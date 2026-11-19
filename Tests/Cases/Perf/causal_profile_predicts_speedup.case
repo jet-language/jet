@@ -1,0 +1,55 @@
+# `jet perf run --lens=causal` runs virtual speedup experiments on the
+# program's lines, and `jet perf view` ranks, for each progress point, how
+# much sooner its passes would come if a line were 30% faster. In the
+# fixture the narrow task's line bounds every round, though the wide tasks
+# take more CPU time. So it ranks first for the `round` zone, and the
+# program with that line's work cut to seven-tenths speeds up by an amount
+# inside the predicted interval, on every tier. Each finished task is a
+# progress point of its own and is ranked apart. A run too short to rank is
+# refused with the reason, and the lens refuses the company of lenses whose
+# readings its delays would skew.
+requires: os-name:linux
+requires: arch:x86_64
+fixture: CausalProfilePredictsSpeedup.fixture
+env: NO_COLOR=1
+step o0: jet perf run -A -O0 main.jet --lens=causal --out causal.jettrace
+exit: 0
+stdout: = "done\n"
+step: jet run -A -O0 main.jet -- measure
+exit: 0
+stdout: = "measured\n"
+step: jet run -A check.jet -- causal.jettrace
+exit: 0
+stdout: = "narrow ranks first for round\nthe measured speedup lies in the predicted interval\n" # the bottleneck ranks first, and the hand-sped program lands in its interval
+step o1: jet perf run -A -O1 main.jet --lens=causal --out causal.jettrace
+exit: 0
+stdout: = "done\n"
+step: jet run -A -O1 main.jet -- measure
+exit: 0
+stdout: = "measured\n"
+step: jet run -A check.jet -- causal.jettrace
+exit: 0
+stdout: = "narrow ranks first for round\nthe measured speedup lies in the predicted interval\n"
+step o2: jet perf run -A -O2 main.jet --lens=causal --out causal.jettrace
+exit: 0
+stdout: = "done\n"
+step: jet run -A -O2 main.jet -- measure
+exit: 0
+stdout: = "measured\n"
+step: jet run -A check.jet -- causal.jettrace
+exit: 0
+stdout: = "narrow ranks first for round\nthe measured speedup lies in the predicted interval\n"
+step: jet perf view causal.jettrace
+exit: 0
+stdout: ~ "`round`: if this line were 30% faster, each pass would come sooner by" # the zone is a progress point
+stdout: ~ "`task`: if this line were 30% faster, each pass would come sooner by" # finished tasks are a point ranked apart
+stdout: ~ "main.jet:" # the ranked lines name the program's own lines
+step: jet perf run -A -O2 main.jet --lens=causal --out short.jettrace -- 60
+exit: 0
+stdout: = "done\n"
+step: jet perf view short.jettrace
+exit: 0
+stdout: ~ "refused: the run kept " # too few experiments to rank, and why
+step: jet perf run -A main.jet --lens=causal,memory --out mixed.jettrace
+exit: 2
+stderr: ~ "run it alone with `--lens=causal`" # the delays would skew the other lenses

@@ -69,7 +69,8 @@ JET_CLI_REPLAY_MAX_I64: 9223372036854775807
 JET_CLI_REPLAY_ADAPTER: "mir-v1"
 
 // Frame kinds: TimeWall, RandBits, IORead, IOChunk, IOEnd, NetRequest,
-// NetDns, NetResponse, NetChunk, NetEnd, and the RunAct extension.
+// NetDns, NetResponse, NetChunk, NetEnd, and the RunAct and RunSync
+// extensions.
 JET_CLI_REPLAY_KIND_TIME: 1
 
 JET_CLI_REPLAY_KIND_RAND: 16
@@ -92,8 +93,12 @@ JET_CLI_REPLAY_KIND_NET_END: 52
 
 JET_CLI_REPLAY_KIND_ACT: 4097
 
+// A RunSync extension frame carries one piece of a `jet run --record` run's
+// sync-order log (JetRuntime RecordReplay.jet), in order.
+JET_CLI_REPLAY_KIND_SYNC: 4098
+
 // The kinds this reader decodes.
-JET_CLI_REPLAY_DECODED_KINDS: [Int]{JET_CLI_REPLAY_KIND_TIME, JET_CLI_REPLAY_KIND_RAND, JET_CLI_REPLAY_KIND_IO_READ, JET_CLI_REPLAY_KIND_IO_CHUNK, JET_CLI_REPLAY_KIND_IO_END, JET_CLI_REPLAY_KIND_NET_REQUEST, JET_CLI_REPLAY_KIND_NET_DNS, JET_CLI_REPLAY_KIND_NET_RESPONSE, JET_CLI_REPLAY_KIND_NET_CHUNK, JET_CLI_REPLAY_KIND_NET_END, JET_CLI_REPLAY_KIND_ACT}
+JET_CLI_REPLAY_DECODED_KINDS: [Int]{JET_CLI_REPLAY_KIND_TIME, JET_CLI_REPLAY_KIND_RAND, JET_CLI_REPLAY_KIND_IO_READ, JET_CLI_REPLAY_KIND_IO_CHUNK, JET_CLI_REPLAY_KIND_IO_END, JET_CLI_REPLAY_KIND_NET_REQUEST, JET_CLI_REPLAY_KIND_NET_DNS, JET_CLI_REPLAY_KIND_NET_RESPONSE, JET_CLI_REPLAY_KIND_NET_CHUNK, JET_CLI_REPLAY_KIND_NET_END, JET_CLI_REPLAY_KIND_ACT, JET_CLI_REPLAY_KIND_SYNC}
 
 // Every v1 registry kind: TimeWall, TimeMonotonic, TimeSleep, RandBits, the
 // I/O and network records, Outcome and GameEvent. A registered kind this
@@ -177,7 +182,8 @@ JET_CLI_REPLAY_CONSENT: "capture sensitive"
 // A verified artifact: its id, the target identity it is bound to, its
 // capture mode and roots, its privacy salt's bytes, the one recorded
 // wall-clock value, the Rand, stdin and HTTP reads in the order the run made
-// them, each HTTP hop's NetRequest, and the exit status of the captured run.
+// them, each HTTP hop's NetRequest, the exit status of the captured run, and
+// the sync-order log its RunSync frames carry (empty when it has none).
 JetCLIReplayArtifact: struct {
     artifact_id: String,
     identity: [CanonicalJSONField],
@@ -188,6 +194,7 @@ JetCLIReplayArtifact: struct {
     reads: [JetCLIReplayRead],
     requests: [JetCLIReplayNetSeen],
     status: Int,
+    sync: [U8]{[U8]{}},
 }
 
 // One recorded raw read, as its journal record: `kind` `R` (Rand bytes),
@@ -535,9 +542,9 @@ jet_cli_replay_net_site_id: fn(identity: JetCLIProveIdentity, members: [JetCLIPr
 // The v1 bytes of one capture: the canonical header, the TimeWall frame,
 // then each raw read in the order the run made it (a RandBits frame, an
 // IORead frame followed by the IOChunk frames it delivered or the IOEnd that
-// ended it, or an HTTP hop's Net frames), and the footer, with the content
-// id in place.
-jet_cli_replay_encode: fn(run: JetCLIReplayRun, reads: [JetCLIReplayRead], salt: String, status: Int) -> [U8] Never! {
+// ended it, or an HTTP hop's Net frames), the RunSync frames of `sync`, the
+// run's sync-order log, and the footer, with the content id in place.
+jet_cli_replay_encode: fn(run: JetCLIReplayRun, reads: [JetCLIReplayRead], salt: String, status: Int, sync: [U8]) -> [U8] Never! {
     header: jet_cli_replay_header_bytes("0".repeat(24), run, salt, status)
     out := "JREPLAY".bytes()
     out.push(U8{0})
@@ -642,6 +649,23 @@ jet_cli_replay_encode: fn(run: JetCLIReplayRun, reads: [JetCLIReplayRead], salt:
             ),
         )
         kinds.push(JET_CLI_REPLAY_KIND_IO_END)
+    }
+    sync_chunk := 0
+    loop sync_chunk * JET_CLI_REPLAY_IO_CHUNK_BYTES < sync.len() {
+        start: sync_chunk * JET_CLI_REPLAY_IO_CHUNK_BYTES
+        end: if sync.len() - start > JET_CLI_REPLAY_IO_CHUNK_BYTES -> start + JET_CLI_REPLAY_IO_CHUNK_BYTES else -> sync.len()
+        payloads.push(
+            canonical_json_bytes(
+                CanonicalJSON.Object(
+                    [CanonicalJSONField]{
+                        CanonicalJSONField{key: "bytes", value: jet_cli_replay_bytes_value(sync.slice(start, end))},
+                        jet_cli_replay_integer_field("chunk_index", sync_chunk),
+                    },
+                ),
+            ),
+        )
+        kinds.push(JET_CLI_REPLAY_KIND_SYNC)
+        sync_chunk += 1
     }
     payload_bytes := 0
     loop (sequence, record) in payloads {
@@ -1006,7 +1030,7 @@ jet_cli_replay_capture_write: fn(identity: JetCLIProveIdentity, request: JetCLIP
     root: identity.authority_root
     reads: jet_cli_replay_journal_reads(journal, run) ?? return Err(err)
     salt: replay_random.token_urlsafe(32) ?? return Err(jet_cli_replay_unfinalized("the OS gave no randomness for the privacy salt"))
-    bytes: jet_cli_replay_encode(run, reads, salt, status)
+    bytes: jet_cli_replay_encode(run, reads, salt, status, [U8]{})
     verified: jet_cli_replay_verify(bytes) ?? return Err(jet_cli_replay_capture_fault(err))
     id: verified.artifact_id
     entry: jet_cli_replay_field_value(run.identity, "entry")
@@ -1088,13 +1112,15 @@ jet_cli_replay_record_path: fn(name: String) -> String Never! {
     ".jet/replays/{name}.jetproof-replay"
 }
 
-// Writes a recording once its run ended with `status`, then indexes it
-// (Rust `finish_named_capture`, `index_named_capture`); returns its path.
+// Writes a recording once its run ended with `status`, with the RunSync
+// frames of `sync`, the run's sync-order log (empty for a `jet test`
+// recording), then indexes it (Rust `finish_named_capture`,
+// `index_named_capture`); returns its path.
 // An index that can't take the row is E2105, as every record index update's is.
-jet_cli_replay_record_finish: fn(record: JetCLIReplayRecord, status: Int) -> String JetCLIProveRefusal! {
+jet_cli_replay_record_finish: fn(record: JetCLIReplayRecord, status: Int, sync: [U8]) -> String JetCLIProveRefusal! {
     root: record.identity.authority_root
     salt: replay_random.token_urlsafe(32) ?? return Err(jet_cli_replay_unfinalized("the OS gave no randomness for the privacy salt"))
-    bytes: jet_cli_replay_encode(record.run, [JetCLIReplayRead]{}, salt, status)
+    bytes: jet_cli_replay_encode(record.run, [JetCLIReplayRead]{}, salt, status, sync)
     verified: jet_cli_replay_verify(bytes) ?? return Err(jet_cli_replay_capture_fault(err))
     jet_cli_replay_publish(root, [String]{".jet", "replays"}, "{record.name}.jetproof-replay", bytes) ?? return Err(err)
     path: jet_cli_replay_record_path(record.name)
@@ -1634,6 +1660,7 @@ jet_cli_replay_verify: fn(bytes: [U8]) -> JetCLIReplayArtifact JetCLIReplayFault
     io_calls := 0
     stream := 0
     chunks := 0
+    sync_chunks := 0
     open := JetCLIReplayRead?{None}
     net_calls := 0
     net := JetCLIReplayNetOpen?{None}
@@ -1755,6 +1782,9 @@ jet_cli_replay_verify: fn(bytes: [U8]) -> JetCLIReplayArtifact JetCLIReplayFault
             ended: jet_cli_replay_net_end_payload(payload, hop)
             artifact.reads.push(ended)
             net = None
+        } else if kind == JET_CLI_REPLAY_KIND_SYNC {
+            artifact.sync.extend(jet_cli_replay_sync_payload(payload, sync_chunks))
+            sync_chunks += 1
         } else { jet_cli_replay_act_payload(payload) }
         frames += 1
         payload_bytes += length
@@ -2367,6 +2397,19 @@ jet_cli_replay_payload_uint: fn(fields: [CanonicalJSONField], key: String, what:
         return Err(jet_cli_replay_corrupt("{what} {key} is not a canonical count"))
     }
     Ok(parsed)
+}
+
+// A RunSync extension record: `{bytes, chunk_index}`, the `chunk`th piece
+// of the run's sync-order log.
+jet_cli_replay_sync_payload: fn(payload: [U8], chunk: Int) -> [U8] JetCLIReplayFault! {
+    what: "recorded sync payload"
+    fields: jet_cli_replay_payload_fields(payload, what, [String]{"bytes", "chunk_index"})
+    if !jet_cli_replay_integer_is(fields, "chunk_index", "{chunk}") {
+        return Err(jet_cli_replay_corrupt("{what} chunk_index is not {chunk}"))
+    }
+    bytes: jet_cli_replay_payload_bytes(fields, "bytes", what)
+    if bytes.len() == 0 -> return Err(jet_cli_replay_corrupt("{what} is empty"))
+    Ok(bytes)
 }
 
 // A RunAct extension record: `{function, line, locals}`.

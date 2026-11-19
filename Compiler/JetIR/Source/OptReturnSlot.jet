@@ -401,6 +401,8 @@ ir_opt_slot_rebuild: fn(f: IRFunction, plan: IROptSlotPlan, results: [Int], id: 
     v.loop_proofs = f.loop_proofs.copy()
     v.masked = f.masked.copy()
     v.inline_sites = f.inline_sites.copy()
+    // The rows are shared, not copied: no pass writes them.
+    v.call_sites = f.call_sites
     own: plan.size[id] >= 0
     map := [Int]{}
     loop slot in 0..<f.param_count {

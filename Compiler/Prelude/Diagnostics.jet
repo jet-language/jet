@@ -7346,7 +7346,9 @@ RetiredValueThrownAway: struct {
         status: .Retired,
         no_fix: None,
 
-        what: fn(self) -> String { "*Retired* (was: a value thrown away, now the tidy error L0508)" }
+        what: fn(self) -> String {
+            "*Retired* (was: a value thrown away, now the tidy error L0508)"
+        }
 
         why: fn(self) -> String {
             "A thrown-away value runs safely, so it is a tidy error that `jet check` and `jet build` list and `jet run` never stops on"
@@ -20616,6 +20618,56 @@ RetiredJitGap: struct {
         }
 
         fix: fn(self) -> String { "Nothing to fix — `jet run` no longer has a JIT tier." }
+    }
+}
+
+DebugAttachFailed: struct {
+    detail: String,
+
+    impl Diagnostic {
+        code: "E2231",
+        safety_class: .Soundness,
+        safety_reason: "A process the debugger could not take has no stopped state to show.",
+        expert_path: "none: attach to a process of your user that the system lets you trace",
+        stage: [.Tooling],
+        meaning: "`jet debug` could not attach to a running process: the system refused the trace, the process ended meanwhile, or its image has no Jet debug information",
+        detail: true,
+        no_fix: .Behavior,
+
+        what: fn(self) -> String { "The debugger could not attach to the process: {self.detail}." }
+
+        why: fn(self) -> String {
+            "Attaching stops a running program where it is and reads its frames from its image's own debug information, which needs the system's leave to trace the process and an image built with that information."
+        }
+
+        fix: fn(self) -> String {
+            "Choose the process again: one of your user's that runs an image built with `jet build -O0`; where the system lets a process trace only its own children (kernel.yama.ptrace_scope 1), start the program with `jet debug <file>` instead."
+        }
+    }
+}
+
+DebugConfigInvalid: struct {
+    detail: String,
+
+    impl Diagnostic {
+        code: "E2236",
+        safety_class: .Soundness,
+        safety_reason: "Attaching to a target that is not as given would debug the wrong program.",
+        expert_path: "none: name the process and its program as they are",
+        stage: [.Tooling],
+        meaning: "A `jet debug` attach names a process id that is no running process, or a program other than the one that process runs",
+        detail: true,
+        no_fix: .Behavior,
+
+        what: fn(self) -> String { "Jet debug configuration is invalid: {self.detail}." }
+
+        why: fn(self) -> String {
+            "The debugger attaches only to the target exactly as given, so a process id that names no running process, or a program that process does not run, leaves it nothing it may attach to."
+        }
+
+        fix: fn(self) -> String {
+            "Correct the process id or the program, in `jet debug --attach PID` or the editor's Jet debug configuration, then start the session again."
+        }
     }
 }
 

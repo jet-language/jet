@@ -164,7 +164,7 @@ fd_read_error: fn(result: I64, error: I64) -> I64 {
             fd_put(state, I64{56}, fd_word(state, I64{56}) + result)
         } else {
             began: perf_samples_io_start()
-            result = host_call(I64{0}, fd_word(state, I64{8}), bytes, requested)
+            result = replay_read(bytes, requested, host_call(I64{0}, fd_word(state, I64{8}), bytes, requested))
             perf_samples_io_file(began, PERF_SAMPLES_IO_READ, result, state)
         }
     }

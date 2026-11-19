@@ -178,6 +178,18 @@ part of the pack identity. A program polls for a stop after every runtime
 call but those to an export the receipt leaves out; without the receipt
 every call polls.
 
+It also writes `runtime.eval`, the eval link receipt (JetIR EvalLink.jet),
+read from the same IR: the runtime functions the debugger's eval runtime
+replaces with a stub (allocation, refcounts, the journey, the scheduler
+hooks, the stop poll, and the stop report listed by function), and for
+each other export whether every syscall it reaches past the stubs is one
+the eval fork's filter allows with a constant number, and every futex call
+private and not a wait. A syscall number counts as constant when every
+caller passes one, through the wrappers; the assembler records each
+`syscall` an inline-assembly template makes. A refused export names the
+first failing syscall and the functions to it. The receipt is not part of
+the pack identity.
+
 Runtime-pack roots are the public defined C-ABI globals of standalone Jet
 runtime objects and explicit extra roots. The Jet object writer publishes
 checked exports as globals and private functions as locals. Undefined symbols,

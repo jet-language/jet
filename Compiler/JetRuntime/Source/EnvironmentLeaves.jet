@@ -1,7 +1,8 @@
 // The Rust original reads the mutable logical environment, decoding UTF-8. None
 // leaves the caller's output untouched; empty is an owned E4 text.
 #Export(c) jet_std_env_get: fn(key: I64, some: I64) -> I64 {
-    value: jet_rt_logical_env_get(key)
+    // A recording logs the value; a replay reads the recorded one.
+    value: replay_text(REPLAY_ENV, jet_rt_logical_env_get(key))
     if (value == I64{0}) { return I64{0} }
     rt_text_store(some, value)
     I64{1}

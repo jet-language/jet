@@ -3,7 +3,8 @@
 // runs and once after it exits, and write one verified `.jettrace`; a run's
 // profile rows are its program's CPU-time samples under the `cpu` lens, the
 // default, and its memory counters' under `memory`; under `alloc` it keeps
-// the program's heap snapshots. The child keeps this process's terminal.
+// the program's heap snapshots, and under `topdown` why its hot lines are
+// slow on the CPU (Topdown.jet). The child keeps this process's terminal.
 use {
     perf_files: core.files
     perf_process: core.process
@@ -37,8 +38,8 @@ JET_CLI_PERF_TRACE_LIMIT: 268435456
 
 // `SessionArgs`: the perf-only flags, and the base intent's argv after its
 // action name with those flags removed. `lenses` are what `--lens` names,
-// in the order `cpu`, `memory`, `alloc`; the default is `cpu`, CPU time
-// alone.
+// in the order `cpu`, `memory`, `alloc`, `topdown`; the default is `cpu`,
+// CPU time alone.
 JetCLIPerfSessionArgs: struct {
     out: String?,
     source: String?,
@@ -92,7 +93,7 @@ jet_cli_perf_session_args: fn(args: [String]) -> JetCLIPerfSessionArgs JetCLIRea
         }
         if arg == "--lens" {
             if index + 1 >= args.len() {
-                return Err(jet_cli_read_error("`--lens` needs one or more of `cpu`, `memory` and `alloc`, comma-separated"))
+                return Err(jet_cli_read_error("`--lens` needs one or more of `cpu`, `memory`, `alloc` and `topdown`, comma-separated"))
             }
             parsed.lenses = jet_cli_perf_session_lenses(args[index + 1])
             skip = true
@@ -110,21 +111,22 @@ jet_cli_perf_session_args: fn(args: [String]) -> JetCLIPerfSessionArgs JetCLIRea
 
 // `--lens` list `raw`: the lenses the run takes, comma-separated, each `cpu`
 // (its CPU time), `memory` (its memory counters), `alloc` (its heap
-// snapshots) or `causal` (its virtual speedup experiments, which time the
-// CPU-time samples and slow the program down, so it takes `cpu` alone
-// beside it), in that order and without repeats.
+// snapshots), `topdown` (its top-down counters) or `causal` (its virtual
+// speedup experiments, which time the CPU-time samples and slow the
+// program down, so it takes `cpu` alone beside it), in that order and
+// without repeats.
 jet_cli_perf_session_lenses: fn(raw: String) -> [String] JetCLIReadError! {
     asked := [String]{}
     loop part in raw.split(",") {
         item: part.trim()
         if item == "" -> next
-        if item != "cpu" && item != "memory" && item != "alloc" && item != "causal" {
-            return Err(jet_cli_read_error("`--lens` item `{item}` is not a lens; lenses: cpu, memory, alloc, causal"))
+        if item != "cpu" && item != "memory" && item != "alloc" && item != "topdown" && item != "causal" {
+            return Err(jet_cli_read_error("`--lens` item `{item}` is not a lens; lenses: cpu, memory, alloc, topdown, causal"))
         }
         if !asked.contains(item.copy()) -> asked.push(item.copy())
     }
     if asked.contains("causal") {
-        if asked.contains("memory") || asked.contains("alloc") {
+        if asked.contains("memory") || asked.contains("alloc") || asked.contains("topdown") {
             return Err(jet_cli_read_error("the `causal` lens slows the program down to time its lines, which would skew the other lenses; run it alone with `--lens=causal`"))
         }
         return Ok([String]{"cpu", "causal"})
@@ -133,8 +135,9 @@ jet_cli_perf_session_lenses: fn(raw: String) -> [String] JetCLIReadError! {
     if asked.contains("cpu") -> lenses.push("cpu")
     if asked.contains("memory") -> lenses.push("memory")
     if asked.contains("alloc") -> lenses.push("alloc")
+    if asked.contains("topdown") -> lenses.push("topdown")
     if lenses.len() == 0 {
-        return Err(jet_cli_read_error("`--lens` needs one or more of `cpu`, `memory` and `alloc`, comma-separated"))
+        return Err(jet_cli_read_error("`--lens` needs one or more of `cpu`, `memory`, `alloc` and `topdown`, comma-separated"))
     }
     Ok(lenses)
 }
@@ -161,7 +164,7 @@ jet_cli_perf_capture_allowlist: fn(raw: String) -> [String] JetCLIReadError! {
 // `run_session`. The exit code is the child's.
 jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Bool) -[FS, Env, Exec, Time]> JetDriverVerbOutput Never! {
     extension: artifact_extension()
-    parsed := jet_cli_perf_session_args(args) ?? return jet_cli_perf_error(err.message, "run `jet perf {action} <file.jet> [--lens=cpu,memory,alloc|causal] [--out <path{extension}>]`", color)
+    parsed := jet_cli_perf_session_args(args) ?? return jet_cli_perf_error(err.message, "run `jet perf {action} <file.jet> [--lens=cpu,memory,alloc,topdown|causal] [--out <path{extension}>]`", color)
     memory: parsed.lenses.contains("memory")
     if memory && action != "run" {
         return jet_cli_perf_error("the `memory` lens samples a program's counters, which only `jet perf run` samples", "run `jet perf run <file.jet> --lens=memory`", color)
@@ -169,6 +172,10 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     alloc: parsed.lenses.contains("alloc")
     if alloc && action != "run" {
         return jet_cli_perf_error("the `alloc` lens snapshots a program's heap, which only `jet perf run` snapshots", "run `jet perf run <file.jet> --lens=alloc`", color)
+    }
+    topdown: parsed.lenses.contains("topdown")
+    if topdown && action != "run" {
+        return jet_cli_perf_error("the `topdown` lens samples a program's top-down events, which only `jet perf run` samples", "run `jet perf run <file.jet> --lens=cpu,topdown`", color)
     }
     causal: parsed.lenses.contains("causal")
     if causal && action != "run" {
@@ -197,7 +204,8 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     // A run's program samples into a file of this session's (the runtime's
     // PerfSamples.jet), beside which `jet run` writes the program's image
     // (Host.jet jet_cli_perf_samples_image): its CPU time under the `cpu`
-    // lens, its counters under `memory`.
+    // lens, its counters under `memory`, its top-down events under
+    // `topdown`.
     samples := String?{None}
     if observed_run {
         spec = spec.env_remove(ENV_JET_OBSERVE)
@@ -266,6 +274,11 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     // The receipt reads the allowlist before the policy takes it.
     stamped: jet_cli_perf_session_receipt(action, argv, parsed.source, parsed.allowlist, samples != None, parsed.lenses) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
     capture.receipts.push(stamped)
+    if topdown && samples == .Val(file) {
+        if parsed.source == .Val(source) {
+            capture.receipts.push(jet_cli_perf_topdown_section(file, sampled, source))
+        }
+    }
     capture.policy.allowlist = parsed.allowlist.move()
     // The core.log spans the program closed, which its runtime keeps beside
     // the samples, and the tasks' waits and wakes and the file and network
@@ -623,12 +636,13 @@ jet_cli_perf_session_receipt: fn(action: String, argv: [String], source: String?
     sampling := CanonicalJSON.Null
     if sampled {
         cpu: lenses.contains("cpu")
-        // The lenses are cpu, memory and alloc, in that order
+        // The lenses are cpu, memory, alloc and topdown, in that order
         // (jet_cli_perf_session_lenses), so each row is written from its name.
         named := [CanonicalJSON]{}
         if cpu -> named.push(CanonicalJSON.String("cpu"))
         if lenses.contains("memory") -> named.push(CanonicalJSON.String("memory"))
         if lenses.contains("alloc") -> named.push(CanonicalJSON.String("alloc"))
+        if lenses.contains("topdown") -> named.push(CanonicalJSON.String("topdown"))
         sampling = CanonicalJSON.Object(
             [CanonicalJSONField]{
                 {key: "allocations", value: CanonicalJSON.String("call-sites")},

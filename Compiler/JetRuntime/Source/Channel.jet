@@ -1,8 +1,10 @@
-// Native homogeneous payload channels. State160: mutex0, refs8, queue
+// Native homogeneous payload channels. State168: mutex0, refs8, queue
 // len16/cap24/data32/head40, bound48, owned meta56, recvwait64/sendwait72,
 // reservations80, closed88/canceled96, kind104 (0 channel,1 timer,2 interval),
 // delay112, senders120/receivers128, observe136,
-// recvwaitcount144/sendwaitcount152. Endpoint handles are the opaque state
+// recvwaitcount144/sendwaitcount152, replay id160 (RecordReplay.jet: each
+// send, receive, close and endpoint drop is a sync event, logged under the
+// mutex, and a select's chosen arm). Endpoint handles are the opaque state
 // pointer, each retaining one ref and one logical endpoint. WaitNode24: next0,
 // park8, flags16 (linked1, ever-woken2), under lock. Single wake is Vec.pop
 // (LIFO); close walks Vec insertion order (FIFO).
@@ -18,14 +20,15 @@ channel_wait_object: fn(channel: I64) -> I64 {
 }
 
 channel_new: fn(bound: I64, kind: I64, delay_ms: I64) -> I64 {
-    channel: jet_rt_alloc(I64{160}, I64{8})
-    thread_zero(channel, I64{160})
+    channel: jet_rt_alloc(I64{168}, I64{8})
+    thread_zero(channel, I64{168})
     sync_store(wrapping(channel + I64{8}), I64{1})
     sync_store(wrapping(channel + I64{48}), bound)
     sync_store(wrapping(channel + I64{104}), kind)
     sync_store(wrapping(channel + I64{112}), delay_ms)
     sync_store(wrapping(channel + I64{128}), I64{1})
     sync_store(wrapping(channel + I64{136}), jet_rt_observe_channel_new(if (bound >= I64{0}) -> I64{1} else -> I64{0}, bound))
+    sync_store(wrapping(channel + I64{160}), replay_object_new())
     channel_update(channel)
     channel
 }
@@ -54,7 +57,7 @@ channel_release: fn(channel: I64) {
     }
     if (capacity != I64{0}) { jet_rt_free(data, capacity * stride, I64{8}) }
     jet_rt_observe_channel_drop(sync_load(wrapping(channel + I64{136})))
-    jet_rt_free(channel, I64{160}, I64{8})
+    jet_rt_free(channel, I64{168}, I64{8})
 }
 
 channel_grow: fn(channel: I64, needed: I64) {
@@ -154,13 +157,17 @@ channel_select_remove: fn(channel: I64, node: I64) {
 }
 
 channel_close: fn(channel: I64, canceled: Bool) {
+    object: sync_load(wrapping(channel + I64{160}))
+    ticket: replay_take(REPLAY_CLOSE, object)
     sync_mutex_lock(channel)
     sync_store(wrapping(channel + I64{88}), I64{1})
     if canceled -> sync_store(wrapping(channel + I64{96}), I64{1})
     channel_wake_all(channel, false)
     channel_wake_all(channel, true)
     channel_update(channel)
+    replay_log(REPLAY_CLOSE, object)
     sync_mutex_unlock(channel)
+    replay_give(ticket)
 }
 
 channel_pop_locked: fn(channel: I64, out: I64) -> Bool {
@@ -185,6 +192,8 @@ channel_wait_new: fn(slot: I64) -> I64 {
 }
 
 channel_receive: fn(channel: I64, out: I64) -> Bool {
+    object: sync_load(wrapping(channel + I64{160}))
+    ticket: replay_take(REPLAY_RECEIVE, object)
     slot := I64{0}
     node := I64{0}
     reason := I64{0}
@@ -197,11 +206,13 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
         if channel_pop_locked(channel, out) {
             received = true
             channel_update(channel)
+            replay_log(REPLAY_RECEIVE, object)
             sync_mutex_unlock(channel)
             break
         }
         if (sync_load(wrapping(channel + I64{88})) != I64{0}) {
             channel_update(channel)
+            replay_log(REPLAY_RECEIVE + REPLAY_FAILED, object)
             sync_mutex_unlock(channel)
             break
         }
@@ -223,6 +234,7 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
     if (node != I64{0}) { jet_rt_free(node, I64{24}, I64{8}) }
     if (slot != I64{0}) { sync_park_drop(slot) }
     if (reason != I64{0}) { jet_rt_string_drop(reason) }
+    replay_give(ticket)
     received
 }
 
@@ -248,6 +260,8 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
 // gone or the task was canceled while it waited, and the value stays at
 // `slot`, owned by the caller (the sender's `SendError`).
 #Export(c) jet_rt_native_sender_send: fn(channel: I64, slot: I64, meta: I64) -> I64 {
+    object: sync_load(wrapping(channel + I64{160}))
+    ticket: replay_take(REPLAY_SEND, object)
     park := I64{0}
     node := I64{0}
     reason := I64{0}
@@ -259,6 +273,7 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
         sync_mutex_lock(channel)
         if (sync_load(wrapping(channel + I64{88})) != I64{0} || sync_load(wrapping(channel + I64{128})) == I64{0}) {
             channel_update(channel)
+            replay_log(REPLAY_SEND + REPLAY_FAILED, object)
             sync_mutex_unlock(channel)
             break
         }
@@ -275,6 +290,7 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
             sync_store(wrapping(channel + I64{16}), length + I64{1})
             channel_wake_one(channel, false)
             channel_update(channel)
+            replay_log(REPLAY_SEND, object)
             sync_mutex_unlock(channel)
             accepted = I64{1}
             break
@@ -297,6 +313,7 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
     if (node != I64{0}) { jet_rt_free(node, I64{24}, I64{8}) }
     if (park != I64{0}) { sync_park_drop(park) }
     if (reason != I64{0}) { jet_rt_string_drop(reason) }
+    replay_give(ticket)
     accepted
 }
 
@@ -326,13 +343,17 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
     if (channel == I64{0}) {
         return
     }
+    object: sync_load(wrapping(channel + I64{160}))
+    ticket: replay_take(REPLAY_SENDER_DROP, object)
     sync_mutex_lock(channel)
     if (sync_add(wrapping(channel + I64{120}), I64{-1}) == I64{1}) {
         sync_store(wrapping(channel + I64{88}), I64{1})
         channel_wake_all(channel, false)
     }
     channel_update(channel)
+    replay_log(REPLAY_SENDER_DROP, object)
     sync_mutex_unlock(channel)
+    replay_give(ticket)
     channel_release(channel)
 }
 
@@ -340,13 +361,17 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
     if (channel == I64{0}) {
         return
     }
+    object: sync_load(wrapping(channel + I64{160}))
+    ticket: replay_take(REPLAY_RECEIVER_DROP, object)
     sync_mutex_lock(channel)
     if (sync_add(wrapping(channel + I64{128}), I64{-1}) == I64{1}) {
         sync_store(wrapping(channel + I64{88}), I64{1})
         channel_wake_all(channel, true)
     }
     channel_update(channel)
+    replay_log(REPLAY_RECEIVER_DROP, object)
     sync_mutex_unlock(channel)
+    replay_give(ticket)
     channel_release(channel)
 }
 
@@ -382,15 +407,21 @@ channel_word: fn(channel: I64, offset: I64) -> I64 {
     jet_int_owned_from_i64(channel_word(channel, I64{112}))
 }
 
+// Under `jet debug --replay` a recorded empty answer stays empty, though a
+// value may already be there (RecordReplay.jet).
 #Export(c) jet_rt_native_receiver_try_receive: fn(channel: I64, meta: I64) -> I64 {
+    object: sync_load(wrapping(channel + I64{160}))
+    ticket: replay_take(REPLAY_TRY_RECEIVE, object)
     sync_mutex_lock(channel)
     result := I64{0}
-    if (sync_load(wrapping(channel + I64{16})) != I64{0}) {
+    if (ticket != REPLAY_TRY_RECEIVE + REPLAY_FAILED && sync_load(wrapping(channel + I64{16})) != I64{0}) {
         result = coll_slot_new(meta)
         _ := channel_pop_locked(channel, result)
     }
     channel_update(channel)
+    replay_log(if (result == I64{0}) -> REPLAY_TRY_RECEIVE + REPLAY_FAILED else -> REPLAY_TRY_RECEIVE, object)
     sync_mutex_unlock(channel)
+    replay_give(ticket)
     result
 }
 
@@ -483,9 +514,12 @@ channel_reservation_drop: fn(reservation: I64) {
 }
 
 // False leaves payload ownership with the caller. No callback runs while the
-// state mutex is held, and already reserved capacity cannot be stolen.
+// state mutex is held, and already reserved capacity cannot be stolen. The
+// commit is the send's sync event (RecordReplay.jet).
 channel_reservation_commit: fn(reservation: I64, slot: I64) -> Bool {
     channel: sync_load(reservation)
+    object: sync_load(wrapping(channel + I64{160}))
+    ticket: replay_take(REPLAY_SEND, object)
     sync_mutex_lock(channel)
     accepted: sync_load(wrapping(channel + I64{88})) == I64{0} && sync_load(wrapping(channel + I64{128})) != I64{0}
     _ := sync_add(wrapping(channel + I64{80}), I64{-1})
@@ -502,7 +536,9 @@ channel_reservation_commit: fn(reservation: I64, slot: I64) -> Bool {
         else -> channel_wake_one(channel, true)
     }
     channel_update(channel)
+    replay_log(if accepted -> REPLAY_SEND else -> REPLAY_SEND + REPLAY_FAILED, object)
     sync_mutex_unlock(channel)
+    replay_give(ticket)
     jet_rt_free(reservation, I64{16}, I64{8})
     channel_release(channel)
     accepted
@@ -520,6 +556,7 @@ channel_select_probe: fn(receivers: I64, count: I64, timer_data: I64, timer_coun
             payload: coll_slot_new(sync_load(wrapping(channel + I64{56})))
             _ := channel_pop_locked(channel, payload)
             channel_update(channel)
+            replay_log(REPLAY_SELECT, at)
             sync_mutex_unlock(channel)
             sync_store(arm, jet_int_owned_from_i64(at))
             sync_store(value, payload)
@@ -533,13 +570,44 @@ channel_select_probe: fn(receivers: I64, count: I64, timer_data: I64, timer_coun
     loop at < timer_count {
         if (now >= sync_load(wrapping(timer_data + at * I64{16}))) {
             sync_store(arm, jet_int_owned_from_i64(count + at))
+            replay_log(REPLAY_SELECT, count + at)
             sync_store(value, I64{0})
             return I64{1}
         }
         at += I64{1}
     }
-    if (closed && timer_count == I64{0}) { return I64{2} }
+    if (closed && timer_count == I64{0}) {
+        replay_log(REPLAY_SELECT, REPLAY_SELECT_CLOSED)
+        return I64{2}
+    }
     I64{0}
+}
+
+// A replayed select takes its recorded arm, without probing or parking: the
+// recorded value is in its channel by its turn, a timer arm has fired, and a
+// probing select that found nothing finds nothing again.
+channel_select_replayed: fn(receivers: I64, count: I64, arm: I64, value: I64) -> I64 {
+    chosen: replay_recorded(I64{16})
+    if (chosen == REPLAY_SELECT_NONE) { return I64{0} }
+    if (chosen == REPLAY_SELECT_CLOSED) { return I64{2} }
+    payload := I64{0}
+    if (chosen < count) {
+        channel: sync_load(wrapping(receivers + chosen * I64{8}))
+        sync_mutex_lock(channel)
+        if (sync_load(wrapping(channel + I64{16})) != I64{0}) {
+            payload = coll_slot_new(sync_load(wrapping(channel + I64{56})))
+            _ := channel_pop_locked(channel, payload)
+        }
+        channel_update(channel)
+        sync_mutex_unlock(channel)
+        if (payload == I64{0}) {
+            replay_mismatch(REPLAY_SELECT + REPLAY_FAILED, chosen)
+            return I64{0}
+        }
+    }
+    sync_store(arm, jet_int_owned_from_i64(chosen))
+    sync_store(value, payload)
+    I64{1}
 }
 
 // Consumed select lists share one cleanup on stopped and completed paths.
@@ -598,8 +666,10 @@ channel_select_drop_inputs: fn(receivers: I64, count: I64, capacity: I64, conver
     if (timer_capacity != I64{0}) { jet_rt_free(durations, timer_capacity * I64{8}, I64{8}) }
     park := I64{0}
     registrations := I64{0}
-    result := if (count == I64{0} && timer_count == I64{0}) -> I64{3} else -> channel_select_probe(receivers, count, converted, timer_count, started, arm, value)
-    if (result == I64{0} && (probing & I64{255}) == I64{0}) {
+    // Under `jet debug --replay` the select takes its recorded turn and arm.
+    ticket: replay_take(REPLAY_SELECT, I64{0})
+    result := if (ticket >= I64{0}) -> channel_select_replayed(receivers, count, arm, value) else if (count == I64{0} && timer_count == I64{0}) -> I64{3} else -> channel_select_probe(receivers, count, converted, timer_count, started, arm, value)
+    if (result == I64{0} && (probing & I64{255}) == I64{0} && ticket < I64{0}) {
         park = sync_park_new()
         if (count != I64{0}) {
             registrations = jet_rt_alloc(count * I64{24}, I64{8})
@@ -658,6 +728,10 @@ channel_select_drop_inputs: fn(receivers: I64, count: I64, capacity: I64, conver
         if (count != I64{0}) { jet_rt_free(registrations, count * I64{24}, I64{8}) }
         sync_park_drop(park)
     }
+    if (result == I64{0} && (probing & I64{255}) != I64{0}) {
+        replay_log(REPLAY_SELECT, REPLAY_SELECT_NONE)
+    }
+    replay_give(ticket)
     channel_select_drop_inputs(receivers, count, capacity, converted, timer_count)
     // The selected payload and arm have already transferred to the caller.
     // Do not turn a completed selection into a stopped, uninitialized output.

@@ -5,11 +5,17 @@
 // NativeSession the `(Jet)` console drives, loaded before the first request,
 // so `setBreakpoints` is verified against the image's line table at once.
 // `launch` takes `stopOnEntry` and `args`; the program runs from
-// `configurationDone`. Run control is synchronous: `continue`, `next`,
-// `stepIn` and `stepOut` answer, run to the next stop and report it (`output`
-// with the program's new output, then `stopped`, or `exited` and
-// `terminated`). One thread, frames are the Jet frames, and a frame's one
-// scope holds its locals as the console shows them, each with its Jet type.
+// `configurationDone`. `attach` takes `processId`, and `program` when the
+// editor names the image that process must run: the session seizes that
+// running program, built at O0, where it is, and `configurationDone`
+// reports it stopped there. A refused attach answers with its registered
+// diagnostic (E2236 for a target that is not as given, E2231 when attaching
+// failed), its code as the error's `jetCode`. Run control is synchronous:
+// `continue`, `next`, `stepIn` and `stepOut` answer, run to the next stop
+// and report it (`output` with the program's new output, then `stopped`, or
+// `exited` and `terminated`). One thread, frames are the Jet frames, and a
+// frame's one scope holds its locals as the console shows them, each with
+// its Jet type.
 // A breakpoint may carry a `condition` and a `logMessage`, and `evaluate`
 // answers an expression in a paused frame, all through the debugger's one
 // evaluator, the compiler (DebugCompile.jet, jet_debug's NativeEval.jet). The
@@ -17,12 +23,13 @@
 // condition is false, or a logpoint's hit (which logs its message), does not
 // stop: a continue runs on, and a step goes on to where it would have
 // stopped.
-// The end of stdin or `disconnect` ends the program and the adapter.
+// The end of stdin or `disconnect` ends a launched program and lets an
+// attached one go on, then ends the adapter.
 use {
     dap_files: core.files
     dap_json: core.encoding.json
     dap_term: core.term
-    jet_debug.[NativeDebugError, NativeEvalRefused, NativeLocal, NativeSaid, NativeSession, NativeSettled, native_debug_condition_place, native_debug_jet_frame]
+    jet_debug.[NATIVE_ATTACH_INVALID, NativeAttachRefused, NativeDebugError, NativeEvalRefused, NativeLocal, NativeSaid, NativeSession, NativeSettled, NativeStop, NativeStopKind, native_debug_condition_place, native_debug_jet_frame]
     jet_foundation.[foundation_json_integer, foundation_json_quote]
 }
 
@@ -51,6 +58,9 @@ JetCLIDap: struct {
     // session keeps their conditions and log messages.
     placed: [String:[Int]],
     launched: Bool,
+    // Whether `attach` took the program, whose stop `configurationDone`
+    // has yet to report.
+    attached: Bool{false},
 
     handle: fn(&self, session: &NativeSession, input: &&JetCLIDapRequest, entry: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never! {
         request := input.move()
@@ -65,6 +75,18 @@ JetCLIDap: struct {
                 self.respond(request, "{{}}")
                 self.event("initialized", "{{}}")
             }
+            "attach" -> {
+                if self.launched -> return self.fail(request, "the session already has its program")
+                if session.attach(jet_cli_dap_int(request.arguments, "processId"), jet_cli_dap_string(request.arguments, "program")) == {
+                    .Ok(_) -> {
+                        self.launched = true
+                        self.attached = true
+                        self.respond(request, "{{}}")
+                        self.event("initialized", "{{}}")
+                    }
+                    .Err(refused) -> self.refuse(request, refused)
+                }
+            }
             "setBreakpoints" -> {
                 if self.set_breakpoints(session, request) == {
                     .Ok(body) -> { self.respond(request, body) }
@@ -73,6 +95,10 @@ JetCLIDap: struct {
             }
             "configurationDone" -> {
                 self.respond(request, "{{}}")
+                if self.attached {
+                    self.attached = false
+                    return self.report(session, NativeSettled{stop: NativeStop{kind: NativeStopKind.Paused, reason: "attach", code: 0, frame: None}, hit: None, said: [NativeSaid]{}}, "pause")
+                }
                 if self.launched {
                     return
                 }
@@ -179,9 +205,10 @@ JetCLIDap: struct {
                 rows.push("{{\"verified\":false,\"line\":{line},\"message\":{foundation_json_quote("No code on {file}:{line}")}}}")
                 next
             }
+            reason := ""
             if spec.condition.trim() != "" || spec.log != "" {
                 if session.make_rule(placed, spec.condition, spec.log, "break {file}:{line}") == {
-                    .Ok(rule) -> { session.set_rule(placed, rule) }
+                    .Ok(rule) -> { reason = session.set_rule(placed, rule) }
                     .Err(refused) -> {
                         session.take_back(placed) ?? return Err(err)
                         rows.push("{{\"verified\":false,\"line\":{line},\"message\":{foundation_json_quote(refused.message)}}}")
@@ -190,7 +217,7 @@ JetCLIDap: struct {
                 }
             }
             numbers.push(placed)
-            place: native_debug_condition_place(spec.condition)
+            place: native_debug_condition_place(spec.condition, reason)
             note: if place == "" -> "" else -> ",\"message\":{foundation_json_quote(place.trim())}"
             rows.push("{{\"id\":{placed},\"verified\":true,\"line\":{line}{note}}}")
         }
@@ -262,6 +289,18 @@ JetCLIDap: struct {
         jet_cli_dap_send("{{\"seq\":{self.seq},\"type\":\"response\",\"request_seq\":{request.seq},\"success\":false,\"command\":{foundation_json_quote(request.command)},\"message\":{foundation_json_quote(message)}}}")
     }
 
+    // `request`, refused with the diagnostic of `refused`: the DAP error of
+    // its code (E2236 jet.invalidArguments, E2231 jet.unavailable), whose
+    // format is the report's What.
+    refuse: fn(&self, request: JetCLIDapRequest, refused: NativeAttachRefused) -[IO, Time.Wait]> Never! {
+        report: refused.diagnostic()
+        invalid: report.code == NATIVE_ATTACH_INVALID
+        name: if invalid -> "jet.invalidArguments" else -> "jet.unavailable"
+        id: if invalid -> 22032 else -> 22034
+        self.seq += 1
+        jet_cli_dap_send("{{\"seq\":{self.seq},\"type\":\"response\",\"request_seq\":{request.seq},\"success\":false,\"command\":{foundation_json_quote(request.command)},\"message\":\"{name}\",\"body\":{{\"error\":{{\"id\":{id},\"format\":{foundation_json_quote(report.what)},\"showUser\":true,\"variables\":{{\"jetCode\":\"{report.code}\"}}}}}}}}")
+    }
+
     event: fn(&self, name: String, body: String) -[IO, Time.Wait]> Never! {
         self.seq += 1
         jet_cli_dap_send("{{\"seq\":{self.seq},\"type\":\"event\",\"event\":\"{name}\",\"body\":{body}}}")
@@ -275,6 +314,7 @@ jet_cli_debug_dap: fn(session: &NativeSession, entry: String) -[FS, Env, Exec, I
         text: jet_cli_dap_read() ?? break
         request: jet_cli_dap_request(text)
         if request.command == "disconnect" {
+            session.close()
             dap.respond(request, "{{}}")
             break
         }
@@ -408,7 +448,10 @@ jet_cli_dap_stack: fn(session: &NativeSession, entry: String) -> String NativeDe
     loop (index, frame) in frames {
         if !native_debug_jet_frame(frame) -> next
         source: "{{\"name\":{foundation_json_quote(dap_files.basename(frame.file))},\"path\":{foundation_json_quote(dap_files.join(base, frame.file))}}}"
-        rows.push("{{\"id\":{index},\"name\":{foundation_json_quote(frame.function)},\"source\":{source},\"line\":{frame.line},\"column\":1}}")
+        // A caller's frame at a call with a call-site row names the call's
+        // column; any other frame its line.
+        column: if frame.column > 0 -> frame.column else -> 1
+        rows.push("{{\"id\":{index},\"name\":{foundation_json_quote(frame.function)},\"source\":{source},\"line\":{frame.line},\"column\":{column}}}")
     }
     Ok("{{\"stackFrames\":[{rows.join(",")}],\"totalFrames\":{rows.len()}}}")
 }

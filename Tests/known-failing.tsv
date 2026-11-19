@@ -68,7 +68,6 @@ Tests/UI/crypto_release_entropy_seam	#6425	check not ported: E2702 caller-contro
 Tests/UI/crypto_secret_local_operations	#6425	check not ported: L0101 and L0103 beside errors (a file with errors reports no lints)
 Tests/UI/crypto_secret_nested_provenance	#6425	check not ported: E1004 and E0119 for `crypto.Secret` in a value and a type position (reports E0629 `crypto` is a module, not a value)
 Tests/UI/ReflectNameLedger	#6425	check not ported: E0302 names an ambiguous imported owner by its module (`alpha.Point`; reports `Point`); the snapshot lines also predate the `use { "alpha" "beta" }` block (+2)
-Tests/UI/Taint/external_boundaries_seed_origin_facts_3	#6425	check not ported: L0508 after E1004 (the unresolved `process.run` call's value is not reported as thrown away)
 Tests/UI/LibraryInvalidBinding/run	#6418	`jet build --lib` checks no Library `bindings:` yet: run.jet exports nothing, so the build stops with E1341 "exports no function" instead of the unsupported `lua` binding
 Tests/UI/jetlib_version_mismatch	#6418	`jet build --lib` writes no loadable `.jetlib` (and this file exports nothing, E1341), so no `jet run` load site refuses one (E1338)
 Tests/UI/jetlib_effect_refused	#6418	`jet build --lib` writes no loadable `.jetlib` (and this file exports nothing, E1341), so no `jet run` load site refuses one (E1339)
@@ -245,7 +244,6 @@ Tests/Cases/ConcurrencyChannelsTiers/aot_runs_the_channel_readiness_example.case
 Tests/Cases/ConcurrencyChannelsTiers/comptime_channel_result_reaches_runtime.case	#6418	`jet build --target=x86_64-unknown-linux-gnu` is not built yet (E2104)
 Tests/Cases/ConcurrencyChannelsTiers/interpreter_runs_the_channel_readiness_example.case	#6418	`jet run --target` is not built yet (E2104)
 Tests/Cases/ConcurrencyChannelsTiers/jit_runs_the_channel_readiness_example.case	#6418	`jet run --target` is not built yet (E2104)
-Tests/Cases/Debug/dap_cli_exercises_the_production_wire_and_attach_failure.case	#6730	unbuilt: DAP `attach` and its E2236 refusal (`jet debug --dap` only launches its program)
 Tests/Cases/FFIJavascript/javascript_sidecar_binds_runs_and_rejects_dynamic_types.case	#6950	`jet run`: `use <name>: js.<lib>` is E1002 (`js` is reserved); the compiler resolves no generated `.jet/bindings/js/` module
 Tests/Cases/FFIPython/python_sidecar_binds_runs_and_launders_failure.case	#6950	`jet run`: `use <name>: py.<lib>` is E1002 (`py` is reserved); the compiler resolves no generated `.jet/bindings/py/` module
 Tests/Cases/FirstHour/first_hour_cli_journey.case	#4944	`jet add` is not built yet (E2104)
@@ -270,7 +268,7 @@ Tests/Cases/OutputCallable/explicit_service_address_reaches_lowering_and_real_cl
 Tests/Cases/OutputCallable/service_edge_emits_one_structured_report_record.case	#6418	`jet run --output` is not built yet (E2104)
 Tests/Cases/Pkg/cli_corrupt_manifest_has_one_diagnostic_across_package_commands.case	#4944	`jet fetch` is not built yet (E2104)
 Tests/Cases/Pkg/cli_run_reports_named_canonical_retired_entry_layout.case	#6418	` command overrides>` is not built yet (E2104)
-Tests/Cases/Prove/run_recorded_alias_time_receipt_replays_without_execution.case	#6418	`jet run --record` is not built yet (E2104)
+Tests/Cases/Prove/run_recorded_alias_time_receipt_replays_without_execution.case	#6418	`jet debug --replay` is not built yet (E2104)
 Tests/Cases/Repl/docs_lookup_builtin_list_filter_matches_ratified_mock.case	#6418	`jet repl` is not built yet (E2104)
 Tests/Cases/Repl/repl_all_complex_binding_shapes_survive_across_turns.case	#6418	`jet repl` is not built yet (E2104)
 Tests/Cases/Repl/repl_allow_fs_rejects_symlink_components_before_open.case	#6418	`jet repl` is not built yet (E2104)
@@ -369,11 +367,9 @@ Tests/Cases/CoreLib/core_net_udp_and_unix_waits_use_typed_scheduler_interrupts.c
 Tests/Cases/CoreLib/core_net_unix_stream_implements_nominal_io_reader_writer.case	#6419	unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0102)
 Tests/Cases/CoreLibPartsPlatform/core_process_wait_cancellation_reaps_the_full_process_tree.case	#6419	unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0313)
 Tests/Cases/DataBridges/dossier_data_lens_matches_status_rows.case	#6418	unbuilt: E2101/E2102 command or flag not built (E2101)
-Tests/Cases/Debug/dap_cli_attaches_and_disconnects_through_the_production_wire.case	#6730	unbuilt: DAP `attach` (`jet debug --dap` only launches its program)
 Tests/Cases/Debug/dap_cli_keeps_running_state_transitions_on_the_production_wire.case	#6730	unbuilt: DAP `restart`
 Tests/Cases/Debug/dap_cli_pauses_a_running_target_through_production_wire.case	#6730	unbuilt: DAP `pause` (`jet debug --dap` runs the program to its next stop before it reads the next request)
 Tests/Cases/Debug/dap_cli_projects_raw_frames_only_when_requested_through_production_wire.case	#6730	unbuilt: DAP `showRawFrames` and its E2236 refusal
-Tests/Cases/Debug/dap_cli_rejects_a_cross_executable_attach_through_the_production_wire.case	#6730	unbuilt: DAP `attach` and its E2236 refusal
 Tests/Cases/Effects/erased_authority_delegations_do_not_enter_effect_facts.case	#6419	unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004)
 Tests/Cases/FFIPython/ffi_capability_report_is_golden_and_cli_backed.case	#6418	unbuilt: E2101/E2102 command or flag not built (E2101)
 Tests/Cases/Fleet/push_fleet_with_bad_host_is_e1242.case	#6604	unbuilt: the Jet-hosted jetpack has no fleet `push` verb (VerbDispatch.jet routes none), so `jetpack push` is refused as not a jetpack command (E1340)

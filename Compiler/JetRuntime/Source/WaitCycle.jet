@@ -3,7 +3,7 @@
 // task, its wait and its line; tasks outside the cycle run on.
 //
 // A task about to block with no deadline and unshielded notes its wait on
-// its control (Scheduler.jet Control192): waitKind160 (WAIT_CYCLE_JOIN,
+// its control (Scheduler.jet Control208): waitKind160 (WAIT_CYCLE_JOIN,
 // _EDIT, _READ), waitTarget168 (the joined task's state, the Shared cell)
 // and arms it, waitArmed176: the park slot it sleeps on, or 1 for a lock's
 // condition poll. waitCycle184 is the deadlock record delivered to it, or 0.
@@ -293,6 +293,11 @@ wait_cycle_stop: fn(control: I64) {
         }
     }
     message: jet_rt_string_builder_new()
+    // A joiner reads a failed task's reason as its first line unless the
+    // reason reads as a panic (Task.jet task_panic_message), so a task's
+    // stop says so and its joiner gets every line of the cycle. The root's
+    // stop header already says `panic: `.
+    if !scheduler_control_is_root(control) { wait_cycle_push(message, rt_static_text("panic: ")) }
     wait_cycle_push(message, rt_static_text("deadlock: tasks wait on each other"))
     at = I64{0}
     loop at < length {

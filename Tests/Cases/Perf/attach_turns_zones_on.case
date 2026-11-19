@@ -1,0 +1,32 @@
+# A zone of a running program stays off until a profiler records it: `jet
+# perf attach --zones=WINDOW` turns the zones of a flight-recorded program
+# on for that window and off again, and the trace holds the zones, frame
+# marks and plots the program recorded meanwhile, beside the ring's samples.
+# An attach without `--zones=` records none.
+requires: os-name:linux
+fixture: AttachTurnsZonesOn.fixture
+env: NO_COLOR=1
+session live line: jet run --observe live.jet
+stderr: null
+recv live
+stdout.trim: = ready.out # the program is running its loop
+step: jet perf attach {pid:live} --source live.jet --out point.jettrace
+exit: 0
+step: jet perf view point.jettrace
+exit: 0
+stdout: !~ "zone tick" # a point attach records no zone
+step: jet perf attach {pid:live} --source live.jet --zones=500ms --out zones.jettrace
+exit: 0
+file: zones.jettrace ~ "\"kind\":\"zone\"" # the window's zones are trace rows
+file: zones.jettrace ~ "\"kind\":\"frame_mark\"" # and its frame marks
+file: zones.jettrace ~ "\"kind\":\"plot\"" # and its plots
+step: jet perf view zones.jettrace
+exit: 0
+stdout: ~ "zone tick count=" # the zones the window recorded
+stdout: ~ "frames count=" # its frame marks
+step: jet perf attach {pid:live} --source live.jet --zones=soon --out bad.jettrace
+exit: 2
+stderr: ~ "`--zones=soon` isn't a window jet understands"
+signal live: KILL
+close live
+exit: any # the case's KILL ends the program

@@ -3905,6 +3905,8 @@ run: fn() {
 the environment-selected value; `default_fidelity()` is the pure value `1.0`.
 `override_fidelity` and `reset_fidelity` modify the environment-scoped value.
 `heap_mark` names a heap snapshot for `jet perf run --lens=alloc`.
+`zone`, `frame` and `plot` write zones, frame marks and plotted values to
+the `jet perf run` timeline (observability.md).
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
@@ -3916,7 +3918,13 @@ the environment-selected value; `default_fidelity()` is the pure value `1.0`.
 | `perf.is_full(value)` / `perf.is_low(value)` | `Bool` | Test full fidelity or fidelity below `0.25`. |
 | `perf.scale(value, work)` | `Int` | Scale nonnegative work by fidelity. |
 | `perf.heap_mark(name)` | `-[Env]> Never!` | Under `jet perf run --lens=alloc`, keep a heap snapshot named `name`: the live blocks by the line that allocated them (observability.md). Any other run keeps nothing. |
+| `perf.zone(name)` | `Zone` | Open a zone named `name` that closes when the block holding it ends; under `jet perf run` it is a `zone` row of the timeline. |
+| `perf.frame()` | `Never!` | Mark the end of a frame on the `jet perf run` timeline. |
+| `perf.plot(name, value)` | `Never!` | Record `value` on the plot `name` on the `jet perf run` timeline. |
+| `perf.progress(name)` | `Never!` | One pass of the progress point `name`, which `jet perf run --lens=causal` ranks lines by. |
 | `Perf` | type | A bounded fidelity value consumed by scaling operations. |
+| `Zone` | type | An open zone; its `Close` writes its row. |
+| `Profiled` | marker | Marks a function, method or package whose bodies a root build wraps in zones through `meta.rewrite_body`. |
 | `PerfError` | `#Error` enum | D-PERF-ERR1=A. `OutOfRange(Float)` holds the rejected value. |
 
 ### `core.text` — UTF-8 text operations

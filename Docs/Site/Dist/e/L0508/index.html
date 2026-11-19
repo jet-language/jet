@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>L0508 — Jet diagnostic</title>
-<meta name="description" content="*Retired* (was: an arrow loop body computes and drops a non-unit value)">
+<meta name="description" content="The result of `{call}` is thrown away">
 <meta property="og:title" content="L0508 — Jet diagnostic">
-<meta property="og:description" content="*Retired* (was: an arrow loop body computes and drops a non-unit value)">
+<meta property="og:description" content="The result of `{call}` is thrown away">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,18 +25,36 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>L0508</h1>
-<p>*Retired* (was: an arrow loop body computes and drops a non-unit value)</p>
+<p>The result of `{call}` is thrown away</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">*Retired* (was: an arrow loop body computes and drops a non-unit value)</p>
+<p class="diag-copy what" data-registry-field="what">The result of `{call}` is thrown away</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">The parser rejects a loop body value that nothing uses (E0003), so no dropped value reaches the lint</p>
+<p class="diag-copy why" data-registry-field="why">A pure call (no effects, nothing passed with `&amp;`) does nothing when its result is dropped; a function with no return type loses the value of its last line</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Do not use L0508</p>
+<p class="diag-copy fix" data-registry-field="fix">For a pure call, use the result or bind it with `result: {call}`; for a last line, write `-&gt; T` after the parameter list if the function should return it; write `.drop(&quot;reason&quot;)` to discard on purpose</p>
 <h2>Worked example</h2>
-<p>No UI snapshot currently mentions this code.</p>
+<p>First UI snapshot mentioning <code>L0508</code>: <code>Tests/UI/discarded_lost_tail.stderr</code>.</p>
+<pre class="diag">Error [jet.ValueThrownAway]: This Int value is thrown away
+  --&gt; Tests/UI/discarded_lost_tail.jet:4:29
+    |
+  4 | total: fn(a: Int, b: Int) { a + b }
+    |                             ^^^^^
+ Why: `total` has no return type, so it returns nothing and the value of its last line is lost
+ Fix: If `total` should return it, write `-&gt; Int` after its parameter list; to discard it on purpose, write `.drop(&quot;reason&quot;)`
+More: jet-lang.dev/e/L0508
+
+Error [jet.ValueThrownAway]: This Int value is thrown away
+  --&gt; Tests/UI/discarded_lost_tail.jet:9:25
+    |
+  9 |     doubled: fn(self) { self.hits * 2 }
+    |                         ^^^^^^^^^^^^^
+ Why: `doubled` has no return type, so it returns nothing and the value of its last line is lost
+ Fix: If `doubled` should return it, write `-&gt; Int` after its parameter list; to discard it on purpose, write `.drop(&quot;reason&quot;)`
+More: jet-lang.dev/e/L0508
+</pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>
 </main>

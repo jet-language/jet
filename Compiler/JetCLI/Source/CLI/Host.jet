@@ -109,6 +109,7 @@ use {
         ENV_JET_PROJECT_ROOT,
         ENV_JET_PROP_SEED,
         ENV_JET_READ_SCOPE,
+        ENV_JET_RECORD,
         ENV_JET_RUN_JSON,
         ENV_JET_TEST_BROWSERS,
         ENV_JET_TEST_BROWSER_UI,
@@ -1598,7 +1599,8 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     checked := inputs.move()
     checks := jet_cli_ir_checks(result, checked, options)
     checks.checked_alloc = jet_cli_checked_alloc(options)
-    checks.observe = options.observe
+    // A recorded run starts its log where an observed run starts observing.
+    checks.observe = options.observe || options.record != ""
     checks.log_package = result.log_filter.copy()
     checks.log_flag = options.log.copy()
     // The `hardened` profile sets the same hardening fact as the entry
@@ -2572,7 +2574,8 @@ JetCLIRunStep: enum {
 // environment that lets it write a production-failure receipt, under
 // `--json` JET_RUN_JSON (an unhandled failure reports as one `jet.err/v1`
 // line, JetRuntime JourneyTLS.jet), and under `--observe` publish its run
-// (jet_cli_observe_env), else return its output. The receipt's walk reuses
+// (jet_cli_observe_env), else return its output. A `--record` run records
+// its replay (jet_cli_run_recorded). The receipt's walk reuses
 // `discovery`, the command's discovery cache.
 jet_cli_run_step: fn(step: &&JetCLIRunStep, discovery: &WorkspaceDeclarationCache) -> JetDriverVerbOutput {
     if step.move() == {
@@ -2584,6 +2587,9 @@ jet_cli_run_step: fn(step: &&JetCLIRunStep, discovery: &WorkspaceDeclarationCach
             if options.observe {
                 // copy: the observed run's fields join the receipt's.
                 loop field in jet_cli_observe_env(file) -> vars.push(field.copy())
+            }
+            if options.record != "" {
+                return jet_cli_run_recorded(executable, file, program_args, options, invocation, read_scope, vars.move(), color)
             }
             jet_cli_launch(executable, file, binary, program_args, options, invocation, read_scope, vars, verbose, color)
         }
@@ -2659,6 +2665,50 @@ jet_cli_launch: fn(executable: X64Executable, file: String, binary: String, prog
         return jet_cli_native_report(file, "run", failure, color)
     }
     jet_cli_launch_failed(x64_file_exec(binary, launch), color)
+}
+
+// `jet run --record=NAME`: the program runs in a child, its runtime writing
+// every capability result and the order of its sync events to the scratch
+// file JET_RECORD names when it exits (JetRuntime RecordReplay.jet), and
+// the log is published as the RunSync frames of the replay artifact
+// `.jet/replays/NAME.jetproof-replay` that `jet debug --replay=NAME` re-runs.
+// The recording binds the entry before its run starts, so a bad or taken
+// NAME refuses with nothing run; jet then ends as the program ended.
+jet_cli_run_recorded: fn(executable: X64Executable, file: String, program_args: [String], options: BuildOptions, invocation: JetCLIInvocationAuthority?, read_scope: [String], vars: &&[JetCLIEnvVar], color: Bool) -> JetDriverVerbOutput {
+    recording: jet_cli_replay_record_begin(file, [String]{file}, options.record, options.profile, options.settings) ?? return jet_cli_prove_refused(err, color, false)
+    scratch: cli_files.temp_dir("jet-record") ?? return jet_cli_launch_failed("couldn't create the recording's scratch directory: {err}", color)
+    log: cli_files.join(scratch.path, "sync.log")
+    recorded := vars.move()
+    recorded.push(JetCLIEnvVar{name: ENV_JET_RECORD, value: cli_files.join(scratch.path, "sync.log")})
+    launch: jet_cli_launch_plan(file, program_args, options, invocation, read_scope, recorded)
+    jet_cli_perf_samples_image(executable)
+    loaded: x64_executable_load(executable)
+    failure := loaded.failure
+    status := -1
+    if failure == "" {
+        spawned: x64_image_spawn(loaded, launch, [Int]{})
+        x64_image_unload(loaded)
+        failure = spawned.failure
+        if failure == "" {
+            jet_cli_perf_map(executable, spawned.pid)
+            status = x64_process_wait_foreground(spawned.pid)
+            if status < 0 -> failure = "couldn't wait for the program (errno {-status})"
+        }
+    }
+    sync: if failure == "" && cli_files.exists(log) -> cli_files.read_bytes(log) ?? [U8]{} else -> [U8]{}
+    if cli_files.remove_all(scratch.path) == {
+        .Err(_) -> {}
+        .Ok(_) -> {}
+    }
+    if failure != "" -> return jet_cli_launch_failed(failure, color)
+    signal: status & 0x7f
+    code: if signal == 0 -> (status >> 8) & 0xff else -> 128 + signal
+    if sync.len() == 0 {
+        return jet_cli_prove_refused(jet_cli_replay_unfinalized("the program ended (status {code}) without writing its sync-order log"), color, false)
+    }
+    path: jet_cli_replay_record_finish(recording, code, sync) ?? return jet_cli_prove_refused(err, color, false)
+    cli_term.eprint("jet run: recorded replay `{path}`")
+    JetDriverVerbOutput{stdout: "", stderr: "", exit_code: x64_process_mirror(status)}
 }
 
 // Why jet is not single-threaded after tasks.quiesce returned `joined`
@@ -3154,7 +3204,7 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
     exit_code: if passed -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR
     recorded := ""
     if replay_record == .Val(recording) {
-        path: jet_cli_replay_record_finish(recording, exit_code) ?? return jet_cli_prove_refused(err, color, options.json)
+        path: jet_cli_replay_record_finish(recording, exit_code, [U8]{}) ?? return jet_cli_prove_refused(err, color, options.json)
         if !options.json -> recorded = "jet test: recorded replay `{path}`\n"
     }
     show: options.capture == "all" || (!passed && options.capture == "failed")

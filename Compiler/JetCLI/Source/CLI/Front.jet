@@ -1744,9 +1744,12 @@ jet_cli_with_build_options: fn(plan: &&JetCLIPlan, jet_argv: [String], quiet: Bo
             if jet_cli_build_options(jet_argv, command, file, source, color, quiet) == {
                 .Refused(refusal) -> return refusal
                 .Selected(options, notes) -> {
-                    // `jet run --observe` (jet_cli_run_entry admits it on a run only).
+                    // `jet run --observe` and `--record` (jet_cli_run_entry admits them on a run only).
                     observed := options.move()
                     observed.observe = !watch && jet_cli_flag_before_separator(jet_argv, "--observe")
+                    if !watch {
+                        observed.record = jet_cli_record_flag(jet_argv) ?? return jet_cli_fail("E2104", "`--record` needs a NAME", jet_cli_why("E2104"), "write `--record=NAME` with letters, digits, `-`, or `_`", color, JET_DRIVER_EXIT_USAGE)
+                    }
                     observed.log = jet_cli_log_flag(jet_argv) ?? return jet_cli_fail("E2104", "`--log` needs a level filter", jet_cli_why("E2104"), "write `--log=warn,shop.db=debug`: {LOG_FILTER_FIX}", color, JET_DRIVER_EXIT_USAGE)
                     if log_filter_bad_pair(observed.log) == .Val(pair) {
                         return jet_cli_fail("E2104", "`--log={observed.log}`: `{pair}` is not a log filter pair", jet_cli_why("E2104"), LOG_FILTER_FIX, color, JET_DRIVER_EXIT_USAGE)
@@ -2051,7 +2054,9 @@ jet_cli_native_source_plan: fn(jet_argv: [String], file: String, language: Strin
 // refuses them as scoped to the one that owns them). `--sha256` pins a URL
 // target's first fetch and is refused on a local path; a bare `--port` is
 // refused for its missing value. `-e` is honored before a run's target
-// (jet_cli_eval_flag_at) and refused after it. Any other registered flag on
+// (jet_cli_eval_flag_at) and refused after it. `--record=NAME` is honored
+// on a run (jet_cli_record_flag) and refused on a dev until its port lands.
+// Any other registered flag on
 // a run is refused until its port lands, never ignored; an unregistered one,
 // a single-dash word too, is refused by E2102: on `jet run` and the
 // `jet <file>` shorthand by jet_cli_check_flags, on `jet dev` by
@@ -2077,6 +2082,19 @@ jet_cli_log_flag: fn(jet_argv: [String]) -> String? Never! {
         if argument.starts_with("--log=") -> filter = argument.removeprefix("--log=").trim()
     }
     Val(filter)
+}
+
+// `--record=<NAME>` of `jet run`, the last one before `--`: the replay the
+// run records (Host.jet jet_cli_run_recorded); "" when none is given, None
+// for a bare `--record` or an empty NAME.
+jet_cli_record_flag: fn(jet_argv: [String]) -> String? Never! {
+    name := ""
+    loop argument in jet_argv {
+        if argument == "--" -> break
+        if argument == "--record" || argument == "--record=" -> return None
+        if argument.starts_with("--record=") -> name = argument.removeprefix("--record=")
+    }
+    Val(name)
 }
 
 // `jet run [<file>]` under its build options (jet_cli_build_options); `watch`
@@ -2127,6 +2145,7 @@ jet_cli_run_entry: fn(jet_argv: [String], args: [String], passthrough: [String]?
             next
         }
         command: if watch -> "dev" else -> "run"
+        if head == "--record" && !watch -> next
         if JET_CLI_RUN_PORTED_FLAGS.contains(head) || build_option_flag_row(head) != None || jet_cli_run_control(head, command) {
             next
         }

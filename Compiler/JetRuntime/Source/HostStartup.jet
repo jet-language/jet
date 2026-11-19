@@ -353,7 +353,8 @@ host_startup_list: fn(bytes: I64, length: I64, output: I64) {
 
 // jet_std_io_args: every process argument, argv[0] first, through the
 // generated list-out ABI (an exact count*8 buffer of owned Text words, 0 when
-// empty). A non-UTF-8 argument panics.
+// empty). A non-UTF-8 argument panics. A recording logs the count and each
+// argument; a replay answers the recorded ones (RecordReplay.jet).
 #Export(c) jet_std_io_args: fn(output: I64) -> I64 {
     host_arguments_require()
     count: host_argc
@@ -374,15 +375,16 @@ host_startup_list: fn(bytes: I64, length: I64, output: I64) {
         }
         index = wrapping(index + I64{1})
     }
-    data: if (count == I64{0}) -> I64{0} else -> jet_rt_alloc(count * I64{8}, I64{8})
+    listed: replay_word(REPLAY_ARGUMENTS, count)
+    data: if (listed <= I64{0}) -> I64{0} else -> jet_rt_alloc(listed * I64{8}, I64{8})
     index = I64{0}
-    loop index < count {
-        bytes: host_argument_bytes(index)
-        rt_text_store(wrapping(data + index * I64{8}), rt_text_copy(bytes, host_startup_byte_length(bytes)))
+    loop index < listed {
+        given: if (index < count) -> rt_text_copy(host_argument_bytes(index), host_startup_byte_length(host_argument_bytes(index))) else -> I64{0}
+        rt_text_store(wrapping(data + index * I64{8}), replay_text(REPLAY_ARGUMENT, given))
         index = wrapping(index + I64{1})
     }
     rt_text_store(output, data)
-    count
+    if (listed < I64{0}) -> I64{0} else -> listed
 }
 
 host_argument_bytes: fn(index: I64) -> I64 {

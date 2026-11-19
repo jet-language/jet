@@ -433,10 +433,13 @@ ir_stmts_leave: fn(p: IRProgram, b: IRBuilder, body: [Int]) -> Bool Never! {
 ir_stmt: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never! {
     mark: b.statement_guards.len()
     depth: b.statement_depth
+    first: b.f.code_line.len()
     b.statement_depth = b.f.open.len()
     ir_stmt_body(m, p, b, statement)
     b.statement_depth = depth
     ir_release_statement_guards(m, b, mark)
+    span: ir_stmt_kind_span(ir_body_stmt(p, b, statement))
+    ir_call_sites_mark(p, b, first, span)
 }
 
 // Ends the guards and temporaries taken since `mark`, latest first: at the
@@ -1976,10 +1979,13 @@ ir_condition: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, condition: BodyIfCon
 
 ir_expr: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Never! {
     outer: b.split_armed
+    first: b.f.code_line.len()
     b.split_armed = false
     slot: ir_expr_slot(m, p, b, expression)
     b.split_armed = outer
     ir_fix_expr(m, p, b, expression, slot)
+    span: ir_body_node(p, b, expression).span
+    ir_call_sites_mark(p, b, first, span)
     slot
 }
 
@@ -1990,10 +1996,13 @@ ir_expr_split: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) ->
     b.split.clear()
     if !ir_splits(p, b, expression) -> return ir_expr(m, p, b, expression)
     outer: b.split_armed
+    first: b.f.code_line.len()
     b.split_ty = ir_ty(p, b, expression)
     b.split_armed = true
     slot: ir_expr_slot(m, p, b, expression)
     b.split_armed = outer
+    span: ir_body_node(p, b, expression).span
+    ir_call_sites_mark(p, b, first, span)
     if b.split.len() > 0 -> return -1
     ir_fix_expr(m, p, b, expression, slot)
     slot

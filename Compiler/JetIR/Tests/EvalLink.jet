@@ -1,0 +1,178 @@
+// The eval link's receipt of the runtime library (EvalLink.jet
+// ir_eval_link_receipt): the stub each replaced function takes, the stop
+// report by function rather than by file, and each export's syscall check,
+// whose numbers are followed through the wrappers that pass them on.
+use {
+    jet_backend.[X64_ASM_UNKNOWN]
+    jet_ir.[IRAsmLeaf, IRFunction, IRLibraryExport, IRModule, IROp, IRSlotKind, ir_args, ir_emit, ir_eval_link_receipt, ir_function_new, ir_module_new, ir_slot]
+}
+
+eval_test_fn: fn(name: String, file: String, params: Int, temps: Int) -> IRFunction {
+    f := ir_function_new(name, name, name, "Compiler/JetRuntime/Source/{file}", 1)
+    loop _ in 0..<params -> _ := ir_slot(f, 0, IRSlotKind.Param, -1, 1)
+    loop _ in 0..<temps -> _ := ir_slot(f, 0, IRSlotKind.Temp, -1, 1)
+    f
+}
+
+// An `#FFI(asm)` leaf whose template makes the syscalls `syscalls` (number
+// and second argument per syscall).
+eval_test_leaf: fn(name: String, syscalls: [Int]) -> IRFunction {
+    leaf := eval_test_fn(name, "Linux.jet", 2, 0)
+    leaf.asm = Val(IRAsmLeaf{code: [U8]{0x0f, 0x05}, regs: [Int]{}, result: 0, syscalls: syscalls})
+    leaf
+}
+
+eval_test_call: fn(f: &IRFunction, callee: Int, args: [Int]) {
+    start: ir_args(f, args)
+    _ := ir_emit(f, IROp.Call, -1, callee, start, args.len(), 1)
+}
+
+// A function that calls `callee` with the constants `values`.
+eval_test_caller: fn(name: String, file: String, callee: Int, values: [Int]) -> IRFunction {
+    f := eval_test_fn(name, file, 0, values.len())
+    loop (slot, value) in values -> _ := ir_emit(f, IROp.Const, slot, value, -1, -1, 1)
+    eval_test_call(f, callee, loop (slot, _) in values -> slot)
+    f
+}
+
+eval_test_export: fn(function: Int, symbol: String) -> IRLibraryExport {
+    IRLibraryExport{function: function, symbol: symbol, init_priority: -1, fini_priority: -1, guards: [Int]{}}
+}
+
+// The library: 0 is os_syscall_i64 (its number and second argument are its
+// operands), 1 a wrapper that passes both on (host_call), 15 the stack4
+// primitive (its number an operand, its second argument the stack).
+eval_test_library: fn() -> IRModule {
+    m := ir_module_new()
+    m.functions.push(eval_test_leaf("os_syscall_i64", [Int]{-1, -2}))
+    wrapper := eval_test_fn("host_call", "HostProcess.jet", 2, 0)
+    eval_test_call(wrapper, 0, [Int]{0, 1})
+    m.functions.push(wrapper)
+    // 2: statx through the wrapper.
+    m.functions.push(eval_test_caller("fd_created", "Fd.jet", 1, [Int]{332, 0}))
+    // 3: a private futex wake through the wrapper; 4: a private futex wait.
+    m.functions.push(eval_test_caller("wake", "Sync.jet", 1, [Int]{202, 129}))
+    m.functions.push(eval_test_caller("wait", "Sync.jet", 0, [Int]{202, 128}))
+    // 5: mmap.
+    m.functions.push(eval_test_caller("mapped", "Trap.jet", 0, [Int]{9, 0}))
+    // 6: passes its own parameter on as the number.
+    passthrough := eval_test_fn("passthrough", "Sys.jet", 1, 1)
+    _ := ir_emit(passthrough, IROp.Const, 1, 0, -1, -1, 1)
+    eval_test_call(passthrough, 0, [Int]{0, 1})
+    m.functions.push(passthrough)
+    // 7: loads the number from a record.
+    loaded := eval_test_fn("synccall", "Thread.jet", 1, 1)
+    _ := ir_emit(loaded, IROp.Load, 1, 0, 8, -1, 1)
+    eval_test_call(loaded, 1, [Int]{1, 1})
+    m.functions.push(loaded)
+    // 8: a Trap.jet word helper the success path calls (9) and the stop
+    // report calls (10).
+    m.functions.push(eval_test_fn("trap_word", "Trap.jet", 1, 0))
+    list := eval_test_fn("list_len", "Collections.jet", 1, 0)
+    eval_test_call(list, 8, [Int]{0})
+    m.functions.push(list)
+    // 10 starts a stop report: it reads a word, writes a header (11, which
+    // only it calls) and writes to stderr itself.
+    stop := eval_test_caller("trap_stop", "Trap.jet", 0, [Int]{1, 0})
+    eval_test_call(stop, 8, [Int]{0})
+    eval_test_call(stop, 11, [Int]{})
+    m.functions.push(stop)
+    m.functions.push(eval_test_caller("trap_header", "TrapMessages.jet", 0, [Int]{1, 0}))
+    // 12: an Int clone whose overflow stops.
+    clone := eval_test_fn("int_clone", "Int.jet", 0, 0)
+    eval_test_call(clone, 10, [Int]{})
+    m.functions.push(clone)
+    // 13: the allocator's lock, which waits; 14 allocates through it.
+    m.functions.push(eval_test_caller("alloc_lock", "Alloc.jet", 0, [Int]{202, 128}))
+    alloc := eval_test_fn("alloc_bytes", "Collections.jet", 0, 0)
+    eval_test_call(alloc, 13, [Int]{})
+    m.functions.push(alloc)
+    // 15: os_syscall_stack4_i64; 16 calls it with rt_sigaction.
+    m.functions.push(eval_test_leaf("os_syscall_stack4_i64", [Int]{-1, X64_ASM_UNKNOWN}))
+    m.functions.push(eval_test_caller("program_start", "Fault.jet", 15, [Int]{13, 0}))
+    m
+}
+
+eval_test_exports: fn() -> [IRLibraryExport] {
+    [IRLibraryExport]{
+        eval_test_export(2, "jet_fd_created_raw"),
+        eval_test_export(3, "jet_rt_wake"),
+        eval_test_export(4, "jet_rt_wait"),
+        eval_test_export(5, "jet_rt_mapped"),
+        eval_test_export(6, "jet_rt_passthrough"),
+        eval_test_export(7, "jet_rt_synccall"),
+        eval_test_export(9, "jet_list_len"),
+        eval_test_export(12, "jet_rt_int_clone"),
+        eval_test_export(13, "jet_rt_alloc_lock"),
+        eval_test_export(14, "jet_rt_alloc_bytes"),
+        eval_test_export(16, "jet_rt_host_program_start"),
+    }
+}
+
+#Test("the eval receipt follows syscall numbers through wrappers and refuses what no constant fixes") {
+    receipt: ir_eval_link_receipt(eval_test_library(), eval_test_exports())
+    assert(receipt.contains("export\tjet_fd_created_raw\trefused\tsyscall 332\tfd_created > host_call > os_syscall_i64"))
+    assert(receipt.contains("export\tjet_rt_wake\tallowed"))
+    assert(receipt.contains("export\tjet_rt_wait\trefused\tfutex wait (operation 128)\twait > os_syscall_i64"))
+    assert(receipt.contains("export\tjet_rt_mapped\tallowed"))
+    assert(receipt.contains("export\tjet_rt_passthrough\trefused\ta syscall number the export's caller passes\tpassthrough > os_syscall_i64"))
+    assert(receipt.contains("export\tjet_rt_synccall\trefused\ta syscall number no constant fixes\tsynccall > host_call > os_syscall_i64"))
+    assert(receipt.contains("export\tjet_rt_host_program_start\trefused\tsyscall 13\tprogram_start > os_syscall_stack4_i64"))
+}
+
+#Test("the stop report is stubbed by function: a Trap helper the success path calls is checked itself") {
+    receipt: ir_eval_link_receipt(eval_test_library(), eval_test_exports())
+    assert(receipt.contains("stub\ttrap_stop\tstop-report"))
+    assert(receipt.contains("stub\ttrap_header\tstop-report"))
+    assert(!receipt.any(fn(row) { row.starts_with("stub\ttrap_word\t") }))
+    assert(!receipt.any(fn(row) { row.starts_with("stub\tmapped\t") }))
+    assert(receipt.contains("export\tjet_list_len\tallowed"))
+    assert(receipt.contains("export\tjet_rt_int_clone\tallowed"))
+    assert(receipt.contains("stub\talloc_lock\talloc"))
+    assert(receipt.contains("export\tjet_rt_alloc_lock\tstub\talloc"))
+    assert(receipt.contains("export\tjet_rt_alloc_bytes\tallowed"))
+}
+
+#Test("a futex call must be private, and a second argument a wrapper's caller passes on is followed") {
+    m := eval_test_library()
+    // 17: a shared futex wake; 18: the stack4 primitive's futex, whose
+    // operation no constant fixes.
+    m.functions.push(eval_test_caller("shared_wake", "Sync.jet", 1, [Int]{202, 1}))
+    m.functions.push(eval_test_caller("stacked_futex", "Sync.jet", 15, [Int]{202, 129}))
+    exports := eval_test_exports()
+    exports.push(eval_test_export(17, "jet_rt_shared_wake"))
+    exports.push(eval_test_export(18, "jet_rt_stacked_futex"))
+    receipt: ir_eval_link_receipt(m, exports)
+    assert(receipt.contains("export\tjet_rt_shared_wake\trefused\tshared futex (operation 1)\tshared_wake > host_call > os_syscall_i64"))
+    assert(receipt.contains("export\tjet_rt_stacked_futex\trefused\ta futex operation no constant fixes\tstacked_futex > os_syscall_stack4_i64"))
+}
+
+#Test("code after a stop report's start never runs in the fork, until its block ends") {
+    m := eval_test_library()
+    // 17 starts a stop (10), then writes its footer (18); 19 calls 17.
+    int_stop := eval_test_fn("int_stop", "Int.jet", 0, 0)
+    eval_test_call(int_stop, 10, [Int]{})
+    eval_test_call(int_stop, 18, [Int]{})
+    m.functions.push(int_stop)
+    m.functions.push(eval_test_caller("trap_footer", "TrapMessages.jet", 0, [Int]{1, 0}))
+    add := eval_test_fn("int_add", "Int.jet", 0, 0)
+    eval_test_call(add, 17, [Int]{})
+    m.functions.push(add)
+    // 20 stops only inside its `if`, then writes (21) after it.
+    guarded := eval_test_fn("guarded", "Text.jet", 0, 1)
+    _ := ir_emit(guarded, IROp.Const, 0, 1, -1, -1, 1)
+    _ := ir_emit(guarded, IROp.If, -1, 0, -1, -1, 1)
+    eval_test_call(guarded, 10, [Int]{})
+    _ := ir_emit(guarded, IROp.End, -1, -1, -1, -1, 1)
+    eval_test_call(guarded, 21, [Int]{})
+    m.functions.push(guarded)
+    m.functions.push(eval_test_caller("trap_write", "Trap.jet", 0, [Int]{1, 0}))
+    exports := eval_test_exports()
+    exports.push(eval_test_export(19, "jet_rt_int_add"))
+    exports.push(eval_test_export(20, "jet_rt_guarded"))
+    receipt: ir_eval_link_receipt(m, exports)
+    assert(receipt.contains("stub\ttrap_footer\tstop-report"))
+    assert(receipt.contains("export\tjet_rt_int_add\tallowed"))
+    assert(!receipt.any(fn(row) { row.starts_with("stub\ttrap_write\t") }))
+    assert(receipt.contains("export\tjet_rt_guarded\trefused\tsyscall 1\tguarded > trap_write > os_syscall_i64"))
+}

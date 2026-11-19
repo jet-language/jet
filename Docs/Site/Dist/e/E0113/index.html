@@ -36,19 +36,24 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Convert or reshape the value into the declared type (for example `/%` for whole-number division, `[value]` for a list, `&quot;{value}&quot;` for text); the declared return type stays as written</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0113</code>: <code>Tests/UI/BuildGeneratedModuleTypeError/stderr</code>.</p>
-<pre class="diag">Error [jet.ReturnTypeMismatch]: This value is String (text), but `tooling_facts` returns Int
-  --&gt; &lt;build-generated&gt;/source-root:0:/.jet/generated/run/facts.jet:1:30
+<p>First UI snapshot mentioning <code>E0113</code>: <code>Tests/UI/alias_shows_source_name_and_expansion.stderr</code>.</p>
+<pre class="diag">Error [jet.ReturnTypeMismatch]: This value is [Int], but `firsts` returns `Grid&lt;Int&gt;` (which is [[Int]])
+  --&gt; Tests/UI/alias_shows_source_name_and_expansion.jet:5:29
     |
-  1 | tooling_facts: fn() -&gt; Int { &quot;x&quot; }
-    |                              ^^^
- Why: `tooling_facts` declares Int as its result, so the value it hands back must be Int
- Fix: Hand back a Int value: convert this value to Int, or return the value you meant
- Note: `b.generate(&quot;facts&quot;)` at `run.jet:7` generated this module
+  5 | firsts: fn() -&gt; Grid&lt;Int&gt; { [Int]{1} }
+    |                             ^^^^^^^^
+ Why: `firsts` declares [[Int]] as its result, so the value it hands back must be [[Int]]
+ Fix: Wrap the value in a list: `[value]`
 More: jet-lang.dev/e/E0113
 
-1 problem found
-Run `jet explain E0113` to learn more
+Error [jet.ValueTypeMismatch]: `total` wants `Grid&lt;Int&gt;` (which is [[Int]]) for argument 1, but this is [Int]
+  --&gt; Tests/UI/alias_shows_source_name_and_expansion.jet:7:25
+    |
+  7 | run: fn() { print(total([Int]{1, 2})) }
+    |                         ^^^^^^^^^^^
+ Why: Every argument must match its parameter&#39;s type
+ Fix: Use [[Int]] here
+More: jet-lang.dev/e/E0112
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

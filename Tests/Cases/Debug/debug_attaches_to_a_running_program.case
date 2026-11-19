@@ -1,0 +1,35 @@
+# `jet debug --attach PID` stops a program already running where it is,
+# behind the `(Jet)` console, against the source its image's line table
+# names. `break tick` then traps the next call, and the end of stdin lets
+# the program go on: afterwards it is running, untraced. The system lets a
+# process trace only its own children here, so the authorizer lets any
+# process trace the program before it runs it. No other debugger is on
+# PATH: the stops are jet debug's own.
+# The fixture must stay in jet fmt form: line 2 is `tick`'s body and line 8
+# the call in the loop.
+requires: os-name:linux
+requires: arch:x86_64
+requires: tool:cc
+fixture: DebugAttachesToARunningProgram.fixture
+env: NO_COLOR=1
+step: cc authorizer.c -o authorizer
+exit: 0
+step: jet build -O0 prog.jet
+exit: 0
+spawn target: {work}/authorizer {work}/.jet/build/prog
+await: process {pid:target} executable = {work}/.jet/build/prog timeout 5s every 10ms
+step: jet debug --attach {pid:target}
+env: PATH={work}/no-tools
+stdin: debug_attaches_to_a_running_program.stdin
+exit: 0
+stdout: ~ "Attached to process {pid:target}" # it takes the running program, by its process id
+stdout: ~ "Breakpoint set  tick\n" # the breakpoint names the function
+stdout: ~ "Breakpoint hit  prog.jet:2  in tick()\n" # the next call stops at the body's first line
+stdout: ~ "#0  tick()  at prog.jet:2\n" # the backtrace starts in the function
+stdout: ~ "#1  run()  at prog.jet:8\n" # called from the loop
+stdout: ~ "Detached from process {pid:target}\n" # the end of stdin lets the program go on
+process {pid:target}: alive-nonzombie
+await: process {pid:target} state not-in ["T","t"] timeout 2s every 20ms
+signal target: KILL
+wait: target
+exit: any # the target ends by the case's own KILL

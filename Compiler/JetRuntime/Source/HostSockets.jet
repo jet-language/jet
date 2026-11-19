@@ -166,6 +166,7 @@ net_socket_transfer: fn(state: I64, data: I64, length: I64, reading: Bool, error
         #Unsafe("the held FD72 lock lends its live nonblocking socket; packed lends exactly length bytes; no pointer survives recvfrom/sendto") {
             result = os_syscall_i64(if reading -> I64{45} else -> I64{44}, fd_word(state, I64{8}), packed, length, if reading -> I64{0} else -> I64{16384}, I64{0}, I64{0})
         }
+        if reading -> result = replay_read(packed, length, result)
         if (temporary && reading && result > I64{0}) {
             at := I64{0}
             // recvfrom initialized `result` compact bytes; `data` owns the

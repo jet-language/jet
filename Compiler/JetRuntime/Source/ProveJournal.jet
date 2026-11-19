@@ -163,12 +163,15 @@ rt_prove_stdin_read: fn(into: I64, capacity: I64) -> I64 {
     got
 }
 
+// A replay (RecordReplay.jet) answers stdin from the recording, without a
+// terminal read that would wait for typing.
 rt_prove_stdin_os_read: fn(into: I64, capacity: I64) -> I64 {
+    if replay_replaying() -> return replay_read(into, capacity, I64{0})
     got := I64{0}
     #Unsafe("into lends `capacity` writable bytes for a raw Linux read of stdin") {
         got = os_syscall_i64(I64{0}, I64{0}, into, capacity, I64{0}, I64{0}, I64{0})
     }
-    got
+    replay_read(into, capacity, got)
 }
 
 // A capture's harness runs in its own process group (HostSpawn.jet), so a

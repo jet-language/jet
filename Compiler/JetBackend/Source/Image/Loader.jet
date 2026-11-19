@@ -1940,6 +1940,14 @@ LOADER_PTRACE_SETOPTIONS: 0x4200
 
 LOADER_PTRACE_GETEVENTMSG: 0x4201
 
+LOADER_PTRACE_DETACH: 17
+
+// Trace a running thread without stopping it, and stop a thread so traced
+// (x64_trace_seize).
+LOADER_PTRACE_SEIZE: 0x4206
+
+LOADER_PTRACE_INTERRUPT: 0x4207
+
 // The kernel kills the program when its tracer ends.
 LOADER_PTRACE_O_EXITKILL: 0x100000
 
@@ -1951,6 +1959,11 @@ LOADER_PTRACE_O_TRACECLONE: 0x8
 // The wait status of a thread stopped by a ptrace event holds the event
 // above the stopping signal: status >> 16.
 X64_TRACE_EVENT_CLONE: 3
+
+// The event of a thread traced by PTRACE_SEIZE that stopped without a
+// signal: PTRACE_INTERRUPT's stop, and a thread such a thread starts,
+// stopped before its first instruction (its status's signal is SIGTRAP).
+X64_TRACE_EVENT_STOP: 128
 
 // The signal that stops one thread of the program (x64_trace_stop).
 LOADER_SIGSTOP: 19
@@ -2144,19 +2157,7 @@ x64_trace_spawn: fn(path: String, argv: [String], output: String) -> X64Trace {
                     _ := os_syscall_i64(I64{OS_SYS_EXECVE}, program_path, program_argv, program_envp, I64{0}, I64{0}, I64{0})
                     _ := os_syscall_i64(I64{OS_SYS_EXIT_GROUP}, I64{127}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
                 }
-                // The first answer is the program's pid; each later one, the
-                // result of the call this process sent.
-                os_store_i64(call + I64{LOADER_TRACE_RESULT}, program)
-                served := os_syscall_i64(I64{OS_SYS_WRITE}, I64{LOADER_TRACE_FD}, call + I64{LOADER_TRACE_SIGNAL}, I64{1}, I64{0}, I64{0}, I64{0}) == I64{1}
-                loop served {
-                    got: os_syscall_i64(I64{OS_SYS_READ}, I64{LOADER_TRACE_FD}, call + I64{LOADER_TRACE_SIGNAL}, I64{1}, I64{0}, I64{0}, I64{0})
-                    if got == (I64{-OS_EINTR}) -> next
-                    if got != 1 -> break
-                    result: os_syscall_i64(os_load_i64(call), os_load_i64(call + I64{8}), os_load_i64(call + I64{16}), os_load_i64(call + I64{24}), os_load_i64(call + I64{32}), os_load_i64(call + I64{40}), os_load_i64(call + I64{48}))
-                    os_store_i64(call + I64{LOADER_TRACE_RESULT}, result)
-                    served = os_syscall_i64(I64{OS_SYS_WRITE}, I64{LOADER_TRACE_FD}, call + I64{LOADER_TRACE_SIGNAL}, I64{1}, I64{0}, I64{0}, I64{0}) == I64{1}
-                }
-                _ := os_syscall_i64(I64{OS_SYS_EXIT_GROUP}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+                loader_trace_serve(call, program)
             }
         }
     }
@@ -2195,6 +2196,126 @@ x64_trace_spawn: fn(path: String, argv: [String], output: String) -> X64Trace {
         _ := x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_SETOPTIONS, pid, 0, LOADER_PTRACE_O_EXITKILL | LOADER_PTRACE_O_TRACECLONE, 0, 0)
     }
     trace
+}
+
+// The trace's helper once its channel end is at LOADER_TRACE_FD: its first
+// answer is the program's pid, `program`; each later one, the result of the
+// call this process sent through the trace's `call` words. It ends when the
+// channel closes. It allocates nothing, so it may run in a fork.
+#Unsafe("`call` is the call words of the trace's scratch page, which the helper shares with this process; the helper makes the system calls the words name")
+loader_trace_serve: fn(call: I64, program: I64) {
+    os_store_i64(call + I64{LOADER_TRACE_RESULT}, program)
+    served := os_syscall_i64(I64{OS_SYS_WRITE}, I64{LOADER_TRACE_FD}, call + I64{LOADER_TRACE_SIGNAL}, I64{1}, I64{0}, I64{0}, I64{0}) == I64{1}
+    loop served {
+        got: os_syscall_i64(I64{OS_SYS_READ}, I64{LOADER_TRACE_FD}, call + I64{LOADER_TRACE_SIGNAL}, I64{1}, I64{0}, I64{0}, I64{0})
+        if got == (I64{-OS_EINTR}) -> next
+        if got != 1 -> break
+        result: os_syscall_i64(os_load_i64(call), os_load_i64(call + I64{8}), os_load_i64(call + I64{16}), os_load_i64(call + I64{24}), os_load_i64(call + I64{32}), os_load_i64(call + I64{40}), os_load_i64(call + I64{48}))
+        os_store_i64(call + I64{LOADER_TRACE_RESULT}, result)
+        served = os_syscall_i64(I64{OS_SYS_WRITE}, I64{LOADER_TRACE_FD}, call + I64{LOADER_TRACE_SIGNAL}, I64{1}, I64{0}, I64{0}, I64{0}) == I64{1}
+    }
+    _ := os_syscall_i64(I64{OS_SYS_EXIT_GROUP}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+}
+
+// A trace of the program `pid`, already running, by a new helper that
+// traces nothing yet: x64_trace_seize takes each of its threads. Its
+// standard files are its own. The kernel lets the program run on when the
+// helper ends (no LOADER_PTRACE_O_EXITKILL), so a trace whose threads
+// x64_trace_detach let go closes without ending it once its pid is -1.
+x64_trace_attach: fn(pid: Int) -> X64Trace {
+    trace := X64Trace{pid: -1, scratch: 0, failure: ""}
+    scratch: os_map_with(0, OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE, LOADER_MAP_SHARED_ANONYMOUS, -1, 0)
+    if os_failed(scratch) {
+        trace.failure = "mapping the tracer's scratch page failed (errno {-scratch})"
+        return trace
+    }
+    trace.scratch = scratch
+    pair := 0
+    theirs := -1
+    #Unsafe("socketpair writes its two int descriptors to the trace's scratch word") {
+        pair = os_syscall(OS_SYS_SOCKETPAIR, LOADER_SOCKET_UNIX, LOADER_SOCKET_STREAM_CLOEXEC, 0, scratch + LOADER_TRACE_WORD, 0, 0)
+        if !os_failed(pair) {
+            ends: Int{os_load_i64(I64{scratch + LOADER_TRACE_WORD})}
+            trace.channel = ends & 0xffffffff
+            theirs = (ends >> 32) & 0xffffffff
+        }
+    }
+    null: loader_open("/dev/null")
+    helper := -1
+    if !os_failed(pair) && !os_failed(null) {
+        call: I64{scratch + LOADER_TRACE_CALL}
+        channel: I64{theirs}
+        input: I64{null}
+        program: I64{pid}
+        #Unsafe("fork copies this thread alone; the helper makes only system calls on words computed before the fork and on the shared scratch page, allocating nothing, so no lock another thread held at the fork can stop it") {
+            helper = os_syscall(OS_SYS_FORK, 0, 0, 0, 0, 0, 0)
+            if helper == 0 {
+                // The helper holds none of this process's files: its
+                // channel end moves to LOADER_TRACE_FD, its standard files
+                // read and write /dev/null, and the rest close.
+                moved: os_syscall_i64(I64{OS_SYS_FCNTL}, channel, I64{LOADER_F_DUPFD_CLOEXEC}, I64{LOADER_TRACE_FD}, I64{0}, I64{0}, I64{0})
+                _ := os_syscall_i64(I64{OS_SYS_DUP2}, input, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+                _ := os_syscall_i64(I64{OS_SYS_DUP2}, input, I64{1}, I64{0}, I64{0}, I64{0}, I64{0})
+                _ := os_syscall_i64(I64{OS_SYS_DUP2}, input, I64{2}, I64{0}, I64{0}, I64{0}, I64{0})
+                if moved != (I64{LOADER_TRACE_FD}) {
+                    _ := os_syscall_i64(I64{OS_SYS_DUP3}, moved, I64{LOADER_TRACE_FD}, I64{LOADER_O_CLOEXEC}, I64{0}, I64{0}, I64{0})
+                }
+                _ := os_syscall_i64(I64{OS_SYS_CLOSE_RANGE}, I64{LOADER_TRACE_FD + 1}, I64{0xffffffff}, I64{0}, I64{0}, I64{0}, I64{0})
+                os_store_i64(call + I64{LOADER_TRACE_MASK}, I64{-1})
+                _ := os_syscall_i64(I64{OS_SYS_RT_SIGPROCMASK}, I64{2}, call + I64{LOADER_TRACE_MASK}, I64{0}, I64{8}, I64{0}, I64{0})
+                loader_trace_serve(call, program)
+            }
+        }
+    }
+    if theirs >= 0 -> loader_close(theirs)
+    if !os_failed(null) -> loader_close(null)
+    if os_failed(pair) {
+        trace.failure = "making the tracer's channel failed (errno {-pair})"
+        return trace
+    }
+    if os_failed(null) {
+        trace.failure = "can't open /dev/null (errno {-null})"
+        return trace
+    }
+    if os_failed(helper) {
+        trace.failure = "fork failed (errno {-helper})"
+        return trace
+    }
+    trace.helper = helper
+    if x64_trace_reply(trace) != pid {
+        trace.failure = "the tracer didn't start"
+        return trace
+    }
+    trace.pid = pid
+    trace.thread = pid
+    trace
+}
+
+// Take thread `thread` of the trace's program (x64_trace_attach): the
+// helper seizes it, every thread it starts traced too
+// (LOADER_PTRACE_O_TRACECLONE), and stops it. Its wait status once it has
+// stopped, or -errno: -EPERM when the system won't let this user trace it,
+// -ESRCH when it has ended.
+x64_trace_seize: fn(trace: X64Trace, thread: Int) -> Int {
+    seized := 0
+    #Unsafe("the helper's PTRACE_SEIZE and PTRACE_INTERRUPT of a thread of the program it is to trace") {
+        seized = x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_SEIZE, thread, 0, LOADER_PTRACE_O_TRACECLONE, 0, 0)
+        if !os_failed(seized) {
+            seized = x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_INTERRUPT, thread, 0, 0, 0, 0)
+        }
+    }
+    if os_failed(seized) -> return seized
+    x64_trace_wait_for(trace, thread)
+}
+
+// Let the trace's stopped thread go untraced, delivering `signal` (0:
+// none). False when the kernel refused.
+x64_trace_detach: fn(trace: X64Trace, signal: Int) -> Bool {
+    result := 0
+    #Unsafe("the helper's PTRACE_DETACH of its own stopped tracee") {
+        result = x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_DETACH, trace.thread, 0, signal, 0, 0)
+    }
+    !os_failed(result)
 }
 
 // The system call `number` with `a1` to `a6`, made by the trace's helper,

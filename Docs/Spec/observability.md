@@ -161,10 +161,11 @@ functions that `run` calls; their `inclusive_count` and `allocation_count` are
 null.
 
 `jet perf run` takes `--lens=<lenses>`, comma-separated: `cpu`, the
-program's CPU time and the default, `memory`, its memory behavior, and
-`alloc`, its live heap; `--lens=cpu,memory,alloc` takes all three in one
-run. `jet perf test` takes only `cpu`, and a word that names no lens is
-refused with the three it may name. Under `memory` the
+program's CPU time and the default, `memory`, its memory behavior,
+`alloc`, its live heap, and `topdown`, why its hot lines are slow on the
+CPU; `--lens=cpu,memory,alloc,topdown` takes all four in one run. `jet perf
+test` takes only `cpu`, and a word that names no lens is refused with the
+four it may name. Under `memory` the
 runtime opens four counters of the program's main thread
 with `perf_event_open`, in user mode only: L1D read misses (one sample per
 10007 events), LLC and dTLB read misses (one per 1009) and page faults (one
@@ -201,6 +202,39 @@ left L1D, `llc_misses` were served from RAM, and `page_faults` fell to the
 page cache or disk. A counter the profile did not capture shows
 `unavailable`. Tests/Run/Perf/CacheVisualization is the worked example.
 
+Under `causal`, which runs alone (with any other lens it is refused, as its
+delays would skew their readings), the run answers a different question:
+which line, if it were faster, would make the program finish its work
+sooner. The runtime's CPU-time sampler runs a series of 25 ms experiments.
+Half of them, at random, are baselines. Each other experiment takes the
+program's own source line of the sample that starts it and speeds it up
+virtually by 30%: each sample that lands in the line adds 30% of its period
+to a global delay, and every other thread pauses at its next sample until
+it has paid that delay. The line therefore runs as if it were 30% faster
+relative to the rest of the program. A thread that was blocked (its last
+sample is more than 5 ms old) owes nothing for the time it was blocked.
+Delays are paid at sampler ticks, so a thread pays its debt up to one
+sample period late. A progress point counts passes: each closed zone by
+its name, each finished task as `task`, each answered HTTP request as
+`request`, and each `core.perf.progress(name)`. Outside the lens these record nothing. At the
+end of each experiment the runtime writes its line, its wall time, the
+delay it inserted and each point's passes to the samples file. The trace
+keeps the predictions in its `causal` receipt section (type
+`JetPerfCausal`). For each point, a line's prediction is how much sooner
+each pass comes, 1 - (baseline rate / line rate), where the line's rate
+counts its passes over its wall time less its delay. Its interval is the
+90% range of 200 deterministic bootstrap resamples. A line is ranked only
+with 6 experiments on it, 6 baselines and an interval no wider than 30
+points; the others are listed with the reason. When no line can be ranked,
+the section says why the run was refused and how long to run. `jet perf
+view` prints, under `causal`, each point as `` `round`: if this line were
+30% faster, each pass would come sooner by``, then its lines best first
+(`  main.jet:23 narrow  +14.2% (9.8% to 18.0%)`). Experiments are
+statistical: a short run, or a line the sampler rarely lands in, gets a
+wide interval and is not ranked.
+Tests/Cases/Perf/causal_profile_predicts_speedup.case is the worked
+example.
+
 Under `alloc` the session builds the program with `--checked-alloc`, whose
 heap keeps each block's ten allocating call sites in its prefix, and the
 runtime links every block allocated from the start of the run into a live
@@ -228,6 +262,19 @@ snapshot after the per-line table, `live at filled  101 blocks  57344
 bytes` and then each site, `  [Int]  leak.jet:14 run  100 blocks  56000
 bytes`, or `  elsewhere  1 blocks  1344 bytes`; a name the run marked
 more than once is shown with its count, `after-cleanup#3`.
+
+`core.perf.zone(name)` opens a zone that closes when the block holding it
+ends (`_z: perf.zone("broadphase")`), `core.perf.frame()` marks the end of a
+frame and `core.perf.plot(name, value)` records a number. Under `jet perf
+run` each writes one row of the timeline that closed `core.log` spans write,
+on the same monotonic clock as the samples: the trace's `spans` keep them as
+`zone`, `frame_mark` and `plot` rows beside the `log_span` rows, a plot's
+`symbol.name` reading `moved = 499`. `jet perf view` lists each zone name
+heaviest first (`zone physics count=5 total=81234ns longest=20311ns`), the
+frames' mean and longest interval and each plot's last value, and Canvas's
+profile view draws the zones on its zones lane. Outside a perf run a zone
+costs a call and a compare at its open and a call at its close; frame marks
+and plots cost a call each.
 
 `jet perf compare base.jettrace head.jettrace` sets the last heap snapshot
 of each trace against each other when both kept one, and
@@ -268,6 +315,59 @@ path, `  kept[99]  100 blocks  56000 bytes`; a type no snapshot keeps is
 refused with the types they keep.
 Tests/Cases/PerfRun/alloc_lens_heap_snapshots.case and
 Tests/Cases/Perf/heap_snapshot_types_retention_and_diff.case are the
+worked examples.
+
+Under `topdown` the runtime splits the program's issue slots by the
+top-down method: each cycle the core can issue a fixed number of
+operations (its slots), and each slot is retiring (useful work), bad
+speculation (work issued and thrown away), front-end bound (no operation
+to issue) or back-end bound (an operation that waits on data or an
+execution unit), the level 1; level 2 splits retiring into light and heavy
+(microcoded) operations, bad speculation into branch mispredicts and
+machine clears, front-end bound into latency and bandwidth and back-end
+bound into memory and core bound. The runtime reads the CPU's model with
+`cpuid` and takes the formulas it has for it: AMD Zen 4 (six slots a
+cycle) and Zen 5 (eight), from the `de_no_dispatch_per_slot`,
+`de_src_op_disp`, `ex_ret_ops` and `ex_no_retire` events; Intel's Golden
+Cove cores alone (Sapphire and Emerald Rapids), from the `topdown.*_slots`
+events; Gracemont alone (Alder Lake-N), from `topdown_*_bound`; and the
+hybrid Alder and Raptor Lake, Golden Cove's events on the `cpu_core` PMU
+and Gracemont's on `cpu_atom`, each counting while the thread runs on that
+core type. It opens each event on the program's main thread in user mode,
+with its count's enabled and running times and a sampling period, and the
+counter handler records each sample's program counter as a single word
+marked with the event. It writes the formulas' set, the vendor, CPUID.1
+EAX, whether a hypervisor runs it and the events' count to
+`<samples>.topdown`, then each event's PMU type, config, period (0 for one
+the kernel refused) and errno, and at exit each event's count, enabled
+and running nanoseconds. The trace keeps the result as its `topdown`
+receipt section (type `JetPerfTopdown`): the checked source's `path`, the
+`cpu` (`vendor`, `family`, `model`, `name`, `hypervisor`), the `unit`
+(hundredths of a percent of the slots), the `sample_floor` and, per core
+type in `cores`, its `label`, `core`, `slot_width`, the `formulas` it
+applied, its `events` (`name`, `pmu_type`, `config`, `period`, `errno`,
+`count`, `enabled_ns`, `running_ns`, `samples`), the `run`'s split from
+the exact counts, each scaled by its enabled time over its running time,
+and its `functions` and `lines`, at most 64 each, the most slots first.
+A row's split comes from its samples: each event's samples at the row's
+lines times the event's period, scaled the same way. Each row holds the
+level 1 and level 2 shares (`retiring`, `bad_speculation`,
+`frontend_bound`, `backend_bound`, `light_operations`, `heavy_operations`,
+`branch_mispredicts`, `machine_clears`, `frontend_latency`,
+`frontend_bandwidth`, `memory_bound`, `core_bound`, and on AMD
+`smt_contention`, the slots a sibling thread took), its `time` (its share
+of the run's slots), its `samples` of the slots event and
+`low_confidence` when those are fewer than 20; a line's row has its
+`line` too. A CPU the lens has no formulas for, a CPU under a hypervisor,
+an event the kernel refused and a run that never counted make the section
+(or the core type) `unavailable`, with the `reason`. `jet perf view`
+prints, per core type, `Why hot functions are slow (AMD Zen 4, level 1)`
+and `Why hot lines are slow (AMD Zen 4, level 1)` with each row's time,
+retiring, bad spec, front end and back end, then `Level 2 of those lines
+(AMD Zen 4)`, ten rows each, a low-confidence row's name ending in `~`;
+or `topdown unavailable: <reason>`. Only the program's starting thread is
+counted. Tests/Cases/PerfRun/topdown_levels_per_function.case and
+Tests/Cases/PerfRun/topdown_unavailable_names_the_refusal.case are the
 worked examples.
 
 `jet perf run` records every wait of a task too, and what ended it. When a
@@ -399,7 +499,6 @@ as `receipt perf <canonical JSON>`, and `jet perf compare` lists each field
 that differs between two traces' receipts (`perf.build.options.optimize: "O0"
 -> "O2"`). `jet perf attach` records no `perf` section.
 
-<<<<<<< ours
 ## Comparing captures
 
 `jet perf compare <base> <head>` takes each side as one `.jettrace` or a
@@ -431,8 +530,6 @@ alone. Compare exits 0 either way: `jet budget check` is the gate.
 per-capture `base` and `head` samples, `p_ppm` (the adjusted p in parts
 per million, null when unjudged) and `verdict`.
 
-||||||| base
-=======
 ## Flight recorder and crash dumps
 
 D-OBSERVE-FLIGHT1=B ratifies an always-on flight recorder under `jet run
@@ -449,6 +546,16 @@ the program made before the attach: each wait's task, line, object and
 waker, and each transfer's `io` row. A wait of a task the live snapshot no
 longer holds becomes no row. Tests/Cases/Perf/attach_drains_flight_ring.case
 is the worked example.
+
+`core.perf` zones, frame marks and plots stay off in such a run: each zone
+site tests one runtime word and calls nothing while it is clear.
+`jet perf attach <pid> --source app.jet --zones=500ms` turns them on for the
+window. It leaves `<temp>/jet-flight-<pid>.samples.zones` beside the ring,
+which the writer's next publication answers by setting the word and writing
+the zone, frame, plot and log span rows to `.samples.spans`. It then removes
+the request, so the next publication clears the word, and reads the rows into
+the trace beside the ring's. Tests/Cases/Perf/attach_turns_zones_on.case is
+the worked example.
 
 A stop that ends an observed process (a panic, a trap, a contract failure)
 writes a typed dump while the stopping stack is whole:
@@ -479,7 +586,6 @@ of its stack: `sample`, `spawn`, `wake`, `clock`, `wait` and `io`. A
 run-control command answers that a dump doesn't run.
 Tests/Cases/Debug/crash_dump_opens_typed.case is the worked example.
 
->>>>>>> theirs
 ## Canonical devtools protocol
 
 `jet.devtools.v1` is the single observation envelope for development hosts.
@@ -614,12 +720,19 @@ logpoint's message, the adapter's `evaluate`) has one evaluator, the
 compiler (`Compiler/JetDebug/Source/NativeEval.jet`,
 `Compiler/JetCLI/Source/CLI/DebugCompile.jet`). The expression is checked
 where the selected frame stopped, as a function of the locals it reads; one
-with an effect is refused, and the refusal names the effect. The program is
+with an effect is refused, and the refusal names the effect. A caller's frame
+stopped at a call: the debug information gives each call the line and column
+of the source node whose lowering made it (a `DW_TAG_call_site` with its
+return address), a call the compiler made for a node (a lambda that a
+lowered `map` calls) included, so the expression is checked just before that
+node; `bt` shows the frame at that line, and the adapter's `stackTrace` at
+that line and column. A row names where the node starts, so two calls of one
+chain that start together share a row. The program is
 compiled again with that function, which runs in a fork of the stopped
 program, placed as `fix` places code, with the locals' bytes read from the
 frame; the program itself neither runs nor changes. A value whose type has a
 `debug_view` shows as `locals` shows it, the view run in that same fork. A
-compiled expression is kept per line and text, so a condition compiles once
+compiled expression is kept per line, column and text, so a condition compiles once
 and runs in a fork at each hit. The fork runs the program's own runtime, so
 a lock another thread held at the stop is never released there (code that
 takes it fails at the 2 s budget), and a function value runs the image's
@@ -664,6 +777,46 @@ source-level prompt supports:
 
 These queries use recorded local snapshots. They do not reverse execution, move
 the program through time, or keep a standing per-variable history buffer.
+
+## Sync-order log
+
+A program's run records its synchronization order when `JET_RECORD` names a
+file, and replays it when `JET_REPLAY` names one
+(`Compiler/JetRuntime/Source/RecordReplay.jet`). The log holds sync events in
+one global turn order:
+
+- spawn and join;
+- a Shared read or edit permit, taken or given up;
+- a channel's send, receive, try-receive, close, and endpoint drops;
+- a select's chosen arm;
+- each print and eprint.
+
+It also holds the bytes of each input: a wall or monotonic clock read, an
+entropy fill, an environment value, the program's arguments, and each file,
+pipe, socket, and stdin read. A UDP sender's address, a positioned file read,
+and a connect are not logged yet.
+
+Tasks, Shared values, and channels are named by ids that do not depend on
+timing. The main task is 1. Any other task, Shared value, or channel mixes
+the id of the task that made it with how many things that task made before
+it. The log holds no instruction counts, so a recording made at one tier
+replays at any other tier.
+
+A replaying task waits at each sync event until the log's next turn names it.
+It then checks that its event is the recorded one, and does it. A select takes
+its recorded arm, and an input reads its recorded bytes. The first mismatch,
+or a turn that no task takes for 10 seconds, stops the program with exit 70:
+
+```text
+replay diverged at sync event 7: recorded edit of Shared value 1 by task 2, got send on channel 1 by task 3  main.jet:14
+```
+
+Only a program that links the runtime's observation start records or
+replays. `jet run --record=<name>` links it, runs the program in a child with
+`JET_RECORD` naming a scratch file, and writes the log into
+`.jet/replays/<name>.jetproof-replay` as `RunSync` frames
+(`Docs/Spec/proof-replay-decisions.md`). The artifact is written with mode
+0600 and stays local: its log holds every input's bytes.
 
 ## Implementation homes
 

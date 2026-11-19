@@ -1,0 +1,99 @@
+// Call-site rows: every instruction the builder emits names the source node
+// whose own lowering made it (IRFunction.call_sites, ir_code_line_call), not
+// the first node of its line. A node's operands are lowered as nodes of their
+// own, so what is left to the node is what its lowering adds: the calls of
+// `f` an inlined `xs.map(f)` makes take the `map` call's row, and a `loop`
+// statement's per-pass `next` takes the loop's. Selection writes a DWARF call
+// site per call with its row's line and column (X64FunctionDebug.calls,
+// Image/Dwarf.jet), so `jet debug` names a caller's frame by the call it
+// returns to.
+use jet_foundation.[Span, StmtKind]
+
+// Each instruction emitted since `first` that names no row yet takes the row
+// of the source node at `span` (ir_call_site_row). Nodes nest, so the
+// innermost node's mark comes first and an outer one marks only what its
+// own lowering added.
+ir_call_sites_mark: fn(p: IRProgram, b: &IRBuilder, first: Int, span: Span) Never! {
+    if span.end <= span.start {
+        return
+    }
+    row := 0
+    loop at in first..<b.f.code_line.len() {
+        line: b.f.code_line[at]
+        if line <= 0 || line >= IR_CODE_LINE_CALL -> next
+        if row == 0 {
+            row = ir_call_site_row(p, b.f, span)
+            if row == 0 {
+                return
+            }
+        }
+        b.f.code_line[at] = line + row * IR_CODE_LINE_CALL
+    }
+}
+
+// The row (from 1) of `f.call_sites` for the node at `span`: the last row
+// when it names the same place, else a new one; 0 when the node has no
+// source line or the code line has no room for another row.
+ir_call_site_row: fn(p: IRProgram, f: &IRFunction, span: Span) -> Int Never! {
+    line: ir_source_line_of(p, f.source_file, span.start) ?? return 0
+    column: ir_source_column(p, f.source_file, span.start) ?? return 0
+    if line <= 0 || line >= IR_CODE_LINE_CALL -> return 0
+    rows: f.call_sites.len() /% IR_CALL_SITE_WORDS
+    if rows > 0 && f.call_sites[f.call_sites.len() - 2] == line && f.call_sites[f.call_sites.len() - 1] == column {
+        return rows
+    }
+    if rows + 1 >= IR_CODE_LINE_SITE /% IR_CODE_LINE_CALL -> return 0
+    f.call_sites.push(line)
+    f.call_sites.push(column)
+    rows + 1
+}
+
+// The source span of statement `kind`; empty for an `#Unsafe` body, whose
+// statements carry their own.
+ir_stmt_kind_span: fn(kind: StmtKind) -> Span Never! {
+    if kind == {
+        .Contract(contract) -> contract.span
+        .ContractScope(_, _, _, _, span) -> span
+        .Let(_, _, _, _, _, span) -> span
+        .RefutableBind(_, _, _, span) -> span
+        .TupleDestructure(_, _, _, _, span) -> span
+        .StructDestructure(_, _, _, _, span) -> span
+        .ListDestructure(_, _, _, _, _, span) -> span
+        .Assign(_, _, _, _, span) -> span
+        .CountedLoop(_, _, _, _, _, _, span) -> span
+        .ForRange(_, _, _, _, _, _, _, _, span) -> span
+        .Range(_, _, _, _, _, _, _, _, _, span) -> span
+        .ExprStmt(_, span) -> span
+        .Return(_, span) -> span
+        .TaskGroup(_, _, _, span) -> span
+        .DeferClose(_, _, span) -> span
+        .If(_, _, _, _, span) -> span
+        .Loop(_, _, span) -> span
+        .While(_, _, _, span) -> span
+        .Break(_, span) -> span
+        .BreakValue(_, _, span) -> span
+        .Continue(_, span) -> span
+        .Match(_, _, _, span) -> span
+        .EnumMatch(_, _, _, _, span) -> span
+        .RangeSwitch(_, _, _, span) -> span
+        .ForIn(_, _, _, _, _, _, _, _, _, _, _, span) -> span
+        .Inline(_, span) -> span
+        .DebugOnly(_, span) -> span
+        .DeepCheck(_, span) -> span
+        .MixedSwitch(_, _, _, _, span) -> span
+        .Unsafe(_, _) -> Span{start: 0, end: 0}
+        .UnsafeBlock(_, _, span) -> span
+        .SentryPolicy(_, _, span) -> span
+        .Impure(_, span) -> span
+        .Reactive(_, span) -> span
+        .Region(_, span) -> span
+        .Layout(_, _, _, span) -> span
+        .ContextBlock(_, _, span) -> span
+        .Live(_, span) -> span
+        .Shield(_, span) -> span
+        .Defer(_, span) -> span
+        .ScopeMember(_, _, span) -> span
+        .Transact(_, _, _, _, span) -> span
+        .GCEdit(_, _, _, _, _, _, span) -> span
+    }
+}

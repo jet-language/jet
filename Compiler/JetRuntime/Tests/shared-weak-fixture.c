@@ -59,16 +59,16 @@ static void lifetime(void) {
     assert(atomic_load(&drops) == 0);
     jet_rt_native_shared_drop(retained);
     assert(atomic_load(&drops) == 1);
-    // Descriptor and payload are gone; only the Cell96 weak allocation lives.
-    assert(jet_rt_program_allocator_fact(2) == base + 96);
+    // Descriptor and payload are gone; only the Cell104 weak allocation lives.
+    assert(jet_rt_program_allocator_fact(2) == base + 104);
     retained = 123;
     assert(!jet_rt_native_shared_weak_upgrade(weak, (W)&retained) && retained == 123);
     jet_rt_native_shared_weak_drop(weak);
-    assert(jet_rt_program_allocator_fact(2) == base + 96);
+    assert(jet_rt_program_allocator_fact(2) == base + 104);
     jet_rt_native_shared_weak_drop(another);
     assert(jet_rt_program_allocator_fact(2) == base);
     jet_rt_program_allocator_restore(0, 0);
-    puts("Shared weak no resurrection/payload once/last weak frees Cell96 ok");
+    puts("Shared weak no resurrection/payload once/last weak frees Cell104 ok");
 }
 typedef struct { W strong, weak; pthread_barrier_t *gate; } Race;
 static void wait_gate(pthread_barrier_t *gate) {

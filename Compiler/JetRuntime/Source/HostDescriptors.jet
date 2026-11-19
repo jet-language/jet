@@ -401,6 +401,7 @@ host_descriptor_wait: fn(descriptor: I64, events: I64, limit: I64) -> I64 {
             count = os_syscall_i64(I64{0}, descriptor, bytes, cap, I64{0}, I64{0}, I64{0})
         }
     }
+    count = replay_read(bytes, cap, count)
     if (count < I64{0}) {
         jet_rt_free_8(bytes, cap)
         return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, -count, error)

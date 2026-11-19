@@ -17,7 +17,8 @@
 // of little-endian words; its first word holds the record's word count in
 // bits 48..58 above the program counter's low 48, and its kind in bits
 // 59..62: 0 for a CPU-time sample, a counter's index plus one for that
-// counter's sample, PERF_SAMPLES_SPAWN for a task's spawn,
+// counter's sample, PERF_SAMPLES_TOPDOWN for a topdown event's sample,
+// PERF_SAMPLES_SPAWN for a task's spawn,
 // PERF_SAMPLES_WAIT for a task's wait, PERF_SAMPLES_WAKE for the wake of a
 // waiter, PERF_SAMPLES_IO for a file or network transfer,
 // PERF_SAMPLES_HEAP_MARK and PERF_SAMPLES_HEAP_SITE for a heap snapshot and
@@ -38,6 +39,15 @@
 // with, or 0. Other threads' events are not counted. The `memory` lens
 // without `cpu` arms no thread's timer, so the file holds no CPU-time
 // sample.
+//
+// Under the `topdown` lens the start opens, on the same thread and through
+// the same handler, the events the CPU's top-down formulas take
+// (perf_topdown_start), each sampled once per its period in a record of
+// kind PERF_SAMPLES_TOPDOWN, its event's index above its program counter.
+// `<samples>.topdown` keeps which formulas the CPU has, the CPU, each
+// event's PMU type, config, period and errno, and at exit each event's
+// count, with the time it was enabled and the time it ran
+// (perf_topdown_exit), which scale a multiplexed event's count.
 //
 // Under the `alloc` lens the session builds the program with
 // `--checked-alloc`, whose every block keeps its allocating chain, and the
@@ -81,6 +91,14 @@ PERF_SAMPLES_SPAWN: I64{15}
 PERF_SAMPLES_WAIT: I64{14}
 
 PERF_SAMPLES_WAKE: I64{12}
+
+// The kind of a topdown event's sample (perf_topdown_start): a record like
+// a counter's, with the event's index in the address bits from
+// PERF_TOPDOWN_EVENT_BITS, above its program counter, which is 0 outside
+// the image's code.
+PERF_SAMPLES_TOPDOWN: I64{7}
+
+PERF_TOPDOWN_EVENT_BITS: I64{40}
 
 // The kind of the record of the CPU time the process used since sampling
 // started (perf_samples_exit): its second word, in nanoseconds.
@@ -181,11 +199,19 @@ PERF_COUNTERS_SIGNAL: I64{63}
 // L1D, LLC and dTLB read misses, and page faults.
 PERF_COUNTERS_COUNT: I64{4}
 
+// The most events the topdown lens opens (perf_topdown_events), and the
+// descriptors the record buffer keeps: the memory lens's counters', then
+// the topdown lens's events'.
+PERF_TOPDOWN_MAX: I64{24}
+
+PERF_COUNTERS_SLOTS: I64{28}
+
 // The lenses JET_PERF_LENSES names, one bit each: `cpu`, the CPU-time
-// samples, `memory`, the counters, `alloc`, the heap snapshots, and
-// `causal`, the virtual speedup experiments (perf_causal_tick), which the
-// session names beside `cpu`. The session writes them comma-separated in
-// that order; a run without it samples CPU time alone.
+// samples, `memory`, the counters, `alloc`, the heap snapshots, `topdown`,
+// the top-down events, and `causal`, the virtual speedup experiments
+// (perf_causal_tick), which the session names beside `cpu`. The session
+// writes them comma-separated in that order; a run without it samples CPU
+// time alone.
 PERF_LENS_CPU: I64{1}
 
 PERF_LENS_MEMORY: I64{2}
@@ -193,6 +219,8 @@ PERF_LENS_MEMORY: I64{2}
 PERF_LENS_ALLOC: I64{4}
 
 PERF_LENS_CAUSAL: I64{8}
+
+PERF_LENS_TOPDOWN: I64{16}
 
 // The SIGPROFs the start sends its own thread to time the kernel's part of
 // one sample (perf_samples_delivery).
@@ -221,8 +249,9 @@ perf_samples_code_high := I64{0}
 
 // The record buffer: its first word is 1 while a handler fills the
 // PERF_SAMPLES_DEPTH words after it; 0 when the start could not map it.
-// After them come the PERF_COUNTERS_COUNT counters' descriptors, -1 for
-// one that is not open, then the nanoseconds every handler has run
+// After them come PERF_COUNTERS_SLOTS counters' descriptors, -1 for one
+// that is not open: PERF_COUNTERS_COUNT for the memory lens, then the
+// topdown lens's events; then the nanoseconds every handler has run
 // (perf_samples_charge), then how many recorded lock waits are blocked now
 // (perf_samples_lock_block).
 perf_samples_buffer := I64{0}
@@ -260,6 +289,13 @@ perf_zones_on := I64{0}
 // start opens the file.
 perf_spans_buffer := I64{0}
 
+// The topdown lens's file, `<samples>.topdown`, -1 unless the start opened
+// it, which stays open for the events' counts at exit (perf_topdown_exit),
+// and how many events it lists.
+perf_topdown_fd := I64{-1}
+
+perf_topdown_count := I64{0}
+
 // Start sampling once per process: into the file JET_PERF_SAMPLES names,
 // or, when it is unset, into the flight recorder's ring (perf_flight_open),
 // CPU time alone at PERF_FLIGHT_INTERVAL_US.
@@ -272,6 +308,7 @@ perf_samples_start: fn() {
     lenses: if (flight) -> PERF_LENS_CPU else -> perf_samples_lenses()
     fd := I64{-1}
     counters := I64{-1}
+    topdown := I64{-1}
     if (flight) { fd = perf_flight_open() }
     if (!flight && rt_text_len(path) != I64{0}) {
         name: fd_c_path(path)
@@ -280,6 +317,7 @@ perf_samples_start: fn() {
         if (fd >= I64{0}) {
             perf_spans_fd_set(perf_samples_open_beside(path, rt_static_text(".spans")))
             counters = perf_counters_open(path, lenses)
+            topdown = perf_topdown_open(path, lenses)
         }
     }
     if (!flight) { jet_rt_string_drop(path) }
@@ -294,7 +332,15 @@ perf_samples_start: fn() {
     perf_cfi_start(image)
     // The spawn, wait and wake records walk their stacks (perf_samples_stack).
     alloc_frames_start()
-    buffer: alloc_map_try(wrapping(wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_COUNT) + I64{2}) * I64{8}))
+    buffer: alloc_map_try(wrapping(wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_SLOTS) + I64{2}) * I64{8}))
+    if (buffer != I64{0}) {
+        // No counter is open yet (perf_counter_of).
+        index := I64{0}
+        loop index < PERF_COUNTERS_SLOTS {
+            rt_text_store(wrapping(perf_counters_table(buffer) + wrapping(index * I64{8})), I64{-1})
+            index = wrapping(index + I64{1})
+        }
+    }
     slots: alloc_map_try(wrapping(PERF_SAMPLES_SLOTS * perf_samples_slot_bytes()))
     causal: if ((lenses & PERF_LENS_CAUSAL) != I64{0}) -> perf_causal_open(image) else -> I64{0}
     #Unsafe("the observation start runs before the timer whose handler reads these is armed") {
@@ -336,9 +382,11 @@ perf_samples_start: fn() {
         }
         _ := host_call(I64{3}, fd, I64{0}, I64{0})
         if (counters >= I64{0}) { _ := host_call(I64{3}, counters, I64{0}, I64{0}) }
+        if (topdown >= I64{0}) { _ := host_call(I64{3}, topdown, I64{0}, I64{0}) }
         return
     }
     perf_counters_start(buffer, counters)
+    perf_topdown_start(buffer, topdown)
     if ((lenses & PERF_LENS_ALLOC) != I64{0}) { _ := alloc_check_track_start() }
     // The record of the CPU time sampled, written at exit.
     observe_exit_install()
@@ -381,7 +429,7 @@ perf_samples_charge: fn(buffer: I64, began: I64) {
     if (buffer == I64{0}) {
         return
     }
-    _ := sync_add(wrapping(buffer + wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_COUNT) * I64{8})), wrapping(perf_samples_clock() - began))
+    _ := sync_add(wrapping(buffer + wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_SLOTS) * I64{8})), wrapping(perf_samples_clock() - began))
 }
 
 // Arm a timer on this thread's CPU clock (CLOCK_THREAD_CPUTIME_ID) that
@@ -464,7 +512,7 @@ perf_samples_exit: fn() {
     }
     perf_samples_heap(rt_static_text("exit"))
     buffer: perf_samples_buffer
-    handlers: if (buffer == I64{0}) -> I64{0} else -> sync_load(wrapping(buffer + wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_COUNT) * I64{8})))
+    handlers: if (buffer == I64{0}) -> I64{0} else -> sync_load(wrapping(buffer + wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_SLOTS) * I64{8})))
     record: jet_rt_alloc(I64{32}, I64{8})
     rt_text_store(record, (I64{4} << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_CLOCK << PERF_SAMPLES_KIND_BITS))
     rt_text_store(wrapping(record + I64{8}), wrapping(perf_samples_process_cpu_ns() - perf_samples_cpu_start))
@@ -472,6 +520,7 @@ perf_samples_exit: fn() {
     rt_text_store(wrapping(record + I64{24}), perf_samples_delivery_ns)
     _ := host_write_all(fd, record, I64{32})
     jet_rt_free(record, I64{32}, I64{8})
+    perf_topdown_exit()
 }
 
 // core.perf.heap_mark(name): the heap snapshot named by the borrowed text
@@ -1300,7 +1349,7 @@ perf_samples_wake: fn(slot: I64, at: I64, waker: I64) {
 // start could not map the buffer.
 perf_samples_lock_count: fn() -> I64 {
     buffer: perf_samples_buffer
-    if (buffer == I64{0}) -> I64{0} else -> wrapping(buffer + wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{2}) + PERF_COUNTERS_COUNT) * I64{8}))
+    if (buffer == I64{0}) -> I64{0} else -> wrapping(buffer + wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{2}) + PERF_COUNTERS_SLOTS) * I64{8}))
 }
 
 // Under `jet perf run`, a task about to block on a Shared value's lock,
@@ -1466,6 +1515,9 @@ perf_samples_lens: fn(item: I64, length: I64) -> I64 {
     if (length == I64{6} && rt_text_equal_bytes(item, rt_text_data(rt_static_text("causal")), I64{6})) {
         return PERF_LENS_CAUSAL
     }
+    if (length == I64{7} && rt_text_equal_bytes(item, rt_text_data(rt_static_text("topdown")), I64{7})) {
+        return PERF_LENS_TOPDOWN
+    }
     I64{0}
 }
 
@@ -1542,11 +1594,6 @@ perf_counters_start: fn(buffer: I64, file: I64) {
         loop {
             if (sync_cas(buffer, I64{0}, I64{1}) == I64{0}) { break }
         }
-        index := I64{0}
-        loop index < PERF_COUNTERS_COUNT {
-            rt_text_store(wrapping(perf_counters_table(buffer) + wrapping(index * I64{8})), I64{-1})
-            index = wrapping(index + I64{1})
-        }
     }
     tid: thread_tid()
     index := I64{0}
@@ -1569,21 +1616,30 @@ perf_counters_start: fn(buffer: I64, file: I64) {
 }
 
 // Open counter `index` on this thread (`tid`), its attribute words built in
-// `buffer`, have it signal this thread at each overflow and arm it for its
-// first period; its descriptor goes in the table before it is armed. An LLC
-// counter the kernel has no generic event for (ENOENT) opens the CPU's raw
-// one instead, where perf_counter_llc_raw knows it. 0, or the negated errno
-// of the call the kernel refused.
+// `buffer`, and attach it (perf_counter_attach). An LLC counter the kernel
+// has no generic event for (ENOENT) opens the CPU's raw one instead, where
+// perf_counter_llc_raw knows it. 0, or the negated errno of the call the
+// kernel refused.
 perf_counter_arm: fn(buffer: I64, index: I64, tid: I64) -> I64 {
     attr: wrapping(buffer + I64{8})
-    fd := perf_counter_event_open(attr, perf_counter_type(index), perf_counter_config(index), perf_counter_period(index))
+    fd := perf_counter_event_open(attr, perf_counter_type(index), perf_counter_config(index), perf_counter_period(index), I64{0})
     if (fd == I64{-2} && index == I64{1}) {
         raw: perf_counter_llc_raw()
         if (raw != I64{0}) {
-            fd = perf_counter_event_open(attr, I64{4}, raw, perf_counter_period(index))
+            fd = perf_counter_event_open(attr, I64{4}, raw, perf_counter_period(index), I64{0})
         }
     }
     if (fd < I64{0}) { return fd }
+    perf_counter_attach(buffer, index, fd, tid)
+}
+
+// Have counter descriptor `fd` signal thread `tid` at each overflow and arm
+// it for its first period, its descriptor in slot `index` of the table
+// before it is armed; the held `buffer` keeps the f_owner_ex. A counter
+// the kernel refuses any of that for is closed. 0, or the negated errno of
+// the call the kernel refused.
+perf_counter_attach: fn(buffer: I64, index: I64, fd: I64, tid: I64) -> I64 {
+    attr: wrapping(buffer + I64{8})
     result := I64{0}
     // fcntl F_SETFL O_ASYNC, F_SETSIG PERF_COUNTERS_SIGNAL, then
     // F_SETOWN_EX with the f_owner_ex {F_OWNER_TID, tid}: each overflow
@@ -1614,15 +1670,15 @@ perf_counter_arm: fn(buffer: I64, index: I64, tid: I64) -> I64 {
 // perf_event_open of the counter of type `kind`, `config` and `period` on
 // this thread, any CPU, no group, PERF_FLAG_FD_CLOEXEC, its attribute words
 // built at `attr`: perf_event_attr's first 64 bytes (PERF_ATTR_SIZE_VER0),
-// its type and size, config, sample_period, sample_type and read_format,
-// then its flags, disabled | exclude_kernel | exclude_hv, the rest zero. Its
-// descriptor, or the negated errno.
-perf_counter_event_open: fn(attr: I64, kind: I64, config: I64, period: I64) -> I64 {
+// its type and size, config, sample_period, sample_type and read_format
+// (`format`), then its flags, disabled | exclude_kernel | exclude_hv, the
+// rest zero. Its descriptor, or the negated errno.
+perf_counter_event_open: fn(attr: I64, kind: I64, config: I64, period: I64, format: I64) -> I64 {
     rt_text_store(attr, kind | (I64{64} << I64{32}))
     rt_text_store(wrapping(attr + I64{8}), config)
     rt_text_store(wrapping(attr + I64{16}), period)
     rt_text_store(wrapping(attr + I64{24}), I64{0})
-    rt_text_store(wrapping(attr + I64{32}), I64{0})
+    rt_text_store(wrapping(attr + I64{32}), format)
     rt_text_store(wrapping(attr + I64{40}), I64{97})
     rt_text_store(wrapping(attr + I64{48}), I64{0})
     rt_text_store(wrapping(attr + I64{56}), I64{0})
@@ -1639,8 +1695,8 @@ perf_counter_refresh: fn(fd: I64) -> I64 {
     }
 }
 
-// Arm counter `counter` (an index, or -1 for a CPU-time sample) for its
-// next period, after the handler wrote its sample.
+// Arm counter `counter` (a slot of the table, or -1 for a CPU-time sample)
+// for its next period, after the handler wrote its sample.
 perf_counter_rearm: fn(buffer: I64, counter: I64) {
     if (counter < I64{0}) {
         return
@@ -1648,7 +1704,7 @@ perf_counter_rearm: fn(buffer: I64, counter: I64) {
     _ := perf_counter_refresh(rt_text_word(wrapping(perf_counters_table(buffer) + wrapping(counter * I64{8}))))
 }
 
-// The index of the counter whose overflow `info` reports (a siginfo of
+// The table slot of the counter whose overflow `info` reports (a siginfo of
 // si_code POLL_IN..POLL_HUP, si_fd at 24 a counter's descriptor), or -1.
 perf_counter_of: fn(info: I64, buffer: I64) -> I64 {
     if (info == I64{0} || buffer == I64{0}) { return I64{-1} }
@@ -1657,11 +1713,327 @@ perf_counter_of: fn(info: I64, buffer: I64) -> I64 {
     fd: rt_text_word(wrapping(info + I64{24})) & I64{4294967295}
     table: perf_counters_table(buffer)
     index := I64{0}
-    loop index < PERF_COUNTERS_COUNT {
+    loop index < PERF_COUNTERS_SLOTS {
         if (rt_text_word(wrapping(table + wrapping(index * I64{8}))) == fd) { return index }
         index = wrapping(index + I64{1})
     }
     I64{-1}
+}
+
+// The top-down formulas the topdown lens knows, by the
+// CPU's model: AMD Zen 4 (family 19h, models 10h-1Fh, 60h-7Fh and A0h-AFh)
+// and Zen 5 (family 1Ah, models below 80h), whose six and eight dispatch
+// slots a cycle the same events count; Intel's Golden Cove cores alone
+// (Sapphire and Emerald Rapids, family 6 models 8Fh and CFh); Alder and
+// Raptor Lake's two core types (models 97h, 9Ah, B7h, BAh and BFh), each
+// with its own events on its own PMU; and Gracemont cores alone (Alder
+// Lake-N, model BEh). Any other CPU, and any virtual machine, whose
+// counters are not the hardware's, has none (0). JetCLI
+// CLI/Perf/Topdown.jet holds the formulas over each table's events.
+PERF_TOPDOWN_ZEN4: I64{1}
+
+PERF_TOPDOWN_ZEN5: I64{2}
+
+PERF_TOPDOWN_GOLDEN_COVE: I64{3}
+
+PERF_TOPDOWN_HYBRID: I64{4}
+
+PERF_TOPDOWN_GRACEMONT: I64{5}
+
+// The CPU's vendor (perf_topdown_vendor).
+PERF_TOPDOWN_AMD: I64{1}
+
+PERF_TOPDOWN_INTEL: I64{2}
+
+// The events of a Golden Cove or Gracemont table; Zen's has twelve.
+PERF_TOPDOWN_CORE_EVENTS: I64{9}
+
+// `<samples>.topdown` when `lenses` hold the topdown lens, else -1.
+perf_topdown_open: fn(samples: I64, lenses: I64) -> I64 {
+    if ((lenses & PERF_LENS_TOPDOWN) == I64{0}) { return I64{-1} }
+    perf_samples_open_beside(samples, rt_static_text(".topdown"))
+}
+
+// The CPU's vendor by CPUID.0's EBX, EDX and ECX: PERF_TOPDOWN_AMD for
+// "AuthenticAMD", PERF_TOPDOWN_INTEL for "GenuineIntel", else 0.
+perf_topdown_vendor: fn() -> I64 {
+    #Unsafe("cpuid only reports processor identification") {
+        ebx: os_cpuid_ebx_i64(I64{0}, I64{0})
+        edx: os_cpuid_edx_i64(I64{0}, I64{0})
+        ecx: os_cpuid_ecx_i64(I64{0}, I64{0})
+        if (ebx == I64{1752462657} && edx == I64{1769238117} && ecx == I64{1145913699}) {
+            return PERF_TOPDOWN_AMD
+        }
+        if (ebx == I64{1970169159} && edx == I64{1231384169} && ecx == I64{1818588270}) {
+            return PERF_TOPDOWN_INTEL
+        }
+    }
+    I64{0}
+}
+
+// The formulas of `vendor`'s CPU whose CPUID.1 EAX is `signature`, 0 for
+// none: its family is the base family plus, for base family Fh, the
+// extended one; its model the base model plus, for families 6 and Fh, the
+// extended model's four bits above it.
+perf_topdown_set: fn(vendor: I64, signature: I64, hypervisor: Bool) -> I64 {
+    if (hypervisor) { return I64{0} }
+    base: (signature >> I64{8}) & I64{15}
+    family: if (base == I64{15}) -> wrapping(base + ((signature >> I64{20}) & I64{255})) else -> base
+    extended: if (base == I64{6} || base == I64{15}) -> ((signature >> I64{16}) & I64{15}) << I64{4} else -> I64{0}
+    model: ((signature >> I64{4}) & I64{15}) | extended
+    if (vendor == PERF_TOPDOWN_AMD && family == I64{25}) {
+        if ((model >= I64{16} && model < I64{32}) || (model >= I64{96} && model < I64{128}) || (model >= I64{160} && model < I64{176})) {
+            return PERF_TOPDOWN_ZEN4
+        }
+    }
+    if (vendor == PERF_TOPDOWN_AMD && family == I64{26} && model < I64{128}) {
+        return PERF_TOPDOWN_ZEN5
+    }
+    if (vendor == PERF_TOPDOWN_INTEL && family == I64{6}) {
+        if (model == I64{143} || model == I64{207}) { return PERF_TOPDOWN_GOLDEN_COVE }
+        if (model == I64{151} || model == I64{154} || model == I64{183} || model == I64{186} || model == I64{191}) {
+            return PERF_TOPDOWN_HYBRID
+        }
+        if (model == I64{190}) { return PERF_TOPDOWN_GRACEMONT }
+    }
+    I64{0}
+}
+
+// The events formulas `set` takes: Zen's table, one core type's, or on a
+// hybrid chip Golden Cove's then Gracemont's.
+perf_topdown_events: fn(set: I64) -> I64 {
+    if (set == PERF_TOPDOWN_ZEN4 || set == PERF_TOPDOWN_ZEN5) { return I64{12} }
+    if (set == PERF_TOPDOWN_GOLDEN_COVE || set == PERF_TOPDOWN_GRACEMONT) {
+        return PERF_TOPDOWN_CORE_EVENTS
+    }
+    if (set == PERF_TOPDOWN_HYBRID) { return wrapping(PERF_TOPDOWN_CORE_EVENTS * I64{2}) }
+    I64{0}
+}
+
+// The table event `index` of `set` is a row of: Zen 4's or Zen 5's,
+// PERF_TOPDOWN_GOLDEN_COVE or PERF_TOPDOWN_GRACEMONT.
+perf_topdown_table: fn(set: I64, index: I64) -> I64 {
+    if (set == PERF_TOPDOWN_HYBRID) {
+        return if (index < PERF_TOPDOWN_CORE_EVENTS) -> PERF_TOPDOWN_GOLDEN_COVE else -> PERF_TOPDOWN_GRACEMONT
+    }
+    set
+}
+
+// The config of row `row` of `table`, a raw event: its event select's low
+// byte, its unit mask from bit 8 and its counter mask from bit 24, and on
+// AMD the event select's high nibble from bit 32.
+// Zen: ls_not_halted_cyc (76h); de_no_dispatch_per_slot (1A0h) of
+// no_ops_from_frontend (01h), backend_stalls (1Eh) and smt_contention
+// (60h); de_src_op_disp.all (AAh 07h); ex_ret_ops (C1h); the cycles
+// the frontend dispatched no op at all (1A0h 01h, counter mask 6 on Zen 4
+// and 8 on Zen 5, its dispatch width);
+// ex_ret_brn_misp (C3h); resyncs_or_nc_redirects (96h);
+// ex_no_retire.load_not_complete (D6h A2h) and .not_complete (D6h 02h);
+// ex_ret_ucode_ops (1C1h).
+// Golden Cove: TOPDOWN.SLOTS_P (A4h 01h); IDQ_BUBBLES.CORE (9Ch 01h);
+// TOPDOWN.BAD_SPEC_SLOTS (A4h 04h); TOPDOWN.BACKEND_BOUND_SLOTS (A4h 02h);
+// UOPS_RETIRED.SLOTS (C2h 02h); IDQ_BUBBLES.CYCLES_0_UOPS_DELIV.CORE (9Ch
+// 01h, counter mask 6); TOPDOWN.BR_MISPREDICT_SLOTS (A4h 08h);
+// TOPDOWN.MEMORY_BOUND_SLOTS (A4h 10h); UOPS_RETIRED.HEAVY (C2h 01h).
+// Gracemont: CPU_CLK_UNHALTED.CORE_P (3Ch); TOPDOWN_FE_BOUND.ALL (71h);
+// TOPDOWN_BAD_SPECULATION.ALL (73h); TOPDOWN_BE_BOUND.ALL (74h);
+// TOPDOWN_RETIRING.ALL (C2h); TOPDOWN_FE_BOUND.FRONTEND_LATENCY (71h 72h);
+// TOPDOWN_BAD_SPECULATION.MISPREDICT (73h 04h);
+// TOPDOWN_BE_BOUND.ALLOC_RESTRICTIONS (74h 01h); UOPS_RETIRED.MS (C2h 01h).
+perf_topdown_config: fn(table: I64, row: I64) -> I64 {
+    if (table == PERF_TOPDOWN_GOLDEN_COVE) {
+        if (row == I64{0}) { return I64{420} }
+        if (row == I64{1}) { return I64{412} }
+        if (row == I64{2}) { return I64{1188} }
+        if (row == I64{3}) { return I64{676} }
+        if (row == I64{4}) { return I64{706} }
+        if (row == I64{5}) { return I64{100663708} }
+        if (row == I64{6}) { return I64{2212} }
+        if (row == I64{7}) { return I64{4260} }
+        return I64{450}
+    }
+    if (table == PERF_TOPDOWN_GRACEMONT) {
+        if (row == I64{0}) { return I64{60} }
+        if (row == I64{1}) { return I64{113} }
+        if (row == I64{2}) { return I64{115} }
+        if (row == I64{3}) { return I64{116} }
+        if (row == I64{4}) { return I64{194} }
+        if (row == I64{5}) { return I64{29297} }
+        if (row == I64{6}) { return I64{1139} }
+        if (row == I64{7}) { return I64{372} }
+        return I64{450}
+    }
+    if (row == I64{0}) { return I64{118} }
+    if (row == I64{1}) { return I64{4294967712} }
+    if (row == I64{2}) { return I64{4294975136} }
+    if (row == I64{3}) { return I64{4294992032} }
+    if (row == I64{4}) { return I64{1962} }
+    if (row == I64{5}) { return I64{193} }
+    if (row == I64{6}) {
+        return if (table == PERF_TOPDOWN_ZEN5) -> I64{4429185440} else -> I64{4395631008}
+    }
+    if (row == I64{7}) { return I64{195} }
+    if (row == I64{8}) { return I64{150} }
+    if (row == I64{9}) { return I64{41686} }
+    if (row == I64{10}) { return I64{726} }
+    I64{4294967489}
+}
+
+// The sample period of row `row` of `table`, a prime by how often the
+// event counts: a cycle's events once per million cycles, a slot's
+// once per six million slots (five on Gracemont), stall cycles and memory
+// slots once per 200003, mispredicts, heavy and microcode ops once per
+// 20011, and Zen's pipeline restarts once per 2003.
+perf_topdown_period: fn(table: I64, row: I64) -> I64 {
+    if (table == PERF_TOPDOWN_ZEN4 || table == PERF_TOPDOWN_ZEN5) {
+        if (row == I64{0}) { return I64{1000003} }
+        if (row < I64{6}) { return I64{6000011} }
+        if (row == I64{7} || row == I64{11}) { return I64{20011} }
+        if (row == I64{8}) { return I64{2003} }
+        return I64{200003}
+    }
+    if (row == I64{0} && table == PERF_TOPDOWN_GRACEMONT) { return I64{1000003} }
+    if (row < I64{5}) {
+        return if (table == PERF_TOPDOWN_GRACEMONT) -> I64{5000011} else -> I64{6000011}
+    }
+    if (row == I64{6} || row == I64{8}) { return I64{20011} }
+    I64{200003}
+}
+
+// The PMU type the sysfs file `path` holds (an event source's `type`, its
+// decimal number), read into the word at `scratch`; the negated errno of a
+// file that can't be opened, ENOENT of one that holds no number.
+perf_topdown_pmu: fn(path: I64, scratch: I64) -> I64 {
+    name: fd_c_path(path)
+    fd: host_call(I64{2}, name, I64{524288}, I64{0})
+    fd_c_path_drop(name, path)
+    if (fd < I64{0}) { return fd }
+    rt_text_store(scratch, I64{0})
+    count: host_call(I64{0}, fd, scratch, I64{8})
+    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    value := I64{0}
+    at := I64{0}
+    loop at < count {
+        digit: rt_text_byte(wrapping(scratch + at))
+        if (digit < I64{48} || digit > I64{57}) { break }
+        value = wrapping(wrapping(value * I64{10}) + wrapping(digit - I64{48}))
+        at = wrapping(at + I64{1})
+    }
+    if (at == I64{0}) { return I64{-2} }
+    value
+}
+
+// Under the topdown lens: write the CPU's formulas (perf_topdown_set), its
+// vendor, its CPUID.1 EAX, whether CPUID says a hypervisor runs it and the
+// count of the formulas' events to `file` (`<samples>.topdown`, or -1 when
+// none was asked for); then open each event on this thread, in user mode,
+// to report its count with the time it was enabled and the time it ran,
+// sampled once per its period as a counter is, in the table's slots past
+// the memory lens's, and write its PMU type, config, period (0 for one the
+// kernel refused) and errno. Raw events go to the core PMU (PERF_TYPE_RAW);
+// on a hybrid chip each core type's go to its own PMU, the type
+// `cpu_core`'s and `cpu_atom`'s sysfs directories name, so each counts
+// while the thread runs on that core type. The file stays open for the
+// counts at exit (perf_topdown_exit). The start holds the record buffer
+// meanwhile, as perf_counters_start does.
+perf_topdown_start: fn(buffer: I64, file: I64) {
+    if (file < I64{0}) {
+        return
+    }
+    vendor: perf_topdown_vendor()
+    signature := I64{0}
+    hypervisor := false
+    #Unsafe("cpuid only reports processor identification") {
+        signature = os_cpuid_eax_i64(I64{1}, I64{0})
+        hypervisor = ((os_cpuid_ecx_i64(I64{1}, I64{0}) >> I64{31}) & I64{1}) != I64{0}
+    }
+    set: perf_topdown_set(vendor, signature, hypervisor)
+    count: perf_topdown_events(set)
+    #Unsafe("five writes of a stack-local word, which the kernel copies before each call returns") {
+        _ := os_write_word_i64(file, set, I64{8})
+        _ := os_write_word_i64(file, vendor, I64{8})
+        _ := os_write_word_i64(file, signature, I64{8})
+        _ := os_write_word_i64(file, if (hypervisor) -> I64{1} else -> I64{0}, I64{8})
+        _ := os_write_word_i64(file, count, I64{8})
+    }
+    status := I64{-12}
+    if (buffer != I64{0} && count > I64{0}) {
+        #Unsafe("rt_sigaction borrows the four-word action on the stack; the handler is this runtime's three-word C-ABI export and the restorer its rt_sigreturn rail") {
+            status = os_syscall_stack4_i64(I64{13}, PERF_COUNTERS_SIGNAL, rt_perf_samples_signal_address(), I64{469762052}, rt_process_signal_restore_address(), I64{0}, I64{8})
+        }
+    }
+    if (status >= I64{0}) {
+        loop {
+            if (sync_cas(buffer, I64{0}, I64{1}) == I64{0}) { break }
+        }
+    }
+    big := I64{4}
+    little := I64{4}
+    if (status >= I64{0} && set == PERF_TOPDOWN_HYBRID) {
+        // The word past the attribute words reads each type.
+        big = perf_topdown_pmu(rt_static_text("/sys/bus/event_source/devices/cpu_core/type"), wrapping(buffer + I64{72}))
+        little = perf_topdown_pmu(rt_static_text("/sys/bus/event_source/devices/cpu_atom/type"), wrapping(buffer + I64{72}))
+    }
+    tid: thread_tid()
+    attr: wrapping(buffer + I64{8})
+    index := I64{0}
+    loop index < count {
+        table: perf_topdown_table(set, index)
+        row: if (set == PERF_TOPDOWN_HYBRID && index >= PERF_TOPDOWN_CORE_EVENTS) -> wrapping(index - PERF_TOPDOWN_CORE_EVENTS) else -> index
+        kind := I64{4}
+        if (set == PERF_TOPDOWN_HYBRID) {
+            kind = if (table == PERF_TOPDOWN_GRACEMONT) -> little else -> big
+        }
+        config: perf_topdown_config(table, row)
+        period: perf_topdown_period(table, row)
+        result := status
+        if (result >= I64{0} && kind < I64{0}) { result = kind }
+        if (result >= I64{0}) {
+            // read_format TOTAL_TIME_ENABLED | TOTAL_TIME_RUNNING.
+            fd: perf_counter_event_open(attr, kind, config, period, I64{3})
+            result = if (fd < I64{0}) -> fd else -> perf_counter_attach(buffer, wrapping(PERF_COUNTERS_COUNT + index), fd, tid)
+        }
+        #Unsafe("four writes of a stack-local word, which the kernel copies before each call returns") {
+            _ := os_write_word_i64(file, if (kind < I64{0}) -> I64{0} else -> kind, I64{8})
+            _ := os_write_word_i64(file, config, I64{8})
+            _ := os_write_word_i64(file, if (result < I64{0}) -> I64{0} else -> period, I64{8})
+            _ := os_write_word_i64(file, if (result < I64{0}) -> wrapping(I64{0} - result) else -> I64{0}, I64{8})
+        }
+        index = wrapping(index + I64{1})
+    }
+    if (status >= I64{0}) { sync_store(buffer, I64{0}) }
+    #Unsafe("the observation start runs before the exit that reads these") {
+        perf_topdown_fd = file
+        perf_topdown_count = count
+    }
+}
+
+// At exit (perf_samples_exit), under the topdown lens: three words for
+// each event in `<samples>.topdown`, its count, the nanoseconds it was
+// enabled and the nanoseconds it ran, all 0 for one that is not open; then
+// the file is closed. A second exit writes nothing.
+perf_topdown_exit: fn() {
+    file: perf_topdown_fd
+    if (file < I64{0}) {
+        return
+    }
+    #Unsafe("the exit runs on one thread, after the start set these") { perf_topdown_fd = I64{-1} }
+    buffer: perf_samples_buffer
+    values: jet_rt_alloc(I64{24}, I64{8})
+    index := I64{0}
+    loop index < perf_topdown_count {
+        fd: if (buffer == I64{0}) -> I64{-1} else -> rt_text_word(wrapping(perf_counters_table(buffer) + wrapping(wrapping(PERF_COUNTERS_COUNT + index) * I64{8})))
+        read: if (fd < I64{0}) -> I64{0} else -> host_call(I64{0}, fd, values, I64{24})
+        if (read != I64{24}) {
+            rt_text_store(values, I64{0})
+            rt_text_store(wrapping(values + I64{8}), I64{0})
+            rt_text_store(wrapping(values + I64{16}), I64{0})
+        }
+        _ := host_write_all(file, values, I64{24})
+        index = wrapping(index + I64{1})
+    }
+    jet_rt_free(values, I64{24}, I64{8})
+    _ := host_call(I64{3}, file, I64{0}, I64{0})
 }
 
 // Checked FunctionAddress intrinsic in the canonical RuntimeLibrary table.
@@ -2226,6 +2598,8 @@ perf_cfi_sort: fn(table: I64, count: I64) {
 // samples as the CPU time it covers gives. A write the kernel refuses loses
 // that one sample; O_APPEND puts each record after the last. A counter's
 // record has its kind, and the counter is armed again once it is written.
+// A topdown event's record is one word, its program counter alone, 0
+// outside the image's code, and its event's index above it.
 #Export(c) jet_rt_perf_samples_signal: fn(signal: I64, info: I64, context: I64) -> I64 {
     if (signal == PERF_FLIGHT_CAPTURE_SIGNAL) {
         perf_flight_capture(context)
@@ -2240,9 +2614,20 @@ perf_cfi_sort: fn(table: I64, count: I64) {
         counter = perf_counter_of(info, buffer)
         if (counter < I64{0}) { return I64{0} }
     }
-    kind: wrapping(counter + I64{1}) << PERF_SAMPLES_KIND_BITS
+    topdown: counter >= PERF_COUNTERS_COUNT
+    kind: if (topdown) -> PERF_SAMPLES_TOPDOWN << PERF_SAMPLES_KIND_BITS else -> wrapping(counter + I64{1}) << PERF_SAMPLES_KIND_BITS
     bias: perf_samples_bias
     pc: wrapping(rt_text_word(wrapping(context + I64{168})) - bias)
+    if (topdown) {
+        own: if (perf_samples_in_code(pc)) -> pc else -> I64{0}
+        word: own | (wrapping(counter - PERF_COUNTERS_COUNT) << PERF_TOPDOWN_EVENT_BITS) | (I64{1} << PERF_SAMPLES_ADDRESS_BITS) | kind
+        #Unsafe("one write of a stack-local word, which the kernel copies before the call returns") {
+            _ := os_write_word_i64(fd, word, I64{8})
+        }
+        perf_counter_rearm(buffer, counter)
+        perf_samples_charge(buffer, began)
+        return I64{0}
+    }
     slot: if (buffer == I64{0} || !perf_samples_in_code(pc)) -> I64{0} else -> perf_samples_claim(buffer)
     periods: perf_samples_periods(signal, info)
     if (signal == PERF_SAMPLES_SIGNAL) { perf_causal_tick(pc, periods) }
@@ -2362,7 +2747,8 @@ PERF_FLIGHT_INTERVAL_US: I64{10000}
 // (perf_flight_end), the dump name's program prefix length and the dump's
 // task rows claimed (perf_flight_tasks); then one datagram's receive
 // buffer, the ring, the dump's scratch for its task rows, /proc/self/maps
-// and directory entries, and the dump's text page.
+// and directory entries, the dump's text page, its redacted copy's vectors
+// and table of Secrets, and its redacted copy (perf_flight_redacted).
 PERF_FLIGHT_READ: I64{8}
 
 PERF_FLIGHT_USED: I64{16}
@@ -2391,7 +2777,19 @@ PERF_FLIGHT_SCRATCH: I64{131072}
 
 PERF_FLIGHT_TEXT_AT: I64{401472}
 
-PERF_FLIGHT_BYTES: I64{405568}
+PERF_FLIGHT_VECTORS_AT: I64{405568}
+
+PERF_FLIGHT_SECRETS_AT: I64{405600}
+
+// The most Secrets a dump redacts by their bytes (Secret.jet
+// secret_redact_table): their table's 40-byte head, then 16 bytes each.
+PERF_FLIGHT_SECRETS: I64{256}
+
+PERF_FLIGHT_COPY_AT: I64{409792}
+
+PERF_FLIGHT_COPY: I64{1048576}
+
+PERF_FLIGHT_BYTES: I64{1458368}
 
 // The dump's text page: the dump's path from its start, then the dump's
 // header words, the oldest dump's name while the dumps rotate
@@ -2712,8 +3110,10 @@ perf_flight_image_bytes: fn(image: I64) -> I64 {
 // (perf_flight_tasks), then each writable memory segment, every thread's
 // and task's stack among them, within PERF_FLIGHT_DUMP_BUDGET. The other
 // threads wait in their capture until the dump is written, so the stacks
-// it holds are the ones their registers name. The live Secrets are
-// scrubbed first, so no dump holds one. Nothing here allocates: the
+// it holds are the ones their registers name. Every byte after its words
+// is written redacted (perf_flight_redacted), so no dump holds a live
+// Secret's bytes, its literal's in the image nor a copy's in memory; the
+// live Secrets are scrubbed once it is written. Nothing here allocates: the
 // state's scratch serves every buffer.
 perf_flight_dump: fn() {
     state: perf_flight_state
@@ -2722,12 +3122,12 @@ perf_flight_dump: fn() {
     }
     frame: alloc_check_caller_frame()
     scrub: secret_scrub_code
-    if (scrub != I64{0}) { _ := coll_call1(scrub, I64{0}) }
     text: wrapping(state + PERF_FLIGHT_TEXT_AT)
     words: wrapping(text + PERF_FLIGHT_WORDS_AT)
     zeros: wrapping(text + PERF_FLIGHT_ZEROS_AT)
     fd: perf_flight_dump_open(state, text, words)
     if (fd < I64{0}) {
+        if (scrub != I64{0}) { _ := coll_call1(scrub, I64{0}) }
         return
     }
     image: perf_samples_image
@@ -2745,18 +3145,19 @@ perf_flight_dump: fn() {
     rt_text_store(wrapping(words + I64{72}), length)
     good := perf_flight_bytes(fd, zeros, words, I64{80})
     if (good) {
-        good = perf_flight_bytes(fd, zeros, image, length) && perf_flight_bytes(fd, zeros, zeros, wrapping(I64{0} - length) & I64{7})
+        good = perf_flight_redacted(fd, state, zeros, image, length) && perf_flight_bytes(fd, zeros, zeros, wrapping(I64{0} - length) & I64{7})
     }
     if (good && perf_flight_lock(state, I64{10000000})) {
         perf_flight_drain(state)
-        good = perf_flight_section(fd, words, zeros, PERF_FLIGHT_SECTION_RING, I64{0}, wrapping(state + PERF_FLIGHT_RING_AT), rt_text_word(wrapping(state + PERF_FLIGHT_USED)))
+        good = perf_flight_section(fd, state, words, zeros, PERF_FLIGHT_SECTION_RING, I64{0}, wrapping(state + PERF_FLIGHT_RING_AT), rt_text_word(wrapping(state + PERF_FLIGHT_USED)))
         sync_store(state, I64{0})
     }
     if (good) { good = perf_flight_tasks(fd, state, words, zeros) }
     if (good) { good = perf_flight_segments(fd, state, words, zeros) }
     if (good) {
-        _ := perf_flight_section(fd, words, zeros, PERF_FLIGHT_SECTION_END, I64{0}, I64{0}, I64{0})
+        _ := perf_flight_section(fd, state, words, zeros, PERF_FLIGHT_SECTION_END, I64{0}, I64{0}, I64{0})
     }
+    if (scrub != I64{0}) { _ := coll_call1(scrub, I64{0}) }
     _ := perf_flight_syscall(I64{3}, fd, I64{0}, I64{0})
     release: wrapping(text + PERF_FLIGHT_RELEASE_AT)
     sync_store(release, PERF_FLIGHT_RELEASED)
@@ -2829,7 +3230,7 @@ perf_flight_tasks: fn(fd: I64, state: I64, words: I64, zeros: I64) -> Bool {
     sync_store(release, PERF_FLIGHT_CLOSED)
     claimed: sync_load(wrapping(state + PERF_FLIGHT_CLAIMED))
     rows: if (claimed > PERF_FLIGHT_TASKS_MAX) -> PERF_FLIGHT_TASKS_MAX else -> claimed
-    perf_flight_section(fd, words, zeros, PERF_FLIGHT_SECTION_TASKS, I64{0}, scratch, wrapping(wrapping(rows * PERF_FLIGHT_TASK_WORDS) * I64{8}))
+    perf_flight_section(fd, state, words, zeros, PERF_FLIGHT_SECTION_TASKS, I64{0}, scratch, wrapping(wrapping(rows * PERF_FLIGHT_TASK_WORDS) * I64{8}))
 }
 
 // The row of a parked or queued fiber whose TCB is `tcb` and that runs a
@@ -2938,13 +3339,74 @@ perf_flight_bytes: fn(fd: I64, zeros: I64, address: I64, length: I64) -> Bool {
 }
 
 // One section of the dump: its three words, then its `length` bytes at
-// `bytes`, padded to a word.
-perf_flight_section: fn(fd: I64, words: I64, zeros: I64, kind: I64, address: I64, bytes: I64, length: I64) -> Bool {
+// `bytes`, redacted and padded to a word.
+perf_flight_section: fn(fd: I64, state: I64, words: I64, zeros: I64, kind: I64, address: I64, bytes: I64, length: I64) -> Bool {
     head: wrapping(words + I64{96})
     rt_text_store(head, kind)
     rt_text_store(wrapping(head + I64{8}), address)
     rt_text_store(wrapping(head + I64{16}), length)
-    perf_flight_bytes(fd, zeros, head, I64{24}) && perf_flight_bytes(fd, zeros, bytes, length) && perf_flight_bytes(fd, zeros, zeros, wrapping(I64{0} - length) & I64{7})
+    perf_flight_bytes(fd, zeros, head, I64{24}) && perf_flight_redacted(fd, state, zeros, bytes, length) && perf_flight_bytes(fd, zeros, zeros, wrapping(I64{0} - length) & I64{7})
+}
+
+// Write `length` bytes at `address` as perf_flight_bytes does, with every
+// run of a live Secret's bytes and every byte of a live Secret's buffer
+// zeroed (Secret.jet secret_redact). Each window of PERF_FLIGHT_COPY bytes
+// is copied to the state's copy and redacted there, and written up to where
+// a run could still start that the window does not hold whole; the next
+// window starts there, and zeroes the rest of a run this one began.
+perf_flight_redacted: fn(fd: I64, state: I64, zeros: I64, address: I64, length: I64) -> Bool {
+    table: wrapping(state + PERF_FLIGHT_SECRETS_AT)
+    width: secret_redact_table(table, PERF_FLIGHT_SECRETS, PERF_FLIGHT_COPY / I64{2})
+    if (width == I64{0}) { return perf_flight_bytes(fd, zeros, address, length) }
+    staged: wrapping(state + PERF_FLIGHT_COPY_AT)
+    reach := I64{0}
+    at := I64{0}
+    loop at < length {
+        left: wrapping(length - at)
+        window: if (left < PERF_FLIGHT_COPY) -> left else -> PERF_FLIGHT_COPY
+        perf_flight_read(state, staged, wrapping(address + at), window)
+        until: if (reach > at) -> wrapping(reach - at) else -> I64{0}
+        reach = wrapping(at + secret_redact(table, staged, window, wrapping(address + at), until))
+        step: if (window < left) -> wrapping(window - wrapping(width - I64{1})) else -> window
+        if (!perf_flight_bytes(fd, zeros, staged, step)) { return false }
+        at = wrapping(at + step)
+    }
+    true
+}
+
+// Copy `length` bytes at `address` to `into` through process_vm_readv, so
+// a page the kernel cannot read copies as zeros instead of faulting.
+perf_flight_read: fn(state: I64, into: I64, address: I64, length: I64) {
+    vectors: wrapping(state + PERF_FLIGHT_VECTORS_AT)
+    process: perf_flight_syscall(I64{39}, I64{0}, I64{0}, I64{0})
+    at := I64{0}
+    loop at < length {
+        rt_text_store(vectors, wrapping(into + at))
+        rt_text_store(wrapping(vectors + I64{8}), wrapping(length - at))
+        rt_text_store(wrapping(vectors + I64{16}), wrapping(address + at))
+        rt_text_store(wrapping(vectors + I64{24}), wrapping(length - at))
+        count: perf_flight_readv(process, vectors)
+        if (count == I64{-4}) { next }
+        if (count > I64{0}) {
+            at = wrapping(at + count)
+            next
+        }
+        gap := wrapping(I64{4096} - (wrapping(address + at) & I64{4095}))
+        if (gap > wrapping(length - at)) { gap = wrapping(length - at) }
+        end: wrapping(at + gap)
+        loop at < end {
+            rt_text_put(wrapping(into + at), I64{0})
+            at = wrapping(at + I64{1})
+        }
+    }
+}
+
+// process_vm_readv of this process: the one local and one remote vector at
+// `vectors`.
+perf_flight_readv: fn(process: I64, vectors: I64) -> I64 {
+    #Unsafe("the vectors name the state's copy and a range of this process's own mappings; the kernel copies between them, faulting on neither") {
+        return os_syscall_i64(I64{310}, process, vectors, I64{1}, wrapping(vectors + I64{16}), I64{1}, I64{0})
+    }
 }
 
 // The digit value of hexadecimal byte `byte`, or -1.
@@ -3001,7 +3463,7 @@ perf_flight_segments: fn(fd: I64, state: I64, words: I64, zeros: I64) -> Bool {
         at = wrapping(at + I64{1})
         size: wrapping(end - start)
         if (writable && size > I64{0} && wrapping(total + size) <= PERF_FLIGHT_DUMP_BUDGET) {
-            if (!perf_flight_section(fd, words, zeros, PERF_FLIGHT_SECTION_MEMORY, start, start, size)) {
+            if (!perf_flight_section(fd, state, words, zeros, PERF_FLIGHT_SECTION_MEMORY, start, start, size)) {
                 return false
             }
             total = wrapping(total + size)

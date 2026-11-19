@@ -20,10 +20,11 @@ NativeEvalRefused: struct {
 }
 
 // What compiles an expression for a session (JetCLI DebugCompile.jet): `text`
-// checked before line `line` of the source `path`, compiled with the
+// checked before the node at line `line` and character column `column` of
+// the source `path` (column 0: the line's first node), compiled with the
 // program, or why it can't be.
 NativeEvaluator: trait {
-    compile: fn(self, path: String, line: Int, text: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval NativeEvalRefused!,
+    compile: fn(self, path: String, line: Int, column: Int, text: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval NativeEvalRefused!,
 }
 
 // A value an evaluation passes or returns: a capture by the name of the
@@ -41,13 +42,16 @@ NativeEvalPart: struct {
 // Each capture is passed as the address of its bytes, and the result is
 // stored at `cell`, an aggregate's bytes, else its word. `plan` places it
 // in a fork; it is made at the first evaluation, against the `planned`
-// fixes the program then held.
+// fixes the program then held. `refusal` says why, as a breakpoint's
+// condition, it can't run in the program itself (JetIR EvalPlace.jet), ""
+// when it can (NativePlace.jet).
 NativeEval: struct {
     text: String,
     edit: NativeFixEdit,
     entry: String,
     captures: [NativeEvalPart],
     result: NativeEvalPart,
+    refusal: String{"nothing checked what it writes"},
     plan: NativeFixPlan?{None},
     planned: Int{-1},
 }

@@ -172,7 +172,7 @@ compiler_fs_read_whole: fn(path: I64, align: I64, cells: I64, error: I64) -> I64
             probe: name
             count := I64{0}
             loop {
-                count = host_call(I64{0}, fd, probe, I64{1})
+                count = replay_read(probe, I64{1}, host_call(I64{0}, fd, probe, I64{1}))
                 if (count != I64{-4}) { break }
             }
             if (count <= I64{0}) {
@@ -188,7 +188,7 @@ compiler_fs_read_whole: fn(path: I64, align: I64, cells: I64, error: I64) -> I64
             capacity = grown
             used += I64{1}
         }
-        count: host_call(I64{0}, fd, bytes + used, capacity - used)
+        count: replay_read(bytes + used, capacity - used, host_call(I64{0}, fd, bytes + used, capacity - used))
         if (count == I64{-4}) { next }
         if (count <= I64{0}) {
             failure = count

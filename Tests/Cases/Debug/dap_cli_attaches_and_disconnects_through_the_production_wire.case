@@ -1,29 +1,35 @@
-# tests/debug.rs::dap_cli_attaches_and_disconnects_through_the_production_wire
-# Original real target/DAP wire; PENDING-GRAMMAR(batch-four process state/executable), PENDING-SAME-HEAD.
+# A DAP client attaches to a program already running: the adapter seizes
+# it where it is (the process stops, traced), reports it paused once the
+# client is configured, and lets it run on at `disconnect`. The system lets a
+# process trace only its own children here, so the authorizer lets any
+# process trace the program before it runs it. No other debugger is on PATH.
 requires: os-name:linux
+requires: arch:x86_64
 requires: tool:cc
 fixture: DapCLIAttachesAndDisconnectsThroughTheProductionWire.fixture
 env: NO_COLOR=1
 step: cc authorizer.c -o authorizer
 exit: 0
+step: jet build -O0 main.jet
+exit: 0
+spawn target: {work}/authorizer {work}/.jet/build/main
+await: process {pid:target} executable = {work}/.jet/build/main timeout 5s every 10ms
 session dap content-length: jet debug --dap {work}/main.jet
+env: PATH={work}/no-tools
 send dap: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\"}}"
-await: file {work}/build/main_dbg is-file timeout 30s every 20ms
-await: file {work}/build/main_dbg.jetmap is-file timeout 30s every 20ms
-spawn target: {work}/authorizer {work}/build/main_dbg
-await: process {pid:target} executable = {work}/build/main_dbg timeout 5s every 10ms
-send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"attach\",\"arguments\":{\"processId\":{pid:target},\"program\":\"{work}/build/main_dbg\",\"map\":\"{work}/build/main_dbg.jetmap\"}}"
+send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"attach\",\"arguments\":{\"processId\":{pid:target},\"program\":\"{work}/.jet/build/main\"}}"
 await: process {pid:target} state in ["T","t"] timeout 30s every 20ms
-send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{}}"
+send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{}}"
+send dap: "{\"seq\":4,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{}}"
 close dap
 exit: 0
-stdout: ~ "\"command\":\"attach\"" # original transcript predicate
-stdout: ~ "\"request_seq\":2,\"success\":true,\"command\":\"attach\"" # original transcript predicate
-stdout: ~ "\"command\":\"disconnect\"" # original transcript predicate
-stdout: ~ "\"request_seq\":3,\"success\":true,\"command\":\"disconnect\"" # original transcript predicate
-stdout: !~ "\"success\":false" # original transcript predicate
+stdout: ~ "\"request_seq\":2,\"success\":true,\"command\":\"attach\"" # the attach succeeds
+stdout: ~ "\"event\":\"initialized\"" # and the client may configure the session
+stdout: ~ "\"reason\":\"pause\"" # configured, the program is reported paused where it was taken
+stdout: ~ "\"request_seq\":4,\"success\":true,\"command\":\"disconnect\"" # disconnect detaches
+stdout: !~ "\"success\":false" # no request fails
 process {pid:target}: alive-nonzombie
 await: process {pid:target} state not-in ["T","t"] timeout 2s every 20ms
 signal target: KILL
 wait: target
-exit: any # original target kill status unasserted
+exit: any # the target ends by the case's own KILL

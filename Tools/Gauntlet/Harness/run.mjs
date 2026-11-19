@@ -4781,6 +4781,29 @@ async function dryRun(options, matrix, entriesDir) {
   if (policy.issues.length || invalid.length || missing) process.exitCode = 1;
 }
 
+// `--entry` naming a pair of the canonical manifest's
+// `profile_overhead_pairs` runs that pair's measurement command (its rows
+// print zoned/plain per state and metric) and exits by its verdict.
+async function manifestPair(name) {
+  if (name === null) return null;
+  const manifest = JSON.parse(await fs.readFile(path.join(repoDir, "Tools/Gauntlet/measurement-manifest.json"), "utf8"));
+  return (manifest.profile_overhead_pairs?.pairs ?? []).find((pair) => pair.entry === name) ?? null;
+}
+
+function runManifestPair(pair, options) {
+  const [command, ...words] = pair.command.split(" ");
+  if (command !== "jet") throw new Error(`pair ${pair.id}: its command must start with jet: ${pair.command}`);
+  // The pair builds and runs its arms with the compiler the gauntlet would
+  // (--jet-bin, else JET); with neither, the pair's own default.
+  const given = options.jetBin ?? process.env.JET ?? null;
+  const jet = given === null ? "jet" : path.resolve(process.cwd(), given);
+  const args = [...words, ...(given === null ? [] : ["--jet", jet])];
+  console.log(`pair ${pair.id}: ${pair.zoned} vs ${pair.plain}, states ${pair.states.join(" ")}`);
+  const result = spawnSync(jet, args, { cwd: repoDir, stdio: "inherit" });
+  if (result.error) throw result.error;
+  return result.status ?? 1;
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const matrixPath = path.join(repoDir, "Tools/Gauntlet/matrix.json");
@@ -4788,6 +4811,11 @@ async function main() {
   const matrix = JSON.parse(matrixText);
   const entriesDir = path.resolve(process.cwd(), options.entriesDir ?? path.join(repoDir, "Tools/Gauntlet/Entries"));
   if (options.dryRun) return dryRun(options, matrix, entriesDir);
+  const pair = options.entriesDir === null ? await manifestPair(options.entry) : null;
+  if (pair) {
+    process.exitCode = runManifestPair(pair, options);
+    return;
+  }
   const defaultEntriesDir = path.resolve(path.join(repoDir, "Tools/Gauntlet/Entries"));
   const axisOnly = options.axis !== null;
   // A --languages run measures some rows only; merged into an earlier run's

@@ -84,6 +84,16 @@ X64AllocSite: struct {
     ty: Int,
 }
 
+// A call whose instruction names a call-site row (JetIR BuildCallSites.jet):
+// its return address `at` (an offset in the function's code) and the line
+// and character column of the source node whose lowering made it, which
+// `jet debug` names a caller's frame by (a DW_TAG_call_site, Image/Dwarf.jet).
+X64CallSite: struct {
+    at: Int,
+    line: Int,
+    column: Int,
+}
+
 X64FunctionDebug: struct {
     lines: [X64LineRow],
     body: Int,
@@ -101,6 +111,8 @@ X64FunctionDebug: struct {
     inlines: [X64InlineRange]{[X64InlineRange]{}},
     // The allocating calls (X64AllocSite), by return address.
     allocs: [X64AllocSite]{[X64AllocSite]{}},
+    // The calls with a call-site row (X64CallSite), by return address.
+    calls: [X64CallSite]{[X64CallSite]{}},
 }
 
 // The source types of the debug variables, described by their machine

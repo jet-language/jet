@@ -263,7 +263,7 @@ pipe_read: fn(pipe: I64, maximum: I64, output: I64, len: I64, error: I64) -> I64
             fd_put(fd, I64{56}, wrapping(pos + count))
         } else {
             loop {
-                got: host_call(I64{0}, fd_word(fd, I64{8}), bytes, limit)
+                got: replay_read(bytes, limit, host_call(I64{0}, fd_word(fd, I64{8}), bytes, limit))
                 if (got == I64{-4}) { next }
                 if (got < I64{0}) { failure = got } else { count = got }
                 break

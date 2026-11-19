@@ -5,7 +5,7 @@ use jobs
 // module would give a task handle or a channel endpoint these methods.
 Task: struct<T> {
     id: Int,
-    value: T,
+    _value: T,
 
     join: fn(self) -> String { "program task {self.id} joined" }
 
@@ -15,14 +15,14 @@ Task: struct<T> {
 
 Sender: struct<T> {
     id: Int,
-    value: T,
+    _value: T,
 
     send: fn(self) -> String { "program sender {self.id} sent" }
 }
 
 Receiver: struct<T> {
     id: Int,
-    value: T,
+    _value: T,
 
     receive: fn(self) -> String { "program receiver {self.id} received" }
 }
@@ -32,9 +32,9 @@ Later<T>: Task<T>
 
 Assignment: jobs.Task
 
-make: fn(id: Int) -> Task<Int> { Task<Int>{id: id, value: 0} }
+make: fn(id: Int) -> Task<Int> { Task<Int>{id: id, _value: 0} }
 
-later: fn(id: Int) -> Later<Bool> { Task<Bool>{id: id, value: true} }
+later: fn(id: Int) -> Later<Bool> { Task<Bool>{id: id, _value: true} }
 
 assign: fn(id: Int) -> Assignment { jobs.Task{id: id} }
 
@@ -42,16 +42,16 @@ run: fn() {
     // The program's types keep their own methods, however their values are
     // typed: a literal, a signature, a generic alias, an import and an alias
     // to it.
-    written: Task<String>{id: 1, value: "first"}
+    written: Task<String>{id: 1, _value: "first"}
     print(written.join())
     print(make(2).detach())
     print(later(3).join())
     imported: jobs.Task{id: 4}
     print(imported.join())
     print(assign(5).join())
-    outbox: Sender<Int>{id: 6, value: 0}
+    outbox: Sender<Int>{id: 6, _value: 0}
     print(outbox.send())
-    inbox: Receiver<Int>{id: 7, value: 0}
+    inbox: Receiver<Int>{id: 7, _value: 0}
     print(inbox.receive())
     // Core's handles keep Core's methods beside them, and cross into tasks.
     { sender: results, receiver: arrivals }: channel<Int>()

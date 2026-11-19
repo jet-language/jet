@@ -13,7 +13,7 @@ use {
     jet_driver.[JetDriverCompileMode, JetDriverEvalAsk, JetDriverIceRow, jet_driver_check_failures, jet_driver_entry_root_path]
     jet_eval.[jet_eval_native_add, jet_eval_native_wrapper]
     jet_foundation.[BuildOptions, CompilerThreads, DeepChecks, deep_checks_flags, name_rows_get_text, type_name, type_unqualified_nominals]
-    jet_ir.[IRTypeKind, ir_module_new, ir_pointer_row, ir_x64_compile_module_logged, ir_x64_debug_program]
+    jet_ir.[IRTypeKind, ir_eval_place_refusal, ir_module_new, ir_pointer_row, ir_x64_compile_module_logged, ir_x64_debug_program]
     jet_sema.[SemaEvalProbeAnswer, sema_eval_probe_function, sema_eval_probe_parse]
 }
 
@@ -36,8 +36,8 @@ JetCLIDebugEvaluator: struct {
     color: Bool,
 
     impl NativeEvaluator {
-        compile: fn(self, path: String, line: Int, text: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval NativeEvalRefused! {
-            jet_cli_debug_eval_compile(self.entry, self.argv, self.color, path, line, text)
+        compile: fn(self, path: String, line: Int, column: Int, text: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval NativeEvalRefused! {
+            jet_cli_debug_eval_compile(self.entry, self.argv, self.color, path, line, column, text)
         }
     }
 }
@@ -54,9 +54,10 @@ jet_cli_debug_eval_refused: fn(message: String) -> NativeEvalRefused Never! {
     NativeEvalRefused{message: message}
 }
 
-// The byte offset of the first non-blank byte of line `line` (from 1) of
-// `source`; None past its end.
-jet_cli_debug_eval_offset: fn(source: String, line: Int) -> Int? Never! {
+// The byte offset of character column `column` (from 1) of line `line` (from
+// 1) of `source`, the start of the node a caller's frame stopped at; column
+// 0 is the line's first non-blank byte. None past the source's end.
+jet_cli_debug_eval_offset: fn(source: String, line: Int, column: Int) -> Int? Never! {
     bytes: source.bytes()
     at := 0
     current := 1
@@ -65,19 +66,28 @@ jet_cli_debug_eval_offset: fn(source: String, line: Int) -> Int? Never! {
         if bytes[at] == 10 -> current += 1
         at += 1
     }
-    loop at < bytes.len() && (bytes[at] == 32 || bytes[at] == 9) -> at += 1
+    if column <= 0 {
+        loop at < bytes.len() && (bytes[at] == 32 || bytes[at] == 9) -> at += 1
+        return Val(at)
+    }
+    // Each character starts at a byte that is not a UTF-8 continuation.
+    loop _ in 1..<column {
+        if at >= bytes.len() || bytes[at] == 10 -> return None
+        at += 1
+        loop at < bytes.len() && bytes[at] >= 128 && bytes[at] < 192 -> at += 1
+    }
     Val(at)
 }
 
 // `text` compiled into the program of `entry`, with the flags `argv`, as a
-// function of the locals it reads before line `line` of the source `path`
-// (NativeEval.jet).
-jet_cli_debug_eval_compile: fn(entry: String, argv: [String], color: Bool, path: String, line: Int, text: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval NativeEvalRefused! {
+// function of the locals it reads before the node at `line` and `column` of
+// the source `path` (NativeEval.jet).
+jet_cli_debug_eval_compile: fn(entry: String, argv: [String], color: Bool, path: String, line: Int, column: Int, text: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval NativeEvalRefused! {
     if entry == "" {
         return Err(jet_cli_debug_eval_refused("the debugger has no source of the program to compile it with; debug it as `jet debug <file.jet>`"))
     }
     source: debug_eval_files.read(path) ?? return Err(jet_cli_debug_eval_refused("couldn't read `{path}`: {err}"))
-    offset: jet_cli_debug_eval_offset(source, line) ?? return Err(jet_cli_debug_eval_refused("`{path}` has no line {line} now"))
+    offset: jet_cli_debug_eval_offset(source, line, column) ?? return Err(jet_cli_debug_eval_refused("`{path}` has no line {line} now"))
     parsed: sema_eval_probe_parse(text, offset)
     if parsed.expression == None {
         what: if parsed.diagnostics.len() > 0 -> parsed.diagnostics[0].what else -> "it is not one expression"
@@ -131,6 +141,7 @@ jet_cli_debug_eval_compile: fn(entry: String, argv: [String], color: Bool, path:
             program := built.program.move()
             built.program = ir_module_new()
             row: name_rows_get_text(program.function_rows, key) ?? return Err(jet_cli_debug_eval_refused("the built program has no function for it"))
+            refusal: ir_eval_place_refusal(program, row)
             params := [Int]{}
             captures := [NativeEvalPart]{}
             loop slot in 0..<program.functions[row].param_count {
@@ -158,7 +169,7 @@ jet_cli_debug_eval_compile: fn(entry: String, argv: [String], color: Bool, path:
                 return Err(jet_cli_debug_eval_refused("the compiler couldn't build it"))
             }
             edit: NativeFixEdit{object: lowered.program.move(), functions: lowered.functions.move(), debug: lowered.debug.move()}
-            Ok(NativeEval{text: text, edit: edit, entry: JET_CLI_DEBUG_EVAL_ENTRY, captures: captures, result: part})
+            Ok(NativeEval{text: text, edit: edit, entry: JET_CLI_DEBUG_EVAL_ENTRY, captures: captures, result: part, refusal: refusal})
         }
     }
 }
@@ -207,9 +218,12 @@ debug_eval_path_same: fn(source: String, path: String) -> Bool Never! {
     source == path || source.ends_with("/{path}") || path.ends_with("/{source}")
 }
 
-#Test("an evaluated expression starts at its line's first byte") {
-    assert_eq(jet_cli_debug_eval_offset("a\n    b: 1\n", 2), Val(6))
-    assert_eq(jet_cli_debug_eval_offset("a\n\tb\n", 2), Val(3))
-    assert_eq(jet_cli_debug_eval_offset("a\n", 1), Val(0))
-    assert_eq(jet_cli_debug_eval_offset("a", 3), None)
+#Test("an evaluated expression starts at its line's first byte, or at the call's column") {
+    assert_eq(jet_cli_debug_eval_offset("a\n    b: 1\n", 2, 0), Val(6))
+    assert_eq(jet_cli_debug_eval_offset("a\n\tb\n", 2, 0), Val(3))
+    assert_eq(jet_cli_debug_eval_offset("a\n", 1, 0), Val(0))
+    assert_eq(jet_cli_debug_eval_offset("a", 3, 0), None)
+    assert_eq(jet_cli_debug_eval_offset("a\n    loop v in xs.map(f)\n", 2, 15), Val(16))
+    assert_eq(jet_cli_debug_eval_offset("é = f(x)\n", 1, 5), Val(5))
+    assert_eq(jet_cli_debug_eval_offset("ab\n", 1, 4), None)
 }

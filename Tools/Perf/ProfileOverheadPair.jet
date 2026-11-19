@@ -1,0 +1,337 @@
+#!/usr/bin/env jet
+// The profile-overhead pair in one command: what profiler zones, frame
+// marks and plots cost a program while no profiler records them, and while
+// one does. The pair (Tools/Perf/ProfileOverhead, the manifest's
+// `profile_overhead_pairs` row) is one frame loop twice: Zoned/main.jet
+// opens a zone per frame, marks each frame and plots a value; Plain/main.jet
+// is the same program without them, and both print the same total.
+//
+// Off: both arms built with `--release` at -O1 and at -O2 and run TRIALS
+// times each through the gauntlet's launcher (Tools/Gauntlet/Harness/launch.c),
+// the arms alternating which runs first. Per level and per metric (wall
+// time, user-mode cycles, peak memory) it takes zoned/plain of the upper
+// medians and the shared harness's paired bootstrap interval of that ratio
+// (Tools/Gauntlet/Harness/performance-surface.mjs). Off, a metric is a loss
+// when the interval's lower bound is above 1: zones a profiler is not
+// recording cost the program beyond noise.
+//
+// On: both arms run under `jet run --observe` with JET_PERF_SAMPLES set, as
+// `jet perf run` runs them, so the sampler runs in both and the zoned arm
+// also records its zones. Its wall time is a loss when the interval's lower
+// bound is above ON_BUDGET.
+//
+// The command exits 0 only when no metric is a loss. `--output` writes the
+// receipt as JSON. It is a timed measurement: run it alone, on the reference
+// machine.
+//
+// usage (from the repository root; needs cc unless JET_GAUNTLET_LAUNCHER
+// names a launcher built from launch.c):
+//   jet Tools/Perf/ProfileOverheadPair.jet [--jet PATH] [--n N] [--trials T] [--output FILE]
+// The default compiler is Tools/Agent/JetEnv.jet's `jet`.
+use {
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    regex: core.regex
+    stats: core.math.stats
+    sys: core.sys
+}
+
+PAIR: "Tools/Perf/ProfileOverhead"
+
+LAUNCH: "Tools/Gauntlet/Harness/launch.c"
+
+JET_ENV: "Tools/Agent/JetEnv.jet"
+
+ARMS: [String]{"Zoned", "Plain"}
+
+LEVELS: [String]{"-O1", "-O2"}
+
+// The most a profiler recording the zones may add to the zoned arm's wall
+// time over the plain arm's under the same profiler.
+ON_BUDGET: 1.05
+
+// Each run's argument: about a fifth of a second of frames per run.
+DEFAULT_N: "20000"
+
+// The shared harness's paired trials and bootstrap.
+DEFAULT_TRIALS: "100"
+
+BOOTSTRAP_RESAMPLES: 10000
+
+BOOTSTRAP_SEED: 2977
+
+BOOTSTRAP_LOWER_RANK: 250
+
+BOOTSTRAP_UPPER_RANK: 9750
+
+// One timed run, from the launcher's report.
+Run: struct {
+    wall_ns: Int,
+    cycles: Int,
+    peak_kb: Int,
+}
+
+Metric: struct {
+    zoned_median: Int,
+    plain_median: Int,
+    ratio: Float,
+    lower95: Float,
+    upper95: Float,
+    verdict: String,
+}
+
+// One state of the pair: a level with no profiler (`-O1`, `-O2`) or `on`.
+State: struct {
+    state: String,
+    trials: Int,
+    budget: Float,
+    wall_ns: Metric,
+    cycles_u: Metric?,
+    peak_rss_kb: Metric,
+    zoned_wall_ns: [Int],
+    plain_wall_ns: [Int],
+}
+
+Host: struct {
+    platform: String,
+    release: String,
+    arch: String,
+    cpu_model: String?,
+    cpu_count: Int,
+}
+
+Receipt: struct {
+    schema: String,
+    pair: String,
+    n: Int,
+    states: [State],
+    host: Host,
+    generated_command: String,
+    verdict: String,
+}
+
+fail: fn(message: String) -[Exec, IO]> Never { process.fail(1, "profile-overhead pair: {message}") }
+
+argument: fn(argv: [String], name: String, fallback: String) -> String {
+    loop at in 0..<argv.len() {
+        if argv[at] == name {
+            return if at + 1 < argv.len() -> argv[at + 1].copy() else -> fail("{name} needs a value")
+        }
+    }
+    fallback.copy()
+}
+
+count: fn(text: String, name: String) -> Int {
+    value: Int.parse(text) ?? fail("{name} is not a number: {text}")
+    if value <= 0 -> fail("{name} must be above 0")
+    value
+}
+
+// One arm's source copied into `dir`.
+stage: fn(root: String, arm: Int, dir: String) {
+    files.create_dir_all(dir) ?? fail("{dir}: {err}")
+    source: files.read(files.join(root, "{PAIR}/{ARMS[arm]}/main.jet")) ?? fail("{PAIR}/{ARMS[arm]}/main.jet: {err}")
+    files.write(files.join(dir, "main.jet"), source) ?? fail("{dir}/main.jet: {err}")
+}
+
+// One arm built at one level into `dir`, its binary.
+build: fn(root: String, jet: [String], arm: Int, level: String, dir: String) -> String {
+    stage(root, arm, dir)
+    argv := jet.copy()
+    argv.extend([String]{"build", "--release", level, "main.jet"})
+    built: process.cmd(argv).cwd(dir).run() ?? fail("{argv.join(" ")}: {err}")
+    binary: files.join(dir, ".jet/build/main")
+    if !built.success || !files.exists(binary) {
+        fail("{ARMS[arm]} {level} does not build:\n{built.output}{built.errors}")
+    }
+    binary
+}
+
+// The launcher's report of one run: its `end` line (exit code, wall ns,
+// first stdout ns, peak KiB, user us, system us, exec errno) and its
+// `cycles` line (-1 when the counter could not open).
+run_of: fn(report: String) -> Run {
+    end := [String]{}
+    cycles := -1
+    loop line in report.split("\n") {
+        fields: line.split(" ").to_list()
+        if fields[0] == "end" -> end = fields.copy()
+        if fields[0] == "cycles" && fields.len() == 2 -> cycles = Int.parse(fields[1]) ?? -1
+    }
+    if end.len() != 8 -> fail("the launcher's report has no end line:\n{report}")
+    if end[1] != "0" || end[7] != "0" -> fail("a timed run exited {end[1]} (exec errno {end[7]})")
+    Run{wall_ns: Int.parse(end[2]) ?? fail("wall time {end[2]}"), cycles: cycles, peak_kb: Int.parse(end[4]) ?? fail("peak {end[4]}")}
+}
+
+// One timed run of `argv` in `dir` with `env`, which must print `expected`.
+timed: fn(launch: String, report: String, argv: [String], dir: String, env: [String:String], expected: String) -> Run {
+    words := [String]{launch, report}
+    loop word in argv -> words.push(word.copy())
+    spec := process.cmd(words).cwd(dir)
+    loop (name, value) in env -> spec = spec.env(name, value)
+    ran: spec.run() ?? fail("{argv.join(" ")}: {err}")
+    if ran.output != expected {
+        fail("{argv.join(" ")} printed other output than its pair:\n{ran.output}{ran.errors}")
+    }
+    run_of(files.read(report) ?? fail("{report}: {err}"))
+}
+
+// The shared harness's paired index bootstrap of median(zoned) /
+// median(plain): a 32-bit linear congruential draw seeded with
+// BOOTSTRAP_SEED picks each resample's indices; the bounds are nearest ranks.
+// A loss is a lower bound above `budget`.
+metric: fn(zoned: [Int], plain: [Int], budget: Float) -> Metric {
+    state := BOOTSTRAP_SEED
+    ratios := [Float]{}
+    loop _ in 0..<BOOTSTRAP_RESAMPLES {
+        picked_zoned := [Int]{}
+        picked_plain := [Int]{}
+        loop _ in 0..<zoned.len() {
+            state = (state * 1664525 + 1013904223) %% 4294967296
+            selected: state * zoned.len() /% 4294967296
+            picked_zoned.push(zoned[selected])
+            picked_plain.push(plain[selected])
+        }
+        zoned_median: stats.median_high_int(picked_zoned) ?? fail("no samples")
+        plain_median: stats.median_high_int(picked_plain) ?? fail("no samples")
+        ratios.push(Float.from_int(zoned_median) / Float.from_int(plain_median))
+    }
+    ratios.sort()
+    lower: ratios[BOOTSTRAP_LOWER_RANK - 1]
+    upper: ratios[BOOTSTRAP_UPPER_RANK - 1]
+    zoned_median: stats.median_high_int(zoned) ?? fail("no samples")
+    plain_median: stats.median_high_int(plain) ?? fail("no samples")
+    verdict: if {
+        lower > budget -> "loss"
+        upper < 1.0 -> "win"
+        else -> "even"
+    }
+    Metric{zoned_median: zoned_median, plain_median: plain_median, ratio: Float.from_int(zoned_median) / Float.from_int(plain_median), lower95: lower, upper95: upper, verdict: verdict}
+}
+
+// Both arms in one state, TRIALS paired runs, the zoned arm first on even
+// trials. `zoned` and `plain` are each arm's argv, run in its directory.
+state_of: fn(launch: String, scratch: String, name: String, zoned: [String], zoned_dir: String, plain: [String], plain_dir: String, env: [String:String], trials: Int, budget: Float) -> State {
+    report: files.join(scratch, "report")
+    first := process.cmd(plain).cwd(plain_dir)
+    loop (key, value) in env -> first = first.env(key, value)
+    expected: first.run() ?? fail("{plain.join(" ")}: {err}")
+    if !expected.success -> fail("plain {name} exited {expected.code}:\n{expected.errors}")
+    zoned_runs := [Run]{}
+    plain_runs := [Run]{}
+    loop trial in 0..<trials {
+        if trial %% 2 == 0 {
+            zoned_runs.push(timed(launch, report, zoned, zoned_dir, env, expected.output))
+        }
+        plain_runs.push(timed(launch, report, plain, plain_dir, env, expected.output))
+        if trial %% 2 == 1 {
+            zoned_runs.push(timed(launch, report, zoned, zoned_dir, env, expected.output))
+        }
+    }
+    zoned_wall: zoned_runs.map(fn(run) { run.wall_ns })
+    plain_wall: plain_runs.map(fn(run) { run.wall_ns })
+    counted: zoned_runs.all(fn(run) { run.cycles >= 0 }) && plain_runs.all(fn(run) { run.cycles >= 0 })
+    State{
+        state: name.copy(),
+        trials: trials,
+        budget: budget,
+        wall_ns: metric(zoned_wall, plain_wall, budget),
+        cycles_u: if counted -> Val(metric(zoned_runs.map(fn(run) { run.cycles }), plain_runs.map(fn(run) { run.cycles }), budget)) else -> None,
+        peak_rss_kb: metric(zoned_runs.map(fn(run) { run.peak_kb }), plain_runs.map(fn(run) { run.peak_kb }), budget),
+        zoned_wall_ns: zoned_wall,
+        plain_wall_ns: plain_wall,
+    }
+}
+
+cpu_model: fn() -> String? {
+    found: regex.match(Regex{"model name\s*:\s*(.*)"}, files.read("/proc/cpuinfo") ?? "") ?? return None
+    Val(found.groups[0].copy())
+}
+
+line_of: fn(name: String, metric: Metric) -> String {
+    "{name} zoned {metric.zoned_median} plain {metric.plain_median} ratio {metric.ratio} [{metric.lower95}, {metric.upper95}] {metric.verdict}"
+}
+
+// The launcher JET_GAUNTLET_LAUNCHER names, as the gauntlet's timer takes it,
+// else one built into `scratch` from launch.c with `cc`.
+launcher: fn(root: String, scratch: String) -> String {
+    if sys.get("JET_GAUNTLET_LAUNCHER") == .Val(built) && built != "" -> return built
+    path: files.join(scratch, "launch")
+    cc: process.cmd([String]{"cc", "-O2", "-o", path, files.join(root, LAUNCH)}).run() ?? fail("cannot build the launcher from {LAUNCH}: {err}")
+    if !cc.success -> fail("cannot build the launcher from {LAUNCH}:\n{cc.output}{cc.errors}")
+    path
+}
+
+run: fn() {
+    argv: process.args()
+    root: files.cwd() ?? fail("cannot read the working directory: {err}")
+    if !files.exists(files.join(root, PAIR)) -> fail("run this from the repository root")
+    given: argument(argv, "--jet", "")
+    jet: if given == "" -> [String]{files.join(root, JET_ENV), "jet"} else -> [String]{given}
+    n_text: argument(argv, "--n", DEFAULT_N)
+    n: count(n_text, "--n")
+    trials: count(argument(argv, "--trials", DEFAULT_TRIALS), "--trials")
+    output: argument(argv, "--output", "")
+    scratch_dir: files.temp_dir("profile-overhead-pair") ?? fail("cannot make a scratch directory: {err}")
+    scratch: scratch_dir.path
+    launch: launcher(root, scratch)
+    states := [State]{}
+    loss := false
+    loop level in LEVELS {
+        zoned_dir: files.join(scratch, "zoned{level}")
+        plain_dir: files.join(scratch, "plain{level}")
+        zoned: build(root, jet, 0, level, zoned_dir)
+        plain: build(root, jet, 1, level, plain_dir)
+        states.push(state_of(launch, scratch, level, [String]{zoned, "--n", n_text.copy()}, zoned_dir, [String]{plain, "--n", n_text.copy()}, plain_dir, [String:String]{}, trials, 1.0))
+    }
+    zoned_on: files.join(scratch, "zoned-on")
+    plain_on: files.join(scratch, "plain-on")
+    stage(root, 0, zoned_on)
+    stage(root, 1, plain_on)
+    observed := jet.copy()
+    observed.extend([String]{"run", "--observe", "main.jet", "--", "--n", n_text})
+    samples: [String:String]{"JET_PERF_SAMPLES": files.join(scratch, "on.samples")}
+    states.push(state_of(launch, scratch, "on", observed, zoned_on, observed, plain_on, samples, trials, ON_BUDGET))
+    loop measured in states {
+        print("{measured.state} {line_of("wall_ns", measured.wall_ns)}")
+        if measured.cycles_u == .Val(cycles) {
+            print("{measured.state} {line_of("cycles_u", cycles)}")
+        }
+        print("{measured.state} {line_of("peak_rss_kb", measured.peak_rss_kb)}")
+        if measured.wall_ns.verdict == "loss" || measured.peak_rss_kb.verdict == "loss" {
+            loss = true
+        }
+        if measured.cycles_u == .Val(cycles) && cycles.verdict == "loss" -> loss = true
+    }
+    verdict: if loss -> "fail" else -> "pass"
+    receipt: Receipt{
+        schema: "jet.perf.profile-overhead-pair.v1",
+        pair: PAIR,
+        n: n,
+        states: states,
+        host: Host{platform: sys.name(), release: sys.release(), arch: sys.arch(), cpu_model: cpu_model(), cpu_count: sys.cpu_count()},
+        generated_command: "jet Tools/Perf/ProfileOverheadPair.jet --n {n} --trials {trials}",
+        verdict: verdict.copy(),
+    }
+    if output != "" {
+        files.write(output, "{json.to_string_pretty(receipt) ?? fail("the receipt: {err}")}\n") ?? fail("{output}: {err}")
+    }
+    print("profile-overhead pair: {verdict}")
+    if verdict != "pass" -> process.exit(1)
+}
+
+#Test("a launcher report gives a run's wall time, cycles and peak") {
+    run: run_of("start 12 5\ncycles 900\nend 0 2500 -1 4096 10 2 0\n")
+    assert_eq(run.wall_ns, 2500)
+    assert_eq(run.cycles, 900)
+    assert_eq(run.peak_kb, 4096)
+}
+
+#Test("off, a zoned arm slower in every trial is a loss; on, only past the budget") {
+    plain: loop at in 0..<100 -> 1000 + at %% 7
+    slower: loop at in 0..<100 -> 1030 + at %% 7
+    assert_eq(metric(slower, plain, 1.0).verdict, "loss")
+    assert_eq(metric(slower, plain, ON_BUDGET).verdict, "even")
+    assert_eq(metric(plain, plain, 1.0).verdict, "even")
+}

@@ -1,10 +1,11 @@
 // Native Shared<NativeValue>. The policy:
 // concurrent readers, exclusive writer, waiting writers precede new readers.
 // Recursive acquisition has no special exception: it blocks.
-// Cell96: packed refs0 (low32 logical owners, high32 physical pins), mutex8,
+// Cell104: packed refs0 (low32 logical owners, high32 physical pins), mutex8,
 // condition sequence16, readers24, writer32, writers-waiting40, revision48,
 // owned descriptor56, payload64, lifetime physical borrows72 (even suspended),
-// monomorphized payload drop function80, weak refs88. The collective weak is
+// monomorphized payload drop function80, weak refs88, replay id96
+// (RecordReplay.jet). The collective weak is
 // retained until both halves of refs0 reach zero; pins alone never upgrade.
 // writer is 0 while no edit permit is held, else the holding task's control,
 // retained until the release (WaitCycle.jet wait_cycle_writer), or 1 for a
@@ -93,7 +94,25 @@ shared_acquire_checked: fn(shared: I64, editable: Bool) -> Bool {
 // When `checked`, a task's unbounded unshielded block arms its wait, and a
 // deadlock delivered to it withdraws the same way, stops the task and
 // answers false.
+// Under `jet run --record` the permit taken or given up is a sync event,
+// logged under the value's mutex; under `jet debug --replay` the acquire
+// waits for its recorded turn and a recorded give-up gives up at once
+// (RecordReplay.jet).
 shared_acquire_until: fn(shared: I64, editable: Bool, deadline_ns: I64, checked: Bool) -> Bool {
+    family: if editable -> REPLAY_EDIT else -> REPLAY_READ
+    object: sync_load(wrapping(shared + I64{96}))
+    ticket: replay_take(family, object)
+    if (ticket == family + REPLAY_FAILED) {
+        replay_give(ticket)
+        return false
+    }
+    taken: shared_acquire_wait(shared, editable, deadline_ns, checked, object)
+    replay_give(ticket)
+    taken
+}
+
+shared_acquire_wait: fn(shared: I64, editable: Bool, deadline_ns: I64, checked: Bool, object: I64) -> Bool {
+    family: if editable -> REPLAY_EDIT else -> REPLAY_READ
     mutex: wrapping(shared + I64{8})
     sync_mutex_lock(mutex)
     if editable -> _ := sync_add(wrapping(shared + I64{40}), I64{1})
@@ -111,6 +130,7 @@ shared_acquire_until: fn(shared: I64, editable: Bool, deadline_ns: I64, checked:
                 }
                 else -> { _ := sync_add(wrapping(shared + I64{24}), I64{1}) }
             }
+            replay_log(family, object)
             sync_mutex_unlock(mutex)
             if armed -> wait_cycle_leave(cycle)
             perf_samples_lock_wait(wrapping(shared + I64{16}), began)
@@ -123,6 +143,7 @@ shared_acquire_until: fn(shared: I64, editable: Bool, deadline_ns: I64, checked:
                 at = perf_samples_lock_release()
                 sync_cond_notify_all(wrapping(shared + I64{16}))
             }
+            replay_log(family + REPLAY_FAILED, object)
             sync_mutex_unlock(mutex)
             perf_samples_lock_wait(wrapping(shared + I64{16}), began)
             if (at != I64{0}) { perf_samples_wake(wrapping(shared + I64{16}), at, I64{-1}) }
@@ -137,6 +158,7 @@ shared_acquire_until: fn(shared: I64, editable: Bool, deadline_ns: I64, checked:
                 at = perf_samples_lock_release()
                 sync_cond_notify_all(wrapping(shared + I64{16}))
             }
+            replay_log(family + REPLAY_FAILED, object)
             sync_mutex_unlock(mutex)
             perf_samples_lock_wait(wrapping(shared + I64{16}), began)
             if (at != I64{0}) { perf_samples_wake(wrapping(shared + I64{16}), at, I64{-1}) }
@@ -191,8 +213,8 @@ shared_revision_stop: fn() {
 }
 
 #Export(c) jet_rt_native_shared_new: fn(slot: I64, meta: I64, drop_code: I64) -> I64 {
-    shared: jet_rt_alloc(I64{96}, I64{8})
-    thread_zero(shared, I64{96})
+    shared: jet_rt_alloc(I64{104}, I64{8})
+    thread_zero(shared, I64{104})
     owned_meta: coll_meta_copy(meta)
     payload: coll_slot_new(owned_meta)
     coll_copy(slot, payload, coll_payload(owned_meta))
@@ -201,6 +223,7 @@ shared_revision_stop: fn() {
     sync_store(wrapping(shared + I64{64}), payload)
     sync_store(wrapping(shared + I64{80}), drop_code)
     sync_store(wrapping(shared + I64{88}), I64{1})
+    sync_store(wrapping(shared + I64{96}), replay_object_new())
     shared
 }
 
@@ -514,7 +537,7 @@ shared_weak_release: fn(weak: I64) {
     // sync_add is Linux's lock xadd; its full fence releases prior destruction
     // and acquires preceding weak retirements before the last cell free.
     if (sync_add(wrapping(weak + I64{88}), I64{-1}) == I64{1}) {
-        jet_rt_free(weak, I64{96}, I64{8})
+        jet_rt_free(weak, I64{104}, I64{8})
     }
 }
 

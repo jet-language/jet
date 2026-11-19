@@ -341,8 +341,10 @@ IRFunction: struct {
     a: [Int],
     b: [Int],
     c: [Int],
-    // Each instruction's source line; from bit 32 up, the inline site it
-    // came from (ir_code_line_site; 0: the function's own code).
+    // Each instruction's source line (below IR_CODE_LINE_CALL); from bit 24
+    // up, the call-site row of a call (ir_code_line_call; 0: none); from bit
+    // 44 up, the inline site it came from (ir_code_line_site; 0: the
+    // function's own code).
     code_line: [Int],
     args: [Int],
     // Open structured-control instructions while building (indexes into `op`).
@@ -368,6 +370,12 @@ IRFunction: struct {
     // it sits in (0: the function's own code) and the source line of the
     // call there. Site s (from 1) starts at word 3s - 3.
     inline_sites: [Int]{[Int]{}},
+    // The call sites of the body (BuildCallSites.jet), IR_CALL_SITE_WORDS
+    // words each: the source line and the character column of the source
+    // node whose lowering made the call. Row r (from 1) starts at word 2r - 2;
+    // a call names its row in its code line (ir_code_line_call). Inlining
+    // keeps the caller's rows and drops the callee's.
+    call_sites: [Int]{[Int]{}},
     // Per slot, whether it holds a `timing: .Fixed` value: the builder marks
     // each scalar slot whose checked type carries a fixed tag
     // (BuildMask.jet ir_fix_slot), a pass that copies a slot copies its bit,
@@ -473,13 +481,17 @@ ir_masked_branch_rows: fn(m: IRModule) -> [String] Never! {
 }
 
 // An assembled `#FFI(asm)` template: its bytes, the register operand i is
-// bound to (`regs[i]`), the register holding its result (-1 for none), and
-// whether it keeps r8 and r9 (JetBackend X64AsmResult.quiet).
+// bound to (`regs[i]`), the register holding its result (-1 for none),
+// whether it keeps r8 and r9 (JetBackend X64AsmResult.quiet), and per
+// `syscall` it makes the number and second argument it passes, two words
+// each (X64AsmResult.syscalls: a constant, an operand, or unknown), which
+// the eval link's syscall check reads (EvalLink.jet).
 IRAsmLeaf: struct {
     code: [U8],
     regs: [Int],
     result: Int,
     quiet: Bool{false},
+    syscalls: [Int]{[Int]{}},
 }
 
 // A word of a static object (IRModule.data_relocs) that holds an address:
@@ -816,8 +828,15 @@ ir_emit: fn(f: &IRFunction, op: IROp, dst: Int, a: Int, b: Int, c: Int, line: In
     at
 }
 
-// Code line bit 32 (IRFunction.code_line): the inline site starts there.
-IR_CODE_LINE_SITE: 4294967296
+// Code line bit 24 (IRFunction.code_line): a call's call-site row starts
+// there, so a source line is below it.
+IR_CODE_LINE_CALL: 16777216
+
+// Code line bit 44 (IRFunction.code_line): the inline site starts there.
+IR_CODE_LINE_SITE: 17592186044416
+
+// The words of one call-site row in IRFunction.call_sites.
+IR_CALL_SITE_WORDS: 2
 
 // The words of one inline site in IRFunction.inline_sites.
 IR_INLINE_SITE_WORDS: 3
@@ -828,9 +847,16 @@ ir_inline_site_parent: fn(f: IRFunction, site: Int) -> Int Never! {
     f.inline_sites[IR_INLINE_SITE_WORDS * (site - 1) + 1]
 }
 
-// The source line of code line `line`, without its inline site.
+// The source line of code line `line`, without its call-site row and inline
+// site.
 ir_code_line_source: fn(line: Int) -> Int Never! {
-    if line >= IR_CODE_LINE_SITE -> line %% IR_CODE_LINE_SITE else -> line
+    if line >= IR_CODE_LINE_CALL -> line %% IR_CODE_LINE_CALL else -> line
+}
+
+// The call-site row of code line `line` (IRFunction.call_sites, from 1), 0
+// when it names none.
+ir_code_line_call: fn(line: Int) -> Int Never! {
+    if line >= IR_CODE_LINE_CALL -> (line %% IR_CODE_LINE_SITE) /% IR_CODE_LINE_CALL else -> 0
 }
 
 // The inline site of code line `line` (IRFunction.inline_sites), 0 for the
@@ -839,8 +865,8 @@ ir_code_line_site: fn(line: Int) -> Int Never! {
     if line >= IR_CODE_LINE_SITE -> line /% IR_CODE_LINE_SITE else -> 0
 }
 
-// Code line `line`'s source line at inline site `site`. A line below 0
-// names no source line and takes no site.
+// Code line `line`'s source line at inline site `site`, without a call-site
+// row. A line below 0 names no source line and takes no site.
 ir_code_line_at: fn(line: Int, site: Int) -> Int Never! {
     source: ir_code_line_source(line)
     if source < 0 -> source else -> source + site * IR_CODE_LINE_SITE
