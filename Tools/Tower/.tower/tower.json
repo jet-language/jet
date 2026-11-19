@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112326,
+    "rev": 112350,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75690,6 +75690,46 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-19",
+          "by": "Main",
+          "text": "c45/c66 eval design (Main decision from Lens findings): profile at 20000 functions: one print = two full front ends (probe check, then the check with the expression appended), sema.effects 17.2 s of 19.9 s each (quadratic; fixed by Lens-6841-sema-effects-linear, front end to ~2.3 s). A held-state print that re-checks the stop function still costs ~1.5 s when the stop is in a 20000-statement function, so it cannot meet 100/250 ms. Chosen: the print re-checks no program function. Its free names resolve to the stop function binders held from the session check (checked type and span); one function `jet_debug_expression(captures) -[]> Unit { jet_debug_store(<expr>) }` is checked against the held registration and lowered alone. It falls back to the probe path when a captured binder is moved, shared or out of scope anywhere it could be at the stop (I1), when a capture type is generic, or when the held state is absent. The --trace output names the path taken. Owner: Lens."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
+          "text": "c6 root, part 2 (Main, objdump of the gate-p305 -O2 ProfileOverhead arms): the plain arm runs under a program-owned main (EntryOwned.jet ir_entry_own: host startup, jet_rt_main_owned_start, the entry), while any core.perf use keeps the process root (main calls jet_rt_main), because jet_perf_zone_open/close, jet_perf_frame and jet_perf_plot are not in IR_ROOT_FREE_ROUTES. The root links +18.5 KB of scheduler-root code (jet_rt_main, deadline parse, world_now, stop polls, root publish, env index) and runs it at startup, so more 64 KiB text windows fault in: with env -i, the zoned image has 172/172 KB text resident against the plain image 108/148. Just listing the perf routes as root-free would drop attach: only jet_rt_main runs the observation start (Main.jet observe_start_code), which opens the flight ring that jet perf attach needs. Fix design: an owned main whose module links observation calls the observation start itself (x64_object_main, after jet_rt_main_owned_start), and the perf routes join the root-free set (their off paths read only perf_zones_on; their on paths write rows and need no root). Proof: profile-overhead pair peak_rss_kb even, plus Perf/attach_turns_zones_on and the zone cases unchanged. The -O1 wall +2.4% is to be rechecked after it, since the root also adds stop polls to every loop."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
+          "text": "c6 measured on p305 (node Tools/Gauntlet/Harness/run.mjs --entry profile-overhead, 01:50-01:53): profile-overhead pair FAIL. -O1 wall 1.024 [1.017,1.032] loss, cycles_u 1.013 loss, peak_rss_kb 356/264 = 1.348 loss; -O2 wall 0.985 win, cycles_u 0.969 win, peak_rss 1.348 loss; on: wall 1.010, cycles 1.013, rss 1.005 (all even). Root of the RSS loss (Main, gate-p305 -O2 arms, launcher peak and /proc smaps): the excess is present with --n 0 (no perf call runs), so it is startup and image, not zone sites. (1) ~60 KB: any program that links observation (a core.perf use) runs jet_rt_observe_runtime_start_from_env, whose jet_rt_logical_env_get seeded the logical environment, a copy of every startup pair (25 KB environment here; env -i removes it). Fix queued: Main-6841-c6-env-read-unseeded (a read of one name before the first write answers from the startup index). (2) ~36 KB: file-backed image residency. Fault-around maps whole 64 KiB windows of a cached image, so resident text equals text size in both arms (plain 148 KB, zoned 180 KB, +4 KB rodata); the zoned image carries the zone runtime, observation start, sampler and flight recorder. Plan: place code reachable only from observation-on paths in a cold region aligned past the executed windows (a general linker mechanism that also suits panic and report paths); the startup check stays hot. -O1 wall +2.4% is to be profiled after (1)+(2)."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
+          "text": "DebugLatency on the p305 batch compiler (dev 659533f268), `jet run Tools/Perf/DebugLatency/Main.jet -- --functions 20000 --runs 5` with the c45 eval rows (Main-6841-c45-latency-eval-rows, queued), 120004 lines, median of 5, ms jet_debug/lldb 21.1.8: build 20254, first_stop 266/210, per_step 1077/2, print_place within lldb+10 (met), print_first 39201 (bar 250), print_again 39208/5 (bar 2x lldb), second_eval 40854 (bar 100), watch_per_stop 766 (lldb watchpoint set variable fails on the Jet image). c59, c45 latency and c66 missed. Ranked: eval compile (~39 s per print, Lens: session-resident checked program) and per_step (~1 s, IfHole: index once per session) are the two largest gaps on the card; c65 parked behind c59."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
+          "text": "c65 decision (Main): the precise branch is provable on this host (Ryzen 9 7950X3D, kernel 7.2.8, perf_event_paranoid=2). IfHole probe: ibs_op (type 11) per thread with exclude_kernel=1 and config2 bit 0 (sysfs format swfilt, the kernel software privilege filter) opens and gives about 2590 user-IP samples in 0.3 s; ibs_fetch the same. ibs_op user-only without swfilt gives EINVAL; with no exclude gives EACCES; cycles precise_ip=1/2 gives EINVAL (AMD forwards them to IBS without swfilt); precise_ip=3 gives EOPNOTSUPP. Reading of the criterion: \"perf_event_paranoid at most 1\" is met where the kernel permits a user-only precise event, as IBS swfilt does at paranoid 2. Design: try ibs_op swfilt in cycle-count mode, then cycles precise_ip=2 (PEBS), then the CPU-time timer signal; one per-thread mechanism and one sample record; the perf receipt sampling object names the pc source and each refusal errno. Owner: IfHole."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
+          "text": "c51 decision (Main, 01:4x): the crash-dump budget stays 32 MiB (PERF_FLIGHT_DUMP_BUDGET) of memory the stop reaches; the image the dump holds is outside it. Debug/crash_dump_keeps_its_budget took its image reference from `jet build big.jet` (130 KB), but a `jet run --observe` dump holds the run image (52.8 MB, with precompiled Core). The case is corrected to compare against the run image, which the dump itself states (image, memory and record bytes); no `jet build` size reference. Owner: IfHole (IfHole-6-1-c51-dump-budget-run-image)."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
+          "text": "c3 decision (Main): the \"meta.events call timings to a sink\" part, merged from #4632 c7, is read as the build handler that meta.events drives (#perf.Profiled / #Zoned) wrapping each function body in a core.perf zone. Each call is one timed zone row in the run trace, the sink that jet perf view totals per function name. A core.log span is not the sink: it needs the Log effect, which the effect-free functions being instrumented do not have. #4632 c7 had no proof case on dev (no profiled_marker_sends_call_timings). c3 root fix queued as Main-6841-c3-rewritten-run-entry: sema and the driver find the entry `run` in the meta.rewrite_body module that replaced it. Before the fix, the #Zoned example failed its check with E0101. With it, the example prints 715 (golden added). After it lands, c3 evidence = the golden on O0/O1/O2 plus a jet perf run/view of the example listing zone rows for collide/step/run. Also queued Main-6841-c45-latency-eval-rows: Tools/Perf/DebugLatency rows print_place, print_first, print_again, second_eval and watch_per_stop against lldb, with the 8.2/c59/c66 bar verdicts. Smoke on gate-p304 (20 functions, 1 run, under cycle load, so noisy): jet first_stop 16 ms vs lldb 493, per_step 0 vs 56, print_first 235-390 ms (bar 250), print_again 781-914 ms (no reuse across stops), second_eval 275 ms (c66 bar 100). lldb 21.1.8 is from the nix store; lldb `watchpoint set variable total` errors on the Jet image. The full measurement waits for the heavy slot."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
+          "text": "c66 baseline (Lens, p301 jet, 20000-function DebugLatency-shaped program): jet check 19.5 s, build -O0 20.4 s, --dead-code=keep 21.4 s; each print runs two whole-program compiles (probe then build), about 40 s against the 100 ms bound. Plan, built after c62/c63/c64: (1) one compile per print; (2) the session keeps the checked program and sema checks one probe function against it; (3) lower and place only the reached functions."
+        },
+        {
           "at": "2026-11-18",
           "by": "Main",
           "text": "Owner ratified D-DBG-DEADLOCK1, D-DBG-VERBS1, D-OBSERVE-FLIGHT1, D-PERF-CAUSAL1, D-PERF-HEAP1, D-PERF-TOPDOWN1, D-PERF-ZONES1, D-TIMETRAVEL3 (2026-11-18). Lens moves off NameWins to this card: c56(a), then c49, c48, c51, c47, c52, c43, c57, c55. D-DBG-UI1 r2 (Canvas native or in a browser) awaits the vote; D-PERF-COMPARE1 is drafted and in recheck."
@@ -75773,11 +75813,11 @@
         {
           "n": 3,
           "text": "A user-written compile-time program instruments every function of a package with profiling spans through reflection and compiler events, with no change to the profiled source. It produces a jet perf view, and the instrumented program prints the same output on O0, O1 and O2. The instrumentation also sends meta.events call timings to a sink (merged from #4632 c7). Proof: `jet test Compiler --profile golden --filter Tooling/Performance/InstrumentEveryFunction` passes on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T11:38:17.304Z"
+          "evidence": "Gate p306 (dev c16749e714, batch compiler = census build; full collect-all suite 02:12-02:27, suite-p306/{golden,cases}.out): PASS Examples/Tooling/Performance/InstrumentEveryFunction/run.jet o0, o1 and o2 (jet test Compiler --profile golden --filter Tooling/Performance/InstrumentEveryFunction). Fixed by 59f1d119a9 (a meta.rewrite_body of the entry file's run holds the entry).",
+          "at": "2026-11-19T07:30:11.716Z"
         },
         {
           "n": 4,
@@ -76126,11 +76166,11 @@
         {
           "n": 36,
           "text": "jet debug covers the everyday debugger workflow natively, in the (Jet) console and over DAP: breakpoints by file:line and by function, conditional breakpoints and logpoints, step in, over and out, finish, backtrace, frame select, print and watch expressions, and attach to a running PID the user owns. Proof: one Debug case per command, each running jet debug with no other debugger on PATH.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T07:54:46.603Z"
+          "evidence": "p304 batch compiler (dev 07f05f5ef8), suite-p304 cases.out: every command has a PASS Debug case run with env PATH={work}/no-tools (no other debugger on PATH). break file:line: break_then_continue_stops_at_breakpoint; break by function: break_by_function_stops_in_it; conditional breakpoints + logpoints: console_breakpoints_take_conditions_and_logs (console) and dap_cli_conditions_logpoints_and_evaluate (DAP); step in + backtrace: step_into_call_and_backtrace; step over: next_steps_over; step out/finish: finish_returns_to_caller; DAP step over/into/out: dap_cli_steps_over_and_into_with_typed_variables, dap_cli_selects_a_caller_frame; frame select: console_breakpoints_take_conditions_and_logs (frame 1, up, down) and dap_cli_selects_a_caller_frame; print: console_breakpoints_take_conditions_and_logs (print i); watch: watch_stops_at_the_changing_write; attach to an owned PID: debug_attaches_to_a_running_program (console) and dap_cli_attaches_and_disconnects_through_the_production_wire (DAP).",
+          "at": "2026-11-19T05:54:46.552Z"
         },
         {
           "n": 37,
@@ -76240,11 +76280,11 @@
         {
           "n": 48,
           "text": "Deadlock stop: When the last task in a wait cycle (channels, locks, joins) blocks, the program stops with a diagnostic naming every task in the cycle, its wait and its line; a partial cycle is found while other tasks still run. Proof: `jet test Compiler --profile cases --filter Tasks/wait_cycle_stops_with_the_cycle`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R6)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T14:10:13.096Z",
+          "evidence": "p305 batch compiler (dev 659533f268): suite-p305 cases.out PASS Tests/Cases/Tasks/wait_cycle_stops_with_the_cycle.case (fixed in p305 by Main-6841-c48-cycle-labels 3a58cbddf7 over IfHole c48-s2-channel-cycles.r3 92f94377f6).",
+          "at": "2026-11-19T06:17:58.709Z",
           "unblockedFrom": "D-DBG-DEADLOCK1"
         },
         {
@@ -76260,11 +76300,11 @@
         {
           "n": 50,
           "text": "Visualizers that never run in the target: A type's `debug_view` renders in `jet debug`, over DAP, in a crash dump and in a replay without running code in the target: R3's path builds it and runs it in a fork of the stopped program, or of the dump's or the replay's process. Built only after c40 is met. Proof: `jet test Compiler --profile cases --filter Debug/debug_view_renders_without_running_the_target`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R8)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T14:10:17.838Z"
+          "evidence": "jet test Compiler --profile cases --filter Debug/debug_view_renders_without_running_the_target: PASS on the p302 batch compiler (census build of dev 7b305b7138), 2026-11-19 00:05.",
+          "at": "2026-11-19T04:56:28.333Z"
         },
         {
           "n": 51,
@@ -76279,11 +76319,11 @@
         {
           "n": 52,
           "text": "Typed heap snapshots: Under `--lens=alloc`, a heap snapshot taken at exit, at a `perf.heap_mark` or on attach names each live block's type and allocation line; `jet perf compare` diffs two snapshots by type and line; `jet perf view --retained-by` shows a block's shortest retention path from a root. Proof: `jet test Compiler --profile cases --filter Perf/heap_snapshot_types_retention_and_diff`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R10)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T14:10:24.178Z",
+          "evidence": "dev 1b276fc602 (p304 batch compiler, census build of 07f05f5ef8): `jet test Compiler --profile cases --filter Perf/heap_snapshot_types_retention_and_diff` n=1 bad=0 (cycle-p304 proof apcallsite-1); suite-p304 fixed.txt lists it.",
+          "at": "2026-11-19T05:46:25.765Z",
           "unblockedFrom": "D-PERF-HEAP1"
         },
         {
@@ -76298,11 +76338,11 @@
         {
           "n": 54,
           "text": "Native hot patch: Under `jet debug`, the fix command swaps an edited function into the running native process at its next call; a layout change migrates by D-HOTSTATE1=A's rules or is refused naming the field. Extends #6919 c5 to the native tier. Proof: `jet test Compiler --profile cases --filter Debug/fix_swaps_function_in_native_process`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R12)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T14:10:28.891Z",
+          "evidence": "p305 batch compiler (dev 659533f268): suite-p305 cases.out PASS Tests/Cases/Debug/fix_swaps_function_in_native_process.case (the runtime-kept image 4dfe1e4c3d, the layout refusal naming the struct as Jet spells it 5d076af46c).",
+          "at": "2026-11-19T06:17:59.595Z",
           "unblockedFrom": "D-DBG-VERBS1"
         },
         {
@@ -76327,11 +76367,11 @@
         {
           "n": 57,
           "text": "Top-down counters: `--lens=topdown` reports TMA levels 1 and 2 per function and line on supported x86 cores, on the memory lens's counter path, and \"unavailable\" with a reason elsewhere (as c16). Proof: `jet test Compiler --profile cases --filter PerfRun/topdown_levels_per_function`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R15)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T14:10:36.789Z",
+          "evidence": "p305 batch compiler (dev 659533f268): suite-p305 cases.out PASS Tests/Cases/PerfRun/topdown_levels_per_function.case (Main-6841-c57-topdown-run-image 8063851e83). The unavailable-with-a-reason half: PerfRun/topdown_unavailable_names_the_refusal PASS on gate-p305 with Main-6841-c43-case-reasons.r2 applied (the case was REFUSED only for missing partial reasons).",
+          "at": "2026-11-19T06:18:00.471Z",
           "unblockedFrom": "D-PERF-TOPDOWN1"
         },
         {
@@ -76352,6 +76392,110 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-18T23:18:18.461Z"
+        },
+        {
+          "n": 60,
+          "text": "c39 G4, a fallible call shows Ok or Err: in jet debug, `print parse(s)` of a function that can fail evaluates to `Ok(3)` or `Err(…)` (rendered as `locals` shows a Result) instead of a refusal. (Docs/Audits/2026-11-19-debug-profile-best-in-existence.md G4)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-19T04:04:12.875Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Debug/print_a_fallible_call_shows_ok_or_err"
+          }
+        },
+        {
+          "n": 61,
+          "text": "c39 G6, evaluation in an inlined frame: `print n + 1` in an -O2 inlined frame answers as it does at O0. (audit G6)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-19T04:04:15.838Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Debug/print_in_an_inlined_frame"
+          }
+        },
+        {
+          "n": 62,
+          "text": "c39 G8, a watch follows reallocation: `watch xs[3]` keeps stopping at the changing write after `xs` grows past its capacity and moves. (audit G8)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-19T04:04:16.894Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Debug/watch_follows_a_reallocated_list"
+          }
+        },
+        {
+          "n": 63,
+          "text": "c39 G10, placed logpoints: a logpoint whose message R7 scan places runs in the program, and a million hits finish in under a second; one it cannot place says so when set. (audit G10)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-19T04:04:17.956Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Debug/placed_logpoint_runs_in_the_program"
+          }
+        },
+        {
+          "n": 64,
+          "text": "c39 G14, DAP attach, pause and restart: the four #6730 known-failing DAP rows pass on the native tier, with no known-failing mark. (audit G14)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-19T04:04:18.976Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Debug/dap_cli_"
+          }
+        },
+        {
+          "n": 65,
+          "text": "c39 G17, precise PC: under `--lens=cpu` with PEBS or IBS available and perf_event_paranoid at most 1, samples are charged by the precise PC and the receipt says so; elsewhere the receipt names the skid source. (audit G17)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-19T04:04:21.860Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "PerfRun/cpu_lens_precise_pc"
+          }
+        },
+        {
+          "n": 66,
+          "text": "c39 G5, second-evaluation latency: a second `print` of a new expression in the same stopped function answers in under 100 ms on a JetCLI-sized image; the case states the measured time and its bound. Measured by `jet run Tools/Perf/DebugLatency/Main.jet -- --functions 20000 --runs 5` second_eval as well. (audit G5)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-19T04:04:34.808Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Debug/second_print_answers_under_100ms"
+          }
+        },
+        {
+          "n": 67,
+          "text": "c39 G16, a stable overhead receipt: `Perf/receipt_reports_measured_overhead` passes in three consecutive gate full suites under suite load (suite-pNNN cases.out), not only alone. (audit G16)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Perf/receipt_reports_measured_overhead PASS in three consecutive gate full suites under suite load: suite-p303, suite-p304, suite-p305 cases.out (dev 659533f268 for p305). Disclosure: p303 and p304 ran with the runtime sample signal timed on the monotonic clock (0a2dce0b27 had reverted aa6ecd6535 by accident); p305 ran with the CPU-clock timing restored (a5ca9ecd3f), so the receipt held under both timings.",
+          "at": "2026-11-19T06:22:37.331Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Perf/receipt_reports_measured_overhead"
+          }
         }
       ],
       "refs": [],
@@ -76359,9 +76503,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-19T04:02:15.652Z",
+      "updated": "2026-11-19T07:30:11.716Z",
       "updatedBy": "Main",
-      "criteriaLastN": 59
+      "criteriaLastN": 67
     },
     {
       "id": "c0in2dft",
@@ -161109,6 +161253,230 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-19T07:30:11.716Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-19T07:10:08.852Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T07:08:42.629Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T07:02:59.381Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T06:51:12.026Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T06:49:44.634Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T06:43:12.677Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T06:22:37.331Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#67"
+    },
+    {
+      "at": "2026-11-19T06:18:00.471Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#57"
+    },
+    {
+      "at": "2026-11-19T06:17:59.595Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#54"
+    },
+    {
+      "at": "2026-11-19T06:17:58.710Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#48"
+    },
+    {
+      "at": "2026-11-19T06:01:04.184Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T05:54:46.552Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#36"
+    },
+    {
+      "at": "2026-11-19T05:46:25.765Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#52"
+    },
+    {
+      "at": "2026-11-19T04:56:28.333Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#50"
+    },
+    {
+      "at": "2026-11-19T04:49:42.545Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T04:04:35.759Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "67 criteria, soft limit 6: c39 review gaps belong on #6841"
+    },
+    {
+      "at": "2026-11-19T04:04:35.759Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#67 c39 G16, a stable overhead receipt: `Perf/receipt_reports_me"
+    },
+    {
+      "at": "2026-11-19T04:04:34.808Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "66 criteria, soft limit 6: c39 review gaps belong on #6841"
+    },
+    {
+      "at": "2026-11-19T04:04:34.808Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#66 c39 G5, second-evaluation latency: a second `print` of a new"
+    },
+    {
+      "at": "2026-11-19T04:04:21.860Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "65 criteria, soft limit 6: c39 review gaps belong on #6841 (its c39 terms)"
+    },
+    {
+      "at": "2026-11-19T04:04:21.860Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#65 c39 G17, precise PC: under `--lens=cpu` with PEBS or IBS ava"
+    },
+    {
+      "at": "2026-11-19T04:04:18.976Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "64 criteria, soft limit 6: c39 review gaps belong on #6841 (its c39 terms)"
+    },
+    {
+      "at": "2026-11-19T04:04:18.976Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#64 c39 G14, DAP attach, pause and restart: the four #6730 known"
+    },
+    {
+      "at": "2026-11-19T04:04:17.956Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "63 criteria, soft limit 6: c39 review gaps belong on #6841 (its c39 terms)"
+    },
+    {
+      "at": "2026-11-19T04:04:17.956Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#63 c39 G10, placed logpoints: a logpoint whose message R7 scan "
+    },
+    {
+      "at": "2026-11-19T04:04:16.894Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "62 criteria, soft limit 6: c39 review gaps belong on #6841 (its c39 terms)"
+    },
+    {
+      "at": "2026-11-19T04:04:16.894Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#62 c39 G8, a watch follows reallocation: `watch xs[3]` keeps st"
+    },
+    {
+      "at": "2026-11-19T04:04:15.838Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "61 criteria, soft limit 6: c39 review gaps belong on #6841 (its c39 terms)"
+    },
+    {
+      "at": "2026-11-19T04:04:15.838Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#61 c39 G6, evaluation in an inlined frame: `print n + 1` in an "
+    },
+    {
+      "at": "2026-11-19T04:04:12.875Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "60 criteria, soft limit 6: c39 review gaps belong on #6841 (its c39 terms)"
+    },
+    {
+      "at": "2026-11-19T04:04:12.875Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#60 c39 G4, a fallible call shows Ok or Err: in jet debug, `prin"
+    },
     {
       "at": "2026-11-19T04:02:15.652Z",
       "by": "Main",
