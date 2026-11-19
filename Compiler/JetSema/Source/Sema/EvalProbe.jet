@@ -25,6 +25,7 @@ use {
         NameRows,
         NamedSpan,
         Span,
+        Stmt,
         TCapture,
         TEffectFacts,
         TEffectSpan,
@@ -33,6 +34,7 @@ use {
         ast_empty_lambda_meta,
         authority_grantable_roots,
         expr_span,
+        result_surface_name,
         type_name,
         type_unqualified_nominals,
     ]
@@ -116,8 +118,10 @@ SEMA_EVAL_PROBE_SELF: "jet_debug_self"
 // `text`, as `answer` checked it at the stop, for `jet debug` to compile into
 // the program (JetCLI DebugCompile.jet): each capture is a parameter, in
 // capture order, typed by its checked type with every nominal unqualified,
-// and the expression's type is the result. The text's own `self` reads the
-// parameter SEMA_EVAL_PROBE_SELF. None for an expression with no value.
+// and the expression's type is the result, declared `Never!`: a call the
+// failure solve finds can fail is refused there, never shown as a value of
+// the success type. The text's own `self` reads the parameter
+// SEMA_EVAL_PROBE_SELF. None for an expression with no value.
 sema_eval_probe_function: fn(answer: SemaEvalProbeAnswer, text: String, name: String) -> String? {
     value: answer.value_type ?? return None
     params := [String]{}
@@ -125,7 +129,8 @@ sema_eval_probe_function: fn(answer: SemaEvalProbeAnswer, text: String, name: St
         shown: if capture.source == "self" -> SEMA_EVAL_PROBE_SELF else -> capture.source
         params.push("{shown}: {type_name(type_unqualified_nominals(capture.ty))}")
     }
-    Val("{name}: fn({params.join(", ")}) -> {type_name(type_unqualified_nominals(value))} {{\n    {sema_eval_probe_without_self(text)}\n}}\n")
+    result: result_surface_name(type_unqualified_nominals(value), Type.Named{name: "Never"})
+    Val("{name}: fn({params.join(", ")}) -> {result} {{\n    {sema_eval_probe_without_self(text)}\n}}\n")
 }
 
 // `text` with each `self` that names a value (not a field or part of a
@@ -256,6 +261,20 @@ sema_eval_probe_visit: fn(span: Span, statement: Bool, environment: SemaScopeEnv
     }
 }
 
+// The span a probe finds statement `statement` at: the semantic index's
+// (sema_compiler_index_stmt_span), with a binding's name in it. A binding
+// `total: f()` starts there at its `:`, and a debugger's stop on its line
+// asks at `total`.
+sema_eval_probe_stmt_span: fn(statement: Stmt) -> Span {
+    span: sema_compiler_index_stmt_span(statement)
+    if statement == .Val(binding) {
+        if binding.name_span.end > binding.name_span.start && binding.name_span.start < span.start {
+            return Span{start: binding.name_span.start, end: span.end}
+        }
+    }
+    span
+}
+
 // The probes `span` answers: those that start there, and those inside a
 // statement's span that no node starting at their position answered yet.
 sema_eval_walk_matches: fn(walk: Shared<SemaEvalWalk>, span: Span, statement: Bool) -> [SemaEvalAsk] {
@@ -304,7 +323,10 @@ sema_eval_answer_put: fn(answers: &[SemaEvalProbeAnswer], answer: &&SemaEvalProb
 // Checks `value` as the body of a lambda `fn() -> T` with `T` open, on copies
 // of the ownership state and context, so the walk goes on as if it had not.
 // The probe's own reports are its refusals; a moved capture is refused at its
-// use, with the move's site as the report's label.
+// use, with the move's site as the report's label. A call of an unannotated
+// function is an obligation of the bundle failure solve, which settles after
+// this walk (sema_failure_defer_obligation), so it refuses nothing here: the
+// compiled function's `Never!` (sema_eval_probe_function) meets the solve.
 sema_eval_probe_check: fn(value: Expr, probe: Int, expression: Int, exact: Bool, function: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: SemaCheckContext) -> SemaEvalProbeAnswer {
     probe_state := sema_ownership_state_snapshot(state)
     probe_context := sema_check_context_snapshot(context)
@@ -318,7 +340,10 @@ sema_eval_probe_check: fn(value: Expr, probe: Int, expression: Int, exact: Bool,
     checked: sema_expression_lambda_with_host(lambda, Val(expected), environment, program, scopes, probe_state, tail_store, probe_context, diagnostics, false, false, false, true)
     answer := SemaEvalProbeAnswer{probe: probe, expression: expression, function: function, exact: exact, span: span, complete: false, value_type: None, captures: [TCapture]{}, refusals: [Diagnostic]{}, effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}}}
     loop diagnostic in diagnostics.move() {
-        if diagnostic.severity == DIAGNOSTIC_ERROR -> answer.refusals.push(diagnostic)
+        if diagnostic.severity != DIAGNOSTIC_ERROR || (diagnostic.detail ?? "").starts_with(sema_failure_obligation_mark()) {
+            next
+        }
+        answer.refusals.push(diagnostic)
     }
     result: checked ?? return answer
     if result.kind == .Lambda(lambda_value) {

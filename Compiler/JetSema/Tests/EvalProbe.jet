@@ -174,13 +174,14 @@ run: fn() {
     print("{total} {box.items.len()}")
 }
 `
-    // A binding statement's node starts at its `:` or `:=`.
-    before_box: source.find(":= Box")
+    // A binding statement's node starts at its name, where a debugger's stop
+    // on its line asks.
+    at_box: source.find("box := Box")
     at_print: source.find(`print("{total}`)
     in_total: source.find(": xs.len()") + 1
     moved_at: source.find("xs}}")
     asks: [EvalProbeAsk]{
-        EvalProbeAsk{offset: before_box, texts: [String]{"total + 1", "xs.len() > 2", "helper(total)", "print(\"x\")"}},
+        EvalProbeAsk{offset: at_box, texts: [String]{"total + 1", "xs.len() > 2", "helper(total)", "print(\"x\")"}},
         EvalProbeAsk{offset: at_print, texts: [String]{"xs.len()", "total"}},
         EvalProbeAsk{offset: in_total, texts: [String]{"xs.len() + 1"}},
     }
@@ -315,11 +316,14 @@ run: fn() {
     }
     probed: eval_probe_run(source, asks, failures)
     sum: eval_probe_function_checks(source, probed, 0, 0, "box.items[1] + total", failures)
-    if !sum.contains("box: Box") || !sum.contains("total: Int") || !sum.contains(`) -> Int {`) {
+    if !sum.contains("box: Box") || !sum.contains("total: Int") || !sum.contains(`) -> Int Never! {`) {
         failures.push("`box.items[1] + total` is not a function of `box` and `total` to Int:\n{sum}")
     }
+    // `first` declares no failure: its call is the failure solve's to settle,
+    // never a refusal of the probe.
+    eval_probe_expect_value(probed, 0, 1, Type.Bool, true, failures)
     called: eval_probe_function_checks(source, probed, 0, 1, "box.first() > total", failures)
-    if !called.contains(`) -> Bool {`) {
+    if !called.contains(`) -> Bool Never! {`) {
         failures.push("`box.first() > total` is not a function to Bool:\n{called}")
     }
     own: eval_probe_function_checks(source, probed, 1, 0, "self.items.len() * 2", failures)

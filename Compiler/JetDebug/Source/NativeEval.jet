@@ -81,6 +81,19 @@ native_eval_refused: fn(message: String) -> NativeEvalRefused Never! {
     NativeEvalRefused{message: message}
 }
 
+// Whether `text` is one name, as a local's: letters, digits and `_` (any
+// non-ASCII byte a letter), not starting with a digit.
+native_eval_is_name: fn(text: String) -> Bool Never! {
+    bytes: text.bytes()
+    if bytes.len() == 0 || (bytes[0] >= 48 && bytes[0] <= 57) -> return false
+    loop byte in bytes {
+        if !((byte >= 97 && byte <= 122) || (byte >= 65 && byte <= 90) || (byte >= 48 && byte <= 57) || byte == 95 || byte >= 128) {
+            return false
+        }
+    }
+    true
+}
+
 // Why the plan of `code` can't place it: a function the compile changed
 // that the program runs too means the source is no longer the program's.
 // "" when it can be placed.
@@ -236,4 +249,11 @@ native_eval_message: fn(message: String) -> String Never! { "\"{message.replace(
 #Test("a logpoint message is one string expression") {
     assert_eq(native_eval_message("total is {{total}}"), "\"total is {{total}}\"")
     assert_eq(native_eval_message("say \"hi\""), "\"say \\\"hi\\\"\"")
+}
+
+#Test("a local's own name reads as `locals` shows it, an expression compiles") {
+    names: [String]{"total", "_a", "x2", "größe"}
+    loop name in names -> assert(native_eval_is_name(name))
+    expressions: [String]{"", "2x", "a.b", "a + 1", "f()", "xs[0]", "a b"}
+    loop text in expressions -> assert(!native_eval_is_name(text))
 }

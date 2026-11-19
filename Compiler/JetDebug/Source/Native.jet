@@ -482,8 +482,21 @@ NativeSession: struct {
         Ok(cell)
     }
 
-    // The value of `text` in the selected frame.
+    // The value of `text` in the selected frame. A local's own name reads as
+    // `locals` shows it, its DebugView included: reading a value runs no
+    // code, so a dump and an inlined frame answer it too, and the local's
+    // type need not be one a compiled function can take (`[Int String!]`).
     evaluate: fn(&self, text: String) -> NativeEvalValue NativeEvalRefused! {
+        name: text.trim()
+        if native_eval_is_name(name) {
+            shown: self.locals() ?? return Err(native_eval_refused(err.detail))
+            loop local in shown {
+                if local.name != name || local.value == NATIVE_DEBUG_UNAVAILABLE -> next
+                truth: local.type_name == "Bool" && local.value == "true"
+                said: "{local.value}"
+                return Ok(NativeEvalValue{shown: local.value, type_name: local.type_name, text: said, truth: truth})
+            }
+        }
         if self.dump != None {
             return Err(native_eval_refused("a dump runs no code; `locals` shows the values it holds"))
         }
