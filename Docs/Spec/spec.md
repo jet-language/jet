@@ -6159,12 +6159,15 @@ flags write `--backtrace=brief` and `--dead-code=keep`. Example:
 [`Tests/Run/Tooling/BuildBacktrace`](../../Tests/Run/Tooling/BuildBacktrace/run.jet).
 
 `zones` (stock `keep`) says whether the image keeps its `core.perf` zone
-sites. Under `keep` each zone open and close is a jump over its call, which
-the link lists in a note of the image (the `jet.zone_sites` part), so no
-code runs at startup to register them; `jet perf run` and `jet perf attach`
-read the note and patch every listed jump into a test that falls through
-to the call, so a zone costs one taken jump until a profiler records it.
-The link lays the runtime code that only zone calls reach after all other
+sites. Under `keep` each zone open and close, and each frame mark or plot
+with its arguments, moves to a stub after its function's other code, and its
+place in the hot code is one instruction that falls through while zones are
+off. The link lists the sites in a note of the image (the `jet.zone_sites`
+part), so no code runs at startup to register them; `jet perf run` and `jet
+perf attach` read the note and patch every listed site into a jump to its
+stub, which makes the call and jumps back, so a zone costs one untaken
+instruction until a profiler records it.
+The link lays the runtime code that only zone stubs reach after all other
 code, in a load segment of its own, so a run that records no zone maps none
 of it; the code that patches the sites is reached only once a profiler
 turns zones on.

@@ -1,8 +1,9 @@
-# An image's zone sites test no runtime word: each is a jump over its call
-# that the image's `jet.zone_sites` part note lists, which the runtime reads
-# when zones turn on, so nothing registers them before the entry runs.
-# Off, the program runs past every site; `jet perf run` patches them on and
-# records every zone.
+# An image's zone sites test no runtime word: each is one instruction that
+# falls through while zones are off, patched into a jump to its call's stub
+# when zones turn on, and the image's `jet.zone_sites` part note lists them,
+# which the runtime reads then, so nothing registers them before the entry
+# runs. Off, the program runs past every site; `jet perf run` patches them
+# on and records every zone.
 fixture: ZonesStripSettingLeavesNoSite.fixture
 env: NO_COLOR=1
 step: jet build main.jet

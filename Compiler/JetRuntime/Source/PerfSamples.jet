@@ -1135,13 +1135,14 @@ perf_zone_clock := I64{0}
 
 perf_zone_task_key := I64{0}
 
-// A site's opcode byte: `jmp rel32` skips the call while zones are off;
-// `test eax, imm32`, over the same four bytes, falls into it while on.
-// One byte changes, so a thread running the site meets one whole
-// instruction or the other.
-PERF_ZONE_SITE_OFF: I64{233}
+// A site's opcode byte: `test eax, imm32`, whose flags nothing reads,
+// falls through while zones are off; `jmp rel32`, over the same four bytes,
+// enters the site's stub while they are on, which makes the call and jumps
+// back (JetIR X64Select.jet ir_x64_zone_stub). One byte changes, so a
+// thread running the site meets one whole instruction or the other.
+PERF_ZONE_SITE_OFF: I64{169}
 
-PERF_ZONE_SITE_ON: I64{169}
+PERF_ZONE_SITE_ON: I64{233}
 
 // Registers the zone-site table at `table` (JetBackend Image/Object.jet
 // x64_object_zone_sites): its site count, then per site a rel32 to its

@@ -276,11 +276,12 @@ LinkContext: struct {
     // assembled from pieces in input order (crti.o's prologue, crtn.o's
     // epilogue), so link_order keeps each group contiguous.
     init_code: [Int:Int],
-    // Per code section with patchable zone sites, the start and end of each
-    // span of its bytes a site skips while zones are off, in order
-    // (Object.jet X64_OBJECT_ZONE_SPANS).
+    // Per code section with patchable zone sites, the offset of each site
+    // and the start and end of each site's stub, in order (Object.jet
+    // X64_OBJECT_ZONE_SPANS).
+    zone_sites: [Int:[Int]],
     zone_spans: [Int:[Int]],
-    // Per live row, whether only the zone sites' skipped spans reach it
+    // Per live row, whether only the zone sites' stubs reach it
     // (link_heat); empty when no input has such spans.
     cold: [Bool],
     // Conditional roots: an init/fini array section with SHF_INFO_LINK (a
@@ -401,6 +402,7 @@ link_context: fn(bufs: &&[[U8]], base: Int) -> LinkContext Never! {
         cond_roots: [Int]{},
         cond_guards: [Int]{},
         init_code: [Int:Int]{},
+        zone_sites: [Int:[Int]]{},
         zone_spans: [Int:[Int]]{},
         cold: [Bool]{},
         g_name: [String]{},
@@ -935,14 +937,17 @@ link_load_object: fn(c: &LinkContext, b: Int, base: Int, size: Int, name: String
 
 // Records the `.jet.zone_spans` section (Object.jet X64_OBJECT_ZONE_SPANS)
 // of `size` bytes at `at` in buffer `b`, of the object whose sections start
-// at id `first`, in c.zone_spans.
+// at id `first`, in c.zone_sites and c.zone_spans.
 link_zone_spans: fn(c: &LinkContext, b: Int, at: Int, size: Int, first: Int) Never! {
-    loop k in 0..<size.div_euclid(24) {
-        row: at + 24 * k
+    loop k in 0..<size.div_euclid(32) {
+        row: at + 32 * k
         s: first + link_u64(c.bufs, b, row)
+        sites := c.zone_sites.get(s) ?? [Int]{}
+        sites.push(link_u64(c.bufs, b, row + 8))
+        c.zone_sites[s] = sites
         spans := c.zone_spans.get(s) ?? [Int]{}
-        spans.push(link_u64(c.bufs, b, row + 8))
         spans.push(link_u64(c.bufs, b, row + 16))
+        spans.push(link_u64(c.bufs, b, row + 24))
         c.zone_spans[s] = spans
     }
 }
@@ -1818,15 +1823,15 @@ link_collect: fn(c: &LinkContext, entries: [Int], linker_names: [String], kept: 
     link_share_cies(c)
 }
 
-// Which live code rows only the code that zone sites skip reaches
-// (c.cold): the rows the collection's roots reach (`entries`, the
-// init/fini arrays and retained sections, the live conditional roots, the
-// personality routines, `kept`), with every live row that is not code,
-// through relocations other than those in a skipped span (c.zone_spans),
-// are hot; the other live code rows are cold, and link_order lays them
-// after all other code, in a packed layout a segment of their own
-// (LinkLayout.cold_start), so a run that records no zone maps none of
-// their pages. Nothing is cold when no input has spans.
+// Which live code rows only the zone sites' stubs reach (c.cold): the
+// rows the collection's roots reach (`entries`, the init/fini arrays and
+// retained sections, the live conditional roots, the personality routines,
+// `kept`), with every live row that is not code, through relocations other
+// than those in a stub's span (c.zone_spans), are hot; the other live code
+// rows are cold, and link_order lays them after all other code, in a
+// packed layout a segment of their own (LinkLayout.cold_start), so a run
+// that records no zone maps none of their pages. Nothing is cold when no
+// input has spans.
 link_heat: fn(c: &LinkContext, entries: [Int], kept: [Int]) Never! {
     if c.zone_spans.len() == 0 {
         return
@@ -1893,12 +1898,13 @@ link_in_spans: fn(spans: [Int], offset: Int) -> Bool Never! {
     low > 0 && offset < spans[2 * low - 1]
 }
 
-#Test("code only a zone site's skipped span reaches is laid after all other code, and a part note names the site") {
-    // `entry`: a zone site's jump over its call to `cold`, then a call to
-    // `hot`, which calls `after`; the input order is entry, hot, cold, after.
-    entry_code: [U8]{0xe9, 5, 0, 0, 0, 0xe8, 0, 0, 0, 0, 0xe8, 0, 0, 0, 0, 0xc3}
+#Test("code only a zone site's stub reaches is laid after all other code, and a part note names the site") {
+    // `entry`: a zone site, whose rel32 reaches its stub past the `ret`,
+    // then a call to `hot`, which calls `after`; the stub calls `cold` and
+    // jumps back past the site. The input order is entry, hot, cold, after.
+    entry_code: [U8]{0xa9, 6, 0, 0, 0, 0xe8, 0, 0, 0, 0, 0xc3, 0xe8, 0, 0, 0, 0, 0xeb, 0xf3}
     functions := [X64CompiledFunction]{
-        X64CompiledFunction{id: X64FunctionID{value: 0}, name: "entry", code: entry_code, relocs: [X64Reloc]{X64Reloc{at: 6, target: X64RelocTarget.Function{id: X64FunctionID{value: 2}}}, X64Reloc{at: 11, target: X64RelocTarget.Function{id: X64FunctionID{value: 1}}}}, align: X64_FUNCTION_ALIGN, zones: [Int]{0}},
+        X64CompiledFunction{id: X64FunctionID{value: 0}, name: "entry", code: entry_code, relocs: [X64Reloc]{X64Reloc{at: 6, target: X64RelocTarget.Function{id: X64FunctionID{value: 1}}}, X64Reloc{at: 12, target: X64RelocTarget.Function{id: X64FunctionID{value: 2}}}}, align: X64_FUNCTION_ALIGN, zones: [Int]{0}, zone_ends: [Int]{18}},
         X64CompiledFunction{id: X64FunctionID{value: 1}, name: "hot", code: [U8]{0xe8, 0, 0, 0, 0, 0xc3}, relocs: [X64Reloc]{X64Reloc{at: 1, target: X64RelocTarget.Function{id: X64FunctionID{value: 3}}}}, align: X64_FUNCTION_ALIGN},
         X64CompiledFunction{id: X64FunctionID{value: 2}, name: "cold", code: [U8]{0xc3}, relocs: [X64Reloc]{}, align: X64_FUNCTION_ALIGN},
         X64CompiledFunction{id: X64FunctionID{value: 3}, name: "after", code: [U8]{0xc3}, relocs: [X64Reloc]{}, align: X64_FUNCTION_ALIGN},
@@ -1937,7 +1943,7 @@ link_in_spans: fn(spans: [Int], offset: Int) -> Bool Never! {
     assert_eq(packed.phnum, flat.phnum + 1)
     // With the part note of the image's one zone site (link_zone_write): one
     // more program header, the note past them, and its table's one entry a
-    // rel32 from its end to `entry`'s first byte, the site's `jmp`.
+    // rel32 from its end to `entry`'s first byte, the site.
     noted: link_layout(c, false, true, true)
     assert_eq(noted.phnum, packed.phnum + 1)
     assert_eq(noted.zone_sites, 1)
@@ -3352,13 +3358,12 @@ link_write_sections: fn(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkD
     link_elf_sections(out, shoff, headers.len() + 2)
 }
 
-// How many patchable zone sites the live code holds: one per span a site
-// skips (c.zone_spans).
+// How many patchable zone sites the live code holds (c.zone_sites).
 link_zone_count: fn(c: LinkContext) -> Int Never! {
     count := 0
     loop s in c.live_secs {
-        spans: c.zone_spans.get(s) ?? next
-        count += spans.len().div_euclid(2)
+        sites: c.zone_sites.get(s) ?? next
+        count += sites.len()
     }
     count
 }
@@ -3384,9 +3389,8 @@ link_zone_phdr: fn(out: &[U8], l: LinkLayout, base: Int) Never! {
 // NUL-padded to LINK_ZONE_LABEL_SIZE, then the site table the runtime
 // patches (JetRuntime PerfSamples.jet perf_zone_table_patch): the site
 // count as a word, then per site a rel32 from the end of its field to the
-// site's `jmp`, which is the 5 bytes before the span it skips, and a zero
-// offset. The note and the code load together, so the rel32s hold wherever
-// the image is mapped.
+// site and a zero offset. The note and the code load together, so the
+// rel32s hold wherever the image is mapped.
 link_zone_write: fn(c: LinkContext, out: &[U8], l: LinkLayout, origin: Int) Never! {
     if l.zone_note_at == 0 {
         return
@@ -3402,9 +3406,9 @@ link_zone_write: fn(c: LinkContext, out: &[U8], l: LinkLayout, origin: Int) Neve
     elf64_u64(out, l.zone_sites)
     field := l.zone_note_at + 16 + LINK_ZONE_LABEL_SIZE + 8
     loop (row, s) in c.live_secs {
-        spans: c.zone_spans.get(s) ?? next
-        loop k in 0..<spans.len().div_euclid(2) {
-            elf64_u32(out, c.live_addr[row] + spans[2 * k] - 5 - (field + 4))
+        sites: c.zone_sites.get(s) ?? next
+        loop site in sites {
+            elf64_u32(out, c.live_addr[row] + site - (field + 4))
             elf64_u32(out, 0)
             field += 8
         }

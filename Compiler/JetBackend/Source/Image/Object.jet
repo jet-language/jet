@@ -302,13 +302,14 @@ x64_object_zone_sites: fn(id: X64FunctionID, name: String, sites: [Int]) -> X64C
     X64CompiledFunction{id: id, name: name, code: code.bytes.move(), relocs: relocs, align: X64_FUNCTION_ALIGN}
 }
 
-// The section naming the code each patchable zone site skips while zones
-// are off (X64CompiledFunction.zones): per site three little-endian words,
-// the header index of the section holding it, then the start and end of
-// the skipped bytes there, from the end of the site's `jmp rel32` to its
-// target. Not loaded; the Jet link lays the sections only those bytes
-// reach after all other code (StaticLink.jet link_heat), so a run that
-// records no zone faults none of their pages in.
+// The section naming each patchable zone site and the code its stub holds
+// (X64CompiledFunction.zones, .zone_ends): per site four little-endian
+// words, the header index of the section holding it, the site's offset
+// there, then the start and end of its stub, from the target of the site's
+// rel32 to the end of the stub's jump back. Not loaded; the Jet link names
+// the sites in the image's part note (StaticLink.jet link_zone_write) and
+// lays the sections only stubs reach after all other code (StaticLink.jet
+// link_heat), so a run that records no zone faults none of their pages in.
 X64_OBJECT_ZONE_SPANS: ".jet.zone_spans"
 
 // The `.jet.zone_spans` contents of `functions`, placed at `offsets` (in
@@ -316,13 +317,13 @@ X64_OBJECT_ZONE_SPANS: ".jet.zone_spans"
 x64_object_zone_spans: fn(functions: [X64CompiledFunction], offsets: [Int], own_sections: Bool) -> [U8] Never! {
     spans := [U8]{}
     loop (row, function) in functions {
-        loop site in function.zones {
-            // The jump's rel32, a forward distance.
-            skip: Int{function.code[site + 1]} | (Int{function.code[site + 2]} << 8) | (Int{function.code[site + 3]} << 16) | (Int{function.code[site + 4]} << 24)
-            start: offsets[row] + site + 5
+        loop (nth, site) in function.zones {
+            // The rel32 to the stub, a forward distance.
+            reach: Int{function.code[site + 1]} | (Int{function.code[site + 2]} << 8) | (Int{function.code[site + 3]} << 16) | (Int{function.code[site + 4]} << 24)
             elf64_u64(spans, x64_object_function_section(own_sections, row))
-            elf64_u64(spans, start)
-            elf64_u64(spans, start + skip)
+            elf64_u64(spans, offsets[row] + site)
+            elf64_u64(spans, offsets[row] + site + 5 + reach)
+            elf64_u64(spans, offsets[row] + function.zone_ends[nth])
         }
     }
     spans
