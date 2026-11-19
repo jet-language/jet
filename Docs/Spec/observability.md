@@ -224,10 +224,14 @@ which line, if it were faster, would make the program finish its work
 sooner. The runtime's CPU-time sampler runs a series of 25 ms experiments.
 Half of them, at random, are baselines. Each other experiment takes the
 program's own source line of the sample that starts it and speeds it up
-virtually by 30%: each sample that lands in the line adds 30% of its period
-to a global delay, and every other thread pauses at its next sample until
-it has paid that delay. The line therefore runs as if it were 30% faster
-relative to the rest of the program. A thread that was blocked (its last
+virtually by 30%: each sample that lands in the line adds 30% of the time
+the sample stands for to a global delay, and every other thread pauses at
+its next sample until it has paid that delay. The line therefore runs as
+if it were 30% faster relative to the rest of the program. A sample
+stands for its period of CPU time, or, when its thread was ready to run
+since its previous sample and that took longer, the wall time between
+them: under load a thread waits for a CPU between samples, and a faster
+line would save that wait too. A thread that was blocked (its last
 sample is more than 5 ms old and it has since given up its CPU of its own
 accord, not merely been preempted) owes nothing for the time it was blocked.
 Delays are paid at sampler ticks, so a thread pays its debt up to one

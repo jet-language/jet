@@ -4419,12 +4419,17 @@ perf_flight_rotate: fn(state: I64, text: I64) {
 // them (a line of the program's own files, every address range of it in its
 // function, from the image's location table) and speed it up by
 // PERF_CAUSAL_SPEEDUP virtually: each sample that lands in the line adds
-// that share of its CPU time to a global delay, and every other thread
-// pauses at its next sample until it has paid the delays it owes, so the
-// line runs as if faster relative to everything else. A thread whose last
-// sample is older than PERF_CAUSAL_BLOCKED_NS and that has since given up
-// its CPU of its own accord was blocked and owes nothing for that time
-// (perf_causal_blocked). Progress points count passes: each closed zone by its
+// that share of the time the line took to a global delay, and every other
+// thread pauses at its next sample until it has paid the delays it owes, so
+// the line runs as if faster relative to everything else. The time a sample
+// stands for is its thread's wall time since its last sample when the
+// thread wasn't blocked meanwhile, and its CPU time when that is more or
+// the thread was blocked: under load a running thread waits for a CPU
+// between its samples, and that wait is part of the line's time, which a
+// faster line would save too. A thread whose last sample is older than
+// PERF_CAUSAL_BLOCKED_NS and that has since given up its CPU of its own
+// accord was blocked and owes nothing for that time (perf_causal_blocked).
+// Progress points count passes: each closed zone by its
 // name, each `core.perf.progress(name)`, each finished task (`task`). At
 // each experiment's end a PERF_SAMPLES_CAUSAL record goes to the samples
 // file: 0 in its low bits, then the line's sampled address (0 for a
@@ -4539,8 +4544,8 @@ perf_causal_table: fn(state: I64, image: I64) -> Bool {
 
 // From the CPU-time samples' handler, for a sample at link-time address
 // `pc` standing for `periods` periods: pay this thread's owed delay, add
-// the target line's share when the sample is in it, and end the
-// experiment once its time is up.
+// the target line's share of the sample's time when the sample is in it,
+// and end the experiment once its time is up.
 perf_causal_tick: fn(pc: I64, periods: I64) {
     state: perf_causal_state
     if (state == I64{0}) {
@@ -4549,11 +4554,16 @@ perf_causal_tick: fn(pc: I64, periods: I64) {
     now: perf_samples_clock()
     thread: perf_causal_thread(state)
     delay: sync_load(wrapping(state + PERF_CAUSAL_DELAY))
+    // The sample's time: its CPU time, or the wall time since this
+    // thread's last sample when it was ready to run all of it and that is
+    // more.
+    spent := wrapping(wrapping(perf_samples_interval_us * I64{1000}) * periods)
     if (thread != I64{0}) {
         last: rt_text_word(wrapping(thread + I64{16}))
         local: rt_text_word(wrapping(thread + I64{8}))
         if {
             (last != I64{0} && !perf_causal_blocked(thread, wrapping(now - last))) -> {
+                if (wrapping(now - last) > spent) { spent = wrapping(now - last) }
                 perf_causal_pay(thread, local, delay)
             }
             (local < delay) -> rt_text_store(wrapping(thread + I64{8}), delay)
@@ -4562,7 +4572,7 @@ perf_causal_tick: fn(pc: I64, periods: I64) {
     }
     count: sync_load(wrapping(state + PERF_CAUSAL_RANGE_COUNT))
     if (count > I64{0} && perf_causal_in_target(state, pc, count)) {
-        share: wrapping(wrapping(sync_load(wrapping(state + PERF_CAUSAL_SPEED)) * perf_samples_interval_us) * periods)
+        share: wrapping(wrapping(sync_load(wrapping(state + PERF_CAUSAL_SPEED)) * spent) / I64{1000})
         _ := sync_add(wrapping(state + PERF_CAUSAL_DELAY), share)
         if (thread != I64{0}) {
             rt_text_store(wrapping(thread + I64{8}), wrapping(rt_text_word(wrapping(thread + I64{8})) + share))
