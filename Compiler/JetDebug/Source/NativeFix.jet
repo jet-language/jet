@@ -80,12 +80,6 @@ NativeFixPlan: struct {
     copied: [Int:Int],
 }
 
-NativeFixOutcome: enum {
-    Refused(reason: String),
-    Unchanged,
-    Planned(plan: NativeFixPlan),
-}
-
 // The region's pages and the code alignment inside it.
 NATIVE_FIX_PAGE: 4096
 
@@ -279,9 +273,10 @@ native_fix_shown: fn(edit: NativeFixEdit, row: Int) -> String Never! {
 
 // The fix of `edit` against the running program: its image's symbols, the
 // image's `.text` (loaded at `text_address`) and the functions earlier fixes
-// placed.
-native_fix_plan: fn(image: NativeImage, edit: NativeFixEdit, symbols: [String:NativeFixSymbol], text: [U8], text_address: Int, fixed: [NativeFixed]) -> NativeFixOutcome Never! {
-    if native_fix_layouts(image, edit.object) == .Val(reason) -> return NativeFixOutcome.Refused{reason: reason}
+// placed. A plan that changes no function means the program already runs
+// the edit; the error's detail says why the edit can't be swapped in.
+native_fix_plan: fn(image: NativeImage, edit: NativeFixEdit, symbols: [String:NativeFixSymbol], text: [U8], text_address: Int, fixed: [NativeFixed]) -> NativeFixPlan NativeDebugError! {
+    if native_fix_layouts(image, edit.object) == .Val(reason) -> return Err(NativeDebugError{detail: reason})
     targets := NativeFixTargets{functions: [Int:Int]{}, data: [Int:Int]{}, runtime: [String:Int]{}, clashed: [String:Bool]{}}
     row_of := [Int:Int]{}
     running := [NativeFixRunning?]{}
@@ -319,7 +314,7 @@ native_fix_plan: fn(image: NativeImage, edit: NativeFixEdit, symbols: [String:Na
         }
         if moved -> changed.push(row)
     }
-    if changed.len() == 0 -> return NativeFixOutcome.Unchanged
+    if changed.len() == 0 -> return Ok(NativeFixPlan{changed: changed, pieces: [NativeFixPiece]{}, size: 0, targets: targets, placed: [Int:Int]{}, copied: [Int:Int]{}})
     // `main` (row 0) runs the entry once; an edit of either can't take
     // effect in a program already past them.
     entry := -1
@@ -328,7 +323,7 @@ native_fix_plan: fn(image: NativeImage, edit: NativeFixEdit, symbols: [String:Na
     }
     loop row in changed {
         if row == 0 || row == entry {
-            return NativeFixOutcome.Refused{reason: "the edit changes `{native_fix_shown(edit, row)}`, the program's start, which has already run"}
+            return Err(NativeDebugError{detail: "the edit changes `{native_fix_shown(edit, row)}`, the program's start, which has already run"})
         }
     }
     // The region: each changed function, then each data object they reach
@@ -352,18 +347,18 @@ native_fix_plan: fn(image: NativeImage, edit: NativeFixEdit, symbols: [String:Na
                 }
                 .Runtime(symbol) -> {
                     if native_fix_known(targets, reloc.target) == None && symbols.get(symbol) == None {
-                        return NativeFixOutcome.Refused{reason: "`{native_fix_shown(edit, row)}` now calls the runtime's `{symbol}`, which the running image does not hold"}
+                        return Err(NativeDebugError{detail: "`{native_fix_shown(edit, row)}` now calls the runtime's `{symbol}`, which the running image does not hold"})
                     }
                 }
                 .RuntimeData(symbol) -> {
                     if native_fix_known(targets, reloc.target) == None && symbols.get(symbol) == None {
-                        return NativeFixOutcome.Refused{reason: "`{native_fix_shown(edit, row)}` now reads the runtime's `{symbol}`, which the running image does not hold"}
+                        return Err(NativeDebugError{detail: "`{native_fix_shown(edit, row)}` now reads the runtime's `{symbol}`, which the running image does not hold"})
                     }
                 }
                 .Function(id) -> {
                     callee: row_of.get(id.value) ?? -1
                     if callee < 0 || (running[callee] == None && placed.get(id.value) == None) {
-                        return NativeFixOutcome.Refused{reason: "`{native_fix_shown(edit, row)}` calls a function the edit does not compile"}
+                        return Err(NativeDebugError{detail: "`{native_fix_shown(edit, row)}` calls a function the edit does not compile"})
                     }
                 }
             }
@@ -386,7 +381,7 @@ native_fix_plan: fn(image: NativeImage, edit: NativeFixEdit, symbols: [String:Na
     }
     // Room for the last word the debugger writes whole.
     size: (offset + 8 + NATIVE_FIX_PAGE - 1).div_euclid(NATIVE_FIX_PAGE) * NATIVE_FIX_PAGE
-    NativeFixOutcome.Planned{plan: NativeFixPlan{changed: changed, pieces: pieces, size: size, targets: targets, placed: placed, copied: copied}}
+    Ok(NativeFixPlan{changed: changed, pieces: pieces, size: size, targets: targets, placed: placed, copied: copied})
 }
 
 // Where the plan's region, mapped at `base`, has `target`.
@@ -531,17 +526,12 @@ native_fix_line_address: fn(debug: X64FunctionDebug, low: Int, line: Int) -> Int
     edited: X64CompiledFunction{id: X64FunctionID{value: 0}, name: "p.g", code: [U8]{0xb8, 2, 0, 0, 0, 0xc3}, relocs: [X64Reloc]{}, align: 16}
     object: X64ObjectModule{data: [X64Data]{}, debug: X64ModuleDebug{directory: "", files: [String]{}, types: [X64DebugType]{}}, functions: [X64FunctionSource]{X64FunctionSource{name: "g", file: -1, line: 3, variables: [X64DebugVariable]{}}, X64FunctionSource{name: "run", file: -1, line: 6, variables: [X64DebugVariable]{}}}}
     rows: [X64FunctionDebug]{}
-    unchanged: native_fix_plan(image, NativeFixEdit{object: object, functions: [X64CompiledFunction]{main, run, same}, debug: rows}, symbols, text, 0x1000, [NativeFixed]{})
-    assert(unchanged == NativeFixOutcome.Unchanged)
-    if native_fix_plan(image, NativeFixEdit{object: object, functions: [X64CompiledFunction]{main, run, edited}, debug: rows}, symbols, text, 0x1000, [NativeFixed]{}) == {
-        .Planned(plan) -> {
-            assert_eq(plan.changed, [Int]{2})
-            assert_eq(native_fix_known(plan.targets, X64RelocTarget.Function{id: X64FunctionID{value: 0}}), Val(0x1010))
-            region: native_fix_region(plan, NativeFixEdit{object: object, functions: [X64CompiledFunction]{main, run, edited}, debug: rows}, symbols, 0x40000000)
-            assert_eq(region[1], U8{2})
-        }
-        .Refused(reason) -> panic("refused: {reason}")
-        .Unchanged -> panic("the edit was not seen")
-    }
+    unchanged: native_fix_plan(image, NativeFixEdit{object: object, functions: [X64CompiledFunction]{main, run, same}, debug: rows}, symbols, text, 0x1000, [NativeFixed]{}) ?? panic("refused: {err.detail}")
+    assert_eq(unchanged.changed.len(), 0)
+    plan: native_fix_plan(image, NativeFixEdit{object: object, functions: [X64CompiledFunction]{main, run, edited}, debug: rows}, symbols, text, 0x1000, [NativeFixed]{}) ?? panic("refused: {err.detail}")
+    assert_eq(plan.changed, [Int]{2})
+    assert_eq(native_fix_known(plan.targets, X64RelocTarget.Function{id: X64FunctionID{value: 0}}), Val(0x1010))
+    region: native_fix_region(plan, NativeFixEdit{object: object, functions: [X64CompiledFunction]{main, run, edited}, debug: rows}, symbols, 0x40000000)
+    assert_eq(region[1], U8{2})
     assert_eq(native_fix_jump(0x1010, 0x40000000), [U8]{0xe9, 0xeb, 0xef, 0xff, 0x3f})
 }

@@ -144,16 +144,13 @@ jet_cli_dev_canvas_loop: fn(file: String, color: Bool, host: String, port: Int) 
             // A transaction's own write is not a change to check again.
             loop {
                 edit: taken.try_receive() ?? break
-                if edit.kind == {
-                    .Debug -> {
-                        jet_cli_canvas_debug_answer(debugs, state, file, source_id, edit)
-                        next
-                    }
-                    .Profile -> {
-                        jet_cli_canvas_profile_answer(profiles, file, source_id, edit)
-                        next
-                    }
-                    .Transaction -> {}
+                if edit.route == .Debug {
+                    jet_cli_canvas_debug_answer(debugs, state, file, source_id, edit)
+                    next
+                }
+                if edit.route == .Profile {
+                    jet_cli_canvas_profile_answer(profiles, file, source_id, edit)
+                    next
                 }
                 if jet_cli_dev_canvas_transact(state, file, source_id, edit) {
                     stamp = jet_cli_dev_stamp(root, [String]{})

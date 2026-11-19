@@ -741,13 +741,8 @@ NativeSession: struct {
         elf: native_files.read_bytes(self.binary) ?? return Err(NativeDebugError{detail: "couldn't read the program `{self.binary}`: {err}"})
         symbols: native_fix_symbols(elf)
         code: native_elf_code(elf)
-        planned := NativeFixPlan?{None}
-        if native_fix_plan(self.image, edit, symbols, code.bytes, code.address, self.fixed) == {
-            .Refused(reason) -> return Ok("Fix refused: {reason}; restart the program to run the edit\n")
-            .Unchanged -> return Ok("Nothing to fix: the program already runs this code\n")
-            .Planned(found) -> planned = Val(found)
-        }
-        plan: planned ?? return Ok("")
+        plan: native_fix_plan(self.image, edit, symbols, code.bytes, code.address, self.fixed) ?? return Ok("Fix refused: {err.detail}; restart the program to run the edit\n")
+        if plan.changed.len() == 0 -> return Ok("Nothing to fix: the program already runs this code\n")
         pc: (self.registers() ?? return Err(err))[X64_TRACE_RIP]
         // Each changed function's running entry, -1 for a new function.
         entries := [Int]{}

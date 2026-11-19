@@ -395,11 +395,11 @@
       const doc = profileState.doc;
       if (!doc) return;
       ev.preventDefault();
-      const centre = profileViewTime(local(ev).x);
+      const middle = profileViewTime(local(ev).x);
       const span = doc.window.to_ns - doc.window.from_ns;
       const scale = ev.deltaY < 0 ? 0.5 : 2;
       const next = Math.max(1, span * scale);
-      const from = Math.max(doc.window.first_ns, centre - (centre - doc.window.from_ns) * scale);
+      const from = Math.max(doc.window.first_ns, middle - (middle - doc.window.from_ns) * scale);
       profileViewZoom(from, Math.min(Math.max(doc.window.last_ns, from + 1), from + next));
     }, { passive: false });
     window.addEventListener("resize", () => renderProfileView());
