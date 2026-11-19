@@ -40,6 +40,15 @@ its `msg`. The gate sweeps it against every Jet source it can reach (Core,
 Compiler, Jetpack, Tools, Examples, every `tests/` tree, case fixture and
 template), and every hit is fixed in one pass.
 
+The census builds with the previous batch compiler, which lacks the new rule,
+so it cannot see the rule's hits in the compiler's own build; the next cycle,
+whose seed carries the rule, fails on them instead. So the hits are fixed in
+the rule's own submission or in one it stacks on, and intake refuses a
+rule-tightening submission that carries neither. A census failure that no
+submission explains is this case: the previous cycle's rule broke `dev`'s
+self-build, and the orchestrator fixes the hits on `dev` before any other
+landing.
+
 ## The submission
 
 One folder per submission in the orchestrator's inbox
