@@ -2,16 +2,16 @@
 // the route table (argument and result carriers, payloads).
 use jet_foundation.[CoreCallRecord, Span, SymbolID, Type, TypeTupleField, TBuiltinOp, BodyCallArg, BodyHandleOp, TCapture, TCaptureFacts, TClosureOp, TEffectFacts, TEffectSpan, NodeKind, TFailureCarrier, BodyFnValueKind, BodyLambda, BodyLambdaBody, TTryConvert, core_call_native_return_labels, checked_builtin_mutates_receiver, checked_generated_local, type_carrier_identity, decl_id_index, name_rows_set, name_rows_value]
 
-// A buffer of `bytes` bytes (a slot) to replace the one of the List at
-// `list`, null when `try` and refused. In a program's module it comes from
-// the allocator that served the old buffer, else from the one owning the
-// List's storage (BuildMove.jet): the current one for storage of this
-// body's frame reserved inside its innermost open `#Context(allocator: a)`
-// block, or with none open (the address test cannot tell that storage
-// from the frame's older storage, nor from a caller's frame once the body
-// is inlined there); the heap anywhere else.
-ir_list_grow_buffer: fn(m: &IRModule, b: &IRBuilder, list: Int, bytes: Int, try: Bool) -> Int Never! {
-    word_row: ir_word_row(m)
+// A buffer of `bytes` bytes (a slot) for elements of row `element` to
+// replace the one of the List at `list`, null when `try` and refused. In a
+// program's module it comes from the allocator that served the old buffer,
+// else from the one owning the List's storage (BuildMove.jet): the current
+// one for storage of this body's frame reserved inside its innermost open
+// `#Context(allocator: a)` block, or with none open (the address test
+// cannot tell that storage from the frame's older storage, nor from a
+// caller's frame once the body is inlined there); the heap anywhere else.
+ir_list_grow_buffer: fn(m: &IRModule, b: &IRBuilder, list: Int, bytes: Int, try: Bool, element: Int) -> Int Never! {
+    word_row: ir_list_alloc_row(m, element)
     if !m.user_values {
         align: ir_word_const(m, b, 8)
         return ir_runtime(m, b, if try -> "jet_rt_alloc_try" else -> "jet_rt_alloc", [Int]{bytes, align}, word_row)
@@ -113,7 +113,7 @@ ir_list_slot: fn(m: &IRModule, b: &IRBuilder, list: Int, row: Int) -> {address: 
     ir_emit(b.f, IROp.Copy, grown, first, -1, -1, b.line)
     ir_end(b.f, b.line)
     grown_bytes: ir_word_op(m, b, IROp.Mul, grown, width)
-    data: ir_list_grow_buffer(m, b, list, grown_bytes, false)
+    data: ir_list_grow_buffer(m, b, list, grown_bytes, false, row)
     old_data: ir_load_word(m, b, list, 16)
     old_bytes: ir_word_op(m, b, IROp.Mul, length, width)
     _: ir_runtime(m, b, "jet_rt_mem_move", [Int]{data, old_data, old_bytes}, -1)
@@ -719,7 +719,7 @@ ir_list_append: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: In
     ir_emit(b.f, IROp.Copy, grown, total, -1, -1, b.line)
     ir_end(b.f, b.line)
     grown_bytes: ir_word_op(m, b, IROp.Mul, grown, width)
-    data: ir_list_grow_buffer(m, b, list, grown_bytes, false)
+    data: ir_list_grow_buffer(m, b, list, grown_bytes, false, row)
     old_data: ir_load_word(m, b, list, 16)
     _: ir_runtime(m, b, "jet_rt_mem_move", [Int]{data, old_data, kept}, -1)
     // The source may window the old buffer: it is copied before that goes.
@@ -808,7 +808,7 @@ ir_list_try_reserve: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lis
     ir_emit(b.f, IROp.Copy, grown, required, -1, -1, b.line)
     ir_end(b.f, b.line)
     grown_bytes: ir_word_op(m, b, IROp.Mul, grown, width)
-    data: ir_list_grow_buffer(m, b, list, grown_bytes, true)
+    data: ir_list_grow_buffer(m, b, list, grown_bytes, true, row)
     nil: ir_word_const(m, b, 0)
     no_memory: ir_bool_op(m, b, IROp.Eq, data, nil)
     ir_open_if(b.f, no_memory, b.line)
@@ -5604,7 +5604,7 @@ ir_record_list_from_runtime: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, item:
     ir_open_if(b.f, filled, b.line)
     width: ir_word_const(m, b, stride)
     bytes: ir_word_op(m, b, IROp.Mul, length, width)
-    storage: ir_list_buffer_sized(m, b, bytes)
+    storage: ir_list_buffer_sized(m, b, bytes, element_row)
     ir_emit(b.f, IROp.Copy, data, storage, -1, -1, b.line)
     ir_end(b.f, b.line)
     ir_route_list_header(m, b, base, offset, data, length)

@@ -304,6 +304,14 @@ IR_INT_INLINE_BITS: 63
 // signature.
 IR_CODE_TYPE: "#code"
 
+// The checked type name of the word or pointer a heap allocation answers in
+// a `--checked-alloc` build (IRModule.alloc_types): its row is the plain
+// word or pointer row's layout over `Apply(IR_ALLOC_TYPE, [the type the
+// storage serves])` (Build.jet ir_alloc_row), so x86-64 selection names
+// that type at the call (X64Select.jet ir_x64_alloc_type) for the heap
+// snapshots of `jet perf run --lens=alloc`.
+IR_ALLOC_TYPE: "#alloc"
+
 // One function's arena. Slots 0..<param_count are the parameters in order.
 // `slot_name` is an interned name (-1 for a temporary); `slot_line` the
 // source line a variable is declared on (0 none); `line[i]` the source line
@@ -606,6 +614,10 @@ IRModule: struct {
     owned_attach: Bool{false},
     single_thread: Bool{false},
     user_values: Bool{false},
+    // A `--checked-alloc` build's module (IRChecks.checked_alloc): the word
+    // a heap allocation answers names the type its storage serves
+    // (Build.jet ir_alloc_row).
+    alloc_types: Bool{false},
     dropped_early: Bool{false},
     marked_inlined: Bool{false},
     debug_directory: String{""},

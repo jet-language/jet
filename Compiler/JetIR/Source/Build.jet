@@ -1322,6 +1322,7 @@ ir_module_for: fn(p: IRProgram) -> IRModule Never! {
     loop _ in 0..<p.functions.len() -> m.ids.push(-1)
     m.stop_points = p.stop_points
     m.user_values = p.user_values
+    m.alloc_types = p.checks.checked_alloc
     m.quiet_routes = p.checks.quiet_routes.copy()
     m
 }
@@ -3467,6 +3468,59 @@ ir_word_row: fn(m: &IRModule) -> Int Never! {
     ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? 0
 }
 
+// The row of the word or pointer a heap allocation answers, `row` (the word
+// or pointer row), for storage serving values of type `ty` (a List's
+// buffer, a Map's table, a wrapper): in a `--checked-alloc` build
+// (IRModule.alloc_types) `row`'s layout over IR_ALLOC_TYPE of `ty`, so x86-64
+// selection names `ty` at the call (X64Select.jet ir_x64_alloc_type); else
+// `row` itself, so any other build's IR is unchanged. A box answers its box
+// row, which names its type already.
+ir_alloc_row: fn(m: &IRModule, row: Int, ty: Type) -> Int Never! {
+    if !m.alloc_types -> return row
+    layout := m.types[row].copy()
+    layout.ty = Type.Apply{name: IR_ALLOC_TYPE, args: [Type]{ir_untag(ty)}}
+    ir_intern_type(m, "{IR_ALLOC_TYPE}:{type_carrier_identity(ty)}", layout)
+}
+
+// ir_alloc_row for storage serving values of type row `served` (-1: none,
+// `row` itself).
+ir_alloc_row_of: fn(m: &IRModule, row: Int, served: Int) -> Int Never! {
+    if !m.alloc_types || served < 0 -> return row
+    ty: m.types[served].ty.copy()
+    ir_alloc_row(m, row, ty)
+}
+
+// The row of the word a List buffer of element row `element` answers
+// (ir_alloc_row of the List type; -1: an untyped buffer, the word row).
+ir_list_alloc_row: fn(m: &IRModule, element: Int) -> Int Never! {
+    word_row: ir_word_row(m)
+    if !m.alloc_types || element < 0 -> return word_row
+    list: Type.List{element: m.types[element].ty.copy()}
+    ir_alloc_row(m, word_row, list)
+}
+
+// Only a `--checked-alloc` module's allocation words name what they serve,
+// each laid out as the plain row it stands for.
+#Test("an allocation word names the type its storage serves only in a checked-alloc module") {
+    m := ir_module_new()
+    word: ir_word_row(m)
+    pointer: ir_pointer_row(m)
+    assert(ir_list_alloc_row(m, word) == word)
+    assert(ir_alloc_row_of(m, pointer, word) == pointer)
+    m.alloc_types = true
+    buffer: ir_list_alloc_row(m, word)
+    assert(buffer != word && ir_list_alloc_row(m, word) == buffer)
+    assert(m.types[buffer].kind == m.types[word].kind && m.types[buffer].size == 8 && m.types[buffer].bits == m.types[word].bits)
+    served := ""
+    if m.types[buffer].ty == .Apply(name, args) && args.len() == 1 && args[0] == .List(element) {
+        served = "{name} {ir_type_name(element)}"
+    }
+    assert(served == ("{IR_ALLOC_TYPE} I64"))
+    wrapper: ir_alloc_row_of(m, pointer, word)
+    assert(wrapper != pointer && wrapper != buffer && m.types[wrapper].kind == .Pointer)
+    assert(ir_alloc_row_of(m, pointer, -1) == pointer && ir_list_alloc_row(m, -1) == word)
+}
+
 ir_string_row: fn(m: &IRModule) -> Int Never! { ir_type_row(m, Type.String) ?? 0 }
 
 // A source location argument triple: (path address, path length, line).
@@ -3510,7 +3564,7 @@ ir_member_write: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, member
     offset := member.offset
     if member.boxed {
         size: m.types[member.ty].size
-        holder = ir_wrapper_alloc(m, b, if size < 8 -> 8 else -> size, place)
+        holder = ir_wrapper_alloc(m, b, if size < 8 -> 8 else -> size, place, member.ty)
         ir_emit(b.f, IROp.Store, -1, base, member.offset, holder, b.line)
         offset = 0
     }
@@ -3575,7 +3629,7 @@ ir_enum_tag_of: fn(m: &IRModule, b: &IRBuilder, value: Int) -> Int Never! {
 ir_member_store: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, member: IRMember, value: Int) Never! {
     if !member.boxed -> return ir_store_at(m, p, b, base, member.offset, value)
     size: m.types[member.ty].size
-    wrapper: ir_wrapper_alloc(m, b, size, -1)
+    wrapper: ir_wrapper_alloc(m, b, size, -1, member.ty)
     ir_store_at(m, p, b, wrapper, 0, value)
     ir_emit(b.f, IROp.Store, -1, base, member.offset, wrapper, b.line)
 }
@@ -3637,12 +3691,13 @@ ir_box_alloc_sized: fn(m: &IRModule, b: &IRBuilder, bytes: Int, row: Int) -> Int
     boxed
 }
 
-// A recursive edge's wrapper box of `size` bytes: in a program's module from
-// the allocator of the holder whose storage `place` addresses
-// (jet_rt_alloc_value_grow; -1: a holder being built, whose allocator is
-// the current one), else the heap.
-ir_wrapper_alloc: fn(m: &IRModule, b: &IRBuilder, size: Int, place: Int) -> Int Never! {
-    pointer_row: ir_pointer_row(m)
+// A recursive edge's wrapper box of `size` bytes for a value of type row
+// `served`: in a program's module from the allocator of the holder whose
+// storage `place` addresses (jet_rt_alloc_value_grow; -1: a holder being
+// built, whose allocator is the current one), else the heap.
+ir_wrapper_alloc: fn(m: &IRModule, b: &IRBuilder, size: Int, place: Int, served: Int) -> Int Never! {
+    plain: ir_pointer_row(m)
+    pointer_row: ir_alloc_row_of(m, plain, served)
     if !m.user_values -> return ir_box_alloc(m, b, size, pointer_row)
     bytes: ir_word_const(m, b, ir_align8(size))
     if place < 0 {
@@ -3673,18 +3728,19 @@ ir_box_replica_sized: fn(m: &IRModule, b: &IRBuilder, bytes: Int, old: Int, row:
     replica
 }
 
-// A List buffer of exactly `bytes` bytes, from where ir_box_alloc takes a
-// box's in a program's module. Unlike a box it is not rounded up: every
-// List buffer is released as capacity * stride (the List drop,
-// ir_release_moved_buffer), and a free must name the allocation's own size.
-ir_list_buffer_alloc: fn(m: &IRModule, b: &IRBuilder, bytes: Int) -> Int Never! {
+// A List buffer of exactly `bytes` bytes for elements of row `element` (-1:
+// untyped), from where ir_box_alloc takes a box's in a program's module.
+// Unlike a box it is not rounded up: every List buffer is released as
+// capacity * stride (the List drop, ir_release_moved_buffer), and a free
+// must name the allocation's own size.
+ir_list_buffer_alloc: fn(m: &IRModule, b: &IRBuilder, bytes: Int, element: Int) -> Int Never! {
     size: ir_word_const(m, b, bytes)
-    ir_list_buffer_sized(m, b, size)
+    ir_list_buffer_sized(m, b, size, element)
 }
 
 // ir_list_buffer_alloc of the byte count in slot `size`.
-ir_list_buffer_sized: fn(m: &IRModule, b: &IRBuilder, size: Int) -> Int Never! {
-    word_row: ir_word_row(m)
+ir_list_buffer_sized: fn(m: &IRModule, b: &IRBuilder, size: Int, element: Int) -> Int Never! {
+    word_row: ir_list_alloc_row(m, element)
     align: ir_word_const(m, b, 8)
     ir_runtime(m, b, if m.user_values -> "jet_rt_alloc_value" else -> "jet_rt_alloc", [Int]{size, align}, word_row)
 }
@@ -4151,7 +4207,7 @@ ir_list_from: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, element_ro
         ir_emit(b.f, IROp.Store, -1, storage, 16, none, b.line)
         return storage
     }
-    data: ir_list_buffer_alloc(m, b, elements.len() * stride)
+    data: ir_list_buffer_alloc(m, b, elements.len() * stride, element_row)
     loop (index, slot) in elements -> ir_store_at(m, p, b, data, index * stride, slot)
     ir_emit(b.f, IROp.Store, -1, storage, 16, data, b.line)
     storage
@@ -4174,7 +4230,7 @@ ir_fixed_bridge: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: I
         ir_emit(b.f, IROp.Store, -1, storage, 16, none, b.line)
         return storage
     }
-    data: ir_list_buffer_alloc(m, b, bytes)
+    data: ir_list_buffer_alloc(m, b, bytes, element_row)
     source: ir_list_data(m, b, slot)
     ir_emit(b.f, IROp.CopyBytes, -1, data, source, bytes, b.line)
     ir_emit(b.f, IROp.Store, -1, storage, 16, data, b.line)

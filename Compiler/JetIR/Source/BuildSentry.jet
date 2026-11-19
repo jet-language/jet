@@ -293,7 +293,7 @@ ir_core_list_append: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], 
         ir_emit(b.f, IROp.Copy, grown, total, -1, -1, b.line)
         ir_end(b.f, b.line)
         grown_bytes: ir_word_op(m, b, IROp.Mul, grown, width)
-        data: ir_list_grow_buffer(m, b, list, grown_bytes, true)
+        data: ir_list_grow_buffer(m, b, list, grown_bytes, true, row)
         made: ir_bool_op(m, b, IROp.Ne, data, zero)
         ir_open_if(b.f, made, b.line)
         old_data: ir_load_word(m, b, list, 16)
