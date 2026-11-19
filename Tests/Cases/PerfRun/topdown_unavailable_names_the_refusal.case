@@ -11,11 +11,11 @@ fixture: TopdownLevelsPerFunction.fixture
 env: NO_COLOR=1
 step: strace -f -qq -o /dev/null -e trace=perf_event_open -e inject=perf_event_open:error=ENOENT {jet} perf run --lens=cpu,topdown td.jet --out {work}/td.jettrace
 exit: 0
-stdout: ~ "guesses="
+stdout: ~ "guesses=" # the run still prints its topdown summary line
 json: file td.jettrace doc $.content.profile.rows #>= 1 # the CPU-time profile is still there
 json: file td.jettrace doc $.content.receipt_sections[?name="topdown"][0].value.status = "unavailable"
 json: file td.jettrace doc $.content.receipt_sections[?name="topdown"][0].value.reason ~ "the kernel refused " # the first event the kernel refused
-json: file td.jettrace doc $.content.receipt_sections[?name="topdown"][0].value.reason ~ " (errno 2)"
+json: file td.jettrace doc $.content.receipt_sections[?name="topdown"][0].value.reason ~ " (errno 2)" # and the errno it refused with
 json: file td.jettrace doc $.content.receipt_sections[?name="topdown"][0].value.cores[0].status = "unavailable"
 json: file td.jettrace doc $.content.receipt_sections[?name="topdown"][0].value.cores[0].events[?errno=2] #>= 1 # each event keeps its errno
 json: file td.jettrace doc $.content.receipt_sections[?name="topdown"][0].value.cores[0].lines #= 0 # and no line holds a split

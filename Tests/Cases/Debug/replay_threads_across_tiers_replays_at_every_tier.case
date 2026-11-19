@@ -15,16 +15,16 @@ capture: recorded = text stdout
 step: jet debug --replay=tiers prog.jet
 exit: 0
 stdout: ~ "{cap:recorded}Program finished\n" # the O0 replay prints the recorded lines in the recorded order
-stdout+stderr: !~ "replay diverged"
+stdout+stderr: !~ "replay diverged" # the replay stays faithful to the recording
 step: jet build -O1 prog.jet
 exit: 0
 step: jet debug --replay=tiers {work}/.jet/build/prog
 exit: 0
 stdout: ~ "{cap:recorded}Program finished\n" # so does the O1 image
-stdout+stderr: !~ "replay diverged"
+stdout+stderr: !~ "replay diverged" # the replay stays faithful to the recording
 step: jet build -O2 prog.jet
 exit: 0
 step: jet debug --replay=tiers {work}/.jet/build/prog
 exit: 0
 stdout: ~ "{cap:recorded}Program finished\n" # and the O2 image, the recording's own tier
-stdout+stderr: !~ "replay diverged"
+stdout+stderr: !~ "replay diverged" # the replay stays faithful to the recording
