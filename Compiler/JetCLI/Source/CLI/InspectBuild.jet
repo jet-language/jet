@@ -720,22 +720,29 @@ jet_cli_root_package_facts: fn(root: JetDriverAuthorizedSourceRoot) -> PackageFa
 }
 
 // The request a compile of `owned_request` folds settings from. When its entry
-// package has a `build: fn`, that build is evaluated first: the modules it
-// generates load beside the sources, and when the package declares settings
-// the values it contributes are recorded (jet_cli_record_build_contributions),
-// so the compile reads the rows of this evaluation. `refusal` is set when the
-// build or the lock write failed.
+// package has a `build: fn`, that build is evaluated first: under
+// `load_generated` the modules it generates load beside the sources, and when
+// the package declares settings the values it contributes are recorded
+// (jet_cli_record_build_contributions), so the compile reads the rows of this
+// evaluation. A `jet build` compile has already evaluated the build and
+// carries what it generated (Host.jet jet_cli_compile_target), so it passes
+// `load_generated` false and, like any compile that already carries generated
+// modules, is evaluated again only for its settings.
+// `refusal` is set when the build or the lock write failed.
 JetCLIContributedRequest: struct {
     request: JetDriverCompileRequest,
     refusal: JetDriverVerbOutput?,
 }
 
-jet_cli_contributed_request: fn(owned_request: &&JetDriverCompileRequest, color: Bool) -> JetCLIContributedRequest {
+jet_cli_contributed_request: fn(owned_request: &&JetDriverCompileRequest, load_generated: Bool, color: Bool) -> JetCLIContributedRequest {
     request := owned_request.move()
     if !jet_driver_entry_package_has_build(request) {
         return {request: request.move(), refusal: None}
     }
     settings: jet_cli_settings_package(request.authorized_sources)
+    if settings == None && (!load_generated || request.generated_modules.len() > 0) {
+        return {request: request.move(), refusal: None}
+    }
     scope := JetDriverBuildQueryScope{next_session_id: 1}
     response := jet_driver_query_build_plan(request, scope)
     query := response.query.move()
@@ -747,9 +754,8 @@ jet_cli_contributed_request: fn(owned_request: &&JetDriverCompileRequest, color:
     // The modules `build: fn` generates (`meta.add`, `meta.rewrite_body`)
     // load beside the sources of every compile of the package, so `jet run`
     // and `jet dev` run the program `jet build` builds, whether or not the
-    // package declares settings. A package build's target compile already
-    // carries them (Host.jet jet_cli_compile_target).
-    if contributed.generated_modules.len() == 0 {
+    // package declares settings.
+    if load_generated && contributed.generated_modules.len() == 0 {
         contributed.generated_modules = query.generated.move()
     }
     package: settings ?? return {request: contributed.move(), refusal: None}

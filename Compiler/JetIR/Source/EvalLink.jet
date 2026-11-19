@@ -31,9 +31,11 @@ IR_EVAL_STUB_NAMES: [String]{"shared_acquire_until", "shared_release", "schedule
 IR_EVAL_STUB_NAME_ROWS: [String]{"shared", "shared", "scheduler", "scheduler", "scheduler", "scheduler"}
 
 // The files of the stop report. A function of theirs whose name ends in
-// `_stop` or `_exit` starts a stop report, as do `jet_rt_panic_*`,
-// `jet_rt_unreachable`, the stop's publication `rt_task_panic_publish` and
-// the functions that end the process (IR_STOP_FATAL): ir_eval_stop_root.
+// `_stop` or `_exit` starts a stop report, and so does the report's header
+// (`trap_header`), which stops outside these files write too; so do
+// `jet_rt_panic_*`, `jet_rt_unreachable`, the stop's publication
+// `rt_task_panic_publish` and the functions that end the process
+// (IR_STOP_FATAL): ir_eval_stop_root.
 IR_EVAL_STOP_FILES: [String]{"Trap.jet", "TrapMessages.jet", "TrapDefectMessages.jet"}
 
 // The syscalls the fork's seccomp filter allows: mmap, mprotect, munmap,
@@ -127,7 +129,7 @@ ir_eval_link_receipt: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Ne
 
 // Whether `f` starts a stop report (IR_EVAL_STOP_FILES).
 ir_eval_stop_root: fn(f: IRFunction) -> Bool Never! {
-    if IR_EVAL_STOP_FILES.contains(ir_eval_file_name(f.source_file)) && (f.name.ends_with("_stop") || f.name.ends_with("_exit")) {
+    if IR_EVAL_STOP_FILES.contains(ir_eval_file_name(f.source_file)) && (f.name.ends_with("_stop") || f.name.ends_with("_exit") || f.name == "trap_header") {
         return true
     }
     f.name.starts_with("jet_rt_panic_") || f.name == "rt_task_panic_publish" || IR_STOP_FATAL.contains(f.name)

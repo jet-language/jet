@@ -133,6 +133,26 @@ eval_test_exports: fn() -> [IRLibraryExport] {
     assert(receipt.contains("export\tjet_rt_alloc_bytes\tallowed"))
 }
 
+#Test("the report's header starts a stop report, so a stop outside the stop files that writes it leaves it a stub") {
+    m := eval_test_library()
+    // 17: a scheduler stop that writes the header (11) itself, then the
+    // message (18); 19 calls 17 on its failure path.
+    fatal := eval_test_fn("scheduler_fatal_stop", "Scheduler.jet", 0, 0)
+    eval_test_call(fatal, 11, [Int]{})
+    eval_test_call(fatal, 18, [Int]{})
+    m.functions.push(fatal)
+    m.functions.push(eval_test_caller("trap_write", "Trap.jet", 0, [Int]{1, 0}))
+    raise := eval_test_fn("parallel_raise", "Parallel.jet", 0, 0)
+    eval_test_call(raise, 17, [Int]{})
+    m.functions.push(raise)
+    exports := eval_test_exports()
+    exports.push(eval_test_export(19, "jet_rt_parallel_raise"))
+    receipt: ir_eval_link_receipt(m, exports)
+    assert(receipt.contains("stub\ttrap_header\tstop-report"))
+    assert(receipt.contains("stub\ttrap_write\tstop-report"))
+    assert(receipt.contains("export\tjet_rt_parallel_raise\tallowed"))
+}
+
 #Test("a futex call must be private, and a second argument a wrapper's caller passes on is followed") {
     m := eval_test_library()
     // 17: a shared futex wake; 18: the stack4 primitive's futex, whose

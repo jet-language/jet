@@ -691,6 +691,11 @@ D-DBG-VERBS1=A names the commands:
 
 - `step` (`s`), `next` (`n`), `continue` (`c`) and `finish` (`f`) run the
   program.
+- `reverse-step` (`rs`), `reverse-next` (`rn`), `reverse-finish` (`rf`)
+  and `reverse-continue` (`rc`) go back in a replay (see Replaying a
+  recording).
+- `why <place>` names, in a replay, the write that gave a local or field
+  path its value (see Replaying a recording).
 - `break <line|file:line|function> [if <expr>]` (`b`) sets a breakpoint.
   `break 12` is line 12 of the file being debugged. With `if`, the breakpoint
   stops only when the Jet expression holds in the stopped frame. A condition
@@ -777,21 +782,74 @@ recording flag; live snapshots, GC evidence, wall-clock sessions, and browser
 transport remain distinct until their contracts can share an envelope without
 losing meaning.
 
-## Recorded-run queries
+## Replaying a recording
 
-`jet run <file> --record=<name>` attaches source-level act snapshots to the
-same `.jetproof-replay` receipt. The receipt keeps its Time authority, identity,
-frame hashes, and footer; it does not create a `.jettrace` file or a second
-trace format.
+`jet debug --replay=<name> <file.jet|image>` runs the program behind the
+debugger console (or `--dap`) under the recording `jet run --record=<name>`
+made, read from `.jet/replays/<name>.jetproof-replay` in the project of a
+source entry, or of the working directory for an image; a project-relative
+`.jetproof-replay` path names one directly. The recording is not changed.
+jet writes its `RunSync` log to a scratch file and starts the program with
+`JET_REPLAY` naming it (below), so the run takes the recorded sync order and
+reads the recorded inputs at whatever tier the image was built: a source
+entry is debugged as the `-O0` build `jet debug` makes, and an `-O1` or `-O2`
+image `jet build` made is debugged as it is. Its output is the recorded
+output, and the first sync event where the run does otherwise stops the
+program with the divergence (below), which the console shows with the
+program's output. Time the debugger holds the program stopped does not count
+toward the 10-second stall.
 
-`jet debug <file> --replay=<name>` reads the receipt without changing it. The
-source-level prompt supports:
+A NAME that isn't one, a recording that isn't there, a recording with no
+sync-order log (a `jet test --record` one) and an image that links no
+observation start are refused before anything runs.
 
-- `why <place> == <value>` — names the recorded acts that produced the value;
-- `when <place>` — lists recorded changes and names the last change.
+A replay can go back. `reverse-step` (`rs`) goes to the line that ran
+before this stop, in any frame; `reverse-next` (`rn`) to the line before
+in this frame or a caller, over the calls it made; `reverse-finish` (`rf`)
+to the caller's line that made this call; and `reverse-continue` (`rc`) to
+the breakpoint hit or watch stop before this one (a breakpoint whose
+condition does not hold there is passed). Under `--dap` the adapter
+answers `supportsStepBack`, and `stepBack` and `reverseContinue` are
+`reverse-next` and `reverse-continue`. The session keeps the commands that
+brought the program to its stop. Going back runs them again from the start
+under the same recording, so the program does the same, with one-shot
+trap bytes counting how often each task passes each line's start (or each
+breakpoint); it then runs them once more to the pass the command wants,
+which becomes the stop. The program's output is not shown again.
+Breakpoints stay as they are; a watch set after the point it goes back to
+ends, with a note. With nothing earlier the program comes back to the
+same stop and says so. Outside a replay, and after `fix` (a new run would
+run the code before the fix), the console refuses them.
+Tests/Cases/Debug/replay_reverse_*.case are the worked examples.
 
-These queries use recorded local snapshots. They do not reverse execution, move
-the program through time, or keep a standing per-variable history buffer.
+`why <place>` in a replay names the write that gave a local of the
+selected frame, or a field path under one, the value it has here:
+
+```
+total = 2, set at prog.jet:21 in run() (task 1)
+  before: 0
+  #0  run()  at prog.jet:21
+```
+
+The line is the write's own, then the task that made it, the value it
+replaced and the stack it was made from. A write before the local's first
+line binds it, and says so as `before: none: this line binds it`. With no
+write since the frame began, it says that. `why` runs the commands again
+three times under the same recording: once to find the call that opened the
+frame and to count this stop's passes after it; once from that call, with
+a debug register on the place's bytes keeping every write that changes them
+(the program runs on) until the same stop; and once more to come back here,
+breakpoints and watches as they were. The traced program runs without
+address randomization, so the place has the same address in every run. A
+local an `-O2` image keeps no place for (optimized away, or held in a
+register) is answered from the `-O0` build of the image's source, which
+jet makes once into the session's scratch directory: a run counts how
+often the stop's task reached the stop's line, the `-O0` image runs under
+the same recording to that pass of the line, and `why` answers there, the
+value labeled `(recovered from the -O0 replay)`. Outside a replay, and
+after `fix`, the console refuses it.
+Tests/Cases/Debug/replay_why_*.case are the worked examples.
+Tests/Cases/Debug/replay_threads_across_tiers_*.case are the worked examples.
 
 ## Sync-order log
 
@@ -804,7 +862,7 @@ one global turn order:
 - a Shared read or edit permit, taken or given up;
 - a channel's send, receive, try-receive, close, and endpoint drops;
 - a select's chosen arm;
-- each print and eprint.
+- each print and eprint, with its length and the FNV-1a hash of its text.
 
 It also holds the bytes of each input: a wall or monotonic clock read, an
 entropy fill, an environment value, the program's arguments, and each file,
@@ -819,8 +877,9 @@ replays at any other tier.
 
 A replaying task waits at each sync event until the log's next turn names it.
 It then checks that its event is the recorded one, and does it. A select takes
-its recorded arm, and an input reads its recorded bytes. The first mismatch,
-or a turn that no task takes for 10 seconds, stops the program with exit 70:
+its recorded arm, an input reads its recorded bytes, and a print must write
+the recorded text before it writes anything. The first mismatch, or a turn
+that no task takes for 10 seconds, stops the program with exit 70:
 
 ```text
 replay diverged at sync event 7: recorded edit of Shared value 1 by task 2, got send on channel 1 by task 3  main.jet:14

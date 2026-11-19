@@ -1,0 +1,31 @@
+// prog.jet changed after its recording: an unsafe write before the tasks
+// start makes worker 2 send its lines without taking the tally's lock, so
+// its first sync event is a send where the recording has the lock.
+
+Score: struct {
+    count: Int,
+}
+
+lockless := 0
+
+work: fn(id: Int, rounds: Int, skip: Int, results: Sender<String>, tally: Shared<Score>) -> Int {
+    loop _ in 0..<rounds {
+        if id == skip -> results.send("worker {id} skipped the tally") else {
+            tally.count += 1
+            results.send("worker {id} saw tally {tally.count}")
+        }
+    }
+    rounds
+}
+
+run: fn() {
+    #Unsafe("no task has started yet, so nothing else reads `lockless`") { lockless = 2 }
+    { sender: results, receiver: lines }: channel<String>(capacity: 2)
+    tally: Shared{Score{count: 0}}
+    first: task work(1, 4, lockless, results.copy(), tally)
+    second: task work(2, 4, lockless, results.copy(), tally)
+    third: task work(3, 4, lockless, results.copy(), tally)
+    loop _ in 0..<12 { print(lines.receive() ?? "closed") }
+    done: (first.join() ?? 0) + (second.join() ?? 0) + (third.join() ?? 0)
+    print("joined {done} rounds, tally {tally.count}")
+}

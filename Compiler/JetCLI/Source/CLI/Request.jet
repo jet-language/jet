@@ -2334,7 +2334,8 @@ jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, optio
             selected.target_machine = options.target_machine.copy()
             selected.setting_overrides = options.settings.copy()
             selected.gate_set.allowed = options.gates.copy()
-            contributed := jet_cli_contributed_request(selected, color)
+            // A `jet build` compile already carries what its build generated.
+            contributed := jet_cli_contributed_request(selected, options.command != "build", color)
             // copy: `refusal` is a payload view of `contributed`.
             if contributed.refusal == .Val(refusal) {
                 return JetCLIExecutableCompiled.Refused{output: refusal.copy()}

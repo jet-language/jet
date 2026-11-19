@@ -1,0 +1,24 @@
+# A replay whose run does otherwise than the recording stops at the first
+# sync event where it differs, naming the recorded event and the one the run
+# got. After the recording, prog.jet changes (lockless.src): an #Unsafe write
+# before the tasks start makes worker 2, task 3, send its lines without
+# taking the tally's lock, so where the recording has task 3 edit the tally,
+# the replay gets its send. The program stops with exit status 70 at that
+# event, at -O0 and in an -O2 image alike.
+fixture: ReplayThreadsAcrossTiers.fixture
+env: NO_COLOR=1
+step: jet run -O2 --record=tiers prog.jet
+exit: 0
+copy: lockless.src prog.jet
+step: jet debug --replay=tiers prog.jet
+exit: 0
+stdout: ~ "replay diverged at sync event "
+stdout: ~ ": recorded edit of Shared value 1 by task 3, got send on channel 1 by task 3" # task 3's first event, not a later one
+stdout: ~ "Program finished with exit status 70\n"
+stdout: !~ "joined 12 rounds" # the run stopped at the divergence
+step: jet build -O2 prog.jet
+exit: 0
+step: jet debug --replay=tiers {work}/.jet/build/prog
+exit: 0
+stdout: ~ ": recorded edit of Shared value 1 by task 3, got send on channel 1 by task 3"
+stdout: ~ "Program finished with exit status 70\n"

@@ -1,0 +1,49 @@
+# Over `jet debug --dap --replay=NAME` the adapter answers
+# `supportsStepBack`: from the second hit of the breakpoint on line 21,
+# `reverseContinue` goes back to the first, and `stepBack` from there to
+# line 20, the line before.
+# The fixture must stay in jet fmt form; line 20 calls `double`, line 21
+# adds its result.
+fixture: ReplayReverse.fixture
+env: NO_COLOR=1
+step: jet run --record=back prog.jet
+exit: 0
+session dap content-length: jet debug --dap --replay=back {work}/prog.jet
+send dap: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\",\"linesStartAt1\":true,\"columnsStartAt1\":true}}"
+recv dap until $.request_seq = 1 timeout 30s every 100ms
+json: stdout doc $.success = true
+json: stdout doc $.body.supportsStepBack = true
+send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{\"program\":\"{work}/prog.jet\",\"stopOnEntry\":false,\"args\":[]}}"
+recv dap until $.event = "initialized" timeout 30s every 100ms
+send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/prog.jet\"},\"breakpoints\":[{\"line\":21}]}}"
+recv dap until $.request_seq = 3 timeout 30s every 100ms
+json: stdout doc $.body.breakpoints[0].verified = true
+send dap: "{\"seq\":4,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{}}"
+recv dap until $.event = "stopped" timeout 30s every 100ms
+json: stdout doc $.body.reason = "breakpoint"
+send dap: "{\"seq\":5,\"type\":\"request\",\"command\":\"continue\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.event = "stopped" timeout 30s every 100ms
+json: stdout doc $.body.reason = "breakpoint"
+send dap: "{\"seq\":6,\"type\":\"request\",\"command\":\"reverseContinue\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.event = "stopped" timeout 60s every 100ms
+json: stdout doc $.body.reason = "breakpoint" # back at the first hit
+send dap: "{\"seq\":7,\"type\":\"request\",\"command\":\"evaluate\",\"arguments\":{\"expression\":\"k\",\"context\":\"repl\"}}"
+recv dap until $.request_seq = 7 timeout 30s every 100ms
+json: stdout doc $.body.result = "0" # the first pass of the loop
+send dap: "{\"seq\":8,\"type\":\"request\",\"command\":\"stepBack\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.event = "stopped" timeout 60s every 100ms
+json: stdout doc $.body.reason = "step"
+send dap: "{\"seq\":9,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.request_seq = 9 timeout 30s every 100ms
+json: stdout doc $.body.stackFrames[0].name = "run"
+json: stdout doc $.body.stackFrames[0].line = 20 # the line before
+send dap: "{\"seq\":10,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/prog.jet\"},\"breakpoints\":[]}}"
+recv dap until $.request_seq = 10 timeout 30s every 100ms
+send dap: "{\"seq\":11,\"type\":\"request\",\"command\":\"continue\",\"arguments\":{\"threadId\":1}}"
+recv dap collect until ndjson $[?event="terminated"] #>= 1 timeout 30s
+stdout: ~ "\"event\":\"exited\"" # the replay runs on to its end
+send dap: "{\"seq\":12,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{}}"
+recv dap until $.request_seq = 12 timeout 30s every 100ms
+json: stdout doc $.success = true
+close dap
+exit: 0

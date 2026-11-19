@@ -121,12 +121,12 @@ native_eval_entry: fn(code: NativeEval, plan: NativeFixPlan) -> Int? Never! {
 
 // Run `code` in a fork of the program `trace` stops, made at the image's
 // `syscall` instruction: its code placed by `plan` near the image's code,
-// the program's trap bytes `sites` put back, and `captures` (each
-// capture's bytes) passed by address. `typed` holds the captures' debug
-// types.
-native_eval_run: fn(image: NativeImage, trace: X64Trace, sites: [Int:Int], code: NativeEval, plan: NativeFixPlan, facts: NativeEvalImage, syscall: Int, captures: [[U8]], typed: [Int]) -> NativeEvalValue NativeEvalRefused! {
+// the program's trap bytes `sites` and a reverse command's probes `probes`
+// put back, and `captures` (each capture's bytes) passed by address.
+// `typed` holds the captures' debug types.
+native_eval_run: fn(image: NativeImage, trace: X64Trace, sites: [Int:Int], probes: [Int:Int], code: NativeEval, plan: NativeFixPlan, facts: NativeEvalImage, syscall: Int, captures: [[U8]], typed: [Int]) -> NativeEvalValue NativeEvalRefused! {
     fork: native_fork_make(trace, syscall) ?? return Err(native_eval_refused(err.detail))
-    value: native_eval_in_fork(image, fork, trace.pid, sites, code, plan, facts, captures, typed) ?? {
+    value: native_eval_in_fork(image, fork, trace.pid, sites, probes, code, plan, facts, captures, typed) ?? {
         native_fork_end(fork)
         return Err(err)
     }
@@ -134,8 +134,8 @@ native_eval_run: fn(image: NativeImage, trace: X64Trace, sites: [Int:Int], code:
     Ok(value)
 }
 
-native_eval_in_fork: fn(image: NativeImage, fork: NativeFork, pid: Int, sites: [Int:Int], code: NativeEval, plan: NativeFixPlan, facts: NativeEvalImage, captures: [[U8]], typed: [Int]) -> NativeEvalValue NativeEvalRefused! {
-    native_fork_prepare(fork, pid, sites) ?? return Err(native_eval_refused(err.detail))
+native_eval_in_fork: fn(image: NativeImage, fork: NativeFork, pid: Int, sites: [Int:Int], probes: [Int:Int], code: NativeEval, plan: NativeFixPlan, facts: NativeEvalImage, captures: [[U8]], typed: [Int]) -> NativeEvalValue NativeEvalRefused! {
+    native_fork_prepare(fork, pid, sites, probes) ?? return Err(native_eval_refused(err.detail))
     // The region goes where a fix's would, within a rel32 of the image's
     // code; a taken address moves on.
     text_end: facts.code.address + facts.code.bytes.len()
@@ -192,7 +192,7 @@ native_eval_in_fork: fn(image: NativeImage, fork: NativeFork, pid: Int, sites: [
         size: native_type_size(image, id)
         word: native_number(held, 0, 8, X64DebugEncoding.Signed)
         bytes: if !code.result.inline && size > 8 -> native_debug_bytes(memory, word, size) ?? held.move() else -> held.move()
-        if native_fork_view(fork, image, pid, sites, view, id, bytes) == .Ok(viewed) {
+        if native_fork_view(fork, image, pid, sites, probes, view, id, bytes) == .Ok(viewed) {
             value.shown = viewed
         }
     }

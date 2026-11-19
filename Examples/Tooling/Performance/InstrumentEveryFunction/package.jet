@@ -1,39 +1,8 @@
 // The header marker marks the package, and so every function in it: the
-// build below wraps each one in a profiler zone without editing run.jet.
+// build in run.jet wraps each one in a profiler zone.
 #Zoned
 name: "instrument_every_function"
 version: "0.1.0"
-authority: { allow: [Meta.Code.Rewrite] }
-
-// A marker a package header or a function may carry. On the header it
-// reaches every function of the package.
-Zoned: struct {
-    impl Marker {
-        sites: [.Package, .Function],
-    }
-}
-
-// A compile-time program over the compiler's events: each checked function
-// the package marks gets a zone named after it around its body. A zone is a
-// no-op until `jet perf run` turns zones on; then every call of the function
-// lands on the `jet perf view` timeline with the samples.
-build: fn(b: Build) {
-    app: b.add_executable("instrument_every_function", ["run.jet"], [])
-    meta: b.compiler(app)
-    meta.events(
-        watch: .Functions{marked: Zoned{}},
-        fn(event) {
-            if event == .Checked(.Function(f)) {
-                name: f.name
-                meta.rewrite_body(
-                    f,
-                    #code {
-                        _zone: core.perf.zone(#{name})
-                        #{f.body}
-                    },
-                )
-            }
-        },
-    )
-    b.default(app)
+authority: {
+    allow: [Meta.Code.Rewrite]
 }

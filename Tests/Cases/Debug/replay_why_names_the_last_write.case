@@ -1,0 +1,23 @@
+# In a replay `why total` names the write that gave `total` its value at
+# this stop: the third pass of line 21 holds 2, which line 21 wrote on the
+# loop's second pass (the first pass added 0, which changed nothing), in
+# run() on the main task, replacing 0; the write's stack follows. `why`
+# runs the replay again behind the stop and comes back to it, so `c` runs
+# the program on to its end from there. The helper task's tally races the
+# loop, so only the main task's total is asserted.
+# The fixture must stay in jet fmt form; line 21 adds `d` to `total`.
+fixture: ReplayReverse.fixture
+env: NO_COLOR=1
+step: jet run --record=why prog.jet
+exit: 0
+stdout: ~ "total 6 tally "
+step: jet debug --replay=why prog.jet
+stdin: replay_why_names_the_last_write.stdin
+exit: 0
+stdout: ~ "(Jet) why total\ntotal = 2, set at prog.jet:21 in run() (task 1)\n  before: 0\n  #0  run()  at prog.jet:21\n" # the last write, its task, the value it replaced and its stack
+stdout: ~ "(Jet) why\nWhy needs a local or a field path, as `why total`\n"
+stdout: ~ "(Jet) why nothing\n`nothing` is not a local" # a name the frame lacks is refused
+stdout: ~ "(Jet) c\ntotal 6 tally " # the session is back at its stop and runs on to the end
+stdout: ~ "Program finished\n"
+stdout+stderr: !~ "replay diverged"
+stdout+stderr: !~ "didn't come back"

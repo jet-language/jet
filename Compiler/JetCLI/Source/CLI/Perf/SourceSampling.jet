@@ -352,7 +352,8 @@ jet_cli_perf_samples_owned: fn(table: X64Jetline, source: String) -[FS]> [Bool] 
 // JET_CLI_PERF_WAIT_KIND for a task's wait, JET_CLI_PERF_WAKE_KIND for a
 // wake and JET_CLI_PERF_IO_KIND for a transfer, whose first words hold a
 // task id in place of the program counter, JET_CLI_PERF_CLOCK_KIND for
-// what sampling cost, and JET_CLI_PERF_HEAP_MARK_KIND,
+// what sampling cost, JET_CLI_PERF_CAUSAL_KIND for a causal experiment's
+// record, and JET_CLI_PERF_HEAP_MARK_KIND,
 // JET_CLI_PERF_HEAP_SITE_KIND, JET_CLI_PERF_HEAP_BLOCK_KIND and
 // JET_CLI_PERF_HEAP_ROOT_KIND for a heap snapshot's records, whose first
 // words hold its number. Bit 63 marks an allocations' record, whose count
@@ -389,7 +390,7 @@ JET_CLI_PERF_HEAP_ROOT_KIND: 5
 
 // PerfSamples.jet PERF_SAMPLES_CAUSAL: a causal experiment's end, or (1 in
 // its low bits) a progress point's name.
-JET_CLI_PERF_CAUSAL_KIND: 7
+JET_CLI_PERF_CAUSAL_KIND: 8
 
 // What a heap snapshot's root record holds (PerfSamples.jet
 // PERF_SAMPLES_ROOT_FRAMES, PERF_SAMPLES_ROOT_STACK and
@@ -570,7 +571,8 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
                     // The line's sampled address (0 for a baseline), the
                     // speedup, the wall time, the delay inserted and each
                     // point's passes.
-                    jet_cli_perf_causal_record(sampled, owned, words, at, record)
+                    experiment: jet_cli_perf_causal_record(sampled, owned, words, at, record)
+                    sampled.experiments.push(experiment)
                 }
             }
             at += record * 8

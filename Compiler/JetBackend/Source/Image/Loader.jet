@@ -1920,6 +1920,10 @@ loader_exec_failed: fn(failure: String) -> LoaderExecBlock Never! {
 
 LOADER_PTRACE_TRACEME: 0
 
+// The personality flag that turns address randomization off for the
+// program a trace starts (x64_trace_spawn).
+LOADER_ADDR_NO_RANDOMIZE: 0x0040000
+
 LOADER_PTRACE_PEEKDATA: 2
 
 LOADER_PTRACE_PEEKUSER: 3
@@ -2089,14 +2093,18 @@ X64TraceStop: struct {
     status: Int,
 }
 
-// Start the image file at `path` with `argv` (argv[0] included) and this
-// process's environment, traced by the trace's helper and stopped before
-// its first instruction. Its standard input reads /dev/null; its output
-// and errors append to the existing file `output`. The helper ends when
-// this process does (its channel closes), and the kernel kills the program
-// when the helper ends. Every thread the program starts is traced too
-// (LOADER_PTRACE_O_TRACECLONE): x64_trace_wait reports its stops.
-x64_trace_spawn: fn(path: String, argv: [String], output: String) -> X64Trace {
+// Start the image file at `path` with `argv` (argv[0] included) and the
+// environment `env` (as X64Launch.env: None is this process's), traced by
+// the trace's helper and stopped before its first instruction. Its standard
+// input reads /dev/null; its output and errors append to the existing file
+// `output`. The helper ends when this process does (its channel closes),
+// and the kernel kills the program when the helper ends. Every thread the
+// program starts is traced too (LOADER_PTRACE_O_TRACECLONE): x64_trace_wait
+// reports its stops. The program runs without address randomization
+// (LOADER_ADDR_NO_RANDOMIZE), so each run of a replay puts its stacks and
+// heap at the same addresses: `why` follows a place's address from one run
+// to the next.
+x64_trace_spawn: fn(path: String, argv: [String], output: String, env: [String]?) -> X64Trace {
     trace := X64Trace{pid: -1, scratch: 0, failure: ""}
     scratch: os_map_with(0, OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE, LOADER_MAP_SHARED_ANONYMOUS, -1, 0)
     if os_failed(scratch) {
@@ -2104,7 +2112,7 @@ x64_trace_spawn: fn(path: String, argv: [String], output: String) -> X64Trace {
         return trace
     }
     trace.scratch = scratch
-    exec: loader_exec_block(path, argv, None)
+    exec: loader_exec_block(path, argv, env)
     if exec.failure != "" {
         trace.failure = exec.failure
         return trace
@@ -2153,6 +2161,10 @@ x64_trace_spawn: fn(path: String, argv: [String], output: String) -> X64Trace {
                 program: os_syscall_i64(I64{OS_SYS_FORK}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
                 if program == 0 {
                     _ := os_syscall_i64(I64{OS_SYS_PTRACE}, I64{LOADER_PTRACE_TRACEME}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+                    persona: os_syscall_i64(I64{OS_SYS_PERSONALITY}, I64{0xffffffff}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+                    if persona >= 0 {
+                        _ := os_syscall_i64(I64{OS_SYS_PERSONALITY}, persona | I64{LOADER_ADDR_NO_RANDOMIZE}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+                    }
                     _ := os_syscall_i64(I64{OS_SYS_RT_SIGPROCMASK}, I64{2}, program_mask, I64{0}, I64{8}, I64{0}, I64{0})
                     _ := os_syscall_i64(I64{OS_SYS_EXECVE}, program_path, program_argv, program_envp, I64{0}, I64{0}, I64{0})
                     _ := os_syscall_i64(I64{OS_SYS_EXIT_GROUP}, I64{127}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
