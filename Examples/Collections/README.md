@@ -28,6 +28,7 @@ Run a lesson from the repository root, for example `jet run Examples/Collections
 - [MapSlot](MapSlot.jet) — `counts[w, or: 0] += 1` counts with one lookup: `or:` names the value a missing key starts with, and only a missing key runs it.
 - [MapsNested](MapsNested.jet)
 - [MemberSpread](MemberSpread.jet) — Member spread expands a shared prefix into field reads.
+- [NamedTupleOrder](NamedTupleOrder.jet) — Named tuples order member by member in written order.
 - [OperationContract](OperationContract.jet) — Each collection operation follows its checked row in the operation contract (Docs/Spec/Reference/core-library.md).
 - [PopTable](PopTable.jet) — Pop removes and returns from each collection.
 - [Queue](Queue.jet) — Queue<T> — ring-buffer double-ended queue.
@@ -36,7 +37,6 @@ Run a lesson from the repository root, for example `jet run Examples/Collections
 - [Set](Set.jet) — Set<T> — hash-backed unordered set.
 - [Sketch](Sketch.jet) — core.data.sketch — approximate data structures.
 - [SortByKey](SortByKey.jet) — sort_by and sort_by_desc reorder the marked list in place by a key closure.
-- [TupleOrder](TupleOrder.jet) — Named tuples order member by member in written order.
 - [WordCount](WordCount.jet)
 
 ## Iterators

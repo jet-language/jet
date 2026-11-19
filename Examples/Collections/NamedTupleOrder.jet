@@ -1,6 +1,6 @@
-// Named tuples order member by member in written order. So a (key, index)
+// Named tuples order member by member in written order. So a {key, index}
 // pair sorts by `key` first, then `index`. Member order is part of the type:
-// (index, key) is another type, and it sorts by `index` first. sort_by names
+// {index, key} is another type, and it sorts by `index` first. sort_by names
 // any other order. The same order holds for <, sort_desc, Map and Set keys,
 // at run time and at compile time.
 written_order: fn(pairs: [{key: String, index: Int}]) -> [{key: String, index: Int}] {
@@ -40,7 +40,7 @@ run: fn() {
     cells[{y: 5, x: 1}] = "north"
     cells[{y: 1, x: 1}] = "center"
     loop (cell, name) in cells -> print("x{cell.x} y{cell.y} {name}")
-    seen := Set.from([{y: 9, x: 0}, {y: 0, x: 9}, {y: 3, x: 0}, {y: 9, x: 0}])
+    seen: Set.from([{y: 9, x: 0}, {y: 0, x: 9}, {y: 3, x: 0}, {y: 9, x: 0}])
     out := "set sorted:"
     loop cell in seen.sort() -> out = "{out} ({cell.x},{cell.y})"
     print(out)

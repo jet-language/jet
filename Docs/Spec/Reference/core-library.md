@@ -866,8 +866,9 @@ A Float or F32 key to `sort_by`, `sort_by_desc`, their `try_` forms, `min_by`
 or `max_by` orders by IEEE 754 totalOrder, as `<=>` does: a negative NaN
 first, then `-inf`, `-0.0` before `+0.0`, `+inf`, and a positive NaN last.
 `sort`, `sort_desc`, `min` and `max` on named tuples compare members in written
-order (S73, D-RECORD-ORDER1=A). So `(key, index)` sorts by `key`, then `index`;
-use `sort_by` to put another member first.
+order (S73, D-RECORD-ORDER1=A). So `{key, index}` sorts by `key`, then `index`;
+use `sort_by` to put another member first (example:
+`Examples/Collections/NamedTupleOrder.jet`).
 `binary_search` returns a matching index, not an insertion position or a
 promise to return the first equal item. `counts()` returns a map of element
 counts; `top_n(n)` orders by descending count and ascending key for ties.
