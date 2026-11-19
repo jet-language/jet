@@ -94,8 +94,10 @@ PERF_SAMPLES_WAKE: I64{12}
 
 // The kind of a topdown event's sample (perf_topdown_start): a record like
 // a counter's, with the event's index in the address bits from
-// PERF_TOPDOWN_EVENT_BITS, above its program counter, which is 0 outside
-// the image's code.
+// PERF_TOPDOWN_EVENT_BITS, above its program counter's distance past the
+// start of the image's code plus one, 0 outside that code. An image `jet
+// run` maps lies above PERF_TOPDOWN_EVENT_BITS's reach, so its program
+// counter does not fit below the index; the distance does.
 PERF_SAMPLES_TOPDOWN: I64{7}
 
 PERF_TOPDOWN_EVENT_BITS: I64{40}
@@ -2626,7 +2628,7 @@ perf_cfi_sort: fn(table: I64, count: I64) {
     bias: perf_samples_bias
     pc: wrapping(rt_text_word(wrapping(context + I64{168})) - bias)
     if (topdown) {
-        own: if (perf_samples_in_code(pc)) -> pc else -> I64{0}
+        own: if (perf_samples_in_code(pc)) -> wrapping(wrapping(pc - perf_samples_code_low) + I64{1}) else -> I64{0}
         word: own | (wrapping(counter - PERF_COUNTERS_COUNT) << PERF_TOPDOWN_EVENT_BITS) | (I64{1} << PERF_SAMPLES_ADDRESS_BITS) | kind
         #Unsafe("one write of a stack-local word, which the kernel copies before the call returns") {
             _ := os_write_word_i64(fd, word, I64{8})

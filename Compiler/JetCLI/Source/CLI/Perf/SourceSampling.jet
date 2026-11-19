@@ -292,7 +292,7 @@ jet_cli_perf_samples_read: fn(path: String, source: String, counters: [TraceCoun
         }
     }
     objects: jet_cli_perf_heap_objects(image)
-    sampled := jet_cli_perf_samples_count(facts.lines, functions, inlines, owned, periods, allocs, names, words)
+    sampled := jet_cli_perf_samples_count(facts.lines, functions, inlines, owned, periods, allocs, names, words, jet_cli_perf_code_low(image))
     loop index in 0..<sampled.heaps.len() {
         jet_cli_perf_heap_retain(facts, objects, names, sampled.heaps[index])
     }
@@ -349,7 +349,8 @@ jet_cli_perf_samples_owned: fn(table: X64Jetline, source: String) -[FS]> [Bool] 
 // 62: 0 for a CPU-time sample, a counter's index plus one for that
 // counter's sample, JET_CLI_PERF_TOPDOWN_KIND for a topdown event's
 // sample, whose first word holds the event's index from
-// JET_CLI_PERF_TOPDOWN_EVENT_BITS above its program counter,
+// JET_CLI_PERF_TOPDOWN_EVENT_BITS above its program counter's distance past
+// the image's code start plus one (jet_cli_perf_code_low),
 // JET_CLI_PERF_SPAWN_KIND for a task's spawn,
 // JET_CLI_PERF_WAIT_KIND for a task's wait, JET_CLI_PERF_WAKE_KIND for a
 // wake and JET_CLI_PERF_IO_KIND for a transfer, whose first words hold a
@@ -427,6 +428,30 @@ JET_CLI_PERF_OBJECT_SOCKET: 4
 // it.
 JET_CLI_PERF_HELPER_PREFIX: "jet_ir_"
 
+// The lowest address of `image`'s executable loadable segments, where the
+// runtime counts a topdown sample's program counter from (PerfSamples.jet
+// perf_samples_code_edge); 0 for an image without one.
+jet_cli_perf_code_low: fn(image: [U8]) -> Int {
+    if image.len() < 64 -> return 0
+    // e_phoff; e_phentsize is bits 48..63 of the word at 48, e_phnum bits
+    // 0..15 of the word at 56.
+    table: link_debug_addr(image, 32)
+    entry: (link_debug_addr(image, 48) >> 48) & 65535
+    count: link_debug_addr(image, 56) & 65535
+    low := 0
+    loop index in 0..<count {
+        header: table + index * entry
+        if header < 0 || header + 48 > image.len() -> break
+        kind: link_debug_addr(image, header)
+        if kind & 4294967295 == 1 && (kind >> 32) & 1 != 0 {
+            // p_vaddr of the program header.
+            start: link_debug_addr(image, header + 16)
+            if low == 0 || start < low -> low = start
+        }
+    }
+    low
+}
+
 // The samples of `words`, records of 8-byte words (PerfSamples.jet): the
 // program counter, then the call site of each caller, innermost first.
 // Each sample counts once at the function and line of `table` its program
@@ -456,7 +481,7 @@ JET_CLI_PERF_HELPER_PREFIX: "jet_ir_"
 // reached through the runtime's own calls when they allocate for it), which
 // `names` spells. Its block and root records are its retention records
 // (JetCLIPerfHeap).
-jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFunction], inlines: &&JetCLIPerfInlines, owned: [Bool], periods: &&[U64], allocs: [Int:Int], names: [Int:String], words: [U8]) -> JetCLIPerfSamples Never! {
+jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFunction], inlines: &&JetCLIPerfInlines, owned: [Bool], periods: &&[U64], allocs: [Int:Int], names: [Int:String], words: [U8], code_low: Int) -> JetCLIPerfSamples Never! {
     sampled := JetCLIPerfSamples{table: table, inlines: inlines, lines: [JetCLIPerfSampledLine]{}, total: U64{0}, outside: U64{0}, helpers: U64{0}, stackless: U64{0}, signals: U64{0}, cost: None, functions: functions, natives: [JetCLIPerfNative]{}, sited: false, periods: periods, spawns: [U64:U64]{}, waits: [JetCLIPerfWait]{}, wakes: [JetCLIPerfWake]{}, transfers: [JetCLIPerfIO]{}, heaps: [JetCLIPerfHeap]{}, experiments: [JetCLIPerfExperiment]{}, points: [Int:String]{}}
     // One key per function, line and ownership.
     places := [String:Int]{}
@@ -679,14 +704,15 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
             next
         }
         if kind == JET_CLI_PERF_TOPDOWN_KIND {
-            // Its program counter alone, 0 outside the image's code; the
+            // Its program counter alone, as its distance past `code_low`,
+            // 0 outside the image's code; the
             // sample counts at the innermost line of the checked source
             // there, as a counter's does.
             sampled.signals += U64{1}
             event: pc >> JET_CLI_PERF_TOPDOWN_EVENT_BITS
-            own: pc & ((1 << JET_CLI_PERF_TOPDOWN_EVENT_BITS) - 1)
-            if own != 0 {
-                held: jet_cli_perf_samples_own(sampled, jet_cli_perf_samples_chain(sampled, places, resolved, owned, own, false))
+            past: pc & ((1 << JET_CLI_PERF_TOPDOWN_EVENT_BITS) - 1)
+            if past != 0 {
+                held: jet_cli_perf_samples_own(sampled, jet_cli_perf_samples_chain(sampled, places, resolved, owned, code_low + past - 1, false))
                 if held >= 0 {
                     loop sampled.lines[held].topdown.len() <= event {
                         sampled.lines[held].topdown.push(0)
