@@ -1,0 +1,14 @@
+# Under JET_KEEP_GOING a build whose functions lowered as #Todo traps
+# reports each one and exits non-zero: it never prints the built program's
+# effects summary and writes no executable, so no stub reaches a binary that
+# its census does not record.
+fixture: KeepGoingCensusRecordsEveryTrap.fixture
+step: jet build main.jet
+env: JET_KEEP_GOING=1
+env: JET_KEEP_GOING_REPORT={work}/census.tsv
+env: NO_COLOR=1
+exit: nonzero
+stdout: !~ "required effects:" # a built program's summary never prints
+stderr: ~ "2 problems found" # both trapped functions are reported
+file: census.tsv ~ "`broken`: lowered as a keep-going trap" # the trap is a census row
+file: .jet/build/main absent # no executable is written
