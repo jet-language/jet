@@ -794,13 +794,15 @@ NativeSession: struct {
 
     // `text` compiled before the node at `line` and `column` of the source
     // `path`: the kept one, or the evaluator's, which may read `binders`
-    // (NativeEvaluator).
+    // (NativeEvaluator) and builds as the image's `main` runs the program.
     compiled: fn(&self, path: String, line: Int, column: Int, text: String, binders: [NativeEvalBinder]?) -> Shared<NativeEval> NativeEvalRefused! {
         key: "{path}:{line}:{column}:{text}"
         if self.evals.get(key) == .Val(found) -> return Ok(found)
+        facts: self.eval_facts() ?? return Err(err)
+        owned: facts.guard_read().value.owned
         made := NativeEval?{None}
         if self.evaluator == .Val(evaluator) {
-            made = Val(evaluator.compile(path, line, column, text, binders) ?? return Err(err))
+            made = Val(evaluator.compile(path, line, column, text, binders, owned) ?? return Err(err))
         }
         code: made ?? return Err(native_eval_refused("this session has no compiler to evaluate expressions with"))
         cell: Shared{code.move()}
@@ -942,7 +944,10 @@ NativeSession: struct {
     eval_facts: fn(&self) -> Shared<NativeEvalImage> NativeEvalRefused! {
         if self.eval_image == .Val(found) -> return Ok(found)
         elf: native_files.read_bytes(self.binary) ?? return Err(native_eval_refused("couldn't read the program `{self.binary}`: {err}"))
-        cell: Shared{NativeEvalImage{symbols: native_fix_symbols(elf), code: native_elf_code(elf)}}
+        symbols: native_fix_symbols(elf)
+        code: native_elf_code(elf)
+        owned: native_eval_owned(symbols, code)
+        cell: Shared{NativeEvalImage{symbols: symbols, code: code, owned: owned}}
         self.eval_image = Val(cell)
         Ok(cell)
     }

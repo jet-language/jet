@@ -293,12 +293,20 @@ frame and `core.perf.plot(name, value)` records a number. Under `jet perf
 run` each writes one row of the timeline that closed `core.log` spans write,
 on the same monotonic clock as the samples: the trace's `spans` keep them as
 `zone`, `frame_mark` and `plot` rows beside the `log_span` rows, a plot's
-`symbol.name` reading `moved = 499`. `jet perf view` lists each zone name
-heaviest first (`zone physics count=5 total=81234ns longest=20311ns`), the
-frames' mean and longest interval and each plot's last value, and Canvas's
-profile view draws the zones on its zones lane. Outside a perf run a zone
-costs a call and a compare at its open and a call at its close; frame marks
-and plots cost a call each.
+`symbol.name` reading `moved = 499`. Each CPU-time sample's record ends in
+its time on that clock and its task, so a zone holds the samples its task
+took between its open and its close, nested zones too. `jet perf view` lists
+each zone name heaviest first with those samples and the source lines most
+of them were on (`zone solve count=5 samples=41 total=81234ns
+longest=20311ns · main.jet:12 38 · main.jet:11 3`), the frames' mean and
+longest interval and each plot's last value; its timeline shows each zone
+row that holds samples with how many and its hottest line
+(`[2100..9800] main.jet#solve · 9 samples · main.jet:12`). The `zones`
+receipt section keeps both: per zone name `samples` and `lines`, and per
+sampled zone row of the trace `sampled`. Canvas's profile view draws the
+zones on its zones lane. Outside a perf run a zone costs a call and a
+compare at its open and a call at its close; frame marks and plots cost a
+call each.
 
 `jet perf compare base.jettrace head.jettrace` sets the last heap snapshot
 of each trace against each other when both kept one, and
@@ -582,8 +590,8 @@ window. It leaves `<temp>/jet-flight-<pid>.samples.zones` beside the ring,
 which the writer's next publication answers by setting the word and writing
 the zone, frame, plot and log span rows to `.samples.spans`. It then removes
 the request, so the next publication clears the word, and reads the rows into
-the trace beside the ring's. Tests/Cases/Perf/attach_turns_zones_on.case is
-the worked example.
+the trace beside the ring's, each zone holding the ring's samples inside it.
+Tests/Cases/Perf/attach_turns_zones_on.case is the worked example.
 
 A stop that ends an observed process (a panic, a trap, a contract failure)
 writes a typed dump while the stopping stack is whole:

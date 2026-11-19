@@ -1207,10 +1207,12 @@ jet_cli_perf_log_span_summary: fn(trace: CanonicalJSON) -> String? Never! {
 
 // The core.perf zones, frame marks and plots of the trace's `zones`
 // receipt section (jet_cli_perf_zones_section): each zone name with how
-// many closed, their total and longest time, heaviest first; the frames
-// with how many and their mean and longest interval; and each plot with how
-// many values and its last. The section counts every one the run closed,
-// the spans past the trace's row limit too.
+// many closed, the CPU-time samples taken inside them, their total and
+// longest time, heaviest first, and the lines of the source most of those
+// samples were on, each with its samples; the frames with how many and
+// their mean and longest interval; and each plot with how many values and
+// its last. The section counts every one the run closed, the spans past the
+// trace's row limit too.
 jet_cli_perf_zone_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     lines := [String]{}
     items: jet_cli_perf_rows(trace, "receipt_sections") ?? return lines
@@ -1218,14 +1220,26 @@ jet_cli_perf_zone_lines: fn(trace: CanonicalJSON) -> [String] Never! {
         section: trace_receipt_section_from_json(item) ?? next
         if section.name != "zones" -> next
         fields: jettrace_object_view(section.value, "receipt zones") ?? next
+        source: jet_cli_perf_field_text(fields, "source") ?? ""
         if jet_cli_perf_key(fields, "zones") == .Val(zones_at) {
             if jettrace_array(fields[zones_at].value, "receipt zones.zones") == .Ok(zones) {
                 loop zone in zones {
                     name: jet_cli_perf_member_text(zone, "name") ?? ""
                     count: jet_cli_perf_member_number(zone, "count") ?? 0
+                    samples: jet_cli_perf_member_number(zone, "samples") ?? 0
                     total: jet_cli_perf_member_number(zone, "total_ns") ?? 0
                     longest: jet_cli_perf_member_number(zone, "longest_ns") ?? 0
-                    lines.push("zone {name} count={count} total={total}ns longest={longest}ns")
+                    hot := ""
+                    zone_fields: jettrace_object_view(zone, "receipt zones.zones") ?? next
+                    if jet_cli_perf_key(zone_fields, "lines") == .Val(lines_at) {
+                        if jettrace_array(zone_fields[lines_at].value, "receipt zones.zones.lines") == .Ok(held) {
+                            loop row in held {
+                                line: jet_cli_perf_member_number(row, "line") ?? next
+                                hot = "{hot} · {source}:{line} {jet_cli_perf_member_number(row, "samples") ?? 0}"
+                            }
+                        }
+                    }
+                    lines.push("zone {name} count={count} samples={samples} total={total}ns longest={longest}ns{hot}")
                 }
             }
         }
@@ -1253,12 +1267,16 @@ jet_cli_perf_zone_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     lines
 }
 
-// One zone name's closed zones (jet_cli_perf_zones_section).
+// One zone name's closed zones (jet_cli_perf_zones_section): with the
+// CPU-time samples their tasks took inside them, and those samples by the
+// line of the checked source they were on.
 JetCLIPerfZoneTotal: struct {
     name: String,
     count: Int,
     total: Int,
     longest: Int,
+    samples: Int,
+    lines: [Int:Int],
 }
 
 // One plot's values (jet_cli_perf_zones_section): how many, and its last.
@@ -1716,7 +1734,9 @@ jet_cli_perf_total_rows: fn(totals: JetCLIPerfLineTotals) -> [JetCLIPerfProfileR
     loop row in totals.rows -> JetCLIPerfProfileRow{symbol: "{totals.names[row.path]}#{totals.names[row.function]}", clock: "cpu", weight: row.samples, line: Val(row.line), inclusive: None, allocations: None, events: ""}
 }
 
-// `ascii_timeline`.
+// `ascii_timeline`. A zone row that holds CPU-time samples
+// (jet_cli_perf_zone_samples) shows them, up to 8 such rows besides the
+// other spans.
 jet_cli_perf_timeline: fn(trace: CanonicalJSON) -> [String] Never! {
     rows := [String]{}
     if jet_cli_perf_rows(trace, "browser") == .Ok(items) {
@@ -1728,9 +1748,11 @@ jet_cli_perf_timeline: fn(trace: CanonicalJSON) -> [String] Never! {
         }
     }
     if jet_cli_perf_rows(trace, "spans") == .Ok(items) {
-        // Up to 8 task and log spans and up to 8 tasks' waits, all on the
-        // one clock of every span.
+        // Up to 8 task and log spans, up to 8 zones that hold samples and
+        // up to 8 tasks' waits, all on the one clock of every span.
+        sampled: jet_cli_perf_zone_samples(trace)
         spans := 0
+        zones := 0
         waits := 0
         loop item in items {
             if (jet_cli_perf_member_text(item, "status") ?? "") != "captured" -> next
@@ -1742,9 +1764,16 @@ jet_cli_perf_timeline: fn(trace: CanonicalJSON) -> [String] Never! {
                 rows.push("[{start}..{end}] {jet_cli_perf_wait_text(item)}")
                 next
             }
+            row: "[{start}..{end}] {jet_cli_perf_member_symbol(item) ?? "span"}"
+            if sampled.get(row) == .Val(held) {
+                if zones >= 8 -> next
+                zones += 1
+                rows.push("{row}{held}")
+                next
+            }
             if spans >= 8 -> next
             spans += 1
-            rows.push("[{start}..{end}] {jet_cli_perf_member_symbol(item) ?? "span"}")
+            rows.push(row)
         }
     }
     if jet_cli_perf_rows(trace, "io") == .Ok(items) {
@@ -1757,4 +1786,30 @@ jet_cli_perf_timeline: fn(trace: CanonicalJSON) -> [String] Never! {
         }
     }
     rows
+}
+
+// The zone rows of the trace's `zones` receipt section that hold CPU-time
+// samples (jet_cli_perf_zones_section), each by its timeline row, `[start..end]
+// path#name`: how many samples, and the line of the source most were on.
+jet_cli_perf_zone_samples: fn(trace: CanonicalJSON) -> [String:String] Never! {
+    sampled := [String:String]{}
+    items: jet_cli_perf_rows(trace, "receipt_sections") ?? return sampled
+    loop item in items {
+        section: trace_receipt_section_from_json(item) ?? next
+        if section.name != "zones" -> next
+        fields: jettrace_object_view(section.value, "receipt zones") ?? next
+        source: jet_cli_perf_field_text(fields, "source") ?? ""
+        at: jet_cli_perf_key(fields, "sampled") ?? next
+        rows: jettrace_array(fields[at].value, "receipt zones.sampled") ?? next
+        loop row in rows {
+            name: jet_cli_perf_member_text(row, "name") ?? next
+            start: jet_cli_perf_member_integer(row, "start_ns") ?? next
+            end: jet_cli_perf_member_integer(row, "end_ns") ?? next
+            samples: jet_cli_perf_member_number(row, "samples") ?? next
+            line: jet_cli_perf_member_number(row, "line") ?? 0
+            noun: if samples == 1 -> "sample" else -> "samples"
+            sampled["[{start}..{end}] {source}#{name}"] = if line > 0 -> " · {samples} {noun} · {source}:{line}" else -> " · {samples} {noun}"
+        }
+    }
+    sampled
 }

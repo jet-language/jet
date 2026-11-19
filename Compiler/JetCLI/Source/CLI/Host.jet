@@ -1607,8 +1607,10 @@ jet_cli_plugin_needs: fn(result: JetDriverCompileResult) -> [String] Never! {
 }
 
 // `roots` are checked function keys built beside the entry (IRChecks.roots):
-// `jet debug`'s evaluated expression (DebugCompile.jet).
-jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs, harness: IRTestHarness?, options: BuildOptions, runtime: JetCLIRuntimeExports, census: &[JetDriverIceRow], file: String, root: String, roots: [String]{[String]{}}) -[FS, Env, Time, Exec.Args]> JetCLINativeProgram Never! {
+// `jet debug`'s evaluated expression (DebugCompile.jet). Without `own` the
+// program keeps its process root even where its stops need none, as the
+// image an evaluation is placed in does when its `main` doesn't own it.
+jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs, harness: IRTestHarness?, options: BuildOptions, runtime: JetCLIRuntimeExports, census: &[JetDriverIceRow], file: String, root: String, roots: [String]{[String]{}}, own: Bool{true}) -[FS, Env, Time, Exec.Args]> JetCLINativeProgram Never! {
     trace_sink: result.trace_sink
     level: jet_cli_native_level(options)
     checked := inputs.move()
@@ -1669,7 +1671,7 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     // web build keeps them: its loader always runs the entry under the
     // runtime partition's root (jet_rt_main), so a stop with no stop edge
     // after it would reach the trap that follows it.
-    if harness == None && build_options_value(options, "os") != "web" {
+    if own && harness == None && build_options_value(options, "os") != "web" {
         _ := ir_entry_own(built.program)
     }
     // A runtime call the runtime does not export would fail the whole link;
@@ -2740,7 +2742,7 @@ jet_cli_run_recorded: fn(executable: X64Executable, file: String, program_args: 
     if sync.len() == 0 {
         return jet_cli_prove_refused(jet_cli_replay_unfinalized("the program ended (status {code}) without writing its sync-order log"), color, false)
     }
-    path: jet_cli_replay_record_finish(recording, code, sync) ?? return jet_cli_prove_refused(err, color, false)
+    path: jet_cli_replay_record_finish(recording, code, sync, program_args) ?? return jet_cli_prove_refused(err, color, false)
     cli_term.eprint("jet run: recorded replay `{path}`")
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: x64_process_mirror(status)}
 }
@@ -3238,7 +3240,7 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
     exit_code: if passed -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR
     recorded := ""
     if replay_record == .Val(recording) {
-        path: jet_cli_replay_record_finish(recording, exit_code, [U8]{}) ?? return jet_cli_prove_refused(err, color, options.json)
+        path: jet_cli_replay_record_finish(recording, exit_code, [U8]{}, [String]{}) ?? return jet_cli_prove_refused(err, color, options.json)
         if !options.json -> recorded = "jet test: recorded replay `{path}`\n"
     }
     show: options.capture == "all" || (!passed && options.capture == "failed")

@@ -1,0 +1,24 @@
+# `jet debug --replay=NAME` reruns the run `jet run --record=NAME` made with
+# the program arguments that run was given, so a replay prints the recorded
+# output without the arguments typed again. The same arguments given again
+# are the same run; other ones are refused before anything runs, since a
+# replay reproduces the recorded run. The empty stdin runs each replay to its
+# end.
+fixture: ReplayRunsTheRecordedArguments.fixture
+env: NO_COLOR=1
+step: jet run --record=args prog.jet -- 5
+exit: 0
+stdout: ~ "n=5 square=25\n" # the recorded run is given 5
+stderr: ~ "jet run: recorded replay `.jet/replays/args.jetproof-replay`" # and is recorded
+step: jet debug --replay=args prog.jet
+exit: 0
+stdout: ~ "n=5 square=25\nProgram finished\n" # the replay runs with the recorded 5, not the default 7
+stdout+stderr: !~ "replay diverged" # the replay stays faithful to the recording
+step: jet debug --replay=args prog.jet -- 5
+exit: 0
+stdout: ~ "n=5 square=25\nProgram finished\n" # the recorded arguments given again are the same run
+step: jet debug --replay=args prog.jet -- 6
+exit: 2
+stderr: ~ "reruns a run that had other program arguments" # other arguments are refused
+stderr: ~ "the recording ran with `5`" # naming the recorded ones
+stdout: !~ "square=" # before the program runs

@@ -282,10 +282,18 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     }
     capture.policy.allowlist = parsed.allowlist.move()
     // The core.log spans the program closed, which its runtime keeps beside
-    // the samples, and the tasks' waits and wakes and the file and network
-    // transfers it recorded among them, each on the clock of `started`.
+    // the samples, with the CPU-time samples each zone holds, and the tasks'
+    // waits and wakes and the file and network transfers it recorded among
+    // them, each on the clock of `started`.
     if samples == .Val(file) && parsed.source == .Val(source) {
-        jet_cli_perf_log_spans_read(capture, "{file}.spans", source, started.start_ns)
+        if {
+            sampled == .Val(found) -> {
+                jet_cli_perf_log_spans_read(capture, "{file}.spans", source, started.start_ns, found.timed)
+            }
+            else -> {
+                jet_cli_perf_log_spans_read(capture, "{file}.spans", source, started.start_ns, [JetCLIPerfTimed]{})
+            }
+        }
     }
     if parsed.source.move() == .Val(source) {
         if sampled.move() == .Val(found) {
@@ -427,6 +435,8 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
         // attach has no start of its own on it.
         origin := 0
         if spans == .Val(taken) -> origin = jet_cli_perf_spans_first(taken)
+        // The ring's CPU-time samples, which the window's zones hold.
+        timed := [JetCLIPerfTimed]{}
         if flight.move() == .Val(found) {
             loop wait in found.waits {
                 if origin == 0 || wait.start_ns < origin -> origin = wait.start_ns
@@ -434,10 +444,11 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
             loop transfer in found.transfers {
                 if origin == 0 || transfer.start_ns < origin -> origin = transfer.start_ns
             }
+            timed = found.timed.move()
             jet_cli_perf_waits_read(capture, found.waits.move(), found.wakes, found.spawns, found.transfers, path, origin)
             jet_cli_perf_io_read(capture, found.transfers.move(), path, origin)
         }
-        if spans == .Val(taken) -> jet_cli_perf_log_spans_read(capture, taken, path, origin)
+        if spans == .Val(taken) -> jet_cli_perf_log_spans_read(capture, taken, path, origin, timed)
     } else if live_error == None {
         return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2102", "live observe snapshot found, but `--source` is required", "domain capture must attribute facts to a Jet symbol identity", "run `jet perf attach {target_pid} --source <file.jet>`", color), exit_code: JET_DRIVER_EXIT_USAGE}
     }

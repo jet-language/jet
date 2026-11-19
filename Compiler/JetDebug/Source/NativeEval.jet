@@ -25,9 +25,11 @@ NativeEvalRefused: struct {
 // program, or why it can't be. `binders` are the variables of the selected
 // frame's function the text's names may read there (NativeSession
 // eval_binders); None when the session asks with no stopped frame or where
-// the image can't list them (an inlined run).
+// the image can't list them (an inlined run). `owned` is whether the
+// image's `main` owns the program's run (native_eval_owned): the compile
+// owns its main only then, so its functions' code is the image's.
 NativeEvaluator: trait {
-    compile: fn(self, path: String, line: Int, column: Int, text: String, binders: [NativeEvalBinder]?) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval NativeEvalRefused!,
+    compile: fn(self, path: String, line: Int, column: Int, text: String, binders: [NativeEvalBinder]?, owned: Bool) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval NativeEvalRefused!,
 }
 
 // A variable a name of an evaluated expression may read at the stop: its
@@ -92,10 +94,12 @@ NativeEvalValue: struct {
 }
 
 // The image's code facts an evaluation places code against, read once:
-// its sized symbols and its `.text`.
+// its sized symbols, its `.text`, and whether its `main` owns the program's
+// run (native_eval_owned).
 NativeEvalImage: struct {
     symbols: NativeFixSymbols,
     code: NativeCode,
+    owned: Bool,
 }
 
 // The captures a call passes in its registers: one register of a call's six
@@ -104,6 +108,31 @@ NATIVE_EVAL_CAPTURES: 5
 
 native_eval_refused: fn(message: String) -> NativeEvalRefused Never! {
     NativeEvalRefused{message: message}
+}
+
+// Whether the image's `main` (`symbols` and `code` its sized symbols and
+// `.text`) owns the program's run (JetIR EntryOwned.jet): its leading calls
+// (JetBackend x64_object_main) reach jet_rt_main_owned_start, where a rooted
+// main hands the entry to jet_rt_main. An owned program's functions keep no
+// stop points, no cleanup scopes and no session propagation, so a build
+// that owns its main where the image doesn't (or the reverse) differs from
+// the image in every function. Both symbols are present in an image whose
+// runtime keeps its dead code, so the code decides.
+native_eval_owned: fn(symbols: NativeFixSymbols, code: NativeCode) -> Bool Never! {
+    main: native_fix_runtime_address(symbols, "main")
+    start: native_fix_runtime_address(symbols, "jet_rt_main_owned_start")
+    // `push rbx`, then a `call rel32` each.
+    at := main - code.address + 1
+    if main == 0 || start == 0 || at < 1 || at > code.bytes.len() || code.bytes[at - 1] != 0x53 {
+        return false
+    }
+    loop at + 5 <= code.bytes.len() && code.bytes[at] == 0xE8 {
+        if code.address + at + 5 + native_number(code.bytes, at + 1, 4, X64DebugEncoding.Signed) == start {
+            return true
+        }
+        at += 5
+    }
+    false
 }
 
 // Whether `text` is one name, as a local's: letters, digits and `_` (any
@@ -423,6 +452,20 @@ native_log_shown: fn(image: NativeImage, memory: NativeMemory, result: NativeEva
     loop name in names -> assert(native_eval_is_name(name))
     expressions: [String]{"", "2x", "a.b", "a + 1", "f()", "xs[0]", "a b"}
     loop text in expressions -> assert(!native_eval_is_name(text))
+}
+
+#Test("an image's main owns its program's run when its leading calls reach the owned start") {
+    symbols := NativeFixSymbols{slots: [String:Int]{}, named: [[NativeFixSymbol]]{}}
+    native_fix_symbol_add(symbols, "main", NativeFixSymbol{address: 0x1000, size: 32})
+    // push rbx; two calls; the call to jet_rt_main_owned_start at 0x3000.
+    owned: [U8]{0x53, 0xE8, 0, 0, 0, 0, 0xE8, 0, 0, 0, 0, 0xE8, 0xF0, 0x1F, 0, 0, 0xC3}
+    // push rbx; two calls; lea rdi; a call to the same address.
+    rooted: [U8]{0x53, 0xE8, 0, 0, 0, 0, 0xE8, 0, 0, 0, 0, 0x48, 0x8D, 0x3D, 0, 0, 0, 0, 0xE8, 0xE9, 0x1F, 0, 0, 0xC3}
+    assert(!native_eval_owned(symbols, NativeCode{address: 0x1000, bytes: owned}))
+    native_fix_symbol_add(symbols, "jet_rt_main_owned_start", NativeFixSymbol{address: 0x3000, size: 16})
+    assert(native_eval_owned(symbols, NativeCode{address: 0x1000, bytes: owned}))
+    assert(!native_eval_owned(symbols, NativeCode{address: 0x1000, bytes: rooted}))
+    assert(!native_eval_owned(symbols, NativeCode{address: 0x2000, bytes: owned}))
 }
 
 #Test("an expression's names are its words that don't start with a digit, each once") {

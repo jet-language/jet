@@ -16,7 +16,7 @@
 // (NATIVE_FORK_BUDGET_MS), and the fork is killed after its result is read.
 use {
     native_fork_files: core.files
-    jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_TRACE_EVENT_CLONE, X64_TRACE_EVENT_EXIT, X64_TRACE_ORIG_RAX, X64_TRACE_R10, X64_TRACE_R8, X64_TRACE_R9, X64_TRACE_RAX, X64_TRACE_RCX, X64_TRACE_RDI, X64_TRACE_RDX, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, x64_eval_fork_filter, x64_jetline_find, x64_jetline_line, x64_trace_event_message, x64_trace_of, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_set_registers, x64_trace_signal, x64_trace_wait_for, x64_trace_wait_within]
+    jet_backend.[X64Trace, X64TraceResume, X64_TRACE_EVENT_CLONE, X64_TRACE_EVENT_EXIT, X64_TRACE_ORIG_RAX, X64_TRACE_R10, X64_TRACE_R8, X64_TRACE_R9, X64_TRACE_RAX, X64_TRACE_RCX, X64_TRACE_RDI, X64_TRACE_RDX, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, x64_eval_fork_filter, x64_jetline_find, x64_jetline_line, x64_trace_event_message, x64_trace_of, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_set_registers, x64_trace_signal, x64_trace_wait_for, x64_trace_wait_within, x64_trace_write]
 }
 
 // A fork of the stopped program: its trace (the program's helper traces
@@ -187,15 +187,12 @@ native_fork_syscall: fn(fork: NativeFork, number: Int, arguments: [Int]) -> Int 
     Ok(after[X64_TRACE_RAX])
 }
 
-// Write `bytes` at `address` of the stopped fork, a word at a time, the last
-// word padded with zeros. False when it can't be written.
+// Write `bytes` at `address` of the stopped fork through its `/proc` mem
+// file (JetBackend x64_trace_write): a few system calls of this process,
+// where a PTRACE_POKEDATA a word is one helper round trip each, and an
+// expression's code is thousands of words. False when it can't be written.
 native_fork_poke: fn(fork: NativeFork, address: Int, bytes: [U8]) -> Bool Never! {
-    loop word in 0..<((bytes.len() + 7) >> 3) {
-        if !x64_trace_poke(fork.trace, address + 8 * word, I64{native_number(bytes, 8 * word, 8, X64DebugEncoding.Signed)}) {
-            return false
-        }
-    }
-    true
+    x64_trace_write(fork.trace, address, bytes)
 }
 
 // One mapping of the program, as /proc/<pid>/smaps lists it: its range, its
@@ -208,11 +205,16 @@ NativeForkMapping: struct {
 }
 
 // The program `pid`'s mappings, from its smaps; empty when they can't be
-// read.
+// read. Of each mapping's lines only its first, which starts with its
+// range's hex digits, and its VmFlags are read.
 native_fork_mappings: fn(pid: Int) -[FS.Read]> [NativeForkMapping] {
     text: native_fork_files.read("/proc/{pid}/smaps") ?? return [NativeForkMapping]{}
     mappings := [NativeForkMapping]{}
     loop line in text.split("\n") {
+        if line.len() == 0 -> next
+        first: line.bytes()[0]
+        head: (first >= 48 && first <= 57) || (first >= 97 && first <= 102)
+        if !head && !line.starts_with("VmFlags:") -> next
         fields := [String]{}
         loop field in line.split(" ") {
             if field.len() > 0 -> fields.push(field)
@@ -306,15 +308,11 @@ native_fork_prepare: fn(fork: NativeFork, pid: Int, sites: [Int:Int], probes: [I
         }
         _ := native_fork_syscall(fork, NATIVE_FORK_SYS_MPROTECT, [Int]{mapping.low, mapping.high - mapping.low, protection}) ?? return Err(err)
     }
-    loop (address, byte) in sites {
-        word: x64_trace_peek(fork.trace, address) ?? next
-        _ := x64_trace_poke(fork.trace, address, word & I64{-256} | I64{byte})
-    }
+    loop (address, byte) in sites -> _ := native_fork_poke(fork, address, [U8]{U8{byte}})
     // A probe where a breakpoint traps replaced the breakpoint's trap byte.
     loop (address, byte) in probes {
         if sites.has_key(address) -> next
-        word: x64_trace_peek(fork.trace, address) ?? next
-        _ := x64_trace_poke(fork.trace, address, word & I64{-256} | I64{byte})
+        _ := native_fork_poke(fork, address, [U8]{U8{byte}})
     }
     Ok()
 }

@@ -1,10 +1,18 @@
 // A game-style loop: each frame runs a `physics` zone and, inside it, a
-// `broadphase` zone, plots the bodies it moved and marks the frame's end.
+// `broadphase` zone per body and a `solve` zone that takes most of the
+// frame's CPU time, plots the bodies it moved and marks the frame's end.
 // A core.log span around the loop writes the same timeline. The program
 // prints what it computed, the same with or without `jet perf run`.
 use {
     log: core.log
     perf: core.perf
+}
+
+settle: fn(bodies: Int) -> Int Never! {
+    _solve: perf.zone("solve")
+    acc := 0
+    loop i in 0..<bodies * 30000 -> acc = (acc * 31 + i) % 1000003
+    acc
 }
 
 step: fn(bodies: Int) -> Int Never! {
@@ -14,7 +22,7 @@ step: fn(bodies: Int) -> Int Never! {
         _broadphase: perf.zone("broadphase")
         moved += body % 3
     }
-    moved
+    moved + settle(bodies) % 2
 }
 
 run: fn() {
