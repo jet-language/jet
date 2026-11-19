@@ -1214,9 +1214,9 @@ NativeSession: struct {
         None
     }
 
-    // The current thread, stopped by a trap, at a placed condition's trap:
-    // put on the breakpoint's address, one past it as a trap byte there
-    // leaves the pc, with `held` saying whether it held (2); or, its
+    // The current thread, stopped by a trap, at a placed condition's trap,
+    // counted: put on the breakpoint's address, one past it as a trap byte
+    // there leaves the pc, with `held` saying whether it held (2); or, its
     // breakpoint gone, on the address to run on (1). At the trap of a hit
     // that filled a logpoint's ring it stays, to run on once the debugger
     // has read the ring (3). 0 for any other trap.
@@ -1224,6 +1224,7 @@ NativeSession: struct {
         if self.placed.len() == 0 -> return Ok(0)
         registers := self.registers() ?? return Err(err)
         trap: self.placed_trap(registers[X64_TRACE_RIP]) ?? return Ok(0)
+        self.placed[trap.row].traps += 1
         if self.placed[trap.row].ring != 0 && trap.truth -> return Ok(3)
         live: self.placed[trap.row].live
         registers[X64_TRACE_RIP] = self.placed[trap.row].address + if live -> 1 else -> 0
@@ -1422,14 +1423,24 @@ NativeSession: struct {
     }
 
     // The console's `breaks`: each breakpoint and watch by number, a
-    // breakpoint as its rule lists it, else by where it traps.
+    // breakpoint as its rule lists it, else by where it traps, then how
+    // many hits of its code placed in the program trapped, once any has.
     breaks_text: fn(self) -> String Never! {
         if self.breakpoints.len() == 0 && self.watches.len() == 0 -> return "No breakpoints\n"
         rows := [{number: Int, text: String}]{}
         loop breakpoint in self.breakpoints {
             frame: native_frame_at(self.image, breakpoint.addresses[0])
             shown: if self.rules.get(breakpoint.number) == .Val(rule) -> "{rule.shown}" else -> "break {frame.file}:{frame.line}"
-            rows.push({number: breakpoint.number, text: shown})
+            traps := 0
+            loop placed in self.placed {
+                if placed.number == breakpoint.number -> traps += placed.traps
+            }
+            counted: if {
+                traps == 0 -> ""
+                traps == 1 -> "  (1 trap)"
+                else -> "  ({traps} traps)"
+            }
+            rows.push({number: breakpoint.number, text: "{shown}{counted}"})
         }
         loop watch in self.watches -> rows.push({number: watch.number, text: "watch {watch.shown}"})
         rows.sort_by(fn(left: {number: Int, text: String}, right: {number: Int, text: String}) { left.number <=> right.number })

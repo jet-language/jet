@@ -1,0 +1,28 @@
+use time: core.time
+
+check: fn(n: Int) -> Int {
+    step: n % 7
+    step
+}
+
+sum_to: fn(n: Int) -> Int {
+    total := 0
+    loop i in 0..<n -> total += check(i)
+    total
+}
+
+run: fn() -[IO, Time]> {
+    started: time.start()
+    first: task { sum_to(20000) }
+    second: task { sum_to(20000) }
+    print("two tasks {first.join() ?? 0} {second.join() ?? 0}")
+    fresh := 0
+    loop _ in 0..<200 {
+        late: task { sum_to(100) }
+        fresh += late.join() ?? 0
+    }
+    took: time.elapsed(started).ns
+    print(if took < 1000000000 -> "fresh fibers under a second" else -> "fresh fibers took {took} ns")
+    held: task { check(1000003) }
+    print("fresh {fresh} held {held.join() ?? 0}")
+}

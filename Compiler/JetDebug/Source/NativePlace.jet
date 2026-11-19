@@ -131,7 +131,10 @@ NativePlaceCode: struct {
 // stub, and the region it and the code it calls take. A logpoint's ring
 // (NativePlaceRing) is at `ring` (0 for a condition), of `slots` slots of
 // `parts` words. `live` is false once the jump is gone; the region stays,
-// since a thread may still be in it.
+// since a thread may still be in it. `traps` counts the hits that left the
+// program for the debugger at one of its traps: the code keeps no state per
+// thread or fiber, so that is a hit where the condition held, called out or
+// filled the ring, never one on a thread or fiber new to it.
 NativePlaced: struct {
     number: Int,
     address: Int,
@@ -147,6 +150,7 @@ NativePlaced: struct {
     ring: Int{0},
     slots: Int{0},
     parts: Int{0},
+    traps: Int{0},
 }
 
 // Whether a legacy prefix (lock, rep, a segment, operand or address size).
