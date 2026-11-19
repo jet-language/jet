@@ -405,6 +405,32 @@ The shared lifecycle states are `starting`, `building`, `ready`, `error`,
 `unavailable`, and `stopped`. A host shows the state and its diagnostic facts;
 it does not turn an unavailable panel or command into a silent no-op.
 
+## The debugger console
+
+`jet debug <file.jet>` stops at the start of `run` (or at `--break
+<file>:<line>`) and reads one command a line at the `(Jet) ` prompt.
+D-DBG-VERBS1=A names the commands:
+
+- `step` (`s`), `next` (`n`), `continue` (`c`) and `finish` (`f`) run the
+  program.
+- `break <line|file:line|function> [if <expr>]` (`b`) sets a breakpoint.
+  `break 12` is line 12 of the file being debugged. With `if`, the breakpoint
+  stops only when the Jet expression holds over the frame's locals. A
+  condition that is not a Bool, or can't be evaluated, stops and says why.
+- `log <file:line> "<text with {expr}>"` sets a logpoint. It prints its
+  message with each `{expr}` filled in, then the program runs on.
+- `breaks` lists the breakpoints by number, as `  2 break cart.jet:88 if
+  total < 0`; `delete <n>` removes one.
+- `frame <n>` selects a frame as `backtrace` (`bt`) numbers it. `up` moves
+  toward the callers and `down` back. `locals` and `print` (`p`) read the
+  selected frame until the program moves.
+- `help` (`h`) lists the commands and `quit` (`q`) ends the session.
+
+A step that passes a breakpoint which does not stop goes on to where the
+step would have ended. `jet debug --dap` settles every run the same way
+(`Compiler/JetDebug/Source/Native.jet`, NativeSession.settle), and both read
+expressions with the one evaluator, `Compiler/JetDebug/Source/Debug/Eval.jet`.
+
 ## Recorder boundary
 
 D-RUN-RECORD1=A ratifies `--record=<name>` on `run`, `dev`, and `test` as the

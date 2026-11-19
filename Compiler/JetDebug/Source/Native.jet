@@ -81,6 +81,30 @@ NativeBreakpoint: struct {
     addresses: [Int],
 }
 
+// What a breakpoint does when it is hit: stop when its condition holds (or
+// it has none), or log its message and run on; and how the console's
+// `breaks` lists it (`break cart.jet:88 if total < 0`).
+NativeRule: struct {
+    condition: DebugExpression?,
+    log: DebugExpression?,
+    shown: String,
+}
+
+// What a run said before it settled: the program's output (`stdout`), a
+// logpoint's message (`console`), or why a condition stopped it (`stderr`).
+NativeSaid: struct {
+    category: String,
+    text: String,
+}
+
+// Where a run settled: its stop, the breakpoint the stop reports (None for
+// the end of a step, a pause or the program), and what it said on the way.
+NativeSettled: struct {
+    stop: NativeStop,
+    hit: Int?,
+    said: [NativeSaid],
+}
+
 // A trap byte written into the program's code: its address and the byte it
 // replaced.
 NativeSite: struct {
@@ -143,6 +167,9 @@ NativeSession: struct {
     // pid.
     started: Bool,
     breakpoints: [NativeBreakpoint],
+    // What each breakpoint with a condition, a log message or a console
+    // listing does when hit, by number; one without stops.
+    rules: [Int:NativeRule],
     numbered: Int,
     sites: [NativeSite],
     selected: Int,
@@ -154,7 +181,7 @@ NativeSession: struct {
         elf: native_files.read_bytes(binary) ?? return Err(NativeDebugError{detail: "couldn't read the program `{binary}`: {err}"})
         image: native_image_load(binary, elf) ?? return Err(NativeDebugError{detail: "`{binary}` has no Jet debug information; build it with `jet build -O0`"})
         native_files.write(output_path, "") ?? return Err(NativeDebugError{detail: "couldn't create the program output file: {err}"})
-        Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: output_path, output_read: 0, started: false, breakpoints: [NativeBreakpoint]{}, numbered: 0, sites: [NativeSite]{}, selected: 0})
+        Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: output_path, output_read: 0, started: false, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [NativeSite]{}, selected: 0})
     }
 
     // A breakpoint on `line` of the Jet source `file` (its base name, as the
@@ -195,6 +222,7 @@ NativeSession: struct {
             if breakpoint.number != number -> kept.push(breakpoint.copy())
         }
         self.breakpoints = kept
+        self.rules.remove(number).drop("a breakpoint placed without a rule has none")
         self.lift_unwanted()
         Ok()
     }
@@ -202,8 +230,33 @@ NativeSession: struct {
     // Remove every breakpoint.
     clear_breakpoints: fn(&self) NativeDebugError! {
         self.breakpoints = [NativeBreakpoint]{}
+        self.rules = [Int:NativeRule]{}
         self.lift_unwanted()
         Ok()
+    }
+
+    // Give breakpoint `number` its condition, log message and listing.
+    set_rule: fn(&self, number: Int, rule: NativeRule) Never! { self.rules[number] = rule }
+
+    // Whether breakpoint `number` is placed.
+    has_breakpoint: fn(self, number: Int) -> Bool Never! {
+        loop breakpoint in self.breakpoints {
+            if breakpoint.number == number -> return true
+        }
+        false
+    }
+
+    // The console's `breaks`: each breakpoint by number, as its rule lists
+    // it, else by where it traps.
+    breaks_text: fn(self) -> String Never! {
+        if self.breakpoints.len() == 0 -> return "No breakpoints\n"
+        text := ""
+        loop breakpoint in self.breakpoints {
+            frame: native_frame_at(self.image, breakpoint.addresses[0])
+            shown: if self.rules.get(breakpoint.number) == .Val(rule) -> "{rule.shown}" else -> "break {frame.file}:{frame.line}"
+            text = "{text}  {breakpoint.number} {shown}\n"
+        }
+        text
     }
 
     // Run the program from its start, with `args`.
@@ -435,24 +488,30 @@ NativeSession: struct {
         text := ""
         if word == {
             "s" | "step" | "n" | "next" | "c" | "continue" | "f" | "finish" -> {
-                moved: self.advance(word) ?? return Err(err)
-                text = self.report(moved, file, lines) ?? return Err(err)
-                return Ok(NativeDebugStep{text: text, stop: moved})
+                short: if word == {
+                    "s" | "step" -> "s"
+                    "n" | "next" -> "n"
+                    "f" | "finish" -> "f"
+                    else -> "c"
+                }
+                settled: self.run(short) ?? return Err(err)
+                loop said in settled.said -> text = "{text}{said.text}"
+                shown: self.report(settled.stop, file, lines) ?? return Err(err)
+                return Ok(NativeDebugStep{text: "{text}{shown}", stop: settled.stop})
             }
-            "b" | "break" -> {
-                at: Int.parse(operand) ?? -1
-                placed := -1
-                if at >= 1 {
-                    if self.break_at(file, at) == {
-                        .Ok(found) -> placed = found ?? -1
-                        .Err(failure) -> return Err(failure)
-                    }
+            "b" | "break" -> text = self.break_command(operand, file) ?? return Err(err)
+            "log" -> text = self.log_command(operand, file) ?? return Err(err)
+            "breaks" -> text = self.breaks_text()
+            "delete" -> {
+                number: Int.parse(operand) ?? -1
+                if !self.has_breakpoint(number) {
+                    return Ok(NativeDebugStep{text: "No breakpoint `{operand}`; `breaks` lists them\n", stop: stop})
                 }
-                text = if {
-                    at < 1 -> "Break needs a line number of {file}, as `break 12`\n"
-                    placed < 0 -> "No code on {file}:{at}\n"
-                    else -> "Breakpoint set  {file}:{at}\n"
-                }
+                self.delete_breakpoint(number) ?? return Err(err)
+                text = "Deleted breakpoint {number}\n"
+            }
+            "frame" | "up" | "down" -> {
+                text = self.frame_command(word, operand, file, lines) ?? return Err(err)
             }
             "locals" -> {
                 locals := self.locals() ?? return Err(err)
@@ -495,6 +554,164 @@ NativeSession: struct {
             stop = if caller && depth <= NATIVE_DEBUG_RUNTIME_DEPTH -> self.step_out() ?? return Err(err) else -> self.continue_run() ?? return Err(err)
         }
         Ok(stop)
+    }
+
+    // Run `word` (`c`, `n`, `s` or `f`) and settle where it stops.
+    run: fn(&self, word: String) -> NativeSettled NativeDebugError! {
+        depth: if word == "c" -> 0 else -> self.jet_depth() ?? return Err(err)
+        first: self.advance(word) ?? return Err(err)
+        self.settle(first, word, depth)
+    }
+
+    // The stop to report after `word` (begun `depth` Jet frames deep) first
+    // stopped at `first`. A breakpoint hit that does not stop
+    // (native_debug_holds) runs on: a continue continues, and a step goes on
+    // to where it would have stopped. A step whose skipped hit was in a call
+    // it steps over returns from the call and steps again; a step out
+    // returns until it is out.
+    settle: fn(&self, first: NativeStop, word: String, depth: Int) -> NativeSettled NativeDebugError! {
+        said := [NativeSaid]{}
+        stop := first
+        returning := false
+        loop stop.kind == NativeStopKind.Paused {
+            hit: native_debug_hit_breakpoint(stop)
+            skipped := false
+            if hit == .Val(number) {
+                ruled: if self.rules.get(number) == .Val(rule) -> rule.condition == .Val(_) || rule.log == .Val(_) else -> false
+                stops := true
+                if ruled {
+                    locals: self.locals() ?? return Err(err)
+                    verdict: if self.rules.get(number) == .Val(rule) -> native_debug_holds(rule, locals) else -> {stops: true, category: "", text: ""}
+                    if verdict.category != "" {
+                        output: self.take_output()
+                        if output != "" -> said.push(NativeSaid{category: "stdout", text: output})
+                        said.push(NativeSaid{category: verdict.category, text: verdict.text})
+                    }
+                    stops = verdict.stops
+                }
+                if stops -> return Ok(NativeSettled{stop: stop, hit: hit, said: said})
+                skipped = true
+            }
+            if !skipped && !returning -> return Ok(NativeSettled{stop: stop, hit: None, said: said})
+            next_word := "c"
+            if word != "c" {
+                here: self.jet_depth() ?? return Err(err)
+                if word == "s" || (word == "n" && here <= depth && !returning) || (word == "f" && here < depth) {
+                    // The step ends here, not the breakpoint that ran on.
+                    stop.reason = "step"
+                    return Ok(NativeSettled{stop: stop, hit: None, said: said})
+                }
+                returning = !(word == "n" && here <= depth)
+                next_word = if returning -> "f" else -> "n"
+            }
+            stop = self.advance(next_word) ?? return Err(err)
+        }
+        Ok(NativeSettled{stop: stop, hit: None, said: said})
+    }
+
+    // The Jet frames on the stack.
+    jet_depth: fn(&self) -> Int NativeDebugError! {
+        frames: self.backtrace() ?? return Err(err)
+        count := 0
+        loop frame in frames {
+            if native_debug_jet_frame(frame) -> count += 1
+        }
+        Ok(count)
+    }
+
+    // A breakpoint on `spec`: `12` (a line of `file`), `cart.jet:88`, or a
+    // function's name. Its number and where it is, or -1 and why it can't
+    // be placed.
+    place_spec: fn(&self, spec: String, file: String) -> {number: Int, shown: String} NativeDebugError! {
+        line := Int.parse(spec) ?? -1
+        in_file := "{file}"
+        if line == -1 && spec.contains(":") {
+            in_file = "{spec.before(":")}"
+            line = Int.parse(spec.after(":")) ?? 0
+        }
+        if line == -1 {
+            entry := -1
+            if self.break_in(spec) == {
+                .Ok(found) -> entry = found ?? -1
+                .Err(failure) -> return Err(failure)
+            }
+            if entry == -1 -> return Ok({number: -1, shown: "No function `{spec}`\n"})
+            return Ok({number: entry, shown: "{spec}"})
+        }
+        if line < 1 {
+            return Ok({number: -1, shown: "`{spec}` is not a line, a file:line or a function\n"})
+        }
+        placed := -1
+        if self.break_at(in_file, line) == {
+            .Ok(found) -> placed = found ?? -1
+            .Err(failure) -> return Err(failure)
+        }
+        if placed == -1 -> return Ok({number: -1, shown: "No code on {in_file}:{line}\n"})
+        Ok({number: placed, shown: "{in_file}:{line}"})
+    }
+
+    // `break <line|file:line|function> [if <expr>]`: a breakpoint that stops
+    // when its condition holds.
+    break_command: fn(&self, operand: String, file: String) -> String NativeDebugError! {
+        spec: operand.before(" if ").trim()
+        condition: if operand.contains(" if ") -> operand.after(" if ").trim() else -> ""
+        if spec == "" -> return Ok("Break needs a line, a file:line or a function, as `break 12`\n")
+        rule := native_debug_rule(condition, "", "") ?? return Ok("Can't use the condition: {err.message}\n")
+        placed: self.place_spec(spec, file) ?? return Err(err)
+        if placed.number < 0 -> return Ok(placed.shown)
+        suffix: if condition == "" -> "" else -> " if {condition}"
+        rule.shown = "break {placed.shown}{suffix}"
+        self.set_rule(placed.number, rule)
+        Ok("Breakpoint set  {placed.shown}{suffix}\n")
+    }
+
+    // `log <file:line> "<text with {expr}>"`: a logpoint, which prints its
+    // message, its `{expr}` parts filled in, and runs on.
+    log_command: fn(&self, operand: String, file: String) -> String NativeDebugError! {
+        quoted: if operand.contains(" ") -> operand.after(" ").trim() else -> ""
+        bytes: quoted.bytes()
+        if bytes.len() < 2 || !quoted.starts_with("\"") || !quoted.ends_with("\"") {
+            return Ok("Log needs a line and a quoted message, as `log cart.jet:90 \"total={{total}}\"`\n")
+        }
+        message: String.from_bytes(bytes[1..<bytes.len() - 1]) ?? ""
+        rule := native_debug_rule("", message, "") ?? return Ok("Can't use the message: {err.message}\n")
+        placed: self.place_spec(operand.before(" "), file) ?? return Err(err)
+        if placed.number < 0 -> return Ok(placed.shown)
+        rule.shown = "log {placed.shown} {quoted}"
+        self.set_rule(placed.number, rule)
+        Ok("Logpoint set  {placed.shown} {quoted}\n")
+    }
+
+    // `frame <n>`, `up` and `down`: select a Jet frame as `bt` numbers them
+    // (#0 innermost, `up` toward the callers), and show it; `locals` and
+    // `print` read the selected frame until the program moves.
+    frame_command: fn(&self, word: String, operand: String, file: String, lines: [String]) -> String NativeDebugError! {
+        frames: self.backtrace() ?? return Err(err)
+        current := 0
+        loop (level, frame) in frames {
+            if level >= self.selected -> break
+            if native_debug_jet_frame(frame) -> current += 1
+        }
+        wanted: if word == {
+            "up" -> current + 1
+            "down" -> current - 1
+            else -> Int.parse(operand) ?? -1
+        }
+        seen := 0
+        loop (level, frame) in frames {
+            if !native_debug_jet_frame(frame) -> next
+            if seen == wanted {
+                _: self.select_frame(level) ?? return Err(err)
+                source: if frame.file == file && frame.line >= 1 && frame.line <= lines.len() -> lines[frame.line - 1] else -> ""
+                locals: self.locals() ?? return Err(err)
+                return Ok("#{wanted}  {frame.function}()  at {frame.file}:{frame.line}\n{frame.line} | {source}\n{native_debug_locals_line(locals)}\n")
+            }
+            seen += 1
+        }
+        if word == "frame" {
+            return Ok("Frame needs a frame number `bt` shows, 0 to {seen - 1}, as `frame 1`\n")
+        }
+        Ok("No frame {if word == "up" -> "above" else -> "below"} #{current}\n")
     }
 
     // The program's new output, then where `stop` left it.
@@ -1287,7 +1504,7 @@ native_debug_image: fn(entry: String, out_dir: String) -> String Never! {
 // both speak it. Every stop prints the Jet source line with its `<- here`
 // caret and the frame's locals; frames without Jet line information (the
 // runtime) are never shown. Each readout starts with a capital.
-NATIVE_DEBUG_HELP: "Commands: step (s), next (n), continue (c), finish (f), break N (b N), locals, print NAME (p NAME), backtrace (bt), help (h), quit (q)"
+NATIVE_DEBUG_HELP: "Commands: step (s), next (n), continue (c), finish (f), break LINE|FILE:LINE|FUNCTION [if EXPR] (b), log FILE:LINE \"TEXT {{EXPR}}\", breaks, delete N, frame N, up, down, locals, print NAME (p NAME), backtrace (bt), help (h), quit (q)"
 
 // The console's prompt.
 NATIVE_DEBUG_PROMPT: "(Jet) "
@@ -1383,6 +1600,38 @@ native_debug_hit_breakpoint: fn(stop: NativeStop) -> Int? Never! {
     if !stop.reason.starts_with("breakpoint ") -> return None
     number: Int.parse(stop.reason.after("breakpoint ").before(".")) ?? return None
     Val(number)
+}
+
+// A breakpoint's rule: `condition` and the logpoint message `log`, each read
+// by the compiler's parser ("" for none), and its `breaks` listing.
+native_debug_rule: fn(condition: String, log: String, shown: String) -> NativeRule DebugEvaluationError! {
+    parsed_condition: if condition.trim() == "" -> DebugExpression?{None} else -> Val(debug_parse_expression(condition) ?? return Err(err))
+    parsed_log: if log == "" -> DebugExpression?{None} else -> Val(debug_parse_message(log) ?? return Err(err))
+    Ok(NativeRule{condition: parsed_condition, log: parsed_log, shown: shown})
+}
+
+// Whether a hit of the breakpoint with `rule`, at a stop whose locals are
+// `locals`, stops: its condition holds (or it has none) and it is not a
+// logpoint; and what the hit says (`category` "" for nothing). A logpoint
+// whose condition holds logs its message instead. A condition that can't be
+// evaluated, or is not a Bool, stops, and says why.
+native_debug_holds: fn(rule: NativeRule, locals: [NativeLocal]) -> {stops: Bool, category: String, text: String} Never! {
+    if rule.condition == .Val(condition) {
+        if debug_eval_condition(condition, locals) == {
+            .Ok(flag) -> {
+                if !flag -> return {stops: false, category: "", text: ""}
+            }
+            .Err(failure) -> return {stops: true, category: "stderr", text: "The breakpoint's condition failed: {failure.message}\n"}
+        }
+    }
+    if rule.log == .Val(message) {
+        text: if debug_eval(message.tables, message.root, locals) == {
+            .Ok(value) -> debug_eval_text(value)
+            .Err(failure) -> "<{failure.message}>"
+        }
+        return {stops: false, category: "console", text: "{text}\n"}
+    }
+    {stops: true, category: "", text: ""}
 }
 
 // Bytes a readout may read: the stopped program's memory, when there is a

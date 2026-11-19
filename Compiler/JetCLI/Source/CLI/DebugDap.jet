@@ -11,7 +11,8 @@
 // `terminated`). One thread, frames are the Jet frames, and a frame's one
 // scope holds its locals as the console shows them, each with its Jet type.
 // A breakpoint may carry a `condition` and a `logMessage`, and `evaluate`
-// answers an expression in a paused frame (DebugEval.jet). A hit whose
+// answers an expression in a paused frame (jet_debug's Debug/Eval.jet). The
+// session settles each run as the `(Jet)` console does: a hit whose
 // condition is false, or a logpoint's hit (which logs its message), does not
 // stop: a continue runs on, and a step goes on to where it would have
 // stopped.
@@ -20,7 +21,7 @@ use {
     dap_files: core.files
     dap_json: core.encoding.json
     dap_term: core.term
-    jet_debug.[DebugExpression, NativeDebugError, NativeLocal, NativeSession, NativeStop, NativeStopKind, debug_parse_expression, debug_parse_message, native_debug_hit_breakpoint, native_debug_jet_frame]
+    jet_debug.[DebugEvaluationError, NativeDebugError, NativeLocal, NativeSaid, NativeSession, NativeSettled, debug_eval, debug_evaluation_error, debug_parse_expression, native_debug_jet_frame, native_debug_rule]
     jet_foundation.[ast_expr, foundation_json_integer, foundation_json_quote]
 }
 
@@ -30,19 +31,6 @@ JetCLIDapBreakpoint: struct {
     line: Int,
     condition: String,
     log: String,
-}
-
-// A placed breakpoint's condition and log message, parsed.
-JetCLIDapRule: struct {
-    condition: DebugExpression?,
-    log: DebugExpression?,
-}
-
-// Where a run stopped, and the breakpoint the stop reports (None for the end
-// of a step, a pause or the program).
-JetCLIDapStop: struct {
-    stop: NativeStop,
-    hit: Int?,
 }
 
 // One request: its sequence number, its command and its arguments' members.
@@ -58,10 +46,9 @@ JetCLIDap: struct {
     seq: Int,
     stop_on_entry: Bool,
     args: [String],
-    // The breakpoints each source file's `setBreakpoints` placed.
+    // The breakpoints each source file's `setBreakpoints` placed; the
+    // session keeps their conditions and log messages.
     placed: [String:[Int]],
-    // The conditions and log messages of the placed breakpoints, by number.
-    rules: [Int:JetCLIDapRule],
     launched: Bool,
 
     handle: fn(&self, session: &NativeSession, input: &&JetCLIDapRequest, entry: String) -[FS, Env, Exec, IO, Time.Wait, FFI.Asm]> Never! {
@@ -141,7 +128,7 @@ JetCLIDap: struct {
                     "stepIn" -> "s"
                     else -> "f"
                 }
-                if self.run(session, word) == {
+                if session.run(word) == {
                     .Ok(stop) -> {
                         self.report(session, stop, if word == "c" -> "pause" else -> "step")
                     }
@@ -175,21 +162,15 @@ JetCLIDap: struct {
             }
         }
         old: self.placed.get(file) ?? [Int]{}
-        loop number in old {
-            session.delete_breakpoint(number) ?? return Err(err)
-            self.rules.remove(number).drop("a breakpoint with no condition and no log message has no rule")
-        }
+        loop number in old { session.delete_breakpoint(number) ?? return Err(err) }
         numbers := [Int]{}
         rows := [String]{}
         loop spec in specs {
             line: spec.line
-            rule := JetCLIDapRule?{None}
-            if jet_cli_dap_rule(spec) == {
-                .Ok(parsed) -> { rule = parsed }
-                .Err(failure) -> {
-                    rows.push("{{\"verified\":false,\"line\":{line},\"message\":{foundation_json_quote(failure.message)}}}")
-                    next
-                }
+            ruled: spec.condition.trim() != "" || spec.log != ""
+            rule := native_debug_rule(spec.condition, spec.log, "break {file}:{line}") ?? {
+                rows.push("{{\"verified\":false,\"line\":{line},\"message\":{foundation_json_quote(err.message)}}}")
+                next
             }
             placed := -1
             if file != "" && line >= 1 {
@@ -200,7 +181,7 @@ JetCLIDap: struct {
             }
             if placed >= 0 {
                 numbers.push(placed)
-                if rule == .Val(found) -> self.rules[placed] = found
+                if ruled -> session.set_rule(placed, rule.move())
             }
             rows.push(if placed >= 0 -> "{{\"id\":{placed},\"verified\":true,\"line\":{line}}}" else -> "{{\"verified\":false,\"line\":{line},\"message\":{foundation_json_quote("No code on {file}:{line}")}}}")
         }
@@ -210,10 +191,10 @@ JetCLIDap: struct {
 
     // `configurationDone`: run the program from its start, to the start of
     // `run` under `stopOnEntry`.
-    start: fn(&self, session: &NativeSession) -[FS, Exec, IO, Time.Wait, FFI.Asm]> JetCLIDapStop NativeDebugError! {
+    start: fn(&self, session: &NativeSession) -[FS, Exec, IO, Time.Wait, FFI.Asm]> NativeSettled NativeDebugError! {
         if !self.stop_on_entry {
             first: session.launch(self.args) ?? return Err(err)
-            return self.settle(session, first, "c", 0)
+            return session.settle(first, "c", 0)
         }
         entry := -1
         if session.break_in("run") == {
@@ -222,89 +203,17 @@ JetCLIDap: struct {
         }
         stop: session.launch(self.args) ?? return Err(err)
         if entry >= 0 -> session.delete_breakpoint(entry) ?? return Err(err)
-        Ok(JetCLIDapStop{stop: stop, hit: None})
+        Ok(NativeSettled{stop: stop, hit: None, said: [NativeSaid]{}})
     }
 
-    // Run `word` (`c`, `n`, `s` or `f`, as NativeSession.advance takes it)
-    // and settle where it stops.
-    run: fn(&self, session: &NativeSession, word: String) -[FS, Exec, IO, Time.Wait, FFI.Asm]> JetCLIDapStop NativeDebugError! {
-        depth: if word == "c" -> 0 else -> jet_cli_dap_depth(session) ?? return Err(err)
-        first: session.advance(word) ?? return Err(err)
-        self.settle(session, first, word, depth)
-    }
-
-    // The stop to report after `word` (begun `depth` Jet frames deep) first
-    // stopped at `first`. A breakpoint hit that does not stop (`holds`) runs
-    // on: a continue continues, and a step goes on to where it would have
-    // stopped. A step whose skipped hit was in a call it steps over returns
-    // from the call and steps again; a step out returns until it is out.
-    settle: fn(&self, session: &NativeSession, first: NativeStop, word: String, depth: Int) -[FS, Exec, IO, Time.Wait, FFI.Asm]> JetCLIDapStop NativeDebugError! {
-        stop := first
-        returning := false
-        loop stop.kind == NativeStopKind.Paused {
-            hit: native_debug_hit_breakpoint(stop)
-            skipped := false
-            if hit == .Val(number) {
-                rule: self.rules.get(number) ?? return Ok(JetCLIDapStop{stop: stop, hit: hit})
-                stops: self.holds(session, rule) ?? return Err(err)
-                if stops -> return Ok(JetCLIDapStop{stop: stop, hit: hit})
-                skipped = true
-            }
-            if !skipped && !returning -> return Ok(JetCLIDapStop{stop: stop, hit: None})
-            next_word := "c"
-            if word != "c" {
-                here: jet_cli_dap_depth(session) ?? return Err(err)
-                if word == "s" || (word == "n" && here <= depth && !returning) || (word == "f" && here < depth) {
-                    return Ok(JetCLIDapStop{stop: stop, hit: None})
-                }
-                returning = !(word == "n" && here <= depth)
-                next_word = if returning -> "f" else -> "n"
-            }
-            stop = session.advance(next_word) ?? return Err(err)
+    // Where `settled` left the program: what the run said on the way (the
+    // program's output, logpoints' messages, failed conditions), its new
+    // output, then `stopped` (for `reason` unless a breakpoint stopped it),
+    // or its end.
+    report: fn(&self, session: &NativeSession, settled: NativeSettled, reason: String) -[FS, IO, Time.Wait]> Never! {
+        loop said in settled.said {
+            self.event("output", "{{\"category\":\"{said.category}\",\"output\":{foundation_json_quote(said.text)}}}")
         }
-        Ok(JetCLIDapStop{stop: stop, hit: None})
-    }
-
-    // Whether a hit of the breakpoint with `rule` stops: its condition holds
-    // (or it has none) and it is not a logpoint. A logpoint whose condition
-    // holds logs its message instead. A condition that can't be evaluated,
-    // or is not a Bool, stops, and says why.
-    holds: fn(&self, session: &NativeSession, rule: JetCLIDapRule) -[FS, Exec, IO, Time.Wait, FFI.Asm]> Bool NativeDebugError! {
-        locals: session.locals() ?? return Err(err)
-        if rule.condition == .Val(condition) {
-            if jet_cli_dap_condition(condition, locals) == {
-                .Ok(flag) -> {
-                    if !flag -> return Ok(false)
-                }
-                .Err(failure) -> {
-                    self.say(session, "stderr", "The breakpoint's condition failed: {failure.message}\n")
-                    return Ok(true)
-                }
-            }
-        }
-        if rule.log == .Val(message) {
-            text: if jet_cli_dap_eval(message.tables, message.root, locals) == {
-                .Ok(value) -> jet_cli_dap_text(value)
-                .Err(failure) -> "<{failure.message}>"
-            }
-            self.say(session, "console", "{text}\n")
-            return Ok(false)
-        }
-        Ok(true)
-    }
-
-    // An `output` event of `category`, after the program's output so far.
-    say: fn(&self, session: &NativeSession, category: String, text: String) -[FS, IO, Time.Wait]> Never! {
-        output: session.take_output()
-        if output != "" {
-            self.event("output", "{{\"category\":\"stdout\",\"output\":{foundation_json_quote(output)}}}")
-        }
-        self.event("output", "{{\"category\":\"{category}\",\"output\":{foundation_json_quote(text)}}}")
-    }
-
-    // Where `settled` left the program: its new output, then `stopped` (for
-    // `reason` unless a breakpoint stopped it), or its end.
-    report: fn(&self, session: &NativeSession, settled: JetCLIDapStop, reason: String) -[FS, IO, Time.Wait]> Never! {
         output: session.take_output()
         if output != "" {
             self.event("output", "{{\"category\":\"stdout\",\"output\":{foundation_json_quote(output)}}}")
@@ -352,7 +261,7 @@ JetCLIDap: struct {
 
 // Answer requests until stdin ends or the editor disconnects.
 jet_cli_debug_dap: fn(session: &NativeSession, entry: String) -[FS, Env, Exec, IO, Time.Wait, FFI.Asm]> Never! {
-    dap := JetCLIDap{seq: 0, stop_on_entry: false, args: [String]{}, placed: [String:[Int]]{}, rules: [Int:JetCLIDapRule]{}, launched: false}
+    dap := JetCLIDap{seq: 0, stop_on_entry: false, args: [String]{}, placed: [String:[Int]]{}, launched: false}
     loop true {
         text: jet_cli_dap_read() ?? break
         request: jet_cli_dap_request(text)
@@ -481,25 +390,6 @@ jet_cli_dap_string: fn(members: [{key: String, value: Dyn}], name: String) -> St
     ""
 }
 
-// A breakpoint's condition and log message, parsed; None when it has
-// neither.
-jet_cli_dap_rule: fn(spec: JetCLIDapBreakpoint) -> JetCLIDapRule? JetCLIDapEvalError! {
-    if spec.condition.trim() == "" && spec.log == "" -> return Ok(None)
-    condition: if spec.condition.trim() == "" -> DebugExpression?{None} else -> Val(debug_parse_expression(spec.condition) ?? return Err(jet_cli_dap_eval_error(err.message)))
-    log: if spec.log == "" -> DebugExpression?{None} else -> Val(debug_parse_message(spec.log) ?? return Err(jet_cli_dap_eval_error(err.message)))
-    Ok(Val(JetCLIDapRule{condition: condition, log: log}))
-}
-
-// The Jet frames on the stack.
-jet_cli_dap_depth: fn(session: &NativeSession) -> Int NativeDebugError! {
-    frames: session.backtrace() ?? return Err(err)
-    count := 0
-    loop frame in frames {
-        if native_debug_jet_frame(frame) -> count += 1
-    }
-    Ok(count)
-}
-
 // `stackTrace`: the Jet frames, innermost first, each by its index in the
 // session's backtrace, which `scopes` and `variables` name it by.
 jet_cli_dap_stack: fn(session: &NativeSession, entry: String) -> String NativeDebugError! {
@@ -539,9 +429,9 @@ jet_cli_dap_variables: fn(session: &NativeSession, frame: Int) -> String NativeD
 // `evaluate`: `text` in frame `frame` (the innermost when the request names
 // none). A local's name answers as `variables` shows it; another expression
 // answers with its value.
-jet_cli_dap_evaluate: fn(session: &NativeSession, text: String, frame: Int) -> String JetCLIDapEvalError! {
-    expr: debug_parse_expression(text) ?? return Err(jet_cli_dap_eval_error(err.message))
-    locals: jet_cli_dap_frame_locals(session, if frame > 0 -> frame else -> 0) ?? return Err(jet_cli_dap_eval_error(err.detail))
+jet_cli_dap_evaluate: fn(session: &NativeSession, text: String, frame: Int) -> String DebugEvaluationError! {
+    expr: debug_parse_expression(text) ?? return Err(err)
+    locals: jet_cli_dap_frame_locals(session, if frame > 0 -> frame else -> 0) ?? return Err(debug_evaluation_error(err.detail))
     shown := {text: "", type_name: ""}
     if ast_expr(expr.tables, expr.root) == .Ident(name, _, _) {
         loop local in locals {
@@ -549,8 +439,8 @@ jet_cli_dap_evaluate: fn(session: &NativeSession, text: String, frame: Int) -> S
         }
     }
     if shown.type_name == "" {
-        value: jet_cli_dap_eval(expr.tables, expr.root, locals) ?? return Err(err)
-        shown = jet_cli_dap_shown(value)
+        value: debug_eval(expr.tables, expr.root, locals) ?? return Err(err)
+        shown = {text: value.value, type_name: value.type_name}
     }
     Ok("{{\"result\":{foundation_json_quote(shown.text)},\"type\":{foundation_json_quote(shown.type_name)},\"variablesReference\":0}}")
 }
