@@ -1,0 +1,18 @@
+# A `print` at a later stop in the same function, where its names read the
+# same variables and each local it reads is a number, runs the code compiled
+# for it at the first stop, with the locals read at the stop it is asked at:
+# each answer is the value there. A new expression, or one that reads a
+# variable declared since, compiles again. The program then runs on
+# unchanged.
+fixture: PrintAgainAtALaterStop.fixture
+env: NO_COLOR=1
+env: PATH={work}/no-tools
+step: jet debug prog.jet
+stdin: print_again_at_a_later_stop_reads_the_values_there.stdin
+exit: 0
+stdout: ~ "Breakpoint hit  prog.jet:5  in run()" # stopped before `total` grows
+stdout: ~ "(Jet) print double(total)\ndouble(total) = 2\n" # compiled at line 5, with total 1
+stdout: ~ "(Jet) print double(total)\ndouble(total) = 6\n" # at line 6, total 3 is read there
+stdout: ~ "(Jet) print double(total) + step\ndouble(total) + step = 65\n" # a new expression at line 8
+stdout: ~ "(Jet) print double(total)\ndouble(total) = 60\n" # at line 8, total 30 is read there
+stdout: ~ "30 5\nProgram finished\n" # the evaluations left the program's run unchanged

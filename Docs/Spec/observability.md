@@ -788,7 +788,12 @@ inlined into at the call, and the locals are the frame's own; code inlined
 from another file is refused, since its lines are not that file's. A value whose type has a
 `debug_view` shows as `locals` shows it, the view run in that same fork. A
 compiled expression is kept per line, column and text, so a condition compiles once
-and runs in a fork at each hit. The fork runs the program's own runtime, so
+and runs in a fork at each hit. A `print` at a later stop in the same frame
+of the same function runs the code compiled before when its names read the
+same variables there (the debug information's variables of each name
+declared by the stop's line, and whether each one's location covers the
+stop) and each local it reads is a number, Bool or Char, which no move
+empties; any other expression compiles again. The fork runs the program's own runtime, so
 a lock another thread held at the stop is never released there (code that
 takes it fails at the 2 s budget), and a function value runs the image's
 code. An expression that calls a function that can fail shows its result as

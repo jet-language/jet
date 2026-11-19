@@ -808,8 +808,37 @@ NativeSession: struct {
         levels: native_levels(self.image, frames)
         level: if self.selected < levels.len() -> levels[self.selected] else -> levels[0]
         at: self.level_source(frames, level) ?? return Err(err)
+        // The same expression where it reads the same names, in the same
+        // frame of the same function, runs the code compiled for it before.
+        scope: self.eval_scope(frames, level, at.line, text)
+        if scope != "" && self.evals.get(scope) == .Val(found) -> return self.run_eval(found)
         compiled: self.compiled(at.path, at.line, at.column, text) ?? return Err(err)
+        if scope != "" && native_eval_word_captures(compiled) -> self.evals[scope] = compiled
         self.run_eval(compiled)
+    }
+
+    // Where `text`, at line `line` of the frame `level` of the unwound
+    // `frames`, reads its names: the function and its frame there (an
+    // inlined run's own), and, for each name, the function's variables in
+    // that frame by that name declared by `line`, each with whether its
+    // location covers the stop. A local's own name reads as `locals` shows
+    // it the same way. Two stops with one scope check `text` alike, so code
+    // compiled at one runs at the other, when every capture is a word of its
+    // own (no move can have emptied it). "" outside Jet code.
+    eval_scope: fn(self, frames: [NativeUnwound], level: NativeLevel, line: Int, text: String) -> String Never! {
+        lookup: native_lookup(level.frame, frames[level.frame].pc)
+        function: native_function_at(self.image, lookup) ?? return ""
+        parts := [String]{"scope {function.low} {level.site} {text}"}
+        loop name in native_eval_names(text) {
+            loop (index, variable) in function.variables {
+                if variable.site != level.site || variable.name != name || variable.line > line {
+                    next
+                }
+                covers: native_variable_covering(self.image, variable, lookup) != None
+                parts.push("{name} {index} {covers}")
+            }
+        }
+        parts.join("\n")
     }
 
     // Run `compiled` in a fork of the stopped program with the captures it

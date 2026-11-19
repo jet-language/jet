@@ -101,6 +101,42 @@ native_eval_is_name: fn(text: String) -> Bool Never! {
     true
 }
 
+// The names `text` spells, each once, in order: runs of letters, digits
+// and `_` (any non-ASCII byte a letter) that don't start with a digit. A
+// field's or a string's words count too, which only keeps more apart
+// (NativeSession.eval_scope).
+native_eval_names: fn(text: String) -> [String] Never! {
+    bytes: text.bytes()
+    names := [String]{}
+    at := 0
+    loop at < bytes.len() {
+        start: at
+        loop at < bytes.len() && native_eval_name_byte(bytes[at]) -> at += 1
+        if at == start {
+            at += 1
+            next
+        }
+        if bytes[start] >= 48 && bytes[start] <= 57 -> next
+        name: String.from_bytes(bytes[start..<at]) ?? next
+        if !names.contains(name) -> names.push(name)
+    }
+    names
+}
+
+native_eval_name_byte: fn(byte: U8) -> Bool Never! {
+    (byte >= 97 && byte <= 122) || (byte >= 65 && byte <= 90) || (byte >= 48 && byte <= 57) || byte == 95 || byte >= 128
+}
+
+// Whether every capture of `compiled` is a word of its own: a number, Bool
+// or Char, which no move empties.
+native_eval_word_captures: fn(compiled: Shared<NativeEval>) -> Bool Never! {
+    held: compiled.guard_read()
+    loop capture in held.value.captures {
+        if !capture.word -> return false
+    }
+    true
+}
+
 // Why the code `plan` (native_fix_place_all) places for `code` isn't the
 // program's: a function it places that the program runs too, compiled
 // differently (`diff`, native_fix_diff), means the source is no longer the
@@ -368,4 +404,11 @@ native_log_shown: fn(image: NativeImage, memory: NativeMemory, result: NativeEva
     loop name in names -> assert(native_eval_is_name(name))
     expressions: [String]{"", "2x", "a.b", "a + 1", "f()", "xs[0]", "a b"}
     loop text in expressions -> assert(!native_eval_is_name(text))
+}
+
+#Test("an expression's names are its words that don't start with a digit, each once") {
+    assert_eq(native_eval_names("f_1(total) + total * 2"), [String]{"f_1", "total"})
+    assert_eq(native_eval_names("xs[0].len() + 2x"), [String]{"xs", "len"})
+    assert_eq(native_eval_names("größe - 1"), [String]{"größe"})
+    assert_eq(native_eval_names("1 + 2"), [String]{})
 }
