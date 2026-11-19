@@ -107,13 +107,15 @@ jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
     assert_eq(bounded.rows[1].sample_weight, U64{4096})
 }
 
-#Test("perf capture keeps observed IO spans, locks and allocations causal") {
+#Test("perf capture keeps observed spans, locks and allocations causal, and no I/O from a wait") {
     live: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(17))
     observations: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{10}, live: live}, JetCLIPerfObservation{at_ns: U64{20}, live: live}}
     capture: jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", Val(U64{30})) ?? panic(err.message)
-    assert_eq(capture.io.len(), 1)
-    assert_eq(capture.io[0].start_ns, U64{10})
-    assert_eq(capture.io[0].end_ns, U64{20})
+    // A task blocked on `tcp receive` is a wait, not a transfer: the I/O rows
+    // are the runtime's records of the bytes a read or write moved, and these
+    // observations come with none.
+    assert_eq(capture.io.len(), 0)
+    assert_eq(capture.tasks[0].wait, "tcp receive")
     assert_eq(capture.locks.len(), 1)
     assert_eq(capture.allocations[0].bytes, U64{64})
     assert_eq(capture.tasks[0].id, U64{1})
