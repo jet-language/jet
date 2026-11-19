@@ -5,11 +5,13 @@
 // thread Thread.jet starts afterwards arms one on its own
 // (perf_samples_thread_start): each sends its thread SIGPROF for each
 // PERF_SAMPLES_INTERVAL_US of CPU time that thread uses, so threads that
-// run at once each keep their own samples. Where the host has a precise
-// sampler, IBS op sampling or PEBS, each thread arms that instead
-// (perf_precise_choose), and a sample's program counter is the instruction
-// the sampler names rather than the one its signal interrupted; the start
-// writes which source it chose to `<samples>.pc`. A handler fills a record
+// run at once each keep their own samples. Where the kernel allows a perf
+// event of the thread's own, each thread arms that instead
+// (perf_precise_choose): the task clock, or, where perf_event_paranoid is
+// at most 1, a precise sampler, IBS op sampling or PEBS, whose sample's
+// program counter is the instruction the sampler names rather than the one
+// its interrupt landed on; the start writes which source it chose to
+// `<samples>.pc`. A handler fills a record
 // buffer of its own (perf_samples_claim), so a sample on one thread never
 // costs another thread's its stack. Each SIGPROF appends one record: the
 // program counter it interrupted, then the call site of each caller,
@@ -310,20 +312,33 @@ perf_topdown_count := I64{0}
 // The CPU lens's sampler (perf_precise_choose): PERF_PC_TIMER, each
 // thread's CPU-time timer, whose SIGPROF charges the program counter the
 // signal interrupted, some instructions past the one that spent the time
-// (its skid); or a precise source, a perf event on each thread whose
-// samples name the instruction itself: AMD's IBS op sampling
-// (PERF_PC_IBS_OP) or Intel's PEBS (PERF_PC_PEBS).
+// (its skid), and which the kernel checks once a tick, so a thread's
+// samples come at most once a tick; PERF_PC_TASK_CLOCK, a perf event on
+// each thread's own CPU clock, sampled exactly once per period of it from
+// the interrupt that ends the period; or a precise source, a perf event on
+// each thread whose samples name the instruction itself: AMD's IBS op
+// sampling (PERF_PC_IBS_OP) or Intel's PEBS (PERF_PC_PEBS).
 PERF_PC_TIMER: I64{0}
 
 PERF_PC_IBS_OP: I64{1}
 
 PERF_PC_PEBS: I64{2}
 
+PERF_PC_TASK_CLOCK: I64{3}
+
 perf_precise_source := PERF_PC_TIMER
 
-// Under a precise source, each thread's sampler's ring by its descriptor,
-// a table of PERF_PRECISE_FDS words, 0 for a descriptor that is none; 0
-// under the timer.
+// A precise source's period, in CPU cycles (perf_precise_cycles), set
+// before its first sampler is armed.
+perf_precise_period := I64{0}
+
+// The perf_event_paranoid word of a kernel with no
+// /proc/sys/kernel/perf_event_paranoid, and so no perf events.
+PERF_PARANOID_NONE: I64{1000}
+
+// Under the task clock or a precise source, each thread's sampler's ring by
+// its descriptor, a table of PERF_PRECISE_FDS words, 0 for a descriptor
+// that is none; 0 under the timer.
 perf_precise_rings := I64{0}
 
 PERF_PRECISE_FDS: I64{65536}
@@ -333,7 +348,7 @@ PERF_PRECISE_PAGE: I64{4096}
 
 PERF_PRECISE_PAGES: I64{8}
 
-// A thread's precise sampler (perf_samples_thread_start) is its descriptor
+// A thread's perf event sampler (perf_samples_thread_start) is its descriptor
 // with this bit, which no timer id has.
 PERF_PRECISE_TAG: I64{4294967296}
 
@@ -417,9 +432,9 @@ perf_samples_start: fn() {
         }
     }
     if (status >= I64{0} && (lenses & PERF_LENS_CPU) != I64{0}) {
-        // This thread's own sampler, a precise source's where this thread
-        // can open one, else its timer; each thread spawned from now on
-        // arms its own as it starts.
+        // This thread's own sampler, a perf event's where this thread can
+        // open one, else its timer; each thread spawned from now on arms
+        // its own as it starts.
         status = perf_precise_choose(sampler, flight || (lenses & PERF_LENS_CAUSAL) != I64{0})
         sampler = I64{-1}
         if (status < I64{0}) { status = perf_samples_thread_start() }
@@ -484,13 +499,13 @@ perf_samples_charge: fn(buffer: I64, began: I64) {
     _ := sync_add(wrapping(buffer + wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_SLOTS) * I64{8})), wrapping(perf_samples_clock() - began))
 }
 
-// Arm this thread's sampler while the process samples CPU time: the precise
-// source's (perf_precise_arm) where the start chose one, else a timer on
+// Arm this thread's sampler while the process samples CPU time: the perf
+// event of the source the start chose (perf_precise_arm), else a timer on
 // this thread's CPU clock (CLOCK_THREAD_CPUTIME_ID) that sends this thread
 // SIGPROF (SIGEV_THREAD_ID) for each PERF_SAMPLES_INTERVAL_US of CPU time
 // it uses: its handle, for perf_samples_thread_end; the negated errno the
 // kernel refused it with; -1 when the process does not sample CPU time.
-// A thread whose precise sampler the kernel refuses goes unsampled.
+// A thread whose perf event the kernel refuses goes unsampled.
 perf_samples_thread_start: fn() -> I64 {
     if (perf_samples_fd < I64{0} || (perf_samples_lens_mask & PERF_LENS_CPU) == I64{0}) {
         return I64{-1}
@@ -527,7 +542,7 @@ perf_samples_thread_start: fn() -> I64 {
 }
 
 // End this thread's sampler (perf_samples_thread_start, `sampler`) as the
-// thread ends: a precise source's closed, a timer deleted; nothing when it
+// thread ends: a perf event closed, a timer deleted; nothing when it
 // has none.
 perf_samples_thread_end: fn(sampler: I64) {
     if (sampler < I64{0}) {
@@ -543,30 +558,56 @@ perf_samples_thread_end: fn(sampler: I64) {
 }
 
 // Choose the CPU lens's sampler once, on the thread that starts sampling,
-// the program's main thread, by arming it there: IBS op sampling, then
-// PEBS, else (-1) each thread's timer, which the flight recorder and the
-// causal lens keep (`timer`), since a causal experiment's periods are CPU
-// time's. Writes the source, then the errno IBS op sampling and PEBS were
-// each refused with, or 0, to `file` (`<samples>.pc`, -1 for none), and
-// closes it. The armed sampler's handle (perf_precise_arm), or -1.
+// the program's main thread, by arming it there. Where perf_event_paranoid
+// is at most 1, a precise source: IBS op sampling, then PEBS, each every
+// perf_precise_period cycles. Else, or where neither opens, at most 2, the
+// task clock. Else (-1) each thread's timer, which the flight recorder and
+// the causal lens keep (`timer`), since a causal experiment's periods are
+// CPU time's. Writes seven words to `file` (`<samples>.pc`, -1 for none),
+// and closes it: the source, the errno IBS op sampling, PEBS and the task
+// clock were each refused with, or 0, perf_event_paranoid
+// (PERF_PARANOID_NONE where the kernel has none), the source's period (in
+// cycles for a precise one, else in nanoseconds of CPU time) and 1 where
+// `timer` kept the timer. The armed sampler's handle (perf_precise_arm), or
+// -1.
 perf_precise_choose: fn(file: I64, timer: Bool) -> I64 {
     ibs := I64{0}
     pebs := I64{0}
+    task := I64{0}
+    paranoid: perf_samples_paranoid()
     handle := I64{-1}
     rings: if (timer) -> I64{0} else -> alloc_map_try(wrapping(PERF_PRECISE_FDS * I64{8}))
     if (rings != I64{0}) {
         #Unsafe("the table is set before the first sampler is armed, so no handler reads it before") {
             perf_precise_rings = rings
-            perf_precise_source = PERF_PC_IBS_OP
         }
-        handle = perf_precise_arm(PERF_PC_IBS_OP)
-        if (handle < I64{0}) {
-            ibs = wrapping(I64{0} - handle)
-            #Unsafe("no sampler is armed yet, so no thread reads the source") {
-                perf_precise_source = PERF_PC_PEBS
+        if (paranoid <= I64{1}) {
+            cycles: perf_precise_cycles()
+            if (cycles < I64{0}) {
+                ibs = wrapping(I64{0} - cycles)
+                pebs = ibs
+            } else {
+                #Unsafe("no sampler is armed yet, so no thread reads the source or its period") {
+                    perf_precise_period = cycles
+                    perf_precise_source = PERF_PC_IBS_OP
+                }
+                handle = perf_precise_arm(PERF_PC_IBS_OP)
+                if (handle < I64{0}) {
+                    ibs = wrapping(I64{0} - handle)
+                    #Unsafe("no sampler is armed yet, so no thread reads the source") {
+                        perf_precise_source = PERF_PC_PEBS
+                    }
+                    handle = perf_precise_arm(PERF_PC_PEBS)
+                    if (handle < I64{0}) { pebs = wrapping(I64{0} - handle) }
+                }
             }
-            handle = perf_precise_arm(PERF_PC_PEBS)
-            if (handle < I64{0}) { pebs = wrapping(I64{0} - handle) }
+        }
+        if (handle < I64{0} && paranoid <= I64{2}) {
+            #Unsafe("no sampler is armed yet, so no thread reads the source") {
+                perf_precise_source = PERF_PC_TASK_CLOCK
+            }
+            handle = perf_precise_arm(PERF_PC_TASK_CLOCK)
+            if (handle < I64{0}) { task = wrapping(I64{0} - handle) }
         }
         if (handle < I64{0}) {
             #Unsafe("no sampler is armed, so no handler reads the table") {
@@ -577,45 +618,121 @@ perf_precise_choose: fn(file: I64, timer: Bool) -> I64 {
         }
     }
     if (file >= I64{0}) {
-        #Unsafe("three writes of a stack-local word, which the kernel copies before each call returns") {
+        precise: perf_precise_source == PERF_PC_IBS_OP || perf_precise_source == PERF_PC_PEBS
+        period: if (precise) -> perf_precise_period else -> wrapping(perf_samples_interval_us * I64{1000})
+        #Unsafe("seven writes of a stack-local word, which the kernel copies before each call returns") {
             _ := os_write_word_i64(file, perf_precise_source, I64{8})
             _ := os_write_word_i64(file, ibs, I64{8})
             _ := os_write_word_i64(file, pebs, I64{8})
+            _ := os_write_word_i64(file, task, I64{8})
+            _ := os_write_word_i64(file, paranoid, I64{8})
+            _ := os_write_word_i64(file, period, I64{8})
+            _ := os_write_word_i64(file, if (timer) -> I64{1} else -> I64{0}, I64{8})
         }
         _ := host_call(I64{3}, file, I64{0}, I64{0})
     }
     handle
 }
 
-// Open this thread's sampler of the precise source `source`: a perf event
-// of this thread in user mode, sampled about once per
-// perf_samples_interval_us of its running time (a frequency the kernel
-// keeps), each sample its instruction pointer, written to a ring the table
-// keeps by its descriptor (perf_precise_attach). IBS op sampling is the
-// PMU whose sysfs directory is `ibs_op`, filtered to user mode in software
-// (swfilt, config2 bit 0), which the kernel allows at perf_event_paranoid
-// 2; PEBS is the core PMU's cycles at precise_ip 2. The descriptor with
-// PERF_PRECISE_TAG, or the negated errno of the call the kernel refused,
-// ENOENT where there is no `ibs_op` PMU.
+// The kernel's /proc/sys/kernel/perf_event_paranoid, a decimal number with
+// an optional sign; PERF_PARANOID_NONE where it can't be read.
+perf_samples_paranoid: fn() -> I64 {
+    path: rt_static_text("/proc/sys/kernel/perf_event_paranoid")
+    name: fd_c_path(path)
+    fd: host_call(I64{2}, name, I64{524288}, I64{0})
+    fd_c_path_drop(name, path)
+    if (fd < I64{0}) { return PERF_PARANOID_NONE }
+    scratch: jet_rt_alloc(I64{16}, I64{8})
+    thread_zero(scratch, I64{16})
+    count: host_call(I64{0}, fd, scratch, I64{16})
+    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    negative: count > I64{0} && rt_text_byte(scratch) == I64{45}
+    at := if (negative) -> I64{1} else -> I64{0}
+    first: at
+    value := I64{0}
+    loop at < count {
+        digit: rt_text_byte(wrapping(scratch + at))
+        if (digit < I64{48} || digit > I64{57}) { break }
+        value = wrapping(wrapping(value * I64{10}) + wrapping(digit - I64{48}))
+        at = wrapping(at + I64{1})
+    }
+    jet_rt_free(scratch, I64{16}, I64{8})
+    if (at == first) { return PERF_PARANOID_NONE }
+    if (negative) -> wrapping(I64{0} - value) else -> value
+}
+
+// The CPU cycles this thread runs in perf_samples_interval_us of its CPU
+// time, a multiple of 16 as IBS's period must be: a cycles counter of this
+// thread, read until it has run that long; the negated errno of the call
+// the kernel refused, EIO where the counter never ran. A precise source
+// counts cycles, so at this period its rate follows the clock speed the
+// cores run at: the measured one gives the timer's rate as sampling
+// starts.
+perf_precise_cycles: fn() -> I64 {
+    attr: jet_rt_alloc(I64{72}, I64{8})
+    thread_zero(attr, I64{72})
+    // PERF_TYPE_HARDWARE's cycles counted, with read_format
+    // PERF_FORMAT_TOTAL_TIME_RUNNING and the flag exclude_hv.
+    rt_text_store(attr, I64{72} << I64{32})
+    rt_text_store(wrapping(attr + I64{32}), I64{2})
+    rt_text_store(wrapping(attr + I64{40}), I64{64})
+    fd := I64{-1}
+    #Unsafe("perf_event_open reads the attribute words of the scratch") {
+        fd = os_syscall_i64(I64{298}, attr, I64{0}, I64{-1}, I64{-1}, I64{8}, I64{0})
+    }
+    if (fd < I64{0}) {
+        jet_rt_free(attr, I64{72}, I64{8})
+        return fd
+    }
+    // Each read writes the count, then the nanoseconds the counter ran,
+    // over the attribute's first two words.
+    goal: wrapping(perf_samples_interval_us * I64{1000})
+    read := I64{0}
+    tries := I64{0}
+    loop tries < (I64{1000000}) {
+        read = host_call(I64{0}, fd, attr, I64{16})
+        if (read != I64{16} || rt_text_word(wrapping(attr + I64{8})) >= goal) { break }
+        tries = wrapping(tries + I64{1})
+    }
+    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    count: rt_text_word(attr)
+    ran: rt_text_word(wrapping(attr + I64{8}))
+    jet_rt_free(attr, I64{72}, I64{8})
+    if (read != I64{16} || ran <= I64{0} || count <= I64{0}) { return I64{-5} }
+    cycles: wrapping(count * goal) / ran
+    if (cycles < I64{16}) -> I64{16} else -> cycles & I64{-16}
+}
+
+// Open this thread's sampler of `source`: a perf event of this thread in
+// user mode, each sample its instruction pointer, written to a ring the
+// table keeps by its descriptor (perf_precise_attach). The task clock is
+// the software event of this thread's CPU clock, sampled once per
+// perf_samples_interval_us of it; time in the kernel takes no sample.
+// IBS op sampling is the PMU whose sysfs directory is `ibs_op`, filtered
+// to user mode in software (swfilt, config2 bit 0); PEBS is the core PMU's
+// cycles at precise_ip 2; each sampled once per perf_precise_period
+// cycles. The descriptor with PERF_PRECISE_TAG, or the negated errno of the
+// call the kernel refused, ENOENT where there is no `ibs_op` PMU.
 perf_precise_arm: fn(source: I64) -> I64 {
     attr: jet_rt_alloc(I64{72}, I64{8})
     thread_zero(attr, I64{72})
-    kind := I64{0}
+    kind := if (source == PERF_PC_TASK_CLOCK) -> I64{1} else -> I64{0}
     if (source == PERF_PC_IBS_OP) {
         kind = perf_topdown_pmu(rt_static_text("/sys/bus/event_source/devices/ibs_op/type"), attr)
     }
     fd := kind
     if (kind >= I64{0}) {
         // perf_event_attr through config2 (PERF_ATTR_SIZE_VER1): its type
-        // and size, config 0 (IBS's cycle count, or cycles), the sample
-        // frequency, sample_type PERF_SAMPLE_IP, the flags disabled |
-        // exclude_kernel | exclude_hv | freq, with precise_ip 2 for PEBS,
-        // a wakeup at each sample, and config2.
+        // and size, config 0 (IBS's cycle count, or cycles) or 1
+        // (PERF_COUNT_SW_TASK_CLOCK), the sample period, sample_type
+        // PERF_SAMPLE_IP, the flags disabled | exclude_kernel | exclude_hv,
+        // with precise_ip 2 for PEBS, a wakeup at each sample, and config2.
+        clock: source == PERF_PC_TASK_CLOCK
         rt_text_store(attr, kind | (I64{72} << I64{32}))
-        rt_text_store(wrapping(attr + I64{8}), I64{0})
-        rt_text_store(wrapping(attr + I64{16}), I64{1000000} / perf_samples_interval_us)
+        rt_text_store(wrapping(attr + I64{8}), if (clock) -> I64{1} else -> I64{0})
+        rt_text_store(wrapping(attr + I64{16}), if (clock) -> wrapping(perf_samples_interval_us * I64{1000}) else -> perf_precise_period)
         rt_text_store(wrapping(attr + I64{24}), I64{1})
-        rt_text_store(wrapping(attr + I64{40}), if (source == PERF_PC_PEBS) -> I64{66657} else -> I64{1121})
+        rt_text_store(wrapping(attr + I64{40}), if (source == PERF_PC_PEBS) -> I64{65633} else -> I64{97})
         rt_text_store(wrapping(attr + I64{48}), I64{1})
         rt_text_store(wrapping(attr + I64{64}), if (source == PERF_PC_IBS_OP) -> I64{1} else -> I64{0})
         #Unsafe("perf_event_open reads the attribute words of the scratch") {
@@ -689,7 +806,7 @@ perf_precise_ring: fn(info: I64) -> I64 {
 // word, `head` (its word count and kind) above a program counter, each
 // write fills in; or, where `record` is 0, that first word alone. A timer's
 // sample (`ring` 0) is `pc`, written once for each of its `periods`; a
-// precise source's is each sample its ring holds past the tail (a
+// perf event's is each sample its ring holds past the tail (a
 // PERF_RECORD_SAMPLE, type 9, its size in the header's top 16 bits and its
 // instruction pointer after the header), by that pointer less the image's
 // bias, under the callers perf_samples_put_precise finds, and the tail then
@@ -3133,9 +3250,9 @@ perf_cfi_sort: fn(table: I64, count: I64) {
 // it while it was pending (perf_samples_periods), so its record is written
 // once for each, as many samples as the CPU time it covers gives. A write
 // the kernel refuses loses that one sample; O_APPEND puts each record after
-// the last. Under a
-// precise source (perf_precise_choose) a SIGPROF reports its sampler's
-// ring instead, and the record is written once for each sample the ring
+// the last. Under the task clock or a precise source (perf_precise_choose)
+// a SIGPROF reports its sampler's ring instead, and the record is written
+// once for each sample the ring
 // holds, by the program counter the sample names, under the callers its
 // function has in the stack walked from the interrupted context
 // (perf_samples_put_precise). A counter's record has its
@@ -3170,7 +3287,7 @@ perf_cfi_sort: fn(table: I64, count: I64) {
         perf_samples_charge(buffer, began)
         return I64{0}
     }
-    // Under a precise source, the sample is its ring's (perf_precise_ring).
+    // Under a perf event, the sample is its ring's (perf_precise_ring).
     ring: if (signal == PERF_SAMPLES_SIGNAL) -> perf_precise_ring(info) else -> I64{0}
     if (ring < I64{0}) {
         perf_samples_charge(buffer, began)

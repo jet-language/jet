@@ -30,6 +30,9 @@ use {
         jet_cli_perf_live_from,
         jet_cli_perf_log_spans_read,
         jet_cli_perf_observed,
+        jet_cli_perf_pc_json,
+        jet_cli_perf_pc_words,
+        jet_cli_perf_sampler_reason,
         jet_cli_perf_samples_count,
         jet_cli_perf_samples_profile,
         jet_cli_perf_source,
@@ -272,11 +275,41 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     profile: jet_cli_perf_samples_profile(jet_cli_perf_source("fib.jet", text), sampled) ?? panic("fib's line holds samples")
     assert(profile.reason.contains("; 1 of 3 samples are outside fib.jet; outside Jet functions: jet_rt_alloc 1; 1 samples in compiler-emitted helpers, such as stop polls, count at the line that called them"))
     assert(profile.reason.contains("; 1 samples in Jet code kept no stack"))
-    assert(profile.reason.contains("; 3 of the 4 samples 4 ms of CPU time under sampling gives"))
+    assert(profile.reason.contains("; it kept 3 of the 4 samples that 4 ms of CPU time under sampling gives"))
     assert(!profile.reason.contains("jet_ir_"))
     assert_eq(profile.overhead_status, "measured")
     assert_eq(profile.overhead_ns, Val(U64{9000}))
     assert_eq(profile.overhead_reason, "the sampler took 9 microseconds, 0.22% of the 4000 microseconds of CPU time sampled: 6 in its handlers and 3 signals at the 1000 nanoseconds the kernel took to deliver and return from one as sampling started")
+}
+
+#Test("perf names the sampler that took the CPU-time samples and why the timer took them") {
+    // The task clock at perf_event_paranoid 2, once per millisecond of CPU
+    // time.
+    clock: jet_cli_perf_test_words([Int]{3, 0, 0, 0, 2, 1000000, 0})
+    json: String.from_bytes(canonical_json_bytes(jet_cli_perf_pc_json(jet_cli_perf_pc_words(clock)))) ?? panic("the pc is UTF-8")
+    assert_eq(json, "{{\"paranoid\":2,\"period\":1000000,\"period_unit\":\"ns\",\"precise\":false,\"refused\":[],\"skid\":\"task_clock_interrupt\",\"source\":\"task_clock\"}}\n")
+    took: jet_cli_perf_pc_words(clock) ?? panic("seven words hold a sampler")
+    assert(jet_cli_perf_sampler_reason(took, U64{50}, Val(U64{50000000})).contains("the task clock took them"))
+    // The timer above perf_event_paranoid 2 states its cap and why.
+    above: jet_cli_perf_pc_words(jet_cli_perf_test_words([Int]{0, 0, 0, 0, 3, 1000000, 0})) ?? panic("seven words hold a sampler")
+    assert_eq(jet_cli_perf_sampler_reason(above, U64{14}, Val(U64{54000000})), "; the CPU-time timer took them, which the kernel checks once a tick, so each thread takes at most one sample a tick: perf_event_paranoid is 3, and a thread's own perf events need it at most 2")
+    // The timer where the kernel refused the task clock names its errno.
+    refused: jet_cli_perf_test_words([Int]{0, 0, 0, 13, 2, 1000000, 0})
+    named: String.from_bytes(canonical_json_bytes(jet_cli_perf_pc_json(jet_cli_perf_pc_words(refused)))) ?? panic("the pc is UTF-8")
+    assert(named.contains("\"refused\":[{{\"errno\":13,\"source\":\"task_clock\"}}],\"skid\":\"timer_signal\",\"source\":\"timer\""))
+    timer: jet_cli_perf_pc_words(refused) ?? panic("seven words hold a sampler")
+    assert(jet_cli_perf_sampler_reason(timer, U64{14}, None).ends_with(": the kernel refused the task clock with errno 13"))
+    kept: jet_cli_perf_pc_words(jet_cli_perf_test_words([Int]{0, 0, 0, 0, 2, 1000000, 1})) ?? panic("seven words hold a sampler")
+    assert(jet_cli_perf_sampler_reason(kept, U64{14}, None).ends_with(": the causal lens keeps it, since its experiments' periods are CPU time's"))
+    // IBS op sampling at perf_event_paranoid -1, its period in cycles, and
+    // the rate it reached.
+    ibs: jet_cli_perf_test_words([Int]{1, 0, 0, 0, -1, 4800016, 0})
+    precise: String.from_bytes(canonical_json_bytes(jet_cli_perf_pc_json(jet_cli_perf_pc_words(ibs)))) ?? panic("the pc is UTF-8")
+    assert_eq(precise, "{{\"paranoid\":-1,\"period\":4800016,\"period_unit\":\"cycles\",\"precise\":true,\"refused\":[],\"skid\":null,\"source\":\"ibs_op\"}}\n")
+    op: jet_cli_perf_pc_words(ibs) ?? panic("seven words hold a sampler")
+    assert_eq(jet_cli_perf_sampler_reason(op, U64{49}, Val(U64{50000000})), "; IBS op sampling took them once per 4800016 cycles, the cycles a core ran in 1000 microseconds as sampling started, so its rate follows the clock speed: it reached 0.98 samples per millisecond of CPU time")
+    // Six words are no sampler.
+    assert(jet_cli_perf_pc_words(jet_cli_perf_test_words([Int]{0, 0, 0, 0, 2, 1000000})) == None)
 }
 
 #Test("a CPU-time sample's record ends in its time and task, and a zone of that task holds the samples inside it") {

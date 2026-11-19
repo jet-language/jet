@@ -160,20 +160,30 @@ fn` declaration (`fn` through its closing brace) and do not separate the
 functions that `run` calls; their `inclusive_count` and `allocation_count` are
 null.
 
-The program counter a timer's `SIGPROF` interrupted is a few instructions
-past the one that spent the time (its skid), so where the host has a precise
-sampler and the run is neither a causal experiment nor a flight recording,
-the runtime charges each sample by the instruction it names instead: AMD's
-IBS op sampling (`perf_event_open` on the `ibs_op` PMU, filtered to user mode
-in software, which `perf_event_paranoid` 2 allows), else Intel's PEBS (cycles
-at `precise_ip` 2), each thread's own event sampled at the timer's rate into
-a ring its `SIGPROF` reports. The callers still come from the interrupted
-stack, which the skid can leave in another function: the sample keeps the
-callers of the innermost interrupted frame in its own function, and when no
-frame is (the function returned before the signal came), the interrupted
-frame is its caller. The main thread arms the first source the kernel
-accepts, and each thread after it arms that source; with neither, every
-thread keeps its timer. The receipt's `capture.sampling.pc` names the source.
+Unless the run is a causal experiment or a flight recording, each thread
+samples by a perf event of its own, written to a ring its `SIGPROF` reports,
+where `perf_event_paranoid` allows one. At 1 or below, on a host with a
+precise sampler, the runtime charges each sample by the instruction that
+spent the time: AMD's IBS op sampling (`perf_event_open` on the `ibs_op` PMU,
+filtered to user mode in software), else Intel's PEBS (cycles at
+`precise_ip` 2), each once per a period in cycles, the cycles the main thread
+ran in 1000 microseconds of its CPU time as sampling started, so their rate
+follows the clock speed the cores run at. At 2, or where neither opens, the
+task clock (`PERF_COUNT_SW_TASK_CLOCK`) samples each thread exactly once per
+1000 microseconds of its CPU time in user mode, at the program counter its
+interrupt landed on, a few instructions past the one that spent the time (its
+skid); time in the kernel takes no sample. Above 2, or where the kernel
+refuses the task clock, each thread keeps its CPU-time timer, whose `SIGPROF`
+the kernel checks once a tick, so each thread takes at most one sample a tick,
+at the program counter the signal interrupted. The callers still come from
+the interrupted stack, which the skid can leave in another function: the
+sample keeps the callers of the innermost interrupted frame in its own
+function, and when no frame is (the function returned before the signal
+came), the interrupted frame is its caller. The main thread arms the first
+source the kernel accepts, and each thread after it arms that source. The
+receipt's `capture.sampling.pc` names the source, and the profile's `reason`
+says which took the samples: the rate a precise source reached, or, for the
+timer, its cap and why the run kept it.
 Tests/Cases/Perf/precise_pc_names_its_source.case is the worked example.
 
 `jet perf run` takes `--lens=<lenses>`, comma-separated: `cpu`, the
@@ -535,12 +545,16 @@ sampled, else its `lenses` (`["cpu"]`, `["memory"]` or `["cpu","memory"]`),
 `allocations` `call-sites`, and under the `cpu` lens `clock` `cpu`,
 `interval_us` 1000 and `pc`, which are null without it. `pc` names what each
 sample was charged by: `source` `ibs_op` or `pebs` with `precise` true and
-`skid` null for a precise sampler, else `timer` with `precise` false and
-`skid` `timer_signal`; `refused` lists each precise source the kernel
-refused, `{"errno":2,"source":"ibs_op"}`. `jet perf view` prints it
-as `receipt perf <canonical JSON>`, and `jet perf compare` lists each field
-that differs between two traces' receipts (`perf.build.options.optimize: "O0"
--> "O2"`). `jet perf attach` records no `perf` section.
+`skid` null for a precise sampler, `task_clock` with `precise` false and
+`skid` `task_clock_interrupt`, else `timer` with `precise` false and `skid`
+`timer_signal`; `refused` lists each source the kernel refused,
+`{"errno":2,"source":"ibs_op"}`; `paranoid` is `perf_event_paranoid` (null
+where the kernel has none); and `period` is the source's period, in
+`period_unit` `cycles` for a precise source, else `ns` of CPU time. `jet perf
+view` prints it as `receipt perf <canonical JSON>`, and `jet perf compare`
+lists each field that differs between two traces' receipts
+(`perf.build.options.optimize: "O0" -> "O2"`). `jet perf attach` records no
+`perf` section.
 
 ## Comparing captures
 
