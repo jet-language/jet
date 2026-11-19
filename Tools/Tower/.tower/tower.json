@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112465,
+    "rev": 112466,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -77774,116 +77774,6 @@
       "completedAt": "2026-11-16T23:03:12.827Z"
     },
     {
-      "id": "c0drmvwg",
-      "num": 6864,
-      "title": "Typed routes: checked paths and search params, loader boundaries and route data freshness",
-      "body": "Destination: a route declares typed path and search parameters, a loader and its navigation contract; a wrong route or parameter is a compile error; a loader's pending, error and not-found states render; and route data stays fresh by the compiler's read sets.\n\nWhy it matters: routing and data loading are the spine of every web app; untyped routes are the most common source of broken links and stale pages.\n\nDecisions: D-ROUTE-ONE1=A (one route table on web.app()), D-ROUTE-FILES2=A (page file words become the address), D-INVALIDATE1=A (the compiler decides what a write makes stale), D-WEBAPP-SHAPE1=A.\n\nSource: #6552 c8, c10, c11, c12 (from archived #2472). Parent: #6552.",
-      "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "All 5 criteria met; the last, c4 (capability boundary E2823/E2824), passed on p229 (dev 8c9859caba)."
-        },
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "c2 SUB Speed-3-3-6864-c2-app-navigation (queued p226) builds client navigation on web.app()'s one route table: App gains navigate, settle, abort, navigating and shown; core.web.router gets no second public API (D-ROUTE-ONE1=A)."
-        },
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "c2 design (Main): route loader boundaries go on web.app()'s one route table (D-ROUTE-ONE1=A: only page rows join client navigation), on the screen routes c1 defines; a loader/settle/show API on core.web.router would be a second route mechanism (I8). Speed-3-3's router-level SUB was returned for that reason."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A screen's route is its state struct (typed `:field` path parameters and `#App.Query` search parameters), its view is the loader, and url_of, go and current are its navigation; a link or navigation to an unknown route or with a wrong parameter type is a compile error with a registered diagnostic and a UI snapshot.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p223 batch compiler (dev a8b53c68d8): jet test Compiler --profile ui --filter web_route_ PASS 4/4 (2ee79b3cf2)",
-          "at": "2026-11-16T19:34:06.150Z",
-          "proof": {
-            "profile": "ui",
-            "filter": "web_route_"
-          }
-        },
-        {
-          "n": 2,
-          "text": "A route loader's pending, error and not-found boundaries render, and an aborted navigation cancels its preload, on O0, O1, O2 and web.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p226 batch compiler (dev 713d2cd072), commit 5e327e8133: jet test Compiler --profile golden --filter Web/RouteLoaderBoundaries PASS 6/6 (Native o0/o1/o2 and Web); navigation lives on web.app()'s one route table.",
-          "at": "2026-11-16T20:50:09.460Z",
-          "proof": {
-            "profile": "golden",
-            "filter": "Web/RouteLoaderBoundaries"
-          }
-        },
-        {
-          "n": 3,
-          "text": "Route data is keyed by its route and arguments, turns stale when a write meets its read set (D-INVALIDATE1=A), refetches, and is dropped after its last screen leaves.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p225 batch compiler (dev 1b2c2d0a54), commit e05ccf100e: jet test Compiler --profile cases --filter WebApp/route_data_lifecycle PASS 1/1 (O0, O1, O2 and web in the case).",
-          "at": "2026-11-16T20:28:54.389Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "WebApp/route_data_lifecycle"
-          }
-        },
-        {
-          "n": 4,
-          "text": "Browser code that uses a server-only capability, or server code that uses a browser-only one, is refused at the app boundary with a registered diagnostic, one UI snapshot per rejection kind.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p229 batch compiler (dev 8c9859caba), commits 46a7723059 + e3a2ca03a5: jet test Compiler --profile ui --filter web_capability_boundary_ PASS 2/2 (E2823 browser_reaches_database, E2824 server_uses_browser); the check reads each body's own uses over call edges, so cases WebApp/enqueue_takes_one_job_call and WebApp/live_takes_one_remote_call PASS (no false positive); Tests/Guards/diagnostic_registry_ratchet.jet PASS (p227); full suite p229 has no new failures from it.",
-          "at": "2026-11-16T21:58:50.327Z",
-          "proof": {
-            "profile": "ui",
-            "filter": "web_capability_boundary_"
-          }
-        },
-        {
-          "n": 5,
-          "text": "Conflicting routes give a deterministic two-span error (E2804); Mux, router and App pick the same handler; HEAD and typed path failures are recorded. Proof: `jet test Compiler --profile ui --filter http_route_ambiguous_overlap` and `jet test Compiler --profile golden --filter net/route_overlap`.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 0b58edf739, gate-p176 jet: jet test Compiler --profile golden --filter Net/RouteOverlap gives 3 PASS (o0, o1, o2). The golden tests/run/Net/RouteOverlap.jet records HEAD running the GET handler, a typed path mismatch as 400, and 405 with its Allow list; Router, App routes and marked mounts share one HTTPMux and pick the same handler. jet test Compiler --profile ui --filter http_route_ambiguous_overlap gives 1 PASS (E2804, two spans). The card's original golden filter net/route_overlap named no row; the golden's path is tests/run/Net/RouteOverlap.jet.",
-          "at": "2026-11-15T11:33:23.317Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "web",
-        "routing"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-15T02:52:15.741Z",
-      "updated": "2026-11-16T21:58:53.821Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 5,
-      "completedAt": "2026-11-16T21:58:53.821Z"
-    },
-    {
       "id": "c0sf9ixl",
       "num": 6865,
       "title": "Endpoints: one checked contract drives dispatch, the typed client, schema, form and OpenAPI",
@@ -85620,11 +85510,11 @@
         {
           "n": 2,
           "text": "The debugger offers forward and reverse navigation, bounded Jet-path watches and explicit fix commands through the live, native and replay routes. Proof: `jet test Compiler --profile cases --filter Debug/navigation_watches_fix_` on the native and DAP routes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:13:19.792Z"
+          "evidence": "dev 8fb6df8746 (IfHole-6-1-6919-c2-navigation-watches-fix.r2) and 9191dde520, p335 batch compiler: `jet test Compiler --profile cases --filter Debug/navigation_watches_fix_` n=2 bad=0; navigation_watches_fix_console (native) and navigation_watches_fix_dap (DAP, including the new `fix` request) cover forward and reverse navigation, bounded Jet-path watches and the explicit fix command.",
+          "at": "2026-11-19T22:31:16.279Z"
         },
         {
           "n": 3,
@@ -85750,7 +85640,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:09:16.617Z",
-      "updated": "2026-11-19T21:57:40.052Z",
+      "updated": "2026-11-19T22:31:16.279Z",
       "updatedBy": "Main",
       "criteriaLastN": 13
     },
@@ -158781,6 +158671,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-19T22:31:16.280Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06lmp17",
+      "note": "#2"
+    },
     {
       "at": "2026-11-19T21:57:40.052Z",
       "by": "Main",
