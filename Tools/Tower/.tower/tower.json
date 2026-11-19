@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112372,
+    "rev": 112375,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75882,21 +75882,21 @@
         {
           "n": 43,
           "text": "Time travel over the chokepoint and sync order: (a) `jet run --record=r1` of a program whose tasks share channels and a lock, made at -O2, replays under `jet debug --replay=r1` with the same output and the same sync order at -O0, -O1 and -O2, on real threads; an unsafe write that changes the run is reported at the first sync event where it diverges. (b) In a replay, `reverse-step`, `reverse-next`, `reverse-finish` and `reverse-continue` reach the previous line, call, caller and breakpoint or watch hit, in the console and over DAP `stepBack` and `reverseContinue`. (c) `why x` in a replay names the write that gave `x` its value: file:line, task, stack and the value it replaced; a local optimized out at -O2 is shown from the -O0 replay and labeled recovered. Proof: `jet test Compiler --profile cases --filter Debug/replay_threads_across_tiers_`; `--filter Debug/replay_reverse_`; `--filter Debug/replay_why_`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R1)",
-          "status": "met",
-          "metBy": "Main",
+          "status": "open",
+          "metBy": null,
           "verifiedBy": null,
-          "evidence": "Gate p307 (dev 2611e58630, batch compiler = census build; full collect-all suite 02:35-02:54, suite-p307/cases.out): PASS Debug/replay_threads_across_tiers_record_writes_the_replay, _refuses_what_it_cannot_replay, _replays_at_every_tier (O0, O1 and O2 images of an -O2 recording), _reports_the_first_diverging_sync_event; PASS Debug/replay_reverse_steps_back_by_line_call_and_caller, replay_reverse_continue_goes_back_to_a_watch_hit, replay_reverse_over_dap, replay_reverse_refuses_outside_a_replay; PASS Debug/replay_why_names_the_last_write, replay_why_recovers_an_optimized_away_local, replay_why_refuses_outside_a_replay. These ran for the first time on p306 (p305 refused them for missing reasons). Fixed by IfHole p305-debug-fixes.r2 and c51-dump-budget-run-image.r2.",
-          "at": "2026-11-19T07:54:48.526Z",
+          "evidence": "",
+          "at": "2026-11-19T11:21:55.254Z",
           "unblockedFrom": "D-TIMETRAVEL3"
         },
         {
           "n": 44,
           "text": "A sampler that is right on threads: (a) `jet perf run` samples each thread on its own CPU clock: four tasks running fib at once at -O2 keep at least 90% of the nominal samples, and every sample keeps its whole stack. (b) A sample in a compiler-emitted helper (a stop poll, a barrier) is charged to the Jet line that called it, and the receipt counts such samples; no fib sample is reported outside Jet functions. (c) A sample in an inlined function names the inlined function's line and its caller's line, at -O2. (d) Every receipt states the capture's overhead, measured against a matched unprofiled run, and the default rate costs under 2% on fib. Proof: `jet test Compiler --profile cases --filter Perf/every_thread_keeps_whole_stacks`; `--filter Perf/helper_samples_charge_the_calling_line`; `--filter Perf/inlined_samples_name_the_inlined_line`; `--filter Perf/receipt_reports_measured_overhead`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R2)",
-          "status": "met",
-          "metBy": "Main",
+          "status": "open",
+          "metBy": null,
           "verifiedBy": null,
-          "evidence": "Swept 2026-11-18 from the a0.0.45 release gate kit at dev 751a90c25c (candidate s2 jet 7667b43e13b5a9f5, full cases/golden/ui profiles; rows-candidate.json): Perf/every_thread_keeps_whole_stacks, Perf/helper_samples_charge_the_calling_line, Perf/inlined_samples_name_the_inlined_line and Perf/receipt_reports_measured_overhead cases PASS.",
-          "at": "2026-11-18T23:12:20.793Z"
+          "evidence": "",
+          "at": "2026-11-19T11:21:56.107Z"
         },
         {
           "n": 45,
@@ -75910,11 +75910,11 @@
         {
           "n": 46,
           "text": "Waits with wakers, off-CPU time, I/O: Every wait in the trace (channel send and receive, lock, join, sleep, I/O readiness) names its object, its blocking stack and the task whose action ended it; `jet perf view` lists off-CPU time per stack; file and network I/O through the capability chokepoint appear on the timeline with bytes and target and no instrumentation. Extends c7 from joins to every wait. Proof: `jet test Compiler --profile cases --filter Perf/every_wait_names_its_waker`; `--filter Perf/off_cpu_time_by_stack`; `--filter Perf/io_on_timeline_without_instrumentation`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R4)",
-          "status": "met",
-          "metBy": "Main",
+          "status": "open",
+          "metBy": null,
           "verifiedBy": null,
-          "evidence": "dev d2c1886238 (batch compiler p299, full cases suite suite-p299/cases.out): PASS Tests/Cases/Perf/every_wait_names_its_waker.case, PASS Perf/off_cpu_time_by_stack.case, PASS Perf/io_on_timeline_without_instrumentation.case",
-          "at": "2026-11-19T01:00:55.387Z"
+          "evidence": "",
+          "at": "2026-11-19T11:21:56.965Z"
         },
         {
           "n": 47,
@@ -76152,7 +76152,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-19T11:21:04.299Z",
+      "updated": "2026-11-19T11:21:56.965Z",
       "updatedBy": "Main",
       "criteriaLastN": 67
     },
@@ -160903,6 +160903,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-19T11:21:56.965Z",
+      "by": "Main",
+      "action": "card.criteria-reopen",
+      "ref": "c0nwrfck",
+      "note": "#46: c39 fresh review (IfHole, p313): two of fib4's three join waits print 'woken by task ?'; every wait must name the task whose action ended it"
+    },
+    {
+      "at": "2026-11-19T11:21:56.107Z",
+      "by": "Main",
+      "action": "card.criteria-reopen",
+      "ref": "c0nwrfck",
+      "note": "#44: c39 fresh review (IfHole, p313): on fib4.jet -- 32 (four tasks, -O2) the per-thread sampler keeps 19-31% of nominal samples over 3 runs (-- 34: 52-80%, -- 36: 88-90%); the 90% bar holds only on the 2 s case every_thread_keeps_whole_stacks. Receipt reason sentence is also cut off"
+    },
+    {
+      "at": "2026-11-19T11:21:55.254Z",
+      "by": "Main",
+      "action": "card.criteria-reopen",
+      "ref": "c0nwrfck",
+      "note": "#43: c39 fresh review (IfHole, p313): jet run --record=r7 fib.jet -- 5 prints fib=5, but jet debug --replay=r7 fib.jet replays with the default argument and prints fib=832040; a replay does not reproduce the recorded run's arguments"
+    },
     {
       "at": "2026-11-19T11:21:04.300Z",
       "by": "Main",
