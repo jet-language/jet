@@ -1,0 +1,25 @@
+// The batched forms: one JOIN instead of a query per row, a query outside
+// any loop, and a write per row (not a query) report nothing.
+package: {
+    name: "sql_query_in_row_loop_quiet"
+    authority: { allow: [DB, DB.Read, DB.Write, IO, Mem.Alloc, Time.Wait] }
+}
+
+use db: core.db
+
+run: fn() {
+    conn: db.open_memory()
+    policy: db.policy("orders", "true") ?? panic("policy")
+    scoped: conn.with_policy(policy, "owner")
+    db.migrate(scoped, "shop-v1", [SQL{"CREATE TABLE orders (id INTEGER PRIMARY KEY, customer INTEGER)"}, SQL{"CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT)"}]) ?? panic("migrate")
+    joined: scoped.query(SQL{"SELECT orders.id, customers.name FROM orders JOIN customers ON customers.id = orders.customer"}) ?? panic("joined")
+    loop row in joined {
+        name: db.row_text(row, "name") ?? panic("name")
+        print(name)
+    }
+    orders: scoped.query(SQL{"SELECT id FROM orders"}) ?? panic("orders")
+    loop order in orders {
+        id: db.row_int(order, "id") ?? panic("id")
+        scoped.execute(SQL{"UPDATE orders SET customer = 0 WHERE id = {id}"}) ?? panic("update")
+    }
+}

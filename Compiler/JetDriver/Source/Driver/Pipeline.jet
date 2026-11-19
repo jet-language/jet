@@ -6464,6 +6464,9 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         if !request.capture_cost_report {
             loop lint in jet_driver_cost_copy_lints(load, checked_functions) -> load.diagnostics.push(lint)
         }
+        // Every check lists the L0308 tidy errors of the SELECTs run once
+        // per row of a loop over database rows.
+        loop lint in jet_driver_sql_row_loop_lints(load, checked_functions, registration_graph.symbols) -> load.diagnostics.push(lint)
         jet_driver_trace_step_begin(request.trace_sink, "driver.check.facts")
         result := jet_driver_compile_result(load, load.diagnostics, None, true, trace)
         result.cost_report = cost_report.move()

@@ -1,0 +1,112 @@
+// The L0308 tidy error: a Query-class SQL statement (one that starts with
+// `SELECT` or `WITH`) run through a database driver's `query`, `query_one` or
+// `live` inside a loop over database rows. Each pass of the loop makes one
+// more round trip, so N rows cost N + 1 queries where one batched read (an
+// `IN` list over the rows' keys, or a join) does the same work.
+use {
+    jet_foundation.[
+        BodyTree,
+        Diagnostic,
+        FnBody,
+        Span,
+        SymbolTable,
+        TMethodRef,
+        Type,
+        body_node,
+        body_type,
+        foundation_byte_text,
+        symbol_key,
+        symbol_key_leaf,
+    ]
+}
+
+// The L0308 tidy errors of `functions`, whose method keys `symbols` holds:
+// one per query call inside a loop over rows, at the call, once however many
+// specializations share its source.
+jet_driver_sql_row_loop_lints: fn(load: JetDriverLoadResult, functions: [FnBody], symbols: SymbolTable) -> [Diagnostic] {
+    lints := [Diagnostic]{}
+    seen := [String:Bool]{}
+    loop function in functions {
+        if !jet_driver_cost_reports(function) -> next
+        tree: function.tree
+        // Each loop's body: from the end of its collection to its own end, so
+        // the query that produces the rows is not inside its own loop.
+        bodies := [Span]{}
+        loop statement in tree.stmts {
+            if statement == .ForIn(_, variable, _, _, collection, _, _, _, _, _, _, span) && jet_driver_sql_rows(variable.ty, body_type(tree, collection)) {
+                bodies.push(Span{start: body_node(tree, collection).span.end, end: span.end})
+            }
+        }
+        if bodies.len() == 0 -> next
+        loop node in tree.nodes {
+            if node.kind == .MethodCall(_, method, _, args) && args.len() == 1 {
+                if !jet_driver_sql_row_loop_inside(bodies, node.span) -> next
+                if !jet_driver_sql_driver_read(tree, symbols, method) -> next
+                head: jet_driver_sql_head(tree, args[0].value) ?? next
+                if head != "select" && head != "with" -> next
+                site: "{function.source_file}:{node.span.start}"
+                if seen.get(site) != None -> next
+                seen[site] = true
+                lints.push(jet_driver_diagnostic_at_loaded_site(load, function.module_identity, "L0308", node.span, "This query runs once for every row of the loop around it", "Each pass of the loop makes one more round trip to the database, so N rows cost N + 1 queries, and the loop slows down as the table grows", "Read what the loop needs in one query before it: `WHERE key IN (…)` over the keys the rows hold, or a JOIN with the query that produced the rows"))
+            }
+        }
+    }
+    lints
+}
+
+// Whether a loop whose element has type `element` over a collection of type
+// `collection` walks database rows: the `[String:DBValue]` rows a driver's
+// `query` returns, or a typed `Query<T>`.
+jet_driver_sql_rows: fn(element: Type, collection: Type) -> Bool Never! {
+    if element == .Map(key, _, value) && key == Type.String && value == .Named(name) {
+        if name == "DBValue" || name.ends_with(".DBValue") -> return true
+    }
+    if collection == .Apply(name, _) -> return name == "Query" || name.ends_with(".Query")
+    false
+}
+
+// Whether `span` lies inside one of `loops`.
+jet_driver_sql_row_loop_inside: fn(loops: [Span], span: Span) -> Bool Never! {
+    loop outer in loops {
+        if span.start >= outer.start && span.end <= outer.end -> return true
+    }
+    false
+}
+
+// Whether `method` is a database driver's read: `query`, `query_one` or
+// `live` declared in `core.db`, or the prelude `Driver` trait's `query` or
+// `query_one` a generic bound calls; not the in-memory `[T].query` of
+// `core.db.query`.
+jet_driver_sql_driver_read: fn(tree: BodyTree, symbols: SymbolTable, method: TMethodRef) -> Bool Never! {
+    if method.name != "query" && method.name != "query_one" && method.name != "live" -> return false
+    if method.trait_owner == .Val(owner) && symbol_key_leaf(symbol_key(symbols, tree.symbols, owner)) == "Driver" -> return true
+    key: symbol_key(symbols, tree.symbols, method.symbol)
+    if symbol_key_leaf(key) != method.name -> return false
+    key.contains("core.db.") && !key.contains("core.db.query.")
+}
+
+// The first word of the SQL text node `id` of `tree` spells, lowercased:
+// the leading literal of the earliest string within its span. None when
+// the statement is not written there (a binding or a call builds it).
+jet_driver_sql_head: fn(tree: BodyTree, id: Int) -> String? Never! {
+    span: body_node(tree, id).span
+    found := -1
+    loop position in 0..<tree.nodes.len() {
+        node: tree.nodes[position]
+        if node.span.start < span.start || node.span.end > span.end -> next
+        if found >= 0 && node.span.start >= tree.nodes[found].span.start -> next
+        if node.kind == .StrLit(parts) && parts.len() > 0 && parts[0] == .Literal(_) -> found = position
+    }
+    if found < 0 -> return None
+    if tree.nodes[found].kind == .StrLit(parts) && parts[0] == .Literal(text) {
+        bytes: text.bytes()
+        start := -1
+        loop position in 0..<bytes.len() {
+            blank: bytes[position] <= 32 || bytes[position] == 40
+            if start < 0 && !blank -> start = position
+            if start >= 0 && blank -> return Val(foundation_byte_text(bytes, start, position).lower())
+        }
+        if start >= 0 -> return Val(foundation_byte_text(bytes, start, bytes.len()).lower())
+    }
+    None
+}
