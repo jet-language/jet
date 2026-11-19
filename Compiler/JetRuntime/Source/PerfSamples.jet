@@ -3141,8 +3141,8 @@ PERF_FLIGHT_TASK_REGISTERS: I64{15}
 
 // Which general registers of a row are known: every one, a thread's a
 // signal interrupted; r15, r14, r13, r12, rbp and rbx, a parked fiber's
-// its last switch saved; rbp alone, the stopping thread's as its caller
-// resumes.
+// its last switch saved and the stopping thread's as its tgkill returns;
+// rbp alone, the stopping thread's as its caller resumes.
 PERF_FLIGHT_TASK_KNOWN: I64{32767}
 
 PERF_FLIGHT_TASK_SAVED: I64{63}
@@ -3447,11 +3447,11 @@ perf_flight_dump: fn() {
     text: wrapping(state + PERF_FLIGHT_TEXT_AT)
     words: wrapping(text + PERF_FLIGHT_WORDS_AT)
     zeros: wrapping(text + PERF_FLIGHT_ZEROS_AT)
-    // The stopping thread's every general register, as perf_flight_capture
-    // takes them when the tgkill to itself returns here, in this frame the
-    // dump outlives, so its debugger unwinds the callee-saved registers
-    // from here (the frames' call frame rules). Without the capture, its
-    // rip, rsp and rbp as its caller resumes.
+    // The stopping thread's callee-saved registers, rip, rsp and rbp, as
+    // perf_flight_capture takes them when the tgkill to itself returns
+    // here, in this frame the dump outlives, so its debugger unwinds the
+    // callee-saved registers from here (the frames' call frame rules).
+    // Without the capture, its rip, rsp and rbp as its caller resumes.
     stop: wrapping(text + PERF_FLIGHT_STOP_AT)
     process: perf_flight_syscall(I64{39}, I64{0}, I64{0}, I64{0})
     me: thread_tid()
@@ -3619,6 +3619,12 @@ perf_flight_fiber: fn(state: I64, tcb: I64) {
 // written, so its stack stays as its row says. A capture the dump no
 // longer waits for writes no row. The stopping thread, which signals
 // itself (perf_flight_dump), only leaves its registers in the text page.
+// Where the signal interrupts a frame that holds nothing but its link (rsp
+// at rbp: os_syscall_i64's, when the tgkill is a call), the dump's own
+// calls overwrite that frame before it copies the stack, so the registers
+// are those of its caller, perf_flight_dump, as the frame returns into it:
+// the saved rbp and return address read while they last, the callee-saved
+// registers as the frame left them, the rest unknown.
 perf_flight_capture: fn(context: I64) {
     state: perf_flight_state
     if (state == I64{0} || context == I64{0}) {
@@ -3627,7 +3633,22 @@ perf_flight_capture: fn(context: I64) {
     text: wrapping(state + PERF_FLIGHT_TEXT_AT)
     tid: thread_tid()
     if (tid == sync_load(wrapping(text + PERF_FLIGHT_SELF_AT))) {
-        perf_flight_context(wrapping(text + PERF_FLIGHT_STOP_AT), context)
+        stop: wrapping(text + PERF_FLIGHT_STOP_AT)
+        perf_flight_context(stop, context)
+        frame: rt_text_word(wrapping(context + I64{120}))
+        if (frame != I64{0} && frame == rt_text_word(wrapping(context + I64{160}))) {
+            caller: rt_text_word(frame)
+            rt_text_store(wrapping(stop + I64{16}), rt_text_word(wrapping(frame + I64{8})))
+            rt_text_store(wrapping(stop + I64{24}), wrapping(frame + I64{16}))
+            rt_text_store(wrapping(stop + I64{32}), caller)
+            rt_text_store(wrapping(stop + I64{48}), PERF_FLIGHT_TASK_SAVED)
+            rt_text_store(wrapping(stop + I64{88}), caller)
+            word := I64{6}
+            loop word < PERF_FLIGHT_TASK_REGISTERS {
+                rt_text_store(wrapping(stop + wrapping(I64{56} + wrapping(word * I64{8}))), I64{0})
+                word = wrapping(word + I64{1})
+            }
+        }
         return
     }
     release: wrapping(text + PERF_FLIGHT_RELEASE_AT)
