@@ -546,6 +546,7 @@
     if (!doc) return false;
     selectedSourceId = sourceId || null;
     latestDoc = doc;
+    if (viewMode === "debug") renderDebugView();
     loadEditorState(doc);
     loadDetailToggles(doc);
     sourceView.textContent = doc.source_text || "";
@@ -648,6 +649,7 @@
           if (typeof renderSearchResults === "function") renderSearchResults();
         }
         latestDoc = doc;
+        if (viewMode === "debug") renderDebugView();
         if (sourceChanged) clearDiagnosticsForRevision(doc.revision);
         else clearStaleDiagnostics(doc);
         loadEditorState(doc);

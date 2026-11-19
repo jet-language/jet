@@ -50,6 +50,9 @@ JET_CLI_CANVAS_DEBUG_MAX_VALUE_BYTES: 4096
 
 JET_CLI_CANVAS_DEBUG_MAX_MESSAGE_BYTES: 16384
 
+// The lines of source the overlay carries on each side of the stop.
+JET_CLI_CANVAS_DEBUG_SOURCE_CONTEXT: 12
+
 // A refused debug request: its jet.canvas.debug error kind and message.
 #Error
 JetCLICanvasDebugError: struct {
@@ -632,6 +635,8 @@ jet_cli_canvas_debug_document: fn(state: Shared<CanvasHostState>, src: String, s
     locals := empty
     watch_values := empty
     call_stack := empty
+    source := empty
+    first_line := 0
     if ran.snapshot == .Val(snapshot) {
         active_span = jet_cli_canvas_debug_line_span(src, snapshot.line)
         line_json = "{snapshot.line}"
@@ -639,6 +644,17 @@ jet_cli_canvas_debug_document: fn(state: Shared<CanvasHostState>, src: String, s
         locals = jet_cli_canvas_debug_locals(snapshot, None)
         watch_values = jet_cli_canvas_debug_locals(snapshot, Val(watches))
         call_stack = jet_cli_canvas_debug_call_stack(snapshot, source_id)
+        lines: jet_cli_canvas_debug_lines(src)
+        first_line = if snapshot.line > JET_CLI_CANVAS_DEBUG_SOURCE_CONTEXT -> snapshot.line - JET_CLI_CANVAS_DEBUG_SOURCE_CONTEXT else -> 1
+        shown := [String]{}
+        clipped := false
+        loop number in first_line..<(snapshot.line + JET_CLI_CANVAS_DEBUG_SOURCE_CONTEXT + 1) {
+            if number > lines.len() -> break
+            text: jet_cli_canvas_debug_bounded(lines[number - 1], JET_CLI_CANVAS_DEBUG_MAX_VALUE_BYTES)
+            clipped = clipped || text.truncated
+            shown.push(foundation_json_quote(text.json))
+        }
+        source = JetCLICanvasDebugList{json: shown.join(","), truncated: clipped}
     }
     trace: jet_cli_canvas_debug_newest(jet_cli_canvas_debug_lines(ran.transcript))
     phase: if ran.running -> "running" else -> "finished"
@@ -663,8 +679,8 @@ jet_cli_canvas_debug_document: fn(state: Shared<CanvasHostState>, src: String, s
     }
     source_json: foundation_json_quote(source_id)
     revision_json: foundation_json_quote(revision)
-    limits: "{{\"locals_truncated\":{locals.truncated},\"watches_truncated\":{watch_values.truncated},\"call_stack_truncated\":{call_stack.truncated},\"trace_truncated\":{trace.truncated},\"wire_path_truncated\":{place.wires_truncated}}}"
-    overlay: "{{\"debug_overlay\":{foundation_json_quote(phase)},\"runtime_state\":{foundation_json_quote(runtime_state)},\"source_id\":{source_json},\"revision\":{revision_json},\"active_line\":{line_json},\"active_span\":{jet_cli_canvas_debug_span_json(active_span)},\"active_graph_id\":{foundation_json_quote(place.graph_id)},\"active_node_id\":{foundation_json_quote(place.node_id)},\"active_wire_id\":{foundation_json_quote(active_wire)},\"wire_path\":[{wires.join(",")}],\"breakpoints\":[{marks.join(",")}],\"locals\":[{locals.json}],\"watches\":[{watch_values.json}],\"call_stack\":[{call_stack.json}],\"trace\":[{trace.json}],\"limits\":{limits}}}"
+    limits: "{{\"locals_truncated\":{locals.truncated},\"watches_truncated\":{watch_values.truncated},\"call_stack_truncated\":{call_stack.truncated},\"trace_truncated\":{trace.truncated},\"source_truncated\":{source.truncated},\"wire_path_truncated\":{place.wires_truncated}}}"
+    overlay: "{{\"debug_overlay\":{foundation_json_quote(phase)},\"runtime_state\":{foundation_json_quote(runtime_state)},\"source_id\":{source_json},\"revision\":{revision_json},\"active_line\":{line_json},\"active_span\":{jet_cli_canvas_debug_span_json(active_span)},\"active_graph_id\":{foundation_json_quote(place.graph_id)},\"active_node_id\":{foundation_json_quote(place.node_id)},\"active_wire_id\":{foundation_json_quote(active_wire)},\"wire_path\":[{wires.join(",")}],\"breakpoints\":[{marks.join(",")}],\"locals\":[{locals.json}],\"watches\":[{watch_values.json}],\"call_stack\":[{call_stack.json}],\"source\":{{\"first_line\":{first_line},\"lines\":[{source.json}]}},\"trace\":[{trace.json}],\"limits\":{limits}}}"
     "{{\"protocol\":\"jet.canvas.debug\",\"schema_version\":{JET_CLI_CANVAS_DEBUG_SCHEMA},\"ok\":true,\"source_id\":{source_json},\"revision\":{revision_json},\"session\":{jet_cli_canvas_debug_session_json(ran.id, phase, source_id, revision)},\"overlay\":{overlay}}}"
 }
 

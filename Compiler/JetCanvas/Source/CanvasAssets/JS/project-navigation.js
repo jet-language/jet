@@ -1759,6 +1759,7 @@
     debugConnectionState = state;
     syncDebugSessionPicker();
     syncDebugActive();
+    renderDebugView();
   }
 
   function syncDebugLiveness() {
@@ -1868,6 +1869,7 @@
           ? "Debug values truncated; source is current"
           : "Debug " + ((debugOverlay && debugOverlay.debug_overlay) || "updated"));
         drawGraph(latestDoc);
+        renderDebugView();
       })
       .catch(() => {
         if (requestGeneration !== debugRequestGeneration) return;

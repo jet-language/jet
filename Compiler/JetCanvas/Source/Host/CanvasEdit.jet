@@ -15,18 +15,26 @@ CANVAS_PROJECT_SCHEMA_VERSION: 1
 // The receipts a session keeps; the oldest goes first.
 CANVAS_HOST_MAX_RECEIPTS: 128
 
-// One request the listener took for the dev loop: its JSON body, and where
-// its answer goes. A `debug` request is a Canvas debug request (POST
-// /debug), answered from the dev loop's debug sessions; any other is a
-// source transaction.
+// What a request the listener took for the dev loop asks: a source
+// transaction (POST /transaction), a debug request (POST /debug), answered
+// from the dev loop's debug sessions, or a profile request (POST /profile),
+// answered from a trace.
+CanvasHostRequest: enum {
+    Transaction,
+    Debug,
+    Profile,
+}
+
+// One request the listener took for the dev loop: what it asks, its JSON
+// body, and where its answer goes.
 CanvasHostEdit: struct {
     body: String,
-    debug: Bool,
+    kind: CanvasHostRequest,
     reply: Sender<CanvasHostReply>,
 }
 
-// The answer to one request: its HTTP status and `canvas.edit` or
-// `canvas.debug` report.
+// The answer to one request: its HTTP status and `canvas.edit`,
+// `canvas.debug` or `canvas.profile` report.
 CanvasHostReply: struct {
     status: Int,
     body: String,
@@ -267,16 +275,24 @@ canvas_host_project: fn(state: Shared<CanvasHostState>) -> HTTPResponse {
     canvas_host_response(200, CANVAS_HOST_JSON, permit.value.project.copy())  // copy: the session keeps the document it serves
 }
 
-// Hand a transaction (or, on the `/debug` route, a debug request) to the dev
-// loop and answer what it answers. The handler waits while the loop checks,
-// writes or debugs; a loop that has stopped never answers, and the request
+// Hand a transaction (or, on the `/debug` and `/profile` routes, a debug or
+// profile request) to the dev loop and answer what it answers. The handler
+// waits while the loop checks, writes, debugs or profiles; a loop that has stopped never answers, and the request
 // is refused.
 canvas_host_transaction: fn(state: Shared<CanvasHostState>, request: HTTPRequest, edits: Sender<CanvasHostEdit>, route: CanvasHostRoute) -[Time.Wait]> HTTPResponse {
-    debug: route == .Debug
-    what: if debug -> "debug request" else -> "transaction"
+    kind: if route == {
+        .Debug -> CanvasHostRequest.Debug
+        .Profile -> CanvasHostRequest.Profile
+        .Page(_) | .PanelPage | .App | .Session | .Project | .Graph | .Source | .Transaction | .Status | .Version | .Unbuilt | .Unknown -> CanvasHostRequest.Transaction
+    }
+    what: if kind == {
+        .Debug -> "debug request"
+        .Profile -> "profile request"
+        .Transaction -> "transaction"
+    }
     body: canvas_host_body_text(request) ?? return canvas_host_response(400, CANVAS_HOST_TEXT, "a Canvas {what} must be UTF-8 JSON")
     { sender: reply, receiver: answer }: channel<CanvasHostReply>(capacity: 1)
-    edits.send(CanvasHostEdit{body: body, debug: debug, reply: reply})
+    edits.send(CanvasHostEdit{body: body, kind: kind, reply: reply})
     answered: answer.receive() ?? return canvas_host_response(503, CANVAS_HOST_TEXT, "the Canvas dev loop stopped before it answered this {what}")
     canvas_host_response(answered.status, CANVAS_HOST_JSON, canvas_host_with_session(state, answered.body))
 }

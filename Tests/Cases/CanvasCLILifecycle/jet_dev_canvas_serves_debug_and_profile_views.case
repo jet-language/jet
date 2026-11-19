@@ -1,0 +1,13 @@
+# `jet dev <file> --canvas` serves the Debug and Profile views: Tools/CanvasTest/Run.jet
+# native-debug-panels copies the demo into a folder of its own, checks that the page carries the
+# source, stack, locals, watches, tasks and console panels and the profile timeline, stops at a
+# line breakpoint with the source around it, the call stack, the locals and a watch in one debug
+# answer, profiles the entry into its spans, zones, waits and io lanes, zooms into half of the
+# trace's window, and refuses a path that is not a trace.
+requires: os-name:linux
+env: JET_BIN={jet}
+env: JET_SOURCE={root}/Examples/Tooling/CanvasBlueprintDemo.jet
+env: TMPDIR={scratch}
+step: jet run --allow=Env,Exec,FS,IO,Net,Time {root}/Tools/CanvasTest/Run.jet -- native-debug-panels
+exit: 0
+stdout: ~ "PASS native jet dev --canvas Debug and Profile views" # the probe's one pass line; the URL, port and secret vary per run

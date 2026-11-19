@@ -329,6 +329,39 @@ entries. Build and debugger failures return structured Jet diagnostics and never
 expose host-compiler output. Both tiers run the compiled program under Jet's
 own native debugger, which needs no external tool.
 
+The overlay's `source` carries the stopped source around the active line:
+`first_line` and up to 12 `lines` on each side, so the Debug view draws source,
+stack, locals, watches and the console transcript from one answer without a
+second request.
+
+## Profile
+
+`POST /__jet_canvas/profile`, `POST /canvas/profile`, and `/panel/profile`
+return `jet.canvas.profile`, the Profile view's timeline of one `.jettrace`.
+
+| Field | Meaning |
+|---|---|
+| `schema_version` | Profile schema version, `1`. |
+| `source_id` | The projected entry. |
+| `revision` | Source revision from the graph document. |
+| `trace` | Optional `.jettrace` path, relative to the entry's directory. Without it the server profiles the entry with `jet perf run` and keeps that one trace for later zooms; the next recording replaces it. |
+| `from_ns`, `to_ns` | Optional window on the trace's clock; the whole trace by default. |
+| `width` | Most marks a lane carries, 1 to 4096; 800 by default. |
+
+```json
+{"protocol":"jet.canvas.profile","schema_version":1,"ok":true,"source_id":"main.jet","revision":"sha256-...","trace":"/tmp/jet-canvas-profile-1/canvas.jettrace","trace_id":"...","window":{"from_ns":0,"to_ns":91000,"first_ns":0,"last_ns":91000,"width":800},"lanes":[{"name":"spans","reduced":false,"marks":[{"start_ns":0,"end_ns":91000,"count":1,"label":"run"}]},{"name":"zones","reduced":false,"marks":[]},{"name":"waits","reduced":false,"marks":[]},{"name":"io","reduced":false,"marks":[]}],"samples":12,"hot_lines":["..."],"limits":{"hot_lines_truncated":false}}
+```
+
+The lanes are captured task spans (`spans`), log spans (`zones`), task waits
+(`waits`) and file and network transfers (`io`), all on the trace's one clock.
+The server reduces each lane to the window shown: past `width` events, one
+mark covers the events that start in each `width`th of the window, with their
+`count` and the label of the longest. A large trace therefore never ships
+whole to the page; zooming asks again with a narrower window of the same
+`trace`. `hot_lines` are the CPU samples' hottest source lines, at most 64.
+A trace that is not a valid `.jettrace` is refused `trace`; a program that
+does not build or run answers its own report as `diagnostic`.
+
 ## Edit transactions
 
 `POST /__jet_canvas/transaction`, `POST /canvas/transaction`, and
