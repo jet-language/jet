@@ -1,0 +1,19 @@
+// Nothing here names the profiler. The package's build wraps `collide`,
+// `step` and `run` in zones, and the program prints the same total either way.
+collide: fn(a: Int, b: Int) -> Bool { (a + b) % 7 == 0 }
+
+step: fn(tick: Int) -> Int {
+    hits := 0
+    loop i in 0..<100 {
+        if collide(tick, i) -> hits += 1
+    }
+    hits
+}
+
+run: fn() {
+    total := 0
+    loop tick in 0..<50 {
+        total += step(tick)
+    }
+    print(total)
+}
