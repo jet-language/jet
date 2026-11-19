@@ -212,10 +212,13 @@ native_fix_runnings: fn(name: String, symbols: NativeFixSymbols, text: [U8], tex
             start: symbol.address - text_address
             if symbol.size <= 0 || start < 0 || start + symbol.size > text.len() -> next
             last: native_fix_latest(symbol.address, fixed)
-            if last >= 0 {
-                runnings.push(NativeFixRunning{address: fixed[last].address, code: fixed[last].code[0..<fixed[last].code.len()]})
-            } else {
-                runnings.push(NativeFixRunning{address: symbol.address, code: text[start..<start + symbol.size]})
+            if {
+                last >= 0 -> {
+                    runnings.push(NativeFixRunning{address: fixed[last].address, code: fixed[last].code[0..<fixed[last].code.len()]})
+                }
+                else -> {
+                    runnings.push(NativeFixRunning{address: symbol.address, code: text[start..<start + symbol.size]})
+                }
             }
         }
     }
@@ -440,7 +443,7 @@ native_fix_diff: fn(image: NativeImage, edit: NativeFixEdit, symbols: NativeFixS
 // means the program already runs the edit; the error's detail says why the
 // edit can't be swapped in.
 native_fix_plan: fn(image: NativeImage, edit: NativeFixEdit, symbols: NativeFixSymbols, text: [U8], text_address: Int, fixed: [NativeFixed]) -> NativeFixPlan NativeDebugError! {
-    diff := native_fix_diff(image, edit, symbols, text, text_address, fixed) ?? return Err(err)
+    diff: native_fix_diff(image, edit, symbols, text, text_address, fixed) ?? return Err(err)
     if diff.changed.len() == 0 -> return Ok(diff)
     row_of := [Int:Int]{}
     loop (row, function) in edit.functions -> row_of[function.id.value] = row

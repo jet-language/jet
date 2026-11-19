@@ -228,7 +228,7 @@ native_dump_waits: fn(memory: NativeMemory, registry: Int) -> [Int:String] Never
         loop at in 0..<entries {
             entry: native_debug_read(memory, record + NATIVE_DUMP_CYCLE_ENTRIES + at * NATIVE_DUMP_CYCLE_ENTRY, 8, 2) ?? break
             if entry[0] != task.control -> next
-            line: native_debug_text(entry[1], memory, false) ?? break
+            line: native_debug_text(entry[1], memory) ?? break
             if line.contains("  ") -> waits[task.id] = line.after("  ")
             break
         }

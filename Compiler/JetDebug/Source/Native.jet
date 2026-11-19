@@ -3824,7 +3824,7 @@ NativeSession: struct {
             if bound && bytes == last -> next
             prior: self.trail_text(place.ty, last)
             latest: self.trail_text(place.ty, bytes)
-            self.trail_note(before, prior, latest, !native_ranges_cover(place.ranges, before[X64_TRACE_RIP])) ?? return Err(err)
+            self.trail_note(before, prior, latest, binds: !native_ranges_cover(place.ranges, before[X64_TRACE_RIP])) ?? return Err(err)
             last = bytes
             bound = true
         }
@@ -3850,7 +3850,7 @@ NativeSession: struct {
         ty: self.watches[index].ty
         before: self.trail_text(ty, self.watches[index].bytes)
         after: self.trail_text(ty, bytes)
-        self.trail_note(registers, before, after, binds) ?? return Err(err)
+        self.trail_note(registers, before, after, binds: binds) ?? return Err(err)
         self.watches[index].bytes = bytes
         Ok()
     }
@@ -3864,7 +3864,7 @@ NativeSession: struct {
     // Keep a write of the trail: the current thread's instruction at the pc
     // of `registers` changed a place from the value shown `before` to the
     // one shown `after`, and with `binds` gave it its first value.
-    trail_note: fn(&self, registers: [Int], before: String, after: String, binds: Bool) NativeDebugError! {
+    trail_note: fn(&self, registers: [Int], before: String, after: String, binds: Bool{false}) NativeDebugError! {
         task: self.thread_task(self.trace.thread, registers).task
         frames := self.backtrace_from(registers) ?? return Err(err)
         stack: native_debug_backtrace(frames, indent: "  ")
@@ -4500,32 +4500,35 @@ NativeSession: struct {
             next_known := loop _ in 0..<registers.len() -> false
             loop index in NATIVE_DEBUG_CALLEE_SAVED -> next_known[index] = known[index]
             outermost := false
-            if framed {
-                loop register in 0..<NATIVE_CFI_RETURN {
-                    index: NATIVE_DEBUG_DWARF_REGISTERS[register]
-                    if row.rules[register] == NATIVE_CFI_LOST -> next_known[index] = false
-                    if row.rules[register] == NATIVE_CFI_SAVED {
-                        saved: self.word(cfa + row.offsets[register])
-                        next_known[index] = saved != None
-                        registers[index] = saved ?? 0
-                    }
-                }
-                outermost = next_known[X64_TRACE_RBP] && registers[X64_TRACE_RBP] == 0
-            } else {
-                rsp_word: self.word(registers[X64_TRACE_RSP])
-                rbp_word: if registers[X64_TRACE_RBP] > 0 -> self.word(registers[X64_TRACE_RBP]) else -> Int?{None}
-                caller_rbp: native_caller_rbp(self.openings, function, registers, pc, here, rsp_word, rbp_word) ?? break
-                loop save in native_prologue_saves(self.openings, function) {
-                    if pc >= save.after && registers[X64_TRACE_RBP] > 0 {
-                        if self.word(registers[X64_TRACE_RBP] - 8 * (save.slot + 1)) == .Val(saved) {
-                            registers[save.register] = saved
-                            next_known[save.register] = true
+            if {
+                framed -> {
+                    loop register in 0..<NATIVE_CFI_RETURN {
+                        index: NATIVE_DEBUG_DWARF_REGISTERS[register]
+                        if row.rules[register] == NATIVE_CFI_LOST -> next_known[index] = false
+                        if row.rules[register] == NATIVE_CFI_SAVED {
+                            saved: self.word(cfa + row.offsets[register])
+                            next_known[index] = saved != None
+                            registers[index] = saved ?? 0
                         }
                     }
+                    outermost = next_known[X64_TRACE_RBP] && registers[X64_TRACE_RBP] == 0
                 }
-                registers[X64_TRACE_RBP] = caller_rbp
-                next_known[X64_TRACE_RBP] = true
-                outermost = function < 0 && caller_rbp == 0
+                else -> {
+                    rsp_word: self.word(registers[X64_TRACE_RSP])
+                    rbp_word: if registers[X64_TRACE_RBP] > 0 -> self.word(registers[X64_TRACE_RBP]) else -> Int?{None}
+                    caller_rbp: native_caller_rbp(self.openings, function, registers, pc, here, rsp_word, rbp_word) ?? break
+                    loop save in native_prologue_saves(self.openings, function) {
+                        if pc >= save.after && registers[X64_TRACE_RBP] > 0 {
+                            if self.word(registers[X64_TRACE_RBP] - 8 * (save.slot + 1)) == .Val(saved) {
+                                registers[save.register] = saved
+                                next_known[save.register] = true
+                            }
+                        }
+                    }
+                    registers[X64_TRACE_RBP] = caller_rbp
+                    next_known[X64_TRACE_RBP] = true
+                    outermost = function < 0 && caller_rbp == 0
+                }
             }
             registers[X64_TRACE_RIP] = returned
             registers[X64_TRACE_RSP] = cfa
@@ -5328,8 +5331,8 @@ native_registry_tasks: fn(memory: NativeMemory, registry: Int) -> [NativeTask] N
     node := head[0]
     loop node != 0 && tasks.len() < NATIVE_DEBUG_MOST_TASKS {
         words: native_debug_read(memory, node, 8, NATIVE_DEBUG_TASK_WORDS) ?? break
-        label: if words[4] == 0 -> "" else -> native_debug_text(words[4], memory, false) ?? ""
-        wait: if words[6] == 0 -> "" else -> native_debug_text(words[6], memory, false) ?? ""
+        label: if words[4] == 0 -> "" else -> native_debug_text(words[4], memory) ?? ""
+        wait: if words[6] == 0 -> "" else -> native_debug_text(words[6], memory) ?? ""
         tasks.push(NativeTask{id: words[1], label: label, state: words[5], wait: wait, canceled: words[9] != 0, fiber: words[14], control: words[10]})
         node = words[0]
     }
@@ -6224,13 +6227,13 @@ native_debug_int: fn(word: Int, memory: NativeMemory) -> Int? Never! {
 // The String whose header [data, byte length, cap] is at `address`, quoted,
 // its first NATIVE_DEBUG_SHOWN_BYTES bytes shown.
 native_debug_string: fn(address: Int, memory: NativeMemory) -> String? Never! {
-    native_debug_text(address, memory, true)
+    native_debug_text(address, memory, quoted: true)
 }
 
 // The String whose header is at `address`, as a Jet string literal when
 // `quoted`, else as its own text: its first NATIVE_DEBUG_SHOWN_BYTES bytes,
 // then its length when it has more.
-native_debug_text: fn(address: Int, memory: NativeMemory, quoted: Bool) -> String? Never! {
+native_debug_text: fn(address: Int, memory: NativeMemory, quoted: Bool{false}) -> String? Never! {
     header: native_debug_read(memory, address, 8, 2) ?? return if native_debug_cut(memory, address, 16) -> Val(NATIVE_DEBUG_CUT_OFF) else -> None
     length: header[1]
     if length < 0 -> return None
@@ -6292,7 +6295,7 @@ native_debug_view_shown: fn(image: NativeImage, memory: NativeMemory, ty: Int, a
         label := NATIVE_DEBUG_UNAVAILABLE.copy()
         value := NATIVE_DEBUG_UNAVAILABLE.copy()
         loop member in image.members[found.group] {
-            text: native_debug_text(native_number(stored, k * size + member.offset, 8, X64DebugEncoding.Signed), memory, false) ?? NATIVE_DEBUG_UNAVAILABLE
+            text: native_debug_text(native_number(stored, k * size + member.offset, 8, X64DebugEncoding.Signed), memory) ?? NATIVE_DEBUG_UNAVAILABLE
             if member.name == "label" -> label = text.copy()
             if member.name == "value" -> value = text
         }
