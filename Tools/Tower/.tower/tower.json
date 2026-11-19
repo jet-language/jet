@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112366,
+    "rev": 112369,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75296,6 +75296,11 @@
         {
           "at": "2026-11-19",
           "by": "Main",
+          "text": "p311 (5f090c020d) DebugLatency 20000 fns x3: first_stop 103 ms (lldb 208), print_first 4199 ms (bar 250: missed), print_again 3 (lldb 2, met), second_eval 30 ms (met). At 2000: print_first 421 missed, second_eval 29. Case Debug/second_print_answers_under_100ms FAILs at 101 ms twice standalone (the new expression f_2+f_3 needs functions the first print did not build). c45 entry fix IfHole c45-eval-entry-functions held on a comment-spelling guard, r2 pending. p312 census failed on that guard; loop restarted from p311 with plot-frame-sites, causal-accounting.r2, c6-frame-codegen, c51-budget-case-order."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
           "text": "Correction: D-DEBUG-FOLD1 is added as a draft. It waits for decision review before it reaches the owner. Note for the review: another ballot on this card says an -O0 build keeps every pure call; Comptime/LocalValues.jet folds on every tier, so that text is wrong."
         },
         {
@@ -75938,11 +75943,11 @@
         {
           "n": 51,
           "text": "Typed crash dumps and the flight recorder: A stop writes a typed dump (every task's stack, values reachable from them to a budget, the flight-recorder ring) and `jet debug` opens it with the live verbs; `jet perf attach` drains the same ring. Proof: `jet test Compiler --profile cases --filter Debug/crash_dump_opens_typed`; `--filter Perf/attach_drains_flight_ring`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T14:10:21.562Z",
+          "evidence": "p311 batch compiler (dev 5f090c020d, gate-p311): full suite PASS Debug/crash_dump_opens_typed and Perf/attach_drains_flight_ring (suite-p311/cases.out). The budget row Debug/crash_dump_keeps_its_budget: jet debug on the dump prints \"Memory: 33546864 bytes held, within the 33554432-byte budget; 30994432 bytes cut off past it\", typed locals `chunks = [[0, 1, …, 15, … 1999984 more], <cut off>, …]`. Its harness FAIL was case ordering (stdout predicates after a file: line), fixed by SUB Main-6841-c51-budget-case-order, which passes on gate-p311.",
+          "at": "2026-11-19T09:50:49.770Z",
           "unblockedFrom": "D-OBSERVE-FLIGHT1"
         },
         {
@@ -76006,11 +76011,11 @@
         {
           "n": 58,
           "text": "One window: Canvas grown: Canvas's Debug view shows source, stack, locals, watches and tasks together, with replay controls, and opens dumps and recordings; a Profile view draws the trace timeline (samples, zones, waits, I/O). No second graphical tool. Proof: `jet Tools/CanvasTest/Run.jet native-debug-panels` (a new mode beside `native-lifecycle`). (Docs/Audits/2026-11-18-best-debugger-profiler.md R16)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T14:10:39.401Z",
+          "evidence": "p311 batch compiler (dev 5f090c020d): `JET_BIN=$D/jet jet Tools/CanvasTest/Run.jet native-debug-panels` rc=0: \"PASS native jet dev --canvas Debug and Profile views: panels, breakpoint stop with source, stack and locals, profile lanes, zoom, refused trace\". Suite p311: CanvasCLILifecycle/jet_dev_canvas_debug_replays_recordings_and_dumps PASS (newly fixed by IfHole c51-c58 entry-aggregates-canvas-dump) and jet_dev_canvas_serves_debug_and_profile_views PASS.",
+          "at": "2026-11-19T09:50:51.207Z",
           "unblockedFrom": "D-DBG-UI1"
         },
         {
@@ -76132,7 +76137,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-19T09:40:55.096Z",
+      "updated": "2026-11-19T09:50:52.491Z",
       "updatedBy": "Main",
       "criteriaLastN": 67
     },
@@ -160883,6 +160888,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-19T09:50:52.491Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T09:50:51.207Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#58"
+    },
+    {
+      "at": "2026-11-19T09:50:49.771Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#51"
+    },
     {
       "at": "2026-11-19T09:40:55.097Z",
       "by": "Main",
