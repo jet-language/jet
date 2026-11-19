@@ -17631,6 +17631,180 @@
         }
       ],
       "retiredAt": "2026-11-19T19:35:12.390Z"
+    },
+    {
+      "id": "c0255wk0",
+      "num": 6849,
+      "title": "Markers, effects, facts, derives and tags are ordinary declared types (D-DECL-TYPES1)",
+      "body": "Destination: Jet has no special declaration words for markers, effects, facts, derives or tags. Each is an ordinary struct, enum or impl of a Core trait (Marker, Effect, Fact, Trait.Derive), so one mechanism, one reader and one set of tools serves all of them, and libraries declare their own on equal terms with Core.\n\nGoverning decisions: D-DECL-TYPES1=A (2026-10-30), D-TAG-MARKER1=A, D-FACT-MARKER1=A, D-DERIVE-PROVIDER1=A, D-MARKER-INBODY1=A (built by #6562), D-MARKER-MODULE1=A, D-MARKER-NAME-HYGIENE1=A, D-MARKER-LAW1=A, D-EFFTYPE-MODEL1=A, D-DECL-COLON1=A. Owner orders: retired declarations get no teaching diagnostic, UI snapshot or jet fix rule (2026-11-06); Jet's own diagnostic types live under the `jet.` prefix (2026-10-30).\n\nDecided without ballot (Main 2026-11-11): wrap is typed with the existing Code value and lowered through root-authorized Compiler events and Meta.Rewrite; library combine is as already ratified (no package marker sets resolution). Package settings take ordinary markers on the package settings record (a header in package.jet, the same marker on an inline package record); no inner-marker sigil. Marker struct form: `struct X { fields; impl Marker { settings; fn expand(self, target: Target) { template } } }`; a trailing list field without a default is variadic.\n\nCarried from #6039, #4276, #4284 and #3662 (closed 2026-11-14).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "All 11 criteria met (c10 on the p225 batch compiler, dev 1b2c2d0a54; the marker feature landed in 9fc0bc398e, and c10's ui filter was corrected to the TitleCase folder names). Closed by Main."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "c2 stays open: the EffectDeclarations golden passes on p214 (PASS 3), but `effect` is still a live declaration keyword (Compiler/JetLexer/Data/Lexer/Keywords.jet KW_EFFECT_DECL retired: false; registered in EffectsSurface.jet, Highlights.jet, PackageFiles.jet and the syntax dictionary). The criterion requires the word gone and the 46 Prelude effects converted."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Markers are structs implementing Core Marker (sites, repeatable, inherits, resolution, scopes, companion and group as trait constants; an `expand(self, target)` template; wrap); the Prelude's 81 markers are converted and the `marker` declaration word is gone; package markers cannot set resolution (D-MARKER-LAW1=A) and the Prelude's .Merge and .Tighten markers keep their built-in rules.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p215 batch compiler (census build of dev add8c1ce16), proofrun on gate-p215: dt-marker-law PASS",
+          "at": "2026-11-16T16:07:58.167Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "decl_types_marker_"
+          }
+        },
+        {
+          "n": 2,
+          "text": "Effects are types implementing Core Effect: #FX above the effect type, `impl X.Effect` in the same file, enum cases as closed families, `irreversible(self) -> Bool`, and value rows like `-[Bucket{name: \"photos\"}]>` that cover only that value; the Prelude's 46 effects are converted and the `effect` declaration word is gone.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p215 batch compiler (census build of dev add8c1ce16), proofrun on gate-p215: dt-effect-word, dt-effect-values-cases, dt-effect-values-ui PASS",
+          "at": "2026-11-16T16:07:59.620Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "ErrorsAndEffects/Effects/EffectDeclarations"
+          }
+        },
+        {
+          "n": 3,
+          "text": "Derives are `impl Trait.Derive { fn expand(target: Target) }` with no `derive` or `derives` word; compiler facts are field-less structs implementing Fact, with their attachment and gate laws as trait constants and gates as Prelude Gate values, one form for value, scope and build facts (this replaces D-FACTDECL1's `fact Name(...)` form); the `fact` word is gone.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p220 batch compiler (census build of dev 17c073989d): jet test Compiler --profile cases --filter decl_types_derive_and_fact_ PASS (DeclTypes-6-1-6867-c10-native.r2 fixed the case text)",
+          "at": "2026-11-16T18:18:30.161Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "decl_types_derive_and_fact_"
+          }
+        },
+        {
+          "n": 4,
+          "text": "A derive with no trait is a field-less marker struct with `impl Marker { sites: [.Type] }` and an `expand(self, target: Target)` template that writes `impl $target { ... }` (D-DERIVE-PROVIDER1=A); writing #DebugText on a type is unchanged; every `derive T.X` provider in Examples, tests and Tools/perf is converted by a one-time script, with no jet fix rule. Proof: `jet test Compiler --profile golden --filter Metaprogramming/Derives/UserDerive` on O0, O1 and O2",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Main ran on p214 (tree aa8715dacd): `jet test Compiler --profile golden --filter Metaprogramming/Derives/UserDerive` PASS 3 (O0, O1, O2), FAIL 0. Examples/Metaprogramming/Derives/UserDerive.jet declares the derive as a field-less struct with `impl Marker { sites: [.Type] expand: fn(self, target: Target) }`. `git grep -E \"derive [A-Z][A-Za-z]*\\.\"` over Examples, tests and Tools/perf finds only comments and the retired/ fixtures of ratified_p12 cases that prove the old form fails to parse.",
+          "at": "2026-11-16T11:22:25.476Z"
+        },
+        {
+          "n": 5,
+          "text": "A value tag is a field-less struct whose Marker impl has `sites: [.TypeUse]`; its denials are its own `#FX(!…)` row (D-EFFTYPE-MODEL1), with no tag-only deny setting; `from` is a Marker constant used only by tags; enum-based states and effect trees stay compile-time facts read by markers, not a new dispatch mechanism (D-FACTMODEL1=A). A tag with no denial or with a ceiling entry is refused with a registered code and UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p215 batch compiler (census build of dev add8c1ce16), proofrun on gate-p215: dt-tag-cases PASS",
+          "at": "2026-11-16T16:08:00.578Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "tag_marker_"
+          }
+        },
+        {
+          "n": 6,
+          "text": "The four built-in tags are Prelude structs; the copies in EffectsSurface.jet, Taint.jet and the TaintKind enum are removed; the 36 tag declarations are converted; E0733 and E0734 texts describe the struct form. Proof: `git grep -n TaintKind Compiler` prints nothing and `jet test Compiler --profile cases --filter tag_marker_` passes",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p215 batch compiler (census build of dev add8c1ce16), proofrun on gate-p215: dt-tag-cases PASS",
+          "at": "2026-11-16T16:08:01.524Z"
+        },
+        {
+          "n": 7,
+          "text": "One in-repo migration rewrites every marker, effect, fact and derive declaration and reject call in one cutover; no old spelling, alias, reader, teaching diagnostic or jet fix rule remains, and the golden, UI and cases compares lose 0 rows.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p216 batch compiler (census build of dev efb3da4f6c): jet test Compiler --profile cases --filter decl_types_no_old_words PASS",
+          "at": "2026-11-16T16:45:32.314Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "decl_types_no_old_words"
+          }
+        },
+        {
+          "n": 8,
+          "text": "Every converted Prelude marker accepts both placements, above the declaration and as a `#X :: value` line inside its body (D-MARKER-INBODY1=A); no marker opts in or out, and the cutovers move no existing marker between the two places.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Main ran on p214 (tree aa8715dacd): `jet test Compiler --profile cases --filter marker_inbody` PASS 6, FAIL 0.",
+          "at": "2026-11-16T11:22:26.911Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "marker_inbody"
+          }
+        },
+        {
+          "n": 9,
+          "text": "No marker shares a name with a trait (a registry check fails on a collision); #Job is the scheduled-job marker; #Discriminant is not Jet syntax, replaced by `#Codable(tag:)` (D-MARKER-NAME-HYGIENE1=A, D-CODABLE-OPTIONS1=A).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p215 batch compiler (census build of dev add8c1ce16), proofrun on gate-p215: dt-hygiene PASS",
+          "at": "2026-11-16T16:08:02.454Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "marker_name_hygiene"
+          }
+        },
+        {
+          "n": 10,
+          "text": "A package-declared marker is named through its module, `#web.Get` (D-MARKER-MODULE1=A); unknown, private and ambiguous marker names each report a registered code with a UI snapshot. Proof: `jet test Compiler --profile golden --filter Modules/QualifiedMarker` and `jet test Compiler --profile ui --filter QualifiedMarker`",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p225 batch compiler (dev 1b2c2d0a54), built in 9fc0bc398e: jet test Compiler --profile golden --filter Modules/QualifiedMarker PASS 3/3 (o0, o1, o2); jet test Compiler --profile ui --filter QualifiedMarker PASS 6/6 (Bare, Ambiguous, Private, LowercaseLibrary, AliasAmbiguous, Unknown).",
+          "at": "2026-11-16T20:33:13.873Z"
+        },
+        {
+          "n": 11,
+          "text": "Markers are PascalCase only: `#Allow(lint)` and `#Wire` are the only spellings, `#allow` and `#wire` (5 .jet files on dev 452b6443f3) are migrated, and a test checks every marker row against the marker NameCase rule. Proof: `git grep -l -E '#(allow|wire)\\b' -- '*.jet'` prints nothing and `jet test tests/guards --filter closed_lists` passes. (was #4022 c19)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed aa8715dacd. git grep -l -E '#(allow|wire)\\b' aa8715dacd -- '*.jet' prints nothing (0 files); jet test tests/guards -> pass (p214 'all test tests/guards' rc=0, which includes closed_lists and its marker NameCase test).",
+          "at": "2026-11-16T10:40:15.912Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "markers",
+        "metaprogramming",
+        "decl-types"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:10:44.799Z",
+      "updated": "2026-11-16T20:33:28.729Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 11,
+      "completedAt": "2026-11-16T20:33:28.729Z",
+      "questions": [],
+      "retiredAt": "2026-11-19T20:52:40.175Z"
     }
   ]
 }
