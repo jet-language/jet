@@ -75,6 +75,15 @@ X64InlineRange: struct {
     end: Int,
 }
 
+// A call that allocates a heap block in a `--checked-alloc` image: its
+// return address `at` (an offset in the function's code) and the type row
+// (X64ModuleDebug.types) of what the block holds, which `jet perf` names a
+// heap snapshot's blocks by (a DW_TAG_call_site, Image/Dwarf.jet).
+X64AllocSite: struct {
+    at: Int,
+    ty: Int,
+}
+
 X64FunctionDebug: struct {
     lines: [X64LineRow],
     body: Int,
@@ -90,6 +99,8 @@ X64FunctionDebug: struct {
     // The runs of inlined code, by start, each run before the runs nested
     // in it; the slow paths after the epilogue are the function's own code.
     inlines: [X64InlineRange]{[X64InlineRange]{}},
+    // The allocating calls (X64AllocSite), by return address.
+    allocs: [X64AllocSite]{[X64AllocSite]{}},
 }
 
 // The source types of the debug variables, described by their machine

@@ -230,6 +230,12 @@ ir_merge: fn(built: &&[IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRoot
             if row < 0 || reached < 0 || out.list_elements.get(row) != None -> next
             out.list_elements[row] = reached
         }
+        loop (local, held) in parts[part].alloc_held {
+            row: ir_merge_reached_type(g, part, local)
+            reached: ir_merge_reached_type(g, part, held)
+            if row < 0 || reached < 0 || out.alloc_held.get(row) != None -> next
+            out.alloc_held[row] = reached
+        }
         // The part's variant lists the merged rows take, by list.
         shaped := [Int:Int]{}
         loop (local, list) in parts[part].debug_variants {

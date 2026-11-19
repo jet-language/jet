@@ -3475,19 +3475,32 @@ ir_word_row: fn(m: &IRModule) -> Int Never! {
 // selection names `ty` at the call (X64Select.jet ir_x64_alloc_type); else
 // `row` itself, so any other build's IR is unchanged. A box answers its box
 // row, which names its type already.
-ir_alloc_row: fn(m: &IRModule, row: Int, ty: Type) -> Int Never! {
+ir_alloc_row: fn(m: &IRModule, row: Int, ty: Type) -> Int Never! { ir_alloc_row_holding(m, row, ty, -1) }
+
+// ir_alloc_row of storage whose block holds values laid out as row `held`
+// (-1: bytes of no known layout), which the call's DWARF type points at
+// (IRModule.alloc_held).
+ir_alloc_row_holding: fn(m: &IRModule, row: Int, ty: Type, held: Int) -> Int Never! {
     if !m.alloc_types -> return row
     layout := m.types[row].copy()
     layout.ty = Type.Apply{name: IR_ALLOC_TYPE, args: [Type]{ir_untag(ty)}}
-    ir_intern_type(m, "{IR_ALLOC_TYPE}:{type_carrier_identity(ty)}", layout)
+    interned: ir_intern_type(m, "{IR_ALLOC_TYPE}:{type_carrier_identity(ty)}", layout)
+    if held >= 0 && m.alloc_held.get(interned) == None -> m.alloc_held[interned] = held
+    interned
 }
 
 // ir_alloc_row for storage serving values of type row `served` (-1: none,
-// `row` itself).
+// `row` itself): a List's block holds its elements, a struct's or tuple's
+// its members.
 ir_alloc_row_of: fn(m: &IRModule, row: Int, served: Int) -> Int Never! {
     if !m.alloc_types || served < 0 -> return row
     ty: m.types[served].ty.copy()
-    ir_alloc_row(m, row, ty)
+    held: if {
+        m.list_elements.get(served) != None -> m.list_elements.get(served) ?? -1
+        m.debug_members.get(served) != None -> served
+        else -> -1
+    }
+    ir_alloc_row_holding(m, row, ty, held)
 }
 
 // The row of the word a List buffer of element row `element` answers
@@ -3496,7 +3509,22 @@ ir_list_alloc_row: fn(m: &IRModule, element: Int) -> Int Never! {
     word_row: ir_word_row(m)
     if !m.alloc_types || element < 0 -> return word_row
     list: Type.List{element: m.types[element].ty.copy()}
-    ir_alloc_row(m, word_row, list)
+    ir_alloc_row_holding(m, word_row, list, element)
+}
+
+// What allocation word `row` serves (ir_alloc_row): the type's Jet spelling
+// and the row its block holds values laid out as (-1: none known).
+IRAllocServed: struct {
+    name: String,
+    held: Int,
+}
+
+// None for a row that is no allocation word.
+ir_alloc_served: fn(m: IRModule, row: Int) -> IRAllocServed? Never! {
+    if m.types[row].ty == .Apply(name, args) {
+        if name == IR_ALLOC_TYPE && args.len() == 1 -> return Val(IRAllocServed{name: ir_type_name(args[0]), held: m.alloc_held.get(row) ?? -1})
+    }
+    None
 }
 
 // Only a `--checked-alloc` module's allocation words name what they serve,
@@ -3516,6 +3544,9 @@ ir_list_alloc_row: fn(m: &IRModule, element: Int) -> Int Never! {
         served = "{name} {ir_type_name(element)}"
     }
     assert(served == ("{IR_ALLOC_TYPE} I64"))
+    assert((m.alloc_held.get(buffer) ?? -1) == word)
+    held: ir_alloc_served(m, buffer) ?? IRAllocServed{name: "", held: -1}
+    assert(held.name == "[I64]" && held.held == word && ir_alloc_served(m, word) == None)
     wrapper: ir_alloc_row_of(m, pointer, word)
     assert(wrapper != pointer && wrapper != buffer && m.types[wrapper].kind == .Pointer)
     assert(ir_alloc_row_of(m, pointer, -1) == pointer && ir_list_alloc_row(m, -1) == word)

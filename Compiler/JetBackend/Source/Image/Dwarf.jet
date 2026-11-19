@@ -20,7 +20,10 @@
 //   Code inlined into a function is an inlined subroutine of an abstract
 //   subprogram of the inlined function, so a debugger shows its frame and
 //   locals. Generated functions (glue, helpers, `main`) are artificial
-//   subprograms.
+//   subprograms. A `--checked-alloc` image's allocating calls are call
+//   sites of their subprogram, each with its return address and the type
+//   of what its block holds (X64FunctionDebug.allocs), which `jet perf`
+//   names a heap snapshot's blocks by.
 // - `.debug_line`: one sequence per function with source lines; the row at
 //   the end of the prologue carries `prologue_end`.
 // - `.debug_jetline`: not DWARF. The location table the runtime's fault
@@ -290,6 +293,10 @@ DWARF_ABBREV_VARIANT: 23
 
 DWARF_ABBREV_DEFAULT_VARIANT: 24
 
+DWARF_ABBREV_CALL_SITE: 25
+
+DWARF_ABBREV_GENERATED_SITES: 26
+
 // Attribute names and forms.
 DW_AT_LOCATION: 0x02
 
@@ -341,6 +348,8 @@ DW_AT_CALL_FILE: 0x58
 
 DW_AT_CALL_LINE: 0x59
 
+DW_AT_CALL_RETURN_PC: 0x7d
+
 DW_FORM_ADDR: 0x01
 
 DW_FORM_DATA2: 0x05
@@ -375,7 +384,9 @@ dwarf_abbrev: fn(bytes: &[U8], code: Int, die: Int, children: Bool, attributes: 
 }
 
 // With `sections` (one section per function) the unit has no address range.
-dwarf_abbrevs: fn(sections: Bool) -> [U8] Never! {
+// With `sites` (a `--checked-alloc` image's X64FunctionDebug.allocs) a
+// generated subprogram may hold call sites too.
+dwarf_abbrevs: fn(sections: Bool, sites: Bool) -> [U8] Never! {
     a := [U8]{}
     named_variable: [Int]{DW_AT_NAME, DW_FORM_STRING, DW_AT_DECL_FILE, DW_FORM_UDATA, DW_AT_DECL_LINE, DW_FORM_UDATA, DW_AT_TYPE, DW_FORM_REF4}
     located := named_variable
@@ -467,6 +478,12 @@ dwarf_abbrevs: fn(sections: Bool) -> [U8] Never! {
     dwarf_abbrev(a, DWARF_ABBREV_VARIANT_PART, 0x33, true, [Int]{DW_AT_DISCR, DW_FORM_REF4})
     dwarf_abbrev(a, DWARF_ABBREV_VARIANT, 0x19, true, [Int]{DW_AT_DISCR_VALUE, DW_FORM_SDATA})
     dwarf_abbrev(a, DWARF_ABBREV_DEFAULT_VARIANT, 0x19, true, [Int]{})
+    if sites {
+        // An allocating call: its return address and the type of what its
+        // block holds (DW_AT_type, beyond DWARF's call site attributes).
+        dwarf_abbrev(a, DWARF_ABBREV_CALL_SITE, 0x48, false, [Int]{DW_AT_CALL_RETURN_PC, DW_FORM_ADDR, DW_AT_TYPE, DW_FORM_REF4})
+        dwarf_abbrev(a, DWARF_ABBREV_GENERATED_SITES, 0x2e, true, [Int]{DW_AT_NAME, DW_FORM_STRING, DW_AT_LOW_PC, DW_FORM_ADDR, DW_AT_HIGH_PC, DW_FORM_DATA8, DW_AT_FRAME_BASE, DW_FORM_EXPRLOC, DW_AT_ARTIFICIAL, DW_FORM_FLAG_PRESENT})
+    }
     dwarf_uleb(a, 0)
     a
 }
@@ -804,7 +821,7 @@ dwarf_info: fn(sections: &X64DwarfSections, program: X64ObjectModule, functions:
     weights := [Int]{}
     total := 0
     loop (index, function) in functions {
-        weight: 1 + dwarf_function_debug(program, function).variables.len() + debug[index].ranges.len() + debug[index].inlines.len()
+        weight: 1 + dwarf_function_debug(program, function).variables.len() + debug[index].ranges.len() + debug[index].inlines.len() + debug[index].allocs.len()
         weights.push(weight)
         total += weight
     }
@@ -878,8 +895,9 @@ dwarf_info: fn(sections: &X64DwarfSections, program: X64ObjectModule, functions:
 }
 
 // Fewest weight units (a function, each of its variables, each of its
-// ranges and each of its inline runs count one) a subprogram thread is
-// admitted for: a few hundred DIEs outweigh a thread's start.
+// ranges, each of its inline runs and each of its allocating calls count
+// one) a subprogram thread is admitted for: a few hundred DIEs outweigh a
+// thread's start.
 DWARF_INFO_MIN_WEIGHT_PER_THREAD: 400
 
 // The threads' inputs for the subprograms: shared handles of the module,
@@ -971,13 +989,18 @@ dwarf_info_part_take: fn(part: Shared<DwarfInfoPart>) -> DwarfInfoRows {
 dwarf_info_function: fn(info: &[U8], relas: &[X64ObjectRela], refs: &[Int], lists: &[U8], list_relas: &[X64ObjectRela], program: X64ObjectModule, function: X64CompiledFunction, debug: X64FunctionDebug, offset: Int, size: Int, symbol: Int, type_offsets: [Int], symbols: X64DwarfSymbols) Never! {
     facts: dwarf_function_debug(program, function)
     if facts.file < 0 {
-        dwarf_uleb(info, DWARF_ABBREV_GENERATED)
+        sited: debug.allocs.len() > 0
+        dwarf_uleb(info, if sited -> DWARF_ABBREV_GENERATED_SITES else -> DWARF_ABBREV_GENERATED)
         dwarf_string(info, function.name)
         dwarf_address(info, relas, symbol, offset)
         elf64_u64(info, size)
         // Frame base: DW_OP_reg6 (rbp).
         dwarf_uleb(info, 1)
         dwarf_u8(info, 0x56)
+        if sited {
+            dwarf_info_alloc_sites(info, relas, debug.allocs, offset, symbol, type_offsets)
+            dwarf_uleb(info, 0)
+        }
         return
     }
     origins: dwarf_inline_origins(info, facts.inlines)
@@ -1069,7 +1092,18 @@ dwarf_info_function: fn(info: &[U8], relas: &[X64ObjectRela], refs: &[Int], list
         ends.push(run.end)
     }
     loop _ in ends -> dwarf_uleb(info, 0)
+    dwarf_info_alloc_sites(info, relas, debug.allocs, offset, symbol, type_offsets)
     dwarf_uleb(info, 0)
+}
+
+// A call site DIE per allocating call `sites` (X64AllocSite) of the
+// function at `offset` from `symbol`.
+dwarf_info_alloc_sites: fn(info: &[U8], relas: &[X64ObjectRela], sites: [X64AllocSite], offset: Int, symbol: Int, type_offsets: [Int]) Never! {
+    loop site in sites {
+        dwarf_uleb(info, DWARF_ABBREV_CALL_SITE)
+        dwarf_address(info, relas, symbol, offset + site.at)
+        elf64_u32(info, type_offsets[site.ty])
+    }
 }
 
 // The abstract subprograms (DW_INL_inlined) of the functions inlined at
@@ -1293,7 +1327,11 @@ x64_dwarf_sections: fn(program: X64ObjectModule, functions: [X64CompiledFunction
     frame := DwarfSectionRows{bytes: [U8]{}, relas: [X64ObjectRela]{}}
     line := DwarfSectionRows{bytes: [U8]{}, relas: [X64ObjectRela]{}}
     jet_line := DwarfSectionRows{bytes: [U8]{}, relas: [X64ObjectRela]{}}
-    if debug_info -> sections.abbrev = dwarf_abbrevs(symbols.functions.len() > 0)
+    sites := false
+    loop row in debug {
+        if row.allocs.len() > 0 -> sites = true
+    }
+    if debug_info -> sections.abbrev = dwarf_abbrevs(symbols.functions.len() > 0, sites)
     if {
         !debug_info -> frame = dwarf_eh_frame(debug, offsets, sizes, symbols)
         compiler_threads_admit(threads, functions.len(), rows, DWARF_LINE_MIN_ROWS_PER_THREAD, 0, 0) <= 1 -> {
@@ -1388,4 +1426,36 @@ dwarf_test_bytes: fn(pieces: [X64ObjectPiece]) -> [U8] Never! {
     assert_eq(many.jet_line, one.jet_line)
     assert_eq(dwarf_test_relas(many.jet_line_relas), dwarf_test_relas(one.jet_line_relas))
     assert_eq(dwarf_test_bytes(many.loclists), dwarf_test_bytes(one.loclists))
+}
+
+// A checked-alloc image's allocating calls are call sites at their return
+// addresses, in a Jet subprogram and a generated one alike, each naming its
+// type; an image with none keeps the abbreviations it had.
+#Test("allocating calls are typed call sites of their subprograms") {
+    functions := [X64CompiledFunction]{}
+    debug := [X64FunctionDebug]{}
+    plain := [X64FunctionDebug]{}
+    loop id in 0..<2 {
+        functions.push(X64CompiledFunction{id: X64FunctionID{value: id}, name: "f{id}", code: [U8]{U8{0x90}, U8{0x90}, U8{0x90}, U8{0x90}, U8{0x90}, U8{0x90}, U8{0xc3}}, relocs: [X64Reloc]{}, align: X64_FUNCTION_ALIGN})
+        debug.push(X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: [U8]{}, ranges: [X64VariableRange]{}, allocs: [X64AllocSite]{X64AllocSite{at: 5 - id, ty: 0}}})
+        plain.push(X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: [U8]{}, ranges: [X64VariableRange]{}})
+    }
+    sources: [X64FunctionSource]{X64FunctionSource{name: "f0", file: 0, line: 1, variables: [X64DebugVariable]{}}, x64_function_source_none()}
+    program: X64ObjectModule{data: [X64Data]{}, debug: X64ModuleDebug{directory: "", files: [String]{"a.jet"}, types: [X64DebugType]{X64DebugType{name: "Node", size: 8, kind: X64DebugTypeKind.Opaque}}}, functions: sources}
+    symbols: X64DwarfSymbols{text: 1, abbrev: 2, line: 3, loclists: 4, functions: [Int]{}}
+    offsets: [Int]{0, 32}
+    sizes: [Int]{7, 7}
+    sited: x64_dwarf_sections(program, functions, debug, offsets, sizes, 64, symbols, compiler_threads_single(), true)
+    bare: x64_dwarf_sections(program, functions, plain, offsets, sizes, 64, symbols, compiler_threads_single(), true)
+    assert_eq(bare.abbrev, dwarf_abbrevs(false, false))
+    assert_eq(sited.abbrev, dwarf_abbrevs(false, true))
+    returns := [Int]{}
+    loop rela in sited.info_relas {
+        if rela.symbol == symbols.text && rela.kind == ELF64_R_X86_64_64 -> returns.push(rela.addend)
+    }
+    // The unit's range, then per function its start and its call site.
+    assert_eq(returns, [Int]{0, 0, 5, 32, 36})
+    info: dwarf_test_bytes(sited.info)
+    assert(info.len() > dwarf_test_bytes(bare.info).len())
+    assert(link_info_plan(info, sited.abbrev, 0, 64) != None)
 }
