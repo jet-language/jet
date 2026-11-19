@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112380,
+    "rev": 112383,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75296,6 +75296,16 @@
         {
           "at": "2026-11-19",
           "by": "Main",
+          "text": "p317 (dev 89e167e475: Lens c45-print-first, c55-span-rate; Main c39 audit revision 3). DebugLatency 20000x3 on gate-p317: entry first_stop 88 (lldb 217), per_step 1 (2), print_place -3 (12), print_first 58 (16), print_again -9 (9), second_eval 45 (5), watch_per_stop 9 (lldb reference failed: watchpoint creation failed on a register local); nested print_first 54, second_eval 42. Every bar the tool states is met; print_first fell from 1846 ms on p315. Open for c45: the §8.2 watch_per_stop reference must be lldb stop-hook expr as specified, condition_per_hit is not measured yet, and negative differential rows are noise; Lens assigned. c66: second_print cases fail in the suite at 104.3 and 100.9 ms (pass alone, 45 ms), so the latency needs headroom; Lens assigned. c44/c68 decision: cpu lens samples on a per-thread perf_event_open task-clock with an exact period; the IBS/PEBS precise source is used only under c65 own condition (paranoid at most 1) and in period mode; the default goes to 8 kHz only if c44(d) stays under 2%, else a rate-setting ballot."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
+          "text": "c51 scope: D-OBSERVE-FLIGHT1=B is ratified (the recorder and dumps exist only when the program starts with observe; other runs print a trace and exit), so the c39 review finding that a plain jet run of a deadlock writes no dump is not a gap. c51 stays: under jet run --observe, a 3-task deadlock dump lists every task with its whole stack and typed locals at -O0 and -O2; its case also asserts a plain run writes no dump."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
           "text": "p315 (dev e19e7c11f9: IfHole p313 fallout + zone-arg-sink, Lens c55 wall-time sizing). c6 pair: -O1 wall 0.9995 [0.992,1.008] even, cycles 0.9994 even; -O2 wall 1.0057 even, cycles 1.0002 even; on-arm even; peak RSS 276/268 KB loss at both levels (the only loss left; IfHole finding the 2 pages with the site patching). DebugLatency 20000 x3: print_first 1846 ms entry / 1860 nested (bar 250 missed; p313 54 ms was mostly the eval refusing, per Lens), second_eval 55/44 (met), print_again 28 vs lldb 6 (missed). Suite: p313 fallout cases and DeadlineContext o0 fixed; first_print_nonentry 252 ms, second_print entry 104.6 ms. c55 under load (64 busy loops): round ranks wide first +21.8% [17.8,25.1] over 56 experiments, hand measure 71; still failing."
         },
         {
@@ -75892,11 +75902,11 @@
         {
           "n": 43,
           "text": "Time travel over the chokepoint and sync order: (a) `jet run --record=r1` of a program whose tasks share channels and a lock, made at -O2, replays under `jet debug --replay=r1` with the same output and the same sync order at -O0, -O1 and -O2, on real threads; an unsafe write that changes the run is reported at the first sync event where it diverges. (b) In a replay, `reverse-step`, `reverse-next`, `reverse-finish` and `reverse-continue` reach the previous line, call, caller and breakpoint or watch hit, in the console and over DAP `stepBack` and `reverseContinue`. (c) `why x` in a replay names the write that gave `x` its value: file:line, task, stack and the value it replaced; a local optimized out at -O2 is shown from the -O0 replay and labeled recovered. Proof: `jet test Compiler --profile cases --filter Debug/replay_threads_across_tiers_`; `--filter Debug/replay_reverse_`; `--filter Debug/replay_why_`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R1)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-19T11:21:55.254Z",
+          "evidence": "p318 batch compiler (census build of dev 791fb2c84f), collect-all cases suite $JET_SCRATCH_ROOT/../lander3-tmp/suite-p318/cases.out: PASS Debug/replay_threads_across_tiers_{record_writes_the_replay, replays_at_every_tier, reports_the_first_diverging_sync_event, refuses_what_it_cannot_replay}; PASS Debug/replay_reverse_{steps_back_by_line_call_and_caller, continue_goes_back_to_a_watch_hit, over_dap, refuses_outside_a_replay}; PASS Debug/replay_why_{names_the_last_write, recovers_an_optimized_away_local, refuses_outside_a_replay}. The reopening defect (c39 review: a replay dropped the recorded program arguments, recorded fib=5 replayed as 832040) is fixed by 1042596623 + fd79127aa3: the replay artifact carries the run arguments, a replay reruns with them, the same arguments again are accepted and different ones are refused (E2104) before the program runs; PASS Debug/replay_runs_the_recorded_arguments on p318 (it failed before the fix on p314: recorded n=5 replayed n=7).",
+          "at": "2026-11-19T12:56:49.461Z",
           "unblockedFrom": "D-TIMETRAVEL3"
         },
         {
@@ -76171,7 +76181,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-19T11:48:27.151Z",
+      "updated": "2026-11-19T12:56:49.461Z",
       "updatedBy": "Main",
       "criteriaLastN": 68
     },
@@ -160922,6 +160932,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-19T12:56:49.461Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#43"
+    },
+    {
+      "at": "2026-11-19T12:34:36.134Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T12:15:03.255Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-19T11:48:27.151Z",
       "by": "Main",
