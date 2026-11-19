@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112404,
+    "rev": 112413,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -38877,6 +38877,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-18T15:20:32.448Z"
+        },
+        {
+          "n": 8,
+          "text": "Member liveness (UnreadField, UnbuiltCase) judges a declaration only in the program of the package that declares it: a dependent package build never reports a path dependency s fields or cases, which its own package check judges. Today the hosted Jetpack build (Jetpack/Bootstrap/Check.jet --hosted on the p325 tree) fails with 847 errors, nearly all UnreadField/UnbuiltCase on Compiler/JetFoundation, JetLexer and other Compiler packages that Jetpack reads only in part, so the suite s jetpack cannot be rebuilt from dev and the next release cannot build jetpack. Proof: Jetpack/Bootstrap/Check.jet --hosted exits 0 on the batch compiler, plus a case where package B uses package A and leaves an A field unread, which reports nothing on B and the field on A.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-19T16:07:27.816Z"
         }
       ],
       "refs": [
@@ -38895,9 +38904,9 @@
       "parentId": "c018gdah",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:47.924Z",
-      "updated": "2026-11-18T19:44:25.425Z",
+      "updated": "2026-11-19T16:07:27.816Z",
       "updatedBy": "Main",
-      "criteriaLastN": 7
+      "criteriaLastN": 8
     },
     {
       "id": "c0yvgmgj",
@@ -40939,6 +40948,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-19",
+          "by": "Main",
+          "text": "Main sweep on p325 (dev e6ddae4d43), c15: keep_going_builds_the_same_jpeg_encoder PASS, but `nm` of the built jet-runtime/jet_core.o still lists core.image.jpeg_codes (t, along with 31 other core.image.jpeg_* functions), so the Core library check still does not land the jpeg code tables and c15 stays open."
+        },
+        {
           "at": "2026-11-18",
           "by": "Main",
           "text": "c14 root cause (Main): the Core library's check lands no Core local value (jet_core.o and the bodies file keep core.image.jpeg_codes as run-time code), while a keep-going or --deep-checks compile checks Core from text and folds them (kgprobe: deep-checks binary == keep-going binary 902f5980, plain 8d39dc66). Fix: Core/Prelude bodies stage no local-value site (LocalValues.jet sema_comptime_local_value_core_body), the same rule as computing ahead; proof case Tests/Cases/Image/keep_going_builds_the_same_jpeg_encoder.case. Landing after the a0.0.45 release frees the heavy slot."
@@ -41155,7 +41169,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-09T18:05:19.437Z",
-      "updated": "2026-11-18T11:43:45.084Z",
+      "updated": "2026-11-19T16:09:55.785Z",
       "updatedBy": "Main",
       "criteriaLastN": 15
     },
@@ -84114,20 +84128,20 @@
         {
           "n": 5,
           "text": "Records compare and sort by written member order (D-RECORD-ORDER1=A): S73 in Docs/Spec/syntax-decisions.md says so, the List.sort and sort_desc docs say so, and an example shows written order and the sort_by spelling. Proof: `jet test Compiler --profile golden --filter Collections/NamedTupleOrder` on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T12:50:54.427Z"
+          "evidence": "p325 batch compiler (dev e6ddae4d43): golden Examples/Collections/NamedTupleOrder.jet PASS on O0, O1 and O2. The example sorts {key, index} pairs in written order and shows the sort_by spelling that puts index first. S73 (D-RECORD-ORDER1) is in Docs/Spec/syntax-decisions.md (the comparison list at line 1620 names sort and sort_desc). The List.sort/sort_desc docs are Docs/Spec/Reference/core-library.md lines 868-871: sort, sort_desc, min and max on named tuples compare members in written order, use sort_by to put another member first, and the example is named. The JetFoundation Collections.jet method rows carry no doc text, so that reference is the sort documentation.",
+          "at": "2026-11-19T16:10:58.510Z"
         },
         {
           "n": 6,
           "text": "A Query-class SQL statement run inside a loop over rows is one tidy error at the query line naming the batched form (an IN list or a join); a query outside any loop reports nothing. Proof: `jet test Compiler --profile ui --filter sql_query_in_row_loop` with its negative fixture.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:50:53.787Z"
+          "evidence": "p325 batch compiler (dev e6ddae4d43) ui profile: sql_query_in_row_loop PASS and sql_query_in_row_loop_quiet PASS (no errors). The snapshot is one jet.SqlQueryInRowLoop (L0308) error at the query line (scoped.query at 18:23) whose fix names the batched forms: WHERE key IN (...) or a JOIN. The quiet fixture, with the query outside any loop, reports nothing.",
+          "at": "2026-11-19T16:09:53.245Z"
         },
         {
           "n": 7,
@@ -84145,11 +84159,11 @@
         {
           "n": 8,
           "text": "Under D-DISCARD1=A, a non-unit last line in a function with no written return type and an ignored non-unit result of a pure call are errors (L0508 re-registered as a tidy error), while unit-returning arrow-loop bodies report nothing. Proof: `jet test Compiler --profile ui --filter discarded_pure_result` and its no-fire pair.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:50:53.787Z"
+          "evidence": "p325 batch compiler (dev e6ddae4d43) ui profile: discarded_pure_result PASS and discarded_pure_result_quiet PASS (no errors). The quiet fixture holds a Unit arrow-loop body (loop n in [...] -> sum += double(n)), a used result, a written return type, an impure call and an explicit .drop, and none reports L0508.",
+          "at": "2026-11-19T16:09:54.109Z"
         },
         {
           "n": 9,
@@ -84182,8 +84196,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:50:53.787Z",
-      "updated": "2026-11-18T21:31:02.483Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-19T16:10:58.510Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c00gioxt",
@@ -84301,6 +84315,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-19",
+          "by": "Main",
+          "text": "Main sweep on p325 (dev e6ddae4d43), c2: the ui rows cost_hidden_copy_in_loop and cost_hidden_copy_in_loop_quiet pass, `jet check` lists L2511 jet.HiddenCopyInLoop (rc 1), and `jet run` of the same file runs to completion (rc 0). But `jet build` of that file exits 0 and lists nothing: its whole output is the authority line, with no L2511. c2 says the error is listed by jet check AND jet build, so it stays open until jet build lists tidy errors (same root as #6858 tidy reporting)."
+        },
+        {
           "at": "2026-11-18",
           "by": "Main",
           "text": "Decision (Main) on c6 spill caps: a loop condition comparing the growing value with any Int (not only a constant or memory-bounded one) clears geometric growth, since the value stays below twice that Int. Measured: 18 geometric sites so far; 8 are capped round-ups (cleared), and 10 are uncapped doublings, swept to 1 << n."
@@ -84408,7 +84427,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:50:55.861Z",
-      "updated": "2026-11-18T10:19:54.426Z",
+      "updated": "2026-11-19T16:09:54.962Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -87353,11 +87372,11 @@
         {
           "n": 7,
           "text": "An `else` arm after exhaustive arms (L0303) gets a safe delete edit, and open-set and non-exhaustive matches stay quiet. The E0307 fix names the missing arms, and pattern_matching.jet and the other triggers are migrated. Proof: `jet test Compiler --profile ui --filter else_after_exhaustive` and `--filter E0307`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:11:42.635Z"
+          "evidence": "p325 batch compiler (dev e6ddae4d43): ui else_after_exhaustive_arms PASS. The fixture reports one jet.ClosedSetElse (E0641) on the else after .Low/.High of the closed enum Level, Fix \"Delete the else arm\" (a structured BehaviorPreserving SourceEdit), while the else that is the only cover of the open set Int in size() stays quiet. ui E0307_missing_arms_named PASS: \"missing: Blink, On(.Low, .Cool)\" with Fix \"Add an arm for: Blink, On(.Low, .Cool)\". Examples/Basics/PatternMatching.jet (the TitleCase rename of pattern_matching.jet) passes golden on all three tiers; E0641 is an error, so an unmigrated trigger anywhere in the suite would fail its row.",
+          "at": "2026-11-19T16:10:32.774Z"
         },
         {
           "n": 8,
@@ -87514,7 +87533,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:11:42.636Z",
-      "updated": "2026-11-19T15:18:27.222Z",
+      "updated": "2026-11-19T16:10:32.774Z",
       "updatedBy": "Main",
       "criteriaLastN": 20
     },
@@ -95286,7 +95305,7 @@
       "track": "epoch",
       "epoch": "e20",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -95324,11 +95343,11 @@
         {
           "n": 2,
           "text": "Jet-owned serialized tokens (receipts, rows, wire and storage schemas) whose spelling is British are inventoried with their producers and consumers and moved to a new format version. A deterministic offline converter turns the old format into the new and verifies the migration, and no reader keeps the old spelling live. Proof: the converter's round-trip case passes and git grep finds no British token in any live reader.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-17T17:23:30.033Z"
+          "evidence": "p325 batch compiler (dev e6ddae4d43): Migrations/american_tokens1_moves_british_tokens_to_new_versions PASS (the AmericanTokens1 converter round trip) and Migrations/american_ident1_renames_british_name_parts PASS. git grep -i over *.jet, *.case and *.json for the British tokens (cancelled, cancelling, colour*, behaviour*, serialis*, initialis*, normalis*, licence, favour*, honour*, centre, analyse/analysed/analysing/analyser, catalogue, artefact*, labelled, modelled, travelled, signalled, marshalled), excluding Compiler/Migrations and the Tests/Guards/american_spelling.jet tables, finds no reader or writer token. The only hits are the converter case s old-format input fixtures (Input/Old/*, which it migrates), the English word \"initialisms\" in Tests/Guards/example_names.jet, and the WAI-ARIA attribute aria-labelledby in the JetCanvas HTML shell, a web-standard name and not a Jet-owned token.",
+          "at": "2026-11-19T16:08:27.983Z"
         }
       ],
       "refs": [
@@ -95338,9 +95357,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-17T17:23:18.313Z",
-      "updated": "2026-11-18T19:44:27.488Z",
+      "updated": "2026-11-19T16:08:30.035Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-19T16:08:30.035Z"
     }
   ],
   "decisions": [
@@ -160973,6 +160993,76 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-19T16:10:58.510Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0jt78qz",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-19T16:10:32.774Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09hk13a",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-19T16:09:55.785Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08i9ox6",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T16:09:54.962Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0i4ehbt",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T16:09:54.109Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0jt78qz",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-19T16:09:53.245Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0jt78qz",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-19T16:08:30.035Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0yk1mno",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-19T16:08:27.983Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0yk1mno",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-19T16:07:27.816Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0eve9h3",
+      "note": "8 criteria, soft limit 6: regression from this card s own landed rule; contract puts it on the causing card"
+    },
+    {
+      "at": "2026-11-19T16:07:27.816Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0eve9h3",
+      "note": "#8 Member liveness (UnreadField, UnbuiltCase) judges a declarat"
+    },
     {
       "at": "2026-11-19T16:05:53.305Z",
       "by": "Main",
