@@ -1,0 +1,32 @@
+// Rounds of a score. At round 1 the program moves an edit (a .edit file, no
+// package member until then) over its own source, so `fix` has one to check:
+// the first session's edit changes the parameters of `score` while `rounds`,
+// which calls it, is on the stack; the second's is a plain edit, but the
+// program also writes over its own binary first.
+use files: core.files
+use sys: core.sys
+
+score: fn(round: Int) -> Int {
+    round * 10
+}
+
+// The second session's edit, and the binary written over.
+rebuild: fn() {
+    files.rename("prog.next.edit", "prog.jet") ?? ()
+    binary: sys.executable()
+    files.remove(binary) ?? ()
+    files.write(binary, "rebuilt\n") ?? ()
+}
+
+rounds: fn() {
+    params: files.is_file("prog.params.edit")
+    loop round in 0..<4 {
+        if round == 1 && params -> files.rename("prog.params.edit", "prog.jet") ?? ()
+        if round == 1 && !params -> rebuild()
+        print("round {round} score {score(round)}")
+    }
+}
+
+run: fn() {
+    rounds()
+}

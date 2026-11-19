@@ -2,10 +2,16 @@
 // compiled again as the program's build compiled it (its optimization level,
 // the same deep checks, debug info) and the result goes to the running program
 // (JetDebug NativeFix.jet), which swaps in each function the edit changed.
-// The compile's problems, or why the swap is refused, are what the prompt
+// The fix is a transaction: it installs only a checked candidate (a compile
+// with no problems, finished, built and lowered whole) whose inputs are
+// unchanged (each source file it compiled from reads the same just before
+// the install), at a checkpoint the running program accepts (Native.fix:
+// its image, the edit's types and layouts, the frames on its stacks). The
+// compile's problems, or why the swap is refused, are what the prompt
 // shows instead; the program then runs on as it was.
 use {
     fix_files: core.files
+    fix_time: core.time
     jet_debug.[NativeFixEdit, NativeSession]
     jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileResult, JetDriverIceRow, JetDriverLoweringInputs, jet_driver_check_failures, jet_driver_entry_root_path, jet_driver_present_diagnostics, jet_driver_report_problems]
     jet_foundation.[BuildOptions, CompilerThreads, DeepChecks, deep_checks_flags]
@@ -16,6 +22,7 @@ use {
 // `entry` with `deep_checks`.
 jet_cli_debug_fix: fn(session: &NativeSession, entry: String, deep_checks: DeepChecks, color: Bool) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> String Never! {
     if entry == "" -> return "Fix needs the program's source: debug it as `jet debug <file.jet>`\n"
+    since: fix_time.unix_ns()
     source: fix_files.read(entry) ?? return "Fix refused: couldn't read `{entry}`: {err}\n"
     argv := [String]{"-O{session.level()}"}
     loop word in deep_checks_flags(deep_checks) -> argv.push(word)
@@ -28,11 +35,13 @@ jet_cli_debug_fix: fn(session: &NativeSession, entry: String, deep_checks: DeepC
     compiled := jet_cli_compile_executable_file(entry, None, color, None, options, None) ?? return "Fix refused: the compiler stopped before finishing `{entry}`\n"
     if compiled.move() == {
         .Refused(refusal) -> return "{refusal.stdout}{refusal.stderr}Fix refused: the edit doesn't compile; the program runs on as it was\n"
-        .Checked(result, inputs, snapshot) -> return jet_cli_debug_fix_checked(session, entry, source, color, options, result, inputs, snapshot)
+        .Checked(result, inputs, snapshot) -> return jet_cli_debug_fix_checked(session, entry, source, color, options, result, inputs, snapshot, since)
     }
 }
 
-jet_cli_debug_fix_checked: fn(session: &NativeSession, entry: String, source: String, color: Bool, options: BuildOptions, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> String Never! {
+// The fix of the checked compile `result` of `entry`, whose sources
+// `snapshot` holds, read no earlier than `since` (unix_ns).
+jet_cli_debug_fix_checked: fn(session: &NativeSession, entry: String, source: String, color: Bool, options: BuildOptions, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot, since: Int) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> String Never! {
     errors: jet_driver_present_diagnostics(jet_driver_check_failures(result.diagnostics), snapshot, result.generated_source_files)
     if errors.len() > 0 {
         return "{jet_driver_report_problems(entry, source, errors, color, true)}Fix refused: the edit doesn't compile; the program runs on as it was\n"
@@ -52,5 +61,9 @@ jet_cli_debug_fix_checked: fn(session: &NativeSession, entry: String, source: St
     lowered := ir_x64_debug_program(selected)
     if lowered.errors.len() > 0 -> return "Fix refused: the compiler couldn't build the edit\n"
     edit: NativeFixEdit{object: lowered.program.move(), functions: lowered.functions.move(), debug: lowered.debug.move()}
+    // A source saved while the edit compiled is not the code about to run.
+    if jet_cli_debug_eval_held_change(jet_cli_debug_eval_stamp(snapshot, since)) == .Val(changed) {
+        return "Fix refused: `{changed}` changed while the edit compiled; fix again\n"
+    }
     session.fix(edit) ?? return "Fix failed: {err.detail}\n"
 }

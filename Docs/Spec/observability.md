@@ -959,6 +959,21 @@ reads more than 5 runs in the program too. A local's own name is no
 expression: `print total` shows the local as `locals` does, in a dump too,
 and a dump runs no code.
 
+`fix` swaps the edited program's changed functions into the stopped
+program as one transaction: it writes nothing until each check passes, and
+a refusal says why and leaves the program running as it was. The candidate
+is checked: the entry compiles again with no problems, at the image's
+optimization level, built and lowered whole. Its inputs are unchanged:
+each source file the compile read still reads the same just before the
+install, so a file saved meanwhile refuses the fix. The checkpoint it
+installs at accepts it: the program's file is still the image the process
+runs (its code reads the same, but for the debugger's own trap bytes and
+jumps); no struct changes its layout, which the refusal names by field; no
+function the program runs changes its parameters while a caller's frame on
+a stack, which finishes in its old code, would pass it the old ones; and
+the edit changes neither the program's start nor needs a runtime routine
+the image does not hold.
+
 A watch on a place in memory takes the CPU's debug registers (at most 4,
 each an aligned 1, 2, 4 or 8 bytes), so the program runs at full speed
 until the write. A local the compiler keeps in a register has no address

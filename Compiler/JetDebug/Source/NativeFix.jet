@@ -14,12 +14,15 @@
 // inside the old code finishes there. Where each target lives in the
 // running image is read from the unchanged functions' own relocation fields,
 // so the image's anonymous data objects are found where the running code
-// reaches them. An edit is refused, with nothing changed, when a struct's
+// reaches them. An edit is refused, with nothing changed, when it was
+// compiled at another optimization level than the image's, when a struct's
 // layout changes (its values in memory would be read through the new
-// layout; the refusal names the field), when it changes the entry the
-// program has already run, or when it reaches a runtime routine the image
-// does not hold.
-use jet_backend.[X64CompiledFunction, X64Data, X64DebugEncoding, X64DebugMember, X64DebugType, X64DebugVariable, X64FunctionDebug, X64FunctionID, X64FunctionSource, X64Jetline, X64JetlineFunction, X64ModuleDebug, X64ObjectModule, X64Reloc, X64RelocTarget, link_debug_addr, link_debug_le, x64_jetline_text]
+// layout; the refusal names the field), when a function the program runs
+// changes its parameters while a caller's frame on a stack, which finishes
+// in its old code, would pass it the old ones, when it changes the entry
+// the program has already run, or when it reaches a runtime routine the
+// image does not hold.
+use jet_backend.[X64CompiledFunction, X64Data, X64DebugEncoding, X64DebugMember, X64DebugType, X64DebugTypeKind, X64DebugVariable, X64FunctionDebug, X64FunctionID, X64FunctionSource, X64Jetline, X64JetlineFunction, X64ModuleDebug, X64ObjectModule, X64Reloc, X64RelocTarget, link_debug_addr, link_debug_le, x64_jetline_find, x64_jetline_text]
 
 // What `fix` compiled: the program's module (its data objects, debug types
 // and functions' source facts), its compiled functions with their
@@ -31,13 +34,15 @@ NativeFixEdit: struct {
 }
 
 // A function a fix placed: its symbol name, where its code is, the code as
-// placed, relocations resolved, and the address of the code it replaced
-// (-1 for a function the program didn't run).
+// placed, relocations resolved, the address of the code it replaced (-1 for
+// a function the program didn't run), and its parameters as
+// native_fix_parameters spells them.
 NativeFixed: struct {
     name: String,
     address: Int,
     code: [U8],
     was: Int,
+    parameters: String,
 }
 
 // A sized symbol of the image's `.symtab`.
@@ -127,6 +132,13 @@ NATIVE_FIX_R8: 9
 NATIVE_FIX_R9: 8
 
 NATIVE_FIX_ORIG_RAX: 15
+
+// The bytes of the `jmp rel32` a fixed function's old entry gets.
+NATIVE_FIX_JUMP: 5
+
+// How many unnamed pointers and typedefs a parameter's type is followed
+// through to the type it is spelled by (native_fix_parameters).
+NATIVE_FIX_TYPE_DEPTH: 8
 
 // mmap, PROT_READ | PROT_WRITE | PROT_EXEC, and MAP_PRIVATE |
 // MAP_ANONYMOUS | MAP_FIXED_NOREPLACE.
@@ -443,6 +455,9 @@ native_fix_diff: fn(image: NativeImage, edit: NativeFixEdit, symbols: NativeFixS
 // means the program already runs the edit; the error's detail says why the
 // edit can't be swapped in.
 native_fix_plan: fn(image: NativeImage, edit: NativeFixEdit, symbols: NativeFixSymbols, text: [U8], text_address: Int, fixed: [NativeFixed]) -> NativeFixPlan NativeDebugError! {
+    if edit.object.debug.level != image.level {
+        return Err(NativeDebugError{detail: "the edit was compiled at O{edit.object.debug.level}, and the program runs O{image.level} code"})
+    }
     diff: native_fix_diff(image, edit, symbols, text, text_address, fixed) ?? return Err(err)
     if diff.changed.len() == 0 -> return Ok(diff)
     row_of := [Int:Int]{}
@@ -462,6 +477,113 @@ native_fix_plan: fn(image: NativeImage, edit: NativeFixEdit, symbols: NativeFixS
     laid.running = diff.running.move()
     laid.lengths = diff.lengths.move()
     Ok(laid)
+}
+
+// The parameters of the edit's function at `row`, its own and not those of
+// a function inlined into it, each `name: Type`, joined by ", ".
+native_fix_parameters: fn(edit: NativeFixEdit, row: Int) -> String Never! {
+    id: edit.functions[row].id.value
+    if id < 0 || id >= edit.object.functions.len() -> return ""
+    shown := [String]{}
+    loop variable in edit.object.functions[id].variables {
+        if variable.parameter && variable.site == 0 {
+            shown.push("{variable.name}: {native_fix_type_shown(edit.object.debug, variable.ty, 0)}")
+        }
+    }
+    shown.join(", ")
+}
+
+// The Jet spelling of the edit's debug type `ty`: an unnamed pointer or
+// typedef is spelled by the type it reaches.
+native_fix_type_shown: fn(debug: X64ModuleDebug, ty: Int, depth: Int) -> String Never! {
+    if ty < 0 || ty >= debug.types.len() -> return "?"
+    found: debug.types[ty]
+    if found.name != "" -> return native_jet_spelling(found.name)
+    if depth >= NATIVE_FIX_TYPE_DEPTH -> return "?"
+    if found.kind == {
+        .Pointer(target) -> native_fix_type_shown(debug, target, depth + 1)
+        .Typedef(target) -> native_fix_type_shown(debug, target, depth + 1)
+        .Base(_) | .Struct(_) | .Union(_) | .Enum(_) | .Variants(_, _) | .Opaque -> "?"
+    }
+}
+
+// The image's type `ty`, spelled as native_fix_type_shown spells the
+// edit's.
+native_fix_image_type: fn(image: NativeImage, ty: Int, depth: Int) -> String Never! {
+    found: image.types.get(ty) ?? return "?"
+    if found.name != "" -> return native_jet_spelling(found.name)
+    if depth < NATIVE_FIX_TYPE_DEPTH && (found.tag == NATIVE_TAG_POINTER || found.tag == NATIVE_TAG_TYPEDEF) {
+        return native_fix_image_type(image, found.target, depth + 1)
+    }
+    "?"
+}
+
+// The parameters of the function the program runs at `address`, spelled
+// as native_fix_parameters spells the edit's: those of the function an
+// earlier fix placed there, else the image's; None when neither knows a
+// function there.
+native_fix_running_parameters: fn(image: NativeImage, fixed: [NativeFixed], address: Int) -> String? Never! {
+    loop placed in fixed {
+        if placed.address == address -> return Val(placed.parameters)
+    }
+    loop function in image.functions {
+        if function.low != address -> next
+        shown := [String]{}
+        loop variable in function.variables {
+            if variable.role == .Parameter && variable.site < 0 {
+                shown.push("{variable.name}: {native_fix_image_type(image, variable.ty, 0)}")
+            }
+        }
+        return Val(shown.join(", "))
+    }
+    None
+}
+
+// Why the planned fix `plan` of `edit` can't be swapped in while the
+// program's frames are where they are (`live`, each frame's code address):
+// a changed function the program runs whose parameters changed, called by
+// a function with a frame on a stack. That frame finishes in its old code
+// (native_fix_on_stack), and its next call of the function, now the edit's,
+// would pass the old parameters. None when no frame would.
+native_fix_types: fn(image: NativeImage, edit: NativeFixEdit, plan: NativeFixPlan, fixed: [NativeFixed], live: [Int]) -> String? Never! {
+    loop row in plan.changed {
+        at: plan.running[row]
+        if at < 0 -> next
+        before: native_fix_running_parameters(image, fixed, at) ?? next
+        after: native_fix_parameters(edit, row)
+        if before == after -> next
+        id: edit.functions[row].id.value
+        loop (caller, function) in edit.functions {
+            low: plan.running[caller]
+            if low < 0 || !native_fix_calls(function, id) -> next
+            if native_fix_on_stack(image, low, low + plan.lengths[caller], live) {
+                return Val("`{native_fix_shown(edit, row)}` changed its parameters from ({before}) to ({after}), and `{native_fix_shown(edit, caller)}`, on the stack, still passes the old ones")
+            }
+        }
+    }
+    None
+}
+
+// Whether `function` calls the edit's function `id`.
+native_fix_calls: fn(function: X64CompiledFunction, id: Int) -> Bool Never! {
+    loop reloc in function.relocs {
+        if reloc.target == .Function(callee) && callee.value == id -> return true
+    }
+    false
+}
+
+// Whether a frame of `live` runs the code [low, high) or another version of
+// that function: code the image's line table names as it names that code
+// (an earlier fix's, or the image's own before a fix).
+native_fix_on_stack: fn(image: NativeImage, low: Int, high: Int, live: [Int]) -> Bool Never! {
+    found: x64_jetline_find(image.lines, low)
+    name: if found >= 0 -> image.lines.functions[found].name else -> ""
+    loop pc in live {
+        if pc >= low && pc < high -> return true
+        at: x64_jetline_find(image.lines, pc)
+        if name != "" && at >= 0 && image.lines.functions[at].name == name -> return true
+    }
+    false
 }
 
 // The plan that places, afresh, the function of `edit` named `entry` and
@@ -656,10 +778,10 @@ native_fix_is_syscall: fn(bytes: [U8], at: Int) -> Bool Never! {
     at + 1 < bytes.len() && bytes[at] == first && bytes[at + 1] == second
 }
 
-// The 5-byte `jmp rel32` at `from` to `to`.
+// The `jmp rel32` at `from` to `to`, NATIVE_FIX_JUMP bytes.
 native_fix_jump: fn(from: Int, to: Int) -> [U8] Never! {
     jump := [U8]{0xe9, 0, 0, 0, 0}
-    native_fix_put(jump, 1, to - (from + 5), 4)
+    native_fix_put(jump, 1, to - (from + NATIVE_FIX_JUMP), 4)
     jump
 }
 
@@ -777,10 +899,47 @@ native_fix_line_address: fn(debug: X64FunctionDebug, low: Int, line: Int) -> Int
     assert_eq(edited.changed, [Int]{2})
     assert_eq(edited.running[2], 0x1010)
     // Once a fix placed it, the program runs the edit there.
-    fixed: [NativeFixed]{NativeFixed{name: "p.eq", address: 0x40000000, code: [U8]{0xb8, 3, 0, 0, 0, 0xc3}, was: 0x1010}}
+    fixed: [NativeFixed]{NativeFixed{name: "p.eq", address: 0x40000000, code: [U8]{0xb8, 3, 0, 0, 0, 0xc3}, was: 0x1010, parameters: ""}}
     again: native_fix_plan(image, NativeFixEdit{object: object, functions: [X64CompiledFunction]{main, one, three}, debug: rows}, symbols, text, 0x1000, fixed) ?? panic("refused: {err.detail}")
     assert_eq(again.changed.len(), 0)
     assert_eq(again.running, [Int]{0x1020, 0x1000, 0x40000000})
+}
+
+#Test("a fix that changes a function's parameters is refused while a caller's frame would pass the old ones") {
+    // p.rounds at 0x1000 (and, as an earlier fix placed it, at 0x40000000)
+    // calls p.score at 0x1010, which takes `round: Int`; the edit's p.score
+    // also takes `bonus: Int`.
+    types := [Int:NativeType]{}
+    types[0x30] = NativeType{name: "I64", size: 8, tag: NATIVE_TAG_BASE, encoding: X64DebugEncoding.Signed, target: -1, group: -1}
+    types[0x40] = NativeType{name: "", size: 8, tag: NATIVE_TAG_TYPEDEF, encoding: X64DebugEncoding.Signed, target: 0x50, group: -1}
+    types[0x50] = NativeType{name: "Int", size: 8, tag: NATIVE_TAG_TYPEDEF, encoding: X64DebugEncoding.Signed, target: 0x30, group: -1}
+    rounds_lines: X64JetlineFunction{low: 0x1000, high: 0x1006, name: "rounds", file: "prog.jet", dir: "", decl: 5, rows: 0, rows_end: 0}
+    score_lines: X64JetlineFunction{low: 0x1010, high: 0x1016, name: "score", file: "prog.jet", dir: "", decl: 1, rows: 0, rows_end: 0}
+    placed_lines: X64JetlineFunction{low: 0x40000000, high: 0x40000006, name: "rounds", file: "prog.jet", dir: "", decl: 5, rows: 0, rows_end: 0}
+    round: NativeVariable{name: "round", line: 1, ty: 0x40, list: -1, base: 0, role: NativeVariableRole.Parameter, site: -1}
+    score: NativeFunction{low: 0x1010, high: 0x1016, name: "score", file: 0, variables: [NativeVariable]{round}, inlined: [NativeInlined]{}}
+    image: NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{rounds_lines, score_lines, placed_lines}}, functions: [NativeFunction]{score}, types: types, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}}
+    call: [U8]{0xe8, 0, 0, 0, 0, 0xc3}
+    main: X64CompiledFunction{id: X64FunctionID{value: -1}, name: "main", code: [U8]{0xc3}, relocs: [X64Reloc]{}, align: 16}
+    rounds: X64CompiledFunction{id: X64FunctionID{value: 1}, name: "p.rounds", code: call, relocs: [X64Reloc]{X64Reloc{at: 1, target: X64RelocTarget.Function{id: X64FunctionID{value: 0}}}}, align: 16}
+    scored: X64CompiledFunction{id: X64FunctionID{value: 0}, name: "p.score", code: [U8]{0xb8, 2, 0, 0, 0, 0xc3}, relocs: [X64Reloc]{}, align: 16}
+    debug_types: [X64DebugType]{X64DebugType{name: "I64", size: 8, kind: X64DebugTypeKind.Base{encoding: X64DebugEncoding.Signed}}, X64DebugType{name: "Int", size: 8, kind: X64DebugTypeKind.Typedef{target: 0}}}
+    widened: [X64DebugVariable]{X64DebugVariable{name: "round", ty: 1, line: 1, parameter: true, indirect: false}, X64DebugVariable{name: "bonus", ty: 1, line: 1, parameter: true, indirect: false}}
+    kept: [X64DebugVariable]{X64DebugVariable{name: "round", ty: 1, line: 1, parameter: true, indirect: false}, X64DebugVariable{name: "made", ty: 1, line: 2, parameter: false, indirect: false}}
+    rounds_source: X64FunctionSource{name: "rounds", file: -1, line: 5, variables: [X64DebugVariable]{}}
+    edit: NativeFixEdit{object: X64ObjectModule{data: [X64Data]{}, debug: X64ModuleDebug{directory: "", files: [String]{}, types: debug_types}, functions: [X64FunctionSource]{X64FunctionSource{name: "score", file: -1, line: 1, variables: widened}, rounds_source}}, functions: [X64CompiledFunction]{main, rounds, scored}, debug: [X64FunctionDebug]{}}
+    same: NativeFixEdit{object: X64ObjectModule{data: [X64Data]{}, debug: X64ModuleDebug{directory: "", files: [String]{}, types: debug_types}, functions: [X64FunctionSource]{X64FunctionSource{name: "score", file: -1, line: 1, variables: kept}, rounds_source}}, functions: [X64CompiledFunction]{main, rounds, scored}, debug: [X64FunctionDebug]{}}
+    targets: NativeFixTargets{functions: [Int:Int]{}, data: [Int:Int]{}, runtime: [String:Int]{}, clashed: [String:Bool]{}}
+    plan: NativeFixPlan{changed: [Int]{1, 2}, pieces: [NativeFixPiece]{}, size: 0, targets: targets, placed: [Int:Int]{}, copied: [Int:Int]{}, running: [Int]{0x1020, 0x1000, 0x1010}, lengths: [Int]{1, 6, 6}}
+    assert_eq(native_fix_parameters(edit, 2), "round: Int, bonus: Int")
+    assert_eq(native_fix_running_parameters(image, [NativeFixed]{}, 0x1010), Val("round: Int"))
+    refused: Val("`score` changed its parameters from (round: Int) to (round: Int, bonus: Int), and `rounds`, on the stack, still passes the old ones")
+    // A frame in `rounds`, or in its code an earlier fix replaced.
+    assert_eq(native_fix_types(image, edit, plan, [NativeFixed]{}, [Int]{0x1012, 0x1004}), refused)
+    assert_eq(native_fix_types(image, edit, plan, [NativeFixed]{}, [Int]{0x40000004}), refused)
+    // No frame of `rounds`, or the same parameters: nothing passes old ones.
+    assert_eq(native_fix_types(image, edit, plan, [NativeFixed]{}, [Int]{0x1012, 0x1020}), None)
+    assert_eq(native_fix_types(image, same, plan, [NativeFixed]{}, [Int]{0x1012, 0x1004}), None)
 }
 
 #Test("an evaluation's call of a runtime function the image doesn't hold goes to a trap; a fix's is refused") {

@@ -2202,16 +2202,27 @@ NativeSession: struct {
     }
 
     // Swap `edit`, the program compiled again, into the stopped program
-    // (NativeFix.jet): what the console shows of it. Nothing changes when
-    // the fix is refused.
+    // (NativeFix.jet): what the console shows of it. Before anything is
+    // written the fix checks the checkpoint it installs at: the program's
+    // file is still the image the process runs (runs_image), the edit's
+    // types keep their layout (native_fix_plan), and no frame on a stack
+    // would pass a changed function its old parameters (native_fix_types).
+    // Nothing changes when the fix is refused.
     fix: fn(&self, edit: NativeFixEdit) -> String NativeDebugError! {
         self.ready() ?? return Err(err)
         elf: native_files.read_bytes(self.binary) ?? return Err(NativeDebugError{detail: "couldn't read the program `{self.binary}`: {err}"})
         symbols: native_fix_symbols(elf)
         code: native_elf_code(elf)
+        if !self.runs_image(code) {
+            return Ok("Fix refused: `{self.binary}` is no longer the program this session runs; restart the program to run the edit\n")
+        }
         plan: native_fix_plan(self.image, edit, symbols, code.bytes, code.address, self.fixed) ?? return Ok("Fix refused: {err.detail}; restart the program to run the edit\n")
         if plan.changed.len() == 0 {
             return Ok("Nothing to fix: the program already runs this code\n")
+        }
+        live: self.live_frames() ?? return Err(err)
+        if native_fix_types(self.image, edit, plan, self.fixed, live) == .Val(reason) {
+            return Ok("Fix refused: {reason}; restart the program to run the edit\n")
         }
         pc: (self.registers() ?? return Err(err))[X64_TRACE_RIP]
         // Each changed function's running entry, -1 for a new function.
@@ -2219,7 +2230,7 @@ NativeSession: struct {
         sizes := [Int]{}
         loop row in plan.changed {
             at: plan.running[row]
-            if at >= 0 && pc > at && pc < at + 5 {
+            if at >= 0 && pc > at && pc < at + NATIVE_FIX_JUMP {
                 return Ok("Fix refused: the program is stopped in the first instruction of `{native_fix_shown(edit, row)}`; step once, then fix again\n")
             }
             entries.push(at)
@@ -2310,7 +2321,7 @@ NativeSession: struct {
                 native_fix_lines(self.image.lines, low, function.code.len(), edit.debug[row], name, file, dir, decl)
                 self.openings.push(native_opening(self.image, self.image.lines.functions.len() - 1, NativeCode{address: base, bytes: region}))
             }
-            self.fixed.push(NativeFixed{name: function.name, address: low, code: region[piece.offset..<piece.offset + function.code.len()], was: at})
+            self.fixed.push(NativeFixed{name: function.name, address: low, code: region[piece.offset..<piece.offset + function.code.len()], was: at, parameters: native_fix_parameters(edit, row)})
             shown.push("`{name}`")
         }
         self.breakpoints = moved
@@ -2326,6 +2337,53 @@ NativeSession: struct {
         // source the fix replaced.
         self.evals = [String:Shared<NativeEval>]{}
         Ok("Fixed {shown.join(", ")}: the edit runs from the next call\n")
+    }
+
+    // Whether the process runs `code`, the `.text` of the program's file:
+    // its code reads the same but for the bytes the debugger wrote there
+    // (originals) and each fixed function's jump to its new code.
+    runs_image: fn(self, code: NativeCode) -> Bool Never! {
+        if code.bytes.len() == 0 -> return false
+        running: x64_trace_read(self.trace, code.address, code.bytes.len()) ?? return false
+        if running.len() != code.bytes.len() -> return false
+        written: self.originals()
+        jumped := [Int:Bool]{}
+        loop placed in self.fixed {
+            if placed.was < 0 -> next
+            loop k in 0..<NATIVE_FIX_JUMP -> jumped[placed.was + k] = true
+        }
+        loop (k, byte) in running {
+            if byte == code.bytes[k] -> next
+            at: code.address + k
+            filed: Int{code.bytes[k]}
+            if jumped.has_key(at) || (written.get(at) ?? -1) == filed -> next
+            return false
+        }
+        true
+    }
+
+    // The code address of every frame on the program's stacks, each
+    // thread's and each parked task's (task_rows): the innermost frame's
+    // pc, and each outer frame's call, a byte before its return address.
+    live_frames: fn(&self) -> [Int] NativeDebugError! {
+        stacks := [[Int]]{}
+        stopped: self.trace.thread
+        loop thread in self.threads {
+            self.trace.thread = thread.id
+            found: x64_trace_registers(self.trace)
+            self.trace.thread = stopped
+            if found == .Val(registers) -> stacks.push(registers)
+        }
+        rows: self.task_rows() ?? return Err(err)
+        loop row in rows {
+            if row.registers == .Val(registers) -> stacks.push(registers)
+        }
+        pcs := [Int]{}
+        loop registers in stacks {
+            frames: self.unwind_from(registers) ?? return Err(err)
+            loop (k, frame) in frames { pcs.push(if k == 0 -> frame.pc else -> frame.pc - 1) }
+        }
+        Ok(pcs)
     }
 
     // Map `size` bytes of code for a fix in the stopped program, within

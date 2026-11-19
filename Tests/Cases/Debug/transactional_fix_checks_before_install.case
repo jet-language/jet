@@ -1,0 +1,23 @@
+# `fix` is a transaction: it checks the stopped program before it writes
+# anything, and a refusal leaves the program running as it was. The first
+# session's edit gives `score` a second parameter while `rounds`, which calls
+# it, is on the stack: its frame runs on in its old code, which would pass
+# the old parameters to the new `score`, so the fix is refused. In the
+# second session the program has written over its own binary, so the image
+# the fix would read is no longer the one the process runs.
+fixture: TransactionalFixChecksBeforeInstall.fixture
+env: NO_COLOR=1
+step: jet debug prog.jet --break prog.jet:26
+stdin: transactional_fix_checks_before_install.stdin
+exit: 0
+stdout+stderr: ~ "Fix refused: `score` changed its parameters" # a caller's frame would pass the old ones
+stdout+stderr: ~ "`rounds`, on the stack, still passes the old ones" # the refusal names the frame
+stdout+stderr: ~ "round 1 score 10" # the program runs on as it was
+stdout+stderr: ~ "round 3 score 30" # its later rounds too
+stdout+stderr: ~ "Program finished" # the process runs to its end
+step: jet debug prog.jet --break prog.jet:26
+stdin: transactional_fix_checks_before_install.stdin
+exit: 0
+stdout+stderr: ~ "is no longer the program this session runs" # the checkpoint's image changed on disk
+stdout+stderr: ~ "round 2 score 1020" # the program runs on as it was
+stdout+stderr: ~ "Program finished" # the second session also runs to its end
