@@ -90,11 +90,30 @@ PERF_SAMPLES_CLOCK: I64{13}
 PERF_SAMPLES_IO: I64{11}
 
 // The kinds of a heap snapshot's records (perf_samples_heap): its mark,
-// then one per group of its live blocks. Kinds 5 to 8 are free but for
-// two reserved: 8 for #6841 c47's zones and 7 for c55's progress points.
+// then one per group of its live blocks, then the retention records
+// (perf_samples_heap_refs), one or more per live block and the roots'.
+// Kinds 7 and 8 are reserved: 8 for #6841 c47's zones and 7 for c55's
+// progress points.
 PERF_SAMPLES_HEAP_MARK: I64{10}
 
 PERF_SAMPLES_HEAP_SITE: I64{9}
+
+PERF_SAMPLES_HEAP_BLOCK: I64{6}
+
+PERF_SAMPLES_HEAP_ROOT: I64{5}
+
+// What a heap snapshot's root record holds, its second word: the frames of
+// the snapshot's thread, the words of those frames that refer to live
+// blocks, or the words of the image's writable segments that do.
+PERF_SAMPLES_ROOT_FRAMES: I64{0}
+
+PERF_SAMPLES_ROOT_STACK: I64{1}
+
+PERF_SAMPLES_ROOT_DATA: I64{2}
+
+// The most words a heap snapshot's record holds: its first word keeps the
+// count in the 11 bits from PERF_SAMPLES_ADDRESS_BITS.
+PERF_SAMPLES_HEAP_RECORD: I64{2047}
 
 // The most bytes of its name a heap snapshot's mark record keeps.
 PERF_SAMPLES_HEAP_NAME: I64{256}
@@ -186,6 +205,10 @@ perf_samples_fd := I64{-1}
 
 perf_samples_bias := I64{0}
 
+// The image's ELF file (Alloc.jet alloc_check_image), whose writable
+// segments a heap snapshot scans for roots (perf_samples_heap_roots).
+perf_samples_image := I64{0}
+
 // The image's code at link time, [low, high): a frame whose address is in
 // it is Jet code or a C library function of the image, which the call frame
 // information or the frame pointer chain walks.
@@ -256,6 +279,7 @@ perf_samples_start: fn() {
     slots: alloc_map_try(wrapping(PERF_SAMPLES_SLOTS * perf_samples_slot_bytes()))
     #Unsafe("the observation start runs before the timer whose handler reads these is armed") {
         perf_samples_bias = bias
+        perf_samples_image = image
         perf_samples_code_low = low
         perf_samples_code_high = high
         perf_samples_buffer = buffer
@@ -293,9 +317,7 @@ perf_samples_start: fn() {
         return
     }
     perf_counters_start(buffer, counters)
-    if ((lenses & PERF_LENS_ALLOC) != I64{0}) {
-        _ := alloc_check_track_start()
-    }
+    if ((lenses & PERF_LENS_ALLOC) != I64{0}) { _ := alloc_check_track_start() }
     // The record of the CPU time sampled, written at exit.
     observe_exit_install()
 }
@@ -430,28 +452,26 @@ perf_samples_exit: fn() {
 
 // core.perf.heap_mark(name): the heap snapshot named by the borrowed text
 // `name` under `jet perf run --lens=alloc`, nothing otherwise.
-#Export(c) jet_perf_heap_mark: fn(name: I64) {
-    perf_samples_heap(name)
-}
+#Export(c) jet_perf_heap_mark: fn(name: I64) { perf_samples_heap(name) }
 
 // The heap snapshot named by text `name`, under the alloc lens: the live
 // list held (Alloc.jet alloc_check_track_hold) across a fork, whose child
 // writes the snapshot (perf_samples_heap_write) and exits, and whose parent
 // releases the list and waits for the child. Where the fork fails, this
-// thread writes it while it holds the list.
+// thread writes it while it holds the list. The frames the snapshot scans
+// for roots are the ones above this call's.
 perf_samples_heap: fn(name: I64) {
     fd: perf_samples_fd
     if (fd < I64{0} || (perf_samples_lens_mask & PERF_LENS_ALLOC) == I64{0}) {
         return
     }
+    frame: alloc_check_caller_frame()
     number: alloc_check_track_hold()
     pid := I64{-1}
     #Unsafe("fork copies the held live list into a child whose only thread writes the snapshot and exits, never returning from here") {
         pid = os_syscall_i64(I64{57}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
-    if (pid <= I64{0}) {
-        perf_samples_heap_write(fd, number, name)
-    }
+    if (pid <= I64{0}) { perf_samples_heap_write(fd, number, name, frame) }
     if (pid == I64{0}) {
         #Unsafe("exit_group ends the snapshot's child, which owns nothing to flush") {
             _ := os_syscall_i64(I64{231}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
@@ -470,16 +490,17 @@ perf_samples_heap: fn(name: I64) {
 
 // Write heap snapshot `number`, named by text `name`, to the samples file
 // `fd`: the live list's blocks grouped by their allocating call sites in a
-// table of PERF_SAMPLES_HEAP_GROUP words a group, then its mark record and
-// one record per group. It allocates nothing from the heap, whose locks
-// other threads may hold: the table and the output buffer are mappings of
-// their own. The mark record: the number in place of a sample's program
-// counter, the blocks, their bytes, the name's byte length (at most
-// PERF_SAMPLES_HEAP_NAME) and the name in whole words. A group's record:
-// the number, the group's blocks, their bytes, then its call sites,
-// innermost first, each a link-time address in the image's code, as a
-// spawn record's (perf_samples_stack).
-perf_samples_heap_write: fn(fd: I64, number: I64, name: I64) {
+// table of PERF_SAMPLES_HEAP_GROUP words a group, then its mark record, one
+// record per group and the retention records (perf_samples_heap_refs) of
+// the roots in the frames above `frame`. It allocates nothing from the
+// heap, whose locks other threads may hold: the table, the output buffer
+// and the retention's index are mappings of their own. The mark record: the
+// number in place of a sample's program counter, the blocks, their bytes,
+// the name's byte length (at most PERF_SAMPLES_HEAP_NAME) and the name in
+// whole words. A group's record: the number, the group's blocks, their
+// bytes, then its call sites, innermost first, each a link-time address in
+// the image's code, as a spawn record's (perf_samples_stack).
+perf_samples_heap_write: fn(fd: I64, number: I64, name: I64, frame: I64) {
     group_bytes: wrapping(PERF_SAMPLES_HEAP_GROUP * I64{8})
     capacity := PERF_SAMPLES_HEAP_GROUPS
     table := alloc_map_try(wrapping(capacity * group_bytes))
@@ -532,6 +553,10 @@ perf_samples_heap_write: fn(fd: I64, number: I64, name: I64) {
     rt_text_store(wrapping(out + I64{24}), length)
     rt_text_bytes_copy(wrapping(out + I64{32}), rt_text_data(name), length)
     used := wrapping(words * I64{8})
+    // Once a group's record is written, its ordinal among the snapshot's
+    // group records, from 1, takes the place of its blocks, so a block's
+    // record names its group (perf_samples_heap_refs).
+    ordinal := I64{0}
     index := I64{0}
     loop index < capacity {
         group: wrapping(table + wrapping(index * group_bytes))
@@ -548,12 +573,313 @@ perf_samples_heap_write: fn(fd: I64, number: I64, name: I64) {
             rt_text_store(wrapping(at + I64{16}), rt_text_word(wrapping(group + I64{8})))
             rt_text_bytes_copy(wrapping(at + I64{24}), wrapping(group + I64{24}), wrapping(depth * I64{8}))
             used = wrapping(used + record)
+            ordinal = wrapping(ordinal + I64{1})
+            rt_text_store(group, ordinal)
         }
         index = wrapping(index + I64{1})
     }
+    used = perf_samples_heap_refs(fd, number, out, used, table, capacity, frame)
     _ := host_write_all(fd, out, used)
     alloc_unmap(table, wrapping(capacity * group_bytes))
     alloc_unmap(out, PERF_SAMPLES_HEAP_BUFFER)
+}
+
+// Write heap snapshot `number`'s retention records to `fd` through `out`,
+// whose first `used` bytes hold records not yet written; the bytes it holds
+// then. The live blocks, sorted by address into a mapping of their own (no
+// records when it cannot be mapped), each get a block record: the block's
+// address, its size and the ordinal of its group's record in `table` of
+// `capacity` groups (perf_samples_heap_write; 0 for a block no group took),
+// then each word of its payload that points into another live block, as
+// the word's offset and that block's address, in further records of the
+// same three words past PERF_SAMPLES_HEAP_RECORD words. The root records
+// follow (perf_samples_heap_roots).
+perf_samples_heap_refs: fn(fd: I64, number: I64, out: I64, used: I64, table: I64, capacity: I64, frame: I64) -> I64 {
+    count := I64{0}
+    block := I64{0}
+    #Unsafe("this thread holds the live list, or is the fork's child, whose copy of it its one thread held") {
+        block = alloc_check_live_next(I64{0})
+        loop block != (I64{0}) {
+            count = wrapping(count + I64{1})
+            block = alloc_check_live_next(block)
+        }
+    }
+    key_bytes: wrapping(wrapping(PERF_SAMPLES_HEAP_DEPTH + I64{1}) * I64{8})
+    index_bytes: wrapping(wrapping(count * I64{16}) + key_bytes)
+    sorted: alloc_map_try(index_bytes)
+    if (sorted == I64{0}) { return used }
+    key: wrapping(sorted + wrapping(count * I64{16}))
+    at := sorted
+    #Unsafe("this thread holds the live list, or is the fork's child, whose copy of it its one thread held") {
+        block = alloc_check_live_next(I64{0})
+        loop block != (I64{0}) {
+            rt_text_store(at, block)
+            rt_text_store(wrapping(at + I64{8}), alloc_check_live_size(block))
+            at = wrapping(at + I64{16})
+            block = alloc_check_live_next(block)
+        }
+    }
+    perf_samples_heap_sort(sorted, count)
+    taken := used
+    #Unsafe("this thread holds the live list, or is the fork's child, whose copy of it its one thread held") {
+        block = alloc_check_live_next(I64{0})
+    }
+    loop block != (I64{0}) {
+        size := I64{0}
+        #Unsafe("block is a tracked live payload of the held live list") {
+            size = alloc_check_live_size(block)
+        }
+        perf_samples_heap_key(alloc_check_live_chain(block), key)
+        group: rt_text_word(perf_samples_heap_slot(table, capacity, key))
+        taken = perf_samples_heap_room(fd, out, taken)
+        at = wrapping(out + taken)
+        words := perf_samples_heap_open(at, block, size, group)
+        offset := I64{0}
+        loop wrapping(offset + I64{8}) <= size {
+            target: perf_samples_heap_find(sorted, count, rt_text_word(wrapping(block + offset)))
+            if (target != I64{0} && target != block) {
+                if (wrapping(words + I64{2}) > PERF_SAMPLES_HEAP_RECORD) {
+                    perf_samples_heap_close(at, number, words, PERF_SAMPLES_HEAP_BLOCK)
+                    taken = perf_samples_heap_room(fd, out, wrapping(taken + wrapping(words * I64{8})))
+                    at = wrapping(out + taken)
+                    words = perf_samples_heap_open(at, block, size, group)
+                }
+                rt_text_store(wrapping(at + wrapping(words * I64{8})), offset)
+                rt_text_store(wrapping(at + wrapping(wrapping(words + I64{1}) * I64{8})), target)
+                words = wrapping(words + I64{2})
+            }
+            offset = wrapping(offset + I64{8})
+        }
+        perf_samples_heap_close(at, number, words, PERF_SAMPLES_HEAP_BLOCK)
+        taken = wrapping(taken + wrapping(words * I64{8}))
+        #Unsafe("block is a tracked live payload of the held live list") {
+            block = alloc_check_live_next(block)
+        }
+    }
+    taken = perf_samples_heap_roots(fd, number, out, taken, sorted, count, frame)
+    alloc_unmap(sorted, index_bytes)
+    taken
+}
+
+// Heap snapshot `number`'s root records, through `out` as
+// perf_samples_heap_refs writes them, of the live blocks `sorted` holds
+// `count` of. The frames of this thread above `frame`, a frame of its frame
+// pointer chain: each as the call site in its function (a link-time
+// address, as a group's record keeps them), its frame pointer and the
+// lowest address of its frame. Then the words of those frames that point
+// into a live block, as the word's address and that block's: a frame is
+// the words from its callee's return address up to its own frame pointer,
+// none where the call crossed into another stack segment. Then the words of
+// the image's writable segments that do, as the word's link-time address
+// and the block's; the live list's own head is no such word.
+perf_samples_heap_roots: fn(fd: I64, number: I64, out: I64, used: I64, sorted: I64, count: I64, frame: I64) -> I64 {
+    bias: perf_samples_bias
+    taken := perf_samples_heap_room(fd, out, used)
+    at := wrapping(out + taken)
+    rt_text_store(wrapping(at + I64{8}), PERF_SAMPLES_ROOT_FRAMES)
+    words := I64{2}
+    link := frame
+    depth := I64{0}
+    loop link != (I64{0}) && depth < PERF_SAMPLES_DEPTH {
+        address: rt_text_word(wrapping(link + I64{8}))
+        above := I64{0}
+        #Unsafe("link is a live [saved rbp][return address] pair of this thread's frame pointer chain, above the snapshot's own frames") {
+            above = stack_frame_caller(link)
+        }
+        if (above == I64{0}) { break }
+        if (wrapping(words + I64{3}) > PERF_SAMPLES_HEAP_RECORD) {
+            perf_samples_heap_close(at, number, words, PERF_SAMPLES_HEAP_ROOT)
+            taken = perf_samples_heap_room(fd, out, wrapping(taken + wrapping(words * I64{8})))
+            at = wrapping(out + taken)
+            rt_text_store(wrapping(at + I64{8}), PERF_SAMPLES_ROOT_FRAMES)
+            words = I64{2}
+        }
+        rt_text_store(wrapping(at + wrapping(words * I64{8})), wrapping(wrapping(address - I64{1}) - bias))
+        rt_text_store(wrapping(at + wrapping(wrapping(words + I64{1}) * I64{8})), above)
+        rt_text_store(wrapping(at + wrapping(wrapping(words + I64{2}) * I64{8})), wrapping(link + I64{16}))
+        words = wrapping(words + I64{3})
+        link = above
+        depth = wrapping(depth + I64{1})
+    }
+    perf_samples_heap_close(at, number, words, PERF_SAMPLES_HEAP_ROOT)
+    taken = perf_samples_heap_room(fd, out, wrapping(taken + wrapping(words * I64{8})))
+    at = wrapping(out + taken)
+    rt_text_store(wrapping(at + I64{8}), PERF_SAMPLES_ROOT_STACK)
+    words = I64{2}
+    link = frame
+    depth = I64{0}
+    loop link != (I64{0}) && depth < PERF_SAMPLES_DEPTH {
+        above := I64{0}
+        #Unsafe("link is a live [saved rbp][return address] pair of this thread's frame pointer chain, above the snapshot's own frames") {
+            above = stack_frame_caller(link)
+        }
+        if (above == I64{0}) { break }
+        if (above > link && wrapping(above - link) < I64{16777216}) {
+            slot := wrapping(link + I64{16})
+            loop slot < above {
+                target: perf_samples_heap_find(sorted, count, rt_text_word(slot))
+                if (target != I64{0}) {
+                    if (wrapping(words + I64{2}) > PERF_SAMPLES_HEAP_RECORD) {
+                        perf_samples_heap_close(at, number, words, PERF_SAMPLES_HEAP_ROOT)
+                        taken = perf_samples_heap_room(fd, out, wrapping(taken + wrapping(words * I64{8})))
+                        at = wrapping(out + taken)
+                        rt_text_store(wrapping(at + I64{8}), PERF_SAMPLES_ROOT_STACK)
+                        words = I64{2}
+                    }
+                    rt_text_store(wrapping(at + wrapping(words * I64{8})), slot)
+                    rt_text_store(wrapping(at + wrapping(wrapping(words + I64{1}) * I64{8})), target)
+                    words = wrapping(words + I64{2})
+                }
+                slot = wrapping(slot + I64{8})
+            }
+        }
+        link = above
+        depth = wrapping(depth + I64{1})
+    }
+    perf_samples_heap_close(at, number, words, PERF_SAMPLES_HEAP_ROOT)
+    taken = perf_samples_heap_room(fd, out, wrapping(taken + wrapping(words * I64{8})))
+    at = wrapping(out + taken)
+    rt_text_store(wrapping(at + I64{8}), PERF_SAMPLES_ROOT_DATA)
+    words = I64{2}
+    head := I64{0}
+    #Unsafe("this thread holds the live list, or is the fork's child, whose copy of it its one thread held; the head goes back below") {
+        head = alloc_check_live_swap(I64{0})
+    }
+    image: perf_samples_image
+    if (image != I64{0}) {
+        // e_phoff, e_phentsize (bits 48..63 of the word at 48) and e_phnum
+        // (bits 0..15 of the word at 56), as perf_samples_code_edge reads them.
+        headers: rt_text_word(wrapping(image + I64{32}))
+        entry: (rt_text_word(wrapping(image + I64{48})) >> I64{48}) & I64{65535}
+        segments: rt_text_word(wrapping(image + I64{56})) & I64{65535}
+        index := I64{0}
+        loop index < segments {
+            header: wrapping(image + wrapping(headers + wrapping(index * entry)))
+            kind: rt_text_word(header)
+            // A PT_LOAD segment both readable (PF_R) and writable (PF_W), at
+            // its p_vaddr for p_memsz bytes.
+            if (kind & I64{4294967295} == I64{1} && (kind >> I64{32}) & I64{6} == I64{6}) {
+                start: wrapping(rt_text_word(wrapping(header + I64{16})) + bias)
+                end: wrapping(start + rt_text_word(wrapping(header + I64{40})))
+                slot := wrapping(start + I64{7}) & I64{-8}
+                loop wrapping(slot + I64{8}) <= end {
+                    target: perf_samples_heap_find(sorted, count, rt_text_word(slot))
+                    if (target != I64{0}) {
+                        if (wrapping(words + I64{2}) > PERF_SAMPLES_HEAP_RECORD) {
+                            perf_samples_heap_close(at, number, words, PERF_SAMPLES_HEAP_ROOT)
+                            taken = perf_samples_heap_room(fd, out, wrapping(taken + wrapping(words * I64{8})))
+                            at = wrapping(out + taken)
+                            rt_text_store(wrapping(at + I64{8}), PERF_SAMPLES_ROOT_DATA)
+                            words = I64{2}
+                        }
+                        rt_text_store(wrapping(at + wrapping(words * I64{8})), wrapping(slot - bias))
+                        rt_text_store(wrapping(at + wrapping(wrapping(words + I64{1}) * I64{8})), target)
+                        words = wrapping(words + I64{2})
+                    }
+                    slot = wrapping(slot + I64{8})
+                }
+            }
+            index = wrapping(index + I64{1})
+        }
+    }
+    #Unsafe("the head this scan took from the live list goes back before the list is let go") {
+        _ := alloc_check_live_swap(head)
+    }
+    perf_samples_heap_close(at, number, words, PERF_SAMPLES_HEAP_ROOT)
+    wrapping(taken + wrapping(words * I64{8}))
+}
+
+// `used`, the bytes of `out` holding records not yet written to `fd`, or 0
+// once it writes them where another record of PERF_SAMPLES_HEAP_RECORD
+// words would not fit.
+perf_samples_heap_room: fn(fd: I64, out: I64, used: I64) -> I64 {
+    if (wrapping(used + wrapping(PERF_SAMPLES_HEAP_RECORD * I64{8})) <= PERF_SAMPLES_HEAP_BUFFER) {
+        return used
+    }
+    _ := host_write_all(fd, out, used)
+    I64{0}
+}
+
+// Open a block record at `at`: the block's address, size and group
+// ordinal after the first word; the words it holds.
+perf_samples_heap_open: fn(at: I64, block: I64, size: I64, group: I64) -> I64 {
+    rt_text_store(wrapping(at + I64{8}), block)
+    rt_text_store(wrapping(at + I64{16}), size)
+    rt_text_store(wrapping(at + I64{24}), group)
+    I64{4}
+}
+
+// Close the record of `words` words at `at`, of kind `kind` and heap
+// snapshot `number`, with its first word.
+perf_samples_heap_close: fn(at: I64, number: I64, words: I64, kind: I64) {
+    rt_text_store(at, (number & PERF_SAMPLES_ADDRESS_MASK) | (words << PERF_SAMPLES_ADDRESS_BITS) | (kind << PERF_SAMPLES_KIND_BITS))
+}
+
+// The address of the live block of the `count` (address, size) entries of
+// `sorted`, sorted by address, whose payload holds address `value`; 0 when
+// none does.
+perf_samples_heap_find: fn(sorted: I64, count: I64, value: I64) -> I64 {
+    low := I64{0}
+    high := count
+    // The last entry that starts at or below the value.
+    loop low < high {
+        middle: wrapping(low + ((high - low) >> I64{1}))
+        if (rt_text_word(wrapping(sorted + wrapping(middle * I64{16}))) <= value) {
+            low = wrapping(middle + I64{1})
+        } else { high = middle }
+    }
+    if (low == I64{0}) { return I64{0} }
+    entry: wrapping(sorted + wrapping(wrapping(low - I64{1}) * I64{16}))
+    start: rt_text_word(entry)
+    if (value < wrapping(start + rt_text_word(wrapping(entry + I64{8})))) -> start else -> I64{0}
+}
+
+// Sort the `count` two-word entries of `sorted` by their first word, in
+// place: a heap sort, as the runtime's sort would allocate and a snapshot
+// may index millions of blocks.
+perf_samples_heap_sort: fn(sorted: I64, count: I64) {
+    start := count >> I64{1}
+    loop start > (I64{0}) {
+        start = wrapping(start - I64{1})
+        perf_samples_heap_sift(sorted, start, count)
+    }
+    end := count
+    loop end > (I64{1}) {
+        end = wrapping(end - I64{1})
+        perf_samples_heap_swap(sorted, I64{0}, end)
+        perf_samples_heap_sift(sorted, I64{0}, end)
+    }
+}
+
+// Sift entry `root` of the first `count` entries of `sorted` down to its
+// place in their max-heap.
+perf_samples_heap_sift: fn(sorted: I64, root: I64, count: I64) {
+    at := root
+    loop {
+        child := wrapping(wrapping(at * I64{2}) + I64{1})
+        if (child >= count) {
+            return
+        }
+        if (wrapping(child + I64{1}) < count && rt_text_word(wrapping(sorted + wrapping(wrapping(child + I64{1}) * I64{16}))) > rt_text_word(wrapping(sorted + wrapping(child * I64{16})))) {
+            child = wrapping(child + I64{1})
+        }
+        if (rt_text_word(wrapping(sorted + wrapping(at * I64{16}))) >= rt_text_word(wrapping(sorted + wrapping(child * I64{16})))) {
+            return
+        }
+        perf_samples_heap_swap(sorted, at, child)
+        at = child
+    }
+}
+
+perf_samples_heap_swap: fn(sorted: I64, first: I64, second: I64) {
+    one: wrapping(sorted + wrapping(first * I64{16}))
+    other: wrapping(sorted + wrapping(second * I64{16}))
+    start: rt_text_word(one)
+    size: rt_text_word(wrapping(one + I64{8}))
+    rt_text_store(one, rt_text_word(other))
+    rt_text_store(wrapping(one + I64{8}), rt_text_word(wrapping(other + I64{8})))
+    rt_text_store(other, start)
+    rt_text_store(wrapping(other + I64{8}), size)
 }
 
 // A heap snapshot's key of a live block at `key`: how many call sites its
@@ -967,9 +1293,15 @@ perf_samples_lenses: fn() -> I64 {
 
 // The lens bit the `length` bytes at `item` name, 0 for none.
 perf_samples_lens: fn(item: I64, length: I64) -> I64 {
-    if (length == I64{3} && rt_text_equal_bytes(item, rt_text_data(rt_static_text("cpu")), I64{3})) { return PERF_LENS_CPU }
-    if (length == I64{6} && rt_text_equal_bytes(item, rt_text_data(rt_static_text("memory")), I64{6})) { return PERF_LENS_MEMORY }
-    if (length == I64{5} && rt_text_equal_bytes(item, rt_text_data(rt_static_text("alloc")), I64{5})) { return PERF_LENS_ALLOC }
+    if (length == I64{3} && rt_text_equal_bytes(item, rt_text_data(rt_static_text("cpu")), I64{3})) {
+        return PERF_LENS_CPU
+    }
+    if (length == I64{6} && rt_text_equal_bytes(item, rt_text_data(rt_static_text("memory")), I64{6})) {
+        return PERF_LENS_MEMORY
+    }
+    if (length == I64{5} && rt_text_equal_bytes(item, rt_text_data(rt_static_text("alloc")), I64{5})) {
+        return PERF_LENS_ALLOC
+    }
     I64{0}
 }
 

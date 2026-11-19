@@ -2977,9 +2977,7 @@ priv alloc_check_track: fn(pointer: I64) {
         os_store_i64(wrapping(pointer - I64{128}), head)
         os_store_i64(wrapping(pointer - I64{136}), I64{0})
         os_store_i64(wrapping(pointer - I64{144}), I64{1})
-        if (head != I64{0}) {
-            os_store_i64(wrapping(head - I64{136}), pointer)
-        }
+        if (head != I64{0}) { os_store_i64(wrapping(head - I64{136}), pointer) }
         alloc_check_live_head = pointer
     }
 }
@@ -2991,14 +2989,10 @@ priv alloc_check_untrack: fn(pointer: I64) {
         if (os_load_i64(wrapping(pointer - I64{144})) == I64{1}) {
             next: os_load_i64(wrapping(pointer - I64{128}))
             previous: os_load_i64(wrapping(pointer - I64{136}))
-            if (previous == I64{0}) {
-                alloc_check_live_head = next
-            } else {
+            if (previous == I64{0}) { alloc_check_live_head = next } else {
                 os_store_i64(wrapping(previous - I64{128}), next)
             }
-            if (next != I64{0}) {
-                os_store_i64(wrapping(next - I64{136}), previous)
-            }
+            if (next != I64{0}) { os_store_i64(wrapping(next - I64{136}), previous) }
             os_store_i64(wrapping(pointer - I64{144}), I64{0})
         }
     }
@@ -3015,9 +3009,7 @@ alloc_check_track_hold: fn() -> I64 {
     alloc_check_snapshots
 }
 
-alloc_check_track_release: fn() {
-    alloc_unlock(wrapping(alloc_root + I64{16}))
-}
+alloc_check_track_release: fn() { alloc_unlock(wrapping(alloc_root + I64{16})) }
 
 // The live block after `pointer` on the live list, its first for 0, and 0
 // past its end. The caller holds the list (alloc_check_track_hold), or is a
@@ -3030,14 +3022,38 @@ alloc_check_live_next: fn(pointer: I64) -> I64 {
 
 // A tracked live block's payload size.
 #Unsafe("pointer is a tracked live payload of the held live list")
-alloc_check_live_size: fn(pointer: I64) -> I64 {
-    os_load_i64(wrapping(pointer - I64{32}))
-}
+alloc_check_live_size: fn(pointer: I64) -> I64 { os_load_i64(wrapping(pointer - I64{32})) }
 
 // The address of a tracked live block's ten allocating return addresses,
 // innermost first (alloc_check_frames).
-alloc_check_live_chain: fn(pointer: I64) -> I64 {
-    wrapping(pointer - I64{120})
+alloc_check_live_chain: fn(pointer: I64) -> I64 { wrapping(pointer - I64{120}) }
+
+// Set the live list's head word to `head` and return the head it held. A
+// heap snapshot that scans the program's data for words referring to live
+// blocks (PerfSamples.jet perf_samples_heap_roots) clears it first, as the
+// list's own head is no reference the program holds, then puts it back.
+#Unsafe("the caller holds the live list (alloc_check_track_hold), or is a snapshot's forked child, whose one thread is the holder, and puts the head back before it lets the list go")
+alloc_check_live_swap: fn(head: I64) -> I64 {
+    held: alloc_check_live_head
+    alloc_check_live_head = head
+    held
+}
+
+// A frame of the calling thread's frame pointer chain that outlives this
+// call: the caller's, or the one above it when this call is inlined (the
+// stub of alloc_frames_start reads rbp). 0 without the stub.
+priv alloc_check_caller_frame: fn() -> I64 {
+    frame := I64{0}
+    #Unsafe("the frame stub (alloc_frames_start) only copies rbp to rax and returns; a missing stub leaves no chain") {
+        stub: os_load_i64(wrapping(alloc_root + I64{56}))
+        if (stub != I64{0}) { frame = os_call_address_i64(stub, I64{0}) }
+    }
+    if (frame == I64{0} || frame & I64{7} != I64{0}) { return I64{0} }
+    caller := I64{0}
+    #Unsafe("frame is this call's live [saved rbp][return address] pair on this thread's stack") {
+        caller = stack_frame_caller(frame)
+    }
+    caller
 }
 
 priv alloc_check_fill: fn(pointer: I64, size: I64) {

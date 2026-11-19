@@ -267,7 +267,9 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
             // have ended, then the I/O rows take the transfers.
             jet_cli_perf_waits_read(capture, found.waits.move(), found.wakes, found.spawns, found.transfers, source, started.start_ns)
             jet_cli_perf_io_read(capture, found.transfers.move(), source, started.start_ns)
-            if jet_cli_perf_session_heaps(source.move(), found.heaps.move()) == .Val(section) -> capture.receipts.push(section)
+            if jet_cli_perf_session_heaps(source.move(), found.heaps.move()) == .Val(section) {
+                capture.receipts.push(section)
+            }
         }
     }
     full := [String]{action}
@@ -549,7 +551,9 @@ jet_cli_perf_session_receipt: fn(action: String, argv: [String], source: String?
 // by the function and line of `source` that allocated them and the type
 // they were allocated for, the most bytes first: a null function and line
 // for the blocks no line of it allocated, a null type for those no typed
-// allocating call allocated; None when it took none.
+// allocating call allocated; then what retains its typed blocks
+// (`retained`, JetCLIPerfRetained), by type and path, a null path for the
+// blocks no root reached. None when it took none.
 jet_cli_perf_session_heaps: fn(source: &&String, heaps: &&[JetCLIPerfHeap]) -> TraceReceiptSection? Never! {
     if heaps.len() == 0 -> return None
     snapshots := [CanonicalJSON]{}
@@ -570,6 +574,20 @@ jet_cli_perf_session_heaps: fn(source: &&String, heaps: &&[JetCLIPerfHeap]) -> T
                 ),
             )
         }
+        retained := [CanonicalJSON]{}
+        loop entry in heap.retained.move() {
+            rooted: entry.path != ""
+            retained.push(
+                CanonicalJSON.Object(
+                    [CanonicalJSONField]{
+                        {key: "blocks", value: CanonicalJSON.Integer("{entry.blocks}")},
+                        {key: "bytes", value: CanonicalJSON.Integer("{entry.bytes}")},
+                        {key: "path", value: if rooted -> CanonicalJSON.String(entry.path.move()) else -> CanonicalJSON.Null},
+                        {key: "type", value: CanonicalJSON.String(entry.type_name.move())},
+                    },
+                ),
+            )
+        }
         snapshots.push(
             CanonicalJSON.Object(
                 [CanonicalJSONField]{
@@ -577,6 +595,7 @@ jet_cli_perf_session_heaps: fn(source: &&String, heaps: &&[JetCLIPerfHeap]) -> T
                     {key: "bytes", value: CanonicalJSON.Integer("{heap.bytes}")},
                     {key: "name", value: CanonicalJSON.String(heap.name.move())},
                     {key: "number", value: CanonicalJSON.Integer("{heap.number}")},
+                    {key: "retained", value: CanonicalJSON.Array(retained.move())},
                     {key: "sites", value: CanonicalJSON.Array(sites.move())},
                 },
             ),

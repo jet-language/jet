@@ -240,7 +240,35 @@ never kept is refused with the names it kept. Compare prints `Heap start
 whose live blocks or bytes changed, signed, the most bytes gained first,
 `  [Int]  leak.jet:14 run  +100 blocks  +56000 bytes`; its receipt deltas leave
 the `heap` section out.
-Tests/Cases/PerfRun/alloc_lens_heap_snapshots.case is the worked example.
+
+Each snapshot also records what retains its blocks. The child sorts the
+live blocks by address and writes, for each, every word of it that points
+into another live block, then the roots: the frames of the thread that
+took the snapshot, each as its call site, frame pointer and lowest
+address, the words of those frames that point into a live block, and the
+words of the image's writable data that do (with the live list's own head
+cleared). `jet perf` walks from the roots, breadth first, the variables
+first, then the data objects of the image's symbol table, then any other
+word, so each block takes a shortest path from a root. The path is named
+by the image's DWARF: a frame's word by the variable whose location holds
+it at the frame's call site and the field of it, else `<function> frame`;
+a data word by its object; each block on the way by its type, a list's
+buffer as the element's index and field (`kept[17]`, `rooms[3].history`),
+any other block as ` -> <type>.<field>`. A path names at most 16 holders,
+nearest the block, and starts with `…` past them. The `heap` section keeps
+the snapshot's `retained` blocks, typed blocks only, by `type` and path
+shape (the path with its list indices left out): one example `path`,
+`blocks` and `bytes`, at most four paths a type with the most bytes, the
+rest under the path `…`, and a null `path` for the blocks no root
+reached, which only another thread's frames or a register held.
+`jet perf view run.jettrace --retained-by <type>` prints, for each snapshot
+that keeps live blocks of the type (its whole name, or the part after its
+last `.`), `retained [Int] at filled  100 blocks  56000 bytes` and then each
+path, `  kept[99]  100 blocks  56000 bytes`; a type no snapshot keeps is
+refused with the types they keep.
+Tests/Cases/PerfRun/alloc_lens_heap_snapshots.case and
+Tests/Cases/Perf/heap_snapshot_types_retention_and_diff.case are the
+worked examples.
 
 `jet perf run` records every wait of a task too, and what ended it. When a
 task spawns another, the runtime writes the new task's id with the Jet call

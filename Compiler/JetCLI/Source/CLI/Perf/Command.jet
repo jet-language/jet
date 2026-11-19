@@ -95,16 +95,36 @@ jet_cli_perf_read: fn(path: String) -[FS]> CanonicalJSON JetTraceError! {
 // `view`: text, `--json` or `--html`, with `--frames=jet|all`, of a
 // `.jettrace`, or text or `--html` of a pprof or OTLP/JSON export of one
 // (PeerExport.jet jet_cli_perf_import). The text and HTML per-line tables of
-// a trace show each line's typed cost facts (LineCosts.jet).
+// a trace show each line's typed cost facts (LineCosts.jet). `--retained-by
+// <type>` shows instead what retains the live blocks of that type in each
+// heap snapshot of a trace (jet_cli_perf_heap_retention_lines).
 jet_cli_perf_view: fn(args: [String], color: Bool) -[FS, Env, Exec, Time]> JetDriverVerbOutput Never! {
     extension: artifact_extension()
+    usage: "run `jet perf view <path{extension}|path.pb.gz|path.json> [--json|--html] [--frames=jet|all]`, or `jet perf view <path{extension}> --retained-by <type>`"
     path := String?{None}
     mode := "text"
     frames := "jet"
+    // The argument that holds `--retained-by`'s type, from byte `retained_from`.
+    retained_at := -1
+    retained_from := 0
     skip := false
     loop (index, arg) in args {
         if skip {
             skip = false
+            next
+        }
+        if arg == "--retained-by" {
+            if index + 1 >= args.len() {
+                return jet_cli_perf_error("`--retained-by` needs a type", usage, color)
+            }
+            retained_at = index + 1
+            retained_from = 0
+            skip = true
+            next
+        }
+        if arg.starts_with("--retained-by=") {
+            retained_at = index
+            retained_from = 14
             next
         }
         if arg == "--json" {
@@ -135,7 +155,7 @@ jet_cli_perf_view: fn(args: [String], color: Bool) -[FS, Env, Exec, Time]> JetDr
             next
         }
         if arg.starts_with("-") {
-            return jet_cli_perf_error("unknown `jet perf view` flag `{arg}`", "run `jet perf view <path{extension}|path.pb.gz|path.json> [--json|--html] [--frames=jet|all]`", color)
+            return jet_cli_perf_error("unknown `jet perf view` flag `{arg}`", usage, color)
         }
         if path != None {
             return jet_cli_perf_error("`jet perf view` takes one trace path", JET_CLI_PERF_FIX, color)
@@ -145,6 +165,9 @@ jet_cli_perf_view: fn(args: [String], color: Bool) -[FS, Env, Exec, Time]> JetDr
     }
     shown: path ?? return jet_cli_perf_error("`jet perf view` needs a {extension} path", JET_CLI_PERF_FIX, color)
     if !shown.ends_with(extension) {
+        if retained_at >= 0 {
+            return jet_cli_perf_error("`--retained-by` reads the heap snapshots of a {extension} trace only", usage, color)
+        }
         if mode == "json" {
             return jet_cli_perf_error("`--json` views a {extension} trace only", "view a pprof or OTLP export as text or with `--html`", color)
         }
@@ -159,6 +182,22 @@ jet_cli_perf_view: fn(args: [String], color: Bool) -[FS, Env, Exec, Time]> JetDr
         return JetDriverVerbOutput{stdout: "{out}{jet_cli_perf_view_sections(flame, imported.timeline, table, color)}", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
     trace: jet_cli_perf_read(shown) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
+    if retained_at >= 0 {
+        if mode != "text" || frames != "jet" {
+            return jet_cli_perf_error("`--retained-by` shows text only, without `--json`, `--html` or `--frames`", usage, color)
+        }
+        wanted: args[retained_at].slice(retained_from..<args[retained_at].len())
+        if wanted == "" -> return jet_cli_perf_error("`--retained-by` needs a type", usage, color)
+        snapshots: jet_cli_perf_heap_snapshots(trace)
+        lines: jet_cli_perf_heap_retention_lines(snapshots, wanted)
+        if lines.len() == 0 {
+            kept: jet_cli_perf_heap_types(snapshots)
+            return jet_cli_perf_error("no heap snapshot of `{shown}` keeps a live `{wanted}`{kept}", usage, color)
+        }
+        out := ""
+        loop line in lines -> out = "{out}{line}\n"
+        return JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
     flame: jet_cli_perf_flame(trace)
     timeline: jet_cli_perf_timeline(trace)
     totals: jet_cli_perf_line_totals(trace)
@@ -468,6 +507,52 @@ jet_cli_perf_receipt_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     lines
 }
 
+// `--retained-by <type>`: for each heap snapshot that keeps live blocks of
+// the type `wanted` names (its whole name, or the part after its last `.`),
+// `retained <type> at <name>  <n> blocks  <n> bytes`, then each path from a
+// root that retains them, the most bytes first, `  <path>  <n> blocks  <n>
+// bytes`: `…` for the blocks along its other paths, and the blocks no root
+// reached last. Empty when no snapshot keeps one.
+jet_cli_perf_heap_retention_lines: fn(snapshots: [JetCLIPerfHeapSnapshot], wanted: String) -> [String] Never! {
+    lines := [String]{}
+    loop snapshot in snapshots {
+        named := ""
+        blocks := 0
+        bytes := 0
+        held := [String]{}
+        loop entry in snapshot.retained {
+            if entry.type_name != wanted && !entry.type_name.ends_with(".{wanted}") -> next
+            named = "{entry.type_name}"
+            blocks += entry.blocks
+            bytes += entry.bytes
+            where: if entry.path == "" -> "no root reached (another thread's stack or a register holds them)" else -> "{entry.path}"
+            held.push("  {where}  {entry.blocks} blocks  {entry.bytes} bytes")
+        }
+        if held.len() == 0 -> next
+        lines.push("retained {named} at {snapshot.name}  {blocks} blocks  {bytes} bytes")
+        loop line in held.move() -> lines.push(line)
+    }
+    lines
+}
+
+// `; they keep <types>`, the types `--retained-by` can name in `snapshots`.
+jet_cli_perf_heap_types: fn(snapshots: [JetCLIPerfHeapSnapshot]) -> String Never! {
+    if snapshots.len() == 0 {
+        return "; it kept no heap snapshot, as only `jet perf run --lens=alloc` keeps them"
+    }
+    types := [String]{}
+    loop snapshot in snapshots {
+        loop entry in snapshot.retained {
+            if !types.contains(entry.type_name) -> types.push("{entry.type_name}")
+        }
+    }
+    if types.len() == 0 {
+        return "; its snapshots name no type, as only a `--checked-alloc` image's typed allocating calls do"
+    }
+    types.sort()
+    "; they keep {types.join(", ")}"
+}
+
 // The heap snapshots the alloc lens kept (jet_cli_perf_heap_snapshots),
 // each `live at <name>` with its live blocks and their bytes, then its
 // blocks by the type and place that allocated them, the most bytes first.
@@ -475,20 +560,34 @@ jet_cli_perf_heap_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     lines := [String]{}
     loop snapshot in jet_cli_perf_heap_snapshots(trace) {
         lines.push("live at {snapshot.name}  {snapshot.blocks} blocks  {snapshot.bytes} bytes")
-        loop place in snapshot.places -> lines.push("  {place.place}  {place.blocks} blocks  {place.bytes} bytes")
+        loop place in snapshot.places {
+            lines.push("  {place.place}  {place.blocks} blocks  {place.bytes} bytes")
+        }
     }
     lines
 }
 
 // A heap snapshot of a trace's `heap` receipt section (Session.jet
 // jet_cli_perf_session_heaps): its name, `#<k>` added to the k-th of a name
-// the trace kept more than once, its live blocks and their bytes, and the
-// same by the place that allocated them, the most bytes first.
+// the trace kept more than once, its live blocks and their bytes, the same
+// by the place that allocated them, the most bytes first, and by what
+// retains them (`retained`, `place` the type, then the path).
 JetCLIPerfHeapSnapshot: struct {
     name: String,
     blocks: Int,
     bytes: Int,
     places: [JetCLIPerfHeapPlace],
+    retained: [JetCLIPerfHeapRetention],
+}
+
+// The live blocks of `type_name` a heap snapshot keeps along one retention
+// path from a root, and their bytes; an empty `path` for the blocks no root
+// reached.
+JetCLIPerfHeapRetention: struct {
+    type_name: String,
+    path: String,
+    blocks: Int,
+    bytes: Int,
 }
 
 // The live blocks of a heap snapshot one place allocated for one type, and
@@ -524,6 +623,14 @@ jet_cli_perf_heap_snapshots: fn(trace: CanonicalJSON) -> [JetCLIPerfHeapSnapshot
                 held: if jet_cli_perf_member_text(site, "type") == .Val(type_name) -> "{type_name}  {where}" else -> where
                 places.push(JetCLIPerfHeapPlace{place: held, blocks: jet_cli_perf_member_number(site, "blocks") ?? 0, bytes: jet_cli_perf_member_number(site, "bytes") ?? 0})
             }
+            retained := [JetCLIPerfHeapRetention]{}
+            if jet_cli_perf_key(members, "retained") == .Val(slot) {
+                if jettrace_array(members[slot].value, "receipt heap snapshot.retained") == .Ok(entries) {
+                    loop entry in entries {
+                        retained.push(JetCLIPerfHeapRetention{type_name: jet_cli_perf_member_text(entry, "type") ?? next, path: jet_cli_perf_member_text(entry, "path") ?? "", blocks: jet_cli_perf_member_number(entry, "blocks") ?? 0, bytes: jet_cli_perf_member_number(entry, "bytes") ?? 0})
+                    }
+                }
+            }
             kth := 0
             total := 0
             loop (other, name) in names {
@@ -533,7 +640,7 @@ jet_cli_perf_heap_snapshots: fn(trace: CanonicalJSON) -> [JetCLIPerfHeapSnapshot
                 }
             }
             label: if total > 1 -> "{names[index]}#{kth}" else -> "{names[index]}"
-            snapshots.push(JetCLIPerfHeapSnapshot{name: label, blocks: jet_cli_perf_member_number(value, "blocks") ?? 0, bytes: jet_cli_perf_member_number(value, "bytes") ?? 0, places: places})
+            snapshots.push(JetCLIPerfHeapSnapshot{name: label, blocks: jet_cli_perf_member_number(value, "blocks") ?? 0, bytes: jet_cli_perf_member_number(value, "bytes") ?? 0, places: places, retained: retained})
         }
     }
     snapshots
@@ -554,7 +661,9 @@ jet_cli_perf_heap_pick: fn(snapshots: [JetCLIPerfHeapSnapshot], wanted: String) 
 
 // `; it kept <names>`, the snapshots a `--heap` name can pick.
 jet_cli_perf_heap_kept: fn(snapshots: [JetCLIPerfHeapSnapshot]) -> String Never! {
-    if snapshots.len() == 0 -> return "; it kept none, as only `jet perf run --lens=alloc` keeps them"
+    if snapshots.len() == 0 {
+        return "; it kept none, as only `jet perf run --lens=alloc` keeps them"
+    }
     names: loop snapshot in snapshots -> "{snapshot.name}"
     "; it kept {names.join(", ")}"
 }
@@ -573,18 +682,24 @@ jet_cli_perf_heap_delta: fn(base: JetCLIPerfHeapSnapshot, head: JetCLIPerfHeapSn
                 bytes -= before.bytes
             }
         }
-        if blocks != 0 || bytes != 0 -> deltas.push(JetCLIPerfHeapPlace{place: "{after.place}", blocks: blocks, bytes: bytes})
+        if blocks != 0 || bytes != 0 {
+            deltas.push(JetCLIPerfHeapPlace{place: "{after.place}", blocks: blocks, bytes: bytes})
+        }
     }
     loop before in base.places {
         kept := false
         loop after in head.places {
             if after.place == before.place -> kept = true
         }
-        if !kept -> deltas.push(JetCLIPerfHeapPlace{place: "{before.place}", blocks: 0 - before.blocks, bytes: 0 - before.bytes})
+        if !kept {
+            deltas.push(JetCLIPerfHeapPlace{place: "{before.place}", blocks: 0 - before.blocks, bytes: 0 - before.bytes})
+        }
     }
     deltas.sort_by(fn(left: JetCLIPerfHeapPlace, right: JetCLIPerfHeapPlace) { (right.bytes <=> left.bytes).then(right.blocks <=> left.blocks).then(left.place <=> right.place) })
     lines := [String]{"Heap {base.name} -> {head.name}: blocks {base.blocks}->{head.blocks} · bytes {base.bytes}->{head.bytes}"}
-    loop place in deltas -> lines.push("  {place.place}  {jet_cli_perf_signed(place.blocks)} blocks  {jet_cli_perf_signed(place.bytes)} bytes")
+    loop place in deltas {
+        lines.push("  {place.place}  {jet_cli_perf_signed(place.blocks)} blocks  {jet_cli_perf_signed(place.bytes)} bytes")
+    }
     lines
 }
 
