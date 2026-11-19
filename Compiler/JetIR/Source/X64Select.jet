@@ -1538,7 +1538,9 @@ ir_x64_from_bits: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
 // -2^53..<2^53 (-2^24..<2^24 for an F32 target), which is inline and which
 // the target holds exactly, is one cvtsi2sd; any other value takes the call
 // as written, in a slow path, which converts a wider exact one or stops as
-// before. False when the call is not of that shape.
+// before. A value proven in -2^24..2^24 (OptStops.jet ir_opt_widen_exact)
+// is inline (an Int in the inline range always is) and needs neither the
+// test nor the call. False when the call is not of that shape.
 ir_x64_checked_widen: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) -> Bool Never! {
     dst: f.dst[at]
     if f.c[at] != 4 || dst < 0 || ir_x64_type(m, f, dst).kind != .Float -> return false
@@ -1548,13 +1550,18 @@ ir_x64_checked_widen: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64
         return false
     }
     reg: ir_x64_use(e, m, f, al, value, X64_RAX)
+    xmm: ir_x64_home_xmm(al, dst, 0)
+    if ir_opt_widen_exact(f, at) {
+        x64_cvtsi2sd(e.code, xmm, reg)
+        ir_x64_store_xmm(e, m, f, al, dst, xmm)
+        return true
+    }
     // In range when value >> precision is 0 or -1: one more is 1 or 0.
     x64_mov_rr(e.code, X64_RDX, reg)
     x64_shift_ri(e.code, X64Shift.Sar, X64_RDX, if al.values[single] != 0 -> 24 else -> 53)
     x64_alu_ri(e.code, X64Alu.Add, X64_RDX, 1)
     x64_alu_ri(e.code, X64Alu.Cmp, X64_RDX, 1)
     sites: [Int]{x64_jcc_rel32(e.code, X64Cond.A)}
-    xmm: ir_x64_home_xmm(al, dst, 0)
     x64_cvtsi2sd(e.code, xmm, reg)
     ir_x64_store_xmm(e, m, f, al, dst, xmm)
     cold := ir_x64_cold(IRX64ColdKind.Call, sites)
@@ -1912,11 +1919,11 @@ IRX64Region: struct {
 // Zone regions: per instruction, of the first of a region's instructions,
 // the region's last one, else -1. A region is whole statements of one
 // level around a frame mark or plot (ir_x64_zone_call) that compute only
-// what nothing past them reads: the call's arguments (a plot's Float, its
-// bits and their boxing), their drops and the stop points between
-// (ir_x64_zone_quiet). The selector puts one skip at a region's start
-// (ir_x64_zone_bound, ir_x64_zones_skip) that, while zones are off, jumps
-// past its end, so a plot the profiler is not recording costs that jump.
+// what nothing past them reads: the call's arguments (a plot's Float),
+// their drops and the stop points between (ir_x64_zone_quiet). The
+// selector puts one skip at a region's start (ir_x64_zone_bound,
+// ir_x64_zones_skip) that, while zones are off, jumps past its end, so a
+// plot the profiler is not recording costs that jump.
 // Skipping is sound because every slot the region writes or drops lives
 // only inside it (ir_x64_zone_holds: its range, X64Alloc.jet's, starts and
 // ends there), the allocator gives each slot one place over its whole
@@ -1957,7 +1964,7 @@ ir_x64_zone_call: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
         return false
     }
     symbol: m.names[f.a[at]]
-    symbol == "jet_perf_plot" || symbol == "jet_perf_frame"
+    symbol == "jet_perf_plot_float" || symbol == "jet_perf_frame"
 }
 
 // Per instruction, the opener of the innermost construct holding it (an
@@ -2065,9 +2072,9 @@ ir_x64_zone_edge: fn(f: IRFunction, poll: Int, at: Int) -> Bool Never! {
 // slots aside (ir_x64_zone_holds): constants, data addresses, conversions,
 // comparisons and arithmetic that cannot trap (a wrapping or exact Int's,
 // a Float's; a division by a constant other than 0 and -1), drops, Blocks,
-// stop edges (ir_x64_zone_edge) and the routes a plot's arguments take
-// (ir_x64_zone_route). Nothing among them publishes a stop or writes past
-// its slots.
+// stop edges (ir_x64_zone_edge) and the runtime calls a plot's arguments
+// take that cannot stop (ir_x64_zone_route). Nothing among them publishes
+// a stop or writes past its slots.
 ir_x64_zone_quiet: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, poll: Int, start: Int, end: Int) -> Bool Never! {
     loop at in start..<(end + 1) {
         quiet: if f.op[at] == {
@@ -2077,7 +2084,7 @@ ir_x64_zone_quiet: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, poll: Int
             .Call -> ir_x64_zone_edge(f, poll, at)
             .If -> at > start && ir_x64_zone_edge(f, poll, at - 1)
             .Br | .Return -> at > start + 1 && ir_x64_zone_edge(f, poll, at - 2)
-            .CallRuntime -> ir_x64_zone_route(m, f, al, at)
+            .CallRuntime -> ir_x64_zone_route(m, f, at)
             .ConstBigInt | .Copy | .Move | .Close | .Shl | .Shr | .Neg | .Concat | .CallIndirect | .FunctionAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Loop | .Else | .BrIf | .Unreachable | .Sqrt | .IntBig | .StreamStore -> false
         }
         if !quiet -> return false
@@ -2105,26 +2112,13 @@ ir_x64_zone_divides: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int
 }
 
 // Whether the runtime call at `at` is one a plot's arguments take that
-// cannot stop: a frame mark or plot itself, a Float's bits
-// (jet_std_math_to_bits), a word's boxing (jet_int_owned_from_i64), an
-// exact Int's widening that cannot fail (OptStops.jet ir_opt_widen_exact)
-// or the I64 of a Float's bits (jet_int_checked_fixed of kind 3 or
-// jet_int_native_i64_at, which every bits value fits: Core Perf.jet plot).
-ir_x64_zone_route: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) -> Bool Never! {
+// cannot stop: a frame mark or plot itself, or an exact Int's widening
+// that cannot fail (OptStops.jet ir_opt_widen_exact; Core Perf.jet plot
+// takes the Float as it is).
+ir_x64_zone_route: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     if f.a[at] < 0 || f.a[at] >= m.names.len() -> return false
-    symbol: m.names[f.a[at]]
-    if ir_x64_zone_call(m, f, at) || symbol == "jet_std_math_to_bits" || symbol == "jet_int_owned_from_i64" {
-        return true
-    }
-    if symbol == "jet_int_checked_widen" -> return ir_opt_widen_exact(f, at)
-    native: symbol == "jet_int_native_i64_at"
-    if f.c[at] != (if native -> 4 else -> 5) || (!native && symbol != "jet_int_checked_fixed") {
-        return false
-    }
-    kind: if native -> -1 else -> f.args[f.b[at] + 1]
-    if !native && (kind < 0 || !al.consts[kind] || al.values[kind] != 3) -> return false
-    writer: ir_opt_only_write(f, f.args[f.b[at]])
-    writer >= 0 && f.op[writer] == .CallRuntime && f.a[writer] >= 0 && f.a[writer] < m.names.len() && m.names[f.a[writer]] == "jet_std_math_to_bits"
+    if ir_x64_zone_call(m, f, at) -> return true
+    m.names[f.a[at]] == "jet_int_checked_widen" && ir_opt_widen_exact(f, at)
 }
 
 // Whether instructions `start` to `end` keep their slots to themselves:
@@ -7272,14 +7266,15 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
 }
 
 // A plot's arguments as Core Perf.jet plot builds them (Float{total %%
-// 1000}, its bits' I64 and their boxing, with their stop points and drops)
-// and the frame mark right after it are one zone region: one skip comes
-// before all of them and, while zones are off, jumps past the frame mark's
-// call. In a module an image links (IRModule.zone_table) the skip is a
-// `jmp rel32` the function lists for the site table; else it tests the
-// zones word. A widening of a value not proven small (a remainder by a
-// parameter) may stop, so it stays ahead of the skip, which covers the
-// rest.
+// 1000}, with its stop points) and the frame mark right after it are one
+// zone region: one skip comes before all of them and, while zones are off,
+// jumps past the frame mark's call. In a module an image links
+// (IRModule.zone_table) the skip is a `jmp rel32` the function lists for
+// the site table; else it tests the zones word. A widening proven small is
+// one cvtsi2sd behind the skip, with no range test and no call that would
+// link the runtime's widening into every image; one of a value not proven
+// small (a remainder by a parameter) may stop, so it stays ahead of the
+// skip, which covers the rest.
 #Test("A plot's argument computations and the frame mark after it sit behind one zones skip") {
     loop listed in ([Bool]{false, true}) {
         loop proven in ([Bool]{true, false}) {
@@ -7313,27 +7308,9 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
             widened: ir_args(f, [Int]{kept, single, file, line})
             _ := ir_emit(f, IROp.CallRuntime, value, ir_intern_name(m, "jet_int_checked_widen"), widened, 4, 2)
             _ := ir_open(f, IROp.Block, 3)
-            bits: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
-            float_bits: ir_args(f, [Int]{value})
-            _ := ir_emit(f, IROp.CallRuntime, bits, ir_intern_name(m, "jet_std_math_to_bits"), float_bits, 1, 3)
-            fixed_args := [Int]{bits}
-            loop constant in ([Int]{3, 0, 0, 3}) {
-                operand: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
-                _ := ir_emit(f, IROp.Const, operand, constant, -1, -1, 3)
-                fixed_args.push(operand)
-            }
-            fixed: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
-            fixed_operands: ir_args(f, fixed_args)
-            _ := ir_emit(f, IROp.CallRuntime, fixed, ir_intern_name(m, "jet_int_checked_fixed"), fixed_operands, 5, 3)
+            plotted: ir_args(f, [Int]{name, value})
+            _ := ir_emit(f, IROp.CallRuntime, -1, ir_intern_name(m, "jet_perf_plot_float"), plotted, 2, 3)
             ir_x64_test_stop_edge(f, flag, poll, IROp.Br, 3)
-            _ := ir_emit(f, IROp.Drop, -1, bits, -1, -1, 3)
-            boxed: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
-            boxing: ir_args(f, [Int]{fixed})
-            _ := ir_emit(f, IROp.CallRuntime, boxed, ir_intern_name(m, "jet_int_owned_from_i64"), boxing, 1, 3)
-            plotted: ir_args(f, [Int]{name, boxed})
-            _ := ir_emit(f, IROp.CallRuntime, -1, ir_intern_name(m, "jet_perf_plot"), plotted, 2, 3)
-            ir_x64_test_stop_edge(f, flag, poll, IROp.Br, 3)
-            _ := ir_emit(f, IROp.Drop, -1, boxed, -1, -1, 3)
             ir_end(f, 3)
             none: ir_args(f, [Int]{})
             _ := ir_emit(f, IROp.CallRuntime, -1, ir_intern_name(m, "jet_perf_frame"), none, 0, 4)
@@ -7371,10 +7348,17 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
             }
             assert(framed > skip)
             assert(ir_x64_test_jcc_target(code, skip) >= framed + 4)
-            // The widening's inline range test (sar rdx, 53; add rdx, 1; cmp rdx, 1).
+            // The widening's inline range test (sar rdx, 53; add rdx, 1; cmp
+            // rdx, 1) and the slow path's call, only when not proven small.
             widening: ir_x64_code_find(code, [U8]{0x48, 0xc1, 0xfa, 0x35, 0x48, 0x83, 0xc2, 0x01, 0x48, 0x83, 0xfa, 0x01}, 0)
-            assert(widening >= 0)
-            assert((widening > skip) == proven)
+            called := false
+            loop reloc in compiled.function.relocs {
+                if reloc.target == .Runtime(symbol) && symbol == "jet_int_checked_widen" {
+                    called = true
+                }
+            }
+            assert_eq(called, !proven)
+            if proven -> assert_eq(widening, -1) else -> assert(widening >= 0 && widening < skip)
         }
     }
 }

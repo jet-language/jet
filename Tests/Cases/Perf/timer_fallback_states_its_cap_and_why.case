@@ -1,0 +1,21 @@
+# Where no perf event takes the `cpu` lens's samples, each thread's CPU-time
+# timer does, and the trace says so: the receipt's `pc` names the timer,
+# never precise, its samples skidding to the instruction its signal
+# interrupted, and the profile's reason states its cap, one sample a kernel
+# tick, and why the run kept it. The causal lens keeps the timer on every
+# host, whatever perf_event_paranoid allows, since its experiments' periods
+# are CPU time's: the runtime tries no perf event, so none is refused.
+requires: os-name:linux
+fixture: PrecisePcNamesItsSource.fixture
+env: NO_COLOR=1
+step: jet perf run main.jet -O2 --lens=causal --out {work}/timer.jettrace
+exit: 0
+stdout: ~ "spun=" # the program ran to its end
+json: file timer.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.pc.source = "timer" # the timer took the samples
+json: file timer.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.pc.precise = false # it is never precise
+json: file timer.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.pc.skid = "timer_signal" # and names its skid source
+json: file timer.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.pc.period_unit = "ns" # its period is CPU time
+json: file timer.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.pc.refused #= 0 # no perf event was tried
+json: file timer.jettrace doc $.content.profile.reason ~ "the CPU-time timer took them, which the kernel checks once a tick, so each thread takes at most one sample a tick: " # its cap
+json: file timer.jettrace doc $.content.profile.reason ~ "the causal lens keeps it, since its experiments' periods are CPU time's" # and why the run kept it
+json: file timer.jettrace doc $.content.profile.rows[?symbol.name="spin_hot_loop"][?sample_count>=50] #>= 1 # the timer's samples land in the hot loop

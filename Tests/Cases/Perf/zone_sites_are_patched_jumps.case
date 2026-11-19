@@ -12,8 +12,10 @@ stdout: = "total 166\n"
 when tool objdump
 step: objdump -d .jet/build/main
 exit: 0
-stdout: !~ "<jet_rt_perf_zones>" # no site tests the zones word
 stdout: ~ "<jet_perf_zone_table>" # the site table registers
+step: sh -c 'objdump -d .jet/build/main | grep -c "(%rip),%r11 .*<jet_rt_perf_zones>"'
+exit: 1
+stdout: = "0\n" # no site loads the zones word to test it: only the runtime's own code names it
 end when
 step: jet perf run main.jet --out keep.jettrace
 exit: 0
@@ -21,5 +23,5 @@ stdout: = "total 166\n"
 step: jet perf view keep.jettrace
 exit: 0
 stdout: ~ "zone step count=3 " # the patched sites record every zone
-stdout: ~ "zone inner count=60 "
+stdout: ~ "zone inner count=60 " # the inner zone's sites, in a loop, record each pass
 stdout: !~ "zones off" # the runtime rewrote the sites

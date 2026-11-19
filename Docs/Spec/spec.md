@@ -6163,13 +6163,14 @@ sites. Under `keep` each zone open and close is a jump over its call, which
 the image lists in a table of sites; `jet perf run` and `jet perf attach`
 patch every listed jump into a test that falls through to the call, so a
 zone costs one taken jump until a profiler records it. The link lays the
-runtime code that only zone calls reach after all other code, so a run that
-records no zone loads none of it. Where the system
-refuses to rewrite the program's code, zones stay off and the trace says
-why. `strip` leaves the zone sites out: the image never records a zone, and
-no profiler can turn them on. Frame marks, plots and `core.log` spans are
-kept under both. `build: fn` writes `b.zones(.Strip)`, and the flag writes
-`--zones=strip`. Cases:
+runtime code that only zone calls reach after all other code, in a load
+segment of its own, so a run that records no zone maps none of it; the code
+that patches the sites is reached only once a profiler turns zones on.
+Where the system refuses to rewrite the program's code, zones stay off and
+the trace says why. `strip` leaves the zone sites out: the image never
+records a zone, and no profiler can turn them on. Frame marks, plots and
+`core.log` spans are kept under both. `build: fn` writes `b.zones(.Strip)`,
+and the flag writes `--zones=strip`. Cases:
 [`Tests/Cases/Perf/zones_strip_setting_leaves_no_site.case`](../../Tests/Cases/Perf/zones_strip_setting_leaves_no_site.case),
 [`Tests/Cases/Perf/zone_sites_are_patched_jumps.case`](../../Tests/Cases/Perf/zone_sites_are_patched_jumps.case),
 [`Tests/Cases/Perf/zone_only_code_is_laid_after_hot_code.case`](../../Tests/Cases/Perf/zone_only_code_is_laid_after_hot_code.case).

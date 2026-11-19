@@ -184,7 +184,9 @@ source the kernel accepts, and each thread after it arms that source. The
 receipt's `capture.sampling.pc` names the source, and the profile's `reason`
 says which took the samples: the rate a precise source reached, or, for the
 timer, its cap and why the run kept it.
-Tests/Cases/Perf/precise_pc_names_its_source.case is the worked example.
+Tests/Cases/Perf/precise_pc_names_its_source.case is the worked example, and
+Tests/Cases/Perf/timer_fallback_states_its_cap_and_why.case shows the timer a
+causal experiment keeps.
 
 `jet perf run` takes `--lens=<lenses>`, comma-separated: `cpu`, the
 program's CPU time and the default, `memory`, its memory behavior,
