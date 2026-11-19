@@ -9,7 +9,7 @@ use {
     perf_files: core.files
     perf_ip: core.net.ip
     jet_backend.[X64ImageFunction, X64Jetline, link_debug_addr, x64_image_function_find, x64_image_functions, x64_jetline_find, x64_jetline_line]
-    jet_debug.[NativeAbstract, NativeFunction, native_image_read, native_inline_chain]
+    jet_debug.[NativeAbstract, NativeFunction, native_image_read, native_inline_chain, native_jet_spelling]
     jet_driver.[jet_driver_inline_package, jet_driver_mask_inline_package]
     jet_foundation.[
         Span,
@@ -192,11 +192,14 @@ JetCLIPerfHeap: struct {
 }
 
 // The live blocks of a heap snapshot whose allocating stack holds `line`
-// of function `name` innermost of the checked source's lines, and their
-// bytes; `line` 0, `name` empty, for the blocks no line of it allocated.
+// of function `name` innermost of the checked source's lines, allocated for
+// the type `type_name` names, and their bytes; `line` 0, `name` empty, for
+// the blocks no line of it allocated, `type_name` empty for those no typed
+// allocating call allocated.
 JetCLIPerfHeapSite: struct {
     name: String,
     line: U64,
+    type_name: String,
     blocks: U64,
     bytes: U64,
 }
@@ -226,7 +229,13 @@ jet_cli_perf_samples_read: fn(path: String, source: String, counters: [TraceCoun
     owned: jet_cli_perf_samples_owned(facts.lines, source)
     periods := [U64]{}
     loop counter in counters -> periods.push(counter.period ?? U64{0})
-    Val(jet_cli_perf_samples_count(facts.lines, functions, inlines, owned, periods, words))
+    // What each typed allocating call allocates for, by its return address,
+    // spelled as Jet writes the type.
+    allocs := [Int:String]{}
+    loop (pc, ty) in facts.allocs {
+        if facts.types.get(ty) == .Val(named) && named.name != "" -> allocs[pc] = native_jet_spelling(named.name)
+    }
+    Val(jet_cli_perf_samples_count(facts.lines, functions, inlines, owned, periods, allocs, words))
 }
 
 // The counters the `memory` lens of `jet perf run` asked for, from the file
@@ -356,8 +365,10 @@ JET_CLI_PERF_HELPER_PREFIX: "jet_ir_"
 // counts time. The clock record, the last one the runtime wrote, gives what
 // sampling cost. A heap snapshot's mark record starts its snapshot and
 // each of its site records counts live blocks at the innermost such line
-// of their allocating stack.
-jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFunction], inlines: &&JetCLIPerfInlines, owned: [Bool], periods: &&[U64], words: [U8]) -> JetCLIPerfSamples Never! {
+// of their allocating stack, for the type `allocs` names at the innermost
+// of its return addresses it holds (an allocating call of a typed image,
+// reached through the runtime's own calls when they allocate for it).
+jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFunction], inlines: &&JetCLIPerfInlines, owned: [Bool], periods: &&[U64], allocs: [Int:String], words: [U8]) -> JetCLIPerfSamples Never! {
     sampled := JetCLIPerfSamples{table: table, inlines: inlines, lines: [JetCLIPerfSampledLine]{}, total: U64{0}, outside: U64{0}, helpers: U64{0}, stackless: U64{0}, signals: U64{0}, cost: None, functions: functions, natives: [JetCLIPerfNative]{}, sited: false, periods: periods, spawns: [U64:U64]{}, waits: [JetCLIPerfWait]{}, wakes: [JetCLIPerfWake]{}, transfers: [JetCLIPerfIO]{}, heaps: [JetCLIPerfHeap]{}}
     // One key per function, line and ownership.
     places := [String:Int]{}
@@ -478,20 +489,27 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
             if record >= 3 && at + record * 8 <= words.len() {
                 if heaps.get(pc) == .Val(index) {
                     frames: jet_cli_perf_samples_stack_frames(sampled, owned, words, at, 3, record)
-                    line: if frames.len() > 0 -> frames[0].line else -> U64{0}
-                    name: if frames.len() > 0 -> frames[0].name.copy() else -> ""
+                    // The innermost frame, taken out of the stack.
+                    innermost: loop frame in frames.move() {
+                        break frame
+                    } ?? TraceStackFrame{line: U64{0}, name: ""}
+                    line: innermost.line
+                    name: innermost.name.move()
+                    type_name: loop k in 3..<record {
+                        if allocs.get(link_debug_addr(words, at + k * 8)) == .Val(typed) -> break typed
+                    } ?? ""
                     blocks: checked(U64{link_debug_addr(words, at + 8)}) ?? U64{0}
                     bytes: checked(U64{link_debug_addr(words, at + 16)}) ?? U64{0}
                     found := -1
                     loop (place, site) in sampled.heaps[index].sites {
-                        if site.line == line && site.name == name {
+                        if site.line == line && site.name == name && site.type_name == type_name {
                             found = place
                             break
                         }
                     }
                     if found < 0 {
                         found = sampled.heaps[index].sites.len()
-                        sampled.heaps[index].sites.push(JetCLIPerfHeapSite{name: name, line: line, blocks: U64{0}, bytes: U64{0}})
+                        sampled.heaps[index].sites.push(JetCLIPerfHeapSite{name: name, line: line, type_name: type_name, blocks: U64{0}, bytes: U64{0}})
                     }
                     sampled.heaps[index].sites[found].blocks += blocks
                     sampled.heaps[index].sites[found].bytes += bytes
@@ -568,7 +586,7 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
     sampled.natives.sort_by(fn(left: JetCLIPerfNative, right: JetCLIPerfNative) { (right.count <=> left.count).then(left.function <=> right.function) })
     sampled.heaps.sort_by(fn(left: JetCLIPerfHeap, right: JetCLIPerfHeap) { left.number <=> right.number })
     loop index in 0..<sampled.heaps.len() {
-        sampled.heaps[index].sites.sort_by(fn(left: JetCLIPerfHeapSite, right: JetCLIPerfHeapSite) { (right.bytes <=> left.bytes).then(right.blocks <=> left.blocks).then(left.name <=> right.name).then(left.line <=> right.line) })
+        sampled.heaps[index].sites.sort_by(fn(left: JetCLIPerfHeapSite, right: JetCLIPerfHeapSite) { (right.bytes <=> left.bytes).then(right.blocks <=> left.blocks).then(left.name <=> right.name).then(left.line <=> right.line).then(left.type_name <=> right.type_name) })
     }
     sampled
 }

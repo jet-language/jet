@@ -204,7 +204,7 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
             1000,
         },
     )
-    sampled: jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, words)
+    sampled: jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:String]{}, words)
     assert_eq(sampled.total, U64{3})
     assert_eq(sampled.outside, U64{1})
     assert_eq(sampled.helpers, U64{1})
@@ -224,6 +224,44 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     assert_eq(profile.overhead_status, "measured")
     assert_eq(profile.overhead_ns, Val(U64{9000}))
     assert_eq(profile.overhead_reason, "the sampler took 9 microseconds, 0.22% of the 4000 microseconds of CPU time sampled: 6 in its handlers and 3 signals at the 1000 nanoseconds the kernel took to deliver and return from one as sampling started")
+}
+
+#Test("a heap snapshot's blocks count by their line and by the type their innermost typed allocating call names") {
+    table: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{X64JetlineFunction{low: 4096, high: 4352, name: "fib", file: "fib.jet", dir: "", decl: 5, rows: 0, rows_end: 0}}}
+    words: jet_cli_perf_test_words(
+        [Int]{
+            // Snapshot 1, `exit`: 3 blocks, 112 bytes, its 4-byte name.
+            1 | (5 << 48) | (10 << 59),
+            3,
+            112,
+            4,
+            0x74697865,
+            // 2 blocks of 96 bytes the runtime allocated for fib's typed call
+            // returning to 12300, which fib's line 5 made.
+            1 | (5 << 48) | (9 << 59),
+            2,
+            96,
+            12300,
+            4160,
+            // 1 block of 16 bytes an untyped call at the same line allocated.
+            1 | (4 << 48) | (9 << 59),
+            1,
+            16,
+            4170,
+        },
+    )
+    allocs: [Int:String]{12300: "[I64]"}
+    sampled: jet_cli_perf_samples_count(table, [X64ImageFunction]{}, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, allocs, words)
+    assert_eq(sampled.heaps.len(), 1)
+    heap: sampled.heaps[0]
+    assert_eq(heap.name, "exit")
+    assert_eq(heap.sites.len(), 2)
+    assert_eq(heap.sites[0].type_name, "[I64]")
+    assert_eq(heap.sites[0].line, U64{5})
+    assert_eq(heap.sites[0].bytes, U64{96})
+    assert_eq(heap.sites[1].type_name, "")
+    assert_eq(heap.sites[1].line, U64{5})
+    assert_eq(heap.sites[1].blocks, U64{1})
 }
 
 #Test("perf samples in inlined code count at the inlined line and inclusive at the call") {
@@ -251,7 +289,7 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
             4112,
         },
     )
-    sampled: jet_cli_perf_samples_count(table, [X64ImageFunction]{}, inlines, [Bool]{true}, [U64]{}, words)
+    sampled: jet_cli_perf_samples_count(table, [X64ImageFunction]{}, inlines, [Bool]{true}, [U64]{}, [Int:String]{}, words)
     assert_eq(sampled.total, U64{3})
     text := ""
     loop _ in 0..<16 -> text = "{text}line\n"

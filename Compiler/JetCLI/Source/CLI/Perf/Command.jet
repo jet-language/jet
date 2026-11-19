@@ -470,7 +470,7 @@ jet_cli_perf_receipt_lines: fn(trace: CanonicalJSON) -> [String] Never! {
 
 // The heap snapshots the alloc lens kept (jet_cli_perf_heap_snapshots),
 // each `live at <name>` with its live blocks and their bytes, then its
-// blocks by the place that allocated them, the most bytes first.
+// blocks by the type and place that allocated them, the most bytes first.
 jet_cli_perf_heap_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     lines := [String]{}
     loop snapshot in jet_cli_perf_heap_snapshots(trace) {
@@ -491,9 +491,11 @@ JetCLIPerfHeapSnapshot: struct {
     places: [JetCLIPerfHeapPlace],
 }
 
-// The live blocks of a heap snapshot one place allocated, and their bytes:
-// `<path>:<line> <function>`, or `elsewhere` for the blocks no line of the
-// run's source allocated; in a jet_cli_perf_heap_delta, their change.
+// The live blocks of a heap snapshot one place allocated for one type, and
+// their bytes: `<path>:<line> <function>`, or `elsewhere` for the blocks no
+// line of the run's source allocated, after `<type>  ` when a typed
+// allocating call allocated them (a `--checked-alloc` image's); in a
+// jet_cli_perf_heap_delta, their change.
 JetCLIPerfHeapPlace: struct {
     place: String,
     blocks: Int,
@@ -519,7 +521,8 @@ jet_cli_perf_heap_snapshots: fn(trace: CanonicalJSON) -> [JetCLIPerfHeapSnapshot
             places := [JetCLIPerfHeapPlace]{}
             loop site in sites {
                 where: if jet_cli_perf_member_integer(site, "line") == .Val(line) -> "{path}:{line} {jet_cli_perf_member_text(site, "function") ?? ""}" else -> "elsewhere"
-                places.push(JetCLIPerfHeapPlace{place: where, blocks: jet_cli_perf_member_number(site, "blocks") ?? 0, bytes: jet_cli_perf_member_number(site, "bytes") ?? 0})
+                held: if jet_cli_perf_member_text(site, "type") == .Val(type_name) -> "{type_name}  {where}" else -> where
+                places.push(JetCLIPerfHeapPlace{place: held, blocks: jet_cli_perf_member_number(site, "blocks") ?? 0, bytes: jet_cli_perf_member_number(site, "bytes") ?? 0})
             }
             kth := 0
             total := 0

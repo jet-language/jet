@@ -261,13 +261,13 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     if samples == .Val(file) && parsed.source == .Val(source) {
         jet_cli_perf_log_spans_read(capture, "{file}.spans", source, started.start_ns)
     }
-    if parsed.source == .Val(source) {
+    if parsed.source.move() == .Val(source) {
         if sampled.move() == .Val(found) {
             // The task_wait rows take the waits, which the transfers may
             // have ended, then the I/O rows take the transfers.
             jet_cli_perf_waits_read(capture, found.waits.move(), found.wakes, found.spawns, found.transfers, source, started.start_ns)
             jet_cli_perf_io_read(capture, found.transfers.move(), source, started.start_ns)
-            if jet_cli_perf_session_heaps(source, found.heaps.move()) == .Val(section) -> capture.receipts.push(section)
+            if jet_cli_perf_session_heaps(source.move(), found.heaps.move()) == .Val(section) -> capture.receipts.push(section)
         }
     }
     full := [String]{action}
@@ -546,23 +546,26 @@ jet_cli_perf_session_receipt: fn(action: String, argv: [String], source: String?
 // The trace's `heap` receipt section: each heap snapshot the alloc lens took
 // of a run of `source`, in the order it took them (JetCLIPerfHeap), with
 // its name, its number, its live blocks and their bytes, and those blocks
-// by the function and line of `source` that allocated them, the most bytes
-// first, a null function and line for the blocks no line of it allocated;
-// None when it took none.
-jet_cli_perf_session_heaps: fn(source: String, heaps: [JetCLIPerfHeap]) -> TraceReceiptSection? Never! {
+// by the function and line of `source` that allocated them and the type
+// they were allocated for, the most bytes first: a null function and line
+// for the blocks no line of it allocated, a null type for those no typed
+// allocating call allocated; None when it took none.
+jet_cli_perf_session_heaps: fn(source: &&String, heaps: &&[JetCLIPerfHeap]) -> TraceReceiptSection? Never! {
     if heaps.len() == 0 -> return None
     snapshots := [CanonicalJSON]{}
-    loop heap in heaps {
+    loop heap in heaps.move() {
         sites := [CanonicalJSON]{}
-        loop site in heap.sites {
+        loop site in heap.sites.move() {
             placed: site.line > (U64{0})
+            typed: site.type_name != ""
             sites.push(
                 CanonicalJSON.Object(
                     [CanonicalJSONField]{
                         {key: "blocks", value: CanonicalJSON.Integer("{site.blocks}")},
                         {key: "bytes", value: CanonicalJSON.Integer("{site.bytes}")},
-                        {key: "function", value: if placed -> CanonicalJSON.String(site.name.copy()) else -> CanonicalJSON.Null},
+                        {key: "function", value: if placed -> CanonicalJSON.String(site.name.move()) else -> CanonicalJSON.Null},
                         {key: "line", value: if placed -> CanonicalJSON.Integer("{site.line}") else -> CanonicalJSON.Null},
+                        {key: "type", value: if typed -> CanonicalJSON.String(site.type_name.move()) else -> CanonicalJSON.Null},
                     },
                 ),
             )
@@ -572,14 +575,14 @@ jet_cli_perf_session_heaps: fn(source: String, heaps: [JetCLIPerfHeap]) -> Trace
                 [CanonicalJSONField]{
                     {key: "blocks", value: CanonicalJSON.Integer("{heap.blocks}")},
                     {key: "bytes", value: CanonicalJSON.Integer("{heap.bytes}")},
-                    {key: "name", value: CanonicalJSON.String(heap.name.copy())},
+                    {key: "name", value: CanonicalJSON.String(heap.name.move())},
                     {key: "number", value: CanonicalJSON.Integer("{heap.number}")},
                     {key: "sites", value: CanonicalJSON.Array(sites.move())},
                 },
             ),
         )
     }
-    value: CanonicalJSON.Object([CanonicalJSONField]{{key: "path", value: CanonicalJSON.String(source.copy())}, {key: "snapshots", value: CanonicalJSON.Array(snapshots.move())}})
+    value: CanonicalJSON.Object([CanonicalJSONField]{{key: "path", value: CanonicalJSON.String(source.move())}, {key: "snapshots", value: CanonicalJSON.Array(snapshots.move())}})
     digest: canonical_json_sha256(value)
     Val(TraceReceiptSection{name: "heap", type_name: "JetPerfHeapSnapshots", value: value, digest: digest})
 }
