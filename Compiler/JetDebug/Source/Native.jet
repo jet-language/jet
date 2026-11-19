@@ -8,7 +8,7 @@
 use {
     native_files: core.files
     native_math: core.math
-    jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, link_debug_uleb, x64_jetline_find, x64_jetline_line, x64_jetline_sleb, x64_jetline_text, x64_trace_close, x64_trace_debug_register, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait]
+    jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, link_debug_uleb, x64_jetline_find, x64_jetline_line, x64_jetline_sleb, x64_jetline_text, x64_trace_close, x64_trace_debug_register, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait, x64_trace_write]
     jet_foundation.[DeepChecks, Diagnostic, deep_checks_flags, diagnostic_display_identities, diagnostic_from_registry, diagnostic_registry_row, foundation_named_type]
 }
 
@@ -105,13 +105,6 @@ NativeSettled: struct {
     said: [NativeSaid],
 }
 
-// A trap byte written into the program's code: its address and the byte it
-// replaced.
-NativeSite: struct {
-    address: Int,
-    byte: Int,
-}
-
 // A watch (`watch total`): its number, the place as the console named it,
 // the address and type of the place's bytes, the debug-register spans that
 // trap a write to them, the thread and canonical frame address of the frame
@@ -167,6 +160,13 @@ NativeReturn: enum {
     Stopped(stop: NativeStop),
 }
 
+// What patch_owned does to a step's trap addresses: write the trap byte, or
+// put back the byte it replaced.
+NativePatch: enum {
+    Trap,
+    Restore,
+}
+
 // Which calls a line step enters: none, or those with Jet line information.
 NativeStepCalls: enum {
     Over,
@@ -217,7 +217,9 @@ NativeSession: struct {
     // listing does when hit, by number; one without stops.
     rules: [Int:NativeRule],
     numbered: Int,
-    sites: [NativeSite],
+    // The trap bytes written into the program's code: each one's address
+    // and the byte it replaced.
+    sites: [Int:Int],
     selected: Int,
     // The watches, which number with the breakpoints; the change the last
     // watch stop saw (`total: 0 -> 2`); and what the next report says first
@@ -248,7 +250,7 @@ NativeSession: struct {
         native_files.write(output_path, "") ?? return Err(NativeDebugError{detail: "couldn't create the program output file: {err}"})
         observe_root: native_elf_symbol(elf, X64_OBSERVE_ROOT_SYMBOL) ?? 0
         openings: native_openings(image, native_elf_code(elf))
-        Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: output_path, output_read: 0, started: false, threads: [NativeThread]{}, observe_root: observe_root, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [NativeSite]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: None, task: 0})
+        Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: output_path, output_read: 0, started: false, threads: [NativeThread]{}, observe_root: observe_root, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: None, task: 0})
     }
 
     // A breakpoint on `line` of the Jet source `file` (its base name, as the
@@ -375,7 +377,7 @@ NativeSession: struct {
         argv := [String]{self.binary.copy()}
         loop arg in args -> argv.push(arg.copy())
         self.started = true
-        self.sites = [NativeSite]{}
+        self.sites = [Int:Int]{}
         // A watch names a frame of the run that ended.
         self.watches = [NativeWatch]{}
         self.trace = x64_trace_spawn(self.binary, argv, self.output_path)
@@ -589,7 +591,7 @@ NativeSession: struct {
     // End the program, if it still runs.
     close: fn(&self) Never! {
         x64_trace_close(self.trace)
-        self.sites = [NativeSite]{}
+        self.sites = [Int:Int]{}
     }
 
     // The source file of the program's `run`, as the image's line table
@@ -772,9 +774,11 @@ NativeSession: struct {
         }
         loop (k, at) in entries {
             if at < 0 -> next
-            loop site in self.sites {
-                if site.address >= at && site.address < at + sizes[k] -> self.lift(site.address)
+            inside := [Int]{}
+            loop address in self.sites.keys() {
+                if address >= at && address < at + sizes[k] -> inside.push(address)
             }
+            loop address in inside -> self.lift(address)
         }
         shown := [String]{}
         loop piece in plan.pieces {
@@ -1359,51 +1363,37 @@ NativeSession: struct {
     // Write a trap byte at `address`, unless one is there; false when the
     // code can't be written.
     plant: fn(&self, address: Int) -> Bool Never! {
-        loop site in self.sites {
-            if site.address == address -> return true
-        }
+        if self.sites.has_key(address) -> return true
         word: x64_trace_peek(self.trace, address) ?? return false
         if !x64_trace_poke(self.trace, address, word & I64{-256} | I64{NATIVE_DEBUG_TRAP}) {
             return false
         }
-        self.sites.push(NativeSite{address: address, byte: Int{word & I64{255}}})
+        self.sites[address] = Int{word & I64{255}}
         true
     }
 
     // Put back the byte the trap at `address` replaced.
     lift: fn(&self, address: Int) Never! {
-        kept := [NativeSite]{}
-        loop site in self.sites {
-            if site.address != address {
-                kept.push(site.copy())
-                next
-            }
-            if x64_trace_peek(self.trace, address) == .Val(word) {
-                _ := x64_trace_poke(self.trace, address, word & I64{-256} | I64{site.byte})
-            }
+        byte: self.sites.remove(address) ?? return
+        if x64_trace_peek(self.trace, address) == .Val(word) {
+            _ := x64_trace_poke(self.trace, address, word & I64{-256} | I64{byte})
         }
-        self.sites = kept
     }
 
     // Lift every trap no breakpoint wants.
     lift_unwanted: fn(&self) Never! {
         stale := [Int]{}
-        loop site in self.sites {
-            if self.breakpoint_at(site.address) == None -> stale.push(site.address)
+        loop address in self.sites.keys() {
+            if self.breakpoint_at(address) == None -> stale.push(address)
         }
         if !self.alive() {
-            self.sites = [NativeSite]{}
+            self.sites = [Int:Int]{}
             return
         }
         loop address in stale -> self.lift(address)
     }
 
-    has_site: fn(self, address: Int) -> Bool Never! {
-        loop site in self.sites {
-            if site.address == address -> return true
-        }
-        false
-    }
+    has_site: fn(self, address: Int) -> Bool Never! { self.sites.has_key(address) }
 
     // The number of the breakpoint trapping `address`.
     breakpoint_at: fn(self, address: Int) -> Int? Never! {
@@ -1422,9 +1412,8 @@ NativeSession: struct {
             return native_debug_bytes(dumped.memory, address, count) ?? [U8]{}
         }
         bytes := x64_trace_read(self.trace, address, count) ?? [U8]{}
-        loop site in self.sites {
-            at: site.address - address
-            if at >= 0 && at < bytes.len() -> bytes[at] = U8{site.byte}
+        loop at in 0..<bytes.len() {
+            if self.sites.get(address + at) == .Val(byte) -> bytes[at] = U8{byte}
         }
         bytes
     }
@@ -1461,10 +1450,7 @@ NativeSession: struct {
         registers: self.registers() ?? return Err(err)
         pc: registers[X64_TRACE_RIP]
         if self.has_site(pc) {
-            byte := 0
-            loop site in self.sites {
-                if site.address == pc -> byte = site.byte
-            }
+            byte: self.sites.get(pc) ?? 0
             if x64_trace_peek(self.trace, pc) == .Val(word) {
                 _ := x64_trace_poke(self.trace, pc, word & I64{-256} | I64{byte})
             }
@@ -1712,7 +1698,7 @@ NativeSession: struct {
         self.trace.pid = -1
         x64_trace_close(self.trace)
         self.threads = [NativeThread]{}
-        self.sites = [NativeSite]{}
+        self.sites = [Int:Int]{}
         self.watches = [NativeWatch]{}
     }
 
@@ -1865,12 +1851,48 @@ NativeSession: struct {
 
     // Trap each of line_over's own addresses `owned`.
     plant_owned: fn(&self, owned: [Int]) NativeDebugError! {
-        loop address in owned {
-            if !self.plant(address) {
-                return Err(NativeDebugError{detail: "couldn't write a breakpoint at {native_debug_hex(address)}"})
-            }
+        if !self.patch_owned(owned, NativePatch.Trap) {
+            return Err(NativeDebugError{detail: "couldn't write the step's breakpoints"})
         }
         Ok()
+    }
+
+    // Trap or put back (`how`) line_over's addresses `owned`. The code is
+    // read and written back once for each run of them that lie within
+    // NATIVE_DEBUG_PATCH_GAP bytes of each other, so a step costs a few
+    // system calls however many rows its function has, not two helper round
+    // trips per row. False when the code can't be read or written.
+    patch_owned: fn(&self, owned: [Int], how: NativePatch) -> Bool Never! {
+        sorted := owned.copy()
+        sorted.sort()
+        start := 0
+        loop start < sorted.len() {
+            end := start + 1
+            loop end < sorted.len() && sorted[end] - sorted[end - 1] <= NATIVE_DEBUG_PATCH_GAP {
+                end += 1
+            }
+            low: sorted[start]
+            count: sorted[end - 1] + 1 - low
+            bytes := x64_trace_read(self.trace, low, count) ?? return false
+            if bytes.len() != count -> return false
+            loop k in start..<end {
+                address: sorted[k]
+                if how == {
+                    .Trap -> {
+                        if self.sites.has_key(address) -> next
+                        self.sites[address] = Int{bytes[address - low]}
+                        bytes[address - low] = U8{NATIVE_DEBUG_TRAP}
+                    }
+                    .Restore -> {
+                        byte: self.sites.remove(address) ?? next
+                        bytes[address - low] = U8{byte}
+                    }
+                }
+            }
+            if !x64_trace_write(self.trace, low, bytes) -> return false
+            start = end
+        }
+        true
     }
 
     // Lift line_over's traps `owned`, unless the program has ended and taken
@@ -1879,7 +1901,7 @@ NativeSession: struct {
         if !self.alive() {
             return
         }
-        loop at in owned -> self.lift(at)
+        _ := self.patch_owned(owned, NativePatch.Restore)
     }
 
     // Run under line_over's traps until one stops the step: the frame's
@@ -1995,6 +2017,10 @@ NativeSession: struct {
 
 // The trap byte (int3).
 NATIVE_DEBUG_TRAP: 0xcc
+
+// The widest gap between two of a step's trap addresses that patch_owned
+// reads and writes through in one piece rather than two.
+NATIVE_DEBUG_PATCH_GAP: 4096
 
 NATIVE_DEBUG_SIGTRAP: 5
 
