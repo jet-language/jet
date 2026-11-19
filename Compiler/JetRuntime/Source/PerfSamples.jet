@@ -4423,8 +4423,9 @@ perf_flight_rotate: fn(state: I64, text: I64) {
 // that share of its CPU time to a global delay, and every other thread
 // pauses at its next sample until it has paid the delays it owes, so the
 // line runs as if faster relative to everything else. A thread whose last
-// sample is older than PERF_CAUSAL_BLOCKED_NS was blocked and owes nothing
-// for that time. Progress points count passes: each closed zone by its
+// sample is older than PERF_CAUSAL_BLOCKED_NS and that has since given up
+// its CPU of its own accord was blocked and owes nothing for that time
+// (perf_causal_blocked). Progress points count passes: each closed zone by its
 // name, each `core.perf.progress(name)`, each finished task (`task`). At
 // each experiment's end a PERF_SAMPLES_CAUSAL record goes to the samples
 // file: 0 in its low bits, then the line's sampled address (0 for a
@@ -4455,7 +4456,8 @@ PERF_CAUSAL_THREADS: I64{512}
 // range count and address, the random state, the location table's start
 // and end, the target's ranges, the progress points (name hash, passes),
 // their passes at the start, the record being written, then one entry per
-// thread (tid, delay paid, last sample, a timespec).
+// thread (tid, delay paid, last sample, voluntary context switches by then,
+// a timespec, a struct rusage).
 PERF_CAUSAL_START: I64{8}
 
 PERF_CAUSAL_DELAY: I64{16}
@@ -4484,9 +4486,9 @@ PERF_CAUSAL_RECORD: I64{1360}
 
 PERF_CAUSAL_THREAD_AT: I64{1664}
 
-PERF_CAUSAL_THREAD_BYTES: I64{40}
+PERF_CAUSAL_THREAD_BYTES: I64{192}
 
-PERF_CAUSAL_BYTES: I64{24576}
+PERF_CAUSAL_BYTES: I64{102400}
 
 // The causal lens's state, 0 unless the lens is on.
 perf_causal_state := I64{0}
@@ -4552,7 +4554,7 @@ perf_causal_tick: fn(pc: I64, periods: I64) {
         last: rt_text_word(wrapping(thread + I64{16}))
         local: rt_text_word(wrapping(thread + I64{8}))
         if {
-            (last != I64{0} && wrapping(now - last) <= PERF_CAUSAL_BLOCKED_NS) -> {
+            (last != I64{0} && !perf_causal_blocked(thread, wrapping(now - last))) -> {
                 perf_causal_pay(thread, local, delay)
             }
             (local < delay) -> rt_text_store(wrapping(thread + I64{8}), delay)
@@ -4567,11 +4569,46 @@ perf_causal_tick: fn(pc: I64, periods: I64) {
             rt_text_store(wrapping(thread + I64{8}), wrapping(rt_text_word(wrapping(thread + I64{8})) + share))
         }
     }
-    if (thread != I64{0}) { rt_text_store(wrapping(thread + I64{16}), perf_samples_clock()) }
-    if (wrapping(now - sync_load(wrapping(state + PERF_CAUSAL_START))) >= PERF_CAUSAL_EXPERIMENT_NS && sync_cas(state, I64{0}, I64{1}) == I64{0}) {
-        perf_causal_next(state, pc, now)
+    // After the pause: a pause the experiment's end left out of its wall
+    // time would still count in its delay and its passes.
+    after: perf_samples_clock()
+    if (thread != I64{0}) { perf_causal_mark(thread, after) }
+    if (wrapping(after - sync_load(wrapping(state + PERF_CAUSAL_START))) >= PERF_CAUSAL_EXPERIMENT_NS && sync_cas(state, I64{0}, I64{1}) == I64{0}) {
+        perf_causal_next(state, pc, after)
         sync_store(state, I64{0})
     }
+}
+
+// Whether this thread was blocked since its last sample, `gap` ago: that
+// long off its CPU, and of its own accord at least once (a voluntary
+// context switch). A thread only preempted that long, as under load or with
+// more threads than cores, was ready to run and owes its delays as any
+// other does: forgiven them, it would leave delays unpaid that its
+// experiment takes off the wall time.
+perf_causal_blocked: fn(thread: I64, gap: I64) -> Bool {
+    if (gap <= PERF_CAUSAL_BLOCKED_NS) { return false }
+    switches: perf_causal_switches(thread)
+    switches < I64{0} || switches != rt_text_word(wrapping(thread + I64{24}))
+}
+
+// Note in this thread's entry its last sample (or sync point) at `now` and
+// its voluntary context switches by then, its own pauses' among them.
+perf_causal_mark: fn(thread: I64, now: I64) {
+    rt_text_store(wrapping(thread + I64{16}), now)
+    rt_text_store(wrapping(thread + I64{24}), perf_causal_switches(thread))
+}
+
+// This thread's voluntary context switches so far (getrusage's ru_nvcsw
+// for RUSAGE_THREAD), read into its entry's struct rusage; -1 when the
+// kernel refuses.
+perf_causal_switches: fn(thread: I64) -> I64 {
+    usage: wrapping(thread + I64{48})
+    status := I64{-1}
+    #Unsafe("getrusage writes the struct rusage in this thread's own entry") {
+        status = os_syscall_i64(I64{98}, I64{1}, usage, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    if (status != I64{0}) { return I64{-1} }
+    rt_text_word(wrapping(usage + I64{128}))
 }
 
 // A task's start and end are the lens's sync points, as a thread's wake
@@ -4594,7 +4631,7 @@ perf_causal_task_start: fn() {
     if (rt_text_word(wrapping(thread + I64{8})) < delay) {
         rt_text_store(wrapping(thread + I64{8}), delay)
     }
-    rt_text_store(wrapping(thread + I64{16}), perf_samples_clock())
+    perf_causal_mark(thread, perf_samples_clock())
 }
 
 perf_causal_task_end: fn() {
@@ -4607,11 +4644,13 @@ perf_causal_task_end: fn() {
         return
     }
     perf_causal_pay(thread, rt_text_word(wrapping(thread + I64{8})), sync_load(wrapping(state + PERF_CAUSAL_DELAY)))
-    rt_text_store(wrapping(thread + I64{16}), perf_samples_clock())
+    perf_causal_mark(thread, perf_samples_clock())
 }
 
 // This thread's entry, claimed by its tid on its first sample; 0 when the
-// table is full.
+// table is full. The claim drops the thread's timer slack to 1 ns: a pause
+// (perf_causal_pause) would otherwise sleep the stock 50 us past its
+// request, which it then owes back as excess no other thread shares.
 perf_causal_thread: fn(state: I64) -> I64 {
     tid: thread_tid()
     probe := wrapping(tid * I64{2654435761}) & wrapping(PERF_CAUSAL_THREADS - I64{1})
@@ -4620,7 +4659,12 @@ perf_causal_thread: fn(state: I64) -> I64 {
         entry: wrapping(wrapping(state + PERF_CAUSAL_THREAD_AT) + wrapping(probe * PERF_CAUSAL_THREAD_BYTES))
         held: sync_load(entry)
         if (held == tid) { return entry }
-        if (held == I64{0} && sync_cas(entry, I64{0}, tid) == I64{0}) { return entry }
+        if (held == I64{0} && sync_cas(entry, I64{0}, tid) == I64{0}) {
+            #Unsafe("prctl(PR_SET_TIMERSLACK) takes no pointer and sets this thread's own slack") {
+                _ := os_syscall_i64(I64{157}, I64{29}, I64{1}, I64{0}, I64{0}, I64{0}, I64{0})
+            }
+            return entry
+        }
         probe = wrapping(probe + I64{1}) & wrapping(PERF_CAUSAL_THREADS - I64{1})
         tries = wrapping(tries + I64{1})
     }
@@ -4646,7 +4690,7 @@ perf_causal_pay: fn(thread: I64, local: I64, delay: I64) {
 // entry's timespec: the time it slept.
 perf_causal_pause: fn(thread: I64, ns: I64) -> I64 {
     wait: if (ns > PERF_CAUSAL_PAUSE_MAX_NS) -> PERF_CAUSAL_PAUSE_MAX_NS else -> ns
-    spec: wrapping(thread + I64{24})
+    spec: wrapping(thread + I64{32})
     rt_text_store(spec, I64{0})
     rt_text_store(wrapping(spec + I64{8}), wait)
     began: perf_samples_clock()

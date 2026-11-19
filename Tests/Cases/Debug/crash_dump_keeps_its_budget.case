@@ -22,6 +22,11 @@ step: jet debug {cap:dump}
 stdin: crash_dump_keeps_its_budget.stdin
 exit: 0
 stdout: ~ "Dump of process " # a dump, not a live process
+stdout: ~ "within the 33554432-byte budget; " # the budget it kept to
+stdout: !~ "; 0 bytes cut off past it" # and the bytes it cut off past it
+stdout: ~ "Stopped  big.jet:5  in check()" # the stopping line
+stdout: ~ "… 1999984 more]" # a list the dump holds shows its first items
+stdout: ~ "<cut off>" # a list it cut off says so
 capture: image stdout.split(" bytes, with ", 0) after "Image: " # the image the run ran, as the dump states it
 capture: records stdout.split(" bytes of records", 0) after ", with " # the dump's bytes beside its image and memory
 capture: memory stdout.split(" bytes held", 0) after "Memory: " # the reached memory the dump holds
@@ -30,8 +35,3 @@ capture: bound = text file records_bound.txt
 cap:memory: f64 <= {cap:budget} # at most the 32 MiB budget of memory
 cap:records: f64 < {cap:bound} # under 2 MiB of records
 file: {cap:dump} size <= {cap:image}+35651584 # the image, 32 MiB of memory and under 2 MiB of records, not the 48 MB of lists
-stdout: ~ "within the 33554432-byte budget; " # the budget it kept to
-stdout: !~ "; 0 bytes cut off past it" # and the bytes it cut off past it
-stdout: ~ "Stopped  big.jet:5  in check()" # the stopping line
-stdout: ~ "… 1999984 more]" # a list the dump holds shows its first items
-stdout: ~ "<cut off>" # a list it cut off says so

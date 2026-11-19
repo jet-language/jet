@@ -45,8 +45,8 @@ JET_CLI_PERF_CAUSAL_EXPERIMENT_MS: 25
 
 // The experiment of the record at byte `at` of `words`, `record` words long:
 // the line its sampled address stands for, the innermost frame of the
-// checked source there; a baseline when the address is 0 or none stands for
-// it.
+// checked source there; line 0 when the address is 0 (a baseline, with no
+// speedup) or none stands for it.
 jet_cli_perf_causal_record: fn(sampled: JetCLIPerfSamples, owned: [Bool], words: [U8], at: Int, record: Int) -> JetCLIPerfExperiment Never! {
     target: link_debug_addr(words, at + 8)
     line := U64{0}
@@ -65,8 +65,7 @@ jet_cli_perf_causal_record: fn(sampled: JetCLIPerfSamples, owned: [Bool], words:
     }
     passes := [Int]{}
     loop k in 5..<record -> passes.push(link_debug_addr(words, at + k * 8))
-    speedup: if line > (U64{0}) -> link_debug_addr(words, at + 16) else -> 0
-    JetCLIPerfExperiment{line: line, name: name, speedup: speedup, wall_ns: link_debug_addr(words, at + 24), delay_ns: if line > (U64{0}) -> link_debug_addr(words, at + 32) else -> 0, passes: passes}
+    JetCLIPerfExperiment{line: line, name: name, speedup: link_debug_addr(words, at + 16), wall_ns: link_debug_addr(words, at + 24), delay_ns: link_debug_addr(words, at + 32), passes: passes}
 }
 
 // The experiments that sped up one line of one function.
@@ -155,10 +154,14 @@ jet_cli_perf_causal_section: fn(source: &&String, experiments: &&[JetCLIPerfExpe
     percent := 30
     loop (index, experiment) in experiments {
         if experiment.speedup > 0 -> percent = experiment.speedup /% 10
-        if experiment.line == (U64{0}) {
+        // A baseline has no speedup. An experiment that slowed the program
+        // for a line the checked source does not name is neither a baseline
+        // nor any line's.
+        if experiment.speedup == 0 {
             base.push(index)
             next
         }
+        if experiment.line == (U64{0}) -> next
         at := groups.len()
         loop (k, group) in groups {
             if group.line == experiment.line && group.name == experiment.name {
