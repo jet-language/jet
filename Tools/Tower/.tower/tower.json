@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112446,
+    "rev": 112448,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74422,11 +74422,11 @@
         {
           "n": 6,
           "text": "Instrumentation costs nothing when it is off and stays within a measured budget when it is on, so a profiled build keeps Jet's performance gate. Proof: `node Tools/Gauntlet/Harness/run.mjs --entry profile-overhead` reports the instrumented and plain pair from the canonical perf manifest.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:06:18.171Z"
+          "evidence": "p330 batch compiler (dev 8acf6a14a1): `node Tools/Gauntlet/Harness/run.mjs --entry profile-overhead` → \"profile-overhead pair: pass\". Zoned vs plain (Tools/Perf/ProfileOverhead), zones off: -O1 wall 1.0025 [0.993, 1.006], cycles 0.9996, peak RSS 1.0; -O2 wall 0.9996 [0.994, 1.004], cycles 1.0004, peak RSS 1.0, all even. Zones on: wall 0.979 [0.950, 1.014] even, cycles 1.015 [0.976, 1.038] even, peak RSS 1.008 (320,500 vs 317,832 KiB). Perf/zone_sites_add_only_their_spans_to_hot_code PASS on p330 (proofs n=1 bad=0, hot.sh reads release image bytes).",
+          "at": "2026-11-19T20:25:14.218Z"
         },
         {
           "n": 7,
@@ -75052,11 +75052,11 @@
         {
           "n": 66,
           "text": "c39 G5, second-evaluation latency: a second `print` of a new expression in the same stopped function answers in under 100 ms on a JetCLI-sized image; the case states the measured time and its bound. Measured by `jet run Tools/Perf/DebugLatency/Main.jet -- --functions 20000 --runs 5` second_eval as well. (audit G5)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-19T04:04:34.808Z",
+          "evidence": "p330 batch compiler (dev 8acf6a14a1), $JET_SCRATCH_ROOT/lanes/Main/c39-p330: `jet run Tools/Perf/DebugLatency/Main.jet -- --functions 20000 --runs 5` (20,000 functions, 120,015 lines, median of 5): second_eval 27.9 ms (lldb 1.2), bar \"second_eval at most 100 ms: met\"; print_first 60.9 ms (bar 250: met); all six latency bars met. Debug/second_print_answers_under_100ms PASS in suite-p330 and in the c39 pass (cases Debug/ 88 PASS, the 1 FAIL the dap_cli_continue_burst load flake, which passes 2/2 alone).",
+          "at": "2026-11-19T20:25:13.172Z",
           "proof": {
             "profile": "cases",
             "filter": "Debug/second_print_answers_under_100ms"
@@ -75090,7 +75090,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-19T19:35:27.645Z",
+      "updated": "2026-11-19T20:25:14.218Z",
       "updatedBy": "Main",
       "criteriaLastN": 68
     },
@@ -159197,6 +159197,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-19T20:25:14.218Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-19T20:25:13.172Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#66"
+    },
     {
       "at": "2026-11-19T20:16:02.236Z",
       "by": "Main",
