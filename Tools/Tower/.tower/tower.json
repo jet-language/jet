@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112383,
+    "rev": 112388,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75296,6 +75296,21 @@
         {
           "at": "2026-11-19",
           "by": "Main",
+          "text": "c47 gap 4 name resolution (Lens probe: a meta.rewrite_body body resolves names in the rewritten function file, so Core profile handler cannot name core.perf when the file imports it under another alias or not at all, e.g. header-marked functions). Decision: first reuse the existing derive/marker template path that resolves names where written, if the meta API lets a handler build rewrite code through it (one mechanism, no change to user-written #code); otherwise the driver adds one import, a long, specific alias, to rewrite modules of bodies Core profile rewrote, with a clash refused by a complete diagnostic (registered code, snapshot), proven by header-marked and other-alias cases. Making all rewrite_body #code resolve where written is a semantic change to existing user rewrites and needs an owner ballot; not taken for c47."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
+          "text": "Decision (c47 gap 4, Core #Profiled handler): option (a). Core/Perf ships the handler as a Core compile-time program and the driver runs it whenever the checked program holds a #Profiled-marked function, with or without a package build fn, as the ratified D-PERF-ZONES1=A story says (the user only adds #Profiled). The marker is the rewrite consent, scoped to the marked function own body, in whichever package carries it: the handler can rewrite nothing else, and Meta.Code.Rewrite stays required for every user-written rewrite. A program with no marker stages no extra check or session (zero compile cost, proven by a timing row on an unmarked build). Same cutover: the ProfiledMarker fixture drops its hand-written build fn and its Meta.Code.Rewrite allow, and the Perf docs stop telling users to write one. Rejected: (b), a new user surface that still needs a build; (c), a second mechanism off the ratified wording."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
+          "text": "p319 (dev abd80d2b02: IfHole c47 zone-patch-sites.r2 + clock-copy.r2; c43 met on p318). c6 pair on gate-p319: -O1 wall 1.0025 [0.988,1.023] even, cycles 0.9995 even, peak RSS 280/268 KB loss; -O2 wall 1.0041 even, cycles 1.0002 even, peak RSS 280/268 loss; on-arm even. RSS regressed from 276 (p315) to 280: assigned to IfHole at top priority with page-level investigation. The two new c47 cases (zone_sites_are_patched_jumps, zone_only_code_is_laid_after_hot_code) were refused by the case runner (stream assertions without reasons), so c47 clause 3 is not proved yet."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
           "text": "p317 (dev 89e167e475: Lens c45-print-first, c55-span-rate; Main c39 audit revision 3). DebugLatency 20000x3 on gate-p317: entry first_stop 88 (lldb 217), per_step 1 (2), print_place -3 (12), print_first 58 (16), print_again -9 (9), second_eval 45 (5), watch_per_stop 9 (lldb reference failed: watchpoint creation failed on a register local); nested print_first 54, second_eval 42. Every bar the tool states is met; print_first fell from 1846 ms on p315. Open for c45: the §8.2 watch_per_stop reference must be lldb stop-hook expr as specified, condition_per_hit is not measured yet, and negative differential rows are noise; Lens assigned. c66: second_print cases fail in the suite at 104.3 and 100.9 ms (pass alone, 45 ms), so the latency needs headroom; Lens assigned. c44/c68 decision: cpu lens samples on a per-thread perf_event_open task-clock with an exact period; the IBS/PEBS precise source is used only under c65 own condition (paranoid at most 1) and in period mode; the default goes to 8 kHz only if c44(d) stays under 2%, else a rate-setting ballot."
         },
         {
@@ -75912,11 +75927,11 @@
         {
           "n": 44,
           "text": "A sampler that is right on threads: (a) `jet perf run` samples each thread on its own CPU clock: four tasks running fib at once at -O2 keep at least 90% of the nominal samples, and every sample keeps its whole stack. (b) A sample in a compiler-emitted helper (a stop poll, a barrier) is charged to the Jet line that called it, and the receipt counts such samples; no fib sample is reported outside Jet functions. (c) A sample in an inlined function names the inlined function's line and its caller's line, at -O2. (d) Every receipt states the capture's overhead, measured against a matched unprofiled run, and the default rate costs under 2% on fib. Proof: `jet test Compiler --profile cases --filter Perf/every_thread_keeps_whole_stacks`; `--filter Perf/helper_samples_charge_the_calling_line`; `--filter Perf/inlined_samples_name_the_inlined_line`; `--filter Perf/receipt_reports_measured_overhead`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R2)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-19T11:21:56.107Z"
+          "evidence": "p320 batch compiler (census build of dev 6a7bcc1005, which carries IfHole c44-task-clock.r2: each thread samples on its own perf_event_open task clock with an exact period and whole CFI stacks; IBS/PEBS precise PC only under c65 condition, in period mode; the timer fallback states its cap and reason in the receipt). Collect-all cases suite: PASS Perf/every_thread_keeps_whole_stacks (now with fib4 -- 32 at -O2, four fib tasks, at least 90% of nominal samples, whole stacks), PASS Perf/helper_samples_charge_the_calling_line, PASS Perf/inlined_samples_name_the_inlined_line, PASS Perf/receipt_reports_measured_overhead; also PASS Perf/precise_pc_names_its_source. (d): measured per-sample cost 2.85-3.3 us (IfHole, IBS and task clock, fib 38), so the 1 kHz default costs about 0.3%, under 2%; 8 kHz would cost about 2.6% and is tracked under c68.",
+          "at": "2026-11-19T13:53:49.399Z"
         },
         {
           "n": 45,
@@ -75978,11 +75993,11 @@
         {
           "n": 51,
           "text": "Typed crash dumps and the flight recorder: A stop writes a typed dump (every task's stack, values reachable from them to a budget, the flight-recorder ring) and `jet debug` opens it with the live verbs; `jet perf attach` drains the same ring. Proof: `jet test Compiler --profile cases --filter Debug/crash_dump_opens_typed`; `--filter Perf/attach_drains_flight_ring`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-19T11:21:58.125Z",
+          "evidence": "p320 batch compiler (census build of dev 6a7bcc1005). Collect-all cases suite: PASS Debug/crash_dump_opens_typed, PASS Perf/attach_drains_flight_ring (the criterion proofs), and PASS Debug/deadlock_dump_holds_every_task (the c39 audit gap: a deadlock under --observe writes a dump that holds every task, each with its stack and typed locals - Task, Receiver and Sender as their task and channel, structs, lists, text - at -O0 and -O2, every held task shown with its wait; a plain run writes no dump, as D-OBSERVE-FLIGHT1=B rules). Landed in 791fb2c84f and acea956b7d.",
+          "at": "2026-11-19T13:53:50.847Z",
           "unblockedFrom": "D-OBSERVE-FLIGHT1"
         },
         {
@@ -76181,7 +76196,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-19T12:56:49.461Z",
+      "updated": "2026-11-19T13:53:50.847Z",
       "updatedBy": "Main",
       "criteriaLastN": 68
     },
@@ -160932,6 +160947,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-19T13:53:50.847Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#51"
+    },
+    {
+      "at": "2026-11-19T13:53:49.399Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#44"
+    },
+    {
+      "at": "2026-11-19T13:48:26.291Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T13:29:46.561Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T13:25:55.202Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-19T12:56:49.461Z",
       "by": "Main",
