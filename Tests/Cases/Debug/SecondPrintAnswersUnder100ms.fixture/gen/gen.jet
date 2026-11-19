@@ -1,0 +1,29 @@
+// Writes prog.jet for the function count its first argument names: that
+// many functions `f_k`, each (x + k) % 1000 in five lines (the last one
+// blank), then `run`, which calls each in turn on `total`, one line each,
+// so the first call is line 5 * count + 3.
+use {
+    core.files
+    core.process.[args]
+}
+
+run: fn() {
+    given: args()
+    if given.len() != 1 -> panic("gen.jet takes one function count")
+    count: Int.parse(given[0]) ?? panic("gen.jet takes one function count, not `{given[0]}`")
+    lines := [String]{}
+    loop k in 0..<count {
+        lines.push("f_{k}: fn(x: Int) -> Int {{")
+        lines.push("    y: x + {k}")
+        lines.push("    y % 1000")
+        lines.push("}}")
+        lines.push("")
+    }
+    lines.push("run: fn() {{")
+    lines.push("    total := 0")
+    loop k in 0..<count -> lines.push("    total = f_{k}(total)")
+    lines.push("    print(\"{{total}}\")")
+    lines.push("}}")
+    lines.push("")
+    files.write("prog.jet", lines.join("\n")) ?? panic("gen.jet: write prog.jet: {err}")
+}
