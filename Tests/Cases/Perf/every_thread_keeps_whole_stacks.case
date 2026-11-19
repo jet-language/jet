@@ -3,8 +3,11 @@
 # for two seconds of CPU time keep at least 90% of the 2000 samples that time
 # gives, and each keeps its whole stack, so fib's recursive line holds them.
 # One process-wide timer sent each expiry to one running thread, which lost
-# about half of them, and a sample taken while another thread's filled the
-# one buffer kept its program counter alone.
+# about half of them; a sample taken while another thread's filled the one
+# buffer kept its program counter alone; and an expiry the kernel folded into
+# a SIGPROF still pending (its si_overrun) was no sample, about a tenth of
+# them on a loaded machine. Each such SIGPROF now writes one record per
+# period it covers.
 requires: os-name:linux
 fixture: EveryThreadKeepsWholeStacks.fixture
 env: NO_COLOR=1

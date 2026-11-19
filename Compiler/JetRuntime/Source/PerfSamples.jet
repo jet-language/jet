@@ -46,6 +46,10 @@ PERF_SAMPLES_SIGNAL: I64{27}
 // One sample per millisecond of CPU time.
 PERF_SAMPLES_INTERVAL_US: I64{1000}
 
+// The most periods past its own one sample stands for (perf_samples_periods):
+// a second of CPU time.
+PERF_SAMPLES_OVERRUNS: I64{1000}
+
 // The most words one record keeps: its program counter and the call sites
 // of its innermost callers.
 PERF_SAMPLES_DEPTH: I64{1024}
@@ -1440,10 +1444,12 @@ perf_cfi_sort: fn(table: I64, count: I64) {
 // ends the stack there. Each handler fills a record buffer of its own, with
 // its own scratch for the rules (perf_samples_claim, perf_samples_scratch);
 // a sample outside the image's code, or one taken while other handlers hold
-// every buffer, is its program counter alone. A write the kernel refuses
-// loses that one sample; O_APPEND puts each record after the last. A
-// counter's record has its kind, and the counter is armed again once it is
-// written.
+// every buffer, is its program counter alone. A timer's SIGPROF stands for
+// its own period and each the kernel folded into it while it was pending
+// (perf_samples_periods), so its record is written once for each, as many
+// samples as the CPU time it covers gives. A write the kernel refuses loses
+// that one sample; O_APPEND puts each record after the last. A counter's
+// record has its kind, and the counter is armed again once it is written.
 #Export(c) jet_rt_perf_samples_signal: fn(signal: I64, info: I64, context: I64) -> I64 {
     fd: perf_samples_fd
     if (fd < I64{0} || context == I64{0}) { return I64{0} }
@@ -1458,9 +1464,15 @@ perf_cfi_sort: fn(table: I64, count: I64) {
     bias: perf_samples_bias
     pc: wrapping(rt_text_word(wrapping(context + I64{168})) - bias)
     slot: if (buffer == I64{0} || !perf_samples_in_code(pc)) -> I64{0} else -> perf_samples_claim(buffer)
+    periods: perf_samples_periods(signal, info)
     if (slot == I64{0}) {
-        #Unsafe("one write of a stack-local word, which the kernel copies before the call returns") {
-            _ := os_write_word_i64(fd, (pc & PERF_SAMPLES_ADDRESS_MASK) | (I64{1} << PERF_SAMPLES_ADDRESS_BITS) | kind, I64{8})
+        word: (pc & PERF_SAMPLES_ADDRESS_MASK) | (I64{1} << PERF_SAMPLES_ADDRESS_BITS) | kind
+        written := I64{0}
+        loop written < periods {
+            #Unsafe("one write of a stack-local word, which the kernel copies before the call returns") {
+                _ := os_write_word_i64(fd, word, I64{8})
+            }
+            written = wrapping(written + I64{1})
         }
         perf_counter_rearm(buffer, counter)
         perf_samples_charge(buffer, began)
@@ -1520,11 +1532,30 @@ perf_cfi_sort: fn(table: I64, count: I64) {
         }
     }
     rt_text_store(wrapping(slot + I64{8}), pc | (count << PERF_SAMPLES_ADDRESS_BITS) | kind)
-    #Unsafe("one write of the record's words, which the kernel copies before the call returns") {
-        _ := os_syscall_i64(I64{1}, fd, wrapping(slot + I64{8}), wrapping(count * I64{8}), I64{0}, I64{0}, I64{0})
+    written := I64{0}
+    loop written < periods {
+        #Unsafe("one write of the record's words, which the kernel copies before the call returns") {
+            _ := os_syscall_i64(I64{1}, fd, wrapping(slot + I64{8}), wrapping(count * I64{8}), I64{0}, I64{0}, I64{0})
+        }
+        written = wrapping(written + I64{1})
     }
     sync_store(slot, I64{0})
     perf_counter_rearm(buffer, counter)
     perf_samples_charge(buffer, began)
     I64{0}
+}
+
+// The periods of CPU time the SIGPROF `info` reports stands for: its
+// timer's expiry and each the kernel counted while the signal was still
+// pending (si_overrun, the high half of the word at 16 of a siginfo of
+// si_code SI_TIMER), at most PERF_SAMPLES_OVERRUNS more; 1 for any other
+// signal, a counter's or one the start sends itself (perf_samples_delivery).
+perf_samples_periods: fn(signal: I64, info: I64) -> I64 {
+    if (signal != PERF_SAMPLES_SIGNAL || info == I64{0}) { return I64{1} }
+    if (rt_text_word(wrapping(info + I64{8})) & I64{4294967295} != I64{4294967294}) {
+        return I64{1}
+    }
+    overrun: (rt_text_word(wrapping(info + I64{16})) >> I64{32}) & I64{2147483647}
+    if (overrun > PERF_SAMPLES_OVERRUNS) { return wrapping(PERF_SAMPLES_OVERRUNS + I64{1}) }
+    wrapping(overrun + I64{1})
 }

@@ -2,11 +2,16 @@ use time: core.time
 
 run: fn() {
     loop _ in 0..<3 -> nap(30ms)
-    pause()
-    print("napped")
+    paused: pause()
+    print("napped, paused {paused}ms")
 }
 
 // Every nap blocks at this one line; each path that calls it is its own stack.
 nap: fn(span: Duration) -[Time.Wait]> { time.sleep(span) }
 
-pause: fn() -[Time.Wait]> { nap(150ms) }
+// pause hands back its span after its nap, so the nap is no tail call (a
+// jump, which leaves no frame) and pause stays on the nap's stack.
+pause: fn() -[Time.Wait]> Int {
+    nap(150ms)
+    150
+}
