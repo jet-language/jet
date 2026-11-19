@@ -1307,19 +1307,58 @@ text's scalar count in the text's own word (`Text.jet:866`). Placed in the
 program, that is a plain store into a block the program owns, which
 another thread may be reading. With the mark, it is refused.
 
-**One arena per thread.** In the target, the result allocation goes to an
-arena the debugger maps when the breakpoint is set. A breakpoint in code
-several threads run is hit by them at once, and the others keep running
-while a placed lambda runs in one, so one arena reset at each hit would let
-one thread's reset reclaim a result another thread is still reading (third
-review, P7). So each thread has its own arena. The runtime reserves one TCB
-word for the debugger (`TCB_DEBUG_ARENA`). With every thread stopped, the
-debugger maps one arena per thread and writes its address into that
-thread's word, and the placed code resets and uses the arena that
-`gs:[TCB_DEBUG_ARENA]` names. A thread created after the breakpoint was set
-has 0 there, so its hit traps to the debugger, which maps its arena and
-writes the word before the condition runs. That is one extra mapping per
-thread in the program. The target's heap is never entered, and a placed
+**One arena per carrier** (review 4, Q4). In the target, the result
+allocation goes to an arena the debugger maps. A breakpoint in code several
+threads run is hit by them at once, and the others keep running while a
+placed lambda runs in one, so one arena reset at each hit would let one
+thread's reset reclaim a result another thread is still reading (third
+review, P7). Revision 4 gave each thread an arena through a TCB word. But
+the scheduler runs every task on a fiber with a TCB of its own
+(`Fiber.jet`), and `gs` names the running fiber's TCB, not the thread's.
+Keyed there, the word would be 0 in every fiber that was not running at
+the stop: ready, parked and pooled fibers, and each fiber mapped later. In
+code that runs a task per request, that is one trap per fresh fiber, the
+cost R7 exists to avoid.
+
+So the arena is keyed by carrier: one per OS thread. The runtime reserves
+one word in the thread TCB for the debugger, `TCB_DEBUG_ARENA` (@760, the
+first unused word of `Thread.jet`'s layout). The placed code finds its
+carrier's TCB as follows:
+
+- `gs:[56]` names the fiber running on this TCB, and is 0 on a plain
+  thread. On a plain thread, the arena is `gs:[TCB_DEBUG_ARENA]`.
+- On a fiber, the carrier record is the fiber's word +16, which
+  `fiber_run` writes before every switch in. The carrier's TCB is the
+  record's word +24, and the arena is that TCB's `TCB_DEBUG_ARENA`.
+
+These are three reads of runtime state that only the scheduler writes. A
+placed lambda never parks (it is `-[]>`). It is built with no stop poll,
+which is the only place a running fiber gives up its carrier. So a fiber
+cannot leave its carrier while its condition runs, and fibers that run one
+after another on one carrier share that carrier's arena without overlap. A
+condition with a loop runs to its end on its carrier.
+
+With every thread stopped, the debugger maps one arena per thread and
+writes its address into that thread's word. A thread created after the
+breakpoint was set has 0 there, so its first hit traps to the debugger,
+which maps its arena and writes the word before the condition runs. That
+is one extra mapping and at most one trap per thread, whatever the number
+of tasks or fibers. Probe `arena_key.py` measured the costs on the lane's
+machine (Ryzen 9 7950X3D) in three runs, each the median of five; the
+ranges are over the three runs
+([`arena_key.log`](DebugEvalNative20261118/Probes/arena_key.log)):
+
+| Lookup | ns per hit |
+|---|---|
+| carrier keyed, on a fiber | 3.16-3.82 |
+| carrier keyed, on a plain thread | 1.07-1.11 |
+| per-fiber word | 1.05 |
+
+One trap and resume costs 6.27-6.53 µs, before the debugger maps anything.
+So keying by carrier costs about 2.8 ns more per hit than a per-fiber word,
+which is 2.8 ms over a million hits. A per-fiber word costs one trap and
+one mapping per fresh fiber, and it leaves an arena behind each fiber the
+runtime unmaps. The target's heap is never entered, and a placed
 lambda writes nothing the program reads, so it computes in the target the
 same value it computes in the fork. Its panic stub writes the message to
 the breakpoint's slot and reports a stop: "the condition panicked:
@@ -1446,8 +1485,11 @@ the target. It stays out of this design and needs its own ballot.
   code is refused, even when the code only reads.
 - A session whose build options differ from the image's is refused, naming
   the option (§3.5).
-- An R7 condition placed in the program uses one extra mapping per thread
-  in the target, its result arena, and one reserved TCB word (§8.1). A
+- An R7 condition placed in the program uses one extra mapping per OS
+  thread in the target, its result arena, and one reserved TCB word. A
+  hit on a fiber costs three reads to find its carrier's arena (§8.1). A
+  placed condition has no stop poll, so a loop in it keeps its carrier
+  until it ends. A
   condition that calls a runtime entry point not marked "writes no memory",
   such as `text.len()` (`jet_char_len`), runs in a fork per hit.
 - A `MADV_DONTFORK` range is a reserved hole in the fork. Jet images set no
@@ -1556,9 +1598,10 @@ dependencies.
    That includes the `dc` reservation and the filter's argument checks.
    Cases cover the budget message, a fault, a refused syscall, each refused
    argument form, a shared mapping, a `wf` mapping, a held `Shared` cell
-   and a call through a function value. R7's per-thread arenas through the
-   reserved TCB word (§8.1), with a case where two threads hit one placed
-   condition at once and each reads its own result.
+   and a call through a function value. R7's per-carrier arenas through the
+   reserved TCB word (§8.1). One case has two threads hit one placed
+   condition at once, each reading its own result, and a third hit on a
+   fiber made after the breakpoint was set.
 5. **Cutover.** Console `print` and `watch`, conditions, logpoints and DAP
    `evaluate` move onto it, with the place path (§8.1). `DebugEval.jet` and
    `native_debug_print` are deleted. Add §1's proof cases except
@@ -1851,3 +1894,4 @@ directory.
 | `genmod.jet` | Do two instances of one generic module keep separate globals from one site, and does a top-level `Shared` global work? (P8) | The run prints `9`, `65`, `2`. The members are `__jet_large_dbump` and `__jet_small_dbump`; `small`'s adds 1 to `const 8`. A breakpoint at `genmod.jet:6` never hits, and `s` from line 16 lands on line 17 |
 | `genmod_mutable.jet` | Does a generic module's body take a mutable global? (P8) | `InvalidStatement` (E0003) at 4:5, "Expected a function, struct, enum, or other item inside a module" |
 | `bounds.jet:4` breakpoint | The control for `genmod`'s breakpoint: does a one-line function stop? | It stops twice, with `bt` showing `peek()` at `bounds.jet:4` under `run()` at `bounds.jet:8` |
+| `arena_key.py` (review 4, Q4) | What does R7's arena lookup cost per hit keyed by carrier, against a per-fiber word, and what does a trap cost? | In `arena_key.log`, not `run_r4.log`: per hit, 3.16-3.82 ns carrier keyed on a fiber, 1.07-1.11 ns on a plain thread, and 1.05 ns for a per-fiber word; one trap and resume, 6.27-6.53 µs |
