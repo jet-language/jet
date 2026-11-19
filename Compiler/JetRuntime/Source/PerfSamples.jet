@@ -2015,18 +2015,21 @@ perf_spans_fd_set: fn(fd: I64) {
     perf_zones_set(I64{1})
 }
 
-// The record of task `id`'s spawn, under `jet perf run`: the id in place of
-// a sample's program counter, then the spawning stack (perf_samples_stack).
-// `jet perf run` names the task's spawn by the innermost of its call sites
-// on a line of the checked source.
-perf_samples_spawn: fn(id: I64) {
+// The record of task `id`'s spawn by task `parent`, under `jet perf run`:
+// the id in place of a sample's program counter, the parent's id, then the
+// spawning stack (perf_samples_stack). `jet perf run` names the task's
+// spawn by the innermost of its call sites on a line of the checked source,
+// and gives the task a trace row under its parent's when no observation
+// saw it.
+perf_samples_spawn: fn(id: I64, parent: I64) {
     fd: perf_samples_fd
     if (fd < I64{0} || id == I64{0}) {
         return
     }
-    size: wrapping(wrapping(PERF_SAMPLES_STACK_DEPTH + I64{1}) * I64{8})
+    size: wrapping(wrapping(PERF_SAMPLES_STACK_DEPTH + I64{2}) * I64{8})
     record: jet_rt_alloc(size, I64{8})
-    words: wrapping(perf_samples_stack(wrapping(record + I64{8})) + I64{1})
+    rt_text_store(wrapping(record + I64{8}), parent)
+    words: wrapping(perf_samples_stack(wrapping(record + I64{16})) + I64{2})
     rt_text_store(record, (id & PERF_SAMPLES_ADDRESS_MASK) | (words << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_SPAWN << PERF_SAMPLES_KIND_BITS))
     _ := host_write_all(fd, record, wrapping(words * I64{8}))
     jet_rt_free(record, size, I64{8})

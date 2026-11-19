@@ -1,0 +1,15 @@
+run: fn() {
+    a: task burn(3000000)
+    b: task burn(3000000)
+    c: task burn(3000000)
+    d: task burn(3000000)
+    print("sum={(a.join() ?? 0) + (b.join() ?? 0) + (c.join() ?? 0) + (d.join() ?? 0)}")
+}
+
+// A task's work: CPU only, so no observation sees it waiting, and short
+// enough to start and end between two of the run's observations.
+burn: fn(n: Int) -> Int {
+    total := 0
+    loop i in 0..<n -> total = (total + i) % 1000003
+    total
+}

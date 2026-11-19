@@ -28,6 +28,8 @@ use {
         TraceIO,
         TRACE_IO_ROW_LIMIT,
         TRACE_SPAN_ROW_LIMIT,
+        TRACE_TASK_ROW_LIMIT,
+        TraceTask,
         trace_profile_unsupported,
         SourceIdentity,
         sha256_hex,
@@ -93,13 +95,11 @@ JetCLIPerfInlines: struct {
 // samples held an allocations' record:
 // a runtime that records no allocation sites counts no line's allocations.
 // `periods` holds each counter's sampling period, 0 for one the run did
-// not capture. `spawns` holds the line of the checked source that spawned
-// each task, by its runtime id, for each task whose spawning stack holds
-// one; `waits` each task's wait, `wakes` each wake of a waiter and
-// `transfers` each file or network transfer, in the order the program
-// recorded them; `heaps` each heap snapshot the alloc lens took, in the
-// order it took them; `timed` each CPU-time sample its time and task, in
-// time order.
+// not capture. `spawns` holds each task's spawn, `waits` each task's wait,
+// `wakes` each wake of a waiter and `transfers` each file or network
+// transfer, in the order the program recorded them; `heaps` each heap
+// snapshot the alloc lens took, in the order it took them; `timed` each
+// CPU-time sample its time and task, in time order.
 JetCLIPerfSamples: struct {
     table: X64Jetline,
     inlines: JetCLIPerfInlines,
@@ -115,7 +115,7 @@ JetCLIPerfSamples: struct {
     natives: [JetCLIPerfNative],
     sited: Bool,
     periods: [U64],
-    spawns: [U64:U64],
+    spawns: [JetCLIPerfSpawn],
     waits: [JetCLIPerfWait],
     wakes: [JetCLIPerfWake],
     transfers: [JetCLIPerfIO],
@@ -143,6 +143,16 @@ JetCLIPerfCost: struct {
     cpu_ns: U64,
     handler_ns: U64,
     delivery_ns: U64,
+}
+
+// A task's spawn (PerfSamples.jet perf_samples_spawn): the task and the
+// task that spawned it, each by its runtime id, and the line of the checked
+// source that spawned it, the innermost on its spawning stack when that
+// holds one.
+JetCLIPerfSpawn: struct {
+    task: U64,
+    parent: U64,
+    line: U64?,
 }
 
 // A task's wait (PerfSamples.jet perf_samples_wait): the waiting task by its
@@ -618,7 +628,7 @@ jet_cli_perf_code_low: fn(image: [U8]) -> Int {
 // `names` spells. Its block and root records are its retention records
 // (JetCLIPerfHeap).
 jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFunction], inlines: &&JetCLIPerfInlines, owned: [Bool], periods: &&[U64], allocs: [Int:Int], names: [Int:String], words: [U8], code_low: Int) -> JetCLIPerfSamples Never! {
-    sampled := JetCLIPerfSamples{table: table, inlines: inlines, lines: [JetCLIPerfSampledLine]{}, total: U64{0}, outside: U64{0}, helpers: U64{0}, stackless: U64{0}, signals: U64{0}, cost: None, sampler: None, functions: functions, natives: [JetCLIPerfNative]{}, sited: false, periods: periods, spawns: [U64:U64]{}, waits: [JetCLIPerfWait]{}, wakes: [JetCLIPerfWake]{}, transfers: [JetCLIPerfIO]{}, heaps: [JetCLIPerfHeap]{}, experiments: [JetCLIPerfExperiment]{}, points: [Int:String]{}, timed: [JetCLIPerfTimed]{}}
+    sampled := JetCLIPerfSamples{table: table, inlines: inlines, lines: [JetCLIPerfSampledLine]{}, total: U64{0}, outside: U64{0}, helpers: U64{0}, stackless: U64{0}, signals: U64{0}, cost: None, sampler: None, functions: functions, natives: [JetCLIPerfNative]{}, sited: false, periods: periods, spawns: [JetCLIPerfSpawn]{}, waits: [JetCLIPerfWait]{}, wakes: [JetCLIPerfWake]{}, transfers: [JetCLIPerfIO]{}, heaps: [JetCLIPerfHeap]{}, experiments: [JetCLIPerfExperiment]{}, points: [Int:String]{}, timed: [JetCLIPerfTimed]{}}
     // One key per function, line and ownership.
     places := [String:Int]{}
     // Each address's entries in `lines`, innermost first, by twice the
@@ -657,8 +667,10 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
             next
         }
         if kind == JET_CLI_PERF_SPAWN_KIND {
-            if jet_cli_perf_samples_stack_line(sampled, owned, words, at, 1, record) == .Val(line) {
-                sampled.spawns[U64{pc}] = U64{line}
+            // The spawned task, then its parent and the spawning stack.
+            if record >= 2 && at + 16 <= words.len() {
+                line: jet_cli_perf_samples_stack_line(sampled, owned, words, at, 2, record)
+                sampled.spawns.push(JetCLIPerfSpawn{task: U64{pc}, parent: U64{link_debug_addr(words, at + 8)}, line: if line == .Val(found) -> Val(U64{found}) else -> U64?{None}})
             }
             at += record * 8
             next
@@ -1537,10 +1549,26 @@ JET_CLI_PERF_ZONE_REFUSED: 4
 // socket's wait for what happened at the connection's other end: the task
 // of the program that acted there (jet_cli_perf_socket_cause), a transfer
 // of `transfers` or a connect of `waits`, at its line, else its peer
-// outside the program. A wait of a task no observation saw has no trace row
-// to name, so it keeps none either. Each wait's name, addresses and stack
-// move into its row.
-jet_cli_perf_waits_read: fn(capture: &JetCLIPerfCapture, waits: &&[JetCLIPerfWait], wakes: [JetCLIPerfWake], spawns: [U64:U64], transfers: [JetCLIPerfIO], source: String, origin_ns: Int) Never! {
+// outside the program. Each task of `spawns` no observation saw gets a
+// done task's row first, under its spawner's, so a wait, a wake or a
+// transfer of a short task still names it; a task whose spawner has no row
+// gets none, and a wait of a task with no row keeps none either. Each
+// wait's name, addresses and stack move into its row.
+jet_cli_perf_waits_read: fn(capture: &JetCLIPerfCapture, waits: &&[JetCLIPerfWait], wakes: [JetCLIPerfWake], spawns: [JetCLIPerfSpawn], transfers: [JetCLIPerfIO], source: String, origin_ns: Int) Never! {
+    // Each spawned task's line by its runtime id, and its row when no
+    // observation gave it one; a spawner's spawn came before its own.
+    lines := [U64:U64]{}
+    loop spawn in spawns {
+        if spawn.line == .Val(line) -> lines[spawn.task] = line
+        if capture.task_ids.has_key(spawn.task) || !capture.task_ids.has_key(spawn.parent) -> next
+        if (U64{capture.tasks.len()}) >= TRACE_TASK_ROW_LIMIT {
+            capture.policy.task_rows_truncated = true
+            next
+        }
+        id: U64{capture.tasks.len() + 1}
+        capture.tasks.push(TraceTask{id: id, parent: capture.task_ids[spawn.parent], state: "done", wait: "", canceled: false, symbol: JetSymbolRef{path: source, name: "run"}})
+        capture.task_ids[spawn.task] = id
+    }
     // Each slot's wakes by their place in `wakes`, earliest first.
     order := [Int]{}
     loop index in 0..<wakes.len() -> order.push(index)
@@ -1597,7 +1625,7 @@ jet_cli_perf_waits_read: fn(capture: &JetCLIPerfCapture, waits: &&[JetCLIPerfWai
         spawn_line := U64?{None}
         if wait.class == JET_CLI_PERF_OBJECT_TASK && capture.task_ids.has_key(wait.id) {
             awaited = Val(capture.task_ids[wait.id])
-            if spawns.has_key(wait.id) -> spawn_line = Val(spawns[wait.id])
+            if lines.has_key(wait.id) -> spawn_line = Val(lines[wait.id])
         }
         channel_id: if wait.class == JET_CLI_PERF_OBJECT_CHANNEL && wait.id != (U64{0}) -> Val(wait.id) else -> U64?{None}
         local_address: if jet_cli_perf_socket_named(wait.local) -> Val(wait.local.move()) else -> String?{None}
