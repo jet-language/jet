@@ -20,6 +20,16 @@ use jet_backend.[X64DebugEncoding, link_debug_uleb, x64_jetline_sleb]
 // a second way, after which the debugger checks that hit in a fork as it
 // does a condition that can't run in the program. JetIR EvalPlace.jet says
 // which conditions may: the code placed writes nothing but its own stack.
+//
+// A logpoint whose `{…}` parts each pass that scan runs in the program the
+// same way, with no stop at each hit: its trampoline claims the next slot
+// of a ring mapped in its region, takes a sequence number from a word the
+// session's logpoints share, calls each part's code with its word of the
+// slot as the result's place, then marks the slot written. The hit that
+// writes the last slot traps; the debugger then reads the ring, shows each
+// hit's message in sequence order, and empties it. It reads every ring at
+// each stop and at the program's exit too, so a message shows before the
+// stop or the end that follows it.
 
 // The trampoline's frame from its rbp C: C+0 the program's rbp, C+8 the
 // breakpoint's address (a frame the walk reads as called from there), the
@@ -76,9 +86,36 @@ NativePlaceArg: struct {
     deref: Bool,
 }
 
+// One call a trampoline makes: the entry of a condition, or of one `{…}`
+// part of a logpoint's message, and where each of its captures is.
+NativePlaceCall: struct {
+    entry: Int,
+    arguments: [NativePlaceArg],
+}
+
+// Where a placed logpoint's hits go: its ring at `address` (the slots the
+// hits claimed, then the generation a slot's hit is written in), `slots`
+// slots after that, and the session's sequence word `clock` that orders
+// the hits of every logpoint. A slot holds each part's word, the
+// generation once the hit's words are in, then the hit's sequence number.
+NativePlaceRing: struct {
+    address: Int,
+    slots: Int,
+    clock: Int,
+}
+
+// The ring's header: the claimed count, then the generation.
+NATIVE_PLACE_RING_HEADER: 16
+
+// The hits a logpoint's ring holds before the debugger drains it.
+NATIVE_PLACE_RING_SLOTS: 65536
+
+// The bytes of a slot of a ring of logpoint parts `parts`.
+native_place_slot: fn(parts: Int) -> Int Never! { 8 * (parts + 2) }
+
 // A trampoline's code and the offsets in it of its two traps (the
-// condition holds; it called out), the moved instructions and the stub its
-// runtime calls go to.
+// condition holds, or a logpoint's ring is full; it called out), the moved
+// instructions and the stub its runtime calls go to.
 NativePlaceCode: struct {
     bytes: [U8],
     truth: Int,
@@ -88,11 +125,13 @@ NativePlaceCode: struct {
     out: Int,
 }
 
-// One placed condition of the session: the breakpoint (`number`) and its
-// address, the bytes the jump replaced, the addresses of the trampoline's
-// two traps, of its moved instructions, of its runtime stub, and the region
-// it and the condition's functions take. `live` is false once the jump is
-// gone; the region stays, since a thread may still be in it.
+// One placed condition or logpoint of the session: the breakpoint
+// (`number`) and its address, the bytes the jump replaced, the addresses
+// of the trampoline's two traps, of its moved instructions, of its runtime
+// stub, and the region it and the code it calls take. A logpoint's ring
+// (NativePlaceRing) is at `ring` (0 for a condition), of `slots` slots of
+// `parts` words. `live` is false once the jump is gone; the region stays,
+// since a thread may still be in it.
 NativePlaced: struct {
     number: Int,
     address: Int,
@@ -105,6 +144,9 @@ NativePlaced: struct {
     low: Int,
     high: Int,
     live: Bool,
+    ring: Int{0},
+    slots: Int{0},
+    parts: Int{0},
 }
 
 // Whether a legacy prefix (lock, rep, a segment, operand or address size).
@@ -426,11 +468,15 @@ native_place_restore: fn(out: &[U8]) Never! {
     native_place_emit(out, [Int]{0x9d, 0x48, 0x8d, 0xa4, 0x24, 0x80, 0, 0, 0})
 }
 
-// The trampoline of a condition at breakpoint `address`, to run at `base`:
-// it calls the condition's entry `entry` with its cell and `arguments`, and
-// on false runs `insns` (from `at` of `bytes`, the code at `address`) moved.
-// None when the entry or a moved instruction's target can't be reached.
-native_place_code: fn(base: Int, address: Int, entry: Int, arguments: [NativePlaceArg], bytes: [U8], at: Int, insns: [NativeInsn]) -> NativePlaceCode? Never! {
+// The trampoline at breakpoint `address`, to run at `base`, of a condition
+// (`ring` None: its one call's cell, on false running `insns`, from `at`
+// of `bytes`, the code at `address`, moved) or of a logpoint: each hit
+// claims a slot of `ring`, takes the next sequence number, has each call
+// write its part's word in the slot, marks the slot written and runs the
+// moved `insns`; the hit that fills the ring traps, and one finding it
+// full goes to the debugger as a call out does. None when an entry or a
+// moved instruction's target can't be reached.
+native_place_code: fn(base: Int, address: Int, calls: [NativePlaceCall], ring: NativePlaceRing?, bytes: [U8], at: Int, insns: [NativeInsn]) -> NativePlaceCode? Never! {
     out := [U8]{}
     // lea rsp,[rsp-128]; pushfq; push each register, DWARF 15 down to 0
     native_place_emit(out, [Int]{0x48, 0x8d, 0x64, 0x24, 0x80, 0x9c})
@@ -461,34 +507,82 @@ native_place_code: fn(base: Int, address: Int, entry: Int, arguments: [NativePla
         native_place_emit(out, [Int]{0x0f, 0x11, 0x85 | ((k & 7) << 3)})
         native_place_word(out, NATIVE_PLACE_XMM + 16 * k, 4)
     }
-    // lea rdi,[rbp+NATIVE_PLACE_CELL], then each capture's address
-    native_place_emit(out, [Int]{0x48, 0x8d, 0x7d, NATIVE_PLACE_CELL})
-    if arguments.len() > NATIVE_PLACE_ARGS.len() -> return None
-    loop (k, argument) in arguments {
-        reg: NATIVE_PLACE_ARGS[k]
-        high: if reg >= 8 -> 4 else -> 0
-        low: reg & 7
-        slot: NATIVE_PLACE_GPR + 8 * argument.register
-        // register: lea R,[rbp+slot]; memory: mov R,[rbp+slot]; lea R,[R+offset]
-        native_place_emit(out, [Int]{0x48 | high, if argument.memory -> 0x8b else -> 0x8d, 0x85 | (low << 3)})
+    if ring == None && calls.len() != 1 -> return None
+    parts: calls.len()
+    slot: native_place_slot(parts)
+    full := -1
+    if ring == .Val(log) {
+        // The claim: movabs rax,ring; mov rcx,1; lock xadd [rax],rcx;
+        // cmp rcx,slots; jae out (patched once `abort` is known)
+        native_place_emit(out, [Int]{0x48, 0xb8})
+        native_place_word(out, log.address, 8)
+        native_place_emit(out, [Int]{0x48, 0xc7, 0xc1, 1, 0, 0, 0, 0xf0, 0x48, 0x0f, 0xc1, 0x08, 0x48, 0x81, 0xf9})
+        native_place_word(out, log.slots, 4)
+        native_place_emit(out, [Int]{0x0f, 0x83})
+        full = out.len()
+        native_place_word(out, 0, 4)
+        // The cell holds the slot's index, then its address:
+        // mov [rbp+cell],rcx; imul rcx,rcx,slot; lea rcx,[rax+rcx+header];
+        // mov [rbp+cell+8],rcx
+        native_place_emit(out, [Int]{0x48, 0x89, 0x4d, NATIVE_PLACE_CELL, 0x48, 0x69, 0xc9})
         native_place_word(out, slot, 4)
-        if argument.memory {
-            native_place_emit(out, [Int]{0x48 | high | (high >> 2), 0x8d, 0x80 | (low << 3) | low})
-            native_place_word(out, argument.offset, 4)
-        }
-        // mov R,[R]
-        if argument.deref {
-            native_place_emit(out, [Int]{0x48 | high | (high >> 2), 0x8b, (low << 3) | low})
-        }
+        native_place_emit(out, [Int]{0x48, 0x8d, 0x4c, 0x08, NATIVE_PLACE_RING_HEADER, 0x48, 0x89, 0x4d, NATIVE_PLACE_CELL + 8})
+        // The sequence number: movabs rax,clock; mov rdx,1;
+        // lock xadd [rax],rdx; mov [rcx+8*parts+8],rdx
+        native_place_emit(out, [Int]{0x48, 0xb8})
+        native_place_word(out, log.clock, 8)
+        native_place_emit(out, [Int]{0x48, 0xc7, 0xc2, 1, 0, 0, 0, 0xf0, 0x48, 0x0f, 0xc1, 0x10, 0x48, 0x89, 0x91})
+        native_place_word(out, 8 * parts + 8, 4)
     }
-    // and rsp,-16; call entry
-    native_place_emit(out, [Int]{0x48, 0x83, 0xe4, 0xf0, 0xe8})
-    call: out.len()
-    native_place_word(out, 0, 4)
-    if !native_place_rel(out, call, base, entry) -> return None
-    back: out.len()
-    // mov rsp,rbp; cmp byte [rbp+cell],0; jne truth
-    native_place_emit(out, [Int]{0x48, 0x89, 0xec, 0x80, 0x7d, NATIVE_PLACE_CELL, 0, 0x0f, 0x85})
+    back := 0
+    loop (index, call) in calls {
+        // The result's place: the cell, or the part's word of the slot
+        // (mov rdi,[rbp+cell+8]; add rdi,8*index); then each capture's
+        // address
+        if ring == None -> native_place_emit(out, [Int]{0x48, 0x8d, 0x7d, NATIVE_PLACE_CELL}) else {
+            native_place_emit(out, [Int]{0x48, 0x8b, 0x7d, NATIVE_PLACE_CELL + 8, 0x48, 0x81, 0xc7})
+            native_place_word(out, 8 * index, 4)
+        }
+        if call.arguments.len() > NATIVE_PLACE_ARGS.len() -> return None
+        loop (k, argument) in call.arguments {
+            reg: NATIVE_PLACE_ARGS[k]
+            high: if reg >= 8 -> 4 else -> 0
+            low: reg & 7
+            saved: NATIVE_PLACE_GPR + 8 * argument.register
+            // register: lea R,[rbp+saved]; memory: mov R,[rbp+saved]; lea R,[R+offset]
+            native_place_emit(out, [Int]{0x48 | high, if argument.memory -> 0x8b else -> 0x8d, 0x85 | (low << 3)})
+            native_place_word(out, saved, 4)
+            if argument.memory {
+                native_place_emit(out, [Int]{0x48 | high | (high >> 2), 0x8d, 0x80 | (low << 3) | low})
+                native_place_word(out, argument.offset, 4)
+            }
+            // mov R,[R]
+            if argument.deref {
+                native_place_emit(out, [Int]{0x48 | high | (high >> 2), 0x8b, (low << 3) | low})
+            }
+        }
+        // and rsp,-16; call entry; mov rsp,rbp
+        native_place_emit(out, [Int]{0x48, 0x83, 0xe4, 0xf0, 0xe8})
+        field: out.len()
+        native_place_word(out, 0, 4)
+        if !native_place_rel(out, field, base, call.entry) -> return None
+        if index == 0 -> back = out.len()
+        native_place_emit(out, [Int]{0x48, 0x89, 0xec})
+    }
+    if ring == .Val(log) {
+        // Written: movabs rax,ring; mov rdx,[rax+8]; mov rcx,[rbp+cell+8];
+        // mov [rcx+8*parts],rdx; then the last slot traps:
+        // cmp qword [rbp+cell],slots-1; je trap
+        native_place_emit(out, [Int]{0x48, 0xb8})
+        native_place_word(out, log.address, 8)
+        native_place_emit(out, [Int]{0x48, 0x8b, 0x50, 0x08, 0x48, 0x8b, 0x4d, NATIVE_PLACE_CELL + 8, 0x48, 0x89, 0x91})
+        native_place_word(out, 8 * parts, 4)
+        native_place_emit(out, [Int]{0x48, 0x81, 0x7d, NATIVE_PLACE_CELL})
+        native_place_word(out, log.slots - 1, 4)
+        native_place_emit(out, [Int]{0x0f, 0x84})
+    }
+    // cmp byte [rbp+cell],0; jne trap
+    if ring == None -> native_place_emit(out, [Int]{0x80, 0x7d, NATIVE_PLACE_CELL, 0, 0x0f, 0x85})
     holds: out.len()
     native_place_word(out, 0, 4)
     native_place_restore(out)
@@ -504,8 +598,10 @@ native_place_code: fn(base: Int, address: Int, entry: Int, arguments: [NativePla
     native_place_emit(out, [Int]{0xcc, 0xe9})
     held_on: out.len()
     native_place_word(out, 0, 4)
-    // Called out: mov rsp,rbp, then as the condition had held.
+    // Called out, or a logpoint's ring full: mov rsp,rbp, then as the
+    // condition had held.
     abort: out.len()
+    if full >= 0 -> native_fix_put(out, full, abort - (full + 4), 4)
     native_place_emit(out, [Int]{0x48, 0x89, 0xec})
     native_place_restore(out)
     unknown: out.len()
@@ -647,7 +743,7 @@ native_place_arg: fn(expression: [U8]) -> NativePlaceArg? Never! {
     code: [U8]{0x55, 0x48, 0x89, 0xe5, 0x90}
     insns: native_displaced(code, 0) ?? panic("displaced")
     arguments: [NativePlaceArg]{NativePlaceArg{register: 6, memory: true, offset: -8, deref: false}}
-    placed: native_place_code(0x200000, 0x1000, 0x201000, arguments, code, 0, insns) ?? panic("code")
+    placed: native_place_code(0x200000, 0x1000, [NativePlaceCall]{NativePlaceCall{entry: 0x201000, arguments: arguments}}, None, code, 0, insns) ?? panic("code")
     assert_eq(Int{placed.bytes[placed.truth]}, 0xcc)
     assert_eq(Int{placed.bytes[placed.unknown]}, 0xcc)
     assert_eq(Int{placed.bytes[placed.moved]}, 0x55)
@@ -663,4 +759,46 @@ native_place_arg: fn(expression: [U8]) -> NativePlaceArg? Never! {
     jump: native_place_jump(0x1000, 0x200000, 5)
     assert_eq(jump.len(), 5)
     assert_eq(native_number(jump, 1, 4, X64DebugEncoding.Signed), 0x200000 - 0x1005)
+}
+
+// Where `wanted` first starts in `bytes`; -1 when nowhere.
+native_place_find: fn(bytes: [U8], wanted: [Int]) -> Int Never! {
+    loop k in 0..<bytes.len() - wanted.len() + 1 {
+        same := true
+        loop (j, byte) in wanted {
+            got: Int{bytes[k + j]}
+            if got != byte {
+                same = false
+                break
+            }
+        }
+        if same -> return k
+    }
+    -1
+}
+
+#Test("a logpoint's trampoline claims a slot, has each part write its word there, and traps on the last") {
+    code: [U8]{0x55, 0x48, 0x89, 0xe5, 0x90}
+    insns: native_displaced(code, 0) ?? panic("displaced")
+    calls: [NativePlaceCall]{NativePlaceCall{entry: 0x201000, arguments: [NativePlaceArg]{}}, NativePlaceCall{entry: 0x201100, arguments: [NativePlaceArg]{}}}
+    ring: NativePlaceRing{address: 0x300000, slots: 4, clock: 0x300100}
+    placed: native_place_code(0x200000, 0x1000, calls, Val(ring), code, 0, insns) ?? panic("code")
+    bytes: placed.bytes
+    // The claim's lock xadd, then its jae to the path that calls out once
+    // the ring is full: mov rsp,rbp and every register put back, then the
+    // trap that leaves the hit to the debugger.
+    claim: native_place_find(bytes, [Int]{0xf0, 0x48, 0x0f, 0xc1, 0x08})
+    assert(claim > 0)
+    full: claim + 5 + 7 + 2
+    abort: full + 4 + native_number(bytes, full, 4, X64DebugEncoding.Signed)
+    assert_eq(native_place_find(bytes[abort..<abort + 3], [Int]{0x48, 0x89, 0xec}), 0)
+    restore := [U8]{}
+    native_place_restore(restore)
+    assert_eq(abort + 3 + restore.len(), placed.unknown)
+    // The second part writes the slot's second word.
+    assert(native_place_find(bytes, [Int]{0x48, 0x8b, 0x7d, NATIVE_PLACE_CELL + 8, 0x48, 0x81, 0xc7, 8, 0, 0, 0}) > claim)
+    // The hit in the last slot traps once it is written.
+    last: native_place_find(bytes, [Int]{0x48, 0x81, 0x7d, NATIVE_PLACE_CELL, 3, 0, 0, 0, 0x0f, 0x84}) + 10
+    assert_eq(last + 4 + native_number(bytes, last, 4, X64DebugEncoding.Signed) + restore.len(), placed.truth)
+    assert_eq(native_place_slot(2), 32)
 }

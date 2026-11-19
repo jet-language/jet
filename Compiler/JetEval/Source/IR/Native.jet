@@ -569,12 +569,27 @@ jet_eval_native_load: fn(built: &&JetEvalIRComptime, config: JetEvalConfig, thre
 // With `loads`, every param is passed as the address of its bytes, which
 // the wrapper loads (a debugger's evaluated expression, whose captures it
 // reads from a stopped frame); an aggregate's address is the param itself.
-jet_eval_native_wrapper: fn(code: &IRModule, name: String, id: Int, params: [Int], result: Int, pointer: Int, loads: Bool{false}) -> IRFunction {
+// With `table` as well, the wrapper is `(cell, table)`: the params'
+// addresses are the words of `table`, in order, for more captures than a
+// call's registers hold.
+jet_eval_native_wrapper: fn(code: &IRModule, name: String, id: Int, params: [Int], result: Int, pointer: Int, loads: Bool{false}, table: Bool{false}) -> IRFunction {
     w := ir_function_new(name, name, name, "", 0)
     cell: ir_slot(w, pointer, IRSlotKind.Param, ir_intern_name(code, "cell"), 0)
+    listed: if loads && table -> ir_slot(w, pointer, IRSlotKind.Param, ir_intern_name(code, "table"), 0) else -> -1
     held := [Int]{}
     loop (index, row) in params {
-        loaded: loads && code.types[row].kind != .Aggregate
+        aggregate: code.types[row].kind == .Aggregate
+        if listed >= 0 {
+            address: ir_slot(w, if aggregate -> row else -> pointer, IRSlotKind.Temp, -1, 0)
+            if aggregate {
+                word: ir_slot(w, pointer, IRSlotKind.Temp, -1, 0)
+                _ := ir_emit(w, IROp.Load, word, listed, 8 * index, -1, 0)
+                _ := ir_emit(w, IROp.Offset, address, word, 0, -1, 0)
+            } else { _ := ir_emit(w, IROp.Load, address, listed, 8 * index, -1, 0) }
+            held.push(address)
+            next
+        }
+        loaded: loads && !aggregate
         held.push(ir_slot(w, if loaded -> pointer else -> row, IRSlotKind.Param, ir_intern_name(code, "a{index}"), 0))
     }
     args := [Int]{}

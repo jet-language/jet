@@ -1969,6 +1969,13 @@ X64_TRACE_EVENT_CLONE: 3
 // stopped before its first instruction (its status's signal is SIGTRAP).
 X64_TRACE_EVENT_STOP: 128
 
+// The kernel stops each thread as it exits (PTRACE_O_TRACEEXIT), its
+// memory still there, with an exit event (X64_TRACE_EVENT_EXIT).
+LOADER_PTRACE_O_TRACEEXIT: 0x40
+
+// The event of a thread stopped as it exits (LOADER_PTRACE_O_TRACEEXIT).
+X64_TRACE_EVENT_EXIT: 6
+
 // The signal that stops one thread of the program (x64_trace_stop).
 LOADER_SIGSTOP: 19
 
@@ -2029,6 +2036,12 @@ LOADER_TRACE_WORD: 256
 
 // The timespec x64_trace_wait_within sleeps on, in this process.
 LOADER_TRACE_SLEEP: 448
+
+// The pollfd x64_trace_wait_or_input polls its input with, in this process.
+LOADER_TRACE_POLL: 464
+
+// poll's event bit for bytes to read.
+LOADER_POLLIN: 1
 
 LOADER_TRACE_CALL: 320
 
@@ -2387,6 +2400,33 @@ x64_trace_wait: fn(trace: X64Trace) -> X64TraceStop {
     X64TraceStop{thread: result, status: status}
 }
 
+// Wait for any thread of the traced program to stop or end, as
+// x64_trace_wait does, while watching the descriptor `input`: None when
+// the input has bytes to read (or has ended) first. The program is asked
+// without waiting, then the input is waited on for up to a millisecond,
+// in turn.
+x64_trace_wait_or_input: fn(trace: X64Trace, input: Int) -> X64TraceStop? {
+    loop {
+        result := -OS_EINTR
+        status := 0
+        ready := 0
+        #Unsafe("the helper's wait4 writes one int status to the trace's scratch word; poll reads and writes the one pollfd at LOADER_TRACE_POLL, in the scratch page") {
+            loop result == -OS_EINTR {
+                result = x64_trace_call(trace, OS_SYS_WAIT4, -1, trace.scratch + LOADER_TRACE_WORD, LOADER_WAIT_ALL | LOADER_WAIT_NOHANG, 0, 0, 0)
+            }
+            if result > 0 {
+                status = Int{os_load_i64(I64{trace.scratch + LOADER_TRACE_WORD})} & 0xffffffff
+            }
+            if result == 0 {
+                os_store_i64(I64{trace.scratch + LOADER_TRACE_POLL}, I64{input | LOADER_POLLIN << 32})
+                ready = os_syscall(OS_SYS_POLL, trace.scratch + LOADER_TRACE_POLL, 1, 1, 0, 0, 0)
+            }
+        }
+        if result != 0 -> return Val(X64TraceStop{thread: result, status: status})
+        if ready > 0 -> return None
+    }
+}
+
 // Stop the running thread `thread` of the traced program: a SIGSTOP to it
 // alone, which x64_trace_wait then reports. False when the kernel refused
 // (the thread has ended).
@@ -2394,6 +2434,20 @@ x64_trace_stop: fn(trace: X64Trace, thread: Int) -> Bool {
     result := 0
     #Unsafe("tgkill of one thread of our own tracee") {
         result = os_syscall(OS_SYS_TGKILL, trace.pid, thread, LOADER_SIGSTOP, 0, 0, 0)
+    }
+    !os_failed(result)
+}
+
+// Have the stopped thread `thread` of the traced program, and each thread
+// it starts, stop as it exits (LOADER_PTRACE_O_TRACEEXIT), besides tracing
+// the threads it starts; `kill` when the kernel kills the program as its
+// tracer ends (a program the helper spawned, not one it attached to).
+// False when the kernel refused.
+x64_trace_follow_exits: fn(trace: X64Trace, thread: Int, kill: Bool) -> Bool {
+    options: LOADER_PTRACE_O_TRACECLONE | LOADER_PTRACE_O_TRACEEXIT | if kill -> LOADER_PTRACE_O_EXITKILL else -> 0
+    result := 0
+    #Unsafe("PTRACE_SETOPTIONS on a stopped thread of the helper's own tracee") {
+        result = x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_SETOPTIONS, thread, 0, options, 0, 0)
     }
     !os_failed(result)
 }

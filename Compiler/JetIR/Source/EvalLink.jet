@@ -8,18 +8,22 @@
 use {
     jet_backend.[X64_ASM_UNKNOWN]
     jet_foundation.[name_rows_value]
+    jet_sema.[SemaUnitMap, sema_unsafe_last_at]
 }
 
 // The runtime files whose every function the eval runtime replaces: the
 // allocator and its large-block cache with a bump arena, retain and release
 // with a count that never frees, and the journey with one of the fork's own.
 // A file's stub row is its name, lower-cased, without `.jet` or a `TLS`
-// suffix (ir_eval_stub_file_row).
+// suffix (ir_eval_stub_file_row). A function's file is the source it stands
+// in (ir_eval_function_files).
 IR_EVAL_STUB_FILES: [String]{"Alloc.jet", "Refcount.jet", "Journey.jet", "JourneyTLS.jet"}
 
 // The stub row of runtime file `file`, one of IR_EVAL_STUB_FILES: its
 // thread-local half shares the stub of the file it extends.
-ir_eval_stub_file_row: fn(file: String) -> String Never! { file.removesuffix(".jet").removesuffix("TLS").to_lower() }
+ir_eval_stub_file_row: fn(file: String) -> String Never! {
+    file.removesuffix(".jet").removesuffix("TLS").to_lower()
+}
 
 // The runtime functions the eval runtime replaces by name: the Shared
 // cell's lock, which it takes in the fork's copy, and the scheduler's task
@@ -88,7 +92,9 @@ IREvalCalls: struct {
 // net_socket_call, trap_syscall and the rest); a number an export's caller
 // passes, or one loaded or computed, fails. Only this check is here: the
 // eval link's other two (no runtime state, no loaded code address) are not.
-ir_eval_link_receipt: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Never! {
+// `units` holds the sources of each composed unit of `m` by the unit's path
+// (JetSema sema_unsafe_unit_map): the runtime is built as one unit.
+ir_eval_link_receipt: fn(m: IRModule, exports: [IRLibraryExport], units: [String:SemaUnitMap]) -> [String] Never! {
     count: m.functions.len()
     name_callees := loop _ in m.names -> -1
     loop row in exports {
@@ -101,9 +107,10 @@ ir_eval_link_receipt: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Ne
             if op == .FunctionAddress && f.a[at] >= 0 && f.a[at] < count -> entries[f.a[at]] = true
         }
     }
-    roots: loop f in m.functions -> ir_eval_stop_root(f)
+    files: ir_eval_function_files(m, units)
+    roots: loop (id, f) in m.functions -> ir_eval_stop_root(f, files[id])
     calls: ir_eval_calls(m, name_callees, roots)
-    stubs: ir_eval_stubs(m, name_callees, calls, roots, entries)
+    stubs: ir_eval_stubs(m, name_callees, calls, roots, entries, files)
     sites: ir_eval_syscalls(m, stubs, name_callees, calls)
     rows := [String]{}
     loop (id, f) in m.functions {
@@ -127,12 +134,29 @@ ir_eval_link_receipt: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Ne
     rows
 }
 
-// Whether `f` starts a stop report (IR_EVAL_STOP_FILES).
-ir_eval_stop_root: fn(f: IRFunction) -> Bool Never! {
-    if IR_EVAL_STOP_FILES.contains(ir_eval_file_name(f.source_file)) && (f.name.ends_with("_stop") || f.name.ends_with("_exit") || f.name == "trap_header") {
+// Whether `f`, whose file name is `file`, starts a stop report
+// (IR_EVAL_STOP_FILES).
+ir_eval_stop_root: fn(f: IRFunction, file: String) -> Bool Never! {
+    if IR_EVAL_STOP_FILES.contains(file) && (f.name.ends_with("_stop") || f.name.ends_with("_exit") || f.name == "trap_header") {
         return true
     }
     f.name.starts_with("jet_rt_panic_") || f.name == "rt_task_panic_publish" || IR_STOP_FATAL.contains(f.name)
+}
+
+// The file name of each function of `m`: in a composed unit of `units`, the
+// name of the source whose unit lines hold the function's first line; else
+// its own file's.
+ir_eval_function_files: fn(m: IRModule, units: [String:SemaUnitMap]) -> [String] Never! {
+    files := loop f in m.functions -> ir_eval_file_name(f.source_file)
+    loop (path, unit) in units {
+        starts: loop source in unit.sources -> source.line
+        loop (id, f) in m.functions {
+            if f.source_file != path -> next
+            at: sema_unsafe_last_at(starts, f.line) ?? -1
+            files[id] = if at < 0 -> "" else -> ir_eval_file_name(unit.sources[at].path)
+        }
+    }
+    files
 }
 
 // The function call `at` of `f` calls, else -1. `name_callees` is the
@@ -178,7 +202,8 @@ ir_eval_calls: fn(m: IRModule, name_callees: [Int], roots: [Bool]) -> IREvalCall
     calls
 }
 
-// Per function of `m`, its stub row (ir_eval_link_receipt), "" for none.
+// Per function of `m`, its stub row (ir_eval_link_receipt), "" for none;
+// `files` is each function's file name (ir_eval_function_files).
 // The stop report (`stop-report`) is listed by function, not by file: each
 // function that starts one (`roots`), and each function a stop report
 // reaches (a call of a root's, or a dead call: ir_eval_calls) that only the
@@ -186,16 +211,14 @@ ir_eval_calls: fn(m: IRModule, name_callees: [Int], roots: [Bool]) -> IREvalCall
 // function whose address is taken (`entries`), whose callers are unknown.
 // So a helper the success path calls too (`trap_word`, `trap_debug_escaped`)
 // is no stub and is checked itself.
-ir_eval_stubs: fn(m: IRModule, name_callees: [Int], calls: IREvalCalls, roots: [Bool], entries: [Bool]) -> [String] Never! {
+ir_eval_stubs: fn(m: IRModule, name_callees: [Int], calls: IREvalCalls, roots: [Bool], entries: [Bool], files: [String]) -> [String] Never! {
     count: m.functions.len()
     stubs := [String]{}
     reached := [Bool]{}
     work := [Int]{}
     loop (id, f) in m.functions {
         row := ""
-        if IR_EVAL_STUB_FILES.contains(ir_eval_file_name(f.source_file)) {
-            row = ir_eval_stub_file_row(ir_eval_file_name(f.source_file))
-        }
+        if IR_EVAL_STUB_FILES.contains(files[id]) -> row = ir_eval_stub_file_row(files[id])
         if IR_EVAL_STUB_NAMES.index_of(f.name) == .Val(at) -> row = IR_EVAL_STUB_NAME_ROWS[at]
         if ir_stop_key(f.key) -> row = "stop-poll"
         stubs.push(row)

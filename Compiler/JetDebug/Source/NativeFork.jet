@@ -16,7 +16,7 @@
 // (NATIVE_FORK_BUDGET_MS), and the fork is killed after its result is read.
 use {
     native_fork_files: core.files
-    jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_TRACE_EVENT_CLONE, X64_TRACE_ORIG_RAX, X64_TRACE_R10, X64_TRACE_R8, X64_TRACE_R9, X64_TRACE_RAX, X64_TRACE_RCX, X64_TRACE_RDI, X64_TRACE_RDX, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, x64_eval_fork_filter, x64_jetline_find, x64_jetline_line, x64_trace_event_message, x64_trace_of, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_set_registers, x64_trace_signal, x64_trace_wait_for, x64_trace_wait_within]
+    jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_TRACE_EVENT_CLONE, X64_TRACE_EVENT_EXIT, X64_TRACE_ORIG_RAX, X64_TRACE_R10, X64_TRACE_R8, X64_TRACE_R9, X64_TRACE_RAX, X64_TRACE_RCX, X64_TRACE_RDI, X64_TRACE_RDX, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, x64_eval_fork_filter, x64_jetline_find, x64_jetline_line, x64_trace_event_message, x64_trace_of, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_set_registers, x64_trace_signal, x64_trace_wait_for, x64_trace_wait_within]
 }
 
 // A fork of the stopped program: its trace (the program's helper traces
@@ -365,6 +365,12 @@ native_fork_call: fn(fork: NativeFork, image: NativeImage, entry: Int, arguments
         return Err(NativeDebugError{detail: "the evaluation was ended by {native_debug_signal_name(status & 0x7f)}"})
     }
     signal: (status >> 8) & 0xff
+    // A copy of a program whose threads stop as they exit (a logpoint runs
+    // in it) stops so as it ends.
+    if signal == NATIVE_DEBUG_SIGTRAP && (status >> 16) == X64_TRACE_EVENT_EXIT {
+        code: x64_trace_event_message(fork.trace) ?? 0
+        return Err(NativeDebugError{detail: "the evaluation exited (code {(code >> 8) & 0xff})"})
+    }
     after: x64_trace_registers(fork.trace) ?? return Err(NativeDebugError{detail: "couldn't read the copy's registers"})
     pc: after[X64_TRACE_RIP]
     if signal == NATIVE_FORK_SIGSEGV && pc == 0 && after[X64_TRACE_RSP] == at + 8 {
@@ -409,11 +415,12 @@ native_fork_place: fn(image: NativeImage, pc: Int) -> String Never! {
     "{function.name}() at {native_fork_files.basename(function.file)}:{x64_jetline_line(image.lines, function, pc) ?? 0}"
 }
 
-// Kill the fork and reap it.
+// Kill the fork and reap it; a stop on the way (as it exits) lets it end.
 native_fork_end: fn(fork: NativeFork) Never! {
     _ := x64_trace_signal(fork.trace, NATIVE_FORK_SIGKILL)
     loop {
         status: x64_trace_wait_for(fork.trace, fork.trace.pid)
         if status < 0 || status & 0xff != 0x7f -> break
+        _ := x64_trace_resume(fork.trace, X64TraceResume.Run, 0)
     }
 }

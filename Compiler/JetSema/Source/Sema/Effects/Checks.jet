@@ -406,6 +406,10 @@ SemaEffectNode: struct {
     memory_events: [SemaMemoryEvent]{[SemaMemoryEvent]{}},
     // User-function call sites and loop spans for arena multiplicity.
     memory_calls: [SemaMemoryCall]{[SemaMemoryCall]{}},
+    // The `memory_calls` rows by callee and span
+    // (sema_effect_memory_call_key), so a call site found again is one
+    // lookup, not a scan of the body's calls.
+    memory_call_rows: [String:Bool]{[String:Bool]{}},
     loop_spans: [Span]{[Span]{}},
     // This pure body made a non-deterministic Core call (E3403 reported).
     nondeterministic_call: Bool{false},
@@ -772,13 +776,9 @@ sema_effect_memory_executions: fn(node: SemaEffectNode, span: Span) -> Int? {
     Val(1)
 }
 
-sema_effect_has_memory_call: fn(node: SemaEffectNode, callee: String, span: Span) -> Bool {
-    loop call in node.memory_calls {
-        if call.callee == callee && call.span.start == span.start && call.span.end == span.end {
-            return true
-        }
-    }
-    false
+// The key of a `memory_calls` row: one call site is one row.
+sema_effect_memory_call_key: fn(callee: String, span: Span) -> String Never! {
+    "{span.start}:{span.end}:{callee}"
 }
 
 sema_effect_push_memory_event: fn(nodes: &[SemaEffectNode], node_index: Int, span: Span, operation: String, kind: String, bytes: Int?) {
@@ -2322,8 +2322,21 @@ sema_effect_node_add_direct: fn(nodes: &[SemaEffectNode], node_index: Int, name:
     }
 }
 
+// A call edge of node `node_index`, appended as the walk finds it: adding
+// each to the ordered set (sema_effect_set_add) rescans and re-sorts the row
+// once per call, quadratic in a body's calls. The walk that collects the
+// node orders and dedupes the row once it ends
+// (sema_effect_node_settle_edges), to the same set.
 sema_effect_node_add_edge: fn(nodes: &[SemaEffectNode], node_index: Int, edge: String) Never! {
-    sema_effect_set_add(nodes[node_index].call_edges, edge)
+    // copy: the node's row owns its key; the caller keeps its own.
+    nodes[node_index].call_edges.push(edge.copy())
+}
+
+// The call edges sema_effect_node_add_edge appended to `node`, as the
+// ordered set sema_effect_set_add builds: each once, by root rank, then by
+// name.
+sema_effect_node_settle_edges: fn(node: &SemaEffectNode) Never! {
+    node.call_edges = sema_effect_set_of(node.call_edges)
 }
 
 // `callee` is taken as a value here and may run later through it; only a
@@ -2740,9 +2753,13 @@ sema_effect_record_fact: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex
     // One call site is one call: another body node with the call's span finds
     // the same fact, and a second row would count the callee's arena bytes
     // twice.
-    if known_callee && !sema_effect_has_memory_call(nodes[node_index], callee_key, fact.span) {
-        executions: sema_effect_memory_executions(nodes[node_index], fact.span)
-        nodes[node_index].memory_calls.push(SemaMemoryCall{callee: callee_key, span: fact.span, executions: executions})
+    if known_callee {
+        row: sema_effect_memory_call_key(callee_key, fact.span)
+        if nodes[node_index].memory_call_rows.get(row) == None {
+            nodes[node_index].memory_call_rows[row] = true
+            executions: sema_effect_memory_executions(nodes[node_index], fact.span)
+            nodes[node_index].memory_calls.push(SemaMemoryCall{callee: callee_key, span: fact.span, executions: executions})
+        }
     }
     row_known: fact.facts.effect_bound != None
     // The closed `core.db` table carries its declared leaves
@@ -3137,6 +3154,7 @@ sema_effect_record_function_arguments: fn(nodes: &[SemaEffectNode], facts: SemaE
                 key: symbol_key(facts.symbols, tree.symbols, symbol)
                 if sema_effect_node_index(facts.node_by_key, key) == None -> next
                 sema_effect_node_add_edge(nodes, node_index, key)
+                nodes[node_index].memory_call_rows[sema_effect_memory_call_key(key, value.span)] = true
                 nodes[node_index].memory_calls.push(SemaMemoryCall{callee: key, span: value.span, executions: None})
             }
         }
@@ -3226,6 +3244,7 @@ sema_effect_record_lambda_bound: fn(nodes: &[SemaEffectNode], node_index: Int, f
     ignored := [Diagnostic]{}
     sema_effect_walk_lambda_children(SemaEffectWalk.LambdaBody{node_index: lambda_index}, nodes, facts, ignored, caller, tree, lambda)
     walked := nodes.pop() ?? panic("the lambda's row node left the graph")
+    sema_effect_node_settle_edges(walked)
     sema_effect_node_rare_open(nodes[node_index])
     if &nodes[node_index].rare == .Val(rare) {
         if hook == .Val(taken) {
@@ -3546,6 +3565,7 @@ sema_effect_resolve_type_params: fn(nodes: &[SemaEffectNode], calls: SemaEffectC
         }
     }
     loop index in 0..<nodes.len() {
+        settled := nodes[index].call_edges.len()
         bound_callees := [String]{}
         sites: nodes[index].instantiations.copy()
         loop site in sites {
@@ -3568,15 +3588,21 @@ sema_effect_resolve_type_params: fn(nodes: &[SemaEffectNode], calls: SemaEffectC
                 sema_effect_add_dispatch_union(nodes, calls, index, dispatch.impls_key, site.span)
             }
         }
-        edges: nodes[index].call_edges.copy()
+        // The node's row was settled when it was collected; settle it again
+        // only where an implementation was added above, and below. The
+        // dispatches below append past the row's first `settled` edges, so
+        // those stay in place while they are read.
+        if nodes[index].call_edges.len() > settled -> sema_effect_node_settle_edges(nodes[index])
+        settled = nodes[index].call_edges.len()
         span: nodes[index].span
-        loop edge in edges {
-            callee: sema_effect_node_index(calls.node_by_key, edge) ?? next
-            if open[callee].len() == 0 || bound_callees.contains(edge) -> next
+        loop at in 0..<settled {
+            callee: sema_effect_node_index(calls.node_by_key, nodes[index].call_edges[at]) ?? next
+            if open[callee].len() == 0 || bound_callees.contains(nodes[index].call_edges[at]) -> next
             loop dispatch in open[callee] {
                 sema_effect_add_dispatch_union(nodes, calls, index, dispatch.impls_key, span)
             }
         }
+        if nodes[index].call_edges.len() > settled -> sema_effect_node_settle_edges(nodes[index])
     }
     // A function's row leaves out what its parameters' bindings do, so a
     // discarded call of it is not proven pure (sema_effect_check_discarded).
@@ -3991,6 +4017,7 @@ sema_effect_collect_function: fn(nodes: &[SemaEffectNode], node_index: Int, func
     loop statement in function.body {
         sema_effect_walk_stmt_children(SemaEffectWalk.Collect{node_index: node_index}, nodes, facts, diagnostics, caller, function.tree, function.tree.stmts[statement])
     }
+    sema_effect_node_settle_edges(nodes[node_index])
 }
 
 sema_effect_check_unsafe_expr: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, caller: SemaEffectCaller, tree: BodyTree, expression: Int, audited: Bool, diagnostics: &[Diagnostic]) {
@@ -6196,6 +6223,7 @@ sema_effect_region_walk: fn(nodes: &[SemaEffectNode], owner: Int, function: FnBo
     region_node.dispatches = [TEffectSpan]{}
     region_node.memory_events = [SemaMemoryEvent]{}
     region_node.memory_calls = [SemaMemoryCall]{}
+    region_node.memory_call_rows = [String:Bool]{}
     if &region_node.rare == .Val(rare) {
         rare.scoped_calls = [SemaEffectScopedCall]{}
         rare.bare_scope_callees = [String]{}
@@ -6207,7 +6235,9 @@ sema_effect_region_walk: fn(nodes: &[SemaEffectNode], owner: Int, function: FnBo
     loop statement in function.body {
         sema_effect_walk_stmt_children(SemaEffectWalk.Region{node_index: region_index, region: span}, nodes, facts, ignored, caller, function.tree, function.tree.stmts[statement])
     }
-    nodes.pop() ?? panic("the region node left the graph")
+    walked := nodes.pop() ?? panic("the region node left the graph")
+    sema_effect_node_settle_edges(walked)
+    walked
 }
 
 // (Rust `check_region_caps`): the effects a `#FX(…)` region reaches:

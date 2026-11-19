@@ -1,0 +1,16 @@
+// The DAP adapter's refusals: a frame, scope or variable reference of an
+// earlier stop is E2238, whose report renders as the CLI snapshot
+// Tests/CLI/debug_stale_reference_e2238.txt records it; the error the
+// adapter sends carries its first line's text as its `format`.
+use {
+    dap_files: core.files
+    jet_cli.[JET_CLI_DAP_STALE]
+    jet_debug.[native_debug_report]
+    jet_foundation.[Diagnostic, diagnostic_render_all]
+}
+
+#Test("an expired reference is refused as its CLI snapshot records") {
+    expected: dap_files.read("Tests/CLI/debug_stale_reference_e2238.txt") ?? panic("read Tests/CLI/debug_stale_reference_e2238.txt: {err}")
+    report: native_debug_report(JET_CLI_DAP_STALE, "reference 5 expired when execution resumed")
+    assert_eq(diagnostic_render_all("", "", [Diagnostic]{report}, false), expected)
+}

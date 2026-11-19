@@ -573,7 +573,7 @@ x64_link_runtime_pack: fn(names: [String], bufs: &&[[U8]], extra_roots: [String]
     imports := link_linker_names()
     imports.push("main")
     imports.push(LINK_FAULT_REPORT)
-    link_collect(c, sections, imports)
+    link_collect(c, sections, imports, [Int]{})
     loop name in c.g_name {
         if link_pack_rust_symbol(name) {
             link_error(c, "runtime pack: Rust symbol `{name}` is not an admissible runtime dependency")
@@ -643,7 +643,7 @@ x64_link_runtime_image: fn(name: String, pack: &&[U8], threads: CompilerThreads)
     }
     imports := link_linker_names()
     imports.push("main")
-    link_collect(c, sections, imports)
+    link_collect(c, sections, imports, [Int]{})
     if c.errors.len() > 0 -> return link_image_failure(c)
     layout: link_layout(c, false, false)
     startup: link_has_startup(c)

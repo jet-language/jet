@@ -6868,6 +6868,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         source_units: source_units,
         entry_source_identity: entry_source_identity,
         entry_module_identity: entry_module_identity,
+        entry_run_module: jet_driver_entry_run_module(request, modules, source_units, entry_module_identity),
         module_table: table,
         modules: modules,
         imports: resolved_imports,
@@ -6911,6 +6912,45 @@ jet_driver_expand_imported_cli_entry: fn(modules: &[JetDriverLoadedModule], sour
         return
     }
     sema_cli_entry_expand_imported(modules[entry].program, imported)
+}
+
+// The generated module that holds the entry's `run: fn` once a
+// `meta.rewrite_body` module replaced it: the one that replaces a function
+// of the entry file and declares `run`. None when the entry module keeps
+// its own `run`.
+jet_driver_entry_run_module: fn(request: JetDriverCompileRequest, modules: [JetDriverLoadedModule], source_units: [JetDriverSourceUnit], entry_module_identity: ModuleID) -> ModuleID? Never! {
+    entry_path := ""
+    loop loaded in modules {
+        if loaded.module_identity != entry_module_identity || loaded.source_unit_index < 0 || loaded.source_unit_index >= source_units.len() {
+            next
+        }
+        unit: source_units[loaded.source_unit_index]
+        if unit.root_index < 0 || unit.root_index >= request.authorized_sources.roots.len() -> next
+        files: request.authorized_sources.roots[unit.root_index].files
+        if unit.file_index >= 0 && unit.file_index < files.len() {
+            entry_path = "{files[unit.file_index].path}"
+        }
+    }
+    if entry_path == "" -> return None
+    loop generated in request.generated_modules {
+        replaced: generated.replaces ?? next
+        if replaced.path != entry_path -> next
+        loop loaded in modules {
+            if loaded.source_unit_index < 0 || loaded.source_unit_index >= source_units.len() {
+                next
+            }
+            unit: source_units[loaded.source_unit_index]
+            if unit.source_origin != SemaSourceOrigin.CompilerGenerated || unit.package_identity != generated.package_identity || unit.relative_path != generated.relative_path {
+                next
+            }
+            loop item in loaded.program.items {
+                if item == .Func(function) && function.name == "run" {
+                    return Val(loaded.module_identity)
+                }
+            }
+        }
+    }
+    None
 }
 
 // The member files of the entry package (a `package.jet` namespace) that

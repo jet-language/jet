@@ -58,6 +58,16 @@ jet_cli_debug_eval_refused: fn(message: String) -> NativeEvalRefused Never! {
     NativeEvalRefused{message: message}
 }
 
+// Whether a value of the IR type kind `kind` is a word of its own: a
+// number, Bool or Char, which a placed logpoint writes whole at its hit and
+// no move empties.
+jet_cli_debug_eval_word: fn(kind: IRTypeKind) -> Bool Never! {
+    if kind == {
+        .Bool | .Int | .Word | .Float | .Float32 | .Char -> true
+        .Unit | .String | .Pointer | .Aggregate -> false
+    }
+}
+
 // The byte offset of character column `column` (from 1) of line `line` (from
 // 1) of `source`, the start of the node a caller's frame stopped at; column
 // 0 is the line's first non-blank byte. None past the source's end.
@@ -107,9 +117,6 @@ jet_cli_debug_eval_compile: fn(entry: String, argv: [String], color: Bool, path:
     answer: jet_cli_debug_eval_answer(entry, color, options, path, offset, line, text) ?? return Err(err)
     function: sema_eval_probe_function(answer, text, JET_CLI_DEBUG_EXPRESSION) ?? return Err(jet_cli_debug_eval_refused("`{text}` has no value"))
     value: answer.value_type ?? return Err(jet_cli_debug_eval_refused("`{text}` has no value"))
-    if answer.captures.len() > NATIVE_EVAL_CAPTURES {
-        return Err(jet_cli_debug_eval_refused("`{text}` reads {answer.captures.len()} locals, and the debugger passes at most {NATIVE_EVAL_CAPTURES}"))
-    }
     overlay: JetCLIOverlay{path: path, source: "{source}\n{function}"}
     prepared: jet_cli_prepare_overlays(entry, entry, [JetCLIOverlay]{overlay}, color, None, JetDriverCompileMode.Program, appended: true)
     compiled: jet_cli_compile_executable(prepared, None, options, None, None, color) ?? return Err(jet_cli_debug_eval_refused("the compiler stopped before finishing it"))
@@ -152,7 +159,8 @@ jet_cli_debug_eval_compile: fn(entry: String, argv: [String], color: Bool, path:
                 ty: program.functions[row].slot_type[slot]
                 params.push(ty)
                 name: if slot < answer.captures.len() -> answer.captures[slot].source else -> ""
-                captures.push(NativeEvalPart{name: name, size: program.types[ty].size, inline: program.types[ty].kind == IRTypeKind.Aggregate})
+                slot_kind: program.types[ty].kind
+                captures.push(NativeEvalPart{name: name, size: program.types[ty].size, inline: slot_kind == IRTypeKind.Aggregate, word: jet_cli_debug_eval_word(slot_kind)})
             }
             result_row: program.functions[row].result
             if result_row < 0 || program.types[result_row].kind == IRTypeKind.Unit {
@@ -162,9 +170,10 @@ jet_cli_debug_eval_compile: fn(entry: String, argv: [String], color: Bool, path:
             // carrier, which names the result: `Int ParseError!`.
             carried: ir_untag(program.types[result_row].ty)
             shown: if carried == .Result(_, _) -> carried else -> value
-            part: NativeEvalPart{name: type_name(type_unqualified_nominals(shown)), size: program.types[result_row].size, inline: program.types[result_row].kind == IRTypeKind.Aggregate, ty: result_row}
+            kind: program.types[result_row].kind
+            part: NativeEvalPart{name: type_name(type_unqualified_nominals(shown)), size: program.types[result_row].size, inline: kind == IRTypeKind.Aggregate, ty: result_row, word: jet_cli_debug_eval_word(kind)}
             pointer: ir_pointer_row(program)
-            wrapper: jet_eval_native_wrapper(program, JET_CLI_DEBUG_EVAL_ENTRY, row, params, result_row, pointer, loads: true)
+            wrapper: jet_eval_native_wrapper(program, JET_CLI_DEBUG_EVAL_ENTRY, row, params, result_row, pointer, loads: true, table: params.len() > NATIVE_EVAL_CAPTURES)
             at: jet_eval_native_add(program, wrapper)
             program.kept.push(at)
             threads: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}

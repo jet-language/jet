@@ -704,7 +704,19 @@ D-DBG-VERBS1=A names the commands:
   stops and says why. Setting it says where the condition runs: the
   debugger checks it at each hit, which stops the program each time.
 - `log <file:line> "<text with {expr}>"` sets a logpoint. It prints its
-  message with each `{expr}` filled in, then the program runs on.
+  message with each `{expr}` filled in, then the program runs on. Setting it
+  says where it runs. A logpoint with no condition, and whose parts are
+  each a number, Bool or Char, runs in the program: each part is compiled
+  on its own and placed as a condition is, and a hit writes its parts'
+  values and a sequence number to a ring of 65,536 slots in the program's
+  memory, then runs on without a stop. The debugger reads the ring and
+  fills in the messages, in the order of their hits, when the program
+  stops, when the ring is full, when a thread exits and before it changes
+  the breakpoints. Its messages then come after the program output that
+  preceded the read, not between its lines. Any other part (a String, a
+  struct) is read from memory that may change after the hit, so such a
+  logpoint says why it can't run in the program, and the debugger fills in
+  its message at each hit, which stops the program each time.
 - `watch <place>` stops at each write that changes a local of the selected
   frame, a field path under one (`watch order.total`), or an item of a List
   at a literal index (`watch xs[3]`, `watch order.lines[0]`). The stop
@@ -733,6 +745,20 @@ A step that passes a breakpoint which does not stop goes on to where the
 step would have ended. `jet debug --dap` settles every run the same way
 (`Compiler/JetDebug/Source/Native.jet`, NativeSession.settle).
 
+While `jet debug --dap` runs the program on (`continue`, and the start from
+`configurationDone` or `restart`), the next request stops every thread where
+it is: `pause` answers and reports the stop; `disconnect` ends the session;
+`restart` starts the program again (an attached one does not restart); any
+other request is answered with the program stopped, and it runs on. A
+replay's runs are made as recorded, without stopping for requests.
+`stackTrace` with `showRawFrames: true` adds the machine frames, each named
+`[raw] <function>` with its `instructionPointerReference`, whose one scope,
+`[raw] Locals`, holds its pc and canonical frame address; a `showRawFrames`
+that is not true or false is E2236 (`jet.invalidArguments`). A frame id or
+variable reference names the stop it was made at: once the program runs
+again it is E2238 (`jet.staleReference`). The error's `jetCode` names the
+diagnostic.
+
 Every expression the debugger is given (`print`, `watch`, a condition, a
 logpoint's message, the adapter's `evaluate`) has one evaluator, the
 compiler (`Compiler/JetDebug/Source/NativeEval.jet`,
@@ -749,21 +775,33 @@ chain that start together share a row. The program is compiled again at
 the optimization level of its build, which the image's debug information
 names (`Jet native backend (O2)`), so the code around the expression is the
 code the program runs, with that function, which runs in a fork of the
-stopped program, placed as `fix` places code, with the locals' bytes read
-from the frame; the program itself neither runs nor changes. `fix` compiles
+stopped program, with the locals' bytes read from the frame; the program
+itself neither runs nor changes. The fork holds a fresh copy of the
+function and of every function it calls, which reach the program's own
+data and runtime where its unchanged code does, so the compile's choices
+for the whole program (its `main`, its register use) need not be the
+image's; a function the expression calls whose code differs from the
+program's is refused, the source no longer the program's. `fix` compiles
 at that level too. An inlined frame is evaluated in as `bt` shows it: the
 expression is checked in the inlined function at its line, the frame it was
 inlined into at the call, and the locals are the frame's own; code inlined
 from another file is refused, since its lines are not that file's. A value whose type has a
 `debug_view` shows as `locals` shows it, the view run in that same fork. A
 compiled expression is kept per line, column and text, so a condition compiles once
-and runs in a fork at each hit. The fork runs the program's own runtime, so
+and runs in a fork at each hit. A `print` at a later stop in the same frame
+of the same function runs the code compiled before when its names read the
+same variables there (the debug information's variables of each name
+declared by the stop's line, and whether each one's location covers the
+stop) and each local it reads is a number, Bool or Char, which no move
+empties; any other expression compiles again. The fork runs the program's own runtime, so
 a lock another thread held at the stop is never released there (code that
 takes it fails at the 2 s budget), and a function value runs the image's
 code. An expression that calls a function that can fail shows its result as
 `locals` shows a fallible result, `parse(s) = Ok(3)` or `Err(ParseError.Empty)`,
-so a condition that can fail is refused, not a Bool. An expression reads at
-most 5 locals. A local's own name is no expression: `print total` shows the
+so a condition that can fail is refused, not a Bool. A call in the fork
+passes up to 5 locals in registers and more by a table of their addresses;
+a condition that reads more than 5 runs in the fork at each hit, not in the
+program. A local's own name is no expression: `print total` shows the
 local as `locals` does, in a dump too, and a dump runs no code.
 
 A watch on a place in memory takes the CPU's debug registers (at most 4,

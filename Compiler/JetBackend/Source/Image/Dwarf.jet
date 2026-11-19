@@ -23,10 +23,13 @@
 //   subprograms. Each call the code generator names a source node for is a
 //   call site of its subprogram with its return address and the line and
 //   column of the node (X64FunctionDebug.calls), which `jet debug` names a
-//   caller's frame by. A `--checked-alloc` image's allocating calls are call
-//   sites of their subprogram, each with its return address and the type
-//   of what its block holds (X64FunctionDebug.allocs), which `jet perf`
-//   names a heap snapshot's blocks by.
+//   caller's frame by, and a call site parameter per argument whose value
+//   the caller keeps while the call runs; past its register's range a
+//   parameter its body never writes is located by its entry value, which
+//   `jet debug` reads from those. A `--checked-alloc` image's allocating
+//   calls are call sites of their subprogram, each with its return address
+//   and the type of what its block holds (X64FunctionDebug.allocs), which
+//   `jet perf` names a heap snapshot's blocks by.
 // - `.debug_line`: one sequence per function with source lines; the row at
 //   the end of the prologue carries `prologue_end`.
 // - `.debug_jetline`: not DWARF. The location table the runtime's fault
@@ -302,6 +305,10 @@ DWARF_ABBREV_GENERATED_SITES: 26
 
 DWARF_ABBREV_CALL: 27
 
+DWARF_ABBREV_CALL_ARGUMENTS: 28
+
+DWARF_ABBREV_CALL_ARGUMENT: 29
+
 // Attribute names and forms.
 DW_AT_LOCATION: 0x02
 
@@ -356,6 +363,8 @@ DW_AT_CALL_FILE: 0x58
 DW_AT_CALL_LINE: 0x59
 
 DW_AT_CALL_RETURN_PC: 0x7d
+
+DW_AT_CALL_VALUE: 0x7e
 
 DW_FORM_ADDR: 0x01
 
@@ -486,8 +495,12 @@ dwarf_abbrevs: fn(sections: Bool, sites: Bool) -> [U8] Never! {
     dwarf_abbrev(a, DWARF_ABBREV_VARIANT, 0x19, true, [Int]{DW_AT_DISCR_VALUE, DW_FORM_SDATA})
     dwarf_abbrev(a, DWARF_ABBREV_DEFAULT_VARIANT, 0x19, true, [Int]{})
     // A call: its return address and the line and column of the source node
-    // that made it.
-    dwarf_abbrev(a, DWARF_ABBREV_CALL, 0x48, false, [Int]{DW_AT_CALL_RETURN_PC, DW_FORM_ADDR, DW_AT_CALL_LINE, DW_FORM_UDATA, DW_AT_CALL_COLUMN, DW_FORM_UDATA})
+    // that made it; with arguments, those the caller keeps while it runs,
+    // each its register (DW_OP_reg*) and value there (DW_AT_call_value).
+    call: [Int]{DW_AT_CALL_RETURN_PC, DW_FORM_ADDR, DW_AT_CALL_LINE, DW_FORM_UDATA, DW_AT_CALL_COLUMN, DW_FORM_UDATA}
+    dwarf_abbrev(a, DWARF_ABBREV_CALL, 0x48, false, call)
+    dwarf_abbrev(a, DWARF_ABBREV_CALL_ARGUMENTS, 0x48, true, call)
+    dwarf_abbrev(a, DWARF_ABBREV_CALL_ARGUMENT, 0x49, false, [Int]{DW_AT_LOCATION, DW_FORM_EXPRLOC, DW_AT_CALL_VALUE, DW_FORM_EXPRLOC})
     if sites {
         // An allocating call: its return address and the type of what its
         // block holds (DW_AT_type, beyond DWARF's call site attributes).
@@ -642,6 +655,8 @@ dwarf_types: fn(info: &[U8], types: [X64DebugType]) -> [Int] Never! {
 // for an `indirect` variable the memory its value points at. The frame base
 // is rbp. A FrameAddress value is rbp + offset itself: indirect, that is the
 // memory at fbreg(offset); direct, the computed address (DW_OP_stack_value).
+// A Constant is its value (DW_OP_consts), an EntryValue the value its
+// register had at the function's entry (DW_OP_entry_value).
 dwarf_location: fn(location: X64DebugLocation, indirect: Bool) -> [U8] Never! {
     expr := [U8]{}
     if location == {
@@ -674,6 +689,18 @@ dwarf_location: fn(location: X64DebugLocation, indirect: Bool) -> [U8] Never! {
         .FrameAddress(offset) -> {
             dwarf_u8(expr, 0x91)
             dwarf_sleb(expr, offset)
+            if !indirect -> dwarf_u8(expr, 0x9f)
+        }
+        .Constant(value) -> {
+            dwarf_u8(expr, 0x11)
+            dwarf_sleb(expr, value)
+            if !indirect -> dwarf_u8(expr, 0x9f)
+        }
+        .EntryValue(reg) -> {
+            entered: dwarf_location(X64DebugLocation.Register{reg: reg}, false)
+            dwarf_u8(expr, 0xa3)
+            dwarf_uleb(expr, entered.len())
+            expr.extend(entered)
             if !indirect -> dwarf_u8(expr, 0x9f)
         }
     }
@@ -1120,13 +1147,28 @@ dwarf_info_alloc_sites: fn(info: &[U8], relas: &[X64ObjectRela], sites: [X64Allo
 }
 
 // A call site DIE per call `sites` (X64CallSite) of the function at `offset`
-// from `symbol`.
+// from `symbol`, holding a call site parameter DIE per argument its caller
+// keeps: the argument's register and, as an expression its value
+// (DW_AT_call_value), where the caller keeps it (dwarf_location of an
+// indirect place: the address it computes is the value).
 dwarf_info_call_sites: fn(info: &[U8], relas: &[X64ObjectRela], sites: [X64CallSite], offset: Int, symbol: Int) Never! {
     loop site in sites {
-        dwarf_uleb(info, DWARF_ABBREV_CALL)
+        kept: site.arguments.len() > 0
+        dwarf_uleb(info, if kept -> DWARF_ABBREV_CALL_ARGUMENTS else -> DWARF_ABBREV_CALL)
         dwarf_address(info, relas, symbol, offset + site.at)
         dwarf_uleb(info, site.line)
         dwarf_uleb(info, site.column)
+        if !kept -> next
+        loop argument in site.arguments {
+            dwarf_uleb(info, DWARF_ABBREV_CALL_ARGUMENT)
+            register: dwarf_location(X64DebugLocation.Register{reg: argument.reg}, false)
+            dwarf_uleb(info, register.len())
+            info.extend(register)
+            value: dwarf_location(argument.value, true)
+            dwarf_uleb(info, value.len())
+            info.extend(value)
+        }
+        dwarf_uleb(info, 0)
     }
 }
 
@@ -1482,4 +1524,32 @@ dwarf_test_bytes: fn(pieces: [X64ObjectPiece]) -> [U8] Never! {
     info: dwarf_test_bytes(sited.info)
     assert(info.len() > dwarf_test_bytes(bare.info).len())
     assert(link_info_plan(info, sited.abbrev, 0, 64) != None)
+}
+
+// A call whose caller keeps its arguments holds a call site parameter per
+// argument, its register and value, which the link's walk reads through;
+// a parameter's entry value is DW_OP_entry_value of its register.
+#Test("a call keeps its arguments as call site parameters") {
+    assert_eq(dwarf_location(X64DebugLocation.EntryValue{reg: X64_RDI}, false), [U8]{0xa3, 1, 0x55, 0x9f})
+    function: X64CompiledFunction{id: X64FunctionID{value: 0}, name: "f0", code: [U8]{U8{0x90}, U8{0x90}, U8{0x90}, U8{0x90}, U8{0x90}, U8{0xc3}}, relocs: [X64Reloc]{}, align: X64_FUNCTION_ALIGN}
+    kept: [X64CallArgument]{X64CallArgument{reg: X64_RDI, value: X64DebugLocation.Constant{value: 3}}, X64CallArgument{reg: X64_RSI, value: X64DebugLocation.Frame{offset: -16}}}
+    debug: X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: [U8]{}, ranges: [X64VariableRange]{}, calls: [X64CallSite]{X64CallSite{at: 5, line: 2, column: 3, arguments: kept}}}
+    sources: [X64FunctionSource]{X64FunctionSource{name: "f0", file: 0, line: 1, variables: [X64DebugVariable]{}}}
+    program: X64ObjectModule{data: [X64Data]{}, debug: X64ModuleDebug{directory: "", files: [String]{"a.jet"}, types: [X64DebugType]{}}, functions: sources}
+    symbols: X64DwarfSymbols{text: 1, abbrev: 2, line: 3, loclists: 4, functions: [Int]{}}
+    built: x64_dwarf_sections(program, [X64CompiledFunction]{function}, [X64FunctionDebug]{debug}, [Int]{0}, [Int]{6}, 64, symbols, compiler_threads_single(), true)
+    info: dwarf_test_bytes(built.info)
+    // rdi (DW_OP_reg5) is 3 (DW_OP_consts); rsi (DW_OP_reg4) the word at
+    // fbreg(-16) (DW_OP_deref); then the end of the call's children.
+    parameters: [U8]{U8{DWARF_ABBREV_CALL_ARGUMENT}, 1, 0x55, 2, 0x11, 3, U8{DWARF_ABBREV_CALL_ARGUMENT}, 1, 0x54, 3, 0x91, 0x70, 0x06, 0}
+    found := false
+    loop at in 0..<(info.len() - parameters.len() + 1) {
+        same := true
+        loop k in 0..<parameters.len() {
+            if info[at + k] != parameters[k] -> same = false
+        }
+        if same -> found = true
+    }
+    assert(found)
+    assert(link_info_plan(info, built.abbrev, 0, 64) != None)
 }

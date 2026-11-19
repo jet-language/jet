@@ -20,13 +20,20 @@
 //     over the first stop, per step;
 //   - lldb, first stop: `lldb -b` on the image with `breakpoint set`, `run`
 //     and `continue`;
-//   - lldb, per step: the same with K `next` commands before `continue`.
+//   - lldb, per step: the same with K `next` commands before `continue`;
+//   - the evaluations at the stop (latency_probes), each the extra time of
+//     a session with its commands over the session without them, in both
+//     debuggers: print_place (`print total`), print_first (the first call
+//     expression), print_again (the same call at a later stop),
+//     second_eval (a second new expression at the same stop) and
+//     watch_per_stop (K steps with a watch on `total`, per step).
 // L is the line of the first call in `run`. A debugger run whose output
-// does not report the breakpoint stop fails the measurement. It prints the
+// does not report the breakpoint stop fails the measurement; an LLDB
+// evaluation that fails leaves its column `-` with the reason. It prints the
 // image's SHA-256, both tools' versions and the exact commands as `#`
-// lines, then one tab-separated row per measure in milliseconds. With
-// `--bar MS` it fails, after the rows, when `jet debug`'s first stop took
-// more than MS milliseconds.
+// lines, then one tab-separated row per measure in milliseconds, then each
+// bar's verdict (latency_verdicts). With `--bar MS` it fails, after the
+// rows, when `jet debug`'s first stop took more than MS milliseconds.
 use {
     crypto: core.crypto
     files: core.files
@@ -58,6 +65,67 @@ LatencyRuns: struct {
     debug_stop: Int,
     debug_steps: Int,
     lldb: LatencyLldb?,
+    probes: [LatencyProbeTime]{[LatencyProbeTime]{}},
+}
+
+// One evaluation measure at the stop (latency_probes): the session input
+// `jet debug` takes with the measured commands and without them, and the
+// LLDB commands after the stop that do the same; the measure is the extra
+// time, over `per`.
+LatencyProbe: struct {
+    measure: String,
+    jet_with: String,
+    jet_base: String,
+    lldb_with: [String],
+    lldb_base: [String],
+    per: Int,
+}
+
+// A probe's milliseconds: `jet debug`'s, and LLDB's or why it has none.
+LatencyProbeTime: struct {
+    measure: String,
+    jet: Int,
+    lldb: Int?,
+    lldb_note: String,
+}
+
+// The call expression the print probes evaluate: a call of one of the
+// program's functions on the stopped function's local.
+LATENCY_CALL: "f_1(total)"
+
+// `first`, then `rest`.
+latency_prepend: fn(first: String, rest: [String]) -> [String] Never! {
+    out := [String]{first}
+    loop item in rest -> out.push("{item}")
+    out
+}
+
+// The evaluation probes, for `steps` steps.
+latency_probes: fn(steps: Int) -> [LatencyProbe] Never! {
+    nexts: "n\n".repeat(steps)
+    lldb_nexts: (loop _ in 0..<steps -> "next")
+    call: "expr -- {LATENCY_CALL}"
+    [LatencyProbe]{
+        LatencyProbe{measure: "print_place", jet_with: "print total\n", jet_base: "", lldb_with: [String]{"frame variable total"}, lldb_base: [String]{}, per: 1},
+        LatencyProbe{measure: "print_first", jet_with: "print {LATENCY_CALL}\n", jet_base: "", lldb_with: [String]{call}, lldb_base: [String]{}, per: 1},
+        LatencyProbe{
+            measure: "print_again",
+            jet_with: "print {LATENCY_CALL}\nn\nprint {LATENCY_CALL}\n",
+            jet_base: "print {LATENCY_CALL}\nn\n",
+            lldb_with: [String]{call, "next", call},
+            lldb_base: [String]{call, "next"},
+            per: 1,
+        },
+        LatencyProbe{
+            measure: "second_eval",
+            jet_with: "print total + 1\nprint total + 2\n",
+            jet_base: "print total + 1\n",
+            lldb_with: [String]{"expr -- total + 1", "expr -- total + 2"},
+            lldb_base: [String]{"expr -- total + 1"},
+            per: 1,
+        },
+        LatencyProbe{measure: "watch_per_stop", jet_with: "watch total\n{nexts}", jet_base: nexts, lldb_with: latency_prepend("watchpoint set variable total", lldb_nexts), lldb_base: lldb_nexts, per: steps},
+    }
 }
 
 usage: fn() -[IO]> Int Never! {
@@ -152,10 +220,16 @@ latency_debug_argv: fn(jet: String, line: Int) -> [String] Never! {
 // The LLDB argv that stops at `line` of prog.jet in the image, takes `steps`
 // steps over, and continues to the program's end.
 latency_lldb_argv: fn(lldb: String, line: Int, steps: Int) -> [String] Never! {
+    latency_lldb_session(lldb, line, (loop _ in 0..<steps -> "next"))
+}
+
+// The LLDB argv that stops at `line` of prog.jet in the image, runs
+// `commands` there and continues to the program's end.
+latency_lldb_session: fn(lldb: String, line: Int, commands: [String]) -> [String] Never! {
     argv := [String]{lldb, "-b", "-o", "breakpoint set --file prog.jet --line {line}", "-o", "run"}
-    loop _ in 0..<steps {
+    loop command in commands {
         argv.push("-o")
-        argv.push("next")
+        argv.push("{command}")
     }
     argv.push("-o")
     argv.push("continue")
@@ -167,6 +241,15 @@ latency_lldb_argv: fn(lldb: String, line: Int, steps: Int) -> [String] Never! {
 latency_command_text: fn(argv: [String]) -> String Never! {
     words: loop word in argv -> if word.contains(" ") -> "'{word}'" else -> word.copy()
     words.join(" ")
+}
+
+// LLDB's extra milliseconds for `probe`: its session with the probe's
+// commands over the one without them, over `per`.
+latency_lldb_probe: fn(lldb: String, line: Int, work: String, probe: LatencyProbe, runs: Int) -[Exec, Time, Time.Wait]> Int Err! {
+    stopped: "stop reason = breakpoint"
+    with_ms: latency_median_time(latency_lldb_session(lldb, line, probe.lldb_with), work, "", stopped, runs) ?? return Err(err)
+    base_ms: latency_median_time(latency_lldb_session(lldb, line, probe.lldb_base), work, "", stopped, runs) ?? return Err(err)
+    Ok((with_ms - base_ms) /% probe.per)
 }
 
 latency_measure: fn(options: LatencyOptions, work: String) -[Exec, FS, Time, Time.Wait]> LatencyRuns Err! {
@@ -191,6 +274,27 @@ latency_measure: fn(options: LatencyOptions, work: String) -[Exec, FS, Time, Tim
         }
         lldb = Val(timed)
     }
+    // Each distinct `jet debug` session is timed once; the probes share them.
+    sessions := [String:Int]{}
+    probes := [LatencyProbeTime]{}
+    loop probe in latency_probes(options.steps) {
+        inputs: [String]{probe.jet_with, probe.jet_base}
+        loop input in inputs {
+            if !sessions.has_key(input) {
+                sessions[input] = latency_median_time(debug, work, input, debug_stopped, options.runs) ?? return Err("{probe.measure}: {err}")
+            }
+        }
+        timed := LatencyProbeTime{measure: "{probe.measure}", jet: (sessions[probe.jet_with] - sessions[probe.jet_base]) /% probe.per, lldb: None, lldb_note: ""}
+        if options.lldb == .Val(tool) {
+            ms: latency_lldb_probe(tool, line, work, probe, options.runs) ?? {
+                timed.lldb_note = "{err.message}"
+                probes.push(timed)
+                next
+            }
+            timed.lldb = Val(ms)
+        }
+        probes.push(timed)
+    }
     Ok(
         LatencyRuns{
             image_sha256: crypto.sha256(image).hex(),
@@ -199,6 +303,7 @@ latency_measure: fn(options: LatencyOptions, work: String) -[Exec, FS, Time, Tim
             debug_stop: latency_median_time(debug, work, "", debug_stopped, options.runs) ?? return Err(err),
             debug_steps: latency_median_time(debug, work, nexts, debug_stopped, options.runs) ?? return Err(err),
             lldb: lldb,
+            probes: probes,
         },
     )
 }
@@ -234,12 +339,49 @@ latency_rows: fn(options: LatencyOptions, runs: LatencyRuns) -> [String] Never! 
     rows.push("build\t{runs.build}\t-")
     rows.push("first_stop\t{runs.debug_stop}\t{lldb_stop}")
     rows.push("per_step\t{debug_step}\t{lldb_step}")
+    loop probe in runs.probes {
+        lldb_ms: if probe.lldb == .Val(ms) -> "{ms}" else -> "-"
+        rows.push("{probe.measure}\t{probe.jet}\t{lldb_ms}")
+    }
+    loop probe in runs.probes {
+        if probe.lldb_note != "" -> rows.push("# lldb {probe.measure} not timed: {probe.lldb_note.split("\n").to_list()[0]}")
+    }
+    loop verdict in latency_verdicts(options, runs) -> rows.push(verdict)
     if options.bar == .Val(bar) {
         verdict: if latency_bar_missed(options, runs) -> "missed" else -> "met"
         rows.push("# bar: jet_debug first_stop at most {bar} ms: {verdict}")
     }
     rows
 }
+
+// The bars `jet debug` is held to, each with its verdict: per_step within
+// LLDB's plus 1 ms; print_place within LLDB's plus 10 ms; print_again and
+// watch_per_stop within twice LLDB's; print_first at most 250 ms; and
+// second_eval at most 100 ms. A bar against LLDB is judged only when LLDB
+// was timed.
+latency_verdicts: fn(options: LatencyOptions, runs: LatencyRuns) -> [String] Never! {
+    verdicts := [String]{}
+    if runs.lldb == .Val(lldb) {
+        debug_step: (runs.debug_steps - runs.debug_stop) /% options.steps
+        lldb_step: (lldb.steps - lldb.stop) /% options.steps
+        verdicts.push("# bar: jet_debug per_step at most lldb's + 1 ms: {latency_verdict(debug_step <= lldb_step + 1)}")
+    }
+    loop probe in runs.probes {
+        if probe.measure == "print_first" -> verdicts.push("# bar: jet_debug print_first at most 250 ms: {latency_verdict(probe.jet <= 250)}")
+        if probe.measure == "second_eval" -> verdicts.push("# bar: jet_debug second_eval at most 100 ms: {latency_verdict(probe.jet <= 100)}")
+        if probe.lldb == .Val(lldb_ms) {
+            if probe.measure == "print_place" {
+                verdicts.push("# bar: jet_debug print_place at most lldb's + 10 ms: {latency_verdict(probe.jet <= lldb_ms + 10)}")
+            }
+            if probe.measure == "print_again" || probe.measure == "watch_per_stop" {
+                verdicts.push("# bar: jet_debug {probe.measure} at most twice lldb's: {latency_verdict(probe.jet <= 2 * lldb_ms)}")
+            }
+        }
+    }
+    verdicts
+}
+
+latency_verdict: fn(met: Bool) -> String Never! { if met -> "met" else -> "missed" }
 
 // Whether `jet debug`'s first stop took longer than the bar, if there is one.
 latency_bar_missed: fn(options: LatencyOptions, runs: LatencyRuns) -> Bool Never! {
@@ -317,7 +459,39 @@ run: fn() {
     assert_eq(rows[8], "# 10 functions, 64 lines, 4 steps, median of 1 runs, milliseconds")
     assert_eq(rows[11], "first_stop\t900\t400")
     assert_eq(rows[12], "per_step\t100\t20")
-    assert_eq(rows.len(), 13)
+    assert_eq(rows[13], "# bar: jet_debug per_step at most lldb's + 1 ms: missed")
+    assert_eq(rows.len(), 14)
+}
+
+#Test("each probe is a row against lldb's, and the bars judge them") {
+    options: LatencyOptions{jet: "jet", lldb: Val("lldb"), functions: 10, steps: 4, runs: 1, bar: None}
+    lldb: LatencyLldb{version: "lldb version 21", stop: 400, steps: 480}
+    probes: [LatencyProbeTime]{
+        LatencyProbeTime{measure: "print_place", jet: 15, lldb: Val(4), lldb_note: ""},
+        LatencyProbeTime{measure: "print_first", jet: 300, lldb: None, lldb_note: "error: use of undeclared identifier"},
+        LatencyProbeTime{measure: "second_eval", jet: 40, lldb: Val(5), lldb_note: ""},
+        LatencyProbeTime{measure: "watch_per_stop", jet: 9, lldb: Val(5), lldb_note: ""},
+    }
+    rows: latency_rows(options, LatencyRuns{image_sha256: "ab12", jet_version: "jet 0.1", build: 300, debug_stop: 900, debug_steps: 984, lldb: Val(lldb), probes: probes})
+    text: rows.join("\n")
+    assert(text.contains("print_place\t15\t4\n"), text)
+    assert(text.contains("print_first\t300\t-\n"), text)
+    assert(text.contains("# lldb print_first not timed: error: use of undeclared identifier"), text)
+    assert(text.contains("# bar: jet_debug per_step at most lldb's + 1 ms: met"), text)
+    assert(text.contains("# bar: jet_debug print_place at most lldb's + 10 ms: missed"), text)
+    assert(text.contains("# bar: jet_debug print_first at most 250 ms: missed"), text)
+    assert(text.contains("# bar: jet_debug second_eval at most 100 ms: met"), text)
+    assert(text.contains("# bar: jet_debug watch_per_stop at most twice lldb's: met"), text)
+}
+
+#Test("the probes measure against their own base sessions") {
+    probes: latency_probes(3)
+    assert_eq(probes.len(), 5)
+    assert_eq(probes[0].jet_with, "print total\n")
+    assert_eq(probes[2].jet_base, "print f_1(total)\nn\n")
+    assert_eq(probes[4].jet_with, "watch total\nn\nn\nn\n")
+    assert_eq(probes[4].per, 3)
+    assert_eq(latency_lldb_session("lldb", 13, [String]{"frame variable total"})[7], "frame variable total")
 }
 
 // c34: the measurement needs nothing but jet; the bar fails the run after

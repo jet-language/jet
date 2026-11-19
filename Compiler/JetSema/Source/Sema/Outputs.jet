@@ -527,7 +527,7 @@ sema_output_resolve: fn(graph: &SemaRegistrationGraph, intent: SemaOutputIntent,
     }
     entry_index: sema_registration_module_index(graph, graph.entry_module_identity) ?? return diagnostics.move()
     legacy := Int?{None}
-    loop (index, function) in graph.modules[entry_index].functions {
+    loop (index, function) in graph.modules[sema_output_run_module_index(graph, entry_index)].functions {
         if function.declaration.name == "run" {
             legacy = Val(index)
             break
@@ -666,13 +666,22 @@ sema_output_legacy_run_contract: fn(graph: SemaRegistrationGraph, intent: SemaOu
             }
         }
     }
-    loop function in graph.modules[entry_index].functions {
+    run_index: sema_output_run_module_index(graph, entry_index)
+    loop function in graph.modules[run_index].functions {
         if function.declaration.name == "run" {
-            _ := sema_output_entry_contract(graph, entry_index, function, "run", OutputKind.Executable, function.declaration.span, sema_output_run_contract_fix(function), diagnostics)
+            _ := sema_output_entry_contract(graph, run_index, function, "run", OutputKind.Executable, function.declaration.span, sema_output_run_contract_fix(function), diagnostics)
             break
         }
     }
     diagnostics.move()
+}
+
+// The index of the module that holds the entry's `run: fn`: the entry
+// module's (`entry_index`), or the `meta.rewrite_body` module's that
+// replaced the entry file's `run`.
+sema_output_run_module_index: fn(graph: SemaRegistrationGraph, entry_index: Int) -> Int Never! {
+    stand_in: graph.entry_run_module ?? return entry_index
+    sema_registration_module_index(graph, stand_in) ?? entry_index
 }
 
 // A `run` that returns a value beside a named error keeps that error: the

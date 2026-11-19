@@ -294,7 +294,7 @@ argon2id: fn(password: Secret, salt: [U8], memory_kib: Int, iterations: Int, lan
     if memory_kib < 8 * lanes || memory_kib * iterations > 1048576 -> return Err(.Length)
     memory_blocks: (memory_kib /% (4 * lanes)) * (4 * lanes)
     if memory_blocks < 8 * lanes -> return Err(.Length)
-    Ok(Secret{bytes: argon2id_raw(password.bytes, salt, memory_kib, iterations, lanes, output_len)})
+    Ok(Secret.from_bytes(argon2id_raw(password.bytes, salt, memory_kib, iterations, lanes, output_len)))
 }
 
 ed25519_sign: fn(secret: [U8], bytes: [U8]) -> Signature CryptoError! {
@@ -319,7 +319,7 @@ x25519_raw: fn(secret_bytes: [U8], public_bytes: [U8]) -> Secret CryptoError! {
     if secret_bytes.len() != 32 || public_bytes.len() != 32 -> return Err(.KeyRejected)
     shared: x25519_scalarmult(secret_bytes, public_bytes)
     if all_zero(shared) -> return Err(.KeyRejected)
-    Ok(Secret{bytes: shared})
+    Ok(Secret.from_bytes(shared))
 }
 
 all_zero: fn(bytes: [U8]) -> Bool Never! {

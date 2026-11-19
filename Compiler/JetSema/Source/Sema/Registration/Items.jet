@@ -894,6 +894,10 @@ SemaLookupCounts: struct {
 SemaRegistrationGraph: struct {
     package_identity: String,
     entry_module_identity: ModuleID,
+    // The module that holds the entry's `run: fn` when a `meta.rewrite_body`
+    // module replaced it (JetDriver jet_driver_entry_run_module); None when
+    // the entry module keeps its own.
+    entry_run_module: ModuleID?{None},
     canonical_effect_module_identity: ModuleID,
     target_machine: TargetMachine,
     build_facts: SemaBuildFacts,

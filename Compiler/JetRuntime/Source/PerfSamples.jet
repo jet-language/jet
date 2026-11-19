@@ -3114,7 +3114,7 @@ perf_flight_zones: fn(path: I64) {
             spans: perf_flight_beside(path, rt_static_text(".spans"))
             file: observe_cstring(spans)
             // O_WRONLY|O_CREAT|O_TRUNC|O_APPEND|O_CLOEXEC, mode 0600.
-            fd: observe_syscall(I64{257}, I64{-100}, file, I64{525825}, I64{384})
+            fd: observe_syscall(I64{257}, I64{-100}, file, I64{525889}, I64{384})
             jet_rt_free(file, wrapping(rt_text_len(spans) + I64{1}), I64{1})
             jet_rt_string_drop(spans)
             perf_spans_fd_set(fd)
@@ -4262,6 +4262,41 @@ perf_causal_tick: fn(pc: I64, periods: I64) {
         perf_causal_next(state, pc, now)
         sync_store(state, I64{0})
     }
+}
+
+// A task's start and end are the lens's sync points, as a thread's wake
+// and its wake of another are Coz's. A worker that starts a task was idle or
+// blocked, so it owes nothing for the delays inserted before; a task that
+// ends pays what it owes before its joiner can see it. Without them a short
+// task finishes between samples and pays its delay later, in whatever its
+// thread runs next, which can be the line the experiment speeds up.
+perf_causal_task_start: fn() {
+    state: perf_causal_state
+    if (state == I64{0}) {
+        return
+    }
+    thread: perf_causal_thread(state)
+    if (thread == I64{0}) {
+        return
+    }
+    rt_text_store(wrapping(thread + I64{8}), sync_load(wrapping(state + PERF_CAUSAL_DELAY)))
+    rt_text_store(wrapping(thread + I64{16}), perf_samples_clock())
+}
+
+perf_causal_task_end: fn() {
+    state: perf_causal_state
+    if (state == I64{0}) {
+        return
+    }
+    thread: perf_causal_thread(state)
+    if (thread == I64{0}) {
+        return
+    }
+    delay: sync_load(wrapping(state + PERF_CAUSAL_DELAY))
+    local: rt_text_word(wrapping(thread + I64{8}))
+    if (local < delay) { perf_causal_pause(thread, wrapping(delay - local)) }
+    rt_text_store(wrapping(thread + I64{8}), delay)
+    rt_text_store(wrapping(thread + I64{16}), perf_samples_clock())
 }
 
 // This thread's entry, claimed by its tid on its first sample; 0 when the

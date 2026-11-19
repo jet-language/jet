@@ -31,6 +31,7 @@ use {
     jet_foundation.[Type, name_rows_value]
     jet_backend.[
         X64Alu,
+        X64CallArgument,
         X64CallSite,
         X64Cond,
         X64CompiledFunction,
@@ -317,10 +318,11 @@ IRX64Emitter: struct {
     alloc_row: Int,
     alloc_relocs: [Int],
     alloc_rows: [Int],
-    // Per call whose instruction names a call-site row (ir_code_line_call):
-    // its return address and that row, for X64FunctionDebug.calls once the
-    // code is laid out.
-    calls: [Int]{[Int]{}},
+    // The calls whose instructions name a call-site row
+    // (ir_code_line_call), each at its unrelaxed return address until the
+    // code is laid out, for X64FunctionDebug.calls; ir_x64_call adds the
+    // arguments its caller keeps (ir_x64_kept_arguments).
+    calls: [X64CallSite]{[X64CallSite]{}},
 }
 
 // One compiled function, the debug variables its ranges refer to, and its
@@ -612,11 +614,11 @@ ir_x64_call_row: fn(e: &IRX64Emitter, f: IRFunction) Never! {
         return
     }
     row: ir_code_line_call(f.code_line[at])
-    if row == 0 {
+    word: IR_CALL_SITE_WORDS * (row - 1)
+    if row == 0 || word + 1 >= f.call_sites.len() {
         return
     }
-    e.calls.push(e.code.bytes.len())
-    e.calls.push(row)
+    e.calls.push(X64CallSite{at: e.code.bytes.len(), line: f.call_sites[word], column: f.call_sites[word + 1]})
 }
 
 // `bytes` pushed below the frame for a while (ir_x64_compile_body's
@@ -692,7 +694,11 @@ ir_x64_call: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocatio
     }
     if sret -> x64_lea(e.code, X64_RDI, X64_RBP, storage)
     if indirect >= 0 -> ir_x64_load(e, m, f, al, indirect, X64_R10)
+    calls: e.calls.len()
     ir_x64_call_out(e, m, f, al, target, indirect >= 0)
+    if e.calls.len() > calls {
+        e.calls[calls].arguments = ir_x64_kept_arguments(al, args, start, places)
+    }
     if stacked.len() + pad > 0 -> x64_alu_ri(e.code, X64Alu.Add, X64_RSP, 8 * (stacked.len() + pad))
     if dst < 0 {
         return
@@ -710,6 +716,35 @@ ir_x64_call: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocatio
         .Float -> { ir_x64_store_xmm(e, m, f, al, dst, 0) }
         .Empty -> {}
     }
+}
+
+// The arguments of a call (its slots `args[start..]`, each passed at
+// `places`, as ir_x64_call lays them out) in general registers whose values
+// the caller keeps while the call runs, so a debugger can read a
+// parameter's value at its callee's entry (X64DebugLocation.EntryValue): a
+// constant, a callee-saved register, a frame home or a frame address.
+ir_x64_kept_arguments: fn(al: IRX64Allocation, args: [Int], start: Int, places: [Int]) -> [X64CallArgument] Never! {
+    kept := [X64CallArgument]{}
+    loop (row, place) in places {
+        if place < 0 || place >= 16 -> next
+        slot: args[start + row]
+        if {
+            al.consts[slot] -> {
+                kept.push(X64CallArgument{reg: place, value: X64DebugLocation.Constant{value: al.values[slot]}})
+            }
+            al.frames[slot] != 0 -> {
+                kept.push(X64CallArgument{reg: place, value: X64DebugLocation.FrameAddress{offset: al.frames[slot]}})
+            }
+            al.regs[slot] < 0 -> {
+                kept.push(X64CallArgument{reg: place, value: X64DebugLocation.Frame{offset: al.homes[slot]}})
+            }
+            IR_X64_SLOT_REGISTERS.contains(al.regs[slot]) -> {
+                kept.push(X64CallArgument{reg: place, value: X64DebugLocation.Register{reg: al.regs[slot]}})
+            }
+            else -> {}
+        }
+    }
+    kept
 }
 
 // The tail Call at `at` (TailCalls.jet): its arguments into their registers,
@@ -4392,12 +4427,16 @@ ir_x64_same_key: fn(a: [Int], b: [Int]) -> Bool Never! {
 // instruction that first writes it, so a debugger never shows a local
 // before its binding runs. A register slot is located over its live range,
 // a frame slot to the body's end, and a frame address (IRX64Allocation
-// .frames) as the rbp-relative address it is to the body's end. An
-// aggregate's slot carries the address of its bytes, so its variable is
-// `indirect`: the debugger reads the bytes there. A local belongs to the
-// inline site of the instruction that first writes it (a callee's local
-// inlined here: OptInline.jet ir_opt_splice).
+// .frames) as the rbp-relative address it is to the body's end. A
+// parameter the body never writes is, past its register's range (or all
+// along when nothing reads it), the value its argument register had at
+// entry (X64DebugLocation.EntryValue), which the caller's call site keeps
+// (ir_x64_kept_arguments). An aggregate's slot carries the address of its
+// bytes, so its variable is `indirect`: the debugger reads the bytes there.
+// A local belongs to the inline site of the instruction that first writes
+// it (a callee's local inlined here: OptInline.jet ir_opt_splice).
 ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, positions: [Int], body: Int, end: Int, variables: &[X64DebugVariable], ranges: &[X64VariableRange]) Never! {
+    entries: ir_x64_entry_registers(m, f, al)
     loop slot in 0..<f.slot_type.len() {
         name: f.slot_name[slot]
         if name < 0 || name >= m.names.len() -> next
@@ -4406,7 +4445,13 @@ ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, positions:
         indirect: m.types[f.slot_type[slot]].kind == .Aggregate
         site: if al.starts[slot] >= 0 && al.starts[slot] < f.op.len() -> ir_code_line_site(f.code_line[al.starts[slot]]) else -> 0
         variables.push(X64DebugVariable{name: m.names[name], ty: f.slot_type[slot], line: f.slot_line[slot], parameter: f.slot_kind[slot] == .Param, indirect: indirect, site: site})
-        if al.starts[slot] > al.ends[slot] || ir_x64_class(ty) == .Empty || al.consts[slot] -> next
+        entry: if slot < entries.len() -> entries[slot] else -> -1
+        if al.starts[slot] > al.ends[slot] || ir_x64_class(ty) == .Empty || al.consts[slot] {
+            if entry >= 0 && end > body {
+                ranges.push(X64VariableRange{variable: variable, start: body, end: end, location: X64DebugLocation.EntryValue{reg: entry}})
+            }
+            next
+        }
         // From the body on: the frame-free prefix keeps its values in
         // registers of its own (ir_x64_wrap).
         bound: if al.starts[slot] < 0 -> body else -> positions[al.starts[slot] + 1]
@@ -4424,12 +4469,40 @@ ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, positions:
             if stop > start {
                 ranges.push(X64VariableRange{variable: variable, start: start, end: stop, location: X64DebugLocation.Register{reg: reg}})
             }
+            after: if stop > start -> stop else -> start
+            if entry >= 0 && end > after {
+                ranges.push(X64VariableRange{variable: variable, start: after, end: end, location: X64DebugLocation.EntryValue{reg: entry}})
+            }
         } else {
             if end > start {
                 ranges.push(X64VariableRange{variable: variable, start: start, end: end, location: X64DebugLocation.Frame{offset: al.homes[slot]}})
             }
         }
     }
+}
+
+// Per parameter slot: the general register its caller passes it in, for a
+// word parameter (not an aggregate's pointer) the body never writes, else
+// -1. The registers follow the prologue's (ir_x64_compile_body): an
+// aggregate result's hidden pointer takes rdi first.
+ir_x64_entry_registers: fn(m: IRModule, f: IRFunction, al: IRX64Allocation) -> [Int] Never! {
+    entries := [Int]{}
+    general := if al.result_home != 0 -> 1 else -> 0
+    loop slot in 0..<f.param_count {
+        class: ir_x64_slot_class(m, f, slot)
+        if class != .General || general >= IR_X64_ARGUMENT_REGISTERS.len() {
+            entries.push(-1)
+            next
+        }
+        word: m.types[f.slot_type[slot]].kind != .Aggregate
+        entries.push(if word -> IR_X64_ARGUMENT_REGISTERS[general] else -> -1)
+        general += 1
+    }
+    loop at in 0..<f.op.len() {
+        written: ir_x64_write(f, at)
+        if written >= 0 && written < entries.len() -> entries[written] = -1
+    }
+    entries
 }
 
 // The runs of inlined code (X64FunctionDebug.inlines): per inline site
@@ -5254,16 +5327,9 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     }
     // An allocating call returns to the end of its rel32 field.
     allocs: loop (k, reloc) in e.alloc_relocs -> X64AllocSite{at: e.relocs[reloc].at + 4, ty: e.alloc_rows[k]}
-    // Each call's return address with its row's line and column.
-    calls := [X64CallSite]{}
+    // Each call's return address, relaxed.
     walk = ir_x64_relax_walk()
-    loop k in 0..<(e.calls.len() /% 2) {
-        word: IR_CALL_SITE_WORDS * (e.calls[2 * k + 1] - 1)
-        returns: ir_x64_relaxed_next(relax, walk, e.calls[2 * k])
-        if word + 1 < f.call_sites.len() {
-            calls.push(X64CallSite{at: returns, line: f.call_sites[word], column: f.call_sites[word + 1]})
-        }
-    }
+    loop k in 0..<e.calls.len() -> e.calls[k].at = ir_x64_relaxed_next(relax, walk, e.calls[k].at)
     walk = ir_x64_relax_walk()
     loop k in 0..<lines.len() -> lines[k].at = ir_x64_relaxed_next(relax, walk, lines[k].at)
     walk = ir_x64_relax_walk()
@@ -5354,7 +5420,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     if checked -> ir_timing_x64_check(m, f, e.code.log, e.errors)
     IRX64FunctionResult{
         function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: e.code.bytes.move(), relocs: e.relocs.move(), align: relax.align},
-        debug: X64FunctionDebug{lines: lines.move(), body: body_at, cfi: cfi.move(), ranges: ranges.move(), stack: stack, dynamic: e.dynamic, inlines: ir_x64_inline_ranges(f, positions), allocs: allocs, calls: calls.move()},
+        debug: X64FunctionDebug{lines: lines.move(), body: body_at, cfi: cfi.move(), ranges: ranges.move(), stack: stack, dynamic: e.dynamic, inlines: ir_x64_inline_ranges(f, positions), allocs: allocs, calls: e.calls.move()},
         variables: variables.move(),
         errors: e.errors.move(),
         log: log,
@@ -6691,4 +6757,46 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
         }
         assert(called && compiled.function.code[site.at - 5] == 0xe8)
     }
+}
+
+// check(n) calls report(n, 3) at a call-site row: its call site keeps 3 as
+// a constant for rsi and n for rdi, and past the call, where nothing reads
+// n, n is its entry value, the rdi check's own caller passed.
+#Test("A call site keeps its arguments and a parameter past its range is its entry value") {
+    m := ir_module_new()
+    word: ir_word_row(m)
+    report := ir_function_new("report", "test:entry.jet.report", "", "entry.jet", 1)
+    first: ir_slot(report, word, IRSlotKind.Param, ir_intern_name(m, "first"), 1)
+    _ := ir_slot(report, word, IRSlotKind.Param, ir_intern_name(m, "second"), 1)
+    report.result = word
+    _ := ir_emit(report, IROp.Return, -1, first, -1, -1, 1)
+    m.functions.push(report)
+    f := ir_function_new("check", "test:entry.jet.check", "", "entry.jet", 2)
+    n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), 2)
+    f.result = word
+    three: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    result: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.Const, three, 3, -1, -1, 3)
+    handed: ir_args(f, [Int]{n, three})
+    call: ir_emit(f, IROp.Call, result, 0, handed, 2, 3)
+    f.code_line[call] = 3 + IR_CODE_LINE_CALL
+    f.call_sites = [Int]{3, 5}
+    _ := ir_emit(f, IROp.Return, -1, result, -1, -1, 4)
+    m.functions.push(f)
+    compiled: ir_x64_compile_function(m, ir_x64_tables(m), 1)
+    assert(compiled.errors.is_empty())
+    assert_eq(compiled.debug.calls.len(), 1)
+    kept: compiled.debug.calls[0].arguments
+    assert_eq(kept.len(), 2)
+    assert_eq(kept[0].reg, X64_RDI)
+    assert_eq(kept[1].reg, X64_RSI)
+    assert(kept[1].value == X64DebugLocation.Constant{value: 3})
+    entered := false
+    entry: X64DebugLocation.EntryValue{reg: X64_RDI}
+    loop range in compiled.debug.ranges {
+        if compiled.variables[range.variable].name == "n" && range.location == entry {
+            entered = true
+        }
+    }
+    assert(entered)
 }

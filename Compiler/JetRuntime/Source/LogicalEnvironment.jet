@@ -1,7 +1,8 @@
 // The Rust original owns one OnceLock<RwLock<JetEnvEntries>>. Native main
 // captures startup before threads and creates the process default cell; the
-// first reader or writer (each calls jet_rt_logical_env_seed) seeds it, once,
-// from the immutable startup byte index, which logical writes never change.
+// first writer, or a reader of every pair (each calls jet_rt_logical_env_seed),
+// seeds it, once, from the immutable startup byte index, which logical writes
+// never change. Until then a read of one name answers from that index.
 // A deterministic World owns a cell of its own (World.jet world_environment),
 // seeded from the same startup index on its first use; while a World is
 // active, every read and write goes to that cell, so a World and its
@@ -114,9 +115,9 @@ logical_environment_drop: fn(root: I64) {
 
 // Called only by the single-threaded host argument registration, before its
 // published argc lets user code enter. No global-address intrinsic is needed.
-// Seeding waits for the first use: every reader and writer seeds first, and
-// the startup index it reads never changes, so a later seed holds the same
-// pairs, and a program that never reads the environment never copies it.
+// Seeding waits for the first write or whole-cell read, and the startup index
+// it reads never changes, so a later seed holds the same pairs, and a program
+// that only reads names (logical_environment_startup_row) never copies it.
 logical_environment_startup: fn() {
     root: jet_rt_alloc(LOGICAL_ENVIRONMENT_BYTES, I64{8})
     #Unsafe("host argument registration is single-threaded and precedes user code") {
@@ -141,28 +142,61 @@ logical_environment_current: fn() -> I64 {
     logical_env_root
 }
 
+// The startup row of `bytes`/`length` while the process default is still
+// unseeded and no World is active: the row, or 0 when startup has no such
+// name; -1 once the cell is seeded or a World is active, so the caller reads
+// the cell. The last row of a name wins, as the seed's append keeps it. The
+// index never changes, so a write that seeds the cell concurrently orders
+// after this read, and every read after a write finds the cell seeded.
+logical_environment_startup_row: fn(bytes: I64, length: I64) -> I64 {
+    comptime_serve_refuse(COMPTIME_REFUSED_ENVIRONMENT)
+    if (logical_env_root == I64{0} || world_current() != I64{0}) { return I64{-1} }
+    host_environment_require()
+    if (sync_load(wrapping(logical_env_root + I64{80})) != I64{0}) { return I64{-1} }
+    found := I64{0}
+    index := I64{0}
+    loop index < host_env_length {
+        row: wrapping(host_env_rows + index * I64{24})
+        if (rt_text_word(wrapping(row + I64{8})) == length && rt_text_equal_bytes(rt_text_word(row), bytes, length)) {
+            found = row
+        }
+        index = wrapping(index + I64{1})
+    }
+    found
+}
+
+// The value bytes of startup row `row` (logical_environment_startup_row).
+logical_environment_startup_value: fn(row: I64) -> I64 {
+    wrapping(rt_text_word(row) + rt_text_word(wrapping(row + I64{16})))
+}
+
+// A String of `length` bytes at `bytes` when they are valid UTF-8, else 0.
+logical_environment_text: fn(bytes: I64, length: I64) -> I64 {
+    at := I64{0}
+    loop at < length {
+        width: rt_text_valid_width(wrapping(bytes + at), length - at, I64{1})
+        if (width < I64{0}) { return I64{0} }
+        at = wrapping(at + width)
+    }
+    rt_text_copy(bytes, length)
+}
+
 // The Rust original is Option<String>, not Result: absent and a present
 // non-Unicode value both return None. Raw OS lookup preserves bytes.
 #Export(c) jet_rt_logical_env_get: fn(key: I64) -> I64 {
     rt_test_reads_text(I64{69}, key)
+    row: logical_environment_startup_row(rt_text_data(key), rt_text_len(key))
+    if (row == I64{0}) { return I64{0} }
+    if (row > I64{0}) {
+        value: logical_environment_startup_value(row)
+        return logical_environment_text(value, host_startup_byte_length(value))
+    }
     root: logical_environment_current()
     shared_acquire(root, false)
     entry: logical_environment_find(root, rt_text_data(key), rt_text_len(key))
     result := I64{0}
     if (entry != I64{0}) {
-        bytes: rt_text_word(wrapping(entry + I64{24}))
-        length: rt_text_word(wrapping(entry + I64{32}))
-        at := I64{0}
-        valid := true
-        loop at < length {
-            width: rt_text_valid_width(wrapping(bytes + at), length - at, I64{1})
-            if (width < I64{0}) {
-                valid = false
-                break
-            }
-            at = wrapping(at + width)
-        }
-        if valid -> result = rt_text_copy(bytes, length)
+        result = logical_environment_text(rt_text_word(wrapping(entry + I64{24})), rt_text_word(wrapping(entry + I64{32})))
     }
     shared_release(root, false)
     result
@@ -172,9 +206,18 @@ logical_environment_current: fn() -> I64 {
 // empty is (1,0,0); nonempty bytes transfer one allocation, length/align=1.
 #Export(c) jet_rt_logical_env_get_os: fn(key: I64, data_out: I64, len_out: I64) -> I64 {
     rt_test_reads_text(I64{69}, key)
-    root: logical_environment_current()
     rt_text_store(data_out, I64{0})
     rt_text_store(len_out, I64{0})
+    row: logical_environment_startup_row(rt_text_data(key), rt_text_len(key))
+    if (row == I64{0}) { return I64{0} }
+    if (row > I64{0}) {
+        value: logical_environment_startup_value(row)
+        length: host_startup_byte_length(value)
+        rt_text_store(data_out, logical_environment_copy(value, length))
+        rt_text_store(len_out, length)
+        return I64{1}
+    }
+    root: logical_environment_current()
     shared_acquire(root, false)
     entry: logical_environment_find(root, rt_text_data(key), rt_text_len(key))
     present := I64{0}
