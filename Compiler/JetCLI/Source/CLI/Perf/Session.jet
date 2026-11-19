@@ -745,13 +745,10 @@ jet_cli_perf_session_receipt: fn(action: String, argv: [String], source: String?
     sampling := CanonicalJSON.Null
     if sampled {
         cpu: lenses.contains("cpu")
-        // The lenses are cpu, memory, alloc and topdown, in that order
-        // (jet_cli_perf_session_lenses), so each row is written from its name.
+        // Each lens the run took, in jet_cli_perf_session_lenses's order:
+        // `causal` rides on `cpu`'s samples, so its run names both.
         named := [CanonicalJSON]{}
-        if cpu -> named.push(CanonicalJSON.String("cpu"))
-        if lenses.contains("memory") -> named.push(CanonicalJSON.String("memory"))
-        if lenses.contains("alloc") -> named.push(CanonicalJSON.String("alloc"))
-        if lenses.contains("topdown") -> named.push(CanonicalJSON.String("topdown"))
+        loop lens in lenses -> named.push(CanonicalJSON.String("{lens}"))
         sampling = CanonicalJSON.Object(
             [CanonicalJSONField]{
                 {key: "allocations", value: CanonicalJSON.String("call-sites")},
