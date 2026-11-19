@@ -282,13 +282,13 @@ jet_cli_debug_build: fn(entry: String, scratch: String, deep_checks: DeepChecks,
 
 // Debug the built `image`, whose `run` is in the source file `entry` with
 // the text `lines`, run with `program_args` and the environment `env` (None:
-// jet's own), with the session's held check `held`, which starts opening
-// here unless it is already or the session didn't build the image
-// (jet_cli_debug_eval_held_slot). An `entry` of "" is the source the image's
-// line table names, read if it is there. A replay (`env` names JET_REPLAY)
-// and a recording (`record`) need an image that links the runtime's
-// observation start, where both begin; a recording is published when the
-// session ends.
+// jet's own), with the session's held checks `held`, which start opening
+// here unless they already are; the program's only when the session built
+// the image (jet_cli_debug_eval_held_slot). An `entry` of "" is the source
+// the image's line table names, read if it is there. A replay (`env` names
+// JET_REPLAY) and a recording (`record`) need an image that links the
+// runtime's observation start, where both begin; a recording is published
+// when the session ends.
 jet_cli_debug_session: fn(image: String, entry: String, lines: [String], scratch: String, breaks: [NativeBreak], program_args: [String], deep_checks: DeepChecks, dap: Bool, env: [String]?, record: JetCLIDebugRecord?, color: Bool, held: JetCLIDebugEvalHeldShared) -[FS, Env, Exec, IO, Net, Time, Rand, FFI.Asm]> JetCLIPlan Never! {
     session := NativeSession.start(image, cli_files.join(scratch, "output.txt")) ?? return jet_cli_debug_unavailable(err, color)
     if env != None && !session.replay_start {
@@ -348,8 +348,10 @@ jet_cli_debug_attach: fn(pid: Int, scratch: String, deep_checks: DeepChecks, col
     level: session.level()
     argv: jet_cli_debug_eval_argv(deep_checks, level)
     // The process's image was built before the session, so evaluations
-    // compile with no held check (jet_cli_debug_eval_held_slot).
+    // have no held check of the program, only of the package's cut
+    // (jet_cli_debug_eval_held_slot).
     held: jet_cli_debug_eval_held_slot()
+    jet_cli_debug_eval_held_start(held, source_file, argv, color: color)
     session.evaluate_with(JetCLIDebugEvaluator{entry: source_file, argv: argv, color: color, held: held})
     lines: (cli_files.read(source_file) ?? "").split("\n").to_list()
     file: cli_files.basename(source_file)

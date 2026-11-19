@@ -49,7 +49,12 @@
 // nothing earlier is refused with E2237 (the last at the same stop, whose
 // frame ids still hold). A replay refused before its session began (a
 // recording of other source, E3621) answers every request with that
-// refusal (jet_cli_dap_refused).
+// refusal (jet_cli_dap_refused). `jump` ({"event": N}), `back`
+// ({"count": K}, optional) and `events`, requests of Jet's own, are the
+// console's: `jump` and `back` answer with the event they go to and
+// report its stop with reason `goto`; `events` answers with the replay's
+// history, each event's `event`, `reason`, `function`, `file` and `line`
+// and whether it is `current`.
 // `dataBreakpointInfo` and `setDataBreakpoints` are the console's `watch`:
 // a local or a field path of a frame of the stopped task, which stops at
 // each write that changes it, reported as a `data breakpoint` stop whose
@@ -351,6 +356,57 @@ JetCLIDap: struct {
                     }
                 }
             }
+            "jump" | "back" -> {
+                if !self.launched || !session.alive() {
+                    return self.fail(request, "the program is not paused")
+                }
+                refusal: session.replay_refusal("`{request.command}`")
+                if refusal != "" -> return self.refuse(request, NATIVE_DEBUG_REFUSED, refusal)
+                latest: session.latest_event()
+                event := jet_cli_dap_int(request.arguments, "event")
+                if request.command == "jump" && (event < 0 || event > latest) {
+                    return self.fail(request, "`jump` needs an event, 0 to {latest}")
+                }
+                if request.command == "back" {
+                    count: jet_cli_dap_int(request.arguments, "count")
+                    event = session.back_event(if count < 0 -> 0 else -> count) ?? {
+                        nothing: if count <= 0 && session.watches.len() > 0 -> "the replay holds no stop at a watch before this one" else -> "the replay holds no event that far back"
+                        return self.refuse(request, NATIVE_DEBUG_REFUSED, nothing)
+                    }
+                }
+                if session.jump(event) == {
+                    .Ok(stop) -> {
+                        if session.notes != "" {
+                            self.event("output", "{{\"category\":\"console\",\"output\":{foundation_json_quote(session.notes)}}}")
+                            session.notes = ""
+                        }
+                        self.respond(request, "{{\"event\":{event}}}")
+                        self.report(session, stop, "goto")
+                    }
+                    .Err(failure) -> {
+                        self.respond(request, "{{}}")
+                        self.stopped_by(failure)
+                    }
+                }
+            }
+            "events" -> {
+                if !self.launched || !session.alive() {
+                    return self.fail(request, "the program is not paused")
+                }
+                refusal: session.replay_refusal("`events`")
+                if refusal != "" -> return self.refuse(request, NATIVE_DEBUG_REFUSED, refusal)
+                current: session.moves.len() - 2
+                rows := [String]{}
+                loop (index, made) in session.moves {
+                    if index > 0 {
+                        rows.push(jet_cli_dap_event(index - 1, made.reached, current: index - 1 == current))
+                    }
+                }
+                loop step in 0..<session.ahead.len() {
+                    rows.push(jet_cli_dap_event(current + 1 + step, session.ahead[session.ahead.len() - 1 - step].reached))
+                }
+                self.respond(request, "{{\"events\":[{rows.join(",")}]}}")
+            }
             "dataBreakpointInfo" -> {
                 if !self.launched || !session.alive() {
                     return self.fail(request, "the program is not paused")
@@ -609,7 +665,7 @@ JetCLIDap: struct {
                         return
                     }
                 }
-                "stackTrace" | "scopes" | "variables" | "evaluate" | "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue" -> {
+                "stackTrace" | "scopes" | "variables" | "evaluate" | "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue" | "jump" | "back" | "events" -> {
                     self.waiting.push(request.move())
                 }
                 else -> self.handle(session, request.move(), entry, deep_checks)
@@ -1057,6 +1113,20 @@ jet_cli_dap_data_place: fn(id: String) -> {stop: Int, index: Int, name: String} 
 jet_cli_dap_no_data: fn(detail: String) -> String Never! {
     report: native_debug_report(NATIVE_DEBUG_REFUSED, detail)
     "{{\"dataId\":null,\"description\":{foundation_json_quote(report.what)},\"jetCode\":\"{NATIVE_DEBUG_REFUSED}\"}}"
+}
+
+// One event of `events`: event `event`, the stop `reached` (none when it
+// was not reached), `current` when the program is at it.
+jet_cli_dap_event: fn(event: Int, reached: NativeStop?, current: Bool{false}) -> String Never! {
+    place := ""
+    reason := ""
+    if reached == .Val(stop) {
+        reason = ",\"reason\":{foundation_json_quote(stop.reason)}"
+        if stop.frame == .Val(frame) {
+            place = ",\"function\":{foundation_json_quote(frame.function)},\"file\":{foundation_json_quote(frame.file)},\"line\":{frame.line}"
+        }
+    }
+    "{{\"event\":{event}{reason}{place},\"current\":{current}}}"
 }
 
 // A data breakpoint not placed, refused with the registered diagnostic

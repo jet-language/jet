@@ -1,14 +1,16 @@
-// A session's held check answers only from the sources the session built
-// its image from (DebugCompile.jet jet_cli_debug_eval_held_done): the
-// first open's sources are the image's, by each file's digest; a session
-// that didn't build its image, or whose first open read nothing, opens no
-// held check, so its evaluations compile.
-use jet_cli.[JetCLIDebugEvalHeldOpen, JetCLIDebugEvalHeldShared, JetCLIDebugEvalHeldStamp, jet_cli_debug_eval_held_claim, jet_cli_debug_eval_held_done, jet_cli_debug_eval_held_slot, jet_cli_debug_eval_image, jet_cli_debug_eval_image_same]
+// A session's held check of the program answers only from the sources the
+// session built its image from (DebugCompile.jet
+// jet_cli_debug_eval_held_done): the first open's sources are the image's,
+// by each file's digest; a session that didn't build its image, or whose
+// first open read nothing, opens no held check of the program, so its
+// evaluations compile. The held check of the package's cut calls none of
+// the image's functions, and opens at every session.
+use jet_cli.[JetCLIDebugEvalHeldCutOpen, JetCLIDebugEvalHeldOpen, JetCLIDebugEvalHeldShared, JetCLIDebugEvalHeldStamp, jet_cli_debug_eval_held_claim, jet_cli_debug_eval_held_cut_claim, jet_cli_debug_eval_held_cut_done, jet_cli_debug_eval_held_done, jet_cli_debug_eval_held_slot, jet_cli_debug_eval_image, jet_cli_debug_eval_image_same]
 
 // The digests of the sources `sources`, as an open that read them and
 // didn't open gives them.
 held_test_digests: fn(sources: [String:String]) -> [String:String]? Never! {
-    jet_cli_debug_eval_image(JetCLIDebugEvalHeldOpen{held: None, missed: Val(JetCLIDebugEvalHeldStamp{sources: sources})})
+    jet_cli_debug_eval_image(JetCLIDebugEvalHeldOpen{held: None, missed: Val(JetCLIDebugEvalHeldStamp{sources: sources, keys: [String:String]{}})})
 }
 
 // Whether the held check `held` knows the sources its image was built from.
@@ -23,9 +25,18 @@ held_test_image: fn(held: JetCLIDebugEvalHeldShared, sources: [String:String]) -
     jet_cli_debug_eval_image_same(permit.value.image, held_test_digests(sources))
 }
 
-#Test("a session that runs an image built before it opens no held check") {
+#Test("a session that runs an image built before it opens no held check of the program") {
     held: jet_cli_debug_eval_held_slot()
     assert(!jet_cli_debug_eval_held_claim(held))
+}
+
+#Test("every session opens the held check of the package's cut, once at a time") {
+    held: jet_cli_debug_eval_held_slot()
+    assert(jet_cli_debug_eval_held_cut_claim(held))
+    assert(!jet_cli_debug_eval_held_cut_claim(held))
+    unopened: JetCLIDebugEvalHeldCutOpen{open: JetCLIDebugEvalHeldOpen{held: None, missed: None}, names: [String:Int]{}}
+    jet_cli_debug_eval_held_cut_done(held, unopened)
+    assert(jet_cli_debug_eval_held_cut_claim(held))
 }
 
 #Test("the image's sources are the first open's, file by file") {
@@ -40,7 +51,7 @@ held_test_image: fn(held: JetCLIDebugEvalHeldShared, sources: [String:String]) -
     held: jet_cli_debug_eval_held_slot(built: true)
     assert(jet_cli_debug_eval_held_claim(held))
     sources: ["prog.jet": `run: fn() {}`]
-    opened: JetCLIDebugEvalHeldOpen{held: None, missed: Val(JetCLIDebugEvalHeldStamp{sources: sources})}
+    opened: JetCLIDebugEvalHeldOpen{held: None, missed: Val(JetCLIDebugEvalHeldStamp{sources: sources, keys: [String:String]{}})}
     read: jet_cli_debug_eval_image(opened)
     jet_cli_debug_eval_held_done(held, opened, read)
     assert(held_test_built(held))

@@ -110,6 +110,21 @@ NativeEvalImage: struct {
     owned: Bool,
 }
 
+// A read of the image's code facts on a task of its own
+// (NativeSession.read_facts): `cell` holds them once `done` wakes the
+// session waiting for them (NativeSession.eval_facts).
+NativeEvalRead: struct {
+    cell: Shared<NativeEvalFacts>,
+    done: Condition,
+}
+
+// The image's code facts, None when the read couldn't read the image, and
+// whether the read is under way.
+NativeEvalFacts: struct {
+    image: Shared<NativeEvalImage>?{None},
+    reading: Bool{true},
+}
+
 // The captures a call passes in its registers: one register of a call's six
 // holds the result's cell. More go by a table of their addresses.
 NATIVE_EVAL_CAPTURES: 5

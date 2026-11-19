@@ -217,7 +217,9 @@ NativeWatchSpan: struct {
 // `mark`). Each names the breakpoints it ran with (`armed`) and their
 // rules (each one's version, by breakpoint number), which the session
 // keeps (NativeSession.arm), and keeps the watches set just before it and
-// the numbers of the watches it ran with.
+// the numbers of the watches it ran with. The stop it reached when it was
+// made is the replay's history: event k is the stop of move k + 1, event
+// 0 the launch's.
 NativeMove: struct {
     word: String,
     armed: [Int],
@@ -226,6 +228,7 @@ NativeMove: struct {
     watching: [Int],
     settle: Bool,
     mark: NativeMark,
+    reached: NativeStop?{None},
 }
 
 // A point of a replayed run: the `pass`-th time (from 1) that task `task`
@@ -452,10 +455,12 @@ NativeSession: struct {
     // What compiles the expressions `print`, `watch`, conditions and
     // logpoints evaluate (NativeEval.jet); None evaluates nothing. Each
     // compiled expression is kept by its source line and text, and the
-    // image's code facts placing them are read once.
+    // image's code facts placing them are read once, from the session's
+    // `evaluate_with` on, on a task of their own (`eval_read`).
     evaluator: NativeEvaluator?{None},
     evals: [String:Shared<NativeEval>]{[String:Shared<NativeEval>]{}},
     eval_image: Shared<NativeEvalImage>?{None},
+    eval_read: NativeEvalRead?{None},
     // A `syscall` instruction of the image's code, which forks and code
     // mappings run (syscall_site); 0 until the first needs one.
     syscall: Int{0},
@@ -481,6 +486,9 @@ NativeSession: struct {
     argv: [String]{[String]{}},
     moves: [NativeMove]{[NativeMove]{}},
     asks: [NativeWatchAsk]{[NativeWatchAsk]{}},
+    // The moves a `jump` back took off the end of `moves`, the next event's
+    // last, which a `jump` forward makes again. A new move drops them.
+    ahead: [NativeMove]{[NativeMove]{}},
     // Whether a reverse command is making the moves again, which records
     // none of them twice.
     rerunning: Bool{false},
@@ -736,9 +744,25 @@ NativeSession: struct {
         self.breakpoints.sort_by(fn(left: NativeBreakpoint, right: NativeBreakpoint) { left.number <=> right.number })
     }
 
-    // Compile the expressions of the session with `evaluator`.
+    // Compile the expressions of the session with `evaluator`, and start
+    // reading the image's code facts they are placed against (read_facts).
     evaluate_with: fn(&self, evaluator: &&NativeEvaluator) Never! {
         self.evaluator = Val(evaluator.move())
+        self.read_facts()
+    }
+
+    // Starts reading the code facts of the session's image on a task of
+    // their own (native_eval_facts_read), in place of any it has, while the
+    // program runs to its first stop, so the first evaluation doesn't read
+    // them (eval_facts).
+    read_facts: fn(&self) Never! {
+        cell: Shared{NativeEvalFacts{}}
+        done: Condition.new()
+        self.eval_image = None
+        self.eval_read = Val(NativeEvalRead{cell: cell, done: done})
+        binary: "{self.binary}"
+        reading: task native_eval_facts_read(cell, done, binary)
+        reading.detach()
     }
 
     // The rule of breakpoint `number`, listed by `breaks` as `shown`:
@@ -1001,15 +1025,18 @@ NativeSession: struct {
         Err(native_eval_refused("the expression has no plan"))
     }
 
-    // The image's code facts evaluations place code against, read at the
-    // first.
+    // The image's code facts evaluations place code against: the read
+    // `read_facts` started, once it is done, else read now.
     eval_facts: fn(&self) -> Shared<NativeEvalImage> NativeEvalRefused! {
         if self.eval_image == .Val(found) -> return Ok(found)
+        if self.eval_read == .Val(read) {
+            if native_eval_facts_wait(read) == .Val(cell) {
+                self.eval_image = Val(cell)
+                return Ok(cell)
+            }
+        }
         elf: native_files.read_bytes(self.binary) ?? return Err(native_eval_refused("couldn't read the program `{self.binary}`: {err}"))
-        symbols: native_fix_symbols(elf)
-        code: native_elf_code(elf)
-        owned: native_eval_owned(symbols, code)
-        cell: Shared{NativeEvalImage{symbols: symbols, code: code, owned: owned}}
+        cell: native_eval_image_of(elf)
         self.eval_image = Val(cell)
         Ok(cell)
     }
@@ -1519,10 +1546,13 @@ NativeSession: struct {
         self.spawn(args) ?? return Err(err)
         if self.recording() {
             self.asks = [NativeWatchAsk]{}
+            self.ahead = [NativeMove]{}
             spawned: self.move_now("spawn")
             self.moves = [NativeMove]{spawned, self.move_now("go")}
         }
-        self.continue_run()
+        first: self.continue_run() ?? return Err(err)
+        if self.recording() && self.moves.len() == 2 -> self.moves[1].reached = Val(first)
+        Ok(first)
     }
 
     // Start the program with `args`, stopped before its first instruction,
@@ -1661,7 +1691,9 @@ NativeSession: struct {
         self.watches = [NativeWatch]{}
         self.evals = [String:Shared<NativeEval>]{}
         self.eval_image = None
+        self.eval_read = None
         self.syscall = 0
+        if self.evaluator != None -> self.read_facts()
         Ok()
     }
 
@@ -1727,7 +1759,9 @@ NativeSession: struct {
     // launch without `stopOnEntry`).
     settle_launch: fn(&self, first: NativeStop) -> NativeSettled NativeDebugError! {
         if self.recording() && self.moves.len() == 2 -> self.moves[1].settle = true
-        self.settle(first, "c", 0)
+        settled: self.settle(first, "c", 0) ?? return Err(err)
+        if self.recording() && self.moves.len() == 2 -> self.moves[1].reached = Val(settled.stop)
+        Ok(settled)
     }
 
     continue_run: fn(&self) -> NativeStop NativeDebugError! {
@@ -2083,6 +2117,37 @@ NativeSession: struct {
                 }
                 return Ok(NativeDebugStep{text: shown, stop: settled.stop})
             }
+            "jump" | "back" -> {
+                refusal: self.replay_refusal("`{word}`")
+                if refusal != "" {
+                    return Ok(NativeDebugStep{text: native_debug_refused(refusal), stop: stop})
+                }
+                latest: self.latest_event()
+                event := -1
+                if word == "jump" {
+                    event = Int.parse(operand) ?? -1
+                    if event < 0 || event > latest {
+                        return Ok(NativeDebugStep{text: "Jump needs an event number `events` lists, 0 to {latest}, as `jump 1`\n", stop: stop})
+                    }
+                }
+                if word == "back" {
+                    count: if operand == "" -> 0 else -> Int.parse(operand) ?? -1
+                    if count < 0 || (operand != "" && count == 0) {
+                        return Ok(NativeDebugStep{text: "Back needs a count of events, as `back 2`, or none\n", stop: stop})
+                    }
+                    event = self.back_event(count) ?? {
+                        nothing: if count == 0 && self.watches.len() > 0 -> "the replay holds no stop at a watch before this one" else -> "the replay holds no event that far back"
+                        return Ok(NativeDebugStep{text: native_debug_refused(nothing), stop: stop})
+                    }
+                }
+                settled: self.jump(event) ?? return Err(err)
+                shown: self.report(settled.stop, file, lines) ?? return Err(err)
+                return Ok(NativeDebugStep{text: "Event {event}\n{shown}", stop: settled.stop})
+            }
+            "events" -> {
+                refusal: self.replay_refusal("`events`")
+                text = if refusal != "" -> native_debug_refused(refusal) else -> self.events_text()
+            }
             "b" | "break" -> text = self.break_command(operand, file) ?? return Err(err)
             "log" -> text = self.log_command(operand, file) ?? return Err(err)
             "breaks" -> text = self.breaks_text()
@@ -2333,13 +2398,17 @@ NativeSession: struct {
     // Run `word` (`c`, `n`, `s` or `f`) and settle where it stops. A replay
     // records it as a move.
     run: fn(&self, word: String) -> NativeSettled NativeDebugError! {
-        if self.recording() && self.moves.len() > 0 {
+        recorded: self.recording() && self.moves.len() > 0
+        if recorded {
             made: self.move_now(word)
             self.moves.push(made)
+            self.ahead = [NativeMove]{}
         }
         depth: if word == "c" -> 0 else -> self.jet_depth() ?? return Err(err)
         first: self.advance(word) ?? return Err(err)
-        self.settle(first, word, depth)
+        settled: self.settle(first, word, depth) ?? return Err(err)
+        if recorded -> self.moves[self.moves.len() - 1].reached = Val(settled.stop)
+        Ok(settled)
     }
 
     // The stop to report after `word` (begun `depth` Jet frames deep) first
@@ -3569,6 +3638,9 @@ NativeSession: struct {
     reverse: fn(&self, word: String) -> NativeSettled NativeDebugError! {
         self.ready() ?? return Err(err)
         self.nowhere = ""
+        // The moves it goes back from are made again, and the events they
+        // reached with them.
+        self.ahead = [NativeMove]{}
         before := [Int]{}
         loop watch in self.watches -> before.push(watch.number)
         // Watches set at this stop belong to no move yet.
@@ -3653,8 +3725,74 @@ NativeSession: struct {
     // command goes back to. `before` numbers the watches there were.
     back: fn(&self, before: [Int]) -> NativeSettled NativeDebugError! {
         stop: self.rerun(self.moves.len(), -1, [Int]{}) ?? return Err(err)
+        self.moves[self.moves.len() - 1].reached = Val(stop)
         self.notes = self.ended_watches(before)
         Ok(native_reverse_settled(stop))
+    }
+
+    // The latest event of the replay's history (NativeMove), counting the
+    // events a `jump` back left ahead.
+    latest_event: fn(self) -> Int Never! { self.moves.len() - 2 + self.ahead.len() }
+
+    // The event `back` goes to from this one: `count` events back; with no
+    // count (0), the latest earlier stop at one of the session's watches,
+    // or one event back when it has none. None when the history holds none.
+    back_event: fn(self, count: Int) -> Int? Never! {
+        current: self.moves.len() - 2
+        if count > 0 || self.watches.len() == 0 {
+            event: current - (if count > 0 -> count else -> 1)
+            return if event >= 0 -> Val(event) else -> None
+        }
+        loop step in 0..<current {
+            event: current - 1 - step
+            if self.moves[event + 1].reached == .Val(stop) {
+                loop watch in self.watches {
+                    if stop.reason == "watchpoint {watch.number}" -> return Val(event)
+                }
+            }
+        }
+        None
+    }
+
+    // `jump N` in a replay: to event `event` of its history, back or
+    // forward: the moves up to the one that reached it, made again in a new
+    // run of the program, come back to its stop, and the moves after it
+    // wait in `ahead` for a jump forward. A note says when the stop is not
+    // the one the event recorded. Watches set after it end, each with a
+    // note.
+    jump: fn(&self, event: Int) -> NativeSettled NativeDebugError! {
+        self.ready() ?? return Err(err)
+        self.nowhere = ""
+        before := [Int]{}
+        loop watch in self.watches -> before.push(watch.number)
+        // Watches set at this stop belong to no move yet.
+        self.asks = [NativeWatchAsk]{}
+        loop self.moves.len() > event + 2 -> self.ahead.push(self.moves.pop() ?? break)
+        loop self.moves.len() < event + 2 -> self.moves.push(self.ahead.pop() ?? break)
+        stop: self.rerun(self.moves.len(), -1, [Int]{}) ?? return Err(err)
+        same: if self.moves[self.moves.len() - 1].reached == .Val(was) -> native_same_stop(was, stop) else -> true
+        self.notes = self.ended_watches(before)
+        if !same {
+            self.notes = "{self.notes}The replay came to another stop than event {event} reached when it was recorded\n"
+        }
+        Ok(native_reverse_settled(stop))
+    }
+
+    // `events` in a replay: each event of its history (NativeMove) on a
+    // line of its own, `*` marking the current one, as `* 2  prog.jet:21
+    // in run()  breakpoint 1.1`.
+    events_text: fn(self) -> String Never! {
+        current: self.moves.len() - 2
+        text := ""
+        loop (index, made) in self.moves {
+            if index > 0 {
+                text = "{text}{native_event_line(index - 1, made.reached, current: index - 1 == current)}"
+            }
+        }
+        loop step in 0..<self.ahead.len() {
+            text = "{text}{native_event_line(current + 1 + step, self.ahead[self.ahead.len() - 1 - step].reached)}"
+        }
+        text
     }
 
     // A note for each watch of `before` the session no longer has.
@@ -5226,6 +5364,32 @@ native_reverse_settled: fn(stop: NativeStop) -> NativeSettled Never! {
     NativeSettled{stop: stop, hit: hit, said: [NativeSaid]{}}
 }
 
+// Whether `left` and `right` are the same stop: of one kind and reason, in
+// the same function at the same line.
+native_same_stop: fn(left: NativeStop, right: NativeStop) -> Bool Never! {
+    if left.kind != right.kind || left.reason != right.reason -> return false
+    if left.frame == .Val(was) {
+        if right.frame == .Val(now) {
+            return was.function == now.function && was.file == now.file && was.line == now.line
+        }
+        return false
+    }
+    right.frame == None
+}
+
+// The `events` line of event `event`, which reached `reached`; `current`
+// marks it with `*`.
+native_event_line: fn(event: Int, reached: NativeStop?, current: Bool{false}) -> String Never! {
+    mark: if current -> "*" else -> " "
+    if reached == .Val(stop) {
+        if stop.frame == .Val(frame) {
+            return "{mark} {event}  {frame.file}:{frame.line}  in {frame.function}()  {stop.reason}\n"
+        }
+        return "{mark} {event}  {stop.reason}\n"
+    }
+    "{mark} {event}  not reached\n"
+}
+
 // The frame `lookup` lies in: its Jet function, file and line, or, outside
 // Jet code, the DWARF function's name (`?` without one) and line 0.
 native_frame_at: fn(image: NativeImage, lookup: Int) -> NativeFrame Never! {
@@ -5342,11 +5506,49 @@ native_debug_image: fn(entry: String, out_dir: String) -> String Never! {
     native_files.join(out_dir, native_files.basename(entry).before(".jet"))
 }
 
+// The code facts of the image `binary` (NativeEvalImage), read on a task of
+// their own into `cell` (native_eval_image_fill), which `done` then wakes
+// its waiters for (native_eval_facts_wait). A read that stops still ends
+// the reading.
+native_eval_facts_read: fn(cell: Shared<NativeEvalFacts>, done: Condition, binary: String) Never! {
+    reading: task native_eval_image_fill(cell, binary)
+    _ := reading.join() ?? false
+    permit := cell.guard_edit()
+    permit.value.reading = false
+    done.notify_all()
+}
+
+// The code facts of the read `read`, once it is done; None when it read
+// none.
+native_eval_facts_wait: fn(read: NativeEvalRead) -> Shared<NativeEvalImage>? Never! {
+    permit: read.cell.guard_edit()
+    permit.wait(read.done, fn(facts) { !facts.reading }) ?? return None
+    permit.value.image
+}
+
+// Reads the code facts of the image `binary` into `cell`; false when it
+// can't be read.
+native_eval_image_fill: fn(cell: Shared<NativeEvalFacts>, binary: String) -> Bool {
+    elf: native_files.read_bytes(binary) ?? return false
+    image: native_eval_image_of(elf)
+    permit := cell.guard_edit()
+    permit.value.image = Val(image)
+    true
+}
+
+// The code facts of the ELF image `elf`.
+native_eval_image_of: fn(elf: [U8]) -> Shared<NativeEvalImage> Never! {
+    symbols: native_fix_symbols(elf)
+    code: native_elf_code(elf)
+    owned: native_eval_owned(symbols, code)
+    Shared{NativeEvalImage{symbols: symbols, code: code, owned: owned}}
+}
+
 // The `(Jet)` console over a session: `jet debug` and the Canvas native tier
 // both speak it. Every stop prints the Jet source line with its `<- here`
 // caret and the frame's locals; frames without Jet line information (the
 // runtime) are never shown. Each readout starts with a capital.
-NATIVE_DEBUG_HELP: "Commands: step (s), next (n), continue (c), finish (f), reverse-step (rs), reverse-next (rn), reverse-finish (rf), reverse-continue (rc), break LINE|FILE:LINE|FUNCTION [if EXPR] (b), log FILE:LINE \"TEXT {{EXPR}}\", watch PLACE, why PLACE, breaks, delete N, frame N, up, down, locals, print NAME (p NAME), backtrace (bt), tasks, fix, help (h), quit (q)"
+NATIVE_DEBUG_HELP: "Commands: step (s), next (n), continue (c), finish (f), reverse-step (rs), reverse-next (rn), reverse-finish (rf), reverse-continue (rc), jump N, back [K], events, break LINE|FILE:LINE|FUNCTION [if EXPR] (b), log FILE:LINE \"TEXT {{EXPR}}\", watch PLACE, why PLACE, breaks, delete N, frame N, up, down, locals, print NAME (p NAME), backtrace (bt), tasks, fix, help (h), quit (q)"
 
 // The runtime's observation start, which an image links when it has a task,
 // a channel, a live value or an event (JetRuntime ObserveLive.jet): a replay
