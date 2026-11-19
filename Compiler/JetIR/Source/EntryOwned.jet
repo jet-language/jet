@@ -39,6 +39,15 @@ use jet_foundation.[name_rows_value]
 // moves. jet_rt_process_entry_return only marks the end of a rooted
 // process, so an owned main drops its calls.
 // Int shifts are not here: jet_int_shl/shr read the scheduler on every call.
+// The checked Int-to-Float widening stops through the same report as the
+// numeric stop (Numeric.jet numeric_widen_stop), and to_bits is a bit copy.
+// The core.perf routes (PerfSamples.jet) do nothing while zones are off,
+// and only an observed program turns them on: `jet perf run` builds with
+// `--observe` and `jet perf attach` needs the flight ring the observation
+// start opens, both of which link jet_rt_observe_link or the observation
+// start, which keep the root. So in an owned main a zone, frame, plot or
+// progress point is the zones word's test, and keeps the root's stop polls
+// and cleanup scopes out of the program it measures.
 //
 // The generated CLI parser's routes (#6328 S2) are root-free too: the
 // arguments (HostStartup.jet: the owned main captures them first, as
@@ -62,6 +71,7 @@ IR_ROOT_FREE_ROUTES: #run { [String]{
     "jet_int_bit_or",
     "jet_int_bit_xor",
     "jet_int_checked_fixed",
+    "jet_int_checked_widen",
     "jet_int_compare",
     "jet_int_div",
     "jet_int_div_euclid",
@@ -77,6 +87,11 @@ IR_ROOT_FREE_ROUTES: #run { [String]{
     "jet_int_sub",
     "jet_journey_origin",
     "jet_journey_reset",
+    "jet_perf_frame",
+    "jet_perf_plot",
+    "jet_perf_progress",
+    "jet_perf_zone_close",
+    "jet_perf_zone_open",
     "jet_rt_alloc",
     "jet_rt_alloc_8",
     "jet_rt_alloc_value",
@@ -134,6 +149,7 @@ IR_ROOT_FREE_ROUTES: #run { [String]{
     "jet_rt_u64_to_string",
     "jet_rt_unreachable",
     "jet_std_io_args",
+    "jet_std_math_to_bits",
     "jet_std_process_exit",
     "jet_string_bytes",
     "jet_string_from_bytes",
@@ -146,8 +162,10 @@ IR_ROOT_FREE_ROUTES: #run { [String]{
 
 // The runtime routes a stop edge or a drop routine may call with nothing a
 // process exit could observe: they free memory, or enter and leave a
-// cleanup scope (an owned main drops those).
+// cleanup scope (an owned main drops those), or close a zone, which writes
+// a row only in an observed program, and that keeps the root.
 IR_ENTRY_QUIET_ROUTES: #run { [String]{
+    "jet_perf_zone_close",
     "jet_rt_block_release",
     "jet_rt_cleanup_enter",
     "jet_rt_cleanup_leave",
