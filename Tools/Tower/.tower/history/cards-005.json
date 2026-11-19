@@ -18503,6 +18503,100 @@
       "completedAt": "2026-11-16T23:03:12.827Z",
       "questions": [],
       "retiredAt": "2026-11-19T23:15:39.458Z"
+    },
+    {
+      "id": "c0hjzhes",
+      "num": 6979,
+      "title": "#Inline(Always) is a guarantee, not a hint: every direct call is inlined on every tier, or sema refuses it",
+      "body": "Owner order 2026-11-15: \"#Inline(Always) must be a guarantee not a hint\". Today (dev d304f826ac) it is honored only at O1/O2 and only when the inliner agrees: OptInline.jet runs at O1 and O2 only, so O0 (jet run, jet dev, compile-time code) never inlines a marked call; the `inline: off` build option and `--inline=off` drop marked inlines too; and the inliner silently keeps a marked call when the callee writes a parameter, is a last-owner routine, reads context.trace, has stops in another file, or reveals a fixed value to a public result. Sema refuses only recursion (E0917), address-taking (E0918) and size (E0919). Nothing proves that zero marked calls remain.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "All 4 criteria met; c1 proved on p233 (dev 22b864b785)."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "c1 is still open on dev 78f4541780. The evidence so far is IR Lint call.marked on ir.build (O0), ir.opt (O1/O2), CoreLibrary and eval.batch, plus the InlineContracts golden with inspect choices on O0/O1/O2. Missing: (1) a committed test that runs the zero-marked-Call census over Examples, Core and Compiler on each tier (the lint stops a build; no test counts); (2) the web path (calls from the JS partition into a marked #Export(wasm) function)."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "p206 (dev fe8c7b89ef): census-r3 dc38cfa29d (the call.marked IR lint, E1016/E1017, E0917 for cycles, guarantee text) and core-abs f9128ac736 landed. golden Contracts/InlineContracts passes; the suites show no new exit-101. Three ui snapshots fail: inline_always_scrub has a wrong fixture (ReadOnlyValueNotOwned fires before E1016), and cycle and reads_trace need their real spans blessed. Three O2 .err.out files cite shifted Math.jet lines. One fix SUB from PrecompiledCore-4; c1, c2 and c4 are met after it."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "p205 (dev 16c1bda2d9): inspect-choices JSON line landed as 583f538540; cases build_entry/inspect_choices_shows_each_inlined_call_and_why passes. c1's census and golden, c2, c3 and c4 are queued for p206 (inline-always-refusals-census-r3 and core-abs-inline-always), with a full suite and self-build that must show zero new exit-101s."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "p204 landed c1's first SUB (686cdaaee7), but its proof case inspect_choices_shows_each_inlined_call_and_why fails on the p204 batch compiler: 'JSON value differs: expected 7, got 4' on jet inspect choices -O2 --json. Sent back to PrecompiledCore-4 as its top priority."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every direct call to an `#Inline(Always)` function is inlined on every tier: O0 (jet run, jet dev and compile-time code), O1, O2 and web where applicable. No build option removes a marked inline: `inline: off` and `--inline=off` cover only unmarked calls. Proof: a census after inlining on each tier counts zero Call ops whose callee is marked over Examples, Core and Compiler, run by a committed test; an example with golden output on O0/O1/O2 whose `jet inspect choices` lists every marked site as inlined.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p233 batch compiler (dev 22b864b785), commits 6bbd1eed99 (the inline_census suite) + cc69028f04: jet test Compiler --profile inline_census rc=0 PASS (Examples, Core and Compiler at O0/O1/O2 count zero Call ops to #Inline(Always) callees); jet test Compiler --profile golden --filter Contracts/InlineContracts PASS on o0/o1/o2; jet test Compiler --profile cases --filter inspect_choices_shows_each_inlined_call_and_why PASS (jet inspect choices lists every marked site as inlined).",
+          "at": "2026-11-16T23:33:46.966Z"
+        },
+        {
+          "n": 2,
+          "text": "The inliner never quietly leaves a marked call: each reason it refuses a site today (a written parameter, a last-owner routine, a context.trace read, stops in another file, a fixed value revealed to a public result, and any other) is either handled by the inliner for marked callees or refused by sema with a registered diagnostic (what/why/fix and a UI snapshot), so a marked call that reaches codegen uninlined is an internal compiler error (exit 101), never a silent call. Proof: one UI snapshot per new diagnostic and one test per former refusal reason.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed c9a590769f (p213, dev 78f4541780). p213 batch compiler: jet test Compiler/JetIR/Source/OptInline.jet rc=0, with one test per former refusal reason (written parameter, last-owner routine, context.trace read, stops in another file, fixed value revealed to a public result, foreign body). The foreign body, the reason that was silently accepted, is now refused by sema as E1021 (registered, what/why/fix); ui --filter inline_always 7 passed, 0 bad, including the new inline_always_foreign snapshot. A marked call that reaches codegen uninlined stops the build through IR Lint call.marked (ICE). DiagnosticRows --check and DiagnosticCensus --check pass; the census is clean (jet check Core: no E1021 in Core).",
+          "at": "2026-11-16T09:50:12.550Z"
+        },
+        {
+          "n": 3,
+          "text": "Marked bodies cross module, package and precompiled-Core boundaries: a program that calls a Core or another package's `#Inline(Always)` function (for example core.math abs) gets the body inlined, with no call to it in the image on O0/O1/O2. Proof: `jet inspect choices` and an image symbol census for that program on each tier.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p206 batch compiler (dev fe8c7b89ef; core.math.abs marked #Inline(Always) in f9128ac736): jet test Compiler --profile cases --filter build_entry/inline_always_crosses_package_and_core_boundaries → PASS 1 FAIL 0. The case calls abs, Int.abs() and a dependency package's marked gap across module, package and Core boundaries. It runs jet inspect choices on O0/O1/O2 and builds an image on each tier that holds neither core_math_abs nor geom_gap. The p206 suites show no new exit-101 (cases: the same 44 lines as p205).",
+          "at": "2026-11-16T05:34:08.921Z"
+        },
+        {
+          "n": 4,
+          "text": "The marker's reference text and its diagnostics say guarantee: the Markers spec and E0917-E0919 state that every direct call is inlined on every tier or the program is refused, with the full list of refusals. Proof: the spec text and the UI snapshots.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed c9a590769f (p213, dev 78f4541780). p213 batch compiler: the Markers reference text and every refusal (E0917-E0919, E1021) state the guarantee in their Why: every direct call is inlined on every tier or the program is refused, with the full list of refusals. ui --filter inline_always 7 passed, 0 bad (six re-blessed snapshots with the guarantee Why, plus E1021); cases inspect_choices_shows_each_inlined_call_and_why 1/0; golden InlineContracts passes in the p213 golden suite (0 FAIL).",
+          "at": "2026-11-16T09:50:13.747Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-16T01:44:26.232Z",
+      "updated": "2026-11-16T23:33:49.945Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 4,
+      "completedAt": "2026-11-16T23:33:49.945Z",
+      "questions": [],
+      "retiredAt": "2026-11-19T23:54:48.408Z"
     }
   ]
 }
