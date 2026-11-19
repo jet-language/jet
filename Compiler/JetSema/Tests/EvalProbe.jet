@@ -21,12 +21,13 @@ use {
         sema_eval_probe_answers,
         sema_eval_probe_parse,
         sema_eval_probes,
+        sema_eval_probe_function,
         sema_finalize_registration_graph,
         sema_registration_prepare_graph,
     ]
     jet_parser.[parse_source]
     jet_driver.[jet_driver_canonical_effect_module]
-    jet_foundation.[Expr, Span, Type, compiler_threads_single, effect_vocabulary_module, expr_span, jet_target_machine_hosted, module_intern, module_table]
+    jet_foundation.[DIAGNOSTIC_ERROR, Expr, Span, Type, compiler_threads_single, effect_vocabulary_module, expr_span, jet_target_machine_hosted, module_intern, module_table]
 }
 
 // The expressions asked at `offset`.
@@ -35,11 +36,12 @@ EvalProbeAsk: struct {
     texts: [String],
 }
 
-// The answers of a checked fixture, and its checked modules and diagnostics
-// as text.
+// The answers of a checked fixture, its checked modules and diagnostics as
+// text, and its errors.
 EvalProbeRun: struct {
     answers: [SemaEvalProbeAnswer],
     facts: String,
+    errors: [String]{[String]{}},
 }
 
 eval_probe_run: fn(source: String, asks: [EvalProbeAsk], failures: &[String]) -> EvalProbeRun {
@@ -91,6 +93,11 @@ eval_probe_run: fn(source: String, asks: [EvalProbeAsk], failures: &[String]) ->
     if asks.len() > 0 -> graph.eval_probes = Val(handle)
     checked := sema_finalize_registration_graph(graph, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, threads, None)
     run.facts = "{checked.modules:Debug}\n{checked.diagnostics:Debug}"
+    loop diagnostic in checked.diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR {
+            run.errors.push("{diagnostic.code}: {diagnostic.what}")
+        }
+    }
     run.answers = sema_eval_probe_answers(handle)
     run
 }
@@ -268,6 +275,56 @@ run: fn() {
         if refused.expression != None || refused.diagnostics.len() == 0 {
             failures.push("`{text}` parsed as one expression")
         }
+    }
+    eval_probe_report(failures)
+}
+
+// The function `jet debug` compiles for the answer of `text` (probe `probe`,
+// expression `expression` of `run`), appended to `source`, checks clean;
+// its text, or "" when it has none.
+eval_probe_function_checks: fn(source: String, run: EvalProbeRun, probe: Int, expression: Int, text: String, failures: &[String]) -> String {
+    answer: eval_probe_answer(run, probe, expression, failures) ?? return ""
+    function: sema_eval_probe_function(answer, text, "jet_debug_expression_{probe}_{expression}") ?? {
+        failures.push("`{text}` has no function: {answer:Debug}")
+        return ""
+    }
+    rechecked: eval_probe_run("{source}\n{function}", [EvalProbeAsk]{}, failures)
+    if rechecked.errors.len() > 0 {
+        failures.push("the function of `{text}` doesn't check:\n{function}{rechecked.errors.join("\n")}")
+    }
+    function
+}
+
+#Test("eval_probe_function") {
+    failures := [String]{}
+    source: `Box: struct {
+    items: [Int],
+
+    first: fn(self) -> Int { self.items[0] }
+}
+
+run: fn() {
+    total: 3
+    box := Box{items: [Int]{4, 5}}
+    print("{total} {box.first()}")
+}
+`
+    asks: [EvalProbeAsk]{
+        EvalProbeAsk{offset: source.find(`print("{total}`), texts: [String]{"box.items[1] + total", "box.first() > total"}},
+        EvalProbeAsk{offset: source.find("self.items[0]"), texts: [String]{"self.items.len() * 2"}},
+    }
+    probed: eval_probe_run(source, asks, failures)
+    sum: eval_probe_function_checks(source, probed, 0, 0, "box.items[1] + total", failures)
+    if !sum.contains("box: Box") || !sum.contains("total: Int") || !sum.contains(`) -> Int {`) {
+        failures.push("`box.items[1] + total` is not a function of `box` and `total` to Int:\n{sum}")
+    }
+    called: eval_probe_function_checks(source, probed, 0, 1, "box.first() > total", failures)
+    if !called.contains(`) -> Bool {`) {
+        failures.push("`box.first() > total` is not a function to Bool:\n{called}")
+    }
+    own: eval_probe_function_checks(source, probed, 1, 0, "self.items.len() * 2", failures)
+    if !own.contains("jet_debug_self: Box") || !own.contains("jet_debug_self.items.len() * 2") {
+        failures.push("`self` is not the parameter `jet_debug_self`:\n{own}")
     }
     eval_probe_report(failures)
 }

@@ -266,6 +266,7 @@ jet_cli_canvas_debug_open: fn(file: String, source_id: String, revision: String,
         jet_cli_canvas_debug_remove(dir)
         return Err(jet_cli_canvas_debug_unavailable(err))
     }
+    live.evaluate_with(JetCLIDebugEvaluator{entry: file, argv: jet_cli_debug_eval_argv(DeepChecks{}), color: false})
     jet_file: cli_files.basename(file)
     jet_lines: src.split("\n").to_list()
     opened := NativeDebugStep?{None}

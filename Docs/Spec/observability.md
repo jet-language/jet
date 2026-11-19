@@ -576,10 +576,10 @@ D-DBG-VERBS1=A names the commands:
   program.
 - `break <line|file:line|function> [if <expr>]` (`b`) sets a breakpoint.
   `break 12` is line 12 of the file being debugged. With `if`, the breakpoint
-  stops only when the Jet expression holds over the frame's locals. A
-  condition that is not a Bool, or can't be evaluated, stops and says why.
-  Setting it says where the condition runs: the debugger checks it at each
-  hit, which stops the program each time.
+  stops only when the Jet expression holds in the stopped frame. A condition
+  that is not a Bool is refused when it is set; one that fails at a hit
+  stops and says why. Setting it says where the condition runs: the
+  debugger checks it at each hit, which stops the program each time.
 - `log <file:line> "<text with {expr}>"` sets a logpoint. It prints its
   message with each `{expr}` filled in, then the program runs on.
 - `watch <place>` stops at each write that changes a local of the selected
@@ -589,8 +589,8 @@ D-DBG-VERBS1=A names the commands:
 - `breaks` lists the breakpoints and watches by number, as `  2 break
   cart.jet:88 if total < 0` and `  3 watch total`; `delete <n>` removes one.
 - `frame <n>` selects a frame as `backtrace` (`bt`) numbers it. `up` moves
-  toward the callers and `down` back. `locals` and `print` (`p`) read the
-  selected frame until the program moves.
+  toward the callers and `down` back. `locals` and `print <expr>` (`p`)
+  read the selected frame until the program moves.
 - `tasks` lists every task by id: its label, its state (queued, running,
   blocked or paused), what it waits on (`channel receive`) and its Jet
   frames; `*` marks the task the program stopped in. Task 1 is the main
@@ -607,8 +607,24 @@ task's frames come from the stack its fiber saved when it parked.
 
 A step that passes a breakpoint which does not stop goes on to where the
 step would have ended. `jet debug --dap` settles every run the same way
-(`Compiler/JetDebug/Source/Native.jet`, NativeSession.settle), and both read
-expressions with the one evaluator, `Compiler/JetDebug/Source/Debug/Eval.jet`.
+(`Compiler/JetDebug/Source/Native.jet`, NativeSession.settle).
+
+Every expression the debugger is given (`print`, `watch`, a condition, a
+logpoint's message, the adapter's `evaluate`) has one evaluator, the
+compiler (`Compiler/JetDebug/Source/NativeEval.jet`,
+`Compiler/JetCLI/Source/CLI/DebugCompile.jet`). The expression is checked
+where the selected frame stopped, as a function of the locals it reads; one
+with an effect is refused, and the refusal names the effect. The program is
+compiled again with that function, which runs in a fork of the stopped
+program, placed as `fix` places code, with the locals' bytes read from the
+frame; the program itself neither runs nor changes. A value whose type has a
+`debug_view` shows as `locals` shows it, the view run in that same fork. A
+compiled expression is kept per line and text, so a condition compiles once
+and runs in a fork at each hit. The fork runs the program's own runtime, so
+a lock another thread held at the stop is never released there (code that
+takes it fails at the 2 s budget), and a function value runs the image's
+code. An expression reads at most 5 locals, and an inlined frame is not
+evaluated in. A dump runs no code: its `print` shows a local by its name.
 
 A watch on a place in memory takes the CPU's debug registers (at most 4,
 each an aligned 1, 2, 4 or 8 bytes), so the program runs at full speed

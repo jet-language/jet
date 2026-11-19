@@ -156,6 +156,12 @@ use {
         sema_library_effect_find,
         sema_library_effect_resolve,
         sema_library_effect_view,
+        SemaEvalProbe,
+        SemaEvalProbeAnswer,
+        SemaEvalProbes,
+        sema_eval_probe_answers,
+        sema_eval_probe_parse,
+        sema_eval_probes,
     ]
     jet_foundation.[
         AUTHORITY_AMBIENT_BASIC_EFFECTS,
@@ -188,6 +194,7 @@ use {
         decl_table_find_symbol,
         decl_table_key,
         Diagnostic,
+        Expr,
         diagnostic_is_report,
         ModuleID,
         ModuleTable,
@@ -5374,6 +5381,42 @@ jet_driver_compile_borrowed: fn(request: JetDriverCompileRequest) -> JetDriverCo
     result
 }
 
+// The probes of the debugger's question `ask` (JetDriverEvalAsk) for the
+// registration graph: its text parsed at the stop, in the generated
+// coordinates of the module whose source segment holds the asked file's
+// byte. None with no question, when no module's source is the asked file,
+// or when the text doesn't parse (the debugger reads it first, so it
+// reports why).
+jet_driver_eval_probes: fn(ask: JetDriverEvalAsk?, inputs: [SemaRegistrationModuleInput]) -> SemaEvalProbes? {
+    asked: ask ?? return None
+    loop input in inputs {
+        loop segment in input.source_segments {
+            if !jet_driver_eval_path_matches(segment.source_file, asked.path) || asked.offset < segment.source_start {
+                next
+            }
+            at: segment.generated.start + asked.offset - segment.source_start
+            if at >= segment.generated.end -> next
+            parsed: sema_eval_probe_parse(asked.text, at)
+            expression: parsed.expression ?? return None
+            return Val(sema_eval_probes([SemaEvalProbe]{SemaEvalProbe{module_identity: input.module_identity, offset: at, expressions: [Expr]{expression}}}))
+        }
+    }
+    None
+}
+
+// The answers of the eval ask's probes the check of `graph` filled
+// (JetDriverCompileResult.eval_answers): empty without an ask.
+jet_driver_eval_answers: fn(graph: SemaRegistrationGraph) -> [SemaEvalProbeAnswer] {
+    if graph.eval_probes == .Val(probes) -> return sema_eval_probe_answers(probes)
+    [SemaEvalProbeAnswer]{}
+}
+
+// Whether the source path `source` and the line table's `asked` name one
+// file: the same path, or one is the other's trailing components.
+jet_driver_eval_path_matches: fn(source: String, asked: String) -> Bool Never! {
+    source == asked || source.ends_with("/{asked}") || asked.ends_with("/{source}")
+}
+
 JetDriverCompileSelectionRestore: struct {
     mode: JetDriverCompileMode,
     capture_build_program: Bool,
@@ -5792,6 +5835,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     registration_module_count := registration_inputs.len()
     package_policies: jet_driver_registration_package_policies(request, load)
     plugin_facts: jet_driver_plugin_facts(request, registration_inputs, load.package_identity)
+    eval_probes: jet_driver_eval_probes(request.eval_ask, registration_inputs)
     registration_graph := sema_registration_prepare_graph(
         registration_inputs,
         load.imports,
@@ -5810,6 +5854,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         derive_hooks: if request.core_seal -> None else -> sema_host_hook_access(request.eval_config.host_hooks),
         capture_derives: request.core_seal,
     )
+    if eval_probes != None -> registration_graph.eval_probes = eval_probes
     output_intent: if request.mode == JetDriverCompileMode.Test -> SemaOutputIntent.Test else -> request.output_intent
     output_diagnostics: sema_output_resolve(registration_graph, output_intent, request.output_address, jet_driver_entry_selection(load) != None)
     loop diagnostic in output_diagnostics -> registration_graph.diagnostics.push(diagnostic)
@@ -6469,6 +6514,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         loop lint in jet_driver_sql_row_loop_lints(load, checked_functions, registration_graph.symbols) -> load.diagnostics.push(lint)
         jet_driver_trace_step_begin(request.trace_sink, "driver.check.facts")
         result := jet_driver_compile_result(load, load.diagnostics, None, true, trace)
+        result.eval_answers = jet_driver_eval_answers(registration_graph)
         result.cost_report = cost_report.move()
         result.rust_foreign = if jet_driver_rust_foreign_present(registration_graph) -> jet_driver_rust_foreign_facts(registration_graph) else -> jet_driver_rust_foreign_empty()
         result.foreign_link = jet_driver_foreign_link_facts(runtime_semantic_modules, load.source_files)
@@ -6674,6 +6720,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     result.rust_foreign = if jet_driver_rust_foreign_present(registration_graph) -> jet_driver_rust_foreign_facts(registration_graph) else -> jet_driver_rust_foreign_empty()
     result.foreign_link = foreign_link
     result.command_record = command_record
+    result.eval_answers = jet_driver_eval_answers(registration_graph)
     jet_driver_trace_step_end(request.trace_sink, "driver.result.compile", -1)
     jet_driver_trace_result_built(request.trace_sink, result.diagnostics.len())
     if request.release_state_aside {

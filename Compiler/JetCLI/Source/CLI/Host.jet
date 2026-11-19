@@ -1590,7 +1590,9 @@ jet_cli_plugin_needs: fn(result: JetDriverCompileResult) -> [String] Never! {
     [String]{}
 }
 
-jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs, harness: IRTestHarness?, options: BuildOptions, runtime: JetCLIRuntimeExports, census: &[JetDriverIceRow], file: String, root: String) -[FS, Env, Time, Exec.Args]> JetCLINativeProgram Never! {
+// `roots` are checked function keys built beside the entry (IRChecks.roots):
+// `jet debug`'s evaluated expression (DebugCompile.jet).
+jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs, harness: IRTestHarness?, options: BuildOptions, runtime: JetCLIRuntimeExports, census: &[JetDriverIceRow], file: String, root: String, roots: [String]{[String]{}}) -[FS, Env, Time, Exec.Args]> JetCLINativeProgram Never! {
     trace_sink: result.trace_sink
     level: jet_cli_native_level(options)
     checked := inputs.move()
@@ -1606,6 +1608,7 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     // (jet_cli_native_executable): its Core calls build as calls of it.
     checks.core = runtime.core
     checks.quiet_routes = jet_cli_runtime_quiet_routes(runtime)
+    checks.roots = loop key in roots -> "{key}"
     declarations := jet_driver_checked_declarations(checked)
     // The program's C closure defines its foreign functions' symbols. An
     // `extern rust` function is called through the slot descriptor its helper

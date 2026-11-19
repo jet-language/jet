@@ -83,10 +83,12 @@ NativeBreakpoint: struct {
 
 // What a breakpoint does when it is hit: stop when its condition holds (or
 // it has none), or log its message and run on; and how the console's
-// `breaks` lists it (`break cart.jet:88 if total < 0`).
+// `breaks` lists it (`break cart.jet:88 if total < 0`). The condition and
+// the message are compiled expressions (NativeEval.jet), the message one
+// String with its `{…}` parts.
 NativeRule: struct {
-    condition: DebugExpression?,
-    log: DebugExpression?,
+    condition: Shared<NativeEval>?,
+    log: Shared<NativeEval>?,
     shown: String,
 }
 
@@ -240,6 +242,13 @@ NativeSession: struct {
     // The index among the dump's tasks of the one `bt`, `frame`, `locals`
     // and `print` read: 0, the stop's, until `task N` selects another.
     task: Int,
+    // What compiles the expressions `print`, `watch`, conditions and
+    // logpoints evaluate (NativeEval.jet); None evaluates nothing. Each
+    // compiled expression is kept by its source line and text, and the
+    // image's code facts placing them are read once.
+    evaluator: NativeEvaluator?{None},
+    evals: [String:Shared<NativeEval>]{[String:Shared<NativeEval>]{}},
+    eval_image: Shared<NativeEvalImage>?{None},
 
     // Load the debug facts of `binary` (a native image with debug info, its
     // own or in the side file its `.gnu_debuglink` names). The program's
@@ -342,6 +351,170 @@ NativeSession: struct {
 
     // Give breakpoint `number` its condition, log message and listing.
     set_rule: fn(&self, number: Int, rule: NativeRule) Never! { self.rules[number] = rule }
+
+    // Compile the expressions of the session with `evaluator`.
+    evaluate_with: fn(&self, evaluator: &&NativeEvaluator) Never! {
+        self.evaluator = Val(evaluator.move())
+    }
+
+    // The rule of breakpoint `number`, listed by `breaks` as `shown`:
+    // `condition` ("" for none) and the logpoint message `log` ("" for
+    // none), compiled where the breakpoint traps. A condition must be a
+    // Bool.
+    make_rule: fn(&self, number: Int, condition: String, log: String, shown: String) -> NativeRule NativeEvalRefused! {
+        address := -1
+        loop breakpoint in self.breakpoints {
+            if breakpoint.number == number && breakpoint.addresses.len() > 0 {
+                address = breakpoint.addresses[0]
+            }
+        }
+        at: self.source_at(address) ?? return Err(native_eval_refused("breakpoint {number} is not on a line of Jet code"))
+        rule := NativeRule{condition: None, log: None, shown: shown}
+        if condition.trim() != "" {
+            compiled: self.compiled(at.path, at.line, condition.trim()) ?? return Err(err)
+            type_name: compiled.guard_read().value.result.name
+            if type_name != "Bool" {
+                return Err(native_eval_refused("`{condition.trim()}` is a {type_name}, not a Bool"))
+            }
+            rule.condition = Val(compiled)
+        }
+        if log != "" {
+            rule.log = Val(self.compiled(at.path, at.line, native_eval_message(log)) ?? return Err(err))
+        }
+        Ok(rule)
+    }
+
+    // The source file (its path, as the image's line table records it)
+    // and line of the Jet code at `lookup`.
+    source_at: fn(self, lookup: Int) -> {path: String, line: Int}? Never! {
+        index: x64_jetline_find(self.image.lines, lookup)
+        if index < 0 -> return None
+        function: self.image.lines.functions[index]
+        line: x64_jetline_line(self.image.lines, function, lookup) ?? return None
+        path: if function.dir == "" || function.file.starts_with("/") -> "{function.file}" else -> native_files.join(function.dir, function.file)
+        Val({path: path, line: line})
+    }
+
+    // `text` compiled before `line` of the source `path`: the kept one, or
+    // the evaluator's.
+    compiled: fn(&self, path: String, line: Int, text: String) -> Shared<NativeEval> NativeEvalRefused! {
+        key: "{path}:{line}:{text}"
+        if self.evals.get(key) == .Val(found) -> return Ok(found)
+        made := NativeEval?{None}
+        if self.evaluator == .Val(evaluator) {
+            made = Val(evaluator.compile(path, line, text) ?? return Err(err))
+        }
+        code: made ?? return Err(native_eval_refused("this session has no compiler to evaluate expressions with"))
+        cell: Shared{code.move()}
+        self.evals[key] = cell
+        Ok(cell)
+    }
+
+    // The value of `text` in the selected frame.
+    evaluate: fn(&self, text: String) -> NativeEvalValue NativeEvalRefused! {
+        if self.dump != None {
+            return Err(native_eval_refused("a dump runs no code; `locals` shows the values it holds"))
+        }
+        self.ready() ?? return Err(native_eval_refused(err.detail))
+        frames: self.unwind() ?? return Err(native_eval_refused(err.detail))
+        if frames.len() == 0 -> return Err(native_eval_refused("there is no frame to evaluate in"))
+        levels: native_levels(self.image, frames)
+        level: if self.selected < levels.len() -> levels[self.selected] else -> levels[0]
+        at: self.source_at(native_lookup(level.frame, frames[level.frame].pc)) ?? return Err(native_eval_refused("the selected frame is not Jet code"))
+        compiled: self.compiled(at.path, at.line, text) ?? return Err(err)
+        self.run_eval(compiled)
+    }
+
+    // Run `compiled` in a fork of the stopped program with the captures it
+    // reads from the selected frame (NativeEval.jet).
+    run_eval: fn(&self, compiled: Shared<NativeEval>) -> NativeEvalValue NativeEvalRefused! {
+        self.ready() ?? return Err(native_eval_refused(err.detail))
+        frames: self.unwind() ?? return Err(native_eval_refused(err.detail))
+        if frames.len() == 0 -> return Err(native_eval_refused("there is no frame to evaluate in"))
+        levels: native_levels(self.image, frames)
+        level: if self.selected < levels.len() -> levels[self.selected] else -> levels[0]
+        if level.site >= 0 {
+            return Err(native_eval_refused("the selected frame is code inlined into the frame below it; select that frame with `down` to evaluate there"))
+        }
+        frame: frames[level.frame]
+        lookup: native_lookup(level.frame, frame.pc)
+        function: native_function_at(self.image, lookup) ?? return Err(native_eval_refused("the selected frame is not Jet code"))
+        memory: NativeMemory{trace: Val(self.trace), blocks: [NativeBlock]{}}
+        facts_cell: self.eval_facts() ?? return Err(err)
+        facts: facts_cell.guard_read()
+        permit := compiled.guard_edit()
+        captures := [[U8]]{}
+        // The debug type of each capture, which shows a result of the same
+        // Jet type as `locals` shows that local.
+        typed := [Int]{}
+        loop capture in permit.value.captures {
+            bytes := [U8]?{None}
+            loop variable in function.variables {
+                if variable.site != -1 || variable.name != capture.name -> next
+                range: native_variable_covering(self.image, variable, lookup) ?? next
+                size: if capture.inline -> capture.size else -> native_type_size(self.image, variable.ty)
+                if size <= 0 || (!capture.inline && size > 8) -> next
+                bytes = native_place_bytes(memory, frame, self.image.loclists, range.from, range.to, size)
+                if bytes != None -> typed.push(variable.ty)
+            }
+            read := bytes ?? return Err(native_eval_refused("`{capture.name}` has no value here"))
+            loop read.len() % 8 != 0 -> read.push(U8{0})
+            captures.push(read.move())
+        }
+        if permit.value.plan == None || permit.value.planned != self.fixed.len() {
+            plan: native_fix_plan(self.image, permit.value.edit, facts.value.symbols, facts.value.code.bytes, facts.value.code.address, self.fixed) ?? return Err(native_eval_refused(err.detail))
+            refusal: native_eval_refusal(permit.value, plan, facts.value, self.fixed)
+            if refusal != "" -> return Err(native_eval_refused(refusal))
+            permit.value.plan = Val(plan)
+            permit.value.planned = self.fixed.len()
+        }
+        syscall: native_fork_syscall_at(self.trace, facts.value.code.address, facts.value.code.address + facts.value.code.bytes.len()) ?? return Err(native_eval_refused("the program's code holds no system call to copy it with"))
+        if permit.value.plan == .Val(plan) {
+            return native_eval_run(self.image, self.trace, self.sites, permit.value, plan, facts.value, syscall, captures, typed)
+        }
+        Err(native_eval_refused("the expression has no plan"))
+    }
+
+    // The image's code facts evaluations place code against, read at the
+    // first.
+    eval_facts: fn(&self) -> Shared<NativeEvalImage> NativeEvalRefused! {
+        if self.eval_image == .Val(found) -> return Ok(found)
+        elf: native_files.read_bytes(self.binary) ?? return Err(native_eval_refused("couldn't read the program `{self.binary}`: {err}"))
+        cell: Shared{NativeEvalImage{symbols: native_fix_symbols(elf), code: native_elf_code(elf)}}
+        self.eval_image = Val(cell)
+        Ok(cell)
+    }
+
+    // Whether a hit of a breakpoint with `condition` and `log` stops: its
+    // condition holds (or it has none) and it is not a logpoint; and what
+    // the hit says (`category` "" for nothing). A logpoint whose condition
+    // holds logs its message instead. A condition that can't be evaluated
+    // stops, and says why.
+    holds: fn(&self, condition: Shared<NativeEval>?, log: Shared<NativeEval>?) -> {stops: Bool, category: String, text: String} Never! {
+        if condition == .Val(compiled) {
+            if self.run_eval(compiled) == {
+                .Ok(value) -> {
+                    if !value.truth -> return {stops: false, category: "", text: ""}
+                }
+                .Err(failure) -> return {stops: true, category: "stderr", text: "The breakpoint's condition failed: {failure.message}\n"}
+            }
+        }
+        if log == .Val(message) {
+            text: if self.run_eval(message) == {
+                .Ok(value) -> value.text
+                .Err(failure) -> "<{failure.message}>"
+            }
+            return {stops: false, category: "console", text: "{text}\n"}
+        }
+        {stops: true, category: "", text: ""}
+    }
+
+    // `print <expr>`: the expression's value in the selected frame.
+    print_command: fn(&self, operand: String) -> String Never! {
+        if operand == "" -> return "Print needs an expression, as `print total`\n"
+        value: self.evaluate(operand) ?? return "Can't evaluate `{operand}`: {err.message}\n"
+        "{operand} = {value.shown}\n"
+    }
 
     // Whether breakpoint or watch `number` is placed.
     has_breakpoint: fn(self, number: Int) -> Bool Never! {
@@ -684,10 +857,7 @@ NativeSession: struct {
                 locals.sort_by(fn(left: NativeLocal, right: NativeLocal) { left.name <=> right.name })
                 text = native_debug_locals_typed(locals)
             }
-            "p" | "print" -> {
-                locals: self.locals() ?? return Err(err)
-                text = "{native_debug_print(locals, operand)}\n"
-            }
+            "p" | "print" -> text = self.print_command(operand)
             "bt" | "backtrace" -> {
                 frames: self.backtrace() ?? return Err(err)
                 text = native_debug_backtrace(frames)
@@ -829,6 +999,9 @@ NativeSession: struct {
                 }
             }
         }
+        // An expression compiled before the fix was checked against the
+        // source the fix replaced.
+        self.evals = [String:Shared<NativeEval>]{}
         Ok("Fixed {shown.join(", ")}: the edit runs from the next call\n")
     }
 
@@ -908,7 +1081,7 @@ NativeSession: struct {
 
     // The stop to report after `word` (begun `depth` Jet frames deep) first
     // stopped at `first`. A breakpoint hit that does not stop
-    // (native_debug_holds) runs on: a continue continues, and a step goes on
+    // (holds) runs on: a continue continues, and a step goes on
     // to where it would have stopped. A step whose skipped hit was in a call
     // it steps over returns from the call and steps again; a step out
     // returns until it is out.
@@ -920,11 +1093,15 @@ NativeSession: struct {
             hit: native_debug_hit_breakpoint(stop)
             skipped := false
             if hit == .Val(number) {
-                ruled: if self.rules.get(number) == .Val(rule) -> rule.condition == .Val(_) || rule.log == .Val(_) else -> false
+                condition := Shared<NativeEval>?{None}
+                log := Shared<NativeEval>?{None}
+                if self.rules.get(number) == .Val(rule) {
+                    condition = rule.condition
+                    log = rule.log
+                }
                 stops := true
-                if ruled {
-                    locals: self.locals() ?? return Err(err)
-                    verdict: if self.rules.get(number) == .Val(rule) -> native_debug_holds(rule, locals) else -> {stops: true, category: "", text: ""}
+                if condition != None || log != None {
+                    verdict: self.holds(condition, log)
                     if verdict.category != "" {
                         output: self.take_output()
                         if output != "" -> said.push(NativeSaid{category: "stdout", text: output})
@@ -994,17 +1171,22 @@ NativeSession: struct {
     }
 
     // `break <line|file:line|function> [if <expr>]`: a breakpoint that stops
-    // when its condition holds.
+    // when its condition holds. A condition that doesn't compile where the
+    // breakpoint traps takes the breakpoint back.
     break_command: fn(&self, operand: String, file: String) -> String NativeDebugError! {
         spec: operand.before(" if ").trim()
         condition: if operand.contains(" if ") -> operand.after(" if ").trim() else -> ""
         if spec == "" -> return Ok("Break needs a line, a file:line or a function, as `break 12`\n")
-        rule := native_debug_rule(condition, "", "") ?? return Ok("Can't use the condition: {err.message}\n")
         placed: self.place_spec(spec, file) ?? return Err(err)
         if placed.number < 0 -> return Ok(placed.shown)
         suffix: if condition == "" -> "" else -> " if {condition}"
-        rule.shown = "break {placed.shown}{suffix}"
-        self.set_rule(placed.number, rule)
+        if self.make_rule(placed.number, condition, "", "break {placed.shown}{suffix}") == {
+            .Ok(rule) -> { self.set_rule(placed.number, rule) }
+            .Err(refused) -> {
+                self.take_back(placed.number) ?? return Err(err)
+                return Ok("Can't use the condition: {refused.message}\n")
+            }
+        }
         Ok("Breakpoint set  {placed.shown}{suffix}\n{native_debug_condition_place(condition)}")
     }
 
@@ -1017,12 +1199,23 @@ NativeSession: struct {
             return Ok("Log needs a line and a quoted message, as `log cart.jet:90 \"total={{total}}\"`\n")
         }
         message: String.from_bytes(bytes[1..<bytes.len() - 1]) ?? ""
-        rule := native_debug_rule("", message, "") ?? return Ok("Can't use the message: {err.message}\n")
         placed: self.place_spec(operand.before(" "), file) ?? return Err(err)
         if placed.number < 0 -> return Ok(placed.shown)
-        rule.shown = "log {placed.shown} {quoted}"
-        self.set_rule(placed.number, rule)
+        if self.make_rule(placed.number, "", message, "log {placed.shown} {quoted}") == {
+            .Ok(rule) -> { self.set_rule(placed.number, rule) }
+            .Err(refused) -> {
+                self.take_back(placed.number) ?? return Err(err)
+                return Ok("Can't use the message: {refused.message}\n")
+            }
+        }
         Ok("Logpoint set  {placed.shown} {quoted}\n")
+    }
+
+    // Delete breakpoint `number`, just placed, and give its number back.
+    take_back: fn(&self, number: Int) NativeDebugError! {
+        self.delete_breakpoint(number) ?? return Err(err)
+        if self.numbered == number -> self.numbered -= 1
+        Ok()
     }
 
     // `watch <place>`: stop at each write that changes `place`, a local of
@@ -1033,6 +1226,9 @@ NativeSession: struct {
     // by stepping its frame's own code instead (watch_steps).
     watch_command: fn(&self, operand: String) -> String NativeDebugError! {
         if operand == "" -> return Ok("Watch needs a local or a field path, as `watch total`\n")
+        // The value shown is the compiler's evaluation of `operand`; the
+        // trap watches the bytes its place names.
+        value: self.evaluate(operand) ?? return Ok("Can't watch `{operand}`: {err.message}\n")
         self.ready() ?? return Err(err)
         frames: self.unwind() ?? return Err(err)
         if frames.len() == 0 -> return Ok("No frame to watch in\n")
@@ -1051,10 +1247,9 @@ NativeSession: struct {
                 }
             }
             held: native_low_bytes(frame.registers[place.register], if size < 8 -> size else -> 8)
-            shown: native_render(self.image, memory, place.ty, held, 0, 0) ?? NATIVE_DEBUG_UNAVAILABLE
             self.numbered += 1
             self.watches.push(NativeWatch{number: self.numbered, shown: "{operand}", address: 0, ty: place.ty, spans: [NativeWatchSpan]{}, thread: self.trace.thread, cfa: frame.cfa, bytes: held, register: place.register, ranges: place.ranges})
-            return Ok("Watchpoint {self.numbered}  {operand} = {shown}\n")
+            return Ok("Watchpoint {self.numbered}  {operand} = {value.shown}\n")
         }
         bytes: native_debug_bytes(memory, place.address, size) ?? return Ok("`{operand}` can't be read here\n")
         spans := native_watch_spans(place.address, size)
@@ -1077,13 +1272,12 @@ NativeSession: struct {
                 return Err(NativeDebugError{detail: "couldn't set a debug register of the program"})
             }
         }
-        shown: native_render(self.image, memory, place.ty, bytes, 0, 0) ?? NATIVE_DEBUG_UNAVAILABLE
         self.numbered += 1
         self.watches.push(NativeWatch{number: self.numbered, shown: "{operand}", address: place.address, ty: place.ty, spans: spans, thread: self.trace.thread, cfa: frame.cfa, bytes: bytes, register: -1, ranges: [NativeRange]{}})
         if !self.set_debug_register(7, native_watch_control(self.watches)) {
             return Err(NativeDebugError{detail: "couldn't set the program's debug control register"})
         }
-        Ok("Watchpoint {self.numbered}  {operand} = {shown}\n")
+        Ok("Watchpoint {self.numbered}  {operand} = {value.shown}\n")
     }
 
     // After a SIGTRAP: whether a watch's debug register trapped a write, and
@@ -2506,14 +2700,6 @@ native_debug_locals_typed: fn(locals: [NativeLocal]) -> String Never! {
     text
 }
 
-native_debug_print: fn(locals: [NativeLocal], name: String) -> String Never! {
-    if name == "" -> return "Print needs a local's name, as `print total`"
-    loop local in locals {
-        if local.name == name -> return "{local.name} = {local.value}"
-    }
-    "`{name}` is not a local here"
-}
-
 // The Jet frames, innermost first; an inlined frame says so.
 native_debug_backtrace: fn(frames: [NativeFrame]) -> String Never! {
     text := ""
@@ -2641,44 +2827,12 @@ native_debug_hit_breakpoint: fn(stop: NativeStop) -> Int? Never! {
     Val(number)
 }
 
-// A breakpoint's rule: `condition` and the logpoint message `log`, each read
-// by the compiler's parser ("" for none), and its `breaks` listing.
-native_debug_rule: fn(condition: String, log: String, shown: String) -> NativeRule DebugEvaluationError! {
-    parsed_condition: if condition.trim() == "" -> DebugExpression?{None} else -> Val(debug_parse_expression(condition) ?? return Err(err))
-    parsed_log: if log == "" -> DebugExpression?{None} else -> Val(debug_parse_message(log) ?? return Err(err))
-    Ok(NativeRule{condition: parsed_condition, log: parsed_log, shown: shown})
-}
-
 // What setting a breakpoint with `condition` says about where the condition
 // runs ("" for none): the debugger checks it at each hit, so a hit whose
 // condition is false still stops the program for that check.
 native_debug_condition_place: fn(condition: String) -> String Never! {
     if condition.trim() == "" -> return ""
     "The condition can't run in the program: the debugger checks it at each hit, which stops the program each time\n"
-}
-
-// Whether a hit of the breakpoint with `rule`, at a stop whose locals are
-// `locals`, stops: its condition holds (or it has none) and it is not a
-// logpoint; and what the hit says (`category` "" for nothing). A logpoint
-// whose condition holds logs its message instead. A condition that can't be
-// evaluated, or is not a Bool, stops, and says why.
-native_debug_holds: fn(rule: NativeRule, locals: [NativeLocal]) -> {stops: Bool, category: String, text: String} Never! {
-    if rule.condition == .Val(condition) {
-        if debug_eval_condition(condition, locals) == {
-            .Ok(flag) -> {
-                if !flag -> return {stops: false, category: "", text: ""}
-            }
-            .Err(failure) -> return {stops: true, category: "stderr", text: "The breakpoint's condition failed: {failure.message}\n"}
-        }
-    }
-    if rule.log == .Val(message) {
-        text: if debug_eval(message.tables, message.root, locals) == {
-            .Ok(value) -> debug_eval_text(value)
-            .Err(failure) -> "<{failure.message}>"
-        }
-        return {stops: false, category: "console", text: "{text}\n"}
-    }
-    {stops: true, category: "", text: ""}
 }
 
 // Bytes a readout may read: the stopped program's memory, when there is a

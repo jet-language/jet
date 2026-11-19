@@ -33,6 +33,8 @@ use {
         ast_empty_lambda_meta,
         authority_grantable_roots,
         expr_span,
+        type_name,
+        type_unqualified_nominals,
     ]
     jet_lexer.[lex_generated, token_shift_spans]
     jet_parser.[parse_lexed]
@@ -105,6 +107,60 @@ SemaEvalProbeParse: struct {
 }
 
 SEMA_EVAL_PROBE_LEAD: "eval_probe: fn() {{\n"
+
+// The parameter an evaluated expression's own `self` reads
+// (sema_eval_probe_function): a free function has no `self`.
+SEMA_EVAL_PROBE_SELF: "jet_debug_self"
+
+// The Jet source of the function `name` that computes the expression
+// `text`, as `answer` checked it at the stop, for `jet debug` to compile into
+// the program (JetCLI DebugCompile.jet): each capture is a parameter, in
+// capture order, typed by its checked type with every nominal unqualified,
+// and the expression's type is the result. The text's own `self` reads the
+// parameter SEMA_EVAL_PROBE_SELF. None for an expression with no value.
+sema_eval_probe_function: fn(answer: SemaEvalProbeAnswer, text: String, name: String) -> String? {
+    value: answer.value_type ?? return None
+    params := [String]{}
+    loop capture in answer.captures {
+        shown: if capture.source == "self" -> SEMA_EVAL_PROBE_SELF else -> capture.source
+        params.push("{shown}: {type_name(type_unqualified_nominals(capture.ty))}")
+    }
+    Val("{name}: fn({params.join(", ")}) -> {type_name(type_unqualified_nominals(value))} {{\n    {sema_eval_probe_without_self(text)}\n}}\n")
+}
+
+// `text` with each `self` that names a value (not a field or part of a
+// longer name) read as SEMA_EVAL_PROBE_SELF.
+sema_eval_probe_without_self: fn(text: String) -> String {
+    bytes: text.bytes()
+    out := [U8]{}
+    at := 0
+    loop at < bytes.len() {
+        if sema_eval_probe_self_at(bytes, at) {
+            out.extend(SEMA_EVAL_PROBE_SELF.bytes())
+            at += 4
+            next
+        }
+        out.push(bytes[at])
+        at += 1
+    }
+    String.from_bytes(out) ?? "{text}"
+}
+
+sema_eval_probe_self_at: fn(bytes: [U8], at: Int) -> Bool {
+    if at + 4 > bytes.len() -> return false
+    spelled: [Int]{115, 101, 108, 102}
+    loop (k, code) in spelled {
+        byte: Int{bytes[at + k]}
+        if byte != code -> return false
+    }
+    before: if at > 0 -> Int{bytes[at - 1]} else -> 32
+    after: if at + 4 < bytes.len() -> Int{bytes[at + 4]} else -> 32
+    before != 46 && !sema_eval_probe_word_byte(before) && !sema_eval_probe_word_byte(after)
+}
+
+sema_eval_probe_word_byte: fn(byte: Int) -> Bool {
+    (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95
+}
 
 sema_eval_probes: fn(probes: [SemaEvalProbe]) -> SemaEvalProbes {
     SemaEvalProbes{table: Shared{SemaEvalProbeTable{probes: probes, answers: [SemaEvalProbeAnswer]{}}}}

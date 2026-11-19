@@ -436,6 +436,10 @@ IRChecks: struct {
     // is a global symbol of the program's object (IRModule.hooks), so the
     // link binds the runtime's calls of the hook to it.
     hooks: [IRLibraryExportRow]{[IRLibraryExportRow]{}},
+    // Checked function keys built as roots beside the entry
+    // (ir_build_program): a debugger's evaluated expression, which nothing
+    // in the program calls.
+    roots: [String]{[String]{}},
     // The runtime routes the runtime's stops receipt proves deliver no stop
     // (JetCLI Host.jet jet_cli_runtime_quiet_routes), which no stop poll
     // follows (ir_route_can_stop); empty without a receipt.
@@ -1693,6 +1697,10 @@ ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
     loop hook in p.checks.hooks {
         hook_row: ir_function_row(p, hook.key) ?? next
         if hook_row != row && !kept_rows.contains(hook_row) -> kept_rows.push(hook_row)
+    }
+    loop key in p.checks.roots {
+        root_row: ir_function_row(p, key) ?? next
+        if root_row != row && !kept_rows.contains(root_row) -> kept_rows.push(root_row)
     }
     kept_keys := [String]{}
     loop kept in kept_rows {

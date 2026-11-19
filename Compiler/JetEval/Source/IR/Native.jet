@@ -566,13 +566,26 @@ jet_eval_native_load: fn(built: &&JetEvalIRComptime, config: JetEvalConfig, thre
 
 // `__jet_comptime_item_{index}(cell, params...)`: calls item function `id`
 // and stores its result in `cell` (an aggregate's bytes, else its word).
-jet_eval_native_wrapper: fn(code: &IRModule, name: String, id: Int, params: [Int], result: Int, pointer: Int) -> IRFunction {
+// With `loads`, every param is passed as the address of its bytes, which
+// the wrapper loads (a debugger's evaluated expression, whose captures it
+// reads from a stopped frame); an aggregate's address is the param itself.
+jet_eval_native_wrapper: fn(code: &IRModule, name: String, id: Int, params: [Int], result: Int, pointer: Int, loads: Bool{false}) -> IRFunction {
     w := ir_function_new(name, name, name, "", 0)
     cell: ir_slot(w, pointer, IRSlotKind.Param, ir_intern_name(code, "cell"), 0)
+    held := [Int]{}
+    loop (index, row) in params {
+        loaded: loads && code.types[row].kind != .Aggregate
+        held.push(ir_slot(w, if loaded -> pointer else -> row, IRSlotKind.Param, ir_intern_name(code, "a{index}"), 0))
+    }
     args := [Int]{}
     loop (index, row) in params {
-        slot: ir_slot(w, row, IRSlotKind.Param, ir_intern_name(code, "a{index}"), 0)
-        args.push(slot)
+        if !loads || code.types[row].kind == .Aggregate {
+            args.push(held[index])
+            next
+        }
+        value: ir_slot(w, row, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(w, IROp.Load, value, held[index], 0, -1, 0)
+        args.push(value)
     }
     start: ir_args(w, args)
     if result < 0 || code.types[result].kind == .Unit {

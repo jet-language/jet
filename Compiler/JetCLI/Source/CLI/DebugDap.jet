@@ -11,7 +11,8 @@
 // `terminated`). One thread, frames are the Jet frames, and a frame's one
 // scope holds its locals as the console shows them, each with its Jet type.
 // A breakpoint may carry a `condition` and a `logMessage`, and `evaluate`
-// answers an expression in a paused frame (jet_debug's Debug/Eval.jet). The
+// answers an expression in a paused frame, all through the debugger's one
+// evaluator, the compiler (DebugCompile.jet, jet_debug's NativeEval.jet). The
 // session settles each run as the `(Jet)` console does: a hit whose
 // condition is false, or a logpoint's hit (which logs its message), does not
 // stop: a continue runs on, and a step goes on to where it would have
@@ -21,8 +22,8 @@ use {
     dap_files: core.files
     dap_json: core.encoding.json
     dap_term: core.term
-    jet_debug.[DebugEvaluationError, NativeDebugError, NativeLocal, NativeSaid, NativeSession, NativeSettled, debug_eval, debug_evaluation_error, debug_parse_expression, native_debug_condition_place, native_debug_jet_frame, native_debug_rule]
-    jet_foundation.[ast_expr, foundation_json_integer, foundation_json_quote]
+    jet_debug.[NativeDebugError, NativeEvalRefused, NativeLocal, NativeSaid, NativeSession, NativeSettled, native_debug_condition_place, native_debug_jet_frame]
+    jet_foundation.[foundation_json_integer, foundation_json_quote]
 }
 
 // One `setBreakpoints` entry: its line, and its condition and log message
@@ -51,7 +52,7 @@ JetCLIDap: struct {
     placed: [String:[Int]],
     launched: Bool,
 
-    handle: fn(&self, session: &NativeSession, input: &&JetCLIDapRequest, entry: String) -[FS, Env, Exec, IO, Time.Wait, FFI.Asm]> Never! {
+    handle: fn(&self, session: &NativeSession, input: &&JetCLIDapRequest, entry: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never! {
         request := input.move()
         if request.command == {
             "initialize" -> {
@@ -140,9 +141,9 @@ JetCLIDap: struct {
     }
 
     // `setBreakpoints`: the source's breakpoints become the requested lines,
-    // each with its condition and log message. One whose condition or
-    // message is not a Jet expression is not placed.
-    set_breakpoints: fn(&self, session: &NativeSession, request: JetCLIDapRequest) -> String NativeDebugError! {
+    // each with its condition and log message, compiled where it traps. One
+    // whose condition or message doesn't compile there is not placed.
+    set_breakpoints: fn(&self, session: &NativeSession, request: JetCLIDapRequest) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> String NativeDebugError! {
         file := ""
         specs := [JetCLIDapBreakpoint]{}
         loop member in request.arguments {
@@ -167,11 +168,6 @@ JetCLIDap: struct {
         rows := [String]{}
         loop spec in specs {
             line: spec.line
-            ruled: spec.condition.trim() != "" || spec.log != ""
-            rule := native_debug_rule(spec.condition, spec.log, "break {file}:{line}") ?? {
-                rows.push("{{\"verified\":false,\"line\":{line},\"message\":{foundation_json_quote(err.message)}}}")
-                next
-            }
             placed := -1
             if file != "" && line >= 1 {
                 if session.break_at(file, line) == {
@@ -179,13 +175,24 @@ JetCLIDap: struct {
                     .Err(failure) -> return Err(failure)
                 }
             }
-            if placed >= 0 {
-                numbers.push(placed)
-                if ruled -> session.set_rule(placed, rule.move())
+            if placed < 0 {
+                rows.push("{{\"verified\":false,\"line\":{line},\"message\":{foundation_json_quote("No code on {file}:{line}")}}}")
+                next
             }
+            if spec.condition.trim() != "" || spec.log != "" {
+                if session.make_rule(placed, spec.condition, spec.log, "break {file}:{line}") == {
+                    .Ok(rule) -> { session.set_rule(placed, rule) }
+                    .Err(refused) -> {
+                        session.take_back(placed) ?? return Err(err)
+                        rows.push("{{\"verified\":false,\"line\":{line},\"message\":{foundation_json_quote(refused.message)}}}")
+                        next
+                    }
+                }
+            }
+            numbers.push(placed)
             place: native_debug_condition_place(spec.condition)
             note: if place == "" -> "" else -> ",\"message\":{foundation_json_quote(place.trim())}"
-            rows.push(if placed >= 0 -> "{{\"id\":{placed},\"verified\":true,\"line\":{line}{note}}}" else -> "{{\"verified\":false,\"line\":{line},\"message\":{foundation_json_quote("No code on {file}:{line}")}}}")
+            rows.push("{{\"id\":{placed},\"verified\":true,\"line\":{line}{note}}}")
         }
         self.placed[file.move()] = numbers.move()
         Ok("{{\"breakpoints\":[{rows.join(",")}]}}")
@@ -262,7 +269,7 @@ JetCLIDap: struct {
 }
 
 // Answer requests until stdin ends or the editor disconnects.
-jet_cli_debug_dap: fn(session: &NativeSession, entry: String) -[FS, Env, Exec, IO, Time.Wait, FFI.Asm]> Never! {
+jet_cli_debug_dap: fn(session: &NativeSession, entry: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never! {
     dap := JetCLIDap{seq: 0, stop_on_entry: false, args: [String]{}, placed: [String:[Int]]{}, launched: false}
     loop true {
         text: jet_cli_dap_read() ?? break
@@ -429,20 +436,19 @@ jet_cli_dap_variables: fn(session: &NativeSession, frame: Int) -> String NativeD
 }
 
 // `evaluate`: `text` in frame `frame` (the innermost when the request names
-// none). A local's name answers as `variables` shows it; another expression
-// answers with its value.
-jet_cli_dap_evaluate: fn(session: &NativeSession, text: String, frame: Int) -> String DebugEvaluationError! {
-    expr: debug_parse_expression(text) ?? return Err(err)
-    locals: jet_cli_dap_frame_locals(session, if frame > 0 -> frame else -> 0) ?? return Err(debug_evaluation_error(err.detail))
+// none), through the session's evaluator. The innermost frame stays
+// selected, as stepping needs.
+jet_cli_dap_evaluate: fn(session: &NativeSession, text: String, frame: Int) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> String NativeEvalRefused! {
+    if frame > 0 {
+        _: session.select_frame(frame) ?? return Err(NativeEvalRefused{message: err.detail})
+    }
     shown := {text: "", type_name: ""}
-    if ast_expr(expr.tables, expr.root) == .Ident(name, _, _) {
-        loop local in locals {
-            if local.name == name -> shown = {text: local.value, type_name: local.type_name}
-        }
+    refusal := ""
+    if session.evaluate(text) == {
+        .Ok(value) -> { shown = {text: value.shown, type_name: value.type_name} }
+        .Err(failure) -> refusal = failure.message
     }
-    if shown.type_name == "" {
-        value: debug_eval(expr.tables, expr.root, locals) ?? return Err(err)
-        shown = {text: value.value, type_name: value.type_name}
-    }
+    if frame > 0 -> _: session.select_frame(0) ?? return Err(NativeEvalRefused{message: err.detail})
+    if refusal != "" -> return Err(NativeEvalRefused{message: refusal})
     Ok("{{\"result\":{foundation_json_quote(shown.text)},\"type\":{foundation_json_quote(shown.type_name)},\"variablesReference\":0}}")
 }

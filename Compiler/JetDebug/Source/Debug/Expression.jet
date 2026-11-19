@@ -1,7 +1,8 @@
-// The one reader of the expressions a debugger is given: a watch, a
-// breakpoint condition, a logpoint's message, an `evaluate` request. The
+// The reader of the places a debugger names without evaluating them: a
+// paused snapshot's place (Snapshot.jet) and a Canvas watch's local. The
 // compiler's parser reads each as one Jet expression; nothing here has a
-// grammar of its own.
+// grammar of its own. Evaluating an expression is the compiler's work
+// (NativeEval.jet).
 use {
     jet_foundation.[ASTTables, DIAGNOSTIC_ERROR, ExprNode, ast_expr, ast_stmt]
     jet_parser.[parse_source]
@@ -33,12 +34,6 @@ debug_parse_expression: fn(text: String) -> DebugExpression DebugEvaluationError
         return Ok(DebugExpression{tables: parsed.program.tables, root: expr})
     }
     Err(debug_evaluation_error("`{text}` is not one Jet expression"))
-}
-
-// A logpoint's message, read as the Jet string literal it would be between
-// double quotes: its `{expr}` parts interpolate.
-debug_parse_message: fn(message: String) -> DebugExpression DebugEvaluationError! {
-    debug_parse_expression("\"{message.replace("\"", "\\\"")}\"")
 }
 
 // Whether `expr` names a place: a local, a named field of a place, or a
@@ -90,6 +85,4 @@ debug_expression_test_refusal: fn(text: String) -> String Never! {
     assert(debug_expression_test_refusal("i ==").starts_with("`i ==` is not a Jet expression: "))
     assert_eq(debug_expression_test_refusal("   "), "the expression is empty")
     assert_eq(debug_expression_test_refusal("i\n}}\nother: fn() {{\ni"), "`i\n}}\nother: fn() {{\ni` is not one Jet expression")
-    message: debug_parse_message("i is {{i}}") ?? panic(err.message)
-    assert(ast_expr(message.tables, message.root) == .Str(_, _, _))
 }
