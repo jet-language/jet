@@ -592,6 +592,31 @@ NATIVE_TEST_RECOVER: "bump: fn(rounds: Int) -> Int {{\n    rounds * 2\n}}\n\ndou
     native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
 }
 
+// A next over a call stops at a breakpoint in it; a next off a function's
+// last line returns to its caller's line.
+#Test("next_stops_at_a_breakpoint_in_its_call_and_returns_off_the_last_line") {
+    scratch: native_test_files.temp_dir("jet-debug-next-return") ?? panic("scratch: {err}")
+    root: scratch.path
+    session := native_test_session(root, NATIVE_TEST_PROGRAM, [String]{"-O0"})
+    lines: NATIVE_TEST_PROGRAM.split("\n").to_list()
+    first: session.run_to([NativeBreak]{{file: "prog.jet", line: 9}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
+    session.clear_breakpoints() ?? panic("clear: {err.detail}")
+    if session.break_at("prog.jet", 3) == {
+        .Ok(number) -> { assert_eq(number ?? -1, 2) }
+        .Err(failure) -> panic("break: {failure.detail}")
+    }
+    hit: session.command("n", first.stop, "prog.jet", lines) ?? panic("next: {err.detail}")
+    assert(hit.text.contains("3 |     y        <- here\n"), hit.text)
+    assert(hit.text.contains("Breakpoint"), hit.text)
+    session.clear_breakpoints() ?? panic("clear: {err.detail}")
+    back: session.command("n", hit.stop, "prog.jet", lines) ?? panic("next: {err.detail}")
+    assert(back.text.contains("9 |         count += double(i)        <- here\n"), back.text)
+    rest: session.command("c", back.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    assert(rest.text.contains("count 2\nProgram finished\n"), rest.text)
+    session.close()
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+}
+
 #Test("next_runs_a_one_line_loop_whole_and_steps_over_recursion_in_its_frame") {
     scratch: native_test_files.temp_dir("jet-debug-next-loop") ?? panic("scratch: {err}")
     root: scratch.path

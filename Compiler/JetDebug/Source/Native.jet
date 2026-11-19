@@ -4144,12 +4144,63 @@ NativeSession: struct {
     }
 
     // `next` on `line` of function `index`, whose frame's canonical frame
-    // address is `base`: a temporary trap on each row of the function on
-    // another line and on the frame's return address, then one run, so a
-    // line that loops a million times costs one stop, not one per
-    // instruction. The traps are lifted again however the run stops.
+    // address is `base`: the thread alone runs the line one instruction at
+    // a time, each call it makes running at full speed to its return
+    // (run_to_return), until a row of this frame on another line, the
+    // frame's return address, or a breakpoint stops it. A step so costs
+    // the instructions of its line, not the rows of its function. A line
+    // still running after NATIVE_DEBUG_LINE_STEPS instructions (a loop on
+    // one line), code it leaves the function for without a call, and a
+    // session with watches or a replay's probes, which a run must see, go
+    // on under traps (line_over_traps).
     line_over: fn(&self, index: Int, line: Int, base: Int, reason: String) -> NativeStop NativeDebugError! {
         returned: native_debug_word(self.trace, base - 8) ?? 0
+        if self.watches.len() > 0 || self.probe.sites.len() > 0 {
+            return self.line_over_traps(index, line, base, returned, reason)
+        }
+        low: self.image.lines.functions[index].low
+        high: self.image.lines.functions[index].high
+        rows: native_step_rows(self.image, index)
+        registers := self.registers() ?? return Err(err)
+        loop _ in 0..<NATIVE_DEBUG_LINE_STEPS {
+            before: registers
+            event: self.go(X64TraceResume.Step) ?? return Err(err)
+            if event.ends_run() -> return self.stopped(event)
+            registers = self.registers() ?? return Err(err)
+            pc := registers[X64_TRACE_RIP]
+            if registers[X64_TRACE_RSP] == before[X64_TRACE_RSP] - 8 {
+                pushed: native_debug_word(self.trace, registers[X64_TRACE_RSP]) ?? 0
+                from: before[X64_TRACE_RIP]
+                if pushed > from && pushed <= from + NATIVE_DEBUG_LONGEST_CALL && pc != pushed {
+                    called: self.run_to_return(pushed, registers[X64_TRACE_RSP] + 8) ?? return Err(err)
+                    if called == .Stopped(stop) -> return Ok(stop)
+                    registers = self.registers() ?? return Err(err)
+                    pc = registers[X64_TRACE_RIP]
+                }
+            }
+            // A breakpoint the step reached stops it, as its trap would.
+            if self.trap_at(pc) && self.breakpoint_at(pc) == .Val(number) {
+                return self.paused("breakpoint {number}.1")
+            }
+            if pc == returned && registers[X64_TRACE_RSP] >= base -> return self.paused(reason)
+            if pc < low || pc >= high {
+                return self.line_over_traps(index, line, base, returned, reason)
+            }
+            here: native_step_line(rows, pc)
+            if here < 0 || pc == low -> next
+            frame: native_frame_base(self.openings, index, registers, pc, self.code(pc, 1))
+            if frame > base -> return self.paused(reason)
+            if frame < base -> return self.line_over_traps(index, line, base, returned, reason)
+            if here != line -> return self.paused(reason)
+        }
+        self.line_over_traps(index, line, base, returned, reason)
+    }
+
+    // line_over under traps: a temporary trap on each row of the function
+    // on another line and on the frame's return address `returned`, then
+    // one run, so a line that loops a million times costs one stop, not one
+    // per instruction. The traps are lifted again however the run stops.
+    line_over_traps: fn(&self, index: Int, line: Int, base: Int, returned: Int, reason: String) -> NativeStop NativeDebugError! {
         targets := native_step_targets(self.image, index, line)
         if returned > 0 -> targets.push(returned)
         owned := [Int]{}
@@ -4180,8 +4231,11 @@ NativeSession: struct {
     // read and written back once for each run of them that lie within
     // NATIVE_DEBUG_PATCH_GAP bytes of each other, so a step costs a few
     // system calls however many rows its function has, not two helper round
-    // trips per row. False when the code can't be read or written.
+    // trips per row. Put back, they leave the sites in one pass once every
+    // byte is written: the sites' map removes a key in time linear in its
+    // size. False when the code can't be read or written.
     patch_owned: fn(&self, owned: [Int], how: NativePatch) -> Bool Never! {
+        // copy: the caller keeps `owned` in its order.
         sorted := owned.copy()
         sorted.sort()
         start := 0
@@ -4203,13 +4257,22 @@ NativeSession: struct {
                         bytes[address - low] = U8{NATIVE_DEBUG_TRAP}
                     }
                     .Restore -> {
-                        byte: self.sites.remove(address) ?? next
+                        byte: self.sites.get(address) ?? next
                         bytes[address - low] = U8{byte}
                     }
                 }
             }
             if !x64_trace_write(self.trace, low, bytes) -> return false
             start = end
+        }
+        if how == NativePatch.Restore {
+            kept := [Int:Int]{}
+            loop address in self.sites.keys() {
+                if !native_sorted_has(sorted, address) {
+                    kept[address] = self.sites.get(address) ?? 0
+                }
+            }
+            self.sites = kept
         }
         true
     }
@@ -4396,6 +4459,10 @@ NATIVE_DEBUG_LONGEST_CALL: 15
 
 // The most instructions one line step single-steps.
 NATIVE_DEBUG_MOST_STEPS: 10000000
+
+// The most instructions a `next` single-steps before it runs on under
+// traps (NativeSession.line_over).
+NATIVE_DEBUG_LINE_STEPS: 256
 
 // The most frames a backtrace unwinds.
 NATIVE_DEBUG_MOST_FRAMES: 256
@@ -4646,6 +4713,61 @@ native_body_start: fn(image: NativeImage, index: Int) -> Int Never! {
         if address > function.low -> return address
     }
     function.low
+}
+
+// The rows of one function, in address order: each row's start and line.
+NativeStepRows: struct {
+    starts: [Int],
+    lines: [Int],
+}
+
+// The rows of function `index`, read once for a `next` to look up each
+// address it steps to (native_step_line).
+native_step_rows: fn(image: NativeImage, index: Int) -> NativeStepRows Never! {
+    function: image.lines.functions[index]
+    rows := NativeStepRows{starts: [Int]{}, lines: [Int]{}}
+    at := function.rows
+    address := function.low
+    current := 1
+    loop at < function.rows_end {
+        address += link_debug_uleb(image.lines.table, at)
+        current += x64_jetline_sleb(image.lines.table, at)
+        rows.starts.push(address)
+        rows.lines.push(current)
+    }
+    rows
+}
+
+// The line of the row that starts at `pc`, the last of the rows starting
+// there as x64_jetline_line reads it; -1 when no row starts there.
+native_step_line: fn(rows: NativeStepRows, pc: Int) -> Int Never! {
+    // The first row starting past `pc`.
+    low := 0
+    high := rows.starts.len()
+    loop low < high {
+        middle: (low + high) >> 1
+        if {
+            (rows.starts[middle] <= pc) -> low = middle + 1
+            else -> high = middle
+        }
+    }
+    if low == 0 || rows.starts[low - 1] != pc -> return -1
+    rows.lines[low - 1]
+}
+
+// Whether the ascending `sorted` holds `value`.
+native_sorted_has: fn(sorted: [Int], value: Int) -> Bool Never! {
+    low := 0
+    high := sorted.len()
+    loop low < high {
+        middle: (low + high) >> 1
+        if {
+            (sorted[middle] == value) -> return true
+            (sorted[middle] < value) -> low = middle + 1
+            else -> high = middle
+        }
+    }
+    false
 }
 
 // The rows of function `index` a `next` on `line` may stop at: each on
