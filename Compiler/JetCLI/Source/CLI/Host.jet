@@ -1607,8 +1607,10 @@ jet_cli_plugin_needs: fn(result: JetDriverCompileResult) -> [String] Never! {
 }
 
 // `roots` are checked function keys built beside the entry (IRChecks.roots):
-// `jet debug`'s evaluated expression (DebugCompile.jet).
-jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs, harness: IRTestHarness?, options: BuildOptions, runtime: JetCLIRuntimeExports, census: &[JetDriverIceRow], file: String, root: String, roots: [String]{[String]{}}) -[FS, Env, Time, Exec.Args]> JetCLINativeProgram Never! {
+// `jet debug`'s evaluated expression (DebugCompile.jet). Without `own` the
+// program keeps its process root even where its stops need none, as the
+// image an evaluation is placed in does when its `main` doesn't own it.
+jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs, harness: IRTestHarness?, options: BuildOptions, runtime: JetCLIRuntimeExports, census: &[JetDriverIceRow], file: String, root: String, roots: [String]{[String]{}}, own: Bool{true}) -[FS, Env, Time, Exec.Args]> JetCLINativeProgram Never! {
     trace_sink: result.trace_sink
     level: jet_cli_native_level(options)
     checked := inputs.move()
@@ -1669,7 +1671,7 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     // web build keeps them: its loader always runs the entry under the
     // runtime partition's root (jet_rt_main), so a stop with no stop edge
     // after it would reach the trap that follows it.
-    if harness == None && build_options_value(options, "os") != "web" {
+    if own && harness == None && build_options_value(options, "os") != "web" {
         _ := ir_entry_own(built.program)
     }
     // A runtime call the runtime does not export would fail the whole link;
