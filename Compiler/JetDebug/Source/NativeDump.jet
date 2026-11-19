@@ -226,9 +226,9 @@ native_dump_jet_frame: fn(frames: [NativeFrame], jet: Int) -> Int? Never! {
     None
 }
 
-// `locals` with each #Secret value shown as NATIVE_DUMP_REDACTED. The stop
-// scrubbed every live Secret before the dump was written, so its bytes are
-// zeros; the readout says what they were.
+// `locals` with each #Secret value shown as NATIVE_DUMP_REDACTED. The dump
+// was written with every live Secret's bytes zeroed (JetRuntime
+// PerfSamples.jet perf_flight_redacted); the readout says what they were.
 native_dump_redact: fn(locals: &[NativeLocal]) Never! {
     loop index in 0..<locals.len() {
         if locals[index].type_name == "Secret" || locals[index].type_name.ends_with(".Secret") {

@@ -10,32 +10,35 @@
 // for the whole module, and a dependency's signatures spell their own types
 // bare (`type_name(ty: Type)`), so the import decides what they mean even
 // where the file never spells the name.
-use jet_foundation.[
-    symbol_table_key,
-    BodyIfCond,
-    BodyPatternShape,
-    BodyTree,
-    Diagnostic,
-    FnBody,
-    Func,
-    Program,
-    Span,
-    SymbolKind,
-    TBinaryOp,
-    TComptimeValue,
-    TFieldRef,
-    TextEdit,
-    StructureFact,
-    StructureFactKind,
-    Type,
-    checked_expr_type_id,
-    comptime_walk_identifiers,
-    core_bare_source_module,
-    core_module_has_type,
-    diagnostic_with_edit,
-    jet_target_layout_enum_backing,
-    jet_target_layout_enum_c_tag,
-]
+use {
+    jet_foundation.[
+        symbol_table_key,
+        BodyIfCond,
+        BodyPatternShape,
+        BodyTree,
+        Diagnostic,
+        FnBody,
+        Func,
+        Program,
+        Span,
+        SymbolKind,
+        TBinaryOp,
+        TComptimeValue,
+        TFieldRef,
+        TextEdit,
+        StructureFact,
+        StructureFactKind,
+        Type,
+        checked_expr_type_id,
+        comptime_walk_identifiers,
+        core_bare_source_module,
+        core_module_has_type,
+        diagnostic_with_edit,
+        jet_target_layout_enum_backing,
+        jet_target_layout_enum_c_tag,
+    ]
+    jet_parser.[parse_type_text]
+}
 
 // A verdict's diagnostic is None when the lint is already reported by the
 // check that found it (an unused local binding), so only its fact is new.
@@ -359,7 +362,9 @@ sema_liveness_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMod
             sema_liveness_unreachable_export(sema_inline_member_source_name(symbol.name), module_row.source_file, symbol.span, verdicts)
         }
         sema_liveness_unreachable_reexports(graph, module_index, verdicts)
-        if members_known -> sema_liveness_unused_members(graph, module_index, application, member_uses, verdicts)
+        if members_known {
+            sema_liveness_unused_members(graph, module_index, application, member_uses, verdicts)
+        }
         loop position in start..<verdicts.len() {
             verdicts[position].diagnostic = sema_liveness_located(verdicts[position].diagnostic, module_row.source_segments)
         }
@@ -447,7 +452,8 @@ sema_liveness_unreachable_reexports: fn(graph: SemaRegistrationGraph, module_ind
 // the program compares or orders the type or hashes it (a map key, a set
 // element, the key a sort or grouping closure returns); derived cloning
 // never reads. Generic code the
-// type is handed to (`json.decode<T>`, a generic call), reflection (a
+// type is handed to (`json.decode<T>`, a generic call, a game scene's
+// `component<T>()` or `query<A, B>()`), reflection (a
 // `T.reflect()` record, `reflect.of`, a type a module constant names, a type
 // a user marker or derive marks, a marker type itself), a C layout, a
 // foreign signature, an effect row (an effect type's members are named
@@ -574,7 +580,8 @@ sema_liveness_condition_uses: fn(condition: BodyIfCond, uses: &SemaLivenessMembe
 }
 
 // A compile-time value builds the cases it holds; a `T.reflect()` record
-// reflects `T`.
+// reflects `T`, and a FieldInfo row (`T.reflect().fields`, folded without
+// its TypeInfo) reads the field it names and reflects the field's type.
 sema_liveness_comptime_uses: fn(value: TComptimeValue, uses: &SemaLivenessMemberUses) -[Mem.Alloc]> Never! {
     if value == {
         .Enum(type_name, variant, args) -> {
@@ -587,6 +594,16 @@ sema_liveness_comptime_uses: fn(value: TComptimeValue, uses: &SemaLivenessMember
                     leaf: sema_call_reflection_leaf_name(reflected)
                     uses.read_types[leaf] = true
                     uses.built_types[leaf] = true
+                }
+                if type_name == "FieldInfo" && field.name == "name" && field.value == .String(field_name) {
+                    uses.field_names["{field_name}"] = true
+                }
+                if type_name == "FieldInfo" && field.name == "type" && field.value == .Struct(_, identity) {
+                    loop part in identity {
+                        if part.name == "name" && part.value == .String(written) && parse_type_text(written) == .Val(ty) {
+                            sema_liveness_type_names(ty, uses.read_types)
+                        }
+                    }
                 }
                 sema_liveness_comptime_uses(field.value, uses)
             }
@@ -703,7 +720,9 @@ sema_liveness_member_body_uses: fn(function: FnBody, uses: &SemaLivenessMemberUs
         if kind == .Print(value) -> sema_liveness_node_type_names(tree, value, uses.read_types)
         if kind == .StrLit(parts) {
             loop part in parts {
-                if part == .Interpolation(value, _) -> sema_liveness_node_type_names(tree, value, uses.read_types)
+                if part == .Interpolation(value, _) {
+                    sema_liveness_node_type_names(tree, value, uses.read_types)
+                }
             }
         }
         if kind == .Call(_, type_args, _) -> sema_liveness_generic_uses(type_args, uses)
@@ -715,6 +734,22 @@ sema_liveness_member_body_uses: fn(function: FnBody, uses: &SemaLivenessMemberUs
                 loop arg in args {
                     sema_liveness_node_type_names(tree, arg, uses.read_types)
                     sema_liveness_node_type_names(tree, arg, uses.built_types)
+                }
+            }
+        }
+        // A game scene's `component<T>()` and `query<A, B>()` hand their
+        // types over as text (Calls/Game.jet); the scene stores, replays and
+        // prints those values, so it reads and builds them.
+        if kind == .HandleMethod(_, operation, args) && (operation == .GameSceneComponent || operation == .GameSceneQuery) {
+            loop arg in args {
+                if tree.nodes[sema_comptime_fold_node_row(tree, arg)].kind == .StrLit(parts) {
+                    loop part in parts {
+                        if part == .Literal(text) {
+                            loop name in text.split(",") {
+                                sema_liveness_whole_type_uses(sema_call_reflection_leaf_name("{name}"), uses)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -782,7 +817,8 @@ sema_liveness_member_uses: fn(graph: SemaRegistrationGraph, modules: [SemaGraphM
         // A value computed while compiling (a local's, Comptime/LocalValues.jet,
         // or a `T.reflect()` record) holds its result in place of the code
         // that made it, so the cases that code names are built and the types
-        // it names are reflected there.
+        // it names are reflected there. A local's value node takes only part
+        // of the binding's span, so the whole binding counts.
         computed := [Span]{}
         loop function in checked.functions {
             if function.synthetic && (function.name == "equal" || function.name == "compare") {
@@ -796,21 +832,42 @@ sema_liveness_member_uses: fn(graph: SemaRegistrationGraph, modules: [SemaGraphM
             loop node in function.tree.nodes {
                 if node.kind == .CtLit(_) -> computed.push(node.span)
             }
+            loop statement in function.tree.stmts {
+                if statement == .Let(_, _, init, _, _, span) && sema_liveness_landed_value(function.tree, init) {
+                    computed.push(Span{start: span.start, end: span.end})
+                }
+            }
         }
-        // A compile-time value leaf holds no nested one, so the spans do not
-        // overlap and the one a reference sits in starts last at or before it.
+        // Joined where they overlap (a binding holds its value node), the
+        // spans are apart, so the one a reference sits in starts last at or
+        // before it.
         computed.sort_by(fn(left: Span, right: Span) { left.start <=> right.start })
+        joined := [Span]{}
+        loop span in computed {
+            last: joined.len() - 1
+            if last >= 0 && span.start <= joined[last].end {
+                if span.end > joined[last].end {
+                    joined[last] = Span{start: joined[last].start, end: span.end}
+                }
+                next
+            }
+            joined.push(Span{start: span.start, end: span.end})
+        }
         loop reference in checked.name_references {
             variant: reference.kind == Val(SymbolKind.Variant)
             if !variant && reference.kind != Val(SymbolKind.Type) -> next
             low := 0
-            high := computed.len()
+            high := joined.len()
             loop low < high {
                 middle: (low + high) /% 2
-                if computed[middle].start <= reference.span.start -> low = middle + 1 else -> high = middle
+                if joined[middle].start <= reference.span.start -> low = middle + 1 else {
+                    high = middle
+                }
             }
-            if low == 0 || reference.span.end > computed[low - 1].end -> next
-            if variant -> uses.cases[reference.symbol.id.id] = true else -> sema_liveness_whole_type_uses(sema_call_reflection_leaf_name(sema_inline_member_source_name(reference.symbol.name)), uses)
+            if low == 0 || reference.span.end > joined[low - 1].end -> next
+            if variant -> uses.cases[reference.symbol.id.id] = true else {
+                sema_liveness_whole_type_uses(sema_call_reflection_leaf_name(sema_inline_member_source_name(reference.symbol.name)), uses)
+            }
         }
         // A constant is made while compiling: its value builds the cases its
         // type holds, and a compile-time loop or `#run` block that walks it
@@ -854,7 +911,9 @@ sema_liveness_member_uses: fn(graph: SemaRegistrationGraph, modules: [SemaGraphM
                 if item == .Struct(definition) {
                     loop block in definition.trait_impls {
                         if block.delegation_field == .Val(field) -> uses.field_names[field] = true
-                        if sema_call_reflection_leaf_name(block.trait_name) == "Effect" -> sema_liveness_whole_type_uses(type_name, uses)
+                        if sema_call_reflection_leaf_name(block.trait_name) == "Effect" {
+                            sema_liveness_whole_type_uses(type_name, uses)
+                        }
                     }
                     if definition.marker != None || definition.effect_impl != None || sema_liveness_carries_marker(definition.type_markers, definition.derives, markers) {
                         sema_liveness_whole_type_uses(type_name, uses)
@@ -890,14 +949,36 @@ sema_liveness_whole_type_uses: fn(type_name: String, uses: &SemaLivenessMemberUs
     uses.built_types[type_name] = true
 }
 
+// Whether node `id` is a value a local computed while compiling landed as
+// (sema_fact_prepared_expr): a literal holding no code.
+sema_liveness_landed_value: fn(tree: BodyTree, id: Int) -> Bool Never! {
+    row: sema_comptime_fold_node_row(tree, id)
+    if tree.nodes[row].kind == .IntLit(_, _) || tree.nodes[row].kind == .BoolLit(_) || tree.nodes[row].kind == .CtLit(_) {
+        return true
+    }
+    if tree.nodes[row].kind == .StrLit(parts) {
+        loop part in parts {
+            if part == .Interpolation(_, _) -> return false
+        }
+        return true
+    }
+    false
+}
+
 // The markers whose uses reflect the type they mark: a marker type (an
-// `impl Marker` block) and a trait with an `impl Name.Derive` template.
+// `impl Marker` block), a declared marker and a trait's derive (an
+// `impl Name.Derive` template).
 sema_liveness_user_markers: fn(graph: SemaRegistrationGraph) -[Mem.Alloc]> [String:Bool] Never! {
     markers := [String:Bool]{}
     loop module_row in graph.modules {
         loop nominal in module_row.nominals {
             if nominal.source == .SourceAST(item) && item == .Struct(definition) && definition.marker != None {
                 markers[sema_call_reflection_leaf_name(sema_inline_member_source_name(nominal.symbol.name))] = true
+            }
+        }
+        loop item in module_row.declarations {
+            if item == .MarkerDecl(declared) {
+                markers[sema_call_reflection_leaf_name(declared.name)] = true
             }
         }
         loop implementation in module_row.impls {
@@ -935,7 +1016,9 @@ sema_liveness_unused_members: fn(graph: SemaRegistrationGraph, module_index: Int
                 // A `#Web.Form` model's fields are the controls its form
                 // renders, by name, and the values the form decodes.
                 web_form: loop marker in definition.type_markers {
-                    if sema_web_marker_is(marker, graph, module_row.module_identity, SEMA_WEB_MARKER_FORM) -> break true
+                    if sema_web_marker_is(marker, graph, module_row.module_identity, SEMA_WEB_MARKER_FORM) {
+                        break true
+                    }
                 } ?? false
                 if web_form -> next
                 if definition.layout == .Val(.C) || definition.layout == .Val(.CAligned(_, _)) {

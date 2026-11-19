@@ -3,22 +3,20 @@
 // `live` inside a loop over database rows. Each pass of the loop makes one
 // more round trip, so N rows cost N + 1 queries where one batched read (an
 // `IN` list over the rows' keys, or a join) does the same work.
-use {
-    jet_foundation.[
-        BodyTree,
-        Diagnostic,
-        FnBody,
-        Span,
-        SymbolTable,
-        TMethodRef,
-        Type,
-        body_node,
-        body_type,
-        foundation_byte_text,
-        symbol_key,
-        symbol_key_leaf,
-    ]
-}
+use jet_foundation.[
+    BodyTree,
+    Diagnostic,
+    FnBody,
+    Span,
+    SymbolTable,
+    TMethodRef,
+    Type,
+    body_node,
+    body_type,
+    foundation_byte_text,
+    symbol_key,
+    symbol_key_leaf,
+]
 
 // The L0308 tidy errors of `functions`, whose method keys `symbols` holds:
 // one per query call inside a loop over rows, at the call, once however many
@@ -79,34 +77,47 @@ jet_driver_sql_row_loop_inside: fn(loops: [Span], span: Span) -> Bool Never! {
 // `core.db.query`.
 jet_driver_sql_driver_read: fn(tree: BodyTree, symbols: SymbolTable, method: TMethodRef) -> Bool Never! {
     if method.name != "query" && method.name != "query_one" && method.name != "live" -> return false
-    if method.trait_owner == .Val(owner) && symbol_key_leaf(symbol_key(symbols, tree.symbols, owner)) == "Driver" -> return true
+    if method.trait_owner == .Val(owner) && symbol_key_leaf(symbol_key(symbols, tree.symbols, owner)) == "Driver" {
+        return true
+    }
     key: symbol_key(symbols, tree.symbols, method.symbol)
     if symbol_key_leaf(key) != method.name -> return false
     key.contains("core.db.") && !key.contains("core.db.query.")
 }
 
-// The first word of the SQL text node `id` of `tree` spells, lowercased:
-// the leading literal of the earliest string within its span. None when
-// the statement is not written there (a binding or a call builds it).
+// The first word the SQL text node `id` of `tree` spells, lowercased. A
+// checked SQL literal is `SQL.build(pieces, holes)` (or, with nothing to
+// build, the text itself), and the first piece is the text before the
+// first hole. The stop message the build carries shares the literal's span,
+// so the piece is read from the call, never as the earliest string there.
+// None when the statement is not written there (a binding or a call builds
+// it).
 jet_driver_sql_head: fn(tree: BodyTree, id: Int) -> String? Never! {
     span: body_node(tree, id).span
-    found := -1
-    loop position in 0..<tree.nodes.len() {
-        node: tree.nodes[position]
+    loop node in tree.nodes {
         if node.span.start < span.start || node.span.end > span.end -> next
-        if found >= 0 && node.span.start >= tree.nodes[found].span.start -> next
-        if node.kind == .StrLit(parts) && parts.len() > 0 && parts[0] == .Literal(_) -> found = position
-    }
-    if found < 0 -> return None
-    if tree.nodes[found].kind == .StrLit(parts) && parts[0] == .Literal(text) {
-        bytes: text.bytes()
-        start := -1
-        loop position in 0..<bytes.len() {
-            blank: bytes[position] <= 32 || bytes[position] == 40
-            if start < 0 && !blank -> start = position
-            if start >= 0 && blank -> return Val(foundation_byte_text(bytes, start, position).lower())
+        if node.kind == .Call(_, _, args) && args.len() == 2 {
+            pieces: body_node(tree, args[0].value)
+            if pieces.kind == .List(values, _) && values.len() > 0 && body_node(tree, values[0]).kind == .StrLit(parts) && parts.len() > 0 && parts[0] == .Literal(text) {
+                return Val(jet_driver_sql_first_word(text))
+            }
         }
-        if start >= 0 -> return Val(foundation_byte_text(bytes, start, bytes.len()).lower())
+        if node.kind == .DistinctCtor(argument) && body_node(tree, argument).kind == .StrLit(parts) && parts.len() > 0 && parts[0] == .Literal(text) {
+            return Val(jet_driver_sql_first_word(text))
+        }
     }
     None
+}
+
+// The first word of `text`, lowercased: up to a blank or `(`.
+jet_driver_sql_first_word: fn(text: String) -> String Never! {
+    bytes: text.bytes()
+    start := -1
+    loop position in 0..<bytes.len() {
+        blank: bytes[position] <= 32 || bytes[position] == 40
+        if start < 0 && !blank -> start = position
+        if start >= 0 && blank -> return foundation_byte_text(bytes, start, position).lower()
+    }
+    if start >= 0 -> return foundation_byte_text(bytes, start, bytes.len()).lower()
+    ""
 }

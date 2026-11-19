@@ -293,6 +293,11 @@ wait_cycle_stop: fn(control: I64) {
         }
     }
     message: jet_rt_string_builder_new()
+    // A joiner reads a failed task's reason as its first line unless the
+    // reason reads as a panic (Task.jet task_panic_message), so a task's
+    // stop says so and its joiner gets every line of the cycle. The root's
+    // stop header already says `panic: `.
+    if !scheduler_control_is_root(control) { wait_cycle_push(message, rt_static_text("panic: ")) }
     wait_cycle_push(message, rt_static_text("deadlock: tasks wait on each other"))
     at = I64{0}
     loop at < length {
