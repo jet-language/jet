@@ -418,6 +418,118 @@ NATIVE_TEST_SPIN: "use process: core.process\n\nSpin: struct {{\n    count: Int,
     native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
 }
 
+// An -O2 `run` that starts a task inlines into the entry wrapper.
+NATIVE_TEST_INLINED_RUN: "work: fn(n: Int) -> Int {{\n    n * 2\n}}\n\nrun: fn() {{\n    t: task work(21)\n    print(\"got {{t.join() ?? 0}}\")\n}}\n"
+
+#Test("an_o2_image_whose_run_is_inlined_opens_at_its_entry") {
+    scratch: native_test_files.temp_dir("jet-debug-run-source") ?? panic("scratch: {err}")
+    root: scratch.path
+    session := native_test_session(root, NATIVE_TEST_INLINED_RUN, [String]{"-O2"})
+    named: loop found in session.image.lines.functions {
+        if found.name == "run" {
+            break true
+        }
+    } ?? false
+    assert(!named, "run is inlined into the entry at -O2")
+    assert_eq(native_test_files.basename(session.run_source()), "prog.jet")
+    lines: NATIVE_TEST_INLINED_RUN.split("\n").to_list()
+    first: session.open("prog.jet", lines, [String]{}) ?? panic("the entry wrapper opens the session")
+    rest: session.command("c", first.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    assert(rest.text.contains("got 42\nProgram finished\n"), rest.text)
+    session.close()
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+}
+
+NATIVE_TEST_REVERSE: "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nrun: fn() {{\n    total := 0\n    loop k in 0..<3 {{\n        d: double(k)\n        total += d\n    }}\n    print(\"total {{total}}\")\n}}\n"
+
+// A reverse step made after a seek (`rn`) and a step (`n`) runs the seek
+// and the step again with its probes in: the step's run passes the probes
+// in the call as any run does, so the program comes back to the stop and
+// the step goes back into the call's last line. A session with an
+// environment reverses as a replay does; the program's main task runs the
+// same each time.
+#Test("a_reverse_step_after_a_seek_and_a_step_goes_into_the_call") {
+    scratch: native_test_files.temp_dir("jet-debug-reverse") ?? panic("scratch: {err}")
+    root: scratch.path
+    session := native_test_session(root, NATIVE_TEST_REVERSE, [String]{"-O0"})
+    session.env = Val([String]{"NO_COLOR=1"})
+    lines: NATIVE_TEST_REVERSE.split("\n").to_list()
+    first: session.open("prog.jet", lines, [String]{}) ?? panic("the session opens at run")
+    stop := first.stop
+    shown := ""
+    words: [String]{"break 10", "c", "rn", "n", "rs"}
+    loop word in words {
+        step: session.command(word, stop, "prog.jet", lines) ?? panic("{word}: {err.detail}")
+        shown = step.text
+        stop = step.stop
+    }
+    assert(shown.starts_with("3 |     y        <- here\n"), shown)
+    rest: session.command("c", stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    assert(rest.text.contains("Breakpoint hit  prog.jet:10"), rest.text)
+    session.close()
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+}
+
+// An -O0 frame holds its locals in registers: `why` follows `total`'s
+// register through run's own code from the frame's start, so the third
+// pass of line 10 names the write on the loop's second pass (the first
+// added 0, which changed nothing), and the session comes back to its stop.
+#Test("why_follows_a_local_held_in_a_register") {
+    scratch: native_test_files.temp_dir("jet-debug-why-register") ?? panic("scratch: {err}")
+    root: scratch.path
+    session := native_test_session(root, NATIVE_TEST_REVERSE, [String]{"-O0"})
+    session.env = Val([String]{"NO_COLOR=1"})
+    lines: NATIVE_TEST_REVERSE.split("\n").to_list()
+    first: session.open("prog.jet", lines, [String]{}) ?? panic("the session opens at run")
+    stop := first.stop
+    words: [String]{"break 10", "c", "c", "c"}
+    loop word in words {
+        step: session.command(word, stop, "prog.jet", lines) ?? panic("{word}: {err.detail}")
+        stop = step.stop
+    }
+    asked: session.command("why total", stop, "prog.jet", lines) ?? panic("why: {err.detail}")
+    assert(asked.text.starts_with("total = 2, set at prog.jet:10 in run() (task 1)\n  before: 0\n  #0  run()  at prog.jet:10\n"), asked.text)
+    bound: session.command("why k", stop, "prog.jet", lines) ?? panic("why: {err.detail}")
+    assert(bound.text.starts_with("k = 2, set at prog.jet:8 in run() (task 1)\n"), bound.text)
+    // Each pass binds `d` again, from outside its register's range.
+    again: session.command("why d", stop, "prog.jet", lines) ?? panic("why: {err.detail}")
+    assert(again.text.starts_with("d = 4, set at prog.jet:9 in run() (task 1)\n  before: none: this line binds it\n"), again.text)
+    rest: session.command("c", stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    assert(rest.text.contains("total 6\nProgram finished\n"), rest.text)
+    session.close()
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+}
+
+// A task keeps the -O2 loop from folding away; `d` has no place in it.
+NATIVE_TEST_RECOVER: "bump: fn(rounds: Int) -> Int {{\n    rounds * 2\n}}\n\ndouble: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nrun: fn() {{\n    helper: task bump(3)\n    total := 0\n    loop k in 0..<3 {{\n        d: double(k)\n        total += d\n    }}\n    print(\"total {{total}} {{helper.join() ?? 0}}\")\n}}\n"
+
+// An -O2 image keeps no place for `d` on line 15: `why` asks for a
+// recovery, and the -O0 image of the same source, run to the same pass of
+// the line, answers there, labeled; the -O2 session stays at its stop.
+#Test("why_recovers_an_optimized_away_local_from_the_o0_image") {
+    scratch: native_test_files.temp_dir("jet-debug-why-recover") ?? panic("scratch: {err}")
+    root: scratch.path
+    other: native_test_files.temp_dir("jet-debug-why-recover-o0") ?? panic("scratch: {err}")
+    unoptimized: other.path
+    built := native_test_session(unoptimized, NATIVE_TEST_RECOVER, [String]{"-O0", "--dead-code=keep"})
+    built.close()
+    session := native_test_session(root, NATIVE_TEST_RECOVER, [String]{"-O2"})
+    session.env = Val([String]{"NO_COLOR=1"})
+    lines: NATIVE_TEST_RECOVER.split("\n").to_list()
+    first: session.run_to([NativeBreak]{{file: "prog.jet", line: 15}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
+    second: session.command("c", first.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    asked: session.why("d") ?? panic("why: {err.detail}")
+    assert(asked.recover, asked.text)
+    image: native_test_files.join(native_test_files.join(unoptimized, "out"), "prog")
+    recovered: session.recovered("d", image, native_test_files.join(root, "recovered.txt")) ?? panic("recovered: {err.detail}")
+    assert(recovered.starts_with("d = 2 (recovered from the -O0 replay), set at prog.jet:14 in run() (task 1)\n"), recovered)
+    rest: session.command("c", second.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    assert(rest.text.contains("Breakpoint hit  prog.jet:15"), rest.text)
+    session.close()
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+    native_test_files.remove_all(unoptimized) ?? panic("scratch cleanup: {err}")
+}
+
 #Test("a_split_debug_image_is_read_through_its_debug_link") {
     scratch: native_test_files.temp_dir("jet-debug-split") ?? panic("scratch: {err}")
     root: scratch.path

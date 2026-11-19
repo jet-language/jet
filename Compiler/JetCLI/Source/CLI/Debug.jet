@@ -341,7 +341,7 @@ jet_cli_debug_commands: fn(session: &NativeSession, first: NativeDebugStep, file
 jet_cli_debug_why: fn(session: &NativeSession, operand: String, entry: String, scratch: String, deep_checks: DeepChecks, recovery: &String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> String NativeDebugError! {
     asked: session.why(operand) ?? return Err(err)
     if !asked.recover || entry != "" -> return Ok(asked.text)
-    source: session.why_source() ?? return Err(err)
+    source: session.run_source()
     if source == "" || !cli_files.exists(source) -> return Ok(asked.text)
     if recovery == "" {
         out_dir: cli_files.join(scratch, "why")
