@@ -1,16 +1,19 @@
 // The program the causal lens profiles. Each round spawns one task down the
 // narrow path and three down the wide one, joins them and closes a `round`
 // zone, the progress point the lens ranks lines by. The narrow task does
-// the most work, so it bounds each round; each wide task does four-fifths
-// of it, so the three together take more CPU time than the narrow one and
-// a CPU profile ranks the wide line first. Speeding the narrow line up
-// shortens every round; speeding the wide one does not.
+// the most work and each wide task four-fifths of it, so the three together
+// take more CPU time than the narrow one. Which line bounds a round depends
+// on the CPUs the tasks get: with one each, the narrow line does, and
+// speeding the wide one gains nothing; when they share fewer (a loaded
+// machine), the round takes their total CPU time, and speeding the wide line
+// gains the most. The lens must tell which from the run it profiles.
 //
 // `jet run main.jet -- MILLIS` runs rounds for MILLIS milliseconds (4000 by
-// default). `jet run main.jet -- measure` times runs of rounds as they are
-// and with the narrow task doing seven-tenths of its work, as if its line
-// were 30% faster, and writes how much sooner each round came, in tenths of
-// a percent, to measured.txt.
+// default). `jet run main.jet -- measure` times runs of rounds as they are,
+// with the narrow task doing seven-tenths of its work, as if its line were
+// 30% faster, and with each wide task doing seven-tenths of its own, and
+// writes how much sooner each round came for the narrow line and for the
+// wide one, in tenths of a percent, to measured.txt.
 use {
     files: core.files
     perf: core.perf
@@ -20,8 +23,8 @@ use {
 
 STEPS: 400000
 
-// The pairs `measure` times, and the rounds in each half of a pair.
-PAIRS: 31
+// The sets of three runs `measure` times, and the rounds in each run.
+SETS: 31
 
 BLOCK: 8
 
@@ -37,22 +40,23 @@ wide: fn(seed: Int, steps: Int) -> Int {
     total
 }
 
-// One round, the narrow task doing `tenths` tenths of its work. (Named
-// apart from its zone: check.jet finds the zone's ranking by its name.)
-play_round: fn(seed: Int, tenths: Int) {
+// One round, the narrow task doing `narrow_tenths` tenths of its work and
+// each wide one `wide_tenths` of its own. (Named apart from its zone:
+// check.jet finds the zone's ranking by its name.)
+play_round: fn(seed: Int, narrow_tenths: Int, wide_tenths: Int) {
     _round: perf.zone("round")
-    first: task narrow(seed, STEPS * tenths /% 10)
-    second: task wide(seed + 1, STEPS * 8 /% 10)
-    third: task wide(seed + 2, STEPS * 8 /% 10)
-    fourth: task wide(seed + 3, STEPS * 8 /% 10)
+    first: task narrow(seed, STEPS * narrow_tenths /% 10)
+    second: task wide(seed + 1, STEPS * 8 * wide_tenths /% 100)
+    third: task wide(seed + 2, STEPS * 8 * wide_tenths /% 100)
+    fourth: task wide(seed + 3, STEPS * 8 * wide_tenths /% 100)
     sum: (first.join() ?? 0) + (second.join() ?? 0) + (third.join() ?? 0) + (fourth.join() ?? 0)
     if sum < 0 -> print("negative")
 }
 
 // How long BLOCK rounds take, in nanoseconds.
-timed: fn(seed: Int, tenths: Int) -> Int {
+timed: fn(seed: Int, narrow_tenths: Int, wide_tenths: Int) -> Int {
     started: time.instant()
-    loop k in 0..<BLOCK -> play_round(seed + k, tenths)
+    loop k in 0..<BLOCK -> play_round(seed + k, narrow_tenths, wide_tenths)
     started.elapsed().ns
 }
 
@@ -60,33 +64,38 @@ run: fn() {
     args: process.args()
     word: if args.len() > 0 -> args[args.len() - 1] else -> ""
     if word == "measure" {
-        // Pairs of runs, the program as it is beside the program sped up,
-        // in turn first, so the machine's load and its drift fall alike on
-        // both halves of a pair; each pair's speedup, and the median of
-        // them, in tenths of a percent.
-        speedups := [Int]{}
-        loop pair in 0..<PAIRS {
-            seed: pair * BLOCK
-            slow := 0
-            fast := 0
-            if pair %% 2 == 0 {
-                slow = timed(seed, 10)
-                fast = timed(seed, 7)
-            } else {
-                fast = timed(seed, 7)
-                slow = timed(seed, 10)
+        // Sets of three runs, the program as it is, with the narrow line
+        // sped up and with the wide one sped up, each first in turn, so the
+        // machine's load and its drift fall alike on all three; each set's
+        // speedups, and the median of them, in tenths of a percent.
+        narrow_gains := [Int]{}
+        wide_gains := [Int]{}
+        loop set in 0..<SETS {
+            seed: set * BLOCK
+            plain := 0
+            narrow_fast := 0
+            wide_fast := 0
+            loop turn in 0..<3 {
+                which: (set + turn) %% 3
+                if {
+                    which == 0 -> plain = timed(seed, 10, 10)
+                    which == 1 -> narrow_fast = timed(seed, 7, 10)
+                    else -> wide_fast = timed(seed, 10, 7)
+                }
             }
-            speedups.push(1000 - fast * 1000 /% slow)
+            narrow_gains.push(1000 - narrow_fast * 1000 /% plain)
+            wide_gains.push(1000 - wide_fast * 1000 /% plain)
         }
-        speedups.sort()
-        files.write("measured.txt", "{speedups[PAIRS /% 2]}\n") ?? panic("cannot write measured.txt")
+        narrow_gains.sort()
+        wide_gains.sort()
+        files.write("measured.txt", "{narrow_gains[SETS /% 2]} {wide_gains[SETS /% 2]}\n") ?? panic("cannot write measured.txt")
         print("measured")
         return
     }
     started: time.instant()
     count := 0
     loop started.elapsed_millis() < (Int.parse(word) ?? 4000) {
-        play_round(count, 10)
+        play_round(count, 10, 10)
         count += 1
     }
     print("done")
