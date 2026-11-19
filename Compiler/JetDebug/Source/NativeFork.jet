@@ -69,26 +69,26 @@ NATIVE_FORK_SIGSYS: 31
 
 NATIVE_FORK_ENOMEM: 12
 
-// The first `syscall` instruction (0f 05) in the stopped program's code
-// [low, high), read as it is now (a planted breakpoint byte doesn't match);
-// None when none is found. Its bytes run as `syscall` wherever they sit in
-// an instruction.
-native_fork_syscall_at: fn(trace: X64Trace, low: Int, high: Int) -> Int? Never! {
-    chunk: 4096
-    from := low
-    loop from < high {
-        // One byte more, so a pair split across two chunks is found.
-        bytes: x64_trace_read(trace, from, chunk + 1) ?? return None
-        if bytes.len() < 2 -> return None
-        loop k in 0..<bytes.len() - 1 {
-            first: Int{bytes[k]}
-            second: Int{bytes[k + 1]}
-            if first == 0x0f && second == 0x05 -> return Val(from + k)
-        }
-        if bytes.len() < chunk + 1 -> return None
-        from += chunk
+// The first `syscall` instruction (0f 05) of the image's `code`, found in
+// its bytes, that the stopped program's code still holds (a planted
+// breakpoint byte doesn't match): one read of the program per candidate,
+// not a scan of its code. None when none is found. Its bytes run as
+// `syscall` wherever they sit in an instruction.
+native_fork_syscall_at: fn(trace: X64Trace, code: NativeCode) -> Int? Never! {
+    if code.bytes.len() < 2 -> return None
+    loop k in 0..<code.bytes.len() - 1 {
+        first: Int{code.bytes[k]}
+        second: Int{code.bytes[k + 1]}
+        if first != 0x0f || second != 0x05 -> next
+        if native_fork_is_syscall(trace, code.address + k) -> return Val(code.address + k)
     }
     None
+}
+
+// Whether the stopped program's code at `address` reads `syscall` now.
+native_fork_is_syscall: fn(trace: X64Trace, address: Int) -> Bool Never! {
+    bytes: x64_trace_read(trace, address, 2) ?? return false
+    bytes.len() == 2 && Int{bytes[0]} == 0x0f && Int{bytes[1]} == 0x05
 }
 
 // Fork the stopped program at its stopped thread (the trace's thread),

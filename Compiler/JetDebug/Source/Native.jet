@@ -455,6 +455,9 @@ NativeSession: struct {
     evaluator: NativeEvaluator?{None},
     evals: [String:Shared<NativeEval>]{[String:Shared<NativeEval>]{}},
     eval_image: Shared<NativeEvalImage>?{None},
+    // A `syscall` instruction of the image's code, which forks and code
+    // mappings run (syscall_site); 0 until the first needs one.
+    syscall: Int{0},
     // The conditions and logpoints placed in the program (NativePlace.jet),
     // latest last, and whether the last stop was a condition of them that
     // held.
@@ -974,7 +977,7 @@ NativeSession: struct {
             permit.value.plan = Val(plan)
             permit.value.planned = self.fixed.len()
         }
-        syscall: native_fork_syscall_at(self.trace, facts.value.code.address, facts.value.code.address + facts.value.code.bytes.len()) ?? return Err(native_eval_refused("the program's code holds no system call to copy it with"))
+        syscall: self.syscall_site(facts.value.code) ?? return Err(native_eval_refused("the program's code holds no system call to copy it with"))
         if permit.value.plan == .Val(plan) {
             return native_eval_run(self.image, self.trace, self.originals(), self.probe.sites, permit.value, plan, facts.value, syscall, captures, typed)
         }
@@ -1087,9 +1090,6 @@ NativeSession: struct {
         args := [[NativePlaceArg]]{}
         loop compiled in calls {
             permit: compiled.guard_read()
-            if permit.value.captures.len() > NATIVE_PLACE_ARGS.len() {
-                return Err(NativeDebugError{detail: "it reads more than {NATIVE_PLACE_ARGS.len()} locals"})
-            }
             places := [NativePlaceArg]{}
             loop capture in permit.value.captures {
                 arg := NativePlaceArg?{None}
@@ -1169,7 +1169,7 @@ NativeSession: struct {
         ring_size: if logs -> NATIVE_PLACE_RING_HEADER + NATIVE_PLACE_RING_SLOTS * slot + clock_room else -> 0
         text_low: facts.value.code.address
         text_high: text_low + facts.value.code.bytes.len()
-        syscall: native_fork_syscall_at(self.trace, text_low, text_high) ?? return "the program's code holds no system call to map the condition's code with"
+        syscall: self.syscall_site(facts.value.code) ?? return "the program's code holds no system call to map the condition's code with"
         base: self.map_code(size + NATIVE_FIX_PAGE + ring_size, text_high, syscall) ?? return err.detail
         trampoline: base + size
         ring_at: trampoline + NATIVE_FIX_PAGE
@@ -1644,6 +1644,7 @@ NativeSession: struct {
         self.watches = [NativeWatch]{}
         self.evals = [String:Shared<NativeEval>]{}
         self.eval_image = None
+        self.syscall = 0
         Ok()
     }
 
@@ -1926,9 +1927,9 @@ NativeSession: struct {
     // value then shows by its fields.
     view: fn(&self, view: Int, ty: Int, value: [U8]) -> String? NativeDebugError! {
         // The image's code holds the runtime's `syscall` instructions.
-        elf: native_files.read_bytes(self.binary) ?? return Ok(None)
-        code: native_elf_code(elf)
-        syscall: native_fork_syscall_at(self.trace, code.address, code.address + code.bytes.len()) ?? return Ok(None)
+        facts_cell: self.eval_facts() ?? return Ok(None)
+        facts: facts_cell.guard_read()
+        syscall: self.syscall_site(facts.value.code) ?? return Ok(None)
         fork: native_fork_make(self.trace, syscall) ?? return Ok(None)
         viewed: native_fork_view(fork, self.image, self.trace.pid, self.originals(), self.probe.sites, view, ty, value) ?? {
             native_fork_end(fork)
@@ -3005,6 +3006,19 @@ NativeSession: struct {
     }
 
     has_site: fn(self, address: Int) -> Bool Never! { self.sites.has_key(address) }
+
+    // A `syscall` instruction of the image's `code` that the program still
+    // holds, found in the image's bytes at the first need
+    // (native_fork_syscall_at) and kept: a later need reads its two bytes
+    // back, and looks again only when they no longer read `syscall`.
+    syscall_site: fn(&self, code: NativeCode) -> Int? Never! {
+        if self.syscall != 0 && native_fork_is_syscall(self.trace, self.syscall) {
+            return Val(self.syscall)
+        }
+        found: native_fork_syscall_at(self.trace, code) ?? return None
+        self.syscall = found
+        Val(found)
+    }
 
     // The number of the breakpoint trapping `address`.
     breakpoint_at: fn(self, address: Int) -> Int? Never! {
@@ -4601,11 +4615,14 @@ NativeSession: struct {
     // register it uses), through the call frame rules of code without Jet
     // line information (the runtime's, native_cfi_row), and the
     // frame-pointer chain elsewhere. A dump's registers are only those its
-    // task's row knows (native_dump_known).
+    // task's row knows (native_dump_known). The stack's words above the
+    // innermost frame are read at once (stack_word).
     unwind_from: fn(self, start: [Int]) -> [NativeUnwound] NativeDebugError! {
         registers := loop value in start -> value
         known := loop _ in 0..<registers.len() -> true
         if self.dump == .Val(dumped) -> known = native_dump_known(dumped, self.task)
+        low: registers[X64_TRACE_RSP]
+        window: if self.dump == None && low > 0 -> x64_trace_read(self.trace, low, NATIVE_DEBUG_STACK_WINDOW) ?? [U8]{} else -> [U8]{}
         frames := [NativeUnwound]{}
         loop frames.len() < NATIVE_DEBUG_MOST_FRAMES {
             pc: registers[X64_TRACE_RIP]
@@ -4625,7 +4642,7 @@ NativeSession: struct {
             frames.push(NativeUnwound{pc: pc, cfa: cfa, registers: registers.copy(), known: known.copy()})
             if cfa <= registers[X64_TRACE_RSP] -> break
             at: if framed -> cfa + row.offsets[NATIVE_CFI_RETURN] else -> cfa - 8
-            returned: self.word(at) ?? break
+            returned: self.stack_word(low, window, at) ?? break
             if returned <= 0 -> break
             next_known := loop _ in 0..<registers.len() -> false
             loop index in NATIVE_DEBUG_CALLEE_SAVED -> next_known[index] = known[index]
@@ -4636,7 +4653,7 @@ NativeSession: struct {
                         index: NATIVE_DEBUG_DWARF_REGISTERS[register]
                         if row.rules[register] == NATIVE_CFI_LOST -> next_known[index] = false
                         if row.rules[register] == NATIVE_CFI_SAVED {
-                            saved: self.word(cfa + row.offsets[register])
+                            saved: self.stack_word(low, window, cfa + row.offsets[register])
                             next_known[index] = saved != None
                             registers[index] = saved ?? 0
                         }
@@ -4644,12 +4661,12 @@ NativeSession: struct {
                     outermost = next_known[X64_TRACE_RBP] && registers[X64_TRACE_RBP] == 0
                 }
                 else -> {
-                    rsp_word: self.word(registers[X64_TRACE_RSP])
-                    rbp_word: if registers[X64_TRACE_RBP] > 0 -> self.word(registers[X64_TRACE_RBP]) else -> Int?{None}
+                    rsp_word: self.stack_word(low, window, registers[X64_TRACE_RSP])
+                    rbp_word: if registers[X64_TRACE_RBP] > 0 -> self.stack_word(low, window, registers[X64_TRACE_RBP]) else -> Int?{None}
                     caller_rbp: native_caller_rbp(self.openings, function, registers, pc, here, rsp_word, rbp_word) ?? break
                     loop save in native_prologue_saves(self.openings, function) {
                         if pc >= save.after && registers[X64_TRACE_RBP] > 0 {
-                            if self.word(registers[X64_TRACE_RBP] - 8 * (save.slot + 1)) == .Val(saved) {
+                            if self.stack_word(low, window, registers[X64_TRACE_RBP] - 8 * (save.slot + 1)) == .Val(saved) {
                                 registers[save.register] = saved
                                 next_known[save.register] = true
                             }
@@ -4671,6 +4688,16 @@ NativeSession: struct {
             }
         }
         Ok(frames)
+    }
+
+    // The word at `address`: from `window`, the stack's bytes read from
+    // `low`, when they hold it, else read alone (word).
+    stack_word: fn(self, low: Int, window: [U8], address: Int) -> Int? Never! {
+        at: address - low
+        if at >= 0 && at + 8 <= window.len() {
+            return Val(native_number(window, at, 8, X64DebugEncoding.Signed))
+        }
+        self.word(address)
     }
 }
 
@@ -4714,6 +4741,10 @@ NATIVE_DEBUG_LINE_STEPS: 256
 
 // The most frames a backtrace unwinds.
 NATIVE_DEBUG_MOST_FRAMES: 256
+
+// The stack bytes above the innermost frame an unwind reads at once, which
+// one x64_trace_read call reads in one process_vm_readv.
+NATIVE_DEBUG_STACK_WINDOW: 3072
 
 // The registers (as the kernel orders them) a call preserves: r15, r14,
 // r13, r12, rbp and rbx.
@@ -4888,10 +4919,13 @@ native_code_at: fn(code: NativeCode, address: Int) -> [U8] Never! {
     code.bytes[at..<end]
 }
 
-// The word of the stopped program at `address`.
+// The word of the stopped program at `address`, read with one
+// process_vm_readv of this process (x64_trace_read), not a round trip to
+// the trace's helper.
 native_debug_word: fn(trace: X64Trace, address: Int) -> Int? Never! {
-    word: x64_trace_peek(trace, address) ?? return None
-    Val(Int{word})
+    bytes: x64_trace_read(trace, address, 8) ?? return None
+    if bytes.len() != 8 -> return None
+    Val(native_number(bytes, 0, 8, X64DebugEncoding.Signed))
 }
 
 // The addresses of `line` in the Jet source `file` (by base name): in each
