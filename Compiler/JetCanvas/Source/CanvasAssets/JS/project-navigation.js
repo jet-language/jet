@@ -1811,9 +1811,10 @@
       schema_version: 1,
       revision: requestedRevision,
       commands,
+      // Each breakpoint names the revision it was drawn on; the debugger
+      // reports one from another revision stale instead of placing it.
       breakpoint_spans: (debugState.breakpoints || [])
-        .filter((b) => b.revision === requestedRevision)
-        .map((b) => b.anchor),
+        .map((b) => b.anchor + "@" + b.revision),
       watches: debugState.watches || []
     };
     if (requestedSourceId) body.source_id = requestedSourceId;

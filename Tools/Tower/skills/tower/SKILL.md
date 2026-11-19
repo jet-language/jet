@@ -78,6 +78,13 @@ approved contract is not a ballot.
   --profile cases --filter F"` on `--add` or `--edit n`. `tower prove --card
   '#N'` prints the plan; add `--yes --jet PATH --tree DIR --commit SHA --by X`
   to run it at a landed commit and meet the passing rows.
+- A speed, latency or size row whose tool also measures a peer is judged
+  against that peer for each measure: Jet's value is at most the peer's
+  (Jet/peer at most 1.00, the AGENTS.md performance gate). A fixed bar such as
+  "under 100 ms" may sit beside the peer bar, never replace it; meeting it
+  while the peer is faster leaves the row open.
+- Board text names a Jet diagnostic by its name, `Jet.Name`, with its E-code
+  at most as the alias beside it.
 - A row that waits on other work says so: `--blocked-by '#M'|'#M cK'|D-ID` on
   `--add` or `--edit n`. The wait ends by itself when the blocker resolves;
   `--unblock n` ends it by hand.

@@ -50,7 +50,8 @@ NATIVE_PLACE_JUMP: 5
 NATIVE_PLACE_REGS: [Int]{0, 2, 1, 3, 6, 7, 5, 4, 8, 9, 10, 11, 12, 13, 14, 15}
 
 // The registers the condition takes its captures in, after its cell in rdi:
-// rsi, rdx, rcx, r8 and r9 (x86 numbers).
+// rsi, rdx, rcx, r8 and r9 (x86 numbers). A condition with more captures
+// takes their addresses in a table, the table's address in rsi.
 NATIVE_PLACE_ARGS: [Int]{6, 2, 1, 8, 9}
 
 // How an instruction branches: not at all, a jmp, a call or a jcc.
@@ -547,9 +548,17 @@ native_place_code: fn(base: Int, address: Int, calls: [NativePlaceCall], ring: N
             native_place_emit(out, [Int]{0x48, 0x8b, 0x7d, NATIVE_PLACE_CELL + 8, 0x48, 0x81, 0xc7})
             native_place_word(out, 8 * index, 4)
         }
-        if call.arguments.len() > NATIVE_PLACE_ARGS.len() -> return None
+        // More captures than registers go by a table of their addresses on
+        // the stack, its address in rsi, as the condition was compiled to
+        // take them (NativeEval.jet NATIVE_EVAL_CAPTURES): and rsp,-16;
+        // sub rsp,table
+        table: call.arguments.len() > NATIVE_EVAL_CAPTURES
+        if table {
+            native_place_emit(out, [Int]{0x48, 0x83, 0xe4, 0xf0, 0x48, 0x81, 0xec})
+            native_place_word(out, ((8 * call.arguments.len() + 15) >> 4) << 4, 4)
+        }
         loop (k, argument) in call.arguments {
-            reg: NATIVE_PLACE_ARGS[k]
+            reg: if table -> 0 else -> NATIVE_PLACE_ARGS[k]
             high: if reg >= 8 -> 4 else -> 0
             low: reg & 7
             saved: NATIVE_PLACE_GPR + 8 * argument.register
@@ -564,7 +573,14 @@ native_place_code: fn(base: Int, address: Int, calls: [NativePlaceCall], ring: N
             if argument.deref {
                 native_place_emit(out, [Int]{0x48 | high | (high >> 2), 0x8b, (low << 3) | low})
             }
+            // a table's row: mov [rsp+8k],rax
+            if table {
+                native_place_emit(out, [Int]{0x48, 0x89, 0x84, 0x24})
+                native_place_word(out, 8 * k, 4)
+            }
         }
+        // mov rsi,rsp
+        if table -> native_place_emit(out, [Int]{0x48, 0x89, 0xe6})
         // and rsp,-16; call entry; mov rsp,rbp
         native_place_emit(out, [Int]{0x48, 0x83, 0xe4, 0xf0, 0xe8})
         field: out.len()
@@ -763,6 +779,25 @@ native_place_arg: fn(expression: [U8]) -> NativePlaceArg? Never! {
     jump: native_place_jump(0x1000, 0x200000, 5)
     assert_eq(jump.len(), 5)
     assert_eq(native_number(jump, 1, 4, X64DebugEncoding.Signed), 0x200000 - 0x1005)
+}
+
+#Test("a condition with more captures than registers takes a table of their addresses") {
+    code: [U8]{0x55, 0x48, 0x89, 0xe5, 0x90}
+    insns: native_displaced(code, 0) ?? panic("displaced")
+    arguments: loop k in 0..<6 -> NativePlaceArg{register: 6, memory: true, offset: -8 * (k + 1), deref: false}
+    placed: native_place_code(0x200000, 0x1000, [NativePlaceCall]{NativePlaceCall{entry: 0x201000, arguments: arguments}}, None, code, 0, insns) ?? panic("code")
+    bytes: placed.bytes
+    // and rsp,-16; sub rsp,48: the table's six rows, aligned
+    table: native_place_find(bytes, [Int]{0x48, 0x83, 0xe4, 0xf0, 0x48, 0x81, 0xec, 48, 0, 0, 0})
+    assert(table > 0)
+    // The sixth capture's address, mov rax,[rbp+rbp's slot]; lea rax,[rax-48],
+    // is the table's last row: mov [rsp+40],rax
+    sixth: native_place_find(bytes, [Int]{0x48, 0x8d, 0x80, 0xd0, 0xff, 0xff, 0xff, 0x48, 0x89, 0x84, 0x24, 40, 0, 0, 0})
+    assert(sixth > table)
+    // Then rsi holds the table and the call follows: mov rsi,rsp; and rsp,-16; call
+    assert_eq(native_place_find(bytes, [Int]{0x48, 0x89, 0xe6, 0x48, 0x83, 0xe4, 0xf0, 0xe8}), sixth + 15)
+    // No capture goes to an argument register.
+    assert_eq(native_place_find(bytes, [Int]{0x48, 0x8b, 0xb5}), -1)
 }
 
 // Where `wanted` first starts in `bytes`; -1 when nowhere.

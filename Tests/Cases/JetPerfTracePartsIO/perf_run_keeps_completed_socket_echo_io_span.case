@@ -7,12 +7,14 @@ fixture: Fixtures/SocketEcho
 step: jet perf run socket_echo.jet --allow=Net --out {work}/socket-echo.jettrace
 exit: 0
 stdout.trim: = echo-ping.out # original predicate
+# An io row is a transfer the runtime recorded (bytes, target and stack); a wait is a task_wait span
+# (Docs/Spec/observability.md), so the accept, the sleep and the reads' readiness are spans, not io rows.
 file: socket-echo.jettrace ~ "\"io\":[{" # original predicate: helper requires nonempty io array
-json: file socket-echo.jettrace doc $.content.io[?kind="tcp"] #>= 1 # original predicate
-json: file socket-echo.jettrace doc $.content.io[?wait in ["tcp accept","tcp accept readiness"]] #>= 1 # original predicate
+json: file socket-echo.jettrace doc $.content.io[?kind="network"][?operation="write"][?bytes=4] #>= 1 # the client's "ping"
+json: file socket-echo.jettrace doc $.content.io[?kind="network"][?operation="read"][?bytes=4] #>= 1 # the server reads it
+json: file socket-echo.jettrace doc $.content.spans[?kind="task_wait"][?symbol.name in ["tcp accept","tcp accept readiness"]] #>= 1 # original predicate: the accept wait, now its span
 file: socket-echo.jettrace !~ "\"io\":[]" # original predicate
-json: file socket-echo.jettrace doc $.content.io[?wait="time sleep"] #= 0 # original predicate
-json: file socket-echo.jettrace doc $.content.io[?wait~="channel "] #= 0 # original predicate
+json: file socket-echo.jettrace doc $.content.io[?kind!="network"] #= 0 # original predicate: no sleep or channel wait is an io row, and the program touches no file
 json: file socket-echo.jettrace doc $.content.io #>= 1 # original predicate: spans>0
 json: file socket-echo.jettrace doc each $.content.io[*] as r: $.content.tasks[?id={r.task_id}][0].state = "done"
 json: file socket-echo.jettrace doc each $.content.io[*] as r: $.content.tasks[?id={r.task_id}][0].wait = ""

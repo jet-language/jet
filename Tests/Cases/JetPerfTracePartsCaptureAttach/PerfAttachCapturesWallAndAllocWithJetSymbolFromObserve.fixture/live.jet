@@ -2,6 +2,7 @@ use {
     mem: core.mem
     net: core.net
     tasks: core.tasks
+    term: core.term
     time: core.time
 }
 
@@ -31,5 +32,9 @@ run: fn() {
     x: arena.alloc(42)
     probe_work()
     print("READY")
+    // A pipe stdout is written when its buffer fills; flush so the case
+    // sees READY while the program still runs.
+    out := term.stdout()
+    out.flush() ?? panic("flush")
     time.sleep(30000ms)
 }

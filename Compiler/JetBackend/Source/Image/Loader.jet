@@ -2037,6 +2037,9 @@ LOADER_TRACE_WORD: 256
 // The timespec x64_trace_wait_within sleeps on, in this process.
 LOADER_TRACE_SLEEP: 448
 
+// x64_trace_wait_within's first nap between asks, in nanoseconds.
+LOADER_TRACE_NAP_FIRST_NS: 16000
+
 // The pollfd x64_trace_wait_or_input polls its input with, in this process.
 LOADER_TRACE_POLL: 464
 
@@ -2632,9 +2635,15 @@ x64_trace_wait_for: fn(trace: X64Trace, thread: Int) -> Int {
 }
 
 // Wait up to about `milliseconds` for the traced thread `thread` to stop or
-// end: its wait status, or -errno; None when it still runs then.
+// end: its wait status, or -errno; None when it still runs then. The thread
+// is asked without waiting between naps that start at
+// LOADER_TRACE_NAP_FIRST_NS and double up to a millisecond, so a stop that
+// comes in microseconds is seen in microseconds.
 x64_trace_wait_within: fn(trace: X64Trace, thread: Int, milliseconds: Int) -> Int? {
-    loop _ in 0..<milliseconds + 1 {
+    budget: milliseconds * 1000000
+    slept := 0
+    nap := LOADER_TRACE_NAP_FIRST_NS
+    loop {
         result := -OS_EINTR
         status := 0
         #Unsafe("the helper's wait4 writes one int status to the trace's scratch word; nanosleep reads the timespec at LOADER_TRACE_SLEEP, in the scratch page") {
@@ -2644,16 +2653,18 @@ x64_trace_wait_within: fn(trace: X64Trace, thread: Int, milliseconds: Int) -> In
             if result == thread {
                 status = Int{os_load_i64(I64{trace.scratch + LOADER_TRACE_WORD})} & 0xffffffff
             }
-            if result == 0 {
+            if result == 0 && slept < budget {
                 os_store_i64(I64{trace.scratch + LOADER_TRACE_SLEEP}, I64{0})
-                os_store_i64(I64{trace.scratch + LOADER_TRACE_SLEEP + 8}, I64{1000000})
+                os_store_i64(I64{trace.scratch + LOADER_TRACE_SLEEP + 8}, I64{nap})
                 _ := os_syscall(OS_SYS_NANOSLEEP, trace.scratch + LOADER_TRACE_SLEEP, 0, 0, 0, 0, 0)
             }
         }
         if result == thread -> return Val(status)
         if result != 0 -> return Val(result)
+        if slept >= budget -> return None
+        slept += nap
+        nap = if nap * 2 < 1000000 -> nap * 2 else -> 1000000
     }
-    None
 }
 
 // Send `signal` to the trace's thread. False when the kernel refused.

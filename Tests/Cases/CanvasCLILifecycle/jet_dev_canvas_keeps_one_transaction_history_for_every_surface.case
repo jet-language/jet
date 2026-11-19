@@ -1,0 +1,15 @@
+# Scenario one_transaction_history: `jet dev <file> --canvas` keeps one source transaction
+# history for every editor surface. Tools/CanvasTest/Run.jet native-history copies the demo
+# into a folder of its own and applies, from two surfaces (the graph and the code editor): the
+# graph's edit, accepted; the code editor's edit drawn before it, refused as a conflict with the
+# entry left as written; the code editor's undo of the graph's edit, restoring the text exactly;
+# and the graph's edit drawn on the revision the undo replaced, refused as stale. The session's
+# history then holds the four receipts in order, each naming its surface and the revisions before
+# and after.
+requires: os-name:linux
+env: JET_BIN={jet}
+env: JET_SOURCE={root}/Examples/Tooling/CanvasBlueprintDemo.jet
+env: TMPDIR={scratch}
+step: jet run --allow=Env,Exec,FS,IO,Net,Time {root}/Tools/CanvasTest/Run.jet -- native-history
+exit: 0
+stdout: ~ "PASS native jet dev --canvas one transaction history" # the probe's one pass line; the URL, port and secret vary per run

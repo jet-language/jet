@@ -36,6 +36,23 @@ ReplaceResult: enum {
 
 source_revision: fn(src: String) -> String Never! { "sha256-{sha256_hex(src)}" }
 
+// A Canvas debug anchor, a breakpoint's `start:end` span or a watch's name,
+// as the source at revision `current` reads it. An anchor may name the
+// revision it was drawn on after `@` (`12:30@sha256-…`). One drawn on
+// another revision is stale, since an edit may have moved the code it named:
+// None. Otherwise its own text (canvas_debug_anchor_text).
+canvas_debug_anchor_current: fn(anchor: String, current: String) -> String? Never! {
+    parts: anchor.split_once("@") ?? return Val(anchor)
+    if parts.after != current -> return None
+    Val(parts.before)
+}
+
+// A Canvas debug anchor's own text, without the revision it may name.
+canvas_debug_anchor_text: fn(anchor: String) -> String Never! {
+    parts: anchor.split_once("@") ?? return anchor
+    parts.before
+}
+
 read_source_without_symlinks: fn(path: String) -> String CanvasSourceError! {
     bytes: read_file_without_symlinks(path)
     String.from_bytes(bytes) ?? return Err(canvas_source_error("Canvas source `{path}` is not UTF-8 text"))

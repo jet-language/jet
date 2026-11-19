@@ -19,7 +19,7 @@ use {
     cli_process: core.process
     cli_sys: core.sys
     core.encoding.[Dyn]
-    jet_canvas.[CanvasDebugPlace, CanvasHostEdit, CanvasHostReply, CanvasHostState, canvas_host_debug_place, canvas_machine_output, read_source_without_symlinks, source_revision]
+    jet_canvas.[CanvasDebugPlace, CanvasHostEdit, CanvasHostReply, CanvasHostState, canvas_debug_anchor_current, canvas_debug_anchor_text, canvas_host_debug_place, canvas_machine_output, read_source_without_symlinks, source_revision]
     jet_debug.[DebugSnapshot, NativeDebugError, NativeSession, NativeStop, NativeStopKind, native_debug_build_argv, native_debug_image, native_dump_events, native_dump_jet_frame, native_dump_open]
     jet_foundation.[DeepChecks, Span, diagnostic_render, foundation_json_integer, foundation_json_parse, foundation_json_quote]
 }
@@ -503,7 +503,11 @@ jet_cli_canvas_debug_payload: fn(debugs: &JetCLICanvasDebugSessions, state: Shar
         if anchor.len() > JET_CLI_CANVAS_DEBUG_MAX_WORD_BYTES {
             return Err(jet_cli_canvas_debug_error("limit", "Canvas debug accepts at most 128 breakpoint spans of 256 bytes each"))
         }
-        if jet_cli_canvas_debug_anchor(src, anchor) == {
+        own: canvas_debug_anchor_current(anchor, current_revision) ?? {
+            stale.push(anchor)
+            next
+        }
+        if jet_cli_canvas_debug_anchor(src, own) == {
             .Val(span) -> { candidates.push(jet_cli_canvas_debug_line_of(src, span.start)) }
             .None -> stale.push(anchor)
         }
@@ -520,9 +524,18 @@ jet_cli_canvas_debug_payload: fn(debugs: &JetCLICanvasDebugSessions, state: Shar
             breakpoints.push(line)
         }
     }
-    watches: request.watches.move()
+    // A watch drawn on another revision is stale and isn't watched.
+    watches := [String]{}
+    stale_watches := [String]{}
+    loop watch in request.watches {
+        own: canvas_debug_anchor_current(watch, current_revision) ?? {
+            stale_watches.push(watch)
+            next
+        }
+        watches.push(own)
+    }
     commands: request.commands.move()
-    jet_cli_canvas_debug_limits(commands, breakpoints, watches) ?? return Err(err)
+    jet_cli_canvas_debug_limits(commands, breakpoints, request.watches) ?? return Err(err)
     ran: debugs.run(file, source_id, revision, session_id, tier, commands, breakpoints) ?? return Err(err)
     after: read_source_without_symlinks(file) ?? {
         debugs.release(ran.id)
@@ -532,7 +545,7 @@ jet_cli_canvas_debug_payload: fn(debugs: &JetCLICanvasDebugSessions, state: Shar
         debugs.release(ran.id)
         return Err(jet_cli_canvas_debug_error("conflict", "source changed while this Canvas debug command was running; the source was kept"))
     }
-    Ok(jet_cli_canvas_debug_document(state, src, source_id, ran, breakpoints, stale, watches))
+    Ok(jet_cli_canvas_debug_document(state, src, source_id, ran, breakpoints, stale, watches, stale_watches))
 }
 
 // The name of the tier `session` runs on, as requests and answers spell
@@ -800,8 +813,9 @@ jet_cli_canvas_debug_stopped: fn(src: String, id: String, tier: String, source_i
 }
 
 // The answer to a run: the session and the overlay of where it stopped, on
-// the graph of the source it ran.
-jet_cli_canvas_debug_document: fn(state: Shared<CanvasHostState>, src: String, source_id: String, ran: JetCLICanvasDebugRun, breakpoints: [Int], stale: [String], watches: [String]) -> String {
+// the graph of the source it ran. `stale` are the breakpoint anchors and
+// `stale_watches` the watches the source no longer places.
+jet_cli_canvas_debug_document: fn(state: Shared<CanvasHostState>, src: String, source_id: String, ran: JetCLICanvasDebugRun, breakpoints: [Int], stale: [String], watches: [String], stale_watches: [String]) -> String {
     revision: source_revision(src)
     empty: JetCLICanvasDebugList{json: "", truncated: false}
     active_span := Span{start: 0, end: 0}
@@ -831,6 +845,15 @@ jet_cli_canvas_debug_document: fn(state: Shared<CanvasHostState>, src: String, s
         }
         source = JetCLICanvasDebugList{json: shown.join(","), truncated: clipped}
     }
+    // A watch drawn on another revision shows no value: it is stale.
+    if stale_watches.len() > 0 {
+        shown := [String]{}
+        if watch_values.json != "" -> shown.push("{watch_values.json}")
+        loop watch in stale_watches {
+            shown.push("{{\"name\":{foundation_json_quote(canvas_debug_anchor_text(watch))},\"anchor\":{foundation_json_quote(watch)},\"state\":\"stale\"}}")
+        }
+        watch_values = JetCLICanvasDebugList{json: shown.join(","), truncated: watch_values.truncated}
+    }
     trace: jet_cli_canvas_debug_newest(jet_cli_canvas_debug_lines(ran.transcript))
     tasks: jet_cli_canvas_debug_newest(ran.tasks)
     phase: if ran.running -> "running" else -> "finished"
@@ -846,6 +869,8 @@ jet_cli_canvas_debug_document: fn(state: Shared<CanvasHostState>, src: String, s
     loop line in breakpoints {
         marks.push("{{\"line\":{line},\"source_span\":{jet_cli_canvas_debug_span_json(jet_cli_canvas_debug_line_span(src, line))},\"state\":\"valid\"}}")
     }
+    // A stale anchor shows the span it names in this source, if any; one
+    // drawn on another revision (`start:end@REVISION`) reads as no span.
     loop anchor in stale {
         span_json: if jet_cli_canvas_debug_anchor(src, anchor) == {
             .Val(span) -> jet_cli_canvas_debug_span_json(span)

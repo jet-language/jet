@@ -1680,7 +1680,10 @@ jet_cli_perf_waits_read: fn(capture: &JetCLIPerfCapture, waits: &&[JetCLIPerfWai
             if wake.line == .Val(line) -> waker_line = Val(U64{line})
         }
         if wait.class == JET_CLI_PERF_OBJECT_SOCKET && waker == "runtime" {
+            // The peer's wake reaches the poller from outside the program:
+            // the line the runtime's wake carries is no peer's.
             waker = "peer"
+            waker_line = None
             if causes[place] == .Val(cause) {
                 waker = "task"
                 if capture.task_ids.has_key(cause.task) {

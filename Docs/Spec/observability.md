@@ -951,11 +951,12 @@ a lock another thread held at the stop is never released there (code that
 takes it fails at the 2 s budget), and a function value runs the image's
 code. An expression that calls a function that can fail shows its result as
 `locals` shows a fallible result, `parse(s) = Ok(3)` or `Err(ParseError.Empty)`,
-so a condition that can fail is refused, not a Bool. A call in the fork
-passes up to 5 locals in registers and more by a table of their addresses;
-a condition that reads more than 5 runs in the fork at each hit, not in the
-program. A local's own name is no expression: `print total` shows the
-local as `locals` does, in a dump too, and a dump runs no code.
+so a condition that can fail is refused, not a Bool. A call, in the fork
+or of a condition run in the program, passes up to 5 locals in registers
+and more by a table of their addresses on the stack, so a condition that
+reads more than 5 runs in the program too. A local's own name is no
+expression: `print total` shows the local as `locals` does, in a dump too,
+and a dump runs no code.
 
 A watch on a place in memory takes the CPU's debug registers (at most 4,
 each an aligned 1, 2, 4 or 8 bytes), so the program runs at full speed
