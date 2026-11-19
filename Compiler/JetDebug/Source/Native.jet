@@ -710,7 +710,7 @@ NativeSession: struct {
         self.versioned += 1
         rule := NativeRule{condition: None, log: None, shown: shown, version: self.versioned}
         if condition.trim() != "" {
-            compiled: self.compiled(at.path, at.line, at.column, condition.trim()) ?? return Err(err)
+            compiled: self.compiled(at.path, at.line, at.column, condition.trim(), None) ?? return Err(err)
             type_name: compiled.guard_read().value.result.name
             if type_name != "Bool" {
                 return Err(native_eval_refused("`{condition.trim()}` is a {type_name}, not a Bool"))
@@ -719,7 +719,7 @@ NativeSession: struct {
             rule.placement = if log != "" -> "it logs a message, which the debugger reads at each hit" else -> self.placement(number, compiled)
         }
         if log != "" {
-            rule.log = Val(self.compiled(at.path, at.line, at.column, native_eval_message(log)) ?? return Err(err))
+            rule.log = Val(self.compiled(at.path, at.line, at.column, native_eval_message(log), None) ?? return Err(err))
             if condition.trim() == "" {
                 split: self.log_parts(number, address, at, log)
                 rule.placement = split.reason
@@ -743,7 +743,7 @@ NativeSession: struct {
         split: native_log_split(log) ?? return {reason: "a `{{` of its message has no `}}`", texts: [String]{}, parts: [Shared<NativeEval>]{}}
         parts := [Shared<NativeEval>]{}
         loop hole in split.holes {
-            compiled: self.compiled(at.path, at.line, at.column, hole) ?? return self.log_refused(address, at.line, hole, err.message)
+            compiled: self.compiled(at.path, at.line, at.column, hole, None) ?? return self.log_refused(address, at.line, hole, err.message)
             name: compiled.guard_read().value.result.name
             if !native_log_word(compiled.guard_read().value.result) {
                 return {reason: "`{hole}` is a {name}, which the debugger would read after the hit rather than at it", texts: [String]{}, parts: [Shared<NativeEval>]{}}
@@ -793,13 +793,14 @@ NativeSession: struct {
     }
 
     // `text` compiled before the node at `line` and `column` of the source
-    // `path`: the kept one, or the evaluator's.
-    compiled: fn(&self, path: String, line: Int, column: Int, text: String) -> Shared<NativeEval> NativeEvalRefused! {
+    // `path`: the kept one, or the evaluator's, which may read `binders`
+    // (NativeEvaluator).
+    compiled: fn(&self, path: String, line: Int, column: Int, text: String, binders: [NativeEvalBinder]?) -> Shared<NativeEval> NativeEvalRefused! {
         key: "{path}:{line}:{column}:{text}"
         if self.evals.get(key) == .Val(found) -> return Ok(found)
         made := NativeEval?{None}
         if self.evaluator == .Val(evaluator) {
-            made = Val(evaluator.compile(path, line, column, text) ?? return Err(err))
+            made = Val(evaluator.compile(path, line, column, text, binders) ?? return Err(err))
         }
         code: made ?? return Err(native_eval_refused("this session has no compiler to evaluate expressions with"))
         cell: Shared{code.move()}
@@ -837,7 +838,7 @@ NativeSession: struct {
         // frame of the same function, runs the code compiled for it before.
         scope: self.eval_scope(frames, level, at.line, text)
         if scope != "" && self.evals.get(scope) == .Val(found) -> return self.run_eval(found)
-        compiled: self.compiled(at.path, at.line, at.column, text) ?? return Err(err)
+        compiled: self.compiled(at.path, at.line, at.column, text, self.eval_binders(frames, level, at.line, text)) ?? return Err(err)
         if scope != "" && native_eval_word_captures(compiled) -> self.evals[scope] = compiled
         self.run_eval(compiled)
     }
@@ -864,6 +865,28 @@ NativeSession: struct {
             }
         }
         parts.join("\n")
+    }
+
+    // The variables `text`'s names may read at line `line` of the frame
+    // `level` of the unwound `frames`, as eval_scope finds them, each with
+    // its type's Jet spelling and whether its location covers the stop.
+    // None outside Jet code and in an inlined run, whose parameters the
+    // image may not list.
+    eval_binders: fn(self, frames: [NativeUnwound], level: NativeLevel, line: Int, text: String) -> [NativeEvalBinder]? Never! {
+        if level.site >= 0 -> return None
+        lookup: native_lookup(level.frame, frames[level.frame].pc)
+        function: native_function_at(self.image, lookup) ?? return None
+        binders := [NativeEvalBinder]{}
+        loop name in native_eval_names(text) {
+            loop variable in function.variables {
+                if variable.site != level.site || variable.name != name || variable.line > line {
+                    next
+                }
+                live: native_variable_covering(self.image, variable, lookup) != None
+                binders.push(NativeEvalBinder{name: "{name}", type_name: native_type_name(self.image, variable.ty), live: live})
+            }
+        }
+        Val(binders)
     }
 
     // Run `compiled` in a fork of the stopped program with the captures it

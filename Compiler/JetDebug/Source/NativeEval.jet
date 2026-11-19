@@ -22,9 +22,21 @@ NativeEvalRefused: struct {
 // What compiles an expression for a session (JetCLI DebugCompile.jet): `text`
 // checked before the node at line `line` and character column `column` of
 // the source `path` (column 0: the line's first node), compiled with the
-// program, or why it can't be.
+// program, or why it can't be. `binders` are the variables of the selected
+// frame's function the text's names may read there (NativeSession
+// eval_binders); None when the session asks with no stopped frame or where
+// the image can't list them (an inlined run).
 NativeEvaluator: trait {
-    compile: fn(self, path: String, line: Int, column: Int, text: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval NativeEvalRefused!,
+    compile: fn(self, path: String, line: Int, column: Int, text: String, binders: [NativeEvalBinder]?) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval NativeEvalRefused!,
+}
+
+// A variable a name of an evaluated expression may read at the stop: its
+// name, its type as the image's debug types spell it in Jet
+// (native_type_name), and whether its location covers the stop (`live`).
+NativeEvalBinder: struct {
+    name: String,
+    type_name: String,
+    live: Bool,
 }
 
 // A value an evaluation passes or returns: a capture by the name of the

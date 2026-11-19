@@ -1,0 +1,15 @@
+# A `print` whose names read only numbers live at the stop compiles in the
+# one compile that builds it; one that reads a local a move emptied is
+# checked where the program stopped, which refuses it as the program's own
+# use there would be. The number expression in the same frame still
+# evaluates, and the program runs on unchanged.
+fixture: PrintAfterAMove.fixture
+env: NO_COLOR=1
+env: PATH={work}/no-tools
+step: jet debug prog.jet
+stdin: print_after_a_move_reads_as_the_stop_checks_it.stdin
+exit: 0
+stdout: ~ "Breakpoint hit  prog.jet:8  in run()" # stopped after `label` was handed to `consume`
+stdout: ~ "(Jet) print label.len()\nCan't evaluate `label.len()`: the compiler refused it: `label` was consumed by `consume`, so it can't be used here" # the moved local is refused as at the stop
+stdout: ~ "(Jet) print count * used\ncount * used = 6\n" # numbers live at the stop evaluate
+stdout: ~ "3 2\nProgram finished\n" # the evaluations left the program's run unchanged
