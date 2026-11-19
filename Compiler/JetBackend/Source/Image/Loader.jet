@@ -1922,7 +1922,11 @@ LOADER_PTRACE_TRACEME: 0
 
 LOADER_PTRACE_PEEKDATA: 2
 
+LOADER_PTRACE_PEEKUSER: 3
+
 LOADER_PTRACE_POKEDATA: 5
+
+LOADER_PTRACE_POKEUSER: 6
 
 LOADER_PTRACE_CONT: 7
 
@@ -1955,6 +1959,11 @@ X64_TRACE_RSP: 19
 X64_TRACE_RSI: 13
 
 X64_TRACE_RDI: 14
+
+// The offset of the debug registers in the kernel's per-thread user area
+// (struct user, u_debugreg) that PTRACE_PEEKUSER and PTRACE_POKEUSER read
+// and write: DR0 to DR7, a word each.
+LOADER_TRACE_DEBUG_REGISTERS: 848
 
 // The scratch page of a trace, which its helper shares: the register block
 // at 0, the word a call returns through at LOADER_TRACE_WORD, the call the
@@ -2277,6 +2286,30 @@ x64_trace_set_registers: fn(trace: X64Trace, registers: [Int]) -> Bool {
     #Unsafe("the helper's PTRACE_SETREGS reads the register block written at the start of the trace's scratch page") {
         loop (k, value) in registers -> os_store_i64(I64{trace.scratch + 8 * k}, I64{value})
         result = x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_SETREGS, trace.pid, 0, trace.scratch, 0, 0)
+    }
+    !os_failed(result)
+}
+
+// The stopped program's debug register `index` (0 to 7: DR0-DR3 the
+// watched addresses, DR6 the status, DR7 the control); None when the
+// kernel refused.
+x64_trace_debug_register: fn(trace: X64Trace, index: Int) -> Int? {
+    word := Int?{None}
+    #Unsafe("the helper's PTRACE_PEEKUSER stores one word of its own stopped tracee's user area to the trace's scratch word") {
+        if !os_failed(x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_PEEKUSER, trace.pid, LOADER_TRACE_DEBUG_REGISTERS + 8 * index, trace.scratch + LOADER_TRACE_WORD, 0, 0)) {
+            word = Val(Int{os_load_i64(I64{trace.scratch + LOADER_TRACE_WORD})})
+        }
+    }
+    word
+}
+
+// Set the stopped program's debug register `index` to `value`; false when
+// the kernel refused (an address outside the program, or a control word
+// that enables a register holding none).
+x64_trace_set_debug_register: fn(trace: X64Trace, index: Int, value: Int) -> Bool {
+    result := 0
+    #Unsafe("the helper's PTRACE_POKEUSER writes one debug register of its own stopped tracee") {
+        result = x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_POKEUSER, trace.pid, LOADER_TRACE_DEBUG_REGISTERS + 8 * index, value, 0, 0)
     }
     !os_failed(result)
 }

@@ -419,8 +419,12 @@ D-DBG-VERBS1=A names the commands:
   condition that is not a Bool, or can't be evaluated, stops and says why.
 - `log <file:line> "<text with {expr}>"` sets a logpoint. It prints its
   message with each `{expr}` filled in, then the program runs on.
-- `breaks` lists the breakpoints by number, as `  2 break cart.jet:88 if
-  total < 0`; `delete <n>` removes one.
+- `watch <place>` stops at each write that changes a local of the selected
+  frame, or a field path under one (`watch order.total`). The stop names
+  the line that wrote it and shows `total: 0 -> 2`. A write that leaves the
+  value as it was runs on.
+- `breaks` lists the breakpoints and watches by number, as `  2 break
+  cart.jet:88 if total < 0` and `  3 watch total`; `delete <n>` removes one.
 - `frame <n>` selects a frame as `backtrace` (`bt`) numbers it. `up` moves
   toward the callers and `down` back. `locals` and `print` (`p`) read the
   selected frame until the program moves.
@@ -430,6 +434,19 @@ A step that passes a breakpoint which does not stop goes on to where the
 step would have ended. `jet debug --dap` settles every run the same way
 (`Compiler/JetDebug/Source/Native.jet`, NativeSession.settle), and both read
 expressions with the one evaluator, `Compiler/JetDebug/Source/Debug/Eval.jet`.
+
+A watch on a place in memory takes the CPU's debug registers (at most 4,
+each an aligned 1, 2, 4 or 8 bytes), so the program runs at full speed
+until the write. A local the compiler keeps in a register has no address
+to trap: its watch single-steps that frame's own code, comparing the
+register after each instruction, while the calls it makes run at full
+speed (they restore the register before they return). One such watch is
+active at a time. A watch covers the place's own bytes: for a list, its
+length and buffer, not the items. A watch on a frame's local ends when
+that frame returns; the next stop says so. Only the program's main thread
+is traced, so a write from another thread does not stop it. A Float held
+in a vector register can't be watched. Globals can't be watched yet,
+because the debug information has no global variables.
 
 ## Recorder boundary
 
