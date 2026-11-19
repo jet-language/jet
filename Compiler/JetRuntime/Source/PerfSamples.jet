@@ -2783,19 +2783,19 @@ PERF_FLIGHT_RING: I64{262144}
 
 PERF_FLIGHT_SCRATCH_AT: I64{270400}
 
-PERF_FLIGHT_SCRATCH: I64{131072}
+PERF_FLIGHT_SCRATCH: I64{360448}
 
-PERF_FLIGHT_TEXT_AT: I64{401472}
+PERF_FLIGHT_TEXT_AT: I64{630848}
 
-PERF_FLIGHT_VECTORS_AT: I64{405568}
+PERF_FLIGHT_VECTORS_AT: I64{634944}
 
-PERF_FLIGHT_SECRETS_AT: I64{405600}
+PERF_FLIGHT_SECRETS_AT: I64{634976}
 
 // The most Secrets a dump redacts by their bytes (Secret.jet
 // secret_redact_table): their table's 40-byte head, then 16 bytes each.
 PERF_FLIGHT_SECRETS: I64{256}
 
-PERF_FLIGHT_COPY_AT: I64{409792}
+PERF_FLIGHT_COPY_AT: I64{639168}
 
 PERF_FLIGHT_COPY: I64{1048576}
 
@@ -2808,25 +2808,25 @@ PERF_FLIGHT_COPY: I64{1048576}
 // write, PERF_FLIGHT_QUEUE rows of [address, bytes]; and the cut section:
 // the budget, the bytes held, the bytes cut off and the rows, then
 // PERF_FLIGHT_CUTS rows of [address, bytes].
-PERF_FLIGHT_WALK_AT: I64{1458368}
+PERF_FLIGHT_WALK_AT: I64{1687744}
 
-PERF_FLIGHT_SPANS_AT: I64{1458448}
+PERF_FLIGHT_SPANS_AT: I64{1687824}
 
 PERF_FLIGHT_SPANS: I64{4096}
 
-PERF_FLIGHT_SEEN_AT: I64{1523984}
+PERF_FLIGHT_SEEN_AT: I64{1753360}
 
 PERF_FLIGHT_SEEN: I64{32768}
 
-PERF_FLIGHT_QUEUE_AT: I64{1786128}
+PERF_FLIGHT_QUEUE_AT: I64{2015504}
 
 PERF_FLIGHT_QUEUE: I64{16384}
 
-PERF_FLIGHT_CUTS_AT: I64{2048272}
+PERF_FLIGHT_CUTS_AT: I64{2277648}
 
 PERF_FLIGHT_CUTS: I64{8192}
 
-PERF_FLIGHT_BYTES: I64{2179376}
+PERF_FLIGHT_BYTES: I64{2408752}
 
 // A page's address bits, and the most frame pointers a stack's chain
 // follows.
@@ -2839,7 +2839,10 @@ PERF_FLIGHT_FRAMES: I64{65536}
 // (perf_flight_rotate), the word the threads the dump captures wait on
 // (PERF_FLIGHT_CAPTURING, PERF_FLIGHT_CLOSED once their rows are taken,
 // PERF_FLIGHT_RELEASED once the dump is written), the count of rows they
-// wrote, and zeros that stand for bytes the dump could not read.
+// wrote, the tid of the stopping thread, which captures itself, and the
+// registers it was interrupted at, its rip (0 until it is captured), rsp
+// and PERF_FLIGHT_TASK_REGISTERS general registers (perf_flight_capture),
+// and zeros that stand for bytes the dump could not read.
 PERF_FLIGHT_WORDS_AT: I64{1024}
 
 PERF_FLIGHT_OLDEST_AT: I64{1280}
@@ -2847,6 +2850,10 @@ PERF_FLIGHT_OLDEST_AT: I64{1280}
 PERF_FLIGHT_RELEASE_AT: I64{2048}
 
 PERF_FLIGHT_ANSWERED_AT: I64{2056}
+
+PERF_FLIGHT_SELF_AT: I64{2064}
+
+PERF_FLIGHT_STOP_AT: I64{2072}
 
 PERF_FLIGHT_CAPTURING: I64{0}
 
@@ -2861,7 +2868,7 @@ PERF_FLIGHT_ZEROS: I64{1024}
 // "JETDUMP1", the dump's first word, then its version.
 PERF_FLIGHT_MAGIC: I64{3553425134609253706}
 
-PERF_FLIGHT_VERSION: I64{2}
+PERF_FLIGHT_VERSION: I64{3}
 
 // The kinds of the dump's sections after its image, each [kind, address,
 // bytes] and the bytes padded to a word: a range of reachable memory, the
@@ -2878,10 +2885,33 @@ PERF_FLIGHT_SECTION_TASKS: I64{3}
 PERF_FLIGHT_SECTION_CUT: I64{4}
 
 // A row of the dump's tasks: the task's id, how its registers were had,
-// its rip, rsp and rbp, and its thread's tid (0 for a parked task's). The
-// rows fill the state's scratch while the threads are captured, at most
-// PERF_FLIGHT_TASKS_MAX of them.
-PERF_FLIGHT_TASK_WORDS: I64{6}
+// its rip, rsp and rbp, its thread's tid (0 for a parked task's), which of
+// the general registers that follow are known (bit k for the k-th), then
+// PERF_FLIGHT_TASK_REGISTERS general registers in the kernel's order
+// (user_regs_struct): r15, r14, r13, r12, rbp, rbx, r11, r10, r9, r8, rax,
+// rcx, rdx, rsi and rdi, 0 for one not known. The rows fill the state's
+// scratch while the threads are captured, at most PERF_FLIGHT_TASKS_MAX of
+// them.
+PERF_FLIGHT_TASK_WORDS: I64{22}
+
+PERF_FLIGHT_TASK_REGISTERS: I64{15}
+
+// Which general registers of a row are known: every one, a thread's a
+// signal interrupted; r15, r14, r13, r12, rbp and rbx, a parked fiber's
+// its last switch saved; rbp alone, the stopping thread's as its caller
+// resumes.
+PERF_FLIGHT_TASK_KNOWN: I64{32767}
+
+PERF_FLIGHT_TASK_SAVED: I64{63}
+
+PERF_FLIGHT_TASK_RBP: I64{16}
+
+// Per general register of a row, 4 bits each from the first's: the index
+// of ucontext_t's general register that holds it (REG_R15 7, REG_R14 6,
+// REG_R13 5, REG_R12 4, REG_RBP 10, REG_RBX 11, REG_R11 3, REG_R10 2,
+// REG_R9 1, REG_R8 0, REG_RAX 13, REG_RCX 14, REG_RDX 12, REG_RSI 9 and
+// REG_RDI 8).
+PERF_FLIGHT_TASK_GREGS: I64{620631437820446055}
 
 PERF_FLIGHT_TASKS_MAX: I64{2048}
 
@@ -3151,7 +3181,8 @@ perf_flight_image_bytes: fn(image: I64) -> I64 {
 // dump `jet debug` opens, `.jet/dumps/<program>-<UTC time>.jetdump`,
 // owner-only, of which the newest PERF_FLIGHT_DUMPS_KEPT stay. Its words:
 // PERF_FLIGHT_MAGIC, PERF_FLIGHT_VERSION, the pid, the Unix time, the load
-// bias, the stopping thread's rip, rsp and rbp as its caller resumes, its
+// bias, the stopping thread's rip, rsp and rbp, where it captured itself in
+// this frame (perf_flight_capture) or else as its caller resumes, its
 // tid, and the image's byte count; then the image, so the dump needs no
 // other file; then the sections: the ring, every task's registers
 // (perf_flight_tasks), the memory the stop reaches from every thread's and
@@ -3173,6 +3204,27 @@ perf_flight_dump: fn() {
     text: wrapping(state + PERF_FLIGHT_TEXT_AT)
     words: wrapping(text + PERF_FLIGHT_WORDS_AT)
     zeros: wrapping(text + PERF_FLIGHT_ZEROS_AT)
+    // The stopping thread's every general register, as perf_flight_capture
+    // takes them when the tgkill to itself returns here, in this frame the
+    // dump outlives, so its debugger unwinds the callee-saved registers
+    // from here (the frames' call frame rules). Without the capture, its
+    // rip, rsp and rbp as its caller resumes.
+    stop: wrapping(text + PERF_FLIGHT_STOP_AT)
+    process: perf_flight_syscall(I64{39}, I64{0}, I64{0}, I64{0})
+    me: thread_tid()
+    sync_store(wrapping(text + PERF_FLIGHT_SELF_AT), me)
+    if (perf_flight_handle() >= I64{0}) {
+        #Unsafe("tgkill of this thread, whose handler copies the registers it interrupts into the text page and returns") {
+            _ := os_syscall_i64(I64{234}, process, me, PERF_FLIGHT_CAPTURE_SIGNAL, I64{0}, I64{0}, I64{0})
+        }
+    }
+    if (rt_text_word(wrapping(stop + I64{16})) == I64{0} && frame != I64{0}) {
+        rt_text_store(wrapping(stop + I64{16}), rt_text_word(wrapping(frame + I64{8})))
+        rt_text_store(wrapping(stop + I64{24}), wrapping(frame + I64{16}))
+        rt_text_store(wrapping(stop + I64{32}), rt_text_word(frame))
+        rt_text_store(wrapping(stop + I64{48}), PERF_FLIGHT_TASK_RBP)
+        rt_text_store(wrapping(stop + I64{88}), rt_text_word(frame))
+    }
     fd: perf_flight_dump_open(state, text, words)
     if (fd < I64{0}) {
         if (scrub != I64{0}) { _ := coll_call1(scrub, I64{0}) }
@@ -3182,14 +3234,14 @@ perf_flight_dump: fn() {
     length: perf_flight_image_bytes(image)
     rt_text_store(words, PERF_FLIGHT_MAGIC)
     rt_text_store(wrapping(words + I64{8}), PERF_FLIGHT_VERSION)
-    rt_text_store(wrapping(words + I64{16}), perf_flight_syscall(I64{39}, I64{0}, I64{0}, I64{0}))
+    rt_text_store(wrapping(words + I64{16}), process)
     // perf_flight_time read the clock into the words at 128.
     rt_text_store(wrapping(words + I64{24}), rt_text_word(wrapping(words + I64{128})))
     rt_text_store(wrapping(words + I64{32}), perf_samples_bias)
-    rt_text_store(wrapping(words + I64{40}), if (frame == I64{0}) -> I64{0} else -> rt_text_word(wrapping(frame + I64{8})))
-    rt_text_store(wrapping(words + I64{48}), if (frame == I64{0}) -> I64{0} else -> wrapping(frame + I64{16}))
-    rt_text_store(wrapping(words + I64{56}), if (frame == I64{0}) -> I64{0} else -> rt_text_word(frame))
-    rt_text_store(wrapping(words + I64{64}), thread_tid())
+    rt_text_store(wrapping(words + I64{40}), rt_text_word(wrapping(stop + I64{16})))
+    rt_text_store(wrapping(words + I64{48}), rt_text_word(wrapping(stop + I64{24})))
+    rt_text_store(wrapping(words + I64{56}), rt_text_word(wrapping(stop + I64{32})))
+    rt_text_store(wrapping(words + I64{64}), me)
     rt_text_store(wrapping(words + I64{72}), length)
     good := perf_flight_bytes(fd, zeros, words, I64{80})
     if (good) {
@@ -3219,11 +3271,12 @@ perf_flight_dump: fn() {
 }
 
 // The dump's task rows (PERF_FLIGHT_SECTION_TASKS): the stopping thread's
-// first, then each other thread's of the live registry (Thread.jet
-// thread_register_tcb), each captured by PERF_FLIGHT_CAPTURE_SIGNAL in its
-// handler (perf_flight_capture), which writes its row and waits there,
-// and each parked or queued fiber's, from the stack its last switch saved:
-// the resume address, then six callee-saved registers, rbp the last. The
+// first, as it captured itself (perf_flight_dump), then each other
+// thread's of the live registry (Thread.jet thread_register_tcb), each
+// captured by PERF_FLIGHT_CAPTURE_SIGNAL in its handler
+// (perf_flight_capture), which writes its row and waits there, and each
+// parked or queued fiber's, from the stack its last switch saved: the
+// resume address, then six callee-saved registers, rbp the last. The
 // registry's lock is held while the threads are signaled and the fibers
 // read, so none starts or ends meanwhile; the rows of the threads that
 // have not answered within PERF_FLIGHT_CAPTURE_NS are left out.
@@ -3235,7 +3288,13 @@ perf_flight_tasks: fn(fd: I64, state: I64, words: I64, zeros: I64) -> Bool {
     thread_zero(scratch, wrapping(wrapping(PERF_FLIGHT_TASKS_MAX * PERF_FLIGHT_TASK_WORDS) * I64{8}))
     process: perf_flight_syscall(I64{39}, I64{0}, I64{0}, I64{0})
     me: thread_tid()
-    perf_flight_row(state, I64{0}, perf_flight_task(thread_base(), me == process), PERF_FLIGHT_TASK_STOPPED, rt_text_word(wrapping(words + I64{40})), rt_text_word(wrapping(words + I64{48})), rt_text_word(wrapping(words + I64{56})), me)
+    stop: wrapping(text + PERF_FLIGHT_STOP_AT)
+    first: perf_flight_row(state, I64{0}, perf_flight_task(thread_base(), me == process), PERF_FLIGHT_TASK_STOPPED, rt_text_word(wrapping(stop + I64{16})), rt_text_word(wrapping(stop + I64{24})), rt_text_word(wrapping(stop + I64{32})), me)
+    word := I64{6}
+    loop word < PERF_FLIGHT_TASK_WORDS {
+        rt_text_store(wrapping(first + wrapping(word * I64{8})), rt_text_word(wrapping(stop + wrapping(word * I64{8}))))
+        word = wrapping(word + I64{1})
+    }
     sync_store(wrapping(state + PERF_FLIGHT_CLAIMED), I64{1})
     sync_store(answered, I64{0})
     sync_store(release, PERF_FLIGHT_CAPTURING)
@@ -3258,11 +3317,7 @@ perf_flight_tasks: fn(fd: I64, state: I64, words: I64, zeros: I64) -> Bool {
                 next
             }
             if (tid == me) { next }
-            if (status == I64{1}) {
-                #Unsafe("rt_sigaction borrows the four-word action on the stack; the handler is this runtime's three-word C-ABI export and the restorer its rt_sigreturn rail") {
-                    status = os_syscall_stack4_i64(I64{13}, PERF_FLIGHT_CAPTURE_SIGNAL, rt_perf_samples_signal_address(), I64{469762052}, rt_process_signal_restore_address(), I64{0}, I64{8})
-                }
-            }
+            if (status == I64{1}) { status = perf_flight_handle() }
             if (status < I64{0}) { next }
             // tgkill of a live registered thread of this process.
             if (perf_flight_syscall(I64{234}, process, tid, PERF_FLIGHT_CAPTURE_SIGNAL) == I64{0}) {
@@ -3302,30 +3357,45 @@ perf_flight_fiber: fn(state: I64, tcb: I64) {
     }
     index: sync_add(wrapping(state + PERF_FLIGHT_CLAIMED), I64{1})
     if (index < PERF_FLIGHT_TASKS_MAX) {
-        perf_flight_row(state, index, id, PERF_FLIGHT_TASK_PARKED, resume, wrapping(saved + I64{56}), rt_text_word(wrapping(saved + I64{48})), I64{0})
+        row: perf_flight_row(state, index, id, PERF_FLIGHT_TASK_PARKED, resume, wrapping(saved + I64{56}), rt_text_word(wrapping(saved + I64{48})), I64{0})
+        // r15, r14, r13 and r12 as the kernel orders them; rbx and rbp
+        // the other way round.
+        rt_text_store(wrapping(row + I64{56}), rt_text_word(wrapping(saved + I64{8})))
+        rt_text_store(wrapping(row + I64{64}), rt_text_word(wrapping(saved + I64{16})))
+        rt_text_store(wrapping(row + I64{72}), rt_text_word(wrapping(saved + I64{24})))
+        rt_text_store(wrapping(row + I64{80}), rt_text_word(wrapping(saved + I64{32})))
+        rt_text_store(wrapping(row + I64{88}), rt_text_word(wrapping(saved + I64{48})))
+        rt_text_store(wrapping(row + I64{96}), rt_text_word(wrapping(saved + I64{40})))
+        rt_text_store(wrapping(row + I64{48}), PERF_FLIGHT_TASK_SAVED)
     }
 }
 
 // A thread the dump captures (perf_flight_tasks), in the handler of
 // PERF_FLIGHT_CAPTURE_SIGNAL: its row, from the registers it was
-// interrupted at (ucontext_t's rip, rsp and rbp at 168, 160 and 120), then
-// it waits until the dump is written, so its stack stays as its row says.
-// A capture the dump no longer waits for writes no row.
+// interrupted at (perf_flight_context), then it waits until the dump is
+// written, so its stack stays as its row says. A capture the dump no
+// longer waits for writes no row. The stopping thread, which signals
+// itself (perf_flight_dump), only leaves its registers in the text page.
 perf_flight_capture: fn(context: I64) {
     state: perf_flight_state
     if (state == I64{0} || context == I64{0}) {
         return
     }
     text: wrapping(state + PERF_FLIGHT_TEXT_AT)
+    tid: thread_tid()
+    if (tid == sync_load(wrapping(text + PERF_FLIGHT_SELF_AT))) {
+        perf_flight_context(wrapping(text + PERF_FLIGHT_STOP_AT), context)
+        return
+    }
     release: wrapping(text + PERF_FLIGHT_RELEASE_AT)
     if (sync_load(release) != PERF_FLIGHT_CAPTURING) {
         return
     }
     index: sync_add(wrapping(state + PERF_FLIGHT_CLAIMED), I64{1})
     if (index < PERF_FLIGHT_TASKS_MAX) {
-        tid: thread_tid()
         main: tid == perf_flight_syscall(I64{39}, I64{0}, I64{0}, I64{0})
-        perf_flight_row(state, index, perf_flight_task(thread_base(), main), PERF_FLIGHT_TASK_RUNNING, rt_text_word(wrapping(context + I64{168})), rt_text_word(wrapping(context + I64{160})), rt_text_word(wrapping(context + I64{120})), tid)
+        row: perf_flight_row(state, index, perf_flight_task(thread_base(), main), PERF_FLIGHT_TASK_RUNNING, I64{0}, I64{0}, I64{0}, tid)
+        perf_flight_context(row, context)
     }
     answered: wrapping(text + PERF_FLIGHT_ANSWERED_AT)
     _ := sync_add(answered, I64{1})
@@ -3346,8 +3416,8 @@ perf_flight_task: fn(tcb: I64, main: Bool) -> I64 {
     if (id == I64{0} && main) -> I64{1} else -> id
 }
 
-// Row `index` of the dump's tasks in the state's scratch.
-perf_flight_row: fn(state: I64, index: I64, id: I64, how: I64, rip: I64, rsp: I64, rbp: I64, tid: I64) {
+// Row `index` of the dump's tasks in the state's scratch; its address.
+perf_flight_row: fn(state: I64, index: I64, id: I64, how: I64, rip: I64, rsp: I64, rbp: I64, tid: I64) -> I64 {
     row: wrapping(wrapping(state + PERF_FLIGHT_SCRATCH_AT) + wrapping(wrapping(index * PERF_FLIGHT_TASK_WORDS) * I64{8}))
     rt_text_store(row, id)
     rt_text_store(wrapping(row + I64{8}), how)
@@ -3355,6 +3425,34 @@ perf_flight_row: fn(state: I64, index: I64, id: I64, how: I64, rip: I64, rsp: I6
     rt_text_store(wrapping(row + I64{24}), rsp)
     rt_text_store(wrapping(row + I64{32}), rbp)
     rt_text_store(wrapping(row + I64{40}), tid)
+    row
+}
+
+// The registers of the row at `row` from the ones a signal interrupted
+// (ucontext_t's general registers from 40, in their own order, the k-th
+// of the row's the one PERF_FLIGHT_TASK_GREGS names at bits 4k), all
+// known: its rip, rsp and rbp at 168, 160 and 120, then the general ones.
+perf_flight_context: fn(row: I64, context: I64) {
+    rt_text_store(wrapping(row + I64{16}), rt_text_word(wrapping(context + I64{168})))
+    rt_text_store(wrapping(row + I64{24}), rt_text_word(wrapping(context + I64{160})))
+    rt_text_store(wrapping(row + I64{32}), rt_text_word(wrapping(context + I64{120})))
+    word := I64{0}
+    loop word < PERF_FLIGHT_TASK_REGISTERS {
+        greg: (PERF_FLIGHT_TASK_GREGS >> wrapping(word * I64{4})) & I64{15}
+        rt_text_store(wrapping(row + wrapping(I64{56} + wrapping(word * I64{8}))), rt_text_word(wrapping(context + wrapping(I64{40} + wrapping(greg * I64{8})))))
+        word = wrapping(word + I64{1})
+    }
+    rt_text_store(wrapping(row + I64{48}), PERF_FLIGHT_TASK_KNOWN)
+}
+
+// Install the sampler's handler (jet_rt_perf_samples_signal) for
+// PERF_FLIGHT_CAPTURE_SIGNAL; the status, negative when it cannot be.
+perf_flight_handle: fn() -> I64 {
+    status := I64{-1}
+    #Unsafe("rt_sigaction borrows the four-word action on the stack; the handler is this runtime's three-word C-ABI export and the restorer its rt_sigreturn rail") {
+        status = os_syscall_stack4_i64(I64{13}, PERF_FLIGHT_CAPTURE_SIGNAL, rt_perf_samples_signal_address(), I64{469762052}, rt_process_signal_restore_address(), I64{0}, I64{8})
+    }
+    status
 }
 
 // A raw system call of the dump's, which neither allocates nor records.

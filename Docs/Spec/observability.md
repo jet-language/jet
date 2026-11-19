@@ -571,12 +571,13 @@ walk is conservative, so it holds at least what the typed pointers reach,
 without reading the image's types in the stop. It holds at most 32 MiB of
 that memory, in the order it reaches it; past that budget the rest is cut
 off, and the dump lists each range it cut off. The stopping thread's
-registers are its own; each other thread is interrupted by a real-time
-signal (62), records its task and registers, and waits until the dump is
-written, so its stack is the one its registers name; a parked or queued
-task's registers are the ones its last switch saved. A thread that does not
-answer within 200ms is left out. Every `core.crypto.Secret`'s bytes are
-zeroed before the write.
+registers are its own, every general register as it sends itself the
+real-time signal 62 from the dump; each other thread is interrupted by
+that signal, records its task and every general register, and waits until
+the dump is written, so its stack is the one its registers name; a parked
+or queued task's registers are the callee-saved ones its last switch
+saved. A thread that does not answer within 200ms is left out. Every
+`core.crypto.Secret`'s bytes are zeroed before the write.
 
 `jet debug <file>.jetdump` opens a dump behind the `(Jet)` console: `Dump of
 process <pid>, <n> flight events`, then `Memory: <n> bytes held, within

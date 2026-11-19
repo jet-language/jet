@@ -3858,10 +3858,12 @@ NativeSession: struct {
     // The frames of a stack whose innermost registers are `start`,
     // innermost first, unwound through the prologue each Jet function opens
     // with (`push rbp; mov rbp, rsp`, then a push of each callee-saved
-    // register it uses) and the frame-pointer chain elsewhere.
+    // register it uses) and the frame-pointer chain elsewhere. A dump's
+    // registers are only those its task's row knows (native_dump_known).
     unwind_from: fn(self, start: [Int]) -> [NativeUnwound] NativeDebugError! {
         registers := loop value in start -> value
         known := loop _ in 0..<registers.len() -> true
+        if self.dump == .Val(dumped) -> known = native_dump_known(dumped, self.task)
         frames := [NativeUnwound]{}
         loop frames.len() < NATIVE_DEBUG_MOST_FRAMES {
             pc: registers[X64_TRACE_RIP]
