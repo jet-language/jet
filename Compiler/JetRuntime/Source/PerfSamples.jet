@@ -395,11 +395,14 @@ perf_samples_start: fn() {
 // The nanoseconds the kernel takes to deliver one SIGPROF to this thread
 // and return from a handler that returns at once: PERF_SAMPLES_CALIBRATIONS
 // signals the thread sends itself (tgkill) timed together, each also paying
-// the call that sends it, as a timer's expiry pays the kernel's tick.
+// the call that sends it, as a timer's expiry pays the kernel's tick. They
+// are timed on the thread's CPU clock, which counts the kernel's work for
+// the thread but not the time it waits preempted, so on a busy machine the
+// other programs' time is not charged to every signal of the run.
 perf_samples_delivery: fn() -> I64 {
     pid: host_call(I64{39}, I64{0}, I64{0}, I64{0})
     tid: thread_tid()
-    began: sync_now_ns()
+    began: perf_samples_cpu_clock_ns(I64{3})
     index := I64{0}
     loop index < PERF_SAMPLES_CALIBRATIONS {
         #Unsafe("tgkill takes this process's and thread's ids and a signal whose handler returns at once") {
@@ -407,7 +410,7 @@ perf_samples_delivery: fn() -> I64 {
         }
         index = wrapping(index + I64{1})
     }
-    wrapping(sync_now_ns() - began) / PERF_SAMPLES_CALIBRATIONS
+    wrapping(perf_samples_cpu_clock_ns(I64{3}) - began) / PERF_SAMPLES_CALIBRATIONS
 }
 
 // The monotonic clock in nanoseconds, for the handler: read into the
@@ -484,11 +487,15 @@ perf_samples_thread_end: fn(timer: I64) {
 
 // The process's CPU time (CLOCK_PROCESS_CPUTIME_ID) in nanoseconds, 0 when
 // it cannot be read.
-perf_samples_process_cpu_ns: fn() -> I64 {
+perf_samples_process_cpu_ns: fn() -> I64 { perf_samples_cpu_clock_ns(I64{2}) }
+
+// The CPU-time clock `clock` (CLOCK_PROCESS_CPUTIME_ID 2 or
+// CLOCK_THREAD_CPUTIME_ID 3) in nanoseconds, 0 when it cannot be read.
+perf_samples_cpu_clock_ns: fn(clock: I64) -> I64 {
     scratch: jet_rt_alloc(I64{16}, I64{8})
     status := I64{-1}
     #Unsafe("clock_gettime writes the two timespec words of the scratch") {
-        status = os_syscall_i64(I64{228}, I64{2}, scratch, I64{0}, I64{0}, I64{0}, I64{0})
+        status = os_syscall_i64(I64{228}, clock, scratch, I64{0}, I64{0}, I64{0}, I64{0})
     }
     ns: if (status == I64{0}) -> wrapping(wrapping(rt_text_word(scratch) * I64{1000000000}) + rt_text_word(wrapping(scratch + I64{8}))) else -> I64{0}
     jet_rt_free(scratch, I64{16}, I64{8})
