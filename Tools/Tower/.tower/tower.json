@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112363,
+    "rev": 112364,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75296,6 +75296,11 @@
         {
           "at": "2026-11-19",
           "by": "Main",
+          "text": "Ballot D-DEBUG-FOLD1 filed (drafted by Lens, validated): what jet debug does with calls sema works out ahead (Comptime/LocalValues.jet folds a pure call with literal arguments on every tier, so `break count_up` is set and never hits). Options A (jet debug builds keep the calls, the #Runtime(.NoEager) policy; other images refuse with a new diagnostic), B, C; recommendation A. Owner decides; nothing is decided until ratified."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
           "text": "c55 (p309, a3fa36e63f): the ranking fix landed (Main-6841-c55-rank-by-supported-gain: rank by the interval low end) and \"narrow ranks first for round\" now holds, but the measured speedup misses the predicted interval: suite 248 vs [-110,147]; alone 132 vs [140,165]. Alone on the p309 jet: two causal runs predict narrow 101 [87,113] and 103 [90,115] (wide -34 and -38); the fixture measure (3 x 1 s windows per arm) gives 93, 156, 146 (spread +-3%), a median of 15 interleaved 200 ms pairs gives 135, 143, 135, 162. Two faults: (1) the hand measurement is too noisy for the interval (fix: interleaved pairs, median); (2) the prediction reads ~4 points low (~10 vs ~14) and wide predicts a negative gain, which a virtual speedup cannot cause; the accounting bias is in PerfSamples.jet perf_causal_tick/pay (likely the joiner/blocked-thread forgiveness or sample-granularity pays at task end). Open; criterion text unchanged."
         },
         {
@@ -76122,7 +76127,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-19T09:02:09.548Z",
+      "updated": "2026-11-19T09:40:44.100Z",
       "updatedBy": "Main",
       "criteriaLastN": 67
     },
@@ -160682,6 +160687,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-19T09:40:44.101Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-19T09:02:09.548Z",
       "by": "Main",
