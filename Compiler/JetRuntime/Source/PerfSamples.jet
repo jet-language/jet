@@ -883,6 +883,18 @@ PERF_ZONE_PLOT: I64{3}
     perf_zone_row(PERF_ZONE_PLOT, time_host_monotonic_i64(), value, name)
 }
 
+// core.perf.__plot_float(name, value): jet_perf_plot's row for a `value`
+// passed as the Float itself, so no caller boxes its bits as an Int.
+#Export(c) jet_perf_plot_float: fn(name: I64, value: Float) {
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        return
+    }
+    if (perf_zones_on == I64{0}) {
+        return
+    }
+    perf_zone_row(PERF_ZONE_PLOT, time_host_monotonic_i64(), rt_f64_bits(value), name)
+}
+
 // One row of the spans file, the one timeline that log spans, zones, frame
 // marks and plots share: `start`, `end` (a plot's value bits), the
 // current task (0 outside every task), the byte length of the text `name`
