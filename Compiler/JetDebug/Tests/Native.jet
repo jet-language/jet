@@ -5,7 +5,7 @@ use {
     native_test_process: core.process
     native_test_files: core.files
     jet_debug.[NativeBlock, NativeBreak, NativeDebugError, NativeFrame, NativeFunction, NativeInlined, NativeLocal, NativeMemory, NativeSession, NativeStop, NativeStopKind, NativeVariable, native_debug_backtrace, native_debug_build_argv, native_debug_decimal_text, native_debug_hit_breakpoint, native_debug_int, native_debug_locals_typed, native_debug_precise, native_debug_string, native_inline_chain, native_jet_spelling]
-    jet_backend.[x64_jetline_sleb]
+    jet_backend.[x64_eval_fork_filter, x64_jetline_sleb]
     jet_foundation.[DeepChecks]
 }
 
@@ -14,6 +14,28 @@ use {
     assert_eq(off, [String]{"jet", "build", "-O0", "--output-dir=out", "prog.jet"})
     kept: native_debug_build_argv("jet", "prog.jet", "out", DeepChecks{all: true, scopes: [String]{"tree", "tree.run"}})
     assert_eq(kept, [String]{"jet", "build", "-O0", "--deep-checks", "--deep-checks=tree", "--deep-checks=tree.run", "--output-dir=out", "prog.jet"})
+}
+
+// The evaluation fork's seccomp program: 32 instructions of 8 bytes (code,
+// jt, jf, k), every jump landing inside it, ending with the allow its
+// admitted calls jump to.
+#Test("the_evaluation_fork_filter_jumps_inside_itself_and_ends_allowing") {
+    filter: x64_eval_fork_filter()
+    assert_eq(filter.len(), 256)
+    count: filter.len() >> 3
+    loop index in 0..<count {
+        at: 8 * index
+        code: Int{filter[at]} | (Int{filter[at + 1]} << 8)
+        // BPF_JMP class: the conditional jumps count from the next one.
+        if code & 7 == 5 {
+            assert(index + 1 + Int{filter[at + 2]} < count, "instruction {index}'s true jump leaves the program")
+            assert(index + 1 + Int{filter[at + 3]} < count, "instruction {index}'s false jump leaves the program")
+        }
+    }
+    last: 8 * (count - 1)
+    allow: Int{filter[last + 4]} | (Int{filter[last + 5]} << 8) | (Int{filter[last + 6]} << 16) | (Int{filter[last + 7]} << 24)
+    assert_eq(Int{filter[last]}, 6)
+    assert_eq(allow, 0x7fff0000)
 }
 
 #Test("a_breakpoint_stop_names_its_breakpoint") {
@@ -169,12 +191,71 @@ NATIVE_TEST_RING: "DebugItem: struct {{\n    label: String,\n    value: String,\
         if local.name == "ring" -> shown = local.value
     }
     assert_eq(shown, "Ring{{0: 3, 1: 4, 2: 5}}")
-    // The view ran in the program, which goes on where it stopped.
+    // The view ran in a fork; the program goes on where it stopped.
     session.clear_breakpoints() ?? panic("clear: {err.detail}")
     finished: session.continue_run() ?? panic("continue: {err.detail}")
     assert(finished.kind == NativeStopKind.Exited)
     assert_eq(finished.code, 0)
     assert_eq(session.take_output(), "items 3\n")
+    session.close()
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+}
+
+// A view that prints, then opens a file. The program never calls it, so its
+// print in the output would be the debugger's doing; in the evaluation fork
+// the print stays in the fork's copy of the output buffer and the open is a
+// refused system call.
+NATIVE_TEST_LOUD: "use {{\n    process: core.process\n    files: core.files\n}}\n\nDebugItem: struct {{\n    label: String,\n    value: String,\n}}\n\nLoud: struct {{\n    count: Int,\n\n    debug_view: fn(self) -> [DebugItem] {{\n        print(\"viewed\")\n        name: files.read(\"/proc/self/comm\") ?? \"\"\n        [DebugItem]{{DebugItem{{label: \"seen\", value: \"{{self.count}} {{name.len()}}\"}}}}\n    }}\n}}\n\nrun: fn() {{\n    loud: Loud{{count: 7}}\n    if process.args().len() > 5 -> print(\"{{loud.debug_view().len()}}\")\n    print(\"count {{loud.count}}\")\n}}\n"
+
+#Test("a_debug_view_that_makes_a_system_call_is_refused_and_the_program_never_runs_it") {
+    scratch: native_test_files.temp_dir("jet-debug-loud") ?? panic("scratch: {err}")
+    root: scratch.path
+    session := native_test_session(root, NATIVE_TEST_LOUD, [String]{"-O0"})
+    paused: session.run_to([NativeBreak]{{file: "prog.jet", line: 24}}, "prog.jet", NATIVE_TEST_LOUD.split("\n").to_list(), [String]{}) ?? panic("run_to: {err.detail}")
+    assert(native_debug_hit_breakpoint(paused.stop) != None, paused.text)
+    // Twice: each view runs in a fresh fork.
+    loop _ in 0..<2 {
+        locals: session.locals() ?? panic("locals: {err.detail}")
+        shown := ""
+        loop local in locals {
+            if local.name == "loud" -> shown = local.value
+        }
+        // The open is refused in the fork, so the value shows by its
+        // fields.
+        assert(shown.contains("7"), shown)
+        assert(!shown.contains("seen"), shown)
+    }
+    session.clear_breakpoints() ?? panic("clear: {err.detail}")
+    finished: session.continue_run() ?? panic("continue: {err.detail}")
+    assert(finished.kind == NativeStopKind.Exited)
+    assert_eq(finished.code, 0)
+    assert_eq(session.take_output(), "count 7\n")
+    session.close()
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+}
+
+// A view that runs far past the evaluation budget.
+NATIVE_TEST_SPIN: "use process: core.process\n\nDebugItem: struct {{\n    label: String,\n    value: String,\n}}\n\nSpin: struct {{\n    count: Int,\n\n    debug_view: fn(self) -> [DebugItem] {{\n        total := 0\n        loop i in 0..<self.count -> total += i % 7\n        [DebugItem]{{DebugItem{{label: \"total\", value: \"{{total}}\"}}}}\n    }}\n}}\n\nrun: fn() {{\n    spin: Spin{{count: 1000000000000000}}\n    if process.args().len() > 5 -> print(\"{{spin.debug_view().len()}}\")\n    print(\"spun {{spin.count > 0}}\")\n}}\n"
+
+#Test("a_debug_view_past_its_budget_is_stopped_and_the_program_runs_on") {
+    scratch: native_test_files.temp_dir("jet-debug-spin") ?? panic("scratch: {err}")
+    root: scratch.path
+    session := native_test_session(root, NATIVE_TEST_SPIN, [String]{"-O0"})
+    paused: session.run_to([NativeBreak]{{file: "prog.jet", line: 21}}, "prog.jet", NATIVE_TEST_SPIN.split("\n").to_list(), [String]{}) ?? panic("run_to: {err.detail}")
+    assert(native_debug_hit_breakpoint(paused.stop) != None, paused.text)
+    locals: session.locals() ?? panic("locals: {err.detail}")
+    shown := ""
+    loop local in locals {
+        if local.name == "spin" -> shown = local.value
+    }
+    // The fork is stopped at the budget and killed: the value shows by its
+    // fields.
+    assert(shown.contains("1000000000000000"), shown)
+    assert(!shown.contains("total"), shown)
+    session.clear_breakpoints() ?? panic("clear: {err.detail}")
+    finished: session.continue_run() ?? panic("continue: {err.detail}")
+    assert(finished.kind == NativeStopKind.Exited)
+    assert_eq(session.take_output(), "spun true\n")
     session.close()
     native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
 }

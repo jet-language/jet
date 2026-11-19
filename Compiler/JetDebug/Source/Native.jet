@@ -8,7 +8,7 @@
 use {
     native_files: core.files
     native_math: core.math
-    jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, link_debug_uleb, x64_jetline_find, x64_jetline_line, x64_jetline_sleb, x64_jetline_text, x64_trace_close, x64_trace_debug_register, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait]
+    jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RIP, X64_TRACE_RSP, link_debug_uleb, x64_jetline_find, x64_jetline_line, x64_jetline_sleb, x64_jetline_text, x64_trace_close, x64_trace_debug_register, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait]
     jet_foundation.[DeepChecks, Diagnostic, deep_checks_flags, diagnostic_display_identities, diagnostic_from_registry, diagnostic_registry_row, foundation_named_type]
 }
 
@@ -548,59 +548,24 @@ NativeSession: struct {
     }
 
     // The value whose bytes are `value`, of struct type `ty`, as its
-    // DebugView shows it: the stopped program runs the view at address
-    // `view` on a copy of the value, below the stack it holds, then its
-    // registers are put back. None when the view does not return (a trap,
-    // a breakpoint or the program's end stops it first) or its items can't
-    // be read.
+    // DebugView shows it: the view at address `view` runs on a copy of the
+    // value in a fork of the stopped program (NativeFork.jet), never in the
+    // program, which neither runs nor changes. None when the fork can't be
+    // made or the view doesn't return there (a refused system call, a
+    // fault, a trap or the budget's end), or its items can't be read: the
+    // value then shows by its fields.
     view: fn(&self, view: Int, ty: Int, value: [U8]) -> String? NativeDebugError! {
-        saved: self.registers() ?? return Err(err)
-        back: saved[X64_TRACE_RIP]
-        // Past the red zone: the [DebugItem] header the view returns through
-        // its hidden result pointer, the value it borrows as `self`, then the
-        // return address, the stack 16-byte aligned at the call.
-        below: saved[X64_TRACE_RSP] - NATIVE_DEBUG_RED_ZONE - 32
-        result: below - below % 16
-        copied: result - value.len() - (result - value.len()) % 16
-        entry: copied - 16 - 8
-        if !self.poke_bytes(copied, value) || !self.poke_bytes(entry, native_word_bytes(back)) {
+        // The image's code holds the runtime's `syscall` instructions.
+        elf: native_files.read_bytes(self.binary) ?? return Ok(None)
+        code: native_elf_code(elf)
+        syscall: native_fork_syscall_at(self.trace, code.address, code.address + code.bytes.len()) ?? return Ok(None)
+        fork: native_fork_make(self.trace, syscall) ?? return Ok(None)
+        viewed: native_fork_view(fork, self.image, self.trace.pid, self.sites, view, ty, value) ?? {
+            native_fork_end(fork)
             return Ok(None)
         }
-        temporary: !self.has_site(back)
-        if temporary && !self.plant(back) -> return Ok(None)
-        registers := self.registers() ?? return Err(err)
-        registers[X64_TRACE_RIP] = view
-        registers[X64_TRACE_RSP] = entry
-        registers[X64_TRACE_RDI] = result
-        registers[X64_TRACE_RSI] = copied
-        if !x64_trace_set_registers(self.trace, registers) {
-            return Err(NativeDebugError{detail: "couldn't set the program's registers"})
-        }
-        // The view runs on its thread alone, so no other thread's stop
-        // can end it.
-        event: self.resume_threads(X64TraceResume.Run, every: false) ?? return Err(err)
-        if event.kind != NativeStopKind.Paused -> return Ok(None)
-        after: self.registers() ?? return Err(err)
-        shown := String?{None}
-        if after[X64_TRACE_RIP] - 1 == back && after[X64_TRACE_RSP] == entry + 8 {
-            shown = native_debug_view_shown(self.image, NativeMemory{trace: Val(self.trace), blocks: [NativeBlock]{}}, ty, result)
-        }
-        if !x64_trace_set_registers(self.trace, saved) {
-            return Err(NativeDebugError{detail: "couldn't set the program's registers"})
-        }
-        if temporary -> self.lift(back)
-        Ok(shown)
-    }
-
-    // Write `bytes` at `address` of the stopped program a word at a time,
-    // the last word padded with zeros; false when it can't be written.
-    poke_bytes: fn(self, address: Int, bytes: [U8]) -> Bool Never! {
-        loop word in 0..<((bytes.len() + 7) >> 3) {
-            if !x64_trace_poke(self.trace, address + 8 * word, I64{native_number(bytes, 8 * word, 8, X64DebugEncoding.Signed)}) {
-                return false
-            }
-        }
-        true
+        native_fork_end(fork)
+        Ok(Val(viewed))
     }
 
     // Select frame `index` of the current thread's backtrace (0 is innermost).

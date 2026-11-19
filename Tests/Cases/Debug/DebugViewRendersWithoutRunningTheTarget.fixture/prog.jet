@@ -1,0 +1,33 @@
+use files: core.files
+
+// A ring buffer whose view lists its items oldest first.
+Ring: struct {
+    slots: [Int],
+    start: Int,
+    count: Int,
+
+    impl DebugView {
+        debug_view: fn(self) -> [DebugItem] Never! {
+            loop k in 0..<self.count -> DebugItem{label: "{k}", value: "{self.slots[(self.start + k) % self.slots.len()]}"}
+        }
+    }
+}
+
+// A view that writes a file: run in the program, it would leave the file.
+Noted: struct {
+    note: String,
+
+    impl DebugView {
+        debug_view: fn(self) -> [DebugItem] Never! {
+            files.write("viewed.txt", self.note) ?? panic("write: {err}")
+            [DebugItem]{DebugItem{label: "note", value: self.note}}
+        }
+    }
+}
+
+run: fn() {
+    ring: Ring{slots: [Int]{5, 0, 3, 4}, start: 2, count: 3}
+    noted: Noted{note: "hello"}
+    print("{ring.count} items, {noted.note}")
+    print("viewed.txt exists: {files.exists("viewed.txt")}")
+}

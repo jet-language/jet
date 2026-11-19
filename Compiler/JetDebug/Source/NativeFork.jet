@@ -1,0 +1,406 @@
+// Evaluation forks. To run code at a stop (a type's debug_view, an
+// evaluated expression) without running the stopped program, the debugger
+// injects clone(2) into the stopped thread at a `syscall` instruction the
+// image already holds. That makes a single-threaded copy-on-write copy of
+// the program, traced and stopped before its first instruction. The copy is
+// the tracer's child, not the program's, and has no exit signal, so the
+// program never sees it. The program's own memory is never written; its
+// registers are saved before the injected call and put back after it.
+//
+// Before the code runs, the fork is confined (native_fork_prepare): every
+// asynchronous signal is blocked, and a seccomp filter (JetBackend
+// x64_eval_fork_filter) allows only private memory calls, private futexes,
+// rt_sigreturn and exit_group. Shared writable mappings become read-only,
+// and the program's MADV_WIPEONFORK and MADV_DONTFORK memory faults rather
+// than reading as zeros. The code runs with a wall budget
+// (NATIVE_FORK_BUDGET_MS), and the fork is killed after its result is read.
+use {
+    native_fork_files: core.files
+    jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_TRACE_EVENT_CLONE, X64_TRACE_ORIG_RAX, X64_TRACE_R10, X64_TRACE_R8, X64_TRACE_R9, X64_TRACE_RAX, X64_TRACE_RDI, X64_TRACE_RDX, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, x64_eval_fork_filter, x64_jetline_find, x64_jetline_line, x64_trace_event_message, x64_trace_of, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_set_registers, x64_trace_signal, x64_trace_wait_for, x64_trace_wait_within]
+}
+
+// A fork of the stopped program: its trace (the program's helper traces
+// it), the image's `syscall` instruction calls are made at, and the low end
+// of the scratch room the debugger keeps below the stopped thread's red
+// zone; the fork's calls run on the stack below it.
+NativeFork: struct {
+    trace: X64Trace,
+    syscall: Int,
+    scratch: Int,
+}
+
+// How long code in a fork may run before it is reported and killed.
+NATIVE_FORK_BUDGET_MS: 2000
+
+// The scratch room's size: the seccomp program and its header, and the
+// signal mask.
+NATIVE_FORK_SCRATCH: 512
+
+// clone(2)'s flags for a fork: CLONE_PARENT, so the copy is the tracer's
+// child, with exit signal 0, so no SIGCHLD reaches anyone.
+NATIVE_FORK_CLONE: 0x8000
+
+NATIVE_FORK_SYS_MMAP: 9
+
+NATIVE_FORK_SYS_MPROTECT: 10
+
+NATIVE_FORK_SYS_RT_SIGPROCMASK: 14
+
+NATIVE_FORK_SYS_CLONE: 56
+
+NATIVE_FORK_SYS_PRCTL: 157
+
+NATIVE_FORK_SYS_SECCOMP: 317
+
+// prctl(PR_SET_NO_NEW_PRIVS), and seccomp(SECCOMP_SET_MODE_FILTER).
+NATIVE_FORK_NO_NEW_PRIVS: 38
+
+NATIVE_FORK_MODE_FILTER: 1
+
+// mmap of a reserved hole: PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS |
+// MAP_FIXED_NOREPLACE.
+NATIVE_FORK_HOLE: 0x100022
+
+NATIVE_FORK_SIGKILL: 9
+
+NATIVE_FORK_SIGSEGV: 11
+
+NATIVE_FORK_SIGSYS: 31
+
+NATIVE_FORK_ENOMEM: 12
+
+// The first `syscall` instruction (0f 05) in the stopped program's code
+// [low, high), read as it is now (a planted breakpoint byte doesn't match);
+// None when none is found. Its bytes run as `syscall` wherever they sit in
+// an instruction.
+native_fork_syscall_at: fn(trace: X64Trace, low: Int, high: Int) -> Int? Never! {
+    chunk: 4096
+    from := low
+    loop from < high {
+        // One byte more, so a pair split across two chunks is found.
+        bytes: x64_trace_read(trace, from, chunk + 1) ?? return None
+        if bytes.len() < 2 -> return None
+        loop k in 0..<bytes.len() - 1 {
+            first: Int{bytes[k]}
+            second: Int{bytes[k + 1]}
+            if first == 0x0f && second == 0x05 -> return Val(from + k)
+        }
+        if bytes.len() < chunk + 1 -> return None
+        from += chunk
+    }
+    None
+}
+
+// Fork the stopped program at its stopped thread (the trace's thread),
+// which `syscall` (a `syscall` instruction of its code) runs the clone. The
+// thread's registers are put back after; a signal that was pending on it,
+// which the injected step met, is sent again so the program still gets it.
+// The trace follows each clone (x64_trace_spawn), so the copy is traced.
+native_fork_make: fn(trace: X64Trace, syscall: Int) -> NativeFork NativeDebugError! {
+    saved: x64_trace_registers(trace) ?? return Err(NativeDebugError{detail: "couldn't read the program's registers"})
+    injected := loop word in saved -> word
+    injected[X64_TRACE_RAX] = NATIVE_FORK_SYS_CLONE
+    injected[X64_TRACE_RDI] = NATIVE_FORK_CLONE
+    injected[X64_TRACE_RSI] = 0
+    injected[X64_TRACE_RDX] = 0
+    injected[X64_TRACE_R10] = 0
+    injected[X64_TRACE_R8] = 0
+    injected[X64_TRACE_RIP] = syscall
+    // Not a syscall the kernel restarts: the thread may have stopped in one.
+    injected[X64_TRACE_ORIG_RAX] = -1
+    pending := [Int]{}
+    child := -1
+    result := 0
+    failure := ""
+    if !x64_trace_set_registers(trace, injected) -> failure = "couldn't set the program's registers"
+    // The clone stops the thread with its event; the step then ends past
+    // the instruction. A signal-delivery stop in between is a signal that
+    // was pending on the thread.
+    loop _ in 0..<64 {
+        if failure != "" -> break
+        if !x64_trace_resume(trace, X64TraceResume.Step, 0) {
+            failure = "the program can't be resumed"
+            break
+        }
+        status: x64_trace_wait_for(trace, trace.thread)
+        if status < 0 || status & 0xff != 0x7f {
+            failure = "the program ended while it was being copied"
+            break
+        }
+        signal: (status >> 8) & 0xff
+        if signal == NATIVE_DEBUG_SIGTRAP && (status >> 16) == X64_TRACE_EVENT_CLONE {
+            child = x64_trace_event_message(trace) ?? -1
+            next
+        }
+        if signal == NATIVE_DEBUG_SIGTRAP {
+            after: x64_trace_registers(trace) ?? [Int]{}
+            if after.len() > X64_TRACE_RAX -> result = after[X64_TRACE_RAX]
+            break
+        }
+        if signal != NATIVE_DEBUG_SIGSTOP -> pending.push(signal)
+    }
+    restored: x64_trace_set_registers(trace, saved)
+    loop signal in pending -> _ := x64_trace_signal(trace, signal)
+    if (!restored || failure != "") && child > 0 {
+        native_fork_end(NativeFork{trace: x64_trace_of(trace, child), syscall: syscall, scratch: 0})
+    }
+    if !restored {
+        return Err(NativeDebugError{detail: "couldn't put back the program's registers"})
+    }
+    if failure != "" -> return Err(NativeDebugError{detail: failure})
+    if child <= 0 {
+        if result == -NATIVE_FORK_ENOMEM {
+            return Err(NativeDebugError{detail: "the kernel refused a copy of the program (out of memory; vm.overcommit_memory=2 refuses a large copy)"})
+        }
+        return Err(NativeDebugError{detail: "the kernel refused a copy of the program (errno {-result})"})
+    }
+    fork: x64_trace_of(trace, child)
+    // The copy starts stopped by the trace, before its first instruction.
+    first: x64_trace_wait_for(fork, child)
+    if first < 0 || first & 0xff != 0x7f {
+        return Err(NativeDebugError{detail: "the copy of the program ended before it started (wait status {first})"})
+    }
+    below: saved[X64_TRACE_RSP] - NATIVE_DEBUG_RED_ZONE - NATIVE_FORK_SCRATCH
+    Ok(NativeFork{trace: fork, syscall: syscall, scratch: below - below % 16})
+}
+
+// The system call `number` with `arguments`, made in the stopped fork at its
+// `syscall` instruction: its result, or -errno.
+native_fork_syscall: fn(fork: NativeFork, number: Int, arguments: [Int]) -> Int NativeDebugError! {
+    registers := x64_trace_registers(fork.trace) ?? return Err(NativeDebugError{detail: "couldn't read the copy's registers"})
+    slots: [Int]{X64_TRACE_RDI, X64_TRACE_RSI, X64_TRACE_RDX, X64_TRACE_R10, X64_TRACE_R8, X64_TRACE_R9}
+    loop (k, slot) in slots -> registers[slot] = if k < arguments.len() -> arguments[k] else -> 0
+    registers[X64_TRACE_RAX] = number
+    registers[X64_TRACE_ORIG_RAX] = -1
+    registers[X64_TRACE_RIP] = fork.syscall
+    if !x64_trace_set_registers(fork.trace, registers) {
+        return Err(NativeDebugError{detail: "couldn't set the copy's registers"})
+    }
+    if !x64_trace_resume(fork.trace, X64TraceResume.Step, 0) {
+        return Err(NativeDebugError{detail: "the copy of the program can't be resumed"})
+    }
+    status: x64_trace_wait_for(fork.trace, fork.trace.pid)
+    if status < 0 || status & 0xff != 0x7f || (status >> 8) & 0xff != NATIVE_DEBUG_SIGTRAP {
+        return Err(NativeDebugError{detail: "system call {number} didn't return in the copy of the program (wait status {status})"})
+    }
+    after: x64_trace_registers(fork.trace) ?? return Err(NativeDebugError{detail: "couldn't read the copy's registers"})
+    Ok(after[X64_TRACE_RAX])
+}
+
+// Write `bytes` at `address` of the stopped fork, a word at a time, the last
+// word padded with zeros. False when it can't be written.
+native_fork_poke: fn(fork: NativeFork, address: Int, bytes: [U8]) -> Bool Never! {
+    loop word in 0..<((bytes.len() + 7) >> 3) {
+        if !x64_trace_poke(fork.trace, address + 8 * word, I64{native_number(bytes, 8 * word, 8, X64DebugEncoding.Signed)}) {
+            return false
+        }
+    }
+    true
+}
+
+// One mapping of the program, as /proc/<pid>/smaps lists it: its range, its
+// permissions ("rw-s") and its VmFlags.
+NativeForkMapping: struct {
+    low: Int,
+    high: Int,
+    permissions: String,
+    flags: [String],
+}
+
+// The program `pid`'s mappings, from its smaps; empty when they can't be
+// read.
+native_fork_mappings: fn(pid: Int) -[FS.Read]> [NativeForkMapping] {
+    text: native_fork_files.read("/proc/{pid}/smaps") ?? return [NativeForkMapping]{}
+    mappings := [NativeForkMapping]{}
+    loop line in text.split("\n") {
+        fields := [String]{}
+        loop field in line.split(" ") {
+            if field.len() > 0 -> fields.push(field)
+        }
+        if fields.len() == 0 -> next
+        if fields[0] == "VmFlags:" {
+            if mappings.len() > 0 {
+                flags: loop k in 1..<fields.len() -> fields[k]
+                mappings[mappings.len() - 1].flags = flags
+            }
+            next
+        }
+        if fields.len() < 2 || fields[1].len() != 4 -> next
+        dash: fields[0].find("-")
+        if dash < 0 -> next
+        low: native_fork_hex(fields[0].slice(0..<dash))
+        high: native_fork_hex(fields[0].slice(dash + 1..<fields[0].len()))
+        if low < 0 || high <= low -> next
+        mappings.push(NativeForkMapping{low: low, high: high, permissions: fields[1], flags: [String]{}})
+    }
+    mappings
+}
+
+// The number `text` writes in lowercase hex digits; -1 when it isn't one.
+native_fork_hex: fn(text: String) -> Int Never! {
+    if text.len() == 0 -> return -1
+    value := 0
+    loop byte in text.bytes() {
+        code: Int{byte}
+        digit: if {
+            code >= 48 && code <= 57 -> code - 48
+            code >= 97 && code <= 102 -> code - 87
+            else -> -1
+        }
+        if digit < 0 -> return -1
+        value = value * 16 + digit
+    }
+    value
+}
+
+// Confine the stopped fork of program `pid` before code runs in it:
+// - each MADV_DONTFORK mapping of the program, a hole in the fork, is
+//   reserved PROT_NONE, so nothing the fork maps lands there;
+// - every asynchronous signal is blocked;
+// - no new privileges, then the seccomp filter;
+// - each shared writable mapping becomes read-only, so no write carries
+//   back to the program, and each MADV_WIPEONFORK mapping PROT_NONE, so it
+//   faults rather than reading as zeros;
+// - the trap bytes of the program's breakpoints, `sites`, are put back, so
+//   the code runs the program's own instructions.
+native_fork_prepare: fn(fork: NativeFork, pid: Int, sites: [NativeSite]) NativeDebugError! {
+    mappings: native_fork_mappings(pid)
+    loop mapping in mappings {
+        if !mapping.flags.contains("dc") -> next
+        _ := native_fork_syscall(fork, NATIVE_FORK_SYS_MMAP, [Int]{mapping.low, mapping.high - mapping.low, 0, NATIVE_FORK_HOLE, -1, 0}) ?? return Err(err)
+    }
+    mask: native_word_bytes(-1)
+    if !native_fork_poke(fork, fork.scratch, mask) {
+        return Err(NativeDebugError{detail: "couldn't write the copy's scratch memory"})
+    }
+    // SIG_BLOCK.
+    blocked: native_fork_syscall(fork, NATIVE_FORK_SYS_RT_SIGPROCMASK, [Int]{0, fork.scratch, 0, 8}) ?? return Err(err)
+    if blocked != 0 {
+        return Err(NativeDebugError{detail: "couldn't block signals in the copy (errno {-blocked})"})
+    }
+    private: native_fork_syscall(fork, NATIVE_FORK_SYS_PRCTL, [Int]{NATIVE_FORK_NO_NEW_PRIVS, 1, 0, 0, 0}) ?? return Err(err)
+    if private != 0 {
+        return Err(NativeDebugError{detail: "couldn't drop privileges in the copy (errno {-private})"})
+    }
+    filter: x64_eval_fork_filter()
+    // The sock_fprog header: the instruction count, then the program's
+    // address.
+    header := native_word_bytes(filter.len() >> 3)
+    header.extend(native_word_bytes(fork.scratch + 32))
+    if !native_fork_poke(fork, fork.scratch + 16, header) || !native_fork_poke(fork, fork.scratch + 32, filter) {
+        return Err(NativeDebugError{detail: "couldn't write the copy's scratch memory"})
+    }
+    filtered: native_fork_syscall(fork, NATIVE_FORK_SYS_SECCOMP, [Int]{NATIVE_FORK_MODE_FILTER, 0, fork.scratch + 16}) ?? return Err(err)
+    if filtered != 0 {
+        return Err(NativeDebugError{detail: "couldn't confine the copy (seccomp errno {-filtered})"})
+    }
+    loop mapping in mappings {
+        shared_writable: mapping.permissions.ends_with("s") && mapping.permissions.slice(1..<2) == "w"
+        wiped: mapping.flags.contains("wf")
+        if !shared_writable && !wiped -> next
+        protection: if {
+            wiped -> 0
+            mapping.permissions.starts_with("r") -> 1
+            else -> 0
+        }
+        _ := native_fork_syscall(fork, NATIVE_FORK_SYS_MPROTECT, [Int]{mapping.low, mapping.high - mapping.low, protection}) ?? return Err(err)
+    }
+    loop site in sites {
+        word: x64_trace_peek(fork.trace, site.address) ?? next
+        _ := x64_trace_poke(fork.trace, site.address, word & I64{-256} | I64{site.byte})
+    }
+    Ok()
+}
+
+// Call the code at `entry` in the stopped fork with `first` and `second` as
+// its first two arguments, on the stack below `top`, and run it until it
+// returns: the fork's registers then. The call returns to address 0, whose
+// fault is the return. A refused system call, a fault, a trap, the fork's
+// end or the budget's end is the failure.
+native_fork_call: fn(fork: NativeFork, image: NativeImage, entry: Int, first: Int, second: Int, top: Int) -> [Int] NativeDebugError! {
+    registers := x64_trace_registers(fork.trace) ?? return Err(NativeDebugError{detail: "couldn't read the copy's registers"})
+    // The return address, the stack 16-byte aligned at the call.
+    at: top - top % 16 - 8
+    if !native_fork_poke(fork, at, native_word_bytes(0)) {
+        return Err(NativeDebugError{detail: "couldn't write the copy's stack"})
+    }
+    registers[X64_TRACE_RIP] = entry
+    registers[X64_TRACE_RSP] = at
+    registers[X64_TRACE_RDI] = first
+    registers[X64_TRACE_RSI] = second
+    registers[X64_TRACE_RAX] = 0
+    registers[X64_TRACE_ORIG_RAX] = -1
+    if !x64_trace_set_registers(fork.trace, registers) {
+        return Err(NativeDebugError{detail: "couldn't set the copy's registers"})
+    }
+    if !x64_trace_resume(fork.trace, X64TraceResume.Run, 0) {
+        return Err(NativeDebugError{detail: "the copy of the program can't be resumed"})
+    }
+    waited: x64_trace_wait_within(fork.trace, fork.trace.pid, NATIVE_FORK_BUDGET_MS)
+    if waited == None {
+        // Stop it to read where it runs; native_fork_end kills it.
+        _ := x64_trace_signal(fork.trace, NATIVE_DEBUG_SIGSTOP)
+        _ := x64_trace_wait_for(fork.trace, fork.trace.pid)
+        stuck: x64_trace_registers(fork.trace) ?? [Int]{}
+        where: if stuck.len() > X64_TRACE_RIP -> native_fork_place(image, stuck[X64_TRACE_RIP]) else -> "an unknown place"
+        return Err(NativeDebugError{detail: "the evaluation ran past its {NATIVE_FORK_BUDGET_MS / 1000} s budget, at {where}"})
+    }
+    status: waited
+    if status < 0 {
+        return Err(NativeDebugError{detail: "waiting for the copy of the program failed (errno {-status})"})
+    }
+    if status & 0x7f == 0 {
+        return Err(NativeDebugError{detail: "the evaluation exited (code {(status >> 8) & 0xff})"})
+    }
+    if status & 0xff != 0x7f {
+        return Err(NativeDebugError{detail: "the evaluation was ended by {native_debug_signal_name(status & 0x7f)}"})
+    }
+    signal: (status >> 8) & 0xff
+    after: x64_trace_registers(fork.trace) ?? return Err(NativeDebugError{detail: "couldn't read the copy's registers"})
+    pc: after[X64_TRACE_RIP]
+    if signal == NATIVE_FORK_SIGSEGV && pc == 0 && after[X64_TRACE_RSP] == at + 8 {
+        return Ok(after)
+    }
+    if signal == NATIVE_FORK_SIGSYS {
+        return Err(NativeDebugError{detail: "the evaluation made system call {after[X64_TRACE_ORIG_RAX]}, which an evaluation may not make, at {native_fork_place(image, pc)}"})
+    }
+    Err(NativeDebugError{detail: "the evaluation stopped with {native_debug_signal_name(signal)} at {native_fork_place(image, pc)}"})
+}
+
+// The value whose bytes are `value`, of struct type `ty`, as the DebugView
+// at address `view` shows it, run in the stopped fork of program `pid`
+// whose breakpoints are `sites` (native_fork_prepare): the [DebugItem] the
+// view returns through its hidden result pointer sits just below the
+// fork's scratch, the copy of the value it borrows as `self` below that.
+// Err names why the view didn't return or its items can't be read.
+native_fork_view: fn(fork: NativeFork, image: NativeImage, pid: Int, sites: [NativeSite], view: Int, ty: Int, value: [U8]) -> String NativeDebugError! {
+    native_fork_prepare(fork, pid, sites) ?? return Err(err)
+    result: fork.scratch - NATIVE_FORK_RESULT
+    copied: result - value.len() - (result - value.len()) % 16
+    if !native_fork_poke(fork, copied, value) {
+        return Err(NativeDebugError{detail: "couldn't write the copy's stack"})
+    }
+    _ := native_fork_call(fork, image, view, result, copied, copied - 16) ?? return Err(err)
+    shown: native_debug_view_shown(image, NativeMemory{trace: Val(fork.trace), blocks: [NativeBlock]{}}, ty, result) ?? return Err(NativeDebugError{detail: "the view's items can't be read"})
+    Ok(shown)
+}
+
+// The room below a fork's scratch for a call's result: a list header.
+NATIVE_FORK_RESULT: 32
+
+// Where `pc` is, in Jet terms when the line table knows it.
+native_fork_place: fn(image: NativeImage, pc: Int) -> String Never! {
+    index: x64_jetline_find(image.lines, pc)
+    if index < 0 -> return native_debug_hex(pc)
+    function: image.lines.functions[index]
+    "{function.name}() at {native_fork_files.basename(function.file)}:{x64_jetline_line(image.lines, function, pc) ?? 0}"
+}
+
+// Kill the fork and reap it.
+native_fork_end: fn(fork: NativeFork) Never! {
+    _ := x64_trace_signal(fork.trace, NATIVE_FORK_SIGKILL)
+    loop {
+        status: x64_trace_wait_for(fork.trace, fork.trace.pid)
+        if status < 0 || status & 0xff != 0x7f -> break
+    }
+}
