@@ -613,10 +613,13 @@ lp_lint: fn(plant: String) -> [IRLintFinding] {
 }
 
 // The Core rows whose arity disagrees with their runtime route (IR Lint
-// rule core.arity). None does: a Core source function such as
-// core.data.loader.authority is a source-owned row with no route. The list
-// is exact, so a new row fails here until it is listed.
-LP_CORE_ARITY: #run { [String]{} }
+// rule core.arity). A Core source function such as
+// core.data.loader.authority is a source-owned row with no route, so it is
+// none of them. `vault.current<T>(name)` is one: ir_core_vault_current
+// (BuildRoutes.jet) hands its route the name and the tag of T, two arguments
+// for the row's one. The list is exact, so a new row fails here until it is
+// listed.
+LP_CORE_ARITY: #run { [String]{"core.crypto.vault.current"} }
 
 // The registry rows that differ from LP_CORE_ARITY, each printed.
 lp_core_failures: fn(core: [IRLintFinding]) -> Int {

@@ -30,23 +30,22 @@ source_model_test_cleanup: fn(path: String) {
 // before the replacement is published through the held parent.
 source_model_test_replace_after_final_swap: fn(path: String, outside: String, candidate: [U8]) {
     target: source_open_parent(path) ?? panic("cannot hold parent: {err.message}")
-    current: source_read_current(target.parent, target.name) ?? panic("cannot read source: {err.message}")
-    mode: if current == .Val(file) -> Val(file.mode) else -> None
+    // A missing source and a refused read both fail the test, so one fallback covers them.
+    current: source_read_current(target.parent, target.name) ?? panic("cannot read source {path}")
     source_model_test_files.rename(path, "{path}.canvas-test-held") ?? panic("cannot move source: {err}")
     source_model_test_files.symlink(outside, path) ?? panic("cannot link source: {err}")
-    source_replace(target, candidate, mode) ?? panic("replace failed: {err.message}")
+    source_replace(target, candidate, Val(current.mode)) ?? panic("replace failed: {err.message}")
 }
 
 // Holds the target's parent, then swaps the parent directory itself for a
 // link to `outside`; the publication stays in the held (moved) directory.
 source_model_test_replace_after_ancestor_swap: fn(path: String, outside: String, candidate: [U8]) {
     target: source_open_parent(path) ?? panic("cannot hold parent: {err.message}")
-    current: source_read_current(target.parent, target.name) ?? panic("cannot read source: {err.message}")
-    mode: if current == .Val(file) -> Val(file.mode) else -> None
+    current: source_read_current(target.parent, target.name) ?? panic("cannot read source {path}")
     parent: source_model_test_files.dirname(path)
     source_model_test_files.rename(parent, source_model_test_files.join(source_model_test_files.dirname(parent), "canvas-test-held")) ?? panic("cannot move parent: {err}")
     source_model_test_files.symlink(outside, parent) ?? panic("cannot link parent: {err}")
-    source_replace(target, candidate, mode) ?? panic("replace failed: {err.message}")
+    source_replace(target, candidate, Val(current.mode)) ?? panic("replace failed: {err.message}")
 }
 
 #Test("compare and publish preserves the source on a conflict") {

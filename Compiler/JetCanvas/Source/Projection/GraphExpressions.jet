@@ -150,14 +150,17 @@ method_is_pure: fn(index: SemIndex, span: Span) -> Bool Never! {
     false
 }
 
+// The name with each character outside ASCII letters, digits and `_` spelled
+// as one `_`.
 canvas_ident_fragment: fn(name: String) -> String Never! {
-    bytes := name.bytes()
-    loop i in 0..<bytes.len() {
-        b: bytes[i]
+    out := [U8]{}
+    loop b in name.bytes() {
+        // A UTF-8 continuation byte belongs to the character its lead byte began.
+        if b >= 128 && b < 192 -> next
         word: (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95
-        if !word -> bytes[i] = 95
+        if word -> out.push(b) else -> out.push(95)
     }
-    String.from_bytes(bytes) ?? name
+    String.from_bytes(out) ?? name
 }
 
 // A game's `assets.image(...)`/`assets.sound(...)` receiver.

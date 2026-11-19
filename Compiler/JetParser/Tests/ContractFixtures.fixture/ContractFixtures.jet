@@ -161,8 +161,13 @@ pc_marker_metadata: fn() {
             pc_require(markers.contains(declaration.name), "unregistered marker {declaration.name}")
             seen.push(declaration.name)
         }
+        // A value tag (`sites: [.TypeUse]`) parses as its tag and declares no rule.
+        if item == .Tag(tag) {
+            pc_require(markers.contains(tag.name), "unregistered value tag {tag.name}")
+            seen.push(tag.name)
+        }
     }
-    pc_require(seen == markers, "every marker struct declares one rule, in source order")
+    pc_require(seen == markers, "every marker struct declares one rule or one value tag, in source order")
     // Rule settings are values after the struct's fields in one list.
     facts: parse_source("Pre: struct {{\n    condition: String,\n    message: String,\n\n    impl Marker {{\n        sites: [.Function, .Method],\n        repeatable: true,\n    }}\n}}\nrun: fn() {{}}\n".bytes())
     pc_require(facts.diagnostics.len() == 0, "named marker metadata parses")
@@ -375,8 +380,10 @@ pc_qualified_generic_literal: fn() {
     pc_require(seen, "qualified literal AST")
 }
 
+// A reserved `__` name (lexer E0067) beside a value guard with no `else` arm
+// (parser E0003): the parser still teaches after the lexer's error.
 pc_lexical_and_parser_diagnostics: fn() {
-    parsed: parse_source("run: fn() {{\n __value: 1 | 2\n print(__value)\n}}\n".bytes())
+    parsed: parse_source("run: fn() {{\n __value: if {{\n true -> 1\n }}\n print(__value)\n}}\n".bytes())
     reserved := false
     parser := false
     codes := [String]{}
@@ -432,7 +439,7 @@ pc_allow_and_fact_roots: fn() {
         pc_require(span.end - span.start == word.bytes().len(), "dollar diagnosis covers the whole word")
         source: "run: fn() {{ print({word})\n print(\"after\")\n }}"
         pc_require(source.slice(span.start..<span.end) == word, "dollar diagnosis highlights exactly the authored word")
-        pc_require(if word == "$HOME" -> rejected.diagnostics[0].what.contains("config") else -> rejected.diagnostics[0].what.contains("compiler fact"), "ALL_CAPS environment read and unknown fact diagnoses remain distinct")
+        pc_require(if word == "$HOME" -> rejected.diagnostics[0].what.contains("config") else -> rejected.diagnostics[0].what.contains("is not a name"), "ALL_CAPS environment read and other dollar word diagnoses remain distinct")
     }
     fact_roots: [String]{"#build", "#package", "#phase", "#program", "#here", "#caller"}
     loop root in fact_roots {
