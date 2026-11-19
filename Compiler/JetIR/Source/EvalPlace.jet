@@ -1,0 +1,92 @@
+// Whether the debugger may run a breakpoint's condition in the program
+// itself, at the breakpoint, rather than stopping the program to check it in
+// a fork at each hit (JetDebug NativePlace.jet). The debugger places the
+// condition's function and every function it calls afresh, next to the
+// program's code, and sends each of their runtime calls back to it, which
+// then checks that hit in a fork as before. So what the condition may not do
+// is what that code does inline, read here from the functions as built:
+// write memory other than its own stack (a Store, StreamStore or CopyBytes
+// through any other address), change a reference count or an atomic in
+// place (the inline retain and release, the atomics, a String's copy or
+// drop), run an `#FFI(asm)` template, or call a function value, whose code
+// it can't place. The stop polls are placed too, and their routine is a
+// runtime call.
+
+// Why the expression function `row` of `m` can't run in the program, "" when
+// it can: the first thing it, or a function it calls, does inline that the
+// program would see.
+ir_eval_place_refusal: fn(m: IRModule, row: Int) -> String Never! {
+    seen := [Int:Bool]{}
+    pending := [Int]{row}
+    loop pending.len() > 0 {
+        id: pending.pop() ?? -1
+        if id < 0 || id >= m.functions.len() || seen.has_key(id) -> next
+        seen[id] = true
+        f: m.functions[id]
+        if ir_stop_key(f.key) -> next
+        place: if id == row -> "" else -> " (in `{f.name}`)"
+        if f.asm != None -> return "it runs the `#FFI(asm)` function `{f.name}`"
+        own: ir_eval_place_own(f)
+        loop at in 0..<f.op.len() {
+            if f.op[at] == {
+                .Store | .StreamStore | .CopyBytes -> {
+                    address: f.a[at]
+                    if address < 0 || address >= own.len() || !own[address] {
+                        return "it writes memory it did not take on its own stack{place}"
+                    }
+                }
+                .CallIndirect -> return "it calls a function value{place}"
+                .Call -> pending.push(f.a[at])
+                .CallRuntime -> {
+                    symbol: if f.a[at] >= 0 && f.a[at] < m.names.len() -> m.names[f.a[at]] else -> ""
+                    if ir_x64_inline_atomic(m, f, at) != "" -> return "it uses an atomic{place}"
+                    if symbol == "jet_rt_block_retain" || symbol == "jet_rt_block_release" {
+                        return "it changes a reference count{place}"
+                    }
+                }
+                .Copy | .Drop -> {
+                    slot: f.a[at]
+                    if slot >= 0 && slot < f.slot_type.len() && f.slot_type[slot] >= 0 && f.slot_type[slot] < m.types.len() {
+                        ty: m.types[f.slot_type[slot]]
+                        if ty.kind == .String && ty.drop != "" {
+                            return "it copies or drops a String{place}"
+                        }
+                    }
+                }
+                .Nop | .Const | .ConstText | .ConstBigInt | .Move | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .FunctionAddress | .DataAddress | .Load | .StackAddress | .Offset | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig -> {}
+            }
+        }
+    }
+    ""
+}
+
+// Which slots of `f` only ever hold an address on its own stack: each write
+// of one is a StackAddress, or an Offset, Copy or Move of such a slot. Each
+// slot written starts as one, and loses it at a write that isn't.
+ir_eval_place_own: fn(f: IRFunction) -> [Bool] Never! {
+    count: f.slot_type.len()
+    own := loop _ in 0..<count -> false
+    loop at in 0..<f.op.len() {
+        if f.dst[at] >= 0 && f.dst[at] < count -> own[f.dst[at]] = true
+    }
+    loop slot in 0..<count {
+        if slot < f.slot_kind.len() && f.slot_kind[slot] == IRSlotKind.Param -> own[slot] = false
+    }
+    changed := true
+    loop changed {
+        changed = false
+        loop at in 0..<f.op.len() {
+            dst: f.dst[at]
+            if dst < 0 || dst >= count || !own[dst] -> next
+            source: f.a[at]
+            op: f.op[at]
+            moved: op == IROp.Offset || op == IROp.Copy || op == IROp.Move
+            kept: op == IROp.StackAddress || (moved && source >= 0 && source < count && own[source])
+            if !kept {
+                own[dst] = false
+                changed = true
+            }
+        }
+    }
+    own
+}

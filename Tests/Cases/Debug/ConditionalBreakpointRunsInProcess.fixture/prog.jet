@@ -1,0 +1,32 @@
+use time: core.time
+
+count_up: fn(n: Int) -> Int {
+    total := 0
+    loop i in 0..<n {
+        step: i % 7
+        total += step
+    }
+    total
+}
+
+sums: fn(n: Int) -> Int {
+    a: 1
+    b: 2
+    c: 3
+    d: 4
+    e: 5
+    total := 0
+    loop i in 0..<n {
+        step: a + b + c + d + e + i
+        total += step
+    }
+    total
+}
+
+run: fn() -[IO, Time]> {
+    started: time.start()
+    first: count_up(1000000)
+    took: time.elapsed(started).ns
+    print(if took < 1000000000 -> "a million hits under a second" else -> "a million hits took {took} ns")
+    print("totals {first} {count_up(5)} {sums(4)}")
+}

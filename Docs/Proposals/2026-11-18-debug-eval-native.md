@@ -1384,6 +1384,49 @@ breakpoint is set ("this condition allocates, so each hit costs a fork of
 the program"), and §8.2 measures the cost. So a condition has one meaning,
 whichever way it runs.
 
+**R7 as built** (first cut). The scan is `JetIR/Source/EvalPlace.jet`
+(`ir_eval_place_refusal`). It runs over the condition's own function and
+every Jet function it calls, and refuses an `#FFI(asm)` function, a store
+or copy into memory the function did not take on its own stack, a call
+through a function value, an atomic, a retain or release, and a String
+copy or drop. Runtime calls are not refused by the scan. Instead every
+runtime call in the placed code goes to a stub
+(`JetDebug/Source/NativePlace.jet`), which unwinds to the trampoline and
+traps, and the debugger checks that hit in a fork. So a condition placed in
+the program only computes on its own stack. A condition that needs the
+runtime, its result arena included, pays a fork for the hits that reach
+the call; the per-carrier arena above is not used yet. A fault in placed
+code goes to the same stub.
+
+At the breakpoint the debugger writes a 5-byte jump to a trampoline mapped
+within ±2 GiB of the code. The trampoline saves the registers and flags
+below the red zone and calls the condition with the address of each
+capture: the register's saved slot, or a register's value plus an offset,
+optionally loaded once. It then restores everything. When the condition is
+false, it runs the instructions the jump replaced, moved and with their
+relative operands rewritten, and jumps back. When the condition holds, it
+traps, and the debugger reports the breakpoint's hit at the breakpoint's
+own address. A breakpoint is placed only when:
+
+- it has a condition and no log message;
+- the condition reads at most five locals, each in a register or in memory
+  at a register;
+- the replaced instructions decode, are not an indirect jump, and are not
+  the target of a branch in their function;
+- they all belong to the breakpoint's line, so no line step's trap lands
+  inside them.
+
+Otherwise the breakpoint is a trap byte, as before, and setting it says
+why: "The condition can't run in the program: it reads more than 5 locals;
+the debugger checks it at each hit, which stops the program each time". A
+placed one says "The condition runs in the program: a hit where it is false
+runs on without a stop". Detach takes the jumps out and turns the traps
+into nops, so a thread still inside a trampoline runs on.
+
+This cut does not save AVX upper halves, MXCSR or x87 state. A step off a
+placed breakpoint runs the moved instructions in one go. A backtrace taken
+inside a trampoline has no CFI.
+
 ### 8.2 Against lldb
 
 `Tools/Perf/DebugLatency` gains five rows. Each runs beside lldb on the

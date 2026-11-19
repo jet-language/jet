@@ -1,0 +1,666 @@
+use jet_backend.[X64DebugEncoding, link_debug_uleb, x64_jetline_sleb]
+
+// A breakpoint whose condition runs in the program itself: a hit where the
+// condition is false goes on with no stop, so a breakpoint whose condition
+// is false a million times costs a call each time, not a stop each time.
+//
+// The debugger replaces the first instructions at the breakpoint with a jump
+// to a trampoline in a region it maps next to the program's code
+// (NativeFix.jet places the condition's function and each function it calls
+// there). The trampoline saves every register and the flags on the thread's
+// own stack, below the red zone, then makes a frame the profiler's walk
+// reads as called from the breakpoint, passes the condition its result cell
+// and the address of each capture, and calls it. On false it puts every
+// register back and runs the instructions the jump replaced, moved, then
+// jumps back after them. On true it puts every register back and traps; the
+// debugger reports the breakpoint with the thread at the breakpoint's
+// address. The condition's runtime calls (stop polls, stack growth,
+// allocation, a slow path of exact Int arithmetic, a stop) all go to one
+// stub that finds the trampoline's frame through the frame chain and traps
+// a second way, after which the debugger checks that hit in a fork as it
+// does a condition that can't run in the program. JetIR EvalPlace.jet says
+// which conditions may: the code placed writes nothing but its own stack.
+
+// The trampoline's frame from its rbp C: C+0 the program's rbp, C+8 the
+// breakpoint's address (a frame the walk reads as called from there), the
+// result cell, xmm0-15, then each register by its DWARF number (7, rsp, as
+// the program had it), the flags and the red zone.
+NATIVE_PLACE_CELL: 16
+
+NATIVE_PLACE_XMM: 32
+
+NATIVE_PLACE_GPR: 288
+
+NATIVE_PLACE_STACK: 552
+
+// The bytes a jump at the breakpoint takes.
+NATIVE_PLACE_JUMP: 5
+
+// The x86 register of each DWARF register number 0-15.
+NATIVE_PLACE_REGS: [Int]{0, 2, 1, 3, 6, 7, 5, 4, 8, 9, 10, 11, 12, 13, 14, 15}
+
+// The registers the condition takes its captures in, after its cell in rdi:
+// rsi, rdx, rcx, r8 and r9 (x86 numbers).
+NATIVE_PLACE_ARGS: [Int]{6, 2, 1, 8, 9}
+
+// How an instruction branches: not at all, a jmp, a call or a jcc.
+NativeBranch: enum {
+    Plain,
+    Jump,
+    Call,
+    Cond,
+}
+
+// What the debugger moves of one x86-64 instruction: its length, the offset
+// of its rip-relative displacement (-1: none), its relative branch (the
+// offset and size of the branch's field, -1 and 0 for none, and a jcc's
+// condition), and whether it is an indirect jump, whose target the debugger
+// can't know.
+NativeInsn: struct {
+    length: Int,
+    rip: Int,
+    field: Int,
+    width: Int,
+    kind: NativeBranch,
+    cond: Int,
+    indirect: Bool,
+}
+
+// Where a capture is at the breakpoint: in DWARF register `register`, or
+// (`memory`) at that register's value plus `offset`, read once more when
+// `deref` (DW_OP_deref).
+NativePlaceArg: struct {
+    register: Int,
+    memory: Bool,
+    offset: Int,
+    deref: Bool,
+}
+
+// A trampoline's code and the offsets in it of its two traps (the
+// condition holds; it called out), the moved instructions and the stub its
+// runtime calls go to.
+NativePlaceCode: struct {
+    bytes: [U8],
+    truth: Int,
+    unknown: Int,
+    moved: Int,
+    moved_end: Int,
+    out: Int,
+}
+
+// One placed condition of the session: the breakpoint (`number`) and its
+// address, the bytes the jump replaced, the addresses of the trampoline's
+// two traps, of its moved instructions, of its runtime stub, and the region
+// it and the condition's functions take. `live` is false once the jump is
+// gone; the region stays, since a thread may still be in it.
+NativePlaced: struct {
+    number: Int,
+    address: Int,
+    bytes: [U8],
+    truth: Int,
+    unknown: Int,
+    moved: Int,
+    moved_end: Int,
+    out: Int,
+    low: Int,
+    high: Int,
+    live: Bool,
+}
+
+// Whether a legacy prefix (lock, rep, a segment, operand or address size).
+native_decode_prefix: fn(byte: Int) -> Bool Never! {
+    byte == 0xf0 || byte == 0xf2 || byte == 0xf3 || byte == 0x2e || byte == 0x36 || byte == 0x3e || byte == 0x26 || byte == 0x64 || byte == 0x65 || byte == 0x66 || byte == 0x67
+}
+
+// The bytes of a ModRM operand whose ModRM byte is at `at`, and the offset
+// from `at` of a rip-relative displacement (-1: none).
+native_decode_modrm: fn(bytes: [U8], at: Int) -> {length: Int, rip: Int}? Never! {
+    if at >= bytes.len() -> return None
+    modrm: Int{bytes[at]}
+    mode: modrm >> 6
+    rm: modrm & 7
+    if mode == 3 -> return Val({length: 1, rip: -1})
+    length := 1
+    rip := -1
+    if rm == 4 {
+        if at + 1 >= bytes.len() -> return None
+        length += 1
+        base: Int{bytes[at + 1]} & 7
+        if mode == 0 && base == 5 -> length += 4
+    }
+    if mode == 0 && rm == 5 {
+        rip = length
+        length += 4
+    }
+    if mode == 1 -> length += 1
+    if mode == 2 -> length += 4
+    Val({length: length, rip: rip})
+}
+
+// Whether one-byte opcode `op` takes a ModRM operand, and its immediate's
+// size; None for one the debugger doesn't move (or isn't valid in 64-bit
+// code). `full` is the size of a word immediate, `moffs` of an absolute
+// address and `mov` of a mov-to-register immediate (8 under REX.W).
+native_decode_one: fn(op: Int, full: Int, moffs: Int, mov: Int) -> {modrm: Bool, imm: Int}? Never! {
+    low: op & 7
+    if {
+        op < 0x40 && (low == 6 || low == 7) -> None
+        op < 0x40 && low < 4 -> Val({modrm: true, imm: 0})
+        op < 0x40 && low == 4 -> Val({modrm: false, imm: 1})
+        op < 0x40 -> Val({modrm: false, imm: full})
+        op >= 0x50 && op <= 0x5f -> Val({modrm: false, imm: 0})
+        op == 0x63 -> Val({modrm: true, imm: 0})
+        op == 0x68 -> Val({modrm: false, imm: full})
+        op == 0x69 -> Val({modrm: true, imm: full})
+        op == 0x6a -> Val({modrm: false, imm: 1})
+        op == 0x6b -> Val({modrm: true, imm: 1})
+        op >= 0x6c && op <= 0x6f -> Val({modrm: false, imm: 0})
+        op == 0x80 || op == 0x83 || op == 0xc0 || op == 0xc1 || op == 0xc6 -> Val({modrm: true, imm: 1})
+        op == 0x81 || op == 0xc7 -> Val({modrm: true, imm: full})
+        op >= 0x84 && op <= 0x8f -> Val({modrm: true, imm: 0})
+        op >= 0x90 && op <= 0x99 -> Val({modrm: false, imm: 0})
+        op >= 0x9b && op <= 0x9f -> Val({modrm: false, imm: 0})
+        op >= 0xa0 && op <= 0xa3 -> Val({modrm: false, imm: moffs})
+        op == 0xa8 -> Val({modrm: false, imm: 1})
+        op == 0xa9 -> Val({modrm: false, imm: full})
+        op >= 0xa4 && op <= 0xaf -> Val({modrm: false, imm: 0})
+        op >= 0xb0 && op <= 0xb7 -> Val({modrm: false, imm: 1})
+        op >= 0xb8 && op <= 0xbf -> Val({modrm: false, imm: mov})
+        op == 0xc2 || op == 0xca -> Val({modrm: false, imm: 2})
+        op == 0xc8 -> Val({modrm: false, imm: 3})
+        op == 0xc3 || op == 0xc9 || op == 0xcb || op == 0xcc || op == 0xcf -> Val({modrm: false, imm: 0})
+        op == 0xcd -> Val({modrm: false, imm: 1})
+        op >= 0xd0 && op <= 0xd3 -> Val({modrm: true, imm: 0})
+        op == 0xd7 -> Val({modrm: false, imm: 0})
+        op >= 0xd8 && op <= 0xdf -> Val({modrm: true, imm: 0})
+        op >= 0xe4 && op <= 0xe7 -> Val({modrm: false, imm: 1})
+        op >= 0xec && op <= 0xef -> Val({modrm: false, imm: 0})
+        op == 0xf1 || op == 0xf4 || op == 0xf5 -> Val({modrm: false, imm: 0})
+        op >= 0xf8 && op <= 0xfd -> Val({modrm: false, imm: 0})
+        op == 0xf6 || op == 0xf7 || op == 0xfe || op == 0xff -> Val({modrm: true, imm: 0})
+        else -> None
+    }
+}
+
+// Whether two-byte opcode 0F `op` takes a ModRM operand, and its
+// immediate's size; None for one the debugger doesn't move.
+native_decode_two: fn(op: Int) -> {modrm: Bool, imm: Int}? Never! {
+    if {
+        op == 0x0f || op == 0x38 || op == 0x3a -> None
+        op == 0x05 || op == 0x06 || op == 0x07 || op == 0x08 || op == 0x09 || op == 0x0b || op == 0x0e || op == 0x77 -> Val({modrm: false, imm: 0})
+        op >= 0x30 && op <= 0x37 -> Val({modrm: false, imm: 0})
+        op == 0xa0 || op == 0xa1 || op == 0xa2 || op == 0xa8 || op == 0xa9 || op == 0xaa -> Val({modrm: false, imm: 0})
+        op >= 0xc8 && op <= 0xcf -> Val({modrm: false, imm: 0})
+        op >= 0x70 && op <= 0x73 -> Val({modrm: true, imm: 1})
+        op == 0xa4 || op == 0xac || op == 0xba || op == 0xc2 || op == 0xc4 || op == 0xc5 || op == 0xc6 -> Val({modrm: true, imm: 1})
+        else -> Val({modrm: true, imm: 0})
+    }
+}
+
+// The instruction at `from` of `bytes`, or None when the debugger can't read
+// it: past the end, EVEX, 3DNow!, a 16-bit branch, loop and jrcxz (whose
+// short branch has no long form).
+native_decode: fn(bytes: [U8], from: Int) -> NativeInsn? Never! {
+    at := from
+    short := false
+    narrow := false
+    loop at < bytes.len() && native_decode_prefix(Int{bytes[at]}) {
+        if bytes[at] == 0x66 -> short = true
+        if bytes[at] == 0x67 -> narrow = true
+        at += 1
+    }
+    wide := false
+    if at < bytes.len() && bytes[at] >= 0x40 && bytes[at] <= 0x4f {
+        wide = Int{bytes[at]} & 8 != 0
+        at += 1
+    }
+    if at >= bytes.len() -> return None
+    op: Int{bytes[at]}
+    at += 1
+    insn := NativeInsn{length: 0, rip: -1, field: -1, width: 0, kind: NativeBranch.Plain, cond: 0, indirect: false}
+    // The relative branches: rel8 jcc and jmp, rel32 jmp and call.
+    branch: if {
+        op >= 0x70 && op <= 0x7f -> {kind: NativeBranch.Cond, width: 1}
+        op == 0xeb -> {kind: NativeBranch.Jump, width: 1}
+        op == 0xe9 -> {kind: NativeBranch.Jump, width: 4}
+        op == 0xe8 -> {kind: NativeBranch.Call, width: 4}
+        op == 0x0f && at < bytes.len() && bytes[at] >= 0x80 && bytes[at] <= 0x8f -> {kind: NativeBranch.Cond, width: 4}
+        else -> {kind: NativeBranch.Plain, width: 0}
+    }
+    if branch.kind != .Plain {
+        if short -> return None
+        insn.cond = if op == 0x0f -> Int{bytes[at]} & 15 else -> op & 15
+        if op == 0x0f -> at += 1
+        insn.kind = branch.kind
+        insn.field = at - from
+        insn.width = branch.width
+        insn.length = at - from + branch.width
+        if from + insn.length > bytes.len() -> return None
+        return Val(insn)
+    }
+    if op == 0x62 || (op >= 0xe0 && op <= 0xe3) -> return None
+    full: if short -> 2 else -> 4
+    moffs: if narrow -> 4 else -> 8
+    shape := {modrm: false, imm: 0}
+    if {
+        op == 0xc4 || op == 0xc5 -> {
+            // VEX: C5 takes one byte (map 0F), C4 two (the map in the first).
+            if at + 1 >= bytes.len() -> return None
+            map: if op == 0xc5 -> 1 else -> Int{bytes[at]} & 31
+            at += if op == 0xc5 -> 1 else -> 2
+            if map < 1 || map > 3 || at >= bytes.len() -> return None
+            code: Int{bytes[at]}
+            at += 1
+            shape.modrm = !(map == 1 && code == 0x77)
+            shape.imm = if {
+                map == 3 -> 1
+                map == 1 && ((code >= 0x70 && code <= 0x73) || code == 0xc2 || code == 0xc4 || code == 0xc5 || code == 0xc6) -> 1
+                else -> 0
+            }
+        }
+        op == 0x0f -> {
+            if at >= bytes.len() -> return None
+            code: Int{bytes[at]}
+            at += 1
+            shape = if {
+                code == 0x38 || code == 0x3a -> {modrm: true, imm: if code == 0x3a -> 1 else -> 0}
+                else -> native_decode_two(code) ?? return None
+            }
+            if code == 0x38 || code == 0x3a {
+                if at >= bytes.len() -> return None
+                at += 1
+            }
+        }
+        else -> {
+            shape = native_decode_one(op, full: full, moffs: moffs, mov: if wide -> 8 else -> full) ?? return None
+        }
+    }
+    if shape.modrm {
+        operand: native_decode_modrm(bytes, at) ?? return None
+        if op == 0xf6 || op == 0xf7 {
+            reg: (Int{bytes[at]} >> 3) & 7
+            if reg < 2 -> shape.imm = if op == 0xf6 -> 1 else -> full
+        }
+        if op == 0xff {
+            reg: (Int{bytes[at]} >> 3) & 7
+            insn.indirect = reg == 4 || reg == 5
+        }
+        if operand.rip >= 0 -> insn.rip = at - from + operand.rip
+        at += operand.length
+    }
+    insn.length = at - from + shape.imm
+    if from + insn.length > bytes.len() -> return None
+    Val(insn)
+}
+
+// Where a relative branch at `at` of `bytes`, which runs at `address`, goes.
+native_branch_target: fn(bytes: [U8], at: Int, address: Int, insn: NativeInsn) -> Int Never! {
+    address + insn.length + native_number(bytes, at + insn.field, insn.width, X64DebugEncoding.Signed)
+}
+
+// The instructions from `at` of `bytes` the jump at a breakpoint replaces:
+// whole instructions covering NATIVE_PLACE_JUMP bytes. None when one can't
+// be read or moved: an indirect jump, or a call before the last.
+native_displaced: fn(bytes: [U8], at: Int) -> [NativeInsn]? Never! {
+    insns := [NativeInsn]{}
+    covered := 0
+    loop covered < NATIVE_PLACE_JUMP {
+        insn: native_decode(bytes, at + covered) ?? return None
+        if insn.indirect -> return None
+        if insns.len() > 0 && insns[insns.len() - 1].kind == .Call -> return None
+        covered += insn.length
+        insns.push(insn)
+    }
+    Val(insns)
+}
+
+// Why the jump can't replace `length` bytes at offset `at` of a function
+// whose code is `bytes` at `address`, "" when it can: its code must read as
+// whole instructions with one starting at `at`, none an indirect jump, and
+// no branch may land inside the bytes replaced.
+native_place_refusal: fn(bytes: [U8], address: Int, at: Int, length: Int) -> String Never! {
+    offset := 0
+    boundary := false
+    loop offset < bytes.len() {
+        if offset == at -> boundary = true
+        insn: native_decode(bytes, offset) ?? return "the debugger can't read its function's code"
+        if insn.indirect -> return "its function jumps through a register"
+        if insn.kind != .Plain {
+            target: native_branch_target(bytes, offset, address + offset, insn)
+            if target > address + at && target < address + at + length {
+                return "its function jumps into the instructions a jump to the condition would replace"
+            }
+        }
+        offset += insn.length
+    }
+    if boundary -> "" else -> "the debugger can't read its function's code"
+}
+
+// Whether `value` fits a signed 32-bit field.
+native_place_near: fn(value: Int) -> Bool Never! { value >= -2147483648 && value <= 2147483647 }
+
+native_place_emit: fn(out: &[U8], bytes: [Int]) Never! {
+    loop byte in bytes -> out.push(U8{byte & 255})
+}
+
+native_place_word: fn(out: &[U8], value: Int, size: Int) Never! {
+    loop k in 0..<size -> out.push(U8{(value >> (8 * k)) & 255})
+}
+
+// A rel32 field at `field` of `out` (which runs at `base`) to `target`;
+// false when it can't reach.
+native_place_rel: fn(out: &[U8], field: Int, base: Int, target: Int) -> Bool Never! {
+    rel: target - (base + field + 4)
+    if !native_place_near(rel) -> return false
+    native_fix_put(out, field, rel, 4)
+    true
+}
+
+// `insns` from `at` of `bytes`, which ran at `address`, rewritten to run at
+// `base` + `out.len()` and appended to `out`, then a jump back to the
+// instruction after them: a rip-relative operand keeps its target, a branch
+// takes its rel32 form and a call pushes the return address it would have
+// pushed and jumps. False when a target can't be reached from there.
+native_moved: fn(out: &[U8], base: Int, bytes: [U8], at: Int, address: Int, insns: [NativeInsn]) -> Bool Never! {
+    offset := at
+    loop insn in insns {
+        here: address + (offset - at)
+        start: out.len()
+        if insn.kind == {
+            .Plain -> {
+                loop index in offset..<offset + insn.length -> out.push(bytes[index])
+                if insn.rip >= 0 {
+                    target: here + insn.length + native_number(bytes, offset + insn.rip, 4, X64DebugEncoding.Signed)
+                    moved: target - (base + start + insn.length)
+                    if !native_place_near(moved) -> return false
+                    native_fix_put(out, start + insn.rip, moved, 4)
+                }
+            }
+            .Jump | .Cond | .Call -> {
+                target: native_branch_target(bytes, offset, here, insn)
+                if insn.kind == .Call {
+                    back: here + insn.length
+                    // lea rsp,[rsp-8]; mov dword [rsp],lo; mov dword [rsp+4],hi
+                    native_place_emit(out, [Int]{0x48, 0x8d, 0x64, 0x24, 0xf8, 0xc7, 0x04, 0x24})
+                    native_place_word(out, back, 4)
+                    native_place_emit(out, [Int]{0xc7, 0x44, 0x24, 0x04})
+                    native_place_word(out, back >> 32, 4)
+                }
+                if insn.kind == .Cond -> native_place_emit(out, [Int]{0x0f, 0x80 + insn.cond}) else {
+                    out.push(0xe9)
+                }
+                field: out.len()
+                native_place_word(out, 0, 4)
+                if !native_place_rel(out, field, base, target) -> return false
+            }
+        }
+        offset += insn.length
+    }
+    out.push(0xe9)
+    field: out.len()
+    native_place_word(out, 0, 4)
+    native_place_rel(out, field, base, address + (offset - at))
+}
+
+// Puts every register and the flags back from the trampoline's frame (rbp),
+// leaving rsp as the program had it.
+native_place_restore: fn(out: &[U8]) Never! {
+    loop k in 0..<16 {
+        // movups xmmk,[rbp+NATIVE_PLACE_XMM+16k]
+        if k >= 8 -> out.push(0x44)
+        native_place_emit(out, [Int]{0x0f, 0x10, 0x85 | ((k & 7) << 3)})
+        native_place_word(out, NATIVE_PLACE_XMM + 16 * k, 4)
+    }
+    // lea rsp,[rbp+NATIVE_PLACE_GPR]
+    native_place_emit(out, [Int]{0x48, 0x8d, 0xa5})
+    native_place_word(out, NATIVE_PLACE_GPR, 4)
+    loop d in 0..<16 {
+        reg: NATIVE_PLACE_REGS[d]
+        if {
+            d == 7 -> native_place_emit(out, [Int]{0x48, 0x8d, 0x64, 0x24, 0x08})
+            reg >= 8 -> native_place_emit(out, [Int]{0x41, 0x58 + reg - 8})
+            else -> out.push(U8{0x58 + reg})
+        }
+    }
+    // popfq; lea rsp,[rsp+128]
+    native_place_emit(out, [Int]{0x9d, 0x48, 0x8d, 0xa4, 0x24, 0x80, 0, 0, 0})
+}
+
+// The trampoline of a condition at breakpoint `address`, to run at `base`:
+// it calls the condition's entry `entry` with its cell and `arguments`, and
+// on false runs `insns` (from `at` of `bytes`, the code at `address`) moved.
+// None when the entry or a moved instruction's target can't be reached.
+native_place_code: fn(base: Int, address: Int, entry: Int, arguments: [NativePlaceArg], bytes: [U8], at: Int, insns: [NativeInsn]) -> NativePlaceCode? Never! {
+    out := [U8]{}
+    // lea rsp,[rsp-128]; pushfq; push each register, DWARF 15 down to 0
+    native_place_emit(out, [Int]{0x48, 0x8d, 0x64, 0x24, 0x80, 0x9c})
+    loop k in 0..<16 {
+        reg: NATIVE_PLACE_REGS[15 - k]
+        if reg >= 8 -> native_place_emit(out, [Int]{0x41, 0x50 + reg - 8}) else {
+            out.push(U8{0x50 + reg})
+        }
+    }
+    // sub rsp,NATIVE_PLACE_GPR; mov rbp,rsp
+    native_place_emit(out, [Int]{0x48, 0x81, 0xec})
+    native_place_word(out, NATIVE_PLACE_GPR, 4)
+    native_place_emit(out, [Int]{0x48, 0x89, 0xe5})
+    // [rbp] = the program's rbp; [rbp+8] = the breakpoint; rsp's slot = the
+    // program's rsp; the cell = 0
+    native_place_emit(out, [Int]{0x48, 0x8b, 0x85})
+    native_place_word(out, NATIVE_PLACE_GPR + 8 * 6, 4)
+    native_place_emit(out, [Int]{0x48, 0x89, 0x45, 0x00, 0x48, 0xb8})
+    native_place_word(out, address, 8)
+    native_place_emit(out, [Int]{0x48, 0x89, 0x45, 0x08, 0x48, 0x8d, 0x85})
+    native_place_word(out, NATIVE_PLACE_STACK, 4)
+    native_place_emit(out, [Int]{0x48, 0x89, 0x85})
+    native_place_word(out, NATIVE_PLACE_GPR + 8 * 7, 4)
+    native_place_emit(out, [Int]{0x48, 0xc7, 0x45, NATIVE_PLACE_CELL, 0, 0, 0, 0, 0x48, 0xc7, 0x45, NATIVE_PLACE_CELL + 8, 0, 0, 0, 0})
+    loop k in 0..<16 {
+        // movups [rbp+NATIVE_PLACE_XMM+16k],xmmk
+        if k >= 8 -> out.push(0x44)
+        native_place_emit(out, [Int]{0x0f, 0x11, 0x85 | ((k & 7) << 3)})
+        native_place_word(out, NATIVE_PLACE_XMM + 16 * k, 4)
+    }
+    // lea rdi,[rbp+NATIVE_PLACE_CELL], then each capture's address
+    native_place_emit(out, [Int]{0x48, 0x8d, 0x7d, NATIVE_PLACE_CELL})
+    if arguments.len() > NATIVE_PLACE_ARGS.len() -> return None
+    loop (k, argument) in arguments {
+        reg: NATIVE_PLACE_ARGS[k]
+        high: if reg >= 8 -> 4 else -> 0
+        low: reg & 7
+        slot: NATIVE_PLACE_GPR + 8 * argument.register
+        // register: lea R,[rbp+slot]; memory: mov R,[rbp+slot]; lea R,[R+offset]
+        native_place_emit(out, [Int]{0x48 | high, if argument.memory -> 0x8b else -> 0x8d, 0x85 | (low << 3)})
+        native_place_word(out, slot, 4)
+        if argument.memory {
+            native_place_emit(out, [Int]{0x48 | high | (high >> 2), 0x8d, 0x80 | (low << 3) | low})
+            native_place_word(out, argument.offset, 4)
+        }
+        // mov R,[R]
+        if argument.deref {
+            native_place_emit(out, [Int]{0x48 | high | (high >> 2), 0x8b, (low << 3) | low})
+        }
+    }
+    // and rsp,-16; call entry
+    native_place_emit(out, [Int]{0x48, 0x83, 0xe4, 0xf0, 0xe8})
+    call: out.len()
+    native_place_word(out, 0, 4)
+    if !native_place_rel(out, call, base, entry) -> return None
+    back: out.len()
+    // mov rsp,rbp; cmp byte [rbp+cell],0; jne truth
+    native_place_emit(out, [Int]{0x48, 0x89, 0xec, 0x80, 0x7d, NATIVE_PLACE_CELL, 0, 0x0f, 0x85})
+    holds: out.len()
+    native_place_word(out, 0, 4)
+    native_place_restore(out)
+    out.push(0xe9)
+    run_on: out.len()
+    native_place_word(out, 0, 4)
+    native_fix_put(out, holds, out.len() - (holds + 4), 4)
+    native_place_restore(out)
+    // Each trap is followed by a jump to the moved instructions, which runs
+    // once the debugger lets the program go untraced (detach puts a nop in
+    // the trap's place).
+    truth: out.len()
+    native_place_emit(out, [Int]{0xcc, 0xe9})
+    held_on: out.len()
+    native_place_word(out, 0, 4)
+    // Called out: mov rsp,rbp, then as the condition had held.
+    abort: out.len()
+    native_place_emit(out, [Int]{0x48, 0x89, 0xec})
+    native_place_restore(out)
+    unknown: out.len()
+    native_place_emit(out, [Int]{0xcc, 0xe9})
+    unknown_on: out.len()
+    native_place_word(out, 0, 4)
+    moved: out.len()
+    loop field in ([Int]{run_on, held_on, unknown_on}) {
+        native_fix_put(out, field, moved - (field + 4), 4)
+    }
+    if !native_moved(out, base, bytes, at, address, insns) -> return None
+    moved_end: out.len()
+    // The runtime stub: walk the frame chain from rbp to the condition's
+    // entry frame (its return address is `back`) or the trampoline's own
+    // frame (the breakpoint's address), set rbp to the trampoline's frame
+    // and go to `abort`.
+    stub: out.len()
+    native_place_emit(out, [Int]{0x48, 0x89, 0xe8, 0x49, 0xbb})
+    native_place_word(out, base + back, 8)
+    native_place_emit(out, [Int]{0x49, 0xba})
+    native_place_word(out, address, 8)
+    // cmp [rax+8],r11; je entry; cmp [rax+8],r10; je own; mov rax,[rax]; jmp
+    native_place_emit(out, [Int]{0x4c, 0x39, 0x58, 0x08, 0x74, 0x0b, 0x4c, 0x39, 0x50, 0x08, 0x74, 0x0d, 0x48, 0x8b, 0x00, 0xeb, 0xef})
+    // entry: mov rbp,[rax]; jmp abort
+    native_place_emit(out, [Int]{0x48, 0x8b, 0x28, 0xe9})
+    first: out.len()
+    native_place_word(out, abort - (first + 4), 4)
+    // own: mov rbp,rax; jmp abort
+    native_place_emit(out, [Int]{0x48, 0x89, 0xc5, 0xe9})
+    second: out.len()
+    native_place_word(out, abort - (second + 4), 4)
+    Val(NativePlaceCode{bytes: out, truth: truth, unknown: unknown, moved: moved, moved_end: moved_end, out: stub})
+}
+
+// The jump at a breakpoint `address` to a trampoline at `target`, padded
+// with int3 to `length` bytes; empty when it can't reach.
+native_place_jump: fn(address: Int, target: Int, length: Int) -> [U8] Never! {
+    out := [U8]{0xe9}
+    native_place_word(out, 0, 4)
+    if !native_place_rel(out, 1, address, target) -> return [U8]{}
+    loop out.len() < length -> out.push(0xcc)
+    out
+}
+
+// Where a capture is at the breakpoint, from its DWARF location expression
+// `expression`: a register, or a register (DW_OP_breg, DW_OP_bregx,
+// DW_OP_fbreg through rbp) plus an offset, maybe read once more
+// (DW_OP_deref). None for any other.
+native_place_arg: fn(expression: [U8]) -> NativePlaceArg? Never! {
+    if expression.len() == 0 -> return None
+    op: Int{expression[0]}
+    if op >= 0x50 && op <= 0x5f && expression.len() == 1 {
+        return Val(NativePlaceArg{register: op - 0x50, memory: false, offset: 0, deref: false})
+    }
+    register := -1
+    at := 1
+    if {
+        op >= 0x70 && op <= 0x7f -> register = op - 0x70
+        op == 0x91 -> register = 6
+        op == 0x92 -> register = link_debug_uleb(expression, at)
+        else -> return None
+    }
+    if register < 0 || register > 15 || at >= expression.len() -> return None
+    offset: x64_jetline_sleb(expression, at)
+    deref: at < expression.len() && expression[at] == 0x06
+    if deref -> at += 1
+    if at != expression.len() -> return None
+    Val(NativePlaceArg{register: register, memory: true, offset: offset, deref: deref})
+}
+
+#Test("the decoder reads each instruction's length, rip-relative field and branch") {
+    // mov rax,[rbp-8]; mov rax,[rip+0x10]; jne +5; call rel32; jmp rel8
+    code: [U8]{0x48, 0x8b, 0x45, 0xf8, 0x48, 0x8b, 0x05, 0x10, 0, 0, 0, 0x75, 0x05, 0xe8, 1, 0, 0, 0, 0xeb, 0xfe}
+    first: native_decode(code, 0) ?? panic("first")
+    assert_eq(first.length, 4)
+    assert_eq(first.rip, -1)
+    second: native_decode(code, 4) ?? panic("second")
+    assert_eq(second.length, 7)
+    assert_eq(second.rip, 3)
+    third: native_decode(code, 11) ?? panic("third")
+    assert_eq(third.length, 2)
+    assert(third.kind == NativeBranch.Cond)
+    assert_eq(third.cond, 5)
+    assert_eq(native_branch_target(code, 11, 0x1000 + 11, third), 0x1000 + 18)
+    call: native_decode(code, 13) ?? panic("call")
+    assert(call.kind == NativeBranch.Call)
+    assert_eq(call.length, 5)
+    // movabs rax,imm64; sub rsp,imm32; movups xmm8,[rbp+0x20]; vmovdqu ymm0,[rsi]
+    more: [U8]{0x48, 0xb8, 1, 2, 3, 4, 5, 6, 7, 8, 0x48, 0x81, 0xec, 0x20, 1, 0, 0, 0x44, 0x0f, 0x10, 0x45, 0x20, 0xc5, 0xfe, 0x6f, 0x06}
+    assert_eq((native_decode(more, 0) ?? panic("movabs")).length, 10)
+    assert_eq((native_decode(more, 10) ?? panic("sub")).length, 7)
+    assert_eq((native_decode(more, 17) ?? panic("movups")).length, 5)
+    assert_eq((native_decode(more, 22) ?? panic("vex")).length, 4)
+    // test byte [rax],1 (F6 /0 ib); jmp [rax] (FF /4); loop
+    assert_eq((native_decode([U8]{0xf6, 0x00, 0x01}, 0) ?? panic("test")).length, 3)
+    assert((native_decode([U8]{0xff, 0x20}, 0) ?? panic("jmp")).indirect)
+    assert(native_decode([U8]{0xe2, 0xfe}, 0) == None)
+}
+
+#Test("the jump replaces whole instructions, and no branch may land inside them") {
+    // push rbp; mov rbp,rsp; sub rsp,16; jmp back to the mov
+    code: [U8]{0x55, 0x48, 0x89, 0xe5, 0x48, 0x83, 0xec, 0x10, 0xeb, 0xf7}
+    insns: native_displaced(code, 0) ?? panic("displaced")
+    assert_eq(insns.len(), 3)
+    assert_eq(insns[0].length + insns[1].length + insns[2].length, 1 + 3 + 4)
+    assert_eq(native_place_refusal(code, 0x1000, 4, 4), "")
+    assert_eq(native_place_refusal(code, 0x1000, 0, 5), "its function jumps into the instructions a jump to the condition would replace")
+    assert_eq(native_place_refusal(code, 0x1000, 2, 5), "the debugger can't read its function's code")
+}
+
+#Test("moved instructions keep their targets") {
+    // mov rax,[rip+0x100]; jne -2 at 0x1000, both moved to 0x2000
+    code: [U8]{0x48, 0x8b, 0x05, 0x00, 0x01, 0, 0, 0x75, 0xfe}
+    insns: [NativeInsn]{native_decode(code, 0) ?? panic("load"), native_decode(code, 7) ?? panic("jne")}
+    out := [U8]{}
+    assert(native_moved(out, 0x2000, code, 0, 0x1000, insns))
+    // The load reads 0x1107 from 0x2007: rip+0x-F00.
+    assert_eq(native_number(out, 3, 4, X64DebugEncoding.Signed), 0x1107 - 0x2007)
+    // jne rel32 to 0x1007, then jmp back to 0x1009.
+    assert_eq(Int{out[7]}, 0x0f)
+    assert_eq(Int{out[8]}, 0x85)
+    assert_eq(native_number(out, 9, 4, X64DebugEncoding.Signed), 0x1007 - 0x200d)
+    assert_eq(Int{out[13]}, 0xe9)
+    assert_eq(native_number(out, 14, 4, X64DebugEncoding.Signed), 0x1009 - 0x2012)
+}
+
+#Test("a capture's place is a register or a register plus an offset") {
+    assert((native_place_arg([U8]{0x53}) ?? panic("reg")).register == 3)
+    frame: native_place_arg([U8]{0x91, 0x70}) ?? panic("fbreg")
+    assert_eq(frame.register, 6)
+    assert_eq(frame.offset, -16)
+    assert(frame.memory && !frame.deref)
+    held: native_place_arg([U8]{0x76, 0x08, 0x06}) ?? panic("breg")
+    assert(held.deref)
+    assert(native_place_arg([U8]{0x76, 0x08, 0x9f}) == None)
+}
+
+#Test("the trampoline calls the condition and its traps and stub are where it says") {
+    code: [U8]{0x55, 0x48, 0x89, 0xe5, 0x90}
+    insns: native_displaced(code, 0) ?? panic("displaced")
+    arguments: [NativePlaceArg]{NativePlaceArg{register: 6, memory: true, offset: -8, deref: false}}
+    placed: native_place_code(0x200000, 0x1000, 0x201000, arguments, code, 0, insns) ?? panic("code")
+    assert_eq(Int{placed.bytes[placed.truth]}, 0xcc)
+    assert_eq(Int{placed.bytes[placed.unknown]}, 0xcc)
+    assert_eq(Int{placed.bytes[placed.moved]}, 0x55)
+    assert_eq(Int{placed.bytes[placed.moved_end - 5]}, 0xe9)
+    assert_eq(Int{placed.bytes[placed.out]}, 0x48)
+    // Past each trap, a jump to the moved instructions.
+    assert_eq(native_number(placed.bytes, placed.truth + 2, 4, X64DebugEncoding.Signed), placed.moved - (placed.truth + 6))
+    assert_eq(native_number(placed.bytes, placed.unknown + 2, 4, X64DebugEncoding.Signed), placed.moved - (placed.unknown + 6))
+    // The stub's walk: its loop's last jump goes back to its first compare.
+    walk: placed.out + 3 + 10 + 10
+    assert_eq(Int{placed.bytes[walk + 15]}, 0xeb)
+    assert_eq(Int{placed.bytes[walk + 11]} + walk + 12, walk + 25)
+    jump: native_place_jump(0x1000, 0x200000, 5)
+    assert_eq(jump.len(), 5)
+    assert_eq(native_number(jump, 1, 4, X64DebugEncoding.Signed), 0x200000 - 0x1005)
+}

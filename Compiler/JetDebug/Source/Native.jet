@@ -110,11 +110,13 @@ NativeBreakpoint: struct {
 // it has none), or log its message and run on; and how the console's
 // `breaks` lists it (`break cart.jet:88 if total < 0`). The condition and
 // the message are compiled expressions (NativeEval.jet), the message one
-// String with its `{…}` parts.
+// String with its `{…}` parts. `placement` says why the condition can't run
+// in the program itself (NativePlace.jet), "" when it can.
 NativeRule: struct {
     condition: Shared<NativeEval>?,
     log: Shared<NativeEval>?,
     shown: String,
+    placement: String{"it has no condition"},
 }
 
 // What a run said before it settled: the program's output (`stdout`), a
@@ -277,6 +279,10 @@ NativeSession: struct {
     evaluator: NativeEvaluator?{None},
     evals: [String:Shared<NativeEval>]{[String:Shared<NativeEval>]{}},
     eval_image: Shared<NativeEvalImage>?{None},
+    // The conditions placed in the program (NativePlace.jet), latest last,
+    // and whether the last stop was one of them that held.
+    placed: [NativePlaced]{[NativePlaced]{}},
+    held: Bool{false},
 
     // Load the debug facts of `binary` (a native image with debug info, its
     // own or in the side file its `.gnu_debuglink` names). The program's
@@ -377,8 +383,37 @@ NativeSession: struct {
         Ok()
     }
 
-    // Give breakpoint `number` its condition, log message and listing.
-    set_rule: fn(&self, number: Int, rule: NativeRule) Never! { self.rules[number] = rule }
+    // Give breakpoint `number` its condition, log message and listing, and
+    // run its condition in the program where it can: why it can't, "" when
+    // it does (or will, once the program runs).
+    set_rule: fn(&self, number: Int, rule: NativeRule) -> String Never! {
+        placeable: rule.condition != None && rule.placement == ""
+        reason := "{rule.placement}"
+        self.rules[number] = rule
+        if !self.alive() -> return reason
+        addresses := [Int]{}
+        loop breakpoint in self.breakpoints {
+            if breakpoint.number == number {
+                loop address in breakpoint.addresses -> addresses.push(address)
+            }
+        }
+        loop address in addresses {
+            loop row in 0..<self.placed.len() {
+                if self.placed[row].live && self.placed[row].address == address -> self.unplace(row)
+            }
+            if !placeable {
+                _ := self.trap(address)
+                next
+            }
+            self.lift(address)
+            refused: self.place_condition(number, address)
+            if refused != "" {
+                reason = refused
+                _ := self.trap(address)
+            }
+        }
+        reason
+    }
 
     // Compile the expressions of the session with `evaluator`.
     evaluate_with: fn(&self, evaluator: &&NativeEvaluator) Never! {
@@ -405,6 +440,7 @@ NativeSession: struct {
                 return Err(native_eval_refused("`{condition.trim()}` is a {type_name}, not a Bool"))
             }
             rule.condition = Val(compiled)
+            rule.placement = if log != "" -> "it logs a message, which the debugger reads at each hit" else -> self.placement(number, compiled)
         }
         if log != "" {
             rule.log = Val(self.compiled(at.path, at.line, at.column, native_eval_message(log)) ?? return Err(err))
@@ -507,7 +543,7 @@ NativeSession: struct {
         }
         syscall: native_fork_syscall_at(self.trace, facts.value.code.address, facts.value.code.address + facts.value.code.bytes.len()) ?? return Err(native_eval_refused("the program's code holds no system call to copy it with"))
         if permit.value.plan == .Val(plan) {
-            return native_eval_run(self.image, self.trace, self.sites, permit.value, plan, facts.value, syscall, captures, typed)
+            return native_eval_run(self.image, self.trace, self.originals(), permit.value, plan, facts.value, syscall, captures, typed)
         }
         Err(native_eval_refused("the expression has no plan"))
     }
@@ -520,6 +556,262 @@ NativeSession: struct {
         cell: Shared{NativeEvalImage{symbols: native_fix_symbols(elf), code: native_elf_code(elf)}}
         self.eval_image = Val(cell)
         Ok(cell)
+    }
+
+    // Why the condition `compiled` of breakpoint `number` can't run in the
+    // program, "" when it can: what it does (JetIR EvalPlace.jet), or the
+    // code at one of the breakpoint's addresses (site_plan).
+    placement: fn(&self, number: Int, compiled: Shared<NativeEval>) -> String Never! {
+        refusal: compiled.guard_read().value.refusal
+        if refusal != "" -> return refusal
+        addresses := [Int]{}
+        loop breakpoint in self.breakpoints {
+            if breakpoint.number == number {
+                loop address in breakpoint.addresses -> addresses.push(address)
+            }
+        }
+        loop address in addresses -> _ := self.site_plan(address, compiled) ?? return err.detail
+        ""
+    }
+
+    // How the code at `address` takes a jump to the condition `compiled`
+    // (NativePlace.jet): the code of its function (`code`, at `low`), the
+    // instructions the jump replaces, and where each capture is there. The
+    // error says why it can't: the code can't be read or moved, a branch
+    // lands inside what the jump replaces, the line ends inside it (so a
+    // line step's trap would), or a capture's place is not a register or
+    // memory at a register.
+    site_plan: fn(&self, address: Int, compiled: Shared<NativeEval>) -> {code: [U8], low: Int, insns: [NativeInsn], args: [NativePlaceArg]} NativeDebugError! {
+        index: x64_jetline_find(self.image.lines, address)
+        if index < 0 -> return Err(NativeDebugError{detail: "its breakpoint is not in Jet code"})
+        function: self.image.lines.functions[index]
+        facts_cell: self.eval_facts() ?? return Err(NativeDebugError{detail: err.message})
+        facts: facts_cell.guard_read()
+        text_low: facts.value.code.address
+        code := [U8]{}
+        if function.low >= text_low && function.high <= text_low + facts.value.code.bytes.len() {
+            code = facts.value.code.bytes[function.low - text_low..<function.high - text_low]
+        }
+        loop fixed in self.fixed {
+            if fixed.address == function.low -> code = fixed.code[0..<fixed.code.len()]
+        }
+        if code.len() == 0 {
+            return Err(NativeDebugError{detail: "the debugger can't read its function's code"})
+        }
+        at: address - function.low
+        insns: native_displaced(code, at) ?? return Err(NativeDebugError{detail: "the debugger can't move the instructions at its breakpoint"})
+        length := 0
+        line: x64_jetline_line(self.image.lines, function, address) ?? -1
+        loop insn in insns {
+            if length > 0 && (x64_jetline_line(self.image.lines, function, address + length) ?? -1) != line {
+                return Err(NativeDebugError{detail: "its line ends inside the instructions a jump to the condition would replace"})
+            }
+            length += insn.length
+        }
+        refusal: native_place_refusal(code, function.low, at, length)
+        if refusal != "" -> return Err(NativeDebugError{detail: refusal})
+        permit: compiled.guard_read()
+        if permit.value.captures.len() > NATIVE_PLACE_ARGS.len() {
+            return Err(NativeDebugError{detail: "it reads more than {NATIVE_PLACE_ARGS.len()} locals"})
+        }
+        found: native_function_at(self.image, address) ?? return Err(NativeDebugError{detail: "its breakpoint is not in Jet code"})
+        args := [NativePlaceArg]{}
+        loop capture in permit.value.captures {
+            arg := NativePlaceArg?{None}
+            loop variable in found.variables {
+                if variable.site != -1 || variable.name != capture.name -> next
+                range: native_variable_covering(self.image, variable, address) ?? next
+                size: if capture.inline -> capture.size else -> native_type_size(self.image, variable.ty)
+                if size <= 0 || (!capture.inline && size > 8) || range.from < 0 || range.to > self.image.loclists.len() || range.from >= range.to {
+                    next
+                }
+                arg = native_place_arg(self.image.loclists[range.from..<range.to])
+            }
+            args.push(arg ?? return Err(NativeDebugError{detail: "the debugger can't find `{capture.name}` there without stopping the program"}))
+        }
+        Ok({code: code, low: function.low, insns: insns, args: args})
+    }
+
+    // Run breakpoint `number`'s condition in the program at `address`, where
+    // no trap byte is: its function and those it calls placed in a region
+    // mapped near the code with the trampoline (NativePlace.jet), the
+    // condition's runtime calls sent to the trampoline's stub, then the jump
+    // written at `address`. Why it can't, "" when it does.
+    place_condition: fn(&self, number: Int, address: Int) -> String Never! {
+        held := Shared<NativeEval>?{None}
+        if self.rules.get(number) == .Val(rule) {
+            if rule.placement != "" -> return "{rule.placement}"
+            held = rule.condition
+        }
+        compiled: held ?? return "it has no condition"
+        site: self.site_plan(address, compiled) ?? return err.detail
+        length := 0
+        loop insn in site.insns -> length += insn.length
+        if self.inside(address, address + length) {
+            return "a thread is stopped inside the instructions a jump to the condition would replace"
+        }
+        facts_cell: self.eval_facts() ?? return err.message
+        facts: facts_cell.guard_read()
+        permit: compiled.guard_read()
+        edit_plan: native_fix_plan(self.image, permit.value.edit, facts.value.symbols, facts.value.code.bytes, facts.value.code.address, self.fixed) ?? return err.detail
+        stale: native_eval_refusal(permit.value, edit_plan, facts.value, self.fixed)
+        if stale != "" -> return stale
+        plan: native_fix_place_all(permit.value.edit, facts.value.symbols, edit_plan, permit.value.entry) ?? return err.detail
+        entry: native_eval_entry(permit.value, plan) ?? return "the compiled condition has no entry"
+        text_low: facts.value.code.address
+        text_high: text_low + facts.value.code.bytes.len()
+        syscall: native_fork_syscall_at(self.trace, text_low, text_high) ?? return "the program's code holds no system call to map the condition's code with"
+        base: self.map_code(plan.size + NATIVE_FIX_PAGE, text_high, syscall) ?? return err.detail
+        trampoline: base + plan.size
+        built: native_place_code(trampoline, address, base + entry, site.args, site.code, address - site.low, site.insns) ?? return "the condition's code is out of reach of its breakpoint"
+        if built.bytes.len() + 8 > NATIVE_FIX_PAGE {
+            return "the instructions at its breakpoint are too long to move"
+        }
+        region := native_fix_region(plan, permit.value.edit, facts.value.symbols, base)
+        loop piece in plan.pieces {
+            if piece.function < 0 -> next
+            loop reloc in permit.value.edit.functions[piece.function].relocs {
+                if reloc.target == .Runtime(_) {
+                    at: piece.offset + reloc.at
+                    native_fix_put(region, at, trampoline + built.out - (base + at + 4), 4)
+                }
+            }
+        }
+        if !self.poke_bytes(base, region) || !self.poke_bytes(trampoline, built.bytes) {
+            return "the debugger couldn't write the condition's code"
+        }
+        jump: native_place_jump(address, trampoline, length)
+        if jump.len() == 0 -> return "the condition's code is out of reach of its breakpoint"
+        word := x64_trace_read(self.trace, address, ((length + 7) >> 3) << 3) ?? return "the debugger couldn't read the code at its breakpoint"
+        loop (k, byte) in jump -> word[k] = byte
+        if !self.poke_bytes(address, word) {
+            return "the debugger couldn't write the jump to the condition"
+        }
+        from: address - site.low
+        self.placed.push(NativePlaced{number: number, address: address, bytes: site.code[from..<from + length], truth: trampoline + built.truth, unknown: trampoline + built.unknown, moved: trampoline + built.moved, moved_end: trampoline + built.moved_end, out: trampoline + built.out, low: base, high: trampoline, live: true})
+        ""
+    }
+
+    // Put back the bytes the jump of placed condition `row` replaced; its
+    // code stays, for a thread still in it. A trap byte there stays, over
+    // the byte now under it.
+    unplace: fn(&self, row: Int) Never! {
+        if !self.placed[row].live {
+            return
+        }
+        self.placed[row].live = false
+        address: self.placed[row].address
+        count: self.placed[row].bytes.len()
+        word := x64_trace_read(self.trace, address, ((count + 7) >> 3) << 3) ?? return
+        loop k in 0..<count -> word[k] = self.placed[row].bytes[k]
+        if self.sites.has_key(address) {
+            self.sites[address] = Int{word[0]}
+            word[0] = U8{NATIVE_DEBUG_TRAP}
+        }
+        _ := self.poke_bytes(address, word)
+    }
+
+    // The row of the live placed condition whose jump is at `address`.
+    placed_live: fn(self, address: Int) -> Int? Never! {
+        loop (row, placed) in self.placed {
+            if placed.live && placed.address == address -> return Val(row)
+        }
+        None
+    }
+
+    // The placed condition whose trap a thread at `pc` just ran, and whether
+    // it was the trap of a condition that held (else of one that called
+    // out of the program).
+    placed_trap: fn(self, pc: Int) -> {row: Int, truth: Bool}? Never! {
+        loop (row, placed) in self.placed {
+            if pc - 1 == placed.truth -> return Val({row: row, truth: true})
+            if pc - 1 == placed.unknown -> return Val({row: row, truth: false})
+        }
+        None
+    }
+
+    // The current thread, stopped by a trap, at a placed condition's trap:
+    // put on the breakpoint's address, one past it as a trap byte there
+    // leaves the pc, with `held` saying whether it held (2); or, its
+    // breakpoint gone, on the address to run on (1). 0 for any other trap.
+    landed: fn(&self) -> Int NativeDebugError! {
+        if self.placed.len() == 0 -> return Ok(0)
+        registers := self.registers() ?? return Err(err)
+        trap: self.placed_trap(registers[X64_TRACE_RIP]) ?? return Ok(0)
+        live: self.placed[trap.row].live
+        registers[X64_TRACE_RIP] = self.placed[trap.row].address + if live -> 1 else -> 0
+        if !x64_trace_set_registers(self.trace, registers) {
+            return Err(NativeDebugError{detail: "couldn't set the program's registers"})
+        }
+        self.held = live && trap.truth
+        Ok(if live -> 2 else -> 1)
+    }
+
+    // Thread `id`, faulting in the code of a placed condition, sent to that
+    // condition's runtime stub, as a runtime call of it would be, so the
+    // debugger checks the hit in a fork, where the fault is the
+    // evaluation's; false when it is not in such code.
+    divert: fn(&self, id: Int) -> Bool Never! {
+        current: self.trace.thread
+        self.trace.thread = id
+        registers := x64_trace_registers(self.trace) ?? [Int]{}
+        diverted := false
+        if registers.len() > 0 {
+            pc: registers[X64_TRACE_RIP]
+            loop placed in self.placed {
+                if pc >= placed.low && pc < placed.high {
+                    registers[X64_TRACE_RIP] = placed.out
+                    diverted = x64_trace_set_registers(self.trace, registers)
+                    break
+                }
+            }
+        }
+        self.trace.thread = current
+        diverted
+    }
+
+    // Whether a thread's pc is strictly between `low` and `high`.
+    inside: fn(&self, low: Int, high: Int) -> Bool Never! {
+        current: self.trace.thread
+        found := false
+        loop thread in self.threads {
+            self.trace.thread = thread.id
+            if x64_trace_registers(self.trace) == .Val(registers) {
+                if registers[X64_TRACE_RIP] > low && registers[X64_TRACE_RIP] < high -> found = true
+            }
+        }
+        self.trace.thread = current
+        found
+    }
+
+    // The program's own byte under each byte the debugger changed in its
+    // code: under each trap byte, and under each placed condition's jump.
+    originals: fn(self) -> [Int:Int] Never! {
+        merged := [Int:Int]{}
+        loop address in self.sites.keys() -> merged[address] = self.sites.get(address) ?? 0
+        loop placed in self.placed {
+            if !placed.live -> next
+            loop (k, byte) in placed.bytes -> merged[placed.address + k] = Int{byte}
+        }
+        merged
+    }
+
+    // Whether a hit at `address` traps: a trap byte or a placed condition.
+    trap_at: fn(self, address: Int) -> Bool Never! {
+        self.sites.has_key(address) || self.placed_live(address) != None
+    }
+
+    // A placed condition's breakpoint the current thread reached at `pc` by
+    // stepping: a hit whose condition the debugger checks, as a trap
+    // byte's would be.
+    placed_hit: fn(&self, pc: Int) -> NativeEvent NativeDebugError! {
+        registers := self.registers() ?? return Err(err)
+        registers[X64_TRACE_RIP] = pc + 1
+        if !x64_trace_set_registers(self.trace, registers) {
+            return Err(NativeDebugError{detail: "couldn't set the program's registers"})
+        }
+        self.held = false
+        Ok(NativeEvent{kind: NativeStopKind.Paused, code: 0})
     }
 
     // Whether a hit of a breakpoint with `condition` and `log` stops: its
@@ -589,6 +881,7 @@ NativeSession: struct {
         loop arg in args -> argv.push(arg.copy())
         self.started = true
         self.sites = [Int:Int]{}
+        self.placed = [NativePlaced]{}
         // A watch names a frame of the run that ended.
         self.watches = [NativeWatch]{}
         self.trace = x64_trace_spawn(self.binary, argv, self.output_path)
@@ -636,6 +929,7 @@ NativeSession: struct {
         self.started = true
         self.attached = true
         self.sites = [Int:Int]{}
+        self.placed = [NativePlaced]{}
         self.watches = [NativeWatch]{}
         self.threads = [NativeThread]{}
         // A thread may start while the others are taken: the threads are
@@ -711,6 +1005,16 @@ NativeSession: struct {
     // its trap bytes are put back, its watches' debug registers cleared, and
     // each thread goes with the signal it stopped with.
     detach: fn(&self) Never! {
+        // A placed condition's jump comes out; its traps become nops, so a
+        // thread still in its code runs on to the moved instructions.
+        loop row in 0..<self.placed.len() {
+            self.unplace(row)
+            loop trap in ([Int]{self.placed[row].truth, self.placed[row].unknown}) {
+                if x64_trace_peek(self.trace, trap) == .Val(word) {
+                    _ := x64_trace_poke(self.trace, trap, word & I64{-256} | I64{0x90})
+                }
+            }
+        }
         trapped := [Int]{}
         loop address in self.sites.keys() -> trapped.push(address)
         loop address in trapped -> self.lift(address)
@@ -895,7 +1199,7 @@ NativeSession: struct {
         code: native_elf_code(elf)
         syscall: native_fork_syscall_at(self.trace, code.address, code.address + code.bytes.len()) ?? return Ok(None)
         fork: native_fork_make(self.trace, syscall) ?? return Ok(None)
-        viewed: native_fork_view(fork, self.image, self.trace.pid, self.sites, view, ty, value) ?? {
+        viewed: native_fork_view(fork, self.image, self.trace.pid, self.originals(), view, ty, value) ?? {
             native_fork_end(fork)
             return Ok(None)
         }
@@ -930,6 +1234,7 @@ NativeSession: struct {
         }
         x64_trace_close(self.trace)
         self.sites = [Int:Int]{}
+        self.placed = [NativePlaced]{}
     }
 
     // The source file of the program's `run`, as the image's line table
@@ -1072,8 +1377,9 @@ NativeSession: struct {
             sizes.push(if running == .Val(found) -> found.code.len() else -> 0)
         }
         syscall := -1
+        changed: self.originals()
         loop k in 0..<code.bytes.len() - 1 {
-            if native_fix_is_syscall(code.bytes, k) && !self.has_site(code.address + k) {
+            if native_fix_is_syscall(code.bytes, k) && !changed.has_key(code.address + k) && !changed.has_key(code.address + k + 1) {
                 syscall = code.address + k
                 break
             }
@@ -1159,6 +1465,7 @@ NativeSession: struct {
             shown.push("`{name}`")
         }
         self.breakpoints = moved
+        self.lift_unwanted()
         loop breakpoint in self.breakpoints {
             loop address in breakpoint.addresses {
                 if !self.plant(address) {
@@ -1266,6 +1573,9 @@ NativeSession: struct {
                     condition = rule.condition
                     log = rule.log
                 }
+                // A condition that ran in the program and held needs no
+                // check.
+                if self.held && log == None -> condition = None
                 stops := true
                 if condition != None || log != None {
                     verdict: self.holds(condition, log)
@@ -1347,14 +1657,15 @@ NativeSession: struct {
         placed: self.place_spec(spec, file) ?? return Err(err)
         if placed.number < 0 -> return Ok(placed.shown)
         suffix: if condition == "" -> "" else -> " if {condition}"
+        reason := ""
         if self.make_rule(placed.number, condition, "", "break {placed.shown}{suffix}") == {
-            .Ok(rule) -> { self.set_rule(placed.number, rule) }
+            .Ok(rule) -> { reason = self.set_rule(placed.number, rule) }
             .Err(refused) -> {
                 self.take_back(placed.number) ?? return Err(err)
                 return Ok("Can't use the condition: {refused.message}\n")
             }
         }
-        Ok("Breakpoint set  {placed.shown}{suffix}\n{native_debug_condition_place(condition)}")
+        Ok("Breakpoint set  {placed.shown}{suffix}\n{native_debug_condition_place(condition, reason)}")
     }
 
     // `log <file:line> "<text with {expr}>"`: a logpoint, which prints its
@@ -1369,7 +1680,7 @@ NativeSession: struct {
         placed: self.place_spec(operand.before(" "), file) ?? return Err(err)
         if placed.number < 0 -> return Ok(placed.shown)
         if self.make_rule(placed.number, "", message, "log {placed.shown} {quoted}") == {
-            .Ok(rule) -> { self.set_rule(placed.number, rule) }
+            .Ok(rule) -> { _ := self.set_rule(placed.number, rule) }
             .Err(refused) -> {
                 self.take_back(placed.number) ?? return Err(err)
                 return Ok("Can't use the message: {refused.message}\n")
@@ -1546,6 +1857,7 @@ NativeSession: struct {
             }
             if registers[X64_TRACE_RSP] >= cfa {
                 self.end_watch(index) ?? return Err(err)
+                if self.placed_live(pc) != None -> return self.placed_hit(pc)
                 if self.has_site(pc) -> return self.resume(X64TraceResume.Step)
                 return self.go_free(X64TraceResume.Run)
             }
@@ -1560,6 +1872,7 @@ NativeSession: struct {
                 }
             }
             // A trap byte the step reached runs, so the stop is a trap's.
+            if self.placed_live(pc) != None -> return self.placed_hit(pc)
             if self.has_site(pc) -> return self.resume(X64TraceResume.Step)
         }
     }
@@ -1570,7 +1883,7 @@ NativeSession: struct {
     // first, as resume gives it.
     run_free_to: fn(&self, address: Int, cfa: Int) -> NativeEvent? NativeDebugError! {
         temporary: !self.has_site(address)
-        if temporary && !self.plant(address) {
+        if temporary && !self.trap(address) {
             return Err(NativeDebugError{detail: "couldn't write a breakpoint at {native_debug_hex(address)}"})
         }
         loop {
@@ -1721,9 +2034,28 @@ NativeSession: struct {
         native_debug_word(self.trace, address)
     }
 
+    // Trap breakpoint code at `address`: run its condition in the program
+    // where it can (place_condition), else write a trap byte there, unless
+    // either is there; false when the code can't be written. A condition
+    // that can't be placed now says so in the next report.
+    plant: fn(&self, address: Int) -> Bool Never! {
+        if self.sites.has_key(address) || self.placed_live(address) != None -> return true
+        number: self.breakpoint_at(address) ?? -1
+        placeable := false
+        if self.rules.get(number) == .Val(rule) {
+            placeable = rule.condition != None && rule.placement == ""
+        }
+        if placeable {
+            refused: self.place_condition(number, address)
+            if refused == "" -> return true
+            self.notes = "{self.notes}Breakpoint {number}: {native_debug_condition_place("-", refused)}"
+        }
+        self.trap(address)
+    }
+
     // Write a trap byte at `address`, unless one is there; false when the
     // code can't be written.
-    plant: fn(&self, address: Int) -> Bool Never! {
+    trap: fn(&self, address: Int) -> Bool Never! {
         if self.sites.has_key(address) -> return true
         word: x64_trace_peek(self.trace, address) ?? return false
         if !x64_trace_poke(self.trace, address, word & I64{-256} | I64{NATIVE_DEBUG_TRAP}) {
@@ -1741,7 +2073,7 @@ NativeSession: struct {
         }
     }
 
-    // Lift every trap no breakpoint wants.
+    // Lift every trap and placed condition no breakpoint wants.
     lift_unwanted: fn(&self) Never! {
         stale := [Int]{}
         loop address in self.sites.keys() {
@@ -1749,9 +2081,15 @@ NativeSession: struct {
         }
         if !self.alive() {
             self.sites = [Int:Int]{}
+            self.placed = [NativePlaced]{}
             return
         }
         loop address in stale -> self.lift(address)
+        loop row in 0..<self.placed.len() {
+            if self.placed[row].live && self.breakpoint_at(self.placed[row].address) == None {
+                self.unplace(row)
+            }
+        }
     }
 
     has_site: fn(self, address: Int) -> Bool Never! { self.sites.has_key(address) }
@@ -1767,14 +2105,16 @@ NativeSession: struct {
     }
 
     // `count` bytes of the program's code from `address`, as the image has
-    // them: the bytes under trap bytes put back. A dump's are its image's.
+    // them: the bytes under trap bytes and placed conditions' jumps put
+    // back. A dump's are its image's.
     code: fn(self, address: Int, count: Int) -> [U8] Never! {
         if self.dump == .Val(dumped) {
             return native_debug_bytes(dumped.memory, address, count) ?? [U8]{}
         }
         bytes := x64_trace_read(self.trace, address, count) ?? [U8]{}
+        changed: self.originals()
         loop at in 0..<bytes.len() {
-            if self.sites.get(address + at) == .Val(byte) -> bytes[at] = U8{byte}
+            if changed.get(address + at) == .Val(byte) -> bytes[at] = U8{byte}
         }
         bytes
     }
@@ -1792,7 +2132,7 @@ NativeSession: struct {
                         break
                     }
                     registers: self.registers() ?? return Err(err)
-                    if self.has_site(registers[X64_TRACE_RIP]) {
+                    if self.trap_at(registers[X64_TRACE_RIP]) {
                         stepped: self.go_free(X64TraceResume.Step) ?? return Err(err)
                         if stepped.ends_run() -> return Ok(stepped)
                     }
@@ -1805,11 +2145,30 @@ NativeSession: struct {
     }
 
     // Let the program go on as `how` says, off a trap byte at its pc first:
-    // the byte is put back for one instruction, then trapped again.
+    // the byte is put back for one instruction, then trapped again. Off a
+    // placed condition's jump, the thread goes on at the instructions it
+    // moved; a step runs them all.
     go_free: fn(&self, how: X64TraceResume) -> NativeEvent NativeDebugError! {
         self.selected = 0
-        registers: self.registers() ?? return Err(err)
+        registers := self.registers() ?? return Err(err)
         pc: registers[X64_TRACE_RIP]
+        if self.placed_live(pc) == .Val(row) {
+            moved: self.placed[row].moved
+            moved_end: self.placed[row].moved_end
+            registers[X64_TRACE_RIP] = moved
+            if !x64_trace_set_registers(self.trace, registers) {
+                return Err(NativeDebugError{detail: "couldn't set the program's registers"})
+            }
+            if how == X64TraceResume.Run -> return self.resume(how)
+            loop {
+                stepped: self.resume(X64TraceResume.Step) ?? return Err(err)
+                if stepped.kind != NativeStopKind.Paused || stepped.code > 0 -> return Ok(stepped)
+                now: self.registers() ?? return Err(err)
+                if now[X64_TRACE_RIP] < moved || now[X64_TRACE_RIP] >= moved_end {
+                    return Ok(stepped)
+                }
+            }
+        }
         if self.has_site(pc) {
             byte: self.sites.get(pc) ?? 0
             if x64_trace_peek(self.trace, pc) == .Val(word) {
@@ -1840,6 +2199,7 @@ NativeSession: struct {
     // write that left its bytes as they were runs on.
     resume_threads: fn(&self, how: X64TraceResume, every: Bool{true}) -> NativeEvent NativeDebugError! {
         going := every
+        self.held = false
         row: self.thread_row(self.trace.thread)
         if row < 0 || !self.let_go(row, how) {
             return Err(NativeDebugError{detail: "the program can't be resumed"})
@@ -1890,6 +2250,14 @@ NativeSession: struct {
             if signal == NATIVE_DEBUG_SIGTRAP {
                 stepping: self.trace.thread
                 self.trace.thread = stop.thread
+                // A placed condition's trap: its breakpoint's hit, or, the
+                // breakpoint gone, nothing to stop for.
+                landed: self.landed() ?? return Err(err)
+                if landed == 1 {
+                    self.trace.thread = stepping
+                    _ := self.let_go(at, mode)
+                    next
+                }
                 code := 0
                 if self.watches.len() > 0 {
                     fired: self.watch_fired() ?? return Err(err)
@@ -1907,6 +2275,13 @@ NativeSession: struct {
                     .Err(failure) -> return Err(failure)
                 }
                 return Ok(NativeEvent{kind: NativeStopKind.Paused, code: code})
+            }
+            // A fault in a placed condition's code goes to its stub, which
+            // leaves the hit to the debugger's check.
+            faulted: signal == 4 || signal == 7 || signal == 8 || signal == 11
+            if faulted && self.divert(stop.thread) {
+                if mine || going -> _ := self.let_go(at, mode)
+                next
             }
             // A stop signal stops the program for its tracer alone.
             self.threads[at].signal = if signal == NATIVE_DEBUG_SIGSTOP -> 0 else -> signal
@@ -1989,17 +2364,24 @@ NativeSession: struct {
                 self.rewind(stop.thread) ?? return Err(err)
                 next
             }
+            faulted: signal == 4 || signal == 7 || signal == 8 || signal == 11
+            if faulted && self.divert(stop.thread) -> next
             self.threads[at].signal = signal
         }
     }
 
-    // Thread `id`, stopped by a trap byte it ran, back on that byte.
+    // Thread `id`, stopped by a trap byte it ran, back on that byte; by a
+    // placed condition's trap, back on its breakpoint's address, to check
+    // the condition again when it runs on.
     rewind: fn(&self, id: Int) NativeDebugError! {
         current: self.trace.thread
         self.trace.thread = id
         registers := x64_trace_registers(self.trace) ?? [Int]{}
-        pc: if registers.len() > 0 -> registers[X64_TRACE_RIP] - 1 else -> 0
-        if registers.len() > 0 && self.has_site(pc) {
+        pc := if registers.len() > 0 -> registers[X64_TRACE_RIP] - 1 else -> 0
+        if registers.len() > 0 && self.placed_trap(pc + 1) == .Val(trap) {
+            pc = self.placed[trap.row].address
+        }
+        if registers.len() > 0 && (self.has_site(pc) || pc + 1 != registers[X64_TRACE_RIP]) {
             registers[X64_TRACE_RIP] = pc
             if !x64_trace_set_registers(self.trace, registers) {
                 self.trace.thread = current
@@ -2064,6 +2446,7 @@ NativeSession: struct {
         x64_trace_close(self.trace)
         self.threads = [NativeThread]{}
         self.sites = [Int:Int]{}
+        self.placed = [NativePlaced]{}
         self.watches = [NativeWatch]{}
     }
 
@@ -2080,7 +2463,7 @@ NativeSession: struct {
                     return Ok(NativeStop{kind: NativeStopKind.Paused, reason: "watchpoint {event.code}", code: 0, frame: Val(native_frames_at(self.image, registers[X64_TRACE_RIP] - 1)[0])})
                 }
                 at: registers[X64_TRACE_RIP] - 1
-                if !self.has_site(at) -> return self.paused("signal SIGTRAP")
+                if !self.trap_at(at) -> return self.paused("signal SIGTRAP")
                 registers[X64_TRACE_RIP] = at
                 if !x64_trace_set_registers(self.trace, registers) {
                     return Err(NativeDebugError{detail: "couldn't set the program's registers"})
@@ -2103,7 +2486,7 @@ NativeSession: struct {
     // returns to `address`, or a breakpoint or its end stops it first.
     run_to_return: fn(&self, address: Int, cfa: Int) -> NativeReturn NativeDebugError! {
         temporary: !self.has_site(address)
-        if temporary && !self.plant(address) {
+        if temporary && !self.trap(address) {
             return Err(NativeDebugError{detail: "couldn't write a breakpoint at {native_debug_hex(address)}"})
         }
         loop {
@@ -2114,7 +2497,7 @@ NativeSession: struct {
             }
             registers := self.registers() ?? return Err(err)
             at: registers[X64_TRACE_RIP] - 1
-            if !self.has_site(at) {
+            if !self.trap_at(at) {
                 if temporary -> self.lift(address)
                 return Ok(NativeReturn.Stopped{stop: self.paused("signal SIGTRAP") ?? return Err(err)})
             }
@@ -2286,7 +2669,7 @@ NativeSession: struct {
             if event.ends_run() -> return self.stopped(event)
             registers := self.registers() ?? return Err(err)
             at: registers[X64_TRACE_RIP] - 1
-            if !self.has_site(at) -> return self.paused("signal SIGTRAP")
+            if !self.trap_at(at) -> return self.paused("signal SIGTRAP")
             registers[X64_TRACE_RIP] = at
             if !x64_trace_set_registers(self.trace, registers) {
                 return Err(NativeDebugError{detail: "couldn't set the program's registers"})
@@ -3071,11 +3454,15 @@ native_debug_hit_breakpoint: fn(stop: NativeStop) -> Int? Never! {
 }
 
 // What setting a breakpoint with `condition` says about where the condition
-// runs ("" for none): the debugger checks it at each hit, so a hit whose
-// condition is false still stops the program for that check.
-native_debug_condition_place: fn(condition: String) -> String Never! {
+// runs ("" for none): in the program, when `refusal` is "", so a hit whose
+// condition is false runs on untouched; else the debugger checks it at each
+// hit, so such a hit still stops the program for that check.
+native_debug_condition_place: fn(condition: String, refusal: String) -> String Never! {
     if condition.trim() == "" -> return ""
-    "The condition can't run in the program: the debugger checks it at each hit, which stops the program each time\n"
+    if refusal == "" {
+        return "The condition runs in the program: a hit where it is false runs on without a stop\n"
+    }
+    "The condition can't run in the program: {refusal}; the debugger checks it at each hit, which stops the program each time\n"
 }
 
 // Bytes a readout may read: the stopped program's memory, when there is a

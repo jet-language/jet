@@ -13,7 +13,7 @@ use {
     jet_driver.[JetDriverCompileMode, JetDriverEvalAsk, JetDriverIceRow, jet_driver_check_failures, jet_driver_entry_root_path]
     jet_eval.[jet_eval_native_add, jet_eval_native_wrapper]
     jet_foundation.[BuildOptions, CompilerThreads, DeepChecks, deep_checks_flags, name_rows_get_text, type_name, type_unqualified_nominals]
-    jet_ir.[IRTypeKind, ir_module_new, ir_pointer_row, ir_x64_compile_module_logged, ir_x64_debug_program]
+    jet_ir.[IRTypeKind, ir_eval_place_refusal, ir_module_new, ir_pointer_row, ir_x64_compile_module_logged, ir_x64_debug_program]
     jet_sema.[SemaEvalProbeAnswer, sema_eval_probe_function, sema_eval_probe_parse]
 }
 
@@ -141,6 +141,7 @@ jet_cli_debug_eval_compile: fn(entry: String, argv: [String], color: Bool, path:
             program := built.program.move()
             built.program = ir_module_new()
             row: name_rows_get_text(program.function_rows, key) ?? return Err(jet_cli_debug_eval_refused("the built program has no function for it"))
+            refusal: ir_eval_place_refusal(program, row)
             params := [Int]{}
             captures := [NativeEvalPart]{}
             loop slot in 0..<program.functions[row].param_count {
@@ -168,7 +169,7 @@ jet_cli_debug_eval_compile: fn(entry: String, argv: [String], color: Bool, path:
                 return Err(jet_cli_debug_eval_refused("the compiler couldn't build it"))
             }
             edit: NativeFixEdit{object: lowered.program.move(), functions: lowered.functions.move(), debug: lowered.debug.move()}
-            Ok(NativeEval{text: text, edit: edit, entry: JET_CLI_DEBUG_EVAL_ENTRY, captures: captures, result: part})
+            Ok(NativeEval{text: text, edit: edit, entry: JET_CLI_DEBUG_EVAL_ENTRY, captures: captures, result: part, refusal: refusal})
         }
     }
 }

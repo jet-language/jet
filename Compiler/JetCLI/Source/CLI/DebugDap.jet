@@ -205,9 +205,10 @@ JetCLIDap: struct {
                 rows.push("{{\"verified\":false,\"line\":{line},\"message\":{foundation_json_quote("No code on {file}:{line}")}}}")
                 next
             }
+            reason := ""
             if spec.condition.trim() != "" || spec.log != "" {
                 if session.make_rule(placed, spec.condition, spec.log, "break {file}:{line}") == {
-                    .Ok(rule) -> { session.set_rule(placed, rule) }
+                    .Ok(rule) -> { reason = session.set_rule(placed, rule) }
                     .Err(refused) -> {
                         session.take_back(placed) ?? return Err(err)
                         rows.push("{{\"verified\":false,\"line\":{line},\"message\":{foundation_json_quote(refused.message)}}}")
@@ -216,7 +217,7 @@ JetCLIDap: struct {
                 }
             }
             numbers.push(placed)
-            place: native_debug_condition_place(spec.condition)
+            place: native_debug_condition_place(spec.condition, reason)
             note: if place == "" -> "" else -> ",\"message\":{foundation_json_quote(place.trim())}"
             rows.push("{{\"id\":{placed},\"verified\":true,\"line\":{line}{note}}}")
         }

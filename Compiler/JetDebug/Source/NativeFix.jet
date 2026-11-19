@@ -16,9 +16,7 @@
 // layout; the refusal names the field), when it changes the entry the
 // program has already run, or when it reaches a runtime routine the image
 // does not hold.
-use {
-    jet_backend.[X64CompiledFunction, X64Data, X64DebugEncoding, X64DebugMember, X64DebugType, X64DebugVariable, X64FunctionDebug, X64FunctionID, X64FunctionSource, X64Jetline, X64JetlineFunction, X64ModuleDebug, X64ObjectModule, X64Reloc, X64RelocTarget, link_debug_addr, link_debug_le, x64_jetline_text]
-}
+use jet_backend.[X64CompiledFunction, X64Data, X64DebugEncoding, X64DebugMember, X64DebugType, X64DebugVariable, X64FunctionDebug, X64FunctionID, X64FunctionSource, X64Jetline, X64JetlineFunction, X64ModuleDebug, X64ObjectModule, X64Reloc, X64RelocTarget, link_debug_addr, link_debug_le, x64_jetline_text]
 
 // What `fix` compiled: the program's module (its data objects, debug types
 // and functions' source facts), its compiled functions with their
@@ -127,7 +125,9 @@ native_fix_symbols: fn(elf: [U8]) -> [String:NativeFixSymbol] Never! {
         table: link_debug_addr(elf, header + 24)
         length: link_debug_addr(elf, header + 32)
         link: link_debug_le(elf, header + 40, 4)
-        if table < 0 || length < 0 || table + length > elf.len() || link < 0 || link >= count -> return symbols
+        if table < 0 || length < 0 || table + length > elf.len() || link < 0 || link >= count {
+            return symbols
+        }
         names: link_debug_addr(elf, headers + link * size + 24)
         loop s in 0..<length.div_euclid(24) {
             at: table + s * 24
@@ -148,7 +148,9 @@ native_fix_running: fn(name: String, symbols: [String:NativeFixSymbol], text: [U
     if name == "" -> return None
     at := fixed.len() - 1
     loop at >= 0 {
-        if fixed[at].name == name -> return Val(NativeFixRunning{address: fixed[at].address, code: fixed[at].code[0..<fixed[at].code.len()]})
+        if fixed[at].name == name {
+            return Val(NativeFixRunning{address: fixed[at].address, code: fixed[at].code[0..<fixed[at].code.len()]})
+        }
         at -= 1
     }
     symbol: symbols.get(name) ?? return None
@@ -191,16 +193,18 @@ native_fix_reached: fn(running: NativeFixRunning, at: Int) -> Int Never! {
 // Record that `target` lives at `address`.
 native_fix_learn: fn(targets: &NativeFixTargets, target: X64RelocTarget, address: Int) Never! {
     key: native_fix_key(target)
-    if targets.clashed.get(key) != None -> return
+    if targets.clashed.get(key) != None {
+        return
+    }
     known: native_fix_known(targets, target)
     if known == .Val(found) {
         if found != address -> targets.clashed[key] = true
         return
     }
     if target == {
-        .Function(id) -> targets.functions[id.value] = address
-        .Data(id) -> targets.data[id.value] = address
-        .Runtime(symbol) -> targets.runtime[symbol] = address
+        .Function(id) -> { targets.functions[id.value] = address }
+        .Data(id) -> { targets.data[id.value] = address }
+        .Runtime(symbol) -> { targets.runtime[symbol] = address }
         .RuntimeData(symbol) -> targets.runtime[symbol] = address
     }
 }
@@ -285,7 +289,9 @@ native_fix_shown: fn(edit: NativeFixEdit, row: Int) -> String Never! {
 // placed. A plan that changes no function means the program already runs
 // the edit; the error's detail says why the edit can't be swapped in.
 native_fix_plan: fn(image: NativeImage, edit: NativeFixEdit, symbols: [String:NativeFixSymbol], text: [U8], text_address: Int, fixed: [NativeFixed]) -> NativeFixPlan NativeDebugError! {
-    if native_fix_layouts(image, edit.object) == .Val(reason) -> return Err(NativeDebugError{detail: reason})
+    if native_fix_layouts(image, edit.object) == .Val(reason) {
+        return Err(NativeDebugError{detail: reason})
+    }
     targets := NativeFixTargets{functions: [Int:Int]{}, data: [Int:Int]{}, runtime: [String:Int]{}, clashed: [String:Bool]{}}
     row_of := [Int:Int]{}
     running := [NativeFixRunning?]{}
@@ -295,7 +301,9 @@ native_fix_plan: fn(image: NativeImage, edit: NativeFixEdit, symbols: [String:Na
         found: native_fix_running(function.name, symbols, text, text_address, fixed)
         alike: if found == .Val(was) -> native_fix_same_bytes(function, was) else -> false
         if alike && found == .Val(was) {
-            loop reloc in function.relocs -> native_fix_learn(targets, reloc.target, native_fix_reached(was, reloc.at))
+            loop reloc in function.relocs {
+                native_fix_learn(targets, reloc.target, native_fix_reached(was, reloc.at))
+            }
         }
         running.push(found)
         same.push(alike)
@@ -323,7 +331,9 @@ native_fix_plan: fn(image: NativeImage, edit: NativeFixEdit, symbols: [String:Na
         }
         if moved -> changed.push(row)
     }
-    if changed.len() == 0 -> return Ok(NativeFixPlan{changed: changed, pieces: [NativeFixPiece]{}, size: 0, targets: targets, placed: [Int:Int]{}, copied: [Int:Int]{}})
+    if changed.len() == 0 {
+        return Ok(NativeFixPlan{changed: changed, pieces: [NativeFixPiece]{}, size: 0, targets: targets, placed: [Int:Int]{}, copied: [Int:Int]{}})
+    }
     // `main` (row 0) runs the entry once; an edit of either can't take
     // effect in a program already past them.
     entry := -1
@@ -335,20 +345,54 @@ native_fix_plan: fn(image: NativeImage, edit: NativeFixEdit, symbols: [String:Na
             return Err(NativeDebugError{detail: "the edit changes `{native_fix_shown(edit, row)}`, the program's start, which has already run"})
         }
     }
-    // The region: each changed function, then each data object they reach
-    // that no unchanged code does, with the objects those reach in turn.
+    native_fix_lay_out(edit, symbols, targets, changed, row_of, loop found in running -> found != None)
+}
+
+// The plan that places, afresh, the function of `edit` named `entry` and
+// every function it reaches by a call, even those the program runs
+// unchanged, at the targets `plan` (the edit's own, native_fix_plan) found:
+// a breakpoint's condition that runs in the program (NativePlace.jet),
+// whose runtime calls the debugger sends elsewhere.
+native_fix_place_all: fn(edit: NativeFixEdit, symbols: [String:NativeFixSymbol], plan: NativeFixPlan, entry: String) -> NativeFixPlan NativeDebugError! {
+    row_of := [Int:Int]{}
+    start := -1
+    loop (row, function) in edit.functions {
+        row_of[function.id.value] = row
+        if function.name == entry -> start = row
+    }
+    if start < 0 -> return Err(NativeDebugError{detail: "the compiled condition has no `{entry}`"})
+    rows := [Int]{}
+    reached := [Int:Bool]{}
+    pending := [Int]{start}
+    loop pending.len() > 0 {
+        row: pending.pop() ?? -1
+        if row < 0 || reached.has_key(row) -> next
+        reached[row] = true
+        rows.push(row)
+        loop reloc in edit.functions[row].relocs {
+            if reloc.target == .Function(id) -> pending.push(row_of.get(id.value) ?? -1)
+        }
+    }
+    native_fix_lay_out(edit, symbols, plan.targets, rows, row_of, loop _ in edit.functions -> false)
+}
+
+// The region that places the functions of `rows`, then each data object
+// they reach that no unchanged code does, with the objects those reach in
+// turn. `running` says which functions' code the program holds, for a call
+// of one `rows` doesn't place.
+native_fix_lay_out: fn(edit: NativeFixEdit, symbols: [String:NativeFixSymbol], targets: NativeFixTargets, rows: [Int], row_of: [Int:Int], running: [Bool]) -> NativeFixPlan NativeDebugError! {
     pieces := [NativeFixPiece]{}
     placed := [Int:Int]{}
     copied := [Int:Int]{}
     offset := 0
-    loop row in changed {
+    loop row in rows {
         offset = (offset + NATIVE_FIX_ALIGN - 1).div_euclid(NATIVE_FIX_ALIGN) * NATIVE_FIX_ALIGN
         pieces.push(NativeFixPiece{function: row, data: -1, offset: offset})
         placed[edit.functions[row].id.value] = row
         offset += edit.functions[row].code.len()
     }
     wanted := [Int]{}
-    loop row in changed {
+    loop row in rows {
         loop reloc in edit.functions[row].relocs {
             if reloc.target == {
                 .Data(id) -> {
@@ -366,7 +410,7 @@ native_fix_plan: fn(image: NativeImage, edit: NativeFixEdit, symbols: [String:Na
                 }
                 .Function(id) -> {
                     callee: row_of.get(id.value) ?? -1
-                    if callee < 0 || (running[callee] == None && placed.get(id.value) == None) {
+                    if callee < 0 || (!running[callee] && placed.get(id.value) == None) {
                         return Err(NativeDebugError{detail: "`{native_fix_shown(edit, row)}` calls a function the edit does not compile"})
                     }
                 }
@@ -390,7 +434,7 @@ native_fix_plan: fn(image: NativeImage, edit: NativeFixEdit, symbols: [String:Na
     }
     // Room for the last word the debugger writes whole.
     size: (offset + 8 + NATIVE_FIX_PAGE - 1).div_euclid(NATIVE_FIX_PAGE) * NATIVE_FIX_PAGE
-    Ok(NativeFixPlan{changed: changed, pieces: pieces, size: size, targets: targets, placed: placed, copied: copied})
+    Ok(NativeFixPlan{changed: rows, pieces: pieces, size: size, targets: targets, placed: placed, copied: copied})
 }
 
 // Where the plan's region, mapped at `base`, has `target`.
