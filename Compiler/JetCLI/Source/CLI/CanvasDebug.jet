@@ -297,8 +297,9 @@ jet_cli_canvas_debug_unavailable: fn(error: NativeDebugError) -> JetCLICanvasDeb
 // build's own report, a recording that can't be replayed its refusal.
 jet_cli_canvas_debug_open: fn(file: String, source_id: String, revision: String, tier: JetCLICanvasDebugTier, serial: Int) -> JetCLICanvasDebugSession JetCLICanvasDebugError! {
     src: read_source_without_symlinks(file) ?? return Err(jet_cli_canvas_debug_error("io", "couldn't read the debug source: {err.message}"))
-    scratch: cli_files.temp_dir("jet-canvas-debug") ?? return Err(jet_cli_canvas_debug_error("io", "couldn't create the Canvas debug build directory: {err}"))
-    dir: scratch.path
+    // The session keeps the directory until it closes (a replay builds and
+    // reruns from it), so it is no TempDir, which would go when this returns.
+    dir: cli_files.tmpdir("jet-canvas-debug") ?? return Err(jet_cli_canvas_debug_error("io", "couldn't create the Canvas debug build directory: {err}"))
     out_dir: cli_files.join(dir, "out")
     built: cli_process.cmd(native_debug_build_argv(cli_sys.executable(), file, out_dir, DeepChecks{})).stdout(.Capture).stderr(.Capture).run() ?? {
         jet_cli_canvas_debug_remove(dir)

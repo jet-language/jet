@@ -576,7 +576,9 @@ debug_panels: fn(jet: String, dir: String, canvas_url: String, original: String)
         return Err(fail_with("the profile must name its trace and draw the spans, zones, waits and io lanes: {short_text(profiled.body, 800)}"))
     }
     // A trace of four log spans, opened by its path: the zones lane, all of
-    // it, then half its window, then reduced to two marks.
+    // it, then a window that ends inside the first span, then reduced to
+    // two marks. The window comes from the first span's own mark, since how
+    // long each span takes depends on the machine's load.
     spans: "{dir}/spans.jet"
     files.write(spans, CANVAS_PANELS_SPANS) ?? return Err(fail_with("cannot write {spans}: {err}"))
     recorded: process.cmd([String]{jet, "perf", "run", spans, "--out", "{dir}/spans.jettrace"}).stdout(.Capture).stderr(.Capture).run() ?? return Err(fail_with("cannot run jet perf run: {err}"))
@@ -588,16 +590,15 @@ debug_panels: fn(jet: String, dir: String, canvas_url: String, original: String)
     if whole.status != 200 || zones.len() != 4 || !zones[0].ends_with("#frame") {
         return Err(fail_with("the opened trace must draw its four log spans in the zones lane: HTTP {whole.status} {short_text(whole.body, 800)}"))
     }
-    low: int(at(whole.tree, "canvas.window.first_ns"))
-    high: int(at(whole.tree, "canvas.window.last_ns"))
-    middle: low + (high - low).div_euclid(2)
-    zoomed: canvas_post(profile_url, token, profile_request(revision, Val("{dir}/spans.jettrace"), Val(low), Val(middle), 64))
-    if zoomed.status != 200 || int(at(zoomed.tree, "canvas.window.from_ns")) != low || int(at(zoomed.tree, "canvas.window.to_ns")) != middle {
-        return Err(fail_with("a zoom must answer the window {low}..{middle}: HTTP {zoomed.status} {short_text(zoomed.body, 600)}"))
+    low: int(at(whole.tree, "canvas.lanes.1.marks.0.start_ns"))
+    inside: low + (int(at(whole.tree, "canvas.lanes.1.marks.0.end_ns")) - low).div_euclid(2)
+    zoomed: canvas_post(profile_url, token, profile_request(revision, Val("{dir}/spans.jettrace"), Val(low), Val(inside), 64))
+    if zoomed.status != 200 || int(at(zoomed.tree, "canvas.window.from_ns")) != low || int(at(zoomed.tree, "canvas.window.to_ns")) != inside {
+        return Err(fail_with("a zoom must answer the window {low}..{inside}: HTTP {zoomed.status} {short_text(zoomed.body, 600)}"))
     }
     shown_zones: zone_labels(zoomed.tree).len()
     if shown_zones < 1 || shown_zones >= 4 {
-        return Err(fail_with("half the window must show some but not all four spans, not {shown_zones}: {short_text(zoomed.body, 800)}"))
+        return Err(fail_with("a window inside the first span must show some but not all four spans, not {shown_zones}: {short_text(zoomed.body, 800)}"))
     }
     reduced: canvas_post(profile_url, token, profile_request(revision, Val("{dir}/spans.jettrace"), None, None, 2))
     lane: at(reduced.tree, "canvas.lanes.1")
