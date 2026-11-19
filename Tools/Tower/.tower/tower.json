@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112413,
+    "rev": 112418,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -43548,6 +43548,15 @@
           "verifiedBy": null,
           "evidence": "Holds on dev 72f6b3bb9c: on batch compiler p275, `jet test Compiler --profile cases --filter CLICommands/build_trace` passes 2 of 2, build_trace_phases and build_trace_file_is_chrome_trace (proof row sp-trace in cycle p275).",
           "at": "2026-11-17T20:34:13.580Z"
+        },
+        {
+          "n": 3,
+          "text": "Root of c1: with the store off, the hermetic executor applies the store s byte limits (BUILD_MAX_ACTION_FILE_BYTES 512 MiB, BUILD_MAX_ACTION_TOTAL_BYTES 1 GiB, Jetpack/Store/Source/Build/Cache.jet) to plain work: build_move_output refuses an output over 512 MiB before renaming it, although it reads no byte, and build_snapshot_declared_inputs and build_stage_inputs read every input whole into memory to stage a copy. The compiler build s core-embed output jet is 528,605,260 B on p325, 8 MB under the limit; the scrubbed build fails there with E3505 \"cache entry exceeds its byte limit\". Fix: the limits bound only bytes held for the store when it is on; publication renames (the cross-device fallback streams the copy); inputs are hashed by streaming and staged by link or read-only bind, not held in memory; a refusal names the action, the file and its size. Proof: an executor test publishing and staging a sparse file over 1 GiB with the store off, plus the c1 scrubbed build, with build peak RSS before and after.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-19T17:23:58.058Z"
         }
       ],
       "refs": [],
@@ -43561,9 +43570,9 @@
       "parentId": "c0fqk5ka",
       "needsAcceptance": false,
       "created": "2026-10-18T18:18:42.399Z",
-      "updated": "2026-11-17T20:34:13.580Z",
+      "updated": "2026-11-19T17:23:58.058Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 3
     },
     {
       "id": "c0nux77t",
@@ -75311,6 +75320,11 @@
         {
           "at": "2026-11-19",
           "by": "Main",
+          "text": "Second effect of deleting the Lander lane: the landing census waits on its capfit.sh slot helper, so p326 census stalled 74 minutes (11:05-12:19). Rewrote the helper with the same interface (one live reservation, scratch disk under 75%, available memory covers the request, dead owners dropped). p326 then failed its census on two Lens SUBs (Core Compiler.events seed skew, a new closed list, copy ceilings), held; the rest go into the next cycle."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
           "text": "Main 11:00 cleanup incident: deleting dead lanes also removed the Lander lane, which still held the landing cycle s devshell.path and musl.env and the suite s published jetpack. p325 s suite lost its jetpack mid-run (69 false new failures in Pkg, Jetpack, EnvDevTrust, InlineDeps) and p326 s first census ran with no git/node/python3 and landed nothing. Restored: devshell.path from `nix develop` of the repository flake, musl.env from the flake s JET_RUST_MUSL_* plus JET_PACK_MUSL_LIB, and jetpack-current from the a0.0.45 release jetpack (rows Pkg/cli_vendor_dir_flag_relocates and EnvDevTrust/dev_no_entry_is_e1254 PASS on p325 with it). The loop restarted from p325. Finding: the hosted jetpack does not build from the p325 tree (Jetpack/Bootstrap/Check.jet --hosted: 847 errors), so jetpack-current cannot be refreshed from dev until that is fixed."
         },
         {
@@ -76231,7 +76245,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-19T16:05:53.305Z",
+      "updated": "2026-11-19T17:21:44.230Z",
       "updatedBy": "Main",
       "criteriaLastN": 68
     },
@@ -88036,6 +88050,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-18T02:47:17.279Z"
+        },
+        {
+          "n": 12,
+          "text": "A field of borrowed storage moved into a call (for example `slot.held.move()` or permit.value passed to a && parameter) leaves the moved value unshared: today it stays shared with its source until the source field is written, so every write in the callee deep-copies it (copy-on-write). Found by Lens on #6841 c66: the debugger s held program deep-copied on every print (25 ms per print, 1.8 ms once the slot is emptied before the call), and JetDriver Pipeline jet_driver_held_eval_lend(held.probe.program....move()) likely pays the same. Repro $JET_SCRATCH_ROOT/lanes/Lens/c66held/mv/main.jet (jet run -A at -O0 and -O2): 5.2-5.9 ms per step on 400k strings against 0 us for a local s field. Proof: a case where a moved borrowed field written in the callee costs the same as a moved local field on O0, O1 and O2, with no deep copy (an allocation count of zero per step).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-19T16:53:57.264Z"
         }
       ],
       "refs": [],
@@ -88047,9 +88070,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:30:04.307Z",
-      "updated": "2026-11-18T02:47:17.279Z",
+      "updated": "2026-11-19T16:53:57.264Z",
       "updatedBy": "Main",
-      "criteriaLastN": 11
+      "criteriaLastN": 12
     },
     {
       "id": "c0rw1zt7",
@@ -93021,6 +93044,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T13:18:41.527Z"
+        },
+        {
+          "n": 8,
+          "text": "`loop line in text.lines()` iterates views of the text with the same semantics as today (CR stripped, no trailing empty line) and builds no owned [String]; the #6897 c2 L2511 sweep found about 45 such sites in loops outside Compiler. Proof: a case where a nested lines() loop allocates no per-line String on O0, O1 and O2, with the same output as today.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-19T17:22:52.192Z"
+        },
+        {
+          "n": 9,
+          "text": "A view (a trim result or a split piece) passed to a `String` parameter that the callee only reads, to map.get, or as the receiver of partition, split or split_once is lent without materializing an owned copy; the #6897 c2 L2511 sweep found about 90 such sites. Proof: a case where those calls in a loop allocate nothing per turn on O0, O1 and O2, and L2511 no longer reports them.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-19T17:22:56.019Z"
         }
       ],
       "refs": [],
@@ -93032,9 +93073,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:23:48.351Z",
-      "updated": "2026-11-17T01:52:31.045Z",
+      "updated": "2026-11-19T17:22:56.019Z",
       "updatedBy": "Main",
-      "criteriaLastN": 7
+      "criteriaLastN": 9
     },
     {
       "id": "c0vucs0t",
@@ -160993,6 +161034,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-19T17:23:58.058Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hnphts",
+      "note": "#3 Root of c1: with the store off, the hermetic executor applie"
+    },
+    {
+      "at": "2026-11-19T17:22:56.019Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0gwtnue",
+      "note": "9 criteria, soft limit 6: compiler-owned hidden copies found by the #6897 c2 L2511 sweep"
+    },
+    {
+      "at": "2026-11-19T17:22:56.019Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0gwtnue",
+      "note": "#9 A view (a trim result or a split piece) passed to a `String`"
+    },
+    {
+      "at": "2026-11-19T17:22:52.192Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0gwtnue",
+      "note": "8 criteria, soft limit 6: compiler-owned hidden copies found by the #6897 c2 L2511 sweep"
+    },
+    {
+      "at": "2026-11-19T17:22:52.192Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0gwtnue",
+      "note": "#8 `loop line in text.lines()` iterates views of the text with "
+    },
+    {
+      "at": "2026-11-19T17:21:44.230Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T16:53:57.264Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0d4kf8m",
+      "note": "12 criteria, soft limit 6: a found instance of this card s defect"
+    },
+    {
+      "at": "2026-11-19T16:53:57.264Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0d4kf8m",
+      "note": "#12 A field of borrowed storage moved into a call (for example `"
+    },
     {
       "at": "2026-11-19T16:10:58.510Z",
       "by": "Main",
