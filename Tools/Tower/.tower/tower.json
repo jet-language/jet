@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112453,
+    "rev": 112457,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -40335,11 +40335,11 @@
         {
           "n": 4,
           "text": "A #Todo stub from keep-going sema never reaches a binary unrecorded: each stub is a census row, and a build with any stub does not report BUILT. Proof: `jet test Compiler --profile cases --filter CLICommands/keep_going_census_records_every_trap` and `--filter keep_going_stub_never_reports_built`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:56:09.262Z"
+          "evidence": "dev 7ae42458e4 (Main-4914-c4-stub-never-built), p332 batch compiler: `jet test Compiler --profile cases --filter CLICommands/keep_going_` n=3 bad=0 (keep_going_census_records_every_trap, keep_going_stub_never_reports_built, keep_going_trap_keys_failed_function_references). A JET_KEEP_GOING build with trapped functions exits non-zero, records each trap as a census row, never prints the built program summary and writes no executable.",
+          "at": "2026-11-19T20:55:54.257Z"
         },
         {
           "n": 5,
@@ -40461,7 +40461,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-09T18:05:19.437Z",
-      "updated": "2026-11-19T19:49:27.318Z",
+      "updated": "2026-11-19T20:55:54.257Z",
       "updatedBy": "Main",
       "criteriaLastN": 15
     },
@@ -74858,11 +74858,11 @@
         {
           "n": 47,
           "text": "Zones, frame marks and plots: An effect-free zone, frame-mark and plot API and a `#Profiled` marker write one per-thread ring that `core.log.span` also writes, and line up with samples on the `jet perf view` timeline. Each zone site is a patchable no-op until `jet perf run` or `jet perf attach` turns zones on, at a cost c6 measures; a build setting strips the sites. Serves c3 and c6. Proof: `jet test Compiler --profile cases --filter Perf/zones_frames_plots_share_the_timeline`; c3; c6. (Docs/Audits/2026-11-18-best-debugger-profiler.md R5)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T14:10:10.457Z",
+          "evidence": "dev af40433427 (Lens-6841-c47b-fix) on 8ba69b5418 (c47b), p332 batch compiler: Perf/zones_frames_plots_share_the_timeline PASS (suite p330 and p332, c39 pass on p330); Perf/zone_sites_are_patched_jumps, zone_sites_add_only_their_spans_to_hot_code, zones_strip_setting_leaves_no_site (the build setting strips sites), attach_turns_zones_on, profiled_marker_zones_marked_functions all PASS; JetCLI InspectBuild inspect_build PASS (proofs p332). c3 and c6 met (c6: profile-overhead pair pass, zones off even at O1 and O2).",
+          "at": "2026-11-19T20:55:57.106Z",
           "unblockedFrom": "D-PERF-ZONES1"
         },
         {
@@ -75118,7 +75118,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-19T20:52:40.042Z",
+      "updated": "2026-11-19T20:55:57.106Z",
       "updatedBy": "Main",
       "criteriaLastN": 70
     },
@@ -83982,11 +83982,11 @@
         {
           "n": 2,
           "text": "The latest request receives the correct fresh verdict, diagnostics already published for unrelated modules stay correct, and nothing is reused across server restarts (no compile cache); no new scheduling policy, worker count or cancellation semantics is selected outside D-LSP1. Proof: `jet test Compiler --profile cases --filter LSP/lsp_overlapping_edits_latest_checked_revision_wins` and `--filter lsp/lsp_sibling_import_edit_never_publishes_stale_verdict` pass (both PASS on dev 6f82527b17 with gate-p141), plus a restart step.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:11:55.862Z"
+          "evidence": "dev bff922ad90 (Main-6903-c2-restart-step), p332 batch compiler: LSP/lsp_overlapping_edits_latest_checked_revision_wins and LSP/lsp_sibling_import_edit_never_publishes_stale_verdict both n=1 bad=0. The restart step starts a second `jet self lsp`, reopens the same URI with new text and gets symbols naming only that text (marker_restart, never the first server last revision marker_new), so nothing is reused across a restart.",
+          "at": "2026-11-19T20:55:55.196Z"
         },
         {
           "n": 3,
@@ -84104,7 +84104,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:55:52.158Z",
-      "updated": "2026-11-17T01:49:32.906Z",
+      "updated": "2026-11-19T20:55:55.196Z",
       "updatedBy": "Main",
       "criteriaLastN": 13
     },
@@ -84736,11 +84736,11 @@
         {
           "n": 8,
           "text": "A rejected unsupported continuation leaves the live session and paused state unchanged, and the next valid continuation keeps the same session ID; source-revision and tier mismatches are still refused. Proof: `jet test Compiler --profile cases --filter Debug/canvas_debug_stop_requires_matching_source_revision_and_tier` and `--filter debug/canvas_debug_session_replays_one_source_bound_session`. (was #6730 c20)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:12:34.512Z"
+          "evidence": "dev 3c3c25b3ac (Main-6909-c8-same-session), p332 batch compiler: Debug/canvas_debug_stop_requires_matching_source_revision_and_tier and Debug/canvas_debug_session_replays_one_source_bound_session both n=1 bad=0. The case refuses an unsupported continuation, then the next valid continuation answers with the captured session id ({cap:session}); source-revision and tier mismatches stay refused.",
+          "at": "2026-11-19T20:55:56.158Z"
         }
       ],
       "refs": [],
@@ -84751,7 +84751,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:03:19.063Z",
-      "updated": "2026-11-17T01:49:42.203Z",
+      "updated": "2026-11-19T20:55:56.158Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -159053,6 +159053,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-19T20:55:57.106Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#47"
+    },
+    {
+      "at": "2026-11-19T20:55:56.158Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0xbfhbt",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-19T20:55:55.196Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0mbiq9g",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-19T20:55:54.257Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08i9ox6",
+      "note": "#4"
+    },
     {
       "at": "2026-11-19T20:52:40.042Z",
       "by": "Main",
