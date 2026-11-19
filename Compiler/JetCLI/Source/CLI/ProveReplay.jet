@@ -1151,6 +1151,20 @@ jet_cli_replay_record_finish: fn(record: JetCLIReplayRecord, status: Int, sync: 
     Ok(path)
 }
 
+// Writes the recording of a program's run that ended with the wait status
+// `status`, whose runtime wrote `sync`, its sync-order log, at its exit
+// (JetRuntime RecordReplay.jet), with `args`, the program arguments it ran
+// with: `jet run --record` and `jet debug --record` both. A run that wrote
+// no log is refused. Returns its path.
+jet_cli_replay_record_run: fn(record: JetCLIReplayRecord, status: Int, sync: [U8], args: [String]) -> String JetCLIProveRefusal! {
+    signal: status & 0x7f
+    code: if signal == 0 -> (status >> 8) & 0xff else -> 128 + signal
+    if sync.len() == 0 {
+        return Err(jet_cli_replay_unfinalized("the program ended (status {code}) without writing its sync-order log"))
+    }
+    jet_cli_replay_record_finish(record, code, sync, args)
+}
+
 jet_cli_replay_record_index_failed: fn(why: String) -> JetCLIProveRefusal Never! {
     jet_cli_replay_refusal("E2105", "record index update failed", why, "make the project's `.jet/records` directory writable, then record again")
 }

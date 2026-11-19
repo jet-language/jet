@@ -994,6 +994,21 @@ A NAME that isn't one, a recording that isn't there, a recording with no
 sync-order log (a `jet test --record` one) and an image that links no
 observation start are refused before anything runs.
 
+`jet debug --record=<name> <file.jet>` makes the same recording under the
+debugger: the program runs behind the console (or `--dap`) with
+`JET_RECORD` naming a scratch file, as `jet run --record=<name>` runs it,
+and once it has ended jet publishes `.jet/replays/<name>.jetproof-replay`
+with the arguments it ran with and says so on stderr. The recording holds
+the run as it went under the debugger (a stop may change which task gets a
+lock first, and the log keeps the order that happened; `print` runs in a
+fork of the program, which records nothing), so `jet debug
+--replay=<name>` replays it as it replays a `jet run` one. The NAME is
+checked before the build, as `jet run` checks it; a built image is refused,
+since the recording binds the source it was built from; and a session that
+ends the program early (`quit`, an editor's disconnect) publishes nothing.
+Tests/Cases/Debug/record_under_debug_then_replay_why.case is the worked
+example.
+
 A replay can go back. `reverse-step` (`rs`) goes to the line that ran
 before this stop, in any frame; `reverse-next` (`rn`) to the line before
 in this frame or a caller, over the calls it made; `reverse-finish` (`rf`)

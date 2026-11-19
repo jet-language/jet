@@ -2892,7 +2892,7 @@ jet_cli_settled_json: fn(raw: [String]) -[FS, Env]> Bool Never! {
 // `--json`, typed or set (jet_cli_settled_json), a refusal is the `cli`
 // status envelope on stdout. `discovery` is the command's discovery cache,
 // which the plan's pinned toolchain check fills (jet_cli_pinned_toolchain).
-jet_cli_front: fn(raw: [String], discovery: &WorkspaceDeclarationCache) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> JetCLIPlan Never! {
+jet_cli_front: fn(raw: [String], discovery: &WorkspaceDeclarationCache) -[FS, Env, Time, Exec, IO, Rand, FFI.C, FFI.Asm, Net]> JetCLIPlan Never! {
     plan: jet_cli_plan_with(raw, discovery)
     if plan == {
         .Refused(report, _, exit_code, notice) -> {
@@ -2931,12 +2931,12 @@ jet_cli_bare: fn(color: Bool, json: Bool) -[FS, Env, IO, Time.Wait]> JetCLIPlan 
 }
 
 // The plan of `raw` (jet_cli_front) with a discovery cache of its own.
-jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> JetCLIPlan Never! {
+jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, Rand, FFI.C, FFI.Asm, Net]> JetCLIPlan Never! {
     discovery := WorkspaceDeclarationCache.new()
     jet_cli_plan_with(raw, discovery)
 }
 
-jet_cli_plan_with: fn(raw: [String], discovery: &WorkspaceDeclarationCache) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> JetCLIPlan Never! {
+jet_cli_plan_with: fn(raw: [String], discovery: &WorkspaceDeclarationCache) -[FS, Env, Time, Exec, IO, Rand, FFI.C, FFI.Asm, Net]> JetCLIPlan Never! {
     // The compiler verbs own every raw argument, before Jet's output/flag
     // parsing; the `jet-cc`/`jet-cxx`/`jet-c++` aliases arrive here as these
     // verbs (Host.jet `jet_cli_alias_args`).

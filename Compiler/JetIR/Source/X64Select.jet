@@ -1926,16 +1926,19 @@ ir_x64_zone_stub: fn(e: &IRX64Emitter, start: Int, end: Int) Never! {
     e.stubs.push(IRX64Stub{start: start, end: end, site: site, resume: e.code.bytes.len(), open: e.open, heads: e.heads})
 }
 
-// Lays out each zone site's stub (ir_x64_zone_stub) after the epilogue, in
-// the sites' order: its site's `jmp` lands at its start, its instructions
-// run as the hot path would have run them, with the open constructs of
-// the site (every one already laid out) and the zone sites among them
-// plain calls (IRX64Emitter.sunk_site), and a jump goes back past the site.
-// Nothing before a stub's first instruction left a slow path for its stop
-// points (ir_x64_zone_holds). A stop edge among them is laid out with the
-// other edges (ir_x64_pads) and resumes in the stub.
-ir_x64_zone_stubs: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64FunctionTables, lines: &[X64LineRow], poll: Int, trap: Int, turn: Int) Never! {
-    loop stub in e.stubs {
+// Lays out each zone site's stub (ir_x64_zone_stub) from the `from`th on,
+// after the epilogue, in the sites' order: its site's `jmp` lands at its
+// start, its instructions run as the hot path would have run them, with
+// the open constructs of the site (every one already laid out) and the
+// zone sites among them plain calls (IRX64Emitter.sunk_site), and a jump
+// goes back past the site. Nothing before a stub's first instruction left
+// a slow path for its stop points (ir_x64_zone_holds). A stop edge among
+// them is laid out with the other edges (ir_x64_pads) and resumes in the
+// stub. A site in a stop edge (a marked function's close) gets its stub
+// after the edges: one zone call, which has no stop edge of its own.
+ir_x64_zone_stubs: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64FunctionTables, lines: &[X64LineRow], poll: Int, trap: Int, turn: Int, from: Int) Never! {
+    loop (nth, stub) in e.stubs {
+        if nth < from -> next
         ir_x64_land(e, stub.site)
         e.open = stub.open
         e.heads = stub.heads
@@ -5718,7 +5721,8 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     x64_pop(e.code, X64_RBP)
     ret: e.code.bytes.len()
     x64_ret(e.code)
-    ir_x64_zone_stubs(e, m, f, al, tables, lines, poll, trap, turn)
+    ir_x64_zone_stubs(e, m, f, al, tables, lines, poll, trap, turn, 0)
+    body_stubs: e.stubs.len()
     // The stop exit: the epilogue with edx 1 (a stop edge was taken), for
     // the stop edges and the slow paths that published a stop. A slow path
     // may come with stack arguments still pushed, so it always resets rsp.
@@ -5742,6 +5746,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     }
     body_returns: e.returns.len()
     ir_x64_pads(e, m, f, al, tables, exit, lines)
+    ir_x64_zone_stubs(e, m, f, al, tables, lines, poll, trap, turn, body_stubs)
     loop (nth, site) in e.returns {
         ir_x64_patch(e, site, if nth < body_returns -> epilogue else -> exit)
     }
@@ -7465,6 +7470,52 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
             assert_eq(called, !proven)
             if proven -> assert_eq(widening, -1) else -> assert(widening >= 0 && widening < skip)
         }
+    }
+}
+
+// A marked function's zone closes on its stop edge too. In a module an
+// image links, that close is a listed site like the body's, and its stub,
+// laid out after the edges, ends in a jump back past it, so the image's
+// site spans hold every site's stub.
+#Test("A zone site on a stop edge gets its stub like a site of the body") {
+    m := ir_module_new()
+    m.zone_table = true
+    int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    text: ir_type_row(m, Type.String) ?? panic("no String row")
+    poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
+    f := ir_function_new("marked", "test:zone.jet.marked", "", "zone.jet", 1)
+    name: ir_slot(f, text, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.ConstText, name, ir_intern_text(m, "marked"), -1, -1, 2)
+    began: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+    none: ir_args(f, [Int]{})
+    _ := ir_emit(f, IROp.CallRuntime, began, ir_intern_name(m, "jet_perf_zone_open"), none, 0, 2)
+    stopped: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.Call, stopped, poll, none, 0, 3)
+    _ := ir_open_if(f, stopped, 3)
+    edge: ir_args(f, [Int]{began, name})
+    _ := ir_emit(f, IROp.CallRuntime, -1, ir_intern_name(m, "jet_perf_zone_close"), edge, 2, 3)
+    _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 3)
+    ir_end(f, 3)
+    body: ir_args(f, [Int]{began, name})
+    _ := ir_emit(f, IROp.CallRuntime, -1, ir_intern_name(m, "jet_perf_zone_close"), body, 2, 4)
+    _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 5)
+    m.functions.push(f)
+    compiled: ir_x64_compile_function(m, ir_x64_tables(m), m.functions.len() - 1)
+    assert(compiled.errors.is_empty())
+    code: compiled.function.code
+    // The open, the edge's close and the body's close.
+    assert_eq(compiled.function.zones.len(), 3)
+    assert_eq(compiled.function.zone_ends.len(), 3)
+    loop (nth, site) in compiled.function.zones {
+        assert(code[site] == 0xa9)
+        stub: site + 5 + ir_x64_rel32_at(code, site + 1)
+        ends: compiled.function.zone_ends[nth]
+        assert(ends > stub)
+        byte: Int{code[ends - 1]}
+        near: code[ends - 2] == 0xeb && ends + (if byte >= 128 -> byte - 256 else -> byte) == site + 5
+        far: code[ends - 5] == 0xe9 && ends + ir_x64_rel32_at(code, ends - 4) == site + 5
+        assert(near || far, "zone site {nth}'s stub ends in a jump back past it")
     }
 }
 

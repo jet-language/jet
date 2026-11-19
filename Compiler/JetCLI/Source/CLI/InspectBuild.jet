@@ -16,6 +16,7 @@ use {
         JetDriverVerbOutput,
         jet_driver_query_build_plan,
         jet_driver_entry_package_has_build,
+        jet_driver_entry_package_profiled,
         jet_driver_present_diagnostics,
         jet_driver_build_plan_json,
         jet_driver_build_explanation,
@@ -720,14 +721,18 @@ jet_cli_root_package_facts: fn(root: JetDriverAuthorizedSourceRoot) -> PackageFa
 }
 
 // The request a compile of `owned_request` folds settings from. When its entry
-// package has a `build: fn`, that build is evaluated first: under
+// package has a `build: fn` (jet_driver_entry_package_has_build), or the
+// program marks a function `#Perf.Profiled`
+// (jet_driver_entry_package_profiled), that build is evaluated first: under
 // `load_generated` the modules it generates load beside the sources, and when
 // the package declares settings the values it contributes are recorded
 // (jet_cli_record_build_contributions), so the compile reads the rows of this
-// evaluation. A `jet build` compile has already evaluated the build and
-// carries what it generated (Host.jet jet_cli_compile_target), so it passes
-// `load_generated` false and, like any compile that already carries generated
-// modules, is evaluated again only for its settings.
+// evaluation. A `jet build` compile of a package with a `build: fn` has
+// already evaluated it and carries what it generated (Host.jet
+// jet_cli_compile_target), so it passes `load_generated` false and, like any
+// compile that already carries generated modules, is evaluated again only
+// for its settings; a `jet build` of a `#Perf.Profiled` program has run no
+// build, so its handler runs here.
 // `refusal` is set when the build or the lock write failed.
 JetCLIContributedRequest: struct {
     request: JetDriverCompileRequest,
@@ -736,11 +741,12 @@ JetCLIContributedRequest: struct {
 
 jet_cli_contributed_request: fn(owned_request: &&JetDriverCompileRequest, load_generated: Bool, color: Bool) -> JetCLIContributedRequest {
     request := owned_request.move()
-    if !jet_driver_entry_package_has_build(request) {
+    declared: jet_driver_entry_package_has_build(request)
+    if !declared && !jet_driver_entry_package_profiled(request) {
         return {request: request.move(), refusal: None}
     }
     settings: jet_cli_settings_package(request.authorized_sources)
-    if settings == None && (!load_generated || request.generated_modules.len() > 0) {
+    if settings == None && ((!load_generated && declared) || request.generated_modules.len() > 0) {
         return {request: request.move(), refusal: None}
     }
     scope := JetDriverBuildQueryScope{next_session_id: 1}

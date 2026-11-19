@@ -324,7 +324,7 @@ jet_cli_canvas_debug_open: fn(file: String, source_id: String, revision: String,
             .Err(refused) -> { refusal = Val(refused) }
         }
         if refusal == None && !live.replay_start {
-            refusal = Val(jet_cli_debug_replay_unstarted(image))
+            refusal = Val(jet_cli_debug_unstarted(image, "replay its recording"))
         }
         if refusal == .Val(refused) {
             live.close()
@@ -535,7 +535,7 @@ jet_cli_canvas_debug_payload: fn(debugs: &JetCLICanvasDebugSessions, state: Shar
 jet_cli_canvas_debug_tier_name: fn(session: JetCLICanvasDebugSession) -> String Never! {
     if {
         session.dir == "" -> JET_CLI_CANVAS_DEBUG_DUMP
-        session.live.env != None -> JET_CLI_CANVAS_DEBUG_RECORDED
+        session.live.replaying() -> JET_CLI_CANVAS_DEBUG_RECORDED
         else -> JET_CLI_CANVAS_DEBUG_TIER
     }
 }
