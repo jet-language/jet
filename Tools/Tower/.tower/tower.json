@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112470,
+    "rev": 112473,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -85184,7 +85184,7 @@
       "track": "epoch",
       "epoch": "e20",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -85235,11 +85235,11 @@
         {
           "n": 3,
           "text": "Reverse and forward navigation over a recording are watch-aware: `back` and `continue` with a watch set stop at the previous or next event where the watched value changes (found by re-execution, c4), and changing a live watch refreshes its baseline at the current event. The test-only DebugHistory model (JetDebug/Source/Debug/History.jet) is removed with its tests, so one mechanism serves replay navigation. Proof: `jet test Compiler --profile cases --filter Debug/replay_watch_` on the native and DAP routes, and `git grep -n DebugHistory -- Compiler` prints nothing.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-19T21:52:00.322Z",
+          "evidence": "p338 batch compiler (dev 20fecac525): Debug/replay_watch_back_goes_to_the_last_watch_stop PASS, Debug/replay_ 18/0 (reverse and refusal rows included). `git grep -n DebugHistory -- Compiler` on 20fecac525 prints nothing: the test-only model is removed.",
+          "at": "2026-11-19T23:57:24.646Z",
           "proof": {
             "profile": "cases",
             "filter": "Debug/recorded_history_watch_navigation"
@@ -85248,11 +85248,11 @@
         {
           "n": 4,
           "text": "Replay navigation follows D-TIMETRAVEL2=B: `jump N` re-executes the recording from the start (or from the nearest checkpoint) with its recorded values and stops at event N, and `back K` from event E is `jump E-K`. Repeated jumps to one event give byte-identical locals on the native and DAP routes, and an index of the recording s events names where each re-execution stops. Proof: `jet test Compiler --profile cases --filter Debug/replay_` passes on the native and DAP routes, including a case that jumps to one event three times and compares the locals.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-19T21:51:59.281Z",
+          "evidence": "dev 33cc7b35f2 (history jump) + 92e1d73822 (case count), p338 batch compiler (dev 20fecac525): Debug/replay_ n=18 bad=0. replay_jump_goes_to_an_event_and_back_again jumps to event 1 three times and the three stops are byte-identical, locals included (tally address 0x7ffff7ef1f18 each time). replay_jump_over_dap PASS, the same on DAP.",
+          "at": "2026-11-19T23:57:23.225Z",
           "proof": {
             "profile": "cases",
             "filter": "Debug/replay_uses_indexed_events"
@@ -85356,9 +85356,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:09:16.617Z",
-      "updated": "2026-11-19T23:29:47.183Z",
+      "updated": "2026-11-19T23:57:31.184Z",
       "updatedBy": "Main",
-      "criteriaLastN": 13
+      "criteriaLastN": 13,
+      "completedAt": "2026-11-19T23:57:31.184Z"
     },
     {
       "id": "c09hk13a",
@@ -158295,6 +158296,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-19T23:57:31.184Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06lmp17",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-19T23:57:24.646Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06lmp17",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-19T23:57:23.226Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06lmp17",
+      "note": "#4"
+    },
     {
       "at": "2026-11-19T23:54:48.254Z",
       "by": "Main",
