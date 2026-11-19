@@ -452,10 +452,12 @@ NativeSession: struct {
     // What compiles the expressions `print`, `watch`, conditions and
     // logpoints evaluate (NativeEval.jet); None evaluates nothing. Each
     // compiled expression is kept by its source line and text, and the
-    // image's code facts placing them are read once.
+    // image's code facts placing them are read once, from the session's
+    // `evaluate_with` on, on a task of their own (`eval_read`).
     evaluator: NativeEvaluator?{None},
     evals: [String:Shared<NativeEval>]{[String:Shared<NativeEval>]{}},
     eval_image: Shared<NativeEvalImage>?{None},
+    eval_read: NativeEvalRead?{None},
     // A `syscall` instruction of the image's code, which forks and code
     // mappings run (syscall_site); 0 until the first needs one.
     syscall: Int{0},
@@ -736,9 +738,25 @@ NativeSession: struct {
         self.breakpoints.sort_by(fn(left: NativeBreakpoint, right: NativeBreakpoint) { left.number <=> right.number })
     }
 
-    // Compile the expressions of the session with `evaluator`.
+    // Compile the expressions of the session with `evaluator`, and start
+    // reading the image's code facts they are placed against (read_facts).
     evaluate_with: fn(&self, evaluator: &&NativeEvaluator) Never! {
         self.evaluator = Val(evaluator.move())
+        self.read_facts()
+    }
+
+    // Starts reading the code facts of the session's image on a task of
+    // their own (native_eval_facts_read), in place of any it has, while the
+    // program runs to its first stop, so the first evaluation doesn't read
+    // them (eval_facts).
+    read_facts: fn(&self) Never! {
+        cell: Shared{NativeEvalFacts{}}
+        done: Condition.new()
+        self.eval_image = None
+        self.eval_read = Val(NativeEvalRead{cell: cell, done: done})
+        binary: "{self.binary}"
+        reading: task native_eval_facts_read(cell, done, binary)
+        reading.detach()
     }
 
     // The rule of breakpoint `number`, listed by `breaks` as `shown`:
@@ -1001,15 +1019,18 @@ NativeSession: struct {
         Err(native_eval_refused("the expression has no plan"))
     }
 
-    // The image's code facts evaluations place code against, read at the
-    // first.
+    // The image's code facts evaluations place code against: the read
+    // `read_facts` started, once it is done, else read now.
     eval_facts: fn(&self) -> Shared<NativeEvalImage> NativeEvalRefused! {
         if self.eval_image == .Val(found) -> return Ok(found)
+        if self.eval_read == .Val(read) {
+            if native_eval_facts_wait(read) == .Val(cell) {
+                self.eval_image = Val(cell)
+                return Ok(cell)
+            }
+        }
         elf: native_files.read_bytes(self.binary) ?? return Err(native_eval_refused("couldn't read the program `{self.binary}`: {err}"))
-        symbols: native_fix_symbols(elf)
-        code: native_elf_code(elf)
-        owned: native_eval_owned(symbols, code)
-        cell: Shared{NativeEvalImage{symbols: symbols, code: code, owned: owned}}
+        cell: native_eval_image_of(elf)
         self.eval_image = Val(cell)
         Ok(cell)
     }
@@ -1661,7 +1682,9 @@ NativeSession: struct {
         self.watches = [NativeWatch]{}
         self.evals = [String:Shared<NativeEval>]{}
         self.eval_image = None
+        self.eval_read = None
         self.syscall = 0
+        if self.evaluator != None -> self.read_facts()
         Ok()
     }
 
@@ -5340,6 +5363,44 @@ native_debug_build_argv: fn(jet: String, entry: String, out_dir: String, deep_ch
 // The image `native_debug_build_argv` writes: the entry's stem in `out_dir`.
 native_debug_image: fn(entry: String, out_dir: String) -> String Never! {
     native_files.join(out_dir, native_files.basename(entry).before(".jet"))
+}
+
+// The code facts of the image `binary` (NativeEvalImage), read on a task of
+// their own into `cell` (native_eval_image_fill), which `done` then wakes
+// its waiters for (native_eval_facts_wait). A read that stops still ends
+// the reading.
+native_eval_facts_read: fn(cell: Shared<NativeEvalFacts>, done: Condition, binary: String) Never! {
+    reading: task native_eval_image_fill(cell, binary)
+    _ := reading.join() ?? false
+    permit := cell.guard_edit()
+    permit.value.reading = false
+    done.notify_all()
+}
+
+// The code facts of the read `read`, once it is done; None when it read
+// none.
+native_eval_facts_wait: fn(read: NativeEvalRead) -> Shared<NativeEvalImage>? Never! {
+    permit: read.cell.guard_edit()
+    permit.wait(read.done, fn(facts) { !facts.reading }) ?? return None
+    permit.value.image
+}
+
+// Reads the code facts of the image `binary` into `cell`; false when it
+// can't be read.
+native_eval_image_fill: fn(cell: Shared<NativeEvalFacts>, binary: String) -> Bool {
+    elf: native_files.read_bytes(binary) ?? return false
+    image: native_eval_image_of(elf)
+    permit := cell.guard_edit()
+    permit.value.image = Val(image)
+    true
+}
+
+// The code facts of the ELF image `elf`.
+native_eval_image_of: fn(elf: [U8]) -> Shared<NativeEvalImage> Never! {
+    symbols: native_fix_symbols(elf)
+    code: native_elf_code(elf)
+    owned: native_eval_owned(symbols, code)
+    Shared{NativeEvalImage{symbols: symbols, code: code, owned: owned}}
 }
 
 // The `(Jet)` console over a session: `jet debug` and the Canvas native tier
