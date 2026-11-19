@@ -1,8 +1,8 @@
 # `#Perf.Profiled` marks the functions to profile, and one handler in the
 # build wraps each marked body in a zone named after the function
 # (`meta.rewrite_body`). The program prints the same total on every tier;
-# under `jet perf run` each call of a marked function is a zone row, and an
-# unmarked function has none.
+# under `jet perf run` on every tier each call of a marked function is a
+# zone row, and an unmarked function has none.
 fixture: ProfiledMarkerZonesMarkedFunctions.fixture
 env: NO_COLOR=1
 step o0: jet run -A -O0 run.jet
@@ -14,11 +14,27 @@ stdout: = total.out
 step o2: jet run -A -O2 run.jet
 exit: 0
 stdout: = total.out
-step: jet perf run run.jet --out marked.jettrace
+step o0perf: jet perf run -O0 run.jet --out marked.jettrace
 exit: 0
 stdout: = total.out
-step: jet perf view marked.jettrace
+step o0view: jet perf view marked.jettrace
 exit: 0
 stdout: ~ "zone collide count=5000 " # every call of a marked function
 stdout: ~ "zone step count=50 " # a marked function the loop calls once per tick
 stdout: !~ "zone run " # an unmarked function has no zone
+step o1perf: jet perf run -O1 run.jet --out marked1.jettrace
+exit: 0
+stdout: = total.out
+step o1view: jet perf view marked1.jettrace
+exit: 0
+stdout: ~ "zone collide count=5000 " # optimized, every call still has its zone
+stdout: ~ "zone step count=50 " # one per tick
+stdout: !~ "zone run " # and the unmarked function none
+step o2perf: jet perf run -O2 run.jet --out marked2.jettrace
+exit: 0
+stdout: = total.out
+step o2view: jet perf view marked2.jettrace
+exit: 0
+stdout: ~ "zone collide count=5000 " # the same rows on the last tier
+stdout: ~ "zone step count=50 " # one per tick
+stdout: !~ "zone run " # and none for the unmarked function
