@@ -1,0 +1,27 @@
+package: { name: "run", authority: { allow: [IO, Mem.Alloc, Net, Time.Wait] } }
+
+use {
+    net: core.net
+    time: core.time
+}
+
+// An accept that waits for its connect and a TCP read that waits for its
+// peer's write, each made by another task of the program.
+run: fn() {
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address: net.listener_local_socket_addr(listener) ?? panic("listener address")
+    peer: task late_writer(address)
+    server := net.tcp_accept(listener) ?? panic("accept")
+    got: net.tcp_read_bytes(server, 4) ?? panic("receive")
+    print("{got.len()} {peer.join() ?? 0}")
+}
+
+// Connects after a pause, then writes after another, so run's accept and
+// read each wait on this task.
+late_writer: fn(address: net.SocketAddr) -[Net, Time.Wait]> Int {
+    time.sleep(100ms)
+    client := net.tcp_connect_addr(address) ?? panic("connect")
+    time.sleep(100ms)
+    net.tcp_write_all_bytes(client, "ping".bytes()) ?? panic("send")
+    4
+}

@@ -834,8 +834,10 @@ jet_cli_perf_wait_summary: fn(trace: CanonicalJSON) -> String? Never! {
 // A wait row `item` in words: its task, its name and line, what it waited
 // for and what ended it: `task 1 in task join at main.jet:5 for task 2
 // spawned at main.jet:4, woken by task 2 at main.jet:11`. A channel's wait
-// waits for `channel 3`; a wake outside every task is `the runtime`'s, and
-// a wait no wake ended ended at `its timeout`.
+// waits for `channel 3`, a socket's `on socket 127.0.0.1:4000 with peer
+// 127.0.0.1:51000` (as either address is known); a wake outside every task
+// is `the runtime`'s, a socket's peer outside the program is `its peer`,
+// and a wait no wake ended ended at `its timeout`.
 jet_cli_perf_wait_text: fn(item: CanonicalJSON) -> String Never! {
     path: jet_cli_perf_member_symbol_text(item, "path") ?? "?"
     text := "task {jet_cli_perf_member_integer(item, "task_id") ?? "?"} in {jet_cli_perf_member_symbol_text(item, "name") ?? "wait"}"
@@ -850,8 +852,15 @@ jet_cli_perf_wait_text: fn(item: CanonicalJSON) -> String Never! {
     if jet_cli_perf_member_integer(item, "channel_id") == .Val(channel) {
         text = "{text} for channel {channel}"
     }
+    if jet_cli_perf_member_text(item, "local_address") == .Val(local) {
+        text = "{text} on socket {local}"
+    }
+    if jet_cli_perf_member_text(item, "peer_address") == .Val(peer) {
+        text = "{text} with peer {peer}"
+    }
     waker: jet_cli_perf_member_text(item, "waker") ?? ""
     if waker == "runtime" -> return "{text}, woken by the runtime"
+    if waker == "peer" -> return "{text}, woken by its peer"
     if waker != "task" -> return "{text}, woken by its timeout"
     text = "{text}, woken by task {jet_cli_perf_member_integer(item, "waker_task_id") ?? "?"}"
     if jet_cli_perf_member_integer(item, "waker_line") == .Val(line) {

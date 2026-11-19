@@ -63,8 +63,9 @@ the trace's captured spans and browser rows, then an
 `code.file.path`, `code.line.number` and `code.function.name`. Its trace id
 is the first 32 hex digits of the trace's id. A task span's parent is its
 parent task's span, and each span's kind and task, and a wait's awaited task,
-spawn line, channel, stack and waker, are `jet.*` attributes. Span times count
-from the session's start, since a trace records no wall-clock origin.
+spawn line, channel, socket addresses, stack and waker, are `jet.*`
+attributes. Span times count from the session's start, since a trace records
+no wall-clock origin.
 `--out <path>` writes any export to a file instead of stdout.
 
 Both exports are interop for other tools; jet reads them back itself.
@@ -206,10 +207,22 @@ symbol's name the wait's name (`task join`, `channel receive`, `time sleep`,
 checked source on its stack, innermost first, so the first is the line it
 waited at. A join's `awaited_task_id` is the awaited task and its
 `spawn_line` the line that spawned it; a channel wait's `channel_id` is the
-channel's. Its `waker` is `task` when a task's wake ended it, with that
+channel's. A socket's wait for readiness (an accept, a connect, a read or a
+write) names the socket by its own address, `local_address`, and its peer's,
+`peer_address`, as the kernel's `getsockname` and `getpeername` give them
+(`127.0.0.1:4000`, `[::1]:4000`, a Unix socket's path), either null when the
+socket has none. Its `waker` is `task` when a task's wake ended it, with that
 task's `waker_task_id` and the line it woke it from as `waker_line`,
 `runtime` when the runtime's did, and `timeout` when no wake did: a sleep,
-or a wait that gave up. The wake that ended a wait is the last one on the
+or a wait that gave up. The runtime's I/O poller wakes a socket's wait for
+what happened at the connection's other end, so `jet perf run` names the
+task of the program that acted there: for a connected socket's wait, the
+last transfer of another task on the socket at the other end (whose
+addresses are the wait's, swapped) begun by the wait's end; for a listener's
+accept, the last connect of another task to the listener's address. That
+task is the `task` waker, at the transfer's or the connect's line. With no
+such task the peer is outside the program and `waker` is `peer`, which names
+no task or line. The wake that ended a wait is the last one on the
 same park slot at or before its end, and after the task's previous wait on
 that slot. Its start and end are measured from the session's start, on the
 same clock as the task and log spans, so the wait lines up with them with no
@@ -219,8 +232,11 @@ times writes a million records. `jet perf view` prints `waits count=3 ·
 longest 400212345ns: task 1 in task join at main.jet:5 for task 2 spawned at
 main.jet:4, woken by task 2`. Its timeline shows up to 8 waits as
 `[start..end] task 1 in channel receive at main.jet:11 for channel 1, woken
-by task 2 at main.jet:28`, beside the task spans.
-Tests/Cases/Perf/every_wait_names_its_waker.case is the worked example.
+by task 2 at main.jet:28`, beside the task spans; a socket's as `task 1 in
+tcp read at main.jet:15 on socket 127.0.0.1:4000 with peer 127.0.0.1:51000,
+woken by task 2 at main.jet:25`, or `, woken by its peer`.
+Tests/Cases/Perf/every_wait_names_its_waker.case and
+Tests/Cases/Perf/socket_wait_names_its_peer.case are the worked examples.
 
 The same waits give off-CPU time by stack, as an off-CPU flame graph does.
 `jet perf view` sums the waits' time by stack, outermost frame first, ending

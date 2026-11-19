@@ -258,22 +258,27 @@ TraceNative: struct {
 // A span row: a task's observed span (`task_observed`), a closed core.log
 // span (`log_span`) or a task's wait (`task_wait`), whose `task_id` is the
 // waiting task, `symbol.name` the wait's name (`task join`, `channel
-// receive`, `time sleep`, `shared lock`, ...) and `wait_stack` the frames
-// of `symbol.path` on its waiting stack, innermost first: the first is the
-// line it waited at. A join's `awaited_task_id` is the task it waits for,
-// which the line `spawn_line` spawned; a channel wait's `channel_id` is its
-// channel's. `waker` says what ended the wait: `task`, the task
-// `waker_task_id` at its line `waker_line` (either null when unknown),
-// `runtime`, outside every task, or `timeout`, no wake. Only a wait has any
-// of these; other rows keep them null, `wait_stack` empty and `waker`
-// empty.
+// receive`, `time sleep`, `shared lock`, `tcp read`, ...) and `wait_stack`
+// the frames of `symbol.path` on its waiting stack, innermost first: the
+// first is the line it waited at. A join's `awaited_task_id` is the task it
+// waits for, which the line `spawn_line` spawned; a channel wait's
+// `channel_id` is its channel's; a socket's wait names the socket by its own
+// address `local_address` and its peer's `peer_address` (a host and port,
+// or a Unix socket's path; either null when the socket has none). `waker`
+// says what ended the wait: `task`, the task `waker_task_id` at its line
+// `waker_line` (either null when unknown), `runtime`, outside every task,
+// `peer`, a socket's peer outside the program, or `timeout`, no wake. Only
+// a wait has any of these; other rows keep them null, `wait_stack` empty
+// and `waker` empty.
 TraceSpan: struct {
     awaited_task_id: U64?,
     channel_id: U64?,
     clock: String,
     end_ns: U64?,
     kind: String,
+    local_address: String?,
     parent_task_id: U64?,
+    peer_address: String?,
     reason: String,
     spawn_line: U64?,
     start_ns: U64?,
@@ -477,7 +482,7 @@ trace_native_to_json: fn(value: TraceNative) -> CanonicalJSON JetTraceError! {
 }
 
 trace_span_to_json: fn(value: TraceSpan) -> CanonicalJSON JetTraceError! {
-    jettrace_object([CanonicalJSONField]{jettrace_field("awaited_task_id", jettrace_optional_uint(value.awaited_task_id)), jettrace_field("channel_id", jettrace_optional_uint(value.channel_id)), jettrace_field("clock", .String(value.clock.copy())), jettrace_field("end_ns", jettrace_optional_uint(value.end_ns)), jettrace_field("kind", .String(value.kind.copy())), jettrace_field("parent_task_id", jettrace_optional_uint(value.parent_task_id)), jettrace_field("reason", .String(value.reason.copy())), jettrace_field("spawn_line", jettrace_optional_uint(value.spawn_line)), jettrace_field("start_ns", jettrace_optional_uint(value.start_ns)), jettrace_field("status", .String(value.status.copy())), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol)), jettrace_field("task_id", jettrace_optional_uint(value.task_id)), jettrace_field("wait_stack", trace_stack_to_json(value.wait_stack)), jettrace_field("waker", .String(value.waker.copy())), jettrace_field("waker_line", jettrace_optional_uint(value.waker_line)), jettrace_field("waker_task_id", jettrace_optional_uint(value.waker_task_id))})
+    jettrace_object([CanonicalJSONField]{jettrace_field("awaited_task_id", jettrace_optional_uint(value.awaited_task_id)), jettrace_field("channel_id", jettrace_optional_uint(value.channel_id)), jettrace_field("clock", .String(value.clock.copy())), jettrace_field("end_ns", jettrace_optional_uint(value.end_ns)), jettrace_field("kind", .String(value.kind.copy())), jettrace_field("local_address", jettrace_optional_text(value.local_address)), jettrace_field("parent_task_id", jettrace_optional_uint(value.parent_task_id)), jettrace_field("peer_address", jettrace_optional_text(value.peer_address)), jettrace_field("reason", .String(value.reason.copy())), jettrace_field("spawn_line", jettrace_optional_uint(value.spawn_line)), jettrace_field("start_ns", jettrace_optional_uint(value.start_ns)), jettrace_field("status", .String(value.status.copy())), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol)), jettrace_field("task_id", jettrace_optional_uint(value.task_id)), jettrace_field("wait_stack", trace_stack_to_json(value.wait_stack)), jettrace_field("waker", .String(value.waker.copy())), jettrace_field("waker_line", jettrace_optional_uint(value.waker_line)), jettrace_field("waker_task_id", jettrace_optional_uint(value.waker_task_id))})
 }
 
 trace_browser_to_json: fn(value: TraceBrowser) -> CanonicalJSON JetTraceError! {

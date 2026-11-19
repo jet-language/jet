@@ -254,9 +254,10 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     }
     if parsed.source == .Val(source) {
         if sampled.move() == .Val(found) {
-            // The I/O rows take the transfers and the task_wait rows the waits.
+            // The task_wait rows take the waits, which the transfers may
+            // have ended, then the I/O rows take the transfers.
+            jet_cli_perf_waits_read(capture, found.waits.move(), found.wakes, found.spawns, found.transfers, source, started.start_ns)
             jet_cli_perf_io_read(capture, found.transfers.move(), source, started.start_ns)
-            jet_cli_perf_waits_read(capture, found.waits.move(), found.wakes, found.spawns, source, started.start_ns)
         }
     }
     full := [String]{action}
