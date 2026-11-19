@@ -19,11 +19,12 @@ time_host_root := I64{0}
     #Unsafe("runtime-init runs before any other thread exists") { time_host_root = root }
 }
 
-// The process epoch time_host_monotonic_sample takes, on the raw monotonic
-// clock in nanoseconds, or 0 until its first read sets it: only loads of
-// the root's published words, so a signal handler may call it.
-time_host_epoch_ns: fn() -> I64 {
-    root: time_host_root
+// The process epoch time_host_monotonic_sample_at takes on the time root
+// `root` (time_host_root, or a copy of it: PerfSamples.jet perf_zone_clock),
+// on the raw monotonic clock in nanoseconds, or 0 until its first read sets
+// it or with no root: only loads of the root's published words, so a signal
+// handler may call it.
+time_host_epoch_ns: fn(root: I64) -> I64 {
     if (root == I64{0} || sync_load(root) != I64{2}) { return I64{0} }
     wrapping(wrapping(sync_load(wrapping(root + I64{8})) * I64{1000000000}) + sync_load(wrapping(root + I64{16})))
 }

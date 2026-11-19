@@ -3249,8 +3249,11 @@ perf_cfi_sort: fn(table: I64, count: I64) {
     if (timed) {
         // Its time from the process epoch, the clock zones, waits and log
         // spans are timed on (time_host_monotonic_i64); before that epoch is
-        // set no zone has opened, so -1 lies before every one.
-        epoch: time_host_epoch_ns()
+        // set no zone has opened, so -1 lies before every one. The epoch is
+        // read through the time root zones copied as they turned on
+        // (perf_zone_clock), 0 while they are off, so the handler keeps no
+        // time init hook in an image whose zones never turn on.
+        epoch: time_host_epoch_ns(perf_zone_clock)
         rt_text_store(wrapping(slot + wrapping(wrapping(count + I64{1}) * I64{8})), if (epoch == I64{0}) -> I64{-1} else -> wrapping(began - epoch))
         rt_text_store(wrapping(slot + wrapping(wrapping(count + I64{2}) * I64{8})), if (scheduler_control_current() == I64{0}) -> I64{0} else -> observe_current_task())
         count = wrapping(count + PERF_SAMPLES_TIMED)
