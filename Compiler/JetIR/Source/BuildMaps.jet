@@ -13,13 +13,15 @@
 // merged in when a write site settles it or a frozen buffer is copied
 // (map.rebuild); growing the buffer (map.grow) keeps the tail where it is,
 // so a Map only ever read by key never sorts. A slot is 0 when empty, else
-// (tag << 32) | (position + 1), the tag the
-// key's 31-bit hash (ir_map_tag), found by linear probing from tag & mask; a
-// removal shifts the later entries down and the probe run back, so no slot
-// ever names a removed entry. A read that needs key order gets the entries
-// merged into a temporary buffer (map.order); a read never writes the Map. A
-// frozen buffer (capacity 0: static, empty) has no trailer: its entries are
-// all in order, found by binary search, as every Map of other keys is.
+// (tag << 32) | (position + 1), the tag the key's 31-bit hash (ir_map_tag),
+// found by linear probing from tag & mask. A removal moves the last entry
+// into the gap and shifts the probe run back over the emptied slot
+// (ir_map_close_gap): it shifts no entries, no slot ever names a removed
+// entry, and a gap in the sorted entries ends them there. A read that needs
+// key order gets the entries merged into a temporary buffer (map.order); a
+// read never writes the Map. A frozen buffer (capacity 0: static, empty)
+// has no trailer: its entries are all in order, found by binary search, as
+// every Map of other keys is.
 use jet_foundation.[Span, Type, TBinaryOp, BodyMapEntry, BodyOrFallback, StmtKind, TypeTupleField, TPanicLoc, TPanicLocal, body_each_expr_child, body_each_stmt_child, name_rows_set, name_rows_value, symbol_none, type_carrier_identity]
 
 // The entry tuple `(key: K, value: V)` of a Map type, None for any other.
@@ -400,10 +402,45 @@ ir_map_slot_insert: fn(m: &IRModule, a: &IRBuilder, trailer: Int, hash: Int, pos
 
 // Takes entry `position` (hashed under tag `hash`) out of the index of the
 // trailer at `trailer` as the entries after it shift down one place: its
-// slot empties, the probe run after it shifts back over the hole (each
-// slot whose home is not cyclically after the hole), every later position
-// drops by one, and so does the sorted count when the entry was in order.
+// slot empties (ir_map_slot_unlink), every later position drops by one, and
+// so does the sorted count when the entry was in order.
 ir_map_slot_remove: fn(m: &IRModule, a: &IRBuilder, trailer: Int, hash: Int, position: Int) Never! {
+    ir_map_slot_unlink(m, a, trailer, hash, position)
+    one: ir_word_const(m, a, 1)
+    low_half: ir_word_const(m, a, 4294967295)
+    numbered: ir_word_op(m, a, IROp.Add, position, one)
+    mask: ir_load_word(m, a, trailer, 8)
+    // Positions after the removed entry move down one.
+    every: ir_word_const(m, a, 0)
+    renumbered: ir_open(a.f, IROp.Block, a.line)
+    _: ir_open(a.f, IROp.Loop, a.line)
+    within: ir_bool_op(m, a, IROp.Le, every, mask)
+    ir_exit_unless(m, a, within, renumbered)
+    each_at: ir_map_slot_address(m, a, trailer, every)
+    each: ir_load_word(m, a, each_at, 0)
+    each_number: ir_word_op(m, a, IROp.BitAnd, each, low_half)
+    later: ir_bool_op(m, a, IROp.Gt, each_number, numbered)
+    ir_open_if(a.f, later, a.line)
+    lowered: ir_word_op(m, a, IROp.Sub, each, one)
+    ir_emit(a.f, IROp.Store, -1, each_at, 0, lowered, a.line)
+    ir_end(a.f, a.line)
+    ir_emit(a.f, IROp.Add, every, every, one, IR_OVERFLOW_WRAP, a.line)
+    ir_emit(a.f, IROp.Br, -1, 0, -1, -1, a.line)
+    ir_end(a.f, a.line)
+    ir_end(a.f, a.line)
+    sorted: ir_load_word(m, a, trailer, 0)
+    ordered: ir_bool_op(m, a, IROp.Lt, position, sorted)
+    ir_open_if(a.f, ordered, a.line)
+    fewer: ir_word_op(m, a, IROp.Sub, sorted, one)
+    ir_emit(a.f, IROp.Store, -1, trailer, 0, fewer, a.line)
+    ir_end(a.f, a.line)
+}
+
+// Empties the slot of entry `position` (hashed under tag `hash`) in the
+// index of the trailer at `trailer`, the probe run after it shifted back
+// over the hole (each slot whose home is not cyclically after the hole), so
+// no probe stops early; the other slots keep their positions.
+ir_map_slot_unlink: fn(m: &IRModule, a: &IRBuilder, trailer: Int, hash: Int, position: Int) Never! {
     word_row: ir_word_row(m)
     zero: ir_word_const(m, a, 0)
     one: ir_word_const(m, a, 1)
@@ -451,30 +488,90 @@ ir_map_slot_remove: fn(m: &IRModule, a: &IRBuilder, trailer: Int, hash: Int, pos
     ir_end(a.f, a.line)
     emptied_at: ir_map_slot_address(m, a, trailer, hole)
     ir_emit(a.f, IROp.Store, -1, emptied_at, 0, zero, a.line)
-    // Positions after the removed entry move down one.
-    every: ir_word_const(m, a, 0)
-    renumbered: ir_open(a.f, IROp.Block, a.line)
+}
+
+// Points the index's slot for entry `from` (hashed under tag `hash`) in the
+// trailer at `trailer` at entry `to` instead, where the entry moved.
+ir_map_slot_renumber: fn(m: &IRModule, a: &IRBuilder, trailer: Int, hash: Int, from: Int, to: Int) Never! {
+    one: ir_word_const(m, a, 1)
+    low_half: ir_word_const(m, a, 4294967295)
+    numbered: ir_word_op(m, a, IROp.Add, from, one)
+    mask: ir_load_word(m, a, trailer, 8)
+    at: ir_word_op(m, a, IROp.BitAnd, hash, mask)
+    found: ir_open(a.f, IROp.Block, a.line)
     _: ir_open(a.f, IROp.Loop, a.line)
-    within: ir_bool_op(m, a, IROp.Le, every, mask)
-    ir_exit_unless(m, a, within, renumbered)
-    each_at: ir_map_slot_address(m, a, trailer, every)
-    each: ir_load_word(m, a, each_at, 0)
-    each_number: ir_word_op(m, a, IROp.BitAnd, each, low_half)
-    later: ir_bool_op(m, a, IROp.Gt, each_number, numbered)
-    ir_open_if(a.f, later, a.line)
-    lowered: ir_word_op(m, a, IROp.Sub, each, one)
-    ir_emit(a.f, IROp.Store, -1, each_at, 0, lowered, a.line)
-    ir_end(a.f, a.line)
-    ir_emit(a.f, IROp.Add, every, every, one, IR_OVERFLOW_WRAP, a.line)
+    slot_at: ir_map_slot_address(m, a, trailer, at)
+    slot: ir_load_word(m, a, slot_at, 0)
+    names: ir_word_op(m, a, IROp.BitAnd, slot, low_half)
+    other: ir_bool_op(m, a, IROp.Ne, names, numbered)
+    ir_exit_unless(m, a, other, found)
+    following: ir_word_op(m, a, IROp.Add, at, one)
+    ir_emit(a.f, IROp.BitAnd, at, following, mask, IR_OVERFLOW_WRAP, a.line)
     ir_emit(a.f, IROp.Br, -1, 0, -1, -1, a.line)
     ir_end(a.f, a.line)
     ir_end(a.f, a.line)
-    sorted: ir_load_word(m, a, trailer, 0)
-    ordered: ir_bool_op(m, a, IROp.Lt, position, sorted)
-    ir_open_if(a.f, ordered, a.line)
-    fewer: ir_word_op(m, a, IROp.Sub, sorted, one)
-    ir_emit(a.f, IROp.Store, -1, trailer, 0, fewer, a.line)
-    ir_end(a.f, a.line)
+    thirty_two: ir_word_const(m, a, 32)
+    high: ir_word_op(m, a, IROp.Shl, hash, thirty_two)
+    renumbered: ir_word_op(m, a, IROp.Add, to, one)
+    entry: ir_word_op(m, a, IROp.BitOr, high, renumbered)
+    moved_at: ir_map_slot_address(m, a, trailer, at)
+    ir_emit(a.f, IROp.Store, -1, moved_at, 0, entry, a.line)
+}
+
+// Closes the gap entry `index` (at `entry`) of the keyed buffer at `map`
+// leaves once its key and value are out, `hash` its key's tag (-1 for an
+// unhashed buffer), and drops the length by one. A counted hashed buffer
+// moves its last entry into the gap (ir_map_slot_unlink,
+// ir_map_slot_renumber), so a removal shifts no entries and walks no slots
+// but the probe runs it touches; when the gap was in order the sorted count
+// drops to `index`, the moved entry and those after the gap joining the
+// tail an ordered read merges. Any other buffer, and a Rank (`keeps`, whose
+// entries stay in its key order), shifts the later entries down one place,
+// a counted hashed one renumbering its index (ir_map_slot_remove).
+ir_map_close_gap: fn(m: &IRModule, a: &IRBuilder, shape: IRMapShape, map: Int, data: Int, entry: Int, index: Int, hash: Int, keeps: Bool) Never! {
+    zero: ir_word_const(m, a, 0)
+    one: ir_word_const(m, a, 1)
+    length: ir_load_word(m, a, map, 0)
+    last: ir_word_op(m, a, IROp.Sub, length, one)
+    swaps: hash >= 0 && !keeps
+    if swaps {
+        capacity: ir_load_word(m, a, map, 8)
+        counted: ir_bool_op(m, a, IROp.Gt, capacity, zero)
+        ir_open_if(a.f, counted, a.line)
+        trailer: ir_map_trailer(m, a, shape, data, capacity)
+        ir_map_slot_unlink(m, a, trailer, hash, index)
+        inside: ir_bool_op(m, a, IROp.Lt, index, last)
+        ir_open_if(a.f, inside, a.line)
+        moving: ir_element_address(m, a, data, last, shape.stride)
+        ir_emit(a.f, IROp.CopyBytes, -1, entry, moving, shape.stride, a.line)
+        moved_key: ir_load_at(m, a, entry, shape.key.offset, shape.key.ty)
+        moved_hash: ir_map_tag(m, a, shape, moved_key)
+        ir_map_slot_renumber(m, a, trailer, moved_hash, last, index)
+        ir_end(a.f, a.line)
+        sorted: ir_load_word(m, a, trailer, 0)
+        ordered: ir_bool_op(m, a, IROp.Lt, index, sorted)
+        ir_open_if(a.f, ordered, a.line)
+        ir_emit(a.f, IROp.Store, -1, trailer, 0, index, a.line)
+        ir_end(a.f, a.line)
+        ir_emit(a.f, IROp.Store, -1, map, 0, last, a.line)
+        ir_else(a.f, a.line)
+    }
+    after: ir_word_op(m, a, IROp.Add, index, one)
+    from: ir_element_address(m, a, data, after, shape.stride)
+    moved: ir_word_op(m, a, IROp.Sub, last, index)
+    width: ir_word_const(m, a, shape.stride)
+    bytes: ir_word_op(m, a, IROp.Mul, moved, width)
+    _: ir_runtime(m, a, "jet_rt_mem_move", [Int]{entry, from, bytes}, -1)
+    ir_emit(a.f, IROp.Store, -1, map, 0, last, a.line)
+    if hash >= 0 && keeps {
+        capacity: ir_load_word(m, a, map, 8)
+        counted: ir_bool_op(m, a, IROp.Gt, capacity, zero)
+        ir_open_if(a.f, counted, a.line)
+        trailer: ir_map_trailer(m, a, shape, data, capacity)
+        ir_map_slot_remove(m, a, trailer, hash, index)
+        ir_end(a.f, a.line)
+    }
+    if swaps -> ir_end(a.f, a.line)
 }
 
 // The sorted count of a hashed Map: every entry of a frozen buffer, the
@@ -945,24 +1042,7 @@ ir_map_take_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShap
         removed_key: ir_load_at(m, a, entry, shape.key.offset, shape.key.ty)
         ir_emit(a.f, IROp.Drop, -1, removed_key, -1, -1, a.line)
     }
-    length: ir_load_word(m, a, map, 0)
-    one: ir_word_const(m, a, 1)
-    last: ir_word_op(m, a, IROp.Sub, length, one)
-    after: ir_word_op(m, a, IROp.Add, index, one)
-    from: ir_element_address(m, a, data, after, shape.stride)
-    moved: ir_word_op(m, a, IROp.Sub, last, index)
-    width: ir_word_const(m, a, shape.stride)
-    bytes: ir_word_op(m, a, IROp.Mul, moved, width)
-    _: ir_runtime(m, a, "jet_rt_mem_move", [Int]{entry, from, bytes}, -1)
-    ir_emit(a.f, IROp.Store, -1, map, 0, last, a.line)
-    if hash >= 0 {
-        capacity: ir_load_word(m, a, map, 8)
-        counted: ir_bool_op(m, a, IROp.Gt, capacity, none)
-        ir_open_if(a.f, counted, a.line)
-        trailer: ir_map_trailer(m, a, shape, data, capacity)
-        ir_map_slot_remove(m, a, trailer, hash, index)
-        ir_end(a.f, a.line)
-    }
+    ir_map_close_gap(m, a, shape, map, data, entry, index, hash, false)
     ir_emit(a.f, IROp.Return, -1, boxed, -1, -1, a.line)
 }
 
