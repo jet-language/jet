@@ -1,9 +1,9 @@
 # The best debugger and profiler in existence: an adversarial review (2026-11-18)
 
-Card: #6841 c39. Revision 2. Base: dev `3c593a7f16`; dev has no debugger,
-profiler or runtime change since (`git diff 3c593a7f16 fa4be89170` over
-`Compiler/JetRuntime`, `Compiler/JetDebug`, `CLI/Perf` and `CLI/Debug.jet` is
-empty). The probes ran on the p294 gate compiler, that commit's build, and
+Card: #6841 c39. Revision 3. Base: dev `3c593a7f16`; when revision 2 was
+written, dev had no debugger, profiler or runtime change since (`git diff
+3c593a7f16 fa4be89170` over `Compiler/JetRuntime`, `Compiler/JetDebug`,
+`CLI/Perf` and `CLI/Debug.jet` was empty). The probes ran on the p294 gate compiler, that commit's build, and
 are committed with their runner and exact log. Follows
 `2026-11-14-debugging-profiling-review.md` (the c1 review, claims 1-8, facts
 M1-M13, gaps G1-G12). This review does not repeat its findings. It raises the
@@ -21,6 +21,17 @@ verdicts weakens accordingly.
 The owner's order (2026-11-18): Jet ships the best debugging and profiling tool
 in existence, and needs nothing but `jet`. No lldb, gdb, Linux perf, go pprof or
 otelcol on the path.
+
+Revision 3 (2026-11-19) answers the first fresh-context review of revision 2,
+recorded on #6841. That review reran the probes on the p313 gate compiler and
+found twelve failed or unbacked claims. This revision corrects each one in
+place: the peers of D3, D8 and D9, P1's sampling rate, the verdicts of P2,
+P3, P7 and P9, P4's lever, F18's description, the runner's crash, R2's
+unbacked load figure, and the card text that contradicted the dispositions.
+The facts F1-F18 and the "Jet today" cells stay dated to the base: dev has
+changed every axis since, so they describe the base, not the tip. The
+review's product findings reopened #6841 c43, c44, c46, c51 and c52, and its
+rate finding added c68.
 
 ## Method
 
@@ -86,7 +97,7 @@ runner's three runs; the log holds the last one.
 | F15 | `jet perf view --html` writes a 1320-byte page with no external `src` or `href`: a browser alone opens it. | probe |
 | F16 | A `jet perf run` that fails before the program runs, on a compile error or an unknown flag, still prints a `Trace:` path. | probe |
 | F17 | Nothing but `jet`: no lldb, gdb, perf, go, pprof, otelcol or rr is on the probes' PATH or on the host's. Every probe above ran that way. | probe |
-| F18 | D1's bar on a large image. `Tools/Perf/DebugLatency/Main.jet --functions 20000 --runs 3 --bar 200` built a 20,000-function, 120,004-line program at `-O0` and stopped `jet debug` at its last line. Median of 3: first stop 57 ms on the prebuilt image (the 200 ms bar: met), a `next` under 1 ms (it rounds to 0), and the `-O0` build 31,533 ms. No lldb was on the path, so the lldb column is empty; c22 needs it. | `latency.log` |
+| F18 | D1's bar on a large image. `Tools/Perf/DebugLatency/Main.jet --functions 20000 --runs 3 --bar 200` built a 20,000-function, 120,004-line program at `-O0` and stopped `jet debug` at `prog.jet:100003`, the first call in `run`. Median of 3: first stop 57 ms on the prebuilt image (the 200 ms bar: met), a `next` under 1 ms (it rounds to 0), and the `-O0` build 31,533 ms. No lldb was on the path, so the lldb column is empty; c22 needs it. | `latency.log` |
 
 ## Debugger axes
 
@@ -235,8 +246,11 @@ compile-time origin fact and stays; `why` is its run-time counterpart.
 ### D3. Jet-typed values at O2, inlined frames included
 
 **Peer.** Visual Studio and the RAD Debugger show optimized C++ well when the
-PDB is good; lldb and gdb show `<optimized out>` often. Nobody shows a value the
-optimizer deleted.
+PDB is good; lldb and gdb show `<optimized out>` often. gdb recovers an
+optimized-out parameter's value at entry (`x@entry=…`) through DWARF call-site
+parameters (`DW_OP_entry_value`), and JVM debuggers deoptimize a compiled frame
+and rematerialize the values the optimizer eliminated. No native debugger
+shows a local that no location, entry value or call site keeps.
 
 **Jet today.** F9: the source path is always `-O0`, and `jet debug -O2` is
 refused; a prebuilt `-O2` image of `fib` stops and shows `n`. c35 owns
@@ -252,8 +266,10 @@ point, labeled as recovered.
 **Attack.** Without a recording, an optimized-out value stays out. Recovery is
 exact only at sync-event granularity plus re-execution inside the window.
 
-**Verdict.** Holds only within stated limits: Jet is the only debugger that can
-show a deleted value, and only when the run was recorded.
+**Verdict.** Holds only within stated limits: Jet shows a native local that no
+location, entry value or call site keeps, which gdb's entry values cannot, and
+only when the run was recorded. JVM deoptimization reaches further on its own
+runtime, with no recording.
 
 **Honest limit.** Live debugging of an unrecorded `-O2` process shows what
 the location lists keep, like every peer.
@@ -415,9 +431,14 @@ command; the transactional rules stay #6919's.
 ### D8. Tasks, channels and locks, with deadlock detection
 
 **Peer.** Go's runtime reports "all goroutines are asleep - deadlock!" only
-when every goroutine blocks. Java's `ThreadMXBean.findDeadlockedThreads` finds
-monitor cycles on request. Visual Studio's Parallel Stacks shows threads and
-tasks.
+when every goroutine blocks. Go 1.26 adds an experimental `goroutineleak`
+profile (`GOEXPERIMENT=goroutineleakprofile`,
+[go.dev/doc/go1.26](https://go.dev/doc/go1.26)) that finds goroutines blocked
+on channels, `Mutex` or `Cond` that no runnable goroutine can reach: partial
+deadlocks, found through garbage-collector reachability when the profile is
+taken. Java's `ThreadMXBean.findDeadlockedThreads` finds cycles of monitors and
+ownable synchronizers (`java.util.concurrent` locks) on request. Visual
+Studio's Parallel Stacks shows threads and tasks.
 
 **Jet today.** F1: a two-task cycle hangs forever with no message. `jet
 inspect live --attach` on the hung process shows both tasks blocked on
@@ -439,8 +460,10 @@ cycle check must treat "no live sender can ever send" as the edge. A cycle
 check on every block costs a pointer walk; bound it by the cycle length. A task
 blocked on I/O is never in a cycle.
 
-**Verdict.** Holds: partial-cycle detection beats Go's global check and
-Java's on-request scan.
+**Verdict.** Holds only within stated limits: Go's leak profile and Java's scan
+also find partial deadlocks, on request. Jet's win is a stop that is on by
+default, fires when the cycle closes, and names every task in it with its wait
+and its line.
 
 **Honest limit.** Deadlocks through FFI-held locks are invisible.
 
@@ -449,7 +472,9 @@ Java's on-request scan.
 ### D9. Post-mortem crash dumps
 
 **Peer.** WinDbg and Visual Studio open minidumps with full types; Crashpad
-writes them in production. A Linux core opened in gdb shows C types only.
+writes them in production. gdb renders C++, Rust, Go and Fortran types on a
+Linux core from its DWARF, and Delve opens Go cores with Go types and
+goroutines.
 
 **Jet today.** A stop prints `context.trace`; there is no dump file and no
 way to open one.
@@ -467,8 +492,10 @@ make the dump typed without the source.
 log uses. Writing a dump after memory corruption may fail; the writer must use
 preallocated memory.
 
-**Verdict.** Holds only within stated limits: typed, task-aware and
-flight-recorded beats a minidump; it covers Jet processes only.
+**Verdict.** Holds only within stated limits: types alone are parity with gdb
+and Delve. The win is a dump that holds every task's stack and the
+flight-recorder ring with the values reachable to a budget, for Jet processes
+only.
 
 **Ballot.** D-OBSERVE-FLIGHT1.
 
@@ -551,8 +578,14 @@ no measured overhead.
    polls, write barriers) to its caller's line, since the compiler knows the
    helper has no source line of its own.
 4. Inline-aware attribution from the compiler's inline records.
-5. Rate up to 10 kHz; the receipt states overhead measured against a matched
-   unprofiled run.
+5. Linux expires CPU-clock timers only from the scheduler tick
+   (`kernel/time/posix-cpu-timers.c`, `run_posix_cpu_timers` from
+   `update_process_times`), so a `CLOCK_THREAD_CPUTIME_ID` timer is capped at
+   `CONFIG_HZ`: 1000 Hz, or 250 Hz on many distribution kernels. Rates up to
+   8 kHz come from per-thread `perf_event_open` sampling where the kernel lets
+   a process profile itself, with the timer as the fallback at the tick; the
+   receipt states the rate it reached, the cap and the overhead measured
+   against a matched unprofiled run.
 
 CFI unwinding is c38.
 
@@ -564,12 +597,14 @@ interrupt syscalls; the runtime's syscalls must restart on `EINTR`. Charging
 a stop poll's samples to its caller could hide the polls' own cost, so the
 receipt counts them: the cost stays visible, only its line changes. 10 kHz
 costs measurable time; the overhead figure must be per program, not per
-benchmark. `perf_event_open` would give precise program counters and branch
-records, but `perf_event_paranoid` often forbids it, so POSIX timers stay the
-default and counters are an extra.
+benchmark. `perf_event_paranoid` 2, the upstream default, lets a process sample
+its own user-mode code through `perf_event_open`; only 3 and above, or a VM
+with no virtual PMU, forbid it. The p313 `-O2` receipt already samples through
+`ibs_op` on this host.
 
-**Verdict.** Holds only within stated limits: parity with Superluminal on
-rate and threads; the win is the compiler-exact attribution.
+**Verdict.** Holds only within stated limits: parity with Superluminal on rate
+and threads only where `perf_event_open` is allowed (#6841 c68); on the timer
+fallback the rate is the tick's. The win is the compiler-exact attribution.
 
 **Honest limit.** Without `perf_event_open`, no LBR or precise PC; skid
 remains.
@@ -600,15 +635,18 @@ a build that compiles zones out; the attachable form costs a nop sled per
 instrumented function, a few bytes and well under a nanosecond, which the
 profile-overhead gauntlet (c6) must measure, not assume.
 
-**Verdict.** Holds: Tracy's zones plus Iprof's one-line instrumentation plus
-XRay's attach, in one mechanism.
+**Verdict.** Holds only within stated limits: Tracy's zones plus Iprof's
+one-line instrumentation plus XRay's attach, in one mechanism, once c6 measures
+the attachable form's cost as no loss against the same program without zones.
+Until then the "zero cost when off" claim is unbacked.
 
 **Ballot.** D-PERF-ZONES1 (serves c2, c3 and c6).
 
 ### P3. One live timeline: samples, zones, tasks, allocations, I/O and waits
 
-**Peer.** Superluminal shows each thread's states and who unblocked a waiting
-thread; Tracy shows zones, locks and messages live.
+**Peer.** Superluminal shows each thread's states and, from the operating
+system's scheduler events, the thread that unblocked a waiting thread with both
+callstacks: exact at thread level. Tracy shows zones, locks and messages live.
 
 **Jet today.** Wall and CPU windows, task spans and samples in one
 `.jettrace` (probe). Join waits naming the awaited task are c7, which is
@@ -619,14 +657,16 @@ object, its blocking stack and the task whose action ended it (the waker).
 I/O comes from the capability chokepoint with bytes and target, with no
 instrumentation. Off-CPU time per stack.
 
-**Lever.** Scheduler and chokepoint: exact wake edges, not inferred from
-context switches.
+**Lever.** Scheduler and chokepoint: exact wake edges between tasks. Under M:N
+scheduling many tasks share a thread, so the operating system's thread-level
+events cannot see which task woke which.
 
 **Attack.** Recording every wait costs on hot channels; record into the
 per-thread ring and drop with a count past budget.
 
-**Verdict.** Holds: exact wakers beat Superluminal's inferred ones, for Jet
-code.
+**Verdict.** Holds only within stated limits: task-level wakers that
+Superluminal's thread-level ones cannot name, for Jet code, once every wait
+names its waker (c46).
 
 ### P4. Memory and allocation profiles, heap snapshots, diffs
 
@@ -648,8 +688,11 @@ allocator's type facts; and a diff of two snapshots by type and allocation
 site, with the shortest retention path from a root for any block.
 
 **Lever.** One allocator in one runtime, and type facts for every block, so
-the snapshot is typed without symbols or heuristics. Instruments and
-Heaptrack see `malloc` sizes, not types.
+the snapshot is typed without symbols or heuristics. Heaptrack sees `malloc`
+sizes and stacks, not types. Instruments' Allocations groups by Objective-C,
+Swift and Core Foundation class and DevTools snapshots are typed by
+constructor, so on typed heaps Jet's lever is parity plus the compiler's type
+for every block, including plain value arrays.
 
 **Attack.** Walking a large heap stops the program; take the snapshot in a
 forked child (copy-on-write) so the parent runs on. Arena and region
@@ -727,9 +770,12 @@ automatic progress points, on runs long enough for the experiments.
 
 ### P7. Static cost next to measured cost
 
-**Peer.** None ships the compiler's predicted cost per line beside the
-measured cost. `llvm-mca` predicts throughput for a snippet, apart from any
-profile.
+**Peer.** Clang's `-fdiagnostics-show-hotness` prints optimization remarks
+with their profile hotness, and `opt-viewer` lays them out per source line
+([clang user manual](https://clang.llvm.org/docs/UsersManual.html)): what the
+optimizer did beside how hot the code is. Intel Advisor joins the compiler's
+vectorization report to measured loop time. `llvm-mca` predicts throughput for
+a snippet, apart from any profile.
 
 **Jet today.** #6897 (D-COSTLAW1=A) plans hidden-cost facts and a per-line
 cost view (#6897 c3, c4); the profiler does not read them.
@@ -743,7 +789,9 @@ measured share, so "predicted cheap, measured hot" stands out.
 **Attack.** Predicted cost is qualitative; a predicted number beside a
 percentage invites a false ranking. Show the facts, not a predicted number.
 
-**Verdict.** Holds: no peer has the compiler's facts.
+**Verdict.** Holds only within stated limits: clang's remarks report the
+optimizer's decisions; Jet's view reports the hidden costs the program pays
+(allocations, copies, locks, dispatch, checks) beside the measured share.
 
 ### P8. Profile diffs and regression gates
 
@@ -779,7 +827,7 @@ Brendan Gregg's off-CPU flame graphs (eBPF) show blocked time by stack.
 **Jet today and design.** As P3: the scheduler records each wait's blocking
 stack and waker; off-CPU time per stack is the same data summed.
 
-**Verdict.** Holds, for Jet code (P3's limits).
+**Verdict.** Holds only within stated limits, for Jet code (P3's limits).
 
 ### P10. Always-on production profiling and attach
 
@@ -825,18 +873,18 @@ number, proposed ones by plan rank).
 | D5 Watch, data breakpoints | gdb, rr | fails (F7: `watch` is unknown) | holds only within stated limits | c36, R7 |
 | D6 Conditions, logpoints | Visual Studio; Live++ and Dyninst patching | fails (DAP only, mini evaluator) | holds only within stated limits (an unplaced condition forks per hit) | c36, c40, R7 |
 | D7 Hot patch | Live++ | fails on native images (`jet dev` only) | holds only within stated limits | #6919 c5, R12 |
-| D8 Tasks, deadlocks | Go runtime, Java ThreadMXBean | fails (F1: hangs; the live view names no cycle) | holds | R6 |
-| D9 Post-mortem | WinDbg with minidumps | fails (none) | holds only within stated limits | R9 |
+| D8 Tasks, deadlocks | Go runtime and `goroutineleak` profile, Java ThreadMXBean | fails (F1: hangs; the live view names no cycle) | holds only within stated limits | R6 |
+| D9 Post-mortem | WinDbg with minidumps, gdb and Delve on cores | fails (none) | holds only within stated limits | R9 |
 | D10 Visualizers | natvis, gdb and lldb formatters | holds only within stated limits (F11) | holds only within stated limits (D4's) | c40, R8 |
 | D11 Surfaces | RemedyBG, VS Code | fails (Canvas debug view is one panel at a time, no timeline) | holds only within stated limits | R16 |
 | Generic instances | every peer | fails (a breakpoint on a generic-module instance's member never hits: the evaluator proposal's `genmod` probe) | holds | c41 |
-| P1 Sampling | Superluminal, Linux perf | fails (F2-F5) | holds only within stated limits | R2, c38 |
-| P2 Zones, instrument all | Tracy, Jai Iprof, LLVM XRay | fails (F12) | holds | c3, c6, R5 |
-| P3 and P9 Timeline, waits, off-CPU | Superluminal, Tracy | fails (no wait on the timeline; c7 open) | holds | c7, R4 |
+| P1 Sampling | Superluminal, Linux perf | fails (F2-F5) | holds only within stated limits | R2, c38, c68 |
+| P2 Zones, instrument all | Tracy, Jai Iprof, LLVM XRay | fails (F12) | holds only within stated limits | c3, c6, R5 |
+| P3 and P9 Timeline, waits, off-CPU | Superluminal, Tracy | fails (no wait on the timeline; c7 open) | holds only within stated limits | c7, R4 |
 | P4 Heap | Instruments, Heaptrack, DevTools | fails (F13: no allocation rows) | holds only within stated limits | c17, R10 |
 | P5 Counters | VTune | fails (F13: none on dev) | holds only within stated limits (no LLC event on Zen 1 and Zen 2) | c13-c16, R15 |
 | P6 Causal | Coz | fails (none) | holds only within stated limits | R13 |
-| P7 Cost beside measured | none | fails (not joined) | holds | R14 |
+| P7 Cost beside measured | clang remarks with hotness, Intel Advisor | fails (not joined) | holds only within stated limits | R14 |
 | P8 Diffs and gates | pprof, Bencher | fails (F14: whole-run deltas, exit 0 on a regression) | holds only within stated limits | R14 |
 | P10 Always-on, attach | Parca, Pyroscope | holds only within stated limits (attach needs `--observe`) | holds only within stated limits | c18-c20, R9 |
 | Nothing but `jet` | (the owner's order) | holds for these probes (F17); c34 and c37 are open for the case suites and the docs | holds | c34, c37 |
@@ -849,12 +897,10 @@ availability) bind Jet as they bind every peer. Revision 2 adds a fourth, the
 cost of evaluating in a fork (D4, D6, D10), which the evaluator proposal
 bounds and measures but does not remove.
 
-No axis's Today column reads a plain `holds`, so every axis needs an open
-criterion, and the last column names one or more. The existing ones are on
-#6841 now: c3, c6, c7, c13-c20, c22, c34-c38, c40 and c41. The R-ranks are
-proposed criteria. None of R1-R16 is on the card yet (its criteria run
-c1-c41). Until Main adds them, D8, D9, D11, P6 and P7 have no open criterion
-on #6841 at all, and D2 and D7 have only #6919's.
+No axis's Today column reads a plain `holds`, so every axis needs a
+criterion, and the last column names one or more. The R-ranks are on #6841 as
+c43-c58 (see the dispositions below), and c68 carries P1's rate. Which of them
+are still open is the card's state, not this document's.
 
 ## Ranked plan
 
@@ -868,7 +914,7 @@ c3, c6, c7, c13-c20, c22 and c34-c41 stay as written.
 | Rank | Step | Proposed criterion | Proof | Ballot |
 |------|------|--------------------|-------|--------|
 | R1 | Time travel over the chokepoint and sync order | (a) `jet run --record=r1` of a program whose tasks share channels and a lock, made at -O2, replays under `jet debug --replay=r1` with the same output and the same sync order at -O0, -O1 and -O2, on real threads; an unsafe write that changes the run is reported at the first sync event where it diverges. (b) In a replay, `reverse-step`, `reverse-next`, `reverse-finish` and `reverse-continue` reach the previous line, call, caller and breakpoint or watch hit, in the console and over DAP `stepBack` and `reverseContinue`. (c) `why x` in a replay names the write that gave `x` its value: file:line, task, stack and the value it replaced; a local optimized out at -O2 is shown from the -O0 replay and labeled recovered. | `jet test Compiler --profile cases --filter Debug/replay_threads_across_tiers_`; `--filter Debug/replay_reverse_`; `--filter Debug/replay_why_` | D-TIMETRAVEL3 |
-| R2 | A sampler that is right on threads | (a) `jet perf run` samples each thread on its own CPU clock: four tasks running fib at once at -O2 keep at least 90% of the nominal samples, and every sample keeps its whole stack. (b) A sample in a compiler-emitted helper (a stop poll, a barrier) is charged to the Jet line that called it, and the receipt counts such samples; no fib sample is reported outside Jet functions. (c) A sample in an inlined function names the inlined function's line and its caller's line, at -O2. (d) Every receipt states the capture's overhead, measured against a matched unprofiled run, and the default rate costs under 2% on fib (0.75% on a machine at load 204, `sampler-overhead.log`). | `jet test Compiler --profile cases --filter Perf/every_thread_keeps_whole_stacks`; `--filter Perf/helper_samples_charge_the_calling_line`; `--filter Perf/inlined_samples_name_the_inlined_line`; `--filter Perf/receipt_reports_measured_overhead`; `Tools/Perf/SamplerOverhead/Main.jet --bar 200`, as `sampler-overhead.log` | no |
+| R2 | A sampler that is right on threads | (a) `jet perf run` samples each thread on its own CPU clock: four tasks running fib at once at -O2 keep at least 90% of the nominal samples, and every sample keeps its whole stack. (b) A sample in a compiler-emitted helper (a stop poll, a barrier) is charged to the Jet line that called it, and the receipt counts such samples; no fib sample is reported outside Jet functions. (c) A sample in an inlined function names the inlined function's line and its caller's line, at -O2. (d) Every receipt states the capture's overhead, measured against a matched unprofiled run, and the default rate costs under 2% on fib (0.75%, `sampler-overhead.log`). | `jet test Compiler --profile cases --filter Perf/every_thread_keeps_whole_stacks`; `--filter Perf/helper_samples_charge_the_calling_line`; `--filter Perf/inlined_samples_name_the_inlined_line`; `--filter Perf/receipt_reports_measured_overhead`; `Tools/Perf/SamplerOverhead/Main.jet --bar 200`, as `sampler-overhead.log` | no |
 | R3 | One evaluator: the compiler's | Every debugger expression (console `print` and `watch`, breakpoint conditions, logpoint templates, DAP `evaluate`) is checked by the compiler at a position probe in the stopped function's own check, built at O0 against the eval runtime, and run in a fork of the stopped program, as `Docs/Proposals/2026-11-18-debug-eval-native.md` specifies. Field paths, indexing, method calls and generic functions work; an expression with an effect is refused with the effect named; `DebugEval.jet`'s second evaluator is gone. Built only after c40 is met. | `jet test Compiler --profile cases --filter Debug/print_evaluates_compiled_expressions`; `--filter Debug/print_refuses_effectful_expression`; the proposal's §8.2 bars | no |
 | R4 | Waits with wakers, off-CPU time, I/O | Every wait in the trace (channel send and receive, lock, join, sleep, I/O readiness) names its object, its blocking stack and the task whose action ended it; `jet perf view` lists off-CPU time per stack; file and network I/O through the capability chokepoint appear on the timeline with bytes and target and no instrumentation. Extends c7 from joins to every wait. | `jet test Compiler --profile cases --filter Perf/every_wait_names_its_waker`; `--filter Perf/off_cpu_time_by_stack`; `--filter Perf/io_on_timeline_without_instrumentation` | no |
 | R5 | Zones, frame marks and plots | An effect-free zone, frame-mark and plot API and a `#Profiled` marker write one per-thread ring that `core.log.span` also writes, and line up with samples on the `jet perf view` timeline. Each zone site is a patchable no-op until `jet perf run` or `jet perf attach` turns zones on, at a cost c6 measures; a build setting strips the sites. Serves c3 and c6. | `jet test Compiler --profile cases --filter Perf/zones_frames_plots_share_the_timeline`; c3; c6 | D-PERF-ZONES1 |
@@ -895,7 +941,8 @@ existing surfaces only.
 
 ## Finding dispositions
 
-Main has since added R1-R16 to #6841 as c43-c58, in rank order.
+Main has since added R1-R16 to #6841 as c43-c58, in rank order. The first
+fresh-context review's rate finding (P1) is #6841 c68.
 
 <!-- audit-dispositions:v1 -->
 | finding | disposition | target or reason |
