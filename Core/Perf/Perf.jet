@@ -100,12 +100,12 @@ plot: fn(name: String, value: Float) Never! { core.perf.__plot(name, core.math.t
 /// it records nothing.
 progress: fn(name: String) Never! { core.perf.__progress(name) }
 
-/// A marker for the functions to profile: `#perf.Profiled` on a function or
+/// A marker for the functions to profile: `#Perf.Profiled` on a function or
 /// method, or on a package header to reach every function of the package.
 /// A root build wraps each marked function's body in a zone named after it,
 /// with one handler over the compiler's events:
-/// `meta.events(watch: .Functions{marked: core.perf.Profiled{}}, …)` calling
-/// `meta.rewrite_body(f, #code { _zone: core.perf.zone(#{name}) … })`.
+/// `meta.events(watch: .Functions{marked: perf.Profiled{}}, …)` calling
+/// `meta.rewrite_body(f, #code { _zone: perf.zone(#{name}) … })`.
 Profiled: struct {
     impl Marker {
         sites: [.Package, .Function, .Method],

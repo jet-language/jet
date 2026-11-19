@@ -1,8 +1,31 @@
 use perf: core.perf
 
-#perf.Profiled collide: fn(a: Int, b: Int) -> Bool { (a + b) % 7 == 0 }
+// Each checked function `#Perf.Profiled` marks gets a zone named after it
+// around its body; the unmarked ones stay as written.
+build: fn(b: Build) {
+    app: b.add_executable("profiled_marker", ["run.jet"], [])
+    meta: b.compiler(app)
+    meta.events(
+        watch: .Functions{marked: perf.Profiled{}},
+        fn(event) {
+            if event == .Checked(.Function(f)) {
+                name: f.name
+                meta.rewrite_body(
+                    f,
+                    #code {
+                        _zone: perf.zone(#{name})
+                        #{f.body}
+                    },
+                )
+            }
+        },
+    )
+    b.default(app)
+}
 
-#perf.Profiled step: fn(tick: Int) -> Int {
+#Perf.Profiled collide: fn(a: Int, b: Int) -> Bool { (a + b) % 7 == 0 }
+
+#Perf.Profiled step: fn(tick: Int) -> Int {
     hits := 0
     loop i in 0..<100 {
         if collide(tick, i) -> hits += 1

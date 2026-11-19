@@ -14,6 +14,8 @@ use {
     jet_debug.[NativeAbstract, NativeFunction, native_image_read, native_inline_chain, native_jet_spelling]
     jet_driver.[jet_driver_inline_package, jet_driver_mask_inline_package]
     jet_foundation.[
+        CanonicalJSON,
+        CanonicalJSONField,
         Span,
         TRACE_COUNTERS,
         TraceCounter,
@@ -30,6 +32,8 @@ use {
         SourceIdentity,
         sha256_hex,
         JetSymbolRef,
+        TraceReceiptSection,
+        canonical_json_sha256,
     ]
 }
 
@@ -1138,10 +1142,18 @@ jet_cli_perf_window: fn(profile: &TraceProfile, window: JetCLIPerfRuntimeWindow)
 // `zone`, `frame_mark` or `plot` row of `capture` (a plot's symbol names its
 // value after its name: `fps = 60`), timed from `origin_ns`, the session's
 // start on that clock, and named by the span in `source`, within the span
-// row limit. The file is removed once read; a row cut short ends the read.
+// row limit. Every zone, frame mark and plotted value counts in the `zones`
+// receipt section, the rows past the limit too (jet_cli_perf_zones_section).
+// The file is removed once read; a row cut short ends the read.
 jet_cli_perf_log_spans_read: fn(capture: &JetCLIPerfCapture, path: String, source: String, origin_ns: Int) -[FS]> Never! {
     bytes: perf_files.read_bytes(path) ?? [U8]{}
     perf_files.remove(path).drop("the session reads its log spans once")
+    zones := [JetCLIPerfZoneTotal]{}
+    // Each zone name's entry in `zones`, and each plot's in `plots`.
+    zoned := [String:Int]{}
+    frames := [Int]{}
+    plots := [JetCLIPerfPlotTotal]{}
+    plot_at := [String:Int]{}
     at := 0
     loop at + 32 <= bytes.len() {
         start: link_debug_addr(bytes, at)
@@ -1152,9 +1164,31 @@ jet_cli_perf_log_spans_read: fn(capture: &JetCLIPerfCapture, path: String, sourc
         if shape < 0 || at + 32 + length > bytes.len() -> break
         name: String.from_bytes(bytes.slice(at + 32, at + 32 + length)) ?? break
         at += 32 + length
+        if kind == JET_CLI_PERF_ZONE_ZONE {
+            if !zoned.has_key(name) {
+                zoned[name] = zones.len()
+                zones.push(JetCLIPerfZoneTotal{name: "{name}", count: 0, total: 0, longest: 0})
+            }
+            zone := zones[zoned[name]]
+            zone.count += 1
+            zone.total += end - start
+            if end - start > zone.longest -> zone.longest = end - start
+            zones[zoned[name]] = zone
+        }
+        if kind == JET_CLI_PERF_ZONE_FRAME -> frames.push(start)
+        if kind == JET_CLI_PERF_ZONE_PLOT {
+            if !plot_at.has_key(name) {
+                plot_at[name] = plots.len()
+                plots.push(JetCLIPerfPlotTotal{name: "{name}", count: 0, last: ""})
+            }
+            plot := plots[plot_at[name]]
+            plot.count += 1
+            plot.last = "{perf_math.from_bits(end)}"
+            plots[plot_at[name]] = plot
+        }
         if (U64{capture.spans.len()}) >= TRACE_SPAN_ROW_LIMIT {
             capture.policy.span_rows_truncated = true
-            break
+            next
         }
         row: if kind == {
             JET_CLI_PERF_ZONE_ZONE -> "zone"
@@ -1168,6 +1202,67 @@ jet_cli_perf_log_spans_read: fn(capture: &JetCLIPerfCapture, path: String, sourc
         symbol: JetSymbolRef{path: source, name: label}
         capture.spans.push(TraceSpan{awaited_task_id: None, channel_id: None, clock: "monotonic", start_ns: Val(jet_cli_perf_since(start, origin_ns)), end_ns: Val(jet_cli_perf_since(finish, origin_ns)), kind: row, local_address: None, parent_task_id: None, peer_address: None, reason: "", spawn_line: None, status: "captured", symbol: symbol, task_id: None, wait_stack: [TraceStackFrame]{}, waker: "", waker_line: None, waker_task_id: None})
     }
+    if zones.len() > 0 || frames.len() > 0 || plots.len() > 0 {
+        zones.sort_by(fn(left: JetCLIPerfZoneTotal, right: JetCLIPerfZoneTotal) { (right.total <=> left.total).then(left.name <=> right.name) })
+        frames.sort()
+        capture.receipts.push(jet_cli_perf_zones_section(zones, frames, plots))
+    }
+}
+
+// The `zones` receipt section of a run's closed zones, heaviest first,
+// frame marks (their starts, in order) and plotted values: each zone name
+// with how many closed and their total and longest time; the frames with how
+// many and their mean and longest interval; and each plot with how many
+// values and its last. `jet perf view` shows them (jet_cli_perf_zone_lines).
+jet_cli_perf_zones_section: fn(zones: [JetCLIPerfZoneTotal], frames: [Int], plots: [JetCLIPerfPlotTotal]) -> TraceReceiptSection Never! {
+    widest := 0
+    loop at in 1..<frames.len() {
+        if frames[at] - frames[at - 1] > widest -> widest = frames[at] - frames[at - 1]
+    }
+    mean: if frames.len() > 1 -> (frames[frames.len() - 1] - frames[0]).div_euclid(frames.len() - 1) else -> 0
+    zone_rows := [CanonicalJSON]{}
+    loop zone in zones {
+        zone_rows.push(
+            CanonicalJSON.Object(
+                [CanonicalJSONField]{
+                    {key: "count", value: CanonicalJSON.Integer("{zone.count}")},
+                    {key: "longest_ns", value: CanonicalJSON.Integer("{zone.longest}")},
+                    {key: "name", value: CanonicalJSON.String("{zone.name}")},
+                    {key: "total_ns", value: CanonicalJSON.Integer("{zone.total}")},
+                },
+            ),
+        )
+    }
+    plot_rows := [CanonicalJSON]{}
+    loop plot in plots {
+        plot_rows.push(
+            CanonicalJSON.Object(
+                [CanonicalJSONField]{
+                    {key: "count", value: CanonicalJSON.Integer("{plot.count}")},
+                    {key: "last", value: CanonicalJSON.String("{plot.last}")},
+                    {key: "name", value: CanonicalJSON.String("{plot.name}")},
+                },
+            ),
+        )
+    }
+    value: CanonicalJSON.Object(
+        [CanonicalJSONField]{
+            {
+                key: "frames",
+                value: CanonicalJSON.Object(
+                    [CanonicalJSONField]{
+                        {key: "count", value: CanonicalJSON.Integer("{frames.len()}")},
+                        {key: "longest_ns", value: CanonicalJSON.Integer("{widest}")},
+                        {key: "mean_ns", value: CanonicalJSON.Integer("{mean}")},
+                    },
+                ),
+            },
+            {key: "plots", value: CanonicalJSON.Array(plot_rows)},
+            {key: "zones", value: CanonicalJSON.Array(zone_rows)},
+        },
+    )
+    digest: canonical_json_sha256(value)
+    TraceReceiptSection{name: "zones", type_name: "JetPerfZones", value: value, digest: digest}
 }
 
 // What a row of the spans file is (PerfSamples.jet PERF_ZONE_LOG and the

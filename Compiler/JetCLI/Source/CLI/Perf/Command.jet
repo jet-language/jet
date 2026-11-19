@@ -598,14 +598,17 @@ jet_cli_perf_receipt_sections: fn(trace: CanonicalJSON) -> [JetDriverRunReceiptS
 
 // `receipt <name> <value>` for each receipt section the trace records, the
 // value as its canonical JSON, but the heap snapshots, the causal
-// predictions and the topdown lens's, which jet_cli_perf_heap_lines,
-// jet_cli_perf_causal_lines and jet_cli_perf_topdown_lines show.
+// predictions, the topdown lens's and the zones, which
+// jet_cli_perf_heap_lines, jet_cli_perf_causal_lines,
+// jet_cli_perf_topdown_lines and jet_cli_perf_zone_lines show.
 jet_cli_perf_receipt_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     items: jet_cli_perf_rows(trace, "receipt_sections") ?? return [String]{}
     lines := [String]{}
     loop item in items {
         section: trace_receipt_section_from_json(item) ?? next
-        if section.name == "heap" || section.name == "causal" || section.name == "topdown" -> next
+        if section.name == "heap" || section.name == "causal" || section.name == "topdown" || section.name == "zones" {
+            next
+        }
         bytes: canonical_json_bytes(section.value)
         text: String.from_bytes(bytes.slice(0, bytes.len() - 1)) ?? next
         lines.push("receipt {section.name} {text}")
@@ -986,15 +989,6 @@ jet_cli_perf_member_symbol: fn(value: CanonicalJSON) -> String? Never! {
     jet_cli_perf_symbol(fields[at].value)
 }
 
-// The name of the row's symbol alone: a core.perf zone's or plot's own
-// name, which its source path does not qualify.
-jet_cli_perf_member_symbol_name: fn(value: CanonicalJSON) -> String? Never! {
-    fields: jettrace_object_view(value, "jettrace row") ?? return None
-    at: jet_cli_perf_key(fields, "symbol") ?? return None
-    symbol: jettrace_object_view(fields[at].value, "symbol") ?? return None
-    jet_cli_perf_field_text(symbol, "name")
-}
-
 // `symbol_label`.
 jet_cli_perf_symbol: fn(value: CanonicalJSON) -> String? Never! {
     fields: jettrace_object_view(value, "symbol") ?? return None
@@ -1211,72 +1205,55 @@ jet_cli_perf_log_span_summary: fn(trace: CanonicalJSON) -> String? Never! {
     Val("log spans count={count} window={start}..{end}ns · {symbol}")
 }
 
-// The core.perf zones, frame marks and plots of the trace's spans: each
-// zone name with how many closed, their total and longest time, heaviest
-// first; the frames with how many and their mean and longest interval; and
-// each plot with how many values and its last.
+// The core.perf zones, frame marks and plots of the trace's `zones`
+// receipt section (jet_cli_perf_zones_section): each zone name with how
+// many closed, their total and longest time, heaviest first; the frames
+// with how many and their mean and longest interval; and each plot with how
+// many values and its last. The section counts every one the run closed,
+// the spans past the trace's row limit too.
 jet_cli_perf_zone_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     lines := [String]{}
-    items: jet_cli_perf_rows(trace, "spans") ?? return lines
-    zones := [JetCLIPerfZoneTotal]{}
-    // Each zone name's entry in `zones`, and each plot's in `plots`.
-    zoned := [String:Int]{}
-    frames := [Int]{}
-    plots := [JetCLIPerfPlotTotal]{}
-    plotted := [String:Int]{}
+    items: jet_cli_perf_rows(trace, "receipt_sections") ?? return lines
     loop item in items {
-        kind: jet_cli_perf_member_text(item, "kind") ?? next
-        start: jet_cli_perf_member_number(item, "start_ns") ?? next
-        end: jet_cli_perf_member_number(item, "end_ns") ?? next
-        symbol: jet_cli_perf_member_symbol_name(item) ?? next
-        if kind == "frame_mark" {
-            frames.push(start)
-            next
-        }
-        if kind == "plot" {
-            parts: symbol.split(" = ").to_list()
-            name: parts[0]
-            value: if parts.len() > 1 -> parts[1] else -> ""
-            if !plotted.has_key(name) {
-                plotted[name] = plots.len()
-                plots.push(JetCLIPerfPlotTotal{name: name, count: 0, last: ""})
+        section: trace_receipt_section_from_json(item) ?? next
+        if section.name != "zones" -> next
+        fields: jettrace_object_view(section.value, "receipt zones") ?? next
+        if jet_cli_perf_key(fields, "zones") == .Val(zones_at) {
+            if jettrace_array(fields[zones_at].value, "receipt zones.zones") == .Ok(zones) {
+                loop zone in zones {
+                    name: jet_cli_perf_member_text(zone, "name") ?? ""
+                    count: jet_cli_perf_member_number(zone, "count") ?? 0
+                    total: jet_cli_perf_member_number(zone, "total_ns") ?? 0
+                    longest: jet_cli_perf_member_number(zone, "longest_ns") ?? 0
+                    lines.push("zone {name} count={count} total={total}ns longest={longest}ns")
+                }
             }
-            plot := plots[plotted[name]]
-            plot.count += 1
-            plot.last = value
-            plots[plotted[name]] = plot
-            next
         }
-        if kind != "zone" -> next
-        if !zoned.has_key(symbol) {
-            zoned[symbol] = zones.len()
-            zones.push(JetCLIPerfZoneTotal{name: symbol, count: 0, total: 0, longest: 0})
+        if jet_cli_perf_key(fields, "frames") == .Val(frames_at) {
+            frames: fields[frames_at].value
+            count: jet_cli_perf_member_number(frames, "count") ?? 0
+            if count > 1 {
+                mean: jet_cli_perf_member_number(frames, "mean_ns") ?? 0
+                widest: jet_cli_perf_member_number(frames, "longest_ns") ?? 0
+                lines.push("frames count={count} mean={mean}ns longest={widest}ns")
+            }
+            if count == 1 -> lines.push("frames count=1")
         }
-        zone := zones[zoned[symbol]]
-        zone.count += 1
-        zone.total += end - start
-        if end - start > zone.longest -> zone.longest = end - start
-        zones[zoned[symbol]] = zone
+        if jet_cli_perf_key(fields, "plots") == .Val(plots_at) {
+            if jettrace_array(fields[plots_at].value, "receipt zones.plots") == .Ok(plots) {
+                loop plot in plots {
+                    name: jet_cli_perf_member_text(plot, "name") ?? ""
+                    count: jet_cli_perf_member_number(plot, "count") ?? 0
+                    last: jet_cli_perf_member_text(plot, "last") ?? ""
+                    lines.push("plot {name} count={count} last={last}")
+                }
+            }
+        }
     }
-    zones.sort_by(fn(left: JetCLIPerfZoneTotal, right: JetCLIPerfZoneTotal) { (right.total <=> left.total).then(left.name <=> right.name) })
-    loop zone in zones {
-        lines.push("zone {zone.name} count={zone.count} total={zone.total}ns longest={zone.longest}ns")
-    }
-    frames.sort()
-    widest := 0
-    loop at in 1..<frames.len() {
-        if frames[at] - frames[at - 1] > widest -> widest = frames[at] - frames[at - 1]
-    }
-    if frames.len() > 1 {
-        mean: (frames[frames.len() - 1] - frames[0]).div_euclid(frames.len() - 1)
-        lines.push("frames count={frames.len()} mean={mean}ns longest={widest}ns")
-    }
-    if frames.len() == 1 -> lines.push("frames count=1")
-    loop plot in plots { lines.push("plot {plot.name} count={plot.count} last={plot.last}") }
     lines
 }
 
-// One zone name's closed zones (jet_cli_perf_zone_lines).
+// One zone name's closed zones (jet_cli_perf_zones_section).
 JetCLIPerfZoneTotal: struct {
     name: String,
     count: Int,
@@ -1284,7 +1261,7 @@ JetCLIPerfZoneTotal: struct {
     longest: Int,
 }
 
-// One plot's values (jet_cli_perf_zone_lines): how many, and its last.
+// One plot's values (jet_cli_perf_zones_section): how many, and its last.
 JetCLIPerfPlotTotal: struct {
     name: String,
     count: Int,
