@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112375,
+    "rev": 112377,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75958,21 +75958,21 @@
         {
           "n": 51,
           "text": "Typed crash dumps and the flight recorder: A stop writes a typed dump (every task's stack, values reachable from them to a budget, the flight-recorder ring) and `jet debug` opens it with the live verbs; `jet perf attach` drains the same ring. Proof: `jet test Compiler --profile cases --filter Debug/crash_dump_opens_typed`; `--filter Perf/attach_drains_flight_ring`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R9)",
-          "status": "met",
-          "metBy": "Main",
+          "status": "open",
+          "metBy": null,
           "verifiedBy": null,
-          "evidence": "p311 batch compiler (dev 5f090c020d, gate-p311): full suite PASS Debug/crash_dump_opens_typed and Perf/attach_drains_flight_ring (suite-p311/cases.out). The budget row Debug/crash_dump_keeps_its_budget: jet debug on the dump prints \"Memory: 33546864 bytes held, within the 33554432-byte budget; 30994432 bytes cut off past it\", typed locals `chunks = [[0, 1, …, 15, … 1999984 more], <cut off>, …]`. Its harness FAIL was case ordering (stdout predicates after a file: line), fixed by SUB Main-6841-c51-budget-case-order, which passes on gate-p311.",
-          "at": "2026-11-19T09:50:49.770Z",
+          "evidence": "",
+          "at": "2026-11-19T11:21:58.125Z",
           "unblockedFrom": "D-OBSERVE-FLIGHT1"
         },
         {
           "n": 52,
           "text": "Typed heap snapshots: Under `--lens=alloc`, a heap snapshot taken at exit, at a `perf.heap_mark` or on attach names each live block's type and allocation line; `jet perf compare` diffs two snapshots by type and line; `jet perf view --retained-by` shows a block's shortest retention path from a root. Proof: `jet test Compiler --profile cases --filter Perf/heap_snapshot_types_retention_and_diff`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R10)",
-          "status": "met",
-          "metBy": "Main",
+          "status": "open",
+          "metBy": null,
           "verifiedBy": null,
-          "evidence": "dev 1b276fc602 (p304 batch compiler, census build of 07f05f5ef8): `jet test Compiler --profile cases --filter Perf/heap_snapshot_types_retention_and_diff` n=1 bad=0 (cycle-p304 proof apcallsite-1); suite-p304 fixed.txt lists it.",
-          "at": "2026-11-19T05:46:25.765Z",
+          "evidence": "",
+          "at": "2026-11-19T11:21:59.009Z",
           "unblockedFrom": "D-PERF-HEAP1"
         },
         {
@@ -76152,7 +76152,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-19T11:21:56.965Z",
+      "updated": "2026-11-19T11:21:59.009Z",
       "updatedBy": "Main",
       "criteriaLastN": 67
     },
@@ -160903,6 +160903,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-19T11:21:59.010Z",
+      "by": "Main",
+      "action": "card.criteria-reopen",
+      "ref": "c0nwrfck",
+      "note": "#52: c39 fresh review (IfHole, p313): jet perf run --lens=alloc alloc.jet snapshot of 20 live blocks leaves 17 (68,048 of 68,960 bytes) as 'elsewhere' with no type or line"
+    },
+    {
+      "at": "2026-11-19T11:21:58.125Z",
+      "by": "Main",
+      "action": "card.criteria-reopen",
+      "ref": "c0nwrfck",
+      "note": "#51: c39 fresh review (IfHole, p313): the dump of a 3-task deadlock lists one task and its locals show as untyped Pointer (c51: every task's stack); a plain jet run of the deadlock writes no dump, only --observe does"
+    },
     {
       "at": "2026-11-19T11:21:56.965Z",
       "by": "Main",
