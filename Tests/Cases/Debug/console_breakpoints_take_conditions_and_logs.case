@@ -14,18 +14,18 @@ step: jet debug prog.jet
 stdin: console_breakpoints_take_conditions_and_logs.stdin
 exit: 0
 stdout: ~ "Breakpoint set  prog.jet:4 if i == 3\nThe condition can't run in the program: the debugger checks it at each hit, which stops the program each time\n" # setting it says where the condition runs
-stdout: ~ "Logpoint set  prog.jet:7 "
-stdout: ~ "Breakpoint set  total_of\n"
+stdout: ~ "Logpoint set  prog.jet:7 " # a logpoint is set on the line
+stdout: ~ "Breakpoint set  total_of\n" # a breakpoint is set on a function name
 stdout: ~ "  2 break prog.jet:4 if i == 3\n  3 log prog.jet:7 " # `breaks` lists each by number
-stdout: ~ "  4 break total_of\n"
-stdout: ~ "Deleted breakpoint 4\n"
+stdout: ~ "  4 break total_of\n" # the list shows the function breakpoint
+stdout: ~ "Deleted breakpoint 4\n" # delete removes it
 stdout: !~ "Breakpoint hit  prog.jet:2" # the deleted breakpoint does not stop
 stdout: !~ "i = 0" # the condition skips the turns before i == 3
-stdout: ~ "Breakpoint hit  prog.jet:4  in total_of()\n"
+stdout: ~ "Breakpoint hit  prog.jet:4  in total_of()\n" # the conditional breakpoint stops only when its condition holds
 stdout: ~ "print i\ni = 3\n" # `print i` at the stop (a piped command is echoed)
-stdout: ~ "#1  run()  at prog.jet:10\n10 | run: fn()"
-stdout: ~ "No frame above #1\n"
-stdout: ~ "#0  total_of()  at prog.jet:4\n4 |         step: i\n"
-stdout: ~ "Frame needs a frame number `bt` shows, 0 to 1, as `frame 1`\n"
+stdout: ~ "#1  run()  at prog.jet:10\n10 | run: fn()" # up moves to the caller frame with its source line
+stdout: ~ "No frame above #1\n" # up past the outermost frame is refused
+stdout: ~ "#0  total_of()  at prog.jet:4\n4 |         step: i\n" # down returns to the stopped frame
+stdout: ~ "Frame needs a frame number `bt` shows, 0 to 1, as `frame 1`\n" # a frame number out of range names the valid range
 stdout: ~ "total is 10\n" # the logpoint logs and runs on
-stdout: ~ "Program finished\n"
+stdout: ~ "Program finished\n" # the program runs to its end

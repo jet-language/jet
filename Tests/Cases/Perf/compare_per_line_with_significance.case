@@ -34,13 +34,13 @@ capture: line = text stdout.after_first("  main.jet:11 spin_hot_loop ").split("\
 cap:line: ~ " slower (p=" # the spin loop's line took more samples in every head capture
 capture: function = text stdout.after_first("  main.jet spin_hot_loop ").split("\n", 0)
 cap:function: ~ " slower (p=" # and so did its function
-stdout: ~ "verdict: exact Mann-Whitney U over 5 captures against 5"
+stdout: ~ "verdict: exact Mann-Whitney U over 5 captures against 5" # the verdict names its test and both capture counts
 step json: jet perf compare {work}/base {work}/head --json
 exit: 0
-stdout: ~ "\"kind\":\"jet.perf.compare\""
+stdout: ~ "\"kind\":\"jet.perf.compare\"" # the JSON form names its kind
 stdout: ~ "\"verdict\":\"slower\"" # the JSON rows carry the same verdicts
 step one: jet perf compare {work}/base/1.jettrace {work}/head/1.jettrace
 exit: 0
 stdout: ~ "  main.jet:11 spin_hot_loop " # the line's means, without a verdict
 stdout: !~ "slower (p=" # no capture count to judge by
-stdout: ~ "verdict: none (one capture each; capture each side at least 4 times)"
+stdout: ~ "verdict: none (one capture each; capture each side at least 4 times)" # one capture a side is too few to rank, and the verdict says how many to take

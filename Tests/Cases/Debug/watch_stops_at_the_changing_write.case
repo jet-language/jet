@@ -11,13 +11,13 @@ env: NO_COLOR=1
 step: jet debug prog.jet
 stdin: watch_stops_at_the_changing_write.stdin
 exit: 0
-stdout: ~ "Breakpoint hit  prog.jet:4  in sum_even()\n"
-stdout: ~ "Watchpoint 3  total = 0\n"
-stdout: ~ "Deleted breakpoint 2\n"
+stdout: ~ "Breakpoint hit  prog.jet:4  in sum_even()\n" # the breakpoint stops before the watch is set
+stdout: ~ "Watchpoint 3  total = 0\n" # the watch reads the current value
+stdout: ~ "Deleted breakpoint 2\n" # the temporary breakpoint is gone
 stdout: ~ "breaks\n  3 watch total\n" # the watch is listed by its number
-stdout: ~ "Watchpoint 3 hit  prog.jet:4  in sum_even()\ntotal: 0 -> 2\n"
-stdout: ~ "Watchpoint 3 hit  prog.jet:4  in sum_even()\ntotal: 2 -> 6\n"
+stdout: ~ "Watchpoint 3 hit  prog.jet:4  in sum_even()\ntotal: 0 -> 2\n" # the first stop is the write that changes total
+stdout: ~ "Watchpoint 3 hit  prog.jet:4  in sum_even()\ntotal: 2 -> 6\n" # the next stop is the next changing write
 stdout: !~ "total: 0 -> 0" # an unchanging write never stops
-stdout: !~ "total: 2 -> 2"
-stdout: ~ "6\n"
-stdout: ~ "Program finished\n"
+stdout: !~ "total: 2 -> 2" # a write of the same value never stops
+stdout: ~ "6\n" # the program prints its sum
+stdout: ~ "Program finished\n" # and runs to its end

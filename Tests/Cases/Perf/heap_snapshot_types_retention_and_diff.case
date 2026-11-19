@@ -24,17 +24,17 @@ stdout: ~ "live at after-chat  " # the snapshot's heading
 stdout: ~ "  [Int]  chat.jet:22 run  200 blocks  " # the bodies, by type and line
 step o0compare: jet perf compare {work}/o0.jettrace --heap start..after-chat
 exit: 0
-stdout: ~ "Heap start -> after-chat: blocks "
+stdout: ~ "Heap start -> after-chat: blocks " # the diff names both snapshots
 stdout: ~ "  [Int]  chat.jet:22 run  +200 blocks  +" # what grew, by type and line
 step o0bodies: jet perf view {work}/o0.jettrace --retained-by [Int]
 exit: 0
-stdout: ~ "retained [Int] at after-chat  200 blocks  "
+stdout: ~ "retained [Int] at after-chat  200 blocks  " # the retained list is typed and counted
 stdout: ~ "  rooms[" # from the variable
 stdout: ~ "].history[" # through the room's history
 stdout: ~ "].body  200 blocks  " # to each message's body, one path shape
 step o0history: jet perf view {work}/o0.jettrace --retained-by=[Message]
 exit: 0
-stdout: ~ "retained [Message] at after-chat  4 blocks  "
+stdout: ~ "retained [Message] at after-chat  4 blocks  " # each element type is a row of its own
 stdout: ~ "].history  4 blocks  " # each room's history buffer
 step o0none: jet perf view {work}/o0.jettrace --retained-by Ring
 exit: 2
@@ -44,7 +44,7 @@ exit: 0
 stdout: = "messages=200\n"
 step o1bodies: jet perf view {work}/o1.jettrace --retained-by [Int]
 exit: 0
-stdout: ~ "retained [Int] at after-chat  200 blocks  "
+stdout: ~ "retained [Int] at after-chat  200 blocks  " # the same retention shows on every reading
 stdout: ~ "].history[" # through the room's history
 stdout: ~ "].body  " # to each message's body
 step o2: jet perf run -O2 --lens=alloc chat.jet --out {work}/o2.jettrace
@@ -52,9 +52,9 @@ exit: 0
 stdout: = "messages=200\n"
 step o2bodies: jet perf view {work}/o2.jettrace --retained-by [Int]
 exit: 0
-stdout: ~ "retained [Int] at after-chat  200 blocks  "
+stdout: ~ "retained [Int] at after-chat  200 blocks  " # and again in this view
 stdout: ~ "].history[" # through the room's history
 stdout: ~ "].body  " # to each message's body
 step o2compare: jet perf compare {work}/o2.jettrace --heap start..after-chat
 exit: 0
-stdout: ~ "  [Int]  chat.jet:22 run  +200 blocks  +"
+stdout: ~ "  [Int]  chat.jet:22 run  +200 blocks  +" # the diff names the allocating line and its growth

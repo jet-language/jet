@@ -11,13 +11,13 @@ env: NO_COLOR=1
 step: jet debug prog.jet
 stdin: tasks_lists_every_task.stdin
 exit: 0
-stdout: ~ "Breakpoint hit  prog.jet:11  in count()\n"
+stdout: ~ "Breakpoint hit  prog.jet:11  in count()\n" # the breakpoint stops count() in its loop
 stdout: ~ "tasks\n  1  root  " # task 1 first, the main thread
-stdout: ~ "  blocked  channel receive\n"
+stdout: ~ "  blocked  channel receive\n" # drain is parked on its channel receive
 stdout: ~ "drain()  at prog.jet:4\n" # the parked task's own frames
-stdout: ~ "  running\n    #0  count()  at prog.jet:11\n"
+stdout: ~ "  running\n    #0  count()  at prog.jet:11\n" # the stopped task shows its own frame
 stdout: ~ "\n* " # the task the program stopped in
-stdout: !~ "SIGTRAP"
-stdout: ~ "count 12\n"
-stdout: ~ "drain 2\n"
-stdout: ~ "Program finished\n"
+stdout: !~ "SIGTRAP" # the stop never leaks a raw signal
+stdout: ~ "count 12\n" # count resumes and finishes
+stdout: ~ "drain 2\n" # drain receives both values
+stdout: ~ "Program finished\n" # the program runs to its end

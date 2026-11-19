@@ -1,5 +1,5 @@
-// Rounds of a score. At round 1 the program moves an edited source over
-// its own, as an editor saves one, so `fix` has an edit to swap in.
+// Rounds of a score. At round 1 the program moves an edit (a .edit file, no
+// package member until then) over its own source, so `fix` has one to swap.
 use files: core.files
 
 Score: struct {
@@ -12,7 +12,7 @@ score: fn(round: Int) -> Score {
 }
 
 run: fn() {
-    edited: if files.is_file("prog.next.jet") -> "prog.next.jet" else -> "prog.layout.jet"
+    edited: if files.is_file("prog.next.edit") -> "prog.next.edit" else -> "prog.layout.edit"
     loop round in 0..<4 {
         if round == 1 -> files.rename(edited, "prog.jet") ?? ()
         print("round {round} score {score(round).value}")
