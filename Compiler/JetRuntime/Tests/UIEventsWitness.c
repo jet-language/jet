@@ -13,7 +13,7 @@ typedef int64_t H;
 typedef struct { unsigned char *data; uint64_t len,cap; } Text;
 typedef struct { uint64_t len,cap; unsigned char *data; } Bytes;
 typedef struct { H kind,first,second; } Event;
-_Static_assert(sizeof(Event)==24,"UiABI Event24");
+_Static_assert(sizeof(Event)==24,"UIABI Event24");
 extern void jet_rt_alloc_init(void);
 extern H jet_rt_alloc(H,H);
 extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);

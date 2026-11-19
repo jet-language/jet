@@ -1,4 +1,4 @@
-// Link the real Jet SHA-256 runtime and Sha256Tests.jet. No host hash provider.
+// Link the real Jet SHA-256 runtime and SHA256Tests.jet. No host hash provider.
 #include <assert.h>
 #include <stdint.h>
 #include <stddef.h>

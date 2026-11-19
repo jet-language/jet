@@ -9,7 +9,7 @@
 typedef int64_t H;
 typedef struct {uint64_t len,cap;H *data;} Pairs;
 typedef struct {H fields[12];Pairs *pairs;} Plan;
-_Static_assert(sizeof(Plan)==104,"UiABI snapshot layouts");
+_Static_assert(sizeof(Plan)==104,"UIABI snapshot layouts");
 extern void jet_rt_alloc_init(void);
 extern H jet_rt_alloc(H,H);
 extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
