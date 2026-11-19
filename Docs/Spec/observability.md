@@ -280,16 +280,19 @@ example.
 
 Under `alloc` the session builds the program with `--checked-alloc`, whose
 heap keeps each block's ten allocating call sites in its prefix, and the
-runtime links every block allocated from the start of the run into a live
-list until it is freed. A run without the lens tracks nothing and pays
-nothing. `core.perf.heap_mark(name)` takes a heap snapshot named `name`,
-and the runtime takes one named `exit` as the program exits; in any other
-run `heap_mark` does nothing. A snapshot holds the live list while it
-forks: the copy-on-write child walks the list as it stood, groups the live
-blocks by their call sites, writes the groups to the samples file and
-exits, while the program goes on once the child has the copy and waits for
-it to exit. The trace keeps the snapshots in its `heap` receipt section
-(type `JetPerfHeapSnapshots`): the checked source's `path`, then each
+runtime links every block allocated from the program's entry into a live
+list until it is freed. The blocks the runtime and the observation take
+before the entry, and those of the observation's writer thread, are their
+own, not the program's, and stay off the list. A run without the lens
+tracks nothing and pays nothing. `core.perf.heap_mark(name)` takes a heap
+snapshot named `name`, and the runtime takes one named `exit` as the
+program exits; in any other run `heap_mark` does nothing. A snapshot holds
+the live list while it forks: the copy-on-write child walks the list as it
+stood, groups the live blocks by their call sites, writes the groups to the
+samples file and exits, while the program goes on once the child has the
+copy and waits for it to exit. The trace keeps the snapshots in its `heap`
+receipt section (type `JetPerfHeapSnapshots`): the checked source's
+`path`, then each
 snapshot in the order the program took them with its `name`, `number`,
 live `blocks` and their `bytes`, and its `sites`, the blocks by the
 `function` and `line` of the checked source innermost on their allocating
@@ -615,6 +618,25 @@ the zone, frame, plot and log span rows to `.samples.spans`. It then removes
 the request, so the next publication clears the word, and reads the rows into
 the trace beside the ring's, each zone holding the ring's samples inside it.
 Tests/Cases/Perf/attach_turns_zones_on.case is the worked example.
+
+`jet run --observe --checked-alloc app.jet` keeps the live list as a `jet
+perf run --lens=alloc` does, which `jet perf attach <pid> --source app.jet
+--lens=alloc` snapshots while the program runs. It leaves
+`<temp>/jet-flight-<pid>.samples.heap-request` beside the ring, which the
+writer's next publication notices as it looks for the zones request: it
+takes the snapshot on the writer's thread, named `attach`, with the live
+list held as a `heap_mark` holds it, so no block joins or leaves it while
+the child forks, and answers in `.samples.heap`: the time the list was held
+and the snapshot's records. Its roots are the image's writable segments;
+the writer's frames are not the program's. The trace keeps the snapshot in
+its `heap` section, and stderr states how long the program's allocations
+and frees waited, `Heap snapshot: held the program's allocations and frees
+for 412 µs`. A program not started with `--checked-alloc` keeps no live
+list: the attach is refused with that reason and the command that starts
+one, and writes no trace. An observed run that is never attached pays one
+`faccessat` a publication, every 100ms, for the request.
+Tests/Cases/Perf/heap_snapshot_types_retention_and_diff.case is the worked
+example.
 
 A stop that ends an observed process (a panic, a trap, a contract failure)
 writes a typed dump while the stopping stack is whole:

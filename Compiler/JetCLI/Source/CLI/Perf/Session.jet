@@ -10,6 +10,7 @@ use {
     perf_process: core.process
     perf_sys: core.sys
     perf_time: core.time
+    jet_backend.[link_debug_addr]
     jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE]
     jet_foundation.[
         CanonicalJSON,
@@ -322,15 +323,30 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
 // `attach`: one point capture of a running process. A devserver browser
 // relay supplies browser rows and compiler symbol identities; otherwise the
 // runtime's live observation is attributed to `--source`. A process that
-// publishes neither still gets a schema-valid empty trace.
+// publishes neither still gets a schema-valid empty trace. With
+// `--lens=alloc`, the trace also holds a heap snapshot the program takes
+// while it runs (jet_cli_perf_attach_heap).
 jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Time]> JetDriverVerbOutput Never! {
     pid := Int?{None}
     out := String?{None}
     source := String?{None}
     allowlist := [String]{}
     zones_ms := 0
+    alloc := false
+    held_ns := Int?{None}
     skip := false
     loop (index, arg) in args {
+        if skip {
+            skip = false
+            next
+        }
+        if arg.starts_with("--lens=") {
+            if arg != "--lens=alloc" {
+                return jet_cli_perf_error("`{arg}` names a lens a running program can't start: attach takes the `alloc` lens alone", "attach with `--lens=alloc` for a heap snapshot, or with no lens for the flight ring", color)
+            }
+            alloc = true
+            next
+        }
         if skip {
             skip = false
             next
@@ -390,6 +406,9 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
         pid = Val(value)
     }
     target_pid: pid ?? return jet_cli_perf_error("`jet perf attach` needs a process id", "run `jet perf attach <pid> --source <file.jet>`", color)
+    if alloc && source == None {
+        return jet_cli_perf_error("`--lens=alloc` names each live block by its line in `--source`, which is missing", "run `jet perf attach {target_pid} --lens=alloc --source <file.jet>`", color)
+    }
     if !perf_files.is_dir("/proc/{target_pid}") {
         return jet_cli_perf_error("process {target_pid} is not running or not visible to this user", "start the program with `jet run --observe`, then attach to that pid", color)
     }
@@ -408,6 +427,9 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
         .Err(failure) -> return jet_cli_perf_error(failure.message, JET_CLI_PERF_FIX, color)
     }
     if browser == .Val(relayed) {
+        if alloc {
+            return jet_cli_perf_error("process {target_pid} is a devserver browser session, whose heap jet does not track", "attach to a program started with `jet run --observe --checked-alloc <file.jet>`", color)
+        }
         if source == .Val(path) {
             matched := false
             loop identity in relayed.sources {
@@ -430,6 +452,14 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
         // wakes, spawns and transfers, read as a run's are.
         flight: jet_cli_perf_attach_flight(target_pid, path)
         capture = jet_cli_perf_capture_source(path, text, observations, flight, target, None) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
+        if alloc {
+            heap: jet_cli_perf_attach_heap(target_pid, path) ?? return jet_cli_perf_error(err.message, "start the program with `jet run --observe --checked-alloc {path}`, then attach with `--lens=alloc`", color)
+            held_ns = Val(heap.held_ns)
+            // copy: the attach keeps its source; the section owns its own.
+            if jet_cli_perf_session_heaps(path.copy(), heap.samples.heaps.move()) == .Val(section) {
+                capture.receipts.push(section)
+            }
+        }
         // The ring's rows are timed from its earliest wait or transfer, or
         // the window's first zone row, on the program's monotonic clock:
         // attach has no start of its own on it.
@@ -453,19 +483,23 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
         return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2102", "live observe snapshot found, but `--source` is required", "domain capture must attribute facts to a Jet symbol identity", "run `jet perf attach {target_pid} --source <file.jet>`", color), exit_code: JET_DRIVER_EXIT_USAGE}
     }
     argv := [String]{"attach", "{target_pid}"}
-    if source == .Val(path) {
+    // The attach request's last use of its source: the recorded argv owns it.
+    if source.move() == .Val(path) {
         argv.push("--source")
-        // copy: the attach request keeps its source; the recorded argv owns its own.
-        argv.push(path.copy())
+        argv.push(path)
     }
     if allowlist.len() > 0 {
         argv.push("--capture")
         argv.push(allowlist.join(","))
     }
     if zones_ms > 0 -> argv.push("--zones={zones_ms}ms")
+    if alloc -> argv.push("--lens=alloc")
     capture.policy.allowlist = allowlist
     path: jet_cli_perf_session_write(capture, "attach", argv, out) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
-    JetDriverVerbOutput{stdout: "", stderr: if quiet -> "" else -> "Trace: {path}\n", exit_code: JET_DRIVER_EXIT_OK}
+    // How long the snapshot held the program: its allocations and frees
+    // waited while the runtime forked the copy that wrote it.
+    held: if held_ns == .Val(ns) -> "Heap snapshot: held the program's allocations and frees for {ns /% 1000} µs\n" else -> ""
+    JetDriverVerbOutput{stdout: "", stderr: if quiet -> "" else -> "{held}Trace: {path}\n", exit_code: JET_DRIVER_EXIT_OK}
 }
 
 // The flight ring the observed program `pid` publishes in the temporary
@@ -483,6 +517,61 @@ jet_cli_perf_attach_flight: fn(pid: Int, source: String) -[FS, Env, Time]> JetCL
     }
     jet_cli_perf_samples_read(taken, source, [TraceCounter]{}, None)
 }
+
+// `--lens=alloc`'s heap snapshot of the flight-recorded program `pid`, taken
+// while it runs, and how long it held the program, in nanoseconds. The
+// request is left beside the program's published ring; the writer thread
+// that publishes the ring every 100 ms notices it there (JetRuntime
+// PerfSamples.jet perf_flight_heap) and answers in `<ring>.heap`: the hold,
+// -1 when the program keeps no list of its live blocks, then the snapshot's
+// records, read beside a copy of the ring's image as a run's samples are.
+// Lines in `source` are its own.
+jet_cli_perf_attach_heap: fn(pid: Int, source: String) -[FS, Env, Time]> JetCLIPerfAttachHeap JetCLIReadError! {
+    ring: perf_files.join(perf_sys.temp_dir(), "jet-flight-{pid}.samples")
+    answer: "{ring}.heap"
+    request: "{ring}.heap-request"
+    perf_files.remove(answer).drop("an earlier attach's answer is none to this request")
+    perf_files.write(request, "") ?? return Err(jet_cli_read_error("cannot ask process {pid} for a heap snapshot: {jet_cli_io_error_text(err)}"))
+    answered := false
+    loop _ in 0..<JET_CLI_PERF_HEAP_WAITS {
+        perf_time.sleep(25ms)
+        if perf_files.exists(answer) {
+            answered = true
+            break
+        }
+    }
+    if !answered {
+        perf_files.remove(request).drop("an unanswered request is only withdrawn")
+        return Err(jet_cli_read_error("process {pid} did not answer the heap snapshot request within 5 s: it publishes no flight ring"))
+    }
+    bytes: perf_files.read_bytes(answer) ?? return Err(jet_cli_read_error("cannot read process {pid}'s heap snapshot: {jet_cli_io_error_text(err)}"))
+    perf_files.remove(answer).drop("the attach reads the answer once")
+    if bytes.len() < 8 {
+        return Err(jet_cli_read_error("process {pid} answered the heap snapshot request with no hold"))
+    }
+    if bytes[7] == (U8{255}) {
+        return Err(jet_cli_read_error("process {pid} keeps no list of its live blocks: it was not started with allocation tracking"))
+    }
+    taken: perf_files.join(perf_sys.temp_dir(), "jet-perf-attach-{pid}-{perf_time.unix_ns()}.heap")
+    perf_files.write_bytes(taken, bytes.slice(8, bytes.len())) ?? return Err(jet_cli_read_error("cannot keep process {pid}'s heap snapshot: {jet_cli_io_error_text(err)}"))
+    if perf_files.copy("{ring}.image", "{taken}.image") == .Err(failure) {
+        perf_files.remove(taken).drop("the attach reads the snapshot it kept once")
+        return Err(jet_cli_read_error("cannot copy process {pid}'s image: {jet_cli_io_error_text(failure)}"))
+    }
+    samples: jet_cli_perf_samples_read(taken, source, [TraceCounter]{}, None) ?? return Err(jet_cli_read_error("process {pid}'s heap snapshot names no line: its image has no line table"))
+    Ok(JetCLIPerfAttachHeap{samples: samples, held_ns: link_debug_addr(bytes, 0)})
+}
+
+// An attach's heap snapshot (jet_cli_perf_attach_heap): its records, read,
+// and how long it held the program, in nanoseconds.
+JetCLIPerfAttachHeap: struct {
+    samples: JetCLIPerfSamples,
+    held_ns: Int,
+}
+
+// The 25 ms waits an attach gives the program to answer a heap snapshot
+// request: 5 s, fifty of its publications.
+JET_CLI_PERF_HEAP_WAITS: 200
 
 // `--zones=` window: whole milliseconds or seconds (`500ms`, `2s`), above 0.
 jet_cli_perf_attach_window: fn(text: String) -> Int? Never! {

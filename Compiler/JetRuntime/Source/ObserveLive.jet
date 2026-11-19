@@ -545,7 +545,10 @@ rt_observe_writer_address: fn() -> I64 {
 // The periodic writer shares the same run lock and never publishes after
 // final publication until a resident host restarts the run. Each turn also
 // publishes the flight recorder's ring (PerfSamples.jet perf_flight_publish).
+// Its blocks are the observation's own, which a heap snapshot leaves out
+// (Alloc.jet alloc_check_track_skip_thread).
 #Export(c) jet_rt_observe_writer: fn(argument: I64) -> I64 {
+    alloc_check_track_skip_thread()
     writer: argument
     slot: sync_park_new()
     loop {

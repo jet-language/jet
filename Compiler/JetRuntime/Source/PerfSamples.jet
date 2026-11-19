@@ -476,7 +476,10 @@ perf_samples_start: fn() {
     }
     perf_counters_start(buffer, counters)
     perf_topdown_start(buffer, topdown)
-    if ((lenses & PERF_LENS_ALLOC) != I64{0}) { _ := alloc_check_track_start() }
+    // A flight recorder of a checked image (`jet run --observe
+    // --checked-alloc`) keeps the live list too, which `jet perf attach
+    // --lens=alloc` snapshots (perf_flight_heap).
+    if (flight || (lenses & PERF_LENS_ALLOC) != I64{0}) { _ := alloc_check_track_start() }
     // The record of the CPU time sampled, written at exit.
     observe_exit_install()
 }
@@ -1441,25 +1444,34 @@ perf_spans_flush: fn() {
     sync_thread_unlock(buffer)
 }
 
-// The heap snapshot named by text `name`, under the alloc lens: the live
-// list held (Alloc.jet alloc_check_track_hold) across a fork, whose child
-// writes the snapshot (perf_samples_heap_write) and exits, and whose parent
-// releases the list and waits for the child. Where the fork fails, this
-// thread writes it while it holds the list. The frames the snapshot scans
-// for roots are the ones above this call's.
+// The heap snapshot named by text `name`, under the alloc lens
+// (perf_samples_heap_take). The frames the snapshot scans for roots are the
+// ones above this call's.
 perf_samples_heap: fn(name: I64) {
     fd: perf_samples_fd
     if (fd < I64{0} || (perf_samples_lens_mask & PERF_LENS_ALLOC) == I64{0}) {
         return
     }
-    frame: alloc_check_caller_frame()
+    _ := perf_samples_heap_take(fd, name, alloc_check_caller_frame())
+}
+
+// Write the heap snapshot named by text `name` to `fd`, its roots the frames
+// above `frame` (none for 0) and the image's writable segments: the live
+// list held (Alloc.jet alloc_check_track_hold) across a fork, whose child
+// writes the snapshot (perf_samples_heap_write) and exits, and whose parent
+// releases the list and waits for the child. Where the fork fails, this
+// thread writes it while it holds the list. The nanoseconds the list was
+// held, while every allocation and free of the program's waited on it.
+perf_samples_heap_take: fn(fd: I64, name: I64, frame: I64) -> I64 {
     number: alloc_check_track_hold()
+    began: sync_now_ns()
     pid := I64{-1}
     #Unsafe("fork copies the held live list into a child whose only thread writes the snapshot and exits, never returning from here") {
         pid = os_syscall_i64(I64{57}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     if (pid <= I64{0}) { perf_samples_heap_write(fd, number, name, frame) }
     if (pid == I64{0}) { perf_samples_heap_child_exit() }
+    held: wrapping(sync_now_ns() - began)
     alloc_check_track_release()
     if (pid > I64{0}) {
         reaped := I64{-4}
@@ -1469,6 +1481,7 @@ perf_samples_heap: fn(name: I64) {
             }
         }
     }
+    held
 }
 
 // End the heap snapshot's forked child once it has written the snapshot.
@@ -3950,7 +3963,9 @@ perf_flight_beside: fn(path: I64, suffix: I64) -> I64 {
 
 // At each of the observation writer's publications: drain the socket into
 // the ring and publish it in `directory`, the image beside it the first
-// time. A publication that finds the lock held (a dump) skips its turn.
+// time, answering an attach's zones (perf_flight_zones) and heap snapshot
+// (perf_flight_heap) requests. A publication that finds the lock held (a
+// dump) skips its turn.
 perf_flight_publish: fn(directory: I64) {
     state: perf_flight_state
     if (state == I64{0} || !perf_flight_lock(state, I64{1})) {
@@ -3967,6 +3982,8 @@ perf_flight_publish: fn(directory: I64) {
             }
             jet_rt_string_drop(image)
         }
+        // After the image, which the attach reads the snapshot beside.
+        perf_flight_heap(path)
         _ := perf_flight_file(path, wrapping(state + PERF_FLIGHT_RING_AT), rt_text_word(wrapping(state + PERF_FLIGHT_USED)))
         jet_rt_string_drop(path)
     }
@@ -4004,6 +4021,57 @@ perf_flight_zones: fn(path: I64) {
     }
     if (!wanted && perf_zones_on != I64{0}) { perf_zones_set(I64{0}) }
     perf_spans_flush()
+}
+
+// `jet perf attach --lens=alloc` asks a flight-recorded run for a heap
+// snapshot by leaving `<ring>.heap-request` beside the published ring
+// `path`. The publication that finds it answers in `<ring>.heap`, staged
+// beside it and renamed over it, then removes the request: first a word,
+// the nanoseconds the snapshot held the program's allocations and frees
+// (perf_samples_heap_take), or -1 where the run keeps no live list (it was
+// not started with `--checked-alloc`); then the snapshot `attach`'s
+// records, as a samples file keeps them. Its roots are the image's writable
+// segments alone: this thread's frames are the writer's, not the
+// program's.
+perf_flight_heap: fn(path: I64) {
+    request: perf_flight_beside(path, rt_static_text(".heap-request"))
+    asked: observe_cstring(request)
+    // faccessat(AT_FDCWD, asked, F_OK)
+    wanted: observe_syscall(I64{269}, I64{-100}, asked, I64{0}, I64{0}) == I64{0}
+    if (wanted) {
+        answer: perf_flight_beside(path, rt_static_text(".heap"))
+        staged: perf_flight_beside(path, rt_static_text(".heap.stage"))
+        file: observe_cstring(staged)
+        word: jet_rt_alloc(I64{8}, I64{8})
+        tracked: alloc_check_track_on()
+        rt_text_store(word, if (tracked) -> I64{0} else -> I64{-1})
+        // O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC, mode 0600.
+        fd: observe_syscall(I64{257}, I64{-100}, file, I64{524865}, I64{384})
+        if (fd >= I64{0}) {
+            written := host_write_all(fd, word, I64{8})
+            if (written == I64{0} && tracked) {
+                // The child writes its records after the word; the hold
+                // then takes the word's place (pwrite64 at offset 0).
+                rt_text_store(word, perf_samples_heap_take(fd, rt_static_text("attach"), I64{0}))
+                if (observe_syscall(I64{18}, fd, word, I64{8}, I64{0}) != I64{8}) {
+                    written = I64{-1}
+                }
+            }
+            _ := observe_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0})
+            if (written == I64{0}) {
+                target: observe_cstring(answer)
+                _ := observe_syscall(I64{82}, file, target, I64{0}, I64{0})
+                jet_rt_free(target, wrapping(rt_text_len(answer) + I64{1}), I64{1})
+            } else { _ := observe_syscall(I64{87}, file, I64{0}, I64{0}, I64{0}) }
+        }
+        _ := observe_syscall(I64{87}, asked, I64{0}, I64{0}, I64{0})
+        jet_rt_free(word, I64{8}, I64{8})
+        jet_rt_free(file, wrapping(rt_text_len(staged) + I64{1}), I64{1})
+        jet_rt_string_drop(staged)
+        jet_rt_string_drop(answer)
+    }
+    jet_rt_free(asked, wrapping(rt_text_len(request) + I64{1}), I64{1})
+    jet_rt_string_drop(request)
 }
 
 // At a run's exit (Observe.jet jet_rt_observe_exit): the published ring and

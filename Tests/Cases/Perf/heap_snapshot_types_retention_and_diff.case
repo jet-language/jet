@@ -6,7 +6,13 @@
 # marks, are live at `after-chat`, each retained through its room's
 # history: the path names the `history` and `body` fields, and at -O0 it
 # starts at the `rooms` variable. A type no snapshot keeps is refused with
-# the types they keep. It holds at -O0, -O1 and -O2.
+# the types they keep. It holds at -O0, -O1 and -O2. Every live block of a
+# snapshot, at a mark or at exit, is charged to the line that allocated it:
+# the runtime's and the observation's own blocks are not the program's. A
+# snapshot is also taken on attach: held.jet keeps the same bodies, by line
+# 24, while it runs under `jet run --observe --checked-alloc`, and `jet perf
+# attach --lens=alloc` snapshots them there and says how long it held the
+# program; a run not started with allocation tracking is refused.
 requires: os-name:linux
 requires: arch:x86_64
 fixture: HeapSnapshotRetention.fixture
@@ -17,6 +23,10 @@ stdout: = "messages=200\n"
 json: file o0.jettrace doc $.content.receipt_sections[0].value.snapshots[1].name = "after-chat"
 json: file o0.jettrace doc $.content.receipt_sections[0].value.snapshots[1].sites[?line=22][?type="[Int]"][?blocks=200] #= 1 # every body, by its type and line
 json: file o0.jettrace doc $.content.receipt_sections[0].value.snapshots[0].sites[?line=22] #= 0 # none before the chat
+json: file o0.jettrace doc $.content.receipt_sections[0].value.snapshots[2].name = "exit"
+json: file o0.jettrace doc $.content.receipt_sections[0].value.snapshots[0].sites[?line=null] #= 0 # each block at the first mark has its line
+json: file o0.jettrace doc $.content.receipt_sections[0].value.snapshots[1].sites[?line=null] #= 0 # and at the second
+json: file o0.jettrace doc $.content.receipt_sections[0].value.snapshots[2].sites[?line=null] #= 0 # and at exit
 json: file o0.jettrace doc $.content.receipt_sections[0].value.snapshots[1].retained[0].type = "[Int]" # what retains the bodies, types in order
 step o0view: jet perf view {work}/o0.jettrace
 exit: 0
@@ -58,3 +68,31 @@ stdout: ~ "].body  " # to each message's body
 step o2compare: jet perf compare {work}/o2.jettrace --heap start..after-chat
 exit: 0
 stdout: ~ "  [Int]  chat.jet:22 run  +200 blocks  +" # the diff names the allocating line and its growth
+session held line: jet run --observe --checked-alloc held.jet
+stderr: null
+recv held
+stdout.trim: ~ "READY" # every body is live and the program waits
+step attach: jet perf attach {pid:held} --lens=alloc --source held.jet --out {work}/attach.jettrace
+exit: 0
+stderr: ~ "Heap snapshot: held the program's allocations and frees for " # how long the snapshot held the program
+json: file attach.jettrace doc $.content.receipt_sections[?name="heap"][0].value.snapshots[0].name = "attach"
+json: file attach.jettrace doc $.content.receipt_sections[?name="heap"][0].value.snapshots[0].sites[?line=24][?type="[Int]"][?blocks=200] #= 1 # every body, by its type and line, while the program runs
+json: file attach.jettrace doc $.content.receipt_sections[?name="heap"][0].value.snapshots[0].sites[?line=null] #= 0 # each live block has its line
+step attachview: jet perf view {work}/attach.jettrace
+exit: 0
+stdout: ~ "  [Int]  held.jet:24 run  200 blocks  " # the view names them so too
+signal held: KILL
+close held
+exit: any # the case's KILL ends the program
+session plain line: jet run --observe held.jet
+stderr: null
+recv plain
+stdout.trim: ~ "READY" # an observed run without allocation tracking
+step untracked: jet perf attach {pid:plain} --lens=alloc --source held.jet --out {work}/untracked.jettrace
+exit: 2
+stderr: ~ "keeps no list of its live blocks: it was not started with allocation tracking" # the refusal's reason
+stderr: ~ "jet run --observe --checked-alloc held.jet" # how to start it with tracking
+file: untracked.jettrace absent # no empty snapshot
+signal plain: KILL
+close plain
+exit: any # the case's KILL ends the program

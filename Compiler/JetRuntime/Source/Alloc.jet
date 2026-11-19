@@ -115,16 +115,22 @@ alloc_check_take_observer := I64{0}
 
 alloc_check_give_observer := I64{0}
 
-// The checked heap's live list under `jet perf run --lens=alloc`
-// (alloc_check_track_start): 1 once it tracks, its first block, and the
-// heap snapshots taken so far (alloc_check_track_hold). The quarantine
-// lock guards all but the switch, which is written once before any thread
-// but the starting one runs.
+// The checked heap's live list under the alloc lens (alloc_check_track_start):
+// 2 once the observation start arms it, 1 once the entry starts it
+// (alloc_check_track_entry), its first block, and the heap snapshots taken
+// so far (alloc_check_track_hold). The quarantine lock guards all but the
+// switch, which each take loads once.
 alloc_check_tracking := I64{0}
 
 alloc_check_live_head := I64{0}
 
 alloc_check_snapshots := I64{0}
+
+// The TCB of the thread whose blocks the live list leaves out, the
+// observation writer's (alloc_check_track_skip_thread), -1 for none: its
+// publications and the heap snapshots it takes for `jet perf attach` are
+// the observation's own blocks, not the program's.
+alloc_check_track_skipped := I64{-1}
 
 // Layout.from_size_align(size.max(1), align): alignment must be a nonzero
 // power of two, and rounding the size to alignment must fit isize.MAX.
@@ -2863,7 +2869,7 @@ priv alloc_check_frames: fn(out: I64, count: I64) {
         os_store_i64(wrapping(pointer + size), pointer ~ ALLOC_CHECK_TAIL)
     }
     alloc_check_frames(wrapping(pointer - I64{120}), I64{10})
-    if (alloc_check_tracking != I64{0}) {
+    if (alloc_check_tracking == I64{1} && alloc_check_track_thread()) {
         lock: wrapping(alloc_root + I64{16})
         alloc_lock(lock)
         alloc_check_track(pointer)
@@ -2958,15 +2964,54 @@ priv alloc_check_frames: fn(out: I64, count: I64) {
     I64{1}
 }
 
-// Under the alloc lens (PerfSamples.jet perf_samples_start): link every
-// checked block allocated from now on into the live list. False outside
+// Under the alloc lens (PerfSamples.jet perf_samples_start): arm the live
+// list, which the entry starts (alloc_check_track_entry). False outside
 // checked mode, which has no prefix to link through.
 alloc_check_track_start: fn() -> Bool {
     if (alloc_class_limit != I64{0}) { return false }
-    #Unsafe("the observation start runs before the program's other threads; each take loads the switch once") {
-        alloc_check_tracking = I64{1}
+    #Unsafe("the observation start runs before the entry; a take links a block only once the entry starts the list") {
+        alloc_check_tracking = I64{2}
     }
     true
+}
+
+// At the entry (Main.jet jet_rt_main): an armed live list links every
+// checked block allocated from now on, so a heap snapshot holds the blocks
+// the program allocated, not the runtime's and the observation's own, which
+// were taken before it. A block a take left unlinked is no block of the
+// list's (alloc_check_untrack).
+alloc_check_track_entry: fn() {
+    if (alloc_check_tracking != I64{2}) {
+        return
+    }
+    #Unsafe("an aligned whole-word store; a take on the observation's writer thread that loads the switch before it links no block, which its free leaves alone") {
+        alloc_check_tracking = I64{1}
+    }
+}
+
+// Whether the live list links blocks: the entry has started it.
+alloc_check_track_on: fn() -> Bool { alloc_check_tracking == I64{1} }
+
+// The observation writer (ObserveLive.jet jet_rt_observe_writer), as it
+// starts: the live list leaves out every block it takes from now on.
+alloc_check_track_skip_thread: fn() {
+    base := I64{0}
+    #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); it is only kept to compare") {
+        base = os_tls_base_i64()
+    }
+    #Unsafe("an aligned whole-word store; a take that loads the word before it is a take of another thread's") {
+        alloc_check_track_skipped = base
+    }
+}
+
+// Whether a tracking take on this thread links its block: none of the
+// observation writer's does (alloc_check_track_skip_thread).
+priv alloc_check_track_thread: fn() -> Bool {
+    base := I64{0}
+    #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); it is only compared") {
+        base = os_tls_base_i64()
+    }
+    base != alloc_check_track_skipped
 }
 
 // Link the fresh payload `pointer` at the head of the live list. The caller

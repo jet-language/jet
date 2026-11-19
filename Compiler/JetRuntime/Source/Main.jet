@@ -283,6 +283,9 @@ main_call_stopped: fn() {
     #Unsafe("an idempotent install: every writer stores the same code address") {
         main_process_stop_code = rt_process_stop_claim_address()
     }
+    // An armed live list (`--lens=alloc`, Alloc.jet alloc_check_track_entry)
+    // starts here, after the runtime's and the observation's own blocks.
+    alloc_check_track_entry()
     // `entry` is the loader/object's checked executable System V void(void)
     // address, not a closure header.
     coll_call0_unit(entry)
