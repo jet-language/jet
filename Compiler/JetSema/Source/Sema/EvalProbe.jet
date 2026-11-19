@@ -18,6 +18,7 @@ use {
         DIAGNOSTIC_ERROR,
         Diagnostic,
         Expr,
+        FnBody,
         Lambda,
         LambdaBody,
         LambdaParam,
@@ -34,6 +35,9 @@ use {
         ast_empty_lambda_meta,
         authority_grantable_roots,
         expr_span,
+        name_rows,
+        name_rows_get_text,
+        name_rows_set,
         type_marked_name,
         type_name,
         type_unqualified_nominals,
@@ -388,11 +392,65 @@ sema_eval_probe_effect_refusals: fn(answer: SemaEvalProbeAnswer, nodes: [SemaEff
         if path.len() > 0 {
             writer: nodes[path[path.len() - 1]]
             writes: writer.rare ?? SEMA_EFFECT_NODE_NO_RARE
-            written: writes.module_writes[0].name
-            refusals.push(sema_error("E3401", answer.span, "the debugger can't evaluate this: {callee} writes module state `{written}`", "an expression the debugger evaluates is checked as `fn() -[]>`, and a write to module state outlives the evaluation", "evaluate the values the expression reads without the call to {callee}"))
+            refusals.push(sema_eval_probe_writer_refusal(callee, writes.module_writes[0].name, answer.span))
         }
     }
     refusals
+}
+
+sema_eval_probe_writer_refusal: fn(callee: String, written: String, span: Span) -> Diagnostic {
+    sema_error("E3401", span, "the debugger can't evaluate this: {callee} writes module state `{written}`", "an expression the debugger evaluates is checked as `fn() -[]>`, and a write to module state outlives the evaluation", "evaluate the values the expression reads without the call to {callee}")
+}
+
+// The effect pass's verdict (sema_eval_probe_effect_refusals) on a function
+// no program holds, checked against a held program
+// (sema_script_probe_check_func). `functions` are the program's checked
+// functions, with the solved rows its effect pass stamped. What the function
+// does itself, and the solved row of each function it calls, are judged
+// against the empty ceiling and the deny-only `Unsafe`. A call that reaches
+// a write to module state, through calls or function values, is refused. A
+// call that no function of `functions` has is left out, as the effect pass
+// leaves out a call with no node.
+sema_eval_held_effect_refusals: fn(function: FnBody, functions: [FnBody], span: Span) -> [Diagnostic] {
+    refusals := [Diagnostic]{}
+    own := [String]{}
+    loop name in function.effects.direct -> sema_effect_set_add(own, name)
+    if function.effects.maximal -> sema_effect_set_union(own, authority_grantable_roots())
+    sema_eval_probe_row_refusals(own, "this expression", span, refusals)
+    by_key := name_rows()
+    loop (row, held) in functions -> name_rows_set(by_key, held.key, row)
+    seen := (loop _ in functions -> false)
+    loop edge in function.effects.call_edges {
+        if edge == "__jet_panic__" -> next
+        target: name_rows_get_text(by_key, edge) ?? next
+        callee: "`{functions[target].name}`"
+        sema_eval_probe_row_refusals(functions[target].effects.solved, callee, span, refusals)
+        writer: sema_eval_held_state_writer(functions, by_key, target, seen) ?? next
+        refusals.push(sema_eval_probe_writer_refusal(callee, functions[writer].effects.module_writes[0].name, span))
+    }
+    refusals
+}
+
+// The first function of `functions` that writes module state, reached
+// depth-first from `index` through calls and function values
+// (sema_effect_state_writer_path over the solved graph's nodes).
+sema_eval_held_state_writer: fn(functions: [FnBody], by_key: NameRows, index: Int, seen: &[Bool]) -> Int? Never! {
+    if seen[index] -> return None
+    seen[index] = true
+    if functions[index].effects.module_writes.len() > 0 -> return Val(index)
+    loop edge in functions[index].effects.call_edges {
+        target: name_rows_get_text(by_key, edge) ?? next
+        if sema_eval_held_state_writer(functions, by_key, target, seen) == .Val(found) {
+            return Val(found)
+        }
+    }
+    loop edge in functions[index].effects.value_edges {
+        target: name_rows_get_text(by_key, edge) ?? next
+        if sema_eval_held_state_writer(functions, by_key, target, seen) == .Val(found) {
+            return Val(found)
+        }
+    }
+    None
 }
 
 sema_eval_probe_row_refusals: fn(row: [String], subject: String, span: Span, refusals: &[Diagnostic]) {

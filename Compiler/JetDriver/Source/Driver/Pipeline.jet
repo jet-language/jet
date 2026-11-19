@@ -44,6 +44,10 @@ use {
         sema_derive_template_loop_waits,
         SemaProgramTables,
         SemaScopeEnvironment,
+        SemaScriptProbe,
+        SemaScriptProbeChecked,
+        sema_script_probe_check_func,
+        sema_script_probe_over,
         SemaSourceLocation,
         SemaSourceOrigin,
         SemaSourceSegment,
@@ -159,6 +163,7 @@ use {
         SemaEvalProbe,
         SemaEvalProbeAnswer,
         SemaEvalProbes,
+        sema_eval_held_effect_refusals,
         sema_eval_probe_answers,
         sema_eval_probe_parse,
         sema_eval_probes,
@@ -280,7 +285,7 @@ use {
         EffectModuleSource,
         RuntimeInterfaceRow,
     ]
-    jet_parser.[parser_guest_import_symbol]
+    jet_parser.[parse_source, parser_guest_import_symbol]
     jet_eval.[JetEvalComptimeInputAdapter]
     jet_pkg_model.[
         EFFECT_PANIC_EDGE,
@@ -6766,6 +6771,60 @@ jet_driver_release_aside: fn(checked: Int, state: &&JetDriverHeldState) {
     }
     released: task &&held { held.functions.len() }
     released.detach()
+}
+
+// A program's held check (JetDriverCompileRequest.hold_check_state), which
+// the debugger checks an expression's function against in place of a
+// compile of the program with the function appended
+// (jet_driver_held_eval_check).
+JetDriverHeldEval: struct {
+    // A probe of the stopped module (JetSema ScriptHelpers.jet
+    // sema_script_probe_over) over the held registration and the checked
+    // modules' types.
+    probe: SemaScriptProbe,
+    // The program's checked functions, with the solved effect rows its
+    // effect pass stamped. The effect verdict reads them, and so does the
+    // eval's build for the calls it binds to them.
+    functions: [FnBody],
+}
+
+// The held program `held` opened at the module whose source is `path`, the
+// display path the compile gives it (jet_driver_display_path). It returns
+// None when no checked module's source file is `path`.
+jet_driver_held_eval_open: fn(held: &&JetDriverHeldState, path: String) -> JetDriverHeldEval? {
+    taken := held.move()
+    found := ModuleID?{None}
+    loop checked in taken.modules {
+        if checked.source_file == path -> found = Val(checked.module_identity)
+    }
+    module_identity: found ?? return None
+    probe := sema_script_probe_over(taken.registration, taken.modules, module_identity) ?? return None
+    Val(JetDriverHeldEval{probe: probe.move(), functions: taken.functions.move()})
+}
+
+// The function in the source `text`, the debugger's expression function
+// (JetCLI DebugCompile.jet), checked by `held`'s probe
+// (sema_script_probe_check_func). The effect verdict judges the checked
+// function against the program's solved rows
+// (sema_eval_held_effect_refusals). A refusal is a report, and the check
+// is then not complete. Spans count from 0 in `text`. A text that doesn't
+// parse as a single function returns the parse's reports and no body.
+jet_driver_held_eval_check: fn(held: &JetDriverHeldEval, text: String) -> SemaScriptProbeChecked {
+    parsed := parse_source(text.bytes())
+    if jet_driver_has_errors(parsed.diagnostics) || parsed.program.items.len() != 1 {
+        return SemaScriptProbeChecked{function: None, diagnostics: parsed.diagnostics.move(), complete: false}
+    }
+    if parsed.program.items[0] == .Func(func) {
+        checked := sema_script_probe_check_func(held.probe, func)
+        if checked.complete && checked.function == .Val(function) {
+            loop refusal in sema_eval_held_effect_refusals(function, held.functions, function.source_span) {
+                checked.diagnostics.push(refusal)
+                checked.complete = false
+            }
+        }
+        return checked
+    }
+    SemaScriptProbeChecked{function: None, diagnostics: parsed.diagnostics.move(), complete: false}
 }
 
 // Drops `facts` on a detached task, as jet_driver_release_aside drops a
