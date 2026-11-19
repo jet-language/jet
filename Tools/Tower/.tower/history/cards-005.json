@@ -16402,6 +16402,517 @@
       "completedAt": "2026-11-16T05:55:14.267Z",
       "questions": [],
       "retiredAt": "2026-11-19T09:02:06.414Z"
+    },
+    {
+      "id": "c0flvd7x",
+      "num": 3838,
+      "title": "Failure model: three-state outcomes, failure ceilings, visible failure points, dbg and hop trails",
+      "body": "Destination: Jet's ratified failure law is built end to end. `T? E!` matches as three states (.Val, .None, .Err; D-OUTCOME-SHAPE1=A, done here). Failures pass up by themselves and None never does. A written failure contract is an optional ceiling and failure sets follow the effect law (D-FAIL-PUBSIG1=A, D-FAIL-EFFECT1=A). Readers see failure points through tools, and teams may require marks (D-FAIL-VISIBLE1=A). A function names its own error cases (D-ERR-CASES1=A, D-FAIL-INFER-UNION1=A). `dbg` works in pure code (D-DBG1=A). `err.as<T>()` recovers a typed failure (D-ERR-TRAIT1=A).\n\nWhy it matters: failures are the most common control flow in real programs; each gap here is a place where a beginner writes a conversion by hand or an expert cannot see where a failure leaves.\n\nSpec: Docs/spec/spec.md failure sections; probes: $JET_SCRATCH_ROOT/lanes/Main/prep/c3838/.\n\nOwned elsewhere: the editor's faint `?` inlay hint (#4917), publish's failure-set version rule (#6860).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P0",
+      "plan": "1. Patterns on `T? E!` accept `.Val(x)`, `.None`, `.Err(e)` directly; exhaustiveness over the three.\n2. Nested `.Ok(...)` form: greenfield cutover — migrate all sources; the old form gets no teaching diagnostic or jet fix (owner order).\n3. Failures keep automatic pass-up; None never leaves a function unless written (`?` on the optional) or `.or_err(\"why\")`.\n4. `??` resolves either state.\n5. Optional internal single-tag layout only with a paired perf cell.",
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "All criteria met with recorded evidence (latest batch compilers p216-p219); closed by Main."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Owner order 2026-11-16: c9 (err.as<T>, waiting on D-PRIM-ANY1) moved to #6833 so the Any work does not block G6."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "p209: law-kit-r2 (8987b1961d, #6855 c4) stops jet test with panic 'the law `law` does not parse' at TraitLaws.jet:186: cases law_kit_names_broken_law and assert_eq_compares_through_authored_equatable fail. MemKernel-6-2 owns the fix: correct law source text, and a registered diagnostic instead of the panic."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "p208 landed the tidy error tier (MemKernel-6-tidy-errors-c2-r3 bc60c2fa1d, c24-l0304-tidy-r3 bac11a8e4a); the p208 suites lost 773 rows (553 ui snapshots print tidy findings beside the real error, 163 cases and 53 run rows meet unswept tidy sites in tests/ and Examples, 242 golden lines), and L0101 has two false positives (a read inside an already-refused expression; a binding kept alive for its drop). Main reverted both on dev. The r4 stack fixes both false positives, sweeps every tree the rule reaches to 0 hits, and keeps check output stable or regenerates every snapshot in the same SUB."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Proof batch on p182 (dev 9003020128, Main 2026-11-15): c1-c4, c7, c10, c11, c15, c18 and c20-c26 re-proven. c5 met. c16 (failures_explicit_policy_function shows a second E0434 at line 14; fmt_inserts_failure_marks leaves rows: parse(path) without ?), c17 (review_flags_new_failure_point REFUSED: a partial assertion without a reason) and c19 (fix_pin_failures exits 1 with E2105) fail after 8ba6fd9fc3, 02087a6f98 and 85282c9d8a landed; all four went back to GoalsA-1-4 as one list."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "c9 (err.as<T>()) needs Err to carry an erased typed payload. That carrier is the one the open owner ballot D-PRIM-ANY1 defines (identity, cleanup, loans, secrecy), so c9 waits on that ballot. Decision (Main, operational): no separate ballot and no private stand-in box; c9 is built on D-PRIM-ANY1's carrier once it is ratified. The other #3838 criteria proceed."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Parked state (GoalsA-1-3, 2026-11-15 02:00): c4 started, nothing edited. Plain and --release trails are already right; missing: jet run --json never switches the runtime to its existing jet.err/v1 wire report (which has hop columns). Plan: an internal env row set by run --json, a run_json UI directive and failure_trail_ tests. c5, c16, c17 and c19 not started. c9 deferred (Err payload / Any unratified). c24 blocked on #6858 c2."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Parked 2026-11-15 01:55 by owner order (Precompiled Core, the speed plan and the memory kernel first). GoalsA-1-3 moves to #5910/#5479 step 3. GoalsA-1-3-failure-ceiling (c18) is finished and lands in census181; c24 still depends on #6858 c2."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "c24 depends on #6858 c2 (the D-NO-WARNINGS1 tidy tier, G5, not built): the arm is already L0304 with a delete fix, but making it a tidy error needs tidy errors that fail jet check. GoalsA-1-3 skipped c24 on 2026-11-15 00:20 and moved to c9."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Rebuilt: c6 split per decision into #3838 c16, #3838 c17, #3838 c18, #3838 c19, #3838 c20, #3838 c21 and #6860 c4; c8 split into #3838 c22-#3838 c26; c4, c5, c9 restated with proofs."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: the nested .Ok(...) form gets no teaching diagnostic (owner order)."
+        },
+        {
+          "at": "2026-11-03",
+          "by": "Main",
+          "text": "2026-11-03 Main findings on D-FAIL-INFER-UNION1=A, outside c7: (1) DEFECT, fixed in the open-union patch: a function that returns both Err(.Case(..)) and Err(\"message\") was E0108 'needs Err | ParseAgeError, but the value is String'; a message now builds the general Err member of the open union (Calls/Direct.jet, Expressions/Control.jet). (2) GAP: option A says an arm for a member that can no longer arrive is a warning; JetSema (and the Rust reference) report E0305 for any non-member arm, and no lint code exists. (3) GAP: in an open union, a catch-all .Err(e) binds the whole union, so e.message is E0302 and {e} is E0915; .Err(.Err(e)) works. Probes: $JET_SCRATCH_ROOT/lanes/Main/probe/three/."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "agent",
+          "text": "2026-10-27 Main: C4 progress on a7eda35ea9: probe p25 ($JET_SCRATCH_ROOT/lanes/Main/q/hop/p25.jet) prints 'Error: empty input / failed here: parse (p25.jet:2) / Trail [E3002] (3 hops via ?, origin first): double :7, total :11, run :15' on jet run and jet run --release. Still open for C4: hops carry line only (no columns), and 'jet run --json' is E2104 not built."
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: absorbed #3713, #3740, #3742, #3885; their criteria are carried here as [#n] rows."
+        },
+        {
+          "at": "2026-09-30",
+          "by": "Pip",
+          "text": "RocBallots finding: named payload patterns (.Case{field: pat}) are E0003 at every depth, not only nested; Examples/features/tooling/test_history/run.jet:256 uses the named form and fails today. Ballot D-PAT-NAMED-NEST1 filed."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Three-state match on `User? DbError!` checks exhaustively and runs; missing arm is E0307 naming it.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Proved 2026-11-03 by Main on HEAD 5eeacdd26d sources (stage-1 jet d8b591814f4fb3a4; the tree adds only an unrelated job-clash sema change). Golden Examples/features/errors/outcome_three_state.jet PASS on o0, o1 and o2 (testkit golden --filter outcome_three_state: 3 PASS, 0 FAIL). UI tests/ui/outcome_three_state_missing_arm PASS: E0307 'This if doesn't cover every case — missing: None'. Probe probe/three/ok.jet (User? DBError! with .Val/.None/.Err arms) checks clean and prints error/none/found ana on jet run and jet run --release.",
+          "at": "2026-11-03T10:58:28.758Z"
+        },
+        {
+          "n": 2,
+          "text": "No source uses nested `.Ok(.Val(..))`; teaching diagnostic + fix snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Proved 2026-11-03 by Main on HEAD 5eeacdd26d sources (stage-1 jet d8b591814f4fb3a4; the tree adds only an unrelated job-clash sema change). UI tests/ui/outcome_nested_ok_retired PASS: E0392 '.Ok(.Val(user)) wraps a state that User? DBError! names directly' with Fix 'Write .Val(user)'; its .fixed companion builds and runs on o0, o1 and o2. git grep for '.Ok(.Val(' and '.Ok(.None' outside audits and research finds only the diagnostic's own rows, spec prose, the retired-form test and its fixed companions, frozen lexer fixtures, and Compiler/JetDebug/Source/Dap.jet:96, which matches a channel recv_timeout Result whose Ok payload is a three-state message: a real Result layer, not the retired wrapper. E0392 fires on every T? E! subject and the compiler builds, so no source uses the retired form.",
+          "at": "2026-11-03T10:58:30.441Z"
+        },
+        {
+          "n": 3,
+          "text": "None never passes up implicitly (UI snapshot); tiers agree.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Proved 2026-11-03 by Main on HEAD 5eeacdd26d sources (stage-1 jet d8b591814f4fb3a4; the tree adds only an unrelated job-clash sema change). UI tests/ui/outcome_none_never_passes_up PASS (testkit ui --filter outcome_: 6 PASS, 0 FAIL). Probe probe/three/nopass.jet: reading .name from a User? inside a String DBError! function is E0310 'A missing value never leaves the function by itself'. Tiers agree: outcome_three_state golden passes on o0, o1 and o2, and the three-state probe prints the same output on jet run and --release.",
+          "at": "2026-11-03T10:58:32.045Z"
+        },
+        {
+          "n": 4,
+          "text": "An unhandled failure prints its origin and each hop with file:line on every level: probe p25 prints the origin of `Err(\"empty input\")` and the hops double, total and run; `--json` carries the origin and hops with columns; `?(text)` frames stay in order (D-FAIL-VISIBLE1=A runtime report). Proof: `jet test Compiler --profile ui --filter failure_trail_` covers a direct Err, one hop, three hops and a failing Core call as origin.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 4f3d00ee3e (in 0d7c85f9eb): jet test Compiler --profile ui --filter failure_trail_ on gate-p178 gives 6 PASS: failure_trail_direct, _one_hop, _three_hops, _core_origin, _frames and _json (jet run --json prints jet.err/v1 with origin and hop columns).",
+          "at": "2026-11-15T11:51:43.883Z"
+        },
+        {
+          "n": 5,
+          "text": "Infallible functions (probe p34's build, load and run) lower to plain returns with no outcome wrapper, while fallible callers, Err returns and written contracts keep the fallible ABI in direct, transitive, recursive, closure and trait cases, and Core's annotations migrate.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "e3fb4c5e14 and 1ba82d6146: jet test Compiler --profile cases --filter infallible_plain_return_abi passes (2 of 2) on batch compiler p182 (dev 9003020128).",
+          "at": "2026-11-15T13:43:20.127Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "infallible_plain_return_abi"
+          }
+        },
+        {
+          "n": 6,
+          "text": "[#3742] Each ratified outcome is implemented and proved here: D-FAIL-VISIBLE1, D-FAIL-PUBSIG1, D-OUTCOME-SHAPE1 (three-state Val/None/Err, which is #3838 itself), D-ERR-CASES1, D-DBG1 (debug builtin on #3893), and D-FAIL-EFFECT1.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #3838 c16: the umbrella split per ratified decision: D-FAIL-VISIBLE1 (V1, V2), D-FAIL-PUBSIG1 and D-FAIL-EFFECT1 (P1, P2, #6860 AP4), D-DBG1 (D1, D2); D-OUTCOME-SHAPE1 is met here (c1-c3) and D-ERR-CASES1 by c7",
+          "at": "2026-11-15T02:42:17.358Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 7,
+          "text": "[#3885] Inferred failure unions (D-FAIL-INFER-UNION1=A, D-ERR-CASES1=A) on JetSema: the Jet-produced positive fixture and three named negative fixtures pass.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Proved 2026-11-03 by Main with the admitted base compiler for HEAD 5eeacdd26d ($JET_SCRATCH_ROOT/discovery/base/5eeacdd26d…). Positive fixture: golden Examples/features/errors/inferred_failure_union.jet PASS on o0, o1 and o2 (plus comptime/prep_inferred_failure on all three). The three named negative fixtures (named in this card's FailUnion note of 2026-09-30): tests/ui/inferred_failure_union_missing_case, inferred_failure_case_type_clash and inferred_failure_case_payload_conflict all PASS (testkit ui --filter inferred_failure: 4 PASS, 0 FAIL; golden --filter inferred_failure: 6 PASS, 0 FAIL). Inference runs on JetSema: Compiler/JetSema/Source/Sema/FailureUnion.jet.",
+          "at": "2026-11-03T11:08:51.628Z"
+        },
+        {
+          "n": 8,
+          "text": "Ratified failure-law gaps (Prep 2026-11-04, probes in $JET_SCRATCH_ROOT/lanes/Main/prep/c3838/): typed and minted failures leave run and a written Err! without a conversion (uprop1, uprop2 and wcase run on O0-O2, and the report names FindError -> Err); a catch-all .Err(e) over an open union binds Err (catchall prints on all tiers); an arm for a member that can no longer arrive is lint L0304 with a delete fix and a UI snapshot, while unknown names stay E0305; minted error types print with {e}, and E0915 no longer doubles its backticks; and one mint conflict reports one E0105 with no E0330 or E0108 cascade.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #3838 c22: the five failure-law gaps split one per outcome: G1-G5",
+          "at": "2026-11-15T02:42:18.312Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 10,
+          "text": "A pattern test in a `loop` condition binds its names in the loop body for each pass, exactly as in an `if` condition: `loop cur == .Val(c) { ...; cur = next(c) }` runs once per `Val` and stops at `None`. Golden at O0/O2, plus a UI snapshot that a bound name is not visible after the loop. Found by the 2026-11-05 Doom port investigation (defect against a ratified rule; compiler 0ccdff27ea).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev in light2 (980e02feb4..6fd8510b1f, Lander5), proved on the batch-15 jet (gate-p20) over the fit tree: 9109c9084c (G5DevX2-c10-loop-pattern): Examples/Basics/LoopPatternTest equals its golden at none and full (rc 0), and ui loop_pattern_binding 1/0.",
+          "at": "2026-11-14T01:17:39.218Z"
+        },
+        {
+          "n": 11,
+          "text": "(was #1532 c2) Interpolation inside a note is lazy and is not evaluated on the success path, proven by a targeted test [precut audit: failing on 9c7ddf1359: C:web_build/web_two_hop_journey_matches_all_execution_tiers FAIL exit 1; expected 0] (was #6281 c102)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Main goal sweep 2026-11-13 on the batch-15 jet (gate-p20, dev 734568e5cd): jet test Compiler --profile cases --filter web_build/web_two_hop_journey_matches_all_execution_tiers gives PASS with 0 FAIL, 0 KNOWN-FAILING and 0 ERROR (Lander5 sweep, results row in $JET_SCRATCH_ROOT/lanes/Main/sweep/results.tsv).",
+          "at": "2026-11-14T00:45:06.702Z"
+        },
+        {
+          "n": 12,
+          "text": "(was #1532 c3) Every ? hop records a journey entry; an unhandled failure prints the journey line on every tier, with or without notes [precut audit: failing on 9c7ddf1359: C:web_build/web_two_hop_journey_matches_all_execution_tiers FAIL exit 1; expected 0] (was #6281 c103)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Main goal sweep 2026-11-13 on the batch-15 jet (gate-p20, dev 734568e5cd): jet test Compiler --profile cases --filter web_build/web_two_hop_journey_matches_all_execution_tiers gives PASS with 0 FAIL, 0 KNOWN-FAILING and 0 ERROR (Lander5 sweep, results row in $JET_SCRATCH_ROOT/lanes/Main/sweep/results.tsv).",
+          "at": "2026-11-14T00:45:07.753Z"
+        },
+        {
+          "n": 13,
+          "text": "(was #1532 c4) The .context method and the \"__Fallible__\" lowering sentinel are deleted, not aliased; E3002's dev-build trace becomes the rendering of the journey [precut audit: failing on 9c7ddf1359: C:web_build/web_two_hop_journey_matches_all_execution_tiers FAIL exit 1; expected 0] (was #6281 c104)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Main goal sweep 2026-11-13 on the batch-15 jet (gate-p20, dev 734568e5cd): jet test Compiler --profile cases --filter web_build/web_two_hop_journey_matches_all_execution_tiers gives PASS with 0 FAIL, 0 KNOWN-FAILING and 0 ERROR (Lander5 sweep, results row in $JET_SCRATCH_ROOT/lanes/Main/sweep/results.tsv). On dev, git grep finds no __Fallible__ and no fn context in Core or Compiler.",
+          "at": "2026-11-14T00:45:08.771Z"
+        },
+        {
+          "n": 15,
+          "text": "(was #4291) [#4286] D-FAIL-ERROR1: Err(\"msg\") builds the default error, with exact field and failure-domain goldens. (was #4275 c54)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "jet test Compiler --profile golden --filter DefaultErr: 18 PASS, 0 FAIL (DefaultErrValue, DefaultErrorConversion, DefaultErrEdge o0/o1/o2) on batch compiler gate-p131 (dev 8d83659ef3), verified by Main on dev bda8175585",
+          "at": "2026-11-14T23:04:11.359Z"
+        },
+        {
+          "n": 16,
+          "text": "`#Policy(failures: .Explicit)` at block, function, module or package level makes each call that can pass a failure up need `?` or `?(text)`, with a registered error naming the call, and `jet fmt` inserts the marks (D-FAIL-VISIBLE1=A, mirroring `copies: .Explicit`). Proof: `jet test Compiler --profile ui --filter failures_explicit_policy` and `jet test Compiler --profile cases --filter fmt_inserts_failure_marks`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "batch compiler p184 (dev 61b4ee98a7), 2026-11-15: ui --filter failures_explicit_policy 6/6 PASS; cases --filter fmt_inserts_failure_marks 1/1 PASS (landed 6c592c93eb)",
+          "at": "2026-11-15T14:48:06.661Z"
+        },
+        {
+          "n": 17,
+          "text": "`jet review` and `jet diff` list a change's failure points and flag a function that newly can fail (D-FAIL-VISIBLE1=A).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "batch compiler p184 (dev 61b4ee98a7), 2026-11-15: cases --filter review_flags_new_failure_point 1/1 PASS (landed 6c592c93eb)",
+          "at": "2026-11-15T14:48:07.661Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "review_flags_new_failure_point"
+          }
+        },
+        {
+          "n": 18,
+          "text": "A written failure contract is a ceiling: a body that can fail outside it is a registered error naming the extra failure, `Never!` denies failure, and `Err` inside the contract keeps it open (D-FAIL-PUBSIG1=A, D-FAIL-EFFECT1=A: failure sets follow the effect law).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "GoalsA-1-3-failure-ceiling landed 27016b2b72 (a written failure contract is a ceiling: Err keeps it open, and Never! refuses a returned Err). on batch compiler p156 (dev aa5f5f1bba), 2026-11-15 02:03: jet test Compiler --profile ui --filter failure_contract_ceiling_ PASS 3; DiagnosticRows --check passed.",
+          "at": "2026-11-15T07:03:52.049Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "failure_contract_ceiling_"
+          }
+        },
+        {
+          "n": 19,
+          "text": "`jet fix --pin-failures` writes each function's inferred failure set into its source as a written contract (D-FAIL-PUBSIG1=A).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "batch compiler p184 (dev 61b4ee98a7), 2026-11-15: cases --filter fix_pin_failures 1/1 PASS (landed 6c592c93eb)",
+          "at": "2026-11-15T14:48:08.776Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "fix_pin_failures"
+          }
+        },
+        {
+          "n": 20,
+          "text": "`dbg(expr)` returns `expr` unchanged and writes one line to standard error (`[dbg] score.jet:3 word.len() * 3 = 9`); it adds no effect, so it works in `-[]>` functions, `#Memo` functions (printing only when the body runs) and compile-time code (D-DBG1=A). Proof: `jet test Compiler --profile golden --filter ErrorsAndEffects/Debugging/Dbg` on o0, o1 and o2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "GoalsA-1-3-debug-trace-comptime landed a0ec433ee0. on batch compiler p154 (dev 31ee594ec7), 2026-11-15 01:30: jet test Compiler --profile golden --filter ErrorsAndEffects/Debugging/Dbg PASS 3 FAIL 0; jet Tools/agent/BodyTreeRows.jet --check passed.",
+          "at": "2026-11-15T06:32:48.367Z"
+        },
+        {
+          "n": 21,
+          "text": "A release-profile build (`jet build`, or `--release` on any command) refuses any remaining `dbg` with a registered error, and `jet fix` removes the wrapper and keeps the expression (D-DBG1=A). Proof: `jet test Compiler --profile ui --filter dbg_in_release_build` and `jet test Compiler --profile cases --filter fix_removes_dbg`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "GoalsA-1-3-debug-trace-comptime landed a0ec433ee0. on batch compiler p154 (dev 31ee594ec7), 2026-11-15 01:30: --profile ui --filter dbg_in_release_build PASS 4; --profile ui --filter E3405_debug_trace_left_in_build PASS 4; --profile cases --filter fix_removes_dbg PASS 1.",
+          "at": "2026-11-15T06:32:49.273Z"
+        },
+        {
+          "n": 22,
+          "text": "Typed and minted failures leave `run` and a written `Err!` contract without a conversion, on O0, O1 and O2, and the run-time report names the conversion (`FindError -> Err`) (probes uprop1, uprop2 and wcase in $JET_SCRATCH_ROOT/lanes/Main/prep/c3838/).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "GoalsA-1-3-failure-proofs landed 2c1fb0ce3f. On batch compiler p153 (dev 84df7e8189), 2026-11-15 01:15: jet test Compiler --profile golden --filter ErrorsAndEffects/Failures/ PASS 9 FAIL 0 (MintedLeaveRun, CatchAllOpenUnion and MintedDisplay among them, on every golden tier); --profile ui --filter E0915 PASS 2; --profile ui --filter mint_conflict_single_error PASS 1; Compiler/JetTestKit/Tests/GoldenStreams.jet 253 passed.",
+          "at": "2026-11-15T06:19:27.614Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "ErrorsAndEffects/Failures/MintedLeaveRun"
+          }
+        },
+        {
+          "n": 23,
+          "text": "A catch-all `.Err(e)` arm over an open failure union binds `e` as Err on every tier (probe catchall). Proof: `jet test Compiler --profile golden --filter ErrorsAndEffects/Failures/CatchAllOpenUnion` on o0, o1 and o2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "GoalsA-1-3-failure-proofs landed 2c1fb0ce3f. On batch compiler p153 (dev 84df7e8189), 2026-11-15 01:15: jet test Compiler --profile golden --filter ErrorsAndEffects/Failures/ PASS 9 FAIL 0 (MintedLeaveRun, CatchAllOpenUnion and MintedDisplay among them, on every golden tier); --profile ui --filter E0915 PASS 2; --profile ui --filter mint_conflict_single_error PASS 1; Compiler/JetTestKit/Tests/GoldenStreams.jet 253 passed.",
+          "at": "2026-11-15T06:19:28.733Z"
+        },
+        {
+          "n": 24,
+          "text": "A match arm for a failure member that can no longer arrive is a tidy error with a delete fix (D-NO-WARNINGS1=A replaces lint L0304), while an unknown member name stays E0305.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p216 batch compiler (efb3da4f6c): jet test Compiler --profile ui --filter failure_arm_cannot_arrive PASS 4/4. Held until the tidy-tier regressions were fixed, which they are on p218 batch compiler (census build of dev 7300cf5099) (golden 0 fail)",
+          "at": "2026-11-16T17:33:28.595Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "failure_arm_cannot_arrive"
+          }
+        },
+        {
+          "n": 25,
+          "text": "A minted error type prints with `{e}`, and E0915's message no longer doubles its backticks. Proof: `jet test Compiler --profile golden --filter ErrorsAndEffects/Failures/MintedDisplay` and the E0915 UI snapshot (`jet test Compiler --profile ui --filter E0915`).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "GoalsA-1-3-failure-proofs landed 2c1fb0ce3f. On batch compiler p153 (dev 84df7e8189), 2026-11-15 01:15: jet test Compiler --profile golden --filter ErrorsAndEffects/Failures/ PASS 9 FAIL 0 (MintedLeaveRun, CatchAllOpenUnion and MintedDisplay among them, on every golden tier); --profile ui --filter E0915 PASS 2; --profile ui --filter mint_conflict_single_error PASS 1; Compiler/JetTestKit/Tests/GoldenStreams.jet 253 passed.",
+          "at": "2026-11-15T06:19:29.707Z"
+        },
+        {
+          "n": 26,
+          "text": "One mint conflict (one case name with two payload types, D-ERR-CASES1=A) reports one E0105 with no E0330 or E0108 cascade.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "GoalsA-1-3-failure-proofs landed 2c1fb0ce3f. On batch compiler p153 (dev 84df7e8189), 2026-11-15 01:15: jet test Compiler --profile golden --filter ErrorsAndEffects/Failures/ PASS 9 FAIL 0 (MintedLeaveRun, CatchAllOpenUnion and MintedDisplay among them, on every golden tier); --profile ui --filter E0915 PASS 2; --profile ui --filter mint_conflict_single_error PASS 1; Compiler/JetTestKit/Tests/GoldenStreams.jet 253 passed.",
+          "at": "2026-11-15T06:19:30.698Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "mint_conflict_single_error"
+          }
+        }
+      ],
+      "refs": [
+        "Docs/research/learnability-reasoning-reading-writing-2026-09-28.md"
+      ],
+      "tags": [
+        "ready-for-agent",
+        "learnability",
+        "wayfinder:task"
+      ],
+      "parentId": "c08s0ppt",
+      "needsAcceptance": false,
+      "created": "2026-09-30T03:02:10.138Z",
+      "updated": "2026-11-16T18:18:07.451Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 26,
+      "completedAt": "2026-11-16T18:18:07.451Z",
+      "questions": [],
+      "retiredAt": "2026-11-19T18:19:38.742Z"
+    },
+    {
+      "id": "c0gvf2dr",
+      "num": 6811,
+      "title": "Web metadata and SEO: typed page head, Open Graph, sitemap.xml and robots.txt from the screen graph",
+      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G13).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "All criteria met with recorded evidence (latest batch compilers p216-p219); closed by Main."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "c1 waits on #6812 (server rendering of app.App screens): today a screen has no server HTML answer, only its APP_ROUTES route, so there is no page for head tags or noindex. c2 (sitemap and robots) does not need rendering and is in progress (Speed-3-3)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": ".head(fn) renders title, description, canonical, Open Graph and Twitter card tags into the server HTML of the screen. Signed-in screens are noindex by default.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p217 batch compiler (census build of dev ec9df40248): jet test Compiler --profile cases --filter head_renders_metadata_and_signed_in_screens_are_noindex PASS",
+          "at": "2026-11-16T17:11:09.805Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "WebApp/head_renders_metadata_and_signed_in_screens_are_noindex"
+          }
+        },
+        {
+          "n": 2,
+          "text": ".sitemap(fn) writes /sitemap.xml with only the public states it returns, and the server output serves /robots.txt that points to it.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p217 batch compiler (census build of dev ec9df40248): jet test Compiler --profile cases --filter sitemap_lists_only_public_states PASS",
+          "at": "2026-11-16T17:11:11.100Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "WebApp/sitemap_lists_only_public_states"
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": "c0snkbac",
+      "needsAcceptance": false,
+      "created": "2026-11-13T15:13:56.474Z",
+      "updated": "2026-11-16T18:18:09.245Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-16T18:18:09.245Z",
+      "questions": [],
+      "retiredAt": "2026-11-19T18:19:38.742Z"
+    },
+    {
+      "id": "c0voqhky",
+      "num": 6820,
+      "title": "Signed webhooks in the app package",
+      "body": "Gap card K7 from the #6792 r2 proposal (Docs/proposals/2026-11-13-web-app-framework-shape.md) and review round 1 (Docs/audits/2026-11-13-web-app-framework-shape-review.md). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "p219: Speed-3-3 p215 regression roots landed. C (mount authority) 64ea4db4eb: inspect_choices_lists_one_apps_placement_exposure_and_context_reads and Core/Web/Web.jet pass. H/I (app address args) 1704c72db0: app_url_of_state_without_screen, web_build_missing_asset and push_open_state_without_a_route_is_a_compile_error pass. Known gap: pages and actions still claim FS.Read at registration."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`#App.Webhook(path:, signature:)` on a service method makes it a webhook; the framework checks the HMAC signature in constant time before decoding and answers 401 otherwise; a webhook with no signature rule is a compile error, proven by cases. (#6792 r2 gap K7)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 6f82527b17 (GoalsB-5-9, app.Signature export). p143 batch compiler (built from dev 6f82527b17), 2026-11-14 22:50: jet test Compiler --profile cases --filter web_app/webhook_without_a_key_answers_401 -> PASS 1. The case answers 401 before decoding a delivery signed with another key or with no key, answers 422 for an undecodable signed body, and refuses a webhook with no signature: rule at its marker (probes/no_signature.jet:8:6). Core/App/App.jet:125,139 compare each MAC with crypto.constant_time_equal_bytes.",
+          "at": "2026-11-15T03:57:24.448Z"
+        },
+        {
+          "n": 2,
+          "text": "key: in #App.Webhook names the #App.SigningKey method; a name that is not one is a compile error.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 6f82527b17. p143 batch compiler (built from dev 6f82527b17), 2026-11-14 22:50: jet test Compiler --profile cases --filter web_app/webhook_key_names_a_signing_key_method -> PASS 1 (unmarked and unknown key: methods refused at the key: argument).",
+          "at": "2026-11-15T03:57:25.339Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "web_app/webhook_key_names_a_signing_key_method"
+          }
+        },
+        {
+          "n": 3,
+          "text": "With .GitHub (and .Stripe) the framework drops a delivery whose X-GitHub-Delivery (Stripe event id) it has run, recording the ID in the webhook's transaction and keeping it 30 days. Proof: `jet test Compiler --profile cases --filter web_app/webhook_redelivery_runs_once`. The store that keeps delivery IDs follows open decision D-DB-TABLE1.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p204 batch compiler (dev 686cdaaee7): jet test Compiler --profile cases --filter web_app/webhook_redelivery_runs_once gives n=1, bad=0 (commit c4a55570dc).",
+          "at": "2026-11-16T04:40:15.616Z"
+        },
+        {
+          "n": 4,
+          "text": "A signing-key method that returns None makes the delivery answer 401; it never skips the check. The key: string must name an #App.SigningKey method of the same service, or the build fails with a registered diagnostic.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 6f82527b17. p143 batch compiler (built from dev 6f82527b17), 2026-11-14 22:50: jet test Compiler --profile cases --filter web_app/webhook_without_a_key_answers_401 -> PASS 1 (a signing-key method returning None answers 401); key: naming a non-SigningKey method is refused (webhook_key_names_a_signing_key_method PASS 1).",
+          "at": "2026-11-15T03:57:26.254Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "web_app/webhook_without_a_key_answers_401"
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": "c0snkbac",
+      "needsAcceptance": false,
+      "created": "2026-11-13T15:43:31.447Z",
+      "updated": "2026-11-16T17:56:32.451Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 4,
+      "completedAt": "2026-11-16T05:55:12.321Z",
+      "questions": [],
+      "retiredAt": "2026-11-19T18:19:38.742Z"
     }
   ]
 }

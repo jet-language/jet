@@ -68429,6 +68429,138 @@
       "outcome": "C",
       "ratifiedAt": "2026-11-04",
       "retiredAt": "2026-11-19T09:02:06.414Z"
+    },
+    {
+      "id": "D-PAT-NAMED-NEST1",
+      "cardId": "c0flvd7x",
+      "group": "language",
+      "title": "Match a case's fields by name, at any depth",
+      "gist": "May a pattern name a case's fields, like `.FailedToFetch{url: u, cause: c}`, including inside another pattern?",
+      "lesson": "A case with named fields is built by name: `AppError.FailedToFetch{url: raw, cause: err}`. Matching it works only by position: `.FailedToFetch(u, c)`. Writing the names is a parse error, both at the top of an arm and inside `.Err(…)`. So the reader must remember field order. Struct destructuring already uses names, and one shipped example already writes the named form.",
+      "explainer": "",
+      "story": "Kai wraps a fetch error with `AppError.FailedToFetch{url: raw, cause: err}`. To report it he writes `.Err(.FailedToFetch{url: u, cause: c})`, the same shape. The parser answers \"Expected `,` between pattern bindings\".",
+      "inWild": "match fetch(\"ftp://b\") {\n    Ok(page) => println!(\"{page}\"),\n    Err(AppError::FailedToFetch { url, cause: FetchError::BadUrl(why) }) =>\n        println!(\"could not fetch {url}: {why}\"),\n}\n// Rust names fields in patterns at any depth, with `url` as shorthand and `..` for the rest. Source: doc.rust-lang.org/reference/patterns.html#struct-patterns.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Names at any depth",
+          "detail": "After a case declared with named fields, a pattern may list fields in braces: `.FailedToFetch{url: u, cause: c}`. A bare `url` binds a name `url`, as in struct destructuring. A field's pattern may be any pattern, such as `cause: .BadUrl(why)`. Listing only some fields needs `..` at the end, as struct destructuring does (E0326).\n\nThe form works wherever a pattern can go: an arm head, inside `.Err(…)` or `.Val(…)`, or deeper. The positional form keeps working. One pattern uses one form; mixing names and positions in the same braces is an error. Braces on a case with unnamed fields, like `BadUrl(String)`, are an error whose fix shows the positional form.",
+          "technical": "The parser gains one variant-pattern shape in both parsers, the Rust one and the Jet compiler's Patterns.jet. It maps onto the existing payload slots by field name, so checking, exhaustiveness and code generation are unchanged. The same result follows on every tier. `Examples/features/tooling/test_history/run.jet:256` already writes `.HandleState{handle: found, state: expected}`, which is E0003 today.\n\nBeginner path: match with the names used to build the value. Expert path: the positional form for short payloads.",
+          "code": "#Error\nenum AppError {\n    FailedToFetch(url: String, cause: FetchError)\n}\n\nfn run() {\n    if fetch(\"ftp://b\") == {\n        .Ok(page) -> print(page)\n        .Err(.FailedToFetch{url, cause: .BadUrl(why)}) -> print(\"could not fetch {url}: {why}\")\n    }\n}"
+        },
+        {
+          "key": "B",
+          "name": "Positional only",
+          "detail": "No change. Patterns match payloads by position only; field names appear only when building a value. The named form stays a parse error with a fix that shows the positional form.",
+          "technical": "The parse error gains a fix that rewrites to positions. `test_history/run.jet:256` is rewritten to `.HandleState(found, expected)`. Beginner path: look up the field order. Expert path: unchanged.",
+          "code": "#Error\nenum AppError {\n    FailedToFetch(url: String, cause: FetchError)\n}\n\nfn run() {\n    if fetch(\"ftp://b\") == {\n        .Ok(page) -> print(page)\n        .Err(.FailedToFetch(url, .BadUrl(why))) -> print(\"could not fetch {url}: {why}\")\n    }\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Swift",
+          "note": "Associated values can be matched with their labels. https://docs.swift.org/swift-book/documentation/the-swift-programming-language/patterns/#Enumeration-Case-Pattern",
+          "code": "case .failure(.failedToFetch(url: let url, cause: .badURL(let why))):\n    print(\"could not fetch \\(url): \\(why)\")"
+        },
+        {
+          "lang": "OCaml",
+          "note": "Constructors with inline records are matched by field name, and patterns nest. https://ocaml.org/manual/latest/typedecl.html",
+          "code": "| Error (Failed_to_fetch { url; cause = Bad_url why }) ->\n    Printf.printf \"could not fetch %s: %s\\n\" url why"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Patterns already nest to any depth, and values with named fields are built by name. Matching by the same names removes a field-order puzzle and completes a spelling people already reach for.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B makes readers recall field order and leaves a spelling people already write as a parse error."
+          }
+        ],
+        "tradeoff": "A second matching form buys patterns that read like construction."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "May a pattern name a case's fields, like `.FailedToFetch{url: u, cause: c}`, including inside another pattern?",
+        "lesson": "A case with named fields is built by name: `AppError.FailedToFetch{url: raw, cause: err}`. Matching it works only by position: `.FailedToFetch(u, c)`. Writing the names is a parse error, both at the top of an arm and inside `.Err(…)`. So the reader must remember field order. Struct destructuring already uses names, and one shipped example already writes the named form.",
+        "trio": {
+          "current": {
+            "note": "The named form does not parse. Only the positional form works.",
+            "code": "#Error\nenum AppError {\n    FailedToFetch(url: String, cause: FetchError)\n}\n\nif fetch(\"ftp://b\") == {\n    .Ok(page) -> print(page)\n    .Err(.FailedToFetch{url: u, cause: c}) -> print(u)  // error E0003\n}\n// works today: .Err(.FailedToFetch(u, .BadUrl(why)))"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust names fields in patterns at any depth, with `url` as shorthand and `..` for the rest. Source: doc.rust-lang.org/reference/patterns.html#struct-patterns.",
+            "code": "match fetch(\"ftp://b\") {\n    Ok(page) => println!(\"{page}\"),\n    Err(AppError::FailedToFetch { url, cause: FetchError::BadUrl(why) }) =>\n        println!(\"could not fetch {url}: {why}\"),\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Names at any depth",
+            "gist": "`.Case{field: pattern}` works wherever a pattern can go, mirroring how the value is built.",
+            "gains": [
+              "Patterns read like the code that built the value.",
+              "No need to remember field order.",
+              "Positional patterns keep working."
+            ],
+            "losses": [
+              "Two ways to match the same case."
+            ],
+            "proposed": {
+              "code": "#Error\nenum AppError {\n    FailedToFetch(url: String, cause: FetchError)\n}\n\nfn run() {\n    if fetch(\"ftp://b\") == {\n        .Ok(page) -> print(page)\n        .Err(.FailedToFetch{url, cause: .BadUrl(why)}) -> print(\"could not fetch {url}: {why}\")\n    }\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Positional only",
+            "gist": "Keep today: names appear when building a value, positions when matching it.",
+            "gains": [
+              "One way to match each case."
+            ],
+            "losses": [
+              "Readers must remember field order.",
+              "The shipped example that writes names must be rewritten."
+            ],
+            "proposed": {
+              "code": "#Error\nenum AppError {\n    FailedToFetch(url: String, cause: FetchError)\n}\n\nfn run() {\n    if fetch(\"ftp://b\") == {\n        .Ok(page) -> print(page)\n        .Err(.FailedToFetch(url, .BadUrl(why))) -> print(\"could not fetch {url}: {why}\")\n    }\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Patterns already nest to any depth, and values with named fields are built by name. Matching by the same names removes a field-order puzzle and completes a spelling people already reach for.",
+          "gains": [
+            "Beginners match with the names they used to build the value.",
+            "Experts keep the short positional form."
+          ],
+          "losses": [
+            {
+              "loss": "Two ways to match the same case.",
+              "mitigation": "Building already has both forms; matching then mirrors building exactly."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B makes readers recall field order and leaves a spelling people already write as a parse error."
+            }
+          ],
+          "tradeoff": "A second matching form buys patterns that read like construction."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-09-30T10:43:44.155Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-09-30",
+      "retiredAt": "2026-11-19T18:19:38.742Z"
     }
   ]
 }
