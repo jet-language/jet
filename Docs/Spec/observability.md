@@ -109,10 +109,11 @@ event publishes nothing: its trace keeps the source identity and map, and its
 profile is `no_samples` with no window.
 `jet perf run` samples the program's CPU time: the runtime arms a timer on
 each thread's own CPU clock (`timer_create` on `CLOCK_THREAD_CPUTIME_ID`,
-delivered to that thread, one sample per millisecond of its CPU), so threads
-that run at once each keep their samples, and records the program counter
-each `SIGPROF` interrupted with the call site of each caller, each handler in
-a record buffer of its own so no sample loses its stack to another thread's.
+delivered to that thread, one sample per 125 microseconds of its CPU, 8 kHz),
+so threads that run at once each keep their samples, and records the program
+counter each `SIGPROF` interrupted with the call site of each caller, each
+handler in a record buffer of its own so no sample loses its stack to another
+thread's.
 A frame without a frame pointer (code before a function's prologue sets one,
 a compiler-emitted helper such as the stop poll, a frameless runtime
 routine, a C library function) is stepped out of by the image's own call
@@ -167,10 +168,10 @@ precise sampler, the runtime charges each sample by the instruction that
 spent the time: AMD's IBS op sampling (`perf_event_open` on the `ibs_op` PMU,
 filtered to user mode in software), else Intel's PEBS (cycles at
 `precise_ip` 2), each once per a period in cycles, the cycles the main thread
-ran in 1000 microseconds of its CPU time as sampling started, so their rate
+ran in 125 microseconds of its CPU time as sampling started, so their rate
 follows the clock speed the cores run at. At 2, or where neither opens, the
 task clock (`PERF_COUNT_SW_TASK_CLOCK`) samples each thread exactly once per
-1000 microseconds of its CPU time in user mode, at the program counter its
+125 microseconds of its CPU time in user mode, at the program counter its
 interrupt landed on, a few instructions past the one that spent the time (its
 skid); time in the kernel takes no sample. Above 2, or where the kernel
 refuses the task clock, each thread keeps its CPU-time timer, whose `SIGPROF`
@@ -184,7 +185,9 @@ source the kernel accepts, and each thread after it arms that source. The
 receipt's `capture.sampling.pc` names the source, and the profile's `reason`
 says which took the samples: the rate a precise source reached, or, for the
 timer, its cap and why the run kept it.
-Tests/Cases/Perf/precise_pc_names_its_source.case is the worked example, and
+Tests/Cases/Perf/precise_pc_names_its_source.case is the worked example,
+Tests/Cases/Perf/task_clock_keeps_eight_khz.case shows four threads keep
+the task clock's 8 kHz, and
 Tests/Cases/Perf/timer_fallback_states_its_cap_and_why.case shows the timer a
 causal experiment keeps.
 
@@ -553,7 +556,7 @@ names the capture's settings: `allowlist`, the privacy fields the trace keeps
 (comma-separated, null for none), and `sampling`, null unless the program
 sampled, else its `lenses` (`["cpu"]`, `["memory"]` or `["cpu","memory"]`),
 `allocations` `call-sites`, and under the `cpu` lens `clock` `cpu`,
-`interval_us` 1000 and `pc`, which are null without it. `pc` names what each
+`interval_us` 125 and `pc`, which are null without it. `pc` names what each
 sample was charged by: `source` `ibs_op` or `pebs` with `precise` true and
 `skid` null for a precise sampler, `task_clock` with `precise` false and
 `skid` `task_clock_interrupt`, else `timer` with `precise` false and `skid`

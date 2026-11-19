@@ -15,10 +15,6 @@ use {
     jet_foundation.[CanonicalJSON, RecordCursor, artifact_extension, foundation_json_integer, record_put_str, record_put_uvarint, record_read_len, record_read_uvarint, trace_id]
 }
 
-// The CPU-time sampling period, one sample per millisecond of process CPU
-// (the runtime's PerfSamples.jet), in pprof's `period` units.
-JET_CLI_PERF_PPROF_PERIOD_NS: 1000000
-
 // A protobuf field's key: its number and wire type (0 varint, 2 bytes).
 jet_cli_perf_pb_key: fn(out: &[U8], field: Int, wire: Int) Never! {
     record_put_uvarint(out, field * 8 + wire)
@@ -69,7 +65,8 @@ jet_cli_perf_pprof_value_type: fn(strings: &[String], kind: &&String, unit: &&St
 // per-line total is a sample whose stack is one location, the total's
 // function at its line, valued by its samples. A row's inclusive samples,
 // allocations and counter events, and the stacks they came from, are not
-// carried, as the profile's comment says.
+// carried, as the profile's comment says. Its period is the runtime's
+// sampling interval (JET_CLI_PERF_SAMPLE_US) in nanoseconds of CPU time.
 jet_cli_perf_pprof_profile: fn(trace: CanonicalJSON) -> [U8] Never! {
     totals: jet_cli_perf_line_totals(trace)
     samples := [U8]{}
@@ -122,7 +119,7 @@ jet_cli_perf_pprof_profile: fn(trace: CanonicalJSON) -> [U8] Never! {
     comment: jet_cli_perf_pprof_string(strings, "jet perf {trace_id(trace) ?? "trace"}: one location per source line; inclusive samples, allocations and counter events are not carried")
     loop text in strings -> jet_cli_perf_pb_text(out, 6, text)
     jet_cli_perf_pb_message(out, 11, period_type)
-    jet_cli_perf_pb_int(out, 12, JET_CLI_PERF_PPROF_PERIOD_NS)
+    jet_cli_perf_pb_int(out, 12, JET_CLI_PERF_SAMPLE_US * 1000)
     jet_cli_perf_pb_packed(out, 13, [Int]{comment})
     out
 }
