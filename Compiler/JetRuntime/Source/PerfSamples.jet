@@ -19,9 +19,11 @@
 // information through frames without a frame pointer, then up the frame
 // pointer chain. Each is a link-time address in the image `jet run` writes
 // beside the file, where the image's location table names its function and
-// line, as Linux perf names the same image's samples. A record is one write
-// of little-endian words; its first word holds the record's word count in
-// bits 48..58 above the program counter's low 48, and its kind in bits
+// line, as Linux perf names the same image's samples. A record is
+// little-endian words, written whole: a sample handler's among the others
+// its buffer's side keeps (perf_samples_keep), any other in a write of its
+// own; its first word holds the record's word count in bits 48..58 above
+// the program counter's low 48, and its kind in bits
 // 59..62: 0 for a CPU-time sample, a counter's index plus one for that
 // counter's sample, PERF_SAMPLES_TOPDOWN for a topdown event's sample,
 // PERF_SAMPLES_SPAWN for a task's spawn,
@@ -183,6 +185,10 @@ PERF_SAMPLES_IO_TARGET: I64{1024}
 // record words, then PERF_CFI_SCRATCH_BYTES of call frame rules.
 PERF_SAMPLES_SLOTS: I64{64}
 
+// The bytes of records a buffer's side holds before its handler writes
+// them (perf_samples_keep): one write for many samples, not one each.
+PERF_SAMPLES_OUT_BYTES: I64{8192}
+
 // The most call sites a spawn, wait or wake record keeps.
 PERF_SAMPLES_STACK_DEPTH: I64{32}
 
@@ -276,6 +282,22 @@ perf_samples_slots := I64{0}
 perf_samples_cpu_start := I64{0}
 
 perf_samples_delivery_ns := I64{0}
+
+// Per record buffer, perf_samples_buffer's first and then each of
+// perf_samples_slots', perf_samples_side_bytes its handler alone uses
+// while it holds the buffer (perf_samples_side): the bytes of the records
+// it has made and not yet written, those records (PERF_SAMPLES_OUT_BYTES),
+// then the rule rows of the addresses its walks met (perf_cfi_cached). 0
+// when the start could not map them: each handler then writes its record
+// as it makes it and interprets every frame's rules.
+perf_samples_sides := I64{0}
+
+// 1 while a handler keeps its records in its buffer's side, to write them
+// once PERF_SAMPLES_OUT_BYTES of them fill it: under `jet perf run`, whose
+// file the session reads after the run, from the start to the exit, which
+// writes what the sides hold (perf_samples_flush). The flight recorder's
+// records are datagrams, each written as it is made.
+perf_samples_buffered := I64{0}
 
 // The lenses the start found (perf_samples_lenses): under `cpu` each
 // thread arms its timer (perf_samples_thread_start); under `memory` alone
@@ -402,6 +424,7 @@ perf_samples_start: fn() {
         }
     }
     slots: alloc_map_try(wrapping(PERF_SAMPLES_SLOTS * perf_samples_slot_bytes()))
+    sides: alloc_map_try(wrapping(wrapping(PERF_SAMPLES_SLOTS + I64{1}) * perf_samples_side_bytes()))
     causal: if ((lenses & PERF_LENS_CAUSAL) != I64{0}) -> perf_causal_open(image) else -> I64{0}
     #Unsafe("the observation start runs before the timer whose handler reads these is armed") {
         perf_causal_state = causal
@@ -411,6 +434,8 @@ perf_samples_start: fn() {
         perf_samples_code_high = high
         perf_samples_buffer = buffer
         perf_samples_slots = slots
+        perf_samples_sides = sides
+        perf_samples_buffered = if (flight || sides == I64{0}) -> I64{0} else -> I64{1}
         perf_samples_lens_mask = lenses
         perf_samples_interval_us = interval
     }
@@ -810,12 +835,14 @@ perf_precise_ring: fn(info: I64) -> I64 {
 // PERF_RECORD_SAMPLE, type 9, its size in the header's top 16 bits and its
 // instruction pointer after the header), by that pointer less the image's
 // bias, under the callers perf_samples_put_precise finds, and the tail then
-// moves to the head, freeing them for the kernel.
-perf_samples_put: fn(fd: I64, record: I64, head: I64, pc: I64, ring: I64, periods: I64) {
+// moves to the head, freeing them for the kernel. `side` is the record
+// buffer's side (perf_samples_side), 0 for none, and `scratch` its rules'
+// scratch (perf_samples_scratch).
+perf_samples_put: fn(fd: I64, side: I64, scratch: I64, record: I64, head: I64, pc: I64, ring: I64, periods: I64) {
     if (ring == I64{0}) {
         written := I64{0}
         loop written < periods {
-            perf_samples_put_one(fd, record, head, pc)
+            perf_samples_put_one(fd, side, record, head, pc)
             written = wrapping(written + I64{1})
         }
         return
@@ -830,7 +857,7 @@ perf_samples_put: fn(fd: I64, record: I64, head: I64, pc: I64, ring: I64, period
         if (size == I64{0}) { break }
         if ((header & I64{4294967295}) == I64{9}) {
             ip: rt_text_word(wrapping(data + (wrapping(tail + I64{8}) & mask)))
-            perf_samples_put_precise(fd, record, head, pc, wrapping(ip - perf_samples_bias))
+            perf_samples_put_precise(fd, side, scratch, record, head, pc, wrapping(ip - perf_samples_bias))
         }
         tail = wrapping(tail + size)
     }
@@ -849,19 +876,31 @@ perf_samples_put: fn(fd: I64, record: I64, head: I64, pc: I64, ring: I64, period
 // came, and the interrupted frame is its caller. A sample outside every
 // range keeps the interrupted frame's callers. A CPU-time sample's record
 // (kind 0) ends in PERF_SAMPLES_TIMED words, which are no callers.
-perf_samples_put_precise: fn(fd: I64, record: I64, head: I64, pc: I64, precise: I64) {
+perf_samples_put_precise: fn(fd: I64, side: I64, scratch: I64, record: I64, head: I64, pc: I64, precise: I64) {
     if (record == I64{0}) {
-        perf_samples_put_one(fd, I64{0}, head, precise)
+        perf_samples_put_one(fd, side, I64{0}, head, precise)
         return
     }
     trailer: if ((head >> PERF_SAMPLES_KIND_BITS) == I64{0}) -> PERF_SAMPLES_TIMED else -> I64{0}
     count: wrapping(((head >> PERF_SAMPLES_ADDRESS_BITS) & I64{2047}) - trailer)
     rt_text_store(wrapping(record + I64{8}), pc)
-    entry: perf_cfi_find(precise)
+    // The sampled function's range: its rule row's when the side caches
+    // them, else its entry's; an empty one outside every function.
+    begin := I64{0}
+    end := I64{0}
+    if (side != I64{0} && scratch != I64{0}) {
+        row: perf_cfi_cached(perf_samples_side_rows(side), scratch, precise)
+        begin = rt_text_word(wrapping(row + I64{8}))
+        end = rt_text_word(wrapping(row + I64{16}))
+    } else {
+        entry: perf_cfi_find(precise)
+        if (entry != I64{0}) {
+            begin = rt_text_word(entry)
+            end = rt_text_word(wrapping(entry + I64{8}))
+        }
+    }
     at := I64{1}
-    if (entry != I64{0}) {
-        begin: rt_text_word(entry)
-        end: rt_text_word(wrapping(entry + I64{8}))
+    if (begin < end) {
         loop at < count {
             frame: rt_text_word(wrapping(record + wrapping(at * I64{8})))
             if (frame >= begin && frame < end) { break }
@@ -874,12 +913,13 @@ perf_samples_put_precise: fn(fd: I64, record: I64, head: I64, pc: I64, precise: 
     // the ring's next sample.
     from: wrapping(record + wrapping(at * I64{8}))
     kept: rt_text_word(from)
-    perf_samples_put_one(fd, from, wrapping(head - (at << PERF_SAMPLES_ADDRESS_BITS)), precise)
+    perf_samples_put_one(fd, side, from, wrapping(head - (at << PERF_SAMPLES_ADDRESS_BITS)), precise)
     rt_text_store(from, kept)
 }
 
-// One write of a sample's record (perf_samples_put) at program counter `pc`.
-perf_samples_put_one: fn(fd: I64, record: I64, head: I64, pc: I64) {
+// One sample's record (perf_samples_put) at program counter `pc`: kept in
+// `side` while records are buffered (perf_samples_keep), else written.
+perf_samples_put_one: fn(fd: I64, side: I64, record: I64, head: I64, pc: I64) {
     word: (pc & PERF_SAMPLES_ADDRESS_MASK) | head
     if (record == I64{0}) {
         #Unsafe("one write of a stack-local word, which the kernel copies before the call returns") {
@@ -888,8 +928,85 @@ perf_samples_put_one: fn(fd: I64, record: I64, head: I64, pc: I64) {
         return
     }
     rt_text_store(record, word)
+    bytes: wrapping(((head >> PERF_SAMPLES_ADDRESS_BITS) & I64{2047}) * I64{8})
+    if (side != I64{0} && perf_samples_buffered != I64{0}) {
+        perf_samples_keep(fd, side, record, bytes)
+        return
+    }
     #Unsafe("one write of the record's words, which the kernel copies before the call returns") {
-        _ := os_syscall_i64(I64{1}, fd, record, wrapping(((head >> PERF_SAMPLES_ADDRESS_BITS) & I64{2047}) * I64{8}), I64{0}, I64{0}, I64{0})
+        _ := os_syscall_i64(I64{1}, fd, record, bytes, I64{0}, I64{0}, I64{0})
+    }
+}
+
+// Appends the `bytes` of the record at `record` to the records `side`
+// holds, writing those out first when the record would not fit.
+perf_samples_keep: fn(fd: I64, side: I64, record: I64, bytes: I64) {
+    used := rt_text_word(side)
+    if (wrapping(used + bytes) > PERF_SAMPLES_OUT_BYTES) {
+        _ := host_write_all(fd, wrapping(side + I64{8}), used)
+        used = I64{0}
+    }
+    out: wrapping(wrapping(side + I64{8}) + used)
+    at := I64{0}
+    loop at < bytes {
+        rt_text_store(wrapping(out + at), rt_text_word(wrapping(record + at)))
+        at = wrapping(at + I64{8})
+    }
+    rt_text_store(side, wrapping(used + bytes))
+}
+
+// The bytes of one record buffer's side (perf_samples_sides): its used
+// count, its records, its rule rows.
+perf_samples_side_bytes: fn() -> I64 {
+    wrapping(wrapping(I64{8} + PERF_SAMPLES_OUT_BYTES) + wrapping(PERF_CFI_CACHE_ROWS * PERF_CFI_CACHE_ROW_BYTES))
+}
+
+// The side of record buffer `slot` (perf_samples_claim) of the handler
+// holding it, 0 when the start could not map the sides.
+perf_samples_side: fn(slot: I64, buffer: I64) -> I64 {
+    sides: perf_samples_sides
+    if (sides == I64{0}) { return I64{0} }
+    index: if (slot == buffer) -> I64{0} else -> wrapping(wrapping(wrapping(slot - perf_samples_slots) / perf_samples_slot_bytes()) + I64{1})
+    wrapping(sides + wrapping(index * perf_samples_side_bytes()))
+}
+
+// The rule rows of side `side` (perf_cfi_cached).
+perf_samples_side_rows: fn(side: I64) -> I64 {
+    wrapping(wrapping(side + I64{8}) + PERF_SAMPLES_OUT_BYTES)
+}
+
+// At the exit, before the clock record: writes the records every side
+// holds, each record buffer held as its handler holds it, so that none
+// fills meanwhile; a handler that holds one finishes first. Records are
+// written as they are made from then on: a handler reads
+// perf_samples_buffered once it holds its buffer, after this clears it.
+perf_samples_flush: fn(fd: I64) {
+    sides: perf_samples_sides
+    if (sides == I64{0} || perf_samples_buffered == I64{0}) {
+        return
+    }
+    #Unsafe("the exit alone clears it; a handler reads it only while it holds its buffer, which the claims below order") {
+        perf_samples_buffered = I64{0}
+    }
+    buffer: perf_samples_buffer
+    slots: perf_samples_slots
+    index := I64{0}
+    loop index <= PERF_SAMPLES_SLOTS {
+        busy: if (index == I64{0}) -> buffer else if (slots == I64{0}) -> I64{0} else -> wrapping(slots + wrapping(wrapping(index - I64{1}) * perf_samples_slot_bytes()))
+        if (busy != I64{0}) {
+            // sched_yield while a handler holds it.
+            loop sync_cas(busy, I64{0}, I64{1}) != (I64{0}) {
+                _ := host_call(I64{24}, I64{0}, I64{0}, I64{0})
+            }
+            side: wrapping(sides + wrapping(index * perf_samples_side_bytes()))
+            used: rt_text_word(side)
+            if (used > I64{0}) {
+                _ := host_write_all(fd, wrapping(side + I64{8}), used)
+                rt_text_store(side, I64{0})
+            }
+            sync_store(busy, I64{0})
+        }
+        index = wrapping(index + I64{1})
     }
 }
 
@@ -918,13 +1035,15 @@ perf_samples_cpu_clock_ns: fn(clock: I64) -> I64 {
 // the kernel's time for one signal (perf_samples_delivery), each in
 // nanoseconds. A second exit writes a later one. Under the alloc lens the
 // heap snapshot named `exit` comes first (perf_samples_heap). The spans
-// buffer's rows are written out first (perf_spans_flush).
+// buffer's rows and the records the handlers keep (perf_samples_flush) are
+// written out first.
 perf_samples_exit: fn() {
     perf_spans_flush()
     fd: perf_samples_fd
     if (fd < I64{0}) {
         return
     }
+    perf_samples_flush(fd)
     perf_samples_heap(rt_static_text("exit"))
     buffer: perf_samples_buffer
     handlers: if (buffer == I64{0}) -> I64{0} else -> sync_load(wrapping(buffer + wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_SLOTS) * I64{8})))
@@ -2834,6 +2953,14 @@ PERF_CFI_RSP: I64{7}
 // A pointer the unwinder cannot decode.
 PERF_CFI_BAD: I64{-1}
 
+// A side's rule rows (perf_cfi_cached): how many, the bytes of each, and
+// the offset of each one's copy of a rule row.
+PERF_CFI_CACHE_ROWS: I64{256}
+
+PERF_CFI_CACHE_ROW_BYTES: I64{72}
+
+PERF_CFI_CACHED: I64{24}
+
 perf_cfi_u16: fn(at: I64) -> I64 {
     rt_text_byte(at) | (rt_text_byte(wrapping(at + I64{1})) << I64{8})
 }
@@ -3141,6 +3268,58 @@ perf_cfi_find: fn(address: I64) -> I64 {
     if (address < rt_text_word(wrapping(entry + I64{8}))) -> entry else -> I64{0}
 }
 
+// The rule row of link-time address `address` in `rows`, a side's
+// PERF_CFI_CACHE_ROWS rows (perf_samples_side_rows), each kept by its
+// address: its address plus one, the range of the table entry holding it
+// (0 and 0 for none), then the rule row's words from PERF_CFI_CFA_REG on,
+// each -1 where the entry has no row the unwinder reads. A row the side
+// does not hold yet is interpreted in `scratch` (perf_cfi_rule) into it,
+// over whichever address held it before: a handler's samples come back to
+// the same few program counters and call sites, so most interpret none.
+perf_cfi_cached: fn(rows: I64, scratch: I64, address: I64) -> I64 {
+    // The product's top 8 bits, one of the 256 rows.
+    index: (wrapping(address * I64{-7046029254386353131}) >> I64{56}) & I64{255}
+    row: wrapping(rows + wrapping(index * PERF_CFI_CACHE_ROW_BYTES))
+    key: wrapping(address + I64{1})
+    if (rt_text_word(row) == key) { return row }
+    entry: perf_cfi_find(address)
+    begin := I64{0}
+    end := I64{0}
+    ruled := false
+    if (entry != I64{0}) {
+        begin = rt_text_word(entry)
+        end = rt_text_word(wrapping(entry + I64{8}))
+        ruled = perf_cfi_rule(scratch, rt_text_word(wrapping(entry + I64{16})), begin, address)
+    }
+    rt_text_store(wrapping(row + I64{8}), begin)
+    rt_text_store(wrapping(row + I64{16}), end)
+    at := I64{0}
+    loop at < PERF_CFI_ROW_BYTES {
+        word: if (ruled) -> rt_text_word(wrapping(wrapping(scratch + PERF_CFI_ROW) + at)) else -> I64{-1}
+        rt_text_store(wrapping(wrapping(row + PERF_CFI_CACHED) + at), word)
+        at = wrapping(at + I64{8})
+    }
+    rt_text_store(row, key)
+    row
+}
+
+// The rule row of link-time address `address` the walk reads, at the
+// offsets it has in a scratch (PERF_CFI_ROW on): `rows`' (perf_cfi_cached)
+// where the handler's side holds rows, else interpreted in `scratch`; 0
+// where the image's call frame information gives none the unwinder reads.
+perf_cfi_rules: fn(rows: I64, scratch: I64, address: I64) -> I64 {
+    if (rows == I64{0}) {
+        entry: perf_cfi_find(address)
+        if (entry == I64{0} || !perf_cfi_rule(scratch, rt_text_word(wrapping(entry + I64{16})), rt_text_word(entry), address)) {
+            return I64{0}
+        }
+        return scratch
+    }
+    row: perf_cfi_cached(rows, scratch, address)
+    if (rt_text_word(wrapping(row + PERF_CFI_CACHED)) < I64{0}) { return I64{0} }
+    wrapping(row + wrapping(PERF_CFI_CACHED - PERF_CFI_ROW))
+}
+
 // The FDEs of the .eh_frame section at `bytes` in the mapping, `size` bytes
 // from link-time address `address`: counted when `table` is 0, else written
 // to it from entry `first` on. The entries written or counted.
@@ -3275,17 +3454,19 @@ perf_cfi_sort: fn(table: I64, count: I64) {
 // sample in the zones of its task that hold it (PERF_SAMPLES_TIMED). A
 // timer's SIGPROF stands for its own period and each the kernel folded into
 // it while it was pending (perf_samples_periods), so its record is written
-// once for each, as many samples as the CPU time it covers gives. A write
-// the kernel refuses loses that one sample; O_APPEND puts each record after
-// the last. Under the task clock or a precise source (perf_precise_choose)
-// a SIGPROF reports its sampler's ring instead, and the record is written
-// once for each sample the ring
-// holds, by the program counter the sample names, under the callers its
-// function has in the stack walked from the interrupted context
-// (perf_samples_put_precise). A counter's record has its
-// kind, and the counter is armed again once it is written. A topdown
-// event's record is one word, its program counter alone, 0 outside the
-// image's code, and its event's index above it.
+// once for each, as many samples as the CPU time it covers gives. The
+// handler keeps its records in its buffer's side to write many at once
+// (perf_samples_keep), and reads each frame's rules from the rows the side
+// keeps (perf_cfi_cached); a write the kernel refuses loses those records,
+// and O_APPEND puts each write after the last. Under the task clock or a
+// precise source (perf_precise_choose) a SIGPROF reports its sampler's ring
+// instead, and the record is written once for each sample the ring holds,
+// by the program counter the sample names, under the callers its function
+// has in the stack walked from the interrupted context
+// (perf_samples_put_precise). A counter's record has its kind, and the
+// counter is armed again once it is written. A topdown event's record is
+// one word, its program counter alone, 0 outside the image's code, and its
+// event's index above it.
 #Export(c) jet_rt_perf_samples_signal: fn(signal: I64, info: I64, context: I64) -> I64 {
     if (signal == PERF_FLIGHT_CAPTURE_SIGNAL) {
         perf_flight_capture(context)
@@ -3327,7 +3508,7 @@ perf_cfi_sort: fn(table: I64, count: I64) {
     periods: perf_samples_periods(signal, info)
     if (signal == PERF_SAMPLES_SIGNAL) { perf_causal_tick(pc, periods) }
     if (slot == I64{0}) {
-        perf_samples_put(fd, I64{0}, (I64{1} << PERF_SAMPLES_ADDRESS_BITS) | kind, pc, ring, periods)
+        perf_samples_put(fd, I64{0}, I64{0}, I64{0}, (I64{1} << PERF_SAMPLES_ADDRESS_BITS) | kind, pc, ring, periods)
         perf_counter_rearm(buffer, counter)
         perf_samples_charge(buffer, began)
         return I64{0}
@@ -3340,33 +3521,36 @@ perf_cfi_sort: fn(table: I64, count: I64) {
     count := if (ring != I64{0}) -> I64{2} else -> I64{1}
     stack: rt_text_word(wrapping(context + I64{160}))
     frame := if (walked) -> rt_text_word(wrapping(context + I64{120})) else -> I64{0}
-    scratch: if (walked) -> perf_samples_scratch(slot, buffer) else -> I64{0}
+    // The buffer's side keeps the records not yet written and the rule
+    // rows its walks met (perf_samples_side, perf_cfi_rules).
+    side: perf_samples_side(slot, buffer)
+    rows: if (side == I64{0}) -> I64{0} else -> perf_samples_side_rows(side)
+    rules: perf_samples_scratch(slot, buffer)
+    scratch: if (walked) -> rules else -> I64{0}
     sp := stack
     address := pc
     loop scratch != (I64{0}) && count < room {
-        entry: perf_cfi_find(address)
-        if (entry == I64{0} || !perf_cfi_rule(scratch, rt_text_word(wrapping(entry + I64{16})), rt_text_word(entry), address)) {
-            break
-        }
-        register: rt_text_word(wrapping(scratch + PERF_CFI_CFA_REG))
+        row: perf_cfi_rules(rows, scratch, address)
+        if (row == I64{0}) { break }
+        register: rt_text_word(wrapping(row + PERF_CFI_CFA_REG))
         // A frame that keeps rbp: the walk below takes it from here.
         if (register == PERF_CFI_RBP) { break }
-        cfa: wrapping(sp + rt_text_word(wrapping(scratch + PERF_CFI_CFA_OFFSET)))
-        if (register != PERF_CFI_RSP || rt_text_word(wrapping(scratch + PERF_CFI_RA_RULE)) != PERF_CFI_SAVED || cfa <= sp || cfa & I64{7} != I64{0} || wrapping(cfa - stack) >= I64{16777216}) {
+        cfa: wrapping(sp + rt_text_word(wrapping(row + PERF_CFI_CFA_OFFSET)))
+        if (register != PERF_CFI_RSP || rt_text_word(wrapping(row + PERF_CFI_RA_RULE)) != PERF_CFI_SAVED || cfa <= sp || cfa & I64{7} != I64{0} || wrapping(cfa - stack) >= I64{16777216}) {
             frame = I64{0}
             break
         }
         // cfa is above the interrupted rsp on the thread's stack, so the
         // return address and the saved rbp below it are words of that stack.
-        rule: rt_text_word(wrapping(scratch + PERF_CFI_RBP_RULE))
+        rule: rt_text_word(wrapping(row + PERF_CFI_RBP_RULE))
         if {
             (rule == PERF_CFI_SAVED) -> {
-                frame = rt_text_word(wrapping(cfa + rt_text_word(wrapping(scratch + PERF_CFI_RBP_OFFSET))))
+                frame = rt_text_word(wrapping(cfa + rt_text_word(wrapping(row + PERF_CFI_RBP_OFFSET))))
             }
             (rule == PERF_CFI_UNKNOWN) -> frame = I64{0}
             else -> {}
         }
-        site: wrapping(wrapping(rt_text_word(wrapping(cfa + rt_text_word(wrapping(scratch + PERF_CFI_RA_OFFSET)))) - I64{1}) - bias)
+        site: wrapping(wrapping(rt_text_word(wrapping(cfa + rt_text_word(wrapping(row + PERF_CFI_RA_OFFSET)))) - I64{1}) - bias)
         if (!perf_samples_in_code(site)) {
             frame = I64{0}
             break
@@ -3402,7 +3586,7 @@ perf_cfi_sort: fn(table: I64, count: I64) {
         rt_text_store(wrapping(slot + wrapping(wrapping(count + I64{2}) * I64{8})), if (scheduler_control_current() == I64{0}) -> I64{0} else -> observe_current_task())
         count = wrapping(count + PERF_SAMPLES_TIMED)
     }
-    perf_samples_put(fd, wrapping(slot + I64{8}), (count << PERF_SAMPLES_ADDRESS_BITS) | kind, pc, ring, periods)
+    perf_samples_put(fd, side, rules, wrapping(slot + I64{8}), (count << PERF_SAMPLES_ADDRESS_BITS) | kind, pc, ring, periods)
     sync_store(slot, I64{0})
     perf_counter_rearm(buffer, counter)
     perf_samples_charge(buffer, began)
