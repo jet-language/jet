@@ -6,8 +6,11 @@
 // stopped program and calls it there. Where every local the expression's
 // names may read is a value no move empties, live at the stop
 // (jet_cli_debug_eval_params), the expression's function takes them as the
-// image's debug types spell them, and the one compile that builds it asks
-// the checker its type and any effect it uses (jet_cli_debug_eval_direct).
+// image's debug types spell them. The session's held check of the program
+// checks that function and the held IR program builds it alone, with no
+// compile of the program (jet_cli_debug_eval_held); where the held check
+// doesn't answer, one compile builds it and asks the checker its type and
+// any effect it uses (jet_cli_debug_eval_direct).
 // When those locals are all of the primitive types and the expression names
 // nothing else, it reads nothing of the program, and that compile takes the
 // entry without the program's code (jet_cli_debug_eval_alone).
@@ -20,9 +23,9 @@
 use {
     debug_eval_files: core.files
     jet_debug.[NATIVE_EVAL_CAPTURES, NativeEval, NativeEvalBinder, NativeEvalPart, NativeEvalRefused, NativeEvaluator, NativeFixEdit, native_eval_names]
-    jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverEvalAsk, JetDriverIceRow, JetDriverLoweringInputs, jet_driver_check_failures, jet_driver_checked_declarations, jet_driver_entry_root_path, jet_driver_inline_package]
+    jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverEvalAsk, JetDriverHeldEval, JetDriverIceRow, JetDriverLoweringInputs, jet_driver_check_failures, jet_driver_checked_declarations, jet_driver_entry_root_path, jet_driver_held_eval_check, jet_driver_held_eval_open, jet_driver_inline_package]
     jet_eval.[jet_eval_native_add, jet_eval_native_wrapper]
-    jet_foundation.[BuildOptions, CompilerThreads, DeepChecks, FnBody, StmtKind, Type, deep_checks_flags, foundation_named_type, name_rows_get_text, type_name, type_unqualified_nominals]
+    jet_foundation.[BuildOptions, CompilerThreads, DeclTable, DeepChecks, FnBody, StmtKind, TTypeDef, Type, body_type, deep_checks_flags, foundation_named_type, name_rows_get_text, sha256_hex, type_name, type_unqualified_nominals]
     jet_ir.[IRModule, IRProgram, IRTypeKind, ir_build_held_root, ir_eval_place_refusal, ir_held_program, ir_module_new, ir_pointer_row, ir_untag, ir_x64_compile_module_logged, ir_x64_debug_program]
     jet_parser.[parse_type_text]
     jet_sema.[SemaEvalProbeAnswer, sema_eval_probe_function, sema_eval_probe_parse, sema_ownership_type_is_copy]
@@ -41,15 +44,18 @@ JET_CLI_DEBUG_EVAL_ENTRY: "jet_debug_eval"
 JET_CLI_DEBUG_EVAL_REFUSAL: "the debugger can't evaluate this: "
 
 // The evaluator of a session debugging the program whose entry file is
-// `entry`, built with the flags `argv` (jet_cli_debug_eval_argv).
+// `entry`, built with the flags `argv` (jet_cli_debug_eval_argv), and the
+// session's held check of that program, which its first evaluation of
+// locals opens (jet_cli_debug_eval_held).
 JetCLIDebugEvaluator: struct {
     entry: String,
     argv: [String],
     color: Bool,
+    held: Shared<JetCLIDebugEvalHeldSlot>,
 
     impl NativeEvaluator {
         compile: fn(self, path: String, line: Int, column: Int, text: String, binders: [NativeEvalBinder]?) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval NativeEvalRefused! {
-            jet_cli_debug_eval_compile(self.entry, self.argv, self.color, path, line, column, text, binders)
+            jet_cli_debug_eval_compile(self.entry, self.argv, self.color, self.held, path, line, column, text, binders)
         }
     }
 }
@@ -106,8 +112,10 @@ jet_cli_debug_eval_offset: fn(source: String, line: Int, column: Int) -> Int? Ne
 // `text` compiled into the program of `entry`, with the flags `argv`, as a
 // function of the locals it reads before the node at `line` and `column` of
 // the source `path` (NativeEval.jet); `binders` as NativeEvaluator.compile
-// takes them.
-jet_cli_debug_eval_compile: fn(entry: String, argv: [String], color: Bool, path: String, line: Int, column: Int, text: String, binders: [NativeEvalBinder]?) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval NativeEvalRefused! {
+// takes them. An expression of locals is first checked against the
+// session's held check `held` and built in its held program
+// (jet_cli_debug_eval_held).
+jet_cli_debug_eval_compile: fn(entry: String, argv: [String], color: Bool, held: Shared<JetCLIDebugEvalHeldSlot>, path: String, line: Int, column: Int, text: String, binders: [NativeEvalBinder]?) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval NativeEvalRefused! {
     if entry == "" {
         return Err(jet_cli_debug_eval_refused("the debugger has no source of the program to compile it with; debug it as `jet debug <file.jet>`"))
     }
@@ -134,6 +142,12 @@ jet_cli_debug_eval_compile: fn(entry: String, argv: [String], color: Bool, path:
                     }
                     .Err(refusal) -> return Err(refusal)
                 }
+            }
+            if jet_cli_debug_eval_held(held, entry, color, options, path, text, params) == {
+                .Ok(built) -> {
+                    if built == .Val(code) -> return Ok(code)
+                }
+                .Err(refusal) -> return Err(refusal)
             }
             if jet_cli_debug_eval_direct(entry, color, options, path, source, text, params) == {
                 .Ok(built) -> {
@@ -341,13 +355,15 @@ JetCLIDebugEvalHeldIR: struct {
 // The held IR program of the checked program `checked`, which `result`
 // checked with the image's build `options`, its Core calls bound to the
 // runtime of `runtime`, as the image's build binds them
-// (jet_cli_native_checks).
-jet_cli_debug_eval_held_ir: fn(result: JetDriverCompileResult, checked: &&JetDriverLoweringInputs, options: BuildOptions, runtime: JetCLIRuntimeExports) -> JetCLIDebugEvalHeldIR Never! {
+// (jet_cli_native_checks). The declarations are the held probe's
+// registration's, `decls`, and the checked types `types` (JetDriver
+// JetDriverHeldOpened), which the probe borrows back for each check.
+jet_cli_debug_eval_held_ir: fn(result: JetDriverCompileResult, checked: &&JetDriverLoweringInputs, decls: DeclTable, types: &&[TTypeDef], options: BuildOptions, runtime: JetCLIRuntimeExports) -> JetCLIDebugEvalHeldIR Never! {
     inputs := checked.move()
     level: jet_cli_native_level(options)
     checks: jet_cli_native_checks(result, inputs, options, runtime)
     declarations: jet_driver_checked_declarations(inputs)
-    program: ir_held_program(inputs.functions.move(), inputs.decls, inputs.symbols.move(), declarations.type_defs.move(), declarations.impls.move(), inputs.sources.move(), declarations.constants.move(), declarations.foreign.move(), checks, bind: level <= 0)
+    program: ir_held_program(inputs.functions.move(), decls, inputs.symbols.move(), types.move(), declarations.impls.move(), inputs.sources.move(), declarations.constants.move(), declarations.foreign.move(), checks, bind: level <= 0)
     JetCLIDebugEvalHeldIR{program: program.move(), level: level, options: options, threads: result.compiler_threads}
 }
 
@@ -372,6 +388,168 @@ jet_cli_debug_eval_held_build: fn(held: &JetCLIDebugEvalHeldIR, root: &&FnBody, 
     code := jet_cli_debug_eval_native(program.move(), key, names, value, text, threads) ?? return Err(err)
     code.held = true
     Ok(code)
+}
+
+// A session's held check of its program (JetDriver jet_driver_held_eval_open)
+// and its held IR program, which owns the checked functions, the symbol
+// table and the checked types the check borrows, opened from the sources
+// `stamp`: a source file that reads other than it did (as a session's `fix`
+// writes one) opens a new one.
+JetCLIDebugEvalHeld: struct {
+    eval: JetDriverHeldEval,
+    ir: JetCLIDebugEvalHeldIR,
+    stamp: JetCLIDebugEvalHeldStamp,
+}
+
+// The sources a held check read at the stop's source `path`: the sha256 of
+// each source file of the program, by its path.
+JetCLIDebugEvalHeldStamp: struct {
+    path: String,
+    digests: [String:String],
+}
+
+// The session's held check, None until its first evaluation of locals
+// opens it (JetCLIDebugEvaluator.held), and the sources of the last one that
+// didn't open, which no evaluation tries again until they change.
+JetCLIDebugEvalHeldSlot: struct {
+    held: JetCLIDebugEvalHeld?,
+    missed: JetCLIDebugEvalHeldStamp?,
+}
+
+// A held evaluation's answer (jet_cli_debug_eval_held_run) and the held
+// check it leaves for the next, or the sources of one that didn't open.
+JetCLIDebugEvalHeldRun: struct {
+    held: JetCLIDebugEvalHeld?,
+    missed: JetCLIDebugEvalHeldStamp?,
+    built: NativeEval?,
+    refusal: NativeEvalRefused?,
+}
+
+// `text` as the function of the locals `params` (jet_cli_debug_eval_params)
+// checked against the session's held check `shared`, opened on the first
+// evaluation at `path` and again when that's another source or a source it
+// read changed, and built in its held IR program: no compile of the program.
+// The built expression, or the debugger's refusal of an effect it uses;
+// None, so the compiles answer, when the held check doesn't open, for any
+// other refusal, a value that can fail, or a build that doesn't finish.
+jet_cli_debug_eval_held: fn(shared: Shared<JetCLIDebugEvalHeldSlot>, entry: String, color: Bool, options: BuildOptions, path: String, text: String, params: [NativeEvalBinder]) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval? NativeEvalRefused! {
+    permit := shared.guard_edit()
+    jet_cli_debug_eval_held_in(permit.value, entry, color, options, path, text, params)
+}
+
+jet_cli_debug_eval_held_in: fn(slot: &JetCLIDebugEvalHeldSlot, entry: String, color: Bool, options: BuildOptions, path: String, text: String, params: [NativeEvalBinder]) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval? NativeEvalRefused! {
+    if slot.held == None && jet_cli_debug_eval_held_missed(slot.missed, path) -> return Ok(None)
+    run: jet_cli_debug_eval_held_run(slot.held.move(), entry, color, options, path, text, params)
+    slot.held = run.held.move()
+    slot.missed = run.missed.move()
+    if run.refusal.move() == .Val(refusal) -> return Err(refusal)
+    Ok(run.built.move())
+}
+
+jet_cli_debug_eval_held_run: fn(held: &&JetCLIDebugEvalHeld?, entry: String, color: Bool, options: BuildOptions, path: String, text: String, params: [NativeEvalBinder]) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> JetCLIDebugEvalHeldRun {
+    kept := held.move()
+    if jet_cli_debug_eval_held_stale(kept, path) {
+        opening: jet_cli_debug_eval_held_open(entry, color, options, path)
+        kept = opening.held.move()
+        if kept == None -> return JetCLIDebugEvalHeldRun{held: None, missed: opening.missed.move(), built: None, refusal: None}
+    }
+    current := kept.move() ?? return JetCLIDebugEvalHeldRun{held: None, missed: None, built: None, refusal: None}
+    typed: loop param in params -> "{param.name}: {param.type_name}"
+    source: "{JET_CLI_DEBUG_EXPRESSION}: fn({typed.join(", ")}) {{\n    _ := {text}\n}}\n"
+    done: jet_driver_held_eval_check(current.eval, current.ir.program.functions, current.ir.program.symbols.move(), current.ir.program.types.move(), source)
+    current.ir.program.symbols = done.symbols.move()
+    current.ir.program.types = done.types.move()
+    loop report in done.checked.diagnostics {
+        if report.what.starts_with(JET_CLI_DEBUG_EVAL_REFUSAL) {
+            return JetCLIDebugEvalHeldRun{held: Val(current.move()), missed: None, built: None, refusal: Val(jet_cli_debug_eval_refused(report.what.slice(JET_CLI_DEBUG_EVAL_REFUSAL.len()..<report.what.len())))}
+        }
+    }
+    if !done.checked.complete || jet_driver_check_failures(done.checked.diagnostics).len() > 0 {
+        return JetCLIDebugEvalHeldRun{held: Val(current.move()), missed: None, built: None, refusal: None}
+    }
+    function := done.checked.function.move() ?? return JetCLIDebugEvalHeldRun{held: Val(current.move()), missed: None, built: None, refusal: None}
+    value: jet_cli_debug_eval_held_value(function) ?? return JetCLIDebugEvalHeldRun{held: Val(current.move()), missed: None, built: None, refusal: None}
+    if value == .Result(_, _) || !jet_cli_debug_eval_returns(function, value) {
+        return JetCLIDebugEvalHeldRun{held: Val(current.move()), missed: None, built: None, refusal: None}
+    }
+    names: loop param in params -> param.name
+    built: jet_cli_debug_eval_held_build(current.ir, function.move(), source, names, value, text) ?? return JetCLIDebugEvalHeldRun{held: Val(current.move()), missed: None, built: None, refusal: None}
+    JetCLIDebugEvalHeldRun{held: Val(current.move()), missed: None, built: Val(built), refusal: None}
+}
+
+// The type of the value the held check's expression function discards
+// (`_ := text`), its last statement; None when that is not the discard.
+jet_cli_debug_eval_held_value: fn(function: FnBody) -> Type? Never! {
+    if function.body.len() == 0 -> return None
+    row: function.body[function.body.len() - 1] - function.tree.stmt_base
+    if function.tree.stmts[row] == .Let(_, _, init, _, _, _) -> return Val(body_type(function.tree, init))
+    if function.tree.stmts[row] == .ExprStmt(discarded, _) -> return Val(body_type(function.tree, discarded))
+    None
+}
+
+// The held check of the program of `entry` (a check that holds its compile
+// state) opened at the source `path`, and its held IR program built with the
+// image's build `options`; or the sources it read, when the check doesn't
+// finish clean, no checked module is `path`'s, or the runtime's exports
+// can't be read.
+jet_cli_debug_eval_held_open: fn(entry: String, color: Bool, options: BuildOptions, path: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> JetCLIDebugEvalHeldRun {
+    compiled: jet_cli_compile_entry(entry, color, None, JetDriverCompileMode.Check, None, None, hold_check_state: true) ?? return JetCLIDebugEvalHeldRun{held: None, missed: None, built: None, refusal: None}
+    if compiled.move() == {
+        .Refused(_) -> return JetCLIDebugEvalHeldRun{held: None, missed: None, built: None, refusal: None}
+        .Compiled(compile, snapshot) -> {
+            digests := [String:String]{}
+            loop root in snapshot.roots {
+                loop file in root.files -> digests["{file.path}"] = sha256_hex(file.source)
+            }
+            stamp: JetCLIDebugEvalHeldStamp{path: "{path}", digests: digests.move()}
+            result := compile.move()
+            if jet_driver_check_failures(result.diagnostics).len() > 0 || result.internal_problem != None || !result.complete {
+                return JetCLIDebugEvalHeldRun{held: None, missed: Val(stamp.move()), built: None, refusal: None}
+            }
+            state: result.held.move() ?? return JetCLIDebugEvalHeldRun{held: None, missed: Val(stamp.move()), built: None, refusal: None}
+            result.held = None
+            // The longest source that names `path`: `util.jet` names `a/util.jet` too.
+            display := ""
+            loop checked in state.modules {
+                if checked.source_file.len() > display.len() && debug_eval_path_same(checked.source_file, path) -> display = "{checked.source_file}"
+            }
+            if display == "" -> return JetCLIDebugEvalHeldRun{held: None, missed: Val(stamp.move()), built: None, refusal: None}
+            runtime: jet_cli_runtime_exports(jet_cli_runtime_dir())
+            if runtime.failure != None -> return JetCLIDebugEvalHeldRun{held: None, missed: Val(stamp.move()), built: None, refusal: None}
+            opened: jet_driver_held_eval_open(state.move(), display) ?? return JetCLIDebugEvalHeldRun{held: None, missed: Val(stamp.move()), built: None, refusal: None}
+            graph: opened.eval.probe.program.registration_graph ?? return JetCLIDebugEvalHeldRun{held: None, missed: Val(stamp.move()), built: None, refusal: None}
+            ir: jet_cli_debug_eval_held_ir(result, opened.inputs.move(), graph.decls, opened.types.move(), options, runtime)
+            return JetCLIDebugEvalHeldRun{held: Val(JetCLIDebugEvalHeld{eval: opened.eval.move(), ir: ir.move(), stamp: stamp.move()}), missed: None, built: None, refusal: None}
+        }
+    }
+    JetCLIDebugEvalHeldRun{held: None, missed: None, built: None, refusal: None}
+}
+
+// Whether the held check `held` is to be opened again for an evaluation at
+// `path`: there is none, or its sources changed
+// (jet_cli_debug_eval_held_changed).
+jet_cli_debug_eval_held_stale: fn(held: JetCLIDebugEvalHeld?, path: String) -[FS]> Bool {
+    open: held ?? return true
+    jet_cli_debug_eval_held_changed(open.stamp, path)
+}
+
+// Whether the held check that last didn't open, from the sources `missed`,
+// would read the same sources at `path` now.
+jet_cli_debug_eval_held_missed: fn(missed: JetCLIDebugEvalHeldStamp?, path: String) -[FS]> Bool {
+    stamp: missed ?? return false
+    !jet_cli_debug_eval_held_changed(stamp, path)
+}
+
+// Whether the sources `stamp` are other than a check at `path` reads now:
+// `path` is another, or a source file reads other than it did or no longer
+// reads.
+jet_cli_debug_eval_held_changed: fn(stamp: JetCLIDebugEvalHeldStamp, path: String) -[FS]> Bool {
+    if stamp.path != path -> return true
+    loop (file, digest) in stamp.digests {
+        now: debug_eval_files.read(file) ?? return true
+        if sha256_hex(now) != digest -> return true
+    }
+    false
 }
 
 // The built module `built`'s function `key`, the expression's, with the
