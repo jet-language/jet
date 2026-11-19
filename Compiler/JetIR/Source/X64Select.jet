@@ -31,6 +31,7 @@ use {
     jet_foundation.[Type, name_rows_value]
     jet_backend.[
         X64Alu,
+        X64CallSite,
         X64Cond,
         X64CompiledFunction,
         X64Code,
@@ -316,6 +317,10 @@ IRX64Emitter: struct {
     alloc_row: Int,
     alloc_relocs: [Int],
     alloc_rows: [Int],
+    // Per call whose instruction names a call-site row (ir_code_line_call):
+    // its return address and that row, for X64FunctionDebug.calls once the
+    // code is laid out.
+    calls: [Int]{[Int]{}},
 }
 
 // One compiled function, the debug variables its ranges refer to, and its
@@ -592,10 +597,26 @@ ir_x64_call_out: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Alloc
             e.alloc_rows.push(e.alloc_row)
         }
     }
+    ir_x64_call_row(e, f)
     if !keeps {
         ir_x64_keep_xmms(e, f, al, false)
         ir_x64_keep_routed(e, f, al, false)
     }
+}
+
+// The call just emitted, when its instruction e.code.at names a call-site
+// row: it returns to the end of the code so far.
+ir_x64_call_row: fn(e: &IRX64Emitter, f: IRFunction) Never! {
+    at: e.code.at
+    if at < 0 || at >= f.code_line.len() {
+        return
+    }
+    row: ir_code_line_call(f.code_line[at])
+    if row == 0 {
+        return
+    }
+    e.calls.push(e.code.bytes.len())
+    e.calls.push(row)
 }
 
 // `bytes` pushed below the frame for a while (ir_x64_compile_body's
@@ -5233,6 +5254,16 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     }
     // An allocating call returns to the end of its rel32 field.
     allocs: loop (k, reloc) in e.alloc_relocs -> X64AllocSite{at: e.relocs[reloc].at + 4, ty: e.alloc_rows[k]}
+    // Each call's return address with its row's line and column.
+    calls := [X64CallSite]{}
+    walk = ir_x64_relax_walk()
+    loop k in 0..<(e.calls.len() /% 2) {
+        word: IR_CALL_SITE_WORDS * (e.calls[2 * k + 1] - 1)
+        returns: ir_x64_relaxed_next(relax, walk, e.calls[2 * k])
+        if word + 1 < f.call_sites.len() {
+            calls.push(X64CallSite{at: returns, line: f.call_sites[word], column: f.call_sites[word + 1]})
+        }
+    }
     walk = ir_x64_relax_walk()
     loop k in 0..<lines.len() -> lines[k].at = ir_x64_relaxed_next(relax, walk, lines[k].at)
     walk = ir_x64_relax_walk()
@@ -5323,7 +5354,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     if checked -> ir_timing_x64_check(m, f, e.code.log, e.errors)
     IRX64FunctionResult{
         function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: e.code.bytes.move(), relocs: e.relocs.move(), align: relax.align},
-        debug: X64FunctionDebug{lines: lines.move(), body: body_at, cfi: cfi.move(), ranges: ranges.move(), stack: stack, dynamic: e.dynamic, inlines: ir_x64_inline_ranges(f, positions), allocs: allocs},
+        debug: X64FunctionDebug{lines: lines.move(), body: body_at, cfi: cfi.move(), ranges: ranges.move(), stack: stack, dynamic: e.dynamic, inlines: ir_x64_inline_ranges(f, positions), allocs: allocs, calls: calls.move()},
         variables: variables.move(),
         errors: e.errors.move(),
         log: log,

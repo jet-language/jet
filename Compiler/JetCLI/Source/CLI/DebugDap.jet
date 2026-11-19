@@ -447,7 +447,10 @@ jet_cli_dap_stack: fn(session: &NativeSession, entry: String) -> String NativeDe
     loop (index, frame) in frames {
         if !native_debug_jet_frame(frame) -> next
         source: "{{\"name\":{foundation_json_quote(dap_files.basename(frame.file))},\"path\":{foundation_json_quote(dap_files.join(base, frame.file))}}}"
-        rows.push("{{\"id\":{index},\"name\":{foundation_json_quote(frame.function)},\"source\":{source},\"line\":{frame.line},\"column\":1}}")
+        // A caller's frame at a call with a call-site row names the call's
+        // column; any other frame its line.
+        column: if frame.column > 0 -> frame.column else -> 1
+        rows.push("{{\"id\":{index},\"name\":{foundation_json_quote(frame.function)},\"source\":{source},\"line\":{frame.line},\"column\":{column}}}")
     }
     Ok("{{\"stackFrames\":[{rows.join(",")}],\"totalFrames\":{rows.len()}}}")
 }

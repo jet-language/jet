@@ -133,7 +133,7 @@ ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction,
         // A selected site is spliced below: its row goes to the report now.
         if selected {
             any = true
-            report.inlines.push(IROptInlined{file: caller.source_file.copy(), line: caller.code_line[at], caller: caller.name.copy(), callee: bodies[caller.a[at]][0].name.copy(), reason: reason.move()})
+            report.inlines.push(IROptInlined{file: caller.source_file.copy(), line: ir_code_line_source(caller.code_line[at]), caller: caller.name.copy(), callee: bodies[caller.a[at]][0].name.copy(), reason: reason.move()})
         }
         selected_sites.push(selected)
     }
@@ -147,6 +147,8 @@ ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction,
     out.max_depth = caller.max_depth
     out.stack_check = caller.stack_check
     out.inline_sites = caller.inline_sites.copy()
+    // The rows are shared, not copied: no pass writes them.
+    out.call_sites = caller.call_sites
     loop slot in 0..<caller.slot_type.len() {
         _ := ir_slot(out, caller.slot_type[slot], caller.slot_kind[slot], caller.slot_name[slot], caller.slot_line[slot])
     }

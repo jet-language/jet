@@ -20,10 +20,11 @@ NativeEvalRefused: struct {
 }
 
 // What compiles an expression for a session (JetCLI DebugCompile.jet): `text`
-// checked before line `line` of the source `path`, compiled with the
+// checked before the node at line `line` and character column `column` of
+// the source `path` (column 0: the line's first node), compiled with the
 // program, or why it can't be.
 NativeEvaluator: trait {
-    compile: fn(self, path: String, line: Int, text: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval NativeEvalRefused!,
+    compile: fn(self, path: String, line: Int, column: Int, text: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval NativeEvalRefused!,
 }
 
 // A value an evaluation passes or returns: a capture by the name of the

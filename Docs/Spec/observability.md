@@ -666,12 +666,19 @@ logpoint's message, the adapter's `evaluate`) has one evaluator, the
 compiler (`Compiler/JetDebug/Source/NativeEval.jet`,
 `Compiler/JetCLI/Source/CLI/DebugCompile.jet`). The expression is checked
 where the selected frame stopped, as a function of the locals it reads; one
-with an effect is refused, and the refusal names the effect. The program is
+with an effect is refused, and the refusal names the effect. A caller's frame
+stopped at a call: the debug information gives each call the line and column
+of the source node whose lowering made it (a `DW_TAG_call_site` with its
+return address), a call the compiler made for a node (a lambda that a
+lowered `map` calls) included, so the expression is checked just before that
+node; `bt` shows the frame at that line, and the adapter's `stackTrace` at
+that line and column. A row names where the node starts, so two calls of one
+chain that start together share a row. The program is
 compiled again with that function, which runs in a fork of the stopped
 program, placed as `fix` places code, with the locals' bytes read from the
 frame; the program itself neither runs nor changes. A value whose type has a
 `debug_view` shows as `locals` shows it, the view run in that same fork. A
-compiled expression is kept per line and text, so a condition compiles once
+compiled expression is kept per line, column and text, so a condition compiles once
 and runs in a fork at each hit. The fork runs the program's own runtime, so
 a lock another thread held at the stop is never released there (code that
 takes it fails at the 2 s budget), and a function value runs the image's

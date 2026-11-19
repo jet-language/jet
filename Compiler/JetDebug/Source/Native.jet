@@ -51,12 +51,15 @@ NATIVE_ATTACH_FAILED: "E2231"
 // One frame of a stop: the Jet function and its source position, or a frame
 // without line information (the runtime's start code) with line 0. An
 // `inlined` frame is code the optimizer inlined into the frame below it,
-// which shows the call at its line.
+// which shows the call at its line. A caller's frame whose call has a
+// call-site row (NativeImage.calls) shows the line and character `column`
+// of the call's source node; `column` is 0 when the frame names a line only.
 NativeFrame: struct {
     function: String,
     file: String,
     line: Int,
     inlined: Bool,
+    column: Int{0},
 }
 
 // One frame a backtrace shows, against the frames the unwinder found: the
@@ -393,10 +396,10 @@ NativeSession: struct {
                 address = breakpoint.addresses[0]
             }
         }
-        at: self.source_at(address) ?? return Err(native_eval_refused("breakpoint {number} is not on a line of Jet code"))
+        at: self.source_at(address, -1) ?? return Err(native_eval_refused("breakpoint {number} is not on a line of Jet code"))
         rule := NativeRule{condition: None, log: None, shown: shown}
         if condition.trim() != "" {
-            compiled: self.compiled(at.path, at.line, condition.trim()) ?? return Err(err)
+            compiled: self.compiled(at.path, at.line, at.column, condition.trim()) ?? return Err(err)
             type_name: compiled.guard_read().value.result.name
             if type_name != "Bool" {
                 return Err(native_eval_refused("`{condition.trim()}` is a {type_name}, not a Bool"))
@@ -404,30 +407,38 @@ NativeSession: struct {
             rule.condition = Val(compiled)
         }
         if log != "" {
-            rule.log = Val(self.compiled(at.path, at.line, native_eval_message(log)) ?? return Err(err))
+            rule.log = Val(self.compiled(at.path, at.line, at.column, native_eval_message(log)) ?? return Err(err))
         }
         Ok(rule)
     }
 
-    // The source file (its path, as the image's line table records it)
-    // and line of the Jet code at `lookup`.
-    source_at: fn(self, lookup: Int) -> {path: String, line: Int}? Never! {
+    // The source file (its path, as the image's line table records it),
+    // line and character column (0: the line's first node) of the Jet code
+    // at `lookup`. A caller's frame passes the return address `call` of
+    // its call (-1 for none): a call-site row there names the call's own
+    // node, not the first node of its line.
+    source_at: fn(self, lookup: Int, call: Int) -> {path: String, line: Int, column: Int}? Never! {
         index: x64_jetline_find(self.image.lines, lookup)
         if index < 0 -> return None
         function: self.image.lines.functions[index]
-        line: x64_jetline_line(self.image.lines, function, lookup) ?? return None
+        line := x64_jetline_line(self.image.lines, function, lookup) ?? return None
+        column := 0
+        if self.image.calls.get(call) == .Val(site) {
+            line = site.line
+            column = site.column
+        }
         path: if function.dir == "" || function.file.starts_with("/") -> "{function.file}" else -> native_files.join(function.dir, function.file)
-        Val({path: path, line: line})
+        Val({path: path, line: line, column: column})
     }
 
-    // `text` compiled before `line` of the source `path`: the kept one, or
-    // the evaluator's.
-    compiled: fn(&self, path: String, line: Int, text: String) -> Shared<NativeEval> NativeEvalRefused! {
-        key: "{path}:{line}:{text}"
+    // `text` compiled before the node at `line` and `column` of the source
+    // `path`: the kept one, or the evaluator's.
+    compiled: fn(&self, path: String, line: Int, column: Int, text: String) -> Shared<NativeEval> NativeEvalRefused! {
+        key: "{path}:{line}:{column}:{text}"
         if self.evals.get(key) == .Val(found) -> return Ok(found)
         made := NativeEval?{None}
         if self.evaluator == .Val(evaluator) {
-            made = Val(evaluator.compile(path, line, text) ?? return Err(err))
+            made = Val(evaluator.compile(path, line, column, text) ?? return Err(err))
         }
         code: made ?? return Err(native_eval_refused("this session has no compiler to evaluate expressions with"))
         cell: Shared{code.move()}
@@ -445,8 +456,9 @@ NativeSession: struct {
         if frames.len() == 0 -> return Err(native_eval_refused("there is no frame to evaluate in"))
         levels: native_levels(self.image, frames)
         level: if self.selected < levels.len() -> levels[self.selected] else -> levels[0]
-        at: self.source_at(native_lookup(level.frame, frames[level.frame].pc)) ?? return Err(native_eval_refused("the selected frame is not Jet code"))
-        compiled: self.compiled(at.path, at.line, text) ?? return Err(err)
+        call: if level.frame > 0 && level.site < 0 -> frames[level.frame].pc else -> -1
+        at: self.source_at(native_lookup(level.frame, frames[level.frame].pc), call) ?? return Err(native_eval_refused("the selected frame is not Jet code"))
+        compiled: self.compiled(at.path, at.line, at.column, text) ?? return Err(err)
         self.run_eval(compiled)
     }
 
@@ -745,14 +757,19 @@ NativeSession: struct {
     }
 
     // The frames of a stack whose innermost registers are `registers`, as
-    // backtrace shows them.
+    // backtrace shows them: a caller's own frame at its call's call-site
+    // row (NativeImage.calls) when the call has one.
     backtrace_from: fn(self, registers: [Int]) -> [NativeFrame] NativeDebugError! {
         frames: self.unwind_from(registers) ?? return Err(err)
         shown := [NativeFrame]{}
         loop (index, frame) in frames {
-            loop found in native_frames_at(self.image, native_lookup(index, frame.pc)) {
-                shown.push(found)
+            found := native_frames_at(self.image, native_lookup(index, frame.pc))
+            if index > 0 && self.image.calls.get(frame.pc) == .Val(site) {
+                own: found.len() - 1
+                found[own].line = site.line
+                found[own].column = site.column
             }
+            loop row in found.move() -> shown.push(row)
         }
         Ok(shown)
     }
