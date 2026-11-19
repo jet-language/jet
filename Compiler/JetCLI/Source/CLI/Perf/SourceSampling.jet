@@ -88,8 +88,9 @@ JetCLIPerfInlines: struct {
 // and not outside, and `stackless` the samples in Jet code that kept their
 // program counter alone. `signals` counts every sample's record, a
 // counter's too, each a signal the sampler took; `cost` is what sampling
-// cost, when its runtime recorded it. `sited` says whether the samples
-// held an allocations' record:
+// cost, when its runtime recorded it, and `sampler` what took the
+// CPU-time samples (jet_cli_perf_pc_read). `sited` says whether the
+// samples held an allocations' record:
 // a runtime that records no allocation sites counts no line's allocations.
 // `periods` holds each counter's sampling period, 0 for one the run did
 // not capture. `spawns` holds the line of the checked source that spawned
@@ -109,6 +110,7 @@ JetCLIPerfSamples: struct {
     stackless: U64,
     signals: U64,
     cost: JetCLIPerfCost?,
+    sampler: JetCLIPerfSampler?,
     functions: [X64ImageFunction],
     natives: [JetCLIPerfNative],
     sited: Bool,
@@ -275,9 +277,10 @@ JetCLIPerfHeapSite: struct {
 // image's location table and its DWARF's inlined runs and, outside Jet
 // functions, its symbol table; each line marked `own` when it is in
 // `source`. A counter sample
-// weighs its counter's period in `counters`. Both files are removed once
+// weighs its counter's period in `counters`; the CPU-time samples are
+// `sampler`'s. Both files are removed once
 // read. None when either is missing or the image has no table.
-jet_cli_perf_samples_read: fn(path: String, source: String, counters: [TraceCounter]) -[FS, Env]> JetCLIPerfSamples? Never! {
+jet_cli_perf_samples_read: fn(path: String, source: String, counters: [TraceCounter], sampler: JetCLIPerfSampler?) -[FS, Env]> JetCLIPerfSamples? Never! {
     image_path: "{path}.image"
     // A file that can't be read reads as empty: no samples, or no table.
     words: perf_files.read_bytes(path) ?? [U8]{}
@@ -309,6 +312,7 @@ jet_cli_perf_samples_read: fn(path: String, source: String, counters: [TraceCoun
     }
     objects: jet_cli_perf_heap_objects(image)
     sampled := jet_cli_perf_samples_count(facts.lines, functions, inlines, owned, periods, allocs, names, words, jet_cli_perf_code_low(image))
+    sampled.sampler = sampler
     loop index in 0..<sampled.heaps.len() {
         jet_cli_perf_heap_retain(facts, objects, names, sampled.heaps[index])
     }
@@ -340,42 +344,116 @@ jet_cli_perf_counters_read: fn(samples: String?) -[FS]> [TraceCounter] Never! {
     counters
 }
 
-// The sampler the `cpu` lens of `jet perf run` charged its samples by, from
-// the file the runtime keeps beside the `samples` file (PerfSamples.jet
-// perf_precise_choose): three words, its source (0 the CPU-time timer, 1
-// IBS op sampling, 2 PEBS), then the errno the kernel refused IBS op
-// sampling and PEBS each with, or 0 for one it never tried. A precise
-// source charges each sample by the instruction it names; the timer by the
-// program counter its signal interrupted, the skid source. Null when the
-// run kept no such file. The file is removed once read.
-jet_cli_perf_pc_read: fn(samples: String?) -[FS]> CanonicalJSON Never! {
-    file: samples ?? return CanonicalJSON.Null
+// The sampler the `cpu` lens of `jet perf run` charged its samples by
+// (jet_cli_perf_pc_read): its `source` (0 the CPU-time timer, 1 IBS op
+// sampling, 2 PEBS, 3 the task clock); the errno the kernel refused IBS op
+// sampling, PEBS and the task clock each with, or 0 for one it never tried
+// or that opened; perf_event_paranoid, None where the kernel has none; the
+// source's period, in cycles for a precise source, else in nanoseconds of
+// CPU time; and whether the causal lens kept the timer (`kept`).
+JetCLIPerfSampler: struct {
+    source: Int,
+    ibs: Int,
+    pebs: Int,
+    task: Int,
+    paranoid: Int?,
+    period: Int,
+    kept: Bool,
+}
+
+// The sampler, from the file the runtime keeps beside the `samples` file
+// (jet_cli_perf_pc_words). None when the run kept no such file. The file
+// is removed once read.
+jet_cli_perf_pc_read: fn(samples: String?) -[FS]> JetCLIPerfSampler? Never! {
+    file: samples ?? return None
     path: "{file}.pc"
-    words: perf_files.read_bytes(path) ?? return CanonicalJSON.Null
+    words: perf_files.read_bytes(path) ?? return None
     perf_files.remove(path).drop("the session reads its sampler once")
-    if words.len() < 24 -> return CanonicalJSON.Null
-    source: link_debug_addr(words, 0)
-    named: if {
+    jet_cli_perf_pc_words(words)
+}
+
+// The sampler the `.pc` file's `words` hold (PerfSamples.jet
+// perf_precise_choose): seven words, its source, the three errnos,
+// perf_event_paranoid (1000 where the kernel has none), the period and 1
+// where the causal lens kept the timer. None for a shorter file.
+jet_cli_perf_pc_words: fn(words: [U8]) -> JetCLIPerfSampler? Never! {
+    if words.len() < 56 -> return None
+    paranoid: link_debug_addr(words, 32)
+    Val(JetCLIPerfSampler{source: link_debug_addr(words, 0), ibs: link_debug_addr(words, 8), pebs: link_debug_addr(words, 16), task: link_debug_addr(words, 24), paranoid: if paranoid == 1000 -> None else -> Val(paranoid), period: link_debug_addr(words, 40), kept: link_debug_addr(words, 48) == 1})
+}
+
+// The source `source` of a sampler (JetCLIPerfSampler) by its receipt name.
+jet_cli_perf_pc_name: fn(source: Int) -> String Never! {
+    if {
         source == 1 -> "ibs_op"
         source == 2 -> "pebs"
+        source == 3 -> "task_clock"
         else -> "timer"
     }
+}
+
+// The receipt's `pc`: the sampler's source; whether it is precise, charging
+// each sample by the instruction it names, or else what charged it, its
+// skid: the task clock's interrupt or the timer's signal, each at the
+// program counter it interrupted; each source the kernel refused, with its
+// errno; perf_event_paranoid; and the period, with its unit. Null for none.
+jet_cli_perf_pc_json: fn(sampler: JetCLIPerfSampler?) -> CanonicalJSON Never! {
+    used: sampler ?? return CanonicalJSON.Null
     refused := [CanonicalJSON]{}
-    loop (index, tried) in ([String]{"ibs_op", "pebs"}) {
-        errno: link_debug_addr(words, 8 + index * 8)
+    loop (index, errno) in ([Int]{used.ibs, used.pebs, used.task}) {
         if errno != 0 {
-            refused.push(CanonicalJSON.Object([CanonicalJSONField]{{key: "errno", value: CanonicalJSON.Integer("{errno}")}, {key: "source", value: CanonicalJSON.String(tried)}}))
+            refused.push(CanonicalJSON.Object([CanonicalJSONField]{{key: "errno", value: CanonicalJSON.Integer("{errno}")}, {key: "source", value: CanonicalJSON.String(jet_cli_perf_pc_name(index + 1))}}))
         }
     }
-    precise: named != "timer"
+    precise: used.source == 1 || used.source == 2
+    skid: if {
+        precise -> CanonicalJSON.Null
+        used.source == 3 -> CanonicalJSON.String("task_clock_interrupt")
+        else -> CanonicalJSON.String("timer_signal")
+    }
     CanonicalJSON.Object(
         [CanonicalJSONField]{
+            {key: "paranoid", value: if used.paranoid == .Val(level) -> CanonicalJSON.Integer("{level}") else -> CanonicalJSON.Null},
+            {key: "period", value: CanonicalJSON.Integer("{used.period}")},
+            {key: "period_unit", value: CanonicalJSON.String(if precise -> "cycles" else -> "ns")},
             {key: "precise", value: CanonicalJSON.Bool(precise)},
             {key: "refused", value: CanonicalJSON.Array(refused)},
-            {key: "skid", value: if precise -> CanonicalJSON.Null else -> CanonicalJSON.String("timer_signal")},
-            {key: "source", value: CanonicalJSON.String(named)},
+            {key: "skid", value: skid},
+            {key: "source", value: CanonicalJSON.String(jet_cli_perf_pc_name(used.source))},
         },
     )
+}
+
+// What the sampler `used` says of a profile's `total` samples over `cpu_ns`
+// of sampled CPU time: the source that took them and, for a precise one,
+// the rate it reached, which follows the clock speed; for the timer, its
+// cap of one sample a tick and why the run kept it.
+jet_cli_perf_sampler_reason: fn(used: JetCLIPerfSampler, total: U64, cpu_ns: U64?) -> String Never! {
+    if used.source == 3 {
+        return "; the task clock took them, a perf event on each thread's CPU time in user mode, so time in the kernel takes none"
+    }
+    if used.source == 1 || used.source == 2 {
+        named: if used.source == 1 -> "IBS op sampling" else -> "PEBS"
+        rate: if cpu_ns == .Val(ns) && ns > (U64{0}) -> ": it reached {jet_cli_perf_per_ms(total, ns)} samples per millisecond of CPU time" else -> ""
+        return "; {named} took them once per {used.period} cycles, the cycles a core ran in {JET_CLI_PERF_SAMPLE_US} microseconds as sampling started, so its rate follows the clock speed{rate}"
+    }
+    why: if {
+        used.kept -> "the causal lens keeps it, since its experiments' periods are CPU time's"
+        used.paranoid == None -> "the kernel has no perf events"
+        (used.paranoid ?? 0) > 2 -> "perf_event_paranoid is {used.paranoid ?? 0}, and a thread's own perf events need it at most 2"
+        used.task != 0 -> "the kernel refused the task clock with errno {used.task}"
+        else -> "no perf event opened"
+    }
+    "; the CPU-time timer took them, which the kernel checks once a tick, so each thread takes at most one sample a tick: {why}"
+}
+
+// `count` samples over `ns` nanoseconds as samples per millisecond, to two
+// decimals: "0.97".
+jet_cli_perf_per_ms: fn(count: U64, ns: U64) -> String Never! {
+    basis: count * U64{100000000} / ns
+    cents: basis % U64{100}
+    pad: if cents < (U64{10}) -> "0" else -> ""
+    "{basis / U64{100}}.{pad}{cents}"
 }
 
 // Whether each function of `table` is in the file `source`; none is when
@@ -540,7 +618,7 @@ jet_cli_perf_code_low: fn(image: [U8]) -> Int {
 // `names` spells. Its block and root records are its retention records
 // (JetCLIPerfHeap).
 jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFunction], inlines: &&JetCLIPerfInlines, owned: [Bool], periods: &&[U64], allocs: [Int:Int], names: [Int:String], words: [U8], code_low: Int) -> JetCLIPerfSamples Never! {
-    sampled := JetCLIPerfSamples{table: table, inlines: inlines, lines: [JetCLIPerfSampledLine]{}, total: U64{0}, outside: U64{0}, helpers: U64{0}, stackless: U64{0}, signals: U64{0}, cost: None, functions: functions, natives: [JetCLIPerfNative]{}, sited: false, periods: periods, spawns: [U64:U64]{}, waits: [JetCLIPerfWait]{}, wakes: [JetCLIPerfWake]{}, transfers: [JetCLIPerfIO]{}, heaps: [JetCLIPerfHeap]{}, experiments: [JetCLIPerfExperiment]{}, points: [Int:String]{}, timed: [JetCLIPerfTimed]{}}
+    sampled := JetCLIPerfSamples{table: table, inlines: inlines, lines: [JetCLIPerfSampledLine]{}, total: U64{0}, outside: U64{0}, helpers: U64{0}, stackless: U64{0}, signals: U64{0}, cost: None, sampler: None, functions: functions, natives: [JetCLIPerfNative]{}, sited: false, periods: periods, spawns: [U64:U64]{}, waits: [JetCLIPerfWait]{}, wakes: [JetCLIPerfWake]{}, transfers: [JetCLIPerfIO]{}, heaps: [JetCLIPerfHeap]{}, experiments: [JetCLIPerfExperiment]{}, points: [Int:String]{}, timed: [JetCLIPerfTimed]{}}
     // One key per function, line and ownership.
     places := [String:Int]{}
     // Each address's entries in `lines`, innermost first, by twice the
@@ -1050,11 +1128,13 @@ jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSa
     natives: if named.len() == 0 -> "" else -> "; outside Jet functions: {named.join(", ")}"
     helpers: if sampled.helpers == (U64{0}) -> "" else -> "; {sampled.helpers} samples in compiler-emitted helpers, such as stop polls, count at the line that called them"
     stackless: if sampled.stackless == (U64{0}) -> "" else -> "; {sampled.stackless} samples in Jet code kept no stack: their frames could not be walked, or other threads' samples held every record buffer"
-    nominal: if sampled.cost == .Val(cost) -> "; {sampled.total} of the {cost.cpu_ns / U64{JET_CLI_PERF_SAMPLE_US * 1000}} samples {cost.cpu_ns / U64{1000000}} ms of CPU time under sampling gives" else -> ""
+    nominal: if sampled.cost == .Val(cost) -> "; it kept {sampled.total} of the {cost.cpu_ns / U64{JET_CLI_PERF_SAMPLE_US * 1000}} samples that {cost.cpu_ns / U64{1000000}} ms of CPU time under sampling gives" else -> ""
+    cpu_ns: if sampled.cost == .Val(cost) -> Val(cost.cpu_ns) else -> U64?{None}
+    taken: if sampled.sampler == .Val(used) -> jet_cli_perf_sampler_reason(used, sampled.total, cpu_ns) else -> ""
     sites: if sampled.sited -> "; each allocation counts at the innermost line of {source.identity.path} on its stack" else -> ""
     timed: "one CPU-time sample per {JET_CLI_PERF_SAMPLE_US} microseconds of each thread's CPU time, at the function and source line its program counter is in and, inclusive, once at each line on its stack; {elsewhere} of {sampled.total} samples are outside {source.identity.path}"
     // The memory lens without the cpu lens takes no CPU-time samples.
-    reason: if sampled.total == (U64{0}) -> "no CPU-time samples, as under the memory lens alone: each row holds its counters' events{natives}{sites}" else -> "{timed}{natives}{helpers}{stackless}{nominal}{sites}"
+    reason: if sampled.total == (U64{0}) -> "no CPU-time samples, as under the memory lens alone: each row holds its counters' events{natives}{sites}" else -> "{timed}{taken}{natives}{helpers}{stackless}{nominal}{sites}"
     profile := TraceProfile{method: "sampling", counters: [TraceCounter]{}, status: status, coverage: coverage, rows: rows, row_limit: U64{4096}, rows_truncated: truncated, overhead_ns: None, overhead_status: "not_measured", overhead_reason: "the runtime recorded no sampling cost", reason: reason, window_status: "unavailable", window_wall_ns: None, window_cpu_ns: None, window_reason: "the runtime published no run window"}
     if sampled.cost == .Val(cost) {
         // Each signal pays the kernel's delivery and return besides the
@@ -1205,8 +1285,8 @@ jet_cli_perf_window: fn(profile: &TraceProfile, window: JetCLIPerfRuntimeWindow)
 // byte length with its kind (JET_CLI_PERF_ZONE_LOG and the others) from bit
 // 32, each a little-endian word, then the name. Each becomes a `log_span`,
 // `zone`, `frame_mark` or `plot` row of `capture` (a plot's symbol names its
-// value after its name: `fps = 60`), timed from `origin_ns`, the session's
-// start on that clock, and named by the span in `source`, within the span
+// value after its name: `fps = 60`), timed from `origin_ns` (a run's 0,
+// its process epoch) and named by the span in `source`, within the span
 // row limit. A zone holds the CPU-time samples of `timed` (in time order,
 // on the same clock) its task took from its start to its end, and the lines
 // of `source` they were on. Every zone, frame mark and plotted value counts

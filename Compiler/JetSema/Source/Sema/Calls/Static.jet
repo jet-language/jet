@@ -1010,6 +1010,19 @@ sema_call_try_builtin_static_field: fn(base: Expr, owner: String, method: String
     SemaMethodSpecialCheck{handled: true, value: None}
 }
 
+// A `core.perf` zone or plot names its site with a string literal (E3406):
+// the site passes the literal's text as it is, so naming it allocates
+// nothing. Checked on every route that calls the module's members.
+sema_call_perf_name: fn(module_name: String, member: String, args: [CallArg], diagnostics: &[Diagnostic]) Never! {
+    if module_name != "core.perf" || (member != "zone" && member != "plot") || args.len() == 0 {
+        return
+    }
+    if sema_app_literal_text(args[0].expr) != None {
+        return
+    }
+    diagnostics.push(sema_error("E3406", expr_span(args[0].expr), "The name `perf.{member}` is given is not a string literal.", "A zone's or plot's name is its site's: the program passes the literal's text as it is, so naming a site allocates nothing and every row of the site carries the same name on the `jet perf view` timeline.", "Write the name as a string literal, such as `perf.{member}(\"physics\")`; to tell cases apart, give each its own site and name."))
+}
+
 // The ambient Perf type is an alternate spelling of the checked core.perf
 // export, not a second native dispatch surface.
 sema_call_perf_static: fn(method: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
@@ -1017,6 +1030,7 @@ sema_call_perf_static: fn(method: String, type_args: [Type], args: [CallArg], sp
     if program.registration_graph == .Val(graph) {
         identity: sema_call_core_module_identity(environment, program, "core.perf") ?? return failed
         target: sema_call_core_source_target(environment, program, identity, method, type_args, span, false, diagnostics) ?? return failed
+        sema_call_perf_name("core.perf", method, args, diagnostics)
         probe_args := args
         binding: sema_call_bind_direct("Perf.{method}", target.signature, probe_args, span, diagnostics) ?? return failed
         defaults: sema_call_registration_defaults(graph, binding) ?? return failed

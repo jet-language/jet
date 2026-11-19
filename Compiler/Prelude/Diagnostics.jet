@@ -13237,6 +13237,30 @@ DebugTraceInRelease: struct {
     }
 }
 
+PerfNameNotLiteral: struct {
+    member: String,
+
+    impl Diagnostic {
+        code: "E3406",
+        safety_class: .Opinion,
+        safety_reason: "A computed name would still record a zone or plot, but Jet keeps each site's name fixed so the site costs nothing to name.",
+        meaning: "A `perf.zone` or `perf.plot` name is not a string literal",
+        detail: true,
+
+        what: fn(self) -> String {
+            "The name `perf.{self.member}` is given is not a string literal."
+        }
+
+        why: fn(self) -> String {
+            "A zone's or plot's name is its site's: the program passes the literal's text as it is, so naming a site allocates nothing and every row of the site carries the same name on the `jet perf view` timeline."
+        }
+
+        fix: fn(self) -> String {
+            "Write the name as a string literal, such as `perf.{self.member}(\"physics\")`; to tell cases apart, give each its own site and name."
+        }
+    }
+}
+
 ReplFuelExhausted: struct {
     impl Diagnostic {
         code: "E1801",

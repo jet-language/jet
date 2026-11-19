@@ -231,14 +231,12 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
         if jet_cli_perf_process_stat(pid) == .Ok(stat) -> alive = Val(stat)
         exited: child.exited() ?? return jet_cli_perf_error("cannot wait for `jet {action}`: {err}", JET_CLI_PERF_FIX, color)
         if exited -> break
-        if parsed.source != None {
-            jet_cli_perf_session_observe(observed, pid, checked(U64{started.elapsed().ns}) ?? U64{0})
-        }
+        if parsed.source != None -> jet_cli_perf_session_observe(observed, pid)
         perf_time.sleep(25ms)
     }
     receipt: child.wait() ?? return jet_cli_perf_error("cannot wait for `jet {action}`: {err}", JET_CLI_PERF_FIX, color)
-    // The session's wall, spawn to exit, on the observations' clock: every
-    // observed span ends inside it.
+    // The session's wall, spawn to exit, the run's wall sample: a duration on
+    // the session's clock, never a moment on the program's.
     wall: checked(U64{started.elapsed().ns}) ?? U64{0}
     // The child is reaped as it exits, so its runtime's exit publication is
     // read without /proc unless a poll already kept it: every completed run
@@ -247,7 +245,7 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     if parsed.source != None && !published && alive == .Val(stat) {
         cpu: if receipt.user_cpu_ns == .Val(user) && receipt.system_cpu_ns == .Val(system) -> Val(user + system) else -> Int?{None}
         if jet_cli_perf_live_read_reaped(pid, stat, cpu) == .Ok(live) {
-            jet_cli_perf_session_keep(observed.root, JetCLIPerfObservation{at_ns: wall, live: live})
+            jet_cli_perf_session_keep(observed.root, jet_cli_perf_observed(live))
         }
     }
     // Under `jet run --observe` only the program publishes, so what the
@@ -257,9 +255,10 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     counters := [TraceCounter]{}
     if memory -> counters = jet_cli_perf_counters_read(samples)
     sampler: jet_cli_perf_pc_read(samples)
+    pc: jet_cli_perf_pc_json(sampler)
     sampled := JetCLIPerfSamples?{None}
     if samples == .Val(file) {
-        sampled = jet_cli_perf_samples_read(file, parsed.source ?? "", counters)
+        sampled = jet_cli_perf_samples_read(file, parsed.source ?? "", counters, sampler)
     }
     reason: if parsed.source == None -> "source sampling requires a source capture" else -> "source sampling requires a readable `.jet` source"
     capture := jet_cli_perf_capture_new(trace_profile_unsupported(reason), [SourceIdentity]{})
@@ -273,7 +272,7 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     }
     if memory -> jet_cli_perf_counters_profile(capture.profile, counters)
     // The receipt reads the allowlist before the policy takes it.
-    stamped: jet_cli_perf_session_receipt(action, argv, parsed.source, parsed.allowlist, samples != None, parsed.lenses, sampler) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
+    stamped: jet_cli_perf_session_receipt(action, argv, parsed.source, parsed.allowlist, samples != None, parsed.lenses, pc) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
     capture.receipts.push(stamped)
     if topdown && samples == .Val(file) {
         if parsed.source == .Val(source) {
@@ -284,14 +283,15 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     // The core.log spans the program closed, which its runtime keeps beside
     // the samples, with the CPU-time samples each zone holds, and the tasks'
     // waits and wakes and the file and network transfers it recorded among
-    // them, each on the clock of `started`.
+    // them. Each is on the program's clock, from its process epoch, which its
+    // observations' elapsed times share: origin 0.
     if samples == .Val(file) && parsed.source == .Val(source) {
         if {
             sampled == .Val(found) -> {
-                jet_cli_perf_log_spans_read(capture, "{file}.spans", source, started.start_ns, found.timed)
+                jet_cli_perf_log_spans_read(capture, "{file}.spans", source, 0, found.timed)
             }
             else -> {
-                jet_cli_perf_log_spans_read(capture, "{file}.spans", source, started.start_ns, [JetCLIPerfTimed]{})
+                jet_cli_perf_log_spans_read(capture, "{file}.spans", source, 0, [JetCLIPerfTimed]{})
             }
         }
     }
@@ -299,8 +299,8 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
         if sampled.move() == .Val(found) {
             // The task_wait rows take the waits, which the transfers may
             // have ended, then the I/O rows take the transfers.
-            jet_cli_perf_waits_read(capture, found.waits.move(), found.wakes, found.spawns, found.transfers, source, started.start_ns)
-            jet_cli_perf_io_read(capture, found.transfers.move(), source, started.start_ns)
+            jet_cli_perf_waits_read(capture, found.waits.move(), found.wakes, found.spawns, found.transfers, source, 0)
+            jet_cli_perf_io_read(capture, found.transfers.move(), source, 0)
             if causal {
                 capture.receipts.push(jet_cli_perf_causal_section("{source}", found.experiments.move(), found.points.move()))
             }
@@ -481,7 +481,7 @@ jet_cli_perf_attach_flight: fn(pid: Int, source: String) -[FS, Env, Time]> JetCL
         perf_files.remove(taken).drop("the attach reads the ring it copied once")
         return None
     }
-    jet_cli_perf_samples_read(taken, source, [TraceCounter]{})
+    jet_cli_perf_samples_read(taken, source, [TraceCounter]{}, None)
 }
 
 // `--zones=` window: whole milliseconds or seconds (`500ms`, `2s`), above 0.
@@ -562,15 +562,15 @@ JetCLIPerfSessionObserved: struct {
     program_pid: Int?,
 }
 
-// One poll of the process tree under `root` at `at` ns into the session
+// One poll of the process tree under `root` into the session
 // (`poll_observe_snapshot`).
-jet_cli_perf_session_observe: fn(observed: &JetCLIPerfSessionObserved, root: Int, at: U64) -[FS.Read, Env, Time]> Never! {
+jet_cli_perf_session_observe: fn(observed: &JetCLIPerfSessionObserved, root: Int) -[FS.Read, Env, Time]> Never! {
     if jet_cli_perf_live_read(root) == .Ok(live) {
-        jet_cli_perf_session_keep(observed.root, JetCLIPerfObservation{at_ns: at, live: live})
+        jet_cli_perf_session_keep(observed.root, jet_cli_perf_observed(live))
     }
     if observed.program_pid == .Val(pid) {
         if jet_cli_perf_live_read(pid) == .Ok(live) {
-            jet_cli_perf_session_keep(observed.program, JetCLIPerfObservation{at_ns: at, live: live})
+            jet_cli_perf_session_keep(observed.program, jet_cli_perf_observed(live))
         }
         return
     }
@@ -582,11 +582,19 @@ jet_cli_perf_session_observe: fn(observed: &JetCLIPerfSessionObserved, root: Int
         seen.push(pid)
         if jet_cli_perf_live_read(pid) == .Ok(live) {
             observed.program_pid = Val(pid)
-            jet_cli_perf_session_keep(observed.program, JetCLIPerfObservation{at_ns: at, live: live})
+            jet_cli_perf_session_keep(observed.program, jet_cli_perf_observed(live))
             return
         }
         loop child in jet_cli_perf_session_children(pid) -> pending.push(child)
     }
+}
+
+// An observation at its publication's own moment: the run's elapsed time on
+// the program's clock, from the process epoch its zones, waits and log spans
+// are timed from (ObserveLive.jet observe_live_start), so its task rows line
+// up with theirs. The run's first publication precedes its entry.
+jet_cli_perf_observed: fn(live: &&JetCLIPerfLive) -> JetCLIPerfObservation Never! {
+    JetCLIPerfObservation{at_ns: live.runtime.elapsed_ns, live: live}
 }
 
 // Observations stay within the capture's 4096-row bound: past it, the newest
@@ -626,7 +634,7 @@ jet_cli_perf_session_target: fn() -[Env]> String Never! {
 // it keeps, and, where the program `sampled`, its `lenses`, with each
 // allocation's call sites and, under the `cpu` lens, its CPU-time sampling
 // every JET_CLI_PERF_SAMPLE_US of CPU time and the `pc` its samples were
-// charged by (jet_cli_perf_pc_read). A `jet test` resolves its build
+// charged by (jet_cli_perf_pc_json). A `jet test` resolves its build
 // through its settings layers too (jet_cli_test_file), which the session
 // does not, so its build is null, as is the build of words the run refused.
 jet_cli_perf_session_receipt: fn(action: String, argv: [String], source: String?, allowlist: [String], sampled: Bool, lenses: [String], pc: CanonicalJSON) -[FS, Env]> TraceReceiptSection JetCLIReadError! {

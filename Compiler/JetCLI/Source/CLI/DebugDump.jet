@@ -14,7 +14,7 @@
 use {
     cli_files: core.files
     cli_term: core.term
-    jet_debug.[NATIVE_DEBUG_PROMPT, NATIVE_DUMP_HELP, NativeDebugError, NativeDumpTask, NativeFrame, NativeLocal, NativeSession, native_debug_backtrace, native_debug_jet_frame, native_debug_locals_line, native_debug_locals_typed, native_dump_events, native_dump_jet_frame, native_dump_open, native_dump_redact, native_dump_task_state]
+    jet_debug.[NATIVE_DEBUG_PROMPT, NATIVE_DUMP_HELP, NativeDebugError, NativeDumpTask, NativeFrame, NativeLocal, NativeSession, native_debug_backtrace, native_debug_jet_frame, native_debug_locals_line, native_debug_locals_typed, native_dump_events, native_dump_jet_frame, native_dump_open, native_dump_redact, native_dump_task_state, native_dump_waits]
     jet_driver.[JET_DRIVER_EXIT_OK]
 }
 
@@ -134,10 +134,12 @@ jet_cli_debug_dump_locals: fn(session: &NativeSession) -> [NativeLocal] NativeDe
 
 // Each task of the dump, one line each, the selected one marked `*`: its
 // id (a thread outside every task by its tid), whether it was stopped,
-// running or parked, its innermost Jet frame, and, when that is not in the
-// program's `file`, the innermost frame that is.
+// running or parked, or the wait a deadlock held it in, its innermost Jet
+// frame, and, when that is not in the program's `file`, the innermost frame
+// that is.
 jet_cli_debug_dump_tasks: fn(session: &NativeSession, file: String) -> String Never! {
     tasks: if session.dump == .Val(dumped) -> dumped.tasks else -> [NativeDumpTask]{}
+    waits: if session.dump == .Val(dumped) -> native_dump_waits(dumped.memory, dumped.registry) else -> [Int:String]{}
     chosen: session.task
     text := ""
     loop (index, task) in tasks {
@@ -145,7 +147,7 @@ jet_cli_debug_dump_tasks: fn(session: &NativeSession, file: String) -> String Ne
         frames: session.backtrace() ?? [NativeFrame]{}
         mark: if index == chosen -> "*" else -> " "
         name: if task.id == 0 -> "thread {task.tid}" else -> "task {task.id}"
-        text = "{text}{mark} {name}  {native_dump_task_state(task)}{jet_cli_debug_dump_where(frames, file)}\n"
+        text = "{text}{mark} {name}  {native_dump_task_state(task, waits)}{jet_cli_debug_dump_where(frames, file)}\n"
     }
     session.task = chosen
     text
