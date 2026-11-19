@@ -4244,10 +4244,13 @@ perf_causal_tick: fn(pc: I64, periods: I64) {
     if (thread != I64{0}) {
         last: rt_text_word(wrapping(thread + I64{16}))
         local: rt_text_word(wrapping(thread + I64{8}))
-        if (last != I64{0} && wrapping(now - last) <= PERF_CAUSAL_BLOCKED_NS && local < delay) {
-            perf_causal_pause(thread, wrapping(delay - local))
+        if {
+            (last != I64{0} && wrapping(now - last) <= PERF_CAUSAL_BLOCKED_NS) -> {
+                perf_causal_pay(thread, local, delay)
+            }
+            (local < delay) -> rt_text_store(wrapping(thread + I64{8}), delay)
+            else -> {}
         }
-        rt_text_store(wrapping(thread + I64{8}), delay)
     }
     count: sync_load(wrapping(state + PERF_CAUSAL_RANGE_COUNT))
     if (count > I64{0} && perf_causal_in_target(state, pc, count)) {
@@ -4279,7 +4282,11 @@ perf_causal_task_start: fn() {
     if (thread == I64{0}) {
         return
     }
-    rt_text_store(wrapping(thread + I64{8}), sync_load(wrapping(state + PERF_CAUSAL_DELAY)))
+    delay: sync_load(wrapping(state + PERF_CAUSAL_DELAY))
+    // What a pause paid past its request still counts (perf_causal_pay).
+    if (rt_text_word(wrapping(thread + I64{8})) < delay) {
+        rt_text_store(wrapping(thread + I64{8}), delay)
+    }
     rt_text_store(wrapping(thread + I64{16}), perf_samples_clock())
 }
 
@@ -4292,10 +4299,7 @@ perf_causal_task_end: fn() {
     if (thread == I64{0}) {
         return
     }
-    delay: sync_load(wrapping(state + PERF_CAUSAL_DELAY))
-    local: rt_text_word(wrapping(thread + I64{8}))
-    if (local < delay) { perf_causal_pause(thread, wrapping(delay - local)) }
-    rt_text_store(wrapping(thread + I64{8}), delay)
+    perf_causal_pay(thread, rt_text_word(wrapping(thread + I64{8})), sync_load(wrapping(state + PERF_CAUSAL_DELAY)))
     rt_text_store(wrapping(thread + I64{16}), perf_samples_clock())
 }
 
@@ -4316,16 +4320,33 @@ perf_causal_thread: fn(state: I64) -> I64 {
     I64{0}
 }
 
+// Pay this thread's owed delay, `delay` less the `local` it has paid, and
+// keep what it paid. A pause sleeps past its request by the timer's slack,
+// and the excess counts toward the delays inserted after it, as in Coz:
+// were it dropped, every pause would add time the experiment's accounting
+// (its wall time less the delay inserted) leaves in, and every line's
+// prediction would read lower by the pauses' total slack.
+perf_causal_pay: fn(thread: I64, local: I64, delay: I64) {
+    paid := local
+    if (local < delay) {
+        paid = wrapping(local + perf_causal_pause(thread, wrapping(delay - local)))
+    }
+    // A pause cut at PERF_CAUSAL_PAUSE_MAX_NS forgives the rest.
+    rt_text_store(wrapping(thread + I64{8}), if (paid < delay) -> delay else -> paid)
+}
+
 // Pause this thread for `ns` (at most PERF_CAUSAL_PAUSE_MAX_NS) in its
-// entry's timespec.
-perf_causal_pause: fn(thread: I64, ns: I64) {
+// entry's timespec: the time it slept.
+perf_causal_pause: fn(thread: I64, ns: I64) -> I64 {
     wait: if (ns > PERF_CAUSAL_PAUSE_MAX_NS) -> PERF_CAUSAL_PAUSE_MAX_NS else -> ns
     spec: wrapping(thread + I64{24})
     rt_text_store(spec, I64{0})
     rt_text_store(wrapping(spec + I64{8}), wait)
+    began: perf_samples_clock()
     #Unsafe("nanosleep reads the timespec in this thread's own entry") {
         _ := os_syscall_i64(I64{35}, spec, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
+    wrapping(perf_samples_clock() - began)
 }
 
 // Whether `pc` is in one of the target's `count` ranges.
