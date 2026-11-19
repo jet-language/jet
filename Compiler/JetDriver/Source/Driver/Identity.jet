@@ -915,6 +915,10 @@ JetDriverAuthorityPolicy: struct {
 
 JetDriverCompileResult: struct {
     diagnostics: [Diagnostic],
+    // The advice the compile found (DiagnosticTier.Report, diagnostic_is_report):
+    // `jet lint <file>` lists it, and it never joins `diagnostics`, so no
+    // other command prints it or fails on it.
+    advice: [Diagnostic]{[Diagnostic]{}},
     generated_source_files: [SourceFile],
     package_identity: String,
     entry_module_identity: String,

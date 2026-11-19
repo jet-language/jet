@@ -79,6 +79,9 @@ kit_ui_directives: fn() -> [KitUIDirective] {
         // `jet lint --cost` is the surface of L2510 and exits nonzero when a
         // loop repeats a hidden dynamic cost.
         {name: "cost_cli", argv: ["lint", "--cost", "$file"], parent: false, exit: "nonzero", streams: "rendered", capability: ""},
+        // `jet lint <file>` is the surface of the advice (the report tier),
+        // which exits 0 with or without a report.
+        {name: "report_cli", argv: ["lint", "$file"], parent: false, exit: "any", streams: "rendered", capability: ""},
         {name: "repl_deny", argv: ["repl", "--deny=FS"], parent: false, exit: "nonzero", streams: "stderr", capability: ""},
         {name: "CommandOverrideConflict", argv: ["run"], parent: true, exit: "nonzero", streams: "both", capability: ""},
         {name: "gate", argv: ["check", "--gate", "$arg", "$file"], parent: false, exit: "any", streams: "rendered", capability: ""},
@@ -272,7 +275,9 @@ kit_ui_discover: fn(ctx: KitCtx) -> [KitEntry] {
     entries
 }
 
-// Remove only the CLI's terminal envelope, never renderer body lines.
+// Remove only the CLI's terminal envelope, never renderer body lines: the
+// "N problems found" or "N reports found" count with its explain pointer, or
+// a check's warnings-only verdict.
 kit_ui_rendered_only: fn(text: String) -> String {
     lines: text.split("\n").to_list()
     n: lines.len()
@@ -281,7 +286,7 @@ kit_ui_rendered_only: fn(text: String) -> String {
     }
     summary: lines[n - 3]
     problem: summary.split(" ").to_list()
-    counted: problem.len() == 3 && (Int.parse(problem[0]) ?? -1) >= 0 && (problem[1] == "problem" || problem[1] == "problems") && problem[2] == "found"
+    counted: problem.len() == 3 && (Int.parse(problem[0]) ?? -1) >= 0 && (problem[1] == "problem" || problem[1] == "problems" || problem[1] == "report" || problem[1] == "reports") && problem[2] == "found"
     warnings: summary.starts_with("OK: `") && summary.contains("` has no errors (") && (summary.ends_with(" warning)") || summary.ends_with(" warnings)"))
     if !counted && !warnings -> return text.copy()
     "{lines.slice(0, n - 4).join("\n")}\n"

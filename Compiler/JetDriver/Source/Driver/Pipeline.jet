@@ -188,6 +188,7 @@ use {
         decl_table_find_symbol,
         decl_table_key,
         Diagnostic,
+        diagnostic_is_report,
         ModuleID,
         ModuleTable,
         module_count,
@@ -451,8 +452,17 @@ jet_driver_compile_result: fn(
     complete: Bool,
     trace: JetDriverCompileTrace,
 ) -> JetDriverCompileResult Never! {
+    // Advice leaves the diagnostic stream for `jet lint <file>`; a lint the
+    // entry package denies is an E1293 error by now and stays.
+    summarized: jet_driver_summarize_dependency_reports(load, diagnostics)
+    shown := [Diagnostic]{}
+    advice := [Diagnostic]{}
+    loop diagnostic in summarized.move() {
+        if diagnostic_is_report(diagnostic) -> advice.push(diagnostic) else -> shown.push(diagnostic)
+    }
     JetDriverCompileResult{
-        diagnostics: jet_driver_summarize_dependency_reports(load, diagnostics),
+        diagnostics: shown,
+        advice: advice,
         generated_source_files: load.generated_source_files,
         package_identity: load.package_identity,
         entry_module_identity: module_text(load.module_table, load.entry_module_identity),

@@ -7,16 +7,22 @@ DiagnosticRegistryStatus: enum {
     Retired,
 }
 
-// Which commands a row's report fails: the cases of Core's `DiagnosticTier`
-// a compiler row may state as its `tier` constant (`.Error` when it states
+// Which commands a row's report fails: a copy of Core's `DiagnosticTier`
+// (Core/Prelude/Prelude.jet is its one home; the closed-list mirror ledger
+// holds the copy to the home's members in order). A compiler row may state
+// one as its `tier` constant (`.Error` when it states
 // none). On an `.Error` row a report is an error when its severity is, and a
 // lint is advice unless a package denies it. A `.Tidy` row is a lint about
 // untidy code that still runs: `jet check` and `jet build` list it and fail,
 // while `jet run`, `jet dev` and `jet test` never stop for it and show it
-// only under `--verbose` (diagnostic_is_tidy).
+// only under `--verbose` (diagnostic_is_tidy). A `.Report` row is a lint
+// whose finding is advice a reader weighs: `jet lint <file>` lists it and
+// fails nothing, and no other command prints it (diagnostic_is_report,
+// JetDriverCompileResult.advice).
 DiagnosticTier: enum {
     Error,
     Tidy,
+    Report,
 }
 
 DiagnosticRegistryFix: enum {
@@ -415,6 +421,14 @@ diagnostic_is_tidy: fn(diagnostic: Diagnostic) -> Bool Never! {
     if diagnostic.severity != DIAGNOSTIC_LINT -> return false
     row: diagnostic_registry_row(diagnostic.code) ?? return false
     row.tier == DiagnosticTier.Tidy
+}
+
+// Advice `jet lint <file>` lists (DiagnosticTier.Report): a lint whose
+// registered row is on the report tier.
+diagnostic_is_report: fn(diagnostic: Diagnostic) -> Bool Never! {
+    if diagnostic.severity != DIAGNOSTIC_LINT -> return false
+    row: diagnostic_registry_row(diagnostic.code) ?? return false
+    row.tier == DiagnosticTier.Report
 }
 
 // A report that reads as a warning: a lint that is no tidy error.

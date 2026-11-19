@@ -1,9 +1,10 @@
 # Port of tests/diagnostic_gate.rs::warnings_never_choose_execution_exit_code (104-161).
 # PENDING-GRAMMAR and PENDING-SAME-HEAD: no runtime snapshot.
-# Visibility follows the ratified rule: run and dev keep the advisory lint
-# L0202 and the tidy error L0103 off stderr, `--verbose` shows them, and
-# `--json` reports exactly what the human output shows. Neither chooses a run's
-# exit code; `jet build` lists the tidy error and fails, and builds over the
+# Visibility follows the ratified rule: run and dev keep the tidy error L0103
+# off stderr, `--verbose` shows it, and `--json` reports exactly what the
+# human output shows. The advisory L0202 is on the report tier: only
+# `jet lint` lists it, even under `--verbose`. Neither chooses a run's exit
+# code; `jet build` lists the tidy error and fails, and builds over the
 # advisory lint. The l0103 fixture imports core.text under two aliases where
 # the Rust source used core.http.client and fetched example.com; the case
 # needs no network.
@@ -68,9 +69,15 @@ step: jet run --verbose main.jet
 cwd: l0202
 env: JET_STORE_DIR={work}/cache/l0202/verbose/build
 exit: 0
-stderr: ~ "Warning [jet.SharedAutoClone]" # #3420: --verbose shows advisories
+stderr: !~ "Warning [jet.SharedAutoClone]" # the report tier stays off run, even under --verbose
 stderr: !~ "Error [jet.SharedAutoClone]" # original predicate
 stdout: = l0202.out
+step: jet lint main.jet
+cwd: l0202
+env: JET_STORE_DIR={work}/cache/l0202/lint/build
+exit: 0
+stderr: ~ "Warning [jet.SharedAutoClone]" # jet lint lists the report tier
+stderr: ~ "1 report found" # the one advisory, counted as a report
 step: jet build main.jet
 cwd: l0202
 env: JET_STORE_DIR={work}/cache/l0202/build/build

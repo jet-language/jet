@@ -256,7 +256,7 @@ jet add [args]                       Add and download a dependency
 jet jobs [<name>]                    List named project jobs or show one
 jet cc [options] <sources>           Compile and link C with the pinned Jetpack toolchain
 jet bind <header.h> --pkg <lib>      Resolve and record a checked foreign binding plan
-jet lint --a11y|--complexity|--cost <file.jet> Run optional code-quality checks
+jet lint [--a11y|--complexity|--cost] <file.jet> Run optional code-quality checks
 jet image [args]                     Build a declared container image
 jet status [<file.jet|dir>]          Show what the project has proved
 jet gc <command>                     Show values moved into automatic memory management
@@ -1421,6 +1421,17 @@ name, symbol}`), `ffi_effects`, `c_libraries`, `loader` (`{interpreter,
 dynamic, needed}`), `host_effects` and `foreign_free`. The exit code is 0
 whenever the report runs; a source that does not check reports its
 diagnostics as `audit copies` does, with exit 1.
+
+`jet lint <file.jet>`, with no category flag, lists the file's advice: the
+lints on the `.Report` tier (diagnostics.md), such as L0202, L0504 or L0505.
+No other command prints them, `jet check --verbose` included, and they fail
+nothing: the list goes to stderr and ends like a check's problems, with
+`N reports found` and the pointer to the first code's explanation; with none,
+an `OK:` line on stdout says the file has no reports. The command exits 0
+either way; only an error in the program exits 1. `--json` emits the reports as diagnostic JSON on
+stdout. `jet fix` applies the fixes the advice carries; a lint a package's
+`policy.lints.deny` names is an E1293 error everywhere. L2510 needs the typed
+cost report, so `jet lint --cost` lists it.
 
 The Jet-hosted `lint --a11y` and `lint --complexity` leaves use the checked
 compiler diagnostics. Accessibility findings exit 1 and go to stderr, as
