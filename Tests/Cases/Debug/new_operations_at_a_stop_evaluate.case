@@ -1,0 +1,26 @@
+# A condition and a print at a stop in an image `jet build` made may use an
+# operation the program never runs: the program only adds and takes
+# remainders, so its image holds none of the runtime's code for a product
+# or an ordering of Ints that outgrow a word. The evaluation's own code does
+# both and calls the runtime only for such Ints, so a value that fits a word
+# evaluates, and one that doesn't stops at a trap that names the runtime
+# function the image lacks. Before, setting the condition or printing
+# refused each such expression, whatever its value. step's x is 4, 11,
+# then 26; the condition first holds at 11.
+# The fixture must stay in jet fmt form: line 3 is step's last line and
+# line 7 run's first.
+fixture: NewOperationsAtAStop.fixture
+env: NO_COLOR=1
+env: PATH={work}/no-tools
+step: jet build -O0 prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog --break prog.jet:7
+stdin: new_operations_at_a_stop_evaluate.stdin
+exit: 0
+stdout: ~ "Breakpoint set  prog.jet:3 if x * 2 > 20\nThe condition runs in the program: a hit where it is false runs on without a stop\n" # the condition runs in the program
+stdout: ~ "Breakpoint hit  prog.jet:3  in step()\n3 |     (y + x) % 1000        <- here\nLocals:  x = 11   y = 14\n" # and stops where it first holds
+stdout: ~ "print x * 3\nx * 3 = 33\n" # a product the program never takes
+stdout: ~ "print y * y > x\ny * y > x = true\n" # an ordering it never takes
+stdout: ~ "Can't evaluate `x * 1000000000000000000`: it needs the runtime's `jet_int_mul`, which the running image does not hold: the program never needed it\n" # a product past a word names what the image lacks
+stdout: ~ "\n57\n" # the program runs to its total
+stdout: ~ "Program finished\n" # and its end

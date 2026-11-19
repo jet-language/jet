@@ -1,0 +1,19 @@
+# A parameter past its last use is found by the value its caller passed
+# (DW_OP_entry_value), and an expression reads it as `locals` and `print`
+# of the name do. At line 3 step's `x` is no longer in a register of its
+# own, so its location is its entry value: `print x` showed it, while
+# `print x + 1` and a condition on `x` said "`x` has no value here".
+# step's x is 4, 7, then 11; the condition holds at 7.
+# The fixture must stay in jet fmt form: line 3 is step's last line.
+fixture: EntryValueParameter.fixture
+env: NO_COLOR=1
+env: PATH={work}/no-tools
+step: jet debug prog.jet
+stdin: print_reads_a_parameter_its_caller_passed.stdin
+exit: 0
+stdout: !~ "has no value here" # each read of `x` finds it
+stdout: ~ "Breakpoint hit  prog.jet:3  in step()\n3 |     y % 1000        <- here\nLocals:  x = 7   y = 10\n" # the condition on `x` stops where it holds
+stdout: ~ "print x\nx = 7\n" # the name reads its entry value
+stdout: ~ "print x + 1\nx + 1 = 8\n" # and so does an expression of it
+stdout: ~ "\n16\n" # the program runs to its total
+stdout: ~ "Program finished\n" # and its end

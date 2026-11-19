@@ -92,7 +92,16 @@ NativeFixPlan: struct {
     // code's length: -1 and 0 for one it doesn't run.
     running: [Int]{[Int]{}},
     lengths: [Int]{[Int]{}},
+    // Each runtime function the placed code calls that the image doesn't
+    // hold, by its place in the order the calls came: its trap is that many
+    // traps past `traps`, the offset of the first in the region
+    // (native_fix_place_all).
+    absent: [String:Int]{[String:Int]{}},
+    traps: Int{0},
 }
+
+// The bytes of a trap, `ud2`.
+NATIVE_FIX_TRAP: 2
 
 // The region's pages and the code alignment inside it.
 NATIVE_FIX_PAGE: 4096
@@ -458,7 +467,13 @@ native_fix_plan: fn(image: NativeImage, edit: NativeFixEdit, symbols: NativeFixS
 // evaluated expression or a breakpoint's condition (NativeEval.jet,
 // NativePlace.jet). Code that only the rest of the program runs stays out,
 // so a compile whose whole-program choices (its main, its register use)
-// differ from the image's still places the same expression.
+// differ from the image's still places the same expression. A call of a
+// runtime function the image doesn't hold, because the program never
+// needed it (an Int's path for values past a word, say), goes to a trap in
+// the region (NativeFixPlan.absent), a `ud2` that stops the code with
+// SIGILL: the code runs in a fork or a placed condition's fault goes to
+// one (Native.divert), so only a run that takes the call fails, naming the
+// function (native_fix_absent_at).
 native_fix_place_all: fn(edit: NativeFixEdit, symbols: NativeFixSymbols, plan: NativeFixPlan, entry: String) -> NativeFixPlan NativeDebugError! {
     row_of := [Int:Int]{}
     start := -1
@@ -479,14 +494,16 @@ native_fix_place_all: fn(edit: NativeFixEdit, symbols: NativeFixSymbols, plan: N
             if reloc.target == .Function(id) -> pending.push(row_of.get(id.value) ?? -1)
         }
     }
-    native_fix_lay_out(edit, symbols, plan.targets, rows, row_of, loop _ in edit.functions -> false)
+    native_fix_lay_out(edit, symbols, plan.targets, rows, row_of, loop _ in edit.functions -> false, trapped: true)
 }
 
 // The region that places the functions of `rows`, then each data object
 // they reach that no unchanged code does, with the objects those reach in
-// turn. `running` says which functions' code the program holds, for a call
-// of one `rows` doesn't place.
-native_fix_lay_out: fn(edit: NativeFixEdit, symbols: NativeFixSymbols, targets: NativeFixTargets, rows: [Int], row_of: [Int:Int], running: [Bool]) -> NativeFixPlan NativeDebugError! {
+// turn, then, when `trapped`, a trap for each runtime function they call
+// that the image doesn't hold (native_fix_place_all); without one, such a
+// call refuses the plan. `running` says which functions' code the program
+// holds, for a call of one `rows` doesn't place.
+native_fix_lay_out: fn(edit: NativeFixEdit, symbols: NativeFixSymbols, targets: NativeFixTargets, rows: [Int], row_of: [Int:Int], running: [Bool], trapped: Bool{false}) -> NativeFixPlan NativeDebugError! {
     pieces := [NativeFixPiece]{}
     placed := [Int:Int]{}
     copied := [Int:Int]{}
@@ -498,6 +515,9 @@ native_fix_lay_out: fn(edit: NativeFixEdit, symbols: NativeFixSymbols, targets: 
         offset += edit.functions[row].code.len()
     }
     wanted := [Int]{}
+    // The runtime functions the image doesn't hold, each by its place in the
+    // order the calls come.
+    absent := [String:Int]{}
     loop row in rows {
         loop reloc in edit.functions[row].relocs {
             if reloc.target == {
@@ -506,7 +526,10 @@ native_fix_lay_out: fn(edit: NativeFixEdit, symbols: NativeFixSymbols, targets: 
                 }
                 .Runtime(symbol) -> {
                     if native_fix_known(targets, reloc.target) == None && symbols.slots.get(symbol) == None {
-                        return Err(NativeDebugError{detail: "`{native_fix_shown(edit, row)}` now calls the runtime's `{symbol}`, which the running image does not hold"})
+                        if !trapped {
+                            return Err(NativeDebugError{detail: "`{native_fix_shown(edit, row)}` now calls the runtime's `{symbol}`, which the running image does not hold"})
+                        }
+                        if !absent.has_key(symbol) -> absent[symbol] = absent.len()
                     }
                 }
                 .RuntimeData(symbol) -> {
@@ -538,9 +561,25 @@ native_fix_lay_out: fn(edit: NativeFixEdit, symbols: NativeFixSymbols, targets: 
             }
         }
     }
+    // Each trap, `ud2` (0f 0b), in the order the calls came.
+    traps: offset
+    offset += NATIVE_FIX_TRAP * absent.len()
     // Room for the last word the debugger writes whole.
     size: (offset + 8 + NATIVE_FIX_PAGE - 1).div_euclid(NATIVE_FIX_PAGE) * NATIVE_FIX_PAGE
-    Ok(NativeFixPlan{changed: rows, pieces: pieces, size: size, targets: targets, placed: placed, copied: copied})
+    Ok(NativeFixPlan{changed: rows, pieces: pieces, size: size, targets: targets, placed: placed, copied: copied, absent: absent.move(), traps: traps})
+}
+
+// Why a run stopped at `pc`, the plan's region mapped at `base`, when that is
+// the trap of a runtime function (NativeFixPlan.absent): it needs that
+// function, which the running image does not hold. None when no trap is
+// there.
+native_fix_absent_at: fn(plan: NativeFixPlan, base: Int, pc: Int) -> String? Never! {
+    loop (symbol, place) in plan.absent {
+        if base + plan.traps + NATIVE_FIX_TRAP * place == pc {
+            return Val("it needs the runtime's `{symbol}`, which the running image does not hold: the program never needed it")
+        }
+    }
+    None
 }
 
 // Where the plan's region, mapped at `base`, has `target`.
@@ -556,7 +595,11 @@ native_fix_address: fn(plan: NativeFixPlan, symbols: NativeFixSymbols, base: Int
         .Data(id) -> {
             if plan.copied.get(id.value) == .Val(piece) -> return base + plan.pieces[piece].offset
         }
-        .Runtime(_) -> {}
+        .Runtime(symbol) -> {
+            if plan.absent.get(symbol) == .Val(place) {
+                return base + plan.traps + NATIVE_FIX_TRAP * place
+            }
+        }
         .RuntimeData(_) -> {}
     }
     if native_fix_known(plan.targets, target) == .Val(found) -> return found
@@ -577,6 +620,11 @@ native_fix_put: fn(bytes: &[U8], at: Int, value: Int, size: Int) Never! {
 // resolved.
 native_fix_region: fn(plan: NativeFixPlan, edit: NativeFixEdit, symbols: NativeFixSymbols, base: Int) -> [U8] Never! {
     region := loop _ in 0..<plan.size -> U8{0}
+    loop (_, place) in plan.absent {
+        at: plan.traps + NATIVE_FIX_TRAP * place
+        region[at] = U8{0x0f}
+        region[at + 1] = U8{0x0b}
+    }
     loop piece in plan.pieces {
         if piece.function >= 0 {
             function: edit.functions[piece.function]
@@ -730,4 +778,31 @@ native_fix_line_address: fn(debug: X64FunctionDebug, low: Int, line: Int) -> Int
     again: native_fix_plan(image, NativeFixEdit{object: object, functions: [X64CompiledFunction]{main, one, three}, debug: rows}, symbols, text, 0x1000, fixed) ?? panic("refused: {err.detail}")
     assert_eq(again.changed.len(), 0)
     assert_eq(again.running, [Int]{0x1020, 0x1000, 0x40000000})
+}
+
+#Test("an evaluation's call of a runtime function the image doesn't hold goes to a trap; a fix's is refused") {
+    symbols: NativeFixSymbols{slots: [String:Int]{}, named: [[NativeFixSymbol]]{}}
+    // `call rel32` to the runtime's jet_int_mul, `ret`.
+    expression: X64CompiledFunction{id: X64FunctionID{value: 0}, name: "p.eval", code: [U8]{0xe8, 0, 0, 0, 0, 0xc3}, relocs: [X64Reloc]{X64Reloc{at: 1, target: X64RelocTarget.Runtime{symbol: "jet_int_mul"}}}, align: 16}
+    object: X64ObjectModule{data: [X64Data]{}, debug: X64ModuleDebug{directory: "", files: [String]{}, types: [X64DebugType]{}}, functions: [X64FunctionSource]{X64FunctionSource{name: "eval", file: -1, line: 1, variables: [X64DebugVariable]{}}}}
+    edit: NativeFixEdit{object: object, functions: [X64CompiledFunction]{expression}, debug: [X64FunctionDebug]{}}
+    targets: NativeFixTargets{functions: [Int:Int]{}, data: [Int:Int]{}, runtime: [String:Int]{}, clashed: [String:Bool]{}}
+    found: NativeFixPlan{changed: [Int]{}, pieces: [NativeFixPiece]{}, size: 0, targets: targets, placed: [Int:Int]{}, copied: [Int:Int]{}}
+    plan: native_fix_place_all(edit, symbols, found, "p.eval") ?? panic("refused: {err.detail}")
+    assert_eq(plan.absent.get("jet_int_mul"), Val(0))
+    assert_eq(plan.traps, 6)
+    region: native_fix_region(plan, edit, symbols, 0x40000000)
+    // The call's rel32 reaches the trap, `ud2`, just past the `ret`.
+    assert_eq(region[1], U8{1})
+    assert_eq(region[6], U8{0x0f})
+    assert_eq(region[7], U8{0x0b})
+    assert_eq(native_fix_absent_at(plan, 0x40000000, 0x40000006), Val("it needs the runtime's `jet_int_mul`, which the running image does not hold: the program never needed it"))
+    assert_eq(native_fix_absent_at(plan, 0x40000000, 0x40000005), None)
+    row_of := [Int:Int]{}
+    row_of[0] = 0
+    refusal := ""
+    if native_fix_lay_out(edit, symbols, targets, [Int]{0}, row_of, [Bool]{false}) == .Err(failed) {
+        refusal = failed.detail
+    }
+    assert_eq(refusal, "`eval` now calls the runtime's `jet_int_mul`, which the running image does not hold")
 }
