@@ -405,6 +405,13 @@ NATIVE_FORK_RESULT: 32
 // The trace's indices of the registers a call's words go in, in order.
 NATIVE_FORK_ARGUMENTS: [Int]{X64_TRACE_RDI, X64_TRACE_RSI, X64_TRACE_RDX, X64_TRACE_RCX, X64_TRACE_R8, X64_TRACE_R9}
 
+// Where the stopped fork's code is: its instruction pointer, -1 when its
+// registers can't be read.
+native_fork_pc: fn(fork: NativeFork) -> Int Never! {
+    registers: x64_trace_registers(fork.trace) ?? return -1
+    if registers.len() > X64_TRACE_RIP -> registers[X64_TRACE_RIP] else -> -1
+}
+
 // Where `pc` is, in Jet terms when the line table knows it.
 native_fork_place: fn(image: NativeImage, pc: Int) -> String Never! {
     index: x64_jetline_find(image.lines, pc)

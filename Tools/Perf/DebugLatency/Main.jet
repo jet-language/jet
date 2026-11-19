@@ -1,6 +1,6 @@
 #!/usr/bin/env jet
-// Debugger latency: the time `jet debug` takes to its first stop and per
-// step, against LLDB driving the same O0 image the same way.
+// Debugger latency: the time `jet debug` takes to its first stop, per step
+// and per evaluation, against LLDB driving the same O0 image the same way.
 // Usage (from the repository root):
 //   jet run Tools/Perf/DebugLatency/Main.jet -- [--jet PATH] [--lldb PATH] [--functions N] [--steps K] [--runs R] [--bar MS] [--stop entry|nested]
 // Defaults: the `jet` and `lldb` on PATH, 2000 functions, 20 steps, 5 runs,
@@ -8,39 +8,47 @@
 // LLDB's column is `-`: the measurement needs nothing but jet.
 //
 // It writes a package whose program has N small functions, and whose `run`
-// calls each in turn one line at a time, to a temporary directory, and
-// builds its O0 image once the way `jet debug` does (`jet build -O0
-// --output-dir`). Both debuggers then drive that one image, and it times,
-// each the median of R runs:
-//   - build: that build again, warm;
-//   - jet debug, first stop: `jet debug --break prog.jet:L out/prog` with
-//     an empty stdin, which continues from the first stop to the program's
-//     end (its last N - K calls are cheap), from the start to its exit;
-//   - jet debug, per step: the same with K `n` lines first; the extra time
-//     over the first stop, per step;
-//   - lldb, first stop: `lldb -b` on the image with `breakpoint set`, `run`
-//     and `continue`;
-//   - lldb, per step: the same with K `next` commands before `continue`;
-//   - the evaluations at the stop (latency_probes), each the extra time of
-//     a session with its commands over the session without them, in both
-//     debuggers: print_place (`print total`), print_first (the first call
-//     expression), print_again (the same call at a later stop),
-//     second_eval (a second new expression at the same stop) and
-//     watch_per_stop (K steps with a watch on `total`, per step; the watch
-//     is deleted after the steps, so the run to the program's end that
-//     follows doesn't stop at its every later write).
+// calls each in turn one line at a time and then `tally` LATENCY_HITS
+// times (latency_run_tail), to a temporary directory, and builds its O0
+// image once (`jet build -O0 --output-dir`), as an editor builds the program
+// it launches. Both debuggers then drive that one image. It times:
+//   - build: that build again, warm, the median of R runs;
+//   - first_stop: `jet debug --break prog.jet:L out/prog` with an empty
+//     stdin, which continues from the first stop to the program's end, from
+//     the start to its exit; and `lldb -b` on the image with `breakpoint
+//     set`, `run` and `continue`; the median of R runs;
+//   - the rest in R sessions of each debugger, driven one command at a time
+//     on its stdin (latency_jet_drive, latency_lldb_drive). Each sample is
+//     the time from sending a command to the end of the debugger's answer
+//     (latency_ask), and each measure the median of its samples:
+//       - print_place: `print total` (LLDB: `frame variable total`);
+//       - print_first: the session's first call expression, LATENCY_CALL;
+//       - second_eval: a second new expression at the same stop;
+//       - per_step: each of K `n` (`next`);
+//       - print_again: LATENCY_CALL again, at the stop after the first step;
+//       - watch_per_stop: K more steps, each with the LATENCY_WATCHES
+//         expressions evaluated at its stop, to the last one's answer.
+//         `jet debug` takes the step and its prints as one write, as an
+//         editor sends its watch expressions after a stop; LLDB runs them as
+//         `target stop-hook`s, one per expression;
+//       - condition_per_hit: a breakpoint on `tally`'s last line with
+//         LATENCY_CONDITION, which reads six locals, so the debugger checks
+//         it at each hit, and is false at every one; then `continue` to the
+//         program's end, over LATENCY_HITS. The fork each check costs moves
+//         with the program's resident size, its share in huge pages and the
+//         machine's load, so the report gives them (LatencyTarget).
 // L is the line of the first call in `run`. With `--stop nested` the N
 // functions move to a second source of the package, lib.jet, beside
 // `outer` and `inner`; `run` calls `outer` first, which calls `inner`, and
 // L is `inner`'s first call: the stop is two calls deep in a function of a
 // source that is not the entry (latency_nested_lib), where `total` is
-// `inner`'s own local. A debugger run whose output
-// does not report the breakpoint stop fails the measurement; an LLDB
-// evaluation that fails leaves its column `-` with the reason. It prints the
-// image's SHA-256, both tools' versions and the exact commands as `#`
-// lines, then one tab-separated row per measure in milliseconds, then each
-// bar's verdict (latency_verdicts). With `--bar MS` it fails, after the
-// rows, when `jet debug`'s first stop took more than MS milliseconds.
+// `inner`'s own local. A debugger run whose output does not report the
+// breakpoint stop fails the measurement; a failed LLDB session leaves its
+// column `-` with the reason. It prints the image's SHA-256, both tools'
+// versions and the exact commands as `#` lines, then one tab-separated row
+// per measure in milliseconds, then each bar's verdict (latency_verdicts).
+// With `--bar MS` it fails, after the rows, when `jet debug`'s first stop
+// took more than MS milliseconds.
 use {
     crypto: core.crypto
     files: core.files
@@ -60,11 +68,40 @@ LatencyOptions: struct {
     nested: Bool{false},
 }
 
-// LLDB's version and timings, when LLDB was timed.
+// LLDB's version and first stop, when LLDB was timed.
 LatencyLldb: struct {
     version: String,
     stop: Int,
-    steps: Int,
+}
+
+// One sample of a measure, in microseconds.
+LatencySample: struct {
+    measure: String,
+    us: Int,
+}
+
+// The debugged program when its condition's hits were timed: its resident
+// size and the part of it in transparent huge pages, in KiB, and the
+// machine's load (/proc/loadavg's three averages).
+LatencyTarget: struct {
+    resident_kib: Int,
+    huge_kib: Int,
+    load: String,
+}
+
+// One debugger's samples, in the order its sessions took them, and its
+// last session's program.
+LatencyTimes: struct {
+    samples: [LatencySample],
+    target: LatencyTarget?,
+}
+
+// A measure's medians in microseconds: `jet debug`'s, and LLDB's when it
+// was timed.
+LatencyRow: struct {
+    measure: String,
+    jet: Int,
+    lldb: Int?,
 }
 
 LatencyRuns: struct {
@@ -72,81 +109,70 @@ LatencyRuns: struct {
     jet_version: String,
     build: Int,
     debug_stop: Int,
-    debug_steps: Int,
     lldb: LatencyLldb?,
-    probes: [LatencyProbeTime]{[LatencyProbeTime]{}},
+    rows: [LatencyRow]{[LatencyRow]{}},
+    jet_target: LatencyTarget?{None},
+    lldb_target: LatencyTarget?{None},
+    // Why LLDB's sessions have no samples, when they failed.
+    lldb_note: String{""},
 }
 
-// One evaluation measure at the stop (latency_probes): the session input
-// `jet debug` takes with the measured commands and without them, and the
-// LLDB commands after the stop that do the same; the measure is the extra
-// time, over `per`.
-LatencyProbe: struct {
-    measure: String,
-    jet_with: String,
-    jet_base: String,
-    lldb_with: [String],
-    lldb_base: [String],
-    per: Int,
+// What ends a debugger's answer: `marker` seen `count` times since the
+// command was sent, with a line end after the last when `line`. Output
+// holding a line with `refused` first is the debugger refusing it.
+LatencyUntil: struct {
+    marker: String,
+    count: Int,
+    line: Bool,
+    refused: String,
 }
 
-// A probe's milliseconds: `jet debug`'s, and LLDB's or why it has none.
-LatencyProbeTime: struct {
-    measure: String,
-    jet: Int,
-    lldb: Int?,
-    lldb_note: String,
+// A debugger's answer to one command, and the microseconds from sending
+// the command to its end.
+LatencyAnswer: struct {
+    text: String,
+    us: Int,
 }
 
-// The call expression the print probes evaluate: a call of one of the
+// The call expression the print measures evaluate: a call of one of the
 // program's functions on the stopped function's local.
 LATENCY_CALL: "f_1(total)"
 
-// `first`, then `rest`.
-latency_prepend: fn(first: String, rest: [String]) -> [String] Never! {
-    out := [String]{first}
-    loop item in rest -> out.push("{item}")
-    out
+// LATENCY_CALL as LLDB takes it. The image's debug information gives `f_1`
+// no return type (LLDB reads it as `void (Int)`), so LLDB calls it and
+// prints nothing unless the call casts it to its real type.
+LATENCY_LLDB_CALL: "((long (*)(long))f_1)(total)"
+
+// The second new expression at the first stop (second_eval).
+LATENCY_SECOND: "total + 1"
+
+// The expressions watch_per_stop evaluates at each stop: the local, three
+// new expressions and the call.
+latency_watches: fn() -> [String] Never! {
+    [String]{"total", "total + 2", "total * 2", "total % 7", LATENCY_CALL}
 }
 
-// The evaluation probes, for `steps` steps.
-latency_probes: fn(steps: Int) -> [LatencyProbe] Never! {
-    nexts: "n\n".repeat(steps)
-    lldb_nexts: (loop _ in 0..<steps -> "next")
-    call: "expr -- {LATENCY_CALL}"
-    // The watch's steps, then the watch deleted (LLDB numbers it 1, jet
-    // debug 2, after the breakpoint).
-    lldb_watched := latency_prepend("watchpoint set variable total", lldb_nexts)
-    lldb_watched.push("watchpoint delete 1")
-    [LatencyProbe]{
-        LatencyProbe{measure: "print_place", jet_with: "print total\n", jet_base: "", lldb_with: [String]{"frame variable total"}, lldb_base: [String]{}, per: 1},
-        LatencyProbe{measure: "print_first", jet_with: "print {LATENCY_CALL}\n", jet_base: "", lldb_with: [String]{call}, lldb_base: [String]{}, per: 1},
-        LatencyProbe{
-            measure: "print_again",
-            jet_with: "print {LATENCY_CALL}\nn\nprint {LATENCY_CALL}\n",
-            jet_base: "print {LATENCY_CALL}\nn\n",
-            lldb_with: [String]{call, "next", call},
-            lldb_base: [String]{call, "next"},
-            per: 1,
-        },
-        LatencyProbe{
-            measure: "second_eval",
-            jet_with: "print total + 1\nprint total + 2\n",
-            jet_base: "print total + 1\n",
-            lldb_with: [String]{"expr -- total + 1", "expr -- total + 2"},
-            lldb_base: [String]{"expr -- total + 1"},
-            per: 1,
-        },
-        LatencyProbe{
-            measure: "watch_per_stop",
-            jet_with: "watch total\n{nexts}delete 2\n",
-            jet_base: nexts,
-            lldb_with: lldb_watched,
-            lldb_base: lldb_nexts,
-            per: steps,
-        },
-    }
+// `expression` as LLDB takes it.
+latency_lldb_expression: fn(expression: String) -> String Never! {
+    if expression == LATENCY_CALL -> LATENCY_LLDB_CALL else -> expression.copy()
 }
+
+// The hits of condition_per_hit: `run` calls `tally` this many times.
+LATENCY_HITS: 1000
+
+// `tally`'s last line, where condition_per_hit's breakpoint is.
+LATENCY_TALLY_SUM: "    a + b + c + d + e + f"
+
+// condition_per_hit's condition: false at every hit, and it reads six of
+// `tally`'s locals, more than a condition run in the program may, so the
+// debugger checks it at each hit.
+LATENCY_CONDITION: "a + b + c + d + e + f < 0"
+
+// `jet debug`'s prompt, which ends each of its answers.
+LATENCY_PROMPT: "(Jet) "
+
+// The longest a debugger session may take before it is stopped.
+LATENCY_SESSION_SECONDS: 1800
 
 usage: fn() -[IO]> Int Never! {
     term.eprint("usage: jet run Tools/Perf/DebugLatency/Main.jet -- [--jet PATH] [--lldb PATH] [--functions N] [--steps K] [--runs R] [--bar MS] [--stop entry|nested]")
@@ -160,16 +186,43 @@ LATENCY_PACKAGE: "name: \"debug_latency\"\nversion: \"0.1.0\"\nauthority: {{ all
 LATENCY_IMAGE: "out/prog"
 
 // The program: N functions of five lines each (the last one blank), then
-// `run`, which calls each in turn.
+// `run`, which calls each in turn, then the tail (latency_run_tail).
 latency_program: fn(functions: Int) -> String Never! {
     lines := latency_functions(functions)
     lines.push("run: fn() {{")
     lines.push("    total := 0")
     loop index in 0..<functions -> lines.push("    total = f_{index}(total)")
-    lines.push("    print(\"{{total}}\")")
-    lines.push("}}")
-    lines.push("")
+    lines.extend(latency_run_tail())
     lines.join("\n")
+}
+
+// The end of `run`, after its calls: `tally` LATENCY_HITS times, then the
+// print; then `tally`, whose six locals the condition reads.
+latency_run_tail: fn() -> [String] Never! {
+    [String]{
+        "    loop k in 0..<{LATENCY_HITS} -> total = (total + tally(k)) % 1000",
+        "    print(\"{{total}}\")",
+        "}}",
+        "",
+        "tally: fn(n: Int) -> Int {{",
+        "    a: n + 1",
+        "    b: n + 2",
+        "    c: n + 3",
+        "    d: n + 4",
+        "    e: n + 5",
+        "    f: n + 6",
+        LATENCY_TALLY_SUM,
+        "}}",
+        "",
+    }
+}
+
+// The line of `tally`'s last line in the entry `program`.
+latency_tally_line: fn(program: String) -> Int Never! {
+    loop (index, line) in program.split("\n").to_list() {
+        if line == LATENCY_TALLY_SUM -> return index + 1
+    }
+    0
 }
 
 // The N functions, five lines each (the last one blank).
@@ -186,13 +239,11 @@ latency_functions: fn(functions: Int) -> [String] Never! {
 }
 
 // `--stop nested`'s entry: `run` calls `outer` (latency_nested_lib), then
-// each of the N functions in turn.
+// each of the N functions in turn, then the tail (latency_run_tail).
 latency_nested_program: fn(functions: Int) -> String Never! {
     lines := [String]{"run: fn() {{", "    total := 0", "    total = outer(total)"}
     loop index in 0..<functions -> lines.push("    total = f_{index}(total)")
-    lines.push("    print(\"{{total}}\")")
-    lines.push("}}")
-    lines.push("")
+    lines.extend(latency_run_tail())
     lines.join("\n")
 }
 
@@ -213,6 +264,18 @@ latency_nested_lib: fn(functions: Int) -> String Never! {
     lines.push("}}")
     lines.push("")
     lines.join("\n")
+}
+
+// The entry source, prog.jet.
+latency_entry: fn(options: LatencyOptions) -> String Never! {
+    if options.nested -> latency_nested_program(options.functions) else -> latency_program(options.functions)
+}
+
+// The lines of the program's sources.
+latency_source_lines: fn(options: LatencyOptions) -> Int Never! {
+    lines: latency_entry(options).split("\n").to_list().len() - 1
+    if !options.nested -> return lines
+    lines + latency_nested_lib(options.functions).split("\n").to_list().len() - 1
 }
 
 // The source the stop is in: prog.jet, or lib.jet with `--stop nested`.
@@ -275,30 +338,15 @@ latency_build_argv: fn(jet: String) -> [String] Never! {
     [String]{jet, "build", "-O0", "--output-dir=out", "prog.jet"}
 }
 
-// `jet debug` on the built image, stopping at `line` of `file`. Its stdin
-// holds the steps.
+// `jet debug` on the built image, stopping at `line` of `file`.
 latency_debug_argv: fn(jet: String, file: String, line: Int) -> [String] Never! {
     [String]{jet, "debug", "--break", "{file}:{line}", LATENCY_IMAGE}
 }
 
-// The LLDB argv that stops at `line` of `file` in the image, takes `steps`
-// steps over, and continues to the program's end.
-latency_lldb_argv: fn(lldb: String, file: String, line: Int, steps: Int) -> [String] Never! {
-    latency_lldb_session(lldb, file, line, (loop _ in 0..<steps -> "next"))
-}
-
-// The LLDB argv that stops at `line` of `file` in the image, runs
-// `commands` there and continues to the program's end.
-latency_lldb_session: fn(lldb: String, file: String, line: Int, commands: [String]) -> [String] Never! {
-    argv := [String]{lldb, "-b", "-o", "breakpoint set --file {file} --line {line}", "-o", "run"}
-    loop command in commands {
-        argv.push("-o")
-        argv.push("{command}")
-    }
-    argv.push("-o")
-    argv.push("continue")
-    argv.push(LATENCY_IMAGE)
-    argv
+// The LLDB argv that stops at `line` of `file` in the image and continues
+// to the program's end.
+latency_lldb_argv: fn(lldb: String, file: String, line: Int) -> [String] Never! {
+    [String]{lldb, "-b", "-o", "breakpoint set --file {file} --line {line}", "-o", "run", "-o", "continue", LATENCY_IMAGE}
 }
 
 // `argv` as a shell would take it: a word with a space in single quotes.
@@ -307,18 +355,248 @@ latency_command_text: fn(argv: [String]) -> String Never! {
     words.join(" ")
 }
 
-// LLDB's extra milliseconds for `probe`: its session with the probe's
-// commands over the one without them, over `per`.
-latency_lldb_probe: fn(lldb: String, file: String, line: Int, work: String, probe: LatencyProbe, runs: Int) -[Exec, Time, Time.Wait]> Int Err! {
-    stopped: "stop reason = breakpoint"
-    with_ms: latency_median_time(latency_lldb_session(lldb, file, line, probe.lldb_with), work, "", stopped, runs) ?? return Err(err)
-    base_ms: latency_median_time(latency_lldb_session(lldb, file, line, probe.lldb_base), work, "", stopped, runs) ?? return Err(err)
-    Ok((with_ms - base_ms) /% probe.per)
+// Whether `text`, a debugger's output since a command was sent, holds the
+// whole answer `until` names.
+latency_answered: fn(text: String, until: LatencyUntil) -> Bool Never! {
+    parts: text.split(until.marker).to_list()
+    if parts.len() <= until.count -> return false
+    !until.line || parts[parts.len() - 1].contains("\n")
+}
+
+// Sends `command` (none when empty) to the debugger `child` and reads its
+// output until the answer `until` names has arrived: the answer, and the
+// microseconds from the send to its last byte.
+latency_ask: fn(child: ProcessChild, command: String, until: LatencyUntil) -[Exec, Time]> LatencyAnswer Err! {
+    watch: time.start()
+    if command != "" {
+        child.stdin.write(command) ?? return Err("couldn't send `{command.trim()}`: {err}")
+    }
+    bytes := [U8]{}
+    loop {
+        us: time.elapsed(watch).ns /% 1000
+        // A read may end inside a UTF-8 sequence; the next completes it.
+        text: String.from_bytes(bytes) ?? ""
+        if latency_answered(text, until) -> return Ok(LatencyAnswer{text: text, us: us})
+        if until.refused != "" && text.contains(until.refused) && text.after(until.refused).contains("\n") {
+            return Err("`{command.trim()}` was refused: {text.trim()}")
+        }
+        chunk: child.stdout.read_bytes(65536) ?? return Err("couldn't read the answer to `{command.trim()}`: {err}")
+        if chunk.len() == 0 {
+            return Err("the debugger ended before it answered `{command.trim()}`: {text.trim()}")
+        }
+        bytes.extend(chunk)
+    }
+}
+
+// `jet debug`'s answer to `command`: `count` prompts, holding `expect`, and
+// no expression it couldn't evaluate.
+latency_jet_ask: fn(child: ProcessChild, command: String, expect: String, count: Int) -[Exec, Time]> LatencyAnswer Err! {
+    answer: latency_ask(child, command, LatencyUntil{marker: LATENCY_PROMPT, count: count, line: false, refused: ""}) ?? return Err(err)
+    if !answer.text.contains(expect) || answer.text.contains("Can't evaluate") {
+        return Err("`jet debug` answered `{command.trim()}` without `{expect}`: {answer.text.trim()}")
+    }
+    Ok(answer)
+}
+
+// LLDB's answer to `command`: a line holding `marker`, `count` times.
+latency_lldb_ask: fn(child: ProcessChild, command: String, marker: String, count: Int) -[Exec, Time]> LatencyAnswer Err! {
+    latency_ask(child, command, LatencyUntil{marker: marker, count: count, line: true, refused: "error: "})
+}
+
+// The process under the debugger `pid` (its child, or a child's child)
+// running the image, if there is one.
+latency_target_pid: fn(pid: Int) -[FS]> Int? Never! {
+    pending := [Int]{pid}
+    at := 0
+    loop at < pending.len() {
+        current: pending[at]
+        at += 1
+        executable: files.read_link("/proc/{current}/exe") ?? ""
+        if current != pid && executable.ends_with("/{LATENCY_IMAGE}") -> return Val(current)
+        threads: files.list_dir("/proc/{current}/task") ?? next
+        loop thread in threads {
+            children: files.read(files.join(thread.path, "children")) ?? next
+            loop word in children.trim().split(" ") {
+                found: Int.parse(word) ?? next
+                pending.push(found)
+            }
+        }
+    }
+    None
+}
+
+// The KiB a /proc `text` gives on its line starting `field`; 0 without one.
+latency_kib: fn(text: String, field: String) -> Int Never! {
+    loop row in text.split("\n") {
+        if row.starts_with(field) -> return Int.parse(row.after(field).trim().before(" ")) ?? 0
+    }
+    0
+}
+
+// The program under the debugger `pid`, now (LatencyTarget).
+latency_target: fn(pid: Int) -[FS]> LatencyTarget Err! {
+    target: latency_target_pid(pid) ?? return Err("no process under the debugger runs {LATENCY_IMAGE}")
+    status: files.read("/proc/{target}/status") ?? return Err("couldn't read the program's status: {err}")
+    rollup: files.read("/proc/{target}/smaps_rollup") ?? return Err("couldn't read the program's memory: {err}")
+    averages: (files.read("/proc/loadavg") ?? return Err("couldn't read the load: {err}")).split(" ").to_list()
+    if averages.len() < 3 -> return Err("the load has no three averages")
+    Ok(LatencyTarget{resident_kib: latency_kib(status, "VmRSS:"), huge_kib: latency_kib(rollup, "AnonHugePages:"), load: "{averages[0]} {averages[1]} {averages[2]}"})
+}
+
+// `argv`, a debugger, started on stdin and stdout streams in `work`, its
+// errors on the same stream.
+latency_spawn: fn(argv: [String], work: String) -[Exec]> ProcessChild Err! {
+    spec: process.cmd(argv).cwd(work).stdin(.Stream).stdout(.Stream).stderr(.Stdout).timeout(time.duration_seconds(LATENCY_SESSION_SECONDS))
+    spec.spawn() ?? return Err("{argv[0]} did not start: {err}")
+}
+
+// Stops the session `child` that failed.
+latency_stop: fn(child: ProcessChild) -[Exec, Time.Wait]> Never! {
+    child.kill().drop("the debugger may have exited already")
+    child.wait().drop("the debugger is stopped either way")
+}
+
+// Ends the session `child` once its program has finished: its input
+// closed, then its exit.
+latency_end: fn(child: ProcessChild) -[Exec, Time.Wait]> Err! {
+    child.stdin.close()
+    receipt: child.wait() ?? return Err("the debugger did not finish: {err}")
+    if !receipt.success -> return Err("the debugger failed with {receipt.code}")
+    Ok()
+}
+
+// One `jet debug` session's samples (see the header).
+latency_jet_session: fn(options: LatencyOptions, work: String, tally: Int) -[Exec, FS, Time, Time.Wait]> LatencyTimes Err! {
+    file: latency_break_file(nested: options.nested)
+    line: latency_break_line(options.functions, nested: options.nested)
+    child: latency_spawn(latency_debug_argv(options.jet, file, line), work) ?? return Err(err)
+    timed: latency_jet_drive(child, options.steps, file, line, tally) ?? {
+        latency_stop(child)
+        return Err(err)
+    }
+    latency_end(child) ?? return Err(err)
+    Ok(timed)
+}
+
+latency_jet_drive: fn(child: ProcessChild, steps: Int, file: String, line: Int, tally: Int) -[Exec, FS, Time]> LatencyTimes Err! {
+    samples := [LatencySample]{}
+    _: latency_jet_ask(child, "", "Breakpoint hit  {file}:{line}", 1) ?? return Err(err)
+    place: latency_jet_ask(child, "print total\n", "total = ", 1) ?? return Err(err)
+    samples.push(LatencySample{measure: "print_place", us: place.us})
+    first: latency_jet_ask(child, "print {LATENCY_CALL}\n", "{LATENCY_CALL} = ", 1) ?? return Err(err)
+    samples.push(LatencySample{measure: "print_first", us: first.us})
+    second: latency_jet_ask(child, "print {LATENCY_SECOND}\n", "{LATENCY_SECOND} = ", 1) ?? return Err(err)
+    samples.push(LatencySample{measure: "second_eval", us: second.us})
+    loop step in 0..<steps {
+        stepped: latency_jet_ask(child, "n\n", "", 1) ?? return Err(err)
+        samples.push(LatencySample{measure: "per_step", us: stepped.us})
+        if step == 0 {
+            again: latency_jet_ask(child, "print {LATENCY_CALL}\n", "{LATENCY_CALL} = ", 1) ?? return Err(err)
+            samples.push(LatencySample{measure: "print_again", us: again.us})
+        }
+    }
+    watches: latency_watches()
+    prints: loop watch in watches -> "print {watch}\n"
+    loop _ in 0..<steps {
+        watched: latency_jet_ask(child, "n\n{prints.join("")}", "{watches[watches.len() - 1]} = ", watches.len() + 1) ?? return Err(err)
+        samples.push(LatencySample{measure: "watch_per_stop", us: watched.us})
+    }
+    _: latency_jet_ask(child, "break prog.jet:{tally} if {LATENCY_CONDITION}\n", "checks it at each hit", 1) ?? return Err(err)
+    target: latency_target(child.id()) ?? return Err(err)
+    // A stop before the end (the condition failed) ends the measure.
+    hits: latency_ask(child, "c\n", LatencyUntil{marker: "Program finished", count: 1, line: true, refused: "Breakpoint hit"}) ?? return Err(err)
+    samples.push(LatencySample{measure: "condition_per_hit", us: hits.us /% LATENCY_HITS})
+    Ok(LatencyTimes{samples: samples, target: Val(target)})
+}
+
+// One LLDB session's samples, the same commands as latency_jet_drive's.
+latency_lldb_session: fn(lldb: String, options: LatencyOptions, work: String, tally: Int) -[Exec, FS, Time, Time.Wait]> LatencyTimes Err! {
+    file: latency_break_file(nested: options.nested)
+    line: latency_break_line(options.functions, nested: options.nested)
+    child: latency_spawn([String]{lldb, LATENCY_IMAGE}, work) ?? return Err(err)
+    timed: latency_lldb_drive(child, options.steps, file, line, tally) ?? {
+        latency_stop(child)
+        return Err(err)
+    }
+    latency_end(child) ?? return Err(err)
+    Ok(timed)
+}
+
+latency_lldb_drive: fn(child: ProcessChild, steps: Int, file: String, line: Int, tally: Int) -[Exec, FS, Time]> LatencyTimes Err! {
+    samples := [LatencySample]{}
+    // Each `expr` answers `(type) $N = value`.
+    value: ") $"
+    _: latency_lldb_ask(child, "breakpoint set --file {file} --line {line}\n", "Breakpoint 1: ", 1) ?? return Err(err)
+    // The program reads /dev/null: on LLDB's stdin it would take the bytes
+    // of the commands sent while it runs.
+    _: latency_lldb_ask(child, "process launch -i /dev/null\n", "stop reason = breakpoint", 1) ?? return Err(err)
+    place: latency_lldb_ask(child, "frame variable total\n", "total = ", 1) ?? return Err(err)
+    samples.push(LatencySample{measure: "print_place", us: place.us})
+    first: latency_lldb_ask(child, "expr -- {LATENCY_LLDB_CALL}\n", value, 1) ?? return Err(err)
+    samples.push(LatencySample{measure: "print_first", us: first.us})
+    second: latency_lldb_ask(child, "expr -- {LATENCY_SECOND}\n", value, 1) ?? return Err(err)
+    samples.push(LatencySample{measure: "second_eval", us: second.us})
+    loop step in 0..<steps {
+        stepped: latency_lldb_ask(child, "next\n", "stop reason = ", 1) ?? return Err(err)
+        samples.push(LatencySample{measure: "per_step", us: stepped.us})
+        if step == 0 {
+            again: latency_lldb_ask(child, "expr -- {LATENCY_LLDB_CALL}\n", value, 1) ?? return Err(err)
+            samples.push(LatencySample{measure: "print_again", us: again.us})
+        }
+    }
+    watches: latency_watches()
+    loop watch in watches {
+        _: latency_lldb_ask(child, "target stop-hook add -o 'expr -- {latency_lldb_expression(watch)}'\n", " added.", 1) ?? return Err(err)
+    }
+    loop _ in 0..<steps {
+        // The hooks answer before the stop's report.
+        watched: latency_lldb_ask(child, "next\n", "stop reason = ", 1) ?? return Err(err)
+        if watched.text.split(value).to_list().len() <= watches.len() {
+            return Err("a step's stop hooks gave fewer than {watches.len()} values: {watched.text.trim()}")
+        }
+        samples.push(LatencySample{measure: "watch_per_stop", us: watched.us})
+    }
+    _: latency_lldb_ask(child, "breakpoint set --file prog.jet --line {tally}\n", "Breakpoint 2: ", 1) ?? return Err(err)
+    // `breakpoint modify` prints nothing; the listing after it shows the
+    // condition taken.
+    _: latency_lldb_ask(child, "breakpoint modify -c '{LATENCY_CONDITION}' 2\nbreakpoint list 2\n", "Condition: {LATENCY_CONDITION}", 1) ?? return Err(err)
+    target: latency_target(child.id()) ?? return Err(err)
+    // A stop before the exit (the condition failed) ends the measure.
+    hits: latency_ask(child, "continue\n", LatencyUntil{marker: "exited with status", count: 1, line: true, refused: "stop reason = "}) ?? return Err(err)
+    samples.push(LatencySample{measure: "condition_per_hit", us: hits.us /% LATENCY_HITS})
+    Ok(LatencyTimes{samples: samples, target: Val(target)})
+}
+
+// The microseconds of `measure`'s samples.
+latency_samples: fn(samples: [LatencySample], measure: String) -> [Int] Never! {
+    picked := [Int]{}
+    loop sample in samples {
+        if sample.measure == measure -> picked.push(sample.us)
+    }
+    picked
+}
+
+// A row per measure, in the order `jet` first took them, each the median
+// of its samples.
+latency_medians: fn(jet: [LatencySample], lldb: [LatencySample]) -> [LatencyRow] Never! {
+    rows := [LatencyRow]{}
+    loop sample in jet {
+        seen: loop row in rows {
+            if row.measure == sample.measure {
+                break true
+            }
+        } ?? false
+        if seen -> next
+        lldb_us: latency_samples(lldb, sample.measure)
+        lldb_median: if lldb_us.len() > 0 -> Val(latency_median(lldb_us)) else -> None
+        rows.push(LatencyRow{measure: "{sample.measure}", jet: latency_median(latency_samples(jet, sample.measure)), lldb: lldb_median})
+    }
+    rows
 }
 
 latency_measure: fn(options: LatencyOptions, work: String) -[Exec, FS, Time, Time.Wait]> LatencyRuns Err! {
     files.write(files.join(work, "package.jet"), LATENCY_PACKAGE) ?? return Err("couldn't write the package: {err}")
-    entry: if options.nested -> latency_nested_program(options.functions) else -> latency_program(options.functions)
+    entry: latency_entry(options)
     files.write(files.join(work, "prog.jet"), entry) ?? return Err("couldn't write the program: {err}")
     if options.nested {
         files.write(files.join(work, "lib.jet"), latency_nested_lib(options.functions)) ?? return Err("couldn't write the program's lib.jet: {err}")
@@ -330,99 +608,97 @@ latency_measure: fn(options: LatencyOptions, work: String) -[Exec, FS, Time, Tim
     image: files.read_bytes(files.join(work, LATENCY_IMAGE)) ?? return Err("couldn't read the image: {err}")
     file: latency_break_file(nested: options.nested)
     line: latency_break_line(options.functions, nested: options.nested)
+    tally: latency_tally_line(entry)
     debug: latency_debug_argv(options.jet, file, line)
-    debug_stopped: "Breakpoint hit  {file}:{line}"
-    lldb_stopped: "stop reason = breakpoint"
-    nexts: "n\n".repeat(options.steps)
+    jet_samples := [LatencySample]{}
+    jet_target := LatencyTarget?{None}
+    loop _ in 0..<options.runs {
+        timed: latency_jet_session(options, work, tally) ?? return Err("a jet debug session: {err.message}")
+        jet_samples.extend(timed.samples)
+        jet_target = timed.target
+    }
     lldb := LatencyLldb?{None}
+    lldb_samples := [LatencySample]{}
+    lldb_target := LatencyTarget?{None}
+    lldb_note := ""
     if options.lldb == .Val(tool) {
         timed: LatencyLldb{
             version: latency_version(tool) ?? return Err(err),
-            stop: latency_median_time(latency_lldb_argv(tool, file, line, 0), work, "", lldb_stopped, options.runs) ?? return Err(err),
-            steps: latency_median_time(latency_lldb_argv(tool, file, line, options.steps), work, "", lldb_stopped, options.runs) ?? return Err(err),
+            stop: latency_median_time(latency_lldb_argv(tool, file, line), work, "", "stop reason = breakpoint", options.runs) ?? return Err(err),
         }
         lldb = Val(timed)
-    }
-    // Each distinct `jet debug` session is timed once; the probes share them.
-    sessions := [String:Int]{}
-    probes := [LatencyProbeTime]{}
-    loop probe in latency_probes(options.steps) {
-        inputs: [String]{probe.jet_with, probe.jet_base}
-        loop input in inputs {
-            if !sessions.has_key(input) {
-                sessions[input] = latency_median_time(debug, work, input, debug_stopped, options.runs) ?? return Err("{probe.measure}: {err}")
+        loop _ in 0..<options.runs {
+            session: latency_lldb_session(tool, options, work, tally) ?? {
+                lldb_note = "{err.message}"
+                lldb_samples = [LatencySample]{}
+                lldb_target = None
+                break
             }
+            lldb_samples.extend(session.samples)
+            lldb_target = session.target
         }
-        timed := LatencyProbeTime{measure: "{probe.measure}", jet: (sessions[probe.jet_with] - sessions[probe.jet_base]) /% probe.per, lldb: None, lldb_note: ""}
-        if options.lldb == .Val(tool) {
-            ms: latency_lldb_probe(tool, file, line, work, probe, options.runs) ?? {
-                timed.lldb_note = "{err.message}"
-                probes.push(timed)
-                next
-            }
-            timed.lldb = Val(ms)
-        }
-        probes.push(timed)
     }
     Ok(
         LatencyRuns{
             image_sha256: crypto.sha256(image).hex(),
             jet_version: latency_version(options.jet) ?? return Err(err),
             build: latency_median_time(build, work, "", "", options.runs) ?? return Err(err),
-            debug_stop: latency_median_time(debug, work, "", debug_stopped, options.runs) ?? return Err(err),
-            debug_steps: latency_median_time(debug, work, nexts, debug_stopped, options.runs) ?? return Err(err),
+            debug_stop: latency_median_time(debug, work, "", "Breakpoint hit  {file}:{line}", options.runs) ?? return Err(err),
             lldb: lldb,
-            probes: probes,
+            rows: latency_medians(jet_samples, lldb_samples),
+            jet_target: jet_target,
+            lldb_target: lldb_target,
+            lldb_note: lldb_note,
         },
     )
 }
 
+// `us` microseconds as milliseconds, to a tenth.
+latency_ms: fn(us: Int) -> String Never! { "{us /% 1000}.{(us % 1000) /% 100}" }
+
+// The program condition_per_hit ran under `debugger`.
+latency_target_text: fn(debugger: String, target: LatencyTarget) -> String Never! {
+    "# condition_per_hit under {debugger}: the program resident {target.resident_kib} KiB, {target.huge_kib} KiB of it in huge pages; load {target.load}"
+}
+
 // The report: the image, the tools and the commands, then the rows, then
-// the bar's verdict when there is one. Per step is the extra time of K steps
-// over the first stop, over K; LLDB's column is `-` when LLDB was not timed.
+// the bars' verdicts. LLDB's column is `-` when LLDB was not timed.
 latency_rows: fn(options: LatencyOptions, runs: LatencyRuns) -> [String] Never! {
     file: latency_break_file(nested: options.nested)
     line: latency_break_line(options.functions, nested: options.nested)
-    debug_step: (runs.debug_steps - runs.debug_stop) /% options.steps
     rows := [String]{
         "# image {LATENCY_IMAGE} sha256 {runs.image_sha256}",
         "# jet {runs.jet_version}",
     }
     lldb_line := "# lldb not timed: none on PATH and no `--lldb`"
     lldb_stop := "-"
-    lldb_step := "-"
     if runs.lldb == .Val(lldb) {
         lldb_line = "# lldb {lldb.version}"
         lldb_stop = "{lldb.stop}"
-        lldb_step = "{(lldb.steps - lldb.stop) /% options.steps}"
     }
     rows.push(lldb_line)
     rows.push("# build: {latency_command_text(latency_build_argv(options.jet))}")
     rows.push("# jet_debug first_stop: {latency_command_text(latency_debug_argv(options.jet, file, line))} < /dev/null")
-    rows.push("# jet_debug per_step: the same with {options.steps} `n` lines on stdin")
+    rows.push("# jet_debug session: {latency_command_text(latency_debug_argv(options.jet, file, line))}, one command at a time")
     if options.lldb == .Val(tool) {
-        rows.push("# lldb first_stop: {latency_command_text(latency_lldb_argv(tool, file, line, 0))}")
-        rows.push("# lldb per_step: {latency_command_text(latency_lldb_argv(tool, file, line, options.steps))}")
+        rows.push("# lldb first_stop: {latency_command_text(latency_lldb_argv(tool, file, line))}")
+        rows.push("# lldb session: {latency_command_text([String]{tool, LATENCY_IMAGE})}, one command at a time")
     }
-    // The lines of the program's sources: run's 1 + N + 3 after the
-    // functions, and with `nested` lib.jet's 10 after them.
-    lines: if options.nested -> 6 * options.functions + 15 else -> latency_break_line(options.functions) + options.functions + 1
     stop: if options.nested -> ", the stop two calls deep in lib.jet" else -> ""
-    rows.push("# {options.functions} functions, {lines} lines{stop}, {options.steps} steps, median of {options.runs} runs, milliseconds")
+    rows.push("# {options.functions} functions, {latency_source_lines(options)} lines{stop}, {options.steps} steps, {LATENCY_HITS} hits, {options.runs} runs, milliseconds: build and first_stop the median run, the rest the median sample")
     rows.push("measure\tjet_debug\tlldb")
     rows.push("build\t{runs.build}\t-")
     rows.push("first_stop\t{runs.debug_stop}\t{lldb_stop}")
-    rows.push("per_step\t{debug_step}\t{lldb_step}")
-    loop probe in runs.probes {
-        lldb_ms: if probe.lldb == .Val(ms) -> "{ms}" else -> "-"
-        rows.push("{probe.measure}\t{probe.jet}\t{lldb_ms}")
+    loop row in runs.rows {
+        lldb_ms: if row.lldb == .Val(us) -> latency_ms(us) else -> "-"
+        rows.push("{row.measure}\t{latency_ms(row.jet)}\t{lldb_ms}")
     }
-    loop probe in runs.probes {
-        if probe.lldb_note != "" {
-            rows.push("# lldb {probe.measure} not timed: {probe.lldb_note.split("\n").to_list()[0]}")
-        }
+    if runs.jet_target == .Val(target) -> rows.push(latency_target_text("jet_debug", target))
+    if runs.lldb_target == .Val(target) -> rows.push(latency_target_text("lldb", target))
+    if runs.lldb_note != "" {
+        rows.push("# lldb sessions not timed: {runs.lldb_note.split("\n").to_list()[0]}")
     }
-    loop verdict in latency_verdicts(options, runs) -> rows.push(verdict)
+    loop verdict in latency_verdicts(runs) -> rows.push(verdict)
     if options.bar == .Val(bar) {
         verdict: if latency_bar_missed(options, runs) -> "missed" else -> "met"
         rows.push("# bar: jet_debug first_stop at most {bar} ms: {verdict}")
@@ -434,27 +710,25 @@ latency_rows: fn(options: LatencyOptions, runs: LatencyRuns) -> [String] Never! 
 // LLDB's plus 1 ms; print_place within LLDB's plus 10 ms; print_again and
 // watch_per_stop within twice LLDB's; print_first at most 250 ms; and
 // second_eval at most 100 ms. A bar against LLDB is judged only when LLDB
-// was timed.
-latency_verdicts: fn(options: LatencyOptions, runs: LatencyRuns) -> [String] Never! {
+// was timed; condition_per_hit has no bar.
+latency_verdicts: fn(runs: LatencyRuns) -> [String] Never! {
     verdicts := [String]{}
-    if runs.lldb == .Val(lldb) {
-        debug_step: (runs.debug_steps - runs.debug_stop) /% options.steps
-        lldb_step: (lldb.steps - lldb.stop) /% options.steps
-        verdicts.push("# bar: jet_debug per_step at most lldb's + 1 ms: {latency_verdict(debug_step <= lldb_step + 1)}")
-    }
-    loop probe in runs.probes {
-        if probe.measure == "print_first" {
-            verdicts.push("# bar: jet_debug print_first at most 250 ms: {latency_verdict(probe.jet <= 250)}")
+    loop row in runs.rows {
+        if row.measure == "print_first" {
+            verdicts.push("# bar: jet_debug print_first at most 250 ms: {latency_verdict(row.jet <= 250000)}")
         }
-        if probe.measure == "second_eval" {
-            verdicts.push("# bar: jet_debug second_eval at most 100 ms: {latency_verdict(probe.jet <= 100)}")
+        if row.measure == "second_eval" {
+            verdicts.push("# bar: jet_debug second_eval at most 100 ms: {latency_verdict(row.jet <= 100000)}")
         }
-        if probe.lldb == .Val(lldb_ms) {
-            if probe.measure == "print_place" {
-                verdicts.push("# bar: jet_debug print_place at most lldb's + 10 ms: {latency_verdict(probe.jet <= lldb_ms + 10)}")
+        if row.lldb == .Val(lldb_us) {
+            if row.measure == "per_step" {
+                verdicts.push("# bar: jet_debug per_step at most lldb's + 1 ms: {latency_verdict(row.jet <= lldb_us + 1000)}")
             }
-            if probe.measure == "print_again" || probe.measure == "watch_per_stop" {
-                verdicts.push("# bar: jet_debug {probe.measure} at most twice lldb's: {latency_verdict(probe.jet <= 2 * lldb_ms)}")
+            if row.measure == "print_place" {
+                verdicts.push("# bar: jet_debug print_place at most lldb's + 10 ms: {latency_verdict(row.jet <= lldb_us + 10000)}")
+            }
+            if row.measure == "print_again" || row.measure == "watch_per_stop" {
+                verdicts.push("# bar: jet_debug {row.measure} at most twice lldb's: {latency_verdict(row.jet <= 2 * lldb_us)}")
             }
         }
     }
@@ -491,7 +765,8 @@ debug_latency: fn() -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
         }
         at += 2
     }
-    if options.functions < 1 || options.steps < 1 || options.steps > options.functions || options.runs < 1 || (options.nested && options.functions < 4) {
+    // The session takes 2K steps from the stop, every one in `run`'s calls.
+    if options.functions < 1 || options.steps < 1 || 2 * options.steps >= options.functions || options.runs < 1 || (options.nested && options.functions < 4) {
         return usage()
     }
     work: files.temp_dir("jet-debug-latency") ?? {
@@ -519,7 +794,19 @@ run: fn() {
     assert_eq(lines[latency_break_line(3) - 1], "    total = f_0(total)")
     assert_eq(lines[latency_break_line(3) + 1], "    total = f_2(total)")
     assert_eq(lines[0], "f_0: fn(x: Int) -> Int {{")
-    assert_eq(lines[latency_break_line(3) + 3], "}}")
+    assert_eq(lines[latency_break_line(3) + 2], "    loop k in 0..<1000 -> total = (total + tally(k)) % 1000")
+    assert_eq(lines[latency_break_line(3) + 4], "}}")
+}
+
+#Test("the condition's breakpoint is tally's last line, after its six locals") {
+    program: latency_program(3)
+    lines: program.split("\n").to_list()
+    line: latency_tally_line(program)
+    assert_eq(lines[line - 1], LATENCY_TALLY_SUM)
+    assert_eq(lines[line - 2], "    f: n + 6")
+    assert_eq(lines[line - 8], "tally: fn(n: Int) -> Int {{")
+    assert_eq(latency_tally_line(latency_nested_program(4)), 4 + 15)
+    assert_eq(latency_source_lines(LatencyOptions{jet: "jet", lldb: None, functions: 10, steps: 4, runs: 1, bar: None}), 75)
 }
 
 #Test("a nested stop is inner's first call, two calls deep in lib.jet") {
@@ -528,7 +815,7 @@ run: fn() {
     assert_eq(lib[line - 1], "    total = f_2(total)")
     assert_eq(lib[line - 3], "inner: fn(x: Int) -> Int {{")
     assert_eq(lib[line - 6], "    inner(x + 1)")
-    assert_eq(lib.len() + latency_nested_program(4).split("\n").to_list().len(), 6 * 4 + 15 + 2)
+    assert_eq(latency_source_lines(LatencyOptions{jet: "jet", lldb: None, functions: 4, steps: 1, runs: 1, bar: None, nested: true}), 6 * 4 + 26)
     assert_eq(latency_nested_program(4).split("\n").to_list()[2], "    total = outer(total)")
     assert_eq(latency_break_file(nested: true), "lib.jet")
 }
@@ -539,70 +826,91 @@ run: fn() {
 
 #Test("both debuggers drive the one built image") {
     assert_eq(latency_debug_argv("jet", "prog.jet", 13), [String]{"jet", "debug", "--break", "prog.jet:13", "out/prog"})
-    lldb: latency_lldb_argv("lldb", "lib.jet", 13, 1)
+    lldb: latency_lldb_argv("lldb", "lib.jet", 13)
     assert_eq(lldb[3], "breakpoint set --file lib.jet --line 13")
     assert_eq(lldb[lldb.len() - 1], "out/prog")
     assert_eq(latency_build_argv("jet"), [String]{"jet", "build", "-O0", "--output-dir=out", "prog.jet"})
 }
 
-#Test("the report names the image, the tools and the commands, then the rows") {
+#Test("an answer ends at its marker's count, and at a line end when asked") {
+    prompt: LatencyUntil{marker: LATENCY_PROMPT, count: 2, line: false, refused: ""}
+    assert(!latency_answered("n\n12 | x\n(Jet) print total\n", prompt))
+    assert(latency_answered("n\n12 | x\n(Jet) print total\ntotal = 3\n(Jet) ", prompt))
+    value: LatencyUntil{marker: ") $", count: 1, line: true, refused: "error: "}
+    assert(!latency_answered("(lldb) expr -- total\n(Int) $0 = ", value))
+    assert(latency_answered("(lldb) expr -- total\n(Int) $0 = 3\n", value))
+}
+
+#Test("lldb calls the function cast to its type, and the other watches as they are") {
+    watches: latency_watches()
+    assert_eq(watches.len(), 5)
+    assert_eq(latency_lldb_expression(watches[0]), "total")
+    assert_eq(latency_lldb_expression(watches[watches.len() - 1]), "((long (*)(long))f_1)(total)")
+    assert_eq(latency_kib("Name:\tprog\nVmRSS:\t   1532 kB\n", "VmRSS:"), 1532)
+    assert_eq(latency_kib("Rss: 1 kB\n", "AnonHugePages:"), 0)
+}
+
+#Test("the rows are each measure's median sample, against lldb's") {
+    jet: [LatencySample]{
+        LatencySample{measure: "print_place", us: 300},
+        LatencySample{measure: "per_step", us: 900},
+        LatencySample{measure: "per_step", us: 700},
+        LatencySample{measure: "per_step", us: 800},
+    }
+    lldb: [LatencySample]{LatencySample{measure: "per_step", us: 2000}}
+    rows: latency_medians(jet, lldb)
+    assert_eq(rows.len(), 2)
+    assert_eq(rows[0].lldb, None)
+    assert_eq(rows[1].jet, 800)
+    assert_eq(rows[1].lldb, Val(2000))
+    assert_eq(latency_ms(12345), "12.3")
+    assert_eq(latency_ms(80), "0.0")
+}
+
+#Test("the report names the image, the tools and the commands, then the rows and the bars") {
     options: LatencyOptions{jet: "jet", lldb: Val("lldb"), functions: 10, steps: 4, runs: 1, bar: None}
-    lldb: LatencyLldb{version: "lldb version 21", stop: 400, steps: 480}
-    rows: latency_rows(options, LatencyRuns{image_sha256: "ab12", jet_version: "jet 0.1", build: 300, debug_stop: 900, debug_steps: 1300, lldb: Val(lldb)})
+    lldb: LatencyLldb{version: "lldb version 21", stop: 400}
+    measured: [LatencyRow]{
+        LatencyRow{measure: "print_place", jet: 15000, lldb: Val(4000)},
+        LatencyRow{measure: "print_first", jet: 300000, lldb: Val(16000)},
+        LatencyRow{measure: "second_eval", jet: 40000, lldb: Val(5000)},
+        LatencyRow{measure: "per_step", jet: 1200, lldb: Val(2500)},
+        LatencyRow{measure: "watch_per_stop", jet: 9000, lldb: Val(5000)},
+        LatencyRow{measure: "condition_per_hit", jet: 2400, lldb: Val(300)},
+    }
+    target: LatencyTarget{resident_kib: 1532, huge_kib: 0, load: "1.00 2.00 3.00"}
+    rows: latency_rows(options, LatencyRuns{image_sha256: "ab12", jet_version: "jet 0.1", build: 300, debug_stop: 900, lldb: Val(lldb), rows: measured, jet_target: Val(target)})
+    text: rows.join("\n")
     assert_eq(rows[0], "# image out/prog sha256 ab12")
     assert_eq(rows[4], "# jet_debug first_stop: jet debug --break prog.jet:53 out/prog < /dev/null")
     assert_eq(rows[6], "# lldb first_stop: lldb -b -o 'breakpoint set --file prog.jet --line 53' -o run -o continue out/prog")
-    assert_eq(rows[8], "# 10 functions, 64 lines, 4 steps, median of 1 runs, milliseconds")
+    assert_eq(rows[8], "# 10 functions, 75 lines, 4 steps, 1000 hits, 1 runs, milliseconds: build and first_stop the median run, the rest the median sample")
     assert_eq(rows[11], "first_stop\t900\t400")
-    assert_eq(rows[12], "per_step\t100\t20")
-    assert_eq(rows[13], "# bar: jet_debug per_step at most lldb's + 1 ms: missed")
-    assert_eq(rows.len(), 14)
-}
-
-#Test("each probe is a row against lldb's, and the bars judge them") {
-    options: LatencyOptions{jet: "jet", lldb: Val("lldb"), functions: 10, steps: 4, runs: 1, bar: None}
-    lldb: LatencyLldb{version: "lldb version 21", stop: 400, steps: 480}
-    probes: [LatencyProbeTime]{
-        LatencyProbeTime{measure: "print_place", jet: 15, lldb: Val(4), lldb_note: ""},
-        LatencyProbeTime{measure: "print_first", jet: 300, lldb: None, lldb_note: "error: use of undeclared identifier"},
-        LatencyProbeTime{measure: "second_eval", jet: 40, lldb: Val(5), lldb_note: ""},
-        LatencyProbeTime{measure: "watch_per_stop", jet: 9, lldb: Val(5), lldb_note: ""},
-    }
-    rows: latency_rows(options, LatencyRuns{image_sha256: "ab12", jet_version: "jet 0.1", build: 300, debug_stop: 900, debug_steps: 984, lldb: Val(lldb), probes: probes})
-    text: rows.join("\n")
-    assert(text.contains("print_place\t15\t4\n"), text)
-    assert(text.contains("print_first\t300\t-\n"), text)
-    assert(text.contains("# lldb print_first not timed: error: use of undeclared identifier"), text)
+    assert(text.contains("print_place\t15.0\t4.0\n"), text)
+    assert(text.contains("condition_per_hit\t2.4\t0.3\n"), text)
+    assert(text.contains("# condition_per_hit under jet_debug: the program resident 1532 KiB, 0 KiB of it in huge pages; load 1.00 2.00 3.00"), text)
     assert(text.contains("# bar: jet_debug per_step at most lldb's + 1 ms: met"), text)
     assert(text.contains("# bar: jet_debug print_place at most lldb's + 10 ms: missed"), text)
     assert(text.contains("# bar: jet_debug print_first at most 250 ms: missed"), text)
     assert(text.contains("# bar: jet_debug second_eval at most 100 ms: met"), text)
     assert(text.contains("# bar: jet_debug watch_per_stop at most twice lldb's: met"), text)
-}
-
-#Test("the probes measure against their own base sessions") {
-    probes: latency_probes(3)
-    assert_eq(probes.len(), 5)
-    assert_eq(probes[0].jet_with, "print total\n")
-    assert_eq(probes[2].jet_base, "print f_1(total)\nn\n")
-    assert_eq(probes[4].jet_with, "watch total\nn\nn\nn\ndelete 2\n")
-    assert_eq(probes[4].per, 3)
-    assert_eq(latency_lldb_session("lldb", "prog.jet", 13, [String]{"frame variable total"})[7], "frame variable total")
+    assert(!text.contains("bar: jet_debug condition_per_hit"), text)
 }
 
 // c34: the measurement needs nothing but jet; the bar fails the run after
 // the rows are printed.
 #Test("without lldb only jet debug is timed, and the bar judges its first stop") {
     options: LatencyOptions{jet: "jet", lldb: None, functions: 10, steps: 4, runs: 1, bar: Val(200)}
-    runs: LatencyRuns{image_sha256: "ab12", jet_version: "jet 0.1", build: 300, debug_stop: 60, debug_steps: 100, lldb: None}
+    measured: [LatencyRow]{LatencyRow{measure: "per_step", jet: 1000, lldb: None}}
+    runs: LatencyRuns{image_sha256: "ab12", jet_version: "jet 0.1", build: 300, debug_stop: 60, lldb: None, rows: measured}
     rows: latency_rows(options, runs)
     assert_eq(rows[2], "# lldb not timed: none on PATH and no `--lldb`")
     assert(!rows.join("\n").contains("# lldb first_stop"), rows.join("\n"))
     assert_eq(rows[rows.len() - 3], "first_stop\t60\t-")
-    assert_eq(rows[rows.len() - 2], "per_step\t10\t-")
+    assert_eq(rows[rows.len() - 2], "per_step\t1.0\t-")
     assert_eq(rows[rows.len() - 1], "# bar: jet_debug first_stop at most 200 ms: met")
     assert(!latency_bar_missed(options, runs))
-    slow: LatencyRuns{image_sha256: "ab12", jet_version: "jet 0.1", build: 300, debug_stop: 201, debug_steps: 300, lldb: None}
+    slow: LatencyRuns{image_sha256: "ab12", jet_version: "jet 0.1", build: 300, debug_stop: 201, lldb: None}
     assert(latency_bar_missed(options, slow))
     assert_eq(latency_rows(options, slow)[latency_rows(options, slow).len() - 1], "# bar: jet_debug first_stop at most 200 ms: missed")
 }

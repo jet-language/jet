@@ -900,6 +900,9 @@ NativeSession: struct {
         levels: native_levels(self.image, frames)
         level: if self.selected < levels.len() -> levels[self.selected] else -> levels[0]
         frame: frames[level.frame]
+        // The frame that called this one, for a parameter's entry value; an
+        // inlined run's caller is no frame of its own.
+        caller: if level.site < 0 && level.frame + 1 < frames.len() -> NativeUnwound?{Val(frames[level.frame + 1])} else -> None
         lookup: native_lookup(level.frame, frame.pc)
         function: native_function_at(self.image, lookup) ?? return Err(native_eval_refused("the selected frame is not Jet code"))
         memory: NativeMemory{trace: Val(self.trace), blocks: [NativeBlock]{}}
@@ -917,7 +920,7 @@ NativeSession: struct {
                 range: native_variable_covering(self.image, variable, lookup) ?? next
                 size: if capture.inline -> capture.size else -> native_type_size(self.image, variable.ty)
                 if size <= 0 || (!capture.inline && size > 8) -> next
-                bytes = native_place_bytes(memory, frame, self.image.loclists, range.from, range.to, size)
+                bytes = native_variable_bytes(self.image, memory, frame, caller, range, size)
                 if bytes != None -> typed.push(variable.ty)
             }
             read := bytes ?? return Err(native_eval_refused("`{capture.name}` has no value here"))
@@ -1808,7 +1811,7 @@ NativeSession: struct {
             at += 1
             range: located ?? next
             view: native_debug_view_at(self.image, variable.ty) ?? next
-            bytes: native_place_bytes(memory, frames[index], self.image.loclists, range.from, range.to, native_type_size(self.image, variable.ty)) ?? next
+            bytes: native_variable_bytes(self.image, memory, frames[index], caller, range, native_type_size(self.image, variable.ty)) ?? next
             if self.view(view, variable.ty, bytes) == {
                 .Ok(viewed) -> {
                     if viewed == .Val(text) -> shown[local].value = text
@@ -5466,25 +5469,41 @@ native_entry_register: fn(bytes: [U8], from: Int, to: Int) -> Int Never! {
 }
 
 // The value of type `ty` that `caller` passed in register `register` (a
-// DWARF number) to the call it stopped at: its call site parameter's value
+// DWARF number) to the call it stopped at, rendered (native_entry_bytes).
+native_entry_value: fn(image: NativeImage, memory: NativeMemory, caller: NativeUnwound?, register: Int, ty: Int, indirect: Bool{false}) -> String? Never! {
+    bytes: native_entry_bytes(image, memory, caller, register, native_type_size(image, ty), indirect: indirect) ?? return None
+    native_render(image, memory, ty, bytes, 0, 0)
+}
+
+// The `size` bytes that `caller` passed in register `register` (a DWARF
+// number) to the call it stopped at: its call site parameter's value
 // (NativeCallArgument), computed in the caller's frame. When `indirect`,
 // that value is the address of the bytes (an aggregate parameter's, which
 // the caller keeps while the call runs). None when the call records no such
 // value or the caller's frame no longer holds what it is computed from.
-native_entry_value: fn(image: NativeImage, memory: NativeMemory, caller: NativeUnwound?, register: Int, ty: Int, indirect: Bool{false}) -> String? Never! {
+native_entry_bytes: fn(image: NativeImage, memory: NativeMemory, caller: NativeUnwound?, register: Int, size: Int, indirect: Bool{false}) -> [U8]? Never! {
     outer: caller ?? return None
-    size: native_type_size(image, ty)
     if size <= 0 || (!indirect && size > 8) -> return None
     loop argument in image.arguments {
         if argument.at != outer.pc || argument.register != register -> next
         word: native_call_value(memory, outer, argument.value) ?? return None
-        bytes: if {
-            indirect -> native_debug_bytes(memory, word, size) ?? return None
-            else -> native_low_bytes(word, size)
-        }
-        return native_render(image, memory, ty, bytes, 0, 0)
+        if indirect -> return native_debug_bytes(memory, word, size)
+        return Val(native_low_bytes(word, size))
     }
     None
+}
+
+// The `size` bytes of a variable's value in `frame` at its location list
+// range `range`: what the location names, or for a parameter located by
+// its entry value (DW_OP_entry_value), what `caller` passed. An entry value
+// with no DW_OP_stack_value (0x9f) after it names memory; its register
+// expression never ends in 0x9f.
+native_variable_bytes: fn(image: NativeImage, memory: NativeMemory, frame: NativeUnwound, caller: NativeUnwound?, range: NativeRange, size: Int) -> [U8]? Never! {
+    entry: native_entry_register(image.loclists, range.from, range.to)
+    if entry < 0 {
+        return native_place_bytes(memory, frame, image.loclists, range.from, range.to, size)
+    }
+    native_entry_bytes(image, memory, caller, entry, size, indirect: image.loclists[range.to - 1] != 0x9f)
 }
 
 // The word the call site parameter value `value` computes in `frame`: a

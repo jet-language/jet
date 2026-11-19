@@ -281,7 +281,14 @@ native_eval_in_fork: fn(image: NativeImage, fork: NativeFork, pid: Int, sites: [
     //   until the budget (NATIVE_FORK_BUDGET_MS, 2 s) ends the call;
     // - a function value the expression calls runs the image's code for
     //   it, whatever that code does within the fork's confinement.
-    _ := native_fork_call(fork, image, base + offset, arguments, at - 16) ?? return Err(native_eval_refused(err.detail))
+    _ := native_fork_call(fork, image, base + offset, arguments, at - 16) ?? {
+        // A call of a runtime function the image doesn't hold stops at its
+        // trap (native_fix_place_all).
+        if native_fix_absent_at(plan, base, native_fork_pc(fork)) == .Val(why) {
+            return Err(native_eval_refused(why))
+        }
+        return Err(native_eval_refused(err.detail))
+    }
     memory: NativeMemory{trace: Val(fork.trace), blocks: [NativeBlock]{}}
     held: native_debug_bytes(memory, cell, cell_size) ?? return Err(native_eval_refused("couldn't read the expression's value"))
     ty: native_eval_type(image, typed, code.result.name)
