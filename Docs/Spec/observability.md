@@ -586,6 +586,9 @@ frame of the stop (`Stopped  main.jet:9  in check()`), its source line and
 its locals. `bt`, `frame N`, `locals` and `print NAME` read the stop as a
 live session reads one, with typed locals; a `Secret` shows as
 `<redacted>`, and a value whose bytes the dump cut off as `<cut off>`.
+The runtime's frames between the stop and the program are stepped out of
+by the image's call frame information (`.eh_frame`), so a register they
+saved holds its value in the program's frames.
 `tasks` lists every task the dump holds, the selected one marked `*`, as
 `task <id>  stopped`, `running` or `parked`, then its innermost Jet frame
 and, when that frame is outside the program's source, the innermost one

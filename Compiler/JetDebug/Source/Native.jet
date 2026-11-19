@@ -466,7 +466,7 @@ NativeSession: struct {
         image: native_image_load(binary, elf) ?? return Err(NativeDebugError{detail: "`{binary}` has no Jet debug information; build it with `jet build -O0`"})
         native_files.write(output_path, "") ?? return Err(NativeDebugError{detail: "couldn't create the program output file: {err}"})
         observe_root: native_elf_symbol(elf, X64_OBSERVE_ROOT_SYMBOL) ?? 0
-        openings: native_openings(image, native_elf_code(elf))
+        openings: native_openings(image, native_elf_codes(elf, ".text"))
         Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: output_path, output_read: 0, started: false, threads: [NativeThread]{}, observe_root: observe_root, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: None, task: 0, replay_start: native_elf_symbol(elf, NATIVE_REPLAY_START_SYMBOL) != None})
     }
 
@@ -1527,7 +1527,7 @@ NativeSession: struct {
         elf: native_files.read_bytes(binary) ?? return Err(NativeDebugError{detail: "couldn't read the program `{binary}`: {err}"})
         image: native_image_load(binary, elf) ?? return Err(NativeDebugError{detail: "`{binary}` has no Jet debug information; build it with `jet build -O0`"})
         self.observe_root = native_elf_symbol(elf, X64_OBSERVE_ROOT_SYMBOL) ?? 0
-        self.openings = native_openings(image, native_elf_code(elf))
+        self.openings = native_openings(image, native_elf_codes(elf, ".text"))
         self.image = image
         self.binary = binary
         self.breakpoints = [NativeBreakpoint]{}
@@ -4190,8 +4190,10 @@ NativeSession: struct {
     // The frames of a stack whose innermost registers are `start`,
     // innermost first, unwound through the prologue each Jet function opens
     // with (`push rbp; mov rbp, rsp`, then a push of each callee-saved
-    // register it uses) and the frame-pointer chain elsewhere. A dump's
-    // registers are only those its task's row knows (native_dump_known).
+    // register it uses), through the call frame rules of code without Jet
+    // line information (the runtime's, native_cfi_row), and the
+    // frame-pointer chain elsewhere. A dump's registers are only those its
+    // task's row knows (native_dump_known).
     unwind_from: fn(self, start: [Int]) -> [NativeUnwound] NativeDebugError! {
         registers := loop value in start -> value
         known := loop _ in 0..<registers.len() -> true
@@ -4202,32 +4204,57 @@ NativeSession: struct {
             lookup: if frames.len() == 0 -> pc else -> pc - 1
             function: x64_jetline_find(self.image.lines, lookup)
             here: self.code(pc, 1)
-            cfa: native_frame_base(self.openings, function, registers, pc, here)
+            // Code without Jet line information unwinds by its call frame
+            // rules when they give its return address (`framed`), from the
+            // canonical frame address register `base`.
+            row := NativeCfiRow{register: -1, offset: 0, rules: [Int]{}, offsets: [Int]{}}
+            if function < 0 && self.image.frames.fdes.len() > 0 {
+                if native_cfi_row(self.image.frames, lookup) == .Val(found) -> row = found
+            }
+            base: if row.register >= 0 && row.register < NATIVE_DEBUG_DWARF_REGISTERS.len() -> NATIVE_DEBUG_DWARF_REGISTERS[row.register] else -> -1
+            framed: base >= 0 && known[base] && row.rules[NATIVE_CFI_RETURN] == NATIVE_CFI_SAVED
+            cfa: if framed -> registers[base] + row.offset else -> native_frame_base(self.openings, function, registers, pc, here)
             frames.push(NativeUnwound{pc: pc, cfa: cfa, registers: registers.copy(), known: known.copy()})
             if cfa <= registers[X64_TRACE_RSP] -> break
-            returned: self.word(cfa - 8) ?? break
+            at: if framed -> cfa + row.offsets[NATIVE_CFI_RETURN] else -> cfa - 8
+            returned: self.word(at) ?? break
             if returned <= 0 -> break
-            rsp_word: self.word(registers[X64_TRACE_RSP])
-            rbp_word: if registers[X64_TRACE_RBP] > 0 -> self.word(registers[X64_TRACE_RBP]) else -> Int?{None}
-            caller_rbp: native_caller_rbp(self.openings, function, registers, pc, here, rsp_word, rbp_word) ?? break
             next_known := loop _ in 0..<registers.len() -> false
             loop index in NATIVE_DEBUG_CALLEE_SAVED -> next_known[index] = known[index]
-            loop save in native_prologue_saves(self.openings, function) {
-                if pc >= save.after && registers[X64_TRACE_RBP] > 0 {
-                    if self.word(registers[X64_TRACE_RBP] - 8 * (save.slot + 1)) == .Val(saved) {
-                        registers[save.register] = saved
-                        next_known[save.register] = true
+            outermost := false
+            if framed {
+                loop register in 0..<NATIVE_CFI_RETURN {
+                    index: NATIVE_DEBUG_DWARF_REGISTERS[register]
+                    if row.rules[register] == NATIVE_CFI_LOST -> next_known[index] = false
+                    if row.rules[register] == NATIVE_CFI_SAVED {
+                        saved: self.word(cfa + row.offsets[register])
+                        next_known[index] = saved != None
+                        registers[index] = saved ?? 0
                     }
                 }
+                outermost = next_known[X64_TRACE_RBP] && registers[X64_TRACE_RBP] == 0
+            } else {
+                rsp_word: self.word(registers[X64_TRACE_RSP])
+                rbp_word: if registers[X64_TRACE_RBP] > 0 -> self.word(registers[X64_TRACE_RBP]) else -> Int?{None}
+                caller_rbp: native_caller_rbp(self.openings, function, registers, pc, here, rsp_word, rbp_word) ?? break
+                loop save in native_prologue_saves(self.openings, function) {
+                    if pc >= save.after && registers[X64_TRACE_RBP] > 0 {
+                        if self.word(registers[X64_TRACE_RBP] - 8 * (save.slot + 1)) == .Val(saved) {
+                            registers[save.register] = saved
+                            next_known[save.register] = true
+                        }
+                    }
+                }
+                registers[X64_TRACE_RBP] = caller_rbp
+                next_known[X64_TRACE_RBP] = true
+                outermost = function < 0 && caller_rbp == 0
             }
             registers[X64_TRACE_RIP] = returned
             registers[X64_TRACE_RSP] = cfa
-            registers[X64_TRACE_RBP] = caller_rbp
             next_known[X64_TRACE_RIP] = true
             next_known[X64_TRACE_RSP] = true
-            next_known[X64_TRACE_RBP] = true
             known = next_known
-            if function < 0 && caller_rbp == 0 {
+            if outermost {
                 frames.push(NativeUnwound{pc: returned, cfa: 0, registers: registers.copy(), known: known.copy()})
                 break
             }
@@ -4402,11 +4429,19 @@ NativeOpening: struct {
     prologue: [U8],
 }
 
-// The opening of each function of `image`'s line table, read from `code`.
-native_openings: fn(image: NativeImage, code: NativeCode) -> [NativeOpening] Never! {
+// The opening of each function of `image`'s line table, read from the one
+// of `codes` (each `.text` of the image: a bound image's runtime's, then
+// the program's) that holds its start.
+native_openings: fn(image: NativeImage, codes: [NativeCode]) -> [NativeOpening] Never! {
     openings := [NativeOpening]{}
+    none: NativeCode{address: 0, bytes: [U8]{}}
     loop index in 0..<image.lines.functions.len() {
-        openings.push(native_opening(image, index, code))
+        low: image.lines.functions[index].low
+        holding := -1
+        loop (k, code) in codes {
+            if low >= code.address && low < code.address + code.bytes.len() -> holding = k
+        }
+        openings.push(native_opening(image, index, if holding >= 0 -> codes[holding] else -> none))
     }
     openings
 }

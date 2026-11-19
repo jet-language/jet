@@ -4,7 +4,7 @@
 use {
     native_test_process: core.process
     native_test_files: core.files
-    jet_debug.[NATIVE_DEBUG_CUT_OFF, NativeBlock, NativeBreak, NativeCut, NativeDebugError, NativeFrame, NativeFunction, NativeInlined, NativeLocal, NativeMemory, NativeSession, NativeStop, NativeStopKind, NativeVariable, native_debug_backtrace, native_debug_build_argv, native_debug_decimal_text, native_debug_hit_breakpoint, native_debug_int, native_debug_locals_typed, native_debug_precise, native_debug_string, native_inline_chain, native_jet_spelling]
+    jet_debug.[NATIVE_CFI_RETURN, NATIVE_CFI_SAME, NATIVE_CFI_SAVED, NATIVE_DEBUG_CUT_OFF, NativeBlock, NativeBreak, NativeCode, NativeCut, NativeDebugError, NativeFde, NativeFrame, NativeFrames, NativeFunction, NativeInlined, NativeLocal, NativeMemory, NativeSession, NativeStop, NativeStopKind, NativeVariable, native_cfi_row, native_debug_backtrace, native_debug_build_argv, native_debug_decimal_text, native_debug_hit_breakpoint, native_debug_int, native_debug_locals_typed, native_debug_precise, native_debug_string, native_frames_index, native_inline_chain, native_jet_spelling]
     jet_backend.[x64_eval_fork_filter, x64_jetline_sleb]
     jet_foundation.[DeepChecks]
 }
@@ -108,10 +108,70 @@ native_test_bytes: fn(words: [Int], size: Int) -> [U8] {
     assert_eq(native_debug_string(64, memory), String?{None})
 }
 
+// An `.eh_frame` at 0x2000 whose one FDE covers [0x1000, 0x1010): a
+// "zR" CIE (pc-relative sdata4 pointers, code alignment 1, data alignment
+// -8, the return address in column 16) whose initial rule is CFA = rsp + 8,
+// then `push rbp` at 0x1000 and `mov rbp, rsp` at 0x1001: each row is the
+// one its address holds.
+#Test("call_frame_rows_follow_the_fde_up_to_the_address") {
+    // The CIE's 24 bytes, the FDE's 28, then the terminator.
+    section: [Int]{20, 0, 0, 0, 0, 0, 0, 0, 1, 0x7a, 0x52, 0, 1, 0x78, 0x10, 1, 0x1b, 0x0c, 7, 8, 0x90, 1, 0, 0, 24, 0, 0, 0, 28, 0, 0, 0, 0xe0, 0xef, 0xff, 0xff, 0x10, 0, 0, 0, 0, 0x41, 0x0e, 0x10, 0x86, 0x02, 0x43, 0x0d, 0x06, 0, 0, 0, 0, 0, 0, 0}
+    bytes: loop value in section -> U8{value}
+    code: NativeCode{address: 0x2000, bytes: bytes}
+    fdes := [NativeFde]{}
+    native_frames_index(fdes, code, 0)
+    assert_eq(fdes.len(), 1)
+    assert_eq(fdes[0].start, 0x1000)
+    assert_eq(fdes[0].end, 0x1010)
+    frames: NativeFrames{sections: [NativeCode]{code}, fdes: fdes}
+    entry: native_cfi_row(frames, 0x1000) ?? return assert(false, "no row at the entry")
+    assert_eq(entry.register, 7)
+    assert_eq(entry.offset, 8)
+    assert_eq(entry.rules[NATIVE_CFI_RETURN], NATIVE_CFI_SAVED)
+    assert_eq(entry.offsets[NATIVE_CFI_RETURN], -8)
+    assert_eq(entry.rules[6], NATIVE_CFI_SAME)
+    pushed: native_cfi_row(frames, 0x1003) ?? return assert(false, "no row after the push")
+    assert_eq(pushed.register, 7)
+    assert_eq(pushed.offset, 16)
+    assert_eq(pushed.rules[6], NATIVE_CFI_SAVED)
+    assert_eq(pushed.offsets[6], -16)
+    framed: native_cfi_row(frames, 0x100f) ?? return assert(false, "no row in the body")
+    assert_eq(framed.register, 6)
+    assert_eq(framed.offset, 16)
+    assert_eq(native_cfi_row(frames, 0x1010) == None, true)
+    assert_eq(native_cfi_row(frames, 0xfff) == None, true)
+}
+
 #Test("an_unavailable_debugger_is_e2203") {
     diagnostic: NativeDebugError{detail: "the program has no Jet debug information"}.diagnostic()
     assert_eq(diagnostic.code, "E2203")
     assert(diagnostic.what.contains("the program has no Jet debug information"))
+}
+
+// The same FDE but for its instructions: `push rbp` at 0x1000, then
+// DW_CFA_remember_state, CFA = rsp + 32 and rbp back to the CIE's rule
+// over [0x1003, 0x1004), and DW_CFA_restore_state at 0x1004.
+#Test("call_frame_rows_restore_a_register_and_a_remembered_state") {
+    section: [Int]{20, 0, 0, 0, 0, 0, 0, 0, 1, 0x7a, 0x52, 0, 1, 0x78, 0x10, 1, 0x1b, 0x0c, 7, 8, 0x90, 1, 0, 0, 28, 0, 0, 0, 28, 0, 0, 0, 0xe0, 0xef, 0xff, 0xff, 0x10, 0, 0, 0, 0, 0x41, 0x0e, 0x10, 0x86, 0x02, 0x0a, 0x42, 0x0e, 0x20, 0xc6, 0x41, 0x0b, 0, 0, 0, 0, 0, 0, 0}
+    bytes: loop value in section -> U8{value}
+    code: NativeCode{address: 0x2000, bytes: bytes}
+    fdes := [NativeFde]{}
+    native_frames_index(fdes, code, 0)
+    frames: NativeFrames{sections: [NativeCode]{code}, fdes: fdes}
+    pushed: native_cfi_row(frames, 0x1001) ?? return assert(false, "no row after the push")
+    assert_eq(pushed.offset, 16)
+    assert_eq(pushed.rules[6], NATIVE_CFI_SAVED)
+    restored: native_cfi_row(frames, 0x1003) ?? return assert(false, "no row after the restore")
+    assert_eq(restored.register, 7)
+    assert_eq(restored.offset, 32)
+    assert_eq(restored.rules[6], NATIVE_CFI_SAME)
+    assert_eq(restored.offsets[6], 0)
+    assert_eq(restored.rules[NATIVE_CFI_RETURN], NATIVE_CFI_SAVED)
+    remembered: native_cfi_row(frames, 0x1004) ?? return assert(false, "no row after the restored state")
+    assert_eq(remembered.register, 7)
+    assert_eq(remembered.offset, 16)
+    assert_eq(remembered.rules[6], NATIVE_CFI_SAVED)
+    assert_eq(remembered.offsets[6], -16)
 }
 
 // The names a debug image gives types are symbol keys

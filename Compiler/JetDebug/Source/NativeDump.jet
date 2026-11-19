@@ -135,7 +135,7 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
     elf: bytes[header..<header + length]
     image: native_image_read(elf) ?? return Err(NativeDebugError{detail: "the program of `{path}` has no Jet debug information"})
     // A dump's frames open as the image's code opens them.
-    openings: native_openings(image, native_elf_code(elf))
+    openings: native_openings(image, native_elf_codes(elf, ".text"))
     // Each memory section is a span of the dump's bytes, which back them.
     blocks := [NativeBlock]{}
     cut := [NativeCut]{}
