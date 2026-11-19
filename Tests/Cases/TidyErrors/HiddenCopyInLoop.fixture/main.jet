@@ -1,0 +1,13 @@
+// Each turn keeps a snapshot of `counts`, then edits it: the loop shares the
+// map each turn, so every edit clones the whole map (L2511).
+history: fn(keys: [String]) -> [[String:Int]] {
+    counts := [String:Int]{}
+    out := [[String:Int]]{}
+    loop key in keys {
+        out.push(counts.copy())
+        counts[key] = out.len()
+    }
+    out
+}
+
+run: fn() { print(history([String]{"a", "b"}).len()) }
