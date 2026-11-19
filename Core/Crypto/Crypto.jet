@@ -121,9 +121,15 @@ Secret: struct {
     bytes: [U8],
 
     /// The UTF-8 bytes of `text` as secret material.
-    from_text: fn(text: String) -> Secret Never! { Secret{bytes: text.bytes()} }
+    from_text: fn(text: String) -> Secret Never! { Secret.from_bytes(text.bytes()) }
 
-    from_bytes: fn(bytes: [U8]) -> Secret Never! { Secret{bytes: bytes} }
+    /// `bytes` as secret material. While the Secret lives, a crash dump
+    /// zeroes every run of its bytes and a process end wipes them.
+    from_bytes: fn(bytes: [U8]) -> Secret Never! {
+        secret := Secret{bytes: bytes}
+        core.crypto.__secret_keep(secret.bytes)
+        secret
+    }
 
     // Configuration codecs construct the nominal secret from text.
     // There is deliberately no Encode implementation that could reveal its bytes.
@@ -356,7 +362,7 @@ hmac_sha256: fn(key: [U8], data: [U8]) -> [U8] Never! {
 hkdf_sha256: fn(ikm: [U8], salt: [U8], info: [U8], len: Int) -> Secret CryptoError! {
     if len < 0 || len > 8160 -> return Err(CryptoError.Length)
     out: hashes.hkdf_with(hashes.SHA256Hash{}, .SHA256, salt, ikm, info, len) ?? return Err(CryptoError.Length)
-    Ok(Secret{bytes: out})
+    Ok(Secret.from_bytes(out))
 }
 
 /// PBKDF2-HMAC-SHA256 (RFC 8018 section 5.2).
@@ -795,7 +801,7 @@ unwrap: fn(recipient: X25519SecretKey, wrapped: WrappedKey) -> Secret CryptoErro
     body: slice_u8(raw, 92, raw.len())
     plain: xchacha_open(kek.bytes, nonce.bytes, wrap_aad, body) ?? return Err(CryptoError.OpenFailed)
     if plain.len() != key_len -> return Err(CryptoError.OpenFailed)
-    Ok(Secret{bytes: plain})
+    Ok(Secret.from_bytes(plain))
 }
 
 password_hash: fn(password: Secret) -[Rand]> PasswordHash CryptoError! {

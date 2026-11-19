@@ -448,14 +448,14 @@ reader: fn(identity: crypto.X25519SecretKey, fixed: [U8], header: [U8], total: I
     shared: crypto.x25519(identity, crypto.X25519PublicKey{bytes: ephemeral}) ?? return Err(.OpenFailed)
     kek: derive_key(shared, file_id, info("JETC2 wrap key", ephemeral, public), 32) ?? return Err(.OpenFailed)
     wrap_nonce: derive_key(shared, file_id, info("JETC2 wrap nonce", ephemeral, public), 24) ?? return Err(.OpenFailed)
-    key: crypto.Secret{
-        bytes: open_wrap(
+    key: crypto.Secret.from_bytes(
+        open_wrap(
             kek,
             wrap_nonce,
             bytes(header, start + 48, start + STANZA),
             wrap_aad(fixed, bytes(header, 0, BASE), bytes(header, start, start + 16), public),
         ),
-    }
+    )
     if !matched || secret_length(key) != 32 -> return Err(.OpenFailed)
     opened: open_key(key, nonce(prefix, 0), bytes(header, length - TAG, length), header_aad(fixed, bytes(header, 0, length - TAG)))
     if opened.len() != 0 -> return Err(.OpenFailed)
