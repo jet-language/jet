@@ -1,7 +1,8 @@
 # An image's zone sites test no runtime word: each is a jump over its call
-# that the image's site table lists, which `main` registers with the runtime
-# (jet_perf_zone_table) before the entry runs. Off, the program runs past
-# every site; `jet perf run` patches them on and records every zone.
+# that the image's `jet.zone_sites` part note lists, which the runtime reads
+# when zones turn on, so nothing registers them before the entry runs.
+# Off, the program runs past every site; `jet perf run` patches them on and
+# records every zone.
 fixture: ZonesStripSettingLeavesNoSite.fixture
 env: NO_COLOR=1
 step: jet build main.jet
@@ -10,9 +11,12 @@ step: {work}/.jet/build/main
 exit: 0
 stdout: = "total 166\n"
 when tool objdump
-step: objdump -d .jet/build/main
-exit: 0
-stdout: ~ "<jet_perf_zone_table>" # the site table registers
+step: sh -c 'objdump -d .jet/build/main | grep -c "<jet_perf_zone_table>"'
+exit: 1
+stdout: = "0\n" # nothing registers a site table: the note lists the sites
+step: sh -c 'objdump -d .jet/build/main | grep -c "<jet_perf_zone_sites>:"'
+exit: 1
+stdout: = "0\n" # and the program holds no table's code
 step: sh -c 'objdump -d .jet/build/main | grep -c "(%rip),%r11 .*<jet_rt_perf_zones>"'
 exit: 1
 stdout: = "0\n" # no site loads the zones word to test it: only the runtime's own code names it

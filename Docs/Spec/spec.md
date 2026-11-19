@@ -6160,12 +6160,14 @@ flags write `--backtrace=brief` and `--dead-code=keep`. Example:
 
 `zones` (stock `keep`) says whether the image keeps its `core.perf` zone
 sites. Under `keep` each zone open and close is a jump over its call, which
-the image lists in a table of sites; `jet perf run` and `jet perf attach`
-patch every listed jump into a test that falls through to the call, so a
-zone costs one taken jump until a profiler records it. The link lays the
-runtime code that only zone calls reach after all other code, in a load
-segment of its own, so a run that records no zone maps none of it; the code
-that patches the sites is reached only once a profiler turns zones on.
+the link lists in a note of the image (the `jet.zone_sites` part), so no
+code runs at startup to register them; `jet perf run` and `jet perf attach`
+read the note and patch every listed jump into a test that falls through
+to the call, so a zone costs one taken jump until a profiler records it.
+The link lays the runtime code that only zone calls reach after all other
+code, in a load segment of its own, so a run that records no zone maps none
+of it; the code that patches the sites is reached only once a profiler
+turns zones on.
 Where the system refuses to rewrite the program's code, zones stay off and
 the trace says why. `strip` leaves the zone sites out: the image never
 records a zone, and no profiler can turn them on. Frame marks, plots and
@@ -6173,7 +6175,8 @@ records a zone, and no profiler can turn them on. Frame marks, plots and
 and the flag writes `--zones=strip`. Cases:
 [`Tests/Cases/Perf/zones_strip_setting_leaves_no_site.case`](../../Tests/Cases/Perf/zones_strip_setting_leaves_no_site.case),
 [`Tests/Cases/Perf/zone_sites_are_patched_jumps.case`](../../Tests/Cases/Perf/zone_sites_are_patched_jumps.case),
-[`Tests/Cases/Perf/zone_only_code_is_laid_after_hot_code.case`](../../Tests/Cases/Perf/zone_only_code_is_laid_after_hot_code.case).
+[`Tests/Cases/Perf/zone_only_code_is_laid_after_hot_code.case`](../../Tests/Cases/Perf/zone_only_code_is_laid_after_hot_code.case),
+[`Tests/Cases/Perf/zone_sites_add_only_their_spans_to_hot_code.case`](../../Tests/Cases/Perf/zone_sites_add_only_their_spans_to_hot_code.case).
 
 `checked_alloc` (stock `false`) holds a Bool. With `true` the program links
 the runtime's checked memory allocator and runs with it from its first

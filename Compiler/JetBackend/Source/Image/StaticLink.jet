@@ -83,6 +83,15 @@ LINK_BUILD_ID_SIZE: 20
 
 LINK_BUILD_ID_NOTE_SIZE: 36
 
+// The part note (ELF.jet x64_executable_add_parts) a link writes of the
+// image's patchable zone sites (link_zone_note), which the runtime reads
+// when zones turn on (JetRuntime PerfSamples.jet perf_zone_image_table), so
+// no code registers them: its name, which NUL-padded to eight bytes takes
+// LINK_ZONE_LABEL_SIZE.
+LINK_ZONE_PART: "jet.zone_sites"
+
+LINK_ZONE_LABEL_SIZE: 16
+
 // Output classes, in image order. LINK_DROP sections never reach the image;
 // LINK_DISCARD sections belong to a COMDAT group loaded earlier.
 LINK_DISCARD: -2
@@ -1884,7 +1893,7 @@ link_in_spans: fn(spans: [Int], offset: Int) -> Bool Never! {
     low > 0 && offset < spans[2 * low - 1]
 }
 
-#Test("code only a zone site's skipped span reaches is laid after all other code") {
+#Test("code only a zone site's skipped span reaches is laid after all other code, and a part note names the site") {
     // `entry`: a zone site's jump over its call to `cold`, then a call to
     // `hot`, which calls `after`; the input order is entry, hot, cold, after.
     entry_code: [U8]{0xe9, 5, 0, 0, 0, 0xe8, 0, 0, 0, 0, 0xe8, 0, 0, 0, 0, 0xc3}
@@ -1918,14 +1927,29 @@ link_in_spans: fn(spans: [Int], offset: Int) -> Bool Never! {
     loop row in rows -> laid.push(c.live_secs[row])
     assert_eq(laid, [Int]{sections[0], sections[1], sections[3], sections[2]})
     // Packed, `cold` starts a segment of its own a page past the rest.
-    packed: link_layout(c, false, true)
+    packed: link_layout(c, false, true, false)
     assert_eq(packed.hot_end, c.live_addr[rows[2]] + 1)
     assert_eq(packed.cold_start, link_align(packed.hot_end, LINK_PAGE) + LINK_PAGE)
     assert_eq(c.live_addr[rows[3]], packed.cold_start)
     assert_eq(packed.text_end, packed.cold_start + 1)
-    flat: link_layout(c, false, false)
+    flat: link_layout(c, false, false, false)
     assert_eq(flat.cold_start, 0)
     assert_eq(packed.phnum, flat.phnum + 1)
+    // With the part note of the image's one zone site (link_zone_write): one
+    // more program header, the note past them, and its table's one entry a
+    // rel32 from its end to `entry`'s first byte, the site's `jmp`.
+    noted: link_layout(c, false, true, true)
+    assert_eq(noted.phnum, packed.phnum + 1)
+    assert_eq(noted.zone_sites, 1)
+    assert_eq(noted.zone_note_at, link_align(c.base + LINK_EHDR_SIZE + LINK_PHDR_SIZE * noted.phnum, 8))
+    note := [U8]{}
+    link_zone_write(c, note, noted, noted.zone_note_at)
+    assert_eq(note.len(), link_zone_note_size(1))
+    assert_eq(loader_u32(note, 8), ELF64_JET_PART_NOTE)
+    assert_eq(String.from_bytes(note[16..<30]) ?? "", LINK_ZONE_PART)
+    assert_eq(loader_u32(note, 32), 1)
+    assert_eq(loader_u32(note, 40), (c.live_addr[rows[0]] - (noted.zone_note_at + 44)) & 0xffffffff)
+    assert_eq(loader_u32(note, 44), 0)
 }
 
 // One CIE per distinct record, written only when a kept FDE names it. A kept
@@ -2192,13 +2216,18 @@ LinkLayout: struct {
     // The build-id note's address, right after the program headers; 0 when
     // the image has none.
     note_at: Int,
+    // The zone-site part note's address (link_zone_note), past the build-id
+    // note, and how many sites it names; 0 when the image's code has none.
+    zone_note_at: Int{0},
+    zone_sites: Int{0},
     // Keeps the layout from deriving comparisons over its nested lists.
     notes: [Int:Int],
 }
 
 // The image's layout at the link base, with a build-id note when `note`,
-// packed when `packed` (LinkLayout).
-link_layout: fn(c: &LinkContext, note: Bool, packed: Bool) -> LinkLayout Never! {
+// packed when `packed` (LinkLayout), with the part note of its zone sites
+// when `zones` and its code has any.
+link_layout: fn(c: &LinkContext, note: Bool, packed: Bool, zones: Bool) -> LinkLayout Never! {
     order: link_order(c)
     has_tls: order[LINK_TDATA].len() + order[LINK_TBSS].len() > 0
     commons := false
@@ -2216,10 +2245,13 @@ link_layout: fn(c: &LinkContext, note: Bool, packed: Bool) -> LinkLayout Never! 
     loop row in order[LINK_TEXT] {
         if packed && row < c.cold.len() && c.cold[row] -> cold.push(row) else -> hot.push(row)
     }
-    phnum: 3 + (if has_rw -> 1 else -> 0) + (if has_tls -> 1 else -> 0) + (if note -> 1 else -> 0) + (if cold.is_empty() -> 0 else -> 1)
+    sites: if zones -> link_zone_count(c) else -> 0
+    phnum: 3 + (if has_rw -> 1 else -> 0) + (if has_tls -> 1 else -> 0) + (if note -> 1 else -> 0) + (if cold.is_empty() -> 0 else -> 1) + (if sites > 0 -> 1 else -> 0)
     addr := c.base + LINK_EHDR_SIZE + LINK_PHDR_SIZE * phnum
     note_at: if note -> addr else -> 0
     if note -> addr += LINK_BUILD_ID_NOTE_SIZE
+    zone_note_at: if sites > 0 -> link_align(addr, 8) else -> 0
+    if sites > 0 -> addr = zone_note_at + link_zone_note_size(sites)
     addr = link_place(c, order[LINK_RODATA], addr)
     r_end: link_place_eh(c, addr)
     text_start: link_align(r_end, LINK_PAGE)
@@ -2286,6 +2318,8 @@ link_layout: fn(c: &LinkContext, note: Bool, packed: Bool) -> LinkLayout Never! 
         preinit_end: preinit_end,
         bss_start: file_end,
         note_at: note_at,
+        zone_note_at: zone_note_at,
+        zone_sites: sites,
         notes: [Int:Int]{},
         packed: packed,
         rw_shift: if packed -> rw_start - r_end else -> 0,
@@ -2878,6 +2912,7 @@ link_write: fn(c: &LinkContext, l: LinkLayout, entry: Int, pieces: &LinkPieces) 
     if l.note_at != 0 {
         link_phdr(out, l.note_at - c.base, 4, 4, l.note_at, LINK_BUILD_ID_NOTE_SIZE, LINK_BUILD_ID_NOTE_SIZE, 4)
     }
+    link_zone_phdr(out, l, c.base)
     // PT_GNU_STACK: the stack is not executable.
     elf64_u32(out, 0x6474e551)
     elf64_u32(out, 6)
@@ -2885,6 +2920,7 @@ link_write: fn(c: &LinkContext, l: LinkLayout, entry: Int, pieces: &LinkPieces) 
     elf64_u64(out, 16)
     base: c.base
     if l.note_at != 0 -> link_build_id_note(out)
+    link_zone_write(c, out, l, base)
     link_write_contents(c, out, l, base, pieces)
     out
 }
@@ -3314,6 +3350,65 @@ link_write_sections: fn(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkD
     headers.push(LinkSectionHeader{name: ".strtab", kind: 3, flags: 0, addr: 0, offset: strtab_at, size: strtab.len(), link: 0, info: 0, align: 1, entry_size: 0})
     shoff: link_write_section_headers(out, 0, headers)
     link_elf_sections(out, shoff, headers.len() + 2)
+}
+
+// How many patchable zone sites the live code holds: one per span a site
+// skips (c.zone_spans).
+link_zone_count: fn(c: LinkContext) -> Int Never! {
+    count := 0
+    loop s in c.live_secs {
+        spans: c.zone_spans.get(s) ?? next
+        count += spans.len().div_euclid(2)
+    }
+    count
+}
+
+// The byte length of the zone-site part note of `sites` sites
+// (link_zone_note).
+link_zone_note_size: fn(sites: Int) -> Int Never! { 16 + LINK_ZONE_LABEL_SIZE + 8 + 8 * sites }
+
+// The PT_NOTE row of layout `l`'s zone-site part note at file offset
+// address minus `base`, appended to `out`; nothing when it has none.
+link_zone_phdr: fn(out: &[U8], l: LinkLayout, base: Int) Never! {
+    if l.zone_note_at == 0 {
+        return
+    }
+    size: link_zone_note_size(l.zone_sites)
+    link_phdr(out, l.zone_note_at - base, 4, 4, l.zone_note_at, size, size, 8)
+}
+
+// Layout `l`'s zone-site part note, appended to `out` (whose first byte is
+// the one at address `origin`) from its address; nothing when it has none.
+// It is a part as x64_executable_add_parts writes one (ELF.jet): owner
+// "Jet", type ELF64_JET_PART_NOTE, its descriptor LINK_ZONE_PART
+// NUL-padded to LINK_ZONE_LABEL_SIZE, then the site table the runtime
+// patches (JetRuntime PerfSamples.jet perf_zone_table_patch): the site
+// count as a word, then per site a rel32 from the end of its field to the
+// site's `jmp`, which is the 5 bytes before the span it skips, and a zero
+// offset. The note and the code load together, so the rel32s hold wherever
+// the image is mapped.
+link_zone_write: fn(c: LinkContext, out: &[U8], l: LinkLayout, origin: Int) Never! {
+    if l.zone_note_at == 0 {
+        return
+    }
+    link_pad_to(out, l.zone_note_at - origin, 0)
+    elf64_u32(out, 4)
+    elf64_u32(out, LINK_ZONE_LABEL_SIZE + 8 + 8 * l.zone_sites)
+    elf64_u32(out, ELF64_JET_PART_NOTE)
+    loop byte in ([U8]{U8{74}, U8{101}, U8{116}, U8{0}}) -> out.push(byte)
+    label: LINK_ZONE_PART.bytes()
+    out.extend(label[0..<label.len()])
+    loop _ in label.len()..<LINK_ZONE_LABEL_SIZE -> out.push(U8{0})
+    elf64_u64(out, l.zone_sites)
+    field := l.zone_note_at + 16 + LINK_ZONE_LABEL_SIZE + 8
+    loop (row, s) in c.live_secs {
+        spans: c.zone_spans.get(s) ?? next
+        loop k in 0..<spans.len().div_euclid(2) {
+            elf64_u32(out, c.live_addr[row] + spans[2 * k] - 5 - (field + 4))
+            elf64_u32(out, 0)
+            field += 8
+        }
+    }
 }
 
 // The build-id note with a zero id, appended to `out`.
@@ -3848,8 +3943,9 @@ link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &
     // the file and save only the pages it alone filled.
     c.eh_debug = request == .None && split && link_eh_unloaded(c)
     // A plain executable's layout is packed (LinkLayout); a resident one's
-    // segments keep their file offsets at their addresses.
-    layout: link_layout(c, split, request == .None)
+    // segments keep their file offsets at their addresses. Either names its
+    // zone sites in a part note (link_zone_write).
+    layout: link_layout(c, split, request == .None, true)
     if request != .None {
         if layout.text_start <= 0 || layout.text_end < layout.text_start || layout.mem_end > 9223372036854775807 {
             return link_resident_failure([String]{"resident executable layout is outside the native address range"})

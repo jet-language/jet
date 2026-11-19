@@ -337,7 +337,7 @@ perf_spans_fd := I64{-1}
 // Nonzero while zones are recorded (perf_zones_set). A compiled zone site
 // (JetIR X64Select.jet ir_x64_zone_site) of an image's code is a `jmp`
 // over its call that the runtime patches while zones are on
-// (jet_perf_zone_table); a site of code no table lists tests this word
+// (perf_zone_tables_turn); a site of code no table lists tests this word
 // through the runtime's data symbol jet_rt_perf_zones. Either calls
 // jet_perf_zone_open and _close only then.
 perf_zones_on := I64{0}
@@ -1106,9 +1106,10 @@ PERF_ZONE_PLOT: I64{3}
 PERF_ZONE_REFUSED: I64{4}
 
 // The first zone-site table registered (jet_perf_zone_table), 0 until one
-// is: a program's own, which its `main` registers, so registering it while
-// zones are off is one store. Further tables (the libraries of an image
-// with more than one part) go on perf_zone_tables.
+// is: a library's, so registering it while zones are off is one store.
+// Further tables (an image with more than one library) go on
+// perf_zone_tables. A program's own sites register nothing: its image names
+// them in a part note (perf_zone_image_table).
 perf_zone_table_first := I64{0}
 
 // The page of further zone-site tables, 0 until the second registers: the
@@ -1144,14 +1145,13 @@ PERF_ZONE_SITE_ON: I64{169}
 
 // Registers the zone-site table at `table` (JetBackend Image/Object.jet
 // x64_object_zone_sites): its site count, then per site a rel32 to its
-// function and the site's offset there. A program's `main` registers its
-// own before the entry runs, a library's constructor at load; the sites
-// turn on at once when zones already are. Registrations never overlap:
-// constructors run one at a time, and `main` registers before its entry
-// can start a thread. A turn of zones may run meanwhile (perf_zones_set):
-// the fence orders the table's store before the zones word's read, as the
-// turn orders the word's store before the tables' read, so a turn and a
-// registration racing see each other at least once.
+// function and the site's offset there. A library's constructor registers
+// its own at load; the sites turn on at once when zones already are.
+// Registrations never overlap: constructors run one at a time. A turn of
+// zones may run meanwhile (perf_zones_set): the fence orders the table's
+// store before the zones word's read, as the turn orders the word's store
+// before the tables' read, so a turn and a registration racing see each
+// other at least once.
 #Export(c) jet_perf_zone_table: fn(table: I64) {
     if (perf_zone_table_first == I64{0}) {
         #Unsafe("registrations never overlap (see above)") { perf_zone_table_first = table }
@@ -1217,11 +1217,12 @@ perf_zone_roots_take: fn() {
     }
 }
 
-// Turns zones on (`on` nonzero) or off: the zones word, then every
-// registered site (perf_zone_tables_turn). The observation start, before
-// the entry, and then the writer it starts turn zones, one at a time, so
-// the first turn allocates the patches' lock alone. The fence orders the
-// word's store before the tables' read (see jet_perf_zone_table).
+// Turns zones on (`on` nonzero) or off: the zones word, then every site of
+// the image's part note and of each registered table
+// (perf_zone_tables_turn). The observation start, before the entry, and
+// then the writer it starts turn zones, one at a time, so the first turn
+// allocates the patches' lock alone. The fence orders the word's store
+// before the tables' read (see jet_perf_zone_table).
 perf_zones_set: fn(on: I64) {
     perf_zone_roots_take()
     if (perf_zone_lock == I64{0}) {
@@ -1241,7 +1242,8 @@ perf_zones_set: fn(on: I64) {
     perf_zone_tables_turn()
 }
 
-// Patches every registered site to the zones word as it stands under the
+// Patches every site of the image's part note (perf_zone_image_table) and
+// of each registered table to the zones word as it stands under the
 // patches' lock: of a turn and a registration racing, the later word wins.
 // Where the system refuses to rewrite code, zones on says so
 // (perf_zones_refused).
@@ -1251,8 +1253,10 @@ perf_zone_tables_turn: fn() {
     now_on: perf_zones_on != I64{0}
     want: if (now_on) -> PERF_ZONE_SITE_ON else -> PERF_ZONE_SITE_OFF
     patched := true
+    image: perf_zone_image_table()
+    if (image != I64{0}) { patched = perf_zone_table_patch(image, want) }
     first: perf_zone_table_first
-    if (first != I64{0}) { patched = perf_zone_table_patch(first, want) }
+    if (first != I64{0} && patched) { patched = perf_zone_table_patch(first, want) }
     tables: perf_zone_tables
     count: if (tables == I64{0}) -> I64{0} else -> sync_load(tables)
     index := I64{0}
@@ -1262,6 +1266,20 @@ perf_zone_tables_turn: fn() {
     }
     sync_thread_unlock(lock)
     if (!patched && now_on) { perf_zones_refused() }
+}
+
+// The zone-site table of the image's own code, which its link names in a
+// part note (JetBackend Image/StaticLink.jet link_zone_write) in the form a
+// registered table takes; 0 when the image has none, or when the note is
+// too short for the count it states.
+perf_zone_image_table: fn() -> I64 {
+    name: rt_static_text("jet.zone_sites")
+    note: host_image_part(name)
+    if (note == I64{0}) { return I64{0} }
+    table: wrapping(wrapping(note + I64{16}) + host_image_part_label(name))
+    size: host_image_part_length(note, name)
+    if (size < I64{8} || rt_text_word(table) > (size - I64{8}) >> I64{3}) { return I64{0} }
+    table
 }
 
 // Writes opcode byte `want` into every site of the zone-site table at
