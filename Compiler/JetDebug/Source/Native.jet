@@ -2672,7 +2672,8 @@ NativeSession: struct {
 
     // The paused facts at the current stop: the innermost Jet frame, its
     // locals, and the Jet call stack outermost first. None when no Jet frame
-    // is on the stack.
+    // is on the stack. A dump's #Secret values read redacted, as its
+    // `locals` shows them.
     snapshot: fn(&self) -> DebugSnapshot? NativeDebugError! {
         frames: self.backtrace() ?? return Err(err)
         stack := [FrameSnapshot]{}
@@ -2684,7 +2685,8 @@ NativeSession: struct {
         if stack.len() == 0 -> return Ok(None)
         top: stack[stack.len() - 1]
         values := [ValueSnapshot]{}
-        locals: self.locals() ?? return Err(err)
+        locals := self.locals() ?? return Err(err)
+        if self.dump != None -> native_dump_redact(locals)
         loop local in locals {
             values.push(ValueSnapshot{name: local.name, type_name: local.type_name, value: local.value})
         }

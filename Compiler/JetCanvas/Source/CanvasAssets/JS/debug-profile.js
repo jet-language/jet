@@ -95,13 +95,18 @@
       const line = overlay && overlay.active_line ? " · line " + overlay.active_line : "";
       state.textContent = (debugSessionId ? "Paused" : overlay ? "Finished" : "No session") + line;
     }
-    const recorded = !!(debugSessionInfo && debugSessionInfo.tier === "native-recorded");
-    const reverse = debugViewElement("debug-view-reverse");
-    if (reverse) reverse.disabled = !recorded;
-    for (const id of ["debug-view-continue", "debug-view-next", "debug-view-step", "debug-view-finish", "debug-view-stop"]) {
-      const button = debugViewElement(id);
-      if (button) button.disabled = !debugSessionId;
+    // Reverse steps and `why` run in a replay; a dump runs nothing.
+    const tier = debugSessionId && debugSessionInfo ? debugSessionInfo.tier : "";
+    for (const id of ["debug-view-reverse", "debug-view-reverse-step", "debug-view-reverse-finish", "debug-view-reverse-continue", "debug-view-why"]) {
+      const control = debugViewElement(id);
+      if (control) control.disabled = tier !== "native-recorded";
     }
+    for (const id of ["debug-view-continue", "debug-view-next", "debug-view-step", "debug-view-finish"]) {
+      const button = debugViewElement(id);
+      if (button) button.disabled = !debugSessionId || tier === "native-dump";
+    }
+    const stop = debugViewElement("debug-view-stop");
+    if (stop) stop.disabled = !debugSessionId;
     // Source: the whole entry from the graph document, or the overlay's
     // window around the stop.
     let firstLine = 1;
@@ -309,16 +314,67 @@
       const element = debugViewElement(id);
       if (element) element.addEventListener("click", handler);
     };
-    bind("debug-view-run", () => {
+    // The replay and dump controls, beside the run controls: reverse steps
+    // and `why` for a replayed session, and opening a `jet run --record`
+    // recording or a `.jetdump` as a new session.
+    const head = debugViewElement("debug-head");
+    if (head && !debugViewElement("debug-view-reverse-step")) {
+      const before = debugViewElement("debug-view-state");
+      const add = (tag, id, text, title) => {
+        const element = document.createElement(tag);
+        element.id = id;
+        if (tag === "input") {
+          element.placeholder = text;
+          element.setAttribute("aria-label", title);
+        } else {
+          element.textContent = text;
+          element.title = title;
+        }
+        head.insertBefore(element, before && before.parentNode === head ? before : null);
+      };
+      add("button", "debug-view-reverse-step", "Back step", "Step backward, into calls (reverse-step)");
+      add("button", "debug-view-reverse-finish", "Back out", "Step backward out to the call (reverse-finish)");
+      add("button", "debug-view-reverse-continue", "Back continue", "Run backward to the previous breakpoint (reverse-continue)");
+      add("input", "debug-view-why", "why <name>", "Why a value has its value");
+      add("input", "debug-view-recording", "recording NAME or .jetproof-replay", "Recording to replay");
+      add("button", "debug-view-replay", "Replay", "Debug the entry replaying a jet run --record recording");
+      add("input", "debug-view-dump", ".jetdump path", "Dump to open");
+      add("button", "debug-view-open-dump", "Open dump", "Debug a .jetdump of the entry");
+    }
+    // A new session on `open`'s tier, ending the one shown.
+    const openSession = (open) => {
       if (debugSessionId) stopDebug();
-      runDebug([]);
-    });
+      runDebug([], open);
+    };
+    const valueOf = (id) => {
+      const input = debugViewElement(id);
+      return input ? input.value.trim() : "";
+    };
+    bind("debug-view-run", () => openSession(null));
     bind("debug-view-continue", () => debugViewCommand(["continue"]));
     bind("debug-view-next", () => debugViewCommand(["next"]));
     bind("debug-view-step", () => debugViewCommand(["step"]));
     bind("debug-view-finish", () => debugViewCommand(["finish"]));
     bind("debug-view-stop", () => stopDebug());
     bind("debug-view-reverse", () => debugViewCommand(["reverse-next"]));
+    bind("debug-view-reverse-step", () => debugViewCommand(["reverse-step"]));
+    bind("debug-view-reverse-finish", () => debugViewCommand(["reverse-finish"]));
+    bind("debug-view-reverse-continue", () => debugViewCommand(["reverse-continue"]));
+    bind("debug-view-replay", () => {
+      const recording = valueOf("debug-view-recording");
+      if (recording) openSession({ tier: "native-recorded", recording });
+    });
+    bind("debug-view-open-dump", () => {
+      const dump = valueOf("debug-view-dump");
+      if (dump) openSession({ tier: "native-dump", dump });
+    });
+    const whyInput = debugViewElement("debug-view-why");
+    if (whyInput) whyInput.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter" || !whyInput.value.trim()) return;
+      const name = whyInput.value.trim();
+      whyInput.value = "";
+      debugViewCommand(["why " + name]);
+    });
     const consoleInput = debugViewElement("debug-console-input");
     if (consoleInput) consoleInput.addEventListener("keydown", (ev) => {
       if (ev.key !== "Enter" || !consoleInput.value.trim()) return;

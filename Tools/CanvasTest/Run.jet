@@ -30,6 +30,15 @@
 //       and the locals in one answer, and a profile request profiles the
 //       entry into timeline lanes, zooms into half of its window, and refuses
 //       a path that is not a trace.
+//   native-debug-replay [--replay-source P] [--dump-source P]
+//       `jet dev --canvas` replays a `jet run --record` recording of the
+//       replay source in the Debug view: a `native-recorded` session
+//       stops at a breakpoint, answers `why`, goes back with
+//       reverse-continue and reverse-next, and refuses a recording that is
+//       not there or a tier without one. Then it opens the `.jetdump` that
+//       `jet run --observe` of the dump source writes: a `native-dump`
+//       session at the stopping line, with the dump's locals (its Secret
+//       redacted) and tasks, that runs nothing.
 //   driver-lifecycle [COUNT]
 //       COUNT (4) Chromium sessions launch with isolated profiles, each answers
 //       on BiDi and CDP, and each closes for good.
@@ -59,6 +68,7 @@ run: fn() {
         "native-serve" -> native_serve()
         "native-edit" -> native_edit()
         "native-debug-panels" -> native_debug_panels()
+        "native-debug-replay" -> native_debug_replay(rest)
         "driver-lifecycle" -> driver_lifecycle(rest)
         "gecko-lifecycle" -> gecko_lifecycle()
         else -> usage("unknown mode: {mode}")
@@ -66,7 +76,7 @@ run: fn() {
 }
 
 usage: fn(message: String) -> Never {
-    process.fail(2, "{message}\nusage: Run.jet scenario --scenario N --port P [--browser B] [--session S] [--out-dir D] [--seed N] [--program-target T]\n       Run.jet native-lifecycle | native-serve | native-edit | native-debug-panels | driver-lifecycle [COUNT] | gecko-lifecycle")
+    process.fail(2, "{message}\nusage: Run.jet scenario --scenario N --port P [--browser B] [--session S] [--out-dir D] [--seed N] [--program-target T]\n       Run.jet native-lifecycle | native-serve | native-edit | native-debug-panels | native-debug-replay [--replay-source P] [--dump-source P] | driver-lifecycle [COUNT] | gecko-lifecycle")
 }
 
 fail: fn(message: String) -> Never { process.fail(1, "FAIL {message}") }
@@ -611,6 +621,187 @@ zone_labels: fn(tree: Dyn) -> [String] {
     labels := [String]{}
     loop mark in items(at(tree, "canvas.lanes.1.marks")) -> labels.push(text(at(mark, "label")))
     labels
+}
+
+// --- native jet dev --canvas Debug replays and dumps ---------------------------------
+
+native_debug_replay: fn(args: [String]) {
+    jet: process.env_get("JET_BIN") ?? usage("JET_BIN is required")
+    program: option(args, "--replay-source", "", "Tests/Cases/Debug/ReplayReverse.fixture/prog.jet")
+    crash: option(args, "--dump-source", "", "Tests/Cases/Debug/CrashDumpOpensTyped.fixture/crash.jet")
+    // The replayed program, with its package's authority, recorded once.
+    replay_dir: files.temp_dir("canvas-replay") ?? fail("cannot make a scratch folder: {err}")
+    entry: "{replay_dir.path}/main.jet"
+    files.write(entry, files.read(program) ?? fail("cannot read {program}: {err}")) ?? fail("cannot write {entry}: {err}")
+    package: "{files.dirname(program)}/package.jet"
+    files.write("{replay_dir.path}/package.jet", files.read(package) ?? fail("cannot read {package}: {err}")) ?? fail("cannot write the package: {err}")
+    recorded: process.cmd([String]{jet, "run", "--record=canvas", "main.jet"}).cwd(replay_dir.path).stdout(.Capture).stderr(.Capture).run() ?? fail("cannot run jet run --record: {err}")
+    if !recorded.success {
+        fail("jet run --record=canvas main.jet failed: {recorded.output}{recorded.errors}")
+    }
+    server := process.cmd([String]{jet, "dev", entry, "--canvas"})
+        .env("JET_CANVAS_BROWSER", "/definitely/missing/canvas-browser")
+        .stdout(.Capture).stderr(.Capture).spawn() ?? fail("cannot start jet dev: {err}")
+    canvas_url := ""
+    loop line in server.stdout.lines() {
+        if line.starts_with("Canvas: http") {
+            canvas_url = line.slice(8..<line.len()).trim()
+            break
+        }
+    }
+    if canvas_url == "" {
+        server.kill().drop("jet dev already exited")
+        server.wait().drop("the receipt is not needed")
+        fail("jet dev exited before printing its Canvas URL")
+    }
+    if debug_replay(canvas_url) == .Err(problem) {
+        server.kill().drop("jet dev already exited")
+        server.wait().drop("the receipt is not needed")
+        fail(problem.message)
+    }
+    server.kill().drop("the session has answered every request")
+    server.wait().drop("a killed jet dev has no status to check")
+    // The crashing program, run observed once: its stop writes one dump.
+    dump_dir: files.temp_dir("canvas-dump") ?? fail("cannot make a scratch folder: {err}")
+    crash_entry: "{dump_dir.path}/crash.jet"
+    files.write(crash_entry, files.read(crash) ?? fail("cannot read {crash}: {err}")) ?? fail("cannot write {crash_entry}: {err}")
+    observed: process.cmd([String]{jet, "run", "--observe", "crash.jet"}).cwd(dump_dir.path).stdout(.Capture).stderr(.Capture).run() ?? fail("cannot run jet run --observe: {err}")
+    if observed.success -> fail("jet run --observe crash.jet must stop at its panic")
+    dumps: files.list_dir("{dump_dir.path}/.jet/dumps", matching: "*.jetdump") ?? fail("the observed stop must write a dump: {err}\n{observed.errors}")
+    if dumps.len() != 1 -> fail("one observed stop must write one dump, not {dumps.len()}")
+    dumped := process.cmd([String]{jet, "dev", crash_entry, "--canvas"})
+        .env("JET_CANVAS_BROWSER", "/definitely/missing/canvas-browser")
+        .stdout(.Capture).stderr(.Capture).spawn() ?? fail("cannot start jet dev: {err}")
+    dump_url := ""
+    loop line in dumped.stdout.lines() {
+        if line.starts_with("Canvas: http") {
+            dump_url = line.slice(8..<line.len()).trim()
+            break
+        }
+    }
+    if dump_url == "" {
+        dumped.kill().drop("jet dev already exited")
+        dumped.wait().drop("the receipt is not needed")
+        fail("jet dev exited before printing its Canvas URL")
+    }
+    if debug_dump(dump_url, ".jet/dumps/{dumps[0].name}") == .Err(problem) {
+        dumped.kill().drop("jet dev already exited")
+        dumped.wait().drop("the receipt is not needed")
+        fail(problem.message)
+    }
+    dumped.kill().drop("the session has answered every request")
+    dumped.wait().drop("a killed jet dev has no status to check")
+    print("PASS native jet dev --canvas Debug replay and dump: recorded session, why, reverse-continue, reverse-next, refused recordings, dump stop with redacted locals and tasks")
+}
+
+// The replay of main.jet's recording `canvas`: line 20 calls `double`, line
+// 21 adds its result `d` to `total`.
+debug_replay: fn(canvas_url: String) Failure! {
+    token: url_param(canvas_url, "session")
+    revision: canvas_revision(canvas_url, token)
+    debug_url: dev_url(canvas_url, "/__jet_canvas/debug")
+    // The third pass of line 21, where `total` holds the 2 its second pass
+    // wrote.
+    replayed: canvas_post(debug_url, token, debug_request(revision, "main.jet", [{key: String, value: String}]{{key: "tier", value: "native-recorded"}, {key: "recording", value: "canvas"}}, [Int]{21}, [String]{"continue", "continue", "continue", "why total"}))
+    overlay: at(replayed.tree, "canvas.overlay")
+    if replayed.status != 200 || int(at(overlay, "active_line")) != 21 || text(at(replayed.tree, "canvas.session.tier")) != "native-recorded" {
+        return Err(fail_with("a native-recorded session must stop at the breakpoint on line 21: HTTP {replayed.status} {short_text(replayed.body, 800)}"))
+    }
+    said := [String]{}
+    loop line in items(at(overlay, "trace")) -> said.push(text(line))
+    if !said.join("\n").contains("total = 2, set at main.jet:21 in run()") {
+        return Err(fail_with("`why total` must name line 21's write of 2: {said.join(" | ")}"))
+    }
+    session_id: text(at(replayed.tree, "canvas.session.id"))
+    back: canvas_post(debug_url, token, debug_request(revision, "main.jet", [{key: String, value: String}]{{key: "tier", value: "native-recorded"}, {key: "session_id", value: session_id.copy()}}, [Int]{}, [String]{"reverse-continue"}))
+    if back.status != 200 || int(at(back.tree, "canvas.overlay.active_line")) != 21 || !locals_of(at(back.tree, "canvas.overlay")).contains("d=2") {
+        return Err(fail_with("reverse-continue must go back to the second pass of line 21, where d=2: HTTP {back.status} {short_text(back.body, 800)}"))
+    }
+    before: canvas_post(debug_url, token, debug_request(revision, "main.jet", [{key: String, value: String}]{{key: "session_id", value: session_id.copy()}}, [Int]{}, [String]{"reverse-next"}))
+    if before.status != 200 || int(at(before.tree, "canvas.overlay.active_line")) != 20 {
+        return Err(fail_with("reverse-next must go back to line 20: HTTP {before.status} {short_text(before.body, 800)}"))
+    }
+    missing: canvas_post(debug_url, token, debug_request(revision, "main.jet", [{key: String, value: String}]{{key: "recording", value: "missing"}}, [Int]{}, [String]{}))
+    if missing.status != 409 || text(at(missing.tree, "canvas.kind")) != "diagnostic" || !text(at(missing.tree, "canvas.message")).contains("no recording") {
+        return Err(fail_with("a recording that is not there must be refused with its E3622 report: HTTP {missing.status} {short_text(missing.body, 800)}"))
+    }
+    unnamed: canvas_post(debug_url, token, debug_request(revision, "main.jet", [{key: String, value: String}]{{key: "tier", value: "native-recorded"}}, [Int]{}, [String]{}))
+    if unnamed.status != 409 || text(at(unnamed.tree, "canvas.kind")) != "bad_request" {
+        return Err(fail_with("a native-recorded session without a recording must be refused as bad_request: HTTP {unnamed.status} {short_text(unnamed.body, 400)}"))
+    }
+    Ok()
+}
+
+// The dump `dump` of crash.jet, which stopped at the panic on line 9 in
+// check(), called from run() on line 21, holding a Secret `key`.
+debug_dump: fn(canvas_url: String, dump: String) Failure! {
+    token: url_param(canvas_url, "session")
+    revision: canvas_revision(canvas_url, token)
+    debug_url: dev_url(canvas_url, "/__jet_canvas/debug")
+    opened: canvas_post(debug_url, token, debug_request(revision, "crash.jet", [{key: String, value: String}]{{key: "dump", value: dump.copy()}}, [Int]{}, [String]{"continue"}))
+    overlay: at(opened.tree, "canvas.overlay")
+    if opened.status != 200 || int(at(overlay, "active_line")) != 9 || text(at(opened.tree, "canvas.session.tier")) != "native-dump" {
+        return Err(fail_with("a native-dump session must show the stopping line 9: HTTP {opened.status} {short_text(opened.body, 800)}"))
+    }
+    locals: locals_of(overlay)
+    if !locals.contains("count=3") || !locals.contains("total=21") || !locals.contains("key=<redacted>") || opened.body.contains("hunter2") {
+        return Err(fail_with("the dump's locals must be count=3 and total=21 with the Secret redacted: {locals.join(",")}"))
+    }
+    stack := [String]{}
+    loop frame in items(at(overlay, "call_stack")) -> stack.push(text(frame))
+    if stack.len() < 2 || !stack[0].contains("check()") || !stack[1].contains("run()") {
+        return Err(fail_with("the dump's call stack must be check then run: {stack.join(" | ")}"))
+    }
+    tasks := [String]{}
+    loop task in items(at(overlay, "tasks")) -> tasks.push(text(task))
+    if !tasks.join("\n").contains("* task 1  stopped  in check() at crash.jet:9") {
+        return Err(fail_with("the tasks panel must list the stopping task: {tasks.join(" | ")}"))
+    }
+    said := [String]{}
+    loop line in items(at(overlay, "trace")) -> said.push(text(line))
+    if !said.join("\n").contains("A dump doesn't run") {
+        return Err(fail_with("`continue` on a dump must answer that it doesn't run: {said.join(" | ")}"))
+    }
+    Ok()
+}
+
+// The source revision the Canvas session at `canvas_url` names.
+canvas_revision: fn(canvas_url: String, token: String) -> String Failure! {
+    initial: wait_status(dev_url(canvas_url, "/__jet_dev_status"))
+    if text(at(initial, "state")) != "ready" {
+        return Err(fail_with("jet dev --canvas must be ready once its entry checks: {js(initial)}"))
+    }
+    reply: canvas_get(dev_url(canvas_url, "/__jet_canvas/session"), token)
+    revision: text(at(json.parse(reply.body) ?? Dyn.Null, "session.source_revision"))
+    if revision == "" {
+        return Err(fail_with("the session must name its source revision: {short_text(reply.body, 400)}"))
+    }
+    Ok(revision)
+}
+
+// The overlay's locals as `name=value`.
+locals_of: fn(overlay: Dyn) -> [String] {
+    locals := [String]{}
+    loop local in items(at(overlay, "locals")) {
+        locals.push("{text(at(local, "name"))}={text(at(local, "value"))}")
+    }
+    locals
+}
+
+// A schema 1 Canvas debug request of `source_id` at `revision`: its text
+// members `texts`, line breakpoints and commands.
+debug_request: fn(revision: String, source_id: String, texts: [{key: String, value: String}], breakpoints: [Int], commands: [String]) -> String {
+    fields := [{key: String, value: Dyn}]{{key: "schema_version", value: Dyn.Int(1)}, {key: "revision", value: Dyn.Text(revision.copy())}, {key: "source_id", value: Dyn.Text(source_id.copy())}}
+    loop member in texts {
+        fields.push({key: member.key.copy(), value: Dyn.Text(member.value.copy())})
+    }
+    lines := [Dyn]{}
+    loop line in breakpoints -> lines.push(Dyn.Int(line))
+    fields.push({key: "breakpoints", value: Dyn.Array(lines)})
+    said := [Dyn]{}
+    loop command in commands -> said.push(Dyn.Text(command.copy()))
+    fields.push({key: "commands", value: Dyn.Array(said)})
+    js(obj(fields))
 }
 
 // A schema 1 Canvas profile request of main.jet at `revision`: the entry

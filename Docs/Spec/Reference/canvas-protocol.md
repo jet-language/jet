@@ -301,8 +301,10 @@ Requests carry:
 | `source_id` | Optional project-relative source selected in the Files rail. |
 | `revision` | Source revision from the graph document. |
 | `session_id` | Returned by a running response to continue or stop that session. |
-| `tier` | `native-recorded` records one complete run of the compiled program, then navigates that history; `native` keeps one live paused program. Both run on Jet's own native debugger. This jet builds only `native`, the default until recording lands: `native-recorded` and `jet-dev-replay` are refused `unsupported`, and any other tier `bad_request`. Continuations keep the tier. |
-| `commands` | `step`, `next`, `continue`, `finish`, `locals`, `print`, or `backtrace`. |
+| `tier` | `native` (the default) keeps one live paused program; `native-recorded` replays a `jet run --record` recording, as `jet debug --replay` does, so the reverse commands and `why` run; `native-dump` reads a `.jetdump`, as `jet debug <dump>` does, where nothing runs. All run on Jet's own native debugger. A new session's tier follows `recording` or `dump`, and a tier that disagrees with them is refused `bad_request`; `jet-dev-replay` is refused `unsupported`, and any other tier `bad_request`. Continuations keep the tier: one that names another is refused `conflict` and the session kept. |
+| `recording` | Opens a `native-recorded` session on the recording: the NAME of a `jet run --record=NAME` run of the entry, or a project-relative `.jetproof-replay` path. A recording that can't be replayed answers its own report as a `diagnostic`. |
+| `dump` | Opens a `native-dump` session on a `.jetdump` of the entry, a path taken from the entry's directory when relative. A dump of another program is refused `bad_request`. Its `#Secret` locals read redacted. |
+| `commands` | `step`, `next`, `continue`, `finish`, `reverse-step`, `reverse-next`, `reverse-finish`, `reverse-continue`, `why <name>`, `locals`, `print <name>`, `backtrace`, `frame <n>`, `tasks`, `task <n>` or `events`, with the console's short forms. The reverse commands and `why` answer a refusal outside a replay; a dump answers that it doesn't run to every run command. |
 | `breakpoint_spans` | Local source anchors encoded as `start:end`. |
 | `breakpoints` | Optional line breakpoints for clients that already mapped spans. |
 | `watches` | Local names evaluated at the stopped frame. |
@@ -326,8 +328,8 @@ A mismatched tier or source is refused; a stale request returns `conflict` and
 keeps a newer live session. The bounded limits are 32 live sessions, 64
 commands, 128 breakpoints, 32 watches, 32 call-stack frames, and 128 trace
 entries. Build and debugger failures return structured Jet diagnostics and never
-expose host-compiler output. Both tiers run the compiled program under Jet's
-own native debugger, which needs no external tool.
+expose host-compiler output. Every tier runs under Jet's own native debugger,
+which needs no external tool.
 
 The overlay's `source` carries the stopped source around the active line:
 `first_line` and up to 12 `lines` on each side, so the Debug view draws source,
