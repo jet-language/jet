@@ -314,9 +314,12 @@ jet_cli_canvas_debug_open: fn(file: String, source_id: String, revision: String,
         jet_cli_canvas_debug_remove(dir)
         return Err(jet_cli_canvas_debug_unavailable(err))
     }
+    // A recorded tier reruns the recording with the program arguments it was
+    // made with.
+    recorded := [String]{}
     if tier.name == JET_CLI_CANVAS_DEBUG_RECORDED {
         refusal := JetCLIProveRefusal?{None}
-        if jet_cli_debug_replay_env(tier.target, file, dir) == {
+        if jet_cli_debug_replay_env(tier.target, file, dir, recorded) == {
             .Ok(env) -> { live.env = Val(env) }
             .Err(refused) -> { refusal = Val(refused) }
         }
@@ -334,7 +337,7 @@ jet_cli_canvas_debug_open: fn(file: String, source_id: String, revision: String,
     jet_file: cli_files.basename(file)
     jet_lines: src.split("\n").to_list()
     opened := NativeDebugStep?{None}
-    if live.open(jet_file, jet_lines, [String]{}) == {
+    if live.open(jet_file, jet_lines, recorded) == {
         .Ok(step) -> { opened = step }
         .Err(failure) -> {
             live.close()
