@@ -86,14 +86,14 @@ BrowserTraceRelay: struct {
         expected: [String]{"class", "clock_ns", "duration_ns", "start_ns", "symbol"}
         if keys != expected -> return Err(BrowserTraceRecordError.Malformed)
         query: "?{text}"
-        class: query_param(query, "class") ?? return Err(BrowserTraceRecordError.Malformed)
-        symbol: query_param(query, "symbol") ?? return Err(BrowserTraceRecordError.Malformed)
+        class: devserver_query_param(query, "class") ?? return Err(BrowserTraceRecordError.Malformed)
+        symbol: devserver_query_param(query, "symbol") ?? return Err(BrowserTraceRecordError.Malformed)
         if (class != "event" && class != "wasm" && class != "dom") || !browser_trace_symbol_ok(symbol) {
             return Err(BrowserTraceRecordError.Malformed)
         }
-        start: browser_trace_number(query_param(query, "start_ns"))
-        duration: browser_trace_number(query_param(query, "duration_ns"))
-        clock: browser_trace_number(query_param(query, "clock_ns"))
+        start: browser_trace_number(devserver_query_param(query, "start_ns"))
+        duration: browser_trace_number(devserver_query_param(query, "duration_ns"))
+        clock: browser_trace_number(devserver_query_param(query, "clock_ns"))
         if start > clock || duration > clock - start {
             return Err(BrowserTraceRecordError.Malformed)
         }
@@ -138,7 +138,7 @@ browser_trace_request_path: fn(pid: Int) -> String {
 browser_trace_remove_quietly: fn(path: String) {
     if browser_trace_files.remove(path) == {
         .Err(_) -> {}
-        else -> {}
+        .Ok(_) -> {}
     }
 }
 
@@ -153,7 +153,7 @@ browser_trace_take_request: fn() -> Bool BrowserTraceError! {
     raw: browser_trace_secure_read(path, 256, "browser trace request")
     parts: raw.trim().split("\t").to_list()
     current: browser_trace_process_start(pid) ?? return Err(browser_trace_error("browser trace process identity cannot be verified"))
-    valid: parts.len() == 3 && parts[0] == BROWSER_TRACE_REQUEST_SCHEMA && parts[1] == "{pid}" && parts[2] == current
+    valid: parts.len() == 3 && parts[0] == BROWSER_TRACE_REQUEST_SCHEMA && parts[1] == ("{pid}") && parts[2] == current
     browser_trace_remove_quietly(path)
     if !valid {
         return Err(browser_trace_error("browser trace request belongs to a stale process session"))
@@ -194,7 +194,7 @@ browser_trace_secure_read: fn(path: String, limit: Int, label: String) -> String
         loop byte in chunk -> bytes.push(byte)
         if bytes.len() > limit -> return Err(browser_trace_error("{label} exceeds its limit"))
     }
-    String.from_bytes(bytes) ?? Err(browser_trace_error("{label} is not UTF-8"))
+    String.from_bytes(bytes) ?? return Err(browser_trace_error("{label} is not UTF-8"))
 }
 
 // The compiler trace map and optional source map the web manifest carries,
@@ -206,7 +206,7 @@ browser_trace_identity_from_manifest: fn(manifest: String) -> BrowserTraceIdenti
     map_field: browser_trace_manifest_field(manifest, "\"sourceMap\": \"", "source map")
     source_map: if map_field == {
         .Val(map) -> Val(browser_trace_unhex(map))
-        else -> None
+        .None -> None
     }
     BrowserTraceIdentity{sources: sources, source_map: source_map}
 }
@@ -313,7 +313,7 @@ browser_trace_unhex: fn(text: String) -> String BrowserTraceError! {
         return Err(browser_trace_error("browser trace relay source encoding is malformed"))
     }
     bytes: browser_trace_hex.decode(text) ?? return Err(browser_trace_error("browser trace relay source encoding is malformed"))
-    String.from_bytes(bytes) ?? Err(browser_trace_error("browser trace relay source is not UTF-8"))
+    String.from_bytes(bytes) ?? return Err(browser_trace_error("browser trace relay source is not UTF-8"))
 }
 
 // The start-time field of `/proc/<pid>/stat`: the 20th field after the

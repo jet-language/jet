@@ -10,7 +10,7 @@ JetDevtoolsNativeColor: struct {
     blue: Int,
     alpha: Int,
 
-    new: fn(red: Int, green: Int, blue: Int, alpha: Int) -> JetDevtoolsNativeColor {
+    new: fn(red: Int, green: Int, blue: Int, alpha: Int) -> JetDevtoolsNativeColor Never! {
         JetDevtoolsNativeColor{red: red, green: green, blue: blue, alpha: alpha}
     }
 }
@@ -60,7 +60,7 @@ NativeOverlayHostError: struct {
     }
 }
 
-native_overlay_error: fn(message: String) -> NativeOverlayHostError {
+native_overlay_error: fn(message: String) -> NativeOverlayHostError Never! {
     NativeOverlayHostError{message: message}
 }
 
@@ -77,33 +77,33 @@ NativeOverlayNode: struct {
     children: [NativeOverlayNode],
     action: NativeOverlayAction?,
 
-    new: fn(id: String, kind: DevtoolsNodeKind, label: String) -> NativeOverlayNode {
+    new: fn(id: String, kind: DevtoolsNodeKind, label: String) -> NativeOverlayNode Never! {
         NativeOverlayNode{id: id, kind: kind, label: label, value: None, status: None, children: [NativeOverlayNode]{}, action: None}
     }
 
-    text: fn(id: String, label: String) -> NativeOverlayNode {
+    text: fn(id: String, label: String) -> NativeOverlayNode Never! {
         NativeOverlayNode.new(id, .Text, label)
     }
 
-    with_value: fn(self, value: String) -> NativeOverlayNode {
+    with_value: fn(self, value: String) -> NativeOverlayNode Never! {
         node := self
         node.value = Val(value)
         node
     }
 
-    with_status: fn(self, status: String) -> NativeOverlayNode {
+    with_status: fn(self, status: String) -> NativeOverlayNode Never! {
         node := self
         node.status = Val(status)
         node
     }
 
-    with_children: fn(self, children: [NativeOverlayNode]) -> NativeOverlayNode {
+    with_children: fn(self, children: [NativeOverlayNode]) -> NativeOverlayNode Never! {
         node := self
         node.children = children
         node
     }
 
-    with_action: fn(self, action: NativeOverlayAction) -> NativeOverlayNode {
+    with_action: fn(self, action: NativeOverlayAction) -> NativeOverlayNode Never! {
         node := self
         node.action = Val(action)
         node
@@ -149,7 +149,7 @@ NativeOverlayPanelFact: struct {
     status: String,
     nodes: [NativeOverlayNode],
 
-    new: fn(panel_id: String, title: String, freshness: Int, status: String, nodes: [NativeOverlayNode]) -> NativeOverlayPanelFact {
+    new: fn(panel_id: String, title: String, freshness: Int, status: String, nodes: [NativeOverlayNode]) -> NativeOverlayPanelFact Never! {
         NativeOverlayPanelFact{panel_id: panel_id, title: title, freshness: freshness, status: status, nodes: nodes}
     }
 
@@ -170,11 +170,11 @@ NativeOverlayEvent: struct {
     observed_at_ms: Int,
     panels: [NativeOverlayPanelFact],
 
-    new: fn(protocol: String, session_id: String, revision: String, sequence: Int, observed_at_ms: Int, panels: [NativeOverlayPanelFact]) -> NativeOverlayEvent {
+    new: fn(protocol: String, session_id: String, revision: String, sequence: Int, observed_at_ms: Int, panels: [NativeOverlayPanelFact]) -> NativeOverlayEvent Never! {
         NativeOverlayEvent{protocol: protocol, session_id: session_id, revision: revision, sequence: sequence, observed_at_ms: observed_at_ms, panels: panels}
     }
 
-    current: fn(session_id: String, revision: String, sequence: Int, observed_at_ms: Int, panels: [NativeOverlayPanelFact]) -> NativeOverlayEvent {
+    current: fn(session_id: String, revision: String, sequence: Int, observed_at_ms: Int, panels: [NativeOverlayPanelFact]) -> NativeOverlayEvent Never! {
         NativeOverlayEvent.new(JET_DEVTOOLS_PROTOCOL, session_id, revision, sequence, observed_at_ms, panels)
     }
 
@@ -229,7 +229,7 @@ NativeOverlayViewport: struct {
         width: self.scaled_extent(480, self.width)
         height: self.scaled_extent(360, self.height)
         if dock == {
-            .Floating -> NativeOverlayRect{x: (self.width - width) / 2, y: (self.height - height) / 2, width: width, height: height}
+            .Floating -> NativeOverlayRect{x: (self.width - width) /% 2, y: (self.height - height) /% 2, width: width, height: height}
             .Left -> NativeOverlayRect{x: 0, y: 0, width: width, height: self.height}
             .Right -> NativeOverlayRect{x: self.width - width, y: 0, width: width, height: self.height}
             .Top -> NativeOverlayRect{x: 0, y: 0, width: self.width, height: height}
@@ -239,7 +239,7 @@ NativeOverlayViewport: struct {
 
     // The logical extent at this scale, rounded up, at least 1 and at most `available`.
     scaled_extent: fn(self, logical: Int, available: Int) -> Int {
-        scaled: (logical * self.scale_milli + 999) / 1000
+        scaled: (logical * self.scale_milli + 999) /% 1000
         if scaled < 1 -> return 1
         if scaled > available -> return available
         scaled
@@ -331,11 +331,11 @@ NativeOverlayHost: struct {
     // One real game-backend draw callback, bounded independently of frame history.
     last_native_draw: JetDevtoolsNativeDrawCommand?,
 
-    new: fn() -> NativeOverlayHost {
+    new: fn() -> NativeOverlayHost Never! {
         NativeOverlayHost.with_viewport(NATIVE_OVERLAY_DEFAULT_VIEWPORT)
     }
 
-    with_viewport: fn(viewport: NativeOverlayViewport) -> NativeOverlayHost {
+    with_viewport: fn(viewport: NativeOverlayViewport) -> NativeOverlayHost Never! {
         _: viewport.validate() ?? panic("invalid native overlay viewport: {err.message}")
         NativeOverlayHost{
             state: NativeOverlayState{open: false, dock: .Floating, focused: false},
@@ -543,22 +543,22 @@ NativeOverlayHost: struct {
             .Toggle -> {
                 if self.release_build -> return .Game
                 self.toggle()
-                    .Overlay
+                NativeOverlayInputRoute.Overlay
             }
             .Close -> {
                 if !self.state.open -> return .Game
                 self.close()
-                    .Overlay
+                NativeOverlayInputRoute.Overlay
             }
             .Dock(dock) -> {
                 if !self.state.open -> return .Game
                 self.set_dock(dock)
-                    .Overlay
+                NativeOverlayInputRoute.Overlay
             }
             .Focus(focused) -> {
                 if !self.state.open -> return .Game
                 self.set_focus(focused)
-                    .Overlay
+                NativeOverlayInputRoute.Overlay
             }
             .Key(code, pressed) -> {
                 if pressed && code == self.toggle_key {
@@ -577,7 +577,7 @@ NativeOverlayHost: struct {
         host := NativeOverlayHost.new()
         host.open()
         host.ingest(event)
-        host.frame() ?? Err(native_overlay_error("native overlay did not produce a headless frame"))
+        host.frame() ?? return Err(native_overlay_error("native overlay did not produce a headless frame"))
     }
 
     push_frame: fn(&self) {

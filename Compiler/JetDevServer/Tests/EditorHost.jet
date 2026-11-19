@@ -86,7 +86,7 @@ editor_test_envelope: fn() -> String Never! {
     assert_eq(transport.latest_cursor(), Val(U64{258}))
     expired: if transport.stream_after(Val(U64{1})) == {
         .Err(.CursorExpired(requested, oldest)) -> requested == (U64{1}) && oldest == (U64{3})
-        else -> false
+        .Ok(_) | .Err(_) -> false
     }
     assert(expired)
     retained: transport.stream_after(Val(U64{2})) ?? panic("oldest predecessor")
@@ -130,5 +130,5 @@ editor_test_envelope: fn() -> String Never! {
     unknown: `{"jsonrpc":"2.0","id":null,"method":"unknown","params":{}}`
     assert(if transport.handle_lsp_json(unknown) == .Err(.UnsupportedMethod("unknown")) -> true else -> false)
     params: foundation_parse_protocol_json(`{"cursor":18446744073709551616.0}`) ?? panic("float fixture")
-    assert_eq(editor_optional_cursor(params) ?? panic("Rust saturating float cast"), Val(U64{18446744073709551615}))
+    assert_eq(editor_optional_cursor(params) ?? panic("Rust saturating float cast"), U64{18446744073709551615})
 }

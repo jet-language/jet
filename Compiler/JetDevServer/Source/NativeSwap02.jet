@@ -144,11 +144,11 @@ impl NativeSwapState {
         }
     }
 
-    error: fn(self, fact: NativeSwapBlockingFact, detail: String) -> NativeSwapError {
+    error: fn(self, fact: NativeSwapBlockingFact, detail: String) -> NativeSwapError Never! {
         NativeSwapError.input(self.source().canonical(), fact, detail)
     }
 
-    phase_error: fn(self, detail: String) -> NativeSwapError {
+    phase_error: fn(self, detail: String) -> NativeSwapError Never! {
         self.error(.InvalidPhase, "{detail}; current phase={self.phase.as_str()}")
     }
 }
@@ -237,8 +237,8 @@ listener_map: fn(source_id: String, executable: NativeSwapExecutable, listeners:
     }
     map := [String:NativeSwapListenerHandle]{}
     loop listener in listeners {
-        _: native_swap_validate_identity(listener.id, "listener handle identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: native_swap_validate_source_identity(listener.source, "listener handle") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: native_swap_validate_identity(listener.id, "listener handle identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, "{err}"))
+        _: native_swap_validate_source_identity(listener.source, "listener handle") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, "{err}"))
         if !listener.source.matches(executable.source) {
             return Err(NativeSwapError.input(source_id, .ListenerHandleStale, "listener `{listener.id}` belongs to another source"))
         }
@@ -259,9 +259,9 @@ connection_map: fn(source_id: String, executable: NativeSwapExecutable, connecti
     }
     map := [String:NativeSwapConnectionHandle]{}
     loop connection in connections {
-        _: native_swap_validate_identity(connection.id, "connection handle identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: native_swap_validate_identity(connection.listener_id, "connection listener identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: native_swap_validate_source_identity(connection.source, "connection handle") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: native_swap_validate_identity(connection.id, "connection handle identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, "{err}"))
+        _: native_swap_validate_identity(connection.listener_id, "connection listener identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, "{err}"))
+        _: native_swap_validate_source_identity(connection.source, "connection handle") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, "{err}"))
         if !connection.source.matches(executable.source) {
             return Err(NativeSwapError.input(source_id, .ConnectionHandleStale, "connection `{connection.id}` belongs to another source"))
         }
@@ -300,8 +300,8 @@ validate_listener_plan_facts: fn(source_id: String, expected_source: NativeSwapS
     }
     seen := [String:Bool]{}
     loop handle in handles {
-        _: native_swap_validate_identity(handle.id, "listener handle identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: native_swap_validate_source_identity(handle.source, "listener handle") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: native_swap_validate_identity(handle.id, "listener handle identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, "{err}"))
+        _: native_swap_validate_source_identity(handle.source, "listener handle") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, "{err}"))
         if !handle.source.matches(expected_source) {
             return Err(NativeSwapError.input(source_id, .ListenerHandleStale, "listener handle `{handle.id}` belongs to another source"))
         }
@@ -318,9 +318,9 @@ validate_connection_plan_facts: fn(source_id: String, expected_source: NativeSwa
     }
     seen := [String:Bool]{}
     loop handle in handles {
-        _: native_swap_validate_identity(handle.id, "connection handle identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: native_swap_validate_identity(handle.listener_id, "connection listener identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: native_swap_validate_source_identity(handle.source, "connection handle") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: native_swap_validate_identity(handle.id, "connection handle identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, "{err}"))
+        _: native_swap_validate_identity(handle.listener_id, "connection listener identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, "{err}"))
+        _: native_swap_validate_source_identity(handle.source, "connection handle") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, "{err}"))
         if !handle.source.matches(expected_source) {
             return Err(NativeSwapError.input(source_id, .ConnectionHandleStale, "connection handle `{handle.id}` belongs to another source"))
         }
@@ -341,7 +341,7 @@ validate_fact_list: fn(source_id: String, facts: [String]) NativeSwapError! {
     }
     seen := [String:Bool]{}
     loop fact in facts {
-        _: native_swap_validate_identity(fact, "native swap fact") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: native_swap_validate_identity(fact, "native swap fact") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, "{err}"))
         if seen.get(fact) != None {
             return Err(NativeSwapError.input(source_id, .DuplicateIdentity, "native swap fact `{fact}` appears more than once"))
         }
@@ -356,7 +356,7 @@ normalized_facts: fn(facts: [String]) -> [String] {
 }
 
 // Drops control characters and truncates at a character boundary within `limit` bytes.
-bounded_text: fn(value: String, limit: Int) -> String {
+bounded_text: fn(value: String, limit: Int) -> String Never! {
     output := ""
     used := 0
     loop character in value.chars() {
@@ -370,7 +370,7 @@ bounded_text: fn(value: String, limit: Int) -> String {
     output
 }
 
-restart_or_reject: fn(source_id: String, allows_restart: Bool, fact: NativeSwapBlockingFact, detail: String) -> NativeSwapError {
+restart_or_reject: fn(source_id: String, allows_restart: Bool, fact: NativeSwapBlockingFact, detail: String) -> NativeSwapError Never! {
     if allows_restart && fact.is_restartable() {
         return NativeSwapError.restart(source_id, fact, detail)
     }

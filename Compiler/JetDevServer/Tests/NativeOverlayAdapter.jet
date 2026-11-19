@@ -33,7 +33,7 @@ overlay_adapter_test_event: fn(sequence: Int) -> JetDevtoolsEvent {
     raw: JetDevtoolsEvent.from_parts(sequence, "session", "build", "program", `{"ok":true}`) ?? panic("devtools event")
     event: raw.publish(JetDevtoolsPayload.one("message", JetDevtoolsValue.text("opaque payload"))) ?? panic("published payload")
     envelope := JetDevtoolsEnvelope.new("session", 0)
-    envelope.push(event)
+    _: envelope.push(event)
     envelope.events()[0]
 }
 
@@ -66,7 +66,7 @@ overlay_adapter_test_action_panel: fn() -> NativeOverlayPanelFact {
     assert(second.reset)
     stale: if adapter.validate_action_request(request) == {
         .Err(.StaleRevision(_, _)) -> true
-        else -> false
+        .Ok(_) | .Err(_) -> false
     }
     assert(stale)
 }

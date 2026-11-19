@@ -418,7 +418,7 @@ WebErrorDiagnosticFact: struct {
         fact
     }
 
-    internal_placeholder: fn() -> WebErrorDiagnosticFact {
+    internal_placeholder: fn() -> WebErrorDiagnosticFact Never! {
         WebErrorDiagnosticFact{code: None, what: Val("Internal development-service failure"), why: None, fix: None, severity: None, moment: None, typed_identity: None, span: None}
     }
 
@@ -533,9 +533,15 @@ WebErrorPage: struct {
         }
         safety := String?{None}
         if diagnostic.safety == .Val(value) -> safety = Val(web_error_safety_name(value))
+        // The diagnostic's primary edit, then its structured suggestions.
         edits := [WebErrorEdit]{}
-        loop edit in web_error_diagnostic_edits(diagnostic) {
+        if diagnostic.edit == .Val(edit) {
             edits.push(WebErrorEdit.from_diagnostic(identity.source_id, edit, applicability, safety))
+        }
+        if diagnostic.structured == .Val(.SuggestedEdits(suggested)) {
+            loop edit in suggested {
+                edits.push(WebErrorEdit.from_diagnostic(identity.source_id, edit, applicability, safety))
+            }
         }
         page: WebErrorPage.new(identity, WebErrorDiagnosticFact.from_diagnostic(diagnostic), source_excerpts, None, action_links)
         page.with_edits(edits)
@@ -650,7 +656,7 @@ WebErrorPage: struct {
         if bytes > MAX_WEB_ERROR_INPUT_BYTES -> return Err(WebErrorPageError.InputTooLarge)
     }
 
-    compute_failure_id: fn(self) -> String {
+    compute_failure_id: fn(self) -> String Never! {
         "fail-{sha256_hex(WebErrorFacts.from_page(self, true).canonical_json())}"
     }
 }
@@ -667,7 +673,7 @@ WebErrorFacts: struct {
     action_links: [WebErrorActionLink],
     redacted: Bool,
 
-    from_page: fn(page: WebErrorPage, local: Bool) -> WebErrorFacts {
+    from_page: fn(page: WebErrorPage, local: Bool) -> WebErrorFacts Never! {
         diagnostic := page.diagnostic
         internal := page.internal
         if !local {
@@ -693,11 +699,11 @@ WebErrorFacts: struct {
         }
     }
 
-    canonical_json: fn(self) -> String { self.json(false) }
+    canonical_json: fn(self) -> String Never! { self.json(false) }
 
-    render_json: fn(self) -> String { self.json(true) }
+    render_json: fn(self) -> String Never! { self.json(true) }
 
-    json: fn(self, include_failure_id: Bool) -> String {
+    json: fn(self, include_failure_id: Bool) -> String Never! {
         excerpts: loop excerpt in self.source_excerpts -> excerpt.json()
         links: loop link in self.action_links -> link.json()
         fields := [String]{"\"schema\":{foundation_json_quote(WEB_ERROR_PAGE_SCHEMA)}", "\"status\":{self.status}"}
@@ -725,12 +731,12 @@ WebErrorFacts: struct {
     render_html: fn(self) -> String {
         html := "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\"><title>Jet development error</title><style>body{{font:16px system-ui,sans-serif;max-width:58rem;margin:2rem auto;padding:0 1rem;color:#202124}}main{{border:1px solid #d0d7de;border-radius:.5rem;padding:1.5rem}}h1{{font-size:1.5rem;margin:.25rem 0 1rem}}h2{{font-size:1rem;margin:1.5rem 0 .5rem}}dl{{display:grid;grid-template-columns:max-content 1fr;gap:.35rem .9rem}}dt{{font-weight:600}}dd{{margin:0;overflow-wrap:anywhere}}pre{{background:#f6f8fa;padding:.75rem;overflow:auto;white-space:pre-wrap}}a{{display:inline-block;margin:.25rem .5rem .25rem 0}}code{{font-family:ui-monospace,monospace}}.muted{{color:#57606a}}.redacted{{background:#fff8c5;padding:.75rem}}</style></head><body><main data-schema=\"jet.dev.error/v1\">"
         html = "{html}<p class=\"muted\">Jet local development error</p><h1>"
-        if self.diagnostic.what == .Val(value) -> html = "{html}{html_escape(value)}"
+        if self.diagnostic.what == .Val(value) -> html = "{html}{browser_web_html_escape(value)}"
         code: if self.diagnostic.code == {
-            .Val(value) -> html_escape(value)
+            .Val(value) -> browser_web_html_escape(value)
             .None -> "diagnostic code unavailable"
         }
-        failure_id: html_escape(self.failure_id)
+        failure_id: browser_web_html_escape(self.failure_id)
         html = "{html}</h1><p><code>{code}</code> · HTTP {self.status} · <code data-failure-id=\"{failure_id}\">{failure_id}</code></p><h2>Request identity</h2><dl>"
         html = "{html}{html_pair("request id", self.identity.request_id)}{html_pair("session id", self.identity.session_id)}{html_pair("source id", self.identity.source_id)}{html_pair("build id", self.identity.build_id)}{html_pair("revision", self.identity.revision)}"
         html = "{html}</dl><h2>Diagnostic</h2><dl>"
@@ -760,7 +766,7 @@ WebErrorFacts: struct {
             if self.action_links.len() > 0 {
                 html = "{html}<h2>Actions</h2><p>"
                 loop link in self.action_links {
-                    html = "{html}<a rel=\"noreferrer\" href=\"{html_escape(link.href)}\">{html_escape(link.label)}</a>"
+                    html = "{html}<a rel=\"noreferrer\" href=\"{browser_web_html_escape(link.href)}\">{browser_web_html_escape(link.label)}</a>"
                 }
                 html = "{html}</p>"
             }
@@ -787,16 +793,6 @@ source_excerpt_from_journey: fn(frame: JetErrorJourneyFrame) -> WebErrorSourceEx
 source_excerpt_from_context: fn(frame: JetErrorContextFrame) -> WebErrorSourceExcerpt WebErrorPageError! {
     line: if frame.line > 0 -> Int?{Val(frame.line)} else -> None
     WebErrorSourceExcerpt.without_span(frame.file, "context", Val(frame.text)).with_location(line, None)
-}
-
-// Every edit a diagnostic carries: its primary edit, then its structured suggestions.
-web_error_diagnostic_edits: fn(diagnostic: Diagnostic) -> [TextEdit] {
-    edits := [TextEdit]{}
-    if diagnostic.edit == .Val(edit) -> edits.push(edit)
-    if diagnostic.structured == .Val(.SuggestedEdits(suggested)) {
-        loop edit in suggested -> edits.push(edit)
-    }
-    edits
 }
 
 web_error_applicability_name: fn(applicability: DiagnosticFixApplicability) -> String {
@@ -847,7 +843,7 @@ normalize_source_identity: fn(value: String) -> String WebErrorPageError! {
 
 redact_identity: fn(value: String) -> String {
     if contains_sensitive_marker(value) -> return WEB_ERROR_REDACTED
-    value
+    value.copy()
 }
 
 validate_identity: fn(value: String, field: String) WebErrorPageError! {
@@ -961,7 +957,7 @@ validate_status: fn(status: Int) WebErrorPageError! {
 }
 
 // Absent values sort first, as the original Option ordering did.
-web_error_optional_text_order: fn(left: String?, right: String?) -> Ordering {
+web_error_optional_text_order: fn(left: String?, right: String?) -> Ordering Never! {
     if left == {
         .None -> if right == .None -> Ordering.Equal else -> Ordering.Less
         .Val(left_text) -> if right == {
@@ -971,17 +967,17 @@ web_error_optional_text_order: fn(left: String?, right: String?) -> Ordering {
     }
 }
 
-web_error_optional_int: fn(value: Int?) -> Int { value ?? -1 }
+web_error_optional_int: fn(value: Int?) -> Int Never! { value ?? -1 }
 
-web_error_span_start: fn(span: WebErrorSpan?) -> Int {
-    if span == .Val(value) { return value.start - 1 }
+web_error_span_start: fn(span: WebErrorSpan?) -> Int Never! {
+    if span == .Val(value) -> value.start else -> -1
 }
 
-web_error_span_end: fn(span: WebErrorSpan?) -> Int {
-    if span == .Val(value) { return value.end - 1 }
+web_error_span_end: fn(span: WebErrorSpan?) -> Int Never! {
+    if span == .Val(value) -> value.end else -> -1
 }
 
-source_excerpt_order: fn(left: WebErrorSourceExcerpt, right: WebErrorSourceExcerpt) -> Ordering {
+source_excerpt_order: fn(left: WebErrorSourceExcerpt, right: WebErrorSourceExcerpt) -> Ordering Never! {
     (left.source_id <=> right.source_id)
         .then(left.label <=> right.label)
         .then(web_error_span_start(left.span) <=> web_error_span_start(right.span))
@@ -991,11 +987,11 @@ source_excerpt_order: fn(left: WebErrorSourceExcerpt, right: WebErrorSourceExcer
         .then(web_error_optional_text_order(left.excerpt, right.excerpt))
 }
 
-action_link_order: fn(left: WebErrorActionLink, right: WebErrorActionLink) -> Ordering {
+action_link_order: fn(left: WebErrorActionLink, right: WebErrorActionLink) -> Ordering Never! {
     (left.label <=> right.label).then(left.href <=> right.href)
 }
 
-web_error_edit_order: fn(left: WebErrorEdit, right: WebErrorEdit) -> Ordering {
+web_error_edit_order: fn(left: WebErrorEdit, right: WebErrorEdit) -> Ordering Never! {
     (left.source_id <=> right.source_id)
         .then(left.span.start <=> right.span.start)
         .then(left.span.end <=> right.span.end)
@@ -1005,21 +1001,23 @@ web_error_edit_order: fn(left: WebErrorEdit, right: WebErrorEdit) -> Ordering {
 }
 
 html_pair: fn(label: String, value: String) -> String {
-    "<dt>{html_escape(label)}</dt><dd>{html_escape(value)}</dd>"
+    "<dt>{browser_web_html_escape(label)}</dt><dd>{browser_web_html_escape(value)}</dd>"
 }
 
 render_source_html: fn(excerpts: [WebErrorSourceExcerpt]) -> String {
     if excerpts.len() == 0 -> return ""
     html := "<h2>Source</h2>"
     loop excerpt in excerpts {
-        html = "{html}<section><h3>{html_escape(excerpt.label)}</h3><p><code>{html_escape(excerpt.source_id)}"
+        html = "{html}<section><h3>{browser_web_html_escape(excerpt.label)}</h3><p><code>{browser_web_html_escape(excerpt.source_id)}"
         if excerpt.line == .Val(line) {
             html = "{html}:{line}"
             if excerpt.column == .Val(column) -> html = "{html}:{column}"
         }
         if excerpt.span == .Val(span) -> html = "{html} bytes {span.start}..{span.end}"
         html = "{html}</code></p>"
-        if excerpt.excerpt == .Val(text) -> html = "{html}<pre>{html_escape(text)}</pre>"
+        if excerpt.excerpt == .Val(text) {
+            html = "{html}<pre>{browser_web_html_escape(text)}</pre>"
+        }
         html = "{html}</section>"
     }
     html

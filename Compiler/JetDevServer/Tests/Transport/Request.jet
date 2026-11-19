@@ -34,7 +34,7 @@ devserver_test_request_fails: fn(raw: String) -> Bool Never! {
 devserver_test_header_error: fn(lines: [String]) -> String Never! {
     if devserver_request_headers(devserver_http.headers_parse(lines)) == {
         .Err(.InvalidData(message)) -> message
-        else -> {
+        .Ok(_) | .Err(_) -> {
             panic("missing devserver header refusal")
         }
     }
@@ -91,7 +91,7 @@ devserver_test_header_error: fn(lines: [String]) -> String Never! {
         if DevserverRequest.read([U8]{}) == {
             .Ok(value) -> if value == {
                 .None -> true
-                else -> false
+                .Val(_) -> false
             }
             .Err(_) -> false
         },
@@ -126,7 +126,7 @@ devserver_test_header_error: fn(lines: [String]) -> String Never! {
         assert(
             if DevserverRequest.read(raw.bytes()) == {
                 .Err(.InvalidData(message)) -> message == "duplicate devserver security header"
-                else -> false
+                .Val(_) | .None | .Err(_) -> false
             },
         )
     }
@@ -143,7 +143,7 @@ devserver_test_header_error: fn(lines: [String]) -> String Never! {
         assert(
             if DevserverRequest.read(raw.bytes()) == {
                 .Err(.CoreHTTP(_)) -> true
-                else -> false
+                .Val(_) | .None | .Err(_) -> false
             },
         )
     }
@@ -174,8 +174,7 @@ devserver_test_header_error: fn(lines: [String]) -> String Never! {
     raw.push(U8{0})
     raw.push(U8{255})
     raw.push(U8{128})
-    parsed: DevserverRequest.read(raw) ?? panic("binary upload rejected")
-    request: parsed ?? panic("missing request")
+    request: DevserverRequest.read(raw) ?? panic("binary upload rejected or incomplete")
     assert_eq(request.body, [U8]{0, 255, 128})
 }
 // Static traversal/authority and owned Canvas route tests (1275–1498) are T2.

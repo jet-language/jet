@@ -131,7 +131,7 @@ NativeOverlayAdapter: struct {
     history_truncated: Bool,
     last_update: NativeOverlayUpdate?,
 
-    new: fn(session_id: String) -> NativeOverlayAdapter {
+    new: fn(session_id: String) -> NativeOverlayAdapter Never! {
         NativeOverlayAdapter{
             session_id: session_id,
             revision: None,
@@ -342,7 +342,7 @@ NativeOverlayAdapter: struct {
 
     find_node: fn(self, panel_id: String, node_id: String) -> NativeOverlayNode NativeOverlayAdapterError! {
         panel: self.typed_panels.get(panel_id) ?? return Err(NativeOverlayAdapterError.UnknownPanel{panel_id: panel_id})
-        find_overlay_node(panel.nodes, node_id) ?? Err(NativeOverlayAdapterError.UnknownNode{node_id: node_id})
+        find_overlay_node(panel.nodes, node_id) ?? return Err(NativeOverlayAdapterError.UnknownNode{node_id: node_id})
     }
 
     render_panels: fn(self, sequence: Int) -> NativeOverlayRenderedPanels NativeOverlayAdapterError! {
@@ -353,12 +353,12 @@ NativeOverlayAdapter: struct {
         loop key in keys {
             panel: self.typed_panels[key]
             typed_node_count += panel_node_count(panel)
-            panels.push(panel)
+            panels.push(panel.copy())
         }
         dropped_for_nodes := false
         if self.event_facts.len() > 0 {
             available: if typed_node_count >= MAX_OVERLAY_NODES -> 0 else -> MAX_OVERLAY_NODES - typed_node_count
-            max_events: available / EVENT_LOG_NODES_PER_EVENT
+            max_events: available /% EVENT_LOG_NODES_PER_EVENT
             skip: if self.event_facts.len() > max_events -> self.event_facts.len() - max_events else -> 0
             if skip != 0 -> dropped_for_nodes = true
             facts: loop index in skip..<self.event_facts.len() -> self.event_facts[index]
@@ -390,7 +390,7 @@ node_from_event: fn(event: JetDevtoolsEvent) -> NativeOverlayNode NativeOverlayA
 
 event_log_panel: fn(events: [JetDevtoolsEvent], sequence: Int) -> NativeOverlayPanelFact NativeOverlayAdapterError! {
     if sequence == 0 -> return Err(NativeOverlayAdapterError.InvalidSequence{sequence: sequence})
-    if events.len() > MAX_NATIVE_OVERLAY_EVENTS || events.len() > MAX_OVERLAY_NODES / EVENT_LOG_NODES_PER_EVENT {
+    if events.len() > MAX_NATIVE_OVERLAY_EVENTS || events.len() > MAX_OVERLAY_NODES /% EVENT_LOG_NODES_PER_EVENT {
         return Err(NativeOverlayAdapterError.InvalidPanel{message: "native overlay event log exceeds its event or node budget"})
     }
     nodes := [NativeOverlayNode]{}

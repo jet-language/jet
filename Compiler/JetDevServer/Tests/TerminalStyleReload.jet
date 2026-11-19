@@ -44,7 +44,7 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
     assert_eq(document.value(TerminalStyleRole.Error), Val(TerminalStyleValue.Plain))
     rejected: if TerminalStyleDocument.parse("accent=1;;96") == {
         .Err(_) -> true
-        else -> false
+        .Ok(_) -> false
     }
     assert(rejected)
 }
@@ -140,7 +140,7 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
     response: adapter.apply_json(`{"source":"accent=1;;96"}`)
     code: if response.outcome == {
         .Rejected(.Invalid(fact)) -> Val(fact.code)
-        else -> TerminalStyleErrorCode?{None}
+        .Applied(_, _) | .Unavailable(_) | .Rejected(_) -> TerminalStyleErrorCode?{None}
     }
     assert_eq(code, Val(TerminalStyleErrorCode.InvalidStyle))
     assert(response.event.contains(`"outcome":"rejected"`))
@@ -151,7 +151,7 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
     first: adapter.apply_json(`{"source":"accent=red"}`)
     applied: if first.outcome == {
         .Applied(_, _) -> true
-        else -> false
+        .Unavailable(_) | .Rejected(_) -> false
     }
     assert(applied)
     response: adapter.apply_json(`{"source":"accent=green","layout_fingerprint":"layout-v2"}`)
