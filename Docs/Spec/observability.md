@@ -269,9 +269,10 @@ sample period late. A progress point counts passes: each closed zone by
 its name, each finished task as `task`, each answered HTTP request as
 `request`, and each `core.perf.progress(name)`. Outside the lens these record nothing. At the
 end of each experiment the runtime writes its line, its wall time, the
-delay it inserted and, for each point, its passes after its first one, the
-wall time from that first pass to its last and the delay inserted between
-them to the samples file. An
+delay it inserted, the run time and the runqueue wait its threads took
+(from each one's `/proc/self/task/<tid>/schedstat`) and, for each point,
+its passes after its first one, the wall time from that first pass to its
+last and the delay inserted between them to the samples file. An
 experiment whose line the checked source does not name counts neither as
 a baseline nor toward any line. The trace
 keeps the predictions in its `causal` receipt section (type
@@ -286,7 +287,13 @@ would get that pass nearly free. Its interval is the
 90% range of 200 deterministic bootstrap resamples. A line is ranked only
 with 6 experiments on it, 6 baselines and an interval no wider than 30
 points; the others are listed with the reason. When no line can be ranked,
-the section says why the run was refused and how long to run. `jet perf
+the section says why the run was refused and how long to run. The section
+keeps the threads' run time and wait (`cpu_run_ms`, `cpu_wait_ms`). When
+they waited for a CPU more than 20% of the time they ran, the gains are
+withheld: under that contention a line made virtually faster frees no CPU
+for the rest, as a really faster one would, so every gain would read low.
+The run is refused with the wait, each point keeps its name with no lines,
+and the reason asks for a run where each thread has a CPU. `jet perf
 view` prints, under `causal`, each point as `` `round`: if this line were
 30% faster, each pass would come sooner by``, then its lines best first
 (`  main.jet:23 narrow  +14.2% (9.8% to 18.0%)`). Experiments are
@@ -896,7 +903,14 @@ recorded, without stopping for requests.
 that is not true or false is E2236 (`jet.invalidArguments`). A frame id or
 variable reference names the stop it was made at: once the program runs
 again it is E2238 (`jet.staleReference`). The error's `jetCode` names the
-diagnostic.
+diagnostic. `dataBreakpointInfo` and `setDataBreakpoints` are `watch`: a
+local or field path of a frame of the stopped task, named by its scope's
+`variablesReference` (or a `frameId`), gets a data id that
+`setDataBreakpoints` places as the watch, and its stop is a `data
+breakpoint` one whose description is the change (`total: 0 -> 2`). A
+place no watch can take has no data id, its description E2237's What and
+its `jetCode` E2237; a data id of an earlier stop is not verified, with
+E2238's.
 
 Every expression the debugger is given (`print`, `watch`, a condition, a
 logpoint's message, the adapter's `evaluate`) has one evaluator, the
@@ -962,7 +976,10 @@ so. Every
 thread gets the watch's debug registers, so a write from any thread stops;
 a watch on a register local follows the thread whose frame holds it. A
 Float held in a vector register can't be watched. Globals can't be watched
-yet, because the debug information has no global variables.
+yet, because the debug information has no global variables. A watch the
+debugger can't place (a place the parser doesn't read as one, no such
+local or field, no bytes, no free debug register) is refused with E2237
+(`jet.DebugRequestRefused`), which names why.
 
 ## Recorder boundary
 
@@ -992,7 +1009,12 @@ toward the 10-second stall.
 
 A NAME that isn't one, a recording that isn't there, a recording with no
 sync-order log (a `jet test --record` one) and an image that links no
-observation start are refused before anything runs.
+observation start are refused before anything runs. So is a source file
+that is not the one recorded: the recording binds its source's digest, and
+one of other source is E3621 (`replay semantic identity does not match`).
+An image binds no source, so it replays unchecked. Under `--dap` each of
+these answers every request but `initialize` with the refusal, its
+`jetCode` naming the code, then ends the session.
 
 `jet debug --record=<name> <file.jet>` makes the same recording under the
 debugger: the program runs behind the console (or `--dap`) with
@@ -1024,9 +1046,13 @@ breakpoint); it then runs them once more to the pass the command wants,
 which becomes the stop. The program's output is not shown again.
 Breakpoints stay as they are; a watch set after the point it goes back to
 ends, with a note. With nothing earlier the program comes back to the
-same stop and says so. Outside a replay, and after `fix` (a new run would
-run the code before the fix), the console refuses them.
+same stop, refused with E2237 (`jet.DebugRequestRefused`), which says
+so; under `--dap` the request fails with it, and the stop's frame ids still
+hold. Outside a replay, and after `fix` (a new run would run the code
+before the fix), they are refused with E2237.
 Tests/Cases/Debug/replay_reverse_*.case are the worked examples.
+Tests/Cases/Debug/replay_refusals_*.case are the worked examples of the
+refusals, at the console and over `--dap`.
 
 `why <place>` in a replay names the write that gave a local of the
 selected frame, or a field path under one, the value it has here:
@@ -1053,7 +1079,7 @@ jet makes once into the session's scratch directory: a run counts how
 often the stop's task reached the stop's line, the `-O0` image runs under
 the same recording to that pass of the line, and `why` answers there, the
 value labeled `(recovered from the -O0 replay)`. Outside a replay, and
-after `fix`, the console refuses it.
+after `fix`, it is refused with E2237.
 Tests/Cases/Debug/replay_why_*.case are the worked examples.
 Tests/Cases/Debug/replay_threads_across_tiers_*.case are the worked examples.
 

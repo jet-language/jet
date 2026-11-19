@@ -1,12 +1,14 @@
 // Reads the causal section of the trace the first argument names and
 // measured.txt, the speedups main.jet measured by hand for the narrow line
-// and for the wide one. For the `round` progress point, each of the two
-// lines the lens ranked must have its measured speedup within its predicted
-// interval, and the lens must have ranked one of them at least. A ranked
-// line's interval is at most WIDEST wide, the lens's own bound for ranking a
-// line, so no interval passes by being vague; and a measured speedup above
-// BOUND, which no line 30% faster can give, is refused as a measurement
-// gone wrong, so none passes by being wild.
+// and for the wide one. It accepts one of two outcomes. Either, for the
+// `round` progress point, each of the two lines the lens ranked has its
+// measured speedup within its predicted interval, and the lens ranked one
+// of them at least. Or the lens refused the run because its threads waited
+// too long for a CPU, naming the wait its receipt keeps and giving no gain.
+// A ranked line's interval is at most WIDEST wide, the lens's own bound for
+// ranking a line, so no interval passes by being vague; and a measured
+// speedup above BOUND, which no line 30% faster can give, is refused as a
+// measurement gone wrong, so none passes by being wild.
 use {
     files: core.files
     process: core.process
@@ -57,9 +59,29 @@ check_line: fn(lines: String, function: String, measured: Int) -> Bool {
     false
 }
 
+// Whether the lens refused the run under CPU contention; when it did, its
+// reason must name the wait the receipt keeps, and no line may have a gain.
+check_contended: fn(trace: String) -> Bool {
+    if !trace.contains(" threads waited ") || !trace.contains("\"refused\":\"the program") {
+        return false
+    }
+    wait: number_after(trace, "\"cpu_wait_ms\":") ?? panic("no cpu_wait_ms in the causal section")
+    if !trace.contains(" threads waited {wait} ms for a CPU while they ran ") {
+        panic("the contention refusal does not name the {wait} ms wait the receipt keeps")
+    }
+    if trace.contains("\"gain_tenths\"") {
+        panic("the lens refused the run under CPU contention but gave a gain")
+    }
+    true
+}
+
 run: fn() {
     args: process.args()
     trace: files.read(args[args.len() - 1]) ?? panic("cannot read the trace")
+    if check_contended(trace) {
+        print("the lens withheld its gains under CPU contention, naming the wait")
+        return
+    }
     measured: (files.read("measured.txt") ?? panic("cannot read measured.txt")).trim().split(" ").to_list()
     if measured.len() != 2 -> panic("measured.txt holds no two numbers")
     narrow_gain: Int.parse(measured[0]) ?? panic("measured.txt's narrow speedup is no number")

@@ -1,0 +1,58 @@
+// A session's held check answers only from the sources the session built
+// its image from (DebugCompile.jet jet_cli_debug_eval_held_done): the
+// first open's sources are the image's, by each file's digest; a session
+// that didn't build its image, or whose first open read nothing, opens no
+// held check, so its evaluations compile.
+use jet_cli.[JetCLIDebugEvalHeldOpen, JetCLIDebugEvalHeldShared, JetCLIDebugEvalHeldStamp, jet_cli_debug_eval_held_claim, jet_cli_debug_eval_held_done, jet_cli_debug_eval_held_slot, jet_cli_debug_eval_image, jet_cli_debug_eval_image_same]
+
+// The digests of the sources `sources`, as an open that read them and
+// didn't open gives them.
+held_test_digests: fn(sources: [String:String]) -> [String:String]? Never! {
+    jet_cli_debug_eval_image(JetCLIDebugEvalHeldOpen{held: None, missed: Val(JetCLIDebugEvalHeldStamp{sources: sources})})
+}
+
+// Whether the held check `held` knows the sources its image was built from.
+held_test_built: fn(held: JetCLIDebugEvalHeldShared) -> Bool Never! {
+    permit: held.slot.guard_edit()
+    permit.value.built
+}
+
+// Whether the sources the image of `held` was built from read as `sources`.
+held_test_image: fn(held: JetCLIDebugEvalHeldShared, sources: [String:String]) -> Bool Never! {
+    permit: held.slot.guard_edit()
+    jet_cli_debug_eval_image_same(permit.value.image, held_test_digests(sources))
+}
+
+#Test("a session that runs an image built before it opens no held check") {
+    held: jet_cli_debug_eval_held_slot()
+    assert(!jet_cli_debug_eval_held_claim(held))
+}
+
+#Test("the image's sources are the first open's, file by file") {
+    built: held_test_digests(["prog.jet": `scaled: fn(x: Int) -> Int { x * 2 }`])
+    assert(jet_cli_debug_eval_image_same(built, held_test_digests(["prog.jet": `scaled: fn(x: Int) -> Int { x * 2 }`])))
+    assert(!jet_cli_debug_eval_image_same(built, held_test_digests(["prog.jet": `scaled: fn(x: Int) -> Int { x * 3 }`])))
+    assert(!jet_cli_debug_eval_image_same(built, held_test_digests(["prog.jet": `scaled: fn(x: Int) -> Int { x * 2 }`, "more.jet": ""])))
+    assert(!jet_cli_debug_eval_image_same(built, None))
+}
+
+#Test("a held check whose first open didn't open keeps the sources it read as the image's") {
+    held: jet_cli_debug_eval_held_slot(built: true)
+    assert(jet_cli_debug_eval_held_claim(held))
+    sources: ["prog.jet": `run: fn() {}`]
+    opened: JetCLIDebugEvalHeldOpen{held: None, missed: Val(JetCLIDebugEvalHeldStamp{sources: sources})}
+    read: jet_cli_debug_eval_image(opened)
+    jet_cli_debug_eval_held_done(held, opened, read)
+    assert(held_test_built(held))
+    assert(held_test_image(held, ["prog.jet": `run: fn() {}`]))
+    assert(!held_test_image(held, ["prog.jet": `run: fn() { panic("edited") }`]))
+}
+
+#Test("a held check whose first open read nothing opens no other") {
+    held: jet_cli_debug_eval_held_slot(built: true)
+    assert(jet_cli_debug_eval_held_claim(held))
+    unopened: JetCLIDebugEvalHeldOpen{held: None, missed: None}
+    jet_cli_debug_eval_held_done(held, unopened, [String:String]?{None})
+    assert(!held_test_built(held))
+    assert(!jet_cli_debug_eval_held_claim(held))
+}

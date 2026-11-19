@@ -1,0 +1,24 @@
+Score: struct {
+    count: Int,
+}
+
+double: fn(x: Int) -> Int {
+    y: x * 2
+    y
+}
+
+bump: fn(rounds: Int, tally: Shared<Score>) -> Int {
+    loop _ in 0..<rounds -> tally.count += 1
+    rounds
+}
+
+run: fn() {
+    tally: Shared{Score{count: 0}}
+    helper: task bump(3, tally)
+    total := 0
+    loop k in 0..<4 {
+        d: double(k)
+        total += d
+    }
+    print("total {total} tally {tally.count + (helper.join() ?? 0)}")
+}

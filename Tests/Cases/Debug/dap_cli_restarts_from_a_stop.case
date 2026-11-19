@@ -1,0 +1,52 @@
+# `restart` at a stop ends that run and starts the program again from the
+# top: the response, then a new `stopped` at the same breakpoint on the
+# loop's first turn (`k` is 0 again). The frame and scope references of
+# the stop before the restart name nothing any more: their `variables` is
+# E2238 (jet.staleReference, 22036). The restarted run goes on as a run
+# does: `continue` stops on the next turn, where `k` is 1.
+# The fixture must stay in jet fmt form: line 8 is the loop's body.
+fixture: DapCLIRestartsFromAStop.fixture
+env: NO_COLOR=1
+env: PATH={work}/no-tools
+session dap content-length: jet debug --dap {work}/main.jet
+send dap: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\"}}"
+send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{\"program\":\"{work}/main.jet\",\"stopOnEntry\":false,\"args\":[]}}"
+recv dap until $.event = "initialized" timeout 30s every 100ms
+send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/main.jet\"},\"breakpoints\":[{\"line\":8}]}}"
+recv dap until $.request_seq = 3 timeout 30s every 100ms
+json: stdout doc $.body.breakpoints[0].verified = true
+send dap: "{\"seq\":4,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{}}"
+recv dap until $.event = "stopped" timeout 30s every 100ms
+json: stdout doc $.body.reason = "breakpoint"
+send dap: "{\"seq\":5,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.request_seq = 5 timeout 30s every 100ms
+capture: first_frame stdout doc $.body.stackFrames[0].id
+send dap: "{\"seq\":6,\"type\":\"request\",\"command\":\"scopes\",\"arguments\":{\"frameId\":{cap:first_frame}}}"
+recv dap until $.request_seq = 6 timeout 30s every 100ms
+capture: first_scope stdout doc $.body.scopes[0].variablesReference
+send dap: "{\"seq\":7,\"type\":\"request\",\"command\":\"continue\",\"arguments\":{\"threadId\":1}}"
+recv dap collect until ndjson $[?request_seq=7][?success=true] #>= 1 && ndjson $[?event="stopped"] #>= 1 timeout 30s
+send dap: "{\"seq\":8,\"type\":\"request\",\"command\":\"restart\",\"arguments\":{}}"
+recv dap collect until ndjson $[?request_seq=8][?success=true] #>= 1 && ndjson $[?event="stopped"] #>= 1 timeout 30s
+json: stdout ndjson $[?event="stopped"][0].body.reason = "breakpoint"
+json: stdout ndjson $[?event="exited"] #= 0
+send dap: "{\"seq\":9,\"type\":\"request\",\"command\":\"variables\",\"arguments\":{\"variablesReference\":{cap:first_scope}}}"
+recv dap until $.request_seq = 9 timeout 30s every 100ms
+json: stdout doc $.success = false
+stdout: ~ "\"id\":22036" # the old stop's scope names nothing now
+stdout: ~ "\"jetCode\":\"E2238\"" # the registered diagnostic's code
+send dap: "{\"seq\":10,\"type\":\"request\",\"command\":\"evaluate\",\"arguments\":{\"expression\":\"k\",\"context\":\"repl\"}}"
+recv dap until $.request_seq = 10 timeout 60s every 100ms
+json: stdout doc $.success = true
+json: stdout doc $.body.result = "0"
+send dap: "{\"seq\":11,\"type\":\"request\",\"command\":\"continue\",\"arguments\":{\"threadId\":1}}"
+recv dap collect until ndjson $[?request_seq=11][?success=true] #>= 1 && ndjson $[?event="stopped"] #>= 1 timeout 30s
+send dap: "{\"seq\":12,\"type\":\"request\",\"command\":\"evaluate\",\"arguments\":{\"expression\":\"k\",\"context\":\"repl\"}}"
+recv dap until $.request_seq = 12 timeout 60s every 100ms
+json: stdout doc $.success = true
+json: stdout doc $.body.result = "1"
+send dap: "{\"seq\":13,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{}}"
+recv dap until $.request_seq = 13 timeout 30s every 100ms
+json: stdout doc $.success = true
+close dap
+exit: 0

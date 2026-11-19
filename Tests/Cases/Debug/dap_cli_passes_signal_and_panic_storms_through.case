@@ -1,0 +1,24 @@
+# A storm of signals and of panics doesn't stop the program or end the
+# session. The program sends itself SIGUSR1 a hundred times, each one
+# taken by its own subscription, then forty helper tasks run, of which
+# every other one panics and its join fails. The adapter passes each
+# signal on to the program and reports no stop for any of them: the
+# program counts all hundred, sees its twenty failed joins, and exits 0,
+# reported as `exited` with exit code 0, then `terminated`.
+fixture: DapCLIPassesSignalAndPanicStormsThrough.fixture
+env: NO_COLOR=1
+session dap content-length: jet debug --dap {work}/main.jet
+send dap: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\"}}"
+send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{\"program\":\"{work}/main.jet\",\"stopOnEntry\":false,\"args\":[]}}"
+send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{}}"
+recv dap collect until ndjson $[?event="terminated"] #>= 1 timeout 60s
+stdout: ~ "100 USR1 received" # every signal reached the program
+stdout: ~ "20 of 40 workers panicked" # every panic ended its own task only
+json: stdout ndjson $[?event="exited"][0].body.exitCode = 0
+json: stdout ndjson $[?event="stopped"] #= 0
+stdout: !~ "Program stopped by" # no signal ended it
+send dap: "{\"seq\":4,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{}}"
+recv dap until $.request_seq = 4 timeout 30s every 100ms
+json: stdout doc $.success = true
+close dap
+exit: 0

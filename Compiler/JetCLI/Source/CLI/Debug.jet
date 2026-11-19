@@ -28,7 +28,9 @@
 // so the run synchronizes and prints as the recorded one did. An image
 // `jet build -O1` or `-O2` made replays as the O0 build does. The first sync
 // event where the run does otherwise stops it with `replay diverged at sync
-// event N`, the recorded event and the one the run got.
+// event N`, the recorded event and the one the run got. A source file that
+// is not the one recorded is refused (E3621); under `--dap` the adapter
+// answers each request with the refusal.
 //
 // `--record=NAME` debugs a source file while its runtime records the run as
 // `jet run --record=NAME` does: the same `.jet/replays/NAME.jetproof-replay`,
@@ -131,7 +133,7 @@ jet_cli_debug: fn(jet_argv: [String], args: [String], passthrough: [String]?, co
 // after `--` are refused.
 jet_cli_debug_target: fn(entry: String, scratch: String, deep_checks: DeepChecks, breaks: [NativeBreak], program_args: [String], dap: Bool, replay: String, record: String, color: Bool) -[FS, Env, Exec, IO, Net, Time, Rand, FFI.Asm]> JetCLIPlan Never! {
     if record != "" {
-        made: jet_cli_debug_record_begin(record, entry, scratch) ?? return jet_cli_debug_replay_refused(err, color)
+        made: jet_cli_debug_record_begin(record, entry, scratch) ?? return jet_cli_debug_unbegun(err, dap: dap, color: color)
         env: jet_cli_launch_env([JetCLIEnvVar]{JetCLIEnvVar{name: ENV_JET_RECORD, value: made.log}, JetCLIEnvVar{name: ENV_JET_REPLAY, value: ""}}) ?? [String]{}
         return jet_cli_debug_launch(entry, scratch, deep_checks, breaks, program_args, dap, Val(env), Val(made), color)
     }
@@ -139,10 +141,10 @@ jet_cli_debug_target: fn(entry: String, scratch: String, deep_checks: DeepChecks
         return jet_cli_debug_launch(entry, scratch, deep_checks, breaks, program_args, dap, None, None, color)
     }
     recorded := [String]{}
-    env: jet_cli_debug_replay_env(replay, entry, scratch, recorded) ?? return jet_cli_debug_replay_refused(err, color)
+    env: jet_cli_debug_replay_env(replay, entry, scratch, recorded) ?? return jet_cli_debug_unbegun(err, dap: dap, color: color)
     if program_args.len() > 0 && !jet_cli_debug_same_args(program_args, recorded) {
         shown: if recorded.len() == 0 -> "no arguments" else -> "`{recorded.join(" ")}`"
-        return jet_cli_debug_replay_refused(JetCLIProveRefusal{code: "E2104", what: "`--replay={replay}` reruns a run that had other program arguments", why: "the recording ran with {shown}, and a replay reproduces that run, so it takes its arguments from the recording", fix: "drop the words after `--`", exit_code: JET_DRIVER_EXIT_USAGE}, color)
+        return jet_cli_debug_unbegun(JetCLIProveRefusal{code: "E2104", what: "`--replay={replay}` reruns a run that had other program arguments", why: "the recording ran with {shown}, and a replay reproduces that run, so it takes its arguments from the recording", fix: "drop the words after `--`", exit_code: JET_DRIVER_EXIT_USAGE}, dap: dap, color: color)
     }
     jet_cli_debug_launch(entry, scratch, deep_checks, breaks, recorded, dap, Val(env), None, color)
 }
@@ -186,6 +188,14 @@ jet_cli_debug_replay_refused: fn(refusal: JetCLIProveRefusal, color: Bool) -> Je
     jet_cli_done(out.stdout, out.stderr, out.exit_code)
 }
 
+// A recording or replay refused before the session began, on stderr. Under
+// `--dap` the editor is answered with it too: each request the adapter gets
+// is refused with it (jet_cli_dap_refused).
+jet_cli_debug_unbegun: fn(refusal: JetCLIProveRefusal, dap: Bool{false}, color: Bool{false}) -[IO, Time.Wait]> JetCLIPlan Never! {
+    if dap -> jet_cli_dap_refused(jet_cli_prove_refusal_report(refusal))
+    jet_cli_debug_replay_refused(refusal, color)
+}
+
 // Debug `entry` with `program_args`, in the environment `env` when it is
 // set, making the recording `record` when it is set.
 jet_cli_debug_launch: fn(entry: String, scratch: String, deep_checks: DeepChecks, breaks: [NativeBreak], program_args: [String], dap: Bool, env: [String]?, record: JetCLIDebugRecord?, color: Bool) -[FS, Env, Exec, IO, Net, Time, Rand, FFI.Asm]> JetCLIPlan Never! {
@@ -200,8 +210,11 @@ jet_cli_debug_launch: fn(entry: String, scratch: String, deep_checks: DeepChecks
 // and no JET_RECORD. The program arguments the run was recorded with go to
 // `args`. NAME is a recording of the project a source `entry` is
 // in, or of the working directory's for an image, or a project-relative
-// `.jetproof-replay` path there.
-jet_cli_debug_replay_env: fn(name: String, entry: String, scratch: String, args: &[String]) -[FS, Env]> [String] JetCLIProveRefusal! {
+// `.jetproof-replay` path there. A source `entry` must be the source the
+// recording was made from: a recording binds its source's digest
+// (jet_cli_replay_source_identity), and one of other source is E3621. An
+// image binds no source, so it is replayed unchecked.
+jet_cli_debug_replay_env: fn(name: String, entry: String, scratch: String, args: &[String]) -[FS, Env, Time.Wait]> [String] JetCLIProveRefusal! {
     path_given: name.ends_with(".jetproof-replay")
     problem: if path_given -> jet_cli_replay_input_problem(name) else -> jet_cli_replay_name_problem(name)
     if problem == .Val(why) {
@@ -217,6 +230,12 @@ jet_cli_debug_replay_env: fn(name: String, entry: String, scratch: String, args:
     artifact: jet_cli_replay_verify_file(root, relative, relative) ?? return Err(jet_cli_replay_fault_refusal(err))
     if artifact.sync.len() == 0 {
         return Err(JetCLIProveRefusal{code: "E2104", what: "`{relative}` holds no run to replay", why: "it is a recording `jet test --record` made, which has no sync-order log", fix: "replay a recording `jet run --record=NAME` made", exit_code: JET_DRIVER_EXIT_USAGE})
+    }
+    if entry.ends_with(".jet") {
+        now: jet_cli_replay_source_identity(entry, [String]{entry}) ?? return Err(err)
+        if jet_cli_replay_field_value(artifact.identity, "source_digest") != now.identity.source_digest {
+            return Err(jet_cli_replay_refusal("E3621", "replay semantic identity does not match", "`{entry}` is not the source `{relative}` recorded: the recorded `source_digest` differs from this source's", "replay the source as it was recorded, or record this one with `jet run --record={name} {entry}`"))
+        }
     }
     loop arg in artifact.args -> args.push("{arg}")
     log: cli_files.join(scratch, "replay.log")
@@ -251,7 +270,7 @@ jet_cli_debug_break: fn(spec: String) -> NativeBreak? Never! {
 // O0, so it opens while the image builds.
 jet_cli_debug_build: fn(entry: String, scratch: String, deep_checks: DeepChecks, breaks: [NativeBreak], program_args: [String], dap: Bool, env: [String]?, record: JetCLIDebugRecord?, color: Bool) -[FS, Env, Exec, IO, Net, Time, Rand, FFI.Asm]> JetCLIPlan Never! {
     source: cli_files.read(entry) ?? return jet_cli_fail("E2105", "couldn't read `{entry}`: {err}", jet_cli_why("E2105"), "check the path, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
-    held: jet_cli_debug_eval_held_slot()
+    held: jet_cli_debug_eval_held_slot(built: true)
     jet_cli_debug_eval_held_start(held, entry, jet_cli_debug_eval_argv(deep_checks, 0), color: color)
     out_dir: cli_files.join(scratch, "out")
     built: cli_process.cmd(native_debug_build_argv(cli_sys.executable(), entry, out_dir, deep_checks)).stdout(.Capture).stderr(.Capture).run() ?? return jet_cli_fail("E2105", "couldn't run the debug build: {err}", jet_cli_why("E2105"), "check that this `jet` can run, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
@@ -264,7 +283,8 @@ jet_cli_debug_build: fn(entry: String, scratch: String, deep_checks: DeepChecks,
 // Debug the built `image`, whose `run` is in the source file `entry` with
 // the text `lines`, run with `program_args` and the environment `env` (None:
 // jet's own), with the session's held check `held`, which starts opening
-// here unless it is already. An `entry` of "" is the source the image's
+// here unless it is already or the session didn't build the image
+// (jet_cli_debug_eval_held_slot). An `entry` of "" is the source the image's
 // line table names, read if it is there. A replay (`env` names JET_REPLAY)
 // and a recording (`record`) need an image that links the runtime's
 // observation start, where both begin; a recording is published when the
@@ -274,6 +294,7 @@ jet_cli_debug_session: fn(image: String, entry: String, lines: [String], scratch
     if env != None && !session.replay_start {
         session.close()
         refused: jet_cli_debug_unstarted(image, if record == None -> "replay its recording" else -> "be recorded")
+        if dap -> jet_cli_dap_refused(jet_cli_prove_refusal_report(refused))
         return jet_cli_fail(refused.code, refused.what, refused.why, refused.fix, color, refused.exit_code)
     }
     session.env = env
@@ -326,8 +347,9 @@ jet_cli_debug_attach: fn(pid: Int, scratch: String, deep_checks: DeepChecks, col
     source_file: session.run_source()
     level: session.level()
     argv: jet_cli_debug_eval_argv(deep_checks, level)
+    // The process's image was built before the session, so evaluations
+    // compile with no held check (jet_cli_debug_eval_held_slot).
     held: jet_cli_debug_eval_held_slot()
-    jet_cli_debug_eval_held_start(held, source_file, argv, color: color)
     session.evaluate_with(JetCLIDebugEvaluator{entry: source_file, argv: argv, color: color, held: held})
     lines: (cli_files.read(source_file) ?? "").split("\n").to_list()
     file: cli_files.basename(source_file)

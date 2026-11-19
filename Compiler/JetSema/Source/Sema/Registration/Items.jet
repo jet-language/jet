@@ -5365,6 +5365,9 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
     // declare: one fixed point over every parsed input before any module is
     // prepared, so each preparation still reads only its own job.
     codecs := sema_derive_foreign_codecs(prepared_inputs)
+    // An impl of a trait another module declares gains the trait's default
+    // bodies, read off every input the same way.
+    sema_trait_impls_foreign(prepared_inputs, edges, table)
     // Each module interns its symbols into its own id range, fixed before any
     // thread runs, so every id is the same for any thread count
     // (Docs/Spec/compiler-data.md). The modules share three quarters of the

@@ -805,9 +805,10 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
                     if length >= 0 && 3 + (length + 7) /% 8 <= record {
                         sampled.points[link_debug_addr(words, at + 8)] = String.from_bytes(words.slice(at + 24, at + 24 + length)) ?? "point"
                     }
-                } else if record >= 5 {
+                } else if record >= 7 {
                     // The line's sampled address (0 for a baseline), the
-                    // speedup, the wall time, the delay inserted and each
+                    // speedup, the wall time, the delay inserted, the
+                    // threads' run time and runqueue wait, and each
                     // point's span in the experiment.
                     experiment: jet_cli_perf_causal_record(sampled, owned, words, at, record)
                     sampled.experiments.push(experiment)

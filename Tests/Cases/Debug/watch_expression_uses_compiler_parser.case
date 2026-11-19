@@ -1,12 +1,12 @@
 # `watch <place>` reads its place with the compiler's parser, as `print`
-# reads its expression: a malformed place is refused with the parser's
-# diagnostic, an expression that names no place is refused, an index that
-# is not a literal (`i + 1`) is evaluated when the watch is set, and a field
-# path names the field. The run starts at `run`, whose entry breakpoint was
-# number 1, so `break 8` is 2 and the two watches are 3 and 4; the refused
-# watches take no number. run_order(1) writes order.lines[2] on line 8 and
-# order.total on line 9. The fixture must stay in jet fmt form: line 8 is
-# the write to the item, line 9 the write to the field.
+# reads its expression: a malformed place is refused (E2237) with the
+# parser's diagnostic, an expression that names no place is refused, an
+# index that is not a literal (`i + 1`) is evaluated when the watch is set,
+# and a field path names the field. The run starts at `run`, whose entry
+# breakpoint was number 1, so `break 8` is 2 and the two watches are 3 and
+# 4; the refused watches take no number. run_order(1) writes order.lines[2]
+# on line 8 and order.total on line 9. The fixture must stay in jet fmt
+# form: line 8 is the write to the item, line 9 the write to the field.
 fixture: WatchExpressionUsesCompilerParser.fixture
 env: NO_COLOR=1
 env: PATH={work}/no-tools
@@ -14,8 +14,8 @@ step: jet debug prog.jet
 stdin: watch_expression_uses_compiler_parser.stdin
 exit: 0
 stdout: ~ "Breakpoint hit  prog.jet:8  in run_order()\n" # the breakpoint stops before the item is written
-stdout: ~ "Can't watch `order.lines[`: `order.lines[` is not a Jet expression: " # the parser's diagnostic refuses a malformed place
-stdout: ~ "Can't watch `order.total + 1`: `order.total + 1` names no place; a place is a local or a field path under one" # an expression that is no place is refused
+stdout: ~ "Error [jet.DebugRequestRefused]: The debugger can't do this here: `order.lines[` can't be watched: `order.lines[` is not a Jet expression: " # the parser's diagnostic refuses a malformed place
+stdout: ~ "Error [jet.DebugRequestRefused]: The debugger can't do this here: `order.total + 1` can't be watched: `order.total + 1` names no place; a place is a local or a field path under one" # an expression that is no place is refused
 stdout: ~ "Watchpoint 3  order.lines[i + 1] = 3\n" # the index expression is evaluated and the watch reads the item
 stdout: ~ "Watchpoint 4  order.total = 0\n" # a field path reads the field
 stdout: ~ "Watchpoint 3 hit  prog.jet:8  in run_order()\norder.lines[i + 1]: 3 -> 7\n" # the write to the item stops

@@ -9,7 +9,7 @@ use {
     native_files: core.files
     native_math: core.math
     jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_EVENT_EXIT, X64_TRACE_EVENT_STOP, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, link_debug_uleb, x64_jetline_find, x64_jetline_line, x64_jetline_sleb, x64_jetline_text, x64_trace_attach, x64_trace_close, x64_trace_debug_register, x64_trace_detach, x64_trace_follow_exits, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_seize, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait, x64_trace_wait_for, x64_trace_wait_or_input, x64_trace_write]
-    jet_foundation.[DeepChecks, Diagnostic, ENV_JET_RECORD, deep_checks_flags, diagnostic_display_identities, diagnostic_from_registry, diagnostic_registry_row, foundation_named_type]
+    jet_foundation.[DeepChecks, Diagnostic, ENV_JET_RECORD, deep_checks_flags, diagnostic_display_identities, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all, foundation_named_type]
 }
 
 #Error
@@ -47,6 +47,16 @@ NativeAttachRefused: struct {
 NATIVE_ATTACH_INVALID: "E2236"
 
 NATIVE_ATTACH_FAILED: "E2231"
+
+// E2237: a request the session can't answer faithfully: going back or
+// `why` outside a replay or after `fix`, going back where the replay holds
+// nothing earlier, or a watch on no place the selected frame holds.
+NATIVE_DEBUG_REFUSED: "E2237"
+
+// The console's answer to a request refused with E2237 for `detail`.
+native_debug_refused: fn(detail: String) -> String Never! {
+    diagnostic_render_all("", "", [Diagnostic]{native_debug_report(NATIVE_DEBUG_REFUSED, detail)}, false)
+}
 
 // One frame of a stop: the Jet function and its source position, or a frame
 // without line information (the runtime's start code) with line 0. An
@@ -232,6 +242,19 @@ NativeWatchAsk: struct {
     place: String,
     frame: Int,
     number: Int,
+}
+
+// What NativeSession.watch found: the watch's number and value shown, or
+// why the place can't be watched there (`refused`, E2237's detail; "" when
+// it can). Finding without placing leaves number 0.
+NativeWatched: struct {
+    number: Int,
+    shown: String,
+    refused: String,
+}
+
+native_watch_refused: fn(detail: String) -> NativeWatched Never! {
+    NativeWatched{number: 0, shown: "", refused: detail}
 }
 
 // A pass a probe counted (NativeProbe): its point, the canonical frame
@@ -457,6 +480,10 @@ NativeSession: struct {
     // Whether a reverse command is making the moves again, which records
     // none of them twice.
     rerunning: Bool{false},
+    // Why the last reverse command went nowhere, the detail of its E2237:
+    // the replay holds nothing earlier, and the program came back to the
+    // same stop ("" when it moved).
+    nowhere: String{""},
     // The trap bytes and passes of a reverse command's run.
     probe: NativeProbe{NativeProbe{}},
     // The writes `why` follows in its run.
@@ -2022,7 +2049,9 @@ NativeSession: struct {
             }
             "rs" | "reverse-step" | "rn" | "reverse-next" | "rf" | "reverse-finish" | "rc" | "reverse-continue" -> {
                 refusal: self.reverse_refusal()
-                if refusal != "" -> return Ok(NativeDebugStep{text: "{refusal}\n", stop: stop})
+                if refusal != "" {
+                    return Ok(NativeDebugStep{text: native_debug_refused(refusal), stop: stop})
+                }
                 short: if word == {
                     "rs" | "reverse-step" -> "s"
                     "rn" | "reverse-next" -> "n"
@@ -2031,6 +2060,9 @@ NativeSession: struct {
                 }
                 settled: self.reverse(short) ?? return Err(err)
                 shown: self.report(settled.stop, file, lines) ?? return Err(err)
+                if self.nowhere != "" {
+                    return Ok(NativeDebugStep{text: "{native_debug_refused(self.nowhere)}{shown}", stop: settled.stop})
+                }
                 return Ok(NativeDebugStep{text: shown, stop: settled.stop})
             }
             "b" | "break" -> text = self.break_command(operand, file) ?? return Err(err)
@@ -2471,44 +2503,69 @@ NativeSession: struct {
     // debug registers trap the write, so the program runs at full speed
     // until then, and a write that leaves the value as it was runs on. A
     // local held in a register is followed by stepping its frame's own code
-    // instead (watch_steps).
+    // instead (watch_steps). A place it can't watch is refused with E2237.
     watch_command: fn(&self, operand: String) -> String NativeDebugError! {
-        if operand == "" -> return Ok("Watch needs a local or a field path, as `watch total`\n")
+        placed: self.watch(operand) ?? return Err(err)
+        if placed.refused != "" -> return Ok(native_debug_refused(placed.refused))
+        Ok("Watchpoint {placed.number}  {operand} = {placed.shown}\n")
+    }
+
+    // Watch `operand` in the selected frame, as watch_command, or, unless
+    // `place`, find only whether it can be watched there: the watch's number
+    // and value shown, or why it can't be (NativeWatched.refused). Finding
+    // evaluates no more than an index the place names (watch_path); placing
+    // evaluates `operand` for the value shown.
+    watch: fn(&self, operand: String, place: Bool{true}) -> NativeWatched NativeDebugError! {
+        if operand == "" {
+            return Ok(native_watch_refused("a watch needs a local, a field path or a List item, as `watch total`"))
+        }
+        if self.focus != None {
+            return Ok(native_watch_refused("a watch watches a frame of the task the program stopped in, not another task's"))
+        }
         path: self.watch_path(operand)
-        if path.refusal != "" -> return Ok("Can't watch `{operand}`: {path.refusal}\n")
+        if path.refusal != "" {
+            return Ok(native_watch_refused("`{operand}` can't be watched: {path.refusal}"))
+        }
         // The value shown is the compiler's evaluation of `operand`; the
         // trap watches the bytes its place names.
-        value: self.evaluate(operand) ?? return Ok("Can't watch `{operand}`: {err.message}\n")
+        shown := ""
+        if place {
+            value: self.evaluate(operand) ?? return Ok(native_watch_refused("`{operand}` can't be watched: {err.message}"))
+            shown = value.shown.move()
+        }
         self.ready() ?? return Err(err)
         frames: self.unwind() ?? return Err(err)
-        if frames.len() == 0 -> return Ok("No frame to watch in\n")
+        if frames.len() == 0 {
+            return Ok(native_watch_refused("the program has no frame to watch in"))
+        }
         levels: native_levels(self.image, frames)
         level: if self.selected < levels.len() -> levels[self.selected] else -> levels[0]
         frame: frames[level.frame]
         memory: NativeMemory{trace: Val(self.trace), blocks: [NativeBlock]{}}
-        place: native_watch_place(self.image, memory, frame, native_lookup(level.frame, frame.pc), level.site, path)
-        if place.refusal != "" -> return Ok("{place.refusal}\n")
+        found: native_watch_place(self.image, memory, frame, native_lookup(level.frame, frame.pc), level.site, path)
+        if found.refusal != "" -> return Ok(native_watch_refused(found.refusal))
         begins := -1
         if native_function_at(self.image, native_lookup(level.frame, frame.pc)) == .Val(owner) {
             begins = owner.low
         }
-        size: native_type_size(self.image, place.ty)
-        if size <= 0 -> return Ok("`{operand}` has no bytes to watch\n")
-        if place.register >= 0 {
+        size: native_type_size(self.image, found.ty)
+        if size <= 0 -> return Ok(native_watch_refused("`{operand}` has no bytes to watch"))
+        if found.register >= 0 {
             loop watch in self.watches {
                 if watch.register >= 0 {
-                    return Ok("`{operand}` is held in a register, which a watch follows by stepping its frame, and watch {watch.number} already does; `delete` it first\n")
+                    return Ok(native_watch_refused("`{operand}` is held in a register, which a watch follows by stepping its frame, and watch {watch.number} already does; `delete` it first"))
                 }
             }
-            held: native_low_bytes(frame.registers[place.register], if size < 8 -> size else -> 8)
+            if !place -> return Ok(NativeWatched{number: 0, shown: "", refused: ""})
+            held: native_low_bytes(frame.registers[found.register], if size < 8 -> size else -> 8)
             self.numbered += 1
             self.ask(operand)
-            self.watches.push(NativeWatch{number: self.numbered, shown: "{operand}", address: 0, ty: place.ty, spans: [NativeWatchSpan]{}, thread: self.trace.thread, cfa: frame.cfa, bytes: held, register: place.register, ranges: place.ranges, function: begins})
-            return Ok("Watchpoint {self.numbered}  {operand} = {value.shown}\n")
+            self.watches.push(NativeWatch{number: self.numbered, shown: "{operand}", address: 0, ty: found.ty, spans: [NativeWatchSpan]{}, thread: self.trace.thread, cfa: frame.cfa, bytes: held, register: found.register, ranges: found.ranges, function: begins})
+            return Ok(NativeWatched{number: self.numbered, shown: shown.move(), refused: ""})
         }
-        bytes: native_debug_bytes(memory, place.address, size) ?? return Ok("`{operand}` can't be read here\n")
-        spans := native_watch_spans(place.address, size)
-        if place.anchor != 0 -> spans.extend(native_watch_spans(place.anchor, 8))
+        bytes: native_debug_bytes(memory, found.address, size) ?? return Ok(native_watch_refused("`{operand}` can't be read here"))
+        spans := native_watch_spans(found.address, size)
+        if found.anchor != 0 -> spans.extend(native_watch_spans(found.anchor, 8))
         free := [Int]{}
         loop slot in 0..<NATIVE_DEBUG_WATCH_SLOTS {
             held := false
@@ -2520,8 +2577,9 @@ NativeSession: struct {
             if !held -> free.push(slot)
         }
         if spans.len() > free.len() {
-            return Ok("`{operand}` needs {spans.len()} of the CPU's {NATIVE_DEBUG_WATCH_SLOTS} debug registers and {free.len()} are free; `delete` a watch first\n")
+            return Ok(native_watch_refused("`{operand}` needs {spans.len()} of the CPU's {NATIVE_DEBUG_WATCH_SLOTS} debug registers and {free.len()} are free; `delete` a watch first"))
         }
+        if !place -> return Ok(NativeWatched{number: 0, shown: "", refused: ""})
         loop k in 0..<spans.len() {
             spans[k].slot = free[k]
             if !self.set_debug_register(free[k], spans[k].address) {
@@ -2530,11 +2588,11 @@ NativeSession: struct {
         }
         self.numbered += 1
         self.ask(operand)
-        self.watches.push(NativeWatch{number: self.numbered, shown: "{operand}", address: place.address, ty: place.ty, spans: spans, thread: self.trace.thread, cfa: frame.cfa, bytes: bytes, register: -1, ranges: [NativeRange]{}, anchor: place.anchor, offset: place.offset, function: begins})
+        self.watches.push(NativeWatch{number: self.numbered, shown: "{operand}", address: found.address, ty: found.ty, spans: spans, thread: self.trace.thread, cfa: frame.cfa, bytes: bytes, register: -1, ranges: [NativeRange]{}, anchor: found.anchor, offset: found.offset, function: begins})
         if !self.set_debug_register(7, native_watch_control(self.watches)) {
             return Err(NativeDebugError{detail: "couldn't set the program's debug control register"})
         }
-        Ok("Watchpoint {self.numbered}  {operand} = {value.shown}\n")
+        Ok(NativeWatched{number: self.numbered, shown: shown.move(), refused: ""})
     }
 
     // Keep the watch on `place` just set, numbered as the last placed, for
@@ -3395,17 +3453,17 @@ NativeSession: struct {
     }
 
     // Why a reverse command can't run ("" when it can): replay_refusal.
-    reverse_refusal: fn(self) -> String Never! { self.replay_refusal("Reverse") }
+    reverse_refusal: fn(self) -> String Never! { self.replay_refusal("going back") }
 
-    // Why `what`, which runs the program again, can't run ("" when it can):
-    // it runs in a replay alone, where the recording makes each run of the
-    // program the same, and not once `fix` has changed the program's code,
-    // which a new run would not have.
+    // Why `what`, which runs the program again, can't run ("" when it can),
+    // the detail of its E2237: it runs in a replay alone, where the
+    // recording makes each run of the program the same, and not once `fix`
+    // has changed the program's code, which a new run would not have.
     replay_refusal: fn(self, what: String) -> String Never! {
         if {
-            !self.replaying() || self.moves.len() == 0 -> "{what} runs in a replay: start the session with `jet debug --replay=NAME`"
-            self.fixed.len() > 0 -> "{what} can't run after `fix`: a new run of the program would run the code before the fix"
-            !self.alive() -> "The program has finished"
+            !self.replaying() || self.moves.len() == 0 -> "{what} needs a replay: start the session with `jet debug --replay=NAME`"
+            self.fixed.len() > 0 -> "{what} can't follow `fix`: a new run of the program would run the code before the fix"
+            !self.alive() -> "{what} needs a running program: the program has finished"
             else -> ""
         }
     }
@@ -3422,10 +3480,11 @@ NativeSession: struct {
     // the line before is not found there), or on the breakpoints, from the
     // start; a second run makes the moves before that one again and seeks
     // the pass the command wants, the new last move. With none, the
-    // program comes back to this stop, saying so. Watches set after the
-    // point it goes back to end, each with a note.
+    // program comes back to this stop, and `nowhere` says why. Watches set
+    // after the point it goes back to end, each with a note.
     reverse: fn(&self, word: String) -> NativeSettled NativeDebugError! {
         self.ready() ?? return Err(err)
+        self.nowhere = ""
         before := [Int]{}
         loop watch in self.watches -> before.push(watch.number)
         // Watches set at this stop belong to no move yet.
@@ -3464,7 +3523,8 @@ NativeSession: struct {
                     mark: self.probe.passes[hit].mark
                     return self.seek_from(1, mark, before)
                 }
-                self.notes = "{self.ended_watches(before)}No earlier breakpoint or watch hit in this replay\n"
+                self.notes = self.ended_watches(before)
+                self.nowhere = "the replay holds no breakpoint or watch hit before this stop"
                 return Ok(native_reverse_settled(again))
             }
             if native_reverse_target(self.probe.passes, word, here, skip: skip) == .Val(target) {
@@ -3475,8 +3535,8 @@ NativeSession: struct {
                 }
             }
             if window == 1 {
-                none: if word == "f" -> "No caller to go back to in this replay" else -> "No earlier line in this replay"
-                self.notes = "{self.ended_watches(before)}{none}\n"
+                self.nowhere = if word == "f" -> "the replay holds no caller to go back to from this stop" else -> "the replay holds no line before this stop"
+                self.notes = self.ended_watches(before)
                 return Ok(native_reverse_settled(again))
             }
             window -= 1
@@ -3592,7 +3652,7 @@ NativeSession: struct {
             loop ask in made.asks {
                 self.selected = ask.frame
                 set: self.watches.len()
-                _ := self.watch_command(ask.place) ?? return Err(err)
+                _ := self.watch(ask.place) ?? return Err(err)
                 if self.watches.len() > set -> self.watches[set].number = ask.number
             }
             self.selected = 0
@@ -3688,7 +3748,9 @@ NativeSession: struct {
             return Ok(NativeWhy{text: "Why needs a local or a field path, as `why total`\n", recover: false})
         }
         refusal: self.replay_refusal("`why`")
-        if refusal != "" -> return Ok(NativeWhy{text: "{refusal}\n", recover: false})
+        if refusal != "" {
+            return Ok(NativeWhy{text: native_debug_refused(refusal), recover: false})
+        }
         path: self.watch_path(operand)
         if path.refusal != "" {
             return Ok(NativeWhy{text: "Can't ask why of `{operand}`: {path.refusal}\n", recover: false})

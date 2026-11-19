@@ -1,7 +1,7 @@
 # Under `jet perf run --lens=causal`, each request an HTTP server answers is
-# the progress point `request`, with no call in the program: `jet perf view`
-# ranks, for it, how much sooner each answer would come if a line were 30%
-# faster.
+# the progress point `request`, with no call in the program: the causal
+# section names it, and ranks for it how much sooner each answer would come
+# if a line were 30% faster unless its threads waited too long for a CPU.
 requires: os-name:linux
 requires: arch:x86_64
 fixture: CausalCountsAnsweredRequests.fixture
@@ -9,6 +9,7 @@ env: NO_COLOR=1
 step: jet perf run -A -O2 main.jet --lens=causal --out requests.jettrace
 exit: 0
 stdout: = "served\n"
+json: file requests.jettrace doc $.content.receipt_sections[?name="causal"][0].value.points[?name="request"] #= 1 # an answered request is a progress point
 step: jet perf view requests.jettrace
 exit: 0
-stdout: ~ "`request`: if this line were 30% faster, each pass would come sooner by" # an answered request is a progress point
+stdout: ~ "causal\n  " # the view gives the lens's ranking or its refusal

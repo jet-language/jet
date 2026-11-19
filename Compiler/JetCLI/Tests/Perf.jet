@@ -632,13 +632,32 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     experiments := [JetCLIPerfExperiment]{}
     // Baselines: 4 passes after the first in 20 ms, a pass each 5 ms. The
     // line's experiments: 4 in 22 ms with 6 ms of it inserted delay, a pass
-    // each 4 ms, 20% sooner.
+    // each 4 ms, 20% sooner. Each thread has a CPU: they never wait for one.
     loop _ in 0..<6 {
-        experiments.push(JetCLIPerfExperiment{line: U64{0}, name: "", speedup: 0, after: [Int]{4}, span_ns: [Int]{20000000}, span_delay_ns: [Int]{0}})
-        experiments.push(JetCLIPerfExperiment{line: U64{30}, name: "narrow", speedup: 300, after: [Int]{4}, span_ns: [Int]{22000000}, span_delay_ns: [Int]{6000000}})
+        experiments.push(JetCLIPerfExperiment{line: U64{0}, name: "", speedup: 0, run_ns: 25000000, wait_ns: 0, after: [Int]{4}, span_ns: [Int]{20000000}, span_delay_ns: [Int]{0}})
+        experiments.push(JetCLIPerfExperiment{line: U64{30}, name: "narrow", speedup: 300, run_ns: 25000000, wait_ns: 0, after: [Int]{4}, span_ns: [Int]{22000000}, span_delay_ns: [Int]{6000000}})
     }
     section: jet_cli_perf_causal_section("main.jet", experiments, [Int:String]{0: "round"})
     json: String.from_bytes(canonical_json_bytes(section.value)) ?? panic("the section is UTF-8")
     assert(json.contains(`{"experiments":6,"function":"narrow","gain_tenths":200,"high_tenths":200,"line":30,"low_tenths":200}`))
+    assert(json.contains(`"cpu_run_ms":300,"cpu_wait_ms":0,`))
     assert(json.contains(`"refused":null`))
+}
+
+#Test("a causal run whose threads waited for a CPU most of their run time is refused with the wait, its gains withheld") {
+    experiments := [JetCLIPerfExperiment]{}
+    // The same rates as a run with a CPU per thread would rank, but the
+    // threads waited 16 ms of every 20 they ran, as four threads do on
+    // 2.15 CPUs.
+    loop _ in 0..<6 {
+        experiments.push(JetCLIPerfExperiment{line: U64{0}, name: "", speedup: 0, run_ns: 20000000, wait_ns: 16000000, after: [Int]{4}, span_ns: [Int]{20000000}, span_delay_ns: [Int]{0}})
+        experiments.push(JetCLIPerfExperiment{line: U64{30}, name: "narrow", speedup: 300, run_ns: 20000000, wait_ns: 16000000, after: [Int]{4}, span_ns: [Int]{22000000}, span_delay_ns: [Int]{6000000}})
+    }
+    section: jet_cli_perf_causal_section("main.jet", experiments, [Int:String]{0: "round"})
+    json: String.from_bytes(canonical_json_bytes(section.value)) ?? panic("the section is UTF-8")
+    assert(json.contains(`"refused":"the program's threads waited 192 ms for a CPU while they ran 240 ms, 80.0% of their run time, above the 20.0% the lens ranks under: `))
+    assert(json.contains(`"cpu_run_ms":240,"cpu_wait_ms":192,`))
+    // The point keeps its name; no gain is given.
+    assert(json.contains(`{"lines":[],"name":"round","unranked":[]}`))
+    assert(!json.contains(`"gain_tenths"`))
 }

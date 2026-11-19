@@ -1,0 +1,27 @@
+# A program a signal ends (here SIGTERM, which it sends itself through
+# `sh`) is reported as it ended: its output, the signal that stopped it on
+# stderr, then `terminated`. It ran no further, so it never says it is
+# still running; it has no exit code, so there is no `exited` event, and
+# no stop. After its end `stackTrace` fails, saying the program is not
+# paused, and `disconnect` closes the session cleanly.
+fixture: DapCLIEndsOnASignalWithAnHonestState.fixture
+env: NO_COLOR=1
+session dap content-length: jet debug --dap {work}/main.jet
+send dap: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\"}}"
+send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{\"program\":\"{work}/main.jet\",\"stopOnEntry\":false,\"args\":[]}}"
+send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{}}"
+recv dap collect until ndjson $[?event="terminated"] #>= 1 timeout 30s
+stdout: ~ "\"output\":\"stopping myself" # the program's own output comes first
+stdout: ~ "\"category\":\"stderr\",\"output\":\"Program stopped by SIGTERM" # then the signal that ended it
+stdout: !~ "still running" # it ran no further
+json: stdout ndjson $[?event="exited"] #= 0
+json: stdout ndjson $[?event="stopped"] #= 0
+send dap: "{\"seq\":4,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.request_seq = 4 timeout 30s every 100ms
+json: stdout doc $.success = false
+json: stdout doc $.message = "the program is not paused"
+send dap: "{\"seq\":5,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{}}"
+recv dap until $.request_seq = 5 timeout 30s every 100ms
+json: stdout doc $.success = true
+close dap
+exit: 0

@@ -1,0 +1,43 @@
+# Going back and `why` run the program again, which only a recording makes
+# the same: a session without `--replay` refuses them with E2237
+# (jet.DebugRequestRefused) and stays at its stop. At the console the
+# refusal is the rendered diagnostic; over `--dap` the adapter offers no
+# `supportsStepBack`, and `stepBack` fails with E2237 as its `jetCode`.
+# The fixture must stay in jet fmt form; line 21 adds to `total`.
+fixture: ReplayRefusals.fixture
+env: NO_COLOR=1
+step: jet debug prog.jet
+stdin: replay_refusals_unsupported.stdin
+exit: 0
+stdout: ~ "(Jet) rs\nError [jet.DebugRequestRefused]: The debugger can't do this here: going back needs a replay: start the session with `jet debug --replay=NAME`.\n Why: " # a reverse step is refused with E2237
+stdout: ~ "(Jet) reverse-continue\nError [jet.DebugRequestRefused]: The debugger can't do this here: going back needs a replay: start the session with `jet debug --replay=NAME`.\n" # and so is a reverse continue
+stdout: ~ "(Jet) why total\nError [jet.DebugRequestRefused]: The debugger can't do this here: `why` needs a replay: start the session with `jet debug --replay=NAME`.\n" # and `why`
+stdout: ~ "More: jet-lang.dev/e/E2237\n" # the refusal names its page
+stdout: ~ "total 6 tally " # the session stayed at its stop, and the program runs on to its end
+stdout: ~ "Program finished\n" # the session runs the program to its end
+session dap content-length: jet debug --dap {work}/prog.jet
+send dap: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\",\"linesStartAt1\":true,\"columnsStartAt1\":true}}"
+recv dap until $.request_seq = 1 timeout 30s every 100ms
+json: stdout doc $.success = true
+stdout: !~ "supportsStepBack" # no recording, so no going back
+send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{\"program\":\"{work}/prog.jet\",\"stopOnEntry\":false,\"args\":[]}}"
+recv dap until $.event = "initialized" timeout 30s every 100ms
+send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/prog.jet\"},\"breakpoints\":[{\"line\":21}]}}"
+recv dap until $.request_seq = 3 timeout 30s every 100ms
+json: stdout doc $.body.breakpoints[0].verified = true
+send dap: "{\"seq\":4,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{}}"
+recv dap until $.event = "stopped" timeout 30s every 100ms
+json: stdout doc $.body.reason = "breakpoint"
+send dap: "{\"seq\":5,\"type\":\"request\",\"command\":\"stepBack\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.request_seq = 5 timeout 30s every 100ms
+json: stdout doc $.success = false
+stdout: ~ "\"jetCode\":\"E2237\"" # the registered refusal's code
+stdout: ~ "going back needs a replay" # its What names why
+send dap: "{\"seq\":6,\"type\":\"request\",\"command\":\"evaluate\",\"arguments\":{\"expression\":\"k\",\"context\":\"repl\"}}"
+recv dap until $.request_seq = 6 timeout 30s every 100ms
+json: stdout doc $.body.result = "0" # still at the first hit
+send dap: "{\"seq\":7,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{}}"
+recv dap until $.request_seq = 7 timeout 30s every 100ms
+json: stdout doc $.success = true
+close dap
+exit: 0

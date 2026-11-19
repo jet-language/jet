@@ -1,0 +1,15 @@
+# Claim: an impl of a trait another module declares gains the trait's default
+# methods, whose bodies resolve their names in the trait's module: the
+# `impl Retain` in a type body of the package's root module and the one in a
+# type body of its file module `local` both answer `evictable` from
+# retain_lib, through a generic bound and as a direct call
+# (Registration/TraitImpls.jet).
+fixture: TraitDefaultOfAnotherModuleRuns.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check app/run.jet
+exit: 0
+step: jet run app/run.jet
+exit: 0
+stdout: = "2\nfalse\n1\ntrue\n"

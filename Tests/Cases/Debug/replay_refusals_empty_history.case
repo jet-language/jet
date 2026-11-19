@@ -1,0 +1,49 @@
+# Going back where the replay holds nothing earlier is refused with E2237
+# (jet.DebugRequestRefused): the program comes back to the same stop. At
+# the console `rc` from the first hit of line 21 has no earlier breakpoint
+# or watch hit to go to, past the stop at the start of `run`, so a second
+# `rc` is refused there at the latest. Over `--dap`, `reverseContinue` from
+# the first hit fails with E2237 as its `jetCode`, and the stop's frame ids
+# and values still hold.
+# The fixture must stay in jet fmt form; line 21 adds to `total`.
+fixture: ReplayRefusals.fixture
+env: NO_COLOR=1
+step: jet run --record=back prog.jet
+exit: 0
+step: jet debug --replay=back prog.jet
+stdin: replay_refusals_empty_history.stdin
+exit: 0
+stdout: ~ "(Jet) rc\nError [jet.DebugRequestRefused]: The debugger can't do this here: the replay holds no breakpoint or watch hit before this stop.\n" # nothing earlier to go back to
+stdout: ~ "More: jet-lang.dev/e/E2237\n" # the refusal names its page
+stdout: ~ "total 6 tally " # the program runs on to its end
+stdout: ~ "Program finished\n" # the session runs the program to its end
+stdout+stderr: !~ "replay diverged" # the replay stays faithful to the recording
+session dap content-length: jet debug --dap --replay=back {work}/prog.jet
+send dap: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\",\"linesStartAt1\":true,\"columnsStartAt1\":true}}"
+recv dap until $.request_seq = 1 timeout 30s every 100ms
+json: stdout doc $.body.supportsStepBack = true
+send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{\"program\":\"{work}/prog.jet\",\"stopOnEntry\":false,\"args\":[]}}"
+recv dap until $.event = "initialized" timeout 30s every 100ms
+send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/prog.jet\"},\"breakpoints\":[{\"line\":21}]}}"
+recv dap until $.request_seq = 3 timeout 30s every 100ms
+json: stdout doc $.body.breakpoints[0].verified = true
+send dap: "{\"seq\":4,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{}}"
+recv dap until $.event = "stopped" timeout 30s every 100ms
+json: stdout doc $.body.reason = "breakpoint"
+send dap: "{\"seq\":5,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.request_seq = 5 timeout 30s every 100ms
+capture: frame stdout doc $.body.stackFrames[0].id
+send dap: "{\"seq\":6,\"type\":\"request\",\"command\":\"reverseContinue\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.request_seq = 6 timeout 60s every 100ms
+json: stdout doc $.success = false
+stdout: ~ "\"jetCode\":\"E2237\"" # the registered refusal's code
+stdout: ~ "the replay holds no breakpoint or watch hit before this stop" # its What names why
+send dap: "{\"seq\":7,\"type\":\"request\",\"command\":\"evaluate\",\"arguments\":{\"expression\":\"k\",\"frameId\":{cap:frame},\"context\":\"repl\"}}"
+recv dap until $.request_seq = 7 timeout 30s every 100ms
+json: stdout doc $.success = true # the frame id still holds
+json: stdout doc $.body.result = "0" # at the first hit still
+send dap: "{\"seq\":8,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{}}"
+recv dap until $.request_seq = 8 timeout 30s every 100ms
+json: stdout doc $.success = true
+close dap
+exit: 0
