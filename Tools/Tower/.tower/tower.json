@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112400,
+    "rev": 112404,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -63600,7 +63600,7 @@
       "track": "epoch",
       "epoch": "e20",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -63634,11 +63634,11 @@
         {
           "n": 1,
           "text": "Every tool output and selector listed in the body writes and reads symbol paths with `.` (for example `inferred_effect_signature.announce`), with no `::` writer, reader or fallback left except real Rust paths in RustForeign.jet; a repo search for `::` in Compiler/ outside Rust-foreign code and dated docs finds none. Proof: git grep for `::` in Compiler, outside RustForeign.jet and dated docs, finds nothing that writes or reads a symbol path.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:24:57.014Z"
+          "evidence": "p325 batch compiler (dev e6ddae4d43) landed 7e7bdeae41: JetSema EvalProbe now keys its probe module \"module:10:eval-probe:main\", the driver identity format, not \"eval-probe::main\". git grep \"::\" in Compiler outside RustForeign*.jet and *.md: 130 lines in 43 files, none a symbol-path writer, reader or fallback. They are IPv6 literals ([::1], ::ffff, ::/96), CSS pseudo-elements (::after, ::before, ::-webkit-details-marker), cgroup v2 \"0::\" rows, GitHub ::{level} annotations, PowerShell :: in completion scripts, Rust/C idioms in comments (u64::MAX, f64::total_cmp, Rc::ptr_eq, Read::read, std::process), the retired-sigil diagnostic E-row and its structured fix, lexer and parser tests of that retired sigil, the DeepChecks malformed-selector rejection test (\"tree::run\" is refused), the Types.jet assertion that a key holds no \"::\", RustSource test fixtures, Unicode table data, retired-with-rust.tsv test names, and one length-prefixed module identity (\"module:14:source-root:0:\" + path) in a JetDebug test.",
+          "at": "2026-11-19T16:05:49.947Z"
         },
         {
           "n": 2,
@@ -63685,9 +63685,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T19:42:47.719Z",
-      "updated": "2026-11-18T07:24:49.008Z",
+      "updated": "2026-11-19T16:05:52.472Z",
       "updatedBy": "Main",
-      "criteriaLastN": 4
+      "criteriaLastN": 4,
+      "completedAt": "2026-11-19T16:05:52.472Z"
     },
     {
       "id": "c078tv7g",
@@ -75296,6 +75297,11 @@
         {
           "at": "2026-11-19",
           "by": "Main",
+          "text": "Main 11:00 cleanup incident: deleting dead lanes also removed the Lander lane, which still held the landing cycle s devshell.path and musl.env and the suite s published jetpack. p325 s suite lost its jetpack mid-run (69 false new failures in Pkg, Jetpack, EnvDevTrust, InlineDeps) and p326 s first census ran with no git/node/python3 and landed nothing. Restored: devshell.path from `nix develop` of the repository flake, musl.env from the flake s JET_RUST_MUSL_* plus JET_PACK_MUSL_LIB, and jetpack-current from the a0.0.45 release jetpack (rows Pkg/cli_vendor_dir_flag_relocates and EnvDevTrust/dev_no_entry_is_e1254 PASS on p325 with it). The loop restarted from p325. Finding: the hosted jetpack does not build from the p325 tree (Jetpack/Bootstrap/Check.jet --hosted: 847 errors), so jetpack-current cannot be refreshed from dev until that is fixed."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
           "text": "Worktree cleanup (owner order: only active worktrees). Removed .agent-worktrees/DeclTypes-6-1 and .agent-worktrees/Speed: no live owner (only IfHole and Lens run), both detached at old dev 4171547dc0. Their uncommitted work is saved whole (binary diff, untracked files included) as $JET_SCRATCH_ROOT/lanes/Main/saved/DeclTypes-6-1.patch (73 files, +2359/-357) and Speed.patch (56 files, +196/-169), with the per-file list of hunks not on dev 1e2fb5763e beside each (DeclTypes-6-1.unlanded.txt: 40 files, mostly perf/live-inspect/trace/debug/runtime observe; Speed.unlanded.txt: 14 files, live-inspect, trace fixtures, guards, Service.jet). Much of it is superseded by later landings on the same files; anything still wanted is re-landed from those patches as a fresh SUB on the tip."
         },
         {
@@ -76199,11 +76205,11 @@
         {
           "n": 68,
           "text": "c39 P1 rate parity with Superluminal (8 kHz, full stacks): Linux expires CPU-clock timers (timer_create CLOCK_THREAD_CPUTIME_ID) only from the scheduler tick, so that sampler is capped at CONFIG_HZ (1000 or 250 Hz). Where the kernel lets a process profile itself (perf_event_paranoid at most 2, the upstream default), jet perf run samples each thread at up to 8 kHz with whole stacks through perf_event_open, at the existing rate setting, and four fib tasks at -O2 keep at least 90% of the nominal samples at 8 kHz; where it may not, the CPU-timer sampler runs at the tick and the receipt states the cap and its reason. The overhead bar of c44(d) holds at the default rate. Proof: a Perf case asserting the receipt's source, rate and kept share at 8 kHz, plus a case forcing the timer path that asserts the stated cap.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-19T11:48:27.151Z"
+          "evidence": "p324 batch compiler (dev 6dda4bf451, IfHole c68-default-8khz landed): Perf/task_clock_keeps_eight_khz PASS (receipt source perf_event task-clock, rate 8000 Hz, kept share >= 90% for four fib tasks at -O2) and Perf/timer_fallback PASS (forced timer path, receipt states the CONFIG_HZ cap and its reason). Overhead at the 8 kHz default, m68 harness ($JET_SCRATCH_ROOT/lanes/IfHole-6-1/m68/m68.sh, 38 runs x 5): 1894 samples, handler 331 ns + delivery 1753 ns = 2080 ns per sample, measured overhead 1.24% (cost projection 1.66%), under the c44(d) 2% bar. Perf/receipt_reports_measured_overhead failed once in the p324 full suite under load and passes alone twice on p324 (known load flake).",
+          "at": "2026-11-19T16:05:50.822Z"
         }
       ],
       "refs": [],
@@ -76211,7 +76217,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-19T15:13:47.336Z",
+      "updated": "2026-11-19T16:05:53.305Z",
       "updatedBy": "Main",
       "criteriaLastN": 68
     },
@@ -160967,6 +160973,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-19T16:05:53.305Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T16:05:52.472Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0a8z3u0",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-19T16:05:50.822Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#68"
+    },
+    {
+      "at": "2026-11-19T16:05:49.947Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0a8z3u0",
+      "note": "#1"
+    },
     {
       "at": "2026-11-19T15:20:56.179Z",
       "by": "Main",
