@@ -281,6 +281,9 @@ canvas_host_transaction: fn(state: Shared<CanvasHostState>, request: HTTPRequest
     { sender: reply, receiver: answer }: channel<CanvasHostReply>(capacity: 1)
     edits.send(CanvasHostEdit{body: body, route: route, reply: reply})
     answered: answer.receive() ?? return canvas_host_response(503, CANVAS_HOST_TEXT, "the Canvas dev loop stopped before it answered this {what}")
+    // A debug or profile answer names its own session (the debugged
+    // program's); only a transaction carries the host's.
+    if route != .Transaction -> return canvas_host_response(answered.status, CANVAS_HOST_JSON, answered.body)
     canvas_host_response(answered.status, CANVAS_HOST_JSON, canvas_host_with_session(state, answered.body))
 }
 

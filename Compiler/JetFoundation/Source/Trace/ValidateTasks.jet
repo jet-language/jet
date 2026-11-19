@@ -195,8 +195,9 @@ jettrace_validate_native: fn(value: CanonicalJSON, tasks: [U64:JetTraceTaskFact]
 }
 
 // A span row is a task's observed span (`task_observed`), whose unavailable
-// state is the only task row, a closed core.log span (`log_span`):
-// captured, timed, and of no task, or a task's wait (`task_wait`):
+// state is the only task row, a closed core.log span (`log_span`), a
+// closed core.perf zone (`zone`), a frame mark (`frame_mark`) or a plotted
+// value (`plot`): captured, timed, and of no task, or a task's wait (`task_wait`):
 // captured, timed, of its waiting task, naming the task it awaits when it
 // is a join, with the line that spawned that task when known, a socket's
 // addresses, its stack's functions and lines, and what ended it (`waker`):
@@ -308,7 +309,7 @@ jettrace_validate_spans: fn(value: CanonicalJSON, tasks: [U64:JetTraceTaskFact],
         if awaited != CanonicalJSON.Null || spawn_line != CanonicalJSON.Null || channel != CanonicalJSON.Null || addressed || stack.len() != 0 || waker_line != CanonicalJSON.Null || waker_task != CanonicalJSON.Null || waker.len() != 0 {
             return Err(jettrace_error("{label} only a wait names an awaited task, a spawn line, a channel, a socket, a stack or a waker"))
         }
-        if kind == "log_span" {
+        if kind == "log_span" || kind == "zone" || kind == "frame_mark" || kind == "plot" {
             if status != "captured" {
                 return Err(jettrace_error("{label}.status must be captured for a log span"))
             }
@@ -324,7 +325,7 @@ jettrace_validate_spans: fn(value: CanonicalJSON, tasks: [U64:JetTraceTaskFact],
             next
         }
         if kind != "task_observed" {
-            return Err(jettrace_error("{label}.kind must be task_observed, log_span or task_wait"))
+            return Err(jettrace_error("{label}.kind must be task_observed, log_span, zone, frame_mark, plot or task_wait"))
         }
         if {
             status == "captured" -> {

@@ -1,7 +1,7 @@
 use {
     core.build.[BuildGraphNode]
     // Source, module, and package identities remain separate at the driver boundary.
-    jet_sema.[SemaOutputIntent]
+    jet_sema.[SemaEvalProbeAnswer, SemaOutputIntent]
     jet_pkg_model.[BuildStamp, ImportBoundary, LockedBuildContribution, PackageEffects, PackageGrant]
     jet_foundation.[
         AppAuthorizedDirectory,
@@ -481,6 +481,21 @@ JetDriverCompileRequest: struct {
     // which packages may read it (JetDriverToolchainTree). None: every
     // `toolchain:` read refuses (E0945).
     toolchain_tree: Shared<JetDriverToolchainTree>?{None},
+    // A debugger's question at a stop (JetDriverEvalAsk): None for none.
+    eval_ask: JetDriverEvalAsk?{None},
+}
+
+// `jet debug`'s evaluator asks the compile how `text` checks at the stop at
+// byte `offset` of the source file `path` (the file's own bytes, its path
+// as the stopped image's line table names it, matched by its last
+// components): the check of the function there answers (JetSema
+// EvalProbe.jet) with the expression's type, captures and refusals, which
+// the result carries (JetDriverCompileResult.eval_answers). The compile is
+// the program's own otherwise.
+JetDriverEvalAsk: struct {
+    path: String,
+    offset: Int,
+    text: String,
 }
 
 // The toolchain tree of a compile's `toolchain:` comptime inputs. `root` is
@@ -1012,6 +1027,9 @@ JetDriverCompileResult: struct {
     // Under the request's `compiler_events`: the compile's public moments,
     // in their fixed order (CompilerEvents.jet). Empty otherwise.
     events: [CompilerEventRecord]{[CompilerEventRecord]{}},
+    // A complete compile of a request's eval ask (JetDriverEvalAsk): the
+    // check's answers, ordered (sema_eval_probe_answers). Empty otherwise.
+    eval_answers: [SemaEvalProbeAnswer]{[SemaEvalProbeAnswer]{}},
 }
 
 // The `allocator:` policy of the entry package of `load`

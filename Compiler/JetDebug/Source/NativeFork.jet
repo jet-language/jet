@@ -16,7 +16,7 @@
 // (NATIVE_FORK_BUDGET_MS), and the fork is killed after its result is read.
 use {
     native_fork_files: core.files
-    jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_TRACE_EVENT_CLONE, X64_TRACE_ORIG_RAX, X64_TRACE_R10, X64_TRACE_R8, X64_TRACE_R9, X64_TRACE_RAX, X64_TRACE_RDI, X64_TRACE_RDX, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, x64_eval_fork_filter, x64_jetline_find, x64_jetline_line, x64_trace_event_message, x64_trace_of, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_set_registers, x64_trace_signal, x64_trace_wait_for, x64_trace_wait_within]
+    jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_TRACE_EVENT_CLONE, X64_TRACE_ORIG_RAX, X64_TRACE_R10, X64_TRACE_R8, X64_TRACE_R9, X64_TRACE_RAX, X64_TRACE_RCX, X64_TRACE_RDI, X64_TRACE_RDX, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, x64_eval_fork_filter, x64_jetline_find, x64_jetline_line, x64_trace_event_message, x64_trace_of, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_set_registers, x64_trace_signal, x64_trace_wait_for, x64_trace_wait_within]
 }
 
 // A fork of the stopped program: its trace (the program's helper traces
@@ -263,7 +263,7 @@ native_fork_hex: fn(text: String) -> Int Never! {
 //   faults rather than reading as zeros;
 // - the trap bytes of the program's breakpoints, `sites`, are put back, so
 //   the code runs the program's own instructions.
-native_fork_prepare: fn(fork: NativeFork, pid: Int, sites: [NativeSite]) NativeDebugError! {
+native_fork_prepare: fn(fork: NativeFork, pid: Int, sites: [Int:Int]) NativeDebugError! {
     mappings: native_fork_mappings(pid)
     loop mapping in mappings {
         if !mapping.flags.contains("dc") -> next
@@ -305,20 +305,23 @@ native_fork_prepare: fn(fork: NativeFork, pid: Int, sites: [NativeSite]) NativeD
         }
         _ := native_fork_syscall(fork, NATIVE_FORK_SYS_MPROTECT, [Int]{mapping.low, mapping.high - mapping.low, protection}) ?? return Err(err)
     }
-    loop site in sites {
-        word: x64_trace_peek(fork.trace, site.address) ?? next
-        _ := x64_trace_poke(fork.trace, site.address, word & I64{-256} | I64{site.byte})
+    loop (address, byte) in sites {
+        word: x64_trace_peek(fork.trace, address) ?? next
+        _ := x64_trace_poke(fork.trace, address, word & I64{-256} | I64{byte})
     }
     Ok()
 }
 
-// Call the code at `entry` in the stopped fork with `first` and `second` as
-// its first two arguments, on the stack below `top`, and run it until it
-// returns: the fork's registers then. The call returns to address 0, whose
-// fault is the return. A refused system call, a fault, a trap, the fork's
-// end or the budget's end is the failure.
-native_fork_call: fn(fork: NativeFork, image: NativeImage, entry: Int, first: Int, second: Int, top: Int) -> [Int] NativeDebugError! {
+// Call the code at `entry` in the stopped fork with `arguments` (at most
+// six words, in rdi, rsi, rdx, rcx, r8 and r9), on the stack below `top`,
+// and run it until it returns: the fork's registers then. The call returns
+// to address 0, whose fault is the return. A refused system call, a fault,
+// a trap, the fork's end or the budget's end is the failure.
+native_fork_call: fn(fork: NativeFork, image: NativeImage, entry: Int, arguments: [Int], top: Int) -> [Int] NativeDebugError! {
     registers := x64_trace_registers(fork.trace) ?? return Err(NativeDebugError{detail: "couldn't read the copy's registers"})
+    if arguments.len() > NATIVE_FORK_ARGUMENTS.len() {
+        return Err(NativeDebugError{detail: "a call in the copy takes at most {NATIVE_FORK_ARGUMENTS.len()} words, not {arguments.len()}"})
+    }
     // The return address, the stack 16-byte aligned at the call.
     at: top - top % 16 - 8
     if !native_fork_poke(fork, at, native_word_bytes(0)) {
@@ -326,8 +329,7 @@ native_fork_call: fn(fork: NativeFork, image: NativeImage, entry: Int, first: In
     }
     registers[X64_TRACE_RIP] = entry
     registers[X64_TRACE_RSP] = at
-    registers[X64_TRACE_RDI] = first
-    registers[X64_TRACE_RSI] = second
+    loop (k, word) in arguments -> registers[NATIVE_FORK_ARGUMENTS[k]] = word
     registers[X64_TRACE_RAX] = 0
     registers[X64_TRACE_ORIG_RAX] = -1
     if !x64_trace_set_registers(fork.trace, registers) {
@@ -373,20 +375,23 @@ native_fork_call: fn(fork: NativeFork, image: NativeImage, entry: Int, first: In
 // view returns through its hidden result pointer sits just below the
 // fork's scratch, the copy of the value it borrows as `self` below that.
 // Err names why the view didn't return or its items can't be read.
-native_fork_view: fn(fork: NativeFork, image: NativeImage, pid: Int, sites: [NativeSite], view: Int, ty: Int, value: [U8]) -> String NativeDebugError! {
+native_fork_view: fn(fork: NativeFork, image: NativeImage, pid: Int, sites: [Int:Int], view: Int, ty: Int, value: [U8]) -> String NativeDebugError! {
     native_fork_prepare(fork, pid, sites) ?? return Err(err)
     result: fork.scratch - NATIVE_FORK_RESULT
     copied: result - value.len() - (result - value.len()) % 16
     if !native_fork_poke(fork, copied, value) {
         return Err(NativeDebugError{detail: "couldn't write the copy's stack"})
     }
-    _ := native_fork_call(fork, image, view, result, copied, copied - 16) ?? return Err(err)
+    _ := native_fork_call(fork, image, view, [Int]{result, copied}, copied - 16) ?? return Err(err)
     shown: native_debug_view_shown(image, NativeMemory{trace: Val(fork.trace), blocks: [NativeBlock]{}}, ty, result) ?? return Err(NativeDebugError{detail: "the view's items can't be read"})
     Ok(shown)
 }
 
 // The room below a fork's scratch for a call's result: a list header.
 NATIVE_FORK_RESULT: 32
+
+// The trace's indices of the registers a call's words go in, in order.
+NATIVE_FORK_ARGUMENTS: [Int]{X64_TRACE_RDI, X64_TRACE_RSI, X64_TRACE_RDX, X64_TRACE_RCX, X64_TRACE_R8, X64_TRACE_R9}
 
 // Where `pc` is, in Jet terms when the line table knows it.
 native_fork_place: fn(image: NativeImage, pc: Int) -> String Never! {

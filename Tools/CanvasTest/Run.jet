@@ -530,6 +530,11 @@ debug_panels: fn(jet: String, dir: String, canvas_url: String, original: String)
     if !locals.contains("limit=4") || watched.join(",") != "limit=4" {
         return Err(fail_with("the locals and the watch must show limit=4, not locals {locals.join(",")} watches {watched.join(",")}"))
     }
+    tasks := [String]{}
+    loop task in items(at(overlay, "tasks")) -> tasks.push(text(task))
+    if tasks.len() == 0 || !tasks[0].contains(" 1  ") {
+        return Err(fail_with("the tasks panel must list task 1, the program's main task, first: {tasks.join(" | ")}"))
+    }
     session_id: text(at(started.tree, "canvas.session.id"))
     stopped: canvas_post(
         debug_url,

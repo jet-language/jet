@@ -2444,10 +2444,11 @@ jet_cli_snapshot_file_count: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> 
 // The authorized request `jet_cli_compile_overlays` compiles, without
 // compiling it: load-only queries (schema, source explain, gates) run the
 // driver's source query over exactly the sources a compile would see.
-// `alone` holds the entry by itself, and `target` holds a build target's
-// whole folder, as jet_cli_prepare_snapshot says.
-jet_cli_prepare_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode, alone: Bool{false}, target: Bool{false}) -> JetCLIPrepared {
-    if jet_cli_prepare_snapshot(anchor, entry, overlays, color, alone, target) == {
+// `alone` holds the entry by itself, `target` holds a build target's whole
+// folder, and `appended` overlays only add code to the files they replace,
+// as jet_cli_prepare_snapshot says.
+jet_cli_prepare_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode, alone: Bool{false}, target: Bool{false}, appended: Bool{false}) -> JetCLIPrepared {
+    if jet_cli_prepare_snapshot(anchor, entry, overlays, color, alone, target, appended) == {
         .Refused(output) -> JetCLIPrepared.Refused{output: output}
         .Held(snapshot) -> jet_cli_prepare_request(snapshot, color, threads, mode)
     }
@@ -2590,8 +2591,10 @@ jet_cli_entry_is_script: fn(entry_path: String, overlays: [JetCLIOverlay]) -[FS,
 // is the entry and the sources it reaches, unless it is a build `target`'s
 // entry: the target's listed sources may name any file of the folder, so its
 // snapshot is the whole folder. An anchor no file holds yet is read from its
-// overlay (an editor's unsaved buffer).
-jet_cli_prepare_snapshot: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, alone: Bool{false}, target: Bool{false}) -> JetCLISnapshotted {
+// overlay (an editor's unsaved buffer). Overlays that are `appended` (a
+// debugger's expression added to a source it reaches) keep a loose entry
+// loose: they reach no other file than the disk copies do.
+jet_cli_prepare_snapshot: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, alone: Bool{false}, target: Bool{false}, appended: Bool{false}) -> JetCLISnapshotted {
     anchor_path: cli_files.realpath(anchor) ?? jet_cli_overlaid_path(anchor, overlays) ?? return jet_cli_snapshot_refused(jet_cli_unread_file_what(anchor), "check the spelling, or run jet from the folder that contains it", color)
     entry_path: jet_cli_overlay_path(entry)
     script: alone || jet_cli_entry_is_script(entry_path, overlays)
@@ -2603,7 +2606,7 @@ jet_cli_prepare_snapshot: fn(anchor: String, entry: String, overlays: [JetCLIOve
     prefix: if root == "/" -> "/" else -> "{root}/"
     // A loose entry (no package around it, no unsaved buffer) holds only the
     // sources it reaches (jet_cli_reach_sources), never its whole folder.
-    loose: !script && !target && overlays.len() == 0 && entry_path.ends_with(".jet") && entry_path.starts_with(prefix) && (jet_cli_parent(entry_path) ?? "") == root && !cli_files.exists(jet_cli_authority_path(root, "package.jet"))
+    loose: !script && !target && (overlays.len() == 0 || appended) && entry_path.ends_with(".jet") && entry_path.starts_with(prefix) && (jet_cli_parent(entry_path) ?? "") == root && !cli_files.exists(jet_cli_authority_path(root, "package.jet"))
     reached := false
     if loose {
         reached = jet_cli_reach_sources(root, entry_path.slice(prefix.len()..<entry_path.len()), files, budget) ?? return jet_cli_snapshot_refused("can't securely read the sources under `{root}`: {err.message}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)

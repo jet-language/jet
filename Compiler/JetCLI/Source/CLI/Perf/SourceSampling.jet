@@ -4,9 +4,11 @@
 // table names by function and source line, and its allocations' records the
 // call sites of their stacks. Under the memory lens its counters' samples
 // are records like the CPU-time ones. Beside them the program keeps a row
-// for each core.log span it closes.
+// for each core.log span and core.perf zone it closes, each frame mark and
+// each plotted value.
 use {
     perf_files: core.files
+    perf_math: core.math
     perf_ip: core.net.ip
     jet_backend.[X64ImageFunction, X64Jetline, link_debug_addr, x64_image_function_find, x64_image_functions, x64_jetline_find, x64_jetline_line]
     jet_debug.[NativeAbstract, NativeFunction, native_image_read, native_inline_chain, native_jet_spelling]
@@ -108,6 +110,8 @@ JetCLIPerfSamples: struct {
     wakes: [JetCLIPerfWake],
     transfers: [JetCLIPerfIO],
     heaps: [JetCLIPerfHeap],
+    experiments: [JetCLIPerfExperiment],
+    points: [Int:String],
 }
 
 // The clock record (PerfSamples.jet perf_samples_exit), in nanoseconds: the
@@ -372,6 +376,10 @@ JET_CLI_PERF_HEAP_BLOCK_KIND: 6
 
 JET_CLI_PERF_HEAP_ROOT_KIND: 5
 
+// PerfSamples.jet PERF_SAMPLES_CAUSAL: a causal experiment's end, or (1 in
+// its low bits) a progress point's name.
+JET_CLI_PERF_CAUSAL_KIND: 7
+
 // What a heap snapshot's root record holds (PerfSamples.jet
 // PERF_SAMPLES_ROOT_FRAMES, PERF_SAMPLES_ROOT_STACK and
 // PERF_SAMPLES_ROOT_DATA).
@@ -435,7 +443,7 @@ JET_CLI_PERF_HELPER_PREFIX: "jet_ir_"
 // `names` spells. Its block and root records are its retention records
 // (JetCLIPerfHeap).
 jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFunction], inlines: &&JetCLIPerfInlines, owned: [Bool], periods: &&[U64], allocs: [Int:Int], names: [Int:String], words: [U8]) -> JetCLIPerfSamples Never! {
-    sampled := JetCLIPerfSamples{table: table, inlines: inlines, lines: [JetCLIPerfSampledLine]{}, total: U64{0}, outside: U64{0}, helpers: U64{0}, stackless: U64{0}, signals: U64{0}, cost: None, functions: functions, natives: [JetCLIPerfNative]{}, sited: false, periods: periods, spawns: [U64:U64]{}, waits: [JetCLIPerfWait]{}, wakes: [JetCLIPerfWake]{}, transfers: [JetCLIPerfIO]{}, heaps: [JetCLIPerfHeap]{}}
+    sampled := JetCLIPerfSamples{table: table, inlines: inlines, lines: [JetCLIPerfSampledLine]{}, total: U64{0}, outside: U64{0}, helpers: U64{0}, stackless: U64{0}, signals: U64{0}, cost: None, functions: functions, natives: [JetCLIPerfNative]{}, sited: false, periods: periods, spawns: [U64:U64]{}, waits: [JetCLIPerfWait]{}, wakes: [JetCLIPerfWake]{}, transfers: [JetCLIPerfIO]{}, heaps: [JetCLIPerfHeap]{}, experiments: [JetCLIPerfExperiment]{}, points: [Int:String]{}}
     // One key per function, line and ownership.
     places := [String:Int]{}
     // Each address's entries in `lines`, innermost first, by twice the
@@ -534,6 +542,24 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
                             sampled.cost = .Val(JetCLIPerfCost{cpu_ns: cpu, handler_ns: handler, delivery_ns: delivery})
                         }
                     }
+                }
+            }
+            at += record * 8
+            next
+        }
+        if kind == JET_CLI_PERF_CAUSAL_KIND {
+            if record >= 3 && at + record * 8 <= words.len() {
+                if pc == 1 {
+                    // The point's slot, the name's length and the name.
+                    length: link_debug_addr(words, at + 16)
+                    if length >= 0 && 3 + (length + 7) /% 8 <= record {
+                        sampled.points[link_debug_addr(words, at + 8)] = String.from_bytes(words.slice(at + 24, at + 24 + length)) ?? "point"
+                    }
+                } else if record >= 5 {
+                    // The line's sampled address (0 for a baseline), the
+                    // speedup, the wall time, the delay inserted and each
+                    // point's passes.
+                    jet_cli_perf_causal_record(sampled, owned, words, at, record)
                 }
             }
             at += record * 8
@@ -1043,32 +1069,54 @@ jet_cli_perf_window: fn(profile: &TraceProfile, window: JetCLIPerfRuntimeWindow)
     profile.window_reason = "runtime-published monotonic run window"
 }
 
-// The log spans file `path` of a `jet perf run` program (the runtime's
-// RouteALog.jet log_span_row_write): per closed span its start and end on the
-// monotonic clock and its name's byte length, each a little-endian word, then
-// the name. Each becomes a `log_span` row of `capture`, timed from
-// `origin_ns`, the session's start on that clock, and named by the span in
-// `source`, within the span row limit. The file is removed once read; a row
-// cut short ends the read.
+// The spans file `path` of a `jet perf run` program (the runtime's
+// PerfSamples.jet perf_zone_row), the one timeline of its closed log spans,
+// closed zones, frame marks and plotted values: per row its start and end
+// (a plot's value bits) on the monotonic clock, its task, and its name's
+// byte length with its kind (JET_CLI_PERF_ZONE_LOG and the others) from bit
+// 32, each a little-endian word, then the name. Each becomes a `log_span`,
+// `zone`, `frame_mark` or `plot` row of `capture` (a plot's symbol names its
+// value after its name: `fps = 60`), timed from `origin_ns`, the session's
+// start on that clock, and named by the span in `source`, within the span
+// row limit. The file is removed once read; a row cut short ends the read.
 jet_cli_perf_log_spans_read: fn(capture: &JetCLIPerfCapture, path: String, source: String, origin_ns: Int) -[FS]> Never! {
     bytes: perf_files.read_bytes(path) ?? [U8]{}
     perf_files.remove(path).drop("the session reads its log spans once")
     at := 0
-    loop at + 24 <= bytes.len() {
+    loop at + 32 <= bytes.len() {
         start: link_debug_addr(bytes, at)
         end: link_debug_addr(bytes, at + 8)
-        length: link_debug_addr(bytes, at + 16)
-        if length < 0 || at + 24 + length > bytes.len() -> break
-        name: String.from_bytes(bytes.slice(at + 24, at + 24 + length)) ?? break
-        at += 24 + length
+        shape: link_debug_addr(bytes, at + 24)
+        length: shape & 4294967295
+        kind: shape >> 32
+        if shape < 0 || at + 32 + length > bytes.len() -> break
+        name: String.from_bytes(bytes.slice(at + 32, at + 32 + length)) ?? break
+        at += 32 + length
         if (U64{capture.spans.len()}) >= TRACE_SPAN_ROW_LIMIT {
             capture.policy.span_rows_truncated = true
             break
         }
-        symbol: JetSymbolRef{path: source, name: name}
-        capture.spans.push(TraceSpan{awaited_task_id: None, channel_id: None, clock: "monotonic", start_ns: Val(jet_cli_perf_since(start, origin_ns)), end_ns: Val(jet_cli_perf_since(end, origin_ns)), kind: "log_span", local_address: None, parent_task_id: None, peer_address: None, reason: "", spawn_line: None, status: "captured", symbol: symbol, task_id: None, wait_stack: [TraceStackFrame]{}, waker: "", waker_line: None, waker_task_id: None})
+        row: if kind == {
+            JET_CLI_PERF_ZONE_ZONE -> "zone"
+            JET_CLI_PERF_ZONE_FRAME -> "frame_mark"
+            JET_CLI_PERF_ZONE_PLOT -> "plot"
+            else -> "log_span"
+        }
+        plotted: kind == JET_CLI_PERF_ZONE_PLOT
+        label: if plotted -> "{name} = {perf_math.from_bits(end)}" else -> name
+        finish: if plotted -> start else -> end
+        symbol: JetSymbolRef{path: source, name: label}
+        capture.spans.push(TraceSpan{awaited_task_id: None, channel_id: None, clock: "monotonic", start_ns: Val(jet_cli_perf_since(start, origin_ns)), end_ns: Val(jet_cli_perf_since(finish, origin_ns)), kind: row, local_address: None, parent_task_id: None, peer_address: None, reason: "", spawn_line: None, status: "captured", symbol: symbol, task_id: None, wait_stack: [TraceStackFrame]{}, waker: "", waker_line: None, waker_task_id: None})
     }
 }
+
+// What a row of the spans file is (PerfSamples.jet PERF_ZONE_LOG and the
+// others): a closed log span, a closed zone, a frame mark or a plot.
+JET_CLI_PERF_ZONE_ZONE: 1
+
+JET_CLI_PERF_ZONE_FRAME: 2
+
+JET_CLI_PERF_ZONE_PLOT: 3
 
 // Each task's wait the program recorded (`waits`) as a `task_wait`
 // row of `capture`, timed from `origin_ns` as the log spans are: its task

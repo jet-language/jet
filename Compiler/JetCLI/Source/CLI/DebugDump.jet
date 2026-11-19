@@ -11,7 +11,7 @@
 use {
     cli_files: core.files
     cli_term: core.term
-    jet_debug.[NATIVE_DEBUG_PROMPT, NATIVE_DUMP_HELP, NativeDebugError, NativeDumpTask, NativeFrame, NativeLocal, NativeSession, native_debug_backtrace, native_debug_jet_frame, native_debug_locals_line, native_debug_locals_typed, native_debug_print, native_dump_events, native_dump_jet_frame, native_dump_open, native_dump_redact, native_dump_task_state]
+    jet_debug.[NATIVE_DEBUG_PROMPT, NATIVE_DUMP_HELP, NativeDebugError, NativeDumpTask, NativeFrame, NativeLocal, NativeSession, native_debug_backtrace, native_debug_jet_frame, native_debug_locals_line, native_debug_locals_typed, native_dump_events, native_dump_jet_frame, native_dump_open, native_dump_redact, native_dump_task_state]
     jet_driver.[JET_DRIVER_EXIT_OK]
 }
 
@@ -64,9 +64,15 @@ jet_cli_debug_dump_command: fn(session: &NativeSession, line: String, events: [S
             locals.sort_by(fn(left: NativeLocal, right: NativeLocal) { left.name <=> right.name })
             Ok(native_debug_locals_typed(locals))
         }
+        // A dump runs no code, so nothing is evaluated: `print` shows a
+        // local of the selected frame by its name, as `locals` reads it.
         "p" | "print" -> {
+            if operand == "" -> return Ok("Print needs a local's name, as `print total`\n")
             locals: jet_cli_debug_dump_locals(session) ?? return Err(err)
-            Ok("{native_debug_print(locals, operand)}\n")
+            loop local in locals {
+                if local.name == operand -> return Ok("{local.name} = {local.value}\n")
+            }
+            Ok("Can't evaluate `{operand}`: a dump runs no code, so `print` shows a local by its name; `locals` lists them\n")
         }
         "frame" -> {
             frames: session.backtrace() ?? return Err(err)

@@ -6128,6 +6128,16 @@ past its check.
 flags write `--backtrace=brief` and `--dead-code=keep`. Example:
 [`Tests/Run/Tooling/BuildBacktrace`](../../Tests/Run/Tooling/BuildBacktrace/run.jet).
 
+`zones` (stock `keep`) says whether the image keeps its `core.perf` zone
+sites. Under `keep` each zone open and close is a test of one runtime word,
+and the call behind it runs only while `jet perf run` or `jet perf attach` has
+set the word, so a zone costs a load, a test and a branch until a profiler
+records it. `strip` leaves the zone sites out: the image never records a zone,
+and no profiler can turn them on. Frame marks, plots and `core.log` spans are
+kept under both. `build: fn` writes `b.zones(.Strip)`, and the flag writes
+`--zones=strip`. Case:
+[`Tests/Cases/Perf/zones_strip_setting_leaves_no_site.case`](../../Tests/Cases/Perf/zones_strip_setting_leaves_no_site.case).
+
 `checked_alloc` (stock `false`) holds a Bool. With `true` the program links
 the runtime's checked memory allocator and runs with it from its first
 allocation: every heap block carries guard words and the call chain that

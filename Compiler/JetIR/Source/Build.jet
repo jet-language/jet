@@ -392,6 +392,9 @@ IRChecks: struct {
     // jet_rt_alloc_check_link, so the link keeps the runtime's checked heap
     // (ir_checked_alloc_link).
     checked_alloc: Bool{false},
+    // `zones: strip`: the image keeps no core.perf zone sites
+    // (IRModule.zones_stripped).
+    zones_stripped: Bool{false},
     // `jet run --observe`: the entry calls jet_rt_observe_link, so the link
     // keeps the runtime's observation start (ir_observe_link).
     observe: Bool{false},
@@ -433,6 +436,10 @@ IRChecks: struct {
     // is a global symbol of the program's object (IRModule.hooks), so the
     // link binds the runtime's calls of the hook to it.
     hooks: [IRLibraryExportRow]{[IRLibraryExportRow]{}},
+    // Checked function keys built as roots beside the entry
+    // (ir_build_program): a debugger's evaluated expression, which nothing
+    // in the program calls.
+    roots: [String]{[String]{}},
     // The runtime routes the runtime's stops receipt proves deliver no stop
     // (JetCLI Host.jet jet_cli_runtime_quiet_routes), which no stop poll
     // follows (ir_route_can_stop); empty without a receipt.
@@ -1323,6 +1330,7 @@ ir_module_for: fn(p: IRProgram) -> IRModule Never! {
     m.stop_points = p.stop_points
     m.user_values = p.user_values
     m.alloc_types = p.checks.checked_alloc
+    m.zones_stripped = p.checks.zones_stripped
     m.quiet_routes = p.checks.quiet_routes.copy()
     m
 }
@@ -1689,6 +1697,10 @@ ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
     loop hook in p.checks.hooks {
         hook_row: ir_function_row(p, hook.key) ?? next
         if hook_row != row && !kept_rows.contains(hook_row) -> kept_rows.push(hook_row)
+    }
+    loop key in p.checks.roots {
+        root_row: ir_function_row(p, key) ?? next
+        if root_row != row && !kept_rows.contains(root_row) -> kept_rows.push(root_row)
     }
     kept_keys := [String]{}
     loop kept in kept_rows {

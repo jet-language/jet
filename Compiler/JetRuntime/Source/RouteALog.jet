@@ -456,20 +456,10 @@ log_sink_open: fn(path: I64) -> I64 {
 }
 
 // The row of the closing span in `slot` for `jet perf run`
-// (PerfSamples.jet perf_spans_fd): its start and now on the monotonic clock
-// and its name's byte length, each a little-endian word, then the name, in
-// one append.
+// (PerfSamples.jet perf_zone_row): from its start to now on the monotonic
+// clock.
 log_span_row_write: fn(slot: I64) {
-    name: rt_text_word(wrapping(slot + I64{8}))
-    length: rt_text_len(name)
-    size: I64{24} + length
-    row: jet_rt_alloc(size, I64{8})
-    rt_text_store(row, rt_text_word(wrapping(slot + I64{16})))
-    rt_text_store(wrapping(row + I64{8}), time_host_monotonic_i64())
-    rt_text_store(wrapping(row + I64{16}), length)
-    coll_copy(rt_text_data(name), wrapping(row + I64{24}), length)
-    _ := host_write_all(perf_spans_fd, row, size)
-    jet_rt_free(row, size, I64{8})
+    perf_zone_row(PERF_ZONE_LOG, rt_text_word(wrapping(slot + I64{16})), time_host_monotonic_i64(), rt_text_word(wrapping(slot + I64{8})))
 }
 
 // jet_log_json_escape: only " \ LF CR TAB are escaped.

@@ -175,10 +175,12 @@ admission_problems: fn(record: Dyn, identity: String) -> [Problem] Never! {
 
 // A row's blocking class, or "" for a check that ran and passed. NOTE is a
 // check `admit` ran that reports a fact, such as a loss
-// with a recorded disposition.
+// with a recorded disposition. WARN is a finding `admit` weighed and let
+// pass under its PASS verdict: a speed result the owner accepted through a
+// disposition, or dispositions that track no row. RELEASE.md shows it.
 row_class: fn(status: String) -> String Never! {
     if {
-        status == "PASS" || status == "NOTE" -> ""
+        status == "PASS" || status == "NOTE" || status == "WARN" -> ""
         status == "" || status == "SKIP" || status == "SKIPPED" || status == "BLOCKED" || status == "NOT_RUN" -> SKIPPED
         status == "FLAKY" || status == "RETRIED" -> FLAKY
         else -> FAILED

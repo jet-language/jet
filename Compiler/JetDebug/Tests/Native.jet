@@ -175,15 +175,16 @@ NATIVE_TEST_SPLIT: "sum_squares: fn(n: Int) -> Int {{\n    total := 0\n    loop 
 // fib's argument depends on the loop, so the call is not folded away.
 NATIVE_TEST_LOOP: "fib: fn(n: Int) -> Int {{\n    if n < 2 -> return n\n    left: fib(n - 1)\n    right: fib(n - 2)\n    left + right\n}}\n\nrun: fn() {{\n    total := 0\n    loop i in 0..<3000000 -> total += i\n    answer: fib(15 + total % 2)\n    print(\"{{total}} {{answer}}\")\n}}\n"
 
-// A ring buffer whose view lists its items in order. The program calls the
-// view itself, so the image has it whether or not the build keeps views.
-NATIVE_TEST_RING: "DebugItem: struct {{\n    label: String,\n    value: String,\n}}\n\nRing: struct {{\n    items: [Int],\n    start: Int,\n    count: Int,\n\n    debug_view: fn(self) -> [DebugItem] {{\n        loop k in 0..<self.count -> DebugItem{{label: \"{{k}}\", value: \"{{self.items[(self.start + k) % self.items.len()]}}\"}}\n    }}\n}}\n\nrun: fn() {{\n    ring: Ring{{items: [Int]{{5, 0, 3, 4}}, start: 2, count: 3}}\n    print(\"items {{ring.debug_view().len()}}\")\n}}\n"
+// A ring buffer whose view lists its items in order, in the Prelude's
+// DebugItem rows. The program calls the view itself, so the image has it
+// whether or not the build keeps views.
+NATIVE_TEST_RING: "Ring: struct {{\n    items: [Int],\n    start: Int,\n    count: Int,\n\n    debug_view: fn(self) -> [DebugItem] {{\n        loop k in 0..<self.count -> DebugItem{{label: \"{{k}}\", value: \"{{self.items[(self.start + k) % self.items.len()]}}\"}}\n    }}\n}}\n\nrun: fn() {{\n    ring: Ring{{items: [Int]{{5, 0, 3, 4}}, start: 2, count: 3}}\n    print(\"items {{ring.debug_view().len()}}\")\n}}\n"
 
 #Test("a_struct_with_a_debug_view_shows_its_items") {
     scratch: native_test_files.temp_dir("jet-debug-view") ?? panic("scratch: {err}")
     root: scratch.path
     session := native_test_session(root, NATIVE_TEST_RING, [String]{"-O0"})
-    paused: session.run_to([NativeBreak]{{file: "prog.jet", line: 18}}, "prog.jet", NATIVE_TEST_RING.split("\n").to_list(), [String]{}) ?? panic("run_to: {err.detail}")
+    paused: session.run_to([NativeBreak]{{file: "prog.jet", line: 13}}, "prog.jet", NATIVE_TEST_RING.split("\n").to_list(), [String]{}) ?? panic("run_to: {err.detail}")
     assert(native_debug_hit_breakpoint(paused.stop) != None, paused.text)
     locals: session.locals() ?? panic("locals: {err.detail}")
     shown := ""
@@ -205,13 +206,13 @@ NATIVE_TEST_RING: "DebugItem: struct {{\n    label: String,\n    value: String,\
 // print in the output would be the debugger's doing; in the evaluation fork
 // the print stays in the fork's copy of the output buffer and the open is a
 // refused system call.
-NATIVE_TEST_LOUD: "use {{\n    process: core.process\n    files: core.files\n}}\n\nDebugItem: struct {{\n    label: String,\n    value: String,\n}}\n\nLoud: struct {{\n    count: Int,\n\n    debug_view: fn(self) -> [DebugItem] {{\n        print(\"viewed\")\n        name: files.read(\"/proc/self/comm\") ?? \"\"\n        [DebugItem]{{DebugItem{{label: \"seen\", value: \"{{self.count}} {{name.len()}}\"}}}}\n    }}\n}}\n\nrun: fn() {{\n    loud: Loud{{count: 7}}\n    if process.args().len() > 5 -> print(\"{{loud.debug_view().len()}}\")\n    print(\"count {{loud.count}}\")\n}}\n"
+NATIVE_TEST_LOUD: "use {{\n    process: core.process\n    files: core.files\n}}\n\nLoud: struct {{\n    count: Int,\n\n    debug_view: fn(self) -> [DebugItem] {{\n        print(\"viewed\")\n        name: files.read(\"/proc/self/comm\") ?? \"\"\n        [DebugItem]{{DebugItem{{label: \"seen\", value: \"{{self.count}} {{name.len()}}\"}}}}\n    }}\n}}\n\nrun: fn() {{\n    loud: Loud{{count: 7}}\n    if process.args().len() > 5 -> print(\"{{loud.debug_view().len()}}\")\n    print(\"count {{loud.count}}\")\n}}\n"
 
 #Test("a_debug_view_that_makes_a_system_call_is_refused_and_the_program_never_runs_it") {
     scratch: native_test_files.temp_dir("jet-debug-loud") ?? panic("scratch: {err}")
     root: scratch.path
     session := native_test_session(root, NATIVE_TEST_LOUD, [String]{"-O0"})
-    paused: session.run_to([NativeBreak]{{file: "prog.jet", line: 24}}, "prog.jet", NATIVE_TEST_LOUD.split("\n").to_list(), [String]{}) ?? panic("run_to: {err.detail}")
+    paused: session.run_to([NativeBreak]{{file: "prog.jet", line: 19}}, "prog.jet", NATIVE_TEST_LOUD.split("\n").to_list(), [String]{}) ?? panic("run_to: {err.detail}")
     assert(native_debug_hit_breakpoint(paused.stop) != None, paused.text)
     // Twice: each view runs in a fresh fork.
     loop _ in 0..<2 {
@@ -235,13 +236,13 @@ NATIVE_TEST_LOUD: "use {{\n    process: core.process\n    files: core.files\n}}\
 }
 
 // A view that runs far past the evaluation budget.
-NATIVE_TEST_SPIN: "use process: core.process\n\nDebugItem: struct {{\n    label: String,\n    value: String,\n}}\n\nSpin: struct {{\n    count: Int,\n\n    debug_view: fn(self) -> [DebugItem] {{\n        total := 0\n        loop i in 0..<self.count -> total += i % 7\n        [DebugItem]{{DebugItem{{label: \"total\", value: \"{{total}}\"}}}}\n    }}\n}}\n\nrun: fn() {{\n    spin: Spin{{count: 1000000000000000}}\n    if process.args().len() > 5 -> print(\"{{spin.debug_view().len()}}\")\n    print(\"spun {{spin.count > 0}}\")\n}}\n"
+NATIVE_TEST_SPIN: "use process: core.process\n\nSpin: struct {{\n    count: Int,\n\n    debug_view: fn(self) -> [DebugItem] {{\n        total := 0\n        loop i in 0..<self.count -> total += i % 7\n        [DebugItem]{{DebugItem{{label: \"total\", value: \"{{total}}\"}}}}\n    }}\n}}\n\nrun: fn() {{\n    spin: Spin{{count: 1000000000000000}}\n    if process.args().len() > 5 -> print(\"{{spin.debug_view().len()}}\")\n    print(\"spun {{spin.count > 0}}\")\n}}\n"
 
 #Test("a_debug_view_past_its_budget_is_stopped_and_the_program_runs_on") {
     scratch: native_test_files.temp_dir("jet-debug-spin") ?? panic("scratch: {err}")
     root: scratch.path
     session := native_test_session(root, NATIVE_TEST_SPIN, [String]{"-O0"})
-    paused: session.run_to([NativeBreak]{{file: "prog.jet", line: 21}}, "prog.jet", NATIVE_TEST_SPIN.split("\n").to_list(), [String]{}) ?? panic("run_to: {err.detail}")
+    paused: session.run_to([NativeBreak]{{file: "prog.jet", line: 16}}, "prog.jet", NATIVE_TEST_SPIN.split("\n").to_list(), [String]{}) ?? panic("run_to: {err.detail}")
     assert(native_debug_hit_breakpoint(paused.stop) != None, paused.text)
     locals: session.locals() ?? panic("locals: {err.detail}")
     shown := ""

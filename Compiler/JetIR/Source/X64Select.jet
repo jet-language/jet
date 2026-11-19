@@ -1703,6 +1703,48 @@ IR_X64_CHECKS_ARMED_STORAGE: "scheduler_checks_armed"
 
 IR_X64_CHECKS_ARMED_SYMBOL: "jet_rt_checks_armed"
 
+// The runtime's zones word (JetRuntime PerfSamples.jet perf_zones_on) and
+// its data symbol (BuildLibrary.jet ir_build_library): nonzero while a
+// profiler records zones. A zone site tests it and calls nothing while it
+// is zero (ir_x64_zone_site).
+IR_X64_PERF_ZONES_STORAGE: "perf_zones_on"
+
+IR_X64_PERF_ZONES_SYMBOL: "jet_rt_perf_zones"
+
+// A zone site, core.perf.__zone_open or __zone_close at `at`: the hot path
+// tests the runtime's zones word and, while it is zero, skips the call (an
+// open's result is the Int 0, which a close skipped the same way never
+// reads). So a zone the profiler is not recording costs the word's load,
+// test and branch, and its name and arguments are not even set up. r11 may
+// hold a close's argument, so it is saved around the test (a pop keeps the
+// flags). A close whose open ran before the profiler turned zones on gets 0
+// and writes no row (PerfSamples.jet jet_perf_zone_close). A `zones: strip`
+// module (IRModule.zones_stripped) keeps no site: an open is the Int 0 and a
+// close is nothing.
+ir_x64_zone_site: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, symbol: String, dst: Int) Never! {
+    if m.zones_stripped {
+        if dst >= 0 {
+            x64_zero(e.code, X64_RAX)
+            ir_x64_store(e, m, f, al, dst, X64_RAX)
+        }
+        return
+    }
+    x64_push(e.code, X64_R11)
+    flag: x64_load_rip(e.code, X64_R11)
+    e.relocs.push(X64Reloc{at: flag, target: X64RelocTarget.RuntimeData{symbol: IR_X64_PERF_ZONES_SYMBOL}})
+    x64_test_rr(e.code, X64_R11, X64_R11)
+    x64_pop(e.code, X64_R11)
+    recording: x64_jcc_rel32(e.code, X64Cond.NE)
+    if dst >= 0 {
+        x64_zero(e.code, X64_RAX)
+        ir_x64_store(e, m, f, al, dst, X64_RAX)
+    }
+    skip: x64_jmp_rel32(e.code)
+    ir_x64_patch(e, recording, e.code.bytes.len())
+    ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: symbol}, -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
+    ir_x64_patch(e, skip, e.code.bytes.len())
+}
+
 // jet_rt_block_release(block) inline: true when the caller's reference was
 // the last one and the process is not ending. A count of 1 is the caller's
 // alone (no other owner can retain it meanwhile), so it is last without a
@@ -3629,6 +3671,9 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
                     e.routed = at
                 }
                 symbol == "jet_std_math_fma" && ir_x64_fma(e, m, f, al, tables, at) -> {}
+                symbol == "jet_perf_zone_open" || symbol == "jet_perf_zone_close" -> {
+                    ir_x64_zone_site(e, m, f, al, at, symbol, dst)
+                }
                 entry != "" -> {
                     ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: entry}, -1, f.args, f.b[at], f.c[at] - 1, dst, al.stack[at])
                 }

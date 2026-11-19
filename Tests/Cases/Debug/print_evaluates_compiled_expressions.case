@@ -1,0 +1,21 @@
+# `print` compiles its expression where the program stopped and runs the
+# compiled code in a fork of the stopped program, so it takes any pure
+# expression the program could write there: a field path, indexing with
+# arithmetic, a method call, a generic function's call, a String method and
+# a struct value. A name the frame doesn't have is the compiler's refusal.
+# The program then runs on unchanged.
+fixture: PrintEvaluatesCompiledExpressions.fixture
+env: NO_COLOR=1
+env: PATH={work}/no-tools
+step: jet debug prog.jet
+stdin: print_evaluates_compiled_expressions.stdin
+exit: 0
+stdout: ~ "Breakpoint hit  prog.jet:20  in run()" # every local is bound by the print line
+stdout: ~ "(Jet) print line.to.x\nline.to.x = 30\n" # a field path through two structs
+stdout: ~ "(Jet) print xs[1] + line.from.y\nxs[1] + line.from.y = 11\n" # indexing and arithmetic
+stdout: ~ "(Jet) print line.from.sum()\nline.from.sum() = 3\n" # a method call runs the method's code
+stdout: ~ "(Jet) print largest(xs[0], xs[2])\nlargest(xs[0], xs[2]) = 16\n" # a generic function at Int
+stdout: ~ "(Jet) print label.len()\nlabel.len() = 3\n" # a Core method on a String
+stdout: ~ "(Jet) print line.to\nline.to = Point{x: 30, y: 40}\n" # a struct result shows as `locals` shows one
+stdout: ~ "(Jet) print missing + 1\nCan't evaluate `missing + 1`: the compiler refused it: " # an unknown name is the compiler's refusal
+stdout: ~ "30 9 jet 16 3\nProgram finished\n" # the evaluations left the program's run unchanged

@@ -1,0 +1,33 @@
+# `zones: strip` (`--zones=strip`) leaves every core.perf zone site out of
+# the image: it calls no zone routine and tests no zones word, and under
+# `jet perf run` it records no zone, while its frame marks and plots still
+# record. The stock `keep` records both zones. The program prints the same
+# either way.
+fixture: ZonesStripSettingLeavesNoSite.fixture
+env: NO_COLOR=1
+step: jet build --zones=strip main.jet
+exit: 0
+step: {work}/.jet/build/main
+exit: 0
+stdout: = "total 166\n"
+when tool objdump
+step: objdump -d .jet/build/main
+exit: 0
+stdout: !~ "<jet_perf_zone_open>" # no zone site calls the routine
+end when
+step: jet perf run --zones=strip main.jet --out strip.jettrace
+exit: 0
+stdout: = "total 166\n"
+file: strip.jettrace ~ "\"kind\":\"frame_mark\"" # frame marks still record
+file: strip.jettrace ~ "\"kind\":\"plot\"" # and plots
+step: jet perf view strip.jettrace
+exit: 0
+stdout: !~ "zone step" # no zone is recorded
+stdout: ~ "frames count=3 " # one mark per frame
+step: jet perf run main.jet --out keep.jettrace
+exit: 0
+stdout: = "total 166\n"
+step: jet perf view keep.jettrace
+exit: 0
+stdout: ~ "zone step count=3 " # one outer zone per frame
+stdout: ~ "zone inner count=60 " # every inner zone

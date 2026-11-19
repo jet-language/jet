@@ -217,32 +217,41 @@ native_fix_known: fn(targets: NativeFixTargets, target: X64RelocTarget) -> Int? 
     }
 }
 
-// The first field by which struct `name` lays out differently in the running
-// image than in the edit, as the refusal names it; None when its layout is
-// the same or the image has no struct of that name.
+// How the struct `name` of the edit differs from the running image: None
+// when the image has no struct of that name or one of them has the same
+// layout. One name can belong to many structs (each instance of a generic
+// type, such as a Result's `Ok`, and same-named types of other modules), so
+// the edit's struct changed only when none of them matches it; the change
+// shown is the one against the first.
 native_fix_layout_change: fn(image: NativeImage, name: String, size: Int, members: [X64DebugMember]) -> String? Never! {
+    first := ""
     loop (_, old) in image.types {
         if old.name != name || old.tag != NATIVE_TAG_STRUCT || old.group < 0 -> next
-        before: image.members[old.group]
-        loop member in members {
-            found := false
-            loop was in before {
-                if was.name != member.name -> next
-                found = true
-                if was.offset != member.offset -> return Val("field `{member.name}` moved")
-            }
-            if !found -> return Val("field `{member.name}` added")
-        }
-        loop was in before {
-            kept := false
-            loop member in members {
-                if member.name == was.name -> kept = true
-            }
-            if !kept -> return Val("field `{was.name}` removed")
-        }
-        if old.size != size -> return Val("its size changed from {old.size} to {size} bytes")
-        return None
+        change: native_fix_layout_against(image.members[old.group], old.size, size, members) ?? return None
+        if first == "" -> first = change
     }
+    if first == "" -> return None
+    Val(first)
+}
+
+native_fix_layout_against: fn(before: [NativeMember], old_size: Int, size: Int, members: [X64DebugMember]) -> String? Never! {
+    loop member in members {
+        found := false
+        loop was in before {
+            if was.name != member.name -> next
+            found = true
+            if was.offset != member.offset -> return Val("field `{member.name}` moved")
+        }
+        if !found -> return Val("field `{member.name}` added")
+    }
+    loop was in before {
+        kept := false
+        loop member in members {
+            if member.name == was.name -> kept = true
+        }
+        if !kept -> return Val("field `{was.name}` removed")
+    }
+    if old_size != size -> return Val("its size changed from {old_size} to {size} bytes")
     None
 }
 

@@ -1992,6 +1992,8 @@ LOADER_TRACE_DEBUG_REGISTERS: 848
 
 X64_TRACE_RDX: 12
 
+X64_TRACE_RCX: 11
+
 X64_TRACE_R10: 7
 
 X64_TRACE_R8: 9
@@ -2328,6 +2330,34 @@ x64_trace_read: fn(trace: X64Trace, address: Int, count: Int) -> [U8]? {
     }
     if bytes.len() == 0 && count > 0 -> return None
     Val(bytes)
+}
+
+// Write `bytes` at `address` of the stopped program, its code included,
+// through its `/proc` mem file, which writes through page protections as
+// PTRACE_POKEDATA does: a few system calls of this process for the whole
+// run, not one helper round trip per word. False when the file can't be
+// opened or a write falls short.
+x64_trace_write: fn(trace: X64Trace, address: Int, bytes: [U8]) -> Bool {
+    if trace.pid <= 0 || trace.scratch == 0 -> return false
+    fd: loader_open_as("/proc/{trace.pid}/mem", OS_O_RDWR_CLOEXEC)
+    if os_failed(fd) -> return false
+    chunk: OS_PAGE_SIZE - LOADER_TRACE_BYTES
+    done := 0
+    loop done < bytes.len() {
+        want: if bytes.len() - done < chunk -> bytes.len() - done else -> chunk
+        wrote := 0
+        #Unsafe("the `want` bytes are copied to LOADER_TRACE_BYTES of the trace's scratch page, inside it, and pwrite64 reads them there") {
+            loop k in 0..<want {
+                os_store_byte(trace.scratch + LOADER_TRACE_BYTES + k, Int{bytes[done + k]})
+            }
+            wrote = os_syscall(OS_SYS_PWRITE64, fd, trace.scratch + LOADER_TRACE_BYTES, want, address + done, 0, 0)
+        }
+        if wrote == -OS_EINTR -> next
+        if wrote <= 0 -> break
+        done += wrote
+    }
+    loader_close(fd)
+    done == bytes.len()
 }
 
 // The trace's stopped thread's registers, X64_TRACE_REGISTERS words in the

@@ -291,7 +291,11 @@ jettrace_test_io: fn(task: U64?) -> TraceIO Never! {
     assert(jettrace_test_error(skeleton).contains("must be captured for a log span"))
     skeleton.spans[0].status = "captured"
     skeleton.spans[0].kind = "guessed"
-    assert(jettrace_test_error(skeleton).contains("kind must be task_observed, log_span or task_wait"))
+    assert(jettrace_test_error(skeleton).contains("kind must be task_observed, log_span, zone, frame_mark, plot or task_wait"))
+    loop kind in [String]{"zone", "frame_mark", "plot"} {
+        skeleton.spans[0].kind = kind
+        _: jettrace_test_valid(skeleton)
+    }
     skeleton.spans[0].kind = "log_span"
     skeleton.spans[0].spawn_line = Val(U64{4})
     assert(jettrace_test_error(skeleton).contains("only a wait names an awaited task, a spawn line, a channel, a socket, a stack or a waker"))

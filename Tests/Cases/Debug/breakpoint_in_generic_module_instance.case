@@ -11,7 +11,7 @@ exit: 0 # the second `c` runs the program to its end
 stdout+stderr: ~ "Breakpoint hit  prog.jet:7" # the member's line stops
 stdout+stderr: ~ "run()  at prog.jet:20" # in `small`'s copy, called on line 20
 stdout+stderr: ~ "run()  at prog.jet:21" # and in `large`'s, called on line 21
-stdout+stderr: ~ "Program finished"
+stdout+stderr: ~ "Program finished" # the session runs to its end
 step: jet debug prog.jet --break prog.jet:11
 stdin: breakpoint_in_generic_module_instance.stdin
 exit: 0
@@ -44,13 +44,13 @@ exit: 0
 step: jet debug {work}/.jet/build/prog --break prog.jet:7
 stdin: breakpoint_in_generic_module_instance.stdin
 exit: 0
-stdout+stderr: ~ "Breakpoint hit  prog.jet:7"
-stdout+stderr: ~ "run()  at prog.jet:20"
-stdout+stderr: ~ "run()  at prog.jet:21"
+stdout+stderr: ~ "Breakpoint hit  prog.jet:7" # the breakpoint in the generic body is hit
+stdout+stderr: ~ "run()  at prog.jet:20" # through the first instance
+stdout+stderr: ~ "run()  at prog.jet:21" # and through the second
 step: jet debug {work}/.jet/build/prog --break prog.jet:20
 stdin: breakpoint_in_generic_module_instance_step.stdin
 exit: 0
-stdout+stderr: ~ "7 |"
+stdout+stderr: ~ "7 |" # the listing shows the generic body line
 step: {work}/.jet/build/prog
 exit: 0
 stdout: = "9\n65\n9\n65\n" # the image runs unchanged

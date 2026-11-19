@@ -256,6 +256,7 @@ jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String]
         if summary == .Val(line) -> out = "{out}{line}\n"
     }
     loop line in jet_cli_perf_counter_lines(trace) -> out = "{out}{line}\n"
+    loop line in jet_cli_perf_zone_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_memory_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_off_cpu_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_game_lines(trace) -> out = "{out}{line}\n"
@@ -270,7 +271,58 @@ jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String]
         out = "{out}{diagnostic_theme_paint(color, "1", "heap")}\n"
         loop line in heap -> out = "{out}{line}\n"
     }
+    causal: jet_cli_perf_causal_lines(trace)
+    if causal.len() > 0 {
+        out = "{out}{diagnostic_theme_paint(color, "1", "causal")}\n"
+        loop line in causal -> out = "{out}{line}\n"
+    }
     out
+}
+
+// The causal lens's predictions (Causal.jet): for each progress point, the
+// lines ranked by how much sooner its passes would come were the line 30%
+// faster, each with its 90% interval, then the lines it could not rank and
+// why; or why the run was refused.
+jet_cli_perf_causal_lines: fn(trace: CanonicalJSON) -> [String] Never! {
+    items: jet_cli_perf_rows(trace, "receipt_sections") ?? return [String]{}
+    lines := [String]{}
+    loop item in items {
+        section: trace_receipt_section_from_json(item) ?? next
+        if section.name != "causal" -> next
+        if jet_cli_perf_member_text(section.value, "refused") == .Val(reason) {
+            lines.push("  refused: {reason}")
+            next
+        }
+        path: jet_cli_perf_member_text(section.value, "path") ?? ""
+        speedup: jet_cli_perf_member_number(section.value, "speedup_percent") ?? 30
+        fields: jettrace_object_view(section.value, "receipt causal") ?? next
+        at: jet_cli_perf_key(fields, "points") ?? next
+        points: jettrace_array(fields[at].value, "receipt causal.points") ?? next
+        loop point in points {
+            name: jet_cli_perf_member_text(point, "name") ?? "point"
+            lines.push("  `{name}`: if this line were {speedup}% faster, each pass would come sooner by")
+            members: jettrace_object_view(point, "receipt causal point") ?? next
+            if jet_cli_perf_key(members, "lines") == .Val(ranked_at) {
+                if jettrace_array(members[ranked_at].value, "receipt causal point.lines") == .Ok(ranked) {
+                    loop row in ranked {
+                        gain: jet_cli_perf_member_number(row, "gain_tenths") ?? 0
+                        low: jet_cli_perf_member_number(row, "low_tenths") ?? 0
+                        high: jet_cli_perf_member_number(row, "high_tenths") ?? 0
+                        sign: if gain >= 0 -> "+" else -> ""
+                        lines.push("    {path}:{jet_cli_perf_member_number(row, "line") ?? 0} {jet_cli_perf_member_text(row, "function") ?? ""}  {sign}{jet_cli_perf_causal_percent(gain)} ({jet_cli_perf_causal_percent(low)} to {jet_cli_perf_causal_percent(high)})")
+                    }
+                }
+            }
+            if jet_cli_perf_key(members, "unranked") == .Val(unranked_at) {
+                if jettrace_array(members[unranked_at].value, "receipt causal point.unranked") == .Ok(unranked) {
+                    loop row in unranked {
+                        lines.push("    {path}:{jet_cli_perf_member_number(row, "line") ?? 0} {jet_cli_perf_member_text(row, "function") ?? ""}  not ranked: {jet_cli_perf_member_text(row, "reason") ?? ""}")
+                    }
+                }
+            }
+        }
+    }
+    lines
 }
 
 // The flame graph, the timeline and the per-line table, each under its
@@ -544,14 +596,15 @@ jet_cli_perf_receipt_sections: fn(trace: CanonicalJSON) -> [JetDriverRunReceiptS
 }
 
 // `receipt <name> <value>` for each receipt section the trace records, the
-// value as its canonical JSON, but the heap snapshots, which
-// jet_cli_perf_heap_lines shows.
+// value as its canonical JSON, but the heap snapshots and the causal
+// predictions, which jet_cli_perf_heap_lines and jet_cli_perf_causal_lines
+// show.
 jet_cli_perf_receipt_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     items: jet_cli_perf_rows(trace, "receipt_sections") ?? return [String]{}
     lines := [String]{}
     loop item in items {
         section: trace_receipt_section_from_json(item) ?? next
-        if section.name == "heap" -> next
+        if section.name == "heap" || section.name == "causal" -> next
         bytes: canonical_json_bytes(section.value)
         text: String.from_bytes(bytes.slice(0, bytes.len() - 1)) ?? next
         lines.push("receipt {section.name} {text}")
@@ -1146,6 +1199,88 @@ jet_cli_perf_log_span_summary: fn(trace: CanonicalJSON) -> String? Never! {
     }
     if count == 0 -> return None
     Val("log spans count={count} window={start}..{end}ns · {symbol}")
+}
+
+// The core.perf zones, frame marks and plots of the trace's spans: each
+// zone name with how many closed, their total and longest time, heaviest
+// first; the frames with how many and their mean and longest interval; and
+// each plot with how many values and its last.
+jet_cli_perf_zone_lines: fn(trace: CanonicalJSON) -> [String] Never! {
+    lines := [String]{}
+    items: jet_cli_perf_rows(trace, "spans") ?? return lines
+    zones := [JetCLIPerfZoneTotal]{}
+    // Each zone name's entry in `zones`, and each plot's in `plots`.
+    zoned := [String:Int]{}
+    frames := [Int]{}
+    plots := [JetCLIPerfPlotTotal]{}
+    plotted := [String:Int]{}
+    loop item in items {
+        kind: jet_cli_perf_member_text(item, "kind") ?? next
+        start: jet_cli_perf_member_number(item, "start_ns") ?? next
+        end: jet_cli_perf_member_number(item, "end_ns") ?? next
+        symbol: jet_cli_perf_member_symbol(item) ?? next
+        if kind == "frame_mark" {
+            frames.push(start)
+            next
+        }
+        if kind == "plot" {
+            parts: symbol.split(" = ").to_list()
+            name: parts[0]
+            value: if parts.len() > 1 -> parts[1] else -> ""
+            if !plotted.has_key(name) {
+                plotted[name] = plots.len()
+                plots.push(JetCLIPerfPlotTotal{name: name, count: 0, last: ""})
+            }
+            plot := plots[plotted[name]]
+            plot.count += 1
+            plot.last = value
+            plots[plotted[name]] = plot
+            next
+        }
+        if kind != "zone" -> next
+        if !zoned.has_key(symbol) {
+            zoned[symbol] = zones.len()
+            zones.push(JetCLIPerfZoneTotal{name: symbol, count: 0, total: 0, longest: 0})
+        }
+        zone := zones[zoned[symbol]]
+        zone.count += 1
+        zone.total += end - start
+        if end - start > zone.longest -> zone.longest = end - start
+        zones[zoned[symbol]] = zone
+    }
+    zones.sort_by(fn(left: JetCLIPerfZoneTotal, right: JetCLIPerfZoneTotal) { (right.total <=> left.total).then(left.name <=> right.name) })
+    loop zone in zones {
+        lines.push("zone {zone.name} count={zone.count} total={zone.total}ns longest={zone.longest}ns")
+    }
+    frames.sort()
+    widest := 0
+    loop at in 1..<frames.len() {
+        if frames[at] - frames[at - 1] > widest -> widest = frames[at] - frames[at - 1]
+    }
+    if frames.len() > 1 {
+        mean: (frames[frames.len() - 1] - frames[0]).div_euclid(frames.len() - 1)
+        lines.push("frames count={frames.len()} mean={mean}ns longest={widest}ns")
+    }
+    if frames.len() == 1 -> lines.push("frames count=1")
+    loop plot in plots {
+        lines.push("plot {plot.name} count={plot.count} last={plot.last}")
+    }
+    lines
+}
+
+// One zone name's closed zones (jet_cli_perf_zone_lines).
+JetCLIPerfZoneTotal: struct {
+    name: String,
+    count: Int,
+    total: Int,
+    longest: Int,
+}
+
+// One plot's values (jet_cli_perf_zone_lines): how many, and its last.
+JetCLIPerfPlotTotal: struct {
+    name: String,
+    count: Int,
+    last: String,
 }
 
 // The tasks' waits (`task_wait` rows): how many, and the longest

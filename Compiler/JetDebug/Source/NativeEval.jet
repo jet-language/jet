@@ -1,0 +1,235 @@
+// Expressions evaluated at a stop: `print`, a breakpoint's condition, a
+// logpoint's message, `watch`'s value and the adapter's `evaluate` all go
+// through one evaluator, the compiler. The session's NativeEvaluator (JetCLI
+// DebugCompile.jet) checks the expression where the selected frame stopped, as
+// a function of the locals it reads (its captures), refuses one with an
+// effect, and compiles the program again with that function and an entry
+// that calls it. The session places the new code in a fork of the stopped
+// program (NativeFork.jet) as `fix` places an edit (NativeFix.jet), calls it
+// there with the captures' bytes read from the frame, and shows the result
+// through the image's debug types. The program itself neither runs nor
+// changes. A compiled expression is kept per source line and text, so a
+// condition compiles once and runs in a fork at each hit.
+use jet_backend.[X64DebugEncoding, X64Trace]
+
+// Why an expression can't be evaluated, as the console shows it after
+// `Can't evaluate `x`: `.
+#Error
+NativeEvalRefused: struct {
+    message: String,
+}
+
+// What compiles an expression for a session (JetCLI DebugCompile.jet): `text`
+// checked before line `line` of the source `path`, compiled with the
+// program, or why it can't be.
+NativeEvaluator: trait {
+    compile: fn(self, path: String, line: Int, text: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval NativeEvalRefused!,
+}
+
+// A value an evaluation passes or returns: a capture by the name of the
+// local it reads, the result by its Jet type's spelling; its size in bytes,
+// and whether its bytes are the value itself (`inline`, an aggregate),
+// rather than a word.
+NativeEvalPart: struct {
+    name: String,
+    size: Int,
+    inline: Bool,
+}
+
+// A compiled expression: its text, and the program compiled again with it
+// (`edit`), whose function `entry` is called as `entry(cell, captures...)`.
+// Each capture is passed as the address of its bytes, and the result is
+// stored at `cell`, an aggregate's bytes, else its word. `plan` places it
+// in a fork; it is made at the first evaluation, against the `planned`
+// fixes the program then held.
+NativeEval: struct {
+    text: String,
+    edit: NativeFixEdit,
+    entry: String,
+    captures: [NativeEvalPart],
+    result: NativeEvalPart,
+    plan: NativeFixPlan?{None},
+    planned: Int{-1},
+}
+
+// An evaluated value: as Jet shows it (a String quoted), its Jet type, its
+// text as interpolation shows it (a String's own text), and whether it is
+// a true Bool.
+NativeEvalValue: struct {
+    shown: String,
+    type_name: String,
+    text: String,
+    truth: Bool,
+}
+
+// The image's code facts an evaluation places code against, read once:
+// its sized symbols and its `.text`.
+NativeEvalImage: struct {
+    symbols: [String:NativeFixSymbol],
+    code: NativeCode,
+}
+
+// The captures an expression may have: one register of a call's six holds
+// the result's cell.
+NATIVE_EVAL_CAPTURES: 5
+
+native_eval_refused: fn(message: String) -> NativeEvalRefused Never! {
+    NativeEvalRefused{message: message}
+}
+
+// Why the plan of `code` can't place it: a function the compile changed
+// that the program runs too means the source is no longer the program's.
+// "" when it can be placed.
+native_eval_refusal: fn(code: NativeEval, plan: NativeFixPlan, facts: NativeEvalImage, fixed: [NativeFixed]) -> String Never! {
+    loop row in plan.changed {
+        if native_fix_running(code.edit.functions[row].name, facts.symbols, facts.code.bytes, facts.code.address, fixed) != None {
+            return "`{native_fix_shown(code.edit, row)}` in the source is not the code the program runs; rebuild the program, or `fix` it first"
+        }
+    }
+    ""
+}
+
+// The offset in the plan's region of the expression's entry.
+native_eval_entry: fn(code: NativeEval, plan: NativeFixPlan) -> Int? Never! {
+    loop piece in plan.pieces {
+        if piece.function >= 0 && code.edit.functions[piece.function].name == code.entry {
+            return Val(piece.offset)
+        }
+    }
+    None
+}
+
+// Run `code` in a fork of the program `trace` stops, made at the image's
+// `syscall` instruction: its code placed by `plan` near the image's code,
+// the program's trap bytes `sites` put back, and `captures` (each
+// capture's bytes) passed by address. `typed` holds the captures' debug
+// types.
+native_eval_run: fn(image: NativeImage, trace: X64Trace, sites: [Int:Int], code: NativeEval, plan: NativeFixPlan, facts: NativeEvalImage, syscall: Int, captures: [[U8]], typed: [Int]) -> NativeEvalValue NativeEvalRefused! {
+    fork: native_fork_make(trace, syscall) ?? return Err(native_eval_refused(err.detail))
+    value: native_eval_in_fork(image, fork, trace.pid, sites, code, plan, facts, captures, typed) ?? {
+        native_fork_end(fork)
+        return Err(err)
+    }
+    native_fork_end(fork)
+    Ok(value)
+}
+
+native_eval_in_fork: fn(image: NativeImage, fork: NativeFork, pid: Int, sites: [Int:Int], code: NativeEval, plan: NativeFixPlan, facts: NativeEvalImage, captures: [[U8]], typed: [Int]) -> NativeEvalValue NativeEvalRefused! {
+    native_fork_prepare(fork, pid, sites) ?? return Err(native_eval_refused(err.detail))
+    // The region goes where a fix's would, within a rel32 of the image's
+    // code; a taken address moves on.
+    text_end: facts.code.address + facts.code.bytes.len()
+    hint := (text_end + NATIVE_FIX_GAP + NATIVE_FIX_PAGE - 1).div_euclid(NATIVE_FIX_PAGE) * NATIVE_FIX_PAGE
+    base := 0
+    loop _ in 0..<NATIVE_FIX_TRIES {
+        mapped: native_fork_syscall(fork, NATIVE_FORK_SYS_MMAP, [Int]{hint, plan.size, NATIVE_FIX_PROTECTION, NATIVE_FIX_FLAGS, -1, 0}) ?? return Err(native_eval_refused(err.detail))
+        if mapped == hint {
+            base = hint
+            break
+        }
+        hint += NATIVE_FIX_GAP
+    }
+    if base == 0 {
+        return Err(native_eval_refused("there is no room near the program's code for the expression's code"))
+    }
+    if !native_fork_poke(fork, base, native_fix_region(plan, code.edit, facts.symbols, base)) {
+        return Err(native_eval_refused("couldn't write the expression's code in the copy"))
+    }
+    offset: native_eval_entry(code, plan) ?? return Err(native_eval_refused("the compiled expression has no entry"))
+    // The result's cell, then each capture's bytes, below the fork's
+    // scratch room; the call runs below them.
+    least: if code.result.size > 8 -> code.result.size else -> 8
+    cell_size: ((least + 7) >> 3) << 3
+    cell: ((fork.scratch - NATIVE_FORK_RESULT - cell_size) >> 4) << 4
+    if !native_fork_poke(fork, cell, loop _ in 0..<cell_size -> U8{0}) {
+        return Err(native_eval_refused("couldn't write the copy's stack"))
+    }
+    arguments := [Int]{cell}
+    at := cell
+    loop bytes in captures {
+        at = ((at - bytes.len()) >> 4) << 4
+        if !native_fork_poke(fork, at, bytes) {
+            return Err(native_eval_refused("couldn't write the copy's stack"))
+        }
+        arguments.push(at)
+    }
+    // v1 runs the program's own runtime in the copy, so two limits hold:
+    // - a lock another thread held at the stop is never released in the
+    //   copy, which has only the stopped thread; code that takes it waits
+    //   until the budget (NATIVE_FORK_BUDGET_MS, 2 s) ends the call;
+    // - a function value the expression calls runs the image's code for
+    //   it, whatever that code does within the fork's confinement.
+    _ := native_fork_call(fork, image, base + offset, arguments, at - 16) ?? return Err(native_eval_refused(err.detail))
+    memory: NativeMemory{trace: Val(fork.trace), blocks: [NativeBlock]{}}
+    held: native_debug_bytes(memory, cell, cell_size) ?? return Err(native_eval_refused("couldn't read the expression's value"))
+    ty: native_eval_type(image, typed, code.result.name)
+    value := native_eval_show(image, memory, code.result, ty, held) ?? return Err(native_eval_refused("the image has no debug type to show a `{code.result.name}` with"))
+    // A value whose type has a DebugView shows as `locals` shows it: its
+    // view, run in this same copy, or its fields when the view fails.
+    if ty == .Val(id) && native_debug_view_at(image, id) == .Val(view) {
+        size: native_type_size(image, id)
+        word: native_number(held, 0, 8, X64DebugEncoding.Signed)
+        bytes: if !code.result.inline && size > 8 -> native_debug_bytes(memory, word, size) ?? held.move() else -> held.move()
+        if native_fork_view(fork, image, pid, sites, view, id, bytes) == .Ok(viewed) {
+            value.shown = viewed
+        }
+    }
+    Ok(value)
+}
+
+// The value whose cell holds `held`, of the type `result` names, as the
+// image's debug type `found` shows it. A word whose type is bigger than a
+// word addresses the value's bytes.
+native_eval_show: fn(image: NativeImage, memory: NativeMemory, result: NativeEvalPart, found: Int?, held: [U8]) -> NativeEvalValue? Never! {
+    name: result.name
+    word: native_number(held, 0, 8, X64DebugEncoding.Signed)
+    shown := String?{None}
+    if found == .Val(ty) {
+        size: native_type_size(image, ty)
+        shown = if !result.inline && size > 8 -> native_render(image, memory, ty, native_debug_bytes(memory, word, size) ?? return None, 0, 0) else -> native_render(image, memory, ty, held, 0, 0)
+    }
+    if shown == None {
+        shown = if name == {
+            "Int" -> if native_debug_int(word, memory) == .Val(number) -> Val("{number}") else -> None
+            "Bool" -> Val(if word & 255 != 0 -> "true" else -> "false")
+            "String" -> native_debug_string(word, memory)
+            else -> None
+        }
+    }
+    value: shown ?? return None
+    text: if name == "String" -> native_debug_text(word, memory, false) ?? value else -> value
+    Val(NativeEvalValue{shown: value, type_name: name, text: text, truth: name == "Bool" && word & 255 != 0})
+}
+
+// The debug type of a result Jet spells `name`: a capture's of that type
+// in `typed`, as `locals` names it, else the image's of that name.
+native_eval_type: fn(image: NativeImage, typed: [Int], name: String) -> Int? Never! {
+    spelled: native_jet_spelling(name)
+    loop ty in typed {
+        if native_type_name(image, ty) == spelled -> return Val(ty)
+    }
+    native_type_named(image, name)
+}
+
+// The image's debug type Jet spells `name`, a typedef first (the language's
+// named types); None when the image has none.
+native_type_named: fn(image: NativeImage, name: String) -> Int? Never! {
+    spelled: native_jet_spelling(name)
+    best := Int?{None}
+    loop (id, found) in image.types {
+        if found.tag == NATIVE_TAG_POINTER || found.name == "" -> next
+        if native_jet_spelling(found.name) != spelled -> next
+        if found.tag == NATIVE_TAG_TYPEDEF -> return Val(id)
+        if best == None -> best = Val(id)
+    }
+    best
+}
+
+// A logpoint's message as the String expression whose `{…}` parts fill it
+// in.
+native_eval_message: fn(message: String) -> String Never! { "\"{message.replace("\"", "\\\"")}\"" }
+
+#Test("a logpoint message is one string expression") {
+    assert_eq(native_eval_message("total is {{total}}"), "\"total is {{total}}\"")
+    assert_eq(native_eval_message("say \"hi\""), "\"say \\\"hi\\\"\"")
+}

@@ -167,6 +167,8 @@ use {
         sema_comptime_reflection_type_id_record,
         sema_comptime_reflection_written_comments,
         sema_comptime_reflection_written_markers,
+        sema_comptime_reflection_package_function_markers,
+        sema_comptime_reflection_package_registry,
         sema_registration_module_index,
         sema_source_location_at,
         sema_type_graph_lookup_symbol_at,
@@ -761,6 +763,7 @@ jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -
     functions := [TComptimeValue]{}
     effects := [TComptimeValue]{}
     catalog: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
+    package_registry: sema_comptime_reflection_package_registry(input.registration, catalog)
     loop (module_index, registration_module) in input.registration.modules {
         if jet_eval_compiler_services_module_is_supplied(registration_module) -> next
         module_text: sema_comptime_reflection_doc_source(registration_module.source, registration_module.source_file)
@@ -778,7 +781,10 @@ jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -
                 // A failed check leaves the registration incomplete, with no
                 // marker registry; like the failed-check FunctionInfo
                 // (JetDriver ComptimeCompiler.jet), its markers then read empty.
-                markers: sema_comptime_reflection_written_markers(input.registration, registration_module.module_identity, registration_module.program, catalog, function.markers, registry) ?? [TComptimeValue]{}
+                markers := sema_comptime_reflection_written_markers(input.registration, registration_module.module_identity, registration_module.program, catalog, function.markers, registry) ?? [TComptimeValue]{}
+                if registration_module.package_identity == input.registration.package_identity {
+                    markers.extend(sema_comptime_reflection_package_function_markers(input.registration, package_registry))
+                }
                 functions.push(jet_eval_compiler_services_function_info(input.registration, module_index, function, module_text, checked_module, function_key, markers))
             }
         }
@@ -867,6 +873,8 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
     packages := [JetCompilerServicesPackageRows]{}
     foreign := [TComptimeValue]{}
     build_keys := [String]{}
+    // The header markers of the package record that its functions inherit.
+    package_registry: sema_comptime_reflection_package_registry(registration, catalog)
     loop (module_index, module_row) in registration.modules {
         if jet_eval_compiler_services_module_is_supplied(module_row) -> next
         // Lexed whole: the ModuleInfo lists every comment, and each
@@ -896,7 +904,10 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
                         next
                     }
                     key: jet_eval_compiler_services_function_key(registration, function, module_row) ?? return .Missing{fact: "function `{module_row.module_name}.{function.name}` is not registered"}
-                    markers: sema_comptime_reflection_written_markers(registration, module_row.module_identity, module_row.program, catalog, function.markers, registry) ?? return .Missing{fact: "module `{module_row.module_name}` has no marker registry"}
+                    markers := sema_comptime_reflection_written_markers(registration, module_row.module_identity, module_row.program, catalog, function.markers, registry) ?? return .Missing{fact: "module `{module_row.module_name}` has no marker registry"}
+                    if module_row.package_identity == registration.package_identity {
+                        markers.extend(sema_comptime_reflection_package_function_markers(registration, package_registry))
+                    }
                     value: jet_eval_compiler_services_function_info(registration, module_index, function, doc_text, checked, Val(key), markers)
                     functions.push(value.copy())
                     module_functions.push(value)

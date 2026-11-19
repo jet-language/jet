@@ -63,7 +63,9 @@
 //             --against the chain's seed, s2 and the seed each compiling COMMIT's compiler
 //             corpus 3 rounds at the default level under `perf stat` (the dev shell's
 //             pkgs.perf). A rise over 10% in CPU, instructions:u or a top-level phase's process
-//             CPU fails, and so does an INCONCLUSIVE verdict.
+//             CPU fails, and so does an INCONCLUSIVE verdict, unless a
+//             `speed<TAB>gate<TAB>*<TAB>#card<TAB>reason` disposition records the owner's
+//             acceptance: the row is then a WARN naming the card. No verdict always fails.
 //   throughput  s2 compiles the corpus once at check, O0 and release (#5479 c1); a
 //             compile that fails fails the row. Every compile of both is a row of
 //             evidence/throughput.tsv, the throughput ledger each release ships.
@@ -312,7 +314,7 @@ parse_dispositions: fn(text: String, suites: [String]) -> Dispositions Never! {
         if line.trim() == "" || line.starts_with("#") -> next
         cells: line.split("\t").to_list()
         why: if cells.len() > 4 -> cells[4..<cells.len()].join("\t").trim().copy() else -> ""
-        if cells.len() < 5 || !suites.contains(cells[0]) || cells[1] == "" || cells[2] == "" || !is_card(cells[3]) || why == "" {
+        if cells.len() < 5 || (!suites.contains(cells[0]) && cells[0] != SPEED_ROW) || cells[1] == "" || cells[2] == "" || !is_card(cells[3]) || why == "" {
             shown: json.dumps(Dyn.Text(line.copy())) ?? line.copy()
             out.errors.push("dispositions line {index + 1}: want suite<TAB>case<TAB>tier|*<TAB>#card<TAB>reason, got {shown}")
             next
@@ -1081,8 +1083,10 @@ chain_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     sha: sha256_file(s2)
     // RELEASE.json records both chain stages so Tools/Release can check the
     // fixed point from the seed alone. The tree's JET_VERSION is the next
-    // release (run_gate), so each names `jet@<next>`.
-    ctx.candidate = Built{jet: s2, runtime: files.join(out, "s2/jet-runtime"), sha: sha, identity: "jet@{ctx.next}#{sha}", jetpack: "", s2: "jet@{ctx.next}#{sha}", s3: "jet@{ctx.next}#{sha256_file(s3)}"}
+    // release (run_gate), so each names `jet@<next>`, with the identity
+    // digest the jet carries (Release.jet identity_digest), not its sha256.
+    named: identity_digest_file(s2)
+    ctx.candidate = Built{jet: s2, runtime: files.join(out, "s2/jet-runtime"), sha: sha, identity: "jet@{ctx.next}#{named}", jetpack: "", s2: "jet@{ctx.next}#{named}", s3: "jet@{ctx.next}#{identity_digest_file(s3)}"}
     ctx.built = true
     row(ctx, "chain", "PASS", "fixed point s2 == s3 (jet {short(sha, 16)}) from {ctx.release.name}, no Rust ({stages.join(", ")}; {verdict_note})")
 }
@@ -2206,6 +2210,9 @@ registries_verdict: fn(texts: [String], sha: String, dispositions: [Disposition]
 // measures nothing.
 SPEED_TOOL: "Tools/Perf/CompileThroughput/Throughput.jet"
 
+// The disposition suite of the speed row.
+SPEED_ROW: "speed"
+
 SPEED_GATE_MODES: "default"
 
 SPEED_RUNS: 3
@@ -2230,14 +2237,20 @@ speed_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     gate: run_logged(in_dev_shell(ctx.candidate.jet, ctx.tree, true, gate_args), ctx.tree, vars, log, 4 * 3600)
     text: read_text(log) ?? ""
     said: speed_detail(text)
-    status: if gate.rc == 0 && said.verdict == "PASS" -> "PASS" else -> "FAIL"
+    measured: if gate.rc == 0 && said.verdict == "PASS" -> "PASS" else -> "FAIL"
+    // An owner-accepted speed result: a `speed<TAB>gate<TAB>*<TAB>#card<TAB>reason`
+    // disposition turns a measured FAIL or INCONCLUSIVE verdict into a WARN row
+    // that names the card and the reason; a gate that gave no verdict still fails.
+    waiver: if measured == "FAIL" && said.verdict != "" -> disposition_for(ctx.dispositions, SPEED_ROW, "gate", SPEED_GATE_MODES) else -> None
+    status: if waiver == None -> measured else -> "WARN"
+    accepted: if waiver == .Val(entry) -> "accepted by {entry.card}: {entry.reason}; " else -> ""
     timed: if gate.timed_out -> " (timed out)" else -> ""
     if said.verdict == "" && text.contains("cannot run --perf") {
         row(ctx, "speed", "FAIL", "no `perf` in the dev shell: the gate counts each compile's instructions:u with `perf stat`, and runs in COMMIT's dev shell (Tools/Agent/JetEnv.jet), whose flake.nix default shell must list pkgs.perf; enter it (`nix develop`) and check `perf --version`, then rerun admit; log {log}")
         remove_tree(work)
         return
     }
-    row(ctx, "speed", status, "s2 against {ctx.release.name}, {SPEED_GATE_MODES} level, {SPEED_RUNS} rounds: {if said.verdict == "" -> "no verdict, rc={gate.rc}{timed}: {tail_of(log, 3)}" else -> said.detail}; log {log}")
+    row(ctx, "speed", status, "{accepted}s2 against {ctx.release.name}, {SPEED_GATE_MODES} level, {SPEED_RUNS} rounds: {if said.verdict == "" -> "no verdict, rc={gate.rc}{timed}: {tail_of(log, 3)}" else -> said.detail}; log {log}")
     cell_args := [String]{ctx.candidate.jet.copy(), tool.copy(), "--modes", SPEED_CELL_MODES, "--runs", "1", "--work", files.join(work, "cell")}
     cell_args.extend(shared.copy())
     cell: run_logged(in_dev_shell(ctx.candidate.jet, ctx.tree, true, cell_args), ctx.tree, vars, log, 2 * 3600, true)
@@ -2314,7 +2327,7 @@ reused_flaky: fn(failures: [SuiteRow], rows: [SuiteRow], suite: String, disposit
 unused_dispositions: fn(dispositions: [Disposition], suites: [SuiteResult]) -> [String] Never! {
     unused := [String]{}
     loop entry in dispositions {
-        if entry.suite == REGISTRY_SUITE -> next
+        if entry.suite == REGISTRY_SUITE || entry.suite == SPEED_ROW -> next
         used := false
         loop result in suites {
             loop lost in result.compared.lost {

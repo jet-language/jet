@@ -3,7 +3,8 @@
 # function's body. Rewrites of one function compose in the order they run:
 # the trace handler, registered first, rewrites `load` and `plain`; the timer
 # handler, registered second, rewrites `load` again, and its paste is the
-# trace rewrite, so the timer wraps outside the trace.
+# trace rewrite, so the timer wraps outside the trace. `jet run` loads the
+# same rewritten bodies, so it prints what the built program prints.
 fixture: MetaEventsRewritesComposeInOrder.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -11,5 +12,8 @@ step: jet build main.jet --write-generated=on
 exit: 0
 file: .jet/generated/main/rewrite_body/load.jet ~ "print(\"time start\")" # the composed body is one generated module
 step: {work}/.jet/build/app
+exit: 0
+stdout: = "time start\nenter\nenter\n3\n"
+step: jet run main.jet
 exit: 0
 stdout: = "time start\nenter\nenter\n3\n"

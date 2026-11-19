@@ -1,0 +1,16 @@
+# The debugger evaluates an expression as a `fn() -[]>`: one that uses an
+# effect is refused before any of it runs, and the refusal names the effect.
+# A pure expression in the same frame still evaluates, and the program runs
+# on unchanged: `shout` speaks once, from the program's own call.
+fixture: PrintRefusesEffectfulExpression.fixture
+env: NO_COLOR=1
+env: PATH={work}/no-tools
+step: jet debug prog.jet
+stdin: print_refuses_effectful_expression.stdin
+exit: 0
+stdout: ~ "Breakpoint hit  prog.jet:9  in run()" # stopped before the program's own call of shout
+stdout: ~ "(Jet) print shout(n)\nCan't evaluate `shout(n)`: " # the effectful expression is refused
+stdout: ~ "uses the effect `IO`" # the refusal names the effect
+stdout: ~ "(Jet) print n * 2\nn * 2 = 14\n" # a pure expression in the same frame still evaluates
+stdout: !~ "shout 7\nshout 7" # the refused call never ran
+stdout: ~ "shout 7\n7\nProgram finished\n" # the program's own call runs as before

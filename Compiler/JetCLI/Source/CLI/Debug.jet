@@ -94,6 +94,9 @@ jet_cli_debug_build: fn(entry: String, scratch: String, deep_checks: DeepChecks,
 jet_cli_debug_session: fn(image: String, entry: String, lines: [String], scratch: String, breaks: [NativeBreak], program_args: [String], deep_checks: DeepChecks, dap: Bool, color: Bool) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> JetCLIPlan Never! {
     session := NativeSession.start(image, cli_files.join(scratch, "output.txt")) ?? return jet_cli_debug_unavailable(err, color)
     source_file: if entry == "" -> session.run_source() else -> entry
+    // `print`, `watch`, conditions, logpoints and the adapter's `evaluate`
+    // compile their expressions with this program (DebugCompile.jet).
+    session.evaluate_with(JetCLIDebugEvaluator{entry: source_file, argv: jet_cli_debug_eval_argv(deep_checks), color: color})
     source_lines: if entry == "" -> (cli_files.read(source_file) ?? "").split("\n").to_list() else -> lines
     if dap {
         jet_cli_debug_dap(session, source_file)
