@@ -704,7 +704,19 @@ D-DBG-VERBS1=A names the commands:
   stops and says why. Setting it says where the condition runs: the
   debugger checks it at each hit, which stops the program each time.
 - `log <file:line> "<text with {expr}>"` sets a logpoint. It prints its
-  message with each `{expr}` filled in, then the program runs on.
+  message with each `{expr}` filled in, then the program runs on. Setting it
+  says where it runs. A logpoint with no condition, and whose parts are
+  each a number, Bool or Char, runs in the program: each part is compiled
+  on its own and placed as a condition is, and a hit writes its parts'
+  values and a sequence number to a ring of 65,536 slots in the program's
+  memory, then runs on without a stop. The debugger reads the ring and
+  fills in the messages, in the order of their hits, when the program
+  stops, when the ring is full, when a thread exits and before it changes
+  the breakpoints. Its messages then come after the program output that
+  preceded the read, not between its lines. Any other part (a String, a
+  struct) is read from memory that may change after the hit, so such a
+  logpoint says why it can't run in the program, and the debugger fills in
+  its message at each hit, which stops the program each time.
 - `watch <place>` stops at each write that changes a local of the selected
   frame, a field path under one (`watch order.total`), or an item of a List
   at a literal index (`watch xs[3]`, `watch order.lines[0]`). The stop
@@ -762,8 +774,10 @@ a lock another thread held at the stop is never released there (code that
 takes it fails at the 2 s budget), and a function value runs the image's
 code. An expression that calls a function that can fail shows its result as
 `locals` shows a fallible result, `parse(s) = Ok(3)` or `Err(ParseError.Empty)`,
-so a condition that can fail is refused, not a Bool. An expression reads at
-most 5 locals. A local's own name is no expression: `print total` shows the
+so a condition that can fail is refused, not a Bool. A call in the fork
+passes up to 5 locals in registers and more by a table of their addresses;
+a condition that reads more than 5 runs in the fork at each hit, not in the
+program. A local's own name is no expression: `print total` shows the
 local as `locals` does, in a dump too, and a dump runs no code.
 
 A watch on a place in memory takes the CPU's debug registers (at most 4,

@@ -30,24 +30,28 @@ NativeEvaluator: trait {
 // A value an evaluation passes or returns: a capture by the name of the
 // local it reads, the result by its Jet type's spelling; its size in bytes,
 // whether its bytes are the value itself (`inline`, an aggregate), rather
-// than a word, and its type's row in the compile's debug types
+// than a word, its type's row in the compile's debug types
 // (NativeEval.edit's object.debug.types, -1: none), which shows a value of a
-// type the program's image has no DWARF for.
+// type the program's image has no DWARF for, and whether its value is a
+// word of its own (`word`: a number, Bool or Char).
 NativeEvalPart: struct {
     name: String,
     size: Int,
     inline: Bool,
     ty: Int{-1},
+    word: Bool{false},
 }
 
 // A compiled expression: its text, and the program compiled again with it
-// (`edit`), whose function `entry` is called as `entry(cell, captures...)`.
-// Each capture is passed as the address of its bytes, and the result is
-// stored at `cell`, an aggregate's bytes, else its word. `plan` places it
-// in a fork; it is made at the first evaluation, against the `planned`
-// fixes the program then held. `refusal` says why, as a breakpoint's
-// condition, it can't run in the program itself (JetIR EvalPlace.jet), ""
-// when it can (NativePlace.jet).
+// (`edit`), whose function `entry` is called as `entry(cell, captures...)`,
+// or, with more than NATIVE_EVAL_CAPTURES captures, as `entry(cell,
+// table)`, `table` the captures' addresses in order. Each capture is passed
+// as the address of its bytes, and the result is stored at `cell`, an
+// aggregate's bytes, else its word. `plan` places it in a fork; it is made
+// at the first evaluation, against the `planned` fixes the program then
+// held. `refusal` says why, as a breakpoint's condition, it can't run in
+// the program itself (JetIR EvalPlace.jet), "" when it can
+// (NativePlace.jet).
 NativeEval: struct {
     text: String,
     edit: NativeFixEdit,
@@ -76,8 +80,8 @@ NativeEvalImage: struct {
     code: NativeCode,
 }
 
-// The captures an expression may have: one register of a call's six holds
-// the result's cell.
+// The captures a call passes in its registers: one register of a call's six
+// holds the result's cell. More go by a table of their addresses.
 NATIVE_EVAL_CAPTURES: 5
 
 native_eval_refused: fn(message: String) -> NativeEvalRefused Never! {
@@ -173,6 +177,15 @@ native_eval_in_fork: fn(image: NativeImage, fork: NativeFork, pid: Int, sites: [
         }
         arguments.push(at)
     }
+    if captures.len() > NATIVE_EVAL_CAPTURES {
+        table := [U8]{}
+        loop k in 1..<arguments.len() -> table.extend(native_word_bytes(arguments[k]))
+        at = ((at - table.len()) >> 4) << 4
+        if !native_fork_poke(fork, at, table) {
+            return Err(native_eval_refused("couldn't write the copy's stack"))
+        }
+        arguments = [Int]{cell, at}
+    }
     // v1 runs the program's own runtime in the copy, so two limits hold:
     // - a lock another thread held at the stop is never released in the
     //   copy, which has only the stopped thread; code that takes it waits
@@ -261,6 +274,88 @@ native_eval_message: fn(message: String) -> String Never! { "\"{message.replace(
 #Test("a logpoint message is one string expression") {
     assert_eq(native_eval_message("total is {{total}}"), "\"total is {{total}}\"")
     assert_eq(native_eval_message("say \"hi\""), "\"say \\\"hi\\\"\"")
+}
+
+// Whether a part whose value is `result` may run in the program: its value
+// is a word of its own, which its code writes whole, so the message shows
+// the value at the hit with nothing the program may change before the
+// debugger reads it (but the digits of an Int too big for its word).
+native_log_word: fn(result: NativeEvalPart) -> Bool Never! {
+    result.word && !result.inline && result.size <= 8
+}
+
+// A logpoint's message as the text around each `{…}` part (`texts`, one
+// more than the parts) and each part's expression, `{{` and `}}` a brace
+// of the text; None when a part doesn't close.
+native_log_split: fn(message: String) -> {texts: [String], holes: [String]}? Never! {
+    bytes: message.bytes()
+    texts := [String]{}
+    holes := [String]{}
+    text := [U8]{}
+    k := 0
+    loop k < bytes.len() {
+        byte: bytes[k]
+        doubled: k + 1 < bytes.len() && bytes[k + 1] == byte
+        if (byte == 123 || byte == 125) && doubled {
+            text.push(byte)
+            k += 2
+            next
+        }
+        if byte != 123 {
+            text.push(byte)
+            k += 1
+            next
+        }
+        depth := 1
+        end := k + 1
+        loop end < bytes.len() && depth > 0 {
+            if bytes[end] == 123 -> depth += 1
+            if bytes[end] == 125 -> depth -= 1
+            end += 1
+        }
+        if depth > 0 -> return None
+        texts.push(String.from_bytes(text) ?? return None)
+        text = [U8]{}
+        hole: String.from_bytes(bytes[k + 1..<end - 1]) ?? return None
+        holes.push("{hole.trim()}")
+        k = end
+    }
+    texts.push(String.from_bytes(text) ?? return None)
+    Val({texts: texts, holes: holes})
+}
+
+// A part's value as a logpoint's message shows it, of the type `result`
+// names (`ty`, its debug type), from the word at `at` of `bytes` its code
+// wrote in the ring: an Int or a Bool straight from the word.
+native_log_shown: fn(image: NativeImage, memory: NativeMemory, result: NativeEvalPart, ty: Int?, bytes: [U8], at: Int) -> String Never! {
+    word: native_number(bytes, at, 8, X64DebugEncoding.Signed)
+    if result.name == "Int" && word >= -4611686018427387904 && word < 4611686018427387904 {
+        return "{word}"
+    }
+    if result.name == "Bool" -> return if word & 255 != 0 -> "true" else -> "false"
+    value: native_eval_show(image, memory, result, ty, bytes[at..<at + 8]) ?? return "<a {result.name} the debugger can't show>"
+    "{value.text}"
+}
+
+#Test("a logpoint's message splits into its text and its parts") {
+    split: native_log_split("i={{i}} and {{{{literal}}}} {{ a + b }}") ?? panic("split")
+    assert_eq(split.texts.len(), 3)
+    assert_eq(split.texts[0], "i=")
+    assert_eq(split.texts[1], " and {{literal}} ")
+    assert_eq(split.texts[2], "")
+    assert_eq(split.holes[0], "i")
+    assert_eq(split.holes[1], "a + b")
+    assert(native_log_split("open {{i") == None)
+    plain: native_log_split("no parts") ?? panic("plain")
+    assert_eq(plain.texts[0], "no parts")
+    assert_eq(plain.holes.len(), 0)
+}
+
+#Test("a part runs in the program only when its value is a word of its own") {
+    assert(native_log_word(NativeEvalPart{name: "Int", size: 8, inline: false, word: true}))
+    assert(native_log_word(NativeEvalPart{name: "Bool", size: 1, inline: false, word: true}))
+    assert(!native_log_word(NativeEvalPart{name: "String", size: 8, inline: false}))
+    assert(!native_log_word(NativeEvalPart{name: "Point", size: 16, inline: true}))
 }
 
 #Test("a local's own name reads as `locals` shows it, an expression compiles") {

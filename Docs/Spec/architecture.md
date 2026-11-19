@@ -187,8 +187,10 @@ the eval fork's filter allows with a constant number, and every futex call
 private and not a wait. A syscall number counts as constant when every
 caller passes one, through the wrappers; the assembler records each
 `syscall` an inline-assembly template makes. A refused export names the
-first failing syscall and the functions to it. The receipt is not part of
-the pack identity.
+first failing syscall and the functions to it. The runtime is built as one
+composed unit, so a function's file is the unit source its first line
+stands in, read from the unit's `// [unit source: PATH]` marks. The
+receipt is not part of the pack identity.
 
 Runtime-pack roots are the public defined C-ABI globals of standalone Jet
 runtime objects and explicit extra roots. The Jet object writer publishes

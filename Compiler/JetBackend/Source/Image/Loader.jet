@@ -1969,6 +1969,13 @@ X64_TRACE_EVENT_CLONE: 3
 // stopped before its first instruction (its status's signal is SIGTRAP).
 X64_TRACE_EVENT_STOP: 128
 
+// The kernel stops each thread as it exits (PTRACE_O_TRACEEXIT), its
+// memory still there, with an exit event (X64_TRACE_EVENT_EXIT).
+LOADER_PTRACE_O_TRACEEXIT: 0x40
+
+// The event of a thread stopped as it exits (LOADER_PTRACE_O_TRACEEXIT).
+X64_TRACE_EVENT_EXIT: 6
+
 // The signal that stops one thread of the program (x64_trace_stop).
 LOADER_SIGSTOP: 19
 
@@ -2394,6 +2401,20 @@ x64_trace_stop: fn(trace: X64Trace, thread: Int) -> Bool {
     result := 0
     #Unsafe("tgkill of one thread of our own tracee") {
         result = os_syscall(OS_SYS_TGKILL, trace.pid, thread, LOADER_SIGSTOP, 0, 0, 0)
+    }
+    !os_failed(result)
+}
+
+// Have the stopped thread `thread` of the traced program, and each thread
+// it starts, stop as it exits (LOADER_PTRACE_O_TRACEEXIT), besides tracing
+// the threads it starts; `kill` when the kernel kills the program as its
+// tracer ends (a program the helper spawned, not one it attached to).
+// False when the kernel refused.
+x64_trace_follow_exits: fn(trace: X64Trace, thread: Int, kill: Bool) -> Bool {
+    options: LOADER_PTRACE_O_TRACECLONE | LOADER_PTRACE_O_TRACEEXIT | if kill -> LOADER_PTRACE_O_EXITKILL else -> 0
+    result := 0
+    #Unsafe("PTRACE_SETOPTIONS on a stopped thread of the helper's own tracee") {
+        result = x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_SETOPTIONS, thread, 0, options, 0, 0)
     }
     !os_failed(result)
 }

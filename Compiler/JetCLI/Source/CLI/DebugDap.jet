@@ -33,7 +33,7 @@ use {
     dap_files: core.files
     dap_json: core.encoding.json
     dap_term: core.term
-    jet_debug.[NATIVE_ATTACH_INVALID, NativeAttachRefused, NativeDebugError, NativeEvalRefused, NativeLocal, NativeSaid, NativeSession, NativeSettled, NativeStop, NativeStopKind, native_debug_condition_place, native_debug_jet_frame]
+    jet_debug.[NATIVE_ATTACH_INVALID, NativeAttachRefused, NativeDebugError, NativeEvalRefused, NativeLocal, NativeSaid, NativeSession, NativeSettled, NativeStop, NativeStopKind, native_debug_jet_frame, native_debug_rule_place]
     jet_foundation.[foundation_json_integer, foundation_json_quote]
 }
 
@@ -242,7 +242,7 @@ JetCLIDap: struct {
                 }
             }
             numbers.push(placed)
-            place: native_debug_condition_place(spec.condition, reason)
+            place: native_debug_rule_place(spec.condition, spec.log, reason)
             note: if place == "" -> "" else -> ",\"message\":{foundation_json_quote(place.trim())}"
             rows.push("{{\"id\":{placed},\"verified\":true,\"line\":{line}{note}}}")
         }

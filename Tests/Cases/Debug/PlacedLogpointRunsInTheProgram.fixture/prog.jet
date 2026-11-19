@@ -1,0 +1,27 @@
+use time: core.time
+
+count_up: fn(n: Int) -> Int {
+    total := 0
+    loop i in 0..<n {
+        step: i % 7
+        total += step
+    }
+    total
+}
+
+named: fn(n: Int) -> Int {
+    total := 0
+    loop i in 0..<n {
+        word: if i % 2 == 0 -> "even" else -> "odd"
+        total += word.len()
+    }
+    total
+}
+
+run: fn() -[IO, Time]> {
+    started: time.start()
+    first: count_up(1000000)
+    took: time.elapsed(started).ns
+    print(if took < 1000000000 -> "a million logged hits under a second" else -> "a million logged hits took {took} ns")
+    print("totals {first} {named(2)}")
+}
