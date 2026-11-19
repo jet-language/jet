@@ -1,0 +1,30 @@
+// A game-style loop: each frame runs a `physics` zone and, inside it, a
+// `broadphase` zone, plots the bodies it moved and marks the frame's end.
+// A core.log span around the loop writes the same timeline. The program
+// prints what it computed, the same with or without `jet perf run`.
+use {
+    log: core.log
+    perf: core.perf
+}
+
+step: fn(bodies: Int) -> Int Never! {
+    _physics: perf.zone("physics")
+    moved := 0
+    loop body in 0..<bodies {
+        _broadphase: perf.zone("broadphase")
+        moved += body % 3
+    }
+    moved
+}
+
+run: fn() {
+    _session: log.span("session")
+    total := 0
+    loop frame in 1..<6 {
+        moved: step(frame * 100)
+        perf.plot("moved", Float{moved})
+        perf.frame()
+        total += moved
+    }
+    print("moved {total} bodies over 5 frames")
+}

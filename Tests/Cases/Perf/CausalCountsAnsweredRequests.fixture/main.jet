@@ -1,0 +1,33 @@
+// A server answers each of a client's requests after some arithmetic, the
+// work every answer waits on.
+package: {
+    name: "causal_counts_answered_requests"
+    authority: { allow: [FS.Read, IO, Mem.Alloc, Net, Time, Time.Wait] }
+}
+
+use {
+    web: core.web
+    http_client: core.http.client
+    http_server: core.http.server
+    net: core.net
+}
+
+// The work each answer waits on.
+work: fn(seed: Int) -> Int {
+    total := seed
+    loop i in 0..<200000 -> total = (total * 31 + i) % 1000003
+    total
+}
+
+run: fn() (HTTPError | NetError | TaskFailure)! {
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
+    addr: listener.local_addr() ?? panic("address")
+    mux: web.app()
+    mux.get("/", fn() { Ok(http_server.response(200, "{work(7)}")) })
+    serving: task {
+        loop _ in 0..<2000 { mux.serve_once(listener) ?? panic("serve") }
+    }
+    loop _ in 0..<2000 -> _: http_client.get("http://{addr}/") ?? panic("GET /")
+    serving.join() ?? panic("server")
+    print("served")
+}

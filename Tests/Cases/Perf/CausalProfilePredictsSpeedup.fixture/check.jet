@@ -1,0 +1,37 @@
+// Reads the causal section of the trace the first argument names and
+// measured.txt: for the `round` progress point the narrow line ranks
+// first, and the speedup measured by hand lands within its interval.
+use {
+    files: core.files
+    process: core.process
+}
+
+// The integer after `key` in `text`; None when `key` is absent.
+number_after: fn(text: String, key: String) -> Int? {
+    parts: text.split(key).to_list()
+    if parts.len() < 2 -> return None
+    digits: parts[1].split(",").to_list()[0].split("}}").to_list()[0]
+    number: Int.parse(digits) ?? return None
+    Val(number)
+}
+
+run: fn() {
+    args: process.args()
+    trace: files.read(args[args.len() - 1]) ?? panic("cannot read the trace")
+    measured: Int.parse((files.read("measured.txt") ?? panic("cannot read measured.txt")).trim()) ?? panic("measured.txt holds no number")
+    // The `round` point's object holds its ranked lines before its name.
+    before: trace.split("\"name\":\"round\"").to_list()
+    if before.len() < 2 -> panic("no `round` progress point in the causal section")
+    pieces: before[0].split("{{\"lines\":[").to_list()
+    first: pieces[pieces.len() - 1].split("}}").to_list()[0]
+    if !first.contains("\"function\":\"narrow\"") {
+        panic("the first ranked line for `round` is not narrow: {first}")
+    }
+    print("narrow ranks first for round")
+    low: number_after(first, "\"low_tenths\":") ?? panic("no low_tenths in {first}")
+    high: number_after(first, "\"high_tenths\":") ?? panic("no high_tenths in {first}")
+    if measured < low || measured > high {
+        panic("measured {measured} lies outside {low} to {high}")
+    }
+    print("the measured speedup lies in the predicted interval")
+}

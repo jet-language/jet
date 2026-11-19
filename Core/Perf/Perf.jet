@@ -67,6 +67,51 @@ scale: fn(perf: Perf, work: Int) -> Int Never! {
     n
 }
 
+/// A profiling zone: under `jet perf run`, the time from `zone(name)` to
+/// the end of the block that holds it is one row of the run's timeline,
+/// beside the samples and the closed core.log spans, and `jet perf view`
+/// totals each name's zones. Readable but not constructible outside this
+/// module.
+Zone: struct {
+    name: String,
+    start: Int,
+
+    impl Close {
+        close: fn(&&self) { core.perf.__zone_close(self.name, self.start) }
+    }
+}
+
+/// Opens a zone named `name` that closes when the block holding it ends:
+/// `_z: perf.zone("broadphase")`. Outside `jet perf run` it records
+/// nothing.
+zone: fn(name: String) -> Zone Never! { Zone{name: name, start: core.perf.__zone_open()} }
+
+/// Marks the end of one frame on the `jet perf run` timeline; `jet perf
+/// view` reports the frames' mean and longest interval.
+frame: fn() Never! { core.perf.__frame() }
+
+/// Records `value` on the plot named `name` at this moment of the `jet
+/// perf run` timeline.
+plot: fn(name: String, value: Float) Never! { core.perf.__plot(name, core.math.to_bits(value)) }
+
+/// One pass of the progress point `name`: `jet perf run --lens=causal`
+/// predicts how much sooner each such pass comes if a line were faster, as
+/// it does for each closed zone and each finished task. Outside that lens
+/// it records nothing.
+progress: fn(name: String) Never! { core.perf.__progress(name) }
+
+/// A marker for the functions to profile: `#perf.Profiled` on a function or
+/// method, or on a package header to reach every function of the package.
+/// A root build wraps each marked function's body in a zone named after it,
+/// with one handler over the compiler's events:
+/// `meta.events(watch: .Functions{marked: core.perf.Profiled{}}, …)` calling
+/// `meta.rewrite_body(f, #code { _zone: core.perf.zone(#{name}) … })`.
+Profiled: struct {
+    impl Marker {
+        sites: [.Package, .Function, .Method],
+    }
+}
+
 #Test("perf fidelity round-trips through overrides") {
     reset_fidelity()
     assert(fidelity() == 1.0)

@@ -1774,6 +1774,9 @@ priv serve_connection: fn(stream: HTTPConn, mux: HTTPMux, deadline: Duration?, s
             .Err(_) -> {}
         }
     }
+    // An answered request is a causal-profile progress point; outside
+    // `--lens=causal` it records nothing.
+    if answered -> core.perf.__progress("request")
     answered
 }
 

@@ -1,0 +1,35 @@
+# core.perf zones close when the block that holds them ends, frame marks
+# and plots record a moment, and a core.log span writes the same timeline:
+# under `jet perf run` each is a span row of the .jettrace, and `jet perf
+# view` totals each zone name, the frames' intervals and each plot's last
+# value. Outside a perf run the program prints the same on every tier.
+fixture: ZonesFramesPlotsShareTheTimeline.fixture
+env: NO_COLOR=1
+step o0: jet run -A -O0 main.jet
+exit: 0
+stdout: = zones_frames_plots_share_the_timeline.out
+stderr: empty
+step o1: jet run -A -O1 main.jet
+exit: 0
+stdout: = zones_frames_plots_share_the_timeline.out
+stderr: empty
+step o2: jet run -A -O2 main.jet
+exit: 0
+stdout: = zones_frames_plots_share_the_timeline.out
+stderr: empty
+step: jet perf run main.jet --out zones.jettrace
+exit: 0
+stdout: = zones_frames_plots_share_the_timeline.out
+stderr: ~ "Trace:" # jet perf run names the trace it wrote
+file: zones.jettrace ~ "\"kind\":\"zone\"" # closed zones are trace rows
+file: zones.jettrace ~ "\"kind\":\"frame_mark\"" # frame marks are trace rows
+file: zones.jettrace ~ "\"kind\":\"plot\"" # plotted values are trace rows
+file: zones.jettrace ~ "\"kind\":\"log_span\"" # the log span shares the timeline
+file: zones.jettrace ~ "\"name\":\"moved = 4" # a plot row names its value
+step: jet perf view zones.jettrace
+exit: 0
+stdout: ~ "zone broadphase count=1500 " # every inner zone closed
+stdout: ~ "zone physics count=5 " # one outer zone per frame
+stdout: ~ "frames count=5 " # one mark per frame
+stdout: ~ "plot moved count=5 last=" # one value per frame
+stdout: ~ "log spans count=1 " # the log span beside the zones

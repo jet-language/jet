@@ -1,0 +1,24 @@
+# `#perf.Profiled` marks the functions to profile, and one handler in the
+# root build wraps each marked body in a zone named after the function
+# (`meta.rewrite_body`). The program prints the same total on every tier;
+# under `jet perf run` each call of a marked function is a zone row, and an
+# unmarked function has none.
+fixture: ProfiledMarkerZonesMarkedFunctions.fixture
+env: NO_COLOR=1
+step o0: jet run -A -O0 run.jet
+exit: 0
+stdout: = total.out
+step o1: jet run -A -O1 run.jet
+exit: 0
+stdout: = total.out
+step o2: jet run -A -O2 run.jet
+exit: 0
+stdout: = total.out
+step: jet perf run run.jet --out marked.jettrace
+exit: 0
+stdout: = total.out
+step: jet perf view marked.jettrace
+exit: 0
+stdout: ~ "zone collide count=5000 " # every call of a marked function
+stdout: ~ "zone step count=50 "
+stdout: !~ "zone run " # an unmarked function has no zone

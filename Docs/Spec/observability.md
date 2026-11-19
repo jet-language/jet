@@ -201,6 +201,39 @@ left L1D, `llc_misses` were served from RAM, and `page_faults` fell to the
 page cache or disk. A counter the profile did not capture shows
 `unavailable`. Tests/Run/Perf/CacheVisualization is the worked example.
 
+Under `causal`, which runs alone (with any other lens it is refused, as its
+delays would skew their readings), the run answers a different question:
+which line, if it were faster, would make the program finish its work
+sooner. The runtime's CPU-time sampler runs a series of 25 ms experiments.
+Half of them, at random, are baselines. Each other experiment takes the
+program's own source line of the sample that starts it and speeds it up
+virtually by 30%: each sample that lands in the line adds 30% of its period
+to a global delay, and every other thread pauses at its next sample until
+it has paid that delay. The line therefore runs as if it were 30% faster
+relative to the rest of the program. A thread that was blocked (its last
+sample is more than 5 ms old) owes nothing for the time it was blocked.
+Delays are paid at sampler ticks, so a thread pays its debt up to one
+sample period late. A progress point counts passes: each closed zone by
+its name, each finished task as `task`, each answered HTTP request as
+`request`, and each `core.perf.progress(name)`. Outside the lens these record nothing. At the
+end of each experiment the runtime writes its line, its wall time, the
+delay it inserted and each point's passes to the samples file. The trace
+keeps the predictions in its `causal` receipt section (type
+`JetPerfCausal`). For each point, a line's prediction is how much sooner
+each pass comes, 1 - (baseline rate / line rate), where the line's rate
+counts its passes over its wall time less its delay. Its interval is the
+90% range of 200 deterministic bootstrap resamples. A line is ranked only
+with 6 experiments on it, 6 baselines and an interval no wider than 30
+points; the others are listed with the reason. When no line can be ranked,
+the section says why the run was refused and how long to run. `jet perf
+view` prints, under `causal`, each point as `` `round`: if this line were
+30% faster, each pass would come sooner by``, then its lines best first
+(`  main.jet:23 narrow  +14.2% (9.8% to 18.0%)`). Experiments are
+statistical: a short run, or a line the sampler rarely lands in, gets a
+wide interval and is not ranked.
+Tests/Cases/Perf/causal_profile_predicts_speedup.case is the worked
+example.
+
 Under `alloc` the session builds the program with `--checked-alloc`, whose
 heap keeps each block's ten allocating call sites in its prefix, and the
 runtime links every block allocated from the start of the run into a live
@@ -228,6 +261,19 @@ snapshot after the per-line table, `live at filled  101 blocks  57344
 bytes` and then each site, `  [Int]  leak.jet:14 run  100 blocks  56000
 bytes`, or `  elsewhere  1 blocks  1344 bytes`; a name the run marked
 more than once is shown with its count, `after-cleanup#3`.
+
+`core.perf.zone(name)` opens a zone that closes when the block holding it
+ends (`_z: perf.zone("broadphase")`), `core.perf.frame()` marks the end of a
+frame and `core.perf.plot(name, value)` records a number. Under `jet perf
+run` each writes one row of the timeline that closed `core.log` spans write,
+on the same monotonic clock as the samples: the trace's `spans` keep them as
+`zone`, `frame_mark` and `plot` rows beside the `log_span` rows, a plot's
+`symbol.name` reading `moved = 499`. `jet perf view` lists each zone name
+heaviest first (`zone physics count=5 total=81234ns longest=20311ns`), the
+frames' mean and longest interval and each plot's last value, and Canvas's
+profile view draws the zones on its zones lane. Outside a perf run a zone
+costs a call and a compare at its open and a call at its close; frame marks
+and plots cost a call each.
 
 `jet perf compare base.jettrace head.jettrace` sets the last heap snapshot
 of each trace against each other when both kept one, and
@@ -399,7 +445,6 @@ as `receipt perf <canonical JSON>`, and `jet perf compare` lists each field
 that differs between two traces' receipts (`perf.build.options.optimize: "O0"
 -> "O2"`). `jet perf attach` records no `perf` section.
 
-<<<<<<< ours
 ## Comparing captures
 
 `jet perf compare <base> <head>` takes each side as one `.jettrace` or a
@@ -431,8 +476,6 @@ alone. Compare exits 0 either way: `jet budget check` is the gate.
 per-capture `base` and `head` samples, `p_ppm` (the adjusted p in parts
 per million, null when unjudged) and `verdict`.
 
-||||||| base
-=======
 ## Flight recorder and crash dumps
 
 D-OBSERVE-FLIGHT1=B ratifies an always-on flight recorder under `jet run
@@ -449,6 +492,16 @@ the program made before the attach: each wait's task, line, object and
 waker, and each transfer's `io` row. A wait of a task the live snapshot no
 longer holds becomes no row. Tests/Cases/Perf/attach_drains_flight_ring.case
 is the worked example.
+
+`core.perf` zones, frame marks and plots stay off in such a run: each zone
+site tests one runtime word and calls nothing while it is clear.
+`jet perf attach <pid> --source app.jet --zones=500ms` turns them on for the
+window. It leaves `<temp>/jet-flight-<pid>.samples.zones` beside the ring,
+which the writer's next publication answers by setting the word and writing
+the zone, frame, plot and log span rows to `.samples.spans`. It then removes
+the request, so the next publication clears the word, and reads the rows into
+the trace beside the ring's. Tests/Cases/Perf/attach_turns_zones_on.case is
+the worked example.
 
 A stop that ends an observed process (a panic, a trap, a contract failure)
 writes a typed dump while the stopping stack is whole:
@@ -479,7 +532,6 @@ of its stack: `sample`, `spawn`, `wake`, `clock`, `wait` and `io`. A
 run-control command answers that a dump doesn't run.
 Tests/Cases/Debug/crash_dump_opens_typed.case is the worked example.
 
->>>>>>> theirs
 ## Canonical devtools protocol
 
 `jet.devtools.v1` is the single observation envelope for development hosts.

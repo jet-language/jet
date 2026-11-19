@@ -1,0 +1,26 @@
+// A long-running loop: each turn runs a `tick` zone, plots its count and
+// marks a frame, then sleeps 10 ms. Its zones stay off until `jet perf
+// attach --zones=` turns them on for a window.
+use {
+    perf: core.perf
+    time: core.time
+}
+
+tick: fn(turn: Int) -> Int Never! {
+    _tick: perf.zone("tick")
+    total := 0
+    loop i in 0..<1000 -> total += (turn + i) % 7
+    total
+}
+
+run: fn() {
+    print("READY")
+    sum := 0
+    loop turn in 0..<3000 {
+        sum += tick(turn)
+        perf.plot("sum", Float{sum % 1000})
+        perf.frame()
+        time.sleep(10ms)
+    }
+    print("done {sum}")
+}
