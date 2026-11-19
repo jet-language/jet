@@ -6,9 +6,11 @@
 // routine itself (a list's last owner drops each element in its loop). A
 // light glue's Drop becomes its Call anywhere (ir_opt_glue_is_light): its
 // inlined body costs less than the call. So the glue is optimized before
-// its users and inlining can take a small glue into them. After inlining,
-// a Call of a glue left in place is a Drop again, which scalar replacement
-// lends storage to (OptScalar.jet).
+// its users and inlining can take a small glue into them. A Drop has no
+// stop point of its own, so a poll right after such a Call delivers the
+// stops of the code before it (OptInline.jet ir_opt_inline_build keeps
+// it). After inlining, a Call of a glue left in place is a Drop again,
+// which scalar replacement lends storage to (OptScalar.jet).
 use jet_foundation.[Type, compiler_threads_single, name_rows_set]
 
 // `glue` is ir_opt_glue_table's: per type row, its glue function or -1;
@@ -63,13 +65,21 @@ ir_opt_glue_is_light: fn(m: IRModule, f: IRFunction) -> Bool Never! {
     true
 }
 
+// Whether the Call at `at` of the function keyed `key` is a Drop that
+// ir_opt_glue_calls made its glue's call: no result, and one argument whose
+// type row's drop routine is `key`.
+ir_opt_glue_site: fn(m: IRModule, f: IRFunction, key: String, at: Int) -> Bool Never! {
+    if f.op[at] != .Call || f.dst[at] >= 0 || f.c[at] != 1 -> return false
+    slot: f.args[f.b[at]]
+    slot >= 0 && m.types[f.slot_type[slot]].drop == key
+}
+
 ir_opt_glue_drops: fn(f: &IRFunction, m: IRModule, keys: [String]) Never! {
     loop at in 0..<f.op.len() {
-        if f.op[at] != .Call || f.dst[at] >= 0 || f.c[at] != 1 -> next
+        if f.op[at] != .Call -> next
         callee: f.a[at]
-        if callee < 0 || callee >= keys.len() -> next
+        if callee < 0 || callee >= keys.len() || !ir_opt_glue_site(m, f, keys[callee], at) -> next
         slot: f.args[f.b[at]]
-        if slot < 0 || m.types[f.slot_type[slot]].drop != keys[callee] -> next
         f.op[at] = .Drop
         f.a[at] = slot
         f.b[at] = -1
