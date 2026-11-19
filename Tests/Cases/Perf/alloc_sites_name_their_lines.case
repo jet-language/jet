@@ -1,0 +1,31 @@
+# Under `--lens=alloc` each allocation counts at the Jet line that allocated
+# it, by the type it was allocated for, with its bytes, through the checked
+# heap's take that keeps the live list: alloc.jet builds a 64-element list
+# 2000 times, so its push on line 8 allocates at least once a turn, and the
+# 20 lists it keeps are live at line 8 when the run ends (the `end` mark;
+# at exit `run` has returned and dropped them). The profile row of line 8
+# carries the allocations without CPU-time samples, the `allocations`
+# section holds them by type and line, and the lens's own time per
+# allocation is measured and stated there.
+requires: os-name:linux
+requires: arch:x86_64
+fixture: AllocSites.fixture
+env: NO_COLOR=1
+step run: jet perf run --lens=alloc alloc.jet --out {work}/alloc.jettrace
+exit: 0
+stdout: = "total=128000 kept=20\n"
+json: file alloc.jettrace doc $.content.profile.rows[?source.start_line=8][?allocation_count>=2000] #= 1 # the list's line, once a turn at least
+json: file alloc.jettrace doc $.content.profile.rows[?sample_count>=1] #= 0 # the alloc lens alone takes no CPU-time sample
+json: file alloc.jettrace doc $.content.profile.reason ~ "no CPU-time samples, as under the alloc lens alone" # the reason says why
+json: file alloc.jettrace doc $.content.receipt_sections[?name="allocations"][0].value.sites[?line=8][?type="[Int]"][?allocations>=2000] #= 1 # by type and line
+json: file alloc.jettrace doc $.content.receipt_sections[?name="allocations"][0].value.sites[?line=8][?type="[Int]"][?bytes>=1024000] #= 1 # and sized: every turn's final buffer holds 64 words
+json: file alloc.jettrace doc $.content.receipt_sections[?name="allocations"][0].value.overhead_status = "measured" # the lens's cost is measured
+json: file alloc.jettrace doc $.content.receipt_sections[?name="allocations"][0].value.overhead_ns >= 1 # and counted
+json: file alloc.jettrace doc $.content.receipt_sections[?name="allocations"][0].value.overhead_reason ~ " nanoseconds each" # per allocation
+json: file alloc.jettrace doc $.content.receipt_sections[?name="heap"][0].value.snapshots[0].name = "end" # the mark before `run` returns
+json: file alloc.jettrace doc $.content.receipt_sections[?name="heap"][0].value.snapshots[0].sites[?line=8][?type="[Int]"][?blocks=20] #= 1 # the kept lists, live at their line
+step view: jet perf view {work}/alloc.jettrace
+exit: 0
+stdout: ~ "allocated  " # the allocations' heading
+stdout: ~ "  [Int]  alloc.jet:8 build  " # the list's line, by type
+stdout: ~ "  line 8 samples=0 inclusive=0 allocations=" # its profile row

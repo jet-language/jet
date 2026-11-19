@@ -20,14 +20,14 @@ env: NO_COLOR=1
 step o0: jet perf run -O0 --lens=alloc chat.jet --out {work}/o0.jettrace
 exit: 0
 stdout: = "messages=200\n"
-json: file o0.jettrace doc $.content.receipt_sections[0].value.snapshots[1].name = "after-chat"
-json: file o0.jettrace doc $.content.receipt_sections[0].value.snapshots[1].sites[?line=22][?type="[Int]"][?blocks=200] #= 1 # every body, by its type and line
-json: file o0.jettrace doc $.content.receipt_sections[0].value.snapshots[0].sites[?line=22] #= 0 # none before the chat
-json: file o0.jettrace doc $.content.receipt_sections[0].value.snapshots[2].name = "exit"
-json: file o0.jettrace doc $.content.receipt_sections[0].value.snapshots[0].sites[?line=null] #= 0 # each block at the first mark has its line
-json: file o0.jettrace doc $.content.receipt_sections[0].value.snapshots[1].sites[?line=null] #= 0 # and at the second
-json: file o0.jettrace doc $.content.receipt_sections[0].value.snapshots[2].sites[?line=null] #= 0 # and at exit
-json: file o0.jettrace doc $.content.receipt_sections[0].value.snapshots[1].retained[0].type = "[Int]" # what retains the bodies, types in order
+json: file o0.jettrace doc $.content.receipt_sections[?name="heap"][0].value.snapshots[1].name = "after-chat"
+json: file o0.jettrace doc $.content.receipt_sections[?name="heap"][0].value.snapshots[1].sites[?line=22][?type="[Int]"][?blocks=200] #= 1 # every body, by its type and line
+json: file o0.jettrace doc $.content.receipt_sections[?name="heap"][0].value.snapshots[0].sites[?line=22] #= 0 # none before the chat
+json: file o0.jettrace doc $.content.receipt_sections[?name="heap"][0].value.snapshots[2].name = "exit"
+json: file o0.jettrace doc $.content.receipt_sections[?name="heap"][0].value.snapshots[0].sites[?line=null] #= 0 # each block at the first mark has its line
+json: file o0.jettrace doc $.content.receipt_sections[?name="heap"][0].value.snapshots[1].sites[?line=null] #= 0 # and at the second
+json: file o0.jettrace doc $.content.receipt_sections[?name="heap"][0].value.snapshots[2].sites[?line=null] #= 0 # and at exit
+json: file o0.jettrace doc $.content.receipt_sections[?name="heap"][0].value.snapshots[1].retained[0].type = "[Int]" # what retains the bodies, types in order
 step o0view: jet perf view {work}/o0.jettrace
 exit: 0
 stdout: ~ "live at after-chat  " # the snapshot's heading

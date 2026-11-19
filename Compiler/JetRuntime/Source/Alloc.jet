@@ -2765,7 +2765,9 @@ priv alloc_arena_give: fn(pointer: I64) {
 // each take links its block at the head of a list of live blocks
 // (alloc_check_live_head) and a free unlinks it, both under the quarantine
 // lock, so a heap snapshot (PerfSamples.jet perf_samples_heap) can walk
-// every block allocated since and still live.
+// every block allocated since and still live; under that same lock the take
+// counts its allocation and its bytes at its allocating chain
+// (PerfSamples.jet perf_samples_alloc_site).
 ALLOC_CHECK_LIVE: I64{2397417249457849674}
 
 ALLOC_CHECK_FREED: I64{2397398596314219850}
@@ -2870,9 +2872,13 @@ priv alloc_check_frames: fn(out: I64, count: I64) {
     }
     alloc_check_frames(wrapping(pointer - I64{120}), I64{10})
     if (alloc_check_tracking == I64{1} && alloc_check_track_thread()) {
+        // Under the alloc lens the take also counts its allocation at its
+        // call sites, timed from here (PerfSamples.jet perf_samples_alloc_site).
+        began: perf_samples_alloc_began()
         lock: wrapping(alloc_root + I64{16})
         alloc_lock(lock)
         alloc_check_track(pointer)
+        perf_samples_alloc_site(alloc_check_live_chain(pointer), size, began)
         alloc_unlock(lock)
     }
     observer: alloc_check_take_observer
@@ -3005,13 +3011,16 @@ alloc_check_track_skip_thread: fn() {
 }
 
 // Whether a tracking take on this thread links its block: none of the
-// observation writer's does (alloc_check_track_skip_thread).
+// observation writer's does (alloc_check_track_skip_thread), nor any of a
+// thread that has no TCB yet. Those are the runtime's own: the thread block a
+// new thread or a host attach takes for itself (Thread.jet thread_new_tcb,
+// 1064 B) and its registry row, before GS names it.
 priv alloc_check_track_thread: fn() -> Bool {
     base := I64{0}
     #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); it is only compared") {
         base = os_tls_base_i64()
     }
-    base != alloc_check_track_skipped
+    base != I64{0} && base != alloc_check_track_skipped
 }
 
 // Link the fresh payload `pointer` at the head of the live list. The caller
@@ -3047,12 +3056,17 @@ priv alloc_check_untrack: fn(pointer: I64) {
 // tracking take and every free take, so no block joins or leaves it until
 // alloc_check_track_release. The snapshot's number, from 1.
 alloc_check_track_hold: fn() -> I64 {
-    alloc_lock(wrapping(alloc_root + I64{16}))
+    alloc_check_track_lock()
     #Unsafe("the held quarantine lock guards the count") {
         alloc_check_snapshots = wrapping(alloc_check_snapshots + I64{1})
     }
     alloc_check_snapshots
 }
+
+// The quarantine lock alone, which every tracking take holds while it links
+// its block and counts its allocation (PerfSamples.jet
+// perf_samples_alloc_site), until alloc_check_track_release.
+alloc_check_track_lock: fn() { alloc_lock(wrapping(alloc_root + I64{16})) }
 
 alloc_check_track_release: fn() { alloc_unlock(wrapping(alloc_root + I64{16})) }
 
