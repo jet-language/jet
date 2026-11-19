@@ -2,20 +2,22 @@
 // --replay=NAME`). A recording run (JET_RECORD names the file) logs each
 // sync event as it completes: a spawn, a join, a Shared read or edit permit,
 // a channel's send, receive, close or endpoint drop, a select's chosen arm,
-// and a print or eprint. One process-wide turn counter orders them: the
-// event takes the next turn by a fetch-and-add inside the lock that orders
-// it (the Shared value's, the channel's, the output's), so the log's order
-// is an order the run synchronized in. Inputs are events too, carrying
-// their values: a clock read, the entropy bytes, an environment value, the
-// process arguments, and the result and bytes of a file, pipe or socket read.
+// and a print or eprint, with its text's hash and length. One process-wide
+// turn counter orders them: the event takes the next turn by a fetch-and-add
+// inside the lock that orders it (the Shared value's, the channel's, the
+// output's), so the log's order is an order the run synchronized in. Inputs
+// are events too, carrying their values: a clock read, the entropy bytes, an
+// environment value, the process arguments, and the result and bytes of a
+// file, pipe or socket read.
 //
 // A replaying run (JET_REPLAY names the file) gives each event its turn:
 // a task waits until the log's next turn names it, checks that the event it
 // is at is the recorded one, does it, and passes the turn on. An input
-// event answers the recorded value. No instruction counts are logged, so a
-// recording made at one optimization level replays at any other. An event
-// that is not the recorded one, a program that ends before the log does or
-// a turn that no task takes in REPLAY_STALL_NS stops the program with the
+// event answers the recorded value; a print must write the recorded text. No
+// instruction counts are logged, so a recording made at one optimization
+// level replays at any other. An event that is not the recorded one, a
+// program that ends before the log does or a turn that no task takes in
+// REPLAY_STALL_NS stops the program with the
 // first sync event where the run diverged: the recorded event, the one the
 // run got instead, and the line the task was at.
 //
@@ -52,7 +54,8 @@ REPLAY_EVENTS_MAX: I64{2097152}
 
 REPLAY_DATA_MAX: I64{16777216}
 
-// How long a replay waits for a turn that no task takes: 10s.
+// How long a replay waits for a turn that no task takes: 10s of the
+// program's running time, not of time a debugger held it stopped.
 REPLAY_STALL_NS: I64{10000000000}
 
 // A turn wait's re-check period: 100ms.
@@ -296,7 +299,8 @@ replay_take: fn(kind: I64, object: I64) -> I64 {
     count: replay_count()
     ticket := I64{-1}
     seen := I64{-1}
-    since := I64{0}
+    waited := I64{0}
+    last := I64{0}
     loop {
         turn: sync_load(replay_root)
         if (turn >= count) {
@@ -313,14 +317,22 @@ replay_take: fn(kind: I64, object: I64) -> I64 {
             ticket = recorded
             break
         }
+        // The stall counts the time the program ran: a gap between two
+        // checks longer than two periods (a debugger held the program)
+        // counts as one period.
         now: sync_now_ns()
         if (turn != seen) {
             seen = turn
-            since = now
-        } else if (now - since >= REPLAY_STALL_NS) {
-            replay_stalled(turn)
-            break
+            waited = I64{0}
+        } else {
+            gap: now - last
+            waited += if (gap > REPLAY_POLL_NS * I64{2}) -> REPLAY_POLL_NS else -> gap
+            if (waited >= REPLAY_STALL_NS) {
+                replay_stalled(turn)
+                break
+            }
         }
+        last = now
         _ := sync_wait(replay_root, turn, sync_deadline(REPLAY_POLL_NS))
     }
     ticket
@@ -349,6 +361,55 @@ replay_log: fn(kind: I64, object: I64) {
     }
     id: replay_task(scheduler_control_current())
     if (id != I64{0}) { replay_append(id, kind, object, I64{0}) }
+}
+
+// The FNV-1a hash of the `length` bytes at `bytes`, then an LF when `line`:
+// the text a print or eprint wrote.
+replay_output_hash: fn(bytes: I64, length: I64, line: Bool) -> I64 {
+    hash := I64{-3750763034362895579}
+    at := I64{0}
+    loop at < length {
+        hash = wrapping((hash ~ rt_text_byte(wrapping(bytes + at))) * I64{1099511628211})
+        at += I64{1}
+    }
+    if line -> hash = wrapping((hash ~ I64{10}) * I64{1099511628211})
+    hash
+}
+
+// A recording's print or eprint (`kind`) of `length` bytes at `bytes` and
+// an LF when `line`: its hash and length, logged where the write completes.
+replay_output_log: fn(kind: I64, bytes: I64, length: I64, line: Bool) {
+    if (replay_mode != REPLAY_RECORD) {
+        return
+    }
+    id: replay_task(scheduler_control_current())
+    if (id != I64{0}) {
+        replay_append(id, kind, replay_output_hash(bytes, length, line), if line -> wrapping(length + I64{1}) else -> length)
+    }
+}
+
+// A replay's print or eprint, holding the turn `ticket` before it writes:
+// text other than the recorded text is the first divergence, so it stops the
+// run before it is written.
+replay_output_check: fn(ticket: I64, kind: I64, bytes: I64, length: I64, line: Bool) {
+    if (ticket < I64{0}) {
+        return
+    }
+    written: if line -> wrapping(length + I64{1}) else -> length
+    if (replay_recorded(I64{24}) == written && replay_recorded(I64{16}) == replay_output_hash(bytes, length, line)) {
+        return
+    }
+    if !replay_claim() {
+        return
+    }
+    message: replay_head(sync_load(replay_root))
+    replay_push(message, rt_static_text(", got "))
+    replay_push_event(message, kind, I64{0})
+    replay_push(message, rt_static_text(" of "))
+    rt_text_push_number(message, written)
+    replay_push(message, rt_static_text(" other bytes by "))
+    replay_push_task(message, replay_task(scheduler_control_current()))
+    replay_finish(message)
 }
 
 replay_append: fn(task: I64, kind: I64, object: I64, extra: I64) {
@@ -604,6 +665,11 @@ replay_head: fn(turn: I64) -> I64 {
     event: replay_event(turn)
     kind: sync_load(wrapping(event + I64{8}))
     replay_push_event(message, kind, sync_load(wrapping(event + I64{16})))
+    if (kind == REPLAY_PRINT || kind == REPLAY_EPRINT) {
+        replay_push(message, rt_static_text(" of "))
+        rt_text_push_number(message, sync_load(wrapping(event + I64{24})))
+        replay_push(message, rt_static_text(" bytes"))
+    }
     if (kind != REPLAY_END) {
         replay_push(message, rt_static_text(" by "))
         replay_push_task(message, sync_load(event))

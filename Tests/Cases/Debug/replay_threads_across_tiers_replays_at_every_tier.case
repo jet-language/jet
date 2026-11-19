@@ -1,0 +1,30 @@
+# `jet debug --replay=NAME` runs the program under the recording `jet run
+# --record=NAME` made: each task waits at a sync event for the turn the
+# recording gave it, and every input reads its recorded value. A recording
+# made at -O2, on real threads, replays at -O0 (jet debug's own build of the
+# source) and at -O1 and -O2 (images `jet build` made) with the recorded
+# output, line for line: the workers' lines and tallies come in the recorded
+# order, so the sync order is the recorded one. The empty stdin runs each
+# replay to its end.
+fixture: ReplayThreadsAcrossTiers.fixture
+env: NO_COLOR=1
+step: jet run -O2 --record=tiers prog.jet
+exit: 0
+stdout: ~ "joined 12 rounds, tally 12\n"
+capture: recorded = text stdout
+step: jet debug --replay=tiers prog.jet
+exit: 0
+stdout: ~ "{cap:recorded}Program finished\n" # the O0 replay prints the recorded lines in the recorded order
+stdout+stderr: !~ "replay diverged"
+step: jet build -O1 prog.jet
+exit: 0
+step: jet debug --replay=tiers {work}/.jet/build/prog
+exit: 0
+stdout: ~ "{cap:recorded}Program finished\n" # so does the O1 image
+stdout+stderr: !~ "replay diverged"
+step: jet build -O2 prog.jet
+exit: 0
+step: jet debug --replay=tiers {work}/.jet/build/prog
+exit: 0
+stdout: ~ "{cap:recorded}Program finished\n" # and the O2 image, the recording's own tier
+stdout+stderr: !~ "replay diverged"

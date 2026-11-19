@@ -96,6 +96,7 @@ host_stdout_flush_locked: fn() -> I64 {
 // replay (RecordReplay.jet), logged under the lock.
 host_stdout_write: fn(bytes: I64, length: I64, line: Bool, flush: Bool) -> I64 {
     ticket: replay_take(REPLAY_PRINT, I64{0})
+    replay_output_check(ticket, REPLAY_PRINT, bytes, length, line)
     sole: sync_sole_enter(host_root)
     failure := I64{0}
     // The caller lends `length` bytes; the output lock owns the destination
@@ -143,7 +144,7 @@ host_stdout_write: fn(bytes: I64, length: I64, line: Bool, flush: Bool) -> I64 {
     }
     if (failure == I64{0}) { rt_text_store(wrapping(host_root + I64{8}), pending) }
     if (failure == I64{0} && flush) { failure = host_stdout_flush_locked() }
-    replay_log(REPLAY_PRINT, I64{0})
+    replay_output_log(REPLAY_PRINT, bytes, length, line)
     sync_sole_exit(host_root, sole)
     replay_give(ticket)
     failure
@@ -151,11 +152,12 @@ host_stdout_write: fn(bytes: I64, length: I64, line: Bool, flush: Bool) -> I64 {
 
 host_stderr_write: fn(bytes: I64, length: I64) -> I64 {
     ticket: replay_take(REPLAY_EPRINT, I64{0})
+    replay_output_check(ticket, REPLAY_EPRINT, bytes, length, false)
     host_lock()
     // An stdout failure must not suppress the requested stderr report.
     _ := host_stdout_flush_locked()
     failure: host_write_all(I64{2}, bytes, length)
-    replay_log(REPLAY_EPRINT, I64{0})
+    replay_output_log(REPLAY_EPRINT, bytes, length, false)
     host_unlock()
     replay_give(ticket)
     failure
@@ -163,6 +165,7 @@ host_stderr_write: fn(bytes: I64, length: I64) -> I64 {
 
 host_stderr_line: fn(bytes: I64, length: I64) -> I64 {
     ticket: replay_take(REPLAY_EPRINT, I64{0})
+    replay_output_check(ticket, REPLAY_EPRINT, bytes, length, true)
     host_lock()
     _ := host_stdout_flush_locked()
     at := I64{0}
@@ -178,7 +181,7 @@ host_stderr_line: fn(bytes: I64, length: I64) -> I64 {
             at = wrapping(at + count)
         }
     }
-    replay_log(REPLAY_EPRINT, I64{0})
+    replay_output_log(REPLAY_EPRINT, bytes, length, true)
     host_unlock()
     replay_give(ticket)
     failure

@@ -1,0 +1,25 @@
+# `jet debug --replay` refuses before the program runs: a NAME that can't
+# name a recording, a recording that isn't there, and an image with no
+# observation start (a program with no task, channel, live value or event),
+# where its runtime would run without the recording. `--record` stays
+# unbuilt on `jet debug`.
+fixture: ReplayThreadsAcrossTiers.fixture
+env: NO_COLOR=1
+step: jet debug --replay=../tiers prog.jet
+exit: 2
+stderr: ~ "`--replay=../tiers` names no recording"
+step: jet debug --replay=tiers prog.jet
+exit: 1
+stderr: ~ "no recording `.jet/replays/tiers.jetproof-replay`"
+stdout: !~ "joined" # nothing ran
+step: jet run -O2 --record=tiers prog.jet
+exit: 0
+copy: plain.src prog.jet
+step: jet debug --replay=tiers prog.jet
+exit: 2
+stderr: ~ "can't replay its recording"
+stderr: ~ "has no observation start"
+stdout: !~ "plain" # nothing ran
+step: jet debug --record=other prog.jet
+exit: any
+stderr: ~ "`jet debug --record` is not built yet"

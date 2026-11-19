@@ -777,21 +777,27 @@ recording flag; live snapshots, GC evidence, wall-clock sessions, and browser
 transport remain distinct until their contracts can share an envelope without
 losing meaning.
 
-## Recorded-run queries
+## Replaying a recording
 
-`jet run <file> --record=<name>` attaches source-level act snapshots to the
-same `.jetproof-replay` receipt. The receipt keeps its Time authority, identity,
-frame hashes, and footer; it does not create a `.jettrace` file or a second
-trace format.
+`jet debug --replay=<name> <file.jet|image>` runs the program behind the
+debugger console (or `--dap`) under the recording `jet run --record=<name>`
+made, read from `.jet/replays/<name>.jetproof-replay` in the project of a
+source entry, or of the working directory for an image; a project-relative
+`.jetproof-replay` path names one directly. The recording is not changed.
+jet writes its `RunSync` log to a scratch file and starts the program with
+`JET_REPLAY` naming it (below), so the run takes the recorded sync order and
+reads the recorded inputs at whatever tier the image was built: a source
+entry is debugged as the `-O0` build `jet debug` makes, and an `-O1` or `-O2`
+image `jet build` made is debugged as it is. Its output is the recorded
+output, and the first sync event where the run does otherwise stops the
+program with the divergence (below), which the console shows with the
+program's output. Time the debugger holds the program stopped does not count
+toward the 10-second stall.
 
-`jet debug <file> --replay=<name>` reads the receipt without changing it. The
-source-level prompt supports:
-
-- `why <place> == <value>` — names the recorded acts that produced the value;
-- `when <place>` — lists recorded changes and names the last change.
-
-These queries use recorded local snapshots. They do not reverse execution, move
-the program through time, or keep a standing per-variable history buffer.
+A NAME that isn't one, a recording that isn't there, a recording with no
+sync-order log (a `jet test --record` one) and an image that links no
+observation start are refused before anything runs.
+Tests/Cases/Debug/replay_threads_across_tiers_*.case are the worked examples.
 
 ## Sync-order log
 
@@ -804,7 +810,7 @@ one global turn order:
 - a Shared read or edit permit, taken or given up;
 - a channel's send, receive, try-receive, close, and endpoint drops;
 - a select's chosen arm;
-- each print and eprint.
+- each print and eprint, with its length and the FNV-1a hash of its text.
 
 It also holds the bytes of each input: a wall or monotonic clock read, an
 entropy fill, an environment value, the program's arguments, and each file,
@@ -819,8 +825,9 @@ replays at any other tier.
 
 A replaying task waits at each sync event until the log's next turn names it.
 It then checks that its event is the recorded one, and does it. A select takes
-its recorded arm, and an input reads its recorded bytes. The first mismatch,
-or a turn that no task takes for 10 seconds, stops the program with exit 70:
+its recorded arm, an input reads its recorded bytes, and a print must write
+the recorded text before it writes anything. The first mismatch, or a turn
+that no task takes for 10 seconds, stops the program with exit 70:
 
 ```text
 replay diverged at sync event 7: recorded edit of Shared value 1 by task 2, got send on channel 1 by task 3  main.jet:14

@@ -283,6 +283,12 @@ NativeSession: struct {
     // and whether the last stop was one of them that held.
     placed: [NativePlaced]{[NativePlaced]{}},
     held: Bool{false},
+    // The environment `launch` starts the program with: jet's own, or these
+    // rows (`jet debug --replay` adds JET_REPLAY).
+    env: [String]?{None},
+    // Whether the image links the runtime's observation start, where a
+    // recorded run's replay begins (JetRuntime RecordReplay.jet).
+    replay_start: Bool{false},
 
     // Load the debug facts of `binary` (a native image with debug info, its
     // own or in the side file its `.gnu_debuglink` names). The program's
@@ -293,7 +299,7 @@ NativeSession: struct {
         native_files.write(output_path, "") ?? return Err(NativeDebugError{detail: "couldn't create the program output file: {err}"})
         observe_root: native_elf_symbol(elf, X64_OBSERVE_ROOT_SYMBOL) ?? 0
         openings: native_openings(image, native_elf_code(elf))
-        Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: output_path, output_read: 0, started: false, threads: [NativeThread]{}, observe_root: observe_root, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: None, task: 0})
+        Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: output_path, output_read: 0, started: false, threads: [NativeThread]{}, observe_root: observe_root, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: None, task: 0, replay_start: native_elf_symbol(elf, NATIVE_REPLAY_START_SYMBOL) != None})
     }
 
     // A breakpoint on `line` of the Jet source `file` (its base name, as the
@@ -897,7 +903,7 @@ NativeSession: struct {
         self.placed = [NativePlaced]{}
         // A watch names a frame of the run that ended.
         self.watches = [NativeWatch]{}
-        self.trace = x64_trace_spawn(self.binary, argv, self.output_path)
+        self.trace = x64_trace_spawn(self.binary, argv, self.output_path, self.env)
         if self.trace.pid < 0 {
             failure: self.trace.failure.copy()
             x64_trace_close(self.trace)
@@ -3204,6 +3210,11 @@ native_debug_image: fn(entry: String, out_dir: String) -> String Never! {
 // caret and the frame's locals; frames without Jet line information (the
 // runtime) are never shown. Each readout starts with a capital.
 NATIVE_DEBUG_HELP: "Commands: step (s), next (n), continue (c), finish (f), break LINE|FILE:LINE|FUNCTION [if EXPR] (b), log FILE:LINE \"TEXT {{EXPR}}\", watch PLACE, breaks, delete N, frame N, up, down, locals, print NAME (p NAME), backtrace (bt), tasks, fix, help (h), quit (q)"
+
+// The runtime's observation start, which an image links when it has a task,
+// a channel, a live value or an event (JetRuntime ObserveLive.jet): a replay
+// begins there.
+NATIVE_REPLAY_START_SYMBOL: "jet_rt_observe_start_init"
 
 // The console's prompt.
 NATIVE_DEBUG_PROMPT: "(Jet) "
