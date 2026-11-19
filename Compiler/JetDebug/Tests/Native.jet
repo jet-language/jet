@@ -81,12 +81,14 @@ native_test_bytes: fn(words: [Int], size: Int) -> [U8] {
     assert(diagnostic.what.contains("the program has no Jet debug information"))
 }
 
+// The names a debug image gives types are symbol keys
+// (`{kind}:{module}.{owner}.{name}`), with a `.` before each name.
 #Test("a_debug_type_name_is_spelled_as_jet_writes_it") {
-    assert_eq(native_jet_spelling("module:29:package:12:case_fixture:0.1.0:main.jet::Point"), "Point")
-    assert_eq(native_jet_spelling("[module:14:source-root:0::prog.jet::Point]"), "[Point]")
-    assert_eq(native_jet_spelling("module:16:package:4:ring:1:ring.jet::Ring"), "Ring")
-    assert_eq(native_jet_spelling("[main::Point]"), "[Point]")
-    assert_eq(native_jet_spelling("<corelib>/core.math::Decimal"), "Decimal")
+    assert_eq(native_jet_spelling("module:29:package:12:case_fixture:0.1.0:main.jet.Point"), "Point")
+    assert_eq(native_jet_spelling("[module:14:source-root:0::prog.jet.Point]"), "[Point]")
+    assert_eq(native_jet_spelling("module:16:package:4:ring:1:ring.jet.Ring"), "Ring")
+    assert_eq(native_jet_spelling("[main.Point]"), "[Point]")
+    assert_eq(native_jet_spelling("<corelib>/core.math.Decimal"), "Decimal")
 }
 
 #Test("a_sleb_keeps_every_bit_of_a_64_bit_value") {
