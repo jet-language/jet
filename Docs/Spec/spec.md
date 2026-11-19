@@ -576,9 +576,14 @@ Ranges are values. `a..b` is inclusive and `a..<b` is half-open; both are
 `Range` values over `Int` that can be stored, passed, returned, looped, or used
 as slice bounds. A range exposes `.start`, `.end`, and `.contains(value)`.
 Literal range loops can lower directly to jumps without allocation. Bounds and
-stride expressions evaluate once from left to right. A stride is a positive
-`Int` and is checked before the first pull (S22, D-RANGE-VALUE1=A,
-D-RANGE-EXCL1=C).
+stride expressions evaluate once from left to right. A stride is a nonzero
+`Int`, checked before the first pull; a zero stride is E0123. A minus stride
+counts down: `a..b, -k` visits `a`, `a - k`, … while the value stays `>= b`,
+so `10..0, -3` visits 10, 7, 4, 1. A loop whose ends are both written numbers
+and whose step moves away from its end could never run; it is E0170, whose
+fix adds the minus step (`10..1` becomes `10..1, -1`) or turns the step
+around. Computed ends are never an error: `0..n - 1` with `n == 0` runs zero
+times (S22, D-RANGE-VALUE1=A, D-RANGE-EXCL1=C, D-RANGE-BACKWARD1=A).
 
 ## Branching, results, and loops
 
