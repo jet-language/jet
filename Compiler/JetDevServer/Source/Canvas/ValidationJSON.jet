@@ -331,14 +331,26 @@ json_string_array: fn(text: String, key: String) -> [String] Never! {
 json_int_array: fn(text: String, key: String) -> [Int] Never! {
     out := [Int]{}
     body: json_array_body(text, key) ?? return out
-    loop item in body.split(",") {
-        trimmed: item.trim()
-        if trimmed == "" -> next
-        value: trimmed.to_int() ?? return out
+    bytes: body.bytes()
+    at := 0
+    // Each comma-separated item, its JSON whitespace (space, tab, line feed,
+    // carriage return) cut by byte bounds; an empty item is skipped.
+    loop at <= bytes.len() {
+        end := at
+        loop end < bytes.len() && bytes[end] != 44 -> end += 1
+        start := at
+        stop := end
+        at = end + 1
+        loop start < stop && json_space(bytes[start]) -> start += 1
+        loop stop > start && json_space(bytes[stop - 1]) -> stop -= 1
+        if start == stop -> next
+        value: foundation_byte_text(bytes, start, stop).to_int() ?? return out
         out.push(value)
     }
     out
 }
+
+json_space: fn(byte: U8) -> Bool Never! { byte == 32 || byte == 9 || byte == 10 || byte == 13 }
 
 // The bytes between the brackets of the JSON array at `"key":`.
 json_array_body: fn(text: String, key: String) -> String? Never! {

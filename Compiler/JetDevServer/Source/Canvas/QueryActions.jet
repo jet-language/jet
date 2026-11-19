@@ -112,24 +112,26 @@ canvas_find: fn(checker: LSPChecker, path: String, src: String, query: String) -
     context: open_query_context(checker, path, src)
     needle: query.trim()
     if needle.is_empty() -> return Ok(query_ok("find", src, "[]", "\"impact\":null,\"diff\":null"))
+    // Lowered once: each search below compares against it.
+    lowered: needle.to_ascii_lower()
     results := [String]{}
     loop definition in context.index.definitions {
         def: definition.def
-        if contains_ci(def.name, needle) || contains_ci(def.identity, needle) {
+        if contains_lowered(def.name, lowered) || contains_lowered(def.identity, lowered) {
             results.push(query_result_json("definition", def.name, def.name, def.module_path, def.def_span, node_for_span(context.projection, def.def_span), src))
         }
     }
     loop reference in context.index.references {
-        if contains_ci(reference.name, needle) {
+        if contains_lowered(reference.name, lowered) {
             results.push(query_result_json("reference", reference.name, reference.name, reference.module_path, reference.span, node_for_span(context.projection, reference.span), src))
         }
     }
     loop node in context.projection.node_refs {
-        if contains_ci(node.title, needle) || contains_ci(node.kind, needle) {
+        if contains_lowered(node.title, lowered) || contains_lowered(node.kind, lowered) {
             results.push(query_result_json("graph", node.title, node.title, "", node.span, Val(node), src))
         }
     }
-    loop span in text_matches(src, needle) {
+    loop span in text_matches(src, lowered) {
         results.push(query_result_json("source", needle, needle, path, span, node_for_span(context.projection, span), src))
     }
     dedupe_results(results)
@@ -139,6 +141,8 @@ canvas_find: fn(checker: LSPChecker, path: String, src: String, query: String) -
 canvas_project_find: fn(checker: LSPChecker, entry: String, selected_path: String, selected_src: String, query: String, expected_project_revision: String?) -> String Err! {
     context: open_project_query_context(checker, entry, selected_path, selected_src, expected_project_revision)
     needle: query.trim()
+    // Lowered once: each search below compares against it.
+    lowered: needle.to_ascii_lower()
     results := [String]{}
     seen := [String:Bool]{}
     if !needle.is_empty() {
@@ -148,28 +152,38 @@ canvas_project_find: fn(checker: LSPChecker, entry: String, selected_path: Strin
             loop definition in source.index.definitions {
                 def: definition.def
                 if !module_belongs_to(context.project_root, source.path, def.module_path) -> next
-                if !contains_ci(def.name, needle) && !contains_ci(def.identity, needle) -> next
+                if !contains_lowered(def.name, lowered) && !contains_lowered(def.identity, lowered) {
+                    next
+                }
                 owner: project_source_owner(context, at, def.module_path)
                 push_project_result(results, seen, "definition", def.name, def.module_path, def.def_span, context.sources[owner], Val(projection), context.selected_source_id)
             }
             loop reference in source.index.references {
-                if !module_belongs_to(context.project_root, source.path, reference.module_path) || !contains_ci(reference.name, needle) {
+                if !module_belongs_to(context.project_root, source.path, reference.module_path) || !contains_lowered(reference.name, lowered) {
                     next
                 }
                 owner: project_source_owner(context, at, reference.module_path)
                 push_project_result(results, seen, "reference", reference.name, reference.module_path, reference.span, context.sources[owner], Val(projection), context.selected_source_id)
             }
-            loop span in text_matches(source.source, needle) {
+            loop span in text_matches(source.source, lowered) {
                 push_project_result(results, seen, "source", needle, source.source_id, span, source, Val(projection), context.selected_source_id)
             }
         }
         loop node in projection.node_refs {
-            if !contains_ci(node.title, needle) && !contains_ci(node.kind, needle) -> next
+            if !contains_lowered(node.title, lowered) && !contains_lowered(node.kind, lowered) {
+                next
+            }
             selected: project_source_at(context.sources, context.selected_source_id) ?? return Err(query_error("not_found", "Canvas query source is not in the projected project"))
             push_project_result(results, seen, "graph", node.title, context.selected_source_id, node.span, context.sources[selected], Val(projection), context.selected_source_id)
         }
     }
     Ok(project_query_ok("project_search", context, results, "\"impact\":null,\"diff\":null"))
+}
+
+// Whether `text`, lowered, holds `lowered`, a needle already lowered
+// (contains_ci without lowering the needle at each call).
+contains_lowered: fn(text: String, lowered: String) -> Bool Never! {
+    text.to_ascii_lower().contains(lowered)
 }
 
 canvas_references: fn(checker: LSPChecker, path: String, src: String, symbol: String) -> String Err! {
@@ -508,17 +522,18 @@ core_catalog_action_json: fn(module_path: String, source_callee_prefix: String, 
 // The Core export registry's modules and members, filtered by `query` and
 // sorted by path and name.
 core_catalog_entries: fn(query: String, exports: [CoreCatalogExport]) -> [CoreCatalogModule] {
-    needle: query.trim()
+    // Lowered once: each search below compares against it.
+    lowered: query.trim().to_ascii_lower()
     merged: core_registry_modules(exports)
     modules := [CoreCatalogModule]{}
     loop module_ref in merged {
         members := [CoreCatalogMember]{}
         loop member in module_ref.members {
-            if needle.is_empty() || contains_ci(member.name, needle) || contains_ci(member.signature, needle) || contains_ci(member.summary, needle) {
+            if lowered.is_empty() || contains_lowered(member.name, lowered) || contains_lowered(member.signature, lowered) || contains_lowered(member.summary, lowered) {
                 members.push(member)
             }
         }
-        if !needle.is_empty() && members.len() == 0 && !contains_ci(module_ref.path, needle) && !contains_ci(module_ref.title, needle) && !contains_ci(module_ref.summary, needle) {
+        if !lowered.is_empty() && members.len() == 0 && !contains_lowered(module_ref.path, lowered) && !contains_lowered(module_ref.title, lowered) && !contains_lowered(module_ref.summary, lowered) {
             next
         }
         members.sort_by(fn(left: CoreCatalogMember, right: CoreCatalogMember) { left.name <=> right.name })

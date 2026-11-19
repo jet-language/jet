@@ -933,8 +933,8 @@ xp_status: fn(args: [String]) -> Int {
             failures += 1
             next
         }
-        ours: process.cmd([String]{exe}).cwd(out).run() ?? {
-            print("{program.name}: cannot run {exe}")
+        ours: process.cmd([String]{exe.move()}).cwd(out).run() ?? {
+            print("{program.name}: cannot run {out}/{program.name}.ir")
             return 70
         }
         theirs: process.cmd([String]{"{out}/.jet/build/{program.name}"}).cwd(out).run() ?? {

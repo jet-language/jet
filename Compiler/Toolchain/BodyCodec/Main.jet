@@ -329,27 +329,32 @@ reach: fn(out: &CodecOut, ty: Type, at: String) BodyCodecError! {
         reach(out, key, at) ?? return Err(err)
         return reach(out, value, at)
     }
-    if ty == .Named(name) {
-        if is_hand_written(out, name) || out.seen.get(name) != None -> return Ok()
-        out.seen["{name}"] = true
-        out.reached.push("{name}")
-        position: out.index.get(name) ?? return Err(codec_fail("{at}: no struct or enum {name}"))
-        // Each field's type, resolved in place, and kept to reach next.
-        types := [Type]{}
-        loop index in 0..<out.shapes[position].fields.len() {
-            where: "{name}.{out.shapes[position].fields[index].name}"
-            types.push(resolved(out, out.shapes[position].fields[index].ty, where) ?? return Err(err))
-            out.shapes[position].fields[index].ty = resolved(out, out.shapes[position].fields[index].ty, where) ?? return Err(err)
-        }
-        loop variant_index in 0..<out.shapes[position].variants.len() {
-            loop index in 0..<out.shapes[position].variants[variant_index].fields.len() {
-                where: "{name}.{out.shapes[position].variants[variant_index].name}"
-                types.push(resolved(out, out.shapes[position].variants[variant_index].fields[index].ty, where) ?? return Err(err))
-                out.shapes[position].variants[variant_index].fields[index].ty = resolved(out, out.shapes[position].variants[variant_index].fields[index].ty, where) ?? return Err(err)
-            }
-        }
-        loop field_type in types -> reach(out, field_type, name) ?? return Err(err)
+    if ty == .Named(name) -> return reach_named(out, name, at)
+    Ok()
+}
+
+// The named type `name` and every named type its fields reach, added to
+// `out.reached` once each.
+reach_named: fn(out: &CodecOut, name: String, at: String) BodyCodecError! {
+    if is_hand_written(out, name) || out.seen.get(name) != None -> return Ok()
+    out.seen["{name}"] = true
+    out.reached.push("{name}")
+    position: out.index.get(name) ?? return Err(codec_fail("{at}: no struct or enum {name}"))
+    // Each field's type, resolved in place, and kept to reach next.
+    types := [Type]{}
+    loop index in 0..<out.shapes[position].fields.len() {
+        where: "{name}.{out.shapes[position].fields[index].name}"
+        types.push(resolved(out, out.shapes[position].fields[index].ty, where) ?? return Err(err))
+        out.shapes[position].fields[index].ty = resolved(out, out.shapes[position].fields[index].ty, where) ?? return Err(err)
     }
+    loop variant_index in 0..<out.shapes[position].variants.len() {
+        loop index in 0..<out.shapes[position].variants[variant_index].fields.len() {
+            where: "{name}.{out.shapes[position].variants[variant_index].name}"
+            types.push(resolved(out, out.shapes[position].variants[variant_index].fields[index].ty, where) ?? return Err(err))
+            out.shapes[position].variants[variant_index].fields[index].ty = resolved(out, out.shapes[position].variants[variant_index].fields[index].ty, where) ?? return Err(err)
+        }
+    }
+    loop field_type in types -> reach(out, field_type, name) ?? return Err(err)
     Ok()
 }
 
@@ -647,7 +652,7 @@ render: fn(target: CodecTarget) -[FS]> String BodyCodecError! {
     importing: target.package != ""
     loop path in target.hand_files -> read_hand(out, path, target) ?? return Err(err)
     loop dir in target.shape_dirs -> read_shapes(out, dir, target) ?? return Err(err)
-    loop root in target.roots -> reach(out, Type.Named{name: root}, root) ?? return Err(err)
+    loop root in target.roots -> reach_named(out, root, root) ?? return Err(err)
     settle(out) ?? return Err(err)
     names: loop name in out.reached -> name
     loop name in names -> write_shape(out, name) ?? return Err(err)
