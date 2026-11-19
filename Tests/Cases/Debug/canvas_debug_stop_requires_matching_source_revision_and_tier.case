@@ -43,6 +43,7 @@ env: S1_METHOD=POST
 env: S1_PATH=/__jet_canvas/debug
 exit: 0
 stdout: ^= "HTTP/1.1 200" # original success vs expect_err projection
+stdout: ~ "\"id\":\"{cap:session}\"" # the refused continuations kept the session: `next` answers in the same one
 write: request.json canvas_debug_stop_requires_matching_source_revision_and_tier.stale_stop.json
 step stale_stop: {work}/canvas-client
 env: S1_CANVAS_URL={cap:url}
