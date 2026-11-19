@@ -93,7 +93,9 @@ JetCLIPerfInlines: struct {
 // counter's too, each a signal the sampler took; `cost` is what sampling
 // cost, when its runtime recorded it, and `sampler` what took the
 // CPU-time samples (jet_cli_perf_pc_read). `sited` says whether the
-// samples held an allocations' record:
+// samples held an allocations' record (PerfSamples.jet
+// perf_samples_alloc_write), and `allocated` holds those allocations by
+// type and line, the most bytes first:
 // a runtime that records no allocation sites counts no line's allocations.
 // `periods` holds each counter's sampling period, 0 for one the run did
 // not capture. `spawns` holds each task's spawn, `waits` each task's wait,
@@ -115,6 +117,7 @@ JetCLIPerfSamples: struct {
     functions: [X64ImageFunction],
     natives: [JetCLIPerfNative],
     sited: Bool,
+    allocated: [JetCLIPerfAllocSite],
     periods: [U64],
     spawns: [JetCLIPerfSpawn],
     waits: [JetCLIPerfWait],
@@ -139,11 +142,28 @@ JetCLIPerfTimed: struct {
 // The clock record (PerfSamples.jet perf_samples_exit), in nanoseconds: the
 // CPU time the process used while sampled, the time the sampler's handlers
 // ran, and the kernel's time to deliver one signal and return from its
-// handler, which the runtime timed as sampling started.
+// handler, which the runtime timed as sampling started; then the
+// allocations the alloc lens counted and the time it spent on them (0 each
+// without it, or from a runtime whose record stops at the third).
 JetCLIPerfCost: struct {
     cpu_ns: U64,
     handler_ns: U64,
     delivery_ns: U64,
+    alloc_count: U64,
+    alloc_ns: U64,
+}
+
+// The allocations the alloc lens counted at one line for one type
+// (PerfSamples.jet perf_samples_alloc_site), and their bytes: `name` and
+// `line` the innermost line of the checked source on their allocating
+// stack, empty and 0 for none; `type_name` the type of their typed
+// allocating call, empty for none.
+JetCLIPerfAllocSite: struct {
+    name: String,
+    line: U64,
+    type_name: String,
+    allocations: U64,
+    bytes: U64,
 }
 
 // A task's spawn (PerfSamples.jet perf_samples_spawn): the task and the
@@ -610,10 +630,12 @@ jet_cli_perf_code_low: fn(image: [U8]) -> Int {
 // counter outside every Jet function
 // counts at the function of `functions` that holds it, unless that is a
 // compiler-emitted helper, whose sample counts at the innermost Jet line of
-// its stack. An allocations'
-// record (Alloc.jet alloc_sites_record), a header that counts them, then
+// its stack. An allocations' record (PerfSamples.jet
+// perf_samples_alloc_write), a header that counts them, their bytes, then
 // the call sites of the stack they share, counts them at the innermost of
-// those on a line of a function `owned` marks. A counter's sample counts
+// those on a line of a function `owned` marks, and in `allocated` at that
+// line for the type DIE `allocs` gives its call sites, as a heap snapshot's
+// site record's blocks. A counter's sample counts
 // its counter's period of `periods` in events at the innermost such line
 // of its stack, its program counter's included, and no CPU time. A spawn's
 // record names its task's spawn by the innermost such line of its stack; a
@@ -629,7 +651,7 @@ jet_cli_perf_code_low: fn(image: [U8]) -> Int {
 // `names` spells. Its block and root records are its retention records
 // (JetCLIPerfHeap).
 jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFunction], inlines: &&JetCLIPerfInlines, owned: [Bool], periods: &&[U64], allocs: [Int:Int], names: [Int:String], words: [U8], code_low: Int) -> JetCLIPerfSamples Never! {
-    sampled := JetCLIPerfSamples{table: table, inlines: inlines, lines: [JetCLIPerfSampledLine]{}, total: U64{0}, outside: U64{0}, helpers: U64{0}, stackless: U64{0}, signals: U64{0}, cost: None, sampler: None, functions: functions, natives: [JetCLIPerfNative]{}, sited: false, periods: periods, spawns: [JetCLIPerfSpawn]{}, waits: [JetCLIPerfWait]{}, wakes: [JetCLIPerfWake]{}, transfers: [JetCLIPerfIO]{}, heaps: [JetCLIPerfHeap]{}, experiments: [JetCLIPerfExperiment]{}, points: [Int:String]{}, timed: [JetCLIPerfTimed]{}}
+    sampled := JetCLIPerfSamples{table: table, inlines: inlines, lines: [JetCLIPerfSampledLine]{}, total: U64{0}, outside: U64{0}, helpers: U64{0}, stackless: U64{0}, signals: U64{0}, cost: None, sampler: None, functions: functions, natives: [JetCLIPerfNative]{}, sited: false, allocated: [JetCLIPerfAllocSite]{}, periods: periods, spawns: [JetCLIPerfSpawn]{}, waits: [JetCLIPerfWait]{}, wakes: [JetCLIPerfWake]{}, transfers: [JetCLIPerfIO]{}, heaps: [JetCLIPerfHeap]{}, experiments: [JetCLIPerfExperiment]{}, points: [Int:String]{}, timed: [JetCLIPerfTimed]{}}
     // One key per function, line and ownership.
     places := [String:Int]{}
     // Each address's entries in `lines`, innermost first, by twice the
@@ -656,13 +678,40 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
         if first < 0 {
             sampled.sited = true
             allocations: checked(U64{pc}) ?? U64{0}
-            loop k in 1..<size + 1 {
+            loop k in 2..<size + 1 {
                 word: at + k * 8
                 if word + 8 > words.len() -> break
                 held: jet_cli_perf_samples_own(sampled, jet_cli_perf_samples_chain(sampled, places, resolved, owned, link_debug_addr(words, word), true))
                 if held < 0 -> next
                 sampled.lines[held].allocations += allocations
                 break
+            }
+            if size >= 1 && at + (size + 1) * 8 <= words.len() {
+                // The innermost frame, taken out of the stack.
+                innermost: loop frame in jet_cli_perf_samples_stack_frames(sampled, owned, words, at, 2, size + 1) {
+                    break frame
+                } ?? TraceStackFrame{line: U64{0}, name: ""}
+                line: innermost.line
+                name: innermost.name.move()
+                held: loop k in 2..<size + 1 {
+                    if allocs.get(link_debug_addr(words, at + k * 8)) == .Val(die) {
+                        break die
+                    }
+                } ?? -1
+                type_name: names.get(held) ?? ""
+                found := -1
+                loop (place, site) in sampled.allocated {
+                    if site.line == line && site.name == name && site.type_name == type_name {
+                        found = place
+                        break
+                    }
+                }
+                if found < 0 {
+                    found = sampled.allocated.len()
+                    sampled.allocated.push(JetCLIPerfAllocSite{name: name, line: line, type_name: type_name, allocations: U64{0}, bytes: U64{0}})
+                }
+                sampled.allocated[found].allocations += allocations
+                sampled.allocated[found].bytes += checked(U64{link_debug_addr(words, at + 8)}) ?? U64{0}
             }
             at += (size + 1) * 8
             next
@@ -723,11 +772,19 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
             next
         }
         if kind == JET_CLI_PERF_CLOCK_KIND {
-            if record == 4 && at + 32 <= words.len() {
+            if record >= 4 && at + record * 8 <= words.len() {
                 if checked(U64{link_debug_addr(words, at + 8)}) == .Val(cpu) {
                     if checked(U64{link_debug_addr(words, at + 16)}) == .Val(handler) {
                         if checked(U64{link_debug_addr(words, at + 24)}) == .Val(delivery) {
-                            sampled.cost = .Val(JetCLIPerfCost{cpu_ns: cpu, handler_ns: handler, delivery_ns: delivery})
+                            // The alloc lens's count, which only the first
+                            // exit writes.
+                            count := if record >= 6 -> checked(U64{link_debug_addr(words, at + 32)}) ?? U64{0} else -> U64{0}
+                            spent := if record >= 6 -> checked(U64{link_debug_addr(words, at + 40)}) ?? U64{0} else -> U64{0}
+                            if count == (U64{0}) && sampled.cost == .Val(earlier) {
+                                count = earlier.alloc_count
+                                spent = earlier.alloc_ns
+                            }
+                            sampled.cost = .Val(JetCLIPerfCost{cpu_ns: cpu, handler_ns: handler, delivery_ns: delivery, alloc_count: count, alloc_ns: spent})
                         }
                     }
                 }
@@ -949,6 +1006,7 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
     sampled.timed.sort_by(fn(left: JetCLIPerfTimed, right: JetCLIPerfTimed) { (left.at_ns <=> right.at_ns).then(left.task <=> right.task).then(left.line <=> right.line) })
     sampled.lines.sort_by(fn(left: JetCLIPerfSampledLine, right: JetCLIPerfSampledLine) { (right.count <=> left.count).then(right.inclusive <=> left.inclusive).then(jet_cli_perf_line_counted(right, 1) <=> jet_cli_perf_line_counted(left, 1)).then(jet_cli_perf_line_counted(right, 0) <=> jet_cli_perf_line_counted(left, 0)).then(right.allocations <=> left.allocations).then(left.name <=> right.name).then(left.line <=> right.line) })
     sampled.natives.sort_by(fn(left: JetCLIPerfNative, right: JetCLIPerfNative) { (right.count <=> left.count).then(left.function <=> right.function) })
+    sampled.allocated.sort_by(fn(left: JetCLIPerfAllocSite, right: JetCLIPerfAllocSite) { (right.bytes <=> left.bytes).then(right.allocations <=> left.allocations).then(left.name <=> right.name).then(left.line <=> right.line).then(left.type_name <=> right.type_name) })
     sampled.heaps.sort_by(fn(left: JetCLIPerfHeap, right: JetCLIPerfHeap) { left.number <=> right.number })
     loop index in 0..<sampled.heaps.len() {
         sampled.heaps[index].sites.sort_by(fn(left: JetCLIPerfHeapSite, right: JetCLIPerfHeapSite) { (right.bytes <=> left.bytes).then(right.blocks <=> left.blocks).then(left.name <=> right.name).then(left.line <=> right.line).then(left.type_name <=> right.type_name) })
@@ -1119,13 +1177,14 @@ jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSa
     }
     // The rows are hottest first, by their own samples, then by the ones
     // they hold, then by their LLC and L1D misses: when no row holds a
-    // sample or a counter's event, every sample landed elsewhere. A row may
-    // hold samples with none of its own, as a line whose time goes to
-    // library code does, and under the memory lens alone, with no CPU-time
-    // samples, a row holds only its counters' events.
+    // sample, a counter's event or an allocation, every sample landed
+    // elsewhere. A row may hold samples with none of its own, as a line
+    // whose time goes to library code does; with no CPU-time samples, a row
+    // holds only its counters' events under the memory lens alone and only
+    // its allocations under the alloc lens alone.
     held := false
     loop row in rows {
-        if row.sample_count > (U64{0}) || (row.inclusive_count ?? U64{0}) > (U64{0}) || (row.l1d_miss_count ?? U64{0}) > (U64{0}) || (row.llc_miss_count ?? U64{0}) > (U64{0}) || (row.dtlb_miss_count ?? U64{0}) > (U64{0}) || (row.page_fault_count ?? U64{0}) > (U64{0}) {
+        if row.sample_count > (U64{0}) || (row.inclusive_count ?? U64{0}) > (U64{0}) || (row.allocation_count ?? U64{0}) > (U64{0}) || (row.l1d_miss_count ?? U64{0}) > (U64{0}) || (row.llc_miss_count ?? U64{0}) > (U64{0}) || (row.dtlb_miss_count ?? U64{0}) > (U64{0}) || (row.page_fault_count ?? U64{0}) > (U64{0}) {
             held = true
             break
         }
@@ -1146,8 +1205,10 @@ jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSa
     taken: if sampled.sampler == .Val(used) -> jet_cli_perf_sampler_reason(used, sampled.total, cpu_ns) else -> ""
     sites: if sampled.sited -> "; each allocation counts at the innermost line of {source.identity.path} on its stack" else -> ""
     timed: "one CPU-time sample per {JET_CLI_PERF_SAMPLE_US} microseconds of each thread's CPU time, at the function and source line its program counter is in and, inclusive, once at each line on its stack; {elsewhere} of {sampled.total} samples are outside {source.identity.path}"
-    // The memory lens without the cpu lens takes no CPU-time samples.
-    reason: if sampled.total == (U64{0}) -> "no CPU-time samples, as under the memory lens alone: each row holds its counters' events{natives}{sites}" else -> "{timed}{taken}{natives}{helpers}{stackless}{nominal}{sites}"
+    // The memory lens or the alloc lens without the cpu lens takes no
+    // CPU-time samples.
+    alone: if sampled.periods.len() == 0 && sampled.sited -> "the alloc lens alone: each row holds its allocations" else -> "the memory lens alone: each row holds its counters' events"
+    reason: if sampled.total == (U64{0}) -> "no CPU-time samples, as under {alone}{natives}{sites}" else -> "{timed}{taken}{natives}{helpers}{stackless}{nominal}{sites}"
     profile := TraceProfile{method: "sampling", counters: [TraceCounter]{}, status: status, coverage: coverage, rows: rows, row_limit: U64{4096}, rows_truncated: truncated, overhead_ns: None, overhead_status: "not_measured", overhead_reason: "the runtime recorded no sampling cost", reason: reason, window_status: "unavailable", window_wall_ns: None, window_cpu_ns: None, window_reason: "the runtime published no run window"}
     if sampled.cost == .Val(cost) {
         // Each signal pays the kernel's delivery and return besides the

@@ -267,7 +267,8 @@ jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String]
     }
     loop note in notes -> out = "{out}{note}\n"
     out = "{out}{jet_cli_perf_view_sections(flame, timeline, table, color)}"
-    heap: jet_cli_perf_heap_lines(trace)
+    heap := jet_cli_perf_allocation_lines(trace)
+    loop line in jet_cli_perf_heap_lines(trace) -> heap.push(line)
     if heap.len() > 0 {
         out = "{out}{diagnostic_theme_paint(color, "1", "heap")}\n"
         loop line in heap -> out = "{out}{line}\n"
@@ -597,16 +598,17 @@ jet_cli_perf_receipt_sections: fn(trace: CanonicalJSON) -> [JetDriverRunReceiptS
 }
 
 // `receipt <name> <value>` for each receipt section the trace records, the
-// value as its canonical JSON, but the heap snapshots, the causal
-// predictions, the topdown lens's and the zones, which
-// jet_cli_perf_heap_lines, jet_cli_perf_causal_lines,
-// jet_cli_perf_topdown_lines and jet_cli_perf_zone_lines show.
+// value as its canonical JSON, but the allocations, the heap snapshots, the
+// causal predictions, the topdown lens's and the zones, which
+// jet_cli_perf_allocation_lines, jet_cli_perf_heap_lines,
+// jet_cli_perf_causal_lines, jet_cli_perf_topdown_lines and
+// jet_cli_perf_zone_lines show.
 jet_cli_perf_receipt_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     items: jet_cli_perf_rows(trace, "receipt_sections") ?? return [String]{}
     lines := [String]{}
     loop item in items {
         section: trace_receipt_section_from_json(item) ?? next
-        if section.name == "heap" || section.name == "causal" || section.name == "topdown" || section.name == "zones" {
+        if section.name == "allocations" || section.name == "heap" || section.name == "causal" || section.name == "topdown" || section.name == "zones" {
             next
         }
         bytes: canonical_json_bytes(section.value)
@@ -660,6 +662,32 @@ jet_cli_perf_heap_types: fn(snapshots: [JetCLIPerfHeapSnapshot]) -> String Never
     }
     types.sort()
     "; they keep {types.join(", ")}"
+}
+
+// The allocations the alloc lens counted (Session.jet
+// jet_cli_perf_session_allocations): `allocated  <n> allocations  <n> bytes`
+// with what counting them cost, then by the type and place that allocated
+// them, the most bytes first, as jet_cli_perf_heap_lines shows a snapshot's
+// blocks.
+jet_cli_perf_allocation_lines: fn(trace: CanonicalJSON) -> [String] Never! {
+    items: jet_cli_perf_rows(trace, "receipt_sections") ?? return [String]{}
+    lines := [String]{}
+    loop item in items {
+        section: trace_receipt_section_from_json(item) ?? next
+        if section.name != "allocations" -> next
+        path: jet_cli_perf_member_text(section.value, "path") ?? ""
+        cost: jet_cli_perf_member_text(section.value, "overhead_reason") ?? ""
+        lines.push("allocated  {jet_cli_perf_member_number(section.value, "allocations") ?? 0} allocations  {jet_cli_perf_member_number(section.value, "bytes") ?? 0} bytes: {cost}")
+        fields: jettrace_object_view(section.value, "receipt allocations") ?? next
+        at: jet_cli_perf_key(fields, "sites") ?? next
+        sites: jettrace_array(fields[at].value, "receipt allocations.sites") ?? next
+        loop site in sites {
+            where: if jet_cli_perf_member_integer(site, "line") == .Val(line) -> "{path}:{line} {jet_cli_perf_member_text(site, "function") ?? ""}" else -> "elsewhere"
+            held: if jet_cli_perf_member_text(site, "type") == .Val(type_name) -> "{type_name}  {where}" else -> where
+            lines.push("  {held}  {jet_cli_perf_member_number(site, "allocations") ?? 0} allocations  {jet_cli_perf_member_number(site, "bytes") ?? 0} bytes")
+        }
+    }
+    lines
 }
 
 // The heap snapshots the alloc lens kept (jet_cli_perf_heap_snapshots),
@@ -1602,7 +1630,7 @@ jet_cli_perf_flame_profile: fn(rows: &&[JetCLIPerfProfileRow]) -> [String] Never
         weight: functions[index].weight
         share: if total > 0 -> weight * 100 /% total else -> 0
         out.push("{functions[index].symbol} profile:{functions[index].clock} samples={weight} share={share}%")
-        functions[index].lines.sort_by(fn(left: {line: Int, weight: Int, inclusive: Int?, allocations: Int?, events: String}, right: {line: Int, weight: Int, inclusive: Int?, allocations: Int?, events: String}) { (right.weight <=> left.weight).then((right.inclusive ?? 0) <=> (left.inclusive ?? 0)).then(left.line <=> right.line) })
+        functions[index].lines.sort_by(fn(left: {line: Int, weight: Int, inclusive: Int?, allocations: Int?, events: String}, right: {line: Int, weight: Int, inclusive: Int?, allocations: Int?, events: String}) { (right.weight <=> left.weight).then((right.inclusive ?? 0) <=> (left.inclusive ?? 0)).then((right.allocations ?? 0) <=> (left.allocations ?? 0)).then(left.line <=> right.line) })
         shown: if functions[index].lines.len() > 3 -> 3 else -> functions[index].lines.len()
         loop at in 0..<shown {
             row: functions[index].lines[at]

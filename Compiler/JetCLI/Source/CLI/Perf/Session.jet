@@ -305,6 +305,9 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
             if causal {
                 capture.receipts.push(jet_cli_perf_causal_section("{source}", found.experiments.move(), found.points.move()))
             }
+            if jet_cli_perf_session_allocations("{source}", found.sited, found.allocated.move(), found.cost) == .Val(section) {
+                capture.receipts.push(section)
+            }
             if jet_cli_perf_session_heaps(source.move(), found.heaps.move()) == .Val(section) {
                 capture.receipts.push(section)
             }
@@ -825,6 +828,62 @@ jet_cli_perf_session_heaps: fn(source: &&String, heaps: &&[JetCLIPerfHeap]) -> T
     value: CanonicalJSON.Object([CanonicalJSONField]{{key: "path", value: CanonicalJSON.String(source.move())}, {key: "snapshots", value: CanonicalJSON.Array(snapshots.move())}})
     digest: canonical_json_sha256(value)
     Val(TraceReceiptSection{name: "heap", type_name: "JetPerfHeapSnapshots", value: value, digest: digest})
+}
+
+// The trace's `allocations` receipt section: the allocations the alloc
+// lens counted in a run of `source` (JetCLIPerfAllocSite), all of them and
+// their bytes, then by the function and line of `source` that allocated
+// them and the type they were allocated for, the most bytes first, a null
+// function and line for those no line of it allocated, a null type for
+// those no typed allocating call allocated; and what counting them cost:
+// the time the lens spent on them, as the runtime timed it on each
+// allocation (PerfSamples.jet perf_samples_alloc_site). None when the run
+// recorded no allocation.
+jet_cli_perf_session_allocations: fn(source: &&String, sited: Bool, allocated: &&[JetCLIPerfAllocSite], charged: JetCLIPerfCost?) -> TraceReceiptSection? Never! {
+    if !sited -> return None
+    sites := [CanonicalJSON]{}
+    allocations := U64{0}
+    bytes := U64{0}
+    loop site in allocated.move() {
+        placed: site.line > (U64{0})
+        typed: site.type_name != ""
+        allocations += site.allocations
+        bytes += site.bytes
+        sites.push(
+            CanonicalJSON.Object(
+                [CanonicalJSONField]{
+                    {key: "allocations", value: CanonicalJSON.Integer("{site.allocations}")},
+                    {key: "bytes", value: CanonicalJSON.Integer("{site.bytes}")},
+                    {key: "function", value: if placed -> CanonicalJSON.String(site.name.move()) else -> CanonicalJSON.Null},
+                    {key: "line", value: if placed -> CanonicalJSON.Integer("{site.line}") else -> CanonicalJSON.Null},
+                    {key: "type", value: if typed -> CanonicalJSON.String(site.type_name.move()) else -> CanonicalJSON.Null},
+                },
+            ),
+        )
+    }
+    overhead := CanonicalJSON.Null
+    status := "not_measured"
+    why := "the runtime recorded no cost of the alloc lens"
+    if charged == .Val(cost) {
+        if cost.alloc_count > (U64{0}) {
+            overhead = CanonicalJSON.Integer("{cost.alloc_ns}")
+            status = "measured"
+            why = "the alloc lens took {cost.alloc_ns / U64{1000}} microseconds over {cost.alloc_count} allocations, {cost.alloc_ns / cost.alloc_count} nanoseconds each, {jet_cli_perf_hundredths(cost.alloc_ns, cost.cpu_ns)} of the {cost.cpu_ns / U64{1000}} microseconds of CPU time: each allocation waited for the checked heap's quarantine lock, linked its block on the live list and counted at its call sites, timed from before the wait to after the count"
+        }
+    }
+    value: CanonicalJSON.Object(
+        [CanonicalJSONField]{
+            {key: "allocations", value: CanonicalJSON.Integer("{allocations}")},
+            {key: "bytes", value: CanonicalJSON.Integer("{bytes}")},
+            {key: "overhead_ns", value: overhead.move()},
+            {key: "overhead_reason", value: CanonicalJSON.String(why.move())},
+            {key: "overhead_status", value: CanonicalJSON.String(status.move())},
+            {key: "path", value: CanonicalJSON.String(source.move())},
+            {key: "sites", value: CanonicalJSON.Array(sites.move())},
+        },
+    )
+    digest: canonical_json_sha256(value)
+    Val(TraceReceiptSection{name: "allocations", type_name: "JetPerfAllocations", value: value, digest: digest})
 }
 
 // `write_session_trace`: the trace goes to `out`, else to

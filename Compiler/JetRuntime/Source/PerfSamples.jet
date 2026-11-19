@@ -65,7 +65,10 @@
 // live list while it forks: the copy-on-write child walks the list as it
 // stood, groups the live blocks by their allocating call sites, writes the
 // snapshot's records and exits, while the program's other threads allocate
-// on; the marking thread waits for the child (perf_samples_heap).
+// on; the marking thread waits for the child (perf_samples_heap). The same
+// take that links a block counts its allocation and its bytes at its
+// allocating call sites (perf_samples_alloc_site), and at exit each
+// distinct chain becomes an allocations' record (perf_samples_alloc_write).
 
 // O_WRONLY|O_CREAT|O_APPEND|O_CLOEXEC.
 PERF_SAMPLES_OPEN: I64{525377}
@@ -161,6 +164,25 @@ PERF_SAMPLES_HEAP_GROUPS: I64{1024}
 
 // The bytes of a snapshot's output buffer, written whenever it fills.
 PERF_SAMPLES_HEAP_BUFFER: I64{65536}
+
+// Under the alloc lens, the allocations the program made by their
+// allocating call sites (perf_samples_alloc_site), 0 otherwise: a mapping
+// of its own holding the table's address 0, its capacity 8, a power of two,
+// its groups 16, the allocations counted 24, the nanoseconds the lens's
+// work on them took 32 and a key's scratch 40 (perf_samples_heap_key). The
+// table's groups are a heap snapshot's (PERF_SAMPLES_HEAP_GROUP words: the
+// allocations, their bytes, then the key). The checked heap's quarantine
+// lock, which each tracking take holds while it counts, guards all of it.
+perf_alloc_state := I64{0}
+
+PERF_ALLOC_STATE_BYTES: I64{4096}
+
+PERF_ALLOC_KEY: I64{40}
+
+// The bit of an allocations' record's first word that marks it, the sign
+// bit: the record's allocations below PERF_SAMPLES_ADDRESS_BITS and its
+// word count from there, past every kind's bits.
+PERF_ALLOC_RECORD: I64{-9223372036854775808}
 
 // What a transfer moved its bytes to or from (perf_samples_io): a file by
 // the path the program opened it by, a descriptor by its number when the
@@ -478,8 +500,10 @@ perf_samples_start: fn() {
     perf_topdown_start(buffer, topdown)
     // A flight recorder of a checked image (`jet run --observe
     // --checked-alloc`) keeps the live list too, which `jet perf attach
-    // --lens=alloc` snapshots (perf_flight_heap).
-    if (flight || (lenses & PERF_LENS_ALLOC) != I64{0}) { _ := alloc_check_track_start() }
+    // --lens=alloc` snapshots (perf_flight_heap); only the alloc lens has
+    // its takes count their allocations as well.
+    counting: (lenses & PERF_LENS_ALLOC) != I64{0}
+    if ((flight || counting) && alloc_check_track_start() && counting) { perf_samples_alloc_open() }
     // The record of the CPU time sampled, written at exit.
     observe_exit_install()
 }
@@ -1034,10 +1058,12 @@ perf_samples_cpu_clock_ns: fn(clock: I64) -> I64 {
 // record of what sampling cost, so that the session can say how many of the
 // samples the CPU time should give it kept and what the sampler took of
 // that time. Its words after the first: the CPU time the process used since
-// sampling started, the time every handler ran (perf_samples_charge) and
-// the kernel's time for one signal (perf_samples_delivery), each in
-// nanoseconds. A second exit writes a later one. Under the alloc lens the
-// heap snapshot named `exit` comes first (perf_samples_heap). The spans
+// sampling started, the time every handler ran (perf_samples_charge), the
+// kernel's time for one signal (perf_samples_delivery), each in
+// nanoseconds, then the allocations the alloc lens counted and the
+// nanoseconds it spent on them (perf_samples_alloc_write). A second exit
+// writes a later one. Under the alloc lens the heap snapshot named `exit`
+// comes first (perf_samples_heap), then the allocations' records. The spans
 // buffer's rows and the records the handlers keep (perf_samples_flush) are
 // written out first.
 perf_samples_exit: fn() {
@@ -1050,13 +1076,14 @@ perf_samples_exit: fn() {
     perf_samples_heap(rt_static_text("exit"))
     buffer: perf_samples_buffer
     handlers: if (buffer == I64{0}) -> I64{0} else -> sync_load(wrapping(buffer + wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_SLOTS) * I64{8})))
-    record: jet_rt_alloc(I64{32}, I64{8})
-    rt_text_store(record, (I64{4} << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_CLOCK << PERF_SAMPLES_KIND_BITS))
+    record: jet_rt_alloc(I64{48}, I64{8})
+    perf_samples_alloc_write(fd, wrapping(record + I64{32}))
+    rt_text_store(record, (I64{6} << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_CLOCK << PERF_SAMPLES_KIND_BITS))
     rt_text_store(wrapping(record + I64{8}), wrapping(perf_samples_process_cpu_ns() - perf_samples_cpu_start))
     rt_text_store(wrapping(record + I64{16}), handlers)
     rt_text_store(wrapping(record + I64{24}), perf_samples_delivery_ns)
-    _ := host_write_all(fd, record, I64{32})
-    jet_rt_free(record, I64{32}, I64{8})
+    _ := host_write_all(fd, record, I64{48})
+    jet_rt_free(record, I64{48}, I64{8})
     perf_topdown_exit()
 }
 
@@ -1949,6 +1976,130 @@ perf_samples_heap_grow: fn(table: I64, capacity: I64) -> I64 {
     }
     alloc_unmap(table, wrapping(capacity * group_bytes))
     grown
+}
+
+// Under the alloc lens, the alloc lens's count of the program's allocations
+// (perf_alloc_state) mapped before the program runs, its table of
+// PERF_SAMPLES_HEAP_GROUPS groups; none when either mapping fails, and the
+// lens's records then hold no allocation.
+perf_samples_alloc_open: fn() {
+    state: alloc_map_try(PERF_ALLOC_STATE_BYTES)
+    if (state == I64{0}) {
+        return
+    }
+    table: alloc_map_try(wrapping(PERF_SAMPLES_HEAP_GROUPS * wrapping(PERF_SAMPLES_HEAP_GROUP * I64{8})))
+    if (table == I64{0}) {
+        alloc_unmap(state, PERF_ALLOC_STATE_BYTES)
+        return
+    }
+    rt_text_store(state, table)
+    rt_text_store(wrapping(state + I64{8}), PERF_SAMPLES_HEAP_GROUPS)
+    #Unsafe("the observation start runs before the program's entry, whose takes read it") {
+        perf_alloc_state = state
+    }
+}
+
+// The time a tracking take's allocation starts costing the alloc lens
+// (Alloc.jet jet_rt_alloc_check_take), before it waits for the quarantine
+// lock; 0 when the lens counts nothing.
+perf_samples_alloc_began: fn() -> I64 {
+    if (perf_alloc_state == I64{0}) -> I64{0} else -> sync_now_ns()
+}
+
+// Count a tracking take's allocation of `size` bytes at its allocating
+// `chain` (Alloc.jet alloc_check_live_chain), and the nanoseconds since
+// `began` (perf_samples_alloc_began) the lens spent on it: the lock's wait,
+// the live list's link and this count. The take holds the quarantine lock.
+// A chain new to a table that is full, and cannot grow, counts in the
+// totals alone.
+perf_samples_alloc_site: fn(chain: I64, size: I64, began: I64) {
+    state: perf_alloc_state
+    if (state == I64{0}) {
+        return
+    }
+    table := rt_text_word(state)
+    capacity := rt_text_word(wrapping(state + I64{8}))
+    groups: rt_text_word(wrapping(state + I64{16}))
+    if (wrapping(groups * I64{2}) >= capacity) {
+        grown: perf_samples_heap_grow(table, capacity)
+        if (grown != I64{0}) {
+            table = grown
+            capacity = wrapping(capacity * I64{2})
+            rt_text_store(state, table)
+            rt_text_store(wrapping(state + I64{8}), capacity)
+        }
+    }
+    key: wrapping(state + PERF_ALLOC_KEY)
+    perf_samples_heap_key(chain, key)
+    group: perf_samples_heap_slot(table, capacity, key)
+    count: rt_text_word(group)
+    // One group stays empty, so every probe ends.
+    if (count != I64{0} || wrapping(groups + I64{1}) < capacity) {
+        if (count == I64{0}) {
+            rt_text_bytes_copy(wrapping(group + I64{16}), key, wrapping(wrapping(PERF_SAMPLES_HEAP_DEPTH + I64{1}) * I64{8}))
+            rt_text_store(wrapping(state + I64{16}), wrapping(groups + I64{1}))
+        }
+        rt_text_store(group, wrapping(count + I64{1}))
+        rt_text_store(wrapping(group + I64{8}), wrapping(rt_text_word(wrapping(group + I64{8})) + size))
+    }
+    rt_text_store(wrapping(state + I64{24}), wrapping(rt_text_word(wrapping(state + I64{24})) + I64{1}))
+    rt_text_store(wrapping(state + I64{32}), wrapping(rt_text_word(wrapping(state + I64{32})) + wrapping(sync_now_ns() - began)))
+}
+
+// At exit, the alloc lens's count to `fd`: an allocations' record for each
+// chain that allocated, its first word the allocations, then the number of
+// words after it from PERF_SAMPLES_ADDRESS_BITS and PERF_ALLOC_RECORD; then
+// their bytes and the chain's call sites (perf_samples_heap_key). The
+// allocations counted and the nanoseconds the lens spent on them go to
+// `totals`, two words, 0 each without the lens. Under the quarantine lock,
+// so a take still running elsewhere waits for the count to be written; the
+// count then ends, so a second exit writes no allocation twice.
+perf_samples_alloc_write: fn(fd: I64, totals: I64) {
+    rt_text_store(totals, I64{0})
+    rt_text_store(wrapping(totals + I64{8}), I64{0})
+    if (perf_alloc_state == I64{0}) {
+        return
+    }
+    out: alloc_map_try(PERF_SAMPLES_HEAP_BUFFER)
+    alloc_check_track_lock()
+    state: perf_alloc_state
+    table: rt_text_word(state)
+    capacity: rt_text_word(wrapping(state + I64{8}))
+    group_bytes: wrapping(PERF_SAMPLES_HEAP_GROUP * I64{8})
+    used := I64{0}
+    index := I64{0}
+    // No buffer, no record.
+    limit: if (out == I64{0}) -> I64{0} else -> capacity
+    loop index < limit {
+        group: wrapping(table + wrapping(index * group_bytes))
+        count: rt_text_word(group)
+        if (count != I64{0}) {
+            depth: rt_text_word(wrapping(group + I64{16}))
+            record: wrapping(wrapping(depth + I64{2}) * I64{8})
+            if (wrapping(used + record) > PERF_SAMPLES_HEAP_BUFFER) {
+                _ := host_write_all(fd, out, used)
+                used = I64{0}
+            }
+            at: wrapping(out + used)
+            rt_text_store(at, (count & PERF_SAMPLES_ADDRESS_MASK) | (wrapping(depth + I64{1}) << PERF_SAMPLES_ADDRESS_BITS) | PERF_ALLOC_RECORD)
+            rt_text_store(wrapping(at + I64{8}), rt_text_word(wrapping(group + I64{8})))
+            rt_text_bytes_copy(wrapping(at + I64{16}), wrapping(group + I64{24}), wrapping(depth * I64{8}))
+            used = wrapping(used + record)
+        }
+        index = wrapping(index + I64{1})
+    }
+    rt_text_store(totals, rt_text_word(wrapping(state + I64{24})))
+    rt_text_store(wrapping(totals + I64{8}), rt_text_word(wrapping(state + I64{32})))
+    #Unsafe("the held quarantine lock guards the count; every take reads it under the lock") {
+        perf_alloc_state = I64{0}
+    }
+    alloc_check_track_release()
+    alloc_unmap(table, wrapping(capacity * group_bytes))
+    alloc_unmap(state, PERF_ALLOC_STATE_BYTES)
+    if (out != I64{0}) {
+        _ := host_write_all(fd, out, used)
+        alloc_unmap(out, PERF_SAMPLES_HEAP_BUFFER)
+    }
 }
 
 // The bytes of one of perf_samples_slots' record buffers.

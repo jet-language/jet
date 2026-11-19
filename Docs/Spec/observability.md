@@ -137,9 +137,9 @@ time, the samples that hold it anywhere on the stack, each once however often
 passes through has a row with no exclusive samples. A row's
 `allocation_count` is the allocations whose stack holds its line innermost
 of the checked source's lines, from the allocation records the runtime
-writes with the samples, so an allocation in the runtime or a core module
-counts at the line of the source that called into it; a run whose runtime
-recorded no allocation site leaves it null. A sample in a compiler-emitted
+writes at exit under the `alloc` lens, so an allocation in the runtime or a
+core module counts at the line of the source that called into it; a run
+without that lens leaves it null. A sample in a compiler-emitted
 helper (a `jet_ir_` symbol, such as the stop poll `jet_ir_stop_turn`) counts
 at the Jet line that called it, and the `reason` counts those samples.
 `coverage` is `complete` when every sample landed in that source and
@@ -316,6 +316,24 @@ snapshot after the per-line table, `live at filled  101 blocks  57344
 bytes` and then each site, `  [Int]  leak.jet:14 run  100 blocks  56000
 bytes`, or `  elsewhere  1 blocks  1344 bytes`; a name the run marked
 more than once is shown with its count, `after-cleanup#3`.
+
+Under `alloc` the same take that links a block onto the live list also
+counts its allocation and its bytes by its ten allocating call sites, under
+the same lock; there is no second allocation hook, and a run without the
+lens neither links nor counts. At exit the runtime writes one record per
+distinct call chain, so each row's `allocation_count` counts the line's
+allocations even with no CPU-time sample (the lens alone takes none, and
+the profile's `reason` says so). The trace's `allocations` receipt section
+(type `JetPerfAllocations`) holds every allocation the program made from
+its entry: the checked source's `path`, the `allocations` and their
+`bytes`, and its `sites`, the allocations by `function`, `line` and `type`
+as a snapshot's sites are, the most bytes first. Counting costs: the
+runtime times each counted allocation from before it waits for the lock
+until its count is done, and `overhead_ns` is the sum, `overhead_status`
+`measured` and `overhead_reason` the time per allocation and its share of
+the CPU time. `jet perf view` prints them before the snapshots, `allocated
+<n> allocations  <n> bytes: <the cost>` and then each site, `  [Int]
+alloc.jet:8 build  <n> allocations  <n> bytes`.
 
 `core.perf.zone(name)` opens a zone that closes when the block holding it
 ends (`_z: perf.zone("broadphase")`), `core.perf.frame()` marks the end of a
