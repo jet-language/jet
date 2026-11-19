@@ -1808,11 +1808,11 @@ IR_HELD_ROOT_SOURCE: "<eval>"
 
 // Builds `root` in held program `program` (ir_held_program) with every
 // function it reaches but those the image holds (ir_held_bound), with no
-// program entry, its Core cells the image's. The root takes the row of its
-// key, a former evaluation's, else a new last one; the program comes back
-// with the build for the next evaluation. The root's spans count in its own
-// `text`, which no checked file holds, so its file is IR_HELD_ROOT_SOURCE,
-// whose source is `text`.
+// program entry, its Core and program cells the image's. The root takes the
+// row of its key, a former evaluation's, else a new last one; the program
+// comes back with the build for the next evaluation. The root's spans count
+// in its own `text`, which no checked file holds, so its file is
+// IR_HELD_ROOT_SOURCE, whose source is `text`.
 ir_build_held_root: fn(program: &&IRProgram, root: &&FnBody, text: String, threads: CompilerThreads) -> IRBuildKept Never! {
     p := program.move()
     bytes: text.bytes()
@@ -1842,6 +1842,10 @@ ir_build_held_root: fn(program: &&IRProgram, root: &&FnBody, text: String, threa
     }
     kept := ir_build_root_rows(p, [Int]{row}, threads)
     if kept.program.checks.core == .Val(image) -> ir_core_cells_bind(kept.result.program, image)
+    // The program's own cells are the running image's (a debuggable image
+    // exports them, ir_debug_cell_exports), not copies placed beside the
+    // evaluation.
+    ir_debug_cells_bind(kept.result.program)
     kept
 }
 

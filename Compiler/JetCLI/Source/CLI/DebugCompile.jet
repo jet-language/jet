@@ -369,7 +369,9 @@ jet_cli_debug_eval_held_build: fn(held: &JetCLIDebugEvalHeldIR, root: &&FnBody, 
     jet_cli_native_optimize(program, held.level, held.options, threads, census, None)
     if census.len() > 0 -> return Err(jet_cli_debug_eval_refused("the compiler couldn't build it"))
     program.debug_level = held.level
-    jet_cli_debug_eval_native(program.move(), key, names, value, text, threads)
+    code := jet_cli_debug_eval_native(program.move(), key, names, value, text, threads) ?? return Err(err)
+    code.held = true
+    Ok(code)
 }
 
 // The built module `built`'s function `key`, the expression's, with the

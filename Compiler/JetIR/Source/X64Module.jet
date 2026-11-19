@@ -970,7 +970,9 @@ ir_x64_take_inputs: fn(inputs: Shared<IRX64Inputs>) -> IRX64Inputs {
 // IRModule.owned_attach, and a global symbol for each runtime provider hook
 // the program defines (IRModule.hooks), which the link binds the runtime's
 // calls of the hook to. `debug_info` false (the build option) leaves the
-// DWARF sections empty.
+// DWARF sections empty; true also names each of the program's own writable
+// cells by a global symbol (ir_debug_cell_exports), which a debugger's
+// evaluation addresses them by.
 ir_x64_object: fn(compiled: &&IRX64Result, debug_info: Bool) -> X64ExecutableResult Never! {
     owned := compiled.move()
     functions := [X64CompiledFunction]{}
@@ -981,6 +983,7 @@ ir_x64_object: fn(compiled: &&IRX64Result, debug_info: Bool) -> X64ExecutableRes
     loop hook in compiler_take_rows<IRLibraryExport>(owned.program.hooks) {
         exports.push(X64RuntimeExport{function: X64FunctionID{value: hook.function}, symbol: hook.symbol})
     }
+    cells: if debug_info -> ir_debug_cell_exports(owned.program) else -> [X64DataExport]{}
     program: ir_x64_object_module(owned)
     threads: CompilerThreads{cap: owned.threads.cap, cores: owned.threads.cores, memory_available: owned.threads.memory_available}
     // What is left of the compile (its IR module above all) is read no more.
@@ -989,7 +992,7 @@ ir_x64_object: fn(compiled: &&IRX64Result, debug_info: Bool) -> X64ExecutableRes
     // drops here, after the object is written, as `owned` goes.
     ways: ir_x64_release_ways(owned.program, threads)
     if ways <= 1 {
-        return x64_object_functions_threads(program, functions, debug, exports, [X64DataExport]{}, threads, debug_info, false)
+        return x64_object_functions_threads(program, functions, debug, exports, cells, threads, debug_info, false)
     }
     released: Shared{IRX64Released{runs: [[IRFunction]]{}, rest: [IRX64Result]{}}}
     ir_x64_release_fill(released, owned, ways)
@@ -997,7 +1000,7 @@ ir_x64_object: fn(compiled: &&IRX64Result, debug_info: Bool) -> X64ExecutableRes
     task.group ir_x64_object_release {
         rest: task ir_x64_release_rest(released)
         dropped: task ir_x64_release_runs(released, -1)
-        objects.push(x64_object_functions_threads(program, functions, debug, exports, [X64DataExport]{}, threads, debug_info, false))
+        objects.push(x64_object_functions_threads(program, functions, debug, exports, cells, threads, debug_info, false))
         _: rest.join() ?? panic(compiler_threads_failure_text(err))
         _: dropped.join() ?? panic(compiler_threads_failure_text(err))
     }

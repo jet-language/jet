@@ -63,7 +63,12 @@ NativeEvalPart: struct {
 // at the first evaluation, against the `planned` fixes the program then
 // held. `refusal` says why, as a breakpoint's condition, it can't run in
 // the program itself (JetIR EvalPlace.jet), "" when it can
-// (NativePlace.jet).
+// (NativePlace.jet). A `held` evaluation was built alone against the
+// program's held check (JetCLI DebugCompile.jet
+// jet_cli_debug_eval_held_build), calling the functions the image holds
+// there: its own copies of the rest differ from the image's by the
+// whole-program return slots an O0 image keeps, so they say nothing of
+// whether the source is the program's (native_eval_refusal).
 NativeEval: struct {
     text: String,
     edit: NativeFixEdit,
@@ -73,6 +78,7 @@ NativeEval: struct {
     refusal: String{"nothing checked what it writes"},
     plan: NativeFixPlan?{None},
     planned: Int{-1},
+    held: Bool{false},
 }
 
 // An evaluated value: as Jet shows it (a String quoted), its Jet type, its
@@ -153,9 +159,10 @@ native_eval_word_captures: fn(compiled: Shared<NativeEval>) -> Bool Never! {
 // program's: a function it places that the program runs too, compiled
 // differently (`diff`, native_fix_diff), means the source is no longer the
 // program's. Code the expression doesn't reach is not asked: the
-// compile's whole-program choices may differ from the image's there. ""
-// when it can be placed.
+// compile's whole-program choices may differ from the image's there; nor
+// is a `held` evaluation's (NativeEval.held). "" when it can be placed.
 native_eval_refusal: fn(code: NativeEval, diff: NativeFixPlan, plan: NativeFixPlan) -> String Never! {
+    if code.held -> return ""
     changed := [Int:Bool]{}
     loop row in diff.changed -> changed[row] = true
     loop row in plan.changed {

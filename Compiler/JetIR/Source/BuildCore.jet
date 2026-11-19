@@ -38,7 +38,7 @@
 // image's, or jet_core.o's in a full link (JetCLI Host.jet).
 use {
     jet_backend.[X64DataExport]
-    jet_foundation.[CompilerThreads, DeclTable, FnBody, ModuleID, Span, SymbolTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_transfer_rows, foundation_byte_text, name_rows_get_text, name_rows_sorted, name_rows_value, sha256_bytes, sha256_hex_bytes]
+    jet_foundation.[CompilerThreads, DeclTable, FnBody, ModuleID, Span, SymbolTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_transfer_rows, foundation_byte_text, name_rows_get_text, name_rows_set, name_rows_sorted, name_rows_value, sha256_bytes, sha256_hex_bytes]
     jet_sema.[SemaCheckedForeignFunction]
 }
 
@@ -149,6 +149,39 @@ ir_core_symbol: fn(key: String) -> String Never! { ir_core_symbol_in(IR_CORE_FUN
 // The symbol of the Core cell keyed `key` in IRModule.constant_rows.
 ir_core_cell_symbol: fn(key: String) -> String Never! {
     ir_core_symbol_in(IR_CORE_CELL_PREFIX, key)
+}
+
+// The prefix of the symbols a debuggable image names its own writable
+// cells by (ir_debug_cell_exports).
+IR_DEBUG_CELL_PREFIX: "jet_debug_cell_"
+
+// The data symbols of a debuggable image's own writable cells
+// (ir_core_cell_key; a Core cell of the runtime image the program binds,
+// IRModule.core_cells, is the image's): each under the ir_core_symbol_in
+// of IR_DEBUG_CELL_PREFIX and its key, but for a symbol two keys make. A
+// debugger's evaluation, built apart from the image, addresses the cells
+// the program runs by them (ir_debug_cells_bind).
+ir_debug_cell_exports: fn(m: IRModule) -> [X64DataExport] Never! {
+    named := [X64DataExport]{}
+    counts := [String:Int]{}
+    loop cell in name_rows_sorted(m.constant_rows) {
+        if cell.local < 0 || !ir_core_cell_key(cell.key) || m.core_cells.get(cell.local) != None {
+            next
+        }
+        symbol: ir_core_symbol_in(IR_DEBUG_CELL_PREFIX, cell.key)
+        counts[symbol] = (counts.get(symbol) ?? 0) + 1
+        named.push(X64DataExport{data: cell.local, symbol: symbol})
+    }
+    loop export in named.move() if counts.get(export.symbol) == Val(1) -> export
+}
+
+// Names the running image's own writable cells for an evaluation's
+// (IRModule.core_cells) by the symbols the image exports them under
+// (ir_debug_cell_exports), so the evaluation reads and writes the
+// program's cell, not a copy. An image that holds no such symbol refuses
+// the evaluation's placement.
+ir_debug_cells_bind: fn(m: &IRModule) Never! {
+    loop export in ir_debug_cell_exports(m) -> m.core_cells[export.data] = export.symbol
 }
 
 // `prefix`, then `text` made a C identifier (each byte outside [0-9A-Za-z]
@@ -631,6 +664,24 @@ ir_core_cells_bind: fn(m: &IRModule, image: IRCoreImage) Never! {
     assert(ir_core_symbol("core.text.split") != ir_core_symbol("core.text.split"), "keys that spell the same identifier get different symbols")
     assert_eq(ir_core_symbol("core.text.split"), one)
     assert(ir_core_cell_symbol("storage:core.log.level").starts_with("jet_core_cell_storage_core_log_level_"), "a cell's symbol spells its key")
+}
+
+#Test("a debuggable image names its own writable cells, and an evaluation binds them by those names") {
+    m := ir_module_new()
+    name_rows_set(m.constant_rows, "storage:app.count", 0)
+    name_rows_set(m.constant_rows, "storage:app.level", 1)
+    name_rows_set(m.constant_rows, "const:app.limit", 2)
+    m.core_cells[1] = ir_core_cell_symbol("storage:app.level")
+    exports: ir_debug_cell_exports(m)
+    count: ir_core_symbol_in(IR_DEBUG_CELL_PREFIX, "storage:app.count")
+    assert_eq(exports.len(), 1)
+    assert_eq(exports[0].data, 0)
+    assert_eq(exports[0].symbol, count)
+    assert(count.starts_with("jet_debug_cell_storage_app_count_"), "a cell's symbol spells its key: {count}")
+    ir_debug_cells_bind(m)
+    assert_eq(m.core_cells.get(0), Val(count))
+    assert_eq(m.core_cells.get(1), Val(ir_core_cell_symbol("storage:app.level")))
+    assert_eq(m.core_cells.get(2), None)
 }
 
 #Test("a bound program finds each Core export row by its symbol in the sorted list") {
