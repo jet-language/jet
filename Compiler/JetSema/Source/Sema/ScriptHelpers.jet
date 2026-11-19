@@ -129,11 +129,14 @@ sema_script_probe_check: fn(probe: &SemaScriptProbe, name: String) -> FnBody? {
 
 // A function no registration holds, checked by a probe
 // (sema_script_probe_check_func): its checked body, None when the check
-// couldn't make one, the check's reports, and whether it finished.
+// couldn't make one, the check's reports, whether it finished, and what its
+// body propagates (SemaFunctionFailureFacts), which no failure solve reads:
+// the body keeps its declared carrier (sema_eval_held_failure_settle).
 SemaScriptProbeChecked: struct {
     function: FnBody?,
     diagnostics: [Diagnostic],
     complete: Bool,
+    failure: SemaFunctionFailureFacts?{None},
 }
 
 // `func`, a top-level function of the probe's module that no registration
@@ -175,7 +178,7 @@ sema_script_probe_check_func: fn(probe: &SemaScriptProbe, func: Func) -> SemaScr
     function.effects.call_edges = edges.move()
     function.effects.direct_spans = spans.move()
     function.effects.maximal = maximal
-    SemaScriptProbeChecked{function: Val(function.move()), diagnostics: diagnostics, complete: checked.complete}
+    SemaScriptProbeChecked{function: Val(function.move()), diagnostics: diagnostics, complete: checked.complete, failure: checked.failure.move()}
 }
 
 // The row of the top-level function `name` among an entry file's items.

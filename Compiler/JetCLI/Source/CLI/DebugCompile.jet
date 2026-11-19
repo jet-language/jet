@@ -711,11 +711,11 @@ jet_cli_debug_eval_native: fn(built: &&IRModule, key: String, names: [String], v
     program.kept.push(added)
     selected: ir_x64_compile_module_logged(program, threads, [String]{})
     if selected.errors.len() > 0 {
-        return Err(jet_cli_debug_eval_refused("the compiler couldn't build it"))
+        return Err(jet_cli_debug_eval_refused("the compiler couldn't build it: {selected.errors[0]}"))
     }
     lowered: ir_x64_debug_program(selected)
     if lowered.errors.len() > 0 {
-        return Err(jet_cli_debug_eval_refused("the compiler couldn't build it"))
+        return Err(jet_cli_debug_eval_refused("the compiler couldn't build it: {lowered.errors[0]}"))
     }
     edit: NativeFixEdit{object: lowered.program.move(), functions: lowered.functions.move(), debug: lowered.debug.move()}
     Ok(NativeEval{text: text, edit: edit, entry: JET_CLI_DEBUG_EVAL_ENTRY, captures: captures, result: part, refusal: refusal})

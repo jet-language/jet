@@ -1057,11 +1057,20 @@ ir_x64_debug_program: fn(compiled: &&IRX64Result) -> IRX64Program Never! {
 
 // The object's functions of `owned` into `functions`, with their debug rows
 // into `debug`: `main` for its entry function (x64_object_main), then the
-// compiled functions it or a kept root reaches (ir_x64_reached_only). Else
-// why there are none: the compile's errors, or an entry `main` can't run.
+// compiled functions it or a kept root reaches (ir_x64_reached_only). A
+// module with no entry but kept roots, a debugger's held evaluation
+// (JetIR Build.jet ir_build_held_root), has no `main`: its functions are
+// those its kept roots reach. Else why there are none: the compile's
+// errors, or an entry `main` can't run.
 ir_x64_main_rows: fn(owned: &IRX64Result, functions: &[X64CompiledFunction], debug: &[X64FunctionDebug]) -> [String] Never! {
     if owned.errors.len() > 0 -> return compiler_take_rows<String>(owned.errors)
     entry: owned.program.entry
+    if entry < 0 && owned.program.kept.len() > 0 {
+        debug.extend(compiler_take_rows<X64FunctionDebug>(owned.debug))
+        functions.extend(compiler_take_rows<X64CompiledFunction>(owned.functions))
+        ir_x64_reached_only(functions, debug, owned.program.kept, false)
+        return [String]{}
+    }
     if entry < 0 || entry >= owned.program.functions.len() {
         return [String]{"entry function {entry} is not in the module"}
     }
@@ -1073,17 +1082,17 @@ ir_x64_main_rows: fn(owned: &IRX64Result, functions: &[X64CompiledFunction], deb
     debug.extend(compiler_take_rows<X64FunctionDebug>(owned.debug))
     functions.push(main.move())
     functions.extend(compiler_take_rows<X64CompiledFunction>(owned.functions))
-    ir_x64_reached_only(functions, debug, owned.program.kept)
+    ir_x64_reached_only(functions, debug, owned.program.kept, true)
     [String]{}
 }
 
 // Keeps the rows of `functions` (with their `debug` rows) whose function the
-// first row, `main`, or a `dead_code: keep` root (`roots`, IRModule.kept)
-// reaches through function relocations. The optimizer keeps every body it
-// inlined (ir_optimize_module), so a function whose calls were all inlined
-// has none left; a program object is one `.text`, which the static link
-// keeps whole, so its dead functions go here.
-ir_x64_reached_only: fn(functions: &[X64CompiledFunction], debug: &[X64FunctionDebug], roots: [Int]) Never! {
+// first row, `main` when `main` holds, or a `dead_code: keep` root (`roots`,
+// IRModule.kept) reaches through function relocations. The optimizer keeps
+// every body it inlined (ir_optimize_module), so a function whose calls were
+// all inlined has none left; a program object is one `.text`, which the
+// static link keeps whole, so its dead functions go here.
+ir_x64_reached_only: fn(functions: &[X64CompiledFunction], debug: &[X64FunctionDebug], roots: [Int], main: Bool) Never! {
     if functions.len() != debug.len() {
         panic("the object writer has {functions.len()} functions and {debug.len()} debug rows")
     }
@@ -1101,8 +1110,11 @@ ir_x64_reached_only: fn(functions: &[X64CompiledFunction], debug: &[X64FunctionD
     loop (index, function) in functions {
         if function.id.value >= -1 -> id_rows[function.id.value + 1].push(index)
     }
-    work := [Int]{functions[0].id.value}
-    reached[functions[0].id.value + 1] = true
+    work := [Int]{}
+    if main && functions.len() > 0 {
+        work.push(functions[0].id.value)
+        reached[functions[0].id.value + 1] = true
+    }
     loop id in roots {
         if id + 1 < 0 || id + 1 >= reached.len() || reached[id + 1] -> next
         reached[id + 1] = true
