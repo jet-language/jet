@@ -269,7 +269,7 @@ compile_program: fn(pattern: String, flags: RegexFlags, with_dfa: Bool) -> Regex
     // Case folding lets other scalars stand for a literal, so the literal
     // pre-checks only run on case-sensitive patterns.
     facts: if flags.ignore_case -> no_facts() else -> literal_facts(p.nodes, p.kids, root)
-    c := Compiler{
+    c := PatternCompiler{
         nodes: p.nodes,
         kids: p.kids,
         ops: [Int]{},
@@ -1152,7 +1152,9 @@ Frag: struct {
     outs: [Int],
 }
 
-Compiler: struct {
+// Not named `Compiler`: a program that loads this module would see this
+// type under that name instead of the build's `Compiler` type.
+PatternCompiler: struct {
     nodes: [Node],
     kids: [Int],
     ops: [Int],
@@ -1334,7 +1336,7 @@ exact_facts: fn(text: [Int]) -> LitFacts Never! {
     LitFacts{exact: true, text: text.copy(), prefix: text.copy(), best: text.copy()}
 }
 
-// Recursion follows group and quantifier nesting, as `Compiler.compile` does.
+// Recursion follows group and quantifier nesting, as `PatternCompiler.compile` does.
 literal_facts: fn(nodes: [Node], kids: [Int], node: Int) -> LitFacts Never! {
     n: nodes[node].copy()
     if n.kind == N_LIT -> return exact_facts([Int]{n.a})

@@ -58,10 +58,12 @@ run: fn() {
         loop i in 0..<n -> cleared += unit_text(i)
         // `joined` shares `left`'s text, so its `+=` builds a fresh one.
         joined := left.to_string()
+        interpolated: "{left}{right}"
         joined += right
         kept: grown.to_string()
         grown += "!"
-        routes: [String]{kept, joined, "{left}{right}", parts.join(""), split, whole.slice(0, n), cleared, kept.to_string(), grown}
+        clone: kept.to_string()
+        routes: [String]{kept, joined, interpolated, parts.join(""), split, whole.slice(0, n), cleared, clone, grown}
         bang := [U8]{}
         loop byte in model -> bang.push(byte)
         bang.push("!".bytes()[0])

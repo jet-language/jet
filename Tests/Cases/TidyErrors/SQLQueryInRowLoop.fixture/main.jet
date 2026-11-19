@@ -1,0 +1,21 @@
+// A SELECT run once for every row of a loop over database rows: N rows cost
+// N + 1 queries (L0308).
+package: {
+    name: "sql_query_in_row_loop_build"
+    authority: { allow: [DB, DB.Read, DB.Write, IO, Mem.Alloc, Time.Wait] }
+}
+
+use db: core.db
+
+run: fn() {
+    conn: db.open_memory()
+    policy: db.policy("orders", "true") ?? panic("policy")
+    scoped: conn.with_policy(policy, "owner")
+    db.migrate(scoped, "shop-v1", [SQL{"CREATE TABLE orders (id INTEGER PRIMARY KEY, customer INTEGER)"}, SQL{"CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT)"}]) ?? panic("migrate")
+    orders: scoped.query(SQL{"SELECT id, customer FROM orders"}) ?? panic("orders")
+    loop order in orders {
+        customer: db.row_int(order, "customer") ?? panic("customer")
+        names: scoped.query(SQL{"SELECT name FROM customers WHERE id = {customer}"}) ?? panic("names")
+        print(names.len())
+    }
+}

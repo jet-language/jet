@@ -25,7 +25,7 @@ run: fn() {
         else -> {}
     }
     loop mode in ["user", "defect"] {
-        receipt: process.run_spec(process.cmd([exe, mode])) ?? panic("relaunching {exe} failed")
+        receipt: process.run_spec(process.cmd([exe.copy(), mode.copy()])) ?? panic("relaunching {exe} failed")
         print("{mode}: exit {receipt.code}")
     }
 }

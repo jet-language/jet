@@ -110,6 +110,9 @@ use {
         sema_core_bound_counters,
         sema_core_seal_offered,
         sema_core_source_lint,
+        SemaLintAllowance,
+        sema_lint_allowances,
+        sema_lint_allowed,
         sema_finalize_bodies,
         sema_finalize_bodies_empty,
         sema_finalize_demand,
@@ -473,7 +476,11 @@ jet_driver_compile_result: fn(
     shown := [Diagnostic]{}
     advice := [Diagnostic]{}
     loop diagnostic in summarized.move() {
-        if diagnostic_is_report(diagnostic) -> advice.push(diagnostic) else -> shown.push(diagnostic)
+        if diagnostic_is_report(diagnostic) {
+            advice.push(diagnostic)
+            next
+        }
+        shown.push(diagnostic)
     }
     JetDriverCompileResult{
         diagnostics: shown,
@@ -6458,13 +6465,30 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     if failed_stage != None && !kg.enabled {
         return jet_driver_doc_failure(jet_driver_compile_result(load, load.diagnostics, failed_stage, false, trace), request.mode, Val(checked_graph.names.structure_facts))
     }
-    // A plain check and a program compile list the L2511 tidy errors of the
-    // hidden copies a loop repeats (CostQueries.jet): `jet check` and `jet
-    // build` fail on them, and `jet run` and `jet dev` never stop for one. A
-    // check that keeps its cost report lists its L2510 lints instead (below).
-    if (request.mode == JetDriverCompileMode.Check && !request.capture_cost_report) || request.mode == JetDriverCompileMode.Program {
-        loop lint in jet_driver_cost_copy_lints(load, checked_functions) {
-            load.diagnostics.push(lint)
+    // A check and a program compile list the tidy errors the driver finds
+    // over the checked functions: `jet check` and `jet build` fail on them,
+    // and `jet run` and `jet dev` never stop for one. These are the L0308
+    // SELECTs run once per row of a loop over database rows (SQLRowLoop.jet)
+    // and, unless a check keeps its cost report and lists its L2510 lints
+    // instead (below), the L2511 hidden copies a loop repeats
+    // (CostQueries.jet). One inside a site `#Allow` for it is the author's
+    // recorded decision, as for sema's lints (LintAllowances.jet).
+    if request.mode == JetDriverCompileMode.Check || request.mode == JetDriverCompileMode.Program {
+        tidy := [Diagnostic]{}
+        if !request.capture_cost_report {
+            tidy = jet_driver_cost_copy_lints(load, checked_functions)
+        }
+        loop lint in jet_driver_sql_row_loop_lints(load, checked_functions, registration_graph.symbols) {
+            tidy.push(lint)
+        }
+        allowances := [SemaLintAllowance]{}
+        if tidy.len() > 0 {
+            loop module_index in 0..<registration_graph.modules.len() {
+                sema_lint_allowances(registration_graph.modules[module_index].program, registration_graph.modules[module_index].source_segments, allowances)
+            }
+        }
+        loop lint in tidy.move() {
+            if !sema_lint_allowed(lint, allowances) -> load.diagnostics.push(lint)
         }
     }
     // `jet check` stops before lowering: no C export rows, no Core
@@ -6528,9 +6552,6 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
             cost_report = Val(report.move())
             jet_driver_trace_step_end(request.trace_sink, "driver.check.cost", cost_cover.covered.len())
         }
-        // Every check lists the L0308 tidy errors of the SELECTs run once
-        // per row of a loop over database rows.
-        loop lint in jet_driver_sql_row_loop_lints(load, checked_functions, registration_graph.symbols) -> load.diagnostics.push(lint)
         jet_driver_trace_step_begin(request.trace_sink, "driver.check.facts")
         result := jet_driver_compile_result(load, load.diagnostics, None, true, trace)
         result.eval_answers = jet_driver_eval_answers(registration_graph)

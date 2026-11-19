@@ -118,6 +118,19 @@ no_nix_tool: fn(argv: [String], host_path: String) {
     if status != 0 -> no_nix_fail("{argv.join(" ")} exited {status}")
 }
 
+// `to` becomes a recursive bind of `from` that receives the host's later
+// mounts and never sends its own back. Each spawned mount owns its argv, so
+// the mount path and `to` are copied once per call.
+no_nix_rbind: fn(mount_real: String, from: String, to: String, host_path: String) {
+    no_nix_tool([mount_real, "--rbind", from, to], host_path)
+    no_nix_tool([mount_real, "--make-rslave", to], host_path)
+}
+
+// `to` becomes a bind of `from`, as no_nix_rbind runs its mount.
+no_nix_bind: fn(mount_real: String, from: String, to: String, host_path: String) {
+    no_nix_tool([mount_real, "--bind", from, to], host_path)
+}
+
 // `readlink -f`, or "" for a path that does not resolve.
 no_nix_real: fn(path: String) -> String { files.canonicalize(path) ?? "" }
 
@@ -232,14 +245,12 @@ no_nix_inner: fn(args: [String]) -> Never {
     loop path in ["/nix", host_nix, files.join(stage, "store"), files.join(stage, "usr/bin")] {
         files.create_dir_all(path) ?? no_nix_fail("mkdir {path}: {err}")
     }
-    no_nix_tool([mount_real, "--rbind", "/nix", host_nix], host_path)
-    no_nix_tool([mount_real, "--make-rslave", host_nix], host_path)
+    no_nix_rbind(mount_real, "/nix", host_nix, host_path)
     loop root in roots {
         name: files.basename(root)
         staged: files.join(files.join(stage, "store"), name)
         files.create_dir_all(staged) ?? no_nix_fail("mkdir {staged}: {err}")
-        no_nix_tool([mount_real, "--rbind", files.join(files.join(host_nix, "store"), name), staged], host_path)
-        no_nix_tool([mount_real, "--make-rslave", staged], host_path)
+        no_nix_rbind(mount_real, files.join(files.join(host_nix, "store"), name), staged, host_path)
     }
     library_dirs := [String]{}
     loop root in roots {
@@ -251,7 +262,7 @@ no_nix_inner: fn(args: [String]) -> Never {
     library_path: library_dirs.join(":")
     loop i in 0..<count {
         if pairs[2 * i + 1] != "" {
-            no_nix_tool([mount_real, "--bind", pairs[2 * i + 1], pairs[2 * i]], host_path)
+            no_nix_bind(mount_real, pairs[2 * i + 1], pairs[2 * i], host_path)
         }
     }
     no_nix_trust_store(bootstrap, mount_real, host_path)

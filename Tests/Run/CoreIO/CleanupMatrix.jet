@@ -102,7 +102,7 @@ run: fn() CaseFail! {
     args: process.args()
     if args.len() > 0 -> return child(args.get(0) ?? "")
     loop path in ["return", "error", "panic", "cancel", "exit", "stop"] {
-        spec: process.cmd([os.executable(), path]).stdout(.Capture).stderr(.Capture)
+        spec: process.cmd([os.executable(), path.copy()]).stdout(.Capture).stderr(.Capture)
         receipt: process.run_spec(spec) ?? panic("child {path} did not start")
         print("== {path}: exit {receipt.code}")
         loop line in process.stdout_lines(receipt) -> print("   {line}")

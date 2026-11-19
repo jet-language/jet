@@ -29,6 +29,7 @@ use {
         jet_cli_build_query_failure,
         jet_cli_build_report,
         jet_cli_driver_request,
+        jet_cli_core_sources,
         jet_cli_native_session_at,
     ]
     jet_build_session.[
@@ -305,4 +306,24 @@ inspect_build_runtime_dir: fn() -> String {
     planned_graph: planned_query.graph ?? panic("checked plan lost graph")
     planned_plan: planned_query.plan ?? panic("checked plan lost plan")
     inspect_build_require(planned_graph.nodes == planned_query.nodes && build_plan_graph(planned_plan).nodes == planned_query.nodes, "same finished Core plan owns the compiler nodes")
+}
+
+// A program with no `build: fn` that marks a function `#Perf.Profiled` plans
+// with Core's handler run on it: the marked function's body, and no other,
+// is rewritten into a zone named after it, with no `authority` row asking.
+#Test("inspect_build profiled marker without build fn") {
+    scope := JetDriverBuildQueryScope{}
+    core: if jet_cli_core_sources("/inspect-build/main.jet") == {
+        .Loaded(sources) -> sources
+        .Missing(what, _) -> panic("the compiler under test has no Core: {what}")
+    }
+    marked := jet_cli_driver_request(inspect_build_request().authorized_sources, core, Val(1), JetDriverCompileMode.Doc)
+    marked.eval_config.native = Val(jet_cli_native_session_at(inspect_build_runtime_dir()) ?? panic("the compiler under test has no runtime pack"))
+    marked.authorized_sources.roots[0].files[0].source = "use perf: core.perf\n\n#Perf.Profiled step: fn(n: Int) -> Int {{\n    n + 1\n}}\n\nrun: fn() {{\n    print(step(1))\n}}\n"
+    response: jet_driver_query_build_plan(marked, scope)
+    query: response.query.move()
+    assert(query.complete && query.internal_problem == None && query.diagnostics.len() == 0, "a marked program with no build fn plans")
+    assert(query.generated.len() == 1 && query.generated[0].relative_path == ".jet/generated/main/rewrite_body/step.jet", "the one marked function is rewritten")
+    rewritten: query.generated[0].source
+    assert(rewritten.contains("use jet_profiled_zone: core.perf") && rewritten.contains("_zone: jet_profiled_zone.zone(\"step\")"), "the new body opens a zone named after the function through the import the build adds")
 }

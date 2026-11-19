@@ -3929,7 +3929,8 @@ the `jet perf run` timeline (observability.md).
 | `perf.progress(name)` | `Never!` | One pass of the progress point `name`, which `jet perf run --lens=causal` ranks lines by. |
 | `Perf` | type | A bounded fidelity value consumed by scaling operations. |
 | `Zone` | type | An open zone; its `Close` writes its row. |
-| `Profiled` | marker | Marks a function, method or package whose bodies a root build wraps in zones through `meta.rewrite_body`. |
+| `Profiled` | marker | Marks a function, method or package whose bodies `profile` wraps in zones named after each function. A program with no `build: fn` that holds a marked function, in its own package or a dependency, builds with `profile` run on it; no `authority` row asks for the rewrite, since the marker is the consent. |
+| `perf.profile(meta)` | `Unit` | The handler behind `Profiled`: on the `Compiler` value `meta`, wrap each checked function the marker reaches in a zone named after it (`meta.rewrite_body`). A `build: fn` calls it as `perf.profile(b.compiler(app))`. |
 | `PerfError` | `#Error` enum | D-PERF-ERR1=A. `OutOfRange(Float)` holds the rejected value. |
 
 ### `core.text` — UTF-8 text operations
@@ -7836,7 +7837,8 @@ A Query-class statement (D-SQL-CLASS1=A: one that starts with `SELECT` or
 `WITH`) run through a driver's `query`, `query_one` or `live` inside a
 `loop` over database rows, the `[String: DBValue]` rows a query returns or a
 table's `Query<T>`, is the tidy error L0308 (`sql_query_in_row_loop`) at
-the inner query: each row costs one more round trip, so N rows cost N + 1
+the inner query, which `jet check` and `jet build` list and fail on and `jet
+run` never stops for: each row costs one more round trip, so N rows cost N + 1
 queries. The fix names the batched form, one query before the loop through a
 `WHERE key IN (…)` list over the rows' keys, or a JOIN with the query that
 produced them. A query outside any loop, a write per row, and a statement the

@@ -283,10 +283,11 @@ kit_steps_capture_value: fn(words: [String], context: KitStepCtx, state: KitStep
         }
         if kind == "prefixed" {
             source: kit_steps_capture_subject(words[3], "", context, state) ?? return kit_steps_capture_failure("ERROR", "{err}")
+            lines: source.lines()
             loop index in 4..<words.len() {
                 if words[index] == "|" -> next
                 prefix: words[index]
-                loop line in source.lines() {
+                loop line in lines {
                     if line.starts_with(prefix) {
                         return kit_steps_capture_result(kit_steps_byte_slice(line, prefix.count_bytes(), line.count_bytes()))
                     }

@@ -584,7 +584,9 @@ in one pass:
 - **A tightened rule sweeps everything first.** A change that makes sema,
   a guard or a gate stricter is checked, before it lands, against every Jet
   source the rule can reach: Core, Compiler, Jetpack, Tools, Examples and every
-  Tests/ tree, case fixture and template. Every hit is fixed in the same batch.
+  Tests/ tree, case fixture and template. Every hit is fixed in the same
+  submission or in one it stacks on, never in a later cycle: the census builds
+  with a seed that lacks the new rule, so it cannot see the rule's hits.
   Checking only what the compiler build or one suite touches is a serial
   discovery.
 - **A failed gate is read whole.** When a release, chain or suite fails, read

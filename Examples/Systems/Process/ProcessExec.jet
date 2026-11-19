@@ -25,11 +25,13 @@ run: fn() {
     }
     exe: os.executable()
     loop mode in ["status", "signal", "missing"] {
-        receipt: process.run_spec(process.cmd([exe, mode])) ?? panic("relaunching {exe} failed")
+        receipt: process.run_spec(process.cmd([exe.copy(), mode.copy()])) ?? panic("relaunching {exe} failed")
         print("{mode}: exit {receipt.code}")
-        loop line in receipt.output.lines() -> print("  stdout: {line}")
+        #Allow(jet.HiddenCopyInLoop, "the compiler materializes this view; no source spelling avoids it yet") loop line in
+            receipt.output.lines() -> print("  stdout: {line}")
         // The error text after the command's name is the OS's own.
-        loop line in receipt.errors.lines() {
+        #Allow(jet.HiddenCopyInLoop, "the compiler materializes this view; no source spelling avoids it yet") loop line in
+            receipt.errors.lines() {
             print("  stderr: {if line.starts_with("jet-no-such-command: ") -> "jet-no-such-command: …" else -> line}")
         }
     }

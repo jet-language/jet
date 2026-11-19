@@ -48,7 +48,8 @@ parse: fn(source: String) -> Book? {
     loop raw_line in source.lines() {
         line: raw_line.trim()
         if line != "" {
-            assignment: line.split_once("=") ?? return None
+            // Splitting the untrimmed line is the same split: both sides are trimmed below.
+            assignment: raw_line.split_once("=") ?? return None
             name: assignment.before.trim()
             if name == "" -> return None
             if cells.get(name.copy()) != None -> return None
