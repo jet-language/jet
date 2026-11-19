@@ -240,13 +240,20 @@ so its pauses barely oversleep. A progress point counts passes: each closed zone
 its name, each finished task as `task`, each answered HTTP request as
 `request`, and each `core.perf.progress(name)`. Outside the lens these record nothing. At the
 end of each experiment the runtime writes its line, its wall time, the
-delay it inserted and each point's passes to the samples file. An
+delay it inserted and, for each point, its passes after its first one, the
+wall time from that first pass to its last and the delay inserted between
+them to the samples file. An
 experiment whose line the checked source does not name counts neither as
 a baseline nor toward any line. The trace
 keeps the predictions in its `causal` receipt section (type
 `JetPerfCausal`). For each point, a line's prediction is how much sooner
-each pass comes, 1 - (baseline rate / line rate), where the line's rate
-counts its passes over its wall time less its delay. Its interval is the
+each pass comes, 1 - (baseline rate / line rate), where a rate counts the
+passes after each experiment's first over the time from its first pass to
+its last, less the delay inserted meanwhile. Only that time counts because
+an experiment's line is the one the sample that starts it landed in, and
+which line runs depends on how far into a pass the program is: counted
+over the whole experiment, a line that tends to start just before a pass
+would get that pass nearly free. Its interval is the
 90% range of 200 deterministic bootstrap resamples. A line is ranked only
 with 6 experiments on it, 6 baselines and an interval no wider than 30
 points; the others are listed with the reason. When no line can be ranked,

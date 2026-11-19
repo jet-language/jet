@@ -134,7 +134,10 @@ def observed_hang():
         print("(the observed process, `{}`, found; it has run 2 s)".format(name))
         print()
         run([jet, "inspect", "live", "--attach", str(target), "--once"])
-    os.killpg(process.pid, signal.SIGKILL)
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass  # the probe ended on its own
     process.wait()
     print()
 

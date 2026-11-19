@@ -1,0 +1,28 @@
+# A first `print` that calls a program function, at a stop in the entry's
+# file, answers in under 250 ms on a program of 20,000 functions, as at a
+# stop outside it (first_print_nonentry_under_250ms.case). The image is
+# built where it is debugged, so its line table names the entry `./prog.jet`
+# under the compilation directory `.`; the stop's source is still the
+# snapshot's absolute prog.jet, so the package's sources are compiled cut to
+# the functions the expression reaches (DebugCompile.jet
+# jet_cli_debug_eval_sliced), not the program. Before, the two paths didn't
+# match and the print opened the held check of the whole program: 1,846 ms
+# (DebugLatency on the gate jet of p315).
+# The print reads `total`, 0 at the stop, and calls f_1(x) = (x + 1) % 1000.
+# gen/gen.jet writes prog.jet: run's first call, the stop, is line 100003.
+fixture: SecondPrintAnswersUnder100ms.fixture
+env: NO_COLOR=1
+step: jet run gen/gen.jet -- 20000
+exit: 0
+stdout: = ""
+session debug line: jet debug prog.jet
+env: PATH={work}/no-tools
+send debug: "break prog.jet:100003"
+send debug: "c"
+recv debug line until ~ "Breakpoint hit  prog.jet:100003  in run()" timeout 600s # the image builds and the program runs to the stop
+send debug: "print f_1(total)"
+recv debug line until ~ "f_1(total) = 1" within 250ms # the first print compiles only what it reaches
+send debug: "c"
+recv debug line until ~ "Program finished" timeout 600s # the evaluation left the program's run unchanged
+close debug
+exit: 0
