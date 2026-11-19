@@ -7,19 +7,19 @@ fixture: ReplayThreadsAcrossTiers.fixture
 env: NO_COLOR=1
 step: jet debug --replay=../tiers prog.jet
 exit: 2
-stderr: ~ "`--replay=../tiers` names no recording"
+stderr: ~ "`--replay=../tiers` names no recording" # the line that names the refusal or the result
 step: jet debug --replay=tiers prog.jet
 exit: 1
-stderr: ~ "no recording `.jet/replays/tiers.jetproof-replay`"
+stderr: ~ "no recording `.jet/replays/tiers.jetproof-replay`" # the line that names the refusal or the result
 stdout: !~ "joined" # nothing ran
 step: jet run -O2 --record=tiers prog.jet
 exit: 0
 copy: plain.src prog.jet
 step: jet debug --replay=tiers prog.jet
 exit: 2
-stderr: ~ "can't replay its recording"
-stderr: ~ "has no observation start"
+stderr: ~ "can't replay its recording" # the line that names the refusal or the result
+stderr: ~ "has no observation start" # the line that names the refusal or the result
 stdout: !~ "plain" # nothing ran
 step: jet debug --record=other prog.jet
 exit: any
-stderr: ~ "`jet debug --record` is not built yet"
+stderr: ~ "`jet debug --record` is not built yet" # the line that names the refusal or the result

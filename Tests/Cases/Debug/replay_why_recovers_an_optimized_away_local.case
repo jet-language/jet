@@ -10,13 +10,13 @@ fixture: ReplayReverse.fixture
 env: NO_COLOR=1
 step: jet run -O2 --record=fast prog.jet
 exit: 0
-stdout: ~ "total 6 tally "
+stdout: ~ "total 6 tally " # the program's own output among the session's
 step: jet build -O2 prog.jet
 exit: 0
 step: jet debug --replay=fast {work}/.jet/build/prog --break prog.jet:21
 stdin: replay_why_recovers_an_optimized_away_local.stdin
 exit: 0
 stdout: ~ "(Jet) why d\nd = 2 (recovered from the -O0 replay), set at prog.jet:20 in run() (task 1)\n" # the -O0 replay's write of `d`, labeled
-stdout: ~ "Program finished\n"
+stdout: ~ "Program finished\n" # the session runs the program to its end
 stdout+stderr: !~ "replay diverged"
 stdout+stderr: !~ "didn't"

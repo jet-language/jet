@@ -571,12 +571,13 @@ walk is conservative, so it holds at least what the typed pointers reach,
 without reading the image's types in the stop. It holds at most 32 MiB of
 that memory, in the order it reaches it; past that budget the rest is cut
 off, and the dump lists each range it cut off. The stopping thread's
-registers are its own; each other thread is interrupted by a real-time
-signal (62), records its task and registers, and waits until the dump is
-written, so its stack is the one its registers name; a parked or queued
-task's registers are the ones its last switch saved. A thread that does not
-answer within 200ms is left out. Every `core.crypto.Secret`'s bytes are
-zeroed before the write.
+registers are its own, every general register as it sends itself the
+real-time signal 62 from the dump; each other thread is interrupted by
+that signal, records its task and every general register, and waits until
+the dump is written, so its stack is the one its registers name; a parked
+or queued task's registers are the callee-saved ones its last switch
+saved. A thread that does not answer within 200ms is left out. Every
+`core.crypto.Secret`'s bytes are zeroed before the write.
 
 `jet debug <file>.jetdump` opens a dump behind the `(Jet)` console: `Dump of
 process <pid>, <n> flight events`, then `Memory: <n> bytes held, within
@@ -705,9 +706,10 @@ D-DBG-VERBS1=A names the commands:
 - `log <file:line> "<text with {expr}>"` sets a logpoint. It prints its
   message with each `{expr}` filled in, then the program runs on.
 - `watch <place>` stops at each write that changes a local of the selected
-  frame, or a field path under one (`watch order.total`). The stop names
-  the line that wrote it and shows `total: 0 -> 2`. A write that leaves the
-  value as it was runs on.
+  frame, a field path under one (`watch order.total`), or an item of a List
+  at a literal index (`watch xs[3]`, `watch order.lines[0]`). The stop
+  names the line that wrote it and shows `total: 0 -> 2`. A write that
+  leaves the value as it was runs on.
 - `breaks` lists the breakpoints and watches by number, as `  2 break
   cart.jet:88 if total < 0` and `  3 watch total`; `delete <n>` removes one.
 - `frame <n>` selects a frame as `backtrace` (`bt`) numbers it. `up` moves
@@ -743,10 +745,16 @@ return address), a call the compiler made for a node (a lambda that a
 lowered `map` calls) included, so the expression is checked just before that
 node; `bt` shows the frame at that line, and the adapter's `stackTrace` at
 that line and column. A row names where the node starts, so two calls of one
-chain that start together share a row. The program is
-compiled again with that function, which runs in a fork of the stopped
-program, placed as `fix` places code, with the locals' bytes read from the
-frame; the program itself neither runs nor changes. A value whose type has a
+chain that start together share a row. The program is compiled again at
+the optimization level of its build, which the image's debug information
+names (`Jet native backend (O2)`), so the code around the expression is the
+code the program runs, with that function, which runs in a fork of the
+stopped program, placed as `fix` places code, with the locals' bytes read
+from the frame; the program itself neither runs nor changes. `fix` compiles
+at that level too. An inlined frame is evaluated in as `bt` shows it: the
+expression is checked in the inlined function at its line, the frame it was
+inlined into at the call, and the locals are the frame's own; code inlined
+from another file is refused, since its lines are not that file's. A value whose type has a
 `debug_view` shows as `locals` shows it, the view run in that same fork. A
 compiled expression is kept per line, column and text, so a condition compiles once
 and runs in a fork at each hit. The fork runs the program's own runtime, so
@@ -755,9 +763,8 @@ takes it fails at the 2 s budget), and a function value runs the image's
 code. An expression that calls a function that can fail shows its result as
 `locals` shows a fallible result, `parse(s) = Ok(3)` or `Err(ParseError.Empty)`,
 so a condition that can fail is refused, not a Bool. An expression reads at
-most 5 locals, and an inlined frame is not evaluated in. A local's own name
-is no expression: `print total` shows the local as `locals` does, in an
-inlined frame and in a dump, and a dump runs no code.
+most 5 locals. A local's own name is no expression: `print total` shows the
+local as `locals` does, in a dump too, and a dump runs no code.
 
 A watch on a place in memory takes the CPU's debug registers (at most 4,
 each an aligned 1, 2, 4 or 8 bytes), so the program runs at full speed
@@ -766,12 +773,17 @@ to trap: its watch single-steps that frame's own code, comparing the
 register after each instruction, while the calls it makes run at full
 speed (they restore the register before they return). One such watch is
 active at a time. A watch covers the place's own bytes: for a list, its
-length and buffer, not the items. A watch on a frame's local ends when
-that frame returns; the next stop says so. Every thread gets the watch's
-debug registers, so a write from any thread stops; a watch on a register
-local follows the thread whose frame holds it. A Float held in a vector
-register can't be watched. Globals can't be watched yet, because the debug
-information has no global variables.
+length and buffer, not the items; `watch xs[3]` covers one item. An item's
+watch also takes a debug register on the List's buffer pointer, so when
+the List grows past its capacity (or a write copies a shared buffer) and
+moves to a new buffer, the watch moves to the same item there; the copy
+leaves the item's value as it was, so the move runs on. If the List lets go
+of its buffer, the watch ends and the next stop says so. A watch on a
+frame's local ends when that frame returns; the next stop says so. Every
+thread gets the watch's debug registers, so a write from any thread stops;
+a watch on a register local follows the thread whose frame holds it. A
+Float held in a vector register can't be watched. Globals can't be watched
+yet, because the debug information has no global variables.
 
 ## Recorder boundary
 

@@ -10,15 +10,15 @@ step: jet run -O2 --record=tiers prog.jet
 exit: 0
 stdout: ~ "worker 3 saw tally " # the workers' lines reach stdout live
 stdout: ~ "joined 12 rounds, tally 12\n" # and the run ends as it does unrecorded
-stderr: ~ "jet run: recorded replay `.jet/replays/tiers.jetproof-replay`"
+stderr: ~ "jet run: recorded replay `.jet/replays/tiers.jetproof-replay`" # the line that names the refusal or the result
 file: .jet/replays/tiers.jetproof-replay is-file
 step: jet run -O2 --record=tiers prog.jet
 exit: 1
-stderr: ~ "the recording `.jet/replays/tiers.jetproof-replay` already exists"
+stderr: ~ "the recording `.jet/replays/tiers.jetproof-replay` already exists" # the line that names the refusal or the result
 stdout: !~ "joined" # refused before the program runs
 step: jet run --record prog.jet
 exit: 2
-stderr: ~ "`--record` needs a NAME"
+stderr: ~ "`--record` needs a NAME" # the line that names the refusal or the result
 step: jet dev --record=other prog.jet
 exit: any
-stderr: ~ "`jet dev --record` is not built yet"
+stderr: ~ "`jet dev --record` is not built yet" # the line that names the refusal or the result

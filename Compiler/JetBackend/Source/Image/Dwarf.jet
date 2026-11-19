@@ -815,7 +815,9 @@ dwarf_info: fn(sections: &X64DwarfSections, program: X64ObjectModule, functions:
     dwarf_section_offset(info, relas, symbols.abbrev, 0)
     paths: program.debug.files
     dwarf_uleb(info, DWARF_ABBREV_UNIT)
-    dwarf_string(info, "Jet native backend (O0)")
+    // The producer names the optimization level, which a debugger compiles
+    // its expressions at (JetDebug NativeFacts.jet native_producer_level).
+    dwarf_string(info, "Jet native backend (O{program.debug.level})")
     // DW_LANG_C11: the closest registered language whose expression syntax
     // (`p.x`, `*p`, `p->x`) reads Jet values.
     elf64_u16(info, 0x1d)

@@ -12,13 +12,13 @@ exit: 0
 copy: lockless.src prog.jet
 step: jet debug --replay=tiers prog.jet
 exit: 0
-stdout: ~ "replay diverged at sync event "
+stdout: ~ "replay diverged at sync event " # the divergence report among the session's output
 stdout: ~ ": recorded edit of Shared value 1 by task 3, got send on channel 1 by task 3" # task 3's first event, not a later one
-stdout: ~ "Program finished with exit status 70\n"
+stdout: ~ "Program finished with exit status 70\n" # the session runs the program to its end
 stdout: !~ "joined 12 rounds" # the run stopped at the divergence
 step: jet build -O2 prog.jet
 exit: 0
 step: jet debug --replay=tiers {work}/.jet/build/prog
 exit: 0
-stdout: ~ ": recorded edit of Shared value 1 by task 3, got send on channel 1 by task 3"
-stdout: ~ "Program finished with exit status 70\n"
+stdout: ~ ": recorded edit of Shared value 1 by task 3, got send on channel 1 by task 3" # the divergence report among the session's output
+stdout: ~ "Program finished with exit status 70\n" # the session runs the program to its end

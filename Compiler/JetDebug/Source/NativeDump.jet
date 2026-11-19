@@ -2,12 +2,13 @@
 // ends the process (JetRuntime PerfSamples.jet perf_flight_dump), opened as
 // a session that never runs. Its words: NATIVE_DUMP_MAGIC, the version, the
 // pid, the Unix time, the load bias, the stopped thread's rip, rsp and rbp
-// as its caller resumes, its tid and the image's byte count; the image
-// itself, padded to a word; then sections of [kind, address, bytes] each
-// padded to a word: the flight ring's records, every task's registers, a
-// range of the memory the stop reaches (every thread's and task's stack,
-// the globals, and what their words point to, within the dump's budget),
-// the ranges reached but cut off past that budget, and the end. The
+// where it captured itself (or as its caller resumes), its tid and the
+// image's byte count; the image itself, padded to a word; then sections of
+// [kind, address, bytes] each padded to a word: the flight ring's records,
+// every task's registers, a range of the memory the stop reaches (every
+// thread's and task's stack, the globals, and what their words point to,
+// within the dump's budget), the ranges reached but cut off past that
+// budget, and the end. The
 // image's loaded segments stand for the code and read-only data the dump
 // does not copy, so `bt`, `locals` and `print` read the stop, or the task
 // `task N` selects, as they read a live one, a value cut off showing as
@@ -21,7 +22,7 @@ use {
 // "JETDUMP1", the dump's first word.
 NATIVE_DUMP_MAGIC: 3553425134609253706
 
-NATIVE_DUMP_VERSION: 2
+NATIVE_DUMP_VERSION: 3
 
 // The words before the image.
 NATIVE_DUMP_HEADER: 10
@@ -42,8 +43,16 @@ NATIVE_DUMP_SECTION_TASKS: 3
 NATIVE_DUMP_SECTION_CUT: 4
 
 // A task row's words: its task's id, how its registers were had, its rip,
-// rsp and rbp, and its thread's tid (0 for a parked task's).
-NATIVE_DUMP_TASK_WORDS: 6
+// rsp and rbp, its thread's tid (0 for a parked task's), which of its
+// general registers are known (bit k for the k-th), then
+// NATIVE_DUMP_GENERAL general registers as the kernel orders them (r15
+// first, rdi the last), 0 for one not known.
+NATIVE_DUMP_TASK_WORDS: 22
+
+NATIVE_DUMP_GENERAL: 15
+
+// The known mask of a stop that could not capture itself: rbp alone.
+NATIVE_DUMP_KNOWN_RBP: 16
 
 // How a task's registers were had: the stopping thread's own, a running
 // thread's the stop interrupted, or a parked or queued task's that its
@@ -80,7 +89,9 @@ NativeDump: struct {
 
 // One task of a dump: its id (0: a thread outside every task, the stop's
 // own alone), how its registers were had (NATIVE_DUMP_TASK_STOPPED and
-// on), its rip, rsp and rbp, and its thread's tid, 0 for a parked task.
+// on), its rip, rsp and rbp, its thread's tid, 0 for a parked task, its
+// general registers as the kernel orders them and which of them are known
+// (bit k for the k-th).
 NativeDumpTask: struct {
     id: Int,
     how: Int,
@@ -88,6 +99,8 @@ NativeDumpTask: struct {
     stack: Int,
     frame: Int,
     tid: Int,
+    general: [Int],
+    known: Int,
 }
 
 // An opened dump: its session, the flight ring's records, the pid and Unix
@@ -164,7 +177,10 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
     native_dump_loaded(blocks, bytes, header, length, bias)
     // A dump whose tasks were not captured still has its stop.
     if tasks.len() == 0 {
-        tasks.push(NativeDumpTask{id: 0, how: NATIVE_DUMP_TASK_STOPPED, pc: native_dump_word(bytes, 40), stack: native_dump_word(bytes, 48), frame: native_dump_word(bytes, 56), tid: native_dump_word(bytes, 64)})
+        frame: native_dump_word(bytes, 56)
+        general := loop _ in 0..<NATIVE_DUMP_GENERAL -> 0
+        general[X64_TRACE_RBP] = frame
+        tasks.push(NativeDumpTask{id: 0, how: NATIVE_DUMP_TASK_STOPPED, pc: native_dump_word(bytes, 40), stack: native_dump_word(bytes, 48), frame: frame, tid: native_dump_word(bytes, 64), general: general, known: NATIVE_DUMP_KNOWN_RBP})
     }
     tasks.sort_by(fn(left: NativeDumpTask, right: NativeDumpTask) { ((if left.how == NATIVE_DUMP_TASK_STOPPED -> 0 else -> 1) <=> (if right.how == NATIVE_DUMP_TASK_STOPPED -> 0 else -> 1)).then(left.id <=> right.id) })
     ring: loop k in ring_at..<ring_at + ring_size -> bytes[k]
@@ -192,21 +208,35 @@ native_dump_tasks: fn(tasks: &[NativeDumpTask], bytes: [U8], at: Int, size: Int)
         id: native_dump_word(bytes, row)
         how: native_dump_word(bytes, row + 8)
         if how == NATIVE_DUMP_TASK_STOPPED || id != 0 {
-            tasks.push(NativeDumpTask{id: id, how: how, pc: native_dump_word(bytes, row + 16), stack: native_dump_word(bytes, row + 24), frame: native_dump_word(bytes, row + 32), tid: native_dump_word(bytes, row + 40)})
+            general: loop k in 0..<NATIVE_DUMP_GENERAL -> native_dump_word(bytes, row + 56 + 8 * k)
+            tasks.push(NativeDumpTask{id: id, how: how, pc: native_dump_word(bytes, row + 16), stack: native_dump_word(bytes, row + 24), frame: native_dump_word(bytes, row + 32), tid: native_dump_word(bytes, row + 40), general: general, known: native_dump_word(bytes, row + 48)})
         }
         row += 8 * NATIVE_DUMP_TASK_WORDS
     }
 }
 
 // The registers of the dump's task `index`, as x64_trace_registers reads a
-// stopped thread's: its rip, rsp and rbp, the rest zero.
+// stopped thread's: its general registers, rip and rsp, the rest zero.
 native_dump_registers: fn(dump: NativeDump, index: Int) -> [Int] Never! {
     registers := loop _ in 0..<NATIVE_DUMP_REGISTERS -> 0
     if index < 0 || index >= dump.tasks.len() -> return registers
+    loop (k, value) in dump.tasks[index].general -> registers[k] = value
     registers[X64_TRACE_RIP] = dump.tasks[index].pc
     registers[X64_TRACE_RSP] = dump.tasks[index].stack
     registers[X64_TRACE_RBP] = dump.tasks[index].frame
     registers
+}
+
+// Which of native_dump_registers' registers the dump knows: rip, rsp and
+// the general registers its row marks.
+native_dump_known: fn(dump: NativeDump, index: Int) -> [Bool] Never! {
+    known := loop _ in 0..<NATIVE_DUMP_REGISTERS -> false
+    if index < 0 || index >= dump.tasks.len() -> return known
+    mask: dump.tasks[index].known
+    loop k in 0..<NATIVE_DUMP_GENERAL -> known[k] = (mask >> k) & 1 == 1
+    known[X64_TRACE_RIP] = true
+    known[X64_TRACE_RSP] = true
+    known
 }
 
 // How a task's registers were had, as `tasks` shows it.

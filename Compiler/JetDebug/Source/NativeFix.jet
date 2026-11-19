@@ -260,14 +260,14 @@ native_fix_layout_against: fn(before: [NativeMember], old_size: Int, size: Int, 
 }
 
 // Why the edit's types can't be swapped in: the first struct whose layout
-// changed, with its field. None when every struct the image knows keeps its
-// layout.
+// changed, by its Jet spelling, with its field. None when every struct the
+// image knows keeps its layout.
 native_fix_layouts: fn(image: NativeImage, object: X64ObjectModule) -> String? Never! {
     loop ty in object.debug.types {
         if ty.name == "" -> next
         if ty.kind == .Struct(members) {
             if native_fix_layout_change(image, ty.name, ty.size, members) == .Val(change) {
-                return Val("`{ty.name}` changed its layout ({change})")
+                return Val("`{native_jet_spelling(ty.name)}` changed its layout ({change})")
             }
         }
     }
