@@ -3229,10 +3229,15 @@ NativeSession: struct {
     // stops again (halt): all-stop, so a stop sees the whole program still.
     // Any other signal goes on to its thread, as it would untraced; a
     // thread the program starts runs when `every` does. A watch's trap on a
-    // write that left its bytes as they were runs on.
+    // write that left its bytes as they were runs on. `interrupted` says
+    // whether the session's input stopped this run: one command may run the
+    // program more than once (out of runtime code to its Jet caller, past a
+    // hit whose condition fails), and a later run that ends at a hit stops
+    // for that hit, which a request taken for the input's would lose.
     resume_threads: fn(&self, how: X64TraceResume, every: Bool{true}) -> NativeEvent NativeDebugError! {
         going := every
         self.held = false
+        self.interrupted = false
         row: self.thread_row(self.trace.thread)
         if row < 0 || !self.let_go(row, how) {
             return Err(NativeDebugError{detail: "the program can't be resumed"})
