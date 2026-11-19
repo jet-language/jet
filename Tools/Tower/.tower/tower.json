@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112393,
+    "rev": 112400,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -87106,6 +87106,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-19",
+          "by": "Main",
+          "text": "Gap map on p323 (dev f8a0b329ca), from the collect-all suite and source: 82 Debug cases pass, including replay_reverse_steps_back_by_line_call_and_caller, replay_reverse_continue_goes_back_to_a_watch_hit, replay_reverse_over_dap, replay_why_names_the_last_write, watch_stops_at_the_changing_write, fix_swaps_function_in_native_process and every dap_cli_ case but one. Open work: c1 `jet debug --record` is registered unported (CLICommands.jet form \"debug --record\", ported false; recording works through `jet run --record`); c7 JetDebug still hand-parses watch paths (Native.jet native_watch path cut, \"needs a literal index\"), so the compiler-parser rule is not met; c13 five EventObservations cases are KNOWN-FAILING; c8/c10 Debug/dap_cli_launches_and_projects_a_live_target_in_jet_terms fails under suite load on p322 and p323 (passes alone); c2-c6 need their named cases (navigation_watches_fix_) or a mapping to the replay cases checked clause by clause; c11 needs `jet check Compiler/JetDebug` and `jet test Compiler/JetDebug` run on the batch compiler."
+        },
+        {
           "at": "2026-11-15",
           "by": "Main",
           "text": "OWNER ORDER 2026-11-15 ~13:10: one goal agent slot does Jet's native debugger, profiler and perf (G5: #6730 jet debug, #4632 jet perf, #6918 debug info, #6841, #6919), native only with no lldb, gdb or Linux perf dependency. The G9 slot (GoalsB-5-2) takes it after its returned fixes; G9 is unstaffed until an agent snowballs past G6. Owner: GoalsB-5-2 (Pareto order 6730, 4632, 6918, 6841, 6919)."
@@ -87234,11 +87239,11 @@
         {
           "n": 12,
           "text": "jet debug's DAP supports conditional breakpoints, logpoints and evaluate (Docs/Audits/2026-11-14-debugging-profiling-review.md). Proof: `jet test Compiler --profile cases --filter Debug/dap_conditional_breakpoints_logpoints_evaluate`. (was #6730 c28)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:13:29.244Z"
+          "evidence": "p323 batch compiler (census build of dev f8a0b329ca), collect-all cases suite: PASS Debug/dap_cli_conditions_logpoints_and_evaluate (the named proof under the name the DAP cases settled on, dap_cli_*). Over the production `jet debug --dap` wire it asserts supportsConditionalBreakpoints and supportsLogPoints, a breakpoint with condition `i == 3` stops only at i = 3, a logpoint fills its message without stopping, a malformed condition is unverified with \"is not a Jet expression\", and evaluate answers `i` = 3 (Int), `total + i * 10` = 33 and `0 < i && i < 4` = true.",
+          "at": "2026-11-19T15:20:52.095Z"
         },
         {
           "n": 13,
@@ -87258,7 +87263,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:09:16.617Z",
-      "updated": "2026-11-17T01:49:57.698Z",
+      "updated": "2026-11-19T15:20:56.178Z",
       "updatedBy": "Main",
       "criteriaLastN": 13
     },
@@ -87320,11 +87325,11 @@
         {
           "n": 5,
           "text": "L0301 exists as a tidy error with fixtures. Proof: `jet test Compiler --profile ui --filter UILint/dispatch_unreachable_arm`, `--filter UILint/multi_head_unreachable` and `--filter UI/pattern_unreachable_arm`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T12:57:26.569Z",
+          "evidence": "p323 batch compiler (census build of dev f8a0b329ca), collect-all ui suite: PASS UILint/dispatch_unreachable_arm, UILint/multi_head_unreachable, UI/pattern_unreachable_arm; L0301 has those fixtures (Tests/UI/pattern_unreachable_arm.stderr, Tests/UILint/dispatch_unreachable_arm.warn).",
+          "at": "2026-11-19T15:18:23.090Z",
           "proof": {
             "profile": "ui",
             "filter": "UILint/L0301"
@@ -87403,11 +87408,11 @@
         {
           "n": 12,
           "text": "JetSema reports the #Test scope and test-runner rules the Rust checker had (#3899): E0613-E0616, E0618 and L2901, each with a UI fixture. Proof: `jet test Compiler --profile ui --filter scope_member_`, `--filter E0613_property_test_parameter_needs_a_generator` and `--filter UILint/test_without_assertion`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T12:57:23.005Z"
+          "evidence": "p323 batch compiler (census build of dev f8a0b329ca), collect-all ui suite: PASS scope_member_ (9 rows), E0613_property_test_parameter_needs_a_generator, UILint/test_without_assertion. One fixture per code: E0613 (E0613_property_test_parameter_needs_a_generator), E0614 scope_member_unknown, E0615 scope_member_outside, E0616 scope_member_setup_not_first, E0618 scope_member_nested, L2901 UILint/test_without_assertion.",
+          "at": "2026-11-19T15:18:23.957Z"
         },
         {
           "n": 13,
@@ -87443,11 +87448,11 @@
         {
           "n": 16,
           "text": "JetSema reports the task detach and freeze rules the Rust checker had (#3900): E1103, E1106, E0121 and E1114. Proof: `jet test Compiler --profile ui --filter task_detach_` and `--filter freeze_`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T12:57:23.926Z"
+          "evidence": "p323 batch compiler (census build of dev f8a0b329ca), collect-all ui suite: PASS task_detach_ (4 rows) and freeze_ (6 rows). Fixtures per code: E1103 task_detach_unsound, E1106 task_detach_captured_view / task_detach_view_capture, E0121 E0121_lambda_move_outer_use (and 56 more), E1114 freeze_resource_source / freeze_shared_source.",
+          "at": "2026-11-19T15:18:24.837Z"
         },
         {
           "n": 17,
@@ -87465,20 +87470,20 @@
         {
           "n": 18,
           "text": "Pattern coverage checks nested patterns beyond single-slot payloads, as #3904 required. Proof: `jet test Compiler --profile ui --filter nested_pattern_coverage`. (was #6425 c26)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T01:17:31.688Z"
+          "evidence": "p323 batch compiler (census build of dev f8a0b329ca), collect-all ui suite: PASS nested_pattern_coverage (2 rows).",
+          "at": "2026-11-19T15:18:26.159Z"
         },
         {
           "n": 19,
           "text": "JetSema reports the serde errors E2408, E2414 and E2415 (#3907). Proof: `jet test Compiler --profile ui --filter serde_flatten_not_struct`, `--filter serde_default_not_const` and `--filter union_codable_`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T12:57:25.719Z"
+          "evidence": "p323 batch compiler (census build of dev f8a0b329ca), collect-all ui suite: PASS serde_flatten_not_struct (E2408), serde_default_not_const (E2414), union_codable_ (7 rows, E2415).",
+          "at": "2026-11-19T15:18:27.222Z"
         },
         {
           "n": 20,
@@ -87503,7 +87508,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:11:42.636Z",
-      "updated": "2026-11-18T12:57:28.658Z",
+      "updated": "2026-11-19T15:18:27.222Z",
       "updatedBy": "Main",
       "criteriaLastN": 20
     },
@@ -160963,6 +160968,55 @@
   ],
   "events": [
     {
+      "at": "2026-11-19T15:20:56.179Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06lmp17",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T15:20:52.095Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06lmp17",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-19T15:18:27.222Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09hk13a",
+      "note": "#19"
+    },
+    {
+      "at": "2026-11-19T15:18:26.159Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09hk13a",
+      "note": "#18"
+    },
+    {
+      "at": "2026-11-19T15:18:24.838Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09hk13a",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-19T15:18:23.957Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09hk13a",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-19T15:18:23.090Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09hk13a",
+      "note": "#5"
+    },
+    {
       "at": "2026-11-19T15:13:47.336Z",
       "by": "Main",
       "action": "card.criteria-meet",
@@ -164440,713 +164494,6 @@
       "action": "card.criteria-meet",
       "ref": "c0sdz4q0",
       "note": "#5"
-    },
-    {
-      "at": "2026-11-17T22:32:46.981Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c07qvm0k",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T22:32:38.167Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c07qvm0k",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-17T22:32:37.199Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c07qvm0k",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T22:19:06.583Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09a7oci",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T22:10:20.341Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-CALLBACK-ONCE1",
-      "note": "A checked #Once parameter permits one consuming callback call"
-    },
-    {
-      "at": "2026-11-17T22:10:18.876Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-FNVAL-COPY1",
-      "note": "Copying a function value shares its captured environment"
-    },
-    {
-      "at": "2026-11-17T22:08:44.927Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0tjjr66",
-      "note": "9 criteria, soft limit 6: a gap in this card's web refusal"
-    },
-    {
-      "at": "2026-11-17T22:08:44.927Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0tjjr66",
-      "note": "#10 Sema's web-target refusal of an API the web host does not pr"
-    },
-    {
-      "at": "2026-11-17T22:04:23.461Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pf4ki0",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T22:04:14.298Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pf4ki0",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T21:54:33.208Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0w8b7vb",
-      "note": "#2: name the ratified spelling D-MAP-SLOT1 instead of a future ballot; was: After ratification, the chosen method does one hash lookup, runs on O0, O1 and O2 from one Core body, has cases under Tests/Cases/CoreLib/ and a teaching example of the counter idiom, and core-library"
-    },
-    {
-      "at": "2026-11-17T21:54:29.759Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w8b7vb",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T21:53:55.989Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0mhdm27",
-      "note": "#5 A task that calls a function value whose captures it mutates"
-    },
-    {
-      "at": "2026-11-17T21:41:02.023Z",
-      "by": "Main",
-      "action": "question.answer",
-      "ref": "q5xewxmx",
-      "note": ""
-    },
-    {
-      "at": "2026-11-17T21:40:40.787Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-BUILTIN-METHOD1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-17T21:40:37.008Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-ITERATOR-FAIL1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-17T21:40:32.560Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-HOOK-POINT1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-17T21:40:28.059Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-ARRAY-MATRESIZE1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-17T21:40:24.923Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-ARRAY-CONVERT1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-17T21:40:20.627Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-FORMAT-TRAIT1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-17T21:40:16.752Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-GUARD-LINT1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-17T21:39:26.931Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0m4deiq",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T21:39:24.922Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0m4deiq",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-17T21:36:33.828Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c05gn07n",
-      "note": "15 criteria, soft limit 6: ballot evidence for an existing ballot on this card; no new stream"
-    },
-    {
-      "at": "2026-11-17T21:36:33.828Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c05gn07n",
-      "note": "#17 D-ARRAY-ZIPCOLUMNS1 (Tower draft, repaired by the 2026-11-17"
-    },
-    {
-      "at": "2026-11-17T21:36:27.091Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-ARRAY-ZIPCOLUMNS1",
-      "note": "Join and split Columns without element copying; performance evidence still required (draft)"
-    },
-    {
-      "at": "2026-11-17T21:36:25.838Z",
-      "by": "Main",
-      "action": "decision.delete",
-      "ref": "D-ARRAY-ZIPCOLUMNS1",
-      "note": "Join columns without copying, with transactional ownership and borrowed views"
-    },
-    {
-      "at": "2026-11-17T21:36:00.814Z",
-      "by": "Main",
-      "action": "decision.delete",
-      "ref": "D-RUNTIME-HANDLE1",
-      "note": "Declare provider-backed type representation at the type"
-    },
-    {
-      "at": "2026-11-17T21:35:59.764Z",
-      "by": "Main",
-      "action": "decision.delete",
-      "ref": "D-ARRAY-ROWMAJOR1",
-      "note": "Make matrix layout optional, with column-major as the default"
-    },
-    {
-      "at": "2026-11-17T21:35:58.684Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0sdz4q0",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T21:35:57.725Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c05gn07n",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T21:30:17.865Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0mhdm27",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-17T21:16:35.023Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ywczn1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T21:06:00.906Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0fymc7l",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-17T21:05:59.908Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0yuouhx",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-17T21:05:58.875Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0q31aks",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T21:05:57.861Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hicd7a",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T21:05:55.469Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hicd7a",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-17T21:05:54.440Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hicd7a",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-17T21:05:53.444Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hicd7a",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T21:05:52.430Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0zlsxzv",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T21:05:50.659Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0zlsxzv",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-17T21:05:49.686Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0zlsxzv",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T20:34:13.580Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hnphts",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-17T20:33:13.809Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c01gyy9b",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-17T20:27:04.886Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-17T20:27:04.886Z"
-    },
-    {
-      "at": "2026-11-17T20:17:42.949Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0a2monf",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T20:08:13.325Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0a2monf",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-17T20:05:28.931Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ARRAY-MATOPS1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-17T20:05:28.931Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-WARM-SET1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-17T20:04:54.692Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-17T20:04:49.459Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hn7w1n",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T20:04:45.766Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#18"
-    },
-    {
-      "at": "2026-11-17T20:04:44.668Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-17T20:03:25.688Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-17T20:03:25.688Z"
-    },
-    {
-      "at": "2026-11-17T20:01:46.421Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0kkogun",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-17T20:01:45.443Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0kkogun",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T20:01:44.429Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0vucs0t",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T20:01:42.502Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0vucs0t",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-17T20:00:42.965Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-17T20:00:42.965Z"
-    },
-    {
-      "at": "2026-11-17T19:38:12.889Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c051j6ab",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T19:38:11.838Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fymc7l",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T19:38:10.817Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0vucs0t",
-      "note": "#3 RuntimeStops/stack_overflow_under_jet_run_stops_within_a_sec"
-    },
-    {
-      "at": "2026-11-17T19:38:09.400Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0vucs0t",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-17T19:38:08.301Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0vzmbkk",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-17T19:38:07.221Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0vzmbkk",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-17T19:12:38.863Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0yhga63",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T19:12:36.188Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0yhga63",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-17T19:12:34.494Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0yhga63",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T19:11:16.225Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#154"
-    },
-    {
-      "at": "2026-11-17T19:11:15.157Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0byuovb",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T19:11:13.265Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0byuovb",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-17T19:11:12.250Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0byuovb",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T19:11:11.235Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0akrada",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T19:11:07.660Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0akrada",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T19:11:04.335Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0povfh0",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T19:11:01.570Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0povfh0",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-17T19:11:00.570Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0povfh0",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T18:43:54.167Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l7lwif",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T18:43:52.227Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0l7lwif",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T18:43:51.114Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0l7lwif",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-17T18:43:49.930Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0l7lwif",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-17T18:43:35.401Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0l7lwif",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-17T18:43:27.628Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0l7lwif",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-17T18:42:12.520Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0vucs0t",
-      "note": "#2 The stack-segment change leaves the suite green. p271 found "
-    },
-    {
-      "at": "2026-11-17T18:42:11.435Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0vucs0t",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T18:42:07.853Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0l7lwif",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-17T18:41:53.328Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c08zzpo5",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-17T18:02:31.253Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c051j6ab",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T17:40:24.285Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0mhdm27",
-      "note": "#4 Generic code that runs a task.group child calling a function"
-    },
-    {
-      "at": "2026-11-17T17:33:55.950Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0429qak",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-17T17:23:33.879Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fymc7l",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T17:23:32.918Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0sdz4q0",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T17:23:31.967Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0429qak",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T17:23:30.992Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c051j6ab",
-      "note": "#4 D-LIFECYCLE-PHASE1=A is built: app.phase() -> Phase? (None w"
-    },
-    {
-      "at": "2026-11-17T17:23:30.033Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0yk1mno",
-      "note": "#2 Jet-owned serialized tokens (receipts, rows, wire and storag"
-    },
-    {
-      "at": "2026-11-17T17:23:29.058Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0yk1mno",
-      "note": "#1 Every British-spelled identifier in Compiler, Core, Jetpack,"
-    },
-    {
-      "at": "2026-11-17T17:23:18.313Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0yk1mno",
-      "note": "Build D-AMERICAN-IDENT1=C: American spelling for source identifiers and Jet-owned machine tokens"
-    },
-    {
-      "at": "2026-11-17T16:52:15.100Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0yuouhx",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T16:51:03.269Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0itgqr6",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T16:49:06.481Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0q31aks",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
