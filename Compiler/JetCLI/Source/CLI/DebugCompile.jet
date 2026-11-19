@@ -824,7 +824,7 @@ JetCLIDebugEvalHeld: struct {
 // The sources a held check read: the text of each source file of the
 // program, by its path, and the identity (jet_cli_identity_key) each file
 // had then, by which a file whose identity is the same reads the same, so
-// nothing reads it again (jet_cli_debug_eval_held_changed). A file written
+// nothing reads it again (jet_cli_debug_eval_held_change). A file written
 // within JET_CLI_DEBUG_EVAL_RACY_NS of the read can be written again with
 // the same identity: it has none, and is read each time.
 JetCLIDebugEvalHeldStamp: struct {
@@ -1254,32 +1254,33 @@ jet_cli_debug_eval_held_of: fn(compile: &&JetDriverCompileResult, stamp: &&JetCL
 }
 
 // Whether the held check `held` is to be opened again: there is none, or
-// its sources changed (jet_cli_debug_eval_held_changed).
+// its sources changed (jet_cli_debug_eval_held_change).
 jet_cli_debug_eval_held_stale: fn(held: JetCLIDebugEvalHeld?) -[FS]> Bool {
     open: held ?? return true
-    jet_cli_debug_eval_held_changed(open.stamp)
+    jet_cli_debug_eval_held_change(open.stamp) != None
 }
 
 // Whether the held check that last didn't open, from the sources `missed`,
 // would read the same sources now.
 jet_cli_debug_eval_held_missed: fn(missed: JetCLIDebugEvalHeldStamp?) -[FS]> Bool {
     stamp: missed ?? return false
-    !jet_cli_debug_eval_held_changed(stamp)
+    jet_cli_debug_eval_held_change(stamp) == None
 }
 
-// Whether a source file of `stamp` reads other than it did or no longer
-// reads. A file whose identity is still its stamped one isn't read.
-jet_cli_debug_eval_held_changed: fn(stamp: JetCLIDebugEvalHeldStamp) -[FS]> Bool {
+// The path of a source file of `stamp` that reads other than it did or no
+// longer reads; None when each reads the same. A file whose identity is
+// still its stamped one isn't read.
+jet_cli_debug_eval_held_change: fn(stamp: JetCLIDebugEvalHeldStamp) -[FS]> String? {
     loop (file, source) in stamp.sources {
         if stamp.keys.get(file) == .Val(key) {
             if debug_eval_files.stat(file) == .Ok(found) {
                 if jet_cli_identity_key("file", found) == key -> next
             }
         }
-        now: debug_eval_files.read(file) ?? return true
-        if now != source -> return true
+        now: debug_eval_files.read(file) ?? return Val(file)
+        if now != source -> return Val(file)
     }
-    false
+    None
 }
 
 // The sources of the snapshot `snapshot`, read no earlier than the time
@@ -1310,7 +1311,7 @@ jet_cli_debug_eval_stamp: fn(snapshot: JetDriverAuthorizedSourceSnapshot, since:
 jet_cli_debug_eval_unchanged: fn(held: JetCLIDebugEvalHeldShared, entry: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Bool Never! {
     permit := held.slot.guard_edit()
     if permit.value.kept == .Val(kept) {
-        if !jet_cli_debug_eval_held_changed(kept) -> return true
+        if jet_cli_debug_eval_held_change(kept) == None -> return true
     }
     permit.value.kept = None
     since: debug_eval_time.unix_ns()

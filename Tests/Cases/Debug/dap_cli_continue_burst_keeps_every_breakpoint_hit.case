@@ -8,7 +8,12 @@
 # stepped over the breakpoint as over one it had reported, so the hit was
 # lost: 5 to 10 of the 11 stops, the program's end before the last
 # continue, and "the program is not paused" (gate jet of 6dda4bf451, 12 of
-# 12 runs).
+# 12 runs). A request that stops the program in runtime code runs it on to
+# Jet code in the same command; a hit that run ends at is that hit's stop,
+# not the request's (NativeSession.interrupted says whether the input
+# stopped the last run). Before, the request was taken at the hit, whose
+# next continue stepped over it: the first hit lost, 10 of the 11 stops
+# (gate jet of a51208e220, 6 of 14 runs).
 fixture: DapCLIContinueBurstKeepsEveryBreakpointHit.fixture
 env: NO_COLOR=1
 session dap content-length: jet debug --dap {work}/main.jet
