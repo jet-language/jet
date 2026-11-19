@@ -1,22 +1,39 @@
-// Reads the causal section of the trace the first argument names and
-// measured.txt, the speedups main.jet measured by hand for the narrow line
-// and for the wide one. It accepts one of two outcomes. Either, for the
-// `round` progress point, each of the two lines the lens ranked has its
-// measured speedup within its predicted interval, and the lens ranked one
-// of them at least. Or the lens refused the run because its threads waited
-// too long for a CPU, naming the wait its receipt keeps and giving no gain.
+// Reads the causal section of the trace the last argument names and
+// before.txt and after.txt, the speedups main.jet measured by hand for the
+// narrow line and for the wide one just before the profiled run and just
+// after it. It accepts one of three outcomes. The lens refused the run
+// because its threads waited too long for a CPU, naming the wait its
+// receipt keeps and giving no gain. Or a hand measurement's threads waited
+// as long, so it measured a contended machine, which is no truth for a run
+// the lens found uncontended. Or, for the `round` progress point, each of
+// the two lines the lens ranked has a predicted interval that meets the
+// line's measured one, and the lens ranked one of them at least. A line's
+// measured interval spans both measurements' 90% intervals of their median,
+// since the machine's CPUs, and with them the line's gain, drift from the
+// one measurement to the other, and the profiled run lies between them.
 // A ranked line's interval is at most WIDEST wide, the lens's own bound for
 // ranking a line, so no interval passes by being vague; and a measured
 // speedup above BOUND, which no line 30% faster can give, is refused as a
 // measurement gone wrong, so none passes by being wild.
+//
+// The argument before the trace names the tier. The outcome's own line,
+// with its numbers, goes to stderr and is appended to the file
+// JET_CAUSAL_CASE_PATHS names when it is set, so a run of the case tells
+// whether each tier compared the lens with its truth or refused.
 use {
     files: core.files
     process: core.process
+    sys: core.sys
 }
 
 // JetCLI CLI/Perf/Causal.jet JET_CLI_PERF_CAUSAL_WIDEST, in tenths of a
 // percent.
 WIDEST: 300
+
+// JetCLI CLI/Perf/Causal.jet JET_CLI_PERF_CAUSAL_WAIT_MOST, in thousandths
+// of the threads' run time: the most runqueue wait under which the lens
+// ranks lines.
+WAIT_MOST: 200
 
 // The most a line 30% faster can make a round sooner, in tenths of a
 // percent: all of the round's time on the line, every part of it 30% less.
@@ -24,8 +41,26 @@ WIDEST: 300
 // measurement gone wrong, and is refused.
 BOUND: 300
 
-// Refuse the measured `gain` of the `function` line when the line cannot
-// have given it (BOUND).
+// One hand measurement: each line's median gain with its 90% interval, in
+// tenths of a percent, and the runqueue wait its threads took, in
+// thousandths of their run time.
+Measured: struct {
+    narrow: [Int],
+    wide: [Int],
+    wait: Int,
+}
+
+// The measurement main.jet wrote to `path`.
+read_measured: fn(path: String) -> Measured {
+    words: (files.read(path) ?? panic("cannot read {path}")).trim().split(" ").to_list()
+    if words.len() != 7 -> panic("{path} holds no seven numbers")
+    numbers := [Int]{}
+    loop word in words -> numbers.push(Int.parse(word) ?? panic("{path} holds `{word}`, no number"))
+    Measured{narrow: [Int]{numbers[0], numbers[1], numbers[2]}, wide: [Int]{numbers[3], numbers[4], numbers[5]}, wait: numbers[6]}
+}
+
+// Refuse the measured median `gain` of the `function` line when the line
+// cannot have given it (BOUND).
 check_bound: fn(function: String, gain: Int) {
     if gain > BOUND {
         panic("the {function} line sped up by hand gained {gain}, more than the {BOUND} a line 30% faster can give a round: the measurement is invalid")
@@ -41,9 +76,11 @@ number_after: fn(text: String, key: String) -> Int? {
     Val(number)
 }
 
-// Whether the lens ranked the line of `function` among `lines`, the `round`
-// point's; when it did, its interval must hold `measured`.
-check_line: fn(lines: String, function: String, measured: Int) -> Bool {
+// The lens's interval for the line of `function` among `lines`, the `round`
+// point's, and the measured one it met; None when the lens did not rank
+// the line. A ranked line's interval must meet the measured one,
+// `measured_low` to `measured_high`.
+check_line: fn(lines: String, function: String, measured_low: Int, measured_high: Int) -> String? {
     loop line in lines.split("}},{{").to_list() {
         if !line.contains("\"function\":\"{function}\"") -> next
         low: number_after(line, "\"low_tenths\":") ?? panic("no low_tenths in {line}")
@@ -51,12 +88,23 @@ check_line: fn(lines: String, function: String, measured: Int) -> Bool {
         if high - low > WIDEST {
             panic("the {function} line is ranked with an interval of {low} to {high}, wider than the lens ranks")
         }
-        if measured < low || measured > high {
-            panic("the {function} line sped up by hand gained {measured}, outside its predicted {low} to {high}")
+        if measured_high < low || measured_low > high {
+            panic("the {function} line sped up by hand gained {measured_low} to {measured_high}, outside its predicted {low} to {high}")
         }
-        return true
+        return Val("{function} predicted {low} to {high}, measured {measured_low} to {measured_high}")
     }
-    false
+    None
+}
+
+// Names the outcome `tier` took: on stderr, and appended to the file
+// JET_CAUSAL_CASE_PATHS names when it is set.
+record_path: fn(tier: String, outcome: String) {
+    line: "causal case {tier}: {outcome}"
+    eprint(line)
+    log: sys.get("JET_CAUSAL_CASE_PATHS") ?? return
+    writer := files.append(log) ?? panic("cannot open {log}: {err}")
+    writer.write_bytes("{line}\n".bytes()) ?? panic("cannot write {log}: {err}")
+    writer.flush() ?? panic("cannot write {log}: {err}")
 }
 
 // Whether the lens refused the run under CPU contention; when it did, its
@@ -77,26 +125,38 @@ check_contended: fn(trace: String) -> Bool {
 
 run: fn() {
     args: process.args()
+    if args.len() < 2 -> panic("usage: check.jet -- TIER TRACE")
+    tier: args[args.len() - 2]
     trace: files.read(args[args.len() - 1]) ?? panic("cannot read the trace")
     if check_contended(trace) {
+        wait: number_after(trace, "\"cpu_wait_ms\":") ?? 0
+        ran: number_after(trace, "\"cpu_run_ms\":") ?? 0
+        record_path(tier, "refused, the profiled run's threads waited {wait} ms for a CPU over {ran} ms of run")
         print("the lens withheld its gains under CPU contention, naming the wait")
         return
     }
-    measured: (files.read("measured.txt") ?? panic("cannot read measured.txt")).trim().split(" ").to_list()
-    if measured.len() != 2 -> panic("measured.txt holds no two numbers")
-    narrow_gain: Int.parse(measured[0]) ?? panic("measured.txt's narrow speedup is no number")
-    wide_gain: Int.parse(measured[1]) ?? panic("measured.txt's wide speedup is no number")
+    // main.jet's `measure` wrote these before the profiled run and after.
+    first: read_measured("before.txt")
+    last: read_measured("after.txt")
+    if first.wait > WAIT_MOST || last.wait > WAIT_MOST {
+        record_path(tier, "contended truth, the measurements' threads waited {first.wait} and {last.wait} thousandths of their run for a CPU")
+        print("a hand measurement's threads waited for a CPU longer than the lens ranks under, so it measured no truth to check the lens by")
+        return
+    }
+    check_bound("narrow", first.narrow[1])
+    check_bound("narrow", last.narrow[1])
+    check_bound("wide", first.wide[1])
+    check_bound("wide", last.wide[1])
     // The `round` point's object holds its ranked lines before its name.
     before: trace.split("\"name\":\"round\"").to_list()
     if before.len() < 2 -> panic("no `round` progress point in the causal section")
     pieces: before[0].split("{{\"lines\":[").to_list()
     lines: pieces[pieces.len() - 1]
-    check_bound("narrow", narrow_gain)
-    check_bound("wide", wide_gain)
-    narrow_ranked: check_line(lines, "narrow", narrow_gain)
-    wide_ranked: check_line(lines, "wide", wide_gain)
-    if !narrow_ranked && !wide_ranked {
+    narrow: check_line(lines, "narrow", min(first.narrow[0], last.narrow[0]), max(first.narrow[2], last.narrow[2]))
+    wide: check_line(lines, "wide", min(first.wide[0], last.wide[0]), max(first.wide[2], last.wide[2]))
+    if narrow == None && wide == None {
         panic("the lens ranked neither line sped up by hand for `round`: {lines}")
     }
+    record_path(tier, "compared, {narrow ?? "narrow unranked"}; {wide ?? "wide unranked"}; waits {first.wait} and {last.wait} thousandths")
     print("each line sped up by hand that the lens ranked gained within its predicted interval")
 }

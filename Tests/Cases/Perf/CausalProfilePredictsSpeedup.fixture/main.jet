@@ -9,11 +9,14 @@
 // gains the most. The lens must tell which from the run it profiles.
 //
 // `jet run main.jet -- MILLIS` runs rounds for MILLIS milliseconds (4000 by
-// default). `jet run main.jet -- measure` times rounds as they are, with the
-// narrow task doing seven-tenths of its work, as if its line were 30%
-// faster, and with each wide task doing seven-tenths of its own, one round
-// of each in turn, and writes how much sooner a round came for the narrow
-// line and for the wide one, in tenths of a percent, to measured.txt.
+// default). `jet run main.jet -- measure FILE` times rounds as they are,
+// with the narrow task doing seven-tenths of its work, as if its line were
+// 30% faster, and with each wide task doing seven-tenths of its own, one
+// round of each in turn. It writes to FILE how much sooner a round came for
+// the narrow line and for the wide one, each as the low end of its median's
+// 90% interval, the median and the high end, in tenths of a percent, then
+// the runqueue wait its threads took in thousandths of their run time.
+// That wait is the same measure the lens takes of its run.
 use {
     files: core.files
     perf: core.perf
@@ -25,6 +28,12 @@ STEPS: 400000
 
 // The rounds `measure` times in each of its three arms.
 ROUNDS: 249
+
+// How many ranks either side of the median the ends of its 90% interval
+// lie among ROUNDS sorted values: 1.645 * sqrt(ROUNDS) / 2, rounded. This
+// is the order-statistic interval, which holds whatever the rounds'
+// distribution is.
+MEDIAN_RANKS: 13
 
 narrow: fn(seed: Int, steps: Int) -> Int {
     total := seed
@@ -58,17 +67,43 @@ timed: fn(seed: Int, narrow_tenths: Int, wide_tenths: Int) -> Int {
     started.elapsed().ns
 }
 
+// The run time and the runqueue wait, in nanoseconds, this program's
+// threads have taken: the first two fields of each thread's schedstat.
+cpu_times: fn() -> [Int] {
+    run := 0
+    wait := 0
+    entries: files.list_dir("/proc/self/task") ?? return [Int]{0, 0}
+    loop entry in entries {
+        text: files.read("/proc/self/task/{entry.name}/schedstat") ?? next
+        fields: text.trim().split(" ").to_list()
+        if fields.len() < 2 -> next
+        run += Int.parse(fields[0]) ?? 0
+        wait += Int.parse(fields[1]) ?? 0
+    }
+    [Int]{run, wait}
+}
+
+// A sorted line's gains as the low end of its median's interval, the median
+// and the high end.
+median_interval: fn(gains: [Int]) -> String {
+    middle: ROUNDS /% 2
+    "{gains[middle - MEDIAN_RANKS]} {gains[middle]} {gains[middle + MEDIAN_RANKS]}"
+}
+
 run: fn() {
     args: process.args()
     word: if args.len() > 0 -> args[args.len() - 1] else -> ""
-    if word == "measure" {
+    if args.len() > 1 && args[args.len() - 2] == "measure" {
         // Rounds in threes, the program as it is, with the narrow line sped
         // up and with the wide one sped up, each first in turn. A sped-up
         // round is paired with the plain round beside it, so the machine's
         // load, which drifts over the run, falls alike on both: each
         // three's speedups, and the median of them, in tenths of a percent.
+        // The wait the threads took meanwhile tells whether the rounds had
+        // their CPUs or contended for them.
         narrow_gains := [Int]{}
         wide_gains := [Int]{}
+        before: cpu_times()
         loop index in 0..<ROUNDS {
             plain := 0
             narrow_fast := 0
@@ -84,9 +119,12 @@ run: fn() {
             narrow_gains.push(1000 - narrow_fast * 1000 /% plain)
             wide_gains.push(1000 - wide_fast * 1000 /% plain)
         }
+        after: cpu_times()
+        run_ns: after[0] - before[0]
+        wait: if run_ns > 0 -> (after[1] - before[1]) * 1000 /% run_ns else -> 0
         narrow_gains.sort()
         wide_gains.sort()
-        files.write("measured.txt", "{narrow_gains[ROUNDS /% 2]} {wide_gains[ROUNDS /% 2]}\n") ?? panic("cannot write measured.txt")
+        files.write(word, "{median_interval(narrow_gains)} {median_interval(wide_gains)} {wait}\n") ?? panic("cannot write {word}")
         print("measured")
         return
     }
