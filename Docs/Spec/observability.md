@@ -167,10 +167,13 @@ the runtime charges each sample by the instruction it names instead: AMD's
 IBS op sampling (`perf_event_open` on the `ibs_op` PMU, filtered to user mode
 in software, which `perf_event_paranoid` 2 allows), else Intel's PEBS (cycles
 at `precise_ip` 2), each thread's own event sampled at the timer's rate into
-a ring its `SIGPROF` reports; the callers still come from the interrupted
-stack. The main thread arms the first source the kernel accepts, and each
-thread after it arms that source; with neither, every thread keeps its
-timer. The receipt's `capture.sampling.pc` names the source.
+a ring its `SIGPROF` reports. The callers still come from the interrupted
+stack, which the skid can leave in another function: the sample keeps the
+callers of the innermost interrupted frame in its own function, and when no
+frame is (the function returned before the signal came), the interrupted
+frame is its caller. The main thread arms the first source the kernel
+accepts, and each thread after it arms that source; with neither, every
+thread keeps its timer. The receipt's `capture.sampling.pc` names the source.
 Tests/Cases/Perf/precise_pc_names_its_source.case is the worked example.
 
 `jet perf run` takes `--lens=<lenses>`, comma-separated: `cpu`, the
@@ -749,6 +752,12 @@ D-DBG-VERBS1=A names the commands:
   leaves the value as it was runs on.
 - `breaks` lists the breakpoints and watches by number, as `  2 break
   cart.jet:88 if total < 0` and `  3 watch total`; `delete <n>` removes one.
+  A condition or logpoint that runs in the program adds how many of its
+  hits have trapped to the debugger, as `  (1 trap)`, once any has. Only a
+  hit where the condition held, needed the debugger or filled the ring
+  traps. The placed code keeps no state per thread or task, so the first hit
+  on a thread or task that starts later runs on without a trap like any
+  other hit.
 - `frame <n>` selects a frame as `backtrace` (`bt`) numbers it. `up` moves
   toward the callers and `down` back. `locals` and `print <expr>` (`p`)
   read the selected frame until the program moves.

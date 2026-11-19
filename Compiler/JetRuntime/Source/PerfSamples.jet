@@ -687,7 +687,8 @@ perf_precise_ring: fn(info: I64) -> I64 {
 // precise source's is each sample its ring holds past the tail (a
 // PERF_RECORD_SAMPLE, type 9, its size in the header's top 16 bits and its
 // instruction pointer after the header), by that pointer less the image's
-// bias, and the tail then moves to the head, freeing them for the kernel.
+// bias, under the callers perf_samples_put_precise finds, and the tail then
+// moves to the head, freeing them for the kernel.
 perf_samples_put: fn(fd: I64, record: I64, head: I64, pc: I64, ring: I64, periods: I64) {
     if (ring == I64{0}) {
         written := I64{0}
@@ -707,11 +708,50 @@ perf_samples_put: fn(fd: I64, record: I64, head: I64, pc: I64, ring: I64, period
         if (size == I64{0}) { break }
         if ((header & I64{4294967295}) == I64{9}) {
             ip: rt_text_word(wrapping(data + (wrapping(tail + I64{8}) & mask)))
-            perf_samples_put_one(fd, record, head, wrapping(ip - perf_samples_bias))
+            perf_samples_put_precise(fd, record, head, pc, wrapping(ip - perf_samples_bias))
         }
         tail = wrapping(tail + size)
     }
     sync_store(wrapping(ring + I64{1032}), filled)
+}
+
+// One write of a precise sample's record (perf_samples_put) at program
+// counter `precise`. The handler walked the interrupted context: `record`'s
+// word 1 is left for its program counter `pc`, and the words after it, to
+// `head`'s count, are its callers. The signal comes some instructions past
+// the sampled one (its skid), so the interrupted code can be another
+// function's: the sampled function's caller, once it returned, or its
+// callee, once it called one. So the callers are those of the innermost
+// walked frame in the sampled function (its call frame information's
+// range); when none is, the sampled function returned before the signal
+// came, and the interrupted frame is its caller. A sample outside every
+// range keeps the interrupted frame's callers.
+perf_samples_put_precise: fn(fd: I64, record: I64, head: I64, pc: I64, precise: I64) {
+    if (record == I64{0}) {
+        perf_samples_put_one(fd, I64{0}, head, precise)
+        return
+    }
+    count: (head >> PERF_SAMPLES_ADDRESS_BITS) & I64{2047}
+    rt_text_store(wrapping(record + I64{8}), pc)
+    entry: perf_cfi_find(precise)
+    at := I64{1}
+    if (entry != I64{0}) {
+        begin: rt_text_word(entry)
+        end: rt_text_word(wrapping(entry + I64{8}))
+        loop at < count {
+            frame: rt_text_word(wrapping(record + wrapping(at * I64{8})))
+            if (frame >= begin && frame < end) { break }
+            at = wrapping(at + I64{1})
+        }
+        if (at == count) { at = I64{0} }
+    }
+    // The record from the frame in the sampled function on, its program
+    // counter the sampled one: that word is put back after the write, for
+    // the ring's next sample.
+    from: wrapping(record + wrapping(at * I64{8}))
+    kept: rt_text_word(from)
+    perf_samples_put_one(fd, from, wrapping(head - (at << PERF_SAMPLES_ADDRESS_BITS)), precise)
+    rt_text_store(from, kept)
 }
 
 // One write of a sample's record (perf_samples_put) at program counter `pc`.
@@ -2855,8 +2895,9 @@ perf_cfi_sort: fn(table: I64, count: I64) {
 // that one sample; O_APPEND puts each record after the last. Under a
 // precise source (perf_precise_choose) a SIGPROF reports its sampler's
 // ring instead, and the record is written once for each sample the ring
-// holds, by the program counter the sample names, the callers walked from
-// the interrupted context (perf_samples_put). A counter's record has its
+// holds, by the program counter the sample names, under the callers its
+// function has in the stack walked from the interrupted context
+// (perf_samples_put_precise). A counter's record has its
 // kind, and the counter is armed again once it is written. A topdown
 // event's record is one word, its program counter alone, 0 outside the
 // image's code, and its event's index above it.
@@ -2903,7 +2944,9 @@ perf_cfi_sort: fn(table: I64, count: I64) {
         perf_samples_charge(buffer, began)
         return I64{0}
     }
-    count := I64{1}
+    // A precise sample's record leaves word 1 for the interrupted program
+    // counter (perf_samples_put_precise).
+    count := if (ring != I64{0}) -> I64{2} else -> I64{1}
     stack: rt_text_word(wrapping(context + I64{160}))
     frame := rt_text_word(wrapping(context + I64{120}))
     scratch: perf_samples_scratch(slot, buffer)
@@ -3141,8 +3184,8 @@ PERF_FLIGHT_TASK_REGISTERS: I64{15}
 
 // Which general registers of a row are known: every one, a thread's a
 // signal interrupted; r15, r14, r13, r12, rbp and rbx, a parked fiber's
-// its last switch saved; rbp alone, the stopping thread's as its caller
-// resumes.
+// its last switch saved and the stopping thread's as its tgkill returns;
+// rbp alone, the stopping thread's as its caller resumes.
 PERF_FLIGHT_TASK_KNOWN: I64{32767}
 
 PERF_FLIGHT_TASK_SAVED: I64{63}
@@ -3447,11 +3490,11 @@ perf_flight_dump: fn() {
     text: wrapping(state + PERF_FLIGHT_TEXT_AT)
     words: wrapping(text + PERF_FLIGHT_WORDS_AT)
     zeros: wrapping(text + PERF_FLIGHT_ZEROS_AT)
-    // The stopping thread's every general register, as perf_flight_capture
-    // takes them when the tgkill to itself returns here, in this frame the
-    // dump outlives, so its debugger unwinds the callee-saved registers
-    // from here (the frames' call frame rules). Without the capture, its
-    // rip, rsp and rbp as its caller resumes.
+    // The stopping thread's callee-saved registers, rip, rsp and rbp, as
+    // perf_flight_capture takes them when the tgkill to itself returns
+    // here, in this frame the dump outlives, so its debugger unwinds the
+    // callee-saved registers from here (the frames' call frame rules).
+    // Without the capture, its rip, rsp and rbp as its caller resumes.
     stop: wrapping(text + PERF_FLIGHT_STOP_AT)
     process: perf_flight_syscall(I64{39}, I64{0}, I64{0}, I64{0})
     me: thread_tid()
@@ -3619,6 +3662,12 @@ perf_flight_fiber: fn(state: I64, tcb: I64) {
 // written, so its stack stays as its row says. A capture the dump no
 // longer waits for writes no row. The stopping thread, which signals
 // itself (perf_flight_dump), only leaves its registers in the text page.
+// Where the signal interrupts a frame that holds nothing but its link (rsp
+// at rbp: os_syscall_i64's, when the tgkill is a call), the dump's own
+// calls overwrite that frame before it copies the stack, so the registers
+// are those of its caller, perf_flight_dump, as the frame returns into it:
+// the saved rbp and return address read while they last, the callee-saved
+// registers as the frame left them, the rest unknown.
 perf_flight_capture: fn(context: I64) {
     state: perf_flight_state
     if (state == I64{0} || context == I64{0}) {
@@ -3627,7 +3676,22 @@ perf_flight_capture: fn(context: I64) {
     text: wrapping(state + PERF_FLIGHT_TEXT_AT)
     tid: thread_tid()
     if (tid == sync_load(wrapping(text + PERF_FLIGHT_SELF_AT))) {
-        perf_flight_context(wrapping(text + PERF_FLIGHT_STOP_AT), context)
+        stop: wrapping(text + PERF_FLIGHT_STOP_AT)
+        perf_flight_context(stop, context)
+        frame: rt_text_word(wrapping(context + I64{120}))
+        if (frame != I64{0} && frame == rt_text_word(wrapping(context + I64{160}))) {
+            caller: rt_text_word(frame)
+            rt_text_store(wrapping(stop + I64{16}), rt_text_word(wrapping(frame + I64{8})))
+            rt_text_store(wrapping(stop + I64{24}), wrapping(frame + I64{16}))
+            rt_text_store(wrapping(stop + I64{32}), caller)
+            rt_text_store(wrapping(stop + I64{48}), PERF_FLIGHT_TASK_SAVED)
+            rt_text_store(wrapping(stop + I64{88}), caller)
+            word := I64{6}
+            loop word < PERF_FLIGHT_TASK_REGISTERS {
+                rt_text_store(wrapping(stop + wrapping(I64{56} + wrapping(word * I64{8}))), I64{0})
+                word = wrapping(word + I64{1})
+            }
+        }
         return
     }
     release: wrapping(text + PERF_FLIGHT_RELEASE_AT)

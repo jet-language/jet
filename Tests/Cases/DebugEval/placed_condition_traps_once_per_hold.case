@@ -1,0 +1,25 @@
+# A condition placed in the program keeps no state per thread or fiber
+# (review 4, Q4), so a hit on a fiber made after the breakpoint was set
+# traps only where the condition holds, as any hit does. Two tasks run the
+# breakpoint's line at once, then 200 fresh tasks run it one after another:
+# 60,000 false hits with no stop, under a second (the program times them
+# itself). A last fresh task, task 204, hits where `n == 1000003` holds.
+# `breaks` counts the placed breakpoint's traps: none is shown before the
+# run, and one after all those fibers, the hit that held.
+# The fixture must stay in jet fmt form: line 4 is check's first statement.
+fixture: PlacedConditionTrapsOncePerHold.fixture
+env: NO_COLOR=1
+env: PATH={work}/no-tools
+step: jet debug prog.jet
+stdin: placed_condition_traps_once_per_hold.stdin
+exit: 0
+stdout: ~ "Breakpoint set  prog.jet:4 if n == 1000003\nThe condition runs in the program: a hit where it is false runs on without a stop\n" # the condition runs in the program
+stdout: ~ "(Jet) breaks\n  2 break prog.jet:4 if n == 1000003\n(Jet) c\n" # no trap before the run
+stdout: ~ "Breakpoint hit  prog.jet:4  in check()\n" # it stops where it holds
+stdout: ~ "print n\nn = 1000003\n" # with the local it held for
+stdout: ~ "(Jet) breaks\n  2 break prog.jet:4 if n == 1000003  (1 trap)\n" # one trap: the hit that held, none per fresh fiber
+stdout: ~ "* 204  check  running\n    #0  check()  at prog.jet:4\n" # on a fiber made after the breakpoint was set
+stdout: !~ "n = 0\n" # no false hit stops
+stdout: ~ "fresh fibers under a second\n" # the false hits on fresh fibers run on at full speed
+stdout: ~ "fresh 59000 held 4\n" # every task runs to its total
+stdout: ~ "Program finished\n" # the program runs to its end

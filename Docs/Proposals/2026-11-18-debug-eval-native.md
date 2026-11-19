@@ -1396,7 +1396,13 @@ traps, and the debugger checks that hit in a fork. So a condition placed in
 the program only computes on its own stack. A condition that needs the
 runtime, its result arena included, pays a fork for the hits that reach
 the call; the per-carrier arena above is not used yet. A fault in placed
-code goes to the same stub.
+code goes to the same stub. The placed code reads no TCB word, so it keeps
+no state per thread or fiber, and the first hit on a fiber made after the
+breakpoint was set traps only as any hit does (review 4, Q4). The console's
+`breaks` counts each placed breakpoint's traps, and
+`DebugEval/placed_condition_traps_once_per_hold` checks the count: its two
+tasks and 200 later fibers hit the condition more than 60,000 times, and it
+traps once, on a fresh fiber where it holds.
 
 At the breakpoint the debugger writes a 5-byte jump to a trampoline mapped
 within ±2 GiB of the code. The trampoline saves the registers and flags

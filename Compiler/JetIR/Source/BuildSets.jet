@@ -321,24 +321,8 @@ ir_set_take_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShap
         boxed = ir_box_alloc(m, a, key_size, option_row)
         ir_emit(a.f, IROp.CopyBytes, -1, boxed, entry, ir_align8(key_size), a.line)
     }
-    length: ir_load_word(m, a, set, 0)
-    one: ir_word_const(m, a, 1)
-    last: ir_word_op(m, a, IROp.Sub, length, one)
-    after: ir_word_op(m, a, IROp.Add, index, one)
-    from: ir_element_address(m, a, data, after, shape.stride)
-    moved: ir_word_op(m, a, IROp.Sub, last, index)
-    width: ir_word_const(m, a, shape.stride)
-    bytes: ir_word_op(m, a, IROp.Mul, moved, width)
-    _: ir_runtime(m, a, "jet_rt_mem_move", [Int]{entry, from, bytes}, -1)
-    ir_emit(a.f, IROp.Store, -1, set, 0, last, a.line)
-    if hash >= 0 {
-        capacity: ir_load_word(m, a, set, 8)
-        counted: ir_bool_op(m, a, IROp.Gt, capacity, none)
-        ir_open_if(a.f, counted, a.line)
-        trailer: ir_map_trailer(m, a, shape, data, capacity)
-        ir_map_slot_remove(m, a, trailer, hash, index)
-        ir_end(a.f, a.line)
-    }
+    keeps: ir_rank_type(m.types[set_row].ty)
+    ir_map_close_gap(m, a, shape, set, data, entry, index, hash, keeps)
     ir_emit(a.f, IROp.Return, -1, boxed, -1, -1, a.line)
 }
 

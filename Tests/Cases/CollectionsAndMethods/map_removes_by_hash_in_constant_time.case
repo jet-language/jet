@@ -1,0 +1,30 @@
+# A Map or Set of hashing keys (Int, String) removes by moving its last
+# entry into the gap (BuildMaps ir_map_close_gap), so a removal shifts no
+# entries and renumbers no index. The program removes 150,000 of 300,000 Int
+# keys and a third of 100,000 String keys and Set members; shifting the later
+# entries and renumbering the whole index on each removal would move about
+# 10^11 words, so finishing under each step's timeout proves removal does
+# not. Ordered reads still see ascending keys after removals from the sorted
+# entries and the tail, a moved key is still found, and a Rank keeps its
+# order.
+fixture: MapRemovesByHashInConstantTime.fixture
+env: NO_COLOR=1
+step: jet run -O0 main.jet
+timeout: 60s
+exit: 0
+stdout: = map_removes_by_hash_in_constant_time.out
+step: jet run -O1 main.jet
+timeout: 60s
+exit: 0
+stdout: = map_removes_by_hash_in_constant_time.out
+step: jet run -O2 main.jet
+timeout: 60s
+exit: 0
+stdout: = map_removes_by_hash_in_constant_time.out
+step: jet build main.jet
+timeout: 120s
+exit: 0
+step: .jet/build/main
+timeout: 60s
+exit: 0
+stdout: = map_removes_by_hash_in_constant_time.out

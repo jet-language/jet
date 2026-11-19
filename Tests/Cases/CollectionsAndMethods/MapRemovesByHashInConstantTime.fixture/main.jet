@@ -1,0 +1,86 @@
+// Maps and Sets of hashing keys (Int, String) remove by moving the last
+// entry into the gap: removing half of 300,000 Int keys, then a third of
+// 100,000 String keys and Set members, ends inside the step timeout, where
+// shifting the later entries and renumbering the whole index on each
+// removal would move about 10^11 words. Every read still sees the remaining
+// keys in key order, a removed key is gone, a moved one is found, and a Rank
+// keeps its order.
+run: fn() {
+    count: 300000
+    numbers := [Int:Int]{}
+    loop i in 0..<count {
+        key: (i * 7919) % count
+        numbers[key] = key * 2
+    }
+    settled := 0
+    loop (key, value) in numbers -> settled += value - key
+    removed := 0
+    loop i in 0..<count {
+        key: (i * 7919) % count
+        if key % 2 == 1 {
+            gone: numbers.remove(key) ?? -1
+            if gone == key * 2 -> removed += 1
+        }
+    }
+    hits := 0
+    loop key in 0..<count {
+        if (numbers.get(key) ?? -1) == key * 2 -> hits += 1
+    }
+    print("ints: {numbers.len()} removed {removed} hits {hits} settled {settled}")
+    print("ordered: {ascending(numbers.keys().to_list())} {key_sum(numbers)}")
+    least: numbers.pop_first() ?? -1
+    middle: numbers.remove(count /% 2) ?? -1
+    top: numbers.remove(count - 2) ?? -1
+    missing: numbers.remove(count /% 2) ?? -1
+    numbers[1] = 7
+    numbers[count + 1] = 9
+    keys: numbers.keys().to_list()
+    print("ends: {least} {middle} {top} {missing} len {numbers.len()} ascending {ascending(keys)}")
+    print("first: {keys[0]} {keys[1]} {keys[2]} last {keys[keys.len() - 1]} {keys[keys.len() - 2]}")
+    loop (key, value) in numbers {
+        if key == 1 || key == count + 1 -> print("entry {key} {value}")
+    }
+
+    words := [String:Int]{}
+    loop i in 0..<100000 -> words["w{i}"] = i
+    loop i in 0..<100000 {
+        if i % 3 == 0 {
+            gone: words.remove("w{i}") ?? -1
+            if gone != i -> print("lost w{i}")
+        }
+    }
+    total := 0
+    in_order := true
+    previous := ""
+    loop (key, value) in words {
+        if key <= previous -> in_order = false
+        previous = key
+        total += value
+    }
+    print("words: {words.len()} {total} {in_order} {words.get("w1") ?? -1} {words.has_key("w3")} {words.get("w99998") ?? -1}")
+
+    members := Set<String>.new()
+    loop i in 0..<100000 { members.add("m{i}") }
+    loop i in 0..<100000 {
+        if i % 3 == 0 -> members.remove("m{i}")
+    }
+    print("members: {members.len()} {members.has("m1")} {members.has("m3")} {members.has("m99998")}")
+
+    ranked := Rank.from([5, 1, 4, 2, 3])
+    ranked.remove(1)
+    ranked.add(0)
+    print("rank: {ranked.to_list()}")
+}
+
+ascending: fn(keys: [Int]) -> Bool {
+    loop i in 1..<keys.len() {
+        if keys[i - 1] >= keys[i] -> return false
+    }
+    true
+}
+
+key_sum: fn(numbers: [Int:Int]) -> Int {
+    total := 0
+    loop (key, _) in numbers -> total += key
+    total
+}

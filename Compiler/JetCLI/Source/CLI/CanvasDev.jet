@@ -53,6 +53,9 @@ use {
 // The dev loop checks the sources for a change every this many clock ticks.
 JET_CLI_CANVAS_STAMP_TICKS: 3
 
+// The stop reason of a Ctrl-C (the SIGINT handler of jet_cli_dev_canvas_loop).
+JET_CLI_CANVAS_INTERRUPTED: "interrupted"
+
 // The plan of `jet dev <file> --canvas`: its own flags, the project
 // environment boundary, then the entry check `jet dev` makes. A refused check
 // (a missing file among them) is the plan, and no Canvas starts.
@@ -127,6 +130,12 @@ jet_cli_dev_canvas_loop: fn(file: String, color: Bool, host: String, port: Int) 
         cli_term.eprint("Canvas: {url}")
     }
     stop: Shared{JetCLIDevWebState{stopped: None}}
+    // Ctrl-C stops the session itself, so it works where the process started
+    // with SIGINT ignored (a background job's): the dev clock sees the stop,
+    // ends the debug sessions and their programs, and exits 130.
+    cli_sys.on_interrupt(fn() {
+        jet_cli_dev_web_stop(stop, JET_CLI_CANVAS_INTERRUPTED)
+    })
     debugs := jet_cli_canvas_debug_sessions()
     profiles := jet_cli_canvas_profiles()
     task.group dev_canvas {
@@ -163,6 +172,11 @@ jet_cli_dev_canvas_loop: fn(file: String, color: Bool, host: String, port: Int) 
             stamp = now
             cli_term.eprint("jet dev: change detected, checking again")
             jet_cli_dev_canvas_project(state, file, source_id)
+        }
+        if jet_cli_dev_web_stopped(stop) == .Val(reason) && reason == JET_CLI_CANVAS_INTERRUPTED {
+            debugs.release_all()
+            profiles.release()
+            cli_process.exit(130)
         }
         serving.join().drop("the Canvas server's stop is reported from its state")
     }

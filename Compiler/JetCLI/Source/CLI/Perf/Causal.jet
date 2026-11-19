@@ -203,7 +203,13 @@ jet_cli_perf_causal_section: fn(source: &&String, experiments: &&[JetCLIPerfExpe
                 ),
             )
         }
-        found.sort_by(fn(left: JetCLIPerfCausalLine, right: JetCLIPerfCausalLine) { right.gain <=> left.gain })
+        // Ranked by the gain the experiments support: the interval's low end
+        // first, so a line whose wide interval reaches a high point gain (noise
+        // under load) never outranks one whose gain is established; the point
+        // gain breaks ties.
+        found.sort_by(fn(left: JetCLIPerfCausalLine, right: JetCLIPerfCausalLine) {
+            if right.low != left.low -> right.low <=> left.low else -> right.gain <=> left.gain
+        })
         ranked += found.len()
         rows.push(
             CanonicalJSON.Object(
