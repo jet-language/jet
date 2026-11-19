@@ -746,19 +746,22 @@ core_threads_unexported: fn(exports: String, threads: String) -> Bool {
 runtime_sources: fn(listed: String) -> [String] {
     paths := [String]{}
     loop row in listed.split("\n") {
-        line: row.trim()
-        if line == "" || line.starts_with("#") -> next
+        trimmed: row.trim()
+        if trimmed == "" || trimmed.starts_with("#") -> next
+        line: trimmed.copy()
         if paths.contains(line) -> fail("`{RUNTIME_SOURCES}` lists `{line}` twice")
-        paths.push(line.copy())
+        paths.push(line)
     }
     if paths.len() == 0 -> fail("`{RUNTIME_SOURCES}` lists no source")
     paths
 }
 
-// An import of Core: `core.x` or `alias: core.x`, member list or not.
+// An import of Core: `core.x` or `alias: core.x`, member list or not, with
+// any surrounding spaces ignored.
 core_import: fn(spec: String) -> Bool {
-    head: spec.partition(": ")
-    target: if head.tail != "" && re.full_match(Regex{"[A-Za-z_][A-Za-z0-9_]*"}, head.head) -> head.tail else -> spec
+    text: spec.trim()
+    head: text.partition(": ")
+    target: if head.tail != "" && re.full_match(Regex{"[A-Za-z_][A-Za-z0-9_]*"}, head.head) -> head.tail else -> text
     target.starts_with("core.")
 }
 
@@ -779,7 +782,7 @@ unit_body: fn(text: String, uses: &[String]) -> String {
                 next
             }
             row: line.trim()
-            if depth == 0 && row != "" && !row.starts_with("//") && core_import(row) {
+            if depth == 0 && row != "" && !row.starts_with("//") && core_import(line) {
                 import: "use {row}"
                 if !uses.contains(import) -> uses.push(import)
             }

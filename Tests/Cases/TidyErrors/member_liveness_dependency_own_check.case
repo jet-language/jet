@@ -1,0 +1,13 @@
+# Claim: a package's unread fields are judged only by its own check. An
+# application that uses the package never reports them, since the dependency's
+# own modules may read what this program never loads.
+fixture: MemberLivenessDependency.fixture
+env: NO_COLOR=1
+step: jet check app/main.jet
+exit: 0
+stderr: !~ "Reading.source" # the dependency's field is not judged here
+stderr: !~ "[jet.UnreadField]" # the application reads every field it declares
+step: jet check meters
+exit: 1
+stderr: ~ "Field `Reading.source` is never read" # the dependency's own check judges it
+stderr: ~ "1 problem found" # only that field is reported

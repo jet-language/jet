@@ -39,6 +39,9 @@ Every brief, and every message that revives a worker, carries these rules:
    Closer runs that line and meets the criterion from it.
 7. Messages to the orchestrator are one line each: a submission staged, a
    blocker, an already-met proof, or ballot facts.
+8. Every message to a worker, and every message that revives one, carries its
+   next queued items, so its run never ends with nothing to do. A worker
+   whose run ends empty is an orchestrator failure (AGENTS.md, Delegation).
 
 ## Already-met claims
 

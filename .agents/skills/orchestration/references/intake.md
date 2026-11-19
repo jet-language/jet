@@ -11,8 +11,18 @@ of a test it wrote, one at a time, under `nice`, with the admitted seed or the
 batch compiler the orchestrator last announced. A submission that touches
 `Compiler/` or `Core/` also runs the three guards a census most often fails
 on, on the worker's composed tree: `Tests/Guards/closed_lists.jet`,
-`Tests/Guards/copy_ratchet.jet` and `Tests/Guards/core_builtins_door.jet`.
-Anything that needs a freshly built compiler goes in the submission's `tests`.
+`Tests/Guards/copy_ratchet.jet` and `Tests/Guards/core_builtins_door.jet`,
+plus `Tests/Guards/comment_spellings.jet` when it touches comment markers or
+generated Jet text, and writes their results in its `msg`. The orchestrator
+refuses such a submission at intake when the results are missing; a census
+should never be the first to find a guard row. Anything that needs a freshly
+built compiler goes in the submission's `tests`.
+
+A package's unit tests run with the environment the landing suite gives them:
+`JET`, `JET_BIN` and `JET_COMPILER_IDENTITY` naming the batch compiler and
+`JET_TOOLCHAIN_ROOT` the checked tree. A failure that names a missing
+compiler identity or a toolchain input outside the tree is the run's setup,
+never a finding to record.
 
 The worker never builds the compiler and never runs the submission gate,
 suites, censuses or chains. It submits and moves straight on to its next task.

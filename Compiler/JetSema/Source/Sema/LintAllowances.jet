@@ -1,6 +1,7 @@
 // Site rungs: `#Allow(jet.UnusedParameter, "why")` on a
-// statement, a function or method, or a struct field silences that one lint
-// inside its target. The lint is named by its diagnostic type path.
+// statement, a function or method, a struct field, or a struct or enum type
+// silences that one lint inside its target. The lint is named by its
+// diagnostic type path.
 // MarkerRules validates the reason (L3103) and refuses `jet.AllowReason`
 // (E0355); this pass only applies the allowance.
 use jet_foundation.[
@@ -58,6 +59,7 @@ sema_lint_allowance_item: fn(item: Item, segments: [SemaSourceSegment], allowanc
             sema_lint_allowance_push(function.markers, function.span, segments, allowances)
         }
         .Struct(definition) -> {
+            sema_lint_allowance_push(definition.type_markers, definition.span, segments, allowances)
             loop field in definition.fields {
                 end := field.ty_span.end
                 if field.computed == .Val(computed) -> end = expr_span(computed).end
@@ -70,6 +72,7 @@ sema_lint_allowance_item: fn(item: Item, segments: [SemaSourceSegment], allowanc
             }
         }
         .Enum(definition) -> {
+            sema_lint_allowance_push(definition.type_markers, definition.span, segments, allowances)
             sema_lint_allowance_functions(definition.methods, segments, allowances)
             loop implementation in definition.trait_impls {
                 sema_lint_allowance_functions(implementation.methods, segments, allowances)

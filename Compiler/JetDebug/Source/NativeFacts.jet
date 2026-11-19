@@ -1107,9 +1107,9 @@ native_function_at: fn(image: NativeImage, pc: Int) -> NativeFunction? Never! {
     image: native_image_of_types(X64ModuleDebug{directory: "", files: [String]{}, types: types})
     ok := native_low_bytes(1, 8)
     ok.extend(native_low_bytes(3, 8))
-    err := native_low_bytes(0, 8)
-    err.extend(native_low_bytes(1, 8))
-    memory: NativeMemory{trace: None, blocks: [NativeBlock]{NativeBlock{address: 4096, bytes: ok}, NativeBlock{address: 8192, bytes: err}}}
+    failed := native_low_bytes(0, 8)
+    failed.extend(native_low_bytes(1, 8))
+    memory: NativeMemory{trace: None, blocks: [NativeBlock]{NativeBlock{address: 4096, bytes: ok}, NativeBlock{address: 8192, bytes: failed}}}
     assert_eq(native_render(image, memory, 7, native_low_bytes(4096, 8), 0, 0), String?{Val("Ok(3)")})
     assert_eq(native_render(image, memory, 7, native_low_bytes(8192, 8), 0, 0), String?{Val("Err(ParseError.Bad)")})
 }

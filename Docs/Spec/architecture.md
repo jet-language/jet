@@ -326,8 +326,14 @@ whole.
 functions as the Core library's check left them, each as the packet a
 compiler thread hands the module pass, its ids written as keys, with the
 facts of that check's compile (target, profile, OS, keep-going and test
-modes). The library's check runs those checks on the compiler threads; each
-thread records the codecs and derived methods its checks demand in rows of
+modes). A record carries the local values its check computed while
+compiling, so a compile that loads it and one that checks the body from
+text lower the same code. The check's compile-time code runs over the
+runtime pack prelinked at the run base in memory, as the image of a
+runtime without Core, before `jet_runtime.image` exists, and lowers each
+Core function it calls from its text. The library's check runs those
+checks on the compiler threads; each thread records the codecs and
+derived methods its checks demand in rows of
 its own, and each packet carries its check's demand. The file holds one
 record per function, the last check of it, in key order behind a table of
 key and record offsets and the keys, which sit together ahead of the
