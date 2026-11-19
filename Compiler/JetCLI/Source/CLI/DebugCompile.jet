@@ -10,7 +10,10 @@
 // which opens in the background from the session's start
 // (jet_cli_debug_eval_held_start), checks that function and the held IR
 // program builds it alone, with no compile of the program
-// (jet_cli_debug_eval_held); until it is open, and where it doesn't
+// (jet_cli_debug_eval_held). Its code calls the image's functions, which
+// compile no copy to compare with the image's, so the held check answers
+// only while it read the sources the session built the image from
+// (JetCLIDebugEvalHeldSlot.same); until it is open, and where it doesn't
 // answer, one compile builds it and asks the checker its type and any
 // effect it uses (jet_cli_debug_eval_direct).
 // When those locals are all of the primitive types and the expression names
@@ -31,7 +34,7 @@ use {
     jet_debug.[NATIVE_EVAL_CAPTURES, NativeEval, NativeEvalBinder, NativeEvalPart, NativeEvalRefused, NativeEvaluator, NativeFixEdit, native_eval_name_byte, native_eval_names]
     jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverEvalAsk, JetDriverHeldEval, JetDriverIceRow, JetDriverLoweringInputs, jet_driver_check_failures, jet_driver_checked_declarations, jet_driver_declares_workspace, jet_driver_entry_root_path, jet_driver_held_eval_check, jet_driver_held_eval_open, jet_driver_inline_package, jet_driver_is_project_configuration]
     jet_eval.[jet_eval_native_add, jet_eval_native_wrapper]
-    jet_foundation.[COMMENT_PREFIX, BuildOptions, CompilerThreads, DeclTable, DeepChecks, FnBody, StmtKind, TTypeDef, Type, body_type, deep_checks_flags, foundation_named_type, name_rows_get_text, type_name, type_unqualified_nominals]
+    jet_foundation.[COMMENT_PREFIX, BuildOptions, CompilerThreads, DeclTable, DeepChecks, FnBody, StmtKind, TTypeDef, Type, body_type, deep_checks_flags, foundation_named_type, name_rows_get_text, sha256_hex, type_name, type_unqualified_nominals]
     jet_ir.[IRBuildResult, IRModule, IRProgram, IRTypeKind, ir_build_held_root, ir_eval_place_refusal, ir_held_program, ir_module_new, ir_pointer_row, ir_untag, ir_x64_compile_module_logged, ir_x64_debug_program]
     jet_parser.[parse_type_text]
     jet_sema.[SemaEvalProbeAnswer, sema_eval_probe_function, sema_eval_probe_parse, sema_ownership_type_is_copy]
@@ -779,12 +782,20 @@ JetCLIDebugEvalHeldStamp: struct {
 // which no open tries again until they change, the items of the sources its
 // last cut compile read (jet_cli_debug_eval_sliced) and its Core binding,
 // None until its first evaluation decides it (jet_cli_debug_eval_core).
+// `built`: whether the session built its image from the sources the held
+// check's first open read, which `image` holds once that open is done, each
+// file's sha256_hex by its path; `same`: whether the held check read those
+// sources, so its calls of the image's functions run the code its source
+// says (jet_cli_debug_eval_held_in).
 JetCLIDebugEvalHeldSlot: struct {
     held: JetCLIDebugEvalHeld?{None},
     opening: Bool{false},
     missed: JetCLIDebugEvalHeldStamp?{None},
     declared: JetCLIDebugEvalDeclared?{None},
     core: Bool?{None},
+    built: Bool{false},
+    image: [String:String]?{None},
+    same: Bool{false},
 }
 
 // A session's held check `slot` and the Condition its open wakes `opened`
@@ -795,9 +806,13 @@ JetCLIDebugEvalHeldShared: struct {
     opened: Condition,
 }
 
-// A session's empty held check, for JetCLIDebugEvaluator.held.
-jet_cli_debug_eval_held_slot: fn() -> JetCLIDebugEvalHeldShared {
-    JetCLIDebugEvalHeldShared{slot: Shared{JetCLIDebugEvalHeldSlot{}}, opened: Condition.new()}
+// A session's empty held check, for JetCLIDebugEvaluator.held. `built`: the
+// session builds the program's image as the held check first opens
+// (jet_cli_debug_eval_held_start before the image's build), so both read
+// the same sources. A session that runs an image built before it has no
+// held check: nothing says which sources that image was built from.
+jet_cli_debug_eval_held_slot: fn(built: Bool{false}) -> JetCLIDebugEvalHeldShared {
+    JetCLIDebugEvalHeldShared{slot: Shared{JetCLIDebugEvalHeldSlot{built: built}}, opened: Condition.new()}
 }
 
 // Starts opening the session's held check `held` of the program of `entry`
@@ -816,7 +831,7 @@ jet_cli_debug_eval_held_start: fn(held: JetCLIDebugEvalHeldShared, entry: String
     }
     options: jet_cli_debug_eval_options(entry, argv, color: color) ?? {
         unopened: JetCLIDebugEvalHeldOpen{held: None, missed: None}
-        jet_cli_debug_eval_held_done(held, unopened)
+        jet_cli_debug_eval_held_done(held, unopened, [String:String]?{None})
         return
     }
     opening: task jet_cli_debug_eval_held_prepare(held, "{entry}", options, color: color)
@@ -825,13 +840,14 @@ jet_cli_debug_eval_held_start: fn(held: JetCLIDebugEvalHeldShared, entry: String
 
 // Whether the held check `held` is to be opened now
 // (jet_cli_debug_eval_held_start), when it is marked opening and a stale
-// one is dropped.
+// one is dropped. A session that didn't build its image opens none.
 jet_cli_debug_eval_held_claim: fn(held: JetCLIDebugEvalHeldShared) -[FS]> Bool Never! {
     permit := held.slot.guard_edit()
-    if permit.value.opening || !jet_cli_debug_eval_held_stale(permit.value.held) || jet_cli_debug_eval_held_missed(permit.value.missed) {
+    if !permit.value.built || permit.value.opening || !jet_cli_debug_eval_held_stale(permit.value.held) || jet_cli_debug_eval_held_missed(permit.value.missed) {
         return false
     }
     permit.value.held = None
+    permit.value.same = false
     permit.value.opening = true
     true
 }
@@ -843,17 +859,55 @@ jet_cli_debug_eval_held_claim: fn(held: JetCLIDebugEvalHeldShared) -[FS]> Bool N
 jet_cli_debug_eval_held_prepare: fn(held: JetCLIDebugEvalHeldShared, entry: String, options: BuildOptions, color: Bool{false}) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never! {
     opening: task jet_cli_debug_eval_held_open(entry, color, options)
     opened: opening.join() ?? JetCLIDebugEvalHeldOpen{held: None, missed: None}
-    jet_cli_debug_eval_held_done(held, opened)
+    read: jet_cli_debug_eval_image(opened)
+    jet_cli_debug_eval_held_done(held, opened, read)
 }
 
-// Ends the opening of the held check `held` with the open `opened`, and
-// wakes the evaluations waiting for it (jet_cli_debug_eval_held_wait).
-jet_cli_debug_eval_held_done: fn(held: JetCLIDebugEvalHeldShared, opened: &&JetCLIDebugEvalHeldOpen) Never! {
+// Ends the opening of the held check `held` with the open `opened`, whose
+// sources read as the digests `read` (jet_cli_debug_eval_image), and wakes
+// the evaluations waiting for it (jet_cli_debug_eval_held_wait). The first
+// open of a session that built its image keeps them as the image's; when
+// it read none, which sources the image was built from is unknown, and the
+// session opens no other.
+jet_cli_debug_eval_held_done: fn(held: JetCLIDebugEvalHeldShared, opened: &&JetCLIDebugEvalHeldOpen, read: &&[String:String]?) Never! {
     permit := held.slot.guard_edit()
+    first: permit.value.built && permit.value.image == None
+    permit.value.same = opened.held != None && (first || jet_cli_debug_eval_image_same(permit.value.image, read))
+    if first {
+        permit.value.built = read != None
+        permit.value.image = read.move()
+    }
     permit.value.held = opened.held.move()
     permit.value.missed = opened.missed.move()
     permit.value.opening = false
     held.opened.notify_all()
+}
+
+// The digests (sha256_hex, by path) of the sources the open `opened` read:
+// its held check's, or the ones it didn't open from; None when it read none.
+jet_cli_debug_eval_image: fn(opened: JetCLIDebugEvalHeldOpen) -> [String:String]? Never! {
+    if opened.held == .Val(open) -> return Val(jet_cli_debug_eval_image_digests(open.stamp))
+    if opened.missed == .Val(missed) -> return Val(jet_cli_debug_eval_image_digests(missed))
+    None
+}
+
+jet_cli_debug_eval_image_digests: fn(stamp: JetCLIDebugEvalHeldStamp) -> [String:String] Never! {
+    digests := [String:String]{}
+    loop (file, source) in stamp.sources -> digests["{file}"] = sha256_hex(source)
+    digests
+}
+
+// Whether the digests `read` are the ones of the sources the image was
+// built from, `image`: the same files, each reading as it did.
+jet_cli_debug_eval_image_same: fn(image: [String:String]?, read: [String:String]?) -> Bool Never! {
+    kept: image ?? return false
+    now: read ?? return false
+    if kept.len() != now.len() -> return false
+    loop (file, digest) in now {
+        was: kept.get(file) ?? return false
+        if was != digest -> return false
+    }
+    true
 }
 
 // Waits while the held check `held` opens (jet_cli_debug_eval_held_start).
@@ -883,9 +937,10 @@ JetCLIDebugEvalHeldOpen: struct {
 // built in its held IR program: no compile of the program. A held check
 // whose sources changed opens again (jet_cli_debug_eval_held_start). The
 // built expression, or the debugger's refusal of an effect it uses; None,
-// so the compiles answer, while the held check isn't open, when no checked
-// module is `path`'s, for any other refusal, a value that can fail, or a
-// build that doesn't finish.
+// so the compiles answer, while the held check isn't open or didn't read
+// the sources the image was built from, when no checked module is
+// `path`'s, for any other refusal, a value that can fail, or a build that
+// doesn't finish.
 jet_cli_debug_eval_held: fn(shared: JetCLIDebugEvalHeldShared, entry: String, argv: [String], color: Bool, path: String, text: String, params: [NativeEvalBinder]) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval? NativeEvalRefused! {
     jet_cli_debug_eval_held_start(shared, entry, argv, color: color)
     permit := shared.slot.guard_edit()
@@ -893,7 +948,7 @@ jet_cli_debug_eval_held: fn(shared: JetCLIDebugEvalHeldShared, entry: String, ar
 }
 
 jet_cli_debug_eval_held_in: fn(slot: &JetCLIDebugEvalHeldSlot, path: String, text: String, params: [NativeEvalBinder]) -[FS, Env, Time, Exec.Args]> NativeEval? NativeEvalRefused! {
-    if slot.opening || slot.held == None -> return Ok(None)
+    if slot.opening || slot.held == None || !slot.same -> return Ok(None)
     taken: jet_cli_debug_eval_held_take(slot.held.move())
     slot.held = None
     run: jet_cli_debug_eval_held_run(taken.move(), path, text, params)
@@ -952,8 +1007,12 @@ jet_cli_debug_eval_held_run: fn(held: &&JetCLIDebugEvalHeld?, path: String, text
 jet_cli_debug_eval_held_value: fn(function: FnBody) -> Type? Never! {
     if function.body.len() == 0 -> return None
     row: function.body[function.body.len() - 1] - function.tree.stmt_base
-    if function.tree.stmts[row] == .Let(_, _, init, _, _, _) -> return Val(body_type(function.tree, init))
-    if function.tree.stmts[row] == .ExprStmt(discarded, _) -> return Val(body_type(function.tree, discarded))
+    if function.tree.stmts[row] == .Let(_, _, init, _, _, _) {
+        return Val(body_type(function.tree, init))
+    }
+    if function.tree.stmts[row] == .ExprStmt(discarded, _) {
+        return Val(body_type(function.tree, discarded))
+    }
     None
 }
 

@@ -1,0 +1,7 @@
+use process: core.process
+
+run: fn() {
+    print("stopping myself")
+    sent: process.shell("kill -TERM {process.current_pid()}").run() ?? panic("sh did not start: {err}")
+    print("still running after {sent.code}")
+}

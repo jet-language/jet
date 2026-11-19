@@ -251,7 +251,7 @@ jet_cli_debug_break: fn(spec: String) -> NativeBreak? Never! {
 // O0, so it opens while the image builds.
 jet_cli_debug_build: fn(entry: String, scratch: String, deep_checks: DeepChecks, breaks: [NativeBreak], program_args: [String], dap: Bool, env: [String]?, record: JetCLIDebugRecord?, color: Bool) -[FS, Env, Exec, IO, Net, Time, Rand, FFI.Asm]> JetCLIPlan Never! {
     source: cli_files.read(entry) ?? return jet_cli_fail("E2105", "couldn't read `{entry}`: {err}", jet_cli_why("E2105"), "check the path, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
-    held: jet_cli_debug_eval_held_slot()
+    held: jet_cli_debug_eval_held_slot(built: true)
     jet_cli_debug_eval_held_start(held, entry, jet_cli_debug_eval_argv(deep_checks, 0), color: color)
     out_dir: cli_files.join(scratch, "out")
     built: cli_process.cmd(native_debug_build_argv(cli_sys.executable(), entry, out_dir, deep_checks)).stdout(.Capture).stderr(.Capture).run() ?? return jet_cli_fail("E2105", "couldn't run the debug build: {err}", jet_cli_why("E2105"), "check that this `jet` can run, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
@@ -264,7 +264,8 @@ jet_cli_debug_build: fn(entry: String, scratch: String, deep_checks: DeepChecks,
 // Debug the built `image`, whose `run` is in the source file `entry` with
 // the text `lines`, run with `program_args` and the environment `env` (None:
 // jet's own), with the session's held check `held`, which starts opening
-// here unless it is already. An `entry` of "" is the source the image's
+// here unless it is already or the session didn't build the image
+// (jet_cli_debug_eval_held_slot). An `entry` of "" is the source the image's
 // line table names, read if it is there. A replay (`env` names JET_REPLAY)
 // and a recording (`record`) need an image that links the runtime's
 // observation start, where both begin; a recording is published when the
@@ -326,8 +327,9 @@ jet_cli_debug_attach: fn(pid: Int, scratch: String, deep_checks: DeepChecks, col
     source_file: session.run_source()
     level: session.level()
     argv: jet_cli_debug_eval_argv(deep_checks, level)
+    // The process's image was built before the session, so evaluations
+    // compile with no held check (jet_cli_debug_eval_held_slot).
     held: jet_cli_debug_eval_held_slot()
-    jet_cli_debug_eval_held_start(held, source_file, argv, color: color)
     session.evaluate_with(JetCLIDebugEvaluator{entry: source_file, argv: argv, color: color, held: held})
     lines: (cli_files.read(source_file) ?? "").split("\n").to_list()
     file: cli_files.basename(source_file)

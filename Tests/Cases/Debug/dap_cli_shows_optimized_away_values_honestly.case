@@ -1,0 +1,45 @@
+# An -O2 image keeps no place for `d` at line 21: the optimizer folds it
+# into the sum. Over `jet debug --dap` the frame is `run` at line 21; its
+# Variables list the locals that have a value there, with it, and not `d`;
+# `evaluate` of `d` is refused, saying it has no value here, and an
+# expression of the locals that do answers.
+fixture: ReplayReverse.fixture
+env: NO_COLOR=1
+step: jet build -O2 prog.jet
+exit: 0
+session dap content-length: jet debug --dap {work}/.jet/build/prog
+env: PATH={work}/no-tools
+send dap: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\"}}"
+send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{\"program\":\"{work}/.jet/build/prog\",\"stopOnEntry\":false,\"args\":[]}}"
+recv dap until $.event = "initialized" timeout 30s every 100ms
+send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/prog.jet\"},\"breakpoints\":[{\"line\":21}]}}"
+recv dap until $.request_seq = 3 timeout 30s every 100ms
+json: stdout doc $.body.breakpoints[0].verified = true
+send dap: "{\"seq\":4,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{}}"
+recv dap until $.event = "stopped" timeout 30s every 100ms
+send dap: "{\"seq\":5,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.request_seq = 5 timeout 30s every 100ms
+capture: frame stdout doc $.body.stackFrames[0].id
+json: stdout doc $.body.stackFrames[0].name = "run"
+json: stdout doc $.body.stackFrames[0].line = 21
+send dap: "{\"seq\":6,\"type\":\"request\",\"command\":\"scopes\",\"arguments\":{\"frameId\":{cap:frame}}}"
+recv dap until $.request_seq = 6 timeout 30s every 100ms
+capture: scope stdout doc $.body.scopes[0].variablesReference
+send dap: "{\"seq\":7,\"type\":\"request\",\"command\":\"variables\",\"arguments\":{\"variablesReference\":{cap:scope}}}"
+recv dap until $.request_seq = 7 timeout 30s every 100ms
+json: stdout doc $.success = true
+json: stdout doc $.body.variables[?name="k"][0].value = "0"
+json: stdout doc $.body.variables[?name="total"][0].value = "0"
+stdout: !~ "\"name\":\"d\"" # a local with no value here is not listed with a made-up one
+send dap: "{\"seq\":8,\"type\":\"request\",\"command\":\"evaluate\",\"arguments\":{\"expression\":\"d\",\"frameId\":{cap:frame},\"context\":\"repl\"}}"
+recv dap until $.request_seq = 8 timeout 60s every 100ms
+json: stdout doc $.success = false
+stdout: ~ "`d` has no value here" # the refusal says why
+send dap: "{\"seq\":9,\"type\":\"request\",\"command\":\"evaluate\",\"arguments\":{\"expression\":\"total + k\",\"frameId\":{cap:frame},\"context\":\"repl\"}}"
+recv dap until $.request_seq = 9 timeout 60s every 100ms
+json: stdout doc $.success = true
+json: stdout doc $.body.result = "0" # total and k at the first pass
+send dap: "{\"seq\":10,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{}}"
+recv dap until $.request_seq = 10 timeout 30s every 100ms
+close dap
+exit: 0
