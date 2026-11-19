@@ -744,6 +744,13 @@ jet_cli_contributed_request: fn(owned_request: &&JetDriverCompileRequest, color:
     }
     contributed := response.request.move()
     plan: query.plan ?? return {request: contributed.move(), refusal: None}
+    // The modules `build: fn` generates (`meta.add`, `meta.rewrite_body`)
+    // load beside the sources of every compile of the package, so `jet run`
+    // and `jet dev` run the program `jet build` builds. A package build's
+    // target compile already carries them (Host.jet jet_cli_compile_target).
+    if contributed.generated_modules.len() == 0 {
+        contributed.generated_modules = query.generated.move()
+    }
     recorded: jet_cli_record_build_contributions(plan, package, color)
     if recorded == .Val(refusal) {
         // copy: `refusal` is a payload view of `recorded`.
