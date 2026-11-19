@@ -288,9 +288,12 @@ perf_samples_interval_us := PERF_SAMPLES_INTERVAL_US
 // The log spans file, `<samples>.spans`, -1 unless the start opened it.
 perf_spans_fd := I64{-1}
 
-// Nonzero while zones are recorded: a compiled zone site (JetIR
-// X64Select.jet ir_x64_zone_site) tests it through the runtime's data symbol
-// jet_rt_perf_zones and calls jet_perf_zone_open and _close only then.
+// Nonzero while zones are recorded (perf_zones_set). A compiled zone site
+// (JetIR X64Select.jet ir_x64_zone_site) of an image's code is a `jmp`
+// over its call that the runtime patches while zones are on
+// (jet_perf_zone_table); a site of code no table lists tests this word
+// through the runtime's data symbol jet_rt_perf_zones. Either calls
+// jet_perf_zone_open and _close only then.
 perf_zones_on := I64{0}
 
 // The rows not yet written to the spans file (perf_zone_row), 0 until the
@@ -824,7 +827,8 @@ perf_samples_exit: fn() {
 
 // What a row of the spans file (perf_spans_fd) is, in the high half of its
 // length word (perf_zone_row): a closed core.log span, a closed
-// core.perf.zone, a frame mark or a plotted value.
+// core.perf.zone, a frame mark, a plotted value, or zones that could not
+// turn on, the row's name saying why (perf_zones_refused).
 PERF_ZONE_LOG: I64{0}
 
 PERF_ZONE_ZONE: I64{1}
@@ -833,12 +837,239 @@ PERF_ZONE_FRAME: I64{2}
 
 PERF_ZONE_PLOT: I64{3}
 
+PERF_ZONE_REFUSED: I64{4}
+
+// The first zone-site table registered (jet_perf_zone_table), 0 until one
+// is: a program's own, which its `main` registers, so registering it while
+// zones are off is one store. Further tables (the libraries of an image
+// with more than one part) go on perf_zone_tables.
+perf_zone_table_first := I64{0}
+
+// The page of further zone-site tables, 0 until the second registers: the
+// count, then each table's address, PERF_ZONE_TABLES_ROOM at most.
+perf_zone_tables := I64{0}
+
+PERF_ZONE_TABLES_BYTES: I64{4096}
+
+PERF_ZONE_TABLES_ROOM: I64{500}
+
+// The lock word every patch of the sites holds (perf_zone_tables_turn),
+// 0 until the first turn of zones (perf_zones_set) allocates it, before it
+// stores the zones word.
+perf_zone_lock := I64{0}
+
+// The time root (HostTime.jet time_host_root) and the task key (Observe.jet
+// observe_task_key) the zone routes read, copied by perf_zone_roots_take
+// before zones first turn on. A zone route reads them only once it has
+// read the zones word on, so the routes keep neither init hook in an image
+// that no profiler observes; an observed image keeps both through the
+// code that turns zones on.
+perf_zone_clock := I64{0}
+
+perf_zone_task_key := I64{0}
+
+// A site's opcode byte: `jmp rel32` skips the call while zones are off;
+// `test eax, imm32`, over the same four bytes, falls into it while on.
+// One byte changes, so a thread running the site meets one whole
+// instruction or the other.
+PERF_ZONE_SITE_OFF: I64{233}
+
+PERF_ZONE_SITE_ON: I64{169}
+
+// Registers the zone-site table at `table` (JetBackend Image/Object.jet
+// x64_object_zone_sites): its site count, then per site a rel32 to its
+// function and the site's offset there. A program's `main` registers its
+// own before the entry runs, a library's constructor at load; the sites
+// turn on at once when zones already are. Registrations never overlap:
+// constructors run one at a time, and `main` registers before its entry
+// can start a thread. A turn of zones may run meanwhile (perf_zones_set):
+// the fence orders the table's store before the zones word's read, as the
+// turn orders the word's store before the tables' read, so a turn and a
+// registration racing see each other at least once.
+#Export(c) jet_perf_zone_table: fn(table: I64) {
+    if (perf_zone_table_first == I64{0}) {
+        #Unsafe("registrations never overlap (see above)") { perf_zone_table_first = table }
+    } else if (!perf_zone_tables_add(table)) {
+        if (perf_zones_on != I64{0}) { perf_zones_refused() }
+        return
+    }
+    // The swap of thread-owned TCB scratch is a full fence.
+    _ := sync_swap(wrapping(thread_base() + I64{232}), I64{0})
+    if (perf_zones_on != I64{0}) { perf_zone_tables_turn() }
+}
+
+// Adds `table` to perf_zone_tables, its page mapped at the first; false
+// when the page cannot be mapped or is full. The count is stored after the
+// address, so a turn reading them meanwhile reads only whole entries.
+perf_zone_tables_add: fn(table: I64) -> Bool {
+    tables := perf_zone_tables
+    if (tables == I64{0}) {
+        tables = alloc_map_try(PERF_ZONE_TABLES_BYTES)
+        if (tables == I64{0}) { return false }
+        #Unsafe("registrations never overlap, and a turn reads the page only once it is stored") {
+            perf_zone_tables = tables
+        }
+    }
+    count: sync_load(tables)
+    if (count >= PERF_ZONE_TABLES_ROOM) { return false }
+    sync_store(wrapping(wrapping(tables + I64{8}) + count * I64{8}), table)
+    sync_store(tables, wrapping(count + I64{1}))
+    true
+}
+
+// Copies the time root and the task key the zone routes read
+// (perf_zone_clock, perf_zone_task_key). The observation start and its
+// writer call it before they store the zones word or the spans file.
+perf_zone_roots_take: fn() {
+    #Unsafe("the observation start, before the entry, and then its writer store the same roots") {
+        perf_zone_clock = time_host_root
+        perf_zone_task_key = observe_task_key
+    }
+}
+
+// Turns zones on (`on` nonzero) or off: the zones word, then every
+// registered site (perf_zone_tables_turn). The observation start, before
+// the entry, and then the writer it starts turn zones, one at a time, so
+// the first turn allocates the patches' lock alone. The fence orders the
+// word's store before the tables' read (see jet_perf_zone_table).
+perf_zones_set: fn(on: I64) {
+    perf_zone_roots_take()
+    if (perf_zone_lock == I64{0}) {
+        lock: jet_rt_alloc(I64{8}, I64{8})
+        sync_store(lock, I64{0})
+        #Unsafe("turns run one at a time (see above), and a registration reads the lock only after the zones word") {
+            perf_zone_lock = lock
+        }
+    }
+    #Unsafe("turns run one at a time; the lock orders their patches with a registration's") {
+        perf_zones_on = on
+    }
+    _ := sync_swap(wrapping(thread_base() + I64{232}), I64{0})
+    perf_zone_tables_turn()
+}
+
+// Patches every registered site to the zones word as it stands under the
+// patches' lock: of a turn and a registration racing, the later word wins.
+// Where the system refuses to rewrite code, zones on says so
+// (perf_zones_refused).
+perf_zone_tables_turn: fn() {
+    lock: perf_zone_lock
+    sync_thread_lock(lock)
+    now_on: perf_zones_on != I64{0}
+    want: if (now_on) -> PERF_ZONE_SITE_ON else -> PERF_ZONE_SITE_OFF
+    patched := true
+    first: perf_zone_table_first
+    if (first != I64{0}) { patched = perf_zone_table_patch(first, want) }
+    tables: perf_zone_tables
+    count: if (tables == I64{0}) -> I64{0} else -> sync_load(tables)
+    index := I64{0}
+    loop index < count && patched {
+        patched = perf_zone_table_patch(sync_load(wrapping(wrapping(tables + I64{8}) + index * I64{8})), want)
+        index += I64{1}
+    }
+    sync_thread_unlock(lock)
+    if (!patched && now_on) { perf_zones_refused() }
+}
+
+// Writes opcode byte `want` into every site of the zone-site table at
+// `table` whose byte differs, the patches' lock held: through a writable
+// mapping of the site's page (mprotect, back to read and execute after),
+// or where the system refuses that, through /proc/self/mem. False when
+// both are refused.
+perf_zone_table_patch: fn(table: I64, want: I64) -> Bool {
+    page := I64{0}
+    mem := I64{-1}
+    refused := false
+    sites: rt_text_word(table)
+    at := I64{0}
+    loop at < sites && !refused {
+        field: wrapping(wrapping(table + I64{8}) + at * I64{8})
+        entry: rt_text_word(field)
+        rel: wrapping(((entry & I64{4294967295}) ~ I64{2147483648}) - I64{2147483648})
+        site: wrapping(wrapping(wrapping(field + I64{4}) + rel) + ((entry >> I64{32}) & I64{4294967295}))
+        if (rt_text_byte(site) != want) {
+            if (mem < I64{0}) {
+                target: site & I64{-4096}
+                if (target != page) {
+                    if (page != I64{0}) { _ := perf_zone_protect(page, I64{5}) }
+                    page = I64{0}
+                    if (perf_zone_protect(target, I64{7})) { page = target } else {
+                        mem = perf_zone_mem_open()
+                        refused = mem < I64{0}
+                    }
+                }
+            }
+            if (!refused && mem < I64{0}) { rt_text_put(site, want) }
+            if (!refused && mem >= I64{0}) { refused = !perf_zone_mem_put(mem, site, want) }
+        }
+        at += I64{1}
+    }
+    if (page != I64{0}) { _ := perf_zone_protect(page, I64{5}) }
+    if (mem >= I64{0}) { _ := observe_syscall(I64{3}, mem, I64{0}, I64{0}, I64{0}) }
+    !refused
+}
+
+// mprotect of the code page at `page` to `protection` (7: read, write and
+// execute; 5: read and execute); false when refused.
+perf_zone_protect: fn(page: I64, protection: I64) -> Bool {
+    observe_syscall(I64{10}, page, I64{4096}, protection, I64{0}) == I64{0}
+}
+
+// /proc/self/mem opened for writing, or a negative errno.
+perf_zone_mem_open: fn() -> I64 {
+    path: rt_static_text("/proc/self/mem")
+    name: observe_cstring(path)
+    // openat(AT_FDCWD, name, O_RDWR|O_CLOEXEC)
+    fd: observe_syscall(I64{257}, I64{-100}, name, I64{524290}, I64{0})
+    jet_rt_free(name, wrapping(rt_text_len(path) + I64{1}), I64{1})
+    fd
+}
+
+// Writes byte `value` at `address` through /proc/self/mem (`mem`), which
+// writes a read-only code page too; false when refused.
+perf_zone_mem_put: fn(mem: I64, address: I64, value: I64) -> Bool {
+    scratch: wrapping(thread_base() + I64{232})
+    rt_text_put(scratch, value)
+    #Unsafe("pwrite64 copies one byte from the thread-owned TCB scratch and retains no pointer") {
+        return os_syscall_i64(I64{18}, mem, scratch, I64{1}, address, I64{0}, I64{0}) == I64{1}
+    }
+}
+
+// Zones were asked for but their sites stay skipped: the system refuses to
+// rewrite the program's code. Says so on stderr and as a PERF_ZONE_REFUSED
+// row, which `jet perf` reports, so an empty timeline is never left
+// unexplained.
+perf_zones_refused: fn() {
+    reason: rt_static_text("the system refuses to rewrite the program's code (mprotect and /proc/self/mem), so zone sites stay skipped")
+    said: rt_static_text("jet perf: zones off: ")
+    _ := host_write_all(I64{2}, rt_text_data(said), rt_text_len(said))
+    _ := host_write_all(I64{2}, rt_text_data(reason), rt_text_len(reason))
+    newline: rt_static_text("\n")
+    _ := host_write_all(I64{2}, rt_text_data(newline), rt_text_len(newline))
+    now: perf_zone_now()
+    perf_zone_row(PERF_ZONE_REFUSED, now, now, reason)
+}
+
 // core.perf.zone(name): the zone's start on the monotonic clock while
 // zones are on (under `jet perf run`, or while `jet perf attach` holds them
-// on), 0 otherwise. A native zone site calls it only while perf_zones_on is
-// set, so a zone no profiler records costs its site's test.
+// on), 0 otherwise. A native zone site calls it only while zones are on,
+// so a zone no profiler records costs its site's skip.
 #Export(c) jet_perf_zone_open: fn() -> I64 {
-    jet_int_owned_from_i64(if (perf_zones_on == I64{0}) -> I64{0} else -> time_host_monotonic_i64())
+    jet_int_owned_from_i64(if (perf_zones_on == I64{0}) -> I64{0} else -> perf_zone_now())
+}
+
+// Now on the monotonic clock of the run's timeline (HostTime.jet
+// time_host_monotonic_i64), through the time root zones copied as they
+// turned on (perf_zone_clock): only a route that has read the zones word
+// on calls it.
+perf_zone_now: fn() -> I64 { time_host_monotonic_i64_at(perf_zone_clock) }
+
+// The observed task this thread runs (Observe.jet observe_current_task),
+// through the task key zones copied as they turned on
+// (perf_zone_task_key): 1 outside every task.
+perf_zone_task: fn() -> I64 {
+    current: jet_rt_tls_get(perf_zone_task_key)
+    if (current == I64{0}) -> I64{1} else -> current
 }
 
 // The close of the zone named by the borrowed text `name` that opened at
@@ -851,7 +1082,7 @@ PERF_ZONE_PLOT: I64{3}
     if (began == I64{0} || perf_zones_on == I64{0}) {
         return
     }
-    perf_zone_row(PERF_ZONE_ZONE, began, time_host_monotonic_i64(), name)
+    perf_zone_row(PERF_ZONE_ZONE, began, perf_zone_now(), name)
     // A closed zone is a progress point of the causal lens.
     perf_causal_progress(name)
 }
@@ -870,7 +1101,7 @@ PERF_ZONE_PLOT: I64{3}
     if (perf_zones_on == I64{0}) {
         return
     }
-    now: time_host_monotonic_i64()
+    now: perf_zone_now()
     perf_zone_row(PERF_ZONE_FRAME, now, now, rt_static_text("frame"))
 }
 
@@ -883,7 +1114,7 @@ PERF_ZONE_PLOT: I64{3}
     if (perf_zones_on == I64{0}) {
         return
     }
-    perf_zone_row(PERF_ZONE_PLOT, time_host_monotonic_i64(), rt_f64_bits(value), name)
+    perf_zone_row(PERF_ZONE_PLOT, perf_zone_now(), rt_f64_bits(value), name)
 }
 
 // One row of the spans file, the one timeline that log spans, zones, frame
@@ -897,7 +1128,7 @@ PERF_ZONE_PLOT: I64{3}
 perf_zone_row: fn(kind: I64, start: I64, end: I64, name: I64) {
     length: rt_text_len(name)
     size: I64{32} + length
-    task: if (scheduler_control_current() == I64{0}) -> I64{0} else -> observe_current_task()
+    task: if (scheduler_control_current() == I64{0}) -> I64{0} else -> perf_zone_task()
     buffer: perf_spans_buffer
     if (buffer == I64{0} || size > PERF_SPANS_BUFFER_BYTES) {
         row: jet_rt_alloc(size, I64{8})
@@ -1490,20 +1721,22 @@ perf_samples_open_beside: fn(samples: I64, suffix: I64) -> I64 {
 }
 
 // Keep `<samples>.spans` for the closed log spans' rows, with its buffer
-// (perf_zone_row); a file that cannot be opened (-1) leaves the spans
-// without rows, as before.
+// (perf_zone_row), and turn zones on; a file that cannot be opened (-1)
+// leaves the spans without rows and zones off, as before.
 perf_spans_fd_set: fn(fd: I64) {
     if (fd < I64{0}) {
         return
     }
+    // A log span's row (perf_zone_row) reads the task key from the file's store on.
+    perf_zone_roots_take()
     buffer: jet_rt_alloc(PERF_SPANS_HEADER_BYTES + PERF_SPANS_BUFFER_BYTES, I64{8})
     rt_text_store(buffer, I64{0})
     rt_text_store(wrapping(buffer + I64{8}), I64{0})
     #Unsafe("the observation start runs before the entry, whose span closes read it") {
         perf_spans_buffer = buffer
         perf_spans_fd = fd
-        perf_zones_on = I64{1}
     }
+    perf_zones_set(I64{1})
 }
 
 // The record of task `id`'s spawn, under `jet perf run`: the id in place of
@@ -3016,8 +3249,11 @@ perf_cfi_sort: fn(table: I64, count: I64) {
     if (timed) {
         // Its time from the process epoch, the clock zones, waits and log
         // spans are timed on (time_host_monotonic_i64); before that epoch is
-        // set no zone has opened, so -1 lies before every one.
-        epoch: time_host_epoch_ns()
+        // set no zone has opened, so -1 lies before every one. The epoch is
+        // read through the time root zones copied as they turned on
+        // (perf_zone_clock), 0 while they are off, so the handler keeps no
+        // time init hook in an image whose zones never turn on.
+        epoch: time_host_epoch_ns(perf_zone_clock)
         rt_text_store(wrapping(slot + wrapping(wrapping(count + I64{1}) * I64{8})), if (epoch == I64{0}) -> I64{-1} else -> wrapping(began - epoch))
         rt_text_store(wrapping(slot + wrapping(wrapping(count + I64{2}) * I64{8})), if (scheduler_control_current() == I64{0}) -> I64{0} else -> observe_current_task())
         count = wrapping(count + PERF_SAMPLES_TIMED)
@@ -3435,16 +3671,10 @@ perf_flight_zones: fn(path: I64) {
             // ftruncate: a later attach reads only its own rows.
             perf_spans_flush()
             _ := observe_syscall(I64{77}, perf_spans_fd, I64{0}, I64{0}, I64{0})
-            #Unsafe("the observation writer is the only thread that turns attached zones on or off") {
-                perf_zones_on = I64{1}
-            }
+            perf_zones_set(I64{1})
         }
     }
-    if (!wanted && perf_zones_on != I64{0}) {
-        #Unsafe("the observation writer is the only thread that turns attached zones on or off") {
-            perf_zones_on = I64{0}
-        }
-    }
+    if (!wanted && perf_zones_on != I64{0}) { perf_zones_set(I64{0}) }
     perf_spans_flush()
 }
 

@@ -19,11 +19,12 @@ time_host_root := I64{0}
     #Unsafe("runtime-init runs before any other thread exists") { time_host_root = root }
 }
 
-// The process epoch time_host_monotonic_sample takes, on the raw monotonic
-// clock in nanoseconds, or 0 until its first read sets it: only loads of
-// the root's published words, so a signal handler may call it.
-time_host_epoch_ns: fn() -> I64 {
-    root: time_host_root
+// The process epoch time_host_monotonic_sample_at takes on the time root
+// `root` (time_host_root, or a copy of it: PerfSamples.jet perf_zone_clock),
+// on the raw monotonic clock in nanoseconds, or 0 until its first read sets
+// it or with no root: only loads of the root's published words, so a signal
+// handler may call it.
+time_host_epoch_ns: fn(root: I64) -> I64 {
     if (root == I64{0} || sync_load(root) != I64{2}) { return I64{0} }
     wrapping(wrapping(sync_load(wrapping(root + I64{8})) * I64{1000000000}) + sync_load(wrapping(root + I64{16})))
 }
@@ -78,8 +79,12 @@ time_seconds_magnitude: fn(seconds: I64) -> I64 {
 
 // Both exact-Int Core samples and bounded Realtime samples borrow this one
 // process epoch. The returned TCB words hold elapsed seconds/nanoseconds.
-time_host_monotonic_sample: fn() -> I64 {
-    root: time_host_root
+time_host_monotonic_sample: fn() -> I64 { time_host_monotonic_sample_at(time_host_root) }
+
+// time_host_monotonic_sample on the time root `root`: time_host_root, or a
+// copy of it taken by a reader that must not keep jet_rt_time_host_init
+// itself (PerfSamples.jet perf_zone_clock).
+time_host_monotonic_sample_at: fn(root: I64) -> I64 {
     if sync_once_enter(root) {
         sample: time_clock_read(I64{1})
         sync_store(wrapping(root + I64{8}), sync_load(sample))
@@ -103,8 +108,12 @@ time_host_monotonic_sample: fn() -> I64 {
     sample
 }
 
-time_host_monotonic_i64: fn() -> I64 {
-    sample: time_host_monotonic_sample()
+time_host_monotonic_i64: fn() -> I64 { time_host_monotonic_i64_at(time_host_root) }
+
+// time_host_monotonic_i64 on the time root `root`
+// (time_host_monotonic_sample_at).
+time_host_monotonic_i64_at: fn(root: I64) -> I64 {
+    sample: time_host_monotonic_sample_at(root)
     seconds: sync_load(sample)
     nanos: sync_load(wrapping(sample + I64{8}))
     if (seconds > I64{9223372036} || (seconds == I64{9223372036} && nanos > I64{854775807})) {

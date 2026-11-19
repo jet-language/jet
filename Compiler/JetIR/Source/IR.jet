@@ -636,6 +636,11 @@ IRModule: struct {
     // core.perf zone sites are left out (X64Select ir_x64_zone_site), so no
     // profiler can turn them on.
     zones_stripped: Bool{false},
+    // A module an image links (IRProgram.zone_table): each zone site's skip
+    // is a `jmp rel32` its table lists for the runtime to patch (X64Select
+    // ir_x64_zones_skip, X64Module ir_x64_zone_sites); else the site tests
+    // the runtime's zones word.
+    zone_table: Bool{false},
     alloc_held: [Int:Int]{[Int:Int]{}},
     dropped_early: Bool{false},
     marked_inlined: Bool{false},

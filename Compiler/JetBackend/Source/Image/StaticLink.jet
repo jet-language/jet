@@ -267,6 +267,13 @@ LinkContext: struct {
     // assembled from pieces in input order (crti.o's prologue, crtn.o's
     // epilogue), so link_order keeps each group contiguous.
     init_code: [Int:Int],
+    // Per code section with patchable zone sites, the start and end of each
+    // span of its bytes a site skips while zones are off, in order
+    // (Object.jet X64_OBJECT_ZONE_SPANS).
+    zone_spans: [Int:[Int]],
+    // Per live row, whether only the zone sites' skipped spans reach it
+    // (link_heat); empty when no input has such spans.
+    cold: [Bool],
     // Conditional roots: an init/fini array section with SHF_INFO_LINK (a
     // runtime lifecycle hook of a service, Image/Object.jet) is live exactly
     // when the section its sh_info names is; per row, that array section and
@@ -385,6 +392,8 @@ link_context: fn(bufs: &&[[U8]], base: Int) -> LinkContext Never! {
         cond_roots: [Int]{},
         cond_guards: [Int]{},
         init_code: [Int:Int]{},
+        zone_spans: [Int:[Int]]{},
+        cold: [Bool]{},
         g_name: [String]{},
         g_name_id: [Int]{},
         g_kind: [Int]{},
@@ -819,6 +828,11 @@ link_load_object: fn(c: &LinkContext, b: Int, base: Int, size: Int, name: String
             c.init_code.add(first + k, if link_name_has(c.bufs, b, name_at, ".init", true) -> 0 else -> 1).drop("one row per section")
             c.roots.push(first + k)
         }
+        if kind == LINK_SHT_PROGBITS && link_name_has(c.bufs, b, name_at, X64_OBJECT_ZONE_SPANS, true) {
+            spans_at: base + link_u64(c.bufs, b, h + 24)
+            spans_size: link_u64(c.bufs, b, h + 32)
+            link_zone_spans(c, b, spans_at, spans_size, first)
+        }
         if kind == LINK_SHT_INIT_ARRAY || kind == LINK_SHT_FINI_ARRAY || kind == LINK_SHT_PREINIT_ARRAY || (link_u32(c.bufs, b, h + 8) & 0x200000) != 0 {
             guard: link_u32(c.bufs, b, h + 44)
             if kind != LINK_SHT_PREINIT_ARRAY && link_u32(c.bufs, b, h + 8) & LINK_SHF_INFO_LINK != 0 && guard > 0 && guard < count {
@@ -909,6 +923,20 @@ link_load_object: fn(c: &LinkContext, b: Int, base: Int, size: Int, name: String
 
 // ---------------------------------------------------------------------------
 // Relocation entries.
+
+// Records the `.jet.zone_spans` section (Object.jet X64_OBJECT_ZONE_SPANS)
+// of `size` bytes at `at` in buffer `b`, of the object whose sections start
+// at id `first`, in c.zone_spans.
+link_zone_spans: fn(c: &LinkContext, b: Int, at: Int, size: Int, first: Int) Never! {
+    loop k in 0..<size.div_euclid(24) {
+        row: at + 24 * k
+        s: first + link_u64(c.bufs, b, row)
+        spans := c.zone_spans.get(s) ?? [Int]{}
+        spans.push(link_u64(c.bufs, b, row + 8))
+        spans.push(link_u64(c.bufs, b, row + 16))
+        c.zone_spans[s] = spans
+    }
+}
 
 link_rel_count: fn(c: LinkContext, obj: Int, s: Int) -> Int Never! {
     r: link_rela_of(c, obj, s)
@@ -1689,9 +1717,10 @@ link_mark_piece: fn(c: &LinkContext, work: &[Int], piece: Int, skip_pc: Bool) Ne
 // fixpoint; then what the sections `kept` reach (`dead_code: keep`'s
 // runtime exports), which runs no conditional hook more: a hook runs when
 // the program's own code links its guard, so a kept export changes no
-// runtime behavior (the checked heap stays off). Then keep exactly the
-// FDEs of live sections. Each live section's relocations are scanned once,
-// for marking and for link_scan_reloc.
+// runtime behavior (the checked heap stays off). Then find the live code
+// only zone sites reach (link_heat), and keep exactly the FDEs of live
+// sections. Each live section's relocations are scanned once for marking
+// and for link_scan_reloc.
 link_collect: fn(c: &LinkContext, entries: [Int], linker_names: [String], kept: [Int]) Never! {
     // Whether each name id is one of `linker_names` (link_scan_reloc).
     linker := [Bool]{}
@@ -1773,10 +1802,119 @@ link_collect: fn(c: &LinkContext, entries: [Int], linker_names: [String], kept: 
         }
         if head == work.len() -> break
     }
+    link_heat(c, entries, kept)
     loop piece in 0..<c.ep_sec.len() {
         if c.ep_cie[piece] >= 0 -> c.ep_keep[piece] = link_live_row(c, c.ep_target[piece]) >= 0
     }
     link_share_cies(c)
+}
+
+// Which live code rows only the code that zone sites skip reaches
+// (c.cold): the rows the collection's roots reach (`entries`, the
+// init/fini arrays and retained sections, the live conditional roots, the
+// personality routines, `kept`), with every live row that is not code,
+// through relocations other than those in a skipped span (c.zone_spans),
+// are hot; the other live code rows are cold, and link_order lays them
+// after all other code, so a run that records no zone faults none of their
+// pages in. Nothing is cold when no input has spans.
+link_heat: fn(c: &LinkContext, entries: [Int], kept: [Int]) Never! {
+    if c.zone_spans.len() == 0 {
+        return
+    }
+    hot := [Bool]{}
+    loop _ in 0..<c.live_secs.len() -> hot.push(false)
+    work := [Int]{}
+    loop (row, class) in c.live_class {
+        if class != LINK_TEXT -> link_heat_mark(c, hot, work, c.live_secs[row])
+    }
+    loop s in entries -> link_heat_mark(c, hot, work, s)
+    loop index in 0..<c.roots.len() -> link_heat_mark(c, hot, work, c.roots[index])
+    loop index in 0..<c.cond_roots.len() -> link_heat_mark(c, hot, work, c.cond_roots[index])
+    loop s in kept -> link_heat_mark(c, hot, work, s)
+    // The personality routines the kept CIEs name.
+    loop piece in 0..<c.ep_sec.len() {
+        if c.ep_cie[piece] >= 0 || !c.ep_keep[piece] -> next
+        loop k in 0..<c.ep_reloc_count[piece] {
+            at: link_rel_table(c, c.ep_obj[piece], c.ep_sec[piece]) + 24 * (c.ep_first_reloc[piece] + k)
+            link_heat_mark(c, hot, work, link_target_section(c, c.ep_obj[piece], link_u32(c.bufs, c.obj_buffer[c.ep_obj[piece]], at + 12)))
+        }
+    }
+    loop work.len() > 0 {
+        s: work.pop() ?? {
+            break
+        }
+        obj: link_obj_of(c, s)
+        spans: c.zone_spans.get(s) ?? [Int]{}
+        table: link_rel_table(c, obj, s)
+        loop k in 0..<link_rel_count(c, obj, s) {
+            at: table + 24 * k
+            if spans.len() > 0 && link_in_spans(spans, link_u64(c.bufs, c.obj_buffer[obj], at)) {
+                next
+            }
+            link_heat_mark(c, hot, work, link_target_section(c, obj, link_u32(c.bufs, c.obj_buffer[obj], at + 12)))
+        }
+    }
+    cold := [Bool]{}
+    loop (row, class) in c.live_class -> cold.push(class == LINK_TEXT && !hot[row])
+    c.cold = cold
+}
+
+// Marks section `s` hot (link_heat), queueing it on `work`, when it is live
+// and not yet hot.
+link_heat_mark: fn(c: LinkContext, hot: &[Bool], work: &[Int], s: Int) Never! {
+    row: link_live_row(c, s)
+    if row < 0 || hot[row] {
+        return
+    }
+    hot[row] = true
+    work.push(s)
+}
+
+// Whether `offset` lies in one of `spans`, start and end pairs in order
+// that do not overlap.
+link_in_spans: fn(spans: [Int], offset: Int) -> Bool Never! {
+    // The spans that start at or before `offset` are those before `low`.
+    low := 0
+    high := spans.len().div_euclid(2)
+    loop low < high {
+        middle: (low + high).div_euclid(2)
+        if spans[2 * middle] <= offset -> low = middle + 1 else -> high = middle
+    }
+    low > 0 && offset < spans[2 * low - 1]
+}
+
+#Test("code only a zone site's skipped span reaches is laid after all other code") {
+    // `entry`: a zone site's jump over its call to `cold`, then a call to
+    // `hot`, which calls `after`; the input order is entry, hot, cold, after.
+    entry_code: [U8]{0xe9, 5, 0, 0, 0, 0xe8, 0, 0, 0, 0, 0xe8, 0, 0, 0, 0, 0xc3}
+    functions := [X64CompiledFunction]{
+        X64CompiledFunction{id: X64FunctionID{value: 0}, name: "entry", code: entry_code, relocs: [X64Reloc]{X64Reloc{at: 6, target: X64RelocTarget.Function{id: X64FunctionID{value: 2}}}, X64Reloc{at: 11, target: X64RelocTarget.Function{id: X64FunctionID{value: 1}}}}, align: X64_FUNCTION_ALIGN, zones: [Int]{0}},
+        X64CompiledFunction{id: X64FunctionID{value: 1}, name: "hot", code: [U8]{0xe8, 0, 0, 0, 0, 0xc3}, relocs: [X64Reloc]{X64Reloc{at: 1, target: X64RelocTarget.Function{id: X64FunctionID{value: 3}}}}, align: X64_FUNCTION_ALIGN},
+        X64CompiledFunction{id: X64FunctionID{value: 2}, name: "cold", code: [U8]{0xc3}, relocs: [X64Reloc]{}, align: X64_FUNCTION_ALIGN},
+        X64CompiledFunction{id: X64FunctionID{value: 3}, name: "after", code: [U8]{0xc3}, relocs: [X64Reloc]{}, align: X64_FUNCTION_ALIGN},
+    }
+    names: [String]{"entry", "hot", "cold", "after"}
+    debug := [X64FunctionDebug]{}
+    sources := [X64FunctionSource]{}
+    exports := [X64RuntimeExport]{}
+    loop (id, name) in names {
+        debug.push(X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: [U8]{}, ranges: [X64VariableRange]{}})
+        sources.push(x64_function_source_none())
+        exports.push(X64RuntimeExport{function: X64FunctionID{value: id}, symbol: name, guards: [Int]{}})
+    }
+    program: X64ObjectModule{data: [X64Data]{}, debug: X64ModuleDebug{directory: "", files: [String]{}, types: [X64DebugType]{}}, functions: sources.move()}
+    object: x64_object_functions_threads(program, functions, debug, exports, [X64DataExport]{}, compiler_threads_single(), false, true)
+    assert_eq(object.errors, [String]{})
+    c := link_context([[U8]]{object.bytes}, LINK_BASE)
+    link_load_inputs(c, [String]{"zones.o"})
+    assert_eq(c.errors, [String]{})
+    sections := [Int]{}
+    loop name in names -> sections.push(c.g_section[link_final(c, link_global_named(c, name))])
+    link_collect(c, [Int]{sections[0]}, [String]{}, [Int]{})
+    assert_eq(c.errors, [String]{})
+    laid := [Int]{}
+    loop row in link_order(c)[LINK_TEXT] -> laid.push(c.live_secs[row])
+    assert_eq(laid, [Int]{sections[0], sections[1], sections[3], sections[2]})
 }
 
 // One CIE per distinct record, written only when a kept FDE names it. A kept
@@ -1935,8 +2073,9 @@ link_rows_in_order: fn(c: LinkContext) -> [Int] Never! {
 
 // Live section rows of every class, in image order: input order, except the
 // init/fini arrays, which run in ascending priority (`.init_array.NNNNN`
-// before plain `.init_array`), and the `.init` and `.fini` pieces, each group
-// contiguous at the start of the code.
+// before plain `.init_array`), the `.init` and `.fini` pieces, each group
+// contiguous at the start of the code, and the code only zone sites reach
+// (link_heat), after all other code.
 link_order: fn(c: LinkContext) -> [[Int]] Never! {
     lists := [[Int]]{}
     loop _ in 0..<LINK_CLASSES -> lists.push([Int]{})
@@ -1946,9 +2085,12 @@ link_order: fn(c: LinkContext) -> [[Int]] Never! {
         loop row in lists[class] -> keys.push(link_priority(c, c.live_secs[row]))
         lists[class] = link_sort_by(lists[class], keys)
     }
-    if c.init_code.len() > 0 {
+    if c.init_code.len() > 0 || c.cold.len() > 0 {
         keys := [Int]{}
-        loop row in lists[LINK_TEXT] -> keys.push(c.init_code.get(c.live_secs[row]) ?? 2)
+        loop row in lists[LINK_TEXT] {
+            cold: row < c.cold.len() && c.cold[row]
+            keys.push(c.init_code.get(c.live_secs[row]) ?? (if cold -> 3 else -> 2))
+        }
         lists[LINK_TEXT] = link_sort_by(lists[LINK_TEXT], keys)
     }
     lists

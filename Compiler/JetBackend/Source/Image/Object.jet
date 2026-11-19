@@ -229,18 +229,25 @@ elf64_section_header: fn(bytes: &[U8], name: Int, kind: Int, flags: Int, offset:
 // libc main transfers its raw argc/argv/envp (the startup stack's, so
 // jet_rt_host_main_arguments) before jet_rt_main(entry).
 // The push keeps rsp 16-byte aligned at all calls. Host constructors have
-// already run through the runtime object's init array. A program that owns
-// its main (`owned`, JetIR EntryOwned.jet) runs the entry itself, with no
-// process root: jet_rt_thread_init when it must attach its thread
-// (`attach`, IRModule.owned_attach), jet_rt_main_owned_start, the entry,
-// the stdout flush, and status 0 as jet_rt_main's normal return.
-x64_object_main: fn(entry: X64FunctionID, owned: Bool, attach: Bool) -> X64CompiledFunction Never! {
+// already run through the runtime object's init array. A program whose
+// code has patchable zone sites calls `sites`, the function that registers
+// their table (JetIR X64Module.jet ir_x64_zone_sites), after host startup
+// and before its entry runs. A program that owns its main (`owned`, JetIR
+// EntryOwned.jet) runs the entry itself, with no process root:
+// jet_rt_thread_init when it must attach its thread (`attach`,
+// IRModule.owned_attach), jet_rt_main_owned_start, the entry, the stdout
+// flush, and status 0 as jet_rt_main's normal return.
+x64_object_main: fn(entry: X64FunctionID, owned: Bool, attach: Bool, sites: X64FunctionID?) -> X64CompiledFunction Never! {
     code := x64_code()
     x64_push(code, X64_RBX)
     arguments_at: x64_call_rel32(code)
     start_at: x64_call_rel32(code)
+    relocs := [X64Reloc]{X64Reloc{at: arguments_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_main_arguments"}}, X64Reloc{at: start_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_program_start"}}}
+    if sites == .Val(table) {
+        sites_at: x64_call_rel32(code)
+        relocs.push(X64Reloc{at: sites_at, target: X64RelocTarget.Function{id: table}})
+    }
     if owned {
-        relocs := [X64Reloc]{X64Reloc{at: arguments_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_main_arguments"}}, X64Reloc{at: start_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_program_start"}}}
         if attach {
             attach_at: x64_call_rel32(code)
             relocs.push(X64Reloc{at: attach_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_thread_init"}})
@@ -264,8 +271,64 @@ x64_object_main: fn(entry: X64FunctionID, owned: Bool, attach: Bool) -> X64Compi
     x64_mov_rr(code, X64_RAX, X64_RBX)
     x64_pop(code, X64_RBX)
     x64_ret(code)
-    relocs: [X64Reloc]{X64Reloc{at: arguments_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_main_arguments"}}, X64Reloc{at: start_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_program_start"}}, X64Reloc{at: entry_at, target: X64RelocTarget.Function{id: entry}}, X64Reloc{at: call_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_main"}}, X64Reloc{at: flush_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_stdout_flush"}}}
+    relocs.push(X64Reloc{at: entry_at, target: X64RelocTarget.Function{id: entry}})
+    relocs.push(X64Reloc{at: call_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_main"}})
+    relocs.push(X64Reloc{at: flush_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_stdout_flush"}})
     X64CompiledFunction{id: X64FunctionID{value: -1}, name: "main", code: code.bytes, relocs: relocs, align: X64_FUNCTION_ALIGN}
+}
+
+// The function `id` that registers a site table: `lea rdi, [rip + table]`
+// and a tail jump to the runtime's jet_perf_zone_table (JetRuntime
+// PerfSamples.jet), then, at X64_OBJECT_SITES_TABLE_AT (8-byte aligned),
+// the table itself: its site count as a little-endian word, then per site a
+// rel32 that a relocation fills with the distance from its end to the
+// site's function, and the site's offset in that function as a 32-bit
+// word. `sites` holds a pair per site: `sites[2k]` the function's id and
+// `sites[2k + 1]` the offset. Only the runtime reads the table; no code
+// runs past the jump.
+X64_OBJECT_SITES_TABLE_AT: 16
+
+x64_object_zone_sites: fn(id: X64FunctionID, name: String, sites: [Int]) -> X64CompiledFunction Never! {
+    code := x64_code()
+    table_at: x64_lea_rip(code, X64_RDI)
+    x64_patch_rel32(code.bytes, table_at, X64_OBJECT_SITES_TABLE_AT)
+    register_at: x64_jmp_rel32(code)
+    loop code.bytes.len() < X64_OBJECT_SITES_TABLE_AT -> code.bytes.push(U8{0xcc})
+    count: sites.len() /% 2
+    elf64_u64(code.bytes, count)
+    relocs := [X64Reloc]{X64Reloc{at: register_at, target: X64RelocTarget.Runtime{symbol: "jet_perf_zone_table"}}}
+    loop site in 0..<count {
+        relocs.push(X64Reloc{at: code.bytes.len(), target: X64RelocTarget.Function{id: X64FunctionID{value: sites[2 * site]}}})
+        elf64_u32(code.bytes, 0)
+        elf64_u32(code.bytes, sites[2 * site + 1])
+    }
+    X64CompiledFunction{id: id, name: name, code: code.bytes.move(), relocs: relocs, align: X64_FUNCTION_ALIGN}
+}
+
+// The section naming the code each patchable zone site skips while zones
+// are off (X64CompiledFunction.zones): per site three little-endian words,
+// the header index of the section holding it, then the start and end of
+// the skipped bytes there, from the end of the site's `jmp rel32` to its
+// target. Not loaded; the Jet link lays the sections only those bytes
+// reach after all other code (StaticLink.jet link_heat), so a run that
+// records no zone faults none of their pages in.
+X64_OBJECT_ZONE_SPANS: ".jet.zone_spans"
+
+// The `.jet.zone_spans` contents of `functions`, placed at `offsets` (in
+// their own sections when `own_sections`); empty when none has a site.
+x64_object_zone_spans: fn(functions: [X64CompiledFunction], offsets: [Int], own_sections: Bool) -> [U8] Never! {
+    spans := [U8]{}
+    loop (row, function) in functions {
+        loop site in function.zones {
+            // The jump's rel32, a forward distance.
+            skip: Int{function.code[site + 1]} | (Int{function.code[site + 2]} << 8) | (Int{function.code[site + 3]} << 16) | (Int{function.code[site + 4]} << 24)
+            start: offsets[row] + site + 5
+            elf64_u64(spans, x64_object_function_section(own_sections, row))
+            elf64_u64(spans, start)
+            elf64_u64(spans, start + skip)
+        }
+    }
+    spans
 }
 
 // `main`'s frame: after `push rbx` the CFA is rsp + 16 with rbx below the
@@ -806,6 +869,7 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, compiled: &&[X64Com
     if !x64_fits_i32(text_size) {
         return X64ExecutableResult{bytes: [U8]{}, errors: [String]{".text is {text_size} bytes; calls between its functions are rel32, which reaches at most 2147483647 bytes"}}
     }
+    zone_spans: x64_object_zone_spans(functions, offsets, own_sections)
     // Each function's code is its `.text` piece as it is (x64_object_lay),
     // so the encoder's bytes are copied once, into the file.
     codes := x64_object_take_codes(functions)
@@ -854,14 +918,14 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, compiled: &&[X64Com
     // thread of their own while the file is assembled; a smaller object
     // assembles its file first and they drop as this returns.
     if laid.workers <= 1 {
-        return X64ExecutableResult{bytes: x64_object_file(dwarf, laid.text, text_align, laid.data, laid.data_align, laid.rodata, laid.rodata_align, laid.rela_text, laid.symtab, laid.xindex, laid.strtab, laid.first_global, laid.data_relas, exports, guard_sections, laid.own), errors: [String]{}}
+        return X64ExecutableResult{bytes: x64_object_file(dwarf, laid.text, text_align, laid.data, laid.data_align, laid.rodata, laid.rodata_align, laid.rela_text, laid.symtab, laid.xindex, laid.strtab, laid.first_global, laid.data_relas, exports, guard_sections, laid.own, zone_spans), errors: [String]{}}
     }
     released: Shared{X64ObjectReleased{functions: [X64CompiledFunction]{}, debug: [X64FunctionDebug]{}, programs: [X64ObjectModule]{}}}
     x64_object_release_fill(released, program, functions, debug)
     files := [[U8]]{}
     task.group x64_object_release_group {
         dropped: task x64_object_release(released)
-        files.push(x64_object_file(dwarf, laid.text, text_align, laid.data, laid.data_align, laid.rodata, laid.rodata_align, laid.rela_text, laid.symtab, laid.xindex, laid.strtab, laid.first_global, laid.data_relas, exports, guard_sections, laid.own))
+        files.push(x64_object_file(dwarf, laid.text, text_align, laid.data, laid.data_align, laid.rodata, laid.rodata_align, laid.rela_text, laid.symtab, laid.xindex, laid.strtab, laid.first_global, laid.data_relas, exports, guard_sections, laid.own, zone_spans))
         _: dropped.join() ?? panic(compiler_threads_failure_text(err))
     }
     X64ExecutableResult{bytes: files.pop() ?? panic("the object writer lost its file"), errors: [String]{}}
@@ -1236,10 +1300,12 @@ x64_object_release_programs: fn(released: Shared<X64ObjectReleased>) -> [X64Obje
 // ELF header, the section contents and the section header table. `own`
 // holds the sections from ELF64_OBJECT_FIRST_OWN (empty: none);
 // `guard_sections` per export the header indices of its hook's guards.
+// `zone_spans` is the `.jet.zone_spans` section's contents
+// (x64_object_zone_spans), which the object has when it is not empty.
 // `xindex` holds the symbols' extended section indices, empty when no
 // index reaches ELF64_OBJECT_SECTION_LIMIT; with them the object ends in
 // `.symtab_shndx`, and with that many headers section 0 holds their count.
-x64_object_file: fn(dwarf: X64DwarfSections, text: [X64ObjectPiece], text_align: Int, data: [U8], data_align: Int, rodata: [U8], rodata_align: Int, rela_text: [X64ObjectPiece], symtab: [X64ObjectPiece], xindex: [X64ObjectPiece], strtab: [X64ObjectPiece], first_global: Int, data_relas: [X64ObjectRela], exports: [X64RuntimeExport], guard_sections: [[Int]], own: &&[X64ObjectSection]) -> [U8] Never! {
+x64_object_file: fn(dwarf: X64DwarfSections, text: [X64ObjectPiece], text_align: Int, data: [U8], data_align: Int, rodata: [U8], rodata_align: Int, rela_text: [X64ObjectPiece], symtab: [X64ObjectPiece], xindex: [X64ObjectPiece], strtab: [X64ObjectPiece], first_global: Int, data_relas: [X64ObjectRela], exports: [X64RuntimeExport], guard_sections: [[Int]], own: &&[X64ObjectSection], zone_spans: [U8]) -> [U8] Never! {
     // Header order is the ELF64_OBJECT_* indices; .shstrtab is filled below.
     sections := [X64ObjectSection]{
         // .text: PROGBITS, ALLOC | EXECINSTR; int3 between the parts
@@ -1304,6 +1370,9 @@ x64_object_file: fn(dwarf: X64DwarfSections, text: [X64ObjectPiece], text_align:
                 sections.push(x64_object_rela_section(".rela{name}", [X64ObjectRela]{X64ObjectRela{at: 0, symbol: first_global + index, kind: ELF64_R_X86_64_64, addend: 0}}, target))
             }
         }
+    }
+    if zone_spans.len() > 0 {
+        sections.push(x64_object_debug_section(X64_OBJECT_ZONE_SPANS, zone_spans))
     }
     if xindex.len() > 0 {
         sections.push(X64ObjectSection{name: ".symtab_shndx", kind: ELF64_SHT_SYMTAB_SHNDX, flags: 0, bytes: [U8]{}, pieces: xindex, link: ELF64_OBJECT_SYMTAB, info: 0, align: 4, entry_size: 4})

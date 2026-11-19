@@ -32,12 +32,16 @@ X64Reloc: struct {
 
 // `align`: the function's start alignment in `.text`, a power of two of at
 // least X64_FUNCTION_ALIGN; code inside it aligned to `align` stays aligned.
+// `zones`: the offset of each patchable zone site's `jmp rel32` in `code`
+// (JetIR X64Select.jet ir_x64_zones_skip), which the image's site table
+// lists for the runtime to patch (JetIR X64Module.jet ir_x64_zone_sites).
 X64CompiledFunction: struct {
     id: X64FunctionID,
     name: String,
     code: [U8],
     relocs: [X64Reloc],
     align: Int,
+    zones: [Int]{[Int]{}},
 }
 
 // Debug facts of one compiled function for Image/Dwarf.jet: a line row

@@ -597,6 +597,12 @@ IRProgram: struct {
     // (IRModule.user_values): a program, test or Core image, whatever its
     // checks; false for the runtime library and compile-time evaluation.
     user_values: Bool{false},
+    // Whether the modules built from it list their zone sites in a table the
+    // runtime patches (IRModule.zone_table): every module an image links (a
+    // program, test, library or Core); false for a debugger's held
+    // evaluation and compile-time evaluation, whose sites test the zones
+    // word.
+    zone_table: Bool{false},
     // Whether each checked `#Pre`/`#Post` clause reports its outcome to the
     // runtime's contract records (BuildContracts.jet ir_contract,
     // JetRuntime TestContracts.jet): true only for a test image
@@ -1342,6 +1348,7 @@ ir_module_for: fn(p: IRProgram) -> IRModule Never! {
     m.user_values = p.user_values
     m.alloc_types = p.checks.checked_alloc
     m.zones_stripped = p.checks.zones_stripped
+    m.zone_table = p.zone_table
     m.quiet_routes = p.checks.quiet_routes.copy()
     m
 }
@@ -1680,6 +1687,7 @@ ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
     if trace_sink == .Val(sink) -> sink.begin("ir.build.program", "", -1, -1)
     p := ir_program_new(functions, decls, symbols, type_defs, impls, sources, constants)
     p.checks = checks
+    p.zone_table = true
     p.sentries = ir_checks_sentries(checks)
     p.user_values = true
     if !ir_core_image_fits(p) -> p.checks.core = None
