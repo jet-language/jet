@@ -9,7 +9,7 @@ use {
     native_files: core.files
     native_math: core.math
     jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_EVENT_EXIT, X64_TRACE_EVENT_STOP, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, link_debug_uleb, x64_jetline_find, x64_jetline_line, x64_jetline_sleb, x64_jetline_text, x64_trace_attach, x64_trace_close, x64_trace_debug_register, x64_trace_detach, x64_trace_follow_exits, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_seize, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait, x64_trace_wait_for, x64_trace_wait_or_input, x64_trace_write]
-    jet_foundation.[DeepChecks, Diagnostic, ENV_JET_REPLAY, deep_checks_flags, diagnostic_display_identities, diagnostic_from_registry, diagnostic_registry_row, foundation_named_type]
+    jet_foundation.[DeepChecks, Diagnostic, ENV_JET_RECORD, deep_checks_flags, diagnostic_display_identities, diagnostic_from_registry, diagnostic_registry_row, foundation_named_type]
 }
 
 #Error
@@ -1652,17 +1652,19 @@ NativeSession: struct {
     // command makes them again.
     recording: fn(self) -> Bool Never! { self.replaying() && !self.rerunning }
 
-    // Whether the program runs under a recording (`jet debug --replay`):
-    // its environment names one in JET_REPLAY, so each run of it is the
-    // same and reverse commands run it again.
+    // Whether reverse commands run the program again: it runs with an
+    // environment of its own, the same each run (`jet debug --replay` names
+    // the recording in JET_REPLAY), unless that environment records the run
+    // (`jet debug --record` names its log in JET_RECORD), which a run again
+    // would record over.
     replaying: fn(self) -> Bool Never! {
         rows: self.env ?? return false
         loop row in rows {
-            if row.starts_with("{ENV_JET_REPLAY}=") && row.len() > ENV_JET_REPLAY.len() + 1 {
-                return true
+            if row.starts_with("{ENV_JET_RECORD}=") && row.len() > ENV_JET_RECORD.len() + 1 {
+                return false
             }
         }
-        false
+        true
     }
 
     // The move `word` about to be made, with the breakpoints, rules and

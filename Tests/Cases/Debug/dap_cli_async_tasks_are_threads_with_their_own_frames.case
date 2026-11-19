@@ -57,7 +57,7 @@ json: stdout doc $.body.result = "0" # the first pass of count's loop
 send dap: "{\"seq\":12,\"type\":\"request\",\"command\":\"next\",\"arguments\":{\"threadId\":2}}"
 recv dap until $.request_seq = 12 timeout 30s every 100ms
 json: stdout doc $.success = false
-stdout: ~ "a step steps task 3, where the program stopped, not task 2"
+stdout: ~ "a step steps task 3, where the program stopped, not task 2" # a step of another task is refused, with the task it would step
 send dap: "{\"seq\":13,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/prog.jet\"},\"breakpoints\":[]}}"
 recv dap until $.request_seq = 13 timeout 30s every 100ms
 send dap: "{\"seq\":14,\"type\":\"request\",\"command\":\"continue\",\"arguments\":{\"threadId\":3}}"
@@ -65,3 +65,8 @@ recv dap collect until ndjson $[?event="terminated"] #>= 1 timeout 30s
 stdout: ~ "\"output\":\"count 12" # count resumes and finishes
 stdout: ~ "drain 2" # drain receives the value
 stdout: ~ "\"event\":\"exited\"" # and the program ends
+send dap: "{\"seq\":15,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{}}"
+recv dap until $.request_seq = 15 timeout 30s every 100ms
+json: stdout doc $.success = true
+close dap
+exit: 0
