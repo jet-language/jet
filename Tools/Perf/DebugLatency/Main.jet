@@ -32,9 +32,11 @@
 //         editor sends its watch expressions after a stop; LLDB runs them as
 //         `target stop-hook`s, one per expression;
 //       - condition_per_hit: a breakpoint on `tally`'s last line with
-//         LATENCY_CONDITION, which reads six locals, so the debugger checks
-//         it at each hit, and is false at every one; then `continue` to the
-//         program's end, over LATENCY_HITS. The fork each check costs moves
+//         LATENCY_CONDITION, which reads six locals and is false at every
+//         hit; then `continue` to the program's end, over LATENCY_HITS.
+//         `jet debug` runs the condition in the program, so no hit stops
+//         it, and a reply that says it checks the condition at each hit
+//         fails the measure. LLDB checks it at each hit, whose cost moves
 //         with the program's resident size, its share in huge pages and the
 //         machine's load, so the report gives them (LatencyTarget).
 // L is the line of the first call in `run`. With `--stop nested` the N
@@ -163,8 +165,8 @@ LATENCY_HITS: 1000
 LATENCY_TALLY_SUM: "    a + b + c + d + e + f"
 
 // condition_per_hit's condition: false at every hit, and it reads six of
-// `tally`'s locals, more than a condition run in the program may, so the
-// debugger checks it at each hit.
+// `tally`'s locals, more than a call's registers hold, so the placed code
+// takes them by a table.
 LATENCY_CONDITION: "a + b + c + d + e + f < 0"
 
 // `jet debug`'s prompt, which ends each of its answers.
@@ -500,7 +502,7 @@ latency_jet_drive: fn(child: ProcessChild, steps: Int, file: String, line: Int, 
         watched: latency_jet_ask(child, "n\n{prints.join("")}", "{watches[watches.len() - 1]} = ", watches.len() + 1) ?? return Err(err)
         samples.push(LatencySample{measure: "watch_per_stop", us: watched.us})
     }
-    _: latency_jet_ask(child, "break prog.jet:{tally} if {LATENCY_CONDITION}\n", "checks it at each hit", 1) ?? return Err(err)
+    _: latency_jet_ask(child, "break prog.jet:{tally} if {LATENCY_CONDITION}\n", "The condition runs in the program", 1) ?? return Err(err)
     target: latency_target(child.id()) ?? return Err(err)
     // A stop before the end (the condition failed) ends the measure.
     hits: latency_ask(child, "c\n", LatencyUntil{marker: "Program finished", count: 1, line: true, refused: "Breakpoint hit"}) ?? return Err(err)
