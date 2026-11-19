@@ -1124,7 +1124,9 @@ jet_cli_replay_record_begin: fn(file: String, files: [String], name: String, pro
 
 // The proof identity of `file`, whose compile authorized `files`, and its
 // members: what a recording of it binds (jet_cli_replay_record_begin), and
-// what `jet debug --replay` checks the source it replays against.
+// what `jet debug --replay` checks the source it replays against. Its paths
+// are the authority root's, so a recording replays from any working
+// directory.
 jet_cli_replay_source_identity: fn(file: String, files: [String]) -> {identity: JetCLIProveIdentity, members: [JetCLIProveMember]} JetCLIProveRefusal! {
     target: JetCLIProveTarget{kind: "file", root: file, members: [String]{file}}
     members: jet_cli_prove_members(target) ?? return Err(err)
@@ -1133,7 +1135,7 @@ jet_cli_replay_source_identity: fn(file: String, files: [String]) -> {identity: 
         authorized.push(cli_files.realpath(path) ?? return Err(jet_cli_prove_target_refusal("couldn't resolve recorded input `{path}`: {jet_cli_io_error_text(err)}")))
     }
     group: JetCLIProveGroup{entry: 0, diagnostics: [Diagnostic]{}, files: authorized, has_tests: true, sites: [JetCLIProveTestSite]{}, floor: None}
-    identity: jet_cli_prove_identity(target, members, [JetCLIProveGroup]{group}) ?? return Err(err)
+    identity: jet_cli_prove_identity(target, members, [JetCLIProveGroup]{group}, rooted: true) ?? return Err(err)
     Ok({identity: identity, members: members})
 }
 

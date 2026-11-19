@@ -1,0 +1,18 @@
+# A recording binds its source by the paths of the source's project root,
+# not of the directory it was recorded from: `jet debug --replay` of the
+# same source named from another directory replays it (Canvas's Debug view
+# replays from its own), where it once refused it with E3621.
+# The fixture must stay in jet fmt form.
+fixture: ReplayRefusals.fixture
+env: NO_COLOR=1
+mkdir: elsewhere
+step: jet run --record=back prog.jet
+exit: 0
+step: jet debug --replay=back {work}/prog.jet
+cwd: {work}/elsewhere
+stdin: replay_from_another_directory.stdin
+exit: 0
+stderr: !~ "E3621" # the same source, named from elsewhere
+stdout: ~ "total 6 tally " # the recorded run replays
+stdout: ~ "Program finished\n" # to its end
+stdout+stderr: !~ "replay diverged" # faithful to the recording

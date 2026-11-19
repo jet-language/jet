@@ -9,7 +9,9 @@
 // there with the captures' bytes read from the frame, and shows the result
 // through the image's debug types. The program itself neither runs nor
 // changes. A compiled expression is kept per source line and text, so a
-// condition compiles once and runs in a fork at each hit.
+// condition compiles once and runs in a fork at each hit, while the
+// program's sources read as they did when it was compiled
+// (NativeEvaluator.unchanged).
 use jet_backend.[X64DebugEncoding, X64Trace]
 
 // Why an expression can't be evaluated, as the console shows it after
@@ -28,8 +30,13 @@ NativeEvalRefused: struct {
 // the image can't list them (an inlined run). `owned` is whether the
 // image's `main` owns the program's run (native_eval_owned): the compile
 // owns its main only then, so its functions' code is the image's.
+// `unchanged`: whether the program's sources read as they did at the last
+// ask; the first ask, and one that finds them changed, takes them as they
+// read now. Code compiled before a change may not be what the source says
+// now, so the session drops the code it kept then.
 NativeEvaluator: trait {
     compile: fn(self, path: String, line: Int, column: Int, text: String, binders: [NativeEvalBinder]?, owned: Bool) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval NativeEvalRefused!,
+    unchanged: fn(self) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Bool Never!,
 }
 
 // A variable a name of an evaluated expression may read at the stop: its
