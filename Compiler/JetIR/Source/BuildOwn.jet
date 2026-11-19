@@ -945,6 +945,7 @@ ir_unique_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int
     ir_end(a.f, a.line)
     word_row: ir_word_row(m)
     stride: ir_list_stride(m, entry)
+    buffer_row: ir_alloc_row_of(m, word_row, row)
     replica := -1
     if ir_map_row_hashed(m, p, row) {
         // A hashed Map's copy takes its index too: a frozen one gets a
@@ -955,7 +956,7 @@ ir_unique_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int
         ir_else(a.f, a.line)
         block: ir_buffer_bytes(m, p, a, row, data, capacity, stride)
         align: ir_word_const(m, a, 8)
-        copied: ir_runtime(m, a, "jet_rt_alloc", [Int]{block, align}, word_row)
+        copied: ir_runtime(m, a, "jet_rt_alloc", [Int]{block, align}, buffer_row)
         _: ir_runtime(m, a, "jet_rt_mem_move", [Int]{copied, data, block}, -1)
         ir_emit(a.f, IROp.Store, -1, header, 16, copied, a.line)
         ir_end(a.f, a.line)
@@ -972,10 +973,10 @@ ir_unique_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int
         // A List's copy comes from where its buffer or storage is served
         // (BuildMove.jet); any other's from the heap.
         if m.user_values && ir_move_list(m, row) {
-            replica = ir_runtime(m, a, "jet_rt_alloc_value_grow", [Int]{bytes, data, header}, word_row)
+            replica = ir_runtime(m, a, "jet_rt_alloc_value_grow", [Int]{bytes, data, header}, buffer_row)
         } else {
             align: ir_word_const(m, a, 8)
-            replica = ir_runtime(m, a, "jet_rt_alloc", [Int]{bytes, align}, word_row)
+            replica = ir_runtime(m, a, "jet_rt_alloc", [Int]{bytes, align}, buffer_row)
         }
         moved: ir_word_op(m, a, IROp.Mul, length, width)
         _: ir_runtime(m, a, "jet_rt_mem_move", [Int]{replica, data, moved}, -1)
