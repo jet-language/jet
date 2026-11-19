@@ -10,7 +10,7 @@ use {
     perf_files: core.files
     perf_math: core.math
     perf_ip: core.net.ip
-    jet_backend.[X64ImageFunction, X64Jetline, link_debug_addr, x64_image_function_find, x64_image_functions, x64_jetline_find, x64_jetline_line]
+    jet_backend.[X64ImageFunction, X64Jetline, link_debug_addr, link_debug_le, x64_image_function_find, x64_image_functions, x64_jetline_find, x64_jetline_line]
     jet_debug.[NativeAbstract, NativeFunction, native_image_read, native_inline_chain, native_jet_spelling]
     jet_driver.[jet_driver_inline_package, jet_driver_mask_inline_package]
     jet_foundation.[
@@ -522,8 +522,9 @@ jet_cli_perf_samples_owned: fn(table: X64Jetline, source: String) -[FS]> [Bool] 
 // record, and JET_CLI_PERF_HEAP_MARK_KIND,
 // JET_CLI_PERF_HEAP_SITE_KIND, JET_CLI_PERF_HEAP_BLOCK_KIND and
 // JET_CLI_PERF_HEAP_ROOT_KIND for a heap snapshot's records, whose first
-// words hold its number. Bit 63 marks an allocations' record, whose count
-// runs up to bit 62 (PerfSamples.jet PERF_SAMPLES_ADDRESS_BITS).
+// words hold its number. Bit 63 marks an allocations' record, whose first
+// word holds its allocations below this bit and the words after it from it
+// up to bit 62 (PerfSamples.jet perf_samples_alloc_write).
 JET_CLI_PERF_ADDRESS_BITS: 48
 
 JET_CLI_PERF_KIND_BITS: 59
@@ -670,12 +671,16 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
     sample := 0
     at := 0
     loop at + 8 <= words.len() {
-        first: link_debug_addr(words, at)
-        size: if first < 0 -> (first >> JET_CLI_PERF_ADDRESS_BITS) & 32767 else -> (first >> JET_CLI_PERF_ADDRESS_BITS) & 2047
-        kind: if first < 0 -> 0 else -> first >> JET_CLI_PERF_KIND_BITS
+        // An allocations' record sets bit 63, which link_debug_addr reads as
+        // -1, so its first word is read from its halves.
+        upper: link_debug_le(words, at + 4, 4)
+        tallied: upper >= 0x80000000
+        first: if tallied -> link_debug_le(words, at, 4) + (upper - 0x80000000) * 0x100000000 else -> link_debug_addr(words, at)
+        size: if tallied -> (first >> JET_CLI_PERF_ADDRESS_BITS) & 32767 else -> (first >> JET_CLI_PERF_ADDRESS_BITS) & 2047
+        kind: if tallied -> 0 else -> first >> JET_CLI_PERF_KIND_BITS
         record: if size < 1 -> 1 else -> size
         pc: first & mask
-        if first < 0 {
+        if tallied {
             sampled.sited = true
             allocations: checked(U64{pc}) ?? U64{0}
             loop k in 2..<size + 1 {

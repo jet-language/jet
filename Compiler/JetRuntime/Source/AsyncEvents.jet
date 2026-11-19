@@ -3,23 +3,26 @@
 // across threads: every core field below moves under the core's mutex, and the
 // counts of cores, entries and reports are atomic.
 //
-// AsyncCore184: refs0 owners8 lock16 listeners{len24 cap32 data40}
+// AsyncCore192: refs0 owners8 lock16 listeners{len24 cap32 data40}
 //   queued{len48 cap56 data64} blocked{len72 cap80 data88} running96
 //   closed104 canceled112 capacity120 overflow128 failure136 sequence144
-//   next_id152 e_meta160 r_meta168 running_entry176
+//   next_id152 e_meta160 r_meta168 running_entry176 id184
 //   refs counts the handles, entries and scopes holding the core; owners
 //   counts the handles (Rust's owner Arc): the last owner hard-cancels.
 //   sequence is the futex word every state change bumps. e_meta describes
-//   the failure E and r_meta a handler's `Result<Unit, E>`.
+//   the failure E and r_meta a handler's `Result<Unit, E>`. id is the
+//   identity the AsyncEvent observations name it by (ObserveLive.jet
+//   observe_event_id).
 // AsyncListener: the Listener64 layout (Events.jet); its refs move under the
 //   core lock. Its subscription has no EventCore (Rust JetSubscription.shared:
 //   the active flag is the state), so unsubscribe only clears the flag and
 //   the next registration or dispatch prunes the row.
-// AsyncEntry72: refs0 core8 phase16 payload24 meta32 report40 accepted48
-//   trace56 control64
+// AsyncEntry80: refs0 core8 phase16 payload24 meta32 report40 accepted48
+//   trace56 control64 id72
 //   One emit_async: its task holds a count, and so does each list holding it.
 //   trace holds the ASYNC_TRACE_* steps it took; control is its task's
 //   scheduler control (retained) once it runs, so a hard cancel reaches it.
+//   id is the dispatch identity its observations name.
 // DispatchReport64: refs0 accepted8 state16 delivered24 summary32 queued40
 //   failures48 e_meta56
 //   summary is the owned trace text (its steps joined by " -> "); failures
@@ -144,22 +147,55 @@ async_trace_text: fn(trace: I64, lines: I64, state: I64) -> I64 {
     }
     if (lines != I64{0}) { jet_rt_string_builder_push(text, lines) }
     jet_rt_string_builder_push(text, rt_static_text("terminal:"))
-    if {
-        state == DISPATCH_DELIVERED -> jet_rt_string_builder_push(text, rt_static_text("Delivered"))
-        state == DISPATCH_HANDLER_FAILED -> {
-            jet_rt_string_builder_push(text, rt_static_text("HandlerFailed"))
-        }
-        state == DISPATCH_DROPPED_NEWEST -> {
-            jet_rt_string_builder_push(text, rt_static_text("DroppedNewest"))
-        }
-        state == DISPATCH_DROPPED_OLDEST -> {
-            jet_rt_string_builder_push(text, rt_static_text("DroppedOldest"))
-        }
-        state == DISPATCH_CLOSED -> jet_rt_string_builder_push(text, rt_static_text("Closed"))
-        state == DISPATCH_CANCELED -> jet_rt_string_builder_push(text, rt_static_text("Canceled"))
-        else -> jet_rt_string_builder_push(text, rt_static_text("DeadlineExceeded"))
-    }
+    jet_rt_string_builder_push(text, async_state_text(state))
     jet_rt_string_builder_finish(text)
+}
+
+// The DispatchState name of `state`, static.
+async_state_text: fn(state: I64) -> I64 {
+    if (state == DISPATCH_DELIVERED) { return rt_static_text("Delivered") }
+    if (state == DISPATCH_HANDLER_FAILED) { return rt_static_text("HandlerFailed") }
+    if (state == DISPATCH_DROPPED_NEWEST) { return rt_static_text("DroppedNewest") }
+    if (state == DISPATCH_DROPPED_OLDEST) { return rt_static_text("DroppedOldest") }
+    if (state == DISPATCH_CLOSED) { return rt_static_text("Closed") }
+    if (state == DISPATCH_CANCELED) { return rt_static_text("Canceled") }
+    rt_static_text("DeadlineExceeded")
+}
+
+// ---- Observations ----------------------------------------------------------
+
+// The EventOverflow name of the policy of `core`, static.
+async_overflow_text: fn(core: I64) -> I64 {
+    overflow: sync_load(wrapping(core + I64{128}))
+    if (overflow == ASYNC_BLOCK) { return rt_static_text("Block") }
+    if (overflow == ASYNC_DROP_NEWEST) { return rt_static_text("DropNewest") }
+    rt_static_text("DropOldest")
+}
+
+// The `lifecycle` record of the dispatch of `entry`, lock held: the core's
+// queued, blocked and running counts as they stand.
+async_observe_counts: fn(core: I64, entry: I64, lifecycle: I64) {
+    none: rt_static_text("None")
+    observe_event(rt_static_text("AsyncEvent"), sync_load(wrapping(core + I64{184})), I64{0}, I64{0}, sync_load(wrapping(entry + I64{72})), lifecycle, event_word(wrapping(core + I64{48})), event_word(wrapping(core + I64{72})), sync_load(wrapping(core + I64{96})), sync_load(wrapping(core + I64{120})), async_overflow_text(core), I64{0}, none, none)
+}
+
+// The Terminal record of `entry` ending `state`, lock held: failure Panic
+// when a handler of its dispatch panicked, else Handler when one failed
+// (`failures`, 0 for none).
+async_observe_terminal: fn(entry: I64, state: I64, failures: I64) {
+    core: sync_load(wrapping(entry + I64{8}))
+    failure := rt_static_text("None")
+    if (failures != I64{0}) {
+        failure = rt_static_text("Handler")
+        at := I64{0}
+        loop at < event_word(failures) {
+            if (event_words_get(failures, at) == DISPATCH_FAILURE_PANIC) {
+                failure = rt_static_text("Panic")
+            }
+            at += I64{2}
+        }
+    }
+    observe_event(rt_static_text("AsyncEvent"), sync_load(wrapping(core + I64{184})), I64{0}, I64{0}, sync_load(wrapping(entry + I64{72})), rt_static_text("Terminal"), I64{-1}, I64{-1}, I64{-1}, sync_load(wrapping(core + I64{120})), async_overflow_text(core), I64{0}, failure, async_state_text(state))
 }
 
 async_failures_free: fn(failures: I64, e_meta: I64) {
@@ -265,8 +301,8 @@ async_failures_push: fn(failures: I64, kind: I64, value: I64) -> I64 {
 // rejects a capacity below 1 first); the FailurePolicy is its ordinal word.
 // It keeps copies of the failure E's and the handler result's descriptors.
 #Export(c) jet_async_event_new: fn(policy: I64, failures: I64, e_meta: I64, r_meta: I64) -> I64 {
-    core: jet_rt_alloc(I64{184}, I64{8})
-    coll_zero(core, I64{184})
+    core: jet_rt_alloc(I64{192}, I64{8})
+    coll_zero(core, I64{192})
     sync_store(core, I64{1})
     sync_store(wrapping(core + I64{8}), I64{1})
     sync_store(wrapping(core + I64{120}), dyn_word(wrapping(policy + ASYNC_POLICY_CAPACITY)))
@@ -274,6 +310,7 @@ async_failures_push: fn(failures: I64, kind: I64, value: I64) -> I64 {
     sync_store(wrapping(core + I64{136}), failures)
     sync_store(wrapping(core + I64{160}), coll_meta_copy(e_meta))
     sync_store(wrapping(core + I64{168}), coll_meta_copy(r_meta))
+    sync_store(wrapping(core + I64{184}), observe_event_id())
     core
 }
 
@@ -298,7 +335,7 @@ async_core_release: fn(core: I64) {
     event_words_free(event_word(wrapping(core + I64{88})), event_word(wrapping(core + I64{80})))
     coll_meta_drop(sync_load(wrapping(core + I64{160})))
     coll_meta_drop(sync_load(wrapping(core + I64{168})))
-    jet_rt_free(core, I64{184}, I64{8})
+    jet_rt_free(core, I64{192}, I64{8})
 }
 
 #Export(c) jet_rt_handle_clone_jet_async_event: fn(core: I64) -> I64 {
@@ -331,7 +368,7 @@ async_entry_release: fn(entry: I64) {
     jet_rt_handle_drop_jet_dispatch_report(sync_load(wrapping(entry + I64{40})))
     scheduler_control_drop(sync_load(wrapping(entry + I64{64})))
     async_core_release(sync_load(wrapping(entry + I64{8})))
-    jet_rt_free(entry, I64{72}, I64{8})
+    jet_rt_free(entry, I64{80}, I64{8})
 }
 
 async_entry_trace: fn(entry: I64, step: I64) {
@@ -364,7 +401,8 @@ async_complete: fn(entry: I64, accepted: Bool, state: I64) {
 }
 
 // async_complete for a dispatch: its delivered count, handler trace lines
-// and failures (both taken) go to the report.
+// and failures (both taken) go to the report. Only the transition to
+// terminal is observed.
 async_finish: fn(entry: I64, accepted: Bool, state: I64, delivered: I64, lines: I64, failures: I64, e_meta: I64) {
     if (sync_load(wrapping(entry + I64{16})) == ASYNC_TERMINAL) {
         jet_rt_string_drop(lines)
@@ -372,6 +410,7 @@ async_finish: fn(entry: I64, accepted: Bool, state: I64, delivered: I64, lines: 
         return
     }
     sync_store(wrapping(entry + I64{16}), ASYNC_TERMINAL)
+    if observe_live() -> async_observe_terminal(entry, state, failures)
     sync_store(wrapping(entry + I64{48}), if accepted -> I64{1} else -> I64{0})
     sync_store(wrapping(entry + I64{40}), dispatch_report_new(accepted, state, delivered, sync_load(wrapping(entry + I64{56})), lines, failures, e_meta))
     payload: sync_load(wrapping(entry + I64{24}))
@@ -447,7 +486,9 @@ async_prune_listeners: fn(core: I64) {
 
 // JetAsyncEvent.add :1086-1128 (on / once / on_priority): the scope tracks
 // the subscription and the event's hard cancel; a canceled scope returns
-// the subscription inactive and the handler is released unregistered.
+// the subscription inactive and the handler is released unregistered,
+// unobserved. A registered one is observed Subscribed with the counts as
+// they stand.
 #Export(c) jet_async_event_listen: fn(core: I64, scope: I64, priority: I64, once: I64, env: I64, invoke: I64, release: I64) -> I64 {
     sub: event_sub_new()
     event_scope_track(scope, sub)
@@ -470,6 +511,15 @@ async_prune_listeners: fn(core: I64) {
     sync_store(wrapping(core + I64{152}), id + I64{1})
     event_store(wrapping(listener + I64{8}), id)
     event_words_push(wrapping(core + I64{24}), listener)
+    source: rt_static_text("AsyncEvent")
+    identity: sync_load(wrapping(core + I64{184}))
+    capacity: sync_load(wrapping(core + I64{120}))
+    overflow: async_overflow_text(core)
+    note: event_note_new(sub, source, identity, scope, priority, I64{-1}, capacity, overflow)
+    if (note != I64{0}) {
+        none: rt_static_text("None")
+        observe_event(source, identity, event_word(wrapping(note + I64{16})), event_word(wrapping(note + I64{24})), I64{0}, rt_static_text("Subscribed"), event_word(wrapping(core + I64{48})), event_word(wrapping(core + I64{72})), sync_load(wrapping(core + I64{96})), capacity, overflow, priority, none, none)
+    }
     async_unlock(core)
     sub
 }
@@ -511,9 +561,10 @@ async_count: fn(core: I64, offset: I64) -> I64 {
 // the moved payload's bytes at `payload` under a copy of `meta`, joins the
 // queue (or the blocked list, or ends at once by the overflow policy) and a
 // task runs it; the task's result is its DispatchReport under `report_meta`.
+// A blocked entry is observed Backpressured.
 #Export(c) jet_async_event_emit: fn(core: I64, payload: I64, meta: I64, report_meta: I64) -> I64 {
-    entry: jet_rt_alloc(I64{72}, I64{8})
-    coll_zero(entry, I64{72})
+    entry: jet_rt_alloc(I64{80}, I64{8})
+    coll_zero(entry, I64{80})
     sync_store(entry, I64{1})
     async_core_retain(core)
     sync_store(wrapping(entry + I64{8}), core)
@@ -522,6 +573,7 @@ async_count: fn(core: I64, offset: I64) -> I64 {
     coll_copy(payload, slot, coll_payload(owned))
     sync_store(wrapping(entry + I64{24}), slot)
     sync_store(wrapping(entry + I64{32}), owned)
+    sync_store(wrapping(entry + I64{72}), observe_event_id())
     async_lock(core)
     capacity: sync_load(wrapping(core + I64{120}))
     closed: sync_load(wrapping(core + I64{104})) != I64{0}
@@ -535,6 +587,7 @@ async_count: fn(core: I64, offset: I64) -> I64 {
         policy == ASYNC_BLOCK -> {
             async_entry_trace(entry, ASYNC_TRACE_PENDING)
             async_list_push(wrapping(core + I64{72}), entry)
+            async_observe_counts(core, entry, rt_static_text("Backpressured"))
         }
         policy == ASYNC_DROP_NEWEST -> async_complete(entry, false, DISPATCH_DROPPED_NEWEST)
         else -> {
@@ -552,11 +605,13 @@ async_count: fn(core: I64, offset: I64) -> I64 {
     task_spawn_typed_deadline(rt_static_text(""), entry, rt_async_entry_invoke_address(), rt_async_entry_release_address(), report_meta)
 }
 
+// The entry joins the queue, lock held, observed Queued.
 async_enqueue: fn(core: I64, entry: I64) {
     sync_store(wrapping(entry + I64{16}), ASYNC_QUEUED)
     sync_store(wrapping(entry + I64{48}), I64{1})
     async_entry_trace(entry, ASYNC_TRACE_QUEUED)
     async_list_push(wrapping(core + I64{48}), entry)
+    async_observe_counts(core, entry, rt_static_text("Queued"))
 }
 
 // RuntimeLower resolves these checked addresses through its sole intrinsic table.
@@ -627,9 +682,10 @@ async_entry_run: fn(entry: I64) -> I64 {
     }
 }
 
-// The listener rows due for one dispatch, lock held: each retained, ordered
-// by priority (highest first) then registration.
-async_snapshot: fn(core: I64) -> I64 {
+// The listener rows due for the dispatch of `entry`, lock held: each
+// retained, ordered by priority (highest first) then registration. A once
+// row reserved here is observed Removed in that dispatch.
+async_snapshot: fn(core: I64, entry: I64) -> I64 {
     base: wrapping(core + I64{24})
     length: event_word(base)
     snapshot: jet_rt_alloc((length + I64{2}) * I64{8}, I64{8})
@@ -643,6 +699,9 @@ async_snapshot: fn(core: I64) -> I64 {
         once: event_word(wrapping(listener + I64{24})) != I64{0}
         due: if once -> sync_cas(wrapping(sub + I64{8}), I64{1}, I64{0}) == I64{1} else -> event_sub_active(sub)
         if due {
+            if once {
+                event_note_observe(event_word(wrapping(sub + I64{32})), sync_load(wrapping(entry + I64{72})), rt_static_text("Removed"), rt_static_text("None"))
+            }
             event_listener_retain(listener)
             event_snapshot_insert(rows, count, listener)
             count += I64{1}
@@ -666,7 +725,9 @@ async_handler_line: fn(lines: I64, index: I64, outcome: I64) {
 // FailurePolicy keeps (StopFirst and Collect), logs or ignores. A panic is a
 // Panic failure that ends the run HandlerFailed; a cancel or deadline stop
 // ends it `Canceled` or `DeadlineExceeded`, and any other stop ends the task
-// with no report.
+// with no report. Observed: Running, then each handler's HandlerStarted and
+// its HandlerDelivered or HandlerFailed (failure Handler for an Err, Panic
+// for a panic).
 async_dispatch: fn(core: I64, entry: I64) -> I64 {
     event_words_remove(wrapping(core + I64{48}), I64{0})
     sync_store(wrapping(entry + I64{16}), ASYNC_RUNNING)
@@ -676,7 +737,10 @@ async_dispatch: fn(core: I64, entry: I64) -> I64 {
     sync_store(wrapping(entry + I64{64}), control)
     sync_store(wrapping(core + I64{96}), I64{1})
     sync_store(wrapping(core + I64{176}), entry)
-    snapshot: async_snapshot(core)
+    async_observe_counts(core, entry, rt_static_text("Running"))
+    snapshot: async_snapshot(core, entry)
+    dispatch: sync_load(wrapping(entry + I64{72}))
+    none: rt_static_text("None")
     payload: sync_load(wrapping(entry + I64{24}))
     sync_store(wrapping(entry + I64{24}), I64{0})
     e_meta: sync_load(wrapping(core + I64{160}))
@@ -698,6 +762,8 @@ async_dispatch: fn(core: I64, entry: I64) -> I64 {
         once: event_word(wrapping(listener + I64{24})) != I64{0}
         if (once || event_sub_active(event_word(wrapping(listener + I64{32})))) {
             delivered += I64{1}
+            note: event_listener_note(listener)
+            event_note_observe(note, dispatch, rt_static_text("HandlerStarted"), none)
             event_listener_call(listener, payload, scratch)
             if (jet_rt_session_propagate() != I64{0}) {
                 record: scheduler_control_take_stop(control)
@@ -710,6 +776,7 @@ async_dispatch: fn(core: I64, entry: I64) -> I64 {
                     jet_rt_string_builder_push(lines, rt_static_text(" -> "))
                     failures = async_failures_push(failures, DISPATCH_FAILURE_PANIC, message)
                     state = DISPATCH_HANDLER_FAILED
+                    event_note_observe(note, dispatch, rt_static_text("HandlerFailed"), rt_static_text("Panic"))
                 } else if (kind == I64{1} || kind == I64{2}) {
                     scheduler_stop_drop(record)
                     if (kind == I64{1}) { scheduler_control_cancel_consume(control) }
@@ -728,15 +795,19 @@ async_dispatch: fn(core: I64, entry: I64) -> I64 {
             boxed: event_word(scratch)
             if (event_word(boxed) == I64{1}) {
                 async_handler_line(lines, at, rt_static_text("delivered -> "))
-            } else if (policy == FAILURE_STOP_FIRST || policy == FAILURE_COLLECT || policy == FAILURE_LOG) {
-                async_handler_line(lines, at, rt_static_text("failed -> "))
-                if (policy == FAILURE_LOG) {
-                    _ := host_stdio_text_failure(rt_static_text("event handler failed"), true, true, false)
-                } else {
-                    failure: coll_slot_new(e_meta)
-                    hook_value_clone(wrapping(boxed + I64{8}), failure, e_meta)
-                    failures = async_failures_push(failures, DISPATCH_FAILURE_HANDLER, failure)
-                    state = DISPATCH_HANDLER_FAILED
+                event_note_observe(note, dispatch, rt_static_text("HandlerDelivered"), none)
+            } else {
+                event_note_observe(note, dispatch, rt_static_text("HandlerFailed"), rt_static_text("Handler"))
+                if (policy == FAILURE_STOP_FIRST || policy == FAILURE_COLLECT || policy == FAILURE_LOG) {
+                    async_handler_line(lines, at, rt_static_text("failed -> "))
+                    if (policy == FAILURE_LOG) {
+                        _ := host_stdio_text_failure(rt_static_text("event handler failed"), true, true, false)
+                    } else {
+                        failure: coll_slot_new(e_meta)
+                        hook_value_clone(wrapping(boxed + I64{8}), failure, e_meta)
+                        failures = async_failures_push(failures, DISPATCH_FAILURE_HANDLER, failure)
+                        state = DISPATCH_HANDLER_FAILED
+                    }
                 }
             }
             coll_slot_drop(scratch, r_meta)

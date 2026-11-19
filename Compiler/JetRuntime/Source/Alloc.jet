@@ -3012,15 +3012,42 @@ alloc_check_track_skip_thread: fn() {
 
 // Whether a tracking take on this thread links its block: none of the
 // observation writer's does (alloc_check_track_skip_thread), nor any of a
-// thread that has no TCB yet. Those are the runtime's own: the thread block a
-// new thread or a host attach takes for itself (Thread.jet thread_new_tcb,
-// 1064 B) and its registry row, before GS names it.
+// thread that has no TCB yet, nor any the observation takes for its own
+// state on a program's thread (alloc_check_own_enter). Those are the
+// runtime's own: the thread block a new thread or a host attach takes for
+// itself (Thread.jet thread_new_tcb, 1064 B) and its registry row, before GS
+// names it, and the observation's task and channel rows (Observe.jet).
 priv alloc_check_track_thread: fn() -> Bool {
     base := I64{0}
-    #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); it is only compared") {
+    own := I64{0}
+    #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); only an attached TCB's own-takes word is read") {
         base = os_tls_base_i64()
+        if (base != I64{0}) { own = os_load_i64(wrapping(base + ALLOC_TCB_OWN)) }
     }
-    base != I64{0} && base != alloc_check_track_skipped
+    base != I64{0} && base != alloc_check_track_skipped && own == I64{0}
+}
+
+// The TCB word counting the observation's own takes this thread is inside
+// (Thread.jet's layout): while it is above 0 a take links no block on the
+// live list and the alloc lens counts none.
+ALLOC_TCB_OWN: I64{768}
+
+// The observation's state on a program's thread (Observe.jet's task and
+// channel rows, a task's label and its wait's name) is the observation's own,
+// not the program's: from here until alloc_check_own_leave this thread's
+// takes stay off the live list a heap snapshot walks and out of the alloc
+// lens's count. The two nest.
+alloc_check_own_enter: fn() { alloc_check_own_add(I64{1}) }
+
+alloc_check_own_leave: fn() { alloc_check_own_add(I64{-1}) }
+
+priv alloc_check_own_add: fn(delta: I64) {
+    #Unsafe("GS:0 is the attached thread's TCB, whose own-takes word only this thread writes; an unattached thread's takes link no block, so it keeps no count") {
+        base: os_tls_base_i64()
+        if (base != I64{0}) {
+            os_store_i64(wrapping(base + ALLOC_TCB_OWN), wrapping(os_load_i64(wrapping(base + ALLOC_TCB_OWN)) + delta))
+        }
+    }
 }
 
 // Link the fresh payload `pointer` at the head of the live list. The caller

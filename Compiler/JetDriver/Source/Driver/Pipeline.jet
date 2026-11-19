@@ -6458,6 +6458,15 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     if failed_stage != None && !kg.enabled {
         return jet_driver_doc_failure(jet_driver_compile_result(load, load.diagnostics, failed_stage, false, trace), request.mode, Val(checked_graph.names.structure_facts))
     }
+    // A plain check and a program compile list the L2511 tidy errors of the
+    // hidden copies a loop repeats (CostQueries.jet): `jet check` and `jet
+    // build` fail on them, and `jet run` and `jet dev` never stop for one. A
+    // check that keeps its cost report lists its L2510 lints instead (below).
+    if (request.mode == JetDriverCompileMode.Check && !request.capture_cost_report) || request.mode == JetDriverCompileMode.Program {
+        loop lint in jet_driver_cost_copy_lints(load, checked_functions) {
+            load.diagnostics.push(lint)
+        }
+    }
     // `jet check` stops before lowering: no C export rows, no Core
     // reachability pruning. The entry resolves over every checked function
     // (pruning only drops unreached Core bodies, never a user entry), and the
@@ -6501,8 +6510,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         // --cost`) first proves the projection complete: a checked body that
         // reaches a callee with neither a checked body nor a foreign row is
         // refused. The report's sites are placed on their lines and its
-        // L2510 lints join the check's diagnostics. Any other check lists
-        // the L2511 tidy errors of the hidden copies its loops repeat.
+        // L2510 lints join the check's diagnostics.
         cost_report := TCostReport?{None}
         if request.capture_cost_report {
             jet_driver_trace_step_begin(request.trace_sink, "driver.check.cost")
@@ -6519,9 +6527,6 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
             loop lint in jet_driver_cost_lints(load, report) -> load.diagnostics.push(lint)
             cost_report = Val(report.move())
             jet_driver_trace_step_end(request.trace_sink, "driver.check.cost", cost_cover.covered.len())
-        }
-        if !request.capture_cost_report {
-            loop lint in jet_driver_cost_copy_lints(load, checked_functions) -> load.diagnostics.push(lint)
         }
         // Every check lists the L0308 tidy errors of the SELECTs run once
         // per row of a loop over database rows.

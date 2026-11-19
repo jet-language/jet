@@ -1,11 +1,11 @@
-// Allocation in a loop: each of 2000 turns builds a 64-element list and
-// every 100th list is kept, so the list's line allocates on every turn and
-// the 20 kept lists are still live when the run ends.
+// Allocation in a loop: each of 2000 turns builds a 64-element list from
+// its turn, so no list is a constant built once at compile time, and keeps
+// every 100th: line 8 allocates on every turn and 20 lists stay live.
 use core.perf
 
-build: fn(n: Int) -> [Int] {
+build: fn(first: Int, n: Int) -> [Int] {
     xs := [Int]{}
-    loop i in 0..<n { xs.push(i) }
+    loop i in 0..<n { xs.push(first + i) }
     xs
 }
 
@@ -13,7 +13,7 @@ run: fn() {
     kept := [[Int]]{}
     total := 0
     loop t in 0..<2000 {
-        xs: build(64)
+        xs: build(t, 64)
         total += xs.len()
         if t % 100 == 0 -> kept.push(xs)
     }

@@ -229,24 +229,20 @@ elf64_section_header: fn(bytes: &[U8], name: Int, kind: Int, flags: Int, offset:
 // libc main transfers its raw argc/argv/envp (the startup stack's, so
 // jet_rt_host_main_arguments) before jet_rt_main(entry).
 // The push keeps rsp 16-byte aligned at all calls. Host constructors have
-// already run through the runtime object's init array. A program whose
-// code has patchable zone sites calls `sites`, the function that registers
-// their table (JetIR X64Module.jet ir_x64_zone_sites), after host startup
-// and before its entry runs. A program that owns its main (`owned`, JetIR
-// EntryOwned.jet) runs the entry itself, with no process root:
-// jet_rt_thread_init when it must attach its thread (`attach`,
-// IRModule.owned_attach), jet_rt_main_owned_start, the entry, the stdout
-// flush, and status 0 as jet_rt_main's normal return.
-x64_object_main: fn(entry: X64FunctionID, owned: Bool, attach: Bool, sites: X64FunctionID?) -> X64CompiledFunction Never! {
+// already run through the runtime object's init array. A program's
+// patchable zone sites need no call: the link names them in a part note
+// (StaticLink.jet link_zone_write), which the runtime reads when zones turn
+// on. A program that owns its main (`owned`, JetIR EntryOwned.jet) runs the
+// entry itself, with no process root: jet_rt_thread_init when it must
+// attach its thread (`attach`, IRModule.owned_attach),
+// jet_rt_main_owned_start, the entry, the stdout flush, and status 0 as
+// jet_rt_main's normal return.
+x64_object_main: fn(entry: X64FunctionID, owned: Bool, attach: Bool) -> X64CompiledFunction Never! {
     code := x64_code()
     x64_push(code, X64_RBX)
     arguments_at: x64_call_rel32(code)
     start_at: x64_call_rel32(code)
     relocs := [X64Reloc]{X64Reloc{at: arguments_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_main_arguments"}}, X64Reloc{at: start_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_program_start"}}}
-    if sites == .Val(table) {
-        sites_at: x64_call_rel32(code)
-        relocs.push(X64Reloc{at: sites_at, target: X64RelocTarget.Function{id: table}})
-    }
     if owned {
         if attach {
             attach_at: x64_call_rel32(code)
@@ -277,7 +273,8 @@ x64_object_main: fn(entry: X64FunctionID, owned: Bool, attach: Bool, sites: X64F
     X64CompiledFunction{id: X64FunctionID{value: -1}, name: "main", code: code.bytes, relocs: relocs, align: X64_FUNCTION_ALIGN}
 }
 
-// The function `id` that registers a site table: `lea rdi, [rip + table]`
+// The function `id` a library's constructor runs to register its site table
+// (JetIR X64Module.jet ir_x64_library_object): `lea rdi, [rip + table]`
 // and a tail jump to the runtime's jet_perf_zone_table (JetRuntime
 // PerfSamples.jet), then, at X64_OBJECT_SITES_TABLE_AT (8-byte aligned),
 // the table itself: its site count as a little-endian word, then per site a
@@ -305,13 +302,14 @@ x64_object_zone_sites: fn(id: X64FunctionID, name: String, sites: [Int]) -> X64C
     X64CompiledFunction{id: id, name: name, code: code.bytes.move(), relocs: relocs, align: X64_FUNCTION_ALIGN}
 }
 
-// The section naming the code each patchable zone site skips while zones
-// are off (X64CompiledFunction.zones): per site three little-endian words,
-// the header index of the section holding it, then the start and end of
-// the skipped bytes there, from the end of the site's `jmp rel32` to its
-// target. Not loaded; the Jet link lays the sections only those bytes
-// reach after all other code (StaticLink.jet link_heat), so a run that
-// records no zone faults none of their pages in.
+// The section naming each patchable zone site and the code its stub holds
+// (X64CompiledFunction.zones, .zone_ends): per site four little-endian
+// words, the header index of the section holding it, the site's offset
+// there, then the start and end of its stub, from the target of the site's
+// rel32 to the end of the stub's jump back. Not loaded; the Jet link names
+// the sites in the image's part note (StaticLink.jet link_zone_write) and
+// lays the sections only stubs reach after all other code (StaticLink.jet
+// link_heat), so a run that records no zone faults none of their pages in.
 X64_OBJECT_ZONE_SPANS: ".jet.zone_spans"
 
 // The `.jet.zone_spans` contents of `functions`, placed at `offsets` (in
@@ -319,13 +317,13 @@ X64_OBJECT_ZONE_SPANS: ".jet.zone_spans"
 x64_object_zone_spans: fn(functions: [X64CompiledFunction], offsets: [Int], own_sections: Bool) -> [U8] Never! {
     spans := [U8]{}
     loop (row, function) in functions {
-        loop site in function.zones {
-            // The jump's rel32, a forward distance.
-            skip: Int{function.code[site + 1]} | (Int{function.code[site + 2]} << 8) | (Int{function.code[site + 3]} << 16) | (Int{function.code[site + 4]} << 24)
-            start: offsets[row] + site + 5
+        loop (nth, site) in function.zones {
+            // The rel32 to the stub, a forward distance.
+            reach: Int{function.code[site + 1]} | (Int{function.code[site + 2]} << 8) | (Int{function.code[site + 3]} << 16) | (Int{function.code[site + 4]} << 24)
             elf64_u64(spans, x64_object_function_section(own_sections, row))
-            elf64_u64(spans, start)
-            elf64_u64(spans, start + skip)
+            elf64_u64(spans, offsets[row] + site)
+            elf64_u64(spans, offsets[row] + site + 5 + reach)
+            elf64_u64(spans, offsets[row] + function.zone_ends[nth])
         }
     }
     spans

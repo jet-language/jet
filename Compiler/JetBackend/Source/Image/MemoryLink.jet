@@ -237,7 +237,9 @@ link_bind_startup: fn(frames: Bool) -> LinkSynth Never! {
     s
 }
 
-// Lay the program out from the image's program base.
+// Lay the program out from the image's program base: the combined program
+// header table, the part note of the program's zone sites when its code
+// has any (StaticLink.jet link_zone_write), then its loaded sections.
 link_bind_layout: fn(c: &LinkContext, view: LinkImageView) -> LinkLayout Never! {
     order: link_order(c)
     commons := false
@@ -248,8 +250,11 @@ link_bind_layout: fn(c: &LinkContext, view: LinkImageView) -> LinkLayout Never! 
     loop class in LINK_RELRO..<LINK_CLASSES {
         if order[class].len() > 0 -> has_rw = true
     }
-    phnum: view.phnum + 2 + (if has_rw -> 1 else -> 0)
+    sites: link_zone_count(c)
+    phnum: view.phnum + 2 + (if has_rw -> 1 else -> 0) + (if sites > 0 -> 1 else -> 0)
     addr := view.program_base + LINK_PHDR_SIZE * phnum
+    zone_note_at: if sites > 0 -> link_align(addr, 8) else -> 0
+    if sites > 0 -> addr = zone_note_at + link_zone_note_size(sites)
     addr = link_place(c, order[LINK_RODATA], addr)
     r_end: link_place_eh(c, addr)
     text_start: link_align(r_end, LINK_PAGE)
@@ -287,19 +292,23 @@ link_bind_layout: fn(c: &LinkContext, view: LinkImageView) -> LinkLayout Never! 
         preinit_end: rw_start,
         bss_start: file_end,
         note_at: 0,
+        zone_note_at: zone_note_at,
+        zone_sites: sites,
         notes: [Int:Int]{},
         packed: false,
         rw_shift: 0,
     }
 }
 
-// The program part: the program header table, then the program's loaded
-// bytes, at file offset `exe.tail_at` (the program base); the image part's
-// `main` places bound to `target`. Returns the image's ELF header naming
-// the combined program header table, for link_bind_sections to finish.
+// The program part: the program header table, the zone-site part note,
+// then the program's loaded bytes, at file offset `exe.tail_at` (the
+// program base); the image part's `main` places bound to `target`. Returns
+// the image's ELF header naming the combined program header table, for
+// link_bind_sections to finish.
 link_bind_write: fn(c: &LinkContext, exe: &X64Executable, view: LinkImageView, l: LinkLayout, target: Int) -> [U8] Never! {
     out := [U8]{}
     elf := link_bind_header(c, exe, out, view, l, target)
+    link_zone_write(c, out, l, view.program_base)
     in_place := link_no_pieces()
     link_write_contents(c, out, l, view.program_base, in_place)
     exe.tail = out
@@ -348,6 +357,7 @@ link_bind_header: fn(c: &LinkContext, exe: &X64Executable, out: &[U8], view: Lin
     if l.has_rw {
         link_phdr(out, l.rw_start - c.base, 1, 6, l.rw_start, l.file_end - l.rw_start, l.mem_end - l.rw_start, LINK_PAGE)
     }
+    link_zone_phdr(out, l, c.base)
     loop k in 0..<view.phnum {
         at: view.phoff + LINK_PHDR_SIZE * k
         if link_u32(c.bufs, 1, at) != 1 -> out.extend(c.bufs[1][at..<at + LINK_PHDR_SIZE])

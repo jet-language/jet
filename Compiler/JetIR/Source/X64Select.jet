@@ -233,6 +233,19 @@ IRX64Pad: struct {
     heads: [Int],
 }
 
+// A zone site's or region's stub (ir_x64_zone_stub): its instructions
+// `start` to `end`, the rel32 field of its site's `jmp`, the hot code's
+// offset right after the site, where the stub jumps back to, and the open
+// constructs there (`open`, `heads`).
+IRX64Stub: struct {
+    start: Int,
+    end: Int,
+    site: Int,
+    resume: Int,
+    open: [Int],
+    heads: [Int],
+}
+
 IRX64Emitter: struct {
     // The machine code and, for a function JET_X64_EMIT_LOG names, its
     // emission log (X64Code), whose `at` follows `at` below.
@@ -326,13 +339,18 @@ IRX64Emitter: struct {
     // Per instruction: of the first of a zone region's instructions
     // (ir_x64_zone_regions), the region's last one, else -1; and the region
     // being selected's last instruction and its skip's rel32 field (-1 for
-    // none).
+    // none): in a stub, the stub's.
     sunk: [Int]{[Int]{}},
     sunk_end: Int{-1},
     sunk_site: Int{-1},
-    // The rel32 fields of the patchable zone sites' jmps (ir_x64_zones_skip)
-    // in code order, until the code is laid out: X64CompiledFunction.zones.
+    // The rel32 fields of the patchable zone sites' jmps (ir_x64_zone_stub)
+    // in code order, until the code is laid out: X64CompiledFunction.zones;
+    // their stubs, in the same order, laid out after the epilogue
+    // (ir_x64_zone_stubs); and where each stub ends, until the code is laid
+    // out: X64CompiledFunction.zone_ends.
     zone_sites: [Int]{[Int]{}},
+    stubs: [IRX64Stub]{[IRX64Stub]{}},
+    stub_ends: [Int]{[Int]{}},
 }
 
 // One compiled function, the debug variables its ranges refer to, and its
@@ -1856,18 +1874,20 @@ IR_X64_PERF_ZONES_STORAGE: "perf_zones_on"
 IR_X64_PERF_ZONES_SYMBOL: "jet_rt_perf_zones"
 
 // A zone site, core.perf.__zone_open, __zone_close, __frame or __plot_float at
-// `at`: the hot path skips the call while zones are off
-// (ir_x64_zones_skip; an open's result is then the Int 0, which a close
-// skipped the same way never reads; a frame mark or a plot records nothing
-// while zones are off). So a zone, frame mark or plot the profiler is not
-// recording costs one jump, and the call's arguments are not even set up. A
-// frame mark or plot inside a zone region (ir_x64_zone_regions) is a plain
-// call: the region's own skip jumped past it with its arguments'
-// computations. A close whose open ran before the profiler turned zones on
-// gets 0 and writes no row (PerfSamples.jet jet_perf_zone_close). A `zones:
-// strip` module (IRModule.zones_stripped) keeps no zone site: an open is
-// the Int 0 and a close is nothing, while its frame marks and plots stay
-// plain calls, which record under a profiler as the setting promises.
+// `at`: the hot path passes the call by while zones are off (in code an
+// image lists the sites of, its stub, ir_x64_zone_stub; else an inline
+// skip, ir_x64_zones_skip; an open's result is then the Int 0, which a
+// close passed by the same way never reads; a frame mark or a plot records
+// nothing while zones are off). So a zone, frame mark or plot the profiler
+// is not recording costs one instruction, and the call's arguments are not
+// even set up. A frame mark or plot inside a zone region
+// (ir_x64_zone_regions), or in a stub, is a plain call: the region's own
+// site or skip passed it by with its arguments' computations. A close
+// whose open ran before the profiler turned zones on gets 0 and writes no
+// row (PerfSamples.jet jet_perf_zone_close). A `zones: strip` module
+// (IRModule.zones_stripped) keeps no zone site: an open is the Int 0 and a
+// close is nothing, while its frame marks and plots stay plain calls, which
+// record under a profiler as the setting promises.
 ir_x64_zone_site: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, symbol: String, dst: Int) Never! {
     if e.sunk_site >= 0 && at <= e.sunk_end {
         ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: symbol}, -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
@@ -1880,28 +1900,80 @@ ir_x64_zone_site: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
     if m.zones_stripped {
         return
     }
-    skip: ir_x64_zones_skip(e, m)
+    if m.zone_table {
+        ir_x64_zone_stub(e, at, at)
+        return
+    }
+    skip: ir_x64_zones_skip(e)
     ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: symbol}, -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
     ir_x64_patch(e, skip, e.code.bytes.len())
 }
 
-// The skip of a zone site or region: the rel32 field of a jump past it
-// while zones are off. Code an image lists the sites of
-// (IRModule.zone_table) jumps with a patchable `jmp rel32`, kept long
-// (X64Relax.jet), whose offset X64CompiledFunction.zones lists: while a
-// profiler records zones the runtime turns its opcode byte into `test eax,
-// imm32` (PerfSamples.jet perf_zones_set), one byte's store, so the jump
-// goes and the site costs a test whose flags nothing reads. Other code (a
-// comptime batch or a debugger's evaluation bound into a running process)
-// has no table to patch: it tests the runtime's zones word and jumps while
-// it is zero. r11 may hold a value (a close's argument), so the test saves
-// it (a pop keeps the flags).
-ir_x64_zones_skip: fn(e: &IRX64Emitter, m: IRModule) -> Int Never! {
-    if m.zone_table {
-        site: x64_jmp_rel32(e.code)
-        e.zone_sites.push(site)
-        return site
+// The site of a zone site or region, instructions `start` to `end`, in code
+// an image lists the sites of (IRModule.zone_table): a patchable `jmp
+// rel32` to the stub that holds them, kept long (X64Relax.jet), whose
+// offset X64CompiledFunction.zones lists. The laid-out code holds its
+// opcode byte as `test eax, imm32` (ir_x64_compile_body), whose flags
+// nothing reads, so while zones are off the hot path runs one instruction
+// and takes no branch, and none of the stub's bytes sit between the hot
+// code's. While a profiler records zones the runtime turns that byte back
+// into the `jmp` (PerfSamples.jet perf_zones_set), one byte's store, and
+// the site enters its stub, which ir_x64_zone_stubs lays out after the
+// epilogue: the instructions, then a jump back past the site.
+ir_x64_zone_stub: fn(e: &IRX64Emitter, start: Int, end: Int) Never! {
+    site: x64_jmp_rel32(e.code)
+    e.zone_sites.push(site)
+    e.stubs.push(IRX64Stub{start: start, end: end, site: site, resume: e.code.bytes.len(), open: e.open, heads: e.heads})
+}
+
+// Lays out each zone site's stub (ir_x64_zone_stub) after the epilogue, in
+// the sites' order: its site's `jmp` lands at its start, its instructions
+// run as the hot path would have run them, with the open constructs of
+// the site (every one already laid out) and the zone sites among them
+// plain calls (IRX64Emitter.sunk_site), and a jump goes back past the site.
+// Nothing before a stub's first instruction left a slow path for its stop
+// points (ir_x64_zone_holds). A stop edge among them is laid out with the
+// other edges (ir_x64_pads) and resumes in the stub.
+ir_x64_zone_stubs: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64FunctionTables, lines: &[X64LineRow], poll: Int, trap: Int, turn: Int) Never! {
+    loop stub in e.stubs {
+        ir_x64_land(e, stub.site)
+        e.open = stub.open
+        e.heads = stub.heads
+        e.falses = [Int]{}
+        loop _ in 0..<e.open.len() -> e.falses.push(-1)
+        e.fused = -1
+        e.routed = -1
+        e.sunk_site = stub.site
+        e.sunk_end = stub.end
+        traps := e.colds.len()
+        at := stub.start
+        loop at <= stub.end {
+            ir_x64_debug_line(lines, e.code.bytes.len(), ir_code_line_source(f.code_line[at]))
+            e.at = at
+            e.code.at = at
+            end: ir_x64_stop_point(e, m, f, al, at, poll, trap, turn, traps)
+            traps = e.colds.len()
+            if end > at {
+                at = end + 1
+                next
+            }
+            ir_x64_select_at(e, m, f, al, tables, at)
+            at += 1
+        }
+        e.code.at = -1
+        ir_x64_jump_to(e, stub.resume)
+        e.stub_ends.push(e.code.bytes.len())
     }
+    e.sunk_site = -1
+    e.sunk_end = -1
+}
+
+// The skip of a zone site or region in code no image lists the sites of
+// (a comptime batch or a debugger's evaluation bound into a running
+// process), which has no table to patch: the rel32 field of a jump past it
+// while the runtime's zones word is zero. r11 may hold a value (a close's
+// argument), so the test saves it (a pop keeps the flags).
+ir_x64_zones_skip: fn(e: &IRX64Emitter) -> Int Never! {
     x64_push(e.code, X64_R11)
     flag: x64_load_rip(e.code, X64_R11)
     e.relocs.push(X64Reloc{at: flag, target: X64RelocTarget.RuntimeData{symbol: IR_X64_PERF_ZONES_SYMBOL}})
@@ -1921,9 +1993,11 @@ IRX64Region: struct {
 // level around a frame mark or plot (ir_x64_zone_call) that compute only
 // what nothing past them reads: the call's arguments (a plot's Float),
 // their drops and the stop points between (ir_x64_zone_quiet). The
-// selector puts one skip at a region's start (ir_x64_zone_bound,
-// ir_x64_zones_skip) that, while zones are off, jumps past its end, so a
-// plot the profiler is not recording costs that jump.
+// selector puts one site at a region's start (ir_x64_zone_bound): in code
+// an image lists the sites of, the region moves to the site's stub
+// (ir_x64_zone_stub); else an inline skip (ir_x64_zones_skip) jumps past
+// its end while zones are off. So a plot the profiler is not recording
+// costs that one instruction.
 // Skipping is sound because every slot the region writes or drops lives
 // only inside it (ir_x64_zone_holds: its range, X64Alloc.jet's, starts and
 // ends there), the allocator gives each slot one place over its whole
@@ -1931,7 +2005,7 @@ IRX64Region: struct {
 // what the skip leaves unwritten is never read, and every other slot keeps
 // its place. A branch may leave a region (a stop edge); none enters one.
 // Adjacent regions (a plot's and the frame mark right after it) share one
-// skip. A `zones: strip` module keeps none.
+// site. A `zones: strip` module keeps none.
 ir_x64_zone_regions: fn(m: IRModule, f: IRFunction, al: IRX64Allocation) -> [Int] Never! {
     sunk := [Int]{}
     loop _ in 0..<f.op.len() -> sunk.push(-1)
@@ -2138,18 +2212,25 @@ ir_x64_zone_holds: fn(f: IRFunction, al: IRX64Allocation, points: [Int], start: 
 }
 
 // A zone region's bounds at instruction `at`: past the region's end, its
-// skip lands here; at a region's start (ir_x64_zone_regions), the skip
-// (ir_x64_zones_skip) jumps past the whole region while zones are off.
-ir_x64_zone_bound: fn(e: &IRX64Emitter, m: IRModule, at: Int) Never! {
+// inline skip lands here; at a region's start (ir_x64_zone_regions), its
+// site goes in (ir_x64_zone_stub, else ir_x64_zones_skip). Returns the
+// region's last instruction when its stub holds the region, which the hot
+// path then passes by, else -1.
+ir_x64_zone_bound: fn(e: &IRX64Emitter, m: IRModule, at: Int) -> Int Never! {
     if e.sunk_site >= 0 && at > e.sunk_end {
         ir_x64_patch(e, e.sunk_site, e.code.bytes.len())
         e.sunk_site = -1
         e.sunk_end = -1
     }
     if e.sunk_site < 0 && e.sunk[at] >= 0 {
+        if m.zone_table {
+            ir_x64_zone_stub(e, at, e.sunk[at])
+            return e.sunk[at]
+        }
         e.sunk_end = e.sunk[at]
-        e.sunk_site = ir_x64_zones_skip(e, m)
+        e.sunk_site = ir_x64_zones_skip(e)
     }
+    -1
 }
 
 // jet_rt_block_release(block) inline: true when the caller's reference was
@@ -5591,7 +5672,14 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
         ir_x64_debug_line(lines, e.code.bytes.len(), ir_code_line_source(f.code_line[at]))
         e.at = at
         e.code.at = at
-        ir_x64_zone_bound(e, m, at)
+        stubbed: ir_x64_zone_bound(e, m, at)
+        if stubbed >= at {
+            // The region's stub holds its instructions (ir_x64_zone_stubs).
+            loop _ in (at + 1)..<(stubbed + 1) -> positions.push(e.code.bytes.len())
+            traps = e.colds.len()
+            at = stubbed + 1
+            next
+        }
         end: ir_x64_stop_point(e, m, f, al, at, poll, trap, turn, traps)
         traps = e.colds.len()
         if end > at {
@@ -5630,6 +5718,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     x64_pop(e.code, X64_RBP)
     ret: e.code.bytes.len()
     x64_ret(e.code)
+    ir_x64_zone_stubs(e, m, f, al, tables, lines, poll, trap, turn)
     // The stop exit: the epilogue with edx 1 (a stop edge was taken), for
     // the stop edges and the slow paths that published a stop. A slow path
     // may come with stack arguments still pushed, so it always resets rsp.
@@ -5683,8 +5772,13 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
         }
     }
     relax: ir_x64_relax(e.code.bytes, e.branches, e.zone_sites, heads, head_ends)
-    // A zone site's offset is its jmp's start (X64CompiledFunction.zones).
+    // A zone site's offset is its jmp's start (X64CompiledFunction.zones),
+    // whose opcode byte the code holds as `test eax, imm32` until the runtime
+    // turns zones on (ir_x64_zone_stub); each stub ends at the instruction
+    // after its jump back (X64CompiledFunction.zone_ends).
     zones: loop site in e.zone_sites -> ir_x64_relaxed_at(relax, site - 1)
+    loop site in zones -> e.code.bytes[site] = U8{0xa9}
+    zone_ends: loop stub_end in e.stub_ends -> ir_x64_relaxed_at(relax, stub_end)
     // Each run is mostly in code order: a walk maps it without a search per
     // offset.
     walk := ir_x64_relax_walk()
@@ -5734,8 +5828,8 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
         dwarf_cfa_restore_state(cfi)
         cfa_at = jump + 5
     }
-    // After `pop rbp` the CFA is rsp + 8 at the `ret`; the slow paths after
-    // it keep the body's frame.
+    // After `pop rbp` the CFA is rsp + 8 at the `ret`; the zone stubs and
+    // slow paths after it keep the body's frame.
     dwarf_cfa_advance(cfi, cfa_at, ret_at)
     dwarf_cfa_remember_state(cfi)
     dwarf_cfa_def_cfa(cfi, x64_dwarf_register(X64_RSP), 8)
@@ -5785,7 +5879,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     log: if logged -> ir_x64_log_text(m, f, e.code) else -> [String]{}
     if checked -> ir_timing_x64_check(m, f, e.code.log, e.errors)
     IRX64FunctionResult{
-        function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: e.code.bytes.move(), relocs: e.relocs.move(), align: relax.align, zones: zones},
+        function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: e.code.bytes.move(), relocs: e.relocs.move(), align: relax.align, zones: zones, zone_ends: zone_ends},
         debug: X64FunctionDebug{lines: lines.move(), body: body_at, cfi: cfi.move(), ranges: ranges.move(), stack: stack, dynamic: e.dynamic, inlines: ir_x64_inline_ranges(f, positions), allocs: allocs, calls: e.calls.move()},
         variables: variables.move(),
         errors: e.errors.move(),
@@ -7267,15 +7361,16 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
 
 // A plot's arguments as Core Perf.jet plot builds them (Float{total %%
 // 1000}, with its stop points) and the frame mark right after it are one
-// zone region: one skip comes before all of them and, while zones are off,
-// jumps past the frame mark's call. In a module an image links
-// (IRModule.zone_table) the skip is a `jmp rel32` the function lists for
-// the site table; else it tests the zones word. A widening proven small is
-// one cvtsi2sd behind the skip, with no range test and no call that would
-// link the runtime's widening into every image; one of a value not proven
-// small (a remainder by a parameter) may stop, so it stays ahead of the
-// skip, which covers the rest.
-#Test("A plot's argument computations and the frame mark after it sit behind one zones skip") {
+// zone region behind one site. In a module an image links
+// (IRModule.zone_table) the site is a listed `test eax, imm32` over the
+// rel32 of a `jmp` to the region's stub, laid out after the epilogue,
+// which ends in a jump back past the site; else an inline skip tests the
+// zones word and, while it is zero, jumps past the frame mark's call. A
+// widening proven small is one cvtsi2sd behind the site, with no range
+// test and no call that would link the runtime's widening into every
+// image; one of a value not proven small (a remainder by a parameter) may
+// stop, so it stays ahead of the site, which covers the rest.
+#Test("A plot's argument computations and the frame mark after it sit behind one zone site") {
     loop listed in ([Bool]{false, true}) {
         loop proven in ([Bool]{true, false}) {
             m := ir_module_new()
@@ -7332,12 +7427,22 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
             }
             skip := -1
             if listed {
-                // A listed `jmp rel32` past the frame mark's call, which
-                // the runtime turns into `test eax, imm32` while zones are on.
+                // The site, `test eax, imm32` while zones are off, over the
+                // rel32 to the stub that holds the frame mark's call.
                 assert_eq(tests.len(), 0)
                 assert_eq(compiled.function.zones.len(), 1)
+                assert_eq(compiled.function.zone_ends.len(), 1)
                 skip = compiled.function.zones[0]
-                assert(code[skip] == 0xe9)
+                assert(code[skip] == 0xa9)
+                stub: skip + 5 + ir_x64_rel32_at(code, skip + 1)
+                assert(framed > stub)
+                // The stub ends in its jump back past the site.
+                ends: compiled.function.zone_ends[0]
+                assert(ends > framed + 4)
+                byte: Int{code[ends - 1]}
+                near: code[ends - 2] == 0xeb && ends + (if byte >= 128 -> byte - 256 else -> byte) == skip + 5
+                far: code[ends - 5] == 0xe9 && ends + ir_x64_rel32_at(code, ends - 4) == skip + 5
+                assert(near || far)
             } else {
                 // mov r11, [rip + zones]; test r11, r11; pop r11; je past the
                 // frame mark's call.
@@ -7345,9 +7450,9 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
                 assert_eq(compiled.function.zones.len(), 0)
                 skip = tests[0] + 4 + 3 + 2
                 assert(code[skip] == 0x74 || (code[skip] == 0x0f && code[skip + 1] == 0x84))
+                assert(ir_x64_test_jcc_target(code, skip) >= framed + 4)
             }
             assert(framed > skip)
-            assert(ir_x64_test_jcc_target(code, skip) >= framed + 4)
             // The widening's inline range test (sar rdx, 53; add rdx, 1; cmp
             // rdx, 1) and the slow path's call, only when not proven small.
             widening: ir_x64_code_find(code, [U8]{0x48, 0xc1, 0xfa, 0x35, 0x48, 0x83, 0xc2, 0x01, 0x48, 0x83, 0xfa, 0x01}, 0)

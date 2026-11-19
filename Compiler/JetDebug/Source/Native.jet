@@ -302,13 +302,15 @@ NativeWrite: struct {
 }
 
 // A thread of the traced program: its id, whether it runs, whether a
-// SIGSTOP the debugger sent it (halt) is still to arrive, and the signal it
-// stopped with, which goes to it when it next runs (0: none).
+// SIGSTOP the debugger sent it (halt) is still to arrive, the signal it
+// stopped with, which goes to it when it next runs (0: none), and whether
+// halt put it back on a trap it ran (rewind) whose hit no stop reported.
 NativeThread: struct {
     id: Int,
     running: Bool,
     halting: Bool,
     signal: Int,
+    rearmed: Bool{false},
 }
 
 // What resuming the program ended in: a SIGTRAP stop (Paused: a trap byte,
@@ -2379,14 +2381,36 @@ NativeSession: struct {
         Ok()
     }
 
+    // The place `operand` names, read by the compiler's parser as one Jet
+    // expression (Debug/Expression.jet debug_place), as `print` reads its
+    // own: a local, a field path under one, and an item of a List at its
+    // end. A literal index is read as written; any other (`xs[i + 1]`) is
+    // evaluated here as `print` evaluates it, once, so the place is the item
+    // it names now.
+    watch_path: fn(&self, operand: String) -> NativeWatchPath Never! {
+        place: debug_place(operand) ?? return native_watch_path_refusal(err.message)
+        index := place.literal
+        if place.index != "" && index < 0 {
+            value: self.evaluate(place.index) ?? return native_watch_path_refusal("Can't evaluate the index `{place.index}`: {err.message}")
+            index = Int.parse(value.text) ?? return native_watch_path_refusal("The index `{place.index}` is {value.shown}, not an Int")
+            if index < 0 {
+                return native_watch_path_refusal("`{operand}` needs an index of 0 or more")
+            }
+        }
+        NativeWatchPath{root: place.root, fields: place.fields, index: index, refusal: ""}
+    }
+
     // `watch <place>`: stop at each write that changes `place`, a local of
-    // the selected frame or a field path under it (`order.total`), and show
-    // its old and new values. The CPU's debug registers trap the write, so
-    // the program runs at full speed until then, and a write that leaves
-    // the value as it was runs on. A local held in a register is followed
-    // by stepping its frame's own code instead (watch_steps).
+    // the selected frame, a field path under it (`order.total`) or an item
+    // of a List (`xs[i + 1]`), and show its old and new values. The CPU's
+    // debug registers trap the write, so the program runs at full speed
+    // until then, and a write that leaves the value as it was runs on. A
+    // local held in a register is followed by stepping its frame's own code
+    // instead (watch_steps).
     watch_command: fn(&self, operand: String) -> String NativeDebugError! {
         if operand == "" -> return Ok("Watch needs a local or a field path, as `watch total`\n")
+        path: self.watch_path(operand)
+        if path.refusal != "" -> return Ok("Can't watch `{operand}`: {path.refusal}\n")
         // The value shown is the compiler's evaluation of `operand`; the
         // trap watches the bytes its place names.
         value: self.evaluate(operand) ?? return Ok("Can't watch `{operand}`: {err.message}\n")
@@ -2397,7 +2421,7 @@ NativeSession: struct {
         level: if self.selected < levels.len() -> levels[self.selected] else -> levels[0]
         frame: frames[level.frame]
         memory: NativeMemory{trace: Val(self.trace), blocks: [NativeBlock]{}}
-        place: native_watch_place(self.image, memory, frame, native_lookup(level.frame, frame.pc), level.site, operand)
+        place: native_watch_place(self.image, memory, frame, native_lookup(level.frame, frame.pc), level.site, path)
         if place.refusal != "" -> return Ok("{place.refusal}\n")
         begins := -1
         if native_function_at(self.image, native_lookup(level.frame, frame.pc)) == .Val(owner) {
@@ -2917,9 +2941,17 @@ NativeSession: struct {
     // the byte is put back for one instruction, then trapped again. Off a
     // placed condition's jump, the thread goes on at the instructions it
     // moved; a step runs them all. A thread leaving a probe it did not trap
-    // on counts its pass there.
+    // on counts its pass there. A run of a thread halt put back on a trap
+    // whose hit no stop reported (NativeThread.rearmed) runs onto it, so the
+    // hit is had: a request that interrupted the run as the thread trapped
+    // doesn't lose it.
     go_free: fn(&self, how: X64TraceResume) -> NativeEvent NativeDebugError! {
         self.selected = 0
+        current: self.thread_row(self.trace.thread)
+        if how == X64TraceResume.Run && current >= 0 && self.threads[current].rearmed {
+            self.probe.on = -1
+            return self.resume(how)
+        }
         registers := self.registers() ?? return Err(err)
         pc: registers[X64_TRACE_RIP]
         if self.probed(pc) != None && (self.probe.on != pc || self.probe.on_thread != self.trace.thread) {
@@ -3117,6 +3149,7 @@ NativeSession: struct {
         self.trace.thread = current
         self.threads[row].signal = 0
         self.threads[row].running = going
+        self.threads[row].rearmed = false
         going
     }
 
@@ -3143,9 +3176,9 @@ NativeSession: struct {
 
     // Stop every running thread for the current thread's stop: each gets a
     // SIGSTOP and is waited for. A thread that trapped meanwhile on a trap
-    // byte is rewound onto it, to trap again when it next runs; any other
-    // signal waits for its next run. The program's end when it ended
-    // meanwhile.
+    // byte is rewound onto it, to trap again when it next runs
+    // (NativeThread.rearmed); any other signal waits for its next run. The
+    // program's end when it ended meanwhile.
     halt: fn(&self) -> NativeEvent? NativeDebugError! {
         loop row in 0..<self.threads.len() {
             if self.threads[row].running && !self.threads[row].halting {
@@ -3189,7 +3222,7 @@ NativeSession: struct {
                 next
             }
             if signal == NATIVE_DEBUG_SIGTRAP {
-                self.rewind(stop.thread) ?? return Err(err)
+                self.threads[at].rearmed = self.rewind(stop.thread) ?? return Err(err)
                 next
             }
             faulted: signal == 4 || signal == 7 || signal == 8 || signal == 11
@@ -3215,8 +3248,8 @@ NativeSession: struct {
 
     // Thread `id`, stopped by a trap byte it ran, back on that byte; by a
     // placed condition's trap, back on its breakpoint's address, to check
-    // the condition again when it runs on.
-    rewind: fn(&self, id: Int) NativeDebugError! {
+    // the condition again when it runs on. Whether it was put back.
+    rewind: fn(&self, id: Int) -> Bool NativeDebugError! {
         current: self.trace.thread
         self.trace.thread = id
         registers := x64_trace_registers(self.trace) ?? [Int]{}
@@ -3224,7 +3257,8 @@ NativeSession: struct {
         if registers.len() > 0 && self.placed_trap(pc + 1) == .Val(trap) {
             pc = self.placed[trap.row].address
         }
-        if registers.len() > 0 && (self.trapped(pc) || pc + 1 != registers[X64_TRACE_RIP]) {
+        back: registers.len() > 0 && (self.trapped(pc) || pc + 1 != registers[X64_TRACE_RIP])
+        if back {
             registers[X64_TRACE_RIP] = pc
             if !x64_trace_set_registers(self.trace, registers) {
                 self.trace.thread = current
@@ -3232,7 +3266,7 @@ NativeSession: struct {
             }
         }
         self.trace.thread = current
-        Ok()
+        Ok(back)
     }
 
     // Give thread `row`, new to the program, the watches' debug registers,
@@ -3589,6 +3623,10 @@ NativeSession: struct {
         }
         refusal: self.replay_refusal("`why`")
         if refusal != "" -> return Ok(NativeWhy{text: "{refusal}\n", recover: false})
+        path: self.watch_path(operand)
+        if path.refusal != "" {
+            return Ok(NativeWhy{text: "Can't ask why of `{operand}`: {path.refusal}\n", recover: false})
+        }
         frames: self.unwind() ?? return Err(err)
         if frames.len() == 0 -> return Ok(NativeWhy{text: "No frame to ask in\n", recover: false})
         levels: native_levels(self.image, frames)
@@ -3596,9 +3634,9 @@ NativeSession: struct {
         frame: frames[level.frame]
         lookup: native_lookup(level.frame, frame.pc)
         memory: NativeMemory{trace: Val(self.trace), blocks: [NativeBlock]{}}
-        place: native_watch_place(self.image, memory, frame, lookup, level.site, operand)
+        place: native_watch_place(self.image, memory, frame, lookup, level.site, path)
         if place.refusal != "" -> return Ok(NativeWhy{text: "{place.refusal}\n", recover: true})
-        root: operand.before(".")
+        root: path.root
         size: native_type_size(self.image, place.ty)
         if size <= 0 {
             return Ok(NativeWhy{text: "`{operand}` has no bytes to follow\n", recover: false})
@@ -5621,32 +5659,38 @@ NativeWatchPlace: struct {
     offset: Int{0},
 }
 
-// Where the place `path` (`total`, `order.total`, `xs[3]`, `order.lines[0]`)
+// A place a watch or `why` names (watch_path): a local (`root`), the fields
+// under it (`fields`, outermost first) and, at its end, the item of a List
+// at `index` (-1: none). `refusal`, empty when the text names one, says why
+// it doesn't.
+NativeWatchPath: struct {
+    root: String,
+    fields: [String],
+    index: Int,
+    refusal: String,
+}
+
+native_watch_path_refusal: fn(refusal: String) -> NativeWatchPath Never! {
+    NativeWatchPath{root: "", fields: [String]{}, index: -1, refusal: refusal}
+}
+
+NATIVE_WATCH_SHAPE: "a watch takes a local, a field path under one or an item of a List, as `xs[3]` or `xs[i + 1]`"
+
+// Where the place `path` (`total`, `order.total`, `xs[3]`, `order.lines[i]`)
 // lives in `frame` at `lookup`, among the variables of the inlined run
 // `site`. A field path goes through typedefs and pointers to the struct
-// whose field it names; a literal index at its end names an item of the
-// List the path names.
-native_watch_place: fn(image: NativeImage, memory: NativeMemory, frame: NativeUnwound, lookup: Int, site: Int, path: String) -> NativeWatchPlace Never! {
-    index := -1
-    base := path
-    if path.ends_with("]") {
-        cut: path.rpartition("[")
-        if cut.sep == "" {
-            return native_watch_refusal("`{path}` needs a literal index, as `xs[3]`")
-        }
-        index = Int.parse(cut.tail.before("]")) ?? return native_watch_refusal("`{path}` needs a literal index, as `xs[3]`")
-        if index < 0 -> return native_watch_refusal("`{path}` needs an index of 0 or more")
-        base = cut.head
-    }
-    names: base.split(".").to_list()
+// whose field it names; an index at its end names an item of the List the
+// path names.
+native_watch_place: fn(image: NativeImage, memory: NativeMemory, frame: NativeUnwound, lookup: Int, site: Int, path: NativeWatchPath) -> NativeWatchPlace Never! {
+    index: path.index
     function: native_function_at(image, lookup) ?? return native_watch_refusal("No Jet function is running here")
     found: loop (row, variable) in function.variables {
-        if variable.site == site && variable.name == names[0] {
+        if variable.site == site && variable.name == path.root {
             break row
         }
-    } ?? return native_watch_refusal("`{names[0]}` is not a local of this frame; a watch takes a local, a field path under one or an item of a List, as `xs[3]`")
+    } ?? return native_watch_refusal("`{path.root}` is not a local of this frame; {NATIVE_WATCH_SHAPE}")
     variable: function.variables[found]
-    unplaced: "`{names[0]}` has no value here"
+    unplaced: "`{path.root}` has no value here"
     if variable.list < 0 -> return native_watch_refusal(unplaced)
     located: native_variable_covering(image, variable, lookup) ?? return native_watch_refusal(unplaced)
     dwarf: native_location_register(image.loclists, located.from, located.to)
@@ -5654,10 +5698,10 @@ native_watch_place: fn(image: NativeImage, memory: NativeMemory, frame: NativeUn
     held := Int?{None}
     address := 0
     if {
-        dwarf >= NATIVE_DEBUG_DWARF_REGISTERS.len() -> return native_watch_refusal("`{names[0]}` is held in a vector register, which a watch can't follow")
+        dwarf >= NATIVE_DEBUG_DWARF_REGISTERS.len() -> return native_watch_refusal("`{path.root}` is held in a vector register, which a watch can't follow")
         dwarf >= 0 -> {
-            value: native_register_value(frame, dwarf) ?? return native_watch_refusal("`{names[0]}`'s register is not known in this frame")
-            if names.len() == 1 && index < 0 {
+            value: native_register_value(frame, dwarf) ?? return native_watch_refusal("`{path.root}`'s register is not known in this frame")
+            if path.fields.len() == 0 && index < 0 {
                 ranges := [NativeRange]{}
                 loop range in native_ranges(image, variable.list, variable.base) {
                     if native_location_register(image.loclists, range.from, range.to) == dwarf {
@@ -5668,12 +5712,12 @@ native_watch_place: fn(image: NativeImage, memory: NativeMemory, frame: NativeUn
             }
             held = Val(value)
         }
-        else -> address = native_place_address(memory, frame, image.loclists, located.from, located.to) ?? return native_watch_refusal("`{names[0]}` is computed here, with no place to watch")
+        else -> address = native_place_address(memory, frame, image.loclists, located.from, located.to) ?? return native_watch_refusal("`{path.root}` is computed here, with no place to watch")
     }
     ty := variable.ty
     // The path up to the field the loop turn looks up.
-    owner := "{names[0]}"
-    loop k in 1..<names.len() {
+    owner := "{path.root}"
+    loop name in path.fields {
         passed: native_watch_through(image, memory, ty, address, held) ?? return native_watch_refusal("`{owner}` can't be read here")
         ty = passed.ty
         address = passed.address
@@ -5688,13 +5732,13 @@ native_watch_place: fn(image: NativeImage, memory: NativeMemory, frame: NativeUn
             return native_watch_refusal("`{owner}` has no fields to watch")
         }
         field: loop (slot, member) in image.members[group] {
-            if member.name == names[k] {
+            if member.name == name {
                 break slot
             }
-        } ?? return native_watch_refusal("`{owner}` has no field `{names[k]}`")
+        } ?? return native_watch_refusal("`{owner}` has no field `{name}`")
         address += image.members[group][field].offset
         ty = image.members[group][field].ty
-        owner = "{owner}.{names[k]}"
+        owner = "{owner}.{name}"
     }
     if index < 0 {
         return NativeWatchPlace{address: address, ty: ty, register: -1, ranges: [NativeRange]{}, refusal: ""}
@@ -5707,10 +5751,10 @@ native_watch_place: fn(image: NativeImage, memory: NativeMemory, frame: NativeUn
     header: native_debug_bytes(memory, passed.address, list.size) ?? return native_watch_refusal("`{owner}` can't be read here")
     length: native_number(header, list.length, 8, X64DebugEncoding.Signed)
     if index >= length {
-        return native_watch_refusal("`{owner}` has {length} items, so `{path}` is past its end")
+        return native_watch_refusal("`{owner}` has {length} items, so `{owner}[{index}]` is past its end")
     }
     stride: native_type_size(image, list.element)
-    if stride <= 0 -> return native_watch_refusal("`{path}` has no bytes to watch")
+    if stride <= 0 -> return native_watch_refusal("`{owner}[{index}]` has no bytes to watch")
     data: native_number(header, list.data, 8, X64DebugEncoding.Signed)
     NativeWatchPlace{address: data + index * stride, ty: list.element, register: -1, ranges: [NativeRange]{}, refusal: "", anchor: passed.address + list.data, offset: index * stride}
 }

@@ -1,8 +1,8 @@
-// The reader of the places a debugger names without evaluating them: a
-// paused snapshot's place (Snapshot.jet) and a Canvas watch's local. The
-// compiler's parser reads each as one Jet expression; nothing here has a
-// grammar of its own. Evaluating an expression is the compiler's work
-// (NativeEval.jet).
+// The reader of the places a debugger names: a paused snapshot's place
+// (Snapshot.jet), a Canvas watch's local, and the place of `watch` and
+// `why` (Native.jet watch_path). The compiler's parser reads each as one
+// Jet expression; nothing here has a grammar of its own. Evaluating an
+// expression is the compiler's work (NativeEval.jet).
 use {
     jet_foundation.[ASTTables, DIAGNOSTIC_ERROR, ExprNode, ast_expr, ast_stmt]
     jet_parser.[parse_source]
@@ -57,6 +57,49 @@ debug_is_local_name: fn(text: String) -> Bool Never! {
     ast_expr(expr.tables, expr.root) == .Ident(_, _, _)
 }
 
+// A place a debugger names, as the parser reads it: the local it starts at
+// (`root`), the fields under it (`fields`, outermost first) and the text of
+// the index at its end (`index`, "" when it has none), with the index's
+// value when it is an integer literal (`literal`, else -1).
+DebugPlace: struct {
+    root: String,
+    fields: [String],
+    index: String,
+    literal: Int,
+}
+
+// The place `text` names: a local or a field path under one, and an index
+// at its end or none. Refused when the parser refuses `text` or it names
+// no place.
+debug_place: fn(text: String) -> DebugPlace DebugEvaluationError! {
+    parsed: debug_parse_expression(text) ?? return Err(err)
+    node := parsed.root
+    index := ""
+    literal := -1
+    if ast_expr(parsed.tables, parsed.root) == .Index(base, item, _, _, _) {
+        node = base
+        // The place before the index is a local or a field path, which has
+        // no brackets, so the index runs from the first `[` to the last `]`.
+        index = "{text.rpartition("]").head.after("[").trim()}"
+        literal = if ast_expr(parsed.tables, item) == .Int(position, _, _, _, _) -> position else -> -1
+    }
+    fields := [String]{}
+    root: debug_place_fields(parsed.tables, node, fields) ?? return Err(debug_evaluation_error("`{text.trim()}` names no place; a place is a local or a field path under one, with an index at its end or none, as `order.lines[i + 1]`"))
+    Ok(DebugPlace{root: root, fields: fields, index: index, literal: literal})
+}
+
+// The fields `node` goes through, outermost first, into `fields`, and the
+// local it starts at; None when it is not a local or a field path under one.
+debug_place_fields: fn(tables: ASTTables, node: ExprNode, fields: &[String]) -> String? Never! {
+    if ast_expr(tables, node) == .Ident(name, _, _) -> return Val(name)
+    if ast_expr(tables, node) == .Field(base, member, _, _) {
+        root: debug_place_fields(tables, base, fields) ?? return None
+        fields.push(member)
+        return Val(root)
+    }
+    None
+}
+
 debug_expression_test_place: fn(text: String) -> Bool Never! {
     expr: debug_parse_expression(text) ?? return false
     debug_is_place(expr.tables, expr.root)
@@ -85,4 +128,32 @@ debug_expression_test_refusal: fn(text: String) -> String Never! {
     assert(debug_expression_test_refusal("i ==").starts_with("`i ==` is not a Jet expression: "))
     assert_eq(debug_expression_test_refusal("   "), "the expression is empty")
     assert_eq(debug_expression_test_refusal("i\n}}\nother: fn() {{\ni"), "`i\n}}\nother: fn() {{\ni` is not one Jet expression")
+}
+
+debug_place_test_refusal: fn(text: String) -> String Never! {
+    if debug_place(text) == {
+        .Ok(_) -> {
+            panic("expected `{text}` to name no place")
+        }
+        .Err(error) -> error.message
+    }
+}
+
+#Test("A watched place, its index any expression, is read by the compiler's parser") {
+    item: debug_place(" order.lines[i + 1] ") ?? panic(err.message)
+    assert_eq(item.root, "order")
+    assert_eq(item.fields.len(), 1)
+    assert_eq(item.fields[0], "lines")
+    assert_eq(item.index, "i + 1")
+    assert_eq(item.literal, -1)
+    third: debug_place("xs[3]") ?? panic(err.message)
+    assert_eq(third.root, "xs")
+    assert_eq(third.index, "3")
+    assert_eq(third.literal, 3)
+    field: debug_place("order.total") ?? panic(err.message)
+    assert_eq(field.fields[0], "total")
+    assert_eq(field.index, "")
+    assert(debug_place_test_refusal("order.total + 1").starts_with("`order.total + 1` names no place; "))
+    assert(debug_place_test_refusal("xs[0].total").starts_with("`xs[0].total` names no place; "))
+    assert(debug_place_test_refusal("order.lines[").starts_with("`order.lines[` is not a Jet expression: "))
 }

@@ -248,14 +248,23 @@ program, and threads in the line at once never pay each other's delays.
 A pause spins and keeps its CPU, where Coz's sleeps: with more threads
 ready than CPUs, a sleeping thread's CPU would go to the line's own
 threads, which would then really run faster and inflate the prediction.
-The samples a pause's CPU time sets off are dropped. A sample
+The samples a pause's CPU time sets off are dropped, and their handling,
+like the pause's own clock reads, counts as time the pause paid: left out,
+every pause would slow the program by more than its delay, and every
+line's prediction would read lower, the more so the more often threads
+pause. A sample
 stands for its period of CPU time, or, when its thread was ready to run
 since its previous sample and that took longer, the wall time between
 them: under load a thread waits for a CPU between samples, and a faster
 line would save that wait too. A thread that was blocked (its last
 sample is more than 5 ms old and it has since given up its CPU of its own
 accord, not merely been preempted) owes nothing for the time it was blocked.
-Delays are paid at sampler ticks, so a thread pays its debt up to one
+A task's start forgives its worker the delays before it, and a task's end
+pays its own before its joiner sees it. A thread another thread wakes from
+a park owes nothing for the delays inserted while it was parked, as in
+Coz: its waker paid them. Charged them, a thread that joins short tasks
+would pause for them again on the program's critical path. Other delays
+are paid at sampler ticks, so a thread pays its debt up to one
 sample period late. A progress point counts passes: each closed zone by
 its name, each finished task as `task`, each answered HTTP request as
 `request`, and each `core.perf.progress(name)`. Outside the lens these record nothing. At the
@@ -290,8 +299,10 @@ Under `alloc` the session builds the program with `--checked-alloc`, whose
 heap keeps each block's ten allocating call sites in its prefix, and the
 runtime links every block allocated from the program's entry into a live
 list until it is freed. The blocks the runtime and the observation take
-before the entry, and those of the observation's writer thread, are their
-own, not the program's, and stay off the list. A run without the lens
+before the entry, those of the observation's writer thread, and the rows the
+observation keeps for the program's tasks and channels (a task's label and
+its wait's name among them), are their own, not the program's: they stay off
+the list, and the lens counts none of them. A run without the lens
 tracks nothing and pays nothing. `core.perf.heap_mark(name)` takes a heap
 snapshot named `name`, and the runtime takes one named `exit` as the
 program exits; in any other run `heap_mark` does nothing. A snapshot holds
@@ -834,9 +845,12 @@ D-DBG-VERBS1=A names the commands:
   its message at each hit, which stops the program each time.
 - `watch <place>` stops at each write that changes a local of the selected
   frame, a field path under one (`watch order.total`), or an item of a List
-  at a literal index (`watch xs[3]`, `watch order.lines[0]`). The stop
-  names the line that wrote it and shows `total: 0 -> 2`. A write that
-  leaves the value as it was runs on.
+  (`watch xs[3]`, `watch order.lines[i + 1]`). The compiler's parser reads
+  the place, as `print` reads its expression, so a malformed one is refused
+  with the parser's diagnostic. An index that is not a literal is evaluated
+  as `print` evaluates it, once, when the watch is set, and the watch stays
+  on that item. The stop names the line that wrote it and shows
+  `total: 0 -> 2`. A write that leaves the value as it was runs on.
 - `breaks` lists the breakpoints and watches by number, as `  2 break
   cart.jet:88 if total < 0` and `  3 watch total`; `delete <n>` removes one.
   A condition or logpoint that runs in the program adds how many of its

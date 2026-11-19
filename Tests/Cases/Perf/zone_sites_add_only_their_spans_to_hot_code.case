@@ -1,0 +1,41 @@
+# A program's zone sites cost its hot code their stubs' spans and nothing
+# more: the link names the sites in the image's `jet.zone_sites` part note,
+# which the runtime reads when zones turn on, so no site table or
+# registration joins the code every run maps. At -O1 and at -O2 the zoned
+# image's first read+execute segment exceeds the zone-stripped image's by
+# at most the bytes of its sites' stubs, the sites themselves and the
+# alignment padding they shift (hot.sh), and `jet perf run` still patches
+# every site the note names.
+fixture: ZonesStripSettingLeavesNoSite.fixture
+env: NO_COLOR=1
+when tool objdump
+step: jet build --zones=strip main.jet
+exit: 0
+step: sh -c 'cp .jet/build/main plain'
+exit: 0
+step: jet build main.jet
+exit: 0
+step: sh -c 'cp .jet/build/main zoned'
+exit: 0
+step: sh hot.sh plain zoned
+exit: 0
+stdout: = "hot code grows by the sites' stubs alone\n" # -O1: the note, not code, lists the sites
+step: jet build --release -O2 --zones=strip main.jet
+exit: 0
+step: sh -c 'cp .jet/build/main plain'
+exit: 0
+step: jet build --release -O2 main.jet
+exit: 0
+step: sh -c 'cp .jet/build/main zoned'
+exit: 0
+step: sh hot.sh plain zoned
+exit: 0
+stdout: = "hot code grows by the sites' stubs alone\n" # -O2 alike
+end when
+step: jet perf run main.jet --out keep.jettrace
+exit: 0
+stdout: = "total 166\n"
+step: jet perf view keep.jettrace
+exit: 0
+stdout: ~ "zone step count=3 " # the sites the note names turn on
+stdout: !~ "zones off" # the runtime rewrote them
