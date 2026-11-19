@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112350,
+    "rev": 112363,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -61818,402 +61818,6 @@
       "updatedBy": "owner"
     },
     {
-      "id": "c0vxf4u0",
-      "num": 6552,
-      "title": "Jet web framework: full breadth and depth parity with the best frameworks, with their downsides designed out",
-      "body": "## Outcome\n\nOwner direction: Jet ships a first-class, native web framework (the Core web modules, compiled by Jet, with no JavaScript runtime or wrapped library). It has full breadth and depth parity with every element of the best frameworks, and every known downside of those elements is engineered away in the Jet design rather than inherited. The framework has no brand of its own (D-WEB-NAME1=C, 2026-11-04): it is Jet's web library, named by its module; no repository path or user-facing text keeps a third-party framework's name.\n\n## Scope\n\nParity is judged element by element against the best framework for that element, not against one framework. The reference set covers at least: TanStack (Start, Router, Query, Form, Table, Virtual, Store, DB, devtools), Next.js, Remix / React Router, SvelteKit, SolidStart, Qwik, Astro, Nuxt, Angular, Phoenix LiveView, Rails (Hotwire), Laravel (Livewire), Django, Leptos and Dioxus, htmx and Elysia/Hono. Elements include routing and typed search params, data loading and caching, mutations and optimistic updates, forms and validation, tables and virtualization, state stores, rendering modes (SSR, SSG, ISR, streaming, islands, resumability, CSR), server functions and actions, real-time and live views, auth and sessions, i18n, images and assets, styling, testing, devtools, error boundaries, deployment and edge targets, and the dev loop.\n\n## Method\n\n1. A dated audit (Docs/audits) with one row per element: the best framework for it, what Jet has (by code path and executable example, not prose), the gap, and each known downside of the best implementation with the Jet design that removes it.\n2. One ballot per owner choice the audit raises (new syntax, public API, product behavior), with same-program alternatives.\n3. One child card per gap, each closing with an executable example and golden output on every applicable tier (I5, I9), and a performance cell where the element is performance-relevant.\n\n## Known downsides to design out (seed list, the audit extends it)\n\nHydration cost and mismatch bugs; client bundle growth; waterfalls between nested loaders; cache invalidation by hand; stringly-typed routes and search params; server/client boundary leaks of secrets; framework lock-in to one host; slow dev rebuilds; runtime-only type errors in forms and APIs; opaque magic in file conventions; duplicated validation between client and server.\n\n## Current state\n\nExamples/features/web/tanstack_start/run.jet is a reference app over the Core web modules (router, query, forms, table, virtual, store). Its web build is being repaired under #5990 c13. It is evidence of coverage breadth only; depth parity is unaudited.",
-      "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "Clarification (Main, 2026-11-16): this card is done only as a container. TowerKeeper-1's board cleanup moved its open criteria to the cards that own the work, and none of them was built when it closed: routes went to #6864, endpoints to #6865, browser tests to #6866, forms, tables and views to #6821, and the parity audit, the one-runtime suite and the one-app proofs to #6445 c12-c18. Only c3, c9, c14, c30, c33 and c38 were met by proof here. The Jet web framework is NOT finished. The open work lives on those cards (all G9)."
-        },
-        {
-          "at": "2026-11-15",
-          "by": "Main",
-          "text": "core.reactive over-notifies and glitches; this blocks c37 (found by GoalsB-5 while measuring reactive_observable, 2026-11-15). An autorun reading n, doubled(n) and plus_one(doubled) re-runs 3 times per n.set(5), and 3 times for n.set(1) when n is already 1 (no same-value suppression). In a diamond (left = a+1, right = a*10, sum = left+right) the effect sees the glitch value 13 before settling. Solid, Vue and Preact signals run once, with no glitch. Fix: a topological or height-ordered propagation, plus same-value suppression in core.reactive. Full notes: the GoalsB-5-16 SUB message."
-        },
-        {
-          "at": "2026-11-15",
-          "by": "TowerKeeper-1",
-          "text": "Cleaned: this card keeps the parity audit (c1, c2, c4, c6, c31), the one-runtime suite (c7) and the one-app and server-call proofs (c35, c36). Routes went to #6864, endpoints to #6865, browser tests to #6866, forms and tables to #6821 (#6821 c3, #6821 c4, #6821 c5)."
-        },
-        {
-          "at": "2026-11-14",
-          "by": "Main",
-          "text": "Shape (Main, 2026-11-14): framework-surface work on this card builds to the ratified D-WEBAPP-SHAPE1=A (#6792, Docs/proposals/2026-11-13-web-app-framework-shape.md). Every element of that shape has a child card under #6792 (#6799-#6831, #6445, #6447) with executable-example criteria; new surface work here names the shape element it builds and must not contradict it."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Correction to the log above: c14's ballot is not missing. D-DX-BROWSERTEST1=A (ratified 2026-09-04, from #2498) chose \"extend jet test\" and the spec carries its flags (spec.md:4004-4007), so c14 is met and c15-c18 (scaffold, UI mode, trace viewer, matrix and reporters) are build work inside that contract. Only a new command or a new jet new template name for the scaffold would need its own ballot; adding a browser #Test to the existing web template does not."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Body: D-WEB-NAME1=C (2026-11-04) chose no brand, so \"its own Jet name\" is gone. Owner gates: c14 waits for a browser-test ballot (scaffold, UI mode, trace viewer) that is not drafted; c2 is the standing rule that every audit choice gets a ballot. c30's ballots are ratified and archived with #4282: D-WEBAPP-SERVE1=D (2026-07-28) and D-WEBRUN1=A (2026-08-27). Merged: c21 into c22, c23-c27 into c28, c19 into c29 (D-G9-4, D-G9-5). Gained #5201 c22 (typed forms). New row: the study rerun from the goal body."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
-        },
-        {
-          "at": "2026-11-04",
-          "by": "Main",
-          "text": "#6563 c1 precut audit re-added 14 criteria from archived #2428, #2472, #2475, #2498, #2852, #2962: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A dated parity audit in Docs/audits lists every element of the reference frameworks named in the body, the best framework for each element, Jet's current state cited by code path and executable example, the gap, and each known downside of the best implementation with the Jet design that removes it. Proof: `git ls-files \"Docs/audits/*web-framework-parity*\"` names the dated audit.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Moved to #6445 c12, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T01:00:36.968Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 2,
-          "text": "Every owner choice the audit raises is on a Tower ballot with same-program alternatives, and every ratified choice has a child card under this card. Proof: each audit row names its ballot ID and child card.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Moved to #6445 c13, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T01:00:40.393Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 3,
-          "text": "The framework name ballot is ratified, and no repository path, example name, or user-facing text uses a third-party framework's name for the Jet framework (Examples/features/web/tanstack_start is renamed in one cutover).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "D-WEB-NAME1 ratified C (Jet Web). 2d8aea4762 moves Examples/features/web/jet_web_framework to Examples/features/web/jet_web with its golden case, package name jet_web_reference and description, renames the DX manifest app to jet-web-orders, and renames the three reference cases and the retired-case row in one cutover. A repository scan for jet_web_framework, jet-web-framework and 'Jet Web framework' outside Docs/audits and Tower finds only the dated owner-feedback proposal heading (generic phrase in historical evidence). golden --filter web/jet_web: PASS o0/o1/o2; the renamed cases match their old-name baseline rows (graph KF #4830, browser REFUSED line 27). lane-check: CHECK OK. tanstack_start no longer exists in the tree.",
-          "at": "2026-11-04T11:29:17.007Z"
-        },
-        {
-          "n": 4,
-          "text": "Every audited element at parity or better has an executable example with golden output on every applicable tier, and the audit row cites it. Proof: each parity row of the audit names its example, and `jet test Compiler --profile golden --filter web` on O0, O1 and O2 passes on every applicable tier.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Moved to #6445 c14, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T01:00:43.374Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 6,
-          "text": "Every claim that the Jet framework or any of its elements is better than an existing framework is backed by a passing adversarial review in Docs/audits, and every downside that review finds is engineered away and re-reviewed before the element is presented to the owner or built (AGENTS.md, Adversarial design review). Proof: each better-than claim in the audit names its passing adversarial review under Docs/audits.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Moved to #6445 c15, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T01:00:46.293Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 7,
-          "text": "Routes, data queries, forms, tables and stores run on one reactive app runtime: one example app uses all five, and its golden passes on O0, O1, O2 and web.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Moved to #6445 c16, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T01:00:49.925Z",
-          "closure": "duplicate",
-          "proof": {
-            "profile": "golden",
-            "filter": "Web/AppSuite"
-          }
-        },
-        {
-          "n": 8,
-          "text": "(was #2472 c1) Checked route declarations carry typed path, search, loader and navigation contracts, and a wrong route is rejected at compile time with a registered diagnostic and a UI snapshot.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Moved to #6864 c1: typed routes are their own stream",
-          "at": "2026-11-15T02:52:23.340Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 9,
-          "text": "(was #2472 c2) Convention and explicit routes feed the same checked App graph and web-graph explanation source, without a second browser registration graph Proof: a golden where a convention page and an explicit route at one address fail jet check with E2804 naming both lines, and `jet explain --routes` lists both forms (D-ROUTE-ONE1=A (2026-10-29): web.app() holds the one route table and server.mux() is removed.) (precut audit 2026-11: unproven at 9c7ddf1359).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 75c623616c, gate-p64 jet, b53proofs 2026-11-14 (dev 99aa698189): jet test Compiler --profile cases --filter web_app_graph/convention_page_and_explicit_route_share_one_table -> PASS 1/FAIL 0.",
-          "at": "2026-11-14T13:36:39.822Z"
-        },
-        {
-          "n": 10,
-          "text": "(was #2472 c3) Typed loader binding, preload/abort plumbing, and pending/error/not-found boundary source are integrated in App and its browser graph consumer Proof: a golden on O0, O1, O2 and web where a route loader's pending, error and not-found boundaries render and an aborted navigation cancels its preload (precut audit 2026-11: unproven at 9c7ddf1359).",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Moved to #6864 c2: typed routes are their own stream",
-          "at": "2026-11-15T02:52:24.273Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 11,
-          "text": "(was #2472 c4) Route cache identity, dependency facts, freshness transitions, invalidation and collection are integrated, with a case proving the observable lifecycle.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Moved to #6864 c3: typed routes are their own stream",
-          "at": "2026-11-15T02:52:25.243Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 12,
-          "text": "(was #2472 c5) Browser/server capability rejection and handler diagnostics stay on the checked App graph boundary, with a UI snapshot per rejection.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Moved to #6864 c4: typed routes are their own stream",
-          "at": "2026-11-15T02:52:26.220Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 13,
-          "text": "(was #2475 c1) Typed headless table and virtual models, checked column access, unified local and server state and all consumer routes are implemented, with goldens on O0, O1, O2 and web.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Moved to #6821 c5: the table and virtual list are standard views (D-VIEW-SET1)",
-          "at": "2026-11-15T02:52:27.167Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 14,
-          "text": "(was #2498 c1) The browser-test contract and CLI choices (scaffold, UI mode, trace viewer) are on a ratified Tower ballot before implementation begins.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "D-DX-BROWSERTEST1 ratified A 2026-09-04 (card c0m60jt9, archived #2498): browser tests extend jet test with typed Browser.Page fixtures; Docs/spec/spec.md:4004-4007 (--browser, --browser-retries, --browser-reporter, --browser-ui, --browser-visual, --browser-trace); Core/Web/Browser.jet (BrowserTestConfig, BrowserTestFixture, BrowserTestReport, report_html viewer).",
-          "at": "2026-11-09T20:22:38.476Z",
-          "closure": "decision"
-        },
-        {
-          "n": 15,
-          "text": "(was #2498 c2) The ratified scaffold creates an isolated browser test project with configured browsers and a reusable `jet dev` web server, then runs a first test, proven by a tests/cases row.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Moved to #6866 c1: browser testing is its own stream",
-          "at": "2026-11-15T02:52:28.087Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 16,
-          "text": "(was #2498 c3) The selected UI mode shows the test tree, filters, timeline, DOM snapshots, source, logs, errors, console, network, attachments and watch updates from one test run, proven by a tests/cases row.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Moved to #6866 c2: browser testing is its own stream",
-          "at": "2026-11-15T02:52:28.959Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 17,
-          "text": "(was #2498 c4) A retry records a bounded trace that opens in the local viewer with action snapshots, source, DOM, logs and network details, while page payloads stay excluded by default, proven by a tests/cases row.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Moved to #6866 c3: browser testing is its own stream",
-          "at": "2026-11-15T02:52:29.837Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 18,
-          "text": "(was #2498 c5) Cross-browser contexts, retries, reporters and failure exit status stay deterministic and keep Jet diagnostic and source identity, proven by tests/cases rows.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Moved to #6866 c4: browser testing is its own stream",
-          "at": "2026-11-15T02:52:30.726Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 20,
-          "text": "(was #2962 c1) Typed endpoint admission, descriptor lowering, handler invocation and native and web codec routing are implemented, with goldens on O0, O1, O2 and web.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Moved to #6865 c1: endpoint contracts are their own stream",
-          "at": "2026-11-15T02:52:31.620Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 22,
-          "text": "(was #3259) One struct-declared rule set yields the same field paths and reasons for JSON decode, `T.validate` and form submission, and errors clear on the next valid submit: golden web/form_validation_one_meaning passes on O0, O1 and O2. (was #3280 c32)",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Moved to #6821 c3: forms are built on the kit standard views card",
-          "at": "2026-11-15T02:52:32.540Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 28,
-          "text": "(was #3304) The endpoint contract agrees across dispatch, the independent client, schema and form on every tier: renaming a public input changes the descriptor-derived client, schema and form in one place; malformed path, query or body input and private result fields never cross the public boundary; typed public errors, auth requirements and HTTP statuses match the real independent client; optional, nested, enum, list and recursive schema references appear only where the endpoint declares them, with no copied web-only metadata; route facts and OpenAPI agree with the typed client, schema and form (D-FOUND-COREAPI1, D-ENDPOINT-SHAPE1; no new App access API). Proof: a Jet test endpoint_contract_replay passes on O0, O1 and O2 with curl as the independent client, and the rename diff is limited to the renamed field. (was #3280 c38-c43)",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Moved to #6865 c2: endpoint contracts are their own stream; split into WAPI c2 and c3",
-          "at": "2026-11-15T02:52:33.426Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 29,
-          "text": "(was #3304, #2852) web.openapi(app) derives one deterministic OpenAPI document from the checked route table on web.app() (D-ROUTE-ONE1=A): stable operation identity and typed input, success, failure, auth and status projections; no internal or visual routes; schema and client are derived artifacts, and every execution adapter only marshals that shared model. Golden web/app_openapi on O0, O1 and O2. (was #3280 c45, #2852 c1)",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Moved to #6865 c4: endpoint contracts are their own stream",
-          "at": "2026-11-15T02:52:34.430Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 30,
-          "text": "(was #4272) [#4282] D-WEBAPP-SERVE1: jet dev serves a web.app entry. D-WEBRUN1: native jet run on web-targeted source stops with a registered error before lowering. (was #4275 c82)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Holds on dev 26afb1a0e6 (GoalsB-1 sweep, gate-p62 jet, 2026-11-14): D-WEBRUN1: jet test Compiler --profile ui --filter web_run_default PASS (registered E-WEB-RUN refusal before lowering). D-WEBAPP-SERVE1: jet test Compiler --profile cases --filter web_app/image_bytes_match_between_jet_dev_and_jet_build PASS (spawns jet dev app.jet on a web.app entry and fetches its page and images).",
-          "at": "2026-11-14T12:49:59.575Z"
-        },
-        {
-          "n": 31,
-          "text": "The 2026-11-04 study (Docs/research/2026-11-04-jet-dev-vs-incumbents.md) is rerun on the built framework against Vite, Bun, Next.js, Deno, Astro, Rsbuild and Parcel; every gap it lists is closed or explained on a card, and the rerun is committed as a dated Docs/research report. Its timing cells belong to G11 (#2858). Proof: `git ls-files \"Docs/research/*jet-dev-vs-incumbents*\"` names the dated rerun report.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Moved to #2756 c10, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T01:00:53.450Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 32,
-          "text": "(was #2474 c1) The ratified typed form fluent validation chain, canonical submission lifecycle and all registration and lowering consumers are implemented, with goldens on O0, O1, O2 and web. (was #5201 c22)",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Moved to #6821 c4: forms are built on the kit standard views card",
-          "at": "2026-11-15T02:52:35.425Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 33,
-          "text": "(was #3239 c6) Examples/Network/Browser/BrowserLockedProvision matches its .out golden on O0, O1, O2 and web; each rebless is justified as correct new output.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 840067a056, gate-p64 jet, b53proofs 2026-11-14 (dev 99aa698189): jet test Compiler --profile golden --filter BrowserLockedProvision -> PASS 3/FAIL 0 (O0, O1, O2), plus cases --filter browser_lock/locked_provision_example_matches_its_golden_on_web -> PASS 1 (web); no rebless.",
-          "at": "2026-11-14T13:36:38.323Z"
-        },
-        {
-          "n": 34,
-          "text": "Route markers on struct methods, added to the app with one call (D-HTTP-ROUTE-EXPOSE1=A, D-ROUTE-ONE1=A): a jokes API with GET and POST routes serves identically on O0, O1 and O2, `web.openapi` renders both routes, and a bad path parameter is a compile error with a UI snapshot.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Moved to #6865 c5: endpoint contracts are their own stream",
-          "at": "2026-11-15T02:52:36.320Z",
-          "closure": "obsolete",
-          "proof": {
-            "profile": "golden",
-            "filter": "Web/JokesApi"
-          }
-        },
-        {
-          "n": 35,
-          "text": "One app package serves web, desktop and phones (D-ONEAPP-MODEL1=A): one example app builds for web and Linux desktop from the same source, and both goldens pass.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Moved to #6445 c17, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T01:00:57.261Z",
-          "closure": "duplicate",
-          "proof": {
-            "profile": "cases",
-            "filter": "web_app/one_source_web_and_linux"
-          }
-        },
-        {
-          "n": 36,
-          "text": "A screen calls a marked server method like a plain function (D-SERVER-FN1=A, in the D-WEBAPP-SHAPE1=A form of app.Remote<S> and #App.SignedIn): the call crosses to the server with typed arguments and comes back with a typed error.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Moved to #6445 c18, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T01:01:01.264Z",
-          "closure": "duplicate",
-          "proof": {
-            "profile": "cases",
-            "filter": "web_app/remote_call_typed_errors"
-          }
-        },
-        {
-          "n": 37,
-          "text": "Examples/features/ui/reactive_observable.jet shows same-value notification, derived order and disposal with no version-cap loss. Proof: `jet test Compiler --profile golden --filter ui/reactive_observable` on O0, O1, O2 and web.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Moved to #6821 c7, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T01:01:06.131Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 38,
-          "text": "Examples/features/ui/async_command.jet shows a disabled command, duplicate activation, cancellation, a domain error surfacing as Failed, and teardown, using existing task ownership. Proof: `jet test Compiler --profile golden --filter ui/async_command` on O0, O1, O2 and web.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 32897bf201 (GoalsB-5-16: Examples/Apps/UI/AsyncCommand, a Save command whose status is a core.reactive signal over task, join, cancel, TaskFailure and task.group). Batch compiler p148, 2026-11-15 00:05: jet test Compiler --profile golden --filter UI/AsyncCommand PASS 3 (O0/O1/O2); jet test tests/guards --filter example 9 passed. The web tier is c39 (task groups are E-WEB-UNSUPPORTED on web until #5201 c7).",
-          "at": "2026-11-15T05:06:48.347Z"
-        },
-        {
-          "n": 39,
-          "text": "Examples/Apps/UI/AsyncCommand proves the same output on web once task groups run there (#5201 c7): jet test Compiler --profile golden --filter UI/AsyncCommand includes the web tier and passes. Depends on #5201 c7; O0/O1/O2 are covered by c38.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Moved to #6821 c8, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T01:01:09.082Z",
-          "closure": "duplicate"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "web-framework-parity",
-        "meta",
-        "needs-owner"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-04T00:55:19.476Z",
-      "updated": "2026-11-16T08:50:24.914Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 39,
-      "completedAt": "2026-11-16T05:55:14.267Z"
-    },
-    {
       "id": "c00ii3d5",
       "num": 6553,
       "title": "Web build: Plain data that updates the screen (no signal wrappers) (D-REACT-REF1)",
@@ -75692,6 +75296,21 @@
         {
           "at": "2026-11-19",
           "by": "Main",
+          "text": "c55 (p309, a3fa36e63f): the ranking fix landed (Main-6841-c55-rank-by-supported-gain: rank by the interval low end) and \"narrow ranks first for round\" now holds, but the measured speedup misses the predicted interval: suite 248 vs [-110,147]; alone 132 vs [140,165]. Alone on the p309 jet: two causal runs predict narrow 101 [87,113] and 103 [90,115] (wide -34 and -38); the fixture measure (3 x 1 s windows per arm) gives 93, 156, 146 (spread +-3%), a median of 15 interleaved 200 ms pairs gives 135, 143, 135, 162. Two faults: (1) the hand measurement is too noisy for the interval (fix: interleaved pairs, median); (2) the prediction reads ~4 points low (~10 vs ~14) and wide predicts a negative gain, which a virtual speedup cannot cause; the accounting bias is in PerfSamples.jet perf_causal_tick/pay (likely the joiner/blocked-thread forgiveness or sample-granularity pays at task end). Open; criterion text unchanged."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
+          "text": "Finding (Lens, 2026-11-19, gate-p308): the -O0 debug build computes a call with literal arguments ahead of time (count_up(1000000) in the placed-logpoint fixture; prog.count_up is kept in the image under --dead-code=keep, with no caller). jet debug then accepts `break count_up` / `break prog.jet:7` (\"Breakpoint set\") and the breakpoint never hits. Two candidate policies, owner-only (compiler policy, ballot needed): (a) the debug build keeps such calls (no ahead-of-time evaluation of calls at -O0 under jet debug), or (b) `break` on code that the build computed ahead of time refuses with \"never called in this build\". The c63 fixture now takes its count from process.args (Lens-6841-c63-placed-logpoint-fixture), so the case tests the placed logpoint and not this policy."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
+          "text": "Correction to the c62 evidence: Debug/watch_follows_a_reallocated_list FAILED on p306 and p307 and first PASSES on p308 (12ffe8b635), the cycle that landed Lens-6841-p306-dap-logpoint-watch. The evidence line saying \"p307 and p308 pass it\" is wrong about p307."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
           "text": "c45/c66 eval design (Main decision from Lens findings): profile at 20000 functions: one print = two full front ends (probe check, then the check with the expression appended), sema.effects 17.2 s of 19.9 s each (quadratic; fixed by Lens-6841-sema-effects-linear, front end to ~2.3 s). A held-state print that re-checks the stop function still costs ~1.5 s when the stop is in a 20000-statement function, so it cannot meet 100/250 ms. Chosen: the print re-checks no program function. Its free names resolve to the stop function binders held from the session check (checked type and span); one function `jet_debug_expression(captures) -[]> Unit { jet_debug_store(<expr>) }` is checked against the held registration and lowered alone. It falls back to the probe path when a captured binder is moved, shared or out of scope anywhere it could be at the stop (I1), when a capture type is generic, or when the held state is absent. The --trace output names the path taken. Owner: Lens."
         },
         {
@@ -76224,20 +75843,20 @@
         {
           "n": 42,
           "text": "The native debugger evaluator build answers review 4 (Docs/Audits/2026-11-18-debug-eval-native-review-4.md) Q1-Q4, each with a proof case: Q1 lowering-made calls carry their source node's call-site index (`loop_pull` case); Q2 the no-blocking-syscall link check follows wrappers and the stack4 primitive and refuses non-constant syscall numbers (thread_synccall_run, HostSockets, Alloc sites refused); Q3 the stop-report stub is chosen per function, not per Trap.jet file, so raw word helpers and the debug text escape table stay live; Q4 the R7 arena is keyed per fiber (or per carrier), with its cost measured. Proof: `jet test Compiler --profile cases --filter DebugEval/` lists one passing case per Q.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T13:44:01.492Z"
+          "evidence": "p309 batch compiler (dev a3fa36e63f, full cases suite 2026-11-19 03:32-03:56): `jet test Compiler --profile cases --filter DebugEval/` lists 3 PASS: DebugEval/loop_pull (Q1: lowering-made calls carry their call-site index), DebugEval/eval_link_receipt (Q2: syscalls followed through wrappers, the stack4 primitive and net_socket_call number: statx/writev/rt_sigaction/listen/shutdown exports refused; Q3: the stop-report stub is per function: trap_header stubbed, trap_word and trap_debug_escaped checked, Int clone allowed), DebugEval/placed_condition_traps_once_per_hold (Q4: a placed condition keeps no per-fiber or per-thread state, so fresh fibers trap only where it holds; cost measured in the case: 60,000 false hits on 202 tasks under a second, one trap at task 204).",
+          "at": "2026-11-19T09:02:06.268Z"
         },
         {
           "n": 43,
           "text": "Time travel over the chokepoint and sync order: (a) `jet run --record=r1` of a program whose tasks share channels and a lock, made at -O2, replays under `jet debug --replay=r1` with the same output and the same sync order at -O0, -O1 and -O2, on real threads; an unsafe write that changes the run is reported at the first sync event where it diverges. (b) In a replay, `reverse-step`, `reverse-next`, `reverse-finish` and `reverse-continue` reach the previous line, call, caller and breakpoint or watch hit, in the console and over DAP `stepBack` and `reverseContinue`. (c) `why x` in a replay names the write that gave `x` its value: file:line, task, stack and the value it replaced; a local optimized out at -O2 is shown from the -O0 replay and labeled recovered. Proof: `jet test Compiler --profile cases --filter Debug/replay_threads_across_tiers_`; `--filter Debug/replay_reverse_`; `--filter Debug/replay_why_`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R1)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T14:10:00.018Z",
+          "evidence": "Gate p307 (dev 2611e58630, batch compiler = census build; full collect-all suite 02:35-02:54, suite-p307/cases.out): PASS Debug/replay_threads_across_tiers_record_writes_the_replay, _refuses_what_it_cannot_replay, _replays_at_every_tier (O0, O1 and O2 images of an -O2 recording), _reports_the_first_diverging_sync_event; PASS Debug/replay_reverse_steps_back_by_line_call_and_caller, replay_reverse_continue_goes_back_to_a_watch_hit, replay_reverse_over_dap, replay_reverse_refuses_outside_a_replay; PASS Debug/replay_why_names_the_last_write, replay_why_recovers_an_optimized_away_local, replay_why_refuses_outside_a_replay. These ran for the first time on p306 (p305 refused them for missing reasons). Fixed by IfHole p305-debug-fixes.r2 and c51-dump-budget-run-image.r2.",
+          "at": "2026-11-19T07:54:48.526Z",
           "unblockedFrom": "D-TIMETRAVEL3"
         },
         {
@@ -76290,11 +75909,11 @@
         {
           "n": 49,
           "text": "Console verbs, fast conditions, hardware watches: c36's verbs ship under the ratified spellings; `watch` uses the CPU's debug registers and stops at the changing write with old and new values; a condition that R3's scan places in the program (it writes no memory the program reads) and that is false a million times finishes in under a second, and a condition it cannot place says so when the breakpoint is set; `tasks` lists every task with state, wait and stack. Proof: `jet test Compiler --profile cases --filter Debug/watch_stops_at_the_changing_write`; `--filter Debug/conditional_breakpoint_runs_in_process`; `--filter Debug/tasks_lists_every_task`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R7)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T14:10:15.193Z",
+          "evidence": "Gate p306 (dev c16749e714, batch compiler = census build; full collect-all suite 02:12-02:27, suite-p306/{golden,cases}.out): PASS Debug/watch_stops_at_the_changing_write, PASS Debug/conditional_breakpoint_runs_in_process (fixed this cycle by e805431016: conditions reading more than 5 locals), PASS Debug/tasks_lists_every_task.",
+          "at": "2026-11-19T07:30:15.951Z",
           "unblockedFrom": "D-DBG-VERBS1"
         },
         {
@@ -76387,20 +76006,20 @@
         {
           "n": 59,
           "text": "Stepping costs what the step does, not what the image holds: `jet debug` per-step time does not grow with the image size, and is at most lldb's on the same image. Today (2026-11-18, a0.0.45 candidate): 76 ms per `n` on a 12,004-line image and 1,339 ms on a 120,004-line image, against lldb under 1 ms on both (Docs/Audits/2026-11-17-debug-latency-vs-lldb.md F2). Proof: `jet run Tools/Perf/DebugLatency/Main.jet -- --functions 20000 --runs 5` prints jet_debug per_step at most lldb's per_step + 1 ms.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T23:18:18.461Z"
+          "evidence": "p308 batch compiler (dev 12ffe8b635, which carries IfHole c59-line-over-step b6bfa6adca and c59-function-index 2611e58630), run alone in the heavy slot at 03:25: jet run Tools/Perf/DebugLatency/Main.jet -- --jet <p308 jet> --lldb lldb-21.1.8 --functions 20000 --runs 5 (with Lens-6841-latency-watch-delete applied, which changes only the watch row) on a 120,004-line image: jet_debug per_step 1 ms, lldb per_step 2 ms, so the bar \"per_step at most lldb + 1 ms\" is met; first_stop 92 ms against lldb 211 ms. At 2000 functions (12,004 lines) per_step is 0 ms against lldb 3 ms. So per-step time no longer grows with the image (p305: 1,077 ms per step at 20000 functions; the card text: 76 ms at 12,004 lines, 1,339 ms at 120,004). An earlier run of the same command overlapping a census gave per_step 1 against 1, also met.",
+          "at": "2026-11-19T08:28:01.095Z"
         },
         {
           "n": 60,
           "text": "c39 G4, a fallible call shows Ok or Err: in jet debug, `print parse(s)` of a function that can fail evaluates to `Ok(3)` or `Err(…)` (rendered as `locals` shows a Result) instead of a refusal. (Docs/Audits/2026-11-19-debug-profile-best-in-existence.md G4)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-19T04:04:12.875Z",
+          "evidence": "Gate p306 (dev c16749e714, batch compiler = census build; full collect-all suite 02:12-02:27, suite-p306/{golden,cases}.out): PASS Debug/print_a_fallible_call_shows_ok_or_err (print of a fallible call renders Ok/Err as locals shows a Result).",
+          "at": "2026-11-19T07:30:18.299Z",
           "proof": {
             "profile": "cases",
             "filter": "Debug/print_a_fallible_call_shows_ok_or_err"
@@ -76409,11 +76028,11 @@
         {
           "n": 61,
           "text": "c39 G6, evaluation in an inlined frame: `print n + 1` in an -O2 inlined frame answers as it does at O0. (audit G6)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-19T04:04:15.838Z",
+          "evidence": "Gate p306 (dev c16749e714, batch compiler = census build; full collect-all suite 02:12-02:27, suite-p306/{golden,cases}.out): PASS Debug/print_in_an_inlined_frame (print n + 1 in an -O2 inlined frame answers as at O0).",
+          "at": "2026-11-19T07:30:20.437Z",
           "proof": {
             "profile": "cases",
             "filter": "Debug/print_in_an_inlined_frame"
@@ -76422,11 +76041,11 @@
         {
           "n": 62,
           "text": "c39 G8, a watch follows reallocation: `watch xs[3]` keeps stopping at the changing write after `xs` grows past its capacity and moves. (audit G8)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-19T04:04:16.894Z",
+          "evidence": "Gate p308 (dev 12ffe8b635; full collect-all suite, suite-p308/cases.out): PASS Debug/watch_follows_a_reallocated_list. `watch xs[3]` keeps stopping at the changing write after xs grows past its capacity and moves, and ends with its frame (no false \"moved to a buffer aligned unlike the old one\" ending). Fixed by Lens-6841-p306-dap-logpoint-watch (6a96ccce8e): a watch records its frame's function, so a later frame of another function at the same CFA is not taken for the live frame. p306 failed this row; p307 and p308 pass it.",
+          "at": "2026-11-19T08:22:25.099Z",
           "proof": {
             "profile": "cases",
             "filter": "Debug/watch_follows_a_reallocated_list"
@@ -76435,11 +76054,11 @@
         {
           "n": 63,
           "text": "c39 G10, placed logpoints: a logpoint whose message R7 scan places runs in the program, and a million hits finish in under a second; one it cannot place says so when set. (audit G10)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-19T04:04:17.956Z",
+          "evidence": "p309 batch compiler (dev a3fa36e63f, full cases suite 03:32-03:56): Debug/placed_logpoint_runs_in_the_program PASS (fixed in p309 by Lens-6841-c63-placed-logpoint-fixture: the count comes from process.args so the -O0 build cannot compute count_up ahead). The case proves: the numeric logpoint says it runs in the program; a million logged hits under a second (the program times itself); every message shown in hit order; a String-part logpoint says when set that it cannot run in the program and is filled in at each hit; totals unchanged. Also PASS when run alone on gate-p308 by Lens (1M lines printed in order).",
+          "at": "2026-11-19T09:02:07.681Z",
           "proof": {
             "profile": "cases",
             "filter": "Debug/placed_logpoint_runs_in_the_program"
@@ -76448,11 +76067,11 @@
         {
           "n": 64,
           "text": "c39 G14, DAP attach, pause and restart: the four #6730 known-failing DAP rows pass on the native tier, with no known-failing mark. (audit G14)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-19T04:04:18.976Z",
+          "evidence": "Gate p308 (dev 12ffe8b635; batch compiler = census build; full collect-all suite 02:57-03:19, suite-p308/cases.out), native tier: PASS Debug/dap_cli_attaches_and_disconnects_through_the_production_wire, Debug/dap_cli_pauses_a_running_target_through_production_wire, Debug/dap_cli_keeps_running_state_transitions_on_the_production_wire, Debug/dap_cli_projects_raw_frames_only_when_requested_through_production_wire (the four #6730 rows the review names at G14), with no known-failing mark: git grep -l known-failing over Tests/Cases/Debug/*dap* finds none. All 11 dap_cli_* rows PASS, including dap_cli_launches_and_projects_a_live_target_in_jet_terms, which p306 had regressed and Lens-6841-p306-dap-logpoint-watch (6a96ccce8e) fixed.",
+          "at": "2026-11-19T08:22:24.050Z",
           "proof": {
             "profile": "cases",
             "filter": "Debug/dap_cli_"
@@ -76461,11 +76080,11 @@
         {
           "n": 65,
           "text": "c39 G17, precise PC: under `--lens=cpu` with PEBS or IBS available and perf_event_paranoid at most 1, samples are charged by the precise PC and the receipt says so; elsewhere the receipt names the skid source. (audit G17)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-19T04:04:21.860Z",
+          "evidence": "p309 batch compiler (dev a3fa36e63f, full cases suite 03:32-03:56): Perf/precise_pc_names_its_source PASS; the p308 regression Perf/unwinds_without_frame_pointers is fixed (PASS) by IfHole-6-1-c65-precise-callers (callers charged by return address, the precise PC only for the leaf).",
+          "at": "2026-11-19T09:02:08.656Z",
           "proof": {
             "profile": "cases",
             "filter": "PerfRun/cpu_lens_precise_pc"
@@ -76503,7 +76122,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-19T07:30:11.716Z",
+      "updated": "2026-11-19T09:02:09.548Z",
       "updatedBy": "Main",
       "criteriaLastN": 67
     },
@@ -139218,196 +138837,6 @@
       "ratifiedAt": "2026-11-02"
     },
     {
-      "id": "D-WEB-NAME1",
-      "cardId": "c0vxf4u0",
-      "group": "web",
-      "title": "The name of Jet's web framework",
-      "situation": "Jet ships its own web framework: the built-in modules for routing, data loading, forms, tables, long lists and app state. It has no name of its own, so guides call it Jet's web library. Its sample app sits in a placeholder folder after dropping a borrowed JavaScript framework's name. The owner picks the name for docs, the website and that sample; code does not change, and we recommend Contrail.",
-      "gist": "What should Jet's web framework be called?",
-      "lesson": "A framework name is what people search for, write in job posts and say in talks. It should be short, easy to say, tied to Jet, and not already used by another web framework, so searches and packages are not confused.",
-      "explainer": "Under every option the code stays the same: `use core.web as web` and `web.app(...)`. The name changes the docs title, the website section, the reference app folder and the noun used in guides. The rename lands in one cutover across the repository.",
-      "story": "Ana tells a colleague she built her shop in Jet. The colleague asks which framework. With a name she answers in one word that a search finds; with \"Jet Web\" she must add that it is the one built into Jet.",
-      "inWild": "First-party: Microsoft names its C# web framework ASP.NET Core. Community: Rust has Axum and Leptos, Elixir has Phoenix, Ruby has Rails. Go ships net/http unnamed; Gin, Echo and Fiber grew to add routing it lacked.",
-      "detail": "Collision checks ran on 2026-11-01 and 2026-11-03 against npm names and search, crates.io, PyPI, RubyGems, Hex, GitHub repository names and trademark notices.\n\nContrail: Juniper's Contrail® networking software (contrail-controller, 436 stars, plus the contrail-web-core and contrail-web-controller UI repos). VibeIQ's Contrail Platform owns the @contrail npm scope (@contrail/sdk, about 17,000 downloads a month).\n\nflo-bit/contrail (57 stars, npm @atmo-dev/contrail) is a pre-alpha Bluesky backend with HTTP endpoints. Also: the Contrails Bluesky feed tool (80 stars), a backtracking crate, an OpenContrail Ruby gem, a PyPI price tracker and an empty npm placeholder. No general web framework uses it. The GitHub user name contrail and contrail.dev and contrail.io are taken.\n\nJetstream: Laravel Jetstream (about 4,000 stars) is a web starter kit. NATS JetStream (built into nats-server, about 21,000 stars), Bluesky's Jetstream service, Google's JetStream inference engine, a Rust RPC crate and Uber's npm sync framework also use it.\n\nDropped: Slipstream, best known as the NAT Slipstreaming attack (samyk/slipstream, about 2,000 stars) and DNS covert-channel tunnels. Taxiway is free on every registry checked, but it fits any plane and reads as cabs.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Contrail",
-          "detail": "The trail a jet leaves across the sky. Tied to Jet, one word, and no general web framework uses it. Reference app: Examples/features/web/contrail.",
-          "technical": "Name only; module paths stay core.web.*. Existing uses: Juniper's Contrail® networking software and its web UI, VibeIQ's @contrail npm packages, a small Bluesky backend, a Bluesky feed tool and a Rust crate.",
-          "code": "// Contrail, the Jet web framework\nuse core.web as web\n\nfn run() {\n    web.app().routes(\"routes\").serve()\n}"
-        },
-        {
-          "key": "B",
-          "name": "Jetstream",
-          "detail": "The most obvious Jet pun. Reference app: Examples/features/web/jetstream.",
-          "technical": "Name only; module paths stay core.web.*. Laravel Jetstream is already a popular web starter kit, and five other projects use the name.",
-          "code": "// Jetstream, the Jet web framework\nuse core.web as web\n\nfn run() {\n    web.app().routes(\"routes\").serve()\n}"
-        },
-        {
-          "key": "C",
-          "name": "No name: \"Jet Web\"",
-          "detail": "The framework is simply Jet's web library, named by its module. Reference app: Examples/features/web/jet_web.",
-          "technical": "Nothing new to learn; the name matches core.web. Searches for \"Jet web\" land on Oracle JET, a JavaScript toolkit with \"JET Web Components\" and about 27,000 npm downloads a month. They also find Jetzig, a Zig web framework with 1,500 stars, and npm jetweb.",
-          "code": "// Jet Web, the core.web library\nuse core.web as web\n\nfn run() {\n    web.app().routes(\"routes\").serve()\n}"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "C#",
-          "note": "Microsoft ships its own web framework under its own name, ASP.NET Core.",
-          "code": "dotnet new webapp -o shop"
-        },
-        {
-          "lang": "Go",
-          "note": "net/http has no name; Gin, Echo and Fiber grew to add routing it lacked.",
-          "code": "http.HandleFunc(\"/\", home)"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "Contrail is tied to Jet, is one word, and no general web framework uses it; its other uses are networking software and small Bluesky tools.",
-        "gains": [
-          "A searchable name.",
-          "No general web framework uses it."
-        ],
-        "losses": [
-          {
-            "loss": "Juniper's Contrail networking software shares the name and is marked as a registered trademark.",
-            "mitigation": "It is a different field; docs and the website always say \"Jet Contrail\" so the two stay distinct."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "Laravel Jetstream is already a web starter kit, and five other projects use the name."
-          },
-          {
-            "key": "C",
-            "reason": "\"Jet web\" searches land on Oracle JET and Jetzig, so people cannot find the framework by name."
-          }
-        ],
-        "tradeoff": "One new word to learn, shared with Juniper's networking software, for a name people can search for."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: BallotReview-WebName. Registry, GitHub and trademark checks found that Juniper's registered Contrail networking software, VibeIQ's @contrail npm packages and a Bluesky backend share the name; Contrail stays recommended once those are disclosed."
-      },
-      "checkInstructions": "Under the winning option, rename the reference app folder, package name, case files and manifest app id in one cutover. Name the framework in Docs/spec and the website. Module paths do not change. Check USPTO serial 86294657 by hand before the website launches. Card #6552 criterion 3 closes on that cutover.",
-      "surface": {
-        "gist": "What should Jet's web framework be called?",
-        "lesson": "A framework name is what people search for and say in talks. It should be short, tied to Jet, and not already used by another web framework.",
-        "trio": {
-          "current": {
-            "note": "Today: no name; the reference app sits at a placeholder path.",
-            "code": "// Examples/features/web/jet_web_framework/run.jet\nuse core.web as web"
-          },
-          "wild": {
-            "lang": "C#",
-            "note": "Microsoft ships its own web framework under its own name, ASP.NET Core.",
-            "code": "dotnet new webapp -o shop"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Contrail",
-            "gist": "The trail a jet leaves; no general web framework uses it.",
-            "gains": [
-              "Tied to Jet.",
-              "No general web framework uses it."
-            ],
-            "losses": [
-              "One more name to learn.",
-              "Juniper's networking software shares the name."
-            ],
-            "proposed": {
-              "code": "// Contrail, the Jet web framework\nuse core.web as web"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Jetstream",
-            "gist": "The obvious Jet pun.",
-            "gains": [
-              "Instantly tied to Jet."
-            ],
-            "losses": [
-              "Laravel Jetstream is a web kit.",
-              "Searches mix results."
-            ],
-            "proposed": {
-              "code": "// Jetstream, the Jet web framework\nuse core.web as web"
-            }
-          },
-          {
-            "key": "C",
-            "name": "No name: \"Jet Web\"",
-            "gist": "Just Jet's web library.",
-            "gains": [
-              "Nothing new to learn.",
-              "Matches the import, core.web."
-            ],
-            "losses": [
-              "\"Jet web\" searches find Oracle JET and Jetzig."
-            ],
-            "proposed": {
-              "code": "// Jet Web, the core.web library\nuse core.web as web"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Contrail is tied to Jet, is one word, and no general web framework uses it.",
-          "gains": [
-            "A searchable name.",
-            "No general web framework uses it."
-          ],
-          "losses": [
-            {
-              "loss": "Juniper networking software shares the trademarked name.",
-              "mitigation": "Different field; docs always say \"Jet Contrail\"."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Laravel Jetstream is already a web starter kit, and five other projects use the name."
-            },
-            {
-              "key": "C",
-              "reason": "\"Jet web\" searches land on Oracle JET and Jetzig, so people cannot find the framework by name."
-            }
-          ],
-          "tradeoff": "One new word to learn, shared with Juniper's networking software, for a name people can search for."
-        }
-      },
-      "designAway": [
-        {
-          "loss": "Search results mixing the framework with other projects.",
-          "attempts": [
-            "Checked npm, crates.io, PyPI, RubyGems, Hex, GitHub and trademark notices for every option."
-          ],
-          "result": "Reduced for A: no general web framework uses Contrail; Juniper's networking UI and two small Bluesky tools share the word."
-        },
-        {
-          "loss": "Renaming later would break links and paths.",
-          "attempts": [
-            "Module paths stay core.web.* under every option, so code never changes."
-          ],
-          "result": "Removed: a rename touches docs, the reference app folder, its package name, case file and manifest entry, never user code."
-        }
-      ],
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-04T02:37:58.908Z",
-      "outcome": "C",
-      "ratifiedAt": "2026-11-04"
-    },
-    {
       "id": "D-WRITE-TAKE1",
       "cardId": "c0r02x8n",
       "group": "other",
@@ -161253,6 +160682,97 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-19T09:02:09.548Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T09:02:08.656Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#65"
+    },
+    {
+      "at": "2026-11-19T09:02:07.681Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#63"
+    },
+    {
+      "at": "2026-11-19T09:02:06.268Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#42"
+    },
+    {
+      "at": "2026-11-19T08:34:54.661Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T08:28:01.095Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#59"
+    },
+    {
+      "at": "2026-11-19T08:22:30.277Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T08:22:25.099Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#62"
+    },
+    {
+      "at": "2026-11-19T08:22:24.050Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#64"
+    },
+    {
+      "at": "2026-11-19T07:54:48.526Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#43"
+    },
+    {
+      "at": "2026-11-19T07:30:20.437Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#61"
+    },
+    {
+      "at": "2026-11-19T07:30:18.299Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#60"
+    },
+    {
+      "at": "2026-11-19T07:30:15.951Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#49"
+    },
     {
       "at": "2026-11-19T07:30:11.716Z",
       "by": "Main",

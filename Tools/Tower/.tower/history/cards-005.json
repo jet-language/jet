@@ -16004,6 +16004,404 @@
       "completedAt": "2026-11-16T03:22:35.742Z",
       "questions": [],
       "retiredAt": "2026-11-19T04:02:02.718Z"
+    },
+    {
+      "id": "c0vxf4u0",
+      "num": 6552,
+      "title": "Jet web framework: full breadth and depth parity with the best frameworks, with their downsides designed out",
+      "body": "## Outcome\n\nOwner direction: Jet ships a first-class, native web framework (the Core web modules, compiled by Jet, with no JavaScript runtime or wrapped library). It has full breadth and depth parity with every element of the best frameworks, and every known downside of those elements is engineered away in the Jet design rather than inherited. The framework has no brand of its own (D-WEB-NAME1=C, 2026-11-04): it is Jet's web library, named by its module; no repository path or user-facing text keeps a third-party framework's name.\n\n## Scope\n\nParity is judged element by element against the best framework for that element, not against one framework. The reference set covers at least: TanStack (Start, Router, Query, Form, Table, Virtual, Store, DB, devtools), Next.js, Remix / React Router, SvelteKit, SolidStart, Qwik, Astro, Nuxt, Angular, Phoenix LiveView, Rails (Hotwire), Laravel (Livewire), Django, Leptos and Dioxus, htmx and Elysia/Hono. Elements include routing and typed search params, data loading and caching, mutations and optimistic updates, forms and validation, tables and virtualization, state stores, rendering modes (SSR, SSG, ISR, streaming, islands, resumability, CSR), server functions and actions, real-time and live views, auth and sessions, i18n, images and assets, styling, testing, devtools, error boundaries, deployment and edge targets, and the dev loop.\n\n## Method\n\n1. A dated audit (Docs/audits) with one row per element: the best framework for it, what Jet has (by code path and executable example, not prose), the gap, and each known downside of the best implementation with the Jet design that removes it.\n2. One ballot per owner choice the audit raises (new syntax, public API, product behavior), with same-program alternatives.\n3. One child card per gap, each closing with an executable example and golden output on every applicable tier (I5, I9), and a performance cell where the element is performance-relevant.\n\n## Known downsides to design out (seed list, the audit extends it)\n\nHydration cost and mismatch bugs; client bundle growth; waterfalls between nested loaders; cache invalidation by hand; stringly-typed routes and search params; server/client boundary leaks of secrets; framework lock-in to one host; slow dev rebuilds; runtime-only type errors in forms and APIs; opaque magic in file conventions; duplicated validation between client and server.\n\n## Current state\n\nExamples/features/web/tanstack_start/run.jet is a reference app over the Core web modules (router, query, forms, table, virtual, store). Its web build is being repaired under #5990 c13. It is evidence of coverage breadth only; depth parity is unaudited.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Clarification (Main, 2026-11-16): this card is done only as a container. TowerKeeper-1's board cleanup moved its open criteria to the cards that own the work, and none of them was built when it closed: routes went to #6864, endpoints to #6865, browser tests to #6866, forms, tables and views to #6821, and the parity audit, the one-runtime suite and the one-app proofs to #6445 c12-c18. Only c3, c9, c14, c30, c33 and c38 were met by proof here. The Jet web framework is NOT finished. The open work lives on those cards (all G9)."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "core.reactive over-notifies and glitches; this blocks c37 (found by GoalsB-5 while measuring reactive_observable, 2026-11-15). An autorun reading n, doubled(n) and plus_one(doubled) re-runs 3 times per n.set(5), and 3 times for n.set(1) when n is already 1 (no same-value suppression). In a diamond (left = a+1, right = a*10, sum = left+right) the effect sees the glitch value 13 before settling. Solid, Vue and Preact signals run once, with no glitch. Fix: a topological or height-ordered propagation, plus same-value suppression in core.reactive. Full notes: the GoalsB-5-16 SUB message."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned: this card keeps the parity audit (c1, c2, c4, c6, c31), the one-runtime suite (c7) and the one-app and server-call proofs (c35, c36). Routes went to #6864, endpoints to #6865, browser tests to #6866, forms and tables to #6821 (#6821 c3, #6821 c4, #6821 c5)."
+        },
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "Shape (Main, 2026-11-14): framework-surface work on this card builds to the ratified D-WEBAPP-SHAPE1=A (#6792, Docs/proposals/2026-11-13-web-app-framework-shape.md). Every element of that shape has a child card under #6792 (#6799-#6831, #6445, #6447) with executable-example criteria; new surface work here names the shape element it builds and must not contradict it."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Correction to the log above: c14's ballot is not missing. D-DX-BROWSERTEST1=A (ratified 2026-09-04, from #2498) chose \"extend jet test\" and the spec carries its flags (spec.md:4004-4007), so c14 is met and c15-c18 (scaffold, UI mode, trace viewer, matrix and reporters) are build work inside that contract. Only a new command or a new jet new template name for the scaffold would need its own ballot; adding a browser #Test to the existing web template does not."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Body: D-WEB-NAME1=C (2026-11-04) chose no brand, so \"its own Jet name\" is gone. Owner gates: c14 waits for a browser-test ballot (scaffold, UI mode, trace viewer) that is not drafted; c2 is the standing rule that every audit choice gets a ballot. c30's ballots are ratified and archived with #4282: D-WEBAPP-SERVE1=D (2026-07-28) and D-WEBRUN1=A (2026-08-27). Merged: c21 into c22, c23-c27 into c28, c19 into c29 (D-G9-4, D-G9-5). Gained #5201 c22 (typed forms). New row: the study rerun from the goal body."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 14 criteria from archived #2428, #2472, #2475, #2498, #2852, #2962: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A dated parity audit in Docs/audits lists every element of the reference frameworks named in the body, the best framework for each element, Jet's current state cited by code path and executable example, the gap, and each known downside of the best implementation with the Jet design that removes it. Proof: `git ls-files \"Docs/audits/*web-framework-parity*\"` names the dated audit.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6445 c12, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:00:36.968Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 2,
+          "text": "Every owner choice the audit raises is on a Tower ballot with same-program alternatives, and every ratified choice has a child card under this card. Proof: each audit row names its ballot ID and child card.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6445 c13, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:00:40.393Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 3,
+          "text": "The framework name ballot is ratified, and no repository path, example name, or user-facing text uses a third-party framework's name for the Jet framework (Examples/features/web/tanstack_start is renamed in one cutover).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "D-WEB-NAME1 ratified C (Jet Web). 2d8aea4762 moves Examples/features/web/jet_web_framework to Examples/features/web/jet_web with its golden case, package name jet_web_reference and description, renames the DX manifest app to jet-web-orders, and renames the three reference cases and the retired-case row in one cutover. A repository scan for jet_web_framework, jet-web-framework and 'Jet Web framework' outside Docs/audits and Tower finds only the dated owner-feedback proposal heading (generic phrase in historical evidence). golden --filter web/jet_web: PASS o0/o1/o2; the renamed cases match their old-name baseline rows (graph KF #4830, browser REFUSED line 27). lane-check: CHECK OK. tanstack_start no longer exists in the tree.",
+          "at": "2026-11-04T11:29:17.007Z"
+        },
+        {
+          "n": 4,
+          "text": "Every audited element at parity or better has an executable example with golden output on every applicable tier, and the audit row cites it. Proof: each parity row of the audit names its example, and `jet test Compiler --profile golden --filter web` on O0, O1 and O2 passes on every applicable tier.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6445 c14, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:00:43.374Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 6,
+          "text": "Every claim that the Jet framework or any of its elements is better than an existing framework is backed by a passing adversarial review in Docs/audits, and every downside that review finds is engineered away and re-reviewed before the element is presented to the owner or built (AGENTS.md, Adversarial design review). Proof: each better-than claim in the audit names its passing adversarial review under Docs/audits.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6445 c15, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:00:46.293Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 7,
+          "text": "Routes, data queries, forms, tables and stores run on one reactive app runtime: one example app uses all five, and its golden passes on O0, O1, O2 and web.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6445 c16, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:00:49.925Z",
+          "closure": "duplicate",
+          "proof": {
+            "profile": "golden",
+            "filter": "Web/AppSuite"
+          }
+        },
+        {
+          "n": 8,
+          "text": "(was #2472 c1) Checked route declarations carry typed path, search, loader and navigation contracts, and a wrong route is rejected at compile time with a registered diagnostic and a UI snapshot.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6864 c1: typed routes are their own stream",
+          "at": "2026-11-15T02:52:23.340Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 9,
+          "text": "(was #2472 c2) Convention and explicit routes feed the same checked App graph and web-graph explanation source, without a second browser registration graph Proof: a golden where a convention page and an explicit route at one address fail jet check with E2804 naming both lines, and `jet explain --routes` lists both forms (D-ROUTE-ONE1=A (2026-10-29): web.app() holds the one route table and server.mux() is removed.) (precut audit 2026-11: unproven at 9c7ddf1359).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 75c623616c, gate-p64 jet, b53proofs 2026-11-14 (dev 99aa698189): jet test Compiler --profile cases --filter web_app_graph/convention_page_and_explicit_route_share_one_table -> PASS 1/FAIL 0.",
+          "at": "2026-11-14T13:36:39.822Z"
+        },
+        {
+          "n": 10,
+          "text": "(was #2472 c3) Typed loader binding, preload/abort plumbing, and pending/error/not-found boundary source are integrated in App and its browser graph consumer Proof: a golden on O0, O1, O2 and web where a route loader's pending, error and not-found boundaries render and an aborted navigation cancels its preload (precut audit 2026-11: unproven at 9c7ddf1359).",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6864 c2: typed routes are their own stream",
+          "at": "2026-11-15T02:52:24.273Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 11,
+          "text": "(was #2472 c4) Route cache identity, dependency facts, freshness transitions, invalidation and collection are integrated, with a case proving the observable lifecycle.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6864 c3: typed routes are their own stream",
+          "at": "2026-11-15T02:52:25.243Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 12,
+          "text": "(was #2472 c5) Browser/server capability rejection and handler diagnostics stay on the checked App graph boundary, with a UI snapshot per rejection.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6864 c4: typed routes are their own stream",
+          "at": "2026-11-15T02:52:26.220Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 13,
+          "text": "(was #2475 c1) Typed headless table and virtual models, checked column access, unified local and server state and all consumer routes are implemented, with goldens on O0, O1, O2 and web.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6821 c5: the table and virtual list are standard views (D-VIEW-SET1)",
+          "at": "2026-11-15T02:52:27.167Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 14,
+          "text": "(was #2498 c1) The browser-test contract and CLI choices (scaffold, UI mode, trace viewer) are on a ratified Tower ballot before implementation begins.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "D-DX-BROWSERTEST1 ratified A 2026-09-04 (card c0m60jt9, archived #2498): browser tests extend jet test with typed Browser.Page fixtures; Docs/spec/spec.md:4004-4007 (--browser, --browser-retries, --browser-reporter, --browser-ui, --browser-visual, --browser-trace); Core/Web/Browser.jet (BrowserTestConfig, BrowserTestFixture, BrowserTestReport, report_html viewer).",
+          "at": "2026-11-09T20:22:38.476Z",
+          "closure": "decision"
+        },
+        {
+          "n": 15,
+          "text": "(was #2498 c2) The ratified scaffold creates an isolated browser test project with configured browsers and a reusable `jet dev` web server, then runs a first test, proven by a tests/cases row.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6866 c1: browser testing is its own stream",
+          "at": "2026-11-15T02:52:28.087Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 16,
+          "text": "(was #2498 c3) The selected UI mode shows the test tree, filters, timeline, DOM snapshots, source, logs, errors, console, network, attachments and watch updates from one test run, proven by a tests/cases row.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6866 c2: browser testing is its own stream",
+          "at": "2026-11-15T02:52:28.959Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 17,
+          "text": "(was #2498 c4) A retry records a bounded trace that opens in the local viewer with action snapshots, source, DOM, logs and network details, while page payloads stay excluded by default, proven by a tests/cases row.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6866 c3: browser testing is its own stream",
+          "at": "2026-11-15T02:52:29.837Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 18,
+          "text": "(was #2498 c5) Cross-browser contexts, retries, reporters and failure exit status stay deterministic and keep Jet diagnostic and source identity, proven by tests/cases rows.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6866 c4: browser testing is its own stream",
+          "at": "2026-11-15T02:52:30.726Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 20,
+          "text": "(was #2962 c1) Typed endpoint admission, descriptor lowering, handler invocation and native and web codec routing are implemented, with goldens on O0, O1, O2 and web.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6865 c1: endpoint contracts are their own stream",
+          "at": "2026-11-15T02:52:31.620Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 22,
+          "text": "(was #3259) One struct-declared rule set yields the same field paths and reasons for JSON decode, `T.validate` and form submission, and errors clear on the next valid submit: golden web/form_validation_one_meaning passes on O0, O1 and O2. (was #3280 c32)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6821 c3: forms are built on the kit standard views card",
+          "at": "2026-11-15T02:52:32.540Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 28,
+          "text": "(was #3304) The endpoint contract agrees across dispatch, the independent client, schema and form on every tier: renaming a public input changes the descriptor-derived client, schema and form in one place; malformed path, query or body input and private result fields never cross the public boundary; typed public errors, auth requirements and HTTP statuses match the real independent client; optional, nested, enum, list and recursive schema references appear only where the endpoint declares them, with no copied web-only metadata; route facts and OpenAPI agree with the typed client, schema and form (D-FOUND-COREAPI1, D-ENDPOINT-SHAPE1; no new App access API). Proof: a Jet test endpoint_contract_replay passes on O0, O1 and O2 with curl as the independent client, and the rename diff is limited to the renamed field. (was #3280 c38-c43)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6865 c2: endpoint contracts are their own stream; split into WAPI c2 and c3",
+          "at": "2026-11-15T02:52:33.426Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 29,
+          "text": "(was #3304, #2852) web.openapi(app) derives one deterministic OpenAPI document from the checked route table on web.app() (D-ROUTE-ONE1=A): stable operation identity and typed input, success, failure, auth and status projections; no internal or visual routes; schema and client are derived artifacts, and every execution adapter only marshals that shared model. Golden web/app_openapi on O0, O1 and O2. (was #3280 c45, #2852 c1)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6865 c4: endpoint contracts are their own stream",
+          "at": "2026-11-15T02:52:34.430Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 30,
+          "text": "(was #4272) [#4282] D-WEBAPP-SERVE1: jet dev serves a web.app entry. D-WEBRUN1: native jet run on web-targeted source stops with a registered error before lowering. (was #4275 c82)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev 26afb1a0e6 (GoalsB-1 sweep, gate-p62 jet, 2026-11-14): D-WEBRUN1: jet test Compiler --profile ui --filter web_run_default PASS (registered E-WEB-RUN refusal before lowering). D-WEBAPP-SERVE1: jet test Compiler --profile cases --filter web_app/image_bytes_match_between_jet_dev_and_jet_build PASS (spawns jet dev app.jet on a web.app entry and fetches its page and images).",
+          "at": "2026-11-14T12:49:59.575Z"
+        },
+        {
+          "n": 31,
+          "text": "The 2026-11-04 study (Docs/research/2026-11-04-jet-dev-vs-incumbents.md) is rerun on the built framework against Vite, Bun, Next.js, Deno, Astro, Rsbuild and Parcel; every gap it lists is closed or explained on a card, and the rerun is committed as a dated Docs/research report. Its timing cells belong to G11 (#2858). Proof: `git ls-files \"Docs/research/*jet-dev-vs-incumbents*\"` names the dated rerun report.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #2756 c10, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:00:53.450Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 32,
+          "text": "(was #2474 c1) The ratified typed form fluent validation chain, canonical submission lifecycle and all registration and lowering consumers are implemented, with goldens on O0, O1, O2 and web. (was #5201 c22)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6821 c4: forms are built on the kit standard views card",
+          "at": "2026-11-15T02:52:35.425Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 33,
+          "text": "(was #3239 c6) Examples/Network/Browser/BrowserLockedProvision matches its .out golden on O0, O1, O2 and web; each rebless is justified as correct new output.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 840067a056, gate-p64 jet, b53proofs 2026-11-14 (dev 99aa698189): jet test Compiler --profile golden --filter BrowserLockedProvision -> PASS 3/FAIL 0 (O0, O1, O2), plus cases --filter browser_lock/locked_provision_example_matches_its_golden_on_web -> PASS 1 (web); no rebless.",
+          "at": "2026-11-14T13:36:38.323Z"
+        },
+        {
+          "n": 34,
+          "text": "Route markers on struct methods, added to the app with one call (D-HTTP-ROUTE-EXPOSE1=A, D-ROUTE-ONE1=A): a jokes API with GET and POST routes serves identically on O0, O1 and O2, `web.openapi` renders both routes, and a bad path parameter is a compile error with a UI snapshot.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6865 c5: endpoint contracts are their own stream",
+          "at": "2026-11-15T02:52:36.320Z",
+          "closure": "obsolete",
+          "proof": {
+            "profile": "golden",
+            "filter": "Web/JokesApi"
+          }
+        },
+        {
+          "n": 35,
+          "text": "One app package serves web, desktop and phones (D-ONEAPP-MODEL1=A): one example app builds for web and Linux desktop from the same source, and both goldens pass.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6445 c17, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:00:57.261Z",
+          "closure": "duplicate",
+          "proof": {
+            "profile": "cases",
+            "filter": "web_app/one_source_web_and_linux"
+          }
+        },
+        {
+          "n": 36,
+          "text": "A screen calls a marked server method like a plain function (D-SERVER-FN1=A, in the D-WEBAPP-SHAPE1=A form of app.Remote<S> and #App.SignedIn): the call crosses to the server with typed arguments and comes back with a typed error.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6445 c18, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:01.264Z",
+          "closure": "duplicate",
+          "proof": {
+            "profile": "cases",
+            "filter": "web_app/remote_call_typed_errors"
+          }
+        },
+        {
+          "n": 37,
+          "text": "Examples/features/ui/reactive_observable.jet shows same-value notification, derived order and disposal with no version-cap loss. Proof: `jet test Compiler --profile golden --filter ui/reactive_observable` on O0, O1, O2 and web.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6821 c7, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:06.131Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 38,
+          "text": "Examples/features/ui/async_command.jet shows a disabled command, duplicate activation, cancellation, a domain error surfacing as Failed, and teardown, using existing task ownership. Proof: `jet test Compiler --profile golden --filter ui/async_command` on O0, O1, O2 and web.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 32897bf201 (GoalsB-5-16: Examples/Apps/UI/AsyncCommand, a Save command whose status is a core.reactive signal over task, join, cancel, TaskFailure and task.group). Batch compiler p148, 2026-11-15 00:05: jet test Compiler --profile golden --filter UI/AsyncCommand PASS 3 (O0/O1/O2); jet test tests/guards --filter example 9 passed. The web tier is c39 (task groups are E-WEB-UNSUPPORTED on web until #5201 c7).",
+          "at": "2026-11-15T05:06:48.347Z"
+        },
+        {
+          "n": 39,
+          "text": "Examples/Apps/UI/AsyncCommand proves the same output on web once task groups run there (#5201 c7): jet test Compiler --profile golden --filter UI/AsyncCommand includes the web tier and passes. Depends on #5201 c7; O0/O1/O2 are covered by c38.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6821 c8, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:09.082Z",
+          "closure": "duplicate"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "web-framework-parity",
+        "meta",
+        "needs-owner"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-04T00:55:19.476Z",
+      "updated": "2026-11-16T08:50:24.914Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 39,
+      "completedAt": "2026-11-16T05:55:14.267Z",
+      "questions": [],
+      "retiredAt": "2026-11-19T09:02:06.414Z"
     }
   ]
 }

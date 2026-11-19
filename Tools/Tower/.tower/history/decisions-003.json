@@ -68238,6 +68238,197 @@
       "outcome": "A",
       "ratifiedAt": "2026-11-12",
       "retiredAt": "2026-11-19T04:02:02.718Z"
+    },
+    {
+      "id": "D-WEB-NAME1",
+      "cardId": "c0vxf4u0",
+      "group": "web",
+      "title": "The name of Jet's web framework",
+      "situation": "Jet ships its own web framework: the built-in modules for routing, data loading, forms, tables, long lists and app state. It has no name of its own, so guides call it Jet's web library. Its sample app sits in a placeholder folder after dropping a borrowed JavaScript framework's name. The owner picks the name for docs, the website and that sample; code does not change, and we recommend Contrail.",
+      "gist": "What should Jet's web framework be called?",
+      "lesson": "A framework name is what people search for, write in job posts and say in talks. It should be short, easy to say, tied to Jet, and not already used by another web framework, so searches and packages are not confused.",
+      "explainer": "Under every option the code stays the same: `use core.web as web` and `web.app(...)`. The name changes the docs title, the website section, the reference app folder and the noun used in guides. The rename lands in one cutover across the repository.",
+      "story": "Ana tells a colleague she built her shop in Jet. The colleague asks which framework. With a name she answers in one word that a search finds; with \"Jet Web\" she must add that it is the one built into Jet.",
+      "inWild": "First-party: Microsoft names its C# web framework ASP.NET Core. Community: Rust has Axum and Leptos, Elixir has Phoenix, Ruby has Rails. Go ships net/http unnamed; Gin, Echo and Fiber grew to add routing it lacked.",
+      "detail": "Collision checks ran on 2026-11-01 and 2026-11-03 against npm names and search, crates.io, PyPI, RubyGems, Hex, GitHub repository names and trademark notices.\n\nContrail: Juniper's Contrail® networking software (contrail-controller, 436 stars, plus the contrail-web-core and contrail-web-controller UI repos). VibeIQ's Contrail Platform owns the @contrail npm scope (@contrail/sdk, about 17,000 downloads a month).\n\nflo-bit/contrail (57 stars, npm @atmo-dev/contrail) is a pre-alpha Bluesky backend with HTTP endpoints. Also: the Contrails Bluesky feed tool (80 stars), a backtracking crate, an OpenContrail Ruby gem, a PyPI price tracker and an empty npm placeholder. No general web framework uses it. The GitHub user name contrail and contrail.dev and contrail.io are taken.\n\nJetstream: Laravel Jetstream (about 4,000 stars) is a web starter kit. NATS JetStream (built into nats-server, about 21,000 stars), Bluesky's Jetstream service, Google's JetStream inference engine, a Rust RPC crate and Uber's npm sync framework also use it.\n\nDropped: Slipstream, best known as the NAT Slipstreaming attack (samyk/slipstream, about 2,000 stars) and DNS covert-channel tunnels. Taxiway is free on every registry checked, but it fits any plane and reads as cabs.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Contrail",
+          "detail": "The trail a jet leaves across the sky. Tied to Jet, one word, and no general web framework uses it. Reference app: Examples/features/web/contrail.",
+          "technical": "Name only; module paths stay core.web.*. Existing uses: Juniper's Contrail® networking software and its web UI, VibeIQ's @contrail npm packages, a small Bluesky backend, a Bluesky feed tool and a Rust crate.",
+          "code": "// Contrail, the Jet web framework\nuse core.web as web\n\nfn run() {\n    web.app().routes(\"routes\").serve()\n}"
+        },
+        {
+          "key": "B",
+          "name": "Jetstream",
+          "detail": "The most obvious Jet pun. Reference app: Examples/features/web/jetstream.",
+          "technical": "Name only; module paths stay core.web.*. Laravel Jetstream is already a popular web starter kit, and five other projects use the name.",
+          "code": "// Jetstream, the Jet web framework\nuse core.web as web\n\nfn run() {\n    web.app().routes(\"routes\").serve()\n}"
+        },
+        {
+          "key": "C",
+          "name": "No name: \"Jet Web\"",
+          "detail": "The framework is simply Jet's web library, named by its module. Reference app: Examples/features/web/jet_web.",
+          "technical": "Nothing new to learn; the name matches core.web. Searches for \"Jet web\" land on Oracle JET, a JavaScript toolkit with \"JET Web Components\" and about 27,000 npm downloads a month. They also find Jetzig, a Zig web framework with 1,500 stars, and npm jetweb.",
+          "code": "// Jet Web, the core.web library\nuse core.web as web\n\nfn run() {\n    web.app().routes(\"routes\").serve()\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "C#",
+          "note": "Microsoft ships its own web framework under its own name, ASP.NET Core.",
+          "code": "dotnet new webapp -o shop"
+        },
+        {
+          "lang": "Go",
+          "note": "net/http has no name; Gin, Echo and Fiber grew to add routing it lacked.",
+          "code": "http.HandleFunc(\"/\", home)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Contrail is tied to Jet, is one word, and no general web framework uses it; its other uses are networking software and small Bluesky tools.",
+        "gains": [
+          "A searchable name.",
+          "No general web framework uses it."
+        ],
+        "losses": [
+          {
+            "loss": "Juniper's Contrail networking software shares the name and is marked as a registered trademark.",
+            "mitigation": "It is a different field; docs and the website always say \"Jet Contrail\" so the two stay distinct."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Laravel Jetstream is already a web starter kit, and five other projects use the name."
+          },
+          {
+            "key": "C",
+            "reason": "\"Jet web\" searches land on Oracle JET and Jetzig, so people cannot find the framework by name."
+          }
+        ],
+        "tradeoff": "One new word to learn, shared with Juniper's networking software, for a name people can search for."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: BallotReview-WebName. Registry, GitHub and trademark checks found that Juniper's registered Contrail networking software, VibeIQ's @contrail npm packages and a Bluesky backend share the name; Contrail stays recommended once those are disclosed."
+      },
+      "checkInstructions": "Under the winning option, rename the reference app folder, package name, case files and manifest app id in one cutover. Name the framework in Docs/spec and the website. Module paths do not change. Check USPTO serial 86294657 by hand before the website launches. Card #6552 criterion 3 closes on that cutover.",
+      "surface": {
+        "gist": "What should Jet's web framework be called?",
+        "lesson": "A framework name is what people search for and say in talks. It should be short, tied to Jet, and not already used by another web framework.",
+        "trio": {
+          "current": {
+            "note": "Today: no name; the reference app sits at a placeholder path.",
+            "code": "// Examples/features/web/jet_web_framework/run.jet\nuse core.web as web"
+          },
+          "wild": {
+            "lang": "C#",
+            "note": "Microsoft ships its own web framework under its own name, ASP.NET Core.",
+            "code": "dotnet new webapp -o shop"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Contrail",
+            "gist": "The trail a jet leaves; no general web framework uses it.",
+            "gains": [
+              "Tied to Jet.",
+              "No general web framework uses it."
+            ],
+            "losses": [
+              "One more name to learn.",
+              "Juniper's networking software shares the name."
+            ],
+            "proposed": {
+              "code": "// Contrail, the Jet web framework\nuse core.web as web"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Jetstream",
+            "gist": "The obvious Jet pun.",
+            "gains": [
+              "Instantly tied to Jet."
+            ],
+            "losses": [
+              "Laravel Jetstream is a web kit.",
+              "Searches mix results."
+            ],
+            "proposed": {
+              "code": "// Jetstream, the Jet web framework\nuse core.web as web"
+            }
+          },
+          {
+            "key": "C",
+            "name": "No name: \"Jet Web\"",
+            "gist": "Just Jet's web library.",
+            "gains": [
+              "Nothing new to learn.",
+              "Matches the import, core.web."
+            ],
+            "losses": [
+              "\"Jet web\" searches find Oracle JET and Jetzig."
+            ],
+            "proposed": {
+              "code": "// Jet Web, the core.web library\nuse core.web as web"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Contrail is tied to Jet, is one word, and no general web framework uses it.",
+          "gains": [
+            "A searchable name.",
+            "No general web framework uses it."
+          ],
+          "losses": [
+            {
+              "loss": "Juniper networking software shares the trademarked name.",
+              "mitigation": "Different field; docs always say \"Jet Contrail\"."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Laravel Jetstream is already a web starter kit, and five other projects use the name."
+            },
+            {
+              "key": "C",
+              "reason": "\"Jet web\" searches land on Oracle JET and Jetzig, so people cannot find the framework by name."
+            }
+          ],
+          "tradeoff": "One new word to learn, shared with Juniper's networking software, for a name people can search for."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Search results mixing the framework with other projects.",
+          "attempts": [
+            "Checked npm, crates.io, PyPI, RubyGems, Hex, GitHub and trademark notices for every option."
+          ],
+          "result": "Reduced for A: no general web framework uses Contrail; Juniper's networking UI and two small Bluesky tools share the word."
+        },
+        {
+          "loss": "Renaming later would break links and paths.",
+          "attempts": [
+            "Module paths stay core.web.* under every option, so code never changes."
+          ],
+          "result": "Removed: a rename touches docs, the reference app folder, its package name, case file and manifest entry, never user code."
+        }
+      ],
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-04T02:37:58.908Z",
+      "outcome": "C",
+      "ratifiedAt": "2026-11-04",
+      "retiredAt": "2026-11-19T09:02:06.414Z"
     }
   ]
 }
