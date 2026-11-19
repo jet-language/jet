@@ -5308,10 +5308,12 @@ perf_flight_rotate: fn(state: I64, text: I64) {
 // file: 0 in its low bits, then the line's sampled address (0 for a
 // baseline), the speedup in thousandths, the wall time, the delay inserted
 // meanwhile, the run time and the runqueue wait the program's threads took
-// meanwhile (perf_causal_schedstat), then PERF_CAUSAL_POINTS words by slot
-// for each of: each progress point's passes after its first one in the
-// experiment, the wall time from that first pass to its last and the delay
-// inserted between them. A point's rate is taken between its own passes:
+// meanwhile, the highest and the lowest clock, in kHz, of the CPUs those
+// of them that ran last ran on (perf_causal_schedstat), then
+// PERF_CAUSAL_POINTS words by slot for each of: each progress point's
+// passes after its first one in the experiment, the wall time from that
+// first pass to its last and the delay inserted between them. A point's
+// rate is taken between its own passes:
 // the experiment's target is the line of the sample that ends the one
 // before, and which line runs depends on how far into a pass the program
 // is, so an experiment's start falls at a different distance from the next
@@ -5374,7 +5376,7 @@ PERF_CAUSAL_POINT_BYTES: I64{48}
 
 PERF_CAUSAL_RECORD: I64{2128}
 
-PERF_CAUSAL_THREAD_AT: I64{2960}
+PERF_CAUSAL_THREAD_AT: I64{2976}
 
 PERF_CAUSAL_THREAD_BYTES: I64{224}
 
@@ -5388,7 +5390,7 @@ PERF_CAUSAL_THREAD_WAIT: I64{216}
 
 // Past the last thread's entry: PERF_CAUSAL_THREAD_AT + PERF_CAUSAL_THREADS *
 // PERF_CAUSAL_THREAD_BYTES. It holds SCHEDULER_STAT_BYTES.
-PERF_CAUSAL_SCRATCH: I64{117648}
+PERF_CAUSAL_SCRATCH: I64{117664}
 
 PERF_CAUSAL_BYTES: I64{118784}
 
@@ -5724,12 +5726,19 @@ perf_causal_in_target: fn(state: I64, pc: I64, count: I64) -> Bool {
 // kernel without schedstat counts nothing. The wait is the time
 // a thread was ready to run but had no CPU: on a machine whose CPUs other
 // work holds, or under a cgroup's cap on the program's share, whose
-// throttled time the kernel counts as wait too. JetCLI CLI/Perf/Causal.jet
-// withholds the predictions of a run whose threads waited too long.
+// throttled time the kernel counts as wait too. Then the highest and the
+// lowest clock, in kHz, of the CPUs the threads that ran meanwhile last ran
+// on (perf_causal_khz); 0 for both when none could be read. A CPU that
+// idled clocks down, and a task begun on it runs slower than its siblings
+// until it clocks up, which no line of the program causes. JetCLI
+// CLI/Perf/Causal.jet withholds the predictions of a run whose threads
+// waited too long, and flags those of one whose CPUs clocked down.
 perf_causal_schedstat: fn(state: I64, out: I64) {
     buffer: wrapping(state + PERF_CAUSAL_SCRATCH)
     run := I64{0}
     wait := I64{0}
+    high := I64{0}
+    low := I64{0}
     index := I64{0}
     loop index < PERF_CAUSAL_THREADS {
         entry: wrapping(wrapping(state + PERF_CAUSAL_THREAD_AT) + wrapping(index * PERF_CAUSAL_THREAD_BYTES))
@@ -5742,15 +5751,53 @@ perf_causal_schedstat: fn(state: I64, out: I64) {
         waited: perf_causal_field(buffer, got, I64{1})
         last_run: wrapping(entry + PERF_CAUSAL_THREAD_RUN)
         last_wait: wrapping(entry + PERF_CAUSAL_THREAD_WAIT)
-        if (rt_text_word(last_run) != I64{0} && ran >= rt_text_word(last_run) && waited >= rt_text_word(last_wait)) {
+        counted: rt_text_word(last_run) != I64{0} && ran >= rt_text_word(last_run) && waited >= rt_text_word(last_wait)
+        // Only the CPUs of threads that ran meanwhile: an idle thread's
+        // CPU clocks down with no work of the program's on it.
+        moved: counted && ran > rt_text_word(last_run)
+        if (counted) {
             run = wrapping(run + wrapping(ran - rt_text_word(last_run)))
             wait = wrapping(wait + wrapping(waited - rt_text_word(last_wait)))
         }
         rt_text_store(last_run, ran)
         rt_text_store(last_wait, waited)
+        if (moved) {
+            khz: perf_causal_khz(tid, buffer)
+            if (khz > high) { high = khz }
+            if (khz > I64{0} && (low == I64{0} || khz < low)) { low = khz }
+        }
     }
     rt_text_store(out, run)
     rt_text_store(wrapping(out + I64{8}), wait)
+    rt_text_store(wrapping(out + I64{16}), high)
+    rt_text_store(wrapping(out + I64{24}), low)
+}
+
+// The clock, in kHz, of the CPU thread `tid` last ran on: field 39 of its
+// /proc/self/task/<tid>/stat, then that CPU's
+// /sys/devices/system/cpu/cpu<N>/cpufreq/scaling_cur_freq; 0 when either
+// cannot be read, as on a kernel without cpufreq. `buffer` holds
+// SCHEDULER_STAT_BYTES.
+perf_causal_khz: fn(tid: I64, buffer: I64) -> I64 {
+    got: scheduler_task_file(tid, rt_static_text("stat"), buffer)
+    // The fields after the name's last `)` are numbers but the state, the
+    // third, which follows it and a space; the CPU is the 37th after that.
+    paren := wrapping(got - I64{1})
+    loop paren >= (I64{0}) && rt_text_byte(wrapping(buffer + paren)) != (I64{41}) {
+        paren = wrapping(paren - I64{1})
+    }
+    if (paren < I64{0} || wrapping(paren + I64{2}) >= got) { return I64{0} }
+    cpu: perf_causal_field(wrapping(buffer + paren + I64{2}), wrapping(got - paren - I64{2}), I64{36})
+    prefix: rt_static_text("/sys/devices/system/cpu/cpu")
+    at := rt_text_len(prefix)
+    rt_text_bytes_copy(buffer, rt_text_data(prefix), at)
+    at = wrapping(at + scheduler_put_number(wrapping(buffer + at), cpu))
+    name: rt_static_text("/cpufreq/scaling_cur_freq")
+    rt_text_bytes_copy(wrapping(buffer + at), rt_text_data(name), rt_text_len(name))
+    rt_text_put(wrapping(buffer + at + rt_text_len(name)), I64{0})
+    read: scheduler_read_path(buffer)
+    if (read <= I64{0}) { return I64{0} }
+    perf_causal_field(buffer, read, I64{0})
 }
 
 // The decimal number that field `field` (from 0) of the `length` bytes at
@@ -5776,7 +5823,7 @@ perf_causal_field: fn(buffer: I64, length: I64, field: I64) -> I64 {
 // next, a baseline or the line holding `pc`.
 perf_causal_next: fn(state: I64, pc: I64, now: I64) {
     record: wrapping(state + PERF_CAUSAL_RECORD)
-    words: wrapping(I64{7} + wrapping(PERF_CAUSAL_POINTS * I64{3}))
+    words: wrapping(I64{9} + wrapping(PERF_CAUSAL_POINTS * I64{3}))
     column: wrapping(PERF_CAUSAL_POINTS * I64{8})
     delay: sync_load(wrapping(state + PERF_CAUSAL_DELAY))
     rt_text_store(record, (PERF_SAMPLES_CAUSAL << PERF_SAMPLES_KIND_BITS) | (words << PERF_SAMPLES_ADDRESS_BITS))
@@ -5789,7 +5836,7 @@ perf_causal_next: fn(state: I64, pc: I64, now: I64) {
     loop index < PERF_CAUSAL_POINTS {
         point: wrapping(wrapping(state + PERF_CAUSAL_POINT_AT) + wrapping(index * PERF_CAUSAL_POINT_BYTES))
         first: sync_load(wrapping(point + I64{8}))
-        out: wrapping(wrapping(record + I64{56}) + wrapping(index * I64{8}))
+        out: wrapping(wrapping(record + I64{72}) + wrapping(index * I64{8}))
         rt_text_store(out, if (first == I64{0}) -> I64{0} else -> sync_load(wrapping(point + I64{40})))
         rt_text_store(wrapping(out + column), if (first == I64{0}) -> I64{0} else -> wrapping(sync_load(wrapping(point + I64{16})) - first))
         rt_text_store(wrapping(wrapping(out + column) + column), if (first == I64{0}) -> I64{0} else -> wrapping(sync_load(wrapping(point + I64{32})) - sync_load(wrapping(point + I64{24}))))

@@ -270,9 +270,11 @@ its name, each finished task as `task`, each answered HTTP request as
 `request`, and each `core.perf.progress(name)`. Outside the lens these record nothing. At the
 end of each experiment the runtime writes its line, its wall time, the
 delay it inserted, the run time and the runqueue wait its threads took
-(from each one's `/proc/self/task/<tid>/schedstat`) and, for each point,
-its passes after its first one, the wall time from that first pass to its
-last and the delay inserted between them to the samples file. An
+(from each one's `/proc/self/task/<tid>/schedstat`), the highest and the
+lowest clock of the CPUs that the threads which ran last ran on (field 39
+of each one's `stat`, then that CPU's `cpufreq/scaling_cur_freq`) and, for
+each point, its passes after its first one, the wall time from that first
+pass to its last and the delay inserted between them to the samples file. An
 experiment whose line the checked source does not name counts neither as
 a baseline nor toward any line. The trace
 keeps the predictions in its `causal` receipt section (type
@@ -293,8 +295,15 @@ they waited for a CPU more than 20% of the time they ran, the gains are
 withheld: under that contention a line made virtually faster frees no CPU
 for the rest, as a really faster one would, so every gain would read low.
 The run is refused with the wait, each point keeps its name with no lines,
-and the reason asks for a run where each thread has a CPU. `jet perf
-view` prints, under `causal`, each point as `` `round`: if this line were
+and the reason asks for a run where each thread has a CPU. The section
+also keeps the means over the experiments of the highest and the lowest
+clock (`clock_high_mhz`, `clock_low_mhz`; 0 where the kernel has no
+cpufreq). When the lowest falls more than 10% below the highest, the gains
+are kept but flagged (`clock_flag`, `gains may under-read: idle CPUs
+clocked down …`): a CPU that idled clocks down, and a task begun on it
+runs slower than its siblings until it clocks up, whichever line the
+experiment speeds up. `jet perf view` prints the flag as `flagged: …`
+before the points, and prints, under `causal`, each point as `` `round`: if this line were
 30% faster, each pass would come sooner by``, then its lines best first
 (`  main.jet:23 narrow  +14.2% (9.8% to 18.0%)`). Experiments are
 statistical: a short run, or a line the sampler rarely lands in, gets a

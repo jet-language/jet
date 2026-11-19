@@ -1,25 +1,29 @@
 // Reads the causal section of the trace the last argument names and
 // before.txt and after.txt, the speedups main.jet measured by hand for the
 // narrow line and for the wide one just before the profiled run and just
-// after it. It accepts one of three outcomes. The lens refused the run
+// after it. It accepts one of four outcomes. The lens refused the run
 // because its threads waited too long for a CPU, naming the wait its
 // receipt keeps and giving no gain. Or a hand measurement's threads waited
 // as long, so it measured a contended machine, which is no truth for a run
-// the lens found uncontended. Or, for the `round` progress point, each of
-// the two lines the lens ranked has a predicted interval that meets the
-// line's measured one, and the lens ranked one of them at least. A line's
-// measured interval spans both measurements' 90% intervals of their median,
-// since the machine's CPUs, and with them the line's gain, drift from the
-// one measurement to the other, and the profiled run lies between them.
-// A ranked line's interval is at most WIDEST wide, the lens's own bound for
-// ranking a line, so no interval passes by being vague; and a measured
-// speedup above BOUND, which no line 30% faster can give, is refused as a
-// measurement gone wrong, so none passes by being wild.
+// the lens found uncontended. Or the CPUs that ran the rounds clocked down
+// more than the lens trusts, in the profiled run, whose gains the lens then
+// flags with the drop its receipt keeps, or in a hand measurement, which
+// then measured slower CPUs than the run had. Or, for the `round` progress
+// point, each of the two lines the lens ranked has a predicted interval
+// that meets the line's measured one, and the lens ranked one of them at
+// least. A line's measured interval spans both measurements' 90% intervals
+// of their median, since the machine's CPUs, and with them the line's gain,
+// drift from the one measurement to the other, and the profiled run lies
+// between them. A ranked line's interval is at most WIDEST wide, the lens's
+// own bound for ranking a line, so no interval passes by being vague; and a
+// measured speedup above BOUND, which no line 30% faster can give, is
+// refused as a measurement gone wrong, so none passes by being wild.
 //
 // The argument before the trace names the tier. The outcome's own line,
 // with its numbers, goes to stderr and is appended to the file
 // JET_CAUSAL_CASE_PATHS names when it is set, so a run of the case tells
-// whether each tier compared the lens with its truth or refused.
+// whether each tier compared the lens with its truth, or which of
+// contention and clocks kept it from comparing.
 use {
     files: core.files
     process: core.process
@@ -35,6 +39,11 @@ WIDEST: 300
 // ranks lines.
 WAIT_MOST: 200
 
+// JetCLI CLI/Perf/Causal.jet JET_CLI_PERF_CAUSAL_CLOCK_MOST, in thousandths
+// of the highest clock: the most the lowest clock of the CPUs that ran the
+// program's threads may fall below it before the lens flags its gains.
+CLOCK_MOST: 100
+
 // The most a line 30% faster can make a round sooner, in tenths of a
 // percent: all of the round's time on the line, every part of it 30% less.
 // main.jet's measured gain above it is no speedup of the line but a
@@ -42,22 +51,29 @@ WAIT_MOST: 200
 BOUND: 300
 
 // One hand measurement: each line's median gain with its 90% interval, in
-// tenths of a percent, and the runqueue wait its threads took, in
-// thousandths of their run time.
+// tenths of a percent, the runqueue wait its threads took, in thousandths
+// of their run time, and the means of the highest and the lowest clock of
+// their CPUs, in MHz.
 Measured: struct {
     narrow: [Int],
     wide: [Int],
     wait: Int,
+    high_mhz: Int,
+    low_mhz: Int,
 }
 
 // The measurement main.jet wrote to `path`.
 read_measured: fn(path: String) -> Measured {
     words: (files.read(path) ?? panic("cannot read {path}")).trim().split(" ").to_list()
-    if words.len() != 7 -> panic("{path} holds no seven numbers")
+    if words.len() != 9 -> panic("{path} holds no nine numbers")
     numbers := [Int]{}
     loop word in words -> numbers.push(Int.parse(word) ?? panic("{path} holds `{word}`, no number"))
-    Measured{narrow: [Int]{numbers[0], numbers[1], numbers[2]}, wide: [Int]{numbers[3], numbers[4], numbers[5]}, wait: numbers[6]}
+    Measured{narrow: [Int]{numbers[0], numbers[1], numbers[2]}, wide: [Int]{numbers[3], numbers[4], numbers[5]}, wait: numbers[6], high_mhz: numbers[7], low_mhz: numbers[8]}
 }
+
+// How far, in thousandths of `high`, `low` falls below it; 0 when no clock
+// was read.
+clock_drop: fn(high: Int, low: Int) -> Int { if high > 0 -> (high - low) * 1000 /% high else -> 0 }
 
 // Refuse the measured median `gain` of the `function` line when the line
 // cannot have given it (BOUND).
@@ -123,6 +139,29 @@ check_contended: fn(trace: String) -> Bool {
     true
 }
 
+// Whether the lens flagged its gains because the CPUs that ran the
+// program's threads clocked down; when it did, its flag must name the drop
+// the receipt keeps, and that drop must be above CLOCK_MOST. When it did
+// not, the drop the receipt keeps must be within it.
+check_clocked: fn(trace: String) -> Bool {
+    high: number_after(trace, "\"clock_high_mhz\":") ?? panic("no clock_high_mhz in the causal section")
+    low: number_after(trace, "\"clock_low_mhz\":") ?? panic("no clock_low_mhz in the causal section")
+    drop: clock_drop(high, low)
+    if !trace.contains("\"clock_flag\":\"gains may under-read: ") {
+        if drop > CLOCK_MOST {
+            panic("the CPUs clocked down from {high} MHz to {low} MHz, but the lens did not flag its gains")
+        }
+        return false
+    }
+    if !trace.contains(" clocked down ") || !trace.contains(" ({high} MHz to {low} MHz) ") {
+        panic("the clock flag does not name the {high} MHz to {low} MHz the receipt keeps")
+    }
+    if drop <= CLOCK_MOST {
+        panic("the lens flagged its gains for clocks of {high} MHz to {low} MHz, within the {CLOCK_MOST} thousandths it trusts")
+    }
+    true
+}
+
 run: fn() {
     args: process.args()
     if args.len() < 2 -> panic("usage: check.jet -- TIER TRACE")
@@ -131,7 +170,7 @@ run: fn() {
     if check_contended(trace) {
         wait: number_after(trace, "\"cpu_wait_ms\":") ?? 0
         ran: number_after(trace, "\"cpu_run_ms\":") ?? 0
-        record_path(tier, "refused, the profiled run's threads waited {wait} ms for a CPU over {ran} ms of run")
+        record_path(tier, "contention, the lens refused: the profiled run's threads waited {wait} ms for a CPU over {ran} ms of run")
         print("the lens withheld its gains under CPU contention, naming the wait")
         return
     }
@@ -139,8 +178,18 @@ run: fn() {
     first: read_measured("before.txt")
     last: read_measured("after.txt")
     if first.wait > WAIT_MOST || last.wait > WAIT_MOST {
-        record_path(tier, "contended truth, the measurements' threads waited {first.wait} and {last.wait} thousandths of their run for a CPU")
+        record_path(tier, "contention, no truth: the measurements' threads waited {first.wait} and {last.wait} thousandths of their run for a CPU")
         print("a hand measurement's threads waited for a CPU longer than the lens ranks under, so it measured no truth to check the lens by")
+        return
+    }
+    flagged: check_clocked(trace)
+    first_drop: clock_drop(first.high_mhz, first.low_mhz)
+    last_drop: clock_drop(last.high_mhz, last.low_mhz)
+    if flagged || first_drop > CLOCK_MOST || last_drop > CLOCK_MOST {
+        high: number_after(trace, "\"clock_high_mhz\":") ?? 0
+        low: number_after(trace, "\"clock_low_mhz\":") ?? 0
+        record_path(tier, "clock, {if flagged -> "the lens flagged its gains" else -> "the lens did not flag"}: the profiled run's CPUs clocked {high} to {low} MHz, the measurements' {first.high_mhz} to {first.low_mhz} and {last.high_mhz} to {last.low_mhz}")
+        print("the CPUs that ran the rounds clocked down more than the lens trusts, so its gains were flagged or the hand measurement had slower CPUs than the run")
         return
     }
     check_bound("narrow", first.narrow[1])
@@ -157,6 +206,6 @@ run: fn() {
     if narrow == None && wide == None {
         panic("the lens ranked neither line sped up by hand for `round`: {lines}")
     }
-    record_path(tier, "compared, {narrow ?? "narrow unranked"}; {wide ?? "wide unranked"}; waits {first.wait} and {last.wait} thousandths")
+    record_path(tier, "compared, {narrow ?? "narrow unranked"}; {wide ?? "wide unranked"}; waits {first.wait} and {last.wait} thousandths; clock drops {first_drop} and {last_drop} thousandths")
     print("each line sped up by hand that the lens ranked gained within its predicted interval")
 }

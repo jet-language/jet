@@ -4,20 +4,23 @@
 # times the program by hand just before the profiled run and just after it,
 # a plain round beside one with its narrow line's work cut to seven-tenths
 # and one with its wide line's, so the machine's drifting load falls alike
-# on each pair. On every tier one of three outcomes passes. Either each of
+# on each pair. On every tier one of four outcomes passes. Either each of
 # the two lines the lens ranked for the `round` zone has a predicted
 # interval that meets the speedup measured around the run, and it ranked one
 # at least; or the program's threads waited for a CPU longer than the lens
 # trusts, and it withheld every gain, naming the wait; or the threads waited
-# that long while measured by hand, so no truth was measured. A measured
-# speedup above the 30% a line 30% faster can give is an error, not a pass.
+# that long while measured by hand, so no truth was measured; or the CPUs
+# that ran the rounds clocked down more than the lens trusts, and it flagged
+# its gains with the drop, or the hand measurement had slower CPUs than the
+# run. A measured speedup above the 30% a line 30% faster can give is an
+# error, not a pass.
 # Which line gains more depends on the CPUs the run gets, so neither is
 # required to rank first. Each finished task is a progress point of its own.
 # A run too short to rank is refused with the reason, and the lens refuses
 # the company of lenses whose readings its delays would skew.
 # With JET_CAUSAL_CASE_PATHS naming a file, each tier's check appends the
-# outcome it took to it, with its numbers: compared, refused for the
-# profiled run's wait, or contended truth.
+# outcome it took to it, with its numbers: compared, contention (the
+# profiled run's wait, or the hand measurement's) or clock.
 requires: os-name:linux
 requires: arch:x86_64
 fixture: CausalProfilePredictsSpeedup.fixture
@@ -35,7 +38,7 @@ exit: 0
 stdout: = "measured\n"
 step: jet run -A check.jet -- o0 causal.jettrace
 exit: 0
-stdout: one-of CausalProfilePredictsSpeedup.fixture/predicted.out CausalProfilePredictsSpeedup.fixture/withheld.out CausalProfilePredictsSpeedup.fixture/contended.out # the hand-sped program lands in the interval of each ranked line, or the lens withheld its gains under contention, or the hand measurement was contended
+stdout: one-of CausalProfilePredictsSpeedup.fixture/predicted.out CausalProfilePredictsSpeedup.fixture/withheld.out CausalProfilePredictsSpeedup.fixture/contended.out CausalProfilePredictsSpeedup.fixture/clocked.out # the hand-sped program lands in the interval of each ranked line, or the lens withheld its gains under contention, or the hand measurement was contended, or the CPUs clocked down
 step o1: jet run -A -O1 main.jet -- measure before.txt
 exit: 0
 stdout: = "measured\n"
@@ -47,7 +50,7 @@ exit: 0
 stdout: = "measured\n"
 step: jet run -A check.jet -- o1 causal.jettrace
 exit: 0
-stdout: one-of CausalProfilePredictsSpeedup.fixture/predicted.out CausalProfilePredictsSpeedup.fixture/withheld.out CausalProfilePredictsSpeedup.fixture/contended.out # on every tier
+stdout: one-of CausalProfilePredictsSpeedup.fixture/predicted.out CausalProfilePredictsSpeedup.fixture/withheld.out CausalProfilePredictsSpeedup.fixture/contended.out CausalProfilePredictsSpeedup.fixture/clocked.out # on every tier
 step o2: jet run -A -O2 main.jet -- measure before.txt
 exit: 0
 stdout: = "measured\n"
@@ -59,10 +62,11 @@ exit: 0
 stdout: = "measured\n"
 step: jet run -A check.jet -- o2 causal.jettrace
 exit: 0
-stdout: one-of CausalProfilePredictsSpeedup.fixture/predicted.out CausalProfilePredictsSpeedup.fixture/withheld.out CausalProfilePredictsSpeedup.fixture/contended.out # on every tier
+stdout: one-of CausalProfilePredictsSpeedup.fixture/predicted.out CausalProfilePredictsSpeedup.fixture/withheld.out CausalProfilePredictsSpeedup.fixture/contended.out CausalProfilePredictsSpeedup.fixture/clocked.out # on every tier
 json: file causal.jettrace doc $.content.receipt_sections[?name="causal"][0].value.points[?name="round"] #= 1 # the zone is a progress point
 json: file causal.jettrace doc $.content.receipt_sections[?name="causal"][0].value.points[?name="task"] #= 1 # finished tasks are a point ranked apart
 json: file causal.jettrace doc $.content.receipt_sections[?name="causal"][0].value.cpu_wait_ms >= 0 # the receipt keeps the threads' wait for a CPU
+json: file causal.jettrace doc $.content.receipt_sections[?name="causal"][0].value.clock_high_mhz >= 0 # and the clocks of the CPUs they ran on
 step: jet perf view causal.jettrace
 exit: 0
 stdout: ~ "causal\n  " # the view gives the lens's ranking or its refusal

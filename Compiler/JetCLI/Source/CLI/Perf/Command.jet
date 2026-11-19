@@ -284,7 +284,7 @@ jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String]
 // The causal lens's predictions (Causal.jet): for each progress point, the
 // lines ranked by how much sooner its passes would come were the line 30%
 // faster, each with its 90% interval, then the lines it could not rank and
-// why; or why the run was refused.
+// why; or why the run was refused. A flag on the gains comes first.
 jet_cli_perf_causal_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     items: jet_cli_perf_rows(trace, "receipt_sections") ?? return [String]{}
     lines := [String]{}
@@ -294,6 +294,9 @@ jet_cli_perf_causal_lines: fn(trace: CanonicalJSON) -> [String] Never! {
         if jet_cli_perf_member_text(section.value, "refused") == .Val(reason) {
             lines.push("  refused: {reason}")
             next
+        }
+        if jet_cli_perf_member_text(section.value, "clock_flag") == .Val(flag) {
+            lines.push("  flagged: {flag}")
         }
         path: jet_cli_perf_member_text(section.value, "path") ?? ""
         speedup: jet_cli_perf_member_number(section.value, "speedup_percent") ?? 30
