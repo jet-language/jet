@@ -232,7 +232,7 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
             1000,
         },
     )
-    sampled: jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words)
+    sampled: jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words, 0)
     assert_eq(sampled.total, U64{3})
     assert_eq(sampled.outside, U64{1})
     assert_eq(sampled.helpers, U64{1})
@@ -280,7 +280,7 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     )
     allocs: [Int:Int]{12300: 77}
     names: [Int:String]{77: "[I64]"}
-    sampled: jet_cli_perf_samples_count(table, [X64ImageFunction]{}, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, allocs, names, words)
+    sampled: jet_cli_perf_samples_count(table, [X64ImageFunction]{}, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, allocs, names, words, 0)
     assert_eq(sampled.heaps.len(), 1)
     heap: sampled.heaps[0]
     assert_eq(heap.name, "exit")
@@ -387,7 +387,7 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
             4112,
         },
     )
-    sampled: jet_cli_perf_samples_count(table, [X64ImageFunction]{}, inlines, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words)
+    sampled: jet_cli_perf_samples_count(table, [X64ImageFunction]{}, inlines, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words, 0)
     assert_eq(sampled.total, U64{3})
     text := ""
     loop _ in 0..<16 -> text = "{text}line\n"
