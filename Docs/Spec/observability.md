@@ -743,10 +743,16 @@ return address), a call the compiler made for a node (a lambda that a
 lowered `map` calls) included, so the expression is checked just before that
 node; `bt` shows the frame at that line, and the adapter's `stackTrace` at
 that line and column. A row names where the node starts, so two calls of one
-chain that start together share a row. The program is
-compiled again with that function, which runs in a fork of the stopped
-program, placed as `fix` places code, with the locals' bytes read from the
-frame; the program itself neither runs nor changes. A value whose type has a
+chain that start together share a row. The program is compiled again at
+the optimization level of its build, which the image's debug information
+names (`Jet native backend (O2)`), so the code around the expression is the
+code the program runs, with that function, which runs in a fork of the
+stopped program, placed as `fix` places code, with the locals' bytes read
+from the frame; the program itself neither runs nor changes. `fix` compiles
+at that level too. An inlined frame is evaluated in as `bt` shows it: the
+expression is checked in the inlined function at its line, the frame it was
+inlined into at the call, and the locals are the frame's own; code inlined
+from another file is refused, since its lines are not that file's. A value whose type has a
 `debug_view` shows as `locals` shows it, the view run in that same fork. A
 compiled expression is kept per line, column and text, so a condition compiles once
 and runs in a fork at each hit. The fork runs the program's own runtime, so
@@ -755,9 +761,8 @@ takes it fails at the 2 s budget), and a function value runs the image's
 code. An expression that calls a function that can fail shows its result as
 `locals` shows a fallible result, `parse(s) = Ok(3)` or `Err(ParseError.Empty)`,
 so a condition that can fail is refused, not a Bool. An expression reads at
-most 5 locals, and an inlined frame is not evaluated in. A local's own name
-is no expression: `print total` shows the local as `locals` does, in an
-inlined frame and in a dump, and a dump runs no code.
+most 5 locals. A local's own name is no expression: `print total` shows the
+local as `locals` does, in a dump too, and a dump runs no code.
 
 A watch on a place in memory takes the CPU's debug registers (at most 4,
 each an aligned 1, 2, 4 or 8 bytes), so the program runs at full speed

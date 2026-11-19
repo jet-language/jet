@@ -1,0 +1,16 @@
+use process: core.process
+
+// The sum of the squares of 0..<count.
+sum_squares: fn(count: Int) -> Int {
+    total := 0
+    loop n in 0..<count {
+        total += n * n
+        if total < 0 -> break
+    }
+    total
+}
+
+run: fn() {
+    count: Int.parse(process.args().get(0) ?? "1000") ?? 1000
+    print("{sum_squares(count)}")
+}

@@ -154,7 +154,8 @@ NativeAbstract: struct {
 // `allocs` the type each allocating call of a `--checked-alloc` image
 // allocates for (a `types` key), by the call's return address; `calls` the
 // call-site row of each call that has one (the source node that made it),
-// by the call's return address.
+// by the call's return address; `level` the optimization level the program
+// was built at, as its unit's producer names it (native_producer_level).
 NativeImage: struct {
     lines: X64Jetline,
     functions: [NativeFunction],
@@ -166,6 +167,7 @@ NativeImage: struct {
     abstracts: [Int:NativeAbstract],
     allocs: [Int:Int],
     calls: [Int:NativeCallSite]{[Int:NativeCallSite]{}},
+    level: Int{0},
 }
 
 // The source node a call's lowering came from: its line and character
@@ -335,8 +337,8 @@ native_encoding: fn(code: Int) -> X64DebugEncoding Never! {
 // `selects` the discriminant value a variant is selected by, `origin` the
 // abstract subprogram an inlined run is of and `call_line` and `call_file`
 // its call's line and file (and a call site's line and `call_column`);
-// `file` is a declaration's file and `return_pc` a call site's return
-// address.
+// `file` is a declaration's file, `return_pc` a call site's return
+// address and `producer` a unit's producer.
 NativeDie: struct {
     tag: Int,
     offset: Int,
@@ -359,6 +361,7 @@ NativeDie: struct {
     call_file: Int,
     return_pc: Int,
     call_column: Int{0},
+    producer: String{""},
 }
 
 // The DIEs of the unit at [start, end) of `info`, into `image`.
@@ -395,7 +398,10 @@ native_image_unit: fn(image: &NativeImage, info: [U8], abbrev: [U8], start: Int,
             }
             native_die_attribute(die, table.attributes[k], form, info, value_at, start)
         }
-        if die.tag == NATIVE_TAG_COMPILE_UNIT && die.low >= 0 -> base = die.low
+        if die.tag == NATIVE_TAG_COMPILE_UNIT {
+            if die.low >= 0 -> base = die.low
+            image.level = native_producer_level(die.producer)
+        }
         native_image_die(image, die, open, base)
         if die.children -> open.push(die)
     }
@@ -439,8 +445,18 @@ native_die_attribute: fn(die: &NativeDie, attribute: Int, form: Int, info: [U8],
         0x58 -> die.call_file = value
         0x7d -> die.return_pc = value
         0x57 -> die.call_column = value
+        0x25 -> die.producer = x64_jetline_text(info, at)
         else -> {}
     }
+}
+
+// The optimization level a unit's producer names, `Jet native backend (O2)`
+// (JetBackend Image/Dwarf.jet); 0 for any other producer.
+native_producer_level: fn(producer: String) -> Int Never! {
+    if !producer.starts_with("Jet native backend (O") || !producer.ends_with(")") -> return 0
+    level: Int.parse(producer.after("(O").before(")")) ?? return 0
+    if level < 0 -> return 0
+    level
 }
 
 // What `die` adds to `image`, nested in the `open` DIEs.
@@ -674,4 +690,11 @@ native_function_at: fn(image: NativeImage, pc: Int) -> NativeFunction? Never! {
     memory: NativeMemory{trace: None, blocks: [NativeBlock]{NativeBlock{address: 4096, bytes: ok}, NativeBlock{address: 8192, bytes: err}}}
     assert_eq(native_render(image, memory, 7, native_low_bytes(4096, 8), 0, 0), String?{Val("Ok(3)")})
     assert_eq(native_render(image, memory, 7, native_low_bytes(8192, 8), 0, 0), String?{Val("Err(ParseError.Bad)")})
+}
+
+#Test("a unit's producer names the level its program was built at") {
+    assert_eq(native_producer_level("Jet native backend (O2)"), 2)
+    assert_eq(native_producer_level("Jet native backend (O1)"), 1)
+    assert_eq(native_producer_level("Jet native backend (O0)"), 0)
+    assert_eq(native_producer_level("GNU C17 13.2.0 -O2"), 0)
 }

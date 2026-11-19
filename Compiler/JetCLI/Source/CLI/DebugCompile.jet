@@ -1,8 +1,9 @@
 // `jet debug`'s one evaluator (JetDebug NativeEval.jet): an expression asked
-// at a stop is compiled with the program, as the debug build compiled it (O0,
-// the same deep checks, debug info). The first compile asks the checker how
-// the expression checks where the frame stopped (JetSema EvalProbe.jet): its
-// type, the locals it captures, and a refusal for an effect, which names the
+// at a stop is compiled with the program, as its build compiled it (its
+// optimization level, the same deep checks, debug info). The first compile
+// asks the checker how the expression checks where the frame stopped (JetSema
+// EvalProbe.jet): its type, the locals it captures, and a refusal for an
+// effect, which names the
 // effect. The second compiles the program with the expression as a function
 // of its captures appended to the stop's source, built as a root with an
 // entry that calls it (JetEval jet_eval_native_wrapper); the session places
@@ -43,11 +44,12 @@ JetCLIDebugEvaluator: struct {
     }
 }
 
-// The flags an evaluation's compile takes: the debug build's, -O0 and its
-// `deep_checks`, with `dead_code: keep`: nothing in the program calls the
+// The flags an evaluation's compile takes: the program's build's, its
+// optimization `level` (NativeSession.level, which the image's DWARF names)
+// and `deep_checks`, with `dead_code: keep`: nothing in the program calls the
 // expression's function, which `remove` would drop unbuilt.
-jet_cli_debug_eval_argv: fn(deep_checks: DeepChecks) -> [String] Never! {
-    argv := [String]{"-O0", "--dead-code=keep"}
+jet_cli_debug_eval_argv: fn(deep_checks: DeepChecks, level: Int) -> [String] Never! {
+    argv := [String]{"-O{level}", "--dead-code=keep"}
     loop word in deep_checks_flags(deep_checks) -> argv.push(word)
     argv
 }

@@ -726,8 +726,7 @@ NativeSession: struct {
         if frames.len() == 0 -> return Err(native_eval_refused("there is no frame to evaluate in"))
         levels: native_levels(self.image, frames)
         level: if self.selected < levels.len() -> levels[self.selected] else -> levels[0]
-        call: if level.frame > 0 && level.site < 0 -> frames[level.frame].pc else -> -1
-        at: self.source_at(native_lookup(level.frame, frames[level.frame].pc), call) ?? return Err(native_eval_refused("the selected frame is not Jet code"))
+        at: self.level_source(frames, level) ?? return Err(err)
         compiled: self.compiled(at.path, at.line, at.column, text) ?? return Err(err)
         self.run_eval(compiled)
     }
@@ -740,9 +739,6 @@ NativeSession: struct {
         if frames.len() == 0 -> return Err(native_eval_refused("there is no frame to evaluate in"))
         levels: native_levels(self.image, frames)
         level: if self.selected < levels.len() -> levels[self.selected] else -> levels[0]
-        if level.site >= 0 {
-            return Err(native_eval_refused("the selected frame is code inlined into the frame below it; select that frame with `down` to evaluate there"))
-        }
         frame: frames[level.frame]
         lookup: native_lookup(level.frame, frame.pc)
         function: native_function_at(self.image, lookup) ?? return Err(native_eval_refused("the selected frame is not Jet code"))
@@ -757,7 +753,7 @@ NativeSession: struct {
         loop capture in permit.value.captures {
             bytes := [U8]?{None}
             loop variable in function.variables {
-                if variable.site != -1 || variable.name != capture.name -> next
+                if variable.site != level.site || variable.name != capture.name -> next
                 range: native_variable_covering(self.image, variable, lookup) ?? next
                 size: if capture.inline -> capture.size else -> native_type_size(self.image, variable.ty)
                 if size <= 0 || (!capture.inline && size > 8) -> next
@@ -790,6 +786,37 @@ NativeSession: struct {
         cell: Shared{NativeEvalImage{symbols: native_fix_symbols(elf), code: native_elf_code(elf)}}
         self.eval_image = Val(cell)
         Ok(cell)
+    }
+
+    // Where the frame `level` of the unwound `frames` stands, as `bt` shows
+    // it: the code at its address in its innermost level, else the call the
+    // level just inside it was inlined for (that call's line; its
+    // character column is the line's first node). Code inlined from
+    // another file is refused: the line table names the function's file.
+    level_source: fn(self, frames: [NativeUnwound], level: NativeLevel) -> {path: String, line: Int, column: Int} NativeEvalRefused! {
+        pc: frames[level.frame].pc
+        lookup: native_lookup(level.frame, pc)
+        call: if level.frame > 0 -> pc else -> -1
+        function: native_function_at(self.image, lookup) ?? {
+            found: self.source_at(lookup, call) ?? return Err(native_eval_refused("the selected frame is not Jet code"))
+            return Ok(found)
+        }
+        // The run just inside the level, -1 when the level is innermost.
+        inner := -1
+        loop site in native_inline_chain(function, lookup) {
+            if site == level.site -> break
+            inner = site
+        }
+        // The level's file: where the call inside it is, else its own code's.
+        file := function.file
+        if level.site >= 0 -> file = function.inlined[level.site].file
+        if inner >= 0 -> file = function.inlined[inner].call_file
+        if file >= 0 && function.file >= 0 && file != function.file {
+            return Err(native_eval_refused("the selected frame is code inlined from another file, which the debugger can't place an expression in"))
+        }
+        at: self.source_at(lookup, if inner >= 0 -> -1 else -> call) ?? return Err(native_eval_refused("the selected frame is not Jet code"))
+        if inner < 0 -> return Ok(at)
+        Ok({path: at.path, line: function.inlined[inner].call_line, column: 0})
     }
 
     // Why the condition `compiled` of breakpoint `number` can't run in the
@@ -849,11 +876,15 @@ NativeSession: struct {
             return Err(NativeDebugError{detail: "it reads more than {NATIVE_PLACE_ARGS.len()} locals"})
         }
         found: native_function_at(self.image, address) ?? return Err(NativeDebugError{detail: "its breakpoint is not in Jet code"})
+        // The variables of the code at `address`: of the innermost run
+        // inlined there, as the condition was compiled at its line.
+        chain: native_inline_chain(found, address)
+        site: if chain.len() > 0 -> chain[0] else -> -1
         args := [NativePlaceArg]{}
         loop capture in permit.value.captures {
             arg := NativePlaceArg?{None}
             loop variable in found.variables {
-                if variable.site != -1 || variable.name != capture.name -> next
+                if variable.site != site || variable.name != capture.name -> next
                 range: native_variable_covering(self.image, variable, address) ?? next
                 size: if capture.inline -> capture.size else -> native_type_size(self.image, variable.ty)
                 if size <= 0 || (!capture.inline && size > 8) || range.from < 0 || range.to > self.image.loclists.len() || range.from >= range.to {
@@ -1550,6 +1581,11 @@ NativeSession: struct {
         }
         Ok("")
     }
+
+    // The optimization level the program was built at (0, 1 or 2), which an
+    // expression's compile and a fix compile at: the same code is built
+    // again around them only at the same level.
+    level: fn(&self) -> Int Never! { self.image.level }
 
     // Run the program with `args` to the start of its `run`, in the Jet
     // source `file` whose text is `lines`. None when the program has no `run`.

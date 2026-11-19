@@ -1,6 +1,6 @@
 // `fix` at the `(Jet)` prompt of `jet debug <file.jet>`: the entry file is
-// compiled again as the debug build compiled it (O0, the same deep checks,
-// debug info) and the result goes to the running program
+// compiled again as the program's build compiled it (its optimization level,
+// the same deep checks, debug info) and the result goes to the running program
 // (JetDebug NativeFix.jet), which swaps in each function the edit changed.
 // The compile's problems, or why the swap is refused, are what the prompt
 // shows instead; the program then runs on as it was.
@@ -17,7 +17,7 @@ use {
 jet_cli_debug_fix: fn(session: &NativeSession, entry: String, deep_checks: DeepChecks, color: Bool) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> String Never! {
     if entry == "" -> return "Fix needs the program's source: debug it as `jet debug <file.jet>`\n"
     source: fix_files.read(entry) ?? return "Fix refused: couldn't read `{entry}`: {err}\n"
-    argv := [String]{"-O0"}
+    argv := [String]{"-O{session.level()}"}
     loop word in deep_checks_flags(deep_checks) -> argv.push(word)
     chosen := BuildOptions?{None}
     if jet_cli_build_options(argv, "build", entry, source, color, true) == {
