@@ -1,9 +1,10 @@
 # A second `print` of a new expression at a stop outside the entry's file
 # answers in under 100 ms on a program of 20,000 functions, as at a stop in
 # the entry (second_print_answers_under_100ms.case). The stop is in lib.jet's
-# `step`, which the entry prog.jet calls, so the evaluation goes through the
-# session's held check (DebugCompile.jet jet_cli_debug_eval_held) rather than
-# the entry-only compile. Before, each print that called a program function
+# `step`, which the entry prog.jet calls, so each print compiles the
+# package's sources cut to what it reaches (DebugCompile.jet
+# jet_cli_debug_eval_sliced), or goes through the session's held check.
+# Before, each print that called a program function
 # fell back to compiling the program again: 2,290-2,420 ms per new
 # expression at 20,000 functions (gate jet of 5f090c020d, stop in run).
 # Both prints read `total`, 0 at the stop, and call the program's own
@@ -21,7 +22,7 @@ send debug: "break lib.jet:100003"
 send debug: "c"
 recv debug line until ~ "Breakpoint hit  lib.jet:100003  in step()" timeout 600s # the image builds and the program runs to the stop
 send debug: "print f_1(total)"
-recv debug line until ~ "f_1(total) = 1" timeout 600s # the first print opens the held check
+recv debug line until ~ "f_1(total) = 1" timeout 600s # the first print
 send debug: "print f_2(total) + f_3(total)"
 recv debug line until ~ "f_2(total) + f_3(total) = 5" within 100ms # a second, new expression answers in under 100 ms
 send debug: "c"

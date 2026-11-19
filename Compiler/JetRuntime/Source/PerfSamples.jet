@@ -870,21 +870,8 @@ PERF_ZONE_PLOT: I64{3}
     perf_zone_row(PERF_ZONE_FRAME, now, now, rt_static_text("frame"))
 }
 
-// core.perf.plot(name, value): the value whose float bits are `bits`, at
-// now, on the plot named by the borrowed text `name`, while zones are on.
-#Export(c) jet_perf_plot: fn(name: I64, bits: I64) {
-    value: host_native_int(bits)
-    if (jet_scheduler_native_propagate() != I64{0}) {
-        return
-    }
-    if (perf_zones_on == I64{0}) {
-        return
-    }
-    perf_zone_row(PERF_ZONE_PLOT, time_host_monotonic_i64(), value, name)
-}
-
-// core.perf.__plot_float(name, value): jet_perf_plot's row for a `value`
-// passed as the Float itself, so no caller boxes its bits as an Int.
+// core.perf.plot(name, value): `value`, its float bits in the row, at now,
+// on the plot named by the borrowed text `name`, while zones are on.
 #Export(c) jet_perf_plot_float: fn(name: I64, value: Float) {
     if (jet_scheduler_native_propagate() != I64{0}) {
         return

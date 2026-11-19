@@ -1838,7 +1838,7 @@ IR_X64_PERF_ZONES_STORAGE: "perf_zones_on"
 
 IR_X64_PERF_ZONES_SYMBOL: "jet_rt_perf_zones"
 
-// A zone site, core.perf.__zone_open, __zone_close, __frame or __plot at
+// A zone site, core.perf.__zone_open, __zone_close, __frame or __plot_float at
 // `at`: the hot path tests the runtime's zones word and, while it is zero,
 // skips the call (an open's result is the Int 0, which a close skipped the
 // same way never reads; a frame mark or a plot records nothing while zones
@@ -3810,7 +3810,7 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
                     e.routed = at
                 }
                 symbol == "jet_std_math_fma" && ir_x64_fma(e, m, f, al, tables, at) -> {}
-                symbol == "jet_perf_zone_open" || symbol == "jet_perf_zone_close" || (!m.zones_stripped && (symbol == "jet_perf_frame" || symbol == "jet_perf_plot")) -> {
+                symbol == "jet_perf_zone_open" || symbol == "jet_perf_zone_close" || (!m.zones_stripped && (symbol == "jet_perf_frame" || symbol == "jet_perf_plot_float")) -> {
                     ir_x64_zone_site(e, m, f, al, at, symbol, dst)
                 }
                 entry != "" -> {

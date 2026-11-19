@@ -1,0 +1,25 @@
+# A first `print` that calls a program function, at a stop outside the
+# entry's file, answers in under 250 ms on a program of 20,000 functions.
+# The stop is in lib.jet's `step`, which the entry prog.jet calls; the
+# package's sources are compiled cut to the functions the expression
+# reaches (DebugCompile.jet jet_cli_debug_eval_sliced), not the program.
+# Before, it compiled the program again: 4,300 ms (gate jet of 5f090c020d).
+# The print reads `total`, 0 at the stop, and calls f_1(x) = (x + 1) % 1000.
+# gen/gen.jet writes lib.jet and prog.jet: step's first call, the stop, is
+# lib.jet line 100003.
+fixture: SecondPrintNonEntryUnder100ms.fixture
+env: NO_COLOR=1
+step: jet run gen/gen.jet -- 20000
+exit: 0
+stdout: = ""
+session debug line: jet debug prog.jet
+env: PATH={work}/no-tools
+send debug: "break lib.jet:100003"
+send debug: "c"
+recv debug line until ~ "Breakpoint hit  lib.jet:100003  in step()" timeout 600s # the image builds and the program runs to the stop
+send debug: "print f_1(total)"
+recv debug line until ~ "f_1(total) = 1" within 250ms # the first print compiles only what it reaches
+send debug: "c"
+recv debug line until ~ "Program finished" timeout 600s # the evaluation left the program's run unchanged
+close debug
+exit: 0
