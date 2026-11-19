@@ -1,4 +1,5 @@
 use {
+    term: core.term
     time: core.time
 }
 
@@ -15,6 +16,10 @@ run: fn() {
     // The ring is published every 100ms: these records are in it by READY.
     time.sleep(500ms)
     print("READY")
+    // A pipe stdout is written when its buffer fills; flush so the case
+    // sees READY while the program still runs.
+    out := term.stdout()
+    out.flush() ?? panic("flush")
     // hold stays live, so the child stays blocked on its second receive.
     time.sleep(30000ms)
 }
