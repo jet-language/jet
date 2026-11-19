@@ -1340,6 +1340,35 @@ sema_comptime_reflection_written_markers: fn(
     None
 }
 
+// The marker registry of the built package's entry module, which a package
+// record's header markers resolve through (sema_marker_package_check); None
+// when the package record carries no marker or the graph cannot build it.
+sema_comptime_reflection_package_registry: fn(graph: SemaRegistrationGraph, catalog: TAppliedRuleCatalog) -> SemaScopeMembersMarkerRegistry? {
+    if graph.build_facts.package_markers.len() == 0 -> return None
+    entry: sema_registration_module_index(graph, graph.entry_module_identity) ?? return None
+    sema_scope_members_build_marker_registry(graph, graph.entry_module_identity, graph.modules[entry].program, catalog)
+}
+
+// The MarkerInfo rows a function of the built package inherits from its
+// package record: each header marker whose rule also allows a function
+// site, read through the entry module's `registry`
+// (sema_comptime_reflection_package_registry). A package marked `#Profiled`
+// thus marks each of its functions, for `meta.events(watch: .Functions{marked:
+// m})` and for a FunctionInfo's `markers`.
+sema_comptime_reflection_package_function_markers: fn(graph: SemaRegistrationGraph, registry: SemaScopeMembersMarkerRegistry?) -> [TComptimeValue] Never! {
+    inherited := [TComptimeValue]{}
+    if registry == .Val(known) {
+        loop marker in graph.build_facts.package_markers {
+            allowed := false
+            loop name in known.function_allowed_markers {
+                if name == marker.name -> allowed = true
+            }
+            if allowed -> inherited.push(sema_comptime_reflection_marker_info(marker, known))
+        }
+    }
+    inherited
+}
+
 // One stored field or named payload field, at `index` among its owner's
 // fields. Its `type` is the field type's TypeId, qualified from the module
 // `caller` of its declaration. `default` is where the field's written default

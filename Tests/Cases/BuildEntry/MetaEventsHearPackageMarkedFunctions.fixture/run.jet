@@ -1,0 +1,56 @@
+// No function here carries `#Traced`; the package record does, so the
+// build's watch hears every function of the package. `Untraced` marks the
+// record too, but its rule allows only the package site, so no function
+// inherits it, and its rewrite, which would print "untraced", never runs.
+Traced: struct {
+    impl Marker {
+        sites: [.Package, .Function],
+    }
+}
+
+Untraced: struct {
+    impl Marker {
+        sites: [.Package],
+    }
+}
+
+load: fn() -> Int { 1 }
+
+twice: fn(n: Int) -> Int { n * 2 }
+
+build: fn(b: Build) {
+    app: b.add_executable("package_traced", ["run.jet"], [])
+    meta: b.compiler(app)
+    meta.events(
+        watch: .Functions{marked: Traced{}},
+        fn(event) {
+            if event == .Checked(.Function(f)) {
+                name: f.name
+                meta.rewrite_body(
+                    f,
+                    #code {
+                        print(#{name})
+                        #{f.body}
+                    },
+                )
+            }
+        },
+    )
+    meta.events(
+        watch: .Functions{marked: Untraced{}},
+        fn(event) {
+            if event == .Checked(.Function(f)) {
+                meta.rewrite_body(
+                    f,
+                    #code {
+                        print("untraced")
+                        #{f.body}
+                    },
+                )
+            }
+        },
+    )
+    b.default(app)
+}
+
+run: fn() { print(twice(load())) }

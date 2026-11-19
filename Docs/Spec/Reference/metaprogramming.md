@@ -1123,7 +1123,11 @@ for every compile and link node after it (`jet inspect explain-build
 the handler with `.Checked(.Function(f))`, a `CompilerEvent`, once for each
 function of the build's checked program that carries the marker of the
 watched value's type, in the order the program lists them; the value's fields
-filter nothing, and a value that is no marker struct's is E1134.
+filter nothing, and a value that is no marker struct's is E1134. A marker
+written on the package record (a `package.jet` header line) is carried by
+every function of the built package when its rule also allows a function
+site, so one header line marks a whole package for a watch and for each
+FunctionInfo's `markers`; a package-only marker reaches no function.
 `meta.events(watch: .Calls{to: print}, handler)` calls the handler with
 `.Checked(.Call(c))` once for each checked call written in the root package's
 own source (outside its `build: fn`) whose resolved callee is the watched one,

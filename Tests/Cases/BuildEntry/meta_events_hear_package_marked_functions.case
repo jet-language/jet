@@ -1,0 +1,17 @@
+# A marker written on the package record (a `package.jet` header line)
+# marks each function of the package when its rule also allows a function
+# site, so `meta.events(watch: .Functions{marked: m})` hears them all and a
+# build program instruments the package with no change to its functions.
+# A package-only marker reaches no function. `jet run` loads the same
+# rewritten bodies `jet build` compiles.
+fixture: MetaEventsHearPackageMarkedFunctions.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build run.jet
+exit: 0
+step: {work}/.jet/build/package_traced
+exit: 0
+stdout: = "run\nload\ntwice\n2\n"
+step: jet run run.jet
+exit: 0
+stdout: = "run\nload\ntwice\n2\n"
