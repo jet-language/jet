@@ -160,6 +160,19 @@ fn` declaration (`fn` through its closing brace) and do not separate the
 functions that `run` calls; their `inclusive_count` and `allocation_count` are
 null.
 
+The program counter a timer's `SIGPROF` interrupted is a few instructions
+past the one that spent the time (its skid), so where the host has a precise
+sampler and the run is neither a causal experiment nor a flight recording,
+the runtime charges each sample by the instruction it names instead: AMD's
+IBS op sampling (`perf_event_open` on the `ibs_op` PMU, filtered to user mode
+in software, which `perf_event_paranoid` 2 allows), else Intel's PEBS (cycles
+at `precise_ip` 2), each thread's own event sampled at the timer's rate into
+a ring its `SIGPROF` reports; the callers still come from the interrupted
+stack. The main thread arms the first source the kernel accepts, and each
+thread after it arms that source; with neither, every thread keeps its
+timer. The receipt's `capture.sampling.pc` names the source.
+Tests/Cases/Perf/precise_pc_names_its_source.case is the worked example.
+
 `jet perf run` takes `--lens=<lenses>`, comma-separated: `cpu`, the
 program's CPU time and the default, `memory`, its memory behavior,
 `alloc`, its live heap, and `topdown`, why its hot lines are slow on the
@@ -493,8 +506,12 @@ not, so its `build` is null, as it is for words the run refuses. Its `capture`
 names the capture's settings: `allowlist`, the privacy fields the trace keeps
 (comma-separated, null for none), and `sampling`, null unless the program
 sampled, else its `lenses` (`["cpu"]`, `["memory"]` or `["cpu","memory"]`),
-`allocations` `call-sites`, and under the `cpu` lens `clock` `cpu` and
-`interval_us` 1000, which are null without it. `jet perf view` prints it
+`allocations` `call-sites`, and under the `cpu` lens `clock` `cpu`,
+`interval_us` 1000 and `pc`, which are null without it. `pc` names what each
+sample was charged by: `source` `ibs_op` or `pebs` with `precise` true and
+`skid` null for a precise sampler, else `timer` with `precise` false and
+`skid` `timer_signal`; `refused` lists each precise source the kernel
+refused, `{"errno":2,"source":"ibs_op"}`. `jet perf view` prints it
 as `receipt perf <canonical JSON>`, and `jet perf compare` lists each field
 that differs between two traces' receipts (`perf.build.options.optimize: "O0"
 -> "O2"`). `jet perf attach` records no `perf` section.

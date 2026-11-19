@@ -256,6 +256,7 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     observations: if observed.program.len() > 0 -> observed.program.move() else if observed_run -> observed.root.move() else -> [JetCLIPerfObservation]{}
     counters := [TraceCounter]{}
     if memory -> counters = jet_cli_perf_counters_read(samples)
+    sampler: jet_cli_perf_pc_read(samples)
     sampled := JetCLIPerfSamples?{None}
     if samples == .Val(file) {
         sampled = jet_cli_perf_samples_read(file, parsed.source ?? "", counters)
@@ -272,7 +273,7 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     }
     if memory -> jet_cli_perf_counters_profile(capture.profile, counters)
     // The receipt reads the allowlist before the policy takes it.
-    stamped: jet_cli_perf_session_receipt(action, argv, parsed.source, parsed.allowlist, samples != None, parsed.lenses) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
+    stamped: jet_cli_perf_session_receipt(action, argv, parsed.source, parsed.allowlist, samples != None, parsed.lenses, sampler) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
     capture.receipts.push(stamped)
     if topdown && samples == .Val(file) {
         if parsed.source == .Val(source) {
@@ -613,11 +614,11 @@ jet_cli_perf_session_target: fn() -[Env]> String Never! {
 // (jet_cli_build_options), and the capture's settings: the privacy fields
 // it keeps, and, where the program `sampled`, its `lenses`, with each
 // allocation's call sites and, under the `cpu` lens, its CPU-time sampling
-// every JET_CLI_PERF_SAMPLE_US of CPU time. A
-// `jet test` resolves its build through its settings layers too
-// (jet_cli_test_file), which the session does not, so its build is null, as
-// is the build of words the run refused.
-jet_cli_perf_session_receipt: fn(action: String, argv: [String], source: String?, allowlist: [String], sampled: Bool, lenses: [String]) -[FS, Env]> TraceReceiptSection JetCLIReadError! {
+// every JET_CLI_PERF_SAMPLE_US of CPU time and the `pc` its samples were
+// charged by (jet_cli_perf_pc_read). A `jet test` resolves its build
+// through its settings layers too (jet_cli_test_file), which the session
+// does not, so its build is null, as is the build of words the run refused.
+jet_cli_perf_session_receipt: fn(action: String, argv: [String], source: String?, allowlist: [String], sampled: Bool, lenses: [String], pc: CanonicalJSON) -[FS, Env]> TraceReceiptSection JetCLIReadError! {
     build := CanonicalJSON.Null
     if action == "run" {
         file: source ?? ""
@@ -649,6 +650,7 @@ jet_cli_perf_session_receipt: fn(action: String, argv: [String], source: String?
                 {key: "clock", value: if cpu -> CanonicalJSON.String("cpu") else -> CanonicalJSON.Null},
                 {key: "interval_us", value: if cpu -> CanonicalJSON.Integer("{JET_CLI_PERF_SAMPLE_US}") else -> CanonicalJSON.Null},
                 {key: "lenses", value: CanonicalJSON.Array(named)},
+                {key: "pc", value: if cpu -> pc else -> CanonicalJSON.Null},
             },
         )
     }

@@ -328,6 +328,44 @@ jet_cli_perf_counters_read: fn(samples: String?) -[FS]> [TraceCounter] Never! {
     counters
 }
 
+// The sampler the `cpu` lens of `jet perf run` charged its samples by, from
+// the file the runtime keeps beside the `samples` file (PerfSamples.jet
+// perf_precise_choose): three words, its source (0 the CPU-time timer, 1
+// IBS op sampling, 2 PEBS), then the errno the kernel refused IBS op
+// sampling and PEBS each with, or 0 for one it never tried. A precise
+// source charges each sample by the instruction it names; the timer by the
+// program counter its signal interrupted, the skid source. Null when the
+// run kept no such file. The file is removed once read.
+jet_cli_perf_pc_read: fn(samples: String?) -[FS]> CanonicalJSON Never! {
+    file: samples ?? return CanonicalJSON.Null
+    path: "{file}.pc"
+    words: perf_files.read_bytes(path) ?? return CanonicalJSON.Null
+    perf_files.remove(path).drop("the session reads its sampler once")
+    if words.len() < 24 -> return CanonicalJSON.Null
+    source: link_debug_addr(words, 0)
+    named: if {
+        source == 1 -> "ibs_op"
+        source == 2 -> "pebs"
+        else -> "timer"
+    }
+    refused := [CanonicalJSON]{}
+    loop (index, tried) in ([String]{"ibs_op", "pebs"}) {
+        errno: link_debug_addr(words, 8 + index * 8)
+        if errno != 0 {
+            refused.push(CanonicalJSON.Object([CanonicalJSONField]{{key: "errno", value: CanonicalJSON.Integer("{errno}")}, {key: "source", value: CanonicalJSON.String(tried)}}))
+        }
+    }
+    precise: named != "timer"
+    CanonicalJSON.Object(
+        [CanonicalJSONField]{
+            {key: "precise", value: CanonicalJSON.Bool(precise)},
+            {key: "refused", value: CanonicalJSON.Array(refused)},
+            {key: "skid", value: if precise -> CanonicalJSON.Null else -> CanonicalJSON.String("timer_signal")},
+            {key: "source", value: CanonicalJSON.String(named)},
+        },
+    )
+}
+
 // Whether each function of `table` is in the file `source`; none is when
 // `source` does not resolve.
 jet_cli_perf_samples_owned: fn(table: X64Jetline, source: String) -[FS]> [Bool] Never! {

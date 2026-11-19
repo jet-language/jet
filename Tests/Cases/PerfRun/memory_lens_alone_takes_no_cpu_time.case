@@ -4,7 +4,7 @@
 # counters' events. The walk a page and a line apart (line 30) misses L1D at
 # nearly every one of its 16 million reads. The profile's reason says the
 # rows hold only counter events, and the receipt names the one lens, with no
-# CPU-time clock or interval.
+# CPU-time clock, interval or sampler.
 requires: os-name:linux
 requires: arch:x86_64
 fixture: MemoryCountersPerLine.fixture
@@ -22,6 +22,7 @@ json: file walk.jettrace doc $.content.receipt_sections[0].value.capture.samplin
 json: file walk.jettrace doc $.content.receipt_sections[0].value.capture.sampling.lenses[0] = "memory"
 json: file walk.jettrace doc $.content.receipt_sections[0].value.capture.sampling.clock = null
 json: file walk.jettrace doc $.content.receipt_sections[0].value.capture.sampling.interval_us = null
+json: file walk.jettrace doc $.content.receipt_sections[0].value.capture.sampling.pc = null
 step: jet perf view {work}/walk.jettrace
 exit: 0
 stdout: ~ "memory by line:" # the view's memory table

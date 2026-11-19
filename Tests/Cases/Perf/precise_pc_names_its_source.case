@@ -1,0 +1,21 @@
+# Under the `cpu` lens `jet perf run` charges each sample by the instruction
+# that spent the time where the host has a precise sampler (AMD's IBS op
+# sampling, else Intel's PEBS), and its `perf` receipt names the source
+# either way: a precise one, or the CPU-time timer, whose samples skid past
+# that instruction to the one its signal interrupted.
+requires: os-name:linux
+fixture: PrecisePcNamesItsSource.fixture
+env: NO_COLOR=1
+step: jet perf run main.jet -O2 --out {work}/spin.jettrace
+exit: 0
+stdout: ~ "spun=" # the program ran to its end
+json: file spin.jettrace doc $.content.receipt_sections[0].value.capture.sampling.pc.source in ["ibs_op","pebs","timer"] # the host's precise sampler, or the timer where it has none
+json: file spin.jettrace doc $.content.receipt_sections[?value.capture.sampling.pc.source="timer"][?value.capture.sampling.pc.precise=true] #= 0 # the timer is never precise
+json: file spin.jettrace doc $.content.receipt_sections[?value.capture.sampling.pc.source="timer"][?value.capture.sampling.pc.skid!="timer_signal"] #= 0 # and names its skid source
+json: file spin.jettrace doc $.content.receipt_sections[?value.capture.sampling.pc.source!="timer"][?value.capture.sampling.pc.precise!=true] #= 0 # a precise source is precise
+json: file spin.jettrace doc $.content.receipt_sections[?value.capture.sampling.pc.source!="timer"][?value.capture.sampling.pc.skid!=null] #= 0 # and has no skid
+json: file spin.jettrace doc $.content.receipt_sections[?value.capture.sampling.pc.source!="ibs_op"][?value.capture.sampling.pc.refused[0].source!="ibs_op"] #= 0 # a source after IBS names IBS's refusal first
+json: file spin.jettrace doc $.content.profile.rows[?symbol.name="spin_hot_loop"][?sample_count>=50] #>= 1 # whichever source charged them, the samples land in the hot loop
+step: jet perf view {work}/spin.jettrace
+exit: 0
+stdout: ~ "\"pc\":{\"precise\":" # the view prints the sampler in the receipt
