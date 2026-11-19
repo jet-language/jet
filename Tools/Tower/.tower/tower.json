@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112308,
+    "rev": 112319,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -45,36 +45,36 @@
     },
     "completionCursor": "2026-11-18T07:53:28.091Z",
     "dayStart": {
-      "date": "2026-11-18",
-      "openCards": 330,
-      "openCriteria": 2362,
+      "date": "2026-11-19",
+      "openCards": 323,
+      "openCriteria": 2345,
       "epochs": {
         "e18": {
-          "openCards": 11,
-          "openCriteria": 71
+          "openCards": 9,
+          "openCriteria": 66
         },
         "e19": {
           "openCards": 24,
-          "openCriteria": 123
+          "openCriteria": 117
         },
         "e20": {
-          "openCards": 55,
-          "openCriteria": 520
+          "openCards": 52,
+          "openCriteria": 504
         },
         "e21": {
-          "openCards": 52,
+          "openCards": 51,
           "openCriteria": 474
         },
         "e22": {
           "openCards": 36,
-          "openCriteria": 284
+          "openCriteria": 293
         },
         "e23": {
           "openCards": 55,
           "openCriteria": 398
         },
         "e24": {
-          "openCards": 74,
+          "openCards": 73,
           "openCriteria": 385
         },
         "e25": {
@@ -85887,11 +85887,11 @@
         {
           "n": 15,
           "text": "A strided array walk reports more L1D misses per element than a sequential walk. Proof: `jet test Compiler --profile golden --filter Perf/StridedVsSequentialL1D`. (was #6312 c7)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:06:27.053Z"
+          "evidence": "d5effe356a fixes the case (the capture took a filter result that is an array; it now takes the first row and closes with a perf view step). `jet test Compiler --profile golden --filter Perf/StridedVsSequentialL1D` with the a0.0.45 candidate s2 jet 7667b43e13b5a9f5: PASS o0, o1, o2 (strided line 25 l1d_misses=17.1M against sequential line 21 2.1M).",
+          "at": "2026-11-18T23:17:37.487Z"
         },
         {
           "n": 16,
@@ -85932,11 +85932,11 @@
         {
           "n": 20,
           "text": "Attaching to a process not started with observe enabled, or owned by another user, fails with a named error and changes nothing in the target. Proof: `jet test Compiler --profile ui --filter inspect_live_attach_refused`. (was #6386 c4)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T01:13:47.910Z"
+          "evidence": "b08cba9e2b fixes the requirement (os:linux matched the OS family, so the snapshot was skipped on Linux; now os-name:linux). With the a0.0.45 candidate s2 jet 7667b43e13b5a9f5 (dev 3a012d3674): `jet test Compiler --profile ui --filter inspect_live_attach_refused` -> PASS Tests/UI/inspect_live_attach_refused_other_user_e2105.jet; the not-observed refusal is Tests/Cases/LiveInspect/live_inspector_attach_refused_without_observe_leaves_the_program_running.case PASS in the a0.0.45 kit.",
+          "at": "2026-11-18T23:18:53.139Z"
         },
         {
           "n": 21,
@@ -85950,11 +85950,11 @@
         {
           "n": 22,
           "text": "The time to the first stop and the time per step are measured against lldb on the same image (Docs/Audits/2026-11-14-debugging-profiling-review.md). Proof: a committed measurement under Docs/Audits naming the image hash, the commands and both timings. (was #6730 c29)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:06:32.823Z"
+          "evidence": "76f59d72c6 records the measurement in Docs/Audits/2026-11-17-debug-latency-vs-lldb.md: image sha256 b914b020b4a1a8d7 (12,004 lines) and 072a06c2c31e13d7 (120,004 lines), the exact commands, and both tools' timings (first stop 7 vs 150 ms and 55 vs 206 ms; per step 76 vs 0 and 1339 vs 0 ms, the per-step gap now c59).",
+          "at": "2026-11-18T23:18:54.120Z"
         },
         {
           "n": 23,
@@ -86110,11 +86110,11 @@
         {
           "n": 34,
           "text": "jet alone debugs and profiles: every Debug and Perf case that proves a product behavior runs with no lldb, gdb, Linux perf, go or otelcol on PATH (the case kit scrubs them for these suites), and the cases that need one of those tools are marked interop checks of Jet's DWARF or symbol map, never the proof of a jet debug or jet perf feature. Proof: `jet test Compiler --profile cases --filter Debug/` and `--filter Perf` with those tools removed from PATH report no SKIP-HOST.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T07:54:44.348Z"
+          "evidence": "734a3f885b makes the case kit run every Debug and Perf case without lldb, gdb, perf, go or otelcol on PATH (Compiler/JetTestKit/Source/Cases.jet KIT_OUTSIDE_TOOLS); interop checks moved to ToolInterop. The a0.0.45 kit at dev 751a90c25c (candidate s2 jet 7667b43e13b5a9f5, cases profile) ran the 61 Debug/ and Perf* cases: 49 PASS, 9 KNOWN-FAILING (#6730 DAP attach/pause/restart, #3594 process-file-fd), 3 FAIL, 0 SKIP-HOST.",
+          "at": "2026-11-18T23:19:19.251Z"
         },
         {
           "n": 35,
@@ -86137,20 +86137,20 @@
         {
           "n": 37,
           "text": "No text tells a user that Jet's debugger or profiler is lldb, gdb or Linux perf: the 'under LLDB' comments in Compiler/Examples/Tooling/Debugging (Debug.jet, DebugNative.jet) say jet debug runs its own engine, and the Canvas debug tier `native-lldb` is renamed `native` with its cases. Proof: `jet test Tests/Guards --filter debug_names_no_outside_debugger` (a guard that fails on those spellings outside interop cases).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T07:54:47.536Z"
+          "evidence": "Guard landed in bab5775f7f (Tests/Guards/debug_names_no_outside_debugger.jet; the Debugging examples and the Canvas tier name jet debug native). Run 2026-11-18 at dev 3a012d3674 with the a0.0.45 candidate s2 jet 7667b43e13b5a9f5: `jet test Tests/Guards --filter debug_names_no_outside_debugger` -> debug_names_no_outside_debugger: pass, 1 passed, 0 failed.",
+          "at": "2026-11-18T23:15:06.670Z"
         },
         {
           "n": 38,
           "text": "jet perf's own sampler keeps whole stacks without frame pointers: a sample taken in code built without frame pointers (an O2 leaf, the runtime, a C library frame) unwinds through Jet's own CFI/DWARF unwinder, not a truncated frame-pointer walk.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T07:54:48.457Z",
+          "evidence": "ea776c1543 on dev: PerfSamples.jet steps out of frameless code by the image .eh_frame (the backend writes FDEs for every Jet function; the runtime pack and C objects bring theirs), then follows rbp from the first frame that keeps one. a0.0.45 kit at 751a90c25c: Perf/unwinds_without_frame_pointers (jet perf run -O2 --inline=off, samples in a frameless prefix keep the loop line under the caller) PASS and Perf/every_thread_keeps_whole_stacks PASS.",
+          "at": "2026-11-18T23:24:33.440Z",
           "proof": {
             "profile": "cases",
             "filter": "Perf/unwinds_without_frame_pointers"
@@ -86223,11 +86223,11 @@
         {
           "n": 46,
           "text": "Waits with wakers, off-CPU time, I/O: Every wait in the trace (channel send and receive, lock, join, sleep, I/O readiness) names its object, its blocking stack and the task whose action ended it; `jet perf view` lists off-CPU time per stack; file and network I/O through the capability chokepoint appear on the timeline with bytes and target and no instrumentation. Extends c7 from joins to every wait. Proof: `jet test Compiler --profile cases --filter Perf/every_wait_names_its_waker`; `--filter Perf/off_cpu_time_by_stack`; `--filter Perf/io_on_timeline_without_instrumentation`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R4)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T14:10:07.762Z"
+          "evidence": "dev d2c1886238 (batch compiler p299, full cases suite suite-p299/cases.out): PASS Tests/Cases/Perf/every_wait_names_its_waker.case, PASS Perf/off_cpu_time_by_stack.case, PASS Perf/io_on_timeline_without_instrumentation.case",
+          "at": "2026-11-19T01:00:55.387Z"
         },
         {
           "n": 47,
@@ -86291,11 +86291,11 @@
         {
           "n": 53,
           "text": "Debugger start and step on large programs: Program arguments after `--` reach the debugged program (F8); `next` over a loop-heavy line costs one stop, not one per instruction; on a prebuilt 100,000-line image the first stop comes in under 200 ms (57 ms today on a 120,004-line image, F18, so this bar guards against regression). Adds the bar to c22's measurement. Proof: `jet test Compiler --profile cases --filter Debug/program_arguments_reach_the_program`; `--filter Debug/next_over_a_loop_is_one_stop`; `Tools/Perf/DebugLatency/Main.jet --bar 200`, as `latency.log`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R11)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T14:10:26.599Z"
+          "evidence": "Debug/program_arguments_reach_the_program and Debug/next_over_a_loop_is_one_stop PASS in the a0.0.45 kit (dev 751a90c25c). `jet run Tools/Perf/DebugLatency/Main.jet -- --functions 20000 --runs 5 --bar 200` with the a0.0.45 candidate s2 jet 7667b43e13b5a9f5 (dev 3a012d3674): first_stop 55 ms on a 120,004-line image, 'bar: jet_debug first_stop at most 200 ms: met', rc 0; recorded in 76f59d72c6.",
+          "at": "2026-11-18T23:18:55.077Z"
         },
         {
           "n": 54,
@@ -86345,6 +86345,15 @@
           "evidence": "",
           "at": "2026-11-18T14:10:39.401Z",
           "unblockedFrom": "D-DBG-UI1"
+        },
+        {
+          "n": 59,
+          "text": "Stepping costs what the step does, not what the image holds: `jet debug` per-step time does not grow with the image size, and is at most lldb's on the same image. Today (2026-11-18, a0.0.45 candidate): 76 ms per `n` on a 12,004-line image and 1,339 ms on a 120,004-line image, against lldb under 1 ms on both (Docs/Audits/2026-11-17-debug-latency-vs-lldb.md F2). Proof: `jet run Tools/Perf/DebugLatency/Main.jet -- --functions 20000 --runs 5` prints jet_debug per_step at most lldb's per_step + 1 ms.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T23:18:18.461Z"
         }
       ],
       "refs": [],
@@ -86352,9 +86361,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-18T23:12:41.516Z",
+      "updated": "2026-11-19T01:00:55.387Z",
       "updatedBy": "Main",
-      "criteriaLastN": 58
+      "criteriaLastN": 59
     },
     {
       "id": "c0in2dft",
@@ -178087,6 +178096,90 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-19T01:00:55.387Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#46"
+    },
+    {
+      "at": "2026-11-18T23:24:33.440Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#38"
+    },
+    {
+      "at": "2026-11-18T23:19:19.251Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#34"
+    },
+    {
+      "at": "2026-11-18T23:18:55.077Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#53"
+    },
+    {
+      "at": "2026-11-18T23:18:54.120Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#22"
+    },
+    {
+      "at": "2026-11-18T23:18:53.139Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#20"
+    },
+    {
+      "at": "2026-11-18T23:18:43.934Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#53"
+    },
+    {
+      "at": "2026-11-18T23:18:41.687Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#20"
+    },
+    {
+      "at": "2026-11-18T23:18:18.461Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "59 criteria, soft limit 6: the debugger and profiler epoch card; a gap found by its own measurement belongs on it (owner order 2026-11-14)"
+    },
+    {
+      "at": "2026-11-18T23:18:18.461Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#59 Stepping costs what the step does, not what the image holds:"
+    },
+    {
+      "at": "2026-11-18T23:17:37.487Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#15"
+    },
+    {
+      "at": "2026-11-18T23:15:06.670Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#37"
+    },
     {
       "at": "2026-11-18T23:12:41.516Z",
       "by": "Main",
