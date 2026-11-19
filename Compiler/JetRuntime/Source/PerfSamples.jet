@@ -480,11 +480,7 @@ perf_samples_heap: fn(name: I64) {
         pid = os_syscall_i64(I64{57}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     if (pid <= I64{0}) { perf_samples_heap_write(fd, number, name, frame) }
-    if (pid == I64{0}) {
-        #Unsafe("exit_group ends the snapshot's child, which owns nothing to flush") {
-            _ := os_syscall_i64(I64{231}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-        }
-    }
+    if (pid == I64{0}) { perf_samples_heap_child_exit() }
     alloc_check_track_release()
     if (pid > I64{0}) {
         reaped := I64{-4}
@@ -493,6 +489,15 @@ perf_samples_heap: fn(name: I64) {
                 reaped = os_syscall_i64(I64{61}, pid, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
             }
         }
+    }
+}
+
+// End the heap snapshot's forked child once it has written the snapshot.
+// The child is not the process a compiler serves, and it owns nothing to
+// flush.
+perf_samples_heap_child_exit: fn() {
+    #Unsafe("exit_group ends the snapshot's child, which owns nothing to flush") {
+        _ := os_syscall_i64(I64{231}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
 }
 
