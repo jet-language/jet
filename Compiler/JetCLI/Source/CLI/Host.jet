@@ -1088,6 +1088,10 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
     // reads would stall the object between ir.build and ir.opt.
     runtime_exports := jet_cli_runtime_exports(runtime_dir)
     runtime_key: if runtime_exports.failure == None -> Val(runtime_exports.key.copy()) else -> None
+    // `dead_code: keep` keeps the runtime's unreached exports too, so code
+    // compiled later against the image (`jet debug`'s `fix` and its
+    // evaluations) finds every runtime function it may call.
+    link_roots: if build_options_value(options, "dead_code") == "keep" -> jet_cli_runtime_export_names(runtime_exports) else -> [String]{}
     // The program object holds DWARF unless `debug_info: false`; the link
     // drops every other input's too (the runtime pack's, a C closure's).
     debug_info: build_options_value(options, "debug_info") != "false"
@@ -1221,14 +1225,14 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
     undefined := [String]{}
     executable := x64_executable_whole([U8]{})
     if debug_link == .Val(name) {
-        split := x64_link_executable_split(names, bytes, base, link_threads, name)
+        split := x64_link_executable_split(names, bytes, base, link_threads, name, link_roots)
         errors = split.errors.copy()
         undefined = split.undefined.copy()
         executable = x64_executable_split(split)
     } else {
-        image := x64_link_executable(names, bytes, base, link_threads, debug_info)
+        image := x64_link_executable(names, bytes, base, link_threads, debug_info, link_roots)
         if image.errors.len() > 0 && retry == .Val(inputs_again) {
-            image = x64_link_executable(names, inputs_again, LINK_RUN_LOW_BASE, link_threads, debug_info)
+            image = x64_link_executable(names, inputs_again, LINK_RUN_LOW_BASE, link_threads, debug_info, link_roots)
         }
         errors = image.errors.move()
         undefined = image.undefined.move()
@@ -1433,6 +1437,17 @@ jet_cli_runtime_exports: fn(runtime_dir: String) -[FS, Env]> JetCLIRuntimeExport
     threads: jet_cli_runtime_bytes(runtime_dir, JET_CLI_RUNTIME_THREADS_FILE) ?? return JetCLIRuntimeExports{key: key, exports: exports, threads: None, failure: None}
     stops: jet_cli_runtime_bytes(runtime_dir, JET_CLI_RUNTIME_STOPS_FILE) ?? return JetCLIRuntimeExports{key: key, exports: exports, threads: Val(threads), failure: None}
     JetCLIRuntimeExports{key: key, exports: exports, threads: Val(threads), failure: None, stops: Val(stops)}
+}
+
+// The names `runtime`'s export list (JET_CLI_RUNTIME_EXPORTS_FILE) holds.
+jet_cli_runtime_export_names: fn(runtime: JetCLIRuntimeExports) -> [String] Never! {
+    names := [String]{}
+    exports: String.from_bytes(runtime.exports) ?? return names
+    rows: exports.split("\n").to_list()
+    loop symbol in rows.move() {
+        if symbol != "" -> names.push(symbol)
+    }
+    names
 }
 
 // The runtime routes no stop poll follows in a program built over `runtime`

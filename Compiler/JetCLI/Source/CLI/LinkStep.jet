@@ -186,7 +186,7 @@ jet_cli_link_step_own: fn(step: JetCLILinkStep, action: JetDriverBuildAction, op
         bytes.push(cli_files.read_bytes(jet_cli_entry_join(step.root, input)) ?? return jet_cli_link_step_failed(step, "{step.setting} names the link step `{step.hook}`, which links `{input}`, a file it can't read: {err}", None, "name only the link inputs the hook was given or files the package holds"))
     }
     threads: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}
-    image: x64_link_executable(action.inputs, bytes.move(), LINK_BASE, threads, build_options_value(options, "debug_info") != "false")
+    image: x64_link_executable(action.inputs, bytes.move(), LINK_BASE, threads, build_options_value(options, "debug_info") != "false", [String]{})
     if image.errors.len() > 0 {
         return jet_cli_link_step_failed(step, "{step.setting} names the link step `{step.hook}`, whose Jet link of `{step.output}` failed", Val(image.errors.join("\n")), JET_CLI_LINK_STEP_FIX)
     }

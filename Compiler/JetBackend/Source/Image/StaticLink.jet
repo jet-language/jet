@@ -3503,9 +3503,10 @@ link_resident_failure: fn(errors: &&[String]) -> X64ResidentLinkResult Never! {
 // link_resolve_program chooses: the objects' `_start`, the linker's musl
 // startup when the archives provide `__libc_start_main`, else `__jet_start`.
 // The ELF header is loaded at `base` (LINK_BASE, or LINK_RUN_BASE for
-// Image/Loader.jet).
-x64_link_executable: fn(names: [String], bufs: &&[[U8]], base: Int, threads: CompilerThreads, debug_info: Bool) -> X64ExecutableResult Never! {
-    linked := link_executable_image(names, bufs, base, None, threads, debug_info, None)
+// Image/Loader.jet). Each of `roots` an input defines stays in the image
+// with what it reaches, as if the entry called it.
+x64_link_executable: fn(names: [String], bufs: &&[[U8]], base: Int, threads: CompilerThreads, debug_info: Bool, roots: [String]) -> X64ExecutableResult Never! {
+    linked := link_executable_image(names, bufs, base, None, threads, debug_info, None, roots)
     linked.image.move()
 }
 
@@ -3559,8 +3560,8 @@ X64SplitExecutableResult: struct {
 // side debug file instead of the executable's tail. `debug_link` is the side
 // file's name, which the image's `.gnu_debuglink` gives with its CRC-32
 // (link_image_note_section): a debugger looks for it beside the image.
-x64_link_executable_split: fn(names: [String], bufs: &&[[U8]], base: Int, threads: CompilerThreads, debug_link: String) -> X64SplitExecutableResult Never! {
-    linked := link_executable_image(names, bufs, base, None, threads, true, Val(debug_link))
+x64_link_executable_split: fn(names: [String], bufs: &&[[U8]], base: Int, threads: CompilerThreads, debug_link: String, roots: [String]) -> X64SplitExecutableResult Never! {
+    linked := link_executable_image(names, bufs, base, None, threads, true, Val(debug_link), roots)
     X64SplitExecutableResult{bytes: linked.image.bytes.move(), debug_file: linked.debug_file.move(), build_id: linked.build_id.move(), errors: linked.image.errors.move(), undefined: linked.image.undefined.move()}
 }
 
@@ -3568,8 +3569,9 @@ x64_link_executable_split: fn(names: [String], bufs: &&[[U8]], base: Int, thread
 // extra roots, descriptor arrays or image copy for ordinary executable links.
 // A split link (`debug_link` the side file's name, x64_link_executable_split)
 // writes the debug tail to a side file, and the image's fault report gives
-// addresses under the build id that names it.
-link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &&X64ResidentLinkRequest?, threads: CompilerThreads, debug_info: Bool, debug_link: String?) -> X64ResidentLinkResult Never! {
+// addresses under the build id that names it. `roots` (x64_link_executable)
+// are collection entries beside the program's entry.
+link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &&X64ResidentLinkRequest?, threads: CompilerThreads, debug_info: Bool, debug_link: String?, roots: [String]) -> X64ResidentLinkResult Never! {
     split: debug_link != None
     c := link_context(bufs, base)
     if split -> c.fault_report = LinkFaultReport.Addresses
@@ -3590,6 +3592,11 @@ link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &
             global: link_intern(c, symbol)
             link_reference(c, global, false)
         }
+    }
+    // A root no input names stays out: it is no reference.
+    loop symbol in roots {
+        global: link_global_named(c, symbol)
+        if global >= 0 -> link_reference(c, global, false)
     }
     entry_g := link_resolve_program(c)
     entry_section := link_entry_section(c, entry_g)
@@ -3622,6 +3629,14 @@ link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &
                 return link_resident_failure([String]{"resident export `{symbol}` has an out-of-section extent"})
             }
             entries.push(section)
+        }
+    }
+    loop symbol in roots {
+        global: link_global_named(c, symbol)
+        if global < 0 -> next
+        final: link_final(c, global)
+        if c.g_kind[final] == LINK_G_FILE && c.g_section[final] >= 0 {
+            entries.push(c.g_section[final])
         }
     }
     link_collect(c, entries, link_linker_names())
