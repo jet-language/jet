@@ -3,13 +3,13 @@
 /// String storage makes Secret owned: ^ must consume rather than copy its field.
 Secret: struct {
     id: Int,
-    token: String,
+    _token: String,
 
     impl Close {
         close: fn(&&self) {
             print("close {self.id}")
             if self.id == 8 {
-                nested: Secret{id: 9, token: "owned"}
+                nested: Secret{id: 9, _token: "owned"}
                 print("nested {nested.id}")
             }
         }
@@ -37,7 +37,7 @@ PlainPair: struct {
 
 DrainPair: struct {
     first: Secret,
-    second: Secret,
+    _second: Secret,
 
     impl Close {
         close: fn(&&self) {
@@ -49,22 +49,22 @@ DrainPair: struct {
 }
 
 direct: fn() {
-    held: Secret{id: 8, token: "owned"}
+    held: Secret{id: 8, _token: "owned"}
     print("direct {held.id}")
 }
 
 wrapped: fn() {
-    held: Wrapper<Secret>{value: Secret{id: 1, token: "owned"}}
+    held: Wrapper<Secret>{value: Secret{id: 1, _token: "owned"}}
     print("wrapper {held.value.id}")
 }
 
 listed: fn() {
-    held: [Secret]{Secret{id: 2, token: "owned"}, Secret{id: 3, token: "owned"}}
+    held: [Secret]{Secret{id: 2, _token: "owned"}, Secret{id: 3, _token: "owned"}}
     print("list {held.len()}")
 }
 
 optional: fn(take_inner: Bool, id: Int) {
-    held := Val(Secret{id: id, token: "owned"})
+    held := Val(Secret{id: id, _token: "owned"})
     if {
         take_inner -> {
             taken: held.move() ?? return
@@ -75,20 +75,20 @@ optional: fn(take_inner: Bool, id: Int) {
 }
 
 replaced: fn() {
-    held := Wrapper<Secret>{value: Secret{id: 6, token: "owned"}}
+    held := Wrapper<Secret>{value: Secret{id: 6, _token: "owned"}}
     taken: held.value.move()
-    held.value = Secret{id: 7, token: "owned"}
+    held.value = Secret{id: 7, _token: "owned"}
     print("replace {taken.id} {held.value.id}")
 }
 
 remainder: fn() {
-    held: Pair<Secret>{first: Secret{id: 10, token: "owned"}, second: Secret{id: 11, token: "owned"}}
+    held: Pair<Secret>{first: Secret{id: 10, _token: "owned"}, second: Secret{id: 11, _token: "owned"}}
     taken: held.first.move()
     print("remainder {taken.id} {held.second.id}")
 }
 
 concrete_remainder: fn() {
-    held: ConcretePair{first: Secret{id: 12, token: "owned"}, second: Secret{id: 13, token: "owned"}}
+    held: ConcretePair{first: Secret{id: 12, _token: "owned"}, second: Secret{id: 13, _token: "owned"}}
     taken: held.first.move()
     print("concrete {taken.id} {held.second.id}")
 }
@@ -100,7 +100,7 @@ plain_remainder: fn() {
 }
 
 early_remainder: fn(leave: Bool, first_id: Int) {
-    held: Pair<Secret>{first: Secret{id: first_id, token: "owned"}, second: Secret{id: first_id + 1, token: "owned"}}
+    held: Pair<Secret>{first: Secret{id: first_id, _token: "owned"}, second: Secret{id: first_id + 1, _token: "owned"}}
     taken: held.first.move()
     print("early {taken.id} {held.second.id}")
     if leave {
@@ -110,7 +110,7 @@ early_remainder: fn(leave: Bool, first_id: Int) {
 }
 
 close_remainder: fn() {
-    held: DrainPair{first: Secret{id: 18, token: "owned"}, second: Secret{id: 19, token: "owned"}}
+    held: DrainPair{first: Secret{id: 18, _token: "owned"}, _second: Secret{id: 19, _token: "owned"}}
     print("close remainder")
 }
 
@@ -119,7 +119,7 @@ inner_resource_remainder: fn() {
     held: PlainPair{first: "outer", second: "kept"}
     taken: held.first.move()
     if true {
-        inner: Secret{id: 20, token: "owned"}
+        inner: Secret{id: 20, _token: "owned"}
         print("shadow {inner.id}")
     }
     print("outer {taken} {held.second}")

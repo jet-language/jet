@@ -6,7 +6,7 @@
 
 #Error
 LockError: struct {
-    reason: String,
+    _reason: String,
 }
 
 acquire: fn(resource: String) -> Lock { Lock{resource: resource} }
@@ -20,7 +20,7 @@ open: fn(resource: String) -> Lock LockError! {
 }
 
 open_early: fn(resource: String) -> Lock LockError! {
-    if resource == "" -> return Err(LockError{reason: "no name"})
+    if resource == "" -> return Err(LockError{_reason: "no name"})
     lock: acquire(resource)
     return Ok(lock)
 }

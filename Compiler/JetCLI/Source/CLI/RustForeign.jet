@@ -36,7 +36,6 @@ JET_CLI_RUST_SANDBOX_POLICY: "filesystem=source-readonly,output-private-copy;pro
 
 JetCLIRustForeignArtifact: struct {
     plan: JetDriverRustForeignPlan,
-    target_dir: String,
     release: String,
 }
 
@@ -819,7 +818,7 @@ jet_cli_rust_foreign_realize: fn(facts: JetDriverRustForeignFacts, link: JetDriv
     if facts.entries.len() == 0 -> return Ok(None)
     key: jet_cli_rust_foreign_key(facts, link)
     if jet_cli_rust_foreign_verified(key.plan, key.source, key.release, key.toolchain, key.link_closure) {
-        return Ok(Val(JetCLIRustForeignArtifact{plan: key.plan, target_dir: key.target_dir, release: key.release}))
+        return Ok(Val(JetCLIRustForeignArtifact{plan: key.plan, release: key.release}))
     }
     cargo: jet_cli_rust_foreign_cargo()
     jet_cli_rust_foreign_require_std()
@@ -828,11 +827,11 @@ jet_cli_rust_foreign_realize: fn(facts: JetDriverRustForeignFacts, link: JetDriv
     // death. No age-based stealing can admit two live writers to one key.
     key_lock: cli_files.lock(cli_files.join(key.cache, "{key.plan.key}.build-lock")) ?? return Err(jet_cli_rust_foreign_io("couldn't lock the FFI cache folder: {err}"))
     if jet_cli_rust_foreign_verified(key.plan, key.source, key.release, key.toolchain, key.link_closure) {
-        return Ok(Val(JetCLIRustForeignArtifact{plan: key.plan, target_dir: key.target_dir, release: key.release}))
+        return Ok(Val(JetCLIRustForeignArtifact{plan: key.plan, release: key.release}))
     }
     cli_files.create_dir_all(key.target_dir) ?? return Err(jet_cli_rust_foreign_io("couldn't create the FFI target folder: {err}"))
     jet_cli_rust_foreign_build(key.plan, key.cache, key.source, key.target_dir, key.release, key.toolchain, key.link_closure, cargo)
-    Ok(Val(JetCLIRustForeignArtifact{plan: key.plan, target_dir: key.target_dir, release: key.release}))
+    Ok(Val(JetCLIRustForeignArtifact{plan: key.plan, release: key.release}))
 }
 
 // `jet check` reports what Rust says about the helper without building or

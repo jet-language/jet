@@ -108,12 +108,28 @@ lists only its errors. A dependency's lints are not reported. A binding whose
 value acts when it goes (a resource, a guard, a child process, a temporary
 directory, a task handle, the handle a scope head names) is used by being
 held, so it is no unused local (L0101); nor is a binding read only in a call
-that fails to check or in a `.skip` reason. `#Allow(jet.Name, "why")` silences
-one lint, tidy error or library warning inside its target, and a package may
-deny a named lint through its lint policy, but a diagnostic code is never a
-policy value. JSON and LSP `code` stays the registered code; a
-`jet.report/v3` `severity` is `error`, `warning` or, for a tidy error, `tidy`,
-and LSP reports a tidy error at Error severity.
+that fails to check or in a `.skip` reason. A struct field no code reads is
+the tidy error L0106 and an enum case no code builds is L0107
+(D-MEMBER-LIVE1=A): writing a field never reads it and matching a case never
+builds it, while printing the value (`print`, an interpolation, `display`,
+`debug`, `to_string`) reads every field it shows, and encoding or decoding,
+derived equality, hashing or ordering, reflection (a user marker or derive on
+the type counts, and a marker type's own fields are read), generic code the
+type is handed to, a C layout, a foreign signature and an effect row (which
+names an effect type's members) read every field and build every case; derived
+cloning never reads. A value computed while compiling (a local's, a
+`T.reflect()` record's) builds the cases and reflects the types its code
+names, an entry `run` reads the failure it returns (it is shown when it
+escapes), and a `#Web.Form` model's fields are read as its form's controls.
+While a module's check is incomplete no member is judged, since a body that
+failed to check records no uses. A library's
+public members are exempt; an application's members and a library's private
+ones are judged. `#Allow(jet.Name, "why")` silences one lint, tidy error or
+library warning inside its target, and a package may deny a named lint through
+its lint policy, but a diagnostic code is never a policy value. JSON and LSP
+`code` stays the registered code; a `jet.report/v3` `severity` is `error`,
+`warning` or, for a tidy error, `tidy`, and LSP reports a tidy error at Error
+severity.
 
 Every human report renders from its row through
 `Compiler/JetFoundation/Source/Diagnostics/Render.jet`: `diagnostic_render`,

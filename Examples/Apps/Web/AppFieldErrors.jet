@@ -1,8 +1,9 @@
 // A service method reports the rules its argument can't check by itself as
 // field errors: `app.field_error(at:, reason:)` names the field by its path
 // in the argument, which the compiler checks against the argument's type
-// (`at: "asignee"` would not compile). The Crew refuses an assignee who is
-// not in the crew and a step with no title, each at its own field.
+// (`at: "asignee"` would not compile). The Crew refuses a task with no
+// title, an assignee who is not in the crew and a step with no title, each at
+// its own field.
 use app
 
 // One step of a task.
@@ -25,10 +26,13 @@ TaskError: enum {
 Crew: struct {
     members: [String],
 
-    // A signed-in caller adds a task: its assignee must be in the crew, and
-    // each of its steps needs a title.
+    // A signed-in caller adds a task: it needs a title, its assignee must be
+    // in the crew, and each of its steps needs a title.
     #App.SignedIn add_task: fn(self, draft: TaskDraft) -> Int TaskError! {
         errors := [FieldError]{}
+        if draft.title == "" {
+            errors.push(app.field_error(at: "title", reason: "Give the task a title."))
+        }
         if draft.assignee == .Val(who) {
             if !self.members.contains(who) {
                 errors.push(app.field_error(at: "assignee", reason: "Pick someone in this project."))

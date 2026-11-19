@@ -3,7 +3,7 @@
 // third and fourth alternatives, on one line or split across lines.
 Op: enum {
     A(x: Int, ys: [Int]),
-    B(x: Int, ys: [Int]),
+    _B(x: Int, ys: [Int]),
     C(x: Int, zs: [Int]),
     D(x: Int, ws: [Int]),
     E,
@@ -11,7 +11,7 @@ Op: enum {
 
 head: fn(op: Op) -> Int {
     if op == {
-        .A(x, _) | .B(x, _) | .C(x, _) | .D(x, _) -> x
+        .A(x, _) | ._B(x, _) | .C(x, _) | .D(x, _) -> x
         .E -> 0
     }
 }
@@ -19,7 +19,7 @@ head: fn(op: Op) -> Int {
 total: fn(op: Op) -> Int {
     sum := 0
     if op == {
-        .A(_, values) | .B(_, values) | .C(_, values) | .D(_, values) -> {
+        .A(_, values) | ._B(_, values) | .C(_, values) | .D(_, values) -> {
             loop value in values -> sum += value
         }
         .E -> {}

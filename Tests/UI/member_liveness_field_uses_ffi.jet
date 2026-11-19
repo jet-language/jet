@@ -1,0 +1,15 @@
+// @all_diags
+// A field of a C-layout struct is read by the foreign code it crosses to,
+// even when no Jet code reads it.
+use store: c.store
+
+#Layout(c) Record: struct {
+    id: U64,
+    flags: U32,
+}
+
+#Import c.store: module {
+    store_save: fn(record: Record) -> I32 = "store_save"
+}
+
+run: fn() { print(store.store_save(Record{id: 1, flags: 0})) }

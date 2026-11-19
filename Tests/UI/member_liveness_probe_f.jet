@@ -1,0 +1,31 @@
+// @all_diags
+// A field that is written but never read, and a case that is matched but
+// never built, are tidy errors: check fails, and run prints as before.
+User: struct {
+    name: String,
+    nickname: String,
+}
+
+Plan: enum {
+    Free,
+    Pro,
+    Legacy,
+}
+
+unused_helper: fn() -> Int { 1 }
+
+label: fn(plan: Plan) -> String {
+    if plan == {
+        .Free -> "free"
+        .Pro -> "pro"
+        .Legacy -> "legacy"
+    }
+}
+
+run: fn() {
+    user: User{name: "a", nickname: "b"}
+    print(user.name)
+    print(3)
+    print(label(.Free))
+    print(label(Plan.Pro))
+}

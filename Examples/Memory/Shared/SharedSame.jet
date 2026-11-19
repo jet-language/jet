@@ -8,14 +8,14 @@ package: {
 // identity only, like Rust's `Rc::ptr_eq`. `==` on `Shared<T>` stays an
 // error: two cells that hold equal values are still two cells.
 Counter: struct {
-    hits: Int,
+    _hits: Int,
 }
 
 same_cell: fn(left: Shared<Counter>, right: Shared<Counter>) -> Bool { return left.same(right) }
 
 run: fn() {
-    first: Shared{Counter{hits: 0}}
-    twin: Shared{Counter{hits: 0}}
+    first: Shared{Counter{_hits: 0}}
+    twin: Shared{Counter{_hits: 0}}
     print("self:{first.same(first)}")
     print("alias:{same_cell(first, first)}")
     print("twin:{same_cell(first, twin)}")

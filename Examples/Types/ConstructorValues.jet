@@ -10,12 +10,10 @@ Message: enum {
 
 Holder: enum<T> {
     Full(T),
-    Empty,
 }
 
 Sink: enum {
     Out(FileWriter),
-    Closed,
 }
 
 describe: fn(message: Message) -> String {
@@ -36,7 +34,6 @@ pair_with: fn(make: fn(*, left: Int, right: Int) -> Message) -> Message { make(r
 fill: fn(make: fn(Int) -> Holder<Int>, value: Int) -> Int {
     if make(value) == {
         .Full(held) -> held
-        .Empty -> 0
     }
 }
 

@@ -36,19 +36,19 @@ measure: fn(name: String, scenario: fn(Int, Int) -> Int, warm: Int) {
 }
 
 Node: struct {
-    label: String,
-    peer: Shared.Weak<Node>?,
+    _label: String,
+    _peer: Shared.Weak<Node>?,
 }
 
 weak_cycle: fn(from: Int, to: Int) -> Int {
     total := 0
     loop i in from..<to {
-        a := Shared{Node{label: "a {i}", peer: None}}
-        b := Shared{Node{label: "b {i}", peer: None}}
+        a := Shared{Node{_label: "a {i}", _peer: None}}
+        b := Shared{Node{_label: "b {i}", _peer: None}}
         wa := a.downgrade()
         wb := b.downgrade()
-        a.peer = Val(wb.copy())
-        b.peer = Val(wa.copy())
+        a._peer = Val(wb.copy())
+        b._peer = Val(wa.copy())
         total += a.strong_count() + b.strong_count() + i % 7
     }
     total

@@ -14,7 +14,6 @@ cache: module<K>(capacity: Int) {
     }
 
     Slot: enum {
-        Empty,
         Value(K),
     }
 
@@ -36,7 +35,6 @@ int_cache: cache<Int>(32)
 
 Mode: enum {
     Fast,
-    Safe,
 }
 
 tier_zero: module(flag: Bool, count: Int, letter: Char, label: String, mode: Mode) {
@@ -128,7 +126,6 @@ run: fn() {
     print(forwarded.key)
     if s == {
         .Value(v) -> { print(v) }
-        .Empty -> { print(0) }
     }
 
     values.show()
@@ -139,4 +136,6 @@ run: fn() {
     print(buffer.items[2])
     wrapped: int_laws.Wrapped{value: 91}
     print(wrapped.reveal())
+    bad: int_laws.SourceErr.Bad(5)
+    if bad == .Bad(v) -> print(v)
 }

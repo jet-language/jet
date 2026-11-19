@@ -2,23 +2,23 @@
 // Compiler/JetFoundation/Source/Types/Types.jet describe.
 #Error
 Bad: struct {
-    message: String,
+    _message: String,
 }
 
 // `T E!`: the contract follows the success type.
 parse: fn(text: String) -> Int Bad! {
-    if text == "" -> return Err(Bad{message: "empty"})
+    if text == "" -> return Err(Bad{_message: "empty"})
     7
 }
 
 // `E!` alone: the unit-success carrier.
 nothing: fn(ok: Bool) Bad! {
-    if !ok -> return Err(Bad{message: "no"})
+    if !ok -> return Err(Bad{_message: "no"})
 }
 
 // `T? E!`: an optional success with a contract.
 lookup: fn(key: String) -> Int? Bad! {
-    if key == "" -> return Err(Bad{message: "no key"})
+    if key == "" -> return Err(Bad{_message: "no key"})
     if key == "a" -> return 1
     None
 }

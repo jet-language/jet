@@ -3,7 +3,6 @@
 // used instead of a full clone. `Ledger` records only the balance on entry.
 Ledger: struct {
     balance: Int,
-    name: String,
 
     impl Rollback {
         Snapshot: LedgerSnap,
@@ -33,8 +32,8 @@ transfer: fn(from: &Ledger, to: &Ledger, amount: Int) -> Int TxnErr! {
 }
 
 run: fn() {
-    alice := Ledger{balance: 100, name: "Alice"}
-    bob := Ledger{balance: 0, name: "Bob"}
+    alice := Ledger{balance: 100}
+    bob := Ledger{balance: 0}
     print("=== successful transfer ===")
     r: transfer(alice, bob, 40) ?? -1
     print(alice.balance)

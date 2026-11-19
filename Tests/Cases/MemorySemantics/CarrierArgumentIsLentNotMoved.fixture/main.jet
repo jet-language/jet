@@ -17,7 +17,7 @@ Named: trait {
 }
 
 Folder: struct {
-    directory: Directory,
+    _directory: Directory,
 
     impl Named {
         label: fn(self) -[]> String { "folder" }
@@ -56,14 +56,14 @@ directory_twice: fn(path: String) -[FS, IO]> Int {
 }
 
 folder_twice: fn(path: String) -[FS, IO]> Int {
-    folder: Folder{directory: files.open_directory(path)}
+    folder: Folder{_directory: files.open_directory(path)}
     open_at: own_number("held")
     print("Folder?: {maybe_folder(Val(folder))}, {maybe_folder(Val(folder))}, open after both calls: {open_at >= 0 && own_number("held") == open_at}")
     open_at
 }
 
 named_twice: fn(path: String) -[FS, IO]> Int {
-    folder: Folder{directory: files.open_directory(path)}
+    folder: Folder{_directory: files.open_directory(path)}
     open_at: own_number("held")
     print("Named?: {maybe_named(Val(folder))}, {maybe_named(Val(folder))}, open after both calls: {open_at >= 0 && own_number("held") == open_at}")
     open_at

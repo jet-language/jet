@@ -3,13 +3,13 @@
 // reduction each, and a checked conversion `?? fallback` takes the fallback
 // for every value outside the target, on every tier.
 Canvas: struct {
-    width: Int,
+    _width: Int,
     bytes: [U8],
     words: [U32],
 }
 
 run: fn() {
-    canvas := Canvas{width: 4, bytes: [U8]{1, 2, 3, 4, 5, 6, 7, 8}, words: [U32]{1, 2, 3, 4}}
+    canvas := Canvas{_width: 4, bytes: [U8]{1, 2, 3, 4, 5, 6, 7, 8}, words: [U32]{1, 2, 3, 4}}
     shared: canvas.bytes.copy()
     fill_bytes(canvas, 200)
     fill_words(canvas, U32{0xC8C8C8C8})
@@ -19,7 +19,7 @@ run: fn() {
     fill_bytes(canvas, 7)
     print("Again{show_bytes(canvas.bytes)} kept{show_bytes(shared)}")
     // Empty frozen fields: no fill writes, a push grows them.
-    empty := Canvas{width: 0, bytes: [U8]{}, words: [U32]{}}
+    empty := Canvas{_width: 0, bytes: [U8]{}, words: [U32]{}}
     fill_bytes(empty, 1)
     empty.words.push(U32{3})
     print("Empty{show_bytes(empty.bytes)} grown{show_words(empty.words)}")

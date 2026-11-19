@@ -13,7 +13,7 @@ Res: struct {
 }
 
 Held: struct {
-    tracer: Res,
+    _tracer: Res,
     directory: Directory?,
 
     is_open: fn(self) -> Bool Never! {
@@ -82,7 +82,7 @@ create_wrappers: fn(snapshot_root: String, executables: [String]) -> Wrappers? {
     mounts := [String]{}
     loop executable in executables -> mounts.push("{snapshot_root}.exec-mount/{executable}")
     directory: files.open_directory(".") ?? return None
-    Val(Wrappers{root: "{snapshot_root}/wrappers/{mounts.len()}", held: Held{tracer: Res{name: "wrappers"}, directory: Val(directory)}})
+    Val(Wrappers{root: "{snapshot_root}/wrappers/{mounts.len()}", held: Held{_tracer: Res{name: "wrappers"}, directory: Val(directory)}})
 }
 
 build_lease: fn(bin: String, outputs: [Output], direct: Bool) -> Lease {

@@ -25,12 +25,12 @@ refresh: fn() app.Notice! {
 }
 
 Listening: struct {
-    scope: EventScope?,
+    _scope: EventScope?,
 }
 
 // The listener's scope, kept past the run: the page goes on after it, and
 // a scope's listeners stop with it.
-LISTENING: Shared{Listening{scope: None}}
+LISTENING: Shared{Listening{_scope: None}}
 
 run: fn() {
     graph: app.new("Crewboard").lifecycle(on_resume: fn() app.Notice! { refresh() })
@@ -42,6 +42,6 @@ run: fn() {
         }
     })
     held := LISTENING.guard_edit()
-    held.value.scope = Val(listening)
+    held.value._scope = Val(listening)
     print(if graph.launch() -> "launched" else -> "not launched")
 }

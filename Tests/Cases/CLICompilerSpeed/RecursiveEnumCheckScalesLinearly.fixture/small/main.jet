@@ -18,7 +18,7 @@ Node: enum {
 
 Layer0: struct {
     tree: Tree,
-    node: Node,
+    _node: Node,
 }
 
 use_0: fn(layer: Layer0) -> Int {
@@ -31,7 +31,7 @@ use_0: fn(layer: Layer0) -> Int {
 
 Layer1: struct {
     left: Layer0,
-    right: Layer0,
+    _right: Layer0,
     tree: Tree,
 }
 
@@ -50,7 +50,7 @@ use_1: fn(layer: Layer1) -> Int {
 
 Layer2: struct {
     left: Layer1,
-    right: Layer1,
+    _right: Layer1,
     tree: Tree,
 }
 
@@ -69,7 +69,7 @@ use_2: fn(layer: Layer2) -> Int {
 
 Layer3: struct {
     left: Layer2,
-    right: Layer2,
+    _right: Layer2,
     tree: Tree,
 }
 
@@ -88,7 +88,7 @@ use_3: fn(layer: Layer3) -> Int {
 
 Layer4: struct {
     left: Layer3,
-    right: Layer3,
+    _right: Layer3,
     tree: Tree,
 }
 
@@ -107,7 +107,7 @@ use_4: fn(layer: Layer4) -> Int {
 
 Layer5: struct {
     left: Layer4,
-    right: Layer4,
+    _right: Layer4,
     tree: Tree,
 }
 
@@ -126,7 +126,7 @@ use_5: fn(layer: Layer5) -> Int {
 
 Layer6: struct {
     left: Layer5,
-    right: Layer5,
+    _right: Layer5,
     tree: Tree,
 }
 
@@ -143,4 +143,13 @@ use_6: fn(layer: Layer6) -> Int {
     }
 }
 
-run: fn() { print(use_0(Layer0{tree: Tree.Leaf(1), node: Node.Plain(2)})) }
+// One value of every case, so each is built.
+samples: fn() -> [Tree] {
+    forest: Forest.Linked{head: Tree.Leaf(1), rest: Forest.Trees([Tree]{Tree.Leaf(2)})}
+    [Tree]{Tree.Branch{left: Tree.Leaf(0), right: Forest.Empty}, Tree.Tagged{label: "held", body: Node.Holds(None)}, Tree.Tagged{label: "grown", body: Node.Grows(forest)}}
+}
+
+run: fn() {
+    print(use_0(Layer0{tree: Tree.Leaf(1), _node: Node.Plain(2)}))
+    print(samples().len())
+}

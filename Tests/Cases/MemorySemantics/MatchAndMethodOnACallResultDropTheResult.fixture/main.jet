@@ -17,8 +17,8 @@ ROUNDS: 40000
 GROWTH_LIMIT_KB: 8192
 
 Row: struct {
-    name: String,
-    items: [String],
+    _name: String,
+    _items: [String],
 }
 
 Table: struct {
@@ -30,7 +30,7 @@ Table: struct {
 
 Shape: enum {
     Rows(rows: [Row]),
-    Empty,
+    _Empty,
 }
 
 status_kb: fn(field: String) -> Int {
@@ -46,7 +46,7 @@ status_kb: fn(field: String) -> Int {
 
 make_rows: fn(n: Int) -> [Row] {
     rows := [Row]{}
-    loop i in 0..<n -> rows.push(Row{name: "row {i}", items: [String]{"a {i}", "b {i}"}})
+    loop i in 0..<n -> rows.push(Row{_name: "row {i}", _items: [String]{"a {i}", "b {i}"}})
     rows
 }
 
@@ -66,7 +66,7 @@ make_text: fn(n: Int) -> String {
 match_binding: fn() -> Int {
     if make_shape(16) == {
         .Rows(rows) -> rows.len()
-        .Empty -> 0
+        ._Empty -> 0
     }
 }
 
@@ -74,7 +74,7 @@ match_binding: fn() -> Int {
 match_ignoring: fn() -> Int {
     if make_shape(16) == {
         .Rows(_) -> 1
-        .Empty -> 0
+        ._Empty -> 0
     }
 }
 

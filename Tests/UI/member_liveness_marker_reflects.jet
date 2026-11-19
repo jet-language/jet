@@ -1,0 +1,46 @@
+// @all_diags
+// A user marker reflects the type it marks, so the type's fields count as read
+// and its cases as built, and a marker type's own fields are read by its uses.
+Describe: struct {
+    impl Marker {
+        sites: [.Type],
+
+        expand: fn(self, target: Target) {
+            describe: fn(self) -> String { target.reflect().name }
+        }
+    }
+}
+
+Entity: struct {
+    kind: String,
+
+    impl Marker {
+        sites: [.Type],
+    }
+}
+
+#Describe
+Point: struct {
+    x: Int,
+    y: Int,
+}
+
+#Describe
+Color: enum {
+    Red,
+    Green,
+}
+
+#Entity("player")
+Player: struct {
+    hp: Int,
+}
+
+ENTITIES: #run Entity.reflect().uses.len()
+
+run: fn() {
+    print(Point{x: 3, y: 4}.describe())
+    print(Color.Green.describe())
+    _: Player{hp: 3}
+    print(ENTITIES)
+}

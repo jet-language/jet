@@ -3,7 +3,7 @@ Measure: trait {
 }
 
 Holder: struct<T> {
-    reader: fn(T) -> Int,
+    _reader: fn(T) -> Int,
 
     inspect: fn(self) -[]> Int { return 1 }
 
@@ -19,9 +19,9 @@ read_measure: fn(value: Measure) -[]> Int { return 2 }
 read_string: fn(value: String) -[]> Int { return value.len() }
 
 run: fn() {
-    callbacks: Holder<fn(Int) -> Int>{reader: read_callback}
-    measures: Holder<Measure>{reader: read_measure}
-    strings: Holder<String>{reader: read_string}
+    callbacks: Holder<fn(Int) -> Int>{_reader: read_callback}
+    measures: Holder<Measure>{_reader: read_measure}
+    strings: Holder<String>{_reader: read_string}
     print(callbacks.inspect())
     print(measures.inspect())
     _copied: strings.copy_tagged(#Input "copy")

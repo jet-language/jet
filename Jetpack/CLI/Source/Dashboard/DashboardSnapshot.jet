@@ -197,8 +197,9 @@ cli_dashboard_interactive_mode: fn(stdin_tty: Bool, stdout_tty: Bool) -> Bool Ne
 // superseded loader is dropped and its task finishes detached.
 DashboardLoader: struct {
     priv result: Receiver<DashboardLoadResult>,
-    // Keeps a scripted, never-completing load open (tests).
-    priv held: Sender<DashboardLoadResult>?,
+    // Keeps a scripted, never-completing load open (tests): only holding the
+    // sender matters, so nothing reads it.
+    priv _held: Sender<DashboardLoadResult>?,
 
     spawn: fn(verification: &StoreVerification) -[IO, FS, Env, Exec, Time, Time.Wait]> DashboardLoader Never! {
         {sender, receiver}: channel<DashboardLoadResult>(capacity: 1)
@@ -206,20 +207,20 @@ DashboardLoader: struct {
         // owner shares its locked verification ledger.
         ledger: verification.copy()
         task cli_dashboard_load_and_send(sender, ledger)
-        DashboardLoader{result: receiver, held: None}
+        DashboardLoader{result: receiver, _held: None}
     }
 
     // A load that has already finished with `result`.
     completed: fn(result: DashboardLoadResult) -> DashboardLoader Never! {
         {sender, receiver}: channel<DashboardLoadResult>(capacity: 1)
         cli_dashboard_send_result(sender, result.copy()).drop("the loader holds the receiver")
-        DashboardLoader{result: receiver, held: None}
+        DashboardLoader{result: receiver, _held: None}
     }
 
     // A load that never finishes.
     stalled: fn() -> DashboardLoader Never! {
         {sender, receiver}: channel<DashboardLoadResult>(capacity: 1)
-        DashboardLoader{result: receiver, held: Val(sender)}
+        DashboardLoader{result: receiver, _held: Val(sender)}
     }
 
     // The finished result, if any. Core's Receiver has no closed query

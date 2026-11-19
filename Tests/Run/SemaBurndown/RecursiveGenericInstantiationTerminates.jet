@@ -12,7 +12,7 @@ Key: struct {
 }
 
 Memo: struct<T> {
-    value: T,
+    _value: T,
     deps: [Key],
     rev: Int,
 }
@@ -24,7 +24,7 @@ QueryEngine: struct<T> {
     new: fn() -> QueryEngine<T> { QueryEngine<T>{memos: [Key:Memo<T>]{}, revision: 0} }
 
     put: fn(&self, key: Key, value: T, deps: [Key]) {
-        self.memos[key] = Memo<T>{value: value, deps: deps, rev: self.revision}
+        self.memos[key] = Memo<T>{_value: value, deps: deps, rev: self.revision}
     }
 
     memo_key_valid: fn(self, key: Key, depth: Int) -> Bool {
@@ -44,8 +44,8 @@ QueryEngine: struct<T> {
 }
 
 GCEntry: struct<O> {
-    object: O,
-    marked: Bool,
+    _object: O,
+    _marked: Bool,
 }
 
 GCState: struct<O> {
@@ -54,18 +54,18 @@ GCState: struct<O> {
     new: fn() -> GCState<O> { GCState<O>{entries: [U64:GCEntry<O>]{}} }
 
     insert: fn(&self, id: U64, object: O) {
-        self.entries[id] = GCEntry<O>{object: object, marked: false}
+        self.entries[id] = GCEntry<O>{_object: object, _marked: false}
     }
 
     count: fn(self) -> Int { self.entries.len() }
 }
 
 GCTestObject: struct {
-    n: Int,
+    _n: Int,
 }
 
 Tree: struct<T> {
-    value: T,
+    _value: T,
     children: [Tree<T>],
 
     count: fn(self) -> Int {
@@ -96,12 +96,12 @@ run: fn() {
     print(engine.memo_key_valid(key("b", 1), 0))
     print(engine.memo_key_valid(key("c", 1), 0))
     state := GCState<GCTestObject>.new()
-    state.insert(U64{1}, GCTestObject{n: 3})
-    state.insert(U64{2}, GCTestObject{n: 4})
+    state.insert(U64{1}, GCTestObject{_n: 3})
+    state.insert(U64{2}, GCTestObject{_n: 4})
     print(state.count())
-    leaf: Tree<String>{value: "b", children: [Tree<String>]{}}
-    middle: Tree<String>{value: "m", children: [Tree<String>]{leaf}}
-    root: Tree<String>{value: "a", children: [Tree<String>]{middle, leaf.copy()}}
+    leaf: Tree<String>{_value: "b", children: [Tree<String>]{}}
+    middle: Tree<String>{_value: "m", children: [Tree<String>]{leaf}}
+    root: Tree<String>{_value: "a", children: [Tree<String>]{middle, leaf.copy()}}
     print(root.count())
     print(depth(root))
 }

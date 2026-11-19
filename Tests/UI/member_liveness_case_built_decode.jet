@@ -1,0 +1,17 @@
+// @all_diags
+// Decoding builds a case: an enum the program only decodes has every case
+// built.
+use json: core.encoding.json
+
+Mode: enum {
+    Fast,
+    Safe,
+}
+
+run: fn() {
+    mode: json.decode<Mode>("\"Fast\"") ?? panic("bad mode")
+    if mode == {
+        .Fast -> { print("fast") }
+        .Safe -> print("safe")
+    }
+}

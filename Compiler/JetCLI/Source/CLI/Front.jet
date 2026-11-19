@@ -355,7 +355,6 @@ JetCLIFmtRequest: struct {
     explicit_failures: Bool,
     simplify: Bool,
     color: Bool,
-    quiet: Bool,
     // `--json`: the Rust status envelopes (`--check` clean/dirty/diff, preflight errors).
     json: Bool{false},
 }
@@ -2787,7 +2786,7 @@ jet_cli_new_plan: fn(name: String, template: String, annotated: Bool, quiet: Boo
 // `jet fmt` (`"fmt"`): `--lang` selects the environment formatter (`argv` is
 // the whole command line from `fmt`, `--` included); otherwise native `.jet`
 // formatting. Every word after `--` is a path, never a flag.
-jet_cli_fmt: fn(argv: [String], jet_argv: [String], args: [String], passthrough: [String]?, color: Bool, quiet: Bool) -> JetCLIPlan Never! {
+jet_cli_fmt: fn(argv: [String], jet_argv: [String], args: [String], passthrough: [String]?, color: Bool) -> JetCLIPlan Never! {
     loop argument in jet_argv {
         if argument == "--lang" || argument.starts_with("--lang=") {
             return JetCLIPlan.FmtLang{argv: argv, color: color}
@@ -2822,7 +2821,6 @@ jet_cli_fmt: fn(argv: [String], jet_argv: [String], args: [String], passthrough:
             explicit_failures: jet_argv.contains("--explicit-failures"),
             simplify: jet_argv.contains("--simplify"),
             color: color,
-            quiet: quiet,
             json: jet_argv.contains("--json"),
         },
     }
@@ -3296,7 +3294,7 @@ jet_cli_plan_with: fn(raw: [String], discovery: &WorkspaceDeclarationCache) -[FS
         "publish" -> return jet_cli_publish_plan(jet_argv, color, quiet)
         "yank" -> return jet_cli_yank_plan(jet_argv, color)
         "lint" -> return jet_cli_lint(jet_argv, args, color, quiet, json)
-        "fmt" -> return jet_cli_fmt(argv, jet_argv, args, passthrough, color, quiet)
+        "fmt" -> return jet_cli_fmt(argv, jet_argv, args, passthrough, color)
         "find" -> return jet_cli_find(jet_cli_tail(argv, 1), color, json)
         "parts" -> return jet_cli_project_parts(jet_cli_tail(argv, 1), color, json)
         // Dispatch arms over the raw argv (`raw[1..]` etc.).

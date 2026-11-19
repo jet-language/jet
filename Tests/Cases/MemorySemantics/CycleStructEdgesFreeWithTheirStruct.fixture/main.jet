@@ -43,7 +43,7 @@ Tree: struct {
 
 // A struct reaching itself through a tuple field and an enum.
 Pairing: struct {
-    name: String,
+    _name: String,
     pair: {label: String, link: Link},
 }
 
@@ -72,7 +72,7 @@ BLANK: Inner{n: 3, tag: "blank", back: []}
 
 // Mutually recursive enums with a struct on the cycle (Left -> Middle -> Right -> Left).
 Left: enum {
-    Leaf(n: String),
+    _Leaf(n: String),
     Wrap(middle: Middle),
 }
 
@@ -92,7 +92,7 @@ CycleOnly: struct {
 }
 
 Shape: enum {
-    Int,
+    _Int,
     Named(name: String),
     Other(items: [CycleOnly]),
 }
@@ -184,8 +184,8 @@ pairing_size: fn(pairing: Pairing) -> Int {
 via_tuple: fn(from: Int, to: Int) -> Int {
     total := 0
     loop i in from..<to {
-        inner: Pairing{name: "i{i}", pair: {label: "l{i}", link: Link.End}}
-        w: Pairing{name: "o", pair: {label: "m", link: Link.To{pairing: inner}}}
+        inner: Pairing{_name: "i{i}", pair: {label: "l{i}", link: Link.End}}
+        w: Pairing{_name: "o", pair: {label: "m", link: Link.To{pairing: inner}}}
         v := w.copy()
         v.pair = {label: "n{i}", link: Link.End}
         total += pairing_size(w) + pairing_size(v)
@@ -195,7 +195,7 @@ via_tuple: fn(from: Int, to: Int) -> Int {
 
 left_size: fn(left: Left) -> Int {
     if left == {
-        .Leaf(n) -> n.len()
+        ._Leaf(n) -> n.len()
         .Wrap(middle) -> middle.name.len() + right_size(middle.right)
     }
 }
@@ -219,7 +219,7 @@ mutual: fn(from: Int, to: Int) -> Int {
 
 shape_weight: fn(shape: Shape) -> Int {
     if shape == {
-        .Int -> 1
+        ._Int -> 1
         .Named(name) -> name.len()
         .Other(items) -> items.len()
     }

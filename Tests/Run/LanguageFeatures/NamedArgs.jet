@@ -11,7 +11,7 @@ force: fn(*, force: Bool) -> Int { 1 }
 apply: fn(action: fn(*, force: Bool) -> Int) -> Int { return action(force: true) }
 
 Logger: struct {
-    id: Int,
+    _id: Int,
 
     write: fn(self, level: String, parts: ...String) -> String {
         return [level, ...parts].join(" ")
@@ -25,7 +25,7 @@ run: fn() {
     print(connect("db", tls: false))
     print(identity<Int>(note: "generic", value: 7))
     print(apply(force))
-    logger: Logger{id: 0}
+    logger: Logger{_id: 0}
     print(logger.write(parts: "a", level: "L"))
     print(logger.write("M", "b", "c"))
 }

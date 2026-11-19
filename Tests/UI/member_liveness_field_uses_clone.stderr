@@ -1,0 +1,8 @@
+Error [jet.UnreadField]: Field `Draft.notes` is never read.
+  --> Tests/UI/member_liveness_field_uses_clone.jet:6:5
+    |
+  6 |     notes: String,
+    |     ^^^^^
+ Why: Code may write this field, but nothing reads it, so it carries data no part of the program uses. Printing, encoding, derived equality or ordering, reflection and foreign code count as reads; derived cloning does not.
+ Fix: Remove the field, or rename `notes` to `_notes` when it is intentional.
+More: jet-lang.dev/e/L0106

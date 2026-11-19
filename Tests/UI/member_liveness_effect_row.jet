@@ -1,0 +1,25 @@
+// @all_diags
+// An effect type's members are named in effect rows, so its cases count as
+// built and its fields as read.
+Ledger: enum {
+    Read,
+    Post,
+}
+
+impl Ledger.Effect {}
+
+Bucket: struct {
+    name: String,
+}
+
+impl Bucket.Effect {}
+
+post: fn() -[Ledger.Post]> {}
+
+upload: fn() -[Bucket{name: "photos"}]> {}
+
+run: fn() {
+    post()
+    upload()
+    print("done")
+}
