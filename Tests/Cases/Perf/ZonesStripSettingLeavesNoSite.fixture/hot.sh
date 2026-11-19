@@ -7,7 +7,9 @@
 # site count, then per site a rel32 from the field's end to the site and a
 # zero word. A site, while zones are off, is a `test eax, imm32` (a9) over
 # the rel32 of the jump to its stub; the stub ends in the first jump back
-# to the instruction after the site.
+# to the instruction after the site, read from the image's bytes (a jmp
+# rel32, e9, or rel8, eb): a release image keeps no section headers, so a
+# disassembly would show none of its code.
 hot() {
     objdump -p "$1" | awk '/LOAD/ { getline; if ($6 == "r-x") { print $2; exit } }'
 }
@@ -15,7 +17,6 @@ plain=$(($(hot "$1")))
 zoned=$(($(hot "$2")))
 objdump -p "$2" > zoned.headers
 od -An -v -tu1 "$2" > zoned.bytes
-objdump -d "$2" > zoned.asm
 spans=$(awk '
 function hex(s,    i, v) {
     sub(/^0x/, "", s)
@@ -45,20 +46,8 @@ FILENAME == ARGV[1] {
     }
     next
 }
-FILENAME == ARGV[2] {
-    for (i = 1; i <= NF; i++) b[n++] = $i
-    next
-}
 {
-    # Each jmp of the disassembly: its address, length and target.
-    if (split($0, f, "\t") < 3 || f[3] !~ /^jmp /) next
-    sub(/:$/, "", f[1])
-    gsub(/ /, "", f[1])
-    split(f[3], w, " ")
-    jumps++
-    jat[jumps] = hex(f[1])
-    jlen[jumps] = split(f[2], x, " ")
-    jto[jumps] = hex(w[2])
+    for (i = 1; i <= NF; i++) b[n++] = $i
 }
 END {
     for (k = 1; k <= rows; k++) {
@@ -75,15 +64,17 @@ END {
         site = offset(address)
         if (site < 0 || b[site] != 169) { print "-2"; exit }
         stub = address + 5 + s32(site + 1)
+        at = offset(stub)
         end = 0
-        for (j = 1; j <= jumps && !end; j++) {
-            if (jat[j] >= stub && jto[j] == address + 5) end = jat[j] + jlen[j]
+        for (j = 0; at >= 0 && j < 256 && !end; j++) {
+            if (b[at + j] == 233 && stub + j + 5 + s32(at + j + 1) == address + 5) end = stub + j + 5
+            if (b[at + j] == 235 && stub + j + 2 + (b[at + j + 1] >= 128 ? b[at + j + 1] - 256 : b[at + j + 1]) == address + 5) end = stub + j + 2
         }
         if (!end) { print "-3"; exit }
         sum += end - stub
     }
     print sum + 15 * count
-}' zoned.headers zoned.bytes zoned.asm)
+}' zoned.headers zoned.bytes)
 if [ "$spans" = -1 ]; then
     echo "the zoned image has no jet.zone_sites note"
 elif [ "$spans" = -2 ]; then

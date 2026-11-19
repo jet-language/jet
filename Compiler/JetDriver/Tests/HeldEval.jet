@@ -4,8 +4,9 @@
 // compile of the program. A type the program's function doesn't return, or
 // a name it doesn't bind, is reported. An effect is refused, whether the
 // function uses it itself or a function it calls does (the call's solved
-// row). One probe checks one function after another, with the program's
-// symbol table and checked types lent to each check and given back.
+// row). One probe checks one function after another, in the module each
+// names, with the program's symbol table and checked types lent to each
+// check and given back.
 use {
     jet_driver.[
         JetDriverAuthorizedSourceFile,
@@ -27,6 +28,16 @@ HELD_EVAL_PATH: "/held-fixture/main.jet"
 // The display path the compile names the entry by (jet_driver_display_path).
 HELD_EVAL_DISPLAY_PATH: "main.jet"
 
+// A second file of the fixture, and its display path. The fixture is a
+// package (HELD_EVAL_MANIFEST), so main.jet sees lib.jet's public names.
+HELD_EVAL_LIB_PATH: "/held-fixture/lib.jet"
+
+HELD_EVAL_LIB_DISPLAY_PATH: "lib.jet"
+
+HELD_EVAL_MANIFEST_PATH: "/held-fixture/package.jet"
+
+HELD_EVAL_MANIFEST: "name: \"held_fixture\"\n"
+
 held_eval_source: fn() -> String {
     [String]{
         "helper: fn(value: Int) -> Int {{ value * 2 }}",
@@ -35,14 +46,22 @@ held_eval_source: fn() -> String {
         "    value",
         "}}",
         "run: fn() {{",
-        "    print(helper(3) + shout(4))",
+        "    print(helper(3) + shout(4) + tripled(5))",
         "}}",
         "",
     }.join("\n")
 }
 
-held_eval_check: fn(opened: &JetDriverHeldOpened, text: String) -> SemaScriptProbeChecked {
-    done := jet_driver_held_eval_check(opened.eval, opened.inputs.functions, opened.inputs.symbols.move(), opened.types.move(), text)
+held_eval_lib_source: fn() -> String {
+    [String]{
+        "tripled: fn(value: Int) -> Int {{ thrice(value) }}",
+        "priv thrice: fn(value: Int) -> Int {{ value * 3 }}",
+        "",
+    }.join("\n")
+}
+
+held_eval_check: fn(opened: &JetDriverHeldOpened, path: String, text: String) -> SemaScriptProbeChecked {
+    done := jet_driver_held_eval_check(opened.eval, path, opened.inputs.functions, opened.inputs.symbols.move(), opened.types.move(), text)
     opened.inputs.symbols = done.symbols.move()
     opened.types = done.types.move()
     done.checked.move()
@@ -55,7 +74,11 @@ held_eval_check: fn(opened: &JetDriverHeldOpened, text: String) -> SemaScriptPro
                 canonical_path: "/held-fixture",
                 identity: "held-root",
                 allow_hardlinks: false,
-                files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: HELD_EVAL_PATH, relative_path: "main.jet", identity: "held-file", source: held_eval_source()}},
+                files: [JetDriverAuthorizedSourceFile]{
+                    JetDriverAuthorizedSourceFile{path: HELD_EVAL_PATH, relative_path: "main.jet", identity: "held-file", source: held_eval_source()},
+                    JetDriverAuthorizedSourceFile{path: HELD_EVAL_LIB_PATH, relative_path: "lib.jet", identity: "held-lib-file", source: held_eval_lib_source()},
+                    JetDriverAuthorizedSourceFile{path: HELD_EVAL_MANIFEST_PATH, relative_path: "package.jet", identity: "held-manifest", source: HELD_EVAL_MANIFEST},
+                },
                 foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
             },
         },
@@ -67,27 +90,37 @@ held_eval_check: fn(opened: &JetDriverHeldOpened, text: String) -> SemaScriptPro
     compiled := jet_driver_compile(request)
     assert(compiled.complete, "the fixture checks: {compiled.diagnostics.map(fn(row) { row.what })}")
     held := compiled.held.move() ?? panic("a held check keeps its compile state")
-    opened := jet_driver_held_eval_open(held, HELD_EVAL_DISPLAY_PATH) ?? panic("the entry's display path names its module")
+    opened := jet_driver_held_eval_open(held) ?? panic("the held program opens at its entry module")
     assert(opened.inputs.functions.any(fn(row) { row.name == "helper" }), "the lowering inputs hold the checked functions")
     assert(opened.types.len() > 0, "the probe's checked types are handed to the lowering")
 
-    sum := held_eval_check(opened, "jet_debug_expression: fn(total: Int) -> Int {{\n    helper(total) + 1\n}}\n")
+    sum := held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    helper(total) + 1\n}}\n")
     assert(sum.complete && sum.function != None, "the call of the program's function checks: {sum.diagnostics.map(fn(row) { row.what })}")
     assert_eq(sum.diagnostics.len(), 0)
 
-    mistyped := held_eval_check(opened, "jet_debug_expression: fn(total: Int) -> Bool {{\n    helper(total)\n}}\n")
+    mistyped := held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Bool {{\n    helper(total)\n}}\n")
     assert(mistyped.diagnostics.len() > 0, "an Int where the function returns Bool is reported")
 
-    unbound := held_eval_check(opened, "jet_debug_expression: fn(total: Int) -> Int {{\n    missing(total)\n}}\n")
+    unbound := held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    missing(total)\n}}\n")
     assert(unbound.diagnostics.len() > 0, "a name the program doesn't bind is reported")
 
-    called := held_eval_check(opened, "jet_debug_expression: fn(total: Int) -> Int {{\n    shout(total)\n}}\n")
+    called := held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    shout(total)\n}}\n")
     assert(!called.complete && called.diagnostics.any(fn(row) { row.code == "E0747" && row.what.contains("`shout`") }), "a call whose solved row has an effect is refused: {called.diagnostics.map(fn(row) { row.what })}")
 
-    printed := held_eval_check(opened, "jet_debug_expression: fn(total: Int) -> Int {{\n    print(total)\n    total\n}}\n")
+    printed := held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    print(total)\n    total\n}}\n")
     assert(!printed.complete && printed.diagnostics.any(fn(row) { row.code == "E0747" && row.what.contains("this expression") }), "an effect the function uses itself is refused: {printed.diagnostics.map(fn(row) { row.what })}")
 
-    again := held_eval_check(opened, "jet_debug_expression: fn(total: Int) -> Int {{\n    helper(helper(total))\n}}\n")
+    again := held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    helper(helper(total))\n}}\n")
     assert(again.complete && again.diagnostics.len() == 0, "the probe checks the next function as it did the first: {again.diagnostics.map(fn(row) { row.what })}")
+
+    // A stop in lib.jet: the probe enters its module, whose private names
+    // bind there, and back.
+    private := held_eval_check(opened, HELD_EVAL_LIB_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    thrice(total) + tripled(total)\n}}\n")
+    assert(private.complete && private.diagnostics.len() == 0, "the other module's own function checks there: {private.diagnostics.map(fn(row) { row.what })}")
+    back := held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    helper(tripled(total))\n}}\n")
+    assert(back.complete && back.diagnostics.len() == 0, "the probe checks in the entry module again: {back.diagnostics.map(fn(row) { row.what })}")
+
+    nowhere := held_eval_check(opened, "other.jet", "jet_debug_expression: fn(total: Int) -> Int {{\n    total\n}}\n")
+    assert(!nowhere.complete && nowhere.function == None, "a file no checked module has checks nothing")
     assert(opened.inputs.symbols.ranges.len() > 0 && opened.types.len() > 0, "each check gives the symbol table and the checked types back")
 }

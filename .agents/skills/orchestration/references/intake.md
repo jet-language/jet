@@ -60,7 +60,10 @@ One folder per submission in the orchestrator's inbox
 - `msg`: the commit message: what, why, evidence, disclosures.
 - `tests`: one command per line, run from the tree root, with `jet` meaning
   the batch compiler. Name the narrowest proof.
-- `cards`: one `#card cN claim` line per criterion claimed.
+- `cards`: one `#card cN claim` line per criterion claimed. `N` in `cN` is the
+  criterion's stable `n` as `tower card show` prints it, never its place in
+  the list: the two part once a row is deleted, and counting places meets the
+  wrong row.
 - `meta`: `base: <sha>`, `stack: <earlier submissions it needs, or none>`,
   `seed: none` or `seed: <what the seed must carry>`.
 

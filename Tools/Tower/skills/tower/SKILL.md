@@ -71,6 +71,9 @@ approved contract is not a ballot.
   no code to land declares `--kind decision|duplicate|obsolete` and names the
   ratified decision, the surviving card, or the reason. A row that belongs on
   another card moves with `--move n --to '#M'`, which keeps both rows linked.
+- Name a row by its stable `n` (`--meet n`, `--reopen n`, `--edit n`, `#N cK`),
+  read from `tower card show`. `n` equals the row's place in the list only
+  until a row is deleted.
 - A row's proof is a field, not a sentence: `--proof "jet test Compiler
   --profile cases --filter F"` on `--add` or `--edit n`. `tower prove --card
   '#N'` prints the plan; add `--yes --jet PATH --tree DIR --commit SHA --by X`

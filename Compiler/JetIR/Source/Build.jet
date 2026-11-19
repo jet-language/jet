@@ -1772,8 +1772,13 @@ ir_build_roots_in: fn(program: &&IRProgram, root_keys: [String], threads: Compil
 // reach, as ir_build_program does, with no program entry: compile-time
 // evaluation runs each root itself. The program comes back with the build.
 ir_build_root_rows: fn(program: &&IRProgram, rows: [Int], threads: CompilerThreads) -> IRBuildKept Never! {
-    roots: loop row in rows -> IRWaveJob{key: program.functions[row].key.copy(), row: row, args: [Type]{}, lambda: -1, part: -1, local: -1}
+    roots: ir_build_root_jobs(program, rows)
     ir_build_waves_kept(program, roots, false, threads, None)
+}
+
+// The build jobs of the functions at `rows` of `program`, roots of a build.
+ir_build_root_jobs: fn(program: IRProgram, rows: [Int]) -> [IRWaveJob] Never! {
+    loop row in rows -> IRWaveJob{key: program.functions[row].key.copy(), row: row, args: [Type]{}, lambda: -1, part: -1, local: -1}
 }
 
 // A debugger's evaluations against a running program image (JetCLI
@@ -1848,7 +1853,12 @@ ir_build_held_root: fn(program: &&IRProgram, root: &&FnBody, text: String, threa
             p.functions.push(function.move())
         }
     }
-    kept := ir_build_root_rows(p, [Int]{row}, threads)
+    // A build that binds the image's functions (ir_held_symbols) builds the
+    // root and the few functions it reaches that the image doesn't hold: on
+    // this thread, not on the threads the program's size admits
+    // (ir_build_waves_kept).
+    roots: ir_build_root_jobs(p, [Int]{row})
+    kept := if p.checks.held.len() > 0 -> ir_build_waves_parted(p, roots, false, 1, None) else -> ir_build_waves_kept(p, roots, false, threads, None)
     if kept.program.checks.core == .Val(image) -> ir_core_cells_bind(kept.result.program, image)
     // The program's own cells are the running image's (a debuggable image
     // exports them, ir_debug_cell_exports), not copies placed beside the
