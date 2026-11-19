@@ -23,12 +23,17 @@
 // any other request is answered with the program stopped, which then runs
 // on. `restart` takes the launch
 // configuration's `stopOnEntry` and `args` again; an attached program does
-// not restart. One thread, frames are the Jet frames, and a frame's one
-// scope holds its locals as the console shows them, each with its Jet
-// type. `showRawFrames` adds the machine frames, each named `[raw]` with its
-// instruction pointer, and each its one scope, `[raw] Locals`, of its pc and
-// canonical frame address. A frame id or variable reference names the stop
-// it was made at; once the program runs again, it names nothing.
+// not restart. Each task of the program is a thread, by its task id as the
+// console's `tasks` lists it, named by its label, its id and its state; the
+// `stopped` event names the task the stop is in, which a step steps and
+// `evaluate` answers in. A task's frames are its Jet frames: a running
+// task's its thread's, a parked task's those its fiber saved when it
+// parked; a queued task has none yet. A frame's one scope holds its locals
+// as the console shows them, each with its Jet type. `showRawFrames` adds
+// the machine frames, each named `[raw]` with its instruction pointer, and
+// each its one scope, `[raw] Locals`, of its pc and canonical frame address.
+// A frame id or variable reference names the stop it was made at; once the
+// program runs again, it names nothing.
 // A breakpoint may carry a `condition` and a `logMessage`, and `evaluate`
 // answers an expression in a paused frame, all through the debugger's one
 // evaluator, the compiler (DebugCompile.jet, jet_debug's NativeEval.jet). The
@@ -50,7 +55,7 @@ use {
     dap_files: core.files
     dap_json: core.encoding.json
     dap_term: core.term
-    jet_debug.[NATIVE_ATTACH_INVALID, NativeDebugError, NativeEvalRefused, NativeLocal, NativeSaid, NativeSession, NativeSettled, NativeStop, NativeStopKind, native_debug_hex, native_debug_jet_frame, native_debug_report, native_debug_rule_place, native_function_at, native_lookup]
+    jet_debug.[NATIVE_ATTACH_INVALID, NATIVE_DEBUG_TASK_RUNNING, NativeDebugError, NativeEvalRefused, NativeLocal, NativeSaid, NativeSession, NativeSettled, NativeStop, NativeStopKind, native_debug_hex, native_debug_jet_frame, native_debug_report, native_debug_rule_place, native_function_at, native_lookup]
     jet_foundation.[foundation_json_integer, foundation_json_quote]
 }
 
@@ -69,16 +74,25 @@ JetCLIDapRequest: struct {
     arguments: [{key: String, value: Dyn}],
 }
 
+// A frame a `stackTrace` listed at this stop: its task, and its index in
+// that task's backtrace, a machine frame's from JET_CLI_DAP_RAW.
+JetCLIDapFrame: struct {
+    task: Int,
+    index: Int,
+}
+
 // E2238: a frame, scope or variable reference of an earlier stop.
 JET_CLI_DAP_STALE: "E2238"
 
-// A frame id is its stop's number (JetCLIDap.stops) above its frame's
-// index at that stop, in the low JET_CLI_DAP_FRAME_BITS bits; the machine
-// frames `showRawFrames` adds are indexed from JET_CLI_DAP_RAW. Stop
-// numbers wrap at JET_CLI_DAP_STOPS, which keeps every variable reference
-// (twice a frame id, plus 1 or 2) below 2^31, as DAP asks.
+// A frame id is its stop's number (JetCLIDap.stops) above its row among the
+// frames this stop's `stackTrace` answers listed (JetCLIDap.frames), in the
+// low JET_CLI_DAP_FRAME_BITS bits. Stop numbers wrap at JET_CLI_DAP_STOPS,
+// which keeps every variable reference (twice a frame id, plus 1 or 2)
+// below 2^31, as DAP asks.
 JET_CLI_DAP_FRAME_BITS: 16
 
+// The machine frames `showRawFrames` adds are indexed from here in their
+// task's frames.
 JET_CLI_DAP_RAW: 32768
 
 JET_CLI_DAP_STOPS: 8192
@@ -99,6 +113,13 @@ JetCLIDap: struct {
     // The number of the stop the program is at, which its frame ids and
     // variable references name.
     stops: Int{0},
+    // The frames this stop's `stackTrace` answers listed, which its frame
+    // ids name by row, and each one's row by its task and index
+    // (jet_cli_dap_frame_key).
+    frames: [JetCLIDapFrame]{[JetCLIDapFrame]{}},
+    rows: [Int:Int]{[Int:Int]{}},
+    // The task the program stopped in.
+    task: Int{1},
     // Whether the session ended (`disconnect`, or the end of stdin).
     done: Bool{false},
     // The requests that came while the program ran, which wait for its
@@ -110,6 +131,8 @@ JetCLIDap: struct {
 
     handle: fn(&self, session: &NativeSession, input: &&JetCLIDapRequest, entry: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never! {
         request := input.move()
+        // Another task's frames are read within the request that names them.
+        session.focus = None
         if request.command == {
             "initialize" -> {
                 back: if session.replaying() -> ",\"supportsStepBack\":true" else -> ""
@@ -175,7 +198,15 @@ JetCLIDap: struct {
                 // A program not running is paused already.
                 self.respond(request, "{{}}")
             }
-            "threads" -> self.respond(request, "{{\"threads\":[{{\"id\":1,\"name\":\"run\"}}]}}")
+            "threads" -> {
+                if !self.launched || !session.alive() {
+                    return self.respond(request, "{{\"threads\":[{{\"id\":1,\"name\":\"run\"}}]}}")
+                }
+                if jet_cli_dap_threads(session) == {
+                    .Ok(body) -> { self.respond(request, body) }
+                    .Err(failure) -> self.fail(request, failure.detail)
+                }
+            }
             "stackTrace" -> {
                 if !self.launched || !session.alive() {
                     return self.fail(request, "the program is not paused")
@@ -189,7 +220,8 @@ JetCLIDap: struct {
                     }
                     return self.refuse(request, NATIVE_ATTACH_INVALID, "field showRawFrames must be true or false")
                 }
-                if jet_cli_dap_stack(session, entry, self.stops, raw) == {
+                asked: jet_cli_dap_int(request.arguments, "threadId")
+                if self.stack(session, entry, if asked > 0 -> asked else -> self.task, raw) == {
                     .Ok(body) -> { self.respond(request, body) }
                     .Err(failure) -> self.fail(request, failure.detail)
                 }
@@ -199,11 +231,8 @@ JetCLIDap: struct {
                     return self.fail(request, "the program is not paused")
                 }
                 id: jet_cli_dap_int(request.arguments, "frameId")
-                index: self.frame_index(id)
-                if index < 0 {
-                    return self.refuse(request, JET_CLI_DAP_STALE, "reference {id} expired when execution resumed")
-                }
-                scope: if index >= JET_CLI_DAP_RAW -> "{{\"name\":\"[raw] Locals\",\"presentationHint\":\"registers\",\"variablesReference\":{id * 2 + 2},\"expensive\":false}}" else -> "{{\"name\":\"Locals\",\"presentationHint\":\"locals\",\"variablesReference\":{id * 2 + 1},\"expensive\":false}}"
+                frame: self.frame_of(id) ?? return self.refuse(request, JET_CLI_DAP_STALE, "reference {id} expired when execution resumed")
+                scope: if frame.index >= JET_CLI_DAP_RAW -> "{{\"name\":\"[raw] Locals\",\"presentationHint\":\"registers\",\"variablesReference\":{id * 2 + 2},\"expensive\":false}}" else -> "{{\"name\":\"Locals\",\"presentationHint\":\"locals\",\"variablesReference\":{id * 2 + 1},\"expensive\":false}}"
                 self.respond(request, "{{\"scopes\":[{scope}]}}")
             }
             "variables" -> {
@@ -214,11 +243,16 @@ JetCLIDap: struct {
                 if reference <= 0 -> return self.respond(request, "{{\"variables\":[]}}")
                 // A scope's reference is twice its frame's id, plus 1 for
                 // Locals and 2 for `[raw] Locals`.
-                index: self.frame_index((reference - 1) >> 1)
-                if index < 0 {
-                    return self.refuse(request, JET_CLI_DAP_STALE, "reference {reference} expired when execution resumed")
+                frame: self.frame_of((reference - 1) >> 1) ?? return self.refuse(request, JET_CLI_DAP_STALE, "reference {reference} expired when execution resumed")
+                if self.focus(session, frame.task) == {
+                    .Ok(found) -> {
+                        if !found {
+                            return self.fail(request, "task {frame.task} has no frames at this stop")
+                        }
+                    }
+                    .Err(failure) -> return self.fail(request, failure.detail)
                 }
-                if jet_cli_dap_variables(session, index) == {
+                if jet_cli_dap_variables(session, frame.index) == {
                     .Ok(body) -> { self.respond(request, body) }
                     .Err(failure) -> self.fail(request, failure.detail)
                 }
@@ -227,11 +261,15 @@ JetCLIDap: struct {
                 if !self.launched || !session.alive() {
                     return self.fail(request, "the program is not paused")
                 }
-                // No frame names the innermost.
+                // No frame names the stopped task's innermost.
                 id: jet_cli_dap_int(request.arguments, "frameId")
-                index: if id < 0 -> 0 else -> self.frame_index(id)
-                if index < 0 {
-                    return self.refuse(request, JET_CLI_DAP_STALE, "reference {id} expired when execution resumed")
+                index := 0
+                if id >= 0 {
+                    frame: self.frame_of(id) ?? return self.refuse(request, JET_CLI_DAP_STALE, "reference {id} expired when execution resumed")
+                    if frame.task != self.task {
+                        return self.fail(request, "`evaluate` answers in task {self.task}, where the program stopped; task {frame.task}'s values are its frames' Variables")
+                    }
+                    index = frame.index
                 }
                 if index >= JET_CLI_DAP_RAW {
                     return self.fail(request, "a raw frame has no Jet locals to evaluate with; choose a Jet frame")
@@ -244,6 +282,10 @@ JetCLIDap: struct {
             "continue" | "next" | "stepIn" | "stepOut" -> {
                 if !self.launched || !session.alive() {
                     return self.fail(request, "the program is not paused")
+                }
+                asked: jet_cli_dap_int(request.arguments, "threadId")
+                if request.command != "continue" && asked > 0 && asked != self.task {
+                    return self.fail(request, "a step steps task {self.task}, where the program stopped, not task {asked}")
                 }
                 self.respond(request, if request.command == "continue" -> "{{\"allThreadsContinued\":true}}" else -> "{{}}")
                 word: if request.command == {
@@ -435,27 +477,85 @@ JetCLIDap: struct {
         self.done = true
     }
 
-    // The index at this stop of the frame `id` names (jet_cli_dap_stack's);
-    // -1 when it names another stop's.
-    frame_index: fn(self, id: Int) -> Int Never! {
-        if id < 0 || (id >> JET_CLI_DAP_FRAME_BITS) != self.stops -> return -1
-        id & ((1 << JET_CLI_DAP_FRAME_BITS) - 1)
+    // `stackTrace` of task `task` at this stop: its Jet frames, innermost
+    // first, each by its row in `frames`, which `scopes`, `variables` and
+    // `evaluate` name it by; with `raw`, then its machine frames. A task
+    // with no stack yet (a queued one) has none.
+    stack: fn(&self, session: &NativeSession, entry: String, task: Int, raw: Bool) -> String NativeDebugError! {
+        if !(self.focus(session, task) ?? return Err(err)) {
+            return Ok("{{\"stackFrames\":[],\"totalFrames\":0}}")
+        }
+        frames: session.backtrace() ?? return Err(err)
+        base: if entry.starts_with("/") -> dap_files.dirname(entry) else -> dap_files.join(dap_files.cwd() ?? ".", dap_files.dirname(entry))
+        rows := [String]{}
+        loop (index, frame) in frames {
+            if !native_debug_jet_frame(frame) -> next
+            id: self.frame_id(task, index) ?? return Err(NativeDebugError{detail: "this stop's frames outnumber the frame ids a stop has"})
+            source: "{{\"name\":{foundation_json_quote(dap_files.basename(frame.file))},\"path\":{foundation_json_quote(dap_files.join(base, frame.file))}}}"
+            // A caller's frame at a call with a call-site row names the
+            // call's column; any other frame its line.
+            column: if frame.column > 0 -> frame.column else -> 1
+            rows.push("{{\"id\":{id},\"name\":{foundation_json_quote(frame.function)},\"source\":{source},\"line\":{frame.line},\"column\":{column}}}")
+        }
+        if raw {
+            machine: session.unwind() ?? return Err(err)
+            loop (index, frame) in machine {
+                id: self.frame_id(task, JET_CLI_DAP_RAW + index) ?? return Err(NativeDebugError{detail: "this stop's frames outnumber the frame ids a stop has"})
+                function: if native_function_at(session.image, native_lookup(index, frame.pc)) == .Val(found) -> found.name else -> "?"
+                rows.push("{{\"id\":{id},\"name\":{foundation_json_quote("[raw] {function}")},\"line\":0,\"column\":0,\"instructionPointerReference\":\"{native_debug_hex(frame.pc)}\",\"presentationHint\":\"subtle\"}}")
+            }
+        }
+        Ok("{{\"stackFrames\":[{rows.join(",")}],\"totalFrames\":{rows.len()}}}")
+    }
+
+    // Read task `task`'s frames (NativeSession.focus_task) unless the
+    // program stopped in it; false when it has no stack.
+    focus: fn(self, session: &NativeSession, task: Int) -> Bool NativeDebugError! {
+        session.focus = None
+        if task == self.task -> return Ok(true)
+        session.focus_task(task)
+    }
+
+    // The id of task `task`'s frame `index` at this stop: its row in
+    // `frames`, added when first listed. None once the rows fill the frame
+    // id's low bits.
+    frame_id: fn(&self, task: Int, index: Int) -> Int? Never! {
+        key: jet_cli_dap_frame_key(task, index)
+        row: self.rows.get(key) ?? {
+            if self.frames.len() >= 1 << JET_CLI_DAP_FRAME_BITS -> return None
+            added: self.frames.len()
+            self.frames.push(JetCLIDapFrame{task: task, index: index})
+            self.rows[key] = added
+            added
+        }
+        Val((self.stops << JET_CLI_DAP_FRAME_BITS) + row)
+    }
+
+    // The frame `id` names at this stop; None when it names another stop's.
+    frame_of: fn(self, id: Int) -> JetCLIDapFrame? Never! {
+        if id < 0 || (id >> JET_CLI_DAP_FRAME_BITS) != self.stops -> return None
+        row: id & ((1 << JET_CLI_DAP_FRAME_BITS) - 1)
+        if row >= self.frames.len() -> return None
+        Val(JetCLIDapFrame{task: self.frames[row].task, index: self.frames[row].index})
     }
 
     // Where `settled` left the program: what the run said on the way, then
     // `stopped` (for `reason` unless a breakpoint stopped it), or its end.
     // The stop is a new one: the frame ids and variable references of the
     // last name nothing.
-    report: fn(&self, session: &NativeSession, settled: NativeSettled, reason: String) -[FS, IO, Time.Wait]> Never! {
+    report: fn(&self, session: &NativeSession, settled: NativeSettled, reason: String) -[FS, IO, Time.Wait, FFI.Asm]> Never! {
         self.tell(session, settled.said)
         self.stops = (self.stops + 1) & (JET_CLI_DAP_STOPS - 1)
+        self.frames = [JetCLIDapFrame]{}
+        self.rows = [Int:Int]{}
         stop: settled.stop
         if stop.kind == {
             .Paused -> {
+                self.task = session.stopped_task()
                 hit: settled.hit
                 why: if hit != None -> "breakpoint" else -> reason
                 ids: if hit == .Val(number) -> ",\"hitBreakpointIds\":[{number}]" else -> ""
-                self.event("stopped", "{{\"reason\":\"{why}\",\"threadId\":1,\"allThreadsStopped\":true{ids}}}")
+                self.event("stopped", "{{\"reason\":\"{why}\",\"threadId\":{self.task},\"allThreadsStopped\":true{ids}}}")
             }
             .Exited -> {
                 self.event("exited", "{{\"exitCode\":{stop.code}}}")
@@ -668,31 +768,24 @@ jet_cli_dap_string: fn(members: [{key: String, value: Dyn}], name: String) -> St
     ""
 }
 
-// `stackTrace` at the stop numbered `stop`: the Jet frames, innermost first,
-// each by its stop and its index in the session's backtrace, which
-// `scopes`, `variables` and `evaluate` name it by; with `raw`, then the
-// machine frames, each by its index from JET_CLI_DAP_RAW.
-jet_cli_dap_stack: fn(session: &NativeSession, entry: String, stop: Int, raw: Bool) -> String NativeDebugError! {
-    frames: session.backtrace() ?? return Err(err)
-    base: if entry.starts_with("/") -> dap_files.dirname(entry) else -> dap_files.join(dap_files.cwd() ?? ".", dap_files.dirname(entry))
-    first: stop << JET_CLI_DAP_FRAME_BITS
+// `threads`: each task of the stopped program by its id, named by its
+// label, its id and its state, with what it waits on.
+jet_cli_dap_threads: fn(session: &NativeSession) -> String NativeDebugError! {
+    tasks: session.task_rows() ?? return Err(err)
     rows := [String]{}
-    loop (index, frame) in frames {
-        if !native_debug_jet_frame(frame) -> next
-        source: "{{\"name\":{foundation_json_quote(dap_files.basename(frame.file))},\"path\":{foundation_json_quote(dap_files.join(base, frame.file))}}}"
-        // A caller's frame at a call with a call-site row names the call's
-        // column; any other frame its line.
-        column: if frame.column > 0 -> frame.column else -> 1
-        rows.push("{{\"id\":{first + index},\"name\":{foundation_json_quote(frame.function)},\"source\":{source},\"line\":{frame.line},\"column\":{column}}}")
+    loop row in tasks {
+        wait: if row.task.wait != "" && row.task.state != NATIVE_DEBUG_TASK_RUNNING -> ", {row.task.wait}" else -> ""
+        name: "{row.task.label} (task {row.task.id}, {row.state}{wait})"
+        rows.push("{{\"id\":{row.task.id},\"name\":{foundation_json_quote(name)}}}")
     }
-    if raw {
-        machine: session.unwind() ?? return Err(err)
-        loop (index, frame) in machine {
-            function: if native_function_at(session.image, native_lookup(index, frame.pc)) == .Val(found) -> found.name else -> "?"
-            rows.push("{{\"id\":{first + JET_CLI_DAP_RAW + index},\"name\":{foundation_json_quote("[raw] {function}")},\"line\":0,\"column\":0,\"instructionPointerReference\":\"{native_debug_hex(frame.pc)}\",\"presentationHint\":\"subtle\"}}")
-        }
-    }
-    Ok("{{\"stackFrames\":[{rows.join(",")}],\"totalFrames\":{rows.len()}}}")
+    Ok("{{\"threads\":[{rows.join(",")}]}}")
+}
+
+// The key of task `task`'s frame `index` among a stop's listed frames
+// (JetCLIDap.rows): an index, a machine frame's from JET_CLI_DAP_RAW, is
+// below twice JET_CLI_DAP_RAW.
+jet_cli_dap_frame_key: fn(task: Int, index: Int) -> Int Never! {
+    task * JET_CLI_DAP_RAW * 2 + index
 }
 
 // `variables` of the machine frame `index`'s `[raw] Locals`: its pc and

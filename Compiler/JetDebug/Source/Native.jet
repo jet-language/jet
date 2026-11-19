@@ -401,6 +401,11 @@ NativeSession: struct {
     // and the byte it replaced.
     sites: [Int:Int],
     selected: Int,
+    // The registers `bt`, `frame` and `locals` unwind from in place of the
+    // stopped thread's: another task's (focus_task), while the DAP reads
+    // that task's frames; None unwinds the stop's. Nothing runs while it is
+    // set.
+    focus: [Int]?{None},
     // The watches, which number with the breakpoints; the change the last
     // watch stop saw (`total: 0 -> 2`); and what the next report says first
     // (a watch dropped when its frame returned).
@@ -1705,6 +1710,7 @@ NativeSession: struct {
     // The selected thread's frames, innermost first, each inlined run its
     // own frame above the frame it is inlined into.
     backtrace: fn(&self) -> [NativeFrame] NativeDebugError! {
+        if self.focus == .Val(focused) -> return self.backtrace_from(focused)
         registers: self.registers() ?? return Err(err)
         self.backtrace_from(registers)
     }
@@ -1728,21 +1734,41 @@ NativeSession: struct {
     }
 
     // `tasks`: every task of the program by id, with its state, what it
-    // waits on and its Jet frames; `*` marks the task this stop is in. The
-    // facts are the runtime's task registry (JetRuntime Observe.jet), the
-    // one `jet inspect live` publishes, read from the stopped program. A
-    // task on a thread shows that thread's stack, a parked task the stack
-    // its fiber saved when it parked (native_task_registers). Task 1 is the
-    // program's main thread.
+    // waits on and its Jet frames; `*` marks the task this stop is in
+    // (task_rows).
     tasks_text: fn(&self) -> String NativeDebugError! {
+        rows: self.task_rows() ?? return Err(err)
+        text := ""
+        loop row in rows {
+            task: row.task
+            mark: if row.current -> "*" else -> " "
+            wait: if task.wait != "" && task.state != NATIVE_DEBUG_TASK_RUNNING -> "  {task.wait}" else -> ""
+            canceled: if task.canceled -> "  canceled" else -> ""
+            text = "{text}{mark} {task.id}  {task.label}  {row.state}{wait}{canceled}\n"
+            if row.registers == .Val(found) {
+                frames: self.backtrace_from(found) ?? return Err(err)
+                stack: native_debug_backtrace(frames, indent: "    ")
+                text = "{text}{stack}"
+            }
+        }
+        Ok(text)
+    }
+
+    // Every task of the program, by id. The facts are the runtime's task
+    // registry (JetRuntime Observe.jet), the one `jet inspect live`
+    // publishes, read from the stopped program. A task on a thread unwinds
+    // from that thread's registers, a parked task from those its fiber saved
+    // when it parked (native_task_registers). Task 1 is the program's main
+    // thread.
+    task_rows: fn(&self) -> [NativeTaskRow] NativeDebugError! {
         self.ready() ?? return Err(err)
         memory: NativeMemory{trace: Val(self.trace), blocks: [NativeBlock]{}}
-        current: self.trace.thread
+        stopped: self.trace.thread
         threads := [NativeTaskThread]{}
         loop thread in self.threads {
             self.trace.thread = thread.id
             found: x64_trace_registers(self.trace)
-            self.trace.thread = current
+            self.trace.thread = stopped
             registers: found ?? next
             on: self.thread_task(thread.id, registers)
             threads.push(NativeTaskThread{id: thread.id, registers: registers, fiber: on.fiber, task: on.task})
@@ -1756,8 +1782,8 @@ NativeSession: struct {
             tasks.push(NativeTask{id: 1, label: "root", state: -1, wait: "", canceled: false, fiber: 0})
         }
         tasks.sort_by(fn(left: NativeTask, right: NativeTask) { left.id <=> right.id })
-        text := ""
-        loop task in tasks {
+        rows := [NativeTaskRow]{}
+        loop task in tasks.move() {
             on: native_task_thread(threads, task)
             registers := [Int]?{None}
             if {
@@ -1774,17 +1800,35 @@ NativeSession: struct {
                 on >= 0 && threads[on].registers[X64_TRACE_ORIG_RAX] >= 0 -> "blocked"
                 else -> "running"
             }
-            mark: if on >= 0 && threads[on].id == current -> "*" else -> " "
-            wait: if task.wait != "" && task.state != NATIVE_DEBUG_TASK_RUNNING -> "  {task.wait}" else -> ""
-            canceled: if task.canceled -> "  canceled" else -> ""
-            text = "{text}{mark} {task.id}  {task.label}  {state}{wait}{canceled}\n"
-            if registers == .Val(found) {
-                frames: self.backtrace_from(found) ?? return Err(err)
-                stack: native_debug_backtrace(frames, indent: "    ")
-                text = "{text}{stack}"
-            }
+            current: on >= 0 && threads[on].id == stopped
+            rows.push(NativeTaskRow{task: task.move(), state: state, current: current, registers: registers.move()})
         }
-        Ok(text)
+        Ok(rows)
+    }
+
+    // The id of the task this stop is in (thread_task); 1, the main
+    // thread's, when the stopped thread's control names none.
+    stopped_task: fn(self) -> Int Never! {
+        registers: self.registers() ?? return 1
+        task: self.thread_task(self.trace.thread, registers).task
+        if task > 0 -> task else -> 1
+    }
+
+    // Unwind task `task` from here on (`focus`): false, and the stop's
+    // frames, when the program has no such task with a stack (a queued
+    // task has none yet).
+    focus_task: fn(&self, task: Int) -> Bool NativeDebugError! {
+        self.focus = None
+        rows: self.task_rows() ?? return Err(err)
+        loop row in rows.move() {
+            if row.task.id != task -> next
+            if row.registers.move() == .Val(found) {
+                self.focus = Val(found)
+                return Ok(true)
+            }
+            return Ok(false)
+        }
+        Ok(false)
     }
 
     // The fiber and the task of thread `id`, whose registers are
@@ -4479,8 +4523,10 @@ NativeSession: struct {
         Ok(NativeReturn.Returned)
     }
 
-    // The current thread's frames, innermost first (unwind_from).
+    // The current thread's frames, innermost first (unwind_from), or the
+    // focused task's (`focus`).
     unwind: fn(self) -> [NativeUnwound] NativeDebugError! {
+        if self.focus == .Val(focused) -> return self.unwind_from(focused)
         registers: self.registers() ?? return Err(err)
         self.unwind_from(registers)
     }
@@ -5321,6 +5367,17 @@ NativeTask: struct {
     canceled: Bool,
     fiber: Int,
     control: Int{0},
+}
+
+// A task as `tasks` lists it (NativeSession.task_rows): the registry's row,
+// its state as shown, whether this stop is in it, and the registers its
+// stack unwinds from: its thread's, or those its fiber saved when it
+// parked; None for a task with no stack yet (a queued one).
+NativeTaskRow: struct {
+    task: NativeTask,
+    state: String,
+    current: Bool,
+    registers: [Int]?,
 }
 
 // A thread of the stopped program as `tasks` matches it to a task: its id,

@@ -1,0 +1,52 @@
+# Optimized code keeps its Jet meaning over `jet debug --dap`. In an -O2
+# image `sum_squares` is inlined into `run`; stopped on its loop's body, the
+# stack is the inlined `sum_squares` at line 6 above `run` at the call, line
+# 14, and the inlined frame's Variables are its own Jet locals with their
+# types. A step stays in the inlined loop, and the image, run on, prints
+# what it prints undebugged. The fixture is the lldb interop case's and must
+# stay in jet fmt form. No other debugger is on PATH.
+fixture: LldbShowsO2InlinedFramesAndTheirLocals.fixture
+env: NO_COLOR=1
+step: jet build -O2 prog.jet
+exit: 0
+session dap content-length: jet debug --dap {work}/.jet/build/prog
+env: PATH={work}/no-tools
+send dap: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\",\"linesStartAt1\":true,\"columnsStartAt1\":true}}"
+recv dap until $.request_seq = 1 timeout 30s every 100ms
+send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{\"program\":\"{work}/.jet/build/prog\",\"stopOnEntry\":false,\"args\":[]}}"
+recv dap until $.event = "initialized" timeout 30s every 100ms
+send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/prog.jet\"},\"breakpoints\":[{\"line\":6}]}}"
+recv dap until $.request_seq = 3 timeout 30s every 100ms
+json: stdout doc $.body.breakpoints[0].verified = true # the inlined copy has code on line 6
+send dap: "{\"seq\":4,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{}}"
+recv dap until $.event = "stopped" timeout 30s every 100ms
+json: stdout doc $.body.reason = "breakpoint"
+send dap: "{\"seq\":5,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.request_seq = 5 timeout 30s every 100ms
+json: stdout doc $.body.stackFrames[0].name = "sum_squares" # the stop is in the inlined copy, named as its function
+json: stdout doc $.body.stackFrames[0].line = 6
+json: stdout doc $.body.stackFrames[1].name = "run" # its caller's frame
+json: stdout doc $.body.stackFrames[1].line = 14 # at the call
+stdout: !~ "__jet_" # no runtime frames among the Jet ones
+capture: inlined stdout doc $.body.stackFrames[0].id
+send dap: "{\"seq\":6,\"type\":\"request\",\"command\":\"scopes\",\"arguments\":{\"frameId\":{cap:inlined}}}"
+recv dap until $.request_seq = 6 timeout 30s every 100ms
+capture: locals stdout doc $.body.scopes[?name="Locals"][0].variablesReference
+send dap: "{\"seq\":7,\"type\":\"request\",\"command\":\"variables\",\"arguments\":{\"variablesReference\":{cap:locals}}}"
+recv dap until $.request_seq = 7 timeout 30s every 100ms
+json: stdout doc $.success = true
+json: stdout doc $.body.variables[?name="total"][0].type = "Int" # the inlined function's own local, with its Jet type
+json: stdout doc $.body.variables[?name="i"][0].type = "Int" # the loop's variable too
+send dap: "{\"seq\":8,\"type\":\"request\",\"command\":\"next\",\"arguments\":{\"threadId\":1}}"
+recv dap collect until ndjson $[?request_seq=8][?type="response"][?command="next"][?success=true] #>= 1 && ndjson $[?event="stopped"] #>= 1 timeout 30s
+send dap: "{\"seq\":9,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.request_seq = 9 timeout 30s every 100ms
+json: stdout doc $.body.stackFrames[0].name = "sum_squares" # the step stays in the inlined loop
+send dap: "{\"seq\":10,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/prog.jet\"},\"breakpoints\":[]}}"
+recv dap until $.request_seq = 10 timeout 30s every 100ms
+send dap: "{\"seq\":11,\"type\":\"request\",\"command\":\"continue\",\"arguments\":{\"threadId\":1}}"
+recv dap collect until ndjson $[?event="terminated"] #>= 1 timeout 30s
+stdout: ~ "332833500" # the image runs unchanged
+stdout: ~ "\"event\":\"exited\"" # and the program ends
+close dap
+exit: 0

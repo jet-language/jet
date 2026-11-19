@@ -1,0 +1,67 @@
+# Each task of the program is a thread over `jet debug --dap`. `count`
+# stops at a breakpoint on its own thread, and the `stopped` event names its
+# task, 3; `threads` lists the main task, `drain` (task 2) blocked on its
+# channel receive and `count` running. `stackTrace` of a task gives that
+# task's own frames: the parked task's are those its fiber saved, and its
+# frame's Variables read its own locals. `evaluate` answers in the stopped
+# task, and a step of another task is refused, as neither can run there.
+# The fixture is tasks_lists_every_task's and must stay in jet fmt form:
+# line 11 is count's loop body, line 4 drain's receive. No other debugger
+# is on PATH.
+fixture: TasksListsEveryTask.fixture
+env: NO_COLOR=1
+env: PATH={work}/no-tools
+session dap content-length: jet debug --dap {work}/prog.jet
+send dap: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\",\"linesStartAt1\":true,\"columnsStartAt1\":true}}"
+recv dap until $.request_seq = 1 timeout 30s every 100ms
+send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{\"program\":\"{work}/prog.jet\",\"stopOnEntry\":false,\"args\":[]}}"
+recv dap until $.event = "initialized" timeout 30s every 100ms
+send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/prog.jet\"},\"breakpoints\":[{\"line\":11}]}}"
+recv dap until $.request_seq = 3 timeout 30s every 100ms
+json: stdout doc $.body.breakpoints[0].verified = true
+send dap: "{\"seq\":4,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{}}"
+recv dap until $.event = "stopped" timeout 30s every 100ms
+json: stdout doc $.body.reason = "breakpoint"
+json: stdout doc $.body.threadId = 3 # the stop is in count's task
+send dap: "{\"seq\":5,\"type\":\"request\",\"command\":\"threads\",\"arguments\":{}}"
+recv dap until $.request_seq = 5 timeout 30s every 100ms
+json: stdout doc $.body.threads[0].id = 1 # the main task
+json: stdout doc $.body.threads[1].id = 2
+json: stdout doc $.body.threads[2].id = 3
+stdout: ~ "(task 2, blocked, channel receive)" # drain is parked on its receive
+stdout: ~ "(task 3, running)" # count runs
+send dap: "{\"seq\":6,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":3}}"
+recv dap until $.request_seq = 6 timeout 30s every 100ms
+json: stdout doc $.body.stackFrames[0].name = "count"
+json: stdout doc $.body.stackFrames[0].line = 11
+send dap: "{\"seq\":7,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":2}}"
+recv dap until $.request_seq = 7 timeout 30s every 100ms
+json: stdout doc $.success = true
+json: stdout doc $.body.stackFrames[?name="drain"][0].line = 4 # the parked task's own frame, where it waits
+capture: drain_frame stdout doc $.body.stackFrames[?name="drain"][0].id
+send dap: "{\"seq\":8,\"type\":\"request\",\"command\":\"scopes\",\"arguments\":{\"frameId\":{cap:drain_frame}}}"
+recv dap until $.request_seq = 8 timeout 30s every 100ms
+capture: drain_scope stdout doc $.body.scopes[0].variablesReference
+send dap: "{\"seq\":9,\"type\":\"request\",\"command\":\"variables\",\"arguments\":{\"variablesReference\":{cap:drain_scope}}}"
+recv dap until $.request_seq = 9 timeout 30s every 100ms
+json: stdout doc $.success = true
+json: stdout doc $.body.variables[?name="receiver"][0].type = "Receiver<Int>" # drain's own parameter, with its Jet type
+send dap: "{\"seq\":10,\"type\":\"request\",\"command\":\"evaluate\",\"arguments\":{\"expression\":\"receiver\",\"frameId\":{cap:drain_frame},\"context\":\"repl\"}}"
+recv dap until $.request_seq = 10 timeout 30s every 100ms
+json: stdout doc $.success = false
+stdout: ~ "answers in task 3, where the program stopped" # an evaluation runs in the stopped task
+send dap: "{\"seq\":11,\"type\":\"request\",\"command\":\"evaluate\",\"arguments\":{\"expression\":\"k * 2\",\"context\":\"repl\"}}"
+recv dap until $.request_seq = 11 timeout 30s every 100ms
+json: stdout doc $.success = true
+json: stdout doc $.body.result = "0" # the first pass of count's loop
+send dap: "{\"seq\":12,\"type\":\"request\",\"command\":\"next\",\"arguments\":{\"threadId\":2}}"
+recv dap until $.request_seq = 12 timeout 30s every 100ms
+json: stdout doc $.success = false
+stdout: ~ "a step steps task 3, where the program stopped, not task 2"
+send dap: "{\"seq\":13,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/prog.jet\"},\"breakpoints\":[]}}"
+recv dap until $.request_seq = 13 timeout 30s every 100ms
+send dap: "{\"seq\":14,\"type\":\"request\",\"command\":\"continue\",\"arguments\":{\"threadId\":3}}"
+recv dap collect until ndjson $[?event="terminated"] #>= 1 timeout 30s
+stdout: ~ "\"output\":\"count 12" # count resumes and finishes
+stdout: ~ "drain 2" # drain receives the value
+stdout: ~ "\"event\":\"exited\"" # and the program ends
