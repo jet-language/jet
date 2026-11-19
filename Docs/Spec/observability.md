@@ -228,13 +228,17 @@ virtually by 30%: each sample that lands in the line adds 30% of its period
 to a global delay, and every other thread pauses at its next sample until
 it has paid that delay. The line therefore runs as if it were 30% faster
 relative to the rest of the program. A thread that was blocked (its last
-sample is more than 5 ms old) owes nothing for the time it was blocked.
+sample is more than 5 ms old and it has since given up its CPU of its own
+accord, not merely been preempted) owes nothing for the time it was blocked.
 Delays are paid at sampler ticks, so a thread pays its debt up to one
-sample period late. A progress point counts passes: each closed zone by
+sample period late; while the lens runs, a thread's timer slack is 1 ns,
+so its pauses barely oversleep. A progress point counts passes: each closed zone by
 its name, each finished task as `task`, each answered HTTP request as
 `request`, and each `core.perf.progress(name)`. Outside the lens these record nothing. At the
 end of each experiment the runtime writes its line, its wall time, the
-delay it inserted and each point's passes to the samples file. The trace
+delay it inserted and each point's passes to the samples file. An
+experiment whose line the checked source does not name counts neither as
+a baseline nor toward any line. The trace
 keeps the predictions in its `causal` receipt section (type
 `JetPerfCausal`). For each point, a line's prediction is how much sooner
 each pass comes, 1 - (baseline rate / line rate), where the line's rate
