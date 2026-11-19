@@ -40,7 +40,6 @@ use jet_foundation.[
     ast_lambda_single_expr_span,
     expr_span,
     symbol_key_text,
-    symbol_none,
     checked_symbol_local,
     type_identity_equal,
     type_name,
@@ -567,36 +566,43 @@ sema_expression_lambda_add_effect_facts: fn(program: SemaProgramTables, source: 
     index := first_call
     loop index < source.call_facts.len() {
         fact := source.call_facts[index]
-        detail: sema_call_site_detail(fact)
-        if {
-            // A foreign body adds its one effect root; a C binding whose row
-            // no descriptor owns is open-world as well.
-            detail.foreign_effect_root != None -> {
-                root: detail.foreign_effect_root ?? ""
-                sema_expression_lambda_append_name(direct, root)
-                spans.push(TEffectSpan{name: root, span: fact.span})
-                if detail.foreign_opaque -> maximal = true
-            }
-            fact.callee != None -> {
-                callee: fact.callee ?? symbol_none()
-                sema_expression_lambda_append_name(edges, sema_symbol_key(program, source, callee))
-            }
-            fact.facts.local_lambda != None -> {
-                if sema_expression_lambda_add_local_facts(fact.facts.local_lambda, fact.span, direct, edges, spans) {
-                    maximal = true
-                }
-            }
-            fact.facts.effect_bound != None -> {
-                row: fact.facts.effect_bound ?? [EffectRowEntry]{}
-                loop entry in row {
-                    if entry.name.starts_with("!") || entry.name.starts_with("..") -> next
-                    sema_expression_lambda_append_name(direct, entry.name)
-                    spans.push(TEffectSpan{name: entry.name, span: fact.span})
-                }
-            }
-            else -> { maximal = true }
-        }
+        callee_key := String?{None}
+        if fact.callee == .Val(callee) -> callee_key = Val(sema_symbol_key(program, source, callee))
+        sema_expression_lambda_add_call_effects(fact, callee_key, direct, edges, spans, maximal)
         index += 1
+    }
+}
+
+// What call `fact` adds to the effect facts of the body it is in, its
+// callee keyed `callee_key` (None: no callee). A function the debugger
+// checks alone gathers its facts the same way (JetSema ScriptHelpers.jet
+// sema_script_probe_check_func).
+sema_expression_lambda_add_call_effects: fn(fact: SemaCallSiteFact, callee_key: String?, direct: &[String], edges: &[String], spans: &[TEffectSpan], maximal: &Bool) Never! {
+    detail: sema_call_site_detail(fact)
+    if {
+        // A foreign body adds its one effect root; a C binding whose row
+        // no descriptor owns is open-world as well.
+        detail.foreign_effect_root != None -> {
+            root: detail.foreign_effect_root ?? ""
+            sema_expression_lambda_append_name(direct, root)
+            spans.push(TEffectSpan{name: root, span: fact.span})
+            if detail.foreign_opaque -> maximal = true
+        }
+        callee_key != None -> sema_expression_lambda_append_name(edges, callee_key)
+        fact.facts.local_lambda != None -> {
+            if sema_expression_lambda_add_local_facts(fact.facts.local_lambda, fact.span, direct, edges, spans) {
+                maximal = true
+            }
+        }
+        fact.facts.effect_bound != None -> {
+            row: fact.facts.effect_bound ?? [EffectRowEntry]{}
+            loop entry in row {
+                if entry.name.starts_with("!") || entry.name.starts_with("..") -> next
+                sema_expression_lambda_append_name(direct, entry.name)
+                spans.push(TEffectSpan{name: entry.name, span: fact.span})
+            }
+        }
+        else -> { maximal = true }
     }
 }
 

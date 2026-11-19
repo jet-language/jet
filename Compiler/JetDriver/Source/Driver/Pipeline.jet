@@ -44,6 +44,10 @@ use {
         sema_derive_template_loop_waits,
         SemaProgramTables,
         SemaScopeEnvironment,
+        SemaScriptProbe,
+        SemaScriptProbeChecked,
+        sema_script_probe_check_func,
+        sema_script_probe_over,
         SemaSourceLocation,
         SemaSourceOrigin,
         SemaSourceSegment,
@@ -159,6 +163,7 @@ use {
         SemaEvalProbe,
         SemaEvalProbeAnswer,
         SemaEvalProbes,
+        sema_eval_held_effect_refusals,
         sema_eval_probe_answers,
         sema_eval_probe_parse,
         sema_eval_probes,
@@ -280,7 +285,7 @@ use {
         EffectModuleSource,
         RuntimeInterfaceRow,
     ]
-    jet_parser.[parser_guest_import_symbol]
+    jet_parser.[parse_source, parser_guest_import_symbol]
     jet_eval.[JetEvalComptimeInputAdapter]
     jet_pkg_model.[
         EFFECT_PANIC_EDGE,
@@ -5096,6 +5101,9 @@ JetDriverHeldState: struct {
     stage: SemaComptimeDeclarationStage,
     run: JetDriverComptimeRunResult,
     trail: SemaGraphTrail,
+    // The canonical effect module (JetDriverLoweringInputs), which `modules`
+    // leaves out.
+    canonical_effect_module_identity: ModuleID,
 }
 
 JetDriverCheckedProjectionCapture: struct {
@@ -6533,6 +6541,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
                 stage: comptime_stage.move(),
                 run: comptime_run.move(),
                 trail: trail.move(),
+                canonical_effect_module_identity: canonical_effect_module_identity,
             })
             return result
         }
@@ -6570,6 +6579,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
                         stage: comptime_stage.move(),
                         run: comptime_run.move(),
                         trail: trail.move(),
+                        canonical_effect_module_identity: canonical_effect_module_identity,
                     },
                 )
             }
@@ -6740,6 +6750,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
                 stage: comptime_stage.move(),
                 run: comptime_run.move(),
                 trail: trail.move(),
+                canonical_effect_module_identity: canonical_effect_module_identity,
             },
         )
     }
@@ -6766,6 +6777,116 @@ jet_driver_release_aside: fn(checked: Int, state: &&JetDriverHeldState) {
     }
     released: task &&held { held.functions.len() }
     released.detach()
+}
+
+// A program's held check (JetDriverCompileRequest.hold_check_state), which
+// the debugger checks an expression's function against in place of a
+// compile of the program with the function appended
+// (jet_driver_held_eval_check): a probe of the stopped module (JetSema
+// ScriptHelpers.jet sema_script_probe_over) over the held registration and
+// the checked modules' types. The registration's symbol table and the
+// checked types are not the probe's own: the program's lowering holds them
+// (JetDriverHeldOpened) and lends them to each check.
+JetDriverHeldEval: struct {
+    probe: SemaScriptProbe,
+}
+
+// A held program opened for the debugger (jet_driver_held_eval_open): its
+// probe, and what its lowering takes. `inputs` holds the checked functions,
+// with the solved effect rows the effect verdict reads, the checked modules,
+// the sources and the registration's symbol table; its declaration table is
+// empty, as the probe's registration keeps it, and `types` holds the checked
+// types, which the probe transferred out of the modules. No Core seal, entry
+// or jobs: an evaluation builds none.
+JetDriverHeldOpened: struct {
+    eval: JetDriverHeldEval,
+    inputs: JetDriverLoweringInputs,
+    types: [TTypeDef],
+}
+
+// The held program `held` opened at the module whose source is `path`, the
+// display path the compile gives it (jet_driver_display_path). It returns
+// None when no checked module's source file is `path`.
+jet_driver_held_eval_open: fn(held: &&JetDriverHeldState, path: String) -> JetDriverHeldOpened? {
+    taken := held.move()
+    found := ModuleID?{None}
+    loop checked in taken.modules {
+        if checked.source_file == path -> found = Val(checked.module_identity)
+    }
+    module_identity: found ?? return None
+    probe := sema_script_probe_over(taken.registration, taken.modules, module_identity) ?? return None
+    graph := probe.program.registration_graph.move() ?? return None
+    symbols := graph.symbols.move()
+    graph.symbols = SymbolTable{ranges: [SymbolKeys]{}}
+    probe.program.registration_graph = Val(graph.move())
+    types := probe.program.checked_types.move()
+    probe.program.checked_types = [TTypeDef]{}
+    sources := [String:String]{}
+    loop file in taken.load.source_files {
+        if sources.get(file.path) == None -> sources[file.path] = file.source
+    }
+    inputs := JetDriverLoweringInputs{functions: taken.functions.move(), modules: taken.modules.move(), decls: DeclTable{}, symbols: symbols.move(), sources: sources.move(), entry_module_identity: taken.load.entry_module_identity, canonical_effect_module_identity: taken.canonical_effect_module_identity, module_table: taken.load.module_table.move(), entry_key: None}
+    Val(JetDriverHeldOpened{eval: JetDriverHeldEval{probe: probe.move()}, inputs: inputs.move(), types: types.move()})
+}
+
+// The function in the source `text`, the debugger's expression function
+// (JetCLI DebugCompile.jet), checked by `held`'s probe
+// (sema_script_probe_check_func) with the program's symbol table `symbols`
+// and checked types `types` lent to it for the check
+// (JetDriverHeldOpened); they come back in the answer, with whatever the
+// check added to them. The effect verdict judges the checked function
+// against the solved rows of the program's checked `functions`
+// (sema_eval_held_effect_refusals). A refusal is a report, and the check is
+// then not complete. Spans count from 0 in `text`. A text that doesn't
+// parse as a single function returns the parse's reports and no body.
+jet_driver_held_eval_check: fn(held: &JetDriverHeldEval, functions: [FnBody], symbols: &&SymbolTable, types: &&[TTypeDef], text: String) -> JetDriverHeldChecked {
+    parsed := parse_source(text.bytes())
+    if jet_driver_has_errors(parsed.diagnostics) || parsed.program.items.len() != 1 {
+        return JetDriverHeldChecked{checked: SemaScriptProbeChecked{function: None, diagnostics: parsed.diagnostics.move(), complete: false}, symbols: symbols.move(), types: types.move()}
+    }
+    if parsed.program.items[0] == .Func(func) {
+        going := jet_driver_held_eval_lend(held.probe.program.registration_graph.move(), symbols.move(), types.move())
+        held.probe.program.registration_graph = going.graph.move()
+        held.probe.program.checked_types = going.types.move()
+        checked := sema_script_probe_check_func(held.probe, func)
+        back := jet_driver_held_eval_lend(held.probe.program.registration_graph.move(), going.symbols.move(), held.probe.program.checked_types.move())
+        held.probe.program.registration_graph = back.graph.move()
+        held.probe.program.checked_types = [TTypeDef]{}
+        if checked.complete && checked.function == .Val(function) {
+            loop refusal in sema_eval_held_effect_refusals(function, functions, function.source_span) {
+                checked.diagnostics.push(refusal)
+                checked.complete = false
+            }
+        }
+        return JetDriverHeldChecked{checked: checked.move(), symbols: back.symbols.move(), types: back.types.move()}
+    }
+    JetDriverHeldChecked{checked: SemaScriptProbeChecked{function: None, diagnostics: parsed.diagnostics.move(), complete: false}, symbols: symbols.move(), types: types.move()}
+}
+
+// A held check's answer (jet_driver_held_eval_check), and the symbol table
+// and checked types lent to it.
+JetDriverHeldChecked: struct {
+    checked: SemaScriptProbeChecked,
+    symbols: SymbolTable,
+    types: [TTypeDef],
+}
+
+// The registration `graph` with `symbols` as its symbol table, the table it
+// held, and `types`, handed through: each check lends the program's symbol
+// table and checked types to the probe and takes them back
+// (jet_driver_held_eval_check).
+JetDriverHeldLend: struct {
+    graph: SemaRegistrationGraph?,
+    symbols: SymbolTable,
+    types: [TTypeDef],
+}
+
+jet_driver_held_eval_lend: fn(graph: &&SemaRegistrationGraph?, symbols: &&SymbolTable, types: &&[TTypeDef]) -> JetDriverHeldLend {
+    taken := graph.move()
+    lent := taken.move() ?? return JetDriverHeldLend{graph: None, symbols: symbols.move(), types: types.move()}
+    previous := lent.symbols.move()
+    lent.symbols = symbols.move()
+    JetDriverHeldLend{graph: Val(lent.move()), symbols: previous.move(), types: types.move()}
 }
 
 // Drops `facts` on a detached task, as jet_driver_release_aside drops a

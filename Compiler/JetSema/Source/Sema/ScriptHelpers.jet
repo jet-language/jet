@@ -3,7 +3,7 @@
 // types the script's own statements give them, which only a check of the
 // generated `run: fn` (sema_script_entry) knows, and a parameter is `&` when
 // a check of the function's body finds it written.
-use jet_foundation.[AST_NODE_GENERATED, ASTTables, AccessConvention, BodyTree, Diagnostic, Expr, ExprNode, FnBody, Func, Item, Span, TFuncKind, TLocal, TTypeDef, Type, ast_expr, ast_visit_body, body_node, body_stmt, checked_builtin_mutates_receiver, compiler_transfer_rows, diagnostic_with_label, name_table_sized]
+use jet_foundation.[AST_NODE_GENERATED, ASTTables, AccessConvention, BodyTree, Diagnostic, Expr, ExprNode, FnBody, Func, Item, ModuleID, Span, SymbolKind, TEffectSpan, TFuncKind, TLocal, TTypeDef, Type, ast_expr, ast_visit_body, body_node, body_stmt, checked_builtin_mutates_receiver, compiler_transfer_rows, diagnostic_with_label, name_table_sized, symbol_is_local, symbol_key_text, symbol_local_keys_text]
 
 // A script variable as the script's own statements bind it: its checked type,
 // and whether it is a `:=` binding a function may change.
@@ -12,8 +12,8 @@ SemaScriptVariable: struct {
     mutable: Bool,
 }
 
-// A check of the entry module's functions against one declaration pass,
-// whose reports are dropped.
+// A check of one module's functions against one declaration pass, whose
+// reports are dropped.
 SemaScriptProbe: struct {
     module_index: Int,
     environment: SemaScopeEnvironment,
@@ -65,10 +65,18 @@ sema_script_probe_open: fn(stage: &&SemaComptimeDeclarationStage) -> SemaScriptP
     taken := declarations.graph.move()
     declarations.graph = None
     graph := taken.move() ?? return None
-    module_index: sema_registration_module_index(graph, graph.entry_module_identity) ?? return None
+    entry: graph.entry_module_identity
+    sema_script_probe_over(graph, declarations.modules, entry)
+}
+
+// A probe of the module `module_identity` of `graph`. The program's types
+// come from `modules`, a declaration pass's or a check's. The probe takes
+// the graph and those rows.
+sema_script_probe_over: fn(graph: &&SemaRegistrationGraph, modules: &[SemaGraphModuleResult], module_identity: ModuleID) -> SemaScriptProbe? {
+    module_index: sema_registration_module_index(graph, module_identity) ?? return None
     types := [TTypeDef]{}
-    loop row in 0..<declarations.modules.len() {
-        compiler_transfer_rows<TTypeDef>(types, declarations.modules[row].declarations.type_defs)
+    loop row in 0..<modules.len() {
+        compiler_transfer_rows<TTypeDef>(types, modules[row].declarations.type_defs)
     }
     environment := sema_check_pass_environment(graph, types, SemaComptimeBodyValues{})
     program := SemaProgramTables{
@@ -90,6 +98,21 @@ sema_script_probe_open: fn(stage: &&SemaComptimeDeclarationStage) -> SemaScriptP
     Val(SemaScriptProbe{module_index: module_index, environment: environment, program: program, scopes: scopes})
 }
 
+// The probe moved to the module `module_identity`, whose scope its next
+// checks read: false when its graph has no such module.
+sema_script_probe_enter: fn(probe: &SemaScriptProbe, module_identity: ModuleID) -> Bool {
+    found := Int?{None}
+    if probe.program.registration_graph == .Val(graph) {
+        found = sema_registration_module_index(graph, module_identity)
+    }
+    module_index: found ?? return false
+    if module_index == probe.module_index -> return true
+    probe.scopes = sema_check_module_summary_scope_init(probe.environment, probe.program, module_index)
+    sema_scope_environment_enter_module(probe.environment, probe.program, module_index, SemaComptimeBodyValues{})
+    probe.module_index = module_index
+    true
+}
+
 // The checked body of the entry's top-level function `name`.
 sema_script_probe_check: fn(probe: &SemaScriptProbe, name: String) -> FnBody? {
     graph: probe.program.registration_graph ?? return None
@@ -102,6 +125,57 @@ sema_script_probe_check: fn(probe: &SemaScriptProbe, name: String) -> FnBody? {
     references := [SemaNameReferenceFact]{}
     checked := sema_function_check_registered(job, probe.module_index, sema_function_memory_plan_new(), None, owner_id, TFuncKind.TopLevel, false, probe.environment, probe.program, probe.scopes, None, dropped, calls, requests, references)
     checked.value.move()
+}
+
+// A function no registration holds, checked by a probe
+// (sema_script_probe_check_func): its checked body, None when the check
+// couldn't make one, the check's reports, and whether it finished.
+SemaScriptProbeChecked: struct {
+    function: FnBody?,
+    diagnostics: [Diagnostic],
+    complete: Bool,
+}
+
+// `func`, a top-level function of the probe's module that no registration
+// holds (the debugger's expression), checked against the probe's
+// declarations. It is bound by its name span, with no id, in a copy of the
+// module scope, as a `#Test` block's synthetic function is (Tests.jet
+// sema_check_test_function), so the probe checks the next one as it did
+// this one. Its reports are kept. A name the module already binds is not
+// checked. No effect pass runs over it: its own effects and the functions
+// it calls are gathered from its calls, as a lambda's are
+// (sema_expression_lambda_add_call_effects).
+sema_script_probe_check_func: fn(probe: &SemaScriptProbe, func: Func) -> SemaScriptProbeChecked {
+    diagnostics := [Diagnostic]{}
+    module_name: sema_scope_environment_module_text(probe.environment, probe.program)
+    key: symbol_key_text(SymbolKind.Function, module_name, "", func.name)
+    symbol := sema_item_symbol(Item.Func{value: func}, probe.environment.module_identity, module_name, probe.environment.source_file, probe.environment.source_origin, probe.environment.source_segments) ?? return SemaScriptProbeChecked{function: None, diagnostics: diagnostics, complete: false}
+    symbol.ty = Val(sema_function_symbol_type(func, false, key, probe.environment.source_file, probe.environment.source_origin, probe.environment.source_segments))
+    scopes := sema_scope_snapshot(probe.scopes)
+    if !sema_scope_add_module_symbol(scopes, symbol, key) {
+        return SemaScriptProbeChecked{function: None, diagnostics: diagnostics, complete: false}
+    }
+    call_facts := [SemaCallSiteFact]{}
+    requests := [SemaComptimeRequest]{}
+    references := [SemaNameReferenceFact]{}
+    checked := sema_function_check_shared(func, key, TFuncKind.TopLevel, false, probe.environment, probe.program, scopes, None, diagnostics, call_facts, requests, references)
+    function := checked.value.move() ?? return SemaScriptProbeChecked{function: None, diagnostics: diagnostics, complete: false}
+    direct := [String]{}
+    edges := [String]{}
+    spans := [TEffectSpan]{}
+    maximal := false
+    loop fact in call_facts {
+        callee_key := String?{None}
+        if fact.callee == .Val(callee) {
+            callee_key = Val(if symbol_is_local(callee) -> symbol_local_keys_text(function.tree.symbols, callee) else -> sema_program_symbol_key(probe.program, callee))
+        }
+        sema_expression_lambda_add_call_effects(fact, callee_key, direct, edges, spans, maximal)
+    }
+    function.effects.direct = direct.move()
+    function.effects.call_edges = edges.move()
+    function.effects.direct_spans = spans.move()
+    function.effects.maximal = maximal
+    SemaScriptProbeChecked{function: Val(function.move()), diagnostics: diagnostics, complete: checked.complete}
 }
 
 // The row of the top-level function `name` among an entry file's items.
