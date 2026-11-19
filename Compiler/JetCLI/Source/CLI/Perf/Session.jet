@@ -109,17 +109,25 @@ jet_cli_perf_session_args: fn(args: [String]) -> JetCLIPerfSessionArgs JetCLIRea
 }
 
 // `--lens` list `raw`: the lenses the run takes, comma-separated, each `cpu`
-// (its CPU time), `memory` (its memory counters) or `alloc` (its heap
-// snapshots), in that order and without repeats.
+// (its CPU time), `memory` (its memory counters), `alloc` (its heap
+// snapshots) or `causal` (its virtual speedup experiments, which time the
+// CPU-time samples and slow the program down, so it takes `cpu` alone
+// beside it), in that order and without repeats.
 jet_cli_perf_session_lenses: fn(raw: String) -> [String] JetCLIReadError! {
     asked := [String]{}
     loop part in raw.split(",") {
         item: part.trim()
         if item == "" -> next
-        if item != "cpu" && item != "memory" && item != "alloc" {
-            return Err(jet_cli_read_error("`--lens` item `{item}` is not a lens; lenses: cpu, memory, alloc"))
+        if item != "cpu" && item != "memory" && item != "alloc" && item != "causal" {
+            return Err(jet_cli_read_error("`--lens` item `{item}` is not a lens; lenses: cpu, memory, alloc, causal"))
         }
         if !asked.contains(item.copy()) -> asked.push(item.copy())
+    }
+    if asked.contains("causal") {
+        if asked.contains("memory") || asked.contains("alloc") {
+            return Err(jet_cli_read_error("the `causal` lens slows the program down to time its lines, which would skew the other lenses; run it alone with `--lens=causal`"))
+        }
+        return Ok([String]{"cpu", "causal"})
     }
     lenses := [String]{}
     if asked.contains("cpu") -> lenses.push("cpu")
@@ -153,7 +161,7 @@ jet_cli_perf_capture_allowlist: fn(raw: String) -> [String] JetCLIReadError! {
 // `run_session`. The exit code is the child's.
 jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Bool) -[FS, Env, Exec, Time]> JetDriverVerbOutput Never! {
     extension: artifact_extension()
-    parsed := jet_cli_perf_session_args(args) ?? return jet_cli_perf_error(err.message, "run `jet perf {action} <file.jet> [--lens=cpu,memory,alloc] [--out <path{extension}>]`", color)
+    parsed := jet_cli_perf_session_args(args) ?? return jet_cli_perf_error(err.message, "run `jet perf {action} <file.jet> [--lens=cpu,memory,alloc|causal] [--out <path{extension}>]`", color)
     memory: parsed.lenses.contains("memory")
     if memory && action != "run" {
         return jet_cli_perf_error("the `memory` lens samples a program's counters, which only `jet perf run` samples", "run `jet perf run <file.jet> --lens=memory`", color)
@@ -161,6 +169,10 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     alloc: parsed.lenses.contains("alloc")
     if alloc && action != "run" {
         return jet_cli_perf_error("the `alloc` lens snapshots a program's heap, which only `jet perf run` snapshots", "run `jet perf run <file.jet> --lens=alloc`", color)
+    }
+    causal: parsed.lenses.contains("causal")
+    if causal && action != "run" {
+        return jet_cli_perf_error("the `causal` lens experiments on a program's timing, which only `jet perf run` does", "run `jet perf run <file.jet> --lens=causal`", color)
     }
     exe: perf_sys.executable()
     if exe == "" {
@@ -267,6 +279,9 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
             // have ended, then the I/O rows take the transfers.
             jet_cli_perf_waits_read(capture, found.waits.move(), found.wakes, found.spawns, found.transfers, source, started.start_ns)
             jet_cli_perf_io_read(capture, found.transfers.move(), source, started.start_ns)
+            if causal {
+                capture.receipts.push(jet_cli_perf_causal_section("{source}", found.experiments.move(), found.points.move()))
+            }
             if jet_cli_perf_session_heaps(source.move(), found.heaps.move()) == .Val(section) {
                 capture.receipts.push(section)
             }
@@ -291,10 +306,15 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
     out := String?{None}
     source := String?{None}
     allowlist := [String]{}
+    zones_ms := 0
     skip := false
     loop (index, arg) in args {
         if skip {
             skip = false
+            next
+        }
+        if arg.starts_with("--zones=") {
+            zones_ms = jet_cli_perf_attach_window(arg.slice(8..<arg.len())) ?? return jet_cli_perf_error("`{arg}` isn't a window jet understands", "write how long to record zones, as `--zones=500ms` or `--zones=2s`", color)
             next
         }
         if arg.starts_with("--out=") {
@@ -381,15 +401,19 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
             return jet_cli_perf_error(message, "start the program with `jet run --observe`, then attach", color)
         }
         text: perf_files.read(path) ?? return jet_cli_perf_error("cannot read source {path}: {jet_cli_io_error_text(err)}", JET_CLI_PERF_FIX, color)
+        // With `--zones=`, the program's zones, frame marks, plots and log
+        // spans for that window, before its ring is read.
+        spans: if zones_ms > 0 -> jet_cli_perf_attach_zones(target_pid, zones_ms) else -> None
         // The flight ring the program publishes: its recent samples, waits,
         // wakes, spawns and transfers, read as a run's are.
         flight: jet_cli_perf_attach_flight(target_pid, path)
         capture = jet_cli_perf_capture_source(path, text, observations, flight, target, None) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
+        // The ring's rows are timed from its earliest wait or transfer, or
+        // the window's first zone row, on the program's monotonic clock:
+        // attach has no start of its own on it.
+        origin := 0
+        if spans == .Val(taken) -> origin = jet_cli_perf_spans_first(taken)
         if flight.move() == .Val(found) {
-            // The ring's rows are timed from its earliest wait or transfer,
-            // on the program's monotonic clock: attach has no start of its
-            // own on it.
-            origin := 0
             loop wait in found.waits {
                 if origin == 0 || wait.start_ns < origin -> origin = wait.start_ns
             }
@@ -399,6 +423,7 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
             jet_cli_perf_waits_read(capture, found.waits.move(), found.wakes, found.spawns, found.transfers, path, origin)
             jet_cli_perf_io_read(capture, found.transfers.move(), path, origin)
         }
+        if spans == .Val(taken) -> jet_cli_perf_log_spans_read(capture, taken, path, origin)
     } else if live_error == None {
         return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2102", "live observe snapshot found, but `--source` is required", "domain capture must attribute facts to a Jet symbol identity", "run `jet perf attach {target_pid} --source <file.jet>`", color), exit_code: JET_DRIVER_EXIT_USAGE}
     }
@@ -412,6 +437,7 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
         argv.push("--capture")
         argv.push(allowlist.join(","))
     }
+    if zones_ms > 0 -> argv.push("--zones={zones_ms}ms")
     capture.policy.allowlist = allowlist
     path: jet_cli_perf_session_write(capture, "attach", argv, out) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
     JetDriverVerbOutput{stdout: "", stderr: if quiet -> "" else -> "Trace: {path}\n", exit_code: JET_DRIVER_EXIT_OK}
@@ -431,6 +457,47 @@ jet_cli_perf_attach_flight: fn(pid: Int, source: String) -[FS, Env, Time]> JetCL
         return None
     }
     jet_cli_perf_samples_read(taken, source, [TraceCounter]{})
+}
+
+// `--zones=` window: whole milliseconds or seconds (`500ms`, `2s`), above 0.
+jet_cli_perf_attach_window: fn(text: String) -> Int? Never! {
+    if text.ends_with("ms") {
+        value: Int.parse(text.slice(0..<text.len() - 2)) ?? return None
+        return if value > 0 -> Val(value) else -> None
+    }
+    if text.ends_with("s") {
+        value: Int.parse(text.slice(0..<text.len() - 1)) ?? return None
+        return if value > 0 && value <= 3600 -> Val(value * 1000) else -> None
+    }
+    None
+}
+
+// Turn zones on in the flight-recorded program `pid` for `window_ms`: leave
+// the request beside its published ring (JetRuntime PerfSamples.jet
+// perf_flight_zones), which its next publication (every 100 ms) answers by
+// recording zones, frame marks, plots and log spans to `<ring>.spans`;
+// remove it after the window and wait two publications, so the program has
+// turned them off and written its rows. The rows, copied out of the
+// program's way; None when it wrote none.
+jet_cli_perf_attach_zones: fn(pid: Int, window_ms: Int) -[FS, Env, Time]> String? Never! {
+    ring: perf_files.join(perf_sys.temp_dir(), "jet-flight-{pid}.samples")
+    request: "{ring}.zones"
+    perf_files.write(request, "") ?? return None
+    loop _ in 0..<(window_ms + 24) /% 25 -> perf_time.sleep(25ms)
+    perf_files.remove(request).drop("a request the program no longer sees turns zones off")
+    perf_time.sleep(250ms)
+    taken: perf_files.join(perf_sys.temp_dir(), "jet-perf-attach-{pid}-{perf_time.unix_ns()}.spans")
+    perf_files.copy("{ring}.spans", taken) ?? return None
+    Val(taken)
+}
+
+// The start of the first row of the spans file `path`, 0 when it has none.
+jet_cli_perf_spans_first: fn(path: String) -[FS]> Int Never! {
+    bytes: perf_files.read_bytes(path) ?? return 0
+    if bytes.len() < 32 -> return 0
+    start := 0
+    loop at in 0..<8 -> start = start | (Int{bytes[at]} << (8 * at))
+    start
 }
 
 // `read_browser_capture`: the devserver's browser relay for `pid`, or None

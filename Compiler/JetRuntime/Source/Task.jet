@@ -326,6 +326,8 @@ task_run: fn(child: I64) {
     }
     jet_rt_session_cleanup_leave(cleanup)
     jet_rt_observe_task_finish(sync_load(wrapping(control + I64{56})))
+    // A finished task is a progress point of the causal lens.
+    perf_causal_progress(rt_static_text("task"))
     if (world != I64{0}) {
         world_task_finished(world)
         _ := rt_time_monotonic_provider_set(saved_provider)

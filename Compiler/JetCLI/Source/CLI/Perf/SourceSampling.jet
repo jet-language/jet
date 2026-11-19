@@ -110,6 +110,8 @@ JetCLIPerfSamples: struct {
     wakes: [JetCLIPerfWake],
     transfers: [JetCLIPerfIO],
     heaps: [JetCLIPerfHeap],
+    experiments: [JetCLIPerfExperiment],
+    points: [Int:String],
 }
 
 // The clock record (PerfSamples.jet perf_samples_exit), in nanoseconds: the
@@ -374,6 +376,10 @@ JET_CLI_PERF_HEAP_BLOCK_KIND: 6
 
 JET_CLI_PERF_HEAP_ROOT_KIND: 5
 
+// PerfSamples.jet PERF_SAMPLES_CAUSAL: a causal experiment's end, or (1 in
+// its low bits) a progress point's name.
+JET_CLI_PERF_CAUSAL_KIND: 7
+
 // What a heap snapshot's root record holds (PerfSamples.jet
 // PERF_SAMPLES_ROOT_FRAMES, PERF_SAMPLES_ROOT_STACK and
 // PERF_SAMPLES_ROOT_DATA).
@@ -437,7 +443,7 @@ JET_CLI_PERF_HELPER_PREFIX: "jet_ir_"
 // `names` spells. Its block and root records are its retention records
 // (JetCLIPerfHeap).
 jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFunction], inlines: &&JetCLIPerfInlines, owned: [Bool], periods: &&[U64], allocs: [Int:Int], names: [Int:String], words: [U8]) -> JetCLIPerfSamples Never! {
-    sampled := JetCLIPerfSamples{table: table, inlines: inlines, lines: [JetCLIPerfSampledLine]{}, total: U64{0}, outside: U64{0}, helpers: U64{0}, stackless: U64{0}, signals: U64{0}, cost: None, functions: functions, natives: [JetCLIPerfNative]{}, sited: false, periods: periods, spawns: [U64:U64]{}, waits: [JetCLIPerfWait]{}, wakes: [JetCLIPerfWake]{}, transfers: [JetCLIPerfIO]{}, heaps: [JetCLIPerfHeap]{}}
+    sampled := JetCLIPerfSamples{table: table, inlines: inlines, lines: [JetCLIPerfSampledLine]{}, total: U64{0}, outside: U64{0}, helpers: U64{0}, stackless: U64{0}, signals: U64{0}, cost: None, functions: functions, natives: [JetCLIPerfNative]{}, sited: false, periods: periods, spawns: [U64:U64]{}, waits: [JetCLIPerfWait]{}, wakes: [JetCLIPerfWake]{}, transfers: [JetCLIPerfIO]{}, heaps: [JetCLIPerfHeap]{}, experiments: [JetCLIPerfExperiment]{}, points: [Int:String]{}}
     // One key per function, line and ownership.
     places := [String:Int]{}
     // Each address's entries in `lines`, innermost first, by twice the
@@ -536,6 +542,24 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
                             sampled.cost = .Val(JetCLIPerfCost{cpu_ns: cpu, handler_ns: handler, delivery_ns: delivery})
                         }
                     }
+                }
+            }
+            at += record * 8
+            next
+        }
+        if kind == JET_CLI_PERF_CAUSAL_KIND {
+            if record >= 3 && at + record * 8 <= words.len() {
+                if pc == 1 {
+                    // The point's slot, the name's length and the name.
+                    length: link_debug_addr(words, at + 16)
+                    if length >= 0 && 3 + (length + 7) /% 8 <= record {
+                        sampled.points[link_debug_addr(words, at + 8)] = String.from_bytes(words.slice(at + 24, at + 24 + length)) ?? "point"
+                    }
+                } else if record >= 5 {
+                    // The line's sampled address (0 for a baseline), the
+                    // speedup, the wall time, the delay inserted and each
+                    // point's passes.
+                    jet_cli_perf_causal_record(sampled, owned, words, at, record)
                 }
             }
             at += record * 8

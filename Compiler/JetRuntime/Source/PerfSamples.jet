@@ -182,14 +182,17 @@ PERF_COUNTERS_SIGNAL: I64{63}
 PERF_COUNTERS_COUNT: I64{4}
 
 // The lenses JET_PERF_LENSES names, one bit each: `cpu`, the CPU-time
-// samples, `memory`, the counters, and `alloc`, the heap snapshots. The
-// session writes them comma-separated in that order; a run without it
-// samples CPU time alone.
+// samples, `memory`, the counters, `alloc`, the heap snapshots, and
+// `causal`, the virtual speedup experiments (perf_causal_tick), which the
+// session names beside `cpu`. The session writes them comma-separated in
+// that order; a run without it samples CPU time alone.
 PERF_LENS_CPU: I64{1}
 
 PERF_LENS_MEMORY: I64{2}
 
 PERF_LENS_ALLOC: I64{4}
+
+PERF_LENS_CAUSAL: I64{8}
 
 // The SIGPROFs the start sends its own thread to time the kernel's part of
 // one sample (perf_samples_delivery).
@@ -293,7 +296,9 @@ perf_samples_start: fn() {
     alloc_frames_start()
     buffer: alloc_map_try(wrapping(wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_COUNT) + I64{2}) * I64{8}))
     slots: alloc_map_try(wrapping(PERF_SAMPLES_SLOTS * perf_samples_slot_bytes()))
+    causal: if ((lenses & PERF_LENS_CAUSAL) != I64{0}) -> perf_causal_open(image) else -> I64{0}
     #Unsafe("the observation start runs before the timer whose handler reads these is armed") {
+        perf_causal_state = causal
         perf_samples_bias = bias
         perf_samples_image = image
         perf_samples_code_low = low
@@ -484,11 +489,12 @@ PERF_ZONE_FRAME: I64{2}
 
 PERF_ZONE_PLOT: I64{3}
 
-// core.perf.zone(name): the zone's start on the monotonic clock under `jet
-// perf run`, 0 otherwise. A native zone site calls it only while
-// perf_zones_on is set, so a zone outside a run costs its site's test.
+// core.perf.zone(name): the zone's start on the monotonic clock while
+// zones are on (under `jet perf run`, or while `jet perf attach` holds them
+// on), 0 otherwise. A native zone site calls it only while perf_zones_on is
+// set, so a zone no profiler records costs its site's test.
 #Export(c) jet_perf_zone_open: fn() -> I64 {
-    jet_int_owned_from_i64(if (perf_spans_fd < I64{0}) -> I64{0} else -> time_host_monotonic_i64())
+    jet_int_owned_from_i64(if (perf_zones_on == I64{0}) -> I64{0} else -> time_host_monotonic_i64())
 }
 
 // The close of the zone named by the borrowed text `name` that opened at
@@ -502,11 +508,22 @@ PERF_ZONE_PLOT: I64{3}
         return
     }
     perf_zone_row(PERF_ZONE_ZONE, began, time_host_monotonic_i64(), name)
+    // A closed zone is a progress point of the causal lens.
+    perf_causal_progress(name)
 }
 
-// core.perf.frame(): a frame mark at now, under `jet perf run`.
+// core.perf.progress(name): one pass of the progress point the borrowed
+// text `name` names, which the causal lens counts; nothing outside it.
+#Export(c) jet_perf_progress: fn(name: I64) {
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        return
+    }
+    perf_causal_progress(name)
+}
+
+// core.perf.frame(): a frame mark at now, while zones are on.
 #Export(c) jet_perf_frame: fn() {
-    if (perf_spans_fd < I64{0}) {
+    if (perf_zones_on == I64{0}) {
         return
     }
     now: time_host_monotonic_i64()
@@ -514,13 +531,13 @@ PERF_ZONE_PLOT: I64{3}
 }
 
 // core.perf.plot(name, value): the value whose float bits are `bits`, at
-// now, on the plot named by the borrowed text `name`, under `jet perf run`.
+// now, on the plot named by the borrowed text `name`, while zones are on.
 #Export(c) jet_perf_plot: fn(name: I64, bits: I64) {
     value: host_native_int(bits)
     if (jet_scheduler_native_propagate() != I64{0}) {
         return
     }
-    if (perf_spans_fd < I64{0}) {
+    if (perf_zones_on == I64{0}) {
         return
     }
     perf_zone_row(PERF_ZONE_PLOT, time_host_monotonic_i64(), value, name)
@@ -1446,6 +1463,9 @@ perf_samples_lens: fn(item: I64, length: I64) -> I64 {
     if (length == I64{5} && rt_text_equal_bytes(item, rt_text_data(rt_static_text("alloc")), I64{5})) {
         return PERF_LENS_ALLOC
     }
+    if (length == I64{6} && rt_text_equal_bytes(item, rt_text_data(rt_static_text("causal")), I64{6})) {
+        return PERF_LENS_CAUSAL
+    }
     I64{0}
 }
 
@@ -2225,6 +2245,7 @@ perf_cfi_sort: fn(table: I64, count: I64) {
     pc: wrapping(rt_text_word(wrapping(context + I64{168})) - bias)
     slot: if (buffer == I64{0} || !perf_samples_in_code(pc)) -> I64{0} else -> perf_samples_claim(buffer)
     periods: perf_samples_periods(signal, info)
+    if (signal == PERF_SAMPLES_SIGNAL) { perf_causal_tick(pc, periods) }
     if (slot == I64{0}) {
         word: (pc & PERF_SAMPLES_ADDRESS_MASK) | (I64{1} << PERF_SAMPLES_ADDRESS_BITS) | kind
         written := I64{0}
@@ -2586,6 +2607,7 @@ perf_flight_publish: fn(directory: I64) {
     if (rt_text_word(wrapping(state + PERF_FLIGHT_ENDED)) == I64{0}) {
         perf_flight_drain(state)
         path: perf_flight_path(directory)
+        perf_flight_zones(path)
         if (rt_text_word(wrapping(state + PERF_FLIGHT_IMAGE)) == I64{0}) {
             image: perf_flight_beside(path, rt_static_text(".image"))
             if (perf_flight_file(image, perf_samples_image, perf_flight_image_bytes(perf_samples_image))) {
@@ -2597,6 +2619,45 @@ perf_flight_publish: fn(directory: I64) {
         jet_rt_string_drop(path)
     }
     sync_store(state, I64{0})
+}
+
+// `jet perf attach` turns zones on in a flight-recorded run by leaving
+// `<ring>.zones` beside the published ring `path`, and off by removing it.
+// While the request stands, zones, frame marks, plots and log spans write
+// their rows to `<ring>.spans` (perf_spans_fd_set), emptied when a request
+// turns zones on and written out at each publication; once it is gone the
+// zones word is cleared, and the rows stay for the attach to read.
+perf_flight_zones: fn(path: I64) {
+    request: perf_flight_beside(path, rt_static_text(".zones"))
+    name: observe_cstring(request)
+    // faccessat(AT_FDCWD, name, F_OK)
+    wanted: observe_syscall(I64{269}, I64{-100}, name, I64{0}, I64{0}) == I64{0}
+    jet_rt_free(name, wrapping(rt_text_len(request) + I64{1}), I64{1})
+    jet_rt_string_drop(request)
+    if (wanted && perf_zones_on == I64{0}) {
+        if (perf_spans_fd < I64{0}) {
+            spans: perf_flight_beside(path, rt_static_text(".spans"))
+            file: observe_cstring(spans)
+            // O_WRONLY|O_CREAT|O_TRUNC|O_APPEND|O_CLOEXEC, mode 0600.
+            fd: observe_syscall(I64{257}, I64{-100}, file, I64{525825}, I64{384})
+            jet_rt_free(file, wrapping(rt_text_len(spans) + I64{1}), I64{1})
+            jet_rt_string_drop(spans)
+            perf_spans_fd_set(fd)
+        } else {
+            // ftruncate: a later attach reads only its own rows.
+            perf_spans_flush()
+            _ := observe_syscall(I64{77}, perf_spans_fd, I64{0}, I64{0}, I64{0})
+            #Unsafe("the observation writer is the only thread that turns attached zones on or off") {
+                perf_zones_on = I64{1}
+            }
+        }
+    }
+    if (!wanted && perf_zones_on != I64{0}) {
+        #Unsafe("the observation writer is the only thread that turns attached zones on or off") {
+            perf_zones_on = I64{0}
+        }
+    }
+    perf_spans_flush()
 }
 
 // At a run's exit (Observe.jet jet_rt_observe_exit): the published ring and
@@ -3142,4 +3203,382 @@ perf_flight_rotate: fn(state: I64, text: I64) {
         if (perf_flight_syscall(I64{263}, directory, oldest, I64{0}) != I64{0}) { break }
     }
     _ := perf_flight_syscall(I64{3}, directory, I64{0}, I64{0})
+}
+
+// The causal lens (`jet perf run --lens=causal`): Coz's virtual speedup
+// experiments, run by the CPU-time samples' handler (perf_causal_tick).
+// Each experiment lasts PERF_CAUSAL_EXPERIMENT_NS of wall time. One in two
+// is a baseline; the others take the source line of the sample that starts
+// them (a line of the program's own files, every address range of it in its
+// function, from the image's location table) and speed it up by
+// PERF_CAUSAL_SPEEDUP virtually: each sample that lands in the line adds
+// that share of its CPU time to a global delay, and every other thread
+// pauses at its next sample until it has paid the delays it owes, so the
+// line runs as if faster relative to everything else. A thread whose last
+// sample is older than PERF_CAUSAL_BLOCKED_NS was blocked and owes nothing
+// for that time. Progress points count passes: each closed zone by its
+// name, each `core.perf.progress(name)`, each finished task (`task`). At
+// each experiment's end a PERF_SAMPLES_CAUSAL record goes to the samples
+// file: 0 in its low bits, then the line's sampled address (0 for a
+// baseline), the speedup in thousandths, the wall time, the delay inserted
+// meanwhile, and each progress point's passes in it, PERF_CAUSAL_POINTS
+// words by slot. The first pass of each point writes a record naming its
+// slot: 1 in its low bits, then the slot, the name's length and the name.
+// JetCLI CLI/Perf/Causal.jet turns them into the predictions.
+PERF_SAMPLES_CAUSAL: I64{7}
+
+PERF_CAUSAL_EXPERIMENT_NS: I64{25000000}
+
+PERF_CAUSAL_SPEEDUP: I64{300}
+
+PERF_CAUSAL_BLOCKED_NS: I64{5000000}
+
+// The most a thread pauses at once.
+PERF_CAUSAL_PAUSE_MAX_NS: I64{100000000}
+
+PERF_CAUSAL_RANGES: I64{32}
+
+PERF_CAUSAL_POINTS: I64{32}
+
+PERF_CAUSAL_THREADS: I64{512}
+
+// The lens's state, one mapping: the rollover lock, the experiment's start,
+// the global delay and its value at the start, the speedup, the target's
+// range count and address, the random state, the location table's start
+// and end, the target's ranges, the progress points (name hash, passes),
+// their passes at the start, the record being written, then one entry per
+// thread (tid, delay paid, last sample, a timespec).
+PERF_CAUSAL_START: I64{8}
+
+PERF_CAUSAL_DELAY: I64{16}
+
+PERF_CAUSAL_DELAY_START: I64{24}
+
+PERF_CAUSAL_SPEED: I64{32}
+
+PERF_CAUSAL_RANGE_COUNT: I64{40}
+
+PERF_CAUSAL_TARGET: I64{48}
+
+PERF_CAUSAL_RANDOM: I64{56}
+
+PERF_CAUSAL_TABLE: I64{64}
+
+PERF_CAUSAL_TABLE_END: I64{72}
+
+PERF_CAUSAL_RANGE_AT: I64{80}
+
+PERF_CAUSAL_POINT_AT: I64{592}
+
+PERF_CAUSAL_POINT_START: I64{1104}
+
+PERF_CAUSAL_RECORD: I64{1360}
+
+PERF_CAUSAL_THREAD_AT: I64{1664}
+
+PERF_CAUSAL_THREAD_BYTES: I64{40}
+
+PERF_CAUSAL_BYTES: I64{24576}
+
+// The causal lens's state, 0 unless the lens is on.
+perf_causal_state := I64{0}
+
+// The lens's state for the image `image`: its location table found, the
+// first experiment a baseline started now; 0 when it cannot be mapped or
+// the image keeps no location table.
+perf_causal_open: fn(image: I64) -> I64 {
+    if (image == I64{0}) { return I64{0} }
+    state: alloc_map_try(PERF_CAUSAL_BYTES)
+    if (state == I64{0}) { return I64{0} }
+    thread_zero(state, PERF_CAUSAL_BYTES)
+    if (!perf_causal_table(state, image)) { return I64{0} }
+    now: perf_samples_clock()
+    rt_text_store(wrapping(state + PERF_CAUSAL_START), now)
+    rt_text_store(wrapping(state + PERF_CAUSAL_RANDOM), now | I64{1})
+    state
+}
+
+// Find the image's .debug_jetline section and keep its bounds in `state`.
+perf_causal_table: fn(state: I64, image: I64) -> Bool {
+    table := I64{0}
+    table_end := I64{0}
+    offset: rt_text_word(wrapping(image + I64{40}))
+    entry: trace_u16(wrapping(image + I64{58}))
+    count: trace_u16(wrapping(image + I64{60}))
+    names_index: trace_u16(wrapping(image + I64{62}))
+    if (offset > I64{0} && names_index < count) {
+        sections: wrapping(image + offset)
+        names: wrapping(image + rt_text_word(wrapping(wrapping(sections + wrapping(names_index * entry)) + I64{24})))
+        index := I64{0}
+        loop index < count {
+            section: wrapping(sections + wrapping(index * entry))
+            name: wrapping(names + trace_u32(section))
+            // ".debug_jetline\0", little-endian.
+            if (rt_text_word(name) == I64{7664958844667520046} && rt_text_word(wrapping(name + I64{8})) & I64{72057594037927935} == I64{111524889523301}) {
+                table = wrapping(image + rt_text_word(wrapping(section + I64{24})))
+                table_end = wrapping(table + rt_text_word(wrapping(section + I64{32})))
+                break
+            }
+            index = wrapping(index + I64{1})
+        }
+    }
+    if (table == I64{0}) { return false }
+    rt_text_store(wrapping(state + PERF_CAUSAL_TABLE), table)
+    rt_text_store(wrapping(state + PERF_CAUSAL_TABLE_END), table_end)
+    true
+}
+
+// From the CPU-time samples' handler, for a sample at link-time address
+// `pc` standing for `periods` periods: pay this thread's owed delay, add
+// the target line's share when the sample is in it, and end the
+// experiment once its time is up.
+perf_causal_tick: fn(pc: I64, periods: I64) {
+    state: perf_causal_state
+    if (state == I64{0}) {
+        return
+    }
+    now: perf_samples_clock()
+    thread: perf_causal_thread(state)
+    delay: sync_load(wrapping(state + PERF_CAUSAL_DELAY))
+    if (thread != I64{0}) {
+        last: rt_text_word(wrapping(thread + I64{16}))
+        local: rt_text_word(wrapping(thread + I64{8}))
+        if (last != I64{0} && wrapping(now - last) <= PERF_CAUSAL_BLOCKED_NS && local < delay) {
+            perf_causal_pause(thread, wrapping(delay - local))
+        }
+        rt_text_store(wrapping(thread + I64{8}), delay)
+    }
+    count: sync_load(wrapping(state + PERF_CAUSAL_RANGE_COUNT))
+    if (count > I64{0} && perf_causal_in_target(state, pc, count)) {
+        share: wrapping(wrapping(sync_load(wrapping(state + PERF_CAUSAL_SPEED)) * perf_samples_interval_us) * periods)
+        _ := sync_add(wrapping(state + PERF_CAUSAL_DELAY), share)
+        if (thread != I64{0}) {
+            rt_text_store(wrapping(thread + I64{8}), wrapping(rt_text_word(wrapping(thread + I64{8})) + share))
+        }
+    }
+    if (thread != I64{0}) { rt_text_store(wrapping(thread + I64{16}), perf_samples_clock()) }
+    if (wrapping(now - sync_load(wrapping(state + PERF_CAUSAL_START))) >= PERF_CAUSAL_EXPERIMENT_NS && sync_cas(state, I64{0}, I64{1}) == I64{0}) {
+        perf_causal_next(state, pc, now)
+        sync_store(state, I64{0})
+    }
+}
+
+// This thread's entry, claimed by its tid on its first sample; 0 when the
+// table is full.
+perf_causal_thread: fn(state: I64) -> I64 {
+    tid: thread_tid()
+    probe := wrapping(tid * I64{2654435761}) & wrapping(PERF_CAUSAL_THREADS - I64{1})
+    tries := I64{0}
+    loop tries < PERF_CAUSAL_THREADS {
+        entry: wrapping(wrapping(state + PERF_CAUSAL_THREAD_AT) + wrapping(probe * PERF_CAUSAL_THREAD_BYTES))
+        held: sync_load(entry)
+        if (held == tid) { return entry }
+        if (held == I64{0} && sync_cas(entry, I64{0}, tid) == I64{0}) { return entry }
+        probe = wrapping(probe + I64{1}) & wrapping(PERF_CAUSAL_THREADS - I64{1})
+        tries = wrapping(tries + I64{1})
+    }
+    I64{0}
+}
+
+// Pause this thread for `ns` (at most PERF_CAUSAL_PAUSE_MAX_NS) in its
+// entry's timespec.
+perf_causal_pause: fn(thread: I64, ns: I64) {
+    wait: if (ns > PERF_CAUSAL_PAUSE_MAX_NS) -> PERF_CAUSAL_PAUSE_MAX_NS else -> ns
+    spec: wrapping(thread + I64{24})
+    rt_text_store(spec, I64{0})
+    rt_text_store(wrapping(spec + I64{8}), wait)
+    #Unsafe("nanosleep reads the timespec in this thread's own entry") {
+        _ := os_syscall_i64(I64{35}, spec, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+}
+
+// Whether `pc` is in one of the target's `count` ranges.
+perf_causal_in_target: fn(state: I64, pc: I64, count: I64) -> Bool {
+    index := I64{0}
+    loop index < count && index < PERF_CAUSAL_RANGES {
+        range: wrapping(wrapping(state + PERF_CAUSAL_RANGE_AT) + wrapping(index * I64{16}))
+        if (pc >= rt_text_word(range) && pc < rt_text_word(wrapping(range + I64{8}))) {
+            return true
+        }
+        index = wrapping(index + I64{1})
+    }
+    false
+}
+
+// End the experiment that ran until `now`: write its record, then start the
+// next, a baseline or the line holding `pc`.
+perf_causal_next: fn(state: I64, pc: I64, now: I64) {
+    record: wrapping(state + PERF_CAUSAL_RECORD)
+    words: wrapping(I64{5} + PERF_CAUSAL_POINTS)
+    delay: sync_load(wrapping(state + PERF_CAUSAL_DELAY))
+    rt_text_store(record, (PERF_SAMPLES_CAUSAL << PERF_SAMPLES_KIND_BITS) | (words << PERF_SAMPLES_ADDRESS_BITS))
+    rt_text_store(wrapping(record + I64{8}), rt_text_word(wrapping(state + PERF_CAUSAL_TARGET)))
+    rt_text_store(wrapping(record + I64{16}), rt_text_word(wrapping(state + PERF_CAUSAL_SPEED)))
+    rt_text_store(wrapping(record + I64{24}), wrapping(now - rt_text_word(wrapping(state + PERF_CAUSAL_START))))
+    rt_text_store(wrapping(record + I64{32}), wrapping(delay - rt_text_word(wrapping(state + PERF_CAUSAL_DELAY_START))))
+    index := I64{0}
+    loop index < PERF_CAUSAL_POINTS {
+        passes: sync_load(wrapping(wrapping(wrapping(state + PERF_CAUSAL_POINT_AT) + wrapping(index * I64{16})) + I64{8}))
+        start: wrapping(wrapping(state + PERF_CAUSAL_POINT_START) + wrapping(index * I64{8}))
+        rt_text_store(wrapping(wrapping(record + I64{40}) + wrapping(index * I64{8})), wrapping(passes - rt_text_word(start)))
+        rt_text_store(start, passes)
+        index = wrapping(index + I64{1})
+    }
+    fd: perf_samples_fd
+    if (fd >= I64{0}) {
+        #Unsafe("one write of the record's words in the lens's own mapping, which the kernel copies before the call returns") {
+            _ := os_syscall_i64(I64{1}, fd, record, wrapping(words * I64{8}), I64{0}, I64{0}, I64{0})
+        }
+    }
+    sync_store(wrapping(state + PERF_CAUSAL_RANGE_COUNT), I64{0})
+    random := rt_text_word(wrapping(state + PERF_CAUSAL_RANDOM))
+    random = random ~ (random << I64{13})
+    random = random ~ ((random >> I64{7}) & I64{144115188075855871})
+    random = random ~ (random << I64{17})
+    rt_text_store(wrapping(state + PERF_CAUSAL_RANDOM), random)
+    count := I64{0}
+    if (random & I64{1} != I64{0}) { count = perf_causal_line(state, pc) }
+    rt_text_store(wrapping(state + PERF_CAUSAL_TARGET), if (count > I64{0}) -> pc else -> I64{0})
+    sync_store(wrapping(state + PERF_CAUSAL_SPEED), if (count > I64{0}) -> PERF_CAUSAL_SPEEDUP else -> I64{0})
+    rt_text_store(wrapping(state + PERF_CAUSAL_DELAY_START), sync_load(wrapping(state + PERF_CAUSAL_DELAY)))
+    rt_text_store(wrapping(state + PERF_CAUSAL_START), perf_samples_clock())
+    sync_store(wrapping(state + PERF_CAUSAL_RANGE_COUNT), count)
+}
+
+// The ranges of the source line that holds link-time address `pc`, in the
+// function that holds it, stored as the target's: their count, 0 when no
+// function of the program's own files holds it (a file whose name starts
+// with `<` is Core's or the runtime's). The table's layout is
+// Fault.jet trace_frame's.
+perf_causal_line: fn(state: I64, pc: I64) -> I64 {
+    table: rt_text_word(wrapping(state + PERF_CAUSAL_TABLE))
+    table_end: rt_text_word(wrapping(state + PERF_CAUSAL_TABLE_END))
+    block := table
+    loop wrapping(block + I64{20}) <= table_end {
+        end: wrapping(wrapping(block + I64{4}) + trace_u32(block))
+        if (end < wrapping(block + I64{20}) || end > table_end) { return I64{0} }
+        count: trace_u32(wrapping(block + I64{4}))
+        strings: wrapping(block + trace_u32(wrapping(block + I64{8})))
+        low := I64{0}
+        low = rt_text_word(wrapping(block + I64{12}))
+        cursor := wrapping(block + I64{20})
+        left := count
+        loop left > (I64{0}) && cursor < end {
+            low = wrapping(low + trace_sleb(cursor))
+            cursor = trace_leb_end(cursor)
+            high: wrapping(low + trace_uleb(cursor))
+            cursor = trace_leb_end(cursor)
+            cursor = trace_leb_end(cursor)
+            file: trace_uleb(cursor)
+            cursor = trace_leb_end(trace_leb_end(cursor))
+            rows_length: trace_uleb(cursor)
+            cursor = trace_leb_end(cursor)
+            rows_end: wrapping(cursor + rows_length)
+            if (rows_end > end) { return I64{0} }
+            if (pc >= low && pc < high) {
+                if (trace_u16(wrapping(strings + file)) & I64{255} == I64{60}) { return I64{0} }
+                line: trace_line(cursor, rows_end, low, high, pc)
+                if (line == I64{0}) { return I64{0} }
+                return perf_causal_ranges(state, cursor, rows_end, low, high, line)
+            }
+            cursor = rows_end
+            low = high
+            left = wrapping(left - I64{1})
+        }
+        block = end
+    }
+    I64{0}
+}
+
+// Store each row range of line `line` in the function [low, high) whose
+// rows are [rows, rows_end) (Fault.jet trace_line's walk) as the target's;
+// their count.
+perf_causal_ranges: fn(state: I64, rows: I64, rows_end: I64, low: I64, high: I64, line: I64) -> I64 {
+    at := rows
+    address := low
+    current := I64{1}
+    previous := I64{-1}
+    previous_line := I64{0}
+    count := I64{0}
+    loop at < rows_end {
+        address = wrapping(address + trace_uleb(at))
+        at = trace_leb_end(at)
+        current = wrapping(current + trace_sleb(at))
+        at = trace_leb_end(at)
+        if (previous >= I64{0} && previous_line == line && address > previous && count < PERF_CAUSAL_RANGES) {
+            perf_causal_range(state, count, previous, address)
+            count = wrapping(count + I64{1})
+        }
+        previous = address
+        previous_line = current
+    }
+    if (previous >= I64{0} && previous_line == line && high > previous && count < PERF_CAUSAL_RANGES) {
+        perf_causal_range(state, count, previous, high)
+        count = wrapping(count + I64{1})
+    }
+    count
+}
+
+perf_causal_range: fn(state: I64, index: I64, low: I64, high: I64) {
+    range: wrapping(wrapping(state + PERF_CAUSAL_RANGE_AT) + wrapping(index * I64{16}))
+    rt_text_store(range, low)
+    rt_text_store(wrapping(range + I64{8}), high)
+}
+
+// One pass of the progress point the borrowed text `name` names, under the
+// causal lens: its slot, by the name's hash, claimed on its first pass,
+// which writes the slot's name record.
+perf_causal_progress: fn(name: I64) {
+    state: perf_causal_state
+    if (state == I64{0}) {
+        return
+    }
+    data: rt_text_data(name)
+    length: rt_text_len(name)
+    hash := I64{-3750763034362895579}
+    index := I64{0}
+    loop index < length {
+        hash = wrapping((hash ~ rt_text_byte(wrapping(data + index))) * I64{1099511628211})
+        index = wrapping(index + I64{1})
+    }
+    hash = hash | I64{1}
+    tries := I64{0}
+    slot := hash & wrapping(PERF_CAUSAL_POINTS - I64{1})
+    loop tries < PERF_CAUSAL_POINTS {
+        point: wrapping(wrapping(state + PERF_CAUSAL_POINT_AT) + wrapping(slot * I64{16}))
+        held: sync_load(point)
+        if (held == hash) {
+            _ := sync_add(wrapping(point + I64{8}), I64{1})
+            return
+        }
+        if (held == I64{0} && sync_cas(point, I64{0}, hash) == I64{0}) {
+            perf_causal_name(slot, data, length)
+            _ := sync_add(wrapping(point + I64{8}), I64{1})
+            return
+        }
+        slot = wrapping(slot + I64{1}) & wrapping(PERF_CAUSAL_POINTS - I64{1})
+        tries = wrapping(tries + I64{1})
+    }
+}
+
+// The record naming progress point slot `slot`: the `length` bytes at
+// `data`, cut to 256.
+perf_causal_name: fn(slot: I64, data: I64, length: I64) {
+    fd: perf_samples_fd
+    if (fd < I64{0}) {
+        return
+    }
+    kept: if (length > I64{256}) -> I64{256} else -> length
+    words: wrapping(I64{3} + (wrapping(kept + I64{7}) >> I64{3}))
+    bytes: wrapping(words * I64{8})
+    record: jet_rt_alloc(bytes, I64{8})
+    thread_zero(record, bytes)
+    rt_text_store(record, (PERF_SAMPLES_CAUSAL << PERF_SAMPLES_KIND_BITS) | (words << PERF_SAMPLES_ADDRESS_BITS) | I64{1})
+    rt_text_store(wrapping(record + I64{8}), slot)
+    rt_text_store(wrapping(record + I64{16}), kept)
+    rt_text_bytes_copy(wrapping(record + I64{24}), data, kept)
+    #Unsafe("one write of the record, which the kernel copies before the call returns") {
+        _ := os_syscall_i64(I64{1}, fd, record, bytes, I64{0}, I64{0}, I64{0})
+    }
+    jet_rt_free(record, bytes, I64{8})
 }

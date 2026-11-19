@@ -1,0 +1,257 @@
+use {
+    jet_backend.[link_debug_addr]
+    jet_foundation.[CanonicalJSON, CanonicalJSONField, TraceReceiptSection, canonical_json_sha256]
+}
+
+// The causal lens (`jet perf run --lens=causal`). The runtime runs virtual
+// speedup experiments (PerfSamples.jet perf_causal_tick): each one either
+// leaves the program alone (a baseline) or slows every other thread down
+// whenever the chosen line runs, so the line runs as if a share faster than
+// the rest. Each progress point's passes per second of the experiment's
+// wall time, less the delay it inserted, against the baselines' passes per
+// second, predicts how much sooner the passes would come if the line really
+// were that much faster. This file turns the experiments into a ranked
+// prediction per progress point, each with an interval, and refuses a line
+// or a run whose experiments are too few to rank.
+
+// One experiment's end (PerfSamples.jet perf_causal_next): the line it sped
+// up, by its source line and function (line 0 for a baseline), the speedup
+// in thousandths, its wall time and the delay it inserted, in nanoseconds,
+// and each progress point's passes in it, by the point's slot.
+JetCLIPerfExperiment: struct {
+    line: U64,
+    name: String,
+    speedup: Int,
+    wall_ns: Int,
+    delay_ns: Int,
+    passes: [Int],
+}
+
+// The experiments a line or the baseline needs before it is ranked.
+JET_CLI_PERF_CAUSAL_MIN: 6
+
+// The widest interval, in tenths of a percent, a ranked line may have.
+JET_CLI_PERF_CAUSAL_WIDEST: 300
+
+// The resamples behind each interval, and the share of them below its low
+// end and above its high end, in resamples: a 90% interval.
+JET_CLI_PERF_CAUSAL_RESAMPLES: 200
+
+JET_CLI_PERF_CAUSAL_TAIL: 10
+
+// The wall time of one experiment, PerfSamples.jet
+// PERF_CAUSAL_EXPERIMENT_NS, in milliseconds.
+JET_CLI_PERF_CAUSAL_EXPERIMENT_MS: 25
+
+// The experiment of the record at byte `at` of `words`, `record` words long:
+// the line its sampled address stands for, the innermost frame of the
+// checked source there; a baseline when the address is 0 or none stands for
+// it.
+jet_cli_perf_causal_record: fn(sampled: JetCLIPerfSamples, owned: [Bool], words: [U8], at: Int, record: Int) -> JetCLIPerfExperiment Never! {
+    target: link_debug_addr(words, at + 8)
+    line := U64{0}
+    name := ""
+    if target != 0 {
+        frames := jet_cli_perf_samples_frames(sampled, owned, target, false)
+        frames.reverse()
+        loop frames.len() > 0 {
+            frame: frames.pop() ?? break
+            if frame.own {
+                line = U64{frame.line}
+                name = frame.name.move()
+                break
+            }
+        }
+    }
+    passes := [Int]{}
+    loop k in 5..<record -> passes.push(link_debug_addr(words, at + k * 8))
+    speedup: if line > (U64{0}) -> link_debug_addr(words, at + 16) else -> 0
+    JetCLIPerfExperiment{line: line, name: name, speedup: speedup, wall_ns: link_debug_addr(words, at + 24), delay_ns: if line > (U64{0}) -> link_debug_addr(words, at + 32) else -> 0, passes: passes}
+}
+
+// The experiments that sped up one line of one function.
+JetCLIPerfCausalGroup: struct {
+    line: U64,
+    name: String,
+    chosen: [Int],
+}
+
+// One line's prediction for one progress point: how much sooner each pass
+// comes, in tenths of a percent, with its 90% interval.
+JetCLIPerfCausalLine: struct {
+    line: U64,
+    name: String,
+    experiments: Int,
+    gain: Int,
+    low: Int,
+    high: Int,
+}
+
+// A rate of passes: the passes and the wall time, less the delay
+// inserted, in microseconds.
+JetCLIPerfCausalRate: struct {
+    passes: Int,
+    wall: Int,
+}
+
+// The rate of `chosen` (indexes into `experiments`) for point `slot`.
+jet_cli_perf_causal_sum: fn(experiments: [JetCLIPerfExperiment], chosen: [Int], slot: Int) -> JetCLIPerfCausalRate Never! {
+    passes := 0
+    wall := 0
+    loop index in chosen {
+        experiment: experiments[index]
+        if slot < experiment.passes.len() -> passes += experiment.passes[slot]
+        wall += (experiment.wall_ns - experiment.delay_ns) /% 1000
+    }
+    JetCLIPerfCausalRate{passes: passes, wall: wall}
+}
+
+// How much sooner each pass comes, in tenths of a percent, at the line's
+// rate `line` against the baselines' rate `base`: 1 - (base rate / line
+// rate). None when either rate is empty.
+jet_cli_perf_causal_gain: fn(base: JetCLIPerfCausalRate, line: JetCLIPerfCausalRate) -> Int? Never! {
+    if base.passes <= 0 || base.wall <= 0 || line.passes <= 0 || line.wall <= 0 -> return None
+    Val(1000 - (base.passes * 1000 * line.wall) /% (base.wall * line.passes))
+}
+
+// The next of the resampling's random numbers below `bound`: a fixed seed,
+// so the same trace gives the same intervals.
+jet_cli_perf_causal_draw: fn(state: &Int, bound: Int) -> Int Never! {
+    state = wrapping(wrapping(state * 6364136223846793005) + 1442695040888963407) & 9223372036854775807
+    (state >> 17) %% bound
+}
+
+// `chosen` drawn again with replacement.
+jet_cli_perf_causal_resample: fn(chosen: [Int], state: &Int) -> [Int] Never! {
+    loop _ in 0..<chosen.len() -> chosen[jet_cli_perf_causal_draw(state, chosen.len())]
+}
+
+// The prediction of the line whose experiments are `chosen` for point
+// `slot` against the baselines `base`; None when either has no pass.
+jet_cli_perf_causal_line: fn(experiments: [JetCLIPerfExperiment], base: [Int], chosen: [Int], slot: Int) -> JetCLIPerfCausalLine? Never! {
+    gain: jet_cli_perf_causal_gain(jet_cli_perf_causal_sum(experiments, base, slot), jet_cli_perf_causal_sum(experiments, chosen, slot)) ?? return None
+    state := 88172645463325252 + slot
+    gains := [Int]{}
+    loop _ in 0..<JET_CLI_PERF_CAUSAL_RESAMPLES {
+        drawn_base: jet_cli_perf_causal_sum(experiments, jet_cli_perf_causal_resample(base, state), slot)
+        drawn: jet_cli_perf_causal_sum(experiments, jet_cli_perf_causal_resample(chosen, state), slot)
+        // A resample with no pass predicts nothing faster: the line made
+        // the point's passes stop.
+        gains.push(jet_cli_perf_causal_gain(drawn_base, drawn) ?? -1000)
+    }
+    gains.sort()
+    first: experiments[chosen[0]]
+    Val(JetCLIPerfCausalLine{line: first.line, name: "{first.name}", experiments: chosen.len(), gain: gain, low: gains[JET_CLI_PERF_CAUSAL_TAIL], high: gains[JET_CLI_PERF_CAUSAL_RESAMPLES - 1 - JET_CLI_PERF_CAUSAL_TAIL]})
+}
+
+// The causal section of the trace of the run of `source`: each progress
+// point's lines, ranked by how much sooner its passes come, each with its
+// interval, and the lines it could not rank with why; or, when no line of
+// any point could be ranked, the reason the run is refused.
+jet_cli_perf_causal_section: fn(source: &&String, experiments: &&[JetCLIPerfExperiment], points: &&[Int:String]) -> TraceReceiptSection Never! {
+    base := [Int]{}
+    groups := [JetCLIPerfCausalGroup]{}
+    // The speedup the experiments took, in percent.
+    percent := 30
+    loop (index, experiment) in experiments {
+        if experiment.speedup > 0 -> percent = experiment.speedup /% 10
+        if experiment.line == (U64{0}) {
+            base.push(index)
+            next
+        }
+        at := groups.len()
+        loop (k, group) in groups {
+            if group.line == experiment.line && group.name == experiment.name {
+                at = k
+                break
+            }
+        }
+        if at == groups.len() {
+            groups.push(JetCLIPerfCausalGroup{line: experiment.line, name: "{experiment.name}", chosen: [Int]{}})
+        }
+        groups[at].chosen.push(index)
+    }
+    slots := [Int]{}
+    loop (slot, _) in points -> slots.push(slot)
+    slots.sort()
+    ranked := 0
+    rows := [CanonicalJSON]{}
+    loop slot in slots {
+        found := [JetCLIPerfCausalLine]{}
+        unranked := [CanonicalJSON]{}
+        loop group in groups {
+            chosen: group.chosen
+            why := ""
+            if chosen.len() < JET_CLI_PERF_CAUSAL_MIN || base.len() < JET_CLI_PERF_CAUSAL_MIN {
+                why = "{chosen.len()} experiments on it and {base.len()} baselines; it needs {JET_CLI_PERF_CAUSAL_MIN} of each"
+            } else if jet_cli_perf_causal_line(experiments, base, chosen, slot) == .Val(predicted) {
+                if predicted.high - predicted.low > JET_CLI_PERF_CAUSAL_WIDEST {
+                    why = "its interval is {jet_cli_perf_causal_percent(predicted.low)} to {jet_cli_perf_causal_percent(predicted.high)}, wider than {JET_CLI_PERF_CAUSAL_WIDEST /% 10} points"
+                } else {
+                    found.push(predicted.move())
+                    next
+                }
+            } else { why = "no pass of the point came in its experiments or the baselines" }
+            unranked.push(
+                CanonicalJSON.Object(
+                    [CanonicalJSONField]{
+                        {key: "experiments", value: CanonicalJSON.Integer("{chosen.len()}")},
+                        {key: "function", value: CanonicalJSON.String("{group.name}")},
+                        {key: "line", value: CanonicalJSON.Integer("{group.line}")},
+                        {key: "reason", value: CanonicalJSON.String(why.move())},
+                    },
+                ),
+            )
+        }
+        found.sort_by(fn(left: JetCLIPerfCausalLine, right: JetCLIPerfCausalLine) { right.gain <=> left.gain })
+        ranked += found.len()
+        rows.push(
+            CanonicalJSON.Object(
+                [CanonicalJSONField]{
+                    {key: "lines", value: CanonicalJSON.Array(loop line in found.move() -> jet_cli_perf_causal_json(line))},
+                    {key: "name", value: CanonicalJSON.String(if points.get(slot) == .Val(named) -> "{named}" else -> "point")},
+                    {key: "unranked", value: CanonicalJSON.Array(unranked.move())},
+                },
+            ),
+        )
+    }
+    reason := ""
+    if ranked == 0 {
+        // Each experiment is a baseline or a line at even odds, so a line
+        // takes about twice its share of the experiments.
+        needed: JET_CLI_PERF_CAUSAL_MIN * 4 * JET_CLI_PERF_CAUSAL_EXPERIMENT_MS
+        reason = if points.len() == 0 -> "no progress point passed: close a zone, finish a task or call `perf.progress(name)` in the run" else -> "the run kept {experiments.len()} experiments of {JET_CLI_PERF_CAUSAL_EXPERIMENT_MS} ms, {base.len()} of them baselines, and no line had {JET_CLI_PERF_CAUSAL_MIN} with an interval narrower than {JET_CLI_PERF_CAUSAL_WIDEST /% 10} points; run it for longer than {needed} ms per line it spends time in"
+    }
+    value: CanonicalJSON.Object(
+        [CanonicalJSONField]{
+            {key: "baselines", value: CanonicalJSON.Integer("{base.len()}")},
+            {key: "experiments", value: CanonicalJSON.Integer("{experiments.len()}")},
+            {key: "path", value: CanonicalJSON.String(source.move())},
+            {key: "points", value: CanonicalJSON.Array(rows.move())},
+            {key: "refused", value: if reason == "" -> CanonicalJSON.Null else -> CanonicalJSON.String(reason.move())},
+            {key: "speedup_percent", value: CanonicalJSON.Integer("{percent}")},
+        },
+    )
+    digest: canonical_json_sha256(value)
+    TraceReceiptSection{name: "causal", type_name: "JetPerfCausal", value: value, digest: digest}
+}
+
+jet_cli_perf_causal_json: fn(line: &&JetCLIPerfCausalLine) -> CanonicalJSON Never! {
+    CanonicalJSON.Object(
+        [CanonicalJSONField]{
+            {key: "experiments", value: CanonicalJSON.Integer("{line.experiments}")},
+            {key: "function", value: CanonicalJSON.String(line.name.move())},
+            {key: "gain_tenths", value: CanonicalJSON.Integer("{line.gain}")},
+            {key: "high_tenths", value: CanonicalJSON.Integer("{line.high}")},
+            {key: "line", value: CanonicalJSON.Integer("{line.line}")},
+            {key: "low_tenths", value: CanonicalJSON.Integer("{line.low}")},
+        },
+    )
+}
+
+// `tenths` tenths of a percent as `12.3%`, signed when below zero.
+jet_cli_perf_causal_percent: fn(tenths: Int) -> String Never! {
+    sign: if tenths < 0 -> "-" else -> ""
+    whole: if tenths < 0 -> -tenths else -> tenths
+    "{sign}{whole /% 10}.{whole %% 10}%"
+}
