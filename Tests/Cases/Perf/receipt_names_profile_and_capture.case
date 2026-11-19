@@ -18,7 +18,7 @@ json: file debug.jettrace doc $.content.receipt_sections[0].value.capture.allowl
 json: file debug.jettrace doc $.content.receipt_sections[0].value.capture.sampling.lenses #= 1 # the cpu lens, the default
 json: file debug.jettrace doc $.content.receipt_sections[0].value.capture.sampling.lenses[0] = "cpu"
 json: file debug.jettrace doc $.content.receipt_sections[0].value.capture.sampling.clock = "cpu"
-json: file debug.jettrace doc $.content.receipt_sections[0].value.capture.sampling.interval_us = 1000
+json: file debug.jettrace doc $.content.receipt_sections[0].value.capture.sampling.interval_us = 125
 json: file debug.jettrace doc $.content.receipt_sections[0].value.capture.sampling.allocations = "call-sites"
 step: jet perf run main.jet -O2 --out {work}/o2.jettrace
 exit: 0
@@ -30,7 +30,7 @@ step: jet perf view {work}/debug.jettrace
 exit: 0
 stdout: ~ "receipt perf " # the view prints the receipt, its value as canonical JSON
 stdout: ~ "\"profile\":\"debug\"" # the profile the words selected
-stdout: ~ "\"interval_us\":1000" # the CPU-time sampling interval
+stdout: ~ "\"interval_us\":125," # the CPU-time sampling interval, 8 kHz
 step: jet perf compare {work}/debug.jettrace {work}/o2.jettrace
 exit: 0
 stdout: ~ "perf.build.options.optimize: \"O0\" -> \"O2\"" # compare names the build's change

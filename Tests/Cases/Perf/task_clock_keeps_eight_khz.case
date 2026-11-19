@@ -1,0 +1,24 @@
+# At perf_event_paranoid 2 `jet perf run` samples each thread by its own
+# task clock at the default rate, 8 kHz: one sample per 125 microseconds of
+# the thread's CPU time, each with its whole stack. Four tasks calling fib at
+# once at -O2 for two seconds of CPU time keep at least 90% of the 16000
+# samples that time gives. The CPU-time timer, which the kernel checks once a
+# tick, takes at most one sample a tick, standing for each period since the
+# last: Perf/timer_fallback_states_its_cap_and_why shows the cap it states.
+# Perf/receipt_reports_measured_overhead holds the same run's measured cost
+# under 2% at this rate.
+requires: os-name:linux
+requires: probe grep -qx 2 /proc/sys/kernel/perf_event_paranoid # the task clock takes the samples at perf_event_paranoid 2
+fixture: EveryThreadKeepsWholeStacks.fixture
+env: NO_COLOR=1
+step: jet perf run -O2 burn.jet --out {work}/burn.jettrace
+exit: 0
+stdout: = "burned=true\n"
+json: file burn.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.pc.source = "task_clock" # the task clock took the samples
+json: file burn.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.interval_us = 125 # one sample per 125 microseconds of CPU time, 8 kHz
+json: file burn.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.pc.period = 125000 # the task clock's period
+json: file burn.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.pc.period_unit = "ns" # in nanoseconds of CPU time
+json: file burn.jettrace doc $.content.profile.reason ~ "the task clock took them" # the reason names the sampler
+json: file burn.jettrace doc $.content.profile.reason ~ " samples that 2" # and the samples two seconds of CPU time give
+json: file burn.jettrace doc $.content.profile.rows[?source.start_line=7][?inclusive_count>=14400] #= 1 # fib's recursive line holds at least 90% of the 16000 samples
+json: file burn.jettrace doc $.content.profile.reason !~ "kept no stack" # no sample in Jet code lost its stack
