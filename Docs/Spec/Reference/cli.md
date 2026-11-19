@@ -1482,7 +1482,9 @@ tier=shared-tir)` line each, a copy's kind naming the copied type
 function named per specialization (`name__generic__<type arguments>`); or the
 `explain.cost` status envelope under `--json` with a `functions` list of every
 covered function's name and a `sites` list of `{function, line, kind, state,
-loop_depth, tier}`.
+loop_depth, tier, path, view, repeats}`: `path` names the site's file as the
+line does, `view` the copied type (empty for none), and `repeats` whether it
+repeats every loop turn.
 Bare `inspect explain-build <file>` selects the authorized invocation entry
 under its authenticated workspace root, then reads the authenticated last-run
 record. It always reports the planned steps the compiler knows: the JSON

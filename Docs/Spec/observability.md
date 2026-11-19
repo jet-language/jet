@@ -43,11 +43,21 @@ projection.
 
 `jet perf view` shows every profile with jet alone. In the terminal it prints
 the flame graph, the timeline and, last, the per-line table: each function's
-CPU-time samples at each source line, hottest first, at most 24 lines
-(`  main.jet:11 spin_hot_loop samples=592`). `--html` prints one
-self-contained page of the same three, which a browser opens with no other
-program and nothing to fetch. Tests/Cases/Perf/view_shows_every_profile.case
-is the worked example.
+CPU-time samples at each source line, hottest first, at most 24 lines, each
+with its share of every line's samples and the line's typed cost facts
+(D-COSTLAW1), as `jet explain --cost` reports them
+(`  main.jet:11 spin_hot_loop samples=592 share=99% · cost: exact Int spill ×2
+— semantic remainder (loop depth 1, repeats every loop turn)`). A fact
+describes the code that ran: the view reads them by running
+`jet explain --cost` on each source the trace names whose file still holds
+the digest the trace recorded. A source it can't read, or that changed since
+the capture, gets a `cost facts: none, …` line above the sections instead.
+A pprof or OTLP export carries no source, so its table has no facts. `--html`
+prints one self-contained page of the same three, which a browser opens with
+no other program and nothing to fetch.
+Tests/Cases/Perf/view_shows_every_profile.case and
+Tests/Cases/Perf/view_shows_cost_facts_beside_samples.case are the worked
+examples.
 
 `jet perf export <trace.jettrace> --pprof` writes pprof's gzip-compressed
 `profile.proto` beside the trace (`<stem>.pb.gz`, or `--out <path>`). Each

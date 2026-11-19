@@ -1,12 +1,15 @@
 # `jet perf export --pprof` and `--otel` carry the profile's per-line totals:
 # `jet perf view` of either export prints the same per-line table as the
-# view of the trace itself, with jet alone on the way.
+# view of the trace itself, with jet alone on the way. The trace's view reads
+# its lines' cost facts from the source, which an export doesn't carry, so
+# it views the trace with the source gone.
 requires: os-name:linux
 fixture: PerfView.fixture
 env: NO_COLOR=1
 step: jet perf run main.jet --out {work}/spin.jettrace
 exit: 0
 stdout: ~ "spun=" # the program ran to its end
+remove: main.jet
 step: jet perf view {work}/spin.jettrace
 exit: 0
 stdout: ~ "per-line\n" # the per-line table

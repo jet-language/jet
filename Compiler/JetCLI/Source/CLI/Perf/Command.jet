@@ -94,8 +94,9 @@ jet_cli_perf_read: fn(path: String) -[FS]> CanonicalJSON JetTraceError! {
 
 // `view`: text, `--json` or `--html`, with `--frames=jet|all`, of a
 // `.jettrace`, or text or `--html` of a pprof or OTLP/JSON export of one
-// (PeerExport.jet jet_cli_perf_import).
-jet_cli_perf_view: fn(args: [String], color: Bool) -[FS]> JetDriverVerbOutput Never! {
+// (PeerExport.jet jet_cli_perf_import). The text and HTML per-line tables of
+// a trace show each line's typed cost facts (LineCosts.jet).
+jet_cli_perf_view: fn(args: [String], color: Bool) -[FS, Env, Exec, Time]> JetDriverVerbOutput Never! {
     extension: artifact_extension()
     path := String?{None}
     mode := "text"
@@ -149,7 +150,7 @@ jet_cli_perf_view: fn(args: [String], color: Bool) -[FS]> JetDriverVerbOutput Ne
         }
         imported: jet_cli_perf_import(shown) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
         flame: jet_cli_perf_flame_profile(jet_cli_perf_total_rows(imported.totals))
-        table: jet_cli_perf_line_table(imported.totals)
+        table: jet_cli_perf_line_table(imported.totals, jet_cli_perf_line_costs_none())
         if mode == "html" {
             return JetDriverVerbOutput{stdout: jet_cli_perf_view_html(shown, frames, flame, imported.timeline, table), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
         }
@@ -160,12 +161,15 @@ jet_cli_perf_view: fn(args: [String], color: Bool) -[FS]> JetDriverVerbOutput Ne
     trace: jet_cli_perf_read(shown) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
     flame: jet_cli_perf_flame(trace)
     timeline: jet_cli_perf_timeline(trace)
-    table: jet_cli_perf_line_table(jet_cli_perf_line_totals(trace))
+    totals: jet_cli_perf_line_totals(trace)
+    // The JSON view carries the trace itself, never the per-line table.
+    costs: if mode != "json" && totals.rows.len() > 0 -> jet_cli_perf_line_costs(trace) else -> jet_cli_perf_line_costs_none()
+    table: jet_cli_perf_line_table(totals, costs)
     if mode == "html" {
         return JetDriverVerbOutput{stdout: jet_cli_perf_view_html(trace_id(trace) ?? "unknown", frames, flame, timeline, table), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
     if mode == "text" {
-        return JetDriverVerbOutput{stdout: jet_cli_perf_view_text(trace, frames, flame, timeline, table, color), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        return JetDriverVerbOutput{stdout: jet_cli_perf_view_text(trace, frames, flame, timeline, table, costs.notes, color), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
     view: CanonicalJSON.Object(
         [CanonicalJSONField]{
@@ -186,8 +190,9 @@ jet_cli_perf_strings: fn(lines: [String]) -> CanonicalJSON Never! {
     CanonicalJSON.Array(loop line in lines -> CanonicalJSON.String(line.copy()))
 }
 
-// `render_view_text`.
-jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String], timeline: [String], table: [String], color: Bool) -> String Never! {
+// `render_view_text`, with `notes` on the sources whose lines have no cost
+// facts (LineCosts.jet) before the sections.
+jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String], timeline: [String], table: [String], notes: [String], color: Bool) -> String Never! {
     out := "{diagnostic_theme_paint(color, "1", "schema")} {TRACE_SCHEMA} v{TRACE_VERSION}\n"
     out = "{out}{diagnostic_theme_paint(color, "1", "trace")} {trace_id(trace) ?? "unknown"}\n"
     out = "{out}{diagnostic_theme_paint(color, "1", "command")} {jet_cli_perf_content_text(trace, "command") ?? "unknown"}\n"
@@ -218,6 +223,7 @@ jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String]
     if frames == "all" {
         out = "{out}generated-frames: none retained in .jettrace (hidden unless captured under --frames=all)\n"
     }
+    loop note in notes -> out = "{out}{note}\n"
     "{out}{jet_cli_perf_view_sections(flame, timeline, table, color)}"
 }
 
@@ -1189,9 +1195,12 @@ jet_cli_perf_line_totals: fn(trace: CanonicalJSON) -> JetCLIPerfLineTotals Never
 
 // The per-line table: each function's samples at each source line, the
 // rows of one function and line summed, hottest first, then by file, line
-// and function, at most JET_CLI_PERF_LINE_ROWS of them
-// (`  main.jet:5 spin samples=812`). Empty when no line has a sample.
-jet_cli_perf_line_table: fn(totals: JetCLIPerfLineTotals) -> [String] Never! {
+// and function, at most JET_CLI_PERF_LINE_ROWS of them, each with its share
+// of every line's samples and its typed cost facts from `costs`
+// (`  main.jet:5 spin samples=812 share=64% · cost: exact Int spill —
+// semantic remainder (loop depth 1, repeats every loop turn)`). Empty when
+// no line has a sample.
+jet_cli_perf_line_table: fn(totals: JetCLIPerfLineTotals, costs: JetCLIPerfLineCosts) -> [String] Never! {
     // Each distinct line's first row, and the samples of all of its rows.
     firsts := [Int]{}
     sums := [Int]{}
@@ -1221,6 +1230,8 @@ jet_cli_perf_line_table: fn(totals: JetCLIPerfLineTotals) -> [String] Never! {
         }
         order.insert(spot, place)
     }
+    total := 0
+    loop place in order -> total += sums[place]
     lines := [String]{}
     loop (at, place) in order {
         if at == JET_CLI_PERF_LINE_ROWS {
@@ -1228,7 +1239,9 @@ jet_cli_perf_line_table: fn(totals: JetCLIPerfLineTotals) -> [String] Never! {
             break
         }
         row: totals.rows[firsts[place]]
-        lines.push("  {totals.names[row.path]}:{row.line} {totals.names[row.function]} samples={sums[place]}")
+        share: sums[place] * 100 /% total
+        facts: jet_cli_perf_line_cost_text(costs, totals.names[row.path], row.line)
+        lines.push("  {totals.names[row.path]}:{row.line} {totals.names[row.function]} samples={sums[place]} share={share}%{facts}")
     }
     lines
 }
