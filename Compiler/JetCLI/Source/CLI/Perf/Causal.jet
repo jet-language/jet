@@ -13,19 +13,22 @@ use {
 // would come if the line really were that much faster. This file turns the
 // experiments into a ranked prediction per progress point, each with an
 // interval, and refuses a line or a run whose experiments are too few to
-// rank.
+// rank, and a run whose threads waited too long for a CPU to be trusted.
 
 // One experiment's end (PerfSamples.jet perf_causal_next): the line it sped
 // up, by its source line and function (line 0 for a baseline), the speedup
-// in thousandths, and by each progress point's slot: its passes after its
-// first one in the experiment, and the wall time from that first pass to
-// its last and the delay inserted between them, in nanoseconds. The
-// record's whole wall time and delay are not kept: only the time between
-// a point's own passes measures its rate.
+// in thousandths, the run time and the runqueue wait the program's threads
+// took meanwhile, in nanoseconds, and by each progress point's slot: its
+// passes after its first one in the experiment, and the wall time from that
+// first pass to its last and the delay inserted between them, in
+// nanoseconds. The record's whole wall time and delay are not kept: only
+// the time between a point's own passes measures its rate.
 JetCLIPerfExperiment: struct {
     line: U64,
     name: String,
     speedup: Int,
+    run_ns: Int,
+    wait_ns: Int,
     after: [Int],
     span_ns: [Int],
     span_delay_ns: [Int],
@@ -42,6 +45,35 @@ JET_CLI_PERF_CAUSAL_WIDEST: 300
 JET_CLI_PERF_CAUSAL_RESAMPLES: 200
 
 JET_CLI_PERF_CAUSAL_TAIL: 10
+
+// The most runqueue wait, in thousandths of their run time, that the
+// program's threads may take over the experiments before the lens
+// withholds its gains. A paused thread spins on its CPU (PerfSamples.jet
+// perf_causal_pause). That is right while each runnable thread has a CPU.
+// When more threads are runnable than there are CPUs, a line made
+// virtually faster frees no CPU for the rest, as a really faster one
+// would, so each gain reads low by a share that grows with the wait.
+//
+// The threshold comes from a processor-sharing model of the
+// CausalProfilePredictsSpeedup fixture: one narrow task and three wide
+// ones on S CPUs, checked against the truth of a line with 30% less work.
+// A baseline round's wait/run, and how many points low the narrow line's
+// gain reads:
+// - 0 (S 4, the dedicated regime): 0 points;
+// - 0.134 (S 3.5): 0.5;
+// - 0.216 (S 3.25): 1.1;
+// - 0.312 (S 3): 2.0;
+// - 0.806 (S 2.15, the contended regime): 5.0, and the wide line 5.6.
+// At S 2.15 both lines fall outside their intervals.
+//
+// The kernel counts both the CPUs other work holds and a cgroup's
+// throttling as wait. Four spinning threads capped at one CPU waited 2.64
+// of their run time (the model's 3). Given four CPUs, at a machine load of
+// 160, they waited 0.000.
+//
+// At 200, a gain reads at most about a point low, inside any interval the
+// lens ranks, and the contended regime is refused four times over.
+JET_CLI_PERF_CAUSAL_WAIT_MOST: 200
 
 // The wall time of one experiment, PerfSamples.jet
 // PERF_CAUSAL_EXPERIMENT_NS, in milliseconds.
@@ -67,13 +99,15 @@ jet_cli_perf_causal_record: fn(sampled: JetCLIPerfSamples, owned: [Bool], words:
             }
         }
     }
-    // The record's words after its first five: three columns of one word
+    // The record's words after its first seven: three columns of one word
     // per progress point's slot.
-    points: (record - 5) /% 3
+    points: (record - 7) /% 3
     JetCLIPerfExperiment{
         line: line,
         name: name,
         speedup: link_debug_addr(words, at + 16),
+        run_ns: link_debug_addr(words, at + 40),
+        wait_ns: link_debug_addr(words, at + 48),
         after: jet_cli_perf_causal_column(words, at, points, 0),
         span_ns: jet_cli_perf_causal_column(words, at, points, 1),
         span_delay_ns: jet_cli_perf_causal_column(words, at, points, 2),
@@ -83,7 +117,7 @@ jet_cli_perf_causal_record: fn(sampled: JetCLIPerfSamples, owned: [Bool], words:
 // Column `column` of the causal record at byte `at` of `words`, one word per
 // slot of its `points` progress points.
 jet_cli_perf_causal_column: fn(words: [U8], at: Int, points: Int, column: Int) -> [Int] Never! {
-    loop slot in 0..<points -> link_debug_addr(words, at + (5 + column * points + slot) * 8)
+    loop slot in 0..<points -> link_debug_addr(words, at + (7 + column * points + slot) * 8)
 }
 
 // The experiments that sped up one line of one function.
@@ -170,14 +204,21 @@ jet_cli_perf_causal_line: fn(experiments: [JetCLIPerfExperiment], base: [Int], c
 // The causal section of the trace of the run of `source`: each progress
 // point's lines, ranked by how much sooner its passes come, each with its
 // interval, and the lines it could not rank with why; or, when no line of
-// any point could be ranked, the reason the run is refused.
+// any point could be ranked, the reason the run is refused. A run whose
+// threads waited for a CPU more than JET_CLI_PERF_CAUSAL_WAIT_MOST of their
+// run time is refused with the wait, and its points keep their names but
+// none of their lines: each gain would read low.
 jet_cli_perf_causal_section: fn(source: &&String, experiments: &&[JetCLIPerfExperiment], points: &&[Int:String]) -> TraceReceiptSection Never! {
     base := [Int]{}
     groups := [JetCLIPerfCausalGroup]{}
     // The speedup the experiments took, in percent.
     percent := 30
+    run_ns := 0
+    wait_ns := 0
     loop (index, experiment) in experiments {
         if experiment.speedup > 0 -> percent = experiment.speedup /% 10
+        run_ns += experiment.run_ns
+        wait_ns += experiment.wait_ns
         // A baseline has no speedup. An experiment that slowed the program
         // for a line the checked source does not name is neither a baseline
         // nor any line's.
@@ -203,6 +244,8 @@ jet_cli_perf_causal_section: fn(source: &&String, experiments: &&[JetCLIPerfExpe
     slots.sort()
     ranked := 0
     rows := [CanonicalJSON]{}
+    // The points with their lines withheld.
+    withheld := [CanonicalJSON]{}
     loop slot in slots {
         found := [JetCLIPerfCausalLine]{}
         unranked := [CanonicalJSON]{}
@@ -238,26 +281,45 @@ jet_cli_perf_causal_section: fn(source: &&String, experiments: &&[JetCLIPerfExpe
             if right.low != left.low -> right.low <=> left.low else -> right.gain <=> left.gain
         })
         ranked += found.len()
+        name: if points.get(slot) == .Val(named) -> "{named}" else -> "point"
+        withheld.push(
+            CanonicalJSON.Object(
+                [CanonicalJSONField]{
+                    {key: "lines", value: CanonicalJSON.Array([CanonicalJSON]{})},
+                    {key: "name", value: CanonicalJSON.String("{name}")},
+                    {key: "unranked", value: CanonicalJSON.Array([CanonicalJSON]{})},
+                },
+            ),
+        )
         rows.push(
             CanonicalJSON.Object(
                 [CanonicalJSONField]{
                     {key: "lines", value: CanonicalJSON.Array(loop line in found.move() -> jet_cli_perf_causal_json(line))},
-                    {key: "name", value: CanonicalJSON.String(if points.get(slot) == .Val(named) -> "{named}" else -> "point")},
+                    {key: "name", value: CanonicalJSON.String(name)},
                     {key: "unranked", value: CanonicalJSON.Array(unranked.move())},
                 },
             ),
         )
     }
     reason := ""
-    if ranked == 0 {
-        // Each experiment is a baseline or a line at even odds, so a line
-        // takes about twice its share of the experiments.
-        needed: JET_CLI_PERF_CAUSAL_MIN * 4 * JET_CLI_PERF_CAUSAL_EXPERIMENT_MS
-        reason = if points.len() == 0 -> "no progress point passed: close a zone, finish a task or call `perf.progress(name)` in the run" else -> "the run kept {experiments.len()} experiments of {JET_CLI_PERF_CAUSAL_EXPERIMENT_MS} ms, {base.len()} of them baselines, and no line had {JET_CLI_PERF_CAUSAL_MIN} with an interval narrower than {JET_CLI_PERF_CAUSAL_WIDEST /% 10} points; run it for longer than {needed} ms per line it spends time in"
+    if {
+        ranked == 0 -> {
+            // Each experiment is a baseline or a line at even odds, so a
+            // line takes about twice its share of the experiments.
+            needed: JET_CLI_PERF_CAUSAL_MIN * 4 * JET_CLI_PERF_CAUSAL_EXPERIMENT_MS
+            reason = if points.len() == 0 -> "no progress point passed: close a zone, finish a task or call `perf.progress(name)` in the run" else -> "the run kept {experiments.len()} experiments of {JET_CLI_PERF_CAUSAL_EXPERIMENT_MS} ms, {base.len()} of them baselines, and no line had {JET_CLI_PERF_CAUSAL_MIN} with an interval narrower than {JET_CLI_PERF_CAUSAL_WIDEST /% 10} points; run it for longer than {needed} ms per line it spends time in"
+        }
+        run_ns > 0 && wait_ns * 1000 > run_ns * JET_CLI_PERF_CAUSAL_WAIT_MOST -> {
+            reason = "the program's threads waited {wait_ns /% 1000000} ms for a CPU while they ran {run_ns /% 1000000} ms, {jet_cli_perf_causal_percent(wait_ns * 1000 /% run_ns)} of their run time, above the {jet_cli_perf_causal_percent(JET_CLI_PERF_CAUSAL_WAIT_MOST)} the lens ranks under: under CPU contention a line made virtually faster frees no CPU for the rest, so every gain would read low; run it where each of its threads has a CPU"
+            rows = withheld.move()
+        }
+        else -> {}
     }
     value: CanonicalJSON.Object(
         [CanonicalJSONField]{
             {key: "baselines", value: CanonicalJSON.Integer("{base.len()}")},
+            {key: "cpu_run_ms", value: CanonicalJSON.Integer("{run_ns /% 1000000}")},
+            {key: "cpu_wait_ms", value: CanonicalJSON.Integer("{wait_ns /% 1000000}")},
             {key: "experiments", value: CanonicalJSON.Integer("{experiments.len()}")},
             {key: "path", value: CanonicalJSON.String(source.move())},
             {key: "points", value: CanonicalJSON.Array(rows.move())},

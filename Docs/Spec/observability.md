@@ -269,9 +269,10 @@ sample period late. A progress point counts passes: each closed zone by
 its name, each finished task as `task`, each answered HTTP request as
 `request`, and each `core.perf.progress(name)`. Outside the lens these record nothing. At the
 end of each experiment the runtime writes its line, its wall time, the
-delay it inserted and, for each point, its passes after its first one, the
-wall time from that first pass to its last and the delay inserted between
-them to the samples file. An
+delay it inserted, the run time and the runqueue wait its threads took
+(from each one's `/proc/self/task/<tid>/schedstat`) and, for each point,
+its passes after its first one, the wall time from that first pass to its
+last and the delay inserted between them to the samples file. An
 experiment whose line the checked source does not name counts neither as
 a baseline nor toward any line. The trace
 keeps the predictions in its `causal` receipt section (type
@@ -286,7 +287,13 @@ would get that pass nearly free. Its interval is the
 90% range of 200 deterministic bootstrap resamples. A line is ranked only
 with 6 experiments on it, 6 baselines and an interval no wider than 30
 points; the others are listed with the reason. When no line can be ranked,
-the section says why the run was refused and how long to run. `jet perf
+the section says why the run was refused and how long to run. The section
+keeps the threads' run time and wait (`cpu_run_ms`, `cpu_wait_ms`). When
+they waited for a CPU more than 20% of the time they ran, the gains are
+withheld: under that contention a line made virtually faster frees no CPU
+for the rest, as a really faster one would, so every gain would read low.
+The run is refused with the wait, each point keeps its name with no lines,
+and the reason asks for a run where each thread has a CPU. `jet perf
 view` prints, under `causal`, each point as `` `round`: if this line were
 30% faster, each pass would come sooner by``, then its lines best first
 (`  main.jet:23 narrow  +14.2% (9.8% to 18.0%)`). Experiments are
