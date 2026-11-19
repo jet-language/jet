@@ -1,0 +1,23 @@
+# `tasks` lists every task by id with its state, what it waits on and its
+# Jet frames. `counter` stops at a breakpoint on a thread other than the
+# main one, and its row carries the `*`; `waiter` is blocked on its channel
+# receive, with the frames it parked in; task 1 is the main thread. Every
+# thread stops at the breakpoint and runs again on `c`, so the program ends
+# as it would untraced. The run starts at `run`, whose entry breakpoint was
+# number 1, so `break 11` is 2. The fixture must stay in jet fmt form: line
+# 11 is count's loop body, line 4 drain's receive.
+fixture: TasksListsEveryTask.fixture
+env: NO_COLOR=1
+step: jet debug prog.jet
+stdin: tasks_lists_every_task.stdin
+exit: 0
+stdout: ~ "Breakpoint hit  prog.jet:11  in count()\n"
+stdout: ~ "tasks\n  1  root  " # task 1 first, the main thread
+stdout: ~ "  blocked  channel receive\n"
+stdout: ~ "drain()  at prog.jet:4\n" # the parked task's own frames
+stdout: ~ "  running\n    #0  count()  at prog.jet:11\n"
+stdout: ~ "\n* " # the task the program stopped in
+stdout: !~ "SIGTRAP"
+stdout: ~ "count 12\n"
+stdout: ~ "drain 2\n"
+stdout: ~ "Program finished\n"

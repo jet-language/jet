@@ -474,7 +474,19 @@ D-DBG-VERBS1=A names the commands:
 - `frame <n>` selects a frame as `backtrace` (`bt`) numbers it. `up` moves
   toward the callers and `down` back. `locals` and `print` (`p`) read the
   selected frame until the program moves.
+- `tasks` lists every task by id: its label, its state (queued, running,
+  blocked or paused), what it waits on (`channel receive`) and its Jet
+  frames; `*` marks the task the program stopped in. Task 1 is the main
+  thread.
 - `help` (`h`) lists the commands and `quit` (`q`) ends the session.
+
+Every thread of the program is traced. A stop stops them all, so `tasks`
+and `print` see the whole program still. `continue` runs them all again,
+and a step moves only the stopped thread. The task list is the runtime's
+own registry (`Compiler/JetRuntime/Source/Observe.jet`, the one `jet
+inspect live` publishes), read from the stopped program's memory. A parked
+task's frames come from the stack its fiber saved when it parked.
+`jet debug --dap` still shows the program as one thread.
 
 A step that passes a breakpoint which does not stop goes on to where the
 step would have ended. `jet debug --dap` settles every run the same way
@@ -489,10 +501,11 @@ register after each instruction, while the calls it makes run at full
 speed (they restore the register before they return). One such watch is
 active at a time. A watch covers the place's own bytes: for a list, its
 length and buffer, not the items. A watch on a frame's local ends when
-that frame returns; the next stop says so. Only the program's main thread
-is traced, so a write from another thread does not stop it. A Float held
-in a vector register can't be watched. Globals can't be watched yet,
-because the debug information has no global variables.
+that frame returns; the next stop says so. Every thread gets the watch's
+debug registers, so a write from any thread stops; a watch on a register
+local follows the thread whose frame holds it. A Float held in a vector
+register can't be watched. Globals can't be watched yet, because the debug
+information has no global variables.
 
 ## Recorder boundary
 

@@ -1941,6 +1941,18 @@ LOADER_PTRACE_SETOPTIONS: 0x4200
 // The kernel kills the program when its tracer ends.
 LOADER_PTRACE_O_EXITKILL: 0x100000
 
+// The kernel traces each thread the program starts from its first
+// instruction, stopped by a SIGSTOP, and stops the starting thread with a
+// clone event (PTRACE_EVENT_CLONE, X64_TRACE_EVENT_CLONE) once it exists.
+LOADER_PTRACE_O_TRACECLONE: 0x8
+
+// The wait status of a thread stopped by a ptrace event holds the event
+// above the stopping signal: status >> 16.
+X64_TRACE_EVENT_CLONE: 3
+
+// The signal that stops one thread of the program (x64_trace_stop).
+LOADER_SIGSTOP: 19
+
 // wait4 option: wait for every kind of child, threads included.
 LOADER_WAIT_ALL: 0x40000000
 
@@ -1959,6 +1971,14 @@ X64_TRACE_RSP: 19
 X64_TRACE_RSI: 13
 
 X64_TRACE_RDI: 14
+
+// The thread's GS base, whose first word a Jet thread keeps its TCB's
+// address in (JetRuntime Thread.jet thread_base): on a carrier running a
+// fiber, the fiber's TCB.
+X64_TRACE_GS_BASE: 22
+
+// The system call a thread stopped in, or -1 when it stopped outside one.
+X64_TRACE_ORIG_RAX: 15
 
 // The offset of the debug registers in the kernel's per-thread user area
 // (struct user, u_debugreg) that PTRACE_PEEKUSER and PTRACE_POKEUSER read
@@ -2013,16 +2033,27 @@ LOADER_TRACE_FD: 3
 // The error of a call to a helper that has ended.
 LOADER_ESRCH: 3
 
-// A traced program: its pid (-1 before it starts), the scratch page this
-// process shares with the trace's helper, the helper's pid and this end of
-// the channel to it (-1 before they exist); `failure` says why the program
+// A traced program: its pid (-1 before it starts), the thread the
+// per-thread calls act on (its registers, its debug registers, how it goes
+// on, and its view of memory; the program's first thread, whose id is the
+// pid, until the caller picks another), the scratch page this process
+// shares with the trace's helper, the helper's pid and this end of the
+// channel to it (-1 before they exist); `failure` says why the program
 // didn't start. x64_trace_close ends them all.
 X64Trace: struct {
     pid: Int,
     scratch: Int,
     failure: String,
+    thread: Int{-1},
     helper: Int{-1},
     channel: Int{-1},
+}
+
+// One wait for the traced program: the thread that stopped or ended and
+// its wait status; `thread` is -errno when the wait failed.
+X64TraceStop: struct {
+    thread: Int,
+    status: Int,
 }
 
 // Start the image file at `path` with `argv` (argv[0] included) and this
@@ -2030,7 +2061,8 @@ X64Trace: struct {
 // its first instruction. Its standard input reads /dev/null; its output
 // and errors append to the existing file `output`. The helper ends when
 // this process does (its channel closes), and the kernel kills the program
-// when the helper ends.
+// when the helper ends. Every thread the program starts is traced too
+// (LOADER_PTRACE_O_TRACECLONE): x64_trace_wait reports its stops.
 x64_trace_spawn: fn(path: String, argv: [String], output: String) -> X64Trace {
     trace := X64Trace{pid: -1, scratch: 0, failure: ""}
     scratch: os_map_with(0, OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE, LOADER_MAP_SHARED_ANONYMOUS, -1, 0)
@@ -2131,15 +2163,16 @@ x64_trace_spawn: fn(path: String, argv: [String], output: String) -> X64Trace {
         return trace
     }
     trace.pid = pid
+    trace.thread = pid
     // The kernel stops the program with SIGTRAP once execve has replaced it.
-    status: x64_trace_wait(trace)
+    status: x64_trace_wait(trace).status
     if status & 0xff != 0x7f || (status >> 8) & 0xff != 5 {
         trace.pid = -1
         trace.failure = if status & 0x7f == 0 && (status >> 8) & 0xff == 127 -> "execve of {path} failed" else -> "the program ended before it started (wait status {status})"
         return trace
     }
     #Unsafe("PTRACE_SETOPTIONS on the helper's own stopped tracee") {
-        _ := x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_SETOPTIONS, pid, 0, LOADER_PTRACE_O_EXITKILL, 0, 0)
+        _ := x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_SETOPTIONS, pid, 0, LOADER_PTRACE_O_EXITKILL | LOADER_PTRACE_O_TRACECLONE, 0, 0)
     }
     trace
 }
@@ -2185,18 +2218,31 @@ x64_trace_reply: fn(trace: X64Trace) -> Int {
     result
 }
 
-// Wait for the traced program to stop or end: its wait status, or -errno.
-x64_trace_wait: fn(trace: X64Trace) -> Int {
+// Wait for any thread of the traced program to stop or end: which thread,
+// and its wait status.
+x64_trace_wait: fn(trace: X64Trace) -> X64TraceStop {
     result := -OS_EINTR
+    status := 0
     #Unsafe("the helper's wait4 writes one int status to the trace's scratch word") {
         loop result == -OS_EINTR {
-            result = x64_trace_call(trace, OS_SYS_WAIT4, trace.pid, trace.scratch + LOADER_TRACE_WORD, LOADER_WAIT_ALL, 0, 0, 0)
+            result = x64_trace_call(trace, OS_SYS_WAIT4, -1, trace.scratch + LOADER_TRACE_WORD, LOADER_WAIT_ALL, 0, 0, 0)
         }
-        if result == trace.pid {
-            result = Int{os_load_i64(I64{trace.scratch + LOADER_TRACE_WORD})} & 0xffffffff
+        if result > 0 {
+            status = Int{os_load_i64(I64{trace.scratch + LOADER_TRACE_WORD})} & 0xffffffff
         }
     }
-    result
+    X64TraceStop{thread: result, status: status}
+}
+
+// Stop the running thread `thread` of the traced program: a SIGSTOP to it
+// alone, which x64_trace_wait then reports. False when the kernel refused
+// (the thread has ended).
+x64_trace_stop: fn(trace: X64Trace, thread: Int) -> Bool {
+    result := 0
+    #Unsafe("tgkill of one thread of our own tracee") {
+        result = os_syscall(OS_SYS_TGKILL, trace.pid, thread, LOADER_SIGSTOP, 0, 0, 0)
+    }
+    !os_failed(result)
 }
 
 // How x64_trace_resume lets a stopped program go on: running, or for one
@@ -2206,8 +2252,8 @@ X64TraceResume: enum {
     Step,
 }
 
-// Let the stopped program go on as `how` says, delivering `signal` (0:
-// none). False when the kernel refused.
+// Let the trace's stopped thread go on as `how` says, delivering `signal`
+// (0: none). False when the kernel refused.
 x64_trace_resume: fn(trace: X64Trace, how: X64TraceResume, signal: Int) -> Bool {
     request: if how == {
         .Run -> LOADER_PTRACE_CONT
@@ -2215,7 +2261,7 @@ x64_trace_resume: fn(trace: X64Trace, how: X64TraceResume, signal: Int) -> Bool 
     }
     result := 0
     #Unsafe("the helper's PTRACE_CONT or PTRACE_SINGLESTEP on its own stopped tracee") {
-        result = x64_trace_call(trace, OS_SYS_PTRACE, request, trace.pid, 0, signal, 0, 0)
+        result = x64_trace_call(trace, OS_SYS_PTRACE, request, trace.thread, 0, signal, 0, 0)
     }
     !os_failed(result)
 }
@@ -2224,7 +2270,7 @@ x64_trace_resume: fn(trace: X64Trace, how: X64TraceResume, signal: Int) -> Bool 
 x64_trace_peek: fn(trace: X64Trace, address: Int) -> I64? {
     word := I64?{None}
     #Unsafe("the helper's PTRACE_PEEKDATA stores the tracee's word to the trace's scratch word") {
-        if !os_failed(x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_PEEKDATA, trace.pid, address, trace.scratch + LOADER_TRACE_WORD, 0, 0)) {
+        if !os_failed(x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_PEEKDATA, trace.thread, address, trace.scratch + LOADER_TRACE_WORD, 0, 0)) {
             word = Val(os_load_i64(I64{trace.scratch + LOADER_TRACE_WORD}))
         }
     }
@@ -2235,7 +2281,7 @@ x64_trace_peek: fn(trace: X64Trace, address: Int) -> I64? {
 x64_trace_poke: fn(trace: X64Trace, address: Int, word: I64) -> Bool {
     result := 0
     #Unsafe("the helper's PTRACE_POKEDATA writes one word of its own stopped tracee") {
-        result = x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_POKEDATA, trace.pid, address, Int{word}, 0, 0)
+        result = x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_POKEDATA, trace.thread, address, Int{word}, 0, 0)
     }
     !os_failed(result)
 }
@@ -2266,50 +2312,50 @@ x64_trace_read: fn(trace: X64Trace, address: Int, count: Int) -> [U8]? {
     Val(bytes)
 }
 
-// The stopped program's registers, X64_TRACE_REGISTERS words in the
+// The trace's stopped thread's registers, X64_TRACE_REGISTERS words in the
 // kernel's order; None when the kernel refused.
 x64_trace_registers: fn(trace: X64Trace) -> [Int]? {
     registers := [Int]?{None}
     #Unsafe("the helper's PTRACE_GETREGS writes the register block at the start of the trace's scratch page") {
-        if !os_failed(x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_GETREGS, trace.pid, 0, trace.scratch, 0, 0)) {
+        if !os_failed(x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_GETREGS, trace.thread, 0, trace.scratch, 0, 0)) {
             registers = Val(loop k in 0..<X64_TRACE_REGISTERS -> Int{os_load_i64(I64{trace.scratch + 8 * k})})
         }
     }
     registers
 }
 
-// Set the stopped program's registers to `registers` (as
+// Set the trace's stopped thread's registers to `registers` (as
 // x64_trace_registers gave them).
 x64_trace_set_registers: fn(trace: X64Trace, registers: [Int]) -> Bool {
     if registers.len() != X64_TRACE_REGISTERS -> return false
     result := 0
     #Unsafe("the helper's PTRACE_SETREGS reads the register block written at the start of the trace's scratch page") {
         loop (k, value) in registers -> os_store_i64(I64{trace.scratch + 8 * k}, I64{value})
-        result = x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_SETREGS, trace.pid, 0, trace.scratch, 0, 0)
+        result = x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_SETREGS, trace.thread, 0, trace.scratch, 0, 0)
     }
     !os_failed(result)
 }
 
-// The stopped program's debug register `index` (0 to 7: DR0-DR3 the
+// The trace's stopped thread's debug register `index` (0 to 7: DR0-DR3 the
 // watched addresses, DR6 the status, DR7 the control); None when the
-// kernel refused.
+// kernel refused. Each thread has its own.
 x64_trace_debug_register: fn(trace: X64Trace, index: Int) -> Int? {
     word := Int?{None}
     #Unsafe("the helper's PTRACE_PEEKUSER stores one word of its own stopped tracee's user area to the trace's scratch word") {
-        if !os_failed(x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_PEEKUSER, trace.pid, LOADER_TRACE_DEBUG_REGISTERS + 8 * index, trace.scratch + LOADER_TRACE_WORD, 0, 0)) {
+        if !os_failed(x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_PEEKUSER, trace.thread, LOADER_TRACE_DEBUG_REGISTERS + 8 * index, trace.scratch + LOADER_TRACE_WORD, 0, 0)) {
             word = Val(Int{os_load_i64(I64{trace.scratch + LOADER_TRACE_WORD})})
         }
     }
     word
 }
 
-// Set the stopped program's debug register `index` to `value`; false when
-// the kernel refused (an address outside the program, or a control word
-// that enables a register holding none).
+// Set the trace's stopped thread's debug register `index` to `value`;
+// false when the kernel refused (an address outside the program, or a
+// control word that enables a register holding none).
 x64_trace_set_debug_register: fn(trace: X64Trace, index: Int, value: Int) -> Bool {
     result := 0
     #Unsafe("the helper's PTRACE_POKEUSER writes one debug register of its own stopped tracee") {
-        result = x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_POKEUSER, trace.pid, LOADER_TRACE_DEBUG_REGISTERS + 8 * index, value, 0, 0)
+        result = x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_POKEUSER, trace.thread, LOADER_TRACE_DEBUG_REGISTERS + 8 * index, value, 0, 0)
     }
     !os_failed(result)
 }
@@ -2321,12 +2367,14 @@ x64_trace_close: fn(trace: &X64Trace) {
         #Unsafe("SIGKILL to the helper's own tracee") {
             _ := os_syscall(OS_SYS_KILL, trace.pid, 9, 0, 0, 0, 0)
         }
-        // The kill ends a stopped tracee too; the helper reaps it.
+        // The kill ends a stopped tracee too; the helper reaps each thread,
+        // the first last.
         loop {
-            status: x64_trace_wait(trace)
-            if status < 0 || status & 0xff != 0x7f -> break
+            stop: x64_trace_wait(trace)
+            if stop.thread < 0 || (stop.thread == trace.pid && stop.status & 0xff != 0x7f) -> break
         }
         trace.pid = -1
+        trace.thread = -1
     }
     // The helper ends once its channel closes; reap it.
     if trace.channel >= 0 {

@@ -212,6 +212,26 @@ native_elf_section: fn(elf: [U8], name: String) -> [U8]? Never! {
     Val(elf[offset..<offset + length])
 }
 
+// The value of the symbol named `name` in the image's symbol table; None
+// when the table has none of that name.
+native_elf_symbol: fn(elf: [U8], name: String) -> Int? Never! {
+    symbols: native_elf_section(elf, ".symtab") ?? return None
+    names: native_elf_section(elf, ".strtab") ?? return None
+    at := 0
+    loop at + NATIVE_ELF_SYMBOL_BYTES <= symbols.len() {
+        named: link_debug_le(symbols, at, 4)
+        if named > 0 && x64_jetline_text(names, named) == name {
+            return Val(link_debug_addr(symbols, at + 8))
+        }
+        at += NATIVE_ELF_SYMBOL_BYTES
+    }
+    None
+}
+
+// The bytes of one ELF64 symbol: its name's offset (4), info, other, section
+// (2), value (8) and size (8).
+NATIVE_ELF_SYMBOL_BYTES: 24
+
 // The encoding of DW_ATE `code`: the inverse of the writer's
 // (JetBackend Image/Dwarf.jet).
 native_encoding: fn(code: Int) -> X64DebugEncoding Never! {
