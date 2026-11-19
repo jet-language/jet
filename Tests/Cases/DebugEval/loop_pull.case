@@ -1,11 +1,12 @@
 # A caller's frame whose call lowering made: `xs.map(...)` is lowered in
 # place, so `run` calls the lambda itself and no source call names that
 # call. The call carries the call-site row of the node whose lowering made
-# it, the `map` call, so `stackTrace` shows the caller's frame at that
-# call's line and column, and `evaluate` in that frame is checked just
-# before that node: `total` and `xs` are in scope, the loop's `v` is not.
-# The fixture must stay in jet fmt form: line 4 is the loop, its `xs` at
-# column 15, and line 5 the lambda's body. No other debugger is on PATH.
+# it, the `map` call, at the method's name, so
+# `stackTrace` shows the caller's frame at that call's line and column, and
+# `evaluate` in that frame is checked just before that node: `total` and
+# `xs` are in scope, the loop's `v` is not. The fixture must stay in jet fmt
+# form: line 4 is the loop, its `map` at column 18, and line 5 the lambda's
+# body. No other debugger is on PATH.
 fixture: LoopPull.fixture
 env: NO_COLOR=1
 env: PATH={work}/no-tools
@@ -25,7 +26,7 @@ recv dap until $.request_seq = 5 timeout 30s every 100ms
 json: stdout doc $.body.stackFrames[0].line = 5
 json: stdout doc $.body.stackFrames[1].name = "run"
 json: stdout doc $.body.stackFrames[1].line = 4
-json: stdout doc $.body.stackFrames[1].column = 15
+json: stdout doc $.body.stackFrames[1].column = 18
 capture: run_frame stdout doc $.body.stackFrames[1].id
 send dap: "{\"seq\":6,\"type\":\"request\",\"command\":\"evaluate\",\"arguments\":{\"expression\":\"total\",\"frameId\":{cap:run_frame},\"context\":\"repl\"}}"
 recv dap until $.request_seq = 6 timeout 30s every 100ms
