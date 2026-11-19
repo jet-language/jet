@@ -176,6 +176,28 @@ native_test_unwound: fn(pc: Int) -> NativeUnwound {
     assert_eq(alone[0].value, NATIVE_DEBUG_NOT_KEPT)
 }
 
+// `pair`, an aggregate parameter, is its entry value with no
+// DW_OP_stack_value after it over [0x1000, 0x1100): the call returning to
+// 0x2005 passed in rdi the address 0x800 of its bytes, so at 0x1050 `pair`
+// shows the Pair there.
+#Test("an_aggregate_parameter_reads_the_bytes_at_the_address_its_caller_passed") {
+    loclists: [U8]{0x04, 0x00, 0x80, 0x02, 0x03, 0xa3, 0x01, 0x55, 0x00}
+    pair: NativeVariable{name: "pair", line: 1, ty: 50, list: 0, base: 0x1000, role: NativeVariableRole.Parameter, site: -1}
+    function: NativeFunction{low: 0x1000, high: 0x1100, name: "check", file: -1, variables: [NativeVariable]{pair}, inlined: [NativeInlined]{}}
+    types := [Int:NativeType]{}
+    types[40] = NativeType{name: "I64", size: 8, tag: 0x24, encoding: X64DebugEncoding.Signed, target: -1, group: -1}
+    types[50] = NativeType{name: "Pair", size: 16, tag: 0x13, encoding: X64DebugEncoding.Signed, target: -1, group: 0}
+    members: [[NativeMember]]{[NativeMember]{NativeMember{name: "first", offset: 0, ty: 40, die: -1}, NativeMember{name: "second", offset: 8, ty: 40, die: -1}}}
+    arguments: [NativeCallArgument]{NativeCallArgument{at: 0x2005, register: 5, value: [U8]{0x11, 0x80, 0x10}}}
+    image: NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions: [NativeFunction]{function}, types: types, members: members, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: loclists, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}, arguments: arguments}
+    memory: NativeMemory{trace: None, blocks: [NativeBlock]{NativeBlock{address: 0x800, bytes: native_test_bytes([Int]{7, 9}, 8)}}}
+    shown: native_frame_locals(image, memory, native_test_unwound(0x1050), 0x1050, -1, NativeUnwound?{Val(native_test_unwound(0x2005))})
+    assert_eq(shown.len(), 1)
+    assert_eq(shown[0].value, "Pair{{first: 7, second: 9}}")
+    alone: native_frame_locals(image, memory, native_test_unwound(0x1050), 0x1050, -1, NativeUnwound?{None})
+    assert_eq(alone[0].value, NATIVE_DEBUG_NOT_KEPT)
+}
+
 // Functions in address order with a gap between them: an address finds the
 // one holding it, and one in the gap, before the first or at the last's end
 // finds none.

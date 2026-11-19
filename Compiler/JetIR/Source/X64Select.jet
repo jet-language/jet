@@ -4432,7 +4432,9 @@ ir_x64_same_key: fn(a: [Int], b: [Int]) -> Bool Never! {
 // along when nothing reads it), the value its argument register had at
 // entry (X64DebugLocation.EntryValue), which the caller's call site keeps
 // (ir_x64_kept_arguments). An aggregate's slot carries the address of its
-// bytes, so its variable is `indirect`: the debugger reads the bytes there.
+// bytes, so its variable is `indirect`: the debugger reads the bytes there,
+// an aggregate parameter's entry value too (the caller's bytes, which it
+// keeps while the call runs).
 // A local belongs to the inline site of the instruction that first writes
 // it (a callee's local inlined here: OptInline.jet ir_opt_splice).
 ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, positions: [Int], body: Int, end: Int, variables: &[X64DebugVariable], ranges: &[X64VariableRange]) Never! {
@@ -4481,10 +4483,10 @@ ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, positions:
     }
 }
 
-// Per parameter slot: the general register its caller passes it in, for a
-// word parameter (not an aggregate's pointer) the body never writes, else
-// -1. The registers follow the prologue's (ir_x64_compile_body): an
-// aggregate result's hidden pointer takes rdi first.
+// Per parameter slot: the general register its caller passes it in (an
+// aggregate's: its bytes' address) when the body never writes it, else -1.
+// The registers follow the prologue's (ir_x64_compile_body): an aggregate
+// result's hidden pointer takes rdi first.
 ir_x64_entry_registers: fn(m: IRModule, f: IRFunction, al: IRX64Allocation) -> [Int] Never! {
     entries := [Int]{}
     general := if al.result_home != 0 -> 1 else -> 0
@@ -4494,8 +4496,7 @@ ir_x64_entry_registers: fn(m: IRModule, f: IRFunction, al: IRX64Allocation) -> [
             entries.push(-1)
             next
         }
-        word: m.types[f.slot_type[slot]].kind != .Aggregate
-        entries.push(if word -> IR_X64_ARGUMENT_REGISTERS[general] else -> -1)
+        entries.push(IR_X64_ARGUMENT_REGISTERS[general])
         general += 1
     }
     loop at in 0..<f.op.len() {
@@ -6797,6 +6798,30 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
         if compiled.variables[range.variable].name == "n" && range.location == entry {
             entered = true
         }
+    }
+    assert(entered)
+}
+
+// second(pair, n) never reads its aggregate `pair`: all along, pair is its
+// entry value, the address of its bytes its caller passed in rdi, read
+// indirectly.
+#Test("An aggregate parameter is its entry value, the address its caller passed") {
+    m := ir_module_new()
+    word: ir_word_row(m)
+    pair: ir_intern_type(m, "Pair", IRType{ty: Type.Named{name: "Pair"}, kind: IRTypeKind.Aggregate, size: 16, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""})
+    f := ir_function_new("second", "test:entry.jet.second", "", "entry.jet", 1)
+    _ := ir_slot(f, pair, IRSlotKind.Param, ir_intern_name(m, "pair"), 1)
+    n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
+    f.result = word
+    _ := ir_emit(f, IROp.Return, -1, n, -1, -1, 2)
+    m.functions.push(f)
+    compiled: ir_x64_compile_function(m, ir_x64_tables(m), 0)
+    assert(compiled.errors.is_empty())
+    entered := false
+    entry: X64DebugLocation.EntryValue{reg: X64_RDI}
+    loop range in compiled.debug.ranges {
+        variable: compiled.variables[range.variable]
+        if variable.name == "pair" && range.location == entry -> entered = variable.indirect
     }
     assert(entered)
 }

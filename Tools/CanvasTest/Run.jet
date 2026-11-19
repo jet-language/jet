@@ -722,8 +722,11 @@ debug_replay: fn(canvas_url: String) Failure! {
     if before.status != 200 || int(at(before.tree, "canvas.overlay.active_line")) != 20 {
         return Err(fail_with("reverse-next must go back to line 20: HTTP {before.status} {short_text(before.body, 800)}"))
     }
+    // The refusal is the E3622 report as the renderer writes it, its
+    // headline sentence-cased (`No recording …`).
     missing: canvas_post(debug_url, token, debug_request(revision, "main.jet", [{key: String, value: String}]{{key: "recording", value: "missing"}}, [Int]{}, [String]{}))
-    if missing.status != 409 || text(at(missing.tree, "canvas.kind")) != "diagnostic" || !text(at(missing.tree, "canvas.message")).contains("no recording") {
+    refused: text(at(missing.tree, "canvas.message"))
+    if missing.status != 409 || text(at(missing.tree, "canvas.kind")) != "diagnostic" || !refused.contains("[jet.CorruptReplay]: No recording") || !refused.contains("jet-lang.dev/e/E3622") {
         return Err(fail_with("a recording that is not there must be refused with its E3622 report: HTTP {missing.status} {short_text(missing.body, 800)}"))
     }
     unnamed: canvas_post(debug_url, token, debug_request(revision, "main.jet", [{key: String, value: String}]{{key: "tier", value: "native-recorded"}}, [Int]{}, [String]{}))
@@ -745,7 +748,10 @@ debug_dump: fn(canvas_url: String, dump: String) Failure! {
         return Err(fail_with("a native-dump session must show the stopping line 9: HTTP {opened.status} {short_text(opened.body, 800)}"))
     }
     locals: locals_of(overlay)
-    if !locals.contains("count=3") || !locals.contains("total=21") || !locals.contains("key=<redacted>") || opened.body.contains("hunter2") {
+    // The Secret's text is in the source the overlay shows; what the dump
+    // read (its locals and the console's trace) never holds it.
+    read: "{js(at(overlay, "locals"))}{js(at(overlay, "trace"))}"
+    if !locals.contains("count=3") || !locals.contains("total=21") || !locals.contains("key=<redacted>") || read.contains("hunter2") {
         return Err(fail_with("the dump's locals must be count=3 and total=21 with the Secret redacted: {locals.join(",")}"))
     }
     stack := [String]{}
