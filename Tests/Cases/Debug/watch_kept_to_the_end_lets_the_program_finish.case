@@ -1,0 +1,15 @@
+# A watch kept until its frame returns ends there, and the program runs on
+# to its end. The program has a task's thread besides its main one, so the
+# write that shows the frame gone traps while other threads run; the watch's
+# debug registers are cleared on every thread all the same, and
+# `continue` reports the program's end instead of failing with E2203.
+# The fixture must stay in jet fmt form; line 32 adds to `order.total`.
+fixture: NavigationWatchesFix.fixture
+env: NO_COLOR=1
+step: jet debug prog.jet
+stdin: watch_kept_to_the_end_lets_the_program_finish.stdin
+exit: 0
+stdout: ~ "Watchpoint 3  order.total = 0\n" # the watch on a field path
+stdout: ~ "order.total: 30 -> 60\n" # its last change
+stdout: ~ "total 60 count 4 helper 3\nProgram finished\n" # the program runs on to its end
+stdout+stderr: !~ "couldn't clear a debug register" # the watch's end clears its registers
