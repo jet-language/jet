@@ -241,8 +241,9 @@ ir_optimize_module: fn(m: &IRModule, options: IROptOptions, threads: CompilerThr
     weights := [Int]{}
     loop f in functions -> weights.push(1 + f.op.len())
     glue: if ir_opt_enabled(options, "glue") -> ir_opt_glue_table(m) else -> [Int]{}
+    light: ir_opt_glue_light(m, functions, glue)
     calls := OptCalls{start: [Int]{}, to: [Int]{}}
-    report.direct_calls += ir_opt_prepare(functions, weights, glue, threads, calls)
+    report.direct_calls += ir_opt_prepare(functions, weights, glue, light, threads, calls)
     order: ir_opt_bottom_up(calls)
     // Before `entry`, whose guard then stays in front of the loop. The call
     // graph stays: a function this rewrites stays recursive, and a guarded
@@ -736,8 +737,9 @@ ir_opt_glue_table: fn(m: IRModule) -> [Int] Never! {
 
 // The functions of one thread of ir_opt_prepare, in order, with the direct
 // Calls it found in them (ir_opt_calls_of): per function how many, then all
-// of them in function order. The per-type glue table (OptGlue.jet; empty
-// with "glue" off) and the module's function count every thread reads.
+// of them in function order. The per-type glue table and which glue is
+// light (OptGlue.jet; empty with "glue" off) and the module's function
+// count every thread reads.
 IROptPart: struct {
     functions: [IRFunction],
     call_counts: [Int],
@@ -746,6 +748,7 @@ IROptPart: struct {
 
 IROptGlue: struct {
     table: [Int],
+    light: [Bool],
     functions: Int,
 }
 
@@ -765,7 +768,7 @@ OptCalls: struct {
 // glue table, so the functions split into consecutive parts
 // (compiler_threads_partition by `weights`), one thread each, joined in part
 // order: every body and the call list are the same for any thread count.
-ir_opt_prepare: fn(functions: &[IRFunction], weights: [Int], glue: &&[Int], threads: CompilerThreads, calls: &OptCalls) -> Int Never! {
+ir_opt_prepare: fn(functions: &[IRFunction], weights: [Int], glue: &&[Int], light: &&[Bool], threads: CompilerThreads, calls: &OptCalls) -> Int Never! {
     total := 0
     loop weight in weights -> total += weight
     count: functions.len()
@@ -773,7 +776,7 @@ ir_opt_prepare: fn(functions: &[IRFunction], weights: [Int], glue: &&[Int], thre
     if workers <= 1 {
         direct := 0
         loop id in 0..<count {
-            direct += ir_opt_prepare_function(functions[id], glue)
+            direct += ir_opt_prepare_function(functions[id], glue, light)
             calls.start.push(calls.to.len())
             _: ir_opt_calls_of(functions[id], count, calls.to)
         }
@@ -795,7 +798,7 @@ ir_opt_prepare: fn(functions: &[IRFunction], weights: [Int], glue: &&[Int], thre
         part -= 1
     }
     slots.reverse()
-    table: Shared{IROptGlue{table: glue.move(), functions: count}}
+    table: Shared{IROptGlue{table: glue.move(), light: light.move(), functions: count}}
     direct: ir_opt_preparers(slots, table, 0) ?? panic("the IR preparing threads failed")
     loop slot in slots {
         held := slot.guard_edit()
@@ -811,9 +814,9 @@ ir_opt_prepare: fn(functions: &[IRFunction], weights: [Int], glue: &&[Int], thre
     direct
 }
 
-ir_opt_prepare_function: fn(f: &IRFunction, glue: [Int]) -> Int Never! {
+ir_opt_prepare_function: fn(f: &IRFunction, glue: [Int], light: [Bool]) -> Int Never! {
     direct: ir_opt_direct_calls(f)
-    if glue.len() > 0 -> ir_opt_glue_calls(f, glue)
+    if glue.len() > 0 -> ir_opt_glue_calls(f, glue, light)
     direct
 }
 
@@ -840,7 +843,7 @@ ir_opt_prepare_part: fn(slot: Shared<IROptPart>, table: Shared<IROptGlue>) -> In
     counts := [Int]{}
     calls := [Int]{}
     loop id in 0..<held.value.functions.len() {
-        direct += ir_opt_prepare_function(held.value.functions[id], reads.value.table)
+        direct += ir_opt_prepare_function(held.value.functions[id], reads.value.table, reads.value.light)
         counts.push(ir_opt_calls_of(held.value.functions[id], reads.value.functions, calls))
     }
     held.value.call_counts = counts.move()
