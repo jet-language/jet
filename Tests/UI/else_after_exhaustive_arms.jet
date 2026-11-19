@@ -1,0 +1,28 @@
+// E0641 (once L0303): an `else` after arms that already take every case of
+// the closed set `Level` can never run, and its safe edit deletes it. The
+// `else` in `size` is the only cover of an open set (`Int`) and stays quiet.
+Level: enum {
+    Low,
+    High,
+}
+
+name: fn(level: Level) -> String {
+    if level == {
+        .Low -> "low"
+        .High -> "high"
+        else -> "other"
+    }
+}
+
+size: fn(n: Int) -> String {
+    if n == {
+        0..9 -> "small"
+        else -> "large"
+    }
+}
+
+run: fn() {
+    print(name(Level.Low))
+    print(name(Level.High))
+    print(size(4))
+}

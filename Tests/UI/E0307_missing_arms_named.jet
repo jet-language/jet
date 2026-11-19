@@ -1,0 +1,30 @@
+// E0307 names each case a table leaves open by an arm it could write: the
+// unit case `.Blink` by its name, and `.On`, whose arms take only some of
+// its `Level` and `Mode` pairs, by the pair no arm takes.
+Level: enum {
+    Low,
+    High,
+}
+
+Mode: enum {
+    Warm,
+    Cool,
+}
+
+Light: enum {
+    Off,
+    Blink,
+    On(level: Level, mode: Mode),
+}
+
+label: fn(light: Light) -> String {
+    if light == {
+        .Off -> "off"
+        .On(.Low, .Warm) -> "low warm"
+        .On(.High, _) -> "high"
+    }
+}
+
+run: fn() {
+    print(label(Light.Off))
+}

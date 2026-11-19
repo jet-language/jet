@@ -520,12 +520,15 @@ sema_coverage_check_table: fn(conditions: [TExpr], multi_head: Bool, span: Span,
         return
     }
     // A case with several payload fields, one of them nested
-    // (`.FailedToFetch{url, cause: .BadURL(why)}`), is proved column by column.
+    // (`.FailedToFetch{url, cause: .BadURL(why)}`), is proved column by
+    // column, and an open case is named by a payload no arm takes
+    // (`Step(.Right, .Right)`).
     if sema_coverage_any_multi_field_nested(table.shapes) {
         rows: loop shape in table.shapes -> SemaPatternCoverageRow{cells: [SemaPatternCoverageCell]{SemaPatternCoverageCell.Shape{shape: shape}}}
         if sema_pattern_matrix_complete(rows, [Type]{subject_ty}, environment, program) {
             return
         }
+        sema_coverage_matrix_witnesses(subject_ty, missing, rows, environment, program)
     }
     names: sema_coverage_shown_cases(subject_ty, missing)
     if multi_head {
@@ -1362,6 +1365,54 @@ sema_pattern_collection_witness: fn(ty: Type, rows: [SemaPatternCoverageRow], en
         return "[_, ..]"
     }
     "_"
+}
+
+// Names each case `missing` lists by the first payload the matrix `rows`
+// leaves open (`Step(.Right, .Right)`), in place; a unit case, or one whose
+// payload no column names, stays as listed.
+sema_coverage_matrix_witnesses: fn(subject_ty: Type, missing: &[String], rows: [SemaPatternCoverageRow], environment: SemaScopeEnvironment, program: SemaProgramTables) Never! {
+    expanded: sema_pattern_matrix_expand(rows)
+    constructors: sema_pattern_matrix_constructors(subject_ty, environment, program)
+    loop index in 0..<missing.len() {
+        loop constructor in constructors {
+            if constructor.name != missing[index] || constructor.payload.len() == 0 -> next
+            if sema_pattern_matrix_witness(sema_pattern_matrix_constructor_rows(expanded, constructor), constructor.payload, environment, program) == .Val(found) {
+                missing[index] = sema_pattern_matrix_witness_case(constructor.name, found).removeprefix(".")
+            }
+            break
+        }
+    }
+}
+
+// A value vector no row of `rows` matches, one pattern per type of `types`
+// (`.Right`, `.Val(_)`, `_`); None when the rows cover every vector
+// (sema_pattern_matrix_complete). A column of a type with no cases to
+// list (a struct, a list, a scalar) is named `_`.
+sema_pattern_matrix_witness: fn(written_rows: [SemaPatternCoverageRow], types: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables) -> [String]? Never! {
+    if sema_pattern_matrix_complete(written_rows, types, environment, program) -> return None
+    wild: loop _ in types -> "_"
+    if types.len() == 0 -> return Val(wild)
+    rows: sema_pattern_matrix_expand(written_rows)
+    tail: sema_pattern_matrix_tail(types)
+    ty: sema_pattern_unwrap_tags(types[0])
+    if ty == .Union(_) -> return Val(wild)
+    loop constructor in sema_pattern_matrix_constructors(ty, environment, program) {
+        payload := constructor.payload
+        loop rest_ty in tail -> payload.push(rest_ty)
+        found: sema_pattern_matrix_witness(sema_pattern_matrix_constructor_rows(rows, constructor), payload, environment, program) ?? next
+        arity: constructor.payload.len()
+        cells := [String]{sema_pattern_matrix_witness_case(constructor.name, found.slice(0, arity))}
+        loop rest in found.slice(arity, found.len()) -> cells.push(rest)
+        return Val(cells)
+    }
+    Val(wild)
+}
+
+// The pattern of case `name` over the payload patterns `slots`: `.None`,
+// `.Val(_)`, `.Ok(.Low)`, `.Step(.Left, _)`.
+sema_pattern_matrix_witness_case: fn(name: String, slots: [String]) -> String Never! {
+    if slots.len() == 0 -> return ".{name}"
+    ".{name}({slots.join(", ")})"
 }
 
 sema_pattern_matrix_needed: fn(shape: TPatternShape) -> Bool Never! {

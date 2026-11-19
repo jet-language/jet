@@ -1,0 +1,25 @@
+// E0307 proves a case with several nested payload fields column by
+// column: `.Step` is taken for three of its four `Side` pairs, so the table
+// is open, and the report names the pair no arm takes.
+Side: enum {
+    Left,
+    Right,
+}
+
+Move: enum {
+    Step(from: Side, to: Side),
+    Stay,
+}
+
+describe: fn(m: Move) -> String {
+    if m == {
+        .Step(.Left, .Right) -> "cross"
+        .Step(.Right, .Left) -> "back"
+        .Step(.Left, .Left) -> "hold left"
+        .Stay -> "stay"
+    }
+}
+
+run: fn() {
+    print(describe(Move.Stay))
+}
