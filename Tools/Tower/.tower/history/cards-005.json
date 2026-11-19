@@ -18196,6 +18196,233 @@
       "completedAt": "2026-11-16T21:58:53.821Z",
       "questions": [],
       "retiredAt": "2026-11-19T22:31:16.545Z"
+    },
+    {
+      "id": "c00cqn1l",
+      "num": 6868,
+      "title": "Live queries scale: shared results, per-server caps, cross-server invalidation and SQL-narrowed read sets",
+      "body": "Destination: live queries (D-LIVEQUERY1=A, app.live) stay correct and cheap as subscribers and servers grow: results are shared when they can be, capped and coalesced when they burst, invalidated across servers, and narrowed to the rows they read.\n\nWhy it matters: a live query that re-runs for every subscriber on every write does not survive real traffic; one shared wrongly leaks data between callers.\n\nDecisions: D-LIVEQUERY1=A, D-INVALIDATE1=A, D-WEBAPP-SHAPE1=A. Gaps K3 come from the #6792 review round 2.\n\nSource: #3709 c13, c18-c21, c24, c25. Parent: #3709.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Every remaining criterion is met; c12 (warm coverage per screen) moved to #6981, the D-WARM-SET1 ballot it waited on."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "c12 waits on the owner ballot D-WARM-SET1 (card #6981): how an app names the reads a device keeps warm. Recommendation A, a warm function in .offline(.Queue, warm: fn ...) checked at compile time against each offline screen's live reads."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "c4: Speed-3-3 SUB c4-live-invalidation-across-servers (per-file version map plus a 1 s poll in core.db, two processes, no broker) is queued in p215. The Postgres LISTEN/NOTIFY wake-up remains: Core has no Postgres client and the test host has no Postgres, so that half waits on a Core Postgres client stream."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "c12 waits on the warm-set ballot (sync note §5.1, ballot B1: proposed, not built, never filed). The orchestrator files it; Speed-3-3 moved to c4."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Blockers (GoalsB-5-2 audit, 2026-11-15): c6 waits on app.caller (#6445 c4, now being built by GoalsB-5-2 on the ambient task caller from #6869 c3); c4 needs a Postgres broker and Core has no Postgres client; c5 needs the SQL-filter Query of D-DB-TABLE1, which is not built; c7 needs app.presence, which does not exist."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Status (GoalsB-5-2, 2026-11-15). c3 submitted: a server-wide re-run cap of 1000 per second, with holds that tell watchers after_ms; 1024 bindings; writes between reads coalesce into one re-run. Design ruling (Main): coalescing between reads plus a cap hold replaces the proposal's fixed 50 ms window, because a fixed window adds up to 50 ms to every live update and changes existing event output. Blocked: c4 (Core has no Postgres client for LISTEN/NOTIFY); c6 and c7 (app.caller() and app.presence() arrive with the #App.SignedIn screens, as #3709 c27/c28 do; the row-policy half of c6 already works per user in db_policy); c5 waits for D-DB-TABLE1 typed table queries (#6822), which GoalsB-5-2 now builds."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Decision (Main, operational, within D-LIVEQUERY1): app.state was E1123 on wasm because Live.run is a rowless fn() -> T E!, so state's solved row was unbounded. Live.run and the bind/poll runs are bounded to -[DB.Read, Net, Time]>, which keeps D-LIVEQUERY1's named sources (DB reads, Net fetch, time polling) and lets web build; a live source with any other effect is refused with E0740, whose fix text names the accepted sources."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Parked 2026-11-15 01:55 by owner order (finish Precompiled Core, the speed plan and the memory kernel before goal work). GoalsB-5 moves to #6759. Landing: GoalsB-5-22r2 (c10) and -23r2 (c2), finished, in census181. Open and unworked until the three are done: c11's livelock bound landed as GoalsB-5-24 (in census180, proof on p155); the rest of the card."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "c8 is not met yet, though db_scope_live_marks_writes_stale_only_after_commit passes on p152: the second sync review (2026-11-15) reads App.jet state (L404-416) then live_store (L566-584), which clears dirty unconditionally, so a re-run that read before a commit and stores after its invalidation keeps the old value as current. GoalsB-5 adds a per-binding generation counter and a case forcing that interleaving."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A live query over a tracked source updates from real deltas, a no-op write leaves the cached result untouched, a write publishes only after its transaction commits, and cancelling the subscription ends its re-runs, on O0, O1, O2 and web.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "68be2c34f4 and 7141a40239: jet test Compiler --profile cases --filter web_app/live_query_lifecycle passes (2 of 2) on batch compiler p182 (dev 9003020128).",
+          "at": "2026-11-15T13:43:22.147Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "web_app/live_query_lifecycle"
+          }
+        },
+        {
+          "n": 2,
+          "text": "A live query that reads no caller-dependent input shares one result among all subscribers with the same arguments.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "GoalsB-5-23r2 landed b0acab4afa (proof case: a live query that reads no caller-dependent input shares one result). on batch compiler p156 (dev aa5f5f1bba), 2026-11-15 02:03: jet test Compiler --profile cases --filter web_app/live_query_shared_result PASS 1 (it failed on p155, which lacked 22r2).",
+          "at": "2026-11-15T07:03:50.222Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "web_app/live_query_shared_result"
+          }
+        },
+        {
+          "n": 3,
+          "text": "Each server caps live subscriptions and re-runs per second and coalesces bursts of writes into one re-run. Proof: `jet test Compiler --profile cases --filter web_app/live_query_caps_and_coalescing` (a load case).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "96f6bd2767: jet test Compiler --profile cases --filter web_app/live_query_caps_and_coalescing passes (1 of 1) on batch compiler p182 (dev 9003020128).",
+          "at": "2026-11-15T13:43:23.350Z"
+        },
+        {
+          "n": 4,
+          "text": "Invalidations reach subscribers on other servers: a write on one server invalidates the matching live reads on every other server that shares the store, on O0, debug and release.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p221 batch compiler (dev 88dc8f59b9): jet test Compiler --profile cases --filter WebApp/live_query_cross_server_invalidation PASS 1/1 (O0, debug, release); still passes in the p222 suite",
+          "at": "2026-11-16T19:12:17.817Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "WebApp/live_query_cross_server_invalidation"
+          }
+        },
+        {
+          "n": 5,
+          "text": "Predicates the compiler can turn into SQL narrow the read set; any other predicate falls back to table-level invalidation, and `jet inspect` shows which.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p219 batch compiler (census build of dev 1123bf884d, Speed-3-3-p215-G-live-filter-comptime landed as 1f51921bea): jet test Compiler --profile cases --filter WebApp/live_query_read_set_narrowing PASS (it failed on p218; the comptime prefetch of a live: local now keeps its SQL filter)",
+          "at": "2026-11-16T17:56:27.946Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "WebApp/live_query_read_set_narrowing"
+          }
+        },
+        {
+          "n": 6,
+          "text": "A caller-dependent live query (one that reads app.caller() or runs under a row policy) is not shared between callers; the cost, one re-run per subscriber per write that meets the read set, is measured under the per-server caps.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "batch compiler p187 (dev 9860836a00), 2026-11-15: jet test Compiler --profile cases --filter web_app/caller_dependent_live_query_is_not_shared 1/1 PASS (landed 7439dda142)",
+          "at": "2026-11-15T18:00:02.630Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "web_app/caller_dependent_live_query_is_not_shared"
+          }
+        },
+        {
+          "n": 7,
+          "text": "app.presence counts only accounts whose last read of that screen passed its policies: a refused reader is not counted.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p221 batch compiler (dev 88dc8f59b9): jet test Compiler --profile cases --filter WebApp/presence_counts_only_admitted_readers PASS 1/1",
+          "at": "2026-11-16T18:47:01.248Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "WebApp/presence_counts_only_admitted_readers"
+          }
+        },
+        {
+          "n": 8,
+          "text": "A write inside a database transaction marks the live bindings over its table stale at the commit or rollback, never at the statement. A binding re-run on another connection while the transaction is open keeps no pre-commit result as current after the commit, and a write outside a transaction marks them at once.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "GoalsB-5-19 landed 5fa1fd1c85 (marks at commit) and GoalsB-5-21 landed 2ded9a1ded (per-binding generation: a re-run an invalidation overtakes stays stale, review G36). on batch compiler p154 (dev 31ee594ec7), 2026-11-15 01:30: --profile cases --filter live_rerun_overtaken PASS 1; --filter db_scope_live PASS 3; --filter sync_crdt/ PASS 3; golden --filter AppLive PASS 3. The livelock bound is c11.",
+          "at": "2026-11-15T06:32:51.135Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "db_scope_live_marks_writes_stale_only_after_commit"
+          }
+        },
+        {
+          "n": 9,
+          "text": "The WebSocket live hub sends an invalidation only to connections holding a subscription it affects, whose caller passed that source's policy. No event, live or replayed on join, carries another caller's encoded key, and a WebSocket route that reads no live query receives no live event. Proof: `jet test Compiler --profile cases --filter web_app/live_hub_events_reach_only_admitted_subscribers` (a two-account case plus an unrelated route).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "GoalsB-5-20r2a landed fad05cd5f6 and GoalsB-5-20r2b landed 1e0820d052 (live events reach only connections watching that binding). on batch compiler p155 (dev 49836bd978), 2026-11-15 01:45: --profile cases --filter live_hub_events PASS 1; db_scope_live PASS 3; RuntimeGenerators --check exit 0.",
+          "at": "2026-11-15T06:47:26.415Z"
+        },
+        {
+          "n": 10,
+          "text": "A read-only parameter passed to app.live or app.invalidate is copied or borrowed by the lowering, not moved. Today (p153) the repro (a live source fn count(project: String), with bind and refresh taking project: String) reports E0120 ReadOnlyValueNotOwned at both call sites, and its fix names the compiler temporary __jet_live_N_0, a name the user never wrote. Proof: a case where jet check passes and jet run prints loaded 3; the case live_rerun_overtaken drops its project.copy() workaround.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "GoalsB-5-22r2 landed dcf8af1eb2 (app.live, subscribe, push and invalidate take a read-only parameter as an argument with no E0120; Live.jet back to 19 copies). on batch compiler p156 (dev aa5f5f1bba), 2026-11-15 02:03: jet test Compiler --profile cases --filter live_calls_read_a_read_only_argument PASS 1; the copy ledger ceiling holds (guards 171/0).",
+          "at": "2026-11-15T07:03:49.304Z"
+        },
+        {
+          "n": 11,
+          "text": "Overtaken re-runs are bounded (sync review 3, G86): under sustained writes to a table a live binding reads, the generation rule (2ded9a1ded) does not re-run the source on every read forever. After a stated bound, the binding settles: it serves a value marked stale, or stores one as current with its generation. Proof: a case with a writer loop that invalidates continuously and a reader that reads N times, where the source runs a bounded number of times and the reader gets a value each time.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "GoalsB-5-24 landed 8630ccf4dd (from the second overtaken run in a row, a binding serves its stale result for a hold of max(run time, 100 ms), then re-runs). on batch compiler p155 (dev 49836bd978), 2026-11-15 01:45: --profile cases --filter live_binding_under_sustained_writes_settles PASS 1; live_rerun_overtaken PASS 1; golden AppLive PASS 3.",
+          "at": "2026-11-15T06:47:27.327Z"
+        },
+        {
+          "n": 13,
+          "text": "Test-host network abilities (sync review gap G64): the app test host can disconnect a client from the server and restore it mid-test, deterministically, so offline, catch-up and replay cases run without real network faults. Proof: a case that disconnects, writes on both sides, restores, and checks the merged state. (was #3709 c28)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p226 batch compiler (dev 713d2cd072), commits b9fbc7793e and 2fe268264c: jet test Compiler --profile cases --filter disconnected_client_merges_after_reconnect PASS 1/1 (the app test host disconnects a client mid-test, both sides write, the client reconnects and the merged state is checked).",
+          "at": "2026-11-16T20:45:56.597Z"
+        },
+        {
+          "n": 14,
+          "text": "Closing a live connection ends that account's presence on the screens it held: the runtime hub hands a leave signal back to Core (ws_hub_leave), so app.presence never counts a closed session. Proof: `jet test Compiler --profile cases --filter WebApp/presence_ends_when_the_connection_closes`, on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p216 batch compiler (census build of dev efb3da4f6c): jet test Compiler --profile cases --filter WebApp/presence_ends_when_the_connection_closes PASS",
+          "at": "2026-11-16T16:45:33.926Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "web",
+        "sync",
+        "live-query"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:54:10.299Z",
+      "updated": "2026-11-16T22:53:26.086Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 14,
+      "completedAt": "2026-11-16T22:53:26.086Z",
+      "questions": [],
+      "retiredAt": "2026-11-19T22:58:08.727Z"
     }
   ]
 }
