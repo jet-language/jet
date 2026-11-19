@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112388,
+    "rev": 112393,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75296,6 +75296,21 @@
         {
           "at": "2026-11-19",
           "by": "Main",
+          "text": "Worktree cleanup (owner order: only active worktrees). Removed .agent-worktrees/DeclTypes-6-1 and .agent-worktrees/Speed: no live owner (only IfHole and Lens run), both detached at old dev 4171547dc0. Their uncommitted work is saved whole (binary diff, untracked files included) as $JET_SCRATCH_ROOT/lanes/Main/saved/DeclTypes-6-1.patch (73 files, +2359/-357) and Speed.patch (56 files, +196/-169), with the per-file list of hunks not on dev 1e2fb5763e beside each (DeclTypes-6-1.unlanded.txt: 40 files, mostly perf/live-inspect/trace/debug/runtime observe; Speed.unlanded.txt: 14 files, live-inspect, trace fixtures, guards, Service.jet). Much of it is superseded by later landings on the same files; anything still wanted is re-landed from those patches as a fresh SUB on the tip."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
+          "text": "p322 (dev 1e2fb5763e: IfHole c6-zones-off-rss, c68-per-sample-cost). c68 per-sample cost, m68 fib 38 x5, p321 then p322 back to back: handler 997 -> 445 ns, delivery 1691 -> 1693 ns, cost 2679 -> 2140 ns per sample, projected overhead at 8 kHz 2.14 -> 1.71 percent (under 2): 8 kHz default goes ahead with no rate ballot. c6 pair on gate-p322: -O1 wall 0.9961 win, cycles 0.99998 win, peak RSS 268/268 even; -O2 wall 0.9989 even, cycles 0.9999 even, peak RSS 272/268 loss (one page); on-arm even. -O1 resident file pages now equal (RssFile 160 KB both; zone-only code on its own r-x segment). -O2 page assigned to IfHole. Proof rows pass on p322: zone_sites_are_patched_jumps, zone_only_code_is_laid_after_hot_code, zones_strip_setting_leaves_no_site, timer_fallback_states_its_cap_and_why."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
+          "text": "c55 diagnosis (Lens, measured on gate-p321 at load 78-200 on 32 cores): Perf/causal_profile_predicts_speedup exits 70 because the lens predicts wrong under contention (narrow line measured 1.7-11.5%%, predicted 18.6%% [5.3, 28.8]; wide line measured 10.7-26.5%%, predicted -12.0%% [-28.6, -0.3]). Two runtime-model defects in the causal pause: a pause is a sleep, which hands its CPU to the target thread and really speeds it; and the global delay is a sum, so N threads in the line pay N times. Fix assigned to IfHole: max-semantics global delay and pauses that keep their CPU share, proven unloaded and under suite load through a landing cycle (no side build). Lens files the receipt fix (the lenses list names causal)."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
           "text": "c47 gap 4 name resolution (Lens probe: a meta.rewrite_body body resolves names in the rewritten function file, so Core profile handler cannot name core.perf when the file imports it under another alias or not at all, e.g. header-marked functions). Decision: first reuse the existing derive/marker template path that resolves names where written, if the meta API lets a handler build rewrite code through it (one mechanism, no change to user-written #code); otherwise the driver adds one import, a long, specific alias, to rewrite modules of bodies Core profile rewrote, with a clash refused by a complete diagnostic (registered code, snapshot), proven by header-marked and other-alias cases. Making all rewrite_body #code resolve where written is a semantic change to existing user rewrites and needs an owner ballot; not taken for c47."
         },
         {
@@ -75936,20 +75951,20 @@
         {
           "n": 45,
           "text": "One evaluator: the compiler's: Every debugger expression (console `print` and `watch`, breakpoint conditions, logpoint templates, DAP `evaluate`) is checked by the compiler at a position probe in the stopped function's own check, built at O0 against the eval runtime, and run in a fork of the stopped program, as `Docs/Proposals/2026-11-18-debug-eval-native.md` specifies. Field paths, indexing, method calls and generic functions work; an expression with an effect is refused with the effect named; `DebugEval.jet`'s second evaluator is gone. Built only after c40 is met. Proof: `jet test Compiler --profile cases --filter Debug/print_evaluates_compiled_expressions`; `--filter Debug/print_refuses_effectful_expression`; the proposal's §8.2 bars. (Docs/Audits/2026-11-18-best-debugger-profiler.md R3)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T14:10:05.633Z"
+          "evidence": "p323 batch compiler (census build of dev f8a0b329ca). Collect-all suite: PASS Debug/print_evaluates_compiled_expressions, PASS Debug/print_refuses_effectful_expression (also PASS new_operations_at_a_stop_evaluate, first_print_entry/nonentry_under_250ms). The CLI DebugEval.jet second evaluator is gone. Proposal section 8.2 bars, jet run Tools/Perf/DebugLatency/Main.jet -- --functions 20000 --runs 5 against lldb 21.1.8 timed one command at a time (send-to-answer, median sample), entry / nested stop, ms: print_place 0.1 vs lldb 17.3 / 0.3 vs 0.1 (bar lldb + 10: met); print_first 49.2 / 53.4 (bar 250: met); print_again 1.7 vs 3.0 / 1.8 vs 2.5 (bar 2x lldb: met); watch_per_stop 8.7 vs 8.6 / 7.2 vs 7.9 (lldb reference: stop-hook expr; bar 2x lldb: met); per_step 0.9 vs 2.2 / 0.9 vs 2.0 (bar lldb + 1: met); second_eval 22.3 / 24.2 (bar 100: met); condition_per_hit reported 2.2 vs 0.7 / 2.1 vs 0.7 ms per hit over 1000 false hits, with resident 2136/1880 KiB, 0 KiB huge pages, load 7.9-10. first_stop 91 vs 219 / 77 vs 187.",
+          "at": "2026-11-19T15:13:46.113Z"
         },
         {
           "n": 46,
           "text": "Waits with wakers, off-CPU time, I/O: Every wait in the trace (channel send and receive, lock, join, sleep, I/O readiness) names its object, its blocking stack and the task whose action ended it; `jet perf view` lists off-CPU time per stack; file and network I/O through the capability chokepoint appear on the timeline with bytes and target and no instrumentation. Extends c7 from joins to every wait. Proof: `jet test Compiler --profile cases --filter Perf/every_wait_names_its_waker`; `--filter Perf/off_cpu_time_by_stack`; `--filter Perf/io_on_timeline_without_instrumentation`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R4)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-19T11:21:56.965Z"
+          "evidence": "p323 batch compiler (census build of dev f8a0b329ca, carrying Lens c46-join-wakers.r2 ece8171719). Collect-all suite: PASS Perf/every_wait_names_its_waker, PASS Perf/off_cpu_time_by_stack, PASS Perf/io_on_timeline_without_instrumentation (the named proofs, also passing on p320, p321), and PASS Perf/join_wait_names_a_short_task (the c39 audit gap: a join on a short task named its waker as task ?; now it names the awaited task and the task that woke it), PASS Perf/join_wait_names_awaited_task.",
+          "at": "2026-11-19T15:13:47.336Z"
         },
         {
           "n": 47,
@@ -76196,7 +76211,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-19T13:53:50.847Z",
+      "updated": "2026-11-19T15:13:47.336Z",
       "updatedBy": "Main",
       "criteriaLastN": 68
     },
@@ -160947,6 +160962,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-19T15:13:47.336Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#46"
+    },
+    {
+      "at": "2026-11-19T15:13:46.113Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#45"
+    },
+    {
+      "at": "2026-11-19T15:12:55.493Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T14:46:19.431Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T14:36:22.888Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-19T13:53:50.847Z",
       "by": "Main",
