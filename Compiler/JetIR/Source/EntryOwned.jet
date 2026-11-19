@@ -237,6 +237,12 @@ ir_entry_root_need: fn(m: IRModule) -> String Never! {
 IREntryQuiet: struct {
     glue: [Int],
     functions: [Bool],
+    // The stop poll's, trap's and turn's functions (-1 when `m` has none).
+    // A call of one only reads the stop word or gives a turn; the stop edge
+    // it guards lies in the same function, whose every instruction is
+    // checked, so a quiet function may hold stop points (a Close routine
+    // calling a route that reads the scheduler, core.perf's Zone close).
+    stops: [Int],
 }
 
 // Whether instruction `at` of `f` (on a stop edge, or in a function one
@@ -247,7 +253,7 @@ IREntryQuiet: struct {
 ir_entry_quiet: fn(m: IRModule, f: IRFunction, at: Int, quiet: IREntryQuiet) -> Bool Never! {
     if f.op[at] == {
         .CallIndirect | .Close | .Unreachable -> false
-        .Call -> f.a[at] >= 0 && f.a[at] < quiet.functions.len() && quiet.functions[f.a[at]]
+        .Call -> f.a[at] >= 0 && f.a[at] < quiet.functions.len() && (quiet.functions[f.a[at]] || quiet.stops.contains(f.a[at]))
         .CallRuntime -> {
             symbol: m.names[f.a[at]]
             loop route in IR_ENTRY_QUIET_ROUTES {
@@ -272,7 +278,12 @@ ir_entry_quiet: fn(m: IRModule, f: IRFunction, at: Int, quiet: IREntryQuiet) -> 
 // type's routine, or a routine calling one outlined part of it (a buffer's
 // last-owner release), counts as quiet when its cycle does nothing else.
 ir_entry_quiet_functions: fn(m: IRModule, seeds: [Int]) -> IREntryQuiet Never! {
-    q := IREntryQuiet{glue: [Int]{}, functions: [Bool]{}}
+    stops: [Int]{
+        name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1,
+        name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1,
+        name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1,
+    }
+    q := IREntryQuiet{glue: [Int]{}, functions: [Bool]{}, stops: stops}
     loop _ in m.functions -> q.functions.push(false)
     seen := q.functions.copy()
     work := seeds.copy()
