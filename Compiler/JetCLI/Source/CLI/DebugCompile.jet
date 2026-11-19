@@ -20,10 +20,10 @@
 use {
     debug_eval_files: core.files
     jet_debug.[NATIVE_EVAL_CAPTURES, NativeEval, NativeEvalBinder, NativeEvalPart, NativeEvalRefused, NativeEvaluator, NativeFixEdit, native_eval_names]
-    jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverEvalAsk, JetDriverIceRow, JetDriverLoweringInputs, jet_driver_check_failures, jet_driver_entry_root_path, jet_driver_inline_package]
+    jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverEvalAsk, JetDriverIceRow, JetDriverLoweringInputs, jet_driver_check_failures, jet_driver_checked_declarations, jet_driver_entry_root_path, jet_driver_inline_package]
     jet_eval.[jet_eval_native_add, jet_eval_native_wrapper]
     jet_foundation.[BuildOptions, CompilerThreads, DeepChecks, FnBody, StmtKind, Type, deep_checks_flags, foundation_named_type, name_rows_get_text, type_name, type_unqualified_nominals]
-    jet_ir.[IRTypeKind, ir_eval_place_refusal, ir_module_new, ir_pointer_row, ir_untag, ir_x64_compile_module_logged, ir_x64_debug_program]
+    jet_ir.[IRModule, IRProgram, IRTypeKind, ir_build_held_root, ir_eval_place_refusal, ir_held_program, ir_module_new, ir_pointer_row, ir_untag, ir_x64_compile_module_logged, ir_x64_debug_program]
     jet_parser.[parse_type_text]
     jet_sema.[SemaEvalProbeAnswer, sema_eval_probe_function, sema_eval_probe_parse, sema_ownership_type_is_copy]
 }
@@ -320,6 +320,63 @@ jet_cli_debug_eval_build: fn(result: JetDriverCompileResult, checked: &&JetDrive
     }
     program := built.program.move()
     built.program = ir_module_new()
+    threads: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}
+    jet_cli_debug_eval_native(program.move(), key, names, value, text, threads)
+}
+
+// A debugger's evaluations over one held check of the program (JetDriver
+// jet_driver_held_eval_open): its checked functions declared and bound once
+// for the IR builder (JetIR ir_held_program), so an evaluation builds only
+// its expression's function and the functions that reaches which the image
+// doesn't hold (jet_cli_debug_eval_held_build). The program's build is the
+// image's: its optimization `level` and build `options`, at whose O0 a call
+// of a function the image holds calls the image's code.
+JetCLIDebugEvalHeldIR: struct {
+    program: IRProgram,
+    level: Int,
+    options: BuildOptions,
+    threads: CompilerThreads,
+}
+
+// The held IR program of the checked program `checked`, which `result`
+// checked with the image's build `options`, its Core calls bound to the
+// runtime of `runtime`, as the image's build binds them
+// (jet_cli_native_checks).
+jet_cli_debug_eval_held_ir: fn(result: JetDriverCompileResult, checked: &&JetDriverLoweringInputs, options: BuildOptions, runtime: JetCLIRuntimeExports) -> JetCLIDebugEvalHeldIR Never! {
+    inputs := checked.move()
+    level: jet_cli_native_level(options)
+    checks: jet_cli_native_checks(result, inputs, options, runtime)
+    declarations: jet_driver_checked_declarations(inputs)
+    program: ir_held_program(inputs.functions.move(), inputs.decls, inputs.symbols.move(), declarations.type_defs.move(), declarations.impls.move(), inputs.sources.move(), declarations.constants.move(), declarations.foreign.move(), checks, bind: level <= 0)
+    JetCLIDebugEvalHeldIR{program: program.move(), level: level, options: options, threads: result.compiler_threads}
+}
+
+// The expression's function `root`, checked against the held program from
+// its own source `source` (JetDriver jet_driver_held_eval_check), built in
+// `held` with the entry that calls it, its parameters read as the locals
+// `names` and its result a `value` of the expression `text`, lowered to the
+// code the session places.
+jet_cli_debug_eval_held_build: fn(held: &JetCLIDebugEvalHeldIR, root: &&FnBody, source: String, names: [String], value: Type, text: String) -[FS, Env, Time, Exec.Args]> NativeEval NativeEvalRefused! {
+    key: "{root.key}"
+    threads: CompilerThreads{cap: held.threads.cap, cores: held.threads.cores, memory_available: jet_cli_memory_available()}
+    kept: ir_build_held_root(held.program.move(), root.move(), source, threads)
+    held.program = kept.program.move()
+    if kept.result.failures.len() > 0 {
+        return Err(jet_cli_debug_eval_refused("the compiler couldn't build it: {kept.result.failures[0].message}"))
+    }
+    program := kept.result.program.move()
+    census := [JetDriverIceRow]{}
+    jet_cli_native_optimize(program, held.level, held.options, threads, census, None)
+    if census.len() > 0 -> return Err(jet_cli_debug_eval_refused("the compiler couldn't build it"))
+    program.debug_level = held.level
+    jet_cli_debug_eval_native(program.move(), key, names, value, text, threads)
+}
+
+// The built module `built`'s function `key`, the expression's, with the
+// entry that calls it, its parameters read as the locals `names` and its
+// result a `value`, lowered to the code the session places.
+jet_cli_debug_eval_native: fn(built: &&IRModule, key: String, names: [String], value: Type, text: String, threads: CompilerThreads) -[FS, Time]> NativeEval NativeEvalRefused! {
+    program := built.move()
     row: name_rows_get_text(program.function_rows, key) ?? return Err(jet_cli_debug_eval_refused("the built program has no function for it"))
     refusal: ir_eval_place_refusal(program, row)
     params := [Int]{}
@@ -345,7 +402,6 @@ jet_cli_debug_eval_build: fn(result: JetDriverCompileResult, checked: &&JetDrive
     wrapper: jet_eval_native_wrapper(program, JET_CLI_DEBUG_EVAL_ENTRY, row, params, result_row, pointer, loads: true, table: params.len() > NATIVE_EVAL_CAPTURES)
     added: jet_eval_native_add(program, wrapper)
     program.kept.push(added)
-    threads: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}
     selected: ir_x64_compile_module_logged(program, threads, [String]{})
     if selected.errors.len() > 0 {
         return Err(jet_cli_debug_eval_refused("the compiler couldn't build it"))

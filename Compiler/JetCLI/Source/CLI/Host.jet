@@ -1612,19 +1612,7 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     trace_sink: result.trace_sink
     level: jet_cli_native_level(options)
     checked := inputs.move()
-    checks := jet_cli_ir_checks(result, checked, options)
-    checks.checked_alloc = jet_cli_checked_alloc(options)
-    // A recorded run starts its log where an observed run starts observing.
-    checks.observe = options.observe || options.record != ""
-    checks.log_package = result.log_filter.copy()
-    checks.log_flag = options.log.copy()
-    // The `hardened` profile sets the same hardening fact as the entry
-    // package's `policy.harden`: the release build keeps the memory sentry.
-    checks.harden = result.harden || options.profile == "hardened"
-    // A program bound to the runtime image calls the Core code there
-    // (jet_cli_native_executable): its Core calls build as calls of it.
-    checks.core = runtime.core
-    checks.quiet_routes = jet_cli_runtime_quiet_routes(runtime)
+    checks := jet_cli_native_checks(result, checked, options, runtime)
     checks.roots = loop key in roots -> "{key}"
     declarations := jet_driver_checked_declarations(checked)
     // The program's C closure defines its foreign functions' symbols. An
@@ -1734,27 +1722,7 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     }
     // The memory term is read now: the compile before this holds most of it.
     threads: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}
-    opt: jet_cli_opt_options(level, options)
-    if level <= 0 -> jet_cli_native_o0(built.program, opt, threads, census, trace_sink)
-    if level > 0 {
-        // The span is named by the level it optimizes at (`O2`).
-        if trace_sink == .Val(sink) -> sink.begin("ir.opt", "O{level}", -1, -1)
-        report: ir_optimize_module(built.program, opt, threads)
-        // With `--opt-verify`, the lint of each body as the passes get it
-        // (`ir.opt.prepare`) and after each pass (`ir.opt.<pass>`).
-        loop finding in report.lint {
-            jet_cli_ice_trap(census, built.program, finding.key, finding.pass, finding.rule, finding.message)
-        }
-        if trace_sink == .Val(sink) -> sink.end("ir.opt", function_count)
-        // IR Lint (Lint.jet) runs once, over the optimized module x86-64
-        // selection reads. Each finding is an ICE row and traps its function.
-        if trace_sink == .Val(sink) -> sink.begin("ir.lint", "", -1, -1)
-        lint: ir_lint_module(built.program, "ir.opt", threads)
-        loop finding in lint {
-            jet_cli_ice_trap(census, built.program, finding.key, finding.pass, finding.rule, finding.message)
-        }
-        if trace_sink == .Val(sink) -> sink.end("ir.lint", function_count)
-    }
+    jet_cli_native_optimize(built.program, level, options, threads, census, trace_sink)
     // The census of the marked calls this tier's passes left (JetIR
     // OptInline.jet ir_opt_marked_calls): Compiler/test.jet's `inline_census`
     // suite holds every build of Examples, Core and the compiler to 0.
@@ -1771,6 +1739,56 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     program := built.program.move()
     built.program = ir_module_new()
     JetCLINativeProgram{program: program.move(), failure: None}
+}
+
+// The runtime checks a native build keeps (jet_cli_ir_checks) with its
+// build's own: a checked heap, an observation start, the log filters, the
+// hardening fact, its Core calls bound to the runtime image and the
+// runtime's quiet routes.
+jet_cli_native_checks: fn(result: JetDriverCompileResult, checked: JetDriverLoweringInputs, options: BuildOptions, runtime: JetCLIRuntimeExports) -> IRChecks Never! {
+    checks := jet_cli_ir_checks(result, checked, options)
+    checks.checked_alloc = jet_cli_checked_alloc(options)
+    // A recorded run starts its log where an observed run starts observing.
+    checks.observe = options.observe || options.record != ""
+    checks.log_package = result.log_filter.copy()
+    checks.log_flag = options.log.copy()
+    // The `hardened` profile sets the same hardening fact as the entry
+    // package's `policy.harden`: the release build keeps the memory sentry.
+    checks.harden = result.harden || options.profile == "hardened"
+    // A program bound to the runtime image calls the Core code there
+    // (jet_cli_native_executable): its Core calls build as calls of it.
+    checks.core = runtime.core
+    checks.quiet_routes = jet_cli_runtime_quiet_routes(runtime)
+    checks
+}
+
+// The built `program`'s IR passes at optimization `level` (O0's
+// jet_cli_native_o0, else the optimizer and one IR Lint over its result),
+// each finding an ICE row of `census` that traps its function.
+jet_cli_native_optimize: fn(program: &IRModule, level: Int, options: BuildOptions, threads: CompilerThreads, census: &[JetDriverIceRow], trace_sink: CompilerTraceSink?) -[FS, Env, Time, Exec.Args]> Never! {
+    function_count: program.functions.len()
+    opt: jet_cli_opt_options(level, options)
+    if level <= 0 {
+        jet_cli_native_o0(program, opt, threads, census, trace_sink)
+        return
+    }
+    // The span is named by the level it optimizes at (`O2`).
+    if trace_sink == .Val(sink) -> sink.begin("ir.opt", "O{level}", -1, -1)
+    report: ir_optimize_module(program, opt, threads)
+    // With `--opt-verify`, the lint of each body as the passes get it
+    // (`ir.opt.prepare`) and after each pass (`ir.opt.<pass>`).
+    loop finding in report.lint {
+        jet_cli_ice_trap(census, program, finding.key, finding.pass, finding.rule, finding.message)
+    }
+    if trace_sink == .Val(sink) -> sink.end("ir.opt", function_count)
+    // IR Lint (Lint.jet) runs once, over the optimized module x86-64
+    // selection reads. Each finding is an ICE row and traps its function.
+    if trace_sink == .Val(sink) -> sink.begin("ir.lint", "", -1, -1)
+    lint: ir_lint_module(program, "ir.opt", threads)
+    loop finding in lint {
+        jet_cli_ice_trap(census, program, finding.key, finding.pass, finding.rule, finding.message)
+    }
+    if trace_sink == .Val(sink) -> sink.end("ir.lint", function_count)
 }
 
 // O0's IR before selection (JetIR Opt.jet ir_opt_o0_bodies): the return
