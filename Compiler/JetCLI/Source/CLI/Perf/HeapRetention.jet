@@ -3,10 +3,11 @@
 // point into other live blocks, and the roots: the words of the snapshot's
 // thread's frames and of the image's writable data that do
 // (PerfSamples.jet perf_samples_heap_refs). A breadth-first walk from the
-// roots, the variables first, then the data objects, then the frames'
-// other words, reaches each block by a shortest path, which the DWARF
-// layout of the variables and of the types the blocks were allocated for
-// names: `kept[17]`, `rooms[3].history -> Ring<Message>.items[17]`.
+// variables, then one from the data objects, then one from the frames'
+// other words, reaches each block by a shortest path from the first of
+// them that reaches it, which the DWARF layout of the variables and of the
+// types the blocks were allocated for names: `kept[17]`,
+// `rooms[3].history -> Ring<Message>.items[17]`.
 use {
     jet_backend.[link_debug_addr, link_debug_le, link_debug_uleb, x64_jetline_sleb, x64_jetline_text]
     jet_debug.[NATIVE_TAG_STRUCT, NATIVE_TAG_TYPEDEF, NativeImage, native_elf_section, native_jet_spelling, native_type_size, native_variable_covering]
@@ -98,7 +99,11 @@ jet_cli_perf_heap_retain: fn(facts: NativeImage, objects: [JetCLIPerfHeapObject]
         labels.push(named.name)
         ranks.push(named.rank)
     }
+    // Each rank's walk runs to its end before the next rank's roots start
+    // one, so a block a variable keeps is never named by a frame's stray
+    // word that points at it, or at a block on its path, more directly.
     queue := [Int]{}
+    head := 0
     loop rank in 0..<3 {
         loop (at, root) in heap.roots {
             if ranks[at] != rank -> next
@@ -108,17 +113,16 @@ jet_cli_perf_heap_retain: fn(facts: NativeImage, objects: [JetCLIPerfHeapObject]
             slot[reached] = at
             queue.push(reached)
         }
-    }
-    head := 0
-    loop head < queue.len() {
-        holder: queue[head]
-        head += 1
-        loop ref in heap.live[holder].refs {
-            reached: index.get(ref.target) ?? next
-            if via[reached] != -2 -> next
-            via[reached] = holder
-            slot[reached] = ref.offset
-            queue.push(reached)
+        loop head < queue.len() {
+            holder: queue[head]
+            head += 1
+            loop ref in heap.live[holder].refs {
+                reached: index.get(ref.target) ?? next
+                if via[reached] != -2 -> next
+                via[reached] = holder
+                slot[reached] = ref.offset
+                queue.push(reached)
+            }
         }
     }
     keys := [String:Int]{}
