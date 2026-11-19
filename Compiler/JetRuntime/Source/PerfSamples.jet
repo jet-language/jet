@@ -2893,14 +2893,14 @@ perf_cfi_sort: fn(table: I64, count: I64) {
 // a sample outside the image's code keeps no callers, and one taken while
 // other handlers hold every buffer is its program counter alone. A
 // CPU-time sample's record in a buffer ends in its time, the handler's
-// start on the monotonic clock zones are timed on, and its task as a zone's
-// row names it (perf_zone_row), so the session counts each sample in the
-// zones of its task that hold it (PERF_SAMPLES_TIMED). A timer's SIGPROF
-// stands for its own period and each the kernel folded into it while it was
-// pending (perf_samples_periods), so its record is written once for each,
-// as many samples as the CPU time it covers gives. A write the kernel
-// refuses loses that one sample; O_APPEND puts each record after the last.
-// Under a
+// start on the process-relative monotonic clock zones are timed on, and its
+// task as a zone's row names it (perf_zone_row), so the session counts each
+// sample in the zones of its task that hold it (PERF_SAMPLES_TIMED). A
+// timer's SIGPROF stands for its own period and each the kernel folded into
+// it while it was pending (perf_samples_periods), so its record is written
+// once for each, as many samples as the CPU time it covers gives. A write
+// the kernel refuses loses that one sample; O_APPEND puts each record after
+// the last. Under a
 // precise source (perf_precise_choose) a SIGPROF reports its sampler's
 // ring instead, and the record is written once for each sample the ring
 // holds, by the program counter the sample names, under the callers its
@@ -3014,7 +3014,11 @@ perf_cfi_sort: fn(table: I64, count: I64) {
         }
     }
     if (timed) {
-        rt_text_store(wrapping(slot + wrapping(wrapping(count + I64{1}) * I64{8})), began)
+        // Its time from the process epoch, the clock zones, waits and log
+        // spans are timed on (time_host_monotonic_i64); before that epoch is
+        // set no zone has opened, so -1 lies before every one.
+        epoch: time_host_epoch_ns()
+        rt_text_store(wrapping(slot + wrapping(wrapping(count + I64{1}) * I64{8})), if (epoch == I64{0}) -> I64{-1} else -> wrapping(began - epoch))
         rt_text_store(wrapping(slot + wrapping(wrapping(count + I64{2}) * I64{8})), if (scheduler_control_current() == I64{0}) -> I64{0} else -> observe_current_task())
         count = wrapping(count + PERF_SAMPLES_TIMED)
     }
