@@ -8,6 +8,9 @@
 // (jet_cli_debug_eval_params), the expression's function takes them as the
 // image's debug types spell them, and the one compile that builds it asks
 // the checker its type and any effect it uses (jet_cli_debug_eval_direct).
+// When those locals are all of the primitive types and the expression names
+// nothing else, it reads nothing of the program, and that compile takes the
+// entry without the program's code (jet_cli_debug_eval_alone).
 // Else, or when that compile refuses it for anything but an effect, a
 // first compile asks the checker how the expression checks where the frame
 // stopped (JetSema EvalProbe.jet): its type, the locals it captures, and a
@@ -17,9 +20,9 @@
 use {
     debug_eval_files: core.files
     jet_debug.[NATIVE_EVAL_CAPTURES, NativeEval, NativeEvalBinder, NativeEvalPart, NativeEvalRefused, NativeEvaluator, NativeFixEdit, native_eval_names]
-    jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverEvalAsk, JetDriverIceRow, JetDriverLoweringInputs, jet_driver_check_failures, jet_driver_entry_root_path]
+    jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverEvalAsk, JetDriverIceRow, JetDriverLoweringInputs, jet_driver_check_failures, jet_driver_entry_root_path, jet_driver_inline_package]
     jet_eval.[jet_eval_native_add, jet_eval_native_wrapper]
-    jet_foundation.[BuildOptions, CompilerThreads, DeepChecks, FnBody, StmtKind, Type, deep_checks_flags, name_rows_get_text, type_name, type_unqualified_nominals]
+    jet_foundation.[BuildOptions, CompilerThreads, DeepChecks, FnBody, StmtKind, Type, deep_checks_flags, foundation_named_type, name_rows_get_text, type_name, type_unqualified_nominals]
     jet_ir.[IRTypeKind, ir_eval_place_refusal, ir_module_new, ir_pointer_row, ir_untag, ir_x64_compile_module_logged, ir_x64_debug_program]
     jet_parser.[parse_type_text]
     jet_sema.[SemaEvalProbeAnswer, sema_eval_probe_function, sema_eval_probe_parse, sema_ownership_type_is_copy]
@@ -124,6 +127,14 @@ jet_cli_debug_eval_compile: fn(entry: String, argv: [String], color: Bool, path:
     options: chosen ?? return Err(jet_cli_debug_eval_refused("the debug build's options don't apply to `{entry}` now"))
     if binders == .Val(locals) {
         if jet_cli_debug_eval_params(text, locals) == .Val(params) {
+            if jet_cli_debug_eval_alone(text, params, entry_source) == .Val(alone) {
+                if jet_cli_debug_eval_direct(entry, color, options, entry, alone, text, params) == {
+                    .Ok(built) -> {
+                        if built == .Val(code) -> return Ok(code)
+                    }
+                    .Err(refusal) -> return Err(refusal)
+                }
+            }
             if jet_cli_debug_eval_direct(entry, color, options, path, source, text, params) == {
                 .Ok(built) -> {
                     if built == .Val(code) -> return Ok(code)
@@ -181,6 +192,28 @@ jet_cli_debug_eval_params: fn(text: String, binders: [NativeEvalBinder]) -> [Nat
         params.push(found)
     }
     Val(params)
+}
+
+// The source of the entry, whose text `entry_source` is, that the
+// expression `text` of the locals `params` (jet_cli_debug_eval_params)
+// compiles with in place of the program's: its package carrier, if it
+// holds one, and an empty `run`. An expression whose every name is one of
+// those locals, each of a type the primitive spellings name
+// (foundation_named_type), reads nothing of the program: the same code
+// checks and builds from that entry, as one function of the same package
+// built with the same flags, without checking the entry's code. The
+// package's other sources still compile. None when a name of `text` is no
+// local's (a function's, a type's, a field's, a keyword) or a local's type
+// is another, so the program's compile builds it.
+jet_cli_debug_eval_alone: fn(text: String, params: [NativeEvalBinder], entry_source: String) -> String? Never! {
+    if native_eval_names(text).len() != params.len() -> return None
+    loop param in params {
+        if foundation_named_type(param.type_name) == .Named(_) -> return None
+    }
+    block: jet_driver_inline_package(entry_source)
+    if block.error != None -> return None
+    carrier: if block.found -> "{entry_source.slice(block.start..<block.end)}\n\n" else -> ""
+    Val("{carrier}run: fn() {{}}")
 }
 
 // `text` compiled as the function of `params` appended to `source`, in one
@@ -377,4 +410,17 @@ debug_eval_path_same: fn(source: String, path: String) -> Bool Never! {
     assert_eq(jet_cli_debug_eval_offset("a\n    loop v in xs.map(f)\n", 2, 15), Val(16))
     assert_eq(jet_cli_debug_eval_offset("é = f(x)\n", 1, 5), Val(5))
     assert_eq(jet_cli_debug_eval_offset("ab\n", 1, 4), None)
+}
+
+#Test("an expression of primitive locals only compiles with its entry's package carrier and an empty run") {
+    total: NativeEvalBinder{name: "total", type_name: "Int", live: true}
+    seen: NativeEvalBinder{name: "seen", type_name: "Bool", live: true}
+    point: NativeEvalBinder{name: "point", type_name: "Point", live: true}
+    loose: "use helpers\n\nf_1: fn(n: Int) -> Int {{\n    n + 1\n}}\n"
+    assert_eq(jet_cli_debug_eval_alone("total + 2", [NativeEvalBinder]{total}, loose), Val("run: fn() {{}}"))
+    assert_eq(jet_cli_debug_eval_alone("seen && total > 3", [NativeEvalBinder]{seen, total}, loose), Val("run: fn() {{}}"))
+    assert_eq(jet_cli_debug_eval_alone("f_1(total)", [NativeEvalBinder]{total}, loose), None)
+    assert_eq(jet_cli_debug_eval_alone("point", [NativeEvalBinder]{point}, loose), None)
+    carried: "package: {{\n    name: \"demo\"\n}}\n\nrun: fn() {{\n    f_1(1)\n}}\n"
+    assert_eq(jet_cli_debug_eval_alone("total + 2", [NativeEvalBinder]{total}, carried), Val("package: {{\n    name: \"demo\"\n}}\n\nrun: fn() {{}}"))
 }
