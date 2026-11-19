@@ -1,0 +1,32 @@
+// The zoned arm of the profile-overhead pair
+// (Tools/Perf/ProfileOverheadPair.jet): a frame loop whose frame is a zone,
+// with a frame mark and a plotted value per frame. Plain/main.jet is the same
+// program without them, and both print the same total.
+use perf: core.perf
+
+#CLI
+Args: struct {
+    n: Int,
+}
+
+PARTICLES: 4096
+
+// One particle's update: a step of a linear congruential walk.
+step: fn(state: Int, i: Int) -> Int { (state * 1103515245 + 12345 + i) %% 2147483648 }
+
+frame: fn(seed: Int) -> Int {
+    _zone: perf.zone("frame")
+    acc := seed
+    loop i in 0..<PARTICLES -> acc = step(acc, i)
+    acc
+}
+
+run: fn(args: Args) {
+    total := 0
+    loop f in 0..<args.n {
+        total = frame(total + f)
+        perf.plot("total", Float.from_int(total %% 1000))
+        perf.frame()
+    }
+    print(total)
+}

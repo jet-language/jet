@@ -349,6 +349,27 @@
       }
     ]
   },
+  "profile_overhead_pairs": {
+    "schema": "jet.perf.profile-overhead-pairs.v1",
+    "version": 1,
+    "rule": "The zoned arm opens a profiler zone per frame, marks each frame and plots a value; the plain arm is the same program without them, with the same output. With no profiler recording (built with --release at -O1 and -O2) the zoned arm must not be slower or bigger: no metric's paired-bootstrap 95% lower bound of zoned/plain is above 1. Under the profiler (jet run --observe with JET_PERF_SAMPLES set, as jet perf run runs it) the zoned arm's wall-time lower bound must stay within on_budget.",
+    "pairs": [
+      {
+        "id": "profile_overhead",
+        "entry": "profile-overhead",
+        "work": ["zone", "frame mark", "plot"],
+        "zoned": "Tools/Perf/ProfileOverhead/Zoned",
+        "plain": "Tools/Perf/ProfileOverhead/Plain",
+        "expected_output": "Tools/Perf/ProfileOverhead/expected.out",
+        "states": ["-O1", "-O2", "on"],
+        "on_budget": 1.05,
+        "command": "jet Tools/Perf/ProfileOverheadPair.jet --output Tools/Perf/ProfileOverhead/evidence.json",
+        "metrics": ["wall_ns", "cycles_u", "peak_rss_kb"],
+        "trials": 100,
+        "evidence_file": "Tools/Perf/ProfileOverhead/evidence.json"
+      }
+    ]
+  },
   "reflection_size_pairs": {
     "schema": "jet.perf.reflection-size-pairs.v1",
     "version": 1,
