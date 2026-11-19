@@ -355,7 +355,7 @@ Unix sockets, UDP, DNS). A buffered file writer's writes are recorded when
 its buffer reaches the kernel, with the flushing stack; a read its buffer
 serves records nothing. SQLite's page reads and writes, file copies and
 directory walks, raw descriptors and the terminal are not recorded. An
-attach records no transfers. Tests/Cases/Perf/io_on_timeline_without_instrumentation.case
+attach records the transfers its flight ring holds (below). Tests/Cases/Perf/io_on_timeline_without_instrumentation.case
 is the worked example.
 
 A `core.game` run under `jet run --observe` relays its frames through its live
@@ -399,6 +399,7 @@ as `receipt perf <canonical JSON>`, and `jet perf compare` lists each field
 that differs between two traces' receipts (`perf.build.options.optimize: "O0"
 -> "O2"`). `jet perf attach` records no `perf` section.
 
+<<<<<<< ours
 ## Comparing captures
 
 `jet perf compare <base> <head>` takes each side as one `.jettrace` or a
@@ -430,6 +431,55 @@ alone. Compare exits 0 either way: `jet budget check` is the gate.
 per-capture `base` and `head` samples, `p_ppm` (the adjusted p in parts
 per million, null when unjudged) and `verdict`.
 
+||||||| base
+=======
+## Flight recorder and crash dumps
+
+D-OBSERVE-FLIGHT1=B ratifies an always-on flight recorder under `jet run
+--observe` (when `JET_PERF_SAMPLES` names no `jet perf run` capture). The
+runtime samples its CPU time every 10ms and records its tasks' waits, wakes,
+spawns and file and network transfers, as `jet perf run` does, into a
+256 KiB ring. Each record is one datagram on a nonblocking socket pair, sent
+whole or, while the socket is full, lost, so no record ever waits. The observe
+writer drains the socket into the ring every 100ms, the oldest records going
+once it fills, and publishes `<temp>/jet-flight-<pid>.samples` beside the live snapshot, and the
+program's image as `.image` once. `jet perf attach <pid> --source app.jet`
+copies both and reads the copies, so its trace holds the waits and transfers
+the program made before the attach: each wait's task, line, object and
+waker, and each transfer's `io` row. A wait of a task the live snapshot no
+longer holds becomes no row. Tests/Cases/Perf/attach_drains_flight_ring.case
+is the worked example.
+
+A stop that ends an observed process (a panic, a trap, a contract failure)
+writes a typed dump while the stopping stack is whole:
+`.jet/dumps/<program>-<UTC time>.jetdump` under the working directory, mode
+0600, `~<n>` after the time when a dump of the same second exists, of which
+the newest three stay. Stderr names it (`dump written: <path>`). The dump
+holds every task's registers, the program's writable memory (every thread's
+and task's stack among it), the flight ring, and the program's image, so it
+opens without the binary. The stopping thread's registers are its own; each
+other thread is interrupted by a real-time signal (62), records its task and
+registers, and waits until the dump is written, so its stack is the one its
+registers name; a parked or queued task's registers are the ones its last
+switch saved. A thread that does not answer within 200ms is left out. Every
+`core.crypto.Secret`'s bytes are zeroed before the write.
+
+`jet debug <file>.jetdump` opens a dump behind the `(Jet)` console: `Dump of
+process <pid>, <n> flight events`, then the innermost Jet frame of the stop
+(`Stopped  main.jet:9  in check()`), its source line and its locals. `bt`,
+`frame N`, `locals` and `print NAME` read the stop as a live session reads
+one, with typed locals; a `Secret` shows as `<redacted>`. `tasks` lists every
+task the dump holds, the selected one marked `*`, as `task <id>  stopped`,
+`running` or `parked`, then its innermost Jet frame and, when that frame is
+outside the program's source, the innermost one inside it (`task 3  parked
+in sleep() at time.jet:41, from run() at main.jet:14`); `task N` selects
+task N for `bt`, `frame`, `locals` and `print`. `events [--last N]` (20 by
+default) lists the ring's records, oldest first, each at the first Jet frame
+of its stack: `sample`, `spawn`, `wake`, `clock`, `wait` and `io`. A
+run-control command answers that a dump doesn't run.
+Tests/Cases/Debug/crash_dump_opens_typed.case is the worked example.
+
+>>>>>>> theirs
 ## Canonical devtools protocol
 
 `jet.devtools.v1` is the single observation envelope for development hosts.
@@ -606,3 +656,4 @@ the program through time, or keep a standing per-variable history buffer.
 - Wall-clock session: `Compiler/JetCLI/Source/CLI/Perf/` and `Compiler/JetFoundation/Source/Trace/JetTrace.jet`
 - Browser rows: `Compiler/JetDevServer/Source/BrowserTrace.jet`, merged by `Compiler/JetCLI/Source/CLI/Perf/BrowserCapture.jet`
 - Devtools protocol and panel policy: `Compiler/JetFoundation/Source/Devtools/` and the panel catalog projection in `Compiler/JetDevServer/Source/Session.jet`
+- Flight recorder and dumps: `Compiler/JetRuntime/Source/PerfSamples.jet` (`perf_flight_*`), read by `Compiler/JetDebug/Source/NativeDump.jet` behind `Compiler/JetCLI/Source/CLI/DebugDump.jet`

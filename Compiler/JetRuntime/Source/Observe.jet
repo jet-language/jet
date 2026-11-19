@@ -410,9 +410,17 @@ observe_cancel_live_tasks: fn() {
 
 // Publishes the writer's exit snapshot, once per process run, after
 // writing the record of the CPU time `jet perf run` sampled (PerfSamples.jet
-// perf_samples_exit).
-#Export(c) jet_rt_observe_exit: fn(_unused: I64) -> I64 {
+// perf_samples_exit) and ending the flight recorder's publication
+// (perf_flight_end). `stop` 1 is a stop that ends the process, while its
+// stack is whole (Trap.jet trap_root_prepare): the flight recorder's typed
+// dump (perf_flight_dump), and nothing else, as the exit still follows.
+#Export(c) jet_rt_observe_exit: fn(stop: I64) -> I64 {
+    if (stop == I64{1}) {
+        perf_flight_dump()
+        return I64{0}
+    }
     perf_samples_exit()
+    perf_flight_end()
     if observe_root == (I64{0}) -> return I64{0}
     if sync_swap(wrapping(observe_root + I64{64}), I64{1}) != (I64{0}) -> return I64{0}
     observe_publish_exit()

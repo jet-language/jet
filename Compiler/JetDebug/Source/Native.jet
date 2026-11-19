@@ -232,6 +232,12 @@ NativeSession: struct {
     // maps its code at (0: none mapped yet).
     fixed: [NativeFixed]{[NativeFixed]{}},
     fix_next: Int{0},
+    // A typed dump's tasks and memory (NativeDump.jet), in place of a
+    // traced program's; None for a live session.
+    dump: NativeDump?,
+    // The index among the dump's tasks of the one `bt`, `frame`, `locals`
+    // and `print` read: 0, the stop's, until `task N` selects another.
+    task: Int,
 
     // Load the debug facts of `binary` (a native image with debug info, its
     // own or in the side file its `.gnu_debuglink` names). The program's
@@ -242,7 +248,7 @@ NativeSession: struct {
         native_files.write(output_path, "") ?? return Err(NativeDebugError{detail: "couldn't create the program output file: {err}"})
         observe_root: native_elf_symbol(elf, X64_OBSERVE_ROOT_SYMBOL) ?? 0
         openings: native_openings(image, native_elf_code(elf))
-        Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: output_path, output_read: 0, started: false, threads: [NativeThread]{}, observe_root: observe_root, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [NativeSite]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings})
+        Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: output_path, output_read: 0, started: false, threads: [NativeThread]{}, observe_root: observe_root, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [NativeSite]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: None, task: 0})
     }
 
     // A breakpoint on `line` of the Jet source `file` (its base name, as the
@@ -510,6 +516,10 @@ NativeSession: struct {
         index: level.frame
         memory: NativeMemory{trace: Val(self.trace), blocks: [NativeBlock]{}}
         lookup: native_lookup(index, frames[index].pc)
+        // A dump runs no view: nothing runs it.
+        if self.dump == .Val(dumped) {
+            return Ok(native_frame_locals(self.image, dumped.memory, frames[index], lookup, level.site))
+        }
         shown := native_frame_locals(self.image, memory, frames[index], lookup, level.site)
         function: native_function_at(self.image, lookup) ?? return Ok(shown)
         // The variables native_frame_locals shows, in its order.
@@ -758,10 +768,14 @@ NativeSession: struct {
                 break
             }
         }
-        if syscall < 0 -> return Ok("Fix refused: the program's code holds no system call to map the edit with; restart the program to run the edit\n")
+        if syscall < 0 {
+            return Ok("Fix refused: the program's code holds no system call to map the edit with; restart the program to run the edit\n")
+        }
         base: self.map_code(plan.size, code.address + code.bytes.len(), syscall) ?? return Err(err)
         region: native_fix_region(plan, edit, symbols, base)
-        if !self.poke_bytes(base, region) -> return Err(NativeDebugError{detail: "couldn't write the fixed code at {native_debug_hex(base)}"})
+        if !self.poke_bytes(base, region) {
+            return Err(NativeDebugError{detail: "couldn't write the fixed code at {native_debug_hex(base)}"})
+        }
         // Breakpoints in the old code move to the same lines of the new.
         moved := [NativeBreakpoint]{}
         loop breakpoint in self.breakpoints {
@@ -776,7 +790,9 @@ NativeSession: struct {
                     line: if index >= 0 -> x64_jetline_line(self.image.lines, self.image.lines.functions[index], address) ?? 0 else -> 0
                     loop piece in plan.pieces {
                         if piece.function != row -> next
-                        if native_fix_line_address(edit.debug[row], base + piece.offset, line) == .Val(found) -> target = found
+                        if native_fix_line_address(edit.debug[row], base + piece.offset, line) == .Val(found) {
+                            target = found
+                        }
                     }
                 }
                 if target >= 0 -> addresses.push(target)
@@ -800,7 +816,9 @@ NativeSession: struct {
                 word: x64_trace_read(self.trace, at, 8) ?? return Err(NativeDebugError{detail: "couldn't read the code of `{function.name}`"})
                 patched := word
                 loop (k, byte) in native_fix_jump(at, low) -> patched[k] = byte
-                if !self.poke_bytes(at, patched) -> return Err(NativeDebugError{detail: "couldn't redirect `{function.name}` to its fixed code"})
+                if !self.poke_bytes(at, patched) {
+                    return Err(NativeDebugError{detail: "couldn't redirect `{function.name}` to its fixed code"})
+                }
             }
             id: function.id.value
             source: if id >= 0 && id < edit.object.functions.len() -> Val(edit.object.functions[id]) else -> None
@@ -810,7 +828,9 @@ NativeSession: struct {
             dir := edit.object.debug.directory
             decl := 0
             if source == .Val(facts) {
-                if facts.file >= 0 && facts.file < edit.object.debug.files.len() -> file = edit.object.debug.files[facts.file]
+                if facts.file >= 0 && facts.file < edit.object.debug.files.len() {
+                    file = edit.object.debug.files[facts.file]
+                }
                 decl = facts.line
             }
             if like >= 0 {
@@ -829,7 +849,9 @@ NativeSession: struct {
         self.breakpoints = moved
         loop breakpoint in self.breakpoints {
             loop address in breakpoint.addresses {
-                if !self.plant(address) -> return Err(NativeDebugError{detail: "couldn't write a breakpoint at {native_debug_hex(address)}"})
+                if !self.plant(address) {
+                    return Err(NativeDebugError{detail: "couldn't write a breakpoint at {native_debug_hex(address)}"})
+                }
             }
         }
         Ok("Fixed {shown.join(", ")}: the edit runs from the next call\n")
@@ -857,7 +879,9 @@ NativeSession: struct {
                 return Err(NativeDebugError{detail: "couldn't set the program's registers"})
             }
             event: self.resume(X64TraceResume.Step) ?? return Err(err)
-            if event.kind != NativeStopKind.Paused -> return Err(NativeDebugError{detail: "the program ended while `fix` mapped its code"})
+            if event.kind != NativeStopKind.Paused {
+                return Err(NativeDebugError{detail: "the program ended while `fix` mapped its code"})
+            }
             mapped: (self.registers() ?? return Err(err))[NATIVE_FIX_RAX]
             if !x64_trace_set_registers(self.trace, saved) {
                 return Err(NativeDebugError{detail: "couldn't set the program's registers"})
@@ -1345,10 +1369,20 @@ NativeSession: struct {
         }
     }
 
-    // The stopped program's registers.
+    // The stopped program's registers, or the dump's selected task's.
     registers: fn(self) -> [Int] NativeDebugError! {
+        if self.dump == .Val(dumped) -> return Ok(native_dump_registers(dumped, self.task))
         registers: x64_trace_registers(self.trace) ?? return Err(NativeDebugError{detail: "couldn't read the program's registers"})
         Ok(registers)
+    }
+
+    // The word of the stopped program, or of the dump, at `address`.
+    word: fn(self, address: Int) -> Int? Never! {
+        if self.dump == .Val(dumped) {
+            read: native_debug_read(dumped.memory, address, 8, 1) ?? return None
+            return Val(read[0])
+        }
+        native_debug_word(self.trace, address)
     }
 
     // Write a trap byte at `address`, unless one is there; false when the
@@ -1411,8 +1445,11 @@ NativeSession: struct {
     }
 
     // `count` bytes of the program's code from `address`, as the image has
-    // them: the bytes under trap bytes put back.
+    // them: the bytes under trap bytes put back. A dump's are its image's.
     code: fn(self, address: Int, count: Int) -> [U8] Never! {
+        if self.dump == .Val(dumped) {
+            return native_debug_bytes(dumped.memory, address, count) ?? [U8]{}
+        }
         bytes := x64_trace_read(self.trace, address, count) ?? [U8]{}
         loop site in self.sites {
             at: site.address - address
@@ -1954,14 +1991,16 @@ NativeSession: struct {
             cfa: native_frame_base(self.openings, function, registers, pc, here)
             frames.push(NativeUnwound{pc: pc, cfa: cfa, registers: registers.copy(), known: known.copy()})
             if cfa <= registers[X64_TRACE_RSP] -> break
-            returned: native_debug_word(self.trace, cfa - 8) ?? break
+            returned: self.word(cfa - 8) ?? break
             if returned <= 0 -> break
-            caller_rbp: native_caller_rbp(self.openings, function, registers, self.trace, pc, here) ?? break
+            rsp_word: self.word(registers[X64_TRACE_RSP])
+            rbp_word: if registers[X64_TRACE_RBP] > 0 -> self.word(registers[X64_TRACE_RBP]) else -> Int?{None}
+            caller_rbp: native_caller_rbp(self.openings, function, registers, pc, here, rsp_word, rbp_word) ?? break
             next_known := loop _ in 0..<registers.len() -> false
             loop index in NATIVE_DEBUG_CALLEE_SAVED -> next_known[index] = known[index]
             loop save in native_prologue_saves(self.openings, function) {
                 if pc >= save.after && registers[X64_TRACE_RBP] > 0 {
-                    if native_debug_word(self.trace, registers[X64_TRACE_RBP] - 8 * (save.slot + 1)) == .Val(saved) {
+                    if self.word(registers[X64_TRACE_RBP] - 8 * (save.slot + 1)) == .Val(saved) {
                         registers[save.register] = saved
                         next_known[save.register] = true
                     }
@@ -2113,19 +2152,19 @@ native_frame_base: fn(openings: [NativeOpening], function: Int, registers: [Int]
 }
 
 // The caller's frame pointer, for the frame native_frame_base measured;
-// `here` is the code byte at `pc`.
-native_caller_rbp: fn(openings: [NativeOpening], function: Int, registers: [Int], trace: X64Trace, pc: Int, here: [U8]) -> Int? Never! {
-    rsp: registers[X64_TRACE_RSP]
+// `here` is the code byte at `pc`, `rsp_word` and `rbp_word` the words the
+// stack and frame pointers point at.
+native_caller_rbp: fn(openings: [NativeOpening], function: Int, registers: [Int], pc: Int, here: [U8], rsp_word: Int?, rbp_word: Int?) -> Int? Never! {
     rbp: registers[X64_TRACE_RBP]
     open: if function >= 0 -> native_frame_open(openings[function].prologue) else -> -1
     if open >= 0 {
         low: openings[function].at
         if pc <= low + open -> return Val(rbp)
-        if pc == low + open + 1 -> return native_debug_word(trace, rsp)
+        if pc == low + open + 1 -> return Val(rsp_word ?? return None)
         if here.len() == 1 && here[0] == (U8{0xc3}) -> return Val(rbp)
     }
     if rbp <= 0 -> return None
-    native_debug_word(trace, rbp)
+    Val(rbp_word ?? return None)
 }
 
 // Where a Jet function opens its frame: at `at`, whose code bytes are
@@ -2647,15 +2686,21 @@ native_debug_holds: fn(rule: NativeRule, locals: [NativeLocal]) -> {stops: Bool,
 
 // Bytes a readout may read: the stopped program's memory, when there is a
 // program, and `blocks` (each its bytes from its address) before it.
+// `backing` holds the bytes of the blocks that name a span of it (a dump's
+// sections), so they share one buffer.
 NativeMemory: struct {
     trace: X64Trace?,
     blocks: [NativeBlock],
+    backing: [U8]{[U8]{}},
 }
 
-// Known bytes from `address`.
+// Known bytes from `address`: `bytes`, or with `from` 0 or more the `size`
+// bytes of the memory's backing from `from`.
 NativeBlock: struct {
     address: Int,
     bytes: [U8],
+    from: Int{-1},
+    size: Int{0},
 }
 
 // The parameters and locals live at `lookup` in `frame` that belong to the
@@ -2959,13 +3004,18 @@ native_debug_bytes: fn(memory: NativeMemory, address: Int, count: Int) -> [U8]? 
     if address <= 0 || count < 0 -> return None
     held: loop index in 0..<memory.blocks.len() {
         block: memory.blocks[index]
-        if address >= block.address && address + count <= block.address + block.bytes.len() {
+        length: if block.from >= 0 -> block.size else -> block.bytes.len()
+        if address >= block.address && address + count <= block.address + length {
             break index
         }
     } ?? -1
     if held >= 0 {
-        from: address - memory.blocks[held].address
-        return Val(memory.blocks[held].bytes[from..<from + count])
+        block: memory.blocks[held]
+        from: address - block.address
+        if block.from >= 0 {
+            return Val(memory.backing[block.from + from..<block.from + from + count])
+        }
+        return Val(block.bytes[from..<from + count])
     }
     trace: memory.trace ?? return None
     if trace.pid <= 0 -> return None

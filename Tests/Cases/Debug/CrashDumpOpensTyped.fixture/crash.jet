@@ -1,0 +1,22 @@
+use {
+    crypto: core.crypto
+    time: core.time
+}
+
+check: fn(count: Int, key: crypto.Secret) {
+    total: count * 7
+    same: crypto.constant_time_equal(key, key)
+    if same && total > 20 -> panic("count too high: {total}")
+}
+
+run: fn() {
+    first: task { time.sleep(30000ms) }
+    second: task { time.sleep(30000ms) }
+    third: task { time.sleep(30000ms) }
+    first.detach()
+    second.detach()
+    third.detach()
+    time.sleep(300ms)
+    key: crypto.Secret.from_text("hunter2")
+    check(3, key)
+}

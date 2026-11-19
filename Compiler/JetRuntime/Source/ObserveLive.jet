@@ -535,12 +535,14 @@ rt_observe_writer_address: fn() -> I64 {
 }
 
 // The periodic writer shares the same run lock and never publishes after
-// final publication until a resident host restarts the run.
+// final publication until a resident host restarts the run. Each turn also
+// publishes the flight recorder's ring (PerfSamples.jet perf_flight_publish).
 #Export(c) jet_rt_observe_writer: fn(argument: I64) -> I64 {
     writer: argument
     slot: sync_park_new()
     loop {
         observe_publish(writer, I64{0})
+        perf_flight_publish(sync_load(wrapping(writer + I64{96})))
         sync_park(slot, I64{100000000})
     }
     I64{0}

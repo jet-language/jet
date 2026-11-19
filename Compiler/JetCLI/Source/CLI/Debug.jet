@@ -11,7 +11,8 @@
 // same flags does. A path that isn't a `.jet` file
 // is an image already built: it is debugged as it is, against the source its
 // line table names. An image the debugger can't read or run stops the
-// session with E2203.
+// session with E2203. A `.jetdump` path is a typed crash dump, read behind
+// the same console without running anything (DebugDump.jet).
 use {
     cli_files: core.files
     cli_process: core.process
@@ -52,6 +53,7 @@ jet_cli_debug: fn(jet_argv: [String], args: [String], passthrough: [String]?, co
         .Read(request) -> deep_checks = request.copy()
     }
     entry: args[1]
+    if entry.ends_with(".jetdump") -> return jet_cli_debug_dump(entry, color)
     scratch: cli_files.temp_dir("jet-debug") ?? return jet_cli_fail("E2105", "couldn't create the debug build directory: {err}", jet_cli_why("E2105"), "check that the temporary directory is writable, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     plan: if entry.ends_with(".jet") -> jet_cli_debug_build(entry, scratch.path, deep_checks, breaks, program_args, dap, color) else -> jet_cli_debug_session(entry, "", [String]{}, scratch.path, breaks, program_args, deep_checks, dap, color)
     if cli_files.remove_all(scratch.path) == {

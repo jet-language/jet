@@ -381,7 +381,24 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
             return jet_cli_perf_error(message, "start the program with `jet run --observe`, then attach", color)
         }
         text: perf_files.read(path) ?? return jet_cli_perf_error("cannot read source {path}: {jet_cli_io_error_text(err)}", JET_CLI_PERF_FIX, color)
-        capture = jet_cli_perf_capture_source(path, text, observations, None, target, None) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
+        // The flight ring the program publishes: its recent samples, waits,
+        // wakes, spawns and transfers, read as a run's are.
+        flight: jet_cli_perf_attach_flight(target_pid, path)
+        capture = jet_cli_perf_capture_source(path, text, observations, flight, target, None) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
+        if flight.move() == .Val(found) {
+            // The ring's rows are timed from its earliest wait or transfer,
+            // on the program's monotonic clock: attach has no start of its
+            // own on it.
+            origin := 0
+            loop wait in found.waits {
+                if origin == 0 || wait.start_ns < origin -> origin = wait.start_ns
+            }
+            loop transfer in found.transfers {
+                if origin == 0 || transfer.start_ns < origin -> origin = transfer.start_ns
+            }
+            jet_cli_perf_waits_read(capture, found.waits.move(), found.wakes, found.spawns, found.transfers, path, origin)
+            jet_cli_perf_io_read(capture, found.transfers.move(), path, origin)
+        }
     } else if live_error == None {
         return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2102", "live observe snapshot found, but `--source` is required", "domain capture must attribute facts to a Jet symbol identity", "run `jet perf attach {target_pid} --source <file.jet>`", color), exit_code: JET_DRIVER_EXIT_USAGE}
     }
@@ -398,6 +415,22 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
     capture.policy.allowlist = allowlist
     path: jet_cli_perf_session_write(capture, "attach", argv, out) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
     JetDriverVerbOutput{stdout: "", stderr: if quiet -> "" else -> "Trace: {path}\n", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// The flight ring the observed program `pid` publishes in the temporary
+// directory (JetRuntime PerfSamples.jet perf_flight_publish) and the image
+// beside it, copied out of its way, then read as a run's samples are; the
+// program keeps publishing its own. Lines in `source` are its own. None when
+// it publishes no ring.
+jet_cli_perf_attach_flight: fn(pid: Int, source: String) -[FS, Env, Time]> JetCLIPerfSamples? Never! {
+    published: perf_files.join(perf_sys.temp_dir(), "jet-flight-{pid}.samples")
+    taken: perf_files.join(perf_sys.temp_dir(), "jet-perf-attach-{pid}-{perf_time.unix_ns()}.samples")
+    perf_files.copy(published, taken) ?? return None
+    if perf_files.copy("{published}.image", "{taken}.image") == .Err(_) {
+        perf_files.remove(taken).drop("the attach reads the ring it copied once")
+        return None
+    }
+    jet_cli_perf_samples_read(taken, source, [TraceCounter]{})
 }
 
 // `read_browser_capture`: the devserver's browser relay for `pid`, or None
