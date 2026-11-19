@@ -1,0 +1,10 @@
+// The main task waits to receive from a channel whose only Sender it holds
+// itself: nothing can ever send on it, so the program stops with the
+// deadlock.
+
+run: fn() {
+    { sender: tx, receiver: rx }: channel<Int>()
+    got: rx.receive() ?? -1
+    tx.send(got) ?? print("refused")
+    print("received {got}")
+}

@@ -2121,6 +2121,11 @@ ir_shared_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], shar
         drop = ir_temp(m, b, pointer_row)
         ir_emit(b.f, IROp.Load, drop, meta, 16, -1, b.line)
     }
+    // Any task the cell reaches may take a Sender out of it, past the
+    // runtime's sender ledger (Channel.jet jet_rt_native_sender_escape).
+    if cell_inner == None && ir_type_carries_sender(m, p, inner, 0) {
+        _: ir_runtime(m, b, "jet_rt_native_sender_escape", [Int]{}, -1)
+    }
     ir_runtime(m, b, "jet_rt_native_shared_new", [Int]{slot, meta, drop}, row)
 }
 

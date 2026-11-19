@@ -1,13 +1,13 @@
-// Native homogeneous payload channels. State168: mutex0, refs8, queue
+// Native homogeneous payload channels. State176: mutex0, refs8, queue
 // len16/cap24/data32/head40, bound48, owned meta56, recvwait64/sendwait72,
 // reservations80, closed88/canceled96, kind104 (0 channel,1 timer,2 interval),
 // delay112, senders120/receivers128, observe136,
 // recvwaitcount144/sendwaitcount152, replay id160 (RecordReplay.jet: each
 // send, receive, close and endpoint drop is a sync event, logged under the
-// mutex, and a select's chosen arm). Endpoint handles are the opaque state
-// pointer, each retaining one ref and one logical endpoint. WaitNode24: next0,
-// park8, flags16 (linked1, ever-woken2), under lock. Single wake is Vec.pop
-// (LIFO); close walks Vec insertion order (FIFO).
+// mutex, and a select's chosen arm), sender ledger168. Endpoint handles are
+// the opaque state pointer, each retaining one ref and one logical endpoint.
+// WaitNode24: next0, park8, flags16 (linked1, ever-woken2), under lock.
+// Single wake is Vec.pop (LIFO); close walks Vec insertion order (FIFO).
 
 channel_update: fn(channel: I64) {
     jet_rt_observe_channel_update(sync_load(wrapping(channel + I64{136})), sync_load(wrapping(channel + I64{16})), sync_load(wrapping(channel + I64{152})), sync_load(wrapping(channel + I64{144})), sync_load(wrapping(channel + I64{88})))
@@ -20,8 +20,11 @@ channel_wait_object: fn(channel: I64) -> I64 {
 }
 
 channel_new: fn(bound: I64, kind: I64, delay_ms: I64) -> I64 {
-    channel: jet_rt_alloc(I64{168}, I64{8})
-    thread_zero(channel, I64{168})
+    channel: jet_rt_alloc(CHANNEL_BYTES, I64{8})
+    thread_zero(channel, CHANNEL_BYTES)
+    ledger: jet_rt_alloc(I64{32}, I64{8})
+    thread_zero(ledger, I64{32})
+    sync_store(wrapping(channel + I64{168}), ledger)
     sync_store(wrapping(channel + I64{8}), I64{1})
     sync_store(wrapping(channel + I64{48}), bound)
     sync_store(wrapping(channel + I64{104}), kind)
@@ -57,7 +60,183 @@ channel_release: fn(channel: I64) {
     }
     if (capacity != I64{0}) { jet_rt_free(data, capacity * stride, I64{8}) }
     jet_rt_observe_channel_drop(sync_load(wrapping(channel + I64{136})))
-    jet_rt_free(channel, I64{168}, I64{8})
+    channel_ledger_drop(sync_load(wrapping(channel + I64{168})))
+    jet_rt_free(channel, CHANNEL_BYTES, I64{8})
+}
+
+CHANNEL_BYTES: I64{176}
+
+// The sender ledger: the tasks holding a channel's Senders, so a receive's
+// wait names its holders (WaitCycle.jet). Ledger32 at state168: count0
+// capacity8 lost16 rows24, a row per holding task: control0 (retained)
+// held8. A Sender counts where it is made, cloned and dropped, and moves
+// with the task body that owns it (jet_rt_native_sender_pass, _take). A
+// task a Sender may leave any other way stops counting as a holder (its
+// control's leaky208, jet_rt_native_sender_leak); a Sender used or dropped
+// where no row counts it, or a holder past CHANNEL_LEDGER_ROWS, loses the
+// ledger for good, and a Shared value that may hold a Sender loses every
+// ledger (channel_senders_escaped). Under the channel's mutex.
+CHANNEL_LEDGER_ROWS: I64{64}
+
+channel_senders_escaped := I64{0}
+
+channel_ledger_drop: fn(ledger: I64) {
+    count: sync_load(ledger)
+    rows: sync_load(wrapping(ledger + I64{24}))
+    at := I64{0}
+    loop at < count {
+        scheduler_control_drop(sync_load(wrapping(rows + at * I64{16})))
+        at += I64{1}
+    }
+    capacity: sync_load(wrapping(ledger + I64{8}))
+    if (capacity != I64{0}) { jet_rt_free(rows, capacity * I64{16}, I64{8}) }
+    jet_rt_free(ledger, I64{32}, I64{8})
+}
+
+// The row of `control` in `ledger`, or 0.
+channel_ledger_row: fn(ledger: I64, control: I64) -> I64 {
+    count: sync_load(ledger)
+    rows: sync_load(wrapping(ledger + I64{24}))
+    at := I64{0}
+    loop at < count {
+        row: wrapping(rows + at * I64{16})
+        if (sync_load(row) == control) { return row }
+        at += I64{1}
+    }
+    I64{0}
+}
+
+channel_ledger_lose: fn(ledger: I64) { sync_store(wrapping(ledger + I64{16}), I64{1}) }
+
+// Adds `delta` (1 or -1) to the Senders of `channel` that task `control`
+// holds. The control to drop once the mutex is free when its row ends,
+// else 0.
+channel_ledger_add: fn(channel: I64, control: I64, delta: I64) -> I64 {
+    ledger: sync_load(wrapping(channel + I64{168}))
+    if (sync_load(wrapping(ledger + I64{16})) != I64{0}) { return I64{0} }
+    row: if (control == I64{0}) -> I64{0} else -> channel_ledger_row(ledger, control)
+    count: sync_load(ledger)
+    if (row == I64{0}) {
+        if (control == I64{0} || delta < I64{0} || count >= CHANNEL_LEDGER_ROWS) {
+            channel_ledger_lose(ledger)
+            return I64{0}
+        }
+        capacity: sync_load(wrapping(ledger + I64{8}))
+        if (count == capacity) {
+            grown: if (capacity == I64{0}) -> I64{4} else -> capacity * I64{2}
+            rows: jet_rt_alloc(grown * I64{16}, I64{8})
+            old: sync_load(wrapping(ledger + I64{24}))
+            at := I64{0}
+            loop at < (count * I64{2}) {
+                sync_store(wrapping(rows + at * I64{8}), sync_load(wrapping(old + at * I64{8})))
+                at += I64{1}
+            }
+            if (capacity != I64{0}) { jet_rt_free(old, capacity * I64{16}, I64{8}) }
+            sync_store(wrapping(ledger + I64{8}), grown)
+            sync_store(wrapping(ledger + I64{24}), rows)
+        }
+        added: wrapping(sync_load(wrapping(ledger + I64{24})) + count * I64{16})
+        scheduler_control_retain(control)
+        sync_store(added, control)
+        sync_store(wrapping(added + I64{8}), delta)
+        sync_store(ledger, count + I64{1})
+        return I64{0}
+    }
+    held: sync_load(wrapping(row + I64{8})) + delta
+    if (held != I64{0}) {
+        sync_store(wrapping(row + I64{8}), held)
+        return I64{0}
+    }
+    last: wrapping(sync_load(wrapping(ledger + I64{24})) + (count - I64{1}) * I64{16})
+    sync_store(row, sync_load(last))
+    sync_store(wrapping(row + I64{8}), sync_load(wrapping(last + I64{8})))
+    sync_store(ledger, count - I64{1})
+    control
+}
+
+// A send by the running task: a Sender no row counts loses the ledger.
+channel_ledger_use: fn(channel: I64) {
+    ledger: sync_load(wrapping(channel + I64{168}))
+    if (sync_load(wrapping(ledger + I64{16})) != I64{0}) {
+        return
+    }
+    control: scheduler_control_current()
+    if (control == I64{0} || channel_ledger_row(ledger, control) == I64{0}) {
+        channel_ledger_lose(ledger)
+    }
+}
+
+// Moves one Sender of `channel` to or from the running task's row.
+channel_ledger_move: fn(channel: I64, delta: I64) {
+    if (channel == I64{0}) {
+        return
+    }
+    sync_mutex_lock(channel)
+    dropped: channel_ledger_add(channel, scheduler_control_current(), delta)
+    sync_mutex_unlock(channel)
+    scheduler_control_drop(dropped)
+}
+
+// A task body takes over a Sender its spawner handed it (JetIR
+// BuildChannels.jet ir_hand_senders): the spawner's row gives it up before
+// the spawn, the task's row takes it as the body starts.
+#Export(c) jet_rt_native_sender_pass: fn(channel: I64) { channel_ledger_move(channel, I64{-1}) }
+
+#Export(c) jet_rt_native_sender_take: fn(channel: I64) { channel_ledger_move(channel, I64{1}) }
+
+// A value that may hold a Sender leaves the running task some other way
+// (a send, a capture of a lambda that escapes or of a task body): no ledger
+// counts the task as a holder from now on.
+#Export(c) jet_rt_native_sender_leak: fn() {
+    control: scheduler_control_current()
+    if (control != I64{0}) { sync_store(wrapping(control + I64{208}), I64{1}) }
+}
+
+// A Shared value that may hold a Sender, which any task it reaches may take
+// out, was made: no ledger names holders from now on.
+#Export(c) jet_rt_native_sender_escape: fn() {
+    #Unsafe("an idempotent flag: every writer stores the same 1") {
+        channel_senders_escaped = I64{1}
+    }
+}
+
+// The tasks holding `channel`'s Senders, while each waits in an armed wait
+// and the channel is an empty, open, unreserved plain channel whose ledger
+// counts every Sender: how many, each added to `walk` (WaitCycle.jet; 0 for
+// none) and named on `text` (0 for none). 0 when any of that does not hold.
+// Under the wait lock, which keeps each armed holder alive.
+channel_senders: fn(channel: I64, walk: I64, text: I64) -> I64 {
+    sync_mutex_lock(channel)
+    ledger: sync_load(wrapping(channel + I64{168}))
+    senders: sync_load(wrapping(channel + I64{120}))
+    count: sync_load(ledger)
+    rows: sync_load(wrapping(ledger + I64{24}))
+    known := channel_senders_escaped == I64{0} && sync_load(wrapping(ledger + I64{16})) == I64{0} && senders > I64{0} && sync_load(wrapping(channel + I64{104})) == I64{0} && sync_load(wrapping(channel + I64{88})) == I64{0} && sync_load(wrapping(channel + I64{16})) == I64{0} && sync_load(wrapping(channel + I64{80})) == I64{0}
+    held := I64{0}
+    at := I64{0}
+    loop known && at < count {
+        control: sync_load(wrapping(rows + at * I64{16}))
+        if (sync_load(wrapping(control + I64{208})) != I64{0} || sync_load(wrapping(control + I64{176})) == I64{0} || sync_load(wrapping(control + I64{184})) != I64{0}) {
+            known = false
+        }
+        held += sync_load(wrapping(rows + at * I64{16} + I64{8}))
+        at += I64{1}
+    }
+    if (held != senders) { known = false }
+    at = I64{0}
+    loop known && at < count {
+        control: sync_load(wrapping(rows + at * I64{16}))
+        if (walk != I64{0} && !wait_cycle_walk_add(walk, control)) { known = false }
+        if (text != I64{0}) {
+            if (at > I64{0}) {
+                wait_cycle_push(text, if (at == count - I64{1}) -> rt_static_text(" and ") else -> rt_static_text(", "))
+            }
+            wait_cycle_name(text, control, false)
+        }
+        at += I64{1}
+    }
+    sync_mutex_unlock(channel)
+    if known -> count else -> I64{0}
 }
 
 channel_grow: fn(channel: I64, needed: I64) {
@@ -191,6 +370,8 @@ channel_wait_new: fn(slot: I64) -> I64 {
     node
 }
 
+// Each wait notes the channel, so a receive that closes a wait cycle stops
+// with it (WaitCycle.jet).
 channel_receive: fn(channel: I64, out: I64) -> Bool {
     object: sync_load(wrapping(channel + I64{160}))
     ticket: replay_take(REPLAY_RECEIVE, object)
@@ -198,6 +379,8 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
     node := I64{0}
     reason := I64{0}
     received := false
+    control: scheduler_control_current()
+    wait_cycle_note(control, WAIT_CYCLE_RECEIVE, channel)
     loop {
         if (scheduler_wait_point_cancel_check() != I64{0} || scheduler_root_cancel_observed()) {
             break
@@ -231,6 +414,7 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
         sync_mutex_unlock(channel)
         if (status != I64{0}) { break }
     }
+    wait_cycle_note(control, I64{0}, I64{0})
     if (node != I64{0}) { jet_rt_free(node, I64{24}, I64{8}) }
     if (slot != I64{0}) { sync_park_drop(slot) }
     if (reason != I64{0}) { jet_rt_string_drop(reason) }
@@ -251,6 +435,7 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
     }
     channel: channel_new(bound, I64{0}, I64{0})
     sync_store(wrapping(channel + I64{120}), I64{1})
+    _ := channel_ledger_add(channel, scheduler_control_current(), I64{1})
     channel_retain(channel)
     sync_store(tx, channel)
     sync_store(rx, channel)
@@ -277,6 +462,7 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
             sync_mutex_unlock(channel)
             break
         }
+        channel_ledger_use(channel)
         bound: sync_load(wrapping(channel + I64{48}))
         length: sync_load(wrapping(channel + I64{16}))
         reserved: sync_load(wrapping(channel + I64{80}))
@@ -325,6 +511,7 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
     channel_retain(channel)
     sync_mutex_lock(channel)
     _ := sync_add(wrapping(channel + I64{120}), I64{1})
+    _ := channel_ledger_add(channel, scheduler_control_current(), I64{1})
     channel_update(channel)
     sync_mutex_unlock(channel)
     channel
@@ -346,6 +533,7 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
     object: sync_load(wrapping(channel + I64{160}))
     ticket: replay_take(REPLAY_SENDER_DROP, object)
     sync_mutex_lock(channel)
+    dropped: channel_ledger_add(channel, scheduler_control_current(), I64{-1})
     if (sync_add(wrapping(channel + I64{120}), I64{-1}) == I64{1}) {
         sync_store(wrapping(channel + I64{88}), I64{1})
         channel_wake_all(channel, false)
@@ -354,6 +542,7 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
     replay_log(REPLAY_SENDER_DROP, object)
     sync_mutex_unlock(channel)
     replay_give(ticket)
+    scheduler_control_drop(dropped)
     channel_release(channel)
 }
 

@@ -3,25 +3,30 @@
 // task, its wait and its line; tasks outside the cycle run on.
 //
 // A task about to block with no deadline and unshielded notes its wait on
-// its control (Scheduler.jet Control208): waitKind160 (WAIT_CYCLE_JOIN,
-// _EDIT, _READ), waitTarget168 (the joined task's state, the Shared cell)
-// and arms it, waitArmed176: the park slot it sleeps on, or 1 for a lock's
-// condition poll. waitCycle184 is the deadlock record delivered to it, or 0.
-// Armed and delivered change only under the scheduler root's waitLock264,
-// so a task leaves an armed wait only by taking that lock, and every control
-// the walk reaches through an armed wait stays alive while it holds it. The
-// lock comes before any Shared cell's mutex, never after.
+// its control (Scheduler.jet Control216): waitKind160 (WAIT_CYCLE_JOIN,
+// _EDIT, _READ, _RECEIVE), waitTarget168 (the joined task's state, the
+// Shared cell, the channel) and arms it, waitArmed176: the park slot it
+// sleeps on, or 1 for a lock's condition poll. waitCycle184 is the deadlock
+// record delivered to it, or 0. Armed and delivered change only under the
+// scheduler root's waitLock264, so a task leaves an armed wait only by
+// taking that lock, and every control the walk reaches through an armed wait
+// stays alive while it holds it. The lock comes before any Shared cell's or
+// channel's mutex, never after.
 //
-// Each armed wait names its holder: a join the joined task until it
+// Each armed wait names its holders: a join the joined task until it
 // finishes, an edit or a read the task holding the Shared value's edit
-// permit (its writer word, Shared.jet). Read permits and writers queued
-// ahead name none, so a cycle through one is not found, nor is one through
-// the runtime's own holds, a transaction's commit or a Condition's
-// reacquisition, which never arm. Arming walks the holders from the arming
-// task; a walk that comes back is a cycle, which the arming task delivers:
-// one record of the cycle's lines and each task's wake. Each task in it
-// then adds its own line's site from its own stack, waits until all have,
-// and stops with the whole cycle.
+// permit (its writer word, Shared.jet), a receive every task holding one of
+// the channel's Senders, by the channel's sender ledger (Channel.jet
+// channel_senders), while the channel is empty and the ledger accounts for
+// every Sender. Read permits and writers queued ahead name none, so a cycle
+// through one is not found, nor is one through the runtime's own holds, a
+// transaction's commit, a Condition's reacquisition, a full channel's send
+// or a select, which never arm. Arming walks the holders from the arming
+// task; a walk that reaches only armed tasks whose holders it reached too
+// is a cycle no task outside it can end, which the arming task delivers:
+// one record of every task's line and each task's wake. Each task in it then
+// adds its own line's site from its own stack, waits until all have, and
+// stops with the whole cycle.
 
 WAIT_CYCLE_JOIN: I64{1}
 
@@ -29,10 +34,12 @@ WAIT_CYCLE_EDIT: I64{2}
 
 WAIT_CYCLE_READ: I64{3}
 
+WAIT_CYCLE_RECEIVE: I64{4}
+
 // The scheduler root's wait lock (Scheduler.jet Scheduler272).
 WAIT_CYCLE_LOCK: I64{264}
 
-// The longest holder chain a walk follows.
+// The most tasks a walk follows.
 WAIT_CYCLE_STEPS: I64{4096}
 
 wait_cycle_lock: fn() -> I64 {
@@ -43,7 +50,9 @@ wait_cycle_lock: fn() -> I64 {
 // Notes the wait `control` is about to make, which its next unbounded park
 // arms (wait_cycle_arm); kind 0 clears it.
 wait_cycle_note: fn(control: I64, kind: I64, target: I64) {
-    if (control == I64{0}) { return }
+    if (control == I64{0}) {
+        return
+    }
     sync_store(wrapping(control + I64{160}), kind)
     sync_store(wrapping(control + I64{168}), target)
 }
@@ -57,8 +66,11 @@ wait_cycle_arm: fn(control: I64, slot: I64) -> Bool {
     if (lock == I64{0}) { return false }
     sync_mutex_lock(lock)
     sync_store(wrapping(control + I64{176}), slot)
-    length: wait_cycle_find(control)
-    if (length > I64{0}) { wait_cycle_deliver(control, length) }
+    walk: wait_cycle_find(control)
+    if (walk != I64{0}) {
+        wait_cycle_deliver(walk)
+        wait_cycle_walk_drop(walk)
+    }
     sync_mutex_unlock(lock)
     true
 }
@@ -122,19 +134,84 @@ wait_cycle_holder: fn(control: I64) -> I64 {
     if armed -> writer else -> I64{0}
 }
 
-// The length of the cycle `control`'s armed wait closes, or 0 when its
-// holders lead elsewhere. Under the wait lock.
-wait_cycle_find: fn(control: I64) -> I64 {
-    current := control
-    steps := I64{0}
-    loop steps < WAIT_CYCLE_STEPS {
-        holder: wait_cycle_holder(current)
-        steps += I64{1}
-        if (holder == control) { return steps }
-        if (holder == I64{0} || holder == current) { return I64{0} }
-        current = holder
+// A walk's tasks in the order it reached them, Walk24: count0 capacity8
+// data16, a control per word.
+wait_cycle_walk_new: fn() -> I64 {
+    walk: jet_rt_alloc(I64{24}, I64{8})
+    sync_store(walk, I64{0})
+    sync_store(wrapping(walk + I64{8}), I64{8})
+    sync_store(wrapping(walk + I64{16}), jet_rt_alloc(I64{64}, I64{8}))
+    walk
+}
+
+wait_cycle_walk_drop: fn(walk: I64) {
+    jet_rt_free(sync_load(wrapping(walk + I64{16})), sync_load(wrapping(walk + I64{8})) * I64{8}, I64{8})
+    jet_rt_free(walk, I64{24}, I64{8})
+}
+
+wait_cycle_walk_at: fn(walk: I64, at: I64) -> I64 {
+    sync_load(wrapping(sync_load(wrapping(walk + I64{16})) + at * I64{8}))
+}
+
+// Adds `control` to `walk` unless the walk has it; false once the walk
+// holds WAIT_CYCLE_STEPS tasks.
+wait_cycle_walk_add: fn(walk: I64, control: I64) -> Bool {
+    count: sync_load(walk)
+    at := I64{0}
+    loop at < count {
+        if (wait_cycle_walk_at(walk, at) == control) { return true }
+        at += I64{1}
     }
-    I64{0}
+    if (count >= WAIT_CYCLE_STEPS) { return false }
+    capacity: sync_load(wrapping(walk + I64{8}))
+    data: sync_load(wrapping(walk + I64{16}))
+    if (count == capacity) {
+        grown: jet_rt_alloc(capacity * I64{16}, I64{8})
+        at = I64{0}
+        loop at < count {
+            sync_store(wrapping(grown + at * I64{8}), sync_load(wrapping(data + at * I64{8})))
+            at += I64{1}
+        }
+        jet_rt_free(data, capacity * I64{8}, I64{8})
+        sync_store(wrapping(walk + I64{8}), capacity * I64{2})
+        sync_store(wrapping(walk + I64{16}), grown)
+    }
+    sync_store(wrapping(sync_load(wrapping(walk + I64{16})) + count * I64{8}), control)
+    sync_store(walk, count + I64{1})
+    true
+}
+
+// Adds the holders of `member`'s wait to `walk`. False when `member` is in
+// no armed wait, is already stopping with a cycle, or waits on no holder
+// the walk can follow: a join or a lock waits on another task, a receive
+// may wait on the Sender its own task holds. Under the wait lock.
+wait_cycle_follow: fn(walk: I64, member: I64) -> Bool {
+    if (sync_load(wrapping(member + I64{176})) == I64{0} || sync_load(wrapping(member + I64{184})) != I64{0}) {
+        return false
+    }
+    if (sync_load(wrapping(member + I64{160})) == WAIT_CYCLE_RECEIVE) {
+        return channel_senders(sync_load(wrapping(member + I64{168})), walk, I64{0}) > I64{0}
+    }
+    holder: wait_cycle_holder(member)
+    holder != I64{0} && holder != member && wait_cycle_walk_add(walk, holder)
+}
+
+// The cycle `control`'s armed wait closes, as the walk of its tasks, or 0
+// when a holder the walk reaches can still move on: it is in no armed wait,
+// or the walk cannot follow its wait. Under the wait lock.
+wait_cycle_find: fn(control: I64) -> I64 {
+    walk: wait_cycle_walk_new()
+    _ := wait_cycle_walk_add(walk, control)
+    at := I64{0}
+    loop {
+        if (at >= sync_load(walk)) { break }
+        if !wait_cycle_follow(walk, wait_cycle_walk_at(walk, at)) {
+            wait_cycle_walk_drop(walk)
+            return I64{0}
+        }
+        at += I64{1}
+    }
+    walk
 }
 
 // Record: refs0 count8 remaining16, then per task 24B: control0 line8
@@ -143,23 +220,22 @@ wait_cycle_record_bytes: fn(length: I64) -> I64 { I64{24} + length * I64{24} }
 
 wait_cycle_entry: fn(record: I64, at: I64) -> I64 { wrapping(record + I64{24} + at * I64{24}) }
 
-// Delivers the cycle of `length` tasks from `control`: its record to each
-// task, then each task's wake. Under the wait lock.
-wait_cycle_deliver: fn(control: I64, length: I64) {
+// Delivers the cycle of the tasks of `walk`: its record to each task, then
+// each task's wake. Under the wait lock.
+wait_cycle_deliver: fn(walk: I64) {
+    length: sync_load(walk)
     bytes: wait_cycle_record_bytes(length)
     record: jet_rt_alloc(bytes, I64{8})
     thread_zero(record, bytes)
     sync_store(record, length)
     sync_store(wrapping(record + I64{8}), length)
     sync_store(wrapping(record + I64{16}), length)
-    current := control
     at := I64{0}
     loop at < length {
-        holder: wait_cycle_holder(current)
+        member: wait_cycle_walk_at(walk, at)
         entry: wait_cycle_entry(record, at)
-        sync_store(entry, current)
-        sync_store(wrapping(entry + I64{8}), wait_cycle_line(current, holder))
-        current = holder
+        sync_store(entry, member)
+        sync_store(wrapping(entry + I64{8}), wait_cycle_line(member))
         at += I64{1}
     }
     at = I64{0}
@@ -171,9 +247,10 @@ wait_cycle_deliver: fn(control: I64, length: I64) {
     }
 }
 
-// Wakes an armed wait: a join's park, a lock's condition.
+// Wakes an armed wait: a join's or a receive's park, a lock's condition.
 wait_cycle_wake: fn(member: I64) {
-    if (sync_load(wrapping(member + I64{160})) == WAIT_CYCLE_JOIN) {
+    kind: sync_load(wrapping(member + I64{160}))
+    if (kind == WAIT_CYCLE_JOIN || kind == WAIT_CYCLE_RECEIVE) {
         sync_park_wake(sync_load(wrapping(member + I64{176})))
         return
     }
@@ -184,19 +261,32 @@ wait_cycle_wake: fn(member: I64) {
     sync_mutex_unlock(mutex)
 }
 
-wait_cycle_push: fn(text: I64, part: I64) { rt_text_append(text, rt_text_data(part), rt_text_len(part)) }
+wait_cycle_push: fn(text: I64, part: I64) {
+    rt_text_append(text, rt_text_data(part), rt_text_len(part))
+}
 
-// One task's line: `task 2 (reader)  waits to join task 3`.
-wait_cycle_line: fn(member: I64, holder: I64) -> I64 {
+// One task's line: `task 2 (reader)  waits to join task 3`, or for a
+// receive `task 2  waits to receive from a channel only task 3 and task 4
+// send on`. Under the wait lock.
+wait_cycle_line: fn(member: I64) -> I64 {
     text: jet_rt_string_builder_new()
     wait_cycle_name(text, member, true)
     kind: sync_load(wrapping(member + I64{160}))
-    wait_cycle_push(text, if {
-        (kind == WAIT_CYCLE_JOIN) -> rt_static_text("  waits to join ")
-        (kind == WAIT_CYCLE_EDIT) -> rt_static_text("  waits to edit a Shared value ")
-        else -> rt_static_text("  waits to read a Shared value ")
-    })
-    wait_cycle_name(text, holder, false)
+    if (kind == WAIT_CYCLE_RECEIVE) {
+        wait_cycle_push(text, rt_static_text("  waits to receive from a channel only "))
+        senders: channel_senders(sync_load(wrapping(member + I64{168})), I64{0}, text)
+        wait_cycle_push(text, if (senders == I64{1}) -> rt_static_text(" sends on") else -> rt_static_text(" send on"))
+        return text
+    }
+    wait_cycle_push(
+        text,
+        if {
+            (kind == WAIT_CYCLE_JOIN) -> rt_static_text("  waits to join ")
+            (kind == WAIT_CYCLE_EDIT) -> rt_static_text("  waits to edit a Shared value ")
+            else -> rt_static_text("  waits to read a Shared value ")
+        },
+    )
+    wait_cycle_name(text, wait_cycle_holder(member), false)
     if (kind != WAIT_CYCLE_JOIN) { wait_cycle_push(text, rt_static_text(" holds")) }
     text
 }
@@ -212,12 +302,14 @@ wait_cycle_name: fn(text: I64, control: I64, labeled: Bool) {
             return
         }
         wait_cycle_push(text, rt_static_text("task 1"))
-        if labeled { wait_cycle_push(text, rt_static_text(" (main)")) }
+        if labeled -> wait_cycle_push(text, rt_static_text(" (main)"))
         return
     }
     wait_cycle_push(text, rt_static_text("task "))
     rt_text_push_number(text, id)
-    if (!labeled || observe_root == I64{0}) { return }
+    if (!labeled || observe_root == I64{0}) {
+        return
+    }
     sync_mutex_lock(observe_root)
     node: observe_task_find(id)
     label: if (node == I64{0}) -> I64{0} else -> sync_load(wrapping(node + I64{32}))
@@ -283,9 +375,7 @@ wait_cycle_stop: fn(control: I64) {
         at += I64{1}
     }
     remaining: wrapping(record + I64{16})
-    if (sync_add(remaining, I64{-1}) == I64{1}) {
-        sync_wake(remaining, I64{2147483647})
-    } else {
+    if (sync_add(remaining, I64{-1}) == I64{1}) { sync_wake(remaining, I64{2147483647}) } else {
         left := sync_load(remaining)
         loop left != (I64{0}) {
             _ := sync_wait(remaining, left, I64{-1})
@@ -297,7 +387,7 @@ wait_cycle_stop: fn(control: I64) {
     // reason reads as a panic (Task.jet task_panic_message), so a task's
     // stop says so and its joiner gets every line of the cycle. The root's
     // stop header already says `panic: `.
-    if !scheduler_control_is_root(control) { wait_cycle_push(message, rt_static_text("panic: ")) }
+    if !scheduler_control_is_root(control) -> wait_cycle_push(message, rt_static_text("panic: "))
     wait_cycle_push(message, rt_static_text("deadlock: tasks wait on each other"))
     at = I64{0}
     loop at < length {
@@ -321,7 +411,9 @@ wait_cycle_stop: fn(control: I64) {
 }
 
 wait_cycle_release: fn(record: I64) {
-    if (sync_add(record, I64{-1}) != I64{1}) { return }
+    if (sync_add(record, I64{-1}) != I64{1}) {
+        return
+    }
     length: sync_load(wrapping(record + I64{8}))
     at := I64{0}
     loop at < length {
