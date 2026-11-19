@@ -873,6 +873,10 @@ JetDriverLoadResult: struct {
     source_units: [JetDriverSourceUnit],
     entry_source_identity: String,
     entry_module_identity: ModuleID,
+    // The `meta.rewrite_body` module that replaced the entry file's `run:
+    // fn`, which then holds the entry (jet_driver_entry_run_module); None when
+    // the entry module keeps its own.
+    entry_run_module: ModuleID?{None},
     // Every module identity the load met (loaded modules and import
     // targets), interned as met: each `module_identity` here and downstream
     // is an id into this table.

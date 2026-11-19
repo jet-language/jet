@@ -818,7 +818,9 @@ jet_driver_function_key_count: fn(functions: [FnBody], key: String) -> Int Never
 // module's `run: fn`, when it takes no parameter, else the generated
 // `__jet_cli_run` of a typed `run: fn(args: T)`.
 jet_driver_default_run_key: fn(load: JetDriverLoadResult, functions: [FnBody]) -> String? Never! {
-    key: symbol_key_text(SymbolKind.Function, module_text(load.module_table, load.entry_module_identity), "", "run")
+    // A `meta.rewrite_body` module that replaced the entry file's `run`
+    // holds it (jet_driver_entry_run_module).
+    key: symbol_key_text(SymbolKind.Function, module_text(load.module_table, load.entry_run_module ?? load.entry_module_identity), "", "run")
     typed_key: symbol_key_text(SymbolKind.Function, module_text(load.module_table, load.entry_module_identity), "", "__jet_cli_run")
     typed := false
     loop function in functions {
@@ -5855,6 +5857,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         capture_derives: request.core_seal,
     )
     if eval_probes != None -> registration_graph.eval_probes = eval_probes
+    registration_graph.entry_run_module = load.entry_run_module
     output_intent: if request.mode == JetDriverCompileMode.Test -> SemaOutputIntent.Test else -> request.output_intent
     output_diagnostics: sema_output_resolve(registration_graph, output_intent, request.output_address, jet_driver_entry_selection(load) != None)
     loop diagnostic in output_diagnostics -> registration_graph.diagnostics.push(diagnostic)
