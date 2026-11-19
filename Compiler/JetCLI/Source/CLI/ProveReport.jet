@@ -454,8 +454,10 @@ jet_cli_prove_collect_tests: fn(member: JetCLIProveMember, items: [Item], sites:
 }
 
 // `resolve_target`'s digests. The hashed inputs are the members, every file
-// a front-end compile authorized, and the project authority files.
-jet_cli_prove_identity: fn(target: JetCLIProveTarget, members: [JetCLIProveMember], groups: [JetCLIProveGroup]) -[FS, Env, Time.Wait]> JetCLIProveIdentity JetCLIProveRefusal! {
+// a front-end compile authorized, and the project authority files; their
+// paths are the working directory's, or, `rooted`, the authority root's
+// (jet_cli_receipt_target_identity).
+jet_cli_prove_identity: fn(target: JetCLIProveTarget, members: [JetCLIProveMember], groups: [JetCLIProveGroup], rooted: Bool{false}) -[FS, Env, Time.Wait]> JetCLIProveIdentity JetCLIProveRefusal! {
     inputs := [JetDriverRunReceiptInput]{}
     loop member in members {
         inputs.push(JetDriverRunReceiptInput{path: member.absolute, digest: member.sha256})
@@ -467,7 +469,7 @@ jet_cli_prove_identity: fn(target: JetCLIProveTarget, members: [JetCLIProveMembe
         }
     }
     cache := WorkspaceDeclarationCache.new()
-    canonical: jet_cli_receipt_target_identity(cache, target.root, inputs) ?? return Err(jet_cli_prove_target_refusal(err.message))
+    canonical: jet_cli_receipt_target_identity(cache, target.root, inputs, rooted: rooted) ?? return Err(jet_cli_prove_target_refusal(err.message))
     sources := [JetCLIProveField]{}
     locks := [JetCLIProveField]{}
     builds := [JetCLIProveField]{}

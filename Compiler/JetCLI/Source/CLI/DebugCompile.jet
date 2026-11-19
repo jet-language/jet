@@ -66,6 +66,10 @@ JetCLIDebugEvaluator: struct {
         compile: fn(self, path: String, line: Int, column: Int, text: String, binders: [NativeEvalBinder]?, owned: Bool) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval NativeEvalRefused! {
             jet_cli_debug_eval_compile(self.entry, self.argv, self.color, self.held, path, line, column, text, binders, owned)
         }
+
+        unchanged: fn(self) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Bool Never! {
+            jet_cli_debug_eval_unchanged(self.held, self.entry)
+        }
     }
 }
 
@@ -786,7 +790,9 @@ JetCLIDebugEvalHeldStamp: struct {
 // check's first open read, which `image` holds once that open is done, each
 // file's sha256_hex by its path; `same`: whether the held check read those
 // sources, so its calls of the image's functions run the code its source
-// says (jet_cli_debug_eval_held_in).
+// says (jet_cli_debug_eval_held_in). `kept`: the sources as they read when
+// the session last asked whether its kept code is current
+// (jet_cli_debug_eval_unchanged).
 JetCLIDebugEvalHeldSlot: struct {
     held: JetCLIDebugEvalHeld?{None},
     opening: Bool{false},
@@ -796,6 +802,7 @@ JetCLIDebugEvalHeldSlot: struct {
     built: Bool{false},
     image: [String:String]?{None},
     same: Bool{false},
+    kept: JetCLIDebugEvalHeldStamp?{None},
 }
 
 // A session's held check `slot` and the Condition its open wakes `opened`
@@ -1025,11 +1032,7 @@ jet_cli_debug_eval_held_open: fn(entry: String, color: Bool, options: BuildOptio
     if compiled.move() == {
         .Refused(_) -> return JetCLIDebugEvalHeldOpen{held: None, missed: None}
         .Compiled(compile, snapshot) -> {
-            sources := [String:String]{}
-            loop root in snapshot.roots {
-                loop file in root.files -> sources["{file.path}"] = file.source
-            }
-            stamp: JetCLIDebugEvalHeldStamp{sources: sources.move()}
+            stamp: jet_cli_debug_eval_stamp(snapshot)
             result := compile.move()
             if jet_driver_check_failures(result.diagnostics).len() > 0 || result.internal_problem != None || !result.complete {
                 return JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}
@@ -1069,6 +1072,33 @@ jet_cli_debug_eval_held_changed: fn(stamp: JetCLIDebugEvalHeldStamp) -[FS]> Bool
     loop (file, source) in stamp.sources {
         now: debug_eval_files.read(file) ?? return true
         if now != source -> return true
+    }
+    false
+}
+
+// The sources of the snapshot `snapshot`: each file's text by its path.
+jet_cli_debug_eval_stamp: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> JetCLIDebugEvalHeldStamp Never! {
+    sources := [String:String]{}
+    loop root in snapshot.roots {
+        loop file in root.files -> sources["{file.path}"] = file.source
+    }
+    JetCLIDebugEvalHeldStamp{sources: sources.move()}
+}
+
+// Whether the program of `entry` reads as it did when the session `held`
+// last asked (NativeEvaluator.unchanged): its sources then, `kept`, each
+// read the same now. The first ask, and one that finds them changed, keeps
+// the sources as they read now; none are kept while they can't be read,
+// and every ask is then a change.
+jet_cli_debug_eval_unchanged: fn(held: JetCLIDebugEvalHeldShared, entry: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Bool Never! {
+    permit := held.slot.guard_edit()
+    if permit.value.kept == .Val(kept) {
+        if !jet_cli_debug_eval_held_changed(kept) -> return true
+    }
+    permit.value.kept = None
+    if jet_cli_prepare_snapshot(entry, entry, [JetCLIOverlay]{}, false) == {
+        .Refused(_) -> {}
+        .Held(snapshot) -> permit.value.kept = Val(jet_cli_debug_eval_stamp(snapshot))
     }
     false
 }
