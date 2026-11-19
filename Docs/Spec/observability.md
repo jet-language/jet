@@ -220,7 +220,20 @@ stack, the most bytes first, with a null `function` and `line` for the
 blocks no line of it allocated. `jet perf view` prints each snapshot after
 the per-line table, `live at filled  101 blocks  57344 bytes` and then
 each site, `  leak.jet:14 run  100 blocks  56000 bytes`, or
-`  elsewhere  1 blocks  1344 bytes`.
+`  elsewhere  1 blocks  1344 bytes`; a name the run marked more than once
+is shown with its count, `after-cleanup#3`.
+
+`jet perf compare base.jettrace head.jettrace` sets the last heap snapshot
+of each trace against each other when both kept one, and
+`--heap=<base>..<head>` names the two: the base trace's snapshot `<base>`
+and the head trace's `<head>`, both of one trace when it names only one
+(`jet perf compare run.jettrace --heap=start..filled`). A name alone picks
+the last snapshot of that name, and `name#k` its k-th; a name the trace
+never kept is refused with the names it kept. Compare prints `Heap start
+-> filled: blocks 1->101 · bytes 1344->57344` and then each place whose
+live blocks or bytes changed, signed, the most bytes gained first,
+`  leak.jet:14 run  +100 blocks  +56000 bytes`; its receipt deltas leave
+the `heap` section out.
 Tests/Cases/PerfRun/alloc_lens_heap_snapshots.case is the worked example.
 
 `jet perf run` records every wait of a task too, and what ended it. When a

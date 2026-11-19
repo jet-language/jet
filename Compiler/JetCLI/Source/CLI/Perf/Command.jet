@@ -293,13 +293,18 @@ jet_cli_perf_html_escape: fn(text: String) -> String Never! {
     text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
 }
 
-// `compare`: two verified traces of one toolchain and machine.
+// `compare`: two verified traces of one toolchain and machine. `--heap
+// <base>..<head>` sets the base trace's heap snapshot named `<base>` against
+// the head trace's named `<head>` (jet_cli_perf_heap_pick), one trace's two
+// when it names one trace; without it two traces that both kept snapshots
+// set their last ones, the `exit` ones of a run.
 jet_cli_perf_compare: fn(args: [String], color: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
     extension: artifact_extension()
-    usage: "run `jet perf compare base{extension} head{extension} [--baseline <name>] [--override-identity]`"
+    usage: "run `jet perf compare base{extension} head{extension} [--baseline <name>] [--override-identity] [--heap <base>..<head>]`, or `jet perf compare run{extension} --heap <base>..<head>`"
     paths := [String]{}
     override_identity := false
     baseline := String?{None}
+    heap := String?{None}
     skip := false
     loop (index, arg) in args {
         if skip {
@@ -314,13 +319,19 @@ jet_cli_perf_compare: fn(args: [String], color: Bool) -[FS, Env]> JetDriverVerbO
             baseline = Val(arg.slice(11..<arg.len()))
             next
         }
-        if arg == "--baseline" {
+        if arg == "--baseline" || arg == "--heap" {
             if index + 1 >= args.len() {
-                return jet_cli_perf_error("`--baseline` needs a pinned baseline name", JET_CLI_PERF_FIX, color)
+                needs: if arg == "--heap" -> "two heap snapshots, `<base>..<head>`" else -> "a pinned baseline name"
+                return jet_cli_perf_error("`{arg}` needs {needs}", JET_CLI_PERF_FIX, color)
             }
-            // copy: the argument list keeps its word; the baseline name owns its own.
-            baseline = Val(args[index + 1].copy())
+            // copy: the argument list keeps its word; the flag's value owns its own.
+            value: args[index + 1].copy()
+            if arg == "--heap" -> heap = Val(value) else -> baseline = Val(value)
             skip = true
+            next
+        }
+        if arg.starts_with("--heap=") {
+            heap = Val(arg.slice(7..<arg.len()))
             next
         }
         if arg.starts_with("-") {
@@ -329,11 +340,18 @@ jet_cli_perf_compare: fn(args: [String], color: Bool) -[FS, Env]> JetDriverVerbO
         // copy: the argument list keeps its word; the path list owns its own.
         paths.push(arg.copy())
     }
-    if paths.len() != 2 {
-        return jet_cli_perf_error("`jet perf compare` needs two {extension} paths", usage, color)
+    if paths.len() != 2 && (paths.len() != 1 || heap == None) {
+        return jet_cli_perf_error("`jet perf compare` needs two {extension} paths, or one and `--heap`", usage, color)
+    }
+    marks := [String]{}
+    if heap == .Val(range) {
+        marks = range.split("..").to_list()
+        if marks.len() != 2 || marks[0] == "" || marks[1] == "" {
+            return jet_cli_perf_error("`--heap` needs two heap snapshots, `<base>..<head>`, not `{range}`", usage, color)
+        }
     }
     base: jet_cli_perf_read(paths[0]) ?? return jet_cli_perf_error("base trace: {err.message}", JET_CLI_PERF_FIX, color)
-    head: jet_cli_perf_read(paths[1]) ?? return jet_cli_perf_error("head trace: {err.message}", JET_CLI_PERF_FIX, color)
+    head: jet_cli_perf_read(paths[paths.len() - 1]) ?? return jet_cli_perf_error("head trace: {err.message}", JET_CLI_PERF_FIX, color)
     same_tool: jet_cli_perf_same(jet_cli_perf_identity(base, "toolchain", "digest"), jet_cli_perf_identity(head, "toolchain", "digest"))
     same_hardware: jet_cli_perf_same(jet_cli_perf_identity(base, "hardware", "fingerprint"), jet_cli_perf_identity(head, "hardware", "fingerprint"))
     mismatch: !same_tool || !same_hardware
@@ -360,6 +378,15 @@ jet_cli_perf_compare: fn(args: [String], color: Bool) -[FS, Env]> JetDriverVerbO
         deltas.push("alloc {before}->{after} B")
     }
     receipt_deltas: jet_cli_perf_receipt_deltas(base, head) ?? return jet_cli_perf_error("receipt sections: {err.message}", JET_CLI_PERF_FIX, color)
+    base_heaps: jet_cli_perf_heap_snapshots(base)
+    head_heaps: jet_cli_perf_heap_snapshots(head)
+    before := base_heaps.len() - 1
+    after := head_heaps.len() - 1
+    if marks.len() == 2 {
+        before = jet_cli_perf_heap_pick(base_heaps, marks[0]) ?? return jet_cli_perf_error("the base trace kept no heap snapshot `{marks[0]}`{jet_cli_perf_heap_kept(base_heaps)}", usage, color)
+        after = jet_cli_perf_heap_pick(head_heaps, marks[1]) ?? return jet_cli_perf_error("the head trace kept no heap snapshot `{marks[1]}`{jet_cli_perf_heap_kept(head_heaps)}", usage, color)
+    }
+    heap_lines: if before >= 0 && after >= 0 -> jet_cli_perf_heap_delta(base_heaps[before], head_heaps[after]) else -> [String]{}
     // #241 budgets: wall AbsoluteFrom/RelativeTo against the pinned base trace.
     budget := "budgets: no comparable wall samples for #241 RelativeTo evaluation"
     if base_wall == .Val(base_ns) && head_wall == .Val(head_ns) && base_ns > 0 {
@@ -372,6 +399,7 @@ jet_cli_perf_compare: fn(args: [String], color: Bool) -[FS, Env]> JetDriverVerbO
     out := "Compare OK · schema {TRACE_SCHEMA} v{TRACE_VERSION} · base {trace_id(base) ?? "unknown"} · head {trace_id(head) ?? "unknown"}{override_note}{baseline_note}\n"
     if deltas.len() > 0 -> out = "{out}Deltas: {deltas.join(" · ")}\n"
     if receipt_deltas.len() > 0 -> out = "{out}Receipt deltas: {receipt_deltas.join(" · ")}\n"
+    loop line in heap_lines -> out = "{out}{line}\n"
     JetDriverVerbOutput{stdout: "{out}{budget}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
@@ -410,12 +438,14 @@ jet_cli_perf_receipt_deltas: fn(base: CanonicalJSON, head: CanonicalJSON) -> [St
     Ok(loop diff in diffs -> jet_cli_receipt_field_diff_render(diff))
 }
 
-// `receipt_sections_for_compare`.
+// `receipt_sections_for_compare`, but the heap snapshots, whose change
+// jet_cli_perf_heap_delta shows.
 jet_cli_perf_receipt_sections: fn(trace: CanonicalJSON) -> [JetDriverRunReceiptSection] JetCLIReadError! {
     items: jet_cli_perf_rows(trace, "receipt_sections") ?? return Err(jet_cli_read_error("trace content.receipt_sections is missing or not an array"))
     sections := [JetDriverRunReceiptSection]{}
     loop index in 0..<items.len() {
         section: trace_receipt_section_from_json(items[index]) ?? return Err(jet_cli_read_error("content.receipt_sections[{index}]: {err.message}"))
+        if section.name == "heap" -> next
         recorded: jet_driver_run_receipt_section_new(section.name, section.type_name, canonical_json_bytes(section.value)) ?? return Err(jet_cli_read_error("content.receipt_sections[{index}]: {err.message}"))
         sections.push(recorded)
     }
@@ -438,34 +468,127 @@ jet_cli_perf_receipt_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     lines
 }
 
-// The heap snapshots the alloc lens kept (Session.jet
-// jet_cli_perf_session_heaps), each `live at <name>` with its live blocks
-// and their bytes, then its blocks by the line that allocated them, the
-// most bytes first: `<path>:<line> <function>`, or `elsewhere` for the
-// blocks no line of the run's source allocated.
+// The heap snapshots the alloc lens kept (jet_cli_perf_heap_snapshots),
+// each `live at <name>` with its live blocks and their bytes, then its
+// blocks by the place that allocated them, the most bytes first.
 jet_cli_perf_heap_lines: fn(trace: CanonicalJSON) -> [String] Never! {
-    items: jet_cli_perf_rows(trace, "receipt_sections") ?? return [String]{}
     lines := [String]{}
+    loop snapshot in jet_cli_perf_heap_snapshots(trace) {
+        lines.push("live at {snapshot.name}  {snapshot.blocks} blocks  {snapshot.bytes} bytes")
+        loop place in snapshot.places -> lines.push("  {place.place}  {place.blocks} blocks  {place.bytes} bytes")
+    }
+    lines
+}
+
+// A heap snapshot of a trace's `heap` receipt section (Session.jet
+// jet_cli_perf_session_heaps): its name, `#<k>` added to the k-th of a name
+// the trace kept more than once, its live blocks and their bytes, and the
+// same by the place that allocated them, the most bytes first.
+JetCLIPerfHeapSnapshot: struct {
+    name: String,
+    blocks: Int,
+    bytes: Int,
+    places: [JetCLIPerfHeapPlace],
+}
+
+// The live blocks of a heap snapshot one place allocated, and their bytes:
+// `<path>:<line> <function>`, or `elsewhere` for the blocks no line of the
+// run's source allocated; in a jet_cli_perf_heap_delta, their change.
+JetCLIPerfHeapPlace: struct {
+    place: String,
+    blocks: Int,
+    bytes: Int,
+}
+
+// The heap snapshots of the trace, in the order the run took them.
+jet_cli_perf_heap_snapshots: fn(trace: CanonicalJSON) -> [JetCLIPerfHeapSnapshot] Never! {
+    items: jet_cli_perf_rows(trace, "receipt_sections") ?? return [JetCLIPerfHeapSnapshot]{}
+    snapshots := [JetCLIPerfHeapSnapshot]{}
     loop item in items {
         section: trace_receipt_section_from_json(item) ?? next
         if section.name != "heap" -> next
         path: jet_cli_perf_member_text(section.value, "path") ?? ""
         fields: jettrace_object_view(section.value, "receipt heap") ?? next
         at: jet_cli_perf_key(fields, "snapshots") ?? next
-        snapshots: jettrace_array(fields[at].value, "receipt heap.snapshots") ?? next
-        loop snapshot in snapshots {
-            name: jet_cli_perf_member_text(snapshot, "name") ?? "heap"
-            lines.push("live at {name}  {jet_cli_perf_member_integer(snapshot, "blocks") ?? "0"} blocks  {jet_cli_perf_member_integer(snapshot, "bytes") ?? "0"} bytes")
-            members: jettrace_object_view(snapshot, "receipt heap snapshot") ?? next
+        values: jettrace_array(fields[at].value, "receipt heap.snapshots") ?? next
+        names: loop value in values -> jet_cli_perf_member_text(value, "name") ?? "heap"
+        loop (index, value) in values {
+            members: jettrace_object_view(value, "receipt heap snapshot") ?? next
             place: jet_cli_perf_key(members, "sites") ?? next
             sites: jettrace_array(members[place].value, "receipt heap snapshot.sites") ?? next
+            places := [JetCLIPerfHeapPlace]{}
             loop site in sites {
                 where: if jet_cli_perf_member_integer(site, "line") == .Val(line) -> "{path}:{line} {jet_cli_perf_member_text(site, "function") ?? ""}" else -> "elsewhere"
-                lines.push("  {where}  {jet_cli_perf_member_integer(site, "blocks") ?? "0"} blocks  {jet_cli_perf_member_integer(site, "bytes") ?? "0"} bytes")
+                places.push(JetCLIPerfHeapPlace{place: where, blocks: jet_cli_perf_member_number(site, "blocks") ?? 0, bytes: jet_cli_perf_member_number(site, "bytes") ?? 0})
             }
+            kth := 0
+            total := 0
+            loop (other, name) in names {
+                if name == names[index] {
+                    total += 1
+                    if other <= index -> kth += 1
+                }
+            }
+            label: if total > 1 -> "{names[index]}#{kth}" else -> "{names[index]}"
+            snapshots.push(JetCLIPerfHeapSnapshot{name: label, blocks: jet_cli_perf_member_number(value, "blocks") ?? 0, bytes: jet_cli_perf_member_number(value, "bytes") ?? 0, places: places})
         }
     }
+    snapshots
+}
+
+// The index of the snapshot `wanted` names: its name, `<name>#<k>` for the
+// k-th of a name kept more than once, or that name alone for its last.
+jet_cli_perf_heap_pick: fn(snapshots: [JetCLIPerfHeapSnapshot], wanted: String) -> Int? Never! {
+    found := Int?{None}
+    loop (index, snapshot) in snapshots {
+        if snapshot.name == wanted -> return Val(index)
+        if snapshot.name.starts_with("{wanted}#") && (Int.parse(snapshot.name.slice(wanted.len() + 1..<snapshot.name.len())) ?? -1) > 0 {
+            found = Val(index)
+        }
+    }
+    found
+}
+
+// `; it kept <names>`, the snapshots a `--heap` name can pick.
+jet_cli_perf_heap_kept: fn(snapshots: [JetCLIPerfHeapSnapshot]) -> String Never! {
+    if snapshots.len() == 0 -> return "; it kept none, as only `jet perf run --lens=alloc` keeps them"
+    names: loop snapshot in snapshots -> "{snapshot.name}"
+    "; it kept {names.join(", ")}"
+}
+
+// `Heap <base> -> <head>` with the live blocks and bytes of each snapshot,
+// then each place whose live blocks or bytes changed, signed, the most
+// bytes gained first: `  <place>  +<n> blocks  +<n> bytes`.
+jet_cli_perf_heap_delta: fn(base: JetCLIPerfHeapSnapshot, head: JetCLIPerfHeapSnapshot) -> [String] Never! {
+    deltas := [JetCLIPerfHeapPlace]{}
+    loop after in head.places {
+        blocks := after.blocks
+        bytes := after.bytes
+        loop before in base.places {
+            if before.place == after.place {
+                blocks -= before.blocks
+                bytes -= before.bytes
+            }
+        }
+        if blocks != 0 || bytes != 0 -> deltas.push(JetCLIPerfHeapPlace{place: "{after.place}", blocks: blocks, bytes: bytes})
+    }
+    loop before in base.places {
+        kept := false
+        loop after in head.places {
+            if after.place == before.place -> kept = true
+        }
+        if !kept -> deltas.push(JetCLIPerfHeapPlace{place: "{before.place}", blocks: 0 - before.blocks, bytes: 0 - before.bytes})
+    }
+    deltas.sort_by(fn(left: JetCLIPerfHeapPlace, right: JetCLIPerfHeapPlace) { (right.bytes <=> left.bytes).then(right.blocks <=> left.blocks).then(left.place <=> right.place) })
+    lines := [String]{"Heap {base.name} -> {head.name}: blocks {base.blocks}->{head.blocks} · bytes {base.bytes}->{head.bytes}"}
+    loop place in deltas -> lines.push("  {place.place}  {jet_cli_perf_signed(place.blocks)} blocks  {jet_cli_perf_signed(place.bytes)} bytes")
     lines
+}
+
+// `value` with its sign: `+3`, `0`, `-3`.
+jet_cli_perf_signed: fn(value: Int) -> String Never! {
+    if value > 0 -> return "+{value}"
+    "{value}"
 }
 
 // `counter <name> captured period=<events>` or `counter <name> unavailable

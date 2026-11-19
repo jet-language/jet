@@ -4,7 +4,10 @@
 # trace's `heap` receipt section, which sorts before `perf`. The rows
 # allocated at line 14 after the `start` mark are live at `filled` and at
 # `exit`, and none at `start`. The view lists each snapshot's live blocks by
-# line.
+# line. `jet perf compare --heap` sets two snapshots of the trace against
+# each other: the rows grew at line 14 from `start` to `filled`, and
+# nothing changed there from `filled` to `exit`; a name the trace never
+# kept is refused with the names it kept.
 requires: os-name:linux
 requires: arch:x86_64
 fixture: HeapSnapshots.fixture
@@ -28,3 +31,15 @@ step: jet perf view {work}/leak.jettrace
 exit: 0
 stdout: ~ "live at filled  " # the snapshot's heading
 stdout: ~ "leak.jet:14 " # its rows by the line that allocated them
+step: jet perf compare {work}/leak.jettrace --heap start..filled
+exit: 0
+stdout: ~ "Heap start -> filled: blocks "
+stdout: ~ "leak.jet:14 " # the line the rows grew at
+stdout: ~ "  +100 blocks  +" # by every row
+step: jet perf compare {work}/leak.jettrace --heap=filled..exit
+exit: 0
+stdout: ~ "Heap filled -> exit: blocks "
+stdout: !~ "leak.jet:14 " # the rows neither grew nor shrank
+step: jet perf compare {work}/leak.jettrace --heap start..done
+exit: 2
+stderr: ~ "the head trace kept no heap snapshot `done`; it kept start, filled, exit"
