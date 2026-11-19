@@ -29,6 +29,7 @@ use {
         jet_cli_perf_heap_types,
         jet_cli_perf_live_from,
         jet_cli_perf_log_spans_read,
+        jet_cli_perf_observed,
         jet_cli_perf_samples_count,
         jet_cli_perf_samples_profile,
         jet_cli_perf_source,
@@ -174,6 +175,18 @@ jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
     hardware: TraceHardware{cpu_arch: "x86_64", logical_cpus: U64{1}, os: "linux", target: "x86_64-unknown-linux-gnu"}
     bytes: jet_cli_perf_capture_bytes(capture, "run", [String]{"app.jet"}, toolchain, hardware) ?? panic(err.message)
     _: verify_jettrace(bytes) ?? panic(err.message)
+}
+
+#Test("perf observations of a run sit on its own clock, from its start") {
+    early: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(17))
+    late := jet_cli_perf_live_from(jet_cli_perf_test_snapshot(17))
+    late.runtime.elapsed_ns = U64{900}
+    observations: [JetCLIPerfObservation]{jet_cli_perf_observed(early), jet_cli_perf_observed(late)}
+    capture: jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", Val(U64{5000})) ?? panic(err.message)
+    assert_eq(capture.spans[0].kind, "task_observed")
+    assert_eq(capture.spans[0].start_ns, Val(U64{50}))
+    assert_eq(capture.spans[0].end_ns, Val(U64{900}))
+    assert_eq(capture.native[0].observed_at_ns, U64{900})
 }
 
 #Test("perf capture without observations keeps the source and records no samples") {

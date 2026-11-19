@@ -4,7 +4,9 @@
 # view` totals each zone name, the frames' intervals and each plot's last
 # value. Each zone holds the CPU-time samples its task took inside it: the
 # view names how many and the lines they were on, and its timeline shows
-# them on the zone rows. Outside a perf run the program prints the same on
+# them on the zone rows. Every row, the run's task row too, is on the
+# program's clock from its process epoch, so the task row holds the log
+# span and the zones. Outside a perf run the program prints the same on
 # every tier.
 fixture: ZonesFramesPlotsShareTheTimeline.fixture
 env: NO_COLOR=1
@@ -29,6 +31,14 @@ file: zones.jettrace ~ "\"kind\":\"frame_mark\"" # frame marks are trace rows
 file: zones.jettrace ~ "\"kind\":\"plot\"" # plotted values are trace rows
 file: zones.jettrace ~ "\"kind\":\"log_span\"" # the log span shares the timeline
 file: zones.jettrace ~ "\"name\":\"moved = 4" # a plot row names its value
+capture: run_start file zones.jettrace doc $.content.spans[?kind="task_observed"][0].start_ns
+capture: run_end file zones.jettrace doc $.content.spans[?kind="task_observed"][0].end_ns
+capture: session_start file zones.jettrace doc $.content.spans[?kind="log_span"][0].start_ns
+capture: first_zone file zones.jettrace doc $.content.spans[?kind="zone"][?symbol.name="physics"][0].start_ns
+capture: last_zone file zones.jettrace doc $.content.spans[?kind="zone"][?symbol.name="physics"][4].end_ns
+cap:session_start: f64 >= {cap:run_start} # the log span opens inside the run's task row
+cap:first_zone: f64 >= {cap:run_start} # so does the first zone
+cap:last_zone: f64 <= {cap:run_end} # and the last zone closes inside it
 step: jet perf view zones.jettrace
 exit: 0
 stdout: ~ "zone broadphase count=1500 " # every inner zone closed

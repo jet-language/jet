@@ -9,8 +9,10 @@
 // jet_foundation's codec (Devtools/LiveSnapshot.jet) validates them for readers.
 // Little-endian words, then sections:
 //   magic "JETLIVE2", sequence, pid, captured unix ms (0 when the clock
-//   fails), elapsed ns since the run started, boot-clock ns when the writer
-//   started, CPU ticks (times(2)) when the run started, AT_CLKTCK, exit,
+//   fails), elapsed ns since the run started (a process's first run starts
+//   at the process epoch, so this is the clock zones and log spans are
+//   timed on), boot-clock ns when the writer started, CPU ticks (times(2))
+//   when the run started, AT_CLKTCK, exit,
 //   arenas, arena allocations, arena bytes, workers, queued; the five
 //   identity texts.
 //   Sections, each a tag word and a record count: 1 tasks (id, parent,
@@ -519,7 +521,13 @@ observe_live_start: fn(identity: I64, directory: I64) -> I64 {
     }
     sync_mutex_unlock(observe_root)
     sync_mutex_lock(writer)
-    sync_store(wrapping(writer + I64{24}), sync_now_ns())
+    // A process's first run starts at the process epoch (HostTime.jet
+    // time_host_monotonic_i64), which this sets when nothing has read the
+    // clock yet: each publication's elapsed time is then the clock that
+    // zones, waits and log spans are timed on. A resident host's next run
+    // starts now.
+    if fresh -> _ := time_host_monotonic_i64()
+    sync_store(wrapping(writer + I64{24}), if fresh -> time_host_epoch_ns(time_host_root) else -> sync_now_ns())
     sync_store(wrapping(writer + I64{32}), cpu)
     sync_store(wrapping(writer + I64{40}), host_getauxval(I64{17}))
     sync_store(wrapping(writer + I64{8}), I64{0})
@@ -541,9 +549,9 @@ rt_observe_writer_address: fn() -> I64 {
     writer: argument
     slot: sync_park_new()
     loop {
+        sync_park(slot, I64{100000000})
         observe_publish(writer, I64{0})
         perf_flight_publish(sync_load(wrapping(writer + I64{96})))
-        sync_park(slot, I64{100000000})
     }
     I64{0}
 }
@@ -621,6 +629,10 @@ observe_env_key: fn(index: I64) -> I64 {
         }
         writer: observe_live_start(inputs, directory)
         jet_rt_string_drop(directory)
+        // The run's first publication precedes its entry, so an observer
+        // sees its root task from the run's start; the writer publishes each
+        // turn after.
+        if writer != (I64{0}) -> observe_publish(writer, I64{0})
         if writer != (I64{0}) && sync_cas(wrapping(writer + I64{112}), I64{0}, I64{1}) == (I64{0}) {
             handle: thread_spawn(rt_observe_writer_address(), writer)
             if handle < (I64{0}) -> scheduler_start_failed()
