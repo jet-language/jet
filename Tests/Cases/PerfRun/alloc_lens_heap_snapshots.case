@@ -1,0 +1,30 @@
+# `jet perf run --lens=alloc` builds the program with the checked heap and
+# keeps a heap snapshot at each core.perf.heap_mark and as it exits: the
+# blocks live then, by the line of leak.jet that allocated them, in the
+# trace's `heap` receipt section, which sorts before `perf`. The rows
+# allocated at line 14 after the `start` mark are live at `filled` and at
+# `exit`, and none at `start`. The view lists each snapshot's live blocks by
+# line.
+requires: os-name:linux
+requires: arch:x86_64
+fixture: HeapSnapshots.fixture
+env: NO_COLOR=1
+step: jet perf run --lens=alloc leak.jet --out {work}/leak.jettrace
+exit: 0
+stdout: = "rows=100\n"
+json: file leak.jettrace doc $.content.receipt_sections[0].name = "heap"
+json: file leak.jettrace doc $.content.receipt_sections[0].type_name = "JetPerfHeapSnapshots"
+json: file leak.jettrace doc $.content.receipt_sections[0].value.snapshots #= 3 # both marks and the exit
+json: file leak.jettrace doc $.content.receipt_sections[0].value.snapshots[0].name = "start"
+json: file leak.jettrace doc $.content.receipt_sections[0].value.snapshots[1].name = "filled"
+json: file leak.jettrace doc $.content.receipt_sections[0].value.snapshots[2].name = "exit"
+json: file leak.jettrace doc $.content.receipt_sections[0].value.snapshots[0].sites[?line=14] #= 0 # no row yet
+json: file leak.jettrace doc $.content.receipt_sections[0].value.snapshots[1].sites[?line=14][?blocks=100] #= 1 # every row, where it grew last
+json: file leak.jettrace doc $.content.receipt_sections[0].value.snapshots[2].sites[?line=14][?blocks=100] #= 1 # still live at exit
+json: file leak.jettrace doc $.content.receipt_sections[1].value.capture.sampling.lenses #= 1
+json: file leak.jettrace doc $.content.receipt_sections[1].value.capture.sampling.lenses[0] = "alloc"
+json: file leak.jettrace doc $.content.receipt_sections[1].value.build.options.checked_alloc = "true" # the lens's checked build
+step: jet perf view {work}/leak.jettrace
+exit: 0
+stdout: ~ "live at filled  " # the snapshot's heading
+stdout: ~ "leak.jet:14 " # its rows by the line that allocated them

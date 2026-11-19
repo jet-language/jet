@@ -3904,6 +3904,7 @@ run: fn() {
 `core.perf` maps a fidelity value to bounded work scaling. `fidelity()` reads
 the environment-selected value; `default_fidelity()` is the pure value `1.0`.
 `override_fidelity` and `reset_fidelity` modify the environment-scoped value.
+`heap_mark` names a heap snapshot for `jet perf run --lens=alloc`.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
@@ -3914,6 +3915,7 @@ the environment-selected value; `default_fidelity()` is the pure value `1.0`.
 | `perf.of(value)` | `Perf` | Construct a bounded fidelity value; NaN becomes `1`. |
 | `perf.is_full(value)` / `perf.is_low(value)` | `Bool` | Test full fidelity or fidelity below `0.25`. |
 | `perf.scale(value, work)` | `Int` | Scale nonnegative work by fidelity. |
+| `perf.heap_mark(name)` | `-[Env]> Never!` | Under `jet perf run --lens=alloc`, keep a heap snapshot named `name`: the live blocks by the line that allocated them (observability.md). Any other run keeps nothing. |
 | `Perf` | type | A bounded fidelity value consumed by scaling operations. |
 | `PerfError` | `#Error` enum | D-PERF-ERR1=A. `OutOfRange(Float)` holds the rejected value. |
 

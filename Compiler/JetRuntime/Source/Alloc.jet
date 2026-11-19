@@ -115,6 +115,17 @@ alloc_check_take_observer := I64{0}
 
 alloc_check_give_observer := I64{0}
 
+// The checked heap's live list under `jet perf run --lens=alloc`
+// (alloc_check_track_start): 1 once it tracks, its first block, and the
+// heap snapshots taken so far (alloc_check_track_hold). The quarantine
+// lock guards all but the switch, which is written once before any thread
+// but the starting one runs.
+alloc_check_tracking := I64{0}
+
+alloc_check_live_head := I64{0}
+
+alloc_check_snapshots := I64{0}
+
 // Layout.from_size_align(size.max(1), align): alignment must be a nonzero
 // power of two, and rounding the size to alignment must fit isize.MAX.
 alloc_layout_valid: fn(size: I64, align: I64) -> Bool Never! {
@@ -2723,7 +2734,9 @@ priv alloc_arena_give: fn(pointer: I64) {
 //   p-24    the reference count (Refcount.jet reads payload-24), 1 for align >= 8
 //   p-32    size, p-40 align
 //   p-120.. ten return addresses of the allocating chain (ascending to p-48)
-//   p-200.. ten return addresses of the freeing chain (ascending to p-128)
+//   p-200.. ten return addresses of the freeing chain (ascending to p-128);
+//           while the block lives and the heap tracks (below), p-128 holds
+//           the next tracked block, p-136 the previous one and p-144 1
 //   p+size  an unaligned tail canary ALLOC_CHECK_TAIL ^ p
 // Each chain starts inside the allocator: the backend may inline its
 // helpers, so a fixed skip count could drop the caller's own frame.
@@ -2742,6 +2755,11 @@ priv alloc_arena_give: fn(pointer: I64) {
 // symbol and print as ??), then aborts.
 // State page words: quarantine lock 16, ring 24, pushes 32, parked count 40,
 // parked bytes 48, frame-pointer stub 56 (alloc_frames_start).
+// Under `jet perf run --lens=alloc` the heap tracks (alloc_check_track_start):
+// each take links its block at the head of a list of live blocks
+// (alloc_check_live_head) and a free unlinks it, both under the quarantine
+// lock, so a heap snapshot (PerfSamples.jet perf_samples_heap) can walk
+// every block allocated since and still live.
 ALLOC_CHECK_LIVE: I64{2397417249457849674}
 
 ALLOC_CHECK_FREED: I64{2397398596314219850}
@@ -2845,6 +2863,12 @@ priv alloc_check_frames: fn(out: I64, count: I64) {
         os_store_i64(wrapping(pointer + size), pointer ~ ALLOC_CHECK_TAIL)
     }
     alloc_check_frames(wrapping(pointer - I64{120}), I64{10})
+    if (alloc_check_tracking != I64{0}) {
+        lock: wrapping(alloc_root + I64{16})
+        alloc_lock(lock)
+        alloc_check_track(pointer)
+        alloc_unlock(lock)
+    }
     observer: alloc_check_take_observer
     if (observer != I64{0}) {
         before: jet_scheduler_native_status()
@@ -2861,10 +2885,11 @@ priv alloc_check_frames: fn(out: I64, count: I64) {
     lock: wrapping(alloc_root + I64{16})
     canary := I64{0}
     alloc_lock(lock)
-    #Unsafe("a checked payload's canary word precedes it; the quarantine lock orders racing frees of one block") {
+    #Unsafe("a checked payload's canary word precedes it; the quarantine lock orders racing frees of one block and guards the live list") {
         canary = os_load_i64(wrapping(pointer - I64{8}))
         if (canary == pointer ~ ALLOC_CHECK_LIVE) {
             os_store_i64(wrapping(pointer - I64{8}), pointer ~ ALLOC_CHECK_FREED)
+            alloc_check_untrack(pointer)
         }
     }
     alloc_unlock(lock)
@@ -2931,6 +2956,88 @@ priv alloc_check_frames: fn(out: I64, count: I64) {
         alloc_check_give_observer = on_free
     }
     I64{1}
+}
+
+// Under the alloc lens (PerfSamples.jet perf_samples_start): link every
+// checked block allocated from now on into the live list. False outside
+// checked mode, which has no prefix to link through.
+alloc_check_track_start: fn() -> Bool {
+    if (alloc_class_limit != I64{0}) { return false }
+    #Unsafe("the observation start runs before the program's other threads; each take loads the switch once") {
+        alloc_check_tracking = I64{1}
+    }
+    true
+}
+
+// Link the fresh payload `pointer` at the head of the live list. The caller
+// holds the quarantine lock.
+priv alloc_check_track: fn(pointer: I64) {
+    #Unsafe("pointer is this take's fresh checked payload, whose freeing-chain words are unused while it lives; the held quarantine lock guards the list and its blocks' link words") {
+        head: alloc_check_live_head
+        os_store_i64(wrapping(pointer - I64{128}), head)
+        os_store_i64(wrapping(pointer - I64{136}), I64{0})
+        os_store_i64(wrapping(pointer - I64{144}), I64{1})
+        if (head != I64{0}) {
+            os_store_i64(wrapping(head - I64{136}), pointer)
+        }
+        alloc_check_live_head = pointer
+    }
+}
+
+// Unlink `pointer`, whose canary was live, from the live list when a take
+// linked it. The caller holds the quarantine lock.
+priv alloc_check_untrack: fn(pointer: I64) {
+    #Unsafe("the live canary proves pointer a checked payload; the held quarantine lock guards the list and its blocks' link words") {
+        if (os_load_i64(wrapping(pointer - I64{144})) == I64{1}) {
+            next: os_load_i64(wrapping(pointer - I64{128}))
+            previous: os_load_i64(wrapping(pointer - I64{136}))
+            if (previous == I64{0}) {
+                alloc_check_live_head = next
+            } else {
+                os_store_i64(wrapping(previous - I64{128}), next)
+            }
+            if (next != I64{0}) {
+                os_store_i64(wrapping(next - I64{136}), previous)
+            }
+            os_store_i64(wrapping(pointer - I64{144}), I64{0})
+        }
+    }
+}
+
+// A heap snapshot's hold on the live list: the quarantine lock, which every
+// tracking take and every free take, so no block joins or leaves it until
+// alloc_check_track_release. The snapshot's number, from 1.
+alloc_check_track_hold: fn() -> I64 {
+    alloc_lock(wrapping(alloc_root + I64{16}))
+    #Unsafe("the held quarantine lock guards the count") {
+        alloc_check_snapshots = wrapping(alloc_check_snapshots + I64{1})
+    }
+    alloc_check_snapshots
+}
+
+alloc_check_track_release: fn() {
+    alloc_unlock(wrapping(alloc_root + I64{16}))
+}
+
+// The live block after `pointer` on the live list, its first for 0, and 0
+// past its end. The caller holds the list (alloc_check_track_hold), or is a
+// snapshot's forked child, whose one thread is the holder.
+#Unsafe("pointer is 0 or a tracked live payload of the held live list")
+alloc_check_live_next: fn(pointer: I64) -> I64 {
+    if (pointer == I64{0}) { return alloc_check_live_head }
+    os_load_i64(wrapping(pointer - I64{128}))
+}
+
+// A tracked live block's payload size.
+#Unsafe("pointer is a tracked live payload of the held live list")
+alloc_check_live_size: fn(pointer: I64) -> I64 {
+    os_load_i64(wrapping(pointer - I64{32}))
+}
+
+// The address of a tracked live block's ten allocating return addresses,
+// innermost first (alloc_check_frames).
+alloc_check_live_chain: fn(pointer: I64) -> I64 {
+    wrapping(pointer - I64{120})
 }
 
 priv alloc_check_fill: fn(pointer: I64, size: I64) {

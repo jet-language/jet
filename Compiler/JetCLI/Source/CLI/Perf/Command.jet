@@ -191,7 +191,8 @@ jet_cli_perf_strings: fn(lines: [String]) -> CanonicalJSON Never! {
 }
 
 // `render_view_text`, with `notes` on the sources whose lines have no cost
-// facts (LineCosts.jet) before the sections.
+// facts (LineCosts.jet) before the sections and the heap snapshots the
+// alloc lens kept (jet_cli_perf_heap_lines) after them.
 jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String], timeline: [String], table: [String], notes: [String], color: Bool) -> String Never! {
     out := "{diagnostic_theme_paint(color, "1", "schema")} {TRACE_SCHEMA} v{TRACE_VERSION}\n"
     out = "{out}{diagnostic_theme_paint(color, "1", "trace")} {trace_id(trace) ?? "unknown"}\n"
@@ -224,7 +225,13 @@ jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String]
         out = "{out}generated-frames: none retained in .jettrace (hidden unless captured under --frames=all)\n"
     }
     loop note in notes -> out = "{out}{note}\n"
-    "{out}{jet_cli_perf_view_sections(flame, timeline, table, color)}"
+    out = "{out}{jet_cli_perf_view_sections(flame, timeline, table, color)}"
+    heap: jet_cli_perf_heap_lines(trace)
+    if heap.len() > 0 {
+        out = "{out}{diagnostic_theme_paint(color, "1", "heap")}\n"
+        loop line in heap -> out = "{out}{line}\n"
+    }
+    out
 }
 
 // The flame graph, the timeline and the per-line table, each under its
@@ -416,15 +423,47 @@ jet_cli_perf_receipt_sections: fn(trace: CanonicalJSON) -> [JetDriverRunReceiptS
 }
 
 // `receipt <name> <value>` for each receipt section the trace records, the
-// value as its canonical JSON.
+// value as its canonical JSON, but the heap snapshots, which
+// jet_cli_perf_heap_lines shows.
 jet_cli_perf_receipt_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     items: jet_cli_perf_rows(trace, "receipt_sections") ?? return [String]{}
     lines := [String]{}
     loop item in items {
         section: trace_receipt_section_from_json(item) ?? next
+        if section.name == "heap" -> next
         bytes: canonical_json_bytes(section.value)
         text: String.from_bytes(bytes.slice(0, bytes.len() - 1)) ?? next
         lines.push("receipt {section.name} {text}")
+    }
+    lines
+}
+
+// The heap snapshots the alloc lens kept (Session.jet
+// jet_cli_perf_session_heaps), each `live at <name>` with its live blocks
+// and their bytes, then its blocks by the line that allocated them, the
+// most bytes first: `<path>:<line> <function>`, or `elsewhere` for the
+// blocks no line of the run's source allocated.
+jet_cli_perf_heap_lines: fn(trace: CanonicalJSON) -> [String] Never! {
+    items: jet_cli_perf_rows(trace, "receipt_sections") ?? return [String]{}
+    lines := [String]{}
+    loop item in items {
+        section: trace_receipt_section_from_json(item) ?? next
+        if section.name != "heap" -> next
+        path: jet_cli_perf_member_text(section.value, "path") ?? ""
+        fields: jettrace_object_view(section.value, "receipt heap") ?? next
+        at: jet_cli_perf_key(fields, "snapshots") ?? next
+        snapshots: jettrace_array(fields[at].value, "receipt heap.snapshots") ?? next
+        loop snapshot in snapshots {
+            name: jet_cli_perf_member_text(snapshot, "name") ?? "heap"
+            lines.push("live at {name}  {jet_cli_perf_member_integer(snapshot, "blocks") ?? "0"} blocks  {jet_cli_perf_member_integer(snapshot, "bytes") ?? "0"} bytes")
+            members: jettrace_object_view(snapshot, "receipt heap snapshot") ?? next
+            place: jet_cli_perf_key(members, "sites") ?? next
+            sites: jettrace_array(members[place].value, "receipt heap snapshot.sites") ?? next
+            loop site in sites {
+                where: if jet_cli_perf_member_integer(site, "line") == .Val(line) -> "{path}:{line} {jet_cli_perf_member_text(site, "function") ?? ""}" else -> "elsewhere"
+                lines.push("  {where}  {jet_cli_perf_member_integer(site, "blocks") ?? "0"} blocks  {jet_cli_perf_member_integer(site, "bytes") ?? "0"} bytes")
+            }
+        }
     }
     lines
 }

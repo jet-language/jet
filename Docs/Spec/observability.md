@@ -161,9 +161,10 @@ functions that `run` calls; their `inclusive_count` and `allocation_count` are
 null.
 
 `jet perf run` takes `--lens=<lenses>`, comma-separated: `cpu`, the
-program's CPU time and the default, and `memory`, its memory behavior;
-`--lens=cpu,memory` takes both in one run. `jet perf test` takes only `cpu`,
-and any other lens is refused with the two it may name. Under `memory` the
+program's CPU time and the default, `memory`, its memory behavior, and
+`alloc`, its live heap; `--lens=cpu,memory,alloc` takes all three in one
+run. `jet perf test` takes only `cpu`, and a word that names no lens is
+refused with the three it may name. Under `memory` the
 runtime opens four counters of the program's main thread
 with `perf_event_open`, in user mode only: L1D read misses (one sample per
 10007 events), LLC and dTLB read misses (one per 1009) and page faults (one
@@ -199,6 +200,28 @@ page_faults=0`). Its first line says what each count means: `l1d_misses`
 left L1D, `llc_misses` were served from RAM, and `page_faults` fell to the
 page cache or disk. A counter the profile did not capture shows
 `unavailable`. Tests/Run/Perf/CacheVisualization is the worked example.
+
+Under `alloc` the session builds the program with `--checked-alloc`, whose
+heap keeps each block's ten allocating call sites in its prefix, and the
+runtime links every block allocated from the start of the run into a live
+list until it is freed. A run without the lens tracks nothing and pays
+nothing. `core.perf.heap_mark(name)` takes a heap snapshot named `name`,
+and the runtime takes one named `exit` as the program exits; in any other
+run `heap_mark` does nothing. A snapshot holds the live list while it
+forks: the copy-on-write child walks the list as it stood, groups the live
+blocks by their call sites, writes the groups to the samples file and
+exits, while the program goes on once the child has the copy and waits for
+it to exit. The trace keeps the snapshots in its `heap` receipt section
+(type `JetPerfHeapSnapshots`): the checked source's `path`, then each
+snapshot in the order the program took them with its `name`, `number`,
+live `blocks` and their `bytes`, and its `sites`, the blocks by the
+`function` and `line` of the checked source innermost on their allocating
+stack, the most bytes first, with a null `function` and `line` for the
+blocks no line of it allocated. `jet perf view` prints each snapshot after
+the per-line table, `live at filled  101 blocks  57344 bytes` and then
+each site, `  leak.jet:14 run  100 blocks  56000 bytes`, or
+`  elsewhere  1 blocks  1344 bytes`.
+Tests/Cases/PerfRun/alloc_lens_heap_snapshots.case is the worked example.
 
 `jet perf run` records every wait of a task too, and what ended it. When a
 task spawns another, the runtime writes the new task's id with the Jet call
