@@ -4,7 +4,7 @@
 use {
     native_test_process: core.process
     native_test_files: core.files
-    jet_debug.[NativeBlock, NativeBreak, NativeDebugError, NativeFrame, NativeFunction, NativeInlined, NativeLocal, NativeMemory, NativeSession, NativeStop, NativeStopKind, NativeVariable, native_debug_backtrace, native_debug_build_argv, native_debug_decimal_text, native_debug_hit_breakpoint, native_debug_int, native_debug_locals_typed, native_debug_precise, native_debug_string, native_inline_chain, native_jet_spelling]
+    jet_debug.[NATIVE_DEBUG_CUT_OFF, NativeBlock, NativeBreak, NativeCut, NativeDebugError, NativeFrame, NativeFunction, NativeInlined, NativeLocal, NativeMemory, NativeSession, NativeStop, NativeStopKind, NativeVariable, native_debug_backtrace, native_debug_build_argv, native_debug_decimal_text, native_debug_hit_breakpoint, native_debug_int, native_debug_locals_typed, native_debug_precise, native_debug_string, native_inline_chain, native_jet_spelling]
     jet_backend.[x64_eval_fork_filter, x64_jetline_sleb]
     jet_foundation.[DeepChecks]
 }
@@ -95,6 +95,17 @@ native_test_bytes: fn(words: [Int], size: Int) -> [U8] {
     assert_eq(native_debug_precise("Fraction", 80, memory), String?{Val("1250/2")})
     assert_eq(native_debug_string(200, memory), String?{None})
     assert_eq(native_debug_decimal_text(-5, 3), "-0.005")
+}
+
+// A dump that reached a String's header or bytes but cut them off past its
+// budget shows the String as cut off; bytes it never reached stay
+// unavailable.
+#Test("a_string_a_dump_cut_off_shows_as_cut_off") {
+    memory: NativeMemory{trace: None, blocks: [NativeBlock]{NativeBlock{address: 16, bytes: native_test_bytes([Int]{4096, 11, 11, 20000, 11, 11}, 8)}}, cut: [NativeCut]{NativeCut{address: 4096, size: 8192}}}
+    assert_eq(native_debug_string(16, memory), String?{Val(NATIVE_DEBUG_CUT_OFF)})
+    assert_eq(native_debug_string(5000, memory), String?{Val(NATIVE_DEBUG_CUT_OFF)})
+    assert_eq(native_debug_string(40, memory), String?{None})
+    assert_eq(native_debug_string(64, memory), String?{None})
 }
 
 #Test("an_unavailable_debugger_is_e2203") {

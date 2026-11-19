@@ -1,13 +1,15 @@
 // `jet debug <dump.jetdump>`: a typed crash dump an observed run's stop
 // wrote (`.jet/dumps/`, JetRuntime PerfSamples.jet perf_flight_dump), read
 // behind the `(Jet)` console as Compiler/JetDebug NativeDump.jet opens it.
-// It shows the innermost Jet frame of the stop with its source line and its
-// locals; `bt`, `frame N`, `locals` and `print` read the stop as a live
-// session reads one, `tasks` lists every task the dump caught, running or
-// parked, with where it is, and `task N` selects task N for them; `events
-// [--last N]` lists the flight ring's records, oldest first. Nothing runs:
-// a run-control command says so. A #Secret value shows as redacted. The
-// end of stdin or `quit` ends it.
+// It names the memory the dump holds against its budget, then shows the
+// innermost Jet frame of the stop with its source line and its locals;
+// `bt`, `frame N`, `locals` and `print` read the stop as a live session
+// reads one, `tasks` lists every task the dump caught, running or parked,
+// with where it is, and `task N` selects task N for them; `events [--last
+// N]` lists the flight ring's records, oldest first. Nothing runs: a
+// run-control command says so. A #Secret value shows as redacted, a value
+// the dump cut off past its budget as cut off. The end of stdin or `quit`
+// ends it.
 use {
     cli_files: core.files
     cli_term: core.term
@@ -28,7 +30,7 @@ jet_cli_debug_dump: fn(path: String, color: Bool) -[FS, IO, Time.Wait, FFI.Asm]>
     events: native_dump_events(opened.session.image, opened.ring)
     file: cli_files.basename(source)
     shown: jet_cli_debug_dump_frame(opened.session, frames, stop, file, lines) ?? return jet_cli_debug_unavailable(err, color)
-    jet_cli_debug_write("Dump of process {opened.pid}, {events.len()} flight events\n{shown}")
+    jet_cli_debug_write("Dump of process {opened.pid}, {events.len()} flight events\nMemory: {opened.held} bytes held, within the {opened.budget}-byte budget; {opened.cut_off} bytes cut off past it\n{shown}")
     input := cli_term.stdin()
     echo: !input.is_tty()
     loop {

@@ -2748,7 +2748,8 @@ PERF_FLIGHT_INTERVAL_US: I64{10000}
 // task rows claimed (perf_flight_tasks); then one datagram's receive
 // buffer, the ring, the dump's scratch for its task rows, /proc/self/maps
 // and directory entries, the dump's text page, its redacted copy's vectors
-// and table of Secrets, and its redacted copy (perf_flight_redacted).
+// and table of Secrets, its redacted copy (perf_flight_redacted), and the
+// tables of its walk of reachable memory (perf_flight_reach).
 PERF_FLIGHT_READ: I64{8}
 
 PERF_FLIGHT_USED: I64{16}
@@ -2789,7 +2790,40 @@ PERF_FLIGHT_COPY_AT: I64{409792}
 
 PERF_FLIGHT_COPY: I64{1048576}
 
-PERF_FLIGHT_BYTES: I64{1458368}
+// The walk's words: its spans' count, the queue's head and tail, the bytes
+// held, the cut rows and bytes, the end of the image's copy, two words a
+// read fills, and the pages marked. Then its tables: the writable spans of
+// /proc/self/maps, PERF_FLIGHT_SPANS rows of [start, end); the pages held or
+// cut off, an open-addressed table of PERF_FLIGHT_SEEN words, each a page's
+// number shifted left once, plus 1 when it was cut off; the ranges to
+// write, PERF_FLIGHT_QUEUE rows of [address, bytes]; and the cut section:
+// the budget, the bytes held, the bytes cut off and the rows, then
+// PERF_FLIGHT_CUTS rows of [address, bytes].
+PERF_FLIGHT_WALK_AT: I64{1458368}
+
+PERF_FLIGHT_SPANS_AT: I64{1458448}
+
+PERF_FLIGHT_SPANS: I64{4096}
+
+PERF_FLIGHT_SEEN_AT: I64{1523984}
+
+PERF_FLIGHT_SEEN: I64{32768}
+
+PERF_FLIGHT_QUEUE_AT: I64{1786128}
+
+PERF_FLIGHT_QUEUE: I64{16384}
+
+PERF_FLIGHT_CUTS_AT: I64{2048272}
+
+PERF_FLIGHT_CUTS: I64{8192}
+
+PERF_FLIGHT_BYTES: I64{2179376}
+
+// A page's address bits, and the most frame pointers a stack's chain
+// follows.
+PERF_FLIGHT_PAGE_MASK: I64{-4096}
+
+PERF_FLIGHT_FRAMES: I64{65536}
 
 // The dump's text page: the dump's path from its start, then the dump's
 // header words, the oldest dump's name while the dumps rotate
@@ -2818,11 +2852,12 @@ PERF_FLIGHT_ZEROS: I64{1024}
 // "JETDUMP1", the dump's first word, then its version.
 PERF_FLIGHT_MAGIC: I64{3553425134609253706}
 
-PERF_FLIGHT_VERSION: I64{1}
+PERF_FLIGHT_VERSION: I64{2}
 
 // The kinds of the dump's sections after its image, each [kind, address,
-// bytes] and the bytes padded to a word: a writable memory segment, the
-// ring, the tasks (perf_flight_tasks), and the end.
+// bytes] and the bytes padded to a word: a range of reachable memory, the
+// ring, the tasks (perf_flight_tasks), the ranges cut off past the budget
+// (perf_flight_reach), and the end.
 PERF_FLIGHT_SECTION_END: I64{0}
 
 PERF_FLIGHT_SECTION_MEMORY: I64{1}
@@ -2830,6 +2865,8 @@ PERF_FLIGHT_SECTION_MEMORY: I64{1}
 PERF_FLIGHT_SECTION_RING: I64{2}
 
 PERF_FLIGHT_SECTION_TASKS: I64{3}
+
+PERF_FLIGHT_SECTION_CUT: I64{4}
 
 // A row of the dump's tasks: the task's id, how its registers were had,
 // its rip, rsp and rbp, and its thread's tid (0 for a parked task's). The
@@ -2855,8 +2892,9 @@ PERF_FLIGHT_CAPTURE_SIGNAL: I64{62}
 // How long the dump waits for the captured threads' rows: 200ms.
 PERF_FLIGHT_CAPTURE_NS: I64{200000000}
 
-// The most memory one dump holds; a segment past it is left out.
-PERF_FLIGHT_DUMP_BUDGET: I64{268435456}
+// The most reachable memory one dump holds, 32 MiB: past it a reached
+// range is cut off (perf_flight_reach).
+PERF_FLIGHT_DUMP_BUDGET: I64{33554432}
 
 // The newest dumps of a program `.jet/dumps` keeps.
 PERF_FLIGHT_DUMPS_KEPT: I64{3}
@@ -3107,8 +3145,9 @@ perf_flight_image_bytes: fn(image: I64) -> I64 {
 // bias, the stopping thread's rip, rsp and rbp as its caller resumes, its
 // tid, and the image's byte count; then the image, so the dump needs no
 // other file; then the sections: the ring, every task's registers
-// (perf_flight_tasks), then each writable memory segment, every thread's
-// and task's stack among them, within PERF_FLIGHT_DUMP_BUDGET. The other
+// (perf_flight_tasks), the memory the stop reaches from every thread's and
+// task's stack and the globals within PERF_FLIGHT_DUMP_BUDGET, and the
+// ranges cut off past it (perf_flight_reach). The other
 // threads wait in their capture until the dump is written, so the stacks
 // it holds are the ones their registers name. Every byte after its words
 // is written redacted (perf_flight_redacted), so no dump holds a live
@@ -3145,7 +3184,7 @@ perf_flight_dump: fn() {
     rt_text_store(wrapping(words + I64{72}), length)
     good := perf_flight_bytes(fd, zeros, words, I64{80})
     if (good) {
-        good = perf_flight_redacted(fd, state, zeros, image, length) && perf_flight_bytes(fd, zeros, zeros, wrapping(I64{0} - length) & I64{7})
+        good = perf_flight_redacted(fd, state, zeros, image, length, false) && perf_flight_bytes(fd, zeros, zeros, wrapping(I64{0} - length) & I64{7})
     }
     if (good && perf_flight_lock(state, I64{10000000})) {
         perf_flight_drain(state)
@@ -3153,7 +3192,7 @@ perf_flight_dump: fn() {
         sync_store(state, I64{0})
     }
     if (good) { good = perf_flight_tasks(fd, state, words, zeros) }
-    if (good) { good = perf_flight_segments(fd, state, words, zeros) }
+    if (good) { good = perf_flight_reach(fd, state, words, zeros) }
     if (good) {
         _ := perf_flight_section(fd, state, words, zeros, PERF_FLIGHT_SECTION_END, I64{0}, I64{0}, I64{0})
     }
@@ -3345,7 +3384,7 @@ perf_flight_section: fn(fd: I64, state: I64, words: I64, zeros: I64, kind: I64, 
     rt_text_store(head, kind)
     rt_text_store(wrapping(head + I64{8}), address)
     rt_text_store(wrapping(head + I64{16}), length)
-    perf_flight_bytes(fd, zeros, head, I64{24}) && perf_flight_redacted(fd, state, zeros, bytes, length) && perf_flight_bytes(fd, zeros, zeros, wrapping(I64{0} - length) & I64{7})
+    perf_flight_bytes(fd, zeros, head, I64{24}) && perf_flight_redacted(fd, state, zeros, bytes, length, false) && perf_flight_bytes(fd, zeros, zeros, wrapping(I64{0} - length) & I64{7})
 }
 
 // Write `length` bytes at `address` as perf_flight_bytes does, with every
@@ -3353,11 +3392,13 @@ perf_flight_section: fn(fd: I64, state: I64, words: I64, zeros: I64, kind: I64, 
 // zeroed (Secret.jet secret_redact). Each window of PERF_FLIGHT_COPY bytes
 // is copied to the state's copy and redacted there, and written up to where
 // a run could still start that the window does not hold whole; the next
-// window starts there, and zeroes the rest of a run this one began.
-perf_flight_redacted: fn(fd: I64, state: I64, zeros: I64, address: I64, length: I64) -> Bool {
+// window starts there, and zeroes the rest of a run this one began. When
+// `scan`, each window written reaches what its words point to
+// (perf_flight_scan), so it is staged even with no Secret live.
+perf_flight_redacted: fn(fd: I64, state: I64, zeros: I64, address: I64, length: I64, scan: Bool) -> Bool {
     table: wrapping(state + PERF_FLIGHT_SECRETS_AT)
     width: secret_redact_table(table, PERF_FLIGHT_SECRETS, PERF_FLIGHT_COPY / I64{2})
-    if (width == I64{0}) { return perf_flight_bytes(fd, zeros, address, length) }
+    if (width == I64{0} && !scan) { return perf_flight_bytes(fd, zeros, address, length) }
     staged: wrapping(state + PERF_FLIGHT_COPY_AT)
     reach := I64{0}
     at := I64{0}
@@ -3365,9 +3406,13 @@ perf_flight_redacted: fn(fd: I64, state: I64, zeros: I64, address: I64, length: 
         left: wrapping(length - at)
         window: if (left < PERF_FLIGHT_COPY) -> left else -> PERF_FLIGHT_COPY
         perf_flight_read(state, staged, wrapping(address + at), window)
-        until: if (reach > at) -> wrapping(reach - at) else -> I64{0}
-        reach = wrapping(at + secret_redact(table, staged, window, wrapping(address + at), until))
-        step: if (window < left) -> wrapping(window - wrapping(width - I64{1})) else -> window
+        step := window
+        if (width != I64{0}) {
+            until: if (reach > at) -> wrapping(reach - at) else -> I64{0}
+            reach = wrapping(at + secret_redact(table, staged, window, wrapping(address + at), until))
+            if (window < left) { step = wrapping(window - wrapping(width - I64{1})) }
+        }
+        if (scan) { perf_flight_scan(state, staged, wrapping(address + at), step) }
         if (!perf_flight_bytes(fd, zeros, staged, step)) { return false }
         at = wrapping(at + step)
     }
@@ -3429,46 +3474,333 @@ perf_flight_number: fn(scratch: I64, length: I64, at: I64, into: I64) {
     rt_text_store(wrapping(into + I64{8}), cursor)
 }
 
-// Each readable and writable segment of /proc/self/maps as a memory
-// section, within PERF_FLIGHT_DUMP_BUDGET.
-perf_flight_segments: fn(fd: I64, state: I64, words: I64, zeros: I64) -> Bool {
+// The memory the dump holds: what the stop can reach, within
+// PERF_FLIGHT_DUMP_BUDGET. The roots are each task row's stack, from its
+// rsp less the red zone to the end of its mapping, and each mapping its
+// frame-pointer chain reaches (a deeper stack segment's bridge frame names
+// the one it grew from: StackSegment.jet), then the image's writable
+// segments, its globals. Each range held is written as a memory section
+// and every aligned word in it that points into a writable mapping of
+// /proc/self/maps reaches more: the pointer's page (a small block never
+// crosses one: Alloc.jet), or a large block's whole mapping when the two
+// words before the pointer name the mapping that starts on its page. Ranges
+// are held page by page in the order they are reached, each page once;
+// past the budget the rest of a reached range is cut off and listed in the
+// cut section, so `jet debug` shows a value there as cut off. The walk is
+// conservative, a superset of what the program's typed pointers reach: the
+// stop cannot read the image's types without allocating.
+perf_flight_reach: fn(fd: I64, state: I64, words: I64, zeros: I64) -> Bool {
+    walk: wrapping(state + PERF_FLIGHT_WALK_AT)
+    image: perf_samples_image
+    rt_text_store(wrapping(walk + I64{48}), wrapping(image + perf_flight_image_bytes(image)))
+    perf_flight_spans(state, words)
+    // The task rows perf_flight_tasks left in the scratch.
+    claimed: sync_load(wrapping(state + PERF_FLIGHT_CLAIMED))
+    rows: if (claimed > PERF_FLIGHT_TASKS_MAX) -> PERF_FLIGHT_TASKS_MAX else -> claimed
     scratch: wrapping(state + PERF_FLIGHT_SCRATCH_AT)
+    index := I64{0}
+    loop index < rows {
+        row: wrapping(scratch + wrapping(wrapping(index * PERF_FLIGHT_TASK_WORDS) * I64{8}))
+        perf_flight_stack(state, rt_text_word(wrapping(row + I64{24})), rt_text_word(wrapping(row + I64{32})))
+        index = wrapping(index + I64{1})
+    }
+    perf_flight_globals(state)
+    queue: wrapping(state + PERF_FLIGHT_QUEUE_AT)
+    loop rt_text_word(wrapping(walk + I64{8})) < rt_text_word(wrapping(walk + I64{16})) {
+        head: rt_text_word(wrapping(walk + I64{8}))
+        rt_text_store(wrapping(walk + I64{8}), wrapping(head + I64{1}))
+        entry: wrapping(queue + wrapping(head * I64{16}))
+        address: rt_text_word(entry)
+        length: rt_text_word(wrapping(entry + I64{8}))
+        if (!perf_flight_section_scanned(fd, state, words, zeros, address, length)) { return false }
+    }
+    cuts: wrapping(state + PERF_FLIGHT_CUTS_AT)
+    rt_text_store(cuts, PERF_FLIGHT_DUMP_BUDGET)
+    rt_text_store(wrapping(cuts + I64{8}), rt_text_word(wrapping(walk + I64{24})))
+    rt_text_store(wrapping(cuts + I64{16}), rt_text_word(wrapping(walk + I64{40})))
+    rt_text_store(wrapping(cuts + I64{24}), rt_text_word(wrapping(walk + I64{32})))
+    perf_flight_section(fd, state, words, zeros, PERF_FLIGHT_SECTION_CUT, I64{0}, cuts, wrapping(I64{32} + wrapping(rt_text_word(wrapping(walk + I64{32})) * I64{16})))
+}
+
+// A memory section of the `length` bytes at `address`, each aligned word
+// of them reaching more (perf_flight_follow).
+perf_flight_section_scanned: fn(fd: I64, state: I64, words: I64, zeros: I64, address: I64, length: I64) -> Bool {
+    head: wrapping(words + I64{96})
+    rt_text_store(head, PERF_FLIGHT_SECTION_MEMORY)
+    rt_text_store(wrapping(head + I64{8}), address)
+    rt_text_store(wrapping(head + I64{16}), length)
+    perf_flight_bytes(fd, zeros, head, I64{24}) && perf_flight_redacted(fd, state, zeros, address, length, true) && perf_flight_bytes(fd, zeros, zeros, wrapping(I64{0} - length) & I64{7})
+}
+
+// Each readable and writable mapping of /proc/self/maps, in address order,
+// into the walk's spans, at most PERF_FLIGHT_SPANS of them. The maps' text
+// is read into the state's copy, which the walk's sections reuse after.
+perf_flight_spans: fn(state: I64, words: I64) {
+    walk: wrapping(state + PERF_FLIGHT_WALK_AT)
+    spans: wrapping(state + PERF_FLIGHT_SPANS_AT)
+    text: wrapping(state + PERF_FLIGHT_COPY_AT)
     path: wrapping(words + I64{160})
     _ := perf_flight_text(path, rt_static_text("/proc/self/maps"))
     // O_RDONLY|O_CLOEXEC.
     maps: perf_flight_syscall(I64{257}, I64{-100}, path, I64{524288})
-    if (maps < I64{0}) { return true }
+    if (maps < I64{0}) {
+        return
+    }
     length := I64{0}
-    loop length < PERF_FLIGHT_SCRATCH {
-        count: perf_flight_syscall(I64{0}, maps, wrapping(scratch + length), wrapping(PERF_FLIGHT_SCRATCH - length))
+    loop length < PERF_FLIGHT_COPY {
+        count: perf_flight_syscall(I64{0}, maps, wrapping(text + length), wrapping(PERF_FLIGHT_COPY - length))
         if (count == I64{-4}) { next }
         if (count <= I64{0}) { break }
         length = wrapping(length + count)
     }
     _ := perf_flight_syscall(I64{3}, maps, I64{0}, I64{0})
     parsed: wrapping(words + I64{144})
-    total := I64{0}
+    held := I64{0}
     at := I64{0}
-    loop at < length {
-        perf_flight_number(scratch, length, at, parsed)
+    loop at < length && held < PERF_FLIGHT_SPANS {
+        perf_flight_number(text, length, at, parsed)
         start: rt_text_word(parsed)
-        perf_flight_number(scratch, length, wrapping(rt_text_word(wrapping(parsed + I64{8})) + I64{1}), parsed)
+        perf_flight_number(text, length, wrapping(rt_text_word(wrapping(parsed + I64{8})) + I64{1}), parsed)
         end: rt_text_word(parsed)
         at = wrapping(rt_text_word(wrapping(parsed + I64{8})) + I64{1})
         // The permissions: `r` then `w`.
-        writable: wrapping(at + I64{1}) < length && rt_text_byte(wrapping(scratch + at)) == I64{114} && rt_text_byte(wrapping(wrapping(scratch + at) + I64{1})) == I64{119}
-        loop at < length && rt_text_byte(wrapping(scratch + at)) != (I64{10}) {
+        writable: wrapping(at + I64{1}) < length && rt_text_byte(wrapping(text + at)) == I64{114} && rt_text_byte(wrapping(wrapping(text + at) + I64{1})) == I64{119}
+        loop at < length && rt_text_byte(wrapping(text + at)) != (I64{10}) {
             at = wrapping(at + I64{1})
         }
         at = wrapping(at + I64{1})
-        size: wrapping(end - start)
-        if (writable && size > I64{0} && wrapping(total + size) <= PERF_FLIGHT_DUMP_BUDGET) {
-            if (!perf_flight_section(fd, state, words, zeros, PERF_FLIGHT_SECTION_MEMORY, start, start, size)) {
-                return false
-            }
-            total = wrapping(total + size)
+        if (writable && end > start) {
+            row: wrapping(spans + wrapping(held * I64{16}))
+            rt_text_store(row, start)
+            rt_text_store(wrapping(row + I64{8}), end)
+            held = wrapping(held + I64{1})
         }
     }
+    rt_text_store(walk, held)
+}
+
+// The index of the walk's span that holds `address`, or -1.
+perf_flight_span: fn(state: I64, address: I64) -> I64 {
+    spans: wrapping(state + PERF_FLIGHT_SPANS_AT)
+    low := I64{0}
+    high := rt_text_word(wrapping(state + PERF_FLIGHT_WALK_AT))
+    loop low < high {
+        middle: wrapping(low + high) >> I64{1}
+        row: wrapping(spans + wrapping(middle * I64{16}))
+        if (address < rt_text_word(row)) {
+            high = middle
+            next
+        }
+        if (address >= rt_text_word(wrapping(row + I64{8}))) {
+            low = wrapping(middle + I64{1})
+            next
+        }
+        return middle
+    }
+    I64{-1}
+}
+
+// The start (`end` false) or end of the walk's span `index`.
+perf_flight_span_bound: fn(state: I64, index: I64, end: Bool) -> I64 {
+    row: wrapping(wrapping(state + PERF_FLIGHT_SPANS_AT) + wrapping(index * I64{16}))
+    if (end) { return rt_text_word(wrapping(row + I64{8})) }
+    rt_text_word(row)
+}
+
+// The stack of a task row whose registers are `rsp` and `rbp`: from rsp
+// less the red zone to its mapping's end, then each mapping the frame
+// pointers lead to that the walk does not hold yet, from that frame to the
+// mapping's end.
+perf_flight_stack: fn(state: I64, rsp: I64, rbp: I64) {
+    span: perf_flight_span(state, rsp)
+    if (span < I64{0}) {
+        return
+    }
+    low: perf_flight_span_bound(state, span, false)
+    from: if (wrapping(rsp - I64{128}) < low) -> low else -> wrapping(rsp - I64{128})
+    perf_flight_take(state, from, perf_flight_span_bound(state, span, true))
+    read: wrapping(wrapping(state + PERF_FLIGHT_WALK_AT) + I64{56})
+    frame := rbp
+    steps := I64{0}
+    loop frame != (I64{0}) && (frame & I64{7}) == (I64{0}) && steps < PERF_FLIGHT_FRAMES {
+        holder: perf_flight_span(state, frame)
+        if (holder < I64{0}) { break }
+        if (perf_flight_seen(state, frame & PERF_FLIGHT_PAGE_MASK) == I64{0}) {
+            perf_flight_take(state, frame, perf_flight_span_bound(state, holder, true))
+        }
+        perf_flight_read(state, read, frame, I64{8})
+        caller: rt_text_word(read)
+        // Within a mapping the chain only climbs.
+        if (caller <= frame && perf_flight_span(state, caller) == holder) { break }
+        frame = caller
+        steps = wrapping(steps + I64{1})
+    }
+}
+
+// The image's writable segments at their load addresses: the globals.
+perf_flight_globals: fn(state: I64) {
+    image: perf_samples_image
+    if (image == I64{0}) {
+        return
+    }
+    table: rt_text_word(wrapping(image + I64{32}))
+    entry: rt_text_word(wrapping(image + I64{54})) & I64{65535}
+    count: rt_text_word(wrapping(image + I64{56})) & I64{65535}
+    index := I64{0}
+    loop index < count {
+        header: wrapping(wrapping(image + table) + wrapping(index * entry))
+        kind: rt_text_word(header)
+        // PT_LOAD with PF_W.
+        if ((kind & I64{4294967295}) == I64{1} && ((kind >> I64{32}) & I64{2}) != I64{0}) {
+            start: wrapping(rt_text_word(wrapping(header + I64{16})) + perf_samples_bias)
+            perf_flight_take(state, start, wrapping(start + rt_text_word(wrapping(header + I64{40}))))
+        }
+        index = wrapping(index + I64{1})
+    }
+}
+
+// Each aligned word of the `length` bytes at `staged`, a copy of the
+// memory at `address`, reaches what it points to.
+perf_flight_scan: fn(state: I64, staged: I64, address: I64, length: I64) {
+    at := wrapping(I64{0} - address) & I64{7}
+    loop wrapping(at + I64{8}) <= length {
+        perf_flight_follow(state, rt_text_word(wrapping(staged + at)))
+        at = wrapping(at + I64{8})
+    }
+}
+
+// Reach the memory `value` points to when it points into a writable
+// mapping outside the flight state and the image's copy, and the walk does
+// not hold its page yet: its page, or the large block's mapping it starts.
+perf_flight_follow: fn(state: I64, value: I64) {
+    if (value < I64{65536} || value >= I64{140737488355328}) {
+        return
+    }
+    if (value >= state && value < wrapping(state + PERF_FLIGHT_BYTES)) {
+        return
+    }
+    walk: wrapping(state + PERF_FLIGHT_WALK_AT)
+    if (value >= perf_samples_image && value < rt_text_word(wrapping(walk + I64{48}))) {
+        return
+    }
+    page: value & PERF_FLIGHT_PAGE_MASK
+    if (perf_flight_seen(state, page) != I64{0}) {
+        return
+    }
+    span: perf_flight_span(state, value)
+    if (span < I64{0}) {
+        return
+    }
+    high: perf_flight_span_bound(state, span, true)
+    end := if (wrapping(page + I64{4096}) < high) -> wrapping(page + I64{4096}) else -> high
+    // A large block: [mapping base][mapping bytes] just before its payload.
+    if ((value & I64{7}) == I64{0} && wrapping(value - page) >= I64{16}) {
+        read: wrapping(walk + I64{56})
+        perf_flight_read(state, read, wrapping(value - I64{16}), I64{16})
+        bytes: rt_text_word(wrapping(read + I64{8}))
+        if (rt_text_word(read) == page && bytes > I64{4096} && (bytes & I64{4095}) == I64{0} && bytes <= wrapping(high - page)) {
+            end = wrapping(page + bytes)
+        }
+    }
+    perf_flight_take(state, page, end)
+}
+
+// Hold [start, end) page by page in the walk's order, skipping each page it
+// holds already: each run of new pages, while the budget has a page left,
+// goes on the queue; once it has none, the rest is cut off.
+perf_flight_take: fn(state: I64, start: I64, end: I64) {
+    walk: wrapping(state + PERF_FLIGHT_WALK_AT)
+    at := start
+    loop at < end {
+        run := at
+        loop run < end {
+            if (!perf_flight_hold(state, run & PERF_FLIGHT_PAGE_MASK)) { break }
+            next_page: wrapping((run & PERF_FLIGHT_PAGE_MASK) + I64{4096})
+            run = if (next_page < end) -> next_page else -> end
+        }
+        if (run > at) {
+            tail: rt_text_word(wrapping(walk + I64{16}))
+            entry: wrapping(wrapping(state + PERF_FLIGHT_QUEUE_AT) + wrapping(tail * I64{16}))
+            rt_text_store(entry, at)
+            rt_text_store(wrapping(entry + I64{8}), wrapping(run - at))
+            rt_text_store(wrapping(walk + I64{16}), wrapping(tail + I64{1}))
+            at = run
+            next
+        }
+        seen: perf_flight_seen(state, at & PERF_FLIGHT_PAGE_MASK)
+        // A page cut off already was cut with the rest of its range.
+        if (seen == I64{2}) {
+            return
+        }
+        if (seen == I64{1}) {
+            next_page: wrapping((at & PERF_FLIGHT_PAGE_MASK) + I64{4096})
+            at = if (next_page < end) -> next_page else -> end
+            next
+        }
+        perf_flight_cut(state, at, end)
+        return
+    }
+}
+
+// Hold the new `page` against the budget, when the queue has a row left,
+// the walk holds no part of the page, the budget has a page left and the
+// page table room.
+perf_flight_hold: fn(state: I64, page: I64) -> Bool {
+    walk: wrapping(state + PERF_FLIGHT_WALK_AT)
+    kept: rt_text_word(wrapping(walk + I64{24}))
+    if (rt_text_word(wrapping(walk + I64{16})) >= PERF_FLIGHT_QUEUE || perf_flight_seen(state, page) != I64{0}) {
+        return false
+    }
+    if (wrapping(kept + I64{4096}) > PERF_FLIGHT_DUMP_BUDGET || !perf_flight_mark(state, page, I64{0})) {
+        return false
+    }
+    rt_text_store(wrapping(walk + I64{24}), wrapping(kept + I64{4096}))
+    true
+}
+
+// List [start, end) as cut off, while the cut table has room, and mark
+// its first page so another pointer into it does not list it again.
+perf_flight_cut: fn(state: I64, start: I64, end: I64) {
+    walk: wrapping(state + PERF_FLIGHT_WALK_AT)
+    rows: rt_text_word(wrapping(walk + I64{32}))
+    if (rows >= PERF_FLIGHT_CUTS || !perf_flight_mark(state, start & PERF_FLIGHT_PAGE_MASK, I64{1})) {
+        return
+    }
+    row: wrapping(wrapping(wrapping(state + PERF_FLIGHT_CUTS_AT) + I64{32}) + wrapping(rows * I64{16}))
+    rt_text_store(row, start)
+    rt_text_store(wrapping(row + I64{8}), wrapping(end - start))
+    rt_text_store(wrapping(walk + I64{32}), wrapping(rows + I64{1}))
+    rt_text_store(wrapping(walk + I64{40}), wrapping(rt_text_word(wrapping(walk + I64{40})) + wrapping(end - start)))
+}
+
+// The slot of the walk's page table where `page` is or would go.
+perf_flight_slot: fn(state: I64, page: I64) -> I64 {
+    table: wrapping(state + PERF_FLIGHT_SEEN_AT)
+    key: page >> I64{12}
+    index := (wrapping(key * I64{-7046029254386353131}) >> I64{40}) & wrapping(PERF_FLIGHT_SEEN - I64{1})
+    loop {
+        slot: wrapping(table + wrapping(index * I64{8}))
+        held: rt_text_word(slot)
+        if (held == I64{0} || (held >> I64{1}) == key) { return slot }
+        index = wrapping(index + I64{1}) & wrapping(PERF_FLIGHT_SEEN - I64{1})
+    }
+}
+
+// Whether the walk holds `page` (1), cut it off (2) or neither (0).
+perf_flight_seen: fn(state: I64, page: I64) -> I64 {
+    held: rt_text_word(perf_flight_slot(state, page))
+    if (held == I64{0}) { return I64{0} }
+    wrapping((held & I64{1}) + I64{1})
+}
+
+// Mark `page` held (`cut` 0) or cut off (1); false when the table is
+// three quarters full, so it never fills.
+perf_flight_mark: fn(state: I64, page: I64, cut: I64) -> Bool {
+    walk: wrapping(state + PERF_FLIGHT_WALK_AT)
+    marked: rt_text_word(wrapping(walk + I64{72}))
+    if (wrapping(marked * I64{4}) >= wrapping(PERF_FLIGHT_SEEN * I64{3})) { return false }
+    rt_text_store(perf_flight_slot(state, page), ((page >> I64{12}) << I64{1}) | cut)
+    rt_text_store(wrapping(walk + I64{72}), wrapping(marked + I64{1}))
     true
 }
 
