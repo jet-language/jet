@@ -149,7 +149,8 @@ NativeAbstract: struct {
     file: Int,
 }
 
-// The facts of one image. `types` is keyed by the type DIE's offset in
+// The facts of one image. `functions` are in address order
+// (native_function_at). `types` is keyed by the type DIE's offset in
 // `.debug_info`; `members`, `enumerators` and `variants` hold each struct's,
 // union's and enumeration's in DIE order, as its group names them;
 // `abstracts` holds each abstract subprogram of inlined code by its offset;
@@ -217,6 +218,8 @@ native_image_read: fn(elf: [U8]) -> NativeImage? Never! {
         native_image_unit(image, info, abbrev, at, end)
         at = end
     }
+    // Units need not come in address order; native_function_at searches.
+    image.functions.sort_by(fn(left: NativeFunction, right: NativeFunction) { left.low <=> right.low })
     Val(image)
 }
 
@@ -1066,12 +1069,21 @@ native_ranges: fn(image: NativeImage, list: Int, base: Int) -> [NativeRange] Nev
     ranges
 }
 
-// The function holding `pc`, else None.
+// The function holding `pc`, else None: the last one starting at or before
+// it, as functions don't overlap.
 native_function_at: fn(image: NativeImage, pc: Int) -> NativeFunction? Never! {
-    loop function in image.functions {
-        if pc >= function.low && pc < function.high -> return Val(function)
+    // The first function starting past `pc`.
+    low := 0
+    high := image.functions.len()
+    loop low < high {
+        middle: (low + high) >> 1
+        if {
+            (image.functions[middle].low <= pc) -> low = middle + 1
+            else -> high = middle
+        }
     }
-    None
+    if low == 0 || pc >= image.functions[low - 1].high -> return None
+    Val(image.functions[low - 1])
 }
 
 // A fallible call's carrier as the compiler describes it (JetIR X64Module.jet

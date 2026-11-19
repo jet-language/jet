@@ -4,7 +4,7 @@
 use {
     native_test_process: core.process
     native_test_files: core.files
-    jet_debug.[NATIVE_CFI_RETURN, NATIVE_CFI_SAME, NATIVE_CFI_SAVED, NATIVE_DEBUG_CUT_OFF, NATIVE_DEBUG_NOT_KEPT, NativeAbstract, NativeBlock, NativeBreak, NativeCallArgument, NativeCode, NativeCut, NativeDebugError, NativeEnumerator, NativeFde, NativeFrame, NativeFrames, NativeFunction, NativeImage, NativeInlined, NativeLocal, NativeMember, NativeMemory, NativeSession, NativeStop, NativeStopKind, NativeType, NativeUnwound, NativeVariable, NativeVariableRole, NativeVariants, native_cfi_row, native_debug_backtrace, native_debug_build_argv, native_debug_decimal_text, native_debug_hit_breakpoint, native_debug_int, native_debug_locals_typed, native_debug_precise, native_debug_string, native_frame_locals, native_frames_index, native_inline_chain, native_jet_spelling]
+    jet_debug.[NATIVE_CFI_RETURN, NATIVE_CFI_SAME, NATIVE_CFI_SAVED, NATIVE_DEBUG_CUT_OFF, NATIVE_DEBUG_NOT_KEPT, NativeAbstract, NativeBlock, NativeBreak, NativeCallArgument, NativeCode, NativeCut, NativeDebugError, NativeEnumerator, NativeFde, NativeFrame, NativeFrames, NativeFunction, NativeImage, NativeInlined, NativeLocal, NativeMember, NativeMemory, NativeSession, NativeStop, NativeStopKind, NativeType, NativeUnwound, NativeVariable, NativeVariableRole, NativeVariants, native_cfi_row, native_debug_backtrace, native_debug_build_argv, native_debug_decimal_text, native_debug_hit_breakpoint, native_debug_int, native_debug_locals_typed, native_debug_precise, native_debug_string, native_frame_locals, native_frames_index, native_function_at, native_inline_chain, native_jet_spelling]
     jet_backend.[X64DebugEncoding, X64Jetline, X64JetlineFunction, x64_eval_fork_filter, x64_jetline_sleb]
     jet_foundation.[DeepChecks]
 }
@@ -174,6 +174,21 @@ native_test_unwound: fn(pc: Int) -> NativeUnwound {
     assert_eq(unrecorded[0].value, NATIVE_DEBUG_NOT_KEPT)
     alone: native_frame_locals(image, memory, native_test_unwound(0x1050), 0x1050, -1, NativeUnwound?{None})
     assert_eq(alone[0].value, NATIVE_DEBUG_NOT_KEPT)
+}
+
+// Functions in address order with a gap between them: an address finds the
+// one holding it, and one in the gap, before the first or at the last's end
+// finds none.
+#Test("an_address_finds_the_function_holding_it") {
+    first: NativeFunction{low: 0x1000, high: 0x1010, name: "first", file: -1, variables: [NativeVariable]{}, inlined: [NativeInlined]{}}
+    second: NativeFunction{low: 0x1020, high: 0x1030, name: "second", file: -1, variables: [NativeVariable]{}, inlined: [NativeInlined]{}}
+    image: NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions: [NativeFunction]{first, second}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}}
+    assert_eq((native_function_at(image, 0x1000) ?? return assert(false, "no function at 0x1000")).name, "first")
+    assert_eq((native_function_at(image, 0x100f) ?? return assert(false, "no function at 0x100f")).name, "first")
+    assert_eq((native_function_at(image, 0x1025) ?? return assert(false, "no function at 0x1025")).name, "second")
+    assert_eq(native_function_at(image, 0x1010) == None, true)
+    assert_eq(native_function_at(image, 0xfff) == None, true)
+    assert_eq(native_function_at(image, 0x1030) == None, true)
 }
 
 #Test("an_unavailable_debugger_is_e2203") {
