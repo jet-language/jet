@@ -5,8 +5,10 @@
 # stop; the two writes to xs[3] do. The run starts at `run`, whose entry
 # breakpoint was number 1, so `break 3` is 2 and the watch is 3. The first
 # loop moves `xs` from its 4 items to room for 104, the second to room for
-# 204, each through several new buffers. The fixture must stay in jet fmt
-# form: line 3 is the first loop, lines 4 and 6 the writes to xs[3].
+# 204, each through several new buffers. When `fill` returns, a later call
+# of `run`'s at the same depth writing where `xs` was ends the watch as its
+# frame returned, not as a move. The fixture must stay in jet fmt form:
+# line 3 is the first loop, lines 4 and 6 the writes to xs[3].
 fixture: WatchFollowsAReallocatedList.fixture
 env: NO_COLOR=1
 env: PATH={work}/no-tools
@@ -19,6 +21,7 @@ stdout: ~ "Watchpoint 3 hit  prog.jet:4  in fill()\nxs[3]: 40 -> 41\n" # the fir
 stdout: ~ "Watchpoint 3 hit  prog.jet:6  in fill()\nxs[3]: 41 -> 42\n" # so does the write after it moved again
 stdout: !~ "xs[3]: 40 -> 40" # moving the item to a new buffer never stops
 stdout: !~ "xs[3]: 41 -> 41" # nor does the second loop's
-stdout: !~ "ended" # the watch lives through every move
+stdout: !~ "ended: its List" # the watch lives through every move
+stdout: !~ "xs[3]: 42 ->" # and no write after `fill` returns is its item's
 stdout: ~ "246\n" # the program prints its result
 stdout: ~ "Program finished\n" # and runs to its end
