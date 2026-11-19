@@ -323,6 +323,13 @@ IRX64Emitter: struct {
     // code is laid out, for X64FunctionDebug.calls; ir_x64_call adds the
     // arguments its caller keeps (ir_x64_kept_arguments).
     calls: [X64CallSite]{[X64CallSite]{}},
+    // Per instruction: of the first of a zone region's instructions
+    // (ir_x64_zone_regions), the region's last one, else -1; and the region
+    // being selected's last instruction and its skip's rel32 field (-1 for
+    // none).
+    sunk: [Int]{[Int]{}},
+    sunk_end: Int{-1},
+    sunk_site: Int{-1},
 }
 
 // One compiled function, the debug variables its ranges refer to, and its
@@ -1844,14 +1851,19 @@ IR_X64_PERF_ZONES_SYMBOL: "jet_rt_perf_zones"
 // same way never reads; a frame mark or a plot records nothing while zones
 // are off). So a zone, frame mark or plot the profiler is not recording
 // costs the word's load, test and branch, and the call's arguments are not
-// even set up. r11 may
-// hold a close's argument, so it is saved around the test (a pop keeps the
-// flags). A close whose open ran before the profiler turned zones on gets 0
-// and writes no row (PerfSamples.jet jet_perf_zone_close). A `zones: strip`
-// module (IRModule.zones_stripped) keeps no zone site: an open is the Int 0
-// and a close is nothing, while its frame marks and plots stay plain calls,
-// which record under a profiler as the setting promises.
+// even set up. A frame mark or plot inside a zone region
+// (ir_x64_zone_regions) is a plain call: the region's own test skipped it
+// with its arguments' computations. A close whose open ran before the
+// profiler turned zones on gets 0 and writes no row (PerfSamples.jet
+// jet_perf_zone_close). A `zones: strip` module (IRModule.zones_stripped)
+// keeps no zone site: an open is the Int 0 and a close is nothing, while
+// its frame marks and plots stay plain calls, which record under a profiler
+// as the setting promises.
 ir_x64_zone_site: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, symbol: String, dst: Int) Never! {
+    if e.sunk_site >= 0 && at <= e.sunk_end {
+        ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: symbol}, -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
+        return
+    }
     if m.zones_stripped {
         if dst >= 0 {
             x64_zero(e.code, X64_RAX)
@@ -1859,12 +1871,7 @@ ir_x64_zone_site: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
         }
         return
     }
-    x64_push(e.code, X64_R11)
-    flag: x64_load_rip(e.code, X64_R11)
-    e.relocs.push(X64Reloc{at: flag, target: X64RelocTarget.RuntimeData{symbol: IR_X64_PERF_ZONES_SYMBOL}})
-    x64_test_rr(e.code, X64_R11, X64_R11)
-    x64_pop(e.code, X64_R11)
-    recording: x64_jcc_rel32(e.code, X64Cond.NE)
+    recording: ir_x64_zones_test(e, X64Cond.NE)
     if dst >= 0 {
         x64_zero(e.code, X64_RAX)
         ir_x64_store(e, m, f, al, dst, X64_RAX)
@@ -1873,6 +1880,273 @@ ir_x64_zone_site: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
     ir_x64_patch(e, recording, e.code.bytes.len())
     ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: symbol}, -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
     ir_x64_patch(e, skip, e.code.bytes.len())
+}
+
+// Tests the runtime's zones word and jumps on `cond` (NE: zones on): the
+// jump's rel32 field. r11 may hold a value (a close's argument), so it is
+// saved around the test (a pop keeps the flags).
+ir_x64_zones_test: fn(e: &IRX64Emitter, cond: X64Cond) -> Int Never! {
+    x64_push(e.code, X64_R11)
+    flag: x64_load_rip(e.code, X64_R11)
+    e.relocs.push(X64Reloc{at: flag, target: X64RelocTarget.RuntimeData{symbol: IR_X64_PERF_ZONES_SYMBOL}})
+    x64_test_rr(e.code, X64_R11, X64_R11)
+    x64_pop(e.code, X64_R11)
+    x64_jcc_rel32(e.code, cond)
+}
+
+// A zone region's instructions, `start` to `end` (ir_x64_zone_regions).
+IRX64Region: struct {
+    start: Int,
+    end: Int,
+}
+
+// Zone regions: per instruction, of the first of a region's instructions,
+// the region's last one, else -1. A region is whole statements of one
+// level around a frame mark or plot (ir_x64_zone_call) that compute only
+// what nothing past them reads: the call's arguments (a plot's Float, its
+// bits and their boxing), their drops and the stop points between
+// (ir_x64_zone_quiet). The selector tests the zones word once at a
+// region's start (ir_x64_zone_bound) and, while it is zero, jumps past its
+// end, so a plot the profiler is not recording costs its test alone.
+// Skipping is sound because every slot the region writes or drops lives
+// only inside it (ir_x64_zone_holds: its range, X64Alloc.jet's, starts and
+// ends there), the allocator gives each slot one place over its whole
+// range, and structured control moves nothing on an edge (X64Alloc.jet):
+// what the skip leaves unwritten is never read, and every other slot keeps
+// its place. A branch may leave a region (a stop edge); none enters one.
+// Adjacent regions (a plot's and the frame mark right after it) share one
+// test. A `zones: strip` module keeps none.
+ir_x64_zone_regions: fn(m: IRModule, f: IRFunction, al: IRX64Allocation) -> [Int] Never! {
+    sunk := [Int]{}
+    loop _ in 0..<f.op.len() -> sunk.push(-1)
+    if m.zones_stripped -> return sunk
+    poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
+    trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
+    turn: name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1
+    points: [Int]{poll, trap, turn}
+    parents: ir_x64_parents(f)
+    first := -1
+    last := -1
+    loop at in 0..<f.op.len() {
+        if at <= last || !ir_x64_zone_call(m, f, at) -> next
+        region: ir_x64_zone_region(m, f, al, parents, points, at, last + 1)
+        // A region right after the last one joins it; a bare call is left to
+        // ir_x64_zone_site.
+        joined: first >= 0 && region.start == last + 1
+        if !joined && region.end == region.start -> next
+        if !joined -> first = region.start
+        sunk[first] = region.end
+        last = region.end
+    }
+    sunk
+}
+
+// Whether instruction `at` is a frame mark or plot, which records nothing
+// while zones are off.
+ir_x64_zone_call: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
+    if f.op[at] != .CallRuntime || f.dst[at] >= 0 || f.a[at] < 0 || f.a[at] >= m.names.len() {
+        return false
+    }
+    symbol: m.names[f.a[at]]
+    symbol == "jet_perf_plot" || symbol == "jet_perf_frame"
+}
+
+// Per instruction, the opener of the innermost construct holding it (an
+// End's is its opener's), -1 at the body's top level.
+ir_x64_parents: fn(f: IRFunction) -> [Int] Never! {
+    parents := [Int]{}
+    open := [Int]{}
+    loop at in 0..<f.op.len() {
+        op: f.op[at]
+        if op == .End && open.len() > 0 -> _ := open.pop()
+        parents.push(if open.is_empty() -> -1 else -> open[open.len() - 1])
+        if op == .Block || op == .Loop || op == .If -> open.push(at)
+    }
+    parents
+}
+
+// The End of the construct `opener` opens.
+ir_x64_zone_close: fn(f: IRFunction, opener: Int) -> Int Never! {
+    if f.op[opener] == .If -> f.c[opener] else -> f.a[opener]
+}
+
+// The zone region around the frame mark or plot at `call`, starting at or
+// after `floor`: the stop points and drops right after the call's
+// statement (ir_x64_zone_trails) and the quiet statements before it, the
+// widest choice whose slots hold (ir_x64_zone_holds), the furthest end
+// first. A Block it fills whole goes along, a statement of the level above.
+// `points` are the stop poll's, trap's and turn's function ids.
+ir_x64_zone_region: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, parents: [Int], points: [Int], call: Int, floor: Int) -> IRX64Region Never! {
+    poll: points[0]
+    start := call
+    end := call
+    loop {
+        parent: parents[start]
+        close: if parent < 0 -> f.op.len() else -> ir_x64_zone_close(f, parent)
+        ends := [Int]{end}
+        loop {
+            next_at: ends[ends.len() - 1] + 1
+            if next_at >= close || !ir_x64_zone_trails(f, poll, next_at) -> break
+            ends.push(if f.op[next_at] == .Drop -> next_at else -> f.c[next_at + 1])
+        }
+        starts := [Int]{start}
+        loop {
+            before: starts[starts.len() - 1] - 1
+            if before <= parent || before < floor -> break
+            from: ir_x64_zone_statement(f, poll, before)
+            if from <= parent || from < floor || !ir_x64_zone_quiet(m, f, al, poll, from, before) {
+                break
+            }
+            starts.push(from)
+        }
+        best := IRX64Region{start: start, end: end}
+        found := false
+        k := ends.len() - 1
+        loop k >= 0 && !found {
+            j := starts.len() - 1
+            loop j >= 0 && !found {
+                if ir_x64_zone_holds(f, al, points, starts[j], ends[k]) {
+                    best = IRX64Region{start: starts[j], end: ends[k]}
+                    found = true
+                }
+                j -= 1
+            }
+            k -= 1
+        }
+        if parent < floor || f.op[parent] != .Block || best.start != parent + 1 || best.end != close - 1 {
+            return best
+        }
+        start = parent
+        end = close
+    }
+}
+
+// The first instruction of the statement ending at `last`: a construct's
+// opener, a stop edge's poll (ir_x64_zone_edge), else `last` itself.
+ir_x64_zone_statement: fn(f: IRFunction, poll: Int, last: Int) -> Int Never! {
+    if f.op[last] != .End -> return last
+    opener: f.a[last]
+    if f.op[opener] == .If && opener > 0 && ir_x64_zone_edge(f, poll, opener - 1) {
+        return opener - 1
+    }
+    opener
+}
+
+// Whether a stop point or a Drop starts at `at`, which may trail a zone
+// region.
+ir_x64_zone_trails: fn(f: IRFunction, poll: Int, at: Int) -> Bool Never! {
+    f.op[at] == .Drop || ir_x64_zone_edge(f, poll, at)
+}
+
+// Whether `at` is a stop poll's call (`poll`, never a trap's or turn's)
+// whose stop edge right after it is only a Br or a Return of nothing.
+ir_x64_zone_edge: fn(f: IRFunction, poll: Int, at: Int) -> Bool Never! {
+    if poll < 0 || at + 3 >= f.op.len() || f.op[at] != .Call || f.a[at] != poll || f.dst[at] < 0 {
+        return false
+    }
+    branch: at + 1
+    if f.op[branch] != .If || f.a[branch] != f.dst[at] || f.b[branch] >= 0 || f.c[branch] != at + 3 {
+        return false
+    }
+    exit: at + 2
+    f.op[exit] == .Br || (f.op[exit] == .Return && f.a[exit] < 0 && f.b[exit] != IR_TAIL_JUMP)
+}
+
+// Whether instructions `start` to `end` may be skipped while zones are off,
+// slots aside (ir_x64_zone_holds): constants, data addresses, conversions,
+// comparisons and arithmetic that cannot trap (a wrapping or exact Int's,
+// a Float's; a division by a constant other than 0 and -1), drops, Blocks,
+// stop edges (ir_x64_zone_edge) and the routes a plot's arguments take
+// (ir_x64_zone_route). Nothing among them publishes a stop or writes past
+// its slots.
+ir_x64_zone_quiet: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, poll: Int, start: Int, end: Int) -> Bool Never! {
+    loop at in start..<(end + 1) {
+        quiet: if f.op[at] == {
+            .Nop | .Const | .ConstText | .DataAddress | .Convert | .Drop | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Not | .Block | .End -> true
+            .Add | .Sub | .Mul | .BitAnd | .BitOr | .BitXor -> ir_x64_zone_total(m, f, at)
+            .Div | .Rem | .FloorDiv | .Mod -> ir_x64_zone_divides(m, f, al, at)
+            .Call -> ir_x64_zone_edge(f, poll, at)
+            .If -> at > start && ir_x64_zone_edge(f, poll, at - 1)
+            .Br | .Return -> at > start + 1 && ir_x64_zone_edge(f, poll, at - 2)
+            .CallRuntime -> ir_x64_zone_route(m, f, al, at)
+            .ConstBigInt | .Copy | .Move | .Close | .Shl | .Shr | .Neg | .Concat | .CallIndirect | .FunctionAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Loop | .Else | .BrIf | .Unreachable | .Sqrt | .IntBig | .StreamStore -> false
+        }
+        if !quiet -> return false
+    }
+    true
+}
+
+// Whether the arithmetic at `at` cannot trap: an exact Int's, a Float's, a
+// Bool's or a wrapping word's.
+ir_x64_zone_total: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
+    if ir_x64_type(m, f, f.a[at]).kind == {
+        .Int | .Float | .Float32 | .Bool -> true
+        .Word -> ir_overflow_wraps(f.c[at])
+        .Unit | .Char | .String | .Pointer | .Aggregate -> false
+    }
+}
+
+// Whether the division at `at` cannot trap: a Float's, or an exact Int's or
+// word's by a constant other than 0 and -1.
+ir_x64_zone_divides: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) -> Bool Never! {
+    kind: ir_x64_type(m, f, f.a[at]).kind
+    if kind == .Float || kind == .Float32 -> return true
+    divisor: f.b[at]
+    (kind == .Int || kind == .Word) && divisor >= 0 && al.consts[divisor] && al.values[divisor] != 0 && al.values[divisor] != -1
+}
+
+// Whether the runtime call at `at` is one a plot's arguments take that
+// cannot stop: a frame mark or plot itself, a Float's bits
+// (jet_std_math_to_bits), a word's boxing (jet_int_owned_from_i64), an
+// exact Int's widening that cannot fail (OptStops.jet ir_opt_widen_exact)
+// or the I64 of a Float's bits (jet_int_checked_fixed of kind 3 or
+// jet_int_native_i64_at, which every bits value fits: Core Perf.jet plot).
+ir_x64_zone_route: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) -> Bool Never! {
+    if f.a[at] < 0 || f.a[at] >= m.names.len() -> return false
+    symbol: m.names[f.a[at]]
+    if ir_x64_zone_call(m, f, at) || symbol == "jet_std_math_to_bits" || symbol == "jet_int_owned_from_i64" {
+        return true
+    }
+    if symbol == "jet_int_checked_widen" -> return ir_opt_widen_exact(f, at)
+    native: symbol == "jet_int_native_i64_at"
+    if f.c[at] != (if native -> 4 else -> 5) || (!native && symbol != "jet_int_checked_fixed") {
+        return false
+    }
+    kind: if native -> -1 else -> f.args[f.b[at] + 1]
+    if !native && (kind < 0 || !al.consts[kind] || al.values[kind] != 3) -> return false
+    writer: ir_opt_only_write(f, f.args[f.b[at]])
+    writer >= 0 && f.op[writer] == .CallRuntime && f.a[writer] >= 0 && f.a[writer] < m.names.len() && m.names[f.a[writer]] == "jet_std_math_to_bits"
+}
+
+// Whether instructions `start` to `end` keep their slots to themselves:
+// every slot one writes or drops is referenced only there (its X64Alloc.jet
+// range lies inside), and every stop poll among them checks no call
+// (OptStops.jet ir_opt_polls_checked) or one among them, never a stop an
+// earlier call published, which skipping it would lose.
+ir_x64_zone_holds: fn(f: IRFunction, al: IRX64Allocation, points: [Int], start: Int, end: Int) -> Bool Never! {
+    loop at in start..<(end + 1) {
+        slot: if f.op[at] == .Drop -> f.a[at] else -> f.dst[at]
+        if slot >= 0 && (al.starts[slot] < start || al.ends[slot] > end) -> return false
+        if f.op[at] != .Call -> next
+        checked: ir_opt_polls_checked(f, points[0], points[1], points[2], at)
+        if checked >= 0 && checked < start -> return false
+    }
+    true
+}
+
+// A zone region's bounds at instruction `at`: past the region's end, its
+// skip lands here; at a region's start (ir_x64_zone_regions), the zones
+// word's test jumps past the whole region while it is zero.
+ir_x64_zone_bound: fn(e: &IRX64Emitter, at: Int) Never! {
+    if e.sunk_site >= 0 && at > e.sunk_end {
+        ir_x64_patch(e, e.sunk_site, e.code.bytes.len())
+        e.sunk_site = -1
+        e.sunk_end = -1
+    }
+    if e.sunk_site < 0 && e.sunk[at] >= 0 {
+        e.sunk_end = e.sunk[at]
+        e.sunk_site = ir_x64_zones_test(e, X64Cond.E)
+    }
 }
 
 // jet_rt_block_release(block) inline: true when the caller's reference was
@@ -5207,6 +5481,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
         if e.picks[at] < 0 -> next
         loop k in ir_x64_select_test(m, f, al, at)..<at -> e.absorbed[k] = f.op[k] != .Nop
     }
+    e.sunk = ir_x64_zone_regions(m, f, al)
 
     // The stack check (ir_x64_stack_check) first, then the frame-free
     // prefix (ir_x64_wrap), in registers of its own with its parameters
@@ -5313,6 +5588,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
         ir_x64_debug_line(lines, e.code.bytes.len(), ir_code_line_source(f.code_line[at]))
         e.at = at
         e.code.at = at
+        ir_x64_zone_bound(e, at)
         end: ir_x64_stop_point(e, m, f, al, at, poll, trap, turn, traps)
         traps = e.colds.len()
         if end > at {
@@ -5324,6 +5600,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
         at += 1
     }
     positions.push(e.code.bytes.len())
+    if e.sunk_site >= 0 -> ir_x64_patch(e, e.sunk_site, e.code.bytes.len())
     if e.open.len() > 0 {
         e.errors.push("{f.name}: {e.open.len()} structured constructs are never closed")
     }
@@ -6977,4 +7254,105 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
         if variable.name == "pair" && range.location == entry -> entered = variable.indirect
     }
     assert(entered)
+}
+
+// A plot's arguments as Core Perf.jet plot builds them (Float{total %%
+// 1000}, its bits' I64 and their boxing, with their stop points and drops)
+// and the frame mark right after it are one zone region: one test of the
+// zones word comes before all of them and, while the word is zero, jumps
+// past the frame mark's call. A widening of a value not proven small (a
+// remainder by a parameter) may stop, so it stays ahead of the test, which
+// covers the rest.
+#Test("A plot's argument computations and the frame mark after it sit behind one zones test") {
+    loop proven in ([Bool]{true, false}) {
+        m := ir_module_new()
+        int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
+        float: ir_type_row(m, Type.Float) ?? panic("no Float row")
+        flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+        text: ir_type_row(m, Type.String) ?? panic("no String row")
+        word: ir_word_row(m)
+        poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
+        f := ir_function_new("plotted", "test:plot.jet.plotted", "", "plot.jet", 1)
+        total: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "total"), 1)
+        modulus: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "modulus"), 1)
+        name: ir_slot(f, text, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(f, IROp.ConstText, name, ir_intern_text(m, "total"), -1, -1, 2)
+        divisor := modulus
+        if proven {
+            divisor = ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+            _ := ir_emit(f, IROp.Const, divisor, 1000, -1, -1, 2)
+        }
+        kept: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(f, IROp.Rem, kept, total, divisor, IR_OVERFLOW_NONNEG, 2)
+        single: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(f, IROp.Const, single, 0, -1, -1, 2)
+        file: ir_slot(f, text, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(f, IROp.ConstText, file, ir_intern_text(m, "plot.jet"), -1, -1, 2)
+        line: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(f, IROp.Const, line, 2, -1, -1, 2)
+        value: ir_slot(f, float, IRSlotKind.Temp, -1, 0)
+        widened: ir_args(f, [Int]{kept, single, file, line})
+        _ := ir_emit(f, IROp.CallRuntime, value, ir_intern_name(m, "jet_int_checked_widen"), widened, 4, 2)
+        _ := ir_open(f, IROp.Block, 3)
+        bits: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+        float_bits: ir_args(f, [Int]{value})
+        _ := ir_emit(f, IROp.CallRuntime, bits, ir_intern_name(m, "jet_std_math_to_bits"), float_bits, 1, 3)
+        fixed_args := [Int]{bits}
+        loop constant in ([Int]{3, 0, 0, 3}) {
+            operand: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+            _ := ir_emit(f, IROp.Const, operand, constant, -1, -1, 3)
+            fixed_args.push(operand)
+        }
+        fixed: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        fixed_operands: ir_args(f, fixed_args)
+        _ := ir_emit(f, IROp.CallRuntime, fixed, ir_intern_name(m, "jet_int_checked_fixed"), fixed_operands, 5, 3)
+        ir_x64_test_stop_edge(f, flag, poll, IROp.Br, 3)
+        _ := ir_emit(f, IROp.Drop, -1, bits, -1, -1, 3)
+        boxed: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+        boxing: ir_args(f, [Int]{fixed})
+        _ := ir_emit(f, IROp.CallRuntime, boxed, ir_intern_name(m, "jet_int_owned_from_i64"), boxing, 1, 3)
+        plotted: ir_args(f, [Int]{name, boxed})
+        _ := ir_emit(f, IROp.CallRuntime, -1, ir_intern_name(m, "jet_perf_plot"), plotted, 2, 3)
+        ir_x64_test_stop_edge(f, flag, poll, IROp.Br, 3)
+        _ := ir_emit(f, IROp.Drop, -1, boxed, -1, -1, 3)
+        ir_end(f, 3)
+        none: ir_args(f, [Int]{})
+        _ := ir_emit(f, IROp.CallRuntime, -1, ir_intern_name(m, "jet_perf_frame"), none, 0, 4)
+        ir_x64_test_stop_edge(f, flag, poll, IROp.Return, 4)
+        _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 5)
+        m.functions.push(f)
+        compiled: ir_x64_compile_function(m, ir_x64_tables(m), m.functions.len() - 1)
+        assert(compiled.errors.is_empty())
+        code: compiled.function.code
+        tests := [Int]{}
+        framed := -1
+        loop reloc in compiled.function.relocs {
+            if reloc.target == .RuntimeData(symbol) && symbol == IR_X64_PERF_ZONES_SYMBOL {
+                tests.push(reloc.at)
+            }
+            if reloc.target == .Runtime(symbol) && symbol == "jet_perf_frame" -> framed = reloc.at
+        }
+        assert_eq(tests.len(), 1)
+        assert(framed > tests[0])
+        // mov r11, [rip + zones]; test r11, r11; pop r11; je past the frame
+        // mark's call.
+        jump: tests[0] + 4 + 3 + 2
+        assert(code[jump] == 0x74 || (code[jump] == 0x0f && code[jump + 1] == 0x84))
+        assert(ir_x64_test_jcc_target(code, jump) >= framed + 4)
+        // The widening's inline range test (sar rdx, 53; add rdx, 1; cmp rdx, 1).
+        widening: ir_x64_code_find(code, [U8]{0x48, 0xc1, 0xfa, 0x35, 0x48, 0x83, 0xc2, 0x01, 0x48, 0x83, 0xfa, 0x01}, 0)
+        assert(widening >= 0)
+        assert((widening > tests[0]) == proven)
+    }
+}
+
+// A stop point: a poll of `callee` and its edge, `exit` (a Br out of the
+// construct around it or a Return).
+ir_x64_test_stop_edge: fn(f: &IRFunction, flag: Int, callee: Int, exit: IROp, line: Int) Never! {
+    stopped: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
+    none: ir_args(f, [Int]{})
+    _ := ir_emit(f, IROp.Call, stopped, callee, none, 0, line)
+    _ := ir_open_if(f, stopped, line)
+    _ := ir_emit(f, exit, -1, if exit == .Br -> 1 else -> -1, -1, -1, line)
+    ir_end(f, line)
 }

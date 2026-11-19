@@ -13,7 +13,7 @@
 // drops of Int and word slots move (no code of theirs can publish or mask
 // a stop), and only into an edge E that never comes back
 // (OptUnique.jet ir_opt_dead_end), so each path drops once.
-use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, name_rows_value]
+use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, name_rows_value]
 
 ir_opt_stops_after_calls: fn(f: &IRFunction, m: IRModule, keys: [String]) Never! {
     count: f.op.len()
@@ -370,15 +370,21 @@ ir_opt_stops_unreported: fn(f: &IRFunction, keys: [String], bodies: [Bool], repo
 // call or a trap publishes is still taken where it was. So an inlined
 // recursive body's entry check folds into the poll after its body. A turn
 // poll folded so makes the later one a turn poll, which still delivers a
-// passed deadline once per iteration. The stop points' ids are the
+// passed deadline once per iteration. A poll right after an exact Int's
+// widening that cannot fail (ir_opt_widen_exact) counts as after what came
+// before the widening, which publishes no stop: so a loop's turn passes it
+// and a zone site's arguments around it may be skipped (X64Select.jet
+// ir_x64_zone_regions). The stop points' and the widening's ids are the
 // module's (ir_opt_view names them in `m`).
 ir_opt_fold_polls: fn(f: &IRFunction, m: IRModule) Never! {
     poll: name_rows_value(m.name_rows, IR_STOP_POLL_KEY) ?? -1
     trap: name_rows_value(m.name_rows, IR_STOP_TRAP_KEY) ?? -1
     turn: name_rows_value(m.name_rows, IR_STOP_TURN_KEY) ?? -1
+    widen: name_rows_value(m.name_rows, "jet_int_checked_widen") ?? -2
     folded := false
     loop at in 0..<f.op.len() {
-        if !ir_opt_stops_any_poll(f, poll, turn, at) || ir_opt_polls_checks_call(f, poll, trap, turn, at) {
+        if !ir_opt_stops_any_poll(f, poll, turn, at) -> next
+        if ir_opt_polls_checks_call(f, poll, trap, turn, at) && !ir_opt_polls_after_exact(f, poll, trap, turn, widen, at) {
             next
         }
         end: f.c[at + 1]
@@ -391,6 +397,44 @@ ir_opt_fold_polls: fn(f: &IRFunction, m: IRModule) Never! {
     if folded -> ir_opt_compact(f)
 }
 
+// Whether the poll at `at` comes right after an exact widening (route
+// `widen`) and, past it, checks no call.
+ir_opt_polls_after_exact: fn(f: IRFunction, poll: Int, trap: Int, turn: Int, widen: Int, at: Int) -> Bool Never! {
+    if at == 0 || f.op[at - 1] != .CallRuntime || f.a[at - 1] != widen -> return false
+    ir_opt_widen_exact(f, at - 1) && !ir_opt_polls_checks_call(f, poll, trap, turn, at - 1)
+}
+
+// Whether the jet_int_checked_widen(value, f32, file, line) call at `at`
+// (BuildTypes.jet ir_checked_widen) widens a value in -2^24..2^24, which
+// every Float target holds exactly, so it never stops: the only write of
+// `value`, before `at`, is a constant there, or an exact Int's Rem or Mod by
+// a constant whose magnitude is at most 2^24 and is not 0 (whose result is
+// smaller than it).
+ir_opt_widen_exact: fn(f: IRFunction, at: Int) -> Bool Never! {
+    if f.c[at] != 4 -> return false
+    writer: ir_opt_only_write(f, f.args[f.b[at]])
+    if writer < 0 || writer >= at -> return false
+    if f.op[writer] == .Const -> return ir_opt_widen_small(f.a[writer])
+    if f.op[writer] != .Rem && f.op[writer] != .Mod -> return false
+    divisor: ir_opt_only_write(f, f.b[writer])
+    divisor >= 0 && divisor < writer && f.op[divisor] == .Const && f.a[divisor] != 0 && ir_opt_widen_small(f.a[divisor])
+}
+
+ir_opt_widen_small: fn(value: Int) -> Bool Never! { value >= -(1 << 24) && value <= 1 << 24 }
+
+// The only instruction writing `slot`, or -1 (a parameter, or written by
+// none or more than one).
+ir_opt_only_write: fn(f: IRFunction, slot: Int) -> Int Never! {
+    if slot < f.param_count -> return -1
+    writer := -1
+    loop at in 0..<f.op.len() {
+        if f.dst[at] != slot -> next
+        if writer >= 0 -> return -1
+        writer = at
+    }
+    writer
+}
+
 // Whether the poll at `at` checks a call: walking back to the first call
 // that is no stop point's (whose callee is no function `poll`, `trap` or
 // `turn`) or the first construct opened, a call met first, or a construct
@@ -398,21 +442,29 @@ ir_opt_fold_polls: fn(f: &IRFunction, m: IRModule) Never! {
 // handing its callee's stop on to the poll after it). X64Select.jet
 // ir_x64_stop_point reads it too.
 ir_opt_polls_checks_call: fn(f: IRFunction, poll: Int, trap: Int, turn: Int, at: Int) -> Bool Never! {
+    ir_opt_polls_checked(f, poll, trap, turn, at) >= 0
+}
+
+// Where the poll at `at` meets the call it checks
+// (ir_opt_polls_checks_call): the call, or the End of the construct whose
+// stop edge hands one on; -1 when it checks none. X64Select.jet
+// ir_x64_zone_holds reads it too.
+ir_opt_polls_checked: fn(f: IRFunction, poll: Int, trap: Int, turn: Int, at: Int) -> Int Never! {
     k := at - 1
     loop k >= 0 {
         op: f.op[k]
         if op == .End {
-            if ir_opt_polls_hands_on(f, f.a[k], k) -> return true
+            if ir_opt_polls_hands_on(f, f.a[k], k) -> return k
             k = f.a[k] - 1
             next
         }
         if (op == .Call && (f.a[k] < 0 || (f.a[k] != poll && f.a[k] != trap && f.a[k] != turn))) || op == .CallRuntime || op == .CallIndirect {
-            return true
+            return k
         }
-        if op == .Block || op == .Loop || op == .If || op == .Else -> return false
+        if op == .Block || op == .Loop || op == .If || op == .Else -> return -1
         k -= 1
     }
-    false
+    -1
 }
 
 // Whether a stop edge (an If testing what a call just returned) from
@@ -497,4 +549,64 @@ ir_opt_polls_br_end: fn(f: IRFunction, at: Int, level: Int) -> Int Never! {
         k += 1
     }
     -1
+}
+
+// A loop's turn right after Float{total %% 1000} (an exact Int's widening
+// of a remainder by a constant, which cannot fail) folds into the poll past
+// the plot after it, so nothing between the widening and the plot's own
+// stop points needs the turn; a remainder by a parameter may be any size,
+// so its widening may stop and the turn stays right after it.
+#Test("A loop's turn passes a widening that cannot fail") {
+    loop proven in ([Bool]{true, false}) {
+        m := ir_module_new()
+        int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
+        float: ir_type_row(m, Type.Float) ?? panic("no Float row")
+        flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+        text: ir_type_row(m, Type.String) ?? panic("no String row")
+        word: ir_word_row(m)
+        poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
+        turn: ir_stop_poll(m, IR_STOP_TURN_KEY)
+        widen: ir_intern_name(m, "jet_int_checked_widen")
+        plot: ir_intern_name(m, "jet_perf_plot")
+        f := ir_function_new("spin", "test:spin.jet.spin", "", "spin.jet", 1)
+        total: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "total"), 1)
+        _ := ir_open(f, IROp.Loop, 2)
+        divisor := total
+        if proven {
+            divisor = ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+            _ := ir_emit(f, IROp.Const, divisor, 1000, -1, -1, 2)
+        }
+        kept: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(f, IROp.Rem, kept, total, divisor, IR_OVERFLOW_NONNEG, 2)
+        single: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(f, IROp.Const, single, 0, -1, -1, 2)
+        file: ir_slot(f, text, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(f, IROp.ConstText, file, ir_intern_text(m, "spin.jet"), -1, -1, 2)
+        line: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(f, IROp.Const, line, 2, -1, -1, 2)
+        value: ir_slot(f, float, IRSlotKind.Temp, -1, 0)
+        operands: ir_args(f, [Int]{kept, single, file, line})
+        widened: ir_emit(f, IROp.CallRuntime, value, widen, operands, 4, 2)
+        ir_x64_test_stop_edge(f, flag, turn, IROp.Return, 2)
+        _ := ir_open(f, IROp.Block, 3)
+        name: ir_slot(f, text, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(f, IROp.ConstText, name, ir_intern_text(m, "total"), -1, -1, 3)
+        plotted: ir_args(f, [Int]{name, value})
+        _ := ir_emit(f, IROp.CallRuntime, -1, plot, plotted, 2, 3)
+        ir_x64_test_stop_edge(f, flag, poll, IROp.Br, 3)
+        ir_end(f, 3)
+        ir_x64_test_stop_edge(f, flag, poll, IROp.Return, 4)
+        _ := ir_emit(f, IROp.Br, -1, 0, -1, -1, 4)
+        ir_end(f, 4)
+        _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 5)
+        view: ir_opt_view(m, [String]{})
+        ir_opt_fold_polls(f, view)
+        turns := [Int]{}
+        loop at in 0..<f.op.len() {
+            if f.op[at] == .Call && f.a[at] == turn -> turns.push(at)
+        }
+        assert_eq(turns.len(), 1)
+        assert_eq(turns[0] == widened + 1, !proven)
+        if proven -> assert(f.op[turns[0] - 1] == .End && f.op[f.a[turns[0] - 1]] == .Block)
+    }
 }
