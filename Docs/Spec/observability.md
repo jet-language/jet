@@ -299,8 +299,10 @@ Under `alloc` the session builds the program with `--checked-alloc`, whose
 heap keeps each block's ten allocating call sites in its prefix, and the
 runtime links every block allocated from the program's entry into a live
 list until it is freed. The blocks the runtime and the observation take
-before the entry, and those of the observation's writer thread, are their
-own, not the program's, and stay off the list. A run without the lens
+before the entry, those of the observation's writer thread, and the rows the
+observation keeps for the program's tasks and channels (a task's label and
+its wait's name among them), are their own, not the program's: they stay off
+the list, and the lens counts none of them. A run without the lens
 tracks nothing and pays nothing. `core.perf.heap_mark(name)` takes a heap
 snapshot named `name`, and the runtime takes one named `exit` as the
 program exits; in any other run `heap_mark` does nothing. A snapshot holds

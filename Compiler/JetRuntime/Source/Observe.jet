@@ -241,6 +241,8 @@ observe_task_linked := I64{0}
         sync_mutex_unlock(observe_root)
         return I64{0}
     }
+    // The label, the row and the table are the observation's own blocks.
+    alloc_check_own_enter()
     text := I64{0}
     if observe_nonblank(label) -> text = observe_bounded(label) else {
         text = jet_rt_string_builder_new()
@@ -256,6 +258,7 @@ observe_task_linked := I64{0}
     sync_store(wrapping(node + I64{32}), text)
     sync_store(wrapping(node + I64{80}), control)
     observe_task_link(node)
+    alloc_check_own_leave()
     sync_mutex_unlock(observe_root)
     id
 }
@@ -337,7 +340,9 @@ observe_task_count: fn(field: I64, delta: I64) {
     if (node != I64{0}) {
         old = sync_load(wrapping(node + I64{48}))
         sync_store(wrapping(node + I64{40}), state)
+        alloc_check_own_enter()
         sync_store(wrapping(node + I64{48}), observe_bounded(wait))
+        alloc_check_own_leave()
         sync_store(wrapping(node + I64{56}), if (present != I64{0}) -> I64{1} else -> I64{0})
         sync_store(wrapping(node + I64{64}), remaining)
     }
@@ -442,7 +447,9 @@ observe_cancel_live_tasks: fn() {
         }
     }
     id: sync_add(wrapping(observe_root + I64{16}), I64{1})
+    alloc_check_own_enter()
     node: jet_rt_alloc(I64{64}, I64{8})
+    alloc_check_own_leave()
     thread_zero(node, I64{64})
     sync_store(wrapping(node + I64{8}), id)
     sync_store(wrapping(node + I64{24}), if (bounded != I64{0}) -> I64{1} else -> I64{0})

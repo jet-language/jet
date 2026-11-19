@@ -32,10 +32,12 @@
 // Alloc window run stacks (Alloc.jet ALLOC_WINDOW_ROWS); @736 exact-Int
 // hazard record (IntHazard.jet INT_HAZARD_TCB_RECORD; a fiber borrows its
 // carrier's); @744/@752 the sampler handler's clock timespec (PerfSamples.jet
-// PERF_SAMPLES_TCB_CLOCK). @760 to @1016 stay unused, so the stack segment
-// words start at an offset where the allocator state page, an unattached
-// thread's GS target, reads zero: @1024 stack limit, @1032 running segment,
-// @1040 spare segment, @1048 segment room, @1056 probe size
+// PERF_SAMPLES_TCB_CLOCK); @768 the count of the observation's own takes the
+// thread is inside (Alloc.jet ALLOC_TCB_OWN). @760 and @776 to @1016 stay
+// unused, so the stack segment words start at an offset where the allocator
+// state page, an unattached thread's GS target, reads zero: @1024 stack
+// limit, @1032 running segment, @1040 spare segment, @1048 segment room,
+// @1056 probe size
 // (StackSegment.jet STACK_TCB_LIMIT).
 // Slot200 provenance: before this append, the 26b5c5911 source map reserves
 // 192/200. Searching I64{192}/I64{200} across Thread, Scheduler, Task,
