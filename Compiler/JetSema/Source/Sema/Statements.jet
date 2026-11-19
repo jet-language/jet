@@ -9741,7 +9741,9 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
     }
     scopes.return_type = return_type
     scopes.loop_depth = loop_depth
-    sema_stmt_lint_same_subject_dispatch(statements, environment, program, diagnostics)
+    // A body a derive writes (`func.compiler_generated`, the origin the
+    // compiler records on the function) is no user dispatch to rewrite.
+    if !context.compiler_generated -> sema_stmt_lint_same_subject_dispatch(statements, environment, program, diagnostics)
     sema_stmt_lint_map_group_round_trip(statements, environment, program, scopes, diagnostics)
     output := [TStmt]{}
     complete := true

@@ -1,0 +1,32 @@
+// A #CLI program with four options: the entry the derive writes reads
+// `--name`, `--count`, `--loud` and `--greeting` through its own guards and
+// tables (`__r`, `__n`), and none of them is a user dispatch. `pick` is the
+// user's own three-guard dispatch over one word, so it alone gets L0514.
+#CLI
+Options: struct {
+    #Doc("who to greet") name: String{"world"},
+    #Doc("how many times") count: Int{1},
+    #Doc("shout") loud: Bool{false},
+    #Doc("the greeting") greeting: String{"hello"},
+}
+
+pick: fn(word: String) -> Int {
+    if word == "one" {
+        return 1
+    }
+    if word == "two" {
+        return 2
+    }
+    if word == "three" {
+        return 3
+    }
+    0
+}
+
+run: fn(args: Options) {
+    loop _ in 0..<args.count {
+        line: "{args.greeting} {args.name}"
+        print(if args.loud -> line.upper() else -> line)
+    }
+    print(pick("two"))
+}

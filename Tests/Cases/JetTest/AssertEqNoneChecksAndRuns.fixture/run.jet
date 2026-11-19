@@ -1,0 +1,16 @@
+// `assert_eq(x, None)` takes `None` at the Optional type of `x`: it
+// checks clean and the assertion holds at run time, as does `Val(2)`.
+lookup: fn(xs: [Int], want: Int) -> Int? {
+    loop x in xs {
+        if x == want -> return x
+    }
+    None
+}
+
+run: fn() {
+    missing: lookup([1, 2], 5)
+    assert_eq(missing, None)
+    present: lookup([1, 2], 2)
+    assert_eq(present, Val(2))
+    print("ok")
+}
