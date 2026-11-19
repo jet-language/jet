@@ -7,7 +7,10 @@
 // listed loop head so that the head starts on its alignment
 // (ir_x64_loop_align) in the relaxed code. Before that, a jcc that only
 // jumps over the listed jmp right after it takes the jmp's target with the
-// inverse condition, and the jmp goes (ir_x64_relax_fuse).
+// inverse condition, and the jmp goes (ir_x64_relax_fuse). A pinned branch
+// (a patchable zone site's jmp, X64Select.jet ir_x64_zones_skip) keeps its
+// rel32 form and is never fused away, so the runtime finds the five bytes
+// it patches; only its displacement follows the code it jumps over.
 //
 // The pass starts from every branch long and shortens, to a fixed point,
 // each branch whose displacement fits in a signed byte in the layout so far.
@@ -59,10 +62,11 @@ ir_x64_loop_align: fn(length: Int) -> Int Never! {
 }
 
 // Relaxes the branches whose rel32 fields `sites` lists (in any order,
-// repeats allowed) in `code`, in place, aligns the loop heads `heads` (old
-// offsets of instruction starts, in any order, no loop inside another),
-// each loop ending at `ends` (the same index), and returns the layout map.
-ir_x64_relax: fn(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64Relax Never! {
+// repeats allowed) in `code`, in place, but for those `pinned` lists too,
+// which stay long; aligns the loop heads `heads` (old offsets of
+// instruction starts, in any order, no loop inside another), each loop
+// ending at `ends` (the same index), and returns the layout map.
+ir_x64_relax: fn(code: &[U8], sites: [Int], pinned: [Int], heads: [Int], ends: [Int]) -> IRX64Relax Never! {
     ordered := sites.copy()
     ordered.sort()
     r := IRX64Relax{sites: [Int]{}, starts: [Int]{}, lengths: [Int]{}, short: [Bool]{}, stays_long: [Bool]{}, gone: [Bool]{}, shrunk: [Int]{}, heads: [Int]{}, ends: [Int]{}, pads: [Int]{}, padded: [Int]{}, align: X64_FUNCTION_ALIGN}
@@ -74,7 +78,7 @@ ir_x64_relax: fn(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64R
         r.starts.push(if jump -> site - 1 else -> site - 2)
         r.lengths.push(if jump -> 5 else -> 6)
         r.short.push(false)
-        r.stays_long.push(false)
+        r.stays_long.push(pinned.contains(site))
         r.gone.push(false)
         r.shrunk.push(0)
         targets.push(site + 4 + ir_x64_rel32_at(code, site))
@@ -222,7 +226,7 @@ ir_x64_relax_fuse: fn(code: &[U8], r: &IRX64Relax, targets: &[Int]) Never! {
         jump: index + 1
         start: r.starts[jump]
         loop seen < landed.len() && landed[seen] < start -> seen += 1
-        if r.lengths[index] == 6 && r.lengths[jump] == 5 && r.starts[index] + 6 == start && targets[index] == start + 5 && !(seen < landed.len() && landed[seen] == start) && !r.heads.contains(start) {
+        if r.lengths[index] == 6 && r.lengths[jump] == 5 && !r.stays_long[jump] && r.starts[index] + 6 == start && targets[index] == start + 5 && !(seen < landed.len() && landed[seen] == start) && !r.heads.contains(start) {
             opcode: r.starts[index] + 1
             code[opcode] = U8{Int{code[opcode]} ~ 1}
             targets[index] = targets[jump]
@@ -352,7 +356,7 @@ ir_x64_relax_heads_to: fn(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never!
     loop _ in 0..<4 -> code.push(U8{0})
     x64_patch_rel32(code, 1, 33)
     x64_patch_rel32(code, 29, 8)
-    r: ir_x64_relax(code, [Int]{1, 29}, [Int]{8}, [Int]{33})
+    r: ir_x64_relax(code, [Int]{1, 29}, [Int]{}, [Int]{8}, [Int]{33})
     assert_eq(r.align, 32)
     assert_eq(ir_x64_relaxed_at(r, 8), 32)
     assert_eq(code.len(), 54)
@@ -378,7 +382,7 @@ ir_x64_relax_heads_to: fn(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never!
         loop _ in 0..<3 -> code.push(U8{0x90})
     }
     length: code.len()
-    r: ir_x64_relax(code, sites, [Int]{80}, [Int]{120})
+    r: ir_x64_relax(code, sites, [Int]{}, [Int]{80}, [Int]{120})
     offsets := [Int]{}
     loop at in 0..<(length + 1) -> offsets.push(at)
     loop at in 0..<(length + 1) -> offsets.push(length - at)
@@ -397,7 +401,7 @@ ir_x64_relax_heads_to: fn(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never!
     loop _ in 0..<4 -> code.push(U8{0})
     x64_patch_rel32(code, 1, 128)
     x64_patch_rel32(code, 124, 122)
-    r: ir_x64_relax(code, [Int]{1, 124}, [Int]{122}, [Int]{128})
+    r: ir_x64_relax(code, [Int]{1, 124}, [Int]{}, [Int]{122}, [Int]{128})
     assert_eq(r.align, 16)
     assert_eq(ir_x64_relaxed_at(r, 122), 128)
     assert_eq(code.len(), 131)
@@ -414,7 +418,7 @@ ir_x64_relax_heads_to: fn(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never!
     code.push(U8{0xc3})
     x64_patch_rel32(code, 2, 11)
     x64_patch_rel32(code, 7, 20)
-    r: ir_x64_relax(code, [Int]{2, 7}, [Int]{}, [Int]{})
+    r: ir_x64_relax(code, [Int]{2, 7}, [Int]{}, [Int]{}, [Int]{})
     assert_eq(code.len(), 12)
     assert_eq(Int{code[0]}, 0x75)
     assert_eq(Int{code[1]}, 9)
@@ -434,7 +438,7 @@ ir_x64_relax_heads_to: fn(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never!
     x64_patch_rel32(code, 2, 11)
     x64_patch_rel32(code, 7, 20)
     x64_patch_rel32(code, 21, 6)
-    r: ir_x64_relax(code, [Int]{2, 7, 21}, [Int]{}, [Int]{})
+    r: ir_x64_relax(code, [Int]{2, 7, 21}, [Int]{}, [Int]{}, [Int]{})
     assert_eq(code.len(), 15)
     assert_eq(Int{code[0]}, 0x74)
     assert_eq(Int{code[1]}, 2)
@@ -443,4 +447,23 @@ ir_x64_relax_heads_to: fn(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never!
     assert_eq(Int{code[13]}, 0xeb)
     assert_eq(Int{code[14]}, 256 - 13)
     assert_eq(ir_x64_relaxed_at(r, 20), 13)
+}
+
+// The je-over-jmp shape again, but the jmp is pinned (a patchable zone
+// site): the jmp stays, long, and the je only goes short.
+#Test("A pinned jmp keeps its rel32 form and is never fused") {
+    code := [U8]{0x0f, 0x84, 0, 0, 0, 0, 0xe9, 0, 0, 0, 0}
+    loop _ in 0..<9 -> code.push(U8{0x90})
+    code.push(U8{0xc3})
+    x64_patch_rel32(code, 2, 11)
+    x64_patch_rel32(code, 7, 20)
+    r: ir_x64_relax(code, [Int]{2, 7}, [Int]{7}, [Int]{}, [Int]{})
+    assert_eq(code.len(), 17)
+    assert_eq(Int{code[0]}, 0x74)
+    assert_eq(Int{code[1]}, 5)
+    assert_eq(Int{code[2]}, 0xe9)
+    assert_eq(ir_x64_rel32_at(code, 3), 9)
+    assert_eq(ir_x64_relaxed_at(r, 6), 2)
+    assert_eq(ir_x64_relaxed_at(r, 20), 16)
+    assert_eq(Int{code[16]}, 0xc3)
 }

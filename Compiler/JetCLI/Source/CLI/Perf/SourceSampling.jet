@@ -1211,8 +1211,9 @@ jet_cli_perf_window: fn(profile: &TraceProfile, window: JetCLIPerfRuntimeWindow)
 // on the same clock) its task took from its start to its end, and the lines
 // of `source` they were on. Every zone, frame mark and plotted value counts
 // in the `zones` receipt section, the rows past the limit too
-// (jet_cli_perf_zones_section).
-// The file is removed once read; a row cut short ends the read.
+// (jet_cli_perf_zones_section), and so does why zones could not turn on (a
+// JET_CLI_PERF_ZONE_REFUSED row's name), which is no timeline row. The file
+// is removed once read; a row cut short ends the read.
 jet_cli_perf_log_spans_read: fn(capture: &JetCLIPerfCapture, path: String, source: String, origin_ns: Int, timed: [JetCLIPerfTimed]) -[FS]> Never! {
     bytes: perf_files.read_bytes(path) ?? [U8]{}
     perf_files.remove(path).drop("the session reads its log spans once")
@@ -1224,6 +1225,7 @@ jet_cli_perf_log_spans_read: fn(capture: &JetCLIPerfCapture, path: String, sourc
     plot_at := [String:Int]{}
     // The zone rows of `capture` that hold samples.
     sampled := [JetCLIPerfZoneSampled]{}
+    refused := ""
     at := 0
     loop at + 32 <= bytes.len() {
         start: link_debug_addr(bytes, at)
@@ -1235,6 +1237,10 @@ jet_cli_perf_log_spans_read: fn(capture: &JetCLIPerfCapture, path: String, sourc
         if shape < 0 || at + 32 + length > bytes.len() -> break
         name: String.from_bytes(bytes.slice(at + 32, at + 32 + length)) ?? break
         at += 32 + length
+        if kind == JET_CLI_PERF_ZONE_REFUSED {
+            refused = name
+            next
+        }
         // The zone's samples, and the line most of them were on.
         held := 0
         hottest := 0
@@ -1294,10 +1300,10 @@ jet_cli_perf_log_spans_read: fn(capture: &JetCLIPerfCapture, path: String, sourc
         symbol: JetSymbolRef{path: source, name: label}
         capture.spans.push(TraceSpan{awaited_task_id: None, channel_id: None, clock: "monotonic", start_ns: Val(since), end_ns: Val(until), kind: row, local_address: None, parent_task_id: None, peer_address: None, reason: "", spawn_line: None, status: "captured", symbol: symbol, task_id: None, wait_stack: [TraceStackFrame]{}, waker: "", waker_line: None, waker_task_id: None})
     }
-    if zones.len() > 0 || frames.len() > 0 || plots.len() > 0 {
+    if zones.len() > 0 || frames.len() > 0 || plots.len() > 0 || refused != "" {
         zones.sort_by(fn(left: JetCLIPerfZoneTotal, right: JetCLIPerfZoneTotal) { (right.total <=> left.total).then(left.name <=> right.name) })
         frames.sort()
-        capture.receipts.push(jet_cli_perf_zones_section(zones, frames, plots, sampled, source))
+        capture.receipts.push(jet_cli_perf_zones_section(zones, frames, plots, sampled, source, refused))
     }
 }
 
@@ -1330,10 +1336,12 @@ JetCLIPerfZoneSampled: struct {
 // samples their tasks took inside them and the JET_CLI_PERF_ZONE_LINES
 // lines of `source` most of those were on; the frames with how many and
 // their mean and longest interval; each plot with how many values and its
-// last; and each zone row of the trace that holds samples (`sampled`), by
-// its name, start and end, with how many and the line most were on. `jet
-// perf view` shows them (jet_cli_perf_zone_lines, jet_cli_perf_timeline).
-jet_cli_perf_zones_section: fn(zones: [JetCLIPerfZoneTotal], frames: [Int], plots: [JetCLIPerfPlotTotal], sampled: [JetCLIPerfZoneSampled], source: String) -> TraceReceiptSection Never! {
+// last; each zone row of the trace that holds samples (`sampled`), by its
+// name, start and end, with how many and the line most were on; and, when
+// the runtime could not turn zones on, why (`refused`, empty otherwise).
+// `jet perf view` shows them (jet_cli_perf_zone_lines,
+// jet_cli_perf_timeline).
+jet_cli_perf_zones_section: fn(zones: [JetCLIPerfZoneTotal], frames: [Int], plots: [JetCLIPerfPlotTotal], sampled: [JetCLIPerfZoneSampled], source: String, refused: String) -> TraceReceiptSection Never! {
     widest := 0
     loop at in 1..<frames.len() {
         if frames[at] - frames[at - 1] > widest -> widest = frames[at] - frames[at - 1]
@@ -1390,24 +1398,26 @@ jet_cli_perf_zones_section: fn(zones: [JetCLIPerfZoneTotal], frames: [Int], plot
             ),
         )
     }
-    value: CanonicalJSON.Object(
-        [CanonicalJSONField]{
-            {
-                key: "frames",
-                value: CanonicalJSON.Object(
-                    [CanonicalJSONField]{
-                        {key: "count", value: CanonicalJSON.Integer("{frames.len()}")},
-                        {key: "longest_ns", value: CanonicalJSON.Integer("{widest}")},
-                        {key: "mean_ns", value: CanonicalJSON.Integer("{mean}")},
-                    },
-                ),
-            },
-            {key: "plots", value: CanonicalJSON.Array(plot_rows)},
-            {key: "sampled", value: CanonicalJSON.Array(sampled_rows)},
-            {key: "source", value: CanonicalJSON.String("{source}")},
-            {key: "zones", value: CanonicalJSON.Array(zone_rows)},
+    fields := [CanonicalJSONField]{
+        {
+            key: "frames",
+            value: CanonicalJSON.Object(
+                [CanonicalJSONField]{
+                    {key: "count", value: CanonicalJSON.Integer("{frames.len()}")},
+                    {key: "longest_ns", value: CanonicalJSON.Integer("{widest}")},
+                    {key: "mean_ns", value: CanonicalJSON.Integer("{mean}")},
+                },
+            ),
         },
-    )
+        {key: "plots", value: CanonicalJSON.Array(plot_rows)},
+    }
+    if refused != "" {
+        fields.push(CanonicalJSONField{key: "refused", value: CanonicalJSON.String("{refused}")})
+    }
+    fields.push(CanonicalJSONField{key: "sampled", value: CanonicalJSON.Array(sampled_rows)})
+    fields.push(CanonicalJSONField{key: "source", value: CanonicalJSON.String("{source}")})
+    fields.push(CanonicalJSONField{key: "zones", value: CanonicalJSON.Array(zone_rows)})
+    value: CanonicalJSON.Object(fields)
     digest: canonical_json_sha256(value)
     TraceReceiptSection{name: "zones", type_name: "JetPerfZones", value: value, digest: digest}
 }
@@ -1422,12 +1432,15 @@ JetCLIPerfZoneLine: struct {
 }
 
 // What a row of the spans file is (PerfSamples.jet PERF_ZONE_LOG and the
-// others): a closed log span, a closed zone, a frame mark or a plot.
+// others): a closed log span, a closed zone, a frame mark, a plot, or why
+// zones could not turn on.
 JET_CLI_PERF_ZONE_ZONE: 1
 
 JET_CLI_PERF_ZONE_FRAME: 2
 
 JET_CLI_PERF_ZONE_PLOT: 3
+
+JET_CLI_PERF_ZONE_REFUSED: 4
 
 // Each task's wait the program recorded (`waits`) as a `task_wait`
 // row of `capture`, timed from `origin_ns` as the log spans are: its task

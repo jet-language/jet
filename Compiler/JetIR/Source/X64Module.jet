@@ -6,7 +6,7 @@
 // big-integer decimals); the debug files and types; and per IR function its
 // name, file, line and debug variables.
 use {
-    jet_foundation.[CompilerThreads, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_transfer_rows]
+    jet_foundation.[CompilerThreads, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_transfer_rows, sha256_hex]
     jet_backend.[
         X64CompiledFunction,
         X64Data,
@@ -36,6 +36,7 @@ use {
         x64_object_functions_threads,
         x64_object_main,
         x64_object_main_debug,
+        x64_object_zone_sites,
     ]
 }
 
@@ -978,15 +979,17 @@ ir_x64_take_inputs: fn(inputs: Shared<IRX64Inputs>) -> IRX64Inputs {
 // (IRModule.owned_main), attaching its thread first when
 // IRModule.owned_attach, and a global symbol for each runtime provider hook
 // the program defines (IRModule.hooks), which the link binds the runtime's
-// calls of the hook to. `debug_info` false (the build option) leaves the
-// DWARF sections empty; true also names each of the program's own writable
-// cells by a global symbol (ir_debug_cell_exports), which a debugger's
-// evaluation addresses them by.
+// calls of the hook to. When the functions `main` reaches have patchable
+// zone sites, `main` registers their table first (ir_x64_zone_sites).
+// `debug_info` false (the build option) leaves the DWARF sections empty;
+// true also names each of the program's own writable cells by a global
+// symbol (ir_debug_cell_exports), which a debugger's evaluation addresses
+// them by.
 ir_x64_object: fn(compiled: &&IRX64Result, debug_info: Bool) -> X64ExecutableResult Never! {
     owned := compiled.move()
     functions := [X64CompiledFunction]{}
     debug := [X64FunctionDebug]{}
-    errors := ir_x64_main_rows(owned, functions, debug)
+    errors := ir_x64_main_rows(owned, functions, debug, true)
     if errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: errors.move()}
     exports := [X64RuntimeExport]{X64RuntimeExport{function: X64FunctionID{value: -1}, symbol: "main"}}
     loop hook in compiler_take_rows<IRLibraryExport>(owned.program.hooks) {
@@ -1035,7 +1038,7 @@ ir_x64_program: fn(compiled: &&IRX64Result) -> IRX64Program Never! {
     owned := compiled.move()
     functions := [X64CompiledFunction]{}
     debug := [X64FunctionDebug]{}
-    errors := ir_x64_main_rows(owned, functions, debug)
+    errors := ir_x64_main_rows(owned, functions, debug, false)
     IRX64Program{
         program: X64ObjectModule{data: compiler_take_rows<X64Data>(owned.tables.data), debug: X64ModuleDebug{directory: "", files: [String]{}, types: [X64DebugType]{}}, functions: [X64FunctionSource]{}},
         functions: functions.move(),
@@ -1049,12 +1052,12 @@ ir_x64_program: fn(compiled: &&IRX64Result) -> IRX64Program Never! {
 // unwritten: the module with its debug files, types and function sources
 // beside its data, `main` and the functions it reaches with their debug
 // rows. `jet debug`'s `fix` swaps these into a running image (JetDebug
-// NativeFix.jet).
+// NativeFix.jet); their zone sites join no table, so they stay off.
 ir_x64_debug_program: fn(compiled: &&IRX64Result) -> IRX64Program Never! {
     owned := compiled.move()
     functions := [X64CompiledFunction]{}
     debug := [X64FunctionDebug]{}
-    errors := ir_x64_main_rows(owned, functions, debug)
+    errors := ir_x64_main_rows(owned, functions, debug, false)
     IRX64Program{
         program: ir_x64_object_module(owned),
         functions: functions.move(),
@@ -1066,12 +1069,14 @@ ir_x64_debug_program: fn(compiled: &&IRX64Result) -> IRX64Program Never! {
 
 // The object's functions of `owned` into `functions`, with their debug rows
 // into `debug`: `main` for its entry function (x64_object_main), then the
-// compiled functions it or a kept root reaches (ir_x64_reached_only). A
-// module with no entry but kept roots, a debugger's held evaluation
-// (JetIR Build.jet ir_build_held_root), has no `main`: its functions are
-// those its kept roots reach. Else why there are none: the compile's
-// errors, or an entry `main` can't run.
-ir_x64_main_rows: fn(owned: &IRX64Result, functions: &[X64CompiledFunction], debug: &[X64FunctionDebug]) -> [String] Never! {
+// compiled functions it or a kept root reaches (ir_x64_reached_only), then
+// with `sites`, when they have patchable zone sites, the function that
+// registers their table, which `main` calls (ir_x64_zone_sites). A module
+// with no entry but kept roots, a debugger's held evaluation (JetIR
+// Build.jet ir_build_held_root), has no `main`: its functions are those its
+// kept roots reach. Else why there are none: the compile's errors, or an
+// entry `main` can't run.
+ir_x64_main_rows: fn(owned: &IRX64Result, functions: &[X64CompiledFunction], debug: &[X64FunctionDebug], sites: Bool) -> [String] Never! {
     if owned.errors.len() > 0 -> return compiler_take_rows<String>(owned.errors)
     entry: owned.program.entry
     if entry < 0 && owned.program.kept.len() > 0 {
@@ -1086,13 +1091,54 @@ ir_x64_main_rows: fn(owned: &IRX64Result, functions: &[X64CompiledFunction], deb
     if owned.program.functions[entry].param_count != 0 || owned.program.functions[entry].result >= 0 {
         return [String]{"entry function {owned.program.functions[entry].name} must take no parameters and return nothing"}
     }
-    main: x64_object_main(X64FunctionID{value: entry}, owned.program.owned_main, owned.program.owned_attach)
+    table: if sites -> ir_x64_zone_sites_id(owned.functions) else -> None
+    main: x64_object_main(X64FunctionID{value: entry}, owned.program.owned_main, owned.program.owned_attach, table)
     debug.push(x64_object_main_debug(main))
     debug.extend(compiler_take_rows<X64FunctionDebug>(owned.debug))
     functions.push(main.move())
     functions.extend(compiler_take_rows<X64CompiledFunction>(owned.functions))
     ir_x64_reached_only(functions, debug, owned.program.kept, true)
+    if table == .Val(id) -> ir_x64_zone_sites(functions, debug, id, IR_X64_ZONE_SITES_NAME)
     [String]{}
+}
+
+// The function that registers a module's zone-site table (`main` calls it
+// in a program; a library's init array does).
+IR_X64_ZONE_SITES_NAME: "jet_perf_zone_sites"
+
+// A library's site registration runs after every runtime init hook
+// (Compiler/JetRuntime/lifecycle.list); it needs none of them.
+IR_X64_ZONE_SITES_PRIORITY: 100
+
+// The id of the function that registers the zone-site table of `functions`
+// (ir_x64_zone_sites), one past the largest of theirs; None when none has a
+// patchable site (X64Select.jet ir_x64_zones_skip).
+ir_x64_zone_sites_id: fn(functions: [X64CompiledFunction]) -> X64FunctionID? Never! {
+    max_id := -1
+    listed := false
+    loop function in functions {
+        if function.id.value > max_id -> max_id = function.id.value
+        if function.zones.len() > 0 -> listed = true
+    }
+    if listed -> Val(X64FunctionID{value: max_id + 1}) else -> None
+}
+
+// Appends to `functions`, with an empty `debug` row, function `id` named
+// `name`: it registers the table of every patchable zone site `functions`
+// holds with the runtime (JetBackend Image/Object.jet
+// x64_object_zone_sites), which turns them on when zones are (JetRuntime
+// PerfSamples.jet perf_zones_set). The table names each site by its
+// function, so the sites are where the link put their functions.
+ir_x64_zone_sites: fn(functions: &[X64CompiledFunction], debug: &[X64FunctionDebug], id: X64FunctionID, name: String) Never! {
+    sites := [Int]{}
+    loop function in functions {
+        loop at in function.zones {
+            sites.push(function.id.value)
+            sites.push(at)
+        }
+    }
+    functions.push(x64_object_zone_sites(id, name, sites))
+    debug.push(X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: [U8]{}, ranges: [X64VariableRange]{}})
 }
 
 // Keeps the rows of `functions` (with their `debug` rows) whose function the
@@ -1374,10 +1420,13 @@ ir_x64_hash_start: fn(symbol: String) -> Int Never! {
 // on): its functions with no `main`, each of `exports` (ir_build_library)
 // a global symbol of its IR function and, with a priority, a constructor or
 // destructor hook, and each of `data_exports` a global symbol of its data
-// object. `debug_info` as ir_x64_object. With `own_sections` every function
-// and data object is in a section of its own, so a link keeps only what it
-// reaches; past the section indices ELF's headers hold (the Core library)
-// the object numbers them through section 0 and `.symtab_shndx`.
+// object. When its functions have patchable zone sites, a constructor
+// registers their table (ir_x64_zone_sites), under a global symbol of its
+// own (ir_x64_zone_sites_symbol). `debug_info` as ir_x64_object. With
+// `own_sections` every function and data object is in a section of its
+// own, so a link keeps only what it reaches; past the section indices
+// ELF's headers hold (the Core library) the object numbers them through
+// section 0 and `.symtab_shndx`.
 ir_x64_library_object: fn(compiled: &&IRX64Result, exports: [IRLibraryExport], data_exports: [X64DataExport], debug_info: Bool, own_sections: Bool) -> X64ExecutableResult Never! {
     owned := compiled.move()
     if owned.errors.len() > 0 {
@@ -1386,8 +1435,22 @@ ir_x64_library_object: fn(compiled: &&IRX64Result, exports: [IRLibraryExport], d
     program := ir_x64_object_module(owned)
     debug := compiler_take_rows<X64FunctionDebug>(owned.debug)
     functions := compiler_take_rows<X64CompiledFunction>(owned.functions)
-    globals: loop row in exports -> X64RuntimeExport{function: X64FunctionID{value: row.function}, symbol: row.symbol, init_priority: row.init_priority, fini_priority: row.fini_priority, guards: row.guards.copy()}
+    globals := [X64RuntimeExport]{}
+    loop row in exports {
+        globals.push(X64RuntimeExport{function: X64FunctionID{value: row.function}, symbol: row.symbol, init_priority: row.init_priority, fini_priority: row.fini_priority, guards: row.guards.copy()})
+    }
+    if ir_x64_zone_sites_id(functions) == .Val(id) {
+        ir_x64_zone_sites(functions, debug, id, IR_X64_ZONE_SITES_NAME)
+        globals.push(X64RuntimeExport{function: id, symbol: ir_x64_zone_sites_symbol(owned.program), init_priority: IR_X64_ZONE_SITES_PRIORITY})
+    }
     x64_object_functions_threads(program, functions, debug, globals, data_exports, owned.threads, debug_info, own_sections)
+}
+
+// The global symbol of a library's site registration: the init array names
+// it, so each library's is its own, from the names of its functions.
+ir_x64_zone_sites_symbol: fn(m: IRModule) -> String Never! {
+    digest: sha256_hex(m.function_rows.texts.join("\n"))
+    "{IR_X64_ZONE_SITES_NAME}_{digest.slice(0..<16)}"
 }
 
 // The object writer's module of `owned`: its data, debug files and types

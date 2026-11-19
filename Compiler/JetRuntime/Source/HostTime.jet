@@ -78,8 +78,12 @@ time_seconds_magnitude: fn(seconds: I64) -> I64 {
 
 // Both exact-Int Core samples and bounded Realtime samples borrow this one
 // process epoch. The returned TCB words hold elapsed seconds/nanoseconds.
-time_host_monotonic_sample: fn() -> I64 {
-    root: time_host_root
+time_host_monotonic_sample: fn() -> I64 { time_host_monotonic_sample_at(time_host_root) }
+
+// time_host_monotonic_sample on the time root `root`: time_host_root, or a
+// copy of it taken by a reader that must not keep jet_rt_time_host_init
+// itself (PerfSamples.jet perf_zone_clock).
+time_host_monotonic_sample_at: fn(root: I64) -> I64 {
     if sync_once_enter(root) {
         sample: time_clock_read(I64{1})
         sync_store(wrapping(root + I64{8}), sync_load(sample))
@@ -103,8 +107,12 @@ time_host_monotonic_sample: fn() -> I64 {
     sample
 }
 
-time_host_monotonic_i64: fn() -> I64 {
-    sample: time_host_monotonic_sample()
+time_host_monotonic_i64: fn() -> I64 { time_host_monotonic_i64_at(time_host_root) }
+
+// time_host_monotonic_i64 on the time root `root`
+// (time_host_monotonic_sample_at).
+time_host_monotonic_i64_at: fn(root: I64) -> I64 {
+    sample: time_host_monotonic_sample_at(root)
     seconds: sync_load(sample)
     nanos: sync_load(wrapping(sample + I64{8}))
     if (seconds > I64{9223372036} || (seconds == I64{9223372036} && nanos > I64{854775807})) {
