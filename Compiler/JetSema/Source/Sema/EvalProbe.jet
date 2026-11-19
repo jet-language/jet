@@ -1,0 +1,325 @@
+// The debugger's position probe. A probe names a position in a module, the
+// start of the node a stopped thread is at, and the expressions a user asks
+// for there. When the check of the function holding the position reaches it,
+// each expression is checked as the lambda `fn() -[]> T`, with `T` inferred,
+// on copies of the scopes' ownership state and of the check's context at that
+// point: the function's own facts are the same with and without probes.
+//
+// A node that starts at the position answers exactly; the statement the
+// position lies in answers until one does. A later visit replaces an earlier
+// one, so the innermost node answers and a speculative check gives way to the
+// real one. Each check pass of a function replaces the answers of the pass
+// before it: the last pass is the one the program is built from, so a
+// refusal names the moves and shares that pass found. The effect pass then
+// judges each answer's row against the empty ceiling and the deny-only
+// `Unsafe` (sema_eval_probe_judge_effects).
+use {
+    jet_foundation.[
+        DIAGNOSTIC_ERROR,
+        Diagnostic,
+        Expr,
+        Lambda,
+        LambdaBody,
+        LambdaParam,
+        ModuleID,
+        NameRows,
+        NamedSpan,
+        Span,
+        TCapture,
+        TEffectFacts,
+        TEffectSpan,
+        TextEdit,
+        Type,
+        ast_empty_lambda_meta,
+        authority_grantable_roots,
+        expr_span,
+    ]
+    jet_lexer.[lex_generated, token_shift_spans]
+    jet_parser.[parse_lexed]
+}
+
+// One stop position and the expressions asked there. `offset` is in the
+// module's generated-span coordinates; every expression's spans start at or
+// after it (sema_eval_probe_parse), so a name the walk bound before the
+// position resolves.
+SemaEvalProbe: struct {
+    module_identity: ModuleID,
+    offset: Int,
+    expressions: [Expr],
+}
+
+// The check of expression `expression` of probe `probe` (rows of
+// SemaEvalProbes), by the walk of the function keyed `function`. A generic
+// function's instances each answer. `complete` is false when the check
+// produced no value or reported an error; `value_type` is None for an
+// expression with no value.
+SemaEvalProbeAnswer: struct {
+    probe: Int,
+    expression: Int,
+    function: String,
+    exact: Bool,
+    span: Span,
+    complete: Bool,
+    value_type: Type?,
+    captures: [TCapture],
+    refusals: [Diagnostic],
+    effects: TEffectFacts,
+}
+
+SemaEvalProbeTable: struct {
+    probes: [SemaEvalProbe],
+    answers: [SemaEvalProbeAnswer],
+}
+
+// The probes of one compile and their answers. Every copy of the handle
+// reaches the same table: the registration graph holds one, and each body
+// thread's walk publishes into it.
+SemaEvalProbes: struct {
+    table: Shared<SemaEvalProbeTable>,
+}
+
+// One function walk's probes: `rows` are the table rows of the probes inside
+// the function, `offsets` their positions, `exact` whether a node starting at
+// the position answered, and `answers` this walk's answers so far.
+SemaEvalWalk: struct {
+    probes: SemaEvalProbes,
+    function: String,
+    rows: [Int],
+    offsets: [Int],
+    exact: [Bool],
+    answers: [SemaEvalProbeAnswer],
+}
+
+// A probe a visited node answers, with a copy of its expressions.
+SemaEvalAsk: struct {
+    local: Int,
+    row: Int,
+    exact: Bool,
+    function: String,
+    expressions: [Expr],
+}
+
+SemaEvalProbeParse: struct {
+    expression: Expr?,
+    diagnostics: [Diagnostic],
+}
+
+SEMA_EVAL_PROBE_LEAD: "eval_probe: fn() {{\n"
+
+sema_eval_probes: fn(probes: [SemaEvalProbe]) -> SemaEvalProbes {
+    SemaEvalProbes{table: Shared{SemaEvalProbeTable{probes: probes, answers: [SemaEvalProbeAnswer]{}}}}
+}
+
+// The answers, ordered by probe, expression and function.
+sema_eval_probe_answers: fn(probes: SemaEvalProbes) -> [SemaEvalProbeAnswer] {
+    held: probes.table.guard_read()
+    rows := loop row in held.value.answers -> row
+    rows.sort_by(fn(left: SemaEvalProbeAnswer, right: SemaEvalProbeAnswer) { (left.probe <=> right.probe).then(left.expression <=> right.expression).then(left.function <=> right.function) })
+    rows
+}
+
+// Parses `text` as one expression whose first byte sits at `offset`. The
+// text is wrapped in a function body, and its tokens move so the
+// expression's spans start at `offset`.
+sema_eval_probe_parse: fn(text: String, offset: Int) -> SemaEvalProbeParse {
+    source: "{SEMA_EVAL_PROBE_LEAD}{text}\n}}\n"
+    shift: offset - SEMA_EVAL_PROBE_LEAD.len()
+    lexed := lex_generated(source.bytes())
+    diagnostics := [Diagnostic]{}
+    loop diagnostic in lexed.diagnostics {
+        diagnostics.push(sema_eval_probe_shift_diagnostic(diagnostic, shift))
+    }
+    if sema_has_error_since(diagnostics, 0) {
+        return SemaEvalProbeParse{expression: None, diagnostics: diagnostics}
+    }
+    loop token_index in 0..<lexed.tokens.len() {
+        token_shift_spans(lexed.tokens[token_index], shift, lexed.tables.literals)
+    }
+    parsed := parse_lexed(lexed)
+    loop diagnostic in parsed.diagnostics.move() -> diagnostics.push(diagnostic)
+    if sema_has_error_since(diagnostics, 0) {
+        return SemaEvalProbeParse{expression: None, diagnostics: diagnostics}
+    }
+    if parsed.program.items.len() == 1 && parsed.program.items[0] == .Func(func) && func.body.len() == 1 && func.body[0] == .Expr(value) {
+        return SemaEvalProbeParse{expression: Val(value), diagnostics: diagnostics}
+    }
+    diagnostics.push(sema_error("E0003", Span{start: offset, end: offset + text.len()}, "the debugger evaluates one expression", "`{text}` is not a single expression", "write one expression, such as a name, a field or a call"))
+    SemaEvalProbeParse{expression: None, diagnostics: diagnostics}
+}
+
+sema_eval_probe_shift_diagnostic: fn(diagnostic: Diagnostic, shift: Int) -> Diagnostic Never! {
+    shifted := diagnostic
+    shifted.span = if shifted.span == {
+        .Val(span) -> Val(Span{start: span.start + shift, end: span.end + shift})
+        .None -> None
+    }
+    shifted.edit = if shifted.edit == {
+        .Val(edit) -> Val(TextEdit{span: Span{start: edit.span.start + shift, end: edit.span.end + shift}, new_text: edit.new_text})
+        .None -> None
+    }
+    shifted
+}
+
+// The walk of the function at `span` in `module_identity`, when the compile
+// has probes inside it. A body the compiler generated has no stop of its own.
+sema_eval_walk_open: fn(program: SemaProgramTables, module_identity: ModuleID, span: Span, function: String) -> Shared<SemaEvalWalk>? {
+    if program.registration_graph == .Val(graph) {
+        if graph.eval_probes == .Val(probes) {
+            return sema_eval_walk_for(probes, module_identity, span, function)
+        }
+    }
+    None
+}
+
+sema_eval_walk_for: fn(probes: SemaEvalProbes, module_identity: ModuleID, span: Span, function: String) -> Shared<SemaEvalWalk>? {
+    rows := [Int]{}
+    offsets := [Int]{}
+    held: probes.table.guard_read()
+    loop (row, probe) in held.value.probes {
+        if probe.module_identity != module_identity || probe.offset < span.start || probe.offset >= span.end {
+            next
+        }
+        rows.push(row)
+        offsets.push(probe.offset)
+    }
+    if rows.len() == 0 -> return None
+    exact: (loop _ in rows -> false)
+    Val(Shared{SemaEvalWalk{probes: probes, function: function, rows: rows, offsets: offsets, exact: exact, answers: [SemaEvalProbeAnswer]{}}})
+}
+
+// The node at `span` is about to be checked: a statement when `statement`,
+// otherwise an expression. Each probe it answers checks its expressions here.
+sema_eval_probe_visit: fn(span: Span, statement: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) {
+    walk: context.eval_walk ?? return
+    loop asked in sema_eval_walk_matches(walk, span, statement) {
+        answers := [SemaEvalProbeAnswer]{}
+        loop (expression, value) in asked.expressions {
+            answers.push(sema_eval_probe_check(value, asked.row, expression, asked.exact, asked.function, environment, program, scopes, state, tail_store, context))
+        }
+        sema_eval_walk_store(walk, asked.local, asked.exact, answers)
+    }
+}
+
+// The probes `span` answers: those that start there, and those inside a
+// statement's span that no node starting at their position answered yet.
+sema_eval_walk_matches: fn(walk: Shared<SemaEvalWalk>, span: Span, statement: Bool) -> [SemaEvalAsk] {
+    asked := [SemaEvalAsk]{}
+    held: walk.guard_read()
+    loop (local, offset) in held.value.offsets {
+        exact: span.start == offset
+        if !exact && (!statement || held.value.exact[local] || offset < span.start || offset >= span.end) {
+            next
+        }
+        row: held.value.rows[local]
+        table: held.value.probes.table.guard_read()
+        expressions: loop value in table.value.probes[row].expressions -> value
+        asked.push(SemaEvalAsk{local: local, row: row, exact: exact, function: "{held.value.function}", expressions: expressions})
+    }
+    asked
+}
+
+sema_eval_walk_store: fn(walk: Shared<SemaEvalWalk>, local: Int, exact: Bool, answers: &&[SemaEvalProbeAnswer]) {
+    held := walk.guard_edit()
+    loop answer in answers.move() -> sema_eval_answer_put(held.value.answers, answer)
+    if exact -> held.value.exact[local] = true
+}
+
+// The function's check pass is done: its answers replace the ones an earlier
+// pass of the same function gave for the probes this pass answered.
+sema_eval_walk_publish: fn(walk: Shared<SemaEvalWalk>) {
+    held: walk.guard_read()
+    fresh: loop answer in held.value.answers -> answer
+    table := held.value.probes.table.guard_edit()
+    loop answer in fresh.move() -> sema_eval_answer_put(table.value.answers, answer)
+}
+
+// Puts `answer` in `answers` over the answer it gives again, the one of the
+// same probe, expression and function.
+sema_eval_answer_put: fn(answers: &[SemaEvalProbeAnswer], answer: &&SemaEvalProbeAnswer) {
+    loop index in 0..<answers.len() {
+        if answers[index].probe == answer.probe && answers[index].expression == answer.expression && answers[index].function == answer.function {
+            answers[index] = answer.move()
+            return
+        }
+    }
+    answers.push(answer.move())
+}
+
+// Checks `value` as the body of a lambda `fn() -> T` with `T` open, on copies
+// of the ownership state and context, so the walk goes on as if it had not.
+// The probe's own reports are its refusals; a moved capture is refused at its
+// use, with the move's site as the report's label.
+sema_eval_probe_check: fn(value: Expr, probe: Int, expression: Int, exact: Bool, function: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: SemaCheckContext) -> SemaEvalProbeAnswer {
+    probe_state := sema_ownership_state_snapshot(state)
+    probe_context := sema_check_context_snapshot(context)
+    probe_context.eval_walk = None
+    probe_context.fresh_expr_ids = true
+    probe_context.lambda_escapes = Val(false)
+    span: expr_span(value)
+    lambda: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{}, effects: None, body: LambdaBody.Expr{value: value}, span: span, meta: ast_empty_lambda_meta()}
+    expected: Type.Fn{params: [Type]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+    diagnostics := [Diagnostic]{}
+    checked: sema_expression_lambda_with_host(lambda, Val(expected), environment, program, scopes, probe_state, tail_store, probe_context, diagnostics, false, false, false, true)
+    answer := SemaEvalProbeAnswer{probe: probe, expression: expression, function: function, exact: exact, span: span, complete: false, value_type: None, captures: [TCapture]{}, refusals: [Diagnostic]{}, effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}}}
+    loop diagnostic in diagnostics.move() {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> answer.refusals.push(diagnostic)
+    }
+    result: checked ?? return answer
+    if result.kind == .Lambda(lambda_value) {
+        answer.complete = answer.refusals.len() == 0
+        answer.value_type = lambda_value.ret
+        answer.captures = lambda_value.captures
+        answer.effects = lambda_value.effects
+    }
+    answer
+}
+
+// The effect pass's verdict on each answer: what the expression does itself,
+// and the solved row of each function it calls, against the empty ceiling
+// `-[]>` and the deny-only `Unsafe`. The other deny-only rights pass: `Panic`
+// and `Mem` are within `-[]>`, and a `Shared` read carries `Time.Wait`, so a
+// wait is refused where the debugger links the expression instead. A call
+// the solved graph holds no node for is left out, as for a callback's bound
+// (sema_effect_check_callback_bounds).
+sema_eval_probe_judge_effects: fn(probes: SemaEvalProbes, nodes: [SemaEffectNode], node_by_key: NameRows, solved: [[String]]) {
+    table := probes.table.guard_edit()
+    loop index in 0..<table.value.answers.len() {
+        refusals: sema_eval_probe_effect_refusals(table.value.answers[index], nodes, node_by_key, solved)
+        loop refusal in refusals -> table.value.answers[index].refusals.push(refusal)
+    }
+}
+
+sema_eval_probe_effect_refusals: fn(answer: SemaEvalProbeAnswer, nodes: [SemaEffectNode], node_by_key: NameRows, solved: [[String]]) -> [Diagnostic] {
+    refusals := [Diagnostic]{}
+    if !answer.complete -> return refusals
+    own := [String]{}
+    loop name in answer.effects.direct -> sema_effect_set_add(own, name)
+    if answer.effects.maximal -> sema_effect_set_union(own, authority_grantable_roots())
+    sema_eval_probe_row_refusals(own, "this expression", answer.span, refusals)
+    seen := (loop _ in nodes -> false)
+    loop edge in answer.effects.call_edges {
+        if edge == "__jet_panic__" -> next
+        target: sema_effect_node_index(node_by_key, edge) ?? next
+        callee: "`{nodes[target].display_key}`"
+        sema_eval_probe_row_refusals(solved[target], callee, answer.span, refusals)
+        path: sema_effect_state_writer_path(nodes, target, seen)
+        if path.len() > 0 {
+            writer: nodes[path[path.len() - 1]]
+            writes: writer.rare ?? SEMA_EFFECT_NODE_NO_RARE
+            written: writes.module_writes[0].name
+            refusals.push(sema_error("E3401", answer.span, "the debugger can't evaluate this: {callee} writes module state `{written}`", "an expression the debugger evaluates is checked as `fn() -[]>`, and a write to module state outlives the evaluation", "evaluate the values the expression reads without the call to {callee}"))
+        }
+    }
+    refusals
+}
+
+sema_eval_probe_row_refusals: fn(row: [String], subject: String, span: Span, refusals: &[Diagnostic]) {
+    over: sema_effect_uncovered(row, [String]{})
+    if over.len() > 0 {
+        shown: sema_effect_show(over)
+        refusals.push(sema_error("E0747", span, "the debugger can't evaluate this: {subject} uses the effect `{shown}`", "an expression the debugger evaluates is checked as `fn() -[]>`, so it may not use an effect", "evaluate the values the expression reads without what uses `{shown}`"))
+    }
+    if sema_effect_covered(row, [String]{"Unsafe"}).len() > 0 {
+        refusals.push(sema_error("E0747", span, "the debugger can't evaluate this: {subject} reaches `#Unsafe` code", "an expression the debugger evaluates denies `Unsafe`; Core's own `#Unsafe` code does not count, a package's does", "evaluate the values the expression reads without what reaches `#Unsafe` code"))
+    }
+}

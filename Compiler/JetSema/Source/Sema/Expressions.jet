@@ -7893,6 +7893,9 @@ sema_expr_type_id_written: fn(expr: Expr, environment: SemaScopeEnvironment, pro
 }
 
 sema_check_expression: fn(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if context.eval_walk != None {
+        sema_eval_probe_visit(expr_span(expr), false, environment, program, scopes, state, tail_store, context)
+    }
     sema_taskgroup_check_scoped_loan_read(context, expr, scopes, state, diagnostics)
     if context.lending_view_parameter_keys.len() > 0 {
         if expr == {

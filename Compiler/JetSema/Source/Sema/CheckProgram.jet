@@ -1787,6 +1787,9 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     context.runtime_policy = sema_function_runtime_policy(func.markers)
     context.compiler_generated = func.compiler_generated && !sema_test_synthetic_function(func) && !sema_policy_wrapper_function(func) && !sema_computed_field_getter_function(func)
     context.return_view_declared = func.declared_return_view_provenance != None
+    if !context.compiler_generated && stand_in == None {
+        context.eval_walk = sema_eval_walk_open(program, module_identity, func.span, owner_key)
+    }
     if !complete {
         sema_check_unsupported(context, "the generic parameters of `{func.name}` could not be resolved against the registration graph")
     }
@@ -2052,6 +2055,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
             sema_stmt_value_block_tail_lints(func.body, !func.compiler_generated && !module_is_core(updated.module_identity), updated, program, context.fallback_tables, diagnostics)
         }
         statements := sema_check_statements(func.body, Val(effective_return), updated, program, scopes, state, tail_store, context, diagnostics, 0)
+        if context.eval_walk == .Val(walk) -> sema_eval_walk_publish(walk)
         // The caller's group joins every task this body spawned into a `Group`
         // parameter, so those handles owe no `join` here.
         sema_taskgroup_mark_spawns_owned(context, SemaTaskGroupOrigin.Parameter, scopes, state, diagnostics)
@@ -3907,7 +3911,9 @@ sema_check_registration_module_test: fn(environment: SemaScopeEnvironment, progr
                     module_result.diagnostics.push(diagnostic)
                 }
                 if !graph.test_mode {
-                    if checked_test.function == .Val(function) -> sema_liveness_member_body_uses(function, module_result.test_member_uses)
+                    if checked_test.function == .Val(function) {
+                        sema_liveness_member_body_uses(function, module_result.test_member_uses)
+                    }
                     return
                 }
                 loop fact in checked_test.call_facts -> module_result.call_facts.push(fact)
@@ -5955,7 +5961,9 @@ sema_check_soft_public_uses: fn(program: SemaProgramTables, module_index: Int, g
             // (symbol_key_text); a builtin, which no module registers, has
             // none.
             path: callee_key.split_once(":") ?? next
-            if path.after.starts_with("{module_identity}.") || sema_registration_callable_row(graph, callee_key) == None -> next
+            if path.after.starts_with("{module_identity}.") || sema_registration_callable_row(graph, callee_key) == None {
+                next
+            }
             sema_soft_public_warn(leaf, seen, module_result.diagnostics)
         }
         sema_check_soft_public_signatures(graph.modules[module_index], raw, seen, module_result.diagnostics)
@@ -12494,7 +12502,7 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     final_graph.symbols = SymbolTable{ranges: [SymbolKeys]{}}
     task.group sema_finalize_effect_walks {
         walking: task sema_finalize_walk_all(final_graph, walk_inputs)
-        effects = sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, trait_caps, final_graph.decls, effects.symbols, final_graph.module_table, prep_functions, effect_threads, closed, organization_denials, organization_source, final_graph.core_seal, stage.package_policies, expert_modules, final_graph.package_identity, heap_free: heap_free, entries: heap_entries)
+        effects = sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, trait_caps, final_graph.decls, effects.symbols, final_graph.module_table, prep_functions, effect_threads, closed, organization_denials, organization_source, final_graph.core_seal, stage.package_policies, expert_modules, final_graph.package_identity, heap_free: heap_free, entries: heap_entries, eval_probes: final_graph.eval_probes)
         if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
         walked = walking.join() ?? panic(compiler_threads_failure_text(err))
     }
