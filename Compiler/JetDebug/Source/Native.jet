@@ -233,6 +233,37 @@ NativeProbe: struct {
     reached: Bool{false},
 }
 
+// What `why` answered: its text, and whether the place has no place to
+// follow in this image (optimized away, or held in a register), so the
+// -O0 build of its source could answer instead (NativeSession.recovered).
+NativeWhy: struct {
+    text: String,
+    recover: Bool,
+}
+
+// The writes `why` follows in a run (NativeSession.why): its place's watch
+// is numbered -1, which no stop reports; the local it is (`root`, of the
+// inlined run `site` of the Jet function `function`, a line-table index)
+// tells a write that binds it. Each write that changed the bytes is kept.
+NativeTrail: struct {
+    function: Int{-1},
+    site: Int{-1},
+    root: String{""},
+    writes: [NativeWrite]{[NativeWrite]{}},
+}
+
+// One write the trail saw: where (the innermost Jet frame and the `bt`
+// text of its stack), by which task, the values before and after, and
+// whether it bound the local (a write before the local's first line).
+NativeWrite: struct {
+    frame: NativeFrame,
+    stack: String,
+    task: Int,
+    old: String,
+    new: String,
+    binds: Bool,
+}
+
 // A thread of the traced program: its id, whether it runs, whether a
 // SIGSTOP the debugger sent it (halt) is still to arrive, and the signal it
 // stopped with, which goes to it when it next runs (0: none).
@@ -378,6 +409,8 @@ NativeSession: struct {
     rerunning: Bool{false},
     // The trap bytes and passes of a reverse command's run.
     probe: NativeProbe{NativeProbe{}},
+    // The writes `why` follows in its run.
+    trail: NativeTrail{NativeTrail{}},
 
     // Load the debug facts of `binary` (a native image with debug info, its
     // own or in the side file its `.gnu_debuglink` names). The program's
@@ -393,8 +426,13 @@ NativeSession: struct {
 
     // A breakpoint on `line` of the Jet source `file` (its base name, as the
     // line table names it): its number, or None when no code is on that line.
-    // A function's start moves past its prologue (entry).
     break_at: fn(&self, file: String, line: Int) -> Int? NativeDebugError! {
+        self.place(self.line_starts(file, line))
+    }
+
+    // Where a breakpoint on `line` of `file` traps: native_line_addresses,
+    // a function's start moved past its prologue (entry).
+    line_starts: fn(self, file: String, line: Int) -> [Int] Never! {
         addresses := native_line_addresses(self.image, file, line)
         loop k in 0..<addresses.len() {
             index: x64_jetline_find(self.image.lines, addresses[k])
@@ -402,7 +440,7 @@ NativeSession: struct {
                 addresses[k] = self.entry(index)
             }
         }
-        self.place(addresses)
+        addresses
     }
 
     // A breakpoint at the start of the Jet function `function`, past its
@@ -1371,9 +1409,8 @@ NativeSession: struct {
             text = "{text}{mark} {task.id}  {task.label}  {state}{wait}{canceled}\n"
             if registers == .Val(found) {
                 frames: self.backtrace_from(found) ?? return Err(err)
-                loop line in native_debug_backtrace(frames).split("\n").to_list() {
-                    if line != "" -> text = "{text}    {line}\n"
-                }
+                stack: native_debug_backtrace(frames, indent: "    ")
+                text = "{text}{stack}"
             }
         }
         Ok(text)
@@ -1488,11 +1525,30 @@ NativeSession: struct {
     // records it; "" when the image holds no `run`.
     run_source: fn(&self) -> String Never! {
         loop found in self.image.lines.functions {
-            if found.name != "run" -> next
-            if found.dir == "" || found.file.starts_with("/") -> return "{found.file}"
-            return native_files.join(found.dir, found.file)
+            if found.name == "run" -> return native_line_source(found.dir, found.file)
         }
         ""
+    }
+
+    // The source `why` builds at -O0 for this image: its `run`'s file, else
+    // (an -O2 image inlines `run` into its entry) the file of the stop's
+    // innermost Jet frame, as the line table records them; "" when neither
+    // is known.
+    why_source: fn(&self) -> String NativeDebugError! {
+        found: self.run_source()
+        if found != "" -> return Ok(found)
+        frames: self.backtrace() ?? return Err(err)
+        shown: loop frame in frames {
+            if native_debug_jet_frame(frame) {
+                break native_files.basename(frame.file)
+            }
+        } ?? return Ok("")
+        loop function in self.image.lines.functions {
+            if native_files.basename(function.file) == shown {
+                return Ok(native_line_source(function.dir, function.file))
+            }
+        }
+        Ok("")
     }
 
     // Run the program with `args` to the start of its `run`, in the Jet
@@ -1579,6 +1635,10 @@ NativeSession: struct {
                 text = if watch -> "Deleted watch {number}\n" else -> "Deleted breakpoint {number}\n"
             }
             "watch" -> text = self.watch_command(operand) ?? return Err(err)
+            "why" -> {
+                answered: self.why(operand) ?? return Err(err)
+                text = answered.text
+            }
             "frame" | "up" | "down" -> {
                 text = self.frame_command(word, operand, file, lines) ?? return Err(err)
             }
@@ -2052,6 +2112,11 @@ NativeSession: struct {
             if !hit -> next
             bytes: native_debug_bytes(memory, self.watches[index].address, self.watches[index].bytes.len()) ?? next
             if bytes == self.watches[index].bytes -> next
+            // The trail's write is kept, and the program runs on.
+            if self.watches[index].number < 0 {
+                self.trail_write(index, bytes) ?? return Err(err)
+                return Ok({fired: true, number: 0})
+            }
             live: self.frame_live(self.watches[index].thread, self.watches[index].cfa) ?? return Err(err)
             if !live {
                 self.end_watch(index) ?? return Err(err)
@@ -2756,14 +2821,17 @@ NativeSession: struct {
         self.watches = [NativeWatch]{}
     }
 
-    // Why a reverse command can't run ("" when it can): it runs in a replay
-    // alone, where the recording makes each run of the program the same,
-    // and not once `fix` has changed the program's code, which a new run
-    // would not have.
-    reverse_refusal: fn(self) -> String Never! {
+    // Why a reverse command can't run ("" when it can): replay_refusal.
+    reverse_refusal: fn(self) -> String Never! { self.replay_refusal("Reverse") }
+
+    // Why `what`, which runs the program again, can't run ("" when it can):
+    // it runs in a replay alone, where the recording makes each run of the
+    // program the same, and not once `fix` has changed the program's code,
+    // which a new run would not have.
+    replay_refusal: fn(self, what: String) -> String Never! {
         if {
-            self.env == None || self.moves.len() == 0 -> "Reverse runs in a replay: start the session with `jet debug --replay=NAME`"
-            self.fixed.len() > 0 -> "Reverse can't run after `fix`: a new run of the program would run the code before the fix"
+            self.env == None || self.moves.len() == 0 -> "{what} runs in a replay: start the session with `jet debug --replay=NAME`"
+            self.fixed.len() > 0 -> "{what} can't run after `fix`: a new run of the program would run the code before the fix"
             !self.alive() -> "The program has finished"
             else -> ""
         }
@@ -3020,6 +3088,253 @@ NativeSession: struct {
             return self.paused("breakpoint {number}.1")
         }
         self.paused("reverse")
+    }
+
+    // `why <place>` in a replay: the write that gave `place` (a local of the
+    // selected frame, or a field path under one) the value it has here, as
+    // `<place> = <value>, set at <file>:<line> in <function>() (task N)`,
+    // then the value it replaced and the write's stack. A first run, with
+    // probes on this stop and on the frame's function start, finds the
+    // pass that opened the frame and counts this stop's passes after it; a
+    // second seeks that opening, follows the place's bytes (follow) and
+    // seeks this stop; a third makes the session's moves again, back here.
+    // A run of the program puts the place at the same address each time
+    // (x64_trace_spawn turns address randomization off), and the place
+    // must hold its bytes here again. `label` follows the value. `recover`
+    // says the place has no bytes to follow in this image.
+    why: fn(&self, operand: String, label: String{""}) -> NativeWhy NativeDebugError! {
+        if operand == "" {
+            return Ok(NativeWhy{text: "Why needs a local or a field path, as `why total`\n", recover: false})
+        }
+        refusal: self.replay_refusal("`why`")
+        if refusal != "" -> return Ok(NativeWhy{text: "{refusal}\n", recover: false})
+        frames: self.unwind() ?? return Err(err)
+        if frames.len() == 0 -> return Ok(NativeWhy{text: "No frame to ask in\n", recover: false})
+        levels: native_levels(self.image, frames)
+        level: if self.selected < levels.len() -> levels[self.selected] else -> levels[0]
+        frame: frames[level.frame]
+        lookup: native_lookup(level.frame, frame.pc)
+        memory: NativeMemory{trace: Val(self.trace), blocks: [NativeBlock]{}}
+        place: native_watch_place(self.image, memory, frame, lookup, level.site, operand)
+        if place.refusal != "" -> return Ok(NativeWhy{text: "{place.refusal}\n", recover: true})
+        root: operand.before(".")
+        if place.register >= 0 {
+            return Ok(NativeWhy{text: "`{root}` is held in a register here, whose writes `why` can't follow\n", recover: true})
+        }
+        size: native_type_size(self.image, place.ty)
+        if size <= 0 {
+            return Ok(NativeWhy{text: "`{operand}` has no bytes to follow\n", recover: false})
+        }
+        spans: native_watch_spans(place.address, size)
+        if spans.len() > NATIVE_DEBUG_WATCH_SLOTS {
+            return Ok(NativeWhy{text: "`{operand}` needs {spans.len()} of the CPU's {NATIVE_DEBUG_WATCH_SLOTS} debug registers; ask `why` of one of its fields\n", recover: false})
+        }
+        now: native_debug_bytes(memory, place.address, size) ?? return Ok(NativeWhy{text: "`{operand}` can't be read here\n", recover: false})
+        shown: native_render(self.image, memory, place.ty, now, 0, 0) ?? NATIVE_DEBUG_UNAVAILABLE
+        registers: self.registers() ?? return Err(err)
+        pc: registers[X64_TRACE_RIP]
+        task: self.thread_task(self.trace.thread, registers).task
+        function: x64_jetline_find(self.image.lines, lookup)
+        entry: if function >= 0 -> self.image.lines.functions[function].low else -> pc
+        cfa: frame.cfa
+        lost: "The replay didn't come back to this stop, so `why` can't follow `{operand}`\n"
+        again: self.rerun(self.moves.len(), 1, [Int]{pc, entry}) ?? return Err(err)
+        if !self.stopped_at(again, pc, task) -> return Ok(NativeWhy{text: lost, recover: false})
+        // This stop's own pass, when its thread counted it as it trapped.
+        own: self.probe.on == pc && self.probe.on_thread == self.trace.thread
+        opened := -1
+        loop (index, pass) in self.probe.passes {
+            if pass.mark.task == task && pass.mark.address == entry && pass.cfa == cfa {
+                opened = index
+            }
+        }
+        arrivals := if own -> 0 else -> 1
+        loop (index, pass) in self.probe.passes {
+            if index > opened && pass.mark.task == task && pass.mark.address == pc -> arrivals += 1
+        }
+        // The session's moves come back once the place is followed; the
+        // second run starts the program as the first did.
+        moves: self.moves
+        self.moves = [NativeMove]{native_bare_move("spawn", NativeMark{task: 0, address: 0, pass: 0})}
+        if opened >= 0 {
+            mark: self.probe.passes[opened].mark
+            self.moves.push(native_bare_move("seek", mark))
+        }
+        self.trail = NativeTrail{function: function, site: level.site, root: root, writes: [NativeWrite]{}}
+        followed := [NativeWrite]?{None}
+        failed := NativeDebugError?{None}
+        if self.follow(NativeMark{task: task, address: pc, pass: arrivals}, place.address, place.ty, spans, now) == {
+            .Ok(writes) -> { followed = writes }
+            .Err(failure) -> failed = Val(failure)
+        }
+        self.trail = NativeTrail{}
+        self.moves = moves
+        back: self.rerun(self.moves.len(), -1, [Int]{}) ?? return Err(err)
+        if failed == .Val(failure) -> return Err(failure)
+        if !self.stopped_at(back, pc, task) -> return Ok(NativeWhy{text: lost, recover: false})
+        writes: followed ?? return Ok(NativeWhy{text: lost, recover: false})
+        if writes.len() == 0 {
+            return Ok(NativeWhy{text: "{operand} = {shown}{label}: nothing wrote it since its frame began\n", recover: false})
+        }
+        write: writes[writes.len() - 1]
+        before: if write.binds -> "none: this line binds it" else -> write.old
+        at: write.frame
+        Ok(NativeWhy{text: "{operand} = {shown}{label}, set at {at.file}:{at.line} in {at.function}() (task {write.task})\n  before: {before}\n{write.stack}", recover: false})
+    }
+
+    // Whether `stop` is the pause of task `task` at `pc`.
+    stopped_at: fn(&self, stop: NativeStop, pc: Int, task: Int) -> Bool NativeDebugError! {
+        if stop.kind != NativeStopKind.Paused || !self.alive() -> return Ok(false)
+        registers: self.registers() ?? return Err(err)
+        Ok(registers[X64_TRACE_RIP] == pc && self.thread_task(self.trace.thread, registers).task == task)
+    }
+
+    // The second run of `why`: the session's moves (the start, and a seek
+    // to the pass that opened the place's frame) made again, then the place
+    // `address` (of type `ty`, under `spans`) watched by the session's trail
+    // while a seek runs to `stop`. The writes that changed the place on the
+    // way, oldest first; None when the run doesn't reach `stop` or the
+    // place there doesn't hold `now`.
+    follow: fn(&self, stop: NativeMark, address: Int, ty: Int, spans: [NativeWatchSpan], now: [U8]) -> [NativeWrite]? NativeDebugError! {
+        _ := self.rerun(self.moves.len(), -1, [Int]{}) ?? return Err(err)
+        if !self.alive() -> return Ok(None)
+        memory: NativeMemory{trace: Val(self.trace), blocks: [NativeBlock]{}}
+        bytes: native_debug_bytes(memory, address, now.len()) ?? return Ok(None)
+        // A replay's run has no watch of its own before its first move.
+        armed := [NativeWatchSpan]{}
+        loop (slot, span) in spans {
+            armed.push(NativeWatchSpan{slot: slot, address: span.address, size: span.size})
+            if !self.set_debug_register(slot, span.address) {
+                return Err(NativeDebugError{detail: "couldn't set a debug register of the program"})
+            }
+        }
+        self.watches.push(NativeWatch{number: -1, shown: "", address: address, ty: ty, spans: armed, thread: self.trace.thread, cfa: 0, bytes: bytes, register: -1, ranges: [NativeRange]{}})
+        if !self.set_debug_register(7, native_watch_control(self.watches)) {
+            return Err(NativeDebugError{detail: "couldn't set the program's debug control register"})
+        }
+        reached: self.seek(stop) ?? return Err(err)
+        if self.alive() -> self.unwatch(-1) ?? return Err(err)
+        if !self.stopped_at(reached, stop.address, stop.task) -> return Ok(None)
+        after: native_debug_bytes(memory, address, now.len()) ?? return Ok(None)
+        if after != now -> return Ok(None)
+        // The trail's writes are the answer; the trail ends with it.
+        writes: self.trail.writes
+        self.trail.writes = [NativeWrite]{}
+        Ok(Val(writes))
+    }
+
+    // Keep the trail's write: watch `index` (the trail's) now holds `bytes`,
+    // which the current thread's last instruction wrote.
+    trail_write: fn(&self, index: Int, bytes: [U8]) NativeDebugError! {
+        registers := self.registers() ?? return Err(err)
+        task: self.thread_task(self.trace.thread, registers).task
+        // The write's own instruction, which the trap comes just after.
+        pc: registers[X64_TRACE_RIP] - 1
+        registers[X64_TRACE_RIP] = pc
+        frames := self.backtrace_from(registers) ?? return Err(err)
+        stack: native_debug_backtrace(frames, indent: "  ")
+        // The write keeps its innermost Jet frame.
+        jet: loop (at, shown) in frames {
+            if native_debug_jet_frame(shown) {
+                break at
+            }
+        } ?? frames.len()
+        innermost: frames.remove(jet, .Slot) ?? NativeFrame{function: "?", file: "", line: 0, inlined: false}
+        binds := false
+        if x64_jetline_find(self.image.lines, pc) == self.trail.function {
+            if native_function_at(self.image, pc) == .Val(described) {
+                loop variable in described.variables {
+                    if variable.site == self.trail.site && variable.name == self.trail.root && variable.list >= 0 {
+                        binds = native_variable_covering(self.image, variable, pc) == None
+                    }
+                }
+            }
+        }
+        memory: NativeMemory{trace: Val(self.trace), blocks: [NativeBlock]{}}
+        old: native_render(self.image, memory, self.watches[index].ty, self.watches[index].bytes, 0, 0) ?? NATIVE_DEBUG_UNAVAILABLE
+        new: native_render(self.image, memory, self.watches[index].ty, bytes, 0, 0) ?? NATIVE_DEBUG_UNAVAILABLE
+        self.trail.writes.push(NativeWrite{frame: innermost, stack: stack, task: task, old: old, new: new, binds: binds})
+        self.watches[index].bytes = bytes
+        Ok()
+    }
+
+    // `why <place>` answered from the -O0 build of this image's source, the
+    // image `image`, when why found no bytes to follow here: a run with
+    // probes on this stop's line counts how often its task reached that
+    // line, and a session on the -O0 image, under the same recording, seeks
+    // that pass of the line, selects the same frame and answers there, its
+    // value labeled recovered. That run's output goes to `output`; this
+    // session comes back to this stop.
+    recovered: fn(&self, operand: String, image: String, output: String) -> String NativeDebugError! {
+        frames := self.backtrace() ?? return Err(err)
+        jet: loop (at, shown) in frames {
+            if native_debug_jet_frame(shown) {
+                break at
+            }
+        } ?? return Ok("No Jet frame here for the -O0 replay to find\n")
+        // The other session looks for its line.
+        here: frames.remove(jet, .Slot) ?? return Ok("No Jet frame here for the -O0 replay to find\n")
+        registers: self.registers() ?? return Err(err)
+        pc: registers[X64_TRACE_RIP]
+        task: self.thread_task(self.trace.thread, registers).task
+        starts: self.line_starts(here.file, here.line)
+        again: self.rerun(self.moves.len(), 1, starts) ?? return Err(err)
+        if !self.stopped_at(again, pc, task) {
+            return Ok("The replay didn't come back to this stop, so `why` can't follow `{operand}`\n")
+        }
+        own: self.probe.on == pc && self.probe.on_thread == self.trace.thread
+        arrivals := if own || !starts.contains(pc) -> 0 else -> 1
+        loop pass in self.probe.passes {
+            if pass.mark.task == task && starts.contains(pass.mark.address) -> arrivals += 1
+        }
+        if arrivals == 0 {
+            return Ok("`{operand}` has no place here, and the -O0 replay can't find this stop's line\n")
+        }
+        other := NativeSession.start(image, output) ?? return Err(err)
+        chosen := -1
+        loop address in other.line_starts(here.file, here.line) {
+            index: x64_jetline_find(other.image.lines, address)
+            if chosen < 0 || (index >= 0 && other.image.lines.functions[index].name == here.function) {
+                chosen = address
+            }
+        }
+        if chosen < 0 {
+            other.close()
+            return Ok("`{operand}` has no place here, and the -O0 build has no code on {here.file}:{here.line}\n")
+        }
+        // The other run replays this session's recording with its argv,
+        // which come back once it ends.
+        other.env = self.env
+        self.env = None
+        other.argv = self.argv
+        self.argv = [String]{}
+        other.moves = [NativeMove]{native_bare_move("spawn", NativeMark{task: 0, address: 0, pass: 0}), native_bare_move("seek", NativeMark{task: task, address: chosen, pass: arrivals})}
+        text := "The -O0 replay didn't reach {here.file}:{here.line}, so `why` can't follow `{operand}` there\n"
+        failed := NativeDebugError?{None}
+        if other.rerun(2, -1, [Int]{}) == {
+            .Ok(reached) -> {
+                if other.stopped_at(reached, chosen, task) == {
+                    .Ok(there) -> {
+                        if there {
+                            other.selected = self.selected
+                            if other.why(operand, label: " (recovered from the -O0 replay)") == {
+                                .Ok(answered) -> { text = answered.text }
+                                .Err(failure) -> failed = Val(failure)
+                            }
+                        }
+                    }
+                    .Err(failure) -> failed = Val(failure)
+                }
+            }
+            .Err(failure) -> failed = Val(failure)
+        }
+        self.env = other.env.move()
+        other.env = None
+        self.argv = other.argv.move()
+        other.argv = [String]{}
+        other.close()
+        if failed == .Val(failure) -> return Err(failure)
+        Ok(text)
     }
 
     // Put probes on `addresses`, counting the current thread's pass when it
@@ -4002,7 +4317,7 @@ native_debug_image: fn(entry: String, out_dir: String) -> String Never! {
 // both speak it. Every stop prints the Jet source line with its `<- here`
 // caret and the frame's locals; frames without Jet line information (the
 // runtime) are never shown. Each readout starts with a capital.
-NATIVE_DEBUG_HELP: "Commands: step (s), next (n), continue (c), finish (f), reverse-step (rs), reverse-next (rn), reverse-finish (rf), reverse-continue (rc), break LINE|FILE:LINE|FUNCTION [if EXPR] (b), log FILE:LINE \"TEXT {{EXPR}}\", watch PLACE, breaks, delete N, frame N, up, down, locals, print NAME (p NAME), backtrace (bt), tasks, fix, help (h), quit (q)"
+NATIVE_DEBUG_HELP: "Commands: step (s), next (n), continue (c), finish (f), reverse-step (rs), reverse-next (rn), reverse-finish (rf), reverse-continue (rc), break LINE|FILE:LINE|FUNCTION [if EXPR] (b), log FILE:LINE \"TEXT {{EXPR}}\", watch PLACE, why PLACE, breaks, delete N, frame N, up, down, locals, print NAME (p NAME), backtrace (bt), tasks, fix, help (h), quit (q)"
 
 // The runtime's observation start, which an image links when it has a task,
 // a channel, a live value or an event (JetRuntime ObserveLive.jet): a replay
@@ -4147,17 +4462,31 @@ native_debug_locals_typed: fn(locals: [NativeLocal]) -> String Never! {
     text
 }
 
-// The Jet frames, innermost first; an inlined frame says so.
-native_debug_backtrace: fn(frames: [NativeFrame]) -> String Never! {
+// The Jet frames, innermost first, each line after `indent`; an inlined
+// frame says so.
+native_debug_backtrace: fn(frames: [NativeFrame], indent: String{""}) -> String Never! {
     text := ""
     index := 0
     loop frame in frames {
         if !native_debug_jet_frame(frame) -> next
         inlined: if frame.inlined -> "  [inlined]" else -> ""
-        text = "{text}#{index}  {frame.function}()  at {frame.file}:{frame.line}{inlined}\n"
+        text = "{text}{indent}#{index}  {frame.function}()  at {frame.file}:{frame.line}{inlined}\n"
         index += 1
     }
     text
+}
+
+// A move `word` made with no breakpoint, rule or watch, running to `mark`
+// when it is a seek.
+native_bare_move: fn(word: String, mark: NativeMark) -> NativeMove Never! {
+    NativeMove{word: word, armed: [Int]{}, rules: [Int:Int]{}, asks: [NativeWatchAsk]{}, watching: [Int]{}, settle: false, mark: mark}
+}
+
+// The path of a line-table function's source: its `file` under its
+// compilation directory `dir`, unless the file is absolute or has none.
+native_line_source: fn(dir: String, file: String) -> String Never! {
+    if dir == "" || file.starts_with("/") -> return "{file}"
+    native_files.join(dir, file)
 }
 
 // A task the runtime's registry lists (JetRuntime Observe.jet): its id, its

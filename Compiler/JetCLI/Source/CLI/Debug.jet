@@ -204,7 +204,7 @@ jet_cli_debug_session: fn(image: String, entry: String, lines: [String], scratch
         session.close()
         return jet_cli_done("", "", JET_DRIVER_EXIT_OK)
     }
-    plan: jet_cli_debug_console(session, cli_files.basename(source_file), source_lines, breaks, program_args, entry, deep_checks, color)
+    plan: jet_cli_debug_console(session, cli_files.basename(source_file), source_lines, breaks, program_args, entry, scratch, deep_checks, color)
     session.close()
     plan
 }
@@ -223,7 +223,7 @@ jet_cli_debug_attach: fn(pid: Int, scratch: String, deep_checks: DeepChecks, col
     plan := jet_cli_done("", "", JET_DRIVER_EXIT_OK)
     if session.attach_report(stop, pid, file, lines) == {
         .Ok(first) -> {
-            plan = jet_cli_debug_commands(session, first, file, lines, pid, source_file, deep_checks, color)
+            plan = jet_cli_debug_commands(session, first, file, lines, pid, source_file, scratch, deep_checks, color)
         }
         .Err(failure) -> { plan = jet_cli_debug_unavailable(failure, color) }
     }
@@ -243,7 +243,7 @@ jet_cli_debug_unavailable: fn(error: NativeDebugError, color: Bool) -> JetCLIPla
 
 // Run the program with `program_args` to its first stop (with `breaks`, the
 // first of them the program reaches), then read commands until it ends.
-jet_cli_debug_console: fn(session: &NativeSession, file: String, lines: [String], breaks: [NativeBreak], program_args: [String], entry: String, deep_checks: DeepChecks, color: Bool) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> JetCLIPlan Never! {
+jet_cli_debug_console: fn(session: &NativeSession, file: String, lines: [String], breaks: [NativeBreak], program_args: [String], entry: String, scratch: String, deep_checks: DeepChecks, color: Bool) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> JetCLIPlan Never! {
     opened := NativeDebugStep?{None}
     if breaks.len() > 0 {
         opened = Val(session.run_to(breaks, file, lines, program_args) ?? return jet_cli_debug_unavailable(err, color))
@@ -258,7 +258,7 @@ jet_cli_debug_console: fn(session: &NativeSession, file: String, lines: [String]
         row: diagnostic_registry_row("E0101") ?? panic("E0101 is not registered")
         return jet_cli_fail("E0101", row.what, row.why, row.fix, color, JET_DRIVER_EXIT_USER_ERROR)
     }
-    jet_cli_debug_commands(session, opened ?? panic("the session opened"), file, lines, -1, entry, deep_checks, color)
+    jet_cli_debug_commands(session, opened ?? panic("the session opened"), file, lines, -1, entry, scratch, deep_checks, color)
 }
 
 // Show `first`, then read commands until the program ends. A piped stdin's
@@ -267,14 +267,18 @@ jet_cli_debug_console: fn(session: &NativeSession, file: String, lines: [String]
 // ends it early (E2204); a program attached to as process `attached` (-1:
 // none) is let go on instead. `fix` compiles `entry` again, built with
 // `deep_checks`, and swaps the functions it changed into the program
-// (DebugFix.jet); the listing then shows the edited text.
-jet_cli_debug_commands: fn(session: &NativeSession, first: NativeDebugStep, file: String, lines: [String], attached: Int, entry: String, deep_checks: DeepChecks, color: Bool) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> JetCLIPlan Never! {
+// (DebugFix.jet); the listing then shows the edited text. `why` may build
+// the -O0 image of a built image's source into `scratch`
+// (jet_cli_debug_why).
+jet_cli_debug_commands: fn(session: &NativeSession, first: NativeDebugStep, file: String, lines: [String], attached: Int, entry: String, scratch: String, deep_checks: DeepChecks, color: Bool) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> JetCLIPlan Never! {
     echo: !cli_term.stdin().is_tty()
     jet_cli_debug_write(first.text)
     stop := first.stop
     input := cli_term.stdin()
     // The source's text once `fix` has read it again.
     edited := [String]{}
+    // The -O0 image `why` built of the source, once it has.
+    recovery := ""
     loop stop.kind == NativeStopKind.Paused {
         jet_cli_debug_write(NATIVE_DEBUG_PROMPT)
         command := ""
@@ -308,11 +312,37 @@ jet_cli_debug_commands: fn(session: &NativeSession, first: NativeDebugStep, file
             edited = (cli_files.read(entry) ?? "").split("\n").to_list()
             next
         }
+        if command == "why" || command.starts_with("why ") {
+            answer: jet_cli_debug_why(session, command.after("why").trim(), entry, scratch, deep_checks, recovery) ?? return jet_cli_debug_unavailable(err, color)
+            jet_cli_debug_write(answer)
+            next
+        }
         step: session.command(command, stop, file, if edited.len() > 0 -> edited else -> lines) ?? return jet_cli_debug_unavailable(err, color)
         jet_cli_debug_write(step.text)
         stop = step.stop
     }
     jet_cli_done("", "", JET_DRIVER_EXIT_OK)
+}
+
+// `why PLACE` (NativeSession.why). In a built image (`entry` ""), a place
+// the image keeps no bytes for, as an -O2 build optimizes a local away, is
+// answered from the -O0 build of the image's source under the same
+// recording (NativeSession.recovered): built into `scratch` with
+// `deep_checks` the first time, its image then in `recovery`.
+jet_cli_debug_why: fn(session: &NativeSession, operand: String, entry: String, scratch: String, deep_checks: DeepChecks, recovery: &String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> String NativeDebugError! {
+    asked: session.why(operand) ?? return Err(err)
+    if !asked.recover || entry != "" -> return Ok(asked.text)
+    source: session.why_source() ?? return Err(err)
+    if source == "" || !cli_files.exists(source) -> return Ok(asked.text)
+    if recovery == "" {
+        out_dir: cli_files.join(scratch, "why")
+        built: cli_process.cmd(native_debug_build_argv(cli_sys.executable(), source, out_dir, deep_checks)).stdout(.Capture).stderr(.Capture).run() ?? return Ok("{asked.text}The -O0 build of `{source}` couldn't run: {err}\n")
+        if !built.success {
+            return Ok("{asked.text}The -O0 build of `{source}` failed:\n{built.output}{built.errors}")
+        }
+        recovery = native_debug_image(source, out_dir)
+    }
+    session.recovered(operand, recovery, cli_files.join(scratch, "why-output.txt"))
 }
 
 jet_cli_debug_write: fn(text: String) -[IO, Time.Wait]> Never! {

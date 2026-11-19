@@ -694,6 +694,8 @@ D-DBG-VERBS1=A names the commands:
 - `reverse-step` (`rs`), `reverse-next` (`rn`), `reverse-finish` (`rf`)
   and `reverse-continue` (`rc`) go back in a replay (see Replaying a
   recording).
+- `why <place>` names, in a replay, the write that gave a local or field
+  path its value (see Replaying a recording).
 - `break <line|file:line|function> [if <expr>]` (`b`) sets a breakpoint.
   `break 12` is line 12 of the file being debugged. With `if`, the breakpoint
   stops only when the Jet expression holds in the stopped frame. A condition
@@ -819,6 +821,34 @@ ends, with a note. With nothing earlier the program comes back to the
 same stop and says so. Outside a replay, and after `fix` (a new run would
 run the code before the fix), the console refuses them.
 Tests/Cases/Debug/replay_reverse_*.case are the worked examples.
+
+`why <place>` in a replay names the write that gave a local of the
+selected frame, or a field path under one, the value it has here:
+
+```
+total = 2, set at prog.jet:21 in run() (task 1)
+  before: 0
+  #0  run()  at prog.jet:21
+```
+
+The line is the write's own, then the task that made it, the value it
+replaced and the stack it was made from. A write before the local's first
+line binds it, and says so as `before: none: this line binds it`. With no
+write since the frame began, it says that. `why` runs the commands again
+three times under the same recording: once to find the call that opened the
+frame and to count this stop's passes after it; once from that call, with
+a debug register on the place's bytes keeping every write that changes them
+(the program runs on) until the same stop; and once more to come back here,
+breakpoints and watches as they were. The traced program runs without
+address randomization, so the place has the same address in every run. A
+local an `-O2` image keeps no place for (optimized away, or held in a
+register) is answered from the `-O0` build of the image's source, which
+jet makes once into the session's scratch directory: a run counts how
+often the stop's task reached the stop's line, the `-O0` image runs under
+the same recording to that pass of the line, and `why` answers there, the
+value labeled `(recovered from the -O0 replay)`. Outside a replay, and
+after `fix`, the console refuses it.
+Tests/Cases/Debug/replay_why_*.case are the worked examples.
 Tests/Cases/Debug/replay_threads_across_tiers_*.case are the worked examples.
 
 ## Sync-order log

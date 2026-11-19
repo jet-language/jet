@@ -1,0 +1,22 @@
+# An -O2 image keeps no place for `d` at line 21: the optimizer folds it
+# into the sum. `why d` in a replay of that image builds the -O0 image of
+# its source, runs it under the same recording to the same pass of line 21
+# (the loop's second) and answers there: line 20 set `d` to 2, labeled as
+# recovered from the -O0 replay. The -O2 session stays at its stop, so `c`
+# runs it on. The helper task's tally races the loop, so only the main
+# task's total is asserted.
+# The fixture must stay in jet fmt form; line 20 binds `d`, line 21 adds it.
+fixture: ReplayReverse.fixture
+env: NO_COLOR=1
+step: jet run -O2 --record=fast prog.jet
+exit: 0
+stdout: ~ "total 6 tally "
+step: jet build -O2 prog.jet
+exit: 0
+step: jet debug --replay=fast {work}/.jet/build/prog --break prog.jet:21
+stdin: replay_why_recovers_an_optimized_away_local.stdin
+exit: 0
+stdout: ~ "(Jet) why d\nd = 2 (recovered from the -O0 replay), set at prog.jet:20 in run() (task 1)\n" # the -O0 replay's write of `d`, labeled
+stdout: ~ "Program finished\n"
+stdout+stderr: !~ "replay diverged"
+stdout+stderr: !~ "didn't"
