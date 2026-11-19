@@ -16964,6 +16964,302 @@
       "completedAt": "2026-11-16T18:57:10.711Z",
       "questions": [],
       "retiredAt": "2026-11-19T19:02:18.354Z"
+    },
+    {
+      "id": "c0b8qwec",
+      "num": 6814,
+      "title": "HTTP caching for pages and assets: Cache-Control, ETag and immutable hashed assets derived from facts",
+      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G16).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "All criteria met (p222 batch compiler, dev 18bc53b3e6). Closed by Main."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Implementation decision (Main, within the ratified CachePolicy and .cache<V> surface, no new spelling): sema lowers .cache<V>(policy) to __cache(reply_type: \"V\", policy), as .screen lowers to __screen. Every GET page or #App.Public endpoint whose reply type is V gets public, max-age plus an ETag; a matching If-None-Match gets 304; the server keeps the encoded reply for max_age, so false, 0 and empty text stay hits (c3) and freshness runs through the expiry instant (c4). #App.SignedIn replies always get private, no-store (c1). c5's shared store is pending Main's reading of D-NEST-UPSTREAM1 (is a store in the app's own database file app-owned?). Speed-3-3 builds c2, then c3, c4 and c1."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Signed-in responses carry Cache-Control: private, no-store. .cache<V>(.Public(max_age:)) sends public, max-age with an ETag, and a matching If-None-Match gets 304.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p217 batch compiler (census build of dev ec9df40248): jet test Compiler --profile cases --filter cache_policy_headers_and_etag_revalidation PASS",
+          "at": "2026-11-16T17:11:13.308Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "WebApp/cache_policy_headers_and_etag_revalidation"
+          }
+        },
+        {
+          "n": 2,
+          "text": "Built assets (images, fonts, icons and static files) have content-hashed names and are served with public, max-age=31536000, immutable. Changing an asset changes its name.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p220 batch compiler (dev 17c073989d): jet test Compiler --profile cases --filter WebBuild/hashed_assets_are_immutable PASS 1/1",
+          "at": "2026-11-16T18:32:09.385Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "WebBuild/hashed_assets_are_immutable"
+          }
+        },
+        {
+          "n": 3,
+          "text": "A server response cache keeps false, 0 and empty text as hits, never as misses.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p217 batch compiler (census build of dev ec9df40248): jet test Compiler --profile cases --filter cache_keeps_falsy_values PASS",
+          "at": "2026-11-16T17:11:14.348Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "WebApp/cache_keeps_falsy_values"
+          }
+        },
+        {
+          "n": 4,
+          "text": "Cache lifetimes are Durations, and an entry is fresh up to its expiry instant and stale after it.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p222 batch compiler (dev 18bc53b3e6): jet test Compiler --profile cases --filter WebApp/cache_expiry_boundary PASS 1/1 (Speed-3-3-6814-c4c5, c6497febfa)",
+          "at": "2026-11-16T19:12:10.558Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "WebApp/cache_expiry_boundary"
+          }
+        },
+        {
+          "n": 5,
+          "text": "Two server instances share one cache store: both read a cached false value, a write to the source invalidates it for both, and a cache store failure falls through to the source instead of failing the request.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p222 batch compiler (dev 18bc53b3e6): jet test Compiler --profile cases --filter WebApp/shared_cache_two_instances PASS 1/1 (c6497febfa)",
+          "at": "2026-11-16T19:12:12.140Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "WebApp/shared_cache_two_instances"
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": "c0snkbac",
+      "needsAcceptance": false,
+      "created": "2026-11-13T15:14:00.487Z",
+      "updated": "2026-11-16T19:12:22.643Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 5,
+      "completedAt": "2026-11-16T19:12:22.643Z",
+      "questions": [],
+      "retiredAt": "2026-11-19T19:13:00.133Z"
+    },
+    {
+      "id": "c0se7lpr",
+      "num": 6825,
+      "title": "app: server jobs, the after-commit outbox and schedules (#App.Job, #App.Every, app.enqueue)",
+      "body": "Gap card N2 from the #6792 r3 proposal (Docs/proposals/2026-11-13-web-app-framework-shape.md, section 4.14; crewboard/Logic/crew.jet tell_assignee, send_invite, remind_due_today). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "All criteria met (p222 batch compiler, dev 18bc53b3e6). Closed by Main."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Ballot D-JOB-STORE1 posted (blocks c9): rec A, no public job-store slot; jobs stay in a core.db store's outbox in the call's transaction, and c9 is reworded to that contract. Main added B's best case (Redis or a cloud queue: job load off the DB, independent scaling) and A's cost (job rows share the database)."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "p209: c2 (9fb22f4c60) hangs every served mux. Server.jet mux_serving relied on list remove(0, .Slot) giving None on an empty list, but .Slot stops on an out-of-range index (E3010), so the serving task dies at its first serve and the client times out. That broke about 100 suite rows (HTTP examples, web_app, http_server_lifecycle, ws, tls, canvas). Speed-3-2 sends the fix first in p210, sweeping every .Slot ?? return|default caller (App.jet:995, Db.jet:2178). c1, c2, c3 and c4 proof rows fail on p209 for this root."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "c9 ruling (Main): a queue store adapter can't be written by user code today. The only adapter seam is core.app's priv(package) transactions module with CallOutbox (Core/App/App.jet:775, :836), joined only by core.db (Core/Db/Db.jet:1362). Refusing a service with #App.Job methods that holds no db.Store would contradict the ratified text in core-library.md:5664-5665 (a call that used no store runs the job at once without keeping it), so that reading is rejected. c9 has a subject only once a public adapter surface exists, and adding one is owner-gated public API. c9 is blocked on a ballot for it; Speed-3-2 moved to #6800 c1."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-2",
+          "text": "Cleanup 2026-11-15 (TowerKeeper-2): c1 split; the per-send keys are #6825 c10."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "app.enqueue inside a #App.SignedIn method stores the job call in that method transaction: a rolled-back write queues nothing, and a committed one runs the job at least once after the commit, retried with backoff up to retries:.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "`jet test Compiler --profile cases --filter web_app/job_runs_after_commit_and_never_after_rollback`: 1 row, 0 failed; also web_app/enqueued_job_runs_with_its_arguments passes. p210 batch compiler (dev 7f902dd915, census-clean build), proofs log $JET_STATE_ROOT/lander3-tmp/proofsp210.out",
+          "at": "2026-11-16T08:01:14.307Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "web_app/job_runs_after_commit_and_never_after_rollback"
+          }
+        },
+        {
+          "n": 2,
+          "text": "#App.Every(cron:) runs on one server at a time across replicas (a lease in the database) and a missed tick runs once at start-up.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "`jet test Compiler --profile cases --filter web_app/schedule_runs_once_across_replicas`: 1 row, 0 failed. p210 batch compiler (dev 7f902dd915, census-clean build), proofs log $JET_STATE_ROOT/lander3-tmp/proofsp210.out",
+          "at": "2026-11-16T08:01:15.281Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "web_app/schedule_runs_once_across_replicas"
+          }
+        },
+        {
+          "n": 3,
+          "text": "Jobs and schedules are server-only: a client call to one is a compile error, and app.endpoints<Crew>() does not list them.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "`jet test Compiler --profile cases --filter web_app/job_is_not_an_endpoint`: 1 row, 0 failed. p210 batch compiler (dev 7f902dd915, census-clean build), proofs log $JET_STATE_ROOT/lander3-tmp/proofsp210.out",
+          "at": "2026-11-16T08:01:16.275Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "web_app/job_is_not_an_endpoint"
+          }
+        },
+        {
+          "n": 4,
+          "text": "Jobs, schedules and webhooks run their queries as db.Who.System, and `jet inspect choices` lists each.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "`jet test Compiler --profile cases --filter web_app/system_runs_are_listed_by_inspect_choices`: 1 row, 0 failed. p210 batch compiler (dev 7f902dd915, census-clean build), proofs log $JET_STATE_ROOT/lander3-tmp/proofsp210.out",
+          "at": "2026-11-16T08:01:17.251Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "web_app/system_runs_are_listed_by_inspect_choices"
+          }
+        },
+        {
+          "n": 5,
+          "text": "app.enqueue's body must be one call of an #App.Job method of the same service with codable arguments, evaluated and encoded at the call; anything else is a compile error with a registered diagnostic and a UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p209 gate (dev a1c3325a65): jet test Compiler --profile cases --filter web_app/enqueue_takes_one_job_call n=1 bad=0, ui web_app_enqueue_not_one_job_call n=1 bad=0 (E2817).",
+          "at": "2026-11-16T07:12:38.237Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "web_app/enqueue_takes_one_job_call"
+          }
+        },
+        {
+          "n": 6,
+          "text": "A job whose worker disconnects before acknowledging it is delivered again, and a duplicate delivery runs under the job's declared idempotency key, so its effect happens once.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p211 gate (dev d6d482c5f7): jet test Compiler --profile cases --filter web_app/job_redelivered_once -> n=1 bad=0 (proof row sp3-6825n6, proofsp211).",
+          "at": "2026-11-16T09:23:21.642Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "web_app/job_redelivered_once"
+          }
+        },
+        {
+          "n": 7,
+          "text": "After a server restart, queued jobs (stored in the database) still run, while local schedule state is rebuilt, never replayed; a retried job's outcome follows its declared retry policy.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p211 gate (dev d6d482c5f7): jet test Compiler --profile cases --filter web_app/jobs_survive_restart -> n=1 bad=0 (proof row sp3-6825n7, proofsp211).",
+          "at": "2026-11-16T09:23:22.729Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "web_app/jobs_survive_restart"
+          }
+        },
+        {
+          "n": 8,
+          "text": "Shutdown waits a bounded time for running jobs and leaves an unfinished job unacknowledged, so it runs again on the next start.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p211 gate (dev d6d482c5f7): jet test Compiler --profile cases --filter web_app/shutdown_never_acks_unfinished_jobs -> n=1 bad=0 (proof row sp3-6825n8, proofsp211).",
+          "at": "2026-11-16T09:23:23.982Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "web_app/shutdown_never_acks_unfinished_jobs"
+          }
+        },
+        {
+          "n": 9,
+          "text": "Jobs are kept only in a core.db store's outbox, in the transaction of the call that queued them. core.app has no public job-store slot, so no app code can weaken the contract. Every engine core.db opens passes the contract rows of c1, c6, c7 and c8, and the case states the in-memory case: jobs last as long as the rows that queued them.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p222 batch compiler (dev 18bc53b3e6): jet test Compiler --profile cases --filter WebApp/job_store_contract_per_engine PASS 1/1 (2bbb2acc1a)",
+          "at": "2026-11-16T19:12:13.770Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "WebApp/job_store_contract_per_engine"
+          }
+        },
+        {
+          "n": 10,
+          "text": "Each push a job sends gets its own key, made from the run key, the recipient and the send open: or link: value, sent hashed to fit each transport limit. app.notify passes it to the transport: APNs apns-collapse-id, FCM android.notification.tag on a non-collapsible message, and Web Push Topic header and notification tag. A retried run repeats each key even when its query returns rows in another order, so a repeat replaces its earlier copy, and two different sends from one job never share a key.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p222 batch compiler (dev 18bc53b3e6): jet test Compiler --profile cases --filter WebApp/job_sends_repeat_their_keys_on_retry PASS 1/1 (18bc53b3e6)",
+          "at": "2026-11-16T19:12:16.123Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "WebApp/job_sends_repeat_their_keys_on_retry"
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": "c0snkbac",
+      "needsAcceptance": false,
+      "created": "2026-11-13T17:08:07.504Z",
+      "updated": "2026-11-16T19:12:24.856Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 10,
+      "completedAt": "2026-11-16T19:12:24.856Z",
+      "questions": [],
+      "retiredAt": "2026-11-19T19:13:00.133Z"
     }
   ]
 }

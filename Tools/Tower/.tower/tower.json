@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112437,
+    "rev": 112438,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -72674,112 +72674,6 @@
       "completedAt": "2026-11-17T00:03:05.048Z"
     },
     {
-      "id": "c0b8qwec",
-      "num": 6814,
-      "title": "HTTP caching for pages and assets: Cache-Control, ETag and immutable hashed assets derived from facts",
-      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G16).",
-      "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "All criteria met (p222 batch compiler, dev 18bc53b3e6). Closed by Main."
-        },
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "Implementation decision (Main, within the ratified CachePolicy and .cache<V> surface, no new spelling): sema lowers .cache<V>(policy) to __cache(reply_type: \"V\", policy), as .screen lowers to __screen. Every GET page or #App.Public endpoint whose reply type is V gets public, max-age plus an ETag; a matching If-None-Match gets 304; the server keeps the encoded reply for max_age, so false, 0 and empty text stay hits (c3) and freshness runs through the expiry instant (c4). #App.SignedIn replies always get private, no-store (c1). c5's shared store is pending Main's reading of D-NEST-UPSTREAM1 (is a store in the app's own database file app-owned?). Speed-3-3 builds c2, then c3, c4 and c1."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Signed-in responses carry Cache-Control: private, no-store. .cache<V>(.Public(max_age:)) sends public, max-age with an ETag, and a matching If-None-Match gets 304.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p217 batch compiler (census build of dev ec9df40248): jet test Compiler --profile cases --filter cache_policy_headers_and_etag_revalidation PASS",
-          "at": "2026-11-16T17:11:13.308Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "WebApp/cache_policy_headers_and_etag_revalidation"
-          }
-        },
-        {
-          "n": 2,
-          "text": "Built assets (images, fonts, icons and static files) have content-hashed names and are served with public, max-age=31536000, immutable. Changing an asset changes its name.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p220 batch compiler (dev 17c073989d): jet test Compiler --profile cases --filter WebBuild/hashed_assets_are_immutable PASS 1/1",
-          "at": "2026-11-16T18:32:09.385Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "WebBuild/hashed_assets_are_immutable"
-          }
-        },
-        {
-          "n": 3,
-          "text": "A server response cache keeps false, 0 and empty text as hits, never as misses.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p217 batch compiler (census build of dev ec9df40248): jet test Compiler --profile cases --filter cache_keeps_falsy_values PASS",
-          "at": "2026-11-16T17:11:14.348Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "WebApp/cache_keeps_falsy_values"
-          }
-        },
-        {
-          "n": 4,
-          "text": "Cache lifetimes are Durations, and an entry is fresh up to its expiry instant and stale after it.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p222 batch compiler (dev 18bc53b3e6): jet test Compiler --profile cases --filter WebApp/cache_expiry_boundary PASS 1/1 (Speed-3-3-6814-c4c5, c6497febfa)",
-          "at": "2026-11-16T19:12:10.558Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "WebApp/cache_expiry_boundary"
-          }
-        },
-        {
-          "n": 5,
-          "text": "Two server instances share one cache store: both read a cached false value, a write to the source invalidates it for both, and a cache store failure falls through to the source instead of failing the request.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p222 batch compiler (dev 18bc53b3e6): jet test Compiler --profile cases --filter WebApp/shared_cache_two_instances PASS 1/1 (c6497febfa)",
-          "at": "2026-11-16T19:12:12.140Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "WebApp/shared_cache_two_instances"
-          }
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": "c0snkbac",
-      "needsAcceptance": false,
-      "created": "2026-11-13T15:14:00.487Z",
-      "updated": "2026-11-16T19:12:22.643Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 5,
-      "completedAt": "2026-11-16T19:12:22.643Z"
-    },
-    {
       "id": "c016keg2",
       "num": 6815,
       "title": "Progressive web app install: generated web app manifest, icons and offline shell on top of #6048",
@@ -73288,192 +73182,6 @@
       "updated": "2026-11-18T02:19:47.691Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
-    },
-    {
-      "id": "c0se7lpr",
-      "num": 6825,
-      "title": "app: server jobs, the after-commit outbox and schedules (#App.Job, #App.Every, app.enqueue)",
-      "body": "Gap card N2 from the #6792 r3 proposal (Docs/proposals/2026-11-13-web-app-framework-shape.md, section 4.14; crewboard/Logic/crew.jet tell_assignee, send_invite, remind_due_today). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md.",
-      "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "All criteria met (p222 batch compiler, dev 18bc53b3e6). Closed by Main."
-        },
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "Ballot D-JOB-STORE1 posted (blocks c9): rec A, no public job-store slot; jobs stay in a core.db store's outbox in the call's transaction, and c9 is reworded to that contract. Main added B's best case (Redis or a cloud queue: job load off the DB, independent scaling) and A's cost (job rows share the database)."
-        },
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "p209: c2 (9fb22f4c60) hangs every served mux. Server.jet mux_serving relied on list remove(0, .Slot) giving None on an empty list, but .Slot stops on an out-of-range index (E3010), so the serving task dies at its first serve and the client times out. That broke about 100 suite rows (HTTP examples, web_app, http_server_lifecycle, ws, tls, canvas). Speed-3-2 sends the fix first in p210, sweeping every .Slot ?? return|default caller (App.jet:995, Db.jet:2178). c1, c2, c3 and c4 proof rows fail on p209 for this root."
-        },
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "c9 ruling (Main): a queue store adapter can't be written by user code today. The only adapter seam is core.app's priv(package) transactions module with CallOutbox (Core/App/App.jet:775, :836), joined only by core.db (Core/Db/Db.jet:1362). Refusing a service with #App.Job methods that holds no db.Store would contradict the ratified text in core-library.md:5664-5665 (a call that used no store runs the job at once without keeping it), so that reading is rejected. c9 has a subject only once a public adapter surface exists, and adding one is owner-gated public API. c9 is blocked on a ballot for it; Speed-3-2 moved to #6800 c1."
-        },
-        {
-          "at": "2026-11-15",
-          "by": "TowerKeeper-2",
-          "text": "Cleanup 2026-11-15 (TowerKeeper-2): c1 split; the per-send keys are #6825 c10."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "app.enqueue inside a #App.SignedIn method stores the job call in that method transaction: a rolled-back write queues nothing, and a committed one runs the job at least once after the commit, retried with backoff up to retries:.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "`jet test Compiler --profile cases --filter web_app/job_runs_after_commit_and_never_after_rollback`: 1 row, 0 failed; also web_app/enqueued_job_runs_with_its_arguments passes. p210 batch compiler (dev 7f902dd915, census-clean build), proofs log $JET_STATE_ROOT/lander3-tmp/proofsp210.out",
-          "at": "2026-11-16T08:01:14.307Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "web_app/job_runs_after_commit_and_never_after_rollback"
-          }
-        },
-        {
-          "n": 2,
-          "text": "#App.Every(cron:) runs on one server at a time across replicas (a lease in the database) and a missed tick runs once at start-up.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "`jet test Compiler --profile cases --filter web_app/schedule_runs_once_across_replicas`: 1 row, 0 failed. p210 batch compiler (dev 7f902dd915, census-clean build), proofs log $JET_STATE_ROOT/lander3-tmp/proofsp210.out",
-          "at": "2026-11-16T08:01:15.281Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "web_app/schedule_runs_once_across_replicas"
-          }
-        },
-        {
-          "n": 3,
-          "text": "Jobs and schedules are server-only: a client call to one is a compile error, and app.endpoints<Crew>() does not list them.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "`jet test Compiler --profile cases --filter web_app/job_is_not_an_endpoint`: 1 row, 0 failed. p210 batch compiler (dev 7f902dd915, census-clean build), proofs log $JET_STATE_ROOT/lander3-tmp/proofsp210.out",
-          "at": "2026-11-16T08:01:16.275Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "web_app/job_is_not_an_endpoint"
-          }
-        },
-        {
-          "n": 4,
-          "text": "Jobs, schedules and webhooks run their queries as db.Who.System, and `jet inspect choices` lists each.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "`jet test Compiler --profile cases --filter web_app/system_runs_are_listed_by_inspect_choices`: 1 row, 0 failed. p210 batch compiler (dev 7f902dd915, census-clean build), proofs log $JET_STATE_ROOT/lander3-tmp/proofsp210.out",
-          "at": "2026-11-16T08:01:17.251Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "web_app/system_runs_are_listed_by_inspect_choices"
-          }
-        },
-        {
-          "n": 5,
-          "text": "app.enqueue's body must be one call of an #App.Job method of the same service with codable arguments, evaluated and encoded at the call; anything else is a compile error with a registered diagnostic and a UI snapshot.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p209 gate (dev a1c3325a65): jet test Compiler --profile cases --filter web_app/enqueue_takes_one_job_call n=1 bad=0, ui web_app_enqueue_not_one_job_call n=1 bad=0 (E2817).",
-          "at": "2026-11-16T07:12:38.237Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "web_app/enqueue_takes_one_job_call"
-          }
-        },
-        {
-          "n": 6,
-          "text": "A job whose worker disconnects before acknowledging it is delivered again, and a duplicate delivery runs under the job's declared idempotency key, so its effect happens once.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p211 gate (dev d6d482c5f7): jet test Compiler --profile cases --filter web_app/job_redelivered_once -> n=1 bad=0 (proof row sp3-6825n6, proofsp211).",
-          "at": "2026-11-16T09:23:21.642Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "web_app/job_redelivered_once"
-          }
-        },
-        {
-          "n": 7,
-          "text": "After a server restart, queued jobs (stored in the database) still run, while local schedule state is rebuilt, never replayed; a retried job's outcome follows its declared retry policy.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p211 gate (dev d6d482c5f7): jet test Compiler --profile cases --filter web_app/jobs_survive_restart -> n=1 bad=0 (proof row sp3-6825n7, proofsp211).",
-          "at": "2026-11-16T09:23:22.729Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "web_app/jobs_survive_restart"
-          }
-        },
-        {
-          "n": 8,
-          "text": "Shutdown waits a bounded time for running jobs and leaves an unfinished job unacknowledged, so it runs again on the next start.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p211 gate (dev d6d482c5f7): jet test Compiler --profile cases --filter web_app/shutdown_never_acks_unfinished_jobs -> n=1 bad=0 (proof row sp3-6825n8, proofsp211).",
-          "at": "2026-11-16T09:23:23.982Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "web_app/shutdown_never_acks_unfinished_jobs"
-          }
-        },
-        {
-          "n": 9,
-          "text": "Jobs are kept only in a core.db store's outbox, in the transaction of the call that queued them. core.app has no public job-store slot, so no app code can weaken the contract. Every engine core.db opens passes the contract rows of c1, c6, c7 and c8, and the case states the in-memory case: jobs last as long as the rows that queued them.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p222 batch compiler (dev 18bc53b3e6): jet test Compiler --profile cases --filter WebApp/job_store_contract_per_engine PASS 1/1 (2bbb2acc1a)",
-          "at": "2026-11-16T19:12:13.770Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "WebApp/job_store_contract_per_engine"
-          }
-        },
-        {
-          "n": 10,
-          "text": "Each push a job sends gets its own key, made from the run key, the recipient and the send open: or link: value, sent hashed to fit each transport limit. app.notify passes it to the transport: APNs apns-collapse-id, FCM android.notification.tag on a non-collapsible message, and Web Push Topic header and notification tag. A retried run repeats each key even when its query returns rows in another order, so a repeat replaces its earlier copy, and two different sends from one job never share a key.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p222 batch compiler (dev 18bc53b3e6): jet test Compiler --profile cases --filter WebApp/job_sends_repeat_their_keys_on_retry PASS 1/1 (18bc53b3e6)",
-          "at": "2026-11-16T19:12:16.123Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "WebApp/job_sends_repeat_their_keys_on_retry"
-          }
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": "c0snkbac",
-      "needsAcceptance": false,
-      "created": "2026-11-13T17:08:07.504Z",
-      "updated": "2026-11-16T19:12:24.856Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 10,
-      "completedAt": "2026-11-16T19:12:24.856Z"
     },
     {
       "id": "c0b5xq4b",
@@ -74766,6 +74474,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-19T18:25:02.799Z"
+        },
+        {
+          "n": 62,
+          "text": "A trait's default method compiles when a type in another package implements the trait without writing it: today a 25-line two-package program (retain_lib declares `Retain: trait { saved: fn(self) -> Bool, evictable: fn(self) -> Bool { !self.saved() } }` and `count_evictable: fn<I: Retain>(items: [I]) -> Int`; retain_app's `Rec` implements only `saved` and calls both `count_evictable(items)` and `items[0].evictable()`) exits 101 with \"ir.build unlowered: method call outside the checked program: evictable\" on the direct call and on the generic instance (batch compiler p327, dev 01b0b4b9e0). The same fault stops Compiler/JetDevServer/Tests (plan_eviction_inner<CaptureTestRecord>, c61's JetDevServer row). Sema fills default bodies only for traits the impl's own module declares (Registration/TraitImpls.jet sema_trait_impls_synthesize); within one package the inline-module form runs. Proof: a cases row with that two-package fixture prints 2 and false, and jet test Compiler/JetDevServer/Tests/LiveInspect.jet compiles.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-19T19:13:00.011Z"
         }
       ],
       "refs": [],
@@ -74773,9 +74490,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T02:02:00.791Z",
-      "updated": "2026-11-19T19:03:29.512Z",
+      "updated": "2026-11-19T19:13:00.011Z",
       "updatedBy": "Main",
-      "criteriaLastN": 61
+      "criteriaLastN": 62
     },
     {
       "id": "c0nwrfck",
@@ -150576,240 +150293,6 @@
       "ratifiedAt": "2026-11-16"
     },
     {
-      "id": "D-JOB-STORE1",
-      "cardId": "c0se7lpr",
-      "group": "library",
-      "title": "Where an app's background jobs are kept: only in the app's own database, through a public store trait with a law kit, or through a trait whose promises jet check reads",
-      "situation": "A background job is a piece of work a server does after it answers, such as sending a push when a task gets an assignee. Today Jet keeps each job as a row in the app's own database, written in the same step as the change that asked for it. A promise on the jobs card says a home-made job store that breaks the rules is refused when the code is checked. No public way to write a job store exists, so that promise has nothing to check. This vote decides whether apps may plug in their own job store, and how. We recommend A: jobs stay in the app's database, and the promise is reworded to the contract that store keeps.",
-      "gist": "Should an app's jobs stay in its own database, or may an app plug in a job store through a tested trait or a trait with checked promises?",
-      "lesson": "A job must be saved in the same step as the change that asked for it. Then a change that is undone sends nothing, and a crash never loses a job. Only the database that holds the change can save the job in that step.",
-      "explainer": "Words used here. A job is work the server does later, after a change is saved. A job store is where jobs wait until they run. A transaction is a group of database writes that all happen or none do; committing it saves them, and rolling it back undoes them.\n\nAt least once means a job may run twice after a crash, but never zero times. To acknowledge a job is to mark it done, so it is not run again. An adapter is code that plugs another system, such as Redis, into a slot the framework offers. A trait is a list of methods a type must have.",
-      "story": "Ana assigns a task to Ben in Crewboard. The assignment and a job that pushes to Ben are saved together.\n\nUnder A the job is a row in crewboard.db, written in the same transaction as the assignment. If the assignment rolls back, there is no job. If the server crashes after the commit, the row is still there, and the next server runs it. Mia never writes job-store code.\n\nUnder B Mia writes RedisJobs, six methods, and runs the law kit in her tests. Redis cannot join crewboard.db's transaction. So her adapter saves the job just after the commit, and a crash between the two loses Ben's push. The law kit passes, because it tests the adapter alone.\n\nUnder C she marks RedisJobs with its promises. jet check refuses it, because it cannot join the transaction, which is true of every store outside the database.",
-      "inWild": "# Oban (Elixir): jobs are rows in the app's Postgres, inserted in the caller's transaction.\n# https://hexdocs.pm/oban/Oban.html\nEcto.Multi.new() |> Ecto.Multi.update(:task, changeset) |> Oban.insert(:push, PushWorker.new(%{id: id})) |> Repo.transaction()\n\n# Rails Solid Queue: Active Job's backend in the app's own database.\n# https://github.com/rails/solid_queue\nconfig.active_job.queue_adapter = :solid_queue\n\n# Sidekiq (Ruby): jobs live in Redis, outside the app's transaction, so enqueueing is a second write beside the commit.\n# https://github.com/sidekiq/sidekiq/wiki\nPushWorker.perform_async(task.id)",
-      "detail": "What this ballot decides: whether core.app offers a public slot for a job store other than the built-in one. If it does, the ballot decides the slot's shape and how jet check refuses a store that cannot keep the contract. The contract has four parts: at-least-once delivery, acknowledgement only after the job finishes, a new delivery after a crash, and jobs that survive a restart.\n\nIt also decides the text of #6825 c9. Today c9 reads: \"A queue store adapter that cannot keep the job store's durability and acknowledgement contract is refused at check time with a registered error naming what it lacks\". Its proof row is jet test Compiler --profile ui --filter app_job_store_adapter_contract.\n\nMain's ruling of 2026-11-16 on #6825 found no adapter seam an app can write. The only seam is core.app's priv(package) transactions module with CallOutbox, joined only by core.db. Refusing a service with jobs that holds no store would contradict Docs/spec/reference/core-library.md:5692-5693. So c9 has no subject until a public slot exists, and adding one is owner-gated public API.\n\nToday, at dev d6d482c5f7, Core/App/App.jet:766-772 says a queued job is kept in the outbox of the first store the call joined, in that store's transaction. CallOutbox (:780-811) is the hook: now, keep, done, failed, take and hold. The transactions module that joins it is priv(package) (:874), and so is the jobs module (:1160).\n\ncore.db fills the hook. db_join hands each store's outbox to the call as its transaction begins (Core/Db/Db.jet:1370-1383). db_outbox keeps a job as an INSERT into __jet_jobs on the connection that holds the call's open transaction (:1460-1501). The hold lasts five seconds and is renewed each second (App.jet:1108-1117).\n\nTwo parts of the contract depend on that shared transaction. A rolled-back write queues nothing (Docs/spec/reference/core-library.md:5662-5665, #6825 c1). A repeated run's writes are dropped, because each store records the job's key with the job's own writes (Docs/spec/reference/core-library.md:5686-5691, #6825 c6). A store outside the database cannot join that transaction.\n\nSuch a store must save the job either before the commit, so a rollback still runs it, or after it, so a crash in between loses it. That is the dual-write problem, which Oban, Solid Queue and the outbox pattern avoid by keeping jobs in the app's database.\n\nEdge cases. An in-memory database keeps its jobs only as long as the process, the same as the rows that queued them; core.db never scans one for jobs at open (Db.jet:1268). A call that used no store runs its job at once without keeping it, as the ratified text says (core-library.md:5692-5693); no option changes that.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Jobs stay in the app's database: no public store slot, and c9 is reworded to that store's contract",
-          "gist": "The job row is written in the same transaction as the change that queued it, and c9 states the contract every database engine must pass.",
-          "detail": "No new public surface. A job is a row of __jet_jobs in the first store the call used, written in that call's transaction, as today. A database engine that core.db adds later brings its outbox through core.db's internal hook, so apps change nothing.\n\nc9 becomes: \"Jobs are kept only in a core.db store's outbox, in the transaction of the call that queued them. core.app has no public job-store slot, so no app code can weaken the contract. Every engine core.db opens passes the contract rows of c1, c6, c7 and c8.\"\n\nIts proof row becomes jet test Compiler --profile cases --filter web_app/job_store_contract_per_engine. It runs those four laws on a database file and states the in-memory case: jobs last as long as the rows that queued them.\n\nBeginner path: mark a method #App.Job and call app.enqueue; there is nothing to configure. Expert path: to feed another system, such as a billing queue, a job sends to it. The outbox retries that hand-off until it succeeds, so it happens at least once.\n\nThe cost: job rows share the app's database, so a very busy queue adds write load there. Moving jobs to another system then means a new ballot, not a setting.",
-          "technical": "Proposed, not implemented: the c9 text and its proof row. CallOutbox, the transactions module and the jobs module stay priv(package) (Core/App/App.jet:780-811, :874, :1160). core.db stays the only caller (Core/Db/Db.jet:1383, :1465).\n\nProof: jet test Compiler --profile cases --filter web_app/job_store_contract_per_engine. It runs rollback-queues-nothing, redelivery after a dropped hold, restart survival and no-ack-on-stop against every engine core.db opens.",
-          "code": "// Logic/crew.jet: the same in every option. Assigning a task queues a\n// push; the job runs after the write commits, at least once.\n#App.Job(retries: 5)\ntell_assignee: fn(self, id: TaskID) -[DB.Read, Net]> TaskError! {\n    task: self.tasks.get(id) ?? return Ok()\n    who: task.assignee ?? return Ok()\n    if !self.is_member(task.project, who) -> return Ok()\n    app.notify(to: who, title: \"Assigned to you\", body: task.title, open: TaskView{id: task.id})\n    Ok()\n}\n\npriv after_assign: fn(self, task: Task, before: auth.AccountID?) Never! {\n    if task.assignee != before && task.assignee != None -> app.enqueue(fn() { self.tell_assignee(task.id) })\n}\n\n// Web/web.jet: no job line. The job row lives in crewboard.db, written in\n// the same transaction as the task, so a rolled-back assignment queues\n// nothing and a committed one survives a crash or a restart.\nrun: fn() logic.TaskError! {\n    crew: logic.open_crew(\"crewboard.db\")\n    screens.crewboard()\n        .mount(crew)\n        .serve()\n}\n\n// tell_assignee above is already a hand-off to another system (Apple,\n// Google or a push service): the outbox retries it until it succeeds. A job\n// that feeds a billing queue or a broker does the same from its body."
-        },
-        {
-          "key": "B",
-          "name": "A public trait with required methods, app.JobStore, plus a law kit, app.job_store_laws",
-          "gist": "An app writes six methods to plug in its own job store and proves the contract with a test kit.",
-          "detail": "CallOutbox's six members become a public trait, and the entry picks a store with .jobs(store). jet check refuses a store missing a method, with the ordinary error for an incomplete trait. app.job_store_laws runs the four laws against the store in the app's tests.\n\nIts best case is a team that already runs Redis or a cloud queue. Job traffic then stays off the app's database, and job workers scale on their own, as Sidekiq's do.\n\nBeginner path: unchanged, since the built-in store stays the default. Expert path: write the six methods, run the law kit, and pick the store in the entry.\n\nThe check-time refusal covers missing methods only. Durability and acknowledgement are behaviour, which the law kit tests at run time. A store outside the database cannot join the call's transaction, so c1's \"a rolled-back write queues nothing\" and c6's once-only writes break. The law kit cannot see that, because it tests the store alone.",
-          "technical": "Proposed, not implemented. core.app gains the trait JobStore (keep, done, failed, take, hold, now), QueuedJob, JobStoreError, App.jobs and job_store_laws. core.db's outbox implements the trait. Proof: --profile ui --filter app_job_store_adapter_contract for the missing method, and --profile cases --filter web_app/job_store_laws for the kit.",
-          "code": "// Logic/crew.jet: the same in every option. Assigning a task queues a\n// push; the job runs after the write commits, at least once.\n#App.Job(retries: 5)\ntell_assignee: fn(self, id: TaskID) -[DB.Read, Net]> TaskError! {\n    task: self.tasks.get(id) ?? return Ok()\n    who: task.assignee ?? return Ok()\n    if !self.is_member(task.project, who) -> return Ok()\n    app.notify(to: who, title: \"Assigned to you\", body: task.title, open: TaskView{id: task.id})\n    Ok()\n}\n\npriv after_assign: fn(self, task: Task, before: auth.AccountID?) Never! {\n    if task.assignee != before && task.assignee != None -> app.enqueue(fn() { self.tell_assignee(task.id) })\n}\n\n// Store/redis_jobs.jet: the app writes an adapter that keeps jobs elsewhere.\nRedisJobs: struct {\n    url_env: String\n}\n\nimpl app.JobStore for RedisJobs {\n    keep: fn(self, name: String, args: String, until: Int) -[Net]> String app.JobStoreError! { ... }\n    done: fn(self, key: String) -[Net]> Bool app.JobStoreError! { ... }\n    failed: fn(self, key: String, runs: Int, error: String, until: Int) -[Net]> Bool app.JobStoreError! { ... }\n    take: fn(self, names: [String], now: Int, until: Int) -[Net]> [app.QueuedJob] app.JobStoreError! { ... }\n    hold: fn(self, keys: [String], until: Int) -[Net]> Bool app.JobStoreError! { ... }\n    now: fn(self) -[Net]> Int app.JobStoreError! { ... }\n}\n\n// Web/web.jet: the entry picks the adapter.\nrun: fn() logic.TaskError! {\n    crew: logic.open_crew(\"crewboard.db\")\n    screens.crewboard()\n        .mount(crew)\n        .jobs(RedisJobs{url_env: \"REDIS_URL\"})\n        .serve()\n}\n\n// Store/redis_jobs_test.jet: the law kit runs the contract against it.\n#Test(\"RedisJobs keeps the job store contract\")\nredis_jobs_laws: fn() {\n    app.job_store_laws(RedisJobs{url_env: \"TEST_REDIS_URL\"})\n}"
-        },
-        {
-          "key": "C",
-          "name": "A trait whose promises are marked: #App.JobStore(durable:, ack_after_run:, redelivers:, joins_transaction:)",
-          "gist": "An adapter declares what it keeps, and jet check refuses one that lacks a promise, with a registered error naming it.",
-          "detail": "The trait is B's, and the marker lists four promises. jet check refuses a store whose marker sets one to false, or leaves one out, with a registered error naming the missing promise. This is c9's text read literally.\n\nBeginner path: unchanged, as in B. Expert path: write the six methods and the marker.\n\nThe promises are the author's word: jet check reads the marker, not the behaviour. Only a store inside the app's database can truthfully set joins_transaction, so every outside store, such as Redis or SQS, is refused. What remains is option A with extra public names.",
-          "technical": "Proposed, not implemented. B's surface plus the #App.JobStore marker and a registered error, jet.JobStoreLacks, at check time. Proof: jet test Compiler --profile ui --filter app_job_store_adapter_contract.",
-          "code": "// Logic/crew.jet: the same in every option. Assigning a task queues a\n// push; the job runs after the write commits, at least once.\n#App.Job(retries: 5)\ntell_assignee: fn(self, id: TaskID) -[DB.Read, Net]> TaskError! {\n    task: self.tasks.get(id) ?? return Ok()\n    who: task.assignee ?? return Ok()\n    if !self.is_member(task.project, who) -> return Ok()\n    app.notify(to: who, title: \"Assigned to you\", body: task.title, open: TaskView{id: task.id})\n    Ok()\n}\n\npriv after_assign: fn(self, task: Task, before: auth.AccountID?) Never! {\n    if task.assignee != before && task.assignee != None -> app.enqueue(fn() { self.tell_assignee(task.id) })\n}\n\n// Store/redis_jobs.jet: the adapter states what it promises. jet check\n// refuses one whose marker lacks a promise, naming it.\n#App.JobStore(durable: true, ack_after_run: true, redelivers: true, joins_transaction: false)\nRedisJobs: struct {\n    url_env: String\n}\n\nimpl app.JobStore for RedisJobs {\n    // the same six methods as B\n}\n\n// Web/web.jet\nrun: fn() logic.TaskError! {\n    crew: logic.open_crew(\"crewboard.db\")\n    screens.crewboard()\n        .mount(crew)\n        .jobs(RedisJobs{url_env: \"REDIS_URL\"})\n        .serve()\n}\n\n// jet check:\n// error[E28xx]: RedisJobs cannot keep the job store contract\n//   #App.JobStore(joins_transaction: false): a job it keeps is not written in\n//   the transaction of the call that queued it, so a rolled-back write could\n//   still run its job, and a crash after the commit could lose one."
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Oban (Elixir)",
-          "note": "Jobs are rows in the app's Postgres, inserted in the caller's transaction, so a rollback queues nothing. Like A. Source: https://hexdocs.pm/oban/Oban.html",
-          "code": "Ecto.Multi.new() |> Ecto.Multi.update(:task, changeset) |> Oban.insert(:push, PushWorker.new(%{id: id})) |> Repo.transaction()"
-        },
-        {
-          "lang": "Rails Solid Queue",
-          "note": "Active Job's database backend: jobs live in the app's own database. Like A. Source: https://github.com/rails/solid_queue",
-          "code": "config.active_job.queue_adapter = :solid_queue"
-        },
-        {
-          "lang": "Rails Active Job adapters",
-          "note": "One adapter interface with many backends; durability and acknowledgement differ per backend, and nothing checks them. Like B without the law kit. Source: https://guides.rubyonrails.org/active_job_basics.html",
-          "code": "config.active_job.queue_adapter = :sidekiq"
-        },
-        {
-          "lang": "Sidekiq",
-          "note": "Jobs live in Redis, outside the app's transaction. Enqueued before the commit, a rolled-back change still runs its job; enqueued after it, a crash in between loses the job. The dual write that B and C face. Source: https://github.com/sidekiq/sidekiq/wiki",
-          "code": "PushWorker.perform_async(task.id)"
-        },
-        {
-          "lang": "Transactional outbox pattern",
-          "note": "Write the message to an outbox table in the same transaction as the change, then relay it. What A does for every job. Source: https://microservices.io/patterns/data/transactional-outbox.html",
-          "code": "INSERT INTO outbox (key, job, args) VALUES (...); -- same transaction as the change"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "rec": "A",
-        "why": "Only the database that holds a change can save its job in the same step, and two of the contract's four parts depend on that. A keeps that guarantee with no new public names, and it rewrites c9 so its proof runs the contract on every engine. B lets a store pass its tests and still lose jobs. C refuses every store outside the database, which is A with more names.",
-        "gains": [
-          "A rolled-back change never sends anything, and a crash never loses a job.",
-          "Nothing to configure: marking a method #App.Job is the whole beginner path.",
-          "c9 gets a real subject and a proof row that runs the contract on every database engine."
-        ],
-        "losses": [
-          {
-            "loss": "An app cannot keep its jobs in Redis, SQS or another broker.",
-            "mitigation": "A job can send to any broker itself, and the outbox retries that hand-off until it succeeds, which is the transactional outbox pattern."
-          },
-          {
-            "loss": "Jobs share the app database's write capacity.",
-            "mitigation": "A job costs one insert in a transaction already open and one delete when it runs, plus one hold statement per second per store. A future core.db engine brings its own outbox with no app change."
-          },
-          {
-            "loss": "c9's ratified text and proof row change.",
-            "mitigation": "The new text keeps c9's intent, that no store can weaken the contract, by offering no slot to weaken it. Its proof row runs the contract on every engine core.db opens."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "A store outside the database passes the law kit and still breaks two parts of the contract, because the kit cannot see the call's transaction."
-          },
-          {
-            "key": "C",
-            "reason": "Promises are the author's word, and only a store inside the database can truthfully make the transaction promise, so C is A with more public names."
-          }
-        ],
-        "tradeoff": "No plug-in job stores buys a contract that holds by construction: a job is saved with the change that asked for it."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: AnyReview11. The pass found three gaps (the in-memory store's restart case, the call with no store, and C collapsing into A), and each is stated or designed away in this payload."
-      },
-      "checkInstructions": "Code reads only, on dev d6d482c5f7 (git show d6d482c5f7:PATH). In Core/App/App.jet read the call comment (:755-772), CallJoin and CallOutbox (:773-811) and CallQueued (:813-820). Then read the priv(package) transactions module (:874) and jobs module (:1160-1200), and the hold and tick times (:1108-1117).\n\nIn Core/Db/Db.jet read db_join (:1370-1383), db_outbox with the __jet_jobs insert and delete (:1460-1501), and the in-memory rule (:1263-1268).\n\nIn Docs/spec/reference/core-library.md read the job rules (:5656-5695), above all :5662-5665 (rollback queues nothing), :5686-5691 (a repeated run's writes are dropped) and :5692-5693 (a call with no store).\n\nIn Docs/proposals/2026-11-13-web-app-framework-shape.md read tell_assignee (:1470-1477) and after_assign (:1543-1545). Run node Tools/tower/tower.mjs card show 6825 --json for c1, c6, c7, c8 and c9, and Main's c9 ruling of 2026-11-16.",
-      "surface": {
-        "gist": "Should jobs stay in the app's database, or may apps plug in a store through a tested trait or a promise-checked trait?",
-        "lesson": "A job must be saved in the same step as the change that asked for it. Only the database holding the change can do that, so a crash never loses a job and an undone change sends nothing.",
-        "trio": {
-          "current": {
-            "note": "Today the job is a row in the app's database, written in the call's transaction. The store hook is internal, so no app can write a store, and c9 has nothing to check.",
-            "code": "// Core/App/App.jet:780-811 and :874, internal: core.db is the only store.\npriv(package) transactions: module { ... }   // joins CallOutbox{keep, done, failed, take, hold, now}"
-          },
-          "wild": {
-            "lang": "Oban (Elixir)",
-            "note": "Jobs are rows in the app's Postgres, inserted in the caller's transaction.",
-            "code": "Ecto.Multi.new() |> Ecto.Multi.update(:task, changeset) |> Oban.insert(:push, PushWorker.new(%{id: id})) |> Repo.transaction()"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Jobs stay in the app's database",
-            "gist": "No store slot; c9 states the contract every engine passes.",
-            "gains": [
-              "A rollback sends nothing",
-              "A crash loses no job",
-              "Nothing to configure"
-            ],
-            "losses": [
-              "No Redis or SQS job store"
-            ],
-            "proposed": {
-              "code": "#App.Job(retries: 5)\ntell_assignee: fn(self, id: TaskID) -[DB.Read, Net]> TaskError! { ... }\n\napp.enqueue(fn() { self.tell_assignee(task.id) })   // saved with the change"
-            }
-          },
-          {
-            "key": "B",
-            "name": "A store trait with a law kit",
-            "gist": "Six methods and a test kit plug in any store.",
-            "gains": [
-              "Any broker can hold jobs"
-            ],
-            "losses": [
-              "An outside store can lose jobs",
-              "The kit cannot see the transaction"
-            ],
-            "proposed": {
-              "code": "impl app.JobStore for RedisJobs { keep: ... done: ... failed: ... take: ... hold: ... now: ... }\n.jobs(RedisJobs{url_env: \"REDIS_URL\"})\napp.job_store_laws(RedisJobs{url_env: \"TEST_REDIS_URL\"})"
-            }
-          },
-          {
-            "key": "C",
-            "name": "A store trait with checked promises",
-            "gist": "jet check refuses a store whose marker lacks a promise.",
-            "gains": [
-              "A refusal at check time, by name"
-            ],
-            "losses": [
-              "Promises are the author's word",
-              "Every outside store is refused"
-            ],
-            "proposed": {
-              "code": "#App.JobStore(durable: true, ack_after_run: true, redelivers: true, joins_transaction: false)\nRedisJobs: struct { url_env: String }   // jet check: lacks joins_transaction"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Only the app's database can save a job in the same step as its change. B can lose jobs while passing its tests, and C refuses every outside store anyway.",
-          "gains": [
-            "A rollback sends nothing",
-            "A crash loses no job",
-            "Nothing to configure"
-          ],
-          "losses": [
-            {
-              "loss": "No Redis or SQS job store.",
-              "mitigation": "A job can send to any broker, and the outbox retries the hand-off until it succeeds."
-            },
-            {
-              "loss": "c9's text changes.",
-              "mitigation": "Its intent stays, and its proof runs the contract on every engine."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "An outside store passes the kit and still loses jobs."
-            },
-            {
-              "key": "C",
-              "reason": "It refuses every outside store, so it is A with more names."
-            }
-          ],
-          "tradeoff": "No plug-in stores buys a contract that holds by construction."
-        }
-      },
-      "reports": [
-        {
-          "title": "Oban",
-          "url": "https://hexdocs.pm/oban/Oban.html",
-          "note": "Jobs inserted in the caller's Postgres transaction."
-        },
-        {
-          "title": "Rails Solid Queue",
-          "url": "https://github.com/rails/solid_queue",
-          "note": "A database-backed Active Job backend."
-        },
-        {
-          "title": "Active Job basics",
-          "url": "https://guides.rubyonrails.org/active_job_basics.html",
-          "note": "One adapter interface over many backends."
-        },
-        {
-          "title": "Sidekiq wiki",
-          "url": "https://github.com/sidekiq/sidekiq/wiki",
-          "note": "Redis-backed jobs, enqueued outside the app's database transaction."
-        },
-        {
-          "title": "Transactional outbox",
-          "url": "https://microservices.io/patterns/data/transactional-outbox.html",
-          "note": "The outbox table written in the change's transaction."
-        }
-      ],
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-16T09:17:45.663Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-11-16"
-    },
-    {
       "id": "D-APP-ID1",
       "cardId": "c0m0czk2",
       "group": "app",
@@ -160401,6 +159884,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-19T19:13:00.011Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0oe96sn",
+      "note": "61 criteria, soft limit 6: an I2 internal compiler error found by the units leg (c61); this card owns the suite regressions it found"
+    },
+    {
+      "at": "2026-11-19T19:13:00.011Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#62 A trait's default method compiles when a type in another pac"
+    },
     {
       "at": "2026-11-19T19:03:29.512Z",
       "by": "Main",
