@@ -23,6 +23,13 @@
 //       it writes and projects again, and refusals of a stale revision, a
 //       candidate that does not check, and an unknown operation, each left
 //       in the session's history.
+//   native-history
+//       `jet dev --canvas` on a copy of $JET_SOURCE keeps one transaction
+//       history for two editor surfaces: one surface's edit is accepted,
+//       the other's edit drawn before it is refused as a conflict, an undo
+//       restores the text exactly, an edit drawn on the revision the undo
+//       replaced is refused as stale, and every receipt names its surface
+//       and the revisions before and after.
 //   native-debug-panels
 //       `jet dev --canvas` on a copy of $JET_SOURCE serves the Debug and
 //       Profile views: the page carries both views' panels, a debug request
@@ -67,6 +74,7 @@ run: fn() {
         "native-lifecycle" -> native_lifecycle()
         "native-serve" -> native_serve()
         "native-edit" -> native_edit()
+        "native-history" -> native_history()
         "native-debug-panels" -> native_debug_panels()
         "native-debug-replay" -> native_debug_replay(rest)
         "driver-lifecycle" -> driver_lifecycle(rest)
@@ -76,7 +84,7 @@ run: fn() {
 }
 
 usage: fn(message: String) -> Never {
-    process.fail(2, "{message}\nusage: Run.jet scenario --scenario N --port P [--browser B] [--session S] [--out-dir D] [--seed N] [--program-target T]\n       Run.jet native-lifecycle | native-serve | native-edit | native-debug-panels | native-debug-replay [--replay-source P] [--dump-source P] | driver-lifecycle [COUNT] | gecko-lifecycle")
+    process.fail(2, "{message}\nusage: Run.jet scenario --scenario N --port P [--browser B] [--session S] [--out-dir D] [--seed N] [--program-target T]\n       Run.jet native-lifecycle | native-serve | native-edit | native-history | native-debug-panels | native-debug-replay [--replay-source P] [--dump-source P] | driver-lifecycle [COUNT] | gecko-lifecycle")
 }
 
 fail: fn(message: String) -> Never { process.fail(1, "FAIL {message}") }
@@ -430,6 +438,108 @@ edit_transactions: fn(canvas_url: String, entry: String, original: String) Failu
     project_transaction: canvas_post(dev_url(canvas_url, "/canvas/project/transaction"), token, edit_request("noop", after, None))
     if project_transaction.status != 501 {
         return Err(fail_with("project transactions are not served yet and must answer 501, not {project_transaction.status}"))
+    }
+    Ok()
+}
+
+// --- native jet dev --canvas: one transaction history -------------------------------
+
+native_history: fn() {
+    jet: process.env_get("JET_BIN") ?? usage("JET_BIN is required")
+    source: process.env_get("JET_SOURCE") ?? "Examples/Tooling/CanvasBlueprintDemo.jet"
+    original: files.read(source) ?? fail("cannot read {source}: {err}")
+    scratch: files.temp_dir("canvas-history") ?? fail("cannot make a scratch folder: {err}")
+    entry: "{scratch.path}/main.jet"
+    files.write(entry, original) ?? fail("cannot write {entry}: {err}")
+    server: process.cmd([String]{jet, "dev", entry, "--canvas"})
+        .env("JET_CANVAS_BROWSER", "/definitely/missing/canvas-browser")
+        .stdout(.Capture).stderr(.Capture).spawn() ?? fail("cannot start jet dev: {err}")
+    canvas_url := ""
+    loop line in server.stdout.lines() {
+        if line.starts_with("Canvas: http") {
+            canvas_url = line.slice(8..<line.len()).trim()
+            break
+        }
+    }
+    if canvas_url == "" {
+        server.kill().drop("jet dev already exited")
+        server.wait().drop("the receipt is not needed")
+        fail("jet dev exited before printing its Canvas URL")
+    }
+    if history_transactions(canvas_url, entry, original) == .Err(problem) {
+        server.kill().drop("jet dev already exited")
+        server.wait().drop("the receipt is not needed")
+        fail(problem.message)
+    }
+    server.kill().drop("the session has answered every transaction")
+    server.wait().drop("a killed jet dev has no status to check")
+    print("PASS native jet dev --canvas one transaction history: two surfaces, conflict refused, undo, stale revision refused, accepted-revision receipts")
+}
+
+// Two editor surfaces, the graph ("canvas-graph") and the code editor
+// ("canvas-code"), apply transactions to the session's one history. The
+// graph's edit is accepted. The code editor's edit, drawn before it, is
+// refused as a conflict. The code editor undoes the graph's edit, restoring
+// the text exactly. The graph's next edit, drawn on the revision the undo
+// replaced, is refused as stale. Each receipt names its surface and the
+// revisions before and after.
+history_transactions: fn(canvas_url: String, entry: String, original: String) Failure! {
+    token: url_param(canvas_url, "session")
+    initial: wait_status(dev_url(canvas_url, "/__jet_dev_status"))
+    if text(at(initial, "state")) != "ready" {
+        return Err(fail_with("jet dev --canvas must be ready once its entry checks: {js(initial)}"))
+    }
+    session_reply: canvas_get(dev_url(canvas_url, "/__jet_canvas/session"), token)
+    start: text(at(json.parse(session_reply.body) ?? Dyn.Null, "session.source_revision"))
+    if start == "" {
+        return Err(fail_with("the session must name its source revision: {short_text(session_reply.body, 400)}"))
+    }
+    transaction: dev_url(canvas_url, "/canvas/transaction")
+
+    graph_text: "{original.trim_end()}\n\nfrom_graph: fn() -> Int {{ 1 }}\n"
+    graph: canvas_post(transaction, token, edit_request("replace_source", start, Val(graph_text), client: "canvas-graph"))
+    if graph.status != 200 || !truthy(at(graph.tree, "canvas.changed")) {
+        return Err(fail_with("the graph's edit at the current revision must apply: HTTP {graph.status} {short_text(graph.body, 600)}"))
+    }
+    edited: text(at(graph.tree, "canvas.revision"))
+    written: files.read(entry) ?? ""
+
+    conflict: canvas_post(transaction, token, edit_request("replace_source", start, Val("{original.trim_end()}\n\nfrom_code: fn() -> Int {{ 2 }}\n"), client: "canvas-code"))
+    if conflict.status != 409 || text(at(conflict.tree, "canvas.kind")) != "conflict" || text(at(conflict.tree, "canvas.current_revision")) != edited {
+        return Err(fail_with("the code editor's edit drawn before the graph's must be refused as a conflict naming {edited}: HTTP {conflict.status} {short_text(conflict.body, 400)}"))
+    }
+    if (files.read(entry) ?? "") != written {
+        return Err(fail_with("a refused conflict must leave the graph's edit as written"))
+    }
+
+    undo: canvas_post(transaction, token, edit_request("replace_source", edited, Val(original), client: "canvas-code", undo: true))
+    if undo.status != 200 || !truthy(at(undo.tree, "canvas.changed")) || text(at(undo.tree, "canvas.revision")) != start {
+        return Err(fail_with("the code editor's undo of the graph's edit must restore revision {start}: HTTP {undo.status} {short_text(undo.body, 400)}"))
+    }
+    if (files.read(entry) ?? "") != original {
+        return Err(fail_with("an undo must restore the entry's text exactly"))
+    }
+
+    stale: canvas_post(transaction, token, edit_request("replace_source", edited, Val("{written.trim_end()}\n\nagain: fn() -> Int {{ 3 }}\n"), client: "canvas-graph"))
+    if stale.status != 409 || text(at(stale.tree, "canvas.kind")) != "conflict" || text(at(stale.tree, "canvas.current_revision")) != start {
+        return Err(fail_with("the graph's edit drawn on the revision the undo replaced must be refused as stale, naming {start}: HTTP {stale.status} {short_text(stale.body, 400)}"))
+    }
+    if (files.read(entry) ?? "") != original {
+        return Err(fail_with("a refused stale edit must leave the undone entry as written"))
+    }
+
+    receipts := [String]{}
+    loop receipt in items(at(stale.tree, "canvas.session.history.receipts")) {
+        receipts.push("{text(at(receipt, "client"))} {text(at(receipt, "kind"))} {text(at(receipt, "status"))} {text(at(receipt, "before"))} -> {text(at(receipt, "after"))}")
+    }
+    expected: [String]{
+        "canvas-graph replace_source accepted {start} -> {edited}",
+        "canvas-code replace_source refused {start} -> {edited}",
+        "canvas-code replace_source accepted {edited} -> {start}",
+        "canvas-graph replace_source refused {edited} -> {start}",
+    }
+    if receipts.join("\n") != expected.join("\n") {
+        return Err(fail_with("the session's one history must hold\n{expected.join("\n")}\nnot\n{receipts.join("\n")}"))
     }
     Ok()
 }
@@ -821,10 +931,12 @@ profile_request: fn(revision: String, trace: String?, from: Int?, to: Int?, widt
     js(obj(fields))
 }
 
-// A schema 1 Canvas edit request for `op` at `revision`, with `source` when
-// given.
-edit_request: fn(op: String, revision: String, source: String?) -> String {
-    fields := [{key: String, value: Dyn}]{{key: "schema_version", value: Dyn.Int(1)}, {key: "op", value: Dyn.Text(op.copy())}, {key: "revision", value: Dyn.Text(revision.copy())}, {key: "client_id", value: Dyn.Text("native-edit")}}
+// A schema 1 Canvas edit request for `op` at `revision` from the editor
+// surface `client`, with `source` when given. An `undo` restores `source`
+// exactly, as the Canvas page's undo does.
+edit_request: fn(op: String, revision: String, source: String?, client: String{"native-edit"}, undo: Bool{false}) -> String {
+    fields := [{key: String, value: Dyn}]{{key: "schema_version", value: Dyn.Int(1)}, {key: "op", value: Dyn.Text(op.copy())}, {key: "revision", value: Dyn.Text(revision.copy())}, {key: "client_id", value: Dyn.Text("{client}")}}
+    if undo -> fields.push({key: "undo_restore", value: Dyn.Bool(true)})
     if source == .Val(text) -> fields.push({key: "source", value: Dyn.Text(text.copy())})
     js(obj(fields))
 }
