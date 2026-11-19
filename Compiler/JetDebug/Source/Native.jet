@@ -141,7 +141,10 @@ NativeSettled: struct {
 // trap a write to them, the thread and canonical frame address of the frame
 // whose local it is, and its bytes when it last changed. A local held in a
 // register has no address or spans: `register` is its index among the
-// trace's registers (else -1), and `ranges` the code where it is there.
+// trace's registers (else -1), and `ranges` the code where it is there. An
+// item of a List (`watch xs[3]`) also holds a span on the List's data word
+// at `anchor` (else 0): when a write moves the List to a new buffer, the
+// watch moves to the item at `offset` in it (follow_list).
 NativeWatch: struct {
     number: Int,
     shown: String,
@@ -153,6 +156,8 @@ NativeWatch: struct {
     bytes: [U8],
     register: Int,
     ranges: [NativeRange],
+    anchor: Int{0},
+    offset: Int{0},
 }
 
 // One debug register a watch holds: DR0 to DR3 (`slot`), trapping a write
@@ -2093,6 +2098,7 @@ NativeSession: struct {
         }
         bytes: native_debug_bytes(memory, place.address, size) ?? return Ok("`{operand}` can't be read here\n")
         spans := native_watch_spans(place.address, size)
+        if place.anchor != 0 -> spans.extend(native_watch_spans(place.anchor, 8))
         free := [Int]{}
         loop slot in 0..<NATIVE_DEBUG_WATCH_SLOTS {
             held := false
@@ -2114,7 +2120,7 @@ NativeSession: struct {
         }
         self.numbered += 1
         self.ask(operand)
-        self.watches.push(NativeWatch{number: self.numbered, shown: "{operand}", address: place.address, ty: place.ty, spans: spans, thread: self.trace.thread, cfa: frame.cfa, bytes: bytes, register: -1, ranges: [NativeRange]{}})
+        self.watches.push(NativeWatch{number: self.numbered, shown: "{operand}", address: place.address, ty: place.ty, spans: spans, thread: self.trace.thread, cfa: frame.cfa, bytes: bytes, register: -1, ranges: [NativeRange]{}, anchor: place.anchor, offset: place.offset})
         if !self.set_debug_register(7, native_watch_control(self.watches)) {
             return Err(NativeDebugError{detail: "couldn't set the program's debug control register"})
         }
@@ -2146,6 +2152,21 @@ NativeSession: struct {
                 if status & (1 << span.slot) != 0 -> hit = true
             }
             if !hit -> next
+            if self.watches[index].anchor != 0 {
+                // A write to the List's data word may have moved the item.
+                live: self.frame_live(self.watches[index].thread, self.watches[index].cfa) ?? return Err(err)
+                if !live {
+                    self.end_watch(index) ?? return Err(err)
+                    return Ok({fired: true, number: 0})
+                }
+                lost: self.follow_list(index, memory) ?? return Err(err)
+                if lost != "" {
+                    number: self.watches[index].number
+                    self.notes = "{self.notes}Watch {number} on `{self.watches[index].shown}` ended: {lost}\n"
+                    self.unwatch(number) ?? return Err(err)
+                    return Ok({fired: true, number: 0})
+                }
+            }
             bytes: native_debug_bytes(memory, self.watches[index].address, self.watches[index].bytes.len()) ?? next
             if bytes == self.watches[index].bytes -> next
             // The trail's write is kept, and the program runs on.
@@ -2161,6 +2182,33 @@ NativeSession: struct {
             return Ok({fired: true, number: self.watch_changed(index, bytes)})
         }
         Ok({fired: true, number: 0})
+    }
+
+    // Move watch `index`, an item of a List, to the same offset in the
+    // buffer the List's data word now points at, when that is not the
+    // buffer it was in. Empty when the watch goes on, else why it can't.
+    follow_list: fn(&self, index: Int, memory: NativeMemory) -> String NativeDebugError! {
+        words: native_debug_bytes(memory, self.watches[index].anchor, 8) ?? return Ok("its List can't be read")
+        data: native_number(words, 0, 8, X64DebugEncoding.Signed)
+        if data == 0 -> return Ok("its List let go of its items")
+        address: self.watches[index].address
+        moved: data + self.watches[index].offset
+        if moved == address -> return Ok("")
+        // The item's spans move by the same distance; a buffer the CPU's
+        // alignment rules would cover with other spans is not followed.
+        shift: moved - address
+        if shift %% 8 != 0 -> return Ok("its List moved to a buffer aligned unlike the old one")
+        end: address + self.watches[index].bytes.len()
+        loop k in 0..<self.watches[index].spans.len() {
+            span: self.watches[index].spans[k]
+            if span.address < address || span.address >= end -> next
+            self.watches[index].spans[k].address = span.address + shift
+            if !self.set_debug_register(span.slot, span.address + shift) {
+                return Err(NativeDebugError{detail: "couldn't set a debug register of the program"})
+            }
+        }
+        self.watches[index].address = moved
+        Ok("")
     }
 
     // Watch `index` now holds `bytes`: the change for the report, and the
@@ -4797,26 +4845,44 @@ native_place_through: fn(memory: NativeMemory, bytes: [U8], base: NativePlaceBas
 // Where a watched place's bytes are: their address and type, or, for a
 // local held in a register, that register's index among the trace's
 // registers (else -1) and the code ranges where the local is in it; or why
-// the place can't be watched (`refusal`, empty when it can).
+// the place can't be watched (`refusal`, empty when it can). An item of a
+// List (`xs[3]`) also names the address of the List's data word (`anchor`)
+// and the item's offset in the buffer that word points at, so the watch
+// follows the item when the List moves to a new buffer.
 NativeWatchPlace: struct {
     address: Int,
     ty: Int,
     register: Int,
     ranges: [NativeRange],
     refusal: String,
+    anchor: Int{0},
+    offset: Int{0},
 }
 
-// Where the place `path` (`total`, `order.total`) lives in `frame` at
-// `lookup`, among the variables of the inlined run `site`. A field path goes
-// through typedefs and pointers to the struct whose field it names.
+// Where the place `path` (`total`, `order.total`, `xs[3]`, `order.lines[0]`)
+// lives in `frame` at `lookup`, among the variables of the inlined run
+// `site`. A field path goes through typedefs and pointers to the struct
+// whose field it names; a literal index at its end names an item of the
+// List the path names.
 native_watch_place: fn(image: NativeImage, memory: NativeMemory, frame: NativeUnwound, lookup: Int, site: Int, path: String) -> NativeWatchPlace Never! {
-    names: path.split(".").to_list()
-    function: native_function_at(image, lookup) ?? return native_watch_refusal("No Jet function is running here")
-    found: loop (index, variable) in function.variables {
-        if variable.site == site && variable.name == names[0] {
-            break index
+    index := -1
+    base := path
+    if path.ends_with("]") {
+        cut: path.rpartition("[")
+        if cut.sep == "" {
+            return native_watch_refusal("`{path}` needs a literal index, as `xs[3]`")
         }
-    } ?? return native_watch_refusal("`{names[0]}` is not a local of this frame; a watch takes a local or a field path under one")
+        index = Int.parse(cut.tail.before("]")) ?? return native_watch_refusal("`{path}` needs a literal index, as `xs[3]`")
+        if index < 0 -> return native_watch_refusal("`{path}` needs an index of 0 or more")
+        base = cut.head
+    }
+    names: base.split(".").to_list()
+    function: native_function_at(image, lookup) ?? return native_watch_refusal("No Jet function is running here")
+    found: loop (row, variable) in function.variables {
+        if variable.site == site && variable.name == names[0] {
+            break row
+        }
+    } ?? return native_watch_refusal("`{names[0]}` is not a local of this frame; a watch takes a local, a field path under one or an item of a List, as `xs[3]`")
     variable: function.variables[found]
     unplaced: "`{names[0]}` has no value here"
     if variable.list < 0 -> return native_watch_refusal(unplaced)
@@ -4829,7 +4895,7 @@ native_watch_place: fn(image: NativeImage, memory: NativeMemory, frame: NativeUn
         dwarf >= NATIVE_DEBUG_DWARF_REGISTERS.len() -> return native_watch_refusal("`{names[0]}` is held in a vector register, which a watch can't follow")
         dwarf >= 0 -> {
             value: native_register_value(frame, dwarf) ?? return native_watch_refusal("`{names[0]}`'s register is not known in this frame")
-            if names.len() == 1 {
+            if names.len() == 1 && index < 0 {
                 ranges := [NativeRange]{}
                 loop range in native_ranges(image, variable.list, variable.base) {
                     if native_location_register(image.loclists, range.from, range.to) == dwarf {
@@ -4846,20 +4912,10 @@ native_watch_place: fn(image: NativeImage, memory: NativeMemory, frame: NativeUn
     // The path up to the field the loop turn looks up.
     owner := "{names[0]}"
     loop k in 1..<names.len() {
-        loop {
-            through: image.types.get(ty) ?? break
-            if through.tag == NATIVE_TAG_TYPEDEF {
-                ty = through.target
-                next
-            }
-            if through.tag != NATIVE_TAG_POINTER -> break
-            if held == .Val(value) -> address = value else {
-                words: native_debug_bytes(memory, address, 8) ?? return native_watch_refusal("`{owner}` can't be read here")
-                address = native_number(words, 0, 8, X64DebugEncoding.Signed)
-            }
-            held = None
-            ty = through.target
-        }
+        passed: native_watch_through(image, memory, ty, address, held) ?? return native_watch_refusal("`{owner}` can't be read here")
+        ty = passed.ty
+        address = passed.address
+        held = passed.held
         group := -1
         if image.types.get(ty) == .Val(kind) {
             if kind.tag == NATIVE_TAG_STRUCT && kind.variants < 0 && !kind.name.starts_with("[") {
@@ -4869,16 +4925,82 @@ native_watch_place: fn(image: NativeImage, memory: NativeMemory, frame: NativeUn
         if group < 0 || held != None {
             return native_watch_refusal("`{owner}` has no fields to watch")
         }
-        field: loop (index, member) in image.members[group] {
+        field: loop (slot, member) in image.members[group] {
             if member.name == names[k] {
-                break index
+                break slot
             }
         } ?? return native_watch_refusal("`{owner}` has no field `{names[k]}`")
         address += image.members[group][field].offset
         ty = image.members[group][field].ty
         owner = "{owner}.{names[k]}"
     }
-    NativeWatchPlace{address: address, ty: ty, register: -1, ranges: [NativeRange]{}, refusal: ""}
+    if index < 0 {
+        return NativeWatchPlace{address: address, ty: ty, register: -1, ranges: [NativeRange]{}, refusal: ""}
+    }
+    passed: native_watch_through(image, memory, ty, address, held) ?? return native_watch_refusal("`{owner}` can't be read here")
+    list: native_watch_list(image, passed.ty)
+    if list.element < 0 || passed.held != None {
+        return native_watch_refusal("`{owner}` is not a List; an index watches an item of one")
+    }
+    header: native_debug_bytes(memory, passed.address, list.size) ?? return native_watch_refusal("`{owner}` can't be read here")
+    length: native_number(header, list.length, 8, X64DebugEncoding.Signed)
+    if index >= length {
+        return native_watch_refusal("`{owner}` has {length} items, so `{path}` is past its end")
+    }
+    stride: native_type_size(image, list.element)
+    if stride <= 0 -> return native_watch_refusal("`{path}` has no bytes to watch")
+    data: native_number(header, list.data, 8, X64DebugEncoding.Signed)
+    NativeWatchPlace{address: data + index * stride, ty: list.element, register: -1, ranges: [NativeRange]{}, refusal: "", anchor: passed.address + list.data, offset: index * stride}
+}
+
+// Through the typedefs and pointers from a place of type `ty` whose bytes
+// are at `address`, or whose pointer value a register holds (`held`), to
+// the type they lead to and the address of its bytes; `held` stays only
+// when no pointer was followed. None when a pointer can't be read.
+native_watch_through: fn(image: NativeImage, memory: NativeMemory, ty: Int, address: Int, held: Int?) -> {ty: Int, address: Int, held: Int?}? Never! {
+    kind := ty
+    at := address
+    value := held
+    loop {
+        through: image.types.get(kind) ?? break
+        if through.tag == NATIVE_TAG_TYPEDEF {
+            kind = through.target
+            next
+        }
+        if through.tag != NATIVE_TAG_POINTER -> break
+        if value == .Val(word) -> at = word else {
+            words: native_debug_bytes(memory, at, 8) ?? return None
+            at = native_number(words, 0, 8, X64DebugEncoding.Signed)
+        }
+        value = None
+        kind = through.target
+    }
+    Val({ty: kind, address: at, held: value})
+}
+
+// The inline header of the List type `ty`: the offsets of its length and
+// data words, its size, and its element type (-1 when `ty` is no List).
+native_watch_list: fn(image: NativeImage, ty: Int) -> {length: Int, data: Int, size: Int, element: Int} Never! {
+    none: {length: 0, data: 0, size: 0, element: -1}
+    found: image.types.get(ty) ?? return none
+    if found.tag != NATIVE_TAG_STRUCT || found.group < 0 || !found.name.starts_with("[") || !found.name.ends_with("]") {
+        return none
+    }
+    length := -1
+    data := -1
+    element := -1
+    size := 0
+    loop member in image.members[found.group] {
+        if member.offset + 8 > size -> size = member.offset + 8
+        if member.name == "len" -> length = member.offset
+        if member.name == "data" {
+            data = member.offset
+            pointer: image.types.get(member.ty) ?? next
+            if pointer.tag == NATIVE_TAG_POINTER -> element = pointer.target
+        }
+    }
+    if length < 0 || data < 0 -> return none
+    {length: length, data: data, size: size, element: element}
 }
 
 // A place that can't be watched, and why.

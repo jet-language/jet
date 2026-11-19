@@ -705,9 +705,10 @@ D-DBG-VERBS1=A names the commands:
 - `log <file:line> "<text with {expr}>"` sets a logpoint. It prints its
   message with each `{expr}` filled in, then the program runs on.
 - `watch <place>` stops at each write that changes a local of the selected
-  frame, or a field path under one (`watch order.total`). The stop names
-  the line that wrote it and shows `total: 0 -> 2`. A write that leaves the
-  value as it was runs on.
+  frame, a field path under one (`watch order.total`), or an item of a List
+  at a literal index (`watch xs[3]`, `watch order.lines[0]`). The stop
+  names the line that wrote it and shows `total: 0 -> 2`. A write that
+  leaves the value as it was runs on.
 - `breaks` lists the breakpoints and watches by number, as `  2 break
   cart.jet:88 if total < 0` and `  3 watch total`; `delete <n>` removes one.
 - `frame <n>` selects a frame as `backtrace` (`bt`) numbers it. `up` moves
@@ -771,12 +772,17 @@ to trap: its watch single-steps that frame's own code, comparing the
 register after each instruction, while the calls it makes run at full
 speed (they restore the register before they return). One such watch is
 active at a time. A watch covers the place's own bytes: for a list, its
-length and buffer, not the items. A watch on a frame's local ends when
-that frame returns; the next stop says so. Every thread gets the watch's
-debug registers, so a write from any thread stops; a watch on a register
-local follows the thread whose frame holds it. A Float held in a vector
-register can't be watched. Globals can't be watched yet, because the debug
-information has no global variables.
+length and buffer, not the items; `watch xs[3]` covers one item. An item's
+watch also takes a debug register on the List's buffer pointer, so when
+the List grows past its capacity (or a write copies a shared buffer) and
+moves to a new buffer, the watch moves to the same item there; the copy
+leaves the item's value as it was, so the move runs on. If the List lets go
+of its buffer, the watch ends and the next stop says so. A watch on a
+frame's local ends when that frame returns; the next stop says so. Every
+thread gets the watch's debug registers, so a write from any thread stops;
+a watch on a register local follows the thread whose frame holds it. A
+Float held in a vector register can't be watched. Globals can't be watched
+yet, because the debug information has no global variables.
 
 ## Recorder boundary
 

@@ -698,3 +698,32 @@ native_function_at: fn(image: NativeImage, pc: Int) -> NativeFunction? Never! {
     assert_eq(native_producer_level("Jet native backend (O0)"), 0)
     assert_eq(native_producer_level("GNU C17 13.2.0 -O2"), 0)
 }
+
+// A List's inline header [len, cap, data] (JetIR BuildRoutes.jet); an
+// aggregate local's DWARF type points at it.
+#Test("an item watch reaches the List's data word through its pointer") {
+    count: X64DebugMember{name: "len", offset: 0, ty: 1}
+    room: X64DebugMember{name: "cap", offset: 8, ty: 1}
+    data: X64DebugMember{name: "data", offset: 16, ty: 2}
+    types: [X64DebugType]{
+        X64DebugType{name: "I64", size: 8, kind: X64DebugTypeKind.Base{encoding: X64DebugEncoding.Signed}},
+        X64DebugType{name: "Int", size: 8, kind: X64DebugTypeKind.Typedef{target: 0}},
+        X64DebugType{name: "", size: 8, kind: X64DebugTypeKind.Pointer{target: 1}},
+        X64DebugType{name: "[Int]", size: 24, kind: X64DebugTypeKind.Struct{members: [X64DebugMember]{count, room, data}}},
+        X64DebugType{name: "", size: 8, kind: X64DebugTypeKind.Pointer{target: 3}},
+    }
+    image: native_image_of_types(X64ModuleDebug{directory: "", files: [String]{}, types: types})
+    memory: NativeMemory{trace: None, blocks: [NativeBlock]{NativeBlock{address: 4096, bytes: native_low_bytes(8192, 8)}}}
+    passed: native_watch_through(image, memory, 4, 4096, None) ?? panic("the pointer is readable")
+    assert_eq(passed.ty, 3)
+    assert_eq(passed.address, 8192)
+    assert_eq(passed.held, Int?{None})
+    held: native_watch_through(image, memory, 4, 0, Val(8192)) ?? panic("a held pointer needs no read")
+    assert_eq(held.address, 8192)
+    list: native_watch_list(image, 3)
+    assert_eq(list.length, 0)
+    assert_eq(list.data, 16)
+    assert_eq(list.size, 24)
+    assert_eq(list.element, 1)
+    assert_eq(native_watch_list(image, 1).element, -1)
+}
