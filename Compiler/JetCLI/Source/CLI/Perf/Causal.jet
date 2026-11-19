@@ -7,24 +7,28 @@ use {
 // speedup experiments (PerfSamples.jet perf_causal_tick): each one either
 // leaves the program alone (a baseline) or slows every other thread down
 // whenever the chosen line runs, so the line runs as if a share faster than
-// the rest. Each progress point's passes per second of the experiment's
-// wall time, less the delay it inserted, against the baselines' passes per
-// second, predicts how much sooner the passes would come if the line really
-// were that much faster. This file turns the experiments into a ranked
-// prediction per progress point, each with an interval, and refuses a line
-// or a run whose experiments are too few to rank.
+// the rest. Each progress point's passes per second between its first and
+// last pass in the experiment, less the delay inserted meanwhile, against
+// the baselines' passes per second, predicts how much sooner the passes
+// would come if the line really were that much faster. This file turns the
+// experiments into a ranked prediction per progress point, each with an
+// interval, and refuses a line or a run whose experiments are too few to
+// rank.
 
 // One experiment's end (PerfSamples.jet perf_causal_next): the line it sped
 // up, by its source line and function (line 0 for a baseline), the speedup
-// in thousandths, its wall time and the delay it inserted, in nanoseconds,
-// and each progress point's passes in it, by the point's slot.
+// in thousandths, and by each progress point's slot: its passes after its
+// first one in the experiment, and the wall time from that first pass to
+// its last and the delay inserted between them, in nanoseconds. The
+// record's whole wall time and delay are not kept: only the time between
+// a point's own passes measures its rate.
 JetCLIPerfExperiment: struct {
     line: U64,
     name: String,
     speedup: Int,
-    wall_ns: Int,
-    delay_ns: Int,
-    passes: [Int],
+    after: [Int],
+    span_ns: [Int],
+    span_delay_ns: [Int],
 }
 
 // The experiments a line or the baseline needs before it is ranked.
@@ -63,9 +67,23 @@ jet_cli_perf_causal_record: fn(sampled: JetCLIPerfSamples, owned: [Bool], words:
             }
         }
     }
-    passes := [Int]{}
-    loop k in 5..<record -> passes.push(link_debug_addr(words, at + k * 8))
-    JetCLIPerfExperiment{line: line, name: name, speedup: link_debug_addr(words, at + 16), wall_ns: link_debug_addr(words, at + 24), delay_ns: link_debug_addr(words, at + 32), passes: passes}
+    // The record's words after its first five: three columns of one word
+    // per progress point's slot.
+    points: (record - 5) /% 3
+    JetCLIPerfExperiment{
+        line: line,
+        name: name,
+        speedup: link_debug_addr(words, at + 16),
+        after: jet_cli_perf_causal_column(words, at, points, 0),
+        span_ns: jet_cli_perf_causal_column(words, at, points, 1),
+        span_delay_ns: jet_cli_perf_causal_column(words, at, points, 2),
+    }
+}
+
+// Column `column` of the causal record at byte `at` of `words`, one word per
+// slot of its `points` progress points.
+jet_cli_perf_causal_column: fn(words: [U8], at: Int, points: Int, column: Int) -> [Int] Never! {
+    loop slot in 0..<points -> link_debug_addr(words, at + (5 + column * points + slot) * 8)
 }
 
 // The experiments that sped up one line of one function.
@@ -86,21 +104,27 @@ JetCLIPerfCausalLine: struct {
     high: Int,
 }
 
-// A rate of passes: the passes and the wall time, less the delay
-// inserted, in microseconds.
+// A rate of passes: the passes after each experiment's first and the wall
+// time from its first pass to its last, less the delay inserted
+// meanwhile, in microseconds.
 JetCLIPerfCausalRate: struct {
     passes: Int,
     wall: Int,
 }
 
-// The rate of `chosen` (indexes into `experiments`) for point `slot`.
+// The rate of `chosen` (indexes into `experiments`) for point `slot`. Only
+// the time between an experiment's own passes counts: how far its start or
+// end falls from a pass depends on which line ran then, which is how its
+// line was chosen.
 jet_cli_perf_causal_sum: fn(experiments: [JetCLIPerfExperiment], chosen: [Int], slot: Int) -> JetCLIPerfCausalRate Never! {
     passes := 0
     wall := 0
     loop index in chosen {
         experiment: experiments[index]
-        if slot < experiment.passes.len() -> passes += experiment.passes[slot]
-        wall += (experiment.wall_ns - experiment.delay_ns) /% 1000
+        if slot < experiment.after.len() {
+            passes += experiment.after[slot]
+            wall += (experiment.span_ns[slot] - experiment.span_delay_ns[slot]) /% 1000
+        }
     }
     JetCLIPerfCausalRate{passes: passes, wall: wall}
 }

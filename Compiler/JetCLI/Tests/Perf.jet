@@ -3,6 +3,7 @@
 use {
     jet_backend.[X64DebugEncoding, X64ImageFunction, X64Jetline, X64JetlineFunction]
     jet_cli.[
+        JetCLIPerfExperiment,
         JetCLIPerfHeap,
         JetCLIPerfHeapBlock,
         JetCLIPerfHeapFrame,
@@ -20,6 +21,7 @@ use {
         JetCLIPerfZoneSampled,
         JetCLIPerfZoneTotal,
         jet_cli_perf_browser_decode,
+        jet_cli_perf_causal_section,
         jet_cli_perf_capture_bytes,
         jet_cli_perf_capture_source,
         jet_cli_perf_heap_retain,
@@ -478,4 +480,19 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     }
     assert_eq(found, 3)
     assert(profile.reason.contains("; 1 of 3 samples are outside prog.jet"))
+}
+
+#Test("a causal rate counts each experiment's passes after its first over the time from its first pass to its last, less the delay inserted meanwhile") {
+    experiments := [JetCLIPerfExperiment]{}
+    // Baselines: 4 passes after the first in 20 ms, a pass each 5 ms. The
+    // line's experiments: 4 in 22 ms with 6 ms of it inserted delay, a pass
+    // each 4 ms, 20% sooner.
+    loop _ in 0..<6 {
+        experiments.push(JetCLIPerfExperiment{line: U64{0}, name: "", speedup: 0, after: [Int]{4}, span_ns: [Int]{20000000}, span_delay_ns: [Int]{0}})
+        experiments.push(JetCLIPerfExperiment{line: U64{30}, name: "narrow", speedup: 300, after: [Int]{4}, span_ns: [Int]{22000000}, span_delay_ns: [Int]{6000000}})
+    }
+    section: jet_cli_perf_causal_section("main.jet", experiments, [Int:String]{0: "round"})
+    json: String.from_bytes(canonical_json_bytes(section.value)) ?? panic("the section is UTF-8")
+    assert(json.contains(`{"experiments":6,"function":"narrow","gain_tenths":200,"high_tenths":200,"line":30,"low_tenths":200}`))
+    assert(json.contains(`"refused":null`))
 }
