@@ -463,12 +463,22 @@ task_join_bounded: fn(child: I64) -> Bool {
     sync_load(wrapping(context + CONTEXT_DEADLINE_PRESENT)) != I64{0} && sync_load(wrapping(context + CONTEXT_DEADLINE_MS)) <= jet_ctx_deadline_ms()
 }
 
+// A child that has run its body to the end: done@24 is stored after its
+// status@32, which is 0 when nothing stopped it.
+task_join_returned: fn(child: I64) -> Bool {
+    sync_load(wrapping(child + I64{24})) != I64{0} && sync_load(wrapping(child + I64{32})) == I64{0}
+}
+
 // Core Task is move-only (Sema/Ownership/Copy.jet:132-143); Rust's has no Clone
 // and join(self):717 consumes the sole handle. Lexical group cleanup is a
 // separate retained drain, using done@24 wake-all. Under `jet perf run` each
 // wait names the awaited task (PerfSamples.jet perf_samples_wait). Each wait
 // notes the joined task, so a join that closes a wait cycle stops with it
-// (WaitCycle.jet).
+// (WaitCycle.jet). A join that observes its joiner's deadline parks until
+// that deadline at most. A child that returned wins over the clock: a
+// joiner a loaded machine wakes after its deadline still returns the result
+// of a child that returned, and the join reports E3003 only for a child
+// still running or stopped at the deadline.
 task_join_wait: fn(child: I64) -> I64 {
     kind: scheduler_msg_join()
     typed: sync_load(wrapping(child + I64{184})) != I64{0}
@@ -476,14 +486,28 @@ task_join_wait: fn(child: I64) -> I64 {
     if !typed -> _ := scheduler_deadline_check(kind)
     awaited: perf_samples_object(PERF_SAMPLES_OBJECT_TASK, sync_load(wrapping(sync_load(wrapping(child + I64{8})) + I64{56})))
     control: scheduler_control_current()
+    observes: !bounded && !scheduler_virtual_wait() && !scheduler_shielded() && jet_ctx_deadline_present()
     wait_cycle_note(control, WAIT_CYCLE_JOIN, child)
     loop jet_scheduler_native_propagate() == (I64{0}) {
         if (scheduler_wait_point_cancel_check() != I64{0}) { break }
         if (sync_load(wrapping(child + I64{24})) != I64{0}) { break }
-        _ := scheduler_yield_policy(kind, sync_load(wrapping(child + I64{104})), I64{-1}, !bounded, awaited)
+        timeout := I64{-1}
+        if observes {
+            remaining: jet_deadline_remaining_ms()
+            if (remaining <= I64{0}) {
+                scheduler_deliver_deadline(kind)
+                break
+            }
+            timeout = deadline_ms_to_ns(remaining)
+        }
+        _ := scheduler_yield_policy(kind, sync_load(wrapping(child + I64{104})), timeout, false, awaited)
+        if (observes && !task_join_returned(child) && jet_deadline_remaining_ms() <= I64{0}) {
+            scheduler_deliver_deadline(kind)
+            break
+        }
     }
     wait_cycle_note(control, I64{0}, I64{0})
-    if !typed -> _ := scheduler_deadline_check(kind)
+    if !typed && !task_join_returned(child) -> _ := scheduler_deadline_check(kind)
     jet_rt_string_drop(kind)
     jet_scheduler_native_propagate()
 }
