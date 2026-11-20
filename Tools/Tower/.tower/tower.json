@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112690,
+    "rev": 112694,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34075,6 +34075,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-20",
+          "by": "Main",
+          "text": "D-CONTEXT-THREAD1 posted: what context.thread reads in Jet code running outside the task pool (the Ctrl-C dispatcher running on_interrupt handlers, a realtime stream callback). The context-thread fix (Errors3202-context-thread-index.r2, landed p382 as 01d4c42a88) made pool indices dense from 1 and gives every other thread -1 as the interim; it found that every runtime helper thread drew from the carrier counter. The interim stands until the vote."
+        },
+        {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
           "text": "2026-11-15 TowerKeeper-1: c10, c11, c12, c16 and c20 met with G3Core commits and passing cases on dev a652c3674b (gate-p141). Still failing there: the context/context_allocator_* cases, context_scratch_block_rewinds_and_moves_what_leaves (ICE) and Examples/Memory/Allocation/ContextAllocator (served by the allocator: false), so c2 (allocator field), c4, c21 and c22 stay open."
@@ -34356,7 +34361,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:43.172Z",
-      "updated": "2026-11-17T01:40:58.537Z",
+      "updated": "2026-11-20T23:01:50.857Z",
       "updatedBy": "Main",
       "criteriaLastN": 22
     },
@@ -67522,62 +67527,6 @@
       "updated": "2026-11-17T01:50:13.159Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
-    },
-    {
-      "id": "c07qvm0k",
-      "num": 6928,
-      "title": "Atomics: exact Int and fixed-width atomics on one nonblocking store, and compare-and-swap without ABA",
-      "body": "Destination: D-ATOMIC-WIDTH1=A is built. Exact Int and direct fixed-width atomics share one growable nonblocking numeric store, with no Atomic-specific pool, extra family, hidden lock or capacity setup, and compare-and-swap on an exact atomic validates the same raw word as its retained owner, so it cannot suffer ABA.\n\nSource: #3239 c30 and c36 (carried from #4266 and #4495).",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e22",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "c1+c2 met on p279 (2d611a5578). Compiler/JetRuntime/Tests/AtomicIntTests.c is unreferenced and unlinkable standalone; the Atomics cases replace it."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "D-ATOMIC-WIDTH1=A: an exact Int atomic grows beyond the machine width, concurrent fixed-width atomic operations stay correct, and allocator exhaustion still makes nonblocking progress, with no hidden lock or Atomic-specific pool. Proof: `jet test Compiler --profile cases --filter Atomics/d_atomic_width1_contract` on O0, O1 and O2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed in 2d611a5578 (dev, p279 batch compiler 0099c1cc87). `jet test Compiler --profile cases --filter Atomics/` passes 2/2 on the batch compiler, including Atomics/d_atomic_width1_contract on O0, O1 and O2. Exact atomics past machine width, concurrent fixed-width ops and allocator exhaustion all hold. Root fix: the hazard record moved off TCB offset 192 (the thread-index word) to its own slot.",
-          "at": "2026-11-17T22:32:37.199Z"
-        },
-        {
-          "n": 2,
-          "text": "Compare-and-swap on an exact atomic uses the same validated raw word as its retained owner, so it has no ABA. Proof: `jet test Compiler --profile cases --filter Atomics/cas_aba_witness`, plus the original schedule test, on the shipping runtime.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed in 2d611a5578 (dev, p279). Atomics/cas_aba_witness passes on the shipping runtime of the batch compiler 0099c1cc87 (Atomics/ 2/2). It runs the original schedule on O0, O1 and O2: incrementers race tasks that swap in a fresh equal number and free the old one. Compiler/JetRuntime/Tests/AtomicIntTests.c is referenced by nothing (`git grep AtomicIntTests` prints nothing), and it cannot link against jet_runtime.pack.o alone (it lacks jet_rt_fault_report and __jet_init_array_*; checked on gate-p279). The case is the runnable form of that schedule.",
-          "at": "2026-11-17T22:32:38.167Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "concurrency",
-        "atomics"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-15T04:38:00.697Z",
-      "updated": "2026-11-17T22:32:46.981Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-17T22:32:46.981Z"
     },
     {
       "id": "c05nw9a0",
@@ -131386,6 +131335,194 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-20T21:30:10.570Z"
+    },
+    {
+      "id": "D-CONTEXT-THREAD1",
+      "cardId": "c0dhc7rh",
+      "group": "api",
+      "title": "What context.thread reads in Jet code that runs outside the task pool",
+      "situation": "Jet code can ask which thread it runs on by reading context.thread: 0 is the main thread, and 1 up are the task pool's threads. Programs use that number to give each thread its own slot in a list, such as one counter per thread. A Ctrl-C handler and a realtime audio callback run on threads of their own, outside the pool, so the vote decides what they read. We recommend -1, which keeps pool numbers within the list and makes a missed check stop at the bad index.",
+      "gist": "What should context.thread read in Jet code that runs outside the task pool?",
+      "lesson": "context.thread numbers threads: 0 is the main thread, and 1 up are the task pool's threads. A Ctrl-C handler and a realtime callback run on threads of their own. C callbacks are settled already: they cannot read the context. Under every option, handlers stay on their own thread, so Ctrl-C still works while every pool thread is busy.",
+      "explainer": "",
+      "story": "A program keeps one hit counter per thread in a list sized for main plus the pool. It adds a Ctrl-C handler that counts too. The handler's number came from start order, so it landed past the list's end and the program stopped.",
+      "inWild": "// Rust, Rayon: Some(i) on a pool worker, None elsewhere\n// https://docs.rs/rayon/latest/rayon/fn.current_thread_index.html\nif let Some(i) = rayon::current_thread_index() {\n    counts[i] += 1;\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Outside threads read -1",
+          "detail": "Only the main thread (0) and the pool's threads (1 up, dense, in start order) get numbers. Any other thread that runs Jet code reads -1. Those are the Ctrl-C dispatcher that runs on_interrupt handlers, and a realtime stream's callback thread. Threads the runtime starts for its own work, such as the timer and the poller, run no Jet code.\n\nBeginner path: read context.thread in tasks; a handler checks for -1 or keeps its own variable. Expert path: size the list for the pool plus 2 and index context.thread + 1. Slot 0 is then shared by every outside thread, so guard it with an atomic or a lock.\n\nThe program prints `main counted 1, task on 1`, and Ctrl-C prints `handler on thread -1`.",
+          "technical": "Built as the interim by the context-thread numbering fix. The main thread claims 0 once, and each pool carrier takes the lowest free index from 1 under the scheduler lock. Every other thread starts at -1. A missed check was probed on gate p382: counts[-1] stops with Jet.ArithmeticOrBoundsFailure \"position -1 doesn't exist\" and shows at = -1.\n\nInterrupt handlers stay on the dispatcher thread under every option. Each handler runs under its own stop boundary, and a stop's report goes to stderr while later handlers still run. After the last handler, the first stopped handler's exit code ends the process; process.exit ends it at once.\n\nA move onto the pool was weighed and dropped. The dispatcher would join each handler as a task, and a join that finds its task unstarted runs it on the joining thread. A busy pool would also delay Ctrl-C.\n\nLending outside threads the next number above the pool was dropped too. A lent number overflows a list sized for the pool. The pool's numbers also stop being dense once it grows past a lent one.\n\nEach option's program passes jet check and jet fmt --check on the p380 compiler. Option C was checked through a stand-in function returning Int?.",
+          "code": "use sys: core.sys\n\ncount_here: fn(counts: &[Int]) {\n    at: context.thread  // -1 outside the pool\n    if at >= 0 -> counts[at] = counts[at] + 1\n}\n\nrun: fn() {\n    counts := [0, 0, 0, 0, 0]  // main + 4 pool threads\n    count_here(counts)\n    sys.on_interrupt(fn() { print(\"handler on thread {context.thread}\") })\n    worker: task context.thread\n    print(\"main counted {counts[0]}, task on {worker.join() ?? -1}\")\n}\n"
+        },
+        {
+          "key": "B",
+          "name": "A second count, downward",
+          "detail": "Pool numbers stay as in A. Each outside thread that runs Jet code takes the next number of a second count: -1, -2, -3, freed when the thread ends. A handler and a stream started later read -1 and -2. Beginner path: the same check as A, since every outside number is negative. Expert path: a second list indexed by -thread - 1, sized by the number of handlers and streams the program starts.",
+          "technical": "Needs a second lowest-free allocator under the scheduler lock for outside threads that run user code. It also needs a way to tell those threads from the runtime's own helpers when they start.",
+          "code": "use sys: core.sys\n\ncount_here: fn(counts: &[Int], outside: &[Int]) {\n    at: context.thread  // -1, -2, ... outside the pool\n    if at >= 0 -> counts[at] = counts[at] + 1 else -> outside[-at - 1] = outside[-at - 1] + 1\n}\n\nrun: fn() {\n    counts := [0, 0, 0, 0, 0]  // main + 4 pool threads\n    outside := [0, 0]  // one Ctrl-C handler, one audio stream\n    count_here(counts, outside)\n    sys.on_interrupt(fn() { print(\"handler on thread {context.thread}\") })\n    worker: task context.thread\n    print(\"main counted {counts[0]}, task on {worker.join() ?? -1}\")\n}\n"
+        },
+        {
+          "key": "C",
+          "name": "An optional number",
+          "detail": "context.thread becomes Int?, as context.deadline already is: Val(i) on main and pool threads, None on any other thread. Indexing a list needs an unwrap first, so a missed check is a compile error. Beginner path: write `at: context.thread ?? return` and index with at. Expert path: the same; a fallback such as ?? 0 compiles too, and then sends outside threads to the main thread's slot.",
+          "technical": "Changes the field's type in the checker's context row and the runtime read, where -1 becomes None. Every existing read migrates: the context examples and the Context, NestedJoin, HTTP and WebApp test fixtures. The compile-time build-root read becomes Val(0).",
+          "code": "use sys: core.sys\n\ncount_here: fn(counts: &[Int]) {\n    at: context.thread ?? return  // None outside the pool\n    counts[at] = counts[at] + 1\n}\n\nrun: fn() {\n    counts := [0, 0, 0, 0, 0]  // main + 4 pool threads\n    count_here(counts)\n    sys.on_interrupt(fn() { print(\"handler on thread {context.thread ?? -1}\") })\n    worker: task context.thread ?? -1\n    print(\"main counted {counts[0]}, task on {worker.join() ?? -1}\")\n}\n"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust (Rayon)",
+          "note": "current_thread_index() returns Some(index) on a pool worker, stable for the thread's life, and None on any other thread. https://docs.rs/rayon/latest/rayon/fn.current_thread_index.html",
+          "code": "if let Some(i) = rayon::current_thread_index() { counts[i] += 1; }"
+        },
+        {
+          "lang": "Rust (std)",
+          "note": "thread::current().id() is an opaque ThreadId, unique and never reused, but no list index. https://doc.rust-lang.org/std/thread/struct.ThreadId.html",
+          "code": "let id = std::thread::current().id();"
+        },
+        {
+          "lang": "Go",
+          "note": "Go gives goroutines no ID on purpose, so code cannot key state on the thread. https://go.dev/doc/faq#no_goroutine_id",
+          "code": "// no goroutine or thread index; pass state in explicitly"
+        },
+        {
+          "lang": "Java",
+          "note": "Thread.threadId() (getId() before Java 19) is unique per thread for its life but not dense, so it does not index a list. https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Thread.html#threadId()",
+          "code": "long id = Thread.currentThread().threadId();"
+        },
+        {
+          "lang": "C (OpenMP)",
+          "note": "omp_get_thread_num() is 0..team size - 1 inside a parallel region and 0 outside one. https://www.openmp.org/spec-html/5.0/openmpsu113.html",
+          "code": "int i = omp_get_thread_num();"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Pool numbers stay small and dense, so per-thread lists fit. Outside threads are rare and get one plain marker, and a missed check stops loudly at the bad index.",
+        "gains": [
+          "A list sized for main plus the pool always fits."
+        ],
+        "losses": [
+          {
+            "loss": "Code that indexes a list must check for -1 first.",
+            "mitigation": "A missed check stops with \"position -1 doesn't exist\" and shows at = -1, so the fix is plain."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B adds a second list and negative indexes for threads few programs have."
+          },
+          {
+            "key": "C",
+            "reason": "C makes a missed check a compile error, but every pool task unwraps a None it never sees, and a quick ?? 0 hides outside threads in main's slot."
+          }
+        ],
+        "tradeoff": "A missed check is caught when it runs, not when it compiles; in return, the common read in pool tasks stays a plain Int."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "What should context.thread read in Jet code that runs outside the task pool?",
+        "lesson": "context.thread numbers threads: 0 is the main thread, and 1 up are the task pool's threads. A Ctrl-C handler and a realtime callback run on threads of their own. C callbacks are settled already: they cannot read the context. Under every option, handlers stay on their own thread, so Ctrl-C still works while every pool thread is busy.",
+        "trio": {
+          "current": {
+            "note": "Before the interim fix, a handler's number came from start order and could land past the list. The interim build reads -1, which stops at the list.",
+            "code": "count_here: fn(counts: &[Int]) {\n    at: context.thread  // a Ctrl-C handler reads -1 in the interim build\n    counts[at] = counts[at] + 1\n}"
+          },
+          "wild": {
+            "lang": "Rust (Rayon)",
+            "note": "Rayon's current_thread_index() is Some(i) on a pool worker and None on any other thread. Source: https://docs.rs/rayon/latest/rayon/fn.current_thread_index.html",
+            "code": "// a pool worker gets 0..num_threads, any other thread None\nif let Some(i) = rayon::current_thread_index() {\n    counts[i] += 1;\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Outside threads read -1",
+            "gist": "Only main and pool threads get numbers; any other thread reads -1.",
+            "gains": [
+              "Numbers stay within main plus the pool, so lists fit.",
+              "A missed check stops at the bad index, naming -1.",
+              "Already built as the interim; reads stay a plain Int."
+            ],
+            "losses": [
+              "Code that indexes a list must check for -1 first."
+            ],
+            "proposed": {
+              "code": "count_here: fn(counts: &[Int]) {\n    at: context.thread  // -1 outside the pool\n    if at >= 0 -> counts[at] = counts[at] + 1\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "A second count, downward",
+            "gist": "Each outside thread gets its own number: -1, -2, and so on.",
+            "gains": [
+              "Each outside thread can keep state of its own.",
+              "Pool numbers still stay within main plus the pool."
+            ],
+            "losses": [
+              "A second list, sized by outside threads nobody can count ahead.",
+              "Negative indexes invite off-by-one mistakes."
+            ],
+            "proposed": {
+              "code": "count_here: fn(counts: &[Int], outside: &[Int]) {\n    at: context.thread  // -1, -2, ... outside the pool\n    if at >= 0 -> counts[at] = counts[at] + 1 else -> outside[-at - 1] = outside[-at - 1] + 1\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "An optional number",
+            "gist": "context.thread becomes Int?: a number on main and pool threads, None elsewhere.",
+            "gains": [
+              "A missed check is a compile error, not a stop.",
+              "Same shape as Rayon, and as context.deadline."
+            ],
+            "losses": [
+              "Every read unwraps, even in pool tasks where it is never None.",
+              "A quick ?? 0 sends outside threads to main's slot silently.",
+              "Existing reads in examples and tests change."
+            ],
+            "proposed": {
+              "code": "count_here: fn(counts: &[Int]) {\n    at: context.thread ?? return  // None outside the pool\n    counts[at] = counts[at] + 1\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Pool numbers stay small and dense, so per-thread lists fit. Outside threads are rare and get one plain marker, and a missed check stops loudly at the bad index.",
+          "gains": [
+            "A list sized for main plus the pool always fits."
+          ],
+          "losses": [
+            {
+              "loss": "Code that indexes a list must check for -1 first.",
+              "mitigation": "A missed check stops with \"position -1 doesn't exist\" and shows at = -1, so the fix is plain."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B adds a second list and negative indexes for threads few programs have."
+            },
+            {
+              "key": "C",
+              "reason": "C makes a missed check a compile error, but every pool task unwraps a None it never sees, and a quick ?? 0 hides outside threads in main's slot."
+            }
+          ],
+          "tradeoff": "A missed check is caught when it runs, not when it compiles; in return, the common read in pool tasks stays a plain Int."
+        }
+      },
+      "draftedBy": "Errors3202",
+      "reviewedBy": "Main",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-20T23:01:35.531Z"
     }
   ],
   "questions": [
@@ -133665,6 +133802,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-20T23:01:50.858Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0dhc7rh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-20T23:01:48.176Z",
+      "by": "Main",
+      "action": "decision.post",
+      "ref": "D-CONTEXT-THREAD1",
+      "note": "reviewed by Main"
+    },
+    {
+      "at": "2026-11-20T23:01:40.215Z",
+      "by": "Main",
+      "action": "decision.review",
+      "ref": "D-CONTEXT-THREAD1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-20T23:01:35.531Z",
+      "by": "Errors3202",
+      "action": "decision.add",
+      "ref": "D-CONTEXT-THREAD1",
+      "note": "What context.thread reads in Jet code that runs outside the task pool (draft)"
+    },
     {
       "at": "2026-11-20T22:29:57.995Z",
       "by": "Main",

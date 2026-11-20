@@ -39137,6 +39137,64 @@
       "completedAt": "2026-11-17T22:04:23.460Z",
       "questions": [],
       "retiredAt": "2026-11-20T22:13:19.259Z"
+    },
+    {
+      "id": "c07qvm0k",
+      "num": 6928,
+      "title": "Atomics: exact Int and fixed-width atomics on one nonblocking store, and compare-and-swap without ABA",
+      "body": "Destination: D-ATOMIC-WIDTH1=A is built. Exact Int and direct fixed-width atomics share one growable nonblocking numeric store, with no Atomic-specific pool, extra family, hidden lock or capacity setup, and compare-and-swap on an exact atomic validates the same raw word as its retained owner, so it cannot suffer ABA.\n\nSource: #3239 c30 and c36 (carried from #4266 and #4495).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e22",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c1+c2 met on p279 (2d611a5578). Compiler/JetRuntime/Tests/AtomicIntTests.c is unreferenced and unlinkable standalone; the Atomics cases replace it."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-ATOMIC-WIDTH1=A: an exact Int atomic grows beyond the machine width, concurrent fixed-width atomic operations stay correct, and allocator exhaustion still makes nonblocking progress, with no hidden lock or Atomic-specific pool. Proof: `jet test Compiler --profile cases --filter Atomics/d_atomic_width1_contract` on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed in 2d611a5578 (dev, p279 batch compiler 0099c1cc87). `jet test Compiler --profile cases --filter Atomics/` passes 2/2 on the batch compiler, including Atomics/d_atomic_width1_contract on O0, O1 and O2. Exact atomics past machine width, concurrent fixed-width ops and allocator exhaustion all hold. Root fix: the hazard record moved off TCB offset 192 (the thread-index word) to its own slot.",
+          "at": "2026-11-17T22:32:37.199Z"
+        },
+        {
+          "n": 2,
+          "text": "Compare-and-swap on an exact atomic uses the same validated raw word as its retained owner, so it has no ABA. Proof: `jet test Compiler --profile cases --filter Atomics/cas_aba_witness`, plus the original schedule test, on the shipping runtime.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed in 2d611a5578 (dev, p279). Atomics/cas_aba_witness passes on the shipping runtime of the batch compiler 0099c1cc87 (Atomics/ 2/2). It runs the original schedule on O0, O1 and O2: incrementers race tasks that swap in a fresh equal number and free the old one. Compiler/JetRuntime/Tests/AtomicIntTests.c is referenced by nothing (`git grep AtomicIntTests` prints nothing), and it cannot link against jet_runtime.pack.o alone (it lacks jet_rt_fault_report and __jet_init_array_*; checked on gate-p279). The case is the runnable form of that schedule.",
+          "at": "2026-11-17T22:32:38.167Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "concurrency",
+        "atomics"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:38:00.697Z",
+      "updated": "2026-11-17T22:32:46.981Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-17T22:32:46.981Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T23:01:36.011Z"
     }
   ]
 }
