@@ -191,6 +191,20 @@ rt_main_stopped_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
 
+// A stop the process root accepted, `code` the status the process ends
+// with, before the frames that stopped unwind to the root: `jet debug`
+// traps jet_rt_debug_root_stop (JetDebug Native.jet
+// NATIVE_ROOT_STOP_SYMBOL) to pause there, the stack that stopped whole.
+// The call goes through the routine's address, so no inlining drops it.
+main_root_stop: fn(code: I64) { _ := coll_call1(rt_debug_root_stop_address(), code) }
+
+// main_root_stop's routine, which a debugger traps; it does nothing.
+#Export(c) jet_rt_debug_root_stop: fn(code: I64) -> I64 { code }
+
+rt_debug_root_stop_address: fn() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
 // jet_rt_main's end of an entry that published a stop to its root (via
 // main_stopped_code): take the stop, leave the root, run the exit
 // handlers, write the captured report and exit with the stop's code.

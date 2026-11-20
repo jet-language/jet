@@ -1,7 +1,7 @@
-# A worker thread that ends the program with status 1, while the main thread
-# waits for it and other tasks run, pauses as it exits and then ends, after
-# its breakpoint is deleted and the run continued: the threads the exit
-# kills first are let go and never waited on again.
+# A worker thread that ends the program with a stop's status, 70, while the
+# main thread waits for it and other tasks run, pauses as it exits and then
+# ends, after its breakpoint is deleted and the run continued: the threads
+# the exit kills first are let go and never waited on again.
 fixture: WorkerStoppingExit.fixture
 env: NO_COLOR=1
 env: PATH={work}/no-tools
@@ -12,6 +12,6 @@ timeout: 60s
 stdin: a_worker_s_stopping_exit_ends_after_delete_and_continue.stdin
 exit: 0 # the program's own status is reported; the session ends cleanly
 stdout+stderr: ~ "prog.jet:20  in work()" # the breakpoint is hit on the worker
-stdout+stderr: ~ "Program exiting with status 1" # the worker's exit pauses
+stdout+stderr: ~ "Program exiting with status 70" # the worker's exit pauses
 stdout+stderr: ~ "work()  at prog.jet:22" # `bt` reads the worker's stack
-stdout+stderr: ~ "Program finished with exit status 1" # and the next continue lets it end
+stdout+stderr: ~ "Program finished with exit status 70" # and the next continue lets it end

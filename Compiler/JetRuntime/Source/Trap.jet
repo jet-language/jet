@@ -269,14 +269,15 @@ trap_header_bytes: fn(code: I64) {
 
 // A stop's frame: its `-->` location, source line and caret. `backtrace:
 // off` prints none (fault_frames_off). A site in Core is not a line the user
-// wrote. Its location is the user's call that reached it
-// (trap_user_location), with no source line or caret. The Core site
-// stays only when the calling chain names no other frame.
+// wrote, and a stop with no site (a runtime routine's, as `Int{x}` over a
+// Fraction that isn't whole) names none. Its location is the user's call
+// that reached it (trap_user_location), with no source line or caret. The
+// Core site stays only when the calling chain names no other frame.
 trap_context: fn(file: I64, file_len: I64, line: I64, function: I64, function_len: I64, source: I64, source_len: I64, column: I64, caret: I64) {
     if fault_frames_off() {
         return
     }
-    if trap_core_site(file, file_len) && trap_user_location(function_len != I64{0}) {
+    if (file_len == I64{0} || trap_core_site(file, file_len)) && trap_user_location(function_len != I64{0}) {
         return
     }
     if (file_len != I64{0}) {
