@@ -800,7 +800,9 @@ the 33554432-byte budget; <n> bytes cut off past it`, then the innermost Jet
 frame of the stop (`Stopped  main.jet:9  in check()`), its source line and
 its locals. `bt`, `frame N`, `locals` and `print NAME` read the stop as a
 live session reads one, with typed locals; a `Secret` shows as
-`<redacted>`, and a value whose bytes the dump cut off as `<cut off>`.
+`<redacted>`, a value whose bytes the dump cut off as `<cut off>`, and a
+task or channel handle its code consumed (a task's `detach`) as
+`<consumed>`, here and in live sessions.
 The runtime's frames between the stop and the program are stepped out of
 by the image's call frame information (`.eh_frame`), so a register they
 saved holds its value in the program's frames.
@@ -816,9 +818,11 @@ inside it (`task 3  parked in sleep() at time.jet:41, from run() at
 main.jet:14`); `task N` selects task N for `bt`, `frame`, `locals` and
 `print`. `events [--last N]` (20 by default) lists the ring's records,
 oldest first, each at the first Jet frame of its stack: `sample`, `spawn`,
-`wake`, `clock`, `wait` and `io`. A run-control command answers that a
-dump doesn't run. Tests/Cases/Debug/crash_dump_opens_typed.case is the
-worked example; Tests/Cases/Debug/crash_dump_keeps_its_budget.case shows
+`wake`, `clock`, `wait` and `io`. A CPU-time sample also names its task
+(`sample  task 1  at check main.jet:9`, or `outside every task`), and one
+whose stack holds no Jet frame is `in the runtime`. A run-control command
+answers that a dump doesn't run. Tests/Cases/Debug/crash_dump_opens_typed.case
+is the worked example; Tests/Cases/Debug/crash_dump_keeps_its_budget.case shows
 the budget and a value cut off past it.
 
 ## Canonical devtools protocol

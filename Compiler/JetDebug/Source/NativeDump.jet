@@ -16,7 +16,7 @@
 // deadlock held with its wait, and `events` lists the ring.
 use {
     native_dump_files: core.files
-    jet_backend.[X64DebugEncoding, X64Trace, X64_TRACE_RBP, X64_TRACE_RIP, X64_TRACE_RSP]
+    jet_backend.[X64DebugEncoding, X64Jetline, X64JetlineFunction, X64Trace, X64_TRACE_RBP, X64_TRACE_RIP, X64_TRACE_RSP]
 }
 
 // "JETDUMP1", the dump's first word.
@@ -65,6 +65,9 @@ NATIVE_DUMP_TASK_PARKED: 2
 
 // The flight ring's record kinds (PerfSamples.jet).
 NATIVE_DUMP_SAMPLE: 0
+
+// The words a CPU-time sample's record ends with: its time and its task.
+NATIVE_DUMP_SAMPLE_TIMED: 2
 
 NATIVE_DUMP_IO: 11
 
@@ -365,7 +368,19 @@ native_dump_event: fn(image: NativeImage, ring: [U8], at: Int, words: Int) -> St
     kind: (head >> 59) & 15
     id: head & 281474976710655
     if kind == NATIVE_DUMP_SAMPLE {
-        return "sample  {native_dump_where(image, ring, at, id, 1, words)}"
+        // A record that kept its call sites ends with its time and its task
+        // (PerfSamples.jet PERF_SAMPLES_TIMED), 0 outside every task; one
+        // made with no record buffer free is its address alone.
+        timed: words >= 1 + NATIVE_DUMP_SAMPLE_TIMED
+        sites: if timed -> words - NATIVE_DUMP_SAMPLE_TIMED else -> words
+        task: if timed -> native_dump_word(ring, at + 8 * (words - 1)) else -> -1
+        who: if {
+            task > 0 -> "task {task}"
+            task == 0 -> "outside every task"
+            else -> "a thread"
+        }
+        found: native_dump_where(image, ring, at, id, 1, sites)
+        return "sample  {who}{if found == "" -> "  in the runtime" else -> found}"
     }
     if kind == NATIVE_DUMP_SPAWN {
         return "spawn   task {id}{native_dump_where(image, ring, at, 0, 1, words)}"
@@ -560,4 +575,19 @@ native_dump_frame: fn(session: &NativeSession, frames: [NativeFrame], index: Int
     assert_eq(native_dump_source("/w/run/.jet/dumps/crash-1.jetdump", "/src/crash.jet"), "/src/crash.jet")
     assert_eq(native_dump_source("/w/kept/crash-1.jetdump", "crash.jet"), "crash.jet")
     assert_eq(native_dump_source("/w/run/.jet/dumps/crash-1.jetdump", ""), "")
+}
+
+// A CPU-time sample shows its task and where it was: the first Jet frame of
+// its stack, or the runtime when none is; its trailing time and task are no
+// call sites.
+#Test("a sample event names its task and its place, the runtime when no Jet frame holds it") {
+    image: NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}}
+    // Address 0x1000, one call site, the time and task 3; the same outside
+    // every task; an address alone, made with no record buffer free.
+    records: [[Int]]{[Int]{0x1000 | (4 << 48), 0x2000, 500, 3}, [Int]{0x1000 | (4 << 48), 0x2000, -1, 0}, [Int]{0x1000 | (1 << 48)}}
+    ring := [U8]{}
+    loop record in records {
+        loop word in record -> ring.extend(native_low_bytes(word, 8))
+    }
+    assert_eq(native_dump_events(image, ring), [String]{"sample  task 3  in the runtime", "sample  outside every task  in the runtime", "sample  a thread  in the runtime"})
 }

@@ -5832,6 +5832,10 @@ NATIVE_DEBUG_NOT_KEPT: "unavailable (not kept at this point)"
 // budget.
 NATIVE_DEBUG_CUT_OFF: "<cut off>"
 
+// The value shown for a Task, Sender or Receiver handle its code consumed
+// (native_debug_runtime_handle).
+NATIVE_DEBUG_CONSUMED: "<consumed>"
+
 // The deepest run of runtime frames a step finishes out of before it lets the
 // program continue.
 NATIVE_DEBUG_RUNTIME_DEPTH: 16
@@ -7081,8 +7085,11 @@ native_debug_runtime_handle_type: fn(type_name: String) -> Bool Never! {
 // ended. An endpoint shows as its channel (Channel.jet's state: len16,
 // bound48, closed88, observe136, an observed run's channel id), `channel
 // N, H of B held` (`H held` when unbounded), with `, closed` once closed.
-// An unobserved run's id is 0: `a task`, `a channel`.
+// An unobserved run's id is 0: `a task`, `a channel`. A handle whose state
+// is 0 holds none any more: its code consumed it (a task's `detach`), and
+// it shows as NATIVE_DEBUG_CONSUMED.
 native_debug_runtime_handle: fn(type_name: String, address: Int, memory: NativeMemory) -> String? Never! {
+    if address == 0 -> return Val(NATIVE_DEBUG_CONSUMED)
     if type_name.starts_with("Task<") {
         state: native_debug_read(memory, address, 8, 4) ?? return None
         control: native_debug_read(memory, state[1], 8, 8) ?? return None
@@ -7118,6 +7125,9 @@ native_debug_runtime_handle: fn(type_name: String, address: Int, memory: NativeM
     assert_eq(native_debug_runtime_handle("Task<Int>", 16384, memory), String?{Val("task 2, done")})
     assert_eq(native_debug_runtime_handle("Sender<Int>", 20480, memory), String?{Val("a channel, 3 held, closed")})
     assert_eq(native_debug_runtime_handle("Task<Int>", 40960, memory), String?{None})
+    // A handle its code consumed holds no state.
+    assert_eq(native_debug_runtime_handle("Task<Int>", 0, memory), String?{Val("<consumed>")})
+    assert_eq(native_debug_runtime_handle("Sender<Int>", 0, memory), String?{Val("<consumed>")})
     assert(native_debug_runtime_handle_type("Receiver<Order>") && !native_debug_runtime_handle_type("Pointer"), "only a handle's typedef reads as one")
 }
 

@@ -2,9 +2,10 @@
 # <program>-<time>.jetdump`, owner-only, the newest three kept. `jet debug`
 # opens it as the program was when it stopped: the stopping line, its
 # backtrace, its typed locals, every task's stack (the three sleeping ones
-# too), and the flight ring's last events. A Secret is never in the dump:
-# every run of its bytes is zeroed as the dump is written, its literal's in
-# the image too, and the console shows it redacted.
+# too), and the flight ring's last events, each with its task and its place.
+# A task handle that `detach` consumed shows as consumed. A Secret is never
+# in the dump: every run of its bytes is zeroed as the dump is written, its
+# literal's in the image too, and the console shows it redacted.
 requires: os-name:linux
 fixture: CrashDumpOpensTyped.fixture
 env: NO_COLOR=1
@@ -35,6 +36,10 @@ stdout: ~ "() at crash.jet:14" # the second
 stdout: ~ "() at crash.jet:15" # the third
 stdout: ~ "A dump doesn't run" # run verbs answer what a dump is
 stdout: ~ "Stopped  crash.jet:21  in run()" # frame 1 is run's call
+stdout: ~ "Locals:  first = <consumed>   key = <redacted>   second = <consumed>   third = <consumed>" # run's locals: the task handles `detach` consumed, and the key
+stdout: !~ "<Unavailable>" # every local of both frames shows what it holds
+stdout: ~ "sample  task 1  at check crash.jet:9" # a sample names its task and its first Jet frame
+stdout: !~ "sample  \n" # no event is left without a place
 step: jet run --observe crash.jet
 exit: nonzero
 step: jet run --observe crash.jet
