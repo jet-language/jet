@@ -944,7 +944,9 @@ main.jet:14`); `task N` selects task N for `bt`, `frame`, `locals` and
 oldest first, each at the first Jet frame of its stack: `sample`, `spawn`,
 `wake`, `clock`, `wait` and `io`. A CPU-time sample also names its task
 (`sample  task 1  at check main.jet:9`, or `outside every task`), and one
-whose stack holds no Jet frame is `in the runtime`. A run-control command
+whose stack holds no Jet frame is `in the runtime`. `disassemble` (`disas`)
+lists code as the live console's does (below), its bytes read from the
+image, the selected frame's pc's row ending `<- here`. A run-control command
 answers that a dump doesn't run. Tests/Cases/Debug/crash_dump_opens_typed.case
 is the worked example; Tests/Cases/Debug/crash_dump_keeps_its_budget.case shows
 the budget and a value cut off past it.
@@ -1101,6 +1103,30 @@ stdin is empty too. D-DBG-VERBS1=A names the commands:
 - `frame <n>` selects a frame as `backtrace` (`bt`) numbers it. `up` moves
   toward the callers and `down` back. `locals` and `print <expr>` (`p`)
   read the selected frame until the program moves.
+- `disassemble` (`disas`) lists machine code under its source lines
+  (D-DISASM1). With no operand it lists the selected frame's function (the
+  one an inlined frame is inlined into); `disas NAME` lists a function by
+  its Jet name, or a runtime routine by its symbol; `disas LINE`,
+  `disas FILE:LINE` and `disas FILE:A-B` list only the rows of those lines.
+  `--bytes` adds each instruction's encoding. The heading names the
+  function, its lines, the build's level, its address and size
+  (`fib  fib.jet:1-3  -O0  0x404110, 732 bytes`), then where the selected
+  frame's locals live at the pc (`  at the pc: n in rbx`). A
+  `fib.jet:3   fib(n - 1) + fib(n - 2)` header starts each run of a line's
+  rows, and `  inlined NAME, called on line N` / `  back in NAME` frame the
+  rows of inlined code. A row is
+  `b2  0x404158 <+72>   mov    rax,rbx        <- here`: `b<N>` marks a
+  breakpoint and `<+N>` its offset in the function, and the pc's row ends
+  `<- here`, as the stop's source line does. A call names its target
+  (`call   0x404110 <fib>`), a jump inside the function its offset
+  (`jo     0x404232 <+290>`), and a rip-relative operand its address and
+  symbol (`# 0x425268
+  <jet_rt_process_ending>`). A breakpoint's trap byte shows as the
+  instruction it covers. A function `fix` replaced notes where its entry
+  jumps to. A name or line with no code is answered as `break` answers it:
+  ``No function `NAME` `` and `No code on FILE:LINE`.
+  Tests/Cases/Debug/disassemble_marks_stop_and_breakpoint.case is the
+  worked example.
 - `tasks` lists every task by id: its label, its state (queued, running,
   blocked or paused), what it waits on (`channel receive`) and its Jet
   frames; `*` marks the task the program stopped in. Task 1 is the main

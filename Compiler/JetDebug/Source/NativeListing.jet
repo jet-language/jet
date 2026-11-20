@@ -1,0 +1,291 @@
+// `disassemble` (`disas`), in jet debug's console and a crash dump's:
+// the program's machine code under its source lines, through
+// the one listing builder (JetBackend X64/Listing.jet). The bytes are the
+// program's own, read as NativeSession.code reads them: a trap byte or a
+// placed condition's jump shows as the instruction it covers, marked with
+// its breakpoint's number, and a dump's are its image's. A zone site reads
+// as it is now. Calls, jumps and rip-relative operands are named by the
+// line table's functions, then by the image's `.symtab`.
+use {
+    native_listing_files: core.files
+    jet_backend.[X64ListingSymbol, X64_REGISTER_NAMES, x64_hex, x64_jetline_find, x64_listing, x64_listing_text]
+    jet_foundation.[MODULE_CORE_PREFIX]
+}
+
+// How one stretch of code is listed: the pc the selected frame stopped at,
+// whose row ends `<- here` as the stop's source line does (-1 for none),
+// the lines [first, last] its rows are kept to (0, 0: all of them), whether
+// each row shows its bytes, and the selected frame's locals' places
+// (native_listing_places; "" for none).
+NativeListingAsk: struct {
+    pc: Int,
+    first: Int,
+    last: Int,
+    bytes: Bool,
+    places: String,
+}
+
+// `disassemble [NAME | LINE | FILE:LINE | FILE:A-B] [--bytes]`. With no
+// name or line: the selected frame's function, its pc's row ending
+// `<- here`, under where each of the frame's locals lives there. NAME: each
+// function of the line table `break` names so (code a fix replaced gives
+// way to the code that runs it now), else each sized `.symtab` symbol of
+// that name. A line: the rows of each function of the file that hold it,
+// the pieces the optimizer moved away included. `file` is the console's
+// source, read as `lines`.
+native_disassemble: fn(session: &NativeSession, operand: String, file: String, lines: [String]) -> String NativeDebugError! {
+    spec := ""
+    specs := 0
+    bytes := false
+    loop word in operand.split(" ") {
+        if {
+            word == "--bytes" -> bytes = true
+            word != "" -> {
+                spec = "{word}"
+                specs += 1
+            }
+            else -> {}
+        }
+    }
+    symbols: native_listing_symbols(session)
+    if spec == "" {
+        frames: session.unwind() ?? return Err(err)
+        if frames.len() == 0 {
+            return Ok("No frame to list; name a function, as `disassemble main`\n")
+        }
+        levels: native_levels(session.image, frames)
+        level: if session.selected < levels.len() -> levels[session.selected] else -> levels[0]
+        pc: frames[level.frame].pc
+        lookup: native_lookup(level.frame, pc)
+        ask: NativeListingAsk{pc: pc, first: 0, last: 0, bytes: bytes, places: native_listing_places(session.image, lookup, level.site)}
+        index: x64_jetline_find(session.image.lines, lookup)
+        if index >= 0 {
+            function: session.image.lines.functions[index]
+            return Ok(native_listing_block(session, symbols, index, function.low, function.high, function.name, ask, file, lines))
+        }
+        loop symbol in symbols {
+            if lookup >= symbol.address && lookup < symbol.address + symbol.size {
+                return Ok(native_listing_block(session, symbols, -1, symbol.address, symbol.address + symbol.size, symbol.name, ask, file, lines))
+            }
+        }
+        return Ok("No function or symbol holds the pc {x64_hex(pc)}\n")
+    }
+    line := Int.parse(spec) ?? -1
+    in_file := "{file}"
+    last := line
+    if line == -1 && spec.contains(":") {
+        in_file = "{spec.before(":")}"
+        span: spec.after(":")
+        line = Int.parse(span.before("-")) ?? 0
+        last = if span.contains("-") -> Int.parse(span.after("-")) ?? 0 else -> line
+    }
+    ask := NativeListingAsk{pc: -1, first: 0, last: 0, bytes: bytes, places: ""}
+    text := ""
+    if line == -1 {
+        loop (index, function) in session.image.lines.functions {
+            if function.name != spec || native_listing_replaced(session, function.low) -> next
+            text = "{text}{if text == "" -> "" else -> "\n"}{native_listing_block(session, symbols, index, function.low, function.high, function.name, ask, file, lines)}"
+        }
+        if text != "" -> return Ok(text)
+        loop symbol in symbols {
+            if symbol.name != spec || symbol.size <= 0 || x64_jetline_find(session.image.lines, symbol.address) >= 0 {
+                next
+            }
+            text = "{text}{if text == "" -> "" else -> "\n"}{native_listing_block(session, symbols, -1, symbol.address, symbol.address + symbol.size, symbol.name, ask, file, lines)}"
+        }
+        if text == "" -> return Ok("No function `{spec}`\n")
+        return Ok(text)
+    }
+    shown: if last == line -> "{in_file}:{line}" else -> "{in_file}:{line}-{last}"
+    if line < 1 || last < line {
+        return Ok("`{spec}` is not a line, a file:line, a file:first-last or a function\n")
+    }
+    ask.first = line
+    ask.last = last
+    loop index in native_line_functions(session.image, in_file) {
+        function: session.image.lines.functions[index]
+        if native_listing_replaced(session, function.low) -> next
+        block: native_listing_block(session, symbols, index, function.low, function.high, function.name, ask, file, lines)
+        if block == "" -> next
+        text = "{text}{if text == "" -> "" else -> "\n"}{block}"
+    }
+    if text == "" -> return Ok("No code on {shown}\n")
+    Ok(text)
+}
+
+// Whether a fix made the code at `low` jump to its edit's.
+native_listing_replaced: fn(session: &NativeSession, low: Int) -> Bool Never! {
+    loop fixed in session.fixed {
+        if fixed.was == low -> return true
+    }
+    false
+}
+
+// The listing of the code [low, high) named `name`: function `function`
+// of the line table (-1: a symbol's code, which has no lines), as `ask`
+// says; "" when `ask` keeps no row of it. Its heading names its lines, the
+// image's level, where it is and how big; a row starting a new line is
+// headed by the line and its source text; a run of inlined code is headed
+// by the function inlined and the line of its call.
+native_listing_block: fn(session: &NativeSession, symbols: [X64ListingSymbol], function: Int, low: Int, high: Int, name: String, ask: NativeListingAsk, file: String, lines: [String]) -> String Never! {
+    marks := [Int:String]{}
+    loop breakpoint in session.breakpoints {
+        loop at in breakpoint.addresses {
+            if at < low || at >= high -> next
+            marks[at] = if marks.get(at) == .Val(had) -> "{had},b{breakpoint.number}" else -> "b{breakpoint.number}"
+        }
+    }
+    rows: x64_listing(session.code(low, high - low), low, session.image.lines, function, symbols, marks)
+    least := 0
+    most := 0
+    widest := 0
+    kept := 0
+    loop row in rows {
+        if ask.first > 0 && (row.line < ask.first || row.line > ask.last) -> next
+        kept += 1
+        if row.bytes.len() > widest -> widest = row.bytes.len()
+        if row.line <= 0 -> next
+        if least == 0 || row.line < least -> least = row.line
+        if row.line > most -> most = row.line
+    }
+    if kept == 0 -> return ""
+    base := ""
+    path := ""
+    if function >= 0 {
+        base = native_listing_files.basename(session.image.lines.functions[function].file)
+        path = native_line_source(session.image.lines.functions[function].dir, session.image.lines.functions[function].file)
+    }
+    span: if least == most -> "{least}" else -> "{least}-{most}"
+    located: if {
+        function < 0 -> ""
+        least == 0 -> "  {base}  -O{session.image.level}"
+        else -> "  {base}:{span}  -O{session.image.level}"
+    }
+    text := "{name}{located}  {x64_hex(low)}, {high - low} bytes\n"
+    loop fixed in session.fixed {
+        if fixed.was == low {
+            text = "{text}  fix replaced it: its entry jumps to the edit's code at {x64_hex(fixed.address)}\n"
+        }
+        if fixed.address == low && fixed.was >= 0 {
+            text = "{text}  fix placed it: the entry it replaced, at {x64_hex(fixed.was)}, jumps here\n"
+        }
+    }
+    text = "{text}{ask.places}"
+    // The console's own source reads as `lines`, any other as the session
+    // reads a frame's (NativeSession.source_text).
+    own: base == file && !path.starts_with(MODULE_CORE_PREFIX)
+    other: if function >= 0 && !own -> (session.source_text(path) ?? "").split("\n").to_list() else -> [String]{}
+    described: native_function_at(session.image, low)
+    line := 0
+    run := -1
+    loop row in rows {
+        if ask.first > 0 && (row.line < ask.first || row.line > ask.last) -> next
+        if row.line > 0 && row.line != line {
+            line = row.line
+            source: if own -> native_source_line(lines, line) else -> native_source_line(other, line)
+            text = "{text}{base}:{line}   {source.trim()}\n"
+        }
+        // The innermost inlined run holding the row: runs follow the run
+        // they are nested in.
+        inner := -1
+        if described == .Val(found) {
+            loop (index, inlined) in found.inlined {
+                if row.address >= inlined.low && row.address < inlined.high -> inner = index
+            }
+            if inner != run && inner >= 0 {
+                callee: if session.image.abstracts.get(found.inlined[inner].origin) == .Val(abstract) -> "{abstract.name}" else -> "?"
+                text = "{text}  inlined {callee}, called on line {found.inlined[inner].call_line}\n"
+            }
+            if inner != run && inner < 0 -> text = "{text}  back in {name}\n"
+            run = inner
+        }
+        here: if row.address == ask.pc -> "        <- here" else -> ""
+        encoded: if ask.bytes -> native_listing_pad(native_listing_bytes(row.bytes), 3 * widest + 2) else -> ""
+        text = "{text}   {native_listing_pad(row.mark, 4)}{x64_hex(row.address)} {native_listing_pad("<+{row.offset}>", 8)}{encoded}{x64_listing_text(row, low, high)}{here}\n"
+    }
+    text
+}
+
+// The symbols a listing names addresses by, in address order: each function
+// of the line table, then each sized `.symtab` symbol that starts no such
+// function. Without the image's symbols (NativeSession.eval_facts) only the
+// functions.
+native_listing_symbols: fn(session: &NativeSession) -> [X64ListingSymbol] Never! {
+    symbols := [X64ListingSymbol]{}
+    starts := [Int:Bool]{}
+    loop function in session.image.lines.functions {
+        symbols.push(X64ListingSymbol{address: function.low, size: function.high - function.low, name: "{function.name}"})
+        starts[function.low] = true
+    }
+    native_listing_table(session, symbols, starts)
+    symbols.sort_by(fn(left: X64ListingSymbol, right: X64ListingSymbol) { (left.address <=> right.address).then(left.name <=> right.name) })
+    symbols
+}
+
+// Adds each sized `.symtab` symbol to `symbols` but those at `starts`.
+native_listing_table: fn(session: &NativeSession, symbols: &[X64ListingSymbol], starts: [Int:Bool]) Never! {
+    facts_cell: session.eval_facts() ?? return
+    facts: facts_cell.guard_read()
+    loop (name, slot) in facts.value.symbols.slots {
+        loop symbol in facts.value.symbols.named[slot] {
+            if symbol.size <= 0 || starts.get(symbol.address) != None -> next
+            symbols.push(X64ListingSymbol{address: symbol.address, size: symbol.size, name: "{name}"})
+        }
+    }
+}
+
+// Where each local of the frame stopped at `lookup`, in inlined run `site`
+// (-1: the function's own frame), lives there, as its location list says:
+// `  at the pc: n in rbx, total at [rbp-0x18]`; "" when none is in a
+// register or at a register plus an offset.
+native_listing_places: fn(image: NativeImage, lookup: Int, site: Int) -> String Never! {
+    function: native_function_at(image, lookup) ?? return ""
+    places := [String]{}
+    loop variable in function.variables {
+        if variable.site != site || variable.list < 0 -> next
+        range: native_variable_covering(image, variable, lookup) ?? next
+        expression: loop k in range.from..<range.to -> image.loclists[k]
+        place: native_place_arg(expression) ?? next
+        if place.register < 0 || place.register >= NATIVE_PLACE_REGS.len() -> next
+        register: X64_REGISTER_NAMES[NATIVE_PLACE_REGS[place.register]]
+        offset: if {
+            place.offset < 0 -> "-{x64_hex(-place.offset)}"
+            place.offset > 0 -> "+{x64_hex(place.offset)}"
+            else -> ""
+        }
+        places.push(
+            if {
+                !place.memory -> "{variable.name} in {register}"
+                place.deref -> "{variable.name} through [{register}{offset}]"
+                else -> "{variable.name} at [{register}{offset}]"
+            },
+        )
+    }
+    if places.len() == 0 -> return ""
+    "  at the pc: {places.join(", ")}\n"
+}
+
+// `bytes` as two hex digits each, spaced: `48 8d 7b ff`.
+native_listing_bytes: fn(bytes: [U8]) -> String Never! {
+    digits: "0123456789abcdef"
+    text := ""
+    loop (index, byte) in bytes {
+        value: Int{byte}
+        text = "{text}{if index == 0 -> "" else -> " "}{digits.slice(value >> 4, (value >> 4) + 1)}{digits.slice(value & 15, (value & 15) + 1)}"
+    }
+    text
+}
+
+// `text` padded with spaces to `width` characters, and at least one.
+native_listing_pad: fn(text: String, width: Int) -> String Never! {
+    if text.len() >= width -> return "{text} "
+    "{text}{" ".repeat(width - text.len())}"
+}
+
+#Test("a listing's bytes show as spaced hex, and its columns pad to their width") {
+    assert_eq(native_listing_bytes([U8]{0x48, 0x8d, 0x7b, 0xff}), "48 8d 7b ff")
+    assert_eq(native_listing_bytes([U8]{}), "")
+    assert_eq(native_listing_pad("b1", 4), "b1  ")
+    assert_eq(native_listing_pad("", 4), "    ")
+    assert_eq(native_listing_pad("<+1024>", 6), "<+1024> ")
+}
