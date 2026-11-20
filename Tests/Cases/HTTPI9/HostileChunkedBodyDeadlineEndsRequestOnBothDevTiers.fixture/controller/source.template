@@ -87,20 +87,19 @@ run: fn() {
         started: time.instant()
         client := retry_connect(address, started)
         client.write_bytes("POST / HTTP/1.1{PEER_CRLF}Host: local{PEER_CRLF}Transfer-Encoding: chunked{PEER_CRLF}Trailer: X-Test{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}1{PEER_CRLF}x{PEER_CRLF}0{PEER_CRLF}".bytes()) ?? panic("chunked prefix")
-        writer: task {
-            trailer: "X-Test: value{PEER_CRLF}".bytes()
-            loop index in 0..<trailer.len() {
-                if files.exists(stop) -> return
-                if client.write_bytes([U8]{trailer[index]}) == {
-                    .Err(_) -> return
-                    .Ok(_) -> {}
-                }
-                if index + 1 < trailer.len() {
-                    loop tick in 0..<80 {
-                        if files.exists(stop) -> return
-                        time.sleep(100ms)
-                    }
-                }
+        // The trailer trickles one byte every 8s until the response is
+        // readable: the stream has one owner, so a readiness wait paces the
+        // bytes. A wait that ends without the response (its deadline) sends the
+        // next byte; any other failure shows in the read below.
+        trailer: "X-Test: value{PEER_CRLF}".bytes()
+        loop index in 0..<trailer.len() {
+            if client.write_bytes([U8]{trailer[index]}) == {
+                .Err(_) -> break
+                .Ok(_) -> {}
+            }
+            if client.ready(NetReadyInterest.Read, deadline: 8s) == {
+                .Ok(ready) -> { if ready.readable -> break }
+                .Err(_) -> {}
             }
         }
         response := [U8]{}
@@ -117,9 +116,8 @@ run: fn() {
                 }
             }
         }
-        files.write_atomic(stop, "stop".bytes()) ?? panic("stop writer")
+        files.write_atomic(stop, "stop".bytes()) ?? panic("stop server")
         _: client.close()
-        writer.join() ?? panic("trickle writer")
         output: runner.join() ?? panic("server runner")
         assert(read_ok && prefix(response, "HTTP/1.1 ".bytes()))
         assert(time.instant() < started + 35s)
