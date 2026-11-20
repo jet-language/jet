@@ -182,23 +182,24 @@ fault_raise: fn(signal: I64) {
 // jet_rt_context_trace returns them. Its own frame and every runtime frame
 // on the way add no line, because the table doesn't hold them.
 trace_text: fn() -> I64 {
-    text: rt_text_builder_with_capacity(I64{0})
-    if (text == I64{0}) { return I64{0} }
-    _ := trace_walk(text, false)
-    text
+    lines: trace_lines_new()
+    _ := trace_walk(lines, false)
+    trace_lines_text(lines)
 }
 
-// Walk the calling chain. With a `text`, each Jet frame appends its line to
-// it. With none (0), the walk stops at the innermost frame whose file is not
-// Core's and writes that frame's `-->` line (Trap.jet trap_user_frame, with
-// its function when `with_function`); it returns whether one was written.
-// A release image writes its callers for `jet crash` in its place
-// (trace_release_callers). That form allocates nothing, so a stop raised in
-// Core (Trap.jet trap_user_location) links no allocator into an image that
-// never allocates. A host that reports the chain itself (trace_host) answers
+// Walk the calling chain. With `lines` (trace_lines_new), each Jet frame
+// adds its line there. With none (0), the walk stops at the innermost frame
+// whose file is not Core's and writes that frame's `-->` line (Trap.jet
+// trap_user_frame, with its function when `with_function`); it returns
+// whether one was written. A release image writes its callers for `jet
+// crash` in its place (trace_release_callers). Neither form allocates: the
+// lines go on pages the trace maps, and trace_lines_text copies them into a
+// text after the walk. So a stop raised in Core (Trap.jet
+// trap_user_location) links no allocator into an image that never
+// allocates. A host that reports the chain itself (trace_host) answers
 // first.
-trace_walk: fn(text: I64, with_function: Bool) -> Bool {
-    hosted: trace_host(text, with_function)
+trace_walk: fn(lines: I64, with_function: Bool) -> Bool {
+    hosted: trace_host(lines, with_function)
     if (hosted >= I64{0}) { return hosted == I64{1} }
     // The frame walk needs rbp, which no admitted asm leaf reads. As
     // alloc_check_start does, this maps the four-byte stub `mov rax, rbp;
@@ -216,14 +217,14 @@ trace_walk: fn(text: I64, with_function: Bool) -> Bool {
     }
     trace_unmap(stub, I64{4096})
     if (frame == I64{0}) { return false }
-    trace_image(text, frame, I64{0}, with_function)
+    trace_image(lines, frame, I64{0}, with_function)
 }
 
 // Read the image's location table as trace_frames does: the chain from
 // `frame`, or with no frame (0) the one function whose code holds runtime
 // address `address`. The image is the loader's mapping under `jet run`
 // (HOST_AT_IMAGE), else /proc/self/exe mapped read-only for the call.
-trace_image: fn(text: I64, frame: I64, address: I64, with_function: Bool) -> Bool {
+trace_image: fn(lines: I64, frame: I64, address: I64, with_function: Bool) -> Bool {
     loaded: host_getauxval(HOST_AT_IMAGE)
     image := loaded
     length := I64{0}
@@ -250,7 +251,7 @@ trace_image: fn(text: I64, frame: I64, address: I64, with_function: Bool) -> Boo
         trace_unmap(path, I64{4096})
     }
     if (image == I64{0}) { return false }
-    found: trace_frames(text, image, alloc_check_bias(image), frame, address, with_function)
+    found: trace_frames(lines, image, alloc_check_bias(image), frame, address, with_function)
     if (length > I64{0}) { trace_unmap(image, length) }
     found
 }
@@ -259,14 +260,103 @@ trace_image: fn(text: I64, frame: I64, address: I64, with_function: Bool) -> Boo
 // in trace_text's form (`function\tfile\tline\n`), as a new text: empty when
 // the image's table holds no such function. 0 when no text could be made.
 trace_address_text: fn(address: I64) -> I64 {
-    text: rt_text_builder_with_capacity(I64{0})
-    if (text == I64{0}) { return I64{0} }
-    _ := trace_image(text, I64{0}, address, true)
+    lines: trace_lines_new()
+    _ := trace_image(lines, I64{0}, address, true)
+    trace_lines_text(lines)
+}
+
+// The text form's lines while the walk runs: a record of three words, the
+// lines' mapping (0 before the first line), how many bytes they hold and
+// the mapping's size. The walk adds to the mapping and never allocates.
+trace_lines_new: fn() -> I64 {
+    lines: jet_rt_alloc(I64{24}, I64{8})
+    thread_zero(lines, I64{24})
+    lines
+}
+
+// The lines as a new text, and the record and its mapping released. 0 when
+// no text could be made.
+trace_lines_text: fn(lines: I64) -> I64 {
+    data: trap_word(lines)
+    used: trap_word(wrapping(lines + I64{8}))
+    size: trap_word(wrapping(lines + I64{16}))
+    text: rt_text_builder_with_capacity(used)
+    if (text != I64{0} && used > I64{0}) { rt_text_append(text, data, used) }
+    if (size > I64{0}) { trace_unmap(data, size) }
+    jet_rt_free(lines, I64{24}, I64{8})
     text
 }
 
-// Unmap a mapping the trace made: its stub page, its path page or its view
-// of the executable.
+// Room for `length` more bytes at the lines' end: their address, which
+// trace_lines_commit then counts, or 0 when no bigger mapping could be made.
+// A full mapping moves to one twice its size.
+trace_lines_reserve: fn(lines: I64, length: I64) -> I64 {
+    data: trap_word(lines)
+    used: trap_word(wrapping(lines + I64{8}))
+    size: trap_word(wrapping(lines + I64{16}))
+    if (length <= wrapping(size - used)) { return wrapping(data + used) }
+    grown := if (size == I64{0}) -> I64{4096} else -> size
+    loop grown > (I64{0}) && wrapping(grown - used) < length -> grown = wrapping(grown * I64{2})
+    if (grown <= I64{0}) { return I64{0} }
+    bigger: alloc_map_try(grown)
+    if (bigger == I64{0}) { return I64{0} }
+    coll_copy(data, bigger, used)
+    if (size > I64{0}) { trace_unmap(data, size) }
+    trap_store(lines, bigger)
+    trap_store(wrapping(lines + I64{16}), grown)
+    wrapping(bigger + used)
+}
+
+trace_lines_commit: fn(lines: I64, length: I64) {
+    trap_store(wrapping(lines + I64{8}), wrapping(trap_word(wrapping(lines + I64{8})) + length))
+}
+
+// The `length` bytes at `at` added to the lines. They are dropped when no
+// room could be made.
+trace_lines_append: fn(lines: I64, at: I64, length: I64) {
+    target: trace_lines_reserve(lines, length)
+    if (target == I64{0}) {
+        return
+    }
+    coll_copy(at, target, length)
+    trace_lines_commit(lines, length)
+}
+
+trace_lines_byte: fn(lines: I64, byte: I64) {
+    target: trace_lines_reserve(lines, I64{1})
+    if (target == I64{0}) {
+        return
+    }
+    trap_put(target, byte)
+    trace_lines_commit(lines, I64{1})
+}
+
+// `value` in decimal added to the lines. A line number is never below 0, so
+// a value below 0 (a malformed table's) is written as 0.
+trace_lines_number: fn(lines: I64, value: I64) {
+    number: if (value < I64{0}) -> I64{0} else -> value
+    digits := I64{1}
+    rest := number /% I64{10}
+    loop rest != (I64{0}) {
+        digits = wrapping(digits + I64{1})
+        rest = rest /% I64{10}
+    }
+    target: trace_lines_reserve(lines, digits)
+    if (target == I64{0}) {
+        return
+    }
+    at := digits
+    rest = number
+    loop at > (I64{0}) {
+        at = wrapping(at - I64{1})
+        trap_put(wrapping(target + at), wrapping(I64{48} + rest % I64{10}))
+        rest = rest /% I64{10}
+    }
+    trace_lines_commit(lines, digits)
+}
+
+// Unmap a mapping the trace made: its stub page, its path page, its view
+// of the executable or the text form's lines.
 trace_unmap: fn(address: I64, bytes: I64) {
     #Unsafe("the trace made this mapping and holds no pointer into it past this call") {
         _ := os_unmap_untracked_i64(address, bytes)
@@ -286,7 +376,7 @@ trace_unmap: fn(address: I64, bytes: I64) {
 // trace_walk through the host's frames (jet_rt_host_frames): 1 when a `-->`
 // line was written, 0 when none was, -1 when the host reports no chain. Its
 // lines go in a page the trace maps, so this form allocates nothing either.
-trace_host: fn(text: I64, with_function: Bool) -> I64 {
+trace_host: fn(lines: I64, with_function: Bool) -> I64 {
     length: jet_rt_host_frames(I64{0}, I64{0})
     if (length < I64{0}) { return I64{-1} }
     if (length == I64{0}) { return I64{0} }
@@ -297,7 +387,7 @@ trace_host: fn(text: I64, with_function: Bool) -> I64 {
     kept: if (written > bytes) -> bytes else -> written
     found := I64{0}
     if (kept > I64{0}) {
-        if (text != I64{0}) { rt_text_append(text, page, kept) } else if trace_host_user(page, kept, with_function) {
+        if (lines != I64{0}) { trace_lines_append(lines, page, kept) } else if trace_host_user(page, kept, with_function) {
             found = I64{1}
         }
     }
@@ -350,11 +440,12 @@ trace_decimal: fn(at: I64, length: I64) -> I64 {
 
 // Each Jet frame of the chain from `start`, read from the .debug_jetline
 // section of `image` (its load bias `bias`), as trace_walk takes them:
-// onto `text`, or to the first frame outside Core when `text` is 0. With no
-// `start` (0), only the function whose code holds runtime address `target`.
-// A release image keeps no table, so its walk for a `-->` line writes the
-// chain for `jet crash` instead (trace_release_callers) and returns false.
-priv trace_frames: fn(text: I64, image: I64, bias: I64, start: I64, target: I64, with_function: Bool) -> Bool {
+// onto `lines`, or to the first frame outside Core when `lines` is 0. With
+// no `start` (0), only the function whose code holds runtime address
+// `target`. A release image keeps no table, so its walk for a `-->` line
+// writes the chain for `jet crash` instead (trace_release_callers) and
+// returns false.
+priv trace_frames: fn(lines: I64, image: I64, bias: I64, start: I64, target: I64, with_function: Bool) -> Bool {
     table := I64{0}
     table_end := I64{0}
     #Unsafe("image is a read-only mapping of this executable's ELF64 file; every offset read comes from its own header and section table") {
@@ -380,13 +471,13 @@ priv trace_frames: fn(text: I64, image: I64, bias: I64, start: I64, target: I64,
         }
     }
     if (table == I64{0}) {
-        if (text == I64{0} && start != I64{0}) {
+        if (lines == I64{0} && start != I64{0}) {
             trace_release_callers(image, bias, start, with_function)
         }
         return false
     }
     if (start == I64{0}) {
-        return trace_frame(text, table, table_end, wrapping(target - bias), with_function)
+        return trace_frame(lines, table, table_end, wrapping(target - bias), with_function)
     }
     frame := start
     steps := I64{0}
@@ -396,7 +487,7 @@ priv trace_frames: fn(text: I64, image: I64, bias: I64, start: I64, target: I64,
             address = os_load_i64(wrapping(frame + I64{8}))
         }
         // The call's own address, at link time.
-        if (address != I64{0} && trace_frame(text, table, table_end, wrapping(wrapping(address - I64{1}) - bias), with_function)) {
+        if (address != I64{0} && trace_frame(lines, table, table_end, wrapping(wrapping(address - I64{1}) - bias), with_function)) {
             return true
         }
         #Unsafe("each followed link ascends by less than 16 MiB or crosses a stack segment's bridge frame, so frame stays on this thread's chain") {
@@ -484,7 +575,8 @@ trace_build_id: fn(image: I64) -> I64 {
 }
 
 // The low `digits` (1 to 16) lowercase hex digits of `value`, most
-// significant first, eight to a write; no heap.
+// significant first, eight to a write; no heap. Its shifts stay below 64 by
+// mask, so none can stop the walk that writes them.
 trace_hex: fn(value: I64, digits: I64) {
     left := digits
     loop left > (I64{0}) {
@@ -492,9 +584,9 @@ trace_hex: fn(value: I64, digits: I64) {
         word := I64{0}
         k := I64{0}
         loop k < count {
-            nibble: (value >> wrapping(wrapping(wrapping(left - k) - I64{1}) * I64{4})) & I64{15}
+            nibble: (value >> (wrapping(wrapping(wrapping(left - k) - I64{1}) * I64{4}) & I64{63})) & I64{15}
             glyph: if (nibble < I64{10}) -> wrapping(nibble + I64{48}) else -> wrapping(nibble + I64{87})
-            word |= glyph << wrapping(k * I64{8})
+            word |= glyph << (wrapping(k * I64{8}) & I64{63})
             k = wrapping(k + I64{1})
         }
         trap_write_word(word, count)
@@ -503,12 +595,12 @@ trace_hex: fn(value: I64, digits: I64) {
 }
 
 // The Jet function whose code holds link-time address `pc`, from the table
-// [table, table_end): its line appended to `text`, or with no `text`, its
+// [table, table_end): its line added to `lines`, or with no `lines`, its
 // `-->` line written when its file is not Core's (Trap.jet
 // trap_user_frame). True when that line was written. The table's layout is
 // DebugPrune.jet's, and its lookup is report.S `find`. Nothing when no
 // function holds pc.
-priv trace_frame: fn(text: I64, table: I64, table_end: I64, pc: I64, with_function: Bool) -> Bool {
+priv trace_frame: fn(lines: I64, table: I64, table_end: I64, pc: I64, with_function: Bool) -> Bool {
     block := table
     loop wrapping(block + I64{20}) <= table_end {
         end: wrapping(wrapping(block + I64{4}) + trace_u32(block))
@@ -538,15 +630,15 @@ priv trace_frame: fn(text: I64, table: I64, table_end: I64, pc: I64, with_functi
                 name_at: wrapping(strings + name)
                 file_at: wrapping(strings + file)
                 line: trace_line(cursor, rows_end, low, high, pc)
-                if (text == I64{0}) {
+                if (lines == I64{0}) {
                     return trap_user_frame(name_at, trace_cstr_len(name_at, end), file_at, trace_cstr_len(file_at, end), line, with_function)
                 }
-                rt_text_append(text, name_at, trace_cstr_len(name_at, end))
-                rt_text_push_scalar(text, I64{9})
-                rt_text_append(text, file_at, trace_cstr_len(file_at, end))
-                rt_text_push_scalar(text, I64{9})
-                rt_text_push_number(text, line)
-                rt_text_push_scalar(text, I64{10})
+                trace_lines_append(lines, name_at, trace_cstr_len(name_at, end))
+                trace_lines_byte(lines, I64{9})
+                trace_lines_append(lines, file_at, trace_cstr_len(file_at, end))
+                trace_lines_byte(lines, I64{9})
+                trace_lines_number(lines, line)
+                trace_lines_byte(lines, I64{10})
                 return false
             }
             cursor = rows_end

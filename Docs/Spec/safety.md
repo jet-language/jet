@@ -2736,70 +2736,70 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 211,
+      "line": 212,
       "column": 5,
       "reason": "stub is a fresh private page that holds `mov rax, rbp; ret` and becomes read+execute before the call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 233,
+      "line": 234,
       "column": 9,
       "reason": "path is a fresh private page; the executable is mapped read-only and only read"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 271,
+      "line": 361,
       "column": 5,
       "reason": "the trace made this mapping and holds no pointer into it past this call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 360,
+      "line": 451,
       "column": 5,
       "reason": "image is a read-only mapping of this executable's ELF64 file; every offset read comes from its own header and section table"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 395,
+      "line": 486,
       "column": 9,
       "reason": "frame is an active caller's [saved rbp][return address] pair on this thread's stack"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 402,
+      "line": 493,
       "column": 9,
       "reason": "each followed link ascends by less than 16 MiB or crosses a stack segment's bridge frame, so frame stays on this thread's chain"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 437,
+      "line": 528,
       "column": 9,
       "reason": "frame is an active caller's [saved rbp][return address] pair on this thread's stack"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 450,
+      "line": 541,
       "column": 9,
       "reason": "each followed link ascends by less than 16 MiB or crosses a stack segment's bridge frame, so frame stays on this thread's chain"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 519,
+      "line": 611,
       "column": 9,
       "reason": "block + 12 is inside this block, which lies in the read-only table"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 612,
+      "line": 704,
       "column": 5,
       "reason": "at lies in a mapping the trace reads: the executable's read-only ELF header, program or section table, notes or location table, or the page the host's frames were written to"
     },
@@ -12069,16 +12069,16 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/Fault.jet | 101:5 | "stack is a fresh private mapping; sigaltstack copies its first three words (ss_sp, ss_flags, ss_size)" |
 | Compiler | Compiler/JetRuntime/Source/Fault.jet | 121:5 | "stack is this thread's registered alternate stack, unused outside a handler; sigaltstack copies its first three words" |
 | Compiler | Compiler/JetRuntime/Source/Fault.jet | 155:5 | "rt_sigaction borrows the four-word SIG_DFL action on the stack; tgkill signals this thread" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 211:5 | "stub is a fresh private page that holds `mov rax, rbp; ret` and becomes read+execute before the call" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 233:9 | "path is a fresh private page; the executable is mapped read-only and only read" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 271:5 | "the trace made this mapping and holds no pointer into it past this call" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 360:5 | "image is a read-only mapping of this executable's ELF64 file; every offset read comes from its own header and section table" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 395:9 | "frame is an active caller's [saved rbp][return address] pair on this thread's stack" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 402:9 | "each followed link ascends by less than 16 MiB or crosses a stack segment's bridge frame, so frame stays on this thread's chain" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 437:9 | "frame is an active caller's [saved rbp][return address] pair on this thread's stack" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 450:9 | "each followed link ascends by less than 16 MiB or crosses a stack segment's bridge frame, so frame stays on this thread's chain" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 519:9 | "block + 12 is inside this block, which lies in the read-only table" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 612:5 | "at lies in a mapping the trace reads: the executable's read-only ELF header, program or section table, notes or location table, or the page the host's frames were written to" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 212:5 | "stub is a fresh private page that holds `mov rax, rbp; ret` and becomes read+execute before the call" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 234:9 | "path is a fresh private page; the executable is mapped read-only and only read" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 361:5 | "the trace made this mapping and holds no pointer into it past this call" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 451:5 | "image is a read-only mapping of this executable's ELF64 file; every offset read comes from its own header and section table" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 486:9 | "frame is an active caller's [saved rbp][return address] pair on this thread's stack" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 493:9 | "each followed link ascends by less than 16 MiB or crosses a stack segment's bridge frame, so frame stays on this thread's chain" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 528:9 | "frame is an active caller's [saved rbp][return address] pair on this thread's stack" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 541:9 | "each followed link ascends by less than 16 MiB or crosses a stack segment's bridge frame, so frame stays on this thread's chain" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 611:9 | "block + 12 is inside this block, which lies in the read-only table" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 704:5 | "at lies in a mapping the trace reads: the executable's read-only ELF header, program or section table, notes or location table, or the page the host's frames were written to" |
 | Compiler | Compiler/JetRuntime/Source/FaultAllocation.jet | 21:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/FaultSchedule.jet | 34:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/Fiber.jet | 127:5 | "the carrier saved its stack at carrier+16 when it switched to this fiber and runs nothing else until this switch resumes it" |
