@@ -5,8 +5,8 @@
 step digest: jet inspect digest --topic diagnostics
 env: NO_COLOR=1
 exit: 0
-stdout.after_first("```text\n").filter(!^= "code\t" "```").first_words: lines > 150 # original predicate
-for line stdout.after_first("```text\n").filter(!^= "code\t" "```").first_words of digest as r
+stdout.after_first("```text\n").filter(!^= "name\t" "```").first_words: lines > 150 # original predicate
+for line stdout.after_first("```text\n").filter(!^= "name\t" "```").first_words of digest as r
 step: jet explain {r}
 env: NO_COLOR=1
 exit: 0
