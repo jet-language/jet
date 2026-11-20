@@ -8,13 +8,13 @@ exit: 1 # sema sees both the held rights and the request
 stdout: empty
 stderr: ~ "Error: Jet.EffectWithoutAuthority: `authority` doesn't hold `FS.Write`, so `with` can't narrow to it" # E0712 at check time
 stderr: ~ "main.jet:3:23" # at the requested right
-stderr: ~ "Why: `authority` holds `FS.Read(\"repo\")` and `FS.Write(\".jet/build\")`, from `Authority.workspace()` on line 2; a scoped right never covers the bare one"
-stderr: ~ "Fix: Ask for a right `authority` holds, such as `FS.Write(\".jet/build\")`, or build the authority with `FS.Write`"
+stderr: ~ "Why: `authority` holds `FS.Read(\"repo\")` and `FS.Write(\".jet/build\")`, from `Authority.workspace()` on line 2; a scoped right never covers the bare one" # the held rights, where they come from
+stderr: ~ "Fix: Ask for a right `authority` holds, such as `FS.Write(\".jet/build\")`, or build the authority with `FS.Write`" # a held right to ask for instead
 step: jet build main.jet
 exit: 1 # the build is refused
-stderr: ~ "Error: Jet.EffectWithoutAuthority"
+stderr: ~ "Error: Jet.EffectWithoutAuthority" # the same check-time error
 step: jet run main.jet
 exit: 1 # the run is refused and nothing runs
 stdout: empty
-stderr: ~ "Error: Jet.EffectWithoutAuthority"
+stderr: ~ "Error: Jet.EffectWithoutAuthority" # the same check-time error
 stderr: !~ "Stop: " # never a run-time stop

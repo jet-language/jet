@@ -1,7 +1,7 @@
 # Claim: an `#FX` region erased by `#Off` checks nothing, so only the active region's effect report remains.
-# Both functions also narrow a workspace authority to the bare `FS.Write`, which each reports as well, so the count is of the region report's own text.
+# Both functions also narrow a workspace authority to a right it holds, which check accepts, so the region report is the one error.
 fixture: ErasedAuthorityScopeDoesNotSurviveErasure/Input
 step: jet check run.jet
 exit: nonzero # expect_err
 stderr: count "`#FX` region uses the effect" = 1 # only the active region reports
-stderr: count "doesn't hold `FS.Write`, so `with` can't narrow to it" = 2 # each function's narrowing
+stderr: count "Error: Jet.EffectWithoutAuthority" = 1 # and nothing else does
