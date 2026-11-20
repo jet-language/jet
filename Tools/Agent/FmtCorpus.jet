@@ -63,8 +63,10 @@
 // - parse lesson: a Tests/UI fixture whose snapshot shows an error the
 //   parser reports (a Compiler/Prelude/Diagnostics.jet row whose `stage:`
 //   names `.Parse`), such as a function with no body, or a checker error
-//   `jet fmt` repairs (FMT_REPAIRED_ERRORS); `jet fmt` repairs some of those
-//   on purpose, and the fixture's bytes are the lesson;
+//   `jet fmt` repairs (FMT_REPAIRED_ERRORS), and the fixtures of a case whose
+//   `stderr:` expects one of those errors; `jet fmt` repairs some of those on
+//   purpose (`#[Codable]` to `#Codable`, `#Fast()` to `#Fast`), and the
+//   fixture's bytes are the lesson;
 // - does not parse: a negative fixture `jet fmt` refuses, found while it runs.
 //
 // The formatter runs over the corpus in batches of BATCH sources, FMT_JOBS
@@ -463,6 +465,11 @@ add_fmt_case_inputs: fn(path: String, text: String, out: &Exclusions) {
     }
 }
 
+// The git grep -E pattern of a case line that expects one of the errors `types`.
+case_lesson_grep: fn(types: [String]) -> String Never! {
+    "^stderr:.*Jet\\.({types.join("|")})([^A-Za-z0-9_]|$)"
+}
+
 // The diagnostic types `rows` (DIAGNOSTIC_ROWS) says the parser reports: each
 // `Name: struct {` whose `stage:` names `.Parse`.
 parse_diagnostic_types: fn(rows: String) -> [String] Never! {
@@ -637,6 +644,11 @@ exclusions: fn(root: String) -[Exec, FS.Read, Time.Wait]> Exclusions CorpusError
         argv: [String]{"git", "grep", "-l", "-I", "-E", "-e", lesson_grep, "--", UI_TREE}
         loop path in git_lines(root, argv, [Int]{0, 1}) ?? return Err(err) {
             note_parse_lesson(path, out)
+        }
+        loop path in grep_roots(root, [String]{}, case_lesson_grep(types)) ?? return Err(err) {
+            if !path.ends_with(".case") -> next
+            text: read_tracked(root, path) ?? return Err(err)
+            loop fixture in case_fixtures(path, text) -> note(out.trees, fixture, RULE_PARSE_LESSON)
         }
     }
     Ok(out)
@@ -2106,6 +2118,7 @@ run: fn() {
     assert_eq(exclusion_rule("Tests/UI/e0081_fn_without_body.jet", out), RULE_PARSE_LESSON)
     assert_eq(exclusion_rule("Tests/UI/E0367_bare_case/main.jet", out), RULE_PARSE_LESSON)
     assert_eq(exclusion_rule("Tests/UI/bare_error_mark_is_not_a_contract.jet", out), "")
+    assert_eq(case_lesson_grep([String]{"StackedRuleLines", "MarkerArgumentMismatch"}), "^stderr:.*Jet\\.(StackedRuleLines|MarkerArgumentMismatch)([^A-Za-z0-9_]|$)")
 }
 
 #Test("a meaning change is the internal error that names the source") {
