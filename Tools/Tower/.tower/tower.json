@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112689,
+    "rev": 112690,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -73805,6 +73805,11 @@
         {
           "at": "2026-11-20",
           "by": "Main",
+          "text": "c4 triage continued: the BackendBattery root is found (Errors3202-shared-point-counts). A declared point (web.requests) is a process cell, but EventHooks.jet:168 counted its hook refs with a plain read-modify-write, so concurrent runs lost an update and freed the hook box (faults at 0x40 and 0x0). ba4ea3532d (p340) exposed it. It was found by gate bisect (p339 12/12 clean, p340 6/12 crash), then the `jet run --checked-alloc=true` fault backtrace (handle Server.jet:208 <- Web.jet:846 requests.run <- __dispatch Server.jet:1165), then reading the code. jet debug did NOT help: looping `printf \"c\\nbt\\ndisas\\nregs\\ntasks\\nquit\\n\" | jet debug .jet/build/pt` until a fault (try 22) printed only \"Program stopped by SIGSEGV\" and ended the session with no prompt. A signal stop must keep the session for bt, regs and tasks (routed to Lens, #6841). c4 stays open: its proof is a triage the jet tools carry, and they could not here."
+        },
+        {
+          "at": "2026-11-20",
+          "by": "Main",
           "text": "c4 triage (gate-p379, dev 6c1c887a39) of golden Tests/Run/Net/BackendBattery/run.jet o0 ERROR \"child terminated by signal\" (failing since p340). Commands: (1) `jet run run.jet` x3 gives rc 139 once, no Jet fault report; (2) `printf \"continue\\nbt\\nlocals\\nquit\\n\" | jet debug run.jet` x8 never faulted; (3) `jet run --observe run.jet` gives rc 139 on run 3, with no .jet/dumps dump and no report; (4) `jet run --record=bbN run.jet` gives on run 3 `Fault [SIGSEGV]: invalid memory access at address 0x0`, `Backtrace: ??`, then Jet.ReplayFinalizeFailed \"ended (status 139) without writing its sync-order log\". Every fault is inside backend.load_test (Jetpack/Provider/Batteries/backend/backend.jet:404, 32 tasks x 1000 HTTP requests to the in-process server) after `order:202`. Defects: a null dereference in safe Jet (I1, routed to Errors3202); the fault backtrace is \"??\"; a crashing --record run loses its replay; an observed run that segfaults writes no dump and no report (all three routed to Lens under #6841). c4 stays open until the triage names the root with jet debug."
         },
         {
@@ -74058,7 +74063,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-20T22:00:51.727Z",
+      "updated": "2026-11-20T22:29:57.995Z",
       "updatedBy": "Main",
       "criteriaLastN": 22
     }
@@ -133660,6 +133665,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-20T22:29:57.995Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00ni11n",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-20T22:15:00.136Z",
       "by": "Main",
