@@ -110,6 +110,13 @@ C_ACCEPT_ONCE_NS: 5000000000
 
 C_ACCEPT_POLL_NS: 50000000
 
+// How long, and for how many bytes, a closing plain connection reads and
+// drops what its client still sends before its socket closes
+// (linger_close).
+C_LINGER_NS: 2000000000
+
+C_LINGER_BYTES: 262144
+
 C_MAX_REQUEST_ID_BYTES: 128
 
 // Connections served at once, and from one peer address: one past either is
@@ -680,13 +687,7 @@ priv peer_leave: fn(state: &HTTPServerState, peer: String) Never! {
 // count given back, all shielded from cancellation so a signal lets the
 // request finish and the count reach the drain.
 priv serve_admitted: fn(state: Shared<HTTPServerState>, handoff: Shared<[TCPStream]>, peer: String, tls: HTTPServerTLS?, mux: HTTPMux, deadline: Duration?) -[Net, FS.Read, Time]> Never! {
-    #Shield {
-        answered: serve_taken(state, handoff, tls, mux, deadline, false)
-        guard := state.guard_edit()
-        guard.value.live -= 1
-        if answered -> guard.value.completed += 1
-        peer_leave(guard.value, peer)
-    }
+    #Shield { serve_taken(state, handoff, peer, tls, mux, deadline, false) }
 }
 
 // A connection taken once accepting work stopped: within the limits, its own
@@ -707,20 +708,35 @@ priv take_while_draining: fn(server: HTTPServer, stream: &&TCPStream) -[Net, FS.
 // A connection taken while draining: its request is answered 503, or by the
 // readiness probe, and its count given back.
 priv serve_refusing: fn(state: Shared<HTTPServerState>, handoff: Shared<[TCPStream]>, peer: String, tls: HTTPServerTLS?, mux: HTTPMux, deadline: Duration?) -[Net, FS.Read, Time]> Never! {
-    #Shield {
-        _: serve_taken(state, handoff, tls, mux, deadline, true)
-        guard := state.guard_edit()
-        guard.value.refusing -= 1
-        peer_leave(guard.value, peer)
-    }
+    #Shield { serve_taken(state, handoff, peer, tls, mux, deadline, true) }
 }
 
-// The handed-off stream's handshake and request; true when it was answered.
-// A `refusing` connection, taken while draining, is answered 503.
-priv serve_taken: fn(state: Shared<HTTPServerState>, handoff: Shared<[TCPStream]>, tls: HTTPServerTLS?, mux: HTTPMux, deadline: Duration?, refusing: Bool) -[Net, FS.Read, Time]> Bool Never! {
-    stream: taken_stream(handoff) ?? return false
-    conn: accept_conn(stream, tls, deadline) ?? return false
-    serve_connection(conn, mux, deadline, Val(state), refusing)
+// The handed-off stream's handshake and request, then its count given back
+// (settle), and only then its plain socket's lingering close. A `refusing`
+// connection, taken while draining, is answered 503.
+priv serve_taken: fn(state: Shared<HTTPServerState>, handoff: Shared<[TCPStream]>, peer: String, tls: HTTPServerTLS?, mux: HTTPMux, deadline: Duration?, refusing: Bool) -[Net, FS.Read, Time]> Never! {
+    stream: taken_stream(handoff) ?? {
+        settle(state, peer, refusing, false)
+        return
+    }
+    conn: accept_conn(stream, tls, deadline) ?? {
+        settle(state, peer, refusing, false)
+        return
+    }
+    served: serve_connection(conn, mux, deadline, Val(state), refusing)
+    settle(state, peer, refusing, served.answered)
+    if served.lingers && conn.tcp == .Val(plain) -> linger_close(plain)
+}
+
+// One connection's count given back: a `refusing` one's, else a live one's,
+// which completed when it was answered.
+priv settle: fn(state: Shared<HTTPServerState>, peer: String, refusing: Bool, answered: Bool) Never! {
+    guard := state.guard_edit()
+    if refusing -> guard.value.refusing -= 1 else {
+        guard.value.live -= 1
+        if answered -> guard.value.completed += 1
+    }
+    peer_leave(guard.value, peer)
 }
 
 // A connection over the limits: a plain one is told 503, then closed.
@@ -866,7 +882,9 @@ priv server_serve_once: fn(listener: TCPListener, mux: HTTPMux) -[Net, FS.Read, 
         return Err(.IO{operation: "accept: {err}"})
     }
     peer: peer_host(stream)
-    _: serve_connection(HTTPConn{tcp: Val(stream), tls: None, peer: peer}, mux, None, None, false)
+    conn: HTTPConn{tcp: Val(stream), tls: None, peer: peer}
+    served: serve_connection(conn, mux, None, None, false)
+    if served.lingers && conn.tcp == .Val(plain) -> linger_close(plain)
     Ok()
 }
 
@@ -1714,15 +1732,22 @@ priv accept_conn: fn(stream: &&TCPStream, tls: HTTPServerTLS?, deadline: Duratio
     Val(HTTPConn{tcp: Val(stream), tls: None, peer: peer})
 }
 
-// Whether the connection's request was answered by the mux. A request the
-// handler upgraded to a WebSocket gets no HTTP response, and its socket is
-// left to the upgraded connection rather than closed here; once that
-// handler returns, what `__on_upgraded` left on `mux` runs. When the drain of
-// `server` ran out while the handler ran, the connection was reported
-// canceled, so its response is not sent and the socket just closes. The
-// server answers the readiness probe, and a `refusing` connection, itself
-// (server_answer).
-priv serve_connection: fn(stream: HTTPConn, mux: HTTPMux, deadline: Duration?, server: Shared<HTTPServerState>?, refusing: Bool) -[Net, FS.Read, Time]> Bool Never! {
+// What serving one connection did: whether its request was answered by the
+// mux, and whether its plain socket is left open for the caller's
+// linger_close, which runs once the connection's count is given back.
+priv HTTPServed: struct {
+    answered: Bool,
+    lingers: Bool,
+}
+
+// Serve the connection's request. A request the handler upgraded to a
+// WebSocket gets no HTTP response, and its socket is left to the upgraded
+// connection rather than closed here; once that handler returns, what
+// `__on_upgraded` left on `mux` runs. When the drain of `server` ran out
+// while the handler ran, the connection was reported canceled, so its
+// response is not sent and the socket just closes. The server answers the
+// readiness probe, and a `refusing` connection, itself (server_answer).
+priv serve_connection: fn(stream: HTTPConn, mux: HTTPMux, deadline: Duration?, server: Shared<HTTPServerState>?, refusing: Bool) -[Net, FS.Read, Time]> HTTPServed Never! {
     budget: if deadline == .Val(limit) -> limit.ns else -> C_IO_NS
     wire := HTTPWire{buffer: [U8]{}, end_ns: rt.clock_mono_ns() + budget}
     answered := false
@@ -1766,18 +1791,56 @@ priv serve_connection: fn(stream: HTTPConn, mux: HTTPMux, deadline: Duration?, s
             }
         }
     }
-    // A TLS stream sends close_notify and closes the socket it owns.
-    if stream.tls == .Val(secure) -> secure.close()
-    if !upgraded && stream.tcp == .Val(plain) {
-        if plain.close() == {
-            .Ok(_) -> {}
-            .Err(_) -> {}
-        }
-    }
     // An answered request is a causal-profile progress point; outside
     // `--lens=causal` it records nothing.
     if answered -> core.perf.__progress("request")
-    answered
+    // A TLS stream sends close_notify and closes the socket it owns.
+    if stream.tls == .Val(secure) -> secure.close()
+    lingers := false
+    if !upgraded && stream.tcp == .Val(plain) {
+        // Past the drain, the socket closes at once.
+        if drain_ended(server) {
+            if plain.close() == {
+                .Ok(_) -> {}
+                .Err(_) -> {}
+            }
+        } else { lingers = true }
+    }
+    HTTPServed{answered: answered, lingers: lingers}
+}
+
+// Close a plain connection the server is done with as RFC 9112 section 9.6
+// asks: end the server's side first, so the client reads the whole response
+// and its end, then read and drop what the client still sends until it ends
+// its own side, at most C_LINGER_BYTES bytes within C_LINGER_NS, and only
+// then close the socket. A socket closed with unread bytes (the rest of a
+// pipelined batch, a body no handler read) or with bytes still arriving
+// makes the kernel answer with a reset, which can discard the response
+// before the client reads it and fails the client's later writes and its
+// half-close. A client that keeps sending past either bound gets that reset.
+// The connection's count is given back before it lingers, so neither the
+// drain nor the per-peer limit waits on a client slow to end its side.
+priv linger_close: fn(plain: TCPStream) -[Net, Time.Wait]> Never! {
+    if plain.shutdown(.Write) == {
+        .Ok(_) -> {
+            end_ns: rt.clock_mono_ns() + C_LINGER_NS
+            dropped := [U8]{}
+            read := 0
+            loop read < C_LINGER_BYTES {
+                remaining: end_ns - rt.clock_mono_ns()
+                if remaining <= 0 -> break
+                count: plain.read_into(dropped, C_READ_BYTES, deadline: Duration{ns: remaining}) ?? break
+                if count == 0 -> break
+                read += count
+                dropped.clear()
+            }
+        }
+        .Err(_) -> {}
+    }
+    if plain.close() == {
+        .Ok(_) -> {}
+        .Err(_) -> {}
+    }
 }
 
 // What the server answers itself instead of the mux: `GET /__jet/ready`, 200

@@ -5428,6 +5428,13 @@ IR_ROUTES_NATIVE_INDEX: #run { [String]{"jet_bit_set_has", "jet_bitset_add", "je
 // their List as Frozen, so the bytes are read in place, never copied.
 IR_ROUTES_FROZEN: #run { [String]{"jet_sys_image_part_raw"} }
 
+// The routes a lowering of their own calls with inputs it builds from the
+// Core call's, not its arguments one for one: vault.current adds the tag
+// of its key type (ir_core_vault_current), plugin.load the guest entry and
+// each Limits field (ir_plugin_load). IR Lint's registry check (Lint.jet
+// ir_lint_core_routes) leaves their arity to those lowerings.
+IR_ROUTES_EXPANDED: #run { [String]{"jet_vault_current_impl", "jet_plugin_load"} }
+
 // Whether the builder lowers a Core call of route `name` itself, with no
 // runtime or environment route: an inline or leaf route, a special of
 // ir_core_call (crypto.wipe and a Secret's keep, channels and timer

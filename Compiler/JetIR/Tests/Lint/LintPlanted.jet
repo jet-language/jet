@@ -6,7 +6,7 @@
 // ir_opt_function runs after each pass), and the Core call registry names
 // only routes the route table has.
 //
-//     cd Compiler/JetIR/Tests/Lint && jet run LintPlanted.jet
+//     cd Compiler/JetIR/Tests/Lint && jet run LintPlanted.jet   (or jet test)
 //
 // With `-- --route-gaps <runtime.exports>` it prints the route lint's rows
 // instead (ir_lint_route_gaps): every R4 gap against that runtime's exports.
@@ -613,31 +613,13 @@ lp_lint: fn(plant: String) -> [IRLintFinding] {
 }
 
 // The Core rows whose arity disagrees with their runtime route (IR Lint
-// rule core.arity). A Core source function such as
-// core.data.loader.authority is a source-owned row with no route, so it is
-// none of them. `vault.current<T>(name)` is one: ir_core_vault_current
-// (BuildRoutes.jet) hands its route the name and the tag of T, two arguments
-// for the row's one. The list is exact, so a new row fails here until it is
-// listed.
-LP_CORE_ARITY: #run { [String]{"core.crypto.vault.current"} }
-
-// The registry rows that differ from LP_CORE_ARITY, each printed.
+// rule core.arity), each printed; there are none. A Core source function
+// such as core.data.loader.authority is a source-owned row with no route,
+// and a route whose lowering builds its inputs (BuildRoutes.jet
+// IR_ROUTES_EXPANDED: vault.current, plugin.load) is left to it.
 lp_core_failures: fn(core: [IRLintFinding]) -> Int {
-    failures := 0
-    seen := [String]{}
-    loop finding in core {
-        if LP_CORE_ARITY.contains(finding.function) -> seen.push(finding.function) else {
-            print("core row not listed: {finding.function}: {finding.message}")
-            failures += 1
-        }
-    }
-    loop known in LP_CORE_ARITY {
-        if !seen.contains(known) {
-            print("listed core row fixed: {known}")
-            failures += 1
-        }
-    }
-    failures
+    loop finding in core -> print("core row off its route: {finding.function}: {finding.message}")
+    core.len()
 }
 
 lp_status: fn() -> Int {
@@ -675,14 +657,18 @@ lp_status: fn() -> Int {
         print("FAIL pass name:\n{ir_lint_text(report.lint)}")
         failures += 1
     }
-    core: ir_lint_core_routes()
-    core_failures: lp_core_failures(core)
+    core_failures: lp_core_failures(ir_lint_core_routes())
     if core_failures > 0 {
         print("FAIL core routes ({core_failures} rows above)")
         failures += 1
-    } else { print("ok core routes ({core.len()} listed)") }
+    } else { print("ok core routes") }
     print(if failures == 0 -> "LINT PLANTED PASS" else -> "LINT PLANTED FAIL ({failures})")
     if failures == 0 -> 0 else -> 1
+}
+
+// The packages suite's row: `jet test Compiler/JetIR/Tests/Lint`.
+#Test("IR Lint gives each planted bug its rule, names the breaking pass and finds the Core registry on its routes") {
+    assert_eq(lp_status(), 0)
 }
 
 // The route lint's report: every R4 gap against the runtime export list at

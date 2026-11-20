@@ -1136,9 +1136,11 @@ kit_steps_one_of: fn(id: String, directory: String, snapshots: String, actual: S
 }
 
 // A failed step carries its command's streams as the row's diff, so a suite
-// report shows why it failed: stderr's last lines, where a failing command
-// reports its error, without the counter lines a `JET_PHASE_COUNTERS` run
-// prints as it goes, then stdout's first lines.
+// report shows which step failed and why: the step's label and command,
+// stderr's last lines, where a failing command reports its error, without
+// the counter lines a `JET_PHASE_COUNTERS` run prints as it goes, then
+// stdout's first lines. A step that failed with both streams empty still
+// names itself.
 KIT_STEPS_STREAM_STDERR_LINES: 24
 
 KIT_STEPS_STREAM_LINES: 32
@@ -1146,10 +1148,12 @@ KIT_STEPS_STREAM_LINES: 32
 KIT_STEPS_PHASE_COUNTER_PREFIX: "JET_PHASE_COUNTERS "
 
 kit_steps_streams_verdict: fn(verdict: &&KitVerdict, context: KitStepCtx, step: KitStep, result: KitRun) -> KitVerdict {
-    if (verdict.status != "FAIL" && verdict.status != "ERROR") || verdict.diff != "" || (result.stderr == "" && result.stdout == "") {
+    if (verdict.status != "FAIL" && verdict.status != "ERROR") || verdict.diff != "" {
         return verdict
     }
-    out := "--- streams/{context.id}: `{step.argv.join(" ")}` exit {result.code}\n"
+    named: if step.label == "" -> "" else -> "step {step.label}: "
+    out := "--- streams/{context.id}: {named}`{step.argv.join(" ")}` exit {result.code}\n"
+    if result.stderr == "" && result.stdout == "" -> out = "{out}(stdout and stderr empty)\n"
     errors := [String]{}
     counters := 0
     loop line in result.stderr.split("\n") {

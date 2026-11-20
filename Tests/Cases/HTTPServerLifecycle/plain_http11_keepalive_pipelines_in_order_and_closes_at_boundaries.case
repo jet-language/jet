@@ -1,6 +1,9 @@
 # Port of tests/http_server_lifecycle.rs:1269-1431; reachable Core raw-wire claims.
 # The server answers one request per connection, so each pipelined exchange
-# gets its first response only (core-library.md, core.http.server).
+# gets its first response only (core-library.md, core.http.server). Before
+# its socket closes, the server ends its side and drops what the client
+# still sends, within a time and a byte bound, so the rest of a pipelined
+# batch never resets the connection under the client's half-close.
 # PENDING-SEAM(http-server-options): omitted subclaims listed in the program.
 # PENDING-SAME-HEAD sockets; no fabricated stdout oracle.
 fixture: PlainHTTP11KeepalivePipelinesInOrderAndClosesAtBoundaries.fixture
