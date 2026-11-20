@@ -939,9 +939,12 @@ jet_cli_build_code_options: fn(file: String, set: [BuildSessionOption]) -> [Buil
     root: jet_cli_manifest_root(directory) ?? directory
     relative := file.copy()
     if file.starts_with("{root}/") -> relative = file.slice(root.len() + 1..<file.len())
+    // A dependency's site (`../tool/tool.jet`) resolves against the root's
+    // canonical path, which a relative root (`handed`, `.`) is not.
+    physical: build_files.realpath(root) ?? root
     loop option in set {
         site: if option.file == "" -> relative else -> option.file
-        source: build_files.read(jet_driver_physical_path(root, site)) ?? ""
+        source: build_files.read(jet_driver_physical_path(physical, site)) ?? ""
         bytes: source.bytes()
         end := option.start
         if end > bytes.len() -> end = bytes.len()
