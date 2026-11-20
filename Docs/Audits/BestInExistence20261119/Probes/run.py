@@ -8,7 +8,8 @@ JET is the compiler under review and REPO the checkout it was built from.
 The probes run the Tests/Cases fixtures and stdin files of REPO as they
 are, the programs beside this file, the 2026-11-18 review's probes and
 Tools/Perf/DebugLatency. AXIS is a name from AXES at the end (default:
-every one, in order). --lldb, --gdb and --perf name the peers a comparison
+every one, in order); the axes d2, d3, d4, d6 and generic are Run.jet's,
+beside this file. --lldb, --gdb and --perf name the peers a comparison
 runs on the same image and host; without one, that comparison says it was
 skipped.
 
@@ -401,136 +402,12 @@ def d1():
     run(argv, work, limit=3600)
 
 
-def d2():
-    heading("D2: record, replay, reverse, why")
-    work = fixture("Debug", "ReplayReverse")
-    run([JET, "run", "--record=back", "prog.jet"], work)
-    for case in ("replay_reverse_steps_back_by_line_call_and_caller", "replay_reverse_continue_goes_back_to_a_watch_hit",
-                 "replay_why_names_the_last_write"):
-        note(case)
-        console([JET, "debug", "--replay=back", "prog.jet"], work, stdin_lines("Debug", case))
-    note("a logpoint added in a replay prints its hits from the recording, as Replay.io's print statements do")
-    console([JET, "debug", "--replay=back", "prog.jet"], work, ['log prog.jet:21 "k={k} d={d} total={total}"', "c"])
-    note("replay_why_recovers_an_optimized_away_local: an -O2 recording and image")
-    run([JET, "run", "-O2", "--record=fast", "prog.jet"], work)
-    run([JET, "build", "-O2", "prog.jet"], work)
-    console([JET, "debug", "--replay=fast", ".jet/build/prog", "--break", "prog.jet:21"], work,
-            stdin_lines("Debug", "replay_why_recovers_an_optimized_away_local"))
-    note("replay_threads_across_tiers: one -O2 recording of tasks sharing channels and a lock, replayed at -O0, -O1 and -O2")
-    tiers = fixture("Debug", "ReplayThreadsAcrossTiers")
-    run([JET, "run", "-O2", "--record=tiers", "prog.jet"], tiers)
-    run([JET, "debug", "--replay=tiers", "prog.jet"], tiers, stdin="")
-    for level in ("-O1", "-O2"):
-        run([JET, "build", level, "prog.jet"], tiers)
-        run([JET, "debug", "--replay=tiers", ".jet/build/prog"], tiers, stdin="")
-    note("the cost of recording: record_cost.jet times its own work, plain and recorded, -O2, warm build")
-    work = probes("record_cost.jet")
-    run([JET, "build", "-O2", "record_cost.jet"], work)
-    for mode, size in (("cpu", "36"), ("sync", "20000")):
-        times = {"plain": [], "recorded": []}
-        for round_ in range(1, 3):
-            plain = run([JET, "run", "-O2", "record_cost.jet", "--", mode, size], work)
-            times["plain"].append(took_ns(plain.text))
-            name = "cost-{}-{}".format(mode, round_)
-            recorded = run([JET, "run", "-O2", "--record=" + name, "record_cost.jet", "--", mode, size], work)
-            times["recorded"].append(took_ns(recorded.text))
-            times.setdefault("cpu/wall", []).append(round(recorded.cpu / recorded.wall, 2))
-        replay = os.path.join(work, ".jet", "replays", name + ".jetproof-replay")
-        size_bytes = os.path.getsize(replay) if os.path.exists(replay) else None
-        best = {key: min(value for value in values if value) for key, values in times.items() if key != "cpu/wall" and any(values)}
-        ratio = best["recorded"] / best["plain"] if len(best) == 2 else None
-        print("record cost, {}: plain {} ns, recorded {} ns (the faster of two each): recorded/plain = {}; recorded runs' cpu/wall {}; replay file {} bytes".format(
-            mode, best.get("plain"), best.get("recorded"), "{:.3f}".format(ratio) if ratio else "?", times["cpu/wall"], size_bytes))
-        print()
-    note("replaying the sync recording to its end")
-    run([JET, "debug", "--replay=cost-sync-2", "record_cost.jet"], work, stdin="c\n")
-
-
-def d3():
-    heading("D3: Jet-typed values in an -O2 image, inlined frames included")
-    work = fixture("Debug", "LldbShowsO2InlinedFramesAndTheirLocals")
-    run([JET, "build", "-O2", "prog.jet"], work)
-    console([JET, "debug", ".jet/build/prog", "--break", "prog.jet:6"], work, stdin_lines("Debug", "native_shows_o2_inlined_frames_and_their_locals"))
-    if "lldb" in PEERS:
-        note("the peer: lldb on the same -O2 image")
-        run([PEERS["lldb"], "-b", "-o", "breakpoint set --file prog.jet --line 6", "-o", "run", "-o", "bt", "-o", "frame variable",
-             "-o", "process kill", ".jet/build/prog"], work, peer=True)
-    if "gdb" in PEERS:
-        note("the peer: gdb on the same -O2 image")
-        run([PEERS["gdb"], "-batch", "-ex", "break prog.jet:6", "-ex", "run", "-ex", "bt", "-ex", "info locals", "-ex", "kill",
-             ".jet/build/prog"], work, peer=True)
-    note("print_in_an_inlined_frame: evaluation in an -O2 inlined frame")
-    work = fixture("Debug", "PrintInAnInlinedFrame")
-    run([JET, "build", "-O2", "prog.jet"], work)
-    console([JET, "debug", ".jet/build/prog", "--break", "prog.jet:7"], work, stdin_lines("Debug", "print_in_an_inlined_frame"))
-    note("a loop's locals at each hit in an -O2 image (ReplayReverse's prog.jet, line 21: k counts 0, 1, 2), jet then the peers")
-    work = fixture("Debug", "ReplayReverse")
-    run([JET, "build", "-O2", "prog.jet"], work)
-    console([JET, "debug", ".jet/build/prog", "--break", "prog.jet:21"], work, ["c", "c", "c"])
-    if "lldb" in PEERS:
-        run([PEERS["lldb"], "-b", "-o", "breakpoint set --file prog.jet --line 21", "-o", "run", "-o", "frame variable", "-o", "continue",
-             "-o", "frame variable", "-o", "continue", "-o", "frame variable", "-o", "process kill", ".jet/build/prog"], work, peer=True)
-    if "gdb" in PEERS:
-        run([PEERS["gdb"], "-batch", "-ex", "break prog.jet:21", "-ex", "run", "-ex", "info locals", "-ex", "continue", "-ex", "info locals",
-             "-ex", "continue", "-ex", "info locals", "-ex", "kill", ".jet/build/prog"], work, peer=True)
-    note("a Shared value at -O0 (the same program's `tally`, a Shared Score)")
-    console([JET, "debug", "prog.jet", "--break", "prog.jet:21"], work, ["print tally", "print tally.count", "locals", "c", "c", "c"])
-
-
-def d4():
-    heading("D4: expression evaluation")
-    for name, case in (("PrintEvaluatesCompiledExpressions", "print_evaluates_compiled_expressions"),
-                       ("PrintAFallibleCallShowsOkOrErr", "print_a_fallible_call_shows_ok_or_err"),
-                       ("PrintRefusesEffectfulExpression", "print_refuses_effectful_expression")):
-        note(case)
-        console([JET, "debug", "prog.jet"], fixture("Debug", name), stdin_lines("Debug", case))
-    note("new_operations_at_a_stop_evaluate")
-    work = fixture("Debug", "NewOperationsAtAStop")
-    run([JET, "build", "-O0", "prog.jet"], work)
-    console([JET, "debug", ".jet/build/prog", "--break", "prog.jet:7"], work, stdin_lines("Debug", "new_operations_at_a_stop_evaluate"))
-
-
 def d5():
     heading("D5: watches")
     for name, case in (("WatchStopsAtTheChangingWrite", "watch_stops_at_the_changing_write"),
                        ("WatchFollowsAReallocatedList", "watch_follows_a_reallocated_list")):
         note(case)
         console([JET, "debug", "prog.jet"], fixture("Debug", name), stdin_lines("Debug", case))
-
-
-def d6():
-    heading("D6: conditions and logpoints")
-    for name, case in (("ConditionalBreakpointRunsInProcess", "conditional_breakpoint_runs_in_process"),
-                       ("PlacedLogpointRunsInTheProgram", "placed_logpoint_runs_in_the_program")):
-        note(case)
-        console([JET, "debug", "prog.jet"], fixture("Debug", name), stdin_lines("Debug", case))
-    note("hits.jet: a million hits of line 15, plain, under a placed logpoint and under a condition that never holds (-O0 image)")
-    work = probes("hits.jet")
-    run([JET, "build", "-O0", "hits.jet"], work)
-    plain = run([".jet/build/hits", "1000000"], work)
-    logged, _ = console([JET, "debug", ".jet/build/hits", "--", "1000000"], work, ['log hits.jet:15 "s{step}"', "c"])
-    held, _ = console([JET, "debug", ".jet/build/hits", "--", "1000000"], work, ["break hits.jet:15 if i == -1", "c"])
-    base = took_ns(plain.text)
-    for label, text in (("placed logpoint", logged), ("in-process condition", held)):
-        spent = took_ns(text)
-        if base and spent:
-            print("{}: {} ns per hit over the plain run ({} ns against {} ns for 1,000,000 hits)".format(
-                label, round((spent - base) / 1e6, 1), spent, base))
-    print()
-    for peer, argv in (("lldb", lambda tool: [tool, "-b", "-o", "breakpoint set --file hits.jet --line 15 --condition 'i == -1'", "-o", "run",
-                                              ".jet/build/hits", "--", "100000"]),
-                       ("gdb", lambda tool: [tool, "-batch", "-ex", "break hits.jet:15 if i == -1", "-ex", "run", "--args",
-                                             ".jet/build/hits", "100000"])):
-        if peer not in PEERS:
-            note("{} not given: its condition per hit is not measured".format(peer))
-            continue
-        note("the peer: {}'s condition on the same image, 100,000 hits".format(peer))
-        small = run([".jet/build/hits", "100000"], work)
-        result = run(argv(PEERS[peer]), work, peer=True, limit=900)
-        spent, base = took_ns(result.text), took_ns(small.text)
-        if spent and base:
-            print("{} condition: {} ns per hit over the plain run".format(peer, round((spent - base) / 1e5, 1)))
-            print()
 
 
 def d7():
@@ -660,18 +537,6 @@ def d11():
     print("the target after the session: {}".format("running" if target.poll() is None else "ended {}".format(target.returncode)))
     print()
     stop(target)
-
-
-def generic():
-    heading("Generic instances: a breakpoint in a generic module's instance at -O0, -O1 and -O2")
-    work = fixture("Debug", "BreakpointInGenericModuleInstance")
-    first, step = stdin_lines("Debug", "breakpoint_in_generic_module_instance"), stdin_lines("Debug", "breakpoint_in_generic_module_instance_step")
-    console([JET, "debug", "prog.jet", "--break", "prog.jet:7"], work, first)
-    console([JET, "debug", "prog.jet", "--break", "prog.jet:20"], work, step)
-    for level in ("-O1", "-O2"):
-        run([JET, "build", level, "prog.jet"], work)
-        console([JET, "debug", ".jet/build/prog", "--break", "prog.jet:7"], work, first)
-        console([JET, "debug", ".jet/build/prog", "--break", "prog.jet:20"], work, step)
 
 
 def p1():
@@ -832,8 +697,8 @@ def p10():
     stop(process)
 
 
-AXES = {"tools": tools, "d1": d1, "d2": d2, "d3": d3, "d4": d4, "d5": d5, "d6": d6, "d7": d7, "d8": d8, "d9": d9, "d10": d10,
-        "d11": d11, "generic": generic, "p1": p1, "p2": p2, "p3": p3, "p4": p4, "p5": p5, "p6": p6, "p7": p7, "p8": p8, "p10": p10}
+AXES = {"tools": tools, "d1": d1, "d5": d5, "d7": d7, "d8": d8, "d9": d9, "d10": d10, "d11": d11,
+        "p1": p1, "p2": p2, "p3": p3, "p4": p4, "p5": p5, "p6": p6, "p7": p7, "p8": p8, "p10": p10}
 
 try:
     for axis in CHOSEN or list(AXES):
