@@ -527,7 +527,7 @@ jet_cli_provenance_text: fn(requirement: String, reports: [JetCLIProvenanceRepor
     out := "Provenance\nRequire: {requirement}\n"
     loop (index, report) in reports {
         if index > 0 -> out = "{out}\n"
-        evidence: if report.integrity.status == "enforced" -> ", E1204" else -> ""
+        evidence: if report.integrity.status == "enforced" -> ", Jet.StoreEntryTampered" else -> ""
         out = "{out}{report.name} {report.version}\n  Integrity    {report.integrity.value} — matches .jet/lock ({report.integrity.status}{evidence})\n"
         out = "{out}  Transparency {report.transparency.value} ({report.transparency.status})\n"
         out = "{out}  Publisher    {report.publisher.value} ({report.publisher.status})\n"

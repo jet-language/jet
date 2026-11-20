@@ -116,7 +116,8 @@ parse_allkeys: fn(source: String) -> [KeyRow] TableError! {
             if weight > limit -> return Err(fail("weight {weight} of '{line}' exceeds {limit}"))
             slot = if slot == 2 -> 0 else -> slot + 1
         }
-        rows.push(KeyRow{scalars: scalars, elements: elements, rank: key_rank(scalars)})
+        rank: key_rank(scalars)
+        rows.push(KeyRow{scalars: scalars, elements: elements, rank: rank})
     }
     if !version_seen -> return Err(fail("{ALLKEYS_PATH} has no @version line"))
     Ok(rows)

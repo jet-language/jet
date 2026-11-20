@@ -1,0 +1,470 @@
+// The Canvas debugger scenarios. Each drives the debug overlay of a running
+// `jet dev --canvas` page with real pointer gestures: a click on a node, its
+// context menu and the Debug Controls buttons. The page's own requests to the
+// production debug protocol are recorded with their answers, so a gesture
+// that never reaches the protocol, or an answer the page doesn't show, fails
+// the scenario.
+
+// The wait for one debug answer: the first one builds and starts the program.
+C_DEBUG_WAIT_MS: 90000
+
+// The node a scenario breaks on: its source span as a breakpoint anchor and
+// the line the span starts on.
+DebugTarget: struct {
+    node_id: String,
+    title: String,
+    anchor: String,
+    line: Int,
+}
+
+// Open the Canvas in a 1440x900 window with the page's debug requests
+// recorded and dismiss the first-run guide. An error the page throws while
+// loading fails the scenario.
+debug_prepare: fn(c: Ctx) Failure! {
+    set_viewport(c, 1440, 900)
+    add_preload(c, DEBUG_RECORDER)
+    if open_canvas(c) == .Err(problem) {
+        return Err(fail_with("{problem.message}; the page threw {js(eval(c, "window.__pageErrors || []"))}"))
+    }
+    thrown: js(eval(c, "window.__pageErrors || []"))
+    if thrown != "[]" -> return Err(fail_with("the Canvas threw while loading: {thrown}"))
+    if eval_bool(c, "!!document.getElementById('first-run-tour')?.classList.contains('is-open')") {
+        click_element(c, "document.getElementById('tour-dismiss')", "dismiss the first-run guide")
+    }
+    Ok()
+}
+
+// Before the page's first script runs (the page keeps the `fetch` it finds
+// then), wrap `fetch`: each request to the debug route is kept, in the order
+// the page sent it, with its HTTP status and its answer once that arrives.
+// Every error the page doesn't catch is kept too.
+DEBUG_RECORDER: """
+() => {{
+  window.__pageErrors = [];
+  addEventListener("error", (e) => window.__pageErrors.push(String(e.message) + " at " + e.filename + ":" + e.lineno));
+  addEventListener("unhandledrejection", (e) => window.__pageErrors.push("unhandled rejection: " + String(e.reason && (e.reason.stack || e.reason))));
+  const real = window.fetch.bind(window);
+  window.__debugProof = {{ requests: [] }};
+  window.fetch = async (input, init) => {{
+    const url = new URL(String(typeof input === "string" ? input : input.url), location.href);
+    if (!url.pathname.endsWith("/debug")) return real(input, init);
+    const entry = {{ request: JSON.parse((init && init.body) || "{{}}"), status: 0, response: null }};
+    window.__debugProof.requests.push(entry);
+    const response = await real(input, init);
+    try {{
+      const json = await response.clone().json();
+      entry.response = json && json.schema === "jet.report/v1" && json.canvas ? json.canvas : json;
+    }} catch (_) {{
+      entry.response = {{ unreadable: true }};
+    }}
+    entry.status = response.status;
+    return response;
+  }};
+}}
+"""
+
+// The page's debug state, the trace's newest lines and every recorded request:
+// what a failed wait reports.
+DEBUG_SNAPSHOT: """
+(() => {{
+  const s = window.__jetCanvasTest || {{}};
+  const o = s.debugOverlay;
+  return {{
+    liveness: s.debugLiveness,
+    session: s.debugSession,
+    overlay: o && {{ debug_overlay: o.debug_overlay, runtime_state: o.runtime_state, active_line: o.active_line, active_node_id: o.active_node_id, breakpoints: o.breakpoints, trace: (o.trace || []).slice(-6) }},
+    toast: s.lastToast,
+    requests: ((window.__debugProof || {{}}).requests || []).map((e) => ({{ request: e.request, status: e.status, session: e.response && e.response.session, line: e.response && e.response.overlay && e.response.overlay.active_line, message: e.response && e.response.message }}))
+  }};
+}})()
+"""
+
+// Wait until `predicate` holds on the page, where `s` is the Canvas test state;
+// a timeout reports the debug state.
+wait_debug: fn(c: Ctx, predicate: String, label: String) Failure! {
+    expression: "(() => {{ const s = window.__jetCanvasTest; return !!s && !!({predicate}); }})()"
+    if wait_js_ms(c, expression, label, C_DEBUG_WAIT_MS) == .Err(_) {
+        return Err(fail_with("timed out waiting for {label}: {js(eval(c, DEBUG_SNAPSHOT))}"))
+    }
+    Ok()
+}
+
+// Click the element `finder` (a JavaScript expression) evaluates to, at its
+// center, as a pointer does; it fails if the element isn't shown there.
+click_element: fn(c: Ctx, finder: String, label: String) Failure! {
+    found: eval(
+        c,
+        """
+        (() => {{
+          const el = ({finder});
+          const label = {q(label)};
+          if (!el) return {{ error: label + ": no such element" }};
+          el.scrollIntoView({{ block: "center", inline: "center" }});
+          const r = el.getBoundingClientRect();
+          if (r.width <= 0 || r.height <= 0) return {{ error: label + ": the element is not shown" }};
+          const x = r.left + r.width / 2, y = r.top + r.height / 2;
+          const hit = document.elementFromPoint(x, y);
+          if (!hit || (hit !== el && !el.contains(hit))) return {{ error: label + ": the element is covered by " + (hit ? hit.outerHTML.slice(0, 160) : "nothing") }};
+          return {{ x, y }};
+        }})()
+        """,
+    )
+    p: point_or_error(found)
+    click(c, p.x, p.y)
+}
+
+// The center of the node `node_id` in the shown graph, where a click reaches
+// the graph.
+node_center: fn(c: Ctx, node_id: String) -> Point Failure! {
+    found: eval(
+        c,
+        """
+        (() => {{
+          const s = window.__jetCanvasTest || {{}};
+          const b = (s.nodeBounds || {{}})[{q(node_id)}];
+          if (!b) return {{ error: "node not shown: " + {q(node_id)} }};
+          const view = document.getElementById("jet-canvas-view");
+          const r = view.getBoundingClientRect();
+          const x = r.left + b.x + b.w / 2, y = r.top + b.y + b.h / 2;
+          const hit = document.elementFromPoint(x, y);
+          if (!hit || (hit !== view && !view.contains(hit))) return {{ error: "node " + {q(node_id)} + " is out of view at " + Math.round(x) + "," + Math.round(y) + " (" + (hit ? hit.outerHTML.slice(0, 120) : "nothing") + ")" }};
+          return {{ x, y }};
+        }})()
+        """,
+    )
+    point_or_error(found)
+}
+
+// Show the graph titled `graph_title` and pick the node a breakpoint on `line`
+// marks: of its nodes with a source span starting on that line, the first
+// statement, as the debugger's active node is.
+debug_target: fn(c: Ctx, graph_title: String, line: Int) -> DebugTarget Failure! {
+    switch_graph(c, graph_title)
+    found: eval(
+        c,
+        """
+        (() => {{
+          const s = window.__jetCanvasTest;
+          const bytes = new TextEncoder().encode(s.sourceText);
+          const lineOf = (at) => {{ let line = 1; for (let i = 0; i < Math.min(at, bytes.length); i++) if (bytes[i] === 10) line++; return line; }};
+          const graph = (s.doc.graphs || []).find((g) => g.graph_id === s.graphId);
+          const nodes = ((graph && graph.nodes) || []).filter((n) => n.source_span && n.kind !== "entry" && (s.nodeBounds || {{}})[n.node_id] && lineOf(n.source_span.start) === {line});
+          nodes.sort((a, b) => (b.node_id.includes(":stmt:") - a.node_id.includes(":stmt:")) || a.source_span.start - b.source_span.start);
+          const node = nodes[0];
+          if (!node) return {{ error: "graph " + s.graphId + " shows no node on line {line}: " + JSON.stringify(((graph && graph.nodes) || []).map((n) => [n.node_id, n.kind, n.source_span])) }};
+          const span = node.source_span;
+          return {{ node_id: node.node_id, title: node.title, anchor: span.start + ":" + span.end }};
+        }})()
+        """,
+    )
+    problem: text(at(found, "error"))
+    if problem != "" -> return Err(fail_with(problem))
+    Ok(DebugTarget{node_id: text(at(found, "node_id")), title: text(at(found, "title")), anchor: text(at(found, "anchor")), line: line})
+}
+
+// Select `target` with a click, open its context menu with a right click and
+// click `entry` there. A target out of view is brought in with Fit Graph.
+node_menu_pick: fn(c: Ctx, target: DebugTarget, entry: String) Failure! {
+    if node_center(c, target.node_id) == .Err(_) {
+        click_element(c, "document.getElementById('fit')", "Fit Graph")
+        sleep_ms(400)
+    }
+    p: node_center(c, target.node_id)
+    click(c, p.x, p.y)
+    wait_debug(c, "s.selectedNodeId === {q(target.node_id)}", "{target.title} selected")
+    right_click(c, p.x, p.y)
+    expect_menu(c, entry)
+    click_element(c, "Array.from(document.querySelectorAll('#context-menu [data-menu-action]')).find((b) => b.textContent.includes({q(entry)}))", "the {entry} menu entry")
+}
+
+// Open the Debug Controls popover with a click on its summary.
+open_debug_controls: fn(c: Ctx) Failure! {
+    if eval_bool(c, "!!document.getElementById('debug-menu')?.open") -> return Ok()
+    click_element(c, "document.querySelector('#debug-menu summary')", "Debug Controls")
+}
+
+// Click the Debug Controls button `button` and wait for the page to show the
+// answer to the request the click sent: that request, `commands` (a JSON
+// array), with its answer.
+debug_gesture: fn(c: Ctx, button: String, commands: String) -> Dyn Failure! {
+    sent: int(eval(c, "window.__debugProof.requests.filter((e) => !e.request.stop).length"))
+    click_element(c, "document.getElementById({q(button)})", button)
+    wait_debug(
+        c,
+        "(() => {{ const sent = window.__debugProof.requests.filter((e) => !e.request.stop); return sent.length > {sent} && sent[{sent}].status > 0 && document.getElementById('debug-liveness').dataset.state !== 'connecting'; }})()",
+        "the answer to {button}",
+    )
+    entry: eval(c, "window.__debugProof.requests.filter((e) => !e.request.stop)[{sent}]")
+    if js(at(entry, "request.commands")) != commands {
+        return Err(fail_with("{button} must send the commands {commands}: {js(at(entry, "request"))}"))
+    }
+    if int(at(entry, "status")) != 200 || text(at(entry, "response.protocol")) != "jet.canvas.debug" || !truthy(at(entry, "response.ok")) {
+        return Err(fail_with("{button} must be answered on the debug protocol: HTTP {int(at(entry, "status"))} {short_text(js(at(entry, "response")), 800)}"))
+    }
+    Ok(entry)
+}
+
+// Whether a line of the answer's trace holds `note`.
+traced: fn(entry: Dyn, note: String) -> Bool {
+    loop line in items(at(entry, "response.overlay.trace")) {
+        if text(line).contains(note) -> return true
+    }
+    false
+}
+
+// --- breakpoint_gestures ------------------------------------------------------------
+
+// On the program of Tests/Cases/Debug/CanvasDebugValuesAtBreakpoint.fixture,
+// a breakpoint set on `y: x * 2` in `scale` from its context menu reaches the
+// debugger as that node's source span: Start opens a session that holds it,
+// Continue stops on line 2 with the node active, Step moves on and Continue
+// runs the program out. Removed from the same menu, the next session holds
+// no breakpoint and Continue runs the program out without that stop. Every
+// gesture is a pointer click, and each one is checked in the request the page
+// sent and in the answer it shows; the source is never changed.
+breakpoint_gestures: fn(c: Ctx) Failure! {
+    debug_prepare(c)
+    before: source(c)
+    target: debug_target(c, "scale", 2)
+    revision: text(at(state(c), "doc.revision"))
+    held: js(Dyn.Array([Dyn]{Dyn.Text("{target.anchor}@{revision}")}))
+
+    node_menu_pick(c, target, "Set Breakpoint")
+    wait_debug(c, "s.lastToast.includes('Breakpoint anchored')", "the breakpoint on {target.title}")
+    open_debug_controls(c)
+    started: debug_gesture(c, "debug-start", "[\"s\"]")
+    if js(at(started, "request.breakpoint_spans")) != held || text(at(started, "request.session_id")) != "" {
+        return Err(fail_with("Start must open a session with the breakpoint the menu set, {held}: {js(at(started, "request"))}"))
+    }
+    mark: at(started, "response.overlay.breakpoints.0")
+    if items(at(started, "response.overlay.breakpoints")).len() != 1 || text(at(mark, "state")) != "valid" || int(at(mark, "line")) != target.line {
+        return Err(fail_with("the session must hold the one breakpoint as valid on line {target.line}: {js(at(started, "response.overlay.breakpoints"))}"))
+    }
+    session: text(at(started, "response.session.id"))
+    if text(at(started, "response.session.state")) != "running" || text(at(started, "response.overlay.runtime_state")) != "live" {
+        return Err(fail_with("Start must leave a live session: {js(at(started, "response.session"))}"))
+    }
+
+    stopped: debug_gesture(c, "debug-continue", "[\"c\"]")
+    if text(at(stopped, "request.session_id")) != session || js(at(stopped, "request.breakpoint_spans")) != held {
+        return Err(fail_with("Continue must go on in session {session} with the breakpoint: {js(at(stopped, "request"))}"))
+    }
+    if int(at(stopped, "response.overlay.active_line")) != target.line || text(at(stopped, "response.overlay.active_node_id")) != target.node_id || !traced(stopped, "Breakpoint hit") {
+        return Err(fail_with("Continue must stop at the breakpoint on line {target.line}, node {target.node_id}: {short_text(js(at(stopped, "response.overlay")), 1200)}"))
+    }
+    wait_debug(c, "s.debugLiveness === 'Runtime live' && s.selectedNodeId === {q(target.node_id)} && document.body.classList.contains('is-debug-active')", "the stop shown live on {target.title}")
+
+    stepped: debug_gesture(c, "debug-step", "[\"s\"]")
+    if text(at(stepped, "request.session_id")) != session || text(at(stepped, "response.overlay.runtime_state")) != "live" || int(at(stepped, "response.overlay.active_line")) == target.line {
+        return Err(fail_with("Step must move session {session} off line {target.line}: {short_text(js(at(stepped, "response.overlay")), 1200)}"))
+    }
+
+    ran_out: debug_gesture(c, "debug-continue", "[\"c\"]")
+    if text(at(ran_out, "request.session_id")) != session || text(at(ran_out, "response.overlay.debug_overlay")) != "finished" {
+        return Err(fail_with("Continue past the breakpoint's only stop must finish the program: {short_text(js(at(ran_out, "response.overlay")), 1200)}"))
+    }
+    wait_debug(c, "s.debugLiveness === 'Runtime finished' && !document.body.classList.contains('is-debug-active')", "the finished run shown")
+
+    switch_graph(c, "scale")
+    node_menu_pick(c, target, "Remove Breakpoint")
+    wait_debug(c, "s.lastToast.includes('Breakpoint removed')", "the breakpoint removed")
+    open_debug_controls(c)
+    cleared: debug_gesture(c, "debug-start", "[\"s\"]")
+    if js(at(cleared, "request.breakpoint_spans")) != "[]" || items(at(cleared, "response.overlay.breakpoints")).len() != 0 {
+        return Err(fail_with("Start after the removal must send and hold no breakpoint: {js(at(cleared, "request"))} {js(at(cleared, "response.overlay.breakpoints"))}"))
+    }
+    if text(at(cleared, "response.overlay.debug_overlay")) == "running" {
+        through: debug_gesture(c, "debug-continue", "[\"c\"]")
+        if text(at(through, "response.overlay.debug_overlay")) != "finished" || traced(through, "Breakpoint hit") {
+            return Err(fail_with("Continue without the breakpoint must run the program out, not stop on line {target.line}: {short_text(js(at(through, "response.overlay")), 1200)}"))
+        }
+    }
+    if source(c) != before -> return Err(fail_with("the debug gestures must not change the source"))
+    Ok()
+}
+
+// --- the values, locals and liveness of a stop -------------------------------------
+
+// Set a breakpoint on `target` from its context menu, Start a session and
+// Continue to the stop; the Continue's request and answer.
+stop_at: fn(c: Ctx, target: DebugTarget) -> Dyn Failure! {
+    node_menu_pick(c, target, "Set Breakpoint")
+    wait_debug(c, "s.lastToast.includes('Breakpoint anchored')", "the breakpoint on {target.title}")
+    open_debug_controls(c)
+    started: debug_gesture(c, "debug-start", "[\"s\"]")
+    session: text(at(started, "response.session.id"))
+    if text(at(started, "response.session.state")) != "running" {
+        return Err(fail_with("Start must open a running session: {short_text(js(at(started, "response")), 1200)}"))
+    }
+    stopped: debug_gesture(c, "debug-continue", "[\"c\"]")
+    if text(at(stopped, "request.session_id")) != session || text(at(stopped, "response.overlay.runtime_state")) != "live" || int(at(stopped, "response.overlay.active_line")) != target.line {
+        return Err(fail_with("Continue must stop session {session} live at the breakpoint on line {target.line}: {short_text(js(at(stopped, "response.overlay")), 1200)}"))
+    }
+    wait_debug(c, "s.debugLiveness === 'Runtime live' && s.selectedNodeId === {q(target.node_id)}", "the stop shown live on {target.title}")
+    Ok(stopped)
+}
+
+// Whether `list`, an answer's locals or watches, holds `name` of type
+// `type_name` with `value`.
+holds_local: fn(list: Dyn, name: String, type_name: String, value: String) -> Bool {
+    loop local in items(list) {
+        if text(at(local, "name")) == name && text(at(local, "type")) == type_name && text(at(local, "value")) == value {
+            return true
+        }
+    }
+    false
+}
+
+// The frames of an answer's call stack.
+frames: fn(entry: Dyn) -> [String] {
+    shown := [String]{}
+    loop frame in items(at(entry, "response.overlay.call_stack")) -> shown.push(text(frame))
+    shown
+}
+
+// A JavaScript test that the rows `selector` matches include `row`: each row's
+// cells, trimmed, joined by " | ".
+shows_row: fn(selector: String, row: String) -> String {
+    "Array.from(document.querySelectorAll({q(selector)})).some((r) => Array.from(r.children).map((p) => p.textContent.trim()).join(' | ') === {q(row)})"
+}
+
+// Switch to the Debug view with a click on its view button.
+open_debug_view: fn(c: Ctx) Failure! {
+    click_element(c, "document.querySelector('[data-view-mode=\"debug\"]')", "the Debug view")
+    wait_debug(c, "!!document.getElementById('debug-view') && document.getElementById('debug-view').getBoundingClientRect().height > 0", "the Debug view shown")
+}
+
+// Click the stop button `button` and wait until the page sent the stop and
+// shows no session.
+debug_stop: fn(c: Ctx, button: String) Failure! {
+    sent: int(eval(c, "window.__debugProof.requests.filter((e) => e.request.stop).length"))
+    click_element(c, "document.getElementById({q(button)})", button)
+    wait_debug(
+        c,
+        "(() => {{ const sent = window.__debugProof.requests.filter((e) => e.request.stop); return sent.length > {sent} && sent[{sent}].status === 200 && sent[{sent}].response.session.state === 'stopped' && !s.debugSession && s.debugLiveness === 'Runtime idle'; }})()",
+        "the stop sent by {button}",
+    )
+}
+
+// On the program of Tests/Cases/Debug/CanvasDebugValuesAtBreakpoint.fixture,
+// a stop at the breakpoint in `scale` shows the live runtime's facts: both
+// frames, the callee's argument and the statement the stop is on as the
+// active node, with no wire walked yet, in the answer, the node's details and
+// the Debug view. Finish and four Nexts, clicked in the Debug view, step back
+// into `run` and through the taken `if` arm to the print: the stack is `run`
+// alone, `total` is the 5 the program computed, and each step's wire path
+// ends at its active wire and never holds the untaken else wire.
+debug_values_at_breakpoint: fn(c: Ctx) Failure! {
+    debug_prepare(c)
+    target: debug_target(c, "scale", 2)
+    stopped: stop_at(c, target)
+    session: text(at(stopped, "request.session_id"))
+    stack: frames(stopped)
+    if stack.len() != 2 || !stack[0].starts_with("#0 scale() ") || !stack[1].starts_with("#1 run() ") {
+        return Err(fail_with("the stop's stack must be scale, then run at the call: {stack.join(" | ")}"))
+    }
+    if !holds_local(at(stopped, "response.overlay.locals"), "x", "Int", "2") {
+        return Err(fail_with("the stop must show the argument x = 2: {js(at(stopped, "response.overlay.locals"))}"))
+    }
+    if text(at(stopped, "response.overlay.active_node_id")) != target.node_id || text(at(stopped, "response.overlay.active_wire_id")) != "" || items(at(stopped, "response.overlay.wire_path")).len() != 0 {
+        return Err(fail_with("the stop's active node must be {target.node_id}, with no wire walked: {short_text(js(at(stopped, "response.overlay")), 1200)}"))
+    }
+    wait_debug(c, "{shows_row("#details .debug-detail .pin-row", "x | Int | 2")} && {shows_row("#details .debug-detail .pin-row", "frame | {stack[0]}")}", "the stop's values in the node's details")
+    open_debug_view(c)
+    wait_debug(c, "{shows_row("#debug-stack-rows .row", stack[1])} && {shows_row("#debug-locals-rows .row", "x | 2 | Int")} && document.getElementById('debug-view-state').textContent === 'Paused · line 2'", "the stop in the Debug view")
+
+    finished: debug_gesture(c, "debug-view-finish", "[\"finish\"]")
+    if text(at(finished, "request.session_id")) != session || frames(finished).len() != 1 {
+        return Err(fail_with("Finish must return session {session} to run: {frames(finished).join(" | ")}"))
+    }
+    last := finished
+    loop _ in 0..<4 {
+        last = debug_gesture(c, "debug-view-next", "[\"next\"]")
+        path: js(at(last, "response.overlay.wire_path"))
+        active: text(at(last, "response.overlay.active_wire_id"))
+        if text(at(last, "request.session_id")) != session || path.contains("run@49-52:wire:15") || (active != "" && !path.contains(q(active))) {
+            return Err(fail_with("each Next must walk the taken arm's wires to its active wire: {short_text(js(at(last, "response.overlay")), 1200)}"))
+        }
+    }
+    at_print: frames(last)
+    if int(at(last, "response.overlay.active_line")) != 13 || at_print.len() != 1 || !at_print[0].starts_with("#0 run() ") || !holds_local(at(last, "response.overlay.locals"), "total", "Int", "5") {
+        return Err(fail_with("the fourth Next must reach the print on line 13 in run, with total = 5: {short_text(js(at(last, "response.overlay")), 1200)}"))
+    }
+    if !text(at(last, "response.overlay.active_node_id")).ends_with(":call:print") || items(at(last, "response.overlay.wire_path")).len() == 0 {
+        return Err(fail_with("at the print the active node must be the print, reached by a wire: {short_text(js(at(last, "response.overlay")), 1200)}"))
+    }
+    wait_debug(c, "{shows_row("#debug-stack-rows .row", at_print[0])} && document.querySelectorAll('#debug-stack-rows .row').length === 1 && {shows_row("#debug-locals-rows .row", "total | 5 | Int")} && document.getElementById('debug-view-state').textContent === 'Paused · line 13'", "the print's stop in the Debug view")
+    debug_stop(c, "debug-view-stop")
+}
+
+// On the program of Tests/Cases/Debug/CanvasDebugPausedLocals.fixture, the
+// frame paused at `count += 1` lists every local with its type and value, a
+// String, a list, a struct, a Bool and an Int, in the answer, the node's
+// details and the Debug view. A Next clicked in Debug Controls moves the frame
+// on: the Int shows the value the line assigned, never the one read before.
+debug_paused_locals: fn(c: Ctx) Failure! {
+    debug_prepare(c)
+    target: debug_target(c, "run", 12)
+    stopped: stop_at(c, target)
+    locals: at(stopped, "response.overlay.locals")
+    wanted: [{name: String, type_name: String, value: String}]{
+        {name: "name", type_name: "String", value: "\"hello world\""},
+        {name: "xs", type_name: "[Int]", value: "[1, 2, 3]"},
+        {name: "p", type_name: "Point", value: "Point{{x: 3, y: 4}}"},
+        {name: "ready", type_name: "Bool", value: "true"},
+        {name: "count", type_name: "Int", value: "1"},
+    }
+    loop local in wanted {
+        if !holds_local(locals, local.name, local.type_name, local.value) {
+            return Err(fail_with("the stop must list {local.name}: {local.type_name} = {local.value}: {js(locals)}"))
+        }
+        wait_debug(c, shows_row("#details .debug-detail .pin-row", "{local.name} | {local.type_name} | {local.value}"), "{local.name} in the node's details")
+    }
+    if js(locals).contains("<Unavailable>") {
+        return Err(fail_with("every local must be read: {js(locals)}"))
+    }
+    open_debug_view(c)
+    loop local in wanted {
+        wait_debug(c, shows_row("#debug-locals-rows .row", "{local.name} | {local.value} | {local.type_name}"), "{local.name} in the Debug view")
+    }
+
+    open_debug_controls(c)
+    next: debug_gesture(c, "debug-next", "[\"n\"]")
+    moved: at(next, "response.overlay.locals")
+    if int(at(next, "response.overlay.active_line")) != 13 || !holds_local(moved, "count", "Int", "2") || holds_local(moved, "count", "Int", "1") || !holds_local(moved, "p", "Point", "Point{{x: 3, y: 4}}") {
+        return Err(fail_with("Next must reach line 13 with count = 2, not the 1 read before: {js(moved)}"))
+    }
+    wait_debug(c, "{shows_row("#debug-locals-rows .row", "count | 2 | Int")} && !{shows_row("#debug-locals-rows .row", "count | 1 | Int")}", "count = 2 in the Debug view")
+    debug_stop(c, "debug-view-stop")
+}
+
+// On the program of canvas_debug_disconnect_is_not_live.program.template
+// (Tests/Cases/Debug), the stop at the print shows total = 6 live. Continue
+// lets the program kill itself: the answer is the session disconnected with
+// no stop, value or stack, and the page says the runtime is disconnected,
+// leaves the debug controls and shows none of the values it read before.
+debug_disconnect_not_live: fn(c: Ctx) Failure! {
+    debug_prepare(c)
+    target: debug_target(c, "run", 8)
+    stopped: stop_at(c, target)
+    if !holds_local(at(stopped, "response.overlay.locals"), "total", "Int", "6") {
+        return Err(fail_with("the stop must show total = 6: {js(at(stopped, "response.overlay.locals"))}"))
+    }
+    wait_debug(c, shows_row("#details .debug-detail .pin-row", "total | Int | 6"), "total = 6 live in the node's details")
+
+    killed: debug_gesture(c, "debug-continue", "[\"c\"]")
+    overlay: at(killed, "response.overlay")
+    if text(at(killed, "response.session.state")) != "disconnected" || text(at(overlay, "runtime_state")) != "disconnected" || !is_null(at(overlay, "active_line")) {
+        return Err(fail_with("the killed program's session must answer disconnected, with no stop: {short_text(js(at(killed, "response")), 1200)}"))
+    }
+    if items(at(overlay, "locals")).len() != 0 || items(at(overlay, "watches")).len() != 0 || items(at(overlay, "call_stack")).len() != 0 || js(overlay).contains("after the kill") {
+        return Err(fail_with("a disconnected session must carry no value or stack: {short_text(js(overlay), 1200)}"))
+    }
+    wait_debug(
+        c,
+        "s.debugLiveness === 'Runtime disconnected' && document.getElementById('debug-liveness').dataset.state === 'disconnected' && !s.debugSessionId && !document.body.classList.contains('is-debug-active') && document.getElementById('details').textContent.includes('runtime disconnected; live values cleared') && document.querySelectorAll('#details .debug-detail .pin-row').length === 0",
+        "the disconnect shown with no live value",
+    )
+    open_debug_view(c)
+    wait_debug(c, "!{shows_row("#debug-locals-rows .row", "total | 6 | Int")} && document.querySelectorAll('#debug-stack-rows .row').length === 0 && document.getElementById('debug-view-stop').disabled", "the Debug view with nothing live")
+}

@@ -1,0 +1,13 @@
+// A raw write from an address with no allocation provenance is a located
+// runtime fault; `harden: true` keeps the sentry in a release build too.
+package: { name: "runtime_r0801", policy: { harden: true } }
+
+use core.mem
+
+run: fn() {
+    #Unsafe("external address must be a live allocation") {
+        pointer: mem.Ptr<Int>.from_addr(1)
+        mem.volatile_write(pointer, 7)
+    }
+}
+// @run_cli

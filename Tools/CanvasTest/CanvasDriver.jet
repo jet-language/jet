@@ -292,7 +292,7 @@ driver_set_viewport: fn(d: Driver, width: Int, height: Int) Failure! {
     window: cdp.send("Browser.getWindowForTarget", target_wire) ?? return Err(fail_with("Browser.getWindowForTarget failed: {err}"))
     window_tree: json.parse(window) ?? return Err(fail_with("Browser.getWindowForTarget reply is not JSON: {err}"))
     bounds: obj([{key: "width", value: Dyn.Int(width)}, {key: "height", value: Dyn.Int(height)}, {key: "windowState", value: Dyn.Text("normal")}])
-    wire: json.to_string(obj([{key: "windowId", value: at(window_tree, "windowId")}, {key: "bounds", value: bounds}])) ?? "{{}}"
+    wire: json.to_string(obj([{key: "windowId", value: at(window_tree, "result.windowId")}, {key: "bounds", value: bounds}])) ?? "{{}}"
     cdp.send("Browser.setWindowBounds", wire) ?? return Err(fail_with("Browser.setWindowBounds failed: {err}"))
     Ok()
 }

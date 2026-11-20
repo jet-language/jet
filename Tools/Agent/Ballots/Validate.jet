@@ -761,7 +761,7 @@ surface_gaps: fn(payload: Dyn, posting: Posting) -> [String] Never! {
     }
     why_not: items(field(recommendation, "whyNot"))
     loop key in keys {
-        if rec == Dyn.Text(key) -> next
+        if rec == .Text(chosen) && chosen == key -> next
         reason: why_not_reason(why_not, key)
         if {
             reason == "" -> gaps.push("surface.recommendation.whyNot[{key}]")
@@ -906,7 +906,7 @@ ballot_gaps: fn(payload: Dyn, posting: Posting) -> [String] Never! {
         if !present(field(recommendation, "tradeoff")) -> gaps.push("recommendation.tradeoff")
         why_not: items(field(recommendation, "whyNot"))
         loop key in keys {
-            if rec == Dyn.Text(key) -> next
+            if rec == .Text(chosen) && chosen == key -> next
             reason := ""
             loop item in why_not {
                 if field(item, "key") == .Text(found) && found == key {

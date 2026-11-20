@@ -1867,7 +1867,9 @@
           ? "live"
           : debugOverlay && debugOverlay.runtime_state === "finished"
             ? "finished"
-            : "failed";
+            : debugOverlay && debugOverlay.runtime_state === "disconnected"
+              ? "disconnected"
+              : "failed";
         syncDebugSessionPicker();
         syncDebugActive();
         if (debugOverlay && debugOverlay.active_graph_id) selectedGraphId = debugOverlay.active_graph_id;

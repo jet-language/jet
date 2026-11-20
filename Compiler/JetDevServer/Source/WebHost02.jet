@@ -8,7 +8,7 @@ use {
     webhost_time: core.time
     core.http.server.[HTTPServer]
     jetpack_foundation.[ColorChoice, terminal_erase_lines, terminal_esc, terminal_write_output]
-    jet_foundation.[JetReleaseDevtoolsPolicy]
+    jet_foundation.[JetReleaseDevtoolsPolicy, diagnostic_display_name]
 }
 
 WEB_HOST_SECRET_BYTES: 32
@@ -342,10 +342,11 @@ format_line_colored: fn(word: String, rest: String) -> String Never! {
 
 format_line_plain: fn(word: String, rest: String) -> String Never! { "jet dev  [{word}] {rest}" }
 
-// A diagnostic in a box headed by its code, 20 to 96 columns wide.
+// A diagnostic in a box headed by its name, 20 to 96 columns wide.
 frame_lines: fn(code: String, diagnostic: String) -> [String] Never! {
     lines: web_host_lines(diagnostic)
-    width := code.len() + 2
+    title: diagnostic_display_name(code)
+    width := title.len() + 2
     loop line in lines {
         scalars := 0
         loop _ in line.chars() -> scalars += 1
@@ -353,10 +354,10 @@ frame_lines: fn(code: String, diagnostic: String) -> [String] Never! {
     }
     if width < 20 -> width = 20
     if width > 96 -> width = 96
-    dashes := width - code.len() - 3
+    dashes := width - title.len() - 3
     if dashes < 1 -> dashes = 1
     top: "─".repeat(dashes)
-    out := [String]{"┌ {code} {top}"}
+    out := [String]{"┌ {title} {top}"}
     loop line in lines -> out.push("│ {line}")
     bottom: "─".repeat(width + 2)
     out.push("└{bottom}")

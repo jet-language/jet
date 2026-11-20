@@ -1,0 +1,90 @@
+// The Decimal micro witness: parse, add and format over money-shaped
+// amounts ("-1234.05"), the kernels behind every Decimal data workload.
+// Rust has no standard Decimal, so the comparison is against this program
+// built by the compiler of 2026-11-15, when the target of a fivefold speedup
+// on all three kernels was set.
+//
+//   jet run --release -A Tools/Perf/ArithKernels/decimal.jet -- [COUNT]
+//
+// COUNT defaults to 200000. Each kernel runs 5 times and prints its best time
+// in nanoseconds and per amount. The last line checks the work: the sum of
+// every amount and the characters their formatted forms take, which must be
+// byte-identical across compilers.
+use core.[process, time]
+
+COUNT: 200000
+
+ROUNDS: 5
+
+amounts: fn(count: Int) -> [String] {
+    out := [String]{}
+    seed := 12345
+    loop _ in 0..<count {
+        seed = (seed * 1103515245 + 12345) % 2147483648
+        whole: seed % 100000
+        cents: (seed /% 100000) % 100
+        sign: if seed % 5 == 0 -> "-" else -> ""
+        pad: if cents < 10 -> "0" else -> ""
+        out.push("{sign}{whole}.{pad}{cents}")
+    }
+    out
+}
+
+parse_kernel: fn(texts: [String]) -> [Decimal] {
+    out := [Decimal]{}
+    loop text in texts -> out.push(Decimal(text))
+    out
+}
+
+add_kernel: fn(values: [Decimal]) -> Decimal {
+    total := Decimal("0")
+    loop value in values -> total = value + total
+    total
+}
+
+format_kernel: fn(values: [Decimal]) -> Int {
+    chars := 0
+    loop value in values -> chars += value.to_string().len()
+    chars
+}
+
+report: fn(name: String, count: Int, best: Int) {
+    print("{name} ops={count} best_ns={best} per_op_ns={best /% max(count, 1)}")
+}
+
+run: fn() {
+    args: process.args()
+    count: if args.len() > 0 -> Int.parse(args[0]) ?? COUNT else -> COUNT
+    texts: amounts(count)
+
+    best := -1
+    values := [Decimal]{}
+    loop _ in 0..<ROUNDS {
+        started: time.instant()
+        values = parse_kernel(texts)
+        spent: started.elapsed().ns
+        if best < 0 || spent < best -> best = spent
+    }
+    report("decimal_parse", count, best)
+
+    best = -1
+    total := Decimal("0")
+    loop _ in 0..<ROUNDS {
+        started: time.instant()
+        total = add_kernel(values)
+        spent: started.elapsed().ns
+        if best < 0 || spent < best -> best = spent
+    }
+    report("decimal_add", count, best)
+
+    best = -1
+    chars := 0
+    loop _ in 0..<ROUNDS {
+        started: time.instant()
+        chars = format_kernel(values)
+        spent: started.elapsed().ns
+        if best < 0 || spent < best -> best = spent
+    }
+    report("decimal_format", count, best)
+    print("check sum={total} chars={chars}")
+}

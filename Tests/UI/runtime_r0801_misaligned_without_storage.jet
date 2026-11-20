@@ -1,0 +1,12 @@
+// A raw read through a fixed odd address no live allocation holds: the
+// sentry checks provenance before alignment, so the fault is the missing
+// storage, not the misaligned Int.
+use core.mem
+
+run: fn() {
+    #Unsafe("a fixed odd address stands for a pointer with no storage") {
+        pointer: mem.Ptr<Int>.from_addr(4097)
+        print(pointer.*)
+    }
+}
+// @run_cli

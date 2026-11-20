@@ -9,7 +9,7 @@ use {
     native_files: core.files
     native_math: core.math
     jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_EVENT_EXIT, X64_TRACE_EVENT_STOP, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, link_debug_uleb, x64_jetline_find, x64_jetline_line, x64_jetline_sleb, x64_jetline_text, x64_trace_attach, x64_trace_close, x64_trace_debug_register, x64_trace_detach, x64_trace_follow_exits, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_seize, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait, x64_trace_wait_for, x64_trace_wait_or_input, x64_trace_write]
-    jet_foundation.[DeepChecks, Diagnostic, ENV_JET_RECORD, deep_checks_flags, diagnostic_display_identities, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all, foundation_named_type]
+    jet_foundation.[DeepChecks, Diagnostic, ENV_JET_RECORD, MODULE_CORE_PREFIX, deep_checks_flags, diagnostic_display_identities, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all, foundation_named_type]
 }
 
 #Error
@@ -64,12 +64,16 @@ native_debug_refused: fn(detail: String) -> String Never! {
 // which shows the call at its line. A caller's frame whose call has a
 // call-site row (NativeImage.calls) shows the line and character `column`
 // of the call's source node; `column` is 0 when the frame names a line only.
+// `file` is the source's name, which the console shows, and `path` the
+// source itself as the line table names it (native_line_source; "" for
+// none), which the session reads it by (NativeSession.frame_source).
 NativeFrame: struct {
     function: String,
     file: String,
     line: Int,
     inlined: Bool,
     column: Int{0},
+    path: String{""},
 }
 
 // One frame a backtrace shows, against the frames the unwinder found: the
@@ -859,8 +863,29 @@ NativeSession: struct {
             line = site.line
             column = site.column
         }
-        path: if function.dir == "" || function.file.starts_with("/") -> "{function.file}" else -> native_files.join(function.dir, function.file)
+        path: native_line_source(function.dir, function.file)
         Val({path: path, line: line, column: column})
+    }
+
+    // The text of the line `frame` stops at: the console's file `file`
+    // reads as `lines`, any other source as source_text reads it by the
+    // frame's path; "" when none does.
+    frame_source: fn(self, frame: NativeFrame, file: String, lines: [String]) -> String Never! {
+        if frame.file == file && !frame.path.starts_with(MODULE_CORE_PREFIX) {
+            return native_source_line(lines, frame.line)
+        }
+        if frame.line < 1 || frame.path == "" -> return ""
+        text: self.source_text(frame.path) ?? return ""
+        native_source_line(text.split("\n").to_list(), frame.line)
+    }
+
+    // The text of the source `path` names (NativeFrame.path, source_at) as
+    // the session's evaluator reads it (NativeEvaluator.source), a Core
+    // source as the Core the program was compiled with; None without an
+    // evaluator or when it can't be read.
+    source_text: fn(self, path: String) -> String? Never! {
+        evaluator: self.evaluator ?? return None
+        evaluator.source(path)
     }
 
     // Drops the code kept for expressions (`evals`) once the program's
@@ -2993,7 +3018,7 @@ NativeSession: struct {
             if !native_debug_jet_frame(frame) -> next
             if seen == wanted {
                 _: self.select_frame(level) ?? return Err(err)
-                source: if frame.file == file && frame.line >= 1 && frame.line <= lines.len() -> lines[frame.line - 1] else -> ""
+                source: self.frame_source(frame, file, lines)
                 locals: self.locals() ?? return Err(err)
                 return Ok("#{wanted}  {frame.function}()  at {frame.file}:{frame.line}\n{frame.line} | {source}\n{native_debug_locals_line(locals)}\n")
             }
@@ -3022,7 +3047,7 @@ NativeSession: struct {
                 if stop.reason.starts_with("watchpoint ") {
                     text = "{text}Watchpoint {stop.reason.after("watchpoint ")} hit  {frame.file}:{frame.line}  in {frame.function}()\n{self.watched}\n"
                 }
-                source: if frame.file == file && frame.line >= 1 && frame.line <= lines.len() -> lines[frame.line - 1] else -> ""
+                source: self.frame_source(frame, file, lines)
                 locals: self.locals() ?? return Err(err)
                 text = "{text}{frame.line} | {source}        <- here\n{native_debug_locals_line(locals)}\n"
             }
@@ -5461,7 +5486,7 @@ native_frame_at: fn(image: NativeImage, lookup: Int) -> NativeFrame Never! {
     index: x64_jetline_find(image.lines, lookup)
     if index >= 0 {
         function: image.lines.functions[index]
-        return NativeFrame{function: function.name, file: native_files.basename(function.file), line: x64_jetline_line(image.lines, function, lookup) ?? 0, inlined: false}
+        return NativeFrame{function: function.name, file: native_files.basename(function.file), line: x64_jetline_line(image.lines, function, lookup) ?? 0, inlined: false, path: native_line_source(function.dir, function.file)}
     }
     named: native_function_at(image, lookup) ?? return NativeFrame{function: "?", file: "", line: 0, inlined: false}
     NativeFrame{function: named.name, file: "", line: 0, inlined: false}
@@ -5483,10 +5508,10 @@ native_frames_at: fn(image: NativeImage, lookup: Int) -[]> [NativeFrame] {
     loop site in native_inline_chain(function, lookup) {
         run: function.inlined[site]
         name: if image.abstracts.get(run.origin) == .Val(origin) -> origin.name else -> "?"
-        shown.push(NativeFrame{function: name, file: frame.file, line: line, inlined: true})
+        shown.push(NativeFrame{function: name, file: frame.file, line: line, inlined: true, path: frame.path})
         line = run.call_line
     }
-    shown.push(NativeFrame{function: frame.function, file: frame.file, line: line, inlined: false})
+    shown.push(NativeFrame{function: frame.function, file: frame.file, line: line, inlined: false, path: frame.path})
     shown
 }
 
@@ -5787,10 +5812,27 @@ native_bare_move: fn(word: String, mark: NativeMark) -> NativeMove Never! {
 }
 
 // The path of a line-table function's source: its `file` under its
-// compilation directory `dir`, unless the file is absolute or has none.
+// compilation directory `dir`, unless the file is absolute, is Core's or has
+// none. A Core source's file is its path under the Core root
+// (`<corelib>/Core/Net/URL.jet`), which names the Core the program was
+// compiled with, never a file under the compilation directory.
 native_line_source: fn(dir: String, file: String) -> String Never! {
-    if dir == "" || file.starts_with("/") -> return "{file}"
+    if dir == "" || file.starts_with("/") || file.starts_with(MODULE_CORE_PREFIX) -> return "{file}"
     native_files.join(dir, file)
+}
+
+// Line `line` (1 for the first) of `lines`; "" when they have no such line.
+native_source_line: fn(lines: [String], line: Int) -> String Never! {
+    if line < 1 || line > lines.len() -> return ""
+    "{lines[line - 1]}"
+}
+
+#Test("a Core source's path is its own, never one under the compilation directory") {
+    assert_eq(native_line_source(".", "<corelib>/Core/Net/URL.jet"), "<corelib>/Core/Net/URL.jet")
+    assert_eq(native_line_source(".", "prog.jet"), "./prog.jet")
+    assert_eq(native_line_source("/work", "/src/prog.jet"), "/src/prog.jet")
+    assert_eq(native_source_line([String]{"a", "b"}, 2), "b")
+    assert_eq(native_source_line([String]{"a"}, 2), "")
 }
 
 // A task the runtime's registry lists (JetRuntime Observe.jet): its id, its

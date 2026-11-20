@@ -164,7 +164,7 @@ run: fn() {
             // `jet test Compiler --profile <suite>` runs that corpus in process with
             // JET from this environment, stages its rows in memory and writes its
             // case verdicts to $JET_CI_EVIDENCE_DIR/<suite>.json.
-            ran := run_child(state, suite, [String]{binary, "test", "{root}/Compiler", "--profile", suite, "--color=never"})
+            ran := run_child(state, suite, [String]{binary.copy(), "test", "{root}/Compiler", "--profile", suite.copy(), "--color=never"})
             if ran.row.status == "PASS" {
                 testkit_verdict(ran.row, "{evidence}/{suite}.json", binary, suite)
             }
@@ -173,7 +173,7 @@ run: fn() {
         }
         output: "{scratch}/registries"
         manifest: "{output}/manifest.json"
-        listed := run_child(state, "registry-manifest", [String]{binary, "{root}/Tools/Agent/CompilerRegistries.jet", "manifest", head, "--out", output})
+        listed := run_child(state, "registry-manifest", [String]{binary.copy(), "{root}/Tools/Agent/CompilerRegistries.jet", "manifest", head.copy(), "--out", output})
         if listed.row.status == "PASS" {
             registry_verdict(listed.row, manifest, None, head, root, binary)
         }
@@ -184,7 +184,7 @@ run: fn() {
             next
         }
         receipt: "{evidence}/registries.json"
-        ran := run_child(state, "registries", [String]{binary, "{root}/Tools/Agent/CompilerRegistries.jet", "run", "--jet", binary, "--manifest", manifest, "--receipt", receipt})
+        ran := run_child(state, "registries", [String]{binary.copy(), "{root}/Tools/Agent/CompilerRegistries.jet", "run", "--jet", binary.copy(), "--manifest", manifest.copy(), "--receipt", receipt.copy()})
         if ran.row.status == "PASS" {
             registry_verdict(ran.row, manifest, Val(receipt), head, root, binary)
         }
@@ -615,7 +615,7 @@ fixture_checkout: fn() -[FS, Env]> String {
         }
         report: read_document("{evidence}/verify-full.json") ?? panic("{mode}: verify-full.json is missing or not JSON")
         rows: array_field(report, "rows")
-        status: fn(scope: String) { text_field(fixture_row(rows, scope), "status") }
+        status: fn(scope: String) -> String { text_field(fixture_row(rows, scope), "status") }
         if mode == {
             "pass" -> assert(rows.all(fn(row) { text_field(row, "status") == "PASS" }))
             "ordinary" -> {

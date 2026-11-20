@@ -129,20 +129,20 @@ static void scope_fixtures(void) {
     assert(jet_rt_test_expect_fail_error(code, needle, code, message) == NULL);
     assert(jet_rt_test_expect_fail_error(NULL, NULL, code, message) == NULL);
     expect_wire(jet_rt_test_expect_fail_error(wrong, NULL, code, message),
-                "expected a stop with E3001, got E3010: index 99");
+                "expected a stop with Jet.Panic, got Jet.ArithmeticOrBoundsFailure: index 99");
     expect_wire(jet_rt_test_expect_fail_error(wrong, needle, code, message),
-                "expected a stop with E3001 whose message contains \"99\", got E3010: index 99");
+                "expected a stop with Jet.Panic whose message contains \"99\", got Jet.ArithmeticOrBoundsFailure: index 99");
     Text *other_needle = text("absent", 6);
     expect_wire(jet_rt_test_expect_fail_error(NULL, other_needle, code, message),
-                "expected a stop whose message contains \"absent\", got E3010: index 99");
+                "expected a stop whose message contains \"absent\", got Jet.ArithmeticOrBoundsFailure: index 99");
     expect_wire(jet_rt_test_expect_fail_error(NULL, NULL, NULL, NULL),
                 "expected this region to fail, but it passed");
     expect_wire(jet_rt_test_expect_fail_error(code, NULL, NULL, NULL),
-                "expected this region to stop with E3010, but it passed");
+                "expected this region to stop with Jet.ArithmeticOrBoundsFailure, but it passed");
     expect_wire(jet_rt_test_expect_fail_error(NULL, needle, NULL, NULL),
                 "expected a stop whose message contains \"99\", but it passed");
     expect_wire(jet_rt_test_expect_fail_error(code, needle, NULL, NULL),
-                "expected this region to stop with E3010 whose message contains \"99\", but it passed");
+                "expected this region to stop with Jet.ArithmeticOrBoundsFailure whose message contains \"99\", but it passed");
     Text *quoted = text("\"\n\\", 3);
     expect_wire(jet_rt_test_expect_fail_error(NULL, quoted, NULL, NULL),
                 "expected a stop whose message contains \"\\\"\\n\\\\\", but it passed");

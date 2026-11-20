@@ -104,7 +104,7 @@ recipe_run_logged: fn(recipe: BuildRecipe, ctx: RecipeBuildContext, transport: R
         if recipe_run_step(step, staged_ctx, transport, report, true) == {
             .Ok(_) -> { attempt.push_step(recipe_step_log(step, index, total, ctx, "ok", "", "")) }
             .Err(error) -> {
-                attempt.push_step(recipe_step_log(step, index, total, ctx, "failed", "", "{error.code}: {error.what}\n{error.why}\n"))
+                attempt.push_step(recipe_step_log(step, index, total, ctx, "failed", "", "{diagnostic_headline(error.code, error.what)}\n{error.why}\n"))
                 staged.discard()
                 return Err(error)
             }

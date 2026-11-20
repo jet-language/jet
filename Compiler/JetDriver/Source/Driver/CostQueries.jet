@@ -55,6 +55,9 @@ TCostSite: struct {
     // the edited map each turn (jet_driver_cost_shared_edits); false for
     // every other kind.
     shared: Bool{false},
+    // Whether the cost is the own work of a call the source writes
+    // (TCostFact.written); such a site is no hidden copy.
+    written: Bool{false},
     // The source file the site is in and the 1-based line it starts on
     // (jet_driver_cost_place); empty and 0 until the site is placed.
     path: String{""},
@@ -247,9 +250,11 @@ jet_driver_cost_copy_lints: fn(load: JetDriverLoadResult, functions: [FnBody]) -
 // The cost sites L2511 lists: a copy sema made that the source doesn't
 // write (a view made owned or an implicit copy), and a map edit whose loop
 // shares the map each turn, so the edit clones it each turn. An edit of a
-// map the loop doesn't share clones it at most once.
+// map the loop doesn't share clones it at most once. A copy that is the own
+// work of a call the source writes (`text.lines()`) is shown, so it is no
+// hidden copy; L2510 still lists it.
 jet_driver_cost_hidden_copy: fn(site: TCostSite) -> Bool Never! {
-    site.kind == TCostKind.ViewMaterialization || site.kind == TCostKind.ImplicitCopy || (site.kind == TCostKind.CollectionCopyOnWrite && site.shared)
+    !site.written && (site.kind == TCostKind.ViewMaterialization || site.kind == TCostKind.ImplicitCopy || (site.kind == TCostKind.CollectionCopyOnWrite && site.shared))
 }
 
 // What a cost kind is, as `explain --cost` names it.
@@ -427,7 +432,7 @@ jet_driver_cost_function_sites: fn(function: FnBody, name: String, nodes: [Int],
         } else if node.kind == .BuiltinMethod(receiver, _, _) && fact.kind == TCostKind.ViewMaterialization {
             view = type_name(body_type(tree, receiver))
         }
-        sites.push(TCostSite{function: name, module_identity: function.module_identity, span: span, loop_depth: depths.get(id) ?? 0, kind: fact.kind, state: state, view: view, shared: shared.get(id) != None})
+        sites.push(TCostSite{function: name, module_identity: function.module_identity, span: span, loop_depth: depths.get(id) ?? 0, kind: fact.kind, state: state, view: view, shared: shared.get(id) != None, written: fact.written})
     }
     loop statement in tree.stmts {
         if statement == .Assign(place, op, value, _, span) {

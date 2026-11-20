@@ -564,7 +564,7 @@ gate: fn(root: String, jet: [String], update: Bool, run_dir: String, scratch: St
         }
         current := Counts{insns: 0, pushes: 0, pops: 0, frame_slots: 0, loops: 0, loop_insns: 0}
         loop name in functions {
-            listing: run_command([String]{"objdump", "-d", "--no-show-raw-insn", "--disassemble={name}", binary}, run_dir, scratch) ?? return fail("{err}")
+            listing: run_command([String]{"objdump", "-d", "--no-show-raw-insn", "--disassemble={name}", binary.copy()}, run_dir, scratch) ?? return fail("{err}")
             current = add_counts(current, count_listing(listing))
         }
         print("{row.symbol}\t{counts_line(current)}\tgolden {counts_line(row.golden)}\tceiling {row.ceiling}\tgap {gap(current.loop_insns, row.ceiling)}")

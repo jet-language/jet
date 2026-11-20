@@ -34,7 +34,6 @@ const TOOL_VERSION_COMMANDS = Object.freeze({
   go: ["go", "version"],
   node: ["node", "--version"],
   bun: ["bun", "--version"],
-  vite: ["vite", "--version"],
   as: ["as", "--version"],
   perf: ["perf", "--version"],
   strip: ["strip", "--version"],
@@ -284,11 +283,10 @@ const LANGUAGE_FILES = {
   lua: "main.lua",
   luajit: "main.lua",
   bun: "main.mjs",
-  vite: "main.mjs",
   asm: "ref.S",
 };
 // The entry folder holding each language's program: LuaJIT runs the Lua
-// program, Bun the Node program and Vite bundles the web (JS) program, and an
+// program and Bun the Node program, and an
 // expert rail has its own folder; the asm ceiling's directory is its
 // asm-parity reference (Coverage.mjs finds each peer's twin the same way).
 export const LANGUAGE_SOURCE_DIRS = Object.freeze({
@@ -306,7 +304,6 @@ export const LANGUAGE_SOURCE_DIRS = Object.freeze({
   lua: "Lua",
   luajit: "Lua",
   js: "JS",
-  vite: "JS",
 });
 
 function baseLanguage(language) {
@@ -1316,7 +1313,7 @@ async function measureSourceManifest(entriesDir, manifest, matrix = null) {
     liveReload.edit?.from !== "reload-before" || liveReload.edit?.to !== "reload-after" ||
     liveReload.phases?.cold !== "first measured edit after a fresh process reaches readiness" ||
     liveReload.phases?.warm !== "measured edit after two unmeasured edits in the same fresh process" ||
-    JSON.stringify([...liveReloadRunnerIds].sort()) !== JSON.stringify(["bun", "entr+cc", "jet-dev", "nodemon", "vite"]) ||
+    JSON.stringify([...liveReloadRunnerIds].sort()) !== JSON.stringify(["bun", "entr+cc", "jet-dev", "nodemon"]) ||
     !equalStringArrays(liveReload.fairness ?? [], ["same source edit", "same observable readiness signal", "fresh process per sample", "median cold and warm reload samples"]) ||
     memorySafetyFuzz.schema !== "gauntlet-axis-memory-safety-fuzz-v1" ||
     memorySafetyFuzz.metric !== "memory_safety_findings" ||
@@ -1651,13 +1648,8 @@ function languageSpecValue(value, language) {
   return value[language] ?? value.default;
 }
 
-// Vite has no entry-local build spec: it bundles the web program's runner
-// (with everything it imports) into dist/runner.mjs, which node runs.
-const VITE_WEB_BUILD = Object.freeze(["vite", "build", "--ssr", "runner.mjs", "--outDir", "dist", "--minify", "esbuild", "--logLevel", "warn"]);
-const VITE_WEB_RUN = Object.freeze(["node", "dist/runner.mjs"]);
-
 async function configuredBuildAndMeasure(language, sourceDir, jetBin, entry) {
-  const configured = languageSpecValue(entry.spec?.build ?? entry.build, language) ?? (language === "vite" ? [...VITE_WEB_BUILD] : null);
+  const configured = languageSpecValue(entry.spec?.build ?? entry.build, language) ?? null;
   const command = commandFromSpec(configured, language, jetBin, null);
   if (!command) return { supported: true, command: null, build: null, artifact: null, failure: null };
   const full = entry.spec?.fullShell === true;
@@ -1671,10 +1663,9 @@ async function configuredBuildAndMeasure(language, sourceDir, jetBin, entry) {
 }
 
 // A web entry's run command. Bun runs the Node program's command with bun in
-// place of node; Vite runs its bundle.
+// place of node.
 function webRunCommand(entry, language, jetBin) {
   const configured = (name) => commandFromSpec(languageSpecValue(entry.spec?.run ?? entry.run, name), name, jetBin, ["node", "runner.mjs"]);
-  if (language === "vite") return [...VITE_WEB_RUN];
   if (language === "bun") {
     const node = configured("node");
     return node[0] === "node" ? ["bun", ...node.slice(1)] : node;
@@ -4678,7 +4669,6 @@ async function toolchainFingerprint(runDir, jetBin) {
     lua: toolVersionCommand("lua"),
     luajit: toolVersionCommand("luajit"),
     bun: toolVersionCommand("bun"),
-    vite: toolVersionCommand("vite"),
     asm: toolVersionCommand("as"),
     perf: toolVersionCommand("perf"),
     strip: toolVersionCommand("strip"),

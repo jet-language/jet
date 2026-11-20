@@ -1114,7 +1114,7 @@ e_read:
     .ascii "15 |     text: files.read(args.input) ?? panic(\"read failed\")\n"
     .ascii "     |                                     ^^^^^\n"
 e_tail:
-    .ascii " Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms.\n"
+    .ascii " Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not Jet.Panic. Jet file and line are shown in Jet terms.\n"
     .ascii " Fix: Fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.\n"
     .ascii "More: jet-lang.dev/e/Jet.Panic\n"
 e_end:

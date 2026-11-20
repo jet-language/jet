@@ -1,92 +1,95 @@
-// The Canvas debug overlay: the active line, graph node and wire path of a
-// stop, typed snapshot values, bounded output, and the native-only tier.
+// The devserver's Canvas debug sessions run on the one Canvas debug engine
+// (JetCanvas CanvasDebugSession.jet) with `jet`'s own host: a native session
+// pauses, resumes and stops with its paused stop kept for the devtools, and
+// a native-recorded one replays a `jet run --record` recording.
 use {
     debug_test_files: core.files
     debug_test_process: core.process
-    jet_canvas.[source_revision]
-    jet_debug.[DebugSnapshot, FrameSnapshot, ValueSnapshot]
-    jet_devserver.[DebugOkRequest, DebugSession, DebugSessions, DebugTier, MAX_DEBUG_VALUE_BYTES, SessionStatus, debug_ok, debug_span_json, line_span]
+    jet_canvas.[CanvasHostState, canvas_host_new, source_revision]
+    jet_cli.[jet_cli_canvas_debug_host]
+    jet_devserver.[DebugSessions, PausedEvaluateHost, debug_sessions]
 }
 
-test_debug_request: fn(src: String, graph_json: String, transcript: String, snapshot: DebugSnapshot?, status: SessionStatus, watches: [String]) -> DebugOkRequest Never! {
-    DebugOkRequest{src: src, graph_json: graph_json, transcript: transcript, snapshot: snapshot, status: status, session_id: "test-session", tier: .Native, source_id: "main.jet", breakpoint_lines: [Int]{}, stale_breakpoints: [String]{}, watches: watches}
+// A scratch directory holding `src` as `name`.
+debug_test_scratch: fn(name: String, src: String) -> String {
+    scratch: debug_test_files.temp_dir("jet-canvas-debug-test") ?? panic("scratch: {err}")
+    debug_test_files.write(debug_test_files.join(scratch.path, name), src) ?? panic("source: {err}")
+    scratch.path
 }
 
-#Test("running_state_ignores_spoofed_completion_output") {
-    src: "run: fn() {{\n    print(\"Program finished\")\n}}\n"
-    active: debug_span_json(line_span(src, 2))
-    graph: "[{{\"node_id\":\"fn:main.jet.run@3-6:expr:1:call:print\",\"source_span\":{active}}},{{\"wire_id\":\"fn:main.jet.run@3-6:wire:1\",\"source_span\":{active}}}]"
-    transcript: "Breakpoint hit  main.jet:2  in main()\n   2 |     print(\"Program finished\")        <- here\nProgram finished\n"
-    out: debug_ok(test_debug_request(src, graph, transcript, None, .Running, [String]{}))
-    assert(out.contains("\"state\":\"running\""), out)
-    assert(out.contains("\"debug_overlay\":\"running\""), out)
-    assert(out.contains("\"active_line\":2"), out)
-    assert(out.contains("\"active_graph_id\":\"fn:main.jet.run@3-6\""), out)
-    assert(out.contains("\"active_node_id\":\"fn:main.jet.run@3-6:expr:1:call:print\""), out)
-    assert(out.contains("\"active_wire_id\":\"fn:main.jet.run@3-6:wire:1\""), out)
-    assert(out.contains("\"tier\":\"native\""), out)
+debug_test_state: fn(path: String, source_id: String) -> Shared<CanvasHostState> {
+    canvas_host_new(path, source_id, "127.0.0.1") ?? panic("state: {err.message}")
 }
 
-#Test("runtime_snapshot_projects_typed_values_and_wire_path") {
-    src: "run: fn() {{\n    total := 1\n    print(total)\n}}\n"
-    active: debug_span_json(line_span(src, 3))
-    graph: "[{{\"node_id\":\"node:print\",\"source_span\":{active}}},{{\"wire_id\":\"wire:input\",\"source_span\":{active}}},{{\"wire_id\":\"wire:output\",\"source_span\":{active}}}]"
-    snapshot: DebugSnapshot{function: "run", line: 3, locals: [ValueSnapshot{name: "total", type_name: "Int", value: "1"}], call_stack: [FrameSnapshot{function: "run", line: 3}]}
-    out: debug_ok(test_debug_request(src, graph, "Program finished\n", Val(snapshot), .Running, ["total"]))
-    fields: ["\"runtime_state\":\"live\"", "\"active_line\":3", "\"type\":\"Int\"", "\"value\":\"1\"", "\"name\":\"total\"", "run()", "\"wire_path\":[\"wire:input\",\"wire:output\"]"]
-    loop field in fields -> assert(out.contains(field), "runtime snapshot missing {field}: {out}")
+debug_test_answer: fn(sessions: &DebugSessions, host: &PausedEvaluateHost, path: String, source_id: String, request: String) -> String {
+    sessions.answer(host, jet_cli_canvas_debug_host(), debug_test_state(path, source_id), path, source_id, request) ?? panic("answer: {err.kind}: {err.message}")
 }
 
-#Test("overlay_marks_bounded_debug_values") {
-    src: "run: fn() {{\n    print(\"ok\")\n}}\n"
-    huge: "x".repeat(MAX_DEBUG_VALUE_BYTES + 128)
-    out: debug_ok(test_debug_request(src, "{{}}", "Locals: value = {huge}\nvalue = {huge}", None, .Finished, ["value"]))
-    assert(out.contains("\"locals_truncated\":true"), out)
-    assert(out.contains("\"watches_truncated\":true"), out)
-    assert(out.len() < 20 * 1024, "debug overlay escaped its bound: {out.len()}")
+debug_test_contains: fn(document: String, wanted: [String]) {
+    loop field in wanted -> assert(document.contains(field), "missing {field}: {document}")
 }
 
-#Test("only_the_native_tier_is_served") {
-    defaulted: DebugTier.parse(None) ?? panic("default tier")
-    assert(defaulted == DebugTier.Native)
-    named: DebugTier.parse(Val("native")) ?? panic("native tier")
-    assert(named == DebugTier.Native)
-    if DebugTier.parse(Val("jet-dev-replay")) == {
-        .Err(failure) -> { assert(failure.body.contains("\"kind\":\"unsupported\""), failure.body) }
-        .Ok(_) -> panic("the replay tier was accepted")
-    }
-}
-
-debug_test_local: fn(snapshot: DebugSnapshot, name: String) -> String Never! {
-    loop local in snapshot.locals {
-        if local.name == name -> return local.value
-    }
-    panic("no local `{name}` in the stop")
-}
-
-// A Canvas session builds the program with `jet build -O0`, pauses it
-// under Jet's native debugger at a breakpoint, resumes to the next hit, and
-// stops.
+// A native session builds the program with `jet build -O0`, pauses it under
+// Jet's native debugger at a breakpoint, keeps its paused stop for the
+// devtools, resumes to the next hit, and stops.
 #Test("a_native_session_builds_pauses_resumes_and_stops") {
     jet: debug_test_process.which("jet") ?? panic("the Jet dev shell puts `jet` on PATH")
-    scratch: debug_test_files.temp_dir("jet-canvas-debug-test") ?? panic("scratch: {err}")
-    source: debug_test_files.join(scratch.path, "prog.jet")
     src: "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nrun: fn() {{\n    count := 0\n    loop i in 0..<2 {{\n        count += double(i)\n    }}\n    print(\"count {{count}}\")\n}}\n"
-    debug_test_files.write(source, src) ?? panic("source: {err}")
+    scratch: debug_test_scratch("prog.jet", src)
+    path: debug_test_files.join(scratch, "prog.jet")
     revision: source_revision(src)
-    sessions := DebugSessions{jet: jet, next_id: 1, sessions: [String:DebugSession]{}, pause_on_input_end: true}
-    first: sessions.execute(source, "prog.jet", revision, None, ["continue"], [2], ["x"], .Native) ?? panic("execute: {err.body}")
-    assert(first.status == SessionStatus.Running)
-    paused: first.snapshot ?? panic("first stop has no snapshot: {first.transcript}")
-    assert_eq(paused.function, "double")
-    assert_eq(paused.line, 2)
-    assert_eq(debug_test_local(paused, "x"), "0")
-    second: sessions.execute(source, "prog.jet", revision, Val(first.id), ["continue"], [2], ["x"], .Native) ?? panic("resume: {err.body}")
-    resumed: second.snapshot ?? panic("second stop has no snapshot: {second.transcript}")
-    assert_eq(resumed.line, 2)
-    assert_eq(debug_test_local(resumed, "x"), "1")
-    tier: sessions.stop(source, revision, revision, first.id, .Native) ?? panic("stop: {err.body}")
-    assert(tier == DebugTier.Native)
-    assert(sessions.sessions.len() == 0)
-    debug_test_files.remove_all(scratch.path) ?? panic("scratch cleanup: {err}")
+    sessions := debug_sessions(jet)
+    host := PausedEvaluateHost{session: None, evaluator_result: None}
+    first: debug_test_answer(sessions, host, path, "prog.jet", "{{\"schema_version\":1,\"revision\":\"{revision}\",\"source_id\":\"prog.jet\",\"breakpoints\":[2],\"commands\":[\"continue\"],\"watches\":[\"x\"]}}")
+    debug_test_contains(first, [String]{"\"id\":\"canvas-debug-1\"", "\"state\":\"running\"", "\"tier\":\"native\"", "\"active_line\":2", "\"name\":\"x\",\"type\":\"Int\",\"value\":\"0\""})
+    assert(sessions.adapters.has_key("canvas-debug-1"), "the paused stop has no adapter")
+    second: debug_test_answer(sessions, host, path, "prog.jet", "{{\"schema_version\":1,\"revision\":\"{revision}\",\"source_id\":\"prog.jet\",\"session_id\":\"canvas-debug-1\",\"commands\":[\"continue\"],\"watches\":[\"x\"]}}")
+    debug_test_contains(second, [String]{"\"active_line\":2", "\"name\":\"x\",\"type\":\"Int\",\"value\":\"1\""})
+    stopped: debug_test_answer(sessions, host, path, "prog.jet", "{{\"schema_version\":1,\"revision\":\"{revision}\",\"source_id\":\"prog.jet\",\"session_id\":\"canvas-debug-1\",\"tier\":\"native\",\"stop\":true}}")
+    debug_test_contains(stopped, [String]{"\"state\":\"stopped\"", "\"overlay\":null"})
+    assert(sessions.debugs.sessions.len() == 0)
+    assert(sessions.adapters.len() == 0)
+    debug_test_files.remove_all(scratch) ?? panic("scratch cleanup: {err}")
+}
+
+// A native-recorded session replays the recording `jet run --record=canvas`
+// made, as `jet debug --replay` does: it stops at the third pass of line 21
+// and goes back to the second with reverse-continue.
+#Test("a_recorded_session_replays_its_recording") {
+    jet: debug_test_process.which("jet") ?? panic("the Jet dev shell puts `jet` on PATH")
+    src: "Score: struct {{\n    count: Int,\n}}\n\ndouble: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nbump: fn(rounds: Int, tally: Shared<Score>) -> Int {{\n    loop _ in 0..<rounds -> tally.count += 1\n    rounds\n}}\n\nrun: fn() {{\n    tally: Shared{{Score{{count: 0}}}}\n    helper: task bump(3, tally)\n    total := 0\n    loop k in 0..<3 {{\n        d: double(k)\n        total += d\n    }}\n    print(\"total {{total}} tally {{tally.count + (helper.join() ?? 0)}}\")\n}}\n"
+    scratch: debug_test_scratch("main.jet", src)
+    debug_test_files.write(debug_test_files.join(scratch, "package.jet"), "name: \"canvas_replay\"\nversion: \"0.1.0\"\nauthority: {{\n    allow: [IO, Time]\n}}\n") ?? panic("package: {err}")
+    recorded: debug_test_process.cmd([String]{jet, "run", "--record=canvas", "main.jet"}).cwd(scratch).stdout(.Capture).stderr(.Capture).run() ?? panic("jet run --record: {err}")
+    assert(recorded.success, "jet run --record=canvas main.jet failed: {recorded.output}{recorded.errors}")
+    path: debug_test_files.join(scratch, "main.jet")
+    revision: source_revision(src)
+    sessions := debug_sessions(jet)
+    host := PausedEvaluateHost{session: None, evaluator_result: None}
+    replayed: debug_test_answer(sessions, host, path, "main.jet", "{{\"schema_version\":1,\"revision\":\"{revision}\",\"source_id\":\"main.jet\",\"recording\":\"canvas\",\"breakpoints\":[21],\"commands\":[\"continue\",\"continue\",\"continue\"]}}")
+    debug_test_contains(replayed, [String]{"\"tier\":\"native-recorded\"", "\"active_line\":21", "\"name\":\"d\",\"type\":\"Int\",\"value\":\"4\""})
+    back: debug_test_answer(sessions, host, path, "main.jet", "{{\"schema_version\":1,\"revision\":\"{revision}\",\"source_id\":\"main.jet\",\"session_id\":\"canvas-debug-1\",\"tier\":\"native-recorded\",\"commands\":[\"reverse-continue\"]}}")
+    debug_test_contains(back, [String]{"\"tier\":\"native-recorded\"", "\"active_line\":21", "\"name\":\"d\",\"type\":\"Int\",\"value\":\"2\""})
+    sessions.debugs.release_all()
+    debug_test_files.remove_all(scratch) ?? panic("scratch cleanup: {err}")
+}
+
+// A tier that is not one of the native tiers is refused, and the session
+// it names is kept.
+#Test("only_the_native_tiers_are_served") {
+    jet: debug_test_process.which("jet") ?? panic("the Jet dev shell puts `jet` on PATH")
+    src: "run: fn() {{\n    print(\"ok\")\n}}\n"
+    scratch: debug_test_scratch("prog.jet", src)
+    path: debug_test_files.join(scratch, "prog.jet")
+    sessions := debug_sessions(jet)
+    host := PausedEvaluateHost{session: None, evaluator_result: None}
+    request: "{{\"schema_version\":1,\"revision\":\"{source_revision(src)}\",\"source_id\":\"prog.jet\",\"tier\":\"interpreted\"}}"
+    if sessions.answer(host, jet_cli_canvas_debug_host(), debug_test_state(path, "prog.jet"), path, "prog.jet", request) == {
+        .Err(failure) -> {
+            assert(failure.kind == "bad_request", "{failure.kind}: {failure.message}")
+        }
+        .Ok(document) -> panic("an unknown tier was served: {document}")
+    }
+    assert(sessions.debugs.sessions.len() == 0)
+    debug_test_files.remove_all(scratch) ?? panic("scratch cleanup: {err}")
 }

@@ -716,7 +716,16 @@ kit_ui_add_code: fn(codes: &[String], code: String) {
     if !kit_expect_named(codes, code) -> codes.push(code.copy())
 }
 
-kit_ui_extract_source: fn(text: String) -> [String] {
+// A byte of a name after `Jet.`: an ASCII letter or digit.
+kit_ui_name_byte: fn(byte: U8) -> Bool {
+    (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122})) || (byte >= (U8{48}) && byte <= (U8{57}))
+}
+
+// The codes `text` names: in double quotes or square brackets, or by the
+// name of one of `rows` that a message or report heading in it opens with
+// (`"Jet.EnvDecodeFailed: …"`, `"Error: Jet.UseAfterLifetime: …"`), as
+// Tools/Agent/DiagnosticRows.jet's source_codes reads them.
+kit_ui_extract_source: fn(text: String, rows: [KitUIRegistryRow]) -> [String] {
     codes := [String]{}
     bytes: text.bytes()
     loop (index, byte) in bytes {
@@ -733,6 +742,23 @@ kit_ui_extract_source: fn(text: String) -> [String] {
         if end > index + 1 && end < bytes.len() && bytes[end] == close {
             code: kit_steps_byte_slice(text, index + 1, end)
             if kit_ui_source_code(code) -> kit_ui_add_code(codes, code)
+        }
+    }
+    loop (index, byte) in bytes {
+        if byte != (U8{74}) || index + 4 >= bytes.len() -> next
+        if index > 0 && (kit_ui_name_byte(bytes[index - 1]) || bytes[index - 1] == (U8{95}) || bytes[index - 1] == (U8{46})) {
+            next
+        }
+        if bytes[index + 1] != (U8{101}) || bytes[index + 2] != (U8{116}) || bytes[index + 3] != (U8{46}) {
+            next
+        }
+        if bytes[index + 4] < (U8{65}) || bytes[index + 4] > (U8{90}) -> next
+        end := index + 5
+        loop end < bytes.len() && kit_ui_name_byte(bytes[end]) -> end += 1
+        if end + 1 >= bytes.len() || bytes[end] != (U8{58}) || bytes[end + 1] != (U8{32}) -> next
+        name: kit_steps_byte_slice(text, index, end)
+        loop row in rows {
+            if row.name == name -> kit_ui_add_code(codes, row.code)
         }
     }
     codes
@@ -752,7 +778,7 @@ KIT_UI_ALLOWLIST: "Tests/diagnostics_coverage_allowlist.tsv"
 // The codes a `.jet` implementation source under `directory` names, skipping
 // test packages and fixtures (#6193; Tests/Guards/diagnostics_coverage.jet
 // scans the same sources).
-kit_ui_emitted: fn(root: String, directory: String, codes: &[String]) {
+kit_ui_emitted: fn(root: String, directory: String, rows: [KitUIRegistryRow], codes: &[String]) {
     path: files.join(root, directory)
     if !files.exists(path) {
         return
@@ -761,22 +787,30 @@ kit_ui_emitted: fn(root: String, directory: String, codes: &[String]) {
         relative: "{directory}/{child.name}"
         if child.is_dir {
             if child.name != "Tests" && child.name != "Fixtures" && child.name != "fixtures" {
-                kit_ui_emitted(root, relative, codes)
+                kit_ui_emitted(root, relative, rows, codes)
             }
         } else if child.name.ends_with(".jet") && !kit_expect_named(KIT_UI_REGISTRY_FILES, relative) {
             text: files.read(child.path) ?? next
-            loop code in kit_ui_extract_source(text) -> kit_ui_add_code(codes, code)
+            loop code in kit_ui_extract_source(text, rows) -> kit_ui_add_code(codes, code)
         }
     }
 }
 
+// A report's trail section opens with KIT_UI_TRAIL_HEADER and prints no
+// heading of its own: it is the report of the row named KIT_UI_TRAIL_ROW.
+// Tools/Agent/DiagnosticRows.jet reads trail sections by the same rule.
+KIT_UI_TRAIL_HEADER: " Trail ("
+
+KIT_UI_TRAIL_ROW: "Jet.FailureTrail"
+
 // The registered codes the report headers in `text` name. A header names a
 // registered row by its name (`Error: Jet.UnknownName: …`), or prints a code
-// no row names.
+// no row names; a trail section's header names the trail row.
 kit_ui_extract_reports: fn(text: String, rows: [KitUIRegistryRow]) -> [String] {
     codes := [String]{}
     loop line in text.split("\n") {
-        token: kit_expect_heading_name(line) ?? next
+        named: if line.starts_with(KIT_UI_TRAIL_HEADER) -> Val(KIT_UI_TRAIL_ROW) else -> kit_expect_heading_name(line)
+        token: named ?? next
         if token.starts_with("Jet.") {
             loop row in rows {
                 if row.name == token -> kit_ui_add_code(codes, row.code)
@@ -869,7 +903,9 @@ kit_ui_coverage: fn(root: String, bless: Bool) -> KitVerdict {
     rows: kit_ui_registry(registry)
     if rows.len() == 0 -> return kit_expect_verdict("ERROR", "diagnostic registry contains no rows")
     emitted := [String]{}
-    loop directory in ["Compiler", "Jetpack", "Core"] -> kit_ui_emitted(root, directory, emitted)
+    loop directory in ["Compiler", "Jetpack", "Core"] {
+        kit_ui_emitted(root, directory, rows, emitted)
+    }
     snapshots := [String]{}
     loop entry in kit_ui_collect(root, "Tests/UI", false) {
         snapshots.push(files.join(root, entry.expected))

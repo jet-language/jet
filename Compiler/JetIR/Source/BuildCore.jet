@@ -222,12 +222,28 @@ ir_core_layout: fn(layout: IRExportLayout) -> String Never! {
 // threads; the other inputs as ir_build_program's.
 ir_build_core_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], entry_module: ModuleID, lowered: [String], threads: CompilerThreads) -> IRCoreLibrary Never! {
     p := ir_program_new(functions, decls, symbols, type_defs, impls, sources, constants)
+    p.quiet_points = ir_core_quiet_points(p)
     p.sentries = true
     p.user_values = true
     p.zone_table = true
     ir_foreign_index(p, foreign, decls)
     skipped: [IRBuildFailure]{}
     ir_core_library_from(p, entry_module, lowered, skipped, threads)
+}
+
+// The library's quiet points (IRProgram.quiet_points): those no program
+// can name. A program bound to the library attaches handlers to a public
+// Core point its own code names (`web.requests.on(scope, handler)`), which
+// the library, built before any program, never sees. So the library's run of
+// a public point dispatches through the point's cell, which it exports and
+// the program binds (ir_core_cells_bind), and the two share its handlers.
+ir_core_quiet_points: fn(p: IRProgram) -[]> [String:Bool] {
+    kept := [String:Bool]{}
+    loop (key, _) in p.quiet_points {
+        row: p.constants.get(key) ?? next
+        if p.constant_defs[row].visibility != .Public -> kept[key] = true
+    }
+    kept
 }
 
 // The Core package of module `module_name`: a public module

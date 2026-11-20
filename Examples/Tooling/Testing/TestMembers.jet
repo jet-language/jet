@@ -22,9 +22,10 @@ run: fn() { print("{double(3)}") }
     assert_eq(double(2), 4)
 }
 
-// The optional message checks the reason, not merely the panic's E3001 code.
+// The optional message checks the reason, not merely that the stop is a
+// `Jet.Panic`.
 #Test("expect_fail checks the raw message") {
-    .expect_fail(E3001, message: "fingerprint collision") {
+    .expect_fail(Jet.Panic, message: "fingerprint collision") {
         panic("internal compiler error: E0859 generic module instance fingerprint collision")
     }
     assert_eq(double(3), 6)

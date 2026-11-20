@@ -38,8 +38,8 @@ if [[ $task == service-lifecycle-readiness-timeout ]]; then
     printf '%s\n' 'readiness timeout unexpectedly succeeded' >&2
     exit 1
   fi
-  grep -q 'E1261' timeout.err || grep -q 'E1261' timeout.out || {
-    printf '%s\n' 'readiness timeout lost E1261' >&2
+  grep -q 'Jet.ServiceNeverHealthy' timeout.err || grep -q 'Jet.ServiceNeverHealthy' timeout.out || {
+    printf '%s\n' 'readiness timeout lost Jet.ServiceNeverHealthy' >&2
     exit 1
   }
   lifecycle="$project/.jet/services/timeout/lifecycle"

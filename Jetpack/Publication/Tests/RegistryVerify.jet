@@ -250,7 +250,7 @@ publication_verify_test_refusal: fn(all: [PublicationIndexEntry], entry: Publica
         if publication_ensure_index_clone(registry) == {
             .Err(error) -> {
                 rendered: diagnostic_render(error.diagnostic, "package.jet", "", false)
-                assert(rendered.contains("E1235"))
+                assert(rendered.contains("Jet.RegistryUnreachable"))
                 assert(!rendered.contains("super-secret"))
             }
             .Ok(_) -> panic("credential-bearing transport accepted")

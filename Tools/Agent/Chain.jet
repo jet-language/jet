@@ -370,7 +370,8 @@ stage_inputs: fn(tree: String) -[Env, Exec, FS, IO, Time.Wait]> [String] Never! 
         loop line in text.split("\n") {
             row: line.trim()
             if row == "" || row.starts_with("#") -> next
-            if files.exists(files.join(tree, row)) -> read.push(row.copy())
+            owned: row.copy()
+            if files.exists(files.join(tree, owned)) -> read.push(owned)
         }
     }
     unique(read)
@@ -1828,7 +1829,7 @@ SlotTaken: struct {
     name: String,
     cpus: String,
     queued: Int,
-    locks: [files.FileLock],
+    _locks: [files.FileLock],
 }
 
 mem_available_gb: fn() -[FS]> Int Never! {
@@ -1949,7 +1950,7 @@ take_slot: fn(r: Roots, small: Bool, short: Bool) -[Env, Exec, FS, IO, Time, Tim
                 files.remove(ticket) ?? ()
                 locks := [files.FileLock]{}
                 locks.push(lock)
-                return SlotTaken{name: name.copy(), cpus: slot_cpus(name), queued: queued, locks: locks}
+                return SlotTaken{name: name.copy(), cpus: slot_cpus(name), queued: queued, _locks: locks}
             }
         }
         time.sleep(time.duration_seconds(10))
@@ -1991,7 +1992,7 @@ take_release_slot: fn(r: Roots) -[Env, Exec, FS, IO, Time, Time.Wait]> SlotTaken
             held.push(name.copy())
         }
         if held.len() == SLOT_NAMES.len() && scratch_used_percent(r) <= SCRATCH_FULL_PERCENT {
-            return SlotTaken{name: "R", cpus: RELEASE_SLOT_CPUS, queued: queued, locks: locks}
+            return SlotTaken{name: "R", cpus: RELEASE_SLOT_CPUS, queued: queued, _locks: locks}
         }
         time.sleep(time.duration_seconds(2))
     }

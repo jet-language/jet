@@ -44,8 +44,8 @@ try:
 
     if task == "service-lifecycle-readiness-timeout":
         failed = run(["services", "up", "timeout", "--trust", "--no-color"])
-        if failed.returncode == 0 or "E1261" not in failed.stderr + failed.stdout:
-            raise SystemExit("readiness timeout did not fail with E1261")
+        if failed.returncode == 0 or "Jet.ServiceNeverHealthy" not in failed.stderr + failed.stdout:
+            raise SystemExit("readiness timeout did not fail with Jet.ServiceNeverHealthy")
         lifecycle = (project / ".jet/services/timeout/lifecycle").read_text()
         if "phase=failed" not in lifecycle or "recovery=startup-failed" not in lifecycle:
             raise SystemExit("failed service lost lifecycle receipt")

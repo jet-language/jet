@@ -73,7 +73,7 @@ static const char root_stop_report[] =
     " Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, "
     "a bounds/key check triggered at runtime, or another program-side stop. "
     "The shared report boundary owns the program-side stop; an unhandled entry "
-    "error is a returned report, not E3001. Jet file and line are shown in Jet "
+    "error is a returned report, not Jet.Panic. Jet file and line are shown in Jet "
     "terms (I2).\n"
     " Fix: Fix the logic that led to the failure. Program-side stops exit 70 "
     "through the shared boundary; unhandled entry errors print their report "

@@ -1,0 +1,21 @@
+// Attaches a handler to points.gate, which refuses an odd number, and to
+// Core's web.requests, which answers 401 under "/admin". Neither point
+// runs here.
+use {
+    server: core.http.server
+    web: core.web
+    points
+}
+
+refuse_odd: fn(n: Int) -[]> HookDecision<Int, String> Never! {
+    if n % 2 == 1 -> HookDecision.Fail("{n} is odd") else -> HookDecision.Continue
+}
+
+signed_out: fn(asked: HTTPRequest) -[]> HookDecision<HTTPRequest, HTTPResponse> Never! {
+    HookDecision.Fail(server.response(401, "sign in for {asked.path}"))
+}
+
+install: fn(scope: EventScope) {
+    _: points.gate.on(scope, refuse_odd)
+    _: web.requests.on(scope, web.under("/admin", signed_out))
+}

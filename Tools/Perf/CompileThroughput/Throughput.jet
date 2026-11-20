@@ -1111,7 +1111,9 @@ run_gate: fn(options: Options, jet: String, identity: String) -> Int {
                 compiler_jet: if compiler == "seed" -> seed else -> jet
                 compiler_identity: if compiler == "seed" -> seed_identity else -> identity
                 warm: measure(options, inputs, lines, compiler_jet, compiler_identity, compiler, mode, 0)
-                if warm.rc != 0 -> term.eprint("throughput: {compiler} {mode} warmup exited {warm.rc}")
+                if warm.rc != 0 {
+                    term.eprint("throughput: {compiler} {mode} warmup exited {warm.rc}")
+                }
                 files.remove_all(slot_dir(options, compiler, mode, 0)) ?? ()
             }
         }
@@ -1171,7 +1173,7 @@ time_value: fn(report: String, key: String) -> String? {
     prefix: "{key}: "
     loop raw in report.split("\n") {
         line: raw.trim()
-        if line.starts_with(prefix) -> return Val(line.remove_prefix(prefix).copy())
+        if line.starts_with(prefix) -> return Val(line.copy().remove_prefix(prefix))
     }
     None
 }

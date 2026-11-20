@@ -379,7 +379,7 @@ measure_arm: fn(jet: String, work: String, samples: Int, name: String, battery: 
     walls := [Int]{}
     stdout := ""
     loop _ in 0..<samples {
-        ran: timed(process.cmd([binary]))
+        ran: timed(process.cmd([binary.copy()]))
         if ran.status != Val(0) {
             row.startup = Val(Startup{status: "unavailable", reason: Val("exit {shown(ran.status)}"), stderr: Val(last_chars(ran.stderr, 400)), samples: None, median_ns: None, stdout: None})
             break

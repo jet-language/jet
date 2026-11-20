@@ -3,7 +3,7 @@
 # build, and no package row lifts it.
 # - Without the organization policy, the app's `meta.add` adds its function.
 # - Under it, the same `meta.add` uses `Meta.Generate`, so the build is
-#   refused (E0749) and the report names the organization policy, even
+#   refused (Jet.ProhibitedEffectReached) and the report names the organization policy, even
 #   though the package's own row is `authority: { allow: [Meta] }`.
 fixture: AnOrganizationDenialOfMetaHoldsOverEveryPackage.fixture
 env: NO_COLOR=1
@@ -17,5 +17,5 @@ step: jet build app/main.jet
 env: JET_ORG_UNSAFE_POLICY={work}/org-policy.jet
 exit: 1
 stderr: = organization-denies-meta.stderr
-stderr: ~ E0749 # the organization's denial holds over the package's allow row
+stderr: ~ Jet.ProhibitedEffectReached # the organization's denial holds over the package's allow row
 stderr: ~ "which the organization policy `{work}/org-policy.jet` denies with `authority: { deny: [Meta] }`" # the report names the organization policy

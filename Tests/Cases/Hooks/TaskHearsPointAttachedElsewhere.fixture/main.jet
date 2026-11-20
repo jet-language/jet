@@ -1,0 +1,15 @@
+// A handler attached in one module is heard by a point another module runs
+// inside a spawned task: guard.jet attaches to points.gate and to Core's
+// web.requests, and site.jet runs both from a task. Each point has one
+// cell that every module and task shares.
+use {
+    event: core.event
+    guard
+    site
+}
+
+run: fn() -[IO, Net, FS.Read, Time]> (HTTPError | NetError | TaskFailure)! {
+    scope: event.scope()
+    guard.install(scope)
+    site.serve()
+}

@@ -1,0 +1,41 @@
+// The embedded-sensor-ring int mod/div micro witness: the entry's per-tick
+// shape (a raw reading and a frame word derived by `%`, then folded through
+// `/%` and `%` by small constants) with no ring, CRC or output in between.
+// int_mod_div.rs beside this file runs the same kernel.
+//
+//   jet run --release -A Tools/Perf/ArithKernels/int_mod_div.jet -- [TICKS]
+//   rustc -O -C target-cpu=native -o /tmp/int_mod_div Tools/Perf/ArithKernels/int_mod_div.rs && /tmp/int_mod_div [TICKS]
+//
+// TICKS defaults to 10000000. The kernel runs 5 times and prints its best
+// time in nanoseconds with its check value; the check values match between
+// the two programs, and Jet passes when its best_ns is below Rust's.
+use core.[process, time]
+
+TICKS: 10000000
+
+ROUNDS: 5
+
+mod_div_kernel: fn(ticks: Int) -> Int {
+    check := 0
+    loop tick in 0..<ticks {
+        raw: (tick * 73 + 19) % 4096
+        frame: (raw * 17 + tick * 31 + 7) % 65536
+        check = (check * 33 + frame /% 7 + frame % 13 + raw /% 8 + tick % 127) % 1000000007
+    }
+    check
+}
+
+run: fn() {
+    args: process.args()
+    ticks: if args.len() > 0 -> Int.parse(args[0]) ?? TICKS else -> TICKS
+
+    best := -1
+    check := 0
+    loop _ in 0..<ROUNDS {
+        started: time.instant()
+        check = mod_div_kernel(ticks)
+        spent: started.elapsed().ns
+        if best < 0 || spent < best -> best = spent
+    }
+    print("int_mod_div ticks={ticks} best_ns={best} check={check}")
+}

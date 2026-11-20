@@ -14,7 +14,7 @@ use {
     cli_process: core.process
     cli_sys: core.sys
     core.encoding.[Dyn]
-    jet_canvas.[CanvasHostEdit, CanvasHostReply, canvas_machine_output, read_source_without_symlinks, source_revision]
+    jet_canvas.[CanvasHostEdit, CanvasHostReply, canvas_debug_bounded, canvas_debug_remove, canvas_debug_text, canvas_machine_output, read_source_without_symlinks, source_revision]
     jet_foundation.[CanonicalJSON, artifact_extension, foundation_json_parse, foundation_json_quote, trace_id]
 }
 
@@ -81,7 +81,7 @@ JetCLICanvasProfiles: struct {
 
     // Remove the last recording, if any.
     release: fn(&self) {
-        if self.dir != "" -> jet_cli_canvas_debug_remove(self.dir)
+        if self.dir != "" -> canvas_debug_remove(self.dir)
         self.dir = ""
     }
 }
@@ -106,7 +106,7 @@ jet_cli_canvas_profile_answer: fn(profiles: &JetCLICanvasProfiles, file: String,
 }
 
 jet_cli_canvas_profile_error_json: fn(kind: String, message: String) -> String Never! {
-    bounded: jet_cli_canvas_debug_bounded(message, JET_CLI_CANVAS_PROFILE_MAX_MESSAGE_BYTES)
+    bounded: canvas_debug_bounded(message, JET_CLI_CANVAS_PROFILE_MAX_MESSAGE_BYTES)
     "{{\"protocol\":\"jet.canvas.profile\",\"schema_version\":{JET_CLI_CANVAS_PROFILE_SCHEMA},\"ok\":false,\"kind\":{foundation_json_quote(kind)},\"message\":{foundation_json_quote(bounded.json)}}}"
 }
 
@@ -148,9 +148,9 @@ jet_cli_canvas_profile_request: fn(value: &&Dyn) -> JetCLICanvasProfileRequest N
         field: fields.pop() ?? break
         if field.key == {
             "schema_version" -> request.schema_version = jet_cli_dap_number(field.value)
-            "revision" -> request.revision = jet_cli_canvas_debug_text(field.value.move())
-            "source_id" -> request.source_id = jet_cli_canvas_debug_text(field.value.move())
-            "trace" -> request.trace = jet_cli_canvas_debug_text(field.value.move())
+            "revision" -> request.revision = canvas_debug_text(field.value.move())
+            "source_id" -> request.source_id = canvas_debug_text(field.value.move())
+            "trace" -> request.trace = canvas_debug_text(field.value.move())
             "from_ns" -> request.from_ns = jet_cli_canvas_profile_int(field.value)
             "to_ns" -> request.to_ns = jet_cli_canvas_profile_int(field.value)
             "width" -> request.width = jet_cli_canvas_profile_int(field.value)
@@ -286,7 +286,7 @@ jet_cli_canvas_profile_document: fn(trace: CanonicalJSON, path: String, source_i
         reduced := false
         loop mark in marks {
             if mark.count > 1 -> reduced = true
-            label: jet_cli_canvas_debug_bounded(mark.label, JET_CLI_CANVAS_PROFILE_MAX_LABEL_BYTES)
+            label: canvas_debug_bounded(mark.label, JET_CLI_CANVAS_PROFILE_MAX_LABEL_BYTES)
             rows.push("{{\"start_ns\":{mark.start},\"end_ns\":{mark.end},\"count\":{mark.count},\"label\":{foundation_json_quote(label.json)}}}")
         }
         lanes.push("{{\"name\":{foundation_json_quote(name)},\"reduced\":{reduced},\"marks\":[{rows.join(",")}]}}")
@@ -299,7 +299,7 @@ jet_cli_canvas_profile_document: fn(trace: CanonicalJSON, path: String, source_i
             hot_truncated = true
             break
         }
-        bounded: jet_cli_canvas_debug_bounded(line, JET_CLI_CANVAS_PROFILE_MAX_LABEL_BYTES)
+        bounded: canvas_debug_bounded(line, JET_CLI_CANVAS_PROFILE_MAX_LABEL_BYTES)
         hot.push(foundation_json_quote(bounded.json))
     }
     samples := 0

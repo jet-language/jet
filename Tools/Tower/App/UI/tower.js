@@ -2635,6 +2635,8 @@ async function viewGuidance() {
 let gauntletCache = null;
 let gauntletOpen = null;
 let gauntletTimer = null;
+// Which Jet the page judges: 'build' (Compiled) or 'run' (Scripting).
+let gauntletMode = 'build';
 
 async function loadGauntlet() {
   const r = await fetch('/api/gauntlet/standings');
@@ -2645,14 +2647,14 @@ async function loadGauntlet() {
 function showGauntletDetail(v, view, entry, peer, mode = 'build') {
   const panel = v.querySelector('[data-gdetail]');
   if (!panel) return;
-  v.querySelectorAll('.ggrid--selected').forEach((cell) => cell.classList.remove('ggrid--selected'));
+  v.querySelectorAll('.gcell--selected').forEach((cell) => cell.classList.remove('gcell--selected'));
   const detail = entry ? gauntletDetail(view, entry, peer, mode) : null;
   gauntletOpen = detail ? { entry, peer, mode } : null;
   panel.hidden = !detail;
   panel.innerHTML = renderGauntletDetail(detail);
   if (!detail) return;
   const selector = `[data-gentry="${CSS.escape(entry)}"][data-gmode="${CSS.escape(mode)}"][data-gpeer="${CSS.escape(peer)}"]`;
-  v.querySelector(selector)?.classList.add('ggrid--selected');
+  v.querySelector(selector)?.classList.add('gcell--selected');
 }
 
 async function viewGauntlet() {
@@ -2666,14 +2668,21 @@ async function viewGauntlet() {
     }
   }
   const view = gauntletCache.data ? projectGauntletStandings(gauntletCache.data) : null;
-  const body = view ? renderGauntletStandings(view)
+  const body = view ? renderGauntletStandings(view, gauntletMode)
     : `<div class="empty">Gauntlet unavailable: ${esc(gauntletCache.error || 'the table has no standings section')}</div>`;
   v.innerHTML = `<div class="viewhead viewhead--gauntlet"><h1 class="h1">Gauntlet</h1>
-      <span class="viewhead__sub">One line per entry: compiled peers and the asm ceiling against jet build's binary, interpreted peers against jet run · click a cell for its details</span>
+      <span class="viewhead__sub">Jet's wins and losses on compile time, startup, run time and memory · Compiled judges jet build's binary, Scripting judges jet run · click a cell for its details</span>
     </div>${body}`;
   if (!view) return;
   const open = (event) => {
     if (event.target.closest('[data-gclose]')) return showGauntletDetail(v, view, null, null);
+    const toggle = event.target.closest('[data-gview]');
+    if (toggle && event.type === 'click') {
+      if (toggle.dataset.gview === gauntletMode) return;
+      gauntletMode = toggle.dataset.gview;
+      gauntletOpen = null;
+      return viewGauntlet();
+    }
     const cell = event.target.closest('[data-gpeer]');
     if (!cell) return;
     if (event.type === 'keydown') {

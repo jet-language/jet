@@ -46,7 +46,8 @@ kit_test_golden_env: fn(root: String) -> KitEnv {
 
 #Test("golden failure reports require the exact registered exit oracle") {
     assert_eq(kit_golden_failure_exit("unknown", "Stop: Jet.Panic: panic\n"), Val(70))
-    assert_eq(kit_golden_failure_exit("unknown", "Runtime fault [R0801]: bad pointer\nexit: 1\n"), None)
+    assert_eq(kit_golden_failure_exit("unknown", "Error: Jet.RawAccessOutsideProvenance: bad pointer\nexit: 1\n"), None)
+    assert_eq(kit_golden_failure_exit("unknown", "Error: Jet.UseAfterLifetime: freed\nexit: 70\n"), Val(70))
     assert_eq(kit_golden_failure_exit("Examples/ErrorsAndEffects/Errors/FatalExit", "entry report\n"), Val(1))
     assert_eq(kit_golden_failure_exit("Examples/unknown", "Error: Jet.InvalidConstructionField: missing fields\n"), Val(1))
     assert_eq(kit_golden_failure_exit("Examples/unknown", "unregistered report\n"), None)

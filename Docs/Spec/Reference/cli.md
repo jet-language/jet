@@ -195,7 +195,7 @@ Bare `jet`, with no command (global flags such as `--color=never` allowed),
 opens the command picker on a terminal (stdin and stdout both a terminal) and
 otherwise prints the command palette and exits 0. The palette lists every
 canonical command under its category (Build & Run, Projects & Environments,
-Packages, Jetos, Development Server, Reference), then the Error Codes row and
+Packages, Jetos, Development Server, Reference), then the Errors row and
 a pointer to `jet help`; it is static text and never opens `/dev/tty`. The
 picker draws on stderr: the palette's categories, fuzzy results while typing,
 a command's usage and flags (Tab), and a two-pane reference on the alternate
@@ -229,7 +229,7 @@ jet check [<file.jet|dir>]           Check code without creating a binary
 jet inspect <command>                Explore code, builds, packages, and bindings
 jet test [<file.jet|dir>] [<filter>] [--profile=<name>] [--filter=<text>] [--shard=<i/n>] [--list] [--results=<file>] [-O0|-O1|-O2...] [--time-limit=<duration>] [--compiler=<jet>] [--capture=<failed|all|none>] [--docs] [-u] Run tests
 jet fmt [args]                       Format Jet and configured project files
-jet explain <CODE|FACT> [file]       Explain a diagnostic code, build fact, generic-module value, or typed cost
+jet explain <NAME|FACT> [file]       Explain a diagnostic, build fact, generic-module value, or typed cost
 jet dev [<file.jet|dir>] [-- <args>] Watch and run a program
 jet repl [<file.jet>] [--project <dir>] [--allow=<RIGHTS>] [--deny=<RIGHTS>] Try Jet code interactively
 jet self <command>                   Manage the Jet installation and editor tools
@@ -1752,10 +1752,11 @@ limit and the caller's remaining budget, its only call, or `marked
 #Inline(Always)`. A marked callee is listed under `--inline=off` and `-O0`
 too, which list no other.
 `#Inline(Always)` is a guarantee that locks the callee inlined; a change that
-makes it recursive or part of a cycle of marked calls (E0917), address-taken
-(E0918), too large (E0919), `#Scrub` (E1016), a reader of `context.trace`
-(E1017) or foreign, `#FFI(c)`, `#FFI(asm)` or `#Import(c)` (E1021), fails
-the build.
+makes it recursive or part of a cycle of marked calls
+(Jet.RecursiveInlineAlways), address-taken (Jet.InlineAlwaysAddressTaken), too
+large (Jet.InlineAlwaysTooLarge), `#Scrub` (Jet.InlineAlwaysScrub), a reader of
+`context.trace` (Jet.InlineAlwaysReadsTrace) or foreign, `#FFI(c)`,
+`#FFI(asm)` or `#Import(c)` (Jet.InlineAlwaysForeign), fails the build.
 Collection: under `#Policy(gc)`, a binding whose returned heap graph needs
 identity beyond its lexical owner is kept by the policy scope's collector, at
 the function's line, for example ``collection: main.jet:10 in build: `first`

@@ -66,26 +66,26 @@ static void journey_goldens(void) {
     Hop *hops[]={&first,&second,&third}; Journey journey={&origin,{3,3,hops}};
     const char *plain=
         "  failed here: read_raw (Examples/ErrorsAndEffects/Errors/ErrorContext.jet:4)\n"
-        " Trail [E3002] (3 calls passed it up, origin first):\n"
+        " Trail (3 calls passed it up, origin first):\n"
         "  1. parse_config (Examples/ErrorsAndEffects/Errors/ErrorContext.jet:7) — reading raw config\n"
         "  2. load_config (Examples/ErrorsAndEffects/Errors/ErrorContext.jet:12) — loading config app.toml\n"
         "  3. run (Examples/ErrorsAndEffects/Errors/ErrorContext.jet:16)\n";
     equal(jet_journey_render_styled(&journey,false,0),plain);
     equal(jet_journey_render_styled(&journey,false,80),
         "  failed here: read_raw (…/errors/error_context.jet:4)\n"
-        " Trail [E3002] (3 calls passed it up, origin first):\n"
+        " Trail (3 calls passed it up, origin first):\n"
         "  1. parse_config (…/errors/error_context.jet:7) — reading raw config\n"
         "  2. load_config (…/errors/error_context.jet:12) — loading config app.toml\n"
         "  3. run (…/errors/error_context.jet:16)\n");
     equal(jet_journey_render_styled(&journey,true,80),
         "\033[2;37m  failed here: read_raw (…/errors/error_context.jet:4)\033[0m\n"
-        "\033[2;37m Trail [E3002] (3 calls passed it up, origin first):\033[0m\n"
+        "\033[2;37m Trail (3 calls passed it up, origin first):\033[0m\n"
         "\033[2;37m  1. parse_config (…/errors/error_context.jet:7) — reading raw config\033[0m\n"
         "\033[2;37m  2. load_config (…/errors/error_context.jet:12) — loading config app.toml\033[0m\n"
         "\033[2;37m  3. run (…/errors/error_context.jet:16)\033[0m\n");
     equal(jet_journey_render_styled(&journey,false,40),
         "  failed here: read_raw (error_context.jet:4)\n"
-        " Trail [E3002] (3 calls):\n"
+        " Trail (3 calls):\n"
         "  1. parse_config (error_context.jet:7)\n"
         "  2. load_config (error_context.jet:12)\n"
         "  3. run (error_context.jet:16)\n");
@@ -101,17 +101,17 @@ static void journey_goldens(void) {
     file=borrowed("a.jet"); a=borrowed("g"); b=borrowed("f"); n1=borrowed("a very long note");
     origin=(Hop){&a,&file,1,1,&empty,1,&empty}; first=(Hop){&b,&file,2,1,&n1,1,&empty}; journey.hops.length=1;
     equal(jet_journey_render_styled(&journey,false,30),
-        "  failed here: g (a.jet:1)\n Trail [E3002] (1 call):\n  1. f (a.jet:2) — a very lon…\n");
+        "  failed here: g (a.jet:1)\n Trail (1 call):\n  1. f (a.jet:2) — a very lon…\n");
     first.count=4; n1=empty;
     equal(jet_journey_render_styled(&journey,false,0),
-        "  failed here: g (a.jet:1)\n Trail [E3002] (4 calls passed it up, origin first):\n  1. f (a.jet:2) ×4\n");
+        "  failed here: g (a.jet:1)\n Trail (4 calls passed it up, origin first):\n  1. f (a.jet:2) ×4\n");
     // #6014: each hop's trimmed source line under its header, cut to width.
     Text s0=borrowed("return Err(\"empty\")"), s1=borrowed("n :: g()");
     origin.source=&s0; first.source=&s1; first.count=1;
     equal(jet_journey_render_styled(&journey,false,0),
-        "  failed here: g (a.jet:1)\n      return Err(\"empty\")\n Trail [E3002] (1 call passed it up, origin first):\n  1. f (a.jet:2)\n      n :: g()\n");
+        "  failed here: g (a.jet:1)\n      return Err(\"empty\")\n Trail (1 call passed it up, origin first):\n  1. f (a.jet:2)\n      n :: g()\n");
     equal(jet_journey_render_styled(&journey,false,20),
-        "  failed here: g (a.jet:1)\n      return Err(\"e…\n Trail [E3002] (1 call):\n  1. f (a.jet:2)\n      n :: g()\n");
+        "  failed here: g (a.jet:1)\n      return Err(\"e…\n Trail (1 call):\n  1. f (a.jet:2)\n      n :: g()\n");
     equal(jet_journey_render_styled(NULL,false,80),"");
 }
 static void journey_ownership(void) {
@@ -133,7 +133,7 @@ static void journey_ownership(void) {
     assert(((Hop **)clone->hops.data)[0]!=held && ((Hop **)clone->hops.data)[0]->count==2 && ((Hop **)clone->hops.data)[0]->source->length==8);
     jet_rt_native_journey_drop(value);
     equal(jet_journey_render_styled(clone,false,0),
-        "  failed here: g (a.jet:1)\n      n :: g()\n Trail [E3002] (2 calls passed it up, origin first):\n  1. f (a.jet:2) ×2 — first\n      n :: g()\n");
+        "  failed here: g (a.jet:1)\n      n :: g()\n Trail (2 calls passed it up, origin first):\n  1. f (a.jet:2) ×2 — first\n      n :: g()\n");
     Journey *carried=jet_rt_native_journey_new();
     // A carried origin replaces an old handled failure; all source children
     // move, not clone. The native caller drops neither carried nor its hops.
@@ -150,7 +150,7 @@ static void journey_ownership(void) {
     jet_rt_native_journey_adopt(clone,carried);
     assert(((Hop **)clone->hops.data)[0]->count==4);
     equal(jet_journey_render_styled(clone,false,0),
-        "  failed here: g (a.jet:10)\n      n :: g()\n Trail [E3002] (4 calls passed it up, origin first):\n  1. f (a.jet:11) ×4 — first\n      n :: g()\n");
+        "  failed here: g (a.jet:10)\n      n :: g()\n Trail (4 calls passed it up, origin first):\n  1. f (a.jet:11) ×4 — first\n      n :: g()\n");
     Text *message=text("error"); Err *error=jet_err_from_message(message); jet_rt_string_drop(message);
     Err *context=jet_rt_native_err_context_frame(error,clone,file,12,3,next,source,note);
     assert(!error->context.length && context->context.length==1);

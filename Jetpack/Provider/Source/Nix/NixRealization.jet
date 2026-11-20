@@ -556,7 +556,7 @@ provider_realize_from_local_nix: fn(verification: &StoreVerification, spec: RefS
 // A native cache admission failure as E1350, naming the missing Nix
 // reference when a registered Nix entry no longer hashes to its record.
 provider_nix_cache_error: fn(verification: &StoreVerification, roots: HangarRoots, error: NixCacheError) -[FS, Env, Time]> ProviderError Never! {
-    detail := "{error.code()}: {error.what()}; why: {error.why()}; fix: {error.fix()}"
+    detail := "{diagnostic_headline(error.code(), error.what())}; why: {error.why()}; fix: {error.fix()}"
     if provider_missing_nix_store_path(verification, roots) == {
         .Val(store_path) -> { detail = "{detail}; missing Nix reference `{store_path}`" }
         .None -> {}

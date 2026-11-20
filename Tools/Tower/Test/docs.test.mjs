@@ -49,8 +49,8 @@ function projectLayout() {
   const proj = mkdtempSync(join(tmpdir(), 'tower-docs-'));
   const dataDir = join(proj, '.tower');
   mkdirSync(dataDir, { recursive: true });
-  mkdirSync(join(proj, 'Docs', 'proposals'), { recursive: true });
-  writeFileSync(join(proj, 'Docs', 'proposals', 'idea.md'), '# Idea\n\nhello');
+  mkdirSync(join(proj, 'Docs', 'Proposals'), { recursive: true });
+  writeFileSync(join(proj, 'Docs', 'Proposals', 'idea.md'), '# Idea\n\nhello');
   writeFileSync(join(proj, 'secret.md'), 'nope');
   return { proj, dataDir };
 }
@@ -70,8 +70,8 @@ test('docs reads never create or migrate files', () => {
   assert.deepEqual(readdirSync(join(proj, 'Docs')).sort(), beforeDocs);
   assert.deepEqual(readdirSync(dataDir).sort(), beforeData);
   assert.equal(existsSync(join(dataDir, 'scratch')), false);
-  assert.equal(existsSync(join(proj, 'Docs', 'audits')), false);
-  assert.equal(existsSync(join(proj, 'Docs', 'research')), false);
+  assert.equal(existsSync(join(proj, 'Docs', 'Audits')), false);
+  assert.equal(existsSync(join(proj, 'Docs', 'Research')), false);
   assert.equal(readFileSync(legacy, 'utf8'), 'legacy contents');
 });
 
@@ -150,8 +150,8 @@ test('docs: path escape rejected; only Docs/*.md writable', () => {
   assert.match(prev.body, /hello/);
   assert.throws(() => docs.showDoc(dataDir, 'secret.md'), /Docs/);
   assert.throws(() => docs.showDoc(dataDir, '../secret.md'), /docs|path/);
-  assert.throws(() => docs.showDoc(dataDir, 'Docs/proposals/../../secret.md'), /docs|path|escape/);
-  assert.throws(() => docs.deleteDoc(dataDir, 'Docs/proposals/../../secret.md'), /docs|path|escape/);
+  assert.throws(() => docs.showDoc(dataDir, 'Docs/Proposals/../../secret.md'), /docs|path|escape/);
+  assert.throws(() => docs.deleteDoc(dataDir, 'Docs/Proposals/../../secret.md'), /docs|path|escape/);
 });
 
 test('docs: symlinked files and directories cannot redirect reads or writes', () => {
@@ -253,23 +253,23 @@ test('docs operations leave unrelated scratch reports untouched', () => {
   mkdirSync(scratch, { recursive: true });
   writeFileSync(join(scratch, 'owner-scratch.md'), '---\ntitle: Owner scratch\n---\nkeep\n');
   writeFileSync(join(scratch, 'field-audit.md'), '# Unpublished findings\n');
-  mkdirSync(join(proj, 'Docs', 'audits'), { recursive: true });
-  writeFileSync(join(proj, 'Docs', 'audits', 'field-audit.md'), '# Published findings\n');
+  mkdirSync(join(proj, 'Docs', 'Audits'), { recursive: true });
+  writeFileSync(join(proj, 'Docs', 'Audits', 'field-audit.md'), '# Published findings\n');
 
   docs.listDocs(dataDir);
   docs.addDoc(dataDir, { section: 'research', title: 'Study', body: '# Study\n' });
   docs.updateScratchPad(dataDir, { body: 'new owner note\n' });
 
   assert.equal(readFileSync(join(scratch, 'field-audit.md'), 'utf8'), '# Unpublished findings\n');
-  assert.equal(readFileSync(join(proj, 'Docs', 'audits', 'field-audit.md'), 'utf8'), '# Published findings\n');
+  assert.equal(readFileSync(join(proj, 'Docs', 'Audits', 'field-audit.md'), 'utf8'), '# Published findings\n');
 });
 
 
 test('docs: list groups sections and ignores non-md', () => {
   const { dataDir, proj } = projectLayout();
-  mkdirSync(join(proj, 'Docs', 'research', '_scripts'), { recursive: true });
-  writeFileSync(join(proj, 'Docs', 'research', '_scripts', 'out.json'), '{}');
-  writeFileSync(join(proj, 'Docs', 'research', 'note.md'), '# Note\n');
+  mkdirSync(join(proj, 'Docs', 'Research', '_scripts'), { recursive: true });
+  writeFileSync(join(proj, 'Docs', 'Research', '_scripts', 'out.json'), '{}');
+  writeFileSync(join(proj, 'Docs', 'Research', 'note.md'), '# Note\n');
   const index = docs.listDocs(dataDir);
   const research = index.sections.find(s => s.id === 'research').files;
   assert.ok(research.some(f => f.path.endsWith('note.md')));
@@ -278,13 +278,13 @@ test('docs: list groups sections and ignores non-md', () => {
 
 test('docs: four categories omit legacy dirs and README navigation; delete removes docs', () => {
   const { dataDir, proj } = projectLayout();
-  for (const dir of ['spec', 'audits', 'research', 'proposals', 'plans', 'reference', 'sidequests', 'archive'])
+  for (const dir of ['Spec', 'Audits', 'Research', 'Proposals', 'plans', 'reference', 'sidequests', 'archive'])
     mkdirSync(join(proj, 'Docs', dir), { recursive: true });
   writeFileSync(join(proj, 'Docs', 'README.md'), '# Docs navigation\n');
-  writeFileSync(join(proj, 'Docs', 'spec', 'philosophy.md'), '# Philosophy\n');
-  writeFileSync(join(proj, 'Docs', 'audits', 'security.md'), '# Security\n');
-  writeFileSync(join(proj, 'Docs', 'research', 'study.md'), '# Study\n');
-  writeFileSync(join(proj, 'Docs', 'proposals', 'idea.md'), '# Idea\n');
+  writeFileSync(join(proj, 'Docs', 'Spec', 'philosophy.md'), '# Philosophy\n');
+  writeFileSync(join(proj, 'Docs', 'Audits', 'security.md'), '# Security\n');
+  writeFileSync(join(proj, 'Docs', 'Research', 'study.md'), '# Study\n');
+  writeFileSync(join(proj, 'Docs', 'Proposals', 'idea.md'), '# Idea\n');
   writeFileSync(join(proj, 'Docs', 'plans', 'old-plan.md'), '# Old plan\n');
   writeFileSync(join(proj, 'Docs', 'reference', 'old-reference.md'), '# Old reference\n');
   writeFileSync(join(proj, 'Docs', 'sidequests', 'old-sidequest.md'), '# Old sidequest\n');

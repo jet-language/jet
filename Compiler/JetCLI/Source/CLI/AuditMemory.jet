@@ -2,6 +2,7 @@
 // never described as whole-program proof.
 use {
     jet_foundation.[
+        diagnostic_display_name,
         diagnostic_registry_row,
         diagnostic_theme_paint,
         Diagnostic,
@@ -241,7 +242,7 @@ jet_cli_audit_memory_at: fn(root: String, args: [String], color: Bool, json: Boo
     out := "{title}\nCoverage: exercised runs only\nWitnesses: {rows.len()}\n"
     if rows.len() == 0 -> out = "{out}\nNo runtime memory witnesses recorded.\n"
     loop row in rows {
-        out = "{out}\n{row.source}:{row.span_start}..{row.span_end}  {row.kind} {row.code}\n  Scope: {row.scope}\n  Provenance: {row.provenance}\n  Witness: {row.detail}\n"
+        out = "{out}\n{row.source}:{row.span_start}..{row.span_end}  {row.kind} {diagnostic_display_name(row.code)}\n  Scope: {row.scope}\n  Provenance: {row.provenance}\n  Witness: {row.detail}\n"
         if {
             row.repairs.len() == 1 && row.byte_spans && row.expected != None -> {
                 out = "{out}  Static repair: {row.repairs[0]}\n"

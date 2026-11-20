@@ -10,7 +10,7 @@
 use {
     cli_files: core.files
     jet_driver.[JetDriverCompileMode, JetDriverDocModule, JetDriverKeepGoing, JetDriverToolStageItem, JetDriverVerbOutput, jet_driver_compile_keep_going, jet_driver_present_diagnostics]
-    jet_foundation.[Diagnostic, Span]
+    jet_foundation.[Diagnostic, Span, diagnostic_headline]
     jet_lsp.[LSPChecked, LSPChecker, LSPChoice, LSPOverlay, LSPProducer, lsp_serve, lsp_write_log]
     jet_semindex.[SemSymbol, semindex_build_symbols]
 }
@@ -66,7 +66,7 @@ JetCLILSPChecker: struct {
             }
             run := jet_cli_tool_stage_run(entry, given, stage, bodies, program)
             if run.stop == .Val(stop) {
-                lsp_write_log("the `{stage}` hooks of `{entry}` did not run: {stop.code}: {stop.what}").drop("standard error is the log; a failed log write has nowhere to go")
+                lsp_write_log("the `{stage}` hooks of `{entry}` did not run: {diagnostic_headline(stop.code, stop.what)}").drop("standard error is the log; a failed log write has nowhere to go")
             }
             run.answers
         }

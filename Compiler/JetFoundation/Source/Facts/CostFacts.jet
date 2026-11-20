@@ -77,10 +77,13 @@ checked_builtin_mutates_receiver: fn(operation: TBuiltinOp) -> Bool Never! {
 }
 
 // One checked expression's run-time cost: what it may do on a hot path and
-// whether a typed proof removed it.
+// whether a typed proof removed it. `written` marks a cost that is the own
+// work of a call the source writes (`text.lines()` copying each line out),
+// not a copy the source doesn't show.
 TCostFact: struct {
     kind: TCostKind,
     state: TCostState,
+    written: Bool{false},
 }
 
 // The checked type of node `id` of `tree`, when the tree files one.
@@ -187,7 +190,8 @@ checked_cost_int_fact: fn(operands: [TIntegerBounds?], result: TIntegerBounds?) 
 // The cost of node `node` of a checked body, as the Rust reference's
 // cost_fact_for_expr reads a typed expression: a read-only view made owned
 // (a view local stored into an owned slot, or `text.lines()`, which copies
-// each line of `text` out into an owned String), a copy sema made without
+// each line of `text` out into an owned String as the written call's own
+// work), a copy sema made without
 // one being written that allocates (a share site's copy of a value still
 // used later, or a materialized argument; a bitwise copy or a Shared
 // handle's count bump is Scalar and no site), an edit of a map's possibly
@@ -215,7 +219,7 @@ body_cost_fact: fn(tree: BodyTree, node: BodyNode) -> TCostFact? Never! {
             return Val(TCostFact{kind: TCostKind.CollectionCopyOnWrite, state: TCostState.SemanticRemainder})
         }
         if operation == TBuiltinOp.Lines && receiver_type == Type.String {
-            return Val(TCostFact{kind: TCostKind.ViewMaterialization, state: TCostState.SemanticRemainder})
+            return Val(TCostFact{kind: TCostKind.ViewMaterialization, state: TCostState.SemanticRemainder, written: true})
         }
     }
     if ty == Type.Int {

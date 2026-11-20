@@ -2,7 +2,7 @@
 // of `lookup`) over SyntaxDictionaryData.jet. Shared with the Jetpack unit:
 // `jetpack explain <token>` answers from the same one table (Rust jetpack used
 // `Syntax.lookup` and `Explain.lookup`).
-use jet_foundation.[DiagnosticExplanation]
+use jet_foundation.[DiagnosticExplanation, diagnostic_display_name]
 
 // ASCII lowercase (Rust `to_ascii_lowercase`).
 jet_cli_ascii_lower: fn(value: String) -> String Never! {
@@ -92,7 +92,9 @@ jet_cli_syntax_meanings_text: fn(meanings: [JetCLISyntaxMeaning]) -> String Neve
         loop line in meaning.example.split("\n") -> text = "{text}{indent}  {line}\n"
         if meaning.afterwards != "" -> text = "{text}{indent}Afterwards: {meaning.afterwards}\n"
         if meaning.related_codes.len() > 0 {
-            text = "{text}{indent}Related: {meaning.related_codes.join(", ")}\n"
+            related := [String]{}
+            loop code in meaning.related_codes -> related.push(diagnostic_display_name(code))
+            text = "{text}{indent}Related: {related.join(", ")}\n"
         }
     }
     text

@@ -301,7 +301,7 @@ Requests carry:
 | `source_id` | Optional project-relative source selected in the Files rail. |
 | `revision` | Source revision from the graph document. |
 | `session_id` | Returned by a running response to continue or stop that session. |
-| `tier` | `native` (the default) keeps one live paused program; `native-recorded` replays a `jet run --record` recording, as `jet debug --replay` does, so the reverse commands and `why` run; `native-dump` reads a `.jetdump`, as `jet debug <dump>` does, where nothing runs. All run on Jet's own native debugger. A new session's tier follows `recording` or `dump`, and a tier that disagrees with them is refused `bad_request`; `jet-dev-replay` is refused `unsupported`, and any other tier `bad_request`. Continuations keep the tier: one that names another is refused `conflict` and the session kept. |
+| `tier` | `native` (the default) keeps one live paused program; `native-recorded` replays a `jet run --record` recording, as `jet debug --replay` does, so the reverse commands and `why` run; `native-dump` reads a `.jetdump`, as `jet debug <dump>` does, where nothing runs. All run on Jet's own native debugger. A new session's tier follows `recording` or `dump`, and a tier that disagrees with them is refused `bad_request`; any other tier is refused `bad_request`. Continuations keep the tier: one that names another is refused `conflict` and the session kept. |
 | `recording` | Opens a `native-recorded` session on the recording: the NAME of a `jet run --record=NAME` run of the entry, or a project-relative `.jetproof-replay` path. A recording that can't be replayed answers its own report as a `diagnostic`. |
 | `dump` | Opens a `native-dump` session on a `.jetdump` of the entry, a path taken from the entry's directory when relative. A dump of another program is refused `bad_request`. Its `#Secret` locals read redacted. |
 | `commands` | `step`, `next`, `continue`, `finish`, `reverse-step`, `reverse-next`, `reverse-finish`, `reverse-continue`, `why <name>`, `locals`, `print <name>`, `backtrace`, `frame <n>`, `tasks`, `task <n>` or `events`, with the console's short forms. The reverse commands and `why` answer a refusal outside a replay; a dump answers that it doesn't run to every run command. |
@@ -319,9 +319,12 @@ A running response projects one bounded runtime snapshot:
 The first request creates a source- and revision-bound session. `runtime_state:
 "live"` means values, stack, active node, and wire path came from the current
 paused runtime snapshot. Finished values are historical and do not pulse the
-graph. A disconnected or stale session clears its overlay before reporting the
-state. A later request sends `session_id` and commands to continue the same
-session.
+graph. A program killed out from under the debugger (`SIGKILL`) ends its
+session `"disconnected"`: the session's `state`, `debug_overlay` and
+`runtime_state` are `"disconnected"`, and the overlay has no active line,
+values or stack, nothing read at an earlier stop. A disconnected or stale
+session clears its overlay before reporting the state. A later request sends
+`session_id` and commands to continue the same session.
 
 An anchor drawn on another revision than the request's is stale, since an edit
 may have moved the code it named. A stale breakpoint stops nowhere and is

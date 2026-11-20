@@ -1,0 +1,86 @@
+// The two embedded-data micro witnesses: the fixed-width take_pattern frame
+// loop and the byte checksum loop, over the same in-memory payload
+// embedded-data reads ("EDB1", a u32 le frame count, then 12-byte frames).
+// bytes.rs beside this file runs the same kernels on the same bytes.
+//
+//   jet run --release -A Tools/Perf/ArithKernels/bytes.jet -- [FRAMES]
+//   rustc -O -C target-cpu=native -o /tmp/bytes Tools/Perf/ArithKernels/bytes.rs && /tmp/bytes [FRAMES]
+//
+// FRAMES defaults to 1000000. Each kernel runs 5 times and prints its best
+// time in nanoseconds with its check value; the check values match between
+// the two programs, and Jet passes when each best_ns is below Rust's.
+use core.[process, time]
+
+FRAMES: 1000000
+
+ROUNDS: 5
+
+push_le: fn(out: &[U8], value: Int, width: Int) {
+    rest := value
+    loop _ in 0..<width {
+        out.push(U8{rest % 256})
+        rest /%= 256
+    }
+}
+
+payload: fn(frames: Int) -> [U8] {
+    out := [U8]{}
+    magic: [U8]{"EDB1"}
+    loop byte in magic -> out.push(byte)
+    push_le(out, frames, 4)
+    seed := 12345
+    loop index in 0..<frames {
+        seed = (seed * 1103515245 + 12345) % 2147483648
+        out.push(U8{index % 4})
+        out.push(U8{if seed % 16 == 0 -> 1 else -> 0})
+        push_le(out, seed % 65536, 2)
+        push_le(out, index, 4)
+        push_le(out, (seed /% 65536) % 65536, 2)
+        push_le(out, (seed /% 7) % 65536, 2)
+    }
+    out
+}
+
+take_pattern_kernel: fn(data: &&[U8]) -> U64 {
+    reader: Reader.over(data)
+    reader.take_pattern([U8]{"EDB1"}) ?? return U64{0}
+    count: Int{reader.read_u32_le() ?? return U64{0}}
+    check := U64{0}
+    loop _ in 0..<count {
+        frame: reader.take_pattern([U8]{"{channel:U8}{flags:U8}{sample:U16le}{tick:U32le}{energy:U16le}{load:U16le}"}) ?? return U64{0}
+        check += U64{frame.channel} + U64{frame.flags} + U64{frame.sample} + U64{frame.tick} + U64{frame.energy} + U64{frame.load}
+    }
+    check
+}
+
+byte_checksum_kernel: fn(data: [U8]) -> U64 {
+    check := U64{0}
+    loop byte in data -> check += (U64{byte})
+    check
+}
+
+run: fn() {
+    args: process.args()
+    frames: if args.len() > 0 -> Int.parse(args[0]) ?? FRAMES else -> FRAMES
+    data: payload(frames)
+
+    best := -1
+    check := U64{0}
+    loop _ in 0..<ROUNDS {
+        owned: data.copy()  // copy: the reader takes its bytes, and every round reads the same payload
+        started: time.instant()
+        check = take_pattern_kernel(owned)
+        spent: started.elapsed().ns
+        if best < 0 || spent < best -> best = spent
+    }
+    print("take_pattern frames={frames} best_ns={best} check={check}")
+
+    best = -1
+    loop _ in 0..<ROUNDS {
+        started: time.instant()
+        check = byte_checksum_kernel(data)
+        spent: started.elapsed().ns
+        if best < 0 || spent < best -> best = spent
+    }
+    print("byte_checksum bytes={data.len()} best_ns={best} check={check}")
+}

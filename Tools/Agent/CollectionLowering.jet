@@ -71,7 +71,7 @@ run: fn() {
     found := [String]{}
     failed := [String]{}
     loop level in LEVELS {
-        ran: process.cmd([String]{jet, "run", "-{level}", EXAMPLE}).run() ?? process.fail(1, "collection lowering: {jet} cannot start: {err}")
+        ran: process.cmd([String]{jet.copy(), "run", "-{level}", EXAMPLE}).run() ?? process.fail(1, "collection lowering: {jet} cannot start: {err}")
         seen: faults_in(ran.output, found) + faults_in(ran.errors, found)
         if ran.code != 0 && seen == 0 {
             failed.push("{level}: exit {ran.code}: {ran.errors.trim()}")

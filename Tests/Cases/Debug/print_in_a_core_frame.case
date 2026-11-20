@@ -1,0 +1,22 @@
+# A stop in a Core function reads its source from the Core the program was
+# compiled with, never from the working directory, which holds no
+# `<corelib>` folder: the stop shows the Core line it is at, and `print`
+# evaluates a field of the Core function's parameter there, which the
+# compile checks in that Core source. `break unparse` stops at the first
+# line of core.net.url's `unparse`, whose `url` is the URL `run` parsed.
+# The fixture must stay in jet fmt form: line 5 is `run`'s call of
+# `unparse`. No other debugger is on PATH.
+fixture: PrintInACoreFrame.fixture
+env: NO_COLOR=1
+step: jet debug prog.jet
+env: PATH={work}/no-tools
+stdin: print_in_a_core_frame.stdin
+exit: 0
+stdout: ~ "Breakpoint hit  URL.jet:" # the stop is in the Core source
+stdout: ~ "  in unparse()\n" # in the Core function the breakpoint names
+stdout: ~ "|     scheme: ascii_lower(url.scheme_text)        <- here\n" # the stop's line is read from Core
+stdout: ~ "(Jet) print url.host_text\nurl.host_text = \"example.com\"\n" # a field of the Core frame's parameter
+stdout: !~ "couldn't read" # no Core source is read from the working directory
+stdout: ~ "#0  unparse()  at URL.jet:" # the backtrace starts in the Core function
+stdout: ~ "#1  run()  at prog.jet:5\n" # called from run
+stdout: ~ "https://example.com/a/b?q=1\nProgram finished\n" # the evaluation left the program's run unchanged

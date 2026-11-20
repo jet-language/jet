@@ -1,7 +1,7 @@
 # D-META-LADDER1: only the root package's own build source makes the
 # `Compiler` value. The `app` root makes it for its target and builds. The
 # `forwarded` root hands its `Build` to the `tool` dependency, whose
-# `b.compiler` call is E0776 at the dependency's own line: a forwarded `Build`
+# `b.compiler` call is Jet.CompilerValueOutsideRoot at the dependency's own line: a forwarded `Build`
 # carries no compiler control.
 fixture: CompilerValueIsMadeOnlyByTheRootBuild.fixture
 env: NO_COLOR=1
@@ -10,5 +10,5 @@ step: jet build app/main.jet
 exit: 0
 step: jet build forwarded/main.jet
 exit: 1
-stderr: ~ E0776 # the dependency's call is refused
+stderr: ~ Jet.CompilerValueOutsideRoot # the dependency's call is refused
 stderr: ~ tool.jet:4 # at the dependency's own line

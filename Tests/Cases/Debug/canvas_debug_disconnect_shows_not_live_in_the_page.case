@@ -1,0 +1,20 @@
+# A program killed out from under the debugger is shown disconnected in the
+# Canvas page, with nothing it read before presented as live: the stop's value
+# is shown live first, then Continue lets the program kill itself, and the page
+# says the runtime is disconnected, leaves the debug controls and clears the
+# values from the node's details and the Debug view. Tools/CanvasTest/Run.jet
+# `scenario` serves the program with `jet dev --canvas` and drives the page in
+# Chromium (Tools/CanvasTest/DebugScenarios.jet).
+requires: os-name:linux
+requires: tool:chromium
+requires: tool:chromedriver
+env: NO_COLOR=1
+env: JET_PROJECT_ROOT={work}
+env: JET_BIN={jet}
+env: TMPDIR={scratch}
+write: jet_debug_canvas_stop_binding.jet canvas_debug_disconnect_is_not_live.program.template
+step: jetpack browser lock chromium --binary {tool:chromium} --version 152.0.7977.64 --protocol bidi-2025.5 --driver {tool:chromedriver}
+exit: 0
+step: jet run --allow=Env,Exec,FS,IO,Net,Time {root}/Tools/CanvasTest/Run.jet -- scenario --scenario debug_disconnect_not_live --source jet_debug_canvas_stop_binding.jet
+exit: 0
+stdout: ~ "PASS chromium debug_disconnect_not_live" # the scenario's one pass line; it fails if the page shows the killed runtime as live

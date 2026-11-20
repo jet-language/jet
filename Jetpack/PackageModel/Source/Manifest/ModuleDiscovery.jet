@@ -3,7 +3,7 @@
 // project `#Job` declarations into the shared job registry.
 use {
     jetpack_foundation.[KW_MODULE, PACKAGE_FILE]
-    jet_foundation.[Diagnostic, Item, JobRegistry]
+    jet_foundation.[Diagnostic, Item, JobRegistry, diagnostic_headline]
     jet_lexer.[lex]
     jet_parser.[parse_lexed]
 }
@@ -92,11 +92,11 @@ pkg_discover_jobs_in: fn(root: String) -[FS, Env]> JobRegistry JobDiscoveryError
         }
         lexed: lex(masked.bytes())
         if lexed.diagnostics.len() > 0 {
-            return Err(JobDiscoveryError{message: "{file.path}: lexer diagnostics: {pkg_diagnostic_codes(lexed.diagnostics)}"})
+            return Err(JobDiscoveryError{message: "{file.path}: lexer diagnostics: {pkg_diagnostic_headlines(lexed.diagnostics)}"})
         }
         parsed: parse_lexed(lexed)
         if parsed.diagnostics.len() > 0 {
-            return Err(JobDiscoveryError{message: "{file.path}: parser diagnostics: {pkg_diagnostic_codes(parsed.diagnostics)}"})
+            return Err(JobDiscoveryError{message: "{file.path}: parser diagnostics: {pkg_diagnostic_headlines(parsed.diagnostics)}"})
         }
         loop item in parsed.program.items {
             if item == .Func(function) {
@@ -113,10 +113,12 @@ pkg_discover_jobs_in: fn(root: String) -[FS, Env]> JobRegistry JobDiscoveryError
     Ok(JobRegistry.from_items(job_items))
 }
 
-// `code: what` of each diagnostic, one per line.
-pkg_diagnostic_codes: fn(diagnostics: [Diagnostic]) -> String Never! {
+// The headline of each diagnostic, one per line.
+pkg_diagnostic_headlines: fn(diagnostics: [Diagnostic]) -> String Never! {
     lines := [String]{}
-    loop diagnostic in diagnostics -> lines.push("{diagnostic.code}: {diagnostic.what}")
+    loop diagnostic in diagnostics {
+        lines.push(diagnostic_headline(diagnostic.code, diagnostic.what))
+    }
     lines.join("\n")
 }
 

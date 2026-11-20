@@ -7,7 +7,8 @@
 // the session in its error state. The dev loop also applies the source
 // transactions the page posts, one at a time: each candidate text is checked
 // before it replaces the entry. It answers the page's debug requests from its
-// debug sessions too (CanvasDebug.jet), and its profile requests from a trace
+// debug sessions too (JetCanvas CanvasDebugSession.jet, with this `jet` as
+// their host, CanvasDebug.jet), and its profile requests from a trace
 // (CanvasProfile.jet). The session ends only when its
 // server stops, or with the process on Ctrl-C.
 use {
@@ -21,6 +22,8 @@ use {
         CanvasHostEdit,
         CanvasHostState,
         CanvasProjectFile,
+        canvas_debug_answer,
+        canvas_debug_sessions,
         canvas_graph_projection,
         canvas_host_app,
         canvas_host_bound,
@@ -136,7 +139,7 @@ jet_cli_dev_canvas_loop: fn(file: String, color: Bool, host: String, port: Int) 
     cli_sys.on_interrupt(fn() {
         jet_cli_dev_web_stop(stop, JET_CLI_CANVAS_INTERRUPTED)
     })
-    debugs := jet_cli_canvas_debug_sessions()
+    debugs := canvas_debug_sessions(cli_sys.executable())
     profiles := jet_cli_canvas_profiles()
     task.group dev_canvas {
         serving: task {
@@ -154,7 +157,7 @@ jet_cli_dev_canvas_loop: fn(file: String, color: Bool, host: String, port: Int) 
             loop {
                 edit: taken.try_receive() ?? break
                 if edit.route == .Debug {
-                    jet_cli_canvas_debug_answer(debugs, state, file, source_id, edit)
+                    canvas_debug_answer(debugs, jet_cli_canvas_debug_host(), state, file, source_id, edit)
                     next
                 }
                 if edit.route == .Profile {

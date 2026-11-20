@@ -21,10 +21,10 @@ function project() {
   const root = mkdtempSync(join(tmpdir(), 'tower-security-'));
   const dataDir = join(root, '.tower');
   mkdirSync(join(dataDir, 'backups'), { recursive: true });
-  mkdirSync(join(root, 'Docs', 'research'), { recursive: true });
+  mkdirSync(join(root, 'Docs', 'Research'), { recursive: true });
   writeJSON(join(dataDir, 'tower.json'), empty('Security test'));
   writeJSON(historyFile(dataDir), emptyHistory());
-  writeFileSync(join(root, 'Docs', 'research', 'inside.md'), 'inside secret\n');
+  writeFileSync(join(root, 'Docs', 'Research', 'inside.md'), 'inside secret\n');
   return { root, dataDir };
 }
 
@@ -35,8 +35,8 @@ function invalid(operation) {
 test('docs reject hardlinked documents and every available special file', (t) => {
   const { root, dataDir } = project();
   try {
-    const original = join(root, 'Docs', 'research', 'inside.md');
-    const hardlink = join(root, 'Docs', 'research', 'hardlink.md');
+    const original = join(root, 'Docs', 'Research', 'inside.md');
+    const hardlink = join(root, 'Docs', 'Research', 'hardlink.md');
     linkSync(original, hardlink);
     for (const operation of [
       () => docs.showDoc(dataDir, 'Docs/Research/hardlink.md'),
@@ -47,10 +47,10 @@ test('docs reject hardlinked documents and every available special file', (t) =>
     assert.equal(readFileSync(original, 'utf8'), 'inside secret\n');
 
     const specialPaths = [];
-    const docsRoot = join(root, 'Docs', 'research');
-    const fifo = join(root, 'Docs', 'research', 'special-fifo.md');
+    const docsRoot = join(root, 'Docs', 'Research');
+    const fifo = join(root, 'Docs', 'Research', 'special-fifo.md');
     if (spawnSync('mkfifo', [fifo]).status === 0) specialPaths.push(fifo);
-    const device = join(root, 'Docs', 'research', 'special-device.md');
+    const device = join(root, 'Docs', 'Research', 'special-device.md');
     if (spawnSync('mknod', [device, 'c', '1', '3']).status === 0) specialPaths.push(device);
     if (!specialPaths.length) return t.skip('host cannot create a FIFO or device node');
     for (const special of specialPaths) {
@@ -72,8 +72,8 @@ test('docs reject hardlinked documents and every available special file', (t) =>
 test('held docs directories fail closed when moved outside the project root', async () => {
   const { root, dataDir } = project();
   const outside = mkdtempSync(join(tmpdir(), 'tower-security-outside-'));
-  const held = join(root, 'Docs', 'research');
-  const moved = join(outside, 'research');
+  const held = join(root, 'Docs', 'Research');
+  const moved = join(outside, 'Research');
   renameSync(held, moved);
   try {
     assert.throws(() => docs.showDoc(dataDir, 'Docs/Research/inside.md'), error =>

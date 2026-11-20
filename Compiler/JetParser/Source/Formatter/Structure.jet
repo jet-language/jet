@@ -2,7 +2,7 @@
 // the source, compared without positions. jfmt_format_source_in refuses a
 // result whose program differs, so no formatter defect can rewrite what a
 // file means; the report names the first node that differs.
-use jet_foundation.[Diagnostic, DIAGNOSTIC_LINT, Program]
+use jet_foundation.[Diagnostic, DIAGNOSTIC_LINT, Program, diagnostic_headline]
 
 // The structure of `program`: its whole debug form, with what records a
 // position or a layout of the text blanked: every `Span`, every node `id`,
@@ -222,7 +222,7 @@ jfmt_structure_clean: fn(diagnostics: [Diagnostic]) -> Bool Never! {
 jfmt_structure_change: fn(source: Program, formatted: Program, formatted_diagnostics: [Diagnostic]) -> String? Never! {
     loop diagnostic in formatted_diagnostics {
         if diagnostic.severity != DIAGNOSTIC_LINT {
-            return Val("the formatted text does not parse ({diagnostic.code}: {diagnostic.what})")
+            return Val("the formatted text does not parse ({diagnostic_headline(diagnostic.code, diagnostic.what)})")
         }
     }
     before: jfmt_structure(source)

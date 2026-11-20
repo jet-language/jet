@@ -151,7 +151,6 @@ Contract: struct {
     tier_requirement: [String:String],
     tier_availability: [String:String],
     tier_reason: [String:String],
-    tier_rationale: [String:String],
 }
 
 run: fn() {
@@ -1173,7 +1172,6 @@ static_contract: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Contrac
         tier_requirement: tier_requirement,
         tier_availability: tier_availability,
         tier_reason: tier_reason,
-        tier_rationale: tier_rationale,
     }
 }
 
@@ -3114,9 +3112,9 @@ write_synthetic_report: fn(state: SelfCheck) -[Env, Exec, FS, IO, Time, Time.Wai
                 at(contract.selected_revision, id),
                 "0",
                 "0",
-                launcher_path,
+                launcher_path.copy(),
                 PEER_LAUNCHER_CONTRACT,
-                launcher_sha,
+                launcher_sha.copy(),
                 at(contract.task_authority, id),
             }
             receipts.push(row.join("\t"))

@@ -86,6 +86,7 @@ use {
         ast_visit_expr,
         ast_empty_lambda_meta,
         diagnostic_registry_row,
+        diagnostic_registry_row_named,
         expr_is_map_slot_or,
         expr_source_span,
         expr_source_start,
@@ -7944,6 +7945,22 @@ sema_stmt_check_reactive: fn(body: [Stmt], span: Span, environment: SemaScopeEnv
     }
 }
 
+// The stop code an `.expect_fail` argument names: a registered E30xx row,
+// written as its name (`Jet.ArithmeticOrBoundsFailure`) or as its code.
+sema_expect_fail_code: fn(argument: Expr) -> String? Never! {
+    if argument == .Ident(value, _, _) {
+        row: diagnostic_registry_row(value) ?? return None
+        if row.code.starts_with("E30") -> return Val(row.code)
+    }
+    if argument == .Field(base, member, _, _) {
+        if base == .Ident(head, _, _) {
+            row: diagnostic_registry_row_named("{head}.{member}") ?? return None
+            if row.code.starts_with("E30") -> return Val(row.code)
+        }
+    }
+    None
+}
+
 sema_stmt_check_scope_member: fn(name: String, args: [Expr], args_span: Span?, body: [Stmt], dsl: Bool, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int) -> TStmt? {
     if dsl {
         type_header := sema_marker_rules_type_header(program, name)
@@ -8002,11 +8019,10 @@ sema_stmt_check_scope_member: fn(name: String, args: [Expr], args_span: Span?, b
             valid := args.len() <= 2
             loop argument in args {
                 if argument == {
-                    .Ident(value, _, _) -> {
-                        if code != None || message != None || !value.starts_with("E30") || diagnostic_registry_row(value) == None {
-                            valid = false
-                        }
-                        code = Val(value)
+                    .Ident(_, _, _) | .Field(_, _, _, _) -> {
+                        found: sema_expect_fail_code(argument)
+                        if code != None || message != None || found == None -> valid = false
+                        code = found
                     }
                     .TupleLit(fields, _, _, _) -> {
                         if message != None || fields.len() != 1 {
@@ -8034,7 +8050,7 @@ sema_stmt_check_scope_member: fn(name: String, args: [Expr], args_span: Span?, b
                             }
                         }
                     }
-                    .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {
+                    .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {
                         valid = false
                     }
                 }
@@ -8044,9 +8060,9 @@ sema_stmt_check_scope_member: fn(name: String, args: [Expr], args_span: Span?, b
                     sema_error(
                         "E0617",
                         args_span ?? span,
-                        "`.expect_fail` takes an optional runtime stop code and `message: \"text\"`",
-                        "the code names a registered E30xx stop; the message is a non-empty string literal matched as a case-sensitive substring",
-                        "write `.expect_fail {{ … }}`, `.expect_fail(E3010) {{ … }}`, or `.expect_fail(E3001, message: \"reason\") {{ … }}`",
+                        "`.expect_fail` takes an optional runtime stop name and `message: \"text\"`",
+                        "the name is a registered runtime stop; the message is a non-empty string literal matched as a case-sensitive substring",
+                        "write `.expect_fail {{ … }}`, `.expect_fail(Jet.ArithmeticOrBoundsFailure) {{ … }}`, or `.expect_fail(Jet.Panic, message: \"reason\") {{ … }}`",
                     ),
                 )
             }

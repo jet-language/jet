@@ -407,7 +407,7 @@ unit_sources: fn(target: SyntaxTarget) -[FS]> [SourceFile] JetpackSyntaxError! {
         loop line in text.lines() {
             path: line.trim()
             if path == "" || path.starts_with("#") || path == target.output -> next
-            sources.push(read_source(path) ?? return Err(err))
+            sources.push(read_source(path.copy()) ?? return Err(err))
         }
     }
     if target.unit_dir == "" -> return Ok(sources)

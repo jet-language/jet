@@ -1147,6 +1147,7 @@
     const lensClose = document.getElementById("jet-devtools-lens-close");
     const workbenchClose = document.getElementById("jet-devtools-workbench-close");
     const copy = document.getElementById("jet-devtools-copy");
+    const panelSelect = document.getElementById("jet-devtools-panel-select");
     if (lens) lens.addEventListener("click", devtoolsOpenLens);
     if (workbench) workbench.addEventListener("click", devtoolsOpenWorkbench);
     if (lensClose) lensClose.addEventListener("click", devtoolsCloseLens);

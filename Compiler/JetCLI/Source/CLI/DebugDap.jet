@@ -32,6 +32,8 @@
 // as the console shows them, each with its Jet type. `showRawFrames` adds
 // the machine frames, each named `[raw]` with its instruction pointer, and
 // each its one scope, `[raw] Locals`, of its pc and canonical frame address.
+// A frame in Core names its source by a `sourceReference`, and the `source`
+// request answers that source's text as the program's Core holds it.
 // A frame id or variable reference names the stop it was made at; once the
 // program runs again, it names nothing.
 // A breakpoint may carry a `condition` and a `logMessage`, and `evaluate`
@@ -76,7 +78,7 @@ use {
     dap_json: core.encoding.json
     dap_term: core.term
     jet_debug.[NATIVE_ATTACH_INVALID, NATIVE_DEBUG_REFUSED, NATIVE_DEBUG_TASK_RUNNING, NativeDebugError, NativeEvalRefused, NativeLocal, NativeSaid, NativeSession, NativeSettled, NativeStop, NativeStopKind, NativeWatched, native_debug_hex, native_debug_jet_frame, native_debug_report, native_debug_rule_place, native_function_at, native_lookup]
-    jet_foundation.[DeepChecks, Diagnostic, foundation_json_integer, foundation_json_quote]
+    jet_foundation.[DeepChecks, Diagnostic, MODULE_CORE_PREFIX, foundation_json_integer, foundation_json_quote]
 }
 
 // One `setBreakpoints` entry: its line, and its condition and log message
@@ -160,6 +162,9 @@ JetCLIDap: struct {
     // Whether `fix` has the program's source: a built image's build is
     // not known, so `fix` refuses it.
     fixable: Bool{false},
+    // The Core sources `stackTrace` named, each by its `sourceReference`,
+    // its index plus 1, which the `source` request reads.
+    sources: [String]{[String]{}},
 
     handle: fn(&self, session: &NativeSession, input: &&JetCLIDapRequest, entry: String, deep_checks: DeepChecks) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never! {
         request := input.move()
@@ -444,6 +449,15 @@ JetCLIDap: struct {
                     .Err(failure) -> self.fail(request, failure.detail)
                 }
             }
+            "source" -> {
+                reference: jet_cli_dap_int(request.arguments, "sourceReference")
+                if reference < 1 || reference > self.sources.len() {
+                    return self.fail(request, "no source has reference {reference}")
+                }
+                path: "{self.sources[reference - 1]}"
+                text: session.source_text(path) ?? return self.fail(request, "couldn't read `{path}`")
+                self.respond(request, "{{\"content\":{foundation_json_quote(text)}}}")
+            }
             "fix" -> {
                 if !self.launched || !session.alive() {
                     return self.fail(request, "the program is not paused")
@@ -682,7 +696,9 @@ JetCLIDap: struct {
     // `stackTrace` of task `task` at this stop: its Jet frames, innermost
     // first, each by its row in `frames`, which `scopes`, `variables` and
     // `evaluate` name it by; with `raw`, then its machine frames. A task
-    // with no stack yet (a queued one) has none.
+    // with no stack yet (a queued one) has none. A Core frame's source is
+    // no file: the `source` request reads it by its `sourceReference`
+    // (NativeSession.source_text).
     stack: fn(&self, session: &NativeSession, entry: String, task: Int, raw: Bool) -> String NativeDebugError! {
         if !(self.focus(session, task) ?? return Err(err)) {
             return Ok("{{\"stackFrames\":[],\"totalFrames\":0}}")
@@ -693,7 +709,7 @@ JetCLIDap: struct {
         loop (index, frame) in frames {
             if !native_debug_jet_frame(frame) -> next
             id: self.frame_id(task, index) ?? return Err(NativeDebugError{detail: "this stop's frames outnumber the frame ids a stop has"})
-            source: "{{\"name\":{foundation_json_quote(dap_files.basename(frame.file))},\"path\":{foundation_json_quote(dap_files.join(base, frame.file))}}}"
+            source: if frame.path.starts_with(MODULE_CORE_PREFIX) -> "{{\"name\":{foundation_json_quote(dap_files.basename(frame.file))},\"path\":{foundation_json_quote(frame.path)},\"sourceReference\":{self.source_reference(frame.path)}}}" else -> "{{\"name\":{foundation_json_quote(dap_files.basename(frame.file))},\"path\":{foundation_json_quote(dap_files.join(base, frame.file))}}}"
             // A caller's frame at a call with a call-site row names the
             // call's column; any other frame its line.
             column: if frame.column > 0 -> frame.column else -> 1
@@ -716,6 +732,16 @@ JetCLIDap: struct {
         session.focus = None
         if task == self.task -> return Ok(true)
         session.focus_task(task)
+    }
+
+    // The `sourceReference` of the Core source `path`: its index in
+    // `sources` plus 1, added when first named.
+    source_reference: fn(&self, path: String) -> Int Never! {
+        loop (index, named) in self.sources {
+            if named == path -> return index + 1
+        }
+        self.sources.push("{path}")
+        self.sources.len()
     }
 
     // The id of task `task`'s frame `index` at this stop: its row in

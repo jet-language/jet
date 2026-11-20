@@ -1,0 +1,37 @@
+// Runs points.gate and serves a web app, whose requests pass Core's
+// web.requests, both inside a spawned task. No handler is attached here.
+use {
+    client: core.http.client
+    net: core.net
+    server: core.http.server
+    web: core.web
+    points
+}
+
+checked: fn(n: Int) -> String {
+    if points.gate.run(n) == {
+        .Continue(kept) -> "{kept} passes"
+        .Cancel -> "{n} is canceled"
+        .Fail(reason) -> reason
+    }
+}
+
+page: fn(asked: HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError! {
+    Ok(server.response(200, "page {asked.path}"))
+}
+
+serve: fn() -[IO, Net, FS.Read, Time]> (HTTPError | NetError | TaskFailure)! {
+    served: web.app().get("/about", page).get("/admin", page)
+    listener: net.tcp_listen("127.0.0.1:0")
+    addr: listener.local_addr()
+    serving: task {
+        loop n in 1..<3 -> print(checked(n))
+        loop _ in 0..<2 { served.serve_once(listener) }
+    }
+    paths: [String]{"/about", "/admin"}
+    loop path in paths {
+        got: client.get("http://{addr}{path}")
+        print("{path}: {got.status} {got.text()}")
+    }
+    serving.join()
+}

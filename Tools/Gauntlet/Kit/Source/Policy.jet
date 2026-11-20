@@ -121,7 +121,7 @@ base_language: fn(language: String) -> String { language.removesuffix("-expert")
 
 // The entry folder holding a language's program (the twin of run.mjs's
 // LANGUAGE_SOURCE_DIRS). Folders are TitleCase; LuaJIT runs the Lua program,
-// Bun the Node program and Vite bundles the web (JS) program.
+// and Bun the Node program.
 language_source_dir: fn(language: String) -> String {
     if language == {
         "jet" -> "Jet"
@@ -138,7 +138,6 @@ language_source_dir: fn(language: String) -> String {
         "lua" -> "Lua"
         "luajit" -> "Lua"
         "js" -> "JS"
-        "vite" -> "JS"
         else -> language.copy()
     }
 }
@@ -426,8 +425,8 @@ ratio_verdict: fn(ratio: Float?) -> String? {
     assert_eq(ratio_verdict(None), None)
 }
 
-#Test("LuaJIT, Bun and Vite run another language's program; every other language has its own folder") {
-    assert_eq(["luajit", "bun", "vite", "lua", "rust-expert"].map(fn(language) { language_source_dir(language) }), ["Lua", "Node", "JS", "Lua", "RustExpert"])
+#Test("LuaJIT and Bun run another language's program; every other language has its own folder") {
+    assert_eq(["luajit", "bun", "js", "lua", "rust-expert"].map(fn(language) { language_source_dir(language) }), ["Lua", "Node", "JS", "Lua", "RustExpert"])
 }
 
 #Test("a cell's peers are the rails and its incumbent, and the run rail joins a cell with a run tier") {

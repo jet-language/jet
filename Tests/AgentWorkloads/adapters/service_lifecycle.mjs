@@ -39,7 +39,7 @@ try {
   if (task === "service-lifecycle-readiness-timeout") {
     const failed = run(["services", "up", "timeout", "--trust", "--no-color"]);
     if (failed.error) throw failed.error;
-    if (failed.status === 0 || !(failed.stdout + failed.stderr).includes("E1261")) throw new Error("readiness timeout did not fail with E1261");
+    if (failed.status === 0 || !(failed.stdout + failed.stderr).includes("Jet.ServiceNeverHealthy")) throw new Error("readiness timeout did not fail with Jet.ServiceNeverHealthy");
     const lifecycle = readFileSync(`${project}/.jet/services/timeout/lifecycle`, "utf8");
     if (!lifecycle.includes("phase=failed") || !lifecycle.includes("recovery=startup-failed")) throw new Error("failed service lost lifecycle receipt");
     if (existsSync(`${project}/.jet/services/timeout/pid`)) throw new Error("failed service retained pid");

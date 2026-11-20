@@ -232,7 +232,8 @@ canvas_edit_text: fn(request: Dyn, key: String) -> String? Never! {
 // (both relative to `root`), as the session serves it from now on. Its
 // revision covers every file's path, revision and kind; its mode is the
 // workspace or package the files show, else the single entry file. The host
-// checks, projects and serves the entry's graph, code and diagnostics.
+// checks, projects and serves the entry's graph, code and diagnostics, and
+// runs it under the debugger, so it has runtime output.
 canvas_host_publish_project: fn(state: Shared<CanvasHostState>, root: String, entry: String, files: [CanvasProjectFile]) {
     facts := [String]{}
     rows := [String]{}
@@ -252,7 +253,7 @@ canvas_host_publish_project: fn(state: Shared<CanvasHostState>, root: String, en
     // A workspace's member projection is not built yet, so its member is left
     // out rather than answered empty; with no workspace it is null.
     workspace_member: if workspace -> "" else -> "\"workspace\":null,"
-    payload: "{{\"protocol\":\"jet.canvas.project\",\"schema_version\":{CANVAS_PROJECT_SCHEMA_VERSION},\"project_root\":{json_str(root)},\"project_revision\":{json_str(source_revision(facts.join("")))},\"entry\":{json_str(entry)},\"mode\":{json_str(mode)},\"capabilities\":{{\"graph\":true,\"code\":true,\"diagnostics\":true}},{workspace_member}\"files\":[{rows.join(",")}],\"source_control\":{{\"truth\":\"git-text\"}},\"state_policy\":{{\"semantic\":\"source\",\"local\":[\"tabs\",\"viewport\",\"selection\",\"breakpoints\",\"watches\",\"comment_boxes\",\"staged_nodes\"],\"shared_visual\":\"source-anchored-comments\"}}}}"
+    payload: "{{\"protocol\":\"jet.canvas.project\",\"schema_version\":{CANVAS_PROJECT_SCHEMA_VERSION},\"project_root\":{json_str(root)},\"project_revision\":{json_str(source_revision(facts.join("")))},\"entry\":{json_str(entry)},\"mode\":{json_str(mode)},\"capabilities\":{{\"graph\":true,\"code\":true,\"diagnostics\":true,\"runtime_output\":true}},{workspace_member}\"files\":[{rows.join(",")}],\"source_control\":{{\"truth\":\"git-text\"}},\"state_policy\":{{\"semantic\":\"source\",\"local\":[\"tabs\",\"viewport\",\"selection\",\"breakpoints\",\"watches\",\"comment_boxes\",\"staged_nodes\"],\"shared_visual\":\"source-anchored-comments\"}}}}"
     permit := state.guard_edit()
     permit.value.project = canvas_machine_output("canvas.project", true, payload)
 }
@@ -283,7 +284,9 @@ canvas_host_transaction: fn(state: Shared<CanvasHostState>, request: HTTPRequest
     answered: answer.receive() ?? return canvas_host_response(503, CANVAS_HOST_TEXT, "the Canvas dev loop stopped before it answered this {what}")
     // A debug or profile answer names its own session (the debugged
     // program's); only a transaction carries the host's.
-    if route != .Transaction -> return canvas_host_response(answered.status, CANVAS_HOST_JSON, answered.body)
+    if route != .Transaction {
+        return canvas_host_response(answered.status, CANVAS_HOST_JSON, answered.body)
+    }
     canvas_host_response(answered.status, CANVAS_HOST_JSON, canvas_host_with_session(state, answered.body))
 }
 

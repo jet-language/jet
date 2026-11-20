@@ -483,7 +483,7 @@ land_main: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
     loop at in 0..<(positional.len() /% 2) {
         patch: absolute(positional[at * 2])
         message: absolute(positional[at * 2 + 1])
-        needed: [String]{patch, message}
+        needed: [String]{patch.copy(), message.copy()}
         loop path in needed {
             if !files.exists(path) {
                 term.eprint("land: no file {path}")
@@ -515,7 +515,7 @@ scratch_copy: fn(source: String, dir: String) -[Exec, FS, IO, Time.Wait]> String
         return Err(LandError{message: "git clone into {dir} failed: {first_line(cloned)}"})
     }
     loop key in IDENTITY_KEYS {
-        value: git(source, [String]{"config", "--get", key})
+        value: git(source, [String]{"config", "--get", key.copy()})
         if value.code == 0 -> git(dir, [String]{"config", key, value.output.trim()})
     }
     head: git(dir, [String]{"rev-parse", "--abbrev-ref", "HEAD"})
@@ -567,7 +567,7 @@ land: fn(dir: String, pairs: [Pair]) -[Exec, Env, FS, IO, Time.Wait]> Int Never!
 revert: fn(dir: String, applied: [String]) -[Exec, IO, Time.Wait]> Never! {
     loop step in 0..<applied.len() {
         patch: applied[applied.len() - 1 - step]
-        undone: git(dir, [String]{"apply", "-R", patch})
+        undone: git(dir, [String]{"apply", "-R", patch.copy()})
         if undone.code != 0 {
             term.eprint("land: could not revert {files.basename(patch)}: {first_line(undone)}; check `git status` in {dir}")
         }
@@ -607,7 +607,7 @@ check: fn(dir: String, touched: [String]) -[Exec, Env, FS, IO, Time.Wait]> Bool 
     }
     clean := true
     loop target in targets {
-        argv := [String]{jet, "Tools/Agent/LaneCheck.jet"}
+        argv := [String]{jet.copy(), "Tools/Agent/LaneCheck.jet"}
         if target != "" -> argv.push(target.copy())
         label: if target == "" -> "the compiler" else -> target.copy()
         receipt: process.cmd(argv).cwd(dir).env("JET", jet).env("JET_TOOLCHAIN_ROOT", dir).output_limit(268435456).run() ?? {
@@ -649,13 +649,13 @@ commit_stack: fn(dir: String, pre: String, pairs: [Pair]) -[Exec, Env, FS, Time.
             failure = "write-tree failed: {first_line(tree)}"
             break
         }
-        made: git(dir, [String]{"commit-tree", tree.output.trim(), "-p", tip, "-F", pair.message})
+        made: git(dir, [String]{"commit-tree", tree.output.trim(), "-p", tip.copy(), "-F", pair.message})
         if made.code != 0 {
             failure = "commit-tree for {files.basename(pair.patch)} failed: {first_line(made)}"
             break
         }
         tip = made.output.trim()
-        subject: git(dir, [String]{"log", "-1", "--format=%h %s", tip}).output.trim()
+        subject: git(dir, [String]{"log", "-1", "--format=%h %s", tip.copy()}).output.trim()
         landed.push(subject)
     }
     // The commits must carry exactly the checked worktree. The private index
@@ -1445,7 +1445,7 @@ core_tests_pass: fn(snap: String, out: String, seed_jet: String, self_jet: Strin
     loop path in targets {
         log: "{out}/core-tests/{path.replace("/", "_")}"
         // The dev shell runs under the seed's identity; the test under the built jet's own.
-        code: run_heavy(snap, 600, CORE_MEMORY, CENSUS_CPUS, [String]{seed_jet, "{snap}/Tools/Agent/JetEnv.jet", "env", "JET_COMPILER_IDENTITY={source_identity}", self_jet, "test", path}, compile_env(identity, snap, ""), log)
+        code: run_heavy(snap, 600, CORE_MEMORY, CENSUS_CPUS, [String]{seed_jet, "{snap}/Tools/Agent/JetEnv.jet", "env", "JET_COMPILER_IDENTITY={source_identity}", self_jet, "test", path.copy()}, compile_env(identity, snap, ""), log)
         loop failure in guard_failures("{files.read("{log}.out") ?? ""}{files.read("{log}.err") ?? ""}") {
             if !failure.starts_with("  FAIL ") {
                 rc = 1
@@ -1580,7 +1580,7 @@ area_lane: fn(lane_areas: [String], areas: [String], caps: [Int], snap: String, 
             Setting{name: "JETPACK_MIN_FREE_MB", value: "4000"},
         }
         log: "{state}/jetpack-bootstrap/census-each-{area}"
-        spec: process.cmd([String]{"taskset", "-c", CENSUS_CPUS, self_jet, "{snap}/Jetpack/Bootstrap/Check.jet", "--area", area}).timeout(time.duration_seconds(1800))
+        spec: process.cmd([String]{"taskset", "-c", CENSUS_CPUS, self_jet, "{snap}/Jetpack/Bootstrap/Check.jet", "--area", area.copy()}).timeout(time.duration_seconds(1800))
         code: run_spec(spec, self_jet, "{home}/cwd", env, log)
         peak: area_peak(state, area)
         lines := [String]{"area {area} FAILED exit {code} (log {log}.out)"}
@@ -3139,11 +3139,9 @@ train_tests: fn(dir: String, pre: String, composed: Composed, work: String, log:
         codes: run_lines(lines, picked, tree, "{work}/sealed/jet", gib, out, "")
         reds := [Int]{}
         loop k in 0..<picked.len() {
-            entry := lines[picked[k]].copy()
-            entry.code = codes[k]
-            lines[picked[k]] = entry
+            lines[picked[k]].code = codes[k]
             if codes[k] == 0 {
-                say(log, "tests PASS {entry.line}")
+                say(log, "tests PASS {lines[picked[k]].line}")
                 next
             }
             reds.push(picked[k])
@@ -3373,12 +3371,12 @@ chain_commit: fn(dir: String, index: String, tip: String, what: String, paths: [
 revert_batch: fn(dir: String, applied: [Applied], all: [String], log: String) -[Exec, Env, FS, IO, Time.Wait]> {
     loop step in 0..<applied.len() {
         patch: applied[applied.len() - 1 - step].job.patch
-        if git(dir, [String]{"apply", "-R", patch}).code != 0 {
+        if git(dir, [String]{"apply", "-R", patch.copy()}).code != 0 {
             say(log, "reverse-apply failed (restoring paths instead): {files.basename(patch)}")
         }
     }
     loop path in dirty_paths(dir) {
-        if git_paths(dir, "", [String]{"checkout", "HEAD"}, [String]{path}).code != 0 {
+        if git_paths(dir, "", [String]{"checkout", "HEAD"}, [String]{path.copy()}).code != 0 {
             git_paths(dir, "", [String]{"rm", "-q", "--cached"}, [String]{path})
         }
     }
@@ -3750,8 +3748,8 @@ prune_bases: fn(base: String) -[FS]> {
             published.push(Dated{path: dir, time: mtime("{dir}/.published")})
         }
         if files.exists("{dir}/goldens.json") && mtime("{dir}/goldens.json") > golden_time {
-            golden = dir
             golden_time = mtime("{dir}/goldens.json")
+            golden = dir
         }
     }
     sorted: newest_first(published)
@@ -4105,7 +4103,7 @@ release_train_run: fn() -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
         if head == "" -> break
         files.remove("{work}/pending") ?? ()
         out: "{work}/train-{head.slice(0..<12)}.log"
-        gated: seed_run(dev, [String]{"run", "Tools/Release/Main.jet", "--", "admit", head, "--min-gains", process.env_nonempty("RELEASE_MIN_GAINS") ?? "10"}, 43200)
+        gated: seed_run(dev, [String]{"run", "Tools/Release/Main.jet", "--", "admit", head.copy(), "--min-gains", process.env_nonempty("RELEASE_MIN_GAINS") ?? "10"}, 43200)
         files.write(out, both(gated)) ?? ()
         files.append_all(log, "{train_verdict(gated.code, both(gated), head, out)}\n") ?? ()
     }

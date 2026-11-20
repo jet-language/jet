@@ -291,7 +291,7 @@ entry_record: fn(result: Dyn, matrix: Dyn, owners: Dyn, tower: TowerState) -> Dy
         }
         if item == "runtime_wall_seconds" && run_reference == .Val(reference) && text_at(reference, "verdict") != Val("win") {
             failure := Dyn.object()
-            failure["metric"] = item
+            failure["metric"] = item.copy()
             failure["peer"] = member(reference, "reference") ?? Dyn.Null
             failure["verdict"] = member(reference, "verdict") ?? Dyn.Null
             failure["reason"] = member(reference, "reason") ?? Dyn.Null
@@ -367,9 +367,9 @@ peer_record: fn(entry: Dyn, language: String, comparison: Dyn, rows: Dyn, metric
         verdict: text_at(judged, "verdict") ?? ""
         if verdict == "win" || verdict == "not_applicable" -> next
         failure := Dyn.object()
-        failure["metric"] = item
+        failure["metric"] = item.copy()
         failure["peer"] = language
-        failure["verdict"] = verdict
+        failure["verdict"] = verdict.copy()
         failure["reason"] = member(judged, "reason") ?? Dyn.Null
         failure["tiers"] = member(judged, "tiers") ?? Dyn.Null
         failure["owner"] = if verdict == "loss" -> live_loss_owner(owners, item, tower) else -> Dyn.Null

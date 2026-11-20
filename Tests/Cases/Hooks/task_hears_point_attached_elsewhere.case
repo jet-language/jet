@@ -1,0 +1,17 @@
+# A handler attached in one module is heard by a declared point another
+# module runs inside a spawned task, at -O0, -O1 and -O2: guard.jet attaches
+# to the program's own points.gate and to Core's web.requests, and site.jet
+# runs both from a task. A `jet run` binds its Core calls to the Core
+# library built into jet, so the library's run of web.requests hears the
+# handler the program attached.
+fixture: TaskHearsPointAttachedElsewhere.fixture
+env: NO_COLOR=1
+step default: jet run -O0 main.jet
+exit: 0
+stdout: = "1 is odd\n2 passes\n/about: 200 page /about\n/admin: 401 sign in for /admin\n"
+step balanced: jet run -O1 main.jet
+exit: 0
+stdout: == default
+step release: jet run -O2 main.jet
+exit: 0
+stdout: == default

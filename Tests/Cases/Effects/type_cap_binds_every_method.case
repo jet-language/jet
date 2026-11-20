@@ -8,7 +8,7 @@ fixture: TypeCapBindsEveryMethod/input
 env: NO_COLOR=1
 step: jet check deny.jet
 exit: 1
-stderr: count "Jet.ProhibitedEffectReached" = 3 # total, text and reload; size reads nothing
+stderr: count "Error: Jet.ProhibitedEffectReached" = 3 # total, text and reload; size reads nothing
 stderr: count "Error: " = 3 # the denials are the only errors
 stderr: ~ "`total` reaches the `FS.Read(\"rates.txt\")` effect, which type `Rates` denies" # the denial holds through the call to read_rates
 stderr: ~ "`text` reaches the `FS.Read` effect, which type `Rates` denies" # a trait impl in the type's body
@@ -17,7 +17,7 @@ stderr: !~ "`read_rates` reaches" # a function outside the type is not bound
 stderr: ~ "type `Rates` is capped here" # the diagnostic says it
 step: jet build deny.jet
 exit: 1
-stderr: count "Jet.ProhibitedEffectReached" = 3 # build refuses before anything is emitted
+stderr: count "Error: Jet.ProhibitedEffectReached" = 3 # build refuses before anything is emitted
 step: jet check module.jet
 exit: 1
 stderr: count "Error: " = 1 # exactly this many

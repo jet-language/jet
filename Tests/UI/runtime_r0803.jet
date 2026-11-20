@@ -1,0 +1,12 @@
+// A raw Int read one byte into a live Int is misaligned: the sentry names
+// how far the address sits past the 8-byte boundary the read needs.
+use core.mem
+
+run: fn() {
+    cell: 258
+    #Unsafe("the read starts one byte into a live Int") {
+        pointer: mem.Ptr<Int>.from_addr(mem.address_of(cell) + 1)
+        print(pointer.*)
+    }
+}
+// @run_cli

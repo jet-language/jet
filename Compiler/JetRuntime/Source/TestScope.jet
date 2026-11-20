@@ -338,7 +338,8 @@ test_scope_expectation_met: fn(expected: I64, expected_message: I64, code: I64, 
     code_matches && (expected_message == I64{0} || jet_string_contains(message, expected_message))
 }
 
-// Raw stop message substring, never rendered text.
+// Raw stop message substring, never rendered text; each code is printed as
+// its row's name.
 #Export(c) jet_rt_test_expect_fail_error: fn(expected: I64, expected_message: I64, code: I64, message: I64) -> I64 {
     if test_scope_expectation_met(expected, expected_message, code, message) -> return I64{0}
     stopped: code != I64{0}
@@ -346,7 +347,7 @@ test_scope_expectation_met: fn(expected: I64, expected_message: I64, code: I64, 
     test_scope_msg_expected(result)
     if (expected != I64{0}) {
         if stopped -> test_scope_msg_stop_code(result) else -> test_scope_msg_region_stop(result)
-        jet_rt_string_builder_push(result, expected)
+        test_scope_push_name(result, expected)
         if (expected_message != I64{0}) { test_scope_msg_code_message(result) }
     } else {
         if (expected_message != I64{0}) { test_scope_msg_stop_message(result) } else {
@@ -356,7 +357,7 @@ test_scope_expectation_met: fn(expected: I64, expected_message: I64, code: I64, 
     if (expected_message != I64{0}) { test_scope_quoted(result, expected_message) }
     if stopped {
         test_scope_msg_got(result)
-        jet_rt_string_builder_push(result, code)
+        test_scope_push_name(result, code)
         test_scope_msg_colon(result)
         jet_rt_string_builder_push(result, message)
     } else { test_scope_msg_passed(result) }

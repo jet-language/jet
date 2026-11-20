@@ -73,7 +73,7 @@ test("live-reload HTTP probes keep the default cap and accept the Jet app cap", 
     assert.equal(Buffer.byteLength(accepted.body), appBody.length);
     assert.equal(accepted.body, appBody.toString("utf8"));
     assert.equal(
-      liveReloadInternals.axisOutputBodyLimit({ id: "vite" }, { path: "/app.js" }),
+      liveReloadInternals.axisOutputBodyLimit({ id: "bun" }, { path: "/app.js" }),
       4 * 1024 * 1024,
     );
   } finally {
@@ -837,7 +837,7 @@ test("measurement manifest covers every corpus entry and source pair", async () 
   for (const row of manifest.entries) assert.equal(Number.isInteger(manifest.loss_owners[row.name]?.source), true);
 
   const liveReload = manifest.axes.live_reload;
-  assert.deepEqual(liveReload.runners.map((runner) => runner.id).sort(), ["bun", "entr+cc", "jet-dev", "nodemon", "vite"]);
+  assert.deepEqual(liveReload.runners.map((runner) => runner.id).sort(), ["bun", "entr+cc", "jet-dev", "nodemon"]);
   for (const runner of liveReload.runners) {
     assert.ok(runner.files.some((file) => file.target === runner.edit_file), `${runner.id}: edit file is not staged`);
     for (const file of runner.files) assert.equal(await exists(repoSourcePath(file.source)), true, `${runner.id}: missing ${file.source}`);

@@ -51,7 +51,7 @@ strategic guidance document.
 | Keywords, sigils, and names | [Syntax registry](../Compiler/JetFoundation/Data/Syntax/) and [examples](../Examples/) |
 | Language checks | The semantic checker ([`Compiler/JetSema/`](../Compiler/JetSema/Source/)) and [tests](../Tests/) |
 | Core APIs and runtime meaning | [Core library sources](../Core/) and the [Prelude](../Compiler/Prelude/) |
-| Diagnostic text | [Diagnostic registry](../Compiler/Prelude/Diagnostics.jet), [UI snapshots](../Tests/UI/), and `jet explain <CODE>` |
+| Diagnostic text | [Diagnostic registry](../Compiler/Prelude/Diagnostics.jet), [UI snapshots](../Tests/UI/), and `jet explain Jet.Name` |
 | Commands and flags | `jet help` and the [command registry](../Compiler/JetFoundation/Source/Registry/CLICommands.jet) |
 
 The Jet-authored compiler under `Compiler/` is the production implementation;
