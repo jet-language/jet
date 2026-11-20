@@ -15,10 +15,18 @@
 // reported. The rewrite is textual, so it reads every kind of file alike. A
 // Jet source that parsed cleanly keeps its text unless the rewrite parses
 // cleanly too.
-use jet_foundation.[diagnostic_registry_row, diagnostic_registry_row_named]
+use jet_foundation.[DIAGNOSTIC_STOP_OPEN, diagnostic_registry_row, diagnostic_registry_row_named]
 
-// The words a report heading opens with.
-DIAGNOSTIC_NAMES1_LABELS: [String]{"Error", "Warning", "Stop", "Lint"}
+// The words a report heading opens with: each `Severity` case, and the
+// `Stop` that opens a runtime stop.
+DIAGNOSTIC_NAMES1_LABELS: #run diagnostic_names1_labels()
+
+diagnostic_names1_labels: fn() -> [String] {
+    labels := [String]{}
+    loop severity in Severity.reflect().values -> labels.push("{severity}")
+    labels.push(DIAGNOSTIC_STOP_OPEN.remove_suffix(": "))
+    labels
+}
 
 // The path a report's More link names its diagnostic under.
 DIAGNOSTIC_NAMES1_LINK: "jet-lang.dev/e/"

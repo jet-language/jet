@@ -30,8 +30,14 @@ as source and writes the Foundation rows in `Registry/DiagnosticRows.jet`
 status. They run in no stage, so they state no `stage`, and `jet explain`
 prints none for them (`--json` gives `"stage": null`).
 
-A diagnostic's name is its type path: `jet.UnusedParameter` for the compiler's
-own, `web.BadPath` for a library's. The current registered code shapes are `E`
+A diagnostic's name is its type path: `Jet.UnusedParameter` for Jet's own,
+`web.BadPath` for a library's. The name is the one identifier a report prints:
+its heading, its `More:` link, its closing `jet explain` hint, an `#Allow` and
+a website page all name it, and `jet explain` accepts it. The code is a stable
+alias: `jet explain E0113` resolves the row that `jet explain
+Jet.ReturnTypeMismatch` does, and a machine report keeps it in its own field.
+No lowercase `jet.` spelling of a name is accepted or printed. The current
+registered code shapes are `E`
 or `L` followed by four digits, `JT` followed by four digits for
 source-migration reports, and `E-WORD-WORD` with two or more uppercase words. A
 library diagnostic without a `code` constant uses its type path as its code.
@@ -40,7 +46,7 @@ code, and no new row of any other severity does. A code registered before
 this law keeps its letter even where the two disagree, because codes are never
 renumbered: the lints `E2818`, `E2930`, `E2931`, `E2934` and `JT0101`, and the
 blocking `L1101`. `W0410`
-(`jet.RandomCryptoContext`, reserved) is a frozen
+(`Jet.RandomCryptoContext`, reserved) is a frozen
 historical exception with a third letter that no new code follows
 (D-REPORT-SEV1). `Tools/Agent/DiagnosticRows.jet --check` enforces the law: it
 refuses a row whose letter disagrees with its severity unless the code is in
@@ -91,14 +97,16 @@ code.
 
 ## Human rendering
 
-The fixed headings are `Error [jet.Name]:` and `Warning [jet.Name]:`, naming
-the diagnostic type; a tidy error (a lint on the `.Tidy` tier) heads
-`Error [jet.Name]:` too. A report with a span includes its source location and
+The fixed headings are `Error: Jet.Name: what` and `Warning: Jet.Name: what`,
+naming the diagnostic type; a tidy error (a lint on the `.Tidy` tier) heads
+`Error: Jet.Name:` too, and a runtime stop heads `Stop: Jet.Name:`. A library
+diagnostic heads with its own name, as in `Error: web.BadPath: what`. A report
+with a span includes its source location and
 underline; a report without a span omits that block. Every report keeps `Why:`,
-`Fix:`, and `More: jet-lang.dev/e/<CODE>` in that order, with optional detail
+`Fix:`, and `More: jet-lang.dev/e/Jet.Name` in that order, with optional detail
 before `More:`; a diagnostic whose code is its type path has no `More:` line,
 and `jet explain web.BadPath` prints its impl's literals with their holes.
-Runtime reports keep their code in the heading. Multiple diagnostics are
+The closing hint reads "Run `jet explain Jet.Name` to learn more". Multiple diagnostics are
 separated by one blank line. A lint on the `.Error` tier does not block
 compilation by default. A tidy error never stops `jet run`, `jet dev` or
 `jet test`, which show it only under `--verbose`; `jet check` and `jet build`
@@ -124,10 +132,12 @@ escapes), and a `#Web.Form` model's fields are read as its form's controls.
 While a module's check is incomplete no member is judged, since a body that
 failed to check records no uses. A library's
 public members are exempt; an application's members and a library's private
-ones are judged. `#Allow(jet.Name, "why")` silences one lint, tidy error or
-library warning inside its target, and a package may deny a named lint through
+ones are judged. `#Allow(Jet.Name, "why")` silences one lint, tidy error or
+library warning inside its target (an `#Allow` that spells the package
+lowercase `jet` is E0107, whose fix writes `Jet`), and a package may deny a named lint through
 its lint policy, but a diagnostic code is never a policy value. JSON and LSP
-`code` stays the registered code; a `jet.report/v3` `severity` is `error`,
+`code` stays the registered code; a `jet.report/v3` diagnostic carries the
+name in its `name` field beside `code`, its `severity` is `error`,
 `warning` or, for a tidy error, `tidy`, and LSP reports a tidy error at Error
 severity.
 
@@ -136,20 +146,25 @@ Every human report renders from its row through
 `diagnostic_render_all`, and the `Stop` line helpers (one of which reads a
 `Stop` line back, for `jet test`). Extra lines go in the
 diagnostic's detail. No other source file under `Compiler/`, `Core/` or
-`Jetpack/` writes a heading such as `Error [E0102]` or `Stop [{code}]`, or a
+`Jetpack/` writes a heading such as `Error: Jet.UnknownFunction:` or
+`Stop: {name}:`, or a
 `jet-lang.dev/e/` link. Runtime reports cannot reach the registry while they
 run, so their texts are generated from the rows by
-`Tools/Agent/gen-runtime-*-messages.mjs`. The stack-overflow report in the
+`Tools/Agent/RuntimeGenerators.jet`. The stack-overflow report in the
 runtime's assembly stays hand-written, because its handler runs on an exhausted
 stack. `Tools/Agent/DiagnosticRows.jet --check` fails on a hand-built report,
 on a generated or assembly copy whose heading, Why or Fix differs from its
-row, and on a generated heading or link that names no code.
+row, and on a generated heading or link that names no diagnostic.
+`Tests/Guards/DiagnosticNames` fails on any line under `Compiler/`, `Core/`,
+`Docs/` or `Tests/` that keeps a bracketed heading or a lowercase `jet.` name.
+`Docs/Audits/`, `Docs/Research/` and captured evidence (research assets and
+proposal probe logs) keep the output they recorded.
 
 Package-budget reports retain the authored callable witness's span and source
 snapshot, including witnesses in dependency modules. A named witness must not
 be rendered against the entry file merely because enforcement runs there.
 
-A default-error entry report uses `Error [E3015]:` with the registry-owned
+A default-error entry report uses `Error: Jet.UnhandledEntryFailure:` with the registry-owned
 What, Why, Fix, and More. The error value's own code remains report data rather
 than replacing the diagnostic identity. A handled `Err` printed as a value is
 not this unhandled-entry report.
@@ -189,7 +204,7 @@ with status 101. No row speaks for it, so it is not a report: it prints one
 A native program's fatal signal is reported the same way under `jet run` and
 `jet build`. The handler runs on a per-thread alternate stack, so an exhausted
 stack is reported too. A SIGSEGV within the guard region below the stack
-pointer is a stack overflow: `Stop [E3012]` names the Jet function and its
+pointer is a stack overflow: `Stop: Jet.StackOverflow:` names the Jet function and its
 source line and exits 70. Deep recursion reaches it only past the thread's
 total stack budget, since a recursive body moves onto stack segments as it
 goes deeper (spec.md, `#MaxDepth`). Any other SIGSEGV, SIGBUS, SIGILL or SIGFPE prints
@@ -211,7 +226,9 @@ a fault reads alike on every tier (D-RT-DEFECT-REPORT1). A report without the
 
 ## Machine reports and causes
 
-The canonical machine envelope is `jet.report/v3`. Its `cause` array is
+The canonical machine envelope is `jet.report/v3`. Each diagnostic carries its
+registered `code` and its `name` (`Jet.ReturnTypeMismatch`, or a library's own
+type path). Its `cause` array is
 nearest-first and contains `code`, `file`, `line`, `col`, and `span` fields.
 Repeated codes are not deduplicated. Every field comes from that cause's own
 `DiagnosticCause` and originating source snapshot; unknown fields are `null`
@@ -253,14 +270,14 @@ target. The exact rendered snapshot is part of the contract and is kept in
 `Tests/UI/freestanding_e3301.stderr`:
 
 ```text
-Error [jet.OsApiOnNoOsTarget]: `files.read` is not available on a no-OS target.
+Error: Jet.OsApiOnNoOsTarget: `files.read` is not available on a no-OS target.
   --> Tests/UI/freestanding_e3301.jet:5:11
     |
   5 |     _: fs.read("config.txt")
     |           ^^^^
  Why: No-OS targets have no OS; only `core`-level APIs are available.
  Fix: Embed the data at compile time with `@embed("file")`, or select a hosted target.
-More: jet-lang.dev/e/E3301
+More: jet-lang.dev/e/Jet.OsApiOnNoOsTarget
 ```
 
 `tests/cross.rs` compiles the same `fs.read` fixture with
@@ -314,7 +331,7 @@ not refused.
 
 ## Explain and website output
 
-`jet explain <CODE>` resolves the same registry rows offline through
+`jet explain <CODE>` and `jet explain Jet.Name` resolve the same registry rows offline through
 [`Explain.jet`](../../Compiler/JetCLI/Source/CLI/Explain.jet). The website is another
 projection of that data: [`Docs/Site/generate.jet`](../Site/generate.jet) writes
 the error index and renders each code page from registry rows and snapshots.

@@ -1,0 +1,113 @@
+// Jet's own diagnostics are named `Jet.Name`, and a report's heading is
+// `Error: Jet.Name: what` (likewise `Warning:` and `Stop:`). No tracked text
+// file under DN_ROOTS keeps an older spelling: a code or name in brackets
+// after `Error`, `Warning` or `Stop`, or a name spelled with a lowercase
+// `jet` and a dot before its capital. Docs/Audits and Docs/Research keep
+// their history, captured research evidence and proposal probe logs keep the
+// output they recorded, and the diagnostic-names1 migration and its case
+// quote the spellings it rewrites. Each offender reads `path:line: text`.
+use {
+    guards.[guards_enter_root]
+    dn_process: core.process
+}
+
+// The trees the rule covers.
+DN_ROOTS: [String]{"Compiler", "Core", "Docs", "Tests"}
+
+// The paths that keep the older spellings on purpose, as pathspec globs.
+DN_EXCLUDED: [String]{
+    "Docs/Audits/**",
+    "Docs/Research/**",
+    "Docs/Assets/Research/**",
+    "Docs/Proposals/**/Probes/**",
+    "Compiler/Migrations/DiagnosticNames1.jet",
+    "Tests/Cases/Migrations/DiagnosticNames1NamesEveryJetDiagnostic/**",
+    "Tests/Cases/Migrations/diagnostic_names1_names_every_jet_diagnostic.case",
+}
+
+// The words a report heading opens with.
+DN_LABELS: [String]{"Error", "Warning", "Stop"}
+
+// What a bracketed heading puts after its word.
+DN_OPEN: " ["
+
+// The prefix the old names were spelled with.
+DN_OLD: "jet."
+
+// Whether `bytes` holds `needle` at `at`.
+dn_at: fn(bytes: [U8], at: Int, needle: String) -> Bool {
+    want: needle.bytes()
+    if at + want.len() > bytes.len() -> return false
+    loop (index, byte) in want {
+        if bytes[at + index] != byte -> return false
+    }
+    true
+}
+
+// Whether the byte before `at` continues a word, a dotted path or a
+// hyphenated name, so a match at `at` is only part of a longer one.
+dn_joined: fn(bytes: [U8], at: Int) -> Bool {
+    if at == 0 -> return false
+    byte: Int{bytes[at - 1]}
+    (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95 || byte == 46 || byte == 45
+}
+
+// Whether `line` keeps an older diagnostic spelling.
+dn_offends: fn(line: String) -> Bool {
+    bytes: line.bytes()
+    loop at in 0..<bytes.len() {
+        if dn_joined(bytes, at) -> next
+        if dn_at(bytes, at, DN_OLD) && at + 4 < bytes.len() {
+            first: Int{bytes[at + 4]}
+            if first >= 65 && first <= 90 -> return true
+        }
+        loop label in DN_LABELS {
+            if dn_at(bytes, at, "{label}{DN_OPEN}") -> return true
+        }
+    }
+    false
+}
+
+// `path:line: text` for each offending line git finds under DN_ROOTS.
+dn_offenders: fn() -> [String] {
+    argv := [String]{"git", "grep", "-n", "-I", "-E", "-e", "jet\\.[A-Z]"}
+    loop label in DN_LABELS {
+        argv.push("-e")
+        argv.push("{label} \\[")
+    }
+    argv.push("--")
+    loop root in DN_ROOTS -> argv.push(root)
+    loop path in DN_EXCLUDED -> argv.push(":(exclude,glob){path}")
+    listed: dn_process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? panic("run git grep: {err}")
+    assert(listed.code == 0 || listed.code == 1, "git grep failed: {dn_process.combined_output(listed).trim()}")
+    found := [String]{}
+    loop line in dn_process.stdout_lines(listed) {
+        path_end: line.find(":")
+        if path_end < 0 -> next
+        rest: line.slice(path_end + 1, line.len())
+        number_end: rest.find(":")
+        if number_end < 0 -> next
+        if dn_offends(rest.slice(number_end + 1, rest.len())) -> found.push(line.copy())
+    }
+    found
+}
+
+#Test("a bracketed heading and an old name offend; a library name and a dotted path do not") {
+    assert(dn_offends("Error{DN_OPEN}E0113]: This value is String"))
+    assert(dn_offends("  Warning{DN_OPEN}{DN_OLD}UnusedImport]: never used"))
+    assert(dn_offends("Stop{DN_OPEN}E3001]: `panic: boom`"))
+    assert(dn_offends("#Allow({DN_OLD}FloatMoney, \"cents\")"))
+    assert(dn_offends("See jet-lang.dev/e/{DN_OLD}UnusedImport."))
+    assert(!dn_offends("Error: Jet.ReturnTypeMismatch: This value is String"))
+    assert(!dn_offends("Stop: Jet.Panic: `panic: boom`"))
+    assert(!dn_offends("Error: game.FrameHold: hold the frame"))
+    assert(!dn_offends("the report schema is {DN_OLD}report/v3"))
+    assert(!dn_offends("the store keeps .{DN_OLD}Cache and my-{DN_OLD}Thing"))
+    assert(!dn_offends("a StackError{DN_OPEN}x] is no heading"))
+}
+
+#Test("no tracked text names a Jet diagnostic the old way") {
+    guards_enter_root()
+    offenders: dn_offenders()
+    assert(offenders.len() == 0, "{offenders.len()} line(s) keep an older diagnostic spelling; write `Error: Jet.Name: what` and `Jet.Name` (`jet run Compiler/Migrations/Migrate.jet -- diagnostic-names1 --write FILE` rewrites most):\n{offenders.join("\n")}")
+}

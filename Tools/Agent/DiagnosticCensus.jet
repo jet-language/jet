@@ -173,7 +173,7 @@ census_name_byte: fn(byte: U8) -> Bool Never! {
 }
 
 // Whether `label` ends just before byte `index` of `text`.
-census_labelled: fn(text: String, index: Int, label: String) -> Bool Never! {
+census_labeled: fn(text: String, index: Int, label: String) -> Bool Never! {
     bytes: text.bytes()
     want: label.bytes()
     if index < want.len() -> return false
@@ -199,9 +199,9 @@ census_names: fn(text: String, names: &[String]) Never! {
         loop end < bytes.len() && census_name_byte(bytes[end]) -> end += 1
         if end == index + 4 -> next
         heading: end + 1 < bytes.len() && bytes[end] == (U8{58}) && bytes[end + 1] == (U8{32})
-        labelled: census_labelled(text, index, "Error: ") || census_labelled(text, index, "Warning: ") || census_labelled(text, index, "Stop: ")
+        labeled: census_labeled(text, index, "Error: ") || census_labeled(text, index, "Warning: ") || census_labeled(text, index, "Stop: ")
         linked: index >= 3 && bytes[index - 3] == (U8{47}) && bytes[index - 2] == (U8{101}) && bytes[index - 1] == (U8{47})
-        if heading || labelled || linked -> census_add(names, census_slice(text, index, end))
+        if heading || labeled || linked -> census_add(names, census_slice(text, index, end))
     }
 }
 
@@ -652,8 +652,8 @@ census_test_entry: fn(code: String, gap: String) -> BaselineRow Never! {
     tokens := CensusTokens{codes: [String]{}, names: [String]{}}
     census_quoted_codes("fail(\"E3413\", x) [E0001] \"E2416: bad line\" \"E9\" [EOF] \"E2417 later\"", tokens.codes)
     assert_eq(tokens.codes, [String]{"E3413", "E0001", "E2416"})
-    census_names("Error: Jet.FetchHashMismatch: x\nMore: jet-lang.dev/e/Jet.ProhibitedEffectReached\nsee /e/nothing #Allow(Jet.FloatMoney, \"why\") `Jet.Prose` game.Jet.Other: Jet.: x ~ \"Stop: Jet.Labelled\" Errors: Jet.Prose", tokens.names)
-    assert_eq(tokens.names, [String]{"Jet.FetchHashMismatch", "Jet.ProhibitedEffectReached", "Jet.Labelled"})
+    census_names("Error: Jet.FetchHashMismatch: x\nMore: jet-lang.dev/e/Jet.ProhibitedEffectReached\nsee /e/nothing #Allow(Jet.FloatMoney, \"why\") `Jet.Prose` game.Jet.Other: Jet.: x ~ \"Stop: Jet.Labeled\" Errors: Jet.Prose", tokens.names)
+    assert_eq(tokens.names, [String]{"Jet.FetchHashMismatch", "Jet.ProhibitedEffectReached", "Jet.Labeled"})
     case_tokens := CensusTokens{codes: [String]{}, names: [String]{}}
     census_carried_text("t/a.case", "# \"E0001\" \"Jet.Hidden\" in a comment\nstderr: ~ \"E0749\" # the denial\nstderr: ~ \"Jet.UnknownName\" !~ \"Jet.Prose here\"\n", case_tokens)
     assert_eq(case_tokens.codes, [String]{"E0749"})

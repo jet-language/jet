@@ -130,7 +130,9 @@ ds_part: fn(line: String, label: String) -> Bool {
 // registered row and renders the row's whole product: a What after the
 // opener, a `Why:` line, a `Fix:` line and the row's `More:` link. An opener
 // naming a user-declared diagnostic type (`app.UnservedRoute`) is not a
-// registry row.
+// registry row. A heading prints its row's name, so a registered code after
+// the label opens no report: it is the text of an error the entry returned
+// (`Error: E2477: a scope over …`).
 #Test("diagnostic_snapshots_keep_the_complete_registered_product") {
     guards_enter_root()
     rows: dc_registered_rows()
@@ -147,6 +149,7 @@ ds_part: fn(line: String, label: String) -> Bool {
                 failures.push("{path}:{start + 1} opens unregistered diagnostic {id}")
                 next
             }
+            if rows[row].code == id -> next
             name: rows[row].name
             end := lines.len()
             loop (index, other) in lines {
