@@ -779,9 +779,11 @@ emitted_codes: fn(facts: [RowFacts], directory: String, codes: &[String]) -[FS]>
 }
 
 // The codes the report headers in `text` name: a header names a row by its
-// name (`Error: Jet.UnknownName: …`), or prints a code no row owns. A row's
-// code after the label is message text, such as an `Err` whose message opens
-// with a code, since every row's heading prints its name.
+// name (`Error: Jet.UnknownName: …`), or prints a code in the compiler's own
+// shape that no row owns. A row's code after the label is message text, such
+// as an `Err` whose message opens with a code, since every row's heading
+// prints its name; any other code is a build rule's own (`Error: ORG01: …`),
+// which a compiler report never prints.
 report_codes: fn(facts: [RowFacts], text: String, codes: &[String]) {
     loop line in text.split("\n") {
         token: line_name(line) ?? next
@@ -789,7 +791,7 @@ report_codes: fn(facts: [RowFacts], text: String, codes: &[String]) {
             loop row in facts {
                 if row.name == token -> add_code(codes, row.code)
             }
-        } else if report_code(token) && !facts.any(fn(row) { row.code == token }) {
+        } else if source_code(token) && !facts.any(fn(row) { row.code == token }) {
             add_code(codes, token)
         }
     }
@@ -2075,8 +2077,8 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\",\n
     source_codes(rows.facts, "x: \"E0109\" [L0302] \"FS\" \"E-WEB-ABI-TYPE\" \"JT0001\" \"E-X\" \"E01090\" [W0001 \"Stop: Jet.BadPath: x\" \"Error: Jet.Unknown: y\"", codes)
     assert_eq(codes, [String]{"E0109", "L0302", "E-WEB-ABI-TYPE", "JT0001", "E9999"})
     rendered := [String]{}
-    report_codes(rows.facts, "Error: E9999: an Err message\nError: Jet.BadPath: x\n Warning: E0001: indented\nStop: FFI01: meta\nLint: Jet.Unknown: y\nError: couldn't read: x\n", rendered)
-    assert_eq(rendered, [String]{"E9999", "FFI01"})
+    report_codes(rows.facts, "Error: E9999: an Err message\nError: Jet.BadPath: x\n Warning: E0001: indented\nStop: FFI01: meta\nStop: E0002: unregistered\nLint: Jet.Unknown: y\nError: couldn't read: x\n", rendered)
+    assert_eq(rendered, [String]{"E9999", "E0002"})
     assert_eq(line_name(" Trail (2 calls passed it up, origin first):") ?? "", TRAIL_ROW)
     assert(line_name("  Trail (in prose)") == None && line_name("Trail (no indent)") == None)
     assert_eq(excluded_codes("{KIT_UI_EXCLUDED}\"E0061\", \"E0277\"], code)\n") ?? panic(err.message), [String]{"E0061", "E0277"})
