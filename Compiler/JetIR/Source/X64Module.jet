@@ -8,6 +8,7 @@
 use {
     jet_foundation.[CompilerThreads, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_transfer_rows, sha256_hex]
     jet_backend.[
+        TIME_DURATION_NS,
         X64CompiledFunction,
         X64Data,
         X64DataExport,
@@ -232,6 +233,7 @@ IRX64DebugRows: struct {
     string: Int,
     decimal: Int,
     fraction: Int,
+    duration: Int,
 }
 
 // Appends `ty` to the debug types; returns its row.
@@ -254,10 +256,11 @@ ir_x64_debug_pointer: fn(tables: &IRX64Tables, target: Int) -> Int Never! {
 // (IRModule.debug_members); an enum, union, Option or Result its variants
 // (IRModule.debug_variants, ir_x64_debug_variants); a Decimal or Fraction a
 // pointer to its runtime handle's two exact Ints (JetRuntime
-// RoutePrecise.jet); a Task, Sender or Receiver a typedef, named as Jet
-// spells it, of its runtime state's pointer; an allocation word a typedef
-// of what its block holds (ir_x64_debug_alloc). Any other aggregate stays
-// opaque.
+// RoutePrecise.jet); a Duration a typedef of a pointer to its runtime
+// record's nanoseconds word (JetRuntime TimeGlue.jet); a Task, Sender,
+// Receiver or any other runtime handle a typedef, named as Jet spells it, of
+// its runtime state's pointer; an allocation word a typedef of what its
+// block holds (ir_x64_debug_alloc). Any other aggregate stays opaque.
 ir_x64_debug_types: fn(m: IRModule, tables: &IRX64Tables) Never! {
     loop _ in 0..<m.types.len() {
         tables.debug_types.push(X64DebugType{name: "", size: 0, kind: X64DebugTypeKind.Opaque})
@@ -266,7 +269,7 @@ ir_x64_debug_types: fn(m: IRModule, tables: &IRX64Tables) Never! {
     byte: ir_x64_debug_add(tables, X64DebugType{name: "U8", size: 1, kind: X64DebugTypeKind.Base{encoding: X64DebugEncoding.Unsigned}})
     pointer: ir_x64_debug_pointer(tables, -1)
     int: ir_x64_debug_add(tables, X64DebugType{name: "Int", size: 8, kind: X64DebugTypeKind.Typedef{target: word}})
-    shared := IRX64DebugRows{word: word, byte: byte, pointer: pointer, int: int, string: -1, decimal: -1, fraction: -1}
+    shared := IRX64DebugRows{word: word, byte: byte, pointer: pointer, int: int, string: -1, decimal: -1, fraction: -1, duration: -1}
     loop (row, ty) in m.types {
         described: ir_x64_debug_type(m, tables, shared, row, ty)
         tables.debug_types[row] = described
@@ -300,23 +303,34 @@ ir_x64_debug_type: fn(m: IRModule, tables: &IRX64Tables, shared: &IRX64DebugRows
         }
         .Pointer -> {
             precise: ir_short_name(ir_nominal_name(ir_untag(ty.ty)) ?? "")
-            if precise == "Decimal" {
-                if shared.decimal < 0 {
-                    shared.decimal = ir_x64_debug_handle(tables, "Decimal", "coefficient", "scale", shared.int, shared.word)
+            if precise == {
+                "Decimal" -> {
+                    if shared.decimal < 0 {
+                        shared.decimal = ir_x64_debug_handle(tables, "Decimal", "coefficient", "scale", shared.int, shared.word)
+                    }
+                    return X64DebugType{name: "Decimal", size: 8, kind: X64DebugTypeKind.Typedef{target: shared.decimal}}
                 }
-                return X64DebugType{name: "Decimal", size: 8, kind: X64DebugTypeKind.Typedef{target: shared.decimal}}
-            }
-            if precise == "Fraction" {
-                if shared.fraction < 0 {
-                    shared.fraction = ir_x64_debug_handle(tables, "Fraction", "numerator", "denominator", shared.int, shared.int)
+                "Fraction" -> {
+                    if shared.fraction < 0 {
+                        shared.fraction = ir_x64_debug_handle(tables, "Fraction", "numerator", "denominator", shared.int, shared.int)
+                    }
+                    return X64DebugType{name: "Fraction", size: 8, kind: X64DebugTypeKind.Typedef{target: shared.fraction}}
                 }
-                return X64DebugType{name: "Fraction", size: 8, kind: X64DebugTypeKind.Typedef{target: shared.fraction}}
+                "Duration" -> {
+                    if shared.duration < 0 {
+                        members: [X64DebugMember]{X64DebugMember{name: "ns", offset: Int{TIME_DURATION_NS}, ty: shared.word}}
+                        record: ir_x64_debug_add(tables, X64DebugType{name: "Duration", size: 8, kind: X64DebugTypeKind.Struct{members: members}})
+                        shared.duration = ir_x64_debug_pointer(tables, record)
+                    }
+                    return X64DebugType{name: "Duration", size: 8, kind: X64DebugTypeKind.Typedef{target: shared.duration}}
+                }
+                else -> {}
             }
-            // A task's or a channel endpoint's handle: named as Jet spells
-            // it, a typedef of the runtime state's pointer, which the
-            // debugger reads by that name (JetDebug Native.jet
-            // native_debug_runtime_handle).
-            if ir_task_element(ty.ty) != None || ir_channel_element(ty.ty, "Sender") != None || ir_channel_element(ty.ty, "Receiver") != None {
+            // Any other runtime handle (a task's, a channel endpoint's,
+            // Bytes, a Clock): named as Jet spells it, a typedef of the
+            // runtime state's pointer, which the debugger reads by that name
+            // (JetDebug Native.jet native_debug_runtime_handle).
+            if ir_task_element(ty.ty) != None || ir_channel_element(ty.ty, "Sender") != None || ir_channel_element(ty.ty, "Receiver") != None || ir_runtime_handle(ir_nominal_name(ir_untag(ty.ty)) ?? "") != None {
                 return X64DebugType{name: ir_type_name(ty.ty), size: 8, kind: X64DebugTypeKind.Typedef{target: shared.pointer}}
             }
             X64DebugType{name: "Pointer", size: 8, kind: X64DebugTypeKind.Pointer{target: -1}}
