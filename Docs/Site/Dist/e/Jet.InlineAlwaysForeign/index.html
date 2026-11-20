@@ -42,7 +42,7 @@
     |
   5 | #[Inline(Always), Unsafe(&quot;register-only increment&quot;), FFI(asm)]
     |   ^^^^^^^^^^^^^^
- Why: The body of an `#FFI(asm)` function is foreign code, not Jet: each call goes to that code, and there is no Jet body to copy into the caller. `#Inline(Always)` guarantees that every direct call is inlined on every tier, or the program is refused: sema refuses a function that calls itself or closes a cycle of marked calls (E0917), one used as a value (E0918), one over the size ceiling (E0919), a `#Scrub` routine (E1016), one that reads `context.trace` (E1017) and one with a foreign body (E1021).
+ Why: The body of an `#FFI(asm)` function is foreign code, not Jet: each call goes to that code, and there is no Jet body to copy into the caller. `#Inline(Always)` guarantees that every direct call is inlined on every tier, or the program is refused: sema refuses a function that calls itself or closes a cycle of marked calls (Jet.RecursiveInlineAlways), one used as a value (Jet.InlineAlwaysAddressTaken), one over the size ceiling (Jet.InlineAlwaysTooLarge), a `#Scrub` routine (Jet.InlineAlwaysScrub), one that reads `context.trace` (Jet.InlineAlwaysReadsTrace) and one with a foreign body (Jet.InlineAlwaysForeign).
  Fix: Drop `#Inline(Always)`; a function with a foreign body stays a call.
 More: jet-lang.dev/e/Jet.InlineAlwaysForeign
 
@@ -51,7 +51,7 @@ Error: Jet.InlineAlwaysForeign: `add` has a foreign body, so `#Inline(Always)` c
     |
  10 | #[Inline(Always), Unsafe(&quot;the scalar ABI contract matches the C definition&quot;), FFI(c)]
     |   ^^^^^^^^^^^^^^
- Why: The body of an `#FFI(c)` function is foreign code, not Jet: each call goes to that code, and there is no Jet body to copy into the caller. `#Inline(Always)` guarantees that every direct call is inlined on every tier, or the program is refused: sema refuses a function that calls itself or closes a cycle of marked calls (E0917), one used as a value (E0918), one over the size ceiling (E0919), a `#Scrub` routine (E1016), one that reads `context.trace` (E1017) and one with a foreign body (E1021).
+ Why: The body of an `#FFI(c)` function is foreign code, not Jet: each call goes to that code, and there is no Jet body to copy into the caller. `#Inline(Always)` guarantees that every direct call is inlined on every tier, or the program is refused: sema refuses a function that calls itself or closes a cycle of marked calls (Jet.RecursiveInlineAlways), one used as a value (Jet.InlineAlwaysAddressTaken), one over the size ceiling (Jet.InlineAlwaysTooLarge), a `#Scrub` routine (Jet.InlineAlwaysScrub), one that reads `context.trace` (Jet.InlineAlwaysReadsTrace) and one with a foreign body (Jet.InlineAlwaysForeign).
  Fix: Drop `#Inline(Always)`; a function with a foreign body stays a call.
 More: jet-lang.dev/e/Jet.InlineAlwaysForeign
 
@@ -60,7 +60,7 @@ Error: Jet.InlineAlwaysForeign: `raw_exit` has a foreign body, so `#Inline(Alway
     |
  15 | #[Inline(Always), Import(c), Unsafe(&quot;this program owns the exit status it passes&quot;)]
     |   ^^^^^^^^^^^^^^
- Why: The body of an `#Import(c)` function is foreign code, not Jet: each call goes to that code, and there is no Jet body to copy into the caller. `#Inline(Always)` guarantees that every direct call is inlined on every tier, or the program is refused: sema refuses a function that calls itself or closes a cycle of marked calls (E0917), one used as a value (E0918), one over the size ceiling (E0919), a `#Scrub` routine (E1016), one that reads `context.trace` (E1017) and one with a foreign body (E1021).
+ Why: The body of an `#Import(c)` function is foreign code, not Jet: each call goes to that code, and there is no Jet body to copy into the caller. `#Inline(Always)` guarantees that every direct call is inlined on every tier, or the program is refused: sema refuses a function that calls itself or closes a cycle of marked calls (Jet.RecursiveInlineAlways), one used as a value (Jet.InlineAlwaysAddressTaken), one over the size ceiling (Jet.InlineAlwaysTooLarge), a `#Scrub` routine (Jet.InlineAlwaysScrub), one that reads `context.trace` (Jet.InlineAlwaysReadsTrace) and one with a foreign body (Jet.InlineAlwaysForeign).
  Fix: Drop `#Inline(Always)`; a function with a foreign body stays a call.
 More: jet-lang.dev/e/Jet.InlineAlwaysForeign
 </pre>

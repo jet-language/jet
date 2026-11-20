@@ -42,7 +42,7 @@
     |
   4 | #Inline(Always) triple: fn(x: Int) -&gt; Int { return x * 3 }
     | ^^^^^^^^^^^^^^^
- Why: `triple` is also used as a plain value somewhere (stored, returned, or passed as a callback), and a value needs a real function to point at. `#Inline(Always)` guarantees that every direct call is inlined on every tier, or the program is refused: sema refuses a function that calls itself or closes a cycle of marked calls (E0917), one used as a value (E0918), one over the size ceiling (E0919), a `#Scrub` routine (E1016), one that reads `context.trace` (E1017) and one with a foreign body (E1021).
+ Why: `triple` is also used as a plain value somewhere (stored, returned, or passed as a callback), and a value needs a real function to point at. `#Inline(Always)` guarantees that every direct call is inlined on every tier, or the program is refused: sema refuses a function that calls itself or closes a cycle of marked calls (Jet.RecursiveInlineAlways), one used as a value (Jet.InlineAlwaysAddressTaken), one over the size ceiling (Jet.InlineAlwaysTooLarge), a `#Scrub` routine (Jet.InlineAlwaysScrub), one that reads `context.trace` (Jet.InlineAlwaysReadsTrace) and one with a foreign body (Jet.InlineAlwaysForeign).
  Fix: Drop `#Inline(Always)`, or call `triple` directly instead of through a value.
 More: jet-lang.dev/e/Jet.InlineAlwaysAddressTaken
 </pre>

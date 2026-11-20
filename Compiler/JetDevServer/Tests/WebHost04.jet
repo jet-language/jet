@@ -36,10 +36,10 @@ use {
     assert_eq(words.rest, "app.jet · 1 client")
 }
 
-#Test("header_words_error_shows_diagnostic_code_not_port") {
+#Test("header_words_error_shows_diagnostic_name_not_port") {
     words: header_words("error", "app.jet", "E0102", 8080, 2, 0)
     assert_eq(words.word, "error")
-    assert_eq(words.rest, "E0102 · 2 clients")
+    assert_eq(words.rest, "Jet.UnknownFunction · 2 clients")
 }
 
 #Test("format_build_time_renders_seconds_with_one_decimal") {
@@ -56,8 +56,8 @@ use {
 }
 
 #Test("format_line_plain_uses_bracketed_state_word_no_color") {
-    line: format_line_plain("error", "E0102 · 2 clients")
-    assert_eq(line, "jet dev  [error] E0102 · 2 clients")
+    line: format_line_plain("error", "Jet.UnknownFunction · 2 clients")
+    assert_eq(line, "jet dev  [error] Jet.UnknownFunction · 2 clients")
     assert(!line.contains(terminal_esc()), "the NO_COLOR and CI floor carries no ANSI: {line}")
 }
 
@@ -67,7 +67,7 @@ use {
     loop line in diagnostic.split("\n") {
         assert(framed.contains("│ {line}"), "missing verbatim line {line}")
     }
-    assert(framed[0].starts_with("┌ E0102 "), framed[0])
+    assert(framed[0].starts_with("┌ Jet.UnknownFunction "), framed[0])
     assert(framed[framed.len() - 1].starts_with("└"), framed[framed.len() - 1])
 }
 
@@ -178,7 +178,7 @@ use {
     facts.reconnecting = false
     recovered: facts.json()
     assert(recovered.contains("\"state\":\"error\""), recovered)
-    assert(recovered.contains("\"message\":\"error · E0102 · 0 clients\""), recovered)
+    assert(recovered.contains("\"message\":\"error · Jet.UnknownFunction · 0 clients\""), recovered)
 }
 
 #Test("status_words_count_the_leased_pages") {

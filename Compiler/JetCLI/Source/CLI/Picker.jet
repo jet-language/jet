@@ -1,7 +1,7 @@
 // The command picker bare `jet` opens on a terminal: the palette's commands
 // grouped by category, fuzzy results while typing, one command's usage and
 // flags (Tab), and a two-pane reference (F1) on the alternate screen. A
-// diagnostic code (E0102, L0201, JT0001) shows its `jet explain` page,
+// diagnostic's name (Jet.UnknownFunction) shows its `jet explain` page,
 // verbatim. Frames go to stderr. Stdout carries only the picked command
 // line, and only for a shell hook (JET_HELP_SHELL_PREFILL), so a bare
 // terminal never gets a pasted-looking line. Without a terminal, or with
@@ -29,8 +29,9 @@ JET_CLI_PICKER_INVERT: "48;5;24;97;1"
 
 JET_CLI_PICKER_BORDER: "90"
 
-// The pseudo-category whose rows are diagnostic codes, typed rather than listed.
-JET_CLI_PICKER_CODES: "Error Codes"
+// The pseudo-category whose rows are diagnostics, typed by name rather than
+// listed.
+JET_CLI_PICKER_ERRORS: "Errors"
 
 // Frames never get narrower than this many columns.
 JET_CLI_PICKER_MIN_WIDTH: 24
@@ -56,7 +57,7 @@ JetCLIPickerHit: struct {
     positions: [Int],
 }
 
-// What a query finds: a diagnostic code's page, or the commands it matches,
+// What a query finds: a diagnostic's page, or the commands it matches,
 // best first.
 JetCLIPickerFound: struct {
     code: DiagnosticExplanation?,
@@ -144,7 +145,7 @@ jet_cli_picker_example: fn(name: String) -> String? Never! {
         "run" -> Val("{JET_CLI_BINARY} run")
         "check" | "build" -> Val("{JET_CLI_BINARY} {name} Examples/Basics/Hello.jet")
         "dev" -> Val("{JET_CLI_BINARY} dev run.jet")
-        "explain" -> Val("{JET_CLI_BINARY} explain E0102")
+        "explain" -> Val("{JET_CLI_BINARY} explain Jet.UnknownFunction")
         else -> None
     }
 }
@@ -194,7 +195,7 @@ jet_cli_picker_index: fn() -> [JetCLIPickerEntry] Never! {
     entries
 }
 
-// The palette's categories that list a command, then the codes category.
+// The palette's categories that list a command, then the errors category.
 jet_cli_picker_categories: fn(index: [JetCLIPickerEntry]) -> [String] Never! {
     categories := [String]{}
     loop category in JET_CLI_PALETTE_CATEGORIES {
@@ -204,7 +205,7 @@ jet_cli_picker_categories: fn(index: [JetCLIPickerEntry]) -> [String] Never! {
         }
         if listed -> categories.push("{category}")
     }
-    categories.push("{JET_CLI_PICKER_CODES}")
+    categories.push("{JET_CLI_PICKER_ERRORS}")
     categories
 }
 
@@ -268,18 +269,15 @@ jet_cli_picker_consider: fn(best: &JetCLIPickerHit?, entry: Int, query: String, 
     best = Val(JetCLIPickerHit{entry: entry, score: score, haystack: "{hay}", positions: positions})
 }
 
-// What `query` finds: an exact diagnostic code's page, else every command
+// What `query` finds: an exact diagnostic's page, else every command
 // whose name, usage, summary, flags, example, related commands or keywords
 // match it, best first and then by name. An exact name ranks first.
 jet_cli_picker_search: fn(index: [JetCLIPickerEntry], query: String) -> JetCLIPickerFound Never! {
     wanted: query.trim().copy()
     commands := [JetCLIPickerHit]{}
     if wanted == "" -> return JetCLIPickerFound{code: None, commands: commands}
-    code: wanted.to_upper()
-    if jet_cli_is_diagnostic_code(code) {
-        if diagnostic_explanation(code) == .Val(explanation) {
-            return JetCLIPickerFound{code: Val(explanation), commands: commands}
-        }
+    if jet_cli_picker_diagnostic(wanted) == .Val(explanation) {
+        return JetCLIPickerFound{code: Val(explanation), commands: commands}
     }
     lowered: wanted.to_ascii_lower()
     loop (at, entry) in index {
@@ -302,6 +300,13 @@ jet_cli_picker_search: fn(index: [JetCLIPickerEntry], query: String) -> JetCLIPi
         if by_score != Ordering.Equal -> by_score else -> index[left.entry].name <=> index[right.entry].name
     })
     JetCLIPickerFound{code: None, commands: commands}
+}
+
+// The page of the diagnostic `wanted` names in full, such as
+// Jet.UnknownFunction, or of the code that aliases it, in any case. A bare
+// word is a command search, never a diagnostic.
+jet_cli_picker_diagnostic: fn(wanted: String) -> DiagnosticExplanation? Never! {
+    if jet_cli_is_diagnostic_code(wanted.to_upper()) || wanted.contains(".") -> diagnostic_explanation(wanted) else -> None
 }
 
 // ---- Text measure ----
@@ -462,8 +467,8 @@ jet_cli_picker_categorized: fn(state: JetCLIPickerState, expanded: Bool, height:
         if current -> header = body.len()
         body.push(JetCLIPickerLine{text: label, selected: current && !open})
         if !open -> next
-        if category == JET_CLI_PICKER_CODES {
-            body.push(JetCLIPickerLine{text: diagnostic_theme_paint(color, DIAGNOSTIC_THEME_DIM, "type an E-code, such as E0102, for verbatim help"), selected: false})
+        if category == JET_CLI_PICKER_ERRORS {
+            body.push(JetCLIPickerLine{text: diagnostic_theme_paint(color, DIAGNOSTIC_THEME_DIM, "type an error's name, such as Jet.UnknownFunction, for its full help"), selected: false})
         }
         loop member in jet_cli_picker_members(state, at) {
             entry: state.index[member]

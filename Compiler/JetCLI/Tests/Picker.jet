@@ -76,7 +76,7 @@ picker_test_same_keys: fn(got: [JetCLIPickerKey], want: [JetCLIPickerKey]) Never
         assert(state.categories.contains(entry.category), "`{entry.name}` has no listed category")
     }
     assert(seen.contains("run") && seen.contains("check") && seen.contains("test"))
-    assert_eq(state.categories[state.categories.len() - 1], "Error Codes")
+    assert_eq(state.categories[state.categories.len() - 1], "Errors")
     listed := 0
     loop at in 0..<state.categories.len() -> listed += jet_cli_picker_members(state, at).len()
     assert_eq(listed, state.index.len())
@@ -142,14 +142,15 @@ picker_test_same_keys: fn(got: [JetCLIPickerKey], want: [JetCLIPickerKey]) Never
     assert_eq(none.commands.len(), 0)
 }
 
-#Test("a diagnostic code query shows its explain page verbatim") {
+#Test("a diagnostic name or code query shows its explain page verbatim") {
     state := jet_cli_picker_state(72, 24, false)
-    explanation: diagnostic_explanation("E0102") ?? panic("E0102 is registered")
-    loop query in ([String]{"E0102", "e0102", "  E0102 "}) {
+    explanation: diagnostic_explanation("Jet.UnknownFunction") ?? panic("Jet.UnknownFunction is registered")
+    loop query in ([String]{"Jet.UnknownFunction", "  Jet.UnknownFunction ", "E0102", "e0102"}) {
         found: jet_cli_picker_search(state.index, query)
         assert(found.code != None, "`{query}` found no page")
         assert_eq(found.commands.len(), 0)
     }
+    assert(jet_cli_picker_search(state.index, "UnknownFunction").code == None, "a bare word stays a command search")
     picker_test_keys(state, [JetCLIPickerKey]{JetCLIPickerKey.Text{text: "E"}, JetCLIPickerKey.Text{text: "0"}, JetCLIPickerKey.Text{text: "1"}, JetCLIPickerKey.Text{text: "0"}, JetCLIPickerKey.Text{text: "2"}})
     assert_eq(jet_cli_picker_render(state), jet_cli_picker_text_view(diagnostic_explanation_render(explanation, false), 72, 24, 0))
     assert(jet_cli_picker_pick(state, false) == None)

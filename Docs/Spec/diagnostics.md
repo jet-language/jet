@@ -331,7 +331,7 @@ not refused.
 
 ## Explain and website output
 
-`jet explain <CODE>` and `jet explain Jet.Name` resolve the same registry rows offline through
+`jet explain Jet.Name` and `jet explain <CODE>` resolve the same registry rows offline through
 [`Explain.jet`](../../Compiler/JetCLI/Source/CLI/Explain.jet). The website is another
 projection of that data: [`Docs/Site/generate.jet`](../Site/generate.jet) writes
 the error index and renders each code page from registry rows and snapshots.
@@ -363,7 +363,7 @@ constant and owning decision appear only with `--verbose`.
    rows, and the generator refuses a change that adds an active row with
    neither a structured edit nor a `no_fix` reason.
 5. Run the focused snapshot and coverage checks, then check
-   `jet explain <CODE>`. Test rendered behavior where applicable; do not add a
+   `jet explain Jet.Name`. Test rendered behavior where applicable; do not add a
    persistent Markdown mirror.
    Parser parity proofs also compare byte spans, secondary labels, edits, and
    their applicability and safety grades in `tests/selfhost_parser.rs`; matching

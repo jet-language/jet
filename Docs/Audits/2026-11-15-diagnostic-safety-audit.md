@@ -504,7 +504,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2105 | DriverOperationFailed | Compiler/JetCLI/Source/CLI/AuditCopies.jet:72 | the operation's cause is fixed |
 | E2106 | UnknownSyntaxToken | Compiler/JetCLI/Source/CLI/SyntaxExplain.jet:53 | registered syntax is used |
 | E2110 | GcFailed | Compiler/JetCLI/Source/CLI/GCReport.jet:318 | the workload or trace path is fixed |
-| E2112 | InvalidMemoryLedger | Compiler/JetCLI/Source/CLI/AuditMemory.jet:195 | the ledger is recorded by exercised runs |
+| E2112 | InvalidMemoryLedger | Compiler/JetCLI/Source/CLI/AuditMemory.jet:196 | the ledger is recorded by exercised runs |
 | E2114 | CrashReportWithoutBuild | Compiler/JetCLI/Source/CLI/Crash.jet:39 | the report keeps its build line |
 | E2115 | CrashSymbolsMissing | Compiler/JetCLI/Source/CLI/Crash.jet:70 | run `jet crash` where the build saved its symbols |
 | E2116 | UnhandledSourceExtension | Compiler/JetCLI/Source/CLI/Front.jet:991 | pass a file the command takes |

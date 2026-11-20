@@ -17,7 +17,7 @@
 // tick does. There are no threads, locks or atomics, and a publication
 // (web_host_publish) holds the state's edit guard, so no static read sees a
 // half-swapped output root.
-use jet_foundation.[JetReleaseDevtoolsDeployment, JetReleaseDevtoolsNetwork, JetReleaseDevtoolsPolicy, foundation_json_quote]
+use jet_foundation.[JetReleaseDevtoolsDeployment, JetReleaseDevtoolsNetwork, JetReleaseDevtoolsPolicy, diagnostic_display_name, foundation_json_quote]
 
 // `jet dev` scans these application ports when none is given.
 APPLICATION_PORT_FIRST: 8080
@@ -139,7 +139,7 @@ web_host_int_json: fn(value: Int?) -> String Never! {
     if value == .Val(number) -> "{number}" else -> "null"
 }
 
-// Building names the watched file, an error its code, ready the address and
+// Building names the watched file, an error its diagnostic's name, ready the address and
 // the last build's time.
 header_words: fn(state: String, file: String, code: String, port: Int, clients: Int, last_build_ms: Int) -> WebHostWords Never! {
     plural: if clients == 1 -> "" else -> "s"
@@ -147,7 +147,7 @@ header_words: fn(state: String, file: String, code: String, port: Int, clients: 
         return WebHostWords{word: "building", rest: "{file} · {clients} client{plural}"}
     }
     if state == "error" {
-        return WebHostWords{word: "error", rest: "{code} · {clients} client{plural}"}
+        return WebHostWords{word: "error", rest: "{diagnostic_display_name(code)} · {clients} client{plural}"}
     }
     built: if last_build_ms > 0 -> " · built {format_build_time(last_build_ms)}" else -> ""
     WebHostWords{word: "ready", rest: "localhost:{port} · {clients} client{plural}{built}"}

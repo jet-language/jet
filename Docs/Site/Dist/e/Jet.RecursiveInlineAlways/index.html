@@ -42,7 +42,7 @@
     |
   5 | #Inline(Always) pong: fn(n: Int) -&gt; Int { if n &lt;= 0 -&gt; 1 else -&gt; ping(n - 1) }
     |                                                                  ^^^^
- Why: Each inlined copy would hold the next one, so expanding the cycle would never end. `#Inline(Always)` guarantees that every direct call is inlined on every tier, or the program is refused: sema refuses a function that calls itself or closes a cycle of marked calls (E0917), one used as a value (E0918), one over the size ceiling (E0919), a `#Scrub` routine (E1016), one that reads `context.trace` (E1017) and one with a foreign body (E1021).
+ Why: Each inlined copy would hold the next one, so expanding the cycle would never end. `#Inline(Always)` guarantees that every direct call is inlined on every tier, or the program is refused: sema refuses a function that calls itself or closes a cycle of marked calls (Jet.RecursiveInlineAlways), one used as a value (Jet.InlineAlwaysAddressTaken), one over the size ceiling (Jet.InlineAlwaysTooLarge), a `#Scrub` routine (Jet.InlineAlwaysScrub), one that reads `context.trace` (Jet.InlineAlwaysReadsTrace) and one with a foreign body (Jet.InlineAlwaysForeign).
  Fix: Drop `#Inline(Always)` from one function of the cycle (use `#Inline` as a hint), or break the cycle.
 More: jet-lang.dev/e/Jet.RecursiveInlineAlways
 </pre>
