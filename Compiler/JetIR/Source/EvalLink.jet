@@ -92,9 +92,9 @@ IREvalCalls: struct {
 // net_socket_call, trap_syscall and the rest); a number an export's caller
 // passes, or one loaded or computed, fails. Only this check is here: the
 // eval link's other two (no runtime state, no loaded code address) are not.
-// `units` holds the sources of each composed unit of `m` by the unit's path
-// (JetSema sema_unsafe_unit_map): the runtime is built as one unit.
-ir_eval_link_receipt: fn(m: IRModule, exports: [IRLibraryExport], units: [String:SemaUnitMap]) -> [String] Never! {
+// `units` holds the sources of each composed unit of `m` with the unit's
+// path (JetSema sema_unsafe_unit_map): the runtime is built as one unit.
+ir_eval_link_receipt: fn(m: IRModule, exports: [IRLibraryExport], units: [IREvalUnit]) -> [String] Never! {
     count: m.functions.len()
     name_callees := loop _ in m.names -> -1
     loop row in exports {
@@ -143,17 +143,24 @@ ir_eval_stop_root: fn(f: IRFunction, file: String) -> Bool Never! {
     f.name.starts_with("jet_rt_panic_") || f.name == "rt_task_panic_publish" || IR_STOP_FATAL.contains(f.name)
 }
 
+// A composed unit (JetSema sema_unsafe_unit_map) and the path of the source
+// file it is.
+IREvalUnit: struct {
+    path: String,
+    map: SemaUnitMap,
+}
+
 // The file name of each function of `m`: in a composed unit of `units`, the
 // name of the source whose unit lines hold the function's first line; else
 // its own file's.
-ir_eval_function_files: fn(m: IRModule, units: [String:SemaUnitMap]) -> [String] Never! {
+ir_eval_function_files: fn(m: IRModule, units: [IREvalUnit]) -> [String] Never! {
     files := loop f in m.functions -> ir_eval_file_name(f.source_file)
-    loop (path, unit) in units {
-        starts: loop source in unit.sources -> source.line
+    loop unit in units {
+        starts: loop source in unit.map.sources -> source.line
         loop (id, f) in m.functions {
-            if f.source_file != path -> next
+            if f.source_file != unit.path -> next
             at: sema_unsafe_last_at(starts, f.line) ?? -1
-            files[id] = if at < 0 -> "" else -> ir_eval_file_name(unit.sources[at].path)
+            files[id] = if at < 0 -> "" else -> ir_eval_file_name(unit.map.sources[at].path)
         }
     }
     files
