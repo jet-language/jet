@@ -1,0 +1,17 @@
+#Error
+SourceErr: enum {
+    Missing,
+}
+
+#Error
+TargetErr: enum {
+    Wrapped,
+}
+
+load_row: fn() -> Int SourceErr! { return Err(SourceErr.Missing) }
+
+job: fn() -> Int TargetErr! {
+    load_row(1)
+    load_row(2)
+    return Ok(0)
+}
