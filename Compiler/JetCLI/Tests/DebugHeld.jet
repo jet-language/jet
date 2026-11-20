@@ -6,11 +6,13 @@
 // an expression that reaches an item of a source that reads otherwise than
 // the record (jet_cli_debug_eval_stale). The held check of the package's
 // cut opens at every session, and gains the functions of a source that an
-// expression reaches, callees first (jet_cli_debug_eval_held_reach).
+// expression reaches, callees first (jet_cli_debug_eval_held_reach); the
+// first stop shows, and an evaluation answers, once it is open.
 use {
-    jet_cli.[JetCLIDebugEvalDeclared, JetCLIDebugEvalHeldOpen, JetCLIDebugEvalHeldShared, JetCLIDebugEvalHeldStamp, jet_cli_debug_eval_declared, jet_cli_debug_eval_digests, jet_cli_debug_eval_held_claim, jet_cli_debug_eval_held_cut_claim, jet_cli_debug_eval_held_cut_done, jet_cli_debug_eval_held_done, jet_cli_debug_eval_held_reach, jet_cli_debug_eval_held_slot, jet_cli_debug_eval_image_same, jet_cli_debug_eval_stale]
+    jet_cli.[JetCLIDebugEvalDeclared, JetCLIDebugEvalHeldOpen, JetCLIDebugEvalHeldShared, JetCLIDebugEvalHeldStamp, jet_cli_debug_eval_declared, jet_cli_debug_eval_digests, jet_cli_debug_eval_held_claim, jet_cli_debug_eval_held_cut_claim, jet_cli_debug_eval_held_cut_done, jet_cli_debug_eval_held_cut_wait, jet_cli_debug_eval_held_done, jet_cli_debug_eval_held_reach, jet_cli_debug_eval_held_slot, jet_cli_debug_eval_image_same, jet_cli_debug_eval_stale]
     jet_debug.[NativeEvalBinder]
     jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot]
+    held_time: core.time
 }
 
 // The digests the held check `held` last read.
@@ -43,6 +45,23 @@ held_test_snapshot: fn(util: String) -> JetDriverAuthorizedSourceSnapshot Never!
     unopened: JetCLIDebugEvalHeldOpen{held: None, missed: None}
     jet_cli_debug_eval_held_cut_done(held, unopened)
     assert(jet_cli_debug_eval_held_cut_claim(held))
+}
+
+// Opens the held cut of `held` after a while, opening nothing.
+held_test_open_later: fn(held: JetCLIDebugEvalHeldShared) -[Time.Wait]> Never! {
+    held_time.sleep(20ms)
+    unopened: JetCLIDebugEvalHeldOpen{held: None, missed: None}
+    jet_cli_debug_eval_held_cut_done(held, unopened)
+}
+
+#Test("the first stop waits while the held check of the package's cut opens") {
+    held: jet_cli_debug_eval_held_slot()
+    assert(jet_cli_debug_eval_held_cut_claim(held))
+    opening: task held_test_open_later(held)
+    jet_cli_debug_eval_held_cut_wait(held)
+    permit: held.slot.guard_edit()
+    assert(!permit.value.cut_opening, "the wait ends once the cut has opened")
+    opening.join() ?? panic("the opening task failed")
 }
 
 // The names of the functions of `declared` at the slots `order`, in order;

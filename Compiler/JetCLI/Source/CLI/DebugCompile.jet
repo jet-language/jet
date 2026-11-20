@@ -1256,11 +1256,21 @@ jet_cli_debug_eval_held_in: fn(slot: &JetCLIDebugEvalHeldSlot, running: [String:
 // built at O0 (`running`, as jet_cli_debug_eval_held takes it); its other
 // names are Core's, a field, or a local of a function it makes. None, so
 // the held check of the program or the compiles answer, as
-// jet_cli_debug_eval_held, and when the cut can't gain what it names.
+// jet_cli_debug_eval_held, and when the cut can't gain what it names. A
+// cut still opening is waited for: it checks only Core and the package's
+// carrier, which takes less than a compile of the expression would.
 jet_cli_debug_eval_held_cut: fn(shared: JetCLIDebugEvalHeldShared, entry: String, running: [String:[U8]], path: String, text: String, params: [NativeEvalBinder]) -[FS, Env, Time, Exec.Args]> NativeEval? NativeEvalRefused! {
     if !jet_cli_debug_eval_alone_types(params) -> return Ok(None)
     permit := shared.slot.guard_edit()
+    permit.wait(shared.opened, fn(slot) { !slot.cut_opening }) ?? return Ok(None)
     jet_cli_debug_eval_held_cut_in(permit.value, entry, running, path, text, params)
+}
+
+// Waits while the held check of the package's cut `held` opens
+// (jet_cli_debug_eval_held_start).
+jet_cli_debug_eval_held_cut_wait: fn(held: JetCLIDebugEvalHeldShared) Never! {
+    permit: held.slot.guard_edit()
+    permit.wait(held.opened, fn(slot) { !slot.cut_opening }) ?? return
 }
 
 jet_cli_debug_eval_held_cut_in: fn(slot: &JetCLIDebugEvalHeldSlot, entry: String, running: [String:[U8]], path: String, text: String, params: [NativeEvalBinder]) -[FS, Env, Time, Exec.Args]> NativeEval? NativeEvalRefused! {
