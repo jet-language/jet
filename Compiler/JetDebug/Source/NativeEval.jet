@@ -1608,6 +1608,47 @@ native_log_word: fn(result: NativeEvalPart) -> Bool Never! {
     result.word && !result.inline && result.size <= 8
 }
 
+// Whether logpoint part `hole`, whose value is `result`, is a String
+// local's own name, which a placed logpoint reads at the hit rather than
+// runs (NativePlace.jet): its trampoline copies the String's length and up
+// to NATIVE_PLACE_TEXT bytes of its text into the hit's slot.
+native_log_text: fn(result: NativeEvalPart, hole: String) -> Bool Never! {
+    result.name == "String" && native_eval_is_name(hole)
+}
+
+// A String part's text as a logpoint's message shows it, from the hit's
+// slot in `bytes`: its length the word at `at`, its text the bytes from
+// `text`. A longer one than NATIVE_PLACE_TEXT shows the bytes the slot
+// kept, cut back to a whole character, then `…`.
+native_log_text_shown: fn(bytes: [U8], at: Int, text: Int) -> String Never! {
+    length: native_number(bytes, at, 8, X64DebugEncoding.Signed)
+    if length < 0 || text + NATIVE_PLACE_TEXT > bytes.len() {
+        return "<a String the debugger can't show>"
+    }
+    kept := if length < NATIVE_PLACE_TEXT -> length else -> NATIVE_PLACE_TEXT
+    // A cut inside a character moves back to its first byte: the last
+    // lead byte kept (not 10xxxxxx) says how many bytes its character
+    // takes.
+    if kept < length {
+        lead := kept - 1
+        loop lead > 0 {
+            byte: Int{bytes[text + lead]}
+            if (byte & 0xc0) != 0x80 -> break
+            lead -= 1
+        }
+        first: Int{bytes[text + lead]}
+        size: if {
+            first >= 0xf0 -> 4
+            first >= 0xe0 -> 3
+            first >= 0xc0 -> 2
+            else -> 1
+        }
+        if lead + size > kept -> kept = lead
+    }
+    shown: String.from_bytes(bytes[text..<text + kept]) ?? ""
+    if kept < length -> "{shown}…" else -> shown
+}
+
 // A logpoint's message as the text around each `{…}` part (`texts`, one
 // more than the parts) and each part's expression, `{{` and `}}` a brace
 // of the text; None when a part doesn't close.
@@ -1675,11 +1716,29 @@ native_log_shown: fn(image: NativeImage, memory: NativeMemory, result: NativeEva
     assert_eq(plain.holes.len(), 0)
 }
 
-#Test("a part runs in the program only when its value is a word of its own") {
+#Test("a part runs in the program only when its value is a word of its own or a String local") {
     assert(native_log_word(NativeEvalPart{name: "Int", size: 8, inline: false, word: true}))
     assert(native_log_word(NativeEvalPart{name: "Bool", size: 1, inline: false, word: true}))
     assert(!native_log_word(NativeEvalPart{name: "String", size: 8, inline: false}))
     assert(!native_log_word(NativeEvalPart{name: "Point", size: 16, inline: true}))
+    assert(native_log_text(NativeEvalPart{name: "String", size: 8, inline: false}, "word"))
+    assert(!native_log_text(NativeEvalPart{name: "String", size: 8, inline: false}, "word.trim()"))
+    assert(!native_log_text(NativeEvalPart{name: "Int", size: 8, inline: false, word: true}, "i"))
+}
+
+#Test("a String part shows the text its slot kept, cut at a whole character") {
+    slot := native_word_bytes(4)
+    loop byte in "even".bytes() -> slot.push(byte)
+    loop slot.len() < 8 + NATIVE_PLACE_TEXT -> slot.push(U8{0})
+    assert_eq(native_log_text_shown(slot, 0, 8), "even")
+    long := native_word_bytes(NATIVE_PLACE_TEXT + 5)
+    loop _ in 0..<NATIVE_PLACE_TEXT - 1 -> long.push(U8{97})
+    // é is two bytes; the slot keeps only its first.
+    long.extend("é".bytes()[0..<1])
+    shown: native_log_text_shown(long, 0, 8)
+    assert_eq(shown.bytes().len(), NATIVE_PLACE_TEXT - 1 + "…".bytes().len())
+    assert(shown.ends_with("a…"))
+    assert_eq(native_log_text_shown(slot[0..<8], 0, 8), "<a String the debugger can't show>")
 }
 
 #Test("a local's own name reads as `locals` shows it, an expression compiles") {

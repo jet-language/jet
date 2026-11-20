@@ -1029,22 +1029,29 @@ stdin is empty too. D-DBG-VERBS1=A names the commands:
   `break 12` is line 12 of the file being debugged. With `if`, the breakpoint
   stops only when the Jet expression holds in the stopped frame. A condition
   that is not a Bool is refused when it is set; one that fails at a hit
-  stops and says why. Setting it says where the condition runs: the
-  debugger checks it at each hit, which stops the program each time.
+  stops and says why. Setting it says where the condition runs: in the
+  program, when its code writes only its own stack and the blocks it
+  allocates, which come from an arena of 64 KiB of its own, emptied at
+  each hit (a hit that finds no room left, or frees the program's memory,
+  traps to the debugger, which checks it); else the debugger checks it at
+  each hit, which stops the program each time.
 - `log <file:line> "<text with {expr}>"` sets a logpoint. It prints its
   message with each `{expr}` filled in, then the program runs on. Setting it
   says where it runs. A logpoint with no condition, and whose parts are
-  each a number, Bool or Char, runs in the program: each part is compiled
-  on its own and placed as a condition is, and a hit writes its parts'
-  values and a sequence number to a ring of 65,536 slots in the program's
+  each a number, Bool or Char, or a String local's own name, runs in the
+  program: each part is compiled on its own and placed as a condition is,
+  and a hit writes its parts' values (a String's length and up to 120
+  bytes of its text, shown cut at a whole character and ended by `…` when
+  longer) and a sequence number to a ring of 65,536 slots in the program's
   memory, then runs on without a stop. The debugger reads the ring and
   fills in the messages, in the order of their hits, when the program
   stops, when the ring is full, when a thread exits and before it changes
   the breakpoints. Its messages then come after the program output that
-  preceded the read, not between its lines. Any other part (a String, a
-  struct) is read from memory that may change after the hit, so such a
-  logpoint says why it can't run in the program, and the debugger fills in
-  its message at each hit, which stops the program each time.
+  preceded the read, not between its lines. Any other part (a String
+  expression, a struct) is read from memory that may change after the
+  hit, so such a logpoint says why it can't run in the program, and the
+  debugger fills in its message at each hit, which stops the program each
+  time.
 - `watch <place>` stops at each write that changes a local of the selected
   frame, a field path under one (`watch order.total`), or an item of a List
   (`watch xs[3]`, `watch order.lines[i + 1]`). The compiler's parser reads

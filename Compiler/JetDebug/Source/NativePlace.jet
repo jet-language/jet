@@ -14,23 +14,29 @@ use jet_backend.[X64DebugEncoding, link_debug_uleb, x64_jetline_sleb]
 // register back and runs the instructions the jump replaced, moved, then
 // jumps back after them. On true it puts every register back and traps; the
 // debugger reports the breakpoint with the thread at the breakpoint's
-// address. The condition's runtime calls (stop polls, stack growth,
-// allocation, a slow path of exact Int arithmetic, a stop) all go to one
-// stub that finds the trampoline's frame through the frame chain and traps
-// a second way, after which the debugger checks that hit as an evaluation
-// (NativeEval.jet), as it does a condition whose code can't be placed in
-// the program's. JetIR EvalPlace.jet says
-// which conditions may: the code placed writes nothing but its own stack.
+// address. The condition's allocations go to a scratch arena mapped in its
+// region, which each hit empties as it starts; a hit that finds another
+// thread using the arena, or fills it, calls out. Its other runtime calls
+// (stop polls, stack growth, a slow path of exact Int arithmetic, a stop)
+// all go to one stub that finds the trampoline's frame through the frame
+// chain and traps a second way, after which the debugger checks that hit
+// as an evaluation (NativeEval.jet), as it does a condition whose code
+// can't be placed in the program's. JetIR EvalPlace.jet says which
+// conditions may: the code placed writes nothing but its own stack and the
+// blocks it allocates.
 //
 // A logpoint whose `{…}` parts each pass that scan runs in the program the
 // same way, with no stop at each hit: its trampoline claims the next slot
 // of a ring mapped in its region, takes a sequence number from a word the
 // session's logpoints share, calls each part's code with its word of the
-// slot as the result's place, then marks the slot written. The hit that
-// writes the last slot traps; the debugger then reads the ring, shows each
-// hit's message in sequence order, and empties it. It reads every ring at
-// each stop and at the program's exit too, so a message shows before the
-// stop or the end that follows it.
+// slot as the result's place, then marks the slot written. A part that
+// names a String local is read rather than called: the trampoline copies
+// the String's length into the part's word and its text, up to
+// NATIVE_PLACE_TEXT bytes, into the slot, at the hit. The hit that writes
+// the last slot traps; the debugger then reads the ring, shows each hit's
+// message in sequence order, and empties it. It reads every ring at each
+// stop and at the program's exit too, so a message shows before the stop
+// or the end that follows it.
 
 // The trampoline's frame from its rbp C: C+0 the program's rbp, C+8 the
 // breakpoint's address (a frame the walk reads as called from there), the
@@ -89,17 +95,21 @@ NativePlaceArg: struct {
 }
 
 // One call a trampoline makes: the entry of a condition, or of one `{…}`
-// part of a logpoint's message, and where each of its captures is.
+// part of a logpoint's message, and where each of its captures is. A
+// `text` part calls nothing: its one capture is a String local, whose
+// length and text the trampoline copies into the hit's slot.
 NativePlaceCall: struct {
     entry: Int,
     arguments: [NativePlaceArg],
+    text: Bool{false},
 }
 
 // Where a placed logpoint's hits go: its ring at `address` (the slots the
 // hits claimed, then the generation a slot's hit is written in), `slots`
 // slots after that, and the session's sequence word `clock` that orders
 // the hits of every logpoint. A slot holds each part's word, the
-// generation once the hit's words are in, then the hit's sequence number.
+// generation once the hit's words are in, the hit's sequence number, then
+// the text of each `text` part, in order (native_place_text_at).
 NativePlaceRing: struct {
     address: Int,
     slots: Int,
@@ -112,12 +122,62 @@ NATIVE_PLACE_RING_HEADER: 16
 // The hits a logpoint's ring holds before the debugger drains it.
 NATIVE_PLACE_RING_SLOTS: 65536
 
-// The bytes of a slot of a ring of logpoint parts `parts`.
-native_place_slot: fn(parts: Int) -> Int Never! { 8 * (parts + 2) }
+// The bytes of a String part's text a slot keeps; a longer one is cut
+// there.
+NATIVE_PLACE_TEXT: 120
+
+// The bytes of a slot of a ring of logpoint parts `parts`, `texts` of them
+// String parts read as text.
+native_place_slot: fn(parts: Int, texts: Int) -> Int Never! {
+    8 * (parts + 2) + NATIVE_PLACE_TEXT * texts
+}
+
+// Where in a slot of `parts` parts the text of its `index`th text part
+// starts.
+native_place_text_at: fn(parts: Int, index: Int) -> Int Never! { native_place_slot(parts, index) }
+
+// A condition's scratch arena, after the logpoint's ring in its region: the
+// take's words (NativeEval.jet NATIVE_EVAL_CURSOR, NATIVE_EVAL_END and
+// NATIVE_EVAL_BASE), the word a hit claims it by, then its blocks, to
+// NATIVE_PLACE_ARENA bytes in all.
+NATIVE_PLACE_ARENA: 65536
+
+NATIVE_PLACE_ARENA_BUSY: 32
+
+NATIVE_PLACE_ARENA_WORDS: 64
+
+// Which of the arena's entries a placed call's runtime call of `symbol`
+// goes to (NativePlaceCode): 0 the take, of jet_rt_alloc and
+// jet_rt_alloc_value; 1 take_8, of their align-8 entries; 2 the give, of
+// jet_rt_free and jet_rt_free_8; -1 for any other, which calls out.
+native_place_arena_route: fn(symbol: String) -> Int Never! {
+    if {
+        symbol == "jet_rt_alloc" || symbol == "jet_rt_alloc_value" -> 0
+        symbol == "jet_rt_alloc_8" || symbol == "jet_rt_alloc_value_8" -> 1
+        symbol == "jet_rt_free" || symbol == "jet_rt_free_8" -> 2
+        else -> -1
+    }
+}
+
+// Where in the trampoline `built` a runtime call of `symbol` goes: the
+// arena's entry for an allocation or a free, when it has an arena, else
+// the stub, which calls out.
+native_place_routine: fn(built: NativePlaceCode, symbol: String) -> Int Never! {
+    route: native_place_arena_route(symbol)
+    if {
+        route == 0 && built.alloc >= 0 -> built.alloc
+        route == 1 && built.alloc_8 >= 0 -> built.alloc_8
+        route == 2 && built.free >= 0 -> built.free
+        else -> built.out
+    }
+}
 
 // A trampoline's code and the offsets in it of its two traps (the
 // condition holds, or a logpoint's ring is full; it called out), the moved
-// instructions and the stub its runtime calls go to.
+// instructions and the stub its runtime calls go to. With an arena, the
+// entries its allocations go to (`alloc`, of jet_rt_alloc(size, align) and
+// jet_rt_alloc_value; `alloc_8`, of their align-8 entries, which take the
+// size alone) and its frees (`free`); -1 without one.
 NativePlaceCode: struct {
     bytes: [U8],
     truth: Int,
@@ -125,6 +185,9 @@ NativePlaceCode: struct {
     moved: Int,
     moved_end: Int,
     out: Int,
+    alloc: Int{-1},
+    alloc_8: Int{-1},
+    free: Int{-1},
 }
 
 // One placed condition or logpoint of the session: the breakpoint
@@ -132,11 +195,12 @@ NativePlaceCode: struct {
 // of the trampoline's two traps, of its moved instructions, of its runtime
 // stub, and the region it and the code it calls take. A logpoint's ring
 // (NativePlaceRing) is at `ring` (0 for a condition), of `slots` slots of
-// `parts` words. `live` is false once the jump is gone; the region stays,
-// since a thread may still be in it. `traps` counts the hits that left the
-// program for the debugger at one of its traps: the code keeps no state per
-// thread or fiber, so that is a hit where the condition held, called out or
-// filled the ring, never one on a thread or fiber new to it.
+// `parts` words and `texts` texts. `live` is false once the jump is gone;
+// the region stays, since a thread may still be in it. `traps` counts the
+// hits that left the program for the debugger at one of its traps: the
+// code keeps no state per thread or fiber, so that is a hit where the
+// condition held, called out or filled the ring, never one on a thread or
+// fiber new to it.
 NativePlaced: struct {
     number: Int,
     address: Int,
@@ -152,6 +216,7 @@ NativePlaced: struct {
     ring: Int{0},
     slots: Int{0},
     parts: Int{0},
+    texts: Int{0},
     traps: Int{0},
 }
 
@@ -480,9 +545,13 @@ native_place_restore: fn(out: &[U8]) Never! {
 // claims a slot of `ring`, takes the next sequence number, has each call
 // write its part's word in the slot, marks the slot written and runs the
 // moved `insns`; the hit that fills the ring traps, and one finding it
-// full goes to the debugger as a call out does. None when an entry or a
-// moved instruction's target can't be reached.
-native_place_code: fn(base: Int, address: Int, calls: [NativePlaceCall], ring: NativePlaceRing?, bytes: [U8], at: Int, insns: [NativeInsn]) -> NativePlaceCode? Never! {
+// full goes to the debugger as a call out does. With an `arena` (its
+// address, 0 for none: NATIVE_PLACE_ARENA), each hit first claims it and
+// empties it, and gives it up once its calls return; a hit that finds it
+// claimed goes to the debugger too. None when an entry or a moved
+// instruction's target can't be reached, or a text part has no ring or
+// not one capture.
+native_place_code: fn(base: Int, address: Int, calls: [NativePlaceCall], ring: NativePlaceRing?, arena: Int, bytes: [U8], at: Int, insns: [NativeInsn]) -> NativePlaceCode? Never! {
     out := [U8]{}
     // lea rsp,[rsp-128]; pushfq; push each register, DWARF 15 down to 0
     native_place_emit(out, [Int]{0x48, 0x8d, 0x64, 0x24, 0x80, 0x9c})
@@ -515,7 +584,22 @@ native_place_code: fn(base: Int, address: Int, calls: [NativePlaceCall], ring: N
     }
     if ring == None && calls.len() != 1 -> return None
     parts: calls.len()
-    slot: native_place_slot(parts)
+    texts := 0
+    loop call in calls {
+        if call.text -> texts += 1
+    }
+    slot: native_place_slot(parts, texts)
+    // The arena's claim: movabs r11,arena; xor eax,eax; mov ecx,1;
+    // lock cmpxchg [r11+busy],rcx; jne contended (patched once known);
+    // then it empties: mov rax,[r11+base]; mov [r11+cursor],rax
+    contended := -1
+    if arena != 0 {
+        native_eval_r11(out, arena)
+        native_place_emit(out, [Int]{0x31, 0xc0, 0xb9, 1, 0, 0, 0, 0xf0, 0x49, 0x0f, 0xb1, 0x4b, NATIVE_PLACE_ARENA_BUSY, 0x0f, 0x85})
+        contended = out.len()
+        native_place_word(out, 0, 4)
+        native_place_emit(out, [Int]{0x49, 0x8b, 0x43, NATIVE_EVAL_BASE, 0x49, 0x89, 0x43, NATIVE_EVAL_CURSOR})
+    }
     full := -1
     if ring == .Val(log) {
         // The claim: movabs rax,ring; mov rcx,1; lock xadd [rax],rcx;
@@ -541,7 +625,28 @@ native_place_code: fn(base: Int, address: Int, calls: [NativePlaceCall], ring: N
         native_place_word(out, 8 * parts + 8, 4)
     }
     back := 0
+    read := 0
     loop (index, call) in calls {
+        if call.text {
+            if ring == None || call.arguments.len() != 1 -> return None
+            // The String's header (rax: its word's address, then the word);
+            // its length into the part's word, then up to
+            // NATIVE_PLACE_TEXT bytes of its text into the slot:
+            // mov rax,[rax]; mov rsi,[rax]; mov rdx,[rax+8];
+            // mov rdi,[rbp+cell+8]; mov [rdi+8*index],rdx;
+            // mov ecx,NATIVE_PLACE_TEXT; cmp rdx,rcx; cmovb rcx,rdx;
+            // add rdi,text; cld; rep movsb
+            native_place_capture(out, call.arguments[0], 0)
+            native_place_emit(out, [Int]{0x48, 0x8b, 0x00, 0x48, 0x8b, 0x30, 0x48, 0x8b, 0x50, 0x08, 0x48, 0x8b, 0x7d, NATIVE_PLACE_CELL + 8, 0x48, 0x89, 0x97})
+            native_place_word(out, 8 * index, 4)
+            out.push(0xb9)
+            native_place_word(out, NATIVE_PLACE_TEXT, 4)
+            native_place_emit(out, [Int]{0x48, 0x39, 0xca, 0x48, 0x0f, 0x42, 0xca, 0x48, 0x81, 0xc7})
+            native_place_word(out, native_place_text_at(parts, read), 4)
+            native_place_emit(out, [Int]{0xfc, 0xf3, 0xa4})
+            read += 1
+            next
+        }
         // The result's place: the cell, or the part's word of the slot
         // (mov rdi,[rbp+cell+8]; add rdi,8*index); then each capture's
         // address
@@ -559,21 +664,7 @@ native_place_code: fn(base: Int, address: Int, calls: [NativePlaceCall], ring: N
             native_place_word(out, ((8 * call.arguments.len() + 15) >> 4) << 4, 4)
         }
         loop (k, argument) in call.arguments {
-            reg: if table -> 0 else -> NATIVE_PLACE_ARGS[k]
-            high: if reg >= 8 -> 4 else -> 0
-            low: reg & 7
-            saved: NATIVE_PLACE_GPR + 8 * argument.register
-            // register: lea R,[rbp+saved]; memory: mov R,[rbp+saved]; lea R,[R+offset]
-            native_place_emit(out, [Int]{0x48 | high, if argument.memory -> 0x8b else -> 0x8d, 0x85 | (low << 3)})
-            native_place_word(out, saved, 4)
-            if argument.memory {
-                native_place_emit(out, [Int]{0x48 | high | (high >> 2), 0x8d, 0x80 | (low << 3) | low})
-                native_place_word(out, argument.offset, 4)
-            }
-            // mov R,[R]
-            if argument.deref {
-                native_place_emit(out, [Int]{0x48 | high | (high >> 2), 0x8b, (low << 3) | low})
-            }
+            native_place_capture(out, argument, if table -> 0 else -> NATIVE_PLACE_ARGS[k])
             // a table's row: mov [rsp+8k],rax
             if table {
                 native_place_emit(out, [Int]{0x48, 0x89, 0x84, 0x24})
@@ -587,9 +678,10 @@ native_place_code: fn(base: Int, address: Int, calls: [NativePlaceCall], ring: N
         field: out.len()
         native_place_word(out, 0, 4)
         if !native_place_rel(out, field, base, call.entry) -> return None
-        if index == 0 -> back = out.len()
+        if back == 0 -> back = out.len()
         native_place_emit(out, [Int]{0x48, 0x89, 0xec})
     }
+    if arena != 0 -> native_place_free_arena(out, arena)
     if ring == .Val(log) {
         // Written: movabs rax,ring; mov rdx,[rax+8]; mov rcx,[rbp+cell+8];
         // mov [rcx+8*parts],rdx; then the last slot traps:
@@ -619,11 +711,14 @@ native_place_code: fn(base: Int, address: Int, calls: [NativePlaceCall], ring: N
     native_place_emit(out, [Int]{0xcc, 0xe9})
     held_on: out.len()
     native_place_word(out, 0, 4)
-    // Called out, or a logpoint's ring full: mov rsp,rbp, then as the
-    // condition had held.
+    // Called out, or a logpoint's ring full: mov rsp,rbp, the arena given
+    // up, then as the condition had held. A hit that found the arena
+    // claimed has rsp at rbp already and gives up none.
     abort: out.len()
     if full >= 0 -> native_fix_put(out, full, abort - (full + 4), 4)
     native_place_emit(out, [Int]{0x48, 0x89, 0xec})
+    if arena != 0 -> native_place_free_arena(out, arena)
+    if contended >= 0 -> native_fix_put(out, contended, out.len() - (contended + 4), 4)
     native_place_restore(out)
     unknown: out.len()
     native_place_emit(out, [Int]{0xcc, 0xe9})
@@ -654,7 +749,62 @@ native_place_code: fn(base: Int, address: Int, calls: [NativePlaceCall], ring: N
     native_place_emit(out, [Int]{0x48, 0x89, 0xc5, 0xe9})
     second: out.len()
     native_place_word(out, abort - (second + 4), 4)
-    Val(NativePlaceCode{bytes: out, truth: truth, unknown: unknown, moved: moved, moved_end: moved_end, out: stub})
+    if arena == 0 {
+        return Val(NativePlaceCode{bytes: out, truth: truth, unknown: unknown, moved: moved, moved_end: moved_end, out: stub})
+    }
+    // The arena's entries. alloc_8: mov esi,8; then alloc: call the take
+    // (NativeEval.jet native_eval_take_code, past the 10 bytes that
+    // follow the call); test rax,rax; je stub; ret. An arena with no room
+    // left calls out.
+    alloc_8: out.len()
+    native_place_emit(out, [Int]{0xbe, 8, 0, 0, 0})
+    alloc: out.len()
+    out.push(0xe8)
+    native_place_word(out, 10, 4)
+    native_place_emit(out, [Int]{0x48, 0x85, 0xc0, 0x0f, 0x84})
+    no_room: out.len()
+    native_place_word(out, stub - (no_room + 4), 4)
+    out.push(0xc3)
+    out.extend(native_eval_take_code(arena))
+    // free: a block of the arena is left be (the next hit empties it); a
+    // free of any other is the program's memory, so the hit calls out:
+    // movabs r11,arena; cmp rdi,[r11+base]; jb stub; cmp rdi,[r11+end];
+    // jae stub; xor eax,eax; ret
+    free: out.len()
+    native_eval_r11(out, arena)
+    native_place_emit(out, [Int]{0x49, 0x3b, 0x7b, NATIVE_EVAL_BASE, 0x0f, 0x82})
+    below: out.len()
+    native_place_word(out, stub - (below + 4), 4)
+    native_place_emit(out, [Int]{0x49, 0x3b, 0x7b, NATIVE_EVAL_END, 0x0f, 0x83})
+    past: out.len()
+    native_place_word(out, stub - (past + 4), 4)
+    native_place_emit(out, [Int]{0x31, 0xc0, 0xc3})
+    Val(NativePlaceCode{bytes: out, truth: truth, unknown: unknown, moved: moved, moved_end: moved_end, out: stub, alloc: alloc, alloc_8: alloc_8, free: free})
+}
+
+// Gives up the arena at `arena` (native_place_code): movabs r11,arena;
+// mov qword [r11+busy],0.
+native_place_free_arena: fn(out: &[U8], arena: Int) Never! {
+    native_eval_r11(out, arena)
+    native_place_emit(out, [Int]{0x49, 0xc7, 0x43, NATIVE_PLACE_ARENA_BUSY, 0, 0, 0, 0})
+}
+
+// The address of a capture's bytes into x86 register `reg`: a register's
+// saved slot (lea R,[rbp+saved]), or memory at one (mov R,[rbp+saved];
+// lea R,[R+offset]), read once more (mov R,[R]) when it says so.
+native_place_capture: fn(out: &[U8], argument: NativePlaceArg, reg: Int) Never! {
+    high: if reg >= 8 -> 4 else -> 0
+    low: reg & 7
+    saved: NATIVE_PLACE_GPR + 8 * argument.register
+    native_place_emit(out, [Int]{0x48 | high, if argument.memory -> 0x8b else -> 0x8d, 0x85 | (low << 3)})
+    native_place_word(out, saved, 4)
+    if argument.memory {
+        native_place_emit(out, [Int]{0x48 | high | (high >> 2), 0x8d, 0x80 | (low << 3) | low})
+        native_place_word(out, argument.offset, 4)
+    }
+    if argument.deref {
+        native_place_emit(out, [Int]{0x48 | high | (high >> 2), 0x8b, (low << 3) | low})
+    }
 }
 
 // The jump at a breakpoint `address` to a trampoline at `target`, padded
@@ -764,7 +914,7 @@ native_place_arg: fn(expression: [U8]) -> NativePlaceArg? Never! {
     code: [U8]{0x55, 0x48, 0x89, 0xe5, 0x90}
     insns: native_displaced(code, 0) ?? panic("displaced")
     arguments: [NativePlaceArg]{NativePlaceArg{register: 6, memory: true, offset: -8, deref: false}}
-    placed: native_place_code(0x200000, 0x1000, [NativePlaceCall]{NativePlaceCall{entry: 0x201000, arguments: arguments}}, None, code, 0, insns) ?? panic("code")
+    placed: native_place_code(0x200000, 0x1000, [NativePlaceCall]{NativePlaceCall{entry: 0x201000, arguments: arguments}}, None, 0, code, 0, insns) ?? panic("code")
     assert_eq(Int{placed.bytes[placed.truth]}, 0xcc)
     assert_eq(Int{placed.bytes[placed.unknown]}, 0xcc)
     assert_eq(Int{placed.bytes[placed.moved]}, 0x55)
@@ -786,7 +936,7 @@ native_place_arg: fn(expression: [U8]) -> NativePlaceArg? Never! {
     code: [U8]{0x55, 0x48, 0x89, 0xe5, 0x90}
     insns: native_displaced(code, 0) ?? panic("displaced")
     arguments: loop k in 0..<6 -> NativePlaceArg{register: 6, memory: true, offset: -8 * (k + 1), deref: false}
-    placed: native_place_code(0x200000, 0x1000, [NativePlaceCall]{NativePlaceCall{entry: 0x201000, arguments: arguments}}, None, code, 0, insns) ?? panic("code")
+    placed: native_place_code(0x200000, 0x1000, [NativePlaceCall]{NativePlaceCall{entry: 0x201000, arguments: arguments}}, None, 0, code, 0, insns) ?? panic("code")
     bytes: placed.bytes
     // and rsp,-16; sub rsp,48: the table's six rows, aligned
     table: native_place_find(bytes, [Int]{0x48, 0x83, 0xe4, 0xf0, 0x48, 0x81, 0xec, 48, 0, 0, 0})
@@ -822,7 +972,7 @@ native_place_find: fn(bytes: [U8], wanted: [Int]) -> Int Never! {
     insns: native_displaced(code, 0) ?? panic("displaced")
     calls: [NativePlaceCall]{NativePlaceCall{entry: 0x201000, arguments: [NativePlaceArg]{}}, NativePlaceCall{entry: 0x201100, arguments: [NativePlaceArg]{}}}
     ring: NativePlaceRing{address: 0x300000, slots: 4, clock: 0x300100}
-    placed: native_place_code(0x200000, 0x1000, calls, Val(ring), code, 0, insns) ?? panic("code")
+    placed: native_place_code(0x200000, 0x1000, calls, Val(ring), 0, code, 0, insns) ?? panic("code")
     bytes: placed.bytes
     // The claim's lock xadd, then its jae to the path that calls out once
     // the ring is full: mov rsp,rbp and every register put back, then the
@@ -840,5 +990,82 @@ native_place_find: fn(bytes: [U8], wanted: [Int]) -> Int Never! {
     // The hit in the last slot traps once it is written.
     last: native_place_find(bytes, [Int]{0x48, 0x81, 0x7d, NATIVE_PLACE_CELL, 3, 0, 0, 0, 0x0f, 0x84}) + 10
     assert_eq(last + 4 + native_number(bytes, last, 4, X64DebugEncoding.Signed) + restore.len(), placed.truth)
-    assert_eq(native_place_slot(2), 32)
+    assert_eq(native_place_slot(2, 0), 32)
+}
+
+#Test("a condition that allocates claims its arena, empties it and gives it up; its allocations take from it") {
+    code: [U8]{0x55, 0x48, 0x89, 0xe5, 0x90}
+    insns: native_displaced(code, 0) ?? panic("displaced")
+    calls: [NativePlaceCall]{NativePlaceCall{entry: 0x201000, arguments: [NativePlaceArg]{}}}
+    placed: native_place_code(0x200000, 0x1000, calls, None, 0x400000, code, 0, insns) ?? panic("code")
+    bytes: placed.bytes
+    restore := [U8]{}
+    native_place_restore(restore)
+    // The claim's lock cmpxchg, then its jne past the arena's release on
+    // the path that calls out: a hit that finds it claimed gives up none.
+    claim: native_place_find(bytes, [Int]{0xf0, 0x49, 0x0f, 0xb1, 0x4b, NATIVE_PLACE_ARENA_BUSY, 0x0f, 0x85})
+    assert(claim > 0)
+    contended: claim + 8
+    assert_eq(contended + 4 + native_number(bytes, contended, 4, X64DebugEncoding.Signed) + restore.len(), placed.unknown)
+    // Then it empties: the cursor goes back to the base.
+    assert_eq(native_place_find(bytes, [Int]{0x49, 0x8b, 0x43, NATIVE_EVAL_BASE, 0x49, 0x89, 0x43, NATIVE_EVAL_CURSOR}), contended + 4)
+    // The release follows the call, and again on the path that calls out.
+    release: [Int]{0x49, 0xc7, 0x43, NATIVE_PLACE_ARENA_BUSY, 0, 0, 0, 0}
+    first: native_place_find(bytes, release)
+    assert(first > claim)
+    assert(native_place_find(bytes[first + 8..<bytes.len()], release) >= 0)
+    // alloc_8 sets the align, then alloc calls the take past its own tail.
+    assert_eq(Int{bytes[placed.alloc_8]}, 0xbe)
+    assert_eq(placed.alloc, placed.alloc_8 + 5)
+    assert_eq(Int{bytes[placed.alloc]}, 0xe8)
+    taken: native_eval_take_code(0x400000)
+    core: placed.alloc + 5 + native_number(bytes, placed.alloc + 1, 4, X64DebugEncoding.Signed)
+    assert_eq(native_place_find(bytes[core..<core + taken.len()], [Int]{0x49, 0xbb}), 0)
+    // No room calls out: je stub.
+    assert_eq(placed.alloc + 10 + 4 + native_number(bytes, placed.alloc + 10, 4, X64DebugEncoding.Signed), placed.out)
+    // A free of a block past the arena calls out too.
+    assert(placed.free > core)
+    assert_eq(placed.free + 16 + 4 + native_number(bytes, placed.free + 16, 4, X64DebugEncoding.Signed), placed.out)
+}
+
+#Test("a logpoint's String part copies the local's length and text into the hit's slot") {
+    code: [U8]{0x55, 0x48, 0x89, 0xe5, 0x90}
+    insns: native_displaced(code, 0) ?? panic("displaced")
+    word: [NativePlaceArg]{NativePlaceArg{register: 3, memory: false, offset: 0, deref: false}}
+    calls: [NativePlaceCall]{NativePlaceCall{entry: 0x201000, arguments: [NativePlaceArg]{}}, NativePlaceCall{entry: 0, arguments: word, text: true}}
+    ring: NativePlaceRing{address: 0x300000, slots: 4, clock: 0x300100}
+    placed: native_place_code(0x200000, 0x1000, calls, Val(ring), 0, code, 0, insns) ?? panic("code")
+    bytes: placed.bytes
+    slot: native_place_slot(2, 1)
+    assert_eq(slot, 32 + NATIVE_PLACE_TEXT)
+    // The claim finds the slot by its size.
+    assert(native_place_find(bytes, [Int]{0x48, 0x69, 0xc9, slot, 0, 0, 0}) > 0)
+    // rbx's saved word's address (lea rax,[rbp+GPR+24]); the header, its
+    // data and length; the length into the part's second word.
+    read: native_place_find(bytes, [Int]{0x48, 0x8d, 0x85, 0x38, 0x01, 0, 0, 0x48, 0x8b, 0x00, 0x48, 0x8b, 0x30, 0x48, 0x8b, 0x50, 0x08, 0x48, 0x8b, 0x7d, NATIVE_PLACE_CELL + 8, 0x48, 0x89, 0x97, 8, 0, 0, 0})
+    assert(read > 0)
+    // At most NATIVE_PLACE_TEXT bytes, copied past the slot's words.
+    copied: native_place_find(bytes, [Int]{0xb9, NATIVE_PLACE_TEXT, 0, 0, 0, 0x48, 0x39, 0xca, 0x48, 0x0f, 0x42, 0xca, 0x48, 0x81, 0xc7, native_place_text_at(2, 0), 0, 0, 0, 0xfc, 0xf3, 0xa4})
+    assert_eq(copied, read + 28)
+    // The part calls nothing: one call, the first part's.
+    assert_eq(native_place_find(bytes[copied..<bytes.len()], [Int]{0x48, 0x83, 0xe4, 0xf0, 0xe8}), -1)
+    assert(native_place_code(0x200000, 0x1000, [NativePlaceCall]{NativePlaceCall{entry: 0, arguments: word, text: true}}, None, 0, code, 0, insns) == None)
+}
+
+#Test("a placed call's allocations and frees go to its arena's entries, its other runtime calls out") {
+    code: [U8]{0x55, 0x48, 0x89, 0xe5, 0x90}
+    insns: native_displaced(code, 0) ?? panic("displaced")
+    calls: [NativePlaceCall]{NativePlaceCall{entry: 0x201000, arguments: [NativePlaceArg]{}}}
+    placed: native_place_code(0x200000, 0x1000, calls, None, 0x400000, code, 0, insns) ?? panic("code")
+    assert_eq(native_place_routine(placed, "jet_rt_alloc"), placed.alloc)
+    assert_eq(native_place_routine(placed, "jet_rt_alloc_value"), placed.alloc)
+    assert_eq(native_place_routine(placed, "jet_rt_alloc_8"), placed.alloc_8)
+    assert_eq(native_place_routine(placed, "jet_rt_alloc_value_8"), placed.alloc_8)
+    assert_eq(native_place_routine(placed, "jet_rt_free"), placed.free)
+    assert_eq(native_place_routine(placed, "jet_rt_free_8"), placed.free)
+    assert_eq(native_place_routine(placed, "jet_rt_session_poll"), placed.out)
+    assert_eq(native_place_arena_route("jet_rt_session_poll"), -1)
+    // Without an arena, an allocation calls out too.
+    bare: native_place_code(0x200000, 0x1000, calls, None, 0, code, 0, insns) ?? panic("code")
+    assert_eq(native_place_routine(bare, "jet_rt_alloc"), bare.out)
 }

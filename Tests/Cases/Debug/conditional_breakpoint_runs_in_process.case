@@ -4,9 +4,10 @@
 # The condition `i == 3 && n == 5` is false through count_up(1000000) and
 # holds once in count_up(5), which stops with `i` at 3. A condition that
 # reads more locals than a call's registers hold runs in the program too,
-# and stops in sums with `i` at 2. A condition that builds a List can't run
-# in the program: setting it says so, the debugger checks it at each hit,
-# and it still stops only where it holds, with `i` at 3.
+# and stops in sums with `i` at 2. A condition that builds a String and
+# drops it can't run in the program: setting it says so, the debugger
+# checks it at each hit, and it still stops only where it holds, with `i`
+# at 3.
 # The fixture must stay in jet fmt form: line 6 is the first statement of
 # count_up's loop body, and lines 20 and 21 are sums'.
 fixture: ConditionalBreakpointRunsInProcess.fixture
@@ -17,7 +18,8 @@ stdin: conditional_breakpoint_runs_in_process.stdin
 exit: 0
 stdout: ~ "Breakpoint set  prog.jet:6 if i == 3 && n == 5\nThe condition runs in the program: a hit where it is false runs on without a stop\n" # the condition runs in the program
 stdout: ~ "Breakpoint set  prog.jet:20 if a + b + c + d + e + i == 17\nThe condition runs in the program: a hit where it is false runs on without a stop\n" # a condition of six locals runs in the program too
-stdout: ~ "Breakpoint set  prog.jet:21 if [i, 2][0] == 3\nThe condition can't run in the program: " # a condition that can't says so when it is set
+stdout: ~ "Breakpoint set  prog.jet:21 if \"" # the String condition is set
+stdout: ~ " == \"3\"\nThe condition can't run in the program: " # a condition that can't says so when it is set
 stdout: ~ "; the debugger checks it at each hit, which stops the program each time\n" # and says the debugger checks it instead
 stdout: ~ "a million hits under a second\n" # a million false hits run on at full speed
 stdout: !~ "i = 0\n" # no condition stops where it is false

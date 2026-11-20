@@ -131,9 +131,11 @@ NativeBreakpoint: struct {
 // String with its `{…}` parts. A logpoint's message is also kept as the
 // text around each part (`texts`, one more than the parts) and each part
 // compiled on its own (`parts`), which is what runs when the logpoint runs
-// in the program. `placement` says why the condition or logpoint can't run
-// in the program itself (NativePlace.jet), "" when it can. Each rule the
-// session makes has its own `version`, which a replay's moves name it by.
+// in the program, and whether each part is a String local the program's
+// trampoline reads as text at the hit instead (`reads`, native_log_text).
+// `placement` says why the condition or logpoint can't run in the program
+// itself (NativePlace.jet), "" when it can. Each rule the session makes has
+// its own `version`, which a replay's moves name it by.
 NativeRule: struct {
     condition: Shared<NativeEval>?,
     log: Shared<NativeEval>?,
@@ -142,6 +144,17 @@ NativeRule: struct {
     version: Int,
     texts: [String]{[String]{}},
     parts: [Shared<NativeEval>]{[Shared<NativeEval>]{}},
+    reads: [Bool]{[Bool]{}},
+}
+
+// A logpoint's message as the program runs it (log_parts): why it can't
+// (`reason`, "" when it can), the text around each part, each part
+// compiled on its own, and whether each is read as text (NativeRule).
+NativeLogParts: struct {
+    reason: String,
+    texts: [String]{[String]{}},
+    parts: [Shared<NativeEval>]{[Shared<NativeEval>]{}},
+    reads: [Bool]{[Bool]{}},
 }
 
 // What a run said before it settled: the program's output (`stdout`), a
@@ -161,12 +174,13 @@ NativeLogRead: struct {
 }
 
 // A ring's hits as read: its rule's message text and parts as they were
-// at the read, the types to show the parts as, the bytes of its first
-// `rows` slots, its parts per slot, and the generation its hits were
-// written in.
+// at the read, whether each part is read as text, the types to show the
+// parts as, the bytes of its first `rows` slots, its parts per slot, and
+// the generation its hits were written in.
 NativeRingRead: struct {
     texts: [String],
     results: [NativeEvalPart],
+    reads: [Bool],
     types: [Int?],
     bytes: [U8],
     rows: Int,
@@ -843,6 +857,7 @@ NativeSession: struct {
                 rule.placement = split.reason
                 rule.texts = split.texts
                 rule.parts = split.parts
+                rule.reads = split.reads
             }
         }
         Ok(rule)
@@ -853,42 +868,46 @@ NativeSession: struct {
     // `at`, where the breakpoint traps (`address`). `reason` says why the
     // logpoint can't run in the program, "" when it can: a part's value is
     // not a word of its own (a String's points at memory the program may
-    // change before the debugger reads it), or its code can't run there
-    // (placement). A part that is a variable's own name and doesn't compile
-    // names a value its function only reads, of a type no read copies,
-    // which is no word either.
-    log_parts: fn(&self, number: Int, address: Int, at: {path: String, line: Int, column: Int}, log: String) -> {reason: String, texts: [String], parts: [Shared<NativeEval>]} Never! {
-        split: native_log_split(log) ?? return {reason: "a `{{` of its message has no `}}`", texts: [String]{}, parts: [Shared<NativeEval>]{}}
+    // change before the debugger reads it) nor a String local, whose text
+    // the program's trampoline copies at the hit, or its code can't run
+    // there (placement). A part that is a variable's own name and doesn't
+    // compile names a value its function only reads, of a type no read
+    // copies, which is no word either.
+    log_parts: fn(&self, number: Int, address: Int, at: {path: String, line: Int, column: Int}, log: String) -> NativeLogParts Never! {
+        split: native_log_split(log) ?? return NativeLogParts{reason: "a `{{` of its message has no `}}`"}
         parts := [Shared<NativeEval>]{}
+        reads := [Bool]{}
         loop hole in split.holes {
-            compiled: self.compiled(at.path, at.line, at.column, hole, None) ?? return self.log_refused(address, at.line, hole, err.message)
-            name: compiled.guard_read().value.result.name
-            if !native_log_word(compiled.guard_read().value.result) {
-                return {reason: "`{hole}` is a {name}, which the debugger would read after the hit rather than at it", texts: [String]{}, parts: [Shared<NativeEval>]{}}
+            compiled: self.compiled(at.path, at.line, at.column, hole, None) ?? return NativeLogParts{reason: self.log_refused(address, at.line, hole, err.message)}
+            result: compiled.guard_read().value.result
+            read: native_log_text(result, hole)
+            if !read && !native_log_word(result) {
+                return NativeLogParts{reason: "`{hole}` is a {result.name}, which the debugger would read after the hit rather than at it"}
             }
-            reason: self.placement(number, compiled)
-            if reason != "" {
-                return {reason: "`{hole}`: {reason}", texts: [String]{}, parts: [Shared<NativeEval>]{}}
-            }
+            // A part read as text runs no code of its own: only where its
+            // String is matters.
+            reason: if read -> self.placement_sites(number, compiled) else -> self.placement(number, compiled)
+            if reason != "" -> return NativeLogParts{reason: "`{hole}`: {reason}"}
             parts.push(compiled)
+            reads.push(read)
         }
-        {reason: "", texts: split.texts, parts: parts}
+        NativeLogParts{reason: "", texts: split.texts, parts: parts, reads: reads}
     }
 
     // Why logpoint part `hole`, which the compiler refused (`refusal`),
     // keeps its logpoint out of the program, for log_parts: a variable's own
     // name the function at `address` declares by line `line` names its
     // type (as `locals` names it), and other parts the refusal.
-    log_refused: fn(self, address: Int, line: Int, hole: String, refusal: String) -> {reason: String, texts: [String], parts: [Shared<NativeEval>]} Never! {
+    log_refused: fn(self, address: Int, line: Int, hole: String, refusal: String) -> String Never! {
         if native_eval_is_name(hole) {
-            function: native_function_at(self.image, address) ?? return {reason: "`{hole}` doesn't compile on its own: {refusal}", texts: [String]{}, parts: [Shared<NativeEval>]{}}
+            function: native_function_at(self.image, address) ?? return "`{hole}` doesn't compile on its own: {refusal}"
             loop variable in function.variables {
                 if variable.name != hole || variable.line > line -> next
                 type_name: native_type_name(self.image, variable.ty)
-                return {reason: "`{hole}` is a {type_name}, which the debugger would read after the hit rather than at it", texts: [String]{}, parts: [Shared<NativeEval>]{}}
+                return "`{hole}` is a {type_name}, which the debugger would read after the hit rather than at it"
             }
         }
-        {reason: "`{hole}` doesn't compile on its own: {refusal}", texts: [String]{}, parts: [Shared<NativeEval>]{}}
+        "`{hole}` doesn't compile on its own: {refusal}"
     }
 
     // The source file (its path, as the image's line table records it),
@@ -1233,10 +1252,16 @@ NativeSession: struct {
 
     // Why the condition `compiled` of breakpoint `number` can't run in the
     // program, "" when it can: what it does (JetIR EvalPlace.jet), or the
-    // code at one of the breakpoint's addresses (site_plan).
+    // code at one of the breakpoint's addresses (placement_sites).
     placement: fn(&self, number: Int, compiled: Shared<NativeEval>) -> String Never! {
         refusal: compiled.guard_read().value.refusal
         if refusal != "" -> return refusal
+        self.placement_sites(number, compiled)
+    }
+
+    // Why the code at one of breakpoint `number`'s addresses can't take a
+    // jump to `compiled` (site_plan), "" when none.
+    placement_sites: fn(&self, number: Int, compiled: Shared<NativeEval>) -> String Never! {
         addresses := [Int]{}
         loop breakpoint in self.breakpoints {
             if breakpoint.number == number {
@@ -1316,18 +1341,27 @@ NativeSession: struct {
     // the program at `address`, where no trap byte is: the code of the
     // condition or of each `{…}` part of the message, and the functions it
     // calls, placed in a region mapped near the code with the trampoline
-    // (NativePlace.jet) and, for a logpoint, its ring; their runtime calls
-    // sent to the trampoline's stub, then the jump written at `address`.
-    // Why it can't, "" when it does.
+    // (NativePlace.jet) and, for a logpoint, its ring; their allocations
+    // and frees sent to the arena after the ring, their other runtime calls
+    // to the trampoline's stub, then the jump written at `address`. A part
+    // read as text has no code: the trampoline copies its String. Why it
+    // can't, "" when it does.
     place_rule: fn(&self, number: Int, address: Int) -> String Never! {
         calls := [Shared<NativeEval>]{}
+        reads := [Bool]{}
         logs := false
         if self.rules.get(number) == .Val(rule) {
             if rule.placement != "" -> return "{rule.placement}"
             logs = rule.log != None && rule.condition == None
-            if rule.condition == .Val(condition) -> calls.push(condition)
+            if rule.condition == .Val(condition) {
+                calls.push(condition)
+                reads.push(false)
+            }
             if logs {
-                loop part in rule.parts -> calls.push(part)
+                loop (k, part) in rule.parts {
+                    calls.push(part)
+                    reads.push(k < rule.reads.len() && rule.reads[k])
+                }
             }
         }
         if calls.len() == 0 && !logs -> return "it has no condition"
@@ -1349,31 +1383,52 @@ NativeSession: struct {
         }
         facts_cell: self.eval_facts() ?? return err.message
         facts: facts_cell.guard_read()
-        // Each call's code and entry, at its offset in the region.
-        plans := [NativeFixPlan]{}
+        // Each call's code and entry, at its offset in the region; a part
+        // read as text has neither.
+        plans := [NativeFixPlan?]{}
         offsets := [Int]{}
         entries := [Int]{}
+        texts := 0
+        allocates := false
         size := 0
-        loop compiled in calls {
+        loop (k, compiled) in calls {
+            offsets.push(size)
+            if reads[k] {
+                plans.push(None)
+                entries.push(0)
+                texts += 1
+                next
+            }
             permit: compiled.guard_read()
             diff: native_fix_diff(self.image, permit.value.edit, facts.value.symbols, facts.value.code.bytes, facts.value.code.address, self.fixed) ?? return err.detail
             plan: native_fix_place_all(permit.value.edit, facts.value.symbols, diff, permit.value.entry) ?? return err.detail
             entries.push(native_eval_entry(permit.value, plan) ?? return "the compiled condition has no entry")
-            offsets.push(size)
             size = (size + plan.size + NATIVE_FIX_ALIGN - 1).div_euclid(NATIVE_FIX_ALIGN) * NATIVE_FIX_ALIGN
-            plans.push(plan)
+            loop piece in plan.pieces {
+                if piece.function < 0 -> next
+                loop reloc in permit.value.edit.functions[piece.function].relocs {
+                    if reloc.target == .Runtime(symbol) {
+                        if native_place_arena_route(symbol) >= 0 -> allocates = true
+                    }
+                }
+            }
+            plans.push(Val(plan))
         }
         // A logpoint's ring follows the trampoline's page, and the
-        // session's sequence word the ring, until the session has one.
-        slot: native_place_slot(calls.len())
+        // session's sequence word the ring, until the session has one; the
+        // arena of code that allocates follows them.
+        slot: native_place_slot(calls.len(), texts)
         clock_room: if self.clock == 0 -> 8 else -> 0
         ring_size: if logs -> NATIVE_PLACE_RING_HEADER + NATIVE_PLACE_RING_SLOTS * slot + clock_room else -> 0
+        ring_end: size + NATIVE_FIX_PAGE + ring_size
+        arena_offset: (ring_end + NATIVE_PLACE_ARENA_WORDS - 1).div_euclid(NATIVE_PLACE_ARENA_WORDS) * NATIVE_PLACE_ARENA_WORDS
         text_low: facts.value.code.address
         text_high: text_low + facts.value.code.bytes.len()
         syscall: self.syscall_site(facts.value.code) ?? return "the program's code holds no system call to map the condition's code with"
-        base: self.map_code(size + NATIVE_FIX_PAGE + ring_size, text_high, syscall) ?? return err.detail
+        base: self.map_code(if allocates -> arena_offset + NATIVE_PLACE_ARENA else -> ring_end, text_high, syscall) ?? return err.detail
         trampoline: base + size
         ring_at: trampoline + NATIVE_FIX_PAGE
+        arena: if allocates -> base + arena_offset else -> 0
         clock: if self.clock == 0 -> ring_at + NATIVE_PLACE_RING_HEADER + NATIVE_PLACE_RING_SLOTS * slot else -> self.clock
         ring := NativePlaceRing?{None}
         if logs {
@@ -1381,23 +1436,24 @@ NativeSession: struct {
         }
         targets := [NativePlaceCall]{}
         loop (k, entry) in entries {
-            targets.push(NativePlaceCall{entry: base + offsets[k] + entry, arguments: site.args[k]})
+            targets.push(NativePlaceCall{entry: if reads[k] -> 0 else -> base + offsets[k] + entry, arguments: site.args[k], text: reads[k]})
         }
-        built: native_place_code(trampoline, address, targets, ring, site.code, address - site.low, site.insns) ?? return "the condition's code is out of reach of its breakpoint"
+        built: native_place_code(trampoline, address, targets, ring, arena, site.code, address - site.low, site.insns) ?? return "the condition's code is out of reach of its breakpoint"
         if built.bytes.len() + 8 > NATIVE_FIX_PAGE {
             return "the instructions at its breakpoint are too long to move"
         }
         region := loop _ in 0..<size -> U8{0}
-        loop (k, plan) in plans {
+        loop (k, planned) in plans {
+            plan: planned ?? next
             permit: calls[k].guard_read()
             placed: native_fix_region(plan, permit.value.edit, facts.value.symbols, base + offsets[k])
             loop (at, byte) in placed -> region[offsets[k] + at] = byte
             loop piece in plan.pieces {
                 if piece.function < 0 -> next
                 loop reloc in permit.value.edit.functions[piece.function].relocs {
-                    if reloc.target == .Runtime(_) {
+                    if reloc.target == .Runtime(symbol) {
                         at: offsets[k] + piece.offset + reloc.at
-                        native_fix_put(region, at, trampoline + built.out - (base + at + 4), 4)
+                        native_fix_put(region, at, trampoline + native_place_routine(built, symbol) - (base + at + 4), 4)
                     }
                 }
             }
@@ -1411,6 +1467,19 @@ NativeSession: struct {
         if logs && !self.poke_bytes(ring_at, header) {
             return "the debugger couldn't write the logpoint's ring"
         }
+        // The arena's words, in NativeEval.jet's order (its next free byte,
+        // its end, its start, a count no give here keeps), then its claim,
+        // free; its blocks start past them.
+        if arena != 0 {
+            words := native_word_bytes(arena + NATIVE_PLACE_ARENA_WORDS)
+            words.extend(native_word_bytes(arena + NATIVE_PLACE_ARENA))
+            words.extend(native_word_bytes(arena + NATIVE_PLACE_ARENA_WORDS))
+            words.extend(native_word_bytes(0))
+            words.extend(native_word_bytes(0))
+            if !self.poke_bytes(arena, words) {
+                return "the debugger couldn't write the condition's arena"
+            }
+        }
         if logs && self.clock == 0 -> self.clock = clock
         jump: native_place_jump(address, trampoline, length)
         if jump.len() == 0 -> return "the condition's code is out of reach of its breakpoint"
@@ -1420,7 +1489,7 @@ NativeSession: struct {
             return "the debugger couldn't write the jump to the condition"
         }
         from: address - site.low
-        self.placed.push(NativePlaced{number: number, address: address, bytes: site.code[from..<from + length], truth: trampoline + built.truth, unknown: trampoline + built.unknown, moved: trampoline + built.moved, moved_end: trampoline + built.moved_end, out: trampoline + built.out, low: base, high: trampoline, live: true, ring: if logs -> ring_at else -> 0, slots: if logs -> NATIVE_PLACE_RING_SLOTS else -> 0, parts: calls.len()})
+        self.placed.push(NativePlaced{number: number, address: address, bytes: site.code[from..<from + length], truth: trampoline + built.truth, unknown: trampoline + built.unknown, moved: trampoline + built.moved, moved_end: trampoline + built.moved_end, out: trampoline + built.out, low: base, high: trampoline, live: true, ring: if logs -> ring_at else -> 0, slots: if logs -> NATIVE_PLACE_RING_SLOTS else -> 0, parts: calls.len(), texts: texts})
         ""
     }
 
@@ -1499,15 +1568,19 @@ NativeSession: struct {
             if claimed == 0 -> next
             generation: native_number(header, 8, 8, X64DebugEncoding.Signed)
             count: if claimed < placed.slots -> claimed else -> placed.slots
-            slot: native_place_slot(placed.parts)
+            slot: native_place_slot(placed.parts, placed.texts)
             bytes: x64_trace_read(self.trace, placed.ring + NATIVE_PLACE_RING_HEADER, count * slot) ?? next
             native_fix_put(header, 0, 0, 8)
             native_fix_put(header, 8, generation + 1, 8)
             _ := self.poke_bytes(placed.ring, header)
             rule: self.rules.get(placed.number) ?? next
-            if rule.texts.len() != placed.parts + 1 || rule.parts.len() != placed.parts -> next
+            if rule.texts.len() != placed.parts + 1 || rule.parts.len() != placed.parts || rule.reads.len() != placed.parts {
+                next
+            }
             texts := [String]{}
             loop text in rule.texts -> texts.push("{text}")
+            reads := [Bool]{}
+            loop read in rule.reads -> reads.push(read)
             results := [NativeEvalPart]{}
             types := [Int?]{}
             loop part in rule.parts {
@@ -1516,7 +1589,7 @@ NativeSession: struct {
                 results.push(NativeEvalPart{name: "{permit.value.result.name}", size: permit.value.result.size, inline: permit.value.result.inline, ty: permit.value.result.ty, word: permit.value.result.word})
             }
             rows: if count * slot <= bytes.len() -> count else -> bytes.len().div_euclid(slot)
-            rings.push(NativeRingRead{texts: texts, results: results, types: types, bytes: bytes, rows: rows, parts: placed.parts, generation: generation})
+            rings.push(NativeRingRead{texts: texts, results: results, reads: reads, types: types, bytes: bytes, rows: rows, parts: placed.parts, generation: generation})
         }
         if rings.len() == 0 {
             return
@@ -1537,15 +1610,24 @@ NativeSession: struct {
             if read.output != "" -> said.push(NativeSaid{category: "stdout", text: "{read.output}"})
             hits := [{sequence: Int, text: String}]{}
             loop ring in read.rings {
-                slot: native_place_slot(ring.parts)
+                // A String part read as text keeps its text in the slot,
+                // after the slot's words, in the order of the parts.
+                texts := 0
+                loop kept in ring.reads {
+                    if kept -> texts += 1
+                }
+                slot: native_place_slot(ring.parts, texts)
                 loop k in 0..<ring.rows {
                     at: k * slot
                     if native_number(ring.bytes, at + 8 * ring.parts, 8, X64DebugEncoding.Signed) != ring.generation {
                         next
                     }
                     text := "{ring.texts[0]}"
+                    copied := 0
                     loop (p, result) in ring.results {
-                        text = "{text}{native_log_shown(self.image, memory, result, ring.types[p], ring.bytes, at + 8 * p)}{ring.texts[p + 1]}"
+                        shown: if ring.reads[p] -> native_log_text_shown(ring.bytes, at + 8 * p, at + native_place_text_at(ring.parts, copied)) else -> native_log_shown(self.image, memory, result, ring.types[p], ring.bytes, at + 8 * p)
+                        if ring.reads[p] -> copied += 1
+                        text = "{text}{shown}{ring.texts[p + 1]}"
                     }
                     hits.push({sequence: native_number(ring.bytes, at + 8 * ring.parts + 8, 8, X64DebugEncoding.Signed), text: "{text}\n"})
                 }
