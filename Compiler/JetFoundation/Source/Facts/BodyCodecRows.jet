@@ -34,8 +34,11 @@ BodyCodecOut: struct {
     module_at: [U32:Int],
     indexed: Bool{false},
     strings: [String]{[String]{}},
-    // Each listed string's position, by the string.
-    string_at: [String:Int]{[String:Int]{}},
+    // The listed strings' spellings, and each one's position in `strings`
+    // by its id there (-1 before it is listed: id 0, the empty spelling,
+    // is in the table from the start).
+    string_names: NameTable{name_table_sized(2)},
+    string_at: [Int]{[Int]{-1}},
 }
 
 body_codec_out: fn() -> BodyCodecOut Never! {
@@ -155,12 +158,14 @@ body_codec_get_bool: fn(bytes: [U8], input: &BodyCodecIn) -> Bool Never! {
 // listed there the first time it is put.
 body_codec_put_string: fn(out: &BodyCodecOut, value: String) Never! {
     if out.indexed {
-        if out.string_at.get(value) == .Val(position) {
-            body_codec_put_uvarint(out, position)
+        id: name_index(name_intern(out.string_names, value))
+        if id == out.string_at.len() -> out.string_at.push(-1)
+        if out.string_at[id] >= 0 {
+            body_codec_put_uvarint(out, out.string_at[id])
             return
         }
         position: out.strings.len()
-        out.string_at[value] = position
+        out.string_at[id] = position
         out.strings.push("{value}")
         body_codec_put_uvarint(out, position)
         return
