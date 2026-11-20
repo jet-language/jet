@@ -19,7 +19,10 @@
 // the means of the highest and the lowest clock, in MHz, of the CPUs its
 // threads that ran last ran on, read after each three rounds (0 for both
 // where the kernel has no cpufreq). The wait and the clocks are the same
-// measures the lens takes of its run.
+// measures the lens takes of its run. A second line gives, for the plain
+// rounds, the narrow-fast ones and the wide-fast ones in turn, the medians
+// of where a round's time went (ROUND_PARTS), which check.jet sets beside
+// the lens's own timings of its rounds' tasks.
 use {
     files: core.files
     perf: core.perf
@@ -50,24 +53,82 @@ wide: fn(seed: Int, steps: Int) -> Int {
     total
 }
 
-// One round, the narrow task doing `narrow_tenths` tenths of its work and
-// each wide one `wide_tenths` of its own. (Named apart from its zone:
-// check.jet finds the zone's ranking by its name.)
-play_round: fn(seed: Int, narrow_tenths: Int, wide_tenths: Int) {
-    _round: perf.zone("round")
-    first: task narrow(seed, STEPS * narrow_tenths /% 10)
-    second: task wide(seed + 1, STEPS * 8 * wide_tenths /% 100)
-    third: task wide(seed + 2, STEPS * 8 * wide_tenths /% 100)
-    fourth: task wide(seed + 3, STEPS * 8 * wide_tenths /% 100)
-    sum: (first.join() ?? 0) + (second.join() ?? 0) + (third.join() ?? 0) + (fourth.join() ?? 0)
-    if sum < 0 -> print("negative")
+// When a task began and ended, in nanoseconds from its round's start, and
+// what its work came to.
+Run: struct {
+    start: Int,
+    end: Int,
+    total: Int,
 }
 
-// How long one round takes, in nanoseconds.
-timed: fn(seed: Int, narrow_tenths: Int, wide_tenths: Int) -> Int {
+narrow_run: fn(origin: Int, seed: Int, steps: Int) -> Run {
+    start: time.instant().start_ns
+    total: narrow(seed, steps)
+    Run{start: start - origin, end: time.instant().start_ns - origin, total: total}
+}
+
+wide_run: fn(origin: Int, seed: Int, steps: Int) -> Run {
+    start: time.instant().start_ns
+    total: wide(seed, steps)
+    Run{start: start - origin, end: time.instant().start_ns - origin, total: total}
+}
+
+// One round, the narrow task doing `narrow_tenths` tenths of its work and
+// each wide one `wide_tenths` of its own: the narrow task's run, then the
+// wide ones'. (Named apart from its zone: check.jet finds the zone's ranking
+// by its name.)
+play_round: fn(seed: Int, narrow_tenths: Int, wide_tenths: Int) -> [Run] {
+    _round: perf.zone("round")
+    origin: time.instant().start_ns
+    first: task narrow_run(origin, seed, STEPS * narrow_tenths /% 10)
+    second: task wide_run(origin, seed + 1, STEPS * 8 * wide_tenths /% 100)
+    third: task wide_run(origin, seed + 2, STEPS * 8 * wide_tenths /% 100)
+    fourth: task wide_run(origin, seed + 3, STEPS * 8 * wide_tenths /% 100)
+    none: Run{start: 0, end: 0, total: 0}
+    runs: [Run]{first.join() ?? none, second.join() ?? none, third.join() ?? none, fourth.join() ?? none}
+    if runs[0].total + runs[1].total + runs[2].total + runs[3].total < 0 -> print("negative")
+    runs
+}
+
+// The parts of a round, in nanoseconds, the second line of `measure` gives
+// the median of: its wall time, its tasks' span from the first start to the
+// last end, the narrow task's start from the first one's and its run, and
+// the wide tasks' starts and runs (the three pooled).
+ROUND_PARTS: 6
+
+// How long one round takes, in nanoseconds, then its tasks' parts
+// (ROUND_PARTS) pushed onto `parts`, in their order, the wide ones' three
+// each.
+timed: fn(seed: Int, narrow_tenths: Int, wide_tenths: Int, parts: &[[Int]]) -> Int {
     started: time.instant()
-    play_round(seed, narrow_tenths, wide_tenths)
-    started.elapsed().ns
+    runs: play_round(seed, narrow_tenths, wide_tenths)
+    wall: started.elapsed().ns
+    first := runs[0].start
+    last := runs[0].end
+    loop run in runs {
+        first = min(first, run.start)
+        last = max(last, run.end)
+    }
+    parts[0].push(wall)
+    parts[1].push(last - first)
+    parts[2].push(runs[0].start - first)
+    parts[3].push(runs[0].end - runs[0].start)
+    loop index in 1..<4 {
+        parts[4].push(runs[index].start - first)
+        parts[5].push(runs[index].end - runs[index].start)
+    }
+    wall
+}
+
+// The median of each of `parts`, joined by spaces.
+medians: fn(parts: &[[Int]]) -> String {
+    words := [String]{}
+    loop part in parts {
+        sorted := part.copy()
+        sorted.sort()
+        words.push("{sorted[sorted.len() /% 2]}")
+    }
+    words.join(" ")
 }
 
 // The run time and the runqueue wait, in nanoseconds, this program's
@@ -130,9 +191,13 @@ run: fn() {
         // three's speedups, and the median of them, in tenths of a percent.
         // The wait the threads took meanwhile tells whether the rounds had
         // their CPUs or contended for them, and the clocks of their CPUs
-        // whether those that idled clocked down.
+        // whether those that idled clocked down. Each arm's rounds' parts
+        // go to its own lists.
         narrow_gains := [Int]{}
         wide_gains := [Int]{}
+        plain_parts := loop part in 0..<ROUND_PARTS -> [Int]{}
+        narrow_parts := loop part in 0..<ROUND_PARTS -> [Int]{}
+        wide_parts := loop part in 0..<ROUND_PARTS -> [Int]{}
         runs := [String:Int]{}
         khz_high := 0
         khz_low := 0
@@ -146,9 +211,9 @@ run: fn() {
             loop turn in 0..<3 {
                 which: (index + turn) %% 3
                 if {
-                    which == 0 -> plain = timed(index, 10, 10)
-                    which == 1 -> narrow_fast = timed(index, 7, 10)
-                    else -> wide_fast = timed(index, 10, 7)
+                    which == 0 -> plain = timed(index, 10, 10, plain_parts)
+                    which == 1 -> narrow_fast = timed(index, 7, 10, narrow_parts)
+                    else -> wide_fast = timed(index, 10, 7, wide_parts)
                 }
             }
             narrow_gains.push(1000 - narrow_fast * 1000 /% plain)
@@ -167,14 +232,14 @@ run: fn() {
         low_mhz: if clocked > 0 -> khz_low /% clocked /% 1000 else -> 0
         narrow_gains.sort()
         wide_gains.sort()
-        files.write(word, "{median_interval(narrow_gains)} {median_interval(wide_gains)} {wait} {high_mhz} {low_mhz}\n") ?? panic("cannot write {word}")
+        files.write(word, "{median_interval(narrow_gains)} {median_interval(wide_gains)} {wait} {high_mhz} {low_mhz}\n{medians(plain_parts)} {medians(narrow_parts)} {medians(wide_parts)}\n") ?? panic("cannot write {word}")
         print("measured")
         return
     }
     started: time.instant()
     count := 0
     loop started.elapsed_millis() < (Int.parse(word) ?? 4000) {
-        play_round(count, 10, 10)
+        _ := play_round(count, 10, 10)
         count += 1
     }
     print("done")

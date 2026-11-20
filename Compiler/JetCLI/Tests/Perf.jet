@@ -5,6 +5,8 @@ use {
     jet_cli.[
         JET_CLI_PERF_OBJECT_SOCKET,
         JetCLIPerfAttachCPU,
+        JetCLIPerfCausalPlace,
+        JetCLIPerfCausalTasks,
         JetCLIPerfExperiment,
         JetCLIPerfHeap,
         JetCLIPerfHeapBlock,
@@ -34,6 +36,7 @@ use {
         jet_cli_perf_attach_keep_window,
         jet_cli_perf_browser_decode,
         jet_cli_perf_causal_section,
+        jet_cli_perf_causal_tasks_section,
         jet_cli_perf_capture_bytes,
         jet_cli_perf_capture_source,
         jet_cli_perf_file_pid,
@@ -988,4 +991,31 @@ jet_cli_perf_test_line_row: fn(digest: String, at: Int, name: String) -> TracePr
     // The point keeps its name; no gain is given.
     assert(json.contains(`{"lines":[],"name":"round","unranked":[]}`))
     assert(!json.contains(`"gain_tenths"`))
+}
+
+#Test("the causal lens's tasks' timings keep each task's row, its start from the first task's and its wall time, beside the experiments by line") {
+    experiments := [JetCLIPerfExperiment]{}
+    experiments.push(JetCLIPerfExperiment{line: U64{0}, name: "", speedup: 0, run_ns: 25000000, wait_ns: 0, khz_high: 0, khz_low: 0, after: [Int]{4}, span_ns: [Int]{20000000}, span_delay_ns: [Int]{0}})
+    experiments.push(JetCLIPerfExperiment{line: U64{30}, name: "narrow", speedup: 300, run_ns: 25000000, wait_ns: 0, khz_high: 0, khz_low: 0, after: [Int]{4}, span_ns: [Int]{22000000}, span_delay_ns: [Int]{6000000}})
+    // Two tasks of one body, written in the order they ended: the second
+    // began first, in the next experiment, after a 2 µs idle gap, and paused
+    // 50 ns of it.
+    tasks: JetCLIPerfCausalTasks{
+        seen: 3,
+        kept_most: 65536,
+        rows: [Int]{0, 1000500, 1002000, 0, 0, 1400, 0, 0, 11, 0, 0, 3, -1, 0, 1000000, 1001000, 1, 1, 900, 50, 40, 7, 100, 150, 5, 2000},
+        bodies: [Int:Int]{4096: 0},
+        places: [JetCLIPerfCausalPlace]{{line: U64{61}, name: "narrow_run"}},
+    }
+    // A run that wrote no timings has no section.
+    none: JetCLIPerfCausalTasks{seen: -1, kept_most: 0, rows: [Int]{}, bodies: [Int:Int]{}, places: [JetCLIPerfCausalPlace]{}}
+    if jet_cli_perf_causal_tasks_section("main.jet", [JetCLIPerfExperiment]{}, none) == .Val(unwanted) {
+        panic("a run with no timings has a section {unwanted.name}")
+    }
+    section: jet_cli_perf_causal_tasks_section("main.jet", experiments, tasks) ?? panic("the run wrote timings")
+    assert_eq(section.name, "causal_tasks")
+    json: String.from_bytes(canonical_json_bytes(section.value)) ?? panic("the section is UTF-8")
+    assert(json.contains(`{"bodies":[{"function":"narrow_run","line":61}],"columns":["body","start_ns","wall_ns",`))
+    assert(json.contains(`"experiments":[null,{"function":"narrow","line":30}],"kept_most":65536,"path":"main.jet",`))
+    assert(json.contains(`"rows":[[0,500,1500,0,0,1400,0,0,11,0,0,3,-1],[0,0,1000,1,1,900,50,40,7,100,150,5,2000]],"seen":3}`))
 }

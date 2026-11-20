@@ -27,6 +27,11 @@
 // contention and clocks kept it from comparing. A comparison that fails
 // prints its line too, with both lines' numbers, before it panics with
 // every way it failed.
+//
+// First, on stdout and stderr, it sets where a round's time went by hand
+// (main.jet ROUND_PARTS, before and after) beside where it went under the
+// lens (the trace's `causal_tasks`: each task's timing), in the lens's
+// baselines and in its experiments on the narrow line and the wide one.
 use {
     files: core.files
     process: core.process
@@ -66,13 +71,182 @@ Measured: struct {
     low_mhz: Int,
 }
 
-// The measurement main.jet wrote to `path`.
+// The measurement main.jet wrote to `path`: its first line.
 read_measured: fn(path: String) -> Measured {
-    words: (files.read(path) ?? panic("cannot read {path}")).trim().split(" ").to_list()
+    words: (files.read(path) ?? panic("cannot read {path}")).trim().split("\n").to_list()[0].split(" ").to_list()
     if words.len() != 9 -> panic("{path} holds no nine numbers")
     numbers := [Int]{}
     loop word in words -> numbers.push(Int.parse(word) ?? panic("{path} holds `{word}`, no number"))
     Measured{narrow: [Int]{numbers[0], numbers[1], numbers[2]}, wide: [Int]{numbers[3], numbers[4], numbers[5]}, wait: numbers[6], high_mhz: numbers[7], low_mhz: numbers[8]}
+}
+
+// main.jet's ROUND_PARTS: the medians of a round's parts each arm gives.
+ROUND_PARTS: 6
+
+// The second line main.jet wrote to `path`: each arm's medians of its
+// rounds' parts, in nanoseconds, plain, narrow-fast then wide-fast; empty
+// when it holds no such line.
+read_parts: fn(path: String) -> [Int] {
+    lines: (files.read(path) ?? return [Int]{}).trim().split("\n").to_list()
+    if lines.len() < 2 -> return [Int]{}
+    numbers := [Int]{}
+    loop word in lines[1].split(" ").to_list() -> numbers.push(Int.parse(word) ?? return [Int]{})
+    if numbers.len() != 3 * ROUND_PARTS -> return [Int]{}
+    numbers
+}
+
+// `ns` nanoseconds in microseconds, to a tenth.
+micros: fn(ns: Int) -> String {
+    sign: if ns < 0 -> "-" else -> ""
+    whole: if ns < 0 -> -ns else -> ns
+    "{sign}{whole /% 1000}.{whole /% 100 %% 10}"
+}
+
+// The median of `values`; -1 when it is empty.
+median: fn(values: [Int]) -> Int {
+    if values.len() == 0 -> return -1
+    sorted := values.copy()
+    sorted.sort()
+    sorted[sorted.len() /% 2]
+}
+
+// A line on stdout and stderr.
+say: fn(line: String) {
+    print(line)
+    eprint(line)
+}
+
+// The parts of a round the lens's timings give, by its kind of experiment,
+// LENS_PARTS each: its tasks' span from the first start to the last end, the
+// delay inserted meanwhile and the span less it; the narrow task's start
+// from the first one's, its wall time, its pauses' wall time, its CPU time
+// less its pauses' and its samples; the same of the wide ones (the three
+// pooled); and the CPUs its tasks began on.
+LENS_PARTS: 14
+
+// The columns of a `causal_tasks` row (JetCLI CLI/Perf/Causal.jet
+// jet_cli_perf_causal_tasks_section).
+COLUMNS: 13
+
+// The round of the lens's task rows `group`, sorted by start, into `parts`
+// at its kind's LENS_PARTS (by `kinds`, its experiment's kind: 0 a
+// baseline, 1 the narrow line's, 2 the wide line's); false when it is no
+// whole round within one experiment.
+take_round: fn(group: [[Int]], kinds: [Int], parts: &[[Int]]) -> Bool {
+    if group.len() != 4 -> return false
+    ordinal: group[0][3]
+    loop row in group {
+        if row[3] != ordinal || row[4] != ordinal -> return false
+    }
+    if ordinal < 0 || ordinal >= kinds.len() || kinds[ordinal] > 2 -> return false
+    at: kinds[ordinal] * LENS_PARTS
+    // The narrow task is the one whose body none of the others shares.
+    narrow := -1
+    loop index in 0..<4 {
+        shared := 0
+        loop other in 0..<4 {
+            if other != index && group[other][0] == group[index][0] -> shared += 1
+        }
+        if shared == 0 -> narrow = index
+    }
+    if narrow < 0 -> return false
+    first := group[0][1]
+    last := group[0][1] + group[0][2]
+    delay_from := group[0][9]
+    delay_to := group[0][10]
+    cores := [Int]{}
+    loop row in group {
+        first = min(first, row[1])
+        last = max(last, row[1] + row[2])
+        delay_from = min(delay_from, row[9])
+        delay_to = max(delay_to, row[10])
+        if !cores.contains(row[11]) -> cores.push(row[11])
+    }
+    parts[at].push(last - first)
+    parts[at + 1].push(delay_to - delay_from)
+    parts[at + 2].push(last - first - (delay_to - delay_from))
+    loop (index, row) in group {
+        side: if index == narrow -> at + 3 else -> at + 8
+        parts[side].push(row[1] - first)
+        parts[side + 1].push(row[2])
+        parts[side + 2].push(row[6])
+        parts[side + 3].push(row[5] - row[7])
+        parts[side + 4].push(row[8])
+    }
+    parts[at + 13].push(cores.len())
+    true
+}
+
+// Where a round's time went by hand and under the lens, as the header says.
+report_rounds: fn(tier: String, trace: String) {
+    arms: [String]{"plain", "narrow-fast", "wide-fast"}
+    loop file in ([String]{"before.txt", "after.txt"}) {
+        hand: read_parts(file)
+        if hand.len() == 0 {
+            say("causal rounds {tier} hand {file}: no round parts")
+            next
+        }
+        loop (arm, name) in arms {
+            at: arm * ROUND_PARTS
+            say("causal rounds {tier} hand {file} {name}: wall {micros(hand[at])} span {micros(hand[at + 1])} narrow at {micros(hand[at + 2])} for {micros(hand[at + 3])} wide at {micros(hand[at + 4])} for {micros(hand[at + 5])} (µs, medians)")
+        }
+    }
+    sections: trace.split("\"name\":\"causal_tasks\"").to_list()
+    if sections.len() < 2 {
+        say("causal rounds {tier} lens: the trace has no causal_tasks section")
+        return
+    }
+    section: sections[1]
+    kinds := [Int]{}
+    listed: section.split("\"experiments\":[").to_list()
+    if listed.len() > 1 {
+        loop piece in listed[1].split("],\"kept_most\"").to_list()[0].split(",").to_list() {
+            if {
+                piece == "null" -> kinds.push(0)
+                piece.starts_with("{{\"function\":\"narrow\"") -> kinds.push(1)
+                piece.starts_with("{{\"function\":\"wide\"") -> kinds.push(2)
+                piece.starts_with("{{\"function\":") -> kinds.push(3)
+            }
+        }
+    }
+    rows := [[Int]]{}
+    tabled: section.split("\"rows\":[[").to_list()
+    if tabled.len() > 1 {
+        loop text in tabled[1].split("]],\"seen\"").to_list()[0].split("],[").to_list() {
+            row := [Int]{}
+            loop word in text.split(",").to_list() {
+                row.push(Int.parse(word) ?? panic("a causal_tasks row holds `{word}`, no number"))
+            }
+            if row.len() != COLUMNS {
+                panic("a causal_tasks row holds {row.len()} numbers, not {COLUMNS}")
+            }
+            rows.push(row)
+        }
+    }
+    rows.sort_by(fn(left: [Int], right: [Int]) { left[1] <=> right[1] })
+    parts := loop _part in 0..<3 * LENS_PARTS -> [Int]{}
+    groups := 0
+    kept := 0
+    index := 0
+    loop index < rows.len() {
+        end := rows[index][1] + rows[index][2]
+        after := index + 1
+        loop after < rows.len() && rows[after][1] < end {
+            end = max(end, rows[after][1] + rows[after][2])
+            after += 1
+        }
+        groups += 1
+        if take_round(rows.slice(index, after), kinds, parts) -> kept += 1
+        index = after
+    }
+    seen: number_after(section, "\"seen\":") ?? -1
+    most: number_after(section, "\"kept_most\":") ?? -1
+    say("causal rounds {tier} lens: tasks seen {seen}, kept {rows.len()} of at most {most}; rounds {groups}, kept whole within one experiment {kept}; experiments {kinds.len()}")
+    loop (kind, name) in ([String]{"baseline", "narrow line", "wide line"}) {
+        at: kind * LENS_PARTS
+        m: loop part in 0..<LENS_PARTS -> median(parts[at + part])
+        say("causal rounds {tier} lens {name}: {parts[at].len()} rounds span {micros(m[0])} delay {micros(m[1])} virtual {micros(m[2])} narrow at {micros(m[3])} for {micros(m[4])} paused {micros(m[5])} work {micros(m[6])} samples {m[7]} wide at {micros(m[8])} for {micros(m[9])} paused {micros(m[10])} work {micros(m[11])} samples {m[12]} cpus {m[13]} (µs, medians)")
+    }
 }
 
 // How far, in thousandths of `high`, `low` falls below it; 0 when no clock
@@ -199,6 +373,7 @@ run: fn() {
     if args.len() < 2 -> panic("usage: check.jet -- TIER TRACE")
     tier: args[args.len() - 2]
     trace: files.read(args[args.len() - 1]) ?? panic("cannot read the trace")
+    report_rounds(tier, trace)
     if check_contended(trace) {
         wait: number_after(trace, "\"cpu_wait_ms\":") ?? 0
         ran: number_after(trace, "\"cpu_run_ms\":") ?? 0
