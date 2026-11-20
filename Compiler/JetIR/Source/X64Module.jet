@@ -6,7 +6,7 @@
 // big-integer decimals); the debug files and types; and per IR function its
 // name, file, line and debug variables.
 use {
-    jet_foundation.[CompilerThreads, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_transfer_rows, sha256_hex]
+    jet_foundation.[CompilerThreads, Type, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_transfer_rows, sha256_hex]
     jet_sema.[sema_inline_member_module, sema_inline_member_source_name]
     jet_backend.[
         TIME_DURATION_NS,
@@ -249,6 +249,10 @@ ir_x64_debug_pointer: fn(tables: &IRX64Tables, target: Int) -> Int Never! {
     ir_x64_debug_add(tables, X64DebugType{name: "", size: 8, kind: X64DebugTypeKind.Pointer{target: target}})
 }
 
+// A Shared value's runtime cell keeps the pointer to its value's bytes at
+// this offset (JetRuntime Shared.jet, Cell104's payload word).
+IR_X64_SHARED_PAYLOAD: 64
+
 // The DWARF type of every IR type row, by its checked type and machine
 // layout: debug row r describes m.types[r]; the rows they name follow. A
 // String is a pointer to its header [data, byte length, cap]; a List its
@@ -258,7 +262,9 @@ ir_x64_debug_pointer: fn(tables: &IRX64Tables, target: Int) -> Int Never! {
 // (IRModule.debug_variants, ir_x64_debug_variants); a Decimal or Fraction a
 // pointer to its runtime handle's two exact Ints (JetRuntime
 // RoutePrecise.jet); a Duration a typedef of a pointer to its runtime
-// record's nanoseconds word (JetRuntime TimeGlue.jet); a Task, Sender,
+// record's nanoseconds word (JetRuntime TimeGlue.jet); a Shared a typedef,
+// named as Jet spells it, of a pointer to its cell, whose payload word
+// points at its value's row (IRModule.list_elements); a Task, Sender,
 // Receiver or any other runtime handle a typedef, named as Jet spells it, of
 // its runtime state's pointer; an allocation word a typedef of what its
 // block holds (ir_x64_debug_alloc). Any other aggregate stays opaque.
@@ -326,6 +332,16 @@ ir_x64_debug_type: fn(m: IRModule, tables: &IRX64Tables, shared: &IRX64DebugRows
                     return X64DebugType{name: "Duration", size: 8, kind: X64DebugTypeKind.Typedef{target: shared.duration}}
                 }
                 else -> {}
+            }
+            // A Shared handle: named as Jet spells it, a typedef of the
+            // pointer to its runtime cell, which points at the value's bytes
+            // (IRModule.list_elements) from its payload word. The debugger
+            // shows the cell, its one unnamed member, as `Shared{value}`.
+            if ir_untag(ty.ty) == .Shared(_) {
+                value: ir_x64_debug_pointer(tables, m.list_elements.get(row) ?? -1)
+                members: [X64DebugMember]{X64DebugMember{name: "", offset: IR_X64_SHARED_PAYLOAD, ty: value}}
+                cell: ir_x64_debug_add(tables, X64DebugType{name: "Shared", size: IR_X64_SHARED_PAYLOAD + 8, kind: X64DebugTypeKind.Struct{members: members}})
+                return X64DebugType{name: ir_type_name(ty.ty), size: 8, kind: X64DebugTypeKind.Typedef{target: ir_x64_debug_pointer(tables, cell)}}
             }
             // Any other runtime handle (a task's, a channel endpoint's,
             // Bytes, a Clock): named as Jet spells it, a typedef of the
@@ -1521,4 +1537,26 @@ ir_x64_member_name: fn(name: String) -> String? Never! {
     assert_eq(ir_x64_member_name("run"), None)
     assert_eq(ir_x64_member_name("run.lambda@12"), None)
     assert_eq(ir_x64_member_name("__jet_lambda_7"), None)
+}
+
+// Shared<Int>: a typedef named as Jet spells it, of a pointer to the cell,
+// whose one unnamed member at the payload word points at the Int's row.
+#Test("A Shared handle's debug type reaches its value through its cell's payload word") {
+    m := ir_module_new()
+    int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    handle: Type.Shared{inner: Type.Int}
+    row: ir_intern_type(m, "Shared<Int>", ir_owned_layout(IRTypeKind.Pointer, handle, "jet_rt_native_shared_drop", "jet_rt_native_shared_clone"))
+    m.list_elements[row] = int_row
+    tables := ir_x64_tables_start(m)
+    ir_x64_debug_types(m, tables)
+    described: tables.debug_types[row]
+    assert_eq(described.name, ir_type_name(handle))
+    to_cell: if described.kind == .Typedef(target) -> target else -> -1
+    assert(to_cell >= 0, "the handle is a typedef of a pointer")
+    cell: if tables.debug_types[to_cell].kind == .Pointer(target) -> target else -> -1
+    assert(cell >= 0, "the pointer points at the cell")
+    members: if tables.debug_types[cell].kind == .Struct(listed) -> listed else -> [X64DebugMember]{}
+    assert(members.len() == 1 && members[0].name == "" && members[0].offset == IR_X64_SHARED_PAYLOAD, "the cell's one member is its payload word")
+    value: if tables.debug_types[members[0].ty].kind == .Pointer(target) -> target else -> -1
+    assert_eq(value, int_row)
 }
