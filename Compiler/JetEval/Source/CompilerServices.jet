@@ -17,7 +17,7 @@ use {
         ast_program,
         type_name,
     ]
-    jet_foundation.[TAppliedRule, TAppliedRuleArgumentMenu, TAppliedRuleCatalog, module_is_core, module_text, record_key_digest, symbol_find, symbol_is_local, symbol_table_key]
+    jet_foundation.[SourceFile, TAppliedRule, TAppliedRuleArgumentMenu, TAppliedRuleCatalog, module_is_core, module_text, record_key_digest, symbol_find, symbol_is_local, symbol_table_key]
     jet_sema.[sema_call_site_detail, sema_compiler_identity, sema_comptime_reflection_type_info]
     jet_lexer.[
         Lexed,
@@ -142,6 +142,7 @@ use {
         SemaCheckedForeignOwner,
         SemaCheckedForeignProvider,
         SemaCompilerModuleSource,
+        SemaDiagnosticOrigin,
         SemaComptimeReflectionSource,
         SemaGraphModuleResult,
         SemaGraphResult,
@@ -170,6 +171,10 @@ use {
         sema_comptime_reflection_package_function_markers,
         sema_comptime_reflection_package_registry,
         sema_registration_module_index,
+        sema_diagnostic_checked_origins,
+        sema_diagnostic_loaded_origins,
+        sema_diagnostic_origin_row,
+        sema_source_digest,
         sema_source_location_at,
         sema_type_graph_lookup_symbol_at,
         sema_type_lookup_nominal_row,
@@ -177,7 +182,8 @@ use {
     ]
 }
 
-JET_COMPILER_SERVICES_SCHEMA_VERSION: 1
+// 2: every CompilerDiagnostic carries its `origin`.
+JET_COMPILER_SERVICES_SCHEMA_VERSION: 2
 
 JetCompilerServicesSourcePreparation: enum {
     Masked(source: String),
@@ -253,7 +259,30 @@ jet_eval_compiler_services_option_span: fn(value: Span?, file: String) -> TCompt
     TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "SourceSpan"}}}
 }
 
-jet_eval_compiler_services_diagnostic_value: fn(diagnostic: Diagnostic) -> TComptimeValue Never! {
+// A diagnostic's origin: the checked snapshot its span indexes, by the file
+// it names (None for text a query was given) and that snapshot's digest
+// (its row of `origins`). A source-free diagnostic has none.
+jet_eval_compiler_services_origin: fn(diagnostic: Diagnostic, origins: [SemaDiagnosticOrigin]) -> TComptimeValue Never! {
+    row: sema_diagnostic_origin_row(origins, diagnostic)
+    if row < 0 {
+        return TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "CompilerDiagnosticOrigin"}}}
+    }
+    jet_eval_compiler_services_origin_value(origins[row].path, origins[row].digest)
+}
+
+jet_eval_compiler_services_origin_value: fn(path: String?, digest: String) -> TComptimeValue Never! {
+    TComptimeValue.Present{
+        value: TComptimeValue.Struct{
+            type_name: "CompilerDiagnosticOrigin",
+            fields: [TComptimeField]{
+                TComptimeField{name: "path", value: jet_eval_compiler_services_option_string(path)},
+                TComptimeField{name: "source_digest", value: jet_eval_compiler_services_string(digest)},
+            },
+        },
+    }
+}
+
+jet_eval_compiler_services_diagnostic_value: fn(diagnostic: Diagnostic, origins: [SemaDiagnosticOrigin]) -> TComptimeValue Never! {
     severity := if diagnostic.severity == DIAGNOSTIC_LINT -> "lint" else -> "error"
     TComptimeValue.Struct{
         type_name: "CompilerDiagnostic",
@@ -264,16 +293,24 @@ jet_eval_compiler_services_diagnostic_value: fn(diagnostic: Diagnostic) -> TComp
             TComptimeField{name: "why", value: jet_eval_compiler_services_string(diagnostic.why)},
             TComptimeField{name: "fix", value: jet_eval_compiler_services_string(diagnostic.fix)},
             TComptimeField{name: "span", value: jet_eval_compiler_services_option_span(diagnostic.span, diagnostic.source_path ?? "")},
+            TComptimeField{name: "origin", value: jet_eval_compiler_services_origin(diagnostic, origins)},
         },
     }
 }
 
-jet_eval_compiler_services_diagnostic_values: fn(diagnostics: [Diagnostic]) -> TComptimeValue Never! {
+// The diagnostics of a result, each with its row of `origins`
+// (sema_diagnostic_checked_origins, sema_diagnostic_loaded_origins).
+jet_eval_compiler_services_diagnostic_values: fn(diagnostics: [Diagnostic], origins: [SemaDiagnosticOrigin]) -> TComptimeValue Never! {
     values := [TComptimeValue]{}
     loop diagnostic in diagnostics {
-        values.push(jet_eval_compiler_services_diagnostic_value(diagnostic))
+        values.push(jet_eval_compiler_services_diagnostic_value(diagnostic, origins))
     }
     TComptimeValue.List{values: values}
+}
+
+// The origins of diagnostics over text a query was handed alone.
+jet_eval_compiler_services_text_origins: fn(diagnostics: [Diagnostic], source: String) -> [SemaDiagnosticOrigin] Never! {
+    sema_diagnostic_loaded_origins(diagnostics, [SourceFile]{}, "", source)
 }
 
 jet_eval_compiler_services_token_kind: fn(kind: Int) -> String? {
@@ -416,7 +453,7 @@ jet_eval_compiler_services_lex_value: fn(source: String, lexed: Lexed) -> TCompt
             TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
             TComptimeField{name: "source", value: jet_eval_compiler_services_string(source)},
             TComptimeField{name: "tokens", value: TComptimeValue.List{values: tokens}},
-            TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(lexed.diagnostics)},
+            TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(lexed.diagnostics, jet_eval_compiler_services_text_origins(lexed.diagnostics, source))},
         },
     }
 }
@@ -589,7 +626,7 @@ jet_eval_compiler_services_syntax_value: fn(source: String, parsed: ParseResult)
             TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
             TComptimeField{name: "source", value: jet_eval_compiler_services_string(source)},
             TComptimeField{name: "items", value: TComptimeValue.List{values: items}},
-            TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(parsed.diagnostics)},
+            TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(parsed.diagnostics, jet_eval_compiler_services_text_origins(parsed.diagnostics, source))},
         },
     }
 }
@@ -803,7 +840,10 @@ jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -
             }
         }
     }
-    index := sema_compiler_semantic_index_from_checked(input.registration, input.graph, input.parsed.source, input.module_sources)
+    // The checked text is hashed once: the semantic index and the
+    // diagnostics' origins share its digest.
+    source_digest: sema_source_digest(input.parsed.source)
+    index := sema_compiler_semantic_index_from_checked(input.registration, input.graph, source_digest, input.module_sources)
     has_errors := false
     loop diagnostic in diagnostics {
         if jet_eval_compiler_services_error_diagnostic(diagnostic) -> has_errors = true
@@ -816,7 +856,7 @@ jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -
             TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
             TComptimeField{name: "source", value: jet_eval_compiler_services_string(input.parsed.source)},
             TComptimeField{name: "syntax", value: input.parsed.value},
-            TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(diagnostics)},
+            TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(diagnostics, sema_diagnostic_checked_origins(diagnostics, input.registration, source_digest))},
             TComptimeField{name: "functions", value: TComptimeValue.List{values: functions}},
             TComptimeField{name: "effects", value: TComptimeValue.List{values: effects}},
             TComptimeField{name: "semantic_index", value: semantic_index},
@@ -863,7 +903,7 @@ JetCompilerServicesProgramInfo: enum {
 jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph, graph: SemaGraphResult, source: String, module_sources: [SemaCompilerModuleSource], *, checked_complete: Bool, stages: &&[TComptimeValue]) -> JetCompilerServicesProgramInfo {
     if !registration.complete -> return .Missing{fact: "the registration graph is incomplete"}
     if !graph.complete -> return .Missing{fact: "the checked graph is incomplete"}
-    index: sema_compiler_semantic_index_from_checked(registration, graph, source, module_sources)
+    index: sema_compiler_semantic_index_from_checked(registration, graph, sema_source_digest(source), module_sources)
     if !index.complete -> return .Missing{fact: "semantic index: {index.missing}"}
     catalog: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
     types := [TComptimeValue]{}

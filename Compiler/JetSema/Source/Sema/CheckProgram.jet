@@ -12481,14 +12481,15 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     // the graph's modules, rows and namespaces, never its symbol table, and
     // the side checks' taint catalog and the bundle's E0307 reports, which
     // only body checks make. The effect pass and the late checks write none
-    // of these, so the walk's threads run beside the effect pass and its
-    // reports join after the late checks, where they always read. The two
-    // share the threads (sema_finalize_walk_inputs): the effect pass takes
-    // what the walk leaves.
+    // of these, so a walk large enough for a thread of its own
+    // (sema_finalize_walk_inputs) runs beside the effect pass, and a smaller
+    // one after it on this thread; either way its reports join after the
+    // late checks, where they always read. Beside the pass the two share the
+    // threads: the effect pass takes what the walk leaves.
     taint_reports := [Diagnostic]{}
     taint_catalog: taint_prepared.pop() ?? panic("the side checks left no taint catalog")
     walk_inputs: sema_finalize_walk_inputs(taint_catalog, diagnostics, threads, taint_reports)
-    effect_threads: compiler_threads_beside(threads, walk_inputs.workers)
+    effect_threads: if walk_inputs.beside -> compiler_threads_beside(threads, walk_inputs.workers) else -> threads
     walked := SemaFinalizeWalked{found: [[Diagnostic]]{}, masked: [[Span]]{}, fixed: [[String]]{}}
     // On a machine with no heap, nothing the entries of a program whose
     // bodies check reach may allocate (sema_effect_check_heap_free); their
@@ -12500,11 +12501,20 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     // it back; the walk's graph holds an empty one meanwhile.
     effects := SemaEffectGraphResult{diagnostics: [Diagnostic]{}, complete: true, symbols: final_graph.symbols.move()}
     final_graph.symbols = SymbolTable{ranges: [SymbolKeys]{}}
-    task.group sema_finalize_effect_walks {
-        walking: task sema_finalize_walk_all(final_graph, walk_inputs)
-        effects = sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, trait_caps, final_graph.decls, effects.symbols, final_graph.module_table, prep_functions, effect_threads, closed, organization_denials, organization_source, final_graph.core_seal, stage.package_policies, expert_modules, final_graph.package_identity, heap_free: heap_free, entries: heap_entries, eval_probes: final_graph.eval_probes)
-        if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
-        walked = walking.join() ?? panic(compiler_threads_failure_text(err))
+    if {
+        walk_inputs.beside -> {
+            task.group sema_finalize_effect_walks {
+                walking: task sema_finalize_walk_all(final_graph, walk_inputs)
+                effects = sema_finalize_effect_pass(modules, final_graph, effect_inputs, effect_prepared, effects.symbols, package_denials, denial_modules, file_caps, trait_caps, prep_functions, effect_threads, organization_denials, organization_source, stage.package_policies, expert_modules, heap_free, heap_entries, closed: closed)
+                if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
+                walked = walking.join() ?? panic(compiler_threads_failure_text(err))
+            }
+        }
+        else -> {
+            effects = sema_finalize_effect_pass(modules, final_graph, effect_inputs, effect_prepared, effects.symbols, package_denials, denial_modules, file_caps, trait_caps, prep_functions, effect_threads, organization_denials, organization_source, stage.package_policies, expert_modules, heap_free, heap_entries, closed: closed)
+            if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
+            walked = sema_finalize_walk_all(final_graph, walk_inputs)
+        }
     }
     final_graph.symbols = effects.symbols.move()
     core_seal: if final_graph.core_seal -> sema_core_seal_lines(final_graph, seal_failure, effects.core_seal) else -> [String]{}
@@ -12805,19 +12815,31 @@ sema_core_source_lint: fn(diagnostic: Diagnostic) -> Bool Never! {
 // checks (sema_finalize_side_checks).
 SEMA_FINALIZE_WALK_MIN_BYTES_PER_THREAD: 65536
 
+// The fewest bytes of item source a taint walk holds to run beside the
+// effect pass rather than after it on the pass's thread
+// (sema_finalize_walk_inputs): a compile's first spawn and join of a task,
+// which starts a carrier, takes 1.76 ms (the median of 21 runs; 0.34 ms at
+// best), and a walk of 14127 bytes (a hello program's) ends within 0.9 ms,
+// at least 16 bytes a µs, so a walk under about 28 KB ends before a thread
+// for it would start. One thread walks 5705580 bytes (a check of JetLexer)
+// in about 1.1 s.
+SEMA_FINALIZE_WALK_BESIDE_MIN_BYTES: 32768
+
 // Core usage jobs per admitted thread, claimed dynamically.
 SEMA_CORE_JOBS_PER_THREAD: 8
 
 // The tag dataflow's inputs (the Rust reference's `check_fact_tags_and_states`
 // taint walk), taken from `prepared` (sema_taint_prepare of the graph): its
-// catalog, its modules heaviest source first, and the threads the walk
-// admits, at most a quarter of `threads`' limit since it runs beside the
-// effect pass (sema_finalize_program): on the compiler the walk is
-// about 1.6 s of CPU against the pass's 2.7 s over 570 ms, so on a quarter
-// it still ends inside the pass, which keeps the rest. Its own reports move
-// onto `reports`; the E0307 reports among `existing_diagnostics` (the
-// bundle's reports so far) settle switch coverage
-// (sema_taint_coverage_reports).
+// catalog, its modules heaviest source first, the threads the walk admits,
+// and whether it runs beside the effect pass (sema_finalize_program): only
+// when `threads` admits more than one and the walk holds at least
+// SEMA_FINALIZE_WALK_BESIDE_MIN_BYTES, so a small program's walk starts no
+// thread. Beside the pass it takes at most a quarter of `threads`' limit:
+// on the compiler the walk is about 1.6 s of CPU against the pass's 2.7 s
+// over 570 ms, so on a quarter it still ends inside the pass, which keeps
+// the rest. Its own reports move onto `reports`; the E0307 reports among
+// `existing_diagnostics` (the bundle's reports so far) settle switch
+// coverage (sema_taint_coverage_reports).
 sema_finalize_walk_inputs: fn(prepared: &&SemaTaintPrepared, existing_diagnostics: [Diagnostic], threads: CompilerThreads, reports: &[Diagnostic]) -> SemaFinalizeWalkInputs {
     taken: prepared.move()
     reports.extend(taken.reports.move())
@@ -12826,7 +12848,16 @@ sema_finalize_walk_inputs: fn(prepared: &&SemaTaintPrepared, existing_diagnostic
     loop weight in taint_weights -> work += weight
     quarter: compiler_threads_capped(threads, (compiler_threads_limit(threads) + 3) /% 4)
     workers: compiler_threads_admit(quarter, taint_weights.len(), work, SEMA_FINALIZE_WALK_MIN_BYTES_PER_THREAD, 0, 0)
-    SemaFinalizeWalkInputs{catalog: taken.catalog.move(), coverage: sema_taint_coverage_reports(existing_diagnostics), taint_order: compiler_threads_heaviest_first(taint_weights), workers: workers}
+    beside: compiler_threads_limit(threads) > 1 && work >= SEMA_FINALIZE_WALK_BESIDE_MIN_BYTES
+    SemaFinalizeWalkInputs{catalog: taken.catalog.move(), coverage: sema_taint_coverage_reports(existing_diagnostics), taint_order: compiler_threads_heaviest_first(taint_weights), workers: workers, beside: beside}
+}
+
+// The effect pass (sema_effects_check_modules) over `modules` with the
+// graph's rows: the root package's denials, its modules' caps and the
+// policies of `package_policies`. It borrows `symbols`, the run's symbol
+// table, and hands it back in its result.
+sema_finalize_effect_pass: fn(modules: &[SemaGraphModuleResult], graph: SemaRegistrationGraph, inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, symbols: &&SymbolTable, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [U32:SemaEffectTypeCap], prep_functions: [String:Bool], threads: CompilerThreads, organization_denials: [String], organization_source: String, package_policies: [SemaRegistrationPackagePolicy], expert_modules: [Int], heap_free: String, heap_entries: [String], closed: Bool) -> SemaEffectGraphResult {
+    sema_effects_check_modules(modules, inputs, prepared.move(), package_denials, denial_modules, file_caps, trait_caps, graph.decls, symbols.move(), graph.module_table, prep_functions, threads, closed, organization_denials, organization_source, graph.core_seal, package_policies, expert_modules, graph.package_identity, heap_free: heap_free, entries: heap_entries, eval_probes: graph.eval_probes)
 }
 
 // Walks every function, method, test and conversion body of each module
@@ -12938,12 +12969,14 @@ sema_finalize_core_jobs: fn(bounds: [Int], owners: [Int]) -> [SemaFinalizeCoreJo
 
 // What every taint-walking thread reads besides the graph
 // (sema_finalize_walk_inputs): the catalog, the coverage reports, the
-// modules in claim order and how many threads claim them.
+// modules in claim order, how many threads claim them and whether the walk
+// runs beside the effect pass.
 SemaFinalizeWalkInputs: struct {
     catalog: SemaTaintCatalog,
     coverage: [Diagnostic],
     taint_order: [Int],
     workers: Int,
+    beside: Bool,
 }
 
 // The next unclaimed job, taken with one atomic add; every thread reads the
@@ -12962,24 +12995,36 @@ SemaFinalizeCoreCollected: struct {
     context: SemaCoreModuleContext?,
 }
 
-// Runs taint-walking threads `from..<workers`, one task each, and moves each
-// module's reports, masked branches and fixed tags a thread returned into
-// its module's slot of `walked`, `masked` and `fixed`. Neither the graph,
-// the inputs nor the queue is written or moved before the group joins.
+// Runs taint-walking threads `from..<workers`, the last on the calling
+// thread and each other one as a task, and moves each module's reports,
+// masked branches and fixed tags a thread returned into its module's slot
+// of `walked`, `masked` and `fixed` (sema_finalize_walk_keep). Neither the
+// graph, the inputs nor the queue is written or moved before the group
+// joins.
 sema_finalize_walkers: fn(graph: SemaRegistrationGraph, inputs: SemaFinalizeWalkInputs, queue: SemaFinalizeCoreQueue, from: Int, workers: Int, walked: &[[Diagnostic]], masked: &[[Span]], fixed: &[[String]]) {
     if from >= workers {
+        return
+    }
+    if from + 1 == workers {
+        sema_finalize_walk_keep(sema_finalize_walk_claimed(graph, inputs, queue), walked, masked, fixed)
         return
     }
     task.group sema_finalize_walk_threads {
         head: task sema_finalize_walk_claimed(graph, inputs, queue)
         sema_finalize_walkers(graph, inputs, queue, from + 1, workers, walked, masked, fixed)
-        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
-        loop claimed.len() > 0 {
-            done: claimed.pop() ?? break
-            walked[done.module_index] = done.found.move()
-            masked[done.module_index] = done.masked.move()
-            fixed[done.module_index] = done.fixed_tags.move()
-        }
+        sema_finalize_walk_keep(head.join() ?? panic(compiler_threads_failure_text(err)), walked, masked, fixed)
+    }
+}
+
+// Moves each module's walk that one thread `claimed` into the module's slot
+// of `walked`, `masked` and `fixed`.
+sema_finalize_walk_keep: fn(claimed: &&[SemaTaintWalked], walked: &[[Diagnostic]], masked: &[[Span]], fixed: &[[String]]) {
+    taken := claimed.move()
+    loop taken.len() > 0 {
+        done: taken.pop() ?? break
+        walked[done.module_index] = done.found.move()
+        masked[done.module_index] = done.masked.move()
+        fixed[done.module_index] = done.fixed_tags.move()
     }
 }
 

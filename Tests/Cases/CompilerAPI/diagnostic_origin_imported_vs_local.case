@@ -1,0 +1,14 @@
+# An imported file's diagnostic names that file; the checked text's own diagnostic names none (the handed text has no path), and neither borrows the other's document.
+fixture: DiagnosticOriginImportedVsLocal.fixture
+env: NO_COLOR=1
+step: jet inspect compiler check main.jet
+exit: 0
+json: stdout doc $.compiler.value.diagnostics[?code="E0107"] #= 2
+json: stdout doc $.compiler.value.diagnostics[?message~="missing_helper"][0].origin.path = "helper.jet"
+json: stdout doc $.compiler.value.diagnostics[?message~="missing_helper"][0].origin.source_digest = "8b6d54563269ff903f0343dee39b2bbc37e07f66ef682023b49353c801fd1821" # SHA-256 of the fixture helper.jet bytes
+json: stdout doc $.compiler.value.diagnostics[?message~="missing_local"][0].origin.path = null
+json: stdout doc $.compiler.value.diagnostics[?message~="missing_local"][0].origin.source_digest = "d12db0f0ca7e6c3880d8b95b34090a52a088ddb0562e23d0472e78d9b82a9cc7" # SHA-256 of the fixture main.jet bytes
+step: jet check --json main.jet
+exit: nonzero
+json: stdout doc $.reports[?what~="missing_helper"][0].file = "helper.jet"
+json: stdout doc $.reports[?what~="missing_local"][0].file = "main.jet"

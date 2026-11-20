@@ -5,6 +5,7 @@ use jet_foundation.[
     Diagnostic,
     Expr,
     InternalTag,
+    SourceFile,
     Span,
     TagMarker,
     TextEdit,
@@ -20,6 +21,7 @@ use jet_foundation.[
     diagnostic_with_source_mapping,
     dimension_display_name,
     measure_expression,
+    sha256_hex,
     type_identity_equal,
     type_name,
 ]
@@ -879,4 +881,133 @@ sema_contains_expiring_secret_loan: fn(ty: Type) -> Bool Never! {
         }
         .Int | .Float | .Bool | .String | .Char | .Named(_) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
+}
+
+// Where a public diagnostic's span points: the checked text it indexes,
+// named by its path (None for text a query was handed), and that text's
+// SHA-256. A result hashes each text its diagnostics name once, however many
+// diagnostics name it, and only the texts some diagnostic names. A
+// diagnostic the driver already placed in its file keeps that origin's
+// digest, which the placing hashed once for the whole result.
+// The origin of every diagnostic whose file key is `file`: its
+// `source_path` ("" for none), or the canonical path of the file the driver
+// placed it in.
+SemaDiagnosticOrigin: struct {
+    file: String,
+    path: String?,
+    digest: String,
+}
+
+sema_source_digest: fn(source: String) -> String Never! { sha256_hex(source) }
+
+// The file key of a diagnostic's origin row; None for a source-free one.
+sema_diagnostic_origin_file: fn(diagnostic: Diagnostic) -> String? Never! {
+    if diagnostic.span == None -> return None
+    if diagnostic.origin == .Val(placed) -> return Val("{placed.path}")
+    Val("{diagnostic.source_path ?? ""}")
+}
+
+// The row of `origins` that holds `diagnostic`'s origin; -1 for a
+// source-free diagnostic or one whose text no snapshot holds.
+sema_diagnostic_origin_row: fn(origins: [SemaDiagnosticOrigin], diagnostic: Diagnostic) -> Int Never! {
+    file: sema_diagnostic_origin_file(diagnostic) ?? return -1
+    sema_diagnostic_origin_file_row(origins, file)
+}
+
+sema_diagnostic_origin_file_row: fn(origins: [SemaDiagnosticOrigin], file: String) -> Int Never! {
+    loop index in 0..<origins.len() {
+        if origins[index].file == file -> return index
+    }
+    -1
+}
+
+// A placed diagnostic's origin: the handed text when its file is the
+// entry (`entry_file`, as the driver displays it), else its file.
+sema_diagnostic_placed_origin: fn(diagnostic: Diagnostic, entry_file: String) -> SemaDiagnosticOrigin? Never! {
+    if diagnostic.origin == .Val(placed) {
+        path: if placed.display == entry_file -> String?{None} else -> String?{Val("{placed.display}")}
+        return Val(SemaDiagnosticOrigin{file: "{placed.path}", path: path, digest: "{placed.revision}"})
+    }
+    None
+}
+
+// The origins of diagnostics over text a query was handed (`entry_source`,
+// which the loader displays as `entry_file`) and the `files` it loaded beside
+// it, as it read them.
+sema_diagnostic_loaded_origins: fn(diagnostics: [Diagnostic], files: [SourceFile], entry_file: String, entry_source: String) -> [SemaDiagnosticOrigin] Never! {
+    origins := [SemaDiagnosticOrigin]{}
+    loop diagnostic in diagnostics {
+        file: sema_diagnostic_origin_file(diagnostic) ?? next
+        if sema_diagnostic_origin_file_row(origins, file) >= 0 -> next
+        if sema_diagnostic_placed_origin(diagnostic, entry_file) == .Val(placed) {
+            origins.push(placed)
+            next
+        }
+        if file == "" || file == entry_file {
+            // The handed text may be named both ways; it is hashed once.
+            digest := ""
+            loop origin in origins {
+                if origin.path == None -> digest = "{origin.digest}"
+            }
+            if digest == "" -> digest = sha256_hex(entry_source)
+            origins.push(SemaDiagnosticOrigin{file: "{file}", path: None, digest: digest})
+            next
+        }
+        loop loaded in files {
+            if loaded.path != file -> next
+            origins.push(SemaDiagnosticOrigin{file: "{file}", path: Val("{file}"), digest: sha256_hex(loaded.source)})
+            break
+        }
+    }
+    origins
+}
+
+// The origins of a checked result's diagnostics, read from the modules the
+// check held: each module's own source under the file its spans name. The
+// entry is the text the query was handed, so its origin names no path, and
+// `entry_digest` is the digest the caller already took of it. In a module
+// stitched from several files, a file that starts at its first byte is that
+// file's own slice of the module source.
+sema_diagnostic_checked_origins: fn(diagnostics: [Diagnostic], registration: SemaRegistrationGraph, entry_digest: String) -> [SemaDiagnosticOrigin] Never! {
+    entry_file := ""
+    loop row in registration.modules {
+        if row.module_identity == registration.entry_module_identity {
+            entry_file = "{row.source_file}"
+        }
+    }
+    origins := [SemaDiagnosticOrigin]{}
+    loop diagnostic in diagnostics {
+        file: sema_diagnostic_origin_file(diagnostic) ?? next
+        if sema_diagnostic_origin_file_row(origins, file) >= 0 -> next
+        if sema_diagnostic_placed_origin(diagnostic, entry_file) == .Val(placed) {
+            origins.push(placed)
+            next
+        }
+        if file == "" || file == entry_file {
+            origins.push(SemaDiagnosticOrigin{file: "{file}", path: None, digest: "{entry_digest}"})
+            next
+        }
+        if sema_diagnostic_module_origin(registration, file) == .Val(origin) -> origins.push(origin)
+    }
+    origins
+}
+
+sema_diagnostic_module_origin: fn(registration: SemaRegistrationGraph, file: String) -> SemaDiagnosticOrigin? Never! {
+    loop row in registration.modules {
+        if row.source_segments.len() <= 1 {
+            if row.source_file == file {
+                return Val(SemaDiagnosticOrigin{file: "{file}", path: Val("{file}"), digest: sha256_hex(row.source)})
+            }
+            next
+        }
+        bytes: row.source.bytes()
+        loop segment in row.source_segments {
+            if segment.source_file != file || segment.source_start != 0 || segment.generated.start >= segment.generated.end || segment.generated.end > bytes.len() {
+                next
+            }
+            text: String.from_bytes(bytes[segment.generated.start..segment.generated.end - 1]) ?? next
+            return Val(SemaDiagnosticOrigin{file: "{file}", path: Val("{file}"), digest: sha256_hex(text)})
+        }
+    }
+    None
 }

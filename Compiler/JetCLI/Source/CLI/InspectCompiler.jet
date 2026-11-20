@@ -1,7 +1,6 @@
-// A check is a source query, not check_file: its filename is metadata and
-// imports use the eval source root.
+// A check is a source query, not check_file: its filename is metadata, and
+// its imports resolve among the sources `jet check` of that file would hold.
 use {
-    cli_files: core.files
     jet_foundation.[
         TComptimeValue,
         TComptimeKey,
@@ -14,14 +13,18 @@ use {
         JetDriverCompileMode,
         JetDriverCompilerCheckInput,
         jet_driver_compiler_check,
+        JET_DRIVER_COMPILER_SOURCE_FILE,
         JET_DRIVER_EXIT_OK,
         jet_driver_compiler_source_input,
         jet_driver_compiler_source_snapshot,
+        jet_driver_entry_root_path,
+        jet_driver_entry_root_sources,
     ]
     jet_eval.[
+        JET_COMPILER_SERVICES_SCHEMA_VERSION,
         jet_eval_compiler_services_parse,
     ]
-    jet_sema.[sema_comptime_reflection_written_signature]
+    jet_sema.[sema_comptime_reflection_written_signature, sema_diagnostic_loaded_origins]
 }
 
 jet_cli_compiler_key_value: fn(key: TComptimeKey) -> TComptimeValue Never! {
@@ -93,7 +96,13 @@ jet_cli_inspect_compiler_check: fn(file: String, source: String) -> JetDriverVer
         }
     }
     parsed: jet_eval_compiler_services_parse(jet_driver_compiler_source_input(source)) ?? return jet_cli_ice("the compiler source query could not parse its source input")
-    snapshot: jet_driver_compiler_source_snapshot(cli_files.cwd() ?? ".", source)
+    held: if jet_cli_prepare_snapshot(file, file, [JetCLIOverlay]{}, false) == {
+        .Refused(output) -> {
+            return output
+        }
+        .Held(snapshot) -> snapshot
+    }
+    snapshot: jet_driver_compiler_source_snapshot(jet_driver_entry_root_path(held), source, jet_driver_entry_root_sources(held))
     // copy: the check takes the snapshot; a failed check's records name its file.
     checked_file: snapshot.entry_path.copy()
     result: jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: jet_cli_driver_request(snapshot, core_sources, None, JetDriverCompileMode.Doc), retain_projection: false}) ?? return jet_cli_ice("the compiler check query failed before returning its diagnostics")
@@ -127,10 +136,10 @@ jet_cli_inspect_compiler_check: fn(file: String, source: String) -> JetDriverVer
             }
             value = jet_cli_status_object(
                 [JetCLIStatusField]{
-                    jet_cli_status_field("schema_version", jet_cli_status_int(1)),
+                    jet_cli_status_field("schema_version", jet_cli_status_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)),
                     jet_cli_status_field("source", jet_cli_status_text(source)),
                     jet_cli_status_field("syntax", jet_cli_compiler_checked_value(parsed.value)),
-                    jet_cli_status_field("diagnostics", jet_cli_compiler_diagnostics(result.diagnostics)),
+                    jet_cli_status_field("diagnostics", jet_cli_compiler_diagnostics(result.diagnostics, sema_diagnostic_loaded_origins(result.diagnostics, result.sources, JET_DRIVER_COMPILER_SOURCE_FILE, source))),
                     jet_cli_status_field("functions", jet_cli_status_array(functions)),
                     jet_cli_status_field("effects", JetCLIStatusValue.Null),
                     jet_cli_status_field("semantic_index", JetCLIStatusValue.Null),

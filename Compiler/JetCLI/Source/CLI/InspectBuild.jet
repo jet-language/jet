@@ -15,6 +15,8 @@ use {
         JetDriverGeneratedModule,
         JetDriverVerbOutput,
         jet_driver_query_build_plan,
+        jet_driver_build_nodes_under_options,
+        jet_driver_physical_path,
         jet_driver_entry_package_has_build,
         jet_driver_entry_package_profiled,
         jet_driver_present_diagnostics,
@@ -45,6 +47,7 @@ use {
         build_option_check_removal_note,
         build_option_row,
         build_options_check_removals,
+        build_options_identity,
         build_options_value,
         build_options_with_code,
         diagnostic_render_all,
@@ -323,7 +326,17 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
     }
     root: jet_cli_parent(build_files.realpath(file) ?? file) ?? "."
     graph: execution ?? return jet_cli_ice("the completed build query has no plan")
-    projected: receipt ?? return jet_cli_ice("the completed build query has no graph")
+    projected := receipt ?? return jet_cli_ice("the completed build query has no graph")
+    // Each compile node is keyed under the options its target builds with
+    // (the `os` of its toolchain over every build option), so the receipt
+    // names a different image by a different key.
+    identities := [String:String]{}
+    loop row in graph.targets {
+        loop output in row.outputs {
+            identities[output] = build_options_identity(jet_cli_build_toolchain_options(graph, row, selected_options))
+        }
+    }
+    projected.nodes = jet_driver_build_nodes_under_options(projected.nodes.move(), identities, build_options_identity(selected_options))
     // Every source a selected target declares exists before any action runs or
     // the lock is written, so a missing one leaves neither behind. A source a
     // build action declares as its output is the action's to produce: the
@@ -915,17 +928,20 @@ jet_cli_comptime_lock_rows: fn(physical: String, read: [JetDriverComptimeInputRe
 }
 
 // fn build's layer of the build options: each option `selected` set, placed
-// at its call in `file` (`at build.jet:3`, relative to the package root).
+// at its call (`at build.jet:3`, relative to the package root): in `file`,
+// or in the dependency's file whose function set it (`at ../tool/tool.jet:16`,
+// as the loader displays it beside the package root).
 jet_cli_build_code_options: fn(file: String, set: [BuildSessionOption]) -> [BuildOptionChoice] {
     choices := [BuildOptionChoice]{}
     if set.len() == 0 -> return choices
-    source: build_files.read(file) ?? ""
     directory: jet_cli_parent(file) ?? "."
     root: jet_cli_manifest_root(directory) ?? directory
     relative := file.copy()
     if file.starts_with("{root}/") -> relative = file.slice(root.len() + 1..<file.len())
-    bytes: source.bytes()
     loop option in set {
+        site: if option.file == "" -> relative else -> option.file
+        source: build_files.read(jet_driver_physical_path(root, site)) ?? ""
+        bytes: source.bytes()
         end := option.start
         if end > bytes.len() -> end = bytes.len()
         line := 1
@@ -935,7 +951,7 @@ jet_cli_build_code_options: fn(file: String, set: [BuildSessionOption]) -> [Buil
         row: build_option_row(option.name) ?? panic("the build session set `{option.name}`, which is no build-option row")
         value: build_option_argument(row, option.value)
         written: if option.pinned -> "b.pin(.{option.name}, {value})" else -> "b.{option.name}({value})"
-        choices.push(BuildOptionChoice{name: option.name.copy(), value: option.value.copy(), layer: BuildOptionLayer.Code, written: written, site: "at {relative}:{line}", pinned: option.pinned})
+        choices.push(BuildOptionChoice{name: option.name.copy(), value: option.value.copy(), layer: BuildOptionLayer.Code, written: written, site: "at {site}:{line}", pinned: option.pinned})
     }
     choices
 }
@@ -1005,8 +1021,9 @@ jet_cli_build_duration: fn(value: Float) -> String Never! {
 }
 
 // Host must supply this pair only after successful native object production and
-// CAS publication. A graph key is not an artifact/cache key: it omits target,
-// profile and runtime identity. Retain the verified object handle separately;
+// CAS publication. A graph key is not an artifact/cache key: it names the
+// options that shape the image (jet_driver_build_nodes_under_options) but not
+// the compiler and runtime identity. Retain the verified object handle separately;
 // the current RecordIndex contract has no native-object link kind. No host
 // supplies one yet, so only the inspect-build tests read `_node`.
 JetCLICompileNodeObservation: struct {

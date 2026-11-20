@@ -177,15 +177,11 @@ jet_driver_build_output_nodes: fn(request: JetDriverCompileRequest, owned_checks
     loop name in request.build_output_names -> build_session_append_unique(outputs, name)
     if outputs.len() == 0 {
         parts: request.authorized_sources.entry_path.split("/").to_list()
-        file: parts[parts.len() - 1]
-        components := file.split(".").to_list()
-        // copy: `file` is an element of `parts`, which can't be moved out (E0225). `output` is
-        // reassigned and pushed into `outputs`, while `components` still views `file`.
-        output := file.copy()
+        components := parts[parts.len() - 1].split(".").to_list()
         if components.len() > 1 && !(components.len() == 2 && components[0] == "") {
             _ := components.pop()
-            output = components.join(".")
         }
+        output: components.join(".")
         outputs.push(if output == "" -> { "program" } else -> { output.move() })
     }
     outputs.sort()
@@ -206,6 +202,38 @@ jet_driver_build_output_nodes: fn(request: JetDriverCompileRequest, owned_checks
     loop node in compiles -> checks.push(node)
     loop node in links -> checks.push(node)
     checks.move()
+}
+
+// `owned_nodes` (jet_driver_build_output_nodes: checks, then compiles, then
+// links) keyed under the options each output was built with: a compile node
+// whose output's options identity (`identities` by output name, else
+// `otherwise`; JetFoundation build_options_identity) is not "" takes it as
+// one more input, `options:<identity>` over its SHA-256, and its link node
+// follows the compile node's key. Stock options add no input, so a stock
+// build keeps the plan's keys, and two builds whose options shape one image
+// share every key.
+jet_driver_build_nodes_under_options: fn(owned_nodes: &&[BuildGraphNode], identities: [String:String], otherwise: String) -> [BuildGraphNode] Never! {
+    nodes := [BuildGraphNode]{}
+    links := [BuildGraphNode]{}
+    loop node in owned_nodes.move() {
+        if node.kind == "link" -> next
+        if node.kind != "compile" {
+            nodes.push(node)
+            next
+        }
+        identity: identities.get(node.subject) ?? otherwise
+        inputs := node.input_digests
+        if identity != "" {
+            inputs.push(BuildGraphInputDigest{name: "options:{identity}", digest: sha256_hex(identity)})
+        }
+        keyed: build_session_compiler_node("compile", node.subject, inputs)
+        // copy: the compile node keeps its key when it moves into `nodes`, and its link node's
+        // input digest needs its own copy of the same key.
+        links.push(build_session_compiler_node("link", node.subject, [BuildGraphInputDigest]{{name: "compile:{node.subject}", digest: keyed.key.copy()}}))
+        nodes.push(keyed)
+    }
+    loop node in links -> nodes.push(node)
+    nodes
 }
 
 jet_driver_build_selected_output_names: fn(plan: BuildSessionPlan) -> [String] Never! {

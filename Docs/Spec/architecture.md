@@ -1414,7 +1414,11 @@ index produced by the same lexer, parser, sema, and `jet-semindex` paths used
 by the compiler. Build code may inspect them; runtime code receives E0956.
 
 The CLI mirror (`jet inspect compiler lex|parse|check|source-map`) uses the
-same versioned JSON envelope (`schema_version: 1`, `api_version: 1`). The
+same versioned JSON envelope (`schema_version: 1`, `api_version: 1`) around
+the same value records (their own `schema_version: 2`). Every diagnostic with
+a span carries an `origin` (its file's root-relative path, or none for the
+handed text, and the SHA-256 of the bytes checked), taken from the sources the
+check already holds, never reread. The
 root compiler owns the small deterministic encoder so the compiler seam does
 not acquire a serialization dependency. No API method mutates or executes a
 source tree, and no backend reimplements these facts.

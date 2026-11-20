@@ -1,0 +1,29 @@
+# The editor and the command line agree on where each diagnostic lives: the report from the imported helper.jet names helper.jet in `jet check --json` and in the typed value's origin, and the language server publishes it under helper.jet's URI, never under the document that imported it.
+fixture: LSPDiagnosticsFollowTheirOrigin.fixture
+env: NO_COLOR=1
+step: jet check --json main.jet
+exit: nonzero
+json: stdout doc $.reports[?what~="missing_helper"][0].file = "helper.jet"
+json: stdout doc $.reports[?what~="missing_local"][0].file = "main.jet"
+step: jet inspect compiler check main.jet
+exit: 0
+json: stdout doc $.compiler.value.diagnostics[?message~="missing_helper"][0].origin.path = "helper.jet"
+json: stdout doc $.compiler.value.diagnostics[?message~="missing_helper"][0].origin.source_digest = "8b6d54563269ff903f0343dee39b2bbc37e07f66ef682023b49353c801fd1821" # SHA-256 of the fixture helper.jet bytes
+json: stdout doc $.compiler.value.diagnostics[?message~="missing_helper"][0].span.start = 21
+json: stdout doc $.compiler.value.diagnostics[?message~="missing_helper"][0].span.end = 35
+json: stdout doc $.compiler.value.diagnostics[?message~="missing_local"][0].origin.path = null
+json: stdout doc $.compiler.value.diagnostics[?message~="missing_local"][0].span.start = 49
+json: stdout doc $.compiler.value.diagnostics[?message~="missing_local"][0].span.end = 62
+session lsp content-length: jet self lsp
+stderr: null
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
+recv lsp until $.id = 7
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"use \\\"helper\\\"\\n\\nrun: fn() { print(helper.value() + missing_local) }\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp collect until ndjson $[?id=8] #>= 1
+json: stdout ndjson $[?params.uri="file://{work}/helper.jet"][-1].params.diagnostics[?code="E0107"] #= 1
+json: stdout ndjson $[?params.uri="file://{work}/helper.jet"][-1].params.diagnostics[?code="E0107"][0].range = {"start":{"line":0,"character":21},"end":{"line":0,"character":35}}
+json: stdout ndjson $[?params.uri="file://{work}/main.jet"][-1].params.version = 1
+json: stdout ndjson $[?params.uri="file://{work}/main.jet"][-1].params.diagnostics[?code="E0107"] #= 1
+json: stdout ndjson $[?params.uri="file://{work}/main.jet"][-1].params.diagnostics[?code="E0107"][0].range = {"start":{"line":2,"character":35},"end":{"line":2,"character":48}}
+close lsp

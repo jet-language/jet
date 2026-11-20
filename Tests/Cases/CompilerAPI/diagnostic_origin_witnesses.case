@@ -1,0 +1,21 @@
+# The two-file, pathless and source-free witnesses read alike through the typed core.compiler API (typed.jet checks the texts of main.jet and source_free.jet at compile time) and the CLI mirror.
+# Two-file: helper.jet's lint names helper.jet and its bytes. Pathless: the checked text's own error names no path but carries its digest. Source-free: a manifest problem with no span has no origin.
+fixture: DiagnosticOriginWitnesses.fixture
+env: NO_COLOR=1
+step: jet run typed.jet
+exit: 0
+stdout: ~ "E0107 none d12db0f0ca7e6c3880d8b95b34090a52a088ddb0562e23d0472e78d9b82a9cc7" # SHA-256 of the fixture main.jet bytes
+stdout: ~ "L0508 helper.jet 79aea50a0cc8a3ae1c7b0f632bd149c9f7c7e4b209a723c08c1cda090d2a014f" # SHA-256 of the fixture helper.jet bytes
+stdout: ~ "E0003 unplaced"
+step: jet inspect compiler check main.jet
+exit: 0
+json: stdout doc $.compiler.value.schema_version = 2 # the value records carry `origin` since version 2
+json: stdout doc $.compiler.value.diagnostics[?code="E0107"][0].origin.path = null
+json: stdout doc $.compiler.value.diagnostics[?code="E0107"][0].origin.source_digest = "d12db0f0ca7e6c3880d8b95b34090a52a088ddb0562e23d0472e78d9b82a9cc7"
+json: stdout doc $.compiler.value.diagnostics[?code="L0508"][0].origin.path = "helper.jet"
+json: stdout doc $.compiler.value.diagnostics[?code="L0508"][0].origin.source_digest = "79aea50a0cc8a3ae1c7b0f632bd149c9f7c7e4b209a723c08c1cda090d2a014f"
+step: jet inspect compiler check source_free.jet
+exit: 0
+json: stdout doc $.compiler.value.diagnostics[?code="E0003"] #>= 1
+json: stdout doc $.compiler.value.diagnostics[?code="E0003"][0].span = null
+json: stdout doc $.compiler.value.diagnostics[?code="E0003"][0].origin = null
