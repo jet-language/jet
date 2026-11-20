@@ -931,6 +931,15 @@ inspect live` publishes), read from the stopped program's memory. A parked
 task's frames come from the stack its fiber saved when it parked.
 `jet debug --dap` still shows the program as one thread.
 
+A program that ends with a status other than 0 pauses as it exits, once
+per run, with every thread stopped and the stack that ended it whole. That
+covers a stop (70) and a Jet defect or fault (101). `Program exiting with
+status 101  prog.jet:4  in half()` names the innermost Jet frame, which is
+selected, and `through …` names the runtime routines between it and the
+exit, outermost first. `bt`, `locals` and `print` read the stack there,
+and the next run command lets the program end. `jet debug --dap` reports
+the pause as an `exception` stop described by its status.
+
 A step that passes a breakpoint which does not stop goes on to where the
 step would have ended. `jet debug --dap` settles every run the same way
 (`Compiler/JetDebug/Source/Native.jet`, NativeSession.settle).
