@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112603,
+    "rev": 112609,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24231,20 +24231,20 @@
         {
           "n": 26,
           "text": "Unknown-method and unknown-item reports (E0311, E0102) list up to three nearest names from the receiver's real surface, or say 'no similar method'. `c.abs()` on I32, `n.to_float()` and `buf.as_mut_ptr()` each get a ranked suggestion. Proof: `jet test Compiler --profile ui --filter unknown_method_suggest`. (was #3720 c17)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T01:10:30.096Z"
+          "evidence": "p350 batch compiler (dev 5d09a5452d): jet test Compiler --profile ui --filter unknown_method_suggest PASS (ranked nearest names from the receiver's real surface, plus one checked idiom table resolved through sema by a unit test).",
+          "at": "2026-11-20T10:55:18.011Z"
         },
         {
           "n": 27,
           "text": "No Fix line tells the user to edit a Core type or declare a built-in name. `BigInt.parse(...)`, `conn.execute(...)` on DBConnection, `x: null` and `println(\"hi\")` each point to the real API (`None`, `print`). Proof: `jet test Compiler --profile ui --filter fix_points_to_real_api`. (was #3720 c18)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T01:10:31.373Z"
+          "evidence": "p350 batch compiler (dev 5d09a5452d): jet test Compiler --profile ui --filter fix_points_to_real_api PASS.",
+          "at": "2026-11-20T10:55:18.987Z"
         },
         {
           "n": 28,
@@ -24258,11 +24258,11 @@
         {
           "n": 29,
           "text": "For t03_unclosed.jet, `jet check` reports E0083 naming the `if` opened on line 9, found from the indentation mismatch (a `}` at column 1 closing a block opened at column 5). Its suggested edit inserts `}` before line 12, the first line back at the `if`'s indentation. Proof: `jet test Compiler --profile ui --filter t03_unclosed`. (was #3720 c28)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T01:10:34.120Z"
+          "evidence": "p350 batch compiler (dev 5d09a5452d): jet test Compiler --profile ui --filter t03_unclosed PASS.",
+          "at": "2026-11-20T10:55:19.890Z"
         },
         {
           "n": 30,
@@ -24303,11 +24303,11 @@
         {
           "n": 35,
           "text": "E0107 (Jet.UnknownName) on a qualified Core path used without an import, such as `t: core.files.read(\"x.txt\")`, gives the fix that compiles: add `use files: core.files` and write `files.read(...)`. Today the Fix says \"Declare it first: `core: ...`\", which is wrong; the unqualified form `files.read` already gets the right fix. Every `core.<module>.<item>` spelling gets the same fix. Proof: a UI snapshot of the qualified case, and `jet check` of the fixed file passes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T01:14:38.671Z"
+          "evidence": "p350 batch compiler (dev 5d09a5452d): jet test Compiler --profile ui --filter core_path_ PASS 3/3 (core_path_without_use, core_path_nested_without_use, core_path_with_use: a qualified core.<module>.<item> without an import gets the use-plus-short-name fix).",
+          "at": "2026-11-20T10:55:20.871Z"
         }
       ],
       "refs": [
@@ -24337,7 +24337,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-20T09:23:09.344Z",
+      "updated": "2026-11-20T10:55:20.871Z",
       "updatedBy": "Main",
       "workOrder": 19,
       "criteriaLastN": 35
@@ -76971,11 +76971,11 @@
         {
           "n": 10,
           "text": "A multi-threaded program under jet debug runs to its exit after `delete` and `continue`: the debugged `jet check` of a three-line file finishes and the session ends, where p346 waited more than 15 minutes in two runs. Proof: a Debug case debugging a program with worker threads through a breakpoint, delete, continue and exit.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T08:18:37.641Z"
+          "evidence": "p350 batch compiler (dev 5d09a5452d): jet test Compiler --profile cases --filter a_worker_s_stopping_exit_ends_after_delete_and_continue PASS (a program with worker threads through a breakpoint, delete, continue and exit; the session ends).",
+          "at": "2026-11-20T10:55:21.742Z"
         },
         {
           "n": 11,
@@ -76989,11 +76989,11 @@
         {
           "n": 12,
           "text": "When jet debug ends by any cause (a signal, a timeout, the terminal closing), nothing it started outlives it: the debugged program and every helper process exit with it. On p346, two timed-out `jet debug Compiler/JetCLI/run.jet` sessions left helpers holding 6.1 GB each, waiting in wait4 for 30 minutes. Proof: a Debug case that kills a jet debug session with SIGKILL while its program is stopped and running, and finds no process of the session left.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T08:42:45.653Z"
+          "evidence": "p350 batch compiler (dev 5d09a5452d): jet test Compiler --profile cases --filter a_killed_session_leaves_no_helper_or_program PASS (SIGKILL of the jet debug session while its program is stopped and while running leaves no process of the session).",
+          "at": "2026-11-20T10:55:22.643Z"
         }
       ],
       "refs": [],
@@ -77001,7 +77001,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-20T10:22:28.592Z",
+      "updated": "2026-11-20T10:55:22.643Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
     }
@@ -137577,6 +137577,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-20T10:55:22.643Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00ni11n",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-20T10:55:21.742Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00ni11n",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-20T10:55:20.871Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dktg7a",
+      "note": "#35"
+    },
+    {
+      "at": "2026-11-20T10:55:19.890Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dktg7a",
+      "note": "#29"
+    },
+    {
+      "at": "2026-11-20T10:55:18.987Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dktg7a",
+      "note": "#27"
+    },
+    {
+      "at": "2026-11-20T10:55:18.011Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dktg7a",
+      "note": "#26"
+    },
     {
       "at": "2026-11-20T10:37:15.288Z",
       "by": "Main",
