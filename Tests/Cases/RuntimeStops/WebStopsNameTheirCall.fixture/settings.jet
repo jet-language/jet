@@ -1,0 +1,25 @@
+// Settings that do not decode: `web.bind` stops before it binds.
+package: {
+    name: "web_stops_settings"
+    authority: { allow: [Env, IO, Net, FS, Exec, Time] }
+}
+
+use {
+    server: core.http.server
+    web: core.web
+}
+
+#[Debug, Codable(only: .Decode)]
+Settings: struct {
+    pool_size: Int,
+}
+
+build: fn(settings: Settings) -> web.App {
+    size: settings.pool_size
+    web.app().get("/", fn() { Ok(server.response(200, "pool of {size}")) })
+}
+
+run: fn() HTTPError! {
+    bound: web.bind<Settings>("127.0.0.1:0", prefix: "APP_", build: build)
+    _: bound.shutdown()
+}

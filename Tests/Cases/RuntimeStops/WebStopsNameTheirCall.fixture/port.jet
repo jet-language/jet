@@ -1,0 +1,11 @@
+// A `JET_APP_PORT` that holds no port: `serve` stops before it listens.
+package: {
+    name: "web_stops_port"
+    authority: { allow: [Env, IO, Net, FS.Read, Time] }
+}
+
+use web: core.web
+
+home: fn() -> WebPage { web.page("Home", "never served") }
+
+run: fn() { web.app().route("/", home).serve() }

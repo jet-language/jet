@@ -1,0 +1,44 @@
+# A web app's stop names the user's call that served or bound it, on every
+# tier: settings that do not decode stop `web.bind` (exit 78) and a
+# `JET_APP_PORT` that holds no port stops `serve` (exit 70), and each report
+# gives the call's `-->` line under `jet run`, from a debug build and from a
+# release build. The line is the call's own place, kept in the stop's message,
+# so a release image prints it itself, with no `jet crash` to name it.
+fixture: WebStopsNameTheirCall.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: APP_POOL_SIZE=lots
+env: JET_APP_PORT=eighty
+step: jet run settings.jet
+exit: 78
+stdout: empty
+stderr: ^= "Stop: Jet.EnvDecodeFailed: The app's settings did not decode, so it does not listen:\n  --> settings.jet:23 in run\n" # the `web.bind` call, before the failures
+step: jet run port.jet
+exit: 70
+stdout: empty
+stderr: ^= "Stop: Jet.AppPortUnavailable: The web app can't listen on JET_APP_PORT=`eighty`: a TCP port is a number from 1 to 65535.\n  --> port.jet:11 in run\n" # the `serve` call
+step: jet build settings.jet
+exit: 0
+step: built
+exit: 78
+stdout: empty
+stderr: ~ "\n  --> settings.jet:23 in run\n" # a debug build names the same call
+step: jet build port.jet
+exit: 0
+step: built
+exit: 70
+stdout: empty
+stderr: ~ "\n  --> port.jet:11 in run\n" # a debug build names the same call
+step: jet build --release settings.jet
+exit: 0
+step: built
+exit: 78
+stdout: empty
+stderr: ~ "\n  --> settings.jet:23 in run\n" # a release image prints the call's line itself
+stderr: !~ "names and lines: jet crash" # and needs no jet crash to name it
+step: jet build --release port.jet
+exit: 0
+step: built
+exit: 70
+stdout: empty
+stderr: ~ "\n  --> port.jet:11 in run\n" # a release image prints the call's line itself
