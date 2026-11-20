@@ -244,11 +244,14 @@ native_dump_build: fn(build: Int) -> String Never! {
 }
 
 // The build hash of `bytes`, as the writer takes it of the image's copy
-// (PerfSamples.jet perf_flight_fold): FNV-1a over each byte.
+// (PerfSamples.jet perf_flight_fold): FNV-1a over each byte, in I64 as the
+// writer folds it. A wrapping product of exact Ints costs far more per byte,
+// so an image of tens of megabytes would take minutes to hash.
 native_dump_digest: fn(bytes: [U8]) -> Int Never! {
-    hash := NATIVE_DUMP_BUILD_OFFSET
-    loop byte in bytes -> hash = wrapping((hash ~ Int{byte}) * NATIVE_DUMP_BUILD_PRIME)
-    hash
+    hash := I64{NATIVE_DUMP_BUILD_OFFSET}
+    prime: I64{NATIVE_DUMP_BUILD_PRIME}
+    loop byte in bytes -> hash = wrapping((hash ~ I64{byte}) * prime)
+    Int{hash}
 }
 
 // The file beside the dump at `path` that holds its image of build
