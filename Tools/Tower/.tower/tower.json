@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112553,
+    "rev": 112562,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34036,124 +34036,6 @@
       "criteriaLastN": 20
     },
     {
-      "id": "c04pd50v",
-      "num": 5022,
-      "title": "Expert opt-out model: how experts turn off Jet's guardrails to reach Jai-level power",
-      "body": "## Outcome\n\nDecision D-JAI-EXPERT1 picks the one opt-out mechanism every Jai-parity power uses. Jai has no guardrails; Jet keeps them as defaults. Today each power has its own switch (`metaprogramming: unrestricted`, `#Impure` plus `--gate impure=allow`, `#StepLimit`), and some powers have none (full host access while compiling, build-wide check relaxation, string code, duck-typed generics). Audit rows: A05-A07, A20, E12-E17, B03, B06, B16.\n\nThe ballot carries the full design; this card holds the vote and, once ratified, the delivery plan.",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e18",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "All five criteria met: c3 step-limit rows 5/5 on p249 (dev 873d300318), c2/c4/c5 earlier. The per-scope #Unchecked half lives on #6323 c9."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Tagged G6: D-JAI-EXPERT1=A is the Meta effect family, metaprogramming beside #5021 (Jai parity). c1 names its proof."
-        },
-        {
-          "at": "2026-11-04",
-          "by": "Main",
-          "text": "#6563 c1 precut audit re-added 1 criteria from archived #8: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "(was #8) The beginner/expert split is audited: each guardrail opt-out in the body (audit rows A05-A07, A20, E12-E17, B03, B06, B16) goes through the one D-JAI-EXPERT1=A mechanism, and a default build never reaches an expert power without it. Proof: a UI snapshot per opt-out shows the refusal without it, and a golden shows the power with it.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Moved to #5022 c2: the one audit split per opt-out: host access (X1), step limit (X2), whole-program and string code (X3), check removal (X4); row B16 is not adopted (D-JAI-GENERIC1=F)",
-          "at": "2026-11-15T02:34:21.221Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 2,
-          "text": "Compile-time host access (windows, processes, network, foreign and DLL calls; audit rows A05, A06) is a Meta expert leaf: root-only, not held by default or by an ancestor, grantable per dependency through `authority.grants`; without it the call is refused with a registered error, and a family or one leaf can be denied as with Net (D-JAI-EXPERT1=A).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p244 batch compiler (dev 5613c2f956); feature 05c8aa66af: ui meta_comptime_host_ n=5 bad=0, ui MetaComptimeHost n=2 bad=0, comptime_dependency_impure and comptime_io_rejected PASS, GatesLints.jet PASS.",
-          "at": "2026-11-17T04:28:16.904Z",
-          "proof": {
-            "profile": "ui",
-            "filter": "meta_comptime_host_"
-          }
-        },
-        {
-          "n": 3,
-          "text": "Running past the compile-time step budget (audit row A07) is written `#StepLimit(n)` (D-PREP-FUEL1=A); it is a budget, not an effect, so there is no expert leaf for it (D-JAI-EXPERT1=A drops unlimited_steps). Without it the 10,000,000-step budget stops with its registered error.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 3846d9b2c1 + 873d300318: jet test Compiler --profile ui --filter comptime_step_limit_ PASS 5/5 on the p249 batch compiler (d6fe44e963), and the cases comptime_fallback_reason_shows (2/2) and locals_that_call_code_are_computed_while_compiling passed on p247.",
-          "at": "2026-11-17T06:31:05.068Z",
-          "proof": {
-            "profile": "ui",
-            "filter": "comptime_step_limit_"
-          }
-        },
-        {
-          "n": 4,
-          "text": "Running the whole program or another program while compiling, and code from strings (audit rows A20, B03, B06), need Meta expert leaves: Meta.Host for running programs at compile time, Meta.Code.Raw for code from text, Meta.Code.Rewrite for rewriting (D-JAI-EXPERT1=A). A dependency using one without the root grant is refused.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p243 batch compiler (dev 220ae562d7; feature 5a29fc351f): ui MetaExpertLeafRootOnly n=3 bad=0, ui meta_expert_leaf_root_only_meta_leaves_code_out n=1 bad=0, cases BuildEntry/rewrite_body_replaces_a_function_body and meta_events_rewrites_compose_in_order PASS.",
-          "at": "2026-11-17T04:07:23.577Z",
-          "proof": {
-            "profile": "ui",
-            "filter": "meta_expert_leaf_root_only"
-          }
-        },
-        {
-          "n": 5,
-          "text": "Removing checks through a build setting (audit rows E12-E17: a check field set to `off`) is the audited `check_removal` gate, which any package or organization may forbid, including a loose file's inline `package:` policy; under a forbidding policy the removal is refused with a registered error (D-JAI-EXPERT1=A, D-JAI-BUILDOPT1).  proof: jet test Compiler --profile ui --filter check_removal_gate_forbidden",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p246 batch compiler (dev 8672bcfd81); feature bd931aba40: ui check_removal_gate_forbidden n=1 bad=0 and ui CheckRemovalGateForbidden (the organization-policy folder) n=1 bad=0; a loose file's inline package policy now forbids --bounds=off.",
-          "at": "2026-11-17T05:18:31.951Z",
-          "proof": {
-            "profile": "ui",
-            "filter": "check_removal_gate_forbidden"
-          }
-        }
-      ],
-      "refs": [
-        "Docs/audits/jai-parity-2026-10-16.md",
-        "#5021"
-      ],
-      "tags": [
-        "mining-2026-10-16",
-        "jai-vs-jet",
-        "jai-parity",
-        "meta",
-        "needs-owner",
-        "wayfinder:decision"
-      ],
-      "parentId": "c02y3vkg",
-      "needsAcceptance": false,
-      "created": "2026-10-16T10:54:40.464Z",
-      "updated": "2026-11-17T06:31:14.615Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 5,
-      "completedAt": "2026-11-17T06:31:14.615Z"
-    },
-    {
       "id": "c0dhc7rh",
       "num": 5025,
       "title": "Context parity with Jai: readable context, typed keys, scratch storage, assertion handler",
@@ -58294,6 +58176,16 @@
         {
           "at": "2026-11-20",
           "by": "Main",
+          "text": "Tool gap found while dogfooding #6970: `jet emit --ir` rejects -O2, so the optimized IR is not visible through Jet tools; it belongs with c95 (machine code visible), whose ballot D-DISASM1 is being drafted."
+        },
+        {
+          "at": "2026-11-20",
+          "by": "Main",
+          "text": "Profile re-probe on dev f2cf0a8324 (Lens, single programs, the perf peer pinned to other cores): P1 sampling now holds (the stop poll is named on its line at 41%, and the external profiler gives 39.1%); P3/P9 hold within the Jet-process limit, with G38 closed; P4 holds within limits, but the alloc-lens attach header is still wrong (c94); P5 holds; P2 still fails (58.79 ns per recorded zone against 27, with the c87 work queued); P6 still fails: the ranking is right, but the prediction is about 25% high (240-278 predicted, 194-199 measured)."
+        },
+        {
+          "at": "2026-11-20",
+          "by": "Main",
           "text": "Gaps found while fixing c82 (Closer4723): (1) jet debug has no path for test entries, so a failing test cannot be debugged; that needs a ballot (the surface: jet test --debug NAME, or jet debug on a test file and filter) before a criterion. (2) A package entry spelled `use { run: tool.start }` gives MissingRunFunction under jet debug; if jet run accepts the same package, this is a defect in the debug entry path and joins c82 entry handling."
         },
         {
@@ -59472,6 +59364,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-20T05:49:34.944Z"
+        },
+        {
+          "n": 94,
+          "text": "Every jet perf attach lens reports the real window in its header: a 500 ms `--lens=alloc` attach (and every other lens) reads run_wall near 500 ms and the program's CPU time in that window, not run_wall=2335ns run_cpu=0ns, with a case per lens family.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-20T06:01:43.302Z"
+        },
+        {
+          "n": 95,
+          "text": "Machine code is visible through Jet's own tools, after a ratified ballot for the surface: `jet debug` disassembles the function at a stop or by name, with each instruction mapped to its source line, and `jet perf view` annotates a hot line's instructions with their sample shares (perf annotate parity), on every native tier. Proof: a Debug case and a Perf case.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-20T06:40:03.752Z"
         }
       ],
       "refs": [],
@@ -59479,9 +59389,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-20T05:49:54.430Z",
+      "updated": "2026-11-20T07:09:48.675Z",
       "updatedBy": "Main",
-      "criteriaLastN": 93
+      "criteriaLastN": 95
     },
     {
       "id": "c0in2dft",
@@ -75537,6 +75447,11 @@
         {
           "at": "2026-11-20",
           "by": "Main",
+          "text": "Ranked (IfHole, single runs on dev f2cf0a8324): fib -O2 35 spends 40% in the stop poll, because a turn poll folded after fib(n-1) was lowered as a full call to jet_ir_stop_turn. A counted List loop shows no poll samples (loop checks are already inline). Recursion through a function value spends 17% at the indirect call. SUB IfHole-6-1-6970-turn-poll-inline lowers the post-call poll as an edx test plus an armed-word load and branch to a cold stub (x64 and web); the expected fib share is 0%, to be measured on its batch compiler. Every-N polling is rejected because the spec promises a check at every loop iteration and those checks already cost one load and one branch. Next: indirect calls report stops in edx, so their poll is inline too."
+        },
+        {
+          "at": "2026-11-20",
+          "by": "Main",
           "text": "Finding from the dated best-in-existence review (Docs/Audits/2026-11-19-debug-profile-best-in-existence.md, axis P1): on the -O2 fib fixture the runtime stop poll jet_ir_stop_turn takes 33.7% of samples under a hardware-counter profile. A per-call poll that costs a third of a call-heavy function breaks the peer floor for every recursive or call-dense program; the poll belongs off the hot path (a load-and-branch on a thread-local flag, hoisted to loop back edges and function entries only where a call can run unbounded). The profiler half (naming the poll per line) is #6841 c86."
         }
       ],
@@ -75643,7 +75558,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:41:51.726Z",
-      "updated": "2026-11-20T03:14:52.181Z",
+      "updated": "2026-11-20T06:40:18.236Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -100717,217 +100632,6 @@
       "ratifiedAt": "2026-10-10"
     },
     {
-      "id": "D-JAI-EXPERT1",
-      "cardId": "c04pd50v",
-      "group": "architecture",
-      "title": "Expert metaprogramming as nested effects you can block as a family or one at a time",
-      "situation": "Jai, the game language Jet is matching, trusts the programmer completely: build code can rewrite your program, run any tool while compiling, and switch off array checks for a whole build. Jet already has one way to say what code may do: effects such as Net or FS.Read, which nest, so denying FS also denies FS.Read. The earlier draft of this ballot added a separate list of powers beside effects, a second way to give permission. The vote decides how Jet's strong metaprogramming becomes a family of nested effects that a team can block whole or one at a time, and where whole-build check removal belongs. We recommend a Meta effect family, with check removal kept on the existing safety-gate rules.",
-      "gist": "Should Jet's strong metaprogramming be nested effects a team can block whole or one at a time, and where does check removal go?",
-      "lesson": "An effect names something code may do, such as Net. Effects nest: denying FS also denies FS.Read. A package's authority block lists effects it holds (may use) and denies. Expert effects are strong ones, such as rewriting code while compiling; nobody holds them until the main package names them. A safety gate, such as `#Unsafe`, is a written, audited place where a safety check is waived. A bounds check stops a read past the end of a list; without it, a bad index can corrupt memory.",
-      "explainer": "",
-      "story": "Ravi ports a Jai game to Jet. His build runs the level editor while compiling, one library rewrites functions marked as game systems into faster code, and release builds run without array checks. His security lead wants one line for a sister project: generated code and macros yes, anything stronger no. Both want to use the effects and safety rules they already know, not a second list of switches.",
-      "inWild": "// Jai: #run code may do anything while compiling, and\n// build options turn checks off for a whole build.\n#run { run_command(\"leveled\", \"--bake\"); }\noptions.array_bounds_check = .OFF;",
-      "detail": "Owner question q2d1w7aw: the earlier powers list deviated from effects. Powers should be nested effects, so a team can block all stronger metaprogramming or one thing. The old syntax was not idiomatic. Jet is the language being designed; Jai is Jonathan Blow's game language that Jet is reaching parity with (Docs/audits/jai-parity-2026-10-16.md). Spellings use `comptime` (D-COMPTIME-WORD1=A) and the arrow form `-[ ]>` (D-EFFECT-ROW2).\n\nRatified ground for effects: D-AUTHORITY-MODEL1=A (one rights tree), D-AUTHORITY-ROOTS1=A (nested roots; `!FFI` denies every leaf), D-EFFTREE1 (holding a parent covers its children). Also D-AUTHORITY-MANIFEST1=A (the `authority` block; `policy:` keeps floors and unsafe mode). Also D-EFFECT-DECL1=A (`effect` declarations) and D-META-EFFECT1=A (one effect model at both stages).\n\nFor metaprogramming: D-META-GATE1=A (`Meta.Generate`, `Meta.Include`), D-META-OPTIN2=A, D-META-CONTROL2=A and D-META-RECONCILE1=A (the opt-in advanced mode governs; older refusals bind projects that do not opt in). Also D-JAI-CODE1=A (everyone gets code values, pasting and macros; text-to-code is expert). For safety gates: D-ONCE-GATE1=A and D-GATE-LAW1=A.\n\nTHE META FAMILY UNDER A. Effects.jet gains these declarations. `$expert` is a new value in the attribute slot that already holds `$irreversible`.\n\n```jet\neffect Meta                        // compile-time code acting on the program\neffect Meta.Generate               // add generated files: b.generate, derives\neffect Meta.Include                // run a dependency's build inside yours\neffect Meta.Paste                  // code values and #Expand macros pasted at a call\neffect Meta.Code $expert           // change the program beyond adding and pasting\neffect Meta.Code.Raw $expert       //   parse(text) to code, and macros with uses: *\neffect Meta.Code.Types $expert     //   build types from facts, with no source file\neffect Meta.Code.Rewrite $expert   //   change written code through checked change sets\neffect Meta.Host $expert           // reach the build machine while compiling\n```\n\nHOLDING. Every Meta leaf is checked against the package's authority block, as Net is. Deny always wins, and denying a parent denies every child: `deny: [Meta]` blocks the whole family. Held means the package may use it. Non-expert leaves are held unless denied, so beginners write nothing. An `$expert` leaf is never held by default, and holding a parent never covers it: it must be named.\n\n`allow: [Meta]` holds Generate, Include and Paste only; a note names the expert leaves it left out. `allow: [Meta.Code]` names an expert node, so it holds all three of its children. Only the main package, the one you build, may hold an expert leaf. It may pass one to a named dependency with `grants:`; a dependency cannot hold one by itself.\n\nThis follows existing precedent: effect declarations already carry an attribute, and the Mem and Panic roots already have their own holding rule (deny-only, E0751). There is one rights tree and one attribute table.\n\nAPPROVAL. Adding an expert leaf to the main package is a project-policy edit. The trust prompt's Update project policy choice shows the diff (D-TRUST-LAUNCH1=A). Expert leaves are never approved by Trust once, `--trust`, `-T` or `--allow`. CI never prompts; it fails with the exact `authority` line to add. Removing a leaf needs no approval. An organization file may deny any Meta leaf, and the outermost refusal wins.\n\nWHERE META LEAVES APPEAR. Meta leaves describe compile-time work, so they appear only in rows of compile-time code: `fn build`, providers, hooks and `comptime fn`. A run-time function that calls a macro keeps its own row; the package's hold of `Meta.Paste` governs the paste. So `fn build(b: BuildContext) -[!Meta.Generate]> BuildPlan` makes `b.generate` an error there. Holding is the package's permission; a build entry's row still lists the Meta leaves it uses, as D-META-GATE1=A requires.\n\nWHAT EACH OLD POWER BECOMES. `metaprogramming: unrestricted` (D-META-OPTIN2) becomes holding `Meta.Code`; its registration, target and approval rules stay. raw_code (D-JAI-CODE1) becomes `Meta.Code.Raw`. comptime_host becomes `Meta.Host`: compile-time code that runs programs, uses unpinned network, loads foreign libraries or opens windows needs `Meta.Host` held.\n\nThe site still writes `#Impure(\"reason\")`, and the function row still lists the ordinary effect, such as Exec. That is the same shape as run-time code. unlimited_steps is dropped: the step limit is a budget, not an effect, and `#StepLimit(n)` (D-PREP-FUEL1=A, ratified, not yet built) covers long work. open_generics is dropped with the D-JAI-GENERIC1 revision.\n\nCHECK REMOVAL UNDER A. Removing run-time checks is not something code does, so it is not an effect. It is an audited safety waiver, like `#Unsafe`, and uses the existing gate rules. A new gate kind, `check_removal`, joins the D-GATE-LAW1 list. Its written gate is a check field set to `off` in the main package's build settings (D-JAI-BUILDOPT1), such as `bounds: off`, or `#Unchecked(bounds)` inside `#Unsafe(\"reason\")`.\n\nThe default `.GateOnly` allows it and lists it in `jet inspect gates` and the build receipt. A package whose policy says `check_removal: .Forbid` is always compiled with its checks, even in an unchecked build, and the receipt says so. An organization `.Forbid` refuses the build. Generic and inlined code takes the setting of the package that wrote it.\n\nI1 AMENDMENT. Today I1 reads: 'The expert escape hatch is a user-written, audited `#Unsafe(\"reason\") { … }` block or `#Unsafe(\"reason\") fn`. Generated Rust `unsafe` appears only there or in vetted standard-library and memory internals.'\n\nUnder A and B, the code generator leaves out the named check at each site in packages built with the gate. On the Rust tier that site becomes an unchecked access inside a generated `unsafe` block. The receipt lists the gate and every package built without the check. I1 adds this text: 'or a check field set to off in the main package's build settings, an audited gate listed in every receipt.'\n\nUnder C, I1 is unchanged.\n\nAMENDS. D-AUTHORITY-ROOTS1 (root list gains Meta). D-META-GATE1: the Meta family replaces its names. Its refusals ('in-place rewrite, a type with no file, running the program inside the compiler') were already lifted for opted-in projects by D-META-RECONCILE1=A.\n\nUnder A, opted in means holding `Meta.Code` or `Meta.Host`. Also `Meta.Reflect` and `Meta.Const` are not declared, since reflection is pure and compile-time parameters are ordinary generics. D-META-OPTIN2: the manifest member becomes holding `Meta.Code`. Its standard mode 'forbids … caller-code insertion'; pasting is now allowed there, as D-JAI-CODE1=A already ruled.\n\nAlso D-CTEFFECT1 and D-ONCE-GATE1: at compile time `Meta.Host` replaces the per-run `--gate impure=allow`, and E3410, E3411 and E1343 change their fix text. Run-time `#Impure` keeps its gate. D-TRUST-LAUNCH1: expert leaves are excluded from one-run approval. D-JAI-BUILDOPT1: `off` needs the `check_removal` gate instead of a power. D-GATE-LAW1: the gate list gains `check_removal`.\n\nMIGRATION. One cutover with machine-applicable `jet fix` rewrites: `metaprogramming: unrestricted` becomes `authority: { holds: { allow: [Meta.Code] } }`, and a compile-time `--gate impure=allow` becomes an `allow: [Meta.Host]` line. No aliases remain. New names get Syntax.rs and Effects.jet rows (I7); every refusal has a registered code and UI snapshot (I4).\n\nBEGINNER AND EXPERT PATHS. A beginner writes nothing: generated code, includes and macros work, and every expert effect and every check stays on. An expert names expert leaves in the main package's allow list, or sets `bounds: off` in a release profile. A careful team writes `deny: [Meta.Code, Meta.Host]` and `check_removal: .Forbid`.\n\nWHY NOT B. B makes check removal an `Unchecked` effect family too. A held effect does nothing by itself, and an effect row cannot see how another package was compiled, so `-[!Unchecked]>` could not be checked by the call graph. WHY NOT C. C keeps every Meta effect but offers no whole-build check removal; experts waive checks only per scope.\n\nOPEN DEPENDENCIES. D-META-HASH1 (open) may respell `$` attributes mechanically. D-LSP-BUILDSAVE1 (open) says a check never uses `Meta.Host`.\n\nEVIDENCE. Jai: #run opens windows and calls DLLs while compiling (Blow UTqZNujQOlA 00:44:04-00:53:31). Jai build options turn checks off (The Way to Jai examples/30/30.4_build_options.jai:50-123). Rust: `#![forbid(unsafe_code)]` lets a crate refuse a power at its root. Zig: build-wide safety modes plus per-scope `@setRuntimeSafety`.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Meta effect family; check removal as a safety gate",
-          "detail": "Strong metaprogramming becomes the Meta family on the one effect tree, with expert leaves that must be named by the main package. Deny a family or one leaf, exactly as with Net. Whole-build check removal is an audited safety gate under the existing gate rules, which any package or organization may forbid.",
-          "technical": "Effects.jet rows above with the `$expert` attribute: excluded from default holding and from ancestor holding, root-only, grantable per dependency through `authority.grants`, approved only through a project-policy edit. New gate kind `check_removal` on the D-GATE-LAW1 list; written gate is a D-JAI-BUILDOPT1 check field set to `off` or `#Unchecked` inside `#Unsafe`.",
-          "code": "// main package\nauthority: { holds: { allow: [Meta.Code.Rewrite, Meta.Host] } }\nbuild: { release: Build{ bounds: off } }   // audited gate, listed in receipts\n// sister project: generated code and macros yes, stronger no\nauthority: { holds: { deny: [Meta.Code, Meta.Host] } }\npolicy: { check_removal: .Forbid }\n// error: `ecs` needs Meta.Code.Rewrite\n//   fix: authority: { grants: { \"ecs\": [Meta.Code.Rewrite] } }"
-        },
-        {
-          "key": "B",
-          "name": "Meta and Unchecked effect families",
-          "detail": "The Meta family of A, plus a second expert family, Unchecked, with leaves Bounds, Null and Casts. Holding a leaf lets the main package turn that check off; a library denies Unchecked to keep its checks.",
-          "technical": "As A, plus `effect Unchecked $expert` and three leaves. `bounds: off` needs `Unchecked.Bounds` held. A package denying Unchecked is compiled with checks.",
-          "code": "authority: { holds: { allow: [Meta.Code.Rewrite, Meta.Host, Unchecked.Bounds] } }\nbuild: { release: Build{ bounds: off } }\n// a library that keeps its checks\nauthority: { holds: { deny: [Unchecked] } }"
-        },
-        {
-          "key": "C",
-          "name": "Meta effect family; checks removed only per scope",
-          "detail": "The Meta family of A. There is no whole-build check removal: an expert waives checks only in a written `#Unchecked(bounds)` scope inside `#Unsafe(\"reason\")`.",
-          "technical": "As A for Meta. D-JAI-BUILDOPT1 check fields lose the `off` value; `fatal` and `report` remain. I1 unchanged.",
-          "code": "authority: { holds: { allow: [Meta.Code.Rewrite, Meta.Host] } }\n#Unsafe(\"hot loop proven in bounds\") {\n    #Unchecked(bounds) { sum += xs[i] }\n}\n// build: { release: Build{ bounds: off } }  -> error: not offered"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Jai",
-          "note": "Build options turn checks off for a whole build, and #run code has no limits at all.",
-          "code": "options.array_bounds_check = .OFF;\n#run { run_command(\"leveled\", \"--bake\"); }"
-        },
-        {
-          "lang": "Rust",
-          "note": "A crate may refuse a power for all of its own code at its root.",
-          "code": "#![forbid(unsafe_code)]"
-        },
-        {
-          "lang": "Zig",
-          "note": "Build-wide safety off with ReleaseFast; per scope with @setRuntimeSafety.",
-          "code": "const exe = b.addExecutable(.{ .optimize = .ReleaseFast });\n@setRuntimeSafety(false);"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "A puts Jai's metaprogramming power under the effects Jet users already know: one deny blocks the family, one leaf blocks one power. Check removal stays where Jet already audits waived safety checks.",
-        "gains": [
-          "One effect system for every metaprogramming power.",
-          "Block the whole family or one power.",
-          "Any library can keep its own checks."
-        ],
-        "losses": [
-          {
-            "loss": "An expert grant carries no written reason.",
-            "mitigation": "Each use site keeps its reason marker, and the build receipt lists every expert grant and site."
-          },
-          {
-            "loss": "Unchecked builds can hide memory bugs.",
-            "mitigation": "It is an audited gate in every receipt, and any package or organization may forbid it."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B calls check removal an effect, but removing a check is not something code does, and rows cannot check it."
-          },
-          {
-            "key": "C",
-            "reason": "C is safer but leaves Jai's whole-build check removal with no Jet form."
-          }
-        ],
-        "tradeoff": "One effect family and one gate kind, for all of Jai's power under rules Jet already has."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 4,
-      "reviewPasses": {
-        "beginner": "Fresh agent: BegExpert2. Skill: rli5. The beginner pass tested the complete ballot. It found the sister-project example contradicted its own story and that power, holds and main package were undefined; the lesson now defines them and macros stay non-expert.",
-        "adversarial": "Author model family: claude-opus. Adversarial model family: claude-haiku. Fresh agent: AdvExpert2. The review found that ancestor holding bypassed expert leaves, that macros clashed with a ratified ruling, and that check removal broke I1. Holding rules, the Meta tree and a check-removal gate with quoted I1 text now fix them."
-      },
-      "checkInstructions": null,
-      "surface": {
-        "gist": "Should strong metaprogramming be nested effects a team can block whole or one at a time, and where does check removal go?",
-        "lesson": "An effect names something code may do, such as Net; denying FS also denies FS.Read. A package's authority block lists effects it holds and denies. Expert effects, like rewriting code while compiling, are off until the main package names them. A safety gate, like `#Unsafe`, is an audited place where a check is waived.",
-        "trio": {
-          "current": {
-            "note": "Today each power has its own switch, and some have none.",
-            "code": "// package.jet\nmetaprogramming: unrestricted\n// build-time programs: #Impure in code AND a flag every run\n$ jet build --gate impure=allow\n// no switch at all: array checks off for a whole build"
-          },
-          "wild": {
-            "lang": "Jai",
-            "note": "Jai's #run may do anything, and build options switch checks off (The Way to Jai, chapter 30).",
-            "code": "#run { run_command(\"leveled\", \"--bake\"); }\noptions.array_bounds_check = .OFF;"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Meta effects; check removal as a gate",
-            "gist": "Metaprogramming powers are nested effects; check removal is an audited safety gate.",
-            "gains": [
-              "One effect system for all metaprogramming.",
-              "Block the whole family or one power.",
-              "Any library can keep its checks."
-            ],
-            "losses": [
-              "Grants carry no reason text."
-            ],
-            "proposed": {
-              "code": "authority: { holds: { allow: [Meta.Code.Rewrite, Meta.Host] } }\nbuild: { release: Build{ bounds: off } }   // audited gate\n// another project: generated code and macros yes, stronger no\nauthority: { holds: { deny: [Meta.Code, Meta.Host] } }\npolicy: { check_removal: .Forbid }"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Meta and Unchecked effects",
-            "gist": "As A, but check removal is an effect family too.",
-            "gains": [
-              "Everything sits in the authority block."
-            ],
-            "losses": [
-              "Removing a check is not something code does."
-            ],
-            "proposed": {
-              "code": "authority: { holds: { allow: [Meta.Host, Unchecked.Bounds] } }\nbuild: { release: Build{ bounds: off } }"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Meta effects; per-scope checks only",
-            "gist": "As A for metaprogramming; no whole-build check removal.",
-            "gains": [
-              "Checks can never vanish build-wide."
-            ],
-            "losses": [
-              "No form for Jai's whole-build check removal."
-            ],
-            "proposed": {
-              "code": "#Unsafe(\"hot loop proven in bounds\") {\n    #Unchecked(bounds) { sum += xs[i] }\n}"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Jai's metaprogramming power comes under effects you already know: one deny blocks the family, one leaf blocks one power. Check removal stays with Jet's audited safety gates.",
-          "gains": [
-            "One permission system per kind of risk."
-          ],
-          "losses": [
-            {
-              "loss": "Grants carry no reason text.",
-              "mitigation": "Each use site keeps its reason marker; the receipt lists every expert grant and site."
-            },
-            {
-              "loss": "Unchecked builds can hide memory bugs.",
-              "mitigation": "Listed in every receipt, and any package or organization may forbid it."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Removing a check is not an action code takes."
-            },
-            {
-              "key": "C",
-              "reason": "Jai's whole-build check removal has no form."
-            }
-          ],
-          "tradeoff": "One effect family and one gate kind, for all of Jai's power."
-        }
-      },
-      "designAway": [
-        {
-          "loss": "An expert grant carries no written reason.",
-          "attempts": [
-            "Reason strings on authority entries; rejected as a syntax on holds that no other effect uses.",
-            "Keep reasons where they are already written, in `#Impure`, `#Unsafe` and provider registrations, listed with sites in the receipt."
-          ],
-          "result": "Negligible: every use site states why, and the receipt shows each one."
-        },
-        {
-          "loss": "Unchecked builds can hide memory bugs.",
-          "attempts": [
-            "Per-scope removal only (option C); kept as the default path, but it drops Jai's whole-build mode.",
-            "Make it an audited gate: listed in every receipt, forbiddable per package and per organization."
-          ],
-          "result": "Reduced: removal is always visible and any library can refuse it."
-        },
-        {
-          "loss": "A second way to give permission.",
-          "attempts": [
-            "Make every metaprogramming power an effect leaf on the one rights tree, and keep check removal on the one gate list."
-          ],
-          "result": "Removed."
-        }
-      ],
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-16T11:39:42.896Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-20"
-    },
-    {
       "id": "D-JAI-EVENTS1",
       "cardId": "c0gmf0y4",
       "group": "architecture",
@@ -103105,320 +102809,6 @@
       "draft": false,
       "status": "ratified",
       "created": "2026-10-22T09:15:39.824Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-22"
-    },
-    {
-      "id": "D-META-CROSSPKG1",
-      "cardId": "c04pd50v",
-      "group": "safety",
-      "title": "Rewriting another package's code needs one line naming that package",
-      "situation": "",
-      "gist": "Should a build need one line naming a dependency before compile-time code may rewrite that dependency's functions?",
-      "lesson": "A rewrite replaces the body of a function that is already written. An application's build may let a library rewrite the application's own code. A rewrite could also reach into a dependency, such as a database library: code you did not write and may never have read. The lock file already pins each dependency's exact contents, so a permission can name a package without copying hashes.",
-      "explainer": "",
-      "story": "Ines hands her compiler value to a tracing library so it can wrap her route functions. The library also wants to wrap every query function inside her database package. Under option A the build stops with an error that names the database package and prints the one line to add. She reads it, decides she wants traced queries, and adds the line. Her teammate sees that line in review.",
-      "inWild": "Jai: any metaprogram may modify any procedure it sees, including ones from imported modules; there is no per-module consent. Source: The Way to Jai, chapter 30, https://github.com/Ivo-Balbaert/The_Way_to_Jai\n\nRust: a crate can refuse a power at its root with `#![forbid(unsafe_code)]`, and the refusal is visible in source. Source: https://doc.rust-lang.org/reference/attributes/diagnostics.html#lint-check-attributes",
-      "detail": "Provenance: the owner approved the proposal on build programs and compiler events (Docs/proposals/build-programs-and-compiler-events-2026-10-22.md). The owner named A, an explicit `meta.allow_rewrite(package:)` call in the application's build, and B, allowed by default as in Jai. C is today's ratified rule, included as the honest third option.\n\nDepends on D-META-COMPILER1. This ballot applies only if that ballot ratifies the `Compiler` value. If it does not, this ballot is moot. Until this ballot rules, D-META-COMPILER1 limits rewrites to the application's own package, and D-META-OPTIN2's target records stand.\n\nAmends D-META-OPTIN2=A. Under A, its `metaprogramming_targets` records (package identity, source digest, exact declarations list) are removed. The per-package call replaces them, and the lock file supplies the digest. OPTIN2's rule that a rewrite never changes the dependency's cached source stays. D-META-RECONCILE1=A quoted the same records as the dependency-target rule; that reference now points here.\n\nKeeps D-JAI-EXPERT1=A: `Meta.Code.Rewrite` stays an effect leaf that must be held, and a deny from a team or organization file still wins over this call. Default holding is D-META-HOLD1.\n\nWhy per package and not per function: rewrites usually follow markers across a package, and a per-function list goes stale on every update. The `meta` lens shows the exact functions changed, so review keeps per-function detail without a hand-kept list.\n\nProfile: short. One mechanism, three options, no new syntax; `allow_rewrite` is an ordinary method on the Core `Compiler` type.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Name the package in the build",
-          "detail": "The application's build may rewrite its own code once it has a compiler value. To rewrite another package's functions, the same build must first call `meta.allow_rewrite(package: \"orm\")`. Without that line, the rewrite stops with an error naming the package and the line to add.\n\nThe rewrite applies only to this build's copy of the locked version. The dependency's cached source never changes, and other projects using the same package are not affected.",
-          "technical": "`Compiler.allow_rewrite(package: String)` records consent for one package, by its locked identity. The lock already pins the package contents, so the consent covers exactly the locked version; an update shows as a lock change in review. A rewrite of a declaration from a package with no consent fails with a registered error at the `rewrite_body` call, naming the package, the function and the fix line.\n\nA consented rewrite follows the same checks as any rewrite. Its effect facts are inferred again, and every affected caller, in the dependency's copy or in the application, is checked again at the end of the round.\n\nAdding new declarations is not a rewrite and needs no consent. Core and the standard library are packages like any other under this rule. The `meta` lens of `jet inspect expand` groups every rewrite by target package. Effect rules still apply: `Meta.Code.Rewrite` must be held, and an organization or team deny still wins.",
-          "code": "// @build.jet\nfn build(b: Build) {\n    app :: b.add_executable(\"app\", find(\"Source/**/*.jet\"))\n    meta :: b.compiler(app)\n    meta.allow_rewrite(package: \"orm\")    // you choose to let tools change orm's code\n    trace.install(meta, marked: Traced)\n    b.default(app)\n}\n\n// without the allow_rewrite line:\n// error: trace.install tried to rewrite `orm.query`, which belongs to package orm\n//   fix: add `meta.allow_rewrite(package: \"orm\")` after `meta ::` at @build.jet:4"
-        },
-        {
-          "key": "B",
-          "name": "Allowed by default",
-          "detail": "Once the application passes its compiler value to a library, that library may rewrite functions in any package the build uses, as in Jai. Nothing in the source names the packages it touches.",
-          "technical": "No consent record exists. The `meta` lens still lists rewrites after the fact, and a team can deny `Meta.Code.Rewrite` entirely.",
-          "code": "fn build(b: Build) {\n    meta :: b.compiler(b.add_executable(\"app\", find(\"Source/**/*.jet\")))\n    trace.install(meta, marked: Traced)   // may also rewrite orm, http, core...\n}"
-        },
-        {
-          "key": "C",
-          "name": "Keep exact records",
-          "detail": "Keep today's written rule. The application's package file lists each dependency it may rewrite, with that package's source hash and the exact functions allowed.",
-          "technical": "The ratified records name package identity, source digest and an exact declarations list. No globs and no transitive grants. An update changes the digest and invalidates the record.",
-          "code": "// package.jet\nmetaprogramming_targets: [\n    { package: \"orm\", source_digest: \"sha256:9c1f...\", declarations: [\"orm.query\", \"orm.exec\"] }\n]"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Jai",
-          "note": "A metaprogram that intercepts the workspace sees every procedure, from any module, and may modify it. Source: The Way to Jai, chapter 30, https://github.com/Ivo-Balbaert/The_Way_to_Jai",
-          "code": "if msg.kind == .TYPECHECKED {\n    // procedures from every imported module arrive here\n    // compiler_modify_procedure(...) may change any of them\n}"
-        },
-        {
-          "lang": "Rust",
-          "note": "A crate root can forbid a power, and the line is visible in source and review. Source: https://doc.rust-lang.org/reference/attributes/diagnostics.html#lint-check-attributes",
-          "code": "#![forbid(unsafe_code)]"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "A keeps full rewrite power but makes changing someone else's code a choice you can see. One line per package is cheap, and the lock already pins what it covers.",
-        "gains": [
-          "No silent changes to code you did not write."
-        ],
-        "losses": [
-          {
-            "loss": "A dependency update can change what a rewrite touches.",
-            "mitigation": "The lock change shows in review, and the meta lens lists every rewritten function by package."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B lets any library you hand the value to change any dependency, with no line saying so."
-          },
-          {
-            "key": "C",
-            "reason": "C makes you copy hashes and function lists by hand, and every update breaks them."
-          }
-        ],
-        "tradeoff": "One line per rewritten package, in exchange for no silent changes to other people's code."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 4,
-      "reviewPasses": null,
-      "checkInstructions": null,
-      "surface": {
-        "gist": "Should a build need one line naming a dependency before tools may rewrite that dependency's functions?",
-        "lesson": "A rewrite replaces the body of a written function. Your build may let a library rewrite your own code. A rewrite could also reach a dependency, such as a database library, whose code you never read. The lock file already pins each dependency's exact contents.",
-        "trio": {
-          "current": {
-            "note": "Nothing can rewrite yet. The written rule, not yet built, lists each target with a hash and function names.",
-            "code": "// package.jet\nmetaprogramming_targets: [\n    { package: \"orm\", source_digest: \"sha256:9c1f...\", declarations: [\"orm.query\"] }\n]"
-          },
-          "wild": {
-            "lang": "Jai",
-            "note": "Jai lets any metaprogram modify any procedure, from any module. Source: The Way to Jai, chapter 30.",
-            "code": "if msg.kind == .TYPECHECKED {\n    // procedures from every imported module arrive here\n    // compiler_modify_procedure(...) may change any of them\n}"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Name the package in the build",
-            "gist": "Rewriting a dependency needs one line in your build naming that package.",
-            "gains": [
-              "You see and approve every package whose code changes.",
-              "The lock already pins what the line covers."
-            ],
-            "losses": [
-              "One extra line per rewritten package."
-            ],
-            "proposed": {
-              "code": "meta :: b.compiler(app)\nmeta.allow_rewrite(package: \"orm\")\ntrace.install(meta, marked: Traced)\n// without the line:\n// error: trace.install tried to rewrite `orm.query` in package orm"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Allowed by default",
-            "gist": "A library you hand the value to may rewrite any package, as in Jai.",
-            "gains": [
-              "Nothing to write; closest to Jai."
-            ],
-            "losses": [
-              "Code you never read can change silently.",
-              "Review cannot see which packages are touched."
-            ],
-            "proposed": {
-              "code": "meta :: b.compiler(app)\ntrace.install(meta, marked: Traced)   // may also rewrite orm, http..."
-            }
-          },
-          {
-            "key": "C",
-            "name": "Keep exact records",
-            "gist": "The package file lists each target with its hash and functions.",
-            "gains": [
-              "Grants exact functions, not whole packages."
-            ],
-            "losses": [
-              "Hashes and function lists are copied by hand.",
-              "Every dependency update breaks the record."
-            ],
-            "proposed": {
-              "code": "metaprogramming_targets: [\n    { package: \"orm\", source_digest: \"sha256:9c1f...\", declarations: [\"orm.query\"] }\n]"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A keeps full rewrite power but makes changing someone else's code a choice you can see. The lock already pins what the line covers.",
-          "gains": [
-            "No silent changes to code you did not write."
-          ],
-          "losses": [
-            {
-              "loss": "A dependency update can change what a rewrite touches.",
-              "mitigation": "The lock change shows in review, and the meta lens lists rewritten functions by package."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B lets a library change any dependency with no line saying so."
-            },
-            {
-              "key": "C",
-              "reason": "C needs hashes copied by hand, and every update breaks them."
-            }
-          ],
-          "tradeoff": "One line per rewritten package, for no silent changes to other people's code."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-22T15:29:06.990Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-22"
-    },
-    {
-      "id": "D-META-HOLD1",
-      "cardId": "c04pd50v",
-      "group": "safety",
-      "title": "The power to create a Compiler value is named once in the package file",
-      "situation": "",
-      "gist": "Must a project name compiler control in its package file before its build can create a Compiler value, or is it on by default?",
-      "lesson": "Every package file has one `authority` block that lists the powers the package holds, such as network access. Ordinary powers are on unless denied. Expert powers are off until the project names them, and the trust prompt shows that change when you open a cloned project. The question is which kind the power to control the compiler should be.",
-      "explainer": "",
-      "story": "Theo clones a game project and opens it. Its build creates a compiler value and rewrites hundreds of functions. Under option A, the clone's package file names that power, so the trust prompt shows it before anything runs, and CI fails with the exact line if it is missing. Under option B, nothing outside the build file says so, and Theo learns about it only if he reads that file.",
-      "inWild": "Rust: a crate can refuse a power at its root with `#![forbid(unsafe_code)]`, one visible line. Source: https://doc.rust-lang.org/reference/attributes/diagnostics.html#lint-check-attributes\n\nDeno: programs get no file, network or subprocess access unless a flag or config names it. Source: https://docs.deno.com/runtime/fundamentals/security/\n\nJai: every metaprogram may drive the compiler, with no grant at all. Source: The Way to Jai, chapter 30, https://github.com/Ivo-Balbaert/The_Way_to_Jai",
-      "detail": "Provenance: the owner approved the proposal on build programs and compiler events (Docs/proposals/build-programs-and-compiler-events-2026-10-22.md) and asked the author to pick the default from Jet's goals: beginner safety, auditability and pragmatism. The proposal leaned toward on-for-the-application. This ballot recommends the opposite, for the reasons below.\n\nSpelling: the proposal wrote a TOML-style `[meta]` table with `compiler = \"none\" | \"root\" | \"any\"`. Jet's package file is Jet record syntax, and D-AUTHORITY-MANIFEST1=A puts every power in one `authority` block. So option A is the proposal's `none` and option B is its `root`. The proposal's `any` is not offered: D-META-COMPILER1 lets only the application's build create the value.\n\nWhy A. Beginner safety: a beginner never sees compiler control unless a tutorial asks for it, and then the error prints the one line. Auditability: the trust prompt, CI and an organization file all read the package file, not build code. Pragmatism: the cost is one line, once per project, which the error prints and `jet fix` can add.\n\nWhy not double gating: `b.compiler(app)` is the use, not a second gate. The package line is the only permission. That matches D-META-OPTIN2=A, where the owner chose a package-level opt-in over a package-plus-every-run opt-in.\n\nUnder A no ruling is replaced: it confirms D-JAI-EXPERT1=A for `Meta.Code` as D-META-COMPILER1 redefines it. Under B, D-JAI-EXPERT1's expert flag is removed from `Meta.Code` for the main package, and D-META-OPTIN2's rule that omission means standard mode is reversed.\n\nRelated: D-META-CROSSPKG1 decides whether rewriting a dependency needs a further line in the build. D-TRUST-LAUNCH1=A already excludes expert leaves from one-run approval, so `--trust` never turns this on.\n\nProfile: short. One mechanism, two options, no new syntax; the `authority` block and `Meta.Code` already exist in ratified law.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Named once in the package file",
-          "detail": "Compiler control stays an expert power. A project turns it on with one line in its package file: `authority: { holds: { allow: [Meta.Code] } }`. Without that line, `b.compiler(app)` stops with an error that prints the line to add.\n\nAdding the line is a project-policy change, so the trust prompt shows it when someone opens a cloned project, and CI fails with the line instead of prompting. A beginner who never asks for compiler control never sees any of this.",
-          "technical": "Confirms D-JAI-EXPERT1=A for the `Meta.Code` node under D-META-COMPILER1: `$expert`, never held by default, only the main package may hold it, approved only through a project-policy edit. Holding `Meta.Code` holds its children `Rewrite`, `Raw` and `Types`; naming only `Meta.Code.Rewrite` is not enough to create the value.\n\n`b.compiler(output)` performs `Meta.Code` and must be written in the main package's own source, so this one line governs every value. If the main package does not hold it, the call fails with a registered error whose fix is the exact `authority` line, machine-applicable through `jet fix` in an interactive edit. Organization and team files may still deny any Meta leaf, and the outermost refusal wins.",
-          "code": "// package.jet\nname: \"game\"\nauthority: { holds: { allow: [Meta.Code] } }\n\n// @build.jet\nfn build(b: Build) {\n    app :: b.add_executable(\"game\", find(\"Source/**/*.jet\"))\n    trace.install(b.compiler(app), marked: Traced)\n    b.default(app)\n}\n\n// without the authority line:\n// error: `b.compiler` needs Meta.Code, which package game does not hold\n//   fix: add `authority: { holds: { allow: [Meta.Code] } }` to package.jet"
-        },
-        {
-          "key": "B",
-          "name": "On for the application",
-          "detail": "The application's own build may create a compiler value with no package-file line. Dependencies still never can. A team that does not want it writes `authority: { holds: { deny: [Meta.Code] } }`.",
-          "technical": "Removes `$expert` from the `Meta.Code` node and its children for the main package only, so the main package holds them unless denied. Dependencies still cannot hold them. This amends D-JAI-EXPERT1=A for that node, and the meaning of omission in D-META-OPTIN2=A.",
-          "code": "// package.jet: no line needed\nname: \"game\"\n\n// @build.jet\nfn build(b: Build) {\n    trace.install(b.compiler(b.add_executable(\"game\", find(\"Source/**/*.jet\"))), marked: Traced)\n}\n\n// a careful team opts out instead:\nauthority: { holds: { deny: [Meta.Code] } }"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Rust",
-          "note": "One line at the crate root changes what the whole crate may do, and review sees it. Source: https://doc.rust-lang.org/reference/attributes/diagnostics.html#lint-check-attributes",
-          "code": "#![forbid(unsafe_code)]"
-        },
-        {
-          "lang": "Deno",
-          "note": "Powers are off until a flag or config names them, and the error names the missing permission. Source: https://docs.deno.com/runtime/fundamentals/security/",
-          "code": "$ deno run main.ts\nerror: Uncaught (in promise) NotCapable: Requires net access to \"example.com:443\", run again with the --allow-net flag\n$ deno run --allow-net=example.com main.ts"
-        },
-        {
-          "lang": "Jai",
-          "note": "Any metaprogram may drive the compiler; there is no grant to write or review. Source: The Way to Jai, chapter 30, https://github.com/Ivo-Balbaert/The_Way_to_Jai",
-          "code": "#run build();   // build() may intercept and modify the whole program"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "Rewriting a whole program is the strongest power Jet offers. One package-file line makes it visible to the trust prompt, CI and reviewers, and costs an expert one line, printed by the error.",
-        "gains": [
-          "A cloned project cannot rewrite code without the trust prompt showing it.",
-          "One rule for every expert power."
-        ],
-        "losses": [
-          {
-            "loss": "An expert writes one more line before the first use.",
-            "mitigation": "The error prints the exact line, and `jet fix` can add it."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B lets a cloned project rewrite its code with nothing outside the build file saying so."
-          }
-        ],
-        "tradeoff": "One line per project, in exchange for compiler control that is always visible and approved."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 4,
-      "reviewPasses": null,
-      "checkInstructions": null,
-      "surface": {
-        "gist": "Must a project name compiler control in its package file before its build can use it?",
-        "lesson": "Every package file has one `authority` block listing the powers the package holds. Ordinary powers are on unless denied. Expert powers are off until named, and the trust prompt shows that change when you open a cloned project. Which kind should compiler control be?",
-        "trio": {
-          "current": {
-            "note": "Nothing can create a compiler value yet. The written rule, not yet built, names expert powers like this.",
-            "code": "// package.jet\nauthority: { holds: { allow: [Meta.Code.Rewrite, Meta.Host] } }\n// a dependency that needs one:\n// error: `ecs` needs Meta.Code.Rewrite"
-          },
-          "wild": {
-            "lang": "Rust",
-            "note": "One line at the crate root sets what the whole crate may do. Source: Rust reference, lint attributes.",
-            "code": "#![forbid(unsafe_code)]"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Named once in the package file",
-            "gist": "Compiler control stays an expert power; one package-file line turns it on.",
-            "gains": [
-              "The trust prompt and CI show it in cloned projects.",
-              "The same rule as every other expert power."
-            ],
-            "losses": [
-              "One line before first use."
-            ],
-            "proposed": {
-              "code": "// package.jet\nauthority: { holds: { allow: [Meta.Code] } }\n// without it:\n// error: `b.compiler` needs Meta.Code, which package game does not hold\n//   fix: add `authority: { holds: { allow: [Meta.Code] } }`"
-            }
-          },
-          {
-            "key": "B",
-            "name": "On for the application",
-            "gist": "The application's build may use it unless the package file denies it.",
-            "gains": [
-              "Nothing to write before first use."
-            ],
-            "losses": [
-              "Cloned projects can rewrite code with no package-file line.",
-              "A second rule beside the other expert powers."
-            ],
-            "proposed": {
-              "code": "// package.jet: nothing needed\n// a careful team opts out:\nauthority: { holds: { deny: [Meta.Code] } }"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Rewriting a whole program is Jet's strongest power. One package-file line makes it visible to the trust prompt, CI and reviewers, and the error prints that line.",
-          "gains": [
-            "A cloned project cannot rewrite code unseen."
-          ],
-          "losses": [
-            {
-              "loss": "An expert writes one more line before first use.",
-              "mitigation": "The error prints the exact line, and `jet fix` can add it."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B lets a cloned project rewrite its code with nothing outside the build file saying so."
-            }
-          ],
-          "tradeoff": "One line per project, for compiler control that is always visible and approved."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-22T15:29:08.781Z",
       "outcome": "A",
       "ratifiedAt": "2026-10-22"
     },
@@ -135621,6 +135011,299 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-20T05:37:12.212Z"
+    },
+    {
+      "id": "D-DISASM1",
+      "cardId": "c0nwrfck",
+      "group": "tooling",
+      "title": "Machine code in Jet's own tools: list a function's instructions in jet debug and give each its samples in jet perf view",
+      "situation": "Machine code is the list of instructions the processor actually runs. Jet writes that code itself, but none of its tools shows it. At a stop, jet debug shows the source line and has no command that lists the instructions under it. jet perf view says line 7 of fib.jet takes most of the time, and cannot say which instruction of that line does. A developer chasing a slow loop has to reach for gdb or Linux perf, which Jet's rules allow on Jet code only as a recorded stopgap. You decide where Jet shows its machine code. We recommend a disassemble command in jet debug and the editor adapter, plus an --instructions view in jet perf view, both reading one x86-64 decoder.",
+      "gist": "Where should Jet show the machine code it compiled, with each instruction's source line and its share of the samples?",
+      "lesson": "A disassembler turns code bytes back into readable instructions, such as add rax, rbx. Jet's image keeps a line table: for each instruction address, the source line it came from. A sampling profiler notes which instruction was running, up to 8,000 times a second of CPU time. Annotating prints each instruction with the share of those samples it took, under its source line. That is what Linux perf annotate shows.",
+      "explainer": "Beginner path: run jet debug fib.jet, stop on a line, and type disassemble (or disas). The listing shows the function's instructions in address order. Each run of instructions sits under the source line it came from, and an arrow marks where the program stopped. In a profile, run jet perf run fib.jet, then jet perf view TRACE --instructions. That opens the hottest function, each instruction with its share of the function's samples.\n\nExpert path: disassemble NAME lists a Jet function by the name break takes, or any other symbol in the image, such as a runtime routine or a linked C function. A name several functions share lists each in turn. disassemble FILE:LINE or FILE:A-B lists only those lines' instructions, including pieces the optimizer moved away. --bytes adds the encoded bytes.\n\njet perf view --instructions=fib.jet:7 opens one line, --instructions=fib one function, and --json gives the rows. Editors get the Debug Adapter Protocol's disassemble request, so VS Code's Disassembly view opens at the stop.\n\nStepping one instruction (stepi) and breaking at an instruction are not on this ballot. The criterion asks to see the code. Stepping changes how a stop is reached, which touches placed conditions, replay and fix, so it needs its own ballot.\n\nEvery native level works the same way. jet debug builds a source file at -O0. A built -O1 or -O2 image is debugged as it is, through its side debug file when the release profile split one out. jet perf run takes -O0, -O1 and -O2. Crash dumps, replays and attached programs list code too, since each holds its image.\n\nRefusals are named. A browser trace has no instruction samples, so --instructions on one gets Jet.PerfNoInstructions, which says to profile the native build. A line with no sampled code, or a function whose code the trace cut, gets the same name and lists the trace's hottest lines. --instructions beside --retained-by, or on a pprof or OTLP export, gets Jet.UnknownFlag, as --retained-by does today. Each exits with status 2.\n\nIn the console, a name that matches nothing prints No function, and a line without code prints No code on, as break does.\n\nWhat the listing shows is the program's own code. A breakpoint's trap byte is shown as the instruction it covers, marked with the breakpoint's number. A condition that runs in place, through a jump to code the debugger placed, is marked the same way. The debugger's own code, a placed condition's or the room an evaluation runs from, is never listed as the program's; the adapter names it [debugger]. After fix, the listing shows the new code that runs and says where the old entry now jumps.\n\nA zone site is shown as it is now: test while zones are off, jmp to its stub while a profiler records them. A crash dump keeps the image, not the live code, so it shows each site as the image holds it.\n\nIn an inlined frame, disas lists the function the code was inlined into and marks the inlined run. The header names where each local lives at the stop, from the image's location lists. Runtime routines and linked C code with no Jet line are listed by symbol and offset alone.\n\nAn image built with debug_info false has no line table, and jet debug refuses it today with Jet.DebuggerUnavailable; that stays. A trace keeps the code that ran. So a trace whose program was rebuilt still lists the old code, and its source lines carry the note the view prints today when a file changed since the capture.\n\nOn the web tier the browser compiles the WebAssembly module to machine code that Jet never sees, and no Jet debugger runs there. Chrome DevTools lists the module's WebAssembly instructions through the source map Jet already writes. This is tooling, not a language meaning, so it needs no I9 exception.",
+      "story": "Mia's fib.jet is slower at -O2 than she expected. jet perf view says line 7 takes most of the time, so she runs it again with --instructions=fib.jet:7. Most of the line's samples sit on the two calls, and a few on the overflow check after the add. She opens jet debug on the built image, breaks on line 7 and types disas. The listing shows the line's code with her breakpoint marked, and both calls are still real calls.",
+      "inWild": "// gdb: stop in fib, then list its code under its source lines.\n(gdb) break fib\n(gdb) run 35\n(gdb) disassemble /s\n// Linux perf: record the run, then annotate the hottest function.\n$ perf record ./fib 35\n$ perf annotate --stdio fib",
+      "detail": "Code read on dev f2cf0a8324. Probed on 2026-11-20 with the gate-p345 compiler on Tests/Cases/JetPerfTracePartsCaptureRun/Fixtures/Fib/fib.jet. The console's commands are NATIVE_DEBUG_HELP (Compiler/JetDebug/Source/Native.jet:5806), and a crash dump's are NATIVE_DUMP_HELP (NativeDump.jet). None lists code: disassemble and disas both print Unknown command (probe). break NAME finds a function in the image's line table only (break_in, Native.jet:582), and prints No function or No code on when it finds none (Native.jet:2682, 2693).\n\nThe adapter advertises no disassemble support (Compiler/JetCLI/Source/CLI/DebugDap.jet:178). D-DBG-DAP1 records disassembly as truthfully unsupported, and its default projection shows no addresses (Docs/Spec/syntax-decisions.md:7545-7550); A replaces that line for the disassemble request. Only showRawFrames frames carry an instructionPointerReference (DebugDap.jet:751).\n\nThe image's .debug_jetline gives each function's code range and its address-to-line rows (Compiler/JetBackend/Source/Image/Jetline.jet). NativeFacts.jet reads the DWARF's inlined runs, call sites and .debug_loclists. The release profile's debug_info split writes them and the symbol table to <image>.debug and .jet/symbols/.build-id/ (Compiler/JetFoundation/Source/Registry/BuildOptions.jet:65-71).\n\njet debug reads that side file (native_image_load, Native.jet:401). An image with no Jet debug information is refused with Jet.DebuggerUnavailable (Native.jet:552). A .jetdump holds the whole image (Compiler/JetDebug/Source/NativeDump.jet).\n\nThe debugger already decodes instruction lengths, to move the instructions a placed condition's 5-byte jump covers (native_decode, Compiler/JetDebug/Source/NativePlace.jet:251). It reads legacy and VEX forms and gives up on EVEX, 3DNow!, 16-bit branches, loop and jrcxz. It names no instruction. Jet's WebAssembly side keeps one instruction table that its decoder, text reader and validator all read (Compiler/JetWasm/Source/Wasm/Opcodes.jet).\n\nThe encoder writes the integer and control subset, SSE and VEX FMA forms (Compiler/JetBackend/Source/X64/Encoder.jet). Only its ALU and shift groups are checked, while the compiler builds, against the template assembler's 53 mnemonics (Encoder.jet:21-23, Compiler/JetFoundation/Source/Facts/InlineAssembly.jet:284).\n\nImages also hold code Jet's encoder never wrote. The fault report is bytes assembled from report.S (Compiler/JetBackend/Source/Image/StaticLink.jet:1553-1557). The asm leaves of X64/IntSum.jet, Fill.jet and Count.jet are written as bytes. link_args admits .a archives built by a C compiler (BuildOptions.jet:883-888). Fifteen files under Tests run objdump on Jet's code today, such as Tests/Cases/Debug/objdump_disassembles_main_from_text_section.case.\n\nThe session keeps the program's own byte under every trap byte and placed jump (originals, Native.jet:1566). fix maps changed functions into a debugger region and makes each old entry jump to its new code (NativeFix.jet). Evaluations run from a room the session maps in the program (NativeEval.jet). A zone site is test eax, imm32 in the image, and the runtime turns it into jmp while zones record (Compiler/JetIR/Source/X64Select.jet:1912-1923).\n\nA perf session reads raw program counters and an image copy, resolves them to lines, then deletes both (Compiler/JetCLI/Source/CLI/Perf/SourceSampling.jet:406). The trace keeps one row per function and source line (TraceProfileRow, Compiler/JetFoundation/Source/Trace/Carriers.jet:52), at most 4096 rows, and no code.\n\nThe trace format is version 2, and the reader refuses any other (Trace/JetTrace.jet:6, 80-88). The text view shows at most 24 line rows (Perf/Command.jet:1855) and notes a source that changed since the capture (Perf/LineCosts.jet:58). Every jet perf view refusal is Jet.UnknownFlag with exit 2 (jet_cli_perf_error, Perf/Command.jet:69).\n\nThe receipt names the sampler and its skid (SourceSampling.jet:532). IBS and PEBS name the instruction that ran, and the runtime picks one only where perf_event_paranoid is at most 1 (Compiler/JetRuntime/Source/PerfSamples.jet:10-13). Otherwise the task clock or the timer lands on the instruction it interrupted, which skids past the slow one. The timer asks for a sample every 125 microseconds of CPU time (PerfSamples.jet:79). jet perf run takes -O0, -O1 and -O2 (Tests/Cases/Perf/game_frame_events.case).\n\nA web build writes a WebAssembly module with a source map (Compiler/JetWeb/Source/Web/Build.jet:117-129). A browser trace holds timed spans of class event, wasm or dom, and no samples (Perf/BrowserCapture.jet:133). Canvas's profile answer lists at most 64 hot lines (Docs/Spec/Reference/canvas-protocol.md:375-402), and Canvas's native tier speaks the same console (Native.jet:5802).\n\njet emit prints the AST and the O0 IR (Compiler/JetCLI/Source/CLI/Emit.jet); its -O2 is refused with Jet.UnknownFlag, exit 2 (probe). Under A a built image's code at any level is listed with disas NAME at the entry stop, so emit gains no --asm. IR at -O1 and -O2 is a gap of jet emit, outside this criterion. This ballot is c95 of #6841.",
+      "options": [
+        {
+          "key": "A",
+          "name": "List code in the debugger and annotate it in the profile view",
+          "detail": "jet debug gains disassemble (disas), and the editor adapter answers the disassemble request. jet perf view gains --instructions. All read one x86-64 decoder and the image's line table, through one listing builder. Listings show the live program, with breakpoints marked over the program's own instructions. Profiles keep the code of their hottest sampled functions, so the view needs no image later. Nothing steps by instruction.",
+          "technical": "Decoder: one x86-64 decoder table in JetBackend covers the user-mode legacy, VEX and EVEX encodings. The encoder and the template assembler are unchanged. A test decodes every form the encoder's tests write, every template-assembler mnemonic, the asm leaves' bytes and the fault report's bytes. It checks each against its own name.\n\nThe same test compares every table row's text with objdump -M intel's, when the tool is present, as fifteen test files run objdump today. The placer's native_decode becomes a call into the decoder, so the debugger keeps one decoder, and the placer's tests pass unchanged. Bytes that decode to nothing show as (bad), one byte at a time, as objdump does.\n\nListing: one builder turns code bytes, the line table, the symbol table and the marks into rows. A row holds the address, offset, bytes, text, the symbol a call or jump reaches, the source line and the marks. The console, the adapter, jet perf view and Canvas only format these rows.\n\nConsole: disassemble [NAME | LINE | FILE:LINE | FILE:A-B] [--bytes], also disas, in jet debug and in a crash dump's console. With no operand it lists the selected frame's function and marks that frame's pc with =>. A line header repeats each time the line changes in address order, as gdb's /s does.\n\nCall targets are named, such as <fib> or <jet_int_add>. Bytes are read from the program, with originals() put back under trap bytes and placed jumps; a crash dump reads them from its image. NAME is looked up as break looks it up, then in the image's symbol table. Answers: No function `NAME`, and No code on FILE:LINE.\n\nAdapter: supportsDisassembleRequest becomes true, and every Jet frame gets an instructionPointerReference. disassemble answers address, bytes, text, symbol and the source line. An address outside any code answers presentationHint invalid, as the protocol asks; an address in the debugger's own code answers its rows under the symbol [debugger]. Stepping granularity and instruction breakpoints stay unsupported, so VS Code steps by line from its Disassembly view.\n\nTrace: the format becomes version 3, with an instructions section. It keeps each sampled function, hottest first, up to 1 MiB of code per trace. Each keeps its symbol, level, link address, code bytes and address-to-line rows. It also keeps the names its calls and jumps reach, and one row per sampled instruction: offset, samples and counter events. A function past the cap is marked cut.\n\nData, strings and values are never kept, pprof and OTLP exports carry no code, and the receipt counts the functions and bytes kept. A version 2 trace is refused as an older format, as the reader refuses old versions today, and the seven committed fixture traces move with it.\n\nView: jet perf view TRACE --instructions[=NAME|FILE:LINE] [--json|--html]. The value takes =, since a bare word after the flag is the trace path; bare, it opens the hottest function. Shares are each instruction's share of its function's samples, as perf annotate gives them, with a column per counter the memory lens captured.\n\nThe header names the sampler. Under the task clock or the timer it says the shares skid, and that precise samples need perf_event_paranoid at most 1. Jet.PerfNoInstructions is registered with its what, why, fix and snapshot. Canvas's debug console accepts disassemble, since it speaks the same console, and its profile request takes instructions with a line or function and answers the same rows.",
+          "code": "// fib.jet, unchanged. The listing is illustrative: A is not built.\n$ jet build -O2 fib.jet\n$ jet debug .jet/build/fib -- 35\n(Jet) break fib.jet:7\nBreakpoint set  fib.jet:7\n(Jet) continue\nBreakpoint hit  fib.jet:7  in fib()\n7 |     fib(n - 1) + fib(n - 2)        <- here\nLocals:  n = 35\n(Jet) disas\nfib  fib.jet:5-8  -O2  0x401a30, 76 bytes\n  at the pc: n in rbx\nfib.jet:6   if n < 2 -> return n\n       0x401a30 <+0>    push   rbx\n       0x401a31 <+1>    mov    rbx, rdi\n       0x401a34 <+4>    cmp    rdi, 2\n       0x401a38 <+8>    jl     0x401a6a <+58>\nfib.jet:7   fib(n - 1) + fib(n - 2)\n=> b1  0x401a3a <+10>   lea    rdi, [rbx-1]\n       0x401a3e <+14>   call   0x401a30 <fib>\n       0x401a43 <+19>   push   rax\n       0x401a44 <+20>   lea    rdi, [rbx-2]\n       0x401a48 <+24>   call   0x401a30 <fib>\n       0x401a4d <+29>   pop    rcx\n       0x401a4e <+30>   add    rax, rcx\n       0x401a51 <+33>   jo     0x401a70 <+64>\n       0x401a53 <+35>   pop    rbx\n       0x401a54 <+36>   ret\n       ...\n(Jet) disas --bytes fib.jet:7\nfib.jet:7   fib(n - 1) + fib(n - 2)\n=> b1  0x401a3a <+10>   48 8d 7b ff   lea    rdi, [rbx-1]\n       ...\n// b1's trap byte shows as the 48 it covers, never as cc.\n(Jet) disas nope\nNo function `nope`\n\n// The profile of the same program:\n$ jet perf run -O2 fib.jet -- 35\n$ jet perf view .jet/perf/1795089901-a41b55f6.jettrace --instructions=fib.jet:7\nfib profile:cpu samples=3012 share=97% level=O2; shares below are of fib's samples\nsampler: pebs, precise: each sample names the instruction that ran\n  fib.jet:7 fib samples=2590 share=86%\n   0.6%   +10   lea    rdi, [rbx-1]\n  33.1%   +14   call   0x401a30 <fib>\n   2.0%   +19   push   rax\n  29.8%   +24   call   0x401a30 <fib>\n   4.1%   +30   add    rax, rcx\n   6.3%   +33   jo     0x401a70 <+64>\n   ...\n// Under the task clock the sampler line reads:\n// sampler: task_clock, skid: a share can sit on an instruction after the one that spent the time; precise samples need perf_event_paranoid at most 1\n\n// A browser trace, exit 2:\n$ jet perf view web.jettrace --instructions\nError: Jet.PerfNoInstructions: `web.jettrace` keeps no instruction samples\n Why: a browser trace holds timed spans; the browser samples none of the module's code for Jet\n Fix: profile the native build: `jet perf run -O2 main.jet`\nMore: jet-lang.dev/e/Jet.PerfNoInstructions\n\n// VS Code: at a stop, Open Disassembly View lists the same rows.\n// Stepping there steps by line: instruction stepping is not on this ballot."
+        },
+        {
+          "key": "B",
+          "name": "One inspect command outside the debugger",
+          "detail": "A new jet inspect asm lists a function or a line of a source file or built image, with its source lines. Given a trace, it adds each instruction's share. For a web build it lists the WebAssembly module's instructions. jet debug and the editor adapter gain nothing, so a stopped program's code is read from its image in another terminal.",
+          "technical": "jet inspect asm <file.jet|image> [NAME|FILE:LINE] [-O0|-O1|-O2] [--target web] [--trace T.jettrace] [--bytes] [--json]. A source file is built at the level given, -O0 by default. The same x86-64 decoder as A and the same instructions section in the trace are needed, since a trace must keep sampled code to annotate it.\n\nFor --target web it prints the module through Jet's WebAssembly instruction table, each instruction under its source-map line. It reads the image file, never a running program, so trap bytes, fix and live zone sites are not shown, and no pc is marked. The adapter keeps disassembly unsupported.",
+          "code": "// fib.jet, unchanged. Illustrative.\n$ jet inspect asm fib.jet fib -O2\nfib  fib.jet:5-8  -O2  76 bytes\nfib.jet:6   if n < 2 -> return n\n    +0    push   rbx\n    ...\nfib.jet:7   fib(n - 1) + fib(n - 2)\n    +14   call   fib\n    ...\n$ jet inspect asm fib.jet fib.jet:7 -O2 --trace .jet/perf/1795089901-a41b55f6.jettrace\n  33.1%   +14   call   fib\n$ jet inspect asm fib.jet fib --target web\nfib.jet:7\n    local.get 0\n    i64.const 1\n    i64.sub\n    call 3 <fib>\n// At a jet debug stop: run it in a second terminal on the same image.\n// It cannot mark the stop or show the debugger's breakpoints."
+        },
+        {
+          "key": "C",
+          "name": "A compiler listing from jet emit",
+          "detail": "jet emit, which prints the AST and IR today, gains --asm. It prints each function as the compiler's emitter writes it, with source-line comments, like Compiler Explorer or gcc -S. For a web build it prints the WebAssembly text. Nothing runs, so no stop is marked and no samples are shown. The debugger, the profile view and the adapter gain nothing.",
+          "technical": "jet emit --asm <file.jet> [--fn NAME] [-O0|-O1|-O2] [--target web] [--json]. The encoder already logs part of what it writes for one function (JET_X64_EMIT_LOG: jumps, calls, memory operands, divisions and string copies). --asm extends that log to every instruction and prints every function's rows after branch relaxation, with local labels for jump targets. No decoder is built: the emitter names what it writes.\n\nThe asm leaves (X64/IntSum.jet and its siblings) are written as bytes, so they print as .byte rows. The runtime pack, the fault report and linked C archives are not listed, since the program's compile never emits them. jet emit --ir must take -O1 and -O2 too, for the levels to match.",
+          "code": "// fib.jet, unchanged. Illustrative.\n$ jet emit --asm -O2 fib.jet --fn fib\nfn fib  fib.jet:5\n  ; fib.jet:6  if n < 2 -> return n\n  push   rbx\n  mov    rbx, rdi\n  cmp    rdi, 2\n  jl     .L2\n  ; fib.jet:7  fib(n - 1) + fib(n - 2)\n  lea    rdi, [rbx-1]\n  call   fib\n  ...\n$ jet emit --asm --target web fib.jet --fn fib   # the WebAssembly text\n// No sample shares, and no listing at a jet debug stop."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "lldb",
+          "note": "disassemble lists the current frame, a function by name or an address range, with --mixed for source lines and -b for bytes. It decodes every x86-64 form through LLVM, and its VS Code adapter answers the disassemble request. This is A's shape in the debugger; lldb has no sample shares.",
+          "code": "(lldb) disassemble --frame --mixed\n(lldb) disassemble --name fib --bytes\n(lldb) si"
+        },
+        {
+          "lang": "gdb",
+          "note": "disassemble /s interleaves source lines in address order and marks the pc with =>. /r adds bytes, and layout asm keeps the code on screen while stepping with stepi. Its decoder covers the whole instruction set on many architectures, and record lets it step back by instruction. A's listing follows /s; A adds no instruction stepping.",
+          "code": "(gdb) disassemble /s fib\n(gdb) stepi\n(gdb) layout asm"
+        },
+        {
+          "lang": "Linux perf annotate",
+          "note": "It prints each instruction's share of a function's samples, with source lines when the binary has DWARF, and its TUI follows jumps and calls. Any hardware event can be annotated, such as cache misses, on any binary on the machine, the kernel included. It needs the binary at report time, through its build-id cache. A's trace keeps the sampled code instead, and annotates Jet programs only.",
+          "code": "$ perf record -e cycles:pp ./fib 35\n$ perf annotate --stdio -s fib"
+        },
+        {
+          "lang": "Tracy",
+          "note": "Its source view opens a function's assembly beside the source, with sample counts per instruction and arrows for jumps. It adds per-instruction latency and throughput from uops.info tables, and decodes with Capstone. That cycle-cost column is something A does not offer.",
+          "code": "// Tracy: click a hot zone, then Source > Assembly.\nZoneScopedN(\"tick\");"
+        },
+        {
+          "lang": "Superluminal",
+          "note": "Its source and disassembly view shows per-line and per-instruction sample shares for the function you select, after the capture ends. It is A's profile half in a desktop window.",
+          "code": "// Superluminal: open a function, then Source & Disassembly."
+        },
+        {
+          "lang": "RemedyBG",
+          "note": "A fast Windows debugger whose disassembly window interleaves source and steps one instruction while that window has focus. It is A's debugger half; it has no profiler.",
+          "code": "// RemedyBG: View > Disassembly; F10 steps one instruction there."
+        },
+        {
+          "lang": "Compiler Explorer",
+          "note": "It compiles a snippet with many compilers and flags and colors each source line with its assembly. Its best case is comparing two compilers or levels side by side, viewing the optimizer's passes, and sharing a link. It never runs your program under a debugger or shows samples. This is C's shape.",
+          "code": "// godbolt.org: paste fib, pick a compiler and -O2.\nint fib(int n) { return n < 2 ? n : fib(n - 1) + fib(n - 2); }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A puts machine code where the questions are asked: at the stop and on the hot line. It gives gdb's listing and perf annotate's shares through one decoder, one line table and one listing builder. Because the trace keeps the sampled code, a profile can be annotated later on any machine, even after a rebuild.",
+        "gains": [
+          "The code at a stop is listed in place, with the stop and breakpoints marked.",
+          "A hot line's instructions carry their sample shares, as perf annotate gives them.",
+          "VS Code's Disassembly view works through the adapter.",
+          "One decoder serves the debugger's placed conditions and both listings, and the encoder is untouched.",
+          "Every native level, crash dumps, replays and attached programs list code the same way."
+        ],
+        "losses": [
+          {
+            "loss": "A full x86-64 decoder is a large table to write and keep correct.",
+            "mitigation": "The encoder stays as it is. A test decodes every form Jet writes back to its own name and compares every row with objdump's text, so a wrong row fails Jet's tests before it reaches a listing. The placer's length decoder is replaced, so the debugger still has one decoder."
+          },
+          {
+            "loss": "Traces grow by the code of their hottest functions, and the trace format moves to version 3.",
+            "mitigation": "At most 1 MiB of code per trace, hottest first, with a cut marked. The trace then needs no image to annotate, which perf needs its build-id cache for. Old traces are recaptured, as each format change already asks."
+          },
+          {
+            "loss": "A shared trace shows the machine code of its hot functions.",
+            "mitigation": "Only code is kept, never data, strings or values: bytes the built image already holds. pprof and OTLP exports carry none, and the receipt counts what is kept."
+          },
+          {
+            "loss": "With the task clock or the timer, a share can land on an instruction after the slow one.",
+            "mitigation": "PEBS or IBS is used whenever the kernel allows it. Otherwise the header says the shares skid and how to allow precise samples. Line shares are unchanged."
+          },
+          {
+            "loss": "The web tier gets no listing.",
+            "mitigation": "The browser compiles the module itself and samples none of it for Jet, so no Jet listing could be true there. Jet.PerfNoInstructions says so, and DevTools reads Jet's source map."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It cannot list the code of a stopped program, mark the stop or show breakpoints, which is half of the criterion. It still needs A's decoder and trace change, and adds a second place to look."
+          },
+          {
+            "key": "C",
+            "reason": "It shows what the compiler meant to write, not what runs: no runtime, no fault report, no linked C code and no samples. It answers Compiler Explorer's question and neither of the criterion's. Under A, -O2 code is read without running anything past the entry stop: build, open jet debug on the image, and disas NAME."
+          }
+        ],
+        "tradeoff": "One decoder table and a bounded bigger trace, for machine code at every stop and on every hot line, in Jet's own tools."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Under A: a new case, Debug/disassemble_marks_stop_and_breakpoint.case, builds fib.jet at -O0, -O1 and -O2. At a breakpoint on line 7 it runs disas, then checks the => line, the b1 mark and a fib.jet:7 header. With --bytes it checks that no cc byte appears at b1's address, and disas nope prints No function `nope`.\n\nA second case lists disas jet_int_add, a runtime routine, by symbol and offset. A third opens a .jetdump and checks disas lists the stopped function from its image. A decoder test decodes every encoder form, the template assembler's mnemonics, the asm leaves and the fault report's bytes, and checks no (bad) row appears. It also compares every table row with objdump -M intel when the tool is present.\n\nA perf case runs jet perf run -O2 fib.jet, then jet perf view --instructions=fib.jet:7. It checks that the shares of the line's instructions sum to the line's share of fib within rounding, and that the sampler line is present. A browser trace checks Jet.PerfNoInstructions and exit 2, and a version 2 trace the older-format refusal. An adapter case sends disassemble at a stop and checks the instruction at the frame's instructionPointerReference.\n\nUnder B: the same perf case through jet inspect asm --trace. Under C: jet emit --asm -O2 fib.jet --fn fib prints a fib.jet:7 comment.\n\nEvidence labels: current behavior is read from code on dev f2cf0a8324. The Unknown command answers and jet emit's -O2 refusal are from 2026-11-20 probes. No option is built, and every listing and share shown is illustrative. The decoder table's size, the trace growth and how much the 1 MiB cap keeps are not measured.",
+      "surface": {
+        "gist": "Where should Jet show the machine code it compiled, with each instruction's source line and sample share?",
+        "lesson": "A disassembler turns code bytes back into instructions such as add rax, rbx. Jet's image says which source line each instruction came from. Its profiler notes which instruction was running, thousands of times a second. Today no Jet tool lists instructions. A lists them in jet debug and annotates them in jet perf view. B adds one inspect command. C prints the compiler's own listing.",
+        "options": [
+          {
+            "key": "A",
+            "name": "Debugger listing and profile annotation",
+            "gist": "disas at a stop, and --instructions on a hot line in jet perf view.",
+            "gains": [
+              "The code at a stop, with the stop and breakpoints marked.",
+              "Each instruction's share of the samples, like perf annotate.",
+              "VS Code's Disassembly view works."
+            ],
+            "losses": [
+              "A full x86-64 decoder to write and keep.",
+              "Traces keep the code of hot functions, up to 1 MiB."
+            ],
+            "proposed": {
+              "code": "(Jet) disas\nfib.jet:7   fib(n - 1) + fib(n - 2)\n=> b1  0x401a3a <+10>   lea    rdi, [rbx-1]\n       0x401a3e <+14>   call   0x401a30 <fib>\n\n$ jet perf view T.jettrace --instructions=fib.jet:7\n  fib.jet:7 fib samples=2590 share=86%\n  33.1%   +14   call   0x401a30 <fib>\n   4.1%   +30   add    rax, rcx"
+            }
+          },
+          {
+            "key": "B",
+            "name": "One inspect command",
+            "gist": "jet inspect asm lists a function from a file or image, with shares from a trace.",
+            "gains": [
+              "One command, which also lists WebAssembly."
+            ],
+            "losses": [
+              "Nothing at a debugger stop, so half the card is unmet.",
+              "Still needs A's decoder and trace change."
+            ],
+            "proposed": {
+              "code": "$ jet inspect asm fib.jet fib -O2\n$ jet inspect asm fib.jet fib.jet:7 -O2 --trace T.jettrace\n  33.1%   +14   call   fib"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Compiler listing",
+            "gist": "jet emit --asm prints each function as the compiler wrote it.",
+            "gains": [
+              "Cheapest: no decoder.",
+              "Good for comparing optimization levels."
+            ],
+            "losses": [
+              "No stop, no samples: neither half of the card.",
+              "Omits the runtime and linked C code."
+            ],
+            "proposed": {
+              "code": "$ jet emit --asm -O2 fib.jet --fn fib\n  ; fib.jet:7  fib(n - 1) + fib(n - 2)\n  call   fib"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A shows machine code where questions arise: at the stop and on the hot line. One decoder and one line table serve both, and traces keep the sampled code.",
+          "gains": [
+            "Listing at every stop, at every native level.",
+            "Per-instruction sample shares, like perf annotate.",
+            "Works in VS Code through the adapter."
+          ],
+          "losses": [
+            {
+              "loss": "A large decoder table to keep correct.",
+              "mitigation": "The encoder is unchanged; tests decode every form Jet writes and compare every row with objdump."
+            },
+            {
+              "loss": "Traces grow by the hot code, and old traces need recapturing.",
+              "mitigation": "Hottest functions only, at most 1 MiB, never data; no image is needed later."
+            },
+            {
+              "loss": "Timer samples skid to a later instruction.",
+              "mitigation": "Precise samples when the kernel allows; otherwise the header says they skid."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It cannot show a stopped program, yet costs nearly as much."
+            },
+            {
+              "key": "C",
+              "reason": "It shows what the compiler meant, not what runs, and no samples."
+            }
+          ],
+          "tradeoff": "One decoder table and bounded bigger traces, for machine code at every stop and hot line."
+        },
+        "trio": {
+          "current": {
+            "note": "Today the console has no command that lists code, and the profile stops at source lines.",
+            "code": "(Jet) disassemble\nUnknown command `disassemble`. Commands: step (s), next (n), ...\n$ jet perf view T.jettrace\n  fib.jet:7 fib samples=2590 share=86%"
+          },
+          "wild": {
+            "lang": "gdb and Linux perf",
+            "note": "gdb lists a function under its source lines; perf annotate gives each instruction its share.",
+            "code": "(gdb) disassemble /s fib\n$ perf annotate --stdio fib"
+          }
+        }
+      },
+      "designAway": [
+        {
+          "loss": "A decoder written for x86-64 is a second description of the instruction set beside the encoder.",
+          "attempts": [
+            "Decode only the forms Jet's encoder writes: rejected. The fault report's bytes come from report.S, and linked C archives hold any instruction, so a hot loop there would show as bytes.",
+            "Make the encoder and the template assembler read the decoder's table, as Jet's WebAssembly decoder, text reader and validator share one: rejected. The criterion needs no encoder change, and rebuilding the compiler's emitter around a table risks its speed and its code for nothing a user sees.",
+            "Generate the table from Intel's XED data files at build: rejected, it adds an outside data dependency.",
+            "One decoder table, with a test that decodes every form the encoder and the template assembler write back to its own name and compares every row with objdump's text: kept. Encoder and decoder stay inverses, checked against each other.",
+            "Make the placer's native_decode call the new decoder: kept, so the debugger keeps one decoder."
+          ],
+          "result": "One decoder in Jet, checked against every form Jet writes and against objdump, with the encoder untouched."
+        },
+        {
+          "loss": "A profile could not be annotated once the image it ran is gone.",
+          "attempts": [
+            "Keep the image path in the trace and read it at view time, as perf's build-id cache does: rejected, the session deletes its image copy, and a rebuilt image would not match.",
+            "Keep the whole image in the trace: rejected, it grows every trace by the program's size.",
+            "Keep the code bytes, line rows and reached names of each sampled function, hottest first, up to 1 MiB: kept. A function past the cap is marked cut.",
+            "Keep only code, never data, strings or values, and leave it out of pprof and OTLP exports: kept, so a trace shows no more than the image already ships."
+          ],
+          "result": "Any trace is annotated anywhere, from the bytes that ran, at a bounded size."
+        },
+        {
+          "loss": "Debugger edits to the code could appear in the listing as if they were the program's.",
+          "attempts": [
+            "Read the image file instead of the program: rejected, it would miss fix and live zone sites.",
+            "Read the program, and put the session's originals() back under each trap byte and placed jump: kept.",
+            "Mark each such instruction with its breakpoint's number, and list the debugger's own code only under [debugger]: kept."
+          ],
+          "result": "The listing shows what the program runs, with the debugger's changes named, not shown as code."
+        },
+        {
+          "loss": "Timer samples skid, so a share lands on a later instruction.",
+          "attempts": [
+            "Hide shares under the timer: rejected, the user loses the rough picture the line view already gives.",
+            "Move each timer sample back one instruction: rejected, the skid is not always one instruction, so the share would be wrong as often as right.",
+            "Use IBS or PEBS when the kernel allows, and otherwise name the sampler, its skid and how to allow precise samples in the header: kept."
+          ],
+          "result": "With precise samples each share is charged to the instruction that ran; otherwise every share is labelled as skidded."
+        },
+        {
+          "loss": "Optimized code is hard to read: a line's code is scattered and locals move between registers.",
+          "attempts": [
+            "Repeat the line header each time the line changes, as gdb's /s does: kept.",
+            "Name inlined code with the line it was inlined at, and in an inlined frame list the function it was inlined into: kept.",
+            "Name where each local lives at the stop, from the image's location lists: kept."
+          ],
+          "result": "An -O2 listing reads as the -O0 one does, with the optimizer's moves named."
+        },
+        {
+          "loss": "VS Code's Disassembly view steps by line, not by instruction.",
+          "attempts": [
+            "Add stepi, nexti and instruction breakpoints to A: rejected here. The criterion asks to see code; stepping changes how a stop is reached, which touches placed conditions, replay and fix, so it needs its own ballot.",
+            "Answer the disassemble request alone, so the view lists code and VS Code steps by line, as it does for any adapter without stepping granularity: kept."
+          ],
+          "result": "The listing ships whole; instruction stepping stays a separate choice."
+        },
+        {
+          "loss": "The web tier gets no listing.",
+          "attempts": [
+            "List the module's WebAssembly with sample shares: rejected, a browser trace holds no samples, so no share could be true.",
+            "Refuse with Jet.PerfNoInstructions, naming the native build to profile: kept."
+          ],
+          "result": "The web tier is refused by name; DevTools lists the module through the source map Jet writes."
+        }
+      ],
+      "draftedBy": "Main",
+      "reviewedBy": "BallotReviewDisasm",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-20T06:54:09.315Z"
     }
   ],
   "questions": [
@@ -136340,19 +136023,6 @@
       "status": "answered",
       "answer": "# D-JAI-CONFIG1 — answer to q1h3c64p\n\n**Question (owner):** \"I'd like to copy the jai model using workspaces in which to build executables or binaries or libraries etc, with the ability to create and modify new workspaces and then we can look for ways to improve on the jai version.\"\n\n**Answer.** Done. The old recommendation only let a target list profile names, so build code could not create or change settings, which is the heart of Jai's model. The revision copies Jai's workspace API call by call onto what `fn build` already has, lists what Jet does better, and lists what it deliberately doesn't copy.\n\n**Jai's model** (audit §1.1, §1.4; The Way to Jai ch. 30): the metaprogram calls `compiler_create_workspace(name)`, copies `Build_Options` with `get_build_options`, edits fields, writes them back with `set_build_options(opts, w)`, adds code with `add_build_file`/`add_build_string`, and reads that workspace's compiler messages in a loop. Each workspace is a separate universe with its own output kind. Program-set options win over command-line flags.\n\n**Jet mapping (option A):**\n\n| Jai | Jet |\n|---|---|\n| `compiler_create_workspace(\"web\")` | `demo :: b.add_executable(\"game_web\", [\"run.jet\"], [], options: web)` or `b.add_library(…)`: each target is a workspace |\n| `get_build_options()` | `b.options()` (the command's settings) or `b.profile(\"release\")` (a fresh copy of a package.jet profile) |\n| copy, edit, `set_build_options(o, w)` | `web := b.profile(\"release\")`, `web.os = .Web`, then `options: web` or `b.set_options(demo, web)` |\n| `add_build_file(path, w)` | the sources argument, or `b.add_source(demo, path)` |\n| `add_build_string(code, w)` | `b.generate(name, value, into: demo)`, written to `.jet/generated/<package>/<target>/` |\n| `add_build_string` during the compile | the `compiler.settled` hook (D-JAI-EVENTS1=A), per target |\n| `if message.workspace != w continue` | every hook payload gains `.target` |\n| output kinds | which `b.add_*` call made it, plus D-JAI-BUILDOPT1's `b.add_object`; no output is `jet check` |\n| separate universes | own settings, own cache key, own `.jet/build/<target name>`; code crosses only through the dependency list |\n| program options win over flags | one rule: flags change `b.options()`; a target with its own `options:` is built as written |\n\nJet already uses \"workspace\" for a group of packages (`workspace.jet`), so the Jai idea keeps the Jet name *target*.\n\n**Improvements over Jai:**\n\n1. The plan is a value: the editor, CI and `jet inspect build` list every target and its settings by running `fn build` only, with no compiling, and the session caches it. Jai's workspaces exist only while the metaprogram runs.\n2. Fixed order: targets build in parallel, but reports arrive in target-name order. Jai's compilation order varied between runs; Blow suggested sorting files by name as a workaround.\n3. Typed targets: no 0 for failure, no -1 for \"current workspace\" (Tsoding had to guess that).\n4. Each target is cached by its own settings, so changing the web target rebuilds only it.\n5. Targets with equal settings share each package's compiled record.\n6. Host facts (`$build.host`) are recorded inputs in the build record and cache key, never shared across machines by mistake.\n\n**Not copied, with reasons:** mid-compile option changes (`set_build_options_dc`): options are fixed when the plan seals because the cache key depends on them; link arguments use `link_args` and the `build.link` hook. Making workspaces from any compile-time code: only `fn build` makes targets; D-META-CONTROL2 sessions cover compiling another program. Jai's pull loop: Jet pushes hooks, plus the read-only ordered `Session.stages()`.\n\n**Options:** **A** every target carries its own settings (recommended); **B** a near-literal copy of Jai's API and message loop (`compiler.workspace`, `w.messages()`), which needs the expert metaprogramming permission and hides builds from tools; **C** the old profile-list design.\n\nPrerequisite for all options: the native compile-time host (#5003), since `fn build` runs there.\n\nRevised ballot: `D-JAI-CONFIG1.json` (full profile; Tower gate passes; fresh beginner and adversarial passes run, findings repaired).",
       "created": "2026-10-17T22:47:38.007Z",
-      "answeredAt": "2026-10-17",
-      "answeredBy": "Main"
-    },
-    {
-      "id": "q2d1w7aw",
-      "cardId": "c04pd50v",
-      "decisionId": "D-JAI-EXPERT1",
-      "by": "owner",
-      "kind": "question",
-      "text": "This seems to deviate from effects, and I think this kinda fits under effects anyway. I think we should have effects that are nested so you can block all more powerful metaprogramming or just individual things. This is not idiomatic or cohesive jet, propose a new ballot with idiomatic cohesive syntax and semantics",
-      "status": "answered",
-      "answer": "# D-JAI-EXPERT1 — answer to q2d1w7aw\n\n**Question (owner):** \"This seems to deviate from effects, and I think this kinda fits under effects anyway. I think we should have effects that are nested so you can block all more powerful metaprogramming or just individual things. This is not idiomatic or cohesive jet, propose a new ballot with idiomatic cohesive syntax and semantics.\"\n\n**Answer.** You're right. The old `policy.powers: [.comptime_host(\"…\")]` list sat beside effects as a second permission system with its own spelling. The revision deletes it. Every metaprogramming power is now an effect leaf on the one effect tree, allowed, denied, granted and listed exactly like `Net` or `FFI.Java`. Whole-build check removal is the one former power that is not something code *does*, so it moves to the existing audited safety-gate rules beside `#Unsafe`, not into a second list.\n\n**The Meta family** (declared in Effects.jet like every effect; `$expert` is a new value in the attribute slot that already holds `$irreversible`):\n\n```jet\neffect Meta                        // compile-time code acting on the program\neffect Meta.Generate               // b.generate, derives            (already ratified)\neffect Meta.Include                // b.include                      (already ratified)\neffect Meta.Paste                  // code values and #Expand macros (D-JAI-CODE1: everyone)\neffect Meta.Code $expert           // change the program beyond adding and pasting\neffect Meta.Code.Raw $expert       //   parse(text), macros with uses: *   (was raw_code)\neffect Meta.Code.Types $expert     //   types from facts, no source file\neffect Meta.Code.Rewrite $expert   //   change written code via change sets (was metaprogramming: unrestricted)\neffect Meta.Host $expert           // the build machine while compiling   (was comptime_host)\n```\n\n**Block everything or one thing**, with syntax Jet already has:\n\n```jet\nauthority: { holds: { deny: [Meta] } }                    // the whole family\nauthority: { holds: { deny: [Meta.Code, Meta.Host] } }    // all expert powers; generation and macros still work\nauthority: { holds: { allow: [Meta.Code], deny: [Meta.Code.Rewrite] } }  // parse and types, no rewriting\nfn build(b: BuildContext) -[!Meta.Generate]> BuildPlan { … }  // this build may not generate code\n```\n\n**Rules.** Deny always wins and covers every child. Non-expert leaves are held unless denied, so beginners write nothing. `$expert` leaves are never held by default and never by holding a parent: `allow: [Meta]` holds only Generate, Include and Paste, with a note naming what it left out. Only the main package may hold an expert leaf; it may pass one to a named dependency through `grants:`. Adding one is a project-policy edit through the existing trust prompt with a shown diff. Trust once, `--trust`, `-T` and `--allow` never approve one, and CI fails with the exact line to add. Precedent: effect declarations already carry an attribute, and the Mem and Panic roots already have their own holding rule (deny-only), so this stays one rights tree and one attribute table.\n\n**Check removal (`bounds: off` build-wide).** This is an audited waiver of a safety check, like `#Unsafe`, so it uses the existing gate rules (D-ONCE-GATE1, D-GATE-LAW1): a new gate kind `check_removal`, written as a check field set to `off` in the main package's build settings, listed in `jet inspect gates` and every receipt. Any package can keep its checks with `policy: { check_removal: .Forbid }`, and an organization `.Forbid` refuses the build. The exact I1 amendment text is quoted in the ballot.\n\n**Dropped.** `unlimited_steps`: the step limit is a budget, not an effect; `#StepLimit(n)` covers long work. `open_generics`: no longer proposed (see the D-JAI-GENERIC1 revision).\n\n**Options.** **A** the Meta effect family plus check removal as a safety gate (recommended); **B** Meta plus a second `Unchecked` effect family (rejected: removing a check is not an action code takes, and effect rows cannot see how another package was compiled); **C** Meta only, with checks waived per scope inside `#Unsafe` (safer, but Jai's whole-build mode has no form).\n\nMigration is one cutover with `jet fix`: `metaprogramming: unrestricted` becomes `allow: [Meta.Code]`, and a compile-time `--gate impure=allow` becomes `allow: [Meta.Host]`.\n\nRevised ballot: `D-JAI-EXPERT1.json` (full profile; Tower gate passes; fresh beginner and adversarial passes run, findings repaired; reviews in `reviews/`).",
-      "created": "2026-10-17T22:50:21.022Z",
       "answeredAt": "2026-10-17",
       "answeredBy": "Main"
     },
@@ -137902,6 +137572,83 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-20T07:09:48.675Z",
+      "by": "Main",
+      "action": "decision.post",
+      "ref": "D-DISASM1",
+      "note": "reviewed by BallotReviewDisasm"
+    },
+    {
+      "at": "2026-11-20T07:09:13.683Z",
+      "by": "BallotReviewDisasm",
+      "action": "decision.review",
+      "ref": "D-DISASM1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-20T07:09:09.260Z",
+      "by": "BallotReviewDisasm",
+      "action": "decision.update",
+      "ref": "D-DISASM1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-20T06:54:09.315Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-DISASM1",
+      "note": "Machine code in Jet's own tools: list a function's instructions in jet debug and give each its samples in jet perf view (draft)"
+    },
+    {
+      "at": "2026-11-20T06:40:19.147Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-20T06:40:18.236Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c05y3url",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-20T06:40:03.752Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "95 criteria, soft limit 6: gap found while dogfooding #6970: no Jet tool shows machine code, which lldb and perf annotate both do"
+    },
+    {
+      "at": "2026-11-20T06:40:03.752Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#95 Machine code is visible through Jet's own tools, after a rat"
+    },
+    {
+      "at": "2026-11-20T06:01:44.119Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-20T06:01:43.302Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "94 criteria, soft limit 6: follow-up of c89 found by the p345 profile re-probe"
+    },
+    {
+      "at": "2026-11-20T06:01:43.302Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#94 Every jet perf attach lens reports the real window in its he"
+    },
     {
       "at": "2026-11-20T05:49:54.430Z",
       "by": "Main",

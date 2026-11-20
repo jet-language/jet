@@ -73859,6 +73859,534 @@
       "outcome": "A",
       "ratifiedAt": "2026-11-15",
       "retiredAt": "2026-11-20T02:32:04.479Z"
+    },
+    {
+      "id": "D-JAI-EXPERT1",
+      "cardId": "c04pd50v",
+      "group": "architecture",
+      "title": "Expert metaprogramming as nested effects you can block as a family or one at a time",
+      "situation": "Jai, the game language Jet is matching, trusts the programmer completely: build code can rewrite your program, run any tool while compiling, and switch off array checks for a whole build. Jet already has one way to say what code may do: effects such as Net or FS.Read, which nest, so denying FS also denies FS.Read. The earlier draft of this ballot added a separate list of powers beside effects, a second way to give permission. The vote decides how Jet's strong metaprogramming becomes a family of nested effects that a team can block whole or one at a time, and where whole-build check removal belongs. We recommend a Meta effect family, with check removal kept on the existing safety-gate rules.",
+      "gist": "Should Jet's strong metaprogramming be nested effects a team can block whole or one at a time, and where does check removal go?",
+      "lesson": "An effect names something code may do, such as Net. Effects nest: denying FS also denies FS.Read. A package's authority block lists effects it holds (may use) and denies. Expert effects are strong ones, such as rewriting code while compiling; nobody holds them until the main package names them. A safety gate, such as `#Unsafe`, is a written, audited place where a safety check is waived. A bounds check stops a read past the end of a list; without it, a bad index can corrupt memory.",
+      "explainer": "",
+      "story": "Ravi ports a Jai game to Jet. His build runs the level editor while compiling, one library rewrites functions marked as game systems into faster code, and release builds run without array checks. His security lead wants one line for a sister project: generated code and macros yes, anything stronger no. Both want to use the effects and safety rules they already know, not a second list of switches.",
+      "inWild": "// Jai: #run code may do anything while compiling, and\n// build options turn checks off for a whole build.\n#run { run_command(\"leveled\", \"--bake\"); }\noptions.array_bounds_check = .OFF;",
+      "detail": "Owner question q2d1w7aw: the earlier powers list deviated from effects. Powers should be nested effects, so a team can block all stronger metaprogramming or one thing. The old syntax was not idiomatic. Jet is the language being designed; Jai is Jonathan Blow's game language that Jet is reaching parity with (Docs/audits/jai-parity-2026-10-16.md). Spellings use `comptime` (D-COMPTIME-WORD1=A) and the arrow form `-[ ]>` (D-EFFECT-ROW2).\n\nRatified ground for effects: D-AUTHORITY-MODEL1=A (one rights tree), D-AUTHORITY-ROOTS1=A (nested roots; `!FFI` denies every leaf), D-EFFTREE1 (holding a parent covers its children). Also D-AUTHORITY-MANIFEST1=A (the `authority` block; `policy:` keeps floors and unsafe mode). Also D-EFFECT-DECL1=A (`effect` declarations) and D-META-EFFECT1=A (one effect model at both stages).\n\nFor metaprogramming: D-META-GATE1=A (`Meta.Generate`, `Meta.Include`), D-META-OPTIN2=A, D-META-CONTROL2=A and D-META-RECONCILE1=A (the opt-in advanced mode governs; older refusals bind projects that do not opt in). Also D-JAI-CODE1=A (everyone gets code values, pasting and macros; text-to-code is expert). For safety gates: D-ONCE-GATE1=A and D-GATE-LAW1=A.\n\nTHE META FAMILY UNDER A. Effects.jet gains these declarations. `$expert` is a new value in the attribute slot that already holds `$irreversible`.\n\n```jet\neffect Meta                        // compile-time code acting on the program\neffect Meta.Generate               // add generated files: b.generate, derives\neffect Meta.Include                // run a dependency's build inside yours\neffect Meta.Paste                  // code values and #Expand macros pasted at a call\neffect Meta.Code $expert           // change the program beyond adding and pasting\neffect Meta.Code.Raw $expert       //   parse(text) to code, and macros with uses: *\neffect Meta.Code.Types $expert     //   build types from facts, with no source file\neffect Meta.Code.Rewrite $expert   //   change written code through checked change sets\neffect Meta.Host $expert           // reach the build machine while compiling\n```\n\nHOLDING. Every Meta leaf is checked against the package's authority block, as Net is. Deny always wins, and denying a parent denies every child: `deny: [Meta]` blocks the whole family. Held means the package may use it. Non-expert leaves are held unless denied, so beginners write nothing. An `$expert` leaf is never held by default, and holding a parent never covers it: it must be named.\n\n`allow: [Meta]` holds Generate, Include and Paste only; a note names the expert leaves it left out. `allow: [Meta.Code]` names an expert node, so it holds all three of its children. Only the main package, the one you build, may hold an expert leaf. It may pass one to a named dependency with `grants:`; a dependency cannot hold one by itself.\n\nThis follows existing precedent: effect declarations already carry an attribute, and the Mem and Panic roots already have their own holding rule (deny-only, E0751). There is one rights tree and one attribute table.\n\nAPPROVAL. Adding an expert leaf to the main package is a project-policy edit. The trust prompt's Update project policy choice shows the diff (D-TRUST-LAUNCH1=A). Expert leaves are never approved by Trust once, `--trust`, `-T` or `--allow`. CI never prompts; it fails with the exact `authority` line to add. Removing a leaf needs no approval. An organization file may deny any Meta leaf, and the outermost refusal wins.\n\nWHERE META LEAVES APPEAR. Meta leaves describe compile-time work, so they appear only in rows of compile-time code: `fn build`, providers, hooks and `comptime fn`. A run-time function that calls a macro keeps its own row; the package's hold of `Meta.Paste` governs the paste. So `fn build(b: BuildContext) -[!Meta.Generate]> BuildPlan` makes `b.generate` an error there. Holding is the package's permission; a build entry's row still lists the Meta leaves it uses, as D-META-GATE1=A requires.\n\nWHAT EACH OLD POWER BECOMES. `metaprogramming: unrestricted` (D-META-OPTIN2) becomes holding `Meta.Code`; its registration, target and approval rules stay. raw_code (D-JAI-CODE1) becomes `Meta.Code.Raw`. comptime_host becomes `Meta.Host`: compile-time code that runs programs, uses unpinned network, loads foreign libraries or opens windows needs `Meta.Host` held.\n\nThe site still writes `#Impure(\"reason\")`, and the function row still lists the ordinary effect, such as Exec. That is the same shape as run-time code. unlimited_steps is dropped: the step limit is a budget, not an effect, and `#StepLimit(n)` (D-PREP-FUEL1=A, ratified, not yet built) covers long work. open_generics is dropped with the D-JAI-GENERIC1 revision.\n\nCHECK REMOVAL UNDER A. Removing run-time checks is not something code does, so it is not an effect. It is an audited safety waiver, like `#Unsafe`, and uses the existing gate rules. A new gate kind, `check_removal`, joins the D-GATE-LAW1 list. Its written gate is a check field set to `off` in the main package's build settings (D-JAI-BUILDOPT1), such as `bounds: off`, or `#Unchecked(bounds)` inside `#Unsafe(\"reason\")`.\n\nThe default `.GateOnly` allows it and lists it in `jet inspect gates` and the build receipt. A package whose policy says `check_removal: .Forbid` is always compiled with its checks, even in an unchecked build, and the receipt says so. An organization `.Forbid` refuses the build. Generic and inlined code takes the setting of the package that wrote it.\n\nI1 AMENDMENT. Today I1 reads: 'The expert escape hatch is a user-written, audited `#Unsafe(\"reason\") { … }` block or `#Unsafe(\"reason\") fn`. Generated Rust `unsafe` appears only there or in vetted standard-library and memory internals.'\n\nUnder A and B, the code generator leaves out the named check at each site in packages built with the gate. On the Rust tier that site becomes an unchecked access inside a generated `unsafe` block. The receipt lists the gate and every package built without the check. I1 adds this text: 'or a check field set to off in the main package's build settings, an audited gate listed in every receipt.'\n\nUnder C, I1 is unchanged.\n\nAMENDS. D-AUTHORITY-ROOTS1 (root list gains Meta). D-META-GATE1: the Meta family replaces its names. Its refusals ('in-place rewrite, a type with no file, running the program inside the compiler') were already lifted for opted-in projects by D-META-RECONCILE1=A.\n\nUnder A, opted in means holding `Meta.Code` or `Meta.Host`. Also `Meta.Reflect` and `Meta.Const` are not declared, since reflection is pure and compile-time parameters are ordinary generics. D-META-OPTIN2: the manifest member becomes holding `Meta.Code`. Its standard mode 'forbids … caller-code insertion'; pasting is now allowed there, as D-JAI-CODE1=A already ruled.\n\nAlso D-CTEFFECT1 and D-ONCE-GATE1: at compile time `Meta.Host` replaces the per-run `--gate impure=allow`, and E3410, E3411 and E1343 change their fix text. Run-time `#Impure` keeps its gate. D-TRUST-LAUNCH1: expert leaves are excluded from one-run approval. D-JAI-BUILDOPT1: `off` needs the `check_removal` gate instead of a power. D-GATE-LAW1: the gate list gains `check_removal`.\n\nMIGRATION. One cutover with machine-applicable `jet fix` rewrites: `metaprogramming: unrestricted` becomes `authority: { holds: { allow: [Meta.Code] } }`, and a compile-time `--gate impure=allow` becomes an `allow: [Meta.Host]` line. No aliases remain. New names get Syntax.rs and Effects.jet rows (I7); every refusal has a registered code and UI snapshot (I4).\n\nBEGINNER AND EXPERT PATHS. A beginner writes nothing: generated code, includes and macros work, and every expert effect and every check stays on. An expert names expert leaves in the main package's allow list, or sets `bounds: off` in a release profile. A careful team writes `deny: [Meta.Code, Meta.Host]` and `check_removal: .Forbid`.\n\nWHY NOT B. B makes check removal an `Unchecked` effect family too. A held effect does nothing by itself, and an effect row cannot see how another package was compiled, so `-[!Unchecked]>` could not be checked by the call graph. WHY NOT C. C keeps every Meta effect but offers no whole-build check removal; experts waive checks only per scope.\n\nOPEN DEPENDENCIES. D-META-HASH1 (open) may respell `$` attributes mechanically. D-LSP-BUILDSAVE1 (open) says a check never uses `Meta.Host`.\n\nEVIDENCE. Jai: #run opens windows and calls DLLs while compiling (Blow UTqZNujQOlA 00:44:04-00:53:31). Jai build options turn checks off (The Way to Jai examples/30/30.4_build_options.jai:50-123). Rust: `#![forbid(unsafe_code)]` lets a crate refuse a power at its root. Zig: build-wide safety modes plus per-scope `@setRuntimeSafety`.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Meta effect family; check removal as a safety gate",
+          "detail": "Strong metaprogramming becomes the Meta family on the one effect tree, with expert leaves that must be named by the main package. Deny a family or one leaf, exactly as with Net. Whole-build check removal is an audited safety gate under the existing gate rules, which any package or organization may forbid.",
+          "technical": "Effects.jet rows above with the `$expert` attribute: excluded from default holding and from ancestor holding, root-only, grantable per dependency through `authority.grants`, approved only through a project-policy edit. New gate kind `check_removal` on the D-GATE-LAW1 list; written gate is a D-JAI-BUILDOPT1 check field set to `off` or `#Unchecked` inside `#Unsafe`.",
+          "code": "// main package\nauthority: { holds: { allow: [Meta.Code.Rewrite, Meta.Host] } }\nbuild: { release: Build{ bounds: off } }   // audited gate, listed in receipts\n// sister project: generated code and macros yes, stronger no\nauthority: { holds: { deny: [Meta.Code, Meta.Host] } }\npolicy: { check_removal: .Forbid }\n// error: `ecs` needs Meta.Code.Rewrite\n//   fix: authority: { grants: { \"ecs\": [Meta.Code.Rewrite] } }"
+        },
+        {
+          "key": "B",
+          "name": "Meta and Unchecked effect families",
+          "detail": "The Meta family of A, plus a second expert family, Unchecked, with leaves Bounds, Null and Casts. Holding a leaf lets the main package turn that check off; a library denies Unchecked to keep its checks.",
+          "technical": "As A, plus `effect Unchecked $expert` and three leaves. `bounds: off` needs `Unchecked.Bounds` held. A package denying Unchecked is compiled with checks.",
+          "code": "authority: { holds: { allow: [Meta.Code.Rewrite, Meta.Host, Unchecked.Bounds] } }\nbuild: { release: Build{ bounds: off } }\n// a library that keeps its checks\nauthority: { holds: { deny: [Unchecked] } }"
+        },
+        {
+          "key": "C",
+          "name": "Meta effect family; checks removed only per scope",
+          "detail": "The Meta family of A. There is no whole-build check removal: an expert waives checks only in a written `#Unchecked(bounds)` scope inside `#Unsafe(\"reason\")`.",
+          "technical": "As A for Meta. D-JAI-BUILDOPT1 check fields lose the `off` value; `fatal` and `report` remain. I1 unchanged.",
+          "code": "authority: { holds: { allow: [Meta.Code.Rewrite, Meta.Host] } }\n#Unsafe(\"hot loop proven in bounds\") {\n    #Unchecked(bounds) { sum += xs[i] }\n}\n// build: { release: Build{ bounds: off } }  -> error: not offered"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Jai",
+          "note": "Build options turn checks off for a whole build, and #run code has no limits at all.",
+          "code": "options.array_bounds_check = .OFF;\n#run { run_command(\"leveled\", \"--bake\"); }"
+        },
+        {
+          "lang": "Rust",
+          "note": "A crate may refuse a power for all of its own code at its root.",
+          "code": "#![forbid(unsafe_code)]"
+        },
+        {
+          "lang": "Zig",
+          "note": "Build-wide safety off with ReleaseFast; per scope with @setRuntimeSafety.",
+          "code": "const exe = b.addExecutable(.{ .optimize = .ReleaseFast });\n@setRuntimeSafety(false);"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A puts Jai's metaprogramming power under the effects Jet users already know: one deny blocks the family, one leaf blocks one power. Check removal stays where Jet already audits waived safety checks.",
+        "gains": [
+          "One effect system for every metaprogramming power.",
+          "Block the whole family or one power.",
+          "Any library can keep its own checks."
+        ],
+        "losses": [
+          {
+            "loss": "An expert grant carries no written reason.",
+            "mitigation": "Each use site keeps its reason marker, and the build receipt lists every expert grant and site."
+          },
+          {
+            "loss": "Unchecked builds can hide memory bugs.",
+            "mitigation": "It is an audited gate in every receipt, and any package or organization may forbid it."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B calls check removal an effect, but removing a check is not something code does, and rows cannot check it."
+          },
+          {
+            "key": "C",
+            "reason": "C is safer but leaves Jai's whole-build check removal with no Jet form."
+          }
+        ],
+        "tradeoff": "One effect family and one gate kind, for all of Jai's power under rules Jet already has."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": {
+        "beginner": "Fresh agent: BegExpert2. Skill: rli5. The beginner pass tested the complete ballot. It found the sister-project example contradicted its own story and that power, holds and main package were undefined; the lesson now defines them and macros stay non-expert.",
+        "adversarial": "Author model family: claude-opus. Adversarial model family: claude-haiku. Fresh agent: AdvExpert2. The review found that ancestor holding bypassed expert leaves, that macros clashed with a ratified ruling, and that check removal broke I1. Holding rules, the Meta tree and a check-removal gate with quoted I1 text now fix them."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should strong metaprogramming be nested effects a team can block whole or one at a time, and where does check removal go?",
+        "lesson": "An effect names something code may do, such as Net; denying FS also denies FS.Read. A package's authority block lists effects it holds and denies. Expert effects, like rewriting code while compiling, are off until the main package names them. A safety gate, like `#Unsafe`, is an audited place where a check is waived.",
+        "trio": {
+          "current": {
+            "note": "Today each power has its own switch, and some have none.",
+            "code": "// package.jet\nmetaprogramming: unrestricted\n// build-time programs: #Impure in code AND a flag every run\n$ jet build --gate impure=allow\n// no switch at all: array checks off for a whole build"
+          },
+          "wild": {
+            "lang": "Jai",
+            "note": "Jai's #run may do anything, and build options switch checks off (The Way to Jai, chapter 30).",
+            "code": "#run { run_command(\"leveled\", \"--bake\"); }\noptions.array_bounds_check = .OFF;"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Meta effects; check removal as a gate",
+            "gist": "Metaprogramming powers are nested effects; check removal is an audited safety gate.",
+            "gains": [
+              "One effect system for all metaprogramming.",
+              "Block the whole family or one power.",
+              "Any library can keep its checks."
+            ],
+            "losses": [
+              "Grants carry no reason text."
+            ],
+            "proposed": {
+              "code": "authority: { holds: { allow: [Meta.Code.Rewrite, Meta.Host] } }\nbuild: { release: Build{ bounds: off } }   // audited gate\n// another project: generated code and macros yes, stronger no\nauthority: { holds: { deny: [Meta.Code, Meta.Host] } }\npolicy: { check_removal: .Forbid }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Meta and Unchecked effects",
+            "gist": "As A, but check removal is an effect family too.",
+            "gains": [
+              "Everything sits in the authority block."
+            ],
+            "losses": [
+              "Removing a check is not something code does."
+            ],
+            "proposed": {
+              "code": "authority: { holds: { allow: [Meta.Host, Unchecked.Bounds] } }\nbuild: { release: Build{ bounds: off } }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Meta effects; per-scope checks only",
+            "gist": "As A for metaprogramming; no whole-build check removal.",
+            "gains": [
+              "Checks can never vanish build-wide."
+            ],
+            "losses": [
+              "No form for Jai's whole-build check removal."
+            ],
+            "proposed": {
+              "code": "#Unsafe(\"hot loop proven in bounds\") {\n    #Unchecked(bounds) { sum += xs[i] }\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Jai's metaprogramming power comes under effects you already know: one deny blocks the family, one leaf blocks one power. Check removal stays with Jet's audited safety gates.",
+          "gains": [
+            "One permission system per kind of risk."
+          ],
+          "losses": [
+            {
+              "loss": "Grants carry no reason text.",
+              "mitigation": "Each use site keeps its reason marker; the receipt lists every expert grant and site."
+            },
+            {
+              "loss": "Unchecked builds can hide memory bugs.",
+              "mitigation": "Listed in every receipt, and any package or organization may forbid it."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Removing a check is not an action code takes."
+            },
+            {
+              "key": "C",
+              "reason": "Jai's whole-build check removal has no form."
+            }
+          ],
+          "tradeoff": "One effect family and one gate kind, for all of Jai's power."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "An expert grant carries no written reason.",
+          "attempts": [
+            "Reason strings on authority entries; rejected as a syntax on holds that no other effect uses.",
+            "Keep reasons where they are already written, in `#Impure`, `#Unsafe` and provider registrations, listed with sites in the receipt."
+          ],
+          "result": "Negligible: every use site states why, and the receipt shows each one."
+        },
+        {
+          "loss": "Unchecked builds can hide memory bugs.",
+          "attempts": [
+            "Per-scope removal only (option C); kept as the default path, but it drops Jai's whole-build mode.",
+            "Make it an audited gate: listed in every receipt, forbiddable per package and per organization."
+          ],
+          "result": "Reduced: removal is always visible and any library can refuse it."
+        },
+        {
+          "loss": "A second way to give permission.",
+          "attempts": [
+            "Make every metaprogramming power an effect leaf on the one rights tree, and keep check removal on the one gate list."
+          ],
+          "result": "Removed."
+        }
+      ],
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-16T11:39:42.896Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-20",
+      "retiredAt": "2026-11-20T06:40:03.866Z"
+    },
+    {
+      "id": "D-META-CROSSPKG1",
+      "cardId": "c04pd50v",
+      "group": "safety",
+      "title": "Rewriting another package's code needs one line naming that package",
+      "situation": "",
+      "gist": "Should a build need one line naming a dependency before compile-time code may rewrite that dependency's functions?",
+      "lesson": "A rewrite replaces the body of a function that is already written. An application's build may let a library rewrite the application's own code. A rewrite could also reach into a dependency, such as a database library: code you did not write and may never have read. The lock file already pins each dependency's exact contents, so a permission can name a package without copying hashes.",
+      "explainer": "",
+      "story": "Ines hands her compiler value to a tracing library so it can wrap her route functions. The library also wants to wrap every query function inside her database package. Under option A the build stops with an error that names the database package and prints the one line to add. She reads it, decides she wants traced queries, and adds the line. Her teammate sees that line in review.",
+      "inWild": "Jai: any metaprogram may modify any procedure it sees, including ones from imported modules; there is no per-module consent. Source: The Way to Jai, chapter 30, https://github.com/Ivo-Balbaert/The_Way_to_Jai\n\nRust: a crate can refuse a power at its root with `#![forbid(unsafe_code)]`, and the refusal is visible in source. Source: https://doc.rust-lang.org/reference/attributes/diagnostics.html#lint-check-attributes",
+      "detail": "Provenance: the owner approved the proposal on build programs and compiler events (Docs/proposals/build-programs-and-compiler-events-2026-10-22.md). The owner named A, an explicit `meta.allow_rewrite(package:)` call in the application's build, and B, allowed by default as in Jai. C is today's ratified rule, included as the honest third option.\n\nDepends on D-META-COMPILER1. This ballot applies only if that ballot ratifies the `Compiler` value. If it does not, this ballot is moot. Until this ballot rules, D-META-COMPILER1 limits rewrites to the application's own package, and D-META-OPTIN2's target records stand.\n\nAmends D-META-OPTIN2=A. Under A, its `metaprogramming_targets` records (package identity, source digest, exact declarations list) are removed. The per-package call replaces them, and the lock file supplies the digest. OPTIN2's rule that a rewrite never changes the dependency's cached source stays. D-META-RECONCILE1=A quoted the same records as the dependency-target rule; that reference now points here.\n\nKeeps D-JAI-EXPERT1=A: `Meta.Code.Rewrite` stays an effect leaf that must be held, and a deny from a team or organization file still wins over this call. Default holding is D-META-HOLD1.\n\nWhy per package and not per function: rewrites usually follow markers across a package, and a per-function list goes stale on every update. The `meta` lens shows the exact functions changed, so review keeps per-function detail without a hand-kept list.\n\nProfile: short. One mechanism, three options, no new syntax; `allow_rewrite` is an ordinary method on the Core `Compiler` type.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Name the package in the build",
+          "detail": "The application's build may rewrite its own code once it has a compiler value. To rewrite another package's functions, the same build must first call `meta.allow_rewrite(package: \"orm\")`. Without that line, the rewrite stops with an error naming the package and the line to add.\n\nThe rewrite applies only to this build's copy of the locked version. The dependency's cached source never changes, and other projects using the same package are not affected.",
+          "technical": "`Compiler.allow_rewrite(package: String)` records consent for one package, by its locked identity. The lock already pins the package contents, so the consent covers exactly the locked version; an update shows as a lock change in review. A rewrite of a declaration from a package with no consent fails with a registered error at the `rewrite_body` call, naming the package, the function and the fix line.\n\nA consented rewrite follows the same checks as any rewrite. Its effect facts are inferred again, and every affected caller, in the dependency's copy or in the application, is checked again at the end of the round.\n\nAdding new declarations is not a rewrite and needs no consent. Core and the standard library are packages like any other under this rule. The `meta` lens of `jet inspect expand` groups every rewrite by target package. Effect rules still apply: `Meta.Code.Rewrite` must be held, and an organization or team deny still wins.",
+          "code": "// @build.jet\nfn build(b: Build) {\n    app :: b.add_executable(\"app\", find(\"Source/**/*.jet\"))\n    meta :: b.compiler(app)\n    meta.allow_rewrite(package: \"orm\")    // you choose to let tools change orm's code\n    trace.install(meta, marked: Traced)\n    b.default(app)\n}\n\n// without the allow_rewrite line:\n// error: trace.install tried to rewrite `orm.query`, which belongs to package orm\n//   fix: add `meta.allow_rewrite(package: \"orm\")` after `meta ::` at @build.jet:4"
+        },
+        {
+          "key": "B",
+          "name": "Allowed by default",
+          "detail": "Once the application passes its compiler value to a library, that library may rewrite functions in any package the build uses, as in Jai. Nothing in the source names the packages it touches.",
+          "technical": "No consent record exists. The `meta` lens still lists rewrites after the fact, and a team can deny `Meta.Code.Rewrite` entirely.",
+          "code": "fn build(b: Build) {\n    meta :: b.compiler(b.add_executable(\"app\", find(\"Source/**/*.jet\")))\n    trace.install(meta, marked: Traced)   // may also rewrite orm, http, core...\n}"
+        },
+        {
+          "key": "C",
+          "name": "Keep exact records",
+          "detail": "Keep today's written rule. The application's package file lists each dependency it may rewrite, with that package's source hash and the exact functions allowed.",
+          "technical": "The ratified records name package identity, source digest and an exact declarations list. No globs and no transitive grants. An update changes the digest and invalidates the record.",
+          "code": "// package.jet\nmetaprogramming_targets: [\n    { package: \"orm\", source_digest: \"sha256:9c1f...\", declarations: [\"orm.query\", \"orm.exec\"] }\n]"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Jai",
+          "note": "A metaprogram that intercepts the workspace sees every procedure, from any module, and may modify it. Source: The Way to Jai, chapter 30, https://github.com/Ivo-Balbaert/The_Way_to_Jai",
+          "code": "if msg.kind == .TYPECHECKED {\n    // procedures from every imported module arrive here\n    // compiler_modify_procedure(...) may change any of them\n}"
+        },
+        {
+          "lang": "Rust",
+          "note": "A crate root can forbid a power, and the line is visible in source and review. Source: https://doc.rust-lang.org/reference/attributes/diagnostics.html#lint-check-attributes",
+          "code": "#![forbid(unsafe_code)]"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps full rewrite power but makes changing someone else's code a choice you can see. One line per package is cheap, and the lock already pins what it covers.",
+        "gains": [
+          "No silent changes to code you did not write."
+        ],
+        "losses": [
+          {
+            "loss": "A dependency update can change what a rewrite touches.",
+            "mitigation": "The lock change shows in review, and the meta lens lists every rewritten function by package."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B lets any library you hand the value to change any dependency, with no line saying so."
+          },
+          {
+            "key": "C",
+            "reason": "C makes you copy hashes and function lists by hand, and every update breaks them."
+          }
+        ],
+        "tradeoff": "One line per rewritten package, in exchange for no silent changes to other people's code."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should a build need one line naming a dependency before tools may rewrite that dependency's functions?",
+        "lesson": "A rewrite replaces the body of a written function. Your build may let a library rewrite your own code. A rewrite could also reach a dependency, such as a database library, whose code you never read. The lock file already pins each dependency's exact contents.",
+        "trio": {
+          "current": {
+            "note": "Nothing can rewrite yet. The written rule, not yet built, lists each target with a hash and function names.",
+            "code": "// package.jet\nmetaprogramming_targets: [\n    { package: \"orm\", source_digest: \"sha256:9c1f...\", declarations: [\"orm.query\"] }\n]"
+          },
+          "wild": {
+            "lang": "Jai",
+            "note": "Jai lets any metaprogram modify any procedure, from any module. Source: The Way to Jai, chapter 30.",
+            "code": "if msg.kind == .TYPECHECKED {\n    // procedures from every imported module arrive here\n    // compiler_modify_procedure(...) may change any of them\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Name the package in the build",
+            "gist": "Rewriting a dependency needs one line in your build naming that package.",
+            "gains": [
+              "You see and approve every package whose code changes.",
+              "The lock already pins what the line covers."
+            ],
+            "losses": [
+              "One extra line per rewritten package."
+            ],
+            "proposed": {
+              "code": "meta :: b.compiler(app)\nmeta.allow_rewrite(package: \"orm\")\ntrace.install(meta, marked: Traced)\n// without the line:\n// error: trace.install tried to rewrite `orm.query` in package orm"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Allowed by default",
+            "gist": "A library you hand the value to may rewrite any package, as in Jai.",
+            "gains": [
+              "Nothing to write; closest to Jai."
+            ],
+            "losses": [
+              "Code you never read can change silently.",
+              "Review cannot see which packages are touched."
+            ],
+            "proposed": {
+              "code": "meta :: b.compiler(app)\ntrace.install(meta, marked: Traced)   // may also rewrite orm, http..."
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep exact records",
+            "gist": "The package file lists each target with its hash and functions.",
+            "gains": [
+              "Grants exact functions, not whole packages."
+            ],
+            "losses": [
+              "Hashes and function lists are copied by hand.",
+              "Every dependency update breaks the record."
+            ],
+            "proposed": {
+              "code": "metaprogramming_targets: [\n    { package: \"orm\", source_digest: \"sha256:9c1f...\", declarations: [\"orm.query\"] }\n]"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A keeps full rewrite power but makes changing someone else's code a choice you can see. The lock already pins what the line covers.",
+          "gains": [
+            "No silent changes to code you did not write."
+          ],
+          "losses": [
+            {
+              "loss": "A dependency update can change what a rewrite touches.",
+              "mitigation": "The lock change shows in review, and the meta lens lists rewritten functions by package."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B lets a library change any dependency with no line saying so."
+            },
+            {
+              "key": "C",
+              "reason": "C needs hashes copied by hand, and every update breaks them."
+            }
+          ],
+          "tradeoff": "One line per rewritten package, for no silent changes to other people's code."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-22T15:29:06.990Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-22",
+      "retiredAt": "2026-11-20T06:40:03.866Z"
+    },
+    {
+      "id": "D-META-HOLD1",
+      "cardId": "c04pd50v",
+      "group": "safety",
+      "title": "The power to create a Compiler value is named once in the package file",
+      "situation": "",
+      "gist": "Must a project name compiler control in its package file before its build can create a Compiler value, or is it on by default?",
+      "lesson": "Every package file has one `authority` block that lists the powers the package holds, such as network access. Ordinary powers are on unless denied. Expert powers are off until the project names them, and the trust prompt shows that change when you open a cloned project. The question is which kind the power to control the compiler should be.",
+      "explainer": "",
+      "story": "Theo clones a game project and opens it. Its build creates a compiler value and rewrites hundreds of functions. Under option A, the clone's package file names that power, so the trust prompt shows it before anything runs, and CI fails with the exact line if it is missing. Under option B, nothing outside the build file says so, and Theo learns about it only if he reads that file.",
+      "inWild": "Rust: a crate can refuse a power at its root with `#![forbid(unsafe_code)]`, one visible line. Source: https://doc.rust-lang.org/reference/attributes/diagnostics.html#lint-check-attributes\n\nDeno: programs get no file, network or subprocess access unless a flag or config names it. Source: https://docs.deno.com/runtime/fundamentals/security/\n\nJai: every metaprogram may drive the compiler, with no grant at all. Source: The Way to Jai, chapter 30, https://github.com/Ivo-Balbaert/The_Way_to_Jai",
+      "detail": "Provenance: the owner approved the proposal on build programs and compiler events (Docs/proposals/build-programs-and-compiler-events-2026-10-22.md) and asked the author to pick the default from Jet's goals: beginner safety, auditability and pragmatism. The proposal leaned toward on-for-the-application. This ballot recommends the opposite, for the reasons below.\n\nSpelling: the proposal wrote a TOML-style `[meta]` table with `compiler = \"none\" | \"root\" | \"any\"`. Jet's package file is Jet record syntax, and D-AUTHORITY-MANIFEST1=A puts every power in one `authority` block. So option A is the proposal's `none` and option B is its `root`. The proposal's `any` is not offered: D-META-COMPILER1 lets only the application's build create the value.\n\nWhy A. Beginner safety: a beginner never sees compiler control unless a tutorial asks for it, and then the error prints the one line. Auditability: the trust prompt, CI and an organization file all read the package file, not build code. Pragmatism: the cost is one line, once per project, which the error prints and `jet fix` can add.\n\nWhy not double gating: `b.compiler(app)` is the use, not a second gate. The package line is the only permission. That matches D-META-OPTIN2=A, where the owner chose a package-level opt-in over a package-plus-every-run opt-in.\n\nUnder A no ruling is replaced: it confirms D-JAI-EXPERT1=A for `Meta.Code` as D-META-COMPILER1 redefines it. Under B, D-JAI-EXPERT1's expert flag is removed from `Meta.Code` for the main package, and D-META-OPTIN2's rule that omission means standard mode is reversed.\n\nRelated: D-META-CROSSPKG1 decides whether rewriting a dependency needs a further line in the build. D-TRUST-LAUNCH1=A already excludes expert leaves from one-run approval, so `--trust` never turns this on.\n\nProfile: short. One mechanism, two options, no new syntax; the `authority` block and `Meta.Code` already exist in ratified law.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Named once in the package file",
+          "detail": "Compiler control stays an expert power. A project turns it on with one line in its package file: `authority: { holds: { allow: [Meta.Code] } }`. Without that line, `b.compiler(app)` stops with an error that prints the line to add.\n\nAdding the line is a project-policy change, so the trust prompt shows it when someone opens a cloned project, and CI fails with the line instead of prompting. A beginner who never asks for compiler control never sees any of this.",
+          "technical": "Confirms D-JAI-EXPERT1=A for the `Meta.Code` node under D-META-COMPILER1: `$expert`, never held by default, only the main package may hold it, approved only through a project-policy edit. Holding `Meta.Code` holds its children `Rewrite`, `Raw` and `Types`; naming only `Meta.Code.Rewrite` is not enough to create the value.\n\n`b.compiler(output)` performs `Meta.Code` and must be written in the main package's own source, so this one line governs every value. If the main package does not hold it, the call fails with a registered error whose fix is the exact `authority` line, machine-applicable through `jet fix` in an interactive edit. Organization and team files may still deny any Meta leaf, and the outermost refusal wins.",
+          "code": "// package.jet\nname: \"game\"\nauthority: { holds: { allow: [Meta.Code] } }\n\n// @build.jet\nfn build(b: Build) {\n    app :: b.add_executable(\"game\", find(\"Source/**/*.jet\"))\n    trace.install(b.compiler(app), marked: Traced)\n    b.default(app)\n}\n\n// without the authority line:\n// error: `b.compiler` needs Meta.Code, which package game does not hold\n//   fix: add `authority: { holds: { allow: [Meta.Code] } }` to package.jet"
+        },
+        {
+          "key": "B",
+          "name": "On for the application",
+          "detail": "The application's own build may create a compiler value with no package-file line. Dependencies still never can. A team that does not want it writes `authority: { holds: { deny: [Meta.Code] } }`.",
+          "technical": "Removes `$expert` from the `Meta.Code` node and its children for the main package only, so the main package holds them unless denied. Dependencies still cannot hold them. This amends D-JAI-EXPERT1=A for that node, and the meaning of omission in D-META-OPTIN2=A.",
+          "code": "// package.jet: no line needed\nname: \"game\"\n\n// @build.jet\nfn build(b: Build) {\n    trace.install(b.compiler(b.add_executable(\"game\", find(\"Source/**/*.jet\"))), marked: Traced)\n}\n\n// a careful team opts out instead:\nauthority: { holds: { deny: [Meta.Code] } }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "One line at the crate root changes what the whole crate may do, and review sees it. Source: https://doc.rust-lang.org/reference/attributes/diagnostics.html#lint-check-attributes",
+          "code": "#![forbid(unsafe_code)]"
+        },
+        {
+          "lang": "Deno",
+          "note": "Powers are off until a flag or config names them, and the error names the missing permission. Source: https://docs.deno.com/runtime/fundamentals/security/",
+          "code": "$ deno run main.ts\nerror: Uncaught (in promise) NotCapable: Requires net access to \"example.com:443\", run again with the --allow-net flag\n$ deno run --allow-net=example.com main.ts"
+        },
+        {
+          "lang": "Jai",
+          "note": "Any metaprogram may drive the compiler; there is no grant to write or review. Source: The Way to Jai, chapter 30, https://github.com/Ivo-Balbaert/The_Way_to_Jai",
+          "code": "#run build();   // build() may intercept and modify the whole program"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Rewriting a whole program is the strongest power Jet offers. One package-file line makes it visible to the trust prompt, CI and reviewers, and costs an expert one line, printed by the error.",
+        "gains": [
+          "A cloned project cannot rewrite code without the trust prompt showing it.",
+          "One rule for every expert power."
+        ],
+        "losses": [
+          {
+            "loss": "An expert writes one more line before the first use.",
+            "mitigation": "The error prints the exact line, and `jet fix` can add it."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B lets a cloned project rewrite its code with nothing outside the build file saying so."
+          }
+        ],
+        "tradeoff": "One line per project, in exchange for compiler control that is always visible and approved."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Must a project name compiler control in its package file before its build can use it?",
+        "lesson": "Every package file has one `authority` block listing the powers the package holds. Ordinary powers are on unless denied. Expert powers are off until named, and the trust prompt shows that change when you open a cloned project. Which kind should compiler control be?",
+        "trio": {
+          "current": {
+            "note": "Nothing can create a compiler value yet. The written rule, not yet built, names expert powers like this.",
+            "code": "// package.jet\nauthority: { holds: { allow: [Meta.Code.Rewrite, Meta.Host] } }\n// a dependency that needs one:\n// error: `ecs` needs Meta.Code.Rewrite"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "One line at the crate root sets what the whole crate may do. Source: Rust reference, lint attributes.",
+            "code": "#![forbid(unsafe_code)]"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Named once in the package file",
+            "gist": "Compiler control stays an expert power; one package-file line turns it on.",
+            "gains": [
+              "The trust prompt and CI show it in cloned projects.",
+              "The same rule as every other expert power."
+            ],
+            "losses": [
+              "One line before first use."
+            ],
+            "proposed": {
+              "code": "// package.jet\nauthority: { holds: { allow: [Meta.Code] } }\n// without it:\n// error: `b.compiler` needs Meta.Code, which package game does not hold\n//   fix: add `authority: { holds: { allow: [Meta.Code] } }`"
+            }
+          },
+          {
+            "key": "B",
+            "name": "On for the application",
+            "gist": "The application's build may use it unless the package file denies it.",
+            "gains": [
+              "Nothing to write before first use."
+            ],
+            "losses": [
+              "Cloned projects can rewrite code with no package-file line.",
+              "A second rule beside the other expert powers."
+            ],
+            "proposed": {
+              "code": "// package.jet: nothing needed\n// a careful team opts out:\nauthority: { holds: { deny: [Meta.Code] } }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Rewriting a whole program is Jet's strongest power. One package-file line makes it visible to the trust prompt, CI and reviewers, and the error prints that line.",
+          "gains": [
+            "A cloned project cannot rewrite code unseen."
+          ],
+          "losses": [
+            {
+              "loss": "An expert writes one more line before first use.",
+              "mitigation": "The error prints the exact line, and `jet fix` can add it."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B lets a cloned project rewrite its code with nothing outside the build file saying so."
+            }
+          ],
+          "tradeoff": "One line per project, for compiler control that is always visible and approved."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-22T15:29:08.781Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-22",
+      "retiredAt": "2026-11-20T06:40:03.866Z"
     }
   ]
 }

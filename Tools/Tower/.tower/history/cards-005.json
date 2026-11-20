@@ -35477,6 +35477,140 @@
       "completedAt": "2026-11-17T04:28:13.040Z",
       "questions": [],
       "retiredAt": "2026-11-20T05:20:23.311Z"
+    },
+    {
+      "id": "c04pd50v",
+      "num": 5022,
+      "title": "Expert opt-out model: how experts turn off Jet's guardrails to reach Jai-level power",
+      "body": "## Outcome\n\nDecision D-JAI-EXPERT1 picks the one opt-out mechanism every Jai-parity power uses. Jai has no guardrails; Jet keeps them as defaults. Today each power has its own switch (`metaprogramming: unrestricted`, `#Impure` plus `--gate impure=allow`, `#StepLimit`), and some powers have none (full host access while compiling, build-wide check relaxation, string code, duck-typed generics). Audit rows: A05-A07, A20, E12-E17, B03, B06, B16.\n\nThe ballot carries the full design; this card holds the vote and, once ratified, the delivery plan.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e18",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "All five criteria met: c3 step-limit rows 5/5 on p249 (dev 873d300318), c2/c4/c5 earlier. The per-scope #Unchecked half lives on #6323 c9."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Tagged G6: D-JAI-EXPERT1=A is the Meta effect family, metaprogramming beside #5021 (Jai parity). c1 names its proof."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 1 criteria from archived #8: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "(was #8) The beginner/expert split is audited: each guardrail opt-out in the body (audit rows A05-A07, A20, E12-E17, B03, B06, B16) goes through the one D-JAI-EXPERT1=A mechanism, and a default build never reaches an expert power without it. Proof: a UI snapshot per opt-out shows the refusal without it, and a golden shows the power with it.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #5022 c2: the one audit split per opt-out: host access (X1), step limit (X2), whole-program and string code (X3), check removal (X4); row B16 is not adopted (D-JAI-GENERIC1=F)",
+          "at": "2026-11-15T02:34:21.221Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 2,
+          "text": "Compile-time host access (windows, processes, network, foreign and DLL calls; audit rows A05, A06) is a Meta expert leaf: root-only, not held by default or by an ancestor, grantable per dependency through `authority.grants`; without it the call is refused with a registered error, and a family or one leaf can be denied as with Net (D-JAI-EXPERT1=A).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p244 batch compiler (dev 5613c2f956); feature 05c8aa66af: ui meta_comptime_host_ n=5 bad=0, ui MetaComptimeHost n=2 bad=0, comptime_dependency_impure and comptime_io_rejected PASS, GatesLints.jet PASS.",
+          "at": "2026-11-17T04:28:16.904Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "meta_comptime_host_"
+          }
+        },
+        {
+          "n": 3,
+          "text": "Running past the compile-time step budget (audit row A07) is written `#StepLimit(n)` (D-PREP-FUEL1=A); it is a budget, not an effect, so there is no expert leaf for it (D-JAI-EXPERT1=A drops unlimited_steps). Without it the 10,000,000-step budget stops with its registered error.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 3846d9b2c1 + 873d300318: jet test Compiler --profile ui --filter comptime_step_limit_ PASS 5/5 on the p249 batch compiler (d6fe44e963), and the cases comptime_fallback_reason_shows (2/2) and locals_that_call_code_are_computed_while_compiling passed on p247.",
+          "at": "2026-11-17T06:31:05.068Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "comptime_step_limit_"
+          }
+        },
+        {
+          "n": 4,
+          "text": "Running the whole program or another program while compiling, and code from strings (audit rows A20, B03, B06), need Meta expert leaves: Meta.Host for running programs at compile time, Meta.Code.Raw for code from text, Meta.Code.Rewrite for rewriting (D-JAI-EXPERT1=A). A dependency using one without the root grant is refused.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p243 batch compiler (dev 220ae562d7; feature 5a29fc351f): ui MetaExpertLeafRootOnly n=3 bad=0, ui meta_expert_leaf_root_only_meta_leaves_code_out n=1 bad=0, cases BuildEntry/rewrite_body_replaces_a_function_body and meta_events_rewrites_compose_in_order PASS.",
+          "at": "2026-11-17T04:07:23.577Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "meta_expert_leaf_root_only"
+          }
+        },
+        {
+          "n": 5,
+          "text": "Removing checks through a build setting (audit rows E12-E17: a check field set to `off`) is the audited `check_removal` gate, which any package or organization may forbid, including a loose file's inline `package:` policy; under a forbidding policy the removal is refused with a registered error (D-JAI-EXPERT1=A, D-JAI-BUILDOPT1).  proof: jet test Compiler --profile ui --filter check_removal_gate_forbidden",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p246 batch compiler (dev 8672bcfd81); feature bd931aba40: ui check_removal_gate_forbidden n=1 bad=0 and ui CheckRemovalGateForbidden (the organization-policy folder) n=1 bad=0; a loose file's inline package policy now forbids --bounds=off.",
+          "at": "2026-11-17T05:18:31.951Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "check_removal_gate_forbidden"
+          }
+        }
+      ],
+      "refs": [
+        "Docs/audits/jai-parity-2026-10-16.md",
+        "#5021"
+      ],
+      "tags": [
+        "mining-2026-10-16",
+        "jai-vs-jet",
+        "jai-parity",
+        "meta",
+        "needs-owner",
+        "wayfinder:decision"
+      ],
+      "parentId": "c02y3vkg",
+      "needsAcceptance": false,
+      "created": "2026-10-16T10:54:40.464Z",
+      "updated": "2026-11-17T06:31:14.615Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 5,
+      "completedAt": "2026-11-17T06:31:14.615Z",
+      "questions": [
+        {
+          "id": "q2d1w7aw",
+          "cardId": "c04pd50v",
+          "decisionId": "D-JAI-EXPERT1",
+          "by": "owner",
+          "kind": "question",
+          "text": "This seems to deviate from effects, and I think this kinda fits under effects anyway. I think we should have effects that are nested so you can block all more powerful metaprogramming or just individual things. This is not idiomatic or cohesive jet, propose a new ballot with idiomatic cohesive syntax and semantics",
+          "status": "answered",
+          "answer": "# D-JAI-EXPERT1 — answer to q2d1w7aw\n\n**Question (owner):** \"This seems to deviate from effects, and I think this kinda fits under effects anyway. I think we should have effects that are nested so you can block all more powerful metaprogramming or just individual things. This is not idiomatic or cohesive jet, propose a new ballot with idiomatic cohesive syntax and semantics.\"\n\n**Answer.** You're right. The old `policy.powers: [.comptime_host(\"…\")]` list sat beside effects as a second permission system with its own spelling. The revision deletes it. Every metaprogramming power is now an effect leaf on the one effect tree, allowed, denied, granted and listed exactly like `Net` or `FFI.Java`. Whole-build check removal is the one former power that is not something code *does*, so it moves to the existing audited safety-gate rules beside `#Unsafe`, not into a second list.\n\n**The Meta family** (declared in Effects.jet like every effect; `$expert` is a new value in the attribute slot that already holds `$irreversible`):\n\n```jet\neffect Meta                        // compile-time code acting on the program\neffect Meta.Generate               // b.generate, derives            (already ratified)\neffect Meta.Include                // b.include                      (already ratified)\neffect Meta.Paste                  // code values and #Expand macros (D-JAI-CODE1: everyone)\neffect Meta.Code $expert           // change the program beyond adding and pasting\neffect Meta.Code.Raw $expert       //   parse(text), macros with uses: *   (was raw_code)\neffect Meta.Code.Types $expert     //   types from facts, no source file\neffect Meta.Code.Rewrite $expert   //   change written code via change sets (was metaprogramming: unrestricted)\neffect Meta.Host $expert           // the build machine while compiling   (was comptime_host)\n```\n\n**Block everything or one thing**, with syntax Jet already has:\n\n```jet\nauthority: { holds: { deny: [Meta] } }                    // the whole family\nauthority: { holds: { deny: [Meta.Code, Meta.Host] } }    // all expert powers; generation and macros still work\nauthority: { holds: { allow: [Meta.Code], deny: [Meta.Code.Rewrite] } }  // parse and types, no rewriting\nfn build(b: BuildContext) -[!Meta.Generate]> BuildPlan { … }  // this build may not generate code\n```\n\n**Rules.** Deny always wins and covers every child. Non-expert leaves are held unless denied, so beginners write nothing. `$expert` leaves are never held by default and never by holding a parent: `allow: [Meta]` holds only Generate, Include and Paste, with a note naming what it left out. Only the main package may hold an expert leaf; it may pass one to a named dependency through `grants:`. Adding one is a project-policy edit through the existing trust prompt with a shown diff. Trust once, `--trust`, `-T` and `--allow` never approve one, and CI fails with the exact line to add. Precedent: effect declarations already carry an attribute, and the Mem and Panic roots already have their own holding rule (deny-only), so this stays one rights tree and one attribute table.\n\n**Check removal (`bounds: off` build-wide).** This is an audited waiver of a safety check, like `#Unsafe`, so it uses the existing gate rules (D-ONCE-GATE1, D-GATE-LAW1): a new gate kind `check_removal`, written as a check field set to `off` in the main package's build settings, listed in `jet inspect gates` and every receipt. Any package can keep its checks with `policy: { check_removal: .Forbid }`, and an organization `.Forbid` refuses the build. The exact I1 amendment text is quoted in the ballot.\n\n**Dropped.** `unlimited_steps`: the step limit is a budget, not an effect; `#StepLimit(n)` covers long work. `open_generics`: no longer proposed (see the D-JAI-GENERIC1 revision).\n\n**Options.** **A** the Meta effect family plus check removal as a safety gate (recommended); **B** Meta plus a second `Unchecked` effect family (rejected: removing a check is not an action code takes, and effect rows cannot see how another package was compiled); **C** Meta only, with checks waived per scope inside `#Unsafe` (safer, but Jai's whole-build mode has no form).\n\nMigration is one cutover with `jet fix`: `metaprogramming: unrestricted` becomes `allow: [Meta.Code]`, and a compile-time `--gate impure=allow` becomes `allow: [Meta.Host]`.\n\nRevised ballot: `D-JAI-EXPERT1.json` (full profile; Tower gate passes; fresh beginner and adversarial passes run, findings repaired; reviews in `reviews/`).",
+          "created": "2026-10-17T22:50:21.022Z",
+          "answeredAt": "2026-10-17",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-20T06:40:03.865Z"
     }
   ]
 }
