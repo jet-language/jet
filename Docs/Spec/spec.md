@@ -483,6 +483,15 @@ numeric widening law and return `Bool`; nonnumeric operands must have matching
 types. `&&`, `||`, and `!` operate on `Bool` (E0110). `&&` and `||` are boolean
 operators; a value alternative in an arm head uses `|`.
 
+A `:=` Float binding seeded with infinity (`Float.INFINITY`,
+`Float.NEG_INFINITY`, `math.INFINITY` or its negation) whose every assignment
+sets it to an `Int` uses the Float only as a sentinel. Each Int widens as it
+is assigned, so the result reads `5.0` where the input held `5`. `jet check`
+reports it as the tidy error **L0306** at the binding, naming the Int form: an
+`Int?` that starts as `None`, or an Int that starts at `Int.MAX` or `Int.MIN`.
+One assignment of a Float value, a compound assignment, or a borrow of the
+binding keeps it quiet.
+
 A control construct is an expression when it produces a value. Its result has a
 type, but `If` and `Loop` are not types: deferred control uses lambdas, and
 inventing construct types would duplicate that mechanism (I8). The syntax and
