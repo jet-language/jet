@@ -1,4 +1,4 @@
-use jet_backend.[X64DebugEncoding, link_debug_uleb, x64_jetline_sleb]
+use jet_backend.[X64DebugEncoding, link_debug_uleb, x64_decode, x64_jetline_sleb]
 
 // A breakpoint whose condition runs in the program itself: a hit where the
 // condition is false goes on with no stop, so a breakpoint whose condition
@@ -61,17 +61,10 @@ NATIVE_PLACE_REGS: [Int]{0, 2, 1, 3, 6, 7, 5, 4, 8, 9, 10, 11, 12, 13, 14, 15}
 // takes their addresses in a table, the table's address in rsi.
 NATIVE_PLACE_ARGS: [Int]{6, 2, 1, 8, 9}
 
-// How an instruction branches: not at all, a jmp, a call or a jcc.
-NativeBranch: enum {
-    Plain,
-    Jump,
-    Call,
-    Cond,
-}
-
 // What the debugger moves of one x86-64 instruction: its length, the offset
 // of its rip-relative displacement (-1: none), its relative branch (the
-// offset and size of the branch's field, -1 and 0 for none, and a jcc's
+// offset and size of the branch's field, -1 and 0 for none; `kind` is the
+// branch's flow, Plain for an instruction without one, and a jcc's
 // condition), and whether it is an indirect jump, whose target the debugger
 // can't know.
 NativeInsn: struct {
@@ -79,7 +72,7 @@ NativeInsn: struct {
     rip: Int,
     field: Int,
     width: Int,
-    kind: NativeBranch,
+    kind: X64Flow,
     cond: Int,
     indirect: Bool,
 }
@@ -220,190 +213,15 @@ NativePlaced: struct {
     traps: Int{0},
 }
 
-// Whether a legacy prefix (lock, rep, a segment, operand or address size).
-native_decode_prefix: fn(byte: Int) -> Bool Never! {
-    byte == 0xf0 || byte == 0xf2 || byte == 0xf3 || byte == 0x2e || byte == 0x36 || byte == 0x3e || byte == 0x26 || byte == 0x64 || byte == 0x65 || byte == 0x66 || byte == 0x67
-}
-
-// The bytes of a ModRM operand whose ModRM byte is at `at`, and the offset
-// from `at` of a rip-relative displacement (-1: none).
-native_decode_modrm: fn(bytes: [U8], at: Int) -> {length: Int, rip: Int}? Never! {
-    if at >= bytes.len() -> return None
-    modrm: Int{bytes[at]}
-    mode: modrm >> 6
-    rm: modrm & 7
-    if mode == 3 -> return Val({length: 1, rip: -1})
-    length := 1
-    rip := -1
-    if rm == 4 {
-        if at + 1 >= bytes.len() -> return None
-        length += 1
-        base: Int{bytes[at + 1]} & 7
-        if mode == 0 && base == 5 -> length += 4
-    }
-    if mode == 0 && rm == 5 {
-        rip = length
-        length += 4
-    }
-    if mode == 1 -> length += 1
-    if mode == 2 -> length += 4
-    Val({length: length, rip: rip})
-}
-
-// Whether one-byte opcode `op` takes a ModRM operand, and its immediate's
-// size; None for one the debugger doesn't move (or isn't valid in 64-bit
-// code). `full` is the size of a word immediate, `moffs` of an absolute
-// address and `mov` of a mov-to-register immediate (8 under REX.W).
-native_decode_one: fn(op: Int, full: Int, moffs: Int, mov: Int) -> {modrm: Bool, imm: Int}? Never! {
-    low: op & 7
-    if {
-        op < 0x40 && (low == 6 || low == 7) -> None
-        op < 0x40 && low < 4 -> Val({modrm: true, imm: 0})
-        op < 0x40 && low == 4 -> Val({modrm: false, imm: 1})
-        op < 0x40 -> Val({modrm: false, imm: full})
-        op >= 0x50 && op <= 0x5f -> Val({modrm: false, imm: 0})
-        op == 0x63 -> Val({modrm: true, imm: 0})
-        op == 0x68 -> Val({modrm: false, imm: full})
-        op == 0x69 -> Val({modrm: true, imm: full})
-        op == 0x6a -> Val({modrm: false, imm: 1})
-        op == 0x6b -> Val({modrm: true, imm: 1})
-        op >= 0x6c && op <= 0x6f -> Val({modrm: false, imm: 0})
-        op == 0x80 || op == 0x83 || op == 0xc0 || op == 0xc1 || op == 0xc6 -> Val({modrm: true, imm: 1})
-        op == 0x81 || op == 0xc7 -> Val({modrm: true, imm: full})
-        op >= 0x84 && op <= 0x8f -> Val({modrm: true, imm: 0})
-        op >= 0x90 && op <= 0x99 -> Val({modrm: false, imm: 0})
-        op >= 0x9b && op <= 0x9f -> Val({modrm: false, imm: 0})
-        op >= 0xa0 && op <= 0xa3 -> Val({modrm: false, imm: moffs})
-        op == 0xa8 -> Val({modrm: false, imm: 1})
-        op == 0xa9 -> Val({modrm: false, imm: full})
-        op >= 0xa4 && op <= 0xaf -> Val({modrm: false, imm: 0})
-        op >= 0xb0 && op <= 0xb7 -> Val({modrm: false, imm: 1})
-        op >= 0xb8 && op <= 0xbf -> Val({modrm: false, imm: mov})
-        op == 0xc2 || op == 0xca -> Val({modrm: false, imm: 2})
-        op == 0xc8 -> Val({modrm: false, imm: 3})
-        op == 0xc3 || op == 0xc9 || op == 0xcb || op == 0xcc || op == 0xcf -> Val({modrm: false, imm: 0})
-        op == 0xcd -> Val({modrm: false, imm: 1})
-        op >= 0xd0 && op <= 0xd3 -> Val({modrm: true, imm: 0})
-        op == 0xd7 -> Val({modrm: false, imm: 0})
-        op >= 0xd8 && op <= 0xdf -> Val({modrm: true, imm: 0})
-        op >= 0xe4 && op <= 0xe7 -> Val({modrm: false, imm: 1})
-        op >= 0xec && op <= 0xef -> Val({modrm: false, imm: 0})
-        op == 0xf1 || op == 0xf4 || op == 0xf5 -> Val({modrm: false, imm: 0})
-        op >= 0xf8 && op <= 0xfd -> Val({modrm: false, imm: 0})
-        op == 0xf6 || op == 0xf7 || op == 0xfe || op == 0xff -> Val({modrm: true, imm: 0})
-        else -> None
-    }
-}
-
-// Whether two-byte opcode 0F `op` takes a ModRM operand, and its
-// immediate's size; None for one the debugger doesn't move.
-native_decode_two: fn(op: Int) -> {modrm: Bool, imm: Int}? Never! {
-    if {
-        op == 0x0f || op == 0x38 || op == 0x3a -> None
-        op == 0x05 || op == 0x06 || op == 0x07 || op == 0x08 || op == 0x09 || op == 0x0b || op == 0x0e || op == 0x77 -> Val({modrm: false, imm: 0})
-        op >= 0x30 && op <= 0x37 -> Val({modrm: false, imm: 0})
-        op == 0xa0 || op == 0xa1 || op == 0xa2 || op == 0xa8 || op == 0xa9 || op == 0xaa -> Val({modrm: false, imm: 0})
-        op >= 0xc8 && op <= 0xcf -> Val({modrm: false, imm: 0})
-        op >= 0x70 && op <= 0x73 -> Val({modrm: true, imm: 1})
-        op == 0xa4 || op == 0xac || op == 0xba || op == 0xc2 || op == 0xc4 || op == 0xc5 || op == 0xc6 -> Val({modrm: true, imm: 1})
-        else -> Val({modrm: true, imm: 0})
-    }
-}
-
-// The instruction at `from` of `bytes`, or None when the debugger can't read
-// it: past the end, EVEX, 3DNow!, a 16-bit branch, loop and jrcxz (whose
-// short branch has no long form).
+// The instruction at `from` of `bytes`, or None when the debugger can't
+// move it: past the end, bytes that start no instruction (x64_decode's
+// "(bad)"), a 16-bit branch, loop and jrcxz (whose short branch has no long
+// form).
 native_decode: fn(bytes: [U8], from: Int) -> NativeInsn? Never! {
-    at := from
-    short := false
-    narrow := false
-    loop at < bytes.len() && native_decode_prefix(Int{bytes[at]}) {
-        if bytes[at] == 0x66 -> short = true
-        if bytes[at] == 0x67 -> narrow = true
-        at += 1
-    }
-    wide := false
-    if at < bytes.len() && bytes[at] >= 0x40 && bytes[at] <= 0x4f {
-        wide = Int{bytes[at]} & 8 != 0
-        at += 1
-    }
-    if at >= bytes.len() -> return None
-    op: Int{bytes[at]}
-    at += 1
-    insn := NativeInsn{length: 0, rip: -1, field: -1, width: 0, kind: NativeBranch.Plain, cond: 0, indirect: false}
-    // The relative branches: rel8 jcc and jmp, rel32 jmp and call.
-    branch: if {
-        op >= 0x70 && op <= 0x7f -> {kind: NativeBranch.Cond, width: 1}
-        op == 0xeb -> {kind: NativeBranch.Jump, width: 1}
-        op == 0xe9 -> {kind: NativeBranch.Jump, width: 4}
-        op == 0xe8 -> {kind: NativeBranch.Call, width: 4}
-        op == 0x0f && at < bytes.len() && bytes[at] >= 0x80 && bytes[at] <= 0x8f -> {kind: NativeBranch.Cond, width: 4}
-        else -> {kind: NativeBranch.Plain, width: 0}
-    }
-    if branch.kind != .Plain {
-        if short -> return None
-        insn.cond = if op == 0x0f -> Int{bytes[at]} & 15 else -> op & 15
-        if op == 0x0f -> at += 1
-        insn.kind = branch.kind
-        insn.field = at - from
-        insn.width = branch.width
-        insn.length = at - from + branch.width
-        if from + insn.length > bytes.len() -> return None
-        return Val(insn)
-    }
-    if op == 0x62 || (op >= 0xe0 && op <= 0xe3) -> return None
-    full: if short -> 2 else -> 4
-    moffs: if narrow -> 4 else -> 8
-    shape := {modrm: false, imm: 0}
-    if {
-        op == 0xc4 || op == 0xc5 -> {
-            // VEX: C5 takes one byte (map 0F), C4 two (the map in the first).
-            if at + 1 >= bytes.len() -> return None
-            map: if op == 0xc5 -> 1 else -> Int{bytes[at]} & 31
-            at += if op == 0xc5 -> 1 else -> 2
-            if map < 1 || map > 3 || at >= bytes.len() -> return None
-            code: Int{bytes[at]}
-            at += 1
-            shape.modrm = !(map == 1 && code == 0x77)
-            shape.imm = if {
-                map == 3 -> 1
-                map == 1 && ((code >= 0x70 && code <= 0x73) || code == 0xc2 || code == 0xc4 || code == 0xc5 || code == 0xc6) -> 1
-                else -> 0
-            }
-        }
-        op == 0x0f -> {
-            if at >= bytes.len() -> return None
-            code: Int{bytes[at]}
-            at += 1
-            shape = if {
-                code == 0x38 || code == 0x3a -> {modrm: true, imm: if code == 0x3a -> 1 else -> 0}
-                else -> native_decode_two(code) ?? return None
-            }
-            if code == 0x38 || code == 0x3a {
-                if at >= bytes.len() -> return None
-                at += 1
-            }
-        }
-        else -> {
-            shape = native_decode_one(op, full: full, moffs: moffs, mov: if wide -> 8 else -> full) ?? return None
-        }
-    }
-    if shape.modrm {
-        operand: native_decode_modrm(bytes, at) ?? return None
-        if op == 0xf6 || op == 0xf7 {
-            reg: (Int{bytes[at]} >> 3) & 7
-            if reg < 2 -> shape.imm = if op == 0xf6 -> 1 else -> full
-        }
-        if op == 0xff {
-            reg: (Int{bytes[at]} >> 3) & 7
-            insn.indirect = reg == 4 || reg == 5
-        }
-        if operand.rip >= 0 -> insn.rip = at - from + operand.rip
-        at += operand.length
-    }
-    insn.length = at - from + shape.imm
-    if from + insn.length > bytes.len() -> return None
-    Val(insn)
+    insn: x64_decode(bytes, from, 0) ?? return None
+    if insn.invalid || insn.flow == .Loop -> return None
+    kind: if insn.width == 0 -> X64Flow.Plain else -> insn.flow
+    Val(NativeInsn{length: insn.length, rip: insn.rip, field: insn.field, width: insn.width, kind: kind, cond: insn.cond, indirect: insn.indirect && insn.flow == .Jump})
 }
 
 // Where a relative branch at `at` of `bytes`, which runs at `address`, goes.
@@ -480,7 +298,8 @@ native_moved: fn(out: &[U8], base: Int, bytes: [U8], at: Int, address: Int, insn
         here: address + (offset - at)
         start: out.len()
         if insn.kind == {
-            .Plain -> {
+            // native_decode gives no relative loop, return or stop.
+            .Plain | .Loop | .Return | .Stop -> {
                 loop index in offset..<offset + insn.length -> out.push(bytes[index])
                 if insn.rip >= 0 {
                     target: here + insn.length + native_number(bytes, offset + insn.rip, 4, X64DebugEncoding.Signed)
@@ -854,11 +673,11 @@ native_place_arg: fn(expression: [U8]) -> NativePlaceArg? Never! {
     assert_eq(second.rip, 3)
     third: native_decode(code, 11) ?? panic("third")
     assert_eq(third.length, 2)
-    assert(third.kind == NativeBranch.Cond)
+    assert(third.kind == X64Flow.Cond)
     assert_eq(third.cond, 5)
     assert_eq(native_branch_target(code, 11, 0x1000 + 11, third), 0x1000 + 18)
     call: native_decode(code, 13) ?? panic("call")
-    assert(call.kind == NativeBranch.Call)
+    assert(call.kind == X64Flow.Call)
     assert_eq(call.length, 5)
     // movabs rax,imm64; sub rsp,imm32; movups xmm8,[rbp+0x20]; vmovdqu ymm0,[rsi]
     more: [U8]{0x48, 0xb8, 1, 2, 3, 4, 5, 6, 7, 8, 0x48, 0x81, 0xec, 0x20, 1, 0, 0, 0x44, 0x0f, 0x10, 0x45, 0x20, 0xc5, 0xfe, 0x6f, 0x06}
