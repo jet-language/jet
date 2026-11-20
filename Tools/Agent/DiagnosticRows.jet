@@ -94,9 +94,16 @@ SAFETY_RANGES: [String]{"E00", "E01", "E02", "E03", "E04", "E05", "E06", "E07", 
 SEMA_ROOT: "Compiler/JetSema/"
 
 // A diagnostic code in compiler source: quoted whole, as `sema_error("E0212", …)`
-// passes it, at the head of a message, as `"E2416: env var …"`, or in a runtime
-// report's brackets, as `Runtime fault [R0801]: …`.
-QUOTED_CODE: Regex{"[\x22\[]((?:E|R|JT|L|W)[0-9]{{4}}|E-[A-Z]+(?:-[A-Z]+)*)[\x22\]:]"}
+// passes it, or in a runtime report's brackets, as `Runtime fault [R0801]: …`.
+QUOTED_CODE: Regex{"[\x22\[]((?:E|R|JT|L|W)[0-9]{{4}}|E-[A-Z]+(?:-[A-Z]+)*)[\x22\]]"}
+
+// A row's name at the head of a message, as `"Jet.EnvDecodeFailed: env var …"`
+// writes it, or in a heading: the line reports that row's code.
+MESSAGE_NAME: Regex{"(?:^|[^A-Za-z0-9_.])(Jet\.[A-Z][A-Za-z0-9]*): "}
+
+// A code at the head of a message, as `"E2416: env var …"` wrote it before
+// messages opened with the row's name.
+MESSAGE_CODE: Regex{"(?:^|[^A-Za-z0-9_\[])((?:E|R|JT|L|W)[0-9]{{4}}): "}
 
 // The active rows no source reports yet: the `jet os` verbs whose engine has
 // not landed, which Jetpack/JetOS refuses until it does. Every other active
@@ -725,7 +732,8 @@ add_code: fn(codes: &[String], code: String) {
 }
 
 // The codes `text` names: in double quotes or square brackets, or by the
-// name a report heading in it prints (`"Stop: Jet.ZipLengthMismatch: …"`).
+// name a message or report heading in it opens with
+// (`"Jet.EnvDecodeFailed: …"`, `"Stop: Jet.ZipLengthMismatch: …"`).
 source_codes: fn(facts: [RowFacts], text: String, codes: &[String]) {
     bytes: text.bytes()
     loop (index, raw) in bytes {
@@ -738,18 +746,8 @@ source_codes: fn(facts: [RowFacts], text: String, codes: &[String]) {
         code: String.from_bytes(bytes.slice(index + 1, end)) ?? next
         if source_code(code) -> add_code(codes, code)
     }
-    loop line in text.split("\n") {
-        loop opener in REPORT_OPENERS {
-            pieces: line.split(opener).to_list()
-            loop at in 1..<pieces.len() {
-                if !pieces[at].contains(": ") -> next
-                token: text_before(pieces[at], ": ")
-                if !token.starts_with(NAME_PATH) -> next
-                loop row in facts {
-                    if row.name == token -> add_code(codes, row.code)
-                }
-            }
-        }
+    loop named in MESSAGE_NAME.matches(text) {
+        if row_named(facts, named.groups[0]) == .Val(row) -> add_code(codes, row.code)
     }
 }
 
@@ -1364,6 +1362,15 @@ file_report_problems: fn(rows: [RowFacts], path: String, text: String) -> Report
                 loop problem in copy_problems(rows, literal, at) -> found.problems.push(problem)
             } else if REPORT_HEADING.is_match(literal) || literal.contains(REPORT_LINK) {
                 found.problems.push("{at}: hand-built report text `{literal.replace("\n", "\\n")}`; build its Diagnostic and render it with diagnostic_render")
+            } else {
+                loop named in MESSAGE_NAME.matches(literal) {
+                    if row_named(rows, named.groups[0]) == None {
+                        found.problems.push("{at}: the message `{literal.replace("\n", "\\n")}` opens with `{named.groups[0]}`, which names no diagnostic row")
+                    }
+                }
+                loop coded in MESSAGE_CODE.matches(literal) {
+                    found.problems.push("{at}: the message `{literal.replace("\n", "\\n")}` opens with the code {coded.groups[0]}; open it with its row's name, or with plain text when no row owns the code")
+                }
             }
         }
     }
@@ -1383,16 +1390,14 @@ report_sites: fn(rows: [RowFacts]) -[FS]> ReportSites DiagnosticRowsError! {
             sites.files += 1
             sites.copies += one.copies
             loop problem in one.problems -> sites.problems.push(problem)
-            if one.copies == 0 && !QUOTED_CODE.is_match(text) -> next
+            if one.copies == 0 && !QUOTED_CODE.is_match(text) && !MESSAGE_NAME.is_match(text) {
+                next
+            }
             loop (index, line) in text.split("\n").to_list() {
                 codes := [String]{}
                 loop quoted in QUOTED_CODE.matches(line) -> codes.push(quoted.groups[0].copy())
-                if one.copies > 0 {
-                    loop heading in COPY_HEADING.matches(line) {
-                        if row_named(rows, heading.groups[0]) == .Val(row) {
-                            codes.push(row.code.copy())
-                        }
-                    }
+                loop named in MESSAGE_NAME.matches(line) {
+                    if row_named(rows, named.groups[0]) == .Val(row) -> codes.push(row.code.copy())
                 }
                 loop code in codes {
                     rank: site_rank(path, line, code)
@@ -1873,11 +1878,12 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\",\n
     assert_eq(site_rank("Compiler/JetSema/b.jet", "    codes: [\"E0298\", \"E0299\"]", "E0299"), 2)
     assert_eq(site_rank("Compiler/JetCLI/c.jet", "    codes: [\"E0298\", \"E0299\"]", "E0299"), 3)
     quoted := [String]{}
-    lines: [String]{"    sema_error(\"E-SUBJECT-CALL\", span)", "    push(rt_static_text(\"E2416: env var \"))", "    rt_static_text(\"Runtime fault [R0801]: raw\")", "    row(\"JT0198\")", "    lint(\"L0530\", span)", "    codes: [\"W0410\"]", "    x: \"Error\" + \"E-mail\""}
+    lines: [String]{"    sema_error(\"E-SUBJECT-CALL\", span)", "    push(rt_static_text(\"Jet.EnvDecodeFailed: env var \"))", "    rt_static_text(\"Runtime fault [R0801]: raw\")", "    row(\"JT0198\")", "    lint(\"L0530\", span)", "    codes: [\"W0410\"]", "    x: \"Error\" + \"E-mail\"", "    y: \"core.Jet.Thing: z\""}
     loop line in lines {
         loop found in QUOTED_CODE.matches(line) -> quoted.push(found.groups[0].copy())
+        loop found in MESSAGE_NAME.matches(line) -> quoted.push(found.groups[0].copy())
     }
-    assert_eq(quoted.join(" "), "E-SUBJECT-CALL E2416 R0801 JT0198 L0530 W0410")
+    assert_eq(quoted.join(" "), "E-SUBJECT-CALL Jet.EnvDecodeFailed R0801 JT0198 L0530 W0410")
     assert(audit.contains("| E0299 | BadPath | soundness | a \\| b |"))
     lifted: (render_rows(row.replace(code, "{sound}        expert_path: \"an `#Unsafe` block\",\n")) ?? panic(err.message)).facts
     assert(render_audit(lifted, sites).contains("| E0299 | BadPath | an `#Unsafe` block |"))
@@ -1914,6 +1920,9 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\",\n
     assert_eq(file_report_problems(rows, "a.jet", "y: \"Stop: Jet.BadPath: no\"\n").problems.len(), 1)
     assert_eq(file_report_problems(rows, "a.jet", "y: \"Warning: E0001: no\"\n").problems.len(), 1)
     assert_eq(file_report_problems(rows, "a.jet", "// Error: Jet.BadPath: in a comment\nz: \"Error: no package here\"\n").problems.len(), 0)
+    assert_eq(file_report_problems(rows, "a.jet", "y: \"Jet.BadPath: no\" + \"Runtime fault [R0801]: no\"\n").problems.join("\n"), "")
+    assert(file_report_problems(rows, "a.jet", "y: \"Jet.BadPaths: no\"\n").problems[0].contains("names no diagnostic row"))
+    assert(file_report_problems(rows, "a.jet", "y: \"x; E3999: no\"\n").problems[0].contains("opens with the code E3999"))
     head: "a: fn() -> I64 {{ t(\"Stop: Jet.BadPath: route `\") }}"
     tail: "b: fn() -> I64 {{ t(\"` must start with /\\n Why: routes are matched from the \\\"site\\\" root\\n Fix: write {{{{/path}}}}\\nMore: jet-lang.dev/e/Jet.BadPath\\n\") }}"
     generated: "// Generated by a generator; do not hand-edit.\n{head}\n{tail}\n"

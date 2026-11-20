@@ -213,10 +213,10 @@ jetlib_test_artifact: fn(payload: [U8]) -> JetLibArtifact Never! from payload {
     stamp := pkg_test_jetlib_library()
     stamp.exports.push(JetLibExport.new("advance", JetLibScalar.Int, 1))
     error: pkg_jetlib_validate_load_metadata(stamp, "linux-x86_64", false) ?? panic("duplicate accepted")
-    assert_eq(error.reason, "E1341: .jetlib metadata repeats export `advance`")
+    assert_eq(error.reason, "Jet.InvalidLibraryOutput: .jetlib metadata repeats export `advance`")
     stamp.exports = [JetLibExport]{JetLibExport.new("a-b", JetLibScalar.Int, 0), JetLibExport.new("a_b", JetLibScalar.Int, 0)}
     error2: pkg_jetlib_validate_load_metadata(stamp, "linux-x86_64", false) ?? panic("collision accepted")
-    assert_eq(error2.reason, "E1341: .jetlib metadata repeats native symbol `a_b`")
+    assert_eq(error2.reason, "Jet.InvalidLibraryOutput: .jetlib metadata repeats native symbol `a_b`")
 }
 
 #Test("jetlib effect projection does not normalize scope spelling") {
@@ -281,7 +281,7 @@ jetlib_test_error: fn(bytes: [U8], loader: Bool, host_max: Int) -> String Never!
     if jetlib_test_digest(stamp, "x".bytes()) == {
         .Ok(_) -> { panic("missing digest accepted") }
         .Err(error) -> {
-            assert_eq(error.message, "E1341: library `<unnamed>` has no native payload digest")
+            assert_eq(error.message, "Jet.InvalidLibraryOutput: library `<unnamed>` has no native payload digest")
         }
     }
 }
@@ -329,15 +329,15 @@ jetlib_test_wire_effects: fn(stamp: JetLibStamp, effects: [String]) -> [U8] Neve
     stamp := pkg_test_jetlib_library()
     stamp.entry = Val("")
     error: pkg_jetlib_validate_load_metadata(stamp, "linux-x86_64", false) ?? panic("entry accepted")
-    assert_eq(error.reason, "E1341: .jetlib metadata has an invalid output entry")
+    assert_eq(error.reason, "Jet.InvalidLibraryOutput: .jetlib metadata has an invalid output entry")
     stamp.entry = None
     stamp.compiler_build = ""
     error2: pkg_jetlib_validate_load_metadata(stamp, "linux-x86_64", false) ?? panic("identity accepted")
-    assert_eq(error2.reason, "E1341: .jetlib metadata has no valid compiler build")
+    assert_eq(error2.reason, "Jet.InvalidLibraryOutput: .jetlib metadata has no valid compiler build")
     stamp.compiler_build = "build"
     stamp.exports[0].conventions = [JetLibAccess]{}
     error3: pkg_jetlib_validate_load_metadata(stamp, "linux-x86_64", false) ?? panic("access accepted")
-    assert_eq(error3.reason, "E1341: .jetlib export `advance` has invalid access-convention metadata")
+    assert_eq(error3.reason, "Jet.InvalidLibraryOutput: .jetlib export `advance` has invalid access-convention metadata")
 }
 
 #Test("jetlib optional output-entry presence and field extent are exact") {

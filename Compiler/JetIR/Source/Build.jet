@@ -2048,7 +2048,7 @@ ir_entry_job: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, job: IRJob, declared
     function: p.functions[job_row]
     ir_entry_word_if(m, b, job.name)
     if job.stripped {
-        message: ir_static_text(m, b, "unknown command `{job.name}` (E1294: no job named `{job.name}`; declared jobs: {declared.join(", ")}): a release binary runs only `#Job(.Ship)` jobs; mark `{job.name}` `#Job(.Ship)` to ship it")
+        message: ir_static_text(m, b, "unknown command `{job.name}` (Jet.UnknownJob: no job named `{job.name}`; declared jobs: {declared.join(", ")}): a release binary runs only `#Job(.Ship)` jobs; mark `{job.name}` `#Job(.Ship)` to ship it")
         string_row: ir_string_row(m)
         text: ir_runtime(m, b, "jet_rt_string_from_static", message, string_row)
         _: ir_runtime(m, b, "jet_rt_entry_error_exit", [Int]{text}, -1)
@@ -2093,7 +2093,7 @@ ir_entry_passthrough: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String
 // which lists `declared` (jet_rt_entry_job_unknown); without one the entry
 // runs.
 ir_entry_unknown_job: fn(m: &IRModule, b: &IRBuilder, declared: [String]) Never! {
-    prefix: ir_static_text(m, b, "E1294: no job named `")
+    prefix: ir_static_text(m, b, "Jet.UnknownJob: no job named `")
     suffix: ir_static_text(m, b, "`; the first program word must name a `#Job fn`; declared jobs: {declared.join(", ")}")
     operands := [Int]{}
     loop operand in prefix -> operands.push(operand)

@@ -1798,7 +1798,7 @@ priv client_dial: fn(wire: &BuildWire, url: ClientURL, phases: ClientPhases, pro
     addresses: provider.jet_http_build_resolve(destination.host, destination.port) ?? {
         // An effect scope in force refused the host before any lookup
         // (spec.md "Effect scopes"): a policy failure, not a resolver one.
-        if err.starts_with("E0740: ") || err.starts_with("E0749: ") {
+        if err.starts_with("Jet.EffectBoundExceeded: ") || err.starts_with("Jet.ProhibitedEffectReached: ") {
             wire.ending = "unmapped"
             return Err(.Policy{reason: err})
         }

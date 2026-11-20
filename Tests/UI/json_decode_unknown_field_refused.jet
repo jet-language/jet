@@ -1,0 +1,19 @@
+// @run_cli
+// A strict typed decode refuses a field its struct does not declare with the
+// registered Jet.UnknownDecodedField, and the entry returns the refusal.
+package: {
+    name: "json_decode_unknown_field_refused"
+    authority: { allow: [IO] }
+}
+
+use json: core.encoding.json
+
+#Codable(unknown: .Deny)
+Strict: struct {
+    name: String,
+}
+
+run: fn() {
+    strict: json.decode<Strict>("{{\"name\":\"x\",\"extra\":1}}") ?? return Err(err[0].reason)
+    print("name: {strict.name}")
+}

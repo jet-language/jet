@@ -95,10 +95,10 @@ jet_cli_import_translate_pascal_file: fn(raw: String, source: String, target: St
     jet_cli_import_files_append(output, jet_cli_import_binder_header("pascal"))
     jet_cli_import_files_append(output, "// Source: {source}\n")
     todo: if jet_cli_import_pascal_library_name(raw) == .Val(library) -> {
-        jet_cli_import_files_append(output, "use {library}: pascal.{library}\n\n// Binder stub: use {library}: pascal.{library}\n// TODO JT0101: Pascal library `{library}` remains an FFI source.\n")
+        jet_cli_import_files_append(output, "use {library}: pascal.{library}\n\n// Binder stub: use {library}: pascal.{library}\n// TODO Jet.SourceImportTodo: Pascal library `{library}` remains an FFI source.\n")
         jet_cli_import_gap("Pascal library `{library}` was not translated", "Object Pascal bodies, classes, and runtime ownership have no proven source-to-Jet mapping; the original source remains authoritative", "run `jet inspect bind pascal {source} --pkg {library}` for call-in-place bindings, then port unsupported bodies explicitly", source, target, 1)
     } else -> {
-        jet_cli_import_files_append(output, "// TODO JT0101: Pascal source has no recognizable library declaration.\n")
+        jet_cli_import_files_append(output, "// TODO Jet.SourceImportTodo: Pascal source has no recognizable library declaration.\n")
         jet_cli_import_gap("Pascal source has no recognizable library declaration", "the importer cannot establish a library boundary or ABI contract", "add a Pascal `library` declaration or use a hand-written Jet FFI overlay; no source was silently emitted", source, target, 1)
     }
     jet_cli_import_files_append(output, "// The Pascal source remains the canonical source of truth.\n")
@@ -111,10 +111,10 @@ jet_cli_import_translate_ada_file: fn(raw: String, source: String, target: Strin
     jet_cli_import_files_append(output, jet_cli_import_binder_header("ada"))
     jet_cli_import_files_append(output, "// Source: {source}\n")
     todo: if jet_cli_import_ada_package_name(raw) == .Val(package) -> {
-        jet_cli_import_files_append(output, "use {package}: ada.{package}\n\n// Binder stub: use {package}: ada.{package}\n// TODO JT0101: Ada package `{package}` remains an FFI source.\n")
+        jet_cli_import_files_append(output, "use {package}: ada.{package}\n\n// Binder stub: use {package}: ada.{package}\n// TODO Jet.SourceImportTodo: Ada package `{package}` remains an FFI source.\n")
         jet_cli_import_gap("Ada package `{package}` was not translated", "Ada bodies, range checks, exceptions, tasking, and representation clauses have no proven source-to-Jet mapping; the original package spec and body remain authoritative", "run `jet inspect bind ada {source} --pkg {package}` for call-in-place bindings, then port unsupported bodies explicitly", source, target, 1)
     } else -> {
-        jet_cli_import_files_append(output, "// TODO JT0101: Ada source has no recognizable package declaration.\n")
+        jet_cli_import_files_append(output, "// TODO Jet.SourceImportTodo: Ada source has no recognizable package declaration.\n")
         jet_cli_import_gap("Ada source has no recognizable package declaration", "the importer cannot establish a library boundary or ABI contract", "add a top-level Ada `package` declaration or use a hand-written Jet FFI overlay; no source was silently emitted", source, target, 1)
     }
     jet_cli_import_files_append(output, "// The Ada source remains the canonical source of truth.\n")

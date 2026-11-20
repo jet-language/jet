@@ -59,10 +59,10 @@ load: fn(path: String, grant: ModGrant) -[FS, Exec]> Mod ModError! {
     loop index in 0..<core.mod.__exports_count(handle) {
         info: core.mod.__export_info(handle, index)
         text_exports = text_exports || info.text
-        core.mod.__resolve_export(handle, index) ?? return Err(ModError.Invalid("E1341: library `{core.mod.__context_name(handle)}` metadata names `{info.name}`, but the payload has no `{info.symbol}` export: {err}"))
+        core.mod.__resolve_export(handle, index) ?? return Err(ModError.Invalid("Jet.InvalidLibraryOutput: library `{core.mod.__context_name(handle)}` metadata names `{info.name}`, but the payload has no `{info.symbol}` export: {err}"))
     }
     if text_exports {
-        core.mod.__resolve_symbol(handle, "jet_text_free") ?? return Err(ModError.Invalid("E1341: library `{core.mod.__context_name(handle)}` has Text exports but no `jet_text_free` allocator release export: {err}"))
+        core.mod.__resolve_symbol(handle, "jet_text_free") ?? return Err(ModError.Invalid("Jet.InvalidLibraryOutput: library `{core.mod.__context_name(handle)}` has Text exports but no `jet_text_free` allocator release export: {err}"))
     }
     // Finish consumes the raw owner; the lexical Close sees an empty slot.
     Ok(core.mod.__finish_context(handle))

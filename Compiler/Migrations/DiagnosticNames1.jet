@@ -9,9 +9,11 @@
 // explain Jet.ReturnTypeMismatch` to learn more"), a bracketed `[jet.Name]`
 // outside a heading is the bare name, any other `jet.Name` is `Jet.Name`
 // (`#Allow(Jet.FloatMoney, "…")`), a jet.report object gains its `name`
-// after its `code`, and a `.case` predicate that matches a code alone matches
-// its name. Each code and name maps through the diagnostic registry; a
-// `jet.Name`, link or hint the registry does not know is left alone and
+// after its `code`, a `.case` predicate that matches a code alone matches
+// its name, and a message that opens with a code opens with its name
+// (`"E2416: env var …"` is `"Jet.EnvDecodeFailed: env var …"`). Each code
+// and name maps through the diagnostic registry; a `jet.Name`, message code,
+// link or hint the registry does not know is left alone and
 // reported. The rewrite is textual, so it reads every kind of file alike. A
 // Jet source that parsed cleanly keeps its text unless the rewrite parses
 // cleanly too.
@@ -45,7 +47,7 @@ diagnostic_names1_file: fn(path: String, text: String, source: Bool) -[]> Migrat
     skipped := [String]{}
     rewritten := 0
     result := text
-    loop pass in 0..<7 {
+    loop pass in 0..<8 {
         bytes: result.bytes()
         outcome: if pass == {
             0 -> diagnostic_names1_headings(path, bytes)
@@ -54,6 +56,7 @@ diagnostic_names1_file: fn(path: String, text: String, source: Bool) -[]> Migrat
             3 -> diagnostic_names1_reports(bytes)
             4 -> diagnostic_names1_bracketed(path, bytes)
             5 -> diagnostic_names1_predicates(path, result)
+            6 -> diagnostic_names1_messages(path, bytes)
             else -> diagnostic_names1_bare(path, bytes)
         }
         loop reason in outcome.skipped {
@@ -225,6 +228,97 @@ diagnostic_names1_bracketed: fn(path: String, bytes: [U8]) -[]> MigrationOutcome
         at = end + 1
     }
     diagnostic_names1_finish(edits, bytes)
+}
+
+// A message that opens with a code, `"E2416: env var …"`, opens with its
+// row's name, `"Jet.EnvDecodeFailed: env var …"`: users read no error numbers.
+// A code opens a message right after a quote, a backtick or a string's `\n`
+// or `\t` escape, or after a heading's label (`Error: E2477: …`); in a
+// recorded output and inside a `.case` predicate's quoted text, any code
+// followed by `: ` opens one. A code no row owns is reported and left alone.
+diagnostic_names1_messages: fn(path: String, bytes: [U8]) -[]> MigrationOutcome {
+    edits := DiagnosticNames1Edits{out: [String]{}, cursor: 0, rewritten: 0, skipped: [String]{}}
+    output: diagnostic_names1_recorded_output(path)
+    predicates: path.ends_with(".case")
+    quoted := false
+    comment := false
+    line_start := true
+    at := 0
+    loop at < bytes.len() {
+        start: at
+        byte: bytes[start]
+        at += 1
+        if byte == 10 {
+            quoted = false
+            comment = false
+            line_start = true
+            next
+        }
+        if line_start && byte != 32 && byte != 9 {
+            comment = byte == 35
+            line_start = false
+        }
+        if byte == 92 {
+            at += 1
+            next
+        }
+        if byte == 34 {
+            quoted = !quoted
+            next
+        }
+        if !diagnostic_names1_letter(byte) || !diagnostic_names1_word_start(bytes, start) -> next
+        end: diagnostic_names1_word_end(bytes, start)
+        if !diagnostic_names1_at(bytes, end, ": ".bytes()) -> next
+        token: String.from_bytes(bytes[start..<end]) ?? next
+        if !diagnostic_names1_code(token) -> next
+        if !output && !(predicates && quoted && !comment) && !diagnostic_names1_message_open(bytes, start) {
+            next
+        }
+        row: diagnostic_registry_row(token) ?? {
+            diagnostic_names1_skip(edits, path, bytes, start, token)
+            at = end
+            next
+        }
+        diagnostic_names1_splice(edits, bytes, start, end, row.name)
+        at = end
+    }
+    diagnostic_names1_finish(edits, bytes)
+}
+
+// A recorded output: a program's or a command's stdout or stderr as a test
+// compares it.
+diagnostic_names1_recorded_output: fn(path: String) -> Bool {
+    path.ends_with(".out") || path.ends_with(".expected") || path.ends_with(".stdout") || path.ends_with(".stderr") || path.ends_with(".err") || path.ends_with(".warn")
+}
+
+// Whether a message opens at `at`: after a quote, a backtick, a string's
+// `\n` or `\t` escape, or a heading's label and `: `.
+diagnostic_names1_message_open: fn(bytes: [U8], at: Int) -[]> Bool {
+    if at == 0 -> return false
+    before: bytes[at - 1]
+    if before == 34 || before == 96 -> return true
+    if at >= 2 && bytes[at - 2] == 92 && (before == 110 || before == 116) -> return true
+    loop label in DIAGNOSTIC_NAMES1_LABELS {
+        if diagnostic_names1_at(bytes, at - label.count_bytes() - 2, "{label}: ".bytes()) {
+            return true
+        }
+    }
+    false
+}
+
+// Whether `token` is spelled as a numbered code: `E`, `L`, `W` or `R` and
+// four digits, or `JT` and four digits.
+diagnostic_names1_code: fn(token: String) -[]> Bool {
+    bytes: token.bytes()
+    first: if token.starts_with("JT") -> 2 else -> 1
+    if bytes.len() != first + 4 -> return false
+    if first == 1 && !token.starts_with("E") && !token.starts_with("L") && !token.starts_with("W") && !token.starts_with("R") {
+        return false
+    }
+    loop byte in bytes[first..<bytes.len()] {
+        if byte < 48 || byte > 57 -> return false
+    }
+    true
 }
 
 // A `.case` predicate that matches a code alone, `stderr: ~ "E0113"` or
@@ -471,4 +565,18 @@ diagnostic_names1_letter: fn(byte: U8) -[]> Bool {
     assert_eq(outcome.text, "stderr: count \"Error: \" = 1 # one\nstdout: !~ \"Error: \" # none\nstdout: !~ \"Stop: \"\nstderr: ~ \"Error: Jet.\"\nstderr.after_first(\"Error: \"): ^= \"Jet.MissingGit:\" # first\nstderr: ~any \"Error: \" \"Warning: \"\nstderr: ~ \"Error: Jet.ReturnTypeMismatch\"\n")
     assert_eq(diagnostic_names1_file("a.case", outcome.text, false).rewritten, 0)
     assert_eq(diagnostic_names1_file("a.txt", old, false).text, old.replace("Error [E0113]", "Error: Jet.ReturnTypeMismatch"))
+}
+
+#Test("a message that opens with a code opens with its name") {
+    old: "x: \"E2416: env var A\"\ny: \"(E2416: kept)\" // E2416: a comment\nz: `E2416: quoted` \"a\\nE2416: b\"\nError: E2416: the entry's Err\n\"E9999: no row\"\n"
+    outcome: diagnostic_names1_file("a.txt", old, false)
+    assert_eq(outcome.text, "x: \"Jet.EnvDecodeFailed: env var A\"\ny: \"(E2416: kept)\" // E2416: a comment\nz: `Jet.EnvDecodeFailed: quoted` \"a\\nJet.EnvDecodeFailed: b\"\nError: Jet.EnvDecodeFailed: the entry's Err\n\"E9999: no row\"\n")
+    assert_eq(outcome.rewritten, 4)
+    assert_eq(outcome.skipped, [String]{"a.txt:5: `E9999` names no registered diagnostic, left alone"})
+    assert_eq(diagnostic_names1_file("a.txt", outcome.text, false).rewritten, 0)
+    recorded: diagnostic_names1_file("a.out", "notes:E2416: x\n[at `port`: E2416: y]\nE0113 is a code\n", false)
+    assert_eq(recorded.text, "notes:Jet.EnvDecodeFailed: x\n[at `port`: Jet.EnvDecodeFailed: y]\nE0113 is a code\n")
+    case_old: "stdout: = \"settings: E2416: env\" # E2416: the decode\n# stdout: ~ \"a: E2416: b\"\n"
+    case_new: diagnostic_names1_file("a.case", case_old, false)
+    assert_eq(case_new.text, "stdout: = \"settings: Jet.EnvDecodeFailed: env\" # E2416: the decode\n# stdout: ~ \"a: E2416: b\"\n")
 }

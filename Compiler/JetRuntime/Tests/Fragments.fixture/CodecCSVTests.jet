@@ -76,16 +76,16 @@ csv_fixture_rejects: fn(template: I64, reason: I64) -> Bool {
     }
     csv_records_free(blank)
     jet_rt_free(out, I64{8}, I64{8})
-    if !csv_fixture_rejects(rt_static_text("a|b"), rt_static_text("E2701: CSV row 1, line 1, column 2 — bare CR is not a record ending")) {
+    if !csv_fixture_rejects(rt_static_text("a|b"), rt_static_text("Jet.MalformedRingInput: CSV row 1, line 1, column 2 — bare CR is not a record ending")) {
         return I64{8}
     }
-    if !csv_fixture_rejects(rt_static_text("a,\"x"), rt_static_text("E2701: CSV row 1, line 1, column 5 — quoted field ended before its closing quote")) {
+    if !csv_fixture_rejects(rt_static_text("a,\"x"), rt_static_text("Jet.MalformedRingInput: CSV row 1, line 1, column 5 — quoted field ended before its closing quote")) {
         return I64{9}
     }
-    if !csv_fixture_rejects(rt_static_text("\"ok\"junk"), rt_static_text("E2701: CSV row 1, line 1, column 5 — only quote, comma, CRLF, LF, or EOF may follow a closing quote")) {
+    if !csv_fixture_rejects(rt_static_text("\"ok\"junk"), rt_static_text("Jet.MalformedRingInput: CSV row 1, line 1, column 5 — only quote, comma, CRLF, LF, or EOF may follow a closing quote")) {
         return I64{10}
     }
-    if !csv_fixture_rejects(rt_static_text("h|\n\"bad|\nvalue"), rt_static_text("E2701: CSV row 2, line 3, column 6 — quoted field ended before its closing quote")) {
+    if !csv_fixture_rejects(rt_static_text("h|\n\"bad|\nvalue"), rt_static_text("Jet.MalformedRingInput: CSV row 2, line 3, column 6 — quoted field ended before its closing quote")) {
         return I64{11}
     }
     I64{0}

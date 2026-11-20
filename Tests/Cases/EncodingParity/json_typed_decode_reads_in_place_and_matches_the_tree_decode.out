@@ -5,11 +5,11 @@ spaced tree ok {"id":7,"name":"Ada","tags":[],"tag":{"Level":{"depth":3}},"score
 order ok {"id":123456789012345678901234567890,"name":"","tags":[],"tag":"Green","inner":{"x":0},"scores":{},"level":9,"price":1,"ratio":1.0,"ok":true,"raw":1,"blob":""}
 order tree ok {"id":123456789012345678901234567890,"name":"","tags":[],"tag":"Green","inner":{"x":0},"scores":{},"level":9,"price":1,"ratio":1.0,"ok":true,"raw":1,"blob":""}
 missing err 2
-  id: E2410: missing required field `id`
-  tag: E2410: missing required field `tag`
+  id: Jet.MissingRequiredField: missing required field `id`
+  tag: Jet.MissingRequiredField: missing required field `tag`
 missing tree err 2
-  id: E2410: missing required field `id`
-  tag: E2410: missing required field `tag`
+  id: Jet.MissingRequiredField: missing required field `id`
+  tag: Jet.MissingRequiredField: missing required field `tag`
 wrong err 12
   id: expected Int, found text "7"
   name: expected Text, found number 7
@@ -123,28 +123,28 @@ lines tree parse failed
 strict ok {"a":1,"bee":"x"}
 strict tree ok {"a":1,"bee":"x"}
 strict-unknown err 3
-  z: E2412: unknown field `z`
-  b: E2412: unknown field `b`
-  y: E2412: unknown field `y`
+  z: Jet.UnknownDecodedField: unknown field `z`
+  b: Jet.UnknownDecodedField: unknown field `b`
+  y: Jet.UnknownDecodedField: unknown field `y`
 strict-unknown tree err 3
-  z: E2412: unknown field `z`
-  b: E2412: unknown field `b`
-  y: E2412: unknown field `y`
+  z: Jet.UnknownDecodedField: unknown field `z`
+  b: Jet.UnknownDecodedField: unknown field `b`
+  y: Jet.UnknownDecodedField: unknown field `y`
 strict-missing err 3
-  zz: E2412: unknown field `zz`
-  a: E2410: missing required field `a`
-  bee: E2410: missing required field `bee`
+  zz: Jet.UnknownDecodedField: unknown field `zz`
+  a: Jet.MissingRequiredField: missing required field `a`
+  bee: Jet.MissingRequiredField: missing required field `bee`
 strict-missing tree err 3
-  zz: E2412: unknown field `zz`
-  a: E2410: missing required field `a`
-  bee: E2410: missing required field `bee`
+  zz: Jet.UnknownDecodedField: unknown field `zz`
+  a: Jet.MissingRequiredField: missing required field `a`
+  bee: Jet.MissingRequiredField: missing required field `bee`
 strict-list err 3
   [1].a: expected Int, found text "no"
-  [1].bee: E2410: missing required field `bee`
+  [1].bee: Jet.MissingRequiredField: missing required field `bee`
   [2]: expected an object
 strict-list tree err 3
   [1].a: expected Int, found text "no"
-  [1].bee: E2410: missing required field `bee`
+  [1].bee: Jet.MissingRequiredField: missing required field `bee`
   [2]: expected an object
 wrap ok {"value":3,"list":[1,2,-9223372036854775808]}
 wrap tree ok {"value":3,"list":[1,2,-9223372036854775808]}
@@ -155,9 +155,9 @@ wrap-bad tree err 2
   value: expected Text, found number 3
   list[1]: expected Text, found number 4
 wrap-inner err 1
-  list[0].x: E2410: missing required field `x`
+  list[0].x: Jet.MissingRequiredField: missing required field `x`
 wrap-inner tree err 1
-  list[0].x: E2410: missing required field `x`
+  list[0].x: Jet.MissingRequiredField: missing required field `x`
 tags err 2
   [2]: no matching enum variant
   [3].Level.depth: expected Int, found text "x"

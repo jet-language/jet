@@ -1331,7 +1331,7 @@ function jet_authority_with(authority, requested) {
       "E0712",
       "<authority>",
       0,
-      `E0712: authority cannot narrow to \`${right}\` outside its held rights`,
+      `Jet.EffectWithoutAuthority: authority cannot narrow to \`${right}\` outside its held rights`,
     );
   }
   return { rights: new Set([right]) };

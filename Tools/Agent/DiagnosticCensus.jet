@@ -13,9 +13,9 @@
 //   Tests/Release), `case` (a Tests/Cases case or its stderr, stdout or
 //   `.warn` file), else `none`.
 // A source emits a code by writing it alone between quotes or brackets
-// (`"E3413"`, `[E0001]`), by opening its message text with it
-// (`"E2416: invalid .env line"`), or by writing a report heading with the
-// row's name (`Error: Jet.MissingEngine: `). The scan covers every `.jet` file
+// (`"E3413"`, `[E0001]`), or by opening a message or a report heading with
+// the row's name (`"Jet.EnvDecodeFailed: invalid .env line"`,
+// `Error: Jet.MissingEngine: `). The scan covers every `.jet` file
 // under Compiler/, Jetpack/ and Core/ except test packages, fixtures, dot
 // directories and the registry's own files. rustc's codes (RUSTC_CODES) are
 // never a Jet emission: a source names them only to classify or set aside
@@ -151,8 +151,7 @@ census_code_byte: fn(byte: U8) -> Bool Never! {
     (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{48}) && byte <= (U8{57})) || byte == (U8{45})
 }
 
-// The codes `text` writes alone between quotes or brackets, or quoted and
-// followed by `: `.
+// The codes `text` writes alone between quotes or brackets.
 census_quoted_codes: fn(text: String, codes: &[String]) Never! {
     bytes: text.bytes()
     loop (index, byte) in bytes {
@@ -160,8 +159,7 @@ census_quoted_codes: fn(text: String, codes: &[String]) Never! {
         close: if byte == (U8{34}) -> U8{34} else -> U8{93}
         end := index + 1
         loop end < bytes.len() && census_code_byte(bytes[end]) -> end += 1
-        coded_text: byte == (U8{34}) && end + 1 < bytes.len() && bytes[end] == (U8{58}) && bytes[end + 1] == (U8{32})
-        if end > index + 1 && end < bytes.len() && (bytes[end] == close || coded_text) {
+        if end > index + 1 && end < bytes.len() && bytes[end] == close {
             code: census_slice(text, index + 1, end)
             if census_is_code(code) -> census_add(codes, code)
         }
@@ -651,9 +649,9 @@ census_test_entry: fn(code: String, gap: String) -> BaselineRow Never! {
 #Test("the census reads emitted codes, heading names and name links, and nothing else") {
     tokens := CensusTokens{codes: [String]{}, names: [String]{}}
     census_quoted_codes("fail(\"E3413\", x) [E0001] \"E2416: bad line\" \"E9\" [EOF] \"E2417 later\"", tokens.codes)
-    assert_eq(tokens.codes, [String]{"E3413", "E0001", "E2416"})
-    census_names("Error: Jet.FetchHashMismatch: x\nMore: jet-lang.dev/e/Jet.ProhibitedEffectReached\nsee /e/nothing #Allow(Jet.FloatMoney, \"why\") `Jet.Prose` game.Jet.Other: Jet.: x ~ \"Stop: Jet.Labeled\" Errors: Jet.Prose", tokens.names)
-    assert_eq(tokens.names, [String]{"Jet.FetchHashMismatch", "Jet.ProhibitedEffectReached", "Jet.Labeled"})
+    assert_eq(tokens.codes, [String]{"E3413", "E0001"})
+    census_names("Error: Jet.FetchHashMismatch: x\nMore: jet-lang.dev/e/Jet.ProhibitedEffectReached\nsee /e/nothing #Allow(Jet.FloatMoney, \"why\") `Jet.Prose` game.Jet.Other: Jet.: x ~ \"Stop: Jet.Labeled\" Errors: Jet.Prose \"Jet.EnvDecodeFailed: bad line\"", tokens.names)
+    assert_eq(tokens.names, [String]{"Jet.FetchHashMismatch", "Jet.ProhibitedEffectReached", "Jet.Labeled", "Jet.EnvDecodeFailed"})
     case_tokens := CensusTokens{codes: [String]{}, names: [String]{}}
     census_carried_text("t/a.case", "# \"E0001\" \"Jet.Hidden\" in a comment\nstderr: ~ \"E0749\" # the denial\nstderr: ~ \"Jet.UnknownName\" !~ \"Jet.Prose here\"\n", case_tokens)
     assert_eq(case_tokens.codes, [String]{"E0749"})

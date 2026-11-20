@@ -1,0 +1,14 @@
+// @run_cli
+// A CSV field with text after its closing quote is refused with the
+// registered Jet.MalformedRingInput, and the entry returns the refusal.
+package: {
+    name: "data_csv_malformed_input_refused"
+    authority: { allow: [IO] }
+}
+
+use data: core.data
+
+run: fn() {
+    rows: data.csv<Int>("n\n\"7\"x") ?? return Err(err.reason)
+    print("rows: {rows.len()}")
+}

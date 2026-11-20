@@ -180,7 +180,7 @@ TypedCSV: struct {
             byte: Int{self.raw[index]}
             if byte < 128 || byte >= 192 -> column += 1
         }
-        self.failure = Val(TypedCSVError{reason: "E2701: CSV row {self.record}, line {self.line}, column {column} — {reason}"})
+        self.failure = Val(TypedCSVError{reason: "Jet.MalformedRingInput: CSV row {self.record}, line {self.line}, column {column} — {reason}"})
     }
 
     // After a field, at its comma, line ending or the end of the input: true
@@ -1389,13 +1389,13 @@ reader: fn<R: Reader>(source: &&R, limits: EncodingLimits{EncodingLimits.safe()}
     assert_eq(records[2], [String]{""})
     if typed_records("é\"") == {
         .Err(error) -> {
-            assert_eq(error.reason, "E2701: CSV row 1, line 1, column 2 — quote inside an unquoted field")
+            assert_eq(error.reason, "Jet.MalformedRingInput: CSV row 1, line 1, column 2 — quote inside an unquoted field")
         }
         .Ok(_) -> panic("unquoted quote must fail")
     }
     if typed_records("\"x") == {
         .Err(error) -> {
-            assert_eq(error.reason, "E2701: CSV row 1, line 1, column 3 — quoted field ended before its closing quote")
+            assert_eq(error.reason, "Jet.MalformedRingInput: CSV row 1, line 1, column 3 — quoted field ended before its closing quote")
         }
         .Ok(_) -> panic("unfinished quoted field must fail")
     }

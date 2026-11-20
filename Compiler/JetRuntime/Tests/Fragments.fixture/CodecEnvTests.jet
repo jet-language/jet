@@ -64,13 +64,13 @@ env_fixture_row: fn(values: I64, index: I64, name: I64, value: I64) -> Bool {
     csv_words_push(origins, jet_rt_string_clone(rt_static_text("db.token")))
     framed: jet_rt_record_new_field_error(rt_static_text("DB.Token"), rt_static_text("expected Int, found text \"s\""))
     env_frame_error(framed, origins)
-    if !jet_rt_string_eq(text_glue_word(framed + TEXT_FIELD_REASON), rt_static_text("E2416: env var APP_DB__TOKEN -> DB.Token: secret value rejected")) {
+    if !jet_rt_string_eq(text_glue_word(framed + TEXT_FIELD_REASON), rt_static_text("Jet.EnvDecodeFailed: env var APP_DB__TOKEN -> DB.Token: secret value rejected")) {
         return I64{11}
     }
     jet_rt_handle_drop_field_error(framed)
     plain: jet_rt_record_new_field_error(rt_static_text("port"), rt_static_text("missing"))
     env_frame_error(plain, origins)
-    if !jet_rt_string_eq(text_glue_word(plain + TEXT_FIELD_REASON), rt_static_text("E2416: config field port: missing")) {
+    if !jet_rt_string_eq(text_glue_word(plain + TEXT_FIELD_REASON), rt_static_text("Jet.EnvDecodeFailed: config field port: missing")) {
         return I64{12}
     }
     jet_rt_handle_drop_field_error(plain)
