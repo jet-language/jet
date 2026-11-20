@@ -31,11 +31,34 @@ exit: 0
 step cold: jet run tests/main.jet
 exit: 0
 stdout: = "42 hi\n"
-step warm: jet run tests/main.jet
+step: jet run control/main.jet
+exit: 0
+stdout: = "42 hi\n"
+# A warm run of an entry that reaches three sources doesn't read the 50000
+# under tests/bulk/. It once read and hashed every one of them on each run:
+# 15 to 99 seconds for 50000 2 KB sources, against 7 to 17 ms now. Each warm
+# run alternates with one of the same entry in control/, which has no other
+# sources, so host load slows both alike and only the medians' ratio counts.
+step base1: jet run control/main.jet
+exit: 0
+stdout: = "42 hi\n"
+step warm1: jet run tests/main.jet
 exit: 0
 stdout: = "42 hi\n"
 stderr: = ""
-# A warm run of an entry that reaches three sources doesn't read the 50000
-# under tests/bulk/. It once read and hashed every one of them on
-# each run: 15 to 99 seconds for 50000 2 KB sources, against 7 to 17 ms now.
-elapsed: warm < 1000ms
+step base2: jet run control/main.jet
+exit: 0
+stdout: = "42 hi\n"
+step warm2: jet run tests/main.jet
+exit: 0
+stdout: = "42 hi\n"
+stderr: = ""
+step base3: jet run control/main.jet
+exit: 0
+stdout: = "42 hi\n"
+step warm3: jet run tests/main.jet
+exit: 0
+stdout: = "42 hi\n"
+stderr: = ""
+elapsed: median [base1,base2,base3] > 0ns
+elapsed: median [warm1,warm2,warm3] < 10 * median [base1,base2,base3]
