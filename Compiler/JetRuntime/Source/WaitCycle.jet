@@ -26,9 +26,11 @@
 // receives from the joiner's channel is no cycle. Arming walks the holders
 // from the arming task; a walk that reaches only armed tasks whose holders
 // it reached too is a cycle no task outside it can end, which the arming
-// task delivers: one record of every task's line and each task's wake. Each
-// task in it then adds its own line's site from its own stack, waits until
-// all have, and stops with the whole cycle.
+// task delivers: one record of every task's line and each task's wake. A
+// task that drops its last Sender of a channel wakes the channel's
+// receivers, which arm again, so a cycle its leaving closes is found too.
+// Each task of a delivered cycle then adds its own line's site from its own
+// stack, waits until all have, and stops with the whole cycle.
 
 WAIT_CYCLE_JOIN: I64{1}
 
