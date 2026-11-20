@@ -1147,9 +1147,14 @@ when the image's runtime exports its allocator words and its record/replay
 mode (`jet_rt_alloc_class_limit`, `jet_rt_alloc_check_take_code`,
 `jet_rt_alloc_check_give_code` and `jet_rt_replay_mode`, data symbols every image
 that allocates holds; nothing in the program writes them for the debugger,
-so a program no debugger touches pays nothing for them): the debugger maps
-the expression's code and a room beside the program's code once per run of
-the program, sets the thread to call it from that room with the other
+so a program no debugger touches pays nothing for them): when it starts or
+attaches to the program the debugger maps one room within a jump's reach of
+the program's code, kept for the whole run, whose code space holds each
+expression's code, page by page; a full space starts over from its first
+page and the expressions placed before are placed again when next run, so
+the room never grows and no evaluation, condition or logpoint is refused
+for want of room. The debugger sets the thread to call the expression from
+that room with the other
 threads stopped, and puts the thread's registers, its floating-point state
 and the code the debugger planted back after it. For the call the debugger
 writes the allocator words, as checked mode routes the heap, so the call's

@@ -479,14 +479,20 @@ NativeSession: struct {
     eval_image: Shared<NativeEvalImage>?{None},
     eval_read: NativeEvalRead?{None},
     // A `syscall` instruction of the image's code, which the evaluation
-    // room's and code's mappings run (syscall_site); 0 until the first needs
-    // one.
+    // room's and the placed code's mappings run (syscall_site): the first
+    // the image's code holds (native_eval_reach), else one found in the
+    // program's when that one isn't there; and the end of the image's code,
+    // which the mappings are near.
     syscall: Int{0},
+    text_end: Int{0},
     // The room an evaluation in the program runs from (NativeEval.jet
-    // native_eval_here), 0 until the first maps it, and the count of the
-    // program's runs, which says whether an expression's code placed in the
-    // program (NativeEval.placed_in) is this run's.
+    // native_eval_here), mapped as the program starts or is attached
+    // (reserve), 0 until it is; the next free byte of the room's code space
+    // (eval_space); and the count of the program's runs and of the code
+    // space's restarts, which says whether an expression's code placed in
+    // the program (NativeEval.placed_in) is still there.
     eval_room: Int{0},
+    eval_code: Int{0},
     eval_runs: Int{0},
     // The conditions and logpoints placed in the program (NativePlace.jet),
     // latest last, and whether the last stop was a condition of them that
@@ -554,7 +560,8 @@ NativeSession: struct {
         observe_root: native_elf_symbol(elf, X64_OBSERVE_ROOT_SYMBOL) ?? 0
         codes: native_elf_codes(elf, ".text")
         openings: native_openings(image, codes)
-        Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: output_path, output_read: 0, started: false, threads: [NativeThread]{}, observe_root: observe_root, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: None, task: 0, replay_start: native_elf_symbol(elf, NATIVE_REPLAY_START_SYMBOL) != None, program_entry: native_image_entry(image, codes)})
+        text: native_eval_reach(codes)
+        Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: output_path, output_read: 0, started: false, threads: [NativeThread]{}, observe_root: observe_root, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: None, task: 0, replay_start: native_elf_symbol(elf, NATIVE_REPLAY_START_SYMBOL) != None, program_entry: native_image_entry(image, codes), syscall: text.syscall, text_end: text.end})
     }
 
     // A breakpoint on `line` of the Jet source `file` (a base name or a path,
@@ -1083,11 +1090,11 @@ NativeSession: struct {
         }
         words: native_eval_words(facts.value.symbols) ?? return Err(native_eval_refused("the program's runtime doesn't export the words evaluations route its heap through ({x64_debug_eval_symbols().join(", ")}): rebuild the program with this jet"))
         syscall: self.syscall_site(facts.value.code) ?? return Err(native_eval_refused("the program's code holds no system call to map the evaluation's room with"))
-        self.eval_ready(facts.value.code, syscall) ?? return Err(native_eval_refused(err.detail))
+        self.eval_ready(syscall) ?? return Err(native_eval_refused(err.detail))
         if permit.value.plan == .Val(plan) {
             if {
                 permit.value.placed == 0 || permit.value.placed_in != self.eval_runs -> {
-                    base: self.eval_map(plan.size, facts.value.code, syscall) ?? return Err(native_eval_refused(err.detail))
+                    base: self.eval_space(plan.size) ?? return Err(native_eval_refused(err.detail))
                     region: native_fix_region(plan, permit.value.edit, facts.value.symbols, base)
                     if !x64_trace_write(self.trace, base, region) {
                         return Err(native_eval_refused("couldn't write the expression's code in the program"))
@@ -1116,29 +1123,61 @@ NativeSession: struct {
         Err(native_eval_refused("the expression has no plan"))
     }
 
-    // Map the room evaluations run from in the program, with its code, near
-    // the image's `code`, unless it is mapped.
-    eval_ready: fn(&self, code: NativeCode, syscall: Int) NativeDebugError! {
+    // Map the room evaluations run from in the program, with its code space
+    // (NATIVE_EVAL_CODE_ROOM), near the image's code, unless it is mapped:
+    // once per run, which every evaluation of the run reuses.
+    eval_ready: fn(&self, syscall: Int) NativeDebugError! {
         if self.eval_room != 0 -> return Ok()
-        room: self.eval_map(NATIVE_EVAL_ROOM_SIZE, code, syscall) ?? return Err(err)
+        room: self.eval_map(NATIVE_EVAL_ROOM_SIZE + NATIVE_EVAL_CODE_ROOM, syscall) ?? return Err(err)
         if !x64_trace_write(self.trace, room, native_eval_room_code(room).bytes) {
             return Err(NativeDebugError{detail: "couldn't write the evaluation's room in the program"})
         }
         self.eval_room = room
+        self.eval_code = 0
         Ok()
     }
 
-    // Map `size` bytes in the program for an evaluation, near the image's
-    // `code`, where `fix` maps its code (map_code), injecting mmap(2) at its
+    // Map the room as the program starts or is attached (eval_ready),
+    // while the address space near its code holds only the image, so no
+    // evaluation, condition or logpoint of the run finds no room for its
+    // code. With no evaluator, or no system call in the image's code to map
+    // it with, the first evaluation maps it.
+    reserve: fn(&self) Never! {
+        if self.evaluator == None || self.syscall == 0 || !native_eval_is_syscall(self.trace, self.syscall) {
+            return
+        }
+        self.eval_ready(self.syscall) ?? return
+    }
+
+    // Where in the room's code space the code of an expression `size` bytes
+    // long goes: its next free pages, or, when the rest is too small, its
+    // first, every expression placed before to be placed again when next
+    // run (eval_runs), so the space is reused and never grows.
+    eval_space: fn(&self, size: Int) -> Int NativeDebugError! {
+        pages: native_eval_pages(size)
+        if pages > NATIVE_EVAL_CODE_ROOM {
+            return Err(NativeDebugError{detail: "the expression's code ({size} bytes) is larger than the evaluation's room for code ({NATIVE_EVAL_CODE_ROOM} bytes)"})
+        }
+        if self.eval_code + pages > NATIVE_EVAL_CODE_ROOM {
+            self.eval_code = 0
+            self.eval_runs += 1
+        }
+        at: self.eval_room + NATIVE_EVAL_ROOM_SIZE + self.eval_code
+        self.eval_code += pages
+        Ok(at)
+    }
+
+    // Map `size` bytes in the program near the image's code (text_end),
+    // where `fix` maps its code (map_code), injecting mmap(2) at its
     // `syscall` instruction (native_eval_map), which leaves a signal the
-    // stopped thread holds for it to the thread.
-    eval_map: fn(&self, size: Int, code: NativeCode, syscall: Int) -> Int NativeDebugError! {
-        after: code.address + code.bytes.len()
-        hint := if self.fix_next > 0 -> self.fix_next else -> (after + NATIVE_FIX_GAP).div_euclid(NATIVE_FIX_PAGE) * NATIVE_FIX_PAGE
+    // stopped thread holds for it to the thread. The next mapping's hint
+    // starts the page after it.
+    eval_map: fn(&self, size: Int, syscall: Int) -> Int NativeDebugError! {
+        hint := if self.fix_next > 0 -> self.fix_next else -> (self.text_end + NATIVE_FIX_GAP).div_euclid(NATIVE_FIX_PAGE) * NATIVE_FIX_PAGE
         loop _ in 0..<NATIVE_FIX_TRIES {
             mapped: native_eval_map(self.trace, syscall, hint, size) ?? return Err(err)
             if mapped == hint {
-                self.fix_next = hint + size
+                self.fix_next = hint + native_eval_pages(size)
                 return Ok(hint)
             }
             hint += NATIVE_FIX_GAP
@@ -1707,7 +1746,9 @@ NativeSession: struct {
         // (stopping_exit).
         self.exits = x64_trace_follow_exits(self.trace, self.trace.pid, kill: true)
         self.ending = false
-        self.plant_breakpoints()
+        self.plant_breakpoints() ?? return Err(err)
+        self.reserve()
+        Ok()
     }
 
     // Trap every breakpoint's addresses in the program.
@@ -1781,6 +1822,7 @@ NativeSession: struct {
             self.detach()
             return Err(NativeAttachRefused{code: NATIVE_ATTACH_FAILED, detail: failure.detail})
         }
+        self.reserve()
         frames: self.backtrace() ?? return Ok(NativeStop{kind: NativeStopKind.Paused, reason: "attach", code: 0, frame: None})
         loop (index, frame) in frames.move() {
             if native_debug_jet_frame(frame) {
@@ -1818,7 +1860,9 @@ NativeSession: struct {
         self.evals = [String:Shared<NativeEval>]{}
         self.eval_image = None
         self.eval_read = None
-        self.syscall = 0
+        text: native_eval_reach(codes)
+        self.syscall = text.syscall
+        self.text_end = text.end
         if self.evaluator != None -> self.read_facts()
         Ok()
     }
@@ -2112,7 +2156,7 @@ NativeSession: struct {
         items: native_fix_runtime_address(facts.value.symbols, X64_DEBUG_ITEMS_DROP_SYMBOL)
         if items == 0 -> return Ok(None)
         syscall: self.syscall_site(facts.value.code) ?? return Ok(None)
-        self.eval_ready(facts.value.code, syscall) ?? return Ok(None)
+        self.eval_ready(syscall) ?? return Ok(None)
         viewed: native_eval_view_here(self.image, self.trace, self.eval_room, words, items, view, ty, value, self.placed, native_eval_locks(facts.value.symbols), self.sites, self.probe.sites, watched: self.watches.len() > 0) ?? return Err(NativeDebugError{detail: err.message})
         if viewed.kept > 0 -> self.notes = "{self.notes}{native_eval_kept(viewed.kept)}\n"
         Ok(viewed.shown)
@@ -2511,7 +2555,8 @@ NativeSession: struct {
     // Map `size` bytes of code for a fix in the stopped program, within
     // reach of a rel32 from the image's code, which ends at `after`: the
     // program runs one `mmap` at the system call `syscall` of its code, then
-    // its registers are put back.
+    // its registers are put back. The next mapping's hint starts the page
+    // after it.
     map_code: fn(&self, size: Int, after: Int, syscall: Int) -> Int NativeDebugError! {
         hint := if self.fix_next > 0 -> self.fix_next else -> (after + NATIVE_FIX_GAP).div_euclid(NATIVE_FIX_PAGE) * NATIVE_FIX_PAGE
         loop _ in 0..<NATIVE_FIX_TRIES {
@@ -2538,7 +2583,7 @@ NativeSession: struct {
                 return Err(NativeDebugError{detail: "couldn't set the program's registers"})
             }
             if mapped == hint {
-                self.fix_next = hint + size
+                self.fix_next = hint + native_eval_pages(size)
                 return Ok(hint)
             }
             hint += NATIVE_FIX_GAP
@@ -4692,14 +4737,16 @@ NativeSession: struct {
     }
 
     // The program's code is gone, or new: so are its placed conditions and
-    // logpoints, their sequence word, the stop at each thread's exit, and
-    // the evaluations' room and code.
+    // logpoints, their sequence word, the stop at each thread's exit, the
+    // evaluations' room and code, and where the next mapping goes.
     forget_placed: fn(&self) Never! {
         self.placed = [NativePlaced]{}
         self.clock = 0
         self.exits = false
         self.eval_room = 0
+        self.eval_code = 0
         self.eval_runs += 1
+        self.fix_next = 0
     }
 
     // The stop `event` is: a write a watch saw, a trap byte's breakpoint,

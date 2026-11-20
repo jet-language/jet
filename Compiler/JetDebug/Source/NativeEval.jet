@@ -246,8 +246,9 @@ native_eval_offset: fn(code: NativeEval, plan: NativeFixPlan, name: String) -> I
 }
 
 // An evaluation in the program itself runs from a room the session maps in
-// the program once per run (NativeSession.eval_room), read and written
-// only by the debugger and the evaluation:
+// the program once per run, when it starts or attaches to it
+// (NativeSession.eval_room, reserve), read and written only by the
+// debugger and the evaluation:
 // - at 0, the call (native_eval_room_code): it saves the thread's vector
 //   and floating-point state (xsave), calls the entry with the words the
 //   debugger wrote, stops so the debugger reads the result, calls the
@@ -296,6 +297,11 @@ NATIVE_EVAL_ROOM_PASS: 20608
 NATIVE_EVAL_ROOM_ARENA: 131072
 
 NATIVE_EVAL_ROOM_SIZE: 4325376
+
+// The code space mapped after the room's NATIVE_EVAL_ROOM_SIZE bytes, where
+// each expression's code goes, a whole number of pages each
+// (NativeSession.eval_space); full, it starts over from its first page.
+NATIVE_EVAL_CODE_ROOM: 16777216
 
 // The call's words, by offset from NATIVE_EVAL_ROOM_DATA: the arena's next
 // free byte, its end and its start, the count of the program's blocks the
@@ -1440,12 +1446,44 @@ native_eval_is_syscall: fn(trace: X64Trace, address: Int) -> Bool Never! {
     bytes.len() == 2 && Int{bytes[0]} == 0x0f && Int{bytes[1]} == 0x05
 }
 
+// Where the image's code ends, and the first `syscall` bytes (0f 05) it
+// holds, 0 when none: what maps the evaluation's room as the program
+// starts, before anything reads the image's code facts.
+NativeEvalReach: struct {
+    end: Int,
+    syscall: Int,
+}
+
+// The NativeEvalReach of the image's code `codes`, read from its file.
+native_eval_reach: fn(codes: [NativeCode]) -> NativeEvalReach Never! {
+    text := NativeEvalReach{end: 0, syscall: 0}
+    loop code in codes {
+        end: code.address + code.bytes.len()
+        if end > text.end -> text.end = end
+        if text.syscall != 0 || code.bytes.len() < 2 -> next
+        loop k in 0..<code.bytes.len() - 1 {
+            first: Int{code.bytes[k]}
+            second: Int{code.bytes[k + 1]}
+            if first != 0x0f || second != 0x05 -> next
+            text.syscall = code.address + k
+            break
+        }
+    }
+    text
+}
+
 // Where `pc` is, in Jet terms when the line table knows it.
 native_eval_place: fn(image: NativeImage, pc: Int) -> String Never! {
     index: x64_jetline_find(image.lines, pc)
     if index < 0 -> return native_debug_hex(pc)
     function: image.lines.functions[index]
     "{function.name}() at {native_eval_files.basename(function.file)}:{x64_jetline_line(image.lines, function, pc) ?? 0}"
+}
+
+// `size` bytes rounded up to whole pages (NATIVE_FIX_PAGE): mmap(2) maps
+// whole pages, and refuses a hint off a page's start.
+native_eval_pages: fn(size: Int) -> Int Never! {
+    (size + NATIVE_FIX_PAGE - 1).div_euclid(NATIVE_FIX_PAGE) * NATIVE_FIX_PAGE
 }
 
 // Map `size` bytes of code and data at `hint` in the program `trace`
@@ -1791,4 +1829,24 @@ native_log_shown: fn(image: NativeImage, memory: NativeMemory, result: NativeEva
     // mov r11, data; cmp rdi, [r11 + base]; jb; cmp rdi, [r11 + end]; jae.
     assert_eq(give[14..<16], [U8]{0x72, U8{kept - 16}})
     assert_eq(give[20..<22], [U8]{0x73, U8{kept - 22}})
+}
+
+#Test("a mapping's size is whole pages, so the next one's hint starts a page") {
+    assert_eq(native_eval_pages(0), 0)
+    assert_eq(native_eval_pages(1), NATIVE_FIX_PAGE)
+    assert_eq(native_eval_pages(NATIVE_FIX_PAGE), NATIVE_FIX_PAGE)
+    assert_eq(native_eval_pages(NATIVE_FIX_PAGE + 1), 2 * NATIVE_FIX_PAGE)
+    // The room and its code space map as one, and the code space starts a page.
+    assert_eq(native_eval_pages(NATIVE_EVAL_ROOM_SIZE), NATIVE_EVAL_ROOM_SIZE)
+    assert_eq(native_eval_pages(NATIVE_EVAL_CODE_ROOM), NATIVE_EVAL_CODE_ROOM)
+}
+
+#Test("the image's code says where it ends and where its first system call is") {
+    codes: [NativeCode]{NativeCode{address: 0x401000, bytes: [U8]{0x90, 0x0f, 0x90, 0x05}}, NativeCode{address: 0x402000, bytes: [U8]{0x55, 0x0f, 0x05, 0xc3, 0x0f, 0x05}}}
+    text: native_eval_reach(codes)
+    assert_eq(text.end, 0x402006)
+    assert_eq(text.syscall, 0x402001)
+    none: native_eval_reach([NativeCode]{NativeCode{address: 0x401000, bytes: [U8]{0x0f}}})
+    assert_eq(none.end, 0x401001)
+    assert_eq(none.syscall, 0)
 }
