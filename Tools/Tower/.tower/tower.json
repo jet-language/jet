@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112584,
+    "rev": 112590,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -23978,6 +23978,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-20",
+          "by": "Main",
+          "text": "Decision (Main, within the ratified naming scope): c32 (the code-number area/topic law) is removed. Names are the identifier users see; codes stay stable aliases and are never renumbered (diagnostics.md). Errors3202 found no area/topic key anywhere and the registry broadly outside it."
+        },
+        {
           "at": "2026-11-19",
           "by": "Main",
           "text": "Staffed c31 and c33 (IfHole), owner query 2026-11-19 about E-codes still in output. State on the p330 batch compiler (dev 8acf6a14a1): the header prints `Error [jet.ReturnTypeMismatch]` (lowercase); the More line and closing hint print E-codes (`More: jet-lang.dev/e/E0113`, \"Run `jet explain E0113`\"); runtime stops print `Stop [E3010]`; `jet explain Jet.ReturnTypeMismatch` falls through to a package-store error; Tests/UI has 3,117 `[jet.Name]` header lines and 3,083 E-code More links. Plan: A) names in the header, link, hint, JSON, explain and #Allow; B) runtime reports regenerated from the rows; C) a guard plus Docs/Spec/diagnostics.md. The orchestrator blesses UI snapshots and goldens on the batch compiler in the same commit."
@@ -24278,15 +24283,6 @@
           "at": "2026-11-16T01:09:57.149Z"
         },
         {
-          "n": 32,
-          "text": "Every diagnostic registry row follows D-DIAG-CODE-LAW1=A: the letter says when (E stops before the program runs, R means the running program stopped), the first digit is one of 10 areas, and the first two digits are one of 28 topics. The spec states the law and the topic key. Proof: `jet test Tests/Guards --filter diagnostic_code_law`. (was #4022 c1)",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:53:35.776Z"
-        },
-        {
           "n": 33,
           "text": "Owner ruling 2026-11-15, amending D-DIAG-HEADER1=A, and owner ruling 2026-11-19 on the heading: Jet's own diagnostics are named `Jet.Name` (capital J, for example `Jet.ValueTypeMismatch`), never `jet.Name`, and a report's heading is `Error: Jet.Name: <what>` (likewise `Warning: Jet.Name: …` and the runtime `Stop: Jet.Name: …`), never `Error [E0113]` or `Error [jet.Name]`. The name is the one identifier everywhere: the heading, the More: link (jet-lang.dev/e/Jet.ValueTypeMismatch), the closing `jet explain Jet.Name` hint, `#Allow(Jet.FloatMoney, \"…\")`, the jet.report JSON `name`, and Docs. The E-code stays only as the stable alias. One cutover: no `jet.Name` spelling or bracketed heading is accepted or printed afterward, and every UI snapshot and golden is regenerated from real output. Proof: `jet test Compiler --profile ui`, and a guard that finds no `[jet.`, `jet.[A-Z]` diagnostic name or `Error [`/`Warning [`/`Stop [` heading in Compiler, Core, Docs or Tests.",
           "status": "open",
@@ -24341,7 +24337,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-19T20:29:15.342Z",
+      "updated": "2026-11-20T09:23:09.344Z",
       "updatedBy": "Main",
       "workOrder": 19,
       "criteriaLastN": 35
@@ -59314,8 +59310,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-20T08:51:48.746Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-20T09:20:01.023Z",
+      "updatedBy": "owner",
       "criteriaLastN": 95
     },
     {
@@ -59391,11 +59387,11 @@
         {
           "n": 5,
           "text": "One covers rule: the compiler's authority check (Policy/Authority.jet authority_covers) decides coverage through the same runtime covers function on the raw right text, so a right the runtime refuses (`with(\"fs.Write(...)\")`) is never reported covered at check time, with a case showing the compiler and the run agree on a case-differing and a space-padded right.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T07:40:27.812Z"
+          "evidence": "p348 batch compiler (dev e2069b5709, lands the one-covers-rule change in Policy/Authority.jet): jet test Compiler --profile cases --filter Effects/effect_scope_covers_is_one_relation_at_every_tier PASS (the runtime covers rule at O0, O1 and O2 on the same table, including fs.Write and a space-padded FS.Write not covering FS.Write); jet test Compiler/JetFoundation/Tests/Policy/EffectScope.jet rc=0 (the compiler check asserts the same table through the shared covers function).",
+          "at": "2026-11-20T09:33:46.514Z"
         }
       ],
       "refs": [],
@@ -59405,7 +59401,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T23:11:25.962Z",
-      "updated": "2026-11-20T07:40:27.812Z",
+      "updated": "2026-11-20T09:33:46.514Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -76995,8 +76991,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-20T08:42:45.653Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-20T09:17:43.431Z",
+      "updatedBy": "owner",
       "criteriaLastN": 12
     }
   ],
@@ -134384,8 +134380,11 @@
       "draftedBy": "Main",
       "reviewedBy": "BallotReviewStdin",
       "draft": false,
-      "status": "open",
-      "created": "2026-11-20T02:32:03.981Z"
+      "status": "ratified",
+      "created": "2026-11-20T02:32:03.981Z",
+      "outcome": "A",
+      "comment": "Piping must also work as expected",
+      "ratifiedAt": "2026-11-20"
     },
     {
       "id": "D-AUTH-WITH1",
@@ -134595,8 +134594,10 @@
       "draftedBy": "Main",
       "reviewedBy": "BallotReviewE0712",
       "draft": false,
-      "status": "open",
-      "created": "2026-11-20T05:20:23.199Z"
+      "status": "ratified",
+      "created": "2026-11-20T05:20:23.199Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-20"
     },
     {
       "id": "D-LIVE-TIMELINE1",
@@ -135187,8 +135188,10 @@
       "draftedBy": "Main",
       "reviewedBy": "BallotReviewDisasm",
       "draft": false,
-      "status": "open",
-      "created": "2026-11-20T06:54:09.315Z"
+      "status": "ratified",
+      "created": "2026-11-20T06:54:09.315Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-20"
     }
   ],
   "questions": [
@@ -136625,6 +136628,17 @@
       "created": "2026-11-18T21:32:18.623Z",
       "answeredAt": "2026-11-18",
       "answeredBy": "Main"
+    },
+    {
+      "id": "q0mi3icc",
+      "cardId": "c0nwrfck",
+      "decisionId": "D-LIVE-TIMELINE1",
+      "by": "owner",
+      "kind": "question",
+      "text": "Downsides need to be engineered away",
+      "status": "open",
+      "answer": "",
+      "created": "2026-11-20T09:20:01.023Z"
     }
   ],
   "ideas": [
@@ -137457,6 +137471,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-20T09:33:46.514Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0in2dft",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-20T09:23:09.344Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0dktg7a",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-20T09:23:08.543Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0dktg7a",
+      "note": "#32: Superseded by the diagnostic-name cutover: a report names a diagnostic only by Jet.Name, the code is a stable alias users never see, and Docs/Spec/diagnostics.md holds that codes are never renumbered. A renumbering of about 1121 codes by an area and topic key would change only text no user reads and break every stable alias; the law it cites has no ratified decision on the board.; was [open]: Every diagnostic registry row follows D-DIAG-CODE-LAW1=A: the letter says when (E stops before the program runs, R means the running program stopped), the first digit is one of 10 areas, and the first"
+    },
+    {
+      "at": "2026-11-20T09:20:01.023Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q0mi3icc",
+      "note": ""
+    },
+    {
+      "at": "2026-11-20T09:19:33.689Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-DISASM1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-20T09:19:33.689Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-AUTH-WITH1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-20T09:17:43.431Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-DEBUG-STDIN1",
+      "note": "A"
+    },
     {
       "at": "2026-11-20T09:15:56.270Z",
       "by": "Main",
