@@ -422,7 +422,12 @@ receipt section keeps both: per zone name `samples` and `lines`, and per
 sampled zone row of the trace `sampled`. Canvas's profile view draws the
 zones on its zones lane. Outside a perf run a zone costs a call and a
 compare at its open and a call at its close; frame marks and plots cost a
-call each.
+call each. Inside one, a zone's open and close each read the processor's
+time-stamp counter where it is invariant (the monotonic clock elsewhere),
+and its close records it in a ring of its thread's own with plain stores,
+no lock; the run drains the rings as it writes the spans out, converting
+the counter to the monotonic clock from a calibration it took as zones
+turned on.
 
 `jet perf compare base.jettrace head.jettrace` sets the last heap snapshot
 of each trace against each other when both kept one, and

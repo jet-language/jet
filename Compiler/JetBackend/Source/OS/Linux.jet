@@ -507,6 +507,21 @@ os_xgetbv_i64: fn(register: I64) -> I64 {
     """
 }
 
+// The time-stamp counter: edx:eax as one word. It reads no memory and
+// orders nothing; a caller that needs the counter steady across cores and
+// power states has seen CPUID.80000007H:EDX bit 8 (invariant TSC), and one
+// whose process may have rdtsc disabled has asked prctl(PR_GET_TSC).
+#[Unsafe("rdtsc only reads the time-stamp counter; the caller has seen it enabled for this process"), FFI(asm)]
+os_rdtsc_i64: fn() -> I64 {
+    """
+    rdtsc
+    shl rdx, 32
+    or rax, rdx
+    mov rax, rax ; -> return
+    ; clobbers rdx
+    """
+}
+
 // One SHA-256 compression (FIPS 180-4) with the SHA extensions: the eight
 // state words a..h at `state` take the 64-byte block at `data`. `table` holds
 // the byte-swap shuffle mask (16 bytes) and the 64 round constants. The
