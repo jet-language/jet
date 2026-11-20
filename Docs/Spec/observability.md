@@ -788,6 +788,27 @@ trace's `window` receipt section (type `JetPerfAttachWindow`) records the
 CPU's clock (`schedstat` or `ticks`), its resolution in nanoseconds and the
 threads that exited. The `native` row `process_cpu` keeps the program's CPU
 since its run started.
+
+No record is lost silently. The runtime counts each record a write refused,
+and whenever the count grew the writer keeps a tally record in the ring (a
+clock record, kind 13, with 1 for its address: the count, then 1 once the
+run ended); the clock record a `jet perf run` exit writes carries the count
+as its seventh word. `jet perf attach` prints `Records lost: <n>; <why>`
+before the trace's path, and the trace of an attach or a run that lost
+records holds the `records` receipt section (type `JetPerfRecords`): `lost`
+and `reason`. Tests/Cases/Perf/flight_ring_counts_lost_records.case is the
+worked example.
+
+The writer writes the ring's new records into the published file in place,
+so a reader that holds it open reads on into them; only after the ring drops
+its oldest records is a whole new file staged and renamed over it. At a
+normal exit the program drains the socket a last time and writes those
+records, the clock record its exit wrote, and a tally that says the run
+ended into the file in place before it removes the ring, its image and its
+`.spans`, so a reader that opened the ring sees the last turn though no file
+is left.
+Tests/Cases/Perf/flight_ring_keeps_the_last_turn.case is the worked example.
+
 `core.perf` zones, frame marks and plots stay off in such a run: each zone
 site tests one runtime word and calls nothing while it is clear.
 `jet perf attach <pid> --source app.jet --zones=500ms` turns them on for the

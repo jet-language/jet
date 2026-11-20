@@ -304,7 +304,8 @@ perf_samples_code_high := I64{0}
 // that is not open: PERF_COUNTERS_COUNT for the memory lens, then the
 // topdown lens's events; then the nanoseconds every handler has run
 // (perf_samples_charge), then how many recorded lock waits are blocked now
-// (perf_samples_lock_block).
+// (perf_samples_lock_block), then how many records the program made and
+// could not write (perf_samples_send).
 perf_samples_buffer := I64{0}
 
 // PERF_SAMPLES_SLOTS more record buffers (perf_samples_claim), 0 when the
@@ -474,7 +475,7 @@ perf_samples_start: fn() {
     perf_cfi_start(image)
     // The spawn, wait and wake records walk their stacks (perf_samples_stack).
     alloc_frames_start()
-    buffer: alloc_map_try(wrapping(wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_SLOTS) + I64{2}) * I64{8}))
+    buffer: alloc_map_try(wrapping(wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_SLOTS) + I64{3}) * I64{8}))
     if (buffer != I64{0}) {
         // No counter is open yet (perf_counter_of).
         index := I64{0}
@@ -1209,13 +1210,16 @@ perf_samples_put_precise: fn(fd: I64, side: I64, scratch: I64, record: I64, head
 }
 
 // One sample's record (perf_samples_put) at program counter `pc`: kept in
-// `side` while records are buffered (perf_samples_keep), else written.
+// `side` while records are buffered (perf_samples_keep), else written, and
+// counted lost when the write fails (perf_samples_send).
 perf_samples_put_one: fn(fd: I64, side: I64, record: I64, head: I64, pc: I64) {
     word: (pc & PERF_SAMPLES_ADDRESS_MASK) | head
     if (record == I64{0}) {
+        written := I64{0}
         #Unsafe("one write of a stack-local word, which the kernel copies before the call returns") {
-            _ := os_write_word_i64(fd, word, I64{8})
+            written = os_write_word_i64(fd, word, I64{8})
         }
+        if (written != I64{8}) { perf_samples_lost_add() }
         return
     }
     rt_text_store(record, word)
@@ -1224,9 +1228,33 @@ perf_samples_put_one: fn(fd: I64, side: I64, record: I64, head: I64, pc: I64) {
         perf_samples_keep(fd, side, record, bytes)
         return
     }
-    #Unsafe("one write of the record's words, which the kernel copies before the call returns") {
-        _ := os_syscall_i64(I64{1}, fd, record, bytes, I64{0}, I64{0}, I64{0})
-    }
+    perf_samples_send(fd, record, bytes)
+}
+
+// Write the `bytes` of the record at `record` to the samples file `fd`, or
+// count the record lost when the write fails: under the flight recorder
+// `fd` is the record socket, whose datagrams are sent whole or, while it
+// is full, not at all (perf_flight_open), and a record it refuses is gone.
+perf_samples_send: fn(fd: I64, record: I64, bytes: I64) {
+    if (host_write_all(fd, record, bytes) != I64{0}) { perf_samples_lost_add() }
+}
+
+// The record buffer's count of records the program made and could not
+// write (perf_samples_send); 0 when the start could not map the buffer.
+perf_samples_lost_word: fn() -> I64 {
+    buffer: perf_samples_buffer
+    if (buffer == I64{0}) -> I64{0} else -> wrapping(buffer + wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{3}) + PERF_COUNTERS_SLOTS) * I64{8}))
+}
+
+perf_samples_lost_add: fn() {
+    word: perf_samples_lost_word()
+    if (word != I64{0}) { _ := sync_add(word, I64{1}) }
+}
+
+// How many records the program made and could not write so far.
+perf_samples_lost: fn() -> I64 {
+    word: perf_samples_lost_word()
+    if (word == I64{0}) -> I64{0} else -> sync_load(word)
 }
 
 // Appends the `bytes` of the record at `record` to the records `side`
@@ -1325,7 +1353,8 @@ perf_samples_cpu_clock_ns: fn(clock: I64) -> I64 {
 // sampling started, the time every handler ran (perf_samples_charge), the
 // kernel's time for one signal (perf_samples_delivery), each in
 // nanoseconds, then the allocations the alloc lens counted and the
-// nanoseconds it spent on them (perf_samples_alloc_write). A second exit
+// nanoseconds it spent on them (perf_samples_alloc_write), then the records
+// the program made and could not write (perf_samples_lost). A second exit
 // writes a later one. Under the alloc lens the heap snapshot named `exit`
 // comes first (perf_samples_heap), then the allocations' records. The spans
 // buffer's rows and the records the handlers keep (perf_samples_flush) are
@@ -1344,14 +1373,15 @@ perf_samples_exit: fn() {
     perf_samples_heap(rt_static_text("exit"))
     buffer: perf_samples_buffer
     handlers: if (buffer == I64{0}) -> I64{0} else -> sync_load(wrapping(buffer + wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_SLOTS) * I64{8})))
-    record: jet_rt_alloc(I64{48}, I64{8})
+    record: jet_rt_alloc(I64{56}, I64{8})
     perf_samples_alloc_write(fd, wrapping(record + I64{32}))
-    rt_text_store(record, (I64{6} << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_CLOCK << PERF_SAMPLES_KIND_BITS))
+    rt_text_store(record, (I64{7} << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_CLOCK << PERF_SAMPLES_KIND_BITS))
     rt_text_store(wrapping(record + I64{8}), wrapping(perf_samples_process_cpu_ns() - perf_samples_cpu_start))
     rt_text_store(wrapping(record + I64{16}), handlers)
     rt_text_store(wrapping(record + I64{24}), perf_samples_delivery_ns)
-    _ := host_write_all(fd, record, I64{48})
-    jet_rt_free(record, I64{48}, I64{8})
+    rt_text_store(wrapping(record + I64{48}), perf_samples_lost())
+    perf_samples_send(fd, record, I64{56})
+    jet_rt_free(record, I64{56}, I64{8})
     perf_topdown_exit()
 }
 
@@ -2817,7 +2847,7 @@ perf_samples_spawn: fn(id: I64, parent: I64) {
     rt_text_store(wrapping(record + I64{8}), parent)
     words: wrapping(perf_samples_stack(wrapping(record + I64{16})) + I64{2})
     rt_text_store(record, (id & PERF_SAMPLES_ADDRESS_MASK) | (words << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_SPAWN << PERF_SAMPLES_KIND_BITS))
-    _ := host_write_all(fd, record, wrapping(words * I64{8}))
+    perf_samples_send(fd, record, wrapping(words * I64{8}))
     jet_rt_free(record, size, I64{8})
 }
 
@@ -2892,7 +2922,7 @@ perf_samples_wait: fn(slot: I64, name: I64, object: I64, start: I64) {
     if (ends != I64{0}) { jet_rt_free(ends, I64{256}, I64{8}) }
     words: wrapping(head + perf_samples_stack(wrapping(record + wrapping(head * I64{8}))))
     rt_text_store(record, (observe_current_task() & PERF_SAMPLES_ADDRESS_MASK) | (words << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_WAIT << PERF_SAMPLES_KIND_BITS))
-    _ := host_write_all(fd, record, wrapping(words * I64{8}))
+    perf_samples_send(fd, record, wrapping(words * I64{8}))
     jet_rt_free(record, size, I64{8})
 }
 
@@ -2933,7 +2963,7 @@ perf_samples_wake: fn(slot: I64, at: I64, waker: I64) {
         id = if (scheduler_control_current() == I64{0}) -> I64{0} else -> observe_current_task()
     }
     rt_text_store(record, (id & PERF_SAMPLES_ADDRESS_MASK) | (words << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_WAKE << PERF_SAMPLES_KIND_BITS))
-    _ := host_write_all(fd, record, wrapping(words * I64{8}))
+    perf_samples_send(fd, record, wrapping(words * I64{8}))
     jet_rt_free(record, size, I64{8})
 }
 
@@ -3032,7 +3062,7 @@ perf_samples_io: fn(start: I64, operation: I64, result: I64, class: I64, target:
     words: wrapping(head + perf_samples_stack(wrapping(record + wrapping(head * I64{8}))))
     id: if (scheduler_control_current() == I64{0}) -> I64{0} else -> observe_current_task()
     rt_text_store(record, (id & PERF_SAMPLES_ADDRESS_MASK) | (words << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_IO << PERF_SAMPLES_KIND_BITS))
-    _ := host_write_all(fd, record, wrapping(words * I64{8}))
+    perf_samples_send(fd, record, wrapping(words * I64{8}))
     jet_rt_free(record, size, I64{8})
 }
 
@@ -4421,12 +4451,17 @@ perf_samples_periods: fn(signal: I64, info: I64) -> I64 {
 // spawns, waits, wakes and transfers, into a ring instead of a file.
 // perf_samples_fd is then the write end of a nonblocking datagram socket
 // pair, so each record is one datagram, sent whole or, while the socket is
-// full, lost: no handler ever waits. The observation writer (ObserveLive.jet
-// jet_rt_observe_writer) drains the socket into the ring at each
-// publication (perf_flight_publish), dropping the oldest records once the
-// ring fills, and publishes it as `jet-flight-<pid>.samples` in this
-// user's private directory (perf_flight_home), the image beside it as
-// `.image`: the pair `jet perf attach` reads. A stop
+// full, lost and counted (perf_samples_send): no handler ever waits. The
+// observation writer (ObserveLive.jet jet_rt_observe_writer) drains the
+// socket into the ring at each publication (perf_flight_publish), dropping
+// the oldest records once the ring fills, keeps the count of lost records
+// in it as a tally record whenever the count grew (perf_flight_tally), and
+// publishes it as `jet-flight-<pid>.samples` in this user's private
+// directory (perf_flight_home), the image beside it as `.image`: the pair
+// `jet perf attach` reads. The ring's new records are written into that
+// file in place (perf_flight_ring), so a reader that holds it open reads on
+// into them, and at the exit the last turn's records and a tally that says
+// the run ended go into it before it is removed (perf_flight_end). A stop
 // that ends the process writes a typed dump that holds the ring
 // (perf_flight_dump), which `jet debug` opens.
 PERF_FLIGHT_INTERVAL_US: I64{10000}
@@ -4439,7 +4474,10 @@ PERF_FLIGHT_INTERVAL_US: I64{10000}
 // buffer, the ring, the dump's scratch for its task rows, /proc/self/maps
 // and directory entries, the dump's text page, its redacted copy's vectors
 // and table of Secrets, its redacted copy (perf_flight_redacted), and the
-// tables of its walk of reachable memory (perf_flight_reach).
+// tables of its walk of reachable memory (perf_flight_reach); then the
+// ring's bytes the published file holds, -1 once the ring dropped records
+// the file holds (perf_flight_ring), and the lost records the ring's last
+// tally counted (perf_flight_tally).
 PERF_FLIGHT_READ: I64{8}
 
 PERF_FLIGHT_USED: I64{16}
@@ -4507,7 +4545,16 @@ PERF_FLIGHT_CUTS_AT: I64{2277648}
 
 PERF_FLIGHT_CUTS: I64{8192}
 
-PERF_FLIGHT_BYTES: I64{2408752}
+PERF_FLIGHT_PUBLISHED: I64{2408752}
+
+PERF_FLIGHT_TALLIED: I64{2408760}
+
+PERF_FLIGHT_BYTES: I64{2408768}
+
+// A tally record's words (perf_flight_tally): its first, of the clock
+// record's kind with 1 in its address bits, then the records the program
+// made and could not write, then 1 once the run ended.
+PERF_FLIGHT_TALLY_WORDS: I64{3}
 
 // A page's address bits, and the most frame pointers a stack's chain
 // follows.
@@ -4664,6 +4711,9 @@ perf_flight_open: fn() -> I64 {
     ends: rt_text_word(pair)
     rt_text_store(pair, I64{0})
     rt_text_store(wrapping(state + PERF_FLIGHT_READ), ends & I64{4294967295})
+    // No file of this run's is published yet: the first publication stages
+    // one, whatever an earlier process of the same pid left at its path.
+    rt_text_store(wrapping(state + PERF_FLIGHT_PUBLISHED), I64{-1})
     #Unsafe("the observation start runs before the writer and the stop that read it") {
         perf_flight_state = state
     }
@@ -4699,7 +4749,8 @@ perf_flight_drain: fn(state: I64) {
 
 // Append the `bytes` of whole records at `record` to the ring. When they
 // would not fit, the oldest records go first, down to half the ring, so
-// the ring moves its records once per half ring of new ones.
+// the ring moves its records once per half ring of new ones; the published
+// file then no longer starts the ring, and the tally may have gone.
 perf_flight_keep: fn(state: I64, record: I64, bytes: I64) {
     if (bytes <= I64{0} || bytes > PERF_FLIGHT_RING / I64{2}) {
         return
@@ -4715,6 +4766,8 @@ perf_flight_keep: fn(state: I64, record: I64, bytes: I64) {
         }
         if (gone > used) { gone = used }
         kept = wrapping(used - gone)
+        rt_text_store(wrapping(state + PERF_FLIGHT_PUBLISHED), I64{-1})
+        rt_text_store(wrapping(state + PERF_FLIGHT_TALLIED), I64{0})
         at := I64{0}
         loop at < kept {
             rt_text_store(wrapping(ring + at), rt_text_word(wrapping(wrapping(ring + gone) + at)))
@@ -4826,11 +4879,11 @@ perf_flight_owned: fn(name: I64, kind: I64) -> Bool {
 }
 
 // At each of the observation writer's publications: drain the socket into
-// the ring and publish it in this user's private directory beside the
-// temporary directory `directory` (perf_flight_home), the image beside it
-// the first time, answering an attach's zones (perf_flight_zones) and heap
-// snapshot (perf_flight_heap) requests. A publication that finds the lock
-// held (a dump) skips its turn.
+// the ring, tally its lost records, and publish it in this user's private
+// directory beside the temporary directory `directory` (perf_flight_home;
+// perf_flight_ring), the image beside it the first time, answering an
+// attach's zones (perf_flight_zones) and heap snapshot (perf_flight_heap)
+// requests. A publication that finds the lock held (a dump) skips its turn.
 perf_flight_publish: fn(directory: I64) {
     state: perf_flight_state
     if (state == I64{0} || !perf_flight_lock(state, I64{1})) {
@@ -4838,6 +4891,7 @@ perf_flight_publish: fn(directory: I64) {
     }
     if (rt_text_word(wrapping(state + PERF_FLIGHT_ENDED)) == I64{0}) {
         perf_flight_drain(state)
+        perf_flight_tally(state, I64{0})
         home: perf_flight_home(directory)
         if (home == I64{0}) {
             // No request stands where others could have left it.
@@ -4855,7 +4909,7 @@ perf_flight_publish: fn(directory: I64) {
             }
             // After the image, which the attach reads the snapshot beside.
             perf_flight_heap(path)
-            _ := perf_flight_file(path, wrapping(state + PERF_FLIGHT_RING_AT), rt_text_word(wrapping(state + PERF_FLIGHT_USED)))
+            perf_flight_ring(state, path, false)
             jet_rt_string_drop(path)
         }
     }
@@ -4947,10 +5001,79 @@ perf_flight_heap: fn(path: I64) {
     jet_rt_string_drop(request)
 }
 
-// At a run's exit (Observe.jet jet_rt_observe_exit): the published ring,
-// its image and its zones' rows (`.spans`) go, and no publication follows.
-// A killed run removes none of them; the next `jet perf run` or attach does
-// (Session.jet jet_cli_perf_sweep).
+// Keep a tally record in the ring when the count of records the program
+// made and could not write (perf_samples_lost) grew since the ring's last
+// tally, or, with `ended` 1, at the exit; the lock is held. The receive
+// buffer, which only a drain fills, holds it on its way.
+perf_flight_tally: fn(state: I64, ended: I64) {
+    lost: perf_samples_lost()
+    if (ended == I64{0} && lost == rt_text_word(wrapping(state + PERF_FLIGHT_TALLIED))) {
+        return
+    }
+    record: wrapping(state + PERF_FLIGHT_RECEIVE_AT)
+    rt_text_store(record, I64{1} | (PERF_FLIGHT_TALLY_WORDS << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_CLOCK << PERF_SAMPLES_KIND_BITS))
+    rt_text_store(wrapping(record + I64{8}), lost)
+    rt_text_store(wrapping(record + I64{16}), ended)
+    perf_flight_keep(state, record, wrapping(PERF_FLIGHT_TALLY_WORDS * I64{8}))
+    rt_text_store(wrapping(state + PERF_FLIGHT_TALLIED), lost)
+}
+
+// Publish the ring at `path`; the lock is held. While the file holds the
+// ring's first PERF_FLIGHT_PUBLISHED bytes, the records after them are
+// written into it in place, so a reader that holds the file open reads on
+// into them (one that reads it meanwhile may find the last record cut
+// short). Once the ring dropped records the file holds, the whole ring is
+// staged beside it and renamed over it, or, the `last` time, written over
+// the file's own bytes, which a reader holding it open reads from its
+// start; the last time writes nothing where no file was published.
+perf_flight_ring: fn(state: I64, path: I64, last: Bool) {
+    ring: wrapping(state + PERF_FLIGHT_RING_AT)
+    used: rt_text_word(wrapping(state + PERF_FLIGHT_USED))
+    published: rt_text_word(wrapping(state + PERF_FLIGHT_PUBLISHED))
+    fd := I64{-1}
+    if (published >= I64{0} || last) {
+        name: observe_cstring(path)
+        // O_WRONLY|O_CLOEXEC: the file the last publication left.
+        fd = observe_syscall(I64{257}, I64{-100}, name, I64{524289}, I64{0})
+        jet_rt_free(name, wrapping(rt_text_len(path) + I64{1}), I64{1})
+    }
+    if (fd < I64{0}) {
+        if (!last && perf_flight_file(path, ring, used)) {
+            rt_text_store(wrapping(state + PERF_FLIGHT_PUBLISHED), used)
+        }
+        return
+    }
+    from: if (published < I64{0}) -> I64{0} else -> published
+    written := perf_flight_pwrite(fd, wrapping(ring + from), wrapping(used - from), from)
+    // ftruncate: the whole ring written over a longer file's bytes.
+    if (written && published < I64{0}) {
+        written = observe_syscall(I64{77}, fd, used, I64{0}, I64{0}) == I64{0}
+    }
+    _ := observe_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0})
+    rt_text_store(wrapping(state + PERF_FLIGHT_PUBLISHED), if (written) -> used else -> I64{-1})
+}
+
+// Write the `length` bytes at `bytes` to `fd` from its byte `offset`
+// (pwrite64); whether all were.
+perf_flight_pwrite: fn(fd: I64, bytes: I64, length: I64, offset: I64) -> Bool {
+    at := I64{0}
+    loop at < length {
+        count: observe_syscall(I64{18}, fd, wrapping(bytes + at), wrapping(length - at), wrapping(offset + at))
+        if (count == I64{-4}) { next }
+        if (count <= I64{0}) { return false }
+        at = wrapping(at + count)
+    }
+    true
+}
+
+// At a run's exit (Observe.jet jet_rt_observe_exit), after the clock
+// record (perf_samples_exit): the socket is drained a last time and the
+// ring, its last tally saying the run ended, is written into the published
+// file in place (perf_flight_ring), so a reader that holds it open reads
+// the run's last turn; then the published ring, its image and its zones'
+// rows (`.spans`) go, at once, and no publication follows. A killed run
+// removes none of them; the next `jet perf run` or attach does (Session.jet
+// jet_cli_perf_sweep).
 perf_flight_end: fn() {
     state: perf_flight_state
     if (state == I64{0} || observe_root == I64{0} || !perf_flight_lock(state, I64{100000000})) {
@@ -4963,6 +5086,9 @@ perf_flight_end: fn() {
         if (home != I64{0}) {
             path: perf_flight_path(home)
             jet_rt_string_drop(home)
+            perf_flight_drain(state)
+            perf_flight_tally(state, I64{1})
+            perf_flight_ring(state, path, true)
             image: perf_flight_beside(path, rt_static_text(".image"))
             spans: perf_flight_beside(path, rt_static_text(".spans"))
             perf_flight_unlink(path)

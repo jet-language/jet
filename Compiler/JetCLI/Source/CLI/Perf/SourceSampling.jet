@@ -148,7 +148,9 @@ JetCLIPerfInlines: struct {
 // they were spawned, of the `threads_claimed` that asked for a row, and
 // `syscalls` its host calls by number and calling stack, the most time
 // first, besides the `syscalls_lost` that found no row
-// (jet_cli_perf_system_read).
+// (jet_cli_perf_system_read). `records_lost` counts the records the
+// program made and could not write, as its clock record or a flight ring's
+// tally says (PerfSamples.jet perf_samples_send).
 JetCLIPerfSamples: struct {
     table: X64Jetline,
     inlines: JetCLIPerfInlines,
@@ -181,6 +183,7 @@ JetCLIPerfSamples: struct {
     threads_claimed: U64{0},
     syscalls: [JetCLIPerfSyscall]{[JetCLIPerfSyscall]{}},
     syscalls_lost: U64{0},
+    records_lost: U64{0},
 }
 
 // A call site of a runtime table's stack (PerfSamples.jet perf_system): its
@@ -804,7 +807,9 @@ jet_cli_perf_code_low: fn(image: [U8]) -> Int {
 // innermost such line of its stack, and a transfer's record a file or
 // network transfer with the checked source's frames on its stack; none
 // counts time. The clock record, the last one the runtime wrote, gives what
-// sampling cost. A heap snapshot's mark record starts its snapshot and
+// sampling cost, and it and a flight ring's tally records (a clock record
+// with 1 for its address) the records the program could not write. A heap
+// snapshot's mark record starts its snapshot and
 // each of its site records counts live blocks at the innermost such line
 // of their allocating stack, for the type DIE `allocs` gives the innermost
 // of its return addresses it holds (an allocating call of a typed image,
@@ -937,8 +942,23 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
             at += record * 8
             next
         }
+        if kind == JET_CLI_PERF_CLOCK_KIND && pc == 1 {
+            // A flight ring's tally (PerfSamples.jet perf_flight_tally): the
+            // records the program could not write so far, then whether the
+            // run ended. Each counts every loss before it, so the most wins.
+            if record >= 3 && at + record * 8 <= words.len() {
+                lost: checked(U64{link_debug_addr(words, at + 8)}) ?? U64{0}
+                if lost > sampled.records_lost -> sampled.records_lost = lost
+            }
+            at += record * 8
+            next
+        }
         if kind == JET_CLI_PERF_CLOCK_KIND {
             if record >= 4 && at + record * 8 <= words.len() {
+                // The records the program could not write, which a runtime
+                // whose record stops at the sixth word doesn't count.
+                lost: if record >= 7 -> checked(U64{link_debug_addr(words, at + 48)}) ?? U64{0} else -> U64{0}
+                if lost > sampled.records_lost -> sampled.records_lost = lost
                 if checked(U64{link_debug_addr(words, at + 8)}) == .Val(cpu) {
                     if checked(U64{link_debug_addr(words, at + 16)}) == .Val(handler) {
                         if checked(U64{link_debug_addr(words, at + 24)}) == .Val(delivery) {
@@ -1490,6 +1510,21 @@ jet_cli_perf_syscalls_section: fn(calls: &&[JetCLIPerfSyscall], lost: U64) -> Tr
         },
     )
     Val(TraceReceiptSection{name: "syscalls", type_name: "JetPerfSyscalls", digest: canonical_json_sha256(value), value: value})
+}
+
+// The trace's `records` receipt section (type `JetPerfRecords`): how many
+// records the program made and could not write (`lost`, its
+// JetCLIPerfSamples.records_lost) and why (`reason`). None when it lost
+// none.
+jet_cli_perf_records_section: fn(lost: U64, reason: String) -> TraceReceiptSection? Never! {
+    if lost == (U64{0}) -> return None
+    value: CanonicalJSON.Object(
+        [CanonicalJSONField]{
+            {key: "lost", value: CanonicalJSON.Integer("{lost}")},
+            {key: "reason", value: CanonicalJSON.String(reason)},
+        },
+    )
+    Val(TraceReceiptSection{name: "records", type_name: "JetPerfRecords", digest: canonical_json_sha256(value), value: value})
 }
 
 // The trace's `helpers` receipt section (type `JetPerfHelpers`): the

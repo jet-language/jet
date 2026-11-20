@@ -323,6 +323,9 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
             if jet_cli_perf_syscalls_section(found.syscalls.move(), found.syscalls_lost) == .Val(section) {
                 capture.receipts.push(section)
             }
+            if jet_cli_perf_records_section(found.records_lost, "the samples file refused their writes") == .Val(section) {
+                capture.receipts.push(section)
+            }
         }
     }
     full := [String]{action}
@@ -349,6 +352,7 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
     zones_ms := 0
     alloc := false
     held_ns := Int?{None}
+    lost := U64{0}
     skip := false
     loop (index, arg) in args {
         if skip {
@@ -514,6 +518,10 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
             timed = found.timed.move()
             jet_cli_perf_waits_read(capture, found.waits.move(), found.wakes, found.spawns, found.transfers, path, origin)
             jet_cli_perf_io_read(capture, found.transfers.move(), path, origin)
+            lost = found.records_lost
+            if jet_cli_perf_records_section(lost, JET_CLI_PERF_RING_LOSS) == .Val(section) {
+                capture.receipts.push(section)
+            }
         }
         if spans == .Val(taken) -> jet_cli_perf_log_spans_read(capture, taken, path, origin, timed)
         observed = true
@@ -542,8 +550,15 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
     // How long the snapshot held the program: its allocations and frees
     // waited while the runtime forked the copy that wrote it.
     held: if held_ns == .Val(ns) -> "Heap snapshot: held the program's allocations and frees for {ns /% 1000} µs\n" else -> ""
-    JetDriverVerbOutput{stdout: "", stderr: if quiet -> "" else -> "{held}Trace: {path}\n", exit_code: JET_DRIVER_EXIT_OK}
+    // Records the program made that the ring never got, which the trace
+    // lacks.
+    dropped: if lost > (U64{0}) -> "Records lost: {lost}; {JET_CLI_PERF_RING_LOSS}\n" else -> ""
+    JetDriverVerbOutput{stdout: "", stderr: if quiet -> "" else -> "{held}{dropped}Trace: {path}\n", exit_code: JET_DRIVER_EXIT_OK}
 }
+
+// Why a flight-recorded program's records were lost (JetRuntime
+// PerfSamples.jet perf_samples_send).
+JET_CLI_PERF_RING_LOSS: "the program's record socket was full when it made them, as its flight recorder drains it every 100 ms"
 
 // The flight ring the observed program `pid` publishes in this user's
 // private directory `home` (jet_cli_perf_flight_home; JetRuntime

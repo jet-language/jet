@@ -445,6 +445,11 @@ native_dump_event: fn(image: NativeImage, ring: [U8], at: Int, words: Int) -> St
     if kind == NATIVE_DUMP_WAKE {
         return "wake    task {id}{native_dump_where(image, ring, at, 0, 3, words)}"
     }
+    // A tally (1 in the address bits): the records the program made and
+    // could not write, as its record socket was full.
+    if kind == NATIVE_DUMP_CLOCK && id == 1 {
+        return "lost    {native_dump_word(ring, at + 8)} records: the record socket was full"
+    }
     if kind == NATIVE_DUMP_CLOCK {
         return "clock   {native_dump_word(ring, at + 8) / 1000000}ms of CPU time"
     }

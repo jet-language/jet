@@ -50,6 +50,7 @@ use {
         jet_cli_perf_pc_json,
         jet_cli_perf_pc_words,
         jet_cli_perf_profile_summary,
+        jet_cli_perf_records_section,
         jet_cli_perf_sampler_reason,
         jet_cli_perf_samples_count,
         jet_cli_perf_samples_profile,
@@ -351,6 +352,30 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     assert_eq(profile.overhead_status, "measured")
     assert_eq(profile.overhead_ns, Val(U64{9000}))
     assert_eq(profile.overhead_reason, "the sampler took 9 microseconds, 0.22% of the 4000 microseconds of CPU time sampled: 6 in its handlers and 3 signals at the 1000 nanoseconds the kernel took to deliver and return from one as sampling started")
+}
+
+// Each record the runtime could not write is counted. A flight ring keeps
+// tally records, clock records with 1 for their address: the losses so far,
+// then whether the run ended, each counting every loss before it. A `jet
+// perf run` exit's clock record carries the count as its seventh word. The
+// trace's `records` section keeps the count; a run that lost none has none.
+#Test("perf samples count the records the program could not write, and the trace keeps the count") {
+    clock: 13 << 59
+    tally: clock | (3 << 48) | 1
+    ring: jet_cli_perf_test_words([Int]{tally, 4, 0, tally, 9, 0, tally, 9, 1})
+    flight: jet_cli_perf_samples_count(X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, [X64ImageFunction]{}, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, ring, 0)
+    assert_eq(flight.records_lost, U64{9})
+    assert_eq(flight.total, U64{0})
+    assert(flight.cost == None)
+    file: jet_cli_perf_test_words([Int]{clock | (7 << 48), 4000000, 6000, 1000, 0, 0, 3})
+    run: jet_cli_perf_samples_count(X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, [X64ImageFunction]{}, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, file, 0)
+    assert_eq(run.records_lost, U64{3})
+    assert(run.cost != None)
+    section: jet_cli_perf_records_section(U64{3}, "the samples file refused their writes") ?? panic("3 records were lost")
+    assert_eq(section.name, "records")
+    assert_eq(section.type_name, "JetPerfRecords")
+    assert_eq(String.from_bytes(canonical_json_bytes(section.value)) ?? "", "{{\"lost\":3,\"reason\":\"the samples file refused their writes\"}}\n")
+    assert(jet_cli_perf_records_section(U64{0}, "the samples file refused their writes") == None)
 }
 
 #Test("the per-line table splits a line's samples in a stop poll out of its own") {

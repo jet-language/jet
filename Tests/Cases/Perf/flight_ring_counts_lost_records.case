@@ -1,0 +1,27 @@
+# No profile event is lost silently. A flight-recorded program sends each
+# record to its record socket, which the flight recorder drains into its
+# ring every 100 ms; a record made while the socket is full is dropped and
+# counted, and the count reaches the ring. `jet perf attach` says how many
+# records the program lost, and its trace keeps the count in its `records`
+# receipt section.
+requires: os-name:linux
+fixture: FlightRingCountsLostRecords.fixture
+env: NO_COLOR=1
+env: XDG_RUNTIME_DIR={work}/run
+env: TMPDIR={work}/tmp
+step: mkdir -m 700 run tmp
+exit: 0
+session live line: jet run --observe live.jet
+stderr: null
+recv live
+stdout.trim: = "READY" # the program has made its records
+step: jet perf attach {pid:live} --source live.jet --out lost.jettrace
+exit: 0
+stderr: ~ "Records lost: " # the attach reports the records the program lost
+stderr: ~ "; the program's record socket was full when it made them, as its flight recorder drains it every 100 ms\nTrace: " # and why, before the trace's path
+json: file lost.jettrace doc $.content.receipt_sections[?name="records"][0].type_name = "JetPerfRecords"
+json: file lost.jettrace doc $.content.receipt_sections[?name="records"][0].value.lost >= 1 # the count reaches the trace
+json: file lost.jettrace doc $.content.receipt_sections[?name="records"][0].value.reason = "the program's record socket was full when it made them, as its flight recorder drains it every 100 ms"
+signal live: KILL
+close live
+exit: any # the case's KILL ends the program
