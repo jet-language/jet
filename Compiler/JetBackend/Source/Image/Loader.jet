@@ -2801,10 +2801,17 @@ x64_trace_close: fn(trace: &X64Trace) {
             _ := os_syscall(OS_SYS_KILL, trace.pid, 9, 0, 0, 0, 0)
         }
         // The kill ends a stopped tracee too; the helper reaps each thread,
-        // the first last.
+        // the first last. A thread that stops on its way out (the exit
+        // event of x64_trace_follow_exits, or a stop already under way)
+        // waits there until it is let go, so each stop is let go.
         loop {
             stop: x64_trace_wait(trace)
             if stop.thread < 0 || (stop.thread == trace.pid && stop.status & 0xff != 0x7f) -> break
+            if stop.status & 0xff == 0x7f {
+                #Unsafe("the helper's PTRACE_CONT of a stopped thread of its own tracee, which the kill ends") {
+                    _ := x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_CONT, stop.thread, 0, 0, 0, 0)
+                }
+            }
         }
         trace.pid = -1
         trace.thread = -1
