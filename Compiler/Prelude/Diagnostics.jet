@@ -24540,7 +24540,7 @@ RawAccessOutsideProvenance: struct {
         no_fix: .Behavior,
         fix_next: "Bound the raw access before it reaches storage and satisfy the named unsafe obligation.",
 
-        what: fn(self) -> String { "raw `{self.operation}` outside `{self.gate}`'s storage" }
+        what: fn(self) -> String { "Raw `{self.operation}` outside `{self.gate}`'s storage" }
 
         why: fn(self) -> String {
             "The pointer is outside the allocation provenance tracked for the active `#Unsafe` gate ({self.detail}); runtime evidence never replaces a required static obligation."
@@ -24569,7 +24569,7 @@ UseAfterLifetime: struct {
         no_fix: .Behavior,
         fix_next: "Do not use the pointer after release or frame exit; satisfy the named lifetime obligation.",
 
-        what: fn(self) -> String { "use of storage after its lifetime ended in `{self.gate}`" }
+        what: fn(self) -> String { "Use of storage after its lifetime ended in `{self.gate}`" }
 
         why: fn(self) -> String {
             "The storage was released or its owning Jet frame expired before this raw `{self.operation}`; the gate's lifetime obligation was not met."
@@ -24599,7 +24599,7 @@ MisalignedRawAccess: struct {
         no_fix: .Behavior,
         fix_next: "Derive an aligned pointer from the live allocation and satisfy the named alignment obligation.",
 
-        what: fn(self) -> String { "misaligned raw `{self.operation}` in `{self.gate}`" }
+        what: fn(self) -> String { "Misaligned raw `{self.operation}` in `{self.gate}`" }
 
         why: fn(self) -> String {
             "This raw `{self.operation}` needs an aligned pointer, but {self.detail}."

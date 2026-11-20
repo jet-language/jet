@@ -20,6 +20,7 @@ fails on a `JET_*` variable the compiler names with no row. The effect surface i
 [`EffectsSurface.jet`](../../../Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet),
 and the verification defaults are in
 [`Tools/Agent/VerifyFull.jet`](../../../Tools/Agent/VerifyFull.jet).
+Vocabulary: [Jet vocabulary](../vocabulary.md).
 
 ## Naming convention
 
