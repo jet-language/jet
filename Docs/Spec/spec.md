@@ -4247,7 +4247,9 @@ amended by D-TASK-SLICE1=A). The wait points are channel send and receive,
 `time.sleep`, task join, a select arm, and I/O. A canceled task unwinds at
 the next wait point or check, whichever comes first, and runs Drop-backed
 cleanup, so a loop or a recursion that only computes stops at its next
-iteration or call. A canceled
+iteration or call. A task canceled before it starts still starts: its body
+unwinds at its first wait point or check, so a body that opens with
+`#Shield` runs that block to its end first. A canceled
 receive unwinds instead of returning `Closed`. A busy race loser stops at its
 next iteration, so `task.race` returns once its winner does. A canceled
 `task.all` member reports `Canceled`. Canceling a task also cancels every
