@@ -7397,6 +7397,10 @@ sema_expr_check_call_expr: fn(call: Call, expected: Type?, environment: SemaScop
 }
 
 sema_expr_check_method_call_expr: fn(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if sema_core_path_unimported(receiver, method, "(...)", scopes) == .Val(report) {
+        diagnostics.push(report)
+        return None
+    }
     // `[Int?].filled(…)` and `[Int?#3].filled(None)`: the parser gave the
     // list type as the call's one owner type argument.
     if receiver == .Ident(owner, _, _) && owner == LIST_TYPE_OWNER && owner_type_args.len() == 1 {

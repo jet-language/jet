@@ -869,7 +869,10 @@ without the binary; a copy no kept dump names is removed as the dumps
 rotate. The memory starts
 from every thread's and task's stack and the program's globals and follows
 each word that points into the program's writable memory: to its page, or
-to a whole large block (a mapping of its own) at that block's start. The
+to a whole large block (a mapping of its own) at that block's start. A
+stack is held from its stack pointer up past the outermost frame its frame
+pointers reach, not to the end of its mapping, since the parked tasks'
+stacks share one mapping and the rest of it is other stacks. The
 walk is conservative, so it holds at least what the typed pointers reach,
 without reading the image's types in the stop. It holds at most 32 MiB of
 that memory, in the order it reaches it; past that budget the rest is cut

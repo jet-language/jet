@@ -1,0 +1,58 @@
+// A block cut off by the end of the file reports the `{` that a `}` left of
+// its line closed too early, and its edit puts that `}` back where the
+// indentation returns, so the edited source parses clean.
+use {
+    jet_foundation.[Diagnostic, Span]
+    jet_parser.[parse_source]
+}
+
+// Line 9's `if` never closes: line 14's `}` at column 1 closes it instead.
+UNCLOSED_IF: `// The if on line 9 never closes: the close on line 14 takes its place.
+// The end of the file then comes before the close of run.
+
+limit: 3
+
+// Prints a count.
+run: fn() {
+    count: 5
+    if count > limit {
+        print("over the limit")
+        print(count)
+    print("done")
+    print(limit)
+}
+
+helper: fn() -> Int { 1 }
+`
+
+unclosed_report: fn(source: String) -> Diagnostic {
+    parsed: parse_source(source.bytes())
+    loop diagnostic in parsed.diagnostics {
+        if diagnostic.code == "E0083" -> return diagnostic
+    }
+    panic("no E0083 for: {source}")
+}
+
+source_text: fn(source: String, span: Span) -> String {
+    String.from_bytes(source.bytes().slice(span.start, span.end)) ?? ""
+}
+
+#Test("a block cut off by the end of the file names the if whose brace an early close took") {
+    report: unclosed_report(UNCLOSED_IF)
+    assert_eq(report.what, "The `if` opened on line 9 is never closed")
+    assert_eq(source_text(UNCLOSED_IF, report.span ?? panic("E0083 without a span")), "{{")
+    assert_eq(report.labels.len(), 1)
+    assert_eq(source_text(UNCLOSED_IF, report.labels[0].span), "}}")
+    edit: report.edit ?? panic("E0083 without an edit")
+    line_twelve: UNCLOSED_IF.split("\n").take(11).to_list().join("\n").len() + 1
+    assert_eq(edit.span.start, line_twelve)
+    assert_eq(edit.new_text, "    }}\n")
+    before: source_text(UNCLOSED_IF, Span{start: 0, end: edit.span.start})
+    after: source_text(UNCLOSED_IF, Span{start: edit.span.end, end: UNCLOSED_IF.len()})
+    assert_eq(parse_source("{before}{edit.new_text}{after}".bytes()).diagnostics.len(), 0)
+}
+
+#Test("a block whose closes all sit at their openers' indentation keeps the end-of-file report") {
+    report: unclosed_report("run: fn() {{\n    if true {{\n        print(1)\n    }}\n")
+    assert_eq(report.what, "`{{` opened on line 1 is never closed")
+}

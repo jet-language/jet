@@ -2116,11 +2116,39 @@ sema_call_item_free_function_root: fn(item: Item, name: String) -> Bool? Never! 
     None
 }
 
-// The current method name nearest `method` in spelling — within two edits,
-// else the one name that is a prefix of the other — among the receiver's
-// built-in methods that take `actual` arguments and its declared instance
-// methods; none when two candidates tie.
-sema_call_method_suggestion: fn(method: String, receiver: Type, actual: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
+// A method another language spells on a receiver whose Jet surface lacks
+// it, and what Jet writes instead: `spelling` is Jet code on a value named
+// `value`, and `witness` a program that writes it on such a receiver.
+// Compiler/JetDriver/Tests/MethodIdioms.jet checks every witness clean and
+// finds its spelling in it, so no row can point at an API that is gone.
+SemaMethodIdiom: struct {
+    receiver: String,
+    foreign: String,
+    note: String,
+    spelling: String,
+    witness: String,
+}
+
+SEMA_METHOD_IDIOMS: [SemaMethodIdiom]{
+    {receiver: "I32", foreign: "abs", note: "`abs` is on `Int`, so widen the value first", spelling: "Int{{value}}.abs()", witness: "run: fn() {{\n    value: I32{{-3}}\n    print(Int{{value}}.abs())\n}}\n"},
+    {receiver: "Int", foreign: "to_float", note: "Jet converts a number by naming the type it becomes", spelling: "Float{{value}}", witness: "run: fn() {{\n    value: 7\n    print(Float{{value}})\n}}\n"},
+    {receiver: "List", foreign: "as_mut_ptr", note: "Jet has no raw pointers; a list's elements are written in place by index", spelling: "value[index] = item", witness: "run: fn() {{\n    value := [U8]{{1, 2}}\n    index: 0\n    item: U8{{5}}\n    value[index] = item\n    print(value)\n}}\n"},
+}
+
+// The Fix an idiom row gives `method` on this receiver; None without a row.
+sema_call_method_idiom_fix: fn(receiver: Type, method: String) -> String? Never! {
+    label: sema_call_method_leaf(sema_call_receiver_method_label(sema_expr_unwrap_tag(receiver)))
+    loop idiom in SEMA_METHOD_IDIOMS {
+        if idiom.receiver == label && idiom.foreign == method {
+            return Val("{idiom.note}: write `{idiom.spelling}`")
+        }
+    }
+    None
+}
+
+// The receiver's built-in methods that take `actual` arguments and its
+// declared instance methods: the names a missing method is compared with.
+sema_call_method_candidates: fn(receiver: Type, actual: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> [String] Never! {
     candidates := [String]{}
     loop name in sema_call_builtin_method_names(receiver) {
         if sema_call_builtin_method_arities(receiver, name).contains(actual) {
@@ -2130,6 +2158,12 @@ sema_call_method_suggestion: fn(method: String, receiver: Type, actual: Int, env
     loop name in sema_call_declared_method_names(receiver, environment, program) {
         if !candidates.contains(name) -> candidates.push(name)
     }
+    candidates
+}
+
+// The candidate nearest `method` in spelling — within two edits, else the
+// one name that is a prefix of the other; none when two candidates tie.
+sema_call_method_suggestion: fn(method: String, candidates: [String]) -> String? {
     if sema_suggest_field(method, candidates) == .Val(near) -> return Val(near)
     prefixed := String?{None}
     loop candidate in candidates {
@@ -2141,8 +2175,37 @@ sema_call_method_suggestion: fn(method: String, receiver: Type, actual: Int, env
     prefixed
 }
 
-sema_call_method_fix: fn(suggestion: String?, otherwise: String) -> String Never! {
-    if suggestion == .Val(name) -> "did you mean `{name}`?" else -> otherwise
+// Up to three candidates within two edits of `method`, nearest first (a tie
+// keeps the surface's order), written "`a`, `b` or `c`"; "" when none is.
+sema_call_method_near_names: fn(method: String, candidates: [String]) -> String Never! {
+    picked := [Int]{}
+    loop distance in 1..<3 {
+        loop index in 0..<candidates.len() {
+            if picked.len() < 3 && sema_taint_edit_distance(method, candidates[index]) == distance {
+                picked.push(index)
+            }
+        }
+    }
+    text := ""
+    loop (position, index) in picked {
+        joiner: if {
+            position == 0 -> ""
+            position == picked.len() - 1 -> " or "
+            else -> ", "
+        }
+        text = "{text}{joiner}`{candidates[index]}`"
+    }
+    text
+}
+
+// The Fix for `method` missing on the receiver: its idiom row, else the
+// nearest names, else "no similar method" and `otherwise`.
+sema_call_method_fix: fn(method: String, receiver: Type, candidates: [String], suggestion: String?, otherwise: String) -> String Never! {
+    if sema_call_method_idiom_fix(receiver, method) == .Val(idiom) -> return idiom
+    near: sema_call_method_near_names(method, candidates)
+    if near.contains("` or `") -> return "did you mean {near}?"
+    if suggestion == .Val(name) -> return "did you mean `{name}`?"
+    "no similar method; {otherwise}"
 }
 
 // The suggested spelling is also the rename edit.
@@ -2155,8 +2218,9 @@ sema_call_method_error: fn(code: String, span: Span, what: String, why: String, 
 }
 
 sema_call_missing_instance_method: fn(method: String, receiver: Type, actual: Int, why: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic {
-    suggestion: sema_call_method_suggestion(method, receiver, actual, environment, program)
-    sema_call_method_error("E0311", span, "`{method}` isn't a method on this value", why, sema_call_method_fix(suggestion, "check the spelling of `{method}`"), suggestion)
+    candidates: sema_call_method_candidates(receiver, actual, environment, program)
+    suggestion: sema_call_method_suggestion(method, candidates)
+    sema_call_method_error("E0311", span, "`{method}` isn't a method on this value", why, sema_call_method_fix(method, receiver, candidates, suggestion, "check the spelling of `{method}`"), suggestion)
 }
 
 // The Fix for `method` missing on the receiver when one of the receiver's
@@ -2256,13 +2320,14 @@ sema_call_missing_method_diagnostic: fn(receiver: Type, method: String, actual: 
             return sema_error("E0102", span, "`{display}` has no method `{method}`", "`{display}` is a one-pass source; `{method}` needs a materialized list, so collection consumes the source and allocates the list", "materialize it first with `.to_list()`; this consumes the source and allocates a list")
         }
     }
-    suggestion: sema_call_method_suggestion(method, nominal, actual, environment, program)
+    candidates: sema_call_method_candidates(nominal, actual, environment, program)
+    suggestion: sema_call_method_suggestion(method, candidates)
     // A module-qualified receiver name (`module.Type`) names its module.
     owner_module: if type_name_value.contains(".") -> foundation_byte_text(type_name_value.bytes(), 0, type_name_value.rfind(".")) else -> ""
     protected: sema_call_core_nominal(nominal, environment, program) || (!source_owned && (sema_reserved_type_name(display) || sema_module_is_core_source(owner_module)))
     if protected {
         reached: if suggestion == None -> sema_call_method_reached_through(method, nominal, environment, program) else -> None
-        fix: reached ?? sema_call_method_fix(suggestion, "use a documented method on `{display}`")
+        fix: reached ?? sema_call_method_fix(method, nominal, candidates, suggestion, "use a documented method on `{display}`")
         return sema_call_method_error("E0102", span, "`{display}` has no method `{method}`", "`{display}` is a protected Core type with a closed method surface", fix, suggestion)
     }
     loop param in environment.generic_params {
@@ -2279,6 +2344,6 @@ sema_call_missing_method_diagnostic: fn(receiver: Type, method: String, actual: 
         fix: if bound_names.len() == 0 -> "add a trait bound that defines `{method}`, or use a method available on `{type_name_value}`" else -> "add a bound that defines `{method}`, or use a method from {bound_names.join(" + ")}"
         return sema_error("E0102", span, "`{display}` has no method `{method}`", why, fix)
     }
-    fix: sema_call_method_fix(suggestion, "define it inside `{display}: struct` or `impl {display}`")
+    fix: sema_call_method_fix(method, nominal, candidates, suggestion, "define it inside `{display}: struct` or `impl {display}`")
     sema_call_method_error("E0102", span, "`{display}` has no method `{method}`", "check the method name on this type", fix, suggestion)
 }

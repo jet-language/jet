@@ -319,7 +319,7 @@ jet_cli_debug_session: fn(image: String, entry: String, lines: [String], scratch
     session.evaluate_with(JetCLIDebugEvaluator{entry: source_file, argv: argv, color: color, held: held})
     source_lines: if entry == "" -> (cli_files.read(source_file) ?? "").split("\n").to_list() else -> lines
     if dap -> jet_cli_debug_dap(session, source_file, deep_checks, fixable: entry != "")
-    plan: if dap -> jet_cli_done("", "", JET_DRIVER_EXIT_OK) else -> jet_cli_debug_console(session, cli_files.basename(source_file), source_lines, breaks, program_args, entry, scratch, deep_checks, color)
+    plan: if dap -> jet_cli_done("", "", JET_DRIVER_EXIT_OK) else -> jet_cli_debug_console(session, cli_files.basename(source_file), source_lines, breaks, program_args, entry, scratch, deep_checks, color, held)
     session.close()
     // A console that refused (`quit` is E2204) has said why nothing was
     // recorded.
@@ -390,8 +390,13 @@ jet_cli_debug_unavailable: fn(error: NativeDebugError, color: Bool) -> JetCLIPla
 }
 
 // Run the program with `program_args` to its first stop (with `breaks`, the
-// first of them the program reaches), then read commands until it ends.
-jet_cli_debug_console: fn(session: &NativeSession, file: String, lines: [String], breaks: [NativeBreak], program_args: [String], entry: String, scratch: String, deep_checks: DeepChecks, color: Bool) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> JetCLIPlan Never! {
+// first of them the program reaches), then read commands until it ends. The
+// first stop shows once the session's held check of the package's cut
+// (`held`, jet_cli_debug_eval_held_cut_open) is open too. It opened while
+// the program launched and ran to that stop, and the stop's first `print`
+// is then checked against it rather than waiting for it or compiling the
+// package's cut alone.
+jet_cli_debug_console: fn(session: &NativeSession, file: String, lines: [String], breaks: [NativeBreak], program_args: [String], entry: String, scratch: String, deep_checks: DeepChecks, color: Bool, held: JetCLIDebugEvalHeldShared) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> JetCLIPlan Never! {
     opened := NativeDebugStep?{None}
     if breaks.len() > 0 {
         opened = Val(session.run_to(breaks, file, lines, program_args) ?? return jet_cli_debug_unavailable(err, color))
@@ -406,6 +411,7 @@ jet_cli_debug_console: fn(session: &NativeSession, file: String, lines: [String]
         row: diagnostic_registry_row("E0101") ?? panic("E0101 is not registered")
         return jet_cli_fail("E0101", row.what, row.why, row.fix, color, JET_DRIVER_EXIT_USER_ERROR)
     }
+    jet_cli_debug_eval_held_cut_wait(held)
     jet_cli_debug_commands(session, opened ?? panic("the session opened"), file, lines, -1, entry, scratch, deep_checks, color)
 }
 

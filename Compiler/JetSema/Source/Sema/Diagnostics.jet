@@ -3,11 +3,13 @@
 use jet_foundation.[
     DIAGNOSTIC_ERROR,
     Diagnostic,
+    Expr,
     InternalTag,
     Span,
     TagMarker,
     TextEdit,
     Type,
+    core_module_export,
     core_module_for_alias,
     diagnostic_caused_by,
     diagnostic_from_registry,
@@ -416,6 +418,47 @@ sema_unknown_name_in: fn(name: String, span: Span, scopes: SemaScopeTable) -> Di
     }
     // copy: the edit keeps the nearest name past the candidate list.
     diagnostic_with_edit(sema_error("E0107", span, what, why, "did you mean {names}?"), TextEdit{span: span, new_text: near[0].copy()})
+}
+
+// E0107 for a `core.<module>.<item>` path where nothing is named `core`: a
+// Core module is reached through `use`, so the fix imports the longest prefix
+// that is a Core module under its last name and writes the path through that
+// name, as the bare module name's fix does. `base.member` is the path, and
+// `call` is what follows it in the fix: `(...)` for a call, else empty. None
+// when the path doesn't open with `core`, something in scope is named
+// `core`, or no prefix is a Core module.
+sema_core_path_unimported: fn(base: Expr, member: String, call: String, scopes: SemaScopeTable) -> Diagnostic? {
+    root: sema_core_path_root(base) ?? return None
+    if sema_scope_resolve_index(scopes, "core") != None -> return None
+    names: "{sema_core_path_text(base)}.{member}".split(".").to_list()
+    // The index of the last name of the longest prefix that is a Core module.
+    module_end := 0
+    prefix := "core"
+    loop index in 1..<names.len() {
+        prefix = "{prefix}.{names[index]}"
+        if core_module_export(prefix) != None -> module_end = index
+    }
+    if module_end == 0 -> return None
+    owner: names.slice(0, module_end + 1).join(".")
+    written: names.slice(module_end, names.len()).join(".")
+    sema_error("E0107", root, "nothing named `core` exists here", "a Core module is reached through a `use` import, and `core` alone names nothing", "add `use {names[module_end]}: {owner}` and write `{written}{call}`")
+}
+
+// The span of the `core` a dotted path `core.a.b` opens with; None for any
+// other expression.
+sema_core_path_root: fn(expr: Expr) -> Span? Never! {
+    if expr == .Ident(name, span, _) {
+        if name == "core" -> return Val(span)
+        return None
+    }
+    if expr == .Field(base, _, _, _) -> return sema_core_path_root(base)
+    None
+}
+
+// The dotted text of a path sema_core_path_root accepts, `core.a.b`.
+sema_core_path_text: fn(expr: Expr) -> String Never! {
+    if expr == .Field(base, member, _, _) -> return "{sema_core_path_text(base)}.{member}"
+    "core"
 }
 
 // E0107 for a name an unresolved read or write spells in a function of an

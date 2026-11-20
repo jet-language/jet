@@ -1,0 +1,36 @@
+// Every idiom row a missing method's Fix can give names a real API: its
+// witness program writes the row's spelling and checks clean through the
+// real loader and checker, with every Core unit read from the tree. A row
+// whose API is gone fails here.
+use {
+    idiom_files: core.files
+    jet_driver.[JetDriverCompileMode, JetDriverCoreSource, jet_driver_compile, jet_driver_core_text, jet_driver_has_errors, jet_driver_runtime_interface_sources]
+    jet_foundation.[CORE_SOURCE_OWNED_ROWS]
+    jet_sema.[SEMA_METHOD_IDIOMS]
+}
+
+#Test("every method idiom row's spelling checks clean in its witness") {
+    loop idiom in SEMA_METHOD_IDIOMS {
+        assert(idiom.witness.contains(idiom.spelling), "the witness for `{idiom.foreign}` on {idiom.receiver} does not write `{idiom.spelling}`")
+        request := seams_request(idiom.witness, JetDriverCompileMode.Program)
+        request.core_sources = idiom_core_rows()
+        result: jet_driver_compile(request)
+        problems := [String]{}
+        loop diagnostic in result.diagnostics {
+            problems.push("{diagnostic.code}: {diagnostic.what}")
+        }
+        assert(!jet_driver_has_errors(result.diagnostics), "the witness for `{idiom.foreign}` on {idiom.receiver} does not check: {problems.join("; ")}")
+    }
+}
+
+// Every built-in Core unit, read from the tree, with the runtime interface
+// units that ride with Core.
+idiom_core_rows: fn() -> [JetDriverCoreSource] {
+    rows := [JetDriverCoreSource]{}
+    loop row in CORE_SOURCE_OWNED_ROWS {
+        text: idiom_files.read(row.path) ?? panic("cannot read {row.path}: {err}")
+        rows.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, text: jet_driver_core_text(text)})
+    }
+    rows.extend(jet_driver_runtime_interface_sources())
+    rows
+}

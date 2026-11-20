@@ -378,8 +378,11 @@ parser_parse_body_lines: fn(state: &JetParserState, value_tail: Bool) -> ParsedB
         }
     }
     if parser_current_kind(state) == TOKEN_EOF {
-        // E0083 (#3719): a block cut off by the end of the file names its opener.
-        parser_report_unclosed(state, open, "the end of the file", "block")
+        // E0083: a block cut off by the end of the file names its opener,
+        // or the inner `{` its indentation shows a `}` closed early.
+        if !parser_report_unclosed_by_indent(state, open) {
+            parser_report_unclosed(state, open, "the end of the file", "block")
+        }
         end: parser_current(state).span.start
         state.block_spans.push(Span{start: open.span.end, end: end})
         return ParsedBlock{span: Span{start: open.span.start, end: end}, statements: statements, tail: None}

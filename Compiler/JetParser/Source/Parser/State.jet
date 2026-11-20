@@ -783,6 +783,102 @@ parser_report_unclosed: fn(state: &JetParserState, opener: Token, cutoff: String
     state.diagnostics.push(diagnostic_with_edit_grade(labeled, TextEdit{span: Span{start: at, end: at}, new_text: close}, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview))
 }
 
+// A block cut off by the end of the file, read by indentation: the first `}`
+// that starts its line left of the line its `{` opened on closes an outer
+// block early, so that `{` is the one never closed. Jet's formatter keeps
+// indentation, so the mismatch names the likely opener, and its `}` belongs
+// before the first line back at the opener's indentation. Reports nothing
+// and returns false when every such `}` sits at its opener's indentation.
+parser_report_unclosed_by_indent: fn(state: &JetParserState, open: Token) -> Bool {
+    if state.line_starts.len() == 0 || state.sources[0].len() == 0 -> return false
+    openers := [Int]{}
+    loop index in 0..<state.tokens.len() {
+        token: state.tokens[index]
+        if token.span.start < open.span.start || token.span.start == token.span.end -> next
+        if token.kind == TOKEN_LBRACE {
+            openers.push(index)
+            next
+        }
+        if token.kind != TOKEN_RBRACE -> next
+        opener: state.tokens[openers.pop() ?? return false]
+        close_start: parser_line_start_of(state, token.span.start)
+        close_column: token.span.start - close_start
+        if parser_line_indent_width(state, close_start) != close_column -> next
+        opener_start: parser_line_start_of(state, opener.span.start)
+        indent: parser_line_indent_width(state, opener_start)
+        if close_column >= indent -> next
+        parser_report_misindented_close(state, opener, token, opener_start, indent)
+        return true
+    }
+    false
+}
+
+// E0083 for the `{` that a `}` left of its line closes too early.
+parser_report_misindented_close: fn(state: &JetParserState, opener: Token, close: Token, opener_start: Int, indent: Int) {
+    opener_line: parser_line_number_of(state, opener.span.start)
+    close_line: parser_line_number_of(state, close.span.start)
+    insert_line := opener_line + 1
+    loop insert_line < close_line {
+        start: state.line_starts[insert_line - 1]
+        width: parser_line_indent_width(state, start)
+        blank: start + width >= state.sources[0].len() || parser_is_space_byte(Int{state.sources[0][start + width]})
+        if !blank && width <= indent -> break
+        insert_line += 1
+    }
+    at: state.line_starts[insert_line - 1]
+    head: parser_line_head_keyword(state, opener_start + indent)
+    named: if head == "" -> "`{{`" else -> "the `{head}`"
+    what: "{named} opened on line {opener_line} is never closed"
+    why: "the `}}` on line {close_line} sits left of {named} on line {opener_line}, so it closes an outer block and leaves {named} without its own `}}`"
+    fix: "add `}}` before line {insert_line}, the first line back at the indentation of {named}"
+    diagnostic: diagnostic_from_registry("E0083", Val(opener.span), what, why, fix)
+    labeled: diagnostic_with_label(diagnostic, close.span, "this `}}` closes an outer block")
+    edit: TextEdit{span: Span{start: at, end: at}, new_text: "{parser_source_slice(state, opener_start, opener_start + indent)}}}\n"}
+    state.diagnostics.push(diagnostic_with_edit_grade(labeled, edit, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview))
+}
+
+// The keyword that opens a block at `offset` (`if`, `else`, `loop`, `match`),
+// or "" when the line opens with anything else.
+parser_line_head_keyword: fn(state: JetParserState, offset: Int) -> String Never! {
+    end := offset
+    loop end < state.sources[0].len() && parser_is_word_byte(Int{state.sources[0][end]}) -> end += 1
+    word: parser_source_slice(state, offset, end)
+    if word == "if" || word == "else" || word == "loop" || word == "match" -> word else -> ""
+}
+
+parser_is_word_byte: fn(byte: Int) -> Bool Never! {
+    (byte >= 97 && byte <= 122) || (byte >= 65 && byte <= 90) || (byte >= 48 && byte <= 57) || byte == 95
+}
+
+// Where the line holding `offset` starts.
+parser_line_start_of: fn(state: JetParserState, offset: Int) -> Int Never! {
+    found := 0
+    loop start in state.line_starts {
+        if start > offset -> break
+        found = start
+    }
+    found
+}
+
+// The 1-based line holding `offset`.
+parser_line_number_of: fn(state: JetParserState, offset: Int) -> Int Never! {
+    line := 0
+    loop start in state.line_starts {
+        if start > offset -> break
+        line += 1
+    }
+    line
+}
+
+// The spaces and tabs that start the line beginning at `line_start`.
+parser_line_indent_width: fn(state: JetParserState, line_start: Int) -> Int Never! {
+    end := line_start
+    loop end < state.sources[0].len() && (Int{state.sources[0][end]} == 32 || Int{state.sources[0][end]} == 9) {
+        end += 1
+    }
+    end - line_start
+}
+
 parser_skip_semicolons: fn(state: &JetParserState) Never! {
     loop parser_current_kind(state) == TOKEN_SEMI -> parser_bump(state)
 }
