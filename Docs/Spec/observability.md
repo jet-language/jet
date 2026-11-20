@@ -1211,7 +1211,16 @@ function and of every function it calls, which reach the program's own
 data and runtime where its unchanged code does, so the compile's choices
 for the whole program (its `main`, its register use) need not be the
 image's; a function the expression calls whose code differs from the
-program's is refused, the source no longer the program's. `fix` compiles
+program's is refused, the source no longer the program's. A runtime
+routine the expression calls that the image does not hold, because the
+program never needed it (an Int product past a word, `jet_int_mul`), is
+mapped with the expression's code from the runtime pack beside this jet,
+with every routine and constant it reaches that the image lacks; what the
+image holds it reaches in place, its writable data where the image's own
+code reaches it, so the program's runtime state is the one it reads. A
+routine the pack can't place that way (thread-local data, a writable
+object only other data points at) is left as a trap, and the evaluation
+that reaches it is refused, naming it. `fix` compiles
 at that level too. An inlined frame is evaluated in as `bt` shows it: the
 expression is checked in the inlined function at its line, the frame it was
 inlined into at the call, and the locals are the frame's own; code inlined

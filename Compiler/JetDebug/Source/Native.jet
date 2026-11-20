@@ -508,6 +508,11 @@ NativeSession: struct {
     eval_room: Int{0},
     eval_code: Int{0},
     eval_runs: Int{0},
+    // The runtime pack an evaluation places the runtime functions the image
+    // lacks from (NativeFixPack.jet), read from the evaluator at the first
+    // plan that needs one (`pack_read`); None when it can't be read.
+    pack: NativeFixPack?{None},
+    pack_read: Bool{false},
     // The conditions and logpoints placed in the program (NativePlace.jet),
     // latest last, and whether the last stop was a condition of them that
     // held.
@@ -950,6 +955,18 @@ NativeSession: struct {
         evaluator.source(path)
     }
 
+    // Reads the runtime pack from the session's evaluator
+    // (NativeEvaluator.runtime) into `pack`, once a session.
+    read_pack: fn(&self) Never! {
+        if self.pack_read {
+            return
+        }
+        self.pack_read = true
+        evaluator: self.evaluator ?? return
+        bytes: evaluator.runtime() ?? return
+        self.pack = native_fix_pack(bytes)
+    }
+
     // Drops the code kept for expressions (`evals`) once the program's
     // sources read other than when it was compiled
     // (NativeEvaluator.unchanged): it may not be what the source says now,
@@ -1102,7 +1119,13 @@ NativeSession: struct {
         }
         if permit.value.plan == None || permit.value.planned != self.fixed.len() {
             diff: native_fix_diff(self.image, permit.value.edit, facts.value.symbols, facts.value.code.bytes, facts.value.code.address, self.fixed) ?? return Err(native_eval_refused(err.detail))
-            plan: native_fix_place_all(permit.value.edit, facts.value.symbols, diff, permit.value.entry, also: permit.value.drop) ?? return Err(native_eval_refused(err.detail))
+            plan := native_fix_place_all(permit.value.edit, facts.value.symbols, diff, permit.value.entry, also: permit.value.drop) ?? return Err(native_eval_refused(err.detail))
+            if plan.absent.len() > 0 {
+                self.read_pack()
+                if self.pack == .Val(pack) {
+                    native_fix_pack_load(plan, pack, facts.value.symbols, facts.value.code)
+                }
+            }
             permit.value.plan = Val(plan)
             permit.value.planned = self.fixed.len()
             permit.value.placed = 0

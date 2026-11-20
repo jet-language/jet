@@ -50,10 +50,14 @@ NativeEvalRefused: struct {
 // names it (NativeSession.source_at, NativeFrame.path), as the compile reads
 // it: a Core source's is the Core the program compiles with, never a file
 // under the working directory. None when it can't be read.
+// `runtime`: the bytes of the runtime pack the program's image linked its
+// runtime from, which an evaluation places the runtime functions the image
+// lacks from (NativeFixPack.jet). None when it can't be read.
 NativeEvaluator: trait {
     compile: fn(self, path: String, line: Int, column: Int, text: String, binders: [NativeEvalBinder]?, owned: Bool, running: [String:[U8]]) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval NativeEvalRefused!,
     unchanged: fn(self) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Bool Never!,
     source: fn(self, path: String) -[FS, Env]> String? Never!,
+    runtime: fn(self) -[FS, Env]> [U8]? Never!,
 }
 
 // A variable a name of an evaluated expression may read at the stop: its
