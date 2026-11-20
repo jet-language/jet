@@ -1,0 +1,13 @@
+// A Map key whose written `equal` reads one field path of each side moves
+// to KeyBy keyed by that path, written as the rule wrote it: the key's body
+// reads the field through `self`, and the fixed source checks clean.
+
+key_by_slot: fn(rule: String) -> String {
+    "Slot: struct {{\n    start_ns: Int,\n    label: String,\n\n{rule}}}\n\nrun: fn() {{\n    owners := [Slot:String]{{}}\n    owners[Slot{{start_ns: 10, label: \"a\"}}] = \"ann\"\n    print(\"slots: {{owners.len()}}\")\n}}\n"
+}
+
+#Test("a written equal over one field path becomes a KeyBy that reads it through self") {
+    written: key_by_slot("    impl Equatable {{\n        equal: fn(self, rhs: Slot) -> Bool {{ self.start_ns == rhs.start_ns }}\n    }}\n")
+    keyed: key_by_slot("    impl KeyBy {{\n        Key: Int,\n\n        key: fn(self) -> Int {{ self.start_ns }}\n    }}\n")
+    assert_idiom_fix(written, keyed)
+}
