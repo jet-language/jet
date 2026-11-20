@@ -311,7 +311,7 @@ use {
         pkg_lint_e1293,
         pkg_lint_policy_is_denied,
     ]
-    jet_ir.[IRProgram, ir_codec_decode_helpers, ir_comptime_codec_targets, ir_comptime_expression_types, ir_core_decoding_read, ir_core_lowered_by_name, ir_core_method_lowered_by_owner, ir_first_function_rows, ir_precise_helper_names, ir_named_function_keys, ir_reachable_core_rows, ir_runtime_intrinsic]
+    jet_ir.[IRProgram, IRReachHeld, ir_codec_decode_helpers, ir_comptime_codec_targets, ir_comptime_expression_types, ir_core_decoding_read, ir_core_lowered_by_name, ir_core_method_lowered_by_owner, ir_first_function_rows, ir_precise_helper_names, ir_named_function_keys, ir_reach_held_add, ir_reach_held_row, ir_reachable_core_rows, ir_runtime_intrinsic]
     jet_eval.[
         JetEvalConfig,
         JetEvalCompilerQueryHost,
@@ -1098,11 +1098,11 @@ JetDriverComptimeRunIndex: struct {
     // A function check that captured one ran before its value landed
     // (jet_driver_comptime_site_waits).
     pass_sites: [Int:[String]]{[Int:[String]]{}},
-    // Constant key -> the functions its landed value names
+    // The functions each landed constant's value names
     // (TComptimeValue.Function, `f: double` in a folded record), which a
     // closure whose bodies read the constant queues as it queues a function
     // value a body names (jet_driver_comptime_precise_refs).
-    value_functions: [String:[String:Bool]]{[String:[String:Bool]]{}},
+    value_functions: IRReachHeld{IRReachHeld{}},
 }
 
 // A function whose visit is the same in every later closure of the run,
@@ -1152,40 +1152,34 @@ jet_driver_comptime_run_index: fn(checked_functions: [SemaComptimeFunctionResult
         node: jet_driver_comptime_node_id(index, checked.module_identity, checked.function_key)
         if index.checked_at[node] < 0 -> index.checked_at[node] = row
     }
-    loop value in values { jet_driver_comptime_value_functions_note(index, value.key, value.value) }
+    loop value in values {
+        jet_driver_comptime_value_functions_note(index.value_functions, value.key, value.value)
+    }
     index
 }
 
-// Notes the functions landed value `value` of constant `key` names
-// (JetDriverComptimeRunIndex.value_functions).
-jet_driver_comptime_value_functions_note: fn(index: &JetDriverComptimeRunIndex, key: String, value: TComptimeValue) Never! {
-    held := [String:Bool]{}
-    jet_driver_comptime_value_functions(value, held)
-    if held.len() > 0 -> index.value_functions[key] = held
+// Records the functions landed value `value` of constant `key` names into
+// `held` (ir_reach_held_add).
+jet_driver_comptime_value_functions_note: fn(held: &IRReachHeld, key: String, value: TComptimeValue) Never! {
+    functions := name_table_sized(4)
+    jet_driver_comptime_value_functions(value, functions)
+    ir_reach_held_add(held, key, functions)
 }
 
-// The functions each landed constant's value names, by constant key: a kept
-// body that reads the constant reaches them (ir_reachable_core_rows).
-jet_driver_value_function_keys: fn(values: [SemaComptimeItemValue]) -> [String:[String]] Never! {
-    keys := [String:[String]]{}
-    loop value in values {
-        held := [String:Bool]{}
-        jet_driver_comptime_value_functions(value.value, held)
-        if held.len() > 0 {
-            functions := [String]{}
-            loop (key, _) in held -> functions.push(key)
-            keys[value.key] = functions
-        }
-    }
-    keys
+// The functions each landed constant's value names: a kept body that reads
+// the constant reaches them (ir_reachable_core_rows).
+jet_driver_value_function_keys: fn(values: [SemaComptimeItemValue]) -> IRReachHeld Never! {
+    held := IRReachHeld{}
+    loop value in values { jet_driver_comptime_value_functions_note(held, value.key, value.value) }
+    held
 }
 
-// Adds each function `value` names to `held`. The items of a list and the
-// values of a map share one type, so one scalar among them makes them all
-// scalars, which name no function.
-jet_driver_comptime_value_functions: fn(value: TComptimeValue, held: &[String:Bool]) Never! {
+// Interns each function `value` names into `held`. The items of a list and
+// the values of a map share one type, so one scalar among them makes them
+// all scalars, which name no function.
+jet_driver_comptime_value_functions: fn(value: TComptimeValue, held: &NameTable) Never! {
     if value == {
-        .Function(key) -> { held[key] = true }
+        .Function(key) -> { _ := name_intern(held, key) }
         .List(items) -> {
             if items.len() > 0 && jet_driver_comptime_value_scalar(items[0]) {
                 return
@@ -1336,12 +1330,14 @@ jet_driver_comptime_precise_refs: fn(graph: SemaRegistrationGraph, index: &JetDr
             }
         }
     }
-    if index.value_functions.len() > 0 {
+    if index.value_functions.starts.len() > 0 {
         loop node in tree.nodes {
             if node.kind == .ConstRef(symbol) {
-                held: index.value_functions.get(symbol_key(graph.symbols, tree.symbols, symbol)) ?? next
+                constant: ir_reach_held_row(index.value_functions, symbol_key(graph.symbols, tree.symbols, symbol))
+                if constant < 0 -> next
                 if !index.owners_built -> jet_driver_comptime_owners_build(graph, index)
-                loop (key, _) in held {
+                loop position in index.value_functions.starts[constant]..<index.value_functions.ends[constant] {
+                    key: index.value_functions.functions[position]
                     if jet_driver_comptime_function_owner(index, key) == .Val(owner) {
                         refs.push(JetDriverComptimeFunctionRef{module_identity: owner, function_key: key})
                     }
@@ -3755,7 +3751,7 @@ jet_driver_comptime_run: fn(
                             sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                             return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
                         }
-                        jet_driver_comptime_value_functions_note(run_index, source.key, plain)
+                        jet_driver_comptime_value_functions_note(run_index.value_functions, source.key, plain)
                         values.push(jet_driver_comptime_item_value(source, plain, comptime_request.expression))
                         made_progress = true
                         next
