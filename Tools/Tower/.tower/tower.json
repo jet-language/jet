@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112635,
+    "rev": 112643,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -44,7 +44,7 @@
         "radar-sq"
       ]
     },
-    "completionCursor": "2026-11-20T09:15:18.070Z",
+    "completionCursor": "2026-11-20T14:08:48.458Z",
     "dayStart": {
       "date": "2026-11-20",
       "openCards": 320,
@@ -24289,20 +24289,20 @@
         {
           "n": 33,
           "text": "Owner ruling 2026-11-15, amending D-DIAG-HEADER1=A, and owner ruling 2026-11-19 on the heading: Jet's own diagnostics are named `Jet.Name` (capital J, for example `Jet.ValueTypeMismatch`), never `jet.Name`, and a report's heading is `Error: Jet.Name: <what>` (likewise `Warning: Jet.Name: …` and the runtime `Stop: Jet.Name: …`), never `Error [E0113]` or `Error [jet.Name]`. The name is the one identifier everywhere: the heading, the More: link (jet-lang.dev/e/Jet.ValueTypeMismatch), the closing `jet explain Jet.Name` hint, `#Allow(Jet.FloatMoney, \"…\")`, the jet.report JSON `name`, and Docs. The E-code stays only as the stable alias. One cutover: no `jet.Name` spelling or bracketed heading is accepted or printed afterward, and every UI snapshot and golden is regenerated from real output. Proof: `jet test Compiler --profile ui`, and a guard that finds no `[jet.`, `jet.[A-Z]` diagnostic name or `Error [`/`Warning [`/`Stop [` heading in Compiler, Core, Docs or Tests.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-19T20:29:15.342Z"
+          "evidence": "p363 batch compiler (dev 6657c8f86b): `jet test Compiler --profile ui` rc=0, PASS 3070 FAIL 0 (suite-p363/ui.out). The 74 KNOWN-FAILING ui rows are none about headings or names: they are #6425 (checks not ported), #6858, #6897, #6843, #6418, #4275 and #6949 rows, each owned by its card. Guard Tests/Guards/DiagnosticNames/diagnostic_names.jet (no bracketed `Error [`/`Warning [`/`Stop [` heading and no `jet.Name` spelling in tracked Compiler, Core, Docs or Tests text, snapshots included) passed in the p363 census (census-p363 guards, rc 0). Docs/Spec/diagnostics.md states the `Error: Jet.Name: what` heading.",
+          "at": "2026-11-20T16:07:16.013Z"
         },
         {
           "n": 34,
           "text": "Owner ruling 2026-11-15: a report's first line is `Error: Jet.Name` (and `Warning: Jet.Name`), not `Error [Jet.Name]`; the what text keeps its place after the name. Library diagnostics use the same header shape (`Error: web.BadPath`). Every renderer (CLI, runtime stop reports, ProveReport, LSP text) prints the one form; Docs/Spec/diagnostics.md states it. Proof: `jet test Compiler --profile ui` and a guard that finds no `Error [` or `Warning [` header in rendered output or snapshots.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:53:36.682Z"
+          "evidence": "p363 batch compiler (dev 6657c8f86b): `jet test Compiler --profile ui` rc=0, PASS 3070 FAIL 0 (suite-p363/ui.out). The 74 KNOWN-FAILING ui rows are none about headings or names: they are #6425 (checks not ported), #6858, #6897, #6843, #6418, #4275 and #6949 rows, each owned by its card. Guard Tests/Guards/DiagnosticNames/diagnostic_names.jet (no bracketed `Error [`/`Warning [`/`Stop [` heading and no `jet.Name` spelling in tracked Compiler, Core, Docs or Tests text, snapshots included) passed in the p363 census (census-p363 guards, rc 0). Docs/Spec/diagnostics.md states the `Error: Jet.Name: what` heading.",
+          "at": "2026-11-20T16:07:18.641Z"
         },
         {
           "n": 35,
@@ -24341,7 +24341,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-20T13:52:17.231Z",
+      "updated": "2026-11-20T16:07:18.641Z",
       "updatedBy": "Main",
       "workOrder": 19,
       "criteriaLastN": 35
@@ -52804,60 +52804,6 @@
       "criteriaLastN": 5
     },
     {
-      "id": "c01xp5ri",
-      "num": 6711,
-      "title": "Generic call to a trait method returning `T? Never!` loses the optional and fails in the backend (ICE)",
-      "body": "Found by SqliteLead on the b6c compiler (#6695 slice 8). A generic call `fn<H: Host>` to a trait method declared `-[]> T? Never!` loses the optional, and the backend rejects it: `ir.build unlowered: ... binder got of type ?[U8] bound to a value of type [U8]`. The smallest repro is the trait `Src{grab -[]> [U8]? Never!; grab2 -> Int? Never!}`, called generically. It works without `Never!`. That breaks I2 (a backend rejection of checked code must not happen) and the one-mechanism promise for effect rows. A workaround is in core.db: VdbeAux.jet Host.vtab_take_errmsg is declared without `Never!`; remove it once fixed. Criteria: a regression case in tests/cases compiles and runs on O0/O1/O2; the workaround is removed.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e22",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "Closed: c1 and c2 met on p267 (7ab9b3958e)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A generic call to a trait method declared `-[]> T? Never!` keeps the optional: the trait `Src { grab -[]> [U8]? Never!; grab2 -> Int? Never! }` called through `fn<H: Src>` builds and runs with no backend rejection (I2). Proof: `jet test Compiler --profile cases --filter generic_trait_method_optional_never_keeps_the_optional` on O0, O1 and O2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 7ab9b3958e (p267): ir_trait_propagate keeps a T? Never! call's optional. Case Traits/generic_trait_method_optional_never_keeps_the_optional (the Src trait through fn<H: Src>, steps on O0, O1 and O2) passes on batch compiler p267, with no backend rejection.",
-          "at": "2026-11-17T14:37:49.022Z"
-        },
-        {
-          "n": 2,
-          "text": "The core.db workaround is removed: Host.vtab_take_errmsg is declared with `Never!` again (Core/DB VdbeAux.jet:72, Prepare.jet:451, VdbeRun.jet:218). Proof: `git grep -n 'vtab_take_errmsg: fn' -- Core/DB` shows `Never!` on each declaration, and `jet test Compiler --profile cases --filter DB/` passes.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 7ab9b3958e (p267): git grep -n 'vtab_take_errmsg: fn' -- Core/DB shows Never! on all 3 declarations (Prepare.jet:595, VdbeAux.jet:76, VdbeRun.jet:229). In the p267 full cases run all 6 DB/ rows pass, and the core profile passes (rc 0).",
-          "at": "2026-11-17T14:37:50.743Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-09T06:30:13.586Z",
-      "updated": "2026-11-17T14:37:53.693Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 2,
-      "completedAt": "2026-11-17T14:37:53.693Z"
-    },
-    {
       "id": "c09a7oci",
       "num": 6714,
       "title": "Stale comments that still name the Rust or musl toolchain",
@@ -55372,210 +55318,6 @@
       "updated": "2026-11-17T01:45:46.862Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
-    },
-    {
-      "id": "c0prey1k",
-      "num": 6799,
-      "title": "App menus, context menus and the tray on the Linux native app host",
-      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G1).",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e19",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "Closed: c1-c5 met (c3 on p268, 365aafa1c3)."
-        },
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "c4 plan (Speed-3-3; covered by D-ONEAPP-RENDER1=A and D-WEBAPP-SHAPE1=A): one leaves walk over core.ui box layout feeds all four sinks (TUI cells, null backend, web scene, native window); the native window draws through ui.open Window/Frame. S1 the screen opener yields the view's UINode (web callers take .__html(), byte-identical) and App.window(width:, height:) opens and paints; S2 input: pointer press on a click-slot leaf, focus ring Tab/Enter/Space, committed text into the focused input, UIEvent.Drop into a drop slot, through new core.ui __click/__drop over the web click/drop runtime tails; S3 repaint on screen change or invalidated live binding; S4 case NativeApp/app_window_renders_its_screen_on_linux (fake compositor reads the shm frame, clicks, reads the changed frame)."
-        },
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. macOS, Windows, iOS and Android work moved to #6982 (G13)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "The tray from examples/tray.jet stays after the last window closes on Linux (the StatusNotifierItem tray). Its menu lists the caller's projects and is rebuilt when my_projects changes. Proof: `jet test Compiler --profile cases --filter NativeApp/tray_menu_follows_the_live_project_list` on Linux (the host driver reads the menu model before and after a project is added).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 5627109956 (case race fix) on features 4d33867924 + 2eb76269b8: jet test Compiler --profile cases --filter NativeApp/tray_menu_follows_the_live_project_list PASS 3 runs in a row on the p247 batch compiler (StatusNotifierItem tray, menu rebuilt when the project list changes).",
-          "at": "2026-11-17T05:55:25.022Z"
-        },
-        {
-          "n": 2,
-          "text": "On Linux, native.menu_bar from crewboard/Desktop/desktop.jet becomes the window's menu, with the app, Edit and Window menus and their key equivalents.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 20fcc28a3b (p257 batch compiler, tip 7d9dd2696d): graph.menu_bar becomes the Linux window's menu, with the app, Edit and Window menus and their key equivalents. Proof on the p257 compiler: jet test Compiler --profile cases --filter NativeApp/menu_bar_maps_to_the_linux_window_menu gives 1 pass and 0 bad, and the whole NativeApp filter gives 18 pass and 0 bad. The full suite has no new failure from this commit. The spelling follows the landed App-method siblings (graph.tray, graph.background).",
-          "at": "2026-11-17T10:00:35.291Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "NativeApp/menu_bar_maps_to_the_linux_window_menu"
-          }
-        },
-        {
-          "n": 3,
-          "text": "native.context_menu opens on right click on the Linux desktop and on contextmenu on the web. An Err from an item's run goes to the app's error surface (section 3.7) and is never dropped.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 365aafa1c3 (p268). On batch compiler p268: case NativeApp/context_menu_opens_on_linux_and_reports_errors PASS (right click opens native.context_menu on the Linux desktop, and an item's Err reaches the app's error surface) and case WebBuild/web_context_menu_opens_on_contextmenu PASS (contextmenu opens it on the web, with the same error routing). Neighbouring WebBuild rows (click counter, scene counter, text input drop) pass.",
-          "at": "2026-11-17T15:05:57.559Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "NativeApp/context_menu_opens_on_linux_and_the_web_and_reports_errors"
-          }
-        },
-        {
-          "n": 4,
-          "text": "The Linux native app host: an app's native.app opens a Wayland window that renders its ui.Node screens through core.ui layout and drawing, and routes pointer, key, text and drop input to the views' handlers, so menu_bar, context_menu, clipboard, drop zones and lifecycle events have a window to attach to. Proof: jet test Compiler --profile cases --filter NativeApp/app_window_renders_its_screen_on_linux (a fake compositor reads the drawn frame and drives a click that changes the screen).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 6b4df8506b (window first frame), 8b7c944dbb (click/drop exports), bfc736770c (window input + case), 89e49913bf (placement), b96326883d (fake compositor decodes by the chosen wl_shm format): jet test Compiler --profile cases --filter NativeApp/app_window_renders_its_screen_on_linux PASS on the p254 batch compiler (acc7351dae) with b96326883d applied; all 15 NativeApp cases pass.",
-          "at": "2026-11-17T08:42:30.620Z"
-        },
-        {
-          "n": 5,
-          "text": "The Linux app window redraws when a live binding its current view read is invalidated (a query or shared value changes with no input), through a wake of the Wayland frame loop, with no polling. Proof: jet test Compiler --profile cases --filter NativeApp/app_window_redraws_when_its_data_changes (a fake compositor sees a new frame after a background write).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 749e35814b (SUB Speed-3-3-6799-c5b-window-wakes-on-live-data, landed in p256). On the p256 batch compiler (tip b193c2b6c2): jet test Compiler --profile cases --filter NativeApp/app_window_redraws_when_its_data_changes gives n=1, bad=0, and all 16 NativeApp rows pass. Run by Main in the p256 cycle.",
-          "at": "2026-11-17T09:34:01.130Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": "c0snkbac",
-      "needsAcceptance": false,
-      "created": "2026-11-13T15:13:39.597Z",
-      "updated": "2026-11-17T15:05:59.422Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 5,
-      "completedAt": "2026-11-17T15:05:59.422Z"
-    },
-    {
-      "id": "c0f4o904",
-      "num": 6800,
-      "title": "Notifications: local notifications on the Linux desktop and Web Push from one typed server call",
-      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G2).",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e19",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "Closed: all 4 criteria met (c3 on p270, 8b3c9ea3ae)."
-        },
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. macOS, Windows, iOS and Android work moved to #6983 (G13)."
-        },
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "Ballot D-PUSH-CREDS1 posted (blocks c1): where push keys come from. Rec A: .push(apns: app.apns(...), fcm: app.fcm(...), web: app.web_push(...)) in the server entry, naming the app's env variables. Validator ok; adversarial passes by AnyReview11 and Main (the mail precedent is ratified in D-WEBAPP-SHAPE1, not built)."
-        },
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "Route set (Main, 2026-11-16): ratified text settles it with no ballot. Rule 1 (one graph) plus #6445 c6: the server's own evaluated graph is every target's route set. Speed-3-2 builds it on app.App now (option X, about 5 SUBs). c2 also needs, unbuilt: the app.new graph type, ui.Node (#6447), native.push() (#480). Findings: lanes/Speed-3/route-set-check.md (scratch)."
-        },
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "Decision (Main): app.notify keeps the proposal's signature fn<V>(to: auth.AccountID, title: String, body: String, open: V) -[Net]> Never!. Sema checks open: against the one route table (c2's jet check failure) and lowers the call to an internal app.__notify carrying the route's wire form, the way enqueue is lowered. The route table gets the state encoder, and Core never sees V. Rejected: a V: Encode bound. It changes the published signature, and it would report E0905 'V isn't Encode' in place of c2's route diagnostic."
-        },
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "c1 decisions (Main, 2026-11-16):\n- Device registration is internal transport behind .with(native.push()): a framework-mounted POST /__jet/push/devices for the signed-in caller, rows in __jet_push_devices through a store hook like CallOutbox.\n- The HTTP/2 client stays internal to core.http.client.\n- Push provider credentials (APNs key, key id, team, topic; FCM service account; VAPID key and subject) are public config surface the proposal doesn't define. Mail's precedent, .mail(app.smtp(\"SMTP_URL\"), from:), has the server entry name the transport. The push equivalent needs an owner ballot (to draft); until then the providers build against an internal priv(package) configuration record, and fixed JET_* environment names are refused."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "One server call, app.notify(to:, title:, body:, open:), reaches every browser the account registered with .with(native.push()) through Web Push (RFC 8030 with RFC 8291 encryption). native.notify shows a local notification on the Linux desktop (the freedesktop Notifications service) with no server. Proof: `jet test Compiler --profile cases --filter WebApp/notify_sends_web_push_payloads` (a local fake push endpoint checks each payload) and `--filter NativeApp/notify_shows_a_local_linux_notification`.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p246 batch compiler (dev 8672bcfd81); feature 29b999b5bc + fix 14938c75d6: jet test Compiler --profile cases --filter NativeApp/notify_shows_a_local_linux_notification n=1 bad=0 (Linux org.freedesktop.Notifications steps; the web build step refuses a local notify).",
-          "at": "2026-11-17T05:18:28.734Z"
-        },
-        {
-          "n": 2,
-          "text": "A tap opens the open: state through the one route table on every target that registered. An open: value whose type has no route on such a target fails jet check.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p238 batch compiler (dev 5bea729463), full collect-all suite: cases NativeApp/push_open_state_without_a_route_is_a_compile_error PASS.",
-          "at": "2026-11-17T02:09:23.763Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "NativeApp/push_open_state_without_a_route_is_a_compile_error"
-          }
-        },
-        {
-          "n": 3,
-          "text": "Crewboard's \"assigned to you\" push is sent only after update_task's transaction commits, and a rolled-back write sends nothing. This uses the after-commit outbox (#6825 c1).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev ff7f01417a and badb784097 (p269 and p270, App.push(...) push settings, with .push reading its key variables itself through -[Env]>) and 8b3c9ea3ae (p270, the proof case). On batch compiler p270, case WebApp/assignee_push_is_sent_after_commit_only PASS: the assignee push goes out through the after-commit outbox only after update_task commits, and a rolled-back write sends nothing. Every HTTP example passes on all tiers again (golden 0 FAIL).",
-          "at": "2026-11-17T16:05:38.269Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "WebApp/assignee_push_is_sent_after_commit_only"
-          }
-        },
-        {
-          "n": 4,
-          "text": "auth.AccountID is the one account identity type, as ratified (D-DB-TABLE1: Member.account: auth.AccountID; app.caller() returns it). Today it doesn't exist and accounts are Strings: Core/App/App.jet:619 Who.Account(String), :640 as_caller(account: String, ...), :651 maybe_caller() -> String?, :660 caller() -> String, Core/Db/Db.jet:954-955 db.Who.Account(String). One cutover: add the type, move every API listed here to it, migrate every caller in every tree, and leave no String spelling. Proof: a cases row where a #Table struct with an auth.AccountID column round-trips through the store and app.caller() returns it, on O0/O1/O2; git grep shows no Account(String).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p211 gate (dev d6d482c5f7; 6e63e77b08, 7438c88cf5 + the p211 fixes): jet test Compiler --profile cases --filter web_app/account_id_round_trips_and_is_the_caller -> n=1 bad=0; the case's steps run -O0, -O1 and -O2. git grep -c 'Account(String)' d6d482c5f7 -> 0 files. Row policy cases (db/row_policy_judges_each_operation, db/row_policy_no_bypass, web_app/crewboard_row_policies, web_app/caller_dependent_live_query_is_not_shared) and golden CoreDB/TypedTable pass on the same gate.",
-          "at": "2026-11-16T09:23:20.472Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": "c0snkbac",
-      "needsAcceptance": false,
-      "created": "2026-11-13T15:13:41.131Z",
-      "updated": "2026-11-17T16:05:46.463Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 4,
-      "completedAt": "2026-11-17T16:05:46.463Z"
     },
     {
       "id": "c0fqrrpk",
@@ -58974,6 +58716,19 @@
             "profile": "cases",
             "filter": "Debug/conditional_breakpoint_runs_in_process"
           }
+        },
+        {
+          "n": 97,
+          "text": "The causal profiler does no unbounded-Int arithmetic per call: Compiler/JetCLI/Source/CLI/Perf/Causal.jet:203 multiplies Ints (BitAnd-masked afterwards) on every call, so it pays an exact bigint product where a U64/I64 product gives the same masked value; it is rewritten on a fixed-width type and the causal cases give the same output.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-20T14:18:04.017Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "causal"
+          }
         }
       ],
       "refs": [],
@@ -58981,9 +58736,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-20T13:52:15.872Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 96
+      "updated": "2026-11-20T14:18:56.571Z",
+      "updatedBy": "owner",
+      "criteriaLastN": 97
     },
     {
       "id": "c0in2dft",
@@ -70097,58 +69852,6 @@
       "completedAt": "2026-11-17T22:32:46.981Z"
     },
     {
-      "id": "c0ndv80x",
-      "num": 6929,
-      "title": "Core functions that call your callback fail with the callback's own failure type (D-CALLBACK-ERR1=A)",
-      "body": "Destination: every Core function that calls a user function takes a failure type parameter `E`; the callback is `fn(T) -> U E!`, and the Core function fails with `E` (for example `sort: fn<T, E>(rows: [T], key_fn: fn(T) -> String E!) -> [T] E!`). A callback that cannot fail, one with a single failure type, and one with a union including an API-owned failure all propagate unchanged.\n\nSource: #3239 c31 (carried from #4266); ratified D-CALLBACK-ERR1=A, Docs/spec/syntax-decisions.md.",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e21",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "Closed: c1 met on p266 (evidence on the criterion). Every criterion is met."
-        },
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "c1: dev 107a887256 (sema: a union in failure position with a type-parameter member, p261) and d46d41c686 (method-lambda failure inference, p262; case Callbacks/method_lambda_binds_its_failure_parameter 1/0 on p262). In p263: the IR union-layout fix (member-set keying; generic_failure_union_reads_its_binding was an ICE) and the Core callbacks SUB with case d_callback_err1_contract."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Every Core function that calls a user callback takes a failure type parameter `E`, and a `Never` callback, a single-failure callback and a union with an API-owned failure each propagate unchanged. Proof: `jet test Compiler --profile cases --filter Callbacks/d_callback_err1_contract`, and a guard over Core's public signatures finds no callback parameter without its `E`.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev a5859bee58 and 35860bde85 (p263), 63bfb59021 (p264), and 61bf86113a (p266; canonical union order, so a callback's union failure binds without an ICE). On batch compiler p266: cases Callbacks/d_callback_err1_contract PASS (also on p263 and p264), Callbacks/d_callback_err1_compiler_typed PASS, FailureFoundation/generic_failure_union_reads_its_binding PASS, and the guard Tests/Guards/CoreCallbacks/core_callbacks.jet PASS 2/0 (every Core callback function takes E; the only exemptions are callbacks the app keeps, such as drop_files and drop_zone, under CC_KEPT_BY_APP). Core/DB/Tests/SQLKernel.jet passes on every tier.",
-          "at": "2026-11-17T14:09:22.064Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "core",
-        "errors"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-15T04:38:01.643Z",
-      "updated": "2026-11-17T14:09:25.243Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-17T14:09:25.243Z"
-    },
-    {
       "id": "c05nw9a0",
       "num": 6930,
       "title": "Restricted code and sandbox guests: one sandbox package kind, lent Authority, scoped file access and the Capabilities run case",
@@ -76646,6 +76349,36 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-20T12:07:15.922Z"
+        },
+        {
+          "n": 19,
+          "text": "Every runtime-stop report names its source line: web_app_port_busy and web_settings_decode_stops_before_bind print a stop with no `-->` line (found by the 42-snapshot Stop: sweep on 2026-11-20); each gains the `-->` line naming the user code that bound the port or decoded the settings, at every tier (release images through `jet crash`).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-20T14:18:08.524Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "web_"
+          }
+        },
+        {
+          "n": 20,
+          "text": "A test binary that `jet test` builds carries the compiler identity, so a test that compiles through the native host (CostProjection fixtures and the like) runs without JET_COMPILER_IDENTITY set by hand; today it fails \"native host omitted its compiler identity\".",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-20T14:18:11.194Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Compiler/JetSema",
+              "--filter",
+              "CostProjection"
+            ]
+          }
         }
       ],
       "refs": [],
@@ -76653,9 +76386,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-20T12:11:49.716Z",
+      "updated": "2026-11-20T14:18:11.194Z",
       "updatedBy": "Main",
-      "criteriaLastN": 18
+      "criteriaLastN": 20
     }
   ],
   "decisions": [
@@ -126087,255 +125820,6 @@
       "ratifiedAt": "2026-11-16"
     },
     {
-      "id": "D-PUSH-CREDS1",
-      "cardId": "c0f4o904",
-      "group": "library",
-      "title": "How a server entry gives push notifications their provider keys: one .push(...) call with a maker per provider, one modifier per provider, or typed secret fields in the environment file",
-      "situation": "A push notification reaches a phone or a browser through the company that delivers it: Apple, Google, or the browser's push service. Each of them asks the sender to prove who it is with a secret key. Jet already builds and signs every push, but no public code says where those keys come from, so an app cannot send a push today. This vote picks that code, and it matters to every app that pushes. A beginner should be able to paste it, and a deployment should keep the keys out of the source. We recommend A: one .push(...) line in the server entry, where the app names its own environment variables. It is shaped like the mail line of the ratified app shape (D-WEBAPP-SHAPE1), which is designed and not built yet.",
-      "gist": "Should a server entry give push its provider keys through one .push(...) call, one modifier per provider, or typed secret fields in the environment file?",
-      "lesson": "A secret such as a signing key belongs outside the code, in an environment variable the app names. The code says which variable holds which key, and the server reads them once as it starts. One place in the server entry then lists every way the app reaches people: mail and push.",
-      "explainer": "Words used here. A provider is the service that delivers a push: APNs for Apple systems, FCM for Android, and a browser's push service for Web Push. A credential is what proves the sender to the provider. An environment variable is a named value the host hands a program as it starts, such as SMTP_URL.\n\nApple's .p8 file is a signing key a developer downloads once. Google's service-account file is a JSON file with a key inside. VAPID is the key pair a Web Push sender signs with. The topic is the app's bundle ID, such as com.example.crewboard.",
-      "story": "Mia's Crewboard server sends a push when a task gets an assignee. She has Apple's key file, Google's service-account file and a fresh VAPID key.\n\nUnder A she adds one .push(...) line below .mail(...) in Web/web.jet. It names APNS_KEY, APNS_KEY_ID, FCM_SERVICE_ACCOUNT and VAPID_KEY. She lists the same names as secrets in env.jet. On her first deploy she forgets VAPID_KEY. The server refuses to start, naming the variable and the line, so her host's health check fails before anyone misses a push.\n\nUnder B she writes three lines, .apns(...), .fcm(...) and .web_push(...), with the same names. Mail still uses .mail(app.smtp(...)), so her entry has two shapes for one idea.\n\nUnder C she writes no push code. She declares typed push fields in env.jet, and jet dev checks the key files first. Her production host starts the program without Jetpack, so she needs a second way to hand it the same keys.",
-      "inWild": "// web-push (Node): the app passes its VAPID keys, read from variables it names.\n// https://github.com/web-push-libs/web-push\nwebpush.setVapidDetails(\"mailto:crew@example.com\", process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);\n\n// Firebase Admin SDK: a service account the app loads from where it chooses.\n// https://firebase.google.com/docs/admin/setup\ninitializeApp({ credential: cert(JSON.parse(process.env.FCM_SERVICE_ACCOUNT)) });\n\n# Phoenix (Elixir): config/runtime.exs reads named variables at start and stops when one is missing (condensed).\n# https://hexdocs.pm/phoenix/releases.html\nsecret_key_base = System.get_env(\"SECRET_KEY_BASE\") || raise \"environment variable SECRET_KEY_BASE is missing.\"",
-      "detail": "What this ballot decides: the public code a server entry writes to give the three push providers their credentials. APNs needs a .p8 signing key, its key ID, the team ID and the topic. FCM needs a service-account JSON file. Web Push needs a VAPID private key and a contact address (the VAPID subject).\n\nOut of scope, decided on #6800 by Main on 2026-11-16. Fixed JET_* variable names are refused. Device registration is internal: POST /__jet/push/devices and __jet_push_devices rows, through a store hook like CallOutbox. The HTTP/2 client stays inside core.http.client. A provider with no configuration is skipped and logged. Until this ballot lands, the providers build against an internal priv(package) record.\n\nToday, at dev d6d482c5f7, Core/App/Push.jet builds each request from raw values. push_apns_token takes the team ID, the key ID and the private scalar (:243-250). push_ec_private parses a .p8 or SEC1 key (:112-124). push_fcm_token_request signs Google's assertion with the service account's RSA key (:272-285).\n\npush_vapid_authorization signs the VAPID token with a key pair and a contact (:205-218), and push_key_pair derives the public key from the private one (:95-102). No public code reaches any of them. Core/App has no push, mail or smtp configuration at all: git grep finds none in App.jet.\n\nThe precedent is mail, still a proposal. The web entry writes .mail(app.smtp(\"SMTP_URL\"), from: \"Crewboard <crew@example.com>\") (Docs/proposals/2026-11-13-web-app-framework-shape.md:2549). Its stub is smtp: fn(url_env: String) -> Mail (:5833-5838), and 4.14 says app.mail sends through the transport the entry names (:3578-3580).\n\nRules every option shares. The app chooses every variable name. The server reads each one once as it starts, through core.sys.getenv (Core/Sys/Sys.jet:2104), and keeps the value as a #Secret String. Jetpack's dotenv secrets list keeps those values out of plans, logs and images (Docs/spec/reference/jetpack-epoch5.md:493-496). If an allow list is given, each secret must be on it (Jetpack/EnvModel/Source/Environment/FactReaders.jet:399-405).\n\nA named variable that is unset or empty refuses the start before the port opens. The error names the variable, the argument and the source line. A key that does not parse refuses the start the same way, with Push.jet's own reason, such as \"the key is not on P-256\". A variable may hold the key file itself or its base64 on one line, so a multi-line .p8 or JSON file fits any host.\n\nEdge cases. Apple's sandbox and production hosts are chosen per device: registration records which one the app build uses, and one .p8 key serves both. The FCM project ID comes from the service-account file's project_id field. A device whose provider is not configured is skipped and logged. The browser gets the VAPID public key from the server, so the app never writes it twice.\n\nMore edge cases. A new VAPID key breaks old browser subscriptions, so the client compares keys as it starts and subscribes again. A push service that answers 404 or 410 drops that subscription. Rotating any key means changing the variable and restarting. APNs and FCM tokens live an hour at most (Push.jet:246, :280), so nothing could switch faster anyway.\n\nTests need no variables: app.test_host sends to local fake providers with keys it makes, as #6800 c1's proof does. Proof rows are proposed in each option's technical text.",
-      "options": [
-        {
-          "key": "A",
-          "name": "One .push(...) call with a maker per provider: .push(apns: app.apns(...), fcm: app.fcm(...), web: app.web_push(...))",
-          "gist": "The server entry names the push transport the way it names the mail transport, and each maker names its own environment variables.",
-          "detail": "The entry gains one builder, .push, with three optional named arguments. app.apns, app.fcm and app.web_push make the three provider values, as app.smtp makes the mail one. An argument ending in _env names an environment variable, the convention of smtp's url_env in the ratified app shape. Every other argument is a plain value that is safe in git: the team ID, the topic and the contact.\n\nBeginner path: paste the .push line, put the three files' contents in .env, and list the names as secrets in env.jet. Leave out a provider the app does not use. A missing variable stops the start with its name and line.\n\nExpert path: choose names per deployment, keep values in the host's secret store, and rotate a key with a rolling restart. A push is a job, and a stopping server leaves its unfinished jobs for the next one (Docs/spec/reference/core-library.md:5680-5686).\n\nA second .push(...) on one app refuses the start, naming both lines.",
-          "technical": "Proposed, not implemented. core.app gains App.push: fn(self, apns: APNs?{None}, fcm: FCM?{None}, web: WebPush?{None}) -> App. It gains apns: fn(key_env: String, key_id_env: String, team: String, topic: String) -> APNs.\n\nIt also gains fcm: fn(service_account_env: String) -> FCM and web_push: fn(key_env: String, contact: String) -> WebPush. serve reads each variable through core.sys.getenv and parses it once with Push.jet's builders. It refuses the start on an unset, empty or malformed value.\n\nProof: jet test Compiler --profile cases --filter web_app/push_config_reads_named_variables, where local fakes check each signed request. A second row, web_app/push_config_missing_variable_refuses_start, checks the refusal.",
-          "code": "// Web/web.jet: the server entry.\nrun: fn() logic.TaskError! {\n    crew: logic.open_crew(\"crewboard.db\")\n    screens.crewboard()\n        .mount(crew)\n        .accounts(auth.sqlite(\"accounts.db\").verify_email().reset_password())\n        .mail(app.smtp(\"SMTP_URL\"), from: \"Crewboard <crew@example.com>\")\n        // Each *_env argument names an environment variable this app chose.\n        // The server reads them once as it starts, as secrets. A provider\n        // left out is skipped, and the start logs that.\n        .push(\n            apns: app.apns(key_env: \"APNS_KEY\", key_id_env: \"APNS_KEY_ID\", team: \"DEF123GHIJ\", topic: \"com.example.crewboard\"),\n            fcm: app.fcm(service_account_env: \"FCM_SERVICE_ACCOUNT\"),\n            web: app.web_push(key_env: \"VAPID_KEY\", contact: \"mailto:crew@example.com\"),\n        )\n        .serve()\n}\n\n// env.jet: the same names, kept as secrets, so Jetpack keeps their values\n// out of plans and logs. The .env file itself stays out of git.\ndotenv: [Dotenv{ file: \".env\", secrets: [\"SMTP_URL\", \"APNS_KEY\", \"APNS_KEY_ID\", \"FCM_SERVICE_ACCOUNT\", \"VAPID_KEY\"] }]\n\n// A job sends the push; nothing in it names a provider or a key.\n#App.Job(retries: 5)\ntell_assignee: fn(self, id: TaskID) -[DB.Read, Net]> TaskError! {\n    task: self.tasks.get(id) ?? return Ok()\n    who: task.assignee ?? return Ok()\n    if !self.is_member(task.project, who) -> return Ok()\n    app.notify(to: who, title: \"Assigned to you\", body: task.title, open: TaskView{id: task.id})\n    Ok()\n}"
-        },
-        {
-          "key": "B",
-          "name": "One modifier per provider: .apns(...), .fcm(...), .web_push(...)",
-          "gist": "Each provider is its own builder method on the app, naming its own environment variables.",
-          "detail": "The entry gains three builders, one per provider, with the same arguments as A's makers. A provider left out is skipped and logged.\n\nBeginner path: paste the provider lines the app needs and list the names as secrets in env.jet, as in A. Expert path: as in A.\n\nMail keeps .mail(app.smtp(...)), so an entry names the mail transport with a builder and a maker, but names push providers with bare builders. That is two shapes for one meaning, naming how the app reaches people. Each builder also needs its own rule for a second call.",
-          "technical": "Proposed, not implemented. core.app gains App.apns, App.fcm and App.web_push, each returning App, with A's argument lists and A's start-up checks. Proof: the same rows as A.",
-          "code": "// Web/web.jet: the server entry.\nrun: fn() logic.TaskError! {\n    crew: logic.open_crew(\"crewboard.db\")\n    screens.crewboard()\n        .mount(crew)\n        .accounts(auth.sqlite(\"accounts.db\").verify_email().reset_password())\n        .mail(app.smtp(\"SMTP_URL\"), from: \"Crewboard <crew@example.com>\")\n        // One modifier per provider, each naming its variables.\n        .apns(key_env: \"APNS_KEY\", key_id_env: \"APNS_KEY_ID\", team: \"DEF123GHIJ\", topic: \"com.example.crewboard\")\n        .fcm(service_account_env: \"FCM_SERVICE_ACCOUNT\")\n        .web_push(key_env: \"VAPID_KEY\", contact: \"mailto:crew@example.com\")\n        .serve()\n}\n\n// env.jet: the same names, kept as secrets, so Jetpack keeps their values\n// out of plans and logs. The .env file itself stays out of git.\ndotenv: [Dotenv{ file: \".env\", secrets: [\"SMTP_URL\", \"APNS_KEY\", \"APNS_KEY_ID\", \"FCM_SERVICE_ACCOUNT\", \"VAPID_KEY\"] }]\n\n// tell_assignee is the same as in A."
-        },
-        {
-          "key": "C",
-          "name": "Typed secret fields in the environment file: push: Push{apns: APNs{key: Secret(\"APNS_KEY\"), ...}} in env.jet",
-          "gist": "The environment file declares typed push fields, Jetpack checks them before the program starts, and the server entry writes nothing.",
-          "detail": "Jetpack's environment schema gains Push, APNs, FCM, WebPush and Secret records. jet dev checks each secret's form before it starts the program, and the server takes the fields from the environment Jetpack prepared.\n\nBeginner path: fill in the env.jet record; jet dev reports a bad key before the program runs. Expert path: a host that starts the program without Jetpack needs a second way to give the same fields. That means variables with names the framework fixes, or a file it reads.\n\nThe environment model is a plan model with no provider, store or network role (Docs/spec/architecture.md:975). Its typed records live in Environment.jet.schema (Jetpack/EnvModel/Source/ModuleEval/Schema/Environment.jet.schema:57-62). Putting push types there ties Jetpack to core.app. Mail would stay in code, so the app's transports would live in two places.",
-          "technical": "Proposed, not implemented. Jetpack/EnvModel's schema gains the push records and a Secret marker, checked at environment evaluation; core.app reads the prepared environment when serve starts. The production path without Jetpack is not defined by this option and would need its own rule. Proof: jet test Compiler --profile cases --filter jetpack/env_push_fields_checked, plus a web_app row for the production path.",
-          "code": "// env.jet: typed push fields in the environment file. Jetpack checks each\n// secret's form (the .p8 parses, the JSON has a key) before jet dev starts.\npush: Push{\n    apns: APNs{ key: Secret(\"APNS_KEY\"), key_id: Secret(\"APNS_KEY_ID\"), team: \"DEF123GHIJ\", topic: \"com.example.crewboard\" },\n    fcm: FCM{ service_account: Secret(\"FCM_SERVICE_ACCOUNT\") },\n    web: WebPush{ key: Secret(\"VAPID_KEY\"), contact: \"mailto:crew@example.com\" },\n}\n\n// Web/web.jet: the server entry has no push line. The server takes the\n// push fields from the environment Jetpack prepared.\nrun: fn() logic.TaskError! {\n    crew: logic.open_crew(\"crewboard.db\")\n    screens.crewboard()\n        .mount(crew)\n        .accounts(auth.sqlite(\"accounts.db\").verify_email().reset_password())\n        .mail(app.smtp(\"SMTP_URL\"), from: \"Crewboard <crew@example.com>\")\n        .serve()\n}\n\n// tell_assignee is the same as in A."
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "web-push (Node)",
-          "note": "The app passes its VAPID subject and keys, read from variables it names; the library fixes no names. Like A and B. Source: https://github.com/web-push-libs/web-push",
-          "code": "webpush.setVapidDetails(\"mailto:crew@example.com\", process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);"
-        },
-        {
-          "lang": "Firebase Admin SDK",
-          "note": "The app gives a service-account credential from where it chooses; GOOGLE_APPLICATION_CREDENTIALS is one fixed fallback name, which #6800 refuses for Jet. Source: https://firebase.google.com/docs/admin/setup",
-          "code": "initializeApp({ credential: cert(JSON.parse(process.env.FCM_SERVICE_ACCOUNT)) });"
-        },
-        {
-          "lang": "Rpush (Ruby)",
-          "note": "One APNs token-auth app record holds the key, key ID, team ID and bundle ID, like A's app.apns. Source: https://github.com/rpush/rpush",
-          "code": "Rpush::Apnsp8::App.new(apn_key: ENV[\"APNS_KEY\"], apn_key_id: ENV[\"APNS_KEY_ID\"], team_id: \"DEF123GHIJ\", bundle_id: \"com.example.crewboard\")"
-        },
-        {
-          "lang": "Phoenix (Elixir)",
-          "note": "The generated config/runtime.exs reads named variables as the release starts and raises when one is missing, the start-up refusal every option here shares. Source: https://hexdocs.pm/phoenix/releases.html",
-          "code": "secret_key_base = System.get_env(\"SECRET_KEY_BASE\") || raise \"environment variable SECRET_KEY_BASE is missing.\""
-        },
-        {
-          "lang": "Expo (EAS)",
-          "note": "Push credentials live in Expo's hosted credential store, set with the eas credentials command, not in app code. Close to C: tooling owns the keys, and the app depends on that tooling to deploy. Source: https://docs.expo.dev/app-signing/app-credentials/",
-          "code": "eas credentials"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "rec": "A",
-        "why": "A names the push transport the way the ratified app shape (D-WEBAPP-SHAPE1) names the mail transport, with one builder and a maker per provider. Every key stays in a variable the app chose, read once and kept secret. B gives the same meaning a second shape. C needs a second path for every host that starts the program without Jetpack.",
-        "gains": [
-          "One line in the server entry turns on all three providers, shaped like the mail line.",
-          "No variable name is fixed by Jet, and no key value appears in code or logs.",
-          "A missing or malformed key stops the start with the variable and the line, before any push is lost."
-        ],
-        "losses": [
-          {
-            "loss": "New public names in core.app: App.push, app.apns, app.fcm, app.web_push and their three value types.",
-            "mitigation": "They mirror .mail, app.smtp and Mail one for one, and they replace the token signing an app would otherwise write by hand."
-          },
-          {
-            "loss": "A missing variable is found as the server starts, not by jet check.",
-            "mitigation": "The start stops before the port opens and names the variable and the line, so a deploy's health check fails at once. Local tests need no variables, because the test host uses fake providers."
-          },
-          {
-            "loss": "A .p8 key and a service-account file span several lines, which some hosts handle badly in variables.",
-            "mitigation": "A variable may hold the file's base64 on one line; the server tells the two forms apart by the PEM header or the opening brace."
-          },
-          {
-            "loss": "Changing a key needs a restart.",
-            "mitigation": "Provider tokens live an hour at most, so a live reload could not switch faster. A rolling restart loses no push, because a stopping server leaves unfinished push jobs for the next one."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "Three builders give push a different shape from mail for the same meaning, and each needs its own rule for a second call."
-          },
-          {
-            "key": "C",
-            "reason": "Keys checked by Jetpack still need a second path on hosts that start the program without it, and the transports split between env.jet and code."
-          }
-        ],
-        "tradeoff": "A handful of new core.app names, mirroring mail, buy one checked line that turns on every push provider with names the app chooses."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: AnyReview11. The pass found four gaps (multi-line keys in variables, Apple's sandbox host, VAPID rotation, and a repeated .push call), and each is designed away in this payload. A second pass by Main found the mail precedent ratified (D-WEBAPP-SHAPE1) but not built, so the text now says so, while the push builders (Core/App/Push.jet:211-294) exist."
-      },
-      "checkInstructions": "Code reads only, on dev d6d482c5f7 (git show d6d482c5f7:PATH). In Core/App/Push.jet read push_key_pair (:95-102), push_ec_private (:112-124), push_vapid_authorization (:205-218) and push_apns_token (:243-250). Then read push_apns_request (:252-270), push_fcm_token_request (:272-285) and push_fcm_request (:287-306). PushKeyPair's private field is #Redact (:56-59).\n\nRun git grep -n -i 'smtp\\|mail\\|getenv\\|apns\\|vapid' d6d482c5f7 -- Core/App/App.jet and see no configuration for push or mail. Read core.sys.getenv at Core/Sys/Sys.jet:2104.\n\nIn Docs/proposals/2026-11-13-web-app-framework-shape.md, read the web entry (:2540-2552), the Mail rule (:3578-3580), the Mail and smtp stubs (:5833-5838) and native.push (:6378).\n\nFor the secret path, read the Dotenv record (Jetpack/EnvModel/Source/ModuleEval/Schema/Environment.jet.schema:57-62) and its check (Jetpack/EnvModel/Source/Environment/FactReaders.jet:387-405). Then read Docs/spec/reference/jetpack-epoch5.md:493-496. Read Docs/spec/architecture.md:975 for the environment model's role, and core-library.md:5680-5686 for jobs a stop leaves. The #6800 decisions are in Main's card log of 2026-11-16.",
-      "surface": {
-        "gist": "Should push get its provider keys from one .push(...) call, one modifier per provider, or typed fields in env.jet?",
-        "lesson": "Keys live in environment variables the app names. The server entry says which variable holds which key, as the ratified app shape does for mail. The server reads them once as it starts.",
-        "trio": {
-          "current": {
-            "note": "Today the push builders are internal and take raw key bytes. No public code says where the keys come from, so no app can send a push.",
-            "code": "// Core/App/Push.jet, internal: the caller must already hold the key.\ntoken: push_apns_token(team_id, key_id, now, private, rng) ?? return Err(err)"
-          },
-          "wild": {
-            "lang": "web-push (Node)",
-            "note": "The app passes keys read from variables it names.",
-            "code": "webpush.setVapidDetails(\"mailto:crew@example.com\", process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "One .push(...) call with a maker per provider",
-            "gist": "Shaped like .mail(app.smtp(\"SMTP_URL\")); each maker names its variables.",
-            "gains": [
-              "Same shape as mail",
-              "Names chosen by the app",
-              "A bad key stops the start"
-            ],
-            "losses": [
-              "A few new core.app names"
-            ],
-            "proposed": {
-              "code": ".push(\n    apns: app.apns(key_env: \"APNS_KEY\", key_id_env: \"APNS_KEY_ID\", team: \"DEF123GHIJ\", topic: \"com.example.crewboard\"),\n    fcm: app.fcm(service_account_env: \"FCM_SERVICE_ACCOUNT\"),\n    web: app.web_push(key_env: \"VAPID_KEY\", contact: \"mailto:crew@example.com\"),\n)"
-            }
-          },
-          {
-            "key": "B",
-            "name": "One modifier per provider",
-            "gist": ".apns(...), .fcm(...) and .web_push(...) on the app.",
-            "gains": [
-              "One line per provider"
-            ],
-            "losses": [
-              "A second shape beside mail",
-              "Three rules for a repeated call"
-            ],
-            "proposed": {
-              "code": ".apns(key_env: \"APNS_KEY\", key_id_env: \"APNS_KEY_ID\", team: \"DEF123GHIJ\", topic: \"com.example.crewboard\")\n.fcm(service_account_env: \"FCM_SERVICE_ACCOUNT\")\n.web_push(key_env: \"VAPID_KEY\", contact: \"mailto:crew@example.com\")"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Typed secret fields in env.jet",
-            "gist": "Jetpack checks typed push fields before the program starts.",
-            "gains": [
-              "Keys checked before the program runs",
-              "No push code in the entry"
-            ],
-            "losses": [
-              "A second path where Jetpack does not start the program",
-              "Transports split between env.jet and code"
-            ],
-            "proposed": {
-              "code": "push: Push{\n    apns: APNs{ key: Secret(\"APNS_KEY\"), key_id: Secret(\"APNS_KEY_ID\"), team: \"DEF123GHIJ\", topic: \"com.example.crewboard\" },\n    fcm: FCM{ service_account: Secret(\"FCM_SERVICE_ACCOUNT\") },\n    web: WebPush{ key: Secret(\"VAPID_KEY\"), contact: \"mailto:crew@example.com\" },\n}"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A names push the way the entry names mail, and every key stays in a variable the app chose. B adds a second shape, and C needs a second path off Jetpack.",
-          "gains": [
-            "Same shape as mail",
-            "No fixed names, no keys in code",
-            "A bad key stops the start"
-          ],
-          "losses": [
-            {
-              "loss": "A few new core.app names.",
-              "mitigation": "They mirror .mail, app.smtp and Mail one for one."
-            },
-            {
-              "loss": "A missing variable shows at start, not at check.",
-              "mitigation": "The start stops before the port opens and names the variable and the line."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "A second shape for naming a transport."
-            },
-            {
-              "key": "C",
-              "reason": "A second path on hosts that start the program without Jetpack."
-            }
-          ],
-          "tradeoff": "A few names that mirror mail buy one checked line for every push provider."
-        }
-      },
-      "reports": [
-        {
-          "title": "web-push (Node)",
-          "url": "https://github.com/web-push-libs/web-push",
-          "note": "setVapidDetails takes the subject and keys the app supplies."
-        },
-        {
-          "title": "Firebase Admin SDK setup",
-          "url": "https://firebase.google.com/docs/admin/setup",
-          "note": "A service-account credential from a source the app chooses."
-        },
-        {
-          "title": "Rpush",
-          "url": "https://github.com/rpush/rpush",
-          "note": "An APNs token-auth app record: key, key ID, team ID, bundle ID."
-        },
-        {
-          "title": "Phoenix releases",
-          "url": "https://hexdocs.pm/phoenix/releases.html",
-          "note": "runtime.exs reads variables at start and raises when one is missing."
-        },
-        {
-          "title": "Expo app credentials",
-          "url": "https://docs.expo.dev/app-signing/app-credentials/",
-          "note": "Hosted credential storage managed by tooling."
-        },
-        {
-          "title": "Apple: sending notification requests to APNs",
-          "url": "https://developer.apple.com/documentation/usernotifications/sending-notification-requests-to-apns",
-          "note": "Token-based requests, apns-topic and the two hosts."
-        },
-        {
-          "title": "RFC 8292: VAPID",
-          "url": "https://www.rfc-editor.org/rfc/rfc8292",
-          "note": "The sender's key pair and its subject."
-        }
-      ],
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-16T09:17:43.727Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-11-16"
-    },
-    {
       "id": "D-APP-ID1",
       "cardId": "c0m0czk2",
       "group": "app",
@@ -134335,6 +133819,214 @@
       "created": "2026-11-20T06:54:09.315Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-20"
+    },
+    {
+      "id": "D-PERF-TARGET1",
+      "cardId": "c00ni11n",
+      "group": "tooling",
+      "title": "How jet perf measures any command or built program, not only a .jet file",
+      "situation": "Jet's profiler, `jet perf`, can only measure a program it compiles and runs itself from a .jet file. It cannot measure a program that is already built, or a jet command such as `jet build Compiler`. So two jobs still need outside Linux tools. One is counting how much work a run does, which `perf stat` does today for the compile-speed gate. The other is listing the calls a run makes into the operating system, such as opening files or starting threads, which `strace` does today in seven test cases. The team rule says Jet code is measured with Jet tools, so both outside tools must go. You are asked how a user names such a target and asks for counts or a call list. We recommend one more way to name the target on the existing `jet perf run`, with counts and calls as two more lenses.",
+      "gist": "How should `jet perf` name a built program or a jet command as its target, and ask for work counts or a list of system calls?",
+      "lesson": "A profiler watches a program run. Today `jet perf run` watches only a program it builds from a .jet file. Two jobs need more. One is counting the work a run does: instructions, the steps the processor finishes, and cycles, its clock ticks. The other is listing the system calls a run makes, which are its requests to the operating system. Both must work on any built program or jet command, with every thread and child process it starts. This vote picks how the user writes that.",
+      "explainer": "Beginner path. A beginner who wants to know how much work a program does writes `jet perf run hash.jet --lens=counts` and reads two numbers in `jet perf view`. To see which files it opens, they write `--lens=syscalls` instead. A built program or a jet command goes after `--exec`, as in `jet perf run --lens=counts --exec jet build Compiler`. If they forget `--exec` and name a program that is not a .jet file, the error names `--exec`.\n\nExpert path. A script or test case records `jet perf run --lens=counts,syscalls --out run.jettrace --exec ./jet run main.jet`. It reads `jet perf view run.jettrace --json`, which holds the counts per process and every call with its arguments. The compile-speed gate drops `perf stat` this way. A test case filters the view's call lines as it filtered strace's lines.",
+      "story": "Sam works on the compiler and wants to know whether a change made `jet build Compiler` do more work. Today the speed gate runs Linux `perf stat`, which Jet's rules forbid for Jet code, and `jet perf run` only takes a .jet file. Under option A, Sam writes `jet perf run --lens=counts --exec jet build Compiler`. The view prints the instructions and cycles of the whole build, with every thread and helper process in the total.\n\nLater a test fails because `jet run` opened its own file twice. Sam runs `jet perf run --lens=syscalls --exec jet run main.jet`. The view lists both opens, each with its path and the line of Jet code that made it.",
+      "inWild": "Linux `perf stat ./prog args` counts events for any command, its threads and its children; `perf stat -e instructions:u,cycles:u` counts user-mode work only. `perf trace ./prog` lists system calls like strace, from the same front door. `strace -f ./prog` follows children and decodes each call's arguments, such as the path of an `openat` and the flags of a `clone`.\n\nThe tools that profile one language follow its runner. Go's `go test -cpuprofile` covers only Go programs. Rust's cargo has no built-in counter and relies on `perf stat`. Valgrind's tools take a whole command, as in `valgrind --tool=callgrind ./prog args`. Instruments on macOS opens any app and records system calls in its System Trace template.\n\nSources follow, one per line.\nperf stat: man7.org/linux/man-pages/man1/perf-stat.1.html\nperf trace: man7.org/linux/man-pages/man1/perf-trace.1.html\nstrace: man7.org/linux/man-pages/man1/strace.1.html\nvalgrind: valgrind.org/docs/manual/manual-core.html",
+      "detail": "The code was read on dev 2e2ac929c1. The command `jet perf run` is the function `jet_cli_perf_session` in the file Compiler/JetCLI/Source/CLI/Perf/Session.jet. It always spawns `jet run --observe` with the user's words. The words after `--` go to the program. So no spelling today names a built program or a jet command, and `--` cannot be reused for that.\n\nThe lenses are `cpu`, `memory`, `alloc`, `topdown` and `causal` (`jet_cli_perf_session_lenses`). The runtime opens the memory and top-down counters with perf_event_open on the program's starting thread only (Compiler/JetRuntime/Source/PerfSamples.jet). The runtime also counts the calls that pass through `host_call` in HostProcess.jet, by number and Jet stack, without arguments. Thread starts, the allocator's munmap, the open of /proc/self/exe and the sockets go around it through raw syscalls. Children and the loader are never seen.\n\nTwo kinds of users wait on this. Tools/Perf/CompileThroughput/Throughput.jet runs each compile under `perf stat -x , -e instructions:u,cycles:u` to count its work. Seven cases run strace. CLICompilerSpeed checks the clone and openat calls of `{jet} run`, twice. ControlAndData checks the munmap calls of a built program at exit. Report checks the network calls of `{jet} build`. TaskgroupStack checks the clone calls of a built program. JetpackJetOS runs it twice, and Tools/Perf/CoreStrace once.\n\nThe engine is the same under every option. Counts use perf_event_open with `inherit` set, so every thread and child adds into the total, user mode only. Calls use ptrace on the target, which follows fork, vfork, clone and exec, and decodes open paths, clone flags, munmap ranges and the socket calls. JetDebug's Native.jet already drives ptrace for `jet debug`. A Jet program also gets the Jet line that made each call, from its debug info.\n\nEdge cases, the same under every option. With no counters (a virtual machine without them, or perf_event_paranoid above 2), the run is refused before it starts with E2124. The message names the kernel's errno and the paranoid level, and the fix names the sysctl. Where ptrace is refused (Yama ptrace_scope 3, a seccomp sandbox, or a target already under `jet debug`), `syscalls` is refused the same way.\n\nA setuid program runs without its privilege under ptrace, as under strace, and the view says so. The command's exit code is passed through. A child still running when the command ends is listed by pid and detached; its counts so far are kept. Each call row keeps at most 4096 bytes of decoded arguments. Past 65536 calls the rest are counted per name.",
+      "options": [
+        {
+          "key": "A",
+          "name": "`--exec` on jet perf run, with counts and syscalls as lenses",
+          "detail": "`jet perf run` keeps its .jet form and gains `--exec`. Every word after `--exec` is the command, run as the shell would, so any perf flag comes before it. Two new lenses join `cpu`, `memory`, `alloc`, `topdown` and `causal`. `counts` records instructions and cycles in user mode, summed over every thread and child. `syscalls` records every call with its arguments. Both land in the one trace file that `jet perf view`, `compare` and `export` already read.\n\nFor a .jet file the counts and calls are the program's alone, never the compile's, as for the other lenses. For `--exec` they are the whole command's. The `syscalls` lens refuses `cpu` beside it, because stopping at every call skews CPU time.",
+          "technical": "Session.jet parses `--exec` as the end of perf flags and spawns the remaining words directly, without `jet run --observe`. The lens list gains `counts` and `syscalls`. Two receipt sections are added: `counts` (instructions, cycles, per process and in total, and survivors) and `syscalls` rows gain `args` and `pid`. `jet perf view` prints `counts instructions:u=… cycles:u=… processes=… threads=…` and one line per call, `pid name(args) = result · at file:line`. `jet perf compare` compares the counts.",
+          "code": "# a .jet file: the program alone, not its compile\n$ jet perf run hash.jet --lens=counts\n$ jet perf run hash.jet --lens=syscalls\n# a built program with its arguments\n$ jet perf run --lens=counts --exec .jet/build/hash data.bin\n$ jet perf run --lens=syscalls --exec .jet/build/hash data.bin\n# a jet command\n$ jet perf run --lens=counts --exec jet build Compiler\n$ jet perf run --lens=syscalls --exec jet build Compiler\n$ jet perf view .jet/perf/<stamp>.jettrace\ncounts instructions:u=81204417733 cycles:u=29511803012 processes=3 threads=14"
+        },
+        {
+          "key": "B",
+          "name": "Two new subcommands, `jet perf stat` and `jet perf trace`",
+          "detail": "Like Linux `perf stat` and `strace`, each takes a whole command and prints its result on stderr when the command ends. `jet perf stat` prints the counts and `jet perf trace` prints one line per call. A .jet file is built first, and then only the program is measured. `--out` also writes a trace file. `jet perf trace --calls=openat,clone3` keeps only the calls named.",
+          "technical": "Two verbs join the perf family in the command registry. Each spawns its command under the shared engine and prints a text report; with `--out` it writes a trace with the same receipt sections as A. A .jet file argument runs `jet build` and then the built program.",
+          "code": "# a .jet file: built first, then the program alone\n$ jet perf stat hash.jet\n$ jet perf trace hash.jet\n# a built program with its arguments\n$ jet perf stat .jet/build/hash data.bin\n$ jet perf trace .jet/build/hash data.bin\n# a jet command\n$ jet perf stat jet build Compiler\n$ jet perf trace --calls=openat jet build Compiler\ninstructions:u 81204417733\ncycles:u       29511803012"
+        },
+        {
+          "key": "C",
+          "name": "jet perf run takes any command, and always records counts",
+          "detail": "`jet perf run` reads its first plain word. A .jet file or a folder runs under `jet run` as today. Anything else is a command found as the shell finds it. Counts are recorded in every trace, with no flag. Calls need `--lens=syscalls`. Perf flags go before the command's words.",
+          "technical": "Session.jet decides the target by the first word that is not a perf flag. A `.jet` file or a directory runs under `jet run`. Any other word is resolved on PATH or as a path. The `counts` section is in every trace's receipt. The `syscalls` lens is as in A.",
+          "code": "# a .jet file: counts are always in the trace\n$ jet perf run hash.jet\n$ jet perf run --lens=syscalls hash.jet\n# a built program with its arguments\n$ jet perf run .jet/build/hash data.bin\n$ jet perf run --lens=syscalls .jet/build/hash data.bin\n# a jet command\n$ jet perf run jet build Compiler\n$ jet perf run --lens=syscalls jet build Compiler"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Linux perf",
+          "note": "One front door for any command: `stat` counts, `trace` lists calls, and `record` samples. Children and threads count unless `--no-inherit` is given.",
+          "code": "$ perf stat -e instructions:u,cycles:u ./prog args\n$ perf trace -e openat ./prog args"
+        },
+        {
+          "lang": "strace",
+          "note": "Takes a whole command. `-f` follows children and threads, and `-e trace=` keeps chosen calls.",
+          "code": "$ strace -f -e trace=clone,clone3 ./prog args"
+        },
+        {
+          "lang": "Valgrind",
+          "note": "Every tool takes the whole command after its own flags.",
+          "code": "$ valgrind --tool=callgrind ./prog args"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "One more way to name the target keeps one profiler command and one trace file, which view, compare and export already read. Counts and calls become two more lenses, the way the memory and top-down counters already are. The command after `--exec` is never mistaken for a .jet file or a folder, and today's `jet perf run` lines keep their meaning.",
+        "gains": [
+          "One command and one trace file for every target and every lens.",
+          "Today's `jet perf run hash.jet -- args` keeps its meaning.",
+          "`jet perf compare` compares counts of two builds with no new tool.",
+          "Test cases and the speed gate read one JSON view."
+        ],
+        "losses": [
+          {
+            "loss": "Users who know `perf stat` and `strace` look for those names first.",
+            "mitigation": "`jet perf stat` and `jet perf trace` stay unknown words whose error prints the matching `jet perf run --lens=… --exec` line, and the help lists both lenses."
+          },
+          {
+            "loss": "Forgetting `--exec` before a built program is an easy slip.",
+            "mitigation": "A first word that is an executable file and not a .jet file is refused with the same line rewritten with `--exec`, so the fix is one paste."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Two more verbs and a second, text-only result format beside the trace file. Counts printed on stderr cannot be compared with `jet perf compare`, so the speed gate would parse text."
+          },
+          {
+            "key": "C",
+            "reason": "Guessing the target from its first word is ambiguous when a folder and a program share a name, as `jet` does in a checkout. Always counting would also refuse every run on a machine without counters."
+          }
+        ],
+        "tradeoff": "A asks for one extra word, `--exec`, in exchange for no guessing and one trace file for every target."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Tools/Perf/CompileThroughput runs its compiles under `jet perf run --lens=counts --exec`. Its counts match `perf stat -e instructions:u,cycles:u` within 1% on one revision.\n\nThe strace users run `jet perf run --lens=syscalls --exec` and check the same facts from `jet perf view`. They are the cases CLICompilerSpeed (two), ControlAndData, Report, TaskgroupStack and JetpackJetOS (two), and Tools/Perf/CoreStrace.\n\nFurther cases cover the E2124 refusal with no counters and with ptrace refused. Others cover the exit code passed through, a child left running, and the hint for `jet perf stat`.",
+      "surface": {
+        "gist": "How should `jet perf` measure a built program or a jet command, not only a .jet file?",
+        "lesson": "`jet perf run` profiles only a program it builds from a .jet file. Two jobs need more: counting the work a run does, and listing its requests to the operating system, called system calls. Both must cover any built program or jet command, with its threads and child processes.",
+        "trio": {
+          "current": {
+            "note": "Today a built program or a jet command needs outside Linux tools.",
+            "code": "$ jet perf run .jet/build/hash data.bin\nerror: not a .jet file\n$ perf stat -e instructions:u jet build Compiler\n$ strace -f -e trace=openat jet run main.jet"
+          },
+          "wild": {
+            "lang": "Linux perf",
+            "note": "One command takes any program, with its threads and children.",
+            "code": "$ perf stat -e instructions:u,cycles:u ./prog args\n$ perf trace -e openat ./prog args"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "`--exec` plus two lenses",
+            "gist": "`--exec` names any command; `--lens=counts` and `--lens=syscalls` choose what is recorded.",
+            "gains": [
+              "One command and one trace file for everything",
+              "Today's commands keep their meaning",
+              "Counts compare with the existing compare command"
+            ],
+            "losses": [
+              "One extra word, `--exec`, before the command"
+            ],
+            "proposed": {
+              "code": "$ jet perf run hash.jet --lens=counts\n$ jet perf run hash.jet --lens=syscalls\n$ jet perf run --lens=counts --exec .jet/build/hash data.bin\n$ jet perf run --lens=syscalls --exec .jet/build/hash data.bin\n$ jet perf run --lens=counts --exec jet build Compiler\n$ jet perf run --lens=syscalls --exec jet build Compiler"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Two new subcommands",
+            "gist": "`jet perf stat` counts and `jet perf trace` lists calls, like the Linux tools.",
+            "gains": [
+              "Familiar to users of Linux perf and strace",
+              "Short to type"
+            ],
+            "losses": [
+              "Two more commands and a second text format",
+              "Counts cannot use the existing compare command"
+            ],
+            "proposed": {
+              "code": "$ jet perf stat hash.jet\n$ jet perf trace hash.jet\n$ jet perf stat .jet/build/hash data.bin\n$ jet perf trace .jet/build/hash data.bin\n$ jet perf stat jet build Compiler\n$ jet perf trace jet build Compiler"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Any command, counts always on",
+            "gist": "The first word decides the target; every trace holds counts.",
+            "gains": [
+              "No extra word to type",
+              "Counts come with every run"
+            ],
+            "losses": [
+              "A folder and a program with one name collide",
+              "Machines without counters refuse every run"
+            ],
+            "proposed": {
+              "code": "$ jet perf run hash.jet\n$ jet perf run --lens=syscalls hash.jet\n$ jet perf run .jet/build/hash data.bin\n$ jet perf run --lens=syscalls .jet/build/hash data.bin\n$ jet perf run jet build Compiler\n$ jet perf run --lens=syscalls jet build Compiler"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One profiler command and one trace file cover every target. Counts and calls join the existing lenses, and nothing has to guess the target.",
+          "tradeoff": "One extra word, in exchange for no guessing and one file format.",
+          "gains": [
+            "The speed gate and tests read one JSON view",
+            "Counts of two builds compare with no new tool"
+          ],
+          "losses": [
+            {
+              "loss": "Users may type `jet perf stat` first",
+              "mitigation": "The error prints the matching `jet perf run` line to paste."
+            },
+            {
+              "loss": "Forgetting `--exec` is an easy slip",
+              "mitigation": "The error repeats the line with `--exec` added."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Two more commands and a text format the compare command cannot read."
+            },
+            {
+              "key": "C",
+              "reason": "Guessing the target is ambiguous, and machines without counters would refuse every run."
+            }
+          ]
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Users who know `perf stat` and `strace` look for those names first.",
+          "attempts": [
+            "Add `jet perf stat` and `jet perf trace` as second spellings. Rejected: two ways to do one thing.",
+            "Answer those words with the matching `--lens` and `--exec` line. Kept."
+          ],
+          "result": "Reduced to one paste."
+        },
+        {
+          "loss": "Forgetting `--exec` before a built program is an easy slip.",
+          "attempts": [
+            "Guess the target from the first word, as option C does. Rejected: a folder named like a program makes it ambiguous.",
+            "Refuse an executable first word with the rewritten line. Kept."
+          ],
+          "result": "Reduced: the slip costs one rerun, and the error holds the fix."
+        }
+      ],
+      "draftedBy": "Main",
+      "reviewedBy": null,
+      "draft": true,
+      "status": "open",
+      "created": "2026-11-20T14:06:03.173Z"
     }
   ],
   "questions": [
@@ -135771,6 +135463,17 @@
       "created": "2026-11-20T09:20:01.023Z",
       "answeredAt": "2026-11-20",
       "answeredBy": "Main"
+    },
+    {
+      "id": "q13ng3ed",
+      "cardId": "c0nwrfck",
+      "decisionId": "D-LIVE-TIMELINE1",
+      "by": "owner",
+      "kind": "question",
+      "text": "wtf why would this overwrite the profile marker zone decision? That is what I want to have, I don’t want it overruled. I asked you to engineer away the down sides, yet this recommendation has 3. The timing of 26 ns is reasonable but there are still downsides that should’ve been addressed",
+      "status": "open",
+      "answer": "",
+      "created": "2026-11-20T14:18:56.570Z"
     }
   ],
   "ideas": [
@@ -136603,6 +136306,83 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-20T16:07:18.641Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dktg7a",
+      "note": "#34"
+    },
+    {
+      "at": "2026-11-20T16:07:16.013Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dktg7a",
+      "note": "#33"
+    },
+    {
+      "at": "2026-11-20T14:18:56.571Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q13ng3ed",
+      "note": ""
+    },
+    {
+      "at": "2026-11-20T14:18:11.194Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "20 criteria, soft limit 6: friction found running #6719 c4 proofs (Closer4723, 2026-11-20); recorded instead of dropped"
+    },
+    {
+      "at": "2026-11-20T14:18:11.194Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#20 A test binary that `jet test` builds carries the compiler id"
+    },
+    {
+      "at": "2026-11-20T14:18:08.525Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "19 criteria, soft limit 6: gap found by IfHole-6-1 during the release-stop sweep; recorded instead of dropped"
+    },
+    {
+      "at": "2026-11-20T14:18:08.524Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#19 Every runtime-stop report names its source line: web_app_por"
+    },
+    {
+      "at": "2026-11-20T14:18:04.017Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "97 criteria, soft limit 6: finding reported during the #6719 c4 sweep (Closer4723, 2026-11-20); recorded instead of dropped"
+    },
+    {
+      "at": "2026-11-20T14:18:04.017Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#97 The causal profiler does no unbounded-Int arithmetic per cal"
+    },
+    {
+      "at": "2026-11-20T14:08:48.458Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-20T14:08:48.458Z"
+    },
+    {
+      "at": "2026-11-20T14:06:03.173Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-PERF-TARGET1",
+      "note": "How jet perf measures any command or built program, not only a .jet file (draft)"
+    },
     {
       "at": "2026-11-20T13:52:17.231Z",
       "by": "Main",

@@ -75002,6 +75002,256 @@
       "comment": "Complete uniformity is more important. the language is unreleased and greenfield.",
       "ratifiedAt": "2026-11-17",
       "retiredAt": "2026-11-20T13:37:17.003Z"
+    },
+    {
+      "id": "D-PUSH-CREDS1",
+      "cardId": "c0f4o904",
+      "group": "library",
+      "title": "How a server entry gives push notifications their provider keys: one .push(...) call with a maker per provider, one modifier per provider, or typed secret fields in the environment file",
+      "situation": "A push notification reaches a phone or a browser through the company that delivers it: Apple, Google, or the browser's push service. Each of them asks the sender to prove who it is with a secret key. Jet already builds and signs every push, but no public code says where those keys come from, so an app cannot send a push today. This vote picks that code, and it matters to every app that pushes. A beginner should be able to paste it, and a deployment should keep the keys out of the source. We recommend A: one .push(...) line in the server entry, where the app names its own environment variables. It is shaped like the mail line of the ratified app shape (D-WEBAPP-SHAPE1), which is designed and not built yet.",
+      "gist": "Should a server entry give push its provider keys through one .push(...) call, one modifier per provider, or typed secret fields in the environment file?",
+      "lesson": "A secret such as a signing key belongs outside the code, in an environment variable the app names. The code says which variable holds which key, and the server reads them once as it starts. One place in the server entry then lists every way the app reaches people: mail and push.",
+      "explainer": "Words used here. A provider is the service that delivers a push: APNs for Apple systems, FCM for Android, and a browser's push service for Web Push. A credential is what proves the sender to the provider. An environment variable is a named value the host hands a program as it starts, such as SMTP_URL.\n\nApple's .p8 file is a signing key a developer downloads once. Google's service-account file is a JSON file with a key inside. VAPID is the key pair a Web Push sender signs with. The topic is the app's bundle ID, such as com.example.crewboard.",
+      "story": "Mia's Crewboard server sends a push when a task gets an assignee. She has Apple's key file, Google's service-account file and a fresh VAPID key.\n\nUnder A she adds one .push(...) line below .mail(...) in Web/web.jet. It names APNS_KEY, APNS_KEY_ID, FCM_SERVICE_ACCOUNT and VAPID_KEY. She lists the same names as secrets in env.jet. On her first deploy she forgets VAPID_KEY. The server refuses to start, naming the variable and the line, so her host's health check fails before anyone misses a push.\n\nUnder B she writes three lines, .apns(...), .fcm(...) and .web_push(...), with the same names. Mail still uses .mail(app.smtp(...)), so her entry has two shapes for one idea.\n\nUnder C she writes no push code. She declares typed push fields in env.jet, and jet dev checks the key files first. Her production host starts the program without Jetpack, so she needs a second way to hand it the same keys.",
+      "inWild": "// web-push (Node): the app passes its VAPID keys, read from variables it names.\n// https://github.com/web-push-libs/web-push\nwebpush.setVapidDetails(\"mailto:crew@example.com\", process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);\n\n// Firebase Admin SDK: a service account the app loads from where it chooses.\n// https://firebase.google.com/docs/admin/setup\ninitializeApp({ credential: cert(JSON.parse(process.env.FCM_SERVICE_ACCOUNT)) });\n\n# Phoenix (Elixir): config/runtime.exs reads named variables at start and stops when one is missing (condensed).\n# https://hexdocs.pm/phoenix/releases.html\nsecret_key_base = System.get_env(\"SECRET_KEY_BASE\") || raise \"environment variable SECRET_KEY_BASE is missing.\"",
+      "detail": "What this ballot decides: the public code a server entry writes to give the three push providers their credentials. APNs needs a .p8 signing key, its key ID, the team ID and the topic. FCM needs a service-account JSON file. Web Push needs a VAPID private key and a contact address (the VAPID subject).\n\nOut of scope, decided on #6800 by Main on 2026-11-16. Fixed JET_* variable names are refused. Device registration is internal: POST /__jet/push/devices and __jet_push_devices rows, through a store hook like CallOutbox. The HTTP/2 client stays inside core.http.client. A provider with no configuration is skipped and logged. Until this ballot lands, the providers build against an internal priv(package) record.\n\nToday, at dev d6d482c5f7, Core/App/Push.jet builds each request from raw values. push_apns_token takes the team ID, the key ID and the private scalar (:243-250). push_ec_private parses a .p8 or SEC1 key (:112-124). push_fcm_token_request signs Google's assertion with the service account's RSA key (:272-285).\n\npush_vapid_authorization signs the VAPID token with a key pair and a contact (:205-218), and push_key_pair derives the public key from the private one (:95-102). No public code reaches any of them. Core/App has no push, mail or smtp configuration at all: git grep finds none in App.jet.\n\nThe precedent is mail, still a proposal. The web entry writes .mail(app.smtp(\"SMTP_URL\"), from: \"Crewboard <crew@example.com>\") (Docs/proposals/2026-11-13-web-app-framework-shape.md:2549). Its stub is smtp: fn(url_env: String) -> Mail (:5833-5838), and 4.14 says app.mail sends through the transport the entry names (:3578-3580).\n\nRules every option shares. The app chooses every variable name. The server reads each one once as it starts, through core.sys.getenv (Core/Sys/Sys.jet:2104), and keeps the value as a #Secret String. Jetpack's dotenv secrets list keeps those values out of plans, logs and images (Docs/spec/reference/jetpack-epoch5.md:493-496). If an allow list is given, each secret must be on it (Jetpack/EnvModel/Source/Environment/FactReaders.jet:399-405).\n\nA named variable that is unset or empty refuses the start before the port opens. The error names the variable, the argument and the source line. A key that does not parse refuses the start the same way, with Push.jet's own reason, such as \"the key is not on P-256\". A variable may hold the key file itself or its base64 on one line, so a multi-line .p8 or JSON file fits any host.\n\nEdge cases. Apple's sandbox and production hosts are chosen per device: registration records which one the app build uses, and one .p8 key serves both. The FCM project ID comes from the service-account file's project_id field. A device whose provider is not configured is skipped and logged. The browser gets the VAPID public key from the server, so the app never writes it twice.\n\nMore edge cases. A new VAPID key breaks old browser subscriptions, so the client compares keys as it starts and subscribes again. A push service that answers 404 or 410 drops that subscription. Rotating any key means changing the variable and restarting. APNs and FCM tokens live an hour at most (Push.jet:246, :280), so nothing could switch faster anyway.\n\nTests need no variables: app.test_host sends to local fake providers with keys it makes, as #6800 c1's proof does. Proof rows are proposed in each option's technical text.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One .push(...) call with a maker per provider: .push(apns: app.apns(...), fcm: app.fcm(...), web: app.web_push(...))",
+          "gist": "The server entry names the push transport the way it names the mail transport, and each maker names its own environment variables.",
+          "detail": "The entry gains one builder, .push, with three optional named arguments. app.apns, app.fcm and app.web_push make the three provider values, as app.smtp makes the mail one. An argument ending in _env names an environment variable, the convention of smtp's url_env in the ratified app shape. Every other argument is a plain value that is safe in git: the team ID, the topic and the contact.\n\nBeginner path: paste the .push line, put the three files' contents in .env, and list the names as secrets in env.jet. Leave out a provider the app does not use. A missing variable stops the start with its name and line.\n\nExpert path: choose names per deployment, keep values in the host's secret store, and rotate a key with a rolling restart. A push is a job, and a stopping server leaves its unfinished jobs for the next one (Docs/spec/reference/core-library.md:5680-5686).\n\nA second .push(...) on one app refuses the start, naming both lines.",
+          "technical": "Proposed, not implemented. core.app gains App.push: fn(self, apns: APNs?{None}, fcm: FCM?{None}, web: WebPush?{None}) -> App. It gains apns: fn(key_env: String, key_id_env: String, team: String, topic: String) -> APNs.\n\nIt also gains fcm: fn(service_account_env: String) -> FCM and web_push: fn(key_env: String, contact: String) -> WebPush. serve reads each variable through core.sys.getenv and parses it once with Push.jet's builders. It refuses the start on an unset, empty or malformed value.\n\nProof: jet test Compiler --profile cases --filter web_app/push_config_reads_named_variables, where local fakes check each signed request. A second row, web_app/push_config_missing_variable_refuses_start, checks the refusal.",
+          "code": "// Web/web.jet: the server entry.\nrun: fn() logic.TaskError! {\n    crew: logic.open_crew(\"crewboard.db\")\n    screens.crewboard()\n        .mount(crew)\n        .accounts(auth.sqlite(\"accounts.db\").verify_email().reset_password())\n        .mail(app.smtp(\"SMTP_URL\"), from: \"Crewboard <crew@example.com>\")\n        // Each *_env argument names an environment variable this app chose.\n        // The server reads them once as it starts, as secrets. A provider\n        // left out is skipped, and the start logs that.\n        .push(\n            apns: app.apns(key_env: \"APNS_KEY\", key_id_env: \"APNS_KEY_ID\", team: \"DEF123GHIJ\", topic: \"com.example.crewboard\"),\n            fcm: app.fcm(service_account_env: \"FCM_SERVICE_ACCOUNT\"),\n            web: app.web_push(key_env: \"VAPID_KEY\", contact: \"mailto:crew@example.com\"),\n        )\n        .serve()\n}\n\n// env.jet: the same names, kept as secrets, so Jetpack keeps their values\n// out of plans and logs. The .env file itself stays out of git.\ndotenv: [Dotenv{ file: \".env\", secrets: [\"SMTP_URL\", \"APNS_KEY\", \"APNS_KEY_ID\", \"FCM_SERVICE_ACCOUNT\", \"VAPID_KEY\"] }]\n\n// A job sends the push; nothing in it names a provider or a key.\n#App.Job(retries: 5)\ntell_assignee: fn(self, id: TaskID) -[DB.Read, Net]> TaskError! {\n    task: self.tasks.get(id) ?? return Ok()\n    who: task.assignee ?? return Ok()\n    if !self.is_member(task.project, who) -> return Ok()\n    app.notify(to: who, title: \"Assigned to you\", body: task.title, open: TaskView{id: task.id})\n    Ok()\n}"
+        },
+        {
+          "key": "B",
+          "name": "One modifier per provider: .apns(...), .fcm(...), .web_push(...)",
+          "gist": "Each provider is its own builder method on the app, naming its own environment variables.",
+          "detail": "The entry gains three builders, one per provider, with the same arguments as A's makers. A provider left out is skipped and logged.\n\nBeginner path: paste the provider lines the app needs and list the names as secrets in env.jet, as in A. Expert path: as in A.\n\nMail keeps .mail(app.smtp(...)), so an entry names the mail transport with a builder and a maker, but names push providers with bare builders. That is two shapes for one meaning, naming how the app reaches people. Each builder also needs its own rule for a second call.",
+          "technical": "Proposed, not implemented. core.app gains App.apns, App.fcm and App.web_push, each returning App, with A's argument lists and A's start-up checks. Proof: the same rows as A.",
+          "code": "// Web/web.jet: the server entry.\nrun: fn() logic.TaskError! {\n    crew: logic.open_crew(\"crewboard.db\")\n    screens.crewboard()\n        .mount(crew)\n        .accounts(auth.sqlite(\"accounts.db\").verify_email().reset_password())\n        .mail(app.smtp(\"SMTP_URL\"), from: \"Crewboard <crew@example.com>\")\n        // One modifier per provider, each naming its variables.\n        .apns(key_env: \"APNS_KEY\", key_id_env: \"APNS_KEY_ID\", team: \"DEF123GHIJ\", topic: \"com.example.crewboard\")\n        .fcm(service_account_env: \"FCM_SERVICE_ACCOUNT\")\n        .web_push(key_env: \"VAPID_KEY\", contact: \"mailto:crew@example.com\")\n        .serve()\n}\n\n// env.jet: the same names, kept as secrets, so Jetpack keeps their values\n// out of plans and logs. The .env file itself stays out of git.\ndotenv: [Dotenv{ file: \".env\", secrets: [\"SMTP_URL\", \"APNS_KEY\", \"APNS_KEY_ID\", \"FCM_SERVICE_ACCOUNT\", \"VAPID_KEY\"] }]\n\n// tell_assignee is the same as in A."
+        },
+        {
+          "key": "C",
+          "name": "Typed secret fields in the environment file: push: Push{apns: APNs{key: Secret(\"APNS_KEY\"), ...}} in env.jet",
+          "gist": "The environment file declares typed push fields, Jetpack checks them before the program starts, and the server entry writes nothing.",
+          "detail": "Jetpack's environment schema gains Push, APNs, FCM, WebPush and Secret records. jet dev checks each secret's form before it starts the program, and the server takes the fields from the environment Jetpack prepared.\n\nBeginner path: fill in the env.jet record; jet dev reports a bad key before the program runs. Expert path: a host that starts the program without Jetpack needs a second way to give the same fields. That means variables with names the framework fixes, or a file it reads.\n\nThe environment model is a plan model with no provider, store or network role (Docs/spec/architecture.md:975). Its typed records live in Environment.jet.schema (Jetpack/EnvModel/Source/ModuleEval/Schema/Environment.jet.schema:57-62). Putting push types there ties Jetpack to core.app. Mail would stay in code, so the app's transports would live in two places.",
+          "technical": "Proposed, not implemented. Jetpack/EnvModel's schema gains the push records and a Secret marker, checked at environment evaluation; core.app reads the prepared environment when serve starts. The production path without Jetpack is not defined by this option and would need its own rule. Proof: jet test Compiler --profile cases --filter jetpack/env_push_fields_checked, plus a web_app row for the production path.",
+          "code": "// env.jet: typed push fields in the environment file. Jetpack checks each\n// secret's form (the .p8 parses, the JSON has a key) before jet dev starts.\npush: Push{\n    apns: APNs{ key: Secret(\"APNS_KEY\"), key_id: Secret(\"APNS_KEY_ID\"), team: \"DEF123GHIJ\", topic: \"com.example.crewboard\" },\n    fcm: FCM{ service_account: Secret(\"FCM_SERVICE_ACCOUNT\") },\n    web: WebPush{ key: Secret(\"VAPID_KEY\"), contact: \"mailto:crew@example.com\" },\n}\n\n// Web/web.jet: the server entry has no push line. The server takes the\n// push fields from the environment Jetpack prepared.\nrun: fn() logic.TaskError! {\n    crew: logic.open_crew(\"crewboard.db\")\n    screens.crewboard()\n        .mount(crew)\n        .accounts(auth.sqlite(\"accounts.db\").verify_email().reset_password())\n        .mail(app.smtp(\"SMTP_URL\"), from: \"Crewboard <crew@example.com>\")\n        .serve()\n}\n\n// tell_assignee is the same as in A."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "web-push (Node)",
+          "note": "The app passes its VAPID subject and keys, read from variables it names; the library fixes no names. Like A and B. Source: https://github.com/web-push-libs/web-push",
+          "code": "webpush.setVapidDetails(\"mailto:crew@example.com\", process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);"
+        },
+        {
+          "lang": "Firebase Admin SDK",
+          "note": "The app gives a service-account credential from where it chooses; GOOGLE_APPLICATION_CREDENTIALS is one fixed fallback name, which #6800 refuses for Jet. Source: https://firebase.google.com/docs/admin/setup",
+          "code": "initializeApp({ credential: cert(JSON.parse(process.env.FCM_SERVICE_ACCOUNT)) });"
+        },
+        {
+          "lang": "Rpush (Ruby)",
+          "note": "One APNs token-auth app record holds the key, key ID, team ID and bundle ID, like A's app.apns. Source: https://github.com/rpush/rpush",
+          "code": "Rpush::Apnsp8::App.new(apn_key: ENV[\"APNS_KEY\"], apn_key_id: ENV[\"APNS_KEY_ID\"], team_id: \"DEF123GHIJ\", bundle_id: \"com.example.crewboard\")"
+        },
+        {
+          "lang": "Phoenix (Elixir)",
+          "note": "The generated config/runtime.exs reads named variables as the release starts and raises when one is missing, the start-up refusal every option here shares. Source: https://hexdocs.pm/phoenix/releases.html",
+          "code": "secret_key_base = System.get_env(\"SECRET_KEY_BASE\") || raise \"environment variable SECRET_KEY_BASE is missing.\""
+        },
+        {
+          "lang": "Expo (EAS)",
+          "note": "Push credentials live in Expo's hosted credential store, set with the eas credentials command, not in app code. Close to C: tooling owns the keys, and the app depends on that tooling to deploy. Source: https://docs.expo.dev/app-signing/app-credentials/",
+          "code": "eas credentials"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A names the push transport the way the ratified app shape (D-WEBAPP-SHAPE1) names the mail transport, with one builder and a maker per provider. Every key stays in a variable the app chose, read once and kept secret. B gives the same meaning a second shape. C needs a second path for every host that starts the program without Jetpack.",
+        "gains": [
+          "One line in the server entry turns on all three providers, shaped like the mail line.",
+          "No variable name is fixed by Jet, and no key value appears in code or logs.",
+          "A missing or malformed key stops the start with the variable and the line, before any push is lost."
+        ],
+        "losses": [
+          {
+            "loss": "New public names in core.app: App.push, app.apns, app.fcm, app.web_push and their three value types.",
+            "mitigation": "They mirror .mail, app.smtp and Mail one for one, and they replace the token signing an app would otherwise write by hand."
+          },
+          {
+            "loss": "A missing variable is found as the server starts, not by jet check.",
+            "mitigation": "The start stops before the port opens and names the variable and the line, so a deploy's health check fails at once. Local tests need no variables, because the test host uses fake providers."
+          },
+          {
+            "loss": "A .p8 key and a service-account file span several lines, which some hosts handle badly in variables.",
+            "mitigation": "A variable may hold the file's base64 on one line; the server tells the two forms apart by the PEM header or the opening brace."
+          },
+          {
+            "loss": "Changing a key needs a restart.",
+            "mitigation": "Provider tokens live an hour at most, so a live reload could not switch faster. A rolling restart loses no push, because a stopping server leaves unfinished push jobs for the next one."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Three builders give push a different shape from mail for the same meaning, and each needs its own rule for a second call."
+          },
+          {
+            "key": "C",
+            "reason": "Keys checked by Jetpack still need a second path on hosts that start the program without it, and the transports split between env.jet and code."
+          }
+        ],
+        "tradeoff": "A handful of new core.app names, mirroring mail, buy one checked line that turns on every push provider with names the app chooses."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: AnyReview11. The pass found four gaps (multi-line keys in variables, Apple's sandbox host, VAPID rotation, and a repeated .push call), and each is designed away in this payload. A second pass by Main found the mail precedent ratified (D-WEBAPP-SHAPE1) but not built, so the text now says so, while the push builders (Core/App/Push.jet:211-294) exist."
+      },
+      "checkInstructions": "Code reads only, on dev d6d482c5f7 (git show d6d482c5f7:PATH). In Core/App/Push.jet read push_key_pair (:95-102), push_ec_private (:112-124), push_vapid_authorization (:205-218) and push_apns_token (:243-250). Then read push_apns_request (:252-270), push_fcm_token_request (:272-285) and push_fcm_request (:287-306). PushKeyPair's private field is #Redact (:56-59).\n\nRun git grep -n -i 'smtp\\|mail\\|getenv\\|apns\\|vapid' d6d482c5f7 -- Core/App/App.jet and see no configuration for push or mail. Read core.sys.getenv at Core/Sys/Sys.jet:2104.\n\nIn Docs/proposals/2026-11-13-web-app-framework-shape.md, read the web entry (:2540-2552), the Mail rule (:3578-3580), the Mail and smtp stubs (:5833-5838) and native.push (:6378).\n\nFor the secret path, read the Dotenv record (Jetpack/EnvModel/Source/ModuleEval/Schema/Environment.jet.schema:57-62) and its check (Jetpack/EnvModel/Source/Environment/FactReaders.jet:387-405). Then read Docs/spec/reference/jetpack-epoch5.md:493-496. Read Docs/spec/architecture.md:975 for the environment model's role, and core-library.md:5680-5686 for jobs a stop leaves. The #6800 decisions are in Main's card log of 2026-11-16.",
+      "surface": {
+        "gist": "Should push get its provider keys from one .push(...) call, one modifier per provider, or typed fields in env.jet?",
+        "lesson": "Keys live in environment variables the app names. The server entry says which variable holds which key, as the ratified app shape does for mail. The server reads them once as it starts.",
+        "trio": {
+          "current": {
+            "note": "Today the push builders are internal and take raw key bytes. No public code says where the keys come from, so no app can send a push.",
+            "code": "// Core/App/Push.jet, internal: the caller must already hold the key.\ntoken: push_apns_token(team_id, key_id, now, private, rng) ?? return Err(err)"
+          },
+          "wild": {
+            "lang": "web-push (Node)",
+            "note": "The app passes keys read from variables it names.",
+            "code": "webpush.setVapidDetails(\"mailto:crew@example.com\", process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "One .push(...) call with a maker per provider",
+            "gist": "Shaped like .mail(app.smtp(\"SMTP_URL\")); each maker names its variables.",
+            "gains": [
+              "Same shape as mail",
+              "Names chosen by the app",
+              "A bad key stops the start"
+            ],
+            "losses": [
+              "A few new core.app names"
+            ],
+            "proposed": {
+              "code": ".push(\n    apns: app.apns(key_env: \"APNS_KEY\", key_id_env: \"APNS_KEY_ID\", team: \"DEF123GHIJ\", topic: \"com.example.crewboard\"),\n    fcm: app.fcm(service_account_env: \"FCM_SERVICE_ACCOUNT\"),\n    web: app.web_push(key_env: \"VAPID_KEY\", contact: \"mailto:crew@example.com\"),\n)"
+            }
+          },
+          {
+            "key": "B",
+            "name": "One modifier per provider",
+            "gist": ".apns(...), .fcm(...) and .web_push(...) on the app.",
+            "gains": [
+              "One line per provider"
+            ],
+            "losses": [
+              "A second shape beside mail",
+              "Three rules for a repeated call"
+            ],
+            "proposed": {
+              "code": ".apns(key_env: \"APNS_KEY\", key_id_env: \"APNS_KEY_ID\", team: \"DEF123GHIJ\", topic: \"com.example.crewboard\")\n.fcm(service_account_env: \"FCM_SERVICE_ACCOUNT\")\n.web_push(key_env: \"VAPID_KEY\", contact: \"mailto:crew@example.com\")"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Typed secret fields in env.jet",
+            "gist": "Jetpack checks typed push fields before the program starts.",
+            "gains": [
+              "Keys checked before the program runs",
+              "No push code in the entry"
+            ],
+            "losses": [
+              "A second path where Jetpack does not start the program",
+              "Transports split between env.jet and code"
+            ],
+            "proposed": {
+              "code": "push: Push{\n    apns: APNs{ key: Secret(\"APNS_KEY\"), key_id: Secret(\"APNS_KEY_ID\"), team: \"DEF123GHIJ\", topic: \"com.example.crewboard\" },\n    fcm: FCM{ service_account: Secret(\"FCM_SERVICE_ACCOUNT\") },\n    web: WebPush{ key: Secret(\"VAPID_KEY\"), contact: \"mailto:crew@example.com\" },\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A names push the way the entry names mail, and every key stays in a variable the app chose. B adds a second shape, and C needs a second path off Jetpack.",
+          "gains": [
+            "Same shape as mail",
+            "No fixed names, no keys in code",
+            "A bad key stops the start"
+          ],
+          "losses": [
+            {
+              "loss": "A few new core.app names.",
+              "mitigation": "They mirror .mail, app.smtp and Mail one for one."
+            },
+            {
+              "loss": "A missing variable shows at start, not at check.",
+              "mitigation": "The start stops before the port opens and names the variable and the line."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A second shape for naming a transport."
+            },
+            {
+              "key": "C",
+              "reason": "A second path on hosts that start the program without Jetpack."
+            }
+          ],
+          "tradeoff": "A few names that mirror mail buy one checked line for every push provider."
+        }
+      },
+      "reports": [
+        {
+          "title": "web-push (Node)",
+          "url": "https://github.com/web-push-libs/web-push",
+          "note": "setVapidDetails takes the subject and keys the app supplies."
+        },
+        {
+          "title": "Firebase Admin SDK setup",
+          "url": "https://firebase.google.com/docs/admin/setup",
+          "note": "A service-account credential from a source the app chooses."
+        },
+        {
+          "title": "Rpush",
+          "url": "https://github.com/rpush/rpush",
+          "note": "An APNs token-auth app record: key, key ID, team ID, bundle ID."
+        },
+        {
+          "title": "Phoenix releases",
+          "url": "https://hexdocs.pm/phoenix/releases.html",
+          "note": "runtime.exs reads variables at start and raises when one is missing."
+        },
+        {
+          "title": "Expo app credentials",
+          "url": "https://docs.expo.dev/app-signing/app-credentials/",
+          "note": "Hosted credential storage managed by tooling."
+        },
+        {
+          "title": "Apple: sending notification requests to APNs",
+          "url": "https://developer.apple.com/documentation/usernotifications/sending-notification-requests-to-apns",
+          "note": "Token-based requests, apns-topic and the two hosts."
+        },
+        {
+          "title": "RFC 8292: VAPID",
+          "url": "https://www.rfc-editor.org/rfc/rfc8292",
+          "note": "The sender's key pair and its subject."
+        }
+      ],
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-16T09:17:43.727Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-16",
+      "retiredAt": "2026-11-20T16:07:16.230Z"
     }
   ]
 }
