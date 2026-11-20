@@ -1,0 +1,1038 @@
+// The Canvas debug session (Docs/Spec/Reference/canvas-protocol.md, "Debug
+// session") on the native tiers: the one engine every Canvas host answers
+// `POST /__jet_canvas/debug` with (JetCLI CanvasDev.jet, JetDevServer
+// DebugSourceGit.jet). The first request opens a session: on the `native`
+// tier it builds the entry with the host's `jet` (`jet build -O0`, as `jet
+// debug` does) and opens the image under Jet's native debugger at the start
+// of `run`; on `native-recorded` it does the same as a replay of a `jet run
+// --record` recording (`jet debug --replay`), whose reverse commands and
+// `why` run; on `native-dump` it opens a `.jetdump` of the entry as `jet
+// debug <dump>` does, where nothing runs. Then it runs the request's
+// commands; a later request names the session and runs more. A session is
+// bound to the entry's source id and revision: a request for another
+// revision ends it, and a stop must name its source and revision. A refused
+// request leaves every session as it was. Every answer is one bounded
+// jet.canvas.debug document.
+use {
+    session_files: core.files
+    session_process: core.process
+    core.encoding.[Dyn]
+    jet_debug.[DebugSnapshot, NativeDebugError, NativeDebugStep, NativeSession, NativeStop, NativeStopKind, native_debug_build_argv, native_debug_image, native_dump_command, native_dump_events, native_dump_frame, native_dump_jet_frame, native_dump_open, native_dump_source, native_dump_task_list]
+    jet_foundation.[DeepChecks, Span, diagnostic_render, foundation_json_integer, foundation_json_parse, foundation_json_quote]
+}
+
+CANVAS_DEBUG_SCHEMA: 1
+
+// The tiers Canvas debugs on: a live program, the default; a replay of a
+// recording; and a dump.
+CANVAS_DEBUG_TIER: "native"
+
+CANVAS_DEBUG_RECORDED: "native-recorded"
+
+CANVAS_DEBUG_DUMP: "native-dump"
+
+// The longest `recording` or `dump` a request names, in bytes.
+CANVAS_DEBUG_MAX_PATH_BYTES: 4096
+
+CANVAS_DEBUG_MAX_SESSIONS: 32
+
+CANVAS_DEBUG_MAX_COMMANDS: 64
+
+CANVAS_DEBUG_MAX_BREAKPOINTS: 128
+
+CANVAS_DEBUG_MAX_WATCHES: 32
+
+// The longest command, watch name or breakpoint anchor, in bytes.
+CANVAS_DEBUG_MAX_WORD_BYTES: 256
+
+CANVAS_DEBUG_MAX_CALL_STACK: 32
+
+CANVAS_DEBUG_MAX_CALL_STACK_BYTES: 16384
+
+CANVAS_DEBUG_MAX_TRACE_LINES: 128
+
+CANVAS_DEBUG_MAX_TRACE_BYTES: 32768
+
+CANVAS_DEBUG_MAX_LOCALS: 64
+
+CANVAS_DEBUG_MAX_VALUE_BYTES: 4096
+
+CANVAS_DEBUG_MAX_MESSAGE_BYTES: 16384
+
+// The lines of source the overlay carries on each side of the stop.
+CANVAS_DEBUG_SOURCE_CONTEXT: 12
+
+// The most stepped stops a session's trail keeps: enough for the wire path
+// (CANVAS_DEBUG_MAX_WIRE_PATH) of one wire a step.
+CANVAS_DEBUG_MAX_TRAIL: 65
+
+// A refused debug request: its jet.canvas.debug error kind and message.
+#Error
+CanvasDebugError: struct {
+    kind: String,
+    message: String,
+}
+
+// What a session needs from the `jet` that serves it beyond Jet's native
+// debugger: the expression compiler `print` and `why` evaluate with, and the
+// replay of a recording, both the compiler's own (JetCLI). A host serves one
+// request: the session that request opens keeps its evaluator.
+CanvasDebugHost: trait {
+    // Start checking the program of the entry `entry` for its evaluator
+    // while its O0 image builds.
+    building: fn(self, entry: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never!,
+    // Give `live`, the image of `entry`, the evaluator of its program at the
+    // level the image was built at.
+    evaluate: fn(self, live: &NativeSession, entry: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never!,
+    // Make `live`, the image `image` of `entry`, replay the recording
+    // `recording` names, as `jet debug --replay` does, with `scratch` its
+    // scratch directory, putting the program arguments it was made with in
+    // `args`; the refusal of one that can't be replayed, as rendered.
+    replay: fn(self, live: &NativeSession, image: String, recording: String, entry: String, scratch: String, args: &[String]) -[FS, Env, Time.Wait]> CanvasDebugError!,
+}
+
+// One live session: the source id and revision it is bound to, the scratch
+// directory its image lives in ("" for a dump's) and the image, the entry's
+// base name and lines (as the image's line table names them), the debugger
+// and where it stopped, a dump's flight ring records, the lines it has
+// breakpoints on, how many commands it has run, and the console's report
+// since the last answer. Its tier follows from these
+// (canvas_debug_tier_name). `trail` is the lines of the stops the run
+// stepped through to its stop, oldest first and the stop's last, at most
+// CANVAS_DEBUG_MAX_TRAIL, all in one frame `trail_depth` Jet frames deep (-1:
+// not known).
+CanvasDebugSession: struct {
+    source_id: String,
+    revision: String,
+    created: Int,
+    dir: String,
+    image: String,
+    jet_file: String,
+    jet_lines: [String],
+    live: NativeSession,
+    stop: NativeStop,
+    events: [String],
+    breakpoints: [Int],
+    commands: Int,
+    transcript: String,
+    trail: [Int]{[Int]{}},
+    trail_depth: Int{-1},
+}
+
+// The tier a request asks for: its `name`, whether the request named it,
+// and the recording or dump a new session opens ("" on `native`).
+CanvasDebugTier: struct {
+    name: String,
+    named: Bool,
+    target: String,
+}
+
+// What one request's commands did: the session and its tier, the image it
+// runs ("" for a dump), the console's transcript, the stop's facts (None
+// outside Jet code), the `tasks` list's lines, whether the program is still
+// paused in the session, and the lines the run stepped through to the
+// snapshot's stop (the session's trail; empty when the snapshot shows
+// another frame).
+CanvasDebugRun: struct {
+    id: String,
+    tier: String,
+    image: String,
+    transcript: String,
+    snapshot: DebugSnapshot?,
+    tasks: [String],
+    running: Bool,
+    trail: [Int],
+}
+
+// One bounded list of a debug document, as JSON items.
+CanvasDebugList: struct {
+    json: String,
+    truncated: Bool,
+}
+
+// The answer to one debug request: its jet.canvas.debug document, and the
+// session it ran (None for a stop), with the image the session runs ("" for
+// a dump) and the stop it is paused at.
+CanvasDebugAnswer: struct {
+    document: String,
+    id: String,
+    running: Bool,
+    image: String,
+    snapshot: DebugSnapshot?,
+}
+
+// A host's live debug sessions, by id, and `jet`, the compiler that builds
+// each debugged program. Only the host's one request loop touches them, so
+// they are plain state.
+CanvasDebugSessions: struct {
+    jet: String,
+    next_id: Int,
+    sessions: [String:CanvasDebugSession],
+
+    // Run `commands` in the session `requested` names (a new one on `tier`
+    // when None, with `host`'s evaluator), with breakpoints on `breakpoints`
+    // first. A program that ends ends its session; one that fails ends it
+    // and answers its transcript.
+    run: fn(&self, host: CanvasDebugHost, file: String, source_id: String, revision: String, requested: String?, tier: CanvasDebugTier, commands: [String], breakpoints: [Int]) -> CanvasDebugRun CanvasDebugError! {
+        if requested == None -> self.evict()
+        id: if requested == {
+            .Val(wanted) -> wanted
+            .None -> "canvas-debug-{self.next_id}"
+        }
+        session := if requested == {
+            .Val(wanted) -> self.resume(wanted, source_id, revision, tier, commands.len()) ?? return Err(err)
+            .None -> if {
+                tier.name == CANVAS_DEBUG_DUMP -> canvas_debug_open_dump(file, source_id, revision, tier.target, self.next_id) ?? return Err(err)
+                else -> canvas_debug_open(host, self.jet, file, source_id, revision, tier, self.next_id) ?? return Err(err)
+            }
+        }
+        if requested == None -> self.next_id += 1
+        session.commands += commands.len()
+        dump: canvas_debug_tier_name(session) == CANVAS_DEBUG_DUMP
+        failed := NativeDebugError?{None}
+        loop line in breakpoints {
+            // A dump runs nothing, so it stops at no breakpoint.
+            if dump || session.breakpoints.contains(line) || failed != None -> next
+            session.breakpoints.push(line)
+            if canvas_debug_step(session, "break {line}") == .Err(failure) -> failed = Val(failure)
+        }
+        loop command in commands {
+            if failed != None -> break
+            if canvas_debug_follow(session, command) == .Err(failure) -> failed = Val(failure)
+        }
+        if failed == None && canvas_debug_step(session, "locals") == .Err(failure) {
+            failed = Val(failure)
+        }
+        if failed == None && canvas_debug_step(session, "bt") == .Err(failure) {
+            failed = Val(failure)
+        }
+        if failed == .Val(failure) {
+            canvas_debug_close(session)
+            return Err(canvas_debug_unavailable(failure))
+        }
+        transcript: session.transcript.move()
+        session.transcript = ""
+        stop: session.stop
+        if stop.kind != NativeStopKind.Paused {
+            canvas_debug_close(session)
+            if stop.kind == NativeStopKind.Exited && stop.code == 0 {
+                return Ok(CanvasDebugRun{id: id, tier: canvas_debug_tier_name(session), image: session.image, transcript: transcript, snapshot: None, tasks: [String]{}, running: false, trail: [Int]{}})
+            }
+            return Err(canvas_debug_error("diagnostic", transcript))
+        }
+        snapshot := DebugSnapshot?{None}
+        if session.live.snapshot() == {
+            .Ok(found) -> { snapshot = found }
+            .Err(failure) -> {
+                canvas_debug_close(session)
+                return Err(canvas_debug_unavailable(failure))
+            }
+        }
+        // The task list is the console's `tasks`; a program whose registry
+        // can't be read shows none.
+        listed := ""
+        if dump -> listed = native_dump_task_list(session.live, session.jet_file) else if session.live.tasks_text() == .Ok(text) {
+            listed = text
+        }
+        tasks := [String]{}
+        loop line in listed.split("\n").to_list() {
+            if line.trim() != "" -> tasks.push(line)
+        }
+        on: canvas_debug_tier_name(session)
+        trail := [Int]{}
+        if snapshot == .Val(found) && session.stop.frame == .Val(frame) && frame.line == found.line {
+            loop line in session.trail -> trail.push(line)
+        }
+        image: session.image
+        self.sessions[id] = session
+        Ok(CanvasDebugRun{id: id, tier: on, image: image, transcript: transcript, snapshot: snapshot, tasks: tasks, running: true, trail: trail})
+    }
+
+    // Take the session `id` out to run `count` more commands in it. One
+    // bound to another source or revision is stale and ends; one on another
+    // tier than `tier` names, or whose command history would overflow,
+    // stays.
+    resume: fn(&self, id: String, source_id: String, revision: String, tier: CanvasDebugTier, count: Int) -> CanvasDebugSession CanvasDebugError! {
+        session := self.sessions.remove(id) ?? return Err(canvas_debug_error("session", "debug session is no longer live; start a new session"))
+        if session.source_id != source_id || session.revision != revision {
+            canvas_debug_close(session)
+            return Err(canvas_debug_error("conflict", "debug session is stale for the current source identity or revision"))
+        }
+        on: canvas_debug_tier_name(session)
+        if tier.named && tier.name != on {
+            refused: "debug session `{id}` runs on the {on} tier, not {tier.name}; it was kept"
+            self.sessions[id] = session
+            return Err(canvas_debug_error("conflict", refused))
+        }
+        if session.commands + count > CANVAS_DEBUG_MAX_COMMANDS {
+            self.sessions[id] = session
+            return Err(canvas_debug_error("limit", "debug session command history is full; start a new session"))
+        }
+        Ok(session)
+    }
+
+    // Make room for one more session: the oldest ends when all are taken.
+    evict: fn(&self) {
+        if self.sessions.len() < CANVAS_DEBUG_MAX_SESSIONS {
+            return
+        }
+        oldest := ""
+        oldest_created := -1
+        loop entry in self.sessions {
+            if oldest_created < 0 || entry.value.created < oldest_created {
+                oldest = entry.key
+                oldest_created = entry.value.created
+            }
+        }
+        self.release(oldest)
+    }
+
+    // End session `id` on a stop request; its tier. A stop from a stale
+    // drawing (a revision that is neither the source's nor the session's),
+    // or naming another tier than the session's, is refused and the session
+    // kept; a session older than the source ends, and the stop says it was
+    // stale.
+    stop: fn(&self, id: String, revision: String, current_revision: String, tier: CanvasDebugTier) -> String CanvasDebugError! {
+        session: self.sessions.get(id) ?? return Err(canvas_debug_error("session", "debug session is no longer live; nothing to stop"))
+        if revision != current_revision && session.revision != revision {
+            return Err(canvas_debug_error("conflict", "debug stop request is stale; the live session was kept"))
+        }
+        on: canvas_debug_tier_name(session)
+        if tier.named && tier.name != on {
+            return Err(canvas_debug_error("conflict", "debug session `{id}` runs on the {on} tier, not {tier.name}; it was kept"))
+        }
+        stale: revision != current_revision || session.revision != revision
+        self.release(id)
+        if stale {
+            return Err(canvas_debug_error("conflict", "debug session is stale for the current source revision"))
+        }
+        Ok(on)
+    }
+
+    // End session `id`, if it is live.
+    release: fn(&self, id: String) {
+        session := self.sessions.remove(id) ?? return
+        canvas_debug_close(session)
+    }
+
+    // End every session: the host has stopped.
+    release_all: fn(&self) {
+        ids := [String]{}
+        loop entry in self.sessions -> ids.push(entry.key)
+        loop id in ids -> self.release(id)
+    }
+}
+
+// No sessions yet, each to be built by `jet`.
+canvas_debug_sessions: fn(jet: String) -> CanvasDebugSessions Never! {
+    CanvasDebugSessions{jet: jet, next_id: 1, sessions: [String:CanvasDebugSession]{}}
+}
+
+canvas_debug_error: fn(kind: String, message: String) -> CanvasDebugError Never! {
+    CanvasDebugError{kind: kind, message: message}
+}
+
+// E2203 (the native debugger could not run) as a debug error, in the
+// registered row's own words.
+canvas_debug_unavailable: fn(error: NativeDebugError) -> CanvasDebugError Never! {
+    canvas_debug_error("diagnostic", diagnostic_render(error.diagnostic(), "", "", false))
+}
+
+// Build `file` with `jet` as `jet debug` does and open it under the native
+// debugger at the start of its `run`: a new session on `tier`, the
+// `serial`th, evaluating with `host`. On `native-recorded` the program
+// replays the recording `tier.target` names, as under `jet debug --replay`.
+// A source that does not build answers the build's own report, a recording
+// that can't be replayed its refusal.
+canvas_debug_open: fn(host: CanvasDebugHost, jet: String, file: String, source_id: String, revision: String, tier: CanvasDebugTier, serial: Int) -> CanvasDebugSession CanvasDebugError! {
+    src: read_source_without_symlinks(file) ?? return Err(canvas_debug_error("io", "couldn't read the debug source: {err.message}"))
+    // The session keeps the directory until it closes (a replay builds and
+    // reruns from it), so it is no TempDir, which would go when this returns.
+    dir: session_files.tmpdir("jet-canvas-debug") ?? return Err(canvas_debug_error("io", "couldn't create the Canvas debug build directory: {err}"))
+    out_dir: session_files.join(dir, "out")
+    host.building(file)
+    built: session_process.cmd(native_debug_build_argv(jet, file, out_dir, DeepChecks{})).stdout(.Capture).stderr(.Capture).run() ?? {
+        canvas_debug_remove(dir)
+        return Err(canvas_debug_error("io", "couldn't run the Canvas debug build: {err}"))
+    }
+    if !built.success {
+        canvas_debug_remove(dir)
+        return Err(canvas_debug_error("diagnostic", "{built.output}{built.errors}"))
+    }
+    image: native_debug_image(file, out_dir)
+    live := NativeSession.start(image, session_files.join(dir, "output.txt")) ?? {
+        canvas_debug_remove(dir)
+        return Err(canvas_debug_unavailable(err))
+    }
+    // A recorded tier reruns the recording with the program arguments it was
+    // made with.
+    recorded := [String]{}
+    if tier.name == CANVAS_DEBUG_RECORDED && host.replay(live, image, tier.target, file, dir, recorded) == .Err(refused) {
+        live.close()
+        canvas_debug_remove(dir)
+        return Err(refused)
+    }
+    host.evaluate(live, file)
+    jet_file: session_files.basename(file)
+    jet_lines: src.split("\n").to_list()
+    opened := NativeDebugStep?{None}
+    if live.open(jet_file, jet_lines, recorded) == {
+        .Ok(step) -> { opened = step }
+        .Err(failure) -> {
+            live.close()
+            canvas_debug_remove(dir)
+            return Err(canvas_debug_unavailable(failure))
+        }
+    }
+    first: opened ?? {
+        live.close()
+        canvas_debug_remove(dir)
+        return Err(canvas_debug_error("diagnostic", "`{jet_file}` has no `run` function to debug"))
+    }
+    trail := [Int]{}
+    if first.stop.frame == .Val(frame) -> trail.push(frame.line)
+    trail_depth: live.jet_depth() ?? -1
+    Ok(
+        CanvasDebugSession{
+            source_id: source_id,
+            revision: revision,
+            created: serial,
+            dir: dir,
+            image: image,
+            jet_file: jet_file,
+            jet_lines: jet_lines,
+            live: live,
+            stop: first.stop,
+            events: [String]{},
+            breakpoints: [Int]{},
+            commands: 0,
+            transcript: first.text,
+            trail: trail,
+            trail_depth: trail_depth,
+        },
+    )
+}
+
+// Open the dump `named` (a `.jetdump` path, taken from the entry's
+// directory when relative) as `jet debug <dump>` does: a new `native-dump`
+// session, the `serial`th, paused where the program stopped, at its
+// innermost Jet frame. The dump must be of the entry `file`, the source the
+// session is bound to.
+canvas_debug_open_dump: fn(file: String, source_id: String, revision: String, named: String, serial: Int) -> CanvasDebugSession CanvasDebugError! {
+    if named.len() > CANVAS_DEBUG_MAX_PATH_BYTES || !named.ends_with(".jetdump") {
+        return Err(canvas_debug_error("bad_request", "Canvas debug `dump` must be a path ending with .jetdump"))
+    }
+    path: session_files.join(session_files.dirname(file), named)
+    opened := native_dump_open(path) ?? return Err(canvas_debug_unavailable(err))
+    live := opened.session.move()
+    program: native_dump_source(path, live.run_source())
+    if (session_files.realpath(program) ?? program) != (session_files.realpath(file) ?? file) {
+        return Err(canvas_debug_error("bad_request", "the dump `{named}` is of `{program}`, not of the entry `{session_files.basename(file)}` this session is bound to"))
+    }
+    src: read_source_without_symlinks(file) ?? return Err(canvas_debug_error("io", "couldn't read the debug source: {err.message}"))
+    jet_file: session_files.basename(file)
+    jet_lines: src.split("\n").to_list()
+    frames: live.backtrace() ?? return Err(canvas_debug_unavailable(err))
+    stop: native_dump_jet_frame(frames, 0) ?? 0
+    _ := live.select_frame(stop) ?? return Err(canvas_debug_unavailable(err))
+    shown: native_dump_frame(live, frames, stop, jet_file, jet_lines) ?? return Err(canvas_debug_unavailable(err))
+    events: native_dump_events(live.image, opened.ring)
+    transcript: "Dump of process {opened.pid}, {events.len()} flight events\n{shown}"
+    Ok(
+        CanvasDebugSession{
+            source_id: source_id,
+            revision: revision,
+            created: serial,
+            dir: "",
+            image: "",
+            jet_file: jet_file,
+            jet_lines: jet_lines,
+            live: live,
+            stop: NativeStop{kind: NativeStopKind.Paused, reason: "dump", code: 0, frame: None},
+            events: events,
+            breakpoints: [Int]{},
+            commands: 0,
+            transcript: transcript,
+        },
+    )
+}
+
+// Run one console command in a paused session, adding its report to the
+// session's transcript, and answer the move it made the program take
+// (NativeDebugStep.moved). A session whose program has ended runs nothing;
+// a dump's reads what it holds, as `jet debug <dump>` does, and never moves.
+canvas_debug_step: fn(session: &CanvasDebugSession, input: String) -> String NativeDebugError! {
+    if session.stop.kind != NativeStopKind.Paused -> return Ok("")
+    if canvas_debug_tier_name(session) == CANVAS_DEBUG_DUMP {
+        text: native_dump_command(session.live, input, session.events, session.jet_file, session.jet_lines) ?? return Err(err)
+        session.transcript = "{session.transcript}{text}"
+        return Ok("")
+    }
+    step: session.live.command(input, session.stop, session.jet_file, session.jet_lines) ?? return Err(err)
+    session.transcript = "{session.transcript}{step.text}"
+    session.stop = step.stop
+    Ok(step.moved)
+}
+
+// Run one of a request's console commands (canvas_debug_step) and follow
+// the run's path: a `step` or `next` that stays in its frame adds the line
+// it reached to the session's trail, any other move starts the trail again
+// at its stop, and a command that runs nothing keeps it.
+canvas_debug_follow: fn(session: &CanvasDebugSession, input: String) NativeDebugError! {
+    left: session.stop.frame
+    moved: canvas_debug_step(session, input) ?? return Err(err)
+    if moved == "" -> return Ok()
+    reached: if session.stop.kind == NativeStopKind.Paused -> session.stop.frame else -> None
+    frame: reached ?? {
+        session.trail = [Int]{}
+        session.trail_depth = -1
+        return Ok()
+    }
+    depth: session.live.jet_depth() ?? return Err(err)
+    last: if session.trail.len() > 0 -> session.trail[session.trail.len() - 1] else -> -1
+    if (moved == "s" || moved == "n") && depth == session.trail_depth && left == .Val(from) && from.file == frame.file && from.line == last {
+        if frame.line != last -> session.trail.push(frame.line)
+        if session.trail.len() > CANVAS_DEBUG_MAX_TRAIL {
+            kept := [Int]{}
+            loop index in 1..<session.trail.len() -> kept.push(session.trail[index])
+            session.trail = kept
+        }
+        return Ok()
+    }
+    session.trail = [Int]{frame.line}
+    session.trail_depth = depth
+    Ok()
+}
+
+// End a session's program, and delete its image (a dump's has none).
+canvas_debug_close: fn(session: &CanvasDebugSession) {
+    session.live.close()
+    if session.dir != "" -> canvas_debug_remove(session.dir)
+}
+
+canvas_debug_remove: fn(dir: String) {
+    if session_files.remove_all(dir) == {
+        .Err(_) -> {}
+        .Ok(_) -> {}
+    }
+}
+
+// Answer one debug request the listener handed the host's request loop,
+// with `host` for a session it opens. A refused request is a 409 carrying
+// its jet.canvas.debug error.
+canvas_debug_answer: fn(debugs: &CanvasDebugSessions, host: CanvasDebugHost, state: Shared<CanvasHostState>, file: String, source_id: String, taken: CanvasHostEdit) {
+    if canvas_debug_payload(debugs, host, state, file, source_id, taken.body) == {
+        .Ok(answer) -> {
+            taken.reply.send(CanvasHostReply{status: 200, body: canvas_machine_output("canvas.debug", true, answer.document)})
+        }
+        .Err(failure) -> {
+            taken.reply.send(CanvasHostReply{status: 409, body: canvas_machine_output("canvas.debug", false, canvas_debug_error_json(failure.kind, failure.message))})
+        }
+    }
+}
+
+// The answer to `body`, a request about the entry `file` (whose source id
+// is `entry_source`), placed on the graph `state` holds, with `host` for a
+// session it opens.
+canvas_debug_payload: fn(debugs: &CanvasDebugSessions, host: CanvasDebugHost, state: Shared<CanvasHostState>, file: String, entry_source: String, body: String) -> CanvasDebugAnswer CanvasDebugError! {
+    parsed: foundation_json_parse(body) ?? return Err(canvas_debug_error("bad_request", "Canvas debug request is not JSON: {err.message}"))
+    request: canvas_debug_request(parsed.move())
+    revision: request.revision ?? return Err(canvas_debug_error("bad_request", "missing `revision`"))
+    if request.schema_version != CANVAS_DEBUG_SCHEMA {
+        return Err(canvas_debug_error("schema", "Canvas debug schema_version must be 1"))
+    }
+    source_id: request.source_id ?? return Err(canvas_debug_error("bad_request", "missing `source_id`"))
+    session_id: request.session_id
+    tier: canvas_debug_tier(request) ?? return Err(err)
+    if source_id != entry_source {
+        if session_id != None {
+            return Err(canvas_debug_error("conflict", "the request names `{source_id}`, not the source `{entry_source}` the debug session is bound to"))
+        }
+        return Err(canvas_debug_error("not_found", "Canvas debug source_id must name the projected entry `{entry_source}`"))
+    }
+    src: read_source_without_symlinks(file) ?? {
+        if session_id == .Val(id) -> debugs.release(id)
+        return Err(canvas_debug_error("io", err.message))
+    }
+    current_revision: source_revision(src)
+    if request.stop {
+        id: session_id ?? return Err(canvas_debug_error("bad_request", "missing `session_id`"))
+        stopped: debugs.stop(id, revision, current_revision, tier) ?? return Err(err)
+        return Ok(CanvasDebugAnswer{document: canvas_debug_stopped(src, id, stopped, source_id), id: "", running: false, image: "", snapshot: None})
+    }
+    if revision != current_revision {
+        if session_id == .Val(id) -> debugs.release(id)
+        return Err(canvas_debug_error("conflict", "source changed since this Canvas debug state was drawn"))
+    }
+    anchors := request.anchors.move()
+    if anchors.len() > CANVAS_DEBUG_MAX_BREAKPOINTS {
+        return Err(canvas_debug_error("limit", "Canvas debug accepts at most 128 breakpoint spans of 256 bytes each"))
+    }
+    candidates := request.breakpoints.move()
+    stale := [String]{}
+    anchors.reverse()
+    loop anchors.len() > 0 {
+        anchor: anchors.pop() ?? break
+        if anchor.len() > CANVAS_DEBUG_MAX_WORD_BYTES {
+            return Err(canvas_debug_error("limit", "Canvas debug accepts at most 128 breakpoint spans of 256 bytes each"))
+        }
+        own: canvas_debug_anchor_current(anchor, current_revision) ?? {
+            stale.push(anchor)
+            next
+        }
+        if canvas_debug_anchor_span(src, own) == {
+            .Val(span) -> { candidates.push(canvas_debug_line_of(src, span.start)) }
+            .None -> stale.push(anchor)
+        }
+    }
+    line_count: canvas_debug_lines(src).len()
+    candidates.sort()
+    breakpoints := [Int]{}
+    loop line in candidates {
+        if line < 1 || line > line_count {
+            stale.push("line:{line}")
+            next
+        }
+        if breakpoints.len() == 0 || breakpoints[breakpoints.len() - 1] != line {
+            breakpoints.push(line)
+        }
+    }
+    // A watch drawn on another revision is stale and isn't watched.
+    watches := [String]{}
+    stale_watches := [String]{}
+    loop watch in request.watches {
+        own: canvas_debug_anchor_current(watch, current_revision) ?? {
+            stale_watches.push(watch)
+            next
+        }
+        watches.push(own)
+    }
+    commands: request.commands.move()
+    canvas_debug_limits(commands, breakpoints, request.watches) ?? return Err(err)
+    ran: debugs.run(host, file, source_id, revision, session_id, tier, commands, breakpoints) ?? return Err(err)
+    after: read_source_without_symlinks(file) ?? {
+        debugs.release(ran.id)
+        return Err(canvas_debug_error("io", "couldn't read the debug source again: {err.message}"))
+    }
+    if after != src {
+        debugs.release(ran.id)
+        return Err(canvas_debug_error("conflict", "source changed while this Canvas debug command was running; the source was kept"))
+    }
+    id: ran.id
+    running: ran.running
+    image: ran.image
+    snapshot: ran.snapshot
+    Ok(CanvasDebugAnswer{document: canvas_debug_document(state, src, source_id, ran, breakpoints, stale, watches, stale_watches), id: id, running: running, image: image, snapshot: snapshot})
+}
+
+// The name of the tier `session` runs on, as requests and answers spell
+// it: a dump's session has no scratch directory, and a replay's program
+// runs in its recording's environment.
+canvas_debug_tier_name: fn(session: CanvasDebugSession) -> String Never! {
+    if {
+        session.dir == "" -> CANVAS_DEBUG_DUMP
+        session.live.replaying() -> CANVAS_DEBUG_RECORDED
+        else -> CANVAS_DEBUG_TIER
+    }
+}
+
+// The tier a request asks for, or its refusal. A new session runs on
+// `native` unless it names a `recording` to replay (`native-recorded`) or a
+// `dump` to read (`native-dump`); a named tier must agree with them. A
+// request that continues a session names neither, and its session checks
+// the tier it names.
+canvas_debug_tier: fn(request: CanvasDebugRequest) -> CanvasDebugTier CanvasDebugError! {
+    if request.recording != None && request.dump != None {
+        return Err(canvas_debug_error("bad_request", "a Canvas debug request opens a `recording` or a `dump`, not both"))
+    }
+    implied := CANVAS_DEBUG_TIER
+    if request.recording != None -> implied = CANVAS_DEBUG_RECORDED
+    if request.dump != None -> implied = CANVAS_DEBUG_DUMP
+    if implied != CANVAS_DEBUG_TIER && request.session_id != None {
+        return Err(canvas_debug_error("bad_request", "`recording` and `dump` open a new Canvas debug session; a request naming `session_id` continues its own"))
+    }
+    target: request.recording ?? request.dump ?? ""
+    name: request.tier ?? return Ok(CanvasDebugTier{name: implied, named: false, target: target})
+    if name != CANVAS_DEBUG_TIER && name != CANVAS_DEBUG_RECORDED && name != CANVAS_DEBUG_DUMP {
+        return Err(canvas_debug_error("bad_request", "Canvas debug tier must be native, native-recorded or native-dump"))
+    }
+    if request.session_id == None && name != implied {
+        refused := "the native Canvas debug tier runs the entry; `recording` and `dump` open the native-recorded and native-dump tiers"
+        if name == CANVAS_DEBUG_RECORDED {
+            refused = "the native-recorded Canvas debug tier replays a recording; name it in `recording`"
+        }
+        if name == CANVAS_DEBUG_DUMP {
+            refused = "the native-dump Canvas debug tier reads a dump; name it in `dump`"
+        }
+        return Err(canvas_debug_error("bad_request", refused))
+    }
+    Ok(CanvasDebugTier{name: name, named: true, target: target})
+}
+
+// The request's commands, breakpoints and watches within their bounds, and
+// each command in the source-level debugger's vocabulary.
+canvas_debug_limits: fn(commands: [String], breakpoints: [Int], watches: [String]) CanvasDebugError! {
+    if commands.len() > CANVAS_DEBUG_MAX_COMMANDS || breakpoints.len() > CANVAS_DEBUG_MAX_BREAKPOINTS || watches.len() > CANVAS_DEBUG_MAX_WATCHES {
+        return Err(canvas_debug_error("limit", "Canvas debug accepts at most 64 commands, 128 breakpoints, and 32 watches per session"))
+    }
+    loop command in commands {
+        if command.len() > CANVAS_DEBUG_MAX_WORD_BYTES {
+            return Err(canvas_debug_error("limit", "Canvas debug command and watch names are limited to 256 bytes"))
+        }
+        if !canvas_debug_known(command) {
+            return Err(canvas_debug_error("unsupported", "Canvas debug command `{command}` is not one of step, next, continue, finish, reverse-step, reverse-next, reverse-finish, reverse-continue, why, locals, print, backtrace, frame, tasks, task or events"))
+        }
+    }
+    loop watch in watches {
+        if watch.len() > CANVAS_DEBUG_MAX_WORD_BYTES {
+            return Err(canvas_debug_error("limit", "Canvas debug command and watch names are limited to 256 bytes"))
+        }
+        if canvas_debug_word_count(watch) != 1 {
+            return Err(canvas_debug_error("unsupported", "Canvas debug watches must be one source-level name"))
+        }
+    }
+    Ok()
+}
+
+// The members of a debug request this tier reads; a member of the wrong
+// type reads as absent.
+CanvasDebugRequest: struct {
+    schema_version: Int,
+    revision: String?,
+    source_id: String?,
+    tier: String?,
+    session_id: String?,
+    recording: String?,
+    dump: String?,
+    stop: Bool,
+    commands: [String],
+    breakpoints: [Int],
+    anchors: [String],
+    watches: [String],
+}
+
+// The request `value` is, taken out of it; anything but an object reads as
+// one with no members.
+canvas_debug_request: fn(value: &&Dyn) -> CanvasDebugRequest Never! {
+    request := CanvasDebugRequest{schema_version: -1, revision: None, source_id: None, tier: None, session_id: None, recording: None, dump: None, stop: false, commands: [String]{}, breakpoints: [Int]{}, anchors: [String]{}, watches: [String]{}}
+    if value.move() == .Object(members) {
+        fields := members
+        fields.reverse()
+        loop fields.len() > 0 {
+            field: fields.pop() ?? break
+            if field.key == {
+                "schema_version" -> {
+                    request.schema_version = foundation_json_integer(field.value) ?? -1
+                }
+                "stop" -> request.stop = field.value == .Bool(true)
+                "revision" -> request.revision = canvas_debug_text(field.value.move())
+                "source_id" -> request.source_id = canvas_debug_text(field.value.move())
+                "tier" -> request.tier = canvas_debug_text(field.value.move())
+                "session_id" -> request.session_id = canvas_debug_text(field.value.move())
+                "recording" -> request.recording = canvas_debug_text(field.value.move())
+                "dump" -> request.dump = canvas_debug_text(field.value.move())
+                "commands" -> request.commands = canvas_debug_texts(field.value.move())
+                "breakpoint_spans" -> request.anchors = canvas_debug_texts(field.value.move())
+                "watches" -> request.watches = canvas_debug_texts(field.value.move())
+                "breakpoints" -> request.breakpoints = canvas_debug_ints(field.value)
+                else -> {}
+            }
+        }
+    }
+    request
+}
+
+canvas_debug_text: fn(value: &&Dyn) -> String? Never! {
+    if value.move() == .Text(text) -> return Val(text)
+    None
+}
+
+// The strings of an array, in order, taken out of it.
+canvas_debug_texts: fn(value: &&Dyn) -> [String] Never! {
+    items := if value.move() == {
+        .Array(list) -> list
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> [Dyn]{}
+    }
+    items.reverse()
+    texts := [String]{}
+    loop items.len() > 0 {
+        item: items.pop() ?? break
+        if item.move() == .Text(text) -> texts.push(text)
+    }
+    texts
+}
+
+// The integers of an array, in order.
+canvas_debug_ints: fn(value: Dyn) -> [Int] Never! {
+    numbers := [Int]{}
+    if value == .Array(items) {
+        loop item in items {
+            if foundation_json_integer(item) == .Val(number) -> numbers.push(number)
+        }
+    }
+    numbers
+}
+
+// Whether `command` is one of the source-level debugger's commands with the
+// operands it takes: the live, replay and dump consoles' vocabulary.
+canvas_debug_known: fn(command: String) -> Bool Never! {
+    count := 0
+    wanted := 0
+    loop word in command.replace("\t", " ").split(" ") {
+        if word == "" -> next
+        if count == 0 {
+            wanted = if word == {
+                "step" | "s" | "next" | "n" | "continue" | "c" | "finish" | "f" | "locals" | "backtrace" | "bt" | "tasks" | "events" -> 1
+                "reverse-step" | "rs" | "reverse-next" | "rn" | "reverse-finish" | "rf" | "reverse-continue" | "rc" -> 1
+                "print" | "p" | "why" | "frame" | "task" -> 2
+                else -> 0
+            }
+        }
+        count += 1
+    }
+    wanted > 0 && count == wanted
+}
+
+// How many space-separated words `text` has.
+canvas_debug_word_count: fn(text: String) -> Int Never! {
+    count := 0
+    loop word in text.replace("\t", " ").split(" ") {
+        if word != "" -> count += 1
+    }
+    count
+}
+
+// The lines of `text`, split on `\n` with a trailing `\r` removed.
+canvas_debug_lines: fn(text: String) -> [String] Never! {
+    lines := [String]{}
+    loop line in text.split("\n") -> lines.push(line.removesuffix("\r"))
+    if lines.len() > 0 && lines[lines.len() - 1] == "" {
+        lines.pop().drop("the text ends with a line break")
+    }
+    lines
+}
+
+// The byte span of line `line` (from 1) of `src`, its line break left out.
+canvas_debug_line_span: fn(src: String, line: Int) -> Span Never! {
+    bytes: src.bytes()
+    current := 1
+    start := if line <= 1 -> 0 else -> bytes.len()
+    loop i in 0..<bytes.len() {
+        if current == line {
+            start = i
+            break
+        }
+        if (Int{bytes[i]}) == 10 {
+            current += 1
+            if current == line && i + 1 == bytes.len() -> start = bytes.len()
+        }
+    }
+    end := start
+    loop end < bytes.len() && (Int{bytes[end]}) != 10 -> end += 1
+    Span{start: start, end: end}
+}
+
+// The line (from 1) of `src` the byte `offset` is on.
+canvas_debug_line_of: fn(src: String, offset: Int) -> Int Never! {
+    bytes: src.bytes()
+    limit: if offset < bytes.len() -> offset else -> bytes.len()
+    line := 1
+    loop i in 0..<limit {
+        if (Int{bytes[i]}) == 10 -> line += 1
+    }
+    line
+}
+
+// The `start:end` byte anchor as a span of `src`, when it names one on
+// character boundaries.
+canvas_debug_anchor_span: fn(src: String, anchor: String) -> Span? Never! {
+    parts: anchor.split_once(":") ?? return None
+    start: Int.parse(parts.before) ?? return None
+    end: Int.parse(parts.after) ?? return None
+    bytes: src.bytes()
+    if start < 0 || start >= bytes.len() || start > end || end > bytes.len() -> return None
+    if !canvas_debug_boundary(bytes, start) || !canvas_debug_boundary(bytes, end) -> return None
+    Val(Span{start: start, end: end})
+}
+
+canvas_debug_boundary: fn(bytes: [U8], offset: Int) -> Bool Never! {
+    if offset == 0 || offset >= bytes.len() -> return offset <= bytes.len()
+    code: Int{bytes[offset]}
+    code < 128 || code >= 192
+}
+
+// `text` within `max_bytes`, cut at a UTF-8 boundary and marked when cut.
+canvas_debug_bounded: fn(text: String, max_bytes: Int) -> CanvasDebugList Never! {
+    if text.len() <= max_bytes -> return CanvasDebugList{json: text, truncated: false}
+    marker: " [truncated]"
+    bytes: text.bytes()
+    end := if max_bytes > marker.len() -> max_bytes - marker.len() else -> 0
+    loop end > 0 && (Int{bytes[end]}) >= 128 && (Int{bytes[end]}) < 192 -> end -= 1
+    prefix: String.from_bytes(bytes[0..<end]) ?? ""
+    CanvasDebugList{json: "{prefix}{marker}", truncated: true}
+}
+
+canvas_debug_error_json: fn(kind: String, message: String) -> String Never! {
+    bounded: canvas_debug_bounded(message, CANVAS_DEBUG_MAX_MESSAGE_BYTES)
+    "{{\"protocol\":\"jet.canvas.debug\",\"schema_version\":{CANVAS_DEBUG_SCHEMA},\"ok\":false,\"kind\":{foundation_json_quote(kind)},\"message\":{foundation_json_quote(bounded.json)}}}"
+}
+
+// The session document of a session in `state` ("running", "finished" or
+// "stopped").
+canvas_debug_session_json: fn(id: String, state: String, tier: String, source_id: String, revision: String) -> String Never! {
+    "{{\"id\":{foundation_json_quote(id)},\"state\":{foundation_json_quote(state)},\"tier\":{foundation_json_quote(tier)},\"persistence\":\"local-source-span\",\"source_id\":{foundation_json_quote(source_id)},\"revision\":{foundation_json_quote(revision)}}}"
+}
+
+// The answer to a stop: the session, on its tier, stopped, and no overlay.
+canvas_debug_stopped: fn(src: String, id: String, tier: String, source_id: String) -> String Never! {
+    revision: source_revision(src)
+    "{{\"protocol\":\"jet.canvas.debug\",\"schema_version\":{CANVAS_DEBUG_SCHEMA},\"ok\":true,\"source_id\":{foundation_json_quote(source_id)},\"revision\":{foundation_json_quote(revision)},\"session\":{canvas_debug_session_json(id, "stopped", tier, source_id, revision)},\"overlay\":null}}"
+}
+
+// The answer to a run: the session and the overlay of where it stopped, on
+// the graph of the source it ran. `stale` are the breakpoint anchors and
+// `stale_watches` the watches the source no longer places.
+canvas_debug_document: fn(state: Shared<CanvasHostState>, src: String, source_id: String, ran: CanvasDebugRun, breakpoints: [Int], stale: [String], watches: [String], stale_watches: [String]) -> String {
+    revision: source_revision(src)
+    empty: CanvasDebugList{json: "", truncated: false}
+    active_span := Span{start: 0, end: 0}
+    line_json := "null"
+    place := CanvasDebugPlace{graph_id: "", node_id: "", wire_ids: [String]{}, wires_truncated: false}
+    locals := empty
+    watch_values := empty
+    call_stack := empty
+    source := empty
+    first_line := 0
+    if ran.snapshot == .Val(snapshot) {
+        active_span = canvas_debug_line_span(src, snapshot.line)
+        line_json = "{snapshot.line}"
+        // The run's stepped stops end at this one; a stop it didn't step
+        // to is all of its path.
+        stops := [Span]{}
+        loop line in ran.trail -> stops.push(canvas_debug_line_span(src, line))
+        if stops.len() == 0 -> stops.push(canvas_debug_line_span(src, snapshot.line))
+        place = canvas_host_debug_place(state, revision, stops)
+        locals = canvas_debug_locals(snapshot, None)
+        watch_values = canvas_debug_locals(snapshot, Val(watches))
+        call_stack = canvas_debug_call_stack(snapshot, source_id)
+        lines: canvas_debug_lines(src)
+        first_line = if snapshot.line > CANVAS_DEBUG_SOURCE_CONTEXT -> snapshot.line - CANVAS_DEBUG_SOURCE_CONTEXT else -> 1
+        shown := [String]{}
+        clipped := false
+        loop number in first_line..<(snapshot.line + CANVAS_DEBUG_SOURCE_CONTEXT + 1) {
+            if number > lines.len() -> break
+            text: canvas_debug_bounded(lines[number - 1], CANVAS_DEBUG_MAX_VALUE_BYTES)
+            clipped = clipped || text.truncated
+            shown.push(foundation_json_quote(text.json))
+        }
+        source = CanvasDebugList{json: shown.join(","), truncated: clipped}
+    }
+    // A watch drawn on another revision shows no value: it is stale.
+    if stale_watches.len() > 0 {
+        shown := [String]{}
+        if watch_values.json != "" -> shown.push("{watch_values.json}")
+        loop watch in stale_watches {
+            shown.push("{{\"name\":{foundation_json_quote(canvas_debug_anchor_text(watch))},\"anchor\":{foundation_json_quote(watch)},\"state\":\"stale\"}}")
+        }
+        watch_values = CanvasDebugList{json: shown.join(","), truncated: watch_values.truncated}
+    }
+    trace: canvas_debug_newest(canvas_debug_lines(ran.transcript))
+    tasks: canvas_debug_newest(ran.tasks)
+    phase: if ran.running -> "running" else -> "finished"
+    runtime_state: if {
+        !ran.running -> "finished"
+        ran.snapshot != None -> "live"
+        else -> "unavailable"
+    }
+    wires := [String]{}
+    loop wire in place.wire_ids -> wires.push(foundation_json_quote(wire))
+    active_wire: if place.wire_ids.len() > 0 -> place.wire_ids[place.wire_ids.len() - 1] else -> ""
+    marks := [String]{}
+    loop line in breakpoints {
+        marks.push("{{\"line\":{line},\"source_span\":{canvas_debug_span_json(canvas_debug_line_span(src, line))},\"state\":\"valid\"}}")
+    }
+    // A stale anchor shows the span it names in this source, if any; one
+    // drawn on another revision (`start:end@REVISION`) reads as no span.
+    loop anchor in stale {
+        span_json: if canvas_debug_anchor_span(src, anchor) == {
+            .Val(span) -> canvas_debug_span_json(span)
+            .None -> "null"
+        }
+        marks.push("{{\"line\":null,\"source_span\":{span_json},\"anchor\":{foundation_json_quote(anchor)},\"state\":\"stale\"}}")
+    }
+    source_json: foundation_json_quote(source_id)
+    revision_json: foundation_json_quote(revision)
+    limits: "{{\"locals_truncated\":{locals.truncated},\"watches_truncated\":{watch_values.truncated},\"call_stack_truncated\":{call_stack.truncated},\"trace_truncated\":{trace.truncated},\"tasks_truncated\":{tasks.truncated},\"source_truncated\":{source.truncated},\"wire_path_truncated\":{place.wires_truncated}}}"
+    overlay: "{{\"debug_overlay\":{foundation_json_quote(phase)},\"runtime_state\":{foundation_json_quote(runtime_state)},\"source_id\":{source_json},\"revision\":{revision_json},\"active_line\":{line_json},\"active_span\":{canvas_debug_span_json(active_span)},\"active_graph_id\":{foundation_json_quote(place.graph_id)},\"active_node_id\":{foundation_json_quote(place.node_id)},\"active_wire_id\":{foundation_json_quote(active_wire)},\"wire_path\":[{wires.join(",")}],\"breakpoints\":[{marks.join(",")}],\"locals\":[{locals.json}],\"watches\":[{watch_values.json}],\"call_stack\":[{call_stack.json}],\"source\":{{\"first_line\":{first_line},\"lines\":[{source.json}]}},\"trace\":[{trace.json}],\"tasks\":[{tasks.json}],\"limits\":{limits}}}"
+    "{{\"protocol\":\"jet.canvas.debug\",\"schema_version\":{CANVAS_DEBUG_SCHEMA},\"ok\":true,\"source_id\":{source_json},\"revision\":{revision_json},\"session\":{canvas_debug_session_json(ran.id, phase, ran.tier, source_id, revision)},\"overlay\":{overlay}}}"
+}
+
+canvas_debug_span_json: fn(span: Span) -> String Never! {
+    "{{\"start\":{span.start},\"end\":{span.end}}}"
+}
+
+// The stop's locals (at most CANVAS_DEBUG_MAX_LOCALS), or with `watches`
+// the watched ones, each with its Jet type and value.
+canvas_debug_locals: fn(snapshot: DebugSnapshot, watches: [String]?) -> CanvasDebugList Never! {
+    truncated := false
+    values := [String]{}
+    loop local in snapshot.locals {
+        state := ""
+        if watches == .Val(names) {
+            if !names.contains(local.name) -> next
+            state = ",\"state\":\"ok\""
+        }
+        if values.len() >= CANVAS_DEBUG_MAX_LOCALS {
+            truncated = true
+            break
+        }
+        type_name: canvas_debug_bounded(local.type_name, CANVAS_DEBUG_MAX_VALUE_BYTES)
+        shown: canvas_debug_bounded(local.value, CANVAS_DEBUG_MAX_VALUE_BYTES)
+        truncated = truncated || type_name.truncated || shown.truncated
+        values.push("{{\"name\":{foundation_json_quote(local.name)},\"type\":{foundation_json_quote(type_name.json)},\"value\":{foundation_json_quote(shown.json)}{state}}}")
+    }
+    CanvasDebugList{json: values.join(","), truncated: truncated}
+}
+
+// The Jet call stack, innermost first: `#0  run()  at main.jet:3`.
+canvas_debug_call_stack: fn(snapshot: DebugSnapshot, source_id: String) -> CanvasDebugList Never! {
+    entries := [String]{}
+    bytes := 0
+    truncated := false
+    count: snapshot.call_stack.len()
+    loop index in 0..<count {
+        if index >= CANVAS_DEBUG_MAX_CALL_STACK {
+            truncated = true
+            break
+        }
+        frame: snapshot.call_stack[count - 1 - index]
+        entry: foundation_json_quote("#{index} {frame.function}() at {source_id}:{frame.line}")
+        if bytes + entry.len() > CANVAS_DEBUG_MAX_CALL_STACK_BYTES {
+            truncated = true
+            break
+        }
+        bytes += entry.len()
+        entries.push(entry)
+    }
+    CanvasDebugList{json: entries.join(","), truncated: truncated}
+}
+
+// The newest transcript lines that fit the trace's bounds, in order.
+canvas_debug_newest: fn(lines: [String]) -> CanvasDebugList Never! {
+    truncated := false
+    bytes := 0
+    kept := [String]{}
+    index := lines.len()
+    loop index > 0 {
+        index -= 1
+        entry: foundation_json_quote(lines[index])
+        if kept.len() >= CANVAS_DEBUG_MAX_TRACE_LINES || bytes + entry.len() > CANVAS_DEBUG_MAX_TRACE_BYTES {
+            truncated = true
+            break
+        }
+        bytes += entry.len()
+        kept.push(entry)
+    }
+    kept.reverse()
+    CanvasDebugList{json: kept.join(","), truncated: truncated}
+}

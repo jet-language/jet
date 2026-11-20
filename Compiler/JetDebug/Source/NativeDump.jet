@@ -79,6 +79,9 @@ NATIVE_DUMP_SPAWN: 15
 // What a #Secret value shows as.
 NATIVE_DUMP_REDACTED: "<redacted>"
 
+// The ring records `events` lists without `--last`.
+NATIVE_DUMP_EVENTS: 20
+
 NATIVE_DUMP_HELP: "Commands: backtrace (bt), frame N, locals, print NAME (p NAME), tasks, task N, events [--last N], help (h), quit (q)"
 
 // A dump's tasks, the stopped one first, its memory, with the image's, and
@@ -406,4 +409,153 @@ native_dump_where: fn(image: NativeImage, ring: [U8], at: Int, pc: Int, first: I
         if native_debug_jet_frame(frame) -> return "  at {frame.function} {frame.file}:{frame.line}"
     }
     ""
+}
+
+// The source file of the run the dump at `path` caught, `source` as its
+// image's line table names it (NativeSession.run_source). A relative one is
+// relative to the directory the run ran in (JetCLI Host.jet
+// jet_cli_debug_directory), which holds the `.jet/dumps` the dump is in
+// (JetRuntime PerfSamples.jet perf_flight_dump_open). A dump kept elsewhere
+// leaves it relative to the working directory.
+native_dump_source: fn(path: String, source: &&String) -> String Never! {
+    if source == "" || native_dump_files.is_absolute(source) -> return source
+    dumps: native_dump_files.dirname(path)
+    kept: native_dump_files.dirname(dumps)
+    if native_dump_files.basename(dumps) != "dumps" || native_dump_files.basename(kept) != ".jet" {
+        return source
+    }
+    ran: native_dump_files.dirname(kept)
+    if ran == "" -> return source
+    native_dump_files.join(ran, source)
+}
+
+// One console command's readout of the dump: `line`, as read. `events` are
+// the flight ring's records (native_dump_events), and `file` (with the text
+// `lines`) the program's source.
+native_dump_command: fn(session: &NativeSession, line: String, events: [String], file: String, lines: [String]) -> String NativeDebugError! {
+    command: line.trim()
+    word: command.before(" ")
+    operand: if command.contains(" ") -> command.after(" ").trim() else -> ""
+    if word == {
+        "bt" | "backtrace" -> {
+            frames: session.backtrace() ?? return Err(err)
+            Ok(native_debug_backtrace(frames))
+        }
+        "locals" -> {
+            locals := native_dump_locals(session) ?? return Err(err)
+            locals.sort_by(fn(left: NativeLocal, right: NativeLocal) { left.name <=> right.name })
+            Ok(native_debug_locals_typed(locals))
+        }
+        // A dump runs no code, so nothing is evaluated: `print` shows a
+        // local of the selected frame by its name, as `locals` reads it.
+        "p" | "print" -> {
+            if operand == "" -> return Ok("Print needs a local's name, as `print total`\n")
+            locals: native_dump_locals(session) ?? return Err(err)
+            loop local in locals {
+                if local.name == operand -> return Ok("{local.name} = {local.value}\n")
+            }
+            Ok("Can't evaluate `{operand}`: a dump runs no code, so `print` shows a local by its name; `locals` lists them\n")
+        }
+        "frame" -> {
+            frames: session.backtrace() ?? return Err(err)
+            wanted: Int.parse(operand) ?? -1
+            index: native_dump_jet_frame(frames, wanted) ?? return Ok("No frame {operand}; `bt` lists them\n")
+            selected: session.select_frame(index) ?? return Err(err)
+            if !selected -> return Ok("No frame {operand}; `bt` lists them\n")
+            native_dump_frame(session, frames, index, file, lines)
+        }
+        "tasks" -> Ok(native_dump_task_list(session, file))
+        "task" -> {
+            wanted: Int.parse(operand) ?? -1
+            index: native_dump_task_index(session, wanted) ?? return Ok("No task {operand}; `tasks` lists them\n")
+            session.task = index
+            frames: session.backtrace() ?? return Err(err)
+            stop: native_dump_jet_frame(frames, 0) ?? 0
+            _ := session.select_frame(stop) ?? return Err(err)
+            native_dump_frame(session, frames, stop, file, lines)
+        }
+        "events" -> {
+            last: if operand.starts_with("--last") -> Int.parse(operand.after("--last").trim()) ?? NATIVE_DUMP_EVENTS else -> NATIVE_DUMP_EVENTS
+            from: if last >= 0 && events.len() > last -> events.len() - last else -> 0
+            text := if events.len() == 0 -> "No events in the flight ring\n" else -> ""
+            loop index in from..<events.len() -> text = "{text}{events[index]}\n"
+            Ok(text)
+        }
+        "s" | "step" | "n" | "next" | "c" | "continue" | "f" | "finish" | "b" | "break" -> Ok("A dump doesn't run: it is the program as it stopped. {NATIVE_DUMP_HELP}\n")
+        "h" | "help" -> Ok("{NATIVE_DUMP_HELP}\n")
+        "" -> Ok("")
+        else -> Ok("Unknown command `{word}`. {NATIVE_DUMP_HELP}\n")
+    }
+}
+
+// The selected frame's locals, each #Secret one redacted.
+native_dump_locals: fn(session: &NativeSession) -> [NativeLocal] NativeDebugError! {
+    locals := session.locals() ?? return Err(err)
+    native_dump_redact(locals)
+    Ok(locals)
+}
+
+// Each task of the dump, one line each, the selected one marked `*`: its
+// id (a thread outside every task by its tid), whether it was stopped,
+// running or parked, or the wait a deadlock held it in, its innermost Jet
+// frame, and, when that is not in the program's `file`, the innermost frame
+// that is.
+native_dump_task_list: fn(session: &NativeSession, file: String) -> String Never! {
+    tasks: if session.dump == .Val(dumped) -> dumped.tasks else -> [NativeDumpTask]{}
+    waits: if session.dump == .Val(dumped) -> native_dump_waits(dumped.memory, dumped.registry) else -> [Int:String]{}
+    chosen: session.task
+    text := ""
+    loop (index, task) in tasks {
+        session.task = index
+        frames: session.backtrace() ?? [NativeFrame]{}
+        mark: if index == chosen -> "*" else -> " "
+        name: if task.id == 0 -> "thread {task.tid}" else -> "task {task.id}"
+        text = "{text}{mark} {name}  {native_dump_task_state(task, waits)}{native_dump_located(frames, file)}\n"
+    }
+    session.task = chosen
+    text
+}
+
+// The index among the dump's tasks of task `id`.
+native_dump_task_index: fn(session: NativeSession, id: Int) -> Int? Never! {
+    if session.dump == .Val(dumped) {
+        loop (index, task) in dumped.tasks {
+            if task.id == id -> return Val(index)
+        }
+    }
+    None
+}
+
+// `  in <function>() at <file>:<line>` for the innermost Jet frame of
+// `frames`, then `, from …` the innermost in the program's `file` when that
+// is another; "" when none is Jet code.
+native_dump_located: fn(frames: [NativeFrame], file: String) -> String Never! {
+    innermost: native_dump_jet_frame(frames, 0) ?? return ""
+    frame: frames[innermost]
+    shown: "  in {frame.function}() at {frame.file}:{frame.line}"
+    if frame.file == file -> return shown
+    loop index in innermost..<frames.len() {
+        caller: frames[index]
+        if native_debug_jet_frame(caller) && caller.file == file {
+            return "{shown}, from {caller.function}() at {caller.file}:{caller.line}"
+        }
+    }
+    shown
+}
+
+// Frame `index` of `frames`: where it is, its Jet source line when `file`
+// (with the text `lines`) holds it, and its locals.
+native_dump_frame: fn(session: &NativeSession, frames: [NativeFrame], index: Int, file: String, lines: [String]) -> String NativeDebugError! {
+    if index >= frames.len() -> return Ok("No Jet frame in the dump\n")
+    frame: frames[index]
+    source: if frame.file == file && frame.line >= 1 && frame.line <= lines.len() -> lines[frame.line - 1] else -> ""
+    locals: native_dump_locals(session) ?? return Err(err)
+    Ok("Stopped  {frame.file}:{frame.line}  in {frame.function}()\n{frame.line} | {source}        <- here\n{native_debug_locals_line(locals)}\n")
+}
+
+#Test("a dump's relative source is in the directory whose .jet/dumps holds the dump") {
+    assert_eq(native_dump_source("/w/run/.jet/dumps/crash-1.jetdump", "crash.jet"), "/w/run/crash.jet")
+    assert_eq(native_dump_source("/w/run/.jet/dumps/crash-1.jetdump", "/src/crash.jet"), "/src/crash.jet")
+    assert_eq(native_dump_source("/w/kept/crash-1.jetdump", "crash.jet"), "crash.jet")
+    assert_eq(native_dump_source("/w/run/.jet/dumps/crash-1.jetdump", ""), "")
 }
