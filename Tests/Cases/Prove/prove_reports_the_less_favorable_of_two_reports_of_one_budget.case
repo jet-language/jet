@@ -4,6 +4,9 @@
 # both ids recomputed). The failing report's id sorts first, so a "last file
 # wins" rule would pick the pass; a failure must never hide behind it.
 fixture: ProveReportsTheLessFavorableOfTwoReportsOfOneBudget.fixture
+# The reports hash the bytes of src/run.jet, so the source is kept as `.txt`,
+# out of the formatted corpus: formatting it would orphan both reports.
+copy: src/run.txt src/run.jet
 step: jet prove src/run.jet --json
 limit: time=120
 exit: 1

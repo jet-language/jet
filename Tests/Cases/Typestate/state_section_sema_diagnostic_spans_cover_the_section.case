@@ -1,9 +1,10 @@
 # Port of tests/typestate.rs::state_section_sema_diagnostic_spans_cover_the_section; the guest source is now `Name: struct { … }`, one byte longer before the section than `struct Name { … }`.
+# empty.jet is in `jet fmt` form, its section on its own line: `state {}` is bytes 20..28.
 fixture: Fixtures/StateSectionSemaDiagnosticSpansCoverTheSection
 step: jet check empty.jet --json
 exit: nonzero
 json: stdout doc $.reports[?code="E0169"] #>= 1 # original predicate: diagnostic exists
-json: stdout doc $.reports[?code="E0169"][0].span = {"start":16,"end":24}
+json: stdout doc $.reports[?code="E0169"][0].span = {"start":20,"end":28}
 step: jet check repeated.jet --json
 exit: nonzero
 json: stdout doc $.reports[?code="E0168"] #>= 1 # original predicate: diagnostic exists

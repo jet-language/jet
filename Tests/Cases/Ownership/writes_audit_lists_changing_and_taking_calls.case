@@ -4,10 +4,10 @@ fixture: WritesAuditListsChangingAndTakingCalls.fixture
 step: jet audit writes main.jet
 exit: 0
 stdout: ~ "Calls that change or take a named value: 4\n" # the receiver push in grow, grow(xs), xs.push(5), archive(title)
-stdout: ~ "main.jet:1:27  span=30..35  mark=&  access=write\n" # `items.push(4)` changes the parameter
-stdout: ~ "main.jet:9:10  span=202..204  mark=&  access=write\n" # `grow(xs)`
-stdout: ~ "main.jet:10:5  span=210..212  mark=&  access=write\n" # `xs.push(5)`
-stdout: ~ "main.jet:12:16  span=255..260  mark=&&  access=take\n" # `archive(title)`
+stdout: ~ "main.jet:1:27  span=26..31  mark=&  access=write\n" # `items.push(4)` changes the parameter
+stdout: ~ "main.jet:9:10  span=190..192  mark=&  access=write\n" # `grow(xs)`
+stdout: ~ "main.jet:10:5  span=198..200  mark=&  access=write\n" # `xs.push(5)`
+stdout: ~ "main.jet:12:16  span=243..248  mark=&&  access=take\n" # `archive(title)`
 stdout: !~ "count" # a read call is not a site
 file: main.jet = WritesAuditListsChangingAndTakingCalls.fixture/main.jet
 step: jet audit writes --json main.jet

@@ -1,8 +1,10 @@
 # Port of tests/try.rs::keep_lands_the_same_bytes_as_the_staged_edit, helper25-45. Sources verbatim; plan is exact original format! expansion.
 # Runtime PENDING-SAME-HEAD.
 fixture: KeepLandsTheSameBytesAsTheStagedEdit.fixture
+# try.json edits bytes 26..29 of the source, so it is kept as `.txt`, out of the formatted corpus.
+copy: examples/main.txt examples/main.jet
 step: jet try {work}/try.json --keep
 exit: 0
-stdout: ~ "kept" # original predicate
+stdout: ~ "Kept:" # original predicate; readout labels start with a capital
 file: examples/main.jet = keep_lands_the_same_bytes_as_the_staged_edit.after.bytes
 file: .jet/codemods is-dir
