@@ -8,14 +8,16 @@
 // zones as timeline lanes over one window, reduced on the server to at most
 // `width` marks a lane, so a large trace never ships whole to the page, and
 // the hot lines of its CPU samples. Zooming asks again with a narrower
-// window of the same trace.
+// window of the same trace. A request naming `instructions` (a function,
+// FILE:LINE, or "" for the hottest function) gets the rows `jet perf view
+// --instructions --json` answers (Perf/Instructions.jet).
 use {
     cli_files: core.files
     cli_process: core.process
     cli_sys: core.sys
     core.encoding.[Dyn]
     jet_canvas.[CanvasHostEdit, CanvasHostReply, canvas_debug_bounded, canvas_debug_remove, canvas_debug_text, canvas_machine_output, read_source_without_symlinks, source_revision]
-    jet_foundation.[CanonicalJSON, artifact_extension, foundation_json_parse, foundation_json_quote, trace_id]
+    jet_foundation.[CanonicalJSON, artifact_extension, canonical_json_bytes, foundation_json_parse, foundation_json_quote, trace_id]
 }
 
 JET_CLI_CANVAS_PROFILE_SCHEMA: 1
@@ -54,6 +56,7 @@ JetCLICanvasProfileRequest: struct {
     from_ns: Int?,
     to_ns: Int?,
     width: Int?,
+    instructions: String?,
 }
 
 // One interval of the trace on its one clock, and the lane it is drawn in.
@@ -136,12 +139,30 @@ jet_cli_canvas_profile_payload: fn(profiles: &JetCLICanvasProfiles, file: String
         .None -> jet_cli_canvas_profile_run(profiles, file) ?? return Err(err)
     }
     trace: jet_cli_perf_read(path) ?? return Err(jet_cli_canvas_profile_error("trace", err.message))
-    Ok(jet_cli_canvas_profile_document(trace, path, source_id, revision, request.from_ns, request.to_ns, width))
+    instructions: if request.instructions == .Val(wanted) -> jet_cli_canvas_profile_instructions(trace, path, wanted) ?? return Err(err) else -> "null"
+    Ok(jet_cli_canvas_profile_document(trace, path, source_id, revision, request.from_ns, request.to_ns, width, instructions))
+}
+
+// The `instructions` member: the instruction view's JSON of the function
+// or FILE:LINE `wanted` ("" the hottest function), as `jet perf view
+// --instructions --json` gives it. A trace without them, or without that
+// function or line, is refused `instructions`, as Jet.PerfNoInstructions.
+jet_cli_canvas_profile_instructions: fn(trace: CanonicalJSON, path: String, wanted: String) -> String JetCLICanvasProfileError! {
+    if wanted.len() > JET_CLI_CANVAS_PROFILE_MAX_LABEL_BYTES {
+        return Err(jet_cli_canvas_profile_error("limit", "Canvas profile `instructions` names a function or line in at most {JET_CLI_CANVAS_PROFILE_MAX_LABEL_BYTES} bytes"))
+    }
+    read: jet_cli_perf_instructions_read(trace) ?? return Err(jet_cli_canvas_profile_error("instructions", "Jet.PerfNoInstructions: `{path}` keeps no instruction samples; {JET_CLI_PERF_NO_INSTRUCTIONS_FIX}"))
+    shown: jet_cli_perf_instructions_shown(read, wanted)
+    if shown.len() == 0 {
+        return Err(jet_cli_canvas_profile_error("instructions", "Jet.PerfNoInstructions: `{path}` keeps no instruction samples of `{wanted}`; {jet_cli_perf_instructions_miss(read)}"))
+    }
+    bytes: canonical_json_bytes(jet_cli_perf_instructions_json(trace_id(trace) ?? "unknown", read, shown, jet_cli_perf_sampler_named(trace)))
+    Ok(String.from_bytes(bytes.slice(0, bytes.len() - 1)) ?? "null")
 }
 
 // The request `value` is, taken out of it.
 jet_cli_canvas_profile_request: fn(value: &&Dyn) -> JetCLICanvasProfileRequest Never! {
-    request := JetCLICanvasProfileRequest{schema_version: -1, revision: None, source_id: None, trace: None, from_ns: None, to_ns: None, width: None}
+    request := JetCLICanvasProfileRequest{schema_version: -1, revision: None, source_id: None, trace: None, from_ns: None, to_ns: None, width: None, instructions: None}
     fields := jet_cli_dap_members(value.move())
     fields.reverse()
     loop fields.len() > 0 {
@@ -154,6 +175,7 @@ jet_cli_canvas_profile_request: fn(value: &&Dyn) -> JetCLICanvasProfileRequest N
             "from_ns" -> request.from_ns = jet_cli_canvas_profile_int(field.value)
             "to_ns" -> request.to_ns = jet_cli_canvas_profile_int(field.value)
             "width" -> request.width = jet_cli_canvas_profile_int(field.value)
+            "instructions" -> request.instructions = canvas_debug_text(field.value.move())
             else -> {}
         }
     }
@@ -266,9 +288,9 @@ jet_cli_canvas_profile_marks: fn(events: [JetCLICanvasProfileEvent], lane: Int, 
     marks
 }
 
-// The document: the trace, the window shown, each lane's marks and the hot
-// lines of the CPU samples.
-jet_cli_canvas_profile_document: fn(trace: CanonicalJSON, path: String, source_id: String, revision: String, from_ns: Int?, to_ns: Int?, width: Int) -> String Never! {
+// The document: the trace, the window shown, each lane's marks, the hot
+// lines of the CPU samples and the `instructions` member's JSON text.
+jet_cli_canvas_profile_document: fn(trace: CanonicalJSON, path: String, source_id: String, revision: String, from_ns: Int?, to_ns: Int?, width: Int, instructions: String) -> String Never! {
     events: jet_cli_canvas_profile_events(trace)
     first := -1
     last := 0
@@ -305,5 +327,5 @@ jet_cli_canvas_profile_document: fn(trace: CanonicalJSON, path: String, source_i
     samples := 0
     loop row in totals.rows -> samples += row.samples
     window: "{{\"from_ns\":{from},\"to_ns\":{to},\"first_ns\":{first},\"last_ns\":{last},\"width\":{width}}}"
-    "{{\"protocol\":\"jet.canvas.profile\",\"schema_version\":{JET_CLI_CANVAS_PROFILE_SCHEMA},\"ok\":true,\"source_id\":{foundation_json_quote(source_id)},\"revision\":{foundation_json_quote(revision)},\"trace\":{foundation_json_quote(path)},\"trace_id\":{foundation_json_quote(trace_id(trace) ?? "")},\"window\":{window},\"lanes\":[{lanes.join(",")}],\"samples\":{samples},\"hot_lines\":[{hot.join(",")}],\"limits\":{{\"hot_lines_truncated\":{hot_truncated}}}}}"
+    "{{\"protocol\":\"jet.canvas.profile\",\"schema_version\":{JET_CLI_CANVAS_PROFILE_SCHEMA},\"ok\":true,\"source_id\":{foundation_json_quote(source_id)},\"revision\":{foundation_json_quote(revision)},\"trace\":{foundation_json_quote(path)},\"trace_id\":{foundation_json_quote(trace_id(trace) ?? "")},\"window\":{window},\"lanes\":[{lanes.join(",")}],\"samples\":{samples},\"hot_lines\":[{hot.join(",")}],\"instructions\":{instructions},\"limits\":{{\"hot_lines_truncated\":{hot_truncated}}}}}"
 }

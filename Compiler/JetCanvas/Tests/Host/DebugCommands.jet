@@ -1,0 +1,19 @@
+// The commands a Canvas debug request may send are the console's, each with
+// the words it takes: `disassemble` (`disas`) alone or with a place and
+// `--bytes`, and nothing past them.
+use jet_canvas.[canvas_debug_known]
+
+#Test("disassemble takes a place and --bytes, as the console does") {
+    assert(canvas_debug_known("disassemble"), "disassemble alone lists the stop's function")
+    assert(canvas_debug_known("disas fib"), "disas takes a function")
+    assert(canvas_debug_known("disas prog.jet:3 --bytes"), "disas takes a line and --bytes")
+    assert(!canvas_debug_known("disas prog.jet:3 --bytes more"), "disas takes at most two words")
+}
+
+#Test("the other commands keep their word counts") {
+    assert(canvas_debug_known("continue"), "continue takes no word")
+    assert(!canvas_debug_known("continue now"), "continue takes no word")
+    assert(canvas_debug_known("print total"), "print takes a name")
+    assert(!canvas_debug_known("print"), "print needs a name")
+    assert(!canvas_debug_known("x/4i $pc"), "an unknown command is refused")
+}

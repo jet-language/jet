@@ -1224,7 +1224,8 @@ reports the pause there, so its stack always has the program's first Jet
 frame (a breakpoint reached first, or the program's end, is reported
 instead); `disconnect` ends the session;
 `restart` starts the program again (an attached one does not restart); a
-request about a stop (`stackTrace`, `scopes`, `variables`, `evaluate`) or a
+request about a stop (`stackTrace`, `scopes`, `variables`, `evaluate`,
+`disassemble`) or a
 run command waits for the next stop, the program running on to it, and is
 answered there in the order it came; any other request is answered with the
 program stopped, and it runs on. The end of stdin ends the session once the
@@ -1249,6 +1250,26 @@ text: Core's sources are no files of the program, and the debugger reads
 them, as it compiles them, from the Core the program was compiled with,
 never from the working directory. The console shows a Core frame's line
 the same way.
+
+Each Jet frame of `stackTrace` carries its pc as its
+`instructionPointerReference` (a caller's is its return address), and
+`initialize` answers `supportsDisassembleRequest`, so an editor's
+disassembly view opens at the stop. `disassemble` answers
+`instructionCount` instructions from the `instructionOffset`th one after
+the instruction holding `memoryReference` plus `offset` (before it, for a
+negative offset), through the console's one listing builder: each
+instruction's `address`, its `instructionBytes`, its text (`call
+0x404110 <fib>`), the code it is in as `symbol` (`fib+14`), and the
+`location` and `line` of its function's source. The window runs on across
+functions that meet or are a gap of padding apart; an address no code is
+known at answers `presentationHint: "invalid"`, one byte a row, as the
+protocol asks, and the debugger's own code (a placed condition's, the
+evaluation room's) is named `[debugger]`. A `memoryReference` that is no
+address, or an `instructionCount` past 65536, is E2236. Stepping by
+instruction and instruction breakpoints are not offered, so the editor
+steps by line from its disassembly view.
+Tests/Cases/Debug/dap_disassemble_lists_the_stop.case is the worked
+example.
 
 Every expression the debugger is given (`print`, `watch`, a condition, a
 logpoint's message, the adapter's `evaluate`) has one evaluator, the

@@ -505,6 +505,27 @@ JetCLIPerfShown: struct {
 // is refused (E2126).
 jet_cli_perf_instructions_view: fn(trace: CanonicalJSON, path: String, wanted: String, mode: String, color: Bool) -> JetDriverVerbOutput Never! {
     read: jet_cli_perf_instructions_read(trace) ?? return jet_cli_perf_instructions_none(trace, path, color)
+    shown: jet_cli_perf_instructions_shown(read, wanted)
+    if shown.len() == 0 {
+        return jet_cli_perf_no_instructions("`{path}` keeps no instruction samples of `{wanted}`", JET_CLI_PERF_NO_INSTRUCTIONS_WHY, jet_cli_perf_instructions_miss(read), color)
+    }
+    sampler: jet_cli_perf_sampler_named(trace)
+    if mode == "json" {
+        return JetDriverVerbOutput{stdout: jet_cli_perf_json("perf.instructions", jet_cli_perf_instructions_json(trace_id(trace) ?? "unknown", read, shown, sampler)), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
+    lines: jet_cli_perf_instructions_lines(read, shown, sampler)
+    if mode == "html" {
+        return JetDriverVerbOutput{stdout: jet_cli_perf_instructions_html(trace_id(trace) ?? "unknown", lines), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
+    out := ""
+    loop line in lines -> out = "{out}{line}\n"
+    JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// The functions of `read` that `wanted` names, with the instructions shown:
+// "" the hottest function whole, NAME each function so named whole,
+// FILE:LINE that line's instructions of each function sampled there.
+jet_cli_perf_instructions_shown: fn(read: JetCLIPerfInstructions, wanted: String) -> [JetCLIPerfShown] Never! {
     shown := [JetCLIPerfShown]{}
     by_line: jet_cli_perf_wanted_line(wanted)
     loop (index, listed) in read.functions {
@@ -518,24 +539,17 @@ jet_cli_perf_instructions_view: fn(trace: CanonicalJSON, path: String, wanted: S
         if wanted != "" && listed.symbol != wanted -> next
         shown.push(JetCLIPerfShown{index: index, rows: jet_cli_perf_listed_instructions(listed, 0)})
     }
-    if shown.len() == 0 {
-        named := [String]{}
-        loop listed in read.functions {
-            if named.len() < 5 -> named.push("`{listed.symbol}`")
-        }
-        return jet_cli_perf_no_instructions("`{path}` keeps no instruction samples of `{wanted}`", JET_CLI_PERF_NO_INSTRUCTIONS_WHY, "name a function or FILE:LINE it sampled, such as {named.join(", ")}, or give `--instructions` alone for the hottest function", color)
+    shown
+}
+
+// How to name what a trace's instructions hold, for a function or line it
+// has no samples of: up to 5 of its functions.
+jet_cli_perf_instructions_miss: fn(read: JetCLIPerfInstructions) -> String Never! {
+    named := [String]{}
+    loop listed in read.functions {
+        if named.len() < 5 -> named.push("`{listed.symbol}`")
     }
-    sampler: jet_cli_perf_sampler_named(trace)
-    if mode == "json" {
-        return JetDriverVerbOutput{stdout: jet_cli_perf_json("perf.instructions", jet_cli_perf_instructions_json(trace_id(trace) ?? "unknown", read, shown, sampler)), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    }
-    lines: jet_cli_perf_instructions_lines(read, shown, sampler)
-    if mode == "html" {
-        return JetDriverVerbOutput{stdout: jet_cli_perf_instructions_html(trace_id(trace) ?? "unknown", lines), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    }
-    out := ""
-    loop line in lines -> out = "{out}{line}\n"
-    JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    "name a function or FILE:LINE it sampled, such as {named.join(", ")}, or give `--instructions` alone for the hottest function"
 }
 
 // The text lines of the functions `shown`: per function a header with its

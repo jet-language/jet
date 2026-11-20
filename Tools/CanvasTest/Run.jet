@@ -697,7 +697,7 @@ debug_panels: fn(jet: String, dir: String, canvas_url: String, original: String)
                     {key: "source_id", value: Dyn.Text("main.jet")},
                     {key: "breakpoints", value: Dyn.Array([Dyn]{Dyn.Int(stop_line)})},
                     {key: "watches", value: Dyn.Array([Dyn]{Dyn.Text("limit")})},
-                    {key: "commands", value: Dyn.Array([Dyn]{Dyn.Text("continue")})},
+                    {key: "commands", value: Dyn.Array([Dyn]{Dyn.Text("continue"), Dyn.Text("disas main.jet:{stop_line}")})},
                 },
             ),
         ),
@@ -732,6 +732,18 @@ debug_panels: fn(jet: String, dir: String, canvas_url: String, original: String)
     loop task in items(at(overlay, "tasks")) -> tasks.push(text(task))
     if tasks.len() == 0 || !tasks[0].contains(" 1  ") {
         return Err(fail_with("the tasks panel must list task 1, the program's main task, first: {tasks.join(" | ")}"))
+    }
+    // `disas` of the stop's line lists its machine code, the pc's row
+    // marked as the console marks it.
+    console := [String]{}
+    marked := false
+    loop line in items(at(overlay, "trace")) {
+        said: text(line)
+        if said.ends_with("<- here") -> marked = true
+        console.push(said)
+    }
+    if !marked {
+        return Err(fail_with("`disas main.jet:{stop_line}` must list the stop's line with the pc's row marked: {console.join(" | ")}"))
     }
     session_id: text(at(started.tree, "canvas.session.id"))
     stopped: canvas_post(
@@ -798,6 +810,13 @@ debug_panels: fn(jet: String, dir: String, canvas_url: String, original: String)
     refused: canvas_post(profile_url, token, profile_request(revision, Val("notes.txt"), None, None, 64))
     if refused.status != 409 || text(at(refused.tree, "canvas.kind")) != "bad_request" {
         return Err(fail_with("a path that is not a trace must be refused as bad_request: HTTP {refused.status} {short_text(refused.body, 400)}"))
+    }
+    // A function the trace has no instruction samples of is refused as
+    // Jet.PerfNoInstructions; one it has would answer `jet perf view
+    // --instructions --json`'s rows.
+    missed: canvas_post(profile_url, token, profile_request(revision, Val("{dir}/spans.jettrace"), None, None, 64, Val("no_such_function")))
+    if missed.status != 409 || text(at(missed.tree, "canvas.kind")) != "instructions" || !text(at(missed.tree, "canvas.message")).starts_with("Jet.PerfNoInstructions: ") {
+        return Err(fail_with("instructions of a function the trace has no samples of must be refused as Jet.PerfNoInstructions: HTTP {missed.status} {short_text(missed.body, 400)}"))
     }
     Ok()
 }
@@ -1000,12 +1019,14 @@ debug_request: fn(revision: String, source_id: String, texts: [{key: String, val
 }
 
 // A schema 1 Canvas profile request of main.jet at `revision`: the entry
-// profiled, or `trace` over `from`..`to`, at most `width` marks a lane.
-profile_request: fn(revision: String, trace: String?, from: Int?, to: Int?, width: Int) -> String {
+// profiled, or `trace` over `from`..`to`, at most `width` marks a lane,
+// with the instructions of the function or line `instructions` names.
+profile_request: fn(revision: String, trace: String?, from: Int?, to: Int?, width: Int, instructions: String?{None}) -> String {
     fields := [{key: String, value: Dyn}]{{key: "schema_version", value: Dyn.Int(1)}, {key: "revision", value: Dyn.Text(revision.copy())}, {key: "source_id", value: Dyn.Text("main.jet")}, {key: "width", value: Dyn.Int(width)}}
     if trace == .Val(path) -> fields.push({key: "trace", value: Dyn.Text(path.copy())})
     if from == .Val(value) -> fields.push({key: "from_ns", value: Dyn.Int(value)})
     if to == .Val(value) -> fields.push({key: "to_ns", value: Dyn.Int(value)})
+    if instructions == .Val(named) -> fields.push({key: "instructions", value: Dyn.Text("{named}")})
     js(obj(fields))
 }
 

@@ -304,7 +304,7 @@ Requests carry:
 | `tier` | `native` (the default) keeps one live paused program; `native-recorded` replays a `jet run --record` recording, as `jet debug --replay` does, so the reverse commands and `why` run; `native-dump` reads a `.jetdump`, as `jet debug <dump>` does, where nothing runs. All run on Jet's own native debugger. A new session's tier follows `recording` or `dump`, and a tier that disagrees with them is refused `bad_request`; any other tier is refused `bad_request`. Continuations keep the tier: one that names another is refused `conflict` and the session kept. |
 | `recording` | Opens a `native-recorded` session on the recording: the NAME of a `jet run --record=NAME` run of the entry, or a project-relative `.jetproof-replay` path. A recording that can't be replayed answers its own report as a `diagnostic`. |
 | `dump` | Opens a `native-dump` session on a `.jetdump` of the entry, a path taken from the entry's directory when relative. A dump of another program is refused `bad_request`. Its `#Secret` locals read redacted. |
-| `commands` | `step`, `next`, `continue`, `finish`, `reverse-step`, `reverse-next`, `reverse-finish`, `reverse-continue`, `why <name>`, `locals`, `print <name>`, `backtrace`, `frame <n>`, `tasks`, `task <n>` or `events`, with the console's short forms. The reverse commands and `why` answer a refusal outside a replay; a dump answers that it doesn't run to every run command. |
+| `commands` | `step`, `next`, `continue`, `finish`, `reverse-step`, `reverse-next`, `reverse-finish`, `reverse-continue`, `why <name>`, `locals`, `print <name>`, `backtrace`, `frame <n>`, `tasks`, `task <n>`, `events` or `disassemble [NAME \| LINE \| FILE:LINE \| FILE:A-B] [--bytes]`, with the console's short forms (`disas`). The reverse commands and `why` answer a refusal outside a replay; a dump answers that it doesn't run to every run command. `disassemble` lists machine code as the console does, into the transcript the overlay's `trace` shows. |
 | `breakpoint_spans` | Local source anchors encoded as `start:end`, or `start:end@REVISION` to name the source revision the span was drawn on. |
 | `breakpoints` | Optional line breakpoints for clients that already mapped spans. |
 | `watches` | Local names evaluated at the stopped frame, or `name@REVISION` to name the revision the watch was drawn on. |
@@ -385,9 +385,10 @@ return `jet.canvas.profile`, the Profile view's timeline of one `.jettrace`.
 | `trace` | Optional `.jettrace` path, relative to the entry's directory. Without it the server profiles the entry with `jet perf run` and keeps that one trace for later zooms; the next recording replaces it. |
 | `from_ns`, `to_ns` | Optional window on the trace's clock; the whole trace by default. |
 | `width` | Most marks a lane carries, 1 to 4096; 800 by default. |
+| `instructions` | Optional function name or `FILE:LINE`, or `""` for the hottest function: the answer's `instructions` then holds the rows `jet perf view --instructions --json` gives (kind `jet.trace.instructions`), each instruction with its address, bytes, text, line and its samples and counter events. It is `null` when the request names none. |
 
 ```json
-{"protocol":"jet.canvas.profile","schema_version":1,"ok":true,"source_id":"main.jet","revision":"sha256-...","trace":"/tmp/jet-canvas-profile-1/canvas.jettrace","trace_id":"...","window":{"from_ns":0,"to_ns":91000,"first_ns":0,"last_ns":91000,"width":800},"lanes":[{"name":"spans","reduced":false,"marks":[{"start_ns":0,"end_ns":91000,"count":1,"label":"run"}]},{"name":"zones","reduced":false,"marks":[]},{"name":"waits","reduced":false,"marks":[]},{"name":"io","reduced":false,"marks":[]}],"samples":12,"hot_lines":["..."],"limits":{"hot_lines_truncated":false}}
+{"protocol":"jet.canvas.profile","schema_version":1,"ok":true,"source_id":"main.jet","revision":"sha256-...","trace":"/tmp/jet-canvas-profile-1/canvas.jettrace","trace_id":"...","window":{"from_ns":0,"to_ns":91000,"first_ns":0,"last_ns":91000,"width":800},"lanes":[{"name":"spans","reduced":false,"marks":[{"start_ns":0,"end_ns":91000,"count":1,"label":"run"}]},{"name":"zones","reduced":false,"marks":[]},{"name":"waits","reduced":false,"marks":[]},{"name":"io","reduced":false,"marks":[]}],"samples":12,"hot_lines":["..."],"instructions":null,"limits":{"hot_lines_truncated":false}}
 ```
 
 The lanes are captured task spans (`spans`), log spans (`zones`), task waits
@@ -398,7 +399,10 @@ mark covers the events that start in each `width`th of the window, with their
 whole to the page; zooming asks again with a narrower window of the same
 `trace`. `hot_lines` are the CPU samples' hottest source lines, at most 64.
 A trace that is not a valid `.jettrace` is refused `trace`; a program that
-does not build or run answers its own report as `diagnostic`.
+does not build or run answers its own report as `diagnostic`. A trace that
+keeps no instruction samples of what `instructions` names is refused
+`instructions`, its message starting `Jet.PerfNoInstructions: ` and naming
+functions the trace does keep.
 
 ## Edit transactions
 

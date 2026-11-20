@@ -32,6 +32,7 @@ use {
         JetCLIPerfWake,
         JetCLIPerfZoneSampled,
         JetCLIPerfZoneTotal,
+        jet_cli_canvas_profile_instructions,
         jet_cli_perf_attach_closed,
         jet_cli_perf_attach_keep_window,
         jet_cli_perf_browser_decode,
@@ -1076,6 +1077,15 @@ jet_cli_perf_test_line_row: fn(digest: String, at: Int, name: String) -> TracePr
     assert_eq(missed.exit_code, 2)
     assert(missed.stderr.contains("Jet.PerfNoInstructions: `run.jettrace` keeps no instruction samples of `nope`"))
     assert(missed.stderr.contains("`fib`, `jet_rt_alloc`"))
+    // Canvas's profile request answers the same rows, and refuses the same
+    // miss as `instructions`.
+    canvas: jet_cli_canvas_profile_instructions(trace, "run.jettrace", "fib.jet:7") ?? panic(err.message)
+    assert(canvas.contains(`"kind":"jet.trace.instructions"`) && canvas.contains(`"line":7`), "the member is the view's JSON: {canvas}")
+    assert(!canvas.ends_with("\n"), "the member is embedded without the document's newline")
+    if jet_cli_canvas_profile_instructions(trace, "run.jettrace", "nope") == .Err(refused) {
+        assert_eq(refused.kind, "instructions")
+        assert(refused.message.starts_with("Jet.PerfNoInstructions: `run.jettrace` keeps no instruction samples of `nope`; "), refused.message)
+    } else { assert(false, "a name the section doesn't hold must be refused") }
 }
 
 // A kept function lists all its code through the one listing builder,
