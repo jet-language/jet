@@ -1,7 +1,10 @@
 // A Python or JavaScript habit is reported with the edits that write it in
 // Jet: applying every edit of every report leaves source the parser reads
 // clean.
-use jet_parser.[parse_source]
+use {
+    jet_lexer.[lex]
+    jet_parser.[parse_lexed, parse_source]
+}
 
 HabitEdit: struct {
     start: Int,
@@ -97,4 +100,18 @@ in_run: fn(body: String) -> String { "run: fn() {{\n{body}}}\n" }
     assert_habit_fix("twice: fn(n: Int) -> Int {{\n    retun n * 2\n}}\n", "twice: fn(n: Int) -> Int {{\n    return n * 2\n}}\n")
     assert_habit_fix("twice: fn(n: Int) -> Int {{\n    returnn n * 2\n}}\n", "twice: fn(n: Int) -> Int {{\n    return n * 2\n}}\n")
     assert_habit_fix("twice: fn(n: Int) -> Int {{\n    rteurn n * 2\n}}\n", "twice: fn(n: Int) -> Int {{\n    return n * 2\n}}\n")
+}
+
+// The compiler query parses its tokens without the source text: a marker's
+// `#` still touches its name, so it is no `# text` comment there either.
+#Test("a statement marker is not a hash comment without the source text") {
+    source: in_run("    #Overflow(.Wrapping) {{\n        print(1)\n    }}\n")
+    loop parsed in [parse_source(source.bytes()), parse_lexed(lex(source.bytes()))] {
+        assert_eq(parsed.diagnostics.len(), 0)
+        assert_eq(parsed.program.items.len(), 1)
+        if parsed.program.items[0] == .Func(function) {
+            assert_eq(function.body.len(), 1)
+            assert(!(function.body[0] == .Expr(_)), "the marked block parsed as an expression statement")
+        } else { panic("`run` is not a function") }
+    }
 }

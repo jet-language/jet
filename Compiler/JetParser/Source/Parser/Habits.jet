@@ -230,16 +230,15 @@ parser_one_dropped: fn(short: [U8], long: [U8]) -> Bool Never! {
 }
 
 // Python's `# text` comment: Jet comments with `//`. The rest of the line
-// is skipped. False when the `#` at the cursor touches what follows on its
-// line, as a Jet marker does.
+// is skipped. False when the `#` at the cursor touches the token after it,
+// as a Jet marker does; touching tokens share a line, so this needs no
+// source text (parse_lexed parses without it).
 parser_report_hash_comment: fn(state: &JetParserState) -> Bool {
     token: parser_current(state)
     if token.kind != TOKEN_HASH -> return false
-    line_end: parser_line_end_of(state, token.span.start)
     next: parser_lookahead(state, 1)
-    if next.kind != TOKEN_EOF && next.span.start == token.span.end && next.span.start < line_end {
-        return false
-    }
+    if next.kind != TOKEN_EOF && next.span.start == token.span.end -> return false
+    line_end: parser_line_end_of(state, token.span.start)
     loop parser_current_kind(state) != TOKEN_EOF && parser_current(state).span.start < line_end {
         parser_bump(state)
     }
