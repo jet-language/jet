@@ -1163,7 +1163,7 @@ sema_taskgroup_check_task_method: fn(receiver: Expr, receiver_value: TExpr, meth
         if context.taskgroups.detach_view_tasks.contains(name) {
             diagnostics.push(sema_error("E1106", span, "can't detach task `{name}` — it captured a `view` borrow that may not live long enough", "a detached task runs unsupervised and may outlive the caller; a captured `view` would dangle", "pass an owned `copy`, or a `Shared<T>` handle, to the task instead of a `view`"))
         } else if context.taskgroups.detach_unsound_tasks.contains(name) {
-            diagnostics.push(sema_error("E1103", span, "can't detach task `{name}` — it captured a value that can't cross a thread boundary", "a detached task runs unsupervised; it must only hold values it owns cleanly", "fix the E1102 error at the spawn site first, then `.detach()` is safe"))
+            diagnostics.push(sema_error("E1103", span, "can't detach task `{name}` — it captured a value that can't cross a thread boundary", "a detached task runs unsupervised; it must only hold values it owns cleanly", "fix the Jet.ValueNotSendable error at the spawn site first, then `.detach()` is safe"))
         }
     }
     if !sema_ownership_check_method_receiver(state, receiver, AccessConvention.Move, method, scopes, span, diagnostics) {
@@ -1247,7 +1247,7 @@ sema_call_check_channel: fn(call: Call, expected: Type?, environment: SemaScopeE
     if call.args.len() == 1 {
         if sema_channel_capacity_literal(call.args[0].expr) == .Val(capacity) {
             if capacity < 1 {
-                diagnostics.push(sema_error("E0395", expr_span(call.args[0].expr), "A channel capacity must be at least 1, not `{capacity}`.", "A bounded channel holds at least one value; Jet has no zero-capacity rendezvous channel, and a capacity below 1 is never clamped. A runtime capacity below 1 stops the program (E3001).", "Write `channel<T>(capacity: 1)` or larger, or `channel<T>()` for an unbounded channel."))
+                diagnostics.push(sema_error("E0395", expr_span(call.args[0].expr), "A channel capacity must be at least 1, not `{capacity}`.", "A bounded channel holds at least one value; Jet has no zero-capacity rendezvous channel, and a capacity below 1 is never clamped. A runtime capacity below 1 stops the program (Jet.Panic).", "Write `channel<T>(capacity: 1)` or larger, or `channel<T>()` for an unbounded channel."))
                 return SemaDirectSpecialCheck{handled: true, value: None}
             }
         }

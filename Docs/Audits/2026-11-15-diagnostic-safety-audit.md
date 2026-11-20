@@ -690,9 +690,9 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E4203 | MissingCertificateRoots | Jetpack/Foundation/Source/Net/FetchError.jet:20 | install the system certificate bundle |
 | JT0198 | SourceImportFailed | Compiler/JetCLI/Source/CLI/Import.jet:46 | the path or permission is fixed |
 | JT0199 | SourceImportConflict | Compiler/JetCLI/Source/CLI/Import.jet:226 | the files are reconciled first |
-| R0801 | RawAccessOutsideProvenance | Compiler/JetRuntime/Source/ServicesMessages.jet:431 | the access is bounded to the live allocation |
-| R0802 | UseAfterLifetime | Compiler/JetRuntime/Source/ServicesMessages.jet:452 | the pointer is not used after release or frame exit |
-| R0803 | MisalignedRawAccess | Compiler/JetRuntime/Source/ServicesMessages.jet:473 | an aligned pointer from the live allocation |
+| R0801 | RawAccessOutsideProvenance | Compiler/JetRuntime/Source/ServicesMessages.jet:437 | the access is bounded to the live allocation |
+| R0802 | UseAfterLifetime | Compiler/JetRuntime/Source/ServicesMessages.jet:458 | the pointer is not used after release or frame exit |
+| R0803 | MisalignedRawAccess | Compiler/JetRuntime/Source/ServicesMessages.jet:479 | an aligned pointer from the live allocation |
 
 ## Sealed floors no source reports
 

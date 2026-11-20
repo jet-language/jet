@@ -37,8 +37,7 @@ stderr: ~ "Error: Jet.MisalignedRawAccess:" # original predicate
 stderr: ~ "unsafe_sentries_alignment.jet:" # original predicate
 stderr: ~ "misaligned raw `read`" # original predicate
 stderr: ~ "obligation `valid_ptr` was not met on this run" # original predicate
-stderr: ~ "This raw `read` needs an aligned pointer, but address 0x" # the faulting address varies with ASLR
-stderr: ~ "is not aligned to 8 bytes." # the faulting address varies with ASLR
+stderr: ~ "This raw `read` needs an aligned pointer, but the address is a multiple of 8 plus 1, so it is not aligned to 8 bytes." # the read starts one byte into the tuple's Int
 step: jet build unsafe_sentries_alignment/unsafe_sentries_alignment.jet
 step: built
 exit: 70
@@ -47,22 +46,20 @@ stderr: ~ "Error: Jet.MisalignedRawAccess:" # original predicate
 stderr: ~ "unsafe_sentries_alignment.jet:" # original predicate
 stderr: ~ "misaligned raw `read`" # original predicate
 stderr: ~ "obligation `valid_ptr` was not met on this run" # original predicate
-stderr: ~ "This raw `read` needs an aligned pointer, but address 0x" # the faulting address varies with ASLR
-stderr: ~ "is not aligned to 8 bytes." # the faulting address varies with ASLR
+stderr: ~ "This raw `read` needs an aligned pointer, but the address is a multiple of 8 plus 1, so it is not aligned to 8 bytes." # the read starts one byte into the tuple's Int
 step: jet run unsafe_sentries_misaligned_list/unsafe_sentries_misaligned_list.jet
 exit: 70
 stdout: empty
-stderr: ~ "Error: Jet.MisalignedRawAccess:" # the report around the heading carries the faulting address, which varies with ASLR
+stderr: ~ "Error: Jet.MisalignedRawAccess:" # the heading of the misaligned read's report
 stderr: ~ "unsafe_sentries_misaligned_list.jet:7:15, in #Unsafe gate" # the faulting read's line and column
-stderr: ~ "This raw `read` needs an aligned pointer, but address 0x" # the faulting address varies with ASLR
-stderr: ~ "is not aligned to 8 bytes." # the faulting address varies with ASLR
+stderr: ~ "This raw `read` needs an aligned pointer, but the address is a multiple of 8 plus 1, so it is not aligned to 8 bytes." # the read starts one byte into the list's first Int
 stderr: !~ "Jet.RawAccessOutsideProvenance" # the fault is not misread as an extent fault
 step: jet build unsafe_sentries_misaligned_list/unsafe_sentries_misaligned_list.jet
 step: built
 exit: 70
 stdout: empty
-stderr: ~ "Error: Jet.MisalignedRawAccess:" # the report around the heading carries the faulting address, which varies with ASLR
-stderr: ~ "is not aligned to 8 bytes." # the faulting address varies with ASLR
+stderr: ~ "Error: Jet.MisalignedRawAccess:" # the heading of the misaligned read's report
+stderr: ~ "the address is a multiple of 8 plus 1, so it is not aligned to 8 bytes." # the read starts one byte into the list's first Int
 stderr: !~ "Jet.RawAccessOutsideProvenance" # the fault is not misread as an extent fault
 # Sentries are a development-tier watch: a plain release build runs the read unwatched
 # (the same split as Examples/Memory/Unsafe/UnsafeSentries.o2.out), so the misaligned

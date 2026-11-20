@@ -275,17 +275,23 @@ services_msg_sentry_stack: fn() -> I64 {
 }
 
 services_msg_sentry_address: fn() -> I64 {
-    text: scheduler_text_new(I64{10})
+    text: scheduler_text_new(I64{29})
     data: sync_load(text)
-    sync_store(wrapping(data + I64{0}), I64{2338339511083492449})
-    sync_store(wrapping(data + I64{8}), I64{30768})
+    coll_copy(rt_text_data(rt_static_text("the address is a multiple of ")), data, I64{29})
+    text
+}
+
+services_msg_sentry_plus: fn() -> I64 {
+    text: scheduler_text_new(I64{6})
+    data: sync_load(text)
+    sync_store(wrapping(data + I64{0}), I64{35680263368736})
     text
 }
 
 services_msg_sentry_alignment: fn() -> I64 {
-    text: scheduler_text_new(I64{19})
+    text: scheduler_text_new(I64{26})
     data: sync_load(text)
-    coll_copy(rt_text_data(rt_static_text(" is not aligned to ")), data, I64{19})
+    coll_copy(rt_text_data(rt_static_text(", so it is not aligned to ")), data, I64{26})
     text
 }
 

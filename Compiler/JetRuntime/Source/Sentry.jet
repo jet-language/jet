@@ -662,16 +662,20 @@ sentry_range_detail: fn(fault: I64, start: I64) -> I64 {
 }
 
 // The fault's detail text: for R0801 the live range and the access's offset
-// in it, for R0803 the address and the alignment it needed.
+// in it, for R0803 how far the address sits past the alignment it needed,
+// which reads the same however the address space is laid out.
 sentry_detail: fn(fault: I64, start: I64, alignment: I64) -> I64 {
     if {
         (fault == I64{2}) -> services_msg_sentry_heap()
         (fault == I64{4}) -> services_msg_sentry_stack()
         (fault == I64{3}) -> {
+            align: if (alignment == I64{0}) -> I64{1} else -> alignment
             text: services_msg_sentry_address()
-            sentry_hex(text, start)
+            sentry_append_number(text, align)
+            sentry_append_owned(text, services_msg_sentry_plus())
+            sentry_append_number(text, sentry_remainder(start, align))
             sentry_append_owned(text, services_msg_sentry_alignment())
-            sentry_append_number(text, if (alignment == I64{0}) -> I64{1} else -> alignment)
+            sentry_append_number(text, align)
             sentry_append_owned(text, services_msg_sentry_bytes())
             text
         }

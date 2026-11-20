@@ -39,9 +39,9 @@ stderr: ~ "freed.jet:10:19, in #Unsafe gate" # the fault is located at the read 
 step aligndev: jet run misaligned.jet
 exit: 70
 stdout: = "2\n"
-stderr: ~ "Error: Jet.MisalignedRawAccess:" # the report also carries the address and the alignment
+stderr: ~ "Error: Jet.MisalignedRawAccess:" # the report also carries how far the address sits past the alignment
 step alignhard: jet run --profile=hardened misaligned.jet
 exit: 70
 stdout: = "2\n"
-stderr: ~ "Error: Jet.MisalignedRawAccess:" # the report also carries the address and the alignment
-stderr: ~ "is not aligned to 8 bytes" # the detail names the alignment the Int read needs
+stderr: ~ "Error: Jet.MisalignedRawAccess:" # the report also carries how far the address sits past the alignment
+stderr: ~ "the address is a multiple of 8 plus 4, so it is not aligned to 8 bytes" # the Int read starts four bytes into the record's first Int

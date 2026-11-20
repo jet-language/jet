@@ -32,7 +32,7 @@
 <h2>What</h2>
 <p class="diag-copy what" data-registry-field="what">A channel capacity must be at least 1, not `{capacity}`.</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">A bounded channel holds at least one value; Jet has no zero-capacity rendezvous channel, and a capacity below 1 is never clamped. A runtime capacity below 1 stops the program (E3001).</p>
+<p class="diag-copy why" data-registry-field="why">A bounded channel holds at least one value; Jet has no zero-capacity rendezvous channel, and a capacity below 1 is never clamped. A runtime capacity below 1 stops the program (Jet.Panic).</p>
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Write `channel&lt;T&gt;(capacity: 1)` or larger, or `channel&lt;T&gt;()` for an unbounded channel.</p>
 <h2>Worked example</h2>
@@ -42,7 +42,7 @@
     |
   2 |     zero := channel&lt;Int&gt;(capacity: 0)
     |                                    ^
- Why: A bounded channel holds at least one value; Jet has no zero-capacity rendezvous channel, and a capacity below 1 is never clamped. A runtime capacity below 1 stops the program (E3001).
+ Why: A bounded channel holds at least one value; Jet has no zero-capacity rendezvous channel, and a capacity below 1 is never clamped. A runtime capacity below 1 stops the program (Jet.Panic).
  Fix: Write `channel&lt;T&gt;(capacity: 1)` or larger, or `channel&lt;T&gt;()` for an unbounded channel.
 More: jet-lang.dev/e/Jet.InvalidChannelCapacity
 
@@ -51,7 +51,7 @@ Error: Jet.InvalidChannelCapacity: A channel capacity must be at least 1, not `-
     |
   3 |     negative := channel&lt;Int&gt;(capacity: -1)
     |                                        ^^
- Why: A bounded channel holds at least one value; Jet has no zero-capacity rendezvous channel, and a capacity below 1 is never clamped. A runtime capacity below 1 stops the program (E3001).
+ Why: A bounded channel holds at least one value; Jet has no zero-capacity rendezvous channel, and a capacity below 1 is never clamped. A runtime capacity below 1 stops the program (Jet.Panic).
  Fix: Write `channel&lt;T&gt;(capacity: 1)` or larger, or `channel&lt;T&gt;()` for an unbounded channel.
 More: jet-lang.dev/e/Jet.InvalidChannelCapacity
 
@@ -60,7 +60,7 @@ Error: Jet.InvalidChannelCapacity: A channel capacity must be at least 1, not `0
     |
   4 |     parenthesized := channel&lt;Int&gt;(capacity: ((0)))
     |                                             ^^^^^
- Why: A bounded channel holds at least one value; Jet has no zero-capacity rendezvous channel, and a capacity below 1 is never clamped. A runtime capacity below 1 stops the program (E3001).
+ Why: A bounded channel holds at least one value; Jet has no zero-capacity rendezvous channel, and a capacity below 1 is never clamped. A runtime capacity below 1 stops the program (Jet.Panic).
  Fix: Write `channel&lt;T&gt;(capacity: 1)` or larger, or `channel&lt;T&gt;()` for an unbounded channel.
 More: jet-lang.dev/e/Jet.InvalidChannelCapacity
 
@@ -69,7 +69,7 @@ Error: Jet.InvalidChannelCapacity: A channel capacity must be at least 1, not `-
     |
   5 |     exact_negative := channel&lt;Int&gt;(capacity: -(9223372036854775809))
     |                                              ^^^^^^^^^^^^^^^^^^^^^^
- Why: A bounded channel holds at least one value; Jet has no zero-capacity rendezvous channel, and a capacity below 1 is never clamped. A runtime capacity below 1 stops the program (E3001).
+ Why: A bounded channel holds at least one value; Jet has no zero-capacity rendezvous channel, and a capacity below 1 is never clamped. A runtime capacity below 1 stops the program (Jet.Panic).
  Fix: Write `channel&lt;T&gt;(capacity: 1)` or larger, or `channel&lt;T&gt;()` for an unbounded channel.
 More: jet-lang.dev/e/Jet.InvalidChannelCapacity
 </pre>
