@@ -1,0 +1,21 @@
+# `jet fmt` writes `place = place op value` as `place op= value` only for a
+# name or a name's field, the places whose compound update checks whatever
+# their type. A deeper field path (`outer.inner.value`) keeps its expanded
+# form: on an operator-hooked (Vec2) or exact-number (Decimal) field the
+# compound form is E0362, and the formatter does not know the field's type. A
+# local and a local's field of the same types are still rewritten. The
+# formatted program checks and prints what the input prints, and a second run
+# changes nothing.
+fixture: NestedFieldUpdateKeepsItsExpandedForm/Input
+env: NO_COLOR=1
+step: jet fmt run.jet
+exit: 0
+file: run.jet = NestedFieldUpdateKeepsItsExpandedForm/formatted.out
+step: jet check run.jet
+exit: 0
+step: jet run run.jet
+exit: 0
+stdout: = "7 8 1.75 3 3\n"
+step: jet fmt run.jet
+exit: 0
+file: run.jet = NestedFieldUpdateKeepsItsExpandedForm/formatted.out

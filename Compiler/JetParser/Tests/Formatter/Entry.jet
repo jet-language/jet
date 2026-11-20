@@ -522,3 +522,24 @@ main: fn() {
 `
     assert_eq(fmt_core_stable(source), source)
 }
+
+// `place = place op value` becomes `place op= value` for a name or a name's
+// field only: a deeper field path keeps its expanded form, whose compound
+// form is E0362 on an operator-hooked or exact-number field.
+#Test("expanded_update_of_a_deeper_field_path_stays_expanded") {
+    source: `grow: fn(outer: &Outer, middle: &Inner, step: Vec2, n: Int) {
+    outer.inner.value = outer.inner.value + step
+    outer.inner.total = outer.inner.total + Decimal("0.25")
+    middle.value = middle.value + step
+    n = n + 2
+}
+`
+    formatted: `grow: fn(outer: &Outer, middle: &Inner, step: Vec2, n: Int) {
+    outer.inner.value = outer.inner.value + step
+    outer.inner.total = outer.inner.total + Decimal("0.25")
+    middle.value += step
+    n += 2
+}
+`
+    assert_eq(fmt_core_stable(source), formatted)
+}

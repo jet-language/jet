@@ -1,0 +1,35 @@
+Vec2: struct {
+    x: Int,
+    y: Int,
+
+    impl Add {
+        add: fn(self, rhs: Vec2) -> Vec2 { Vec2{x: self.x + rhs.x, y: self.y + rhs.y} }
+    }
+}
+
+Inner: struct {
+    value: Vec2,
+    total: Decimal,
+}
+
+Outer: struct {
+    inner: Inner,
+}
+
+grow: fn(outer: &Outer, step: Vec2) {
+    outer.inner.value = outer.inner.value + step
+    outer.inner.total = outer.inner.total + Decimal("0.25")
+}
+
+run: fn() {
+    outer := Outer{inner: Inner{value: Vec2{x: 1, y: 2}, total: Decimal("1.5")}}
+    step := Vec2{x: 1, y: 1}
+    step = step + Vec2{x: 2, y: 2}
+    grow(outer, step)
+    outer.inner.value = outer.inner.value + step
+    middle := Inner{value: Vec2{x: 0, y: 0}, total: Decimal("0")}
+    middle.value = middle.value + step
+    n := 1
+    n = n + 2
+    print("{outer.inner.value.x} {outer.inner.value.y} {outer.inner.total} {middle.value.x} {n}")
+}
