@@ -1103,8 +1103,10 @@ jet_cli_replay_record_begin: fn(file: String, files: [String], name: String, pro
     if cli_time.unix_ns() < 0 {
         return Err(jet_cli_replay_refusal("E3629", "replay artifact could not be finalized", "the system clock is before the Unix epoch", "fix the system clock and record again"))
     }
+    // A taken NAME is refused here, before the program runs, so no run's
+    // work is lost to it.
     if cli_files.lexists(jet_cli_entry_join(identity.authority_root, path)) {
-        return Err(jet_cli_replay_refusal("E3629", "replay artifact could not be finalized", "the recording `{path}` already exists", "record under a new NAME, or remove the old recording"))
+        return Err(jet_cli_replay_refusal("E3630", "the recording name `{name}` is taken, and nothing ran", "`{path}` already holds a recording, and `--record` never replaces one, so the program was refused before it ran", "choose another NAME, such as `--record={name}-2`, or remove `{path}` and record again"))
     }
     sites: jet_cli_replay_sites(members)
     site_id: jet_cli_replay_site_id(identity, members, sites)

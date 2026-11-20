@@ -1316,7 +1316,10 @@ replays. `jet run --record=<name>` links it, runs the program in a child with
 `JET_RECORD` naming a scratch file, and writes the log into
 `.jet/replays/<name>.jetproof-replay` as `RunSync` frames
 (`Docs/Spec/proof-replay-decisions.md`). The artifact is written with mode
-0600 and stays local: its log holds every input's bytes.
+0600 and stays local: its log holds every input's bytes. A recording is
+never replaced: a NAME that already names one is E3630
+(`Jet.ReplayNameTaken`), refused before the program runs, so no run's work
+is lost to it; choose another NAME or remove the old recording.
 
 ## Implementation homes
 

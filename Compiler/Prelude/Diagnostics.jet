@@ -23861,6 +23861,28 @@ ReplayFinalizeFailed: struct {
     }
 }
 
+ReplayNameTaken: struct {
+    impl Diagnostic {
+        code: "E3630",
+        safety_class: .Soundness,
+        safety_reason: "The recording under that name stays as it was and the program never ran, so no run's work is lost and no recording is replaced.",
+        expert_path: "none: a recording is never replaced",
+        stage: [.Compile],
+        meaning: "A `--record` name another recording already holds",
+        detail: true,
+
+        what: fn(self) -> String { "The recording name is taken, and nothing ran" }
+
+        why: fn(self) -> String {
+            "`--record=NAME` writes a new recording and never replaces one, so a NAME that already names a recording is refused before the program runs."
+        }
+
+        fix: fn(self) -> String {
+            "Choose another NAME, or remove the old recording from `.jet/replays/` and record again."
+        }
+    }
+}
+
 EmptyTest: struct {
     impl Diagnostic {
         code: "L2901",

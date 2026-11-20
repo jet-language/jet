@@ -496,8 +496,9 @@ The replay code allocation keeps these What/Why/Fix meanings:
 | E3627 | `replay capture refused sensitive data` | raw or tainted data would be stored without the required consent | provide sanitized input or use the approved sensitive path |
 | E3628 | `replay capture exceeded its artifact limit` | actual frames or bytes exceed the bound | reduce the captured input |
 | E3629 | `replay artifact could not be finalized` | the exact destination, race, or filesystem durability check failed | fix the path and retry |
+| E3630 | `the recording name {name} is taken, and nothing ran` | `--record=NAME` names an existing recording, which a recording never replaces; it is refused before the program runs | choose another NAME, or remove the old recording and record again |
 
-E3620–E3629 exit 1; usage is 2, captured or replayed E3001 is 70, and ICE is
+E3620–E3630 exit 1; usage is 2, captured or replayed E3001 is 70, and ICE is
 101. The registry and snapshots use the same meanings (for example, the
 rendered What for E3623 is `Replay diverged from captured authority`).
 

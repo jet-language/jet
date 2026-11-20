@@ -20,8 +20,9 @@ stderr: ~ "jet debug: recorded replay `.jet/replays/why.jetproof-replay`" # and 
 file: .jet/replays/why.jetproof-replay is-file
 step: jet debug --record=why prog.jet
 exit: 1
-stderr: ~ "The recording `.jet/replays/why.jetproof-replay` already exists" # a taken NAME is refused
-stdout: !~ "total" # before the program runs
+stdout: = "" # refused before the program runs: no console, none of its output
+stderr: ~ "Error: Jet.ReplayNameTaken: The recording name `why` is taken, and nothing ran" # the heading says the name is taken and nothing ran
+stderr: ~ "remove `.jet/replays/why.jetproof-replay` and record again" # and how to free the name
 step: jet debug --record prog.jet
 exit: 2
 stderr: ~ "`--record` needs a NAME" # a bare `--record` is a usage error
