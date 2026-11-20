@@ -15,6 +15,7 @@ use {
         BuildSessionDiagnostic,
         BuildSessionReply,
         BuildSessionValue,
+        build_session_at,
         build_session_call,
         build_session_diag,
         build_session_graph,
@@ -41,12 +42,12 @@ JetDriverBuildAdapter: struct {
             JetDriverBuildAdapter{session: self.session.copy(), inputs: self.inputs.copy(), base_dir: self.base_dir.copy()}
         }
 
-        build_call: fn(self, member: String, args: [TComptimeValue], fallible: Bool, impure: Bool, span: Span) -[FS.Read, Net, Time.Wait]> JetEvalBuildReply? {
+        build_call: fn(self, member: String, args: [TComptimeValue], fallible: Bool, impure: Bool, span: Span, file: String) -[FS.Read, Net, Time.Wait]> JetEvalBuildReply? {
             // copy: build_call has a read `self`, but jet_driver_build_host_call writes its session
             // (`&`). This call writes a session of its own, and the adapter keeps its session for the
             // next build_call.
             session := self.session.copy()
-            reply: jet_driver_build_host_call(session, self.inputs, self.base_dir, member, args, fallible, impure, span)
+            reply: jet_driver_build_host_call(session, self.inputs, self.base_dir, member, args, fallible, impure, span, file)
             // A refused call stops the run, and its report is the build's own:
             // the build query keeps it beside a failed staging check's reports.
             if reply == .Val(answer) && answer == .Failure(_) -> build_session_refuse(session)
@@ -68,7 +69,8 @@ jet_driver_build_context_owned: fn(session: BuildSession, owner: Int) -> Bool Ne
     permit.value.id == owner && permit.value.active
 }
 
-jet_driver_build_host_call: fn(session: &BuildSession, inputs: JetDriverSharedBuildInputs?, base_dir: String, member: String, args: [TComptimeValue], fallible: Bool, impure: Bool, span: Span) -[FS.Read]> JetEvalBuildReply? {
+// A `build: fn` call `member` on `args` at `span` in source file `file`.
+jet_driver_build_host_call: fn(session: &BuildSession, inputs: JetDriverSharedBuildInputs?, base_dir: String, member: String, args: [TComptimeValue], fallible: Bool, impure: Bool, span: Span, file: String) -[FS.Read]> JetEvalBuildReply? {
     if member == "BuildPlan.graph" {
         if args.len() != 1 {
             return Val(jet_driver_build_host_failure(session, span, "graph requires one checked BuildPlan"))
@@ -139,6 +141,9 @@ jet_driver_build_host_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
         }
         generated = Val(spliced)
     }
+    // An option the call sets names its site in `file`, a dependency's
+    // function's as well as the build file's.
+    build_session_at(session, file)
     reply: build_session_call(session, method, values, generated, impure, span.start, span.end)
     if reply == {
         .Value(value) -> {

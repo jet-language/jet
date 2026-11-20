@@ -727,6 +727,29 @@ build_options_key: fn(options: BuildOptions) -> String Never! {
     out
 }
 
+// The options' identity in a compile node (JetDriver BuildQueries.jet
+// jet_driver_build_nodes_under_options): what build_options_key names,
+// less the profile name and every row at its stock value for the command,
+// as `name=value` parts, sorted and joined by `;`. Two builds of one source
+// whose options shape the same image have one identity; "" is the stock
+// image's.
+build_options_identity: fn(options: BuildOptions) -> String Never! {
+    stock: build_options_stock(options.command)
+    parts := [String]{}
+    loop choice in options.values {
+        if JET_BUILD_OPTIONS_UNKEYED.contains(choice.name) -> next
+        if build_options_value(stock, choice.name) == choice.value -> next
+        parts.push("{choice.name}={choice.value}")
+    }
+    loop setting in options.settings -> parts.push("set.{setting.name}={setting.value}")
+    if options.observe || options.record != "" -> parts.push("observe")
+    if options.log != "" -> parts.push("log={options.log}")
+    deep: deep_checks_key(options.deep_checks)
+    if deep != "" -> parts.push("deep={deep}")
+    parts.sort()
+    parts.join(";")
+}
+
 // The stock options of `command`: no profile, no flag.
 build_options_stock: fn(command: String) -> BuildOptions Never! {
     if build_options_resolve(command, "", [BuildOptionChoice]{}) == {

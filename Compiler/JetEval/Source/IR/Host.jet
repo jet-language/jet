@@ -65,13 +65,14 @@ jet_eval_ir_host_arguments: fn(s: &JetEvalIRState, params: [Int], args: [TCompti
     Val(words)
 }
 
-// jet_comptime_host_method(member, impure, start, end, (row key, word)...):
-// method `member` (`Owner.method`, or `compiler.query` for a `core.compiler`
-// query) on the receiver and arguments, each a word of the type row its key
-// names; `impure` when the call sits in an `#Impure` block; `start` and
-// `end` the call's span (ir_host_method).
+// jet_comptime_host_method(member, impure, start, end, file, (row key,
+// word)...): method `member` (`Owner.method`, or `compiler.query` for a
+// `core.compiler` query) on the receiver and arguments, each a word of the
+// type row its key names; `impure` when the call sits in an `#Impure` block;
+// `start` and `end` the call's span in source file `file`
+// (ir_host_method).
 jet_eval_ir_host_method_route: fn(s: &JetEvalIRState, args: [Int], dst_row: Int, area: Int) -> Int? {
-    if args.len() < 4 || args.len() % 2 != 0 {
+    if args.len() < 5 || args.len() % 2 != 1 {
         return jet_eval_ir_primitive_shape(s, "jet_comptime_host_method")
     }
     member: jet_eval_ir_text(s, args[0]) ?? return None
@@ -110,14 +111,15 @@ jet_eval_ir_host_method_route: fn(s: &JetEvalIRState, args: [Int], dst_row: Int,
     types := types_cell.guard_edit()
     layouts: layouts_cell.guard_read()
     values := [TComptimeValue]{}
-    at := 4
+    at := 5
     loop at < args.len() {
         row: jet_eval_ir_host_row(types.value, s, args[at]) ?? return None
         values.push(jet_eval_ir_data(types.value, layouts.value[0], s, args[at + 1], row) ?? return None)
         at += 2
     }
     fallible: dst_row >= 0 && ir_untag(types.value.types[dst_row].ty) == .Result(_, _)
-    answer: jet_eval_ir_host_answer(s, parts[0], parts[1], member, values, fallible, args[1] != 0, Span{start: args[2], end: args[3]}) ?? return None
+    file: jet_eval_ir_text(s, args[4]) ?? return None
+    answer: jet_eval_ir_host_answer(s, parts[0], parts[1], member, values, fallible, args[1] != 0, Span{start: args[2], end: args[3]}, file) ?? return None
     if dst_row < 0 -> return Val(0)
     jet_eval_ir_host_store(types.value, layouts.value[0], s, answer, dst_row, area)
 }
@@ -196,9 +198,10 @@ jet_eval_ir_host_row: fn(types: IRModule, s: &JetEvalIRState, key: Int) -> Int? 
 // a reflection predicate or compiler value projection, a `core.compiler`
 // query (owner `compiler`, no receiver) the compiler's query host answers,
 // or the build host's, which places its record or failure at the call's
-// `span`. `BuildError.into_err` is the default Err a BuildError converts to
-// (JetIR ir_try_reraise): its own record, which already is that Err.
-jet_eval_ir_host_answer: fn(s: &JetEvalIRState, owner: String, method: String, member: String, values: [TComptimeValue], fallible: Bool, impure: Bool, span: Span) -> TComptimeValue? {
+// `span` in source file `file`. `BuildError.into_err` is the default Err a
+// BuildError converts to (JetIR ir_try_reraise): its own record, which
+// already is that Err.
+jet_eval_ir_host_answer: fn(s: &JetEvalIRState, owner: String, method: String, member: String, values: [TComptimeValue], fallible: Bool, impure: Bool, span: Span, file: String) -> TComptimeValue? {
     if owner == "compiler" -> return jet_eval_ir_compiler_query(s, method, values, span)
     if member == "BuildError.into_err" && values.len() == 1 -> return Val(values[0])
     if jet_eval_reflection_metadata_supported(owner, method) {
@@ -214,7 +217,7 @@ jet_eval_ir_host_answer: fn(s: &JetEvalIRState, owner: String, method: String, m
             return None
         }
     }
-    reply: adapter.build_call(member, values, fallible, impure, span) ?? {
+    reply: adapter.build_call(member, values, fallible, impure, span, file) ?? {
         jet_eval_ir_unsupported(s, "compiler host method {member}")
         return None
     }

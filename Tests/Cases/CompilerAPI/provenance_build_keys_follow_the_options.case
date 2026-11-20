@@ -1,0 +1,48 @@
+# The receipt's compile and link keys cover the options each build used, so a different image never shares a key. -O0, -O2 (the stock level), --inline=off and --debug-info=false give four different compile keys and four different link keys; each option off its stock value is one more compile input, named with its value and keyed by its SHA-256, and the link key follows the compile key. Building again with the same flag gives the same keys. No cache decision reads these keys: the binary cache keys a target by its own options, so no build could take another's image by them. An option a dependency's function sets reaches the key too, and a flag that replaces it names it at its call in the dependency's file.
+fixture: ProvenanceOptions.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build app/main.jet -O0
+exit: 0
+json: file app/.jet/build/receipt.json doc $.nodes[?kind="compile"][0].input_digests[?name="options:optimize=O0"][0].digest = "2182e3e176449d1e29fd672bbdf70874088c4842711c2242fff18431475d5d33" # SHA-256 of `optimize=O0`
+capture: compile_o0 file app/.jet/build/receipt.json doc $.nodes[?kind="compile"][0].key
+capture: link_o0 file app/.jet/build/receipt.json doc $.nodes[?kind="link"][0].key
+json: file app/.jet/build/receipt.json doc $.nodes[?kind="link"][0].input_digests[0].digest = "{cap:compile_o0}" # the link key follows the compile key
+step: jet build app/main.jet -O2
+exit: 0
+json: file app/.jet/build/receipt.json doc $.nodes[?kind="compile"][0].inputs = ["check:main.jet"] # the stock level adds no input
+capture: compile_o2 file app/.jet/build/receipt.json doc $.nodes[?kind="compile"][0].key
+capture: link_o2 file app/.jet/build/receipt.json doc $.nodes[?kind="link"][0].key
+step: jet build app/main.jet --inline=off
+exit: 0
+json: file app/.jet/build/receipt.json doc $.nodes[?kind="compile"][0].input_digests[?name="options:inline=off"][0].digest = "01db0c5ace2c845dcb5e0b9485b4f056a82a6e5666fa1724ade8108181bee328" # SHA-256 of `inline=off`
+capture: compile_inline file app/.jet/build/receipt.json doc $.nodes[?kind="compile"][0].key
+capture: link_inline file app/.jet/build/receipt.json doc $.nodes[?kind="link"][0].key
+step: jet build app/main.jet --debug-info=false
+exit: 0
+json: file app/.jet/build/receipt.json doc $.nodes[?kind="compile"][0].input_digests[?name="options:debug_info=false"][0].digest = "2efef0e9840a3018b4e7c55026a7cb56ccefe4bdf9e96da87ccf14007f1af01e" # SHA-256 of `debug_info=false`
+capture: compile_debug file app/.jet/build/receipt.json doc $.nodes[?kind="compile"][0].key
+capture: link_debug file app/.jet/build/receipt.json doc $.nodes[?kind="link"][0].key
+cap:compile_o0: != "{cap:compile_o2}"
+cap:compile_o0: != "{cap:compile_inline}"
+cap:compile_o0: != "{cap:compile_debug}"
+cap:compile_o2: != "{cap:compile_inline}"
+cap:compile_o2: != "{cap:compile_debug}"
+cap:compile_inline: != "{cap:compile_debug}"
+cap:link_o0: != "{cap:link_o2}"
+cap:link_o0: != "{cap:link_inline}"
+cap:link_o0: != "{cap:link_debug}"
+cap:link_o2: != "{cap:link_inline}"
+cap:link_o2: != "{cap:link_debug}"
+cap:link_inline: != "{cap:link_debug}"
+step: jet build app/main.jet --inline=off
+exit: 0
+json: file app/.jet/build/receipt.json doc $.nodes[?kind="compile"][0].key = "{cap:compile_inline}" # the same options, the same compile key
+json: file app/.jet/build/receipt.json doc $.nodes[?kind="link"][0].key = "{cap:link_inline}" # and the same link key
+step: jet build handed/main.jet
+exit: 0
+stderr: !~ "note:" # no flag replaces the dependency's option
+json: file handed/.jet/build/receipt.json doc $.nodes[?kind="compile"][0].input_digests[?name="options:inline=off"][0].digest = "01db0c5ace2c845dcb5e0b9485b4f056a82a6e5666fa1724ade8108181bee328" # the option `tool.configure` set is in the key
+step: jet build handed/main.jet --inline=auto
+stderr: ~ "note: --inline=auto replaces b.inline(.Off) at ../tool/tool.jet:2 for this run" # named at its call in the dependency's file
+stderr: !~ "at main.jet" # not at an offset of the build file

@@ -42,9 +42,10 @@ JetEvalBuildHostAdapter: trait {
     clone_adapter: fn(self) -[]> JetEvalBuildHostAdapter Never!,
     // Build host method `member` (`Build.add_executable`, `BuildPlan.graph`,
     // `Dev.watch`) on `args`, the receiver first; `fallible` when the checked
-    // call returns a Result, `impure` when it sits in an `#Impure` block.
-    // None: no method of this host.
-    build_call: fn(self, member: String, args: [TComptimeValue], fallible: Bool, impure: Bool, span: Span) -[FS.Read, Net, Time.Wait]> JetEvalBuildReply?,
+    // call returns a Result, `impure` when it sits in an `#Impure` block;
+    // `span` the call's, in source file `file`. None: no method of this
+    // host.
+    build_call: fn(self, member: String, args: [TComptimeValue], fallible: Bool, impure: Bool, span: Span, file: String) -[FS.Read, Net, Time.Wait]> JetEvalBuildReply?,
 }
 
 // A host method's answer (a build host's, a compiler query host's): its

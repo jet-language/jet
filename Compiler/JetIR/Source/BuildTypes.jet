@@ -764,10 +764,11 @@ ir_host_value_row: fn(m: IRModule, p: IRProgram, row: Int) -> String? Never! {
 
 // Method `member` (`Owner.method`) of a compiler value, or `compiler.query`
 // for a `core.compiler` query, which the compiler answers (ir_host_route
-// kind 1): `member`, impure, the call's span start and end, (row, word)...
-// over `values` (the receiver first, then the arguments), `impure` inside an
-// `#Impure` block. The span places a build host call's record and failure
-// at the call, not at the invocation.
+// kind 1): `member`, impure, the call's span start and end, the source file
+// the span is in, (row, word)... over `values` (the receiver first, then the
+// arguments), `impure` inside an `#Impure` block. The span and file place a
+// build host call's record and failure at the call, not at the invocation,
+// in the file that holds it, a dependency's as well as the build's own.
 ir_host_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, member: String, values: [Int], span: Span) -> Int Never! {
     words := [Int]{}
     loop value in values {
@@ -793,7 +794,10 @@ ir_host_method_words: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, me
     member_text: ir_temp(m, b, string_row)
     ir_emit(b.f, IROp.ConstText, member_text, ir_intern_text(m, member), -1, -1, b.line)
     impure: if b.impure > 0 -> 1 else -> 0
-    operands := [Int]{member_text, ir_word_const(m, b, impure), ir_word_const(m, b, span.start), ir_word_const(m, b, span.end)}
+    file_text: ir_temp(m, b, string_row)
+    file_key: ir_intern_text(m, b.f.source_file)
+    ir_emit(b.f, IROp.ConstText, file_text, file_key, -1, -1, b.line)
+    operands := [Int]{member_text, ir_word_const(m, b, impure), ir_word_const(m, b, span.start), ir_word_const(m, b, span.end), file_text}
     loop word in words {
         // A host route names each operand's type row by its intern key.
         operands.push(ir_host_row_key(m, b, b.f.slot_type[word]))

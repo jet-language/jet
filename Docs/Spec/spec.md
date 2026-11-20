@@ -7496,7 +7496,14 @@ When `jet build` runs the graph of a `build: fn`, it leaves two records under
 the `core.build` `BuildGraph` it ran: its targets, steps with their keys, files
 and the compiler's own nodes, with each step that ran marked a cache miss in
 `cache_hit` (`cache_hits` lists none, since no step's outputs come from the
-store). `times.json` is its `BuildTimes`: one `BuildTime` row (`name`, `kind`
+store). A compile node's key covers the options its target was built with:
+each option not at its stock value (`-O2`, `--inline=off`, a `b.optimize`
+of `build: fn` or of a dependency's function it calls, the `os` of the
+target's toolchain) is one more input, `options:<name=value;...>`, and the
+link node follows the compile node's key. Two builds whose options differ in
+one such value have different keys; two builds with the same options have
+the same keys, and a stock build's keys are the plan's (`jet inspect build`).
+`times.json` is its `BuildTimes`: one `BuildTime` row (`name`, `kind`
 `step`, `host`, `image` or `library`, `wall_ms`, `reused`) per step and target,
 in the order each finished. A step's `wall_ms` is the time of the steps that ran
 with it, and `reused` is false, since every image is built. Both are

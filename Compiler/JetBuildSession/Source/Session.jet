@@ -224,13 +224,15 @@ BuildSessionTarget: struct {
 
 // A build option `build: fn` set (`b.optimize(.O2)`) or pinned
 // (`b.pin(.optimize, .O2)`): its row and value as the option table spells
-// them (JetFoundation BuildOptions.jet), and the call's span.
+// them (JetFoundation BuildOptions.jet), and the call's span in source file
+// `file` ("" for the build file).
 BuildSessionOption: struct {
     name: String,
     value: String,
     pinned: Bool,
     start: Int,
     end: Int,
+    file: String{""},
 }
 
 // One `Compiler` value `b.compiler(target)` made: the target it acts on, the
@@ -285,8 +287,11 @@ BuildSessionState: struct {
     refused: Bool{false},
     // Each finding `meta.report` raised, in call order.
     findings: [BuildSessionFinding]{[BuildSessionFinding]{}},
+    // The call being answered: its span, in source file `file`
+    // (build_session_at; "" for the build file).
     start: Int,
     end: Int,
+    file: String{""},
 }
 
 BuildSession: struct {
@@ -336,6 +341,14 @@ build_session_refuse: fn(session: &BuildSession) Never! {
 build_session_refused: fn(session: BuildSession) -> Bool Never! {
     permit: session.storage.guard_read()
     permit.value.refused
+}
+
+// The next call's span is in source file `file` (a dependency's function's
+// call as well as the build file's), which an option it sets names as its
+// site.
+build_session_at: fn(session: &BuildSession, file: String) Never! {
+    permit := session.storage.guard_edit()
+    permit.value.file = file
 }
 
 // The words after `--` on `jet build` (`b.args()`); a new session has none.
@@ -768,10 +781,10 @@ build_session_set_option: fn(state: &BuildSessionState, args: [BuildSessionValue
         if state.options[index].pinned && !pinned {
             return BuildSessionReply.Value{value: BuildSessionValue.Unit}
         }
-        state.options[index] = BuildSessionOption{name: name.copy(), value: value.copy(), pinned: pinned, start: start, end: end}
+        state.options[index] = BuildSessionOption{name: name.copy(), value: value.copy(), pinned: pinned, start: start, end: end, file: state.file}
         return BuildSessionReply.Value{value: BuildSessionValue.Unit}
     }
-    state.options.push(BuildSessionOption{name: name, value: value, pinned: pinned, start: start, end: end})
+    state.options.push(BuildSessionOption{name: name, value: value, pinned: pinned, start: start, end: end, file: state.file})
     BuildSessionReply.Value{value: BuildSessionValue.Unit}
 }
 
