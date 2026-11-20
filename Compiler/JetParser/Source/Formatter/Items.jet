@@ -1727,6 +1727,8 @@ jfmt_fmt_trait_impl_block: fn(f: &JetFmt, block: TraitImplBlock) {
     if block.delegation_field == .Val(field) {
         jfmt_write(f, " using ")
         jfmt_write(f, field)
+        // The comment written after the field, on its line.
+        if block.span == .Val(span) -> jfmt_emit_trailing(f, span.end)
         return
     }
     jfmt_write(f, " {{")

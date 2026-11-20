@@ -351,15 +351,6 @@ jfmt_uses_classic_if_spelling: fn(bytes: [U8], if_span: Span, first_condition: S
     true
 }
 
-// Rust `Expr.without_parens`.
-jfmt_expr_without_parens: fn(expr: Expr) -> Expr Never! {
-    current := expr
-    loop {
-        if current == .Paren(inner, _, _) -> current = inner else { break }
-    }
-    current
-}
-
 // `self.out.trim_end().ends_with('}')`.
 jfmt_out_trimmed_ends_with_close: fn(f: JetFmt) -> Bool Never! {
     index := f.out.len() - 1
@@ -2054,20 +2045,6 @@ jfmt_same_subject: fn(f: JetFmt, a: Expr, subject: Expr) -> Bool Never! {
     jfmt_src_text(f, a_start, a_end) == jfmt_src_text(f, subject_start, subject_end)
 }
 
-// Subject-first test-binds own their `==` delimiter, so outer parens around an
-// already-postfix subject are redundant. Keep grouping inside the subject:
-// `(left + right).method()` still needs its receiver parens.
-jfmt_fmt_refutable_subject: fn(f: &JetFmt, expr: Expr) {
-    unwrapped: jfmt_expr_without_parens(expr)
-    postfix: if unwrapped == {
-        .Call(_, _) | .CallValue(_, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) -> true
-        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
-    }
-    if postfix -> jfmt_fmt_expr(f, unwrapped, JFMT_PREC_CMP) else {
-        jfmt_fmt_expr(f, expr, JFMT_PREC_CMP)
-    }
-}
-
 jfmt_fmt_binding: fn(f: &JetFmt, b: Binding) {
     if b.meta == .Val(meta) {
         jfmt_fmt_meta_attr(f, meta)
@@ -2090,9 +2067,10 @@ jfmt_fmt_binding: fn(f: &JetFmt, b: Binding) {
     }
     if b.pattern == .Val(pattern_value) {
         if pattern_value == .Refutable(pattern, fallback, _, _) {
-            // This statement has no binding sigil in its
-            // surface form; the successful pattern captures are the locals.
-            jfmt_fmt_refutable_subject(f, b.init)
+            // This statement has no binding sigil in its surface form; the
+            // successful pattern captures are the locals. The subject keeps
+            // the grouping parens its author wrote (#6898 c20).
+            jfmt_fmt_expr(f, b.init, JFMT_PREC_CMP)
             jfmt_write(f, " == ")
             jfmt_fmt_pattern(f, pattern)
             jfmt_write(f, " ")

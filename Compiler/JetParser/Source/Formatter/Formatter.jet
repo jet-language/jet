@@ -10,6 +10,7 @@ use {
         AppliedRuleApplication,
         BinOp,
         Binding,
+        BLOCK_COMMENT_OPEN,
         COMMENT_PREFIX,
         Diagnostic,
         DIAGNOSTIC_ERROR,
@@ -1016,6 +1017,15 @@ jfmt_emit_leading: fn(f: &JetFmt, pos: Int) Never! {
         // refcounted text.
         comment: f.comments[f.comment_i].copy()
         if comment.span.start >= pos -> break
+        // A block comment written just before the code at `pos`, on its line,
+        // stays there: `x: /* note */ 7`.
+        if !f.at_line_start && f.out.len() > 0 && comment.text.starts_with(BLOCK_COMMENT_OPEN) && jfmt_line_of(f, comment.span.end) == jfmt_line_of(f, pos) {
+            if f.out[f.out.len() - 1] != 32 -> jfmt_write(f, " ")
+            jfmt_emit_comment_inline(f, comment.text)
+            jfmt_write(f, " ")
+            f.comment_i += 1
+            next
+        }
         if jfmt_is_trailing_comment_at(f, comment.span) -> break
         jfmt_emit_comment_line(f, comment.text)
         f.comment_i += 1
@@ -1555,7 +1565,11 @@ jfmt_fmt_body_expanded: fn(f: &JetFmt, body: [Stmt]) {
 // starts at its leftmost operand (jfmt_expr_start): a method call's own span
 // starts after its receiver.
 jfmt_single_stmt_braces: fn(f: JetFmt, stmt: Stmt) -> JetFmtBraces? Never! {
-    start: if stmt == .Expr(expr) -> jfmt_expr_start(expr) else -> jfmt_stmt_start(stmt)
+    jfmt_braces_before(f, if stmt == .Expr(expr) -> jfmt_expr_start(expr) else -> jfmt_stmt_start(stmt))
+}
+
+// The `{ … }` whose `{` is the last token before source offset `start`.
+jfmt_braces_before: fn(f: JetFmt, start: Int) -> JetFmtBraces? Never! {
     if start < 0 || start > f.src_bytes.len() -> return None
     brace: jfmt_bytes_rfind(f.src_bytes, start, "{{")
     if brace < 0 -> return None
