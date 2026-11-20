@@ -8,7 +8,7 @@ env: JETPACK_ENV=1
 step first: jet test
 cwd: app
 exit: 0 # a missing snapshot is recorded, not failed
-file: app/__snapshots__/run_jet_8.snap ~ "hello\n" # named after the call's file and line
+file: app/__snapshots__/run_jet_6.snap ~ "hello\n" # named after the call's file and line
 
 step again: jet test
 cwd: app
@@ -19,14 +19,14 @@ copy: alt/changed.jet app/run.jet
 step changed: jet test
 cwd: app
 exit: nonzero # the new value differs from the snapshot
-stderr: ~ "snapshot differs: run_jet_8" # the failure names the snapshot
+stderr: ~ "snapshot differs: run_jet_6" # the failure names the snapshot
 stderr: ~ "-hello\n+hello, world\n" # the unified diff body
-file: app/__snapshots__/run_jet_8.snap ~ "hello\n" # a plain run leaves the snapshot alone
+file: app/__snapshots__/run_jet_6.snap ~ "hello\n" # a plain run leaves the snapshot alone
 
 step update: jet test -u
 cwd: app
 exit: 0 # -u rewrites the snapshot
-file: app/__snapshots__/run_jet_8.snap ~ "hello, world\n" # the snapshot holds the new value
+file: app/__snapshots__/run_jet_6.snap ~ "hello, world\n" # the snapshot holds the new value
 
 step check: jet test
 cwd: app
