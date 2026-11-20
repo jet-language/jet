@@ -350,6 +350,10 @@ direct indexed compound updates remain E0164 (copy, update, then store), and a
 map slot with a starting value takes them in place: `counts[w, or: 0] += 1`.
 User-record compound arithmetic requires the same operator hook as its binary
 form; without that hook sema reports E0360, before any execution tier runs.
+An exact number (`Decimal`, `Fraction`, `Complex`) updates as its binary form
+does too: `total += value` takes the same operand pairs, Int lift and result
+type as `total = total + value`, so a `Decimal /= Decimal` (a Fraction
+quotient) is refused as the expanded form is.
 Operator implementation identity includes the left type, trait, and right type
 (D-OPMIX1). Hooks with different right types are distinct trait instantiations,
 not ordinary method-name overloads. Binary operators and explicit calls such as

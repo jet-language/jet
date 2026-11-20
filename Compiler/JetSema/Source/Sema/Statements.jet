@@ -8653,12 +8653,14 @@ sema_stmt_compound_missing_struct_hook: fn(op: BinOp, place: Type, environment: 
 // (Rust `check_stmt`): compound arithmetic is the same operator as
 // its binary form, so on a place whose type has no built-in arithmetic (a
 // nominal type: an operator-hook struct such as `Vec3`, a time, unit,
-// geometry or distinct carrier) `place op= value` checks as
-// `place = place op value` and the checked tree sees one binary spine. The binary check
-// then resolves the hook or reports E0360 at the operator, as Rust's
-// missing-hook report does. Numbers, exact numbers and `String +=` keep the
-// compound route. Only a local or a field of a local qualifies: a nominal
-// field below an index keeps E0362, and an indexed slot keeps E0164.
+// geometry or distinct carrier, or an exact number such as `Decimal`)
+// `place op= value` checks as `place = place op value` and the checked tree
+// sees one binary spine. The binary check then resolves the hook, the exact
+// number's operation (which takes `Decimal` and `core.math.Decimal` as one
+// type and lifts an Int operand), or reports E0360 at the operator, as Rust's
+// missing-hook report does. Numbers and `String +=` keep the compound route.
+// Only a local or a field of a local qualifies: a nominal field below an
+// index keeps E0362, and an indexed slot keeps E0164.
 sema_stmt_compound_hook_operator: fn(op: BinOp?) -> BinOp? Never! {
     operator: op ?? return None
     if operator != BinOp.Add && operator != BinOp.Sub && operator != BinOp.Mul && operator != BinOp.Div {
@@ -8699,7 +8701,7 @@ sema_stmt_compound_nominal: fn(ty: Type) -> Bool Never! {
 }
 
 sema_stmt_compound_hooked_place: fn(ty: Type) -> Bool {
-    sema_stmt_compound_nominal(ty) && !sema_expr_is_numeric(ty) && sema_expr_precise_name(ty) == None && ty != Type.String
+    sema_stmt_compound_nominal(ty) && !sema_expr_is_numeric(ty) && ty != Type.String
 }
 
 // A silent exit of an assignment check: when nothing since `diagnostics`/

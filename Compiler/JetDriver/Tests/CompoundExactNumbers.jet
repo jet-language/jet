@@ -1,0 +1,133 @@
+// Compound arithmetic on an exact number checks as its binary form (JetSema
+// Statements.jet `sema_stmt_compound_hooked_place`). A Decimal or Fraction
+// local made by `Decimal("0")` takes a value read from a `[Decimal]` or
+// `[Fraction]` parameter (the `core.math` identity of the same type) and lifts
+// an Int operand, as `place = place op value` does. A refused update reports
+// what its expanded form reports, and the compound text `jet fmt` writes for
+// the expanded form checks.
+use {
+    jet_driver.[
+        JetDriverAuthorizedSourceFile,
+        JetDriverAuthorizedSourceRoot,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode,
+        jet_driver_compile,
+        jet_driver_has_errors,
+        jet_driver_runtime_interface_sources,
+    ]
+    jet_cli.[jet_cli_builtin_core_rows, jet_cli_driver_request]
+    jet_parser.[jet_format_source]
+}
+
+// `place op= value` when `compound`, else `place = place op value`.
+compound_exact_update: fn(compound: Bool, place: String, op: String, value: String) -> String {
+    if compound -> "{place} {op}= {value}" else -> "{place} = {place} {op} {value}"
+}
+
+// Decimal and Fraction updates of locals and of a parameter's field, every
+// one written compound or every one expanded.
+compound_exact_source: fn(compound: Bool) -> String {
+    add_value: compound_exact_update(compound, "total", "+", "value")
+    add_two: compound_exact_update(compound, "total", "+", "2")
+    take_quarter: compound_exact_update(compound, "total", "-", "Decimal(\"0.25\")")
+    triple: compound_exact_update(compound, "total", "*", "3")
+    credit_value: compound_exact_update(compound, "wallet.total", "+", "value")
+    credit_count: compound_exact_update(compound, "wallet.total", "+", "count")
+    add_one: compound_exact_update(compound, "total", "+", "1")
+    [String]{
+        "Wallet: struct {{",
+        "    total: Decimal,",
+        "}}",
+        "",
+        "sum: fn(values: [Decimal]) -> Decimal {{",
+        "    total := Decimal(\"0\")",
+        "    loop value in values -> {add_value}",
+        "    {add_two}",
+        "    {take_quarter}",
+        "    {triple}",
+        "    total",
+        "}}",
+        "",
+        "credit: fn(wallet: &Wallet, value: Decimal, count: Int) {{",
+        "    {credit_value}",
+        "    {credit_count}",
+        "}}",
+        "",
+        "share: fn(values: [Fraction]) -> Fraction {{",
+        "    total := Decimal(\"0\") / Decimal(\"1\")",
+        "    loop value in values -> {add_value}",
+        "    {add_one}",
+        "    total",
+        "}}",
+        "",
+        "run: fn() {{",
+        "    print(sum([Decimal]{{Decimal(\"1.5\"), Decimal(\"2.25\")}}))",
+        "    wallet := Wallet{{total: Decimal(\"10\")}}",
+        "    credit(wallet, Decimal(\"0.75\"), 2)",
+        "    print(wallet.total)",
+        "    print(share([Fraction]{{Decimal(\"1\") / Decimal(\"3\"), Decimal(\"1\") / Decimal(\"6\")}}))",
+        "}}",
+        "",
+    }.join("\n")
+}
+
+// A Decimal local divided by a Decimal parameter: the quotient is a Fraction,
+// which the local does not hold.
+compound_exact_refused_source: fn(compound: Bool) -> String {
+    divide: compound_exact_update(compound, "total", "/", "value")
+    [String]{
+        "halve: fn(values: [Decimal]) -> Decimal {{",
+        "    total := Decimal(\"1\")",
+        "    loop value in values -> {divide}",
+        "    total",
+        "}}",
+        "",
+    }.join("\n")
+}
+
+// Each diagnostic of a check of `source` as `code what`.
+compound_exact_problems: fn(source: String) -> [String] {
+    snapshot: JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{
+            JetDriverAuthorizedSourceRoot{
+                canonical_path: "/compound-exact",
+                identity: "compound-exact-root",
+                allow_hardlinks: false,
+                files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/compound-exact/main.jet", relative_path: "main.jet", identity: "compound-exact-file", source: source}},
+                foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+            },
+        },
+        entry_root_identity: "compound-exact-root",
+        entry_path: "/compound-exact/main.jet",
+    }
+    core_rows := jet_cli_builtin_core_rows()
+    core_rows.extend(jet_driver_runtime_interface_sources())
+    compiled: jet_driver_compile(jet_cli_driver_request(snapshot, core_rows, Val(1), JetDriverCompileMode.Check))
+    assert(compiled.internal_problem == None, "the check met an internal problem: {compiled.internal_problem:Debug}")
+    problems := [String]{}
+    loop diagnostic in compiled.diagnostics { problems.push("{diagnostic.code} {diagnostic.what}") }
+    if !jet_driver_has_errors(compiled.diagnostics) -> problems.push("no errors")
+    problems
+}
+
+#Test("exact-number compound updates check as their expanded forms") {
+    expanded: compound_exact_problems(compound_exact_source(false))
+    assert(expanded.contains("no errors"), "the expanded updates check: {expanded:Debug}")
+    compound: compound_exact_problems(compound_exact_source(true))
+    assert(compound == expanded, "the compound updates report what the expanded ones do:\ncompound {compound:Debug}\nexpanded {expanded:Debug}")
+}
+
+#Test("a refused exact-number compound update reports what its expanded form reports") {
+    expanded: compound_exact_problems(compound_exact_refused_source(false))
+    assert(!expanded.contains("no errors"), "a Fraction quotient into a Decimal local is refused")
+    compound: compound_exact_problems(compound_exact_refused_source(true))
+    assert(compound == expanded, "the compound division reports what the expanded one does:\ncompound {compound:Debug}\nexpanded {expanded:Debug}")
+}
+
+#Test("the compound form jet fmt writes for expanded exact-number updates checks") {
+    formatted: jet_format_source(compound_exact_source(false), false)
+    assert(formatted.ok, "the expanded program formats: {formatted.diagnostics.map(fn(row) { row.what })}")
+    assert(formatted.text == compound_exact_source(true), "jet fmt writes each expanded update compound:\n{formatted.text}")
+    problems: compound_exact_problems(formatted.text)
+    assert(problems.contains("no errors"), "the formatted program checks: {problems:Debug}")
+}
