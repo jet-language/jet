@@ -495,3 +495,30 @@ upload: fn() -[Bucket{name: "photos"}]> {}
 `
     assert_eq(fmt_core_stable(source), source)
 }
+
+// An `#Allow(…)` on an assignment stays on it whatever the place is: a
+// local, an index, a field of an index, a field, and their compound forms.
+#Test("allow_on_an_assignment_is_kept") {
+    source: `P: struct {
+    x: Int,
+}
+
+main: fn() {
+    ps := [P]{P{x: 0}}
+    counts := [String:Int]{}
+    total := 0
+    p := P{x: 0}
+    loop key in ([String]{"a", "b"}) {
+        #Allow(jet.HiddenCopyInLoop, "the key is small") counts[key] = 1
+        #Allow(jet.HiddenCopyInLoop, "an index's field") ps[0].x = 2
+        #Allow(jet.HiddenCopyInLoop, "a field") p.x = 2
+        #Allow(jet.HiddenCopyInLoop, "a local") total = 3
+        #Allow(jet.HiddenCopyInLoop, "a compound local") total += 1
+        #Allow(jet.HiddenCopyInLoop, "a compound index") counts[key] += 1
+        #Allow(jet.HiddenCopyInLoop, "a compound field") ps[0].x += 1
+    }
+    print("{total} {p.x} {counts.len()} {ps[0].x}")
+}
+`
+    assert_eq(fmt_core_stable(source), source)
+}
