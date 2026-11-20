@@ -1,0 +1,19 @@
+# The Canvas page lists every local of the paused frame with its type and
+# value, a String, a list, a struct, a Bool and an Int, in the node's details
+# and in the Debug view, and a Next clicked in Debug Controls shows the value
+# the line assigned, never the one read before. Tools/CanvasTest/Run.jet
+# `scenario` serves the program with `jet dev --canvas` and drives the page in
+# Chromium (Tools/CanvasTest/DebugScenarios.jet).
+requires: os-name:linux
+requires: tool:chromium
+requires: tool:chromedriver
+fixture: CanvasDebugPausedLocals.fixture
+env: NO_COLOR=1
+env: JET_PROJECT_ROOT={work}
+env: JET_BIN={jet}
+env: TMPDIR={scratch}
+step: jetpack browser lock chromium --binary {tool:chromium} --version 152.0.7977.64 --protocol bidi-2025.5 --driver {tool:chromedriver}
+exit: 0
+step: jet run --allow=Env,Exec,FS,IO,Net,Time {root}/Tools/CanvasTest/Run.jet -- scenario --scenario debug_paused_locals --source jet_debug_canvas_paused_locals.jet
+exit: 0
+stdout: ~ "PASS chromium debug_paused_locals" # the scenario's one pass line; it fails on the first local the page doesn't list

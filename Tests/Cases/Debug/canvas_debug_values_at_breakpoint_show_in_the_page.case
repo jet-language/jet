@@ -1,0 +1,20 @@
+# The Canvas page shows a stop's live values where the debugger found them:
+# both frames, the callee's argument and the active node at the breakpoint,
+# then, after Finish and four Nexts clicked in the Debug view, the caller's
+# stack, its computed total and a wire path that ends at the active wire and
+# never holds the untaken arm. Tools/CanvasTest/Run.jet `scenario` serves the
+# program with `jet dev --canvas` and checks each answer the page received
+# and what its details and Debug view show (Tools/CanvasTest/DebugScenarios.jet).
+requires: os-name:linux
+requires: tool:chromium
+requires: tool:chromedriver
+fixture: CanvasDebugValuesAtBreakpoint.fixture
+env: NO_COLOR=1
+env: JET_PROJECT_ROOT={work}
+env: JET_BIN={jet}
+env: TMPDIR={scratch}
+step: jetpack browser lock chromium --binary {tool:chromium} --version 152.0.7977.64 --protocol bidi-2025.5 --driver {tool:chromedriver}
+exit: 0
+step: jet run --allow=Env,Exec,FS,IO,Net,Time {root}/Tools/CanvasTest/Run.jet -- scenario --scenario debug_values_at_breakpoint --source jet_debug_canvas_values_at_breakpoint.jet
+exit: 0
+stdout: ~ "PASS chromium debug_values_at_breakpoint" # the scenario's one pass line; it fails on the first value the page doesn't show

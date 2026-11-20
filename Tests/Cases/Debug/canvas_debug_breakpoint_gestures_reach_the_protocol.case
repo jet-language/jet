@@ -1,0 +1,20 @@
+# A breakpoint set and cleared on a node of the Canvas page, and its Start,
+# Continue and Step buttons, reach the debugger through the requests the page
+# itself sends. Tools/CanvasTest/Run.jet `scenario` serves the program with
+# `jet dev --canvas` and drives the page in Chromium with pointer clicks only;
+# it records each request the page sends to the debug route and fails unless
+# the request holds the node's source span and the answer stops on it. The
+# scenario's own checks are listed in Tools/CanvasTest/DebugScenarios.jet.
+requires: os-name:linux
+requires: tool:chromium
+requires: tool:chromedriver
+fixture: CanvasDebugValuesAtBreakpoint.fixture
+env: NO_COLOR=1
+env: JET_PROJECT_ROOT={work}
+env: JET_BIN={jet}
+env: TMPDIR={scratch}
+step: jetpack browser lock chromium --binary {tool:chromium} --version 152.0.7977.64 --protocol bidi-2025.5 --driver {tool:chromedriver}
+exit: 0
+step: jet run --allow=Env,Exec,FS,IO,Net,Time {root}/Tools/CanvasTest/Run.jet -- scenario --scenario breakpoint_gestures --source jet_debug_canvas_values_at_breakpoint.jet
+exit: 0
+stdout: ~ "PASS chromium breakpoint_gestures" # the scenario's one pass line; it fails on the first gesture that doesn't reach the protocol

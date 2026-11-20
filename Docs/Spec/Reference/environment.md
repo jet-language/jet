@@ -138,7 +138,7 @@ object. A URL's user and password never appear in that list.
 | `JET_BUILD_LINE` | text | The build line the gauntlet's performance receipt records. Unset, the receipt records none. |
 | `JET_CALL_GRAPH` | `auto`, `fp` or `dwarf` | How the live compiler profile (`Tools/Perf/JetcProfile/Live`) records stacks; `auto` takes frame pointers and retakes a DWARF window when they are mostly truncated. Unset, `auto`. |
 | `JET_CANVAS_BROWSER` | `chromium` or `firefox` | The browser of a `Tools/CanvasTest/Run.jet` scenario when `--browser` names none. Unset, `chromium`. |
-| `JET_CANVAS_PORT` | port | The `jet dev --canvas` port a `Tools/CanvasTest/Run.jet` scenario drives when `--port` names none. |
+| `JET_CANVAS_PORT` | port | The `jet dev --canvas` port a `Tools/CanvasTest/Run.jet` scenario drives when `--port` names none. Unset, the scenario serves its own program (`--source`, else `JET_SOURCE`) with `jet dev --canvas` for its length. |
 | `JET_CFFI_ABI` | ABI name | Selects the C-ABI matrix row. Companion `JET_CFFI_CC`, `JET_CFFI_AR`, `JET_CFFI_RUST_TARGET`, `JET_CFFI_RUST_LINKER`, and `JET_CFFI_RUNNER` name that row's tools and target. |
 | `JET_CHECK_MEM` | a size such as `20G`, `512M` or `4096K`, or `off` | The address-space cap of each compiler check `Tools/Agent/LaneCheck.jet` runs; `off` runs it uncapped. Unset, `20G`. |
 | `JET_CHECK_SLOTS` | count | How many compiler checks of `Tools/Agent/LaneCheck.jet` run at once on the machine; the rest wait for a slot. Unset, 2. |
@@ -176,7 +176,7 @@ object. A URL's user and password never appear in that list.
 | `JET_SEED` | path | Checkout tool root (`Tools/Agent/roots.sh`): the admitted seed compiler's directory. Unset, `$JET_SEEDS/current`. |
 | `JET_SEEDS` | path | Checkout tool root (`Tools/Agent/roots.sh`): the seed store. Unset, `${XDG_DATA_HOME:-~/.local/share}/jet-seeds`. |
 | `JET_SELFHOST_SCRATCH` | path | The directory the self-host study (`Tools/Perf/Selfhost`) makes its run directories in. Unset, `$JET_STATE_ROOT/selfhost`. |
-| `JET_SOURCE` | path | The program `Tools/CanvasTest/Run.jet native-lifecycle` serves with `jet dev --canvas`. Unset, `Examples/Tooling/CanvasBlueprintDemo.jet`. |
+| `JET_SOURCE` | path | The program `Tools/CanvasTest/Run.jet native-lifecycle` serves with `jet dev --canvas`, and a `scenario` serves when neither `--port` nor `--source` names one. Unset, `Examples/Tooling/CanvasBlueprintDemo.jet`. |
 | `JET_SOURCE_MAP` | path | The compiler source map the live compiler profile resolves addresses through. Unset, the stage-1 self-check's `compiler.map.json` under `$JET_STATE_ROOT`. |
 | `JET_STATE_ROOT` | path | Checkout tool root (`Tools/Agent/roots.sh`): per-user dev state and caches. Each root is read from the environment, else from `${XDG_CONFIG_HOME:-~/.config}/jet/env`. Unset, `${XDG_CACHE_HOME:-~/.cache}/jet-dev`. |
 | `JET_STREAM_BENCH_COMMAND` | command line | The Jet command `Tools/Perf/StreamBench/run.jet` runs, split as a shell splits it. Unset, `Tools/Agent/JetEnv.jet jet`. |

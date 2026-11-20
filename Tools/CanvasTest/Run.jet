@@ -3,10 +3,15 @@
 //   jet run --allow=Env,Exec,FS,IO,Net,Time Tools/CanvasTest/Run.jet -- <mode> ...
 //
 // Modes:
-//   scenario --scenario N --port P [--browser chromium|firefox] [--session S]
-//            [--out-dir D] [--seed 373] [--program-target T]
-//       One Canvas scenario against a running `jet dev --canvas` server. No
-//       scenario is ported to Jet yet (#6418), so a named scenario fails.
+//   scenario --scenario N [--browser chromium|firefox] [--out-dir D]
+//            [--source P | --port P [--session S]]
+//       One Canvas scenario in a fresh browser tab. With --port it drives the
+//       running `jet dev --canvas` server on that port; without it, it serves
+//       a copy of the source ($JET_SOURCE) with `jet dev --canvas` ($JET_BIN)
+//       for the scenario's length. The scenarios: breakpoint_gestures,
+//       debug_values_at_breakpoint, debug_paused_locals and
+//       debug_disconnect_not_live (DebugScenarios.jet); a name that isn't
+//       one of them fails as not ported.
 //   native-lifecycle
 //       `jet dev --canvas` ($JET_BIN, $JET_SOURCE) refuses a missing source,
 //       stays ready when its browser launch fails, serves two browser
@@ -63,8 +68,6 @@ use {
     core.encoding.[Dyn]
 }
 
-C_DEFAULT_SEED: 373
-
 run: fn() {
     args: process.args()
     mode: if args.len() == 0 || args[0].starts_with("--") -> "scenario" else -> args[0].copy()
@@ -84,7 +87,7 @@ run: fn() {
 }
 
 usage: fn(message: String) -> Never {
-    process.fail(2, "{message}\nusage: Run.jet scenario --scenario N --port P [--browser B] [--session S] [--out-dir D] [--seed N] [--program-target T]\n       Run.jet native-lifecycle | native-serve | native-edit | native-history | native-debug-panels | native-debug-replay [--replay-source P] [--dump-source P] | driver-lifecycle [COUNT] | gecko-lifecycle")
+    process.fail(2, "{message}\nusage: Run.jet scenario --scenario N [--browser B] [--out-dir D] [--source P | --port P [--session S]]\n       Run.jet native-lifecycle | native-serve | native-edit | native-history | native-debug-panels | native-debug-replay [--replay-source P] [--dump-source P] | driver-lifecycle [COUNT] | gecko-lifecycle")
 }
 
 fail: fn(message: String) -> Never { process.fail(1, "FAIL {message}") }
@@ -102,11 +105,69 @@ option: fn(args: [String], name: String, env: String, fallback: String) -> Strin
 
 scenario_mode: fn(args: [String]) {
     name: option(args, "--scenario", "", "")
-    port: Int.parse(option(args, "--port", "JET_CANVAS_PORT", "0")) ?? 0
-    browser: option(args, "--browser", "JET_CANVAS_BROWSER", "chromium")
     if name == "" -> usage("unknown scenario: (missing)")
-    if port <= 0 -> usage("missing --port")
-    fail("{browser} {name}: scenario {name} is not ported to Jet yet (#6418)")
+    browser: option(args, "--browser", "JET_CANVAS_BROWSER", "chromium")
+    port: Int.parse(option(args, "--port", "JET_CANVAS_PORT", "0")) ?? 0
+    out_dir: option(args, "--out-dir", "", "{process.env_get("TMPDIR") ?? "/tmp"}/canvas-scenarios")
+    if port > 0 {
+        canvas_url: "http://127.0.0.1:{port}/canvas?session={option(args, "--session", "", "")}"
+        scenario_on(browser, name, canvas_url, out_dir) ?? fail("{browser} {name}: {err.message}")
+        print("PASS {browser} {name}")
+        return
+    }
+    jet: process.env_get("JET_BIN") ?? usage("JET_BIN is required without --port")
+    source: option(args, "--source", "JET_SOURCE", "Examples/Tooling/CanvasBlueprintDemo.jet")
+    original: files.read(source) ?? fail("cannot read {source}: {err}")
+    scratch: files.temp_dir("canvas-scenario") ?? fail("cannot make a scratch folder: {err}")
+    // The copy keeps the source's name, which the session's source id is.
+    entry: files.basename(source)
+    files.write("{scratch.path}/{entry}", original) ?? fail("cannot write {scratch.path}/{entry}: {err}")
+    server: process.cmd([String]{jet, "dev", entry, "--canvas"}).cwd(scratch.path)
+        .env("JET_CANVAS_BROWSER", "/definitely/missing/canvas-browser")
+        .stdout(.Capture).stderr(.Capture).spawn() ?? fail("cannot start jet dev: {err}")
+    canvas_url := ""
+    loop line in server.stdout.lines() {
+        if line.starts_with("Canvas: http") {
+            canvas_url = line.slice(8..<line.len()).trim()
+            break
+        }
+    }
+    if canvas_url == "" {
+        server.kill().drop("jet dev already exited")
+        server.wait().drop("the receipt is not needed")
+        fail("jet dev exited before printing its Canvas URL")
+    }
+    if scenario_on(browser, name, canvas_url, out_dir) == .Err(problem) {
+        server.kill().drop("jet dev already exited")
+        server.wait().drop("the receipt is not needed")
+        fail("{browser} {name}: {problem.message}")
+    }
+    server.kill().drop("the scenario is over")
+    server.wait().drop("a killed jet dev has no status to check")
+    print("PASS {browser} {name}")
+}
+
+// Run scenario `name` in a fresh `browser` tab on the Canvas at `canvas_url`.
+scenario_on: fn(browser: String, name: String, canvas_url: String, out_dir: String) Failure! {
+    d: driver_launch(browser)
+    origin: url_origin(canvas_url).split(":").to_list()
+    port: Int.parse(origin[origin.len() - 1]) ?? 0
+    c: Ctx{d: d, port: port, session: url_param(canvas_url, "session"), out_dir: "{out_dir}", scenario: "{name}"}
+    if run_scenario(c) == .Err(problem) {
+        driver_close(d)
+        return Err(problem)
+    }
+    driver_close(d)
+}
+
+run_scenario: fn(c: Ctx) Failure! {
+    if c.scenario == {
+        "breakpoint_gestures" -> breakpoint_gestures(c)
+        "debug_values_at_breakpoint" -> debug_values_at_breakpoint(c)
+        "debug_paused_locals" -> debug_paused_locals(c)
+        "debug_disconnect_not_live" -> debug_disconnect_not_live(c)
+        else -> Err(fail_with("scenario {c.scenario} is not ported to Jet yet"))
+    }
 }
 
 // --- driver and gecko lifecycles ---------------------------------------------------
