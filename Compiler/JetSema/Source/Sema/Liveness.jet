@@ -36,6 +36,7 @@ use {
         diagnostic_with_edit,
         jet_target_layout_enum_backing,
         jet_target_layout_enum_c_tag,
+        module_is_core,
     ]
     jet_parser.[parse_type_text]
 }
@@ -967,7 +968,9 @@ sema_liveness_landed_value: fn(tree: BodyTree, id: Int) -> Bool Never! {
 
 // The markers whose uses reflect the type they mark: a marker type (an
 // `impl Marker` block), a declared marker and a trait's derive (an
-// `impl Name.Derive` template).
+// `impl Name.Derive` template). A declared marker registers no root
+// declaration, so the module's items hold it; a Core marker's reads are
+// the uses its own rules name.
 sema_liveness_user_markers: fn(graph: SemaRegistrationGraph) -[Mem.Alloc]> [String:Bool] Never! {
     markers := [String:Bool]{}
     loop module_row in graph.modules {
@@ -976,8 +979,8 @@ sema_liveness_user_markers: fn(graph: SemaRegistrationGraph) -[Mem.Alloc]> [Stri
                 markers[sema_call_reflection_leaf_name(sema_inline_member_source_name(nominal.symbol.name))] = true
             }
         }
-        loop item in module_row.declarations {
-            if item == .MarkerDecl(declared) {
+        if !module_is_core(module_row.module_identity) {
+            loop declared in sema_marker_module_declarations(module_row.program.items, "", false) {
                 markers[sema_call_reflection_leaf_name(declared.name)] = true
             }
         }

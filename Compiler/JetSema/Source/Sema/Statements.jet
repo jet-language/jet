@@ -6376,15 +6376,28 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     if string_view -> let_ty = TLetTy.StrView
     gc_promotion := if binding.gc_promotion == .Val(promotion) -> Val(sema_function_memory_tree_promotion(promotion)) else -> None
     stored := view_init ?? init
+    span := Span{start: binding.name_span.start, end: expr_span(binding.init).end}
     if folded == .Val(number) {
         stored = sema_tree_node(init.ty, TExprKind.IntLit{value: number, width: None}, init.span)
     } else if !binding.mutable && !string_view && binding.name != "_" {
         // Computed while compiling when it can be (Comptime/LocalValues.jet).
         computed := sema_comptime_local_value(binding.name, binding.name_span, binding.init, stored, fact_start, reference_start, node_start, environment, program, scopes, context)
-        if computed.value == .Val(value) -> stored = value
+        if computed.value == .Val(value) {
+            stored = value
+            // A call spans only its name, so the statement of a landed
+            // value runs through the last name its initializer reads:
+            // liveness counts the cases and types that code names
+            // (sema_liveness_member_uses).
+            loop index in reference_start..<context.name_references.len() {
+                read: context.name_references[index].span
+                if read.start >= span.start && read.end > span.end {
+                    span = Span{start: span.start, end: read.end}
+                }
+            }
+        }
         local.run_time_reason = computed.reason
     }
-    Val(TStmt.Let{local: local, let_ty: let_ty, init: stored, gc_promotion: gc_promotion, gc_transferred: binding.gc_transferred, span: Span{start: binding.name_span.start, end: expr_span(binding.init).end}})
+    Val(TStmt.Let{local: local, let_ty: let_ty, init: stored, gc_promotion: gc_promotion, gc_transferred: binding.gc_transferred, span: span})
 }
 
 // Rust `infer_owning_value` (`implicit_copy_target` over
