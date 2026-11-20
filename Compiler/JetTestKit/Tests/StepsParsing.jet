@@ -101,6 +101,24 @@ kit_test_steps_env: fn() -> KitEnv {
     assert_eq(kit_steps_check(plan.steps[0], context, KitStepState{last: bad, built: "", built_once: false}, "").status, "FAIL")
 }
 
+#Test("a failed step's streams name the step, even when both are empty") {
+    env: kit_test_steps_env()
+    plan: kit_steps_parse("step run: ./fragment isolated\nexit: 0\n")
+    context: kit_steps_context(plan, "case", env, env.root, env.scratch, env.root, kit_test_steps_bless())
+    silent: KitRun{stdout: "", stderr: "", code: 1, signal: None, timed_out: false, error: ""}
+    quiet: kit_steps_check(plan.steps[0], context, KitStepState{last: silent, built: "", built_once: false}, "")
+    assert_eq(quiet.status, "FAIL")
+    assert_eq(quiet.detail, "exit 1; expected 0")
+    assert_eq(quiet.diff, "--- streams/case: step run: `./fragment isolated` exit 1\n(stdout and stderr empty)\n")
+    lines := [String]{}
+    loop at in 0..<30 -> lines.push("line {at}")
+    loud: KitRun{stdout: "", stderr: lines.join("\n"), code: 1, signal: None, timed_out: false, error: ""}
+    told: kit_steps_check(plan.steps[0], context, KitStepState{last: loud, built: "", built_once: false}, "")
+    assert_eq(told.detail, "exit 1; expected 0")
+    assert(told.diff.starts_with("--- streams/case: step run: `./fragment isolated` exit 1\nstderr| (6 earlier lines and 0 phase counter lines not shown)\nstderr| line 6\n"))
+    assert(told.diff.ends_with("stderr| line 29\n"))
+}
+
 #Test("build artifacts use the nearest package root or standalone entry directory") {
     root: kit_test_core_scratch("artifacts")
     kit_exec_write(files.join(root, "pkg/package.jet"), "name: \"artifact-fixture\"\n")
