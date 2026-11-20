@@ -8,10 +8,12 @@
 # buffer kept its program counter alone; and an expiry the kernel folded into
 # a SIGPROF still pending (its si_overrun) was no sample, about a tenth of
 # them on a loaded machine. Each such SIGPROF now writes one record per
-# period it covers. Four threads that each live for one fib(32), about 15 ms
-# of CPU time, keep at least 90% of their 472 samples too: IBS op sampling at
-# a frequency the kernel adjusts kept 16 to 22 of the 59 they gave at 1 kHz,
-# as each thread ended before the kernel reached the frequency asked for.
+# period it covers. Four threads that each live for one fib(32), tens of
+# milliseconds of CPU time, keep at least 90% of the samples that time gives
+# too, each with its whole stack, so burn's line that calls fib holds every
+# sample fib's recursive line does: IBS op sampling at a frequency the
+# kernel adjusts kept 16 to 22 of the 59 they gave at 1 kHz, as each thread
+# ended before the kernel reached the frequency asked for.
 requires: os-name:linux
 fixture: EveryThreadKeepsWholeStacks.fixture
 env: NO_COLOR=1
@@ -24,5 +26,12 @@ json: file burn.jettrace doc $.content.profile.reason !~ "kept no stack" # no sa
 step: jet perf run -O2 fib4.jet --out {work}/fib4.jettrace -- 32
 exit: 0
 stdout: = "sum=8713236\n"
-json: file fib4.jettrace doc $.content.profile.rows[?source.start_line=7][?inclusive_count>=425] #= 1 # fib's recursive line holds at least 90% of the 472 samples four short threads give
 json: file fib4.jettrace doc $.content.profile.reason !~ "kept no stack" # no sample in Jet code lost its stack
+step: jet perf view {work}/fib4.jettrace
+exit: 0
+capture: outer = text stdout.split("  line 10 samples=", 1).split("inclusive=", 1).split("\n", 0).split(" ", 0).trim
+capture: recursive = text stdout.split("  line 7 samples=", 1).split("inclusive=", 1).split("\n", 0).split(" ", 0).trim
+json: stdout.split("  line 7 samples=", 1).split("inclusive=", 1).split("\n", 0).split(" ", 0).trim doc $ <= {cap:outer}+0 # each sample on fib's recursive line holds burn's call too
+step: sh -c 'n=$(grep -oE "of the [0-9]+ samples that" fib4.jettrace | cut -d" " -f3); echo $((9 * n))'
+exit: 0
+json: stdout.trim doc $ <= 10*{cap:recursive} # fib's recursive line holds at least 90% of the samples the sampled CPU time gives
