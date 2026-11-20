@@ -54,6 +54,10 @@ use jet_foundation.[
     diagnostic_registry_row,
     expr_span,
     module_is_core,
+    name_count,
+    name_find,
+    name_intern,
+    name_table,
     type_name,
 ]
 
@@ -867,21 +871,23 @@ sema_app_route_diagnostics: fn(graph: SemaRegistrationGraph, modules: [SemaGraph
     workers: compiler_threads_admit(threads, places.len(), work, SEMA_APP_ROUTE_NODES_PER_THREAD, 0, 0)
     bounds: if workers <= 1 -> [Int]{0, places.len()} else -> compiler_threads_partition(weights, workers)
     scans: sema_app_route_scans(graph, modules, places, bounds, 0, takes, screen)
-    opened := [String:Bool]{}
+    // The states the screens open, by key; a key interned before is a state
+    // a second screen opens. Id 0 is the empty name, so one name is none.
+    opened := name_table()
     reports := [SemaAppCallerReport]{}
     loop scan in scans {
         loop site in scan.screens {
-            if opened.get(site.key) != None {
+            known: name_count(opened)
+            _ := name_intern(opened, site.key)
+            if name_count(opened) == known {
                 reports.push(SemaAppCallerReport{module_index: site.module_index, diagnostic: sema_app_screen_error("…", "`{site.name}` is the state of another screen of the graph too, and a state has one address", site.span)})
-                next
             }
-            opened[site.key.copy()] = true
         }
     }
-    if opened.len() == 0 -> return [Diagnostic]{}
+    if name_count(opened) == 1 -> return [Diagnostic]{}
     loop scan in scans {
         loop site in scan.addresses {
-            if opened.get(site.key) == None {
+            if name_find(opened, site.key) == None {
                 reports.push(SemaAppCallerReport{module_index: site.module_index, diagnostic: sema_app_no_screen(site.name, site.span)})
             }
         }
