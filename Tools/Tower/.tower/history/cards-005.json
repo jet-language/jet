@@ -36039,6 +36039,227 @@
         }
       ],
       "retiredAt": "2026-11-20T11:23:55.412Z"
+    },
+    {
+      "id": "c0cnf5w8",
+      "num": 6734,
+      "title": "User-visible text is never all lowercase, and every text is American English",
+      "body": "OWNER HARD REQUIREMENTS (2026-11-09): (1) The owner hates all-lowercase text in readouts, UI and anything a user sees (CLI output such as jet --version's 'release status: prerelease', HUD labels, reports, help). User-visible labels and readouts use Title Case or sentence case; acronyms in caps. Identifiers, paths, flags, code and machine formats (JSON keys) keep their spelling. (2) American English everywhere, never British: behavior not behaviour, color not colour, initialize not initialise, license not licence, and so on. A census of dev finds 129 files with British spellings.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e20",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Closed: every criterion is met (c1-c4; evidence on each). The posted ballot D-AMERICAN-IDENT1 is new scope (public identifier and wire renames); its outcome gets built on its own card once ratified."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Every criterion is met. The card stays open only for the posted ballot D-AMERICAN-IDENT1 (renaming British-spelled public identifiers and wire values), which c1 left untouched."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c2 progress: dev 18a70c2521 (CLI, p260), e4b3a2fa25 (registry and Core.UI guard coverage plus the regenerated explain pages, p261), 043cf12ecc (case predicates and the ffi UI snapshots, p262). On batch compiler p262: Tests/Guards/user_text_capitalized.jet passes, and the 11 text-case rows pass. Left: two jetpack readout predicates that show up now that the suite's jetpack is rebuilt (inspect_info_shows_registry_maintainer_liveness, override_draft_writes...)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A committed spelling guard (a British-to-American word list with exceptions for quoted external names) fails on British spellings in tracked text, source comments, diagnostics and docs; its census over dev is empty (receipt).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 1fb0d7c13c (DeclTypes-6-1-6734-c1-american-spelling, cycle p259): Tests/Guards/american_spelling.jet, a British-to-American list with exceptions for quoted external names, over tracked text, source comments, diagnostics and docs. 569 paths respelled in the same commit. On batch compiler p259: `jet test Tests/Guards/american_spelling.jet` rc=0 PASS; the census over dev is empty.",
+          "at": "2026-11-17T10:50:49.648Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Tests/Guards",
+              "--filter",
+              "american_spelling"
+            ]
+          }
+        },
+        {
+          "n": 2,
+          "text": "Every CLI readout, diagnostic heading, report, help text and UI label starts with a capital (Title Case for labels and headings, sentence case for prose), acronyms in caps; a guard over the CLI, diagnostic registry and Core.Ui label sources holds it, and the UI snapshots and goldens are regenerated in the same stack.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 18a70c2521 (CLI readouts, headings, labels and help; p260), e4b3a2fa25 (the guard also covers the diagnostic registry and Core.UI labels, with registry texts capitalized and explain pages regenerated; p261), 043cf12ecc and dae25fa759 (case predicates, ffi UI snapshots and goldens quoting the changed lines; p262, p264). Tests/Guards/user_text_capitalized.jet passes on batch compiler p261. Every case row that quoted the old text passes on p262 (11 rows) and p264 (the 2 jetpack readout rows, with the suite's jetpack rebuilt from dev). Golden on p264 has 0 text failures (1 FAIL, CBind o0, a C-toolchain realization failure unrelated to text). Machine output is unchanged (c4 guard).",
+          "at": "2026-11-17T13:04:21.976Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Tests/Guards",
+              "--filter",
+              "user_text_capitalized"
+            ]
+          }
+        },
+        {
+          "n": 3,
+          "text": "jet debug's readouts start with a capital: Locals:, the --> ... in fn line, <Unavailable> and the (Jet) prompt (was #6746).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "db372838b3 (on dev). On the gate-p55 jet (tree dev 9623399213), Lander5 holds run: `jet test Compiler/JetDebug/Tests` 38/0, with Snapshot.jet pinning the capitalized readouts (Locals:, the --> ... in fn line, <Unavailable> and the (Jet) prompt). The lldb-driven debug cases need lldb, which this host lacks.",
+          "at": "2026-11-14T06:44:52.688Z"
+        },
+        {
+          "n": 4,
+          "text": "Machine output does not change with the case rules: the JSON from every machine door is byte-identical before and after.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 54bc3668ed (DeclTypes-6-1-6734-c4-machine-doors, cycle p260): Tests/Guards/machine_doors_unchanged_by_case_law.jet runs every machine door (--json and wire outputs) over fixed fixtures and compares the bytes with the recorded pre-case-rule output. On batch compiler p260 (dev b7588ea8e5, which includes the c2 CLI capitalization 18a70c2521): `jet test Tests/Guards/machine_doors_unchanged_by_case_law.jet` rc=0 PASS.",
+          "at": "2026-11-17T11:19:04.643Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Tests/Guards",
+              "--filter",
+              "machine_doors_unchanged_by_case_law"
+            ]
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T15:56:53.397Z",
+      "updated": "2026-11-17T13:36:31.093Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 4,
+      "completedAt": "2026-11-17T13:36:31.093Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T13:37:17.001Z"
+    },
+    {
+      "id": "c0pv78gy",
+      "num": 6832,
+      "title": "ELF object writer: extended section numbering (SHN_XINDEX) for objects over 65280 sections",
+      "body": "The sweep2 Core object reached 107273 sections, above the ELF limit of 65280 without extended numbering. The stage-A build worked around it by splitting or merging the Core object. The object writer should emit extended section indices: e_shnum 0 with the real count in section 0 sh_size, e_shstrndx SHN_XINDEX with the index in section 0 sh_link, and a .symtab_shndx table for symbols in sections at or above SHN_LORESERVE, so that any program of any size links.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e24",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Closed: c1 is met by the extended-numbering writer (5ec0838a3f), shown on jet_core.o (128976 sections) linking and running on every tier in p265."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The object writer emits extended section numbering (SHN_XINDEX, .symtab_shndx) when an object has 65280 or more sections, and a generated program whose object has more than 70000 sections links and runs on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter object_writer_extended_section_numbering` (it builds that program and runs it on O0, O1 and O2).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "The writer landed in 5ec0838a3f (Compiler object writer, Object.jet:89-98: SHN_XINDEX, section 0 sh_size, and .symtab_shndx past 65280 sections). Proof on dev da151131b6 (batch compiler p265): the runtime object jet_core.o is written by this writer with one section per function. It has e_shnum=0 with section 0 sh_size=128976 (extended numbering, 128976 sections, above 70000), and it links into every program and runs on O0, O1 and O2 in every p265 suite (golden 5054 PASS, 0 FAIL). A program's own object never reaches 70000 sections (only library-style objects get one section per function), so the jet_core.o object, linked and run on every tier, is the witness of the stated behavior in place of a generated program. Ruled by Main within scope.",
+          "at": "2026-11-17T13:46:11.472Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-13T20:22:10.960Z",
+      "updated": "2026-11-17T13:46:16.730Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-17T13:46:16.730Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T13:52:15.988Z"
+    },
+    {
+      "id": "c0ioa1t9",
+      "num": 6944,
+      "title": "Reading stdin line by line streams before EOF and leaves the unread tail in place",
+      "body": "Destination: a program reading stdin line by line sees each line as it arrives, without waiting for EOF, can stop at a blank sentinel, and a later `io.readline` returns the next unread line, the same on O0, O1 and O2.\n\nSource: #6317 c25-c27 (carried from #2881 and #2923). The case is refused today by the kit's process-file-fd seam (#6317 c4).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e21",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Closed: c1 and c2 hold on dev da151131b6 (p265 Closer sweep; evidence on each criterion)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "With piped stdin, O0, O1 and O2 echo the first stdin line before EOF and stop at a blank sentinel without needing the input closed, so the read-until-blank program prints `a`, `b`, `c` and exits 0.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev da151131b6 (batch compiler p265, Closer sweep): a read-until-blank program was built with jet build -O0, -O1 and -O2, then fed by { printf 'a\\n'; sleep 2; printf 'b\\nc\\n\\nd\\n'; sleep 4; } | main. Each tier printed '0.00s a / 2.01s b / 2.01s c' and exited 0 at 2.01 s, 4 s before EOF.",
+          "at": "2026-11-17T13:46:01.412Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Terminal/stdin_lines_emit_before_eof_and_stop_at_blank"
+          }
+        },
+        {
+          "n": 2,
+          "text": "After the blank sentinel, `io.readline` returns the next unread line on all three tiers; the loop neither consumes nor discards that tail.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev da151131b6 (p265): in the same runs, after the blank sentinel io.readline returns the unread 'd' ('tail: d') on O0, O1 and O2; the loop doesn't consume it.",
+          "at": "2026-11-17T13:46:04.217Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Terminal/stdin_tail_after_sentinel"
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "io"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:54:42.678Z",
+      "updated": "2026-11-17T13:46:08.711Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-17T13:46:08.710Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T13:52:15.988Z"
     }
   ]
 }

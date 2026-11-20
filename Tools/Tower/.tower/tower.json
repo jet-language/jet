@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112627,
+    "rev": 112635,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24249,11 +24249,15 @@
         {
           "n": 28,
           "text": "A checked-in corpus of 50 Python and JavaScript habits and typos (`for x in xs:`, `and`, `**`, `//`, `elif`, `len(xs)`, `None`, `True`, `x++`, misspelled locals and fields) runs through `jet check --json`. At least 45 carry a non-empty `fix_edits` after which `jet check` passes, and the mirrored Python 3.13 corpus gives a did-you-mean on fewer cases. Both counts are logged on this card. Proof: `jet test Tests/Guards --filter habit_corpus_fix_edits`. (was #3720 c23)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:53:34.860Z"
+          "evidence": "gate-p357 (dev 2e2ac929c1, with 9ca8b39b6a and 049fb9071f): `jet test Compiler --profile cases --filter Habits/habit_corpus_fix_edits` PASS on the batch compiler (the corpus fixes 48 of 51 through jet check --json; the 3 not fixed are let/const/var, which are allowed no-edit rows; the floor is 45).",
+          "at": "2026-11-20T13:52:17.231Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Habits/habit_corpus_fix_edits"
+          }
         },
         {
           "n": 29,
@@ -24337,7 +24341,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-20T10:55:20.871Z",
+      "updated": "2026-11-20T13:52:17.231Z",
       "updatedBy": "Main",
       "workOrder": 19,
       "criteriaLastN": 35
@@ -53159,12 +53163,16 @@
         },
         {
           "n": 4,
-          "text": "Wrapping arithmetic on Int compiles to a machine multiply at -O2: an FNV-1a loop over a 1 MB buffer written with `h = wrapping(h * PRIME)` on Int finishes in milliseconds, where on p349 it did not finish in 100 s (found writing the crash-dump digest). Proof: a Run golden hashing 1 MB with wrapping Int arithmetic at O0, O1 and O2, with a time bound.",
+          "text": "A loop that grows an Int geometrically through wrapping(...) or saturating(...), such as an FNV-1a hash `h = wrapping((h ^ byte) * PRIME)`, gets the L2511 ExactIntSpill tidy diagnostic naming the repair (I64 or U64, or a range-typed Int), because wrapping on an unbounded Int is its exact operator and never wraps (with a _quiet twin on U64 that stays silent); and the same hash written on U64 compiles to a machine multiply and hashes 1 MB in milliseconds at O0, O1 and O2 (a Run golden with a time bound).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-20T11:03:11.712Z"
+          "at": "2026-11-20T13:01:02.397Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "cost_spill_wrapping_int_hash"
+          }
         }
       ],
       "refs": [],
@@ -53172,7 +53180,7 @@
       "parentId": "c0f9brds",
       "needsAcceptance": false,
       "created": "2026-11-09T13:21:28.909Z",
-      "updated": "2026-11-20T11:03:11.712Z",
+      "updated": "2026-11-20T13:01:02.397Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -53413,112 +53421,6 @@
       "updated": "2026-11-17T01:44:49.984Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
-    },
-    {
-      "id": "c0cnf5w8",
-      "num": 6734,
-      "title": "User-visible text is never all lowercase, and every text is American English",
-      "body": "OWNER HARD REQUIREMENTS (2026-11-09): (1) The owner hates all-lowercase text in readouts, UI and anything a user sees (CLI output such as jet --version's 'release status: prerelease', HUD labels, reports, help). User-visible labels and readouts use Title Case or sentence case; acronyms in caps. Identifiers, paths, flags, code and machine formats (JSON keys) keep their spelling. (2) American English everywhere, never British: behavior not behaviour, color not colour, initialize not initialise, license not licence, and so on. A census of dev finds 129 files with British spellings.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e20",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P0",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "Closed: every criterion is met (c1-c4; evidence on each). The posted ballot D-AMERICAN-IDENT1 is new scope (public identifier and wire renames); its outcome gets built on its own card once ratified."
-        },
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "Every criterion is met. The card stays open only for the posted ballot D-AMERICAN-IDENT1 (renaming British-spelled public identifiers and wire values), which c1 left untouched."
-        },
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "c2 progress: dev 18a70c2521 (CLI, p260), e4b3a2fa25 (registry and Core.UI guard coverage plus the regenerated explain pages, p261), 043cf12ecc (case predicates and the ffi UI snapshots, p262). On batch compiler p262: Tests/Guards/user_text_capitalized.jet passes, and the 11 text-case rows pass. Left: two jetpack readout predicates that show up now that the suite's jetpack is rebuilt (inspect_info_shows_registry_maintainer_liveness, override_draft_writes...)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A committed spelling guard (a British-to-American word list with exceptions for quoted external names) fails on British spellings in tracked text, source comments, diagnostics and docs; its census over dev is empty (receipt).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 1fb0d7c13c (DeclTypes-6-1-6734-c1-american-spelling, cycle p259): Tests/Guards/american_spelling.jet, a British-to-American list with exceptions for quoted external names, over tracked text, source comments, diagnostics and docs. 569 paths respelled in the same commit. On batch compiler p259: `jet test Tests/Guards/american_spelling.jet` rc=0 PASS; the census over dev is empty.",
-          "at": "2026-11-17T10:50:49.648Z",
-          "proof": {
-            "profile": "cmd",
-            "args": [
-              "Tests/Guards",
-              "--filter",
-              "american_spelling"
-            ]
-          }
-        },
-        {
-          "n": 2,
-          "text": "Every CLI readout, diagnostic heading, report, help text and UI label starts with a capital (Title Case for labels and headings, sentence case for prose), acronyms in caps; a guard over the CLI, diagnostic registry and Core.Ui label sources holds it, and the UI snapshots and goldens are regenerated in the same stack.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 18a70c2521 (CLI readouts, headings, labels and help; p260), e4b3a2fa25 (the guard also covers the diagnostic registry and Core.UI labels, with registry texts capitalized and explain pages regenerated; p261), 043cf12ecc and dae25fa759 (case predicates, ffi UI snapshots and goldens quoting the changed lines; p262, p264). Tests/Guards/user_text_capitalized.jet passes on batch compiler p261. Every case row that quoted the old text passes on p262 (11 rows) and p264 (the 2 jetpack readout rows, with the suite's jetpack rebuilt from dev). Golden on p264 has 0 text failures (1 FAIL, CBind o0, a C-toolchain realization failure unrelated to text). Machine output is unchanged (c4 guard).",
-          "at": "2026-11-17T13:04:21.976Z",
-          "proof": {
-            "profile": "cmd",
-            "args": [
-              "Tests/Guards",
-              "--filter",
-              "user_text_capitalized"
-            ]
-          }
-        },
-        {
-          "n": 3,
-          "text": "jet debug's readouts start with a capital: Locals:, the --> ... in fn line, <Unavailable> and the (Jet) prompt (was #6746).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "db372838b3 (on dev). On the gate-p55 jet (tree dev 9623399213), Lander5 holds run: `jet test Compiler/JetDebug/Tests` 38/0, with Snapshot.jet pinning the capitalized readouts (Locals:, the --> ... in fn line, <Unavailable> and the (Jet) prompt). The lldb-driven debug cases need lldb, which this host lacks.",
-          "at": "2026-11-14T06:44:52.688Z"
-        },
-        {
-          "n": 4,
-          "text": "Machine output does not change with the case rules: the JSON from every machine door is byte-identical before and after.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 54bc3668ed (DeclTypes-6-1-6734-c4-machine-doors, cycle p260): Tests/Guards/machine_doors_unchanged_by_case_law.jet runs every machine door (--json and wire outputs) over fixed fixtures and compares the bytes with the recorded pre-case-rule output. On batch compiler p260 (dev b7588ea8e5, which includes the c2 CLI capitalization 18a70c2521): `jet test Tests/Guards/machine_doors_unchanged_by_case_law.jet` rc=0 PASS.",
-          "at": "2026-11-17T11:19:04.643Z",
-          "proof": {
-            "profile": "cmd",
-            "args": [
-              "Tests/Guards",
-              "--filter",
-              "machine_doors_unchanged_by_case_law"
-            ]
-          }
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-09T15:56:53.397Z",
-      "updated": "2026-11-17T13:36:31.093Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 4,
-      "completedAt": "2026-11-17T13:36:31.093Z"
     },
     {
       "id": "c03obxd3",
@@ -57098,51 +57000,6 @@
       "criteriaLastN": 6
     },
     {
-      "id": "c0pv78gy",
-      "num": 6832,
-      "title": "ELF object writer: extended section numbering (SHN_XINDEX) for objects over 65280 sections",
-      "body": "The sweep2 Core object reached 107273 sections, above the ELF limit of 65280 without extended numbering. The stage-A build worked around it by splitting or merging the Core object. The object writer should emit extended section indices: e_shnum 0 with the real count in section 0 sh_size, e_shstrndx SHN_XINDEX with the index in section 0 sh_link, and a .symtab_shndx table for symbols in sections at or above SHN_LORESERVE, so that any program of any size links.",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e24",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "Closed: c1 is met by the extended-numbering writer (5ec0838a3f), shown on jet_core.o (128976 sections) linking and running on every tier in p265."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "The object writer emits extended section numbering (SHN_XINDEX, .symtab_shndx) when an object has 65280 or more sections, and a generated program whose object has more than 70000 sections links and runs on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter object_writer_extended_section_numbering` (it builds that program and runs it on O0, O1 and O2).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "The writer landed in 5ec0838a3f (Compiler object writer, Object.jet:89-98: SHN_XINDEX, section 0 sh_size, and .symtab_shndx past 65280 sections). Proof on dev da151131b6 (batch compiler p265): the runtime object jet_core.o is written by this writer with one section per function. It has e_shnum=0 with section 0 sh_size=128976 (extended numbering, 128976 sections, above 70000), and it links into every program and runs on O0, O1 and O2 in every p265 suite (golden 5054 PASS, 0 FAIL). A program's own object never reaches 70000 sections (only library-style objects get one section per function), so the jet_core.o object, linked and run on every tier, is the witness of the stated behavior in place of a generated program. Ruled by Main within scope.",
-          "at": "2026-11-17T13:46:11.472Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-13T20:22:10.960Z",
-      "updated": "2026-11-17T13:46:16.730Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 1,
-      "completedAt": "2026-11-17T13:46:16.730Z"
-    },
-    {
       "id": "c0w0b4wd",
       "num": 6834,
       "title": "Gauntlet peer standings: every entry against Rust, C, Zig, Go, Python, Bun, Node, Vite and the hand-written asm ceiling, for startup, run time and binary size, shown in Tower",
@@ -57880,6 +57737,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-20",
+          "by": "Main",
+          "text": "c94 on p355 (dev a05d321392): 3 of 4 attach lens families report the real window and pass: point/flight ring (Perf/attach_drains_flight_ring), zones (Perf/attach_turns_zones_on, window_wall >= 500 ms), alloc (Perf/heap_snapshot_types_retention_and_diff, the 500 ms --lens=alloc --zones=500ms step). The browser relay family (JetPerfTracePartsBrowser/perf_attach_drives_real_devserver_browser_lifecycle) is KNOWN-FAILING under #5931 (Compiler/JetDevServer does not compile, so jet dev --target=web is refused E2104); its window lines are added to that case now and c94 is met when #5931 lands and the case passes."
+        },
         {
           "at": "2026-11-20",
           "by": "Main",
@@ -58878,11 +58740,11 @@
         {
           "n": 71,
           "text": "One evaluation mechanism: every debugger evaluation runs in the stopped process (the scratch room and arena behind jet_rt_debug_eval_heap), including a type s DebugView result (the image carries a drop function for [DebugItem]) and record/replay sessions, and the fork evaluation path is removed. An image without the export is refused with a stated reason to rebuild it. Proof: `git grep -n -i fork -- Compiler/JetDebug/Source` names no evaluation path, and `jet test Compiler --profile cases --filter Debug/` passes, including a DebugView print and a replay print case.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-19T23:54:48.254Z"
+          "evidence": "gate-p356 (dev 537ee9843f): `git grep -n -i fork -- Compiler/JetDebug/Source` gives 0 lines; `jet test Compiler --profile cases --filter Debug/` PASS 143 FAIL 0 KNOWN-FAILING 1 (#3594 canvas_graph_source_id, process file fd) ERROR 0, including debug_view_renders_without_running_the_target, debug_view_package_ring_buffer and replay_print_runs_in_the_program.",
+          "at": "2026-11-20T13:37:16.665Z"
         },
         {
           "n": 72,
@@ -58932,11 +58794,11 @@
         {
           "n": 77,
           "text": "G26: A debugger expression that needs a runtime entry the image lacks loads that entry with the expression's code instead of being refused: `x * 1000000000000000000` prints its overflow stop or value. Proof: a Debug case and the probe axis d4.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T03:14:02.063Z"
+          "evidence": "gate-p356 (dev 537ee9843f): case Debug/new_operations_at_a_stop_evaluate PASS (in the Debug/ filter, 143/0); probe axis d4 (`jet run Docs/Audits/BestInExistence20261119/Probes/Run.jet -- JET TREE d4`) prints `x * 1000000000000000000 = 11000000000000000000` in 10.3 ms at a stop (Int is exact, so the value, not a stop).",
+          "at": "2026-11-20T13:37:20.867Z"
         },
         {
           "n": 78,
@@ -59013,11 +58875,11 @@
         {
           "n": 86,
           "text": "G35: `jet perf view` splits a line's samples by the runtime helper they land in, and the runtime stop poll appears per line and in the cost facts; on fib the poll's share on its line is within 5 points of a hardware-counter reference. Proof: a Perf case and the probe axis p1.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T03:14:09.600Z"
+          "evidence": "gate-p357 (dev 2e2ac929c1, with 48c451a1ab: a body on a call cycle runs the quiet task-control tests inline, so the poll after an inlined function-value call no longer takes call jet_ir_stop_turn on each recursion step): `jet test Compiler --profile cases --filter Perf/helper_samples_charge` PASS (it failed on p355 and p356 with the deep line charged to \"stop poll\").",
+          "at": "2026-11-20T13:52:15.872Z"
         },
         {
           "n": 87,
@@ -59099,6 +58961,19 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-20T06:40:03.752Z"
+        },
+        {
+          "n": 96,
+          "text": "A breakpoint condition that builds, compares or drops a String (`\"{i}\" == \"3\"`) runs in the program: the runtime functions it calls (string builder, Int render, String eq and drop) are placed from the runtime pack with their allocations in the scratch arena, so a false hit runs on without a stop, and d6 prints \"The condition runs in the program\" for it with a million hits under a second.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-20T13:44:16.317Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Debug/conditional_breakpoint_runs_in_process"
+          }
         }
       ],
       "refs": [],
@@ -59106,9 +58981,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-20T11:43:36.764Z",
+      "updated": "2026-11-20T13:52:15.872Z",
       "updatedBy": "Main",
-      "criteriaLastN": 95
+      "criteriaLastN": 96
     },
     {
       "id": "c0in2dft",
@@ -72182,70 +72057,6 @@
       "updated": "2026-11-17T19:11:04.334Z",
       "updatedBy": "Main",
       "completedAt": "2026-11-17T19:11:04.334Z"
-    },
-    {
-      "id": "c0ioa1t9",
-      "num": 6944,
-      "title": "Reading stdin line by line streams before EOF and leaves the unread tail in place",
-      "body": "Destination: a program reading stdin line by line sees each line as it arrives, without waiting for EOF, can stop at a blank sentinel, and a later `io.readline` returns the next unread line, the same on O0, O1 and O2.\n\nSource: #6317 c25-c27 (carried from #2881 and #2923). The case is refused today by the kit's process-file-fd seam (#6317 c4).",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e21",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "Closed: c1 and c2 hold on dev da151131b6 (p265 Closer sweep; evidence on each criterion)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "With piped stdin, O0, O1 and O2 echo the first stdin line before EOF and stop at a blank sentinel without needing the input closed, so the read-until-blank program prints `a`, `b`, `c` and exits 0.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Holds on dev da151131b6 (batch compiler p265, Closer sweep): a read-until-blank program was built with jet build -O0, -O1 and -O2, then fed by { printf 'a\\n'; sleep 2; printf 'b\\nc\\n\\nd\\n'; sleep 4; } | main. Each tier printed '0.00s a / 2.01s b / 2.01s c' and exited 0 at 2.01 s, 4 s before EOF.",
-          "at": "2026-11-17T13:46:01.412Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "Terminal/stdin_lines_emit_before_eof_and_stop_at_blank"
-          }
-        },
-        {
-          "n": 2,
-          "text": "After the blank sentinel, `io.readline` returns the next unread line on all three tiers; the loop neither consumes nor discards that tail.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Holds on dev da151131b6 (p265): in the same runs, after the blank sentinel io.readline returns the unread 'd' ('tail: d') on O0, O1 and O2; the loop doesn't consume it.",
-          "at": "2026-11-17T13:46:04.217Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "Terminal/stdin_tail_after_sentinel"
-          }
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "core",
-        "io"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-15T04:54:42.678Z",
-      "updated": "2026-11-17T13:46:08.711Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-17T13:46:08.710Z"
     },
     {
       "id": "c0qqeaqb",
@@ -129844,182 +129655,6 @@
       "ratifiedAt": "2026-11-17"
     },
     {
-      "id": "D-AMERICAN-IDENT1",
-      "cardId": "c0cnf5w8",
-      "group": "compatibility",
-      "title": "Separate American prose from public identifier and wire renames",
-      "situation": "The owner requires American English in user-facing prose while explicitly preserving identifiers, paths, flags and machine formats. A spelling guard therefore contains named exceptions for existing public names and external contracts. This vote asks whether to amend that preservation rule for Jet-owned APIs, and separately for Jet-owned stored or transmitted formats. We recommend retaining the current boundary rather than treating prose cleanup as authorization for breaking renames.",
-      "gist": "Should American spelling cleanup also rename public APIs and machine tokens?",
-      "lesson": "Prose cleanup is not authorization for source or wire changes. Labels can also affect snapshots or consumers, so check their contracts.",
-      "explainer": "Beginner: American prose remains required under every option. Expert: distinguish Jet-owned source names from stable encodings, public paths/flags and foreign schemas; each requires explicit authorization before a breaking change.",
-      "story": "Ada updates a cancellation label and its snapshots. A saved status token needs a separate migration rather than an unnoticed spelling edit.",
-      "inWild": "pub enum State { Cancelled }\n// A public case rename breaks callers that name it.",
-      "detail": "Card #6734's owner directive explicitly preserves identifiers, paths, flags, code and machine JSON keys during American prose cleanup. Its c1 guard criterion is already met; this ballot asks whether to amend the naming boundary, not to approve an unfinished guard. Tests/Guards/american_spelling.jet:66-76 lists Cancelled, cancelled, metres, kilometres, METRE, litre, millilitre, specialisation and specialisations. Quoted/historical text has separate exceptions. A spelling in that list is not proof that every dictionary rejects it in American English.\n\nOn gate-p261, probes2/american.jet prints event.DispatchState.Cancelled as Cancelled. That verifies one public API spelling, not whether it has a published wire representation. The sample's wire mappings in B/C are conditional design examples, not claims that this enum is serialized today. NixOS's foreign specialisation key remains external regardless of internal naming.\n\nCargo's compatibility guide treats public item rename/removal as breaking. Its usual alias/deprecation mitigation is not Jet's clean-cutover policy here: choosing B/C requires checked migration assistance, release notes and removal of obsolete names. B's strongest benefit is consistent discovery/search without migrating stored tokens; C also removes owned wire/source mismatch. A has a real lasting consistency cost. Label edits can affect snapshots and text consumers even without changing source API names.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Keep public and machine spellings",
-          "detail": "Retain the owner's preservation rule and use American spelling in prose and newly designed Jet-owned APIs.",
-          "technical": "Existing published names remain canonical, not deprecated aliases. Keep the narrow identifier allowlist, exact foreign keys and historical quotations. New names use American spelling without adding parallel British aliases. Do not rewrite samples to nonexistent renamed APIs or use a blanket guard suppression.\n\nReview label/prose changes for snapshots, documented output and machine consumers; human-facing does not automatically mean unobserved. Update label snapshots together, but keep machine contracts stable. Document/search-index existing canonical spellings so users can discover them without adding source aliases. This improves discovery but does not erase the legacy inconsistency.",
-          "code": "state: event.DispatchState.Cancelled\nprint(state)"
-        },
-        {
-          "key": "B",
-          "name": "Rename Jet-owned source identifiers",
-          "detail": "Authorize one breaking source-name cutover while preserving published wire tokens, paths and flags.",
-          "technical": "Build an exact old-to-canonical-name inventory from Jet-owned declarations, including unit aliases and generated bindings. Prefer an existing canonical American name where it actually exists; do not assert that every listed alias has one. Rename declarations, resolved callers, examples, tests and generated code together; delete obsolete aliases. Public paths, flags and foreign contracts remain outside this source-identifier authorization.\n\nPublished encodings require explicit codec/schema mappings rather than automatic renamed-case encoding. First determine which identifiers actually escape onto a wire or disk; the Cancelled example is not evidence of such deployment. Generate checked migration edits and diagnostics identifying affected declarations. Consistent source spelling improves completion/search and future guard simplicity, at the cost of breaking callers and maintaining any necessary stable mappings.",
-          "code": "// Proposed source rename.\nstate: event.DispatchState.Canceled\n// If a published token exists, preserve it through its codec."
-        },
-        {
-          "key": "C",
-          "name": "Rename source and owned machine tokens",
-          "detail": "Authorize B's source cutover plus a versioned migration of Jet-owned serialized schemas.",
-          "technical": "Use B's exact identifier inventory and separately inventory actual owned wire/storage tokens and their producers/consumers. Migrate only contracts Jet owns; foreign protocol keys, historical text, public paths and CLI flags remain unchanged by this vote. Version stored data and update every producer, reader, fixture and schema snapshot at the chosen incompatible boundary.\n\nShip a deterministic offline converter and migration verification before switching formats. Keep the old format as a conversion input, not an indefinite second live spelling. Mixed-version external deployments require a coordinated version boundary; if that cannot be arranged, the affected format cannot cut over. This removes owned source/wire mismatch but has operational costs far beyond prose cleanup.",
-          "code": "// Proposed source rename and separately versioned owned format.\nstate: event.DispatchState.Canceled\n// Actual owned tokens change only after checked data conversion."
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Rust/Cargo",
-          "note": "The compatibility guide classifies renaming a public item as breaking.",
-          "code": "pub enum State { Cancelled }\n// Renaming the public case breaks State::Cancelled callers.",
-          "source": "https://doc.rust-lang.org/cargo/reference/semver.html#item-remove"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "Preserve published contracts unless consistency is worth a deliberate breaking migration. The owner directive defines today's boundary, not proof that alternative naming goals have no value.",
-        "gains": [
-          "No accidental source/data break.",
-          "Foreign contracts remain exact."
-        ],
-        "losses": [
-          {
-            "loss": "Legacy spelling keeps search and naming inconsistent.",
-            "mitigation": "Document/index canonical existing names and use American spelling for new designs without duplicate source aliases."
-          },
-          {
-            "loss": "Even prose/label changes can affect snapshots and consumers.",
-            "mitigation": "Check output contracts and update human-facing snapshots together; preserve machine spellings unless separately authorized."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "Improves source discovery without data migration, but breaks callers and requires verified encoding mappings where tokens are published."
-          },
-          {
-            "key": "C",
-            "reason": "Eliminates owned source/wire mismatch, but requires actual data and mixed-version consumer coordination for spelling."
-          }
-        ],
-        "tradeoff": "Stable contracts over complete spelling uniformity."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: OpenAI GPT. Adversarial model family: OpenAI GPT. Fresh agent: BallotReview2. Removed claims that prose/label changes are harmless and that a source enum proves a deployed wire token or existing replacement alias. Made B/C's discovery/consistency benefits explicit and specified authorization, output, mapping and mixed-version migration costs."
-      },
-      "checkInstructions": "Read the owner preservation directive, guard categories and Cargo compatibility guidance; gate-p261 printed the retained enum spelling. B/C examples are proposals, not current names or deployed schema evidence. Acceptance requires separate source/token inventories, resolved migration edits, all caller/generated-code changes, stable mappings or versioned data conversion, output-contract checks and no obsolete aliases.",
-      "surface": {
-        "gist": "Should American prose cleanup also authorize source-name or owned machine-token migrations?",
-        "lesson": "The present rule preserves identifiers and machine contracts. Source spelling alone does not prove a deployed wire token; label edits also need output checks.",
-        "trio": {
-          "current": {
-            "note": "The retained public case prints its current spelling.",
-            "code": "state: event.DispatchState.Cancelled\nprint(state)"
-          },
-          "wild": {
-            "lang": "Rust/Cargo",
-            "note": "Public renames break source callers; migration cost must be explicit.",
-            "code": "pub enum State { Cancelled }"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Preserve contracts",
-            "gist": "Keep existing names; use American spelling for prose and new APIs.",
-            "gains": [
-              "No unintended source or data break."
-            ],
-            "losses": [
-              "Legacy spelling remains inconsistent."
-            ],
-            "proposed": {
-              "code": "event.DispatchState.Cancelled"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Rename source identifiers",
-            "gist": "Clean-cutover owned identifiers; preserve actual published encodings, paths and flags.",
-            "gains": [
-              "Consistent source search without changing stored tokens."
-            ],
-            "losses": [
-              "Broken callers; maintained mappings where needed."
-            ],
-            "proposed": {
-              "code": "event.DispatchState.Canceled\n// Published encodings, if any, stay explicitly mapped."
-            }
-          },
-          {
-            "key": "C",
-            "name": "Also migrate owned tokens",
-            "gist": "Version and convert actual Jet-owned wire/storage schemas too.",
-            "gains": [
-              "Owned source and token spelling agree."
-            ],
-            "losses": [
-              "Data and mixed-version consumer coordination."
-            ],
-            "proposed": {
-              "code": "event.DispatchState.Canceled\n// Owned tokens change only after versioned conversion."
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Preserve existing contracts unless spelling uniformity warrants an explicitly authorized breaking migration.",
-          "gains": [
-            "Exact foreign and machine contracts."
-          ],
-          "losses": [
-            {
-              "loss": "Legacy spelling hurts consistency and discovery.",
-              "mitigation": "Document/index canonical names; use American names for new designs without aliases."
-            },
-            {
-              "loss": "Labels can affect output consumers.",
-              "mitigation": "Check output contracts and update human-facing snapshots together."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Better source discovery, but breaks callers and needs verified encoding mappings."
-            },
-            {
-              "key": "C",
-              "reason": "More uniform, but adds data and deployment migration."
-            }
-          ],
-          "tradeoff": "Contract stability over complete uniformity."
-        }
-      },
-      "draftedBy": "Main",
-      "reviewedBy": "BallotReview2",
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-17T12:31:13.797Z",
-      "outcome": "C",
-      "comment": "Complete uniformity is more important. the language is unreleased and greenfield.",
-      "ratifiedAt": "2026-11-17"
-    },
-    {
       "id": "D-LIFECYCLE-PHASE1",
       "cardId": "c051j6ab",
       "group": "application",
@@ -136968,6 +136603,69 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-20T13:52:17.231Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dktg7a",
+      "note": "#28"
+    },
+    {
+      "at": "2026-11-20T13:52:15.872Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#86"
+    },
+    {
+      "at": "2026-11-20T13:44:16.318Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "96 criteria, soft limit 6: a gap found proving c78; the debugger card owns the area"
+    },
+    {
+      "at": "2026-11-20T13:44:16.318Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#96 A breakpoint condition that builds, compares or drops a Stri"
+    },
+    {
+      "at": "2026-11-20T13:37:20.867Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#77"
+    },
+    {
+      "at": "2026-11-20T13:37:16.666Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#71"
+    },
+    {
+      "at": "2026-11-20T13:11:16.510Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dktg7a",
+      "note": "#28: the census runs Tests/Guards with the seed, which never has the change under test, so a guard that measures compiler behaviour can never land; the corpus check runs as a case on the batch compiler instead; proof: jet test Compiler --profile cases --filter Habits/habit_corpus_fix_edits"
+    },
+    {
+      "at": "2026-11-20T13:01:02.397Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qoe1b9",
+      "note": "#4: Int is exact (D-INTBIG1): wrapping and saturating on an unbounded Int are its exact operators, so no machine multiply can give the answer; the defect is that nothing told the user. The existing L2511 ExactIntSpill covers geometric growth in a loop and names the fixed-width repair.; was: Wrapping arithmetic on Int compiles to a machine multiply at -O2: an FNV-1a loop over a 1 MB buffer written with `h = wrapping(h * PRIME)` on Int finishes in milliseconds, where on p349 it did not fin; proof: jet test Compiler --profile ui --filter cost_spill_wrapping_int_hash"
+    },
+    {
+      "at": "2026-11-20T12:57:31.361Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-20T12:11:49.717Z",
       "by": "Main",

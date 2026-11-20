@@ -74825,6 +74825,183 @@
       "outcome": "C",
       "ratifiedAt": "2026-11-16",
       "retiredAt": "2026-11-20T11:23:55.413Z"
+    },
+    {
+      "id": "D-AMERICAN-IDENT1",
+      "cardId": "c0cnf5w8",
+      "group": "compatibility",
+      "title": "Separate American prose from public identifier and wire renames",
+      "situation": "The owner requires American English in user-facing prose while explicitly preserving identifiers, paths, flags and machine formats. A spelling guard therefore contains named exceptions for existing public names and external contracts. This vote asks whether to amend that preservation rule for Jet-owned APIs, and separately for Jet-owned stored or transmitted formats. We recommend retaining the current boundary rather than treating prose cleanup as authorization for breaking renames.",
+      "gist": "Should American spelling cleanup also rename public APIs and machine tokens?",
+      "lesson": "Prose cleanup is not authorization for source or wire changes. Labels can also affect snapshots or consumers, so check their contracts.",
+      "explainer": "Beginner: American prose remains required under every option. Expert: distinguish Jet-owned source names from stable encodings, public paths/flags and foreign schemas; each requires explicit authorization before a breaking change.",
+      "story": "Ada updates a cancellation label and its snapshots. A saved status token needs a separate migration rather than an unnoticed spelling edit.",
+      "inWild": "pub enum State { Cancelled }\n// A public case rename breaks callers that name it.",
+      "detail": "Card #6734's owner directive explicitly preserves identifiers, paths, flags, code and machine JSON keys during American prose cleanup. Its c1 guard criterion is already met; this ballot asks whether to amend the naming boundary, not to approve an unfinished guard. Tests/Guards/american_spelling.jet:66-76 lists Cancelled, cancelled, metres, kilometres, METRE, litre, millilitre, specialisation and specialisations. Quoted/historical text has separate exceptions. A spelling in that list is not proof that every dictionary rejects it in American English.\n\nOn gate-p261, probes2/american.jet prints event.DispatchState.Cancelled as Cancelled. That verifies one public API spelling, not whether it has a published wire representation. The sample's wire mappings in B/C are conditional design examples, not claims that this enum is serialized today. NixOS's foreign specialisation key remains external regardless of internal naming.\n\nCargo's compatibility guide treats public item rename/removal as breaking. Its usual alias/deprecation mitigation is not Jet's clean-cutover policy here: choosing B/C requires checked migration assistance, release notes and removal of obsolete names. B's strongest benefit is consistent discovery/search without migrating stored tokens; C also removes owned wire/source mismatch. A has a real lasting consistency cost. Label edits can affect snapshots and text consumers even without changing source API names.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep public and machine spellings",
+          "detail": "Retain the owner's preservation rule and use American spelling in prose and newly designed Jet-owned APIs.",
+          "technical": "Existing published names remain canonical, not deprecated aliases. Keep the narrow identifier allowlist, exact foreign keys and historical quotations. New names use American spelling without adding parallel British aliases. Do not rewrite samples to nonexistent renamed APIs or use a blanket guard suppression.\n\nReview label/prose changes for snapshots, documented output and machine consumers; human-facing does not automatically mean unobserved. Update label snapshots together, but keep machine contracts stable. Document/search-index existing canonical spellings so users can discover them without adding source aliases. This improves discovery but does not erase the legacy inconsistency.",
+          "code": "state: event.DispatchState.Cancelled\nprint(state)"
+        },
+        {
+          "key": "B",
+          "name": "Rename Jet-owned source identifiers",
+          "detail": "Authorize one breaking source-name cutover while preserving published wire tokens, paths and flags.",
+          "technical": "Build an exact old-to-canonical-name inventory from Jet-owned declarations, including unit aliases and generated bindings. Prefer an existing canonical American name where it actually exists; do not assert that every listed alias has one. Rename declarations, resolved callers, examples, tests and generated code together; delete obsolete aliases. Public paths, flags and foreign contracts remain outside this source-identifier authorization.\n\nPublished encodings require explicit codec/schema mappings rather than automatic renamed-case encoding. First determine which identifiers actually escape onto a wire or disk; the Cancelled example is not evidence of such deployment. Generate checked migration edits and diagnostics identifying affected declarations. Consistent source spelling improves completion/search and future guard simplicity, at the cost of breaking callers and maintaining any necessary stable mappings.",
+          "code": "// Proposed source rename.\nstate: event.DispatchState.Canceled\n// If a published token exists, preserve it through its codec."
+        },
+        {
+          "key": "C",
+          "name": "Rename source and owned machine tokens",
+          "detail": "Authorize B's source cutover plus a versioned migration of Jet-owned serialized schemas.",
+          "technical": "Use B's exact identifier inventory and separately inventory actual owned wire/storage tokens and their producers/consumers. Migrate only contracts Jet owns; foreign protocol keys, historical text, public paths and CLI flags remain unchanged by this vote. Version stored data and update every producer, reader, fixture and schema snapshot at the chosen incompatible boundary.\n\nShip a deterministic offline converter and migration verification before switching formats. Keep the old format as a conversion input, not an indefinite second live spelling. Mixed-version external deployments require a coordinated version boundary; if that cannot be arranged, the affected format cannot cut over. This removes owned source/wire mismatch but has operational costs far beyond prose cleanup.",
+          "code": "// Proposed source rename and separately versioned owned format.\nstate: event.DispatchState.Canceled\n// Actual owned tokens change only after checked data conversion."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust/Cargo",
+          "note": "The compatibility guide classifies renaming a public item as breaking.",
+          "code": "pub enum State { Cancelled }\n// Renaming the public case breaks State::Cancelled callers.",
+          "source": "https://doc.rust-lang.org/cargo/reference/semver.html#item-remove"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Preserve published contracts unless consistency is worth a deliberate breaking migration. The owner directive defines today's boundary, not proof that alternative naming goals have no value.",
+        "gains": [
+          "No accidental source/data break.",
+          "Foreign contracts remain exact."
+        ],
+        "losses": [
+          {
+            "loss": "Legacy spelling keeps search and naming inconsistent.",
+            "mitigation": "Document/index canonical existing names and use American spelling for new designs without duplicate source aliases."
+          },
+          {
+            "loss": "Even prose/label changes can affect snapshots and consumers.",
+            "mitigation": "Check output contracts and update human-facing snapshots together; preserve machine spellings unless separately authorized."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Improves source discovery without data migration, but breaks callers and requires verified encoding mappings where tokens are published."
+          },
+          {
+            "key": "C",
+            "reason": "Eliminates owned source/wire mismatch, but requires actual data and mixed-version consumer coordination for spelling."
+          }
+        ],
+        "tradeoff": "Stable contracts over complete spelling uniformity."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: OpenAI GPT. Adversarial model family: OpenAI GPT. Fresh agent: BallotReview2. Removed claims that prose/label changes are harmless and that a source enum proves a deployed wire token or existing replacement alias. Made B/C's discovery/consistency benefits explicit and specified authorization, output, mapping and mixed-version migration costs."
+      },
+      "checkInstructions": "Read the owner preservation directive, guard categories and Cargo compatibility guidance; gate-p261 printed the retained enum spelling. B/C examples are proposals, not current names or deployed schema evidence. Acceptance requires separate source/token inventories, resolved migration edits, all caller/generated-code changes, stable mappings or versioned data conversion, output-contract checks and no obsolete aliases.",
+      "surface": {
+        "gist": "Should American prose cleanup also authorize source-name or owned machine-token migrations?",
+        "lesson": "The present rule preserves identifiers and machine contracts. Source spelling alone does not prove a deployed wire token; label edits also need output checks.",
+        "trio": {
+          "current": {
+            "note": "The retained public case prints its current spelling.",
+            "code": "state: event.DispatchState.Cancelled\nprint(state)"
+          },
+          "wild": {
+            "lang": "Rust/Cargo",
+            "note": "Public renames break source callers; migration cost must be explicit.",
+            "code": "pub enum State { Cancelled }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Preserve contracts",
+            "gist": "Keep existing names; use American spelling for prose and new APIs.",
+            "gains": [
+              "No unintended source or data break."
+            ],
+            "losses": [
+              "Legacy spelling remains inconsistent."
+            ],
+            "proposed": {
+              "code": "event.DispatchState.Cancelled"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Rename source identifiers",
+            "gist": "Clean-cutover owned identifiers; preserve actual published encodings, paths and flags.",
+            "gains": [
+              "Consistent source search without changing stored tokens."
+            ],
+            "losses": [
+              "Broken callers; maintained mappings where needed."
+            ],
+            "proposed": {
+              "code": "event.DispatchState.Canceled\n// Published encodings, if any, stay explicitly mapped."
+            }
+          },
+          {
+            "key": "C",
+            "name": "Also migrate owned tokens",
+            "gist": "Version and convert actual Jet-owned wire/storage schemas too.",
+            "gains": [
+              "Owned source and token spelling agree."
+            ],
+            "losses": [
+              "Data and mixed-version consumer coordination."
+            ],
+            "proposed": {
+              "code": "event.DispatchState.Canceled\n// Owned tokens change only after versioned conversion."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Preserve existing contracts unless spelling uniformity warrants an explicitly authorized breaking migration.",
+          "gains": [
+            "Exact foreign and machine contracts."
+          ],
+          "losses": [
+            {
+              "loss": "Legacy spelling hurts consistency and discovery.",
+              "mitigation": "Document/index canonical names; use American names for new designs without aliases."
+            },
+            {
+              "loss": "Labels can affect output consumers.",
+              "mitigation": "Check output contracts and update human-facing snapshots together."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Better source discovery, but breaks callers and needs verified encoding mappings."
+            },
+            {
+              "key": "C",
+              "reason": "More uniform, but adds data and deployment migration."
+            }
+          ],
+          "tradeoff": "Contract stability over complete uniformity."
+        }
+      },
+      "draftedBy": "Main",
+      "reviewedBy": "BallotReview2",
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-17T12:31:13.797Z",
+      "outcome": "C",
+      "comment": "Complete uniformity is more important. the language is unreleased and greenfield.",
+      "ratifiedAt": "2026-11-17",
+      "retiredAt": "2026-11-20T13:37:17.003Z"
     }
   ]
 }
