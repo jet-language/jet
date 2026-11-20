@@ -1,11 +1,13 @@
 # A zone of a running program stays off until a profiler records it: `jet
 # perf attach --zones=WINDOW` turns the zones of a flight-recorded program
 # on for that window and off again, and the trace holds the zones, frame
-# marks and plots the program recorded meanwhile, beside the ring's samples.
-# An attach without `--zones=` records none. The trace's run window is the
-# attach's window, which holds the zones window: at least the 500 ms asked
-# for and no longer than the attach took, with the program's CPU in it, to
-# the nanosecond.
+# marks and plots the program recorded meanwhile, beside its records in the
+# window, each thread's CPU time sampled every 125 microseconds there as
+# under `jet perf run`, not every 10 ms as its flight ring is. An attach
+# without `--zones=` records none, and charges each of the ring's samples
+# 10 ms. The trace's run window is the attach's window, which holds the
+# zones window: at least the 500 ms asked for and no longer than the attach
+# took, with the program's CPU in it, to the nanosecond.
 requires: os-name:linux
 fixture: AttachTurnsZonesOn.fixture
 env: NO_COLOR=1
@@ -18,6 +20,7 @@ exit: 0
 step: jet perf view point.jettrace
 exit: 0
 stdout: !~ "zone tick" # a point attach records no zone
+json: file point.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.interval_us = 10000 # the ring's samples, one per 10 ms of CPU time
 step: jet perf attach {pid:live} --source live.jet --zones=500ms --out zones.jettrace
 exit: 0
 capture: took = elapsed
@@ -31,13 +34,15 @@ capture: wall file zones.jettrace doc $.content.profile.window_wall_ns
 json: file zones.jettrace doc $.content.profile.window_cpu_ns > 0 # the program's CPU in the window: its tick loop ran
 json: file zones.jettrace doc $.content.profile.window_cpu_ns <= 2*{cap:wall} # at most the window's wall on each of its two threads, the loop's and the runtime's observation writer
 json: file zones.jettrace doc $.content.receipt_sections[?name="window"][0].value.cpu_resolution_ns = 1 # counted by each thread's schedstat, not in ticks
+json: file zones.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.interval_us = 125 # the window's samples, one per 125 microseconds of CPU time
+json: file zones.jettrace doc $.content.profile.overhead_status = "measured" # the window's handler time and signals against its CPU time
 step: jet perf view zones.jettrace
 exit: 0
 stdout: ~ "zone tick count=" # the zones the window recorded
 stdout: ~ " window=live run_wall=" # the header's window is the attach's
 stdout: !~ " run_cpu=0ns" # with the program's CPU in it
 stdout: !~ "run_cpu_resolution=" # counted to the nanosecond
-stdout: ~ " · live.jet:13 " # the ring's samples inside them, on the tick loop's line
+stdout: ~ " · live.jet:13 " # the window's samples inside them, on the tick loop's line
 stdout: ~ "frames count=" # its frame marks
 step: jet perf attach {pid:live} --source live.jet --zones=soon --out bad.jettrace
 exit: 2

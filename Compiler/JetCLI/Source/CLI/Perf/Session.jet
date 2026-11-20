@@ -276,7 +276,7 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     }
     if memory -> jet_cli_perf_counters_profile(capture.profile, counters)
     // The receipt reads the allowlist before the policy takes it.
-    stamped: jet_cli_perf_session_receipt(action, argv, parsed.source, parsed.allowlist, samples != None, parsed.lenses, pc) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
+    stamped: jet_cli_perf_session_receipt(action, argv, parsed.source, parsed.allowlist, samples != None, parsed.lenses, pc, JET_CLI_PERF_SAMPLE_US) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
     capture.receipts.push(stamped)
     if topdown && samples == .Val(file) {
         if parsed.source == .Val(source) {
@@ -364,6 +364,10 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
     alloc := false
     held_ns := Int?{None}
     lost := U64{0}
+    // Why those records were lost, and the CPU time each CPU-time sample
+    // the attach read stands for, in microseconds; None for none read.
+    loss := JET_CLI_PERF_RING_LOSS
+    sampling_us := Int?{None}
     // The functions an outside sampling found the program's CPU in.
     hot := ""
     skip := false
@@ -492,13 +496,26 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
         jet_cli_perf_sweep_leftovers()
         text: perf_files.read(path) ?? return jet_cli_perf_error("cannot read source {path}: {jet_cli_io_error_text(err)}", JET_CLI_PERF_FIX, color)
         // With `--zones=`, the program's zones, frame marks, plots and log
-        // spans for that window, before its ring is read.
-        spans: if zones_ms > 0 -> jet_cli_perf_attach_zones(target_pid, home, zones_ms) else -> None
+        // spans for that window, and its records in it, before its ring is
+        // read.
+        zoned: if zones_ms > 0 -> jet_cli_perf_attach_zones(target_pid, home, zones_ms, path) else -> None
         if zones_ms > 0 -> read.push("its zones for {zones_ms} ms")
-        // The flight ring the program publishes: its recent samples, waits,
-        // wakes, spawns and transfers, read as a run's are.
-        flight: jet_cli_perf_attach_flight(target_pid, home, path)
-        read.push("its flight ring")
+        spans := String?{None}
+        flight := JetCLIPerfSamples?{None}
+        if zoned.move() == .Val(taken) {
+            spans = Val(taken.spans)
+            flight = taken.samples.move()
+        }
+        if flight != None {
+            read.push("its records in the zones window")
+            loss = JET_CLI_PERF_WINDOW_LOSS
+        } else {
+            // The flight ring the program publishes: its recent samples,
+            // waits, wakes, spawns and transfers, read as a run's are.
+            flight = jet_cli_perf_attach_flight(target_pid, home, path)
+            read.push("its flight ring")
+        }
+        if flight == .Val(found) -> sampling_us = Val(found.interval_us)
         capture = jet_cli_perf_capture_source(path, text, observations, flight, target, None) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
         if alloc {
             heap: jet_cli_perf_attach_heap(target_pid, home, path) ?? {
@@ -514,12 +531,12 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
                 capture.receipts.push(section)
             }
         }
-        // The ring's rows are timed from its earliest wait or transfer, or
+        // The records are timed from their earliest wait or transfer, or
         // the window's first zone row, on the program's monotonic clock:
         // attach has no start of its own on it.
         origin := 0
         if spans == .Val(taken) -> origin = jet_cli_perf_spans_first(taken)
-        // The ring's CPU-time samples, which the window's zones hold.
+        // The CPU-time samples, which the window's zones hold.
         timed := [JetCLIPerfTimed]{}
         if flight.move() == .Val(found) {
             loop wait in found.waits {
@@ -532,7 +549,7 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
             jet_cli_perf_waits_read(capture, found.waits.move(), found.wakes, found.spawns, jet_cli_perf_task_samples(timed), found.transfers, path, origin)
             jet_cli_perf_io_read(capture, found.transfers.move(), path, origin)
             lost = found.records_lost
-            if jet_cli_perf_records_section(lost, JET_CLI_PERF_RING_LOSS) == .Val(section) {
+            if jet_cli_perf_records_section(lost, loss) == .Val(section) {
                 capture.receipts.push(section)
             }
         }
@@ -566,6 +583,12 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
     }
     if zones_ms > 0 -> argv.push("--zones={zones_ms}ms")
     if alloc -> argv.push("--lens=alloc")
+    // The interval the trace's CPU-time samples stand for, which its view
+    // charges them at.
+    if sampling_us == .Val(interval) {
+        stamped: jet_cli_perf_session_receipt("attach", argv, None, allowlist, true, [String]{"cpu"}, CanonicalJSON.Null, interval) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
+        capture.receipts.push(stamped)
+    }
     capture.policy.allowlist = allowlist
     path: jet_cli_perf_session_write(capture, "attach", argv, out) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
     // How long the snapshot held the program: its allocations and frees
@@ -573,7 +596,7 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
     held: if held_ns == .Val(ns) -> "Heap snapshot: held the program's allocations and frees for {ns /% 1000} µs\n" else -> ""
     // Records the program made that the ring never got, which the trace
     // lacks.
-    dropped: if lost > (U64{0}) -> "Records lost: {lost}; {JET_CLI_PERF_RING_LOSS}\n" else -> ""
+    dropped: if lost > (U64{0}) -> "Records lost: {lost}; {loss}\n" else -> ""
     JetDriverVerbOutput{stdout: "", stderr: if quiet -> "" else -> "{held}{dropped}{hot}Trace: {path}\n", exit_code: JET_DRIVER_EXIT_OK}
 }
 
@@ -581,10 +604,15 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
 // PerfSamples.jet perf_samples_send).
 JET_CLI_PERF_RING_LOSS: "the program's record socket was full when it made them, as its flight recorder drains it every 100 ms"
 
+// Why records made in an attach's zones window were lost (JetRuntime
+// PerfSamples.jet perf_samples_flush).
+JET_CLI_PERF_WINDOW_LOSS: "the program could not write them to its zones window's file"
+
 // The flight ring the observed program `pid` publishes in this user's
 // private directory `home` (jet_cli_perf_flight_home; JetRuntime
 // PerfSamples.jet perf_flight_publish) and the image beside it, copied out
-// of its way, then read as a run's samples are; the program keeps
+// of its way, then read as a run's samples are, each CPU-time sample
+// standing for the flight recorder's interval; the program keeps
 // publishing its own. Lines in `source` are its own. None when it publishes
 // no ring.
 jet_cli_perf_attach_flight: fn(pid: Int, home: String, source: String) -[FS, Env, Time]> JetCLIPerfSamples? Never! {
@@ -595,7 +623,9 @@ jet_cli_perf_attach_flight: fn(pid: Int, home: String, source: String) -[FS, Env
         perf_files.remove(taken).drop("the attach reads the ring it copied once")
         return None
     }
-    jet_cli_perf_samples_read(taken, source, [TraceCounter]{}, None)
+    sampled := jet_cli_perf_samples_read(taken, source, [TraceCounter]{}, None) ?? return None
+    sampled.interval_us = JET_CLI_PERF_FLIGHT_SAMPLE_US
+    Val(sampled)
 }
 
 // `--lens=alloc`'s heap snapshot of the flight-recorded program `pid`, taken
@@ -682,24 +712,63 @@ jet_cli_perf_attach_window: fn(text: String) -> Int? Never! {
     None
 }
 
+// What an attach's zones window took (jet_cli_perf_attach_zones): the copy
+// of the program's spans file, and the records the program made in the
+// window, None when it opened none.
+JetCLIPerfZonesTaken: struct {
+    spans: String,
+    samples: JetCLIPerfSamples?,
+}
+
+// How often an attach renews its zones request, in 25 ms waits: every
+// 250 ms, well within the second after which the program takes an
+// unrenewed one for an attach that died (JetRuntime PerfSamples.jet
+// PERF_FLIGHT_LEASE_NS).
+JET_CLI_PERF_ZONES_RENEW: 10
+
 // Turn zones on in the flight-recorded program `pid` for `window_ms`: leave
 // the request, a file only this user can write, beside the ring it
 // publishes in `home` (JetRuntime PerfSamples.jet perf_flight_zones), which
 // its next publication (every 100 ms) answers by recording zones, frame
-// marks, plots and log spans to `<ring>.spans`;
-// remove it after the window and wait two publications, so the program has
-// turned them off and written its rows. The rows, copied out of the
-// program's way; None when it wrote none.
-jet_cli_perf_attach_zones: fn(pid: Int, home: String, window_ms: Int) -[FS, Env, Time]> String? Never! {
+// marks, plots and log spans to `<ring>.spans` and opening its zones
+// window: its records go to `<ring>.window`, each thread sampled every
+// 125 microseconds of CPU time. The request is rewritten every
+// JET_CLI_PERF_ZONES_RENEW waits, as the program removes one unrenewed for
+// a second; it is removed after the window, and two publications awaited,
+// so the program has turned zones off, closed the window and written its
+// rows, the window's row among them (jet_cli_perf_spans_window). The rows,
+// copied out of the program's way, and the window's records beside a copy
+// of the ring's image, read as a run's samples are with lines in `source`
+// its own; None when it wrote no rows.
+jet_cli_perf_attach_zones: fn(pid: Int, home: String, window_ms: Int, source: String) -[FS, Env, Time]> JetCLIPerfZonesTaken? Never! {
     ring: perf_files.join(home, "jet-flight-{pid}.samples")
     request: "{ring}.zones"
     _: perf_files.create(request, mode: Val(0o600), links: .Refuse) ?? return None
-    loop _ in 0..<(window_ms + 24) /% 25 -> perf_time.sleep(25ms)
+    waited := 0
+    loop _ in 0..<(window_ms + 24) /% 25 {
+        perf_time.sleep(25ms)
+        waited += 1
+        if waited == JET_CLI_PERF_ZONES_RENEW {
+            waited = 0
+            // Rewritten from empty, its modification time is now.
+            perf_files.write_bytes(request, [U8]{}).drop("a request the program finds unrenewed only ends the window early")
+        }
+    }
     perf_files.remove(request).drop("a request the program no longer sees turns zones off")
     perf_time.sleep(250ms)
-    taken: perf_files.join(home, "jet-perf-attach-{perf_process.current_pid()}-{pid}-{perf_time.unix_ns()}.spans")
-    perf_files.copy("{ring}.spans", taken) ?? return None
-    Val(taken)
+    stem: perf_files.join(home, "jet-perf-attach-{perf_process.current_pid()}-{pid}-{perf_time.unix_ns()}")
+    spans: "{stem}.spans"
+    perf_files.copy("{ring}.spans", spans) ?? return None
+    window: jet_cli_perf_spans_window(perf_files.read_bytes(spans) ?? [U8]{}) ?? return Val(JetCLIPerfZonesTaken{spans: spans, samples: None})
+    records: "{stem}.window"
+    if perf_files.copy("{ring}.window", records) == .Err(_) {
+        return Val(JetCLIPerfZonesTaken{spans: spans, samples: None})
+    }
+    if perf_files.copy("{ring}.image", "{records}.image") == .Err(_) {
+        perf_files.remove(records).drop("the attach reads the window it copied once")
+        return Val(JetCLIPerfZonesTaken{spans: spans, samples: None})
+    }
+    Val(JetCLIPerfZonesTaken{spans: spans, samples: jet_cli_perf_samples_read(records, source, [TraceCounter]{}, None, window: Val(window))})
 }
 
 // This user's private directory, where a flight-recorded program publishes
@@ -1108,11 +1177,12 @@ jet_cli_perf_session_target: fn() -[Env]> String Never! {
 // (jet_cli_build_options), and the capture's settings: the privacy fields
 // it keeps, and, where the program `sampled`, its `lenses`, with each
 // allocation's call sites and, under the `cpu` lens, its CPU-time sampling
-// every JET_CLI_PERF_SAMPLE_US of CPU time and the `pc` its samples were
-// charged by (jet_cli_perf_pc_json). A `jet test` resolves its build
-// through its settings layers too (jet_cli_test_file), which the session
-// does not, so its build is null, as is the build of words the run refused.
-jet_cli_perf_session_receipt: fn(action: String, argv: [String], source: String?, allowlist: [String], sampled: Bool, lenses: [String], pc: CanonicalJSON) -[FS, Env]> TraceReceiptSection JetCLIReadError! {
+// every `interval_us` of CPU time and the `pc` its samples were charged by
+// (jet_cli_perf_pc_json). A `jet test` resolves its build through its
+// settings layers too (jet_cli_test_file), which the session does not, so
+// its build is null, as is the build of words the run refused and of an
+// attach.
+jet_cli_perf_session_receipt: fn(action: String, argv: [String], source: String?, allowlist: [String], sampled: Bool, lenses: [String], pc: CanonicalJSON, interval_us: Int) -[FS, Env]> TraceReceiptSection JetCLIReadError! {
     build := CanonicalJSON.Null
     if action == "run" {
         file: source ?? ""
@@ -1139,7 +1209,7 @@ jet_cli_perf_session_receipt: fn(action: String, argv: [String], source: String?
             [CanonicalJSONField]{
                 {key: "allocations", value: CanonicalJSON.String("call-sites")},
                 {key: "clock", value: if cpu -> CanonicalJSON.String("cpu") else -> CanonicalJSON.Null},
-                {key: "interval_us", value: if cpu -> CanonicalJSON.Integer("{JET_CLI_PERF_SAMPLE_US}") else -> CanonicalJSON.Null},
+                {key: "interval_us", value: if cpu -> CanonicalJSON.Integer("{interval_us}") else -> CanonicalJSON.Null},
                 {key: "lenses", value: CanonicalJSON.Array(named)},
                 {key: "pc", value: if cpu -> pc else -> CanonicalJSON.Null},
             },

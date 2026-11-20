@@ -1,0 +1,32 @@
+# `jet perf attach --zones=WINDOW` renews its zones request every 250 ms
+# while its window is open. A request not renewed within a second was left
+# by an attach that died, so the program removes it, closes the zones
+# window and turns its zones off: the window's row in `.spans` says so. A
+# request left by hand and never renewed is such a request.
+requires: os-name:linux
+fixture: AttachTurnsZonesOn.fixture
+env: NO_COLOR=1
+env: XDG_RUNTIME_DIR={work}/run
+env: TMPDIR={work}/tmp
+step: mkdir -m 700 run tmp
+exit: 0
+session live line: jet run --observe live.jet
+stderr: null
+recv live
+stdout.trim: ~ "READY" # the program is running its loop
+step: sh -c 'n=0; while [ ! -f run/jet/jet-flight-{pid:live}.samples ] && [ $n -lt 200 ]; do sleep 0.05; n=$((n+1)); done; touch run/jet/jet-flight-{pid:live}.samples.zones'
+exit: 0
+step: sh -c 'n=0; while [ ! -s run/jet/jet-flight-{pid:live}.samples.spans ] && [ $n -lt 100 ]; do sleep 0.05; n=$((n+1)); done; ls run/jet | grep -c -e "samples.spans$" -e "samples.window$"'
+exit: 0
+stdout: = "2\n" # the request turned zones on: zone rows, and the window's own records
+step: sleep 2
+exit: 0
+step: sh -c 'ls run/jet | grep -c "samples.zones$"'
+exit: 1 # grep counts no line
+stdout: = "0\n" # unrenewed, the request lapsed and the program removed it
+step: sh -c 'od -A n -v -t d8 -w8 run/jet/jet-flight-{pid:live}.samples.spans | grep -c -x " *25769803816"'
+exit: 0
+stdout: = "1\n" # and closed the window once: one row of kind 6 holding five words (40 | 6 << 32)
+signal live: KILL
+close live
+exit: any # the case's KILL ends the program
