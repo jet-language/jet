@@ -1,0 +1,78 @@
+// A value moved out of its variable into a read parameter (`f(x.move())`)
+// is the call's own: it ends right after the call, on every call shape, not
+// at the variable's scope end.
+Node: struct {
+    _label: String,
+}
+
+Limits: struct {
+    cap: Int,
+    node: Shared<Node>,
+
+    measure: fn(self, other: Limits) -> Int { self.cap + other.cap }
+
+    sum: fn(first: Limits, second: Limits) -> Int { first.cap + second.cap }
+}
+
+Measured: trait {
+    weigh: fn(self, other: Limits) -> Int,
+}
+
+Scale: struct {
+    factor: Int,
+
+    impl Measured {
+        weigh: fn(self, other: Limits) -> Int { self.factor * other.cap }
+    }
+}
+
+consume: fn(limits: Limits) -> Int { limits.cap }
+
+fresh: fn(cap: Int) -> Limits { Limits{cap: cap, node: Shared{Node{_label: "node {cap}"}}} }
+
+direct: fn() -> String {
+    taken: fresh(1)
+    weak: taken.node.downgrade()
+    used: consume(taken.move())
+    "direct freed {weak.upgrade() == .None} used {used}"
+}
+
+method: fn() -> String {
+    base: fresh(2)
+    taken: fresh(3)
+    weak: taken.node.downgrade()
+    used: base.measure(taken.move())
+    "method freed {weak.upgrade() == .None} used {used}"
+}
+
+static_method: fn() -> String {
+    first: fresh(4)
+    taken: fresh(5)
+    weak: taken.node.downgrade()
+    used: Limits.sum(first, taken.move())
+    "static method freed {weak.upgrade() == .None} used {used}"
+}
+
+closure: fn() -> String {
+    pick: fn(limits: Limits) -> Int { limits.cap * 2 }
+    taken: fresh(6)
+    weak: taken.node.downgrade()
+    used: pick(taken.move())
+    "closure freed {weak.upgrade() == .None} used {used}"
+}
+
+trait_value: fn() -> String {
+    scale: Measured{Scale{factor: 3}}
+    taken: fresh(7)
+    weak: taken.node.downgrade()
+    used: scale.weigh(taken.move())
+    "trait value freed {weak.upgrade() == .None} used {used}"
+}
+
+run: fn() {
+    print(direct())
+    print(method())
+    print(static_method())
+    print(closure())
+    print(trait_value())
+}

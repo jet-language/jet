@@ -3,21 +3,51 @@ use {
     _tasks: core.tasks
 }
 
-run: fn() {
+// Accepts the client, signals that it is about to read, and reads from a
+// client that never writes; the read's error message.
+serve: fn(listener: TCPListener, ready_tx: Sender<Int>) -> String Never! {
+    stream: net.tcp_accept(listener) ?? panic("accept")
+    ready_tx.send(1) ?? panic("ready send")
+    if stream.read_bytes(1) == {
+        .Ok(_) -> "unexpected read"
+        .Err(error) -> net.error_message(error)
+    }
+}
+
+// One try: cancel a serving task once it signals. A cancel that lands while
+// the read waits ends the read with its typed cancellation, the message this
+// returns. One that lands before the read waits unwinds the task at the
+// check after `send` returns, so its join reports `Canceled`, and this
+// returns None.
+canceled_read: fn() -> String? {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     typed_address: net.listener_local_socket_addr(listener) ?? panic("address")
     address: net.socket_to_string(typed_address)
     { sender: ready_tx, receiver: ready_rx }: channel<Int>()
-    server: task {
-        stream := net.tcp_accept(listener) ?? panic("accept")
-        ready_tx.send(1)
-        if stream.read_bytes(1) == {
-            .Ok(_) -> { print("unexpected read") }
-            .Err(error) -> print(net.error_message(error))
-        }
-    }
+    server: task serve(listener, ready_tx)
     _client: net.tcp_connect(address) ?? panic("connect")
     _ready: ready_rx.receive() ?? panic("ready")
     server.cancel()
-    server.join() ?? panic("server task failed")
+    if server.join() == {
+        .Ok(message) -> Val(message)
+        .Err(failure) -> {
+            if failure != TaskFailure.Canceled -> panic("server task failed: {failure}")
+            None
+        }
+    }
+}
+
+run: fn() {
+    // Every try checks the outcome its ordering gives; trying again until a
+    // cancel lands in the read's wait makes every run check the typed one.
+    loop _ in 0..<100 {
+        if canceled_read() == {
+            .Val(message) -> {
+                print(message)
+                return
+            }
+            .None -> {}
+        }
+    }
+    panic("no cancel reached the read's wait in 100 tries")
 }

@@ -1,0 +1,413 @@
+// `jet perf attach` of a process that publishes nothing about itself, as the
+// jet CLI and a program started without `--observe` do: the kernel samples
+// the CPU time of each thread of it and of the processes it started (a
+// `jet check`'s compile-time work runs in one) from outside them
+// (x64_sampler_open), and each process's own executable names its samples'
+// frames, so the attach shows which functions their CPU was in.
+use {
+    perf_files: core.files
+    perf_time: core.time
+    jet_backend.[X64ImageFunction, X64Samples, x64_image_function_find, x64_image_functions, x64_sampler_close, x64_sampler_drain, x64_sampler_open]
+    jet_foundation.[CanonicalJSON, CanonicalJSONField, TraceReceiptSection, canonical_json_sha256, jettrace_array, jettrace_object_view, trace_receipt_section_from_json]
+}
+
+// The CPU time of one thread between two of its samples: a millisecond.
+JET_CLI_PERF_OUTSIDE_PERIOD_NS: 1000000
+
+// How long an outside attach samples.
+JET_CLI_PERF_OUTSIDE_WINDOW_MS: 1000
+
+// The functions the `functions` section keeps, the most samples first.
+JET_CLI_PERF_OUTSIDE_ROWS: 32
+
+// The most processes an outside attach samples: the one named and those it
+// started, and theirs.
+JET_CLI_PERF_OUTSIDE_PROCESSES: 64
+
+// The first four bytes of an ELF image, `\x7fELF`, as a little-endian word.
+JET_CLI_PERF_OUTSIDE_ELF: 0x464c457f
+
+// A range of a sampled process's code that an image of its executable file
+// holds, as it is mapped: from `start` to `end` in the process, and `delta`
+// from there to the link addresses of the image, by its index among the
+// images.
+JetCLIPerfOutsideRange: struct {
+    start: Int,
+    end: Int,
+    delta: Int,
+    image: Int,
+}
+
+// A loadable segment of an image: `size` bytes at offset `offset` of the
+// file that holds the image, linked at `address`.
+JetCLIPerfOutsideSegment: struct {
+    offset: Int,
+    size: Int,
+    address: Int,
+}
+
+// An ELF image of an executable file the sampled processes run, the file's
+// own or one it holds as a part (x64_executable_add_parts), as a jet holds
+// the runtime image its compile-time work runs: the file's `path`, the
+// image's functions, sorted by start, and its loadable segments.
+JetCLIPerfOutsideImage: struct {
+    path: String,
+    functions: [X64ImageFunction],
+    segments: [JetCLIPerfOutsideSegment],
+}
+
+// A function the samples were in and its samples: `own`, those whose
+// innermost frame is in it, and `total`, those with it anywhere on their
+// stack; `seen` is the last sample counted in its total, so a function a
+// stack holds twice counts once.
+JetCLIPerfOutsideRow: struct {
+    name: String,
+    own: Int,
+    total: Int,
+    seen: Int,
+}
+
+// Sample process `pid`, and the processes it started, for `window_ms` and
+// say where their CPU went, as the trace's `functions` receipt section
+// (type `JetPerfFunctions`): the `samples` taken of the `threads` of its
+// `processes`, one each `period_ns` of a thread's CPU time over
+// `window_ms`; the samples the kernel `lost`; those whose innermost frame
+// no function of its process's executable holds (`unnamed`); and the
+// functions the samples were in, by name, the most samples whose innermost
+// frame is in it (`self`) first, then the most with it anywhere on their
+// stack (`total`), at most JET_CLI_PERF_OUTSIDE_ROWS. Err says why the
+// kernel won't sample it or its executable can't name the frames.
+jet_cli_perf_outside_sample: fn(pid: Int, window_ms: Int) -[FS.Read, Time, FFI.Asm]> TraceReceiptSection JetCLIReadError! {
+    family: jet_cli_perf_outside_family(pid)
+    threads := [Int]{}
+    // The process, by its index in `family`, each thread is of.
+    owner := [Int:Int]{}
+    loop (index, each) in family {
+        tasks: perf_files.list_dir("/proc/{each}/task") ?? next
+        loop task in tasks {
+            thread: Int.parse(task.name) ?? next
+            threads.push(thread)
+            owner[thread] = index
+        }
+    }
+    if threads.len() == 0 {
+        return Err(jet_cli_read_error("its threads can't be listed under /proc/{pid}/task"))
+    }
+    sampler := x64_sampler_open(threads, JET_CLI_PERF_OUTSIDE_PERIOD_NS)
+    sampled: sampler.threads.len()
+    if sampled == 0 {
+        why: if sampler.failure != "" -> "the kernel won't sample it: {sampler.failure}" else -> "it has no thread left to sample"
+        x64_sampler_close(sampler)
+        return Err(jet_cli_read_error(why))
+    }
+    taken := X64Samples{words: [Int]{}, samples: 0, lost: 0}
+    // The rings are drained every 20 ms, well before one fills.
+    loop _ in 0..<(window_ms + 19) /% 20 {
+        perf_time.sleep(20ms)
+        x64_sampler_drain(sampler, taken)
+    }
+    x64_sampler_close(sampler)
+    images := [JetCLIPerfOutsideImage]{}
+    // Where each process's code is mapped, none when its executable can't
+    // be read.
+    processes := [[JetCLIPerfOutsideRange]]{}
+    failure := ""
+    loop each in family {
+        mapped: jet_cli_perf_outside_process(each, images) ?? {
+            if failure == "" -> failure = err.message
+            processes.push([JetCLIPerfOutsideRange]{})
+            next
+        }
+        processes.push(mapped)
+    }
+    if images.len() == 0 -> return Err(jet_cli_read_error(failure))
+    rows := [JetCLIPerfOutsideRow]{}
+    // Each row's index by its function's name.
+    named_rows := [String:Int]{}
+    unnamed := 0
+    at := 0
+    sample := 0
+    loop at + 1 < taken.words.len() {
+        process: owner[taken.words[at], or: -1]
+        count: taken.words[at + 1]
+        loop k in 0..<count {
+            if process < 0 {
+                if k == 0 -> unnamed += 1
+                break
+            }
+            // A caller's frame holds its return address, the byte after its call.
+            pc: if k == 0 -> taken.words[at + 2] else -> taken.words[at + 2 + k] - 1
+            range: jet_cli_perf_outside_range(processes[process], pc)
+            image: if range < 0 -> -1 else -> processes[process][range].image
+            index: if range < 0 -> -1 else -> x64_image_function_find(images[image].functions, pc + processes[process][range].delta)
+            if index < 0 {
+                if k == 0 -> unnamed += 1
+                next
+            }
+            name: "{images[image].functions[index].name}"
+            row: named_rows[name, or: rows.len()]
+            if row == rows.len() {
+                named_rows[name] = row
+                rows.push(JetCLIPerfOutsideRow{name: name, own: 0, total: 0, seen: -1})
+            }
+            if k == 0 -> rows[row].own = rows[row].own + 1
+            if rows[row].seen != sample {
+                rows[row].seen = sample
+                rows[row].total = rows[row].total + 1
+            }
+        }
+        at += 2 + count
+        sample += 1
+    }
+    rows.sort_by(fn(left: JetCLIPerfOutsideRow, right: JetCLIPerfOutsideRow) {
+        if left.own != right.own -> return right.own <=> left.own
+        right.total <=> left.total
+    })
+    kept: if rows.len() > JET_CLI_PERF_OUTSIDE_ROWS -> JET_CLI_PERF_OUTSIDE_ROWS else -> rows.len()
+    functions := [CanonicalJSON]{}
+    loop k in 0..<kept {
+        row: rows[k]
+        functions.push(
+            CanonicalJSON.Object(
+                [CanonicalJSONField]{
+                    {key: "name", value: CanonicalJSON.String(row.name)},
+                    {key: "self", value: CanonicalJSON.Integer("{row.own}")},
+                    {key: "total", value: CanonicalJSON.Integer("{row.total}")},
+                },
+            ),
+        )
+    }
+    value: CanonicalJSON.Object(
+        [CanonicalJSONField]{
+            {key: "functions", value: CanonicalJSON.Array(functions.move())},
+            {key: "lost", value: CanonicalJSON.Integer("{taken.lost}")},
+            {key: "period_ns", value: CanonicalJSON.Integer("{JET_CLI_PERF_OUTSIDE_PERIOD_NS}")},
+            {key: "processes", value: CanonicalJSON.Integer("{family.len()}")},
+            {key: "samples", value: CanonicalJSON.Integer("{taken.samples}")},
+            {key: "threads", value: CanonicalJSON.Integer("{sampled}")},
+            {key: "unnamed", value: CanonicalJSON.Integer("{unnamed}")},
+            {key: "window_ms", value: CanonicalJSON.Integer("{window_ms}")},
+        },
+    )
+    Ok(TraceReceiptSection{name: "functions", type_name: "JetPerfFunctions", digest: canonical_json_sha256(value), value: value})
+}
+
+// Process `pid` and the processes it started, and theirs, from each
+// thread's /proc `children`, at most JET_CLI_PERF_OUTSIDE_PROCESSES.
+jet_cli_perf_outside_family: fn(pid: Int) -[FS.Read]> [Int] Never! {
+    family := [Int]{pid}
+    at := 0
+    loop at < family.len() {
+        each: family[at]
+        at += 1
+        tasks: perf_files.list_dir("/proc/{each}/task") ?? next
+        loop task in tasks {
+            text: perf_files.read("/proc/{each}/task/{task.name}/children") ?? next
+            loop word in jet_cli_find_words(text) {
+                child: Int.parse(word) ?? next
+                if family.len() < JET_CLI_PERF_OUTSIDE_PROCESSES -> family.push(child)
+            }
+        }
+    }
+    family
+}
+
+// Where process `pid`'s code is mapped in it, by the images of its
+// executable file, read into `images` unless an earlier process runs the
+// same file.
+jet_cli_perf_outside_process: fn(pid: Int, images: &[JetCLIPerfOutsideImage]) -[FS.Read]> [JetCLIPerfOutsideRange] JetCLIReadError! {
+    exe: perf_files.read_link("/proc/{pid}/exe") ?? return Err(jet_cli_read_error("process {pid}'s executable can't be found: {jet_cli_io_error_text(err)}"))
+    // A replaced executable's link says so; its mappings name the path alone.
+    path: if exe.ends_with(" (deleted)") -> exe.slice(0..<exe.len() - 10) else -> exe
+    // The link opens the file the process runs, replaced or not.
+    file: "/proc/{pid}/exe"
+    known := false
+    loop image in images {
+        if image.path == path {
+            known = true
+            break
+        }
+    }
+    if !known {
+        own: jet_cli_perf_outside_image(file, path, 0) ?? return Err(jet_cli_read_error("process {pid}'s executable {path} {err.message}"))
+        images.push(own)
+        // A part whose functions can't be read leaves its code unnamed.
+        loop base in jet_cli_perf_outside_parts(file) {
+            part: jet_cli_perf_outside_image(file, path, base) ?? next
+            images.push(part)
+        }
+    }
+    maps: perf_files.read("/proc/{pid}/maps") ?? return Err(jet_cli_read_error("process {pid}'s mappings can't be read: {jet_cli_io_error_text(err)}"))
+    Ok(jet_cli_perf_outside_ranges(maps, path, images))
+}
+
+// The ELF image at offset `base` of the executable file `file`, which
+// mappings name `path`: its loadable segments and its functions, read
+// from its start to the end of its section headers, which its .symtab and
+// .strtab lie before. Err says why it has none.
+jet_cli_perf_outside_image: fn(file: String, path: String, base: Int) -[FS.Read]> JetCLIPerfOutsideImage JetCLIReadError! {
+    head: perf_files.read_at(file, base, 64) ?? return Err(jet_cli_read_error("can't be read: {jet_cli_io_error_text(err)}"))
+    if head.len() < 64 || jet_cli_perf_outside_word(head, 0, 4) != JET_CLI_PERF_OUTSIDE_ELF {
+        return Err(jet_cli_read_error("isn't an ELF image"))
+    }
+    count: jet_cli_perf_outside_word(head, 56, 2)
+    table: perf_files.read_at(file, base + jet_cli_perf_outside_word(head, 32, 8), count * 56) ?? return Err(jet_cli_read_error("can't be read: {jet_cli_io_error_text(err)}"))
+    segments := [JetCLIPerfOutsideSegment]{}
+    loop k in 0..<count {
+        at: k * 56
+        if at + 56 > table.len() -> break
+        // PT_LOAD
+        if jet_cli_perf_outside_word(table, at, 4) != 1 -> next
+        segments.push(JetCLIPerfOutsideSegment{offset: base + jet_cli_perf_outside_word(table, at + 8, 8), size: jet_cli_perf_outside_word(table, at + 32, 8), address: jet_cli_perf_outside_word(table, at + 16, 8)})
+    }
+    end: jet_cli_perf_outside_word(head, 40, 8) + jet_cli_perf_outside_word(head, 60, 2) * 64
+    bytes: perf_files.read_at(file, base, end) ?? return Err(jet_cli_read_error("can't be read: {jet_cli_io_error_text(err)}"))
+    read: x64_image_functions(bytes)
+    if read.failure != "" -> return Err(jet_cli_read_error("names no function: {read.failure}"))
+    Ok(JetCLIPerfOutsideImage{path: path, functions: read.functions.move(), segments: segments})
+}
+
+// The offsets in the executable file `file` of the ELF executables it holds
+// as parts (x64_executable_add_parts), as a jet holds its runtime image:
+// each PT_NOTE of its program headers that is a jet part's note (`Jet`,
+// then the part's label, padded with at least one NUL to 8 bytes) whose
+// bytes are an executable, not an object file.
+jet_cli_perf_outside_parts: fn(file: String) -[FS.Read]> [Int] Never! {
+    parts := [Int]{}
+    head: perf_files.read_at(file, 0, 64) ?? return parts
+    if head.len() < 64 -> return parts
+    count: jet_cli_perf_outside_word(head, 56, 2)
+    table: perf_files.read_at(file, jet_cli_perf_outside_word(head, 32, 8), count * 56) ?? return parts
+    loop k in 0..<count {
+        at: k * 56
+        if at + 56 > table.len() -> break
+        // PT_NOTE
+        if jet_cli_perf_outside_word(table, at, 4) != 4 -> next
+        from: jet_cli_perf_outside_word(table, at + 8, 8)
+        size: jet_cli_perf_outside_word(table, at + 32, 8)
+        note: perf_files.read_at(file, from, if size < 272 -> size else -> 272) ?? next
+        // A 4-byte name, `Jet` and its NUL.
+        if note.len() < 17 || jet_cli_perf_outside_word(note, 0, 4) != 4 || jet_cli_perf_outside_word(note, 12, 4) != 0x0074654a {
+            next
+        }
+        label := 16
+        loop label < note.len() && note[label] != 0 -> label += 1
+        if label == note.len() -> next
+        payload: from + 16 + (label - 16 + 8) /% 8 * 8
+        magic: perf_files.read_at(file, payload, 18) ?? next
+        // ET_EXEC or ET_DYN
+        if magic.len() < 18 || jet_cli_perf_outside_word(magic, 0, 4) != JET_CLI_PERF_OUTSIDE_ELF {
+            next
+        }
+        kind: jet_cli_perf_outside_word(magic, 16, 2)
+        if kind == 2 || kind == 3 -> parts.push(payload)
+    }
+    parts
+}
+
+// The executable code of `maps` (a process's /proc/<pid>/maps) that the
+// images of the executable file mappings name `path` hold: each mapping in
+// the smallest loadable segment of them that holds its file offset. A
+// mapping starts at the page that holds its segment's first byte.
+jet_cli_perf_outside_ranges: fn(maps: String, path: String, images: [JetCLIPerfOutsideImage]) -> [JetCLIPerfOutsideRange] Never! {
+    ranges := [JetCLIPerfOutsideRange]{}
+    loop line in maps.split("\n").to_list() {
+        words: jet_cli_find_words(line)
+        // start-end, permissions, file offset, device, inode, path.
+        if words.len() < 6 || !words[1].contains("x") || words[5] != path -> next
+        bounds: words[0].split("-").to_list()
+        if bounds.len() != 2 -> next
+        start: jet_cli_perf_outside_hex(bounds[0]) ?? next
+        end: jet_cli_perf_outside_hex(bounds[1]) ?? next
+        offset: jet_cli_perf_outside_hex(words[2]) ?? next
+        found := JetCLIPerfOutsideRange{start: start, end: end, delta: 0, image: -1}
+        size := 0
+        loop (index, image) in images {
+            if image.path != path -> next
+            loop segment in image.segments {
+                holds: offset >= segment.offset - segment.offset % 4096 && offset < segment.offset + segment.size
+                if holds && (found.image < 0 || segment.size < size) {
+                    found.delta = segment.address + offset - segment.offset - start
+                    found.image = index
+                    size = segment.size
+                }
+            }
+        }
+        if found.image >= 0 -> ranges.push(found)
+    }
+    ranges
+}
+
+// The little-endian `width`-byte word at `at` of `bytes`.
+jet_cli_perf_outside_word: fn(bytes: [U8], at: Int, width: Int) -> Int Never! {
+    value := 0
+    loop k in 0..<width -> value = value | (Int{bytes[at + k]} << (8 * k))
+    value
+}
+
+// The hexadecimal `text` of /proc's maps, without its `0x`.
+jet_cli_perf_outside_hex: fn(text: String) -> Int? Never! {
+    if text == "" -> return None
+    value := 0
+    loop byte in text.bytes() {
+        code: Int{byte}
+        digit := -1
+        if code >= 48 && code <= 57 -> digit = code - 48
+        if code >= 97 && code <= 102 -> digit = code - 87
+        if digit < 0 -> return None
+        value = value * 16 + digit
+    }
+    Val(value)
+}
+
+// The index of the range of `ranges` that holds process address `pc`,
+// else -1.
+jet_cli_perf_outside_range: fn(ranges: [JetCLIPerfOutsideRange], pc: Int) -> Int Never! {
+    loop (index, range) in ranges {
+        if pc >= range.start && pc < range.end -> return index
+    }
+    -1
+}
+
+// The `functions` section's lines (jet_cli_perf_outside_sample):
+// `functions samples=1003 processes=2 threads=35 window_ms=1000 lost=0
+// unnamed=241`, then each function it keeps, each share of the samples:
+// `  41.6% self  68.2% total · unit.rt_text_append_owner`.
+jet_cli_perf_outside_lines: fn(value: CanonicalJSON) -> [String] Never! {
+    lines := [String]{}
+    fields: jettrace_object_view(value, "receipt functions") ?? return lines
+    samples: jet_cli_perf_member_number(value, "samples") ?? 0
+    processes: jet_cli_perf_field_integer(fields, "processes") ?? "0"
+    threads: jet_cli_perf_field_integer(fields, "threads") ?? "0"
+    window: jet_cli_perf_field_integer(fields, "window_ms") ?? "0"
+    lost: jet_cli_perf_field_integer(fields, "lost") ?? "0"
+    unnamed: jet_cli_perf_field_integer(fields, "unnamed") ?? "0"
+    lines.push("functions samples={samples} processes={processes} threads={threads} window_ms={window} lost={lost} unnamed={unnamed}")
+    at: jet_cli_perf_key(fields, "functions") ?? return lines
+    rows: jettrace_array(fields[at].value, "receipt functions.functions") ?? return lines
+    loop row in rows {
+        own: jet_cli_perf_member_number(row, "self") ?? 0
+        total: jet_cli_perf_member_number(row, "total") ?? 0
+        name: jet_cli_perf_member_text(row, "name") ?? "?"
+        lines.push("  {jet_cli_perf_outside_share(own, samples)} self  {jet_cli_perf_outside_share(total, samples)} total · {name}")
+    }
+    lines
+}
+
+// `part` of `whole` as a percentage to a tenth, `41.2%`.
+jet_cli_perf_outside_share: fn(part: Int, whole: Int) -> String Never! {
+    if whole <= 0 -> return "0.0%"
+    tenths: (part * 1000 + whole /% 2) /% whole
+    "{tenths /% 10}.{tenths % 10}%"
+}
+
+// The lines of the trace's `functions` receipt section, none when it has
+// none (jet_cli_perf_outside_lines).
+jet_cli_perf_function_lines: fn(trace: CanonicalJSON) -> [String] Never! {
+    items: jet_cli_perf_rows(trace, "receipt_sections") ?? return [String]{}
+    loop item in items {
+        section: trace_receipt_section_from_json(item) ?? next
+        if section.name == "functions" -> return jet_cli_perf_outside_lines(section.value)
+    }
+    [String]{}
+}

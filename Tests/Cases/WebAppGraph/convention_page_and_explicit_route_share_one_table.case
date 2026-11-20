@@ -11,15 +11,15 @@ step: jet check app.jet
 cwd: clash
 exit: nonzero
 stderr: ~ "Error: Jet.AmbiguousRoute: Two routes both match `GET /about`; this one comes from `routes/about/page.jet`." # E2804 names the convention file
-stderr: ~ "--> app.jet:3:23" # the `routes(from:)` registration
-stderr: ~ "--> app.jet:3:46" # the explicit `route("/about", ...)` registration
+stderr: ~ "--> app.jet:5:23" # the `routes(from:)` registration
+stderr: ~ "--> app.jet:5:46" # the explicit `route("/about", ...)` registration
 stderr: ~ "the other registration, by `builder`" # the explicit row is labeled as the other one
 stderr: ~ "More: jet-lang.dev/e/Jet.AmbiguousRoute" # the footer links the E2804 page
 step: jet explain --routes app.jet
 cwd: table
 exit: 0
 stdout: ~ "Route Table — app.jet" # the heading names the entry file
-stdout: ~ "GET  /contact  contact_page  page  app.jet:3\n" # the explicit route's row
+stdout: ~ "GET  /contact  contact_page  page  app.jet:5\n" # the explicit route's row
 stdout: ~ "GET  /about    page          page  routes/about/page.jet:1\n" # the convention file's row
 
 step: jet explain --web-graph app.jet --json

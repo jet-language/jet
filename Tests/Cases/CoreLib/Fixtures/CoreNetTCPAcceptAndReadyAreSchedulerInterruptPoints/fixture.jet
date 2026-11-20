@@ -1,48 +1,97 @@
 use {
     net: core.net
     _tasks: core.tasks
-    time: core.time
+}
+
+// Each try below cancels a task once it signals that it is about to wait. A
+// cancel that lands while the wait is parked ends it with its typed
+// cancellation, the message the task returns. One that lands before the
+// wait parks unwinds the task at the check after `send` returns, so its
+// join reports `Canceled` and the try returns None.
+
+// Signals, then accepts; the accept's error message.
+accept_after_signal: fn(listener: TCPListener, ready_tx: Sender<Int>) -> String Never! {
+    ready_tx.send(1) ?? panic("accept ready send")
+    if listener.accept() == {
+        .Ok(_) -> "accept unexpectedly succeeded"
+        .Err(error) -> net.error_message(error)
+    }
+}
+
+canceled_accept: fn() -> String? {
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("cancel listen")
+    address: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("cancel address"))
+    { sender: ready_tx, receiver: ready_rx }: channel<Int>()
+    accepting: task accept_after_signal(listener, ready_tx)
+    _ready: ready_rx.receive() ?? panic("accept ready")
+    accepting.cancel()
+    // A connection keeps a broken cancel from hanging the accept.
+    release: net.tcp_connect(address) ?? panic("release accept")
+    release.close() ?? panic("release close")
+    if accepting.join() == {
+        .Ok(message) -> Val(message)
+        .Err(failure) -> {
+            if failure != TaskFailure.Canceled -> panic("canceled accept task failed: {failure}")
+            None
+        }
+    }
+}
+
+// Signals, then waits for the stream to turn readable; the wait's error
+// message.
+ready_after_signal: fn(server: TCPStream, ready_tx: Sender<Int>) -> String Never! {
+    ready_tx.send(1) ?? panic("wait ready send")
+    interest: NetReadyInterest.Read
+    if server.ready(interest, deadline: Duration.milliseconds(1000) ?? panic("ready deadline")) == {
+        .Ok(_) -> "ready unexpectedly succeeded"
+        .Err(error) -> net.error_message(error)
+    }
+}
+
+canceled_ready: fn() -> String? {
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("ready listen")
+    address: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("ready address"))
+    client: net.tcp_connect(address) ?? panic("ready connect")
+    server: net.tcp_accept(listener) ?? panic("ready accept")
+    { sender: wait_tx, receiver: wait_rx }: channel<Int>()
+    waiting: task ready_after_signal(server, wait_tx)
+    _wait_ready: wait_rx.receive() ?? panic("wait ready")
+    waiting.cancel()
+    outcome: if waiting.join() == {
+        .Ok(message) -> Val(message)
+        .Err(failure) -> {
+            if failure != TaskFailure.Canceled -> panic("ready wait task failed: {failure}")
+            None
+        }
+    }
+    client.close() ?? panic("ready client close")
+    outcome
+}
+
+// Tries again until a cancel lands in the wait, so every run checks the
+// typed cancellation.
+typed_cancellation: fn(attempt: fn() -> String?, what: String) -> String {
+    loop _ in 0..<100 {
+        if attempt() == {
+            .Val(message) -> return message
+            .None -> {}
+        }
+    }
+    panic("no cancel reached the {what} wait in 100 tries")
 }
 
 run: fn() {
-    canceled_listener: net.tcp_listen("127.0.0.1:0") ?? panic("cancel listen")
-    canceled_address: net.socket_to_string(net.listener_local_socket_addr(canceled_listener) ?? panic("cancel address"))
-    { sender: accept_tx, receiver: accept_rx }: channel<Int>()
-    canceled_accept: task {
-        accept_tx.send(1)
-        if canceled_listener.accept() == {
-            .Ok(_) -> { print("accept unexpectedly succeeded") }
-            .Err(error) -> print(net.error_message(error))
-        }
-    }
-    _accept_ready: accept_rx.receive() ?? panic("accept ready")
-    time.sleep(10ms)
-    canceled_accept.cancel()
-    time.sleep(10ms)
-    release_accept: net.tcp_connect(canceled_address) ?? panic("release accept")
-    release_accept.close() ?? panic("release close")
-    canceled_accept.join() ?? panic("canceled accept task failed")
+    print(typed_cancellation(canceled_accept, "accept"))
 
-    ready_listener: net.tcp_listen("127.0.0.1:0") ?? panic("ready listen")
-    ready_address: net.socket_to_string(net.listener_local_socket_addr(ready_listener) ?? panic("ready address"))
-    ready_client: net.tcp_connect(ready_address) ?? panic("ready connect")
-    ready_server := net.tcp_accept(ready_listener) ?? panic("ready accept")
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("write listen")
+    address: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("write address"))
+    client: net.tcp_connect(address) ?? panic("write connect")
+    server: net.tcp_accept(listener) ?? panic("write accept")
     write_interest: NetReadyInterest.Write
-    write_ready: ready_server.ready(write_interest, deadline: Duration.milliseconds(1000) ?? panic("write ready deadline")) ?? panic("write ready")
+    write_ready: server.ready(write_interest, deadline: Duration.milliseconds(1000) ?? panic("write ready deadline")) ?? panic("write ready")
     print(net.ready_readable(write_ready))
     print(net.ready_writable(write_ready))
-    interest: NetReadyInterest.Read
-    { sender: wait_tx, receiver: wait_rx }: channel<Int>()
-    ready_wait: task &&ready_server {
-        wait_tx.send(1)
-        if ready_server.ready(interest, deadline: Duration.milliseconds(1000) ?? panic("ready deadline")) == {
-            .Ok(_) -> { print("ready unexpectedly succeeded") }
-            .Err(error) -> print(net.error_message(error))
-        }
-    }
-    _wait_ready: wait_rx.receive() ?? panic("wait ready")
-    time.sleep(10ms)
-    ready_wait.cancel()
-    ready_wait.join() ?? panic("ready wait task failed")
-    ready_client.close() ?? panic("ready client close")
+    client.close() ?? panic("write client close")
+
+    print(typed_cancellation(canceled_ready, "ready"))
 }

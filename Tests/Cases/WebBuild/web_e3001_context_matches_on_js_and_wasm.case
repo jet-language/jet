@@ -8,8 +8,8 @@ env: NO_COLOR=1
 step native_js: jet run tests/fixtures/web_e3001_js_context.jet
 exit: 70
 stdout: empty
-stderr: ~ "Stop: Jet.Panic: `panic: missing value`\n  --> web_e3001_js_context.jet:7 in run\n" # the report's head; the page's report is compared whole below
-stderr: ~ "7 |     print(missing() ?? panic(\"missing value\"))" # the source line under the location
+stderr: ~ "Stop: Jet.Panic: `panic: missing value`\n  --> web_e3001_js_context.jet:4 in run\n" # the report's head; the page's report is compared whole below
+stderr: ~ "4 | run: fn() { print(missing() ?? panic(\"missing value\")) }" # the source line under the location
 step: jet build --target web tests/fixtures/web_e3001_js_context.jet
 exit: 0
 file: tests/fixtures/.jet/build/app.wasm is-file
@@ -21,8 +21,8 @@ stderr: == native_js
 step native_wasm: jet run tests/fixtures/web_e3001_wasm_context.jet
 exit: 70
 stdout: empty
-stderr: ~ "Stop: Jet.Panic: `panic: missing value`\n  --> web_e3001_wasm_context.jet:7 in run\n" # the report's head; the page's report is compared whole below
-stderr: ~ "7 |     print(missing() ?? panic(\"missing value\"))" # the source line under the location
+stderr: ~ "Stop: Jet.Panic: `panic: missing value`\n  --> web_e3001_wasm_context.jet:4 in run\n" # the report's head; the page's report is compared whole below
+stderr: ~ "4 | run: fn() { print(missing() ?? panic(\"missing value\")) }" # the source line under the location
 step: jet build --target web tests/fixtures/web_e3001_wasm_context.jet
 exit: 0
 file: tests/fixtures/.jet/build/app.wasm is-file

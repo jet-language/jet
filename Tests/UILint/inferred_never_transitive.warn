@@ -33,3 +33,21 @@ Warning: Jet.InferredNeverReturn: Public function `fail` always diverges but doe
  Why: Inferred divergence is useful to callers but is not part of the written API contract
  Fix: Write `-> Never` as the return type, for example `fail: fn() -> Never`
 More: jet-lang.dev/e/Jet.InferredNeverReturn
+
+Error: Jet.UnconditionalRecursion: Every path through `ping` calls `pong`, and every path through `pong` leads back to `ping`, so no call of `ping` returns
+  --> Tests/UILint/inferred_never_transitive.jet:23:27
+    |
+ 23 | ping: fn(n: Int) -> Int { pong(n + 1) }
+    |                           ^^^^
+ Why: No path through the body reaches a `return` or its end without calling again, so the calls nest until the stack runs out
+ Fix: Give `ping` a path that returns without calling again, such as a check on an argument that ends the recursion
+More: jet-lang.dev/e/Jet.UnconditionalRecursion
+
+Error: Jet.UnconditionalRecursion: Every path through `pong` calls `ping`, and every path through `ping` leads back to `pong`, so no call of `pong` returns
+  --> Tests/UILint/inferred_never_transitive.jet:25:27
+    |
+ 25 | pong: fn(n: Int) -> Int { ping(n - 1) }
+    |                           ^^^^
+ Why: No path through the body reaches a `return` or its end without calling again, so the calls nest until the stack runs out
+ Fix: Give `pong` a path that returns without calling again, such as a check on an argument that ends the recursion
+More: jet-lang.dev/e/Jet.UnconditionalRecursion

@@ -3,7 +3,11 @@
 # holder stops owning it, so the Shared the member holds has one owner, and its
 # cell is freed where the taken value ends, before the holder's scope end. The
 # dump of each take shares nothing: no Shared clone and no function value
-# retain. Output matches on o0, o1 and o2.
+# retain. Output matches on o0, o1 and o2. The taken value ends right after
+# the call it is moved into (`consume(taken.move())`), as any value moved
+# into a read parameter does: call_shapes.jet moves a variable into a
+# function, a method, a static method, a closure and a trait value's method,
+# and each frees its cell before the caller goes on.
 fixture: AMovedMemberHoldingAnOptionalIntOrAFunctionEndsWithItsNewHolder.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -34,3 +38,12 @@ stdout: = "owners 1 freed true used 1 holder 0\nowners 1 freed true used 2 holde
 step: jet run -O2 function_value.jet
 exit: 0 # o2
 stdout: = "owners 1 freed true used 1 holder 0\nowners 1 freed true used 2 holder 1\nowners 1 freed true used 3 holder 2\ntotal 3\n" # o2
+step: jet run -O0 call_shapes.jet
+exit: 0 # o0
+stdout: = "direct freed true used 1\nmethod freed true used 5\nstatic method freed true used 9\nclosure freed true used 12\ntrait value freed true used 21\n" # o0
+step: jet run -O1 call_shapes.jet
+exit: 0 # o1
+stdout: = "direct freed true used 1\nmethod freed true used 5\nstatic method freed true used 9\nclosure freed true used 12\ntrait value freed true used 21\n" # o1
+step: jet run -O2 call_shapes.jet
+exit: 0 # o2
+stdout: = "direct freed true used 1\nmethod freed true used 5\nstatic method freed true used 9\nclosure freed true used 12\ntrait value freed true used 21\n" # o2

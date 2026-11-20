@@ -4399,6 +4399,11 @@ ir_call_row: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args: 
             slot = ir_carrier_lent(m, p, b, carrier_ty, arg.value, lends, span)
         } else { slot = ir_value_as(m, p, b, arg.value, param_row, span) }
         if ir_failed(b) -> return -1
+        // A call whose result is a view (`-> T from x`) may borrow from a
+        // read argument, so a moved one stays with its variable.
+        if params[index].convention != .Move && p.functions[row].return_view_provenance == None {
+            ir_end_moved_argument(p, b, arg.value, slot)
+        }
         // A Unit argument (`finish(done)` at T = Unit) has no value slot, but
         // the callee keeps a Param slot of the Unit row for it (ir_param_slot),
         // so it is passed as a fresh Unit temp, which holds no bits to set.
@@ -4409,6 +4414,20 @@ ir_call_row: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args: 
         moves.push(params[index].convention == .Move)
     }
     ir_call_row_emit(m, p, b, row, type_args, slots, moves, backs, bridges, lends, span)
+}
+
+// A read argument written `name.move()` (a read parameter, or any parameter
+// of a closure call, which only lends): the variable gives its value up at
+// the call, so the value is the call's temporary and ends right after it
+// (ir_release), not at the variable's scope end. A take parameter's ir_own
+// does the same for the value it keeps.
+ir_end_moved_argument: fn(p: IRProgram, b: &IRBuilder, value: Int, slot: Int) Never! {
+    if slot < 0 || !(ir_body_node(p, b, value).kind == .Move(_)) || !ir_movable_binding(b, slot) {
+        return
+    }
+    ir_close_disarm(b, slot)
+    ir_disown(b, slot)
+    b.fresh[slot] = true
 }
 
 // The call of non-generic function row `row` on argument values already
@@ -8742,6 +8761,7 @@ ir_indirect_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, arg
         slot: ir_value_as(m, p, b, arg.value, row, span)
         if ir_failed(b) -> return -1
         if slot < 0 -> return ir_fail_slot(b, span, "Unit argument of an indirect call")
+        ir_end_moved_argument(p, b, arg.value, slot)
         slots.push(slot)
     }
     code_row: ir_code_row(m, fact)

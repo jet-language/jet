@@ -32,7 +32,7 @@ JET_CLI_PERF_FIX: "correct the named flag, or run `jet help` to see the flags"
 
 // `jet perf <action> …`: `argv` starts at `perf`. The front door answers the
 // group's help and refuses an unknown or unbuilt action before this runs.
-jet_cli_perf: fn(argv: [String], color: Bool) -[FS, Env, Exec, Time]> JetDriverVerbOutput Never! {
+jet_cli_perf: fn(argv: [String], color: Bool) -[FS, Env, Exec, Time, FFI.Asm]> JetDriverVerbOutput Never! {
     action: argv[1]
     rest := [String]{}
     help := false
@@ -284,6 +284,7 @@ jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String]
     loop line in jet_cli_perf_topdown_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_off_cpu_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_thread_lines(trace) -> out = "{out}{line}\n"
+    loop line in jet_cli_perf_function_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_syscall_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_game_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_receipt_lines(trace) -> out = "{out}{line}\n"
@@ -633,20 +634,21 @@ jet_cli_perf_receipt_sections: fn(trace: CanonicalJSON) -> [JetDriverRunReceiptS
 // `receipt <name> <value>` for each receipt section the trace records, the
 // value as its canonical JSON, but the allocations, the heap snapshots, the
 // causal predictions, the topdown lens's, the zones, the tasks, the
-// threads, the host calls, the helpers and the code, which
-// jet_cli_perf_allocation_lines, jet_cli_perf_heap_lines,
+// threads, the functions an outside attach sampled, the host calls, the
+// helpers and the code, which jet_cli_perf_allocation_lines,
+// jet_cli_perf_heap_lines,
 // jet_cli_perf_causal_lines, jet_cli_perf_topdown_lines,
 // jet_cli_perf_zone_lines, jet_cli_perf_task_summary with
 // jet_cli_perf_task_phase_lines, jet_cli_perf_thread_lines,
-// jet_cli_perf_syscall_lines, the per-line table
-// (jet_cli_perf_line_table) and jet_cli_perf_instructions_summary show,
-// and the causal lens's tasks' timings, a row per task, which only the
+// jet_cli_perf_function_lines, jet_cli_perf_syscall_lines, the per-line
+// table (jet_cli_perf_line_table) and jet_cli_perf_instructions_summary
+// show, and the causal lens's tasks' timings, a row per task, which only the
 // trace keeps.
 jet_cli_perf_receipt_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     items: jet_cli_perf_rows(trace, "receipt_sections") ?? return [String]{}
     lines := [String]{}
     // The sections their own lines show, or none does.
-    shown: [String]{"allocations", "heap", "causal", "causal_tasks", "topdown", "zones", "tasks", "threads", "syscalls", "helpers", "instructions"}
+    shown: [String]{"allocations", "heap", "causal", "causal_tasks", "topdown", "zones", "tasks", "threads", "functions", "syscalls", "helpers", "instructions"}
     loop item in items {
         section: trace_receipt_section_from_json(item) ?? next
         if shown.contains(section.name) -> next
