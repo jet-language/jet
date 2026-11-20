@@ -22,7 +22,7 @@ stdout: = file_lock_compared_with_none_checks_in_sema.out
 stderr: empty
 step: jet check plain/main.jet
 exit: 1
-stderr: count "Jet.OperatorTypeMismatch" = 1 # the one `lock != None`
+stderr: count "Error: Jet.OperatorTypeMismatch" = 1 # the one `lock != None`
 stderr: ~ "Only an optional value can be compared with `None`" # E0109's text
 stderr: ~ "Jet.OperatorTypeMismatch" # the registered code
 stderr: !~ "Internal compiler error" # sema refuses it; ir.build never sees it
@@ -32,5 +32,5 @@ stderr: ~ "Jet.OperatorTypeMismatch" # run checks first and stops there
 stderr: !~ "Internal compiler error" # no backend fault
 step: jet check declared/main.jet
 exit: 1
-stderr: count "Jet.OperatorTypeMismatch" = 2 # `point != None` and `mode == None`
+stderr: count "Error: Jet.OperatorTypeMismatch" = 2 # `point != None` and `mode == None`
 stderr: !~ "Internal compiler error" # both refused in sema

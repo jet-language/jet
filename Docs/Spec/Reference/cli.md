@@ -229,7 +229,7 @@ jet check [<file.jet|dir>]           Check code without creating a binary
 jet inspect <command>                Explore code, builds, packages, and bindings
 jet test [<file.jet|dir>] [<filter>] [--profile=<name>] [--filter=<text>] [--shard=<i/n>] [--list] [--results=<file>] [-O0|-O1|-O2...] [--time-limit=<duration>] [--compiler=<jet>] [--capture=<failed|all|none>] [--docs] [-u] Run tests
 jet fmt [args]                       Format Jet and configured project files
-jet explain <NAME|FACT> [file]       Explain a diagnostic code, build fact, generic-module value, or typed cost
+jet explain <NAME|FACT> [file]       Explain a diagnostic, build fact, generic-module value, or typed cost
 jet dev [<file.jet|dir>] [-- <args>] Watch and run a program
 jet repl [<file.jet>] [--project <dir>] [--allow=<RIGHTS>] [--deny=<RIGHTS>] Try Jet code interactively
 jet self <command>                   Manage the Jet installation and editor tools
