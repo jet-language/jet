@@ -5650,9 +5650,10 @@ perf_flight_number: fn(scratch: I64, length: I64, at: I64, into: I64) {
 
 // The memory the dump holds: what the stop can reach, within
 // PERF_FLIGHT_DUMP_BUDGET. The roots are each task row's stack, from the
-// page of its rsp less the red zone to the end of its mapping, and each
-// mapping its frame-pointer chain reaches (a deeper stack segment's bridge
-// frame names the one it grew from: StackSegment.jet), then the image's
+// page of its rsp less the red zone up past the outermost frame its
+// frame-pointer chain reaches in that mapping, and each mapping the chain
+// reaches (a deeper stack segment's bridge frame names the one it grew
+// from: StackSegment.jet), then the image's
 // writable segments, its globals. Each range held is written as a memory
 // section and every aligned word in it that points into a writable mapping
 // of /proc/self/maps reaches more: the pointer's page (a small block never
@@ -5782,26 +5783,32 @@ perf_flight_span_bound: fn(state: I64, index: I64, end: Bool) -> I64 {
 }
 
 // The stack of a task row whose registers are `rsp` and `rbp`: from rsp
-// less the red zone to its mapping's end, then each mapping the frame
-// pointers lead to that the walk does not hold yet, from that frame to the
-// mapping's end, each from its page's start (perf_flight_take).
+// less the red zone, then from each frame where the frame-pointer chain
+// enters another mapping, each up past the chain's outermost frame there
+// (perf_flight_stack_run), each from its page's start (perf_flight_take).
+// A stack's mapping is no bound: fiber stacks share one mapping (Fiber.jet
+// fiber_new), so its end would take every neighbor's whole stack.
 perf_flight_stack: fn(state: I64, rsp: I64, rbp: I64) {
     span: perf_flight_span(state, rsp)
     if (span < I64{0}) {
         return
     }
     low: perf_flight_span_bound(state, span, false)
-    from: if (wrapping(rsp - I64{128}) < low) -> low else -> wrapping(rsp - I64{128})
-    perf_flight_take(state, from, perf_flight_span_bound(state, span, true))
+    holder := span
+    start := if (wrapping(rsp - I64{128}) < low) -> low else -> wrapping(rsp - I64{128})
+    top := I64{0}
     read: wrapping(wrapping(state + PERF_FLIGHT_WALK_AT) + I64{56})
     frame := rbp
     steps := I64{0}
     loop frame != (I64{0}) && (frame & I64{7}) == (I64{0}) && steps < PERF_FLIGHT_FRAMES {
-        holder: perf_flight_span(state, frame)
-        if (holder < I64{0}) { break }
-        if (perf_flight_seen(state, frame & PERF_FLIGHT_PAGE_MASK) == I64{0}) {
-            perf_flight_take(state, frame, perf_flight_span_bound(state, holder, true))
+        within: perf_flight_span(state, frame)
+        if (within < I64{0}) { break }
+        if (within != holder) {
+            perf_flight_stack_run(state, holder, start, top)
+            holder = within
+            start = frame
         }
+        top = frame
         perf_flight_read(state, read, frame, I64{8})
         caller: rt_text_word(read)
         // Within a mapping the chain only climbs.
@@ -5809,6 +5816,24 @@ perf_flight_stack: fn(state: I64, rsp: I64, rbp: I64) {
         frame = caller
         steps = wrapping(steps + I64{1})
     }
+    perf_flight_stack_run(state, holder, start, top)
+}
+
+// Hold one run of a stack in the walk's span `span`: from `start` through
+// the page after the one that holds the link of `top`, the outermost frame
+// the chain reached there. That covers the entry's words above it and, on
+// a fiber, the header at its stack's top. With no frame there (`top` 0),
+// to the span's end.
+perf_flight_stack_run: fn(state: I64, span: I64, start: I64, top: I64) {
+    high: perf_flight_span_bound(state, span, true)
+    if (top == I64{0}) {
+        perf_flight_take(state, start, high)
+        return
+    }
+    past: wrapping(top + I64{8})
+    page: past & PERF_FLIGHT_PAGE_MASK
+    end: wrapping(page + I64{8192})
+    perf_flight_take(state, start, if (end < high) -> end else -> high)
 }
 
 // The image's writable segments at their load addresses: the globals.
