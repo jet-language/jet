@@ -41,7 +41,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0075 | CollectingLoopBreakPayload | Compiler/JetSema/Source/Sema/Statements.jet:297 | the exit has one value |
 | E0076 | LoopResultMismatch | Compiler/JetSema/Source/Sema/Expressions/LoopValues.jet:43 | every exit must give the loop's value |
 | E0078 | MissingExhaustionRoute | Compiler/JetSema/Source/Sema/Expressions/Control.jet:1551 | the exhausted loop needs a written value |
-| E0081 | MissingFunctionBody | Compiler/JetParser/Source/Formatter/Formatter.jet:2381 | host and foreign functions are declared with `#Import` or `#FFI` and their body forms |
+| E0081 | MissingFunctionBody | Compiler/JetParser/Source/Formatter/Formatter.jet:2395 | host and foreign functions are declared with `#Import` or `#FFI` and their body forms |
 | E0083 | UnclosedDelimiter | Compiler/JetParser/Source/Parser/State.jet:781 | no opt-in decides where an unclosed delimiter ends |
 | E0086 | AmbiguousMarker | Compiler/JetSema/Source/Sema/MarkerModules.jet:590 | no opt-in picks between two declarations |
 | E0088 | BidiControlInSource | Compiler/JetLexer/Source/Lexer/Payload.jet:553 | the guard protects every reader of the source, and no author can waive it for them |
