@@ -1,6 +1,7 @@
 // The Rust fixture lexes and parses two modules into a ProgramBundle; here
 // the same program is written directly as the budget's EffectBudgetProgram
-// view (module paths, aliases, and the effect keys their items define).
+// view (module paths, aliases, and the effect keys their items define). A
+// program-wide key is `{alias}.{key}`, as the driver writes it.
 use {
     jet_pkg_model.[
         EffectBudgetImport,
@@ -44,21 +45,21 @@ pkg_test_effect_program: fn() -> EffectBudgetProgram Never! {
 }
 
 pkg_test_effect_summaries: fn(root_calls_migrate: Bool) -> [String:PackageEffectSummary] Never! {
-    run_edges: if root_calls_migrate -> [String]{"crypto::migrate_v1"} else -> [String]{}
+    run_edges: if root_calls_migrate -> [String]{"crypto.migrate_v1"} else -> [String]{}
     [String:PackageEffectSummary]{
-        "run::run": pkg_test_effect_summary([String]{}, run_edges, false),
-        "crypto::migrate_v1": pkg_test_effect_summary([String]{}, [String]{"crypto::seal"}, false),
-        "crypto::seal": pkg_test_effect_summary([String]{"Rand"}, [String]{}, false),
-        "crypto::unused": pkg_test_effect_summary([String]{"Rand"}, [String]{}, false),
+        "run.run": pkg_test_effect_summary([String]{}, run_edges, false),
+        "crypto.migrate_v1": pkg_test_effect_summary([String]{}, [String]{"crypto.seal"}, false),
+        "crypto.seal": pkg_test_effect_summary([String]{"Rand"}, [String]{}, false),
+        "crypto.unused": pkg_test_effect_summary([String]{"Rand"}, [String]{}, false),
     }
 }
 
 pkg_test_effect_solved: fn() -> [String:[String]] Never! {
     [String:[String]]{
-        "run::run": [String]{},
-        "crypto::migrate_v1": [String]{"Rand"},
-        "crypto::seal": [String]{"Rand"},
-        "crypto::unused": [String]{"Rand"},
+        "run.run": [String]{},
+        "crypto.migrate_v1": [String]{"Rand"},
+        "crypto.seal": [String]{"Rand"},
+        "crypto.unused": [String]{"Rand"},
     }
 }
 
@@ -92,7 +93,7 @@ pkg_test_package_effects: fn(name: String, effects: [String], chains: [String:[S
     entries: pkg_compute_package_effects(pkg_test_effect_program(), pkg_test_effect_solved(), pkg_test_effect_summaries(true))
     email: pkg_test_effect_package(entries, "email")
     assert(email.effects.contains("Rand"))
-    assert_eq(email.effect_chains.get("Rand"), Val([String]{"crypto::migrate_v1", "crypto::seal"}))
+    assert_eq(email.effect_chains.get("Rand"), Val([String]{"crypto.migrate_v1", "crypto.seal"}))
     diagnostics: pkg_effect_enforce(entries, pkg_test_budget_manifest([String]{"IO"}))
     found := false
     loop diagnostic in diagnostics {
@@ -103,7 +104,7 @@ pkg_test_package_effects: fn(name: String, effects: [String], chains: [String:[S
 
 #Test("package budget preserves the authored effect witness location") {
     solved := pkg_test_effect_solved()
-    solved["run::run"] = [String]{"Rand"}
+    solved["run.run"] = [String]{"Rand"}
     entries: pkg_compute_package_effects(pkg_test_effect_program(), solved, pkg_test_effect_summaries(true))
     diagnostics: pkg_effect_enforce(entries, pkg_test_budget_manifest([String]{"IO"}))
     assert_eq(diagnostics.len(), 2)
@@ -165,7 +166,7 @@ pkg_test_owner_module: fn(path: String) -> EffectBudgetModule Never! {
 
 #Test("a grant line is the dependency's whole limit and names the call path") {
     manifest := pkg_test_budget_manifest([String]{"FS", "Net"})
-    chains: [String:[String]]{"Net": [String]{"dep::fetch", "dep::dial"}}
+    chains: [String:[String]]{"Net": [String]{"dep.fetch", "dep.dial"}}
     entries: [PackageEffects]{pkg_test_package_effects("dep", [String]{"Net"}, chains, [String]{}, None)}
     // `allow` lists Net, so without a line the dependency may use it.
     assert_eq(pkg_effect_enforce(entries, manifest).len(), 0)
@@ -189,7 +190,7 @@ pkg_test_owner_module: fn(path: String) -> EffectBudgetModule Never! {
 
 #Test("a written allow row is a ceiling over the root package's own code") {
     manifest := pkg_test_budget_manifest([String]{"FS"})
-    entries: [PackageEffects]{pkg_test_package_effects("root", [String]{"Net"}, [String:[String]]{"Net": [String]{"run::run", "run::fetch"}}, [String]{}, None)}
+    entries: [PackageEffects]{pkg_test_package_effects("root", [String]{"Net"}, [String:[String]]{"Net": [String]{"run.run", "run.fetch"}}, [String]{}, None)}
     diagnostics: pkg_effect_enforce(entries, manifest)
     assert_eq(diagnostics.len(), 1)
     assert_eq(diagnostics[0].code, "E0749")
@@ -209,7 +210,7 @@ pkg_test_owner_module: fn(path: String) -> EffectBudgetModule Never! {
 // descriptor-owned binding has its descriptor's root; `FFI.C` never covers
 // another FFI leaf or a Jet-side effect.
 #Test("a written allow row holds each foreign call to the effects it has") {
-    c_call: [PackageEffects]{pkg_test_package_effects("root", [String]{"FFI.C(\"c\")", "IO"}, [String:[String]]{"FFI.C(\"c\")": [String]{"run::run"}}, [String]{}, None)}
+    c_call: [PackageEffects]{pkg_test_package_effects("root", [String]{"FFI.C(\"c\")", "IO"}, [String:[String]]{"FFI.C(\"c\")": [String]{"run.run"}}, [String]{}, None)}
     omitted: pkg_effect_enforce(c_call, pkg_test_budget_manifest([String]{"IO", "Mem.Alloc"}))
     assert_eq(omitted.len(), 1)
     assert_eq(omitted[0].code, "E0749")
@@ -217,12 +218,12 @@ pkg_test_owner_module: fn(path: String) -> EffectBudgetModule Never! {
     assert_eq(pkg_effect_enforce(c_call, pkg_test_budget_manifest([String]{"FFI.C(\"c\")", "IO", "Mem.Alloc"})).len(), 0)
     assert_eq(pkg_effect_enforce(c_call, pkg_test_budget_manifest([String]{"FFI.C", "IO", "Mem.Alloc"})).len(), 0)
     assert_eq(pkg_effect_enforce(c_call, pkg_test_budget_manifest([String]{"FFI", "IO", "Mem.Alloc"})).len(), 0)
-    described: [PackageEffects]{pkg_test_package_effects("root", [String]{"FFI.Fortran"}, [String:[String]]{"FFI.Fortran": [String]{"run::run"}}, [String]{}, None)}
+    described: [PackageEffects]{pkg_test_package_effects("root", [String]{"FFI.Fortran"}, [String:[String]]{"FFI.Fortran": [String]{"run.run"}}, [String]{}, None)}
     fortran: pkg_effect_enforce(described, pkg_test_budget_manifest([String]{"FFI.C", "IO", "Mem.Alloc"}))
     assert_eq(fortran.len(), 1)
     assert_eq(fortran[0].code, "E0749")
     assert(fortran[0].what.contains("`FFI.Fortran`"))
-    jet_side: [PackageEffects]{pkg_test_package_effects("root", [String]{"FFI.C", "Net"}, [String:[String]]{"Net": [String]{"run::run", "run::fetch"}}, [String]{}, None)}
+    jet_side: [PackageEffects]{pkg_test_package_effects("root", [String]{"FFI.C", "Net"}, [String:[String]]{"Net": [String]{"run.run", "run.fetch"}}, [String]{}, None)}
     net: pkg_effect_enforce(jet_side, pkg_test_budget_manifest([String]{"FFI.C", "IO", "Mem.Alloc"}))
     assert_eq(net.len(), 1)
     assert_eq(net[0].code, "E0749")
@@ -233,14 +234,14 @@ pkg_test_owner_module: fn(path: String) -> EffectBudgetModule Never! {
 // the root's `allow` row names the root's key, so it lends a dependency
 // nothing; the dependency's grant line names the dependency's own key.
 #Test("a foreign-library grant covers its own library in its own package") {
-    c_call: [PackageEffects]{pkg_test_package_effects("root", [String]{"FFI.C(\"c\")", "IO"}, [String:[String]]{"FFI.C(\"c\")": [String]{"run::run"}}, [String]{}, None)}
+    c_call: [PackageEffects]{pkg_test_package_effects("root", [String]{"FFI.C(\"c\")", "IO"}, [String:[String]]{"FFI.C(\"c\")": [String]{"run.run"}}, [String]{}, None)}
     other: pkg_effect_enforce(c_call, pkg_test_budget_manifest([String]{"FFI.C(\"m\")", "IO", "Mem.Alloc"}))
     assert_eq(other.len(), 1)
     assert_eq(other[0].code, "E0749")
     assert(other[0].what.contains("`FFI.C(\"c\")`"))
     assert(other[0].fix.contains("`FFI.C(\"c\")`"))
     span: Span{start: 4, end: 12}
-    helper_call: [PackageEffects]{pkg_test_package_effects("helper", [String]{"FFI.C(\"c\")"}, [String:[String]]{"FFI.C(\"c\")": [String]{"helper::magnitude"}}, [String]{}, Val(span))}
+    helper_call: [PackageEffects]{pkg_test_package_effects("helper", [String]{"FFI.C(\"c\")"}, [String:[String]]{"FFI.C(\"c\")": [String]{"helper.magnitude"}}, [String]{}, Val(span))}
     manifest := pkg_test_budget_manifest([String]{"FFI.C(\"c\")", "IO", "Mem.Alloc"})
     lent: pkg_effect_enforce(helper_call, manifest)
     assert_eq(lent.len(), 1)
@@ -255,7 +256,7 @@ pkg_test_owner_module: fn(path: String) -> EffectBudgetModule Never! {
 #Test("panic budget ignores allow omission but honors denial") {
     manifest := pkg_test_budget_manifest([String]{"IO", "GPU", "Mem.Alloc", "FS", "Rand"})
     span: Span{start: 4, end: 12}
-    entries: [PackageEffects]{pkg_test_package_effects("panicdep", [String]{"Panic"}, [String:[String]]{}, [String]{"panicdep::parse_port"}, Val(span))}
+    entries: [PackageEffects]{pkg_test_package_effects("panicdep", [String]{"Panic"}, [String:[String]]{}, [String]{"panicdep.parse_port"}, Val(span))}
     assert_eq(pkg_effect_enforce(entries, manifest).len(), 0)
     manifest.authority.deny = Val([String]{"Panic"})
     denied: pkg_effect_enforce(entries, manifest)
@@ -273,8 +274,8 @@ pkg_test_owner_module: fn(path: String) -> EffectBudgetModule Never! {
 
 #Test("effect entry summary ignores open callback possibilities") {
     summaries: [String:PackageEffectSummary]{
-        "run": pkg_test_effect_summary([String]{"IO"}, [String]{"callbacks::apply_twice"}, true),
-        "callbacks::apply_twice": pkg_test_effect_summary([String]{}, [String]{}, true),
+        "run": pkg_test_effect_summary([String]{"IO"}, [String]{"callbacks.apply_twice"}, true),
+        "callbacks.apply_twice": pkg_test_effect_summary([String]{}, [String]{}, true),
     }
     assert_eq(pkg_effect_summary_line_for_entry(summaries, "run"), "effects: IO")
     assert((pkg_effect_summary_json_for_entry(summaries, "run") ?? panic("render effects")).contains("\"action\":\"build.effects\""))
@@ -303,8 +304,8 @@ pkg_test_owner_module: fn(path: String) -> EffectBudgetModule Never! {
     pure: [PackageEffects]{pkg_test_package_effects("root", [String]{"IO"}, [String:[String]]{}, [String]{}, None), pkg_test_package_effects("dep", [String]{}, [String:[String]]{}, [String]{}, None)}
     // A stop is deny-only: never named as a gain nor recorded.
     witness: EffectBudgetWitness{path: "/workspace/app/dep/dep.jet", span: Span{start: 40, end: 44}}
-    reading := pkg_test_package_effects("dep", [String]{"FS.Read", "Panic"}, [String:[String]]{"FS.Read": [String]{"dep::greet", "dep::load"}}, [String]{}, None)
-    reading.effect_witnesses = [String:EffectBudgetWitness]{"dep::load": witness}
+    reading := pkg_test_package_effects("dep", [String]{"FS.Read", "Panic"}, [String:[String]]{"FS.Read": [String]{"dep.greet", "dep.load"}}, [String]{}, None)
+    reading.effect_witnesses = [String:EffectBudgetWitness]{"dep.load": witness}
     widening: [PackageEffects]{reading}
     first: pkg_lock_record_effect_rows(root, pure, false) ?? panic("record first")
     assert_eq(first.len(), 0)
@@ -317,7 +318,7 @@ pkg_test_owner_module: fn(path: String) -> EffectBudgetModule Never! {
     assert_eq(refused[0].name, "dep")
     assert_eq(refused[0].reaches.len(), 1)
     assert_eq(refused[0].reaches[0].effect_name, "FS.Read")
-    assert_eq(refused[0].reaches[0].chain, [String]{"dep::greet", "dep::load"})
+    assert_eq(refused[0].reaches[0].chain, [String]{"dep.greet", "dep.load"})
     assert_eq(files.read(lock_path) ?? panic("read locked"), recorded)
     report: pkg_lock_e3513(refused[0].name, refused[0].reaches[0])
     assert_eq(report.code, "E3513")
