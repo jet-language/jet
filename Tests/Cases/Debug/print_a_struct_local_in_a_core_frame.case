@@ -1,0 +1,20 @@
+# `print` evaluates a field of a struct local in a Core frame, whose source
+# comes from the Core the program was compiled with, never from the working
+# directory, which holds no `<corelib>` folder. A checked URL literal with a
+# hole runs core.net.url's `literal`, which stops at its line 326 with its
+# locals `url` (a URL) and `cursor` (a URLHoleCursor) built.
+# No other debugger is on PATH.
+fixture: PrintAStructLocalInACoreFrame.fixture
+env: NO_COLOR=1
+step: jet debug prog.jet
+env: PATH={work}/no-tools
+stdin: print_a_struct_local_in_a_core_frame.stdin
+exit: 0
+stdout: ~ "Breakpoint hit  URL.jet:326  in literal()\n" # the stop is in the Core function
+stdout: ~ "326 |     if cursor.index != holes.len() -> panic(" # the stop's line is read from Core
+stdout: ~ "(Jet) print url.host_text\nurl.host_text = \"example.com\"\n" # a field of a struct local
+stdout: ~ "(Jet) print cursor.index\ncursor.index = 1\n" # and of another
+stdout: !~ "couldn't read" # no Core source is read from the working directory
+stdout: ~ "#0  literal()  at URL.jet:326\n" # the backtrace starts in the Core function
+stdout: ~ "  run()  at prog.jet:5\n" # called from run
+stdout: ~ "https://example.com/a/b?q=1\nProgram finished\n" # the evaluations left the program's run unchanged

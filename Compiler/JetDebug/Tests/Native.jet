@@ -779,3 +779,27 @@ NATIVE_TEST_GENERIC_MODULE: "use core.process\n\ncounter: module<T>(start: Int) 
         native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
     }
 }
+
+// The compiler's shape: a worker thread of a task group, with tasks busy on
+// other threads, ends the program with status 1 while the main thread waits
+// for it, so the exit kills the main thread before the worker's own exit
+// stop.
+NATIVE_TEST_WORKER_EXIT: "use process: core.process\n\nhalf: fn(n: Int) -> Int {{\n    n /% 2\n}}\n\nspin: fn(n: Int) -> Int {{\n    total := 0\n    loop i in 0..<n -> total += i\n    total\n}}\n\nwork: fn(n: Int) -> Int {{\n    loop k in 0..<3 {{\n        spinning: task spin(1000000000 + k)\n        spinning.detach()\n    }}\n    total := 0\n    loop i in 0..<n -> total += half(i)\n    print(\"total {{total}}\")\n    process.exit(1)\n    total\n}}\n\nrun: fn() {{\n    results := [Int]{{}}\n    task.group big(stack: 201326592) {{\n        worker: task work(7)\n        results.push(worker.join() ?? panic(\"the worker failed\"))\n    }}\n    print(\"{{results[0]}}\")\n}}\n"
+
+#Test("a_worker_s_stopping_exit_pauses_and_ends_after_its_breakpoint_is_deleted") {
+    scratch: native_test_files.temp_dir("jet-debug-worker-exit") ?? panic("scratch: {err}")
+    root: scratch.path
+    session := native_test_session(root, NATIVE_TEST_WORKER_EXIT, [String]{"-O0"})
+    lines: NATIVE_TEST_WORKER_EXIT.split("\n").to_list()
+    first: session.run_to([NativeBreak]{{file: "prog.jet", line: 4}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
+    assert(first.text.contains("Breakpoint hit  prog.jet:4  in half()"), first.text)
+    deleted: session.command("delete 1", first.stop, "prog.jet", lines) ?? panic("delete: {err.detail}")
+    exiting: session.command("c", deleted.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    assert(exiting.text.contains("Program exiting with status 1"), exiting.text)
+    shown: session.command("bt", exiting.stop, "prog.jet", lines) ?? panic("bt: {err.detail}")
+    assert(shown.text.contains("work()  at prog.jet:21"), shown.text)
+    ended: session.command("c", exiting.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    assert(ended.text.contains("Program finished with exit status 1"), ended.text)
+    session.close()
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+}

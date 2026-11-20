@@ -15,3 +15,21 @@ Error: Jet.ValueTypeMismatch: `total` wants `Grid<Int>` (which is [[Int]]) for a
  Why: Every argument must match its parameter's type
  Fix: Use [[Int]] here
 More: jet-lang.dev/e/Jet.ValueTypeMismatch
+
+Error: Jet.ReturnTypeMismatch: This value is [Int], but `pairs_of` returns `Pairs<Int>` (which is [(Int, Int)])
+  --> Tests/UI/alias_shows_source_name_and_expansion.jet:13:32
+    |
+ 13 | pairs_of: fn() -> Pairs<Int> { [Int]{1} }
+    |                                ^^^^^^^^
+ Why: `pairs_of` declares [(Int, Int)] as its result, so the value it hands back must be [(Int, Int)]
+ Fix: Hand back a [(Int, Int)] value: convert this value to [(Int, Int)], or return the value you meant
+More: jet-lang.dev/e/Jet.ReturnTypeMismatch
+
+Error: Jet.ValueTypeMismatch: `count` wants `Pairs<Int>` (which is [(Int, Int)]) for argument 1, but this is [Int]
+  --> Tests/UI/alias_shows_source_name_and_expansion.jet:15:30
+    |
+ 15 | counted: fn() -> Int { count([Int]{3, 4}) }
+    |                              ^^^^^^^^^^^
+ Why: Every argument must match its parameter's type
+ Fix: Use [(Int, Int)] here
+More: jet-lang.dev/e/Jet.ValueTypeMismatch

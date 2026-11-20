@@ -1,0 +1,24 @@
+# The room evaluations run from is mapped as the program starts, near its
+# code, and kept for the run: placing a logpoint in the program maps its
+# code after the room, and a logpoint the debugger fills in at each hit (a
+# String part that is not a local's own name keeps it out of the program)
+# evaluates its message there 250 times, every hit's message shown and
+# none refused for want of room.
+# The fixture must stay in jet fmt form: line 7 is the `total += step` of
+# count_up's loop and line 16 that of named's. The count comes from the
+# program's arguments (none here, so 1000): with a literal count the
+# compiler works count_up's total out ahead and its loop never runs.
+fixture: LogpointsEvaluatedAtEveryHitAlwaysFindRoom.fixture
+env: NO_COLOR=1
+env: PATH={work}/no-tools
+step: jet debug prog.jet
+stdin: logpoints_evaluated_at_every_hit_always_find_room.stdin
+exit: 0
+stdout: ~ "\nThe logpoint runs in the program: a hit writes its values there and runs on without a stop\n" # the first logpoint is placed in the program
+stdout: ~ "\ns0\ns1\ns2\ns3\ns4\ns5\ns6\ns0\n" # and logs each hit
+stdout: ~ "\nThe logpoint can't run in the program: `word.trim()` is a String" # the other is filled in by the debugger
+stdout: ~ "\neven at 0\nodd at 1\neven at 2\n" # the debugger fills in the other at its first hits
+stdout: ~ "\nodd at 247\neven at 248\nodd at 249\n" # and at its last, each in the room
+stdout: !~ "no room" # no evaluation is refused for want of room
+stdout: ~ "totals 2997 875\n" # the program runs to its totals unchanged
+stdout: ~ "Program finished\n" # and to its end

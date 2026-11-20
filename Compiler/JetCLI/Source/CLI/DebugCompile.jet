@@ -91,6 +91,12 @@ JetCLIDebugEvaluator: struct {
         source: fn(self, path: String) -[FS, Env]> String? Never! {
             Val(jet_cli_debug_source_text(self.entry, path) ?? return None)
         }
+
+        // The pack beside this jet, which a program this jet built linked
+        // its runtime from.
+        runtime: fn(self) -[FS, Env]> [U8]? Never! {
+            Val(jet_cli_runtime_bytes(jet_cli_runtime_dir(), JET_CLI_RUNTIME_PACK_FILE) ?? return None)
+        }
     }
 }
 

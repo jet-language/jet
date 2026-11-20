@@ -1029,22 +1029,29 @@ stdin is empty too. D-DBG-VERBS1=A names the commands:
   `break 12` is line 12 of the file being debugged. With `if`, the breakpoint
   stops only when the Jet expression holds in the stopped frame. A condition
   that is not a Bool is refused when it is set; one that fails at a hit
-  stops and says why. Setting it says where the condition runs: the
-  debugger checks it at each hit, which stops the program each time.
+  stops and says why. Setting it says where the condition runs: in the
+  program, when its code writes only its own stack and the blocks it
+  allocates, which come from an arena of 64 KiB of its own, emptied at
+  each hit (a hit that finds no room left, or frees the program's memory,
+  traps to the debugger, which checks it); else the debugger checks it at
+  each hit, which stops the program each time.
 - `log <file:line> "<text with {expr}>"` sets a logpoint. It prints its
   message with each `{expr}` filled in, then the program runs on. Setting it
   says where it runs. A logpoint with no condition, and whose parts are
-  each a number, Bool or Char, runs in the program: each part is compiled
-  on its own and placed as a condition is, and a hit writes its parts'
-  values and a sequence number to a ring of 65,536 slots in the program's
+  each a number, Bool or Char, or a String local's own name, runs in the
+  program: each part is compiled on its own and placed as a condition is,
+  and a hit writes its parts' values (a String's length and up to 120
+  bytes of its text, shown cut at a whole character and ended by `…` when
+  longer) and a sequence number to a ring of 65,536 slots in the program's
   memory, then runs on without a stop. The debugger reads the ring and
   fills in the messages, in the order of their hits, when the program
   stops, when the ring is full, when a thread exits and before it changes
   the breakpoints. Its messages then come after the program output that
-  preceded the read, not between its lines. Any other part (a String, a
-  struct) is read from memory that may change after the hit, so such a
-  logpoint says why it can't run in the program, and the debugger fills in
-  its message at each hit, which stops the program each time.
+  preceded the read, not between its lines. Any other part (a String
+  expression, a struct) is read from memory that may change after the
+  hit, so such a logpoint says why it can't run in the program, and the
+  debugger fills in its message at each hit, which stops the program each
+  time.
 - `watch <place>` stops at each write that changes a local of the selected
   frame, a field path under one (`watch order.total`), or an item of a List
   (`watch xs[3]`, `watch order.lines[i + 1]`). The compiler's parser reads
@@ -1147,9 +1154,14 @@ when the image's runtime exports its allocator words and its record/replay
 mode (`jet_rt_alloc_class_limit`, `jet_rt_alloc_check_take_code`,
 `jet_rt_alloc_check_give_code` and `jet_rt_replay_mode`, data symbols every image
 that allocates holds; nothing in the program writes them for the debugger,
-so a program no debugger touches pays nothing for them): the debugger maps
-the expression's code and a room beside the program's code once per run of
-the program, sets the thread to call it from that room with the other
+so a program no debugger touches pays nothing for them): when it starts or
+attaches to the program the debugger maps one room within a jump's reach of
+the program's code, kept for the whole run, whose code space holds each
+expression's code, page by page; a full space starts over from its first
+page and the expressions placed before are placed again when next run, so
+the room never grows and no evaluation, condition or logpoint is refused
+for want of room. The debugger sets the thread to call the expression from
+that room with the other
 threads stopped, and puts the thread's registers, its floating-point state
 and the code the debugger planted back after it. For the call the debugger
 writes the allocator words, as checked mode routes the heap, so the call's
@@ -1163,8 +1175,34 @@ state is put back, and the refusal says the program may keep values alive
 that the evaluation took references to and could not give back; a
 breakpoint it passes is stepped over, a watched place it writes stops
 nothing, and a signal sent to the program meanwhile is the program's once
-the call is done. The debugger also turns the record/replay mode off for
-the call and puts it back after (`jet debug --record`, `--replay`), so an
+the call is done. The other threads, stopped, may hold a lock the call
+would wait on, and a call refused part way through taking one would leave
+it taken, so for the call the debugger keeps it from the program's locks
+and its scheduler: a `Shared` or `Cell` value's read (`tally.count`,
+`tally.read(…)`) jumps to a read in the room that calls the closure on the
+value as it stands, without its lock; a read guard
+(`tally.guard_read().value`) is the value's cell itself, taken and dropped
+without its lock; its drop of a value with another owner takes the count
+down without the cell's mutex; the stop polls, cleanup shields, the
+stack's growth and a stop's publication answer at once, so the call gives
+the scheduler no turn, a failure's report is its text and no stop reaches
+the program. An edit, an edit guard, a wait, a last owner's drop, a
+transaction, a memo, a task's spawn, join, cancel, pause or resume, a
+parallel walk, a channel's make, send, receive or select, a generator, a
+fiber's park or wake, and the runtime's own lock, wait, park and yield trap
+at their entry, which refuses the call before it takes the lock or waits.
+Every entry is put back after the call, so the program's locks and
+scheduler read as they did whether the call answered or was refused. A
+failure the call returns (`print parse("")`, `Err(ParseError.Empty)`)
+starts or extends no error journey of the thread's: the journey's origin,
+frames, adoption and reset answer at once and a context frame is the error
+as it was, so the program's own report trail shows only its own failures.
+The thread's TLS, its slot table and slots, is put back after the call as
+the stop found it, so a slot the call set (a `#MaxDepth` count) or a table
+it grew or made from the arena never reaches the program. The debugger
+also turns the
+record/replay mode off for the call and puts it back after (`jet debug
+--record`, `--replay`), so an
 evaluation adds nothing to the recording and takes nothing from it. An
 image whose runtime doesn't export those words evaluates nothing: the
 refusal says to build it again with this jet. The
@@ -1173,7 +1211,16 @@ function and of every function it calls, which reach the program's own
 data and runtime where its unchanged code does, so the compile's choices
 for the whole program (its `main`, its register use) need not be the
 image's; a function the expression calls whose code differs from the
-program's is refused, the source no longer the program's. `fix` compiles
+program's is refused, the source no longer the program's. A runtime
+routine the expression calls that the image does not hold, because the
+program never needed it (an Int product past a word, `jet_int_mul`), is
+mapped with the expression's code from the runtime pack beside this jet,
+with every routine and constant it reaches that the image lacks; what the
+image holds it reaches in place, its writable data where the image's own
+code reaches it, so the program's runtime state is the one it reads. A
+routine the pack can't place that way (thread-local data, a writable
+object only other data points at) is left as a trap, and the evaluation
+that reaches it is refused, naming it. `fix` compiles
 at that level too. An inlined frame is evaluated in as `bt` shows it: the
 expression is checked in the inlined function at its line, the frame it was
 inlined into at the call, and the locals are the frame's own; code inlined

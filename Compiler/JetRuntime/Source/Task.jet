@@ -293,9 +293,14 @@ task_run: fn(child: I64) {
     if aborted -> scheduler_deliver_cancel()
     frame: scheduler_task_completion_begin()
     body: scheduler_body_enter()
-    if (!aborted && jet_scheduler_native_propagate() == I64{0}) {
+    // The body's start and its return are no checks: a cancel that came
+    // before the start is delivered at the body's first wait point or check
+    // outside a shield (so a body that opens with `#Shield` holds it too), and
+    // one that came after the body's last check leaves its outcome. Only a
+    // stop already delivered is read here.
+    if (!aborted && scheduler_delivered_status() == I64{0}) {
         _ := coll_call2(sync_load(wrapping(child + I64{72})), sync_load(wrapping(child + I64{64})), sync_load(wrapping(child + I64{48})))
-        if (jet_scheduler_native_propagate() == I64{0}) {
+        if (scheduler_delivered_status() == I64{0}) {
             sync_store(wrapping(child + I64{56}), I64{1})
         }
     }

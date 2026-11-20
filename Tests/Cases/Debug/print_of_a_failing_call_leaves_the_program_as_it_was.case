@@ -1,0 +1,22 @@
+# An evaluation leaves the program as it found it. `print` of a call that
+# fails starts an error's journey, which the runtime keeps in the thread's
+# TLS: at line 16 before the program has failed once, so the thread has no
+# journey yet, and at line 18 after it has, so the thread's journey holds
+# the program's own failure. Neither evaluation leaves the program a
+# journey, a hop or a TLS slot of its own; the program then fails twice
+# itself, recovers both times, and runs to its end.
+# The fixture must stay in jet fmt form: line 16 is run's first call of
+# parse(blank), line 18 its second.
+fixture: PrintOfAFailingCallLeavesTheProgramAsItWas.fixture
+env: NO_COLOR=1
+env: PATH={work}/no-tools
+step: jet debug prog.jet
+stdin: print_of_a_failing_call_leaves_the_program_as_it_was.stdin
+exit: 0
+stdout: ~ "Breakpoint hit  prog.jet:16  in run()" # a stop before the program's first failure
+stdout: ~ "(Jet) print parse(blank)\nparse(blank) = Err(ParseError.Empty)\n" # the evaluation's failure is its value
+stdout: ~ "Breakpoint hit  prog.jet:18  in run()" # the program failed once on its own and ran on
+stdout: ~ "(Jet) print parse(word)\nparse(word) = Ok(3)\n" # an evaluation after a failing one
+stdout: ~ "0 3 5\nProgram finished\n" # the program's own failures recovered, and its run unchanged
+stdout: !~ "Fault [" # nothing the evaluations did faults the program
+stdout: !~ "Program stopped by" # nor stops it

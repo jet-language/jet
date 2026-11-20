@@ -1,0 +1,20 @@
+// The one way the parser here fails.
+#Error
+ParseError: enum {
+    Empty,
+}
+
+// The length of `s`; an empty `s` is no number.
+parse: fn(s: String) -> Int ParseError! {
+    if s == "" -> return Err(ParseError.Empty)
+    s.len()
+}
+
+run: fn() {
+    word: "abc"
+    blank: ""
+    first: parse(blank) ?? 0
+    second: parse(word) ?? 0
+    third: parse(blank) ?? 5
+    print("{first} {second} {third}")
+}

@@ -1,0 +1,65 @@
+// Hover names a parameter whose written type applies a generic alias as the
+// check names it (JetDriverDocModule.alias_shown): the alias as written, then
+// its one expansion. The fixture checker runs no type check, so this one
+// records what the driver's check records for `grid`, at its name's offset,
+// and the hovers are on the parameters' declarations: uses inside a body
+// reach them only through a checked index
+// (Tests/Cases/LSP/lsp_hover_names_generic_alias.case covers that path).
+use {
+    jet_driver.[JetDriverToolStageItem]
+    jet_foundation.[Span]
+    jet_semindex.[semindex_build_symbols]
+    jet_lsp.[LSPChecked, LSPChecker, LSPOverlay, LSPServer, lsp_server]
+}
+
+LSP_ALIAS_HOVER_URI: "file:///w/grid.jet"
+
+// `grid` is declared at byte 26 (line 2, character 10), `count` at character 27.
+LSP_ALIAS_HOVER_SOURCE: `Grid<T>: [[T]]
+
+total: fn(grid: Grid<Int>, count: Int) -> Int {
+    grid.len() + count
+}
+`
+
+LSPAliasHoverChecker: struct {
+    impl LSPChecker {
+        check: fn(self, entry: String, overlays: [LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
+            plain: LSPFixtureChecker{}
+            checked := plain.check(entry, overlays)
+            slot := 0
+            loop slot < checked.modules.len() {
+                if checked.modules[slot].path == entry {
+                    checked.modules[slot].alias_shown[26] = "`Grid<Int>` (which is [[Int]])"
+                }
+                slot += 1
+            }
+            if checked.index == .Val(index) {
+                checked.symbols = semindex_build_symbols(index, checked.modules)
+            }
+            checked
+        }
+
+        stage: fn(self, entry: String, overlays: &&[LSPOverlay], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
+            LSPFixtureChecker{}.stage(entry, overlays, stage, bodies, program)
+        }
+    }
+}
+
+lsp_alias_hover_text: fn(server: &LSPServer, line: Int, character: Int) -> String {
+    hover: lsp_test_result(server, "textDocument/hover", lsp_test_at(LSP_ALIAS_HOVER_URI, line, character))
+    lsp_test_text(lsp_test_field(hover, "contents"), "value")
+}
+
+#Test("hover names a generic alias parameter as written, then its one expansion") {
+    server := lsp_server(LSPAliasHoverChecker{})
+    lsp_test_open(server, LSP_ALIAS_HOVER_URI, LSP_ALIAS_HOVER_SOURCE)
+    grid: lsp_alias_hover_text(server, 2, 10)
+    assert(grid.contains("grid: Grid<Int>"), "the parameter's type as its source spells it")
+    assert(grid.contains("Type: `Grid<Int>` (which is [[Int]])"), "the alias, then its one expansion")
+    assert(!grid.contains("grid: [[Int]]"), "never the expansion alone")
+    assert(!grid.contains("(which is [[Int]]) (which is"), "one expansion, not two")
+    count: lsp_alias_hover_text(server, 2, 27)
+    assert(count.contains("count: Int"), "a plain parameter hovers with its type")
+    assert(!count.contains("Type:"), "and no alias line")
+}

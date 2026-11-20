@@ -2079,6 +2079,10 @@ X64_TRACE_EVENT_EXIT: 6
 // The signal that stops one thread of the program (x64_trace_stop).
 LOADER_SIGSTOP: 19
 
+// The one signal a trace's helper takes (it blocks every other): its
+// parent-death signal (loader_trace_hold).
+LOADER_SIGKILL: 9
+
 // wait4 option: wait for every kind of child, threads included.
 LOADER_WAIT_ALL: 0x40000000
 
@@ -2214,10 +2218,12 @@ X64TraceStop: struct {
 // the trace's helper and stopped before its first instruction. Its standard
 // input reads the file `input` (`/dev/null` for none, `/dev/stdin` for this
 // process's own); its output and errors append to the existing file
-// `output`. The helper ends when this process does (its channel closes),
-// and the kernel kills the program when the helper ends. Every thread the
-// program starts is traced too (LOADER_PTRACE_O_TRACECLONE): x64_trace_wait
-// reports its stops. The program runs without address randomization
+// `output`. The helper ends when the thread that started it does
+// (loader_trace_hold), and the kernel kills the program when the helper
+// ends (LOADER_PTRACE_O_EXITKILL, which each thread the program starts
+// inherits). Every thread the program starts is traced too
+// (LOADER_PTRACE_O_TRACECLONE): x64_trace_wait reports its stops. The
+// program runs without address randomization
 // (LOADER_ADDR_NO_RANDOMIZE), so each run of a replay puts its stacks and
 // heap at the same addresses: `why` follows a place's address from one run
 // to the next.
@@ -2258,8 +2264,10 @@ x64_trace_spawn: fn(path: String, argv: [String], output: String, input: String,
         program_envp: I64{exec.envp}
         program_mask: I64{exec.block}
         #Unsafe("fork copies this thread alone; the helper and the program it starts make only system calls on words computed before the fork and on the shared scratch page, allocating nothing, so no lock another thread held at the fork can stop them; execve reads the argument block") {
+            starter: I64{os_syscall(OS_SYS_GETPID, 0, 0, 0, 0, 0, 0)}
             helper = os_syscall(OS_SYS_FORK, 0, 0, 0, 0, 0, 0)
             if helper == 0 {
+                loader_trace_hold(starter)
                 // The helper: its channel end moves to LOADER_TRACE_FD, the
                 // program's input and output to 0, 1 and 2, and every
                 // descriptor above LOADER_TRACE_FD closes, so it holds none
@@ -2350,6 +2358,22 @@ loader_trace_serve: fn(call: I64, program: I64) {
     _ := os_syscall_i64(I64{OS_SYS_EXIT_GROUP}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
 }
 
+// A trace's helper, just forked by a thread of the process `starter`: it
+// gets LOADER_SIGKILL, the one signal it takes, when that thread ends
+// (PR_SET_PDEATHSIG), and ends at once when that process ended before the
+// prctl, its parent no longer `starter`. A helper waiting on the program
+// never reads its channel, so the channel closing can't end it: a session
+// killed however it ends leaves no helper, and the kernel kills the program
+// its helper spawned (LOADER_PTRACE_O_EXITKILL). The thread that starts a
+// trace is the session's own, which lives as long as the session.
+#Unsafe("prctl and getppid of the helper itself")
+loader_trace_hold: fn(starter: I64) {
+    _ := os_syscall_i64(I64{OS_SYS_PRCTL}, I64{OS_PR_SET_PDEATHSIG}, I64{LOADER_SIGKILL}, I64{0}, I64{0}, I64{0}, I64{0})
+    if os_syscall_i64(I64{OS_SYS_GETPPID}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) != starter {
+        _ := os_syscall_i64(I64{OS_SYS_EXIT_GROUP}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+}
+
 // A trace of the program `pid`, already running, by a new helper that
 // traces nothing yet: x64_trace_seize takes each of its threads. Its
 // standard files are its own. The kernel lets the program run on when the
@@ -2381,8 +2405,10 @@ x64_trace_attach: fn(pid: Int) -> X64Trace {
         input: I64{null}
         program: I64{pid}
         #Unsafe("fork copies this thread alone; the helper makes only system calls on words computed before the fork and on the shared scratch page, allocating nothing, so no lock another thread held at the fork can stop it") {
+            starter: I64{os_syscall(OS_SYS_GETPID, 0, 0, 0, 0, 0, 0)}
             helper = os_syscall(OS_SYS_FORK, 0, 0, 0, 0, 0, 0)
             if helper == 0 {
+                loader_trace_hold(starter)
                 // The helper holds none of this process's files: its
                 // channel end moves to LOADER_TRACE_FD, its standard files
                 // read and write /dev/null, and the rest close.
@@ -2614,7 +2640,9 @@ x64_trace_poke: fn(trace: X64Trace, address: Int, word: I64) -> Bool {
 }
 
 // Up to `count` bytes of the stopped program from `address`, fewer where
-// its mapping ends; None when none of them is mapped.
+// its mapping ends; None when none of them is mapped. Read through the
+// trace's thread, stopped and so still there: a main thread that ended
+// before the others has no memory left to read through.
 x64_trace_read: fn(trace: X64Trace, address: Int, count: Int) -> [U8]? {
     bytes := [U8]{}
     chunk: OS_PAGE_SIZE - LOADER_TRACE_BYTES
@@ -2627,7 +2655,7 @@ x64_trace_read: fn(trace: X64Trace, address: Int, count: Int) -> [U8]? {
             os_store_word(iov + 8, want)
             os_store_word(iov + 16, address + bytes.len())
             os_store_word(iov + 24, want)
-            got = os_syscall(OS_SYS_PROCESS_VM_READV, trace.pid, iov, 1, iov + 16, 1, 0)
+            got = os_syscall(OS_SYS_PROCESS_VM_READV, trace.thread, iov, 1, iov + 16, 1, 0)
             if got > 0 && !mem.list_append<U8>(bytes, mem.Ptr<U8>.from_addr(trace.scratch + LOADER_TRACE_BYTES), got) {
                 got = 0
             }
@@ -2640,13 +2668,13 @@ x64_trace_read: fn(trace: X64Trace, address: Int, count: Int) -> [U8]? {
 }
 
 // Write `bytes` at `address` of the stopped program, its code included,
-// through its `/proc` mem file, which writes through page protections as
-// PTRACE_POKEDATA does: a few system calls of this process for the whole
-// run, not one helper round trip per word. False when the file can't be
-// opened or a write falls short.
+// through its trace's thread's `/proc` mem file (as x64_trace_read), which
+// writes through page protections as PTRACE_POKEDATA does: a few system
+// calls of this process for the whole run, not one helper round trip per
+// word. False when the file can't be opened or a write falls short.
 x64_trace_write: fn(trace: X64Trace, address: Int, bytes: [U8]) -> Bool {
-    if trace.pid <= 0 || trace.scratch == 0 -> return false
-    fd: loader_open_as("/proc/{trace.pid}/mem", OS_O_RDWR_CLOEXEC)
+    if trace.thread <= 0 || trace.scratch == 0 -> return false
+    fd: loader_open_as("/proc/{trace.thread}/mem", OS_O_RDWR_CLOEXEC)
     if os_failed(fd) -> return false
     chunk: OS_PAGE_SIZE - LOADER_TRACE_BYTES
     done := 0

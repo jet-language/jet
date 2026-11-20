@@ -100,9 +100,14 @@ NativeFixPlan: struct {
     // Each runtime function the placed code calls that the image doesn't
     // hold, by its place in the order the calls came: its trap is that many
     // traps past `traps`, the offset of the first in the region
-    // (native_fix_place_all).
+    // (native_fix_place_all). An evaluation's plan places what it can of
+    // those from the runtime pack instead (NativeFixPack.jet
+    // native_fix_pack_load): its sections are `loaded`, and `entries` holds
+    // the region offset of each function placed that way.
     absent: [String:Int]{[String:Int]{}},
     traps: Int{0},
+    loaded: [NativeFixLoaded]{[NativeFixLoaded]{}},
+    entries: [String:Int]{[String:Int]{}},
 }
 
 // The bytes of a trap, `ud2`.
@@ -600,7 +605,10 @@ native_fix_on_stack: fn(image: NativeImage, low: Int, high: Int, live: [Int]) ->
 // runs in the stopped program with its faults kept from it (NativeEval.jet
 // native_eval_here), or a placed condition's fault goes to one
 // (Native.divert), so only a run that takes the call fails, naming the
-// function (native_fix_absent_at).
+// function (native_fix_absent_at). An evaluation then places that function
+// from the runtime pack where it can (NativeFixPack.jet
+// native_fix_pack_load), so its trap is left only for one the pack can't
+// place.
 native_fix_place_all: fn(edit: NativeFixEdit, symbols: NativeFixSymbols, plan: NativeFixPlan, entry: String, also: String{""}) -> NativeFixPlan NativeDebugError! {
     row_of := [Int:Int]{}
     start := -1
@@ -725,6 +733,7 @@ native_fix_address: fn(plan: NativeFixPlan, symbols: NativeFixSymbols, base: Int
             if plan.copied.get(id.value) == .Val(piece) -> return base + plan.pieces[piece].offset
         }
         .Runtime(symbol) -> {
+            if plan.entries.get(symbol) == .Val(entry) -> return base + entry
             if plan.absent.get(symbol) == .Val(place) {
                 return base + plan.traps + NATIVE_FIX_TRAP * place
             }
@@ -746,7 +755,8 @@ native_fix_put: fn(bytes: &[U8], at: Int, value: Int, size: Int) Never! {
 }
 
 // The bytes of the plan's region mapped at `base`, every relocation
-// resolved.
+// resolved, with the runtime pack's sections it loaded
+// (NativeFixPack.jet native_fix_pack_write).
 native_fix_region: fn(plan: NativeFixPlan, edit: NativeFixEdit, symbols: NativeFixSymbols, base: Int) -> [U8] Never! {
     region := loop _ in 0..<plan.size -> U8{0}
     loop (_, place) in plan.absent {
@@ -772,6 +782,7 @@ native_fix_region: fn(plan: NativeFixPlan, edit: NativeFixEdit, symbols: NativeF
             native_fix_put(region, piece.offset + reloc.offset, reached + reloc.addend, 8)
         }
     }
+    native_fix_pack_write(region, plan.loaded, base)
     region
 }
 

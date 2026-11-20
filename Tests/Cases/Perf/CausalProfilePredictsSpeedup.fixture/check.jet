@@ -21,10 +21,12 @@
 //
 // The argument before the trace names the tier. The outcome's own line,
 // with its numbers and the receipt's fit (its octaves' residuals, slope
-// and R²), goes to stderr and is appended to the file
+// and R²), goes to stdout and stderr, and is appended to the file
 // JET_CAUSAL_CASE_PATHS names when it is set, so a run of the case tells
 // whether each tier compared the lens with its truth, or which of
-// contention and clocks kept it from comparing.
+// contention and clocks kept it from comparing. A comparison that fails
+// prints its line too, with both lines' numbers, before it panics with
+// every way it failed.
 use {
     files: core.files
     process: core.process
@@ -77,12 +79,13 @@ read_measured: fn(path: String) -> Measured {
 // was read.
 clock_drop: fn(high: Int, low: Int) -> Int { if high > 0 -> (high - low) * 1000 /% high else -> 0 }
 
-// Refuse the measured median `gain` of the `function` line when the line
-// cannot have given it (BOUND).
-check_bound: fn(function: String, gain: Int) {
+// What is wrong with the measured median `gain` of the `function` line
+// when the line cannot have given it (BOUND); "" when nothing is.
+check_bound: fn(function: String, gain: Int) -> String {
     if gain > BOUND {
-        panic("the {function} line sped up by hand gained {gain}, more than the {BOUND} a line 30% faster can give a round: the measurement is invalid")
+        return "the {function} line sped up by hand gained {gain}, more than the {BOUND} a line 30% faster can give a round: the measurement is invalid"
     }
+    ""
 }
 
 // The integer after `key` in `text`; None when `key` is absent.
@@ -94,24 +97,33 @@ number_after: fn(text: String, key: String) -> Int? {
     Val(number)
 }
 
+// One line's comparison: whether the lens ranked it, what it predicted
+// against what was measured, and every way it fails.
+LineCheck: struct {
+    ranked: Bool,
+    said: String,
+    wrong: [String],
+}
+
 // The lens's interval for the line of `function` among `lines`, the `round`
-// point's, and the measured one it met; None when the lens did not rank
-// the line. A ranked line's interval must meet the measured one,
-// `measured_low` to `measured_high`.
-check_line: fn(lines: String, function: String, measured_low: Int, measured_high: Int) -> String? {
+// point's, against the measured one, `measured_low` to `measured_high`. A
+// ranked line's interval must meet the measured one and be at most WIDEST
+// wide.
+check_line: fn(lines: String, function: String, measured_low: Int, measured_high: Int) -> LineCheck {
     loop line in lines.split("}},{{").to_list() {
         if !line.contains("\"function\":\"{function}\"") -> next
         low: number_after(line, "\"low_tenths\":") ?? panic("no low_tenths in {line}")
         high: number_after(line, "\"high_tenths\":") ?? panic("no high_tenths in {line}")
+        wrong := [String]{}
         if high - low > WIDEST {
-            panic("the {function} line is ranked with an interval of {low} to {high}, wider than the lens ranks")
+            wrong.push("the {function} line is ranked with an interval of {low} to {high}, wider than the lens ranks")
         }
         if measured_high < low || measured_low > high {
-            panic("the {function} line sped up by hand gained {measured_low} to {measured_high}, outside its predicted {low} to {high}")
+            wrong.push("the {function} line sped up by hand gained {measured_low} to {measured_high}, outside its predicted {low} to {high}")
         }
-        return Val("{function} predicted {low} to {high}, measured {measured_low} to {measured_high}")
+        return LineCheck{ranked: true, said: "{function} predicted {low} to {high}, measured {measured_low} to {measured_high}", wrong: wrong}
     }
-    None
+    LineCheck{ranked: false, said: "{function} unranked, measured {measured_low} to {measured_high}", wrong: [String]{}}
 }
 
 // The receipt's fit of how much slower a task ran the longer its CPU idled
@@ -122,11 +134,16 @@ fit_of: fn(trace: String) -> String {
     parts[1].split(",\"clock_flag\":").to_list()[0]
 }
 
-// Names the outcome `tier` took, with the fit of the receipt `trace`: on
-// stderr, and appended to the file JET_CAUSAL_CASE_PATHS names when it is
-// set.
+// Names the outcome `tier` took, with the fit of the receipt `trace`, its
+// R² and slope ahead of its octaves: on stdout and stderr, and appended to
+// the file JET_CAUSAL_CASE_PATHS names when it is set.
 record_path: fn(tier: String, trace: String, outcome: String) {
-    line: "causal case {tier}: {outcome}; fit {fit_of(trace)}"
+    fit: fit_of(trace)
+    held: if fit.contains("\"refused\":null") -> "held" else -> "refused"
+    r2: number_after(fit, "\"r2_thousandths\":") ?? panic("no r2_thousandths in the fit {fit}")
+    slope: number_after(fit, "\"slope_thousandths\":") ?? panic("no slope_thousandths in the fit {fit}")
+    line: "causal case {tier}: {outcome}; fit {held}, R² {r2} and slope {slope} thousandths; {fit}"
+    print(line)
     eprint(line)
     log: sys.get("JET_CAUSAL_CASE_PATHS") ?? return
     writer := files.append(log) ?? panic("cannot open {log}: {err}")
@@ -204,10 +221,11 @@ run: fn() {
         print("the CPUs that ran the rounds clocked down more than the lens trusts and it could not fit how that slowed the tasks, so it flagged its gains")
         return
     }
-    check_bound("narrow", first.narrow[1])
-    check_bound("narrow", last.narrow[1])
-    check_bound("wide", first.wide[1])
-    check_bound("wide", last.wide[1])
+    bounds: [String]{check_bound("narrow", first.narrow[1]), check_bound("narrow", last.narrow[1]), check_bound("wide", first.wide[1]), check_bound("wide", last.wide[1])}
+    wrong := [String]{}
+    loop problem in bounds {
+        if problem != "" -> wrong.push(problem)
+    }
     // The `round` point's object holds its ranked lines before its name.
     before: trace.split("\"name\":\"round\"").to_list()
     if before.len() < 2 -> panic("no `round` progress point in the causal section")
@@ -215,9 +233,13 @@ run: fn() {
     lines: pieces[pieces.len() - 1]
     narrow: check_line(lines, "narrow", min(first.narrow[0], last.narrow[0]), max(first.narrow[2], last.narrow[2]))
     wide: check_line(lines, "wide", min(first.wide[0], last.wide[0]), max(first.wide[2], last.wide[2]))
-    if narrow == None && wide == None {
-        panic("the lens ranked neither line sped up by hand for `round`: {lines}")
+    loop problem in narrow.wrong -> wrong.push(problem)
+    loop problem in wide.wrong -> wrong.push(problem)
+    if !narrow.ranked && !wide.ranked {
+        wrong.push("the lens ranked neither line sped up by hand for `round`: {lines}")
     }
-    record_path(tier, trace, "compared, {narrow ?? "narrow unranked"}; {wide ?? "wide unranked"}; waits {first.wait} and {last.wait} thousandths; the measurements' clock drops {clock_drop(first.high_mhz, first.low_mhz)} and {clock_drop(last.high_mhz, last.low_mhz)} thousandths")
+    outcome: if wrong.len() == 0 -> "compared" else -> "compared and failed"
+    record_path(tier, trace, "{outcome}, {narrow.said}; {wide.said}; waits {first.wait} and {last.wait} thousandths; the measurements' clock drops {clock_drop(first.high_mhz, first.low_mhz)} and {clock_drop(last.high_mhz, last.low_mhz)} thousandths")
+    if wrong.len() > 0 -> panic(wrong.join("; "))
     print("each line sped up by hand that the lens ranked gained within its predicted interval")
 }

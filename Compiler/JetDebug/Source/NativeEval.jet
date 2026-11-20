@@ -18,7 +18,8 @@
 // (NativeEvaluator.unchanged).
 use {
     native_eval_files: core.files
-    jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_DEBUG_EVAL_STORAGE, X64_TRACE_EVENT_EXIT, X64_TRACE_ORIG_RAX, X64_TRACE_RAX, X64_TRACE_RDI, X64_TRACE_RDX, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, x64_debug_eval_symbols, x64_jetline_find, x64_jetline_line, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_resume_to_syscall, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_signal, x64_trace_stop, x64_trace_wait_for, x64_trace_wait_within, x64_trace_write]
+    jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_DEBUG_EVAL_STORAGE, X64_TRACE_EVENT_EXIT, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RAX, X64_TRACE_RDI, X64_TRACE_RDX, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, x64_debug_eval_symbols, x64_jetline_find, x64_jetline_line, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_resume_to_syscall, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_signal, x64_trace_stop, x64_trace_wait_for, x64_trace_wait_within, x64_trace_write]
+    jet_foundation.[RUNTIME_C_EXPORTS]
 }
 
 // Why an expression can't be evaluated, as the console shows it after
@@ -49,10 +50,14 @@ NativeEvalRefused: struct {
 // names it (NativeSession.source_at, NativeFrame.path), as the compile reads
 // it: a Core source's is the Core the program compiles with, never a file
 // under the working directory. None when it can't be read.
+// `runtime`: the bytes of the runtime pack the program's image linked its
+// runtime from, which an evaluation places the runtime functions the image
+// lacks from (NativeFixPack.jet). None when it can't be read.
 NativeEvaluator: trait {
     compile: fn(self, path: String, line: Int, column: Int, text: String, binders: [NativeEvalBinder]?, owned: Bool, running: [String:[U8]]) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval NativeEvalRefused!,
     unchanged: fn(self) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Bool Never!,
     source: fn(self, path: String) -[FS, Env]> String? Never!,
+    runtime: fn(self) -[FS, Env]> [U8]? Never!,
 }
 
 // A variable a name of an evaluated expression may read at the stop: its
@@ -245,8 +250,9 @@ native_eval_offset: fn(code: NativeEval, plan: NativeFixPlan, name: String) -> I
 }
 
 // An evaluation in the program itself runs from a room the session maps in
-// the program once per run (NativeSession.eval_room), read and written
-// only by the debugger and the evaluation:
+// the program once per run, when it starts or attaches to it
+// (NativeSession.eval_room, reserve), read and written only by the
+// debugger and the evaluation:
 // - at 0, the call (native_eval_room_code): it saves the thread's vector
 //   and floating-point state (xsave), calls the entry with the words the
 //   debugger wrote, stops so the debugger reads the result, calls the
@@ -256,6 +262,11 @@ native_eval_offset: fn(code: NativeEval, plan: NativeFixPlan, name: String) -> I
 //   them out, and the give (NATIVE_EVAL_ROOM_GIVE), which leaves a block of
 //   the arena be and counts any other: a block of the program's that the
 //   evaluation should only have borrowed, left allocated;
+// - the runtime's stand-ins, NATIVE_EVAL_ROOM_READ through
+//   NATIVE_EVAL_ROOM_NONE, which the runtime's own entries jump to while
+//   an evaluation runs (native_eval_locks): a Shared or Cell value's read
+//   and drop, a read guard's take and drop, and the answer of the stop
+//   polls, the cleanup shields, the stack's growth and a stop's publication;
 // - the saved state (NATIVE_EVAL_ROOM_XSAVE), 64-byte aligned, as large as
 //   any CPU's;
 // - the call's words (NATIVE_EVAL_ROOM_DATA), then what a call passes: its
@@ -271,6 +282,16 @@ NATIVE_EVAL_ROOM_TAKE: 512
 
 NATIVE_EVAL_ROOM_GIVE: 768
 
+NATIVE_EVAL_ROOM_READ: 1024
+
+NATIVE_EVAL_ROOM_DROP: 1088
+
+NATIVE_EVAL_ROOM_GUARD: 1152
+
+NATIVE_EVAL_ROOM_UNGUARD: 1216
+
+NATIVE_EVAL_ROOM_NONE: 1280
+
 NATIVE_EVAL_ROOM_XSAVE: 4096
 
 NATIVE_EVAL_ROOM_DATA: 20480
@@ -280,6 +301,11 @@ NATIVE_EVAL_ROOM_PASS: 20608
 NATIVE_EVAL_ROOM_ARENA: 131072
 
 NATIVE_EVAL_ROOM_SIZE: 4325376
+
+// The code space mapped after the room's NATIVE_EVAL_ROOM_SIZE bytes, where
+// each expression's code goes, a whole number of pages each
+// (NativeSession.eval_space); full, it starts over from its first page.
+NATIVE_EVAL_CODE_ROOM: 16777216
 
 // The call's words, by offset from NATIVE_EVAL_ROOM_DATA: the arena's next
 // free byte, its end and its start, the count of the program's blocks the
@@ -396,6 +422,16 @@ native_eval_room_code: fn(room: Int) -> NativeEvalCode Never! {
     code.extend(native_eval_take_code(data))
     loop code.len() < NATIVE_EVAL_ROOM_GIVE -> code.push(U8{NATIVE_DEBUG_TRAP})
     code.extend(native_eval_give_code(data))
+    loop code.len() < NATIVE_EVAL_ROOM_READ -> code.push(U8{NATIVE_DEBUG_TRAP})
+    code.extend(native_eval_read_code())
+    loop code.len() < NATIVE_EVAL_ROOM_DROP -> code.push(U8{NATIVE_DEBUG_TRAP})
+    code.extend(native_eval_drop_code())
+    loop code.len() < NATIVE_EVAL_ROOM_GUARD -> code.push(U8{NATIVE_DEBUG_TRAP})
+    code.extend(native_eval_guard_code())
+    loop code.len() < NATIVE_EVAL_ROOM_UNGUARD -> code.push(U8{NATIVE_DEBUG_TRAP})
+    code.extend(native_eval_unguard_code())
+    loop code.len() < NATIVE_EVAL_ROOM_NONE -> code.push(U8{NATIVE_DEBUG_TRAP})
+    code.extend(native_eval_none_code())
     NativeEvalCode{bytes: code, middle: middle, tail: tail, end: end}
 }
 
@@ -450,6 +486,293 @@ native_eval_give_code: fn(data: Int) -> [U8] Never! {
     stub
 }
 
+// The read of a Shared or Cell value, `read(shared, env, invoke, out)` as
+// jet_rt_native_shared_read takes it: with every other thread stopped
+// nothing writes the value, so it calls `invoke(env, payload, out)` on the
+// value's payload (the cell's word at 64) without taking the value's lock
+// or a pin of the cell: mov rax,rdx; mov rdx,rcx; mov r8,[rdi+64];
+// mov rdi,rsi; mov rsi,r8; jmp rax.
+native_eval_read_code: fn() -> [U8] Never! {
+    stub := [U8]{}
+    native_place_emit(stub, [Int]{0x48, 0x89, 0xd0, 0x48, 0x89, 0xca, 0x4c, 0x8b, 0x47, 0x40, 0x48, 0x89, 0xf7, 0x4c, 0x89, 0xc6, 0xff, 0xe0})
+    stub
+}
+
+// The drop of a Shared or Cell value, `drop(shared)` as
+// jet_rt_native_shared_drop takes it: a value with another owner (the
+// count of logical owners, the cell's low 32 bits, past 1) loses one
+// without the cell's mutex, which a stopped thread may hold; the last
+// owner's drop would retire the value, so it stops at the trap
+// NATIVE_EVAL_DROP_HELD bytes in, which refuses the evaluation:
+// test rdi,rdi; je ret; mov eax,[rdi]; cmp eax,1; jbe trap;
+// lock sub qword [rdi],1; ret; int3.
+native_eval_drop_code: fn() -> [U8] Never! {
+    stub := [U8]{}
+    native_place_emit(stub, [Int]{0x48, 0x85, 0xff, 0x74, 0x0c, 0x8b, 0x07, 0x83, 0xf8, 0x01, 0x76, 0x06, 0xf0, 0x48, 0x83, 0x2f, 0x01, 0xc3, NATIVE_DEBUG_TRAP})
+    stub
+}
+
+NATIVE_EVAL_DROP_HELD: 18
+
+// A read guard of a Shared value, `guard_read(shared) -> guard` as
+// jet_rt_native_shared_guard_read takes it: with every other thread
+// stopped nothing writes the value, so the guard is the cell itself, held
+// (its low bit clear), without the value's lock or another owner of the
+// cell. An error's context frame, `frame(error, …) -> error` as
+// jet_err_with_context_frame adds it, is the error as it was, with no
+// journey of the thread's to add the frame to: mov rax,rdi; ret.
+native_eval_guard_code: fn() -> [U8] Never! {
+    stub := [U8]{}
+    native_place_emit(stub, [Int]{0x48, 0x89, 0xf8, 0xc3})
+    stub
+}
+
+// A guard's drop, `drop(guard)` as jet_rt_native_shared_guard_drop and
+// jet_rt_native_shared_read_guard_drop take it: a guard of the room's
+// (native_eval_guard_code) holds nothing to give back; a projected guard
+// (bit 1 set: a token the runtime made of a guard) stops at the trap
+// NATIVE_EVAL_UNGUARD_HELD bytes in, which refuses the evaluation:
+// test dil,2; jnz trap; ret; int3.
+native_eval_unguard_code: fn() -> [U8] Never! {
+    stub := [U8]{}
+    native_place_emit(stub, [Int]{0x40, 0xf6, 0xc7, 0x02, 0x75, 0x01, 0xc3, NATIVE_DEBUG_TRAP})
+    stub
+}
+
+NATIVE_EVAL_UNGUARD_HELD: 7
+
+// The answer of an entry that would give the program's scheduler a turn,
+// deliver, publish or capture a stop, shield a cleanup, grow the stack or
+// add to the thread's error journey: 0, nothing given, delivered,
+// published, captured, shielded, grown or added, so the evaluation runs to
+// its end or fails without the program's scheduler, a failure's report is
+// written, which the drive reads as its text, and an `Err` the evaluation
+// returns leaves no hop in the journey the thread keeps (or makes, on its
+// first error) for the program's own report: xor eax,eax; ret.
+native_eval_none_code: fn() -> [U8] Never! {
+    stub := [U8]{}
+    native_place_emit(stub, [Int]{0x31, 0xc0, 0xc3})
+    stub
+}
+
+// Where the room's code at `route` stops for what it can't do without a
+// lock (NATIVE_EVAL_DROP_HELD, NATIVE_EVAL_UNGUARD_HELD), an offset into
+// it; -1 for none.
+native_eval_held: fn(route: Int) -> Int Never! {
+    if {
+        route == NATIVE_EVAL_ROOM_DROP -> NATIVE_EVAL_DROP_HELD
+        route == NATIVE_EVAL_ROOM_UNGUARD -> NATIVE_EVAL_UNGUARD_HELD
+        else -> -1
+    }
+}
+
+// One of the runtime's entries that would take a lock of the program's,
+// which a thread the debugger stopped may hold, wait on another of its
+// threads, or change its scheduler's state, at `address` in the program.
+// While an evaluation runs, its first bytes jump to the room's code at
+// `route` (NATIVE_EVAL_STAND_IN_CODE), which does its work without the
+// lock, or, for -1, trap there, which refuses the evaluation before the
+// entry changes anything. The runtime's functions start 16 bytes apart at
+// least, so the jump's five bytes stay in the entry's own.
+NativeEvalLock: struct {
+    name: String,
+    address: Int,
+    route: Int,
+}
+
+// The runtime's entries the room stands in for while an evaluation runs,
+// each jumping to the room's code at its NATIVE_EVAL_STAND_IN_CODE: a
+// Shared or Cell value's read and drop; a read guard's take and its drops;
+// the stop polls, which would give the scheduler a turn or deliver a stop;
+// a cleanup's shield, whose leave would deliver one; the stack's growth,
+// which would map a segment and leave the thread's limit changed; a stop's
+// publication to its task and its capture at the root (the code words
+// task_panic_code and trap_root_rail_code call), so a failure's report is
+// written instead; and an error's journey, its origin, frames, context
+// frames, adoption and reset, which the thread keeps in its own TLS and
+// would otherwise hold blocks of the evaluation's arena after it. Each is
+// one of the runtime's C exports (RUNTIME_C_EXPORTS), which
+// NATIVE_EVAL_STAND_INS_CHECKED holds it to.
+NATIVE_EVAL_STAND_INS: [String]{
+    "jet_rt_native_shared_read",
+    "jet_rt_native_shared_drop",
+    "jet_rt_native_shared_guard_read",
+    "jet_rt_native_shared_read_guard_drop",
+    "jet_rt_native_shared_guard_drop",
+    "jet_rt_session_turn",
+    "jet_rt_session_propagate",
+    "jet_rt_session_poll",
+    "jet_scheduler_native_propagate",
+    "jet_scheduler_native_poll",
+    "jet_rt_cleanup_enter",
+    "jet_rt_cleanup_leave",
+    "jet_rt_session_shield_enter",
+    "jet_rt_session_shield_leave",
+    "jet_scheduler_shield_enter",
+    "jet_scheduler_shield_leave",
+    "jet_rt_stack_grow",
+    "jet_rt_task_panic_publish",
+    "jet_rt_trap_root",
+    "jet_journey_origin",
+    "jet_journey_frame_text",
+    "jet_journey_adopt",
+    "jet_journey_reset",
+    "jet_err_with_context_frame",
+}
+
+NATIVE_EVAL_STAND_INS_CHECKED: #run native_eval_exports_checked("NATIVE_EVAL_STAND_INS", NATIVE_EVAL_STAND_INS, RUNTIME_C_EXPORTS)
+
+// The room's code each of NATIVE_EVAL_STAND_INS jumps to.
+NATIVE_EVAL_STAND_IN_CODE: [Int]{
+    NATIVE_EVAL_ROOM_READ,
+    NATIVE_EVAL_ROOM_DROP,
+    NATIVE_EVAL_ROOM_GUARD,
+    NATIVE_EVAL_ROOM_UNGUARD,
+    NATIVE_EVAL_ROOM_UNGUARD,
+    NATIVE_EVAL_ROOM_NONE,
+    NATIVE_EVAL_ROOM_NONE,
+    NATIVE_EVAL_ROOM_NONE,
+    NATIVE_EVAL_ROOM_NONE,
+    NATIVE_EVAL_ROOM_NONE,
+    NATIVE_EVAL_ROOM_NONE,
+    NATIVE_EVAL_ROOM_NONE,
+    NATIVE_EVAL_ROOM_NONE,
+    NATIVE_EVAL_ROOM_NONE,
+    NATIVE_EVAL_ROOM_NONE,
+    NATIVE_EVAL_ROOM_NONE,
+    NATIVE_EVAL_ROOM_NONE,
+    NATIVE_EVAL_ROOM_NONE,
+    NATIVE_EVAL_ROOM_NONE,
+    NATIVE_EVAL_ROOM_NONE,
+    NATIVE_EVAL_ROOM_NONE,
+    NATIVE_EVAL_ROOM_NONE,
+    NATIVE_EVAL_ROOM_NONE,
+    NATIVE_EVAL_ROOM_GUARD,
+}
+
+// The runtime's entries an evaluation is refused at: those that take a
+// Shared or Cell value's lock or its cell's mutex to edit it, guard it for
+// an edit or wait on it; a transaction's; a memo's lock; a task's or task
+// group's spawn, join, cancel, pause or resume, and a parallel walk; a
+// channel's make, send and receive, and a select; a generator's pull,
+// yield and release; a fiber's park and wake; a host wait; a realtime
+// stream's cancel and deadline. Each is one of the runtime's C exports
+// (RUNTIME_C_EXPORTS), which NATIVE_EVAL_LOCKING_CHECKED holds it to.
+NATIVE_EVAL_LOCKING: [String]{
+    "jet_rt_native_shared_edit",
+    "jet_rt_native_shared_try_replace",
+    "jet_rt_native_shared_guard_edit",
+    "jet_rt_native_shared_guard_within",
+    "jet_rt_native_shared_guard_wait",
+    "jet_rt_native_shared_edit_guard_drop",
+    "jet_rt_shared_guard_wait_once",
+    "jet_rt_shared_guard_acquire",
+    "jet_rt_shared_guard_reacquire_and_refresh",
+    "jet_rt_native_cell_guard",
+    "jet_rt_shared_pin_drop",
+    "jet_rt_native_stm_begin",
+    "jet_rt_native_stm_commit",
+    "jet_rt_native_stm_rollback",
+    "jet_rt_transaction_hook_enter",
+    "jet_rt_transaction_hook_leave",
+    "jet_rt_memo_lock",
+    "jet_rt_memo_stats",
+    "jet_rt_native_task_spawn",
+    "jet_rt_native_group_spawn",
+    "jet_rt_native_group_spawn_joined",
+    "jet_rt_native_task_join",
+    "jet_rt_native_task_cancel",
+    "jet_rt_native_task_pause",
+    "jet_rt_native_task_pause_with_mode",
+    "jet_rt_native_task_resume",
+    "jet_rt_native_task_group",
+    "jet_rt_native_task_group_with_limit",
+    "jet_rt_native_task_group_stack",
+    "jet_rt_native_task_all_tuple",
+    "jet_rt_native_atexit",
+    "jet_rt_native_para_walk",
+    "jet_rt_native_channel",
+    "jet_rt_native_sender_send",
+    "jet_rt_native_receiver_receive",
+    "jet_rt_native_receiver_try_receive",
+    "jet_rt_native_receiver_iter",
+    "jet_rt_native_select_wait",
+    "jet_rt_native_iter_channel_release",
+    "jet_rt_native_generator_pull",
+    "jet_rt_native_generator_yield",
+    "jet_rt_native_generator_release",
+    "jet_rt_fiber_lot_wait",
+    "jet_rt_fiber_lot_wake",
+    "jet_rt_fiber_park_slot",
+    "jet_rt_fiber_ready",
+    "jet_rt_scheduler_pause_park",
+    "jet_rt_host_wait",
+    "jet_rt_cancel",
+    "jet_rt_next_deadline",
+}
+
+NATIVE_EVAL_LOCKING_CHECKED: #run native_eval_exports_checked("NATIVE_EVAL_LOCKING", NATIVE_EVAL_LOCKING, RUNTIME_C_EXPORTS)
+
+// The runtime's own lock, wait, park and yield, refused too: every other
+// path that would take a lock or wait reaches them where it doesn't inline
+// them (an iterator over a channel or a generator, a registry's first
+// entry). They are the runtime unit's local functions, no export, so the
+// image names them `unit.<name>`.
+NATIVE_EVAL_UNIT_LOCKING: [String]{
+    "unit.sync_mutex_lock",
+    "unit.sync_thread_lock",
+    "unit.sync_sole_enter",
+    "unit.sync_wait",
+    "unit.sync_futex_wait",
+    "unit.sync_cond_wait",
+    "unit.sync_park",
+    "unit.scheduler_yield",
+}
+
+// The number of names in `view` (the list `name`), once each is one of
+// the runtime's C exports `exports`; else the build stops naming the
+// strays.
+native_eval_exports_checked: fn(name: String, view: [String], exports: [String]) -> Int {
+    known := [String:Bool]{}
+    loop export in exports -> known[export] = true
+    strays := ""
+    loop entry in view {
+        if !(known.get(entry) ?? false) -> strays = "{strays}, {entry}"
+    }
+    if strays != "" {
+        panic("{name} names {strays.slice(2..<strays.len())}, which the runtime's C exports (RUNTIME_C_EXPORTS) do not hold")
+    }
+    view.len()
+}
+
+// The locking entries of the image whose symbols are `symbols`
+// (NativeEvalLock): NATIVE_EVAL_STAND_INS, routed to the room's code, then
+// NATIVE_EVAL_LOCKING and NATIVE_EVAL_UNIT_LOCKING, refused; an entry its
+// runtime doesn't have is left out.
+native_eval_locks: fn(symbols: NativeFixSymbols) -> [NativeEvalLock] Never! {
+    locks := [NativeEvalLock]{}
+    loop (k, name) in NATIVE_EVAL_STAND_INS {
+        address: native_fix_runtime_address(symbols, name)
+        if address != 0 {
+            locks.push(NativeEvalLock{name: name, address: address, route: NATIVE_EVAL_STAND_IN_CODE[k]})
+        }
+    }
+    loop name in NATIVE_EVAL_LOCKING {
+        address: native_fix_runtime_address(symbols, name)
+        if address != 0 -> locks.push(NativeEvalLock{name: name, address: address, route: -1})
+    }
+    loop name in NATIVE_EVAL_UNIT_LOCKING {
+        address: native_fix_runtime_address(symbols, name)
+        if address != 0 -> locks.push(NativeEvalLock{name: name, address: address, route: -1})
+    }
+    locks
+}
+
+// Why an evaluation stopped at the start of the locking entry `name`.
+native_eval_locking: fn(name: String) -> String Never! {
+    "the evaluation would take a lock of the program's or wait on another of its threads in {name}, which a thread the debugger stopped may hold or never end; an evaluation reads a Shared or Cell value (`shared.field`, `shared.read(…)`, `shared.guard_read()`) without its lock, and runs no edit, edit guard, task, channel, generator, memo or transaction"
+}
+
 // What an evaluation in the program found: its value, and how many of the
 // program's blocks it gave back that it should only have borrowed, which
 // stay allocated (NATIVE_EVAL_KEPT; any is a debugger fault).
@@ -476,12 +799,16 @@ NativeEvalCall: struct {
 // thread stopped: the room they run from (`room`, its code `layout`), the
 // thread's registers at the stop (`saved`), the stack top below its red
 // zone the calls run on, the trap bytes they step over where they meet one
-// (`traps`), the placed conditions' jumps taken out of the program's code
-// while they run (`lifted`, the bytes put back after), what the runtime's
+// (`traps`), the program's code changed while they run (`lifted`, the bytes
+// put back after): the placed conditions' jumps taken out and the runtime's
+// locking entries routed or trapped (native_eval_locks), with the name of
+// the entry each refusing trap stands for (`locking`), what the runtime's
 // words (X64_DEBUG_EVAL_STORAGE) held before they were routed to the room
 // (`was`), whether a watch is set, the program's blocks the calls gave back
-// (`kept`, NATIVE_EVAL_KEPT), and the signals that came for the program
-// meanwhile (`held`), which it gets once the calls are done.
+// (`kept`, NATIVE_EVAL_KEPT), the signals that came for the program
+// meanwhile (`held`), which it gets once the calls are done, and the
+// thread's TLS as it was at the stop (`tls`, native_eval_tls), put back
+// after.
 NativeEvalRoom: struct {
     room: Int,
     layout: NativeEvalCode,
@@ -489,10 +816,49 @@ NativeEvalRoom: struct {
     top: Int,
     traps: [Int:Int],
     lifted: [NativeCode],
+    locking: [Int:String],
     was: [Int],
     watched: Bool,
     kept: Int{0},
     held: [Int]{[Int]{}},
+    tls: [NativeCode]{[NativeCode]{}},
+}
+
+// Thread.jet's TLS: the word of a thread's TCB (thread_base, the word at
+// its GS base) that holds its slot table, and the table's header, its slot
+// count, capacity and slots. NATIVE_EVAL_TLS_SLOTS bounds the slots the
+// debugger keeps.
+NATIVE_EVAL_TLS_TABLE: 208
+
+NATIVE_EVAL_TLS_HEADER: 24
+
+NATIVE_EVAL_TLS_SLOTS: 65536
+
+// The stopped thread's TLS, its GS base `base` (0, or a 0 TCB there, for
+// a thread with none), as native_eval_leave writes it back: the TCB's word
+// for its slot table, the table's header and its slots. A call of the
+// evaluation's may set a slot (a `#MaxDepth` function's count), grow the
+// table or make it, each from the evaluation's arena; with the bytes
+// written back the thread finds its TLS as it left it, and the
+// evaluation's blocks unreached.
+native_eval_tls: fn(trace: X64Trace, base: Int) -> [NativeCode] Never! {
+    kept := [NativeCode]{}
+    if base == 0 -> return kept
+    tcb: native_debug_word(trace, base) ?? return kept
+    if tcb == 0 -> return kept
+    at: tcb + NATIVE_EVAL_TLS_TABLE
+    table: native_debug_word(trace, at) ?? return kept
+    kept.push(NativeCode{address: at, bytes: native_word_bytes(table)})
+    if table == 0 -> return kept
+    header: x64_trace_read(trace, table, NATIVE_EVAL_TLS_HEADER) ?? return kept
+    if header.len() != NATIVE_EVAL_TLS_HEADER -> return kept
+    kept.push(NativeCode{address: table, bytes: header})
+    capacity: native_number(header, 8, 8, X64DebugEncoding.Signed)
+    slots: native_number(header, 16, 8, X64DebugEncoding.Signed)
+    if slots == 0 || capacity <= 0 || capacity > NATIVE_EVAL_TLS_SLOTS -> return kept
+    held: x64_trace_read(trace, slots, capacity * 8) ?? return kept
+    if held.len() == capacity * 8 -> kept.push(NativeCode{address: slots, bytes: held})
+    kept
 }
 
 // How one call went: why it failed ("" when it didn't), whether that was
@@ -525,13 +891,15 @@ NativeEvalRun: struct {
 // passed by address in the room. `typed` holds the captures' debug types.
 // The program's trap bytes `sites` and a reverse command's probes `probes`
 // stay, stepped over where the call meets one; the jumps of the conditions
-// `placed` puts in the program's code are taken out while it runs. A value
-// whose type has a DebugView shows as `locals` shows it: when the image
-// keeps the drop of a view's items (at `items`), the view runs on the
+// `placed` puts in the program's code are taken out while it runs, and the
+// runtime's locking entries `locks` (native_eval_locks) routed or trapped.
+// A value whose type has a DebugView shows as `locals` shows it: when the
+// image keeps the drop of a view's items (at `items`), the view runs on the
 // result before the result's drop gives it back (native_eval_view); the
 // value shows by its fields when the view fails. The thread's registers,
-// its state, the program's heap and its code read as they did before.
-native_eval_here: fn(image: NativeImage, trace: X64Trace, room: Int, words: [Int], items: Int, code: NativeEval, plan: NativeFixPlan, base: Int, captures: [[U8]], typed: [Int], placed: [NativePlaced], sites: [Int:Int], probes: [Int:Int], watched: Bool) -> NativeEvalHere NativeEvalRefused! {
+// its state, the program's heap, its locks and its code read as they did
+// before.
+native_eval_here: fn(image: NativeImage, trace: X64Trace, room: Int, words: [Int], items: Int, code: NativeEval, plan: NativeFixPlan, base: Int, captures: [[U8]], typed: [Int], placed: [NativePlaced], locks: [NativeEvalLock], sites: [Int:Int], probes: [Int:Int], watched: Bool) -> NativeEvalHere NativeEvalRefused! {
     entry: native_eval_offset(code, plan, code.entry) ?? return Err(native_eval_refused("the compiled expression has no entry"))
     drop := 0
     if code.drop != "" {
@@ -566,7 +934,7 @@ native_eval_here: fn(image: NativeImage, trace: X64Trace, room: Int, words: [Int
         view = native_debug_view_at(image, id) ?? 0
         viewed_type = id
     }
-    entered := native_eval_enter(trace, room, words, placed, sites, probes, watched: watched) ?? return Err(err)
+    entered := native_eval_enter(trace, room, words, placed, locks, sites, probes, watched: watched) ?? return Err(err)
     // With a view, the result's drop waits until the view has run on it.
     run := native_eval_start(image, trace, entered, NativeEvalCall{entry: base + entry, words: arguments, drop: if view != 0 -> 0 else -> drop, cell: cell, fresh: true}, passed, code.plan, base)
     value := NativeEvalValue?{None}
@@ -634,11 +1002,11 @@ native_eval_here: fn(image: NativeImage, trace: X64Trace, room: Int, words: [Int
 // fields. `kept` as NativeEvalHere's. Err when the view couldn't put back
 // the program's state, its runtime's words or its registers, or the program
 // ended.
-native_eval_view_here: fn(image: NativeImage, trace: X64Trace, room: Int, words: [Int], items: Int, view: Int, ty: Int, value: [U8], placed: [NativePlaced], sites: [Int:Int], probes: [Int:Int], watched: Bool) -> {shown: String?, kept: Int} NativeEvalRefused! {
+native_eval_view_here: fn(image: NativeImage, trace: X64Trace, room: Int, words: [Int], items: Int, view: Int, ty: Int, value: [U8], placed: [NativePlaced], locks: [NativeEvalLock], sites: [Int:Int], probes: [Int:Int], watched: Bool) -> {shown: String?, kept: Int} NativeEvalRefused! {
     if NATIVE_EVAL_ITEMS + value.len() > NATIVE_EVAL_ROOM_ARENA - NATIVE_EVAL_ROOM_PASS {
         return Ok({shown: None, kept: 0})
     }
-    entered := native_eval_enter(trace, room, words, placed, sites, probes, watched: watched) ?? return Err(err)
+    entered := native_eval_enter(trace, room, words, placed, locks, sites, probes, watched: watched) ?? return Err(err)
     list: room + NATIVE_EVAL_ROOM_PASS
     passed := loop _ in 0..<NATIVE_EVAL_ITEMS -> U8{0}
     loop byte in value -> passed.push(byte)
@@ -676,9 +1044,12 @@ native_eval_view: fn(image: NativeImage, trace: X64Trace, entered: &NativeEvalRo
 // `trace` stops: its registers read, the runtime's words at `words`
 // (X64_DEBUG_EVAL_STORAGE) routed to the room (native_eval_routed), the
 // program's trap bytes `sites` and a reverse command's probes `probes` to
-// step over, and the jumps of the conditions `placed` puts in the program's
-// code taken out.
-native_eval_enter: fn(trace: X64Trace, room: Int, words: [Int], placed: [NativePlaced], sites: [Int:Int], probes: [Int:Int], watched: Bool) -> NativeEvalRoom NativeEvalRefused! {
+// step over, the jumps of the conditions `placed` puts in the program's
+// code taken out, and the runtime's locking entries `locks` jumping to the
+// room's code that does their work without the lock, or trapped, which
+// refuses the evaluation before it takes a lock (NativeEvalLock): no lock
+// of the program's changes, whether the evaluation fails or not.
+native_eval_enter: fn(trace: X64Trace, room: Int, words: [Int], placed: [NativePlaced], locks: [NativeEvalLock], sites: [Int:Int], probes: [Int:Int], watched: Bool) -> NativeEvalRoom NativeEvalRefused! {
     saved: x64_trace_registers(trace) ?? return Err(native_eval_refused("couldn't read the program's registers"))
     traps := [Int:Int]{}
     loop (address, byte) in sites -> traps[address] = byte
@@ -691,27 +1062,62 @@ native_eval_enter: fn(trace: X64Trace, room: Int, words: [Int], placed: [NativeP
     // program's own instructions go back while it runs.
     lifted := [NativeCode]{}
     loop row in placed {
-        if !row.live -> next
-        now: x64_trace_read(trace, row.address, row.bytes.len()) ?? [U8]{}
-        if now.len() != row.bytes.len() || !x64_trace_write(trace, row.address, row.bytes) {
+        if row.live && !native_eval_change(trace, lifted, row.address, row.bytes) {
             loop back in lifted -> _ := x64_trace_write(trace, back.address, back.bytes)
             _ := native_eval_swap(trace, words, was)
             return Err(native_eval_refused("couldn't take a placed condition's jump out of the program's code"))
         }
-        lifted.push(NativeCode{address: row.address, bytes: now})
+    }
+    // A thread the debugger stopped may hold a lock the evaluation would
+    // wait on, and an evaluation refused part way through taking one would
+    // leave it taken: a locking entry jumps to the room's lockless code
+    // (jmp rel32) or traps before it runs.
+    locking := [Int:String]{}
+    loop lock in locks {
+        rel: room + lock.route - (lock.address + 5)
+        bytes := [U8]{U8{NATIVE_DEBUG_TRAP}}
+        if {
+            lock.route >= 0 && rel >= -2147483648 && rel < 2147483648 -> {
+                bytes = [U8]{U8{0xe9}}
+                loop k in 0..<4 -> bytes.push(U8{(rel >> (8 * k)) & 0xff})
+            }
+            else -> { locking[lock.address] = lock.name }
+        }
+        held: native_eval_held(lock.route)
+        if held >= 0 -> locking[room + lock.route + held] = lock.name
+        if !native_eval_change(trace, lifted, lock.address, bytes) {
+            loop back in lifted -> _ := x64_trace_write(trace, back.address, back.bytes)
+            _ := native_eval_swap(trace, words, was)
+            return Err(native_eval_refused("couldn't keep the evaluation from the program's locks: {lock.name} can't be changed"))
+        }
     }
     below: saved[X64_TRACE_RSP] - NATIVE_DEBUG_RED_ZONE - NATIVE_EVAL_STACK_GAP
     top: below - below % 16
-    Ok(NativeEvalRoom{room: room, layout: native_eval_room_code(room), saved: saved, top: top, traps: traps, lifted: lifted, was: was, watched: watched})
+    tls: native_eval_tls(trace, saved[X64_TRACE_GS_BASE])
+    Ok(NativeEvalRoom{room: room, layout: native_eval_room_code(room), saved: saved, top: top, traps: traps, lifted: lifted, locking: locking, was: was, watched: watched, tls: tls})
 }
 
-// Leave the `entered` room: the placed conditions' jumps put back, the
-// runtime's words at `words` as they were, the thread's registers as they
-// were at the stop, then the signals that came for the program meanwhile
-// sent again. Why the program can't go on ("" when it can): the words or
-// the registers couldn't be put back.
+// Write `bytes` at `address` in the stopped program's code, the bytes it
+// held pushed on `lifted`: false when they couldn't be read or written.
+native_eval_change: fn(trace: X64Trace, lifted: &[NativeCode], address: Int, bytes: [U8]) -> Bool Never! {
+    now: x64_trace_read(trace, address, bytes.len()) ?? [U8]{}
+    if now.len() != bytes.len() || !x64_trace_write(trace, address, bytes) -> return false
+    lifted.push(NativeCode{address: address, bytes: now})
+    true
+}
+
+// Leave the `entered` room: the program's code put back (the placed
+// conditions' jumps, the runtime's locking entries), the thread's TLS and
+// the runtime's words at `words` as they were, the thread's registers as
+// they were at the stop, then the signals that came for the program
+// meanwhile sent again. Why the program can't go on ("" when it can): the
+// TLS, the words or the registers couldn't be put back.
 native_eval_leave: fn(trace: X64Trace, words: [Int], entered: NativeEvalRoom) -> String Never! {
     loop back in entered.lifted -> _ := x64_trace_write(trace, back.address, back.bytes)
+    kept := true
+    loop back in entered.tls {
+        if !x64_trace_write(trace, back.address, back.bytes) -> kept = false
+    }
     unrouted: native_eval_swap(trace, words, entered.was) != None
     restored: x64_trace_set_registers(trace, entered.saved)
     loop signal in entered.held -> _ := x64_trace_signal(trace, signal)
@@ -719,6 +1125,7 @@ native_eval_leave: fn(trace: X64Trace, words: [Int], entered: NativeEvalRoom) ->
     if !unrouted {
         return "couldn't put back the program's allocator words, so the program can't go on safely"
     }
+    if !kept -> return "couldn't put back the thread's TLS, so the program can't go on safely"
     ""
 }
 
@@ -811,10 +1218,12 @@ native_eval_kept: fn(count: Int) -> String Never! {
 // them and its text read (a panic's message), as though it was written;
 // any other call, a fault, or the budget's end (NATIVE_EVAL_BUDGET_MS of
 // no stop) fails the call, which then runs the room's tail from the
-// stack's top. A stop at a trap byte of the room's `traps` steps over it; a
-// watch's leaves the watch's debug status clear. It returns at the middle
-// stop (`run.middle`), where the caller reads the call's result and drives
-// it on, and once the call is done, failed or the program ended.
+// stack's top, as does a stop at the trap of a locking entry the room
+// keeps it from (`locking`), before the entry takes its lock. A stop at a
+// trap byte of the room's `traps` steps over it; a watch's leaves the
+// watch's debug status clear. It returns at the middle stop
+// (`run.middle`), where the caller reads the call's result and drives it
+// on, and once the call is done, failed or the program ended.
 native_eval_drive: fn(image: NativeImage, trace: X64Trace, entered: &NativeEvalRoom, plan: NativeFixPlan?, base: Int, run: &NativeEvalRun) Never! {
     room: entered.room
     loop _ in 0..<NATIVE_EVAL_MOST_STOPS {
@@ -882,6 +1291,9 @@ native_eval_drive: fn(image: NativeImage, trace: X64Trace, entered: &NativeEvalR
                 run.done = true
                 if run.stopping -> native_eval_absorb(trace, entered)
                 return
+            }
+            trapped && entered.locking.has_key(pc - 1) -> {
+                why = native_eval_locking(entered.locking.get(pc - 1) ?? "the runtime")
             }
             trapped && entered.traps.has_key(pc - 1) -> {
                 why = native_eval_step_over(image, trace, pc - 1, entered.traps.get(pc - 1) ?? NATIVE_DEBUG_TRAP, entered, run)
@@ -1038,12 +1450,44 @@ native_eval_is_syscall: fn(trace: X64Trace, address: Int) -> Bool Never! {
     bytes.len() == 2 && Int{bytes[0]} == 0x0f && Int{bytes[1]} == 0x05
 }
 
+// Where the image's code ends, and the first `syscall` bytes (0f 05) it
+// holds, 0 when none: what maps the evaluation's room as the program
+// starts, before anything reads the image's code facts.
+NativeEvalReach: struct {
+    end: Int,
+    syscall: Int,
+}
+
+// The NativeEvalReach of the image's code `codes`, read from its file.
+native_eval_reach: fn(codes: [NativeCode]) -> NativeEvalReach Never! {
+    text := NativeEvalReach{end: 0, syscall: 0}
+    loop code in codes {
+        end: code.address + code.bytes.len()
+        if end > text.end -> text.end = end
+        if text.syscall != 0 || code.bytes.len() < 2 -> next
+        loop k in 0..<code.bytes.len() - 1 {
+            first: Int{code.bytes[k]}
+            second: Int{code.bytes[k + 1]}
+            if first != 0x0f || second != 0x05 -> next
+            text.syscall = code.address + k
+            break
+        }
+    }
+    text
+}
+
 // Where `pc` is, in Jet terms when the line table knows it.
 native_eval_place: fn(image: NativeImage, pc: Int) -> String Never! {
     index: x64_jetline_find(image.lines, pc)
     if index < 0 -> return native_debug_hex(pc)
     function: image.lines.functions[index]
     "{function.name}() at {native_eval_files.basename(function.file)}:{x64_jetline_line(image.lines, function, pc) ?? 0}"
+}
+
+// `size` bytes rounded up to whole pages (NATIVE_FIX_PAGE): mmap(2) maps
+// whole pages, and refuses a hint off a page's start.
+native_eval_pages: fn(size: Int) -> Int Never! {
+    (size + NATIVE_FIX_PAGE - 1).div_euclid(NATIVE_FIX_PAGE) * NATIVE_FIX_PAGE
 }
 
 // Map `size` bytes of code and data at `hint` in the program `trace`
@@ -1168,6 +1612,47 @@ native_log_word: fn(result: NativeEvalPart) -> Bool Never! {
     result.word && !result.inline && result.size <= 8
 }
 
+// Whether logpoint part `hole`, whose value is `result`, is a String
+// local's own name, which a placed logpoint reads at the hit rather than
+// runs (NativePlace.jet): its trampoline copies the String's length and up
+// to NATIVE_PLACE_TEXT bytes of its text into the hit's slot.
+native_log_text: fn(result: NativeEvalPart, hole: String) -> Bool Never! {
+    result.name == "String" && native_eval_is_name(hole)
+}
+
+// A String part's text as a logpoint's message shows it, from the hit's
+// slot in `bytes`: its length the word at `at`, its text the bytes from
+// `text`. A longer one than NATIVE_PLACE_TEXT shows the bytes the slot
+// kept, cut back to a whole character, then `…`.
+native_log_text_shown: fn(bytes: [U8], at: Int, text: Int) -> String Never! {
+    length: native_number(bytes, at, 8, X64DebugEncoding.Signed)
+    if length < 0 || text + NATIVE_PLACE_TEXT > bytes.len() {
+        return "<a String the debugger can't show>"
+    }
+    kept := if length < NATIVE_PLACE_TEXT -> length else -> NATIVE_PLACE_TEXT
+    // A cut inside a character moves back to its first byte: the last
+    // lead byte kept (not 10xxxxxx) says how many bytes its character
+    // takes.
+    if kept < length {
+        lead := kept - 1
+        loop lead > 0 {
+            byte: Int{bytes[text + lead]}
+            if (byte & 0xc0) != 0x80 -> break
+            lead -= 1
+        }
+        first: Int{bytes[text + lead]}
+        size: if {
+            first >= 0xf0 -> 4
+            first >= 0xe0 -> 3
+            first >= 0xc0 -> 2
+            else -> 1
+        }
+        if lead + size > kept -> kept = lead
+    }
+    shown: String.from_bytes(bytes[text..<text + kept]) ?? ""
+    if kept < length -> "{shown}…" else -> shown
+}
+
 // A logpoint's message as the text around each `{…}` part (`texts`, one
 // more than the parts) and each part's expression, `{{` and `}}` a brace
 // of the text; None when a part doesn't close.
@@ -1235,11 +1720,29 @@ native_log_shown: fn(image: NativeImage, memory: NativeMemory, result: NativeEva
     assert_eq(plain.holes.len(), 0)
 }
 
-#Test("a part runs in the program only when its value is a word of its own") {
+#Test("a part runs in the program only when its value is a word of its own or a String local") {
     assert(native_log_word(NativeEvalPart{name: "Int", size: 8, inline: false, word: true}))
     assert(native_log_word(NativeEvalPart{name: "Bool", size: 1, inline: false, word: true}))
     assert(!native_log_word(NativeEvalPart{name: "String", size: 8, inline: false}))
     assert(!native_log_word(NativeEvalPart{name: "Point", size: 16, inline: true}))
+    assert(native_log_text(NativeEvalPart{name: "String", size: 8, inline: false}, "word"))
+    assert(!native_log_text(NativeEvalPart{name: "String", size: 8, inline: false}, "word.trim()"))
+    assert(!native_log_text(NativeEvalPart{name: "Int", size: 8, inline: false, word: true}, "i"))
+}
+
+#Test("a String part shows the text its slot kept, cut at a whole character") {
+    slot := native_word_bytes(4)
+    loop byte in "even".bytes() -> slot.push(byte)
+    loop slot.len() < 8 + NATIVE_PLACE_TEXT -> slot.push(U8{0})
+    assert_eq(native_log_text_shown(slot, 0, 8), "even")
+    long := native_word_bytes(NATIVE_PLACE_TEXT + 5)
+    loop _ in 0..<NATIVE_PLACE_TEXT - 1 -> long.push(U8{97})
+    // é is two bytes; the slot keeps only its first.
+    long.extend("é".bytes()[0..<1])
+    shown: native_log_text_shown(long, 0, 8)
+    assert_eq(shown.bytes().len(), NATIVE_PLACE_TEXT - 1 + "…".bytes().len())
+    assert(shown.ends_with("a…"))
+    assert_eq(native_log_text_shown(slot[0..<8], 0, 8), "<a String the debugger can't show>")
 }
 
 #Test("a local's own name reads as `locals` shows it, an expression compiles") {
@@ -1270,16 +1773,101 @@ native_log_shown: fn(image: NativeImage, memory: NativeMemory, result: NativeEva
     assert_eq(native_eval_names("1 + 2"), [String]{})
 }
 
-#Test("the room's code stops at its middle and its end, before its take and give") {
+#Test("the room's code stops at its middle and its end, before its take, give and stand-ins") {
     layout: native_eval_room_code(0x7000_0000_0000)
     assert(layout.middle < layout.tail && layout.tail < layout.end && layout.end < NATIVE_EVAL_ROOM_TAKE)
     assert_eq(Int{layout.bytes[layout.middle]}, NATIVE_DEBUG_TRAP)
     assert_eq(Int{layout.bytes[layout.end]}, NATIVE_DEBUG_TRAP)
     // Without a drop, the call goes on at the tail.
     assert_eq(layout.middle + Int{layout.bytes[layout.middle - 1]}, layout.tail)
-    assert_eq(layout.bytes.len(), NATIVE_EVAL_ROOM_GIVE + native_eval_give_code(0x7000_0000_0000 + NATIVE_EVAL_ROOM_DATA).len())
     assert(NATIVE_EVAL_ROOM_TAKE + native_eval_take_code(0).len() <= NATIVE_EVAL_ROOM_GIVE)
+    assert(NATIVE_EVAL_ROOM_GIVE + native_eval_give_code(0).len() <= NATIVE_EVAL_ROOM_READ)
+    assert(NATIVE_EVAL_ROOM_READ + native_eval_read_code().len() <= NATIVE_EVAL_ROOM_DROP)
+    assert(NATIVE_EVAL_ROOM_DROP + native_eval_drop_code().len() <= NATIVE_EVAL_ROOM_GUARD)
+    assert(NATIVE_EVAL_ROOM_GUARD + native_eval_guard_code().len() <= NATIVE_EVAL_ROOM_UNGUARD)
+    assert(NATIVE_EVAL_ROOM_UNGUARD + native_eval_unguard_code().len() <= NATIVE_EVAL_ROOM_NONE)
+    assert_eq(layout.bytes.len(), NATIVE_EVAL_ROOM_NONE + native_eval_none_code().len())
+    assert_eq(layout.bytes[NATIVE_EVAL_ROOM_READ..<NATIVE_EVAL_ROOM_READ + native_eval_read_code().len()], native_eval_read_code())
+    assert_eq(Int{layout.bytes[NATIVE_EVAL_ROOM_DROP + NATIVE_EVAL_DROP_HELD]}, NATIVE_DEBUG_TRAP)
+    assert_eq(Int{layout.bytes[NATIVE_EVAL_ROOM_UNGUARD + NATIVE_EVAL_UNGUARD_HELD]}, NATIVE_DEBUG_TRAP)
+    assert_eq(layout.bytes[NATIVE_EVAL_ROOM_NONE..<layout.bytes.len()], [U8]{0x31, 0xc0, 0xc3})
     assert(layout.bytes.len() <= NATIVE_EVAL_ROOM_XSAVE)
+}
+
+#Test("the room reads a Shared value's payload and drops a shared owner without the cell's lock") {
+    // invoke(env, payload at [shared + 64], out), a tail call.
+    assert_eq(native_eval_read_code(), [U8]{0x48, 0x89, 0xd0, 0x48, 0x89, 0xca, 0x4c, 0x8b, 0x47, 0x40, 0x48, 0x89, 0xf7, 0x4c, 0x89, 0xc6, 0xff, 0xe0})
+    drop: native_eval_drop_code()
+    // je over the drop lands on its ret; jbe on the last owner on the trap.
+    assert_eq(drop[3..<5], [U8]{0x74, 0x0c})
+    assert_eq(5 + Int{drop[4]}, NATIVE_EVAL_DROP_HELD - 1)
+    assert_eq(Int{drop[NATIVE_EVAL_DROP_HELD - 1]}, 0xc3)
+    assert_eq(drop[10..<12], [U8]{0x76, 0x06})
+    assert_eq(12 + Int{drop[11]}, NATIVE_EVAL_DROP_HELD)
+    assert_eq(Int{drop[NATIVE_EVAL_DROP_HELD]}, NATIVE_DEBUG_TRAP)
+    assert_eq(drop.len(), NATIVE_EVAL_DROP_HELD + 1)
+}
+
+#Test("the room's read guard is the cell itself, and a guard's drop gives back nothing but traps a projected one") {
+    assert_eq(native_eval_guard_code(), [U8]{0x48, 0x89, 0xf8, 0xc3})
+    unguard: native_eval_unguard_code()
+    // test dil, 2; jnz to the trap over the ret.
+    assert_eq(unguard[0..<4], [U8]{0x40, 0xf6, 0xc7, 0x02})
+    assert_eq(unguard[4..<6], [U8]{0x75, 0x01})
+    assert_eq(6 + Int{unguard[5]}, NATIVE_EVAL_UNGUARD_HELD)
+    assert_eq(Int{unguard[NATIVE_EVAL_UNGUARD_HELD - 1]}, 0xc3)
+    assert_eq(Int{unguard[NATIVE_EVAL_UNGUARD_HELD]}, NATIVE_DEBUG_TRAP)
+    assert_eq(unguard.len(), NATIVE_EVAL_UNGUARD_HELD + 1)
+    assert_eq(native_eval_held(NATIVE_EVAL_ROOM_DROP), NATIVE_EVAL_DROP_HELD)
+    assert_eq(native_eval_held(NATIVE_EVAL_ROOM_UNGUARD), NATIVE_EVAL_UNGUARD_HELD)
+    assert_eq(native_eval_held(NATIVE_EVAL_ROOM_NONE), -1)
+}
+
+#Test("an image's locking entries route its Shared reads, guards, drops and stop polls to the room and trap the rest") {
+    assert_eq(NATIVE_EVAL_STAND_INS.len(), NATIVE_EVAL_STAND_IN_CODE.len())
+    symbols := NativeFixSymbols{slots: [String:Int]{}, named: [[NativeFixSymbol]]{}}
+    assert_eq(native_eval_locks(symbols).len(), 0)
+    native_fix_symbol_add(symbols, "jet_rt_native_shared_read", NativeFixSymbol{address: 0x1000, size: 64})
+    native_fix_symbol_add(symbols, "jet_rt_native_shared_drop", NativeFixSymbol{address: 0x1100, size: 64})
+    native_fix_symbol_add(symbols, "jet_rt_native_shared_edit", NativeFixSymbol{address: 0x1200, size: 64})
+    native_fix_symbol_add(symbols, "jet_rt_native_shared_guard_read", NativeFixSymbol{address: 0x1300, size: 64})
+    native_fix_symbol_add(symbols, "jet_rt_native_shared_guard_drop", NativeFixSymbol{address: 0x1400, size: 64})
+    native_fix_symbol_add(symbols, "jet_rt_session_turn", NativeFixSymbol{address: 0x1500, size: 64})
+    native_fix_symbol_add(symbols, "jet_rt_native_task_join", NativeFixSymbol{address: 0x1600, size: 64})
+    native_fix_symbol_add(symbols, "unit.sync_wait", NativeFixSymbol{address: 0x1700, size: 64})
+    locks: native_eval_locks(symbols)
+    assert_eq(locks.len(), 8)
+    assert_eq(locks[0].address, 0x1000)
+    assert_eq(locks[0].route, NATIVE_EVAL_ROOM_READ)
+    assert_eq(locks[1].address, 0x1100)
+    assert_eq(locks[1].route, NATIVE_EVAL_ROOM_DROP)
+    assert_eq(locks[2].address, 0x1300)
+    assert_eq(locks[2].route, NATIVE_EVAL_ROOM_GUARD)
+    assert_eq(locks[3].address, 0x1400)
+    assert_eq(locks[3].route, NATIVE_EVAL_ROOM_UNGUARD)
+    assert_eq(locks[4].address, 0x1500)
+    assert_eq(locks[4].route, NATIVE_EVAL_ROOM_NONE)
+    assert_eq(locks[5].name, "jet_rt_native_shared_edit")
+    assert_eq(locks[5].route, -1)
+    assert_eq(locks[6].name, "jet_rt_native_task_join")
+    assert_eq(locks[6].route, -1)
+    assert_eq(locks[7].name, "unit.sync_wait")
+    assert_eq(locks[7].route, -1)
+    assert(native_eval_locking("jet_rt_native_shared_edit").contains("jet_rt_native_shared_edit"))
+}
+
+#Test("an error's journey adds nothing while an evaluation runs, and a context frame keeps its error") {
+    symbols := NativeFixSymbols{slots: [String:Int]{}, named: [[NativeFixSymbol]]{}}
+    native_fix_symbol_add(symbols, "jet_journey_origin", NativeFixSymbol{address: 0x2000, size: 64})
+    native_fix_symbol_add(symbols, "jet_err_with_context_frame", NativeFixSymbol{address: 0x2100, size: 64})
+    locks: native_eval_locks(symbols)
+    assert_eq(locks.len(), 2)
+    assert_eq(locks[0].name, "jet_journey_origin")
+    assert_eq(locks[0].route, NATIVE_EVAL_ROOM_NONE)
+    assert_eq(locks[1].name, "jet_err_with_context_frame")
+    assert_eq(locks[1].route, NATIVE_EVAL_ROOM_GUARD)
+    // The guard's code hands back its first word: mov rax,rdi; ret.
+    assert_eq(native_eval_guard_code(), [U8]{0x48, 0x89, 0xf8, 0xc3})
 }
 
 #Test("an evaluation routes the class limit to 0, the code words to the room's take and give, and the replay mode off") {
@@ -1304,4 +1892,24 @@ native_log_shown: fn(image: NativeImage, memory: NativeMemory, result: NativeEva
     // mov r11, data; cmp rdi, [r11 + base]; jb; cmp rdi, [r11 + end]; jae.
     assert_eq(give[14..<16], [U8]{0x72, U8{kept - 16}})
     assert_eq(give[20..<22], [U8]{0x73, U8{kept - 22}})
+}
+
+#Test("a mapping's size is whole pages, so the next one's hint starts a page") {
+    assert_eq(native_eval_pages(0), 0)
+    assert_eq(native_eval_pages(1), NATIVE_FIX_PAGE)
+    assert_eq(native_eval_pages(NATIVE_FIX_PAGE), NATIVE_FIX_PAGE)
+    assert_eq(native_eval_pages(NATIVE_FIX_PAGE + 1), 2 * NATIVE_FIX_PAGE)
+    // The room and its code space map as one, and the code space starts a page.
+    assert_eq(native_eval_pages(NATIVE_EVAL_ROOM_SIZE), NATIVE_EVAL_ROOM_SIZE)
+    assert_eq(native_eval_pages(NATIVE_EVAL_CODE_ROOM), NATIVE_EVAL_CODE_ROOM)
+}
+
+#Test("the image's code says where it ends and where its first system call is") {
+    codes: [NativeCode]{NativeCode{address: 0x401000, bytes: [U8]{0x90, 0x0f, 0x90, 0x05}}, NativeCode{address: 0x402000, bytes: [U8]{0x55, 0x0f, 0x05, 0xc3, 0x0f, 0x05}}}
+    text: native_eval_reach(codes)
+    assert_eq(text.end, 0x402006)
+    assert_eq(text.syscall, 0x402001)
+    none: native_eval_reach([NativeCode]{NativeCode{address: 0x401000, bytes: [U8]{0x0f}}})
+    assert_eq(none.end, 0x401001)
+    assert_eq(none.syscall, 0)
 }

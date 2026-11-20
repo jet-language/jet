@@ -1,0 +1,20 @@
+# `print` evaluates in a frame of a path dependency's source that sits beside
+# the entry's package. The line table names that source through the entry's
+# directory (`app/../lib/lib.jet`). The frame's path is its plain path
+# (`lib/lib.jet`), and the expression appended to it replaces the
+# dependency's source in the snapshot, which used to refuse it as "not a
+# checked source file". `score` takes the program's argument count, so
+# it is neither folded nor inlined.
+fixture: PrintInASiblingPackageFrame.fixture
+env: NO_COLOR=1
+step: jet debug app/run.jet
+env: PATH={work}/no-tools
+stdin: print_in_a_sibling_package_frame.stdin
+exit: 0
+stdout: ~ "Breakpoint hit  lib.jet:10  in score()\n" # the stop is in the dependency's source
+stdout: ~ "10 |     total + made.label.len()        <- here\n" # and shows its line
+stdout: ~ "(Jet) print made.count\nmade.count = 6\n" # a field of a struct local there
+stdout: ~ "(Jet) print made.label\nmade.label = \"three\"\n" # and another
+stdout: !~ "not a checked source file" # the dependency's source is one
+stdout: ~ "#0  score()  at lib.jet:10\n#1  run()  at run.jet:7\n" # the backtrace crosses the packages
+stdout: ~ "20\nProgram finished\n" # the evaluations left the program's run unchanged

@@ -5,8 +5,8 @@
 # stop per hit costs tens of microseconds, so a million stops would take
 # twenty seconds at the least; the hits themselves take about a tenth of a
 # second on an idle machine, and the bound leaves room for a loaded one.
-# A logpoint with a String part says, when it is set, that it can't run in
-# the program; the debugger fills in its message at each hit.
+# A logpoint with a String local's part runs in the program too: the hit
+# copies the String's text into its slot, which the debugger shows.
 # The fixture must stay in jet fmt form: line 10 is the `total += step` of
 # count_up's loop and line 19 that of named's. The count comes from the
 # program's arguments (none here, so a million): with a literal count the
@@ -18,9 +18,9 @@ step: jet debug prog.jet
 stdin: placed_logpoint_runs_in_the_program.stdin
 exit: 0
 stdout: ~ "\nThe logpoint runs in the program: a hit writes its values there and runs on without a stop\n" # the logpoint runs in the program
-stdout: ~ "\nThe logpoint can't run in the program: `word` is a String, which the debugger would read after the hit rather than at it; the debugger fills in its message at each hit, which stops the program each time\n" # a String part keeps it out of the program, and says why
+stdout: !~ "The logpoint can't run in the program" # a String local's part keeps it in the program
 stdout: ~ "a million logged hits under five seconds\n" # a million logged hits run on without a stop each
 stdout: ~ "\ns0\ns1\ns2\ns3\ns4\ns5\ns6\ns0\n" # each hit's message, in the order of the hits
-stdout: ~ "even at 0\nodd at 1\n" # the debugger fills in the other logpoint at each hit
+stdout: ~ "even at 0\nodd at 1\n" # the String part's text, copied at each hit
 stdout: ~ "totals 2999997 7\n" # the program runs to its totals unchanged
 stdout: ~ "Program finished\n" # and to its end

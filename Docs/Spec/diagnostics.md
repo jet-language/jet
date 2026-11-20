@@ -359,8 +359,10 @@ constant and owning decision appear only with `--verbose`.
    contain no raw backend error.
 4. Run `jet Tools/Agent/DiagnosticRows.jet --write`. It regenerates every copy
    of the row: the Foundation registry rows, the repair-coverage baseline
-   `Tests/diagnostics_coverage_baseline.txt`, and the explain page
-   `Docs/Site/Dist/e/<CODE>/index.html`. Never edit those files by hand;
+   `Tests/diagnostics_coverage_baseline.txt`, the explain page
+   `Docs/Site/Dist/e/<Jet.Name>/index.html`, and under
+   `Docs/Site/Dist/e/<code>/index.html` a page that sends an older link to it.
+   Never edit those files by hand;
    `--check` (run by the cheap gates) fails when any of them differs from the
    rows, and the generator refuses a change that adds an active row with
    neither a structured edit nor a `no_fix` reason.
