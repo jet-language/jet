@@ -4915,6 +4915,8 @@ ir_x64_same_key: fn(a: [Int], b: [Int]) -> Bool Never! {
 // it (a callee's local inlined here: OptInline.jet ir_opt_splice).
 ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, positions: [Int], body: Int, end: Int, variables: &[X64DebugVariable], ranges: &[X64VariableRange]) Never! {
     entries: ir_x64_entry_registers(m, f, al)
+    // Per slot: its variable, -1 for none.
+    variable_of := loop _ in 0..<f.slot_type.len() -> -1
     loop slot in 0..<f.slot_type.len() {
         name: f.slot_name[slot]
         if name < 0 || name >= m.names.len() -> next
@@ -4923,6 +4925,7 @@ ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, positions:
         indirect: m.types[f.slot_type[slot]].kind == .Aggregate
         site: if al.starts[slot] >= 0 && al.starts[slot] < f.op.len() -> ir_code_line_site(f.code_line[al.starts[slot]]) else -> 0
         variables.push(X64DebugVariable{name: m.names[name], ty: f.slot_type[slot], line: f.slot_line[slot], parameter: f.slot_kind[slot] == .Param, indirect: indirect, site: site})
+        variable_of[slot] = variable
         entry: if slot < entries.len() -> entries[slot] else -> -1
         if al.starts[slot] > al.ends[slot] || ir_x64_class(ty) == .Empty || al.consts[slot] {
             if entry >= 0 && end > body {
@@ -4956,6 +4959,54 @@ ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, positions:
                 ranges.push(X64VariableRange{variable: variable, start: start, end: end, location: X64DebugLocation.Frame{offset: al.homes[slot]}})
             }
         }
+    }
+    // A Loop's split (IRFunction.splits) holds its slot's value over the
+    // split's own live range, where the slot's own place is stale: there the
+    // variable is in the split's place, past it in its own place again. An
+    // outer Loop's split comes before an inner one's, which cuts it the same
+    // way.
+    pair := 0
+    loop pair + 1 < f.splits.len() {
+        split: f.splits[pair]
+        home: f.splits[pair + 1]
+        pair += 2
+        variable: if home >= 0 && home < variable_of.len() -> variable_of[home] else -> -1
+        if variable < 0 || split < 0 || split >= al.starts.len() || al.starts[split] < 0 || al.starts[split] > al.ends[split] {
+            next
+        }
+        from: positions[al.starts[split] + 1]
+        start: if from < body -> body else -> from
+        stop: positions[al.ends[split] + 1]
+        if stop <= start -> next
+        location: if al.regs[split] >= 0 -> X64DebugLocation.Register{reg: al.regs[split]} else -> X64DebugLocation.Frame{offset: al.homes[split]}
+        ir_x64_cut_ranges(ranges, variable, start, stop)
+        ranges.push(X64VariableRange{variable: variable, start: start, end: stop, location: location})
+    }
+}
+
+// Cuts start..<stop out of `variable`'s `ranges`, in place: a range across
+// it keeps its parts before and after.
+ir_x64_cut_ranges: fn(ranges: &[X64VariableRange], variable: Int, start: Int, stop: Int) Never! {
+    k := 0
+    loop k < ranges.len() {
+        range: ranges[k]
+        if range.variable != variable || range.end <= start || range.start >= stop {
+            k += 1
+            next
+        }
+        if {
+            range.start < start && range.end > stop -> {
+                ranges.push(X64VariableRange{variable: variable, start: stop, end: range.end, location: range.location})
+                ranges[k].end = start
+            }
+            range.start < start -> ranges[k].end = start
+            range.end > stop -> ranges[k].start = stop
+            else -> {
+                _ := ranges.remove(k, .Slot)
+                next
+            }
+        }
+        k += 1
     }
 }
 
@@ -7459,6 +7510,62 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
         if variable.name == "pair" && range.location == entry -> entered = variable.indirect
     }
     assert(entered)
+}
+
+// count(n) of OptSplit.jet's test, its Loop split: inside the Loop total and
+// i are in their splits' places, where their own are stale, so each
+// variable's ranges name more than one place and never overlap.
+#Test("A Loop split's variable is in the split's place over the split's range") {
+    m := ir_module_new()
+    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    truth: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    f := ir_function_new("count", "test:split.jet.count", "", "split.jet", 1)
+    n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
+    f.result = word
+    total: ir_slot(f, word, IRSlotKind.Local, ir_intern_name(m, "total"), 2)
+    i: ir_slot(f, word, IRSlotKind.Local, ir_intern_name(m, "i"), 3)
+    done: ir_slot(f, truth, IRSlotKind.Temp, -1, 0)
+    hit: ir_slot(f, truth, IRSlotKind.Temp, -1, 0)
+    one: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.Const, total, 0, -1, -1, 2)
+    _ := ir_emit(f, IROp.Const, i, 0, -1, -1, 3)
+    _ := ir_emit(f, IROp.Block, -1, 17, -1, -1, 4)
+    _ := ir_emit(f, IROp.Block, -1, 16, -1, -1, 4)
+    _ := ir_emit(f, IROp.Loop, -1, 15, -1, -1, 4)
+    _ := ir_emit(f, IROp.Ge, done, i, n, -1, 4)
+    _ := ir_emit(f, IROp.BrIf, -1, done, 1, -1, 4)
+    _ := ir_emit(f, IROp.Eq, hit, total, n, -1, 5)
+    _ := ir_emit(f, IROp.If, -1, hit, -1, 10, 5)
+    _ := ir_emit(f, IROp.Br, -1, 3, -1, -1, 5)
+    _ := ir_emit(f, IROp.End, -1, 8, -1, -1, 5)
+    _ := ir_emit(f, IROp.Add, total, total, i, IR_OVERFLOW_WRAP, 6)
+    _ := ir_emit(f, IROp.Const, one, 1, -1, -1, 7)
+    _ := ir_emit(f, IROp.Add, i, i, one, IR_OVERFLOW_WRAP, 7)
+    _ := ir_emit(f, IROp.Br, -1, 0, -1, -1, 7)
+    _ := ir_emit(f, IROp.End, -1, 4, -1, -1, 7)
+    _ := ir_emit(f, IROp.End, -1, 3, -1, -1, 7)
+    _ := ir_emit(f, IROp.End, -1, 2, -1, -1, 7)
+    _ := ir_emit(f, IROp.Return, -1, total, -1, -1, 8)
+    assert_eq(ir_opt_split_loops(m, f), 2)
+    m.functions.push(f)
+    compiled: ir_x64_compile_function(m, ir_x64_tables(m), 0)
+    assert(compiled.errors.is_empty())
+    loop name in ([String]{"total", "i"}) {
+        mine := [Int]{}
+        loop (index, range) in compiled.debug.ranges {
+            if compiled.variables[range.variable].name == name -> mine.push(index)
+        }
+        moved := false
+        loop (at, index) in mine {
+            range: compiled.debug.ranges[index]
+            if !(range.location == compiled.debug.ranges[mine[0]].location) -> moved = true
+            loop next_at in (at + 1)..<mine.len() {
+                other: compiled.debug.ranges[mine[next_at]]
+                assert(range.end <= other.start || other.end <= range.start, "{name}'s ranges {at} and {next_at} overlap")
+            }
+        }
+        assert(moved, "{name} is in its split's place inside the Loop")
+    }
 }
 
 // A plot's arguments as Core Perf.jet plot builds them (Float{total %%

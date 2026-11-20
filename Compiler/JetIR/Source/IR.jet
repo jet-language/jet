@@ -404,6 +404,11 @@ IRFunction: struct {
     // a call cycle (through a function value's call too), in a module with
     // stop points.
     stack_check: Bool{false},
+    // The Loop splits of the body (OptSplit.jet ir_opt_split_loops), two
+    // words each: a slot that stands for another inside one Loop, and that
+    // slot. Over the split's live range the value is in the split's place,
+    // and the other slot's place is stale (X64Select.jet ir_x64_variables).
+    splits: [Int]{[Int]{}},
 }
 
 // The frame bound of a function with a body of bound `inlined` spliced into

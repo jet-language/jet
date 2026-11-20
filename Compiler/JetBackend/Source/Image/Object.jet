@@ -79,12 +79,16 @@ ELF64_OBJECT_DEBUG_JETLINE: 17
 
 ELF64_OBJECT_RODATA: 19
 
-// With a section per function and data object: the location lists'
-// relocations, then from ELF64_OBJECT_FIRST_OWN per function its section and
-// that section's relocations, then the same per data object.
-ELF64_OBJECT_DEBUG_LOCLISTS_RELA: 20
+// `.debug_addr`, the function starts the DWARF names by index (Dwarf.jet
+// dwarf_info), and `.debug_rnglists`, the inlined runs' range lists.
+ELF64_OBJECT_DEBUG_ADDR: 20
 
-ELF64_OBJECT_FIRST_OWN: 21
+ELF64_OBJECT_DEBUG_RNGLISTS: 22
+
+// With a section per function and data object: from ELF64_OBJECT_FIRST_OWN
+// per function its section and that section's relocations, then the same
+// per data object.
+ELF64_OBJECT_FIRST_OWN: 23
 
 // The first index ELF reserves (SHN_LORESERVE): a header count or a
 // symbol's section index from it on is written through extended section
@@ -111,7 +115,11 @@ ELF64_OBJECT_SYMBOL_LOCLISTS: 5
 
 ELF64_OBJECT_SYMBOL_RODATA: 6
 
-ELF64_OBJECT_SYMBOL_FIRST_OWN: 7
+ELF64_OBJECT_SYMBOL_ADDR: 7
+
+ELF64_OBJECT_SYMBOL_RNGLISTS: 8
+
+ELF64_OBJECT_SYMBOL_FIRST_OWN: 9
 
 X64ObjectRela: struct {
     at: Int,
@@ -694,7 +702,7 @@ x64_object_test_field: fn(bytes: [U8], at: Int, width: Int) -> Int Never! {
 }
 
 #Test("A library object with more sections than 16-bit indices reach numbers them through section 0 and .symtab_shndx") {
-    // 21 fixed headers and two per function: the last function's section is
+    // 23 fixed headers and two per function: the last function's section is
     // past SHN_LORESERVE.
     count: 32700
     functions := [X64CompiledFunction]{}
@@ -889,6 +897,8 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, compiled: &&[X64Com
         abbrev: ELF64_OBJECT_SYMBOL_ABBREV,
         line: ELF64_OBJECT_SYMBOL_LINE,
         loclists: ELF64_OBJECT_SYMBOL_LOCLISTS,
+        addr: ELF64_OBJECT_SYMBOL_ADDR,
+        rnglists: ELF64_OBJECT_SYMBOL_RNGLISTS,
         functions: function_symbols,
     }
     laid_rows := [X64ObjectLaid]{}
@@ -1045,6 +1055,8 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], c
         {name: "", info: 3, section: ELF64_OBJECT_DEBUG_LINE, value: 0, size: 0},
         {name: "", info: 3, section: ELF64_OBJECT_DEBUG_LOCLISTS, value: 0, size: 0},
         {name: "", info: 3, section: ELF64_OBJECT_RODATA, value: 0, size: 0},
+        {name: "", info: 3, section: ELF64_OBJECT_DEBUG_ADDR, value: 0, size: 0},
+        {name: "", info: 3, section: ELF64_OBJECT_DEBUG_RNGLISTS, value: 0, size: 0},
     }
     if own_sections {
         loop index in 0..<functions.len() {
@@ -1333,11 +1345,11 @@ x64_object_file: fn(dwarf: X64DwarfSections, text: [X64ObjectPiece], text_align:
         x64_object_rela_section(".rela.debug_jetline", dwarf.jet_line_relas, ELF64_OBJECT_DEBUG_JETLINE),
         // .rodata: PROGBITS, ALLOC: no address word, so no relocations.
         {name: ".rodata", kind: 1, flags: 2, bytes: rodata, link: 0, info: 0, align: rodata_align, entry_size: 0},
+        x64_object_debug_section(".debug_addr", dwarf.addr),
+        x64_object_rela_section(".rela.debug_addr", dwarf.addr_relas, ELF64_OBJECT_DEBUG_ADDR),
+        {name: ".debug_rnglists", kind: 1, flags: 0, bytes: [U8]{}, pieces: dwarf.rnglists, link: 0, info: 0, align: 1, entry_size: 0},
     }
-    if own.len() > 0 {
-        sections.push(x64_object_rela_section(".rela.debug_loclists", dwarf.loclists_relas, ELF64_OBJECT_DEBUG_LOCLISTS))
-        sections.extend(own)
-    }
+    if own.len() > 0 -> sections.extend(own)
     // Lifecycle priority is carried by the section name; equal priorities use
     // lexical export symbols, never declaration order. A guarded hook has
     // one SHF_INFO_LINK array section per guard, its sh_info that guard's

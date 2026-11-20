@@ -98,8 +98,10 @@ NativeVariableRole: enum {
 // One parameter or local: its name, declaration line, type (a
 // NativeImage.types key) and the offset of its location list in
 // `.debug_loclists`, -1 when it has none. `base` is its unit's base address
-// for offset-pair entries. `site` is the inlined run (a NativeFunction.inlined
-// index) whose frame it belongs to, -1 for the function's own frame.
+// for offset-pair entries and `addr_base` its unit's `.debug_addr` table
+// (DW_AT_addr_base, -1 for none) for base_addressx entries. `site` is the
+// inlined run (a NativeFunction.inlined index) whose frame it belongs to,
+// -1 for the function's own frame.
 NativeVariable: struct {
     name: String,
     line: Int,
@@ -108,6 +110,7 @@ NativeVariable: struct {
     base: Int,
     role: NativeVariableRole,
     site: Int,
+    addr_base: Int{-1},
 }
 
 // One run of code inlined into a function: its code [low, high), the offset
@@ -163,7 +166,8 @@ NativeAbstract: struct {
 // names it (native_producer_level); `frames` its call frame information;
 // `sources` the sha256 of each source it was compiled from, by its path
 // from the entry root (`.debug_jetsource`; empty when the image records
-// none).
+// none); `addresses` its `.debug_addr`, the addresses the DWARF names by
+// index.
 NativeImage: struct {
     lines: X64Jetline,
     functions: [NativeFunction],
@@ -179,6 +183,7 @@ NativeImage: struct {
     level: Int{0},
     frames: NativeFrames{NativeFrames{sections: [NativeCode]{}, fdes: [NativeFde]{}}},
     sources: [String:[U8]]{[String:[U8]]{}},
+    addresses: [U8]{[U8]{}},
 }
 
 // The source node a call's lowering came from: its line and character
@@ -211,7 +216,7 @@ NativeRange: struct {
 // The facts of the ELF image `elf`; None without a `.debug_jetline`.
 native_image_read: fn(elf: [U8]) -> NativeImage? Never! {
     table: native_elf_section(elf, ".debug_jetline") ?? return None
-    image := NativeImage{lines: x64_jetline_parse(table), functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: native_elf_section(elf, ".debug_loclists") ?? [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}, frames: native_frames_read(elf)}
+    image := NativeImage{lines: x64_jetline_parse(table), functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: native_elf_section(elf, ".debug_loclists") ?? [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}, frames: native_frames_read(elf), addresses: native_elf_section(elf, ".debug_addr") ?? [U8]{}}
     if native_elf_section(elf, ".debug_jetsource") == .Val(record) {
         // A record that doesn't parse is none.
         listed: x64_dwarf_sources_parse(record) ?? [X64DebugSource]{}
@@ -219,12 +224,14 @@ native_image_read: fn(elf: [U8]) -> NativeImage? Never! {
     }
     info: native_elf_section(elf, ".debug_info") ?? return Val(image)
     abbrev: native_elf_section(elf, ".debug_abbrev") ?? return Val(image)
+    // The inlined runs' range lists.
+    ranges: native_elf_section(elf, ".debug_rnglists") ?? [U8]{}
     at := 0
     loop at + 12 <= info.len() {
         length: link_debug_le(info, at, 4)
         end: at + 4 + length
         if length < 8 || end > info.len() -> break
-        native_image_unit(image, info, abbrev, at, end)
+        native_image_unit(image, info, abbrev, ranges, at, end)
         at = end
     }
     // Units need not come in address order; native_function_at searches.
@@ -762,15 +769,27 @@ NativeDie: struct {
     call_value: [U8]{[U8]{}},
 }
 
-// The DIEs of the unit at [start, end) of `info`, into `image`.
-native_image_unit: fn(image: &NativeImage, info: [U8], abbrev: [U8], start: Int, end: Int) Never! {
+// A unit's base address for offset-pair entries (its DW_AT_low_pc), and the
+// starts of its `.debug_addr` table, its loclists offsets table and its
+// rnglists offsets table (DW_AT_addr_base, DW_AT_loclists_base and
+// DW_AT_rnglists_base); -1 for none.
+NativeUnitBases: struct {
+    low: Int,
+    addr: Int,
+    lists: Int,
+    ranges: Int,
+}
+
+// The DIEs of the unit at [start, end) of `info`, into `image`; `ranges`
+// is the image's `.debug_rnglists`.
+native_image_unit: fn(image: &NativeImage, info: [U8], abbrev: [U8], ranges: [U8], start: Int, end: Int) Never! {
     version: link_debug_le(info, start + 4, 2)
     if version != 5 || link_debug_le(info, start + 6, 1) != 1 || link_debug_le(info, start + 7, 1) != 8 {
         return
     }
     table: link_debug_abbrevs(abbrev, link_debug_le(info, start + 8, 4)) ?? return
     at := start + 12
-    base := 0
+    bases := NativeUnitBases{low: 0, addr: -1, lists: -1, ranges: -1}
     // The open DIEs with children, innermost last.
     open := [NativeDie]{}
     loop at < end {
@@ -794,19 +813,24 @@ native_image_unit: fn(image: &NativeImage, info: [U8], abbrev: [U8], start: Int,
             if at < 0 || at > end {
                 return
             }
-            native_die_attribute(die, table.attributes[k], form, info, value_at, start)
+            native_die_attribute(die, table.attributes[k], form, info, value_at, start, image, ranges, bases)
         }
         if die.tag == NATIVE_TAG_COMPILE_UNIT {
-            if die.low >= 0 -> base = die.low
+            if die.low >= 0 -> bases.low = die.low
             image.level = native_producer_level(die.producer)
         }
-        native_image_die(image, die, open, base)
+        native_image_die(image, die, open, bases)
         if die.children -> open.push(die)
     }
 }
 
-// Record attribute `attribute` of `die`, a `form` value at `at`.
-native_die_attribute: fn(die: &NativeDie, attribute: Int, form: Int, info: [U8], at: Int, unit: Int) Never! {
+// Record attribute `attribute` of `die`, a `form` value at `at`, in the
+// unit at `unit` of `image` whose bases are `bases` (the unit's own base
+// attributes set them). An address index reads `image.addresses`, a
+// location list index the loclists offsets table, and a range list
+// (DW_AT_ranges, of an inlined run) sets the die's code to its ranges'
+// span.
+native_die_attribute: fn(die: &NativeDie, attribute: Int, form: Int, info: [U8], at: Int, unit: Int, image: NativeImage, ranges: [U8], bases: &NativeUnitBases) Never! {
     if form == 0x18 && (attribute == 0x02 || attribute == 0x7e) {
         cursor := at
         length: link_debug_uleb(info, cursor)
@@ -820,6 +844,18 @@ native_die_attribute: fn(die: &NativeDie, attribute: Int, form: Int, info: [U8],
     value: if form == {
         0x08 -> 0
         0x01 | 0x07 -> link_debug_addr(info, at)
+        0x1b -> {
+            cursor := at
+            native_address_slot(image.addresses, bases.addr, link_debug_uleb(info, cursor))
+        }
+        0x22 -> {
+            cursor := at
+            native_list_offset(image.loclists, bases.lists, link_debug_uleb(info, cursor))
+        }
+        0x23 -> {
+            cursor := at
+            native_list_offset(ranges, bases.ranges, link_debug_uleb(info, cursor))
+        }
         0x0b -> link_debug_le(info, at, 1)
         0x05 -> link_debug_le(info, at, 2)
         0x06 | 0x17 -> link_debug_le(info, at, 4)
@@ -854,8 +890,102 @@ native_die_attribute: fn(die: &NativeDie, attribute: Int, form: Int, info: [U8],
         0x7d -> die.return_pc = value
         0x57 -> die.call_column = value
         0x25 -> die.producer = x64_jetline_text(info, at)
+        0x73 -> bases.addr = value
+        0x8c -> bases.lists = value
+        0x74 -> bases.ranges = value
+        0x55 -> native_die_ranges(die, image.addresses, ranges, value, bases.addr)
         else -> {}
     }
+}
+
+// The address in slot `index` of the `.debug_addr` table at `base` of
+// `addresses`; -1 when there is none.
+native_address_slot: fn(addresses: [U8], base: Int, index: Int) -> Int Never! {
+    if base < 0 || index < 0 -> return -1
+    link_debug_addr(addresses, base + 8 * index)
+}
+
+// The offset in `lists` of list `index` of the offsets table at `base`;
+// -1 when there is none.
+native_list_offset: fn(lists: [U8], base: Int, index: Int) -> Int Never! {
+    if base < 0 || index < 0 -> return -1
+    entry: link_debug_le(lists, base + 4 * index, 4)
+    if entry < 0 -> return -1
+    base + entry
+}
+
+// The code of `die` as the span of the range list at `list` of `ranges`:
+// from its lowest start to its highest end. Index entries read the
+// `.debug_addr` table at `addr_base` of `addresses`. A list it can't read
+// leaves `die` as it was.
+native_die_ranges: fn(die: &NativeDie, addresses: [U8], ranges: [U8], list: Int, addr_base: Int) Never! {
+    if list < 0 {
+        return
+    }
+    at := list
+    base := -1
+    low := -1
+    high := -1
+    loop {
+        if at >= ranges.len() {
+            return
+        }
+        kind: Int{ranges[at]}
+        at += 1
+        if kind == 0 -> break
+        start := -1
+        end := -1
+        if kind == {
+            // DW_RLE_base_addressx, DW_RLE_base_address.
+            0x01 -> base = native_address_slot(addresses, addr_base, link_debug_uleb(ranges, at))
+            0x05 -> {
+                base = link_debug_addr(ranges, at)
+                at += 8
+            }
+            // DW_RLE_startx_endx, DW_RLE_startx_length.
+            0x02 -> {
+                start = native_address_slot(addresses, addr_base, link_debug_uleb(ranges, at))
+                end = native_address_slot(addresses, addr_base, link_debug_uleb(ranges, at))
+            }
+            0x03 -> {
+                start = native_address_slot(addresses, addr_base, link_debug_uleb(ranges, at))
+                end = start + link_debug_uleb(ranges, at)
+            }
+            // DW_RLE_offset_pair, from the base.
+            0x04 -> {
+                from: link_debug_uleb(ranges, at)
+                to: link_debug_uleb(ranges, at)
+                if base < 0 {
+                    return
+                }
+                start = base + from
+                end = base + to
+            }
+            // DW_RLE_start_end, DW_RLE_start_length.
+            0x06 -> {
+                start = link_debug_addr(ranges, at)
+                end = link_debug_addr(ranges, at + 8)
+                at += 16
+            }
+            0x07 -> {
+                start = link_debug_addr(ranges, at)
+                at += 8
+                end = start + link_debug_uleb(ranges, at)
+            }
+            else -> return
+        }
+        if kind == 0x01 || kind == 0x05 -> next
+        if start < 0 || end < start {
+            return
+        }
+        if low < 0 || start < low -> low = start
+        if end > high -> high = end
+    }
+    if low < 0 {
+        return
+    }
+    die.low = low
+    die.length = high - low
 }
 
 // The optimization level a unit's producer names, `Jet native backend (O2)`
@@ -867,8 +997,9 @@ native_producer_level: fn(producer: String) -> Int Never! {
     level
 }
 
-// What `die` adds to `image`, nested in the `open` DIEs.
-native_image_die: fn(image: &NativeImage, die: NativeDie, open: [NativeDie], base: Int) Never! {
+// What `die` adds to `image`, nested in the `open` DIEs, in a unit whose
+// bases are `bases`.
+native_image_die: fn(image: &NativeImage, die: NativeDie, open: [NativeDie], bases: NativeUnitBases) Never! {
     size: if die.size < 0 -> 0 else -> die.size
     code: die.tag
     if {
@@ -1004,7 +1135,7 @@ native_image_die: fn(image: &NativeImage, die: NativeDie, open: [NativeDie], bas
             last: image.functions.len() - 1
             role: if code == NATIVE_TAG_PARAMETER -> NativeVariableRole.Parameter else -> NativeVariableRole.Local
             site: native_open_site(image.functions[last], open)
-            image.functions[last].variables.push(NativeVariable{name: die.name, line: die.line, ty: die.ty, list: die.location, base: base, role: role, site: site})
+            image.functions[last].variables.push(NativeVariable{name: die.name, line: die.line, ty: die.ty, list: die.location, base: bases.low, role: role, site: site, addr_base: bases.addr})
         }
         else -> {}
     }
@@ -1034,14 +1165,17 @@ native_open_site: fn(function: NativeFunction, open: [NativeDie]) -[]> Int {
     -1
 }
 
-// The ranges of the location list at `list` (DW_LLE_offset_pair from
-// `base`, DW_LLE_start_length, DW_LLE_base_address, DW_LLE_start_end).
-native_ranges: fn(image: NativeImage, list: Int, base: Int) -> [NativeRange] Never! {
+// The ranges of `variable`'s location list (DW_LLE_offset_pair from its
+// unit's base or the address a DW_LLE_base_addressx names in
+// `image.addresses`, DW_LLE_start_length, DW_LLE_base_address,
+// DW_LLE_start_end).
+native_ranges: fn(image: NativeImage, variable: NativeVariable) -> [NativeRange] Never! {
     ranges := [NativeRange]{}
     bytes: image.loclists
+    list: variable.list
     if list < 0 || list >= bytes.len() -> return ranges
     at := list
-    unit_base := base
+    unit_base := variable.base
     loop at < bytes.len() {
         kind: Int{bytes[at]}
         at += 1
@@ -1049,6 +1183,11 @@ native_ranges: fn(image: NativeImage, list: Int, base: Int) -> [NativeRange] Nev
         end := 0
         if kind == {
             0x00 -> return ranges
+            0x01 -> {
+                unit_base = native_address_slot(image.addresses, variable.addr_base, link_debug_uleb(bytes, at))
+                if unit_base < 0 -> return ranges
+                next
+            }
             0x04 -> {
                 start = unit_base + link_debug_uleb(bytes, at)
                 end = unit_base + link_debug_uleb(bytes, at)

@@ -6297,7 +6297,7 @@ native_call_value: fn(memory: NativeMemory, frame: NativeUnwound, value: [U8]) -
 
 // The first range of `variable`'s location list that covers `lookup`.
 native_variable_covering: fn(image: NativeImage, variable: NativeVariable, lookup: Int) -> NativeRange? Never! {
-    loop range in native_ranges(image, variable.list, variable.base) {
+    loop range in native_ranges(image, variable) {
         if lookup >= range.start && lookup < range.end -> return Val(range)
     }
     None
@@ -6441,7 +6441,7 @@ native_watch_place: fn(image: NativeImage, memory: NativeMemory, frame: NativeUn
             value: native_register_value(frame, dwarf) ?? return native_watch_refusal("`{path.root}`'s register is not known in this frame")
             if path.fields.len() == 0 && index < 0 {
                 ranges := [NativeRange]{}
-                loop range in native_ranges(image, variable.list, variable.base) {
+                loop range in native_ranges(image, variable) {
                     if native_location_register(image.loclists, range.from, range.to) == dwarf {
                         ranges.push(NativeRange{start: range.start, end: range.end, from: range.from, to: range.to})
                     }
