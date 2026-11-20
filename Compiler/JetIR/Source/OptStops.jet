@@ -106,6 +106,103 @@ ir_opt_stops_drops: fn(code: &IROptCode, f: IRFunction, start: Int, end: Int) Ne
     }
 }
 
+// Stop edges handed off (O1, O2, after the polls fold): inside a construct
+// (the Block an inlined body leaves), a stop point's edge that only drops
+// and branches to the construct's End hands its stop on to the stop or
+// turn poll after that End (past the drops there), whose own edge E never
+// comes back:
+//
+//     block { r := g(t); s := poll(); if s { drop t; br 1 } ... }
+//     drop c; stopped := poll(); if stopped { E }
+//
+// The edge takes the drops and E itself instead of branching:
+//
+//     block { r := g(t); s := poll(); if s { drop t; drop c; E } ... }
+//     drop c; stopped := poll(); if stopped { E }
+//
+// A delivered stop stays until a boundary takes it, so the later poll
+// would have taken it into E after the same drops: each path does what it
+// did. With no stop handed on (ir_opt_polls_hands_on), the later poll
+// checks only what came before the construct (ir_opt_polls_checked), and
+// where that is no call that can stop, the selector tests the armed word
+// inline instead of calling the poll (X64Select.jet ir_x64_stop_point).
+// An edge inside a loop within the construct keeps its branch: the loop's
+// exits stay as the module passes after (Opt.jet ir_optimize_module's
+// entry versions, OptReduce.jet) read them, so a loop they left alone
+// before stays so.
+ir_opt_stops_hand_off: fn(f: &IRFunction, m: IRModule) Never! {
+    poll: name_rows_value(m.name_rows, IR_STOP_POLL_KEY) ?? -1
+    trap: name_rows_value(m.name_rows, IR_STOP_TRAP_KEY) ?? -1
+    turn: name_rows_value(m.name_rows, IR_STOP_TURN_KEY) ?? -1
+    count: f.op.len()
+    // The poll whose drops and edge replace each handing Br (-1: none).
+    into := [Int]{}
+    loop _ in 0..<count -> into.push(-1)
+    handed := false
+    loop at in 0..<count {
+        if !ir_opt_stops_any_poll(f, poll, turn, at) || ir_opt_dead_end(f, at + 1) < 0 -> next
+        end: ir_opt_stops_before_drops(f, at)
+        if end < 0 || f.op[end] != .End -> next
+        edge := f.a[end]
+        loop edge < end {
+            if f.op[edge] == .Loop {
+                edge = f.a[edge] + 1
+                next
+            }
+            br: ir_opt_stops_handing(f, poll, trap, turn, edge, end)
+            if br >= 0 {
+                into[br] = at
+                handed = true
+            }
+            edge += 1
+        }
+    }
+    if !handed {
+        return
+    }
+    code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    loop at in 0..<count {
+        target: into[at]
+        if target < 0 {
+            ir_opt_code_put(code, f.op[at], f.dst[at], f.a[at], f.b[at], f.c[at], f.code_line[at])
+            next
+        }
+        ir_opt_stops_drops(code, f, ir_opt_stops_before_drops(f, target) + 1, target)
+        ir_opt_stops_drops(code, f, target + 2, f.c[target + 1])
+    }
+    f.op = code.op.move()
+    f.dst = code.dst.move()
+    f.a = code.a.move()
+    f.b = code.b.move()
+    f.c = code.c.move()
+    f.code_line = code.line.move()
+    ir_opt_compact(f)
+}
+
+// The last instruction before `at` that is no Drop, or -1.
+ir_opt_stops_before_drops: fn(f: IRFunction, at: Int) -> Int Never! {
+    k := at - 1
+    loop k >= 0 && f.op[k] == .Drop -> k -= 1
+    k
+}
+
+// The Br of the stop edge at `edge` (an If, with no Else, on what a stop,
+// trap or turn poll just returned) when the edge only drops and then
+// branches to the End at `end`; else -1.
+ir_opt_stops_handing: fn(f: IRFunction, poll: Int, trap: Int, turn: Int, edge: Int, end: Int) -> Int Never! {
+    if edge == 0 || f.op[edge] != .If || f.b[edge] >= 0 || f.op[edge - 1] != .Call -> return -1
+    callee: f.a[edge - 1]
+    if callee < 0 || (callee != poll && callee != trap && callee != turn) || f.a[edge] != f.dst[edge - 1] {
+        return -1
+    }
+    br: f.c[edge] - 1
+    if br <= edge || f.op[br] != .Br -> return -1
+    loop k in (edge + 1)..<br {
+        if f.op[k] != .Drop -> return -1
+    }
+    if ir_opt_polls_br_end(f, br, f.a[br]) == end -> br else -> -1
+}
+
 // Stop facts (O1, O2, over the module once every body is optimized). A
 // body reports a stop to its caller (edx, X64Select ir_x64_stop_point) only
 // from a stop edge or a slow path that publishes a stop. A body that starts
@@ -396,7 +493,7 @@ ir_opt_fold_polls: fn(f: &IRFunction, m: IRModule) Never! {
     folded := false
     loop at in 0..<f.op.len() {
         if !ir_opt_stops_any_poll(f, poll, turn, at) -> next
-        if ir_opt_polls_checks_call(f, poll, trap, turn, at) && !ir_opt_polls_after_exact(f, poll, trap, turn, widen, at) {
+        if ir_opt_polls_checks_call(m, f, poll, trap, turn, at) && !ir_opt_polls_after_exact(m, f, poll, trap, turn, widen, at) {
             next
         }
         end: f.c[at + 1]
@@ -411,9 +508,9 @@ ir_opt_fold_polls: fn(f: &IRFunction, m: IRModule) Never! {
 
 // Whether the poll at `at` comes right after an exact widening (route
 // `widen`) and, past it, checks no call.
-ir_opt_polls_after_exact: fn(f: IRFunction, poll: Int, trap: Int, turn: Int, widen: Int, at: Int) -> Bool Never! {
+ir_opt_polls_after_exact: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int, turn: Int, widen: Int, at: Int) -> Bool Never! {
     if at == 0 || f.op[at - 1] != .CallRuntime || f.a[at - 1] != widen -> return false
-    ir_opt_widen_exact(f, at - 1) && !ir_opt_polls_checks_call(f, poll, trap, turn, at - 1)
+    ir_opt_widen_exact(f, at - 1) && !ir_opt_polls_checks_call(m, f, poll, trap, turn, at - 1)
 }
 
 // Whether the jet_int_checked_widen(value, f32, file, line) call at `at`
@@ -449,19 +546,21 @@ ir_opt_only_write: fn(f: IRFunction, slot: Int) -> Int Never! {
 
 // Whether the poll at `at` checks a call: walking back to the first call
 // that is no stop point's (whose callee is no function `poll`, `trap` or
-// `turn`) or the first construct opened, a call met first, or a construct
-// closed on the way holding a stop edge that branches (an inlined body
-// handing its callee's stop on to the poll after it). X64Select.jet
-// ir_x64_stop_point reads it too.
-ir_opt_polls_checks_call: fn(f: IRFunction, poll: Int, trap: Int, turn: Int, at: Int) -> Bool Never! {
-    ir_opt_polls_checked(f, poll, trap, turn, at) >= 0
+// `turn`) and no runtime route the runtime's stops receipt proves quiet
+// (Build.jet ir_route_can_stop, by `m`'s names: the optimizer's view
+// names none, so there every route counts), or the first construct
+// opened, a call met first, or a construct closed on the way holding a
+// stop edge that branches (an inlined body handing its callee's stop on
+// to the poll after it). X64Select.jet ir_x64_stop_point reads it too.
+ir_opt_polls_checks_call: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int, turn: Int, at: Int) -> Bool Never! {
+    ir_opt_polls_checked(m, f, poll, trap, turn, at) >= 0
 }
 
 // Where the poll at `at` meets the call it checks
 // (ir_opt_polls_checks_call): the call, or the End of the construct whose
 // stop edge hands one on; -1 when it checks none. X64Select.jet
 // ir_x64_zone_holds reads it too.
-ir_opt_polls_checked: fn(f: IRFunction, poll: Int, trap: Int, turn: Int, at: Int) -> Int Never! {
+ir_opt_polls_checked: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int, turn: Int, at: Int) -> Int Never! {
     k := at - 1
     loop k >= 0 {
         op: f.op[k]
@@ -470,13 +569,19 @@ ir_opt_polls_checked: fn(f: IRFunction, poll: Int, trap: Int, turn: Int, at: Int
             k = f.a[k] - 1
             next
         }
-        if (op == .Call && (f.a[k] < 0 || (f.a[k] != poll && f.a[k] != trap && f.a[k] != turn))) || op == .CallRuntime || op == .CallIndirect {
+        if (op == .Call && (f.a[k] < 0 || (f.a[k] != poll && f.a[k] != trap && f.a[k] != turn))) || (op == .CallRuntime && !ir_opt_route_quiet(m, f.a[k])) || op == .CallIndirect {
             return k
         }
         if op == .Block || op == .Loop || op == .If || op == .Else -> return -1
         k -= 1
     }
     -1
+}
+
+// Whether runtime route `id` (of `m`'s names) publishes no stop
+// (Build.jet ir_route_can_stop).
+ir_opt_route_quiet: fn(m: IRModule, id: Int) -> Bool Never! {
+    id >= 0 && id < m.names.len() && !ir_route_can_stop(m, m.names[id])
 }
 
 // Whether a stop edge (an If testing what a call just returned) from
@@ -690,5 +795,117 @@ ir_opt_polls_br_end: fn(f: IRFunction, at: Int, level: Int) -> Int Never! {
             }
             assert_eq(drops, 2)
         }
+    }
+}
+
+// An inlined body (a Block) whose stop edge after r := code(x) drops and
+// branches to the Block's End, then drop t and a turn poll whose edge
+// returns: the edge takes drop t and the turn's edge instead of branching,
+// so no Br is left, each path drops t once, and the turn, which checked
+// the stop the body handed on, checks no call.
+#Test("An inlined body's stop edge takes the edge of the poll after the body") {
+    m := ir_module_new()
+    int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    word: ir_word_row(m)
+    poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
+    turn: ir_stop_poll(m, IR_STOP_TURN_KEY)
+    f := ir_function_new("f", "test:handoff.jet.f", "", "handoff.jet", 1)
+    x: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
+    code: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "code"), 1)
+    f.result = int_row
+    t: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+    r: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.Add, t, x, x, 0, 2)
+    _ := ir_open(f, IROp.Block, 2)
+    passed: ir_args(f, [Int]{x})
+    _ := ir_emit(f, IROp.CallIndirect, r, code, passed, 1, 2)
+    ir_x64_test_stop_edge(f, flag, poll, IROp.Br, 2)
+    ir_end(f, 2)
+    _ := ir_emit(f, IROp.Drop, -1, t, -1, -1, 3)
+    ir_x64_test_stop_edge(f, flag, turn, IROp.Return, 3)
+    _ := ir_emit(f, IROp.Return, -1, r, -1, -1, 4)
+    view: ir_opt_view(m, [String]{})
+    // The turn's call: its If, the edge's Return, the End and the Return follow.
+    assert(ir_opt_polls_checks_call(view, f, poll, -1, turn, f.op.len() - 5))
+    ir_opt_stops_hand_off(f, view)
+    brs := 0
+    drops := 0
+    returns := 0
+    turns := [Int]{}
+    loop (at, op) in f.op {
+        if op == .Br -> brs += 1
+        if op == .Drop && f.a[at] == t -> drops += 1
+        if op == .Return -> returns += 1
+        if op == .Call && f.a[at] == turn -> turns.push(at)
+    }
+    assert_eq(brs, 0)
+    assert_eq(drops, 2)
+    assert_eq(returns, 3)
+    assert_eq(turns.len(), 1)
+    assert(!ir_opt_polls_checks_call(view, f, poll, -1, turn, turns[0]))
+}
+
+// The same body with its call in a loop: the stop edge branches out of the
+// loop to the body's End, and it keeps that branch.
+#Test("A stop edge inside a loop of an inlined body keeps its branch") {
+    m := ir_module_new()
+    int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    word: ir_word_row(m)
+    poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
+    turn: ir_stop_poll(m, IR_STOP_TURN_KEY)
+    f := ir_function_new("f", "test:handoff.jet.f", "", "handoff.jet", 1)
+    x: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
+    code: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "code"), 1)
+    f.result = int_row
+    r: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+    stopped: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
+    _ := ir_open(f, IROp.Block, 2)
+    _ := ir_open(f, IROp.Loop, 2)
+    passed: ir_args(f, [Int]{x})
+    _ := ir_emit(f, IROp.CallIndirect, r, code, passed, 1, 2)
+    none: ir_args(f, [Int]{})
+    _ := ir_emit(f, IROp.Call, stopped, poll, none, 0, 2)
+    _ := ir_open_if(f, stopped, 2)
+    // Out of the If, the Loop and the Block.
+    _ := ir_emit(f, IROp.Br, -1, 2, -1, -1, 2)
+    ir_end(f, 2)
+    _ := ir_emit(f, IROp.Br, -1, 0, -1, -1, 2)
+    ir_end(f, 2)
+    ir_end(f, 2)
+    ir_x64_test_stop_edge(f, flag, turn, IROp.Return, 3)
+    _ := ir_emit(f, IROp.Return, -1, r, -1, -1, 4)
+    count: f.op.len()
+    ir_opt_stops_hand_off(f, ir_opt_view(m, [String]{}))
+    brs := 0
+    loop op in f.op {
+        if op == .Br -> brs += 1
+    }
+    assert_eq(brs, 2)
+    assert_eq(f.op.len(), count)
+}
+
+// A poll after a runtime route checks it unless the module's stops receipt
+// proves the route quiet; the optimizer's view names no route, so there
+// every route counts.
+#Test("A poll after a quiet runtime route checks no call") {
+    loop quiet in ([Bool]{false, true}) {
+        m := ir_module_new()
+        flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+        word: ir_word_row(m)
+        poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
+        route: ir_intern_name(m, "jet_rt_alloc")
+        if quiet -> m.quiet_routes["jet_rt_alloc"] = true
+        f := ir_function_new("f", "test:quiet.jet.f", "", "quiet.jet", 1)
+        size: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "size"), 1)
+        box: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        sizes: ir_args(f, [Int]{size, size})
+        _ := ir_emit(f, IROp.CallRuntime, box, route, sizes, 2, 2)
+        at: f.op.len()
+        ir_x64_test_stop_edge(f, flag, poll, IROp.Return, 2)
+        _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 3)
+        assert_eq(ir_opt_polls_checks_call(m, f, poll, -1, -1, at), !quiet)
+        assert(ir_opt_polls_checks_call(ir_opt_view(m, [String]{}), f, poll, -1, -1, at))
     }
 }

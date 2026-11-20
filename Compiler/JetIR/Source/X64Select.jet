@@ -2107,7 +2107,7 @@ ir_x64_zone_region: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, parents:
         loop k >= 0 && !found {
             j := starts.len() - 1
             loop j >= 0 && !found {
-                if ir_x64_zone_holds(f, al, points, starts[j], ends[k]) {
+                if ir_x64_zone_holds(m, f, al, points, starts[j], ends[k]) {
                     best = IRX64Region{start: starts[j], end: ends[k]}
                     found = true
                 }
@@ -2212,12 +2212,12 @@ ir_x64_zone_route: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
 // range lies inside), and every stop poll among them checks no call
 // (OptStops.jet ir_opt_polls_checked) or one among them, never a stop an
 // earlier call published, which skipping it would lose.
-ir_x64_zone_holds: fn(f: IRFunction, al: IRX64Allocation, points: [Int], start: Int, end: Int) -> Bool Never! {
+ir_x64_zone_holds: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, points: [Int], start: Int, end: Int) -> Bool Never! {
     loop at in start..<(end + 1) {
         slot: if f.op[at] == .Drop -> f.a[at] else -> f.dst[at]
         if slot >= 0 && (al.starts[slot] < start || al.ends[slot] > end) -> return false
         if f.op[at] != .Call -> next
-        checked: ir_opt_polls_checked(f, points[0], points[1], points[2], at)
+        checked: ir_opt_polls_checked(m, f, points[0], points[1], points[2], at)
         if checked >= 0 && checked < start -> return false
     }
     true
@@ -4355,7 +4355,7 @@ ir_x64_stop_point: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
             e.code.bytes.push(0xd2)
             site = x64_jcc_rel32(e.code, X64Cond.NE)
             if f.a[at] == turn -> ir_x64_armed_poll(e, at, branch, true)
-        } else if f.a[at] != trap && (routed || !ir_opt_polls_checks_call(f, poll, trap, turn, at)) {
+        } else if f.a[at] != trap && (routed || !ir_opt_polls_checks_call(m, f, poll, trap, turn, at)) {
             // A poll that checks no call can observe only what another task
             // asked for, which arms the runtime's word first: the hot path
             // is its load, test and branch, and the poll's call, its test

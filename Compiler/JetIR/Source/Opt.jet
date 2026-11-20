@@ -965,7 +965,8 @@ ir_opt_calls_route: fn(m: IRModule, f: IRFunction, at: Int, route: String) -> Bo
 // callees' final bodies (`bodies`; the drop glue it calls, OptGlue.jet, and
 // a glue call left is a Drop again), then the polls folded into the next
 // stop point, Simplify, scalar replacement, Simplify again, the versioned
-// copies and the SSA round trip, the polls folded again and the stop points
+// copies and the SSA round trip, the polls folded again, the inlined
+// bodies' stop edges handed the polls' edges after them, the stop points
 // moved after their calls, and last the address sums moved to their accesses.
 // Hoisting, glue, stops and sink match callees by `keys` (every function's key),
 // never by a body a wave may hold. With
@@ -1038,6 +1039,10 @@ ir_opt_function: fn(m: IRModule, bodies: [[IRFunction]], keys: [String], f: &&IR
     if stops {
         ir_opt_fold_polls(out, m)
         if checking -> checking = ir_opt_lint(m, lint, out, "polls", report)
+        // After Simplify, which would unwrap a Block whose stop edges no
+        // longer branch.
+        ir_opt_stops_hand_off(out, m)
+        if checking -> checking = ir_opt_lint(m, lint, out, "handoff", report)
         ir_opt_stops_after_calls(out, m, keys)
         if checking -> checking = ir_opt_lint(m, lint, out, "stops", report)
     }
