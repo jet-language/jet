@@ -5,6 +5,7 @@ use jet_foundation.[
     foundation_byte_text,
     symbol_is_local,
     symbol_key_leaf_start,
+    symbol_key_parts,
     symbol_local_keys_count,
     symbol_local_keys_text_at,
     symbol_local_row,
@@ -183,27 +184,19 @@ sema_compiler_identity: fn(registration: SemaRegistrationGraph, key: String) -> 
     rest: key.slice(kind.len() + 1, key.len())
     name_start: symbol_key_leaf_start(rest)
     if name_start == 0 -> return key.copy()
-    head: foundation_byte_text(rest.bytes(), 0, name_start - 1)
     name: foundation_byte_text(rest.bytes(), name_start, rest.count_bytes())
-    // A module identity may hold `.` and `:` of its own: the longest prefix
-    // of `head`, cut at a `.`, that keys a registered module is the module,
-    // and the rest its owner.
+    // A module identity may hold `.` and `:` of its own: the key's module is
+    // the registered one symbol_key_parts finds, and the rest its owner. A
+    // key of no registered module is cut at the last `.` before its name.
     declaring := ""
     owner := ""
-    found := false
-    bytes: head.bytes()
-    at := bytes.len()
-    loop at > 0 && !found {
-        if at == bytes.len() || bytes[at] == (U8{46}) {
-            if sema_registration_module_index_text(registration, foundation_byte_text(bytes, 0, at)) == .Val(row) {
-                declaring = registration.modules[row].module_name.copy()
-                owner = if at == bytes.len() -> "" else -> foundation_byte_text(bytes, at + 1, bytes.len())
-                found = true
-            }
+    if symbol_key_parts(key, fn(text: String) { sema_registration_module_index_text(registration, text) != None }) == .Val(parts) {
+        if sema_registration_module_index_text(registration, parts.module_identity) == .Val(row) {
+            declaring = registration.modules[row].module_name.copy()
         }
-        at -= 1
-    }
-    if !found {
+        owner = parts.owner
+    } else {
+        head: foundation_byte_text(rest.bytes(), 0, name_start - 1)
         split: head.cut_last(".")
         declaring = if split == .Val(parts) -> parts.before.copy() else -> head.copy()
         owner = if split == .Val(parts) -> parts.after.copy() else -> ""

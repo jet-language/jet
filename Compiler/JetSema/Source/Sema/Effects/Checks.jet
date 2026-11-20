@@ -36,7 +36,7 @@ use jet_foundation.[
     BodyRequireKind,
     BodyTree,
     CompilerThreads,
-    core_path_module,
+    core_identity_is_module,
     DeclID,
     DeclTable,
     decl_table_find,
@@ -98,6 +98,7 @@ use jet_foundation.[
     symbol_key,
     symbol_key_leaf,
     symbol_key_names,
+    symbol_key_parts,
     symbol_none,
     symbol_table,
     symbol_table_key,
@@ -3839,25 +3840,23 @@ sema_effect_record_iterable_loop: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNo
 }
 
 // The declaring module of a `kind:{module}.{name}` type symbol key
-// (`symbol_id` with an empty owner).
+// (`symbol_id` with an empty owner): all the text before its name
+// (symbol_key_parts).
 sema_effect_symbol_module: fn(key: String) -> String? Never! {
-    head: key.cut_last(".") ?? return None
-    kind_and_module: head.before.split_once(":") ?? return None
-    Val(kind_and_module.after)
+    parts: symbol_key_parts(key, fn(text: String) { text != "" }) ?? return None
+    if parts.module_identity == "" -> return None
+    Val(parts.module_identity)
 }
 
 // The Core module identity of a free Core declaration's key
 // (`function:<corelib>/core.net.fetch` is `<corelib>/core.net`); None for any
-// other key. A method's key puts its owner between its module and its name
-// (symbol_key_text), so only a key whose text before the name is a Core
-// module names one.
+// other key, a Core method's too: its key has its owner between its module
+// and its name (symbol_key_parts).
 sema_effect_core_member_module: fn(key: String) -> String? Never! {
-    path: key.split_once(":") ?? return None
-    if !path.after.starts_with("<corelib>/") -> return None
-    head: path.after.cut_last(".") ?? return None
-    module_name: head.before.slice(10, head.before.len())
-    if (core_path_module(module_name) ?? return None) != module_name -> return None
-    Val(head.before)
+    if !(key.split_once(":") ?? return None).after.starts_with("<corelib>/") -> return None
+    parts: symbol_key_parts(key, fn(text: String) { core_identity_is_module(text) }) ?? return None
+    if parts.owner != "" -> return None
+    Val(parts.module_identity)
 }
 
 sema_effect_walk_expr: fn(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTree, expression: Int, facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller) {
