@@ -1,0 +1,20 @@
+# A command whose deadline passes before its reply comes leaves the session
+# usable: its late reply is dropped, so the event wait after it times out on
+# its own and the page's DOM, screenshot and title after a second such wait
+# each get their own reply. A UI-mode test whose wait times out still writes
+# that attempt's DOM and screenshot this way (browser_test_ui_mode).
+env: NO_COLOR=1
+copy: {root}/Tests/Cases/WebBrowser/Fixtures/LateReply {work}/late
+when probe chromium --version
+when probe chromedriver --version
+step: jetpack browser lock chromium --binary {tool:chromium} --driver {tool:chromedriver}
+cwd: {work}/late
+env: JET_PROJECT_ROOT={work}/late
+exit: 0
+step: jet run --allow=Env,Exec,FS,IO,Net,Time {work}/late/main.jet
+cwd: {work}/late
+env: JET_PROJECT_ROOT={work}/late
+exit: 0
+stdout: = "wait: timeout\nevent: timeout\nwait: timeout\ndom: has title: true\nscreenshot: png: true\ntitle: late\n"
+end when
+end when
