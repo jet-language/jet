@@ -6157,10 +6157,17 @@ native_bare_move: fn(word: String, mark: NativeMark) -> NativeMove Never! {
 // compilation directory `dir`, unless the file is absolute, is Core's or has
 // none. A Core source's file is its path under the Core root
 // (`<corelib>/Core/Net/URL.jet`), which names the Core the program was
-// compiled with, never a file under the compilation directory.
+// compiled with, never a file under the compilation directory. A file the
+// line table names through `..` (a path dependency beside the entry's
+// package: `Compiler/JetCLI/../JetSema/Source/Sema/CheckProgram.jet`) is
+// its plain path, `Compiler/JetSema/Source/Sema/CheckProgram.jet`, which the
+// checked sources name it by.
 native_line_source: fn(dir: String, file: String) -> String Never! {
     if dir == "" || file.starts_with("/") || file.starts_with(MODULE_CORE_PREFIX) -> return "{file}"
-    native_files.join(dir, file)
+    joined: native_files.join(dir, file)
+    if !joined.starts_with("../") && !joined.contains("/../") -> return joined
+    plain: native_files.normalize(joined)
+    if joined.starts_with("./") && !plain.starts_with("../") -> "./{plain}" else -> plain
 }
 
 // Whether `path` names the source a line-table function records as `file`
@@ -6183,6 +6190,13 @@ native_source_line: fn(lines: [String], line: Int) -> String Never! {
     assert_eq(native_line_source("/work", "/src/prog.jet"), "/src/prog.jet")
     assert_eq(native_source_line([String]{"a", "b"}, 2), "b")
     assert_eq(native_source_line([String]{"a"}, 2), "")
+}
+
+#Test("a source the line table names through `..` is its plain path") {
+    assert_eq(native_line_source("Compiler/JetCLI", "../JetSema/Source/Sema/CheckProgram.jet"), "Compiler/JetSema/Source/Sema/CheckProgram.jet")
+    assert_eq(native_line_source(".", "../lib/step.jet"), "../lib/step.jet")
+    assert_eq(native_line_source("./app", "../lib/step.jet"), "./lib/step.jet")
+    assert(native_line_file_is("Compiler/JetCLI", "../JetSema/Source/Sema/CheckProgram.jet", "Sema/CheckProgram.jet"))
 }
 
 // A task the runtime's registry lists (JetRuntime Observe.jet): its id, its

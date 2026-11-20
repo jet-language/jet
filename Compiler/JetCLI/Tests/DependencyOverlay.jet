@@ -1,0 +1,44 @@
+// An overlay of a path dependency's source (a debugger's expression
+// appended to the source a program stopped in, in a package beside the
+// entry's) replaces that source in the program's snapshot.
+use {
+    jet_cli.[JetCLIOverlay, JetCLISnapshotted, jet_cli_prepare_snapshot]
+    overlay_files: core.files
+    overlay_process: core.process
+    overlay_sys: core.sys
+}
+
+#Test("an overlay of a path dependency's source replaces it in the snapshot") {
+    made: "{overlay_sys.temp_dir()}/jet-dependency-overlay-{overlay_process.current_pid()}"
+    overlay_files.create_dir_all("{made}/app") ?? panic("app root")
+    overlay_files.create_dir_all("{made}/greeter") ?? panic("dependency root")
+    root: overlay_files.realpath(made) ?? panic("test root")
+    overlay_files.write("{root}/app/package.jet", "name: \"app\"\nversion: \"0.1.0\"\ndeps: {{\n    greeter: ../greeter,\n}}\n") ?? panic("app manifest")
+    overlay_files.write("{root}/app/run.jet", "use greeter\n\nrun: fn() {{ print(greeter.greet()) }}\n") ?? panic("app source")
+    overlay_files.write("{root}/greeter/package.jet", "name: \"greeter\"\nversion: \"0.1.0\"\n") ?? panic("dependency manifest")
+    overlay_files.write("{root}/greeter/greeter.jet", "greet: fn() -> String {{ \"hello\" }}\n") ?? panic("dependency source")
+    appended: "greet: fn() -> String {{ \"hello\" }}\n\nasked: fn() -> Int {{ 1 }}\n"
+    entry: "{root}/app/run.jet"
+    // The line table names the dependency's source through the entry
+    // package's directory.
+    overlays: [JetCLIOverlay]{JetCLIOverlay{path: "{root}/app/../greeter/greeter.jet", source: appended}}
+    found := ""
+    wanted: "{root}/greeter/greeter.jet"
+    if jet_cli_prepare_snapshot(entry, entry, overlays, false, appended: true) == {
+        .Refused(output) -> {
+            panic("the snapshot refused the dependency's overlay: {output.stderr}")
+        }
+        .Held(snapshot) -> {
+            loop held in snapshot.roots {
+                loop file in held.files {
+                    if file.path == wanted -> found = file.source
+                }
+            }
+        }
+    }
+    assert_eq(found, appended)
+    if jet_cli_prepare_snapshot(entry, entry, [JetCLIOverlay]{JetCLIOverlay{path: "{root}/elsewhere.jet", source: appended}}, false, appended: true) == .Held(_) {
+        panic("an overlay of no checked source must be refused")
+    }
+    overlay_files.remove_all(made) ?? panic("dependency overlay cleanup")
+}
