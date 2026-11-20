@@ -38960,6 +38960,133 @@
       "completedAt": "2026-11-17T21:05:57.861Z",
       "questions": [],
       "retiredAt": "2026-11-20T21:07:54.221Z"
+    },
+    {
+      "id": "c0m4deiq",
+      "num": 6661,
+      "title": "Language defects found by ports: ported case rows and the last Jetpack workarounds",
+      "body": "Language defects found while porting code to Jet, each with a case and its port workaround removed.\n\nPortsLead-2 settled the #6651 untracked rows in 92c8dc5914 and parked 19 rows whose root no card owned under #5454. Those roots are language defects, not ported-case ledger work, so they own their rows here. Row list and first errors: tests/known-failing.tsv lines naming this card.\n\nThe Jetpack port defects (archived #5940, carried by #5971 c10) were fixed in 33cd0d50c3 and 62e933686a; two workaround sites remain (PD1).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e21",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "All 6 criteria met; c4 rows pass on p277 (112b577445)."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c6 progress: NarCodec workaround removed (0b8f8c0562, p268); the sema fix for non-escaping read captures landed (341cc6b01b, p268). The TUF half (tuf-lock-capture) lands in p269, which carries that fix in the seed; Jetpack/Publication tests pass on p268."
+        },
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "Decision (Main, 2026-11-14) for c4 row corelib/game_run_needs_mutable_scene_lvalue: a temporary passed to a `&` (write) parameter stays accepted, as today for any call (`bump(make())`). The spec rules only on `:` bindings (E0111) and read parameters (E0205) as receivers of writes (spec.md:792, 1745); a temporary is a fresh owned value, so writing to it has no soundness cost, and D-CALLSITE-MARK2=A gives calls no marks to tell them apart. Making it an error would be a new rule that needs a ballot. The row is a stale fixture: it is updated to pass a `:=` scene and to show game.run working, under a name that says so. c3: generics/generic_modules_complete_instantiation (E0907 on impl TargetErr.From inside an instantiated generic module) is fixed by G6Meta-implrhs, queued in batch 43."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "c1 sweep (G12Docs-5, dev e764ade14b, seed-b14): 3 of 4 cases pass (control_and_data/yielding_and_result_loops_compile_and_run, corelib/core_net_dns_rejects_reserved_header_forward_pointer_and_impossible_counts, corelib/core_net_dns_txt_and_srv_are_real_udp_queries). corelib/core_http_client_bounds_and_strictly_decodes_response_bodies is still KNOWN-FAILING under #3665: the guest matches .Ok/.Err on an HTTPResponse (E0305), not E0073."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). c3's generic_modules_complete_instantiation row is also #6281 c68's proof (G6). Whoever fixes it meets both rows."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "c4 progress (TestSystemLead-2): ebb25ee28f makes a valueless builtin call (print/assert/assert_eq/consume/close) as a value-block tail report E0114 unless an earlier line always leaves. value_block_tails_report_unit_and_lint_old_arm_table_shape passes step 1 and stays KF at step 2 (lintable.jet gets E0003, not L0513). 0e5a5249b8 reserves Solver again: solve_solver_type_name_is_reserved KF→PASS, 8 Solver rows still pass. Remaining rows: game_run_needs_mutable_scene_lvalue needs core.game.run to take the scene mutably (a Core signature change); b3_map_get_through_object_pattern:  now binds key/value entries, not a map, so the fixture's .get is a type error (fixture intent); generated_internal_tagged_enum_round_trips_every_variant_shape (unit variant decode panics) and io_prompt_helpers_validate_choices_and_refuse_non_tty_secrets.pty (transcript matches a forbidden pattern) are not yet examined."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "c1 progress, 56e30acfcf (TestSystemLead-2, on dev): a dead break value still types its loop, and a task body's lone finite loop stays a statement. With the lane's s1 compiler, 3 of c1's 4 rows PASS: control_and_data/yielding_and_result_loops_compile_and_run and corelib/core_net_dns_rejects_reserved_header_forward_pointer_and_impossible_counts / core_net_dns_txt_and_srv_are_real_udp_queries. Bonus #5454 row: dev_parts_routine/yielding_and_result_loops_run_in_native_jit_without_fallback. Regression filters: loop 52 PASS (base 51 PASS, 10 KF), task 81 PASS, break 7 PASS. corelib/core_http_client_bounds_and_strictly_decodes_response_bodies is past E0073 and now fails at E0305 on its guest's .Ok/.Err match of an HTTPResponse, a Core HTTP client defect; its KF line now points to #3665. c1 stays open until that row passes."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Its 19 rows name this card in tests/known-failing.tsv since 26d99ef2fe."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "E0073 'no final break value': a value loop whose labeled outer break precedes its own break, and a loop that ends a task body (control_and_data/yielding_and_result_loops_compile_and_run, corelib/core_http_client_bounds_and_strictly_decodes_response_bodies, corelib/core_net_dns_rejects_reserved_header_forward_pointer_and_impossible_counts, corelib/core_net_dns_txt_and_srv_are_real_udp_queries) PASS.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev 6f6a4ccf58 (the gate-p45 jet, batch 39): cases control_and_data/yielding_and_result_loops_compile_and_run, corelib/core_http_client_bounds_and_strictly_decodes_response_bodies, corelib/core_net_dns_rejects_reserved_header_forward_pointer_and_impossible_counts and corelib/core_net_dns_txt_and_srv_are_real_udp_queries each PASS 1/0 (G3Core-2 run).",
+          "at": "2026-11-14T04:47:56.730Z"
+        },
+        {
+          "n": 2,
+          "text": "Numeric widening at operators, arguments, collection joins and the no-third-type rule (numeric_widening/exact_widening_is_symmetric_at_operators_and_works_for_arguments, numeric_multi_producer_joins_widen_every_producer_across_tiers, widening_does_not_search_for_a_third_type_or_narrow) PASS on every tier.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev in light2 (980e02feb4..6fd8510b1f, Lander5), proved on the batch-15 jet (gate-p20) over the fit tree: 1d432551c1 (G3Core2-6661c2case): numeric_widening/widening_does_not_search_for_a_third_type_or_narrow 1/0; the other two named cases PASS in the Main goal sweep on the same jet.",
+          "at": "2026-11-14T01:17:56.918Z"
+        },
+        {
+          "n": 3,
+          "text": "Generics: inference through a generic constructor (custom/generic_struct_fns E0904), generic module instantiation (generics/generic_modules_complete_instantiation), phantom type-argument counts (nominal_identity/generic_display_keeps_runtime_reflection_identity), and bounded generic arithmetic keeping checked overflow and source location (numops/generic_add_bound_keeps_checked_overflow, generic_div_bound_keeps_source_location) PASS.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "jet test Compiler --profile cases: custom/generic_struct_fns, generics/generic_modules_complete_instantiation, nominal_identity/generic_display_keeps_runtime_reflection_identity, numops/generic_add_bound_keeps_checked_overflow, numops/generic_div_bound_keeps_source_location each 1 PASS on batch compiler gate-p131 (dev 8d83659ef3), verified by Main on dev 291197b25e",
+          "at": "2026-11-14T23:34:26.937Z"
+        },
+        {
+          "n": 4,
+          "text": "Remaining rows PASS, with stale fixtures updated to the current grammar where the case predates it: control_and_data/discarded_if_does_not_unify_mixed_tail_values, value_block_tails_report_unit_and_lint_old_arm_table_shape, corelib/game_run_needs_mutable_scene_lvalue, generated_internal_tagged_enum_round_trips_every_variant_shape, io_prompt_helpers_validate_choices_and_refuse_non_tty_secrets.pty, solve_solver_type_name_is_reserved, ice_regressions/b3_map_get_through_object_pattern. Proof: `jet test Compiler --profile cases --filter <each named row>` passes, with no row left in Tests/known-failing.tsv naming #6661.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev 112b577445 (batch compiler p277). `jet test Compiler --profile cases --filter <row>` PASS for: discarded_if_does_not_unify_mixed_tail_values, value_block_tails_report_unit_and_lint_old_arm_table_shape, generated_internal_tagged_enum_round_trips_every_variant_shape, io_prompt_helpers_validate_choices_and_refuse_non_tty_secrets (.case and .pty.case), solve_solver_type_name_is_reserved, ice_regressions b3_map_get_through_object_pattern, and game_run_needs_mutable_scene_lvalue, which is ported as CoreLib/game_run_runs_a_mutable_scene_binding. Tests/known-failing.tsv has no row naming #6661.",
+          "at": "2026-11-17T21:39:24.922Z"
+        },
+        {
+          "n": 5,
+          "text": "Two ICEs found by the #6636 coverage work on the gate-p45 jet (I2: checked code must lower). (a) Examples/LowLevel/RawPointerTools.jet with dev`s own Core stops in ir.build: unlowered core.mem::Window<Int>. (b) A Reader.over(...) temporary passed to a `&term.Reader` parameter stops with \"write place HandleMethod\"; sema accepts the temporary (Main`s c4 ruling), so lowering must give it a place. Proof: golden LowLevel/RawPointerTools at o0, o1 and o2, and a case passing a Reader.over temporary to a &term.Reader parameter at o0, o1 and o2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "(a) jet test Compiler --profile golden --filter RawPointerTools: 3 PASS (O0/O1/O2) with dev's own Core; (b) cases corelib/a_reader_over_temporary_fills_a_lent_reader_parameter_on_every_tier (dev 291197b25e): 1 PASS on batch compiler gate-p131 (dev 8d83659ef3), verified by Main on dev 291197b25e",
+          "at": "2026-11-14T23:34:27.839Z"
+        },
+        {
+          "n": 6,
+          "text": "The last two Jetpack workarounds for port-found defects go: Jetpack/Store/Source/Nar/NarCodec.jet:45 (`workaround #5940(d,e)`: the NarByteInput enum instead of an escaping lambda owning the reader) and Jetpack/Publication/Source/TUF.jet:392 (`workaround #5940(h)`: a `path.copy()` local before a lambda capture) use the fixed forms, as 62e933686a did for the other sites. Proof: `git grep -n 'workaround #5940' -- Jetpack` prints nothing, and `jet test Jetpack/Store` and `jet test Jetpack/Publication` pass.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0b8f8c0562 (p268, NarCodec uses the escaping-lambda form) and d29d7cff88 (p269, TUF captures path directly). git grep -n 'workaround #5940' origin/dev -- Jetpack prints nothing. 'jet test Jetpack/Publication' passes on batch compiler p269 (rc 0).",
+          "at": "2026-11-17T15:58:30.276Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T08:09:39.678Z",
+      "updated": "2026-11-17T21:39:26.931Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 6,
+      "completedAt": "2026-11-17T21:39:26.931Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T22:00:51.842Z"
     }
   ]
 }
