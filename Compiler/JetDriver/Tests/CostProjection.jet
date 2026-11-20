@@ -3,9 +3,10 @@
 // function's once per specialization it is called at, the gap a reachable
 // callee without a checked body leaves, a captured report's lines and L2510
 // lints, the implicit copy a loop repeats, the String copy `lines()` makes,
-// the Int arithmetic a range loop's counter keeps on the packed rail, a view
-// read in place as a receiver, a plain check's L2511 tidy errors, and a map
-// edit's L2511 only where its loop shares the map each turn.
+// which is an L2510 lint but no L2511 hidden copy, the Int arithmetic a range
+// loop's counter keeps on the packed rail, a view read in place as a
+// receiver, a plain check's L2511 tidy errors, and a map edit's L2511 only
+// where its loop shares the map each turn.
 use {
     jet_driver.[
         JetDriverAuthorizedSourceFile,
@@ -202,6 +203,79 @@ cost_projection_lines_source: fn() -> String {
         if row.code == "L2510" -> lints.push(row.what)
     }
     assert_eq(lints, [String]{"This copy of `String` view into an owned slot inside a loop"})
+}
+
+// `lines()` in a loop as a loop source and under `filter`, `len` and `join`,
+// beside an implicit String copy in a loop.
+cost_projection_written_lines_source: fn() -> String {
+    [String]{
+        "Tag: struct {{ name: String, turn: Int }}",
+        "widths: fn(logs: [String]) -> Int {{",
+        "    total := 0",
+        "    loop log in logs {{",
+        "        loop line in log.lines() -> total += line.len()",
+        "        total += log.lines().filter(fn(line) {{ line != \"\" }}).len()",
+        "        total += log.lines().len()",
+        "        total += log.lines().join(\" \").len()",
+        "    }}",
+        "    total",
+        "}}",
+        "tags: fn(turns: Int) -> [Tag] {{",
+        "    label: \"turn\"",
+        "    out := [Tag]{{}}",
+        "    loop turn in 0..<turns {{",
+        "        out.push(Tag{{name: label, turn: turn}})",
+        "    }}",
+        "    out",
+        "}}",
+        "",
+    }.join("\n")
+}
+
+#Test("the copies a written `lines()` makes in a loop are view materialization sites and L2510 lints but no L2511, while an implicit String copy in a loop stays an L2511") {
+    request := cost_projection_request(cost_projection_written_lines_source())
+    request.capture_cost_report = true
+    captured := jet_driver_compile(request)
+    assert(captured.complete, "the fixture checks: {captured.diagnostics.map(fn(row) { row.what })}")
+    report: captured.cost_report.move() ?? panic("a captured check keeps its cost report")
+    copies := [String]{}
+    loop site in report.sites {
+        if site.kind == .ViewMaterialization || site.kind == .ImplicitCopy {
+            copies.push("{site.kind:Debug} `{site.view}` {site.function} main.jet:{site.line} depth {site.loop_depth}")
+        }
+    }
+    assert_eq(
+        copies,
+        [String]{
+            "ViewMaterialization `String` widths main.jet:5 depth 2",
+            "ViewMaterialization `String` widths main.jet:5 depth 2",
+            "ViewMaterialization `String` widths main.jet:6 depth 1",
+            "ViewMaterialization `String` widths main.jet:7 depth 1",
+            "ViewMaterialization `String` widths main.jet:8 depth 1",
+            "ImplicitCopy `String` tags main.jet:16 depth 1",
+        },
+    )
+    lints := [String]{}
+    loop row in captured.advice {
+        if row.code == "L2510" && !row.what.starts_with("An exact Int") -> lints.push(row.what)
+    }
+    assert_eq(
+        lints,
+        [String]{
+            "This copy of `String` view into an owned slot inside a loop",
+            "This copy of `String` view into an owned slot inside a loop",
+            "This copy of `String` view into an owned slot inside a loop",
+            "This copy of `String` view into an owned slot inside a loop",
+            "Implicitly copying a `String` inside a loop",
+        },
+    )
+    compiled := jet_driver_compile(cost_projection_request(cost_projection_written_lines_source()))
+    assert(compiled.complete, "the fixture checks: {compiled.diagnostics.map(fn(row) { row.what })}")
+    tidy := [String]{}
+    loop row in compiled.diagnostics {
+        if row.code == "L2511" -> tidy.push("{row.what} | {row.fix}")
+    }
+    assert_eq(tidy, [String]{"Implicitly copying a `String` inside a loop | To keep the copy out of the loop, hand the value over with `.move()` at its last use, or make the copy explicit outside the loop."})
 }
 
 // A string view read only as the receiver of a scalar read: `trimmed.len()`
