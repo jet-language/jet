@@ -3,9 +3,10 @@
 // `lex` and `parse` run the compiler's own lexer and parser over the query's
 // source; `check` runs the same check query `jet inspect compiler check`
 // runs (jet_driver_compiler_check) over the syntax tree's source, under this
-// compile's Core sources, host facts and evaluator; `source_map` reads the
-// generated-Rust markers `jet inspect compiler source-map` reads. These read
-// only their argument: no path, package or sibling source. The package views
+// compile's Core sources, host facts and evaluator, and its imports resolve
+// among the sources this compile holds under its root; `source_map` reads the
+// generated-Rust markers `jet inspect compiler source-map` reads. `lex`,
+// `parse` and `source_map` read only their argument. The package views
 // (`manifest`, `package`, `lock`, `profiles`) read the compile's pinned
 // package root (ComptimePackageViews.jet). `schema` answers the running
 // toolchain's executable schema (jet_driver_compiler_schema); `receipt`
@@ -54,20 +55,30 @@ use {
         jet_eval_compiler_services_string,
     ]
     jet_pkg_model.[AuthorityError, AuthorityResolver]
-    jet_sema.[sema_comptime_reflection_written_signature, sema_comptime_reflection_doc_source, sema_comptime_reflection_documentation]
+    jet_sema.[SemaDiagnosticOrigin, sema_comptime_reflection_written_signature, sema_comptime_reflection_doc_source, sema_comptime_reflection_documentation, sema_diagnostic_loaded_origins]
 }
 
 JET_DRIVER_COMPILER_SOURCE_IDENTITY: "compiler-eval-source"
 
 JET_DRIVER_COMPILER_SOURCE_FILE: "core.compiler.jet"
 
-// What a check query compiles under: the requesting compile's facts.
+// What a check query compiles under: the requesting compile's facts, under
+// its entry root.
 JetDriverComptimeCompilerContext: struct {
     root: String,
+    facts: JetDriverComptimeCompilerFacts,
+    eval_config: JetEvalConfig,
+}
+
+// The requesting compile's facts a check query takes whole: the sources it
+// holds under its entry root (`sources`), as it read them, less the package
+// manifest and any file that takes the query's name (a query is a lone file
+// that joins no package manifest), and its Core, effects, host and threads.
+JetDriverComptimeCompilerFacts: struct {
+    sources: [JetDriverAuthorizedSourceFile],
     canonical_effects: EffectModuleSource,
     core_sources: [JetDriverCoreSource],
     host_facts: JetDriverHostFacts,
-    eval_config: JetEvalConfig,
     compiler_threads: CompilerThreads,
 }
 
@@ -125,15 +136,43 @@ jet_driver_compiler_source_input: fn(source: String) -> JetCompilerServicesSourc
     JetCompilerServicesSourceInput{source: source, preparation: Val(preparation)}
 }
 
-// The one-file source snapshot a check query compiles: `source` as
-// `core.compiler.jet` under `root` (metadata only; imports resolve there).
-jet_driver_compiler_source_snapshot: fn(root: String, source: String) -> JetDriverAuthorizedSourceSnapshot {
-    path: if root == "/" -> "/{JET_DRIVER_COMPILER_SOURCE_FILE}" else -> "{root}/{JET_DRIVER_COMPILER_SOURCE_FILE}"
+// The path of a check query's source under `root`.
+jet_driver_compiler_source_path: fn(root: String) -> String Never! {
+    if root == "/" -> "/{JET_DRIVER_COMPILER_SOURCE_FILE}" else -> "{root}/{JET_DRIVER_COMPILER_SOURCE_FILE}"
+}
+
+// The source snapshot a check query compiles: `source` as
+// `core.compiler.jet` under `root` (metadata only), beside the `held`
+// sources of that root (jet_driver_entry_root_sources), which it takes, so
+// its imports resolve to the texts the caller already read, never to a fresh
+// read of the disk.
+jet_driver_compiler_source_snapshot: fn(root: String, source: String, held: &&[JetDriverAuthorizedSourceFile]) -> JetDriverAuthorizedSourceSnapshot {
+    path: jet_driver_compiler_source_path(root)
+    files := [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: path, relative_path: JET_DRIVER_COMPILER_SOURCE_FILE, identity: JET_DRIVER_COMPILER_SOURCE_IDENTITY, source: source}}
+    files.extend(held.move())
     JetDriverAuthorizedSourceSnapshot{
-        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: root, identity: JET_DRIVER_COMPILER_SOURCE_IDENTITY, allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: path, relative_path: JET_DRIVER_COMPILER_SOURCE_FILE, identity: JET_DRIVER_COMPILER_SOURCE_IDENTITY, source: source}}, foreign_cache_files: []}},
+        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: root, identity: JET_DRIVER_COMPILER_SOURCE_IDENTITY, allow_hardlinks: false, files: files, foreign_cache_files: []}},
         entry_root_identity: JET_DRIVER_COMPILER_SOURCE_IDENTITY,
         entry_path: path,
     }
+}
+
+// The sources `snapshot` holds under its entry root that a check query
+// compiles beside its own: the query is a lone file, so it joins no package
+// manifest, and no held file takes its name.
+jet_driver_entry_root_sources: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> [JetDriverAuthorizedSourceFile] Never! {
+    held := [JetDriverAuthorizedSourceFile]{}
+    loop root in snapshot.roots {
+        if root.identity != snapshot.entry_root_identity -> next
+        loop file in root.files {
+            if file.relative_path == JET_DRIVER_COMPILER_SOURCE_FILE || file.relative_path == "package.jet" {
+                next
+            }
+            // copy: the query holds the text the compile read; the snapshot keeps its own.
+            held.push(file.copy())
+        }
+    }
+    held
 }
 
 // The compiler query host of `request`'s compile-time code.
@@ -141,11 +180,14 @@ jet_driver_comptime_compiler_for: fn(request: JetDriverCompileRequest) -> JetEva
     // copy: the host keeps the facts a check query compiles under; the request keeps its own.
     context: Shared{JetDriverComptimeCompilerContext{
         root: jet_driver_entry_root_path(request.authorized_sources),
-        canonical_effects: request.canonical_effects.copy(),
-        core_sources: request.core_sources.copy(),
-        host_facts: request.host_facts.copy(),
+        facts: JetDriverComptimeCompilerFacts{
+            sources: jet_driver_entry_root_sources(request.authorized_sources),
+            canonical_effects: request.canonical_effects.copy(),
+            core_sources: request.core_sources.copy(),
+            host_facts: request.host_facts.copy(),
+            compiler_threads: request.compiler_threads.copy(),
+        },
         eval_config: jet_driver_comptime_eval_config(request.eval_config, None, None),
-        compiler_threads: request.compiler_threads.copy(),
     }}
     JetDriverComptimeCompiler{context: context}
 }
@@ -242,10 +284,12 @@ jet_driver_compiler_receipt: fn(path: String, root: String, span: Span) -[FS, En
         }
         .Err(error) -> {
             diagnostic: diagnostic_from_registry("E2105", Val(span), "`{path}` is not a valid run receipt: {error.message}", "a run receipt is read only when it decodes and its digest authenticates its body", "record the run again to write its receipt")
+            // The query's own call site is in the calling code, whose
+            // text this answer does not hold: no snapshot to name.
             jet_driver_compiler_receipt_failed(
                 "Invalid",
                 [TComptimeEnumArg]{
-                    TComptimeEnumArg{name: None, value: jet_eval_compiler_services_diagnostic_values([Diagnostic]{diagnostic})},
+                    TComptimeEnumArg{name: None, value: jet_eval_compiler_services_diagnostic_values([Diagnostic]{diagnostic}, [SemaDiagnosticOrigin]{})},
                 },
                 span,
             )
@@ -316,19 +360,21 @@ jet_driver_compiler_query_check: fn(context: Shared<JetDriverComptimeCompilerCon
     text: source ?? return jet_driver_compiler_query_lost("check", span)
     parsed: jet_eval_compiler_services_parse(jet_driver_compiler_source_input(text)) ?? return jet_driver_compiler_query_lost("check", span)
     permit: context.guard_read()
+    // copy: the check takes the facts whole; the host keeps its own for the next query.
+    facts := permit.value.facts.copy()
     request: JetDriverCompileRequest{
-        authorized_sources: jet_driver_compiler_source_snapshot(permit.value.root, text),
-        canonical_effects: permit.value.canonical_effects.copy(),
-        core_sources: permit.value.core_sources.copy(),
-        host_facts: permit.value.host_facts.copy(),
+        authorized_sources: jet_driver_compiler_source_snapshot(permit.value.root, text, facts.sources.move()),
+        canonical_effects: facts.canonical_effects.move(),
+        core_sources: facts.core_sources.move(),
+        host_facts: facts.host_facts.move(),
         eval_config: jet_driver_comptime_eval_config(permit.value.eval_config, None, None),
         record_store: None,
         trace_sink: None,
-        compiler_threads: permit.value.compiler_threads.copy(),
+        compiler_threads: facts.compiler_threads.move(),
         mode: JetDriverCompileMode.Doc,
     }
-    // copy: the check takes the request; a failed check's records name its file.
-    checked_file: request.authorized_sources.entry_path.copy()
+    // The check takes the request; a failed check's records name its file.
+    checked_file: jet_driver_compiler_source_path(permit.value.root)
     result: jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed.copy(), request: request, retain_projection: false}) ?? return JetEvalBuildReply.Failure{diagnostic: diagnostic_from_registry("E0003", Val(span), "`compiler.check` failed inside the compiler", "the check query failed before returning its diagnostics", "report this compiler bug")}
     if result.internal_problem == .Val(problem) {
         return JetEvalBuildReply.Failure{diagnostic: diagnostic_from_registry("E0003", Val(span), "`compiler.check` failed inside the compiler", problem, "report this compiler bug")}
@@ -371,7 +417,7 @@ jet_driver_compiler_query_check: fn(context: Shared<JetDriverComptimeCompilerCon
                             TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
                             TComptimeField{name: "source", value: jet_eval_compiler_services_string(text)},
                             TComptimeField{name: "syntax", value: parsed.value},
-                            TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(result.diagnostics)},
+                            TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(result.diagnostics, sema_diagnostic_loaded_origins(result.diagnostics, result.sources, JET_DRIVER_COMPILER_SOURCE_FILE, text))},
                             TComptimeField{name: "functions", value: TComptimeValue.List{values: functions}},
                             TComptimeField{name: "effects", value: TComptimeValue.List{values: []}},
                             TComptimeField{name: "semantic_index", value: TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "CompilerSemanticIndex"}}}},

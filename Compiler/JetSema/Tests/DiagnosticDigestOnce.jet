@@ -1,0 +1,80 @@
+// A checked snapshot's digest is taken once per snapshot, however many
+// diagnostics name it, and from the text the check holds: the snapshot's root
+// is not on disk, so a re-read could not answer.
+use {
+    jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot, jet_driver_present_diagnostic]
+    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, DiagnosticOrigin, SourceFile, Span, sha256_hex, source_file_id]
+    jet_sema.[sema_diagnostic_loaded_origins, sema_diagnostic_origin_row]
+}
+
+DIGEST_ROOT: "/jet-digest-once/not-on-disk"
+
+DIGEST_MAIN: "use \"helper\"\n\nrun: fn() {{ print(helper.value() + missing_local + also_missing) }}\n"
+
+DIGEST_HELPER: "value: fn() -> Int {{ missing_helper + other_missing }}\n"
+
+digest_diagnostic: fn(file: String?, start: Int) -> Diagnostic Never! {
+    Diagnostic{severity: DIAGNOSTIC_ERROR, code: "E0107", span: Val(Span{start: start, end: start + 4}), source_path: file, source_offset: Val(0), source_start: Val(0), what: "unknown name", why: "why", fix: "fix"}
+}
+
+digest_require: fn(ok: Bool, name: String) Never! {
+    if !ok -> panic("diagnostic digest: {name}")
+}
+
+#Test("diagnostic_digest_once_per_snapshot") {
+    main_file: JetDriverAuthorizedSourceFile{path: "{DIGEST_ROOT}/main.jet", relative_path: "main.jet", identity: "digest-root", source: DIGEST_MAIN}
+    helper_file: JetDriverAuthorizedSourceFile{path: "{DIGEST_ROOT}/helper.jet", relative_path: "helper.jet", identity: "digest-root", source: DIGEST_HELPER}
+    snapshot: JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: DIGEST_ROOT, identity: "digest-root", allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{main_file, helper_file}, foreign_cache_files: [JetDriverAuthorizedSourceFile]{}}},
+        entry_root_identity: "digest-root",
+        entry_path: "{DIGEST_ROOT}/main.jet",
+    }
+    raw: [Diagnostic]{
+        digest_diagnostic(Val("main.jet"), 40),
+        digest_diagnostic(Val("helper.jet"), 21),
+        digest_diagnostic(Val("main.jet"), 56),
+        digest_diagnostic(Val("helper.jet"), 40),
+        digest_diagnostic(Val("main.jet"), 14),
+        Diagnostic{severity: DIAGNOSTIC_ERROR, code: "E0003", what: "a manifest problem", why: "why", fix: "fix"},
+    }
+
+    // Presentation: one origin per file for the whole result, from the held bytes.
+    origins := [String:DiagnosticOrigin]{}
+    presented := [Diagnostic]{}
+    loop diagnostic in raw {
+        presented.push(jet_driver_present_diagnostic(diagnostic, snapshot, [SourceFile]{}, origins))
+    }
+    digest_require(origins.len() == 2, "six diagnostics over two files take two digests, not six")
+    main_digest: sha256_hex(DIGEST_MAIN)
+    helper_digest: sha256_hex(DIGEST_HELPER)
+    loop index in 0..<5 {
+        placed: presented[index].origin ?? panic("diagnostic digest: a located diagnostic lost its origin")
+        held: if placed.display == "main.jet" -> DIGEST_MAIN else -> DIGEST_HELPER
+        digest_require(placed.source == held, "an origin holds the snapshot's own bytes")
+        digest_require(placed.revision == sha256_hex(held), "an origin's digest is the snapshot's SHA-256")
+    }
+    digest_require(presented[5].origin == None, "a source-free diagnostic takes no digest")
+
+    // The public origins reuse the digest the presentation took; they never
+    // hash again. The first diagnostic of a file names its origin.
+    presented[0].origin = Val(DiagnosticOrigin{display: "main.jet", path: "{DIGEST_ROOT}/main.jet", source: DIGEST_MAIN, revision: "already-taken"})
+    public: sema_diagnostic_loaded_origins(presented, [SourceFile]{}, "main.jet", DIGEST_MAIN)
+    digest_require(public.len() == 2, "one public origin per snapshot")
+    digest_require(public[sema_diagnostic_origin_row(public, presented[0])].digest == "already-taken", "a placed origin's digest is reused, not recomputed")
+    digest_require(public[sema_diagnostic_origin_row(public, presented[0])].path == None, "the handed text names no path")
+    digest_require(public[sema_diagnostic_origin_row(public, presented[1])].digest == helper_digest, "an imported snapshot keeps its own digest")
+
+    // Unplaced diagnostics over handed text and loaded files: one digest per
+    // snapshot, from the texts the load held.
+    loaded: [SourceFile]{SourceFile{id: source_file_id("helper.jet"), path: "helper.jet", source: DIGEST_HELPER}}
+    rows: sema_diagnostic_loaded_origins(raw, loaded, "main.jet", DIGEST_MAIN)
+    digest_require(rows.len() == 2, "five located diagnostics over two snapshots take two digests")
+    loop index in 0..<5 {
+        row: sema_diagnostic_origin_row(rows, raw[index])
+        digest_require(row >= 0, "a located diagnostic has an origin row")
+        expected: if raw[index].source_path == Val("main.jet") -> main_digest else -> helper_digest
+        digest_require(rows[row].digest == expected, "an origin row's digest is its held snapshot's")
+    }
+    digest_require(sema_diagnostic_origin_row(rows, raw[5]) == -1, "a source-free diagnostic has no origin row")
+    print("diagnostic digest once per snapshot: passed")
+}

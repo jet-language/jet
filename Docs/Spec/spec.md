@@ -6736,10 +6736,18 @@ with `schema_version: 1` and `api_version: 1`; its operations are `lex`,
 query `core.compiler.query` (see Compiler and package model APIs).
 Runtime calls to `core.compiler` are E0956.
 
-Diagnostics are value records with code, severity, message, why, fix, and span.
-Semantic facts reuse the existing index schema: the `semantic_index` that
-`check` returns carries the semantic-index `schema_version` (20, see Semantic
-index and codemods), not the envelope's 1. The API does not return
+Diagnostics are value records with code, severity, message, why, fix, span,
+and origin. A diagnostic with a source span carries an origin naming the text
+it came from: `path` is the file's root-relative path, or none for the text the
+query was handed, and `source_digest` is the SHA-256 of the exact bytes
+checked. A diagnostic with no span carries no origin. The value records carry
+their own `schema_version`, 2 since `origin` was added. A `check` resolves the
+handed text's imports among the sources the calling compile holds under its
+root (`jet inspect compiler check <file>`: the sources `jet check <file>`
+holds); it never rereads them from disk. Semantic facts reuse the existing
+index schema: the `semantic_index` that `check` returns carries the
+semantic-index `schema_version` (20, see Semantic index and codemods), not the
+envelope's 1. The API does not return
 `Program`, `Item`, `Expr`, `Token`, mutable caches, parser state, or sema
 internals, and modified syntax cannot be fed back into compilation
 (D-FRONTENDAPI1).
@@ -7618,7 +7626,8 @@ the host keeps its typed override fields alongside the System reference.
 `core.compiler` is a typed, read-only compiler API. `lex`, `parse`, `check`, and
 `source_map` are compile-time-only and retain source, spans, diagnostics,
 semantic facts, and generated-line mappings. `jet inspect compiler` mirrors
-these operations as deterministic JSON with schema and API version 1. Runtime
+these operations as deterministic JSON with envelope schema and API version 1
+around value records of schema version 2. Runtime
 calls are E0956.
 
 Facts have one reader. `query(source: FactSource, kind: FactKind)` answers the

@@ -70,6 +70,9 @@ JetDriverCompilerCheckResult: struct {
     failed_stage: JetDriverStage?,
     complete: Bool,
     internal_problem: String?,
+    // A failed load's own texts, as it read them: its diagnostics' spans
+    // index these, so their origins are hashed from them, never re-read.
+    sources: [SourceFile]{[SourceFile]{}},
 }
 
 // Invocation-owned documents use paths already resolved by the CLI's retained
@@ -112,7 +115,7 @@ jet_driver_compiler_queries_check_text: fn(queries: &JetDriverCompilerQueries, p
 }
 
 jet_driver_compiler_check_failure: fn(load: JetDriverLoadResult, stage: JetDriverStage, problem: String?) -> JetDriverCompilerCheckResult Never! {
-    JetDriverCompilerCheckResult{product: .Failed, diagnostics: load.diagnostics, failed_stage: Val(stage), complete: false, internal_problem: problem}
+    JetDriverCompilerCheckResult{product: .Failed, diagnostics: load.diagnostics, failed_stage: Val(stage), complete: false, internal_problem: problem, sources: load.source_files}
 }
 
 jet_driver_compiler_check_package_policies: fn(load: JetDriverLoadResult) -> [SemaRegistrationPackagePolicy] Never! {

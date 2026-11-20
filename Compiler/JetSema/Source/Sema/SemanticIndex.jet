@@ -2101,7 +2101,9 @@ sema_compiler_index_collect_checked_locals: fn(function: FnBody, module_identity
     }
 }
 
-sema_compiler_semantic_index_from_checked: fn(registration: SemaRegistrationGraph, graph: SemaGraphResult, source: String, module_sources: [SemaCompilerModuleSource]) -> SemaCompilerSemanticIndexFacts {
+// `source_digest` is the digest of the checked entry text, which the caller
+// takes once for the index and the diagnostics' origins alike.
+sema_compiler_semantic_index_from_checked: fn(registration: SemaRegistrationGraph, graph: SemaGraphResult, source_digest: String, module_sources: [SemaCompilerModuleSource]) -> SemaCompilerSemanticIndexFacts {
     definitions := [TComptimeValue]{}
     definition_keys := [String:Bool]{}
     function_views: sema_compiler_index_function_views(graph)
@@ -2254,7 +2256,7 @@ sema_compiler_semantic_index_from_checked: fn(registration: SemaRegistrationGrap
         type_name: "CompilerSemanticIndex",
         fields: [TComptimeField]{
             TComptimeField{name: "schema_version", value: sema_compiler_index_int(20)},
-            TComptimeField{name: "source_digest", value: sema_compiler_index_string(sha256_hex(source))},
+            TComptimeField{name: "source_digest", value: sema_compiler_index_string(source_digest)},
             TComptimeField{name: "definitions", value: TComptimeValue.List{values: definitions}},
             TComptimeField{name: "references", value: TComptimeValue.List{values: references}},
             TComptimeField{name: "calls", value: TComptimeValue.List{values: calls}},
