@@ -71,7 +71,7 @@ Read D-SERVICE-IDENTITY1 D, D-SERVICE-UPGRADE1 D, D-SERVICE-WORKER1 A and D-SERV
 
 ## Independent receipts
 
-Compiler: `$HOME/.cache/jet-dev/lander3-tmp/gate-p285/tree/Compiler/JetCLI/.jet/build/jet`.
+Compiler: `$JET_STATE_ROOT/lander3-tmp/gate-p285/tree/Compiler/JetCLI/.jet/build/jet`.
 
 Current behavior:
 
