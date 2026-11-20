@@ -1,0 +1,26 @@
+// A loop whose line 15 a debugger can count: `jet run hits.jet -- N` runs
+// it N times (a million by default) and prints how long the loop took, so a
+// logpoint's or a condition's cost per hit is the difference from a plain
+// run, divided by N. The count comes from the arguments, so the compiler
+// cannot work the loop out ahead.
+use {
+    process: core.process
+    time: core.time
+}
+
+count_up: fn(n: Int) -> Int {
+    total := 0
+    loop i in 0..<n {
+        step: i % 7
+        total += step
+    }
+    total
+}
+
+run: fn() {
+    count: Int.parse(process.args().get(0) ?? "1000000") ?? 1000000
+    started: time.start()
+    total: count_up(count)
+    took: time.elapsed(started).ns
+    print("{count} hits took {took} ns, total {total}")
+}

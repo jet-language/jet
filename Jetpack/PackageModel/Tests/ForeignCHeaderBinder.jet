@@ -158,3 +158,28 @@ pkg_test_cbind_source_parses: fn(source: String) -> Bool Never! {
     plain: pkg_cbind_bind_files("int add(int a, int b);\n", "math", HandleOverlay.empty()) ?? panic("C header must bind")
     assert_eq(plain.metadata, String?{None})
 }
+
+PKG_TEST_MANAGED_CALLBACK_HEADER: "typedef void (*source_callback)(void *ctx, int64_t value);\nvoid *on_data(source_callback callback, void *ctx);\nint64_t emit_async(int64_t value);\nint unsubscribe(void *ctx);\n"
+
+#Test("C binder writes managed callback tasks in the current result type syntax") {
+    result: pkg_test_cbind(PKG_TEST_MANAGED_CALLBACK_HEADER, "source")
+    assert(result.source.contains("    emit_async: fn(value: I64) -> Task<I64 Err!> = \"__jet_ffi_emit_async\"\n"))
+    assert(result.source.contains("    unsubscribe: fn(subscription: &&FfiCallbackRegistration) -> Task<Err!> = \"__jet_ffi_callback_unsubscribe\"\n"))
+    assert(pkg_test_cbind_source_parses(result.source))
+}
+
+#Test("C binder binds a managed unsubscribe's void pointer context and its managed row") {
+    result: pkg_test_cbind(PKG_TEST_MANAGED_CALLBACK_HEADER, "source")
+    assert(result.source.contains("    __jet_native_unsubscribe: fn(ctx: *U8) -> Int = \"unsubscribe\"\n"))
+    assert(result.source.contains("    unsubscribe: fn(subscription: &&FfiCallbackRegistration)"))
+    assert_eq(result.bound, [String]{"on_data", "emit_async", "unsubscribe"})
+    assert_eq(result.skipped.len(), 0)
+}
+
+#Test("C binder keeps the reserved native prefix on managed raw rows") {
+    result: pkg_test_cbind(PKG_TEST_MANAGED_CALLBACK_HEADER, "source")
+    assert(result.source.contains("    __jet_native_on_data: fn(callback: fn(FfiCallbackEvent<I64>)) -> *U8 = \"on_data\"\n"))
+    assert(result.source.contains("    on_data: fn(callback: fn(FfiCallbackEvent<I64>)) -> FfiCallbackRegistration = \"on_data\"\n"))
+    assert(result.source.contains("    __jet_native_emit_async: fn(value: Int) -> Int = \"emit_async\"\n"))
+    assert(!result.source.contains("    _jet_native_"))
+}
