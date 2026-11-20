@@ -25,7 +25,7 @@ I agree with stable logical identity as a direction. I do not agree that the sup
 
 ### Independently rerun evidence
 
-Compiler: `$HOME/.cache/jet-dev/lander3-tmp/gate-p287/tree/Compiler/JetCLI/.jet/build/jet`. Set PATH, NO_COLOR=1 and JET_TOOLCHAIN_ROOT explicitly; unset LD_LIBRARY_PATH. Scratch is `../probes/service-r3/review-r4/`. Its toolchain overlay copies the gate's Service.jet, not a guessed git revision; other modules point to the gate. Appended helpers reproduce the author's refuse/deliver_gate/send_now/call_now implementation without adding a lock. Only the two REVIEWR3 probes and one REVIEWR4 probe ran, not a suite.
+Compiler: `$JET_STATE_ROOT/lander3-tmp/gate-p287/tree/Compiler/JetCLI/.jet/build/jet`. Set PATH, NO_COLOR=1 and JET_TOOLCHAIN_ROOT explicitly; unset LD_LIBRARY_PATH. Scratch is `../probes/service-r3/review-r4/`. Its toolchain overlay copies the gate's Service.jet, not a guessed git revision; other modules point to the gate. Appended helpers reproduce the author's refuse/deliver_gate/send_now/call_now implementation without adding a lock. Only the two REVIEWR3 probes and one REVIEWR4 probe ran, not a suite.
 
 Sequential rerun: before 10; handoff 2; today's old call Stale; call_now 20; rollback 1; call_now 30. Early refusal returns [early]. Partitioned pinned shard returns [a, b], another worker answers 105, reconciliation then answers 2. Foreign send returns [x]. Handler failure returns no message. Old drain address is Stale; draining the current id then calling returns [late]. Both original shape probes pass.
 

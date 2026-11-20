@@ -515,6 +515,25 @@ trap_process_stop: fn(code: I64, message: I64, message_len: I64) {
     data: rt_text_data(message)
     length: rt_text_len(message)
     trap_stop(I64{1}, data, length, I64{0}, I64{0})
+    trap_coded_report(code, data, length, false)
+}
+
+// The stop of a wait cycle that holds the root (WaitCycle.jet
+// wait_cycle_stop): the registered deadlock row, whose `-->` line is the
+// root's own waiting line (the innermost frame outside Core) rather than
+// the Core wait it blocked in, then the cycle's task lines in `message`.
+trap_deadlock_stop: fn(message: I64) {
+    data: rt_text_data(message)
+    length: rt_text_len(message)
+    trap_stop(I64{1}, data, length, I64{0}, I64{0})
+    trap_coded_report(rt_static_text("E3006"), data, length, true)
+}
+
+// A stop of the registered row `code` past the stop door, with the
+// message's `length` bytes at `data`. The first line of the message is the
+// row's `what`; when `located`, the stopping task's innermost frame outside
+// Core follows it as the `-->` line, before the message's other lines.
+trap_coded_report: fn(code: I64, data: I64, length: I64, located: Bool) {
     code_data: rt_text_data(code)
     code_length: rt_text_len(code)
     word_length: if (code_length > I64{8}) -> I64{8} else -> code_length
@@ -539,8 +558,18 @@ trap_process_stop: fn(code: I64, message: I64, message_len: I64) {
         return
     }
     trap_coded_head(word)
-    trap_write(data, length)
+    first := length
+    if located {
+        first = I64{0}
+        loop first < length && host_u8_get(data, first) != (I64{10}) -> first += I64{1}
+    }
+    trap_write(data, first)
     trap_msg_newline()
+    if (located && !fault_frames_off()) { _ := trap_user_location(false) }
+    if (first < length) {
+        trap_write(wrapping(data + first + I64{1}), length - first - I64{1})
+        trap_msg_newline()
+    }
     trap_coded_footer(word)
     trap_exit(trap_coded_exit(word))
 }

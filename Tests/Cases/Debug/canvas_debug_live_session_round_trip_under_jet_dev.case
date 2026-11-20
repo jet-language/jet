@@ -1,0 +1,25 @@
+# One Canvas debug session on `jet dev`'s O0 build of the entry, from Run in
+# the Debug view to its end, every step a pointer gesture or a key the page
+# receives: breakpoints and a watch kept and sent as source spans at the
+# shown revision, the session in the selector and the liveness chip,
+# Continue, Step and Next with the stack, the locals, the values on pins and
+# wires, the active node and the wire pulse, an unknown command refused with
+# the session kept live, a typed backtrace in the console, the run finished,
+# the ended session and a request from another revision refused, kept
+# breakpoints from another revision or outside the source held stale, and
+# the source never changed. Tools/CanvasTest/Run.jet `scenario` serves the
+# program with `jet dev --canvas` and checks each answer the page received
+# and what it drew (Tools/CanvasTest/DebugScenarios.jet).
+requires: os-name:linux
+requires: tool:chromium
+requires: tool:chromedriver
+fixture: CanvasDebugValuesAtBreakpoint.fixture
+env: NO_COLOR=1
+env: JET_PROJECT_ROOT={work}
+env: JET_BIN={jet}
+env: TMPDIR={scratch}
+step: jetpack browser lock chromium --binary {tool:chromium} --version 152.0.7977.64 --protocol bidi-2025.5 --driver {tool:chromedriver}
+exit: 0
+step: jet run --allow=Env,Exec,FS,IO,Net,Time {root}/Tools/CanvasTest/Run.jet -- scenario --scenario debug_live_session_round_trip --source jet_debug_canvas_values_at_breakpoint.jet
+exit: 0
+stdout: ~ "PASS chromium debug_live_session_round_trip" # the scenario's one pass line; it fails on the first request, answer or drawing the session doesn't show

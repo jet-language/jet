@@ -140,9 +140,9 @@ The known fc8 defect is already owned by #6048 c5. Its particular printed interl
 Commands used the supplied environment:
 
 ```sh
-export PATH="$HOME/.cache/jet-dev/lander3-tmp/gate-p277/tree/Compiler/JetCLI/.jet/build:$PATH"
+export PATH="$JET_STATE_ROOT/lander3-tmp/gate-p277/tree/Compiler/JetCLI/.jet/build:$PATH"
 export NO_COLOR=1
-export JET_TOOLCHAIN_ROOT="$HOME/.cache/jet-dev/lander3-tmp/gate-p277/tree"
+export JET_TOOLCHAIN_ROOT="$JET_STATE_ROOT/lander3-tmp/gate-p277/tree"
 jet run <program.jet>
 jet "$REPO/Tools/Agent/Ballots/Validate.jet" D-FNVAL-COPY1.r2.json D-CALLBACK-ONCE1.r2.json
 ```

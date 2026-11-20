@@ -1,0 +1,10 @@
+// The main task receives from a channel whose only Sender it holds itself,
+// a wait cycle of one task: the program stops with the deadlock report, at
+// the main task's receive rather than a place in Core, and not as a panic.
+run: fn() {
+    { sender: tx, receiver: rx }: channel<Int>()
+    got: rx.receive() ?? -1
+    tx.send(got) ?? print("refused")
+    print("received {got}")
+}
+// @run_cli

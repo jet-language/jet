@@ -182,6 +182,26 @@ trap_build_footer_e2809: fn(builder: I64) {
     jet_rt_string_builder_push(builder, trap_footer_e2809_text())
 }
 
+// E3006 Why: Each task of the cycle waits for the next one: to join it, to edit a Shared value it holds, or to receive on a channel only it can send on. The main task is one of them, so the program could never finish. The `-->` line is where the main task waits; each line below names a task, what it waits for and where.
+// Fix: Break the cycle: send before you receive, join a task only after the values it waits for are sent, or give one wait a deadline or a `select` with another way out.
+trap_head_e3006_text: fn() -> I64 { rt_static_text("Stop: Jet.Deadlock: ") }
+
+trap_head_e3006: fn() { trap_write_static(trap_head_e3006_text()) }
+
+trap_build_head_e3006: fn(builder: I64) {
+    jet_rt_string_builder_push(builder, trap_head_e3006_text())
+}
+
+trap_footer_e3006_text: fn() -> I64 {
+    rt_static_text(" Why: Each task of the cycle waits for the next one: to join it, to edit a Shared value it holds, or to receive on a channel only it can send on. The main task is one of them, so the program could never finish. The `-->` line is where the main task waits; each line below names a task, what it waits for and where.\n Fix: Break the cycle: send before you receive, join a task only after the values it waits for are sent, or give one wait a deadline or a `select` with another way out.\nMore: jet-lang.dev/e/Jet.Deadlock\n")
+}
+
+trap_footer_e3006: fn() { trap_write_static(trap_footer_e3006_text()) }
+
+trap_build_footer_e3006: fn(builder: I64) {
+    jet_rt_string_builder_push(builder, trap_footer_e3006_text())
+}
+
 // E3012 Why: The call stack kept growing without reaching a safe return — with Jet file, line, and source context
 // Fix: End the recursion or make progress toward a base case, or give deep work more stack with `task.group deep(stack: bytes)`.
 trap_head_e3012_text: fn() -> I64 { rt_static_text("Stop: Jet.StackOverflow: ") }
@@ -203,7 +223,7 @@ trap_build_footer_e3012: fn(builder: I64) {
 }
 
 trap_coded_registered: fn(code: I64) -> Bool {
-    code == I64{232753738309} || code == I64{224147288645} || code == I64{228442255941} || code == I64{241327157829} || code == I64{245622125125} || code == I64{215573607237}
+    code == I64{232753738309} || code == I64{224147288645} || code == I64{228442255941} || code == I64{241327157829} || code == I64{245622125125} || code == I64{232736699205} || code == I64{215573607237}
 }
 
 trap_coded_head: fn(code: I64) {
@@ -213,6 +233,7 @@ trap_coded_head: fn(code: I64) {
         (code == I64{228442255941}) -> trap_head_e2805()
         (code == I64{241327157829}) -> trap_head_e2808()
         (code == I64{245622125125}) -> trap_head_e2809()
+        (code == I64{232736699205}) -> trap_head_e3006()
         else -> trap_head_e3012()
     }
 }
@@ -224,6 +245,7 @@ trap_coded_footer: fn(code: I64) {
         (code == I64{228442255941}) -> trap_footer_e2805()
         (code == I64{241327157829}) -> trap_footer_e2808()
         (code == I64{245622125125}) -> trap_footer_e2809()
+        (code == I64{232736699205}) -> trap_footer_e3006()
         else -> trap_footer_e3012()
     }
 }

@@ -364,10 +364,12 @@ wait_cycle_site: fn() -> I64 {
 
 // Stops the running task with the deadlock delivered to it: adds its own
 // line's site, waits until every task of the cycle has added its own, then
-// publishes the whole cycle as a panic (a root's ends the process). When
-// the cycle holds the root, whose stop ends the process, each other task of
-// it first waits for that stop's dump (PerfSamples.jet perf_flight_await),
-// so an observed run's dump holds every task of the cycle where it waited.
+// publishes the whole cycle as a panic. The root's stop ends the process
+// with the registered deadlock report at its own waiting line
+// (Trap.jet trap_deadlock_stop). When the cycle holds the root, each other
+// task of it first waits for that stop's dump (PerfSamples.jet
+// perf_flight_await), so an observed run's dump holds every task of the
+// cycle where it waited.
 wait_cycle_stop: fn(control: I64) {
     record: sync_load(wrapping(control + I64{184}))
     length: sync_load(wrapping(record + I64{8}))
@@ -388,16 +390,16 @@ wait_cycle_stop: fn(control: I64) {
             left = sync_load(remaining)
         }
     }
-    if (!scheduler_control_is_root(control) && wait_cycle_holds_root(record)) {
-        perf_flight_await()
-    }
+    root: scheduler_control_is_root(control)
+    if (!root && wait_cycle_holds_root(record)) { perf_flight_await() }
     message: jet_rt_string_builder_new()
     // A joiner reads a failed task's reason as its first line unless the
     // reason reads as a panic (Task.jet task_panic_message), so a task's
     // stop says so and its joiner gets every line of the cycle. The root's
-    // stop header already says `panic: `.
-    if !scheduler_control_is_root(control) -> wait_cycle_push(message, rt_static_text("panic: "))
-    wait_cycle_push(message, rt_static_text("deadlock: tasks wait on each other"))
+    // first line is its report's `what`.
+    if root -> wait_cycle_push(message, rt_static_text("Tasks wait on each other")) else {
+        wait_cycle_push(message, rt_static_text("panic: deadlock: tasks wait on each other"))
+    }
     at = I64{0}
     loop at < length {
         entry: wait_cycle_entry(record, at)
@@ -415,7 +417,9 @@ wait_cycle_stop: fn(control: I64) {
     sync_store(wrapping(control + I64{184}), I64{0})
     sync_mutex_unlock(lock)
     wait_cycle_release(record)
-    jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
+    if root -> trap_deadlock_stop(message) else {
+        jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
+    }
     jet_rt_string_drop(message)
 }
 

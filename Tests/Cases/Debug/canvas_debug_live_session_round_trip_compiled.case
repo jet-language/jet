@@ -1,0 +1,22 @@
+# The Canvas debug session round trip on a compiled run: `jet run
+# --record=canvas` of the entry, replayed with Replay in the Debug view of
+# `jet dev --canvas`. The same steps as on `jet dev`'s O0 build
+# (canvas_debug_live_session_round_trip_under_jet_dev.case), every one a
+# pointer gesture or a key the page receives, with the selector and the
+# liveness chip naming the compiled run replay, and a typed `why total`
+# naming the write the recording holds. Tools/CanvasTest/Run.jet `scenario
+# --record canvas` records the program, serves it and checks each answer the
+# page received and what it drew (Tools/CanvasTest/DebugScenarios.jet).
+requires: os-name:linux
+requires: tool:chromium
+requires: tool:chromedriver
+fixture: CanvasDebugValuesAtBreakpoint.fixture
+env: NO_COLOR=1
+env: JET_PROJECT_ROOT={work}
+env: JET_BIN={jet}
+env: TMPDIR={scratch}
+step: jetpack browser lock chromium --binary {tool:chromium} --version 152.0.7977.64 --protocol bidi-2025.5 --driver {tool:chromedriver}
+exit: 0
+step: jet run --allow=Env,Exec,FS,IO,Net,Time {root}/Tools/CanvasTest/Run.jet -- scenario --scenario debug_compiled_session_round_trip --source jet_debug_canvas_values_at_breakpoint.jet --record canvas
+exit: 0
+stdout: ~ "PASS chromium debug_compiled_session_round_trip" # the scenario's one pass line; it fails on the first request, answer or drawing the replayed session doesn't show

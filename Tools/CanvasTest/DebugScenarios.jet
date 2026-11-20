@@ -499,10 +499,10 @@ draws_no_value: fn(pin: String) -> String {
 }
 
 // A JavaScript test that the session selector lists the sessions `ids`, each
-// named by its engine, with `shown` picked and shown.
-lists_sessions: fn(ids: [String], shown: String) -> String {
+// named by its engine `engine`, with `shown` picked and shown.
+lists_sessions: fn(ids: [String], shown: String, engine: String) -> String {
     labels := [String]{}
-    loop id in ids -> labels.push("{id} · jet dev O0")
+    loop id in ids -> labels.push("{id} · {engine}")
     "(() => {{ const picker = document.getElementById('debug-session'); return Array.from(picker.options).map((o) => o.textContent).join(' | ') === {q(labels.join(" | "))} && picker.value === {q(shown)} && s.debugSessionId === {q(shown)} && s.debugSessions.length === {ids.len()}; }})()"
 }
 
@@ -548,8 +548,63 @@ debug_overlay: fn(c: Ctx) Failure! {
     stopped: stop_at(c, target)
     first: text(at(stopped, "request.session_id"))
     wait_debug(c, "{draws_value(":value:get:total:output:total", "4")} && s.debugValues.wires.length === 1 && {draws_no_value(":binding:output:total")} && {draws_no_value(":binding:output:n")} && {draws_no_value(":value:get:n:output:n")}", "total = 4 on its read and wire at line 9, and nothing the stop didn't read")
-    wait_debug(c, lists_sessions([String]{first}, first), "the one session in the selector")
+    wait_debug(c, lists_sessions([String]{first}, first, "jet dev O0"), "the one session in the selector")
+    binding: watch_total(c, revision, first)
+    next_pulses(c, first)
 
+    open_debug_view(c)
+    wait_debug(
+        c,
+        "{shows_row("#debug-watches-rows .row", "total | 4 | Int")} && document.querySelector('#debug-watches-rows .row').dataset.anchor === {q("{binding.anchor}@{revision}")} && document.getElementById('debug-view-state').textContent === 'Paused · line 10 · jet dev O0'",
+        "the watch in the Debug view",
+    )
+    sent_run: debug_sent(c)
+    click_element(c, "document.getElementById('debug-view-run')", "Run")
+    opened: debug_answer(c, sent_run, "Run")
+    second: text(at(opened, "response.session.id"))
+    if text(at(opened, "request.session_id")) != "" || second == "" || second == first || text(at(opened, "response.session.state")) != "running" {
+        return Err(fail_with("Run must open a second running session beside {first}: {short_text(js(at(opened, "response")), 800)}"))
+    }
+    wait_debug(c, lists_sessions([String]{first, second}, second, "jet dev O0"), "both sessions in the selector")
+
+    open_debug_controls(c)
+    sent_pick: debug_sent(c)
+    click_element(c, "document.getElementById('debug-session')", "the session selector")
+    press(c, "ArrowUp")
+    press(c, "Enter")
+    picked: debug_answer(c, sent_pick, "the session picked in the selector")
+    if text(at(picked, "request.session_id")) != first || js(at(picked, "request.commands")) != "[]" || int(at(picked, "response.overlay.active_line")) != 10 {
+        return Err(fail_with("picking {first} must show it again at line 10: {short_text(js(at(picked, "request")), 400)} {short_text(js(at(picked, "response.overlay")), 800)}"))
+    }
+    wait_debug(c, "{lists_sessions([String]{first, second}, first, "jet dev O0")} && document.getElementById('debug-view-state').textContent === 'Paused · line 10 · jet dev O0'", "the first session shown again")
+
+    stops: int(eval(c, "window.__debugProof.requests.filter((e) => e.request.stop).length"))
+    sent_stop: debug_sent(c)
+    click_element(c, "document.getElementById('debug-view-stop')", "Stop")
+    shown: debug_answer(c, sent_stop, "the session shown after the stop")
+    wait_debug(c, "window.__debugProof.requests.filter((e) => e.request.stop).length > {stops} && window.__debugProof.requests.filter((e) => e.request.stop)[{stops}].status > 0", "the answer to Stop")
+    stop: eval(c, "window.__debugProof.requests.filter((e) => e.request.stop)[{stops}]")
+    if text(at(stop, "request.session_id")) != first || text(at(stop, "response.session.state")) != "stopped" || text(at(shown, "request.session_id")) != second {
+        return Err(fail_with("Stop must stop {first} and show {second}: {js(at(stop, "request"))} then {js(at(shown, "request"))}"))
+    }
+    wait_debug(c, lists_sessions([String]{second}, second, "jet dev O0"), "the other session shown")
+    debug_stop(c, "debug-view-stop")
+    wait_debug(c, "(() => {{ const p = window.__jetCanvasDebugPulse; return !p.moving && p.wire_ids.length === 0 && !p.node_id && s.debugValues.pins.length === 0 && document.getElementById('debug-session').disabled; }})()", "no pulse and no value once every session stopped")
+}
+
+// A JavaScript expression: the anchors of the page's kept `kind`
+// (`breakpoints` or `watches`) for the shown source, each `span@revision`,
+// as one JSON text.
+kept_anchors: fn(kind: String) -> String {
+    "JSON.stringify(((JSON.parse(localStorage.getItem('jet.canvas.debug:' + (s.doc.source_id || 'source')) || 'null') || {{}}).{kind} || []).map((b) => b.anchor + '@' + b.revision))"
+}
+
+// At the stop on line 9 of `run` in session `session`, at revision
+// `revision`: select the binding of `total` and click Watch in Debug
+// Controls. The watch goes to the session anchored to the revision, reads
+// total = 4, and the page keeps it with the binding's source span; the
+// binding.
+watch_total: fn(c: Ctx, revision: String, session: String) -> DebugTarget Failure! {
     found: eval(
         c,
         """
@@ -572,24 +627,28 @@ debug_overlay: fn(c: Ctx) Failure! {
     sent: debug_sent(c)
     click_element(c, "document.getElementById('debug-watch')", "Watch")
     watched: debug_answer(c, sent, "Watch")
-    if js(at(watched, "request.watches")) != js(Dyn.Array([Dyn]{Dyn.Text("total@{revision}")})) || text(at(watched, "request.session_id")) != first {
-        return Err(fail_with("Watch must send total at revision {revision} in session {first}: {js(at(watched, "request"))}"))
+    if js(at(watched, "request.watches")) != js(Dyn.Array([Dyn]{Dyn.Text("total@{revision}")})) || text(at(watched, "request.session_id")) != session {
+        return Err(fail_with("Watch must send total at revision {revision} in session {session}: {js(at(watched, "request"))}"))
     }
     if !holds_local(at(watched, "response.overlay.watches"), "total", "Int", "4") {
         return Err(fail_with("the watch must read total = 4: {js(at(watched, "response.overlay.watches"))}"))
     }
-    wait_debug(
-        c,
-        "(() => {{ const kept = JSON.parse(localStorage.getItem('jet.canvas.debug:' + (s.doc.source_id || 'source')) || 'null'); return !!kept && kept.watches.length === 1 && kept.watches[0].name === 'total' && kept.watches[0].anchor === {q(binding.anchor)} && kept.watches[0].revision === {q(revision)}; }})()",
-        "the watch kept with the span {binding.anchor} and revision {revision}",
-    )
+    wait_debug(c, "{kept_anchors("watches")} === {q(js(Dyn.Array([Dyn]{Dyn.Text("{binding.anchor}@{revision}")})))}", "the watch kept with the span {binding.anchor} and revision {revision}")
+    Ok(binding)
+}
 
+// From the stop on line 9 of `run` in session `session`, click Next in Debug
+// Controls: it stops on line 10, reached by a wire, and the reads and writes
+// of `total` before line 10, which the arm writes, show nothing. The pulse
+// moves along exactly the wires the Next took and around its node, over the
+// graph, and lets the pointer through. The Next's request and answer.
+next_pulses: fn(c: Ctx, session: String) -> Dyn Failure! {
     open_debug_controls(c)
     stepped: debug_gesture(c, "debug-next", "[\"n\"]")
     path: js(at(stepped, "response.overlay.wire_path"))
     active: text(at(stepped, "response.overlay.active_node_id"))
-    if int(at(stepped, "response.overlay.active_line")) != 10 || items(at(stepped, "response.overlay.wire_path")).len() == 0 || active == "" {
-        return Err(fail_with("Next must stop on line 10, reached by a wire: {short_text(js(at(stepped, "response.overlay")), 1200)}"))
+    if text(at(stepped, "request.session_id")) != session || int(at(stepped, "response.overlay.active_line")) != 10 || items(at(stepped, "response.overlay.wire_path")).len() == 0 || active == "" {
+        return Err(fail_with("Next must stop session {session} on line 10, reached by a wire: {short_text(js(at(stepped, "response.overlay")), 1200)}"))
     }
     wait_debug(c, "{draws_no_value(":value:get:total:output:total")} && {draws_no_value(":binding:output:total")}", "no value on the reads and writes of total before line 10")
     wait_debug(
@@ -601,43 +660,226 @@ debug_overlay: fn(c: Ctx) Failure! {
     if text(at(pulse, "error")) != "" || int(at(pulse, "frames")) < 2 || !truthy(at(pulse, "moved")) || !truthy(at(pulse, "inert")) || !truthy(at(pulse, "covers")) {
         return Err(fail_with("the pulse must move over the graph and let the pointer through: {js(pulse)}"))
     }
+    Ok(stepped)
+}
+
+// --- the live session round trip ------------------------------------------------------
+
+// The engine a round trip debugs on: its name in the selector, the liveness
+// chip and the Debug view; the tier its answers name; and the `jet run
+// --record` recording it replays, "" for `jet dev`'s O0 build of the entry.
+DebugEngine: struct {
+    label: String,
+    tier: String,
+    recording: String,
+}
+
+// The round trip on `jet dev`'s O0 build of the entry, opened with Run in
+// the Debug view.
+debug_live_session_round_trip: fn(c: Ctx) Failure! {
+    debug_round_trip(c, DebugEngine{label: "jet dev O0", tier: "native", recording: ""})
+}
+
+// The round trip on the compiled run `jet run --record=canvas` recorded
+// (Run.jet `scenario --record canvas`), opened with Replay in the Debug view;
+// the recording also answers `why total` with the write that set it.
+debug_compiled_session_round_trip: fn(c: Ctx) Failure! {
+    debug_round_trip(c, DebugEngine{label: "compiled run replay", tier: "native-recorded", recording: "canvas"})
+}
+
+// On the program of Tests/Cases/Debug/CanvasDebugValuesAtBreakpoint.fixture,
+// one debug session on `engine` from its first request to its end, every
+// step a pointer gesture or a key the page receives:
+// - breakpoints set from the context menus of `y: x * 2` in `scale` and `if
+//   total > 3` in `run` are kept and sent as their source spans at the shown
+//   revision (`span@sha256-…`); the session opened holds both as valid, and
+//   the selector and the liveness chip name it and its engine;
+// - Continue stops in `scale` with its node active, both frames on the stack
+//   and x = 2; Step moves on in `scale`; Continue stops at the branch in
+//   `run`, where the read of `total` and its wire show 4 and nothing the stop
+//   didn't read shows a value;
+// - Watch on the binding of `total` is sent and kept at that span and
+//   revision and reads 4; Next moves the active node to line 10 and the pulse
+//   along exactly the wires it took;
+// - a command the debugger doesn't know, typed in the Debug view's console,
+//   is refused as unsupported and the session is kept live: a typed
+//   `backtrace` answers in it and the console shows the trace; the Debug
+//   view shows the stack, the locals and the watch;
+// - Continue runs the program out: the session is finished, with no active
+//   line and no value drawn, and the console shows the program's output;
+// - the ended session refuses a command, and a request drawn on another
+//   revision is refused as a conflict;
+// - reloaded with a breakpoint kept from an earlier revision and one whose
+//   span the source doesn't have, the page holds the first as stale, sends
+//   all four and the new session holds those two as stale; Stop ends it and
+//   the selector lists none;
+// - the source is never changed.
+debug_round_trip: fn(c: Ctx, engine: DebugEngine) Failure! {
+    debug_prepare(c)
+    before: source(c)
+    revision: text(at(state(c), "doc.revision"))
+    source_id: text(at(state(c), "doc.source_id"))
+    in_scale: debug_target(c, "scale", 2)
+    node_menu_pick(c, in_scale, "Set Breakpoint")
+    wait_debug(c, "{kept_anchors("breakpoints")} === {q(js(Dyn.Array([Dyn]{Dyn.Text("{in_scale.anchor}@{revision}")})))}", "the breakpoint in scale kept at its span and revision")
+    in_run: debug_target(c, "run", 9)
+    node_menu_pick(c, in_run, "Set Breakpoint")
+    held: js(Dyn.Array([Dyn]{Dyn.Text("{in_scale.anchor}@{revision}"), Dyn.Text("{in_run.anchor}@{revision}")}))
+    wait_debug(c, "{kept_anchors("breakpoints")} === {q(held)}", "both breakpoints kept at their spans and revision")
+
+    opened: open_round_trip(c, engine)
+    session: text(at(opened, "response.session.id"))
+    marks: items(at(opened, "response.overlay.breakpoints"))
+    if js(at(opened, "request.breakpoint_spans")) != held || marks.len() != 2 || text(at(marks[0], "state")) != "valid" || int(at(marks[0], "line")) != 2 || text(at(marks[1], "state")) != "valid" || int(at(marks[1], "line")) != 9 {
+        return Err(fail_with("the session must open with both breakpoints, {held}, valid on lines 2 and 9: {js(at(opened, "request"))} {js(at(opened, "response.overlay.breakpoints"))}"))
+    }
+    if session == "" || text(at(opened, "response.session.state")) != "running" || text(at(opened, "response.session.tier")) != engine.tier || is_null(at(opened, "response.overlay.active_line")) {
+        return Err(fail_with("the session must open running on the {engine.tier} tier at a line: {short_text(js(at(opened, "response")), 1200)}"))
+    }
+    wait_debug(c, "{lists_sessions([String]{session}, session, engine.label)} && s.debugLiveness === 'Runtime live · {engine.label}'", "the session in the selector and the liveness chip")
+
+    open_graph_view(c)
+    open_debug_controls(c)
+    in_callee: debug_gesture(c, "debug-continue", "[\"c\"]")
+    stack: frames(in_callee)
+    if text(at(in_callee, "request.session_id")) != session || int(at(in_callee, "response.overlay.active_line")) != 2 || text(at(in_callee, "response.overlay.active_node_id")) != in_scale.node_id || !traced(in_callee, "Breakpoint hit") {
+        return Err(fail_with("Continue must stop session {session} at the breakpoint in scale, node {in_scale.node_id}: {short_text(js(at(in_callee, "response.overlay")), 1200)}"))
+    }
+    if stack.len() != 2 || !stack[0].starts_with("#0 scale() ") || !stack[1].starts_with("#1 run() ") || !holds_local(at(in_callee, "response.overlay.locals"), "x", "Int", "2") {
+        return Err(fail_with("the stop in scale must show scale, then run at the call, and x = 2: {stack.join(" | ")} {js(at(in_callee, "response.overlay.locals"))}"))
+    }
+    wait_debug(c, "s.debugLiveness === 'Runtime live · {engine.label}' && s.selectedNodeId === {q(in_scale.node_id)} && document.body.classList.contains('is-debug-active')", "the stop in scale shown live")
+    stepped: debug_gesture(c, "debug-step", "[\"s\"]")
+    if text(at(stepped, "request.session_id")) != session || int(at(stepped, "response.overlay.active_line")) != 3 || frames(stepped).len() != 2 {
+        return Err(fail_with("Step must move session {session} to line 3 in scale: {short_text(js(at(stepped, "response.overlay")), 1200)}"))
+    }
+    at_branch: debug_gesture(c, "debug-continue", "[\"c\"]")
+    if text(at(at_branch, "request.session_id")) != session || int(at(at_branch, "response.overlay.active_line")) != 9 || text(at(at_branch, "response.overlay.active_node_id")) != in_run.node_id || frames(at_branch).len() != 1 || !holds_local(at(at_branch, "response.overlay.locals"), "total", "Int", "4") {
+        return Err(fail_with("Continue must stop session {session} at the branch in run, with total = 4: {short_text(js(at(at_branch, "response.overlay")), 1200)}"))
+    }
+    wait_debug(c, "{draws_value(":value:get:total:output:total", "4")} && s.debugValues.wires.length === 1 && {draws_no_value(":binding:output:total")} && {draws_no_value(":binding:output:n")}", "total = 4 on its read and wire at line 9, and nothing the stop didn't read")
+    binding: watch_total(c, revision, session)
+    on_arm: next_pulses(c, session)
 
     open_debug_view(c)
+    refused: debug_typed(c, "teleport")
+    if int(at(refused, "status")) != 409 || text(at(refused, "response.kind")) != "unsupported" || text(at(refused, "request.session_id")) != session {
+        return Err(fail_with("a command the debugger doesn't know must be refused as unsupported in session {session}: HTTP {int(at(refused, "status"))} {short_text(js(at(refused, "response")), 800)}"))
+    }
+    wait_debug(c, "{lists_sessions([String]{session}, session, engine.label)} && s.lastToast.includes('`teleport` is not one of') && s.debugLiveness === 'Runtime live · {engine.label}'", "the refusal shown with the session kept live")
+    traced_back: debug_typed(c, "backtrace")
+    if int(at(traced_back, "status")) != 200 || text(at(traced_back, "request.session_id")) != session || int(at(traced_back, "response.overlay.active_line")) != 10 || !traced(traced_back, "#0  run()  at ") {
+        return Err(fail_with("backtrace must answer in the kept session {session} at line 10: HTTP {int(at(traced_back, "status"))} {short_text(js(at(traced_back, "response")), 1200)}"))
+    }
+    wait_debug(c, "{logs("#0  run()  at ")}", "the backtrace in the Debug view's console")
+    if engine.recording != "" {
+        asked: debug_typed(c, "why total")
+        if int(at(asked, "status")) != 200 || js(at(asked, "request.commands")) != "[\"why total\"]" || !traced(asked, "total = 4, set at ") {
+            return Err(fail_with("`why total` must name the write of 4 the recording holds: HTTP {int(at(asked, "status"))} {short_text(js(at(asked, "response.overlay.trace")), 1200)}"))
+        }
+        wait_debug(c, logs("total = 4, set at "), "the answer to why in the Debug view's console")
+    }
     wait_debug(
         c,
-        "{shows_row("#debug-watches-rows .row", "total | 4 | Int")} && document.querySelector('#debug-watches-rows .row').dataset.anchor === {q("{binding.anchor}@{revision}")} && document.getElementById('debug-view-state').textContent === 'Paused · line 10 · jet dev O0'",
-        "the watch in the Debug view",
+        "{shows_row("#debug-stack-rows .row", frames(on_arm)[0])} && {shows_row("#debug-locals-rows .row", "total | 4 | Int")} && {shows_row("#debug-watches-rows .row", "total | 4 | Int")} && document.querySelector('#debug-watches-rows .row').dataset.anchor === {q("{binding.anchor}@{revision}")} && document.getElementById('debug-view-state').textContent === 'Paused · line 10 · {engine.label}'",
+        "the stack, the locals and the watch in the Debug view",
     )
-    sent_run: debug_sent(c)
-    click_element(c, "document.getElementById('debug-view-run')", "Run")
-    opened: debug_answer(c, sent_run, "Run")
-    second: text(at(opened, "response.session.id"))
-    if text(at(opened, "request.session_id")) != "" || second == "" || second == first || text(at(opened, "response.session.state")) != "running" {
-        return Err(fail_with("Run must open a second running session beside {first}: {short_text(js(at(opened, "response")), 800)}"))
-    }
-    wait_debug(c, lists_sessions([String]{first, second}, second), "both sessions in the selector")
 
-    open_debug_controls(c)
-    sent_pick: debug_sent(c)
-    click_element(c, "document.getElementById('debug-session')", "the session selector")
-    press(c, "ArrowUp")
-    press(c, "Enter")
-    picked: debug_answer(c, sent_pick, "the session picked in the selector")
-    if text(at(picked, "request.session_id")) != first || js(at(picked, "request.commands")) != "[]" || int(at(picked, "response.overlay.active_line")) != 10 {
-        return Err(fail_with("picking {first} must show it again at line 10: {short_text(js(at(picked, "request")), 400)} {short_text(js(at(picked, "response.overlay")), 800)}"))
+    finished: debug_gesture(c, "debug-view-continue", "[\"continue\"]")
+    if text(at(finished, "request.session_id")) != session || text(at(finished, "response.session.state")) != "finished" || text(at(finished, "response.overlay.debug_overlay")) != "finished" || !is_null(at(finished, "response.overlay.active_line")) || !traced(finished, "total is 5") {
+        return Err(fail_with("Continue must run session {session} out, with no active line: {short_text(js(at(finished, "response")), 1200)}"))
     }
-    wait_debug(c, "{lists_sessions([String]{first, second}, first)} && document.getElementById('debug-view-state').textContent === 'Paused · line 10 · jet dev O0'", "the first session shown again")
+    wait_debug(c, "s.debugLiveness === 'Runtime finished · {engine.label}' && !document.body.classList.contains('is-debug-active') && s.debugValues.pins.length === 0 && s.debugValues.wires.length === 0 && {logs("total is 5")}", "the finished run shown with no value drawn")
 
+    debug_url: "http://127.0.0.1:{c.port}/__jet_canvas/debug?session={c.session}"
+    continued := [{key: String, value: String}]{{key: "session_id", value: session.copy()}}
+    opener := [{key: String, value: String}]{}
+    if engine.recording != "" {
+        continued.push({key: "tier", value: engine.tier.copy()})
+        opener.push({key: "tier", value: engine.tier.copy()})
+        opener.push({key: "recording", value: engine.recording.copy()})
+    }
+    ended: canvas_post(debug_url, c.session, debug_request(revision, source_id, continued, [Int]{}, [String]{"n"}))
+    if ended.status != 409 || text(at(ended.tree, "canvas.kind")) != "session" {
+        return Err(fail_with("the ended session {session} must refuse a command: HTTP {ended.status} {short_text(ended.body, 600)}"))
+    }
+    drawn_before: canvas_post(debug_url, c.session, debug_request("sha256-stale", source_id, opener, [Int]{}, [String]{"s"}))
+    if drawn_before.status != 409 || text(at(drawn_before.tree, "canvas.kind")) != "conflict" {
+        return Err(fail_with("a request drawn on another revision must be refused as a conflict: HTTP {drawn_before.status} {short_text(drawn_before.body, 600)}"))
+    }
+
+    eval(c, "(() => {{ const s = window.__jetCanvasTest; const key = 'jet.canvas.debug:' + (s.doc.source_id || 'source'); const kept = JSON.parse(localStorage.getItem(key)); kept.breakpoints.push({{ anchor: '999999:1000000', revision: {q(revision)} }}, {{ anchor: {q(in_scale.anchor)}, revision: 'sha256-drawn-before' }}); localStorage.setItem(key, JSON.stringify(kept)); return true; }})()")
+    if open_canvas(c) == .Err(problem) -> return Err(fail_with("the reload: {problem.message}"))
+    stale: js(Dyn.Array([Dyn]{Dyn.Text("{in_scale.anchor}@{revision}"), Dyn.Text("{in_run.anchor}@{revision}"), Dyn.Text("999999:1000000@{revision}"), Dyn.Text("{in_scale.anchor}@sha256-drawn-before")}))
+    reopened: open_round_trip(c, engine)
+    held_again: items(at(reopened, "response.overlay.breakpoints"))
+    states := [String]{}
+    loop mark in held_again -> states.push("{text(at(mark, "anchor"))}={text(at(mark, "state"))}")
+    if js(at(reopened, "request.breakpoint_spans")) != stale || held_again.len() != 4 || states.join(" ") != "=valid =valid 999999:1000000@{revision}=stale {in_scale.anchor}@sha256-drawn-before=stale" {
+        return Err(fail_with("the reloaded page must send the four kept breakpoints, {stale}, and the session hold the out-of-span and earlier-revision ones as stale: {js(at(reopened, "request.breakpoint_spans"))} {states.join(" ")}"))
+    }
+    wait_debug(c, "window.__jetCanvasDebugState.staleBreakpoints.length === 1", "the breakpoint from the earlier revision held stale")
+    second: text(at(reopened, "response.session.id"))
     stops: int(eval(c, "window.__debugProof.requests.filter((e) => e.request.stop).length"))
-    sent_stop: debug_sent(c)
     click_element(c, "document.getElementById('debug-view-stop')", "Stop")
-    shown: debug_answer(c, sent_stop, "the session shown after the stop")
-    wait_debug(c, "window.__debugProof.requests.filter((e) => e.request.stop).length > {stops} && window.__debugProof.requests.filter((e) => e.request.stop)[{stops}].status > 0", "the answer to Stop")
-    stop: eval(c, "window.__debugProof.requests.filter((e) => e.request.stop)[{stops}]")
-    if text(at(stop, "request.session_id")) != first || text(at(stop, "response.session.state")) != "stopped" || text(at(shown, "request.session_id")) != second {
-        return Err(fail_with("Stop must stop {first} and show {second}: {js(at(stop, "request"))} then {js(at(shown, "request"))}"))
+    wait_debug(
+        c,
+        "(() => {{ const sent = window.__debugProof.requests.filter((e) => e.request.stop); return sent.length > {stops} && sent[{stops}].status === 200 && sent[{stops}].request.session_id === {q(second)} && sent[{stops}].response.session.state === 'stopped' && !s.debugSessionId && s.debugLiveness.startsWith('Runtime idle') && document.getElementById('debug-session').disabled && document.getElementById('debug-session').textContent === 'No live session'; }})()",
+        "the stop of {second} with no session left",
+    )
+    if source(c) != before || text(at(state(c), "doc.revision")) != revision {
+        return Err(fail_with("the debug session must not change the source"))
     }
-    wait_debug(c, lists_sessions([String]{second}, second), "the other session shown")
-    debug_stop(c, "debug-view-stop")
-    wait_debug(c, "(() => {{ const p = window.__jetCanvasDebugPulse; return !p.moving && p.wire_ids.length === 0 && !p.node_id && s.debugValues.pins.length === 0 && document.getElementById('debug-session').disabled; }})()", "no pulse and no value once every session stopped")
+    Ok()
+}
+
+// Open the round trip's session on `engine` from the Debug view: Run for
+// `jet dev`; for a compiled run, the recording typed and Replay reached
+// with Tab and pressed with Enter, as a keyboard user does. The request, a
+// new session with no command, and its answer.
+open_round_trip: fn(c: Ctx, engine: DebugEngine) -> Dyn Failure! {
+    open_debug_view(c)
+    sent: debug_sent(c)
+    if {
+        engine.recording == "" -> {
+            click_element(c, "document.getElementById('debug-view-run')", "Run")
+        }
+        else -> {
+            click_element(c, "document.getElementById('debug-view-recording')", "the recording to replay")
+            type_text(c, engine.recording)
+            press(c, "Tab")
+            wait_debug(c, "document.activeElement && document.activeElement.id === 'debug-view-replay'", "Replay focused after the recording")
+            press(c, "Enter")
+        }
+    }
+    opened: debug_answer(c, sent, "the session opened on {engine.label}")
+    if text(at(opened, "request.session_id")) != "" || text(at(opened, "request.recording")) != engine.recording || js(at(opened, "request.commands")) != "[]" {
+        return Err(fail_with("the {engine.label} session must open with no command: {js(at(opened, "request"))}"))
+    }
+    Ok(opened)
+}
+
+// Switch to the Graph view with a click on its view button.
+open_graph_view: fn(c: Ctx) Failure! {
+    click_element(c, "document.querySelector('[data-view-mode=\"graph\"]')", "the Graph view")
+    wait_debug(c, "document.getElementById('jet-canvas-view').getBoundingClientRect().height > 0", "the Graph view shown")
+}
+
+// Type `typed` into the Debug view's console and press Enter, clicking the
+// console first unless it holds the focus from the last command typed; the
+// request the page sent and its answer, any status.
+debug_typed: fn(c: Ctx, typed: String) -> Dyn Failure! {
+    sent: debug_sent(c)
+    if !eval_bool(c, "document.activeElement && document.activeElement.id === 'debug-console-input'") {
+        click_element(c, "document.getElementById('debug-console-input')", "the Debug view's console")
+    }
+    type_text(c, typed)
+    press(c, "Enter")
+    wait_debug(c, "(() => {{ const sent = window.__debugProof.requests.filter((e) => !e.request.stop); return sent.length > {sent} && sent[{sent}].status > 0; }})()", "the answer to {typed}")
+    eval(c, "window.__debugProof.requests.filter((e) => !e.request.stop)[{sent}]")
+}
+
+// A JavaScript test that a row of the Debug view's console holds `note`.
+logs: fn(note: String) -> String {
+    "Array.from(document.querySelectorAll('#debug-console-log .row')).some((r) => r.textContent.includes({q(note)}))"
 }

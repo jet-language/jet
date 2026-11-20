@@ -11227,6 +11227,29 @@ ContractFailed: struct {
     }
 }
 
+Deadlock: struct {
+    impl Diagnostic {
+        code: "E3006",
+        safety_class: .Soundness,
+        safety_reason: "Every task of the cycle waits for another task of it, so none of them can ever go on.",
+        expert_path: "none: one task of the cycle stops waiting for the others",
+        stage: [.Runtime],
+        meaning: "The main task is in a cycle of tasks that each wait for the next, so the program stops",
+        detail: true,
+        no_fix: .Behavior,
+
+        what: fn(self) -> String { "Tasks wait on each other" }
+
+        why: fn(self) -> String {
+            "Each task of the cycle waits for the next one: to join it, to edit a Shared value it holds, or to receive on a channel only it can send on. The main task is one of them, so the program could never finish. The `-->` line is where the main task waits; each line below names a task, what it waits for and where."
+        }
+
+        fix: fn(self) -> String {
+            "Break the cycle: send before you receive, join a task only after the values it waits for are sent, or give one wait a deadline or a `select` with another way out."
+        }
+    }
+}
+
 ArithmeticOrBoundsFailure: struct {
     msg: String,
 

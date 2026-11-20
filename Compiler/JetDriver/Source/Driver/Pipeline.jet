@@ -4773,16 +4773,20 @@ jet_driver_entry_root_keys: fn(graph: SemaRegistrationGraph, modules: [ModuleID]
 // top-level functions lowering keeps with no keyed call in a checked body
 // (ir_core_lowered_by_name) or finds by the jet_builtins role they fill
 // (sema_core_role), every top-level function of a Core module with foreign
-// rows, which jet_driver_prunable_core_modules leaves rooted, the methods
-// lowering selects by owner type (ir_core_method_lowered_by_owner) and the
-// `__Decoding` reads it selects by target (ir_core_decoding_read).
-jet_driver_core_lowering_roots: fn(graph: SemaRegistrationGraph) -> [String:Bool] Never! {
+// rows, which jet_driver_prunable_core_modules leaves rooted, or of the Core
+// unit under test (`tested`, jet_driver_test_modules: a `jet test` of a Core
+// source, and a debugger's evaluation in a Core frame, whose expression is
+// a function appended to that unit that no body calls), which lowering roots
+// whole, the methods lowering selects by owner type
+// (ir_core_method_lowered_by_owner) and the `__Decoding` reads it selects by
+// target (ir_core_decoding_read).
+jet_driver_core_lowering_roots: fn(graph: SemaRegistrationGraph, tested: [U32:Bool]) -> [String:Bool] Never! {
     roots := [String:Bool]{}
     loop module_row in graph.modules {
         identity: module_row.module_identity
         if !module_is_core(identity) -> next
         identity_text: module_text(graph.module_table, identity)
-        rooted := module_row.foreign_functions.len() > 0
+        rooted := module_row.foreign_functions.len() > 0 || tested.get(identity.id) != None
         loop provider in graph.foreign_providers {
             if provider.module_identity == identity -> rooted = true
         }
@@ -5922,7 +5926,8 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     // and `jet check Core` check every body.
     lowers: request.mode == JetDriverCompileMode.Program || request.mode == JetDriverCompileMode.Test || request.mode == JetDriverCompileMode.Eval || request.mode == JetDriverCompileMode.RootRun
     if lowers && !kg.enabled {
-        registration_graph.core_lowering_roots = Val(jet_driver_core_lowering_roots(registration_graph))
+        tested: if request.core_tests != "" -> jet_driver_test_modules(load, request.core_tests) else -> [U32:Bool]{}
+        registration_graph.core_lowering_roots = Val(jet_driver_core_lowering_roots(registration_graph, tested))
     }
     if registration_graph.internal_problem != None {
         loop diagnostic in registration_graph.diagnostics -> load.diagnostics.push(diagnostic)

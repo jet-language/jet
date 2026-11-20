@@ -413,10 +413,16 @@ semindex_method_fact: fn(ctx: SemWalk, owner: String, function: Func, origin: St
 // ---------------------------------------------------------------------------
 // References (`scoped_ref`, `declaration_ref`).
 
+// The written name at `span` and what it reads. A reference at this span
+// counts only when it reads that name: the compiler's own reads can share
+// the span (a call of a script function reads each script variable it takes
+// at the call's name), and those name other declarations.
 semindex_scoped_ref: fn(name: String, span: Span, ctx: SemWalk) -> SemRef {
     target := SemAnchor?{None}
     loop reference in ctx.references {
-        if reference.span.start != span.start || reference.span.end != span.end -> next
+        if reference.span.start != span.start || reference.span.end != span.end || reference.symbol.name != name {
+            next
+        }
         module_path: ctx.module_paths.get(Int{reference.symbol.module_identity.id}) ?? break
         target = Val(SemAnchor{module_path: module_path, kind: sema_name_reference_kind_text(reference.kind), def_span: reference.symbol.span, semantic_identity: None})
         break
