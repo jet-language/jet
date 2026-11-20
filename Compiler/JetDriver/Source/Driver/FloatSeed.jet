@@ -11,6 +11,8 @@ use jet_foundation.[
     TUnaryOp,
     Type,
     body_node,
+    name_intern,
+    name_table,
     symbol_key,
     symbol_key_leaf,
 ]
@@ -20,7 +22,10 @@ use jet_foundation.[
 // specializations share its source.
 jet_driver_float_seed_lints: fn(load: JetDriverLoadResult, functions: [FnBody], symbols: SymbolTable) -> [Diagnostic] {
     lints := [Diagnostic]{}
-    seen := [String:Bool]{}
+    // The reported bindings, each by its file's id in `files` (high half)
+    // and its start offset (low half).
+    files := name_table()
+    seen := [Int:Bool]{}
     loop function in functions {
         if !jet_driver_cost_reports(function) -> next
         tree: function.tree
@@ -29,7 +34,7 @@ jet_driver_float_seed_lints: fn(load: JetDriverLoadResult, functions: [FnBody], 
                 symbol: local.symbol_id ?? next
                 sign: jet_driver_float_seed_sign(tree, symbols, init) ?? next
                 if !jet_driver_float_seed_int_only(tree, symbol) -> next
-                site: "{function.source_file}:{local.span.start}"
+                site: (Int{name_intern(files, function.source_file).id} << 32) | local.span.start
                 if seen.get(site) != None -> next
                 seen[site] = true
                 seed: if sign > 0 -> "infinity" else -> "-infinity"
