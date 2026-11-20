@@ -1,0 +1,47 @@
+// A link's foreign C closure hashes its compiler's and archiver's bytes
+// once, the first time one of its C builds needs them.
+use {
+    jet_cli.[JetCLIClosureCTools, JetCLINativeCTools, jet_cli_native_c_tool_digest]
+    cli_sys: core.sys
+    cli_files: core.files
+    cli_process: core.process
+}
+
+#Test("a link reads and hashes its C tools once") {
+    root: "{cli_sys.temp_dir()}/jet-c-tool-digest-{cli_process.current_pid()}"
+    cli_files.create_dir_all(root) ?? panic("test root")
+    cli_files.write("{root}/cc", "the compiler's bytes") ?? panic("compiler")
+    cli_files.write("{root}/ar", "the archiver's bytes") ?? panic("archiver")
+    link := c_tool_link(root)
+    jet_cli_native_c_tool_digest(link) ?? panic("first C build: {err.message}")
+    assert(link.tool_digest != "", "the first C build hashes the tools")
+    // The link's later C builds keep its digest without reading the tools:
+    // they are gone, and still nothing fails.
+    cli_files.remove_all(root) ?? panic("tools cleanup")
+    jet_cli_native_c_tool_digest(link) ?? panic("later C build read the tools again: {err.message}")
+    // Another link reads them itself.
+    other := c_tool_link(root)
+    if jet_cli_native_c_tool_digest(other) == {
+        .Err(detail) -> {
+            assert(detail.message.contains("couldn't read C tool `{root}/cc`"), detail.message)
+        }
+        .Ok(_) -> panic("another link hashed tools that are gone")
+    }
+    // The same bytes hash as the first build did, so the link kept its digest.
+    cli_files.create_dir_all(root) ?? panic("test root again")
+    cli_files.write("{root}/cc", "the compiler's bytes") ?? panic("compiler again")
+    cli_files.write("{root}/ar", "the archiver's bytes") ?? panic("archiver again")
+    same := c_tool_link(root)
+    jet_cli_native_c_tool_digest(same) ?? panic("same tools: {err.message}")
+    assert_eq(link.tool_digest, same.tool_digest)
+    // With other bytes, the digest differs.
+    cli_files.write("{root}/ar", "another archiver's bytes") ?? panic("another archiver")
+    jet_cli_native_c_tool_digest(other) ?? panic("another link: {err.message}")
+    assert(other.tool_digest != "" && other.tool_digest != link.tool_digest, "other tool bytes hash differently")
+    cli_files.remove_all(root) ?? panic("tools cleanup")
+}
+
+c_tool_link: fn(root: String) -> JetCLIClosureCTools Never! {
+    tools: JetCLINativeCTools{compiler: "{root}/cc", archiver: "{root}/ar", target: "x86_64-linux-musl", flags: [String]{}, link_flags: [String]{}}
+    JetCLIClosureCTools{tools: tools, platform: [String]{}, proof: [String]{}, tool_digest: ""}
+}
