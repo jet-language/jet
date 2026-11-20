@@ -648,7 +648,13 @@ aggregate_type: fn(ty: String) -> Bool Never! {
 /// access through it is placed by its own type. Also the variant each enum
 /// slot holds (`slot_payload`, at `slot_payload_at`): the type of the one
 /// payload address its function takes of it (an `offset` typed as a
-/// struct), "?" when it takes two.
+/// struct), "?" when it takes two. The same way, the value an untyped
+/// address holds once a whole value is copied into it (`copy_bytes`): the
+/// source's type, or, from an untyped source, the type of the copy glue an
+/// optimized build inlines over it (copy_glue) when that glue copies as
+/// many bytes; the glue follows the copy, so the copy is seen first. An
+/// untyped address no copy places holds what its one struct-typed `offset`
+/// addresses (a boxed variant's payload read through its box).
 find_elements: fn(c: &Check, spec: Spec) Never! {
     c.slot_elem = loop _ in 0..<c.slot_kind.len() -> ""
     c.slot_defs = loop _ in 0..<c.slot_kind.len() -> [Int]{}
@@ -658,22 +664,55 @@ find_elements: fn(c: &Check, spec: Spec) Never! {
     loop f in 0..<count {
         base: c.fn_slot[f]
         last: if f + 1 < count -> c.fn_op[f + 1] else -> c.op_name.len()
+        // Untyped addresses a value of unknown type was copied into, with
+        // the bytes copied.
+        whole := [Int:Int]{}
+        // Untyped addresses with struct-typed `offset`s: the one type and
+        // start they address, "?" for two.
+        pointed := [Int:String]{}
+        pointed_at := [Int:Int]{}
         loop k in c.fn_op[f]..<last {
+            op: c.op_name[k]
+            addressing: op == "copy_bytes" || op == "load" || op == "store"
+            into: if !addressing || c.op_a[k] < 0 -> -1 else -> base + c.op_a[k]
+            if into >= 0 && op == "copy_bytes" && c.op_b[k] >= 0 && c.slot_type[into] == "Pointer" {
+                source: c.slot_type[base + c.op_b[k]]
+                if {
+                    aggregate_type(source) -> place_payload(c, into, source.copy(), 0)
+                    else -> whole[into] = c.op_c[k]
+                }
+            }
+            if into >= 0 && op != "copy_bytes" && whole.get(into) != None {
+                glue: copy_glue(c, f, k)
+                if glue != "" && glue_size(glue) == whole[into] {
+                    place_payload(c, into, glue_type(glue), 0)
+                }
+            }
             if c.op_dst[k] < 0 -> next
             d: base + c.op_dst[k]
             c.slot_defs[d].push(k)
-            if c.op_name[k] != "offset" || c.op_a[k] < 0 -> next
+            if c.op_name[k] != "offset" || c.op_a[k] < 0 || !is_struct(c.slot_type[d]) -> next
             a: base + c.op_a[k]
             enum_ty: c.slot_type[a]
-            if !is_struct(enum_ty) || c.members.get(key_base(enum_ty)) != None || !is_struct(c.slot_type[d]) {
+            if enum_ty == "Pointer" {
+                known: pointed.get(a) ?? ""
+                if {
+                    known == "" -> {
+                        pointed[a] = c.slot_type[d].copy()
+                        pointed_at[a] = c.op_b[k]
+                    }
+                    known != c.slot_type[d] || pointed_at[a] != c.op_b[k] -> { pointed[a] = "?" }
+                    else -> {}
+                }
                 next
             }
-            known: c.slot_payload[a]
-            if known == "" {
-                c.slot_payload[a] = c.slot_type[d].copy()
-                c.slot_payload_at[a] = c.op_b[k]
-            } else if known != c.slot_type[d] || c.slot_payload_at[a] != c.op_b[k] {
-                c.slot_payload[a] = "?"
+            if !is_struct(enum_ty) || c.members.get(key_base(enum_ty)) != None -> next
+            place_payload(c, a, c.slot_type[d].copy(), c.op_b[k])
+        }
+        loop (slot, ty) in pointed {
+            if ty != "?" && c.slot_payload[slot] == "" {
+                c.slot_payload[slot] = ty.copy()
+                c.slot_payload_at[slot] = pointed_at[slot]
             }
         }
     }
@@ -715,6 +754,47 @@ find_elements: fn(c: &Check, spec: Spec) Never! {
         }
         if !changed -> break
     }
+}
+
+/// Records that static slot `a` addresses a `ty` from `at` bytes on
+/// (`slot_payload`); "?" once two places disagree.
+place_payload: fn(c: &Check, a: Int, ty: String, at: Int) Never! {
+    known: c.slot_payload[a]
+    if {
+        known == "" -> {
+            c.slot_payload[a] = ty.copy()
+            c.slot_payload_at[a] = at
+        }
+        known != ty || c.slot_payload_at[a] != at -> { c.slot_payload[a] = "?" }
+        else -> {}
+    }
+}
+
+/// The copy glue instruction `k` of function `f` sits in when an optimized
+/// build inlined it (OptInline.jet): the key of its outermost `#copy<…>`
+/// inline site, `#copy<<kind>:<size>:<align>:<flag>[:struct|:enum]:<type>>`,
+/// whose body loads and stores the copied value's members at their offsets
+/// from its start; "" outside one.
+copy_glue: fn(c: Check, f: Int, k: Int) -> String Never! {
+    sites_at: c.fn_site[f]
+    site := c.op_site[k]
+    outermost := ""
+    loop site > 0 {
+        key: c.site_key[sites_at + site - 1]
+        if key.starts_with("#copy<") -> outermost = key
+        site = c.site_outer[sites_at + site - 1]
+    }
+    outermost
+}
+
+/// The bytes copy glue `key` (copy_glue) copies.
+glue_size: fn(key: String) -> Int Never! { number(key.partition(":").tail.partition(":").head) }
+
+/// The type copy glue `key` (copy_glue) copies.
+glue_type: fn(key: String) -> String Never! {
+    rest := key.removeprefix("#copy<").removesuffix(">")
+    loop _ in 0..<4 -> rest = rest.partition(":").tail
+    rest.removeprefix("struct:").removeprefix("enum:").copy()
 }
 
 /// Whether every write of function slot `local` (its function's slots from
@@ -1324,19 +1404,23 @@ read_spec: fn(text: String, dropped: [String:Bool]) -> Spec Never! {
 
 run: fn() {
     argv: process.args()
-    // `--drop <directive>` (repeatable) checks without that spec line: the
-    // case's proof that the check finds what the directive clears.
+    // `--drop <directive>` (repeatable) checks without that spec line, and
+    // `--add <directive>` with that line too: the case's proof that the
+    // check finds what a directive clears, and what a stricter spec plants.
     dropped := [String:Bool]{}
+    added := ""
     first := 0
-    loop first + 1 < argv.len() && argv[first] == "--drop" {
-        dropped[argv[first + 1].copy()] = true
+    loop first + 1 < argv.len() && (argv[first] == "--drop" || argv[first] == "--add") {
+        if argv[first] == "--drop" -> dropped[argv[first + 1].copy()] = true else {
+            added = "{added}\n{argv[first + 1]}"
+        }
         first += 2
     }
     if argv.len() < first + 2 {
-        process.fail(2, "usage: jet check.jet [--drop <directive>]... <spec> <log>...")
+        process.fail(2, "usage: jet check.jet [--drop <directive>]... [--add <directive>]... <spec> <log>...")
     }
     spec_text: files.read(argv[first]) ?? process.fail(2, "{argv[first]}: cannot read: {err}")
-    spec: read_spec(spec_text, dropped)
+    spec: read_spec("{spec_text}{added}", dropped)
     failed := 0
     // The expected functions some log finds something in.
     hit := [String:Bool]{}
