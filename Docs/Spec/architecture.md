@@ -631,9 +631,9 @@ point is the pass name its findings carry:
 - `ir.opt.prepare`, `ir.opt.<pass>` and `ssa.form`: with
   `IROptOptions.verify` (tests, CI, `JET_OPT_VERIFY=1`, `--opt-verify`),
   each body as the passes get it, after each optimizer pass, and each SSA
-  form. Verify also takes each body out of SSA, which no other build does,
-  so the test kit runs every case under it but the Debug cases, whose
-  debuggers read the code a build ships.
+  form, with a copy of the body taken out of SSA (`ir.opt.ssa`). Verify
+  only reads: a verified build ships the machine code an unverified one
+  does (`Tests/Cases/OptVerify`), so the test kit runs every case under it.
 - `ir.build` and `ir.opt` in the runtime library build (`Request.jet`
   `jet_cli_runtime_ir`) and the Core code library
   (`CoreLibrary.jet` `jet_cli_core_library_ir`, on its own task beside the

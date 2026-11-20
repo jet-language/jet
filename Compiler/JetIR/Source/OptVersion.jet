@@ -322,14 +322,14 @@ ir_opt_version_function: fn(m: IRModule, f: &IRFunction, body: Int, options: IRO
         ir_opt_report_add(report, versioned)
         return false
     }
-    ir_opt_ssa(m, f, options, versioned)
+    ir_opt_ssa(m, f, options, lint, versioned)
     if versioned.lint.len() > 0 || ir_version_gains(m, f, slots) > 0 {
         if versioned.lint.len() > 0 -> checking = false
         ir_opt_report_add(report, versioned)
         return true
     }
     trial := ir_opt_report(report.level)
-    ir_opt_ssa(m, plain, options, trial)
+    ir_opt_ssa(m, plain, options, lint, trial)
     if trial.lint.len() == 0 && ir_version_gains(m, plain, slots) == 0 {
         f = plain.move()
         ir_opt_report_add(report, trial)

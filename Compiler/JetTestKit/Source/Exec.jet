@@ -211,9 +211,9 @@ kit_exec_base_value: fn(name: String, env: KitEnv, scratch: String) -> String? {
     if {
         name == ENV_JET_COMPILER_EXTENSION -> None
         name == "NO_COLOR" || name == ENV_JET_RECEIPT_BYPASS -> Val("1")
-        // Every build under test runs IR Lint after each optimizer pass, but a
-        // Debug case's (KitEnv.opt_verify).
-        name == "JET_OPT_VERIFY" -> if env.opt_verify -> Val("1") else -> None
+        // Every build under test runs IR Lint after each optimizer pass, which
+        // reads the code and changes none of it.
+        name == "JET_OPT_VERIFY" -> Val("1")
         // Any other compiler control (KIT_CONTROL_VARIABLES), or a compiler
         // identity, in the caller's shell would change what every row checks or
         // which compiler it names: a row runs under one only when its case sets it.

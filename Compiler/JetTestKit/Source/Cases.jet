@@ -65,12 +65,6 @@ kit_cases_run: fn(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
     annotation: kit_cases_known_failure(entry, context.known, source)
     env := context.env
     if annotation != "" -> env.answer_limit = KIT_KNOWN_ANSWER_LIMIT
-    // A Debug or ToolInterop case's debugger reads the code a build ships: no
-    // build a user runs makes the verifier's SSA round trip, which moves a
-    // named local's value at a join into a fresh unnamed slot.
-    if entry.path.starts_with("Tests/Cases/Debug/") || entry.path.starts_with("Tests/Cases/ToolInterop/") {
-        env.opt_verify = false
-    }
     env.jet_alone = kit_cases_jet_alone(entry.path)
     steps: kit_steps_context(
         plan,
