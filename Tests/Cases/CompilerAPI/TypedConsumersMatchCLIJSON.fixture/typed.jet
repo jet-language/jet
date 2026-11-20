@@ -1,0 +1,26 @@
+use compiler: core.compiler
+
+// The texts of main.jet and broken.jet, checked through the typed API.
+CHECKED: #run { compiler.check(compiler.parse(embed_file("main.jet")) ?? panic("parse")) ?? panic("check") }
+
+BROKEN: #run { compiler.check(compiler.parse(embed_file("broken.jet")) ?? panic("parse")) ?? panic("check") }
+
+INDEX: #run { CHECKED.semantic_index() ?? panic("a clean check has an index") }
+
+DIGEST: #run INDEX.source_digest
+
+// The checked text's own facts, as typed code reads them.
+DEFINITIONS: #run (loop d in INDEX.definitions -> (if d.module == "core.compiler" && d.span.end > 0 -> "definition {d.name} {d.identity} {d.module} {d.span.start}-{d.span.end}\n" else -> "")).join("")
+
+REFERENCES: #run (loop r in INDEX.references -> (if r.module == "core.compiler" -> "reference {r.name} {r.module} {r.span.start}-{r.span.end}\n" else -> "")).join("")
+
+CALLS: #run (loop c in INDEX.calls -> "call {c.caller} {c.callee} {c.module} {c.span.start}-{c.span.end}\n").join("")
+
+BROKEN_CODES: #run (loop d in BROKEN.diagnostics() -> d.code).join(",")
+
+BROKEN_INDEX: #run { (if BROKEN.semantic_index() == None -> "absent" else -> "present") }
+
+run: fn() {
+    print("digest {DIGEST}")
+    print("{DEFINITIONS}{REFERENCES}{CALLS}broken {BROKEN_CODES} index {BROKEN_INDEX}")
+}
