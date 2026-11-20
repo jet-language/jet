@@ -4811,10 +4811,10 @@ sema_effect_memory_found: fn(nodes: [SemaEffectNode], parents: [Int], owner: Int
 // program's call that leads to it, whose report names each step and the line
 // that allocates. An open dispatch is no allocation the proof finds: a
 // foreign body runs on the machine's own memory, not the program's heap.
-sema_effect_check_heap_free: fn(nodes: [SemaEffectNode], inputs: [SemaEffectModuleInput], own_modules: [Bool], node_by_key: NameRows, entries: [String], machine: String, diagnostics: &[Diagnostic]) Never! {
+sema_effect_check_heap_free: fn(nodes: [SemaEffectNode], inputs: [SemaEffectModuleInput], own_modules: [Bool], calls: SemaEffectCallIndex, entries: [String], machine: String, diagnostics: &[Diagnostic]) Never! {
     reported := [String]{}
     loop key in entries {
-        root: sema_effect_node_index(node_by_key, key) ?? next
+        root: sema_effect_node_index(calls.node_by_key, key) ?? next
         found: sema_effect_memory_search(nodes, root, "alloc", opens: false) ?? next
         event: found.event ?? next
         // The program's own code runs from the entry to the first step
@@ -6581,7 +6581,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     // promise `-[!Mem.Alloc]>` makes, Core's bodies included.
     if heap_free != "" {
         walks = true
-        sema_effect_check_heap_free(nodes, inputs, denial_modules, calls.node_by_key, entries, heap_free, diagnostics)
+        sema_effect_check_heap_free(nodes, inputs, denial_modules, calls, entries, heap_free, diagnostics)
     }
     // A package's every other denial is a compile-time prohibition on its
     // own functions, exactly as if each wrote `-[!E]>`;
@@ -6678,7 +6678,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     }
     loop module_row in inputs {
         sema_effect_check_discarded(modules[module_row.module_index].call_facts, module_row, nodes, calls.node_by_key, calls.symbols, solved, diagnostics)
-        sema_effect_check_hole_headers(modules[module_row.module_index].call_facts, module_row, nodes, calls.node_by_key, calls.symbols, solved, diagnostics)
+        sema_effect_check_hole_headers(modules[module_row.module_index].call_facts, module_row, nodes, calls, solved, diagnostics)
     }
     // All source reads are finished: stamp the solved rows in place, the
     // frame bound of each function a stack denial reaches, and each uncalled
@@ -7153,7 +7153,7 @@ sema_effect_check_discarded: fn(call_facts: [SemaCallSiteFact], module_row: Sema
 // written call reports once, with the fix its check found
 // (sema_expr_hole_header_fix); a call already refused for a change it makes
 // is not refused again.
-sema_effect_check_hole_headers: fn(call_facts: [SemaCallSiteFact], module_row: SemaEffectModuleInput, nodes: [SemaEffectNode], node_by_key: NameRows, symbols: SymbolTable, solved: [[String]], diagnostics: &[Diagnostic]) {
+sema_effect_check_hole_headers: fn(call_facts: [SemaCallSiteFact], module_row: SemaEffectModuleInput, nodes: [SemaEffectNode], calls: SemaEffectCallIndex, solved: [[String]], diagnostics: &[Diagnostic]) {
     reported := [Diagnostic]{}
     seen := [Span]{}
     loop fact in call_facts {
@@ -7161,8 +7161,8 @@ sema_effect_check_hole_headers: fn(call_facts: [SemaCallSiteFact], module_row: S
         fix: detail.hole_header ?? next
         if fix.reported || seen.contains(fact.span) -> next
         if fact.callee == .Val(callee) {
-            callee_key: sema_effect_run_key(symbols, callee) ?? next
-            node_index: sema_effect_node_index(node_by_key, callee_key) ?? next
+            callee_key: sema_effect_run_key(calls.symbols, callee) ?? next
+            node_index: sema_effect_node_index(calls.node_by_key, callee_key) ?? next
             if sema_effect_deep_check_over(solved[node_index]).len() == 0 -> next
             seen.push(fact.span)
             reported.push(sema_expr_hole_header_diagnostic(nodes[node_index].name, "has an effect", fix, fact.span))
