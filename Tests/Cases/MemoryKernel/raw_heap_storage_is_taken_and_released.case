@@ -31,12 +31,12 @@ end when
 step keptnone: jet run -O0 kept.jet
 exit: 70
 stdout: = "5\n"
-stderr: ~ "Runtime fault [R0802]" # the report also carries the gate and the obligation
+stderr: ~ "Error: Jet.UseAfterLifetime:" # the report also carries the gate and the obligation
 stderr: ~ "kept.jet:10:19, in #Unsafe gate" # the fault is located at the read after release
 step keptfull: jet run -O2 kept.jet
 exit: 70
 stdout: = "5\n"
-stderr: ~ "Runtime fault [R0802]" # the report also carries the gate and the obligation
+stderr: ~ "Error: Jet.UseAfterLifetime:" # the report also carries the gate and the obligation
 stderr: ~ "kept.jet:10:19, in #Unsafe gate" # the fault is located at the read after release
 step twice: jet check twice.jet
 exit: 1
@@ -45,10 +45,10 @@ stderr: ~ "twice.jet:7:26" # the report is located at the second release
 step aliasednone: jet run -O0 aliased.jet
 exit: 70
 stdout: = "released\n"
-stderr: ~ "Runtime fault [R0802]" # the report also carries the gate and the obligation
+stderr: ~ "Error: Jet.UseAfterLifetime:" # the report also carries the gate and the obligation
 stderr: ~ "aliased.jet:9:17, in #Unsafe gate" # the fault is located at the second release
 step aliasedfull: jet run -O2 aliased.jet
 exit: 70
 stdout: = "released\n"
-stderr: ~ "Runtime fault [R0802]" # the report also carries the gate and the obligation
+stderr: ~ "Error: Jet.UseAfterLifetime:" # the report also carries the gate and the obligation
 stderr: ~ "aliased.jet:9:17, in #Unsafe gate" # the fault is located at the second release

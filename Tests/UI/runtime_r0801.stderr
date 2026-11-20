@@ -1,0 +1,7 @@
+Error: Jet.RawAccessOutsideProvenance: raw `volatile_write` outside `external address must be a live allocation`'s storage
+  --> runtime_r0801.jet:10:13, in #Unsafe gate "external address must be a live allocation"
+ Why: The pointer is outside the allocation provenance tracked for the active `#Unsafe` gate (no live allocation contains this address); runtime evidence never replaces a required static obligation.
+ Fix: Bound the raw access before it reaches storage — obligation `valid_ptr` was not met on this run.
+obligation: valid_ptr = false
+exit: 70
+More: jet-lang.dev/e/Jet.RawAccessOutsideProvenance

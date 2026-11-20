@@ -28,18 +28,18 @@ stdout: = "1 8 15\n1 40 40\n40\n"
 end when
 step misalignednone: jet run -O0 misaligned.jet
 exit: 70
-stderr: ~ "Runtime fault [R0803]" # the report also carries the gate and the faulting address
+stderr: ~ "Error: Jet.MisalignedRawAccess:" # the report also carries the gate and the faulting address
 stderr: ~ "misaligned.jet:7:19, in #Unsafe gate" # the fault is located at the misaligned read
 stderr: ~ "is not aligned to 8 bytes." # the address before it varies with ASLR
 step misalignedfull: jet run -O2 misaligned.jet
 exit: 70
-stderr: ~ "Runtime fault [R0803]" # the report also carries the gate and the faulting address
+stderr: ~ "Error: Jet.MisalignedRawAccess:" # the report also carries the gate and the faulting address
 stderr: ~ "misaligned.jet:7:19, in #Unsafe gate" # the fault is located at the misaligned read
 stderr: ~ "is not aligned to 8 bytes." # the address before it varies with ASLR
 step readpastnone: jet run -O0 readpast.jet
 exit: 70
 stdout: = "4\n"
-stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
+stderr: ~ "Error: Jet.RawAccessOutsideProvenance:" # the report also carries the gate and the obligation
 stderr: ~ "readpast.jet:9:19, in #Unsafe gate" # the fault is located at the read past the block
 stderr: ~ "raw `volatile_read` outside" # the gate's audit text follows
 stderr: ~ "the access starts at offset 16 of the live range 0x" # the range's addresses vary with ASLR
@@ -47,13 +47,13 @@ stderr: ~ "(16 bytes) and runs past its end" # the block's two Ints
 step readpastfull: jet run -O2 readpast.jet
 exit: 70
 stdout: = "4\n"
-stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
+stderr: ~ "Error: Jet.RawAccessOutsideProvenance:" # the report also carries the gate and the obligation
 stderr: ~ "readpast.jet:9:19, in #Unsafe gate" # the fault is located at the read past the block
 stderr: ~ "(16 bytes) and runs past its end" # the block's two Ints
 step writepastnone: jet run -O0 writepast.jet
 exit: 70
 stdout: = "4\n"
-stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
+stderr: ~ "Error: Jet.RawAccessOutsideProvenance:" # the report also carries the gate and the obligation
 stderr: ~ "writepast.jet:9:13, in #Unsafe gate" # the fault is located at the write past the block
 stderr: ~ "raw `volatile_write` outside" # the gate's audit text follows
 stderr: ~ "the access starts at offset 16 of the live range 0x" # the range's addresses vary with ASLR
@@ -61,28 +61,28 @@ stderr: ~ "(16 bytes) and runs past its end" # the block's two Ints
 step writepastfull: jet run -O2 writepast.jet
 exit: 70
 stdout: = "4\n"
-stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
+stderr: ~ "Error: Jet.RawAccessOutsideProvenance:" # the report also carries the gate and the obligation
 stderr: ~ "writepast.jet:9:13, in #Unsafe gate" # the fault is located at the write past the block
 stderr: ~ "(16 bytes) and runs past its end" # the block's two Ints
 step readfreednone: jet run -O0 readfreed.jet
 exit: 70
 stdout: = "4\n"
-stderr: ~ "Runtime fault [R0802]" # the report also carries the gate and the obligation
+stderr: ~ "Error: Jet.UseAfterLifetime:" # the report also carries the gate and the obligation
 stderr: ~ "readfreed.jet:10:19, in #Unsafe gate" # the fault is located at the read after release
 stderr: ~ "before this raw `volatile_read`" # the access the released storage refused
 step readfreedfull: jet run -O2 readfreed.jet
 exit: 70
 stdout: = "4\n"
-stderr: ~ "Runtime fault [R0802]" # the report also carries the gate and the obligation
+stderr: ~ "Error: Jet.UseAfterLifetime:" # the report also carries the gate and the obligation
 stderr: ~ "readfreed.jet:10:19, in #Unsafe gate" # the fault is located at the read after release
 step fromaddrfreednone: jet run -O0 fromaddrfreed.jet
 exit: 70
 stdout: = "6\n"
-stderr: ~ "Runtime fault [R0802]" # the report also carries the gate and the obligation
+stderr: ~ "Error: Jet.UseAfterLifetime:" # the report also carries the gate and the obligation
 stderr: ~ "fromaddrfreed.jet:10:15, in #Unsafe gate" # the fault is located at the read through the remade address
 stderr: ~ "before this raw `read`" # the access the released storage refused
 step fromaddrfreedfull: jet run -O2 fromaddrfreed.jet
 exit: 70
 stdout: = "6\n"
-stderr: ~ "Runtime fault [R0802]" # the report also carries the gate and the obligation
+stderr: ~ "Error: Jet.UseAfterLifetime:" # the report also carries the gate and the obligation
 stderr: ~ "fromaddrfreed.jet:10:15, in #Unsafe gate" # the fault is located at the read through the remade address

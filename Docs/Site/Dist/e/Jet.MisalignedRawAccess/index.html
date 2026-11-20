@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Jet.MisalignedRawAccess — Jet diagnostic</title>
-<meta name="description" content="Runtime fault [R0803]: misaligned raw `{operation}` in `{gate}`">
+<meta name="description" content="misaligned raw `{operation}` in `{gate}`">
 <meta property="og:title" content="Jet.MisalignedRawAccess — Jet diagnostic">
-<meta property="og:description" content="Runtime fault [R0803]: misaligned raw `{operation}` in `{gate}`">
+<meta property="og:description" content="misaligned raw `{operation}` in `{gate}`">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,18 +25,26 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic R0803</p>
 <h1>Jet.MisalignedRawAccess</h1>
-<p>Runtime fault [R0803]: misaligned raw `{operation}` in `{gate}`</p>
+<p>misaligned raw `{operation}` in `{gate}`</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">Runtime fault [R0803]: misaligned raw `{operation}` in `{gate}`</p>
+<p class="diag-copy what" data-registry-field="what">misaligned raw `{operation}` in `{gate}`</p>
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">This raw `{operation}` needs an aligned pointer, but {detail}.</p>
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Derive an aligned pointer from the live allocation, or use the typed memory operation instead of raw address arithmetic — obligation `{obligation}` was not met on this run.</p>
 <h2>Worked example</h2>
-<p>No UI snapshot currently mentions this diagnostic.</p>
+<p>First UI snapshot mentioning <code>Jet.MisalignedRawAccess</code>: <code>Tests/UI/runtime_r0803.stderr</code>.</p>
+<pre class="diag">Error: Jet.MisalignedRawAccess: misaligned raw `read` in `a fixed odd address stands for a misaligned pointer`
+  --&gt; runtime_r0803.jet:8:15, in #Unsafe gate &quot;a fixed odd address stands for a misaligned pointer&quot;
+ Why: This raw `read` needs an aligned pointer, but address 0x1001 is not aligned to 8 bytes.
+ Fix: Derive an aligned pointer from the live allocation, or use the typed memory operation instead of raw address arithmetic — obligation `valid_ptr` was not met on this run.
+obligation: valid_ptr = false
+exit: 70
+More: jet-lang.dev/e/Jet.MisalignedRawAccess
+</pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>
 </main>

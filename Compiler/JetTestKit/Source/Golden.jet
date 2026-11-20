@@ -80,15 +80,15 @@ kit_golden_discover: fn(root: String, corpora: [String]) -> [KitEntry] {
     all
 }
 
-// The native comparator's exit oracle; unknown reports fail. A
+// The native comparator's exit oracle; unknown reports fail. A sentry
+// fault's report stops the run with its one `exit:` line; any other
 // diagnostic report is a front-end rejection, exit 1 whether a build or the
 // direct tier's `jet run` printed it.
 kit_golden_failure_exit: fn(expected: String, report: String) -> Int? {
     if report.starts_with("Stop: ") || report.starts_with("Error: Jet.DeadlineExceeded:") {
         return Val(KIT_EXIT_RUNTIME_PANIC)
     }
-    if report.starts_with("Error: Jet.") -> return Val(1)
-    if report.starts_with("Runtime fault [R0801]:") || report.starts_with("Runtime fault [R0802]:") {
+    if report.starts_with("Error: Jet.RawAccessOutsideProvenance:") || report.starts_with("Error: Jet.UseAfterLifetime:") {
         loop raw in report.split("\n") {
             line: raw.trim().copy()
             if line.starts_with("exit:") && kit_steps_byte_slice(line, 5, line.count_bytes()).trim() != "{KIT_EXIT_RUNTIME_PANIC}" {
@@ -97,6 +97,7 @@ kit_golden_failure_exit: fn(expected: String, report: String) -> Int? {
         }
         return Val(KIT_EXIT_RUNTIME_PANIC)
     }
+    if report.starts_with("Error: Jet.") -> return Val(1)
     if report == "" {
         return if expected.ends_with("Tests/Run/CoreIO/LogFatal") -> Val(1) else -> None
     }

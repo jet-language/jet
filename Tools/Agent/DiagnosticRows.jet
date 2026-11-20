@@ -93,9 +93,9 @@ SAFETY_RANGES: [String]{"E00", "E01", "E02", "E03", "E04", "E05", "E06", "E07", 
 // Where a sealed floor's report site is looked for first.
 SEMA_ROOT: "Compiler/JetSema/"
 
-// A diagnostic code in compiler source: quoted whole, as `sema_error("E0212", …)`
-// passes it, or in a runtime report's brackets, as `Runtime fault [R0801]: …`.
-QUOTED_CODE: Regex{"[\x22\[]((?:E|R|JT|L|W)[0-9]{{4}}|E-[A-Z]+(?:-[A-Z]+)*)[\x22\]]"}
+// A diagnostic code in compiler source, quoted whole, as
+// `sema_error("E0212", …)` passes it.
+QUOTED_CODE: Regex{"[\x22]((?:E|R|JT|L|W)[0-9]{{4}}|E-[A-Z]+(?:-[A-Z]+)*)[\x22]"}
 
 // A row's name at the head of a message, as `"Jet.EnvDecodeFailed: env var …"`
 // writes it, or in a heading: the line reports that row's code.
@@ -697,6 +697,13 @@ COVERAGE_REPORTS: [String]{"Tests/CLI\t.txt", "Tests/Release\t.txt", "Tests/Fixt
 
 REPORT_OPENERS: [String]{"Error: ", "Warning: ", "Stop: ", "Lint: "}
 
+// A report's trail section opens with TRAIL_HEADER and prints no heading of
+// its own: it is the report of the row named TRAIL_ROW. The kit's coverage
+// (kit_ui_extract_reports) reads trail sections by the same rule.
+TRAIL_HEADER: " Trail ("
+
+TRAIL_ROW: "Jet.FailureTrail"
+
 code_byte: fn(byte: Int) -> Bool Never! {
     (byte >= 65 && byte <= 90) || (byte >= 48 && byte <= 57) || byte == 45
 }
@@ -777,7 +784,7 @@ emitted_codes: fn(facts: [RowFacts], directory: String, codes: &[String]) -[FS]>
 // with a code, since every row's heading prints its name.
 report_codes: fn(facts: [RowFacts], text: String, codes: &[String]) {
     loop line in text.split("\n") {
-        token: heading_name(line) ?? next
+        token: line_name(line) ?? next
         if token.starts_with(NAME_PATH) {
             loop row in facts {
                 if row.name == token -> add_code(codes, row.code)
@@ -988,7 +995,7 @@ first_snapshots: fn(snapshots: [TextFile]) -> [String:Int] Never! {
     first := [String:Int]{}
     loop (at, snapshot) in snapshots {
         loop line in snapshot.text.split("\n") {
-            name: heading_name(line.trim_start()) ?? next
+            name: line_name(line) ?? (heading_name(line.trim_start()) ?? next)
             if name.starts_with(NAME_PATH) && first.get(name) == None -> first[name] = at
         }
     }
@@ -1007,6 +1014,13 @@ heading_name: fn(line: String) -> String? Never! {
         return Val(name)
     }
     None
+}
+
+// The row name a report line states: its heading's name, or TRAIL_ROW for a
+// trail section's header.
+line_name: fn(line: String) -> String? Never! {
+    if line.starts_with(TRAIL_HEADER) -> return Val(TRAIL_ROW.copy())
+    heading_name(line)
 }
 
 html_escape: fn(value: String) -> String Never! {
@@ -1306,14 +1320,6 @@ copy_problems: fn(rows: [RowFacts], text: String, at: String) -> [String] Never!
             next
         }
         stem: text_before(row.what, "{{")
-        // A What that writes its own heading (`Runtime fault [R0801]: …`) is
-        // copied whole, heading and all.
-        if stem.contains("[{row.code}]: ") {
-            if !text.contains(stem) {
-                problems.push("{at}: the {name} What `{text.replace("\n", "\\n")}` is not its row's What `{row.what}`")
-            }
-            next
-        }
         shown: text_before(text_after(text, "{name}: "), "\n")
         if !shown.starts_with(stem) && !stem.starts_with(shown) {
             problems.push("{at}: the {name} heading `{shown}` is not its row's What `{row.what}`")
@@ -1878,12 +1884,12 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\",\n
     assert_eq(site_rank("Compiler/JetSema/b.jet", "    codes: [\"E0298\", \"E0299\"]", "E0299"), 2)
     assert_eq(site_rank("Compiler/JetCLI/c.jet", "    codes: [\"E0298\", \"E0299\"]", "E0299"), 3)
     quoted := [String]{}
-    lines: [String]{"    sema_error(\"E-SUBJECT-CALL\", span)", "    push(rt_static_text(\"Jet.EnvDecodeFailed: env var \"))", "    rt_static_text(\"Runtime fault [R0801]: raw\")", "    row(\"JT0198\")", "    lint(\"L0530\", span)", "    codes: [\"W0410\"]", "    x: \"Error\" + \"E-mail\"", "    y: \"core.Jet.Thing: z\""}
+    lines: [String]{"    sema_error(\"E-SUBJECT-CALL\", span)", "    push(rt_static_text(\"Jet.EnvDecodeFailed: env var \"))", "    rt_static_text(\"Trail [R0801] (\")", "    row(\"JT0198\")", "    lint(\"L0530\", span)", "    codes: [\"W0410\"]", "    x: \"Error\" + \"E-mail\"", "    y: \"core.Jet.Thing: z\""}
     loop line in lines {
         loop found in QUOTED_CODE.matches(line) -> quoted.push(found.groups[0].copy())
         loop found in MESSAGE_NAME.matches(line) -> quoted.push(found.groups[0].copy())
     }
-    assert_eq(quoted.join(" "), "E-SUBJECT-CALL Jet.EnvDecodeFailed R0801 JT0198 L0530 W0410")
+    assert_eq(quoted.join(" "), "E-SUBJECT-CALL Jet.EnvDecodeFailed JT0198 L0530 W0410")
     assert(audit.contains("| E0299 | BadPath | soundness | a \\| b |"))
     lifted: (render_rows(row.replace(code, "{sound}        expert_path: \"an `#Unsafe` block\",\n")) ?? panic(err.message)).facts
     assert(render_audit(lifted, sites).contains("| E0299 | BadPath | an `#Unsafe` block |"))
@@ -1920,7 +1926,7 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\",\n
     assert_eq(file_report_problems(rows, "a.jet", "y: \"Stop: Jet.BadPath: no\"\n").problems.len(), 1)
     assert_eq(file_report_problems(rows, "a.jet", "y: \"Warning: E0001: no\"\n").problems.len(), 1)
     assert_eq(file_report_problems(rows, "a.jet", "// Error: Jet.BadPath: in a comment\nz: \"Error: no package here\"\n").problems.len(), 0)
-    assert_eq(file_report_problems(rows, "a.jet", "y: \"Jet.BadPath: no\" + \"Runtime fault [R0801]: no\"\n").problems.join("\n"), "")
+    assert_eq(file_report_problems(rows, "a.jet", "y: \"Jet.BadPath: no\" + \"Error: no package here\"\n").problems.join("\n"), "")
     assert(file_report_problems(rows, "a.jet", "y: \"Jet.BadPaths: no\"\n").problems[0].contains("names no diagnostic row"))
     assert(file_report_problems(rows, "a.jet", "y: \"x; E3999: no\"\n").problems[0].contains("opens with the code E3999"))
     head: "a: fn() -> I64 {{ t(\"Stop: Jet.BadPath: route `\") }}"
@@ -2071,6 +2077,8 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\",\n
     rendered := [String]{}
     report_codes(rows.facts, "Error: E9999: an Err message\nError: Jet.BadPath: x\n Warning: E0001: indented\nStop: FFI01: meta\nLint: Jet.Unknown: y\nError: couldn't read: x\n", rendered)
     assert_eq(rendered, [String]{"E9999", "FFI01"})
+    assert_eq(line_name(" Trail (2 calls passed it up, origin first):") ?? "", TRAIL_ROW)
+    assert(line_name("  Trail (in prose)") == None && line_name("Trail (no indent)") == None)
     assert_eq(excluded_codes("{KIT_UI_EXCLUDED}\"E0061\", \"E0277\"], code)\n") ?? panic(err.message), [String]{"E0061", "E0277"})
     if excluded_codes("{KIT_UI_EXCLUDED}E0061], code)\n") == .Ok(found) {
         panic("an unquoted exclusion was read: {found.join(", ")}")

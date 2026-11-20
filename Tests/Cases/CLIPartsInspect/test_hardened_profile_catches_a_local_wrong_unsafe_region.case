@@ -8,13 +8,13 @@ cwd: release
 env: NO_COLOR=1
 exit: 0
 stdout: ~ "1 passed" # original predicate
-stdout: !~ "Runtime fault [R0802]" # original predicate
-stderr: !~ "Runtime fault [R0802]" # original predicate
+stdout: !~ "Error: Jet.UseAfterLifetime:" # original predicate
+stderr: !~ "Error: Jet.UseAfterLifetime:" # original predicate
 step: jet test main.jet --profile=hardened
 cwd: hardened
 env: NO_COLOR=1
 exit: 1
-stdout+stderr: ~ "Runtime fault [R0802]" # original predicate
+stdout+stderr: ~ "Error: Jet.UseAfterLifetime:" # original predicate
 stdout+stderr: ~ "test deliberately reads after arena reset" # original predicate
 stdout+stderr: ~ "Why:" # original predicate
 stdout+stderr: ~ "Fix:" # original predicate

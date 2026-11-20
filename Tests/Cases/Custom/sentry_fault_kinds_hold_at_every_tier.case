@@ -6,60 +6,60 @@ fixture: Fixtures/SentryFaultsAreTierParity
 step: jet run -O0 unsafe_sentries_expired_stack/unsafe_sentries_expired_stack.jet
 exit: 70
 stdout: empty
-stderr: ~ "Runtime fault [R0802]" # O0: the address of a returned frame local reads as an expired frame, not as no allocation
+stderr: ~ "Error: Jet.UseAfterLifetime:" # O0: the address of a returned frame local reads as an expired frame, not as no allocation
 stderr: ~ "owning Jet frame expired" # O0: the fault names its kind
 stderr: ~ "unsafe_sentries_expired_stack.jet:" # O0: at the faulting read
 stderr: !~ "Jet.RawAccessOutsideProvenance" # O0: never misread as an address outside every allocation
 step: jet run -O1 unsafe_sentries_expired_stack/unsafe_sentries_expired_stack.jet
 exit: 70
 stdout: empty
-stderr: ~ "Runtime fault [R0802]" # O1: the address of a returned frame local reads as an expired frame, not as no allocation
+stderr: ~ "Error: Jet.UseAfterLifetime:" # O1: the address of a returned frame local reads as an expired frame, not as no allocation
 stderr: ~ "owning Jet frame expired" # O1: the fault names its kind
 stderr: ~ "unsafe_sentries_expired_stack.jet:" # O1: at the faulting read
 stderr: !~ "Jet.RawAccessOutsideProvenance" # O1: never misread as an address outside every allocation
 step: jet run -O2 unsafe_sentries_expired_stack/unsafe_sentries_expired_stack.jet
 exit: 70
 stdout: empty
-stderr: ~ "Runtime fault [R0802]" # O2: the address of a returned frame local reads as an expired frame, not as no allocation
+stderr: ~ "Error: Jet.UseAfterLifetime:" # O2: the address of a returned frame local reads as an expired frame, not as no allocation
 stderr: ~ "owning Jet frame expired" # O2: the fault names its kind
 stderr: ~ "unsafe_sentries_expired_stack.jet:" # O2: at the faulting read
 stderr: !~ "Jet.RawAccessOutsideProvenance" # O2: never misread as an address outside every allocation
 step: jet run -O0 unsafe_sentries_provenance/unsafe_sentries_provenance.jet
 exit: 70
 stdout: empty
-stderr: ~ "Runtime fault [R0801]" # O0: an address past the allocation is outside its provenance
+stderr: ~ "Error: Jet.RawAccessOutsideProvenance:" # O0: an address past the allocation is outside its provenance
 stderr: ~ "The pointer is outside the allocation provenance" # O0: the fault names its kind
 stderr: ~ "unsafe_sentries_provenance.jet:" # O0: at the faulting read
 step: jet run -O1 unsafe_sentries_provenance/unsafe_sentries_provenance.jet
 exit: 70
 stdout: empty
-stderr: ~ "Runtime fault [R0801]" # O1: an address past the allocation is outside its provenance
+stderr: ~ "Error: Jet.RawAccessOutsideProvenance:" # O1: an address past the allocation is outside its provenance
 stderr: ~ "The pointer is outside the allocation provenance" # O1: the fault names its kind
 stderr: ~ "unsafe_sentries_provenance.jet:" # O1: at the faulting read
 step: jet run -O2 unsafe_sentries_provenance/unsafe_sentries_provenance.jet
 exit: 70
 stdout: empty
-stderr: ~ "Runtime fault [R0801]" # O2: an address past the allocation is outside its provenance
+stderr: ~ "Error: Jet.RawAccessOutsideProvenance:" # O2: an address past the allocation is outside its provenance
 stderr: ~ "The pointer is outside the allocation provenance" # O2: the fault names its kind
 stderr: ~ "unsafe_sentries_provenance.jet:" # O2: at the faulting read
 step: jet run -O0 unsafe_sentries_quarantine/unsafe_sentries_quarantine.jet
 exit: 70
 stdout: empty
-stderr: ~ "Runtime fault [R0802]" # O0: freed storage reads as expired
+stderr: ~ "Error: Jet.UseAfterLifetime:" # O0: freed storage reads as expired
 stderr: ~ "storage after its lifetime ended" # O0: the fault names its kind
 stderr: ~ "unsafe_sentries_quarantine.jet:" # O0: at the faulting read
 stderr: !~ "Jet.RawAccessOutsideProvenance" # O0: never misread as an address outside every allocation
 step: jet run -O1 unsafe_sentries_quarantine/unsafe_sentries_quarantine.jet
 exit: 70
 stdout: empty
-stderr: ~ "Runtime fault [R0802]" # O1: freed storage reads as expired
+stderr: ~ "Error: Jet.UseAfterLifetime:" # O1: freed storage reads as expired
 stderr: ~ "storage after its lifetime ended" # O1: the fault names its kind
 stderr: ~ "unsafe_sentries_quarantine.jet:" # O1: at the faulting read
 stderr: !~ "Jet.RawAccessOutsideProvenance" # O1: never misread as an address outside every allocation
 step: jet run -O2 unsafe_sentries_quarantine/unsafe_sentries_quarantine.jet
 exit: 70
 stdout: empty
-stderr: ~ "Runtime fault [R0802]" # O2: freed storage reads as expired
+stderr: ~ "Error: Jet.UseAfterLifetime:" # O2: freed storage reads as expired
 stderr: ~ "storage after its lifetime ended" # O2: the fault names its kind
 stderr: ~ "unsafe_sentries_quarantine.jet:" # O2: at the faulting read
 stderr: !~ "Jet.RawAccessOutsideProvenance" # O2: never misread as an address outside every allocation

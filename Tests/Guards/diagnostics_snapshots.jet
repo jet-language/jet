@@ -130,10 +130,11 @@ ds_part: fn(line: String, label: String) -> Bool {
 // registered row and renders the row's whole product: a What after the
 // opener, a `Why:` line, a `Fix:` line and the row's `More:` link. An opener
 // naming a user-declared diagnostic type (`app.UnservedRoute`) is not a
-// registry row. A registered code after the label opens no report, and
-// neither does an opener that a `failed here:` line follows: both are the text
-// of an error the entry returned (`Error: Jet.ScopedQueryOutsideScope: a
-// scope over …` then `  failed here: run (main.jet:12)`).
+// registry row. An opener that names a row by its code fails: a report prints
+// the row's name. An opener that a `failed here:` line follows opens no
+// report: it is the text of an error the entry returned
+// (`Error: Jet.ScopedQueryOutsideScope: a scope over …` then
+// `  failed here: run (main.jet:12)`).
 #Test("diagnostic_snapshots_keep_the_complete_registered_product") {
     guards_enter_root()
     rows: dc_registered_rows()
@@ -150,7 +151,10 @@ ds_part: fn(line: String, label: String) -> Bool {
                 failures.push("{path}:{start + 1} opens unregistered diagnostic {id}")
                 next
             }
-            if rows[row].code == id -> next
+            if rows[row].code == id {
+                failures.push("{path}:{start + 1} opens with the code {id}, not its name {rows[row].name}")
+                next
+            }
             name: rows[row].name
             end := lines.len()
             loop (index, other) in lines {

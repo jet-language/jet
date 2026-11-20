@@ -430,7 +430,10 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     stop: KitUIRegistryRow{code: "E3003", name: "Jet.DeadlineExceeded", active: true, lint: false}
     lint: KitUIRegistryRow{code: "L0302", name: "Jet.SameEnumGuardTable", active: true, lint: true}
     assert_eq(kit_ui_extract_reports("Error: Jet.OperatorTypeMismatch: root\n Warning: Jet.SameEnumGuardTable: indented\n Fix: E0001\nStop: Jet.DeadlineExceeded: runtime\nLint: Jet.SameEnumGuardTable: lint\nError: Jet.Unknown: unregistered\nError: FFI01: foreign\nError: couldn't read it: no\n", [row, stop, lint]), ["E0109", "E3003", "L0302", "FFI01"])
-    assert_eq(kit_ui_extract_source("\"E0109\" [L0302] \"FS\" \"E-WEB-ABI-TYPE\" \"JT0001\""), ["E0109", "L0302", "E-WEB-ABI-TYPE", "JT0001"])
+    trail: KitUIRegistryRow{code: "E3002", name: "Jet.FailureTrail", active: true, lint: false}
+    assert_eq(kit_ui_extract_reports("Error: boom\n Trail (2 calls passed it up, origin first):\n  1. f (a.jet:1)\nsee the Trail (above)\n  Trail (indented)\n", [row, trail]), ["E3002"])
+    assert_eq(kit_ui_extract_source("\"E0109\" [L0302] \"FS\" \"E-WEB-ABI-TYPE\" \"JT0001\"", [row]), ["E0109", "L0302", "E-WEB-ABI-TYPE", "JT0001"])
+    assert_eq(kit_ui_extract_source("\"Stop: Jet.DeadlineExceeded: late\" \"Jet.SameEnumGuardTable: x\" core.Jet.OperatorTypeMismatch: no Jet.Unknown: no\n", [row, stop, lint]), ["E3003", "L0302"])
     parsed: kit_ui_registry("// header\nA: struct {{\n    impl Diagnostic {{\n        code: \"E0109\",\n        severity: .Lint,\n        structured_fix: .CryptoMisuse,\n        no_fix: None,\n        what: fn(self) -> String {{ \"w\" }}\n    }}\n}}\n\nB: struct {{\n    path: String,\n\n    impl Diagnostic {{\n        code: \"E0001\",\n        stage: [.Jet, .Parse],\n    }}\n}}\n\nC: struct {{\n    impl Diagnostic {{\n        code: \"E0004\",\n        status: .Retired,\n    }}\n}}\n")
     assert_eq(parsed.len(), 3)
     assert_eq(parsed[0].code, "E0109")

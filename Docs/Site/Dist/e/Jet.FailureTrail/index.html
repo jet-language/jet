@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Jet.FailureTrail — Jet diagnostic</title>
-<meta name="description" content="`Trail [E3002] (N calls passed it up, origin first):` followed by one numbered `{fn_name} ({file}:{line})` line per hop, each with its note after an em dash and `×N` when the same hop repeats, and under it the hop&#39;s trimmed source line.">
+<meta name="description" content="`Trail (N calls passed it up, origin first):` followed by one numbered `{fn_name} ({file}:{line})` line per hop, each with its note after an em dash and `×N` when the same hop repeats, and under it the hop&#39;s trimmed source line.">
 <meta property="og:title" content="Jet.FailureTrail — Jet diagnostic">
-<meta property="og:description" content="`Trail [E3002] (N calls passed it up, origin first):` followed by one numbered `{fn_name} ({file}:{line})` line per hop, each with its note after an em dash and `×N` when the same hop repeats, and under it the hop&#39;s trimmed source line.">
+<meta property="og:description" content="`Trail (N calls passed it up, origin first):` followed by one numbered `{fn_name} ({file}:{line})` line per hop, each with its note after an em dash and `×N` when the same hop repeats, and under it the hop&#39;s trimmed source line.">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,18 +25,27 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic E3002</p>
 <h1>Jet.FailureTrail</h1>
-<p>`Trail [E3002] (N calls passed it up, origin first):` followed by one numbered `{fn_name} ({file}:{line})` line per hop, each with its note after an em dash and `×N` when the same hop repeats, and under it the hop&#39;s trimmed source line.</p>
+<p>`Trail (N calls passed it up, origin first):` followed by one numbered `{fn_name} ({file}:{line})` line per hop, each with its note after an em dash and `×N` when the same hop repeats, and under it the hop&#39;s trimmed source line.</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">`Trail [E3002] (N calls passed it up, origin first):` followed by one numbered `{fn_name} ({file}:{line})` line per hop, each with its note after an em dash and `×N` when the same hop repeats, and under it the hop&#39;s trimmed source line.</p>
+<p class="diag-copy what" data-registry-field="what">`Trail (N calls passed it up, origin first):` followed by one numbered `{fn_name} ({file}:{line})` line per hop, each with its note after an em dash and `×N` when the same hop repeats, and under it the hop&#39;s trimmed source line.</p>
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">Each call that passes a failure up joins the failure&#39;s trail, so the report can show where the failure started and which callers forwarded it.</p>
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Read the root failure above the trail first — it says what went wrong. Then read the trail from hop 1, the origin, down to the last hop at the entry.</p>
 <h2>Worked example</h2>
-<p>No UI snapshot currently mentions this diagnostic.</p>
+<p>First UI snapshot mentioning <code>Jet.FailureTrail</code>: <code>Tests/UI/failure_trail_core_origin.stderr</code>.</p>
+<pre class="diag">note: Tests/UI/failure_trail_core_origin.jet reads files (-A hides this)
+Error: not found during read `no-such-file.txt`: No such file or directory (os error 2) (type: IOError)
+  conversion: IOError -&gt; Err
+  failed here: size (failure_trail_core_origin.jet:7)
+      text: files.read(path)
+ Trail (1 call passed it up, origin first):
+  1. run (failure_trail_core_origin.jet:11)
+      run: fn() { print(size(&quot;no-such-file.txt&quot;)) }
+</pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>
 </main>
