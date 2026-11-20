@@ -99,31 +99,18 @@ JET_CLI_PERF_CAUSAL_CLOCK_MOST: 100
 JET_CLI_PERF_CAUSAL_EXPERIMENT_MS: 25
 
 // The experiment of the record at byte `at` of `words`, `record` words long:
-// the line its sampled address stands for, the innermost frame of the
-// checked source there; line 0 when the address is 0 (a baseline, with no
-// speedup) or none stands for it.
+// the line its sampled address stands for (jet_cli_perf_causal_place); line
+// 0 when the address is 0 (a baseline, with no speedup) or none stands for
+// it.
 jet_cli_perf_causal_record: fn(sampled: JetCLIPerfSamples, owned: [Bool], words: [U8], at: Int, record: Int) -> JetCLIPerfExperiment Never! {
     target: link_debug_addr(words, at + 8)
-    line := U64{0}
-    name := ""
-    if target != 0 {
-        frames := jet_cli_perf_samples_frames(sampled, owned, target, false)
-        frames.reverse()
-        loop frames.len() > 0 {
-            frame: frames.pop() ?? break
-            if frame.own {
-                line = U64{frame.line}
-                name = frame.name.move()
-                break
-            }
-        }
-    }
+    place: if target != 0 -> jet_cli_perf_causal_place(sampled, owned, target) else -> JetCLIPerfCausalPlace{line: U64{0}, name: ""}
     // The record's words after its first nine: three columns of one word
     // per progress point's slot.
     points: (record - 9) /% 3
     JetCLIPerfExperiment{
-        line: line,
-        name: name,
+        line: place.line,
+        name: place.name.move(),
         speedup: link_debug_addr(words, at + 16),
         run_ns: link_debug_addr(words, at + 40),
         wait_ns: link_debug_addr(words, at + 48),
@@ -133,6 +120,24 @@ jet_cli_perf_causal_record: fn(sampled: JetCLIPerfSamples, owned: [Bool], words:
         span_ns: jet_cli_perf_causal_column(words, at, points, 1),
         span_delay_ns: jet_cli_perf_causal_column(words, at, points, 2),
     }
+}
+
+// A source line, and the function it is in.
+JetCLIPerfCausalPlace: struct {
+    line: U64,
+    name: String,
+}
+
+// The line link-time address `address` stands for: the innermost frame of
+// the checked source there; line 0 and no name when none is.
+jet_cli_perf_causal_place: fn(sampled: JetCLIPerfSamples, owned: [Bool], address: Int) -> JetCLIPerfCausalPlace Never! {
+    frames := jet_cli_perf_samples_frames(sampled, owned, address, false)
+    frames.reverse()
+    loop frames.len() > 0 {
+        frame: frames.pop() ?? break
+        if frame.own -> return JetCLIPerfCausalPlace{line: U64{frame.line}, name: frame.name.move()}
+    }
+    JetCLIPerfCausalPlace{line: U64{0}, name: ""}
 }
 
 // Column `column` of the causal record at byte `at` of `words`, one word per
@@ -626,4 +631,77 @@ jet_cli_perf_causal_percent: fn(tenths: Int) -> String Never! {
     sign: if tenths < 0 -> "-" else -> ""
     whole: if tenths < 0 -> -tenths else -> tenths
     "{sign}{whole /% 10}.{whole %% 10}%"
+}
+
+// The words of a task's timing (PerfSamples.jet PERF_CAUSAL_ROW_WORDS).
+JET_CLI_PERF_CAUSAL_ROW_WORDS: 14
+
+// The tasks' timings the causal lens kept (PerfSamples.jet
+// perf_causal_rows_write): the tasks that claimed a row (-1 when the run
+// wrote none) and the most rows it keeps; each row's words after its
+// header, its body's address replaced by its index in `places`, the bodies'
+// lines, which `bodies` holds by address.
+JetCLIPerfCausalTasks: struct {
+    seen: Int,
+    kept_most: Int,
+    rows: [Int],
+    bodies: [Int:Int],
+    places: [JetCLIPerfCausalPlace],
+}
+
+// The `causal_tasks` section: each task's timing under the causal lens, for
+// telling where a round's time went in each kind of experiment. Its
+// experiments, in order, by the line each sped up (null for a baseline);
+// the task bodies by their line; and one row per task kept, in the order
+// its timing was written: its body's index, its start from the first
+// task's, its wall time, the experiments it began and ended in (an index
+// into the experiments, which a task that ran into the run's last,
+// unrecorded, one passes), its thread's CPU time over it, the wall time and
+// CPU time its pauses took, the samples its thread took, the global delay
+// at its start and its end, the CPU it began on, and the idle gap before it
+// (-1 for none), each time in nanoseconds. None when the run wrote no
+// timings.
+jet_cli_perf_causal_tasks_section: fn(source: String, experiments: &&[JetCLIPerfExperiment], tasks: &&JetCLIPerfCausalTasks) -> TraceReceiptSection? Never! {
+    if tasks.seen < 0 -> return None
+    first := 0
+    loop row in 0..<tasks.rows.len() /% (JET_CLI_PERF_CAUSAL_ROW_WORDS - 1) {
+        start: tasks.rows[row * (JET_CLI_PERF_CAUSAL_ROW_WORDS - 1) + 1]
+        if row == 0 || start < first -> first = start
+    }
+    rows := [CanonicalJSON]{}
+    loop row in 0..<tasks.rows.len() /% (JET_CLI_PERF_CAUSAL_ROW_WORDS - 1) {
+        at: row * (JET_CLI_PERF_CAUSAL_ROW_WORDS - 1)
+        words := [CanonicalJSON]{}
+        loop column in 0..<JET_CLI_PERF_CAUSAL_ROW_WORDS - 1 {
+            value: if {
+                column == 1 -> tasks.rows[at + 1] - first
+                column == 2 -> tasks.rows[at + 2] - tasks.rows[at + 1]
+                else -> tasks.rows[at + column]
+            }
+            words.push(CanonicalJSON.Integer("{value}"))
+        }
+        rows.push(CanonicalJSON.Array(words.move()))
+    }
+    value: CanonicalJSON.Object(
+        [CanonicalJSONField]{
+            {key: "bodies", value: CanonicalJSON.Array(loop place in tasks.places -> jet_cli_perf_causal_place_json(place.line, "{place.name}"))},
+            {key: "columns", value: CanonicalJSON.Array(loop column in ["body", "start_ns", "wall_ns", "experiment_at_start", "experiment_at_end", "cpu_ns", "paused_ns", "paused_cpu_ns", "samples", "delay_at_start_ns", "delay_at_end_ns", "cpu", "idle_gap_ns"] -> CanonicalJSON.String(column))},
+            {key: "experiments", value: CanonicalJSON.Array(loop experiment in experiments -> if experiment.speedup == 0 -> CanonicalJSON.Null else -> jet_cli_perf_causal_place_json(experiment.line, "{experiment.name}"))},
+            {key: "kept_most", value: CanonicalJSON.Integer("{tasks.kept_most}")},
+            {key: "path", value: CanonicalJSON.String(source)},
+            {key: "rows", value: CanonicalJSON.Array(rows.move())},
+            {key: "seen", value: CanonicalJSON.Integer("{tasks.seen}")},
+        },
+    )
+    digest: canonical_json_sha256(value)
+    Val(TraceReceiptSection{name: "causal_tasks", type_name: "JetPerfCausalTasks", value: value, digest: digest})
+}
+
+jet_cli_perf_causal_place_json: fn(line: U64, name: String) -> CanonicalJSON Never! {
+    CanonicalJSON.Object(
+        [CanonicalJSONField]{
+            {key: "function", value: CanonicalJSON.String(name)},
+            {key: "line", value: CanonicalJSON.Integer("{line}")},
+        },
+    )
 }

@@ -292,6 +292,17 @@ run: fn() {}
     )
 }
 
+// The parse reports its first authored `;` as the explicit semicolon; where
+// that `;` stands in a data member's comma, it is not reported again as a
+// missing comma. A later one is the missing comma.
+#Test("an authored semicolon between data members is reported once") {
+    codes := [String]{}
+    loop diagnostic in parser_test_errors("Mode: enum {{ Fast; Safe; Slow }}\n") {
+        if diagnostic.severity == 1 -> codes.push(diagnostic.code)
+    }
+    assert_eq(codes.join(" "), "E0373 E0003")
+}
+
 #Test("a comma ends a function-typed field before the next member") {
     program: parser_test_program(
         `Holder: struct {

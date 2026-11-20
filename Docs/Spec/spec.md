@@ -2994,6 +2994,19 @@ A bare effect covers every scoped instance of itself and its leaves, so `FS`
 and `FS.Read` both cover `FS.Read("assets/")`. A scoped effect never covers
 the bare one.
 
+`authority.with(right)` keeps only a right the authority already holds: one
+of its held rights must cover `right`, or there is nothing to narrow to.
+When the checker can see both the rights the authority holds (an
+`Authority.workspace()` or `Authority.from_rights([…])` bound with `:`, a
+`with` or `without` of one, or the handle of a `#FX(…)` head that lists only
+vocabulary effects) and the requested right (a string literal), and none
+covers it, the call is E0712
+`EffectWithoutAuthority` at the requested right: `jet check`, `jet build` and
+`jet run` refuse it and nothing runs. Otherwise, as for a parameter, a
+constant or a right built at run time, a `with` none of the held rights
+covers stops the program with the registered E0712 stop at the asking line,
+exit 70.
+
 A call names its scope through a constant argument. The `core.files`
 functions that read or write the one path their first argument names, such
 as `read`, `read_bytes`, `open`, `write` and `create`, need `FS.Read` or

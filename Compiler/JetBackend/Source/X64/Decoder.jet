@@ -1,0 +1,2586 @@
+// x86-64 decoder: the one reader of machine code that jet debug and jet perf
+// show. X64_DECODE_TABLE names the user-mode instruction forms of the legacy
+// one-byte, 0F, 0F 38 and 0F 3A maps (x87 included) and of the VEX and EVEX
+// maps. x64_decode reads one instruction with it, spells it as
+// `objdump -M intel` does, and reports what the debugger's placer moves: its
+// length, its rip-relative field and its relative branch. Bytes that start
+// no instruction decode as one byte, "(bad)". The encoder (Encoder.jet) and
+// the template assembler (InlineAsm.jet) do not read the table;
+// Compiler/JetBackend/Tests/X64Decode.jet decodes the bytes they write back
+// to their own names.
+
+// How an instruction leaves: on to the next (Plain), by a jmp, a call, a
+// jcc, a loop or jrcxz (Loop, whose rel8 has no long form), a return, or
+// not at all (Stop: ud2, ud1, ud0, hlt).
+X64Flow: enum {
+    Plain,
+    Jump,
+    Call,
+    Cond,
+    Loop,
+    Return,
+    Stop,
+}
+
+// One decoded instruction: its length; whether a table form named it
+// (`named`), and whether its bytes start no instruction at all (`invalid`:
+// one byte, "(bad)"); its mnemonic with any prefixes it shows ("lock
+// cmpxchg", "rep stos") and its operands as objdump writes them; the
+// offset of its rip-relative displacement (-1: none); the offset and width
+// of its relative branch's field (-1 and 0: none); how it leaves; a jcc's
+// condition (X64_COND_NAMES); whether it jumps or calls through a register
+// or memory; and, when `reaches`, the address its relative branch or
+// rip-relative operand reaches.
+X64Insn: struct {
+    length: Int,
+    named: Bool,
+    invalid: Bool,
+    mnemonic: String,
+    operands: [String],
+    rip: Int,
+    field: Int,
+    width: Int,
+    flow: X64Flow,
+    cond: Int,
+    indirect: Bool,
+    reaches: Bool,
+    reach: Int,
+}
+
+// One row of X64_DECODE_TABLE for one opcode: the map (`space`, see
+// x64_decode_spaces) and opcode it names, the conditions it holds under (-1:
+// any) and the mnemonic and operand codes it names the instruction with.
+X64DecodeRow: struct {
+    space: Int,
+    opcode: Int,
+    prefix: Int{-1},
+    reg: Int{-1},
+    mode: Int{-1},
+    modrm: Int{-1},
+    w: Int{-1},
+    l: Int{-1},
+    size: Int{-1},
+    b: Int{-1},
+    addr: Int{-1},
+    element: Int{0},
+    rounding: Int{0},
+    name: String,
+    operands: [String],
+}
+
+// What x64_decode has read of one instruction so far.
+X64Decoding: struct {
+    from: Int,
+    at: Int,
+    address: Int,
+    // The legacy prefix bytes in order, and what they say.
+    prefixes: [Int],
+    lock: Bool{false},
+    rep: Int{0},
+    opsize: Bool{false},
+    addr32: Bool{false},
+    segment: Int{0},
+    // The REX byte (0: none) and a REX a later prefix voids.
+    rex: Int{0},
+    voided_rex: Int{0},
+    w: Int{0},
+    r: Int{0},
+    x: Int{0},
+    b: Int{0},
+    // 0 legacy, 1 VEX, 2 EVEX, and their fields.
+    kind: Int{0},
+    vvvv: Int{0},
+    l: Int{0},
+    pp: Int{0},
+    r2: Int{0},
+    v2: Int{0},
+    aaa: Int{0},
+    z: Int{0},
+    bcst: Int{0},
+    space: Int{0},
+    opcode: Int{0},
+    // The ModRM byte (-1: none), its SIB and displacement.
+    modrm: Int{-1},
+    mod: Int{0},
+    reg: Int{0},
+    rm: Int{0},
+    sib: Bool{false},
+    scale: Int{0},
+    index: Int{0},
+    base: Int{0},
+    disp: Int{0},
+    rip: Int{-1},
+    immediates: [Int],
+}
+
+// The maps a row's space word names: L0 the one-byte map, L1 0F, L2 0F 38,
+// L3 0F 3A (spaces 0-3); V1-V3 the VEX maps 0F, 0F 38, 0F 3A (4-6); E1-E3
+// the EVEX ones (7-9); VE1-VE3 both. EVEX maps 5 and 6 are spaces 10 and 11,
+// which no row names.
+X64_DECODE_SPACES: 12
+
+X64_DECODE_KEYS: 3072
+
+// The x86-64 instruction forms, one per line:
+//   SPACE OPCODE[-LAST] [CONDITIONS] | NAME [OPERANDS]
+// See x64_decode_rows for the conditions and x64_decode_operand for the
+// operand codes. An opcode range gives the row to each opcode of it, and
+// `{cc}` in NAME is the condition (X64_COND_NAMES) at the opcode's offset
+// from the first. The first row that holds names the instruction.
+X64_DECODE_TABLE: #run { ```# The one-byte map.
+L0 00 | add Eb,Gb
+L0 01 | add Ev,Gv
+L0 02 | add Gb,Eb
+L0 03 | add Gv,Ev
+L0 04 | add AL,Ib
+L0 05 | add rAX,Iz
+L0 08 | or Eb,Gb
+L0 09 | or Ev,Gv
+L0 0a | or Gb,Eb
+L0 0b | or Gv,Ev
+L0 0c | or AL,Ib
+L0 0d | or rAX,Iz
+L0 10 | adc Eb,Gb
+L0 11 | adc Ev,Gv
+L0 12 | adc Gb,Eb
+L0 13 | adc Gv,Ev
+L0 14 | adc AL,Ib
+L0 15 | adc rAX,Iz
+L0 18 | sbb Eb,Gb
+L0 19 | sbb Ev,Gv
+L0 1a | sbb Gb,Eb
+L0 1b | sbb Gv,Ev
+L0 1c | sbb AL,Ib
+L0 1d | sbb rAX,Iz
+L0 20 | and Eb,Gb
+L0 21 | and Ev,Gv
+L0 22 | and Gb,Eb
+L0 23 | and Gv,Ev
+L0 24 | and AL,Ib
+L0 25 | and rAX,Iz
+L0 28 | sub Eb,Gb
+L0 29 | sub Ev,Gv
+L0 2a | sub Gb,Eb
+L0 2b | sub Gv,Ev
+L0 2c | sub AL,Ib
+L0 2d | sub rAX,Iz
+L0 30 | xor Eb,Gb
+L0 31 | xor Ev,Gv
+L0 32 | xor Gb,Eb
+L0 33 | xor Gv,Ev
+L0 34 | xor AL,Ib
+L0 35 | xor rAX,Iz
+L0 38 | cmp Eb,Gb
+L0 39 | cmp Ev,Gv
+L0 3a | cmp Gb,Eb
+L0 3b | cmp Gv,Ev
+L0 3c | cmp AL,Ib
+L0 3d | cmp rAX,Iz
+L0 50-57 | push Zs
+L0 58-5f | pop Zs
+L0 63 | movsxd Gv,Ed
+L0 68 | push Izq
+L0 69 | imul Gv,Ev,Iz
+L0 6a | push Ibq
+L0 6b | imul Gv,Ev,Ibs
+L0 6c | ins Yb,DX
+L0 6d | ins Yz,DX
+L0 6e | outs DX,Xb
+L0 6f | outs DX,Xz
+L0 70-7f | j{cc} Jb
+L0 80 /0 | add Eb,Ib
+L0 80 /1 | or Eb,Ib
+L0 80 /2 | adc Eb,Ib
+L0 80 /3 | sbb Eb,Ib
+L0 80 /4 | and Eb,Ib
+L0 80 /5 | sub Eb,Ib
+L0 80 /6 | xor Eb,Ib
+L0 80 /7 | cmp Eb,Ib
+L0 81 /0 | add Ev,Iz
+L0 81 /1 | or Ev,Iz
+L0 81 /2 | adc Ev,Iz
+L0 81 /3 | sbb Ev,Iz
+L0 81 /4 | and Ev,Iz
+L0 81 /5 | sub Ev,Iz
+L0 81 /6 | xor Ev,Iz
+L0 81 /7 | cmp Ev,Iz
+L0 83 /0 | add Ev,Ibs
+L0 83 /1 | or Ev,Ibs
+L0 83 /2 | adc Ev,Ibs
+L0 83 /3 | sbb Ev,Ibs
+L0 83 /4 | and Ev,Ibs
+L0 83 /5 | sub Ev,Ibs
+L0 83 /6 | xor Ev,Ibs
+L0 83 /7 | cmp Ev,Ibs
+L0 84 | test Eb,Gb
+L0 85 | test Ev,Gv
+L0 86 | xchg Eb,Gb
+L0 87 | xchg Ev,Gv
+L0 88 | mov Eb,Gb
+L0 89 | mov Ev,Gv
+L0 8a | mov Gb,Eb
+L0 8b | mov Gv,Ev
+L0 8c | mov Edw,Sw
+L0 8d m | lea Gv,M
+L0 8e | mov Sw,Edw
+L0 8f /0 | pop Es
+L0 90 F3 | pause
+L0 90 B0 o16 | xchg Zv,rAX
+L0 90 B0 | nop
+L0 90-97 | xchg Zv,rAX
+L0 98 o16 | cbw
+L0 98 o32 | cwde
+L0 98 o64 | cdqe
+L0 99 o16 | cwd
+L0 99 o32 | cdq
+L0 99 o64 | cqo
+L0 9b | fwait
+L0 9c | pushf
+L0 9d | popf
+L0 9e | sahf
+L0 9f | lahf
+L0 a0 | movabs AL,Ob
+L0 a1 | movabs rAX,Ov
+L0 a2 | movabs Ob,AL
+L0 a3 | movabs Ov,rAX
+L0 a4 | movs Yb,Xb
+L0 a5 | movs Yv,Xv
+L0 a6 | cmps Xb,Yb
+L0 a7 | cmps Xv,Yv
+L0 a8 | test AL,Ib
+L0 a9 | test rAX,Iz
+L0 aa | stos Yb,AL
+L0 ab | stos Yv,rAX
+L0 ac | lods AL,Xb
+L0 ad | lods rAX,Xv
+L0 ae | scas AL,Yb
+L0 af | scas rAX,Yv
+L0 b0-b7 | mov Zb,Ib
+L0 b8-bf W1 | movabs Zv,Iv
+L0 b8-bf | mov Zv,Iv
+L0 c0 /0 | rol Eb,Ib
+L0 c0 /1 | ror Eb,Ib
+L0 c0 /2 | rcl Eb,Ib
+L0 c0 /3 | rcr Eb,Ib
+L0 c0 /4 | shl Eb,Ib
+L0 c0 /5 | shr Eb,Ib
+L0 c0 /6 | shl Eb,Ib
+L0 c0 /7 | sar Eb,Ib
+L0 c1 /0 | rol Ev,Ib
+L0 c1 /1 | ror Ev,Ib
+L0 c1 /2 | rcl Ev,Ib
+L0 c1 /3 | rcr Ev,Ib
+L0 c1 /4 | shl Ev,Ib
+L0 c1 /5 | shr Ev,Ib
+L0 c1 /6 | shl Ev,Ib
+L0 c1 /7 | sar Ev,Ib
+L0 c2 | ret Iw
+L0 c3 | ret
+L0 c6 =f8 | xabort Ib
+L0 c6 /0 | mov Eb,Ib
+L0 c7 =f8 | xbegin Jz
+L0 c7 /0 | mov Ev,Iz
+L0 c8 | enter Iw,Ib
+L0 c9 | leave
+L0 ca | retf Iw
+L0 cb | retf
+L0 cc | int3
+L0 cd | int Ib
+L0 cf o16 | iretw
+L0 cf o32 | iret
+L0 cf o64 | iretq
+L0 d0 /0 | rol Eb,1
+L0 d0 /1 | ror Eb,1
+L0 d0 /2 | rcl Eb,1
+L0 d0 /3 | rcr Eb,1
+L0 d0 /4 | shl Eb,1
+L0 d0 /5 | shr Eb,1
+L0 d0 /6 | shl Eb,1
+L0 d0 /7 | sar Eb,1
+L0 d1 /0 | rol Ev,1
+L0 d1 /1 | ror Ev,1
+L0 d1 /2 | rcl Ev,1
+L0 d1 /3 | rcr Ev,1
+L0 d1 /4 | shl Ev,1
+L0 d1 /5 | shr Ev,1
+L0 d1 /6 | shl Ev,1
+L0 d1 /7 | sar Ev,1
+L0 d2 /0 | rol Eb,CL
+L0 d2 /1 | ror Eb,CL
+L0 d2 /2 | rcl Eb,CL
+L0 d2 /3 | rcr Eb,CL
+L0 d2 /4 | shl Eb,CL
+L0 d2 /5 | shr Eb,CL
+L0 d2 /6 | shl Eb,CL
+L0 d2 /7 | sar Eb,CL
+L0 d3 /0 | rol Ev,CL
+L0 d3 /1 | ror Ev,CL
+L0 d3 /2 | rcl Ev,CL
+L0 d3 /3 | rcr Ev,CL
+L0 d3 /4 | shl Ev,CL
+L0 d3 /5 | shr Ev,CL
+L0 d3 /6 | shl Ev,CL
+L0 d3 /7 | sar Ev,CL
+L0 d7 | xlat XBX
+L0 e0 | loopne Jb
+L0 e1 | loope Jb
+L0 e2 | loop Jb
+L0 e3 a32 | jecxz Jb
+L0 e3 | jrcxz Jb
+L0 e4 | in AL,Ib
+L0 e5 | in eAX,Ib
+L0 e6 | out Ib,AL
+L0 e7 | out Ib,eAX
+L0 e8 | call Jz
+L0 e9 | jmp Jz
+L0 eb | jmp Jb
+L0 ec | in AL,DX
+L0 ed | in eAX,DX
+L0 ee | out DX,AL
+L0 ef | out DX,eAX
+L0 f1 | int1
+L0 f4 | hlt
+L0 f5 | cmc
+L0 f6 /0 | test Eb,Ib
+L0 f6 /1 | test Eb,Ib
+L0 f6 /2 | not Eb
+L0 f6 /3 | neg Eb
+L0 f6 /4 | mul Eb
+L0 f6 /5 | imul Eb
+L0 f6 /6 | div Eb
+L0 f6 /7 | idiv Eb
+L0 f7 /0 | test Ev,Iz
+L0 f7 /1 | test Ev,Iz
+L0 f7 /2 | not Ev
+L0 f7 /3 | neg Ev
+L0 f7 /4 | mul Ev
+L0 f7 /5 | imul Ev
+L0 f7 /6 | div Ev
+L0 f7 /7 | idiv Ev
+L0 f8 | clc
+L0 f9 | stc
+L0 fa | cli
+L0 fb | sti
+L0 fc | cld
+L0 fd | std
+L0 fe /0 | inc Eb
+L0 fe /1 | dec Eb
+L0 ff /0 | inc Ev
+L0 ff /1 | dec Ev
+L0 ff /2 | call Es
+L0 ff /3 m | call Mf
+L0 ff /4 | jmp Es
+L0 ff /5 m | jmp Mf
+L0 ff /6 | push Es
+# x87.
+L0 d8 m /0 | fadd Md
+L0 d8 m /1 | fmul Md
+L0 d8 m /2 | fcom Md
+L0 d8 m /3 | fcomp Md
+L0 d8 m /4 | fsub Md
+L0 d8 m /5 | fsubr Md
+L0 d8 m /6 | fdiv Md
+L0 d8 m /7 | fdivr Md
+L0 d8 /0 | fadd F0,Fi
+L0 d8 /1 | fmul F0,Fi
+L0 d8 /2 | fcom Fi
+L0 d8 /3 | fcomp Fi
+L0 d8 /4 | fsub F0,Fi
+L0 d8 /5 | fsubr F0,Fi
+L0 d8 /6 | fdiv F0,Fi
+L0 d8 /7 | fdivr F0,Fi
+L0 d9 m /0 | fld Md
+L0 d9 m /2 | fst Md
+L0 d9 m /3 | fstp Md
+L0 d9 m /4 | fldenv M
+L0 d9 m /5 | fldcw Mw
+L0 d9 m /6 | fnstenv M
+L0 d9 m /7 | fnstcw Mw
+L0 d9 /0 | fld Fi
+L0 d9 /1 | fxch Fi
+L0 d9 =d0 | fnop
+L0 d9 =e0 | fchs
+L0 d9 =e1 | fabs
+L0 d9 =e4 | ftst
+L0 d9 =e5 | fxam
+L0 d9 =e8 | fld1
+L0 d9 =e9 | fldl2t
+L0 d9 =ea | fldl2e
+L0 d9 =eb | fldpi
+L0 d9 =ec | fldlg2
+L0 d9 =ed | fldln2
+L0 d9 =ee | fldz
+L0 d9 =f0 | f2xm1
+L0 d9 =f1 | fyl2x
+L0 d9 =f2 | fptan
+L0 d9 =f3 | fpatan
+L0 d9 =f4 | fxtract
+L0 d9 =f5 | fprem1
+L0 d9 =f6 | fdecstp
+L0 d9 =f7 | fincstp
+L0 d9 =f8 | fprem
+L0 d9 =f9 | fyl2xp1
+L0 d9 =fa | fsqrt
+L0 d9 =fb | fsincos
+L0 d9 =fc | frndint
+L0 d9 =fd | fscale
+L0 d9 =fe | fsin
+L0 d9 =ff | fcos
+L0 da m /0 | fiadd Md
+L0 da m /1 | fimul Md
+L0 da m /2 | ficom Md
+L0 da m /3 | ficomp Md
+L0 da m /4 | fisub Md
+L0 da m /5 | fisubr Md
+L0 da m /6 | fidiv Md
+L0 da m /7 | fidivr Md
+L0 da /0 | fcmovb F0,Fi
+L0 da /1 | fcmove F0,Fi
+L0 da /2 | fcmovbe F0,Fi
+L0 da /3 | fcmovu F0,Fi
+L0 da =e9 | fucompp
+L0 db m /0 | fild Md
+L0 db m /1 | fisttp Md
+L0 db m /2 | fist Md
+L0 db m /3 | fistp Md
+L0 db m /5 | fld Mt
+L0 db m /7 | fstp Mt
+L0 db /0 | fcmovnb F0,Fi
+L0 db /1 | fcmovne F0,Fi
+L0 db /2 | fcmovnbe F0,Fi
+L0 db /3 | fcmovnu F0,Fi
+L0 db =e2 | fnclex
+L0 db =e3 | fninit
+L0 db /5 | fucomi F0,Fi
+L0 db /6 | fcomi F0,Fi
+L0 dc m /0 | fadd Mq
+L0 dc m /1 | fmul Mq
+L0 dc m /2 | fcom Mq
+L0 dc m /3 | fcomp Mq
+L0 dc m /4 | fsub Mq
+L0 dc m /5 | fsubr Mq
+L0 dc m /6 | fdiv Mq
+L0 dc m /7 | fdivr Mq
+L0 dc /0 | fadd Fi,F0
+L0 dc /1 | fmul Fi,F0
+L0 dc /4 | fsubr Fi,F0
+L0 dc /5 | fsub Fi,F0
+L0 dc /6 | fdivr Fi,F0
+L0 dc /7 | fdiv Fi,F0
+L0 dd m /0 | fld Mq
+L0 dd m /1 | fisttp Mq
+L0 dd m /2 | fst Mq
+L0 dd m /3 | fstp Mq
+L0 dd m /4 | frstor M
+L0 dd m /6 | fnsave M
+L0 dd m /7 | fnstsw Mw
+L0 dd /0 | ffree Fi
+L0 dd /2 | fst Fi
+L0 dd /3 | fstp Fi
+L0 dd /4 | fucom Fi
+L0 dd /5 | fucomp Fi
+L0 de m /0 | fiadd Mw
+L0 de m /1 | fimul Mw
+L0 de m /2 | ficom Mw
+L0 de m /3 | ficomp Mw
+L0 de m /4 | fisub Mw
+L0 de m /5 | fisubr Mw
+L0 de m /6 | fidiv Mw
+L0 de m /7 | fidivr Mw
+L0 de =d9 | fcompp
+L0 de /0 | faddp Fi,F0
+L0 de /1 | fmulp Fi,F0
+L0 de /4 | fsubrp Fi,F0
+L0 de /5 | fsubp Fi,F0
+L0 de /6 | fdivrp Fi,F0
+L0 de /7 | fdivp Fi,F0
+L0 df m /0 | fild Mw
+L0 df m /1 | fisttp Mw
+L0 df m /2 | fist Mw
+L0 df m /3 | fistp Mw
+L0 df m /4 | fbld Mt
+L0 df m /5 | fild Mq
+L0 df m /6 | fbstp Mt
+L0 df m /7 | fistp Mq
+L0 df =e0 | fnstsw AX
+L0 df /0 | ffreep Fi
+L0 df /5 | fucomip F0,Fi
+L0 df /6 | fcomip F0,Fi
+# The 0F map.
+L1 01 =d0 | xgetbv
+L1 01 =d1 | xsetbv
+L1 01 =d5 | xend
+L1 01 =d6 | xtest
+L1 01 np =e8 | serialize
+L1 01 =ee | rdpkru
+L1 01 =ef | wrpkru
+L1 01 =f9 | rdtscp
+L1 05 | syscall
+L1 0b | ud2
+L1 0d m /0 | prefetch Mb
+L1 0d m /1 | prefetchw Mb
+L1 0d m /2 | prefetchwt1 Mb
+L1 10 np | movups Vx,Wx
+L1 10 66 | movupd Vx,Wx
+L1 10 F3 | movss Vo,Wd
+L1 10 F2 | movsd Vo,Wq
+L1 11 np | movups Wx,Vx
+L1 11 66 | movupd Wx,Vx
+L1 11 F3 | movss Wd,Vo
+L1 11 F2 | movsd Wq,Vo
+L1 12 np r | movhlps Vo,Wo
+L1 12 np m | movlps Vo,Mq
+L1 12 66 m | movlpd Vo,Mq
+L1 12 F3 | movsldup Vo,Wo
+L1 12 F2 | movddup Vo,Wq
+L1 13 np m | movlps Mq,Vo
+L1 13 66 m | movlpd Mq,Vo
+L1 14 np | unpcklps Vx,Wx
+L1 14 66 | unpcklpd Vx,Wx
+L1 15 np | unpckhps Vx,Wx
+L1 15 66 | unpckhpd Vx,Wx
+L1 16 np r | movlhps Vo,Wo
+L1 16 np m | movhps Vo,Mq
+L1 16 66 m | movhpd Vo,Mq
+L1 16 F3 | movshdup Vo,Wo
+L1 17 np m | movhps Mq,Vo
+L1 17 66 m | movhpd Mq,Vo
+L1 18 m /0 | prefetchnta Mb
+L1 18 m /1 | prefetcht0 Mb
+L1 18 m /2 | prefetcht1 Mb
+L1 18 m /3 | prefetcht2 Mb
+L1 1e F3 =fa | endbr64
+L1 1e F3 =fb | endbr32
+L1 18-1f | nop Ev
+L1 28 np | movaps Vx,Wx
+L1 28 66 | movapd Vx,Wx
+L1 29 np | movaps Wx,Vx
+L1 29 66 | movapd Wx,Vx
+L1 2a F3 | cvtsi2ss Vo,Ey
+L1 2a F2 | cvtsi2sd Vo,Ey
+L1 2b np m | movntps Mx,Vx
+L1 2b 66 m | movntpd Mx,Vx
+L1 2c F3 | cvttss2si Gy,Wd
+L1 2c F2 | cvttsd2si Gy,Wq
+L1 2d F3 | cvtss2si Gy,Wd
+L1 2d F2 | cvtsd2si Gy,Wq
+L1 2e np | ucomiss Vo,Wd
+L1 2e 66 | ucomisd Vo,Wq
+L1 2f np | comiss Vo,Wd
+L1 2f 66 | comisd Vo,Wq
+L1 30 | wrmsr
+L1 31 | rdtsc
+L1 32 | rdmsr
+L1 33 | rdpmc
+L1 40-4f | cmov{cc} Gv,Ev
+L1 50 np r | movmskps Gd,Wo
+L1 50 66 r | movmskpd Gd,Wo
+L1 51 np | sqrtps Vx,Wx
+L1 51 66 | sqrtpd Vx,Wx
+L1 51 F3 | sqrtss Vo,Wd
+L1 51 F2 | sqrtsd Vo,Wq
+L1 52 np | rsqrtps Vx,Wx
+L1 52 F3 | rsqrtss Vo,Wd
+L1 53 np | rcpps Vx,Wx
+L1 53 F3 | rcpss Vo,Wd
+L1 54 np | andps Vx,Wx
+L1 54 66 | andpd Vx,Wx
+L1 55 np | andnps Vx,Wx
+L1 55 66 | andnpd Vx,Wx
+L1 56 np | orps Vx,Wx
+L1 56 66 | orpd Vx,Wx
+L1 57 np | xorps Vx,Wx
+L1 57 66 | xorpd Vx,Wx
+L1 58 np | addps Vx,Wx
+L1 58 66 | addpd Vx,Wx
+L1 58 F3 | addss Vo,Wd
+L1 58 F2 | addsd Vo,Wq
+L1 59 np | mulps Vx,Wx
+L1 59 66 | mulpd Vx,Wx
+L1 59 F3 | mulss Vo,Wd
+L1 59 F2 | mulsd Vo,Wq
+L1 5a np | cvtps2pd Vo,Wq
+L1 5a 66 | cvtpd2ps Vo,Wo
+L1 5a F3 | cvtss2sd Vo,Wd
+L1 5a F2 | cvtsd2ss Vo,Wq
+L1 5b np | cvtdq2ps Vx,Wx
+L1 5b 66 | cvtps2dq Vx,Wx
+L1 5b F3 | cvttps2dq Vx,Wx
+L1 5c np | subps Vx,Wx
+L1 5c 66 | subpd Vx,Wx
+L1 5c F3 | subss Vo,Wd
+L1 5c F2 | subsd Vo,Wq
+L1 5d np | minps Vx,Wx
+L1 5d 66 | minpd Vx,Wx
+L1 5d F3 | minss Vo,Wd
+L1 5d F2 | minsd Vo,Wq
+L1 5e np | divps Vx,Wx
+L1 5e 66 | divpd Vx,Wx
+L1 5e F3 | divss Vo,Wd
+L1 5e F2 | divsd Vo,Wq
+L1 5f np | maxps Vx,Wx
+L1 5f 66 | maxpd Vx,Wx
+L1 5f F3 | maxss Vo,Wd
+L1 5f F2 | maxsd Vo,Wq
+L1 60 66 | punpcklbw Vx,Wx
+L1 61 66 | punpcklwd Vx,Wx
+L1 62 66 | punpckldq Vx,Wx
+L1 63 66 | packsswb Vx,Wx
+L1 64 66 | pcmpgtb Vx,Wx
+L1 65 66 | pcmpgtw Vx,Wx
+L1 66 66 | pcmpgtd Vx,Wx
+L1 67 66 | packuswb Vx,Wx
+L1 68 66 | punpckhbw Vx,Wx
+L1 69 66 | punpckhwd Vx,Wx
+L1 6a 66 | punpckhdq Vx,Wx
+L1 6b 66 | packssdw Vx,Wx
+L1 6c 66 | punpcklqdq Vx,Wx
+L1 6d 66 | punpckhqdq Vx,Wx
+L1 6e 66 W1 | movq Vo,Eq
+L1 6e 66 | movd Vo,Ed
+L1 6f 66 | movdqa Vx,Wx
+L1 6f F3 | movdqu Vx,Wx
+L1 70 66 | pshufd Vx,Wx,Ib
+L1 70 F3 | pshufhw Vx,Wx,Ib
+L1 70 F2 | pshuflw Vx,Wx,Ib
+L1 71 66 r /2 | psrlw Wo,Ib
+L1 71 66 r /4 | psraw Wo,Ib
+L1 71 66 r /6 | psllw Wo,Ib
+L1 72 66 r /2 | psrld Wo,Ib
+L1 72 66 r /4 | psrad Wo,Ib
+L1 72 66 r /6 | pslld Wo,Ib
+L1 73 66 r /2 | psrlq Wo,Ib
+L1 73 66 r /3 | psrldq Wo,Ib
+L1 73 66 r /6 | psllq Wo,Ib
+L1 73 66 r /7 | pslldq Wo,Ib
+L1 74 66 | pcmpeqb Vx,Wx
+L1 75 66 | pcmpeqw Vx,Wx
+L1 76 66 | pcmpeqd Vx,Wx
+L1 77 np | emms
+L1 7c 66 | haddpd Vx,Wx
+L1 7c F2 | haddps Vx,Wx
+L1 7d 66 | hsubpd Vx,Wx
+L1 7d F2 | hsubps Vx,Wx
+L1 7e 66 W1 | movq Eq,Vo
+L1 7e 66 | movd Ed,Vo
+L1 7e F3 | movq Vo,Wq
+L1 7f 66 | movdqa Wx,Vx
+L1 7f F3 | movdqu Wx,Vx
+L1 80-8f | j{cc} Jz
+L1 90-9f | set{cc} Eb
+L1 a2 | cpuid
+L1 a3 | bt Ev,Gv
+L1 a4 | shld Ev,Gv,Ib
+L1 a5 | shld Ev,Gv,CL
+L1 ab | bts Ev,Gv
+L1 ac | shrd Ev,Gv,Ib
+L1 ad | shrd Ev,Gv,CL
+L1 ae np m /0 W1 | fxsave64 M
+L1 ae np m /0 | fxsave M
+L1 ae np m /1 W1 | fxrstor64 M
+L1 ae np m /1 | fxrstor M
+L1 ae np m /2 | ldmxcsr Md
+L1 ae np m /3 | stmxcsr Md
+L1 ae np m /4 W1 | xsave64 M
+L1 ae np m /4 | xsave M
+L1 ae np m /5 W1 | xrstor64 M
+L1 ae np m /5 | xrstor M
+L1 ae np m /6 W1 | xsaveopt64 M
+L1 ae np m /6 | xsaveopt M
+L1 ae 66 m /6 | clwb Mb
+L1 ae np m /7 | clflush Mb
+L1 ae 66 m /7 | clflushopt Mb
+L1 ae F3 r /0 | rdfsbase Ey
+L1 ae F3 r /1 | rdgsbase Ey
+L1 ae F3 r /2 | wrfsbase Ey
+L1 ae F3 r /3 | wrgsbase Ey
+L1 ae np r /5 | lfence
+L1 ae np r /6 | mfence
+L1 ae np r /7 | sfence
+L1 af | imul Gv,Ev
+L1 b0 | cmpxchg Eb,Gb
+L1 b1 | cmpxchg Ev,Gv
+L1 b3 | btr Ev,Gv
+L1 b6 | movzx Gv,Eb
+L1 b7 | movzx Gv,Ew
+L1 b8 F3 | popcnt Gv,Ev
+L1 b9 | ud1 Gv,Ev
+L1 ba /4 | bt Ev,Ib
+L1 ba /5 | bts Ev,Ib
+L1 ba /6 | btr Ev,Ib
+L1 ba /7 | btc Ev,Ib
+L1 bb | btc Ev,Gv
+L1 bc F3 | tzcnt Gv,Ev
+L1 bc | bsf Gv,Ev
+L1 bd F3 | lzcnt Gv,Ev
+L1 bd | bsr Gv,Ev
+L1 be | movsx Gv,Eb
+L1 bf | movsx Gv,Ew
+L1 c0 | xadd Eb,Gb
+L1 c1 | xadd Ev,Gv
+L1 c2 np | cmpps Vx,Wx,Ib
+L1 c2 66 | cmppd Vx,Wx,Ib
+L1 c2 F3 | cmpss Vo,Wd,Ib
+L1 c2 F2 | cmpsd Vo,Wq,Ib
+L1 c3 np m | movnti My,Gy
+L1 c4 66 | pinsrw Vo,Edw,Ib
+L1 c5 66 r | pextrw Gd,Wo,Ib
+L1 c6 np | shufps Vx,Wx,Ib
+L1 c6 66 | shufpd Vx,Wx,Ib
+L1 c7 m /1 W1 | cmpxchg16b Mo
+L1 c7 m /1 | cmpxchg8b Mq
+L1 c7 m /4 W1 | xsavec64 M
+L1 c7 m /4 | xsavec M
+L1 c7 F3 r /7 | rdpid Eq
+L1 c7 r /6 | rdrand Ev
+L1 c7 r /7 | rdseed Ev
+L1 c8-cf | bswap Zv
+L1 d0 66 | addsubpd Vx,Wx
+L1 d0 F2 | addsubps Vx,Wx
+L1 d1 66 | psrlw Vx,Wx
+L1 d2 66 | psrld Vx,Wx
+L1 d3 66 | psrlq Vx,Wx
+L1 d4 66 | paddq Vx,Wx
+L1 d5 66 | pmullw Vx,Wx
+L1 d6 66 | movq Wq,Vo
+L1 d7 66 r | pmovmskb Gd,Wo
+L1 d8 66 | psubusb Vx,Wx
+L1 d9 66 | psubusw Vx,Wx
+L1 da 66 | pminub Vx,Wx
+L1 db 66 | pand Vx,Wx
+L1 dc 66 | paddusb Vx,Wx
+L1 dd 66 | paddusw Vx,Wx
+L1 de 66 | pmaxub Vx,Wx
+L1 df 66 | pandn Vx,Wx
+L1 e0 66 | pavgb Vx,Wx
+L1 e1 66 | psraw Vx,Wx
+L1 e2 66 | psrad Vx,Wx
+L1 e3 66 | pavgw Vx,Wx
+L1 e4 66 | pmulhuw Vx,Wx
+L1 e5 66 | pmulhw Vx,Wx
+L1 e6 66 | cvttpd2dq Vo,Wo
+L1 e6 F3 | cvtdq2pd Vo,Wq
+L1 e6 F2 | cvtpd2dq Vo,Wo
+L1 e7 66 m | movntdq Mx,Vx
+L1 e8 66 | psubsb Vx,Wx
+L1 e9 66 | psubsw Vx,Wx
+L1 ea 66 | pminsw Vx,Wx
+L1 eb 66 | por Vx,Wx
+L1 ec 66 | paddsb Vx,Wx
+L1 ed 66 | paddsw Vx,Wx
+L1 ee 66 | pmaxsw Vx,Wx
+L1 ef 66 | pxor Vx,Wx
+L1 f0 F2 m | lddqu Vx,Mx
+L1 f1 66 | psllw Vx,Wx
+L1 f2 66 | pslld Vx,Wx
+L1 f3 66 | psllq Vx,Wx
+L1 f4 66 | pmuludq Vx,Wx
+L1 f5 66 | pmaddwd Vx,Wx
+L1 f6 66 | psadbw Vx,Wx
+L1 f7 66 r | maskmovdqu Vo,Wo
+L1 f8 66 | psubb Vx,Wx
+L1 f9 66 | psubw Vx,Wx
+L1 fa 66 | psubd Vx,Wx
+L1 fb 66 | psubq Vx,Wx
+L1 fc 66 | paddb Vx,Wx
+L1 fd 66 | paddw Vx,Wx
+L1 fe 66 | paddd Vx,Wx
+L1 ff | ud0 Gv,Ev
+# The 0F 38 map.
+L2 00 66 | pshufb Vx,Wx
+L2 01 66 | phaddw Vx,Wx
+L2 02 66 | phaddd Vx,Wx
+L2 03 66 | phaddsw Vx,Wx
+L2 04 66 | pmaddubsw Vx,Wx
+L2 05 66 | phsubw Vx,Wx
+L2 06 66 | phsubd Vx,Wx
+L2 07 66 | phsubsw Vx,Wx
+L2 08 66 | psignb Vx,Wx
+L2 09 66 | psignw Vx,Wx
+L2 0a 66 | psignd Vx,Wx
+L2 0b 66 | pmulhrsw Vx,Wx
+L2 10 66 | pblendvb Vx,Wx,XMM0
+L2 14 66 | blendvps Vx,Wx,XMM0
+L2 15 66 | blendvpd Vx,Wx,XMM0
+L2 17 66 | ptest Vx,Wx
+L2 1c 66 | pabsb Vx,Wx
+L2 1d 66 | pabsw Vx,Wx
+L2 1e 66 | pabsd Vx,Wx
+L2 20 66 | pmovsxbw Vo,Wq
+L2 21 66 | pmovsxbd Vo,Wd
+L2 22 66 | pmovsxbq Vo,Ww
+L2 23 66 | pmovsxwd Vo,Wq
+L2 24 66 | pmovsxwq Vo,Wd
+L2 25 66 | pmovsxdq Vo,Wq
+L2 28 66 | pmuldq Vx,Wx
+L2 29 66 | pcmpeqq Vx,Wx
+L2 2a 66 m | movntdqa Vx,Mx
+L2 2b 66 | packusdw Vx,Wx
+L2 30 66 | pmovzxbw Vo,Wq
+L2 31 66 | pmovzxbd Vo,Wd
+L2 32 66 | pmovzxbq Vo,Ww
+L2 33 66 | pmovzxwd Vo,Wq
+L2 34 66 | pmovzxwq Vo,Wd
+L2 35 66 | pmovzxdq Vo,Wq
+L2 37 66 | pcmpgtq Vx,Wx
+L2 38 66 | pminsb Vx,Wx
+L2 39 66 | pminsd Vx,Wx
+L2 3a 66 | pminuw Vx,Wx
+L2 3b 66 | pminud Vx,Wx
+L2 3c 66 | pmaxsb Vx,Wx
+L2 3d 66 | pmaxsd Vx,Wx
+L2 3e 66 | pmaxuw Vx,Wx
+L2 3f 66 | pmaxud Vx,Wx
+L2 40 66 | pmulld Vx,Wx
+L2 41 66 | phminposuw Vo,Wo
+L2 c8 np | sha1nexte Vo,Wo
+L2 c9 np | sha1msg1 Vo,Wo
+L2 ca np | sha1msg2 Vo,Wo
+L2 cb np | sha256rnds2 Vo,Wo,XMM0
+L2 cc np | sha256msg1 Vo,Wo
+L2 cd np | sha256msg2 Vo,Wo
+L2 db 66 | aesimc Vo,Wo
+L2 dc 66 | aesenc Vo,Wo
+L2 dd 66 | aesenclast Vo,Wo
+L2 de 66 | aesdec Vo,Wo
+L2 df 66 | aesdeclast Vo,Wo
+L2 f0 F2 | crc32 Gy,Eb
+L2 f1 F2 | crc32 Gy,Ev
+L2 f0 m | movbe Gv,Mv
+L2 f1 m | movbe Mv,Gv
+L2 f6 66 | adcx Gy,Ey
+L2 f6 F3 | adox Gy,Ey
+# The 0F 3A map.
+L3 08 66 | roundps Vx,Wx,Ib
+L3 09 66 | roundpd Vx,Wx,Ib
+L3 0a 66 | roundss Vo,Wd,Ib
+L3 0b 66 | roundsd Vo,Wq,Ib
+L3 0c 66 | blendps Vx,Wx,Ib
+L3 0d 66 | blendpd Vx,Wx,Ib
+L3 0e 66 | pblendw Vx,Wx,Ib
+L3 0f 66 | palignr Vx,Wx,Ib
+L3 14 66 | pextrb Edb,Vo,Ib
+L3 15 66 | pextrw Edw,Vo,Ib
+L3 16 66 W1 | pextrq Eq,Vo,Ib
+L3 16 66 | pextrd Ed,Vo,Ib
+L3 17 66 | extractps Ed,Vo,Ib
+L3 20 66 | pinsrb Vo,Edb,Ib
+L3 21 66 | insertps Vo,Wd,Ib
+L3 22 66 W1 | pinsrq Vo,Eq,Ib
+L3 22 66 | pinsrd Vo,Ed,Ib
+L3 40 66 | dpps Vx,Wx,Ib
+L3 41 66 | dppd Vx,Wx,Ib
+L3 42 66 | mpsadbw Vx,Wx,Ib
+L3 44 66 | pclmulqdq Vo,Wo,Ib
+L3 60 66 | pcmpestrm Vo,Wo,Ib
+L3 61 66 | pcmpestri Vo,Wo,Ib
+L3 62 66 | pcmpistrm Vo,Wo,Ib
+L3 63 66 | pcmpistri Vo,Wo,Ib
+L3 cc np | sha1rnds4 Vo,Wo,Ib
+L3 df 66 | aeskeygenassist Vo,Wo,Ib
+# The VEX 0F map (with EVEX where both name it alike).
+VE1 10 np | vmovups Vx,Wx
+VE1 10 66 | vmovupd Vx,Wx
+VE1 10 F3 r | vmovss Vo,Ho,Wo
+VE1 10 F3 m | vmovss Vo,Md
+VE1 10 F2 r | vmovsd Vo,Ho,Wo
+VE1 10 F2 m | vmovsd Vo,Mq
+VE1 11 np | vmovups Wx,Vx
+VE1 11 66 | vmovupd Wx,Vx
+VE1 11 F3 r | vmovss Wo,Ho,Vo
+VE1 11 F3 m | vmovss Md,Vo
+VE1 11 F2 r | vmovsd Wo,Ho,Vo
+VE1 11 F2 m | vmovsd Mq,Vo
+VE1 12 np r | vmovhlps Vo,Ho,Wo
+VE1 12 np m | vmovlps Vo,Ho,Mq
+VE1 12 66 m | vmovlpd Vo,Ho,Mq
+VE1 12 F3 | vmovsldup Vx,Wx
+VE1 12 F2 l0 | vmovddup Vo,Wq
+VE1 12 F2 | vmovddup Vx,Wx
+VE1 13 np m | vmovlps Mq,Vo
+VE1 13 66 m | vmovlpd Mq,Vo
+VE1 14 np | vunpcklps Vx,Hx,Wx
+VE1 14 66 | vunpcklpd Vx,Hx,Wx
+VE1 15 np | vunpckhps Vx,Hx,Wx
+VE1 15 66 | vunpckhpd Vx,Hx,Wx
+VE1 16 np r | vmovlhps Vo,Ho,Wo
+VE1 16 np m | vmovhps Vo,Ho,Mq
+VE1 16 66 m | vmovhpd Vo,Ho,Mq
+VE1 16 F3 | vmovshdup Vx,Wx
+VE1 17 np m | vmovhps Mq,Vo
+VE1 17 66 m | vmovhpd Mq,Vo
+VE1 28 np | vmovaps Vx,Wx
+VE1 28 66 | vmovapd Vx,Wx
+VE1 29 np | vmovaps Wx,Vx
+VE1 29 66 | vmovapd Wx,Vx
+VE1 2a F3 er | vcvtsi2ss Vo,Ho,Ey
+VE1 2a F2 er | vcvtsi2sd Vo,Ho,Ey
+VE1 2b np m | vmovntps Mx,Vx
+VE1 2b 66 m | vmovntpd Mx,Vx
+VE1 2c F3 sae | vcvttss2si Gy,Wd
+VE1 2c F2 sae | vcvttsd2si Gy,Wq
+VE1 2d F3 er | vcvtss2si Gy,Wd
+VE1 2d F2 er | vcvtsd2si Gy,Wq
+VE1 2e np sae | vucomiss Vo,Wd
+VE1 2e 66 sae | vucomisd Vo,Wq
+VE1 2f np sae | vcomiss Vo,Wd
+VE1 2f 66 sae | vcomisd Vo,Wq
+V1 41 np l1 W0 | kandw Kr,Hk,Km
+V1 41 66 l1 W0 | kandb Kr,Hk,Km
+V1 41 np l1 W1 | kandq Kr,Hk,Km
+V1 41 66 l1 W1 | kandd Kr,Hk,Km
+V1 42 np l1 W0 | kandnw Kr,Hk,Km
+V1 42 66 l1 W0 | kandnb Kr,Hk,Km
+V1 42 np l1 W1 | kandnq Kr,Hk,Km
+V1 42 66 l1 W1 | kandnd Kr,Hk,Km
+V1 44 np l0 W0 | knotw Kr,Km
+V1 44 66 l0 W0 | knotb Kr,Km
+V1 44 np l0 W1 | knotq Kr,Km
+V1 44 66 l0 W1 | knotd Kr,Km
+V1 45 np l1 W0 | korw Kr,Hk,Km
+V1 45 66 l1 W0 | korb Kr,Hk,Km
+V1 45 np l1 W1 | korq Kr,Hk,Km
+V1 45 66 l1 W1 | kord Kr,Hk,Km
+V1 46 np l1 W0 | kxnorw Kr,Hk,Km
+V1 46 66 l1 W0 | kxnorb Kr,Hk,Km
+V1 46 np l1 W1 | kxnorq Kr,Hk,Km
+V1 46 66 l1 W1 | kxnord Kr,Hk,Km
+V1 47 np l1 W0 | kxorw Kr,Hk,Km
+V1 47 66 l1 W0 | kxorb Kr,Hk,Km
+V1 47 np l1 W1 | kxorq Kr,Hk,Km
+V1 47 66 l1 W1 | kxord Kr,Hk,Km
+V1 4a np l1 W0 | kaddw Kr,Hk,Km
+V1 4a 66 l1 W0 | kaddb Kr,Hk,Km
+V1 4a np l1 W1 | kaddq Kr,Hk,Km
+V1 4a 66 l1 W1 | kaddd Kr,Hk,Km
+V1 4b 66 l1 W0 | kunpckbw Kr,Hk,Km
+V1 4b np l1 W0 | kunpckwd Kr,Hk,Km
+V1 4b np l1 W1 | kunpckdq Kr,Hk,Km
+VE1 50 np r | vmovmskps Gd,Wx
+VE1 50 66 r | vmovmskpd Gd,Wx
+VE1 51 np er | vsqrtps Vx,Wx
+VE1 51 66 er | vsqrtpd Vx,Wx
+VE1 51 F3 er | vsqrtss Vo,Ho,Wd
+VE1 51 F2 er | vsqrtsd Vo,Ho,Wq
+V1 52 np | vrsqrtps Vx,Wx
+V1 52 F3 | vrsqrtss Vo,Ho,Wd
+V1 53 np | vrcpps Vx,Wx
+V1 53 F3 | vrcpss Vo,Ho,Wd
+VE1 54 np | vandps Vx,Hx,Wx
+VE1 54 66 | vandpd Vx,Hx,Wx
+VE1 55 np | vandnps Vx,Hx,Wx
+VE1 55 66 | vandnpd Vx,Hx,Wx
+VE1 56 np | vorps Vx,Hx,Wx
+VE1 56 66 | vorpd Vx,Hx,Wx
+VE1 57 np | vxorps Vx,Hx,Wx
+VE1 57 66 | vxorpd Vx,Hx,Wx
+VE1 58 np er | vaddps Vx,Hx,Wx
+VE1 58 66 er | vaddpd Vx,Hx,Wx
+VE1 58 F3 er | vaddss Vo,Ho,Wd
+VE1 58 F2 er | vaddsd Vo,Ho,Wq
+VE1 59 np er | vmulps Vx,Hx,Wx
+VE1 59 66 er | vmulpd Vx,Hx,Wx
+VE1 59 F3 er | vmulss Vo,Ho,Wd
+VE1 59 F2 er | vmulsd Vo,Ho,Wq
+VE1 5a np sae e4 | vcvtps2pd Vx,Wh
+VE1 5a 66 er | vcvtpd2ps Vh,Wx
+VE1 5a F3 sae | vcvtss2sd Vo,Ho,Wd
+VE1 5a F2 er | vcvtsd2ss Vo,Ho,Wq
+V1 5b np | vcvtdq2ps Vx,Wx
+V1 5b 66 | vcvtps2dq Vx,Wx
+V1 5b F3 | vcvttps2dq Vx,Wx
+E1 5b np W0 er | vcvtdq2ps Vx,Wx
+E1 5b np W1 er | vcvtqq2ps Vh,Wx
+E1 5b 66 er | vcvtps2dq Vx,Wx
+E1 5b F3 sae | vcvttps2dq Vx,Wx
+VE1 5c np er | vsubps Vx,Hx,Wx
+VE1 5c 66 er | vsubpd Vx,Hx,Wx
+VE1 5c F3 er | vsubss Vo,Ho,Wd
+VE1 5c F2 er | vsubsd Vo,Ho,Wq
+VE1 5d np sae | vminps Vx,Hx,Wx
+VE1 5d 66 sae | vminpd Vx,Hx,Wx
+VE1 5d F3 sae | vminss Vo,Ho,Wd
+VE1 5d F2 sae | vminsd Vo,Ho,Wq
+VE1 5e np er | vdivps Vx,Hx,Wx
+VE1 5e 66 er | vdivpd Vx,Hx,Wx
+VE1 5e F3 er | vdivss Vo,Ho,Wd
+VE1 5e F2 er | vdivsd Vo,Ho,Wq
+VE1 5f np sae | vmaxps Vx,Hx,Wx
+VE1 5f 66 sae | vmaxpd Vx,Hx,Wx
+VE1 5f F3 sae | vmaxss Vo,Ho,Wd
+VE1 5f F2 sae | vmaxsd Vo,Ho,Wq
+VE1 60 66 | vpunpcklbw Vx,Hx,Wx
+VE1 61 66 | vpunpcklwd Vx,Hx,Wx
+VE1 62 66 | vpunpckldq Vx,Hx,Wx
+VE1 63 66 | vpacksswb Vx,Hx,Wx
+V1 64 66 | vpcmpgtb Vx,Hx,Wx
+V1 65 66 | vpcmpgtw Vx,Hx,Wx
+V1 66 66 | vpcmpgtd Vx,Hx,Wx
+E1 64 66 | vpcmpgtb Kr,Hx,Wx
+E1 65 66 | vpcmpgtw Kr,Hx,Wx
+E1 66 66 | vpcmpgtd Kr,Hx,Wx
+VE1 67 66 | vpackuswb Vx,Hx,Wx
+VE1 68 66 | vpunpckhbw Vx,Hx,Wx
+VE1 69 66 | vpunpckhwd Vx,Hx,Wx
+VE1 6a 66 | vpunpckhdq Vx,Hx,Wx
+VE1 6b 66 | vpackssdw Vx,Hx,Wx
+VE1 6c 66 | vpunpcklqdq Vx,Hx,Wx
+VE1 6d 66 | vpunpckhqdq Vx,Hx,Wx
+VE1 6e 66 W1 | vmovq Vo,Eq
+VE1 6e 66 | vmovd Vo,Ed
+V1 6f 66 | vmovdqa Vx,Wx
+V1 6f F3 | vmovdqu Vx,Wx
+E1 6f 66 W0 | vmovdqa32 Vx,Wx
+E1 6f 66 W1 | vmovdqa64 Vx,Wx
+E1 6f F3 W0 | vmovdqu32 Vx,Wx
+E1 6f F3 W1 | vmovdqu64 Vx,Wx
+E1 6f F2 W0 | vmovdqu8 Vx,Wx
+E1 6f F2 W1 | vmovdqu16 Vx,Wx
+VE1 70 66 | vpshufd Vx,Wx,Ib
+VE1 70 F3 | vpshufhw Vx,Wx,Ib
+VE1 70 F2 | vpshuflw Vx,Wx,Ib
+VE1 71 66 /2 | vpsrlw Hx,Wx,Ib
+VE1 71 66 /4 | vpsraw Hx,Wx,Ib
+VE1 71 66 /6 | vpsllw Hx,Wx,Ib
+E1 72 66 /0 W0 | vprord Hx,Wx,Ib
+E1 72 66 /0 W1 | vprorq Hx,Wx,Ib
+E1 72 66 /1 W0 | vprold Hx,Wx,Ib
+E1 72 66 /1 W1 | vprolq Hx,Wx,Ib
+E1 72 66 /4 W1 | vpsraq Hx,Wx,Ib
+VE1 72 66 /2 | vpsrld Hx,Wx,Ib
+VE1 72 66 /4 | vpsrad Hx,Wx,Ib
+VE1 72 66 /6 | vpslld Hx,Wx,Ib
+VE1 73 66 /2 | vpsrlq Hx,Wx,Ib
+VE1 73 66 /3 | vpsrldq Hx,Wx,Ib
+VE1 73 66 /6 | vpsllq Hx,Wx,Ib
+VE1 73 66 /7 | vpslldq Hx,Wx,Ib
+V1 74 66 | vpcmpeqb Vx,Hx,Wx
+V1 75 66 | vpcmpeqw Vx,Hx,Wx
+V1 76 66 | vpcmpeqd Vx,Hx,Wx
+E1 74 66 | vpcmpeqb Kr,Hx,Wx
+E1 75 66 | vpcmpeqw Kr,Hx,Wx
+E1 76 66 | vpcmpeqd Kr,Hx,Wx
+V1 77 np l0 | vzeroupper
+V1 77 np l1 | vzeroall
+V1 7c 66 | vhaddpd Vx,Hx,Wx
+V1 7c F2 | vhaddps Vx,Hx,Wx
+V1 7d 66 | vhsubpd Vx,Hx,Wx
+V1 7d F2 | vhsubps Vx,Hx,Wx
+VE1 7e 66 W1 | vmovq Eq,Vo
+VE1 7e 66 | vmovd Ed,Vo
+VE1 7e F3 | vmovq Vo,Wq
+V1 7f 66 | vmovdqa Wx,Vx
+V1 7f F3 | vmovdqu Wx,Vx
+E1 7f 66 W0 | vmovdqa32 Wx,Vx
+E1 7f 66 W1 | vmovdqa64 Wx,Vx
+E1 7f F3 W0 | vmovdqu32 Wx,Vx
+E1 7f F3 W1 | vmovdqu64 Wx,Vx
+E1 7f F2 W0 | vmovdqu8 Wx,Vx
+E1 7f F2 W1 | vmovdqu16 Wx,Vx
+V1 90 np l0 W0 | kmovw Kr,Kmw
+V1 90 66 l0 W0 | kmovb Kr,Kmb
+V1 90 np l0 W1 | kmovq Kr,Kmq
+V1 90 66 l0 W1 | kmovd Kr,Kmd
+V1 91 np l0 W0 m | kmovw Mw,Kr
+V1 91 66 l0 W0 m | kmovb Mb,Kr
+V1 91 np l0 W1 m | kmovq Mq,Kr
+V1 91 66 l0 W1 m | kmovd Md,Kr
+V1 92 np l0 W0 r | kmovw Kr,Ed
+V1 92 66 l0 W0 r | kmovb Kr,Ed
+V1 92 F2 l0 W0 r | kmovd Kr,Ed
+V1 92 F2 l0 W1 r | kmovq Kr,Eq
+V1 93 np l0 W0 r | kmovw Gd,Km
+V1 93 66 l0 W0 r | kmovb Gd,Km
+V1 93 F2 l0 W0 r | kmovd Gd,Km
+V1 93 F2 l0 W1 r | kmovq Gq,Km
+V1 98 np l0 W0 r | kortestw Kr,Km
+V1 98 66 l0 W0 r | kortestb Kr,Km
+V1 98 np l0 W1 r | kortestq Kr,Km
+V1 98 66 l0 W1 r | kortestd Kr,Km
+V1 99 np l0 W0 r | ktestw Kr,Km
+V1 99 66 l0 W0 r | ktestb Kr,Km
+V1 99 np l0 W1 r | ktestq Kr,Km
+V1 99 66 l0 W1 r | ktestd Kr,Km
+V1 ae np m /2 | vldmxcsr Md
+V1 ae np m /3 | vstmxcsr Md
+V1 c2 np | vcmpps Vx,Hx,Wx,Ib
+V1 c2 66 | vcmppd Vx,Hx,Wx,Ib
+V1 c2 F3 | vcmpss Vo,Ho,Wd,Ib
+V1 c2 F2 | vcmpsd Vo,Ho,Wq,Ib
+E1 c2 np sae | vcmpps Kr,Hx,Wx,Ib
+E1 c2 66 sae | vcmppd Kr,Hx,Wx,Ib
+E1 c2 F3 sae | vcmpss Kr,Ho,Wd,Ib
+E1 c2 F2 sae | vcmpsd Kr,Ho,Wq,Ib
+VE1 c4 66 | vpinsrw Vo,Ho,Edw,Ib
+VE1 c5 66 r | vpextrw Gd,Wo,Ib
+VE1 c6 np | vshufps Vx,Hx,Wx,Ib
+VE1 c6 66 | vshufpd Vx,Hx,Wx,Ib
+V1 d0 66 | vaddsubpd Vx,Hx,Wx
+V1 d0 F2 | vaddsubps Vx,Hx,Wx
+VE1 d1 66 | vpsrlw Vx,Hx,Wo
+VE1 d2 66 | vpsrld Vx,Hx,Wo
+VE1 d3 66 | vpsrlq Vx,Hx,Wo
+VE1 d4 66 | vpaddq Vx,Hx,Wx
+VE1 d5 66 | vpmullw Vx,Hx,Wx
+VE1 d6 66 | vmovq Wq,Vo
+V1 d7 66 r | vpmovmskb Gd,Wx
+VE1 d8 66 | vpsubusb Vx,Hx,Wx
+VE1 d9 66 | vpsubusw Vx,Hx,Wx
+VE1 da 66 | vpminub Vx,Hx,Wx
+V1 db 66 | vpand Vx,Hx,Wx
+E1 db 66 W0 | vpandd Vx,Hx,Wx
+E1 db 66 W1 | vpandq Vx,Hx,Wx
+VE1 dc 66 | vpaddusb Vx,Hx,Wx
+VE1 dd 66 | vpaddusw Vx,Hx,Wx
+VE1 de 66 | vpmaxub Vx,Hx,Wx
+V1 df 66 | vpandn Vx,Hx,Wx
+E1 df 66 W0 | vpandnd Vx,Hx,Wx
+E1 df 66 W1 | vpandnq Vx,Hx,Wx
+VE1 e0 66 | vpavgb Vx,Hx,Wx
+VE1 e1 66 | vpsraw Vx,Hx,Wo
+VE1 e2 66 W1 | vpsraq Vx,Hx,Wo
+VE1 e2 66 | vpsrad Vx,Hx,Wo
+VE1 e3 66 | vpavgw Vx,Hx,Wx
+VE1 e4 66 | vpmulhuw Vx,Hx,Wx
+VE1 e5 66 | vpmulhw Vx,Hx,Wx
+VE1 e6 66 sae | vcvttpd2dq Vh,Wx
+VE1 e6 F3 e4 | vcvtdq2pd Vx,Wh
+VE1 e6 F2 er | vcvtpd2dq Vh,Wx
+VE1 e7 66 m | vmovntdq Mx,Vx
+VE1 e8 66 | vpsubsb Vx,Hx,Wx
+VE1 e9 66 | vpsubsw Vx,Hx,Wx
+VE1 ea 66 | vpminsw Vx,Hx,Wx
+V1 eb 66 | vpor Vx,Hx,Wx
+E1 eb 66 W0 | vpord Vx,Hx,Wx
+E1 eb 66 W1 | vporq Vx,Hx,Wx
+VE1 ec 66 | vpaddsb Vx,Hx,Wx
+VE1 ed 66 | vpaddsw Vx,Hx,Wx
+VE1 ee 66 | vpmaxsw Vx,Hx,Wx
+V1 ef 66 | vpxor Vx,Hx,Wx
+E1 ef 66 W0 | vpxord Vx,Hx,Wx
+E1 ef 66 W1 | vpxorq Vx,Hx,Wx
+V1 f0 F2 m | vlddqu Vx,Mx
+VE1 f1 66 | vpsllw Vx,Hx,Wo
+VE1 f2 66 | vpslld Vx,Hx,Wo
+VE1 f3 66 | vpsllq Vx,Hx,Wo
+VE1 f4 66 | vpmuludq Vx,Hx,Wx
+VE1 f5 66 | vpmaddwd Vx,Hx,Wx
+VE1 f6 66 | vpsadbw Vx,Hx,Wx
+V1 f7 66 r | vmaskmovdqu Vo,Wo
+VE1 f8 66 | vpsubb Vx,Hx,Wx
+VE1 f9 66 | vpsubw Vx,Hx,Wx
+VE1 fa 66 | vpsubd Vx,Hx,Wx
+VE1 fb 66 | vpsubq Vx,Hx,Wx
+VE1 fc 66 | vpaddb Vx,Hx,Wx
+VE1 fd 66 | vpaddw Vx,Hx,Wx
+VE1 fe 66 | vpaddd Vx,Hx,Wx
+# The VEX 0F 38 map (with EVEX where both name it alike).
+VE2 00 66 | vpshufb Vx,Hx,Wx
+V2 01 66 | vphaddw Vx,Hx,Wx
+V2 02 66 | vphaddd Vx,Hx,Wx
+V2 03 66 | vphaddsw Vx,Hx,Wx
+VE2 04 66 | vpmaddubsw Vx,Hx,Wx
+V2 05 66 | vphsubw Vx,Hx,Wx
+V2 06 66 | vphsubd Vx,Hx,Wx
+V2 07 66 | vphsubsw Vx,Hx,Wx
+V2 08 66 | vpsignb Vx,Hx,Wx
+V2 09 66 | vpsignw Vx,Hx,Wx
+V2 0a 66 | vpsignd Vx,Hx,Wx
+VE2 0b 66 | vpmulhrsw Vx,Hx,Wx
+VE2 0c 66 W0 | vpermilps Vx,Hx,Wx
+VE2 0d 66 W0 | vpermilpd Vx,Hx,Wx
+E2 0d 66 W1 | vpermilpd Vx,Hx,Wx
+V2 0e 66 | vtestps Vx,Wx
+V2 0f 66 | vtestpd Vx,Wx
+E2 10 F3 | vpmovuswb Wh,Vx
+E2 11 F3 | vpmovusdb W4,Vx
+E2 12 F3 | vpmovusqb W8,Vx
+E2 13 F3 | vpmovusdw Wh,Vx
+E2 14 F3 | vpmovusqw W4,Vx
+E2 15 F3 | vpmovusqd Wh,Vx
+VE2 13 66 W0 sae | vcvtph2ps Vx,Wh
+V2 16 66 | vpermps Vx,Hx,Wx
+E2 16 66 W0 | vpermps Vx,Hx,Wx
+E2 16 66 W1 | vpermpd Vx,Hx,Wx
+V2 17 66 | vptest Vx,Wx
+VE2 18 66 W0 | vbroadcastss Vx,Wd
+V2 19 66 | vbroadcastsd Vx,Wq
+E2 19 66 W1 | vbroadcastsd Vx,Wq
+E2 19 66 W0 | vbroadcastf32x2 Vx,Wq
+V2 1a 66 m | vbroadcastf128 Vx,Mdq
+E2 1a 66 W0 m | vbroadcastf32x4 Vx,Mdq
+E2 1a 66 W1 m | vbroadcastf64x2 Vx,Mdq
+E2 1b 66 W0 m | vbroadcastf32x8 Vx,Mqq
+E2 1b 66 W1 m | vbroadcastf64x4 Vx,Mqq
+VE2 1c 66 | vpabsb Vx,Wx
+VE2 1d 66 | vpabsw Vx,Wx
+VE2 1e 66 | vpabsd Vx,Wx
+E2 1f 66 W1 | vpabsq Vx,Wx
+VE2 20 66 | vpmovsxbw Vx,Wh
+VE2 21 66 | vpmovsxbd Vx,W4
+VE2 22 66 | vpmovsxbq Vx,W8
+VE2 23 66 | vpmovsxwd Vx,Wh
+VE2 24 66 | vpmovsxwq Vx,W4
+VE2 25 66 | vpmovsxdq Vx,Wh
+E2 20 F3 | vpmovswb Wh,Vx
+E2 21 F3 | vpmovsdb W4,Vx
+E2 22 F3 | vpmovsqb W8,Vx
+E2 23 F3 | vpmovsdw Wh,Vx
+E2 24 F3 | vpmovsqw W4,Vx
+E2 25 F3 | vpmovsqd Wh,Vx
+E2 26 66 W0 | vptestmb Kr,Hx,Wx
+E2 26 66 W1 | vptestmw Kr,Hx,Wx
+E2 27 66 W0 | vptestmd Kr,Hx,Wx
+E2 27 66 W1 | vptestmq Kr,Hx,Wx
+E2 26 F3 W0 | vptestnmb Kr,Hx,Wx
+E2 26 F3 W1 | vptestnmw Kr,Hx,Wx
+E2 27 F3 W0 | vptestnmd Kr,Hx,Wx
+E2 27 F3 W1 | vptestnmq Kr,Hx,Wx
+VE2 28 66 | vpmuldq Vx,Hx,Wx
+E2 28 F3 W0 r | vpmovm2b Vx,Km
+E2 28 F3 W1 r | vpmovm2w Vx,Km
+V2 29 66 | vpcmpeqq Vx,Hx,Wx
+E2 29 66 | vpcmpeqq Kr,Hx,Wx
+E2 29 F3 W0 r | vpmovb2m Kr,Wx
+E2 29 F3 W1 r | vpmovw2m Kr,Wx
+VE2 2a 66 m | vmovntdqa Vx,Mx
+VE2 2b 66 | vpackusdw Vx,Hx,Wx
+V2 2c 66 m | vmaskmovps Vx,Hx,Mx
+V2 2d 66 m | vmaskmovpd Vx,Hx,Mx
+V2 2e 66 m | vmaskmovps Mx,Hx,Vx
+V2 2f 66 m | vmaskmovpd Mx,Hx,Vx
+VE2 30 66 | vpmovzxbw Vx,Wh
+VE2 31 66 | vpmovzxbd Vx,W4
+VE2 32 66 | vpmovzxbq Vx,W8
+VE2 33 66 | vpmovzxwd Vx,Wh
+VE2 34 66 | vpmovzxwq Vx,W4
+VE2 35 66 | vpmovzxdq Vx,Wh
+E2 30 F3 | vpmovwb Wh,Vx
+E2 31 F3 | vpmovdb W4,Vx
+E2 32 F3 | vpmovqb W8,Vx
+E2 33 F3 | vpmovdw Wh,Vx
+E2 34 F3 | vpmovqw W4,Vx
+E2 35 F3 | vpmovqd Wh,Vx
+VE2 36 66 W0 | vpermd Vx,Hx,Wx
+E2 36 66 W1 | vpermq Vx,Hx,Wx
+V2 37 66 | vpcmpgtq Vx,Hx,Wx
+E2 37 66 | vpcmpgtq Kr,Hx,Wx
+E2 38 F3 W0 r | vpmovm2d Vx,Km
+E2 38 F3 W1 r | vpmovm2q Vx,Km
+E2 39 F3 W0 r | vpmovd2m Kr,Wx
+E2 39 F3 W1 r | vpmovq2m Kr,Wx
+VE2 38 66 | vpminsb Vx,Hx,Wx
+E2 39 66 W1 | vpminsq Vx,Hx,Wx
+VE2 39 66 | vpminsd Vx,Hx,Wx
+VE2 3a 66 | vpminuw Vx,Hx,Wx
+E2 3b 66 W1 | vpminuq Vx,Hx,Wx
+VE2 3b 66 | vpminud Vx,Hx,Wx
+VE2 3c 66 | vpmaxsb Vx,Hx,Wx
+E2 3d 66 W1 | vpmaxsq Vx,Hx,Wx
+VE2 3d 66 | vpmaxsd Vx,Hx,Wx
+VE2 3e 66 | vpmaxuw Vx,Hx,Wx
+E2 3f 66 W1 | vpmaxuq Vx,Hx,Wx
+VE2 3f 66 | vpmaxud Vx,Hx,Wx
+E2 40 66 W1 | vpmullq Vx,Hx,Wx
+VE2 40 66 | vpmulld Vx,Hx,Wx
+V2 41 66 | vphminposuw Vo,Wo
+E2 44 66 W0 | vplzcntd Vx,Wx
+E2 44 66 W1 | vplzcntq Vx,Wx
+VE2 45 66 W0 | vpsrlvd Vx,Hx,Wx
+VE2 45 66 W1 | vpsrlvq Vx,Hx,Wx
+VE2 46 66 W0 | vpsravd Vx,Hx,Wx
+E2 46 66 W1 | vpsravq Vx,Hx,Wx
+VE2 47 66 W0 | vpsllvd Vx,Hx,Wx
+VE2 47 66 W1 | vpsllvq Vx,Hx,Wx
+V2 58 66 | vpbroadcastd Vx,Wd
+E2 58 66 W0 | vpbroadcastd Vx,Wd
+V2 59 66 | vpbroadcastq Vx,Wq
+E2 59 66 W1 | vpbroadcastq Vx,Wq
+E2 59 66 W0 | vbroadcasti32x2 Vx,Wq
+V2 5a 66 m | vbroadcasti128 Vx,Mdq
+E2 5a 66 W0 m | vbroadcasti32x4 Vx,Mdq
+E2 5a 66 W1 m | vbroadcasti64x2 Vx,Mdq
+E2 5b 66 W0 m | vbroadcasti32x8 Vx,Mqq
+E2 5b 66 W1 m | vbroadcasti64x4 Vx,Mqq
+E2 64 66 W0 | vpblendmd Vx,Hx,Wx
+E2 64 66 W1 | vpblendmq Vx,Hx,Wx
+E2 65 66 W0 | vblendmps Vx,Hx,Wx
+E2 65 66 W1 | vblendmpd Vx,Hx,Wx
+E2 66 66 W0 | vpblendmb Vx,Hx,Wx
+E2 66 66 W1 | vpblendmw Vx,Hx,Wx
+E2 75 66 W0 | vpermi2b Vx,Hx,Wx
+E2 75 66 W1 | vpermi2w Vx,Hx,Wx
+E2 76 66 W0 | vpermi2d Vx,Hx,Wx
+E2 76 66 W1 | vpermi2q Vx,Hx,Wx
+E2 77 66 W0 | vpermi2ps Vx,Hx,Wx
+E2 77 66 W1 | vpermi2pd Vx,Hx,Wx
+VE2 78 66 W0 | vpbroadcastb Vx,Wb
+VE2 79 66 W0 | vpbroadcastw Vx,Ww
+E2 7a 66 W0 r | vpbroadcastb Vx,Ed
+E2 7b 66 W0 r | vpbroadcastw Vx,Ed
+E2 7c 66 W0 r | vpbroadcastd Vx,Ed
+E2 7c 66 W1 r | vpbroadcastq Vx,Eq
+E2 7d 66 W0 | vpermt2b Vx,Hx,Wx
+E2 7d 66 W1 | vpermt2w Vx,Hx,Wx
+E2 7e 66 W0 | vpermt2d Vx,Hx,Wx
+E2 7e 66 W1 | vpermt2q Vx,Hx,Wx
+E2 7f 66 W0 | vpermt2ps Vx,Hx,Wx
+E2 7f 66 W1 | vpermt2pd Vx,Hx,Wx
+E2 88 66 W0 | vexpandps Vx,Wx
+E2 88 66 W1 | vexpandpd Vx,Wx
+E2 89 66 W0 | vpexpandd Vx,Wx
+E2 89 66 W1 | vpexpandq Vx,Wx
+E2 8a 66 W0 | vcompressps Wx,Vx
+E2 8a 66 W1 | vcompresspd Wx,Vx
+E2 8b 66 W0 | vpcompressd Wx,Vx
+E2 8b 66 W1 | vpcompressq Wx,Vx
+V2 8c 66 W0 m | vpmaskmovd Vx,Hx,Mx
+V2 8c 66 W1 m | vpmaskmovq Vx,Hx,Mx
+V2 8e 66 W0 m | vpmaskmovd Mx,Hx,Vx
+V2 8e 66 W1 m | vpmaskmovq Mx,Hx,Vx
+V2 90 66 W0 m | vpgatherdd Vx,@xd,Hx
+V2 90 66 W1 m | vpgatherdq Vx,@hq,Hx
+V2 91 66 W0 m | vpgatherqd Vo,@xd,Ho
+V2 91 66 W1 m | vpgatherqq Vx,@xq,Hx
+V2 92 66 W0 m | vgatherdps Vx,@xd,Hx
+V2 92 66 W1 m | vgatherdpd Vx,@hq,Hx
+V2 93 66 W0 m | vgatherqps Vo,@xd,Ho
+V2 93 66 W1 m | vgatherqpd Vx,@xq,Hx
+E2 90 66 W0 m | vpgatherdd Vx,@xd
+E2 90 66 W1 m | vpgatherdq Vx,@hq
+E2 91 66 W0 m | vpgatherqd Vh,@xd
+E2 91 66 W1 m | vpgatherqq Vx,@xq
+E2 92 66 W0 m | vgatherdps Vx,@xd
+E2 92 66 W1 m | vgatherdpd Vx,@hq
+E2 93 66 W0 m | vgatherqps Vh,@xd
+E2 93 66 W1 m | vgatherqpd Vx,@xq
+E2 a0 66 W0 m | vpscatterdd @xd,Vx
+E2 a0 66 W1 m | vpscatterdq @hq,Vx
+E2 a1 66 W0 m | vpscatterqd @xd,Vh
+E2 a1 66 W1 m | vpscatterqq @xq,Vx
+E2 a2 66 W0 m | vscatterdps @xd,Vx
+E2 a2 66 W1 m | vscatterdpd @hq,Vx
+E2 a3 66 W0 m | vscatterqps @xd,Vh
+E2 a3 66 W1 m | vscatterqpd @xq,Vx
+VE2 96 66 W0 er | vfmaddsub132ps Vx,Hx,Wx
+VE2 96 66 W1 er | vfmaddsub132pd Vx,Hx,Wx
+VE2 97 66 W0 er | vfmsubadd132ps Vx,Hx,Wx
+VE2 97 66 W1 er | vfmsubadd132pd Vx,Hx,Wx
+VE2 98 66 W0 er | vfmadd132ps Vx,Hx,Wx
+VE2 98 66 W1 er | vfmadd132pd Vx,Hx,Wx
+VE2 99 66 W0 er | vfmadd132ss Vo,Ho,Wd
+VE2 99 66 W1 er | vfmadd132sd Vo,Ho,Wq
+VE2 9a 66 W0 er | vfmsub132ps Vx,Hx,Wx
+VE2 9a 66 W1 er | vfmsub132pd Vx,Hx,Wx
+VE2 9b 66 W0 er | vfmsub132ss Vo,Ho,Wd
+VE2 9b 66 W1 er | vfmsub132sd Vo,Ho,Wq
+VE2 9c 66 W0 er | vfnmadd132ps Vx,Hx,Wx
+VE2 9c 66 W1 er | vfnmadd132pd Vx,Hx,Wx
+VE2 9d 66 W0 er | vfnmadd132ss Vo,Ho,Wd
+VE2 9d 66 W1 er | vfnmadd132sd Vo,Ho,Wq
+VE2 9e 66 W0 er | vfnmsub132ps Vx,Hx,Wx
+VE2 9e 66 W1 er | vfnmsub132pd Vx,Hx,Wx
+VE2 9f 66 W0 er | vfnmsub132ss Vo,Ho,Wd
+VE2 9f 66 W1 er | vfnmsub132sd Vo,Ho,Wq
+VE2 a6 66 W0 er | vfmaddsub213ps Vx,Hx,Wx
+VE2 a6 66 W1 er | vfmaddsub213pd Vx,Hx,Wx
+VE2 a7 66 W0 er | vfmsubadd213ps Vx,Hx,Wx
+VE2 a7 66 W1 er | vfmsubadd213pd Vx,Hx,Wx
+VE2 a8 66 W0 er | vfmadd213ps Vx,Hx,Wx
+VE2 a8 66 W1 er | vfmadd213pd Vx,Hx,Wx
+VE2 a9 66 W0 er | vfmadd213ss Vo,Ho,Wd
+VE2 a9 66 W1 er | vfmadd213sd Vo,Ho,Wq
+VE2 aa 66 W0 er | vfmsub213ps Vx,Hx,Wx
+VE2 aa 66 W1 er | vfmsub213pd Vx,Hx,Wx
+VE2 ab 66 W0 er | vfmsub213ss Vo,Ho,Wd
+VE2 ab 66 W1 er | vfmsub213sd Vo,Ho,Wq
+VE2 ac 66 W0 er | vfnmadd213ps Vx,Hx,Wx
+VE2 ac 66 W1 er | vfnmadd213pd Vx,Hx,Wx
+VE2 ad 66 W0 er | vfnmadd213ss Vo,Ho,Wd
+VE2 ad 66 W1 er | vfnmadd213sd Vo,Ho,Wq
+VE2 ae 66 W0 er | vfnmsub213ps Vx,Hx,Wx
+VE2 ae 66 W1 er | vfnmsub213pd Vx,Hx,Wx
+VE2 af 66 W0 er | vfnmsub213ss Vo,Ho,Wd
+VE2 af 66 W1 er | vfnmsub213sd Vo,Ho,Wq
+VE2 b6 66 W0 er | vfmaddsub231ps Vx,Hx,Wx
+VE2 b6 66 W1 er | vfmaddsub231pd Vx,Hx,Wx
+VE2 b7 66 W0 er | vfmsubadd231ps Vx,Hx,Wx
+VE2 b7 66 W1 er | vfmsubadd231pd Vx,Hx,Wx
+VE2 b8 66 W0 er | vfmadd231ps Vx,Hx,Wx
+VE2 b8 66 W1 er | vfmadd231pd Vx,Hx,Wx
+VE2 b9 66 W0 er | vfmadd231ss Vo,Ho,Wd
+VE2 b9 66 W1 er | vfmadd231sd Vo,Ho,Wq
+VE2 ba 66 W0 er | vfmsub231ps Vx,Hx,Wx
+VE2 ba 66 W1 er | vfmsub231pd Vx,Hx,Wx
+VE2 bb 66 W0 er | vfmsub231ss Vo,Ho,Wd
+VE2 bb 66 W1 er | vfmsub231sd Vo,Ho,Wq
+VE2 bc 66 W0 er | vfnmadd231ps Vx,Hx,Wx
+VE2 bc 66 W1 er | vfnmadd231pd Vx,Hx,Wx
+VE2 bd 66 W0 er | vfnmadd231ss Vo,Ho,Wd
+VE2 bd 66 W1 er | vfnmadd231sd Vo,Ho,Wq
+VE2 be 66 W0 er | vfnmsub231ps Vx,Hx,Wx
+VE2 be 66 W1 er | vfnmsub231pd Vx,Hx,Wx
+VE2 bf 66 W0 er | vfnmsub231ss Vo,Ho,Wd
+VE2 bf 66 W1 er | vfnmsub231sd Vo,Ho,Wq
+E2 c4 66 W0 | vpconflictd Vx,Wx
+E2 c4 66 W1 | vpconflictq Vx,Wx
+VE2 db 66 | vaesimc Vo,Wo
+VE2 dc 66 | vaesenc Vx,Hx,Wx
+VE2 dd 66 | vaesenclast Vx,Hx,Wx
+VE2 de 66 | vaesdec Vx,Hx,Wx
+VE2 df 66 | vaesdeclast Vx,Hx,Wx
+V2 f2 np l0 | andn Gy,Hy,Ey
+V2 f3 np l0 /1 | blsr Hy,Ey
+V2 f3 np l0 /2 | blsmsk Hy,Ey
+V2 f3 np l0 /3 | blsi Hy,Ey
+V2 f5 np l0 | bzhi Gy,Ey,Hy
+V2 f5 F3 l0 | pext Gy,Hy,Ey
+V2 f5 F2 l0 | pdep Gy,Hy,Ey
+V2 f6 F2 l0 | mulx Gy,Hy,Ey
+V2 f7 np l0 | bextr Gy,Ey,Hy
+V2 f7 66 l0 | shlx Gy,Ey,Hy
+V2 f7 F3 l0 | sarx Gy,Ey,Hy
+V2 f7 F2 l0 | shrx Gy,Ey,Hy
+# The VEX 0F 3A map (with EVEX where both name it alike).
+VE3 00 66 W1 | vpermq Vx,Wx,Ib
+VE3 01 66 W1 | vpermpd Vx,Wx,Ib
+V3 02 66 W0 | vpblendd Vx,Hx,Wx,Ib
+E3 03 66 W0 | valignd Vx,Hx,Wx,Ib
+E3 03 66 W1 | valignq Vx,Hx,Wx,Ib
+VE3 04 66 W0 | vpermilps Vx,Wx,Ib
+VE3 05 66 | vpermilpd Vx,Wx,Ib
+V3 06 66 | vperm2f128 Vx,Hx,Wx,Ib
+V3 08 66 | vroundps Vx,Wx,Ib
+V3 09 66 | vroundpd Vx,Wx,Ib
+V3 0a 66 | vroundss Vo,Ho,Wd,Ib
+V3 0b 66 | vroundsd Vo,Ho,Wq,Ib
+E3 08 66 sae | vrndscaleps Vx,Wx,Ib
+E3 09 66 sae | vrndscalepd Vx,Wx,Ib
+E3 0a 66 sae | vrndscaless Vo,Ho,Wd,Ib
+E3 0b 66 sae | vrndscalesd Vo,Ho,Wq,Ib
+V3 0c 66 | vblendps Vx,Hx,Wx,Ib
+V3 0d 66 | vblendpd Vx,Hx,Wx,Ib
+V3 0e 66 | vpblendw Vx,Hx,Wx,Ib
+VE3 0f 66 | vpalignr Vx,Hx,Wx,Ib
+VE3 14 66 | vpextrb Edb,Vo,Ib
+VE3 15 66 | vpextrw Edw,Vo,Ib
+VE3 16 66 W1 | vpextrq Eq,Vo,Ib
+VE3 16 66 | vpextrd Ed,Vo,Ib
+VE3 17 66 | vextractps Ed,Vo,Ib
+V3 18 66 | vinsertf128 Vx,Hx,Wo,Ib
+V3 19 66 | vextractf128 Wo,Vx,Ib
+E3 18 66 W0 | vinsertf32x4 Vx,Hx,Wo,Ib
+E3 18 66 W1 | vinsertf64x2 Vx,Hx,Wo,Ib
+E3 19 66 W0 | vextractf32x4 Wo,Vx,Ib
+E3 19 66 W1 | vextractf64x2 Wo,Vx,Ib
+E3 1a 66 W0 | vinsertf32x8 Vx,Hx,Wy,Ib
+E3 1a 66 W1 | vinsertf64x4 Vx,Hx,Wy,Ib
+E3 1b 66 W0 | vextractf32x8 Wy,Vx,Ib
+E3 1b 66 W1 | vextractf64x4 Wy,Vx,Ib
+VE3 1d 66 W0 sae | vcvtps2ph Wh,Vx,Ib
+E3 1e 66 W0 | vpcmpud Kr,Hx,Wx,Ib
+E3 1e 66 W1 | vpcmpuq Kr,Hx,Wx,Ib
+E3 1f 66 W0 | vpcmpd Kr,Hx,Wx,Ib
+E3 1f 66 W1 | vpcmpq Kr,Hx,Wx,Ib
+VE3 20 66 | vpinsrb Vo,Ho,Edb,Ib
+VE3 21 66 | vinsertps Vo,Ho,Wd,Ib
+VE3 22 66 W1 | vpinsrq Vo,Ho,Eq,Ib
+VE3 22 66 | vpinsrd Vo,Ho,Ed,Ib
+E3 23 66 W0 | vshuff32x4 Vx,Hx,Wx,Ib
+E3 23 66 W1 | vshuff64x2 Vx,Hx,Wx,Ib
+E3 25 66 W0 | vpternlogd Vx,Hx,Wx,Ib
+E3 25 66 W1 | vpternlogq Vx,Hx,Wx,Ib
+V3 30 66 l0 W0 r | kshiftrb Kr,Km,Ib
+V3 30 66 l0 W1 r | kshiftrw Kr,Km,Ib
+V3 31 66 l0 W0 r | kshiftrd Kr,Km,Ib
+V3 31 66 l0 W1 r | kshiftrq Kr,Km,Ib
+V3 32 66 l0 W0 r | kshiftlb Kr,Km,Ib
+V3 32 66 l0 W1 r | kshiftlw Kr,Km,Ib
+V3 33 66 l0 W0 r | kshiftld Kr,Km,Ib
+V3 33 66 l0 W1 r | kshiftlq Kr,Km,Ib
+V3 38 66 | vinserti128 Vx,Hx,Wo,Ib
+V3 39 66 | vextracti128 Wo,Vx,Ib
+E3 38 66 W0 | vinserti32x4 Vx,Hx,Wo,Ib
+E3 38 66 W1 | vinserti64x2 Vx,Hx,Wo,Ib
+E3 39 66 W0 | vextracti32x4 Wo,Vx,Ib
+E3 39 66 W1 | vextracti64x2 Wo,Vx,Ib
+E3 3a 66 W0 | vinserti32x8 Vx,Hx,Wy,Ib
+E3 3a 66 W1 | vinserti64x4 Vx,Hx,Wy,Ib
+E3 3b 66 W0 | vextracti32x8 Wy,Vx,Ib
+E3 3b 66 W1 | vextracti64x4 Wy,Vx,Ib
+E3 3e 66 W0 | vpcmpub Kr,Hx,Wx,Ib
+E3 3e 66 W1 | vpcmpuw Kr,Hx,Wx,Ib
+E3 3f 66 W0 | vpcmpb Kr,Hx,Wx,Ib
+E3 3f 66 W1 | vpcmpw Kr,Hx,Wx,Ib
+V3 40 66 | vdpps Vx,Hx,Wx,Ib
+V3 41 66 | vdppd Vo,Ho,Wo,Ib
+V3 42 66 | vmpsadbw Vx,Hx,Wx,Ib
+E3 43 66 W0 | vshufi32x4 Vx,Hx,Wx,Ib
+E3 43 66 W1 | vshufi64x2 Vx,Hx,Wx,Ib
+VE3 44 66 | vpclmulqdq Vx,Hx,Wx,Ib
+V3 46 66 | vperm2i128 Vx,Hx,Wx,Ib
+V3 4a 66 W0 | vblendvps Vx,Hx,Wx,Lx
+V3 4b 66 W0 | vblendvpd Vx,Hx,Wx,Lx
+V3 4c 66 W0 | vpblendvb Vx,Hx,Wx,Lx
+V3 60 66 | vpcmpestrm Vo,Wo,Ib
+V3 61 66 | vpcmpestri Vo,Wo,Ib
+V3 62 66 | vpcmpistrm Vo,Wo,Ib
+V3 63 66 | vpcmpistri Vo,Wo,Ib
+VE3 df 66 | vaeskeygenassist Vo,Wo,Ib
+V3 f0 F2 l0 | rorx Gy,Ey,Ib
+``` }
+
+// X64_DECODE_TABLE's rows, ordered by space and opcode (each opcode's in
+// table order).
+X64_DECODE_ROWS: #run x64_decode_rows(X64_DECODE_TABLE)
+
+// Where each space-and-opcode key's rows start in X64_DECODE_ROWS, one more
+// entry than X64_DECODE_KEYS so a key's rows end where the next key's start.
+X64_DECODE_INDEX: #run x64_decode_index(X64_DECODE_ROWS)
+
+// Whether each key's instruction takes a ModRM byte: any of its rows tests
+// one or names an operand it holds.
+X64_DECODE_MODRM: #run x64_decode_modrm_keys(X64_DECODE_ROWS)
+
+// The register names by width (X64_REGISTER_NAMES is the 64-bit one).
+X64_DECODE_GPR32: [String]{"eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi", "r8d", "r9d", "r10d", "r11d", "r12d", "r13d", "r14d", "r15d"}
+
+X64_DECODE_GPR16: [String]{"ax", "cx", "dx", "bx", "sp", "bp", "si", "di", "r8w", "r9w", "r10w", "r11w", "r12w", "r13w", "r14w", "r15w"}
+
+X64_DECODE_GPR8: [String]{"al", "cl", "dl", "bl", "spl", "bpl", "sil", "dil", "r8b", "r9b", "r10b", "r11b", "r12b", "r13b", "r14b", "r15b"}
+
+// The byte registers 4-7 name without a REX prefix.
+X64_DECODE_GPR8_HIGH: [String]{"ah", "ch", "dh", "bh"}
+
+X64_DECODE_SEGMENTS: [String]{"es", "cs", "ss", "ds", "fs", "gs"}
+
+// The predicates cmpps and its kin spell into their names: the legacy forms
+// the first 8, VEX and EVEX all 32.
+X64_DECODE_CMP_PREDICATES: [String]{"eq", "lt", "le", "unord", "neq", "nlt", "nle", "ord", "eq_uq", "nge", "ngt", "false", "neq_oq", "ge", "gt", "true", "eq_os", "lt_oq", "le_oq", "unord_s", "neq_us", "nlt_uq", "nle_uq", "ord_s", "eq_us", "nge_uq", "ngt_uq", "false_os", "neq_os", "ge_oq", "gt_oq", "true_us"}
+
+// The predicates vpcmp spells into its name; 3 and 7 keep their immediate.
+X64_DECODE_VPCMP_PREDICATES: [String]{"eq", "lt", "le", "", "neq", "nlt", "nle", ""}
+
+// The EVEX rounding a register form's L'L names under EVEX.b.
+X64_DECODE_ROUNDING: [String]{"{{rn-sae}}", "{{rd-sae}}", "{{ru-sae}}", "{{rz-sae}}"}
+
+// The words of `text` split at spaces.
+x64_decode_words: fn(text: String) -> [String] Never! {
+    words := [String]{}
+    loop word in text.split(" ") {
+        if word != "" -> words.push(word)
+    }
+    words
+}
+
+// The value of hex digits `text`, or the build stops naming `row`.
+x64_decode_hex_parse: fn(text: String, row: String) -> Int Never! {
+    value := 0
+    if text == "" -> panic("X64_DECODE_TABLE: an empty number in `{row}`")
+    loop byte in text.bytes() {
+        digit: Int{byte}
+        value = value * 16 + if {
+            digit >= 48 && digit <= 57 -> digit - 48
+            digit >= 97 && digit <= 102 -> digit - 87
+            digit >= 65 && digit <= 70 -> digit - 55
+            else -> panic("X64_DECODE_TABLE: `{text}` is not hex in `{row}`")
+        }
+    }
+    value
+}
+
+// The spaces a row's space word names (X64_DECODE_SPACES).
+x64_decode_spaces: fn(word: String, row: String) -> [Int] Never! {
+    if {
+        word == "L0" -> [Int]{0}
+        word == "L1" -> [Int]{1}
+        word == "L2" -> [Int]{2}
+        word == "L3" -> [Int]{3}
+        word == "V1" -> [Int]{4}
+        word == "V2" -> [Int]{5}
+        word == "V3" -> [Int]{6}
+        word == "E1" -> [Int]{7}
+        word == "E2" -> [Int]{8}
+        word == "E3" -> [Int]{9}
+        word == "VE1" -> [Int]{4, 7}
+        word == "VE2" -> [Int]{5, 8}
+        word == "VE3" -> [Int]{6, 9}
+        else -> panic("X64_DECODE_TABLE: unknown space `{word}` in `{row}`")
+    }
+}
+
+// The rows of `table` (X64_DECODE_TABLE), ordered by space and opcode. A
+// row's conditions: np 66 F3 F2 its mandatory prefix (VEX and EVEX: pp);
+// /N its ModRM.reg; r m a register or memory ModRM.rm; =XX its whole ModRM
+// byte; W0 W1 its REX.W, VEX.W or EVEX.W; l0 l1 l2 its vector length; o16
+// o32 o64 its operand size; B0 B1 its REX.B; a32 a64 its address size; e2
+// e4 e8 the bytes of its broadcast element (else 4 or 8 by W); er sae the
+// EVEX rounding control or suppress-all-exceptions a register form takes
+// under EVEX.b.
+x64_decode_rows: fn(table: String) -> [X64DecodeRow] Never! {
+    buckets := loop _key in 0..<X64_DECODE_KEYS -> [X64DecodeRow]{}
+    loop line in table.split("\n") {
+        text: line.trim().copy()
+        if text == "" || text.starts_with("#") -> next
+        halves: text.split(" | ").to_list()
+        if halves.len() != 2 {
+            panic("X64_DECODE_TABLE: a row reads `SPACE OPCODE [CONDITIONS] | NAME [OPERANDS]`, not `{text}`")
+        }
+        left: x64_decode_words(halves[0])
+        right: x64_decode_words(halves[1])
+        if left.len() < 2 || right.len() < 1 || right.len() > 2 {
+            panic("X64_DECODE_TABLE: a row reads `SPACE OPCODE [CONDITIONS] | NAME [OPERANDS]`, not `{text}`")
+        }
+        bounds: left[1].split("-").to_list()
+        first: x64_decode_hex_parse(bounds[0], text)
+        last: if bounds.len() == 2 -> x64_decode_hex_parse(bounds[1], text) else -> first
+        row := X64DecodeRow{space: 0, opcode: 0, name: right[0].copy(), operands: if right.len() == 2 -> right[1].split(",").to_list() else -> [String]{}}
+        loop k in 2..<left.len() {
+            word: left[k]
+            if {
+                word == "np" -> row.prefix = 0
+                word == "66" -> row.prefix = 0x66
+                word == "F3" -> row.prefix = 0xf3
+                word == "F2" -> row.prefix = 0xf2
+                word == "r" -> row.mode = 3
+                word == "m" -> row.mode = 0
+                word == "W0" -> row.w = 0
+                word == "W1" -> row.w = 1
+                word == "l0" -> row.l = 0
+                word == "l1" -> row.l = 1
+                word == "l2" -> row.l = 2
+                word == "o16" -> row.size = 16
+                word == "o32" -> row.size = 32
+                word == "o64" -> row.size = 64
+                word == "B0" -> row.b = 0
+                word == "B1" -> row.b = 1
+                word == "a32" -> row.addr = 32
+                word == "a64" -> row.addr = 64
+                word == "e2" -> row.element = 2
+                word == "e4" -> row.element = 4
+                word == "e8" -> row.element = 8
+                word == "er" -> row.rounding = 1
+                word == "sae" -> row.rounding = 2
+                word.starts_with("/") && word.len() == 2 -> {
+                    row.reg = x64_decode_hex_parse(word.slice(1, 2), text)
+                }
+                word.starts_with("=") -> {
+                    row.modrm = x64_decode_hex_parse(word.slice(1, word.len()), text)
+                }
+                else -> panic("X64_DECODE_TABLE: unknown condition `{word}` in `{text}`")
+            }
+        }
+        if row.reg > 7 -> panic("X64_DECODE_TABLE: ModRM.reg past 7 in `{text}`")
+        // An st(i) operand is a register form.
+        if row.operands.contains("Fi") -> row.mode = 3
+        loop space in x64_decode_spaces(left[0], text) {
+            loop opcode in first..<last + 1 {
+                name: if row.name.contains("{{cc}}") -> row.name.replace("{{cc}}", X64_COND_NAMES[opcode - first]) else -> row.name.copy()
+                buckets[space * 256 + opcode].push(x64_decode_row_at(row, space, opcode, name))
+            }
+        }
+    }
+    rows := [X64DecodeRow]{}
+    loop bucket in buckets {
+        loop row in bucket {
+            rows.push(x64_decode_row_at(row, row.space, row.opcode, row.name.copy()))
+        }
+    }
+    rows
+}
+
+// `row` for opcode `opcode` of space `space`, named `name`.
+x64_decode_row_at: fn(row: X64DecodeRow, space: Int, opcode: Int, name: String) -> X64DecodeRow Never! {
+    X64DecodeRow{space: space, opcode: opcode, prefix: row.prefix, reg: row.reg, mode: row.mode, modrm: row.modrm, w: row.w, l: row.l, size: row.size, b: row.b, addr: row.addr, element: row.element, rounding: row.rounding, name: name, operands: loop code in row.operands -> code.copy()}
+}
+
+// Where each key's rows start in `rows` (ordered by key), and their end.
+x64_decode_index: fn(rows: [X64DecodeRow]) -> [Int] Never! {
+    starts := [Int]{}
+    at := 0
+    loop key in 0..<X64_DECODE_KEYS {
+        loop at < rows.len() && rows[at].space * 256 + rows[at].opcode < key -> at += 1
+        starts.push(at)
+    }
+    starts.push(rows.len())
+    starts
+}
+
+// Whether operand code `code` is held in a ModRM byte.
+x64_decode_modrm_operand: fn(code: String) -> Bool Never! {
+    first: code.slice(0, 1)
+    first == "E" || first == "G" || first == "M" || first == "V" || first == "W" || first == "K" || first == "S" || first == "F" || first == "@"
+}
+
+// Whether each key (space * 256 + opcode) takes a ModRM byte.
+x64_decode_modrm_keys: fn(rows: [X64DecodeRow]) -> [Bool] Never! {
+    keys := loop _key in 0..<X64_DECODE_KEYS -> false
+    loop row in rows {
+        key: row.space * 256 + row.opcode
+        // Every VEX and EVEX form but vzeroupper and vzeroall takes one.
+        if row.reg >= 0 || row.mode >= 0 || row.modrm >= 0 || (row.space >= 4 && !(row.space == 4 && row.opcode == 0x77)) {
+            keys[key] = true
+        }
+        loop code in row.operands {
+            if x64_decode_modrm_operand(code) -> keys[key] = true
+        }
+    }
+    keys
+}
+
+// "0x" and the hex digits of `value`, a negative one read as its 64 bits
+// unsigned.
+x64_hex: fn(value: Int) -> String Never! {
+    digits := [U8]{}
+    rest := value
+    loop {
+        digit: rest & 15
+        digits.insert(0, U8{if digit < 10 -> 48 + digit else -> 87 + digit})
+        rest = (rest >> 4) & 0x0fffffffffffffff
+        if rest == 0 -> break
+    }
+    "0x{String.from_bytes(digits) ?? ""}"
+}
+
+// `value` as the `bits`-bit unsigned number with its bits; at 64 bits a
+// negative value stays as it is, which x64_hex reads as unsigned.
+x64_decode_unsigned: fn(value: Int, bits: Int) -> Int Never! {
+    if value < 0 && bits < 64 -> return value + (1 << bits)
+    value
+}
+
+// The `bits`-bit two's-complement number `value` holds; 0 and 64 bits
+// leave it as it is.
+x64_decode_signed: fn(value: Int, bits: Int) -> Int Never! {
+    if bits > 0 && bits < 64 && value >= 1 << (bits - 1) -> return value - (1 << bits)
+    value
+}
+
+// The little-endian `size`-byte number at `at` of `bytes`.
+x64_decode_le: fn(bytes: [U8], at: Int, size: Int) -> Int Never! {
+    value := 0
+    loop k in 0..<size -> value = value | (Int{bytes[at + k]} << (8 * k))
+    value
+}
+
+// Whether `byte` is a legacy prefix: lock, a rep, a segment, the operand or
+// the address size.
+x64_decode_legacy_prefix: fn(byte: Int) -> Bool Never! {
+    byte == 0xf0 || byte == 0xf2 || byte == 0xf3 || byte == 0x2e || byte == 0x36 || byte == 0x3e || byte == 0x26 || byte == 0x64 || byte == 0x65 || byte == 0x66 || byte == 0x67
+}
+
+// The mandatory prefix VEX and EVEX pp name.
+x64_decode_pp: fn(pp: Int) -> Int Never! {
+    if { pp == 1 -> 0x66, pp == 2 -> 0xf3, pp == 3 -> 0xf2, else -> 0 }
+}
+
+// One byte that starts no instruction.
+x64_decode_bad: fn() -> X64Insn Never! {
+    X64Insn{length: 1, named: false, invalid: true, mnemonic: "(bad)", operands: [String]{}, rip: -1, field: -1, width: 0, flow: X64Flow.Plain, cond: 0, indirect: false, reaches: false, reach: 0}
+}
+
+// The instruction at `from` of `bytes`, which runs at `address`, or None
+// when the bytes end before it does.
+x64_decode: fn(bytes: [U8], from: Int, address: Int) -> X64Insn? Never! {
+    if from < 0 || from >= bytes.len() -> return None
+    d := X64Decoding{from: from, at: from, address: address, prefixes: [Int]{}, immediates: [Int]{}}
+    loop d.at < bytes.len() {
+        byte: Int{bytes[d.at]}
+        if byte >= 0x40 && byte <= 0x4f {
+            if d.rex != 0 -> d.voided_rex = d.rex
+            d.rex = byte
+            d.at += 1
+            next
+        }
+        if !x64_decode_legacy_prefix(byte) -> break
+        // A REX counts only right before the opcode.
+        if d.rex != 0 {
+            d.voided_rex = d.rex
+            d.rex = 0
+        }
+        d.prefixes.push(byte)
+        if {
+            byte == 0xf0 -> d.lock = true
+            byte == 0xf2 || byte == 0xf3 -> d.rep = byte
+            byte == 0x66 -> d.opsize = true
+            byte == 0x67 -> d.addr32 = true
+            else -> d.segment = byte
+        }
+        d.at += 1
+    }
+    if d.at >= bytes.len() -> return None
+    if d.at - from >= 15 -> return Val(x64_decode_bad())
+    d.w = (d.rex >> 3) & 1
+    d.r = (d.rex >> 2) & 1
+    d.x = (d.rex >> 1) & 1
+    d.b = d.rex & 1
+    op: Int{bytes[d.at]}
+    d.at += 1
+    if {
+        op == 0xc4 || op == 0xc5 || op == 0x62 -> {
+            if d.rex != 0 || d.opsize || d.rep != 0 || d.lock -> return Val(x64_decode_bad())
+            read: x64_decode_vex(d, bytes, op)
+            if read < 0 -> return None
+            if read == 0 -> return Val(x64_decode_bad())
+        }
+        op == 0x0f -> {
+            if d.at >= bytes.len() -> return None
+            second: Int{bytes[d.at]}
+            d.at += 1
+            if {
+                second == 0x38 || second == 0x3a -> {
+                    if d.at >= bytes.len() -> return None
+                    d.space = if second == 0x38 -> 2 else -> 3
+                    d.opcode = Int{bytes[d.at]}
+                    d.at += 1
+                }
+                else -> {
+                    d.space = 1
+                    d.opcode = second
+                }
+            }
+        }
+        else -> d.opcode = op
+    }
+    key: d.space * 256 + d.opcode
+    first: X64_DECODE_INDEX[key]
+    end: X64_DECODE_INDEX[key + 1]
+    modrm: if first < end -> X64_DECODE_MODRM[key] else -> (x64_decode_shape(d) ?? return Val(x64_decode_bad())).modrm
+    if modrm && !x64_decode_modrm(d, bytes) -> return None
+    loop index in first..<end {
+        if x64_decode_holds(d, X64_DECODE_ROWS[index]) {
+            return x64_decode_named(d, bytes, X64_DECODE_ROWS[index])
+        }
+    }
+    // No form names it; its shape still gives its length.
+    shape: x64_decode_shape(d) ?? return Val(x64_decode_bad())
+    if shape.modrm != modrm -> return Val(x64_decode_bad())
+    if d.at + shape.imm > bytes.len() -> return None
+    length: d.at + shape.imm - from
+    if length > 15 -> return Val(x64_decode_bad())
+    Val(X64Insn{length: length, named: false, invalid: false, mnemonic: "(bad)", operands: [String]{}, rip: d.rip, field: -1, width: 0, flow: X64Flow.Plain, cond: 0, indirect: false, reaches: false, reach: 0})
+}
+
+// Read the VEX (C4, C5) or EVEX (62) prefix whose first byte `op` was just
+// read, and the opcode after it: 1 when read, 0 when the bytes can't start
+// one, -1 when they end first.
+x64_decode_vex: fn(d: &X64Decoding, bytes: [U8], op: Int) -> Int Never! {
+    size: if { op == 0xc5 -> 1, op == 0xc4 -> 2, else -> 3 }
+    if d.at + size >= bytes.len() -> return -1
+    p0: Int{bytes[d.at]}
+    if {
+        op == 0xc5 -> {
+            d.r = 1 - ((p0 >> 7) & 1)
+            d.vvvv = 15 - ((p0 >> 3) & 15)
+            d.l = (p0 >> 2) & 1
+            d.pp = x64_decode_pp(p0 & 3)
+            d.space = 4
+            d.kind = 1
+        }
+        op == 0xc4 -> {
+            p1: Int{bytes[d.at + 1]}
+            map: p0 & 31
+            if map < 1 || map > 3 -> return 0
+            d.r = 1 - ((p0 >> 7) & 1)
+            d.x = 1 - ((p0 >> 6) & 1)
+            d.b = 1 - ((p0 >> 5) & 1)
+            d.w = (p1 >> 7) & 1
+            d.vvvv = 15 - ((p1 >> 3) & 15)
+            d.l = (p1 >> 2) & 1
+            d.pp = x64_decode_pp(p1 & 3)
+            d.space = 3 + map
+            d.kind = 1
+        }
+        else -> {
+            p1: Int{bytes[d.at + 1]}
+            p2: Int{bytes[d.at + 2]}
+            map: p0 & 7
+            if (p0 & 8) != 0 || (p1 & 4) == 0 || map == 0 || map == 4 || map == 7 -> return 0
+            d.r = 1 - ((p0 >> 7) & 1)
+            d.x = 1 - ((p0 >> 6) & 1)
+            d.b = 1 - ((p0 >> 5) & 1)
+            d.r2 = 1 - ((p0 >> 4) & 1)
+            d.w = (p1 >> 7) & 1
+            d.vvvv = 15 - ((p1 >> 3) & 15)
+            d.pp = x64_decode_pp(p1 & 3)
+            d.z = (p2 >> 7) & 1
+            d.l = (p2 >> 5) & 3
+            d.bcst = (p2 >> 4) & 1
+            d.v2 = 1 - ((p2 >> 3) & 1)
+            d.aaa = p2 & 7
+            d.space = if map <= 3 -> 6 + map else -> 5 + map
+            d.kind = 2
+        }
+    }
+    d.at += size
+    d.opcode = Int{bytes[d.at]}
+    d.at += 1
+    1
+}
+
+// Read the ModRM byte at the cursor and the SIB and displacement it names;
+// false when the bytes end first.
+x64_decode_modrm: fn(d: &X64Decoding, bytes: [U8]) -> Bool Never! {
+    if d.at >= bytes.len() -> return false
+    byte: Int{bytes[d.at]}
+    d.at += 1
+    d.modrm = byte
+    d.mod = byte >> 6
+    d.reg = (byte >> 3) & 7
+    d.rm = byte & 7
+    if d.mod == 3 -> return true
+    size := if { d.mod == 1 -> 1, d.mod == 2 -> 4, else -> 0 }
+    if {
+        d.rm == 4 -> {
+            if d.at >= bytes.len() -> return false
+            sib: Int{bytes[d.at]}
+            d.at += 1
+            d.sib = true
+            d.scale = sib >> 6
+            d.index = (sib >> 3) & 7
+            d.base = sib & 7
+            if d.mod == 0 && d.base == 5 -> size = 4
+        }
+        d.mod == 0 && d.rm == 5 -> {
+            size = 4
+            d.rip = d.at - d.from
+        }
+    }
+    if d.at + size > bytes.len() -> return false
+    d.disp = x64_decode_signed(x64_decode_le(bytes, d.at, size), 8 * size)
+    d.at += size
+    true
+}
+
+// Whether the instruction takes a ModRM byte, and its immediate's size, by
+// its map and opcode alone, for one no row names: the VEX and EVEX maps and
+// 0F 38 and 0F 3A take a ModRM byte (an immediate in 0F 3A and in the VEX 0F
+// opcodes with one), the 0F map by opcode. None for the one-byte map and the
+// 0F opcodes that start no instruction (0F 0F 3DNow!).
+x64_decode_shape: fn(d: X64Decoding) -> {modrm: Bool, imm: Int}? Never! {
+    op: d.opcode
+    if {
+        d.space == 0 -> None
+        d.space == 2 || d.space == 5 || d.space == 8 || d.space >= 10 -> Val({modrm: true, imm: 0})
+        d.space == 3 || d.space == 6 || d.space == 9 -> Val({modrm: true, imm: 1})
+        d.space == 4 || d.space == 7 -> {
+            if op == 0x77 -> return Val({modrm: false, imm: 0})
+            imm: if (op >= 0x70 && op <= 0x73) || op == 0xc2 || op == 0xc4 || op == 0xc5 || op == 0xc6 -> 1 else -> 0
+            Val({modrm: true, imm: imm})
+        }
+        op == 0x0f -> None
+        op == 0x05 || op == 0x06 || op == 0x07 || op == 0x08 || op == 0x09 || op == 0x0b || op == 0x0e || op == 0x77 -> Val({modrm: false, imm: 0})
+        op >= 0x30 && op <= 0x37 -> Val({modrm: false, imm: 0})
+        op == 0xa0 || op == 0xa1 || op == 0xa2 || op == 0xa8 || op == 0xa9 || op == 0xaa -> Val({modrm: false, imm: 0})
+        op >= 0xc8 && op <= 0xcf -> Val({modrm: false, imm: 0})
+        op >= 0x70 && op <= 0x73 -> Val({modrm: true, imm: 1})
+        op == 0xa4 || op == 0xac || op == 0xba || op == 0xc2 || op == 0xc4 || op == 0xc5 || op == 0xc6 -> Val({modrm: true, imm: 1})
+        else -> Val({modrm: true, imm: 0})
+    }
+}
+
+// The prefix that selects a row: VEX and EVEX pp, else the last F2 or F3,
+// else 66.
+x64_decode_mandatory: fn(d: X64Decoding) -> Int Never! {
+    if {
+        d.kind != 0 -> d.pp
+        d.rep != 0 -> d.rep
+        d.opsize -> 0x66
+        else -> 0
+    }
+}
+
+// The vector length bits a row tests: EVEX.b on a register form makes L'L
+// the rounding, its length 512 bits.
+x64_decode_length_bits: fn(d: X64Decoding) -> Int Never! {
+    if d.kind == 2 && d.bcst == 1 && d.mod == 3 && d.modrm >= 0 -> return 2
+    d.l
+}
+
+// Whether `row` holds for the instruction read so far.
+x64_decode_holds: fn(d: X64Decoding, row: X64DecodeRow) -> Bool Never! {
+    if row.prefix >= 0 && row.prefix != x64_decode_mandatory(d) -> return false
+    if row.reg >= 0 && row.reg != d.reg -> return false
+    if row.mode >= 0 && (row.mode == 3) != (d.mod == 3) -> return false
+    if row.modrm >= 0 && row.modrm != d.modrm -> return false
+    if row.w >= 0 && row.w != d.w -> return false
+    if row.l >= 0 && row.l != x64_decode_length_bits(d) -> return false
+    if row.size >= 0 && row.size != x64_decode_osize(d, row) -> return false
+    if row.b >= 0 && row.b != d.b -> return false
+    if row.addr >= 0 && row.addr != (if d.addr32 -> 32 else -> 64) -> return false
+    true
+}
+
+// The operand size under `row`: 64 under W, 16 under a 66 the row doesn't
+// take as its mandatory prefix, else 32.
+x64_decode_osize: fn(d: X64Decoding, row: X64DecodeRow) -> Int Never! {
+    if {
+        d.w == 1 -> 64
+        d.opsize && row.prefix != 0x66 -> 16
+        else -> 32
+    }
+}
+
+// The size of a push, a pop and a near branch through memory: 64 bits, 16
+// under a 66.
+x64_decode_stack: fn(d: X64Decoding, row: X64DecodeRow) -> Int Never! {
+    if d.opsize && row.prefix != 0x66 -> 16 else -> 64
+}
+
+// The vector length in bytes: 16 for the legacy forms, VEX.L, EVEX L'L
+// (512 bits under rounding control).
+x64_decode_vl: fn(d: X64Decoding, row: X64DecodeRow) -> Int Never! {
+    if {
+        d.kind == 0 -> 16
+        d.kind == 1 -> if d.l == 1 -> 32 else -> 16
+        d.bcst == 1 && d.mod == 3 && row.rounding > 0 -> 64
+        d.l == 0 -> 16
+        d.l == 1 -> 32
+        else -> 64
+    }
+}
+
+// The bytes of an immediate operand code `code` (0: not an immediate).
+x64_decode_immediate_size: fn(d: X64Decoding, row: X64DecodeRow, code: String) -> Int Never! {
+    osize: x64_decode_osize(d, row)
+    if {
+        code == "Ib" || code == "Ibs" || code == "Ibq" || code == "Lx" || code == "Jb" -> 1
+        code == "Iw" -> 2
+        code == "Iz" -> if osize == 16 -> 2 else -> 4
+        code == "Izq" -> if x64_decode_stack(d, row) == 16 -> 2 else -> 4
+        code == "Iv" -> osize /% 8
+        code == "Jz" -> 4
+        code == "Ob" || code == "Ov" -> if d.addr32 -> 4 else -> 8
+        else -> 0
+    }
+}
+
+// How the instruction leaves.
+x64_decode_flow: fn(d: X64Decoding) -> X64Flow Never! {
+    op: d.opcode
+    if {
+        d.space == 0 && op >= 0x70 && op <= 0x7f -> X64Flow.Cond
+        d.space == 0 && op == 0xe8 -> X64Flow.Call
+        d.space == 0 && (op == 0xe9 || op == 0xeb) -> X64Flow.Jump
+        d.space == 0 && op >= 0xe0 && op <= 0xe3 -> X64Flow.Loop
+        d.space == 0 && (op == 0xc2 || op == 0xc3 || op == 0xca || op == 0xcb || op == 0xcf) -> X64Flow.Return
+        d.space == 0 && op == 0xf4 -> X64Flow.Stop
+        d.space == 0 && op == 0xff && (d.reg == 2 || d.reg == 3) -> X64Flow.Call
+        d.space == 0 && op == 0xff && (d.reg == 4 || d.reg == 5) -> X64Flow.Jump
+        d.space == 1 && op >= 0x80 && op <= 0x8f -> X64Flow.Cond
+        d.space == 1 && (op == 0x0b || op == 0xb9 || op == 0xff) -> X64Flow.Stop
+        else -> X64Flow.Plain
+    }
+}
+
+// Whether operand code `code` reads its width from the operand size, so a
+// 66 is used by it.
+x64_decode_sized_operand: fn(code: String) -> Bool Never! {
+    code == "Ev" || code == "Gv" || code == "Zv" || code == "Zs" || code == "Es" || code == "Mv" || code == "Iz" || code == "Iv" || code == "Izq" || code == "Ibq" || code == "Ibs" || code == "rAX" || code == "eAX" || code == "Xv" || code == "Yv" || code == "Xz" || code == "Yz"
+}
+
+// Whether operand code `code` reads memory through the ModRM byte, a
+// string register or an absolute address.
+x64_decode_memory_operand: fn(d: X64Decoding, code: String) -> Bool Never! {
+    first: code.slice(0, 1)
+    if code == "XBX" || code == "Ob" || code == "Ov" || code == "Xb" || code == "Xv" || code == "Xz" || code == "Yb" || code == "Yv" || code == "Yz" {
+        return true
+    }
+    if d.mod == 3 || d.modrm < 0 -> return false
+    first == "E" || first == "M" || first == "W" || first == "@" || code.starts_with("Km")
+}
+
+// The instruction `row` names, its immediates read from the cursor.
+x64_decode_named: fn(d: &X64Decoding, bytes: [U8], row: X64DecodeRow) -> X64Insn? Never! {
+    field := -1
+    width := 0
+    loop code in row.operands {
+        size: x64_decode_immediate_size(d, row, code)
+        if size == 0 -> next
+        // A 16-bit relative branch truncates rip, which no code here does.
+        if code.starts_with("J") && d.opsize -> return Val(x64_decode_bad())
+        if d.at + size > bytes.len() -> return None
+        if code.starts_with("J") {
+            field = d.at - d.from
+            width = size
+        }
+        d.immediates.push(x64_decode_le(bytes, d.at, size))
+        d.at += size
+    }
+    length: d.at - d.from
+    if length > 15 -> return Val(x64_decode_bad())
+    flow: x64_decode_flow(d)
+    insn := X64Insn{length: length, named: true, invalid: false, mnemonic: "", operands: [String]{}, rip: d.rip, field: field, width: width, flow: flow, cond: if flow == .Cond -> d.opcode & 15 else -> 0, indirect: d.space == 0 && d.opcode == 0xff && d.reg >= 2 && d.reg <= 5, reaches: false, reach: 0}
+    memory := false
+    sized := row.size >= 0
+    slot := 0
+    loop code in row.operands {
+        immediate: if x64_decode_immediate_size(d, row, code) > 0 -> d.immediates[slot] else -> 0
+        if x64_decode_immediate_size(d, row, code) > 0 -> slot += 1
+        if x64_decode_memory_operand(d, code) -> memory = true
+        if x64_decode_sized_operand(code) -> sized = true
+        if code.starts_with("J") {
+            insn.reaches = true
+            insn.reach = d.address + length + x64_decode_signed(immediate, 8 * width)
+        }
+        insn.operands.push(x64_decode_operand(d, row, code, immediate, length))
+    }
+    if d.rip >= 0 && memory {
+        insn.reaches = true
+        insn.reach = d.address + length + d.disp
+    }
+    if d.kind == 2 && insn.operands.len() > 0 {
+        if d.aaa != 0 -> insn.operands[0] = "{insn.operands[0]}{{k{d.aaa}}}"
+        if d.z == 1 -> insn.operands[0] = "{insn.operands[0]}{{z}}"
+        // objdump writes the rounding or {sae} onto the last register
+        // operand, before any immediate.
+        if d.bcst == 1 && d.mod == 3 && row.rounding > 0 {
+            control: if row.rounding == 1 -> X64_DECODE_ROUNDING[d.l] else -> "{{sae}}"
+            last_register := insn.operands.len() - 1
+            loop last_register > 0 && insn.operands[last_register].starts_with("0x") {
+                last_register -= 1
+            }
+            insn.operands[last_register] = "{insn.operands[last_register]}{control}"
+        }
+    }
+    name := row.name.copy()
+    // The predicate immediates objdump spells into the name.
+    last: if d.immediates.len() > 0 -> d.immediates[d.immediates.len() - 1] else -> -1
+    predicate := ""
+    if d.opcode == 0xc2 && (d.space == 1 || d.space == 4 || d.space == 7) && last >= 0 && last < (if d.space == 1 -> 8 else -> 32) {
+        predicate = X64_DECODE_CMP_PREDICATES[last]
+        name = name.replace("cmp", "cmp{predicate}")
+    }
+    if d.opcode == 0x44 && (d.space == 3 || d.space == 6 || d.space == 9) && (last == 0 || last == 1 || last == 0x10 || last == 0x11) {
+        predicate = if {
+            last == 0 -> "lqlq"
+            last == 1 -> "hqlq"
+            last == 0x10 -> "lqhq"
+            else -> "hqhq"
+        }
+        name = name.replace("pclmulqdq", "pclmul{predicate}dq")
+    }
+    if d.space == 9 && (d.opcode == 0x1e || d.opcode == 0x1f || d.opcode == 0x3e || d.opcode == 0x3f) && last >= 0 && last < 8 && X64_DECODE_VPCMP_PREDICATES[last] != "" {
+        predicate = X64_DECODE_VPCMP_PREDICATES[last]
+        name = name.replace("vpcmp", "vpcmp{predicate}")
+    }
+    if predicate != "" {
+        // The immediate is the row's last operand; EVEX rounding follows it.
+        kept := [String]{}
+        loop (k, operand) in insn.operands {
+            if k != row.operands.len() - 1 -> kept.push(operand.copy())
+        }
+        insn.operands = kept
+    }
+    words: x64_decode_prefix_words(d, row, flow, insn.indirect, memory, sized, insn.operands)
+    insn.mnemonic = if words == "" -> name else -> "{words} {name}"
+    Val(insn)
+}
+
+// The prefixes objdump shows before the mnemonic, in byte order: lock, a
+// rep the instruction doesn't take as its mandatory prefix (rep, repz,
+// repnz; bnd on a branch; xacquire and xrelease under lock), a 66 or 67 no
+// operand used (data16, addr32), a cs, ss, ds or es (ignored in 64-bit
+// code; notrack on an indirect branch), an fs or gs no memory operand used,
+// a REX a later prefix voided, and a bare REX (40) no byte register of
+// `operands` needed: only spl, bpl, sil and dil take one.
+x64_decode_prefix_words: fn(d: X64Decoding, row: X64DecodeRow, flow: X64Flow, indirect: Bool, memory: Bool, sized: Bool, operands: [String]) -> String Never! {
+    words := [String]{}
+    if d.voided_rex != 0 {
+        bits := ""
+        if d.voided_rex & 8 != 0 -> bits = "{bits}W"
+        if d.voided_rex & 4 != 0 -> bits = "{bits}R"
+        if d.voided_rex & 2 != 0 -> bits = "{bits}X"
+        if d.voided_rex & 1 != 0 -> bits = "{bits}B"
+        words.push(if bits == "" -> "rex" else -> "rex.{bits}")
+    }
+    string_op: d.space == 0 && ((d.opcode >= 0x6c && d.opcode <= 0x6f) || (d.opcode >= 0xa4 && d.opcode <= 0xa7) || (d.opcode >= 0xaa && d.opcode <= 0xaf))
+    compare_op: d.space == 0 && (d.opcode == 0xa6 || d.opcode == 0xa7 || d.opcode == 0xae || d.opcode == 0xaf)
+    branch: flow == .Jump || flow == .Call || flow == .Return || flow == .Cond
+    loop (k, byte) in d.prefixes {
+        latest := true
+        loop later in k + 1..<d.prefixes.len() {
+            same: d.prefixes[later] == byte || ((byte == 0xf2 || byte == 0xf3) && (d.prefixes[later] == 0xf2 || d.prefixes[later] == 0xf3)) || (x64_decode_segment_prefix(byte) && x64_decode_segment_prefix(d.prefixes[later]))
+            if same -> latest = false
+        }
+        if {
+            byte == 0xf0 -> words.push("lock")
+            byte == 0xf2 || byte == 0xf3 -> {
+                if latest && d.kind == 0 && row.prefix == byte -> next
+                words.push(
+                    if {
+                        d.lock -> if byte == 0xf2 -> "xacquire" else -> "xrelease"
+                        string_op && byte == 0xf3 -> if compare_op -> "repz" else -> "rep"
+                        byte == 0xf2 && branch -> "bnd"
+                        byte == 0xf2 -> "repnz"
+                        else -> "repz"
+                    },
+                )
+            }
+            byte == 0x66 -> {
+                if !(latest && (row.prefix == 0x66 || sized)) -> words.push("data16")
+            }
+            byte == 0x67 -> {
+                if !(latest && (memory || row.addr >= 0)) -> words.push("addr32")
+            }
+            byte == 0x64 || byte == 0x65 -> {
+                if !(latest && memory) -> words.push(if byte == 0x64 -> "fs" else -> "gs")
+            }
+            byte == 0x3e && indirect -> words.push("notrack")
+            else -> words.push(X64_DECODE_SEGMENTS[x64_decode_segment_number(byte)])
+        }
+    }
+    if d.rex == 0x40 && !operands.contains("spl") && !operands.contains("bpl") && !operands.contains("sil") && !operands.contains("dil") {
+        words.push("rex")
+    }
+    words.join(" ")
+}
+
+// Whether `byte` is a segment override.
+x64_decode_segment_prefix: fn(byte: Int) -> Bool Never! {
+    byte == 0x26 || byte == 0x2e || byte == 0x36 || byte == 0x3e || byte == 0x64 || byte == 0x65
+}
+
+// The segment register (X64_DECODE_SEGMENTS) override `byte` names.
+x64_decode_segment_number: fn(byte: Int) -> Int Never! {
+    if {
+        byte == 0x26 -> 0
+        byte == 0x2e -> 1
+        byte == 0x36 -> 2
+        byte == 0x3e -> 3
+        byte == 0x64 -> 4
+        else -> 5
+    }
+}
+
+// General register `n` at `bits` wide; a byte register without a REX
+// prefix is ah-bh for 4-7.
+x64_decode_gpr: fn(n: Int, bits: Int, rex: Bool) -> String Never! {
+    if {
+        bits == 64 -> X64_REGISTER_NAMES[n]
+        bits == 32 -> X64_DECODE_GPR32[n]
+        bits == 16 -> X64_DECODE_GPR16[n]
+        !rex && n >= 4 && n < 8 -> X64_DECODE_GPR8_HIGH[n - 4]
+        else -> X64_DECODE_GPR8[n]
+    }
+}
+
+// Vector register `n` of `bytes` bytes (at least an xmm).
+x64_decode_vreg: fn(n: Int, bytes: Int) -> String Never! {
+    if { bytes >= 64 -> "zmm{n}", bytes >= 32 -> "ymm{n}", else -> "xmm{n}" }
+}
+
+// The width in bits of a general-register operand of size letters `size`.
+x64_decode_gpr_bits: fn(d: X64Decoding, row: X64DecodeRow, size: String) -> Int Never! {
+    if {
+        size == "b" -> 8
+        size == "w" -> 16
+        size == "d" || size == "db" || size == "dw" -> 32
+        size == "q" -> 64
+        size == "y" -> if d.w == 1 -> 64 else -> 32
+        size == "s" -> x64_decode_stack(d, row)
+        size == "z" -> if x64_decode_osize(d, row) == 16 -> 16 else -> 32
+        else -> x64_decode_osize(d, row)
+    }
+}
+
+// The bytes a memory operand of size letters `size` reads (0: unsized).
+x64_decode_memory_bytes: fn(d: X64Decoding, row: X64DecodeRow, size: String) -> Int Never! {
+    vl: x64_decode_vl(d, row)
+    if {
+        size == "" -> 0
+        size == "b" || size == "db" -> 1
+        size == "w" || size == "dw" -> 2
+        size == "d" -> 4
+        size == "q" -> 8
+        size == "f" -> 6
+        size == "t" -> 10
+        size == "o" || size == "dq" -> 16
+        size == "qq" -> 32
+        size == "x" -> vl
+        size == "h" -> vl /% 2
+        size == "4" -> vl /% 4
+        size == "8" -> vl /% 8
+        else -> x64_decode_gpr_bits(d, row, size) /% 8
+    }
+}
+
+// The size word objdump writes before a memory operand of `bytes` bytes.
+x64_decode_label: fn(bytes: Int, size: String) -> String Never! {
+    if {
+        size == "o" -> "OWORD PTR "
+        bytes == 1 -> "BYTE PTR "
+        bytes == 2 -> "WORD PTR "
+        bytes == 4 -> "DWORD PTR "
+        bytes == 6 -> "FWORD PTR "
+        bytes == 8 -> "QWORD PTR "
+        bytes == 10 -> "TBYTE PTR "
+        bytes == 16 -> "XMMWORD PTR "
+        bytes == 32 -> "YMMWORD PTR "
+        bytes == 64 -> "ZMMWORD PTR "
+        else -> ""
+    }
+}
+
+// A displacement as objdump adds it: "+0x8", "-0x8".
+x64_decode_disp: fn(disp: Int) -> String Never! {
+    if disp < 0 -> "-{x64_hex(-disp)}" else -> "+{x64_hex(disp)}"
+}
+
+// The ModRM memory operand: `label` before it, EVEX's disp8 scaled by `n`,
+// and a VSIB index of `vsib` bytes (0: a general index).
+x64_decode_memory: fn(d: X64Decoding, label: String, n: Int, vsib: Int) -> String Never! {
+    segment: if { d.segment == 0x64 -> "fs:", d.segment == 0x65 -> "gs:", else -> "" }
+    disp: if d.kind == 2 && d.mod == 1 -> d.disp * n else -> d.disp
+    bits: if d.addr32 -> 32 else -> 64
+    if !d.sib && d.mod == 0 && d.rm == 5 {
+        return "{label}{segment}[{if d.addr32 -> "eip" else -> "rip"}{x64_decode_disp(disp)}]"
+    }
+    base := -1
+    index := -1
+    if {
+        d.sib -> {
+            if !(d.mod == 0 && d.base == 5) -> base = d.base | (d.b << 3)
+            number: d.index | (d.x << 3)
+            if {
+                vsib > 0 -> index = number | (d.v2 << 4)
+                number != 4 -> index = number
+            }
+        }
+        else -> base = d.rm | (d.b << 3)
+    }
+    // An index of 4 (none) shows as riz when the scale or a base other than
+    // rsp and r12 says the SIB byte meant one.
+    zero: vsib == 0 && index < 0 && d.sib && (d.scale != 0 || (base >= 0 && d.base != 4))
+    if base < 0 && index < 0 && !zero {
+        return "{label}{if segment == "" -> "ds:" else -> segment}{x64_hex(x64_decode_unsigned(disp, bits))}"
+    }
+    inner := if base >= 0 -> x64_decode_gpr(base, bits, true) else -> ""
+    if index >= 0 || zero {
+        name: if {
+            vsib > 0 -> x64_decode_vreg(index, vsib)
+            zero -> if d.addr32 -> "eiz" else -> "riz"
+            else -> x64_decode_gpr(index, bits, true)
+        }
+        inner = if inner == "" -> "{name}*{1 << d.scale}" else -> "{inner}+{name}*{1 << d.scale}"
+    }
+    if d.mod != 0 || base < 0 -> inner = "{inner}{x64_decode_disp(disp)}"
+    "{label}{segment}[{inner}]"
+}
+
+// One operand as objdump writes it, for operand code `code`. The codes:
+// E the ModRM.rm general register or memory; G the ModRM.reg general
+// register; M memory only; Z the opcode's register; V the ModRM.reg vector
+// register; W the ModRM.rm vector register or memory; H VEX.vvvv (Hy a
+// general register, Hk a mask); Lx the vector register imm8[7:4] names; Kr
+// the ModRM.reg mask, Km the ModRM.rm mask or memory; @ VSIB memory (index
+// x the vector length or h half of it, element d or q); Sw the ModRM.reg
+// segment register; Fi st(ModRM.rm), F0 st; X and Y the string source
+// [rsi] and destination [rdi], XBX xlat's [rbx]; Ib Iw an
+// immediate, Iz one of 16 or 32 bits and Iv of 16, 32 or 64 by the operand
+// size, Ibs one sign-extended to the operand size, Ibq and Izq to the stack
+// size; Jb Jz a relative branch; Ob Ov an absolute address; and the fixed
+// registers AL CL DX AX rAX eAX XMM0 and the count 1. The size letters: b w
+// d q a byte to a quadword, t a tbyte, f a fword, o an oword, dq an
+// xmmword, qq a ymmword, v the operand size, y d or q by W, s the stack
+// size, z w or d by the operand size, x the vector length, h 4 8 its half,
+// quarter or eighth, db dw a 32-bit register or a byte or word in memory.
+x64_decode_operand: fn(d: X64Decoding, row: X64DecodeRow, code: String, immediate: Int, length: Int) -> String Never! {
+    osize: x64_decode_osize(d, row)
+    first: code.slice(0, 1)
+    size: code.slice(1, code.len())
+    vl: x64_decode_vl(d, row)
+    if {
+        code == "AL" || code == "CL" || code == "DX" || code == "AX" || code == "XMM0" -> code.to_lower()
+        code == "1" -> "1"
+        code == "rAX" -> x64_decode_gpr(0, osize, true)
+        code == "eAX" -> if osize == 16 -> "ax" else -> "eax"
+        code == "Ib" || code == "Iw" || code == "Iv" -> x64_hex(immediate)
+        code == "Ibs" -> x64_hex(x64_decode_unsigned(x64_decode_signed(immediate, 8), osize))
+        code == "Ibq" -> x64_hex(x64_decode_unsigned(x64_decode_signed(immediate, 8), x64_decode_stack(d, row)))
+        code == "Iz" -> {
+            bits: if osize == 16 -> 16 else -> 32
+            x64_hex(x64_decode_unsigned(x64_decode_signed(immediate, bits), osize))
+        }
+        code == "Izq" -> {
+            stack: x64_decode_stack(d, row)
+            x64_hex(x64_decode_unsigned(x64_decode_signed(immediate, if stack == 16 -> 16 else -> 32), stack))
+        }
+        code == "Jb" || code == "Jz" -> {
+            width: if code == "Jb" -> 8 else -> 32
+            x64_hex(x64_decode_unsigned(d.address + length + x64_decode_signed(immediate, width), 64))
+        }
+        code == "Ob" || code == "Ov" -> {
+            segment: if { d.segment == 0x64 -> "fs", d.segment == 0x65 -> "gs", else -> "ds" }
+            "{segment}:{x64_hex(immediate)}"
+        }
+        code == "XBX" -> "BYTE PTR {x64_decode_string_segment(d)}[{if d.addr32 -> "ebx" else -> "rbx"}]"
+        first == "X" || first == "Y" -> {
+            bytes: x64_decode_gpr_bits(d, row, size) /% 8
+            segment: if first == "Y" -> "" else -> x64_decode_string_segment(d)
+            register: if {
+                first == "Y" && d.addr32 -> "edi"
+                first == "Y" -> "rdi"
+                d.addr32 -> "esi"
+                else -> "rsi"
+            }
+            "{x64_decode_label(bytes, size)}{segment}[{register}]"
+        }
+        code == "Sw" -> if d.reg < 6 -> X64_DECODE_SEGMENTS[d.reg] else -> "(bad)"
+        code == "F0" -> "st"
+        code == "Fi" -> "st({d.rm})"
+        code == "Kr" -> "k{d.reg}"
+        code == "Hk" -> "k{d.vvvv & 7}"
+        code == "Hy" -> x64_decode_gpr(d.vvvv, if d.w == 1 -> 64 else -> 32, true)
+        code.starts_with("Km") -> {
+            if d.mod == 3 -> return "k{d.rm}"
+            bytes: x64_decode_memory_bytes(d, row, code.slice(2, code.len()))
+            x64_decode_memory(d, x64_decode_label(bytes, ""), bytes, 0)
+        }
+        code == "Lx" -> x64_decode_vreg(immediate >> 4, vl)
+        first == "G" -> x64_decode_gpr(d.reg | (d.r << 3), x64_decode_gpr_bits(d, row, size), d.rex != 0)
+        first == "Z" -> x64_decode_gpr((d.opcode & 7) | (d.b << 3), x64_decode_gpr_bits(d, row, size), d.rex != 0)
+        first == "E" -> {
+            if d.mod == 3 {
+                return x64_decode_gpr(d.rm | (d.b << 3), x64_decode_gpr_bits(d, row, size), d.rex != 0)
+            }
+            bytes: x64_decode_memory_bytes(d, row, size)
+            x64_decode_memory(d, x64_decode_label(bytes, size), bytes, 0)
+        }
+        first == "M" -> {
+            if d.mod == 3 -> return "(bad)"
+            bytes: x64_decode_memory_bytes(d, row, size)
+            x64_decode_memory(d, x64_decode_label(bytes, size), bytes, 0)
+        }
+        first == "V" -> x64_decode_vreg(d.reg | (d.r << 3) | (d.r2 << 4), x64_decode_vector_bytes(d, row, size))
+        first == "H" -> x64_decode_vreg(d.vvvv | (d.v2 << 4), x64_decode_vector_bytes(d, row, size))
+        first == "W" -> {
+            if d.mod == 3 {
+                extra: if d.kind == 2 -> d.x << 4 else -> 0
+                return x64_decode_vreg(d.rm | (d.b << 3) | extra, x64_decode_vector_bytes(d, row, size))
+            }
+            // A W of size y is a ymm's 32 bytes, not the y of a general register.
+            bytes: if size == "y" -> 32 else -> x64_decode_memory_bytes(d, row, size)
+            if d.kind == 2 && d.bcst == 1 {
+                element: if {
+                    row.element > 0 -> row.element
+                    d.w == 1 -> 8
+                    else -> 4
+                }
+                word: x64_decode_label(element, "").replace(" PTR ", " BCST ")
+                return x64_decode_memory(d, word, element, 0)
+            }
+            x64_decode_memory(d, x64_decode_label(bytes, size), bytes, 0)
+        }
+        first == "@" -> {
+            if d.mod == 3 -> return "(bad)"
+            element: if code.slice(2, 3) == "q" -> 8 else -> 4
+            index: if code.slice(1, 2) == "h" && vl > 16 -> vl /% 2 else -> vl
+            x64_decode_memory(d, x64_decode_label(element, ""), element, index)
+        }
+        else -> "(bad)"
+    }
+}
+
+// The bytes of a vector register operand of size letters `size`, at least
+// an xmm's.
+x64_decode_vector_bytes: fn(d: X64Decoding, row: X64DecodeRow, size: String) -> Int Never! {
+    vl: x64_decode_vl(d, row)
+    bytes: if {
+        size == "x" -> vl
+        size == "y" -> 32
+        size == "h" -> vl /% 2
+        size == "4" -> vl /% 4
+        size == "8" -> vl /% 8
+        else -> 16
+    }
+    if bytes < 16 -> 16 else -> bytes
+}
+
+// The segment a string source names: an fs or gs override ("fs:"), else
+// none, since 64-bit code ignores ds, es, cs and ss.
+x64_decode_string_segment: fn(d: X64Decoding) -> String Never! {
+    if { d.segment == 0x64 -> "fs:", d.segment == 0x65 -> "gs:", else -> "" }
+}
+
+// The instruction as objdump -M intel writes it: the mnemonic, a space and
+// the operands joined by commas.
+x64_insn_text: fn(insn: X64Insn) -> String Never! {
+    if insn.operands.len() == 0 -> return insn.mnemonic.copy()
+    "{insn.mnemonic} {insn.operands.join(",")}"
+}
+
+#Test("the decoder spells instructions as objdump -M intel does") {
+    cases: [{bytes: [U8], text: String}]{
+        {bytes: [U8]{0x48, 0x8b, 0x45, 0xf8}, text: "mov rax,QWORD PTR [rbp-0x8]"},
+        {bytes: [U8]{0x48, 0x8b, 0x05, 0x10, 0, 0, 0}, text: "mov rax,QWORD PTR [rip+0x10]"},
+        {bytes: [U8]{0x0f, 0x1f, 0x44, 0x00, 0x00}, text: "nop DWORD PTR [rax+rax*1+0x0]"},
+        {bytes: [U8]{0x66, 0x2e, 0x0f, 0x1f, 0x84, 0, 0, 0, 0, 0}, text: "cs nop WORD PTR [rax+rax*1+0x0]"},
+        {bytes: [U8]{0x66, 0x90}, text: "xchg ax,ax"},
+        {bytes: [U8]{0x90}, text: "nop"},
+        {bytes: [U8]{0xf3, 0xc3}, text: "repz ret"},
+        {bytes: [U8]{0xf3, 0x48, 0xab}, text: "rep stos QWORD PTR [rdi],rax"},
+        {bytes: [U8]{0xf3, 0xa4}, text: "rep movs BYTE PTR [rdi],BYTE PTR [rsi]"},
+        {bytes: [U8]{0x64, 0xac}, text: "lods al,BYTE PTR fs:[rsi]"},
+        {bytes: [U8]{0x40, 0x0f, 0x94, 0xc0}, text: "rex sete al"},
+        {bytes: [U8]{0x40, 0x0f, 0x94, 0xc6}, text: "sete sil"},
+        {bytes: [U8]{0x62, 0xf1, 0x7c, 0x38, 0x58, 0xc2}, text: "vaddps zmm0,zmm0,zmm2{{rd-sae}}"},
+        {bytes: [U8]{0xf0, 0x48, 0xff, 0x00}, text: "lock inc QWORD PTR [rax]"},
+        {bytes: [U8]{0x48, 0x83, 0xe4, 0xf0}, text: "and rsp,0xfffffffffffffff0"},
+        {bytes: [U8]{0x48, 0xb8, 1, 2, 3, 4, 5, 6, 7, 8}, text: "movabs rax,0x807060504030201"},
+        {bytes: [U8]{0x64, 0x48, 0x8b, 0x04, 0x25, 0x28, 0, 0, 0}, text: "mov rax,QWORD PTR fs:0x28"},
+        {bytes: [U8]{0x40, 0x88, 0xc6}, text: "mov sil,al"},
+        {bytes: [U8]{0x88, 0xc6}, text: "mov dh,al"},
+        {bytes: [U8]{0x48, 0xd1, 0xe0}, text: "shl rax,1"},
+        {bytes: [U8]{0x48, 0xd3, 0xe0}, text: "shl rax,cl"},
+        {bytes: [U8]{0x0f, 0x94, 0xc0}, text: "sete al"},
+        {bytes: [U8]{0xf2, 0x0f, 0x10, 0x45, 0xf8}, text: "movsd xmm0,QWORD PTR [rbp-0x8]"},
+        {bytes: [U8]{0x44, 0x0f, 0x10, 0x45, 0x20}, text: "movups xmm8,XMMWORD PTR [rbp+0x20]"},
+        {bytes: [U8]{0xc5, 0xfe, 0x6f, 0x06}, text: "vmovdqu ymm0,YMMWORD PTR [rsi]"},
+        {bytes: [U8]{0xc4, 0xe2, 0xf1, 0xa9, 0xc2}, text: "vfmadd213sd xmm0,xmm1,xmm2"},
+        {bytes: [U8]{0xf3, 0x48, 0x0f, 0xae, 0xdf}, text: "wrgsbase rdi"},
+        {bytes: [U8]{0x65, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0}, text: "mov rax,QWORD PTR gs:0x0"},
+        {bytes: [U8]{0x0f, 0xc2, 0xc1, 0x01}, text: "cmpltps xmm0,xmm1"},
+        {bytes: [U8]{0x66, 0x0f, 0x3a, 0x44, 0xc1, 0x11}, text: "pclmulhqhqdq xmm0,xmm1"},
+        {bytes: [U8]{0x62, 0xf1, 0x7c, 0x48, 0x58, 0xc2}, text: "vaddps zmm0,zmm0,zmm2"},
+        {bytes: [U8]{0x62, 0xf1, 0x7c, 0x4a, 0x58, 0x41, 0x01}, text: "vaddps zmm0{{k2}},zmm0,ZMMWORD PTR [rcx+0x40]"},
+        {bytes: [U8]{0xd9, 0xc9}, text: "fxch st(1)"},
+        {bytes: [U8]{0xde, 0xc1}, text: "faddp st(1),st"},
+        {bytes: [U8]{0x8d, 0x74, 0x26, 0x00}, text: "lea esi,[rsi+riz*1+0x0]"},
+    }
+    loop item in cases {
+        insn: x64_decode(item.bytes, 0, 0) ?? panic("truncated: {item.text}")
+        assert_eq(x64_insn_text(insn), item.text)
+        assert_eq(insn.length, item.bytes.len())
+    }
+}
+
+#Test("a relative branch and a rip-relative operand say what they reach") {
+    jump: x64_decode([U8]{0xe8, 0xfb, 0xff, 0xff, 0xff}, 0, 0x401000) ?? panic("call")
+    assert(jump.flow == X64Flow.Call)
+    assert_eq(jump.reach, 0x401000)
+    assert_eq(x64_insn_text(jump), "call 0x401000")
+    assert_eq(jump.field, 1)
+    assert_eq(jump.width, 4)
+    load: x64_decode([U8]{0x48, 0x8d, 0x3d, 0x00, 0x01, 0, 0}, 0, 0x2000) ?? panic("lea")
+    assert(load.reaches)
+    assert_eq(load.reach, 0x2107)
+    assert_eq(load.rip, 3)
+    cond: x64_decode([U8]{0x0f, 0x85, 0, 0, 0, 0}, 0, 0) ?? panic("jne")
+    assert(cond.flow == X64Flow.Cond)
+    assert_eq(cond.cond, 5)
+    assert((x64_decode([U8]{0xff, 0x24, 0xc5, 0, 0, 0, 0}, 0, 0) ?? panic("jmp")).indirect)
+}
+
+#Test("bytes that start no instruction decode as one (bad) byte, and the end of the bytes as None") {
+    bad: x64_decode([U8]{0x06, 0x90}, 0, 0) ?? panic("bad")
+    assert(bad.invalid)
+    assert_eq(bad.length, 1)
+    assert_eq(x64_insn_text(bad), "(bad)")
+    assert(x64_decode([U8]{0x48, 0x8b}, 0, 0) == None)
+    assert(x64_decode([U8]{0xe8, 0, 0}, 0, 0) == None)
+    // An EVEX map 5 opcode no row names keeps its length.
+    shape: x64_decode([U8]{0x62, 0xf5, 0x7c, 0x48, 0x58, 0xc2}, 0, 0) ?? panic("map 5")
+    assert(!shape.named && !shape.invalid)
+    assert_eq(shape.length, 6)
+}

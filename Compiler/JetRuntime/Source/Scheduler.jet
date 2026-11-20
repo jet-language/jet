@@ -584,6 +584,18 @@ scheduler_stop_new: fn(kind: I64, message: I64) -> I64 {
     record
 }
 
+// The status the process ends with once its root takes the stop `record`
+// published to it (`control`), as jet_rt_root_take_stop gives it.
+scheduler_root_stop_code: fn(control: I64, record: I64) -> I64 {
+    kind: sync_load(record)
+    if (kind == I64{3} || kind == I64{4}) {
+        status: if (kind == I64{3}) -> I64{2} else -> I64{3}
+        return I64{80} + status
+    }
+    if (kind == I64{5}) { return sync_load(wrapping(control + I64{112})) }
+    EXIT_RUNTIME_PANIC
+}
+
 // Takes the record, including on rejection. First stop wins, except Deadline
 // supersedes `Canceled`. Record precedes release status.
 scheduler_control_publish: fn(control: I64, record: I64) -> Bool {
@@ -598,6 +610,8 @@ scheduler_control_publish: fn(control: I64, record: I64) -> Bool {
     if (control == main_root_control && main_stopped_code == I64{0}) {
         main_stopped_install(rt_main_stopped_address())
     }
+    // Read before the root can take the record (main_root_stop).
+    ending: if (control == main_root_control) -> scheduler_root_stop_code(control, record) else -> I64{0}
     sync_mutex_lock(wrapping(control + I64{72}))
     old: sync_load(wrapping(control + I64{32}))
     // A task panic replaces an undelivered cancellation/deadline/budget.
@@ -613,8 +627,12 @@ scheduler_control_publish: fn(control: I64, record: I64) -> Bool {
     sync_mutex_unlock(wrapping(control + I64{72}))
     if accepted -> scheduler_stop_drop(previous) else -> scheduler_stop_drop(record)
     // jet_rt_main's root takes every stop it accepts and ends the process,
-    // so the frames unwinding to it leave their heap to the kernel (#5478).
-    if accepted && control == main_root_control -> main_process_end()
+    // so the frames unwinding to it leave their heap to the kernel (#5478),
+    // and a debugger pauses before they unwind (main_root_stop).
+    if (accepted && control == main_root_control) {
+        main_process_end()
+        main_root_stop(ending)
+    }
     accepted
 }
 

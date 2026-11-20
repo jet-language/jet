@@ -5,15 +5,16 @@
 # it, when its tracer ends (PTRACE_O_EXITKILL). A running program keeps
 # its helper waiting on it, never reading the session's channel, so the
 # channel closing alone left that helper, and the program, behind.
-# left.sh records the processes below the session, then counts those
-# still there once it is killed.
+# left.sh records the processes below the session once the program is in
+# the state the case names, then waits for those still there once it is
+# killed to end, and counts the ones that don't.
 fixture: KilledSessionLeavesNothing.fixture
 env: NO_COLOR=1
 session stopped line: jet debug prog.jet
 send stopped: "break prog.jet:4"
 send stopped: "c"
 recv stopped line until ~ "Breakpoint hit  prog.jet:4  in spin()" timeout 300s # the image builds and the program runs to the stop
-step: sh left.sh record {pid:stopped}
+step: sh left.sh record {pid:stopped} t
 exit: 0
 stdout: ~ "program: t\n" # the program is stopped at the breakpoint
 stdout: !~ "below: 0\n" # the session has its helper and the program below it
@@ -30,9 +31,7 @@ recv running line until ~ "Breakpoint hit  prog.jet:4  in spin()" timeout 300s #
 send running: "delete 2"
 recv running line until ~ "Deleted breakpoint 2" timeout 30s # the breakpoint goes (1 is the entry's stop), so the program runs on
 send running: "c"
-step: sleep 1
-exit: 0
-step: sh left.sh record {pid:running}
+step: sh left.sh record {pid:running} R
 exit: 0
 stdout: ~ "program: R\n" # the program runs on, its helper waiting on it
 stdout: !~ "below: 0\n" # the session has its helper and the program below it

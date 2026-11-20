@@ -2510,7 +2510,11 @@ parser_finish_data_member: fn(state: &JetParserState, what: String) -[]> {
     ahead := 0
     loop parser_kind_at(state, ahead) == TOKEN_SEMI -> ahead += 1
     closer: parser_kind_at(state, ahead)
-    if closer != TOKEN_RBRACE && closer != TOKEN_EOF {
+    // An authored `;` where the comma goes is already the parse's explicit
+    // semicolon report (parser_bump): that one character is reported once.
+    next_token: parser_current(state)
+    authored_semicolon: next_token.kind == TOKEN_SEMI && next_token.span.start < next_token.span.end && !state.explicit_semicolon_reported
+    if closer != TOKEN_RBRACE && closer != TOKEN_EOF && !authored_semicolon {
         end: parser_data_member_end(state)
         parser_add_report(state, diagnostic_from_registry("E0003", Val(Span{start: end, end: end}), "expected `,` after this {what}", "the data members of a brace body are separated by commas, on one line or many", "add `,` after the {what}"))
     }

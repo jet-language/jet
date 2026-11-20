@@ -9,8 +9,8 @@ spin: fn(n: Int) -> Int {
 }
 
 // The compiler's shape: the work runs on a thread of its own, other tasks
-// busy on theirs, and the worker ends the program with status 1, as a
-// failed check does, while the main thread waits for it.
+// busy on theirs, and the worker ends the program with a stop's status,
+// 70, while the main thread waits for it.
 work: fn(n: Int) -> Int {
     loop k in 0..<3 {
         spinning: task spin(1000000000 + k)
@@ -19,7 +19,7 @@ work: fn(n: Int) -> Int {
     total := 0
     loop i in 0..<n -> total += half(i)
     print("total {total}")
-    process.exit(1)
+    process.exit(70)
     total
 }
 

@@ -1,0 +1,624 @@
+// The x86-64 decoder (X64/Decoder.jet) reads back every instruction Jet
+// writes: each encoder form to its full objdump -M intel text, each
+// template-assembler mnemonic and closed rail to its own name, the asm
+// leaves and the native fault reports to named instructions only. Where
+// objdump is on PATH, it decodes the same instructions as a peer oracle.
+use {
+    x64_decode_test_files: core.files
+    x64_decode_test_process: core.process
+    jet_backend.[X64_CLONE_CHILD, X64_CLONE_CHILD_BYTES, X64_FAULT_REPORT, X64_FAULT_REPORT_ADDRESSES, X64_FIBER_SWITCH, X64_FIBER_SWITCH_BYTES, X64_GS_BASE_WRITE, X64_GS_BASE_WRITE_BYTES, X64_RAX, X64_RBP, X64_RBX, X64_RCX, X64_RDI, X64_RDX, X64_RSI, X64_RSP, X64_R8, X64_R9, X64_R11, X64_SIGNAL_RETURN, X64_SIGNAL_RETURN_BYTES, X64Alu, X64Code, X64Cond, X64FloatOp, X64Insn, X64Shift, x64_alu_mi, x64_alu_ri, x64_alu_rr, x64_assemble_template, x64_call_rel32, x64_call_reg, x64_cmov_rr, x64_code, x64_count_code, x64_count_step, x64_cpuid, x64_cqo, x64_cvtsd2ss, x64_cvtsi2sd, x64_cvtsi2ss, x64_cvtss2sd, x64_cvttsd2si, x64_cvttss2si, x64_decode, x64_decode_hex_parse, x64_div, x64_fill_code, x64_float_load, x64_float_op, x64_float_op_mem, x64_float_store, x64_idiv, x64_imul_rr, x64_imul_rri, x64_imul_wide, x64_insn_text, x64_int_sum_code, x64_jcc_rel32, x64_jmp_rel32, x64_lea, x64_lea_indexed, x64_lea_rip, x64_load, x64_load_indexed, x64_load_rip, x64_load_u8, x64_lock_cmpxchg, x64_lock_xadd, x64_mov_ri, x64_mov_rr, x64_movaps, x64_movnti, x64_movq_from_xmm, x64_movq_to_xmm, x64_movzx_r8, x64_mul, x64_neg, x64_nops, x64_pop, x64_push, x64_rep_movsb, x64_rep_stos, x64_ret, x64_setcc, x64_sfence, x64_shift_cl, x64_shift_ri, x64_sse, x64_sse_escaped, x64_store, x64_store_indexed, x64_store_indexed_imm, x64_store_u8, x64_test_ri, x64_test_rr, x64_ucomisd, x64_ucomiss, x64_ud2, x64_vector_load, x64_vector_store, x64_vfmadd213sd, x64_vfmadd213sd_mem, x64_xchg_mem, x64_xgetbv, x64_zero]
+    jet_foundation.[INLINE_ASSEMBLY_X64_MNEMONICS, INLINE_ASSEMBLY_X64_RAIL_MNEMONICS]
+    jet_testkit.[kit_require_tool]
+}
+
+// One instruction or run of them and the objdump -M intel text it decodes
+// to, its instructions joined by "; ".
+X64DecodeTestForm: struct {
+    text: String,
+    bytes: [U8],
+}
+
+// One instruction of a decoded run: where it starts and what it is.
+X64DecodeTestAt: struct {
+    at: Int,
+    insn: X64Insn,
+}
+
+// `bytes` as space-separated hex pairs, for a failure message.
+x64_decode_test_bytes: fn(bytes: [U8]) -> String Never! {
+    digits: "0123456789abcdef"
+    pairs := [String]{}
+    loop byte in bytes {
+        value: Int{byte}
+        pairs.push("{digits.slice(value >> 4, (value >> 4) + 1)}{digits.slice(value & 15, (value & 15) + 1)}")
+    }
+    pairs.join(" ")
+}
+
+// The instructions of `bytes` from offset 0 to its end, each at its offset
+// as its address; a run that ends inside an instruction panics.
+x64_decode_test_linear: fn(bytes: [U8], label: String) -> [X64DecodeTestAt] Never! {
+    found := [X64DecodeTestAt]{}
+    at := 0
+    loop at < bytes.len() {
+        insn: x64_decode(bytes, at, at) ?? panic("{label}: the bytes end inside the instruction at {at}: {x64_decode_test_bytes(bytes.slice(at, bytes.len()))}")
+        at += insn.length
+        found.push(X64DecodeTestAt{at: at - insn.length, insn: insn})
+    }
+    found
+}
+
+// The instructions of `bytes` reached from offset 0 by falling through and
+// following relative branches and calls that stay inside it: code that
+// holds its own data (the fault reports' texts) decodes only where it runs.
+x64_decode_test_reached: fn(bytes: [U8], label: String) -> [X64DecodeTestAt] Never! {
+    seen := loop _at in 0..<bytes.len() -> false
+    work := [Int]{0}
+    found := [X64DecodeTestAt]{}
+    k := 0
+    loop k < work.len() {
+        cursor := work[k]
+        k += 1
+        loop cursor < bytes.len() && !seen[cursor] {
+            seen[cursor] = true
+            insn: x64_decode(bytes, cursor, cursor) ?? panic("{label}: the bytes end inside the instruction at {cursor}")
+            found.push(X64DecodeTestAt{at: cursor, insn: insn})
+            if insn.width > 0 && insn.reach >= 0 && insn.reach < bytes.len() {
+                work.push(insn.reach)
+            }
+            if insn.flow == .Return || insn.flow == .Stop || insn.flow == .Jump || insn.invalid {
+                break
+            }
+            cursor += insn.length
+        }
+    }
+    found
+}
+
+// Every instruction of `found` that no table form names, as
+// "LABEL+OFFSET: BYTES".
+x64_decode_test_unnamed: fn(bytes: [U8], found: [X64DecodeTestAt], label: String) -> [String] Never! {
+    unnamed := [String]{}
+    loop item in found {
+        if !item.insn.named {
+            unnamed.push("{label}+{item.at}: {x64_decode_test_bytes(bytes.slice(item.at, item.at + item.insn.length))}")
+        }
+    }
+    unnamed
+}
+
+// The texts of the instructions of `bytes`, decoded from offset 0, joined
+// by "; ".
+x64_decode_test_text: fn(bytes: [U8]) -> String Never! {
+    (loop item in x64_decode_test_linear(bytes, "form") -> x64_insn_text(item.insn)).join("; ")
+}
+
+// The mnemonics of the instructions of `bytes`, prefixes included.
+x64_decode_test_mnemonics: fn(bytes: [U8]) -> [String] Never! {
+    loop item in x64_decode_test_linear(bytes, "mnemonics") -> item.insn.mnemonic.copy()
+}
+
+// Push the form `text` with the bytes `code` holds.
+x64_decode_test_form: fn(forms: &[X64DecodeTestForm], text: String, code: X64Code) Never! {
+    forms.push(X64DecodeTestForm{text: text, bytes: code.bytes})
+}
+
+// Each encoder form and the text it decodes to.
+x64_decode_test_forms: fn() -> [X64DecodeTestForm] Never! {
+    forms := [X64DecodeTestForm]{}
+    code := x64_code()
+    x64_mov_rr(code, X64_RAX, X64_R8)
+    x64_decode_test_form(forms, "mov rax,r8", code)
+    code = x64_code()
+    x64_mov_ri(code, X64_R9, 5)
+    x64_decode_test_form(forms, "mov r9d,0x5", code)
+    code = x64_code()
+    x64_mov_ri(code, X64_RAX, -1)
+    x64_decode_test_form(forms, "mov rax,0xffffffffffffffff", code)
+    code = x64_code()
+    x64_mov_ri(code, X64_RAX, 0x123456789a)
+    x64_decode_test_form(forms, "movabs rax,0x123456789a", code)
+    code = x64_code()
+    x64_alu_rr(code, X64Alu.Sub, X64_RBX, X64_RSI)
+    x64_decode_test_form(forms, "sub rbx,rsi", code)
+    code = x64_code()
+    x64_alu_rr(code, X64Alu.Cmp, X64_RAX, X64_R11)
+    x64_decode_test_form(forms, "cmp rax,r11", code)
+    code = x64_code()
+    x64_zero(code, X64_R9)
+    x64_decode_test_form(forms, "xor r9d,r9d", code)
+    code = x64_code()
+    x64_alu_ri(code, X64Alu.Cmp, X64_RAX, -1)
+    x64_decode_test_form(forms, "cmp rax,0xffffffffffffffff", code)
+    code = x64_code()
+    x64_alu_ri(code, X64Alu.And, 12, 0x1000)
+    x64_decode_test_form(forms, "and r12,0x1000", code)
+    code = x64_code()
+    x64_alu_mi(code, X64Alu.Cmp, X64_RCX, -24, 1)
+    x64_decode_test_form(forms, "cmp QWORD PTR [rcx-0x18],0x1", code)
+    code = x64_code()
+    x64_alu_mi(code, X64Alu.Add, 12, 8, 300)
+    x64_decode_test_form(forms, "add QWORD PTR [r12+0x8],0x12c", code)
+    code = x64_code()
+    x64_imul_rr(code, X64_RAX, X64_R9)
+    x64_decode_test_form(forms, "imul rax,r9", code)
+    code = x64_code()
+    x64_imul_rri(code, X64_RDX, X64_RBX, 10)
+    x64_decode_test_form(forms, "imul rdx,rbx,0xa", code)
+    code = x64_code()
+    x64_imul_rri(code, X64_RDX, X64_RBX, 1000)
+    x64_decode_test_form(forms, "imul rdx,rbx,0x3e8", code)
+    code = x64_code()
+    x64_test_rr(code, X64_RSI, X64_RSI)
+    x64_decode_test_form(forms, "test rsi,rsi", code)
+    code = x64_code()
+    x64_test_ri(code, X64_RAX, 0x80)
+    x64_decode_test_form(forms, "test rax,0x80", code)
+    code = x64_code()
+    x64_load(code, X64_RAX, X64_RBP, -8)
+    x64_decode_test_form(forms, "mov rax,QWORD PTR [rbp-0x8]", code)
+    code = x64_code()
+    x64_load(code, X64_RAX, X64_RSP, 16)
+    x64_decode_test_form(forms, "mov rax,QWORD PTR [rsp+0x10]", code)
+    code = x64_code()
+    x64_load(code, 13, 13, 0)
+    x64_decode_test_form(forms, "mov r13,QWORD PTR [r13+0x0]", code)
+    code = x64_code()
+    x64_load(code, X64_RAX, X64_RDI, 0x1000)
+    x64_decode_test_form(forms, "mov rax,QWORD PTR [rdi+0x1000]", code)
+    code = x64_code()
+    x64_store(code, X64_RDI, 0, X64_RAX)
+    x64_decode_test_form(forms, "mov QWORD PTR [rdi],rax", code)
+    code = x64_code()
+    x64_count_step(code, X64_RDI, 8, true, true)
+    x64_decode_test_form(forms, "lock inc QWORD PTR [rdi+0x8]", code)
+    code = x64_code()
+    x64_count_step(code, X64_RDI, 8, false, false)
+    x64_decode_test_form(forms, "dec QWORD PTR [rdi+0x8]", code)
+    code = x64_code()
+    x64_xchg_mem(code, X64_RDI, 0, X64_RAX)
+    x64_decode_test_form(forms, "xchg QWORD PTR [rdi],rax", code)
+    code = x64_code()
+    x64_lock_xadd(code, X64_RBP, -16, X64_RCX)
+    x64_decode_test_form(forms, "lock xadd QWORD PTR [rbp-0x10],rcx", code)
+    code = x64_code()
+    x64_lock_cmpxchg(code, 12, 8, X64_R9)
+    x64_decode_test_form(forms, "lock cmpxchg QWORD PTR [r12+0x8],r9", code)
+    code = x64_code()
+    x64_load_indexed(code, X64_RAX, X64_RDI, X64_RSI, 8, 16, 8)
+    x64_decode_test_form(forms, "mov rax,QWORD PTR [rdi+rsi*8+0x10]", code)
+    code = x64_code()
+    x64_load_indexed(code, X64_RAX, X64_RDI, X64_RSI, 1, 0, 1)
+    x64_decode_test_form(forms, "movzx rax,BYTE PTR [rdi+rsi*1]", code)
+    code = x64_code()
+    x64_load_indexed(code, X64_RAX, X64_RDI, X64_RSI, 2, 0, 2)
+    x64_decode_test_form(forms, "movzx rax,WORD PTR [rdi+rsi*2]", code)
+    code = x64_code()
+    x64_load_indexed(code, X64_RAX, X64_RDI, X64_RSI, 4, 0, 4)
+    x64_decode_test_form(forms, "mov eax,DWORD PTR [rdi+rsi*4]", code)
+    code = x64_code()
+    x64_load_indexed(code, X64_R8, 12, -1, 1, 8, 4)
+    x64_decode_test_form(forms, "mov r8d,DWORD PTR [r12+0x8]", code)
+    code = x64_code()
+    x64_store_indexed(code, X64_RDI, X64_RDX, 1, 0, X64_RSI, 1)
+    x64_decode_test_form(forms, "mov BYTE PTR [rdi+rdx*1],sil", code)
+    code = x64_code()
+    x64_store_indexed(code, X64_RDI, X64_RDX, 2, 0, X64_RAX, 2)
+    x64_decode_test_form(forms, "mov WORD PTR [rdi+rdx*2],ax", code)
+    code = x64_code()
+    x64_store_indexed(code, X64_RDI, X64_RDX, 4, 0, X64_RAX, 4)
+    x64_decode_test_form(forms, "mov DWORD PTR [rdi+rdx*4],eax", code)
+    code = x64_code()
+    x64_store_indexed(code, X64_RDI, X64_RDX, 8, -8, X64_RAX, 8)
+    x64_decode_test_form(forms, "mov QWORD PTR [rdi+rdx*8-0x8],rax", code)
+    code = x64_code()
+    x64_store_indexed_imm(code, X64_RDI, X64_RDX, 1, 0, 7, 1)
+    x64_decode_test_form(forms, "mov BYTE PTR [rdi+rdx*1],0x7", code)
+    code = x64_code()
+    x64_store_indexed_imm(code, X64_RDI, X64_RDX, 2, 0, 0x1234, 2)
+    x64_decode_test_form(forms, "mov WORD PTR [rdi+rdx*2],0x1234", code)
+    code = x64_code()
+    x64_store_indexed_imm(code, X64_RDI, X64_RDX, 4, 0, 5, 4)
+    x64_decode_test_form(forms, "mov DWORD PTR [rdi+rdx*4],0x5", code)
+    code = x64_code()
+    x64_store_indexed_imm(code, X64_RDI, X64_RDX, 8, 0, -1, 8)
+    x64_decode_test_form(forms, "mov QWORD PTR [rdi+rdx*8],0xffffffffffffffff", code)
+    code = x64_code()
+    x64_movnti(code, X64_RDI, X64_RDX, 8, 0, X64_RAX, 8)
+    x64_decode_test_form(forms, "movnti QWORD PTR [rdi+rdx*8],rax", code)
+    code = x64_code()
+    x64_movnti(code, X64_RDI, X64_RDX, 4, 0, X64_RAX, 4)
+    x64_decode_test_form(forms, "movnti DWORD PTR [rdi+rdx*4],eax", code)
+    code = x64_code()
+    x64_sfence(code)
+    x64_decode_test_form(forms, "sfence", code)
+    code = x64_code()
+    x64_lea(code, X64_RAX, X64_RBP, -16)
+    x64_decode_test_form(forms, "lea rax,[rbp-0x10]", code)
+    code = x64_code()
+    x64_lea_indexed(code, X64_RAX, X64_RDI, X64_RSI, 4, 8)
+    x64_decode_test_form(forms, "lea rax,[rdi+rsi*4+0x8]", code)
+    code = x64_code()
+    x64_load_u8(code, X64_RAX, X64_RDI, 3)
+    x64_decode_test_form(forms, "movzx rax,BYTE PTR [rdi+0x3]", code)
+    code = x64_code()
+    x64_store_u8(code, X64_RDI, 0, X64_RSI)
+    x64_decode_test_form(forms, "mov BYTE PTR [rdi],sil", code)
+    code = x64_code()
+    x64_lea_rip(code, X64_RAX)
+    x64_decode_test_form(forms, "lea rax,[rip+0x0]", code)
+    code = x64_code()
+    x64_load_rip(code, X64_RCX)
+    x64_decode_test_form(forms, "mov rcx,QWORD PTR [rip+0x0]", code)
+    code = x64_code()
+    x64_neg(code, X64_RCX)
+    x64_mul(code, X64_RCX)
+    x64_imul_wide(code, X64_RCX)
+    x64_div(code, X64_RCX)
+    x64_idiv(code, 12)
+    x64_cqo(code)
+    x64_decode_test_form(forms, "neg rcx; mul rcx; imul rcx; div rcx; idiv r12; cqo", code)
+    code = x64_code()
+    x64_shift_cl(code, X64Shift.Sar, X64_RDX)
+    x64_shift_cl(code, X64Shift.Shr, X64_RDX)
+    x64_shift_ri(code, X64Shift.Shl, X64_RSI, 3)
+    x64_decode_test_form(forms, "sar rdx,cl; shr rdx,cl; shl rsi,0x3", code)
+    code = x64_code()
+    x64_rep_movsb(code)
+    x64_decode_test_form(forms, "rep movs BYTE PTR [rdi],BYTE PTR [rsi]", code)
+    code = x64_code()
+    x64_rep_stos(code, 1)
+    x64_rep_stos(code, 2)
+    x64_rep_stos(code, 4)
+    x64_rep_stos(code, 8)
+    x64_decode_test_form(forms, "rep stos BYTE PTR [rdi],al; rep stos WORD PTR [rdi],ax; rep stos DWORD PTR [rdi],eax; rep stos QWORD PTR [rdi],rax", code)
+    code = x64_code()
+    x64_ud2(code)
+    x64_decode_test_form(forms, "ud2", code)
+    code = x64_code()
+    x64_setcc(code, X64Cond.NE, X64_RSI)
+    x64_setcc(code, X64Cond.E, X64_RAX)
+    x64_setcc(code, X64Cond.G, 9)
+    x64_decode_test_form(forms, "setne sil; rex sete al; setg r9b", code)
+    code = x64_code()
+    x64_movzx_r8(code, X64_RAX, X64_RSI)
+    x64_decode_test_form(forms, "movzx rax,sil", code)
+    code = x64_code()
+    x64_cmov_rr(code, X64Cond.L, X64_RAX, X64_RBX)
+    x64_cmov_rr(code, X64Cond.AE, 10, 11)
+    x64_decode_test_form(forms, "cmovl rax,rbx; cmovae r10,r11", code)
+    code = x64_code()
+    x64_push(code, 12)
+    x64_push(code, X64_RBP)
+    x64_pop(code, X64_RBP)
+    x64_pop(code, 12)
+    x64_ret(code)
+    x64_decode_test_form(forms, "push r12; push rbp; pop rbp; pop r12; ret", code)
+    nops: [String]{"nop", "xchg ax,ax", "nop DWORD PTR [rax]", "nop DWORD PTR [rax+0x0]", "nop DWORD PTR [rax+rax*1+0x0]", "nop WORD PTR [rax+rax*1+0x0]", "nop DWORD PTR [rax+0x0]", "nop DWORD PTR [rax+rax*1+0x0]", "nop WORD PTR [rax+rax*1+0x0]"}
+    loop (k, text) in nops {
+        code = x64_code()
+        x64_nops(code.bytes, k + 1)
+        x64_decode_test_form(forms, text.copy(), code)
+    }
+    code = x64_code()
+    x64_call_rel32(code)
+    x64_call_reg(code, X64_R11)
+    x64_call_reg(code, X64_RAX)
+    x64_decode_test_form(forms, "call 0x5; call r11; call rax", code)
+    code = x64_code()
+    x64_jmp_rel32(code)
+    x64_jcc_rel32(code, X64Cond.AE)
+    x64_jcc_rel32(code, X64Cond.LE)
+    x64_decode_test_form(forms, "jmp 0x5; jae 0xb; jle 0x11", code)
+    code = x64_code()
+    x64_sse(code, 0x66, false, 0xef, 1, 9)
+    x64_sse_escaped(code, 0x66, 0x38, 0x00, 0, 1)
+    x64_sse_escaped(code, 0, 0x38, 0xcb, 10, 2)
+    x64_decode_test_form(forms, "pxor xmm1,xmm9; pshufb xmm0,xmm1; sha256rnds2 xmm10,xmm2,xmm0", code)
+    code = x64_code()
+    x64_float_load(code, false, 0, X64_RBP, -8)
+    x64_float_load(code, true, 9, X64_RBP, -8)
+    x64_float_store(code, false, X64_RSP, 8, 1)
+    x64_float_store(code, true, 12, 0, 1)
+    x64_decode_test_form(forms, "movsd xmm0,QWORD PTR [rbp-0x8]; movss xmm9,DWORD PTR [rbp-0x8]; movsd QWORD PTR [rsp+0x8],xmm1; movss DWORD PTR [r12],xmm1", code)
+    code = x64_code()
+    x64_vector_load(code, 0, X64_RDI, 16)
+    x64_vector_store(code, X64_RDI, 0, 8)
+    x64_movaps(code, 0, 1)
+    x64_decode_test_form(forms, "movups xmm0,XMMWORD PTR [rdi+0x10]; movups XMMWORD PTR [rdi],xmm8; movaps xmm0,xmm1", code)
+    code = x64_code()
+    x64_float_op(code, X64FloatOp.Add, false, 0, 1)
+    x64_float_op(code, X64FloatOp.Sub, false, 0, 1)
+    x64_float_op(code, X64FloatOp.Mul, true, 0, 1)
+    x64_float_op(code, X64FloatOp.Div, true, 0, 1)
+    x64_float_op(code, X64FloatOp.Sqrt, false, 2, 11)
+    x64_float_op_mem(code, X64FloatOp.Mul, true, 2, X64_RBP, -4)
+    x64_decode_test_form(forms, "addsd xmm0,xmm1; subsd xmm0,xmm1; mulss xmm0,xmm1; divss xmm0,xmm1; sqrtsd xmm2,xmm11; mulss xmm2,DWORD PTR [rbp-0x4]", code)
+    code = x64_code()
+    x64_ucomisd(code, 0, 1)
+    x64_ucomiss(code, 0, 1)
+    x64_vfmadd213sd(code, 0, 1, 2)
+    x64_vfmadd213sd_mem(code, 0, 1, X64_RDI, 8)
+    x64_decode_test_form(forms, "ucomisd xmm0,xmm1; ucomiss xmm0,xmm1; vfmadd213sd xmm0,xmm1,xmm2; vfmadd213sd xmm0,xmm1,QWORD PTR [rdi+0x8]", code)
+    code = x64_code()
+    x64_cpuid(code)
+    x64_xgetbv(code)
+    x64_decode_test_form(forms, "cpuid; xgetbv", code)
+    code = x64_code()
+    x64_cvtsi2sd(code, 0, X64_RAX)
+    x64_cvtsi2ss(code, 0, X64_RAX)
+    x64_cvttsd2si(code, X64_RAX, 1)
+    x64_cvttss2si(code, X64_RAX, 1)
+    x64_cvtss2sd(code, 0, 1)
+    x64_cvtsd2ss(code, 0, 1)
+    x64_decode_test_form(forms, "cvtsi2sd xmm0,rax; cvtsi2ss xmm0,rax; cvttsd2si rax,xmm1; cvttss2si rax,xmm1; cvtss2sd xmm0,xmm1; cvtsd2ss xmm0,xmm1", code)
+    code = x64_code()
+    x64_movq_to_xmm(code, false, 0, X64_RBX)
+    x64_movq_to_xmm(code, true, 0, X64_RBX)
+    x64_movq_from_xmm(code, false, X64_RBX, 0)
+    x64_movq_from_xmm(code, true, X64_RBX, 0)
+    x64_decode_test_form(forms, "movq xmm0,rbx; movd xmm0,ebx; movq rbx,xmm0; movd ebx,xmm0", code)
+    forms
+}
+
+// A template line for each listed mnemonic, its operands, and the
+// mnemonics its bytes decode to.
+X64DecodeTestSample: struct {
+    template: String,
+    names: [String],
+    decoded: [String],
+}
+
+x64_decode_test_samples: fn() -> [X64DecodeTestSample] Never! {
+    one: [String]{"a"}
+    none: [String]{}
+    [X64DecodeTestSample]{
+        X64DecodeTestSample{template: "push {{a}}\npop rax", names: one, decoded: [String]{"push", "pop"}},
+        X64DecodeTestSample{template: "call {{a}}", names: one, decoded: [String]{"call"}},
+        X64DecodeTestSample{template: "syscall", names: none, decoded: [String]{"syscall"}},
+        X64DecodeTestSample{template: "pause", names: none, decoded: [String]{"pause"}},
+        X64DecodeTestSample{template: "push rbx\ncpuid\npop rbx", names: none, decoded: [String]{"push", "cpuid", "pop"}},
+        X64DecodeTestSample{template: "xgetbv", names: none, decoded: [String]{"xgetbv"}},
+        X64DecodeTestSample{template: "rdtsc", names: none, decoded: [String]{"rdtsc"}},
+        X64DecodeTestSample{template: "rdtscp", names: none, decoded: [String]{"rdtscp"}},
+        X64DecodeTestSample{template: "lfence\nmfence\nsfence", names: none, decoded: [String]{"lfence", "mfence", "sfence"}},
+        X64DecodeTestSample{template: "std\ncld", names: none, decoded: [String]{"std", "cld"}},
+        X64DecodeTestSample{template: "rep movsb\nrep movsq\nrep stosb\nrep stosq", names: none, decoded: [String]{"rep movs", "rep movs", "rep stos", "rep stos"}},
+        X64DecodeTestSample{template: "lock cmpxchg qword ptr [{{a}}], rcx\nlock xadd qword ptr [{{a}}], rcx", names: one, decoded: [String]{"lock cmpxchg", "lock xadd"}},
+        X64DecodeTestSample{template: "xchg qword ptr [{{a}}], rcx", names: one, decoded: [String]{"xchg"}},
+        X64DecodeTestSample{template: "mov rax, {{a}}\nmovzx rcx, byte ptr [{{a}}]", names: one, decoded: [String]{"mov", "movzx"}},
+        X64DecodeTestSample{template: "add rax, {{a}}\nsub rax, {{a}}\nand rax, {{a}}\nor rax, {{a}}\nxor rax, {{a}}", names: one, decoded: [String]{"add", "sub", "and", "or", "xor"}},
+        X64DecodeTestSample{template: "shl rax, 3\nshr rax, cl\nsar rax, 63", names: none, decoded: [String]{"shl", "shr", "sar"}},
+        X64DecodeTestSample{template: "movups xmm0, xmmword ptr [{{a}}]\nmovups xmmword ptr [{{a}}], xmm1\nmovaps xmm2, xmm0", names: one, decoded: [String]{"movups", "movups", "movaps"}},
+        X64DecodeTestSample{template: "paddd xmm0, xmm1\npshufd xmm0, xmm1, 27\npshufb xmm0, xmm1\npalignr xmm0, xmm1, 8\npblendw xmm0, xmm1, 15", names: none, decoded: [String]{"paddd", "pshufd", "pshufb", "palignr", "pblendw"}},
+        X64DecodeTestSample{template: "pxor xmm0, xmm1\npor xmm0, xmm1\npand xmm0, xmm1\npcmpeqb xmm0, xmm1\npmovmskb rax, xmm0", names: none, decoded: [String]{"pxor", "por", "pand", "pcmpeqb", "pmovmskb"}},
+        X64DecodeTestSample{template: "sha256rnds2 xmm1, xmm2\nsha256msg1 xmm1, xmm2\nsha256msg2 xmm1, xmm2", names: none, decoded: [String]{"sha256rnds2", "sha256msg1", "sha256msg2"}},
+        X64DecodeTestSample{template: "aesenc xmm0, xmm1\naesenclast xmm0, xmm1\naesdec xmm0, xmm1\naesdeclast xmm0, xmm1", names: none, decoded: [String]{"aesenc", "aesenclast", "aesdec", "aesdeclast"}},
+        X64DecodeTestSample{template: "pclmulqdq xmm0, xmm1, 17\npclmulqdq xmm0, xmm1, 5", names: none, decoded: [String]{"pclmulhqhqdq", "pclmulqdq"}},
+        X64DecodeTestSample{template: "psrlq xmm0, 4\npsrldq xmm0, 4\npsllq xmm0, 4\npslldq xmm0, 4", names: none, decoded: [String]{"psrlq", "psrldq", "psllq", "pslldq"}},
+    }
+}
+
+// The closed rails, their lines and bytes.
+x64_decode_test_rails: fn() -> [{lines: [String], bytes: [U8]}] Never! {
+    [{lines: [String], bytes: [U8]}]{
+        {lines: X64_FIBER_SWITCH, bytes: X64_FIBER_SWITCH_BYTES},
+        {lines: X64_GS_BASE_WRITE, bytes: X64_GS_BASE_WRITE_BYTES},
+        {lines: X64_SIGNAL_RETURN, bytes: X64_SIGNAL_RETURN_BYTES},
+        {lines: X64_CLONE_CHILD, bytes: X64_CLONE_CHILD_BYTES},
+    }
+}
+
+// The asm leaves, each run whole from its first byte.
+x64_decode_test_leaves: fn() -> [{label: String, bytes: [U8]}] Never! {
+    leaves := [{label: String, bytes: [U8]}]{{label: "int_sum", bytes: x64_int_sum_code()}}
+    loop width in ([Int]{1, 2, 4, 8}) {
+        leaves.push({label: "fill{width}", bytes: x64_fill_code(width, false)})
+        leaves.push({label: "fill{width}_exact", bytes: x64_fill_code(width, true)})
+    }
+    loop stride in ([Int]{1, 8}) {
+        leaves.push({label: "count{stride}", bytes: x64_count_code(stride, false)})
+        leaves.push({label: "count{stride}_exact", bytes: x64_count_code(stride, true)})
+    }
+    leaves
+}
+
+// Instructions past what Jet writes, for the objdump comparison: VEX,
+// EVEX, x87 and the prefix spellings.
+X64_DECODE_TEST_SPOTS: [[U8]]{
+    [U8]{0xc5, 0xfe, 0x6f, 0x06},
+    [U8]{0xc5, 0xf9, 0x7e, 0xc0},
+    [U8]{0xc4, 0xe2, 0x7d, 0x58, 0xc1},
+    [U8]{0xc4, 0xe2, 0xf8, 0xf2, 0xc1},
+    [U8]{0xc4, 0xe3, 0xfb, 0xf0, 0xc1, 0x05},
+    [U8]{0xc4, 0xe2, 0x6d, 0x90, 0x04, 0x88},
+    [U8]{0x64, 0xac},
+    [U8]{0x65, 0x48, 0xa5},
+    [U8]{0xd7},
+    [U8]{0x62, 0xf1, 0x7c, 0x18, 0x5d, 0xc2},
+    [U8]{0x62, 0xf3, 0x7d, 0x18, 0x0a, 0xc1, 0x04},
+    [U8]{0xc5, 0xf8, 0x77},
+    [U8]{0xc5, 0xfc, 0x77},
+    [U8]{0xc5, 0xf8, 0x93, 0xc1},
+    [U8]{0x62, 0xf1, 0x7c, 0x48, 0x58, 0xc2},
+    [U8]{0x62, 0xf1, 0x7c, 0x4a, 0x58, 0x41, 0x01},
+    [U8]{0x62, 0xf1, 0xfd, 0x48, 0x6f, 0x07},
+    [U8]{0x62, 0xf3, 0x75, 0x48, 0x25, 0xc2, 0x96},
+    [U8]{0x62, 0xf1, 0x7c, 0x38, 0x58, 0xc2},
+    [U8]{0x62, 0xf1, 0x7c, 0x58, 0x58, 0x07},
+    [U8]{0x62, 0xf2, 0x7d, 0x48, 0x18, 0x07},
+    [U8]{0xd9, 0xc9},
+    [U8]{0xde, 0xc1},
+    [U8]{0xdd, 0x45, 0xf8},
+    [U8]{0xdb, 0x6d, 0x10},
+    [U8]{0xd9, 0xe8},
+    [U8]{0xdf, 0xe0},
+    [U8]{0x66, 0x2e, 0x0f, 0x1f, 0x84, 0, 0, 0, 0, 0},
+    [U8]{0xf3, 0xc3},
+    [U8]{0xf2, 0xe9, 0, 0, 0, 0},
+    [U8]{0x3e, 0xff, 0xe0},
+    [U8]{0x64, 0x48, 0x8b, 0x04, 0x25, 0x28, 0, 0, 0},
+    [U8]{0x67, 0x8b, 0x07},
+    [U8]{0x48, 0xa1, 1, 2, 3, 4, 5, 6, 7, 8},
+    [U8]{0xf3, 0x0f, 0x1e, 0xfa},
+    [U8]{0x0f, 0xc2, 0xc1, 0x01},
+    [U8]{0x0f, 0x0d, 0x08},
+    [U8]{0xf3, 0x48, 0x0f, 0xb8, 0xc1},
+    [U8]{0x0f, 0xc7, 0x0f},
+    [U8]{0x48, 0x0f, 0xc7, 0x0f},
+    [U8]{0x0f, 0x38, 0xf0, 0x07},
+    [U8]{0xf2, 0x48, 0x0f, 0x38, 0xf1, 0xc1},
+    [U8]{0x66, 0x0f, 0x3a, 0x16, 0xc0, 0x01},
+    [U8]{0x8d, 0x74, 0x26, 0x00},
+}
+
+#Test("every encoder form decodes to its own objdump -M intel text") {
+    problems := [String]{}
+    loop form in x64_decode_test_forms() {
+        text: x64_decode_test_text(form.bytes)
+        if text != form.text {
+            problems.push("{x64_decode_test_bytes(form.bytes)}: `{text}`, not `{form.text}`")
+        }
+    }
+    assert(problems.len() == 0, "the decoder misreads encoder forms:\n{problems.join("\n")}")
+}
+
+#Test("every template-assembler mnemonic and rail decodes to its own name") {
+    problems := [String]{}
+    covered := [String]{}
+    loop sample in x64_decode_test_samples() {
+        assembled: x64_assemble_template(sample.template, sample.names, false, false)
+        if assembled.error == .Val(error) {
+            problems.push("`{sample.template}` does not assemble: {error}")
+            next
+        }
+        decoded: x64_decode_test_mnemonics(assembled.code)
+        if decoded != sample.decoded {
+            problems.push("`{sample.template}` decodes to [{decoded.join(", ")}], not [{sample.decoded.join(", ")}]")
+        }
+        // A line's mnemonic is its first word, or the word after a lock or
+        // rep prefix as well.
+        loop line in sample.template.split("\n") {
+            words: line.split(" ").to_list()
+            covered.push(words[0].copy())
+            if (words[0] == "lock" || words[0] == "rep") && words.len() > 1 {
+                covered.push(words[1].copy())
+            }
+        }
+    }
+    loop mnemonic in INLINE_ASSEMBLY_X64_MNEMONICS {
+        if !covered.contains(mnemonic) -> problems.push("no sample assembles `{mnemonic}`")
+    }
+    rail_words := [String]{}
+    loop rail in x64_decode_test_rails() {
+        expected := [String]{}
+        loop line in rail.lines {
+            word: line.split(" ").to_list()[0]
+            if word.ends_with(":") -> next
+            rail_words.push(word.copy())
+            // objdump spells jnz as its synonym jne.
+            expected.push(if word == "jnz" -> "jne" else -> word.copy())
+        }
+        decoded: x64_decode_test_mnemonics(rail.bytes)
+        if decoded != expected {
+            problems.push("rail `{rail.lines.join("; ")}` decodes to [{decoded.join(", ")}]")
+        }
+    }
+    loop mnemonic in INLINE_ASSEMBLY_X64_RAIL_MNEMONICS {
+        if !rail_words.contains(mnemonic) -> problems.push("no rail spells `{mnemonic}`")
+    }
+    assert(problems.len() == 0, "the decoder misreads assembled templates:\n{problems.join("\n")}")
+}
+
+#Test("the asm leaves and the fault reports decode to named instructions only") {
+    problems := [String]{}
+    loop leaf in x64_decode_test_leaves() {
+        found: x64_decode_test_linear(leaf.bytes, leaf.label)
+        problems.extend(x64_decode_test_unnamed(leaf.bytes, found, leaf.label))
+    }
+    reports: [{label: String, bytes: [U8]}]{{label: "fault_report", bytes: X64_FAULT_REPORT}, {label: "fault_report_addresses", bytes: X64_FAULT_REPORT_ADDRESSES}}
+    loop report in reports {
+        found: x64_decode_test_reached(report.bytes, report.label)
+        assert(found.len() > 100, "{report.label}: only {found.len()} instructions reached")
+        problems.extend(x64_decode_test_unnamed(report.bytes, found, report.label))
+    }
+    assert(problems.len() == 0, "instructions no table form names:\n{problems.join("\n")}")
+}
+
+// Every instruction the tests above decode, one byte run each.
+x64_decode_test_instructions: fn() -> [[U8]] Never! {
+    runs := [[U8]]{}
+    loop form in x64_decode_test_forms() -> x64_decode_test_split(runs, form.bytes)
+    loop sample in x64_decode_test_samples() {
+        x64_decode_test_split(runs, x64_assemble_template(sample.template, sample.names, false, false).code)
+    }
+    loop rail in x64_decode_test_rails() -> x64_decode_test_split(runs, rail.bytes)
+    loop leaf in x64_decode_test_leaves() -> x64_decode_test_split(runs, leaf.bytes)
+    loop spot in X64_DECODE_TEST_SPOTS -> x64_decode_test_split(runs, spot)
+    reports: [[U8]]{X64_FAULT_REPORT, X64_FAULT_REPORT_ADDRESSES}
+    loop report in reports {
+        loop item in x64_decode_test_reached(report, "objdump") {
+            runs.push(report.slice(item.at, item.at + item.insn.length))
+        }
+    }
+    runs
+}
+
+// objdump's text as the decoder writes it: one space between words, no
+// `<symbol>` after a target and no `# address` comment.
+x64_decode_test_objdump_text: fn(text: String) -> String Never! {
+    words := [String]{}
+    loop word in text.split(" ") {
+        piece: word.trim()
+        if piece.starts_with("#") || piece.starts_with("<") -> break
+        if piece != "" -> words.push(piece.copy())
+    }
+    words.join(" ")
+}
+
+// Push each instruction of `bytes`, decoded from offset 0, as its own run.
+x64_decode_test_split: fn(runs: &[[U8]], bytes: [U8]) Never! {
+    loop item in x64_decode_test_linear(bytes, "objdump") {
+        runs.push(bytes.slice(item.at, item.at + item.insn.length))
+    }
+}
+
+#Test("objdump -M intel decodes every instruction as the decoder does") {
+    objdump: kit_require_tool("objdump") ?? return
+    runs: x64_decode_test_instructions()
+    blob := [U8]{}
+    starts := [Int]{}
+    loop run in runs {
+        starts.push(blob.len())
+        blob.extend(run)
+    }
+    scratch: x64_decode_test_files.temp_dir("jet-x64-decode") ?? panic("scratch: {err}")
+    path: "{scratch.path}/code.bin"
+    x64_decode_test_files.write_bytes(path, blob) ?? panic("{path}: {err}")
+    receipt: x64_decode_test_process.cmd([String]{objdump, "-D", "-b", "binary", "-m", "i386:x86-64", "-M", "intel", "--insn-width=16", path}).output_limit(256 << 20).run() ?? panic("objdump could not start: {err}")
+    assert(receipt.success, "objdump failed: {receipt.errors}")
+    theirs := [String]{}
+    at := [Int]{}
+    loop line in receipt.output.split("\n") {
+        fields: line.split("\t").to_list()
+        if fields.len() < 3 || !fields[0].trim().ends_with(":") -> next
+        offset: fields[0].trim()
+        at.push(x64_decode_hex_parse(offset.slice(0, offset.len() - 1), line))
+        theirs.push(x64_decode_test_objdump_text(fields[2]))
+    }
+    problems := [String]{}
+    k := 0
+    loop (index, start) in starts {
+        loop k < at.len() && at[k] < start -> k += 1
+        insn: x64_decode(blob, start, start) ?? panic("run {index} is cut short")
+        ours: x64_insn_text(insn)
+        if k >= at.len() || at[k] != start {
+            problems.push("{x64_decode_test_bytes(runs[index])}: objdump starts no instruction at {start}; ours `{ours}`")
+            next
+        }
+        if theirs[k] != ours {
+            problems.push("{x64_decode_test_bytes(runs[index])}: objdump `{theirs[k]}`, ours `{ours}`")
+        }
+    }
+    assert(problems.len() == 0, "{problems.len()} instructions differ from objdump:\n{problems.join("\n")}")
+}

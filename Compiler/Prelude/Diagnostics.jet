@@ -9763,21 +9763,20 @@ EffectWithoutAuthority: struct {
     impl Diagnostic {
         code: "E0712",
         safety_class: .Soundness,
-        safety_reason: "`#FX` allows exactly the effects it lists, so an effect it omits would run with no authority behind it.",
-        expert_path: "none: the `#FX` list names every effect the region reaches",
-        meaning: "An effect used inside a `#FX(…)` region has no authority — it isn't in the authority list",
+        safety_reason: "`#FX` allows exactly the effects it lists, and an `Authority` narrows only to a right it holds, so an effect or right outside them would run with no authority behind it.",
+        expert_path: "none: the `#FX` list names every effect the region reaches, and `with` asks only for a right the authority holds",
+        stage: [.Sema, .Runtime],
+        meaning: "An effect or right with no authority behind it: an effect a `#FX(…)` region doesn't list, or an `Authority` narrowed with `with` to a right it doesn't hold",
         detail: true,
 
-        what: fn(self) -> String {
-            "This `#FX` region uses the effect `{self.effect_name}`, which has no authority backing."
-        }
+        what: fn(self) -> String { "No held authority covers `{self.effect_name}`" }
 
         why: fn(self) -> String {
-            "`#FX(…)` allows exactly the listed effects; an effect reached inside — even transitively through a call — that the list omits has no authority backing it."
+            "An effect runs, and an `Authority` narrows, only within a right that covers it: `#FX(…)` allows exactly the listed effects, even those reached through a call, and `with` keeps only a right the authority already holds."
         }
 
         fix: fn(self) -> String {
-            "Add the named effect to the `#FX(…)` list, or move that work outside the region."
+            "Add the effect to the `#FX(…)` list or move that work outside the region; narrow an `Authority` only to a right it holds, or build it with that right."
         }
     }
 }

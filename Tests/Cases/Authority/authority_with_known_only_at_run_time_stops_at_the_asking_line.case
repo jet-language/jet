@@ -1,0 +1,23 @@
+# Claim: a `with` sema can't answer (a parameter's Authority narrowed to a right known only at run time) is answered at run time: a right none of the held rights covers is the registered E0712 stop at the asking line, exit 70, on every hosted tier
+fixture: AuthorityWithKnownOnlyAtRunTimeStopsAtTheAskingLine.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # sema sees neither the parameter's rights nor the requested text
+step: jet run main.jet
+exit: 70 # the registered run-time stop
+stdout: = "narrowed FS.Read(\"repo\")\n" # a held right narrows
+stderr: ~ "Stop: Jet.EffectWithoutAuthority: No held authority covers `FS.Write`" # the row's what, naming the request
+stderr: count "Stop: " = 1 # one stop
+stderr: ~ "main.jet:2" # the asking line
+stderr: ~ "More: jet-lang.dev/e/Jet.EffectWithoutAuthority" # the row's own footer
+stderr: !~ "Jet.Panic" # never a panic
+stderr: !~ "<core.prelude>" # never the prelude's site
+step: jet build main.jet
+exit: 0
+step: built
+exit: 70 # the same stop in the built program
+stdout: = "narrowed FS.Read(\"repo\")\n"
+stderr: ~ "Stop: Jet.EffectWithoutAuthority: No held authority covers `FS.Write`"
+stderr: ~ "main.jet:2"

@@ -269,14 +269,15 @@ trap_header_bytes: fn(code: I64) {
 
 // A stop's frame: its `-->` location, source line and caret. `backtrace:
 // off` prints none (fault_frames_off). A site in Core is not a line the user
-// wrote. Its location is the user's call that reached it
-// (trap_user_location), with no source line or caret. The Core site
-// stays only when the calling chain names no other frame.
+// wrote, and a stop with no site (a runtime routine's, as `Int{x}` over a
+// Fraction that isn't whole) names none. Its location is the user's call
+// that reached it (trap_user_location), with no source line or caret. The
+// Core site stays only when the calling chain names no other frame.
 trap_context: fn(file: I64, file_len: I64, line: I64, function: I64, function_len: I64, source: I64, source_len: I64, column: I64, caret: I64) {
     if fault_frames_off() {
         return
     }
-    if trap_core_site(file, file_len) && trap_user_location(function_len != I64{0}) {
+    if (file_len == I64{0} || trap_core_site(file, file_len)) && trap_user_location(function_len != I64{0}) {
         return
     }
     if (file_len != I64{0}) {
@@ -518,15 +519,18 @@ trap_process_stop: fn(code: I64, message: I64, message_len: I64) {
     trap_coded_report(code, data, length, false)
 }
 
-// The stop of a wait cycle that holds the root (WaitCycle.jet
-// wait_cycle_stop): the registered deadlock row, whose `-->` line is the
-// root's own waiting line (the innermost frame outside Core) rather than
-// the Core wait it blocked in, then the cycle's task lines in `message`.
-trap_deadlock_stop: fn(message: I64) {
+// The stop of the registered row `code` at the stopping task's own line: the
+// row's `what` (the first line of `message`), then the `-->` line of the
+// innermost frame outside Core rather than the Core or runtime call it
+// stopped in, then the message's other lines. A wait cycle that holds the
+// root stops so (WaitCycle.jet wait_cycle_stop, E3006), and so does an
+// `Authority` narrowed outside its held rights (Authority.jet
+// authority_narrow_failure, E0712).
+trap_located_stop: fn(code: I64, message: I64) {
     data: rt_text_data(message)
     length: rt_text_len(message)
     trap_stop(I64{1}, data, length, I64{0}, I64{0})
-    trap_coded_report(rt_static_text("E3006"), data, length, true)
+    trap_coded_report(code, data, length, true)
 }
 
 // A stop of the registered row `code` past the stop door, with the

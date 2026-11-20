@@ -139,9 +139,10 @@ JetCLIPerfInlines: struct {
 // transfer, in the order the program recorded them; `heaps` each heap
 // snapshot the alloc lens took, in the order it took them; `timed` each
 // CPU-time sample its time and task, in time order. `experiments`,
-// `points` and `idle` are the causal lens's experiments, progress points'
-// names and idle table (PerfSamples.jet perf_causal_idle_write: its words
-// after the header, empty when no exit wrote one). `files` holds each
+// `points`, `idle` and `tasks` are the causal lens's experiments, progress
+// points' names, idle table (PerfSamples.jet perf_causal_idle_write: its
+// words after the header, empty when no exit wrote one) and tasks' timings
+// (JetCLIPerfCausalTasks). `files` holds each
 // function of `table`'s entry of the program's other sources
 // (JetCLIPerfFiles.at), and `sources` those that lines are in, each at its
 // path's entry of `source_at` (-1 for one no line is in or that couldn't be
@@ -177,6 +178,7 @@ JetCLIPerfSamples: struct {
     points: [Int:String],
     idle: [Int],
     timed: [JetCLIPerfTimed],
+    tasks: JetCLIPerfCausalTasks{JetCLIPerfCausalTasks{seen: -1, kept_most: 0, rows: [Int]{}, bodies: [Int:Int]{}, places: [JetCLIPerfCausalPlace]{}}},
     files: [Int]{[Int]{}},
     sources: [JetCLIPerfProgramSource]{[JetCLIPerfProgramSource]{}},
     source_at: [Int]{[Int]{}},
@@ -724,7 +726,8 @@ JET_CLI_PERF_HEAP_BLOCK_KIND: 6
 JET_CLI_PERF_HEAP_ROOT_KIND: 5
 
 // PerfSamples.jet PERF_SAMPLES_CAUSAL: a causal experiment's end, (1 in
-// its low bits) a progress point's name, or (2) the idle table.
+// its low bits) a progress point's name, (2) the idle table, (4) the tasks
+// that claimed a timing, or (3) one task's timing.
 JET_CLI_PERF_CAUSAL_KIND: 8
 
 // What a heap snapshot's root record holds (PerfSamples.jet
@@ -990,6 +993,26 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
                 } else if pc == 2 {
                     // The idle table: a later exit's holds an earlier one's.
                     sampled.idle = loop index in 1..<record -> link_debug_addr(words, at + index * 8)
+                } else if pc == 4 {
+                    // The tasks that claimed a timing and the most kept; the
+                    // timings follow, and a later exit's hold an earlier one's.
+                    sampled.tasks = JetCLIPerfCausalTasks{seen: link_debug_addr(words, at + 8), kept_most: link_debug_addr(words, at + 16), rows: [Int]{}, bodies: [Int:Int]{}, places: [JetCLIPerfCausalPlace]{}}
+                } else if pc == 3 {
+                    // A task's timing (PerfSamples.jet perf_causal_row), its
+                    // body's address as its index among the bodies placed.
+                    if record == JET_CLI_PERF_CAUSAL_ROW_WORDS {
+                        body: link_debug_addr(words, at + 8)
+                        index := sampled.tasks.places.len()
+                        if sampled.tasks.bodies.get(body) == .Val(known) -> index = known else {
+                            place: jet_cli_perf_causal_place(sampled, owned, body)
+                            sampled.tasks.bodies[body] = index
+                            sampled.tasks.places.push(place.move())
+                        }
+                        sampled.tasks.rows.push(index)
+                        loop word in 2..<JET_CLI_PERF_CAUSAL_ROW_WORDS {
+                            sampled.tasks.rows.push(link_debug_addr(words, at + word * 8))
+                        }
+                    }
                 } else if record >= 9 {
                     // The line's sampled address (0 for a baseline), the
                     // speedup, the wall time, the delay inserted, the

@@ -9,7 +9,7 @@ use {
     native_files: core.files
     native_math: core.math
     jet_backend.[X64DebugEncoding, X64LineRow, X64Trace, X64TraceResume, X64_DEBUG_ITEMS_DROP_SYMBOL, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_EVENT_EXIT, X64_TRACE_EVENT_STOP, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, link_debug_uleb, x64_debug_eval_symbols, x64_jetline_find, x64_jetline_line, x64_jetline_next, x64_jetline_place, x64_jetline_sleb, x64_jetline_text, x64_trace_attach, x64_trace_close, x64_trace_debug_register, x64_trace_detach, x64_trace_event_message, x64_trace_follow_exits, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_seize, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait, x64_trace_wait_for, x64_trace_wait_or_input, x64_trace_write]
-    jet_foundation.[DeepChecks, Diagnostic, ENV_JET_RECORD, MODULE_CORE_PREFIX, deep_checks_flags, diagnostic_display_identities, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all, foundation_named_type]
+    jet_foundation.[DeepChecks, Diagnostic, ENV_JET_RECORD, EXIT_ICE, EXIT_RUNTIME_PANIC, MODULE_CORE_PREFIX, deep_checks_flags, diagnostic_display_identities, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all, foundation_named_type]
 }
 
 #Error
@@ -377,7 +377,8 @@ NativeThread: struct {
 // a finished single step, or with `code` the number of the watch whose
 // bytes a write changed), its exit with `code`, or its death by the signal
 // `code`. A Paused event with `exiting` is the program's stopping exit,
-// paused before it ends with that status (NativeSession.stopping_exit).
+// paused before it ends with that status (NativeSession.stopping_exit), or
+// as its stop reaches the process root (NativeSession.root_stop).
 NativeEvent: struct {
     kind: NativeStopKind,
     code: Int,
@@ -575,6 +576,11 @@ NativeSession: struct {
     clock: Int{0},
     exits: Bool{false},
     ending: Bool{false},
+    // The runtime routine a stop that reached the process root calls before
+    // the frames that stopped unwind (NATIVE_ROOT_STOP_SYMBOL), trapped as
+    // the program starts: its stopping exit pauses there; 0 when the image
+    // has none.
+    root_stop: Int{0},
     // The descriptor whose input stops a run of every thread where it is
     // (the DAP adapter's requests), -1 for none; and whether that input
     // stopped the last run.
@@ -596,7 +602,7 @@ NativeSession: struct {
         codes: native_elf_codes(elf, ".text")
         openings: native_openings(image, codes)
         text: native_eval_reach(codes)
-        Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: output_path, output_read: 0, started: false, threads: [NativeThread]{}, observe_root: observe_root, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: None, task: 0, replay_start: native_elf_symbol(elf, NATIVE_REPLAY_START_SYMBOL) != None, program_entry: native_image_entry(image, codes), syscall: text.syscall, text_end: text.end})
+        Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: output_path, output_read: 0, started: false, threads: [NativeThread]{}, observe_root: observe_root, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: None, task: 0, replay_start: native_elf_symbol(elf, NATIVE_REPLAY_START_SYMBOL) != None, program_entry: native_image_entry(image, codes), syscall: text.syscall, text_end: text.end, root_stop: native_elf_symbol(elf, NATIVE_ROOT_STOP_SYMBOL) ?? 0})
     }
 
     // A breakpoint on `line` of the Jet source `file` (a base name or a path,
@@ -1862,11 +1868,15 @@ NativeSession: struct {
             return Err(NativeDebugError{detail: "couldn't start the program: {failure}"})
         }
         self.threads = [NativeThread]{NativeThread{id: self.trace.pid, running: false, halting: false, signal: 0}}
-        // A program ending with a status other than 0 (a stop, a Jet
-        // defect, a fault) pauses as it exits, its stack whole
+        // A program that ends by a stop (70) or a Jet defect or fault (101)
+        // pauses as it ends, its stack whole: a stop that reaches the process
+        // root traps on its way there (root_stop), any other at its exit
         // (stopping_exit).
         self.exits = x64_trace_follow_exits(self.trace, self.trace.pid, kill: true)
         self.ending = false
+        if self.root_stop != 0 && !self.trap(self.root_stop) {
+            return Err(NativeDebugError{detail: "couldn't write a breakpoint at {native_debug_hex(self.root_stop)}"})
+        }
         self.plant_breakpoints() ?? return Err(err)
         self.reserve()
         Ok()
@@ -1968,6 +1978,7 @@ NativeSession: struct {
         elf: native_files.read_bytes(binary) ?? return Err(NativeDebugError{detail: "couldn't read the program `{binary}`: {err}"})
         image: native_image_load(binary, elf) ?? return Err(NativeDebugError{detail: "`{binary}` has no Jet debug information; build it with `jet build -O0`"})
         self.observe_root = native_elf_symbol(elf, X64_OBSERVE_ROOT_SYMBOL) ?? 0
+        self.root_stop = native_elf_symbol(elf, NATIVE_ROOT_STOP_SYMBOL) ?? 0
         codes: native_elf_codes(elf, ".text")
         self.openings = native_openings(image, codes)
         self.step_index = -1
@@ -3426,11 +3437,14 @@ NativeSession: struct {
         self.has_site(address) || self.probed(address) != None
     }
 
-    // Lift every trap and placed condition no breakpoint wants.
+    // Lift every trap and placed condition no breakpoint wants; the trap
+    // at the stopping exit's routine (root_stop) stays.
     lift_unwanted: fn(&self) Never! {
         stale := [Int]{}
         loop address in self.sites.keys() {
-            if self.breakpoint_at(address) == None -> stale.push(address)
+            if address != self.root_stop && self.breakpoint_at(address) == None {
+                stale.push(address)
+            }
         }
         if !self.alive() {
             self.sites = [Int:Int]{}
@@ -3664,6 +3678,33 @@ NativeSession: struct {
             if signal == NATIVE_DEBUG_SIGTRAP {
                 stepping: self.trace.thread
                 self.trace.thread = stop.thread
+                // The trap of a stop that reached the process root (root_stop):
+                // the program's stopping exit pauses there, the frames that
+                // stopped not yet unwound, with every thread stopped. The
+                // trap is lifted, so the run goes on through the routine.
+                if self.root_stop != 0 && !(mine && how == X64TraceResume.Step) {
+                    registers := self.registers() ?? return Err(err)
+                    if registers[X64_TRACE_RIP] - 1 == self.root_stop {
+                        registers[X64_TRACE_RIP] = self.root_stop
+                        if !x64_trace_set_registers(self.trace, registers) {
+                            return Err(NativeDebugError{detail: "couldn't set the program's registers"})
+                        }
+                        self.lift(self.root_stop)
+                        if !self.ending && native_debug_stopping_status(registers[X64_TRACE_RDI]) {
+                            if self.halt() == {
+                                .Ok(ended) -> {
+                                    if ended == .Val(event) -> return Ok(event)
+                                }
+                                .Err(failure) -> return Err(failure)
+                            }
+                            self.ending = true
+                            return Ok(NativeEvent{kind: NativeStopKind.Paused, code: 0, exiting: registers[X64_TRACE_RDI]})
+                        }
+                        self.trace.thread = stepping
+                        _ := self.let_go(at, mode)
+                        next
+                    }
+                }
                 // A placed condition's trap: its breakpoint's hit, or, the
                 // breakpoint gone, nothing to stop for; or the trap of the
                 // hit that filled a logpoint's ring, which is read.
@@ -3862,9 +3903,11 @@ NativeSession: struct {
     }
 
     // The status the program exits with when thread `id`, stopped at its
-    // exit, ends the whole program with a status other than 0 (its
-    // exit_group: a stop, 70, or a Jet defect, 101); 0 otherwise, and once
-    // the program paused at its stopping exit already (`ending`).
+    // exit, ends the whole program by a stop (EXIT_RUNTIME_PANIC, 70) or a
+    // Jet defect or fault (EXIT_ICE, 101) with its exit_group; 0 otherwise:
+    // a program that exits with a status of its own (`process.exit(3)`)
+    // just ends. 0 too once the program paused at its stopping exit already
+    // (`ending`).
     stopping_exit: fn(&self, id: Int) -> Int Never! {
         if self.ending -> return 0
         current: self.trace.thread
@@ -3875,7 +3918,8 @@ NativeSession: struct {
         if registers.len() == 0 || registers[X64_TRACE_ORIG_RAX] != NATIVE_DEBUG_EXIT_GROUP || status & 0x7f != 0 {
             return 0
         }
-        (status >> 8) & 0xff
+        code: (status >> 8) & 0xff
+        if native_debug_stopping_status(code) -> code else -> 0
     }
 
     // Thread `id`, stopped by a trap byte it ran, back on that byte; by a
@@ -5373,6 +5417,13 @@ NATIVE_DEBUG_SIGSTOP: 19
 // thread stopped at its exit holds it.
 NATIVE_DEBUG_EXIT_GROUP: 231
 
+// Whether a program that ends with `status` ends by a stop
+// (EXIT_RUNTIME_PANIC) or a Jet defect or fault (EXIT_ICE), whose stopping
+// exit pauses; a status of the program's own (`process.exit(3)`) just ends.
+native_debug_stopping_status: fn(status: Int) -> Bool Never! {
+    status == EXIT_RUNTIME_PANIC || status == EXIT_ICE
+}
+
 // The errors x64_trace_seize reports: the system refused the trace, and the
 // thread has ended.
 NATIVE_DEBUG_EPERM: 1
@@ -6050,6 +6101,12 @@ NATIVE_DEBUG_HELP: "Commands: step (s), next (n), continue (c), finish (f), reve
 // a channel, a live value or an event (JetRuntime ObserveLive.jet): a replay
 // begins there.
 NATIVE_REPLAY_START_SYMBOL: "jet_rt_observe_start_init"
+
+// The runtime routine a stop that reached the process root calls before
+// the frames that stopped unwind (JetRuntime Main.jet main_root_stop), its
+// first argument the status the program ends with: the stopping exit of a
+// stop that unwinds pauses there.
+NATIVE_ROOT_STOP_SYMBOL: "jet_rt_debug_root_stop"
 
 // The console's prompt.
 NATIVE_DEBUG_PROMPT: "(Jet) "

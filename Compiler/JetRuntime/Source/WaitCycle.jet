@@ -366,7 +366,7 @@ wait_cycle_site: fn() -> I64 {
 // line's site, waits until every task of the cycle has added its own, then
 // publishes the whole cycle as a panic. The root's stop ends the process
 // with the registered deadlock report at its own waiting line
-// (Trap.jet trap_deadlock_stop). When the cycle holds the root, each other
+// (Trap.jet trap_located_stop). When the cycle holds the root, each other
 // task of it first waits for that stop's dump (PerfSamples.jet
 // perf_flight_await), so an observed run's dump holds every task of the
 // cycle where it waited.
@@ -417,7 +417,7 @@ wait_cycle_stop: fn(control: I64) {
     sync_store(wrapping(control + I64{184}), I64{0})
     sync_mutex_unlock(lock)
     wait_cycle_release(record)
-    if root -> trap_deadlock_stop(message) else {
+    if root -> trap_located_stop(rt_static_text("E3006"), message) else {
         jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
     }
     jet_rt_string_drop(message)
