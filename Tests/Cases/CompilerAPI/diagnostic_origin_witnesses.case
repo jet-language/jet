@@ -4,9 +4,7 @@ fixture: DiagnosticOriginWitnesses.fixture
 env: NO_COLOR=1
 step: jet run typed.jet
 exit: 0
-stdout: ~ "E0107 none d12db0f0ca7e6c3880d8b95b34090a52a088ddb0562e23d0472e78d9b82a9cc7" # SHA-256 of the fixture main.jet bytes
-stdout: ~ "L0508 helper.jet 79aea50a0cc8a3ae1c7b0f632bd149c9f7c7e4b209a723c08c1cda090d2a014f" # SHA-256 of the fixture helper.jet bytes
-stdout: ~ "E0003 unplaced"
+stdout: = "helper value 41\nE0107 none d12db0f0ca7e6c3880d8b95b34090a52a088ddb0562e23d0472e78d9b82a9cc7\nL0508 helper.jet 79aea50a0cc8a3ae1c7b0f632bd149c9f7c7e4b209a723c08c1cda090d2a014f\nE0003 unplaced\n" # main.jet's own error names no path and its bytes' SHA-256, helper.jet's lint names helper.jet and its bytes' SHA-256, and the spanless manifest problem has no origin
 step: jet inspect compiler check main.jet
 exit: 0
 json: stdout doc $.compiler.value.schema_version = 2 # the value records carry `origin` since version 2
