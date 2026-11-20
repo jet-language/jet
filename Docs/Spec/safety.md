@@ -244,8 +244,8 @@ file in a `Tests/` tree. The ratchet refuses either.
     "Docs": 10,
     "Examples": 45,
     "Jetpack": 8,
-    "Tools": 28,
-    "tests": 548
+    "Tests": 548,
+    "Tools": 28
   },
   "regions": [
     {
@@ -3743,6 +3743,27 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/SHA256.jet",
+      "line": 255,
+      "column": 5,
+      "reason": "runtime-init runs before any other thread exists"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/SHA256.jet",
+      "line": 260,
+      "column": 5,
+      "reason": "cpuid only reports processor identification"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/SHA256.jet",
+      "line": 285,
+      "column": 9,
+      "reason": "the state list holds eight U32 words, and the range check keeps each block inside the length borrowed bytes"
+    },
+    {
+      "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
       "line": 49,
       "column": 5,
@@ -3908,27 +3929,6 @@ file in a `Tests/` tree. The ratchet refuses either.
       "line": 18,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/SHA256.jet",
-      "line": 255,
-      "column": 5,
-      "reason": "runtime-init runs before any other thread exists"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/SHA256.jet",
-      "line": 260,
-      "column": 5,
-      "reason": "cpuid only reports processor identification"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/SHA256.jet",
-      "line": 285,
-      "column": 9,
-      "reason": "the state list holds eight U32 words, and the range check keeps each block inside the length borrowed bytes"
     },
     {
       "package": "Compiler",
@@ -5269,6 +5269,13 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "Core",
+      "file": "Core/DB/Query.jet",
+      "line": 172,
+      "column": 5,
+      "reason": "the exact owned query bytes passed the shared strict UTF-8 validator"
+    },
+    {
+      "package": "Core",
       "file": "Core/Data/Data.jet",
       "line": 3084,
       "column": 5,
@@ -5280,13 +5287,6 @@ file in a `Tests/` tree. The ratchet refuses either.
       "line": 3467,
       "column": 5,
       "reason": "inspect existing private Decode carriers only inside checked Core data source"
-    },
-    {
-      "package": "Core",
-      "file": "Core/DB/Query.jet",
-      "line": 172,
-      "column": 5,
-      "reason": "the exact owned query bytes passed the shared strict UTF-8 validator"
     },
     {
       "package": "Core",
@@ -6144,17 +6144,17 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "Core",
-      "file": "Core/Testing/Testing.jet",
-      "line": 1504,
-      "column": 5,
-      "reason": "all appended bytes came from complete UTF-8 strings or ASCII"
-    },
-    {
-      "package": "Core",
       "file": "Core/TUI/TUI.jet",
       "line": 108,
       "column": 5,
       "reason": "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Testing/Testing.jet",
+      "line": 1504,
+      "column": 5,
+      "reason": "all appended bytes came from complete UTF-8 strings or ASCII"
     },
     {
       "package": "Docs",
@@ -6598,6 +6598,3842 @@ file in a `Tests/` tree. The ratchet refuses either.
       "reason": "the store test owns the fixture file whose mtime it pins"
     },
     {
+      "package": "Tests",
+      "file": "Tests/Cases/BackendIce/Fixtures/AsmRail/rail.jet",
+      "line": 10,
+      "column": 1,
+      "reason": "the program claims the runtime's stack switch"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/BackendIce/Fixtures/AsmRail/rail.jet",
+      "line": 36,
+      "column": 1,
+      "reason": "the program claims the runtime's TLS base"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/BackendIce/Fixtures/AsmRail/rail.jet",
+      "line": 44,
+      "column": 5,
+      "reason": "call the leaf the build refuses"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/BackendIce/Fixtures/AsmRail/rail.jet",
+      "line": 48,
+      "column": 5,
+      "reason": "call the leaf the build refuses"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/BackendIce/Fixtures/AsmRdtsc/stamp/stamp.jet",
+      "line": 9,
+      "column": 1,
+      "reason": "rdtsc writes only rax and rdx, both declared"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/BackendIce/Fixtures/AsmRdtsc/stamp/stamp.jet",
+      "line": 20,
+      "column": 1,
+      "reason": "lfence and rdtsc write only rax and rdx, and rdx is declared"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/BackendIce/Fixtures/AsmRdtsc/stamp/stamp.jet",
+      "line": 32,
+      "column": 5,
+      "reason": "call the audited rdtsc contracts"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/BackendIce/Fixtures/AsmRdtsc/unencoded/unencoded.jet",
+      "line": 12,
+      "column": 1,
+      "reason": "the body writes only its result register"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/BackendIce/Fixtures/AsmRdtsc/unencoded/unencoded.jet",
+      "line": 20,
+      "column": 1,
+      "reason": "the body writes only its result register"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/BackendIce/Fixtures/AsmRdtsc/unencoded/unencoded.jet",
+      "line": 28,
+      "column": 5,
+      "reason": "call the leaves sema refuses"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/BuildEntry/MetaCodeNeverAuthorizesUnsafe.fixture/added/main.jet",
+      "line": 8,
+      "column": 17,
+      "reason": "generated"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/BuildEntry/MetaCodeNeverAuthorizesUnsafe.fixture/rewritten/main.jet",
+      "line": 18,
+      "column": 25,
+      "reason": "generated"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/CLIPartsCore/Fixtures/GatePolicy/main.jet",
+      "line": 2,
+      "column": 5,
+      "reason": "org refusal"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/CLIPartsInspect/Fixtures/Foreign/app/main.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "calls the audited dependency"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/CLIPartsInspect/Fixtures/Foreign/dep/dep.jet",
+      "line": 3,
+      "column": 1,
+      "reason": "intentionally invalid address"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/CLIPartsInspect/Fixtures/Release/hardened/main.jet",
+      "line": 7,
+      "column": 5,
+      "reason": "pointer is used only after arena reset to prove quarantine"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/CLIPartsInspect/Fixtures/Release/release/main.jet",
+      "line": 7,
+      "column": 5,
+      "reason": "pointer is used only after arena reset to prove quarantine"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/CLIPartsInspect/Fixtures/Team/unsafe/main.jet",
+      "line": 2,
+      "column": 5,
+      "reason": "audit"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/CLIPartsInspect/Fixtures/TestHardened/hardened/main.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "test deliberately reads after arena reset"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/CLIPartsInspect/Fixtures/TestHardened/release/main.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "test deliberately reads after arena reset"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Cffi/CffiRawStatusOutPointerReadsOnlyOnSuccess.fixture/main.jet",
+      "line": 23,
+      "column": 5,
+      "reason": "store_load receives a live non-null slot; bytes are read only after status zero"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Cffi/FFICapabilityBoundaryIsSafeOnlyInsideUnsafe/Input/o2/run.jet",
+      "line": 8,
+      "column": 5,
+      "reason": "the foreign call may write through the borrowed value"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Cffi/FFICapabilityBoundaryIsSafeOnlyInsideUnsafe/Input/o3/run.jet",
+      "line": 8,
+      "column": 5,
+      "reason": "the foreign call may write through the borrowed value"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Cffi/RuntimeExitImportExitsWithItsArgument.fixture/main.jet",
+      "line": 1,
+      "column": 1,
+      "reason": "this program owns the exit status it passes"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/CffiNativeMatrix/Fixtures/RequiredNativeCABIMatrix/default/matrix.jet",
+      "line": 47,
+      "column": 5,
+      "reason": "live non-null out slot; read only after status zero"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/CffiNativeMatrix/Fixtures/RequiredNativeCABIMatrix/sysv64/matrix.jet",
+      "line": 47,
+      "column": 5,
+      "reason": "live non-null out slot; read only after status zero"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/CollectionsAndMethods/SentryTypedIntStoreKeepsExactCarrier.fixture/main.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "the typed pointer refers to the live local cell for these stores"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/ComptimeCLIParity/ComptimeChildIsReapedBeforeTheProgramRuns.fixture/run.jet",
+      "line": 15,
+      "column": 5,
+      "reason": "fork and reap the child before returning"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/ComptimeCLIParity/Fixtures/TierParityExamplesRunThroughAOTJITAndInterpreter/tooling_checked_text_type/checked_text_type.jet",
+      "line": 20,
+      "column": 5,
+      "reason": "checked text example output"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/ComptimeCorePureParity/CryptoExpertAeadSignArgonAOTStdoutMatchesKnownAnswers.fixture/main.jet",
+      "line": 9,
+      "column": 5,
+      "reason": "fixed RFC interop vectors"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/ComptimeCorePureParity/CryptoValuesMatchAOTComptimeForcedInterpreterAndDefaultDev/Input/o1/run.jet",
+      "line": 12,
+      "column": 5,
+      "reason": "fixed RFC interop vectors"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/ComptimeCorePureParity/CryptoValuesMatchAOTComptimeForcedInterpreterAndDefaultDev/Input/o2/run.jet",
+      "line": 12,
+      "column": 5,
+      "reason": "fixed RFC interop vectors"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/ConcurrencyBoundaries/AGroupTaskReadsALentParameterInPlace.fixture/lend.jet",
+      "line": 10,
+      "column": 5,
+      "reason": "reads the address of the graph's storage, not its bytes"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/ConcurrencyBoundaries/AGroupTaskReadsALentParameterInPlace.fixture/lend.jet",
+      "line": 29,
+      "column": 5,
+      "reason": "reads the address of the graph's storage, not its bytes"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Context/ContextAllocatorMemoEntryMovesToTheHeap.fixture/memo.jet",
+      "line": 63,
+      "column": 5,
+      "reason": "the reuser's kept blocks were claimed from its region, which unmaps them all"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Context/ContextAllocatorMovesTextThatLeavesTheBlock.fixture/text.jet",
+      "line": 104,
+      "column": 5,
+      "reason": "the reuser's kept blocks were claimed from its region, which unmaps them all"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Context/ContextAllocatorMovesWhatLeavesTheBlock.fixture/moves.jet",
+      "line": 124,
+      "column": 5,
+      "reason": "the reuser's kept blocks were claimed from its region, which unmaps them all"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Context/ContextAllocatorPanicInAllocateStopsTheTask.fixture/refuse.jet",
+      "line": 38,
+      "column": 5,
+      "reason": "the picky allocator's kept blocks were claimed from its region, which unmaps them all"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Context/ContextAllocatorReadsBackTheUserAllocator.fixture/main.jet",
+      "line": 52,
+      "column": 5,
+      "reason": "the counter's kept blocks were claimed from its region, which unmaps them all"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Context/ContextAllocatorServesTheBlockAndItsLibraryCalls.fixture/served.jet",
+      "line": 61,
+      "column": 5,
+      "reason": "the counter's kept blocks were claimed from its region, which unmaps them all"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Context/ContextScratchBlockRewindsAndMovesWhatLeaves.fixture/scratch.jet",
+      "line": 18,
+      "column": 5,
+      "reason": "only reads the address of an item the caller keeps alive"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/ControlAndData/ExplicitExitUnmappedKeeps101OnEveryTier.fixture/main.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "this case reports a Jet defect status on purpose"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/ControlAndData/ExplicitProcessExitCleanupGoldenMatchesAllExecutionTiers.fixture/process_exit_cleanup.jet",
+      "line": 22,
+      "column": 5,
+      "reason": "the exit callback has no captured state"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/ControlAndData/ProcessExitLeavesHeapToKernelAfterUserCleanup.fixture/main.jet",
+      "line": 35,
+      "column": 5,
+      "reason": "the exit callback has no captured state"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/CoreCryptoArgon2ID/Argon2IDParallelLanesMatchRfcVectorAcrossTiers/Input/run.jet",
+      "line": 8,
+      "column": 5,
+      "reason": "fixed Argon2id parallel-lane known-answer vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/CoreLib/CoreMemRegionsHandOutBlocksAndAWindowChecksItsIndex.fixture/main.jet",
+      "line": 16,
+      "column": 5,
+      "reason": "the caller's block holds the bytes and stays unused while the adopted region and its blocks live"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/CoreLib/CoreMemRegionsHandOutBlocksAndAWindowChecksItsIndex.fixture/main.jet",
+      "line": 43,
+      "column": 5,
+      "reason": "the shelf's blocks were claimed from regions that are closed, and nothing reads them again"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/CoreLib/CoreMemRegionsHandOutBlocksAndAWindowChecksItsIndex.fixture/window.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "the four Ints are fresh heap storage, every access stays inside them, and they are released once"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/CoreLibNet/SharedMemoryWordsOrderAcrossProcesses.fixture/main.jet",
+      "line": 25,
+      "column": 5,
+      "reason": "fork a peer that shares the mapping, and reap it"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Cross/WebBuildRefusesInlineCBeforeCodegen.fixture/main.jet",
+      "line": 1,
+      "column": 1,
+      "reason": "the scalar ABI contract matches the C definition"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Cross/WebBuildRefusesInlineCBeforeCodegen.fixture/main.jet",
+      "line": 7,
+      "column": 5,
+      "reason": "call the audited inline C contract"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Custom/Fixtures/FromAddrSentryIsTierParity/fixture.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "value is live on this stack frame and the pointer never escapes"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Custom/Fixtures/SentryFaultsAreTierParity/unsafe_sentries_alignment/unsafe_sentries_alignment.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "the tuple storage is live but this raw Int is misaligned"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Custom/Fixtures/SentryFaultsAreTierParity/unsafe_sentries_expired_recursive_stack/unsafe_sentries_expired_recursive_stack.jet",
+      "line": 11,
+      "column": 5,
+      "reason": "the recursive address outlives its owning Jet frame"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Custom/Fixtures/SentryFaultsAreTierParity/unsafe_sentries_expired_stack/unsafe_sentries_expired_stack.jet",
+      "line": 10,
+      "column": 5,
+      "reason": "the returned address outlives its owning Jet frame"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Custom/Fixtures/SentryFaultsAreTierParity/unsafe_sentries_misaligned_list/unsafe_sentries_misaligned_list.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "the list storage is live but this raw Int is misaligned"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Custom/Fixtures/SentryFaultsAreTierParity/unsafe_sentries_provenance/unsafe_sentries_provenance.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "external address must be a live allocation"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Custom/Fixtures/SentryFaultsAreTierParity/unsafe_sentries_quarantine/unsafe_sentries_quarantine.jet",
+      "line": 7,
+      "column": 5,
+      "reason": "pointer is used only after arena reset to prove quarantine"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Custom/Fixtures/SentrySourcePolicyOffIsTierParity/fixture.jet",
+      "line": 7,
+      "column": 5,
+      "reason": "the local cell is live for this raw read"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/DevPartsRoutine/JIT1216AdversarialRegressions.fixture/raw_alias/run.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "the pointer stays inside this stack frame"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/DevPartsRoutine/UnsafeBlocksAreEvaluatedWithLiveSentries.fixture/fault.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "mapped address is valid and aligned"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/DiagnosticsCoverage/SentryMetadataUsesTheReturnedFaultExitCode.fixture/app/main.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "calls the audited dependency"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/DiagnosticsCoverage/SentryMetadataUsesTheReturnedFaultExitCode.fixture/dep/dep.jet",
+      "line": 3,
+      "column": 1,
+      "reason": "intentionally invalid address"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Effects/ProcessExitNeedsOnlyTheExitLeaf.fixture/exit.jet",
+      "line": 7,
+      "column": 1,
+      "reason": "the case checks the leaf of the unmapped exit"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Effects/ProcessExitNeedsOnlyTheExitLeaf.fixture/exit.jet",
+      "line": 13,
+      "column": 9,
+      "reason": "the case checks the leaf of the unmapped exit"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/FixturesCryptoBridgeEntropy/Argon2IDRfcAndExpertKnownAnswersKillArgon2IMutation.fixture/run.jet",
+      "line": 45,
+      "column": 5,
+      "reason": "original public expert Argon2id KAT"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/FixturesCryptoBridgeEntropy/ExpertAES256GcmMatchesNistCavsVector.fixture/run.jet",
+      "line": 45,
+      "column": 5,
+      "reason": "original published known-answer vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/FixturesCryptoBridgeEntropy/ExpertSurfaceMatchesReferenceVectorsAndBounds.fixture/run.jet",
+      "line": 49,
+      "column": 5,
+      "reason": "original expert interoperability vectors"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/FixturesCryptoBridgeEntropy/ExpertXchacha20Poly1305MatchesCfrgVector.fixture/run.jet",
+      "line": 45,
+      "column": 5,
+      "reason": "original published known-answer vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/FixturesCryptoBridgeEntropy/JetcV1ExpertOpenAcceptsOnlyThePinnedGrammar.fixture/run.jet",
+      "line": 48,
+      "column": 5,
+      "reason": "original pinned JETC v1 migration grammar"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/FixturesCryptoBridgeEntropy/JetcV1MigrationResealsToVerifiedV2WithoutTouchingSource.fixture/run.jet",
+      "line": 24,
+      "column": 5,
+      "reason": "crypto expert: the fixture seals a pinned JETC v1 envelope and migrates it"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/FixturesCryptoBridgeEntropy/KeygenZeroizesProviderCopyAndStackSeed.fixture/run.jet",
+      "line": 47,
+      "column": 5,
+      "reason": "crypto expert: the test reads the generated seed to prove it is live and 32 bytes"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/FixturesCryptoBridgeEntropy/PriorCryptoSuiteStillUsesLiveEntropy.fixture/run.jet",
+      "line": 50,
+      "column": 5,
+      "reason": "crypto expert: the test reads the generated seed length"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/FixturesCryptoBridgeEntropy/TypedSecretWrapSignKDFAndPasswordPathsPreserveRoles.fixture/run.jet",
+      "line": 56,
+      "column": 5,
+      "reason": "crypto expert: the test derives from the secret's raw bytes"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Fmt/FmtPreservesCheckedTextType/Input/run.jet",
+      "line": 19,
+      "column": 5,
+      "reason": "formatter fixture"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Fmt/FmtPreservesUnsafeSiteModesAndPostfixObligations/Input/run.jet",
+      "line": 3,
+      "column": 1,
+      "reason": "caller keeps address live"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Fmt/FmtPreservesUnsafeSiteModesAndPostfixObligations/Input/run.jet",
+      "line": 13,
+      "column": 5,
+      "reason": "calling audited reader"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Fmt/FmtUnsafeReasonsEscapeStrings/Input/run.jet",
+      "line": 3,
+      "column": 1,
+      "reason": "caller says \"ok\""
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Fmt/FmtUnsafeReasonsEscapeStrings/Input/run.jet",
+      "line": 8,
+      "column": 5,
+      "reason": "path C:\\tmp"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/FmtProject/RawCImportsAndModuleBindingsRemainCleanThroughCLI.fixture/runtime.jet",
+      "line": 7,
+      "column": 1,
+      "reason": "audited C boundary"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/FmtProject/RawCImportsAndModuleBindingsRemainCleanThroughCLI.fixture/runtime.jet",
+      "line": 10,
+      "column": 1,
+      "reason": "audited C boundary"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/FmtRoundTripRegressions/RawCImportsAndModuleBindingMutabilityAreByteExactAndIdempotent/Input/run.jet",
+      "line": 7,
+      "column": 1,
+      "reason": "audited C boundary"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/FmtRoundTripRegressions/RawCImportsAndModuleBindingMutabilityAreByteExactAndIdempotent/Input/run.jet",
+      "line": 10,
+      "column": 1,
+      "reason": "audited C boundary"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/GateLedger/Fixtures/Gates/gates.jet",
+      "line": 2,
+      "column": 5,
+      "reason": "test unsafe reason"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/JetTest/JetTestReportsEachFailingTestAndRunsTheRest.fixture/parked.jet",
+      "line": 35,
+      "column": 5,
+      "reason": "the exit callback has no captured state"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/LanguageFeatures/CoreGroupImportNamesModuleTraitsAndTypes.fixture/main.jet",
+      "line": 46,
+      "column": 5,
+      "reason": "the stack's kept block was claimed from its region, which unmaps it"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/LanguageFeatures/ImplMethodInheritsTraitEffectRowOnEveryTier.fixture/main.jet",
+      "line": 38,
+      "column": 5,
+      "reason": "the case prints the checked text"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/LivenessLints/FallbackErrIsNeverAnUnusedLocal.fixture/main.jet",
+      "line": 3,
+      "column": 1,
+      "reason": "probe"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/LivenessLints/FallbackErrIsNeverAnUnusedLocal.fixture/main.jet",
+      "line": 9,
+      "column": 5,
+      "reason": "probe"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Memory/SentryPolicyOffSkipsR0801.fixture/checked.jet",
+      "line": 11,
+      "column": 5,
+      "reason": "target's buffer holds eight Ints: its three items and spare capacity past them"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Memory/SentryPolicyOffSkipsR0801.fixture/off.jet",
+      "line": 11,
+      "column": 5,
+      "reason": "target's buffer holds eight Ints: its three items and spare capacity past them"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/AMappingIsLiveStorageUntilItIsUnmapped.fixture/after_close.jet",
+      "line": 19,
+      "column": 5,
+      "reason": "the copy writes into pages the region unmapped, so the sentry stops it before any byte moves"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/AMappingIsLiveStorageUntilItIsUnmapped.fixture/after_close.jet",
+      "line": 25,
+      "column": 5,
+      "reason": "the shelf's block was claimed from the closed region, and nothing reads it again"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/AMappingIsLiveStorageUntilItIsUnmapped.fixture/keeper.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "the program claims pages it never mapped"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/AMappingIsLiveStorageUntilItIsUnmapped.fixture/main.jet",
+      "line": 15,
+      "column": 5,
+      "reason": "the block holds three Ints of the open region's fresh pages"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/AMappingIsLiveStorageUntilItIsUnmapped.fixture/main.jet",
+      "line": 23,
+      "column": 5,
+      "reason": "the shelf's block was claimed from the closed region, and nothing reads it again"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawBlockCopyAndFillMoveWholeRanges.fixture/copy_from_past.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "the copy reads one Int past the source block"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawBlockCopyAndFillMoveWholeRanges.fixture/copy_to_past.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "the copy writes one Int past the target block"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawBlockCopyAndFillMoveWholeRanges.fixture/main.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "every range stays inside the `values` tuple, which outlives each access"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawBlockCopyAndFillMoveWholeRanges.fixture/main.jet",
+      "line": 16,
+      "column": 5,
+      "reason": "both Strings stay inside `names`; the static texts they replace need no drop"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawBlockCopyAndFillMoveWholeRanges.fixture/past.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "the fill runs one Int past the tuple, so the sentry stops it before any write"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawByteFillWritesExactlyItsRange.fixture/main.jet",
+      "line": 16,
+      "column": 5,
+      "reason": "every fill and read stays inside the block's `room` bytes, and the block is freed once after them"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawByteMoveMatchesABufferedMoveAtEverySizeAndOverlap.fixture/main.jet",
+      "line": 17,
+      "column": 5,
+      "reason": "every move and every byte written or read stays inside the block, which is freed once after the moves"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/main.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "every raw range stays inside the `values` tuple, which outlives each access"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/main.jet",
+      "line": 17,
+      "column": 5,
+      "reason": "each append reads the Ints `many` holds, which move before their old buffer goes"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/main.jet",
+      "line": 27,
+      "column": 5,
+      "reason": "both ranges stay inside `names`; every String is a static text, which needs no single owner"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/negative.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "the two Ints of `cell` take the copy"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/outside.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "the two Ints of `cell` take the copy"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/past_append.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "the append reads one Int past the tuple, so the sentry stops it before the List changes"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/past_copy.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "the copy writes one Int past the tuple, so the sentry stops it before any byte moves"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawPointerCastReadsTheSameAddress.fixture/main.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "each cast names the live local cell, at an alignment its type allows"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawPointerCastReadsTheSameAddress.fixture/misaligned.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "the cast Int starts one byte into the cell, so the sentry stops the read"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawPointerStepsByElementsOrBytes.fixture/main.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "every step stays inside the `values` tuple, which outlives each read"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawPointerStepsByElementsOrBytes.fixture/past.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "the step runs one Int past the local cell, so the sentry stops the read"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawReadOrWriteNeedsALiveAlignedValue.fixture/fromaddrfreed.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "the address names an Int of a block already released"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawReadOrWriteNeedsALiveAlignedValue.fixture/main.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "every address names a live, aligned value of the block, which outlives each access"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawReadOrWriteNeedsALiveAlignedValue.fixture/misaligned.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "the read starts one byte into the block, so its Int is not aligned"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawReadOrWriteNeedsALiveAlignedValue.fixture/readfreed.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "the read takes an Int of a block already released"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawReadOrWriteNeedsALiveAlignedValue.fixture/readpast.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "the read takes the Int just past the block"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawReadOrWriteNeedsALiveAlignedValue.fixture/writepast.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "the write stores the Int just past the block"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawWindowChecksEachIndex.fixture/main.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "the window covers exactly the tuple's four Ints, which outlive it"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawWindowChecksEachIndex.fixture/past.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "the window covers exactly the tuple's four Ints, which outlive it"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawWindowChecksEachIndex.fixture/released.jet",
+      "line": 10,
+      "column": 9,
+      "reason": "`base` names `count` live I64s while the capability lives"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawWindowChecksEachIndex.fixture/released.jet",
+      "line": 17,
+      "column": 5,
+      "reason": "the block is used only through this capability and released once by `release`"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/ARawWindowChecksEachIndex.fixture/released.jet",
+      "line": 27,
+      "column": 5,
+      "reason": "`base` came from `alloc_raw` in `acquire`, and the capability is spent here, once"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/AllocResizeFreeFuzz.fixture/main.jet",
+      "line": 26,
+      "column": 5,
+      "reason": "`address` starts a live block of `size` bytes"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/AllocResizeFreeFuzz.fixture/main.jet",
+      "line": 38,
+      "column": 5,
+      "reason": "the block is written only inside its `size` bytes, and released once by `release`"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/AllocResizeFreeFuzz.fixture/main.jet",
+      "line": 47,
+      "column": 5,
+      "reason": "`address` came unchanged from `alloc_raw` in `claim`, and its block is released here once"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/AllocResizeFreeFuzz.fixture/main.jet",
+      "line": 91,
+      "column": 13,
+      "reason": "both blocks are live, `old` holds at least `shared` bytes and `fresh` holds `size`"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/RawHeapStorageIsTakenAndReleased.fixture/aliased.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "a second release through a copy of the pointer, which the ownership check cannot see, so the runtime stops it"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/RawHeapStorageIsTakenAndReleased.fixture/kept.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "a copy of the pointer is read after its block is released, so the sentry stops the read"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/RawHeapStorageIsTakenAndReleased.fixture/main.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "each block is used only through pointers derived from it, and released once"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemoryKernel/RawHeapStorageIsTakenAndReleased.fixture/twice.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "the second release is refused before the program runs"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemorySemantics/ClosureBoxesFreeAtTheirLastOwner.fixture/main.jet",
+      "line": 313,
+      "column": 5,
+      "reason": "the exit callback only reads its captured List"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/MemorySemantics/UnsafeAddressKeepsStringAliveToBlockEnd.fixture/main.jet",
+      "line": 9,
+      "column": 5,
+      "reason": "label is live on this frame until this block ends"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/ModuleStorage/ModuleGlobalsStartLaidOutUnlessTheyHoldAHandle.fixture/main.jet",
+      "line": 118,
+      "column": 5,
+      "reason": "one task writes the globals"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/OSNative/CredentialsChangeOnEveryThread.fixture/main.jet",
+      "line": 77,
+      "column": 5,
+      "reason": "the process is root of a disposable user namespace; it drops to a mapped user"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/OSNative/ForkUnderLoadChildCompletes.fixture/main.jet",
+      "line": 47,
+      "column": 9,
+      "reason": "the child only allocates, resolves and exits; the parent reaps it"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Observe/PanicContextUsesOnlyLexicallyLiveLocals.fixture/unsafe/panic_lexical_unsafe.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "the region only binds and prints a local; it reads and writes no raw memory"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/OutputCallable/RunnableContractsAndSelectionFailInSema.fixture/probe3/main.jet",
+      "line": 3,
+      "column": 1,
+      "reason": "raw boundary"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Pin/Fixtures/LibraryWiresSelfRefUnderUnsafeAndExposesSafePinAPI/fixture.jet",
+      "line": 9,
+      "column": 5,
+      "reason": "node storage is fixed for the returned pin; self_addr names this place"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/PlaceWindowLifetimes/BorrowedWindowStaysCallerOwned.fixture/main.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "the borrowed value is live in the caller"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/PlaceWindowLifetimes/HeapElementWindowStaysAllocatorOwned.fixture/main.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "the list element remains heap-owned"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/PlaceWindowLifetimes/StackWindowUsesExpiringSentryAddress.fixture/main.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "cell is live on this stack frame"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/PolicyScope/UnsafeObligationsAreCheckedBeforeCodegen.fixture/run.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "local pointer"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/ProcessSessions/Subjects/native/session_fixture.jet",
+      "line": 54,
+      "column": 5,
+      "reason": "the fixture's descendant rejoins the process group of the tree that spawned it"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/ProcessSessions/Subjects/native/session_fixture.jet",
+      "line": 96,
+      "column": 9,
+      "reason": "kill -0 only asks whether the killed descendant still exists"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/ResourceClose/ReplacedListElementMapValueAndModuleStorageCloseBeforeTheyDrop.fixture/main.jet",
+      "line": 19,
+      "column": 5,
+      "reason": "the test runs one task"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/RunEntry/ModuleWriteFromFnIsE0111.fixture/ok.jet",
+      "line": 11,
+      "column": 5,
+      "reason": "this program starts no task, so nothing else writes `raw`"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/SingleUse/DropErasesNoUnsafeInCodegen.fixture/source-1.jet",
+      "line": 11,
+      "column": 5,
+      "reason": "gone"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/SingleUse/DropInsideUnsafeBlockSatisfiesSingleUse.fixture/source-1.jet",
+      "line": 11,
+      "column": 5,
+      "reason": "the resource is already gone; nothing to release"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/SingleUse/DropInsideUnsafeFnSatisfiesSingleUse.fixture/source-1.jet",
+      "line": 9,
+      "column": 1,
+      "reason": "voids a freshly-acquired lock whose resource is already gone"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/SingleUse/DropInsideUnsafeFnSatisfiesSingleUse.fixture/source-1.jet",
+      "line": 16,
+      "column": 5,
+      "reason": "calling the audited voider"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/SingleUse/HolderConsumedCompiles.fixture/main.jet",
+      "line": 28,
+      "column": 5,
+      "reason": "the lease's job is done by hand here"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/SingleUse/HolderConsumedCompiles.fixture/main.jet",
+      "line": 35,
+      "column": 5,
+      "reason": "the slot's lease is done by hand here"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/SingleUse/HolderDroppedIsE0140.fixture/main.jet",
+      "line": 33,
+      "column": 5,
+      "reason": "the lease's job is done by hand here"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/SingleUse/ReuseAfterDropIsE0121.fixture/source-1.jet",
+      "line": 11,
+      "column": 5,
+      "reason": "done with it"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/TargetMachines/Fixtures/SelectedTargetMachineRejectsDirectMMIOOutsideRegion/main.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "this address is intentionally outside the board MMIO region"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/TargetMachines/Fixtures/SelectedTargetMachineValidatesDirectMMIOAccesses/main.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "timer register is mapped by board.sensor_v1"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/UnsafeAndRuntime/ASentryFaultNamesTheAccessAndTheRange.fixture/steps.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "the second read steps one Int past the tuple, so the sentry stops it there"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/UnsafeAndRuntime/AnOptionalRawPointerIsNoneWhenNull.fixture/main.jet",
+      "line": 12,
+      "column": 5,
+      "reason": "each pointer names the live local cell, or is null and never read"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/UnsafeAndRuntime/DerefPlaceLendsThePointeeToAWriteParameter.fixture/main.jet",
+      "line": 13,
+      "column": 5,
+      "reason": "c lives in place until `run` returns"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/UnsafeAndRuntime/DerefPlaceReceivesATraitSelfMethodThroughAPointer.fixture/main.jet",
+      "line": 21,
+      "column": 5,
+      "reason": "address is the address of a live A that outlives this call"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/UnsafeAndRuntime/DerefPlaceReceivesATraitSelfMethodThroughAPointer.fixture/main.jet",
+      "line": 30,
+      "column": 5,
+      "reason": "c lives in place until `run` returns"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/UnsafeAndRuntime/EveryUnsafeRegionKindEntersItsOwnSentryScope.fixture/regions.jet",
+      "line": 1,
+      "column": 1,
+      "reason": "the cell is live on this frame"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/UnsafeAndRuntime/EveryUnsafeRegionKindEntersItsOwnSentryScope.fixture/regions.jet",
+      "line": 9,
+      "column": 5,
+      "reason": "call the gated reader"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/UnsafeAndRuntime/EveryUnsafeRegionKindEntersItsOwnSentryScope.fixture/regions.jet",
+      "line": 13,
+      "column": 5,
+      "reason": "test region calls the gated reader"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/UnsafeAndRuntime/Fixtures/FFICapabilityEdgeUsesSharedSentryPrelude/main.jet",
+      "line": 8,
+      "column": 5,
+      "reason": "the foreign call may write through the borrowed value"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/UnsafeAndRuntime/Fixtures/MemAddressOfNeverFoldsPlainOrParenthesized/paren/main.jet",
+      "line": 3,
+      "column": 1,
+      "reason": "reads through a raw pointer; addr must be a live, valid Int"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/UnsafeAndRuntime/Fixtures/MemAddressOfNeverFoldsPlainOrParenthesized/paren/main.jet",
+      "line": 12,
+      "column": 5,
+      "reason": "addr is the address of `cell`, a live Int on this stack frame"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/UnsafeAndRuntime/Fixtures/MemAddressOfNeverFoldsPlainOrParenthesized/plain/main.jet",
+      "line": 3,
+      "column": 1,
+      "reason": "reads through a raw pointer; addr must be a live, valid Int"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/UnsafeAndRuntime/Fixtures/MemAddressOfNeverFoldsPlainOrParenthesized/plain/main.jet",
+      "line": 12,
+      "column": 5,
+      "reason": "addr is the address of `cell`, a live Int on this stack frame"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/UnsafeAndRuntime/Fixtures/SentryKernelIsSharedByAOTAndRuntimeAdapters/main.jet",
+      "line": 7,
+      "column": 5,
+      "reason": "the local cell is live for this raw read"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/UnsafeAndRuntime/Fixtures/UnsafeFnBlockAndPtrOps/main.jet",
+      "line": 3,
+      "column": 1,
+      "reason": "reads through a raw pointer; addr must be a live, valid Int"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/UnsafeAndRuntime/Fixtures/UnsafeFnBlockAndPtrOps/main.jet",
+      "line": 12,
+      "column": 5,
+      "reason": "addr is the address of `cell`, a live Int on this stack frame"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/UnsafeAndRuntime/Fixtures/UnsafeTierEmitIsByteExact/main.jet",
+      "line": 3,
+      "column": 1,
+      "reason": "reads through a raw pointer; addr must be valid"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/UnsafeAndRuntime/Fixtures/UnsafeTierEmitIsByteExact/main.jet",
+      "line": 12,
+      "column": 5,
+      "reason": "safe: cell is live"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/UnsafeAndRuntime/Fixtures/VolatileWriteEmitIsByteExact/main.jet",
+      "line": 3,
+      "column": 1,
+      "reason": "UART TX register is mapped by the target machine"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/UnsafeAndRuntime/HardenedProfileStopsAnOutOfBoundsRawAccessAtEveryLevel.fixture/read/read.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "reads the one Int the arena allocated"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/UnsafeAndRuntime/HardenedProfileStopsAnOutOfBoundsRawAccessAtEveryLevel.fixture/write/write.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "writes the one Int the arena allocated"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/UnsafeAndRuntime/RawPointerToolsKeepTheirChecksInHardenedBuilds.fixture/freed.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "no copy of the pointer is read after the block is released"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/UnsafeAndRuntime/RawPointerToolsKeepTheirChecksInHardenedBuilds.fixture/misaligned.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "every Int read starts on an Int boundary"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/UnsafeAndRuntime/RawPointerToolsKeepTheirChecksInHardenedBuilds.fixture/range.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "the steps stay inside the tuple's four Ints"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/WebBuild/ModuleLocalDevIsValidatedAsWebRuntime.fixture/main.jet",
+      "line": 5,
+      "column": 9,
+      "reason": "exercise the web gate"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/AES/nist_gcm.jet",
+      "line": 13,
+      "column": 5,
+      "reason": "published KAT or frozen seed AES-GCM fixture"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/AES/seed_differential.jet",
+      "line": 13,
+      "column": 5,
+      "reason": "published KAT or frozen seed AES-GCM fixture"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/aes256gcm_open.jet",
+      "line": 8,
+      "column": 5,
+      "reason": "fixed NIST AES-256-GCM vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/aes256gcm_seal.jet",
+      "line": 7,
+      "column": 5,
+      "reason": "fixed NIST AES-256-GCM vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/argon2id.jet",
+      "line": 10,
+      "column": 5,
+      "reason": "fixed Argon2id known-answer vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/ed25519_sign.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "fixed RFC 8032 Ed25519 vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/ed25519_verify_strict.jet",
+      "line": 7,
+      "column": 5,
+      "reason": "fixed RFC 8032 Ed25519 vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/hkdf_sha256_raw.jet",
+      "line": 8,
+      "column": 5,
+      "reason": "fixed RFC 5869 HKDF vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/open_v1.jet",
+      "line": 7,
+      "column": 5,
+      "reason": "fixed JETC v1 AES vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/secret_bytes.jet",
+      "line": 9,
+      "column": 5,
+      "reason": "inspect fixed secret bytes"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/shared_secret_bytes.jet",
+      "line": 11,
+      "column": 5,
+      "reason": "inspect shared-secret length"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/signing_key_bytes.jet",
+      "line": 9,
+      "column": 5,
+      "reason": "inspect generated signing-key bytes"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/x25519_raw.jet",
+      "line": 7,
+      "column": 5,
+      "reason": "fixed RFC 7748 X25519 vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/x25519_secret_bytes.jet",
+      "line": 9,
+      "column": 5,
+      "reason": "inspect generated X25519 secret bytes"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/xchacha20poly1305_open.jet",
+      "line": 9,
+      "column": 5,
+      "reason": "fixed CFRG XChaCha20-Poly1305 vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/xchacha20poly1305_seal.jet",
+      "line": 9,
+      "column": 5,
+      "reason": "fixed CFRG XChaCha20-Poly1305 vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/Vault/commit_import_signing.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "restore a fixed signing key into the vault"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/Vault/commit_import_x25519.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "restore a fixed X25519 secret into the vault"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/Vault/guard_errors.jet",
+      "line": 33,
+      "column": 5,
+      "reason": "vault key import: fixed guard vectors that never hold key material"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/Vault/prepare_import_signing.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "restore a fixed signing-key vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/Vault/prepare_import_x25519.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "restore a fixed X25519 secret vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 15,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 19,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 32,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 36,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 49,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 53,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 66,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 70,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 83,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 87,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 98,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 109,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 120,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 131,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 142,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 153,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 164,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 175,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 186,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 197,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 208,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 219,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 230,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 241,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 252,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 263,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 274,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 285,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 296,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 307,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 323,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 334,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 350,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 361,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 377,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 388,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 404,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 415,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 431,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 442,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 458,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 469,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 485,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 496,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 512,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 523,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 539,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 550,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 566,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 577,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 593,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 604,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 620,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 631,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 647,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 658,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 674,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 685,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 701,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 712,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 728,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 739,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 755,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 766,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 782,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 793,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 809,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 820,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 836,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 847,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 863,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 874,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 890,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 901,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 917,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 928,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 944,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 955,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 971,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 982,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 998,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1009,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1025,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1036,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1052,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1063,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1079,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1090,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1106,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1117,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1133,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1144,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1160,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1171,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1187,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1198,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1214,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1225,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1241,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1252,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1268,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1279,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1295,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1306,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1322,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1333,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1344,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1355,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1366,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1377,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1388,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1399,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1410,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1426,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1442,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1458,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1476,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1480,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1493,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1497,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1510,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1514,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1527,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1531,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1544,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1548,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1561,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1565,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1578,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1582,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1595,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1599,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1612,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1616,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1629,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1633,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1646,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1650,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1663,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1667,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1680,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1684,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1697,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1701,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1714,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1718,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1731,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1735,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1748,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1752,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1765,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1769,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1782,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1786,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1799,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1803,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1816,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1820,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1833,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1837,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1850,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1854,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1867,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1871,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1884,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1888,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1901,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1905,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1918,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1922,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1935,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1939,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1952,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1956,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1969,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1973,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1986,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 1990,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2003,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2007,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2020,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2024,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2037,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2041,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2054,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2058,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2071,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2075,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2088,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2092,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2105,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2109,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2122,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2126,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2139,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2143,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2156,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2160,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2173,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2177,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2190,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2194,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2207,
+      "column": 5,
+      "reason": "frozen Ed25519 sign witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2211,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2222,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
+      "line": 2238,
+      "column": 5,
+      "reason": "public Ed25519 acceptance witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_x25519.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "published/frozen X25519 test inputs"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Crypto/x25519.jet",
+      "line": 11,
+      "column": 5,
+      "reason": "inspect shared-secret length"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Files/Sealed/migrate_v1.jet",
+      "line": 12,
+      "column": 5,
+      "reason": "fixed JETC v1 source failure"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Mem/volatile_read.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "value is live on this stack frame and the pointer never escapes"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Mem/volatile_write.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "value is live on this stack frame and the pointer never escapes"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Sys/atexit.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "the exit callback has no captured state"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Sys/close_fd.jet",
+      "line": 7,
+      "column": 13,
+      "reason": "close an invalid descriptor without changing process state"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Sys/fork.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "fork and let the child return immediately"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Sys/getpriority.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "read the current process priority"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Sys/initgroups.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "probe initgroups with a stable missing user"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Sys/kill.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "check the process group without sending a signal"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Sys/mkfifo.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "probe FIFO creation with an empty path"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Sys/mknod.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "probe device-file creation with a major number out of range"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Sys/pipe.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "open a pipe and observe its descriptor pair"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Sys/reset_signal.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "restore the default disposition of SIGUSR1, which this program never handles, then refuse signal 0"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Sys/set_group_ids.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "set the effective group ID to the one it already is, which needs no privilege, then refuse an ID out of range"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Sys/set_scheduling.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "move this short-lived witness to batch time sharing and back; neither needs privilege"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Sys/set_user_ids.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "set the effective user ID to the one it already is, which needs no privilege, then refuse an ID out of range"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Sys/set_wall_clock.jet",
+      "line": 8,
+      "column": 5,
+      "reason": "a time before 1970 is refused before it reaches the kernel, so the clock never changes"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Sys/setgid.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "probe setgid with an invalid identifier"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Sys/setpgid.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "set the current process into its existing process group"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Sys/setpgrp.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "set the current process group"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Sys/setpriority.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "lower the current process priority for this short-lived witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Sys/setsid.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "create a session when the host permits it"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Sys/setuid.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "probe setuid with an invalid identifier"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Sys/stop.jet",
+      "line": 7,
+      "column": 13,
+      "reason": "stop this dedicated witness successfully"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Sys/umask.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "set a deterministic mask for this short-lived witness"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Sys/utime.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "probe timestamp update with an empty path"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Sys/wait.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "wait for a child that this witness does not have"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Conformance/Corpus/Core/Sys/waitpid.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "poll for a child that this witness does not have"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Fixtures/UnsafeObligations/run.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "local pointer"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Fixtures/explicit_cleanup_order.jet",
+      "line": 39,
+      "column": 5,
+      "reason": "exercise the explicit process-stop cleanup boundary"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Fixtures/ffi_stack4_i64.jet",
+      "line": 2,
+      "column": 1,
+      "reason": "the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Fixtures/ffi_stack4_i64.jet",
+      "line": 49,
+      "column": 5,
+      "reason": "Linux getpid syscall 39 ignores all argument registers and retains no stack pointer"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Fixtures/fmt_import_c_bindings.jet",
+      "line": 7,
+      "column": 1,
+      "reason": "audited C boundary"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Fixtures/fmt_import_c_bindings.jet",
+      "line": 10,
+      "column": 1,
+      "reason": "audited C boundary"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Fixtures/native_global_word.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "the fixture's one-threaded caller (run, or global-word.c) is the only writer"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Fixtures/native_inline_c_shared_state.jet",
+      "line": 4,
+      "column": 1,
+      "reason": "updates this program's private counter"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Fixtures/native_inline_c_shared_state.jet",
+      "line": 13,
+      "column": 1,
+      "reason": "reads the counter defined by fixture_bump"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Fixtures/native_inline_c_shared_state.jet",
+      "line": 25,
+      "column": 5,
+      "reason": "the counter is private to these two bodies"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Fuzz/Sema/Differential/ex_crypto_crypto_migration.jet",
+      "line": 29,
+      "column": 5,
+      "reason": "AES-256-GCM protocol interoperability"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Fuzz/Sema/Valid/ex_crypto_crypto_suite.jet",
+      "line": 40,
+      "column": 5,
+      "reason": "known-answer check reads the RFC 7748 shared secret"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Fuzz/Sema/Valid/ex_lowlevel_lowlevel.jet",
+      "line": 8,
+      "column": 5,
+      "reason": "`cell` is live on this stack frame and the pointer never escapes"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Fuzz/Sema/Valid/ex_lowlevel_lowlevel.jet",
+      "line": 22,
+      "column": 5,
+      "reason": "`cell` is a live Int on this stack frame; the pointer never escapes"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Fuzz/Sema/Valid/ex_lowlevel_pointer_cast_deref.jet",
+      "line": 11,
+      "column": 5,
+      "reason": "flag is live on this stack frame and the pointer never escapes"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Run/Comptime/ForeignBranchNotTaken.jet",
+      "line": 12,
+      "column": 1,
+      "reason": "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Run/Comptime/ForeignBranchNotTaken.jet",
+      "line": 24,
+      "column": 9,
+      "reason": "call the audited register-only assembly contract"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Run/Comptime/MutableGlobalStartsFromAnyStorableValue.jet",
+      "line": 60,
+      "column": 5,
+      "reason": "one task writes the globals"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Run/Comptime/MutableGlobalStartsFromComputedValue.jet",
+      "line": 32,
+      "column": 5,
+      "reason": "one task writes the frame"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Run/Comptime/MutableGlobalStartsFromComputedValue.jet",
+      "line": 43,
+      "column": 5,
+      "reason": "one task writes the globals"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Run/CoreCryptoFoundations/CryptoAeadTamperingIsRejectedAcrossTiers.jet",
+      "line": 64,
+      "column": 5,
+      "reason": "fixed AEAD tamper vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Run/CoreCryptoFoundations/PrimitiveMatrix.jet",
+      "line": 101,
+      "column": 5,
+      "reason": "known-answer check reads the RFC 7748 shared secret"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Run/CoreCryptoFoundations/PrimitiveMatrix.jet",
+      "line": 163,
+      "column": 5,
+      "reason": "expert known-answer vectors need raw key bytes"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Run/CoreIO/CleanupMatrix.jet",
+      "line": 35,
+      "column": 5,
+      "reason": "the stop runs the shared cleanup boundary"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Run/CoreIO/CleanupMatrix.jet",
+      "line": 83,
+      "column": 5,
+      "reason": "the exit callbacks have no captured state"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Run/Dyn/NumberInUnsafe.jet",
+      "line": 7,
+      "column": 5,
+      "reason": "the literal below is a valid JSON number lexeme"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Run/FailureFoundation/TransactOSStop.jet",
+      "line": 34,
+      "column": 5,
+      "reason": "the stop runs the shared cleanup boundary"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Run/PatternsAndFields/FixedSizeListWidensAtCoreCall.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "fixed signature vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Run/UnsafeAndRuntime/MemFromAddrDirect.jet",
+      "line": 11,
+      "column": 5,
+      "reason": "the borrowed value is live in the caller and the pointer never escapes"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/AuditedGateLadderForbidden/run.jet",
+      "line": 3,
+      "column": 5,
+      "reason": "the organization policy refuses this audited escape"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/E3113PackageWithoutKernelFiles/run.jet",
+      "line": 6,
+      "column": 1,
+      "reason": "the caller releases the storage with `free_raw`, exactly once"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/E3113RawMemoryOutsideKernel/kernel.jet",
+      "line": 4,
+      "column": 1,
+      "reason": "the caller releases the storage with `free_raw`, exactly once"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/E3113RawMemoryOutsideKernel/run.jet",
+      "line": 5,
+      "column": 1,
+      "reason": "the caller releases the storage with `free_raw`, exactly once"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/E3113RuntimeUnitSourceOutsideKernel/run.jet",
+      "line": 6,
+      "column": 1,
+      "reason": "each caller vouches for the address"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/E3113RuntimeUnitSourceOutsideKernel/run.jet",
+      "line": 10,
+      "column": 5,
+      "reason": "the kernel's own leaf reads a word its caller lends"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/E3113RuntimeUnitSourceOutsideKernel/run.jet",
+      "line": 16,
+      "column": 5,
+      "reason": "the host holds the word at this address"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/E3114RawAddressIntoKernel/run.jet",
+      "line": 8,
+      "column": 5,
+      "reason": "the caller hands the address of a live Int"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/E3114RawAddressIntoKernel/run.jet",
+      "line": 18,
+      "column": 5,
+      "reason": "kernel code hands the address of a live Int"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/GatesLoadPackageCeiling/run.jet",
+      "line": 2,
+      "column": 5,
+      "reason": "audited load-only gate"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/Ownership/raw_window_read_after_its_owner_is_released.jet",
+      "line": 11,
+      "column": 5,
+      "reason": "the cells hold no resource, so spending them frees nothing"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/Ownership/raw_window_read_after_its_owner_is_released.jet",
+      "line": 16,
+      "column": 5,
+      "reason": "the window covers exactly the two Int fields, which `cells` keeps"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/Ownership/single_use_holder_dropped_owes_consume.jet",
+      "line": 33,
+      "column": 5,
+      "reason": "the lease's job is done by hand here"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/SecretsExpiry/expiring_secret_loan_rejects_move_variadic_and_drop_paths_3.jet",
+      "line": 13,
+      "column": 9,
+      "reason": "attempt to discard a loan"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/UnsafeAndRuntime/VolatileWriteEmitIsByteExact/run.jet",
+      "line": 3,
+      "column": 1,
+      "reason": "UART TX register is mapped by the target machine"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/UnsafeEffectBudget/unsafedep/unsafedep.jet",
+      "line": 3,
+      "column": 5,
+      "reason": "audited peek"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/UnsafeForbidden/run.jet",
+      "line": 2,
+      "column": 5,
+      "reason": "not allowed"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/UnsafeForbiddenByOrganizationPolicy/run.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "the organization policy forbids this escape"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/UnsafePerSite/run.jet",
+      "line": 2,
+      "column": 5,
+      "reason": "selection required"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/cffi_out_pointer_requires_unsafe.jet",
+      "line": 14,
+      "column": 1,
+      "reason": "the local slot remains live for the complete C call"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/changeset_a_failed_handler_publishes_none.jet",
+      "line": 28,
+      "column": 25,
+      "reason": "generated"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/checked_text_raw_requires_unsafe.jet",
+      "line": 22,
+      "column": 5,
+      "reason": "audited literal"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/crypto_argon2id_literal_policy.jet",
+      "line": 9,
+      "column": 5,
+      "reason": "fixed password-hash vectors"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/crypto_argon2id_literal_policy_type_precedence.jet",
+      "line": 9,
+      "column": 5,
+      "reason": "fixed password-hash vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/crypto_argon2id_literal_policy_valid.jet",
+      "line": 9,
+      "column": 5,
+      "reason": "protocol-selected password policy"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/crypto_argon2id_literal_policy_valid.jet",
+      "line": 17,
+      "column": 5,
+      "reason": "fixed password-hash vectors"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/crypto_expert_material_length.jet",
+      "line": 12,
+      "column": 5,
+      "reason": "fixed interop vectors"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/crypto_expert_material_length_type_precedence.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "fixed interop vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/crypto_expert_material_length_valid.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "protocol-selected interop material"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/crypto_expert_material_length_valid.jet",
+      "line": 17,
+      "column": 5,
+      "reason": "fixed interop vectors"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/crypto_expert_nonce_callback_bound_precedence.jet",
+      "line": 13,
+      "column": 5,
+      "reason": "fixed interop vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/crypto_expert_nonce_correct.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "fixed interop vectors"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/crypto_expert_nonce_effect_bound_precedence.jet",
+      "line": 10,
+      "column": 5,
+      "reason": "fixed interop vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/crypto_expert_nonce_effect_precedence.jet",
+      "line": 10,
+      "column": 5,
+      "reason": "fixed interop vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/crypto_expert_nonce_effect_prohibition_precedence.jet",
+      "line": 10,
+      "column": 5,
+      "reason": "fixed interop vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/crypto_expert_nonce_effect_unknown_precedence.jet",
+      "line": 10,
+      "column": 5,
+      "reason": "fixed interop vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/crypto_expert_nonce_length.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "fixed interop vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/crypto_expert_nonce_region_authority_precedence.jet",
+      "line": 9,
+      "column": 5,
+      "reason": "fixed interop vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/crypto_expert_nonce_trait_dispatch_precedence.jet",
+      "line": 9,
+      "column": 5,
+      "reason": "fixed interop vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/crypto_expert_nonce_type_precedence.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "fixed interop vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/crypto_hkdf_output_length.jet",
+      "line": 9,
+      "column": 5,
+      "reason": "fixed interop vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/crypto_hkdf_output_type_precedence.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "fixed interop vector"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/crypto_hkdf_output_valid.jet",
+      "line": 8,
+      "column": 5,
+      "reason": "protocol-selected output length"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/crypto_hkdf_output_valid.jet",
+      "line": 16,
+      "column": 5,
+      "reason": "fixed interop vectors"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/discarded_pure_quiet.jet",
+      "line": 47,
+      "column": 5,
+      "reason": "the test deliberately keeps this stderr write behind its audit boundary"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/e3106_unsafe_skip_without_per_site.jet",
+      "line": 3,
+      "column": 5,
+      "reason": "reads a checked constant"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/ffi_asm_duplicate_clobber.jet",
+      "line": 3,
+      "column": 1,
+      "reason": "each discarded register is named once"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/ffi_asm_float_signature.jet",
+      "line": 3,
+      "column": 1,
+      "reason": "register-only increment"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/ffi_asm_missing_return_anchor.jet",
+      "line": 3,
+      "column": 1,
+      "reason": "cycle counter"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/ffi_asm_no_mem.jet",
+      "line": 1,
+      "column": 1,
+      "reason": "register-only increment"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/ffi_asm_return_clobber.jet",
+      "line": 3,
+      "column": 1,
+      "reason": "the result register is overwritten by the body"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/ffi_asm_unencoded_mnemonic.jet",
+      "line": 3,
+      "column": 1,
+      "reason": "the body writes only its result register"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/ffi_asm_unknown_clobber.jet",
+      "line": 3,
+      "column": 1,
+      "reason": "the body declares only audited registers"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/ffi_body_not_string.jet",
+      "line": 1,
+      "column": 1,
+      "reason": "demo"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/ffi_inline_asm_call_needs_unsafe_region.jet",
+      "line": 3,
+      "column": 1,
+      "reason": "the operands are scalar registers and r10 is a declared clobber"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/ffi_inline_asm_call_needs_unsafe_region.jet",
+      "line": 14,
+      "column": 5,
+      "reason": "call the audited register-only assembly contract"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/ffi_inline_c_call_needs_unsafe_region.jet",
+      "line": 1,
+      "column": 1,
+      "reason": "the scalar ABI contract matches the C definition"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/ffi_inline_c_call_needs_unsafe_region.jet",
+      "line": 7,
+      "column": 5,
+      "reason": "call the audited inline C contract"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/ffi_inline_c_mismatch.jet",
+      "line": 1,
+      "column": 1,
+      "reason": "deliberate mismatch fixture"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/ffi_inline_cpp_call_needs_unsafe_region.jet",
+      "line": 1,
+      "column": 1,
+      "reason": "the scalar ABI contract matches the C++ definition"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/ffi_inline_cpp_call_needs_unsafe_region.jet",
+      "line": 7,
+      "column": 5,
+      "reason": "call the audited inline C++ contract"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/ffi_unknown_argument.jet",
+      "line": 1,
+      "column": 1,
+      "reason": "demo"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/ffi_unknown_language.jet",
+      "line": 1,
+      "column": 1,
+      "reason": "demo"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/lowlevel_e3102.jet",
+      "line": 2,
+      "column": 5,
+      "reason": "addr is valid"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/lowlevel_e3103.jet",
+      "line": 3,
+      "column": 1,
+      "reason": "reads through caller-provided raw pointer"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/lowlevel_volatile_write_without_mem.jet",
+      "line": 2,
+      "column": 5,
+      "reason": "addr is valid"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/lowlevel_volatile_write_wrong_ptr.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "plain ints are not raw pointers"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/lowlevel_volatile_write_wrong_value.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "slot is live and pointer never escapes"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/meta_ladder_add_never_authorizes_unsafe.jet",
+      "line": 7,
+      "column": 13,
+      "reason": "generated"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/module_write_from_fn_is_e0111.jet",
+      "line": 13,
+      "column": 5,
+      "reason": "this program starts no task, so nothing else writes `raw`"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/secret_read_requires_unsafe.jet",
+      "line": 8,
+      "column": 5,
+      "reason": "the length leaves this function, never the key bytes"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/unsafe_block_after_statement_parse_error.jet",
+      "line": 8,
+      "column": 5,
+      "reason": "target outlives the read in this frame"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/unsafe_effect_module_cap.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "audited peek"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/unsafe_effect_prohibition_transitive.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "audited peek"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/unsafe_obligation_missing.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "local pointer"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UI/unsafe_obligation_no_bleed.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "two independent pointer operations"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UILint/inline_asm_reads_its_core_mem_gate.jet",
+      "line": 8,
+      "column": 1,
+      "reason": "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/UILint/inline_asm_reads_its_core_mem_gate.jet",
+      "line": 19,
+      "column": 5,
+      "reason": "call the audited register-only assembly contract"
+    },
+    {
       "package": "Tools",
       "file": "Tools/Agent/Cache/Lanes.jet",
       "line": 325,
@@ -6792,3842 +10628,6 @@ file in a `Tests/` tree. The ratchet refuses either.
       "line": 139,
       "column": 9,
       "reason": "`at` is one of the mapping's words"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/BackendIce/Fixtures/AsmRail/rail.jet",
-      "line": 10,
-      "column": 1,
-      "reason": "the program claims the runtime's stack switch"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/BackendIce/Fixtures/AsmRail/rail.jet",
-      "line": 36,
-      "column": 1,
-      "reason": "the program claims the runtime's TLS base"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/BackendIce/Fixtures/AsmRail/rail.jet",
-      "line": 44,
-      "column": 5,
-      "reason": "call the leaf the build refuses"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/BackendIce/Fixtures/AsmRail/rail.jet",
-      "line": 48,
-      "column": 5,
-      "reason": "call the leaf the build refuses"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/BackendIce/Fixtures/AsmRdtsc/stamp/stamp.jet",
-      "line": 9,
-      "column": 1,
-      "reason": "rdtsc writes only rax and rdx, both declared"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/BackendIce/Fixtures/AsmRdtsc/stamp/stamp.jet",
-      "line": 20,
-      "column": 1,
-      "reason": "lfence and rdtsc write only rax and rdx, and rdx is declared"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/BackendIce/Fixtures/AsmRdtsc/stamp/stamp.jet",
-      "line": 32,
-      "column": 5,
-      "reason": "call the audited rdtsc contracts"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/BackendIce/Fixtures/AsmRdtsc/unencoded/unencoded.jet",
-      "line": 12,
-      "column": 1,
-      "reason": "the body writes only its result register"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/BackendIce/Fixtures/AsmRdtsc/unencoded/unencoded.jet",
-      "line": 20,
-      "column": 1,
-      "reason": "the body writes only its result register"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/BackendIce/Fixtures/AsmRdtsc/unencoded/unencoded.jet",
-      "line": 28,
-      "column": 5,
-      "reason": "call the leaves sema refuses"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/BuildEntry/MetaCodeNeverAuthorizesUnsafe.fixture/added/main.jet",
-      "line": 8,
-      "column": 17,
-      "reason": "generated"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/BuildEntry/MetaCodeNeverAuthorizesUnsafe.fixture/rewritten/main.jet",
-      "line": 18,
-      "column": 25,
-      "reason": "generated"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Cffi/CffiRawStatusOutPointerReadsOnlyOnSuccess.fixture/main.jet",
-      "line": 23,
-      "column": 5,
-      "reason": "store_load receives a live non-null slot; bytes are read only after status zero"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Cffi/FFICapabilityBoundaryIsSafeOnlyInsideUnsafe/Input/o2/run.jet",
-      "line": 8,
-      "column": 5,
-      "reason": "the foreign call may write through the borrowed value"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Cffi/FFICapabilityBoundaryIsSafeOnlyInsideUnsafe/Input/o3/run.jet",
-      "line": 8,
-      "column": 5,
-      "reason": "the foreign call may write through the borrowed value"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Cffi/RuntimeExitImportExitsWithItsArgument.fixture/main.jet",
-      "line": 1,
-      "column": 1,
-      "reason": "this program owns the exit status it passes"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/CffiNativeMatrix/Fixtures/RequiredNativeCABIMatrix/default/matrix.jet",
-      "line": 47,
-      "column": 5,
-      "reason": "live non-null out slot; read only after status zero"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/CffiNativeMatrix/Fixtures/RequiredNativeCABIMatrix/sysv64/matrix.jet",
-      "line": 47,
-      "column": 5,
-      "reason": "live non-null out slot; read only after status zero"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/CLIPartsCore/Fixtures/GatePolicy/main.jet",
-      "line": 2,
-      "column": 5,
-      "reason": "org refusal"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/CLIPartsInspect/Fixtures/Foreign/app/main.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "calls the audited dependency"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/CLIPartsInspect/Fixtures/Foreign/dep/dep.jet",
-      "line": 3,
-      "column": 1,
-      "reason": "intentionally invalid address"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/CLIPartsInspect/Fixtures/Release/hardened/main.jet",
-      "line": 7,
-      "column": 5,
-      "reason": "pointer is used only after arena reset to prove quarantine"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/CLIPartsInspect/Fixtures/Release/release/main.jet",
-      "line": 7,
-      "column": 5,
-      "reason": "pointer is used only after arena reset to prove quarantine"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/CLIPartsInspect/Fixtures/Team/unsafe/main.jet",
-      "line": 2,
-      "column": 5,
-      "reason": "audit"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/CLIPartsInspect/Fixtures/TestHardened/hardened/main.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "test deliberately reads after arena reset"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/CLIPartsInspect/Fixtures/TestHardened/release/main.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "test deliberately reads after arena reset"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/CollectionsAndMethods/SentryTypedIntStoreKeepsExactCarrier.fixture/main.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "the typed pointer refers to the live local cell for these stores"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/ComptimeCLIParity/ComptimeChildIsReapedBeforeTheProgramRuns.fixture/run.jet",
-      "line": 15,
-      "column": 5,
-      "reason": "fork and reap the child before returning"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/ComptimeCLIParity/Fixtures/TierParityExamplesRunThroughAOTJITAndInterpreter/tooling_checked_text_type/checked_text_type.jet",
-      "line": 20,
-      "column": 5,
-      "reason": "checked text example output"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/ComptimeCorePureParity/CryptoExpertAeadSignArgonAOTStdoutMatchesKnownAnswers.fixture/main.jet",
-      "line": 9,
-      "column": 5,
-      "reason": "fixed RFC interop vectors"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/ComptimeCorePureParity/CryptoValuesMatchAOTComptimeForcedInterpreterAndDefaultDev/Input/o1/run.jet",
-      "line": 12,
-      "column": 5,
-      "reason": "fixed RFC interop vectors"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/ComptimeCorePureParity/CryptoValuesMatchAOTComptimeForcedInterpreterAndDefaultDev/Input/o2/run.jet",
-      "line": 12,
-      "column": 5,
-      "reason": "fixed RFC interop vectors"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/ConcurrencyBoundaries/AGroupTaskReadsALentParameterInPlace.fixture/lend.jet",
-      "line": 10,
-      "column": 5,
-      "reason": "reads the address of the graph's storage, not its bytes"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/ConcurrencyBoundaries/AGroupTaskReadsALentParameterInPlace.fixture/lend.jet",
-      "line": 29,
-      "column": 5,
-      "reason": "reads the address of the graph's storage, not its bytes"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Context/ContextAllocatorMemoEntryMovesToTheHeap.fixture/memo.jet",
-      "line": 63,
-      "column": 5,
-      "reason": "the reuser's kept blocks were claimed from its region, which unmaps them all"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Context/ContextAllocatorMovesTextThatLeavesTheBlock.fixture/text.jet",
-      "line": 104,
-      "column": 5,
-      "reason": "the reuser's kept blocks were claimed from its region, which unmaps them all"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Context/ContextAllocatorMovesWhatLeavesTheBlock.fixture/moves.jet",
-      "line": 124,
-      "column": 5,
-      "reason": "the reuser's kept blocks were claimed from its region, which unmaps them all"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Context/ContextAllocatorPanicInAllocateStopsTheTask.fixture/refuse.jet",
-      "line": 38,
-      "column": 5,
-      "reason": "the picky allocator's kept blocks were claimed from its region, which unmaps them all"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Context/ContextAllocatorReadsBackTheUserAllocator.fixture/main.jet",
-      "line": 52,
-      "column": 5,
-      "reason": "the counter's kept blocks were claimed from its region, which unmaps them all"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Context/ContextAllocatorServesTheBlockAndItsLibraryCalls.fixture/served.jet",
-      "line": 61,
-      "column": 5,
-      "reason": "the counter's kept blocks were claimed from its region, which unmaps them all"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Context/ContextScratchBlockRewindsAndMovesWhatLeaves.fixture/scratch.jet",
-      "line": 18,
-      "column": 5,
-      "reason": "only reads the address of an item the caller keeps alive"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/ControlAndData/ExplicitExitUnmappedKeeps101OnEveryTier.fixture/main.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "this case reports a Jet defect status on purpose"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/ControlAndData/ExplicitProcessExitCleanupGoldenMatchesAllExecutionTiers.fixture/process_exit_cleanup.jet",
-      "line": 22,
-      "column": 5,
-      "reason": "the exit callback has no captured state"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/ControlAndData/ProcessExitLeavesHeapToKernelAfterUserCleanup.fixture/main.jet",
-      "line": 35,
-      "column": 5,
-      "reason": "the exit callback has no captured state"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/CoreCryptoArgon2ID/Argon2IDParallelLanesMatchRfcVectorAcrossTiers/Input/run.jet",
-      "line": 8,
-      "column": 5,
-      "reason": "fixed Argon2id parallel-lane known-answer vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/CoreLib/CoreMemRegionsHandOutBlocksAndAWindowChecksItsIndex.fixture/main.jet",
-      "line": 16,
-      "column": 5,
-      "reason": "the caller's block holds the bytes and stays unused while the adopted region and its blocks live"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/CoreLib/CoreMemRegionsHandOutBlocksAndAWindowChecksItsIndex.fixture/main.jet",
-      "line": 43,
-      "column": 5,
-      "reason": "the shelf's blocks were claimed from regions that are closed, and nothing reads them again"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/CoreLib/CoreMemRegionsHandOutBlocksAndAWindowChecksItsIndex.fixture/window.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "the four Ints are fresh heap storage, every access stays inside them, and they are released once"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/CoreLibNet/SharedMemoryWordsOrderAcrossProcesses.fixture/main.jet",
-      "line": 25,
-      "column": 5,
-      "reason": "fork a peer that shares the mapping, and reap it"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Cross/WebBuildRefusesInlineCBeforeCodegen.fixture/main.jet",
-      "line": 1,
-      "column": 1,
-      "reason": "the scalar ABI contract matches the C definition"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Cross/WebBuildRefusesInlineCBeforeCodegen.fixture/main.jet",
-      "line": 7,
-      "column": 5,
-      "reason": "call the audited inline C contract"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Custom/Fixtures/FromAddrSentryIsTierParity/fixture.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "value is live on this stack frame and the pointer never escapes"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Custom/Fixtures/SentryFaultsAreTierParity/unsafe_sentries_alignment/unsafe_sentries_alignment.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "the tuple storage is live but this raw Int is misaligned"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Custom/Fixtures/SentryFaultsAreTierParity/unsafe_sentries_expired_recursive_stack/unsafe_sentries_expired_recursive_stack.jet",
-      "line": 11,
-      "column": 5,
-      "reason": "the recursive address outlives its owning Jet frame"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Custom/Fixtures/SentryFaultsAreTierParity/unsafe_sentries_expired_stack/unsafe_sentries_expired_stack.jet",
-      "line": 10,
-      "column": 5,
-      "reason": "the returned address outlives its owning Jet frame"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Custom/Fixtures/SentryFaultsAreTierParity/unsafe_sentries_misaligned_list/unsafe_sentries_misaligned_list.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "the list storage is live but this raw Int is misaligned"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Custom/Fixtures/SentryFaultsAreTierParity/unsafe_sentries_provenance/unsafe_sentries_provenance.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "external address must be a live allocation"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Custom/Fixtures/SentryFaultsAreTierParity/unsafe_sentries_quarantine/unsafe_sentries_quarantine.jet",
-      "line": 7,
-      "column": 5,
-      "reason": "pointer is used only after arena reset to prove quarantine"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Custom/Fixtures/SentrySourcePolicyOffIsTierParity/fixture.jet",
-      "line": 7,
-      "column": 5,
-      "reason": "the local cell is live for this raw read"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/DevPartsRoutine/JIT1216AdversarialRegressions.fixture/raw_alias/run.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "the pointer stays inside this stack frame"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/DevPartsRoutine/UnsafeBlocksAreEvaluatedWithLiveSentries.fixture/fault.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "mapped address is valid and aligned"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/DiagnosticsCoverage/SentryMetadataUsesTheReturnedFaultExitCode.fixture/app/main.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "calls the audited dependency"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/DiagnosticsCoverage/SentryMetadataUsesTheReturnedFaultExitCode.fixture/dep/dep.jet",
-      "line": 3,
-      "column": 1,
-      "reason": "intentionally invalid address"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Effects/ProcessExitNeedsOnlyTheExitLeaf.fixture/exit.jet",
-      "line": 7,
-      "column": 1,
-      "reason": "the case checks the leaf of the unmapped exit"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Effects/ProcessExitNeedsOnlyTheExitLeaf.fixture/exit.jet",
-      "line": 13,
-      "column": 9,
-      "reason": "the case checks the leaf of the unmapped exit"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/FixturesCryptoBridgeEntropy/Argon2IDRfcAndExpertKnownAnswersKillArgon2IMutation.fixture/run.jet",
-      "line": 45,
-      "column": 5,
-      "reason": "original public expert Argon2id KAT"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/FixturesCryptoBridgeEntropy/ExpertAES256GcmMatchesNistCavsVector.fixture/run.jet",
-      "line": 45,
-      "column": 5,
-      "reason": "original published known-answer vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/FixturesCryptoBridgeEntropy/ExpertSurfaceMatchesReferenceVectorsAndBounds.fixture/run.jet",
-      "line": 49,
-      "column": 5,
-      "reason": "original expert interoperability vectors"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/FixturesCryptoBridgeEntropy/ExpertXchacha20Poly1305MatchesCfrgVector.fixture/run.jet",
-      "line": 45,
-      "column": 5,
-      "reason": "original published known-answer vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/FixturesCryptoBridgeEntropy/JetcV1ExpertOpenAcceptsOnlyThePinnedGrammar.fixture/run.jet",
-      "line": 48,
-      "column": 5,
-      "reason": "original pinned JETC v1 migration grammar"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/FixturesCryptoBridgeEntropy/JetcV1MigrationResealsToVerifiedV2WithoutTouchingSource.fixture/run.jet",
-      "line": 24,
-      "column": 5,
-      "reason": "crypto expert: the fixture seals a pinned JETC v1 envelope and migrates it"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/FixturesCryptoBridgeEntropy/KeygenZeroizesProviderCopyAndStackSeed.fixture/run.jet",
-      "line": 47,
-      "column": 5,
-      "reason": "crypto expert: the test reads the generated seed to prove it is live and 32 bytes"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/FixturesCryptoBridgeEntropy/PriorCryptoSuiteStillUsesLiveEntropy.fixture/run.jet",
-      "line": 50,
-      "column": 5,
-      "reason": "crypto expert: the test reads the generated seed length"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/FixturesCryptoBridgeEntropy/TypedSecretWrapSignKDFAndPasswordPathsPreserveRoles.fixture/run.jet",
-      "line": 56,
-      "column": 5,
-      "reason": "crypto expert: the test derives from the secret's raw bytes"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Fmt/FmtPreservesCheckedTextType/Input/run.jet",
-      "line": 19,
-      "column": 5,
-      "reason": "formatter fixture"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Fmt/FmtPreservesUnsafeSiteModesAndPostfixObligations/Input/run.jet",
-      "line": 3,
-      "column": 1,
-      "reason": "caller keeps address live"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Fmt/FmtPreservesUnsafeSiteModesAndPostfixObligations/Input/run.jet",
-      "line": 13,
-      "column": 5,
-      "reason": "calling audited reader"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Fmt/FmtUnsafeReasonsEscapeStrings/Input/run.jet",
-      "line": 3,
-      "column": 1,
-      "reason": "caller says \"ok\""
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Fmt/FmtUnsafeReasonsEscapeStrings/Input/run.jet",
-      "line": 8,
-      "column": 5,
-      "reason": "path C:\\tmp"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/FmtProject/RawCImportsAndModuleBindingsRemainCleanThroughCLI.fixture/runtime.jet",
-      "line": 7,
-      "column": 1,
-      "reason": "audited C boundary"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/FmtProject/RawCImportsAndModuleBindingsRemainCleanThroughCLI.fixture/runtime.jet",
-      "line": 10,
-      "column": 1,
-      "reason": "audited C boundary"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/FmtRoundTripRegressions/RawCImportsAndModuleBindingMutabilityAreByteExactAndIdempotent/Input/run.jet",
-      "line": 7,
-      "column": 1,
-      "reason": "audited C boundary"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/FmtRoundTripRegressions/RawCImportsAndModuleBindingMutabilityAreByteExactAndIdempotent/Input/run.jet",
-      "line": 10,
-      "column": 1,
-      "reason": "audited C boundary"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/GateLedger/Fixtures/Gates/gates.jet",
-      "line": 2,
-      "column": 5,
-      "reason": "test unsafe reason"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/JetTest/JetTestReportsEachFailingTestAndRunsTheRest.fixture/parked.jet",
-      "line": 35,
-      "column": 5,
-      "reason": "the exit callback has no captured state"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/LanguageFeatures/CoreGroupImportNamesModuleTraitsAndTypes.fixture/main.jet",
-      "line": 46,
-      "column": 5,
-      "reason": "the stack's kept block was claimed from its region, which unmaps it"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/LanguageFeatures/ImplMethodInheritsTraitEffectRowOnEveryTier.fixture/main.jet",
-      "line": 38,
-      "column": 5,
-      "reason": "the case prints the checked text"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/LivenessLints/FallbackErrIsNeverAnUnusedLocal.fixture/main.jet",
-      "line": 3,
-      "column": 1,
-      "reason": "probe"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/LivenessLints/FallbackErrIsNeverAnUnusedLocal.fixture/main.jet",
-      "line": 9,
-      "column": 5,
-      "reason": "probe"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Memory/SentryPolicyOffSkipsR0801.fixture/checked.jet",
-      "line": 11,
-      "column": 5,
-      "reason": "target's buffer holds eight Ints: its three items and spare capacity past them"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Memory/SentryPolicyOffSkipsR0801.fixture/off.jet",
-      "line": 11,
-      "column": 5,
-      "reason": "target's buffer holds eight Ints: its three items and spare capacity past them"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/AMappingIsLiveStorageUntilItIsUnmapped.fixture/after_close.jet",
-      "line": 19,
-      "column": 5,
-      "reason": "the copy writes into pages the region unmapped, so the sentry stops it before any byte moves"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/AMappingIsLiveStorageUntilItIsUnmapped.fixture/after_close.jet",
-      "line": 25,
-      "column": 5,
-      "reason": "the shelf's block was claimed from the closed region, and nothing reads it again"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/AMappingIsLiveStorageUntilItIsUnmapped.fixture/keeper.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "the program claims pages it never mapped"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/AMappingIsLiveStorageUntilItIsUnmapped.fixture/main.jet",
-      "line": 15,
-      "column": 5,
-      "reason": "the block holds three Ints of the open region's fresh pages"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/AMappingIsLiveStorageUntilItIsUnmapped.fixture/main.jet",
-      "line": 23,
-      "column": 5,
-      "reason": "the shelf's block was claimed from the closed region, and nothing reads it again"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawBlockCopyAndFillMoveWholeRanges.fixture/copy_from_past.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "the copy reads one Int past the source block"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawBlockCopyAndFillMoveWholeRanges.fixture/copy_to_past.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "the copy writes one Int past the target block"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawBlockCopyAndFillMoveWholeRanges.fixture/main.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "every range stays inside the `values` tuple, which outlives each access"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawBlockCopyAndFillMoveWholeRanges.fixture/main.jet",
-      "line": 16,
-      "column": 5,
-      "reason": "both Strings stay inside `names`; the static texts they replace need no drop"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawBlockCopyAndFillMoveWholeRanges.fixture/past.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "the fill runs one Int past the tuple, so the sentry stops it before any write"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawByteFillWritesExactlyItsRange.fixture/main.jet",
-      "line": 16,
-      "column": 5,
-      "reason": "every fill and read stays inside the block's `room` bytes, and the block is freed once after them"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawByteMoveMatchesABufferedMoveAtEverySizeAndOverlap.fixture/main.jet",
-      "line": 17,
-      "column": 5,
-      "reason": "every move and every byte written or read stays inside the block, which is freed once after the moves"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/main.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "every raw range stays inside the `values` tuple, which outlives each access"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/main.jet",
-      "line": 17,
-      "column": 5,
-      "reason": "each append reads the Ints `many` holds, which move before their old buffer goes"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/main.jet",
-      "line": 27,
-      "column": 5,
-      "reason": "both ranges stay inside `names`; every String is a static text, which needs no single owner"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/negative.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "the two Ints of `cell` take the copy"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/outside.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "the two Ints of `cell` take the copy"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/past_append.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "the append reads one Int past the tuple, so the sentry stops it before the List changes"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/past_copy.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "the copy writes one Int past the tuple, so the sentry stops it before any byte moves"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawPointerCastReadsTheSameAddress.fixture/main.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "each cast names the live local cell, at an alignment its type allows"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawPointerCastReadsTheSameAddress.fixture/misaligned.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "the cast Int starts one byte into the cell, so the sentry stops the read"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawPointerStepsByElementsOrBytes.fixture/main.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "every step stays inside the `values` tuple, which outlives each read"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawPointerStepsByElementsOrBytes.fixture/past.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "the step runs one Int past the local cell, so the sentry stops the read"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawReadOrWriteNeedsALiveAlignedValue.fixture/fromaddrfreed.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "the address names an Int of a block already released"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawReadOrWriteNeedsALiveAlignedValue.fixture/main.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "every address names a live, aligned value of the block, which outlives each access"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawReadOrWriteNeedsALiveAlignedValue.fixture/misaligned.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "the read starts one byte into the block, so its Int is not aligned"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawReadOrWriteNeedsALiveAlignedValue.fixture/readfreed.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "the read takes an Int of a block already released"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawReadOrWriteNeedsALiveAlignedValue.fixture/readpast.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "the read takes the Int just past the block"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawReadOrWriteNeedsALiveAlignedValue.fixture/writepast.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "the write stores the Int just past the block"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawWindowChecksEachIndex.fixture/main.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "the window covers exactly the tuple's four Ints, which outlive it"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawWindowChecksEachIndex.fixture/past.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "the window covers exactly the tuple's four Ints, which outlive it"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawWindowChecksEachIndex.fixture/released.jet",
-      "line": 10,
-      "column": 9,
-      "reason": "`base` names `count` live I64s while the capability lives"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawWindowChecksEachIndex.fixture/released.jet",
-      "line": 17,
-      "column": 5,
-      "reason": "the block is used only through this capability and released once by `release`"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/ARawWindowChecksEachIndex.fixture/released.jet",
-      "line": 27,
-      "column": 5,
-      "reason": "`base` came from `alloc_raw` in `acquire`, and the capability is spent here, once"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/AllocResizeFreeFuzz.fixture/main.jet",
-      "line": 26,
-      "column": 5,
-      "reason": "`address` starts a live block of `size` bytes"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/AllocResizeFreeFuzz.fixture/main.jet",
-      "line": 38,
-      "column": 5,
-      "reason": "the block is written only inside its `size` bytes, and released once by `release`"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/AllocResizeFreeFuzz.fixture/main.jet",
-      "line": 47,
-      "column": 5,
-      "reason": "`address` came unchanged from `alloc_raw` in `claim`, and its block is released here once"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/AllocResizeFreeFuzz.fixture/main.jet",
-      "line": 91,
-      "column": 13,
-      "reason": "both blocks are live, `old` holds at least `shared` bytes and `fresh` holds `size`"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/RawHeapStorageIsTakenAndReleased.fixture/aliased.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "a second release through a copy of the pointer, which the ownership check cannot see, so the runtime stops it"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/RawHeapStorageIsTakenAndReleased.fixture/kept.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "a copy of the pointer is read after its block is released, so the sentry stops the read"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/RawHeapStorageIsTakenAndReleased.fixture/main.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "each block is used only through pointers derived from it, and released once"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemoryKernel/RawHeapStorageIsTakenAndReleased.fixture/twice.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "the second release is refused before the program runs"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemorySemantics/ClosureBoxesFreeAtTheirLastOwner.fixture/main.jet",
-      "line": 313,
-      "column": 5,
-      "reason": "the exit callback only reads its captured List"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/MemorySemantics/UnsafeAddressKeepsStringAliveToBlockEnd.fixture/main.jet",
-      "line": 9,
-      "column": 5,
-      "reason": "label is live on this frame until this block ends"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/ModuleStorage/ModuleGlobalsStartLaidOutUnlessTheyHoldAHandle.fixture/main.jet",
-      "line": 118,
-      "column": 5,
-      "reason": "one task writes the globals"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Observe/PanicContextUsesOnlyLexicallyLiveLocals.fixture/unsafe/panic_lexical_unsafe.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "the region only binds and prints a local; it reads and writes no raw memory"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/OSNative/CredentialsChangeOnEveryThread.fixture/main.jet",
-      "line": 77,
-      "column": 5,
-      "reason": "the process is root of a disposable user namespace; it drops to a mapped user"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/OSNative/ForkUnderLoadChildCompletes.fixture/main.jet",
-      "line": 47,
-      "column": 9,
-      "reason": "the child only allocates, resolves and exits; the parent reaps it"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/OutputCallable/RunnableContractsAndSelectionFailInSema.fixture/probe3/main.jet",
-      "line": 3,
-      "column": 1,
-      "reason": "raw boundary"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/Pin/Fixtures/LibraryWiresSelfRefUnderUnsafeAndExposesSafePinAPI/fixture.jet",
-      "line": 9,
-      "column": 5,
-      "reason": "node storage is fixed for the returned pin; self_addr names this place"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/PlaceWindowLifetimes/BorrowedWindowStaysCallerOwned.fixture/main.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "the borrowed value is live in the caller"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/PlaceWindowLifetimes/HeapElementWindowStaysAllocatorOwned.fixture/main.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "the list element remains heap-owned"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/PlaceWindowLifetimes/StackWindowUsesExpiringSentryAddress.fixture/main.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "cell is live on this stack frame"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/PolicyScope/UnsafeObligationsAreCheckedBeforeCodegen.fixture/run.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "local pointer"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/ProcessSessions/Subjects/native/session_fixture.jet",
-      "line": 54,
-      "column": 5,
-      "reason": "the fixture's descendant rejoins the process group of the tree that spawned it"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/ProcessSessions/Subjects/native/session_fixture.jet",
-      "line": 96,
-      "column": 9,
-      "reason": "kill -0 only asks whether the killed descendant still exists"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/ResourceClose/ReplacedListElementMapValueAndModuleStorageCloseBeforeTheyDrop.fixture/main.jet",
-      "line": 19,
-      "column": 5,
-      "reason": "the test runs one task"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/RunEntry/ModuleWriteFromFnIsE0111.fixture/ok.jet",
-      "line": 11,
-      "column": 5,
-      "reason": "this program starts no task, so nothing else writes `raw`"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/SingleUse/DropErasesNoUnsafeInCodegen.fixture/source-1.jet",
-      "line": 11,
-      "column": 5,
-      "reason": "gone"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/SingleUse/DropInsideUnsafeBlockSatisfiesSingleUse.fixture/source-1.jet",
-      "line": 11,
-      "column": 5,
-      "reason": "the resource is already gone; nothing to release"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/SingleUse/DropInsideUnsafeFnSatisfiesSingleUse.fixture/source-1.jet",
-      "line": 9,
-      "column": 1,
-      "reason": "voids a freshly-acquired lock whose resource is already gone"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/SingleUse/DropInsideUnsafeFnSatisfiesSingleUse.fixture/source-1.jet",
-      "line": 16,
-      "column": 5,
-      "reason": "calling the audited voider"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/SingleUse/HolderConsumedCompiles.fixture/main.jet",
-      "line": 28,
-      "column": 5,
-      "reason": "the lease's job is done by hand here"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/SingleUse/HolderConsumedCompiles.fixture/main.jet",
-      "line": 35,
-      "column": 5,
-      "reason": "the slot's lease is done by hand here"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/SingleUse/HolderDroppedIsE0140.fixture/main.jet",
-      "line": 33,
-      "column": 5,
-      "reason": "the lease's job is done by hand here"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/SingleUse/ReuseAfterDropIsE0121.fixture/source-1.jet",
-      "line": 11,
-      "column": 5,
-      "reason": "done with it"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/TargetMachines/Fixtures/SelectedTargetMachineRejectsDirectMMIOOutsideRegion/main.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "this address is intentionally outside the board MMIO region"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/TargetMachines/Fixtures/SelectedTargetMachineValidatesDirectMMIOAccesses/main.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "timer register is mapped by board.sensor_v1"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/UnsafeAndRuntime/ASentryFaultNamesTheAccessAndTheRange.fixture/steps.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "the second read steps one Int past the tuple, so the sentry stops it there"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/UnsafeAndRuntime/AnOptionalRawPointerIsNoneWhenNull.fixture/main.jet",
-      "line": 12,
-      "column": 5,
-      "reason": "each pointer names the live local cell, or is null and never read"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/UnsafeAndRuntime/DerefPlaceLendsThePointeeToAWriteParameter.fixture/main.jet",
-      "line": 13,
-      "column": 5,
-      "reason": "c lives in place until `run` returns"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/UnsafeAndRuntime/DerefPlaceReceivesATraitSelfMethodThroughAPointer.fixture/main.jet",
-      "line": 21,
-      "column": 5,
-      "reason": "address is the address of a live A that outlives this call"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/UnsafeAndRuntime/DerefPlaceReceivesATraitSelfMethodThroughAPointer.fixture/main.jet",
-      "line": 30,
-      "column": 5,
-      "reason": "c lives in place until `run` returns"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/UnsafeAndRuntime/EveryUnsafeRegionKindEntersItsOwnSentryScope.fixture/regions.jet",
-      "line": 1,
-      "column": 1,
-      "reason": "the cell is live on this frame"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/UnsafeAndRuntime/EveryUnsafeRegionKindEntersItsOwnSentryScope.fixture/regions.jet",
-      "line": 9,
-      "column": 5,
-      "reason": "call the gated reader"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/UnsafeAndRuntime/EveryUnsafeRegionKindEntersItsOwnSentryScope.fixture/regions.jet",
-      "line": 13,
-      "column": 5,
-      "reason": "test region calls the gated reader"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/UnsafeAndRuntime/Fixtures/FFICapabilityEdgeUsesSharedSentryPrelude/main.jet",
-      "line": 8,
-      "column": 5,
-      "reason": "the foreign call may write through the borrowed value"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/UnsafeAndRuntime/Fixtures/MemAddressOfNeverFoldsPlainOrParenthesized/paren/main.jet",
-      "line": 3,
-      "column": 1,
-      "reason": "reads through a raw pointer; addr must be a live, valid Int"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/UnsafeAndRuntime/Fixtures/MemAddressOfNeverFoldsPlainOrParenthesized/paren/main.jet",
-      "line": 12,
-      "column": 5,
-      "reason": "addr is the address of `cell`, a live Int on this stack frame"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/UnsafeAndRuntime/Fixtures/MemAddressOfNeverFoldsPlainOrParenthesized/plain/main.jet",
-      "line": 3,
-      "column": 1,
-      "reason": "reads through a raw pointer; addr must be a live, valid Int"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/UnsafeAndRuntime/Fixtures/MemAddressOfNeverFoldsPlainOrParenthesized/plain/main.jet",
-      "line": 12,
-      "column": 5,
-      "reason": "addr is the address of `cell`, a live Int on this stack frame"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/UnsafeAndRuntime/Fixtures/SentryKernelIsSharedByAOTAndRuntimeAdapters/main.jet",
-      "line": 7,
-      "column": 5,
-      "reason": "the local cell is live for this raw read"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/UnsafeAndRuntime/Fixtures/UnsafeFnBlockAndPtrOps/main.jet",
-      "line": 3,
-      "column": 1,
-      "reason": "reads through a raw pointer; addr must be a live, valid Int"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/UnsafeAndRuntime/Fixtures/UnsafeFnBlockAndPtrOps/main.jet",
-      "line": 12,
-      "column": 5,
-      "reason": "addr is the address of `cell`, a live Int on this stack frame"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/UnsafeAndRuntime/Fixtures/UnsafeTierEmitIsByteExact/main.jet",
-      "line": 3,
-      "column": 1,
-      "reason": "reads through a raw pointer; addr must be valid"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/UnsafeAndRuntime/Fixtures/UnsafeTierEmitIsByteExact/main.jet",
-      "line": 12,
-      "column": 5,
-      "reason": "safe: cell is live"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/UnsafeAndRuntime/Fixtures/VolatileWriteEmitIsByteExact/main.jet",
-      "line": 3,
-      "column": 1,
-      "reason": "UART TX register is mapped by the target machine"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/UnsafeAndRuntime/HardenedProfileStopsAnOutOfBoundsRawAccessAtEveryLevel.fixture/read/read.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "reads the one Int the arena allocated"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/UnsafeAndRuntime/HardenedProfileStopsAnOutOfBoundsRawAccessAtEveryLevel.fixture/write/write.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "writes the one Int the arena allocated"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/UnsafeAndRuntime/RawPointerToolsKeepTheirChecksInHardenedBuilds.fixture/freed.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "no copy of the pointer is read after the block is released"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/UnsafeAndRuntime/RawPointerToolsKeepTheirChecksInHardenedBuilds.fixture/misaligned.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "every Int read starts on an Int boundary"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/UnsafeAndRuntime/RawPointerToolsKeepTheirChecksInHardenedBuilds.fixture/range.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "the steps stay inside the tuple's four Ints"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Cases/WebBuild/ModuleLocalDevIsValidatedAsWebRuntime.fixture/main.jet",
-      "line": 5,
-      "column": 9,
-      "reason": "exercise the web gate"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/AES/nist_gcm.jet",
-      "line": 13,
-      "column": 5,
-      "reason": "published KAT or frozen seed AES-GCM fixture"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/AES/seed_differential.jet",
-      "line": 13,
-      "column": 5,
-      "reason": "published KAT or frozen seed AES-GCM fixture"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 15,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 19,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 32,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 36,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 49,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 53,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 66,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 70,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 83,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 87,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 98,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 109,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 120,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 131,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 142,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 153,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 164,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 175,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 186,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 197,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 208,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 219,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 230,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 241,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 252,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 263,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 274,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 285,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 296,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 307,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 323,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 334,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 350,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 361,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 377,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 388,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 404,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 415,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 431,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 442,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 458,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 469,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 485,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 496,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 512,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 523,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 539,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 550,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 566,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 577,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 593,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 604,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 620,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 631,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 647,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 658,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 674,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 685,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 701,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 712,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 728,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 739,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 755,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 766,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 782,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 793,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 809,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 820,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 836,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 847,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 863,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 874,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 890,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 901,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 917,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 928,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 944,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 955,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 971,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 982,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 998,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1009,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1025,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1036,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1052,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1063,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1079,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1090,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1106,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1117,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1133,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1144,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1160,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1171,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1187,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1198,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1214,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1225,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1241,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1252,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1268,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1279,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1295,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1306,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1322,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1333,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1344,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1355,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1366,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1377,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1388,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1399,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1410,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1426,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1442,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1458,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1476,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1480,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1493,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1497,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1510,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1514,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1527,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1531,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1544,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1548,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1561,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1565,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1578,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1582,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1595,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1599,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1612,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1616,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1629,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1633,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1646,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1650,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1663,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1667,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1680,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1684,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1697,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1701,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1714,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1718,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1731,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1735,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1748,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1752,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1765,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1769,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1782,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1786,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1799,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1803,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1816,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1820,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1833,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1837,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1850,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1854,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1867,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1871,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1884,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1888,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1901,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1905,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1918,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1922,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1935,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1939,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1952,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1956,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1969,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1973,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1986,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 1990,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2003,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2007,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2020,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2024,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2037,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2041,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2054,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2058,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2071,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2075,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2088,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2092,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2105,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2109,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2122,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2126,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2139,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2143,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2156,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2160,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2173,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2177,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2190,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2194,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2207,
-      "column": 5,
-      "reason": "frozen Ed25519 sign witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2211,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2222,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet",
-      "line": 2238,
-      "column": 5,
-      "reason": "public Ed25519 acceptance witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/ct_x25519.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "published/frozen X25519 test inputs"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/aes256gcm_open.jet",
-      "line": 8,
-      "column": 5,
-      "reason": "fixed NIST AES-256-GCM vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/aes256gcm_seal.jet",
-      "line": 7,
-      "column": 5,
-      "reason": "fixed NIST AES-256-GCM vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/argon2id.jet",
-      "line": 10,
-      "column": 5,
-      "reason": "fixed Argon2id known-answer vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/ed25519_sign.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "fixed RFC 8032 Ed25519 vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/ed25519_verify_strict.jet",
-      "line": 7,
-      "column": 5,
-      "reason": "fixed RFC 8032 Ed25519 vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/hkdf_sha256_raw.jet",
-      "line": 8,
-      "column": 5,
-      "reason": "fixed RFC 5869 HKDF vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/open_v1.jet",
-      "line": 7,
-      "column": 5,
-      "reason": "fixed JETC v1 AES vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/secret_bytes.jet",
-      "line": 9,
-      "column": 5,
-      "reason": "inspect fixed secret bytes"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/shared_secret_bytes.jet",
-      "line": 11,
-      "column": 5,
-      "reason": "inspect shared-secret length"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/signing_key_bytes.jet",
-      "line": 9,
-      "column": 5,
-      "reason": "inspect generated signing-key bytes"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/x25519_raw.jet",
-      "line": 7,
-      "column": 5,
-      "reason": "fixed RFC 7748 X25519 vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/x25519_secret_bytes.jet",
-      "line": 9,
-      "column": 5,
-      "reason": "inspect generated X25519 secret bytes"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/xchacha20poly1305_open.jet",
-      "line": 9,
-      "column": 5,
-      "reason": "fixed CFRG XChaCha20-Poly1305 vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/Expert/xchacha20poly1305_seal.jet",
-      "line": 9,
-      "column": 5,
-      "reason": "fixed CFRG XChaCha20-Poly1305 vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/Vault/commit_import_signing.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "restore a fixed signing key into the vault"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/Vault/commit_import_x25519.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "restore a fixed X25519 secret into the vault"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/Vault/guard_errors.jet",
-      "line": 33,
-      "column": 5,
-      "reason": "vault key import: fixed guard vectors that never hold key material"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/Vault/prepare_import_signing.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "restore a fixed signing-key vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/Vault/prepare_import_x25519.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "restore a fixed X25519 secret vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Crypto/x25519.jet",
-      "line": 11,
-      "column": 5,
-      "reason": "inspect shared-secret length"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Files/Sealed/migrate_v1.jet",
-      "line": 12,
-      "column": 5,
-      "reason": "fixed JETC v1 source failure"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Mem/volatile_read.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "value is live on this stack frame and the pointer never escapes"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Mem/volatile_write.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "value is live on this stack frame and the pointer never escapes"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Sys/atexit.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "the exit callback has no captured state"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Sys/close_fd.jet",
-      "line": 7,
-      "column": 13,
-      "reason": "close an invalid descriptor without changing process state"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Sys/fork.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "fork and let the child return immediately"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Sys/getpriority.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "read the current process priority"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Sys/initgroups.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "probe initgroups with a stable missing user"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Sys/kill.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "check the process group without sending a signal"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Sys/mkfifo.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "probe FIFO creation with an empty path"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Sys/mknod.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "probe device-file creation with a major number out of range"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Sys/pipe.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "open a pipe and observe its descriptor pair"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Sys/reset_signal.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "restore the default disposition of SIGUSR1, which this program never handles, then refuse signal 0"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Sys/set_group_ids.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "set the effective group ID to the one it already is, which needs no privilege, then refuse an ID out of range"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Sys/set_scheduling.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "move this short-lived witness to batch time sharing and back; neither needs privilege"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Sys/set_user_ids.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "set the effective user ID to the one it already is, which needs no privilege, then refuse an ID out of range"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Sys/set_wall_clock.jet",
-      "line": 8,
-      "column": 5,
-      "reason": "a time before 1970 is refused before it reaches the kernel, so the clock never changes"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Sys/setgid.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "probe setgid with an invalid identifier"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Sys/setpgid.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "set the current process into its existing process group"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Sys/setpgrp.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "set the current process group"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Sys/setpriority.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "lower the current process priority for this short-lived witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Sys/setsid.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "create a session when the host permits it"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Sys/setuid.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "probe setuid with an invalid identifier"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Sys/stop.jet",
-      "line": 7,
-      "column": 13,
-      "reason": "stop this dedicated witness successfully"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Sys/umask.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "set a deterministic mask for this short-lived witness"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Sys/utime.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "probe timestamp update with an empty path"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Sys/wait.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "wait for a child that this witness does not have"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Conformance/Corpus/Core/Sys/waitpid.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "poll for a child that this witness does not have"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Fixtures/explicit_cleanup_order.jet",
-      "line": 39,
-      "column": 5,
-      "reason": "exercise the explicit process-stop cleanup boundary"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Fixtures/ffi_stack4_i64.jet",
-      "line": 2,
-      "column": 1,
-      "reason": "the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Fixtures/ffi_stack4_i64.jet",
-      "line": 49,
-      "column": 5,
-      "reason": "Linux getpid syscall 39 ignores all argument registers and retains no stack pointer"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Fixtures/fmt_import_c_bindings.jet",
-      "line": 7,
-      "column": 1,
-      "reason": "audited C boundary"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Fixtures/fmt_import_c_bindings.jet",
-      "line": 10,
-      "column": 1,
-      "reason": "audited C boundary"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Fixtures/native_global_word.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "the fixture's one-threaded caller (run, or global-word.c) is the only writer"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Fixtures/native_inline_c_shared_state.jet",
-      "line": 4,
-      "column": 1,
-      "reason": "updates this program's private counter"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Fixtures/native_inline_c_shared_state.jet",
-      "line": 13,
-      "column": 1,
-      "reason": "reads the counter defined by fixture_bump"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Fixtures/native_inline_c_shared_state.jet",
-      "line": 25,
-      "column": 5,
-      "reason": "the counter is private to these two bodies"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Fixtures/UnsafeObligations/run.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "local pointer"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Fuzz/Sema/Differential/ex_crypto_crypto_migration.jet",
-      "line": 29,
-      "column": 5,
-      "reason": "AES-256-GCM protocol interoperability"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Fuzz/Sema/Valid/ex_crypto_crypto_suite.jet",
-      "line": 40,
-      "column": 5,
-      "reason": "known-answer check reads the RFC 7748 shared secret"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Fuzz/Sema/Valid/ex_lowlevel_lowlevel.jet",
-      "line": 8,
-      "column": 5,
-      "reason": "`cell` is live on this stack frame and the pointer never escapes"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Fuzz/Sema/Valid/ex_lowlevel_lowlevel.jet",
-      "line": 22,
-      "column": 5,
-      "reason": "`cell` is a live Int on this stack frame; the pointer never escapes"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Fuzz/Sema/Valid/ex_lowlevel_pointer_cast_deref.jet",
-      "line": 11,
-      "column": 5,
-      "reason": "flag is live on this stack frame and the pointer never escapes"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Run/Comptime/ForeignBranchNotTaken.jet",
-      "line": 12,
-      "column": 1,
-      "reason": "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Run/Comptime/ForeignBranchNotTaken.jet",
-      "line": 24,
-      "column": 9,
-      "reason": "call the audited register-only assembly contract"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Run/Comptime/MutableGlobalStartsFromAnyStorableValue.jet",
-      "line": 60,
-      "column": 5,
-      "reason": "one task writes the globals"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Run/Comptime/MutableGlobalStartsFromComputedValue.jet",
-      "line": 32,
-      "column": 5,
-      "reason": "one task writes the frame"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Run/Comptime/MutableGlobalStartsFromComputedValue.jet",
-      "line": 43,
-      "column": 5,
-      "reason": "one task writes the globals"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Run/CoreCryptoFoundations/CryptoAeadTamperingIsRejectedAcrossTiers.jet",
-      "line": 64,
-      "column": 5,
-      "reason": "fixed AEAD tamper vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Run/CoreCryptoFoundations/PrimitiveMatrix.jet",
-      "line": 101,
-      "column": 5,
-      "reason": "known-answer check reads the RFC 7748 shared secret"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Run/CoreCryptoFoundations/PrimitiveMatrix.jet",
-      "line": 163,
-      "column": 5,
-      "reason": "expert known-answer vectors need raw key bytes"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Run/CoreIO/CleanupMatrix.jet",
-      "line": 35,
-      "column": 5,
-      "reason": "the stop runs the shared cleanup boundary"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Run/CoreIO/CleanupMatrix.jet",
-      "line": 83,
-      "column": 5,
-      "reason": "the exit callbacks have no captured state"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Run/Dyn/NumberInUnsafe.jet",
-      "line": 7,
-      "column": 5,
-      "reason": "the literal below is a valid JSON number lexeme"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Run/FailureFoundation/TransactOSStop.jet",
-      "line": 34,
-      "column": 5,
-      "reason": "the stop runs the shared cleanup boundary"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Run/PatternsAndFields/FixedSizeListWidensAtCoreCall.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "fixed signature vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/Run/UnsafeAndRuntime/MemFromAddrDirect.jet",
-      "line": 11,
-      "column": 5,
-      "reason": "the borrowed value is live in the caller and the pointer never escapes"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/E3113PackageWithoutKernelFiles/run.jet",
-      "line": 6,
-      "column": 1,
-      "reason": "the caller releases the storage with `free_raw`, exactly once"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/E3113RawMemoryOutsideKernel/kernel.jet",
-      "line": 4,
-      "column": 1,
-      "reason": "the caller releases the storage with `free_raw`, exactly once"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/E3113RawMemoryOutsideKernel/run.jet",
-      "line": 5,
-      "column": 1,
-      "reason": "the caller releases the storage with `free_raw`, exactly once"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/E3113RuntimeUnitSourceOutsideKernel/run.jet",
-      "line": 6,
-      "column": 1,
-      "reason": "each caller vouches for the address"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/E3113RuntimeUnitSourceOutsideKernel/run.jet",
-      "line": 10,
-      "column": 5,
-      "reason": "the kernel's own leaf reads a word its caller lends"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/E3113RuntimeUnitSourceOutsideKernel/run.jet",
-      "line": 16,
-      "column": 5,
-      "reason": "the host holds the word at this address"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/E3114RawAddressIntoKernel/run.jet",
-      "line": 8,
-      "column": 5,
-      "reason": "the caller hands the address of a live Int"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/E3114RawAddressIntoKernel/run.jet",
-      "line": 18,
-      "column": 5,
-      "reason": "kernel code hands the address of a live Int"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/AuditedGateLadderForbidden/run.jet",
-      "line": 3,
-      "column": 5,
-      "reason": "the organization policy refuses this audited escape"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/cffi_out_pointer_requires_unsafe.jet",
-      "line": 14,
-      "column": 1,
-      "reason": "the local slot remains live for the complete C call"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/changeset_a_failed_handler_publishes_none.jet",
-      "line": 28,
-      "column": 25,
-      "reason": "generated"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/checked_text_raw_requires_unsafe.jet",
-      "line": 22,
-      "column": 5,
-      "reason": "audited literal"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/crypto_argon2id_literal_policy.jet",
-      "line": 9,
-      "column": 5,
-      "reason": "fixed password-hash vectors"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/crypto_argon2id_literal_policy_type_precedence.jet",
-      "line": 9,
-      "column": 5,
-      "reason": "fixed password-hash vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/crypto_argon2id_literal_policy_valid.jet",
-      "line": 9,
-      "column": 5,
-      "reason": "protocol-selected password policy"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/crypto_argon2id_literal_policy_valid.jet",
-      "line": 17,
-      "column": 5,
-      "reason": "fixed password-hash vectors"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/crypto_expert_material_length.jet",
-      "line": 12,
-      "column": 5,
-      "reason": "fixed interop vectors"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/crypto_expert_material_length_type_precedence.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "fixed interop vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/crypto_expert_material_length_valid.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "protocol-selected interop material"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/crypto_expert_material_length_valid.jet",
-      "line": 17,
-      "column": 5,
-      "reason": "fixed interop vectors"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/crypto_expert_nonce_callback_bound_precedence.jet",
-      "line": 13,
-      "column": 5,
-      "reason": "fixed interop vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/crypto_expert_nonce_correct.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "fixed interop vectors"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/crypto_expert_nonce_effect_bound_precedence.jet",
-      "line": 10,
-      "column": 5,
-      "reason": "fixed interop vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/crypto_expert_nonce_effect_precedence.jet",
-      "line": 10,
-      "column": 5,
-      "reason": "fixed interop vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/crypto_expert_nonce_effect_prohibition_precedence.jet",
-      "line": 10,
-      "column": 5,
-      "reason": "fixed interop vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/crypto_expert_nonce_effect_unknown_precedence.jet",
-      "line": 10,
-      "column": 5,
-      "reason": "fixed interop vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/crypto_expert_nonce_length.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "fixed interop vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/crypto_expert_nonce_region_authority_precedence.jet",
-      "line": 9,
-      "column": 5,
-      "reason": "fixed interop vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/crypto_expert_nonce_trait_dispatch_precedence.jet",
-      "line": 9,
-      "column": 5,
-      "reason": "fixed interop vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/crypto_expert_nonce_type_precedence.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "fixed interop vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/crypto_hkdf_output_length.jet",
-      "line": 9,
-      "column": 5,
-      "reason": "fixed interop vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/crypto_hkdf_output_type_precedence.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "fixed interop vector"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/crypto_hkdf_output_valid.jet",
-      "line": 8,
-      "column": 5,
-      "reason": "protocol-selected output length"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/crypto_hkdf_output_valid.jet",
-      "line": 16,
-      "column": 5,
-      "reason": "fixed interop vectors"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/discarded_pure_quiet.jet",
-      "line": 47,
-      "column": 5,
-      "reason": "the test deliberately keeps this stderr write behind its audit boundary"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/e3106_unsafe_skip_without_per_site.jet",
-      "line": 3,
-      "column": 5,
-      "reason": "reads a checked constant"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/ffi_asm_duplicate_clobber.jet",
-      "line": 3,
-      "column": 1,
-      "reason": "each discarded register is named once"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/ffi_asm_float_signature.jet",
-      "line": 3,
-      "column": 1,
-      "reason": "register-only increment"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/ffi_asm_missing_return_anchor.jet",
-      "line": 3,
-      "column": 1,
-      "reason": "cycle counter"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/ffi_asm_no_mem.jet",
-      "line": 1,
-      "column": 1,
-      "reason": "register-only increment"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/ffi_asm_return_clobber.jet",
-      "line": 3,
-      "column": 1,
-      "reason": "the result register is overwritten by the body"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/ffi_asm_unencoded_mnemonic.jet",
-      "line": 3,
-      "column": 1,
-      "reason": "the body writes only its result register"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/ffi_asm_unknown_clobber.jet",
-      "line": 3,
-      "column": 1,
-      "reason": "the body declares only audited registers"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/ffi_body_not_string.jet",
-      "line": 1,
-      "column": 1,
-      "reason": "demo"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/ffi_inline_asm_call_needs_unsafe_region.jet",
-      "line": 3,
-      "column": 1,
-      "reason": "the operands are scalar registers and r10 is a declared clobber"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/ffi_inline_asm_call_needs_unsafe_region.jet",
-      "line": 14,
-      "column": 5,
-      "reason": "call the audited register-only assembly contract"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/ffi_inline_c_call_needs_unsafe_region.jet",
-      "line": 1,
-      "column": 1,
-      "reason": "the scalar ABI contract matches the C definition"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/ffi_inline_c_call_needs_unsafe_region.jet",
-      "line": 7,
-      "column": 5,
-      "reason": "call the audited inline C contract"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/ffi_inline_c_mismatch.jet",
-      "line": 1,
-      "column": 1,
-      "reason": "deliberate mismatch fixture"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/ffi_inline_cpp_call_needs_unsafe_region.jet",
-      "line": 1,
-      "column": 1,
-      "reason": "the scalar ABI contract matches the C++ definition"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/ffi_inline_cpp_call_needs_unsafe_region.jet",
-      "line": 7,
-      "column": 5,
-      "reason": "call the audited inline C++ contract"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/ffi_unknown_argument.jet",
-      "line": 1,
-      "column": 1,
-      "reason": "demo"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/ffi_unknown_language.jet",
-      "line": 1,
-      "column": 1,
-      "reason": "demo"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/GatesLoadPackageCeiling/run.jet",
-      "line": 2,
-      "column": 5,
-      "reason": "audited load-only gate"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/lowlevel_e3102.jet",
-      "line": 2,
-      "column": 5,
-      "reason": "addr is valid"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/lowlevel_e3103.jet",
-      "line": 3,
-      "column": 1,
-      "reason": "reads through caller-provided raw pointer"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/lowlevel_volatile_write_without_mem.jet",
-      "line": 2,
-      "column": 5,
-      "reason": "addr is valid"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/lowlevel_volatile_write_wrong_ptr.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "plain ints are not raw pointers"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/lowlevel_volatile_write_wrong_value.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "slot is live and pointer never escapes"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/meta_ladder_add_never_authorizes_unsafe.jet",
-      "line": 7,
-      "column": 13,
-      "reason": "generated"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/module_write_from_fn_is_e0111.jet",
-      "line": 13,
-      "column": 5,
-      "reason": "this program starts no task, so nothing else writes `raw`"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/Ownership/raw_window_read_after_its_owner_is_released.jet",
-      "line": 11,
-      "column": 5,
-      "reason": "the cells hold no resource, so spending them frees nothing"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/Ownership/raw_window_read_after_its_owner_is_released.jet",
-      "line": 16,
-      "column": 5,
-      "reason": "the window covers exactly the two Int fields, which `cells` keeps"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/Ownership/single_use_holder_dropped_owes_consume.jet",
-      "line": 33,
-      "column": 5,
-      "reason": "the lease's job is done by hand here"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/secret_read_requires_unsafe.jet",
-      "line": 8,
-      "column": 5,
-      "reason": "the length leaves this function, never the key bytes"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/SecretsExpiry/expiring_secret_loan_rejects_move_variadic_and_drop_paths_3.jet",
-      "line": 13,
-      "column": 9,
-      "reason": "attempt to discard a loan"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/UnsafeAndRuntime/VolatileWriteEmitIsByteExact/run.jet",
-      "line": 3,
-      "column": 1,
-      "reason": "UART TX register is mapped by the target machine"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/unsafe_block_after_statement_parse_error.jet",
-      "line": 8,
-      "column": 5,
-      "reason": "target outlives the read in this frame"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/UnsafeEffectBudget/unsafedep/unsafedep.jet",
-      "line": 3,
-      "column": 5,
-      "reason": "audited peek"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/unsafe_effect_module_cap.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "audited peek"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/unsafe_effect_prohibition_transitive.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "audited peek"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/UnsafeForbidden/run.jet",
-      "line": 2,
-      "column": 5,
-      "reason": "not allowed"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/UnsafeForbiddenByOrganizationPolicy/run.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "the organization policy forbids this escape"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/unsafe_obligation_missing.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "local pointer"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/unsafe_obligation_no_bleed.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "two independent pointer operations"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UI/UnsafePerSite/run.jet",
-      "line": 2,
-      "column": 5,
-      "reason": "selection required"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UILint/inline_asm_reads_its_core_mem_gate.jet",
-      "line": 8,
-      "column": 1,
-      "reason": "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs"
-    },
-    {
-      "package": "tests",
-      "file": "Tests/UILint/inline_asm_reads_its_core_mem_gate.jet",
-      "line": 19,
-      "column": 5,
-      "reason": "call the audited register-only assembly contract"
     }
   ]
 }
@@ -10642,8 +10642,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Docs | 10 |
 | Examples | 45 |
 | Jetpack | 8 |
+| Tests | 548 |
 | Tools | 28 |
-| tests | 548 |
 | **total** | **1483** |
 
 ### Regions
@@ -11149,6 +11149,9 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 352:5 | "TCSETS reads the kernel termios from the caller's initialized struct" |
 | Compiler | Compiler/JetRuntime/Source/RouteTesting.jet | 131:13 | "written under the host lock" |
 | Compiler | Compiler/JetRuntime/Source/RouteTesting.jet | 140:9 | "written under the host lock" |
+| Compiler | Compiler/JetRuntime/Source/SHA256.jet | 255:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/SHA256.jet | 260:5 | "cpuid only reports processor identification" |
+| Compiler | Compiler/JetRuntime/Source/SHA256.jet | 285:9 | "the state list holds eight U32 words, and the range check keeps each block inside the length borrowed bytes" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 49:5 | "idempotent flags: every writer stores the same 1, the held one first" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 58:5 | "an idempotent flag: every writer stores the same 1" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 72:5 | "the monitor is the only thread that clears the flag; an arm it races restores it" |
@@ -11173,9 +11176,6 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 180:5 | "secret is fresh aligned24B storage this call owns exclusively" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 197:5 | "secret is a live exclusively borrowed native24B Secret header; len/cap/data follow the native List layout and all byte owners remain inside its buffer" |
 | Compiler | Compiler/JetRuntime/Source/Sentry.jet | 18:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/SHA256.jet | 255:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/SHA256.jet | 260:5 | "cpuid only reports processor identification" |
-| Compiler | Compiler/JetRuntime/Source/SHA256.jet | 285:9 | "the state list holds eight U32 words, and the range check keeps each block inside the length borrowed bytes" |
 | Compiler | Compiler/JetRuntime/Source/Shared.jet | 64:5 | "x86 pause only hints that this thread is waiting in a spin loop; no memory is touched" |
 | Compiler | Compiler/JetRuntime/Source/Shared.jet | 483:9 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/SharedTransactions.jet | 20:5 | "runtime-init runs before any other thread exists" |
@@ -11367,9 +11367,9 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Crypto/Vault.jet | 382:5 | "vault typed revocation commit provider boundary" |
 | Core | Core/Crypto/Vault.jet | 388:5 | "vault passphrase export provider boundary" |
 | Core | Core/Crypto/Vault.jet | 397:5 | "vault recipient export provider boundary" |
+| Core | Core/DB/Query.jet | 172:5 | "the exact owned query bytes passed the shared strict UTF-8 validator" |
 | Core | Core/Data/Data.jet | 3084:5 | "inspect existing private Decode carriers only inside checked Core data source" |
 | Core | Core/Data/Data.jet | 3467:5 | "inspect existing private Decode carriers only inside checked Core data source" |
-| Core | Core/DB/Query.jet | 172:5 | "the exact owned query bytes passed the shared strict UTF-8 validator" |
 | Core | Core/Encoding/CBOR.jet | 110:5 | "inspect private typed carriers without changing public Dyn variants" |
 | Core | Core/Encoding/CBOR.jet | 178:5 | "validated private carriers retain byte strings for typed Encode" |
 | Core | Core/Encoding/CBORStream.jet | 248:9 | "the retained key copies exactly the already validated text bytes" |
@@ -11492,8 +11492,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Sys/Sys.jet | 2052:1 | "posix kill: the caller owns or is entitled to signal the target process" |
 | Core | Core/Sys/Sys.jet | 2060:1 | "posix signal reset: the caller owns the process signal disposition it resets" |
 | Core | Core/Sys/Sys.jet | 2065:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
-| Core | Core/Testing/Testing.jet | 1504:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
 | Core | Core/TUI/TUI.jet | 108:5 | "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption" |
+| Core | Core/Testing/Testing.jet | 1504:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
 | Docs | Docs/Audits/G15202611/Probes/c4599_28_comptime_asm.jet | 10:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
 | Docs | Docs/Audits/G15202611/Probes/c4599_28_comptime_asm.jet | 25:5 | "call the audited register-only assembly contract" |
 | Docs | Docs/Audits/G15202611/Probes/c4599_28_comptime_asm_reach.jet | 10:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
@@ -11557,6 +11557,554 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Jetpack | Jetpack/Publication/Tests/Index.jet | 346:5 | "the test owns the planted lock file it ages" |
 | Jetpack | Jetpack/Store/Tests/ClosureGraph.jet | 60:13 | "the test owns the journal file it just wrote" |
 | Jetpack | Jetpack/Store/Tests/Seal.jet | 29:5 | "the store test owns the fixture file whose mtime it pins" |
+| Tests | Tests/Cases/BackendIce/Fixtures/AsmRail/rail.jet | 10:1 | "the program claims the runtime's stack switch" |
+| Tests | Tests/Cases/BackendIce/Fixtures/AsmRail/rail.jet | 36:1 | "the program claims the runtime's TLS base" |
+| Tests | Tests/Cases/BackendIce/Fixtures/AsmRail/rail.jet | 44:5 | "call the leaf the build refuses" |
+| Tests | Tests/Cases/BackendIce/Fixtures/AsmRail/rail.jet | 48:5 | "call the leaf the build refuses" |
+| Tests | Tests/Cases/BackendIce/Fixtures/AsmRdtsc/stamp/stamp.jet | 9:1 | "rdtsc writes only rax and rdx, both declared" |
+| Tests | Tests/Cases/BackendIce/Fixtures/AsmRdtsc/stamp/stamp.jet | 20:1 | "lfence and rdtsc write only rax and rdx, and rdx is declared" |
+| Tests | Tests/Cases/BackendIce/Fixtures/AsmRdtsc/stamp/stamp.jet | 32:5 | "call the audited rdtsc contracts" |
+| Tests | Tests/Cases/BackendIce/Fixtures/AsmRdtsc/unencoded/unencoded.jet | 12:1 | "the body writes only its result register" |
+| Tests | Tests/Cases/BackendIce/Fixtures/AsmRdtsc/unencoded/unencoded.jet | 20:1 | "the body writes only its result register" |
+| Tests | Tests/Cases/BackendIce/Fixtures/AsmRdtsc/unencoded/unencoded.jet | 28:5 | "call the leaves sema refuses" |
+| Tests | Tests/Cases/BuildEntry/MetaCodeNeverAuthorizesUnsafe.fixture/added/main.jet | 8:17 | "generated" |
+| Tests | Tests/Cases/BuildEntry/MetaCodeNeverAuthorizesUnsafe.fixture/rewritten/main.jet | 18:25 | "generated" |
+| Tests | Tests/Cases/CLIPartsCore/Fixtures/GatePolicy/main.jet | 2:5 | "org refusal" |
+| Tests | Tests/Cases/CLIPartsInspect/Fixtures/Foreign/app/main.jet | 4:5 | "calls the audited dependency" |
+| Tests | Tests/Cases/CLIPartsInspect/Fixtures/Foreign/dep/dep.jet | 3:1 | "intentionally invalid address" |
+| Tests | Tests/Cases/CLIPartsInspect/Fixtures/Release/hardened/main.jet | 7:5 | "pointer is used only after arena reset to prove quarantine" |
+| Tests | Tests/Cases/CLIPartsInspect/Fixtures/Release/release/main.jet | 7:5 | "pointer is used only after arena reset to prove quarantine" |
+| Tests | Tests/Cases/CLIPartsInspect/Fixtures/Team/unsafe/main.jet | 2:5 | "audit" |
+| Tests | Tests/Cases/CLIPartsInspect/Fixtures/TestHardened/hardened/main.jet | 5:5 | "test deliberately reads after arena reset" |
+| Tests | Tests/Cases/CLIPartsInspect/Fixtures/TestHardened/release/main.jet | 5:5 | "test deliberately reads after arena reset" |
+| Tests | Tests/Cases/Cffi/CffiRawStatusOutPointerReadsOnlyOnSuccess.fixture/main.jet | 23:5 | "store_load receives a live non-null slot; bytes are read only after status zero" |
+| Tests | Tests/Cases/Cffi/FFICapabilityBoundaryIsSafeOnlyInsideUnsafe/Input/o2/run.jet | 8:5 | "the foreign call may write through the borrowed value" |
+| Tests | Tests/Cases/Cffi/FFICapabilityBoundaryIsSafeOnlyInsideUnsafe/Input/o3/run.jet | 8:5 | "the foreign call may write through the borrowed value" |
+| Tests | Tests/Cases/Cffi/RuntimeExitImportExitsWithItsArgument.fixture/main.jet | 1:1 | "this program owns the exit status it passes" |
+| Tests | Tests/Cases/CffiNativeMatrix/Fixtures/RequiredNativeCABIMatrix/default/matrix.jet | 47:5 | "live non-null out slot; read only after status zero" |
+| Tests | Tests/Cases/CffiNativeMatrix/Fixtures/RequiredNativeCABIMatrix/sysv64/matrix.jet | 47:5 | "live non-null out slot; read only after status zero" |
+| Tests | Tests/Cases/CollectionsAndMethods/SentryTypedIntStoreKeepsExactCarrier.fixture/main.jet | 6:5 | "the typed pointer refers to the live local cell for these stores" |
+| Tests | Tests/Cases/ComptimeCLIParity/ComptimeChildIsReapedBeforeTheProgramRuns.fixture/run.jet | 15:5 | "fork and reap the child before returning" |
+| Tests | Tests/Cases/ComptimeCLIParity/Fixtures/TierParityExamplesRunThroughAOTJITAndInterpreter/tooling_checked_text_type/checked_text_type.jet | 20:5 | "checked text example output" |
+| Tests | Tests/Cases/ComptimeCorePureParity/CryptoExpertAeadSignArgonAOTStdoutMatchesKnownAnswers.fixture/main.jet | 9:5 | "fixed RFC interop vectors" |
+| Tests | Tests/Cases/ComptimeCorePureParity/CryptoValuesMatchAOTComptimeForcedInterpreterAndDefaultDev/Input/o1/run.jet | 12:5 | "fixed RFC interop vectors" |
+| Tests | Tests/Cases/ComptimeCorePureParity/CryptoValuesMatchAOTComptimeForcedInterpreterAndDefaultDev/Input/o2/run.jet | 12:5 | "fixed RFC interop vectors" |
+| Tests | Tests/Cases/ConcurrencyBoundaries/AGroupTaskReadsALentParameterInPlace.fixture/lend.jet | 10:5 | "reads the address of the graph's storage, not its bytes" |
+| Tests | Tests/Cases/ConcurrencyBoundaries/AGroupTaskReadsALentParameterInPlace.fixture/lend.jet | 29:5 | "reads the address of the graph's storage, not its bytes" |
+| Tests | Tests/Cases/Context/ContextAllocatorMemoEntryMovesToTheHeap.fixture/memo.jet | 63:5 | "the reuser's kept blocks were claimed from its region, which unmaps them all" |
+| Tests | Tests/Cases/Context/ContextAllocatorMovesTextThatLeavesTheBlock.fixture/text.jet | 104:5 | "the reuser's kept blocks were claimed from its region, which unmaps them all" |
+| Tests | Tests/Cases/Context/ContextAllocatorMovesWhatLeavesTheBlock.fixture/moves.jet | 124:5 | "the reuser's kept blocks were claimed from its region, which unmaps them all" |
+| Tests | Tests/Cases/Context/ContextAllocatorPanicInAllocateStopsTheTask.fixture/refuse.jet | 38:5 | "the picky allocator's kept blocks were claimed from its region, which unmaps them all" |
+| Tests | Tests/Cases/Context/ContextAllocatorReadsBackTheUserAllocator.fixture/main.jet | 52:5 | "the counter's kept blocks were claimed from its region, which unmaps them all" |
+| Tests | Tests/Cases/Context/ContextAllocatorServesTheBlockAndItsLibraryCalls.fixture/served.jet | 61:5 | "the counter's kept blocks were claimed from its region, which unmaps them all" |
+| Tests | Tests/Cases/Context/ContextScratchBlockRewindsAndMovesWhatLeaves.fixture/scratch.jet | 18:5 | "only reads the address of an item the caller keeps alive" |
+| Tests | Tests/Cases/ControlAndData/ExplicitExitUnmappedKeeps101OnEveryTier.fixture/main.jet | 5:5 | "this case reports a Jet defect status on purpose" |
+| Tests | Tests/Cases/ControlAndData/ExplicitProcessExitCleanupGoldenMatchesAllExecutionTiers.fixture/process_exit_cleanup.jet | 22:5 | "the exit callback has no captured state" |
+| Tests | Tests/Cases/ControlAndData/ProcessExitLeavesHeapToKernelAfterUserCleanup.fixture/main.jet | 35:5 | "the exit callback has no captured state" |
+| Tests | Tests/Cases/CoreCryptoArgon2ID/Argon2IDParallelLanesMatchRfcVectorAcrossTiers/Input/run.jet | 8:5 | "fixed Argon2id parallel-lane known-answer vector" |
+| Tests | Tests/Cases/CoreLib/CoreMemRegionsHandOutBlocksAndAWindowChecksItsIndex.fixture/main.jet | 16:5 | "the caller's block holds the bytes and stays unused while the adopted region and its blocks live" |
+| Tests | Tests/Cases/CoreLib/CoreMemRegionsHandOutBlocksAndAWindowChecksItsIndex.fixture/main.jet | 43:5 | "the shelf's blocks were claimed from regions that are closed, and nothing reads them again" |
+| Tests | Tests/Cases/CoreLib/CoreMemRegionsHandOutBlocksAndAWindowChecksItsIndex.fixture/window.jet | 6:5 | "the four Ints are fresh heap storage, every access stays inside them, and they are released once" |
+| Tests | Tests/Cases/CoreLibNet/SharedMemoryWordsOrderAcrossProcesses.fixture/main.jet | 25:5 | "fork a peer that shares the mapping, and reap it" |
+| Tests | Tests/Cases/Cross/WebBuildRefusesInlineCBeforeCodegen.fixture/main.jet | 1:1 | "the scalar ABI contract matches the C definition" |
+| Tests | Tests/Cases/Cross/WebBuildRefusesInlineCBeforeCodegen.fixture/main.jet | 7:5 | "call the audited inline C contract" |
+| Tests | Tests/Cases/Custom/Fixtures/FromAddrSentryIsTierParity/fixture.jet | 5:5 | "value is live on this stack frame and the pointer never escapes" |
+| Tests | Tests/Cases/Custom/Fixtures/SentryFaultsAreTierParity/unsafe_sentries_alignment/unsafe_sentries_alignment.jet | 5:5 | "the tuple storage is live but this raw Int is misaligned" |
+| Tests | Tests/Cases/Custom/Fixtures/SentryFaultsAreTierParity/unsafe_sentries_expired_recursive_stack/unsafe_sentries_expired_recursive_stack.jet | 11:5 | "the recursive address outlives its owning Jet frame" |
+| Tests | Tests/Cases/Custom/Fixtures/SentryFaultsAreTierParity/unsafe_sentries_expired_stack/unsafe_sentries_expired_stack.jet | 10:5 | "the returned address outlives its owning Jet frame" |
+| Tests | Tests/Cases/Custom/Fixtures/SentryFaultsAreTierParity/unsafe_sentries_misaligned_list/unsafe_sentries_misaligned_list.jet | 5:5 | "the list storage is live but this raw Int is misaligned" |
+| Tests | Tests/Cases/Custom/Fixtures/SentryFaultsAreTierParity/unsafe_sentries_provenance/unsafe_sentries_provenance.jet | 6:5 | "external address must be a live allocation" |
+| Tests | Tests/Cases/Custom/Fixtures/SentryFaultsAreTierParity/unsafe_sentries_quarantine/unsafe_sentries_quarantine.jet | 7:5 | "pointer is used only after arena reset to prove quarantine" |
+| Tests | Tests/Cases/Custom/Fixtures/SentrySourcePolicyOffIsTierParity/fixture.jet | 7:5 | "the local cell is live for this raw read" |
+| Tests | Tests/Cases/DevPartsRoutine/JIT1216AdversarialRegressions.fixture/raw_alias/run.jet | 5:5 | "the pointer stays inside this stack frame" |
+| Tests | Tests/Cases/DevPartsRoutine/UnsafeBlocksAreEvaluatedWithLiveSentries.fixture/fault.jet | 4:5 | "mapped address is valid and aligned" |
+| Tests | Tests/Cases/DiagnosticsCoverage/SentryMetadataUsesTheReturnedFaultExitCode.fixture/app/main.jet | 4:5 | "calls the audited dependency" |
+| Tests | Tests/Cases/DiagnosticsCoverage/SentryMetadataUsesTheReturnedFaultExitCode.fixture/dep/dep.jet | 3:1 | "intentionally invalid address" |
+| Tests | Tests/Cases/Effects/ProcessExitNeedsOnlyTheExitLeaf.fixture/exit.jet | 7:1 | "the case checks the leaf of the unmapped exit" |
+| Tests | Tests/Cases/Effects/ProcessExitNeedsOnlyTheExitLeaf.fixture/exit.jet | 13:9 | "the case checks the leaf of the unmapped exit" |
+| Tests | Tests/Cases/FixturesCryptoBridgeEntropy/Argon2IDRfcAndExpertKnownAnswersKillArgon2IMutation.fixture/run.jet | 45:5 | "original public expert Argon2id KAT" |
+| Tests | Tests/Cases/FixturesCryptoBridgeEntropy/ExpertAES256GcmMatchesNistCavsVector.fixture/run.jet | 45:5 | "original published known-answer vector" |
+| Tests | Tests/Cases/FixturesCryptoBridgeEntropy/ExpertSurfaceMatchesReferenceVectorsAndBounds.fixture/run.jet | 49:5 | "original expert interoperability vectors" |
+| Tests | Tests/Cases/FixturesCryptoBridgeEntropy/ExpertXchacha20Poly1305MatchesCfrgVector.fixture/run.jet | 45:5 | "original published known-answer vector" |
+| Tests | Tests/Cases/FixturesCryptoBridgeEntropy/JetcV1ExpertOpenAcceptsOnlyThePinnedGrammar.fixture/run.jet | 48:5 | "original pinned JETC v1 migration grammar" |
+| Tests | Tests/Cases/FixturesCryptoBridgeEntropy/JetcV1MigrationResealsToVerifiedV2WithoutTouchingSource.fixture/run.jet | 24:5 | "crypto expert: the fixture seals a pinned JETC v1 envelope and migrates it" |
+| Tests | Tests/Cases/FixturesCryptoBridgeEntropy/KeygenZeroizesProviderCopyAndStackSeed.fixture/run.jet | 47:5 | "crypto expert: the test reads the generated seed to prove it is live and 32 bytes" |
+| Tests | Tests/Cases/FixturesCryptoBridgeEntropy/PriorCryptoSuiteStillUsesLiveEntropy.fixture/run.jet | 50:5 | "crypto expert: the test reads the generated seed length" |
+| Tests | Tests/Cases/FixturesCryptoBridgeEntropy/TypedSecretWrapSignKDFAndPasswordPathsPreserveRoles.fixture/run.jet | 56:5 | "crypto expert: the test derives from the secret's raw bytes" |
+| Tests | Tests/Cases/Fmt/FmtPreservesCheckedTextType/Input/run.jet | 19:5 | "formatter fixture" |
+| Tests | Tests/Cases/Fmt/FmtPreservesUnsafeSiteModesAndPostfixObligations/Input/run.jet | 3:1 | "caller keeps address live" |
+| Tests | Tests/Cases/Fmt/FmtPreservesUnsafeSiteModesAndPostfixObligations/Input/run.jet | 13:5 | "calling audited reader" |
+| Tests | Tests/Cases/Fmt/FmtUnsafeReasonsEscapeStrings/Input/run.jet | 3:1 | "caller says \"ok\"" |
+| Tests | Tests/Cases/Fmt/FmtUnsafeReasonsEscapeStrings/Input/run.jet | 8:5 | "path C:\\tmp" |
+| Tests | Tests/Cases/FmtProject/RawCImportsAndModuleBindingsRemainCleanThroughCLI.fixture/runtime.jet | 7:1 | "audited C boundary" |
+| Tests | Tests/Cases/FmtProject/RawCImportsAndModuleBindingsRemainCleanThroughCLI.fixture/runtime.jet | 10:1 | "audited C boundary" |
+| Tests | Tests/Cases/FmtRoundTripRegressions/RawCImportsAndModuleBindingMutabilityAreByteExactAndIdempotent/Input/run.jet | 7:1 | "audited C boundary" |
+| Tests | Tests/Cases/FmtRoundTripRegressions/RawCImportsAndModuleBindingMutabilityAreByteExactAndIdempotent/Input/run.jet | 10:1 | "audited C boundary" |
+| Tests | Tests/Cases/GateLedger/Fixtures/Gates/gates.jet | 2:5 | "test unsafe reason" |
+| Tests | Tests/Cases/JetTest/JetTestReportsEachFailingTestAndRunsTheRest.fixture/parked.jet | 35:5 | "the exit callback has no captured state" |
+| Tests | Tests/Cases/LanguageFeatures/CoreGroupImportNamesModuleTraitsAndTypes.fixture/main.jet | 46:5 | "the stack's kept block was claimed from its region, which unmaps it" |
+| Tests | Tests/Cases/LanguageFeatures/ImplMethodInheritsTraitEffectRowOnEveryTier.fixture/main.jet | 38:5 | "the case prints the checked text" |
+| Tests | Tests/Cases/LivenessLints/FallbackErrIsNeverAnUnusedLocal.fixture/main.jet | 3:1 | "probe" |
+| Tests | Tests/Cases/LivenessLints/FallbackErrIsNeverAnUnusedLocal.fixture/main.jet | 9:5 | "probe" |
+| Tests | Tests/Cases/Memory/SentryPolicyOffSkipsR0801.fixture/checked.jet | 11:5 | "target's buffer holds eight Ints: its three items and spare capacity past them" |
+| Tests | Tests/Cases/Memory/SentryPolicyOffSkipsR0801.fixture/off.jet | 11:5 | "target's buffer holds eight Ints: its three items and spare capacity past them" |
+| Tests | Tests/Cases/MemoryKernel/AMappingIsLiveStorageUntilItIsUnmapped.fixture/after_close.jet | 19:5 | "the copy writes into pages the region unmapped, so the sentry stops it before any byte moves" |
+| Tests | Tests/Cases/MemoryKernel/AMappingIsLiveStorageUntilItIsUnmapped.fixture/after_close.jet | 25:5 | "the shelf's block was claimed from the closed region, and nothing reads it again" |
+| Tests | Tests/Cases/MemoryKernel/AMappingIsLiveStorageUntilItIsUnmapped.fixture/keeper.jet | 6:5 | "the program claims pages it never mapped" |
+| Tests | Tests/Cases/MemoryKernel/AMappingIsLiveStorageUntilItIsUnmapped.fixture/main.jet | 15:5 | "the block holds three Ints of the open region's fresh pages" |
+| Tests | Tests/Cases/MemoryKernel/AMappingIsLiveStorageUntilItIsUnmapped.fixture/main.jet | 23:5 | "the shelf's block was claimed from the closed region, and nothing reads it again" |
+| Tests | Tests/Cases/MemoryKernel/ARawBlockCopyAndFillMoveWholeRanges.fixture/copy_from_past.jet | 4:5 | "the copy reads one Int past the source block" |
+| Tests | Tests/Cases/MemoryKernel/ARawBlockCopyAndFillMoveWholeRanges.fixture/copy_to_past.jet | 4:5 | "the copy writes one Int past the target block" |
+| Tests | Tests/Cases/MemoryKernel/ARawBlockCopyAndFillMoveWholeRanges.fixture/main.jet | 5:5 | "every range stays inside the `values` tuple, which outlives each access" |
+| Tests | Tests/Cases/MemoryKernel/ARawBlockCopyAndFillMoveWholeRanges.fixture/main.jet | 16:5 | "both Strings stay inside `names`; the static texts they replace need no drop" |
+| Tests | Tests/Cases/MemoryKernel/ARawBlockCopyAndFillMoveWholeRanges.fixture/past.jet | 5:5 | "the fill runs one Int past the tuple, so the sentry stops it before any write" |
+| Tests | Tests/Cases/MemoryKernel/ARawByteFillWritesExactlyItsRange.fixture/main.jet | 16:5 | "every fill and read stays inside the block's `room` bytes, and the block is freed once after them" |
+| Tests | Tests/Cases/MemoryKernel/ARawByteMoveMatchesABufferedMoveAtEverySizeAndOverlap.fixture/main.jet | 17:5 | "every move and every byte written or read stays inside the block, which is freed once after the moves" |
+| Tests | Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/main.jet | 6:5 | "every raw range stays inside the `values` tuple, which outlives each access" |
+| Tests | Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/main.jet | 17:5 | "each append reads the Ints `many` holds, which move before their old buffer goes" |
+| Tests | Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/main.jet | 27:5 | "both ranges stay inside `names`; every String is a static text, which needs no single owner" |
+| Tests | Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/negative.jet | 6:5 | "the two Ints of `cell` take the copy" |
+| Tests | Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/outside.jet | 6:5 | "the two Ints of `cell` take the copy" |
+| Tests | Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/past_append.jet | 6:5 | "the append reads one Int past the tuple, so the sentry stops it before the List changes" |
+| Tests | Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/past_copy.jet | 6:5 | "the copy writes one Int past the tuple, so the sentry stops it before any byte moves" |
+| Tests | Tests/Cases/MemoryKernel/ARawPointerCastReadsTheSameAddress.fixture/main.jet | 6:5 | "each cast names the live local cell, at an alignment its type allows" |
+| Tests | Tests/Cases/MemoryKernel/ARawPointerCastReadsTheSameAddress.fixture/misaligned.jet | 6:5 | "the cast Int starts one byte into the cell, so the sentry stops the read" |
+| Tests | Tests/Cases/MemoryKernel/ARawPointerStepsByElementsOrBytes.fixture/main.jet | 5:5 | "every step stays inside the `values` tuple, which outlives each read" |
+| Tests | Tests/Cases/MemoryKernel/ARawPointerStepsByElementsOrBytes.fixture/past.jet | 6:5 | "the step runs one Int past the local cell, so the sentry stops the read" |
+| Tests | Tests/Cases/MemoryKernel/ARawReadOrWriteNeedsALiveAlignedValue.fixture/fromaddrfreed.jet | 4:5 | "the address names an Int of a block already released" |
+| Tests | Tests/Cases/MemoryKernel/ARawReadOrWriteNeedsALiveAlignedValue.fixture/main.jet | 6:5 | "every address names a live, aligned value of the block, which outlives each access" |
+| Tests | Tests/Cases/MemoryKernel/ARawReadOrWriteNeedsALiveAlignedValue.fixture/misaligned.jet | 4:5 | "the read starts one byte into the block, so its Int is not aligned" |
+| Tests | Tests/Cases/MemoryKernel/ARawReadOrWriteNeedsALiveAlignedValue.fixture/readfreed.jet | 4:5 | "the read takes an Int of a block already released" |
+| Tests | Tests/Cases/MemoryKernel/ARawReadOrWriteNeedsALiveAlignedValue.fixture/readpast.jet | 4:5 | "the read takes the Int just past the block" |
+| Tests | Tests/Cases/MemoryKernel/ARawReadOrWriteNeedsALiveAlignedValue.fixture/writepast.jet | 4:5 | "the write stores the Int just past the block" |
+| Tests | Tests/Cases/MemoryKernel/ARawWindowChecksEachIndex.fixture/main.jet | 5:5 | "the window covers exactly the tuple's four Ints, which outlive it" |
+| Tests | Tests/Cases/MemoryKernel/ARawWindowChecksEachIndex.fixture/past.jet | 5:5 | "the window covers exactly the tuple's four Ints, which outlive it" |
+| Tests | Tests/Cases/MemoryKernel/ARawWindowChecksEachIndex.fixture/released.jet | 10:9 | "`base` names `count` live I64s while the capability lives" |
+| Tests | Tests/Cases/MemoryKernel/ARawWindowChecksEachIndex.fixture/released.jet | 17:5 | "the block is used only through this capability and released once by `release`" |
+| Tests | Tests/Cases/MemoryKernel/ARawWindowChecksEachIndex.fixture/released.jet | 27:5 | "`base` came from `alloc_raw` in `acquire`, and the capability is spent here, once" |
+| Tests | Tests/Cases/MemoryKernel/AllocResizeFreeFuzz.fixture/main.jet | 26:5 | "`address` starts a live block of `size` bytes" |
+| Tests | Tests/Cases/MemoryKernel/AllocResizeFreeFuzz.fixture/main.jet | 38:5 | "the block is written only inside its `size` bytes, and released once by `release`" |
+| Tests | Tests/Cases/MemoryKernel/AllocResizeFreeFuzz.fixture/main.jet | 47:5 | "`address` came unchanged from `alloc_raw` in `claim`, and its block is released here once" |
+| Tests | Tests/Cases/MemoryKernel/AllocResizeFreeFuzz.fixture/main.jet | 91:13 | "both blocks are live, `old` holds at least `shared` bytes and `fresh` holds `size`" |
+| Tests | Tests/Cases/MemoryKernel/RawHeapStorageIsTakenAndReleased.fixture/aliased.jet | 4:5 | "a second release through a copy of the pointer, which the ownership check cannot see, so the runtime stops it" |
+| Tests | Tests/Cases/MemoryKernel/RawHeapStorageIsTakenAndReleased.fixture/kept.jet | 4:5 | "a copy of the pointer is read after its block is released, so the sentry stops the read" |
+| Tests | Tests/Cases/MemoryKernel/RawHeapStorageIsTakenAndReleased.fixture/main.jet | 4:5 | "each block is used only through pointers derived from it, and released once" |
+| Tests | Tests/Cases/MemoryKernel/RawHeapStorageIsTakenAndReleased.fixture/twice.jet | 4:5 | "the second release is refused before the program runs" |
+| Tests | Tests/Cases/MemorySemantics/ClosureBoxesFreeAtTheirLastOwner.fixture/main.jet | 313:5 | "the exit callback only reads its captured List" |
+| Tests | Tests/Cases/MemorySemantics/UnsafeAddressKeepsStringAliveToBlockEnd.fixture/main.jet | 9:5 | "label is live on this frame until this block ends" |
+| Tests | Tests/Cases/ModuleStorage/ModuleGlobalsStartLaidOutUnlessTheyHoldAHandle.fixture/main.jet | 118:5 | "one task writes the globals" |
+| Tests | Tests/Cases/OSNative/CredentialsChangeOnEveryThread.fixture/main.jet | 77:5 | "the process is root of a disposable user namespace; it drops to a mapped user" |
+| Tests | Tests/Cases/OSNative/ForkUnderLoadChildCompletes.fixture/main.jet | 47:9 | "the child only allocates, resolves and exits; the parent reaps it" |
+| Tests | Tests/Cases/Observe/PanicContextUsesOnlyLexicallyLiveLocals.fixture/unsafe/panic_lexical_unsafe.jet | 4:5 | "the region only binds and prints a local; it reads and writes no raw memory" |
+| Tests | Tests/Cases/OutputCallable/RunnableContractsAndSelectionFailInSema.fixture/probe3/main.jet | 3:1 | "raw boundary" |
+| Tests | Tests/Cases/Pin/Fixtures/LibraryWiresSelfRefUnderUnsafeAndExposesSafePinAPI/fixture.jet | 9:5 | "node storage is fixed for the returned pin; self_addr names this place" |
+| Tests | Tests/Cases/PlaceWindowLifetimes/BorrowedWindowStaysCallerOwned.fixture/main.jet | 5:5 | "the borrowed value is live in the caller" |
+| Tests | Tests/Cases/PlaceWindowLifetimes/HeapElementWindowStaysAllocatorOwned.fixture/main.jet | 6:5 | "the list element remains heap-owned" |
+| Tests | Tests/Cases/PlaceWindowLifetimes/StackWindowUsesExpiringSentryAddress.fixture/main.jet | 6:5 | "cell is live on this stack frame" |
+| Tests | Tests/Cases/PolicyScope/UnsafeObligationsAreCheckedBeforeCodegen.fixture/run.jet | 5:5 | "local pointer" |
+| Tests | Tests/Cases/ProcessSessions/Subjects/native/session_fixture.jet | 54:5 | "the fixture's descendant rejoins the process group of the tree that spawned it" |
+| Tests | Tests/Cases/ProcessSessions/Subjects/native/session_fixture.jet | 96:9 | "kill -0 only asks whether the killed descendant still exists" |
+| Tests | Tests/Cases/ResourceClose/ReplacedListElementMapValueAndModuleStorageCloseBeforeTheyDrop.fixture/main.jet | 19:5 | "the test runs one task" |
+| Tests | Tests/Cases/RunEntry/ModuleWriteFromFnIsE0111.fixture/ok.jet | 11:5 | "this program starts no task, so nothing else writes `raw`" |
+| Tests | Tests/Cases/SingleUse/DropErasesNoUnsafeInCodegen.fixture/source-1.jet | 11:5 | "gone" |
+| Tests | Tests/Cases/SingleUse/DropInsideUnsafeBlockSatisfiesSingleUse.fixture/source-1.jet | 11:5 | "the resource is already gone; nothing to release" |
+| Tests | Tests/Cases/SingleUse/DropInsideUnsafeFnSatisfiesSingleUse.fixture/source-1.jet | 9:1 | "voids a freshly-acquired lock whose resource is already gone" |
+| Tests | Tests/Cases/SingleUse/DropInsideUnsafeFnSatisfiesSingleUse.fixture/source-1.jet | 16:5 | "calling the audited voider" |
+| Tests | Tests/Cases/SingleUse/HolderConsumedCompiles.fixture/main.jet | 28:5 | "the lease's job is done by hand here" |
+| Tests | Tests/Cases/SingleUse/HolderConsumedCompiles.fixture/main.jet | 35:5 | "the slot's lease is done by hand here" |
+| Tests | Tests/Cases/SingleUse/HolderDroppedIsE0140.fixture/main.jet | 33:5 | "the lease's job is done by hand here" |
+| Tests | Tests/Cases/SingleUse/ReuseAfterDropIsE0121.fixture/source-1.jet | 11:5 | "done with it" |
+| Tests | Tests/Cases/TargetMachines/Fixtures/SelectedTargetMachineRejectsDirectMMIOOutsideRegion/main.jet | 4:5 | "this address is intentionally outside the board MMIO region" |
+| Tests | Tests/Cases/TargetMachines/Fixtures/SelectedTargetMachineValidatesDirectMMIOAccesses/main.jet | 4:5 | "timer register is mapped by board.sensor_v1" |
+| Tests | Tests/Cases/UnsafeAndRuntime/ASentryFaultNamesTheAccessAndTheRange.fixture/steps.jet | 5:5 | "the second read steps one Int past the tuple, so the sentry stops it there" |
+| Tests | Tests/Cases/UnsafeAndRuntime/AnOptionalRawPointerIsNoneWhenNull.fixture/main.jet | 12:5 | "each pointer names the live local cell, or is null and never read" |
+| Tests | Tests/Cases/UnsafeAndRuntime/DerefPlaceLendsThePointeeToAWriteParameter.fixture/main.jet | 13:5 | "c lives in place until `run` returns" |
+| Tests | Tests/Cases/UnsafeAndRuntime/DerefPlaceReceivesATraitSelfMethodThroughAPointer.fixture/main.jet | 21:5 | "address is the address of a live A that outlives this call" |
+| Tests | Tests/Cases/UnsafeAndRuntime/DerefPlaceReceivesATraitSelfMethodThroughAPointer.fixture/main.jet | 30:5 | "c lives in place until `run` returns" |
+| Tests | Tests/Cases/UnsafeAndRuntime/EveryUnsafeRegionKindEntersItsOwnSentryScope.fixture/regions.jet | 1:1 | "the cell is live on this frame" |
+| Tests | Tests/Cases/UnsafeAndRuntime/EveryUnsafeRegionKindEntersItsOwnSentryScope.fixture/regions.jet | 9:5 | "call the gated reader" |
+| Tests | Tests/Cases/UnsafeAndRuntime/EveryUnsafeRegionKindEntersItsOwnSentryScope.fixture/regions.jet | 13:5 | "test region calls the gated reader" |
+| Tests | Tests/Cases/UnsafeAndRuntime/Fixtures/FFICapabilityEdgeUsesSharedSentryPrelude/main.jet | 8:5 | "the foreign call may write through the borrowed value" |
+| Tests | Tests/Cases/UnsafeAndRuntime/Fixtures/MemAddressOfNeverFoldsPlainOrParenthesized/paren/main.jet | 3:1 | "reads through a raw pointer; addr must be a live, valid Int" |
+| Tests | Tests/Cases/UnsafeAndRuntime/Fixtures/MemAddressOfNeverFoldsPlainOrParenthesized/paren/main.jet | 12:5 | "addr is the address of `cell`, a live Int on this stack frame" |
+| Tests | Tests/Cases/UnsafeAndRuntime/Fixtures/MemAddressOfNeverFoldsPlainOrParenthesized/plain/main.jet | 3:1 | "reads through a raw pointer; addr must be a live, valid Int" |
+| Tests | Tests/Cases/UnsafeAndRuntime/Fixtures/MemAddressOfNeverFoldsPlainOrParenthesized/plain/main.jet | 12:5 | "addr is the address of `cell`, a live Int on this stack frame" |
+| Tests | Tests/Cases/UnsafeAndRuntime/Fixtures/SentryKernelIsSharedByAOTAndRuntimeAdapters/main.jet | 7:5 | "the local cell is live for this raw read" |
+| Tests | Tests/Cases/UnsafeAndRuntime/Fixtures/UnsafeFnBlockAndPtrOps/main.jet | 3:1 | "reads through a raw pointer; addr must be a live, valid Int" |
+| Tests | Tests/Cases/UnsafeAndRuntime/Fixtures/UnsafeFnBlockAndPtrOps/main.jet | 12:5 | "addr is the address of `cell`, a live Int on this stack frame" |
+| Tests | Tests/Cases/UnsafeAndRuntime/Fixtures/UnsafeTierEmitIsByteExact/main.jet | 3:1 | "reads through a raw pointer; addr must be valid" |
+| Tests | Tests/Cases/UnsafeAndRuntime/Fixtures/UnsafeTierEmitIsByteExact/main.jet | 12:5 | "safe: cell is live" |
+| Tests | Tests/Cases/UnsafeAndRuntime/Fixtures/VolatileWriteEmitIsByteExact/main.jet | 3:1 | "UART TX register is mapped by the target machine" |
+| Tests | Tests/Cases/UnsafeAndRuntime/HardenedProfileStopsAnOutOfBoundsRawAccessAtEveryLevel.fixture/read/read.jet | 6:5 | "reads the one Int the arena allocated" |
+| Tests | Tests/Cases/UnsafeAndRuntime/HardenedProfileStopsAnOutOfBoundsRawAccessAtEveryLevel.fixture/write/write.jet | 6:5 | "writes the one Int the arena allocated" |
+| Tests | Tests/Cases/UnsafeAndRuntime/RawPointerToolsKeepTheirChecksInHardenedBuilds.fixture/freed.jet | 4:5 | "no copy of the pointer is read after the block is released" |
+| Tests | Tests/Cases/UnsafeAndRuntime/RawPointerToolsKeepTheirChecksInHardenedBuilds.fixture/misaligned.jet | 5:5 | "every Int read starts on an Int boundary" |
+| Tests | Tests/Cases/UnsafeAndRuntime/RawPointerToolsKeepTheirChecksInHardenedBuilds.fixture/range.jet | 5:5 | "the steps stay inside the tuple's four Ints" |
+| Tests | Tests/Cases/WebBuild/ModuleLocalDevIsValidatedAsWebRuntime.fixture/main.jet | 5:9 | "exercise the web gate" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/AES/nist_gcm.jet | 13:5 | "published KAT or frozen seed AES-GCM fixture" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/AES/seed_differential.jet | 13:5 | "published KAT or frozen seed AES-GCM fixture" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/Expert/aes256gcm_open.jet | 8:5 | "fixed NIST AES-256-GCM vector" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/Expert/aes256gcm_seal.jet | 7:5 | "fixed NIST AES-256-GCM vector" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/Expert/argon2id.jet | 10:5 | "fixed Argon2id known-answer vector" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/Expert/ed25519_sign.jet | 6:5 | "fixed RFC 8032 Ed25519 vector" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/Expert/ed25519_verify_strict.jet | 7:5 | "fixed RFC 8032 Ed25519 vector" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/Expert/hkdf_sha256_raw.jet | 8:5 | "fixed RFC 5869 HKDF vector" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/Expert/open_v1.jet | 7:5 | "fixed JETC v1 AES vector" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/Expert/secret_bytes.jet | 9:5 | "inspect fixed secret bytes" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/Expert/shared_secret_bytes.jet | 11:5 | "inspect shared-secret length" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/Expert/signing_key_bytes.jet | 9:5 | "inspect generated signing-key bytes" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/Expert/x25519_raw.jet | 7:5 | "fixed RFC 7748 X25519 vector" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/Expert/x25519_secret_bytes.jet | 9:5 | "inspect generated X25519 secret bytes" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/Expert/xchacha20poly1305_open.jet | 9:5 | "fixed CFRG XChaCha20-Poly1305 vector" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/Expert/xchacha20poly1305_seal.jet | 9:5 | "fixed CFRG XChaCha20-Poly1305 vector" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/Vault/commit_import_signing.jet | 5:5 | "restore a fixed signing key into the vault" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/Vault/commit_import_x25519.jet | 5:5 | "restore a fixed X25519 secret into the vault" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/Vault/guard_errors.jet | 33:5 | "vault key import: fixed guard vectors that never hold key material" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/Vault/prepare_import_signing.jet | 5:5 | "restore a fixed signing-key vector" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/Vault/prepare_import_x25519.jet | 5:5 | "restore a fixed X25519 secret vector" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 15:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 19:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 32:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 36:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 49:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 53:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 66:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 70:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 83:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 87:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 98:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 109:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 120:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 131:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 142:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 153:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 164:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 175:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 186:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 197:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 208:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 219:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 230:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 241:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 252:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 263:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 274:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 285:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 296:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 307:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 323:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 334:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 350:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 361:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 377:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 388:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 404:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 415:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 431:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 442:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 458:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 469:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 485:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 496:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 512:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 523:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 539:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 550:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 566:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 577:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 593:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 604:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 620:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 631:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 647:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 658:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 674:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 685:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 701:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 712:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 728:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 739:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 755:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 766:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 782:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 793:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 809:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 820:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 836:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 847:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 863:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 874:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 890:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 901:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 917:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 928:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 944:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 955:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 971:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 982:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 998:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1009:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1025:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1036:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1052:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1063:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1079:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1090:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1106:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1117:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1133:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1144:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1160:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1171:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1187:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1198:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1214:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1225:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1241:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1252:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1268:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1279:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1295:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1306:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1322:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1333:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1344:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1355:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1366:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1377:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1388:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1399:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1410:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1426:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1442:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1458:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1476:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1480:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1493:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1497:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1510:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1514:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1527:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1531:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1544:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1548:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1561:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1565:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1578:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1582:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1595:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1599:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1612:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1616:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1629:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1633:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1646:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1650:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1663:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1667:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1680:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1684:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1697:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1701:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1714:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1718:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1731:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1735:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1748:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1752:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1765:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1769:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1782:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1786:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1799:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1803:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1816:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1820:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1833:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1837:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1850:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1854:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1867:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1871:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1884:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1888:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1901:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1905:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1918:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1922:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1935:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1939:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1952:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1956:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1969:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1973:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1986:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1990:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2003:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2007:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2020:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2024:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2037:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2041:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2054:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2058:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2071:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2075:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2088:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2092:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2105:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2109:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2122:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2126:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2139:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2143:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2156:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2160:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2173:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2177:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2190:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2194:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2207:5 | "frozen Ed25519 sign witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2211:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2222:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2238:5 | "public Ed25519 acceptance witness" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/ct_x25519.jet | 5:5 | "published/frozen X25519 test inputs" |
+| Tests | Tests/Conformance/Corpus/Core/Crypto/x25519.jet | 11:5 | "inspect shared-secret length" |
+| Tests | Tests/Conformance/Corpus/Core/Files/Sealed/migrate_v1.jet | 12:5 | "fixed JETC v1 source failure" |
+| Tests | Tests/Conformance/Corpus/Core/Mem/volatile_read.jet | 6:5 | "value is live on this stack frame and the pointer never escapes" |
+| Tests | Tests/Conformance/Corpus/Core/Mem/volatile_write.jet | 6:5 | "value is live on this stack frame and the pointer never escapes" |
+| Tests | Tests/Conformance/Corpus/Core/Sys/atexit.jet | 5:5 | "the exit callback has no captured state" |
+| Tests | Tests/Conformance/Corpus/Core/Sys/close_fd.jet | 7:13 | "close an invalid descriptor without changing process state" |
+| Tests | Tests/Conformance/Corpus/Core/Sys/fork.jet | 5:5 | "fork and let the child return immediately" |
+| Tests | Tests/Conformance/Corpus/Core/Sys/getpriority.jet | 5:5 | "read the current process priority" |
+| Tests | Tests/Conformance/Corpus/Core/Sys/initgroups.jet | 5:5 | "probe initgroups with a stable missing user" |
+| Tests | Tests/Conformance/Corpus/Core/Sys/kill.jet | 5:5 | "check the process group without sending a signal" |
+| Tests | Tests/Conformance/Corpus/Core/Sys/mkfifo.jet | 5:5 | "probe FIFO creation with an empty path" |
+| Tests | Tests/Conformance/Corpus/Core/Sys/mknod.jet | 5:5 | "probe device-file creation with a major number out of range" |
+| Tests | Tests/Conformance/Corpus/Core/Sys/pipe.jet | 5:5 | "open a pipe and observe its descriptor pair" |
+| Tests | Tests/Conformance/Corpus/Core/Sys/reset_signal.jet | 5:5 | "restore the default disposition of SIGUSR1, which this program never handles, then refuse signal 0" |
+| Tests | Tests/Conformance/Corpus/Core/Sys/set_group_ids.jet | 5:5 | "set the effective group ID to the one it already is, which needs no privilege, then refuse an ID out of range" |
+| Tests | Tests/Conformance/Corpus/Core/Sys/set_scheduling.jet | 5:5 | "move this short-lived witness to batch time sharing and back; neither needs privilege" |
+| Tests | Tests/Conformance/Corpus/Core/Sys/set_user_ids.jet | 5:5 | "set the effective user ID to the one it already is, which needs no privilege, then refuse an ID out of range" |
+| Tests | Tests/Conformance/Corpus/Core/Sys/set_wall_clock.jet | 8:5 | "a time before 1970 is refused before it reaches the kernel, so the clock never changes" |
+| Tests | Tests/Conformance/Corpus/Core/Sys/setgid.jet | 5:5 | "probe setgid with an invalid identifier" |
+| Tests | Tests/Conformance/Corpus/Core/Sys/setpgid.jet | 5:5 | "set the current process into its existing process group" |
+| Tests | Tests/Conformance/Corpus/Core/Sys/setpgrp.jet | 5:5 | "set the current process group" |
+| Tests | Tests/Conformance/Corpus/Core/Sys/setpriority.jet | 5:5 | "lower the current process priority for this short-lived witness" |
+| Tests | Tests/Conformance/Corpus/Core/Sys/setsid.jet | 5:5 | "create a session when the host permits it" |
+| Tests | Tests/Conformance/Corpus/Core/Sys/setuid.jet | 5:5 | "probe setuid with an invalid identifier" |
+| Tests | Tests/Conformance/Corpus/Core/Sys/stop.jet | 7:13 | "stop this dedicated witness successfully" |
+| Tests | Tests/Conformance/Corpus/Core/Sys/umask.jet | 5:5 | "set a deterministic mask for this short-lived witness" |
+| Tests | Tests/Conformance/Corpus/Core/Sys/utime.jet | 5:5 | "probe timestamp update with an empty path" |
+| Tests | Tests/Conformance/Corpus/Core/Sys/wait.jet | 5:5 | "wait for a child that this witness does not have" |
+| Tests | Tests/Conformance/Corpus/Core/Sys/waitpid.jet | 5:5 | "poll for a child that this witness does not have" |
+| Tests | Tests/Fixtures/UnsafeObligations/run.jet | 5:5 | "local pointer" |
+| Tests | Tests/Fixtures/explicit_cleanup_order.jet | 39:5 | "exercise the explicit process-stop cleanup boundary" |
+| Tests | Tests/Fixtures/ffi_stack4_i64.jet | 2:1 | "the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return" |
+| Tests | Tests/Fixtures/ffi_stack4_i64.jet | 49:5 | "Linux getpid syscall 39 ignores all argument registers and retains no stack pointer" |
+| Tests | Tests/Fixtures/fmt_import_c_bindings.jet | 7:1 | "audited C boundary" |
+| Tests | Tests/Fixtures/fmt_import_c_bindings.jet | 10:1 | "audited C boundary" |
+| Tests | Tests/Fixtures/native_global_word.jet | 6:5 | "the fixture's one-threaded caller (run, or global-word.c) is the only writer" |
+| Tests | Tests/Fixtures/native_inline_c_shared_state.jet | 4:1 | "updates this program's private counter" |
+| Tests | Tests/Fixtures/native_inline_c_shared_state.jet | 13:1 | "reads the counter defined by fixture_bump" |
+| Tests | Tests/Fixtures/native_inline_c_shared_state.jet | 25:5 | "the counter is private to these two bodies" |
+| Tests | Tests/Fuzz/Sema/Differential/ex_crypto_crypto_migration.jet | 29:5 | "AES-256-GCM protocol interoperability" |
+| Tests | Tests/Fuzz/Sema/Valid/ex_crypto_crypto_suite.jet | 40:5 | "known-answer check reads the RFC 7748 shared secret" |
+| Tests | Tests/Fuzz/Sema/Valid/ex_lowlevel_lowlevel.jet | 8:5 | "`cell` is live on this stack frame and the pointer never escapes" |
+| Tests | Tests/Fuzz/Sema/Valid/ex_lowlevel_lowlevel.jet | 22:5 | "`cell` is a live Int on this stack frame; the pointer never escapes" |
+| Tests | Tests/Fuzz/Sema/Valid/ex_lowlevel_pointer_cast_deref.jet | 11:5 | "flag is live on this stack frame and the pointer never escapes" |
+| Tests | Tests/Run/Comptime/ForeignBranchNotTaken.jet | 12:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
+| Tests | Tests/Run/Comptime/ForeignBranchNotTaken.jet | 24:9 | "call the audited register-only assembly contract" |
+| Tests | Tests/Run/Comptime/MutableGlobalStartsFromAnyStorableValue.jet | 60:5 | "one task writes the globals" |
+| Tests | Tests/Run/Comptime/MutableGlobalStartsFromComputedValue.jet | 32:5 | "one task writes the frame" |
+| Tests | Tests/Run/Comptime/MutableGlobalStartsFromComputedValue.jet | 43:5 | "one task writes the globals" |
+| Tests | Tests/Run/CoreCryptoFoundations/CryptoAeadTamperingIsRejectedAcrossTiers.jet | 64:5 | "fixed AEAD tamper vector" |
+| Tests | Tests/Run/CoreCryptoFoundations/PrimitiveMatrix.jet | 101:5 | "known-answer check reads the RFC 7748 shared secret" |
+| Tests | Tests/Run/CoreCryptoFoundations/PrimitiveMatrix.jet | 163:5 | "expert known-answer vectors need raw key bytes" |
+| Tests | Tests/Run/CoreIO/CleanupMatrix.jet | 35:5 | "the stop runs the shared cleanup boundary" |
+| Tests | Tests/Run/CoreIO/CleanupMatrix.jet | 83:5 | "the exit callbacks have no captured state" |
+| Tests | Tests/Run/Dyn/NumberInUnsafe.jet | 7:5 | "the literal below is a valid JSON number lexeme" |
+| Tests | Tests/Run/FailureFoundation/TransactOSStop.jet | 34:5 | "the stop runs the shared cleanup boundary" |
+| Tests | Tests/Run/PatternsAndFields/FixedSizeListWidensAtCoreCall.jet | 5:5 | "fixed signature vector" |
+| Tests | Tests/Run/UnsafeAndRuntime/MemFromAddrDirect.jet | 11:5 | "the borrowed value is live in the caller and the pointer never escapes" |
+| Tests | Tests/UI/AuditedGateLadderForbidden/run.jet | 3:5 | "the organization policy refuses this audited escape" |
+| Tests | Tests/UI/E3113PackageWithoutKernelFiles/run.jet | 6:1 | "the caller releases the storage with `free_raw`, exactly once" |
+| Tests | Tests/UI/E3113RawMemoryOutsideKernel/kernel.jet | 4:1 | "the caller releases the storage with `free_raw`, exactly once" |
+| Tests | Tests/UI/E3113RawMemoryOutsideKernel/run.jet | 5:1 | "the caller releases the storage with `free_raw`, exactly once" |
+| Tests | Tests/UI/E3113RuntimeUnitSourceOutsideKernel/run.jet | 6:1 | "each caller vouches for the address" |
+| Tests | Tests/UI/E3113RuntimeUnitSourceOutsideKernel/run.jet | 10:5 | "the kernel's own leaf reads a word its caller lends" |
+| Tests | Tests/UI/E3113RuntimeUnitSourceOutsideKernel/run.jet | 16:5 | "the host holds the word at this address" |
+| Tests | Tests/UI/E3114RawAddressIntoKernel/run.jet | 8:5 | "the caller hands the address of a live Int" |
+| Tests | Tests/UI/E3114RawAddressIntoKernel/run.jet | 18:5 | "kernel code hands the address of a live Int" |
+| Tests | Tests/UI/GatesLoadPackageCeiling/run.jet | 2:5 | "audited load-only gate" |
+| Tests | Tests/UI/Ownership/raw_window_read_after_its_owner_is_released.jet | 11:5 | "the cells hold no resource, so spending them frees nothing" |
+| Tests | Tests/UI/Ownership/raw_window_read_after_its_owner_is_released.jet | 16:5 | "the window covers exactly the two Int fields, which `cells` keeps" |
+| Tests | Tests/UI/Ownership/single_use_holder_dropped_owes_consume.jet | 33:5 | "the lease's job is done by hand here" |
+| Tests | Tests/UI/SecretsExpiry/expiring_secret_loan_rejects_move_variadic_and_drop_paths_3.jet | 13:9 | "attempt to discard a loan" |
+| Tests | Tests/UI/UnsafeAndRuntime/VolatileWriteEmitIsByteExact/run.jet | 3:1 | "UART TX register is mapped by the target machine" |
+| Tests | Tests/UI/UnsafeEffectBudget/unsafedep/unsafedep.jet | 3:5 | "audited peek" |
+| Tests | Tests/UI/UnsafeForbidden/run.jet | 2:5 | "not allowed" |
+| Tests | Tests/UI/UnsafeForbiddenByOrganizationPolicy/run.jet | 5:5 | "the organization policy forbids this escape" |
+| Tests | Tests/UI/UnsafePerSite/run.jet | 2:5 | "selection required" |
+| Tests | Tests/UI/cffi_out_pointer_requires_unsafe.jet | 14:1 | "the local slot remains live for the complete C call" |
+| Tests | Tests/UI/changeset_a_failed_handler_publishes_none.jet | 28:25 | "generated" |
+| Tests | Tests/UI/checked_text_raw_requires_unsafe.jet | 22:5 | "audited literal" |
+| Tests | Tests/UI/crypto_argon2id_literal_policy.jet | 9:5 | "fixed password-hash vectors" |
+| Tests | Tests/UI/crypto_argon2id_literal_policy_type_precedence.jet | 9:5 | "fixed password-hash vector" |
+| Tests | Tests/UI/crypto_argon2id_literal_policy_valid.jet | 9:5 | "protocol-selected password policy" |
+| Tests | Tests/UI/crypto_argon2id_literal_policy_valid.jet | 17:5 | "fixed password-hash vectors" |
+| Tests | Tests/UI/crypto_expert_material_length.jet | 12:5 | "fixed interop vectors" |
+| Tests | Tests/UI/crypto_expert_material_length_type_precedence.jet | 5:5 | "fixed interop vector" |
+| Tests | Tests/UI/crypto_expert_material_length_valid.jet | 5:5 | "protocol-selected interop material" |
+| Tests | Tests/UI/crypto_expert_material_length_valid.jet | 17:5 | "fixed interop vectors" |
+| Tests | Tests/UI/crypto_expert_nonce_callback_bound_precedence.jet | 13:5 | "fixed interop vector" |
+| Tests | Tests/UI/crypto_expert_nonce_correct.jet | 5:5 | "fixed interop vectors" |
+| Tests | Tests/UI/crypto_expert_nonce_effect_bound_precedence.jet | 10:5 | "fixed interop vector" |
+| Tests | Tests/UI/crypto_expert_nonce_effect_precedence.jet | 10:5 | "fixed interop vector" |
+| Tests | Tests/UI/crypto_expert_nonce_effect_prohibition_precedence.jet | 10:5 | "fixed interop vector" |
+| Tests | Tests/UI/crypto_expert_nonce_effect_unknown_precedence.jet | 10:5 | "fixed interop vector" |
+| Tests | Tests/UI/crypto_expert_nonce_length.jet | 5:5 | "fixed interop vector" |
+| Tests | Tests/UI/crypto_expert_nonce_region_authority_precedence.jet | 9:5 | "fixed interop vector" |
+| Tests | Tests/UI/crypto_expert_nonce_trait_dispatch_precedence.jet | 9:5 | "fixed interop vector" |
+| Tests | Tests/UI/crypto_expert_nonce_type_precedence.jet | 5:5 | "fixed interop vector" |
+| Tests | Tests/UI/crypto_hkdf_output_length.jet | 9:5 | "fixed interop vector" |
+| Tests | Tests/UI/crypto_hkdf_output_type_precedence.jet | 5:5 | "fixed interop vector" |
+| Tests | Tests/UI/crypto_hkdf_output_valid.jet | 8:5 | "protocol-selected output length" |
+| Tests | Tests/UI/crypto_hkdf_output_valid.jet | 16:5 | "fixed interop vectors" |
+| Tests | Tests/UI/discarded_pure_quiet.jet | 47:5 | "the test deliberately keeps this stderr write behind its audit boundary" |
+| Tests | Tests/UI/e3106_unsafe_skip_without_per_site.jet | 3:5 | "reads a checked constant" |
+| Tests | Tests/UI/ffi_asm_duplicate_clobber.jet | 3:1 | "each discarded register is named once" |
+| Tests | Tests/UI/ffi_asm_float_signature.jet | 3:1 | "register-only increment" |
+| Tests | Tests/UI/ffi_asm_missing_return_anchor.jet | 3:1 | "cycle counter" |
+| Tests | Tests/UI/ffi_asm_no_mem.jet | 1:1 | "register-only increment" |
+| Tests | Tests/UI/ffi_asm_return_clobber.jet | 3:1 | "the result register is overwritten by the body" |
+| Tests | Tests/UI/ffi_asm_unencoded_mnemonic.jet | 3:1 | "the body writes only its result register" |
+| Tests | Tests/UI/ffi_asm_unknown_clobber.jet | 3:1 | "the body declares only audited registers" |
+| Tests | Tests/UI/ffi_body_not_string.jet | 1:1 | "demo" |
+| Tests | Tests/UI/ffi_inline_asm_call_needs_unsafe_region.jet | 3:1 | "the operands are scalar registers and r10 is a declared clobber" |
+| Tests | Tests/UI/ffi_inline_asm_call_needs_unsafe_region.jet | 14:5 | "call the audited register-only assembly contract" |
+| Tests | Tests/UI/ffi_inline_c_call_needs_unsafe_region.jet | 1:1 | "the scalar ABI contract matches the C definition" |
+| Tests | Tests/UI/ffi_inline_c_call_needs_unsafe_region.jet | 7:5 | "call the audited inline C contract" |
+| Tests | Tests/UI/ffi_inline_c_mismatch.jet | 1:1 | "deliberate mismatch fixture" |
+| Tests | Tests/UI/ffi_inline_cpp_call_needs_unsafe_region.jet | 1:1 | "the scalar ABI contract matches the C++ definition" |
+| Tests | Tests/UI/ffi_inline_cpp_call_needs_unsafe_region.jet | 7:5 | "call the audited inline C++ contract" |
+| Tests | Tests/UI/ffi_unknown_argument.jet | 1:1 | "demo" |
+| Tests | Tests/UI/ffi_unknown_language.jet | 1:1 | "demo" |
+| Tests | Tests/UI/lowlevel_e3102.jet | 2:5 | "addr is valid" |
+| Tests | Tests/UI/lowlevel_e3103.jet | 3:1 | "reads through caller-provided raw pointer" |
+| Tests | Tests/UI/lowlevel_volatile_write_without_mem.jet | 2:5 | "addr is valid" |
+| Tests | Tests/UI/lowlevel_volatile_write_wrong_ptr.jet | 4:5 | "plain ints are not raw pointers" |
+| Tests | Tests/UI/lowlevel_volatile_write_wrong_value.jet | 6:5 | "slot is live and pointer never escapes" |
+| Tests | Tests/UI/meta_ladder_add_never_authorizes_unsafe.jet | 7:13 | "generated" |
+| Tests | Tests/UI/module_write_from_fn_is_e0111.jet | 13:5 | "this program starts no task, so nothing else writes `raw`" |
+| Tests | Tests/UI/secret_read_requires_unsafe.jet | 8:5 | "the length leaves this function, never the key bytes" |
+| Tests | Tests/UI/unsafe_block_after_statement_parse_error.jet | 8:5 | "target outlives the read in this frame" |
+| Tests | Tests/UI/unsafe_effect_module_cap.jet | 4:5 | "audited peek" |
+| Tests | Tests/UI/unsafe_effect_prohibition_transitive.jet | 4:5 | "audited peek" |
+| Tests | Tests/UI/unsafe_obligation_missing.jet | 5:5 | "local pointer" |
+| Tests | Tests/UI/unsafe_obligation_no_bleed.jet | 6:5 | "two independent pointer operations" |
+| Tests | Tests/UILint/inline_asm_reads_its_core_mem_gate.jet | 8:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
+| Tests | Tests/UILint/inline_asm_reads_its_core_mem_gate.jet | 19:5 | "call the audited register-only assembly contract" |
 | Tools | Tools/Agent/Cache/Lanes.jet | 325:21 | "the guard signals only compiler, build and test jobs of this user, chosen by name from /proc" |
 | Tools | Tools/Agent/Orchestrator/LaneCommit.jet | 224:5 | "signal 0 delivers nothing: it only asks whether a queued job's caller still runs" |
 | Tools | Tools/CI/CompiledWorkloadPeerLauncher.jet | 655:9 | "posix kill: every process in the sandbox's private PID namespace except its init and this supervisor belongs to the supervised command" |
@@ -11585,554 +12133,6 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Tools | Tools/Perf/CodegenCeiling/ZeroCost/Kernel/kernel.jet | 122:9 | "the region's pages stay mapped, private and writable until the owner closes it" |
 | Tools | Tools/Perf/CodegenCeiling/ZeroCost/Kernel/kernel.jet | 132:9 | "`at` is one of the mapping's words" |
 | Tools | Tools/Perf/CodegenCeiling/ZeroCost/Kernel/kernel.jet | 139:9 | "`at` is one of the mapping's words" |
-| tests | Tests/Cases/BackendIce/Fixtures/AsmRail/rail.jet | 10:1 | "the program claims the runtime's stack switch" |
-| tests | Tests/Cases/BackendIce/Fixtures/AsmRail/rail.jet | 36:1 | "the program claims the runtime's TLS base" |
-| tests | Tests/Cases/BackendIce/Fixtures/AsmRail/rail.jet | 44:5 | "call the leaf the build refuses" |
-| tests | Tests/Cases/BackendIce/Fixtures/AsmRail/rail.jet | 48:5 | "call the leaf the build refuses" |
-| tests | Tests/Cases/BackendIce/Fixtures/AsmRdtsc/stamp/stamp.jet | 9:1 | "rdtsc writes only rax and rdx, both declared" |
-| tests | Tests/Cases/BackendIce/Fixtures/AsmRdtsc/stamp/stamp.jet | 20:1 | "lfence and rdtsc write only rax and rdx, and rdx is declared" |
-| tests | Tests/Cases/BackendIce/Fixtures/AsmRdtsc/stamp/stamp.jet | 32:5 | "call the audited rdtsc contracts" |
-| tests | Tests/Cases/BackendIce/Fixtures/AsmRdtsc/unencoded/unencoded.jet | 12:1 | "the body writes only its result register" |
-| tests | Tests/Cases/BackendIce/Fixtures/AsmRdtsc/unencoded/unencoded.jet | 20:1 | "the body writes only its result register" |
-| tests | Tests/Cases/BackendIce/Fixtures/AsmRdtsc/unencoded/unencoded.jet | 28:5 | "call the leaves sema refuses" |
-| tests | Tests/Cases/BuildEntry/MetaCodeNeverAuthorizesUnsafe.fixture/added/main.jet | 8:17 | "generated" |
-| tests | Tests/Cases/BuildEntry/MetaCodeNeverAuthorizesUnsafe.fixture/rewritten/main.jet | 18:25 | "generated" |
-| tests | Tests/Cases/Cffi/CffiRawStatusOutPointerReadsOnlyOnSuccess.fixture/main.jet | 23:5 | "store_load receives a live non-null slot; bytes are read only after status zero" |
-| tests | Tests/Cases/Cffi/FFICapabilityBoundaryIsSafeOnlyInsideUnsafe/Input/o2/run.jet | 8:5 | "the foreign call may write through the borrowed value" |
-| tests | Tests/Cases/Cffi/FFICapabilityBoundaryIsSafeOnlyInsideUnsafe/Input/o3/run.jet | 8:5 | "the foreign call may write through the borrowed value" |
-| tests | Tests/Cases/Cffi/RuntimeExitImportExitsWithItsArgument.fixture/main.jet | 1:1 | "this program owns the exit status it passes" |
-| tests | Tests/Cases/CffiNativeMatrix/Fixtures/RequiredNativeCABIMatrix/default/matrix.jet | 47:5 | "live non-null out slot; read only after status zero" |
-| tests | Tests/Cases/CffiNativeMatrix/Fixtures/RequiredNativeCABIMatrix/sysv64/matrix.jet | 47:5 | "live non-null out slot; read only after status zero" |
-| tests | Tests/Cases/CLIPartsCore/Fixtures/GatePolicy/main.jet | 2:5 | "org refusal" |
-| tests | Tests/Cases/CLIPartsInspect/Fixtures/Foreign/app/main.jet | 4:5 | "calls the audited dependency" |
-| tests | Tests/Cases/CLIPartsInspect/Fixtures/Foreign/dep/dep.jet | 3:1 | "intentionally invalid address" |
-| tests | Tests/Cases/CLIPartsInspect/Fixtures/Release/hardened/main.jet | 7:5 | "pointer is used only after arena reset to prove quarantine" |
-| tests | Tests/Cases/CLIPartsInspect/Fixtures/Release/release/main.jet | 7:5 | "pointer is used only after arena reset to prove quarantine" |
-| tests | Tests/Cases/CLIPartsInspect/Fixtures/Team/unsafe/main.jet | 2:5 | "audit" |
-| tests | Tests/Cases/CLIPartsInspect/Fixtures/TestHardened/hardened/main.jet | 5:5 | "test deliberately reads after arena reset" |
-| tests | Tests/Cases/CLIPartsInspect/Fixtures/TestHardened/release/main.jet | 5:5 | "test deliberately reads after arena reset" |
-| tests | Tests/Cases/CollectionsAndMethods/SentryTypedIntStoreKeepsExactCarrier.fixture/main.jet | 6:5 | "the typed pointer refers to the live local cell for these stores" |
-| tests | Tests/Cases/ComptimeCLIParity/ComptimeChildIsReapedBeforeTheProgramRuns.fixture/run.jet | 15:5 | "fork and reap the child before returning" |
-| tests | Tests/Cases/ComptimeCLIParity/Fixtures/TierParityExamplesRunThroughAOTJITAndInterpreter/tooling_checked_text_type/checked_text_type.jet | 20:5 | "checked text example output" |
-| tests | Tests/Cases/ComptimeCorePureParity/CryptoExpertAeadSignArgonAOTStdoutMatchesKnownAnswers.fixture/main.jet | 9:5 | "fixed RFC interop vectors" |
-| tests | Tests/Cases/ComptimeCorePureParity/CryptoValuesMatchAOTComptimeForcedInterpreterAndDefaultDev/Input/o1/run.jet | 12:5 | "fixed RFC interop vectors" |
-| tests | Tests/Cases/ComptimeCorePureParity/CryptoValuesMatchAOTComptimeForcedInterpreterAndDefaultDev/Input/o2/run.jet | 12:5 | "fixed RFC interop vectors" |
-| tests | Tests/Cases/ConcurrencyBoundaries/AGroupTaskReadsALentParameterInPlace.fixture/lend.jet | 10:5 | "reads the address of the graph's storage, not its bytes" |
-| tests | Tests/Cases/ConcurrencyBoundaries/AGroupTaskReadsALentParameterInPlace.fixture/lend.jet | 29:5 | "reads the address of the graph's storage, not its bytes" |
-| tests | Tests/Cases/Context/ContextAllocatorMemoEntryMovesToTheHeap.fixture/memo.jet | 63:5 | "the reuser's kept blocks were claimed from its region, which unmaps them all" |
-| tests | Tests/Cases/Context/ContextAllocatorMovesTextThatLeavesTheBlock.fixture/text.jet | 104:5 | "the reuser's kept blocks were claimed from its region, which unmaps them all" |
-| tests | Tests/Cases/Context/ContextAllocatorMovesWhatLeavesTheBlock.fixture/moves.jet | 124:5 | "the reuser's kept blocks were claimed from its region, which unmaps them all" |
-| tests | Tests/Cases/Context/ContextAllocatorPanicInAllocateStopsTheTask.fixture/refuse.jet | 38:5 | "the picky allocator's kept blocks were claimed from its region, which unmaps them all" |
-| tests | Tests/Cases/Context/ContextAllocatorReadsBackTheUserAllocator.fixture/main.jet | 52:5 | "the counter's kept blocks were claimed from its region, which unmaps them all" |
-| tests | Tests/Cases/Context/ContextAllocatorServesTheBlockAndItsLibraryCalls.fixture/served.jet | 61:5 | "the counter's kept blocks were claimed from its region, which unmaps them all" |
-| tests | Tests/Cases/Context/ContextScratchBlockRewindsAndMovesWhatLeaves.fixture/scratch.jet | 18:5 | "only reads the address of an item the caller keeps alive" |
-| tests | Tests/Cases/ControlAndData/ExplicitExitUnmappedKeeps101OnEveryTier.fixture/main.jet | 5:5 | "this case reports a Jet defect status on purpose" |
-| tests | Tests/Cases/ControlAndData/ExplicitProcessExitCleanupGoldenMatchesAllExecutionTiers.fixture/process_exit_cleanup.jet | 22:5 | "the exit callback has no captured state" |
-| tests | Tests/Cases/ControlAndData/ProcessExitLeavesHeapToKernelAfterUserCleanup.fixture/main.jet | 35:5 | "the exit callback has no captured state" |
-| tests | Tests/Cases/CoreCryptoArgon2ID/Argon2IDParallelLanesMatchRfcVectorAcrossTiers/Input/run.jet | 8:5 | "fixed Argon2id parallel-lane known-answer vector" |
-| tests | Tests/Cases/CoreLib/CoreMemRegionsHandOutBlocksAndAWindowChecksItsIndex.fixture/main.jet | 16:5 | "the caller's block holds the bytes and stays unused while the adopted region and its blocks live" |
-| tests | Tests/Cases/CoreLib/CoreMemRegionsHandOutBlocksAndAWindowChecksItsIndex.fixture/main.jet | 43:5 | "the shelf's blocks were claimed from regions that are closed, and nothing reads them again" |
-| tests | Tests/Cases/CoreLib/CoreMemRegionsHandOutBlocksAndAWindowChecksItsIndex.fixture/window.jet | 6:5 | "the four Ints are fresh heap storage, every access stays inside them, and they are released once" |
-| tests | Tests/Cases/CoreLibNet/SharedMemoryWordsOrderAcrossProcesses.fixture/main.jet | 25:5 | "fork a peer that shares the mapping, and reap it" |
-| tests | Tests/Cases/Cross/WebBuildRefusesInlineCBeforeCodegen.fixture/main.jet | 1:1 | "the scalar ABI contract matches the C definition" |
-| tests | Tests/Cases/Cross/WebBuildRefusesInlineCBeforeCodegen.fixture/main.jet | 7:5 | "call the audited inline C contract" |
-| tests | Tests/Cases/Custom/Fixtures/FromAddrSentryIsTierParity/fixture.jet | 5:5 | "value is live on this stack frame and the pointer never escapes" |
-| tests | Tests/Cases/Custom/Fixtures/SentryFaultsAreTierParity/unsafe_sentries_alignment/unsafe_sentries_alignment.jet | 5:5 | "the tuple storage is live but this raw Int is misaligned" |
-| tests | Tests/Cases/Custom/Fixtures/SentryFaultsAreTierParity/unsafe_sentries_expired_recursive_stack/unsafe_sentries_expired_recursive_stack.jet | 11:5 | "the recursive address outlives its owning Jet frame" |
-| tests | Tests/Cases/Custom/Fixtures/SentryFaultsAreTierParity/unsafe_sentries_expired_stack/unsafe_sentries_expired_stack.jet | 10:5 | "the returned address outlives its owning Jet frame" |
-| tests | Tests/Cases/Custom/Fixtures/SentryFaultsAreTierParity/unsafe_sentries_misaligned_list/unsafe_sentries_misaligned_list.jet | 5:5 | "the list storage is live but this raw Int is misaligned" |
-| tests | Tests/Cases/Custom/Fixtures/SentryFaultsAreTierParity/unsafe_sentries_provenance/unsafe_sentries_provenance.jet | 6:5 | "external address must be a live allocation" |
-| tests | Tests/Cases/Custom/Fixtures/SentryFaultsAreTierParity/unsafe_sentries_quarantine/unsafe_sentries_quarantine.jet | 7:5 | "pointer is used only after arena reset to prove quarantine" |
-| tests | Tests/Cases/Custom/Fixtures/SentrySourcePolicyOffIsTierParity/fixture.jet | 7:5 | "the local cell is live for this raw read" |
-| tests | Tests/Cases/DevPartsRoutine/JIT1216AdversarialRegressions.fixture/raw_alias/run.jet | 5:5 | "the pointer stays inside this stack frame" |
-| tests | Tests/Cases/DevPartsRoutine/UnsafeBlocksAreEvaluatedWithLiveSentries.fixture/fault.jet | 4:5 | "mapped address is valid and aligned" |
-| tests | Tests/Cases/DiagnosticsCoverage/SentryMetadataUsesTheReturnedFaultExitCode.fixture/app/main.jet | 4:5 | "calls the audited dependency" |
-| tests | Tests/Cases/DiagnosticsCoverage/SentryMetadataUsesTheReturnedFaultExitCode.fixture/dep/dep.jet | 3:1 | "intentionally invalid address" |
-| tests | Tests/Cases/Effects/ProcessExitNeedsOnlyTheExitLeaf.fixture/exit.jet | 7:1 | "the case checks the leaf of the unmapped exit" |
-| tests | Tests/Cases/Effects/ProcessExitNeedsOnlyTheExitLeaf.fixture/exit.jet | 13:9 | "the case checks the leaf of the unmapped exit" |
-| tests | Tests/Cases/FixturesCryptoBridgeEntropy/Argon2IDRfcAndExpertKnownAnswersKillArgon2IMutation.fixture/run.jet | 45:5 | "original public expert Argon2id KAT" |
-| tests | Tests/Cases/FixturesCryptoBridgeEntropy/ExpertAES256GcmMatchesNistCavsVector.fixture/run.jet | 45:5 | "original published known-answer vector" |
-| tests | Tests/Cases/FixturesCryptoBridgeEntropy/ExpertSurfaceMatchesReferenceVectorsAndBounds.fixture/run.jet | 49:5 | "original expert interoperability vectors" |
-| tests | Tests/Cases/FixturesCryptoBridgeEntropy/ExpertXchacha20Poly1305MatchesCfrgVector.fixture/run.jet | 45:5 | "original published known-answer vector" |
-| tests | Tests/Cases/FixturesCryptoBridgeEntropy/JetcV1ExpertOpenAcceptsOnlyThePinnedGrammar.fixture/run.jet | 48:5 | "original pinned JETC v1 migration grammar" |
-| tests | Tests/Cases/FixturesCryptoBridgeEntropy/JetcV1MigrationResealsToVerifiedV2WithoutTouchingSource.fixture/run.jet | 24:5 | "crypto expert: the fixture seals a pinned JETC v1 envelope and migrates it" |
-| tests | Tests/Cases/FixturesCryptoBridgeEntropy/KeygenZeroizesProviderCopyAndStackSeed.fixture/run.jet | 47:5 | "crypto expert: the test reads the generated seed to prove it is live and 32 bytes" |
-| tests | Tests/Cases/FixturesCryptoBridgeEntropy/PriorCryptoSuiteStillUsesLiveEntropy.fixture/run.jet | 50:5 | "crypto expert: the test reads the generated seed length" |
-| tests | Tests/Cases/FixturesCryptoBridgeEntropy/TypedSecretWrapSignKDFAndPasswordPathsPreserveRoles.fixture/run.jet | 56:5 | "crypto expert: the test derives from the secret's raw bytes" |
-| tests | Tests/Cases/Fmt/FmtPreservesCheckedTextType/Input/run.jet | 19:5 | "formatter fixture" |
-| tests | Tests/Cases/Fmt/FmtPreservesUnsafeSiteModesAndPostfixObligations/Input/run.jet | 3:1 | "caller keeps address live" |
-| tests | Tests/Cases/Fmt/FmtPreservesUnsafeSiteModesAndPostfixObligations/Input/run.jet | 13:5 | "calling audited reader" |
-| tests | Tests/Cases/Fmt/FmtUnsafeReasonsEscapeStrings/Input/run.jet | 3:1 | "caller says \"ok\"" |
-| tests | Tests/Cases/Fmt/FmtUnsafeReasonsEscapeStrings/Input/run.jet | 8:5 | "path C:\\tmp" |
-| tests | Tests/Cases/FmtProject/RawCImportsAndModuleBindingsRemainCleanThroughCLI.fixture/runtime.jet | 7:1 | "audited C boundary" |
-| tests | Tests/Cases/FmtProject/RawCImportsAndModuleBindingsRemainCleanThroughCLI.fixture/runtime.jet | 10:1 | "audited C boundary" |
-| tests | Tests/Cases/FmtRoundTripRegressions/RawCImportsAndModuleBindingMutabilityAreByteExactAndIdempotent/Input/run.jet | 7:1 | "audited C boundary" |
-| tests | Tests/Cases/FmtRoundTripRegressions/RawCImportsAndModuleBindingMutabilityAreByteExactAndIdempotent/Input/run.jet | 10:1 | "audited C boundary" |
-| tests | Tests/Cases/GateLedger/Fixtures/Gates/gates.jet | 2:5 | "test unsafe reason" |
-| tests | Tests/Cases/JetTest/JetTestReportsEachFailingTestAndRunsTheRest.fixture/parked.jet | 35:5 | "the exit callback has no captured state" |
-| tests | Tests/Cases/LanguageFeatures/CoreGroupImportNamesModuleTraitsAndTypes.fixture/main.jet | 46:5 | "the stack's kept block was claimed from its region, which unmaps it" |
-| tests | Tests/Cases/LanguageFeatures/ImplMethodInheritsTraitEffectRowOnEveryTier.fixture/main.jet | 38:5 | "the case prints the checked text" |
-| tests | Tests/Cases/LivenessLints/FallbackErrIsNeverAnUnusedLocal.fixture/main.jet | 3:1 | "probe" |
-| tests | Tests/Cases/LivenessLints/FallbackErrIsNeverAnUnusedLocal.fixture/main.jet | 9:5 | "probe" |
-| tests | Tests/Cases/Memory/SentryPolicyOffSkipsR0801.fixture/checked.jet | 11:5 | "target's buffer holds eight Ints: its three items and spare capacity past them" |
-| tests | Tests/Cases/Memory/SentryPolicyOffSkipsR0801.fixture/off.jet | 11:5 | "target's buffer holds eight Ints: its three items and spare capacity past them" |
-| tests | Tests/Cases/MemoryKernel/AMappingIsLiveStorageUntilItIsUnmapped.fixture/after_close.jet | 19:5 | "the copy writes into pages the region unmapped, so the sentry stops it before any byte moves" |
-| tests | Tests/Cases/MemoryKernel/AMappingIsLiveStorageUntilItIsUnmapped.fixture/after_close.jet | 25:5 | "the shelf's block was claimed from the closed region, and nothing reads it again" |
-| tests | Tests/Cases/MemoryKernel/AMappingIsLiveStorageUntilItIsUnmapped.fixture/keeper.jet | 6:5 | "the program claims pages it never mapped" |
-| tests | Tests/Cases/MemoryKernel/AMappingIsLiveStorageUntilItIsUnmapped.fixture/main.jet | 15:5 | "the block holds three Ints of the open region's fresh pages" |
-| tests | Tests/Cases/MemoryKernel/AMappingIsLiveStorageUntilItIsUnmapped.fixture/main.jet | 23:5 | "the shelf's block was claimed from the closed region, and nothing reads it again" |
-| tests | Tests/Cases/MemoryKernel/ARawBlockCopyAndFillMoveWholeRanges.fixture/copy_from_past.jet | 4:5 | "the copy reads one Int past the source block" |
-| tests | Tests/Cases/MemoryKernel/ARawBlockCopyAndFillMoveWholeRanges.fixture/copy_to_past.jet | 4:5 | "the copy writes one Int past the target block" |
-| tests | Tests/Cases/MemoryKernel/ARawBlockCopyAndFillMoveWholeRanges.fixture/main.jet | 5:5 | "every range stays inside the `values` tuple, which outlives each access" |
-| tests | Tests/Cases/MemoryKernel/ARawBlockCopyAndFillMoveWholeRanges.fixture/main.jet | 16:5 | "both Strings stay inside `names`; the static texts they replace need no drop" |
-| tests | Tests/Cases/MemoryKernel/ARawBlockCopyAndFillMoveWholeRanges.fixture/past.jet | 5:5 | "the fill runs one Int past the tuple, so the sentry stops it before any write" |
-| tests | Tests/Cases/MemoryKernel/ARawByteFillWritesExactlyItsRange.fixture/main.jet | 16:5 | "every fill and read stays inside the block's `room` bytes, and the block is freed once after them" |
-| tests | Tests/Cases/MemoryKernel/ARawByteMoveMatchesABufferedMoveAtEverySizeAndOverlap.fixture/main.jet | 17:5 | "every move and every byte written or read stays inside the block, which is freed once after the moves" |
-| tests | Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/main.jet | 6:5 | "every raw range stays inside the `values` tuple, which outlives each access" |
-| tests | Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/main.jet | 17:5 | "each append reads the Ints `many` holds, which move before their old buffer goes" |
-| tests | Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/main.jet | 27:5 | "both ranges stay inside `names`; every String is a static text, which needs no single owner" |
-| tests | Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/negative.jet | 6:5 | "the two Ints of `cell` take the copy" |
-| tests | Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/outside.jet | 6:5 | "the two Ints of `cell` take the copy" |
-| tests | Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/past_append.jet | 6:5 | "the append reads one Int past the tuple, so the sentry stops it before the List changes" |
-| tests | Tests/Cases/MemoryKernel/ARawListAppendAndCopyMoveWholeRanges.fixture/past_copy.jet | 6:5 | "the copy writes one Int past the tuple, so the sentry stops it before any byte moves" |
-| tests | Tests/Cases/MemoryKernel/ARawPointerCastReadsTheSameAddress.fixture/main.jet | 6:5 | "each cast names the live local cell, at an alignment its type allows" |
-| tests | Tests/Cases/MemoryKernel/ARawPointerCastReadsTheSameAddress.fixture/misaligned.jet | 6:5 | "the cast Int starts one byte into the cell, so the sentry stops the read" |
-| tests | Tests/Cases/MemoryKernel/ARawPointerStepsByElementsOrBytes.fixture/main.jet | 5:5 | "every step stays inside the `values` tuple, which outlives each read" |
-| tests | Tests/Cases/MemoryKernel/ARawPointerStepsByElementsOrBytes.fixture/past.jet | 6:5 | "the step runs one Int past the local cell, so the sentry stops the read" |
-| tests | Tests/Cases/MemoryKernel/ARawReadOrWriteNeedsALiveAlignedValue.fixture/fromaddrfreed.jet | 4:5 | "the address names an Int of a block already released" |
-| tests | Tests/Cases/MemoryKernel/ARawReadOrWriteNeedsALiveAlignedValue.fixture/main.jet | 6:5 | "every address names a live, aligned value of the block, which outlives each access" |
-| tests | Tests/Cases/MemoryKernel/ARawReadOrWriteNeedsALiveAlignedValue.fixture/misaligned.jet | 4:5 | "the read starts one byte into the block, so its Int is not aligned" |
-| tests | Tests/Cases/MemoryKernel/ARawReadOrWriteNeedsALiveAlignedValue.fixture/readfreed.jet | 4:5 | "the read takes an Int of a block already released" |
-| tests | Tests/Cases/MemoryKernel/ARawReadOrWriteNeedsALiveAlignedValue.fixture/readpast.jet | 4:5 | "the read takes the Int just past the block" |
-| tests | Tests/Cases/MemoryKernel/ARawReadOrWriteNeedsALiveAlignedValue.fixture/writepast.jet | 4:5 | "the write stores the Int just past the block" |
-| tests | Tests/Cases/MemoryKernel/ARawWindowChecksEachIndex.fixture/main.jet | 5:5 | "the window covers exactly the tuple's four Ints, which outlive it" |
-| tests | Tests/Cases/MemoryKernel/ARawWindowChecksEachIndex.fixture/past.jet | 5:5 | "the window covers exactly the tuple's four Ints, which outlive it" |
-| tests | Tests/Cases/MemoryKernel/ARawWindowChecksEachIndex.fixture/released.jet | 10:9 | "`base` names `count` live I64s while the capability lives" |
-| tests | Tests/Cases/MemoryKernel/ARawWindowChecksEachIndex.fixture/released.jet | 17:5 | "the block is used only through this capability and released once by `release`" |
-| tests | Tests/Cases/MemoryKernel/ARawWindowChecksEachIndex.fixture/released.jet | 27:5 | "`base` came from `alloc_raw` in `acquire`, and the capability is spent here, once" |
-| tests | Tests/Cases/MemoryKernel/AllocResizeFreeFuzz.fixture/main.jet | 26:5 | "`address` starts a live block of `size` bytes" |
-| tests | Tests/Cases/MemoryKernel/AllocResizeFreeFuzz.fixture/main.jet | 38:5 | "the block is written only inside its `size` bytes, and released once by `release`" |
-| tests | Tests/Cases/MemoryKernel/AllocResizeFreeFuzz.fixture/main.jet | 47:5 | "`address` came unchanged from `alloc_raw` in `claim`, and its block is released here once" |
-| tests | Tests/Cases/MemoryKernel/AllocResizeFreeFuzz.fixture/main.jet | 91:13 | "both blocks are live, `old` holds at least `shared` bytes and `fresh` holds `size`" |
-| tests | Tests/Cases/MemoryKernel/RawHeapStorageIsTakenAndReleased.fixture/aliased.jet | 4:5 | "a second release through a copy of the pointer, which the ownership check cannot see, so the runtime stops it" |
-| tests | Tests/Cases/MemoryKernel/RawHeapStorageIsTakenAndReleased.fixture/kept.jet | 4:5 | "a copy of the pointer is read after its block is released, so the sentry stops the read" |
-| tests | Tests/Cases/MemoryKernel/RawHeapStorageIsTakenAndReleased.fixture/main.jet | 4:5 | "each block is used only through pointers derived from it, and released once" |
-| tests | Tests/Cases/MemoryKernel/RawHeapStorageIsTakenAndReleased.fixture/twice.jet | 4:5 | "the second release is refused before the program runs" |
-| tests | Tests/Cases/MemorySemantics/ClosureBoxesFreeAtTheirLastOwner.fixture/main.jet | 313:5 | "the exit callback only reads its captured List" |
-| tests | Tests/Cases/MemorySemantics/UnsafeAddressKeepsStringAliveToBlockEnd.fixture/main.jet | 9:5 | "label is live on this frame until this block ends" |
-| tests | Tests/Cases/ModuleStorage/ModuleGlobalsStartLaidOutUnlessTheyHoldAHandle.fixture/main.jet | 118:5 | "one task writes the globals" |
-| tests | Tests/Cases/Observe/PanicContextUsesOnlyLexicallyLiveLocals.fixture/unsafe/panic_lexical_unsafe.jet | 4:5 | "the region only binds and prints a local; it reads and writes no raw memory" |
-| tests | Tests/Cases/OSNative/CredentialsChangeOnEveryThread.fixture/main.jet | 77:5 | "the process is root of a disposable user namespace; it drops to a mapped user" |
-| tests | Tests/Cases/OSNative/ForkUnderLoadChildCompletes.fixture/main.jet | 47:9 | "the child only allocates, resolves and exits; the parent reaps it" |
-| tests | Tests/Cases/OutputCallable/RunnableContractsAndSelectionFailInSema.fixture/probe3/main.jet | 3:1 | "raw boundary" |
-| tests | Tests/Cases/Pin/Fixtures/LibraryWiresSelfRefUnderUnsafeAndExposesSafePinAPI/fixture.jet | 9:5 | "node storage is fixed for the returned pin; self_addr names this place" |
-| tests | Tests/Cases/PlaceWindowLifetimes/BorrowedWindowStaysCallerOwned.fixture/main.jet | 5:5 | "the borrowed value is live in the caller" |
-| tests | Tests/Cases/PlaceWindowLifetimes/HeapElementWindowStaysAllocatorOwned.fixture/main.jet | 6:5 | "the list element remains heap-owned" |
-| tests | Tests/Cases/PlaceWindowLifetimes/StackWindowUsesExpiringSentryAddress.fixture/main.jet | 6:5 | "cell is live on this stack frame" |
-| tests | Tests/Cases/PolicyScope/UnsafeObligationsAreCheckedBeforeCodegen.fixture/run.jet | 5:5 | "local pointer" |
-| tests | Tests/Cases/ProcessSessions/Subjects/native/session_fixture.jet | 54:5 | "the fixture's descendant rejoins the process group of the tree that spawned it" |
-| tests | Tests/Cases/ProcessSessions/Subjects/native/session_fixture.jet | 96:9 | "kill -0 only asks whether the killed descendant still exists" |
-| tests | Tests/Cases/ResourceClose/ReplacedListElementMapValueAndModuleStorageCloseBeforeTheyDrop.fixture/main.jet | 19:5 | "the test runs one task" |
-| tests | Tests/Cases/RunEntry/ModuleWriteFromFnIsE0111.fixture/ok.jet | 11:5 | "this program starts no task, so nothing else writes `raw`" |
-| tests | Tests/Cases/SingleUse/DropErasesNoUnsafeInCodegen.fixture/source-1.jet | 11:5 | "gone" |
-| tests | Tests/Cases/SingleUse/DropInsideUnsafeBlockSatisfiesSingleUse.fixture/source-1.jet | 11:5 | "the resource is already gone; nothing to release" |
-| tests | Tests/Cases/SingleUse/DropInsideUnsafeFnSatisfiesSingleUse.fixture/source-1.jet | 9:1 | "voids a freshly-acquired lock whose resource is already gone" |
-| tests | Tests/Cases/SingleUse/DropInsideUnsafeFnSatisfiesSingleUse.fixture/source-1.jet | 16:5 | "calling the audited voider" |
-| tests | Tests/Cases/SingleUse/HolderConsumedCompiles.fixture/main.jet | 28:5 | "the lease's job is done by hand here" |
-| tests | Tests/Cases/SingleUse/HolderConsumedCompiles.fixture/main.jet | 35:5 | "the slot's lease is done by hand here" |
-| tests | Tests/Cases/SingleUse/HolderDroppedIsE0140.fixture/main.jet | 33:5 | "the lease's job is done by hand here" |
-| tests | Tests/Cases/SingleUse/ReuseAfterDropIsE0121.fixture/source-1.jet | 11:5 | "done with it" |
-| tests | Tests/Cases/TargetMachines/Fixtures/SelectedTargetMachineRejectsDirectMMIOOutsideRegion/main.jet | 4:5 | "this address is intentionally outside the board MMIO region" |
-| tests | Tests/Cases/TargetMachines/Fixtures/SelectedTargetMachineValidatesDirectMMIOAccesses/main.jet | 4:5 | "timer register is mapped by board.sensor_v1" |
-| tests | Tests/Cases/UnsafeAndRuntime/ASentryFaultNamesTheAccessAndTheRange.fixture/steps.jet | 5:5 | "the second read steps one Int past the tuple, so the sentry stops it there" |
-| tests | Tests/Cases/UnsafeAndRuntime/AnOptionalRawPointerIsNoneWhenNull.fixture/main.jet | 12:5 | "each pointer names the live local cell, or is null and never read" |
-| tests | Tests/Cases/UnsafeAndRuntime/DerefPlaceLendsThePointeeToAWriteParameter.fixture/main.jet | 13:5 | "c lives in place until `run` returns" |
-| tests | Tests/Cases/UnsafeAndRuntime/DerefPlaceReceivesATraitSelfMethodThroughAPointer.fixture/main.jet | 21:5 | "address is the address of a live A that outlives this call" |
-| tests | Tests/Cases/UnsafeAndRuntime/DerefPlaceReceivesATraitSelfMethodThroughAPointer.fixture/main.jet | 30:5 | "c lives in place until `run` returns" |
-| tests | Tests/Cases/UnsafeAndRuntime/EveryUnsafeRegionKindEntersItsOwnSentryScope.fixture/regions.jet | 1:1 | "the cell is live on this frame" |
-| tests | Tests/Cases/UnsafeAndRuntime/EveryUnsafeRegionKindEntersItsOwnSentryScope.fixture/regions.jet | 9:5 | "call the gated reader" |
-| tests | Tests/Cases/UnsafeAndRuntime/EveryUnsafeRegionKindEntersItsOwnSentryScope.fixture/regions.jet | 13:5 | "test region calls the gated reader" |
-| tests | Tests/Cases/UnsafeAndRuntime/Fixtures/FFICapabilityEdgeUsesSharedSentryPrelude/main.jet | 8:5 | "the foreign call may write through the borrowed value" |
-| tests | Tests/Cases/UnsafeAndRuntime/Fixtures/MemAddressOfNeverFoldsPlainOrParenthesized/paren/main.jet | 3:1 | "reads through a raw pointer; addr must be a live, valid Int" |
-| tests | Tests/Cases/UnsafeAndRuntime/Fixtures/MemAddressOfNeverFoldsPlainOrParenthesized/paren/main.jet | 12:5 | "addr is the address of `cell`, a live Int on this stack frame" |
-| tests | Tests/Cases/UnsafeAndRuntime/Fixtures/MemAddressOfNeverFoldsPlainOrParenthesized/plain/main.jet | 3:1 | "reads through a raw pointer; addr must be a live, valid Int" |
-| tests | Tests/Cases/UnsafeAndRuntime/Fixtures/MemAddressOfNeverFoldsPlainOrParenthesized/plain/main.jet | 12:5 | "addr is the address of `cell`, a live Int on this stack frame" |
-| tests | Tests/Cases/UnsafeAndRuntime/Fixtures/SentryKernelIsSharedByAOTAndRuntimeAdapters/main.jet | 7:5 | "the local cell is live for this raw read" |
-| tests | Tests/Cases/UnsafeAndRuntime/Fixtures/UnsafeFnBlockAndPtrOps/main.jet | 3:1 | "reads through a raw pointer; addr must be a live, valid Int" |
-| tests | Tests/Cases/UnsafeAndRuntime/Fixtures/UnsafeFnBlockAndPtrOps/main.jet | 12:5 | "addr is the address of `cell`, a live Int on this stack frame" |
-| tests | Tests/Cases/UnsafeAndRuntime/Fixtures/UnsafeTierEmitIsByteExact/main.jet | 3:1 | "reads through a raw pointer; addr must be valid" |
-| tests | Tests/Cases/UnsafeAndRuntime/Fixtures/UnsafeTierEmitIsByteExact/main.jet | 12:5 | "safe: cell is live" |
-| tests | Tests/Cases/UnsafeAndRuntime/Fixtures/VolatileWriteEmitIsByteExact/main.jet | 3:1 | "UART TX register is mapped by the target machine" |
-| tests | Tests/Cases/UnsafeAndRuntime/HardenedProfileStopsAnOutOfBoundsRawAccessAtEveryLevel.fixture/read/read.jet | 6:5 | "reads the one Int the arena allocated" |
-| tests | Tests/Cases/UnsafeAndRuntime/HardenedProfileStopsAnOutOfBoundsRawAccessAtEveryLevel.fixture/write/write.jet | 6:5 | "writes the one Int the arena allocated" |
-| tests | Tests/Cases/UnsafeAndRuntime/RawPointerToolsKeepTheirChecksInHardenedBuilds.fixture/freed.jet | 4:5 | "no copy of the pointer is read after the block is released" |
-| tests | Tests/Cases/UnsafeAndRuntime/RawPointerToolsKeepTheirChecksInHardenedBuilds.fixture/misaligned.jet | 5:5 | "every Int read starts on an Int boundary" |
-| tests | Tests/Cases/UnsafeAndRuntime/RawPointerToolsKeepTheirChecksInHardenedBuilds.fixture/range.jet | 5:5 | "the steps stay inside the tuple's four Ints" |
-| tests | Tests/Cases/WebBuild/ModuleLocalDevIsValidatedAsWebRuntime.fixture/main.jet | 5:9 | "exercise the web gate" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/AES/nist_gcm.jet | 13:5 | "published KAT or frozen seed AES-GCM fixture" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/AES/seed_differential.jet | 13:5 | "published KAT or frozen seed AES-GCM fixture" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 15:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 19:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 32:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 36:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 49:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 53:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 66:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 70:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 83:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 87:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 98:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 109:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 120:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 131:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 142:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 153:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 164:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 175:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 186:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 197:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 208:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 219:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 230:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 241:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 252:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 263:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 274:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 285:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 296:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 307:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 323:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 334:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 350:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 361:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 377:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 388:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 404:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 415:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 431:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 442:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 458:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 469:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 485:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 496:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 512:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 523:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 539:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 550:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 566:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 577:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 593:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 604:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 620:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 631:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 647:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 658:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 674:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 685:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 701:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 712:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 728:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 739:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 755:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 766:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 782:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 793:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 809:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 820:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 836:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 847:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 863:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 874:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 890:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 901:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 917:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 928:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 944:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 955:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 971:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 982:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 998:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1009:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1025:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1036:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1052:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1063:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1079:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1090:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1106:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1117:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1133:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1144:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1160:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1171:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1187:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1198:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1214:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1225:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1241:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1252:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1268:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1279:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1295:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1306:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1322:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1333:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1344:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1355:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1366:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1377:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1388:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1399:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1410:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1426:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1442:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1458:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1476:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1480:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1493:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1497:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1510:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1514:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1527:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1531:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1544:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1548:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1561:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1565:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1578:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1582:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1595:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1599:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1612:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1616:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1629:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1633:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1646:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1650:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1663:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1667:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1680:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1684:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1697:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1701:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1714:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1718:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1731:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1735:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1748:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1752:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1765:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1769:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1782:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1786:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1799:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1803:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1816:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1820:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1833:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1837:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1850:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1854:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1867:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1871:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1884:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1888:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1901:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1905:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1918:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1922:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1935:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1939:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1952:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1956:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1969:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1973:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1986:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 1990:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2003:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2007:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2020:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2024:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2037:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2041:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2054:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2058:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2071:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2075:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2088:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2092:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2105:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2109:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2122:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2126:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2139:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2143:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2156:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2160:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2173:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2177:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2190:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2194:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2207:5 | "frozen Ed25519 sign witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2211:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2222:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_ed25519.jet | 2238:5 | "public Ed25519 acceptance witness" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/ct_x25519.jet | 5:5 | "published/frozen X25519 test inputs" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/Expert/aes256gcm_open.jet | 8:5 | "fixed NIST AES-256-GCM vector" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/Expert/aes256gcm_seal.jet | 7:5 | "fixed NIST AES-256-GCM vector" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/Expert/argon2id.jet | 10:5 | "fixed Argon2id known-answer vector" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/Expert/ed25519_sign.jet | 6:5 | "fixed RFC 8032 Ed25519 vector" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/Expert/ed25519_verify_strict.jet | 7:5 | "fixed RFC 8032 Ed25519 vector" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/Expert/hkdf_sha256_raw.jet | 8:5 | "fixed RFC 5869 HKDF vector" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/Expert/open_v1.jet | 7:5 | "fixed JETC v1 AES vector" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/Expert/secret_bytes.jet | 9:5 | "inspect fixed secret bytes" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/Expert/shared_secret_bytes.jet | 11:5 | "inspect shared-secret length" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/Expert/signing_key_bytes.jet | 9:5 | "inspect generated signing-key bytes" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/Expert/x25519_raw.jet | 7:5 | "fixed RFC 7748 X25519 vector" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/Expert/x25519_secret_bytes.jet | 9:5 | "inspect generated X25519 secret bytes" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/Expert/xchacha20poly1305_open.jet | 9:5 | "fixed CFRG XChaCha20-Poly1305 vector" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/Expert/xchacha20poly1305_seal.jet | 9:5 | "fixed CFRG XChaCha20-Poly1305 vector" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/Vault/commit_import_signing.jet | 5:5 | "restore a fixed signing key into the vault" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/Vault/commit_import_x25519.jet | 5:5 | "restore a fixed X25519 secret into the vault" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/Vault/guard_errors.jet | 33:5 | "vault key import: fixed guard vectors that never hold key material" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/Vault/prepare_import_signing.jet | 5:5 | "restore a fixed signing-key vector" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/Vault/prepare_import_x25519.jet | 5:5 | "restore a fixed X25519 secret vector" |
-| tests | Tests/Conformance/Corpus/Core/Crypto/x25519.jet | 11:5 | "inspect shared-secret length" |
-| tests | Tests/Conformance/Corpus/Core/Files/Sealed/migrate_v1.jet | 12:5 | "fixed JETC v1 source failure" |
-| tests | Tests/Conformance/Corpus/Core/Mem/volatile_read.jet | 6:5 | "value is live on this stack frame and the pointer never escapes" |
-| tests | Tests/Conformance/Corpus/Core/Mem/volatile_write.jet | 6:5 | "value is live on this stack frame and the pointer never escapes" |
-| tests | Tests/Conformance/Corpus/Core/Sys/atexit.jet | 5:5 | "the exit callback has no captured state" |
-| tests | Tests/Conformance/Corpus/Core/Sys/close_fd.jet | 7:13 | "close an invalid descriptor without changing process state" |
-| tests | Tests/Conformance/Corpus/Core/Sys/fork.jet | 5:5 | "fork and let the child return immediately" |
-| tests | Tests/Conformance/Corpus/Core/Sys/getpriority.jet | 5:5 | "read the current process priority" |
-| tests | Tests/Conformance/Corpus/Core/Sys/initgroups.jet | 5:5 | "probe initgroups with a stable missing user" |
-| tests | Tests/Conformance/Corpus/Core/Sys/kill.jet | 5:5 | "check the process group without sending a signal" |
-| tests | Tests/Conformance/Corpus/Core/Sys/mkfifo.jet | 5:5 | "probe FIFO creation with an empty path" |
-| tests | Tests/Conformance/Corpus/Core/Sys/mknod.jet | 5:5 | "probe device-file creation with a major number out of range" |
-| tests | Tests/Conformance/Corpus/Core/Sys/pipe.jet | 5:5 | "open a pipe and observe its descriptor pair" |
-| tests | Tests/Conformance/Corpus/Core/Sys/reset_signal.jet | 5:5 | "restore the default disposition of SIGUSR1, which this program never handles, then refuse signal 0" |
-| tests | Tests/Conformance/Corpus/Core/Sys/set_group_ids.jet | 5:5 | "set the effective group ID to the one it already is, which needs no privilege, then refuse an ID out of range" |
-| tests | Tests/Conformance/Corpus/Core/Sys/set_scheduling.jet | 5:5 | "move this short-lived witness to batch time sharing and back; neither needs privilege" |
-| tests | Tests/Conformance/Corpus/Core/Sys/set_user_ids.jet | 5:5 | "set the effective user ID to the one it already is, which needs no privilege, then refuse an ID out of range" |
-| tests | Tests/Conformance/Corpus/Core/Sys/set_wall_clock.jet | 8:5 | "a time before 1970 is refused before it reaches the kernel, so the clock never changes" |
-| tests | Tests/Conformance/Corpus/Core/Sys/setgid.jet | 5:5 | "probe setgid with an invalid identifier" |
-| tests | Tests/Conformance/Corpus/Core/Sys/setpgid.jet | 5:5 | "set the current process into its existing process group" |
-| tests | Tests/Conformance/Corpus/Core/Sys/setpgrp.jet | 5:5 | "set the current process group" |
-| tests | Tests/Conformance/Corpus/Core/Sys/setpriority.jet | 5:5 | "lower the current process priority for this short-lived witness" |
-| tests | Tests/Conformance/Corpus/Core/Sys/setsid.jet | 5:5 | "create a session when the host permits it" |
-| tests | Tests/Conformance/Corpus/Core/Sys/setuid.jet | 5:5 | "probe setuid with an invalid identifier" |
-| tests | Tests/Conformance/Corpus/Core/Sys/stop.jet | 7:13 | "stop this dedicated witness successfully" |
-| tests | Tests/Conformance/Corpus/Core/Sys/umask.jet | 5:5 | "set a deterministic mask for this short-lived witness" |
-| tests | Tests/Conformance/Corpus/Core/Sys/utime.jet | 5:5 | "probe timestamp update with an empty path" |
-| tests | Tests/Conformance/Corpus/Core/Sys/wait.jet | 5:5 | "wait for a child that this witness does not have" |
-| tests | Tests/Conformance/Corpus/Core/Sys/waitpid.jet | 5:5 | "poll for a child that this witness does not have" |
-| tests | Tests/Fixtures/explicit_cleanup_order.jet | 39:5 | "exercise the explicit process-stop cleanup boundary" |
-| tests | Tests/Fixtures/ffi_stack4_i64.jet | 2:1 | "the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return" |
-| tests | Tests/Fixtures/ffi_stack4_i64.jet | 49:5 | "Linux getpid syscall 39 ignores all argument registers and retains no stack pointer" |
-| tests | Tests/Fixtures/fmt_import_c_bindings.jet | 7:1 | "audited C boundary" |
-| tests | Tests/Fixtures/fmt_import_c_bindings.jet | 10:1 | "audited C boundary" |
-| tests | Tests/Fixtures/native_global_word.jet | 6:5 | "the fixture's one-threaded caller (run, or global-word.c) is the only writer" |
-| tests | Tests/Fixtures/native_inline_c_shared_state.jet | 4:1 | "updates this program's private counter" |
-| tests | Tests/Fixtures/native_inline_c_shared_state.jet | 13:1 | "reads the counter defined by fixture_bump" |
-| tests | Tests/Fixtures/native_inline_c_shared_state.jet | 25:5 | "the counter is private to these two bodies" |
-| tests | Tests/Fixtures/UnsafeObligations/run.jet | 5:5 | "local pointer" |
-| tests | Tests/Fuzz/Sema/Differential/ex_crypto_crypto_migration.jet | 29:5 | "AES-256-GCM protocol interoperability" |
-| tests | Tests/Fuzz/Sema/Valid/ex_crypto_crypto_suite.jet | 40:5 | "known-answer check reads the RFC 7748 shared secret" |
-| tests | Tests/Fuzz/Sema/Valid/ex_lowlevel_lowlevel.jet | 8:5 | "`cell` is live on this stack frame and the pointer never escapes" |
-| tests | Tests/Fuzz/Sema/Valid/ex_lowlevel_lowlevel.jet | 22:5 | "`cell` is a live Int on this stack frame; the pointer never escapes" |
-| tests | Tests/Fuzz/Sema/Valid/ex_lowlevel_pointer_cast_deref.jet | 11:5 | "flag is live on this stack frame and the pointer never escapes" |
-| tests | Tests/Run/Comptime/ForeignBranchNotTaken.jet | 12:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
-| tests | Tests/Run/Comptime/ForeignBranchNotTaken.jet | 24:9 | "call the audited register-only assembly contract" |
-| tests | Tests/Run/Comptime/MutableGlobalStartsFromAnyStorableValue.jet | 60:5 | "one task writes the globals" |
-| tests | Tests/Run/Comptime/MutableGlobalStartsFromComputedValue.jet | 32:5 | "one task writes the frame" |
-| tests | Tests/Run/Comptime/MutableGlobalStartsFromComputedValue.jet | 43:5 | "one task writes the globals" |
-| tests | Tests/Run/CoreCryptoFoundations/CryptoAeadTamperingIsRejectedAcrossTiers.jet | 64:5 | "fixed AEAD tamper vector" |
-| tests | Tests/Run/CoreCryptoFoundations/PrimitiveMatrix.jet | 101:5 | "known-answer check reads the RFC 7748 shared secret" |
-| tests | Tests/Run/CoreCryptoFoundations/PrimitiveMatrix.jet | 163:5 | "expert known-answer vectors need raw key bytes" |
-| tests | Tests/Run/CoreIO/CleanupMatrix.jet | 35:5 | "the stop runs the shared cleanup boundary" |
-| tests | Tests/Run/CoreIO/CleanupMatrix.jet | 83:5 | "the exit callbacks have no captured state" |
-| tests | Tests/Run/Dyn/NumberInUnsafe.jet | 7:5 | "the literal below is a valid JSON number lexeme" |
-| tests | Tests/Run/FailureFoundation/TransactOSStop.jet | 34:5 | "the stop runs the shared cleanup boundary" |
-| tests | Tests/Run/PatternsAndFields/FixedSizeListWidensAtCoreCall.jet | 5:5 | "fixed signature vector" |
-| tests | Tests/Run/UnsafeAndRuntime/MemFromAddrDirect.jet | 11:5 | "the borrowed value is live in the caller and the pointer never escapes" |
-| tests | Tests/UI/E3113PackageWithoutKernelFiles/run.jet | 6:1 | "the caller releases the storage with `free_raw`, exactly once" |
-| tests | Tests/UI/E3113RawMemoryOutsideKernel/kernel.jet | 4:1 | "the caller releases the storage with `free_raw`, exactly once" |
-| tests | Tests/UI/E3113RawMemoryOutsideKernel/run.jet | 5:1 | "the caller releases the storage with `free_raw`, exactly once" |
-| tests | Tests/UI/E3113RuntimeUnitSourceOutsideKernel/run.jet | 6:1 | "each caller vouches for the address" |
-| tests | Tests/UI/E3113RuntimeUnitSourceOutsideKernel/run.jet | 10:5 | "the kernel's own leaf reads a word its caller lends" |
-| tests | Tests/UI/E3113RuntimeUnitSourceOutsideKernel/run.jet | 16:5 | "the host holds the word at this address" |
-| tests | Tests/UI/E3114RawAddressIntoKernel/run.jet | 8:5 | "the caller hands the address of a live Int" |
-| tests | Tests/UI/E3114RawAddressIntoKernel/run.jet | 18:5 | "kernel code hands the address of a live Int" |
-| tests | Tests/UI/AuditedGateLadderForbidden/run.jet | 3:5 | "the organization policy refuses this audited escape" |
-| tests | Tests/UI/cffi_out_pointer_requires_unsafe.jet | 14:1 | "the local slot remains live for the complete C call" |
-| tests | Tests/UI/changeset_a_failed_handler_publishes_none.jet | 28:25 | "generated" |
-| tests | Tests/UI/checked_text_raw_requires_unsafe.jet | 22:5 | "audited literal" |
-| tests | Tests/UI/crypto_argon2id_literal_policy.jet | 9:5 | "fixed password-hash vectors" |
-| tests | Tests/UI/crypto_argon2id_literal_policy_type_precedence.jet | 9:5 | "fixed password-hash vector" |
-| tests | Tests/UI/crypto_argon2id_literal_policy_valid.jet | 9:5 | "protocol-selected password policy" |
-| tests | Tests/UI/crypto_argon2id_literal_policy_valid.jet | 17:5 | "fixed password-hash vectors" |
-| tests | Tests/UI/crypto_expert_material_length.jet | 12:5 | "fixed interop vectors" |
-| tests | Tests/UI/crypto_expert_material_length_type_precedence.jet | 5:5 | "fixed interop vector" |
-| tests | Tests/UI/crypto_expert_material_length_valid.jet | 5:5 | "protocol-selected interop material" |
-| tests | Tests/UI/crypto_expert_material_length_valid.jet | 17:5 | "fixed interop vectors" |
-| tests | Tests/UI/crypto_expert_nonce_callback_bound_precedence.jet | 13:5 | "fixed interop vector" |
-| tests | Tests/UI/crypto_expert_nonce_correct.jet | 5:5 | "fixed interop vectors" |
-| tests | Tests/UI/crypto_expert_nonce_effect_bound_precedence.jet | 10:5 | "fixed interop vector" |
-| tests | Tests/UI/crypto_expert_nonce_effect_precedence.jet | 10:5 | "fixed interop vector" |
-| tests | Tests/UI/crypto_expert_nonce_effect_prohibition_precedence.jet | 10:5 | "fixed interop vector" |
-| tests | Tests/UI/crypto_expert_nonce_effect_unknown_precedence.jet | 10:5 | "fixed interop vector" |
-| tests | Tests/UI/crypto_expert_nonce_length.jet | 5:5 | "fixed interop vector" |
-| tests | Tests/UI/crypto_expert_nonce_region_authority_precedence.jet | 9:5 | "fixed interop vector" |
-| tests | Tests/UI/crypto_expert_nonce_trait_dispatch_precedence.jet | 9:5 | "fixed interop vector" |
-| tests | Tests/UI/crypto_expert_nonce_type_precedence.jet | 5:5 | "fixed interop vector" |
-| tests | Tests/UI/crypto_hkdf_output_length.jet | 9:5 | "fixed interop vector" |
-| tests | Tests/UI/crypto_hkdf_output_type_precedence.jet | 5:5 | "fixed interop vector" |
-| tests | Tests/UI/crypto_hkdf_output_valid.jet | 8:5 | "protocol-selected output length" |
-| tests | Tests/UI/crypto_hkdf_output_valid.jet | 16:5 | "fixed interop vectors" |
-| tests | Tests/UI/discarded_pure_quiet.jet | 47:5 | "the test deliberately keeps this stderr write behind its audit boundary" |
-| tests | Tests/UI/e3106_unsafe_skip_without_per_site.jet | 3:5 | "reads a checked constant" |
-| tests | Tests/UI/ffi_asm_duplicate_clobber.jet | 3:1 | "each discarded register is named once" |
-| tests | Tests/UI/ffi_asm_float_signature.jet | 3:1 | "register-only increment" |
-| tests | Tests/UI/ffi_asm_missing_return_anchor.jet | 3:1 | "cycle counter" |
-| tests | Tests/UI/ffi_asm_no_mem.jet | 1:1 | "register-only increment" |
-| tests | Tests/UI/ffi_asm_return_clobber.jet | 3:1 | "the result register is overwritten by the body" |
-| tests | Tests/UI/ffi_asm_unencoded_mnemonic.jet | 3:1 | "the body writes only its result register" |
-| tests | Tests/UI/ffi_asm_unknown_clobber.jet | 3:1 | "the body declares only audited registers" |
-| tests | Tests/UI/ffi_body_not_string.jet | 1:1 | "demo" |
-| tests | Tests/UI/ffi_inline_asm_call_needs_unsafe_region.jet | 3:1 | "the operands are scalar registers and r10 is a declared clobber" |
-| tests | Tests/UI/ffi_inline_asm_call_needs_unsafe_region.jet | 14:5 | "call the audited register-only assembly contract" |
-| tests | Tests/UI/ffi_inline_c_call_needs_unsafe_region.jet | 1:1 | "the scalar ABI contract matches the C definition" |
-| tests | Tests/UI/ffi_inline_c_call_needs_unsafe_region.jet | 7:5 | "call the audited inline C contract" |
-| tests | Tests/UI/ffi_inline_c_mismatch.jet | 1:1 | "deliberate mismatch fixture" |
-| tests | Tests/UI/ffi_inline_cpp_call_needs_unsafe_region.jet | 1:1 | "the scalar ABI contract matches the C++ definition" |
-| tests | Tests/UI/ffi_inline_cpp_call_needs_unsafe_region.jet | 7:5 | "call the audited inline C++ contract" |
-| tests | Tests/UI/ffi_unknown_argument.jet | 1:1 | "demo" |
-| tests | Tests/UI/ffi_unknown_language.jet | 1:1 | "demo" |
-| tests | Tests/UI/GatesLoadPackageCeiling/run.jet | 2:5 | "audited load-only gate" |
-| tests | Tests/UI/lowlevel_e3102.jet | 2:5 | "addr is valid" |
-| tests | Tests/UI/lowlevel_e3103.jet | 3:1 | "reads through caller-provided raw pointer" |
-| tests | Tests/UI/lowlevel_volatile_write_without_mem.jet | 2:5 | "addr is valid" |
-| tests | Tests/UI/lowlevel_volatile_write_wrong_ptr.jet | 4:5 | "plain ints are not raw pointers" |
-| tests | Tests/UI/lowlevel_volatile_write_wrong_value.jet | 6:5 | "slot is live and pointer never escapes" |
-| tests | Tests/UI/meta_ladder_add_never_authorizes_unsafe.jet | 7:13 | "generated" |
-| tests | Tests/UI/module_write_from_fn_is_e0111.jet | 13:5 | "this program starts no task, so nothing else writes `raw`" |
-| tests | Tests/UI/Ownership/raw_window_read_after_its_owner_is_released.jet | 11:5 | "the cells hold no resource, so spending them frees nothing" |
-| tests | Tests/UI/Ownership/raw_window_read_after_its_owner_is_released.jet | 16:5 | "the window covers exactly the two Int fields, which `cells` keeps" |
-| tests | Tests/UI/Ownership/single_use_holder_dropped_owes_consume.jet | 33:5 | "the lease's job is done by hand here" |
-| tests | Tests/UI/secret_read_requires_unsafe.jet | 8:5 | "the length leaves this function, never the key bytes" |
-| tests | Tests/UI/SecretsExpiry/expiring_secret_loan_rejects_move_variadic_and_drop_paths_3.jet | 13:9 | "attempt to discard a loan" |
-| tests | Tests/UI/UnsafeAndRuntime/VolatileWriteEmitIsByteExact/run.jet | 3:1 | "UART TX register is mapped by the target machine" |
-| tests | Tests/UI/unsafe_block_after_statement_parse_error.jet | 8:5 | "target outlives the read in this frame" |
-| tests | Tests/UI/UnsafeEffectBudget/unsafedep/unsafedep.jet | 3:5 | "audited peek" |
-| tests | Tests/UI/unsafe_effect_module_cap.jet | 4:5 | "audited peek" |
-| tests | Tests/UI/unsafe_effect_prohibition_transitive.jet | 4:5 | "audited peek" |
-| tests | Tests/UI/UnsafeForbidden/run.jet | 2:5 | "not allowed" |
-| tests | Tests/UI/UnsafeForbiddenByOrganizationPolicy/run.jet | 5:5 | "the organization policy forbids this escape" |
-| tests | Tests/UI/unsafe_obligation_missing.jet | 5:5 | "local pointer" |
-| tests | Tests/UI/unsafe_obligation_no_bleed.jet | 6:5 | "two independent pointer operations" |
-| tests | Tests/UI/UnsafePerSite/run.jet | 2:5 | "selection required" |
-| tests | Tests/UILint/inline_asm_reads_its_core_mem_gate.jet | 8:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
-| tests | Tests/UILint/inline_asm_reads_its_core_mem_gate.jet | 19:5 | "call the audited register-only assembly contract" |
 <!-- unsafe-ratchet:end -->
 
 ## CoreLib unsafe audit
