@@ -395,7 +395,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1220 | DependencyAuthorityExceeded | Jetpack/PackageModel/Source/Policy/EffectBudget.jet:581 | the effect is added to the dependency's grant line |
 | E1221 | InvalidAuthorityBlock | Compiler/JetDriver/Source/Driver/Loader.jet:303 | `authority:` is written in its one block form |
 | E1222 | InvalidProgramAllocator | Compiler/JetDriver/Source/Driver/Loader.jet:804 | `mem.Heap` or a counting allocator over it with a valid cap |
-| E1224 | PackageFileOperationFailed | Compiler/JetCLI/Source/CLI/Host.jet:3578 | the file is readable and writable |
+| E1224 | PackageFileOperationFailed | Compiler/JetCLI/Source/CLI/Host.jet:3580 | the file is readable and writable |
 | E1227 | EngineProtocolMismatch | Compiler/JetCLI/Source/CLI/InspectB.jet:679 | `jet` and its engines come from one toolchain |
 | E1228 | MissingEngine | Compiler/JetCLI/Source/CLI/InspectB.jet:660 | install the engine with the toolchain |
 | E1230 | AmbiguousWorkspaceMember | Jetpack/CLI/Source/Output/RefErrorReport.jet:20 | a longer path or an `@source` names one member |
@@ -514,9 +514,9 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2120 | DeepCheckScopeUnknown | Compiler/JetFoundation/Source/Registry/BuildOptions.jet:422 | the scope names a declaration of this program |
 | E2121 | DeepCheckScopeHoldsNone | Compiler/JetFoundation/Source/Registry/BuildOptions.jet:423 | the scope names declarations that hold deep checks |
 | E2122 | DottedPathPrefixUnresolved | Compiler/JetFoundation/Source/Names/Names.jet:75 | the path starts with the name of exactly one module |
-| E2123 | PerfDirectoryNotPrivate | Compiler/JetCLI/Source/CLI/Perf/Session.jet:841 | the profile is kept where only its user can reach it |
-| E2124 | AttachTargetNotObserved | Compiler/JetCLI/Source/CLI/Perf/Session.jet:848 | the program runs under `jet run --observe` |
-| E2125 | AttachWhichProcess | Compiler/JetCLI/Source/CLI/Perf/Session.jet:855 | one attach names one process id |
+| E2123 | PerfDirectoryNotPrivate | Compiler/JetCLI/Source/CLI/Perf/Session.jet:910 | the profile is kept where only its user can reach it |
+| E2124 | AttachTargetNotObserved | Compiler/JetCLI/Source/CLI/Perf/Session.jet:917 | the program runs under `jet run --observe` |
+| E2125 | AttachWhichProcess | Compiler/JetCLI/Source/CLI/Perf/Session.jet:924 | one attach names one process id |
 | E2126 | PerfNoInstructions | Compiler/JetCLI/Source/CLI/CanvasProfile.jet:154 | the trace of a native `jet perf run` keeps the code its samples landed in |
 | E2203 | DebuggerUnavailable | Compiler/JetDebug/Source/Native.jet:26 | the program is a native -O0 image this machine can run traced |
 | E2204 | DebugSessionQuit | Compiler/JetCLI/Source/CLI/Debug.jet:461 | let the program run to its end |
