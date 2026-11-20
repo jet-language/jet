@@ -4391,8 +4391,11 @@ Code reads the task context as `context.<field>` (D-CONTEXT1).
 `context.deadline` is the installed absolute wall-millisecond deadline as an
 `Int?`, `None` outside every `#Deadline` block or function and `task.timeout`;
 a task reads the deadline it was spawned under. `context.thread` is the
-running thread's index as an `Int`: 0 on the main thread, and a fiber reads
-its carrier thread's index. A read is an implicit input of every function,
+running thread's index as an `Int`: 0 on the main thread, 1 up on the task
+pool's carrier threads, numbered densely in the order they start (a carrier
+that starts after one retired takes the index it left), and -1 on any other
+thread, such as a host thread that calls in. A fiber reads its carrier
+thread's index. A read is an implicit input of every function,
 not an effect: it adds nothing to the function's row and needs no grant, so a
 `-[]>` function reads the context too, and no policy denies it. The input is
 the task's current context record. A module value that reads it is E0643, a

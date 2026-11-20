@@ -1,0 +1,18 @@
+# `context.thread` is 0 on the main thread and numbers the task pool's
+# carriers from 1, densely, in the order they start. A thread the runtime
+# starts for its own work, here the timer thread a deadline wait on the main
+# thread starts before any task runs, takes no carrier index, so the first
+# carrier still reads 1.
+fixture: CarriersNumberFromOne.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "main 0, first carrier 1\n" # the timer thread shifts no carrier's index
+step: jet run -O1 main.jet
+exit: 0
+stdout: = "main 0, first carrier 1\n"
+step: jet run -O2 main.jet
+exit: 0
+stdout: = "main 0, first carrier 1\n"
