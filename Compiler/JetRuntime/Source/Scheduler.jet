@@ -83,7 +83,9 @@ scheduler_checks_settle: fn(root: I64) {
 // A control's attention word (+24): what its stop polls take beyond a
 // published stop (scheduler_check_loops). A strong pause holds the task
 // there; a cancel and a passed deadline are delivered there, so a busy loop
-// stops at its next turn.
+// stops at its next turn. Only a turn poll enters its routine on the deadline
+// bit (JetIR IR.jet ir_stop_attention spells the bits each poll tests): the
+// poll after a call leaves a deadline to the wait points.
 SCHEDULER_ATTEND_PAUSE: I64{1}
 
 SCHEDULER_ATTEND_CANCEL: I64{2}
@@ -134,11 +136,18 @@ scheduler_attention_set: fn(control: I64, bits: I64, on: Bool) {
     }
 }
 
-// The current task or root has a deadline (Deadline.jet): its stop polls
+// The current task or root has a deadline (Deadline.jet): its turn polls
 // read the clock from now on, so a busy loop stops once the deadline passes.
 scheduler_deadline_attend: fn() {
     control: scheduler_control_current()
     if (control != I64{0}) { scheduler_attention_set(control, SCHEDULER_ATTEND_DEADLINE, true) }
+}
+
+// The context's deadlines all ended (Deadline.jet jet_ctx_pop_deadline): its
+// turn polls stop reading the clock.
+scheduler_deadline_leave: fn() {
+    control: scheduler_control_current()
+    if (control != I64{0}) { scheduler_attention_set(control, SCHEDULER_ATTEND_DEADLINE, false) }
 }
 
 // A wait that returns its typed timeout (`DeadlineBlown`) has delivered the

@@ -480,6 +480,20 @@ x64_test_ri: fn(code: &X64Code, reg: Int, value: Int) Never! {
     x64_u32(code.bytes, value)
 }
 
+// test qword [base + disp], imm (REX.W F7 /0 id). The immediate must fit i32.
+x64_test_mi: fn(code: &X64Code, base: Int, disp: Int, value: Int) Never! {
+    x64_rex(code.bytes, true, 0, base)
+    x64_byte(code.bytes, 0xf7)
+    x64_modrm_mem(code, 0, base, disp)
+    x64_u32(code.bytes, value)
+}
+
+#Test("A test of a memory qword encodes test qword [rax + 24], 3") {
+    code := x64_code()
+    x64_test_mi(code, X64_RAX, 24, 3)
+    assert_eq(code.bytes, [U8]{0x48, 0xf7, 0x40, 0x18, 0x03, 0x00, 0x00, 0x00})
+}
+
 // mov dst, [base + disp] (REX.W 8B /r)
 x64_load: fn(code: &X64Code, dst: Int, base: Int, disp: Int) Never! {
     x64_rex(code.bytes, true, dst, base)

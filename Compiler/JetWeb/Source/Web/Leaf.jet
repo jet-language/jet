@@ -8,7 +8,7 @@
 // through the module table.
 use {
     jet_foundation.[Type]
-    jet_ir.[IRFunction, IRModule, IRSlotKind, ir_function_new, ir_intern_name, ir_module_new, ir_slot, ir_stop_routine, ir_type_row]
+    jet_ir.[IRFunction, IRModule, IRSlotKind, ir_function_new, ir_intern_name, ir_module_new, ir_slot, ir_stop_attention, ir_stop_routine, ir_type_row]
 }
 
 // The host's system call: number and six arguments.
@@ -411,8 +411,9 @@ web_leaf_body: fn(st: &WebState, m: IRModule, f: IRFunction) -> WebBody Never! {
 // thread's TCB (the word WEB_GLOBAL_TLS names), its task control (word 16),
 // the control's status (word 32); with a status, or with attention raised
 // (word 24, a strong pause, a cancel or a deadline: JetRuntime Scheduler.jet
-// scheduler_check_loops), its routine's (JetIR IR.jet ir_stop_routine)
-// delivered stop as a Bool, else 0.
+// scheduler_check_loops) on the bits its routine takes (JetIR IR.jet
+// ir_stop_attention), its routine's (ir_stop_routine) delivered stop as a
+// Bool, else 0.
 web_poll_body: fn(st: &WebState, m: IRModule, f: IRFunction) -> WebBody Never! {
     e := web_emitter(m, f)
     web_global_get(e, WEB_GLOBAL_TLS)
@@ -427,6 +428,8 @@ web_poll_body: fn(st: &WebState, m: IRModule, f: IRFunction) -> WebBody Never! {
     web_poll_quiet_unless(e, word)
     web_at(e, word)
     web_mem(e, 0x29, 24)
+    web_i64(e, ir_stop_attention(f.key))
+    web_op(e, 0x83)
     web_op(e, 0x50)
     web_if(e)
     web_at(e, word)
