@@ -1,14 +1,16 @@
 // The probes of Docs/Audits/2026-11-19-debug-profile-best-in-existence.md
 // (revision 5) on its debugger axes, one at a time:
 //
-//     jet Docs/Audits/BestInExistence20261119/Probes/Run.jet JET REPO [--lldb PATH] [--gdb PATH] [AXIS ...]
+//     jet Docs/Audits/BestInExistence20261119/Probes/Run.jet JET REPO [--lldb PATH] [--gdb PATH] [--chromium PATH --chromedriver PATH --jetpack PATH] [AXIS ...]
 //
 // JET is the compiler under review and REPO the checkout it was built from.
 // The probes run REPO's Tests/Cases fixtures and stdin files as they are, and
-// the programs beside this file in REPO. AXIS is d2, d3, d4, d6 or generic
-// (default: each, in that order). --lldb and --gdb name the peers a
+// the programs beside this file in REPO. AXIS is d2, d3, d4, d6, generic or
+// canvas (default: each, in that order). --lldb and --gdb name the peers a
 // comparison runs on the same image and host; without one, that comparison
-// says it was skipped. The other axes are run.py's.
+// says it was skipped. --chromium, --chromedriver and --jetpack name the
+// browser the canvas axis drives and the jetpack that locks it; without all
+// three, it says it was skipped. The other axes are run.py's.
 //
 // Every jet command runs with PATH set to an empty directory, so nothing but
 // the given jet can be reached, in a temporary directory that holds copies of
@@ -27,9 +29,9 @@ use {
 
 PROBE_PROMPT: "(Jet) "
 
-PROBE_AXES: [String]{"d2", "d3", "d4", "d6", "generic"}
+PROBE_AXES: [String]{"d2", "d3", "d4", "d6", "generic", "canvas"}
 
-PROBE_USAGE: "usage: jet Docs/Audits/BestInExistence20261119/Probes/Run.jet JET REPO [--lldb PATH] [--gdb PATH] [AXIS ...]\nAXIS: d2, d3, d4, d6 or generic (default: each, in that order)"
+PROBE_USAGE: "usage: jet Docs/Audits/BestInExistence20261119/Probes/Run.jet JET REPO [--lldb PATH] [--gdb PATH] [--chromium PATH --chromedriver PATH --jetpack PATH] [AXIS ...]\nAXIS: d2, d3, d4, d6, generic or canvas (default: each, in that order)"
 
 // How long a command that runs to its end may take, and a console session.
 PROBE_RUN_SECONDS: 600
@@ -50,6 +52,11 @@ Probe: struct {
     host_path: String,
     lldb: String?,
     gdb: String?,
+    // The browser the canvas axis drives, its WebDriver and the jetpack that
+    // locks it.
+    chromium: String?,
+    chromedriver: String?,
+    jetpack: String?,
     // This environment's JET_DEVTOOLS_RELAY_* names, which no probe inherits.
     relay: [String],
     count: Int,
@@ -78,6 +85,9 @@ probe_scrub: fn(probe: Probe, text: String) -> String Never! {
     out := text.replace(probe.jet, "jet").replace(probe.scratch, "<work>").replace(probe.repo, "<repo>")
     if probe.lldb == .Val(path) -> out = out.replace(path, "lldb")
     if probe.gdb == .Val(path) -> out = out.replace(path, "gdb")
+    if probe.chromium == .Val(path) -> out = out.replace(path, "chromium")
+    if probe.chromedriver == .Val(path) -> out = out.replace(path, "chromedriver")
+    if probe.jetpack == .Val(path) -> out = out.replace(path, "jetpack")
     if probe.home != "" -> out = out.replace(probe.home, "~")
     regex.replace(Regex{"<work>/[A-Za-z0-9]+-[0-9]+"}, out, "<work>")
 }
@@ -528,6 +538,95 @@ probe_generic: fn(probe: &Probe) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     }
 }
 
+// The Canvas debugger against RemedyBG: Tools/CanvasTest's debug_first_paint
+// scenario on the program of CanvasDebugValuesAtBreakpoint, in the given
+// Chromium headless through the given chromedriver, which the given
+// jetpack's `browser lock` pins in the work directory as the Canvas cases
+// do. The scenario prints its measures; then each of the panels RemedyBG
+// shows at a stop is matched to a Debug view panel in the window. RemedyBG
+// runs on Windows alone, so its time is not measured here; the bar is its
+// stop shown in well under a second.
+probe_canvas: fn(probe: &Probe) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
+    probe_heading("Canvas: the Debug and Profile views, their first paint and panels, against RemedyBG")
+    browser := ""
+    webdriver := ""
+    locker := ""
+    if probe.chromium == .Val(path) -> browser = path.copy()
+    if probe.chromedriver == .Val(path) -> webdriver = path.copy()
+    if probe.jetpack == .Val(path) -> locker = path.copy()
+    if browser == "" || webdriver == "" || locker == "" {
+        probe_note("--chromium, --chromedriver and --jetpack not all given: the Canvas views are not probed")
+        return
+    }
+    probe_canvas_run(probe, browser, webdriver, locker)
+}
+
+// RemedyBG's panels at a stop, each by the Debug view panel's label that
+// would show it.
+PROBE_REMEDYBG_PANELS: [String]{"Source", "Call Stack", "Locals", "Watches", "Tasks", "Memory", "Registers", "Disassembly"}
+
+priv probe_canvas_run: fn(probe: &Probe, chromium: String, driver: String, jetpack: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
+    work: probe_fixture(probe, "Debug", "CanvasDebugValuesAtBreakpoint")
+    told: probe_run(probe, [String]{chromium, "--version"}, work, show: false, peer: true)
+    found: regex.match(Regex{"([0-9]+[.][0-9]+[.][0-9]+[.][0-9]+)"}, told.text) ?? {
+        probe_note("chromium printed no version: the Canvas views are not probed")
+        return
+    }
+    probe_note("the browser: Chromium {found.groups[0]}, headless, 1440x900")
+    locked: probe_run(probe, [String]{jetpack, "browser", "lock", "chromium", "--binary", chromium, "--version", found.groups[0], "--protocol", "bidi-2025.5", "--driver", driver}, work, peer: true)
+    if locked.code != "0" {
+        probe_note("the browser is not locked: the Canvas views are not probed")
+        return
+    }
+    scenario: [String]{
+        "env",
+        "NO_COLOR=1",
+        "JET_BIN={probe.jet}",
+        "JET_PROJECT_ROOT={work}",
+        probe.jet,
+        "run",
+        "--allow=Env,Exec,FS,IO,Net,Time",
+        files.join(probe.repo, "Tools/CanvasTest/Run.jet"),
+        "--",
+        "scenario",
+        "--scenario",
+        "debug_first_paint",
+        "--source",
+        "jet_debug_canvas_values_at_breakpoint.jet",
+    }
+    result: probe_run(probe, scenario, work, peer: true)
+    if !result.text.contains("PASS chromium debug_first_paint") {
+        probe_note("the scenario did not pass: no panel or time is compared")
+        return
+    }
+    shown := [String]{}
+    loop line in result.text.split("\n") {
+        if line.starts_with("debug panel: ") && line.contains(": in the window, ") {
+            shown.push(line.slice(13..<line.len()).split(": ").to_list()[0])
+        }
+    }
+    missing := [String]{}
+    loop panel in PROBE_REMEDYBG_PANELS {
+        if !shown.contains(panel) -> missing.push("{panel}")
+    }
+    held: PROBE_REMEDYBG_PANELS.len() - missing.len()
+    print("RemedyBG's panels at a stop in the Debug view's window: {held} of {PROBE_REMEDYBG_PANELS.len()}")
+    if missing.len() > 0 -> print("not shown: {missing.join(", ")}")
+    stop: regex.match(Regex{"Continue to the stop painted in ([0-9.]+) ms"}, result.text) ?? {
+        probe_note("the scenario printed no stop time")
+        return
+    }
+    print("Continue to the stop painted: {stop.groups[0]} ms, against RemedyBG's well under a second (not measured: RemedyBG runs on Windows alone)")
+    quick: (Float.parse(stop.groups[0]) ?? 1000.0) < 1000.0
+    if missing.len() == 0 && quick -> print("Verdict: holds") else {
+        reasons := [String]{}
+        if missing.len() > 0 -> reasons.push("no {missing.join(", ")} panel at the stop")
+        if !quick -> reasons.push("the stop painted a second or more after Continue")
+        print("Verdict: does not hold: {reasons.join("; ")}")
+    }
+    print("")
+}
+
 run: fn() {
     args: process.args()
     if args.len() < 2 -> process.fail(2, PROBE_USAGE)
@@ -535,14 +634,23 @@ run: fn() {
     repo: files.absolute(args[1]) ?? process.fail(2, "{args[1]}: {err}")
     lldb := String?{None}
     gdb := String?{None}
+    chromium := String?{None}
+    chromedriver := String?{None}
+    jetpack := String?{None}
     chosen := [String]{}
     at := 2
     loop at < args.len() {
         word: args[at]
-        if word == "--lldb" || word == "--gdb" {
+        if word == "--lldb" || word == "--gdb" || word == "--chromium" || word == "--chromedriver" || word == "--jetpack" {
             if at + 1 >= args.len() -> process.fail(2, "`{word}` needs a path\n{PROBE_USAGE}")
             path: files.absolute(args[at + 1]) ?? process.fail(2, "{args[at + 1]}: {err}")
-            if word == "--lldb" -> lldb = Val(path) else -> gdb = Val(path)
+            if word == {
+                "--lldb" -> { lldb = Val(path) }
+                "--gdb" -> { gdb = Val(path) }
+                "--chromium" -> { chromium = Val(path) }
+                "--chromedriver" -> { chromedriver = Val(path) }
+                else -> { jetpack = Val(path) }
+            }
             at += 2
             next
         }
@@ -573,6 +681,9 @@ run: fn() {
         host_path: process.env_get("PATH") ?? "",
         lldb: lldb,
         gdb: gdb,
+        chromium: chromium,
+        chromedriver: chromedriver,
+        jetpack: jetpack,
         relay: relay,
         count: 0,
     }
@@ -583,7 +694,8 @@ run: fn() {
             "d3" -> probe_d3(probe)
             "d4" -> probe_d4(probe)
             "d6" -> probe_d6(probe)
-            else -> probe_generic(probe)
+            "generic" -> probe_generic(probe)
+            else -> probe_canvas(probe)
         }
         out.flush().drop("a pipe that closed takes no more output")
     }

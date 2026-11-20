@@ -85,7 +85,11 @@ review's `deadlock.jet`, and `Tools/Perf/DebugLatency`. The axes D2, D3, D4, D6
 and generic instances have since moved to
 [`Run.jet`](BestInExistence20261119/Probes/Run.jet) beside it, which takes the
 same arguments but `--perf` and runs the same commands with the same report;
-`run.py` keeps the others. Every `jet` command runs
+`run.py` keeps the others. `Run.jet`'s `canvas` axis (D11) takes
+`--chromium`, `--chromedriver` and `--jetpack`: the jetpack pins the browser in
+the probe's work directory with `jetpack browser lock`, as the Canvas cases do,
+and Tools/CanvasTest drives the page; that scenario runs with the host's `PATH`,
+which the browser needs. Every other `jet` command runs
 with `PATH` set to an empty directory. A console session is driven one command
 at a time, and each command is timed from sending it to the next `(Jet) `
 prompt. A DAP session is timed from each request to its response, or to the
@@ -444,26 +448,39 @@ DevTools puts sources, console and performance in one window.
   on the right line, and `evaluate k` reads the earlier value.
 - The console attaches to a running `-O0` image (first prompt 22.2 ms), breaks
   in `tick`, and leaves the program running when it detaches.
+- In the Canvas Debug view (`run.log`, Canvas, on the gate p372 compiler, three
+  runs back to back at a load average of about 10), Continue to a breakpoint
+  paints the stop in 56.6 to 93.4 ms: the source line active, both frames and
+  `x = 2` in Locals. Start to the entry shown paused takes 124 to 148 ms, and a
+  watch typed and entered paints its value in 131 to 183 ms. Each time runs in
+  the page from the input event to the first frame painted after the view
+  shows the result. The Profile view paints its timeline 235 to 289 ms after
+  Profile entry, with Hot Lines and Selection beside it.
+- At the stop, the window shows six panels at once: Source, Call Stack,
+  Locals, Watches, Tasks and the Debug Console.
 
 **Attack.**
 
 - A `pause` sent as the program starts answers with a thread named `root (task
   1, blocked)` and no frames (`"stackFrames": []`). Sent 100 ms later, it
   shows `run` at line 3.
-- This revision did not probe the graphical surface, the Canvas Debug and
-  Profile views. Their only evidence is c58's gate run, which shows that they
-  work, not that they match RemedyBG.
+- RemedyBG also shows memory, registers and disassembly at a stop; the Debug
+  view has none of the three. `jet debug` and DAP disassemble (c95), but the
+  Canvas does not show it.
+- RemedyBG runs on Windows alone, so its time is not measured here. It shows a
+  stop in well under a second; the slowest of the three runs here took 93.4 ms.
+- The probe's program is a few lines long, so its profile is one or no
+  sample: the axis times the Profile view's paint, not what it shows.
 
-**Verdict.** Fails: an early pause shows no stack, and the graphical surface is
-not measured against its peer.
+**Verdict.** Fails: an early pause shows no stack, and the Debug view lacks
+three of RemedyBG's panels at a stop.
 
 **Gaps.**
 
 - G31: a `pause` before the program's first Jet frame stops at that frame, or
   says that the program has not started yet, never with an empty stack.
-- G32: `run.py` drives the Canvas Debug view and measures what RemedyBG
-  shows at a stop: the time to the first painted stop, and the source, stack,
-  locals, watches, tasks and memory panels.
+- G40: the Canvas Debug view shows memory, registers and disassembly at a stop,
+  as RemedyBG does.
 
 ### Generic instances
 
@@ -700,12 +717,14 @@ sets; the probe's does. eBPF profilers see every process, Jet's or not.
 
 ### Nothing but `jet`
 
-**Jet today.** `run.log`, tools: every probe ran with `PATH` empty. lldb, gdb,
-`perf`, rr, go, pprof and otelcol were absent from it and from the host's
-`PATH`. The peers ran only as comparators, from paths given to the harness.
+**Jet today.** `run.log`, tools: every probe but the canvas axis's scenario
+ran with `PATH` empty. lldb, gdb, `perf`, rr, go, pprof and otelcol were absent
+from it and from the host's `PATH`. The peers ran only as comparators, from
+paths given to the harness.
 
-**Verdict.** Holds for the terminal, DAP and every profiler view. The graphical
-surface is not probed (G32).
+**Verdict.** Holds for the terminal, DAP, every profiler view and the Canvas,
+which `jet dev --canvas` serves to the user's own browser. The canvas axis
+needs `jetpack` and chromedriver only to pin and drive that browser.
 
 ## Verdict table
 
@@ -724,7 +743,7 @@ gate p339 probes in `run.log`.
 | D8 tasks, deadlocks | Go, Java, Visual Studio | holds | G28 |
 | D9 dumps | WinDbg, Visual Studio, gdb | fails | G29, G30 |
 | D10 visualizers | natvis, gdb and lldb formatters | holds | none |
-| D11 surfaces | RemedyBG, the RAD Debugger, VS Code | fails | G31, G32 |
+| D11 surfaces | RemedyBG, the RAD Debugger, VS Code | fails | G31, G40 |
 | Generic instances | every native debugger | fails | G33, G34 |
 | P1 sampling | Superluminal, Linux `perf` | fails | G35 |
 | P2 zones | Tracy | fails | G36, G37 |
@@ -735,7 +754,7 @@ gate p339 probes in `run.log`.
 | P7 static cost | none | holds | G35 |
 | P8 diffs | pprof | holds | none |
 | P10 always-on, attach | Parca, Pyroscope, Go pprof | holds only within stated limits | none |
-| Nothing but `jet` | none | holds | G32 |
+| Nothing but `jet` | none | holds | none |
 
 c39 is not met: ten axes fail, and each has its gaps below. The limits that no
 engineering removes:
@@ -747,9 +766,9 @@ engineering removes:
 
 ## Gaps
 
-Every axis that does not hold, with its gap and fix. G21 and G39 have open
-criteria (c70 with c71, and c55). The rest are proposed criteria for #6841, and
-each names its proof.
+Every axis that does not hold, with its gap and fix. G21, G32 and G39 have
+criteria (c70 with c71, c83, and c55). The rest are proposed criteria for
+#6841, and each names its proof.
 
 - **G21** (D1, D4, D5). `first_stop`, `print_first` and `watch_per_stop` are
   above lldb's on the 120,015-line image. Fix: c70 and c71. Proof:
@@ -783,9 +802,10 @@ each names its proof.
 - **G31** (D11). A DAP `pause` at start answers with an empty stack. Fix: stop
   at the first Jet frame, or say that the program has not started. Proof:
   `run.py … d11`'s 0 ms pause.
-- **G32** (D11). The Canvas Debug and Profile views are not probed against
-  RemedyBG. Fix: a `run.py` axis that drives Canvas and measures the time to
-  the first painted stop and the panels shown. Proof: that axis's log.
+- **G32** (D11). The Canvas Debug and Profile views were not probed against
+  RemedyBG. Fix: `Run.jet`'s canvas axis, which times the first painted stop
+  and lists the panels shown (c83). Proof: its log in `run.log`, which found
+  G40.
 - **G33** (generic instances). Frames are named `__jet_small_dbump`. Fix: name
   an instance frame as the source spells it (`small.bump`). Proof: `Run.jet …
   generic`.
@@ -810,11 +830,16 @@ each names its proof.
   clocks. Proof: `run.py … p3` shows a wall time of about 500 ms.
 - **G39** (P6). The causal prediction is high by a third. Fix: c55. Proof:
   `run.py … p6` passes its check.
+- **G40** (D11). The Canvas Debug view shows no memory, registers or
+  disassembly at a stop, which RemedyBG shows. Fix: those three panels in the
+  Debug view, the disassembly from the listing `jet debug` gives (c95). Proof:
+  `Run.jet … canvas` prints `Verdict: holds`. A new user surface, so a ballot
+  first.
 
 ## Finding dispositions
 
 G1 to G20 are revision 4's gaps, each with the criterion that closed it. G21
-onward are this revision's: G21 and G39 have open criteria, and the rest are
+onward are this revision's: G21, G32 and G39 have criteria, and the rest are
 proposed for #6841.
 
 <!-- audit-dispositions:v1 -->
@@ -851,7 +876,7 @@ proposed for #6841.
 | G29 dump caller-frame locals unavailable | card | #6841 (proposed criterion) |
 | G30 dump copies the whole image | card | #6841 (proposed criterion) |
 | G31 DAP pause at start has no frames | card | #6841 (proposed criterion) |
-| G32 Canvas not probed against RemedyBG | card | #6841 (proposed criterion) |
+| G32 Canvas not probed against RemedyBG | card | #6841 c83 |
 | G33 generic instance frame names | card | #6841 (proposed criterion) |
 | G34 inlined locals listed in the caller | card | #6841 (proposed criterion) |
 | G35 runtime helper time hidden in its line | card | #6841 (proposed criterion) |
@@ -859,4 +884,5 @@ proposed for #6841.
 | G37 no live timeline | card | #6841 (proposed criterion) |
 | G38 attach header wall and CPU time | card | #6841 (proposed criterion) |
 | G39 causal prediction high | card | #6841 c55 |
+| G40 Canvas Debug view lacks memory, registers, disassembly | card | #6841 (proposed criterion) |
 <!-- /audit-dispositions -->
