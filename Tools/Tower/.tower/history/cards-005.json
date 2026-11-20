@@ -34764,6 +34764,501 @@
       "completedAt": "2026-11-17T01:44:51.672Z",
       "questions": [],
       "retiredAt": "2026-11-20T01:56:54.335Z"
+    },
+    {
+      "id": "c0p39lw2",
+      "num": 3067,
+      "title": "Require one typed hole in dispatch tables and preserve Boolean guards",
+      "body": "User proposed factoring the repeated condition in examples/features/basics/fizzbuzz.jet into an if header with one required `_` hole. He chose one statically typed input, ordinary && and || composition, and header evaluation per attempted arm. This card records the complete language choice before implementation.\n\nThe proposal preserves candidate guards, pattern bindings, range matching, and the existing ordinary and subjectless if forms. It replaces old distributed headers in one repository-wide cutover. The full ballot must settle exact typing, grouping, evaluation, ownership, exhaustiveness, and migration rules. These rules are not implemented or ratified by creating this card.\n\nDeduplication: the live non-done card query found no matching typed-hole, hole-dispatch, FizzBuzz, or D-IFDIST1 stream. D-IFHOLE1 is unused. This request is about readability, not a claimed performance improvement.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e18",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": "## Goal\nImplement ratified D-IFHOLE1=A (2026-09-11). Every dispatch table header holds exactly one statically typed `_` hole that each non-else arm fills. Guards keep ordinary `&&`/`||`.\n\n```jet\nfn label(n: Int) -> String {\n    return if n % _ == 0 {\n        15 -> \"FizzBuzz\"\n        3 -> \"Fizz\"\n        5 -> \"Buzz\"\n        else -> \"{n}\"\n    }\n}\n```\n\n## Ratified terms (keep all)\n- `2 && ready` needs both checks. `2 && ready || emergency` accepts emergency alone. `2 && (ready || emergency)` always tests the candidate.\n- Boolean candidates are grouped in parentheses. Arm-level `|` separates candidates, not bits.\n- Value tables normally need `else`. Omitting `else` requires plain equality, one immutable bound subject and complete unguarded pattern coverage.\n- Owner choices: one candidate per non-else arm; a candidate behind a false `&&` is left uncalled; the header is evaluated once per attempted arm (bind first for a single read).\n- Amends D-IFDIST1, D-IF3, D-MATCHARM1/2 and S68, and preserves D-ARMHEAD-PAREN1.\n\n## Current state\n- `Examples/features/basics/fizzbuzz.jet:5-11` uses a subjectless table. The hole form sits commented out at `:14-21`, in retired `String ->` spelling.\n- The distributed header `if subject OP { atoms -> }` is parsed by `parser_expression_form_parse_dispatch_table` in `Compiler/JetParser/Source/Parser/ExpressionForms/DecisionTables.jet:340`. It lowers to nested ifs through `parser_expression_form_nest_arms` (`:284`), with atom/`&&`/`||` handling at `:135-213` and E0386 at `:188`. There is no hole parsing anywhere in JetParser.\n- D-IFHOLE1 is not recorded in syntax-decisions.md or Syntax.rs.\n- Migration size: about 6,050 tracked `.jet` lines open an `if <expr> OP {` table, most of them `if x == {` pattern tables. The migration must be mechanical.\n\n## Changes\n1. JetParser DecisionTables.jet: parse `if H[_] { candidate [&& guard] -> body }`. Reject a missing, repeated or ambiguous hole with registered errors. A holeless distributed header is not Jet syntax: it gets an ordinary parse error, with no teaching diagnostic or Safe edit (owner order). No compatibility parse path.\n2. JetAst: carry the hole position, or desugar at parse time by substituting each candidate into the header, so each candidate is evaluated at its substituted position at most once.\n3. JetSema (`Expressions/Control.jet`, `Patterns.jet`):\n   - a single hole type across arms, and a Bool header result;\n   - pattern-slot filling that keeps range matching, payload wildcards and safe bindings;\n   - OR groups that cannot leak missing bindings;\n   - no exhaustiveness credit unless the subject is immutable.\n4. Reuse the existing guard/pattern TIR, so Compiler/JetCodegen needs no new mechanism.\n5. Register the new diagnostics in DiagnosticRows.jet and Prelude/Diagnostics.jet, with UI fixtures `tests/ui/ifhole_{missing,repeated,wrong_type,non_bool}.jet`.\n6. Apply the Safe edit repo-wide (`jet fix`) across Examples, Core, Compiler, Jetpack, Tools and tests. Bind effectful subjects first where a one-time read was relied on. Update fizzbuzz.jet.\n7. Add the syntax registry row and syntax-decisions entry, update the crates/jet-parser formatter, run `jet devtools grammars`, and re-bless snapshots.\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- `JET_GOLDEN_FILTER=basics/fizzbuzz Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes. The full output, including the countdown, is unchanged on `jet run`, `jet run --interpret` and `jet build`.\n- A new `Examples/features/basics/dispatch_hole.jet` golden covers guard precedence, per-attempt header effects (counter), skipped candidates, error propagation and a pattern slot, and matches the explicit reference forms.\n- `JET_UI_FILTER=tests/ui/ifhole_ ... cargo test --test diagnostic_snapshots ui_snapshots` passes.\n- A census of holeless `if <expr> OP {` headers finds zero.\n\n## Batch\nbatch-jetc-front: parser-led syntax cutover. The sema checks ride the same build.\n\n## Dependencies\nNone. Land after #3727 so the census and grammar regenerations do not collide.",
+      "checkSteps": "All commands run through scripts/agent/jet-env with CARGO_INCREMENTAL=0 and disk-backed scratch. These are future proof commands, not completed evidence.\n\nRebuild with cargo build --bin jet before compiler smoke tests. Run target/debug/jet run --trace-tiers examples/features/basics/fizzbuzz.jet, target/debug/jet run --trace-tiers --interpret examples/features/basics/fizzbuzz.jet, and target/debug/jet run --release examples/features/basics/fizzbuzz.jet. All must retain the complete expected output, including the countdown. The traces must identify default native and forced interpreter execution honestly.\n\nSet JET_GOLDEN_FILTER=basics/fizzbuzz and run cargo test --test golden examples_compile_and_run -- --exact --nocapture. Repeat with the exact path selector for each affected example; never run the unfiltered census for this card.\n\nMigrate and run cargo test --test same_subject_dispatch rewrite_compiles_formats_and_preserves_parser_dispatch_behavior -- --exact --nocapture. Keep its observable original/rewrite execution comparison. Remove source-substring assertions rather than repinning implementation details.\n\nExtend the existing web arm/pattern checks to execute generated JavaScript and Wasm. Use the existing web_build runner and run its exact changed test names with cargo test --test web_build NAME -- --exact --nocapture. The current web_value_and_range_arm_tables_emit_on_js_and_wasm case pins generated text; replace those assertions with observable value/range outcomes. Require real execution, not source-shape evidence or skipped tools.\n\nUse JET_UI_FILTER=tests/ui/NAME.jet with cargo test --test diagnostic_snapshots ui_snapshots -- --exact --nocapture for each changed diagnostic fixture. Use the corresponding tests/ui_lint selector and lint_snapshots filter when a generated repair changes. Bless only the exact reviewed fixture, never UPDATE_EXPECT=1.\n\nAdd focused regression cases for Boolean precedence, header and candidate effect order, alternative guard failure, missing pattern bindings under OR, ownership after a false guard, and changing-subject exhaustiveness. Their names and exact commands must be recorded before the implementation receipt. Execute the same witness meanings through AOT, default native run, forced interpreter/deopt, web, and compile-time evaluation. An unimplemented or skipped applicable mode blocks closure.\n\nCheck formatter roundtrips for the changed headers and repairs. A lint or formatter fix must preserve the existing program meaning, inserting an explicit binding where a prior one-time read must remain one-time. No performance result is claimed.",
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "All criteria met; c25 on p239 (e34c1b985f)."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "p216: c3 and c5 met. Held: c4 (ui E0442 fails), c6 (golden profile not clean), c14 (ui dispatch_hole_header_not_bool snapshot). The fixes are with IfHole-6-1."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Criteria c4, c5, c6, c14, c24 and c25 rewritten to D-IFHOLE2=A (ratified 2026-11-15): the hole is spelled `<>`, a plain `subject == {` table compares one value, effectful hole headers are refused (E0950), hole tables refuse pattern/range arms and need else when they give a value, and the missing-hole diagnostic is dropped. Order of work: the A respell and its refusals first, then c3/c4/c20 in the `<>` spelling."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Handoff (SweepFix-162 stopped, agent cap): partial D-IFHOLE2=A parser groundwork in SUB SweepFix-162-ifhole2-partial (DecisionTables.jet, never checked or run; not for landing as is). Left: the two State.jet fields; <> in parser_parse_pipe_value; header open/close in both if parsers; the statement-form E1013 and E1014; rows E1013-E1016 and updates to E0437, E0946 and E0948, then DiagnosticRows --write; the sema E1016 effect-call refusal; the formatter's hole detection; tests, snapshots, an example and the spec."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Main 2026-11-14: ballot D-IFHOLE2 filed (draft GoalsA-1-3, adversarial review IfholeReview-1, validator clean). Recommends A. Recount: 16,351 holeless tables in 2,724 files, 5,983 of them with a call in the header. c6 and the missing-hole part of c14 wait on it. Hole tables landed in stack135 (4010511a89, ed0fefd0d6, 0216146c95, 37707476ff)."
+        },
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "Main, 2026-11-14: the parser and formatter slice (c3/c4/c5, hole tables additive, holeless tables unchanged) is queued as GoalsA-1-3-ifhole-parse for the stack after 134. The c6/c14 removal is held on a conflict between two ratified rulings: D-IFHOLE1=A (2026-09-11) says every dispatch header holds exactly one '_' hole, with old distributed headers removed in one cutover; D-IF3 (2026-10-01, spec S68) keeps the holeless canonical form 'if subject == { ... }'. Main files the owner ballot: (a) keep both forms, or (b) remove the holeless form and migrate every table to 'subject == _'. c6/c14 wait on it; the rest proceeds."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Examples concept-area cutover (2c3e68a70b) moved paths this card's criteria cite. Read each cited path as its new home: c18: Examples/features/basics/fizzbuzz.jet -> Examples/Basics/FizzBuzz.jet."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match proof on the admitted `jet` (no jetc0, compiler-diff or frozen-Rust evidence)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: the old holeless header gets no teaching diagnostic (owner order)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 3 criteria from archived #3971: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
+          "at": "2026-10-01",
+          "by": "TowerCloser",
+          "text": "Retargeted to the Jet compiler under the Rust freeze, 2026-10-01 (owner): the Rust compiler only gets stage-zero blockers, deletions and C-ABI runtime exports."
+        },
+        {
+          "at": "2026-10-01",
+          "by": "TowerCloser",
+          "text": "Split into 5 session-sized children (#4068 #4069 #4070 #4071 #4072) on 2026-10-01: 20 open specific criteria (~12 sessions) in one card; split into 5 session-sized children of ~4 criteria each. This card stays open as their umbrella; meet its criteria from the children's evidence."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Phase 0b plan build-out (2026-09-29, Opus 5.5): plan rewritten for the self-hosted direction with a runnable proof and batch key batch-jetc-front."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Phase 0 triage 2026-09-28 (types1b, Opus 5.5): C_RETARGET. D-IFHOLE1 is now ratified A, but nothing is implemented: fizzbuzz still uses the subjectless table, with the hole form commented out. The plan and criteria name the Rust syntax registry (Syntax.rs) and generic parser/formatter; the cutover now belongs in Compiler/. Evidence: Examples/features/basics/fizzbuzz.jet:5-21 (hole form commented out); no dispatch-hole parsing in Compiler/JetParser/Source/Parser (grep); Tower D-IFHOLE1 ratified A"
+        },
+        {
+          "at": "2026-09-11",
+          "by": "Main",
+          "text": "D-IFHOLE1 preparation is complete; implementation is not started. The owner chose ordinary &&/|| and per-attempt header evaluation. After review, he selected \"Require a candidate per arm\" and \"Yes, leave it uncalled\" for a candidate behind false &&.\n\nFresh reviews: HoleBeginner and HoleAdversary, both openai-codex/gpt-5.6-sol. The beginner review prompted explanations of FizzBuzz, typing, fallback, evaluation counts, and the wildcard. The adversarial review prompted two explicit owner choices and exact rules for expression versus pattern filling, guarded ownership, Boolean-OR scope, no-else coverage, grouping, and migration.\n\nDesign-away pass: preserve attached guards instead of forcing nested if; preserve typed equality patterns and range matching instead of hidden search. Keep one local hole and existing alternative grouping. Preserve old one-time reads through explicit bindings during source-aware migration. A formatter-only insertion is insufficient. Remaining costs are visible in the ballot: old mixed tables need rewriting, compound Boolean candidates need parentheses, bitmask candidates need a named value, and expression evaluation follows substitution rather than eager function arguments.\n\nThe no-else proof is explicit: a plain equality header, one immutable bound subject, and sufficient unguarded structural coverage. Other forms need else when returning a value. No runtime fallback or general stability prover is introduced. The two reviewers examined the complete base draft; Main incorporated their findings. This log does not claim they re-reviewed the revised text or that compiler behavior has passed."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-IFHOLE1 has complete semantic acceptance terms, both independent full-ballot reviews, and owner ratification before compiler edits.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "D-IFHOLE1 is ratified (outcome A, 2026-09-11), with the beginner and adversarial review passes recorded on the decision.",
+          "at": "2026-11-17T02:29:19.223Z",
+          "closure": "decision"
+        },
+        {
+          "n": 3,
+          "text": "Joined guards preserve ordinary &&/|| precedence and short-circuiting. Bool candidates, parenthesized alternatives, and OR bypass produce the documented results without nested if statements. Proof: `jet test Compiler --profile golden --filter IfHole/GuardPrecedence` on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p216 batch compiler (census build of dev efb3da4f6c): jet test Compiler --profile golden --filter IfHole/GuardPrecedence PASS on O0/O1/O2 (3/3)",
+          "at": "2026-11-16T16:45:22.847Z"
+        },
+        {
+          "n": 4,
+          "text": "Under D-IFHOLE2=A a `<>` header runs once for each arm tried, in arm order, and never for an arm after the first match; candidate expressions run at their substituted position at most once; errors propagate rather than becoming nonmatches; a header with an effect (an effectful call, a `&` argument or a `&self` receiver that changes state) is refused (E0442 HoleHeaderEffect) with a fix that names the value first. Proof: `jet test Compiler --profile golden --filter IfHole/HeaderEvalPerCandidate` on O0, O1 and O2, and `jet test Compiler --profile ui --filter E0442`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p220 batch compiler (census build of dev 17c073989d): jet test Compiler --profile ui --filter E0442 PASS 2/2 (IfHole-6-1-e0442-filter, 8a0e946561)",
+          "at": "2026-11-16T18:18:32.904Z"
+        },
+        {
+          "n": 5,
+          "text": "Under D-IFHOLE2=A a hole table refuses pattern and range arms (E0948), and a hole table that gives a value needs `else` (registered code, UI snapshot); a plain `subject == {` table keeps range matching, payload wildcards and safe bindings, and a plain table over an enum that lists every case needs no `else`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p216 batch compiler (census build of dev efb3da4f6c): jet test Compiler --profile cases --filter IfHole/pattern_slots PASS",
+          "at": "2026-11-16T16:45:24.535Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "IfHole/pattern_slots"
+          }
+        },
+        {
+          "n": 6,
+          "text": "One cutover respells every hole table in Examples, tests, Core, Compiler and Tools from `_` to `<>` (D-IFHOLE2=A); `_` in an if header is no longer a hole, and no compatibility parser, alias or jet fix rule remains. Proof: `jet test Compiler --profile cases --filter IfHole/old_header_refused` and the full golden profile passes on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p216: cases IfHole/old_header_refused PASS; p218 batch compiler (census build of dev 7300cf5099): the full golden profile passes on O0/O1/O2 (5008 pass, 0 fail)",
+          "at": "2026-11-16T17:33:31.320Z"
+        },
+        {
+          "n": 13,
+          "text": "[retarget] D-IFHOLE1 ratified A (met).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "D-IFHOLE1 is ratified (outcome A, 2026-09-11), with the beginner and adversarial review passes recorded on the decision.",
+          "at": "2026-11-17T02:29:20.484Z",
+          "closure": "decision"
+        },
+        {
+          "n": 14,
+          "text": "Every hole table has exactly one statically typed `<>` hole. Repeated, ambiguous, wrong-type and non-Bool headers get registered diagnostics (DiagnosticRows.jet) with UI snapshots.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p218 batch compiler (census build of dev 7300cf5099): jet test Compiler --profile ui --filter dispatch_hole_ PASS 12/12",
+          "at": "2026-11-16T17:33:29.980Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "dispatch_hole_"
+          }
+        },
+        {
+          "n": 19,
+          "text": "The dispatch-hole syntax has its syntax registry row, its syntax-decisions.md entry, regenerated editor grammars and re-blessed snapshots. Proof: after `jet self devtools grammars`, `git status --short Tools/Editors` is empty, and `jet test Tests/Guards --filter grammar` and `jet test Tests/Guards --filter syntax_reconciliation` pass.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p235 batch compiler (dev 1c5b311279): jet test Tests/Guards --filter grammar PASS 13/0 and --filter syntax_reconciliation PASS 16/0; jet self devtools grammars leaves git status --short Tools/Editors empty (rechecked by IfHole on dev d9215b4fd5).",
+          "at": "2026-11-17T01:22:46.727Z"
+        },
+        {
+          "n": 20,
+          "text": "Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): `jet test Compiler --profile golden --filter Basics/DispatchHole` passes. It proves guard precedence, per-attempt header effects, skipped-candidate silence, error propagation and a pattern slot against explicit reference forms. Goldens pass on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p237 batch compiler (dev ab95db25f2): jet test Compiler --profile golden --filter Basics/DispatchHole PASS 3/3 (Examples/Basics/DispatchHole.jet on o0, o1 and o2).",
+          "at": "2026-11-17T01:23:42.042Z"
+        },
+        {
+          "n": 21,
+          "text": "(was #3971 c1) No E0003 for a guarded table in value or statement position; coverage is reported only by sema diagnostics, with UI snapshots [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev in light2 (980e02feb4..6fd8510b1f, Lander5), proved on the batch-15 jet (gate-p20) over the fit tree: d7e52660dd (G6Meta-3067guards): case control_and_data/guarded_dispatch_tables_check_coverage_in_sema 1/0, ui guarded_arm_covers_no_case 1/0, run NestedPayloadSafety 3/0.",
+          "at": "2026-11-14T01:17:48.665Z"
+        },
+        {
+          "n": 22,
+          "text": "(was #3971 c2) L0303 and E0307 never contradict each other on the same table (test with the probe tables from the report) [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev in light2 (980e02feb4..6fd8510b1f, Lander5), proved on the batch-15 jet (gate-p20) over the fit tree: d7e52660dd (G6Meta-3067guards): case control_and_data/guarded_dispatch_tables_check_coverage_in_sema 1/0, ui guarded_arm_covers_no_case 1/0, run NestedPayloadSafety 3/0.",
+          "at": "2026-11-14T01:17:50.859Z"
+        },
+        {
+          "n": 23,
+          "text": "(was #3971 c3) nested_payload_safety.jet matches the ratified rule, including its comment, and its golden passes [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev in light2 (980e02feb4..6fd8510b1f, Lander5), proved on the batch-15 jet (gate-p20) over the fit tree: d7e52660dd (G6Meta-3067guards): case control_and_data/guarded_dispatch_tables_check_coverage_in_sema 1/0, ui guarded_arm_covers_no_case 1/0, run NestedPayloadSafety 3/0.",
+          "at": "2026-11-14T01:17:53.800Z"
+        },
+        {
+          "n": 24,
+          "text": "Read counts follow D-IFHOLE2=A: a plain `subject == {` table reads its subject once, and a `<>` header runs once per arm tried. Proof: a case on O0/O1/O2 whose plain-table subject call prints once, and whose hole-table golden shows per-arm evaluation order.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p237 batch compiler (dev ab95db25f2): jet test Compiler --profile cases --filter IfHole/pattern_slots PASS 1/1, and --profile golden --filter IfHole/HeaderEvalPerCandidate PASS 3/3 (o0, o1 and o2).",
+          "at": "2026-11-17T01:23:07.795Z"
+        },
+        {
+          "n": 25,
+          "text": "E0948 fix text no longer says \"write `subject == _`\"; a header that only compares with `<>` is refused with its own registered code (what/why/fix, UI snapshot) and a fix that removes the `<>` (D-IFHOLE2=A). Proof: `jet test Compiler --profile ui --filter E0948` and the new code UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p239 batch compiler (dev 58664a641a), commit e34c1b985f: jet test Compiler --profile ui --filter E0948 PASS and --filter E0441 (the new comparison-only header code, with its snapshot) PASS.",
+          "at": "2026-11-17T02:29:05.595Z"
+        },
+        {
+          "n": 26,
+          "text": "Data/Syntax registry entry updated",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev ab95db25f2: Compiler/JetFoundation/Data/Syntax/MathLayout.jet:859 OP_PIPE_VALUE \"<>\", Highlights.jet:857, and the <> rows in Data/Syntax/Spellings.jet.",
+          "at": "2026-11-17T01:23:11.536Z"
+        },
+        {
+          "n": 27,
+          "text": "syntax-decisions.md log entry",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev ab95db25f2: Docs/Spec/syntax-decisions.md:1153 D-IFHOLE1=A and 1162 D-IFHOLE2=A entries.",
+          "at": "2026-11-17T01:23:20.614Z"
+        },
+        {
+          "n": 28,
+          "text": "editor grammars regenerated (jet self devtools grammars)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p235 batch compiler (dev 1c5b311279): jet test Tests/Guards --filter grammar PASS 13/0 and --filter syntax_reconciliation PASS 16/0; jet self devtools grammars leaves git status --short Tools/Editors empty (rechecked by IfHole on dev d9215b4fd5).",
+          "at": "2026-11-17T01:22:57.242Z"
+        },
+        {
+          "n": 29,
+          "text": "snapshots re-blessed",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p237 batch compiler (dev ab95db25f2): jet test Compiler --profile ui --filter dispatch_hole_ PASS 12/12.",
+          "at": "2026-11-17T01:23:23.566Z"
+        }
+      ],
+      "refs": [
+        "examples/features/basics/fizzbuzz.jet",
+        "examples/features/basics/pattern_matching.jet",
+        "crates/jet-parser/src/Parser/Statements/conditionals.rs",
+        "crates/jet-foundation/src/Syntax.rs",
+        "docs/spec/syntax-decisions.md",
+        "D-IFDIST1",
+        "D-ARMHEAD-PAREN1",
+        "https://doc.rust-lang.org/reference/expressions/match-expr.html",
+        "https://docs.scala-lang.org/scala3/book/fun-anonymous-functions.html"
+      ],
+      "tags": [
+        "full",
+        "retargeted",
+        "batch-jetc-front",
+        "wayfinder:task"
+      ],
+      "parentId": "c0w9o2sz",
+      "needsAcceptance": false,
+      "created": "2026-09-11T12:59:34.979Z",
+      "updated": "2026-11-17T02:29:22.554Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 29,
+      "completedAt": "2026-11-17T02:29:22.554Z",
+      "questions": [
+        {
+          "id": "q0n7cs1p",
+          "cardId": "c0p39lw2",
+          "decisionId": "D-IFHOLE2",
+          "by": "owner",
+          "kind": "question",
+          "text": "Should the hole be <> instead of _ to match pipe syntax so that <> means the value is inserted here? I also am very confused by this ballot, no idea what it means plainly",
+          "status": "answered",
+          "answer": "Plainly: a decision table is Jet's `if` with arms, like a match. Today you write `if light == { .Red -> 30  .Amber -> 5 }`: Jet compares `light` with each arm in turn. The hole form marks where each arm's value goes: `if n % _ == 0 { 15 -> \"FizzBuzz\"  3 -> \"Fizz\" }` means try `n % 15 == 0`, then `n % 3 == 0`. On 2026-09-11 you ruled that every table must have a hole, so `if light == {` would become `if light == _ {`. That migration never ran. The ballot asks which headers stay: (A) keep `if light == {` for plain comparisons and use a hole only when the test is more than one comparison; (B) migrate all ~16,000 tables to a hole; (C) allow both spellings; (D) require the hole everywhere but read the header once. The catch for B: your rule re-runs the header for each arm tried, so `if files.try_lock(path) == _ {` would call try_lock up to once per arm, and ~6,000 tables call a function in the header and would first need a named value.\n\nOn `<>`: yes, we recommend it. `<>` already means 'a value is inserted here' in pipes, so the hole reuses one idea instead of adding one. `_` already means 'ignore this' in patterns and the catch-all arm, and a hole table would hold both meanings at once (`if try_lock(p) == _ { .Val(_) -> ... }`). The one cost is nesting: a hole table directly inside a pipe step would see two `<>` values. The rule we'd propose: a hole table inside a pipe step names the pipe value first, and the compiler refuses the ambiguous form with that fix. The ballot will be rewritten in plain language with `<>` as the hole in every option and re-reviewed; the hole syntax that landed today (`_`) is a one-token parser change to switch.",
+          "created": "2026-11-15T00:22:10.963Z",
+          "answeredAt": "2026-11-15",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-20T02:32:04.476Z"
+    },
+    {
+      "id": "c0zn6gbs",
+      "num": 6538,
+      "title": "Examples goldens: every example has an expected stream, and Path output does not depend on the working directory",
+      "body": "Update 2026-11-15 (TowerKeeper-2): one golden runner remains. Tools/agent/run-feature-examples.mjs was deleted in c515c4ea10 (#6035 c3), and the examples moved to concept areas in 2c3e68a70b, so the old paths below are history. The testkit golden suite (Compiler/JetTestKit/Source/Golden.jet:318) FAILs an example with no expected stream; c1 gives each one a stream, and the Path criterion covers io/path (now Examples/Systems/Files/Path.jet).\n\nFound by AsmPar-1 on dev 163d4852ad (w22 s2), 2026-11-01. Examples goldens have two runners. Tools/agent/run-feature-examples.mjs (the wave's default-tier golden) skips an example with no expected .out or .err.out ('no native golden', line 366). Tools/testkit's golden suite FAILs the same example with 'missing expected stream' (Golden.jet:184) at every tier, o0 included: TESTKIT_ARGS='--tier o0 --filter collections/data_battery' jet test Tools/testkit 'suite golden'. The 18 examples: data_battery, job_queue, native_resource_streams, foundations/{arrays, bridges, capabilities, distributed, dsl, exact, realtime, receipts, storage, text, units}, opaque_handles, ui/battery, ui/surface, web/state_surface. Separately, Examples io/path walks the relative Path.from('Examples/features/io') (path.jet:26): it prints 'walk non-empty: true' from the repo root (run-feature-examples) and 'false' from testkit's staged directory. One meaning needs one rule. Under I5 every example needs a golden, so the likely fix is to give the 18 real goldens and remove the .mjs skip, and to make io/path independent of cwd. Lists: $JET_SCRATCH_ROOT/lanes/AsmPar/selfab/gold-r41/.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e20",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "All criteria met on p238 (dev 5bea729463)."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-2",
+          "text": "Cleanup 2026-11-15 (TowerKeeper-2): c1 reworded to the one remaining runner; the Path half split off as #6538 c6."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner 2026-11-06 approved: c2 drops the decision ID from `jet explain` output, per AGENTS.md I7."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 4 criteria from archived #2045: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
+          "at": "2026-11-02",
+          "by": "Main",
+          "text": "Main census on base 190f826022, 2026-11-02 (o0 `jet run` from a scratch copy of each example; full stderr in $JET_STATE_ROOT/scratch/Main/ex18/<name>/o0.err). foundations/receipts already has receipts.out. Runs clean: concurrency/native_resource_streams (o0/o1/o2 stdout byte-identical, 8 lines; expected .out queued as Main-2 for wave 35). foundations/realtime: runs on all three tiers but its stdout is timing-dependent (callbacks 1875/1874/1875, max_lateness_ns and jitter vary), so it needs the example changed to print only deterministic facts before it can get a golden. Real defects, one per example: collections/data_battery E2404 (`csv()` DataError cannot propagate into [FieldError]); concurrency/job_queue ICE 101 (ir.build unlowered core.jobs::queue, Unit call); foundations/arrays runtime panic \"gray pixels\" (run.jet:158); foundations/bridges E0067 `__bindgen__` reserved (generated fixture-state/bindings/c/zreader.jet); foundations/capabilities E0102 Plugin has no method greet; foundations/distributed E0102 Stream has no method with_event_time; foundations/dsl E0312 [Dyn] has no ==; foundations/exact E0360 no + for T (exact.jet:384); foundations/storage E2305 returned view needs a stable owner (run.jet:61); foundations/text ICE 101 (ir.build unlowered scan_logs); foundations/units E0113 Length*Time^-2 vs MeterPerSecondSquared; ui/battery ICE 101 (14 faults, ir.build unlowered run); ui/surface E1803 Browser authority undecided; web/state_surface E1004 core.web.router has no item show. Not run: opaque_handles (no source found under Examples/features). The ICE rows break I2 and need their own cards."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every example under Examples/ has an expected stream, so no golden row FAILs with 'missing expected stream' (Compiler/JetTestKit/Source/Golden.jet:318). Proof: `jet test Compiler --profile golden` gives a verdict, not a missing-stream FAIL, for every example at O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p238 batch compiler (dev 5bea729463), full golden profile: 5032 PASS, 0 FAIL; no Examples/ row reports 'missing expected stream' at O0, O1 or O2 (the one such row is Tests/Run/Foundations/Capabilities, known-failing on #6930, not an example).",
+          "at": "2026-11-17T02:09:51.498Z"
+        },
+        {
+          "n": 2,
+          "text": "(was #2045 c1) jet explain @ / : / #Live / => (every registered user-typeable glyph, sigil, keyword, marker) returns name, meaning, a docs link and a one-line example from the syntax registry, with no decision ID (I7: decision IDs live in Tower and specs, never in source or registries) (`Compiler/JetFoundation/Data/Syntax`) [precut audit: not proven on 9c7ddf1359: C:explain_syntax/explain_syntax_verbose_names_registry_constant_and_decision has no expected output, so the golden runner cannot judge it (#6538)]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev in light3 (b38459deab..ed697d01d9, Lander5), proved on the batch-15/16 jet over the fit tree: bf3fb6bb0e (G5DevX2-explain-blessed): jet test Compiler --profile cases --filter explain_syntax/ 48/0 (was 47/1), and cli dictionary_golden passes. The verbose case now has expected output that names the registry constant and no decision ID; its known-failing row was removed.",
+          "at": "2026-11-14T01:24:54.970Z"
+        },
+        {
+          "n": 3,
+          "text": "(was #2045 c2) Unknown token gets a real diagnostic with nearest-match suggestion, not the build-log E1274 fallthrough [precut audit: not proven on 9c7ddf1359: C:explain_syntax/explain_syntax_verbose_names_registry_constant_and_decision has no expected output, so the golden runner cannot judge it (#6538)]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev in light3 (b38459deab..ed697d01d9, Lander5), proved on the batch-15/16 jet over the fit tree: bf3fb6bb0e (G5DevX2-explain-blessed): jet test Compiler --profile cases --filter explain_syntax/ 48/0 (was 47/1), and cli dictionary_golden passes. The verbose case now has expected output that names the registry constant and no decision ID; its known-failing row was removed.",
+          "at": "2026-11-14T01:24:56.283Z"
+        },
+        {
+          "n": 4,
+          "text": "(was #2045 c3) Lookup is generated from the registry (no hand-maintained parallel table); REPL ?name docs reuse the same source [precut audit: not proven on 9c7ddf1359: C:explain_syntax/explain_syntax_verbose_names_registry_constant_and_decision has no expected output, so the golden runner cannot judge it (#6538)]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev in light3 (b38459deab..ed697d01d9, Lander5), proved on the batch-15/16 jet over the fit tree: bf3fb6bb0e (G5DevX2-explain-blessed): jet test Compiler --profile cases --filter explain_syntax/ 48/0 (was 47/1), and cli dictionary_golden passes. The verbose case now has expected output that names the registry constant and no decision ID; its known-failing row was removed.",
+          "at": "2026-11-14T01:24:57.544Z"
+        },
+        {
+          "n": 5,
+          "text": "(was #2045 c4) CLI snapshot tests cover representative glyph, keyword, marker, and unknown-token queries [precut audit: not proven on 9c7ddf1359: C:explain_syntax/explain_syntax_verbose_names_registry_constant_and_decision has no expected output, so the golden runner cannot judge it (#6538)]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev in light3 (b38459deab..ed697d01d9, Lander5), proved on the batch-15/16 jet over the fit tree: bf3fb6bb0e (G5DevX2-explain-blessed): jet test Compiler --profile cases --filter explain_syntax/ 48/0 (was 47/1), and cli dictionary_golden passes. The verbose case now has expected output that names the registry constant and no decision ID; its known-failing row was removed.",
+          "at": "2026-11-14T01:24:58.957Z"
+        },
+        {
+          "n": 6,
+          "text": "Examples/Systems/Files/Path.jet prints the same output whatever the working directory: it walks a directory the example makes (61b10e3cd9). Proof: `jet test Compiler --profile golden --filter Systems/Files/Path` passes when run from the repository root and from another directory.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p238 batch compiler (dev 5bea729463), full collect-all suite: golden Systems/Files/Path PASS on o0, o1 and o2 (cwd-independent since 61b10e3cd9).",
+          "at": "2026-11-17T02:09:20.349Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-01T09:11:08.072Z",
+      "updated": "2026-11-17T02:09:53.426Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 6,
+      "completedAt": "2026-11-17T02:09:53.426Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T02:32:04.479Z"
+    },
+    {
+      "id": "c01pk3vf",
+      "num": 6801,
+      "title": "Background work: periodic jobs on the Linux desktop; browsers run none (server jobs and push cover the web)",
+      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G3).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e19",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "All criteria met; c3 on p239 (a11188f7ed). The device web halves live on #6556."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. macOS, Windows, iOS and Android work moved to #6984 (G13)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "native.background(every:, run:) on the Linux desktop is a timer while the app runs, or a login item (an XDG autostart entry) when the app asks to run at login.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p238 batch compiler (dev 5bea729463), commit 5bea729463: jet test Compiler --profile cases --filter NativeApp/background_registers_on_linux PASS 1/1.",
+          "at": "2026-11-17T01:44:27.053Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "NativeApp/background_registers_on_linux"
+          }
+        },
+        {
+          "n": 3,
+          "text": "native.background in a graph built for the web output is a compile error that names server jobs as the replacement, never a silent no-op.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p239 batch compiler (dev 58664a641a), commit a11188f7ed: jet test Compiler --profile cases --filter WebApp/background_on_the_web_output_is_a_compile_error PASS 1/1.",
+          "at": "2026-11-17T02:29:04.169Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "WebApp/background_on_the_web_output_is_a_compile_error"
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": "c0snkbac",
+      "needsAcceptance": false,
+      "created": "2026-11-13T15:13:42.496Z",
+      "updated": "2026-11-17T02:29:08.389Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-17T02:29:08.389Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T02:32:04.479Z"
     }
   ]
 }

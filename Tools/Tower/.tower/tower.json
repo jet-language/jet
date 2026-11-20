@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112502,
+    "rev": 112507,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -23265,299 +23265,6 @@
       "created": "2026-09-10T22:58:55.987Z",
       "updated": "2026-11-16T12:52:54.958Z",
       "updatedBy": "Main"
-    },
-    {
-      "id": "c0p39lw2",
-      "num": 3067,
-      "title": "Require one typed hole in dispatch tables and preserve Boolean guards",
-      "body": "User proposed factoring the repeated condition in examples/features/basics/fizzbuzz.jet into an if header with one required `_` hole. He chose one statically typed input, ordinary && and || composition, and header evaluation per attempted arm. This card records the complete language choice before implementation.\n\nThe proposal preserves candidate guards, pattern bindings, range matching, and the existing ordinary and subjectless if forms. It replaces old distributed headers in one repository-wide cutover. The full ballot must settle exact typing, grouping, evaluation, ownership, exhaustiveness, and migration rules. These rules are not implemented or ratified by creating this card.\n\nDeduplication: the live non-done card query found no matching typed-hole, hole-dispatch, FizzBuzz, or D-IFDIST1 stream. D-IFHOLE1 is unused. This request is about readability, not a claimed performance improvement.",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e18",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": "## Goal\nImplement ratified D-IFHOLE1=A (2026-09-11). Every dispatch table header holds exactly one statically typed `_` hole that each non-else arm fills. Guards keep ordinary `&&`/`||`.\n\n```jet\nfn label(n: Int) -> String {\n    return if n % _ == 0 {\n        15 -> \"FizzBuzz\"\n        3 -> \"Fizz\"\n        5 -> \"Buzz\"\n        else -> \"{n}\"\n    }\n}\n```\n\n## Ratified terms (keep all)\n- `2 && ready` needs both checks. `2 && ready || emergency` accepts emergency alone. `2 && (ready || emergency)` always tests the candidate.\n- Boolean candidates are grouped in parentheses. Arm-level `|` separates candidates, not bits.\n- Value tables normally need `else`. Omitting `else` requires plain equality, one immutable bound subject and complete unguarded pattern coverage.\n- Owner choices: one candidate per non-else arm; a candidate behind a false `&&` is left uncalled; the header is evaluated once per attempted arm (bind first for a single read).\n- Amends D-IFDIST1, D-IF3, D-MATCHARM1/2 and S68, and preserves D-ARMHEAD-PAREN1.\n\n## Current state\n- `Examples/features/basics/fizzbuzz.jet:5-11` uses a subjectless table. The hole form sits commented out at `:14-21`, in retired `String ->` spelling.\n- The distributed header `if subject OP { atoms -> }` is parsed by `parser_expression_form_parse_dispatch_table` in `Compiler/JetParser/Source/Parser/ExpressionForms/DecisionTables.jet:340`. It lowers to nested ifs through `parser_expression_form_nest_arms` (`:284`), with atom/`&&`/`||` handling at `:135-213` and E0386 at `:188`. There is no hole parsing anywhere in JetParser.\n- D-IFHOLE1 is not recorded in syntax-decisions.md or Syntax.rs.\n- Migration size: about 6,050 tracked `.jet` lines open an `if <expr> OP {` table, most of them `if x == {` pattern tables. The migration must be mechanical.\n\n## Changes\n1. JetParser DecisionTables.jet: parse `if H[_] { candidate [&& guard] -> body }`. Reject a missing, repeated or ambiguous hole with registered errors. A holeless distributed header is not Jet syntax: it gets an ordinary parse error, with no teaching diagnostic or Safe edit (owner order). No compatibility parse path.\n2. JetAst: carry the hole position, or desugar at parse time by substituting each candidate into the header, so each candidate is evaluated at its substituted position at most once.\n3. JetSema (`Expressions/Control.jet`, `Patterns.jet`):\n   - a single hole type across arms, and a Bool header result;\n   - pattern-slot filling that keeps range matching, payload wildcards and safe bindings;\n   - OR groups that cannot leak missing bindings;\n   - no exhaustiveness credit unless the subject is immutable.\n4. Reuse the existing guard/pattern TIR, so Compiler/JetCodegen needs no new mechanism.\n5. Register the new diagnostics in DiagnosticRows.jet and Prelude/Diagnostics.jet, with UI fixtures `tests/ui/ifhole_{missing,repeated,wrong_type,non_bool}.jet`.\n6. Apply the Safe edit repo-wide (`jet fix`) across Examples, Core, Compiler, Jetpack, Tools and tests. Bind effectful subjects first where a one-time read was relied on. Update fizzbuzz.jet.\n7. Add the syntax registry row and syntax-decisions entry, update the crates/jet-parser formatter, run `jet devtools grammars`, and re-bless snapshots.\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- `JET_GOLDEN_FILTER=basics/fizzbuzz Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes. The full output, including the countdown, is unchanged on `jet run`, `jet run --interpret` and `jet build`.\n- A new `Examples/features/basics/dispatch_hole.jet` golden covers guard precedence, per-attempt header effects (counter), skipped candidates, error propagation and a pattern slot, and matches the explicit reference forms.\n- `JET_UI_FILTER=tests/ui/ifhole_ ... cargo test --test diagnostic_snapshots ui_snapshots` passes.\n- A census of holeless `if <expr> OP {` headers finds zero.\n\n## Batch\nbatch-jetc-front: parser-led syntax cutover. The sema checks ride the same build.\n\n## Dependencies\nNone. Land after #3727 so the census and grammar regenerations do not collide.",
-      "checkSteps": "All commands run through scripts/agent/jet-env with CARGO_INCREMENTAL=0 and disk-backed scratch. These are future proof commands, not completed evidence.\n\nRebuild with cargo build --bin jet before compiler smoke tests. Run target/debug/jet run --trace-tiers examples/features/basics/fizzbuzz.jet, target/debug/jet run --trace-tiers --interpret examples/features/basics/fizzbuzz.jet, and target/debug/jet run --release examples/features/basics/fizzbuzz.jet. All must retain the complete expected output, including the countdown. The traces must identify default native and forced interpreter execution honestly.\n\nSet JET_GOLDEN_FILTER=basics/fizzbuzz and run cargo test --test golden examples_compile_and_run -- --exact --nocapture. Repeat with the exact path selector for each affected example; never run the unfiltered census for this card.\n\nMigrate and run cargo test --test same_subject_dispatch rewrite_compiles_formats_and_preserves_parser_dispatch_behavior -- --exact --nocapture. Keep its observable original/rewrite execution comparison. Remove source-substring assertions rather than repinning implementation details.\n\nExtend the existing web arm/pattern checks to execute generated JavaScript and Wasm. Use the existing web_build runner and run its exact changed test names with cargo test --test web_build NAME -- --exact --nocapture. The current web_value_and_range_arm_tables_emit_on_js_and_wasm case pins generated text; replace those assertions with observable value/range outcomes. Require real execution, not source-shape evidence or skipped tools.\n\nUse JET_UI_FILTER=tests/ui/NAME.jet with cargo test --test diagnostic_snapshots ui_snapshots -- --exact --nocapture for each changed diagnostic fixture. Use the corresponding tests/ui_lint selector and lint_snapshots filter when a generated repair changes. Bless only the exact reviewed fixture, never UPDATE_EXPECT=1.\n\nAdd focused regression cases for Boolean precedence, header and candidate effect order, alternative guard failure, missing pattern bindings under OR, ownership after a false guard, and changing-subject exhaustiveness. Their names and exact commands must be recorded before the implementation receipt. Execute the same witness meanings through AOT, default native run, forced interpreter/deopt, web, and compile-time evaluation. An unimplemented or skipped applicable mode blocks closure.\n\nCheck formatter roundtrips for the changed headers and repairs. A lint or formatter fix must preserve the existing program meaning, inserting an explicit binding where a prior one-time read must remain one-time. No performance result is claimed.",
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "All criteria met; c25 on p239 (e34c1b985f)."
-        },
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "p216: c3 and c5 met. Held: c4 (ui E0442 fails), c6 (golden profile not clean), c14 (ui dispatch_hole_header_not_bool snapshot). The fixes are with IfHole-6-1."
-        },
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "Criteria c4, c5, c6, c14, c24 and c25 rewritten to D-IFHOLE2=A (ratified 2026-11-15): the hole is spelled `<>`, a plain `subject == {` table compares one value, effectful hole headers are refused (E0950), hole tables refuse pattern/range arms and need else when they give a value, and the missing-hole diagnostic is dropped. Order of work: the A respell and its refusals first, then c3/c4/c20 in the `<>` spelling."
-        },
-        {
-          "at": "2026-11-15",
-          "by": "Main",
-          "text": "Handoff (SweepFix-162 stopped, agent cap): partial D-IFHOLE2=A parser groundwork in SUB SweepFix-162-ifhole2-partial (DecisionTables.jet, never checked or run; not for landing as is). Left: the two State.jet fields; <> in parser_parse_pipe_value; header open/close in both if parsers; the statement-form E1013 and E1014; rows E1013-E1016 and updates to E0437, E0946 and E0948, then DiagnosticRows --write; the sema E1016 effect-call refusal; the formatter's hole detection; tests, snapshots, an example and the spec."
-        },
-        {
-          "at": "2026-11-15",
-          "by": "Main",
-          "text": "Main 2026-11-14: ballot D-IFHOLE2 filed (draft GoalsA-1-3, adversarial review IfholeReview-1, validator clean). Recommends A. Recount: 16,351 holeless tables in 2,724 files, 5,983 of them with a call in the header. c6 and the missing-hole part of c14 wait on it. Hole tables landed in stack135 (4010511a89, ed0fefd0d6, 0216146c95, 37707476ff)."
-        },
-        {
-          "at": "2026-11-14",
-          "by": "Main",
-          "text": "Main, 2026-11-14: the parser and formatter slice (c3/c4/c5, hole tables additive, holeless tables unchanged) is queued as GoalsA-1-3-ifhole-parse for the stack after 134. The c6/c14 removal is held on a conflict between two ratified rulings: D-IFHOLE1=A (2026-09-11) says every dispatch header holds exactly one '_' hole, with old distributed headers removed in one cutover; D-IF3 (2026-10-01, spec S68) keeps the holeless canonical form 'if subject == { ... }'. Main files the owner ballot: (a) keep both forms, or (b) remove the holeless form and migrate every table to 'subject == _'. c6/c14 wait on it; the rest proceeds."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Examples concept-area cutover (2c3e68a70b) moved paths this card's criteria cite. Read each cited path as its new home: c18: Examples/features/basics/fizzbuzz.jet -> Examples/Basics/FizzBuzz.jet."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Deconfliction 2026-11-06: reworded to match proof on the admitted `jet` (no jetc0, compiler-diff or frozen-Rust evidence)."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Owner deconfliction 2026-11-06: the old holeless header gets no teaching diagnostic (owner order)."
-        },
-        {
-          "at": "2026-11-04",
-          "by": "Main",
-          "text": "#6563 c1 precut audit re-added 3 criteria from archived #3971: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
-        },
-        {
-          "at": "2026-10-01",
-          "by": "TowerCloser",
-          "text": "Retargeted to the Jet compiler under the Rust freeze, 2026-10-01 (owner): the Rust compiler only gets stage-zero blockers, deletions and C-ABI runtime exports."
-        },
-        {
-          "at": "2026-10-01",
-          "by": "TowerCloser",
-          "text": "Split into 5 session-sized children (#4068 #4069 #4070 #4071 #4072) on 2026-10-01: 20 open specific criteria (~12 sessions) in one card; split into 5 session-sized children of ~4 criteria each. This card stays open as their umbrella; meet its criteria from the children's evidence."
-        },
-        {
-          "at": "2026-09-29",
-          "by": "Pip",
-          "text": "Phase 0b plan build-out (2026-09-29, Opus 5.5): plan rewritten for the self-hosted direction with a runnable proof and batch key batch-jetc-front."
-        },
-        {
-          "at": "2026-09-29",
-          "by": "Pip",
-          "text": "Phase 0 triage 2026-09-28 (types1b, Opus 5.5): C_RETARGET. D-IFHOLE1 is now ratified A, but nothing is implemented: fizzbuzz still uses the subjectless table, with the hole form commented out. The plan and criteria name the Rust syntax registry (Syntax.rs) and generic parser/formatter; the cutover now belongs in Compiler/. Evidence: Examples/features/basics/fizzbuzz.jet:5-21 (hole form commented out); no dispatch-hole parsing in Compiler/JetParser/Source/Parser (grep); Tower D-IFHOLE1 ratified A"
-        },
-        {
-          "at": "2026-09-11",
-          "by": "Main",
-          "text": "D-IFHOLE1 preparation is complete; implementation is not started. The owner chose ordinary &&/|| and per-attempt header evaluation. After review, he selected \"Require a candidate per arm\" and \"Yes, leave it uncalled\" for a candidate behind false &&.\n\nFresh reviews: HoleBeginner and HoleAdversary, both openai-codex/gpt-5.6-sol. The beginner review prompted explanations of FizzBuzz, typing, fallback, evaluation counts, and the wildcard. The adversarial review prompted two explicit owner choices and exact rules for expression versus pattern filling, guarded ownership, Boolean-OR scope, no-else coverage, grouping, and migration.\n\nDesign-away pass: preserve attached guards instead of forcing nested if; preserve typed equality patterns and range matching instead of hidden search. Keep one local hole and existing alternative grouping. Preserve old one-time reads through explicit bindings during source-aware migration. A formatter-only insertion is insufficient. Remaining costs are visible in the ballot: old mixed tables need rewriting, compound Boolean candidates need parentheses, bitmask candidates need a named value, and expression evaluation follows substitution rather than eager function arguments.\n\nThe no-else proof is explicit: a plain equality header, one immutable bound subject, and sufficient unguarded structural coverage. Other forms need else when returning a value. No runtime fallback or general stability prover is introduced. The two reviewers examined the complete base draft; Main incorporated their findings. This log does not claim they re-reviewed the revised text or that compiler behavior has passed."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "D-IFHOLE1 has complete semantic acceptance terms, both independent full-ballot reviews, and owner ratification before compiler edits.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "D-IFHOLE1 is ratified (outcome A, 2026-09-11), with the beginner and adversarial review passes recorded on the decision.",
-          "at": "2026-11-17T02:29:19.223Z",
-          "closure": "decision"
-        },
-        {
-          "n": 3,
-          "text": "Joined guards preserve ordinary &&/|| precedence and short-circuiting. Bool candidates, parenthesized alternatives, and OR bypass produce the documented results without nested if statements. Proof: `jet test Compiler --profile golden --filter IfHole/GuardPrecedence` on O0, O1 and O2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p216 batch compiler (census build of dev efb3da4f6c): jet test Compiler --profile golden --filter IfHole/GuardPrecedence PASS on O0/O1/O2 (3/3)",
-          "at": "2026-11-16T16:45:22.847Z"
-        },
-        {
-          "n": 4,
-          "text": "Under D-IFHOLE2=A a `<>` header runs once for each arm tried, in arm order, and never for an arm after the first match; candidate expressions run at their substituted position at most once; errors propagate rather than becoming nonmatches; a header with an effect (an effectful call, a `&` argument or a `&self` receiver that changes state) is refused (E0442 HoleHeaderEffect) with a fix that names the value first. Proof: `jet test Compiler --profile golden --filter IfHole/HeaderEvalPerCandidate` on O0, O1 and O2, and `jet test Compiler --profile ui --filter E0442`.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p220 batch compiler (census build of dev 17c073989d): jet test Compiler --profile ui --filter E0442 PASS 2/2 (IfHole-6-1-e0442-filter, 8a0e946561)",
-          "at": "2026-11-16T18:18:32.904Z"
-        },
-        {
-          "n": 5,
-          "text": "Under D-IFHOLE2=A a hole table refuses pattern and range arms (E0948), and a hole table that gives a value needs `else` (registered code, UI snapshot); a plain `subject == {` table keeps range matching, payload wildcards and safe bindings, and a plain table over an enum that lists every case needs no `else`.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p216 batch compiler (census build of dev efb3da4f6c): jet test Compiler --profile cases --filter IfHole/pattern_slots PASS",
-          "at": "2026-11-16T16:45:24.535Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "IfHole/pattern_slots"
-          }
-        },
-        {
-          "n": 6,
-          "text": "One cutover respells every hole table in Examples, tests, Core, Compiler and Tools from `_` to `<>` (D-IFHOLE2=A); `_` in an if header is no longer a hole, and no compatibility parser, alias or jet fix rule remains. Proof: `jet test Compiler --profile cases --filter IfHole/old_header_refused` and the full golden profile passes on O0, O1 and O2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p216: cases IfHole/old_header_refused PASS; p218 batch compiler (census build of dev 7300cf5099): the full golden profile passes on O0/O1/O2 (5008 pass, 0 fail)",
-          "at": "2026-11-16T17:33:31.320Z"
-        },
-        {
-          "n": 13,
-          "text": "[retarget] D-IFHOLE1 ratified A (met).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "D-IFHOLE1 is ratified (outcome A, 2026-09-11), with the beginner and adversarial review passes recorded on the decision.",
-          "at": "2026-11-17T02:29:20.484Z",
-          "closure": "decision"
-        },
-        {
-          "n": 14,
-          "text": "Every hole table has exactly one statically typed `<>` hole. Repeated, ambiguous, wrong-type and non-Bool headers get registered diagnostics (DiagnosticRows.jet) with UI snapshots.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p218 batch compiler (census build of dev 7300cf5099): jet test Compiler --profile ui --filter dispatch_hole_ PASS 12/12",
-          "at": "2026-11-16T17:33:29.980Z",
-          "proof": {
-            "profile": "ui",
-            "filter": "dispatch_hole_"
-          }
-        },
-        {
-          "n": 19,
-          "text": "The dispatch-hole syntax has its syntax registry row, its syntax-decisions.md entry, regenerated editor grammars and re-blessed snapshots. Proof: after `jet self devtools grammars`, `git status --short Tools/Editors` is empty, and `jet test Tests/Guards --filter grammar` and `jet test Tests/Guards --filter syntax_reconciliation` pass.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p235 batch compiler (dev 1c5b311279): jet test Tests/Guards --filter grammar PASS 13/0 and --filter syntax_reconciliation PASS 16/0; jet self devtools grammars leaves git status --short Tools/Editors empty (rechecked by IfHole on dev d9215b4fd5).",
-          "at": "2026-11-17T01:22:46.727Z"
-        },
-        {
-          "n": 20,
-          "text": "Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): `jet test Compiler --profile golden --filter Basics/DispatchHole` passes. It proves guard precedence, per-attempt header effects, skipped-candidate silence, error propagation and a pattern slot against explicit reference forms. Goldens pass on O0, O1 and O2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p237 batch compiler (dev ab95db25f2): jet test Compiler --profile golden --filter Basics/DispatchHole PASS 3/3 (Examples/Basics/DispatchHole.jet on o0, o1 and o2).",
-          "at": "2026-11-17T01:23:42.042Z"
-        },
-        {
-          "n": 21,
-          "text": "(was #3971 c1) No E0003 for a guarded table in value or statement position; coverage is reported only by sema diagnostics, with UI snapshots [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev in light2 (980e02feb4..6fd8510b1f, Lander5), proved on the batch-15 jet (gate-p20) over the fit tree: d7e52660dd (G6Meta-3067guards): case control_and_data/guarded_dispatch_tables_check_coverage_in_sema 1/0, ui guarded_arm_covers_no_case 1/0, run NestedPayloadSafety 3/0.",
-          "at": "2026-11-14T01:17:48.665Z"
-        },
-        {
-          "n": 22,
-          "text": "(was #3971 c2) L0303 and E0307 never contradict each other on the same table (test with the probe tables from the report) [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev in light2 (980e02feb4..6fd8510b1f, Lander5), proved on the batch-15 jet (gate-p20) over the fit tree: d7e52660dd (G6Meta-3067guards): case control_and_data/guarded_dispatch_tables_check_coverage_in_sema 1/0, ui guarded_arm_covers_no_case 1/0, run NestedPayloadSafety 3/0.",
-          "at": "2026-11-14T01:17:50.859Z"
-        },
-        {
-          "n": 23,
-          "text": "(was #3971 c3) nested_payload_safety.jet matches the ratified rule, including its comment, and its golden passes [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev in light2 (980e02feb4..6fd8510b1f, Lander5), proved on the batch-15 jet (gate-p20) over the fit tree: d7e52660dd (G6Meta-3067guards): case control_and_data/guarded_dispatch_tables_check_coverage_in_sema 1/0, ui guarded_arm_covers_no_case 1/0, run NestedPayloadSafety 3/0.",
-          "at": "2026-11-14T01:17:53.800Z"
-        },
-        {
-          "n": 24,
-          "text": "Read counts follow D-IFHOLE2=A: a plain `subject == {` table reads its subject once, and a `<>` header runs once per arm tried. Proof: a case on O0/O1/O2 whose plain-table subject call prints once, and whose hole-table golden shows per-arm evaluation order.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p237 batch compiler (dev ab95db25f2): jet test Compiler --profile cases --filter IfHole/pattern_slots PASS 1/1, and --profile golden --filter IfHole/HeaderEvalPerCandidate PASS 3/3 (o0, o1 and o2).",
-          "at": "2026-11-17T01:23:07.795Z"
-        },
-        {
-          "n": 25,
-          "text": "E0948 fix text no longer says \"write `subject == _`\"; a header that only compares with `<>` is refused with its own registered code (what/why/fix, UI snapshot) and a fix that removes the `<>` (D-IFHOLE2=A). Proof: `jet test Compiler --profile ui --filter E0948` and the new code UI snapshot.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p239 batch compiler (dev 58664a641a), commit e34c1b985f: jet test Compiler --profile ui --filter E0948 PASS and --filter E0441 (the new comparison-only header code, with its snapshot) PASS.",
-          "at": "2026-11-17T02:29:05.595Z"
-        },
-        {
-          "n": 26,
-          "text": "Data/Syntax registry entry updated",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev ab95db25f2: Compiler/JetFoundation/Data/Syntax/MathLayout.jet:859 OP_PIPE_VALUE \"<>\", Highlights.jet:857, and the <> rows in Data/Syntax/Spellings.jet.",
-          "at": "2026-11-17T01:23:11.536Z"
-        },
-        {
-          "n": 27,
-          "text": "syntax-decisions.md log entry",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev ab95db25f2: Docs/Spec/syntax-decisions.md:1153 D-IFHOLE1=A and 1162 D-IFHOLE2=A entries.",
-          "at": "2026-11-17T01:23:20.614Z"
-        },
-        {
-          "n": 28,
-          "text": "editor grammars regenerated (jet self devtools grammars)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p235 batch compiler (dev 1c5b311279): jet test Tests/Guards --filter grammar PASS 13/0 and --filter syntax_reconciliation PASS 16/0; jet self devtools grammars leaves git status --short Tools/Editors empty (rechecked by IfHole on dev d9215b4fd5).",
-          "at": "2026-11-17T01:22:57.242Z"
-        },
-        {
-          "n": 29,
-          "text": "snapshots re-blessed",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p237 batch compiler (dev ab95db25f2): jet test Compiler --profile ui --filter dispatch_hole_ PASS 12/12.",
-          "at": "2026-11-17T01:23:23.566Z"
-        }
-      ],
-      "refs": [
-        "examples/features/basics/fizzbuzz.jet",
-        "examples/features/basics/pattern_matching.jet",
-        "crates/jet-parser/src/Parser/Statements/conditionals.rs",
-        "crates/jet-foundation/src/Syntax.rs",
-        "docs/spec/syntax-decisions.md",
-        "D-IFDIST1",
-        "D-ARMHEAD-PAREN1",
-        "https://doc.rust-lang.org/reference/expressions/match-expr.html",
-        "https://docs.scala-lang.org/scala3/book/fun-anonymous-functions.html"
-      ],
-      "tags": [
-        "full",
-        "retargeted",
-        "batch-jetc-front",
-        "wayfinder:task"
-      ],
-      "parentId": "c0w9o2sz",
-      "needsAcceptance": false,
-      "created": "2026-09-11T12:59:34.979Z",
-      "updated": "2026-11-17T02:29:22.554Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 29,
-      "completedAt": "2026-11-17T02:29:22.554Z"
     },
     {
       "id": "c0c4k3fw",
@@ -48194,121 +47901,6 @@
       "criteriaLastN": 4
     },
     {
-      "id": "c0zn6gbs",
-      "num": 6538,
-      "title": "Examples goldens: every example has an expected stream, and Path output does not depend on the working directory",
-      "body": "Update 2026-11-15 (TowerKeeper-2): one golden runner remains. Tools/agent/run-feature-examples.mjs was deleted in c515c4ea10 (#6035 c3), and the examples moved to concept areas in 2c3e68a70b, so the old paths below are history. The testkit golden suite (Compiler/JetTestKit/Source/Golden.jet:318) FAILs an example with no expected stream; c1 gives each one a stream, and the Path criterion covers io/path (now Examples/Systems/Files/Path.jet).\n\nFound by AsmPar-1 on dev 163d4852ad (w22 s2), 2026-11-01. Examples goldens have two runners. Tools/agent/run-feature-examples.mjs (the wave's default-tier golden) skips an example with no expected .out or .err.out ('no native golden', line 366). Tools/testkit's golden suite FAILs the same example with 'missing expected stream' (Golden.jet:184) at every tier, o0 included: TESTKIT_ARGS='--tier o0 --filter collections/data_battery' jet test Tools/testkit 'suite golden'. The 18 examples: data_battery, job_queue, native_resource_streams, foundations/{arrays, bridges, capabilities, distributed, dsl, exact, realtime, receipts, storage, text, units}, opaque_handles, ui/battery, ui/surface, web/state_surface. Separately, Examples io/path walks the relative Path.from('Examples/features/io') (path.jet:26): it prints 'walk non-empty: true' from the repo root (run-feature-examples) and 'false' from testkit's staged directory. One meaning needs one rule. Under I5 every example needs a golden, so the likely fix is to give the 18 real goldens and remove the .mjs skip, and to make io/path independent of cwd. Lists: $JET_SCRATCH_ROOT/lanes/AsmPar/selfab/gold-r41/.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e20",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "All criteria met on p238 (dev 5bea729463)."
-        },
-        {
-          "at": "2026-11-15",
-          "by": "TowerKeeper-2",
-          "text": "Cleanup 2026-11-15 (TowerKeeper-2): c1 reworded to the one remaining runner; the Path half split off as #6538 c6."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Owner 2026-11-06 approved: c2 drops the decision ID from `jet explain` output, per AGENTS.md I7."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`)."
-        },
-        {
-          "at": "2026-11-04",
-          "by": "Main",
-          "text": "#6563 c1 precut audit re-added 4 criteria from archived #2045: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
-        },
-        {
-          "at": "2026-11-02",
-          "by": "Main",
-          "text": "Main census on base 190f826022, 2026-11-02 (o0 `jet run` from a scratch copy of each example; full stderr in $JET_STATE_ROOT/scratch/Main/ex18/<name>/o0.err). foundations/receipts already has receipts.out. Runs clean: concurrency/native_resource_streams (o0/o1/o2 stdout byte-identical, 8 lines; expected .out queued as Main-2 for wave 35). foundations/realtime: runs on all three tiers but its stdout is timing-dependent (callbacks 1875/1874/1875, max_lateness_ns and jitter vary), so it needs the example changed to print only deterministic facts before it can get a golden. Real defects, one per example: collections/data_battery E2404 (`csv()` DataError cannot propagate into [FieldError]); concurrency/job_queue ICE 101 (ir.build unlowered core.jobs::queue, Unit call); foundations/arrays runtime panic \"gray pixels\" (run.jet:158); foundations/bridges E0067 `__bindgen__` reserved (generated fixture-state/bindings/c/zreader.jet); foundations/capabilities E0102 Plugin has no method greet; foundations/distributed E0102 Stream has no method with_event_time; foundations/dsl E0312 [Dyn] has no ==; foundations/exact E0360 no + for T (exact.jet:384); foundations/storage E2305 returned view needs a stable owner (run.jet:61); foundations/text ICE 101 (ir.build unlowered scan_logs); foundations/units E0113 Length*Time^-2 vs MeterPerSecondSquared; ui/battery ICE 101 (14 faults, ir.build unlowered run); ui/surface E1803 Browser authority undecided; web/state_surface E1004 core.web.router has no item show. Not run: opaque_handles (no source found under Examples/features). The ICE rows break I2 and need their own cards."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Every example under Examples/ has an expected stream, so no golden row FAILs with 'missing expected stream' (Compiler/JetTestKit/Source/Golden.jet:318). Proof: `jet test Compiler --profile golden` gives a verdict, not a missing-stream FAIL, for every example at O0, O1 and O2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p238 batch compiler (dev 5bea729463), full golden profile: 5032 PASS, 0 FAIL; no Examples/ row reports 'missing expected stream' at O0, O1 or O2 (the one such row is Tests/Run/Foundations/Capabilities, known-failing on #6930, not an example).",
-          "at": "2026-11-17T02:09:51.498Z"
-        },
-        {
-          "n": 2,
-          "text": "(was #2045 c1) jet explain @ / : / #Live / => (every registered user-typeable glyph, sigil, keyword, marker) returns name, meaning, a docs link and a one-line example from the syntax registry, with no decision ID (I7: decision IDs live in Tower and specs, never in source or registries) (`Compiler/JetFoundation/Data/Syntax`) [precut audit: not proven on 9c7ddf1359: C:explain_syntax/explain_syntax_verbose_names_registry_constant_and_decision has no expected output, so the golden runner cannot judge it (#6538)]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev in light3 (b38459deab..ed697d01d9, Lander5), proved on the batch-15/16 jet over the fit tree: bf3fb6bb0e (G5DevX2-explain-blessed): jet test Compiler --profile cases --filter explain_syntax/ 48/0 (was 47/1), and cli dictionary_golden passes. The verbose case now has expected output that names the registry constant and no decision ID; its known-failing row was removed.",
-          "at": "2026-11-14T01:24:54.970Z"
-        },
-        {
-          "n": 3,
-          "text": "(was #2045 c2) Unknown token gets a real diagnostic with nearest-match suggestion, not the build-log E1274 fallthrough [precut audit: not proven on 9c7ddf1359: C:explain_syntax/explain_syntax_verbose_names_registry_constant_and_decision has no expected output, so the golden runner cannot judge it (#6538)]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev in light3 (b38459deab..ed697d01d9, Lander5), proved on the batch-15/16 jet over the fit tree: bf3fb6bb0e (G5DevX2-explain-blessed): jet test Compiler --profile cases --filter explain_syntax/ 48/0 (was 47/1), and cli dictionary_golden passes. The verbose case now has expected output that names the registry constant and no decision ID; its known-failing row was removed.",
-          "at": "2026-11-14T01:24:56.283Z"
-        },
-        {
-          "n": 4,
-          "text": "(was #2045 c3) Lookup is generated from the registry (no hand-maintained parallel table); REPL ?name docs reuse the same source [precut audit: not proven on 9c7ddf1359: C:explain_syntax/explain_syntax_verbose_names_registry_constant_and_decision has no expected output, so the golden runner cannot judge it (#6538)]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev in light3 (b38459deab..ed697d01d9, Lander5), proved on the batch-15/16 jet over the fit tree: bf3fb6bb0e (G5DevX2-explain-blessed): jet test Compiler --profile cases --filter explain_syntax/ 48/0 (was 47/1), and cli dictionary_golden passes. The verbose case now has expected output that names the registry constant and no decision ID; its known-failing row was removed.",
-          "at": "2026-11-14T01:24:57.544Z"
-        },
-        {
-          "n": 5,
-          "text": "(was #2045 c4) CLI snapshot tests cover representative glyph, keyword, marker, and unknown-token queries [precut audit: not proven on 9c7ddf1359: C:explain_syntax/explain_syntax_verbose_names_registry_constant_and_decision has no expected output, so the golden runner cannot judge it (#6538)]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev in light3 (b38459deab..ed697d01d9, Lander5), proved on the batch-15/16 jet over the fit tree: bf3fb6bb0e (G5DevX2-explain-blessed): jet test Compiler --profile cases --filter explain_syntax/ 48/0 (was 47/1), and cli dictionary_golden passes. The verbose case now has expected output that names the registry constant and no decision ID; its known-failing row was removed.",
-          "at": "2026-11-14T01:24:58.957Z"
-        },
-        {
-          "n": 6,
-          "text": "Examples/Systems/Files/Path.jet prints the same output whatever the working directory: it walks a directory the example makes (61b10e3cd9). Proof: `jet test Compiler --profile golden --filter Systems/Files/Path` passes when run from the repository root and from another directory.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p238 batch compiler (dev 5bea729463), full collect-all suite: golden Systems/Files/Path PASS on o0, o1 and o2 (cwd-independent since 61b10e3cd9).",
-          "at": "2026-11-17T02:09:20.349Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-01T09:11:08.072Z",
-      "updated": "2026-11-17T02:09:53.426Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 6,
-      "completedAt": "2026-11-17T02:09:53.426Z"
-    },
-    {
       "id": "c0wtvbj7",
       "num": 6543,
       "title": "jet repl: evaluating 1 + 2 takes 3.6 s and 691 MB peak RSS; suite REPLs reach 5 GB",
@@ -56311,73 +55903,6 @@
       "updatedBy": "Main",
       "criteriaLastN": 4,
       "completedAt": "2026-11-17T16:05:46.463Z"
-    },
-    {
-      "id": "c01pk3vf",
-      "num": 6801,
-      "title": "Background work: periodic jobs on the Linux desktop; browsers run none (server jobs and push cover the web)",
-      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G3).",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e19",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "All criteria met; c3 on p239 (a11188f7ed). The device web halves live on #6556."
-        },
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. macOS, Windows, iOS and Android work moved to #6984 (G13)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "native.background(every:, run:) on the Linux desktop is a timer while the app runs, or a login item (an XDG autostart entry) when the app asks to run at login.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p238 batch compiler (dev 5bea729463), commit 5bea729463: jet test Compiler --profile cases --filter NativeApp/background_registers_on_linux PASS 1/1.",
-          "at": "2026-11-17T01:44:27.053Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "NativeApp/background_registers_on_linux"
-          }
-        },
-        {
-          "n": 3,
-          "text": "native.background in a graph built for the web output is a compile error that names server jobs as the replacement, never a silent no-op.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p239 batch compiler (dev 58664a641a), commit a11188f7ed: jet test Compiler --profile cases --filter WebApp/background_on_the_web_output_is_a_compile_error PASS 1/1.",
-          "at": "2026-11-17T02:29:04.169Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "WebApp/background_on_the_web_output_is_a_compile_error"
-          }
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": "c0snkbac",
-      "needsAcceptance": false,
-      "created": "2026-11-13T15:13:42.496Z",
-      "updated": "2026-11-17T02:29:08.389Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 3,
-      "completedAt": "2026-11-17T02:29:08.389Z"
     },
     {
       "id": "c0mq8xwu",
@@ -77559,6 +77084,11 @@
         {
           "at": "2026-11-20",
           "by": "Main",
+          "text": "c7: the terminal half (the debuggee shares a terminal stdin, gdb style) is IfHole c7 part 1; the pipe/file half waits on ballot D-DEBUG-STDIN1 (posted 21:4x, reviewed by BallotReviewStdin; recommends --stdin=FILE plus a DAP launch stdin field). The input-path plumbing is built internally so the ratified spelling is a thin front end."
+        },
+        {
+          "at": "2026-11-20",
+          "by": "Main",
           "text": "c6 filed as Lens-6995-c6-core-frame-source (stacked on Lens 6909 c7, c6): Core frames resolve <corelib>/ paths through one resolver, the text comes from the Core the program was built with, and evaluating in a Core frame loads Core whole with its bodies. Case Debug/print_in_a_core_frame fails on the old binary with the exact card error. Lands in the cycle after p339."
         }
       ],
@@ -77641,7 +77171,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-20T01:38:49.275Z",
+      "updated": "2026-11-20T02:40:54.133Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     }
@@ -81140,171 +80670,6 @@
       "draft": false,
       "status": "ratified",
       "created": "2026-09-11T02:55:29.318Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-09-11"
-    },
-    {
-      "id": "D-IFHOLE1",
-      "cardId": "c0p39lw2",
-      "group": "syntax",
-      "title": "Require one typed dispatch hole and keep Boolean guards",
-      "gist": "Should dispatch tables require one typed `_` hole while keeping Boolean guards?",
-      "lesson": "Each arm supplies a candidate for `_`. A guard adds a true-or-false check. The first successful arm wins; `->` selects its result. Here candidates are whole numbers (`Int`), and tests produce true or false (`Bool`). A pattern checks a value shape; `.Ok(_)` ignores its carried value.",
-      "explainer": "",
-      "story": "User is improving Jet's FizzBuzz example. He wants one shared divisibility test and a clear list of divisors. He also wants per-arm checks such as ready without nesting another if.",
-      "inWild": "A request router can try ordered thresholds and readiness checks in one table:\n```jet\nif queue_depth < _ {\n    8 && primary_ready -> route_primary()\n    32 && (secondary_ready || emergency) -> route_secondary()\n    else -> reject_request()\n}\n```\nThe values 8 and 32 fill the same typed hole. Each extra Boolean check applies to that arm. This is a proposed usage example, not an observed production deployment.",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "Require one typed hole",
-          "detail": "Every non-else arm fills `_`. `2 && ready` requires both checks; `2 && ready || emergency` accepts an emergency alone. `2 && (ready || emergency)` always requires the candidate test.\n\nGroup Boolean candidates: `(ready && backup)`. Arm-level `|` separates candidates, not bits. Value-returning tables normally need `else`; action-only tables may do nothing. Omitting else requires plain equality, one immutable bound subject, and complete unguarded pattern coverage.\n\nState the shared test once. Keep Boolean guards beside each candidate. Check one input type across the table.\n\nOld headers and independent predicate arms need migration. Boolean candidates need grouping; bitwise-OR candidates need a named value. Header calls can repeat; unneeded candidate computations can be skipped.",
-          "code": "fn label(n: Int) String -> {\n    return if n % _ == 0 {\n        15 -> \"FizzBuzz\"\n        3 -> \"Fizz\"\n        5 -> \"Buzz\"\n        else -> \"{n}\"\n    }\n}",
-          "technical": "Authority and scope\n\nThe owner chose a required typed `_`, one input, ordinary && and ||, and header evaluation per attempted arm. He also chose one candidate per non-else arm and candidate evaluation only when execution reaches `_`. The complete contract still requires this ballot's ratification.\n\nAmend D-IFDIST1, D-IF3, D-MATCHARM1/2, and S68. Preserve D-ARMHEAD-PAREN1 grouping. Do not reopen unrelated syntax or the meaning of payload wildcards.\n\nThe feature is readability-motivated. No speedup, compile-time improvement, or measured peer advantage is claimed.\n\nHeader and typing\n\nWrite `if H[_] { candidate -> body }`. H[_] denotes a header with exactly one typed hole. Filling it must produce a Bool condition. Expression candidates and pattern candidates have the separate filling rules below.\n\nThe `_` is required for dispatch tables. Ordinary `if condition` and subjectless `if { condition -> body }` remain unchanged.\n\nReject zero-hole distributed headers and headers with multiple expression-hole occurrences. Repeated `_` does not name the same argument twice.\n\nThe hole has one static input type for the entire table. Infer it using existing expression, call, literal, and candidate constraints. Never specialize the header independently for each arm. For a pattern candidate, this is the type of value being matched, not a value produced by that pattern.\n\nAmbiguous types receive a normal front-end diagnostic. Resolve ambiguity by typing an existing binding or named predicate. This ballot adds no `_` annotation spelling or conversion rule.\n\nA single input may have any ordinary value type. Existing tuple or struct values remain one input. There is no automatic splitting into multiple arguments.\n\nThe hole belongs only to its own table header. It may occur inside ordinary operators, parentheses, receivers, indexing, or call arguments. It cannot cross into a nested callable, loop body, comprehension body, or another table. Those scopes could defer or repeat evaluation of the hole. Payload wildcard `_` remains a different syntactic role.\n\nHeader names keep their outer lexical bindings. Candidate pattern names cannot capture or rewrite names inside the header.\n\nCandidate and Boolean grammar\n\nThe first arm operand is a candidate or a parenthesized candidate-alternative group. Its static type must fit the hole, regardless of whether that type is Bool.\n\nComparisons or Boolean expressions used as candidates must be parenthesized. Thus `(a < b)` supplies one Bool value, rather than bypassing the header.\n\nAfter the candidate test, && and || take ordinary Bool operands with normal precedence. A bare trailing number is not another implicit candidate.\n\nFor `if n < _`, `2 && ready == true` means `(n < 2) && (ready == true)`.\n\n`2 && ready || emergency` means `((n < 2) && ready) || emergency`. An emergency may select the arm when the candidate comparison is false.\n\n`2 && (ready || emergency)` requires `n < 2` in both cases. The formatter preserves necessary grouping.\n\nA candidate group uses existing `|`. `(1 | 2) && ready` means `(H[1] || H[2]) && ready`. A group next to && or || requires parentheses.\n\nAn explicit parenthesized alternative group may also occur after a Boolean operator. Every member still fills the same hole; no additional input is introduced.\n\nThe group stops at its first successful candidate. If its following guard then fails, continue to the next arm, not another candidate in that group.\n\nAt candidate-group level, | means alternatives, including inside parentheses. To supply a bitwise-OR result as one candidate, compute it in an ordinary binding or nested function argument first. No type-based grammar guessing is permitted.\n\nA whole independent predicate belongs in a subjectless table. A Bool candidate is never silently reclassified as an independent predicate.\n\nEvaluation and errors\n\nThere are two filling rules. An expression candidate x is substituted at the hole's expression position. This is not an eager runtime function call. Substitution preserves lexical bindings and ordinary evaluation order. A pattern candidate instead becomes the pattern operand of an existing equality pattern test. Its matching rule is specified below; it is not evaluated as an expression.\n\nFor each reached candidate, evaluate its completed header as an ordinary condition. An expression candidate is evaluated at most once, only if execution reaches the hole. A pattern candidate is matched only if execution reaches its equality pattern test.\n\nFor `if ready && accepts(_)`, a false ready skips an effectful candidate expression. For `if read() % _ == 0`, each reached candidate can call read again.\n\nNo table-wide caching is implied, even for an equality header. A user-written immutable binding provides one-time evaluation.\n\nStop after the first true complete arm head. Skip later candidates, guards, and bodies when their result is no longer needed. This skipping is short-circuiting. Evaluate only the selected body.\n\nErrors and failures propagate exactly as in the expanded condition. They are not false matches. Do not hide division by zero or retry an error through later arms.\n\nExisting effect, borrowing, and ownership rules apply. Do not add implicit cloning, copying, or deferred effects to make an otherwise-invalid repeated use compile.\n\nPatterns, ranges, and bindings\n\nA structural or range pattern may fill a hole that is an entire operand of an ordinary equality pattern test. `if result == _` and `if _ == result` are examples.\n\nAn enclosing Boolean expression retains ordinary pattern-test rules. Arithmetic and call input positions accept values, not binding patterns.\n\n`if score == _ { 90..100 -> \"A\"; else -> \"other\" }` matches an inclusive band using the existing range-pattern mechanism.\n\n`if n % _ == 0 { 2..5 -> ... }` does not search divisors. A Range cannot fill an Int hole. A function hole whose actual input type is Range may accept a Range value.\n\nIn `.Ok(value) && value > 0`, a successful pattern makes value available to the guard and selected body. The payload wildcard in `.Ok(_)` binds nothing.\n\nNames are local to the arm. Keep the existing strict Boolean-OR rule: a pattern binding introduced beneath || is unavailable after that ||, including in the body. This remains true even when both Boolean branches bind the same name. A binding established before `(ready || emergency)` remains available; that nested OR does not introduce it.\n\nOnly structural | may merge pattern bindings across alternatives. Existing structural or-pattern rules require matching names, types, and binding modes across alternatives. They do not create multiple header inputs.\n\nRead a pattern subject once within each candidate test. Range bounds and payload checks inspect that same value. A later candidate starts a new attempt.\n\nPending guards receive non-consuming read access to pattern-bound payloads. Sema rejects a guard that moves from or mutates the matched payload. Existing ordinary copying rules still apply to copyable values. Commit a permitted by-value pattern move only after the complete head selects the arm. Guard effects on unrelated state remain ordinary effects; there is no rollback.\n\nExhaustiveness and result types\n\nValue tables require else unless existing structural coverage proves that some arm must succeed. Arm result types unify through existing rules. Effect tables may fall through without else.\n\nPer-attempt subject evaluation makes type coverage alone insufficient. If next_result() returns .Err then .Ok, arms .Ok followed by .Err can both miss.\n\nUse one explicit no-else proof rule. Ignoring parentheses, the whole header must be `subject == _` or `_ == subject`. The subject must be an immutable bound value. Unguarded structural pattern arms must cover its closed type using existing coverage rules.\n\nOther guarded arms may be present but contribute no coverage. A Boolean conjunction or disjunction in the header requires else. A call, computed expression, or literal subject also requires else; bind it first to request structural coverage.\n\nFor example, `false && result == _` never becomes exhaustive merely because all result variants are listed. A result stored with `result :: next_result()` may use the ordinary unguarded variant-coverage proof. This proposal does not add a general stability or constant-folding prover.\n\nDo not pretend arbitrary predicate tables are exhaustive by solving their conditions. No runtime fallback may stand in for a missing user else.\n\nCutover and implementation obligations\n\nMigrate every in-repository caller, source producer, example, test, snapshot, formatter case, and affected explanation. Remove acceptance of the old holeless dispatch form.\n\nWhere old code relied on one evaluated subject, insert an explicit binding during migration unless single-evaluation equivalence is proven. Preserve observed meaning rather than mechanically adding `_`. The formatter handles layout after a source-aware semantic repair; it does not invent the repair.\n\nMixed tables with independent predicate arms must become subjectless tables. For example, retain `code == 200` and `ready == true` as separate written conditions. Preserve their ordering and any prior one-time subject binding. A bare unrelated predicate must not be forced into the hole or silently discarded.\n\nRetain unrelated ordinary and subjectless if forms. Register the new contextual hole role in Syntax.rs against this decision. New or changed diagnostics need registered what, why, fix, and UI snapshots.\n\nOne semantic lowering must serve statement and value position, AOT, default run/dev, interpreter/deopt, web, and compile-time evaluation where applicable.\n\nLower to the existing typed conditional and pattern machinery. Do not introduce runtime closures, allocations, backend policy copies, or a compatibility parser.\n\nProve FizzBuzz, joined guards, OR bypass, grouped alternatives, skipped candidate effects, repeated header calls, changing-subject coverage, and pattern ownership. Compare them with explicit reference conditions.\n\nBefore closure, run affected golden, formatter, and diagnostic checks plus actual multi-mode programs. Do not claim these proposed examples have already passed.\n\nConcrete reading and grammar examples\n\nFor an Int n, `n % divisor == 0` tests whether the divisor fits evenly. FizzBuzz returns \"FizzBuzz\" at 15 and \"7\" at 7.\n\nFor a Bool-taking accepts function, `ready && backup -> body()` means `accepts(ready) && backup` under `if accepts(_)`.\n\n`(ready && backup) -> body()` instead means `accepts(ready && backup)`. The parentheses make the whole expression one candidate.\n\nLikewise, write `(a < b)` to supply a comparison result as a Bool candidate. An unparenthesized whole comparison is not an independent predicate-arm escape.\n\nAt candidate-group level, `(Read | Write)` is still two alternatives. For a combined bitmask, first write `both :: Read | Write`, then use `both` as the candidate.\n\nWith read() returning 7, `if read() % _ == 0 { 3 -> hit(); 5 -> hit(); else -> miss() }` performs two reads.\n\nWith `n :: read()` before `if n % _ == 0`, the same candidates use one read. With a false condition before the hole, an effectful candidate is skipped.\n\nThese examples describe the proposed semantics. They are not compiler execution receipts."
-        },
-        {
-          "key": "B",
-          "name": "Keep current tables and name the predicate",
-          "detail": "Share the test through an ordinary function without adding hole syntax. No dispatch-header migration is needed. Reuse the predicate outside the table. Repeat the function call and fixed arguments. A local shared test needs a separate function or lambda.",
-          "code": "fn divides(n: Int, divisor: Int) Bool -> {\n    return n % divisor == 0\n}\nfn label(n: Int) String -> {\n    return if {\n        divides(n, 15) -> \"FizzBuzz\"\n        divides(n, 3) -> \"Fizz\"\n        divides(n, 5) -> \"Buzz\"\n        else -> \"{n}\"\n    }\n}",
-          "technical": "Retain the current distributed comparison and subjectless-table contracts. Share calculations through existing functions or lambdas. This counterfactual records the rejected alternative; it does not satisfy the owner's requested required-hole design."
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Rust",
-          "note": "Primary reference read on 2026-09-11. Rust specifies ordered patterns, Boolean guards, bound-name scope, and guard borrowing. Its or-pattern guard can retry another alternative after a false guard. Jet keeps explicit OR-group semantics instead. No feature-level adoption count was established. Source: https://doc.rust-lang.org/reference/expressions/match-expr.html",
-          "code": "// https://doc.rust-lang.org/reference/expressions/match-expr.html\nfn label(n: i64) -> String {\n    match () {\n        _ if n % 15 == 0 => \"FizzBuzz\".into(),\n        _ if n % 3 == 0 => \"Fizz\".into(),\n        _ if n % 5 == 0 => \"Buzz\".into(),\n        _ => n.to_string(),\n    }\n}"
-        },
-        {
-          "lang": "Scala",
-          "note": "Primary documentation read on 2026-09-11. Scala teaches `_` for a single unnamed function input and expands it into a named lambda. This supports the expression-hole interpretation, not Jet's proposed table grammar. No popularity or performance inference is made. Source: https://docs.scala-lang.org/scala3/book/fun-anonymous-functions.html",
-          "code": "// https://docs.scala-lang.org/scala3/book/fun-anonymous-functions.html\nval doubled = List(1, 2, 3).map(_ * 2)\nval explicit = List(1, 2, 3).map((i: Int) => i * 2)"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "A states the shared test once. It honors the owner's choices of candidate-only arms and evaluation at the hole.",
-        "gains": [
-          "State the shared test once.",
-          "Keep Boolean guards beside each candidate.",
-          "Check one input type across the table."
-        ],
-        "losses": [
-          {
-            "loss": "Old headers and independent predicate arms need migration.",
-            "mitigation": "Required holes and candidate-only arms remove the old mixed form. Source-aware migration preserves ordering and one-time reads."
-          },
-          {
-            "loss": "Boolean candidates need grouping; bitwise-OR candidates need a named value.",
-            "mitigation": "Grouping separates candidates from guards. A named value distinguishes bitwise OR from the retained alternative separator."
-          },
-          {
-            "loss": "Header calls can repeat; unneeded candidate computations can be skipped.",
-            "mitigation": "These effects follow the chosen per-attempt substitution rule. Bind before the table when the computation must happen once."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B repeats the predicate name and fixed arguments. A removes that source repetition, not runtime calls."
-          }
-        ],
-        "tradeoff": "Headers and mixed arms must migrate. Assume read() returns 7. Candidates 3 and 5 in `if read() % _ == 0` cause two reads.\n\nFor one read, write `n :: read()` before `if n % _ == 0`. Earlier false && checks skip a computation placed at the hole. Grouped Boolean candidates and named bitmasks keep guards and alternatives distinct."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 4,
-      "reviewPasses": {
-        "beginner": "Fresh agent: HoleBeginner. Skill: rli5. The beginner pass tested the complete ballot. Added surface explanations for candidate types, FizzBuzz notation, repeated reads, explicit bindings, fallbacks, and the pattern wildcard.",
-        "adversarial": "Author model family: OpenAI. Adversarial model family: OpenAI. Fresh agent: HoleAdversary. The adversarial review attacked the recommendation. Obtained owner choices on candidate timing and mixed arms; clarified pattern filling, borrowing, OR scope, exhaustive coverage, grouping, and source-aware migration."
-      },
-      "checkInstructions": null,
-      "surface": {
-        "gist": "Should dispatch tables require one typed `_` hole while keeping Boolean guards?",
-        "lesson": "Each arm supplies a candidate for `_`. A guard adds a true-or-false check. The first successful arm wins; `->` selects its result. Here candidates are whole numbers (`Int`), and tests produce true or false (`Bool`). A pattern checks a value shape; `.Ok(_)` ignores its carried value.",
-        "trio": {
-          "current": {
-            "note": "`%` gives the remainder; `== 0` tests divisibility. `\"{n}\"` inserts n. 15 gives \"FizzBuzz\"; 7 gives \"7\".",
-            "code": "fn label(n: Int) String -> {\n    return if {\n        n % 15 == 0 -> \"FizzBuzz\"\n        n % 3 == 0 -> \"Fizz\"\n        n % 5 == 0 -> \"Buzz\"\n        else -> \"{n}\"\n    }\n}"
-          },
-          "wild": {
-            "lang": "Rust",
-            "note": "Rust's ordered match guards repeat the arithmetic.",
-            "code": "// https://doc.rust-lang.org/reference/expressions/match-expr.html\nfn label(n: i64) -> String {\n    match () {\n        _ if n % 15 == 0 => \"FizzBuzz\".into(),\n        _ if n % 3 == 0 => \"Fizz\".into(),\n        _ if n % 5 == 0 => \"Buzz\".into(),\n        _ => n.to_string(),\n    }\n}"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Require one typed hole",
-            "gist": "Every non-else arm fills `_`. `2 && ready` requires both checks; `2 && ready || emergency` accepts an emergency alone. `2 && (ready || emergency)` always requires the candidate test.\n\nGroup Boolean candidates: `(ready && backup)`. Arm-level `|` separates candidates, not bits. Value-returning tables normally need `else`; action-only tables may do nothing. Omitting else requires plain equality, one immutable bound subject, and complete unguarded pattern coverage.",
-            "gains": [
-              "State the shared test once.",
-              "Keep Boolean guards beside each candidate.",
-              "Check one input type across the table."
-            ],
-            "losses": [
-              "Old headers and independent predicate arms need migration.",
-              "Boolean candidates need grouping; bitwise-OR candidates need a named value.",
-              "Header calls can repeat; unneeded candidate computations can be skipped."
-            ],
-            "proposed": {
-              "code": "fn label(n: Int) String -> {\n    return if n % _ == 0 {\n        15 -> \"FizzBuzz\"\n        3 -> \"Fizz\"\n        5 -> \"Buzz\"\n        else -> \"{n}\"\n    }\n}"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Keep current tables and name the predicate",
-            "gist": "Share the test through an ordinary function without adding hole syntax.",
-            "gains": [
-              "No dispatch-header migration.",
-              "Reuse the predicate outside the table."
-            ],
-            "losses": [
-              "Repeat the function call and fixed arguments.",
-              "A local shared test needs a separate function or lambda."
-            ],
-            "proposed": {
-              "code": "fn divides(n: Int, divisor: Int) Bool -> {\n    return n % divisor == 0\n}\nfn label(n: Int) String -> {\n    return if {\n        divides(n, 15) -> \"FizzBuzz\"\n        divides(n, 3) -> \"Fizz\"\n        divides(n, 5) -> \"Buzz\"\n        else -> \"{n}\"\n    }\n}"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A states the shared test once. It honors the owner's choices of candidate-only arms and evaluation at the hole.",
-          "gains": [
-            "State the shared test once.",
-            "Keep Boolean guards beside each candidate.",
-            "Check one input type across the table."
-          ],
-          "losses": [
-            {
-              "loss": "Old headers and independent predicate arms need migration.",
-              "mitigation": "Required holes and candidate-only arms remove the old mixed form. Source-aware migration preserves ordering and one-time reads."
-            },
-            {
-              "loss": "Boolean candidates need grouping; bitwise-OR candidates need a named value.",
-              "mitigation": "Grouping separates candidates from guards. A named value distinguishes bitwise OR from the retained alternative separator."
-            },
-            {
-              "loss": "Header calls can repeat; unneeded candidate computations can be skipped.",
-              "mitigation": "These effects follow the chosen per-attempt substitution rule. Bind before the table when the computation must happen once."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B repeats the predicate name and fixed arguments. A removes that source repetition, not runtime calls."
-            }
-          ],
-          "tradeoff": "Headers and mixed arms must migrate. Assume read() returns 7. Candidates 3 and 5 in `if read() % _ == 0` cause two reads.\n\nFor one read, write `n :: read()` before `if n % _ == 0`. Earlier false && checks skip a computation placed at the hole. Grouped Boolean candidates and named bitmasks keep guards and alternatives distinct."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-09-11T13:22:07.144Z",
       "outcome": "A",
       "ratifiedAt": "2026-09-11"
     },
@@ -127506,233 +126871,6 @@
       "ratifiedAt": "2026-11-14"
     },
     {
-      "id": "D-IFHOLE2",
-      "cardId": "c0p39lw2",
-      "group": "syntax",
-      "title": "Keep the plain table header for comparing one value, with the hole written `<>`?",
-      "situation": "A decision table is an `if` followed by a list of arms; Jet tries the arms in order and runs the first one that fits. The plain header `if light == {` compares one value with each arm. The hole header `if n % <> == 0 {` drops each arm's value into the `<>`, so the arm `15 -> \"FizzBuzz\"` tests `n % 15 == 0`. In September you ruled that every table needs a hole. That would change about 16,000 tables and make about 5,400 function calls in headers run again for every arm tried. You asked for the hole to be `<>`, the mark a pipe already uses for \"the value goes here\", so every option below spells it that way. You are asked which headers Jet keeps. We recommend keeping the plain header for comparing one value and using the `<>` hole only for tests that do more.",
-      "gist": "Should a table that compares one value keep its plain header, with the `<>` hole kept for tests that do more?",
-      "lesson": "A decision table is an `if` whose arms are tried in order, like a list of cases. Its header holds the test the arms share. A hole is the mark `<>` in that test, and each arm's value fills it in turn. A pipe already uses `<>` to mean \"the value goes here\", so one mark keeps one meaning. Whichever option wins, the rules, the formatter and the docs name one spelling for each job.",
-      "explainer": "Words used here. A decision table is an `if` followed by a list of arms. Each arm is a value, an arrow and what to do: `15 -> \"FizzBuzz\"`. Jet tries the arms from the top and runs the first one that fits.\n\nThe header is the test written after `if`, before the `{`. A plain header such as `if light == {` compares one value with each arm. A hole header holds the mark `<>`, and each arm's value fills that mark in turn: `if n % <> == 0 {` with the arm `3` tests `n % 3 == 0`.\n\nA pipe passes a value down a chain of steps: `raw |> Int.parse(<>)`. Inside a step, `<>` is the value coming in. The `else` arm runs when no other arm fits.\n\nA call has an effect when it does more than compute an answer: it reads input, takes a lock, changes a value or prints. Calling it twice is not the same as calling it once. A pure call only computes, so a second call gives the same answer.",
-      "story": "Maya teaches Jet to new programmers with a traffic light. Her first table is `if light == { .Red -> 30  .Amber -> 5  .Green -> 0 }`. Later she shows FizzBuzz with `if n % <> == 0 { 15 -> \"FizzBuzz\"  3 -> \"Fizz\" }`. One student asks whether the light table also needs `light == <>`. Another writes `if reader.next() == <> {` and wonders why records go missing. A third ends a pipe with a FizzBuzz table and cannot tell which `<>` is the piped number. Maya wants one answer she can teach without exceptions.",
-      "inWild": "// Rust reference: https://doc.rust-lang.org/reference/expressions/match-expr.html\n// A match reads its value once and lists the arms.\nfn wait_secs(light: Light) -> u32 {\n    match light {\n        Light::Red => 30,\n        Light::Amber => 5,\n        Light::Green => 0,\n    }\n}\n// A shared test repeats in each guard instead of using a hole.\nfn label(n: u32) -> String {\n    match () {\n        _ if n % 15 == 0 => \"FizzBuzz\".into(),\n        _ if n % 3 == 0 => \"Fizz\".into(),\n        _ => n.to_string(),\n    }\n}\n\n;; Clojure condp: https://clojuredocs.org/clojure.core/condp\n;; One shared two-input test, one value read once, candidates in order.\n(condp #(zero? (mod %2 %1)) n\n  15 \"FizzBuzz\"\n  3 \"Fizz\"\n  (str n))",
-      "detail": "What you ruled. On 2026-09-11 you chose D-IFHOLE1=A (card #3067). It says every table header holds exactly one hole and the plain header goes away in one change. It also says the header runs again for each arm tried, with no saving of the first result, even for a plain comparison. That change never ran, so the spec still teaches the plain header.\n\nWhat is built today. The hole landed on 2026-11-14, spelled `_`. Jet rewrites each arm into the header, with the arm's value in the hole, and runs an ordinary list of tests. A header that is exactly `subject == _` is treated as the plain table, so it reads its subject once. That does not match your per-arm rule, so the ruling must settle it either way. Three errors, E0946, E0947 and E0948, refuse a misplaced hole or arm.\n\nWhy `<>` instead of `_`. You asked for it, and it fits. A pipe step already reads its input as `<>`, so `<>` already means \"the value goes here\". The `_` mark already means \"ignore this\" in patterns and in the catch-all arm. With `_` as the hole, one table would use it both ways, as in `if files.try_lock(path) == _ { .Val(_) -> false }`. Switching is a one-token change in the parser, plus respelling the hole's own example, spec rows and tests. A `_` written where the hole goes then gets an error whose fix writes `<>`.\n\nThe pipe rule. A pipe runs each step on the value of the line above, and the step names that value `<>`. A table inside a step could then see two meanings of `<>`. The rule in every option is the one pipes already use: inside a step, `<>` is always the step's value, even inside a lambda or a string. So a table header inside a step cannot hold a hole. A plain header there, such as `|> if <> == {`, compares the piped value and works.\n\nWhat the pipe rule refuses. A table inside a step whose header needs a hole is refused with a registered error. Its fix ends the pipe one line early in a named value and starts the table with that name. The author picks the name, so `jet fix` does not apply it. A pipe written inside a hole header is fine: in `if (raw |> Int.parse(<>) ?? 0) % <> == 0 {`, the `<>` in the parentheses belongs to that pipe and the other is the hole.\n\nHow many tables would change. A scan of dev e3f8a73a8b skips comments and strings and follows headers across lines. It finds 16,351 plain-header tables in 2,724 files. By area: Compiler 6,588, Core 1,530, Examples 427, tests 2,063, Jetpack 5,135, Tools 504 and Docs 104. Markdown pages hold about 117 more. Of these tables, about 5,400 call a function in the header, and about 530 read through an index or a borrow. In Examples, 240 of 427 tables call a function in the header.\n\nWhy a call in the header matters. A header that holds a hole runs again for each arm tried. Then `if reader.next() % <> == 0 {` calls `next` once per arm, and a miss on the first arm skips a record. A test of the hand-written equivalent printed two fetches where the plain header printed one. Under your per-arm rule this holds for every table, so option B must first name about 5,400 header calls, and must do it without reordering other effects.\n\nThe effect rule. Options A, C and D keep hole headers that run per arm, so each refuses a call with an effect in one. Sema already knows each call's effects: reading input, taking a lock, printing, or changing a value through `&` or `&self`. The fix names the value first, as B does: `next: reader.next()` on the line above, then `if next % <> == 0 {`. A pure call such as `fits(<>, size)` stays, since a second run gives the same answer. D allows any call in `subject == <>`, which reads once.\n\nWhen a table needs `else`. A plain table over an enum that lists every case, such as `light == {` with `.Red`, `.Amber` and `.Green`, is proven complete and needs no `else`. A hole table cannot be proven that way: Jet cannot tell that `15` and `3` cover every `n`. So a hole table that gives a value needs `else`, and today a missing one is refused. A hole table used as a statement may leave `else` out and does nothing when no arm fits.\n\nEdge cases. A call that holds the hole, such as `if queue.try_push(<>) {`, cannot be named first, since each arm passes a different value. It gets the same error, and the fix writes the arms as plain tests: `if { queue.try_push(1) -> … }`. A call inside a lambda in the header is checked the same way. A call that only reads, such as `list.len()`, is pure and stays.\n\nSome fixes are shown and not applied. In `total: base() + if next() % <> == 0 {`, the table does not start its statement. Moving `next()` above would run it before `base()`, so the author places it.\n\nThe same tables in each option. Take `if kind == {` in Compiler ItemHeads.jet, `if parse(...) == {` in Core Toml.jet and `if files.try_lock(path) == {` in Examples FilesRootedLifecycle.jet. A leaves all three as they are. B writes `if kind == <> {` and names `parse(...)` and `files.try_lock(path)` first, since a second `try_lock` would take the lock again. C allows either spelling of each. D writes `<>` into all three, and each still reads its subject once.\n\nOne way per meaning (I8). Jet already runs a table two ways: as a comparison against one value, or as a list of tests. A gives each way one spelling, and a `<>` in a header always means the header runs per arm. B runs every table by one per-arm rule. C gives one table two spellings with the same meaning. D keeps one shape, but its `<>` means one read in some headers and a read per arm in others.\n\nBeginners. A learner reads `if light == {` as \"compare light with each arm\". Under A, the hole lesson may invite `light == <>`, which is refused with a fix that deletes `<>`. Under B and D every table looks alike, but `<>` in a plain comparison tells the reader nothing new. Under B, `if reader.next() == <> {` loses records with no warning.\n\nExperts. Experts want one rule and no hidden repeats. A shows the read rule in the syntax and refuses a repeated effect, and B gives one rule with explicit names. C makes each review pick a spelling, and D asks readers to spot which header shapes read once.\n\nFormatter and errors. Under A, the fix for `light == <>` deletes one token, and the parser already proves both spellings build the same table. E0948's fix must stop suggesting `subject == _`. Under B and D the formatter must learn to lay out hole tables before the change, and the change touches files in every live lane at once.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Plain header compares one value; the `<>` hole fills a shared test",
-          "detail": "`if subject == {` stays the one way to compare one value with each arm, and it reads the subject once. The `<>` hole is for a shared test that does more, such as `n % <> == 0` or `fits(<>, size)`. That header runs once per arm tried, so a call with an effect in it is refused, and the fix names the value first. A header that only compares with `<>` is refused, with a fix that removes the `<>`.\n\nA hole table that gives a value needs `else`, because Jet cannot prove its arms cover every value. A plain table over an enum that lists every case needs none. In a pipe step `<>` is the piped value: a plain table works there, and a hole table names the value first. No existing table changes.",
-          "code": "// Compare one value: `light` is read once, and listing every case needs no `else`.\nwait_secs: fn(light: Light) -> Int {\n    if light == {\n        .Red -> 30\n        .Amber -> 5\n        .Green -> 0\n    }\n}\n// A shared test: each arm's value fills `<>` in turn.\n// It gives a value, so it needs `else`: 15 and 3 do not cover every n.\nlabel: fn(n: Int) -> String {\n    if n % <> == 0 {\n        15 -> \"FizzBuzz\"\n        3 -> \"Fizz\"\n        else -> \"{n}\"\n    }\n}\n// A call in a plain header still runs once.\ncontended: if files.try_lock(path) == {\n    .None -> true\n    .Val(_) -> false\n    .Err(_) -> panic(\"probe lock\")\n}\n// A call with an effect in a hole header is refused; the fix names it first.\n// `if reader.next() % <> == 0 {` becomes:\nbatch_size: fn(reader: &Reader) -> Int {\n    next: reader.next()\n    if next % <> == 0 {\n        100 -> 100\n        10 -> 10\n        else -> 1\n    }\n}\n// In a pipe step `<>` is the piped value, so a plain table can test it.\nsize_word: fn(raw: String) -> String {\n    raw |> Int.parse(<>) ?? 0 |> if <> == {\n        0 -> \"none\"\n        1 -> \"one\"\n        else -> \"many\"\n    }\n}\n// `if light == <> {` is refused: the fix removes the `<>`.\n// `raw |> Int.parse(<>) ?? 0 |> if <> % 3 == 0 {` is refused: name the number first.",
-          "technical": "Amend D-IFHOLE1: drop the rule that every table holds a hole, and drop its cutover. Keep D-IF3, D-IFDIST1 and S68 for comparison headers. Respell the hole `<>`. E0437 (`<>` outside a pipe step) narrows to `<>` outside a step or a table header, E0947 retires into it, and a `_` where the hole goes gets an error whose fix writes `<>`.\n\nThe parser refuses a header whose whole test, ignoring parentheses, is `subject OP <>` or `<> OP subject`. That refusal is a registered error with a machine fix that deletes the `<>` and flips the operator when `<>` stood on the left. The queued rewrite of that header into the comparison table becomes this refusal. E0946 stays. E0948 stays, with its fix changed to `if subject == {`.\n\nA new registered error (E0950, the next free code) refuses a call with an effect in a hole header. It reads the call's effect facts: an effect, a `&` argument or a `&self` receiver. A pure call stays. The error ships with a UI snapshot and a machine fix that binds the call to a name on the line above and reads the name in the header.\n\nThe name is the called method's name (`next`), or `value` for another call, with a number added on a clash. The fix applies only when the table starts its statement; otherwise it is shown, not applied, so no effect moves before another. A call that holds the `<>` cannot be named; its fix shows the arms as plain tests. Calls inside a lambda in the header are checked too.\n\nA hole table that gives a value requires `else` (E0003), since its arms are tests, not cases of one type; one used as a statement may leave `else` out. A plain table keeps today's coverage rule.\n\nInside a pipe step `<>` is always the step's value, through lambdas and string holes, as D-PIPE1 says. A table header there that needs a hole is refused with a registered error whose fix shows the pipe split into a named value. The spec, the syntax row and Examples/Basics/DispatchHole.jet drop `shape == _` and spell the hole `<>`."
-        },
-        {
-          "key": "B",
-          "name": "Every table holds a `<>` hole, as ratified",
-          "detail": "D-IFHOLE1 as ratified, with the hole spelled `<>`. Every header holds exactly one `<>`, so `if light == {` becomes `if light == <> {`. The header runs once per arm tried, even for a plain comparison. A header that calls a function gets a named value first, so the call still runs once. A table written later with a call in its header repeats the call per arm, as ratified.\n\nA table needs `else` unless its header compares a named value with every case of an enum. In a pipe step `<>` is the piped value, so a table there names the value first. About 16,400 tables in 2,700 files change, about 5,400 with a call in the header.",
-          "code": "// Compare one value: the header runs once per arm tried.\n// `light` is a named value and every case is listed, so no `else`.\nwait_secs: fn(light: Light) -> Int {\n    if light == <> {\n        .Red -> 30\n        .Amber -> 5\n        .Green -> 0\n    }\n}\n// A shared test: each arm's value fills `<>` in turn.\n// It gives a value, so it needs `else`: 15 and 3 do not cover every n.\nlabel: fn(n: Int) -> String {\n    if n % <> == 0 {\n        15 -> \"FizzBuzz\"\n        3 -> \"Fizz\"\n        else -> \"{n}\"\n    }\n}\n// A call is named first, or it would run once per arm.\nlock: files.try_lock(path)\ncontended: if lock == <> {\n    .None -> true\n    .Val(_) -> false\n    .Err(_) -> panic(\"probe lock\")\n}\n// No table fits in a pipe step, so the number is named first.\nsize_word: fn(raw: String) -> String {\n    count: Int.parse(raw) ?? 0\n    if count == <> {\n        0 -> \"none\"\n        1 -> \"one\"\n        else -> \"many\"\n    }\n}",
-          "technical": "Keep D-IFHOLE1 as written, with the hole respelled `<>`. Remove the plain-header parser path and the `it` subject name, and refuse a plain header with a registered error and a machine fix. Change the queued rewrite so a computed `subject == <>` runs per arm tried and needs a named subject to leave out `else`.\n\nMigrate every table with a source-aware tool that names each computed subject first and moves it without reordering other effects. Inside a pipe step `<>` is the step's value, so every table there is refused with the pipe-split fix, and the migration splits such pipes too. Teach the formatter to lay out hole tables. The examples, spec and teaching pages move to the hole header."
-        },
-        {
-          "key": "C",
-          "name": "Both headers stay",
-          "detail": "Keep both spellings. `if light == {` and `if light == <> {` build the same table, and both read the subject once. Both keep the plain coverage rule, so listing every case of an enum needs no `else`. The formatter keeps whichever was written. No existing table changes.\n\nHole headers that do more than compare work as ratified and run per arm. A call with an effect in one is refused with a fix that names the value first, as in A. Such a table needs `else` when it gives a value. Inside a pipe step `<>` is the piped value: a plain table there works, and a hole table must name the value first.",
-          "code": "// Compare one value, either way: `light` is read once.\n// Every case is listed, so neither needs `else`.\nwait_secs: fn(light: Light) -> Int {\n    if light == {\n        .Red -> 30\n        .Amber -> 5\n        .Green -> 0\n    }\n}\nwait_again: fn(light: Light) -> Int {\n    if light == <> {\n        .Red -> 30\n        .Amber -> 5\n        .Green -> 0\n    }\n}\n// A shared test: each arm's value fills `<>` in turn.\n// It gives a value, so it needs `else`: 15 and 3 do not cover every n.\nlabel: fn(n: Int) -> String {\n    if n % <> == 0 {\n        15 -> \"FizzBuzz\"\n        3 -> \"Fizz\"\n        else -> \"{n}\"\n    }\n}\n// `if reader.next() % <> == 0 {` is refused: name `reader.next()` first.\n// In a pipe step `<>` is the piped value, so a plain table can test it.\nsize_word: fn(raw: String) -> String {\n    raw |> Int.parse(<>) ?? 0 |> if <> == {\n        0 -> \"none\"\n        1 -> \"one\"\n        else -> \"many\"\n    }\n}",
-          "technical": "Keep D-IF3 and D-IFHOLE1 side by side, drop D-IFHOLE1's cutover, and respell the hole `<>`. Amend D-IFHOLE1 so a hole header whose whole test is one comparison reads its subject once, as built, with the plain table's coverage. The formatter keeps the written spelling, and the docs teach both spellings as one table.\n\nEvery other hole header runs per arm tried. The same new registered error as in A (E0950, with a UI snapshot and the same machine fix) refuses a call with an effect there. A hole table that gives a value requires `else` (E0003).\n\nInside a pipe step `<>` is always the step's value, as D-PIPE1 says. A plain header there compares that value. A header there that needs a hole is refused with a registered error whose fix shows the pipe split into a named value."
-        },
-        {
-          "key": "D",
-          "name": "Every table holds a `<>` hole; a plain comparison still reads once",
-          "detail": "Every table header holds one `<>`, as ratified. A header whose whole test is `subject == <>` still reads its subject once, as the parser builds it today. It keeps the plain coverage rule, so listing every case of an enum needs no `else`. The change adds one token per table: `if fetch() == {` becomes `if fetch() == <> {`, with no named value and no change in behavior.\n\nEvery other hole header runs per arm. A call with an effect there is refused with a fix that names the value first, as in A. Such a table needs `else` when it gives a value. Inside a pipe step `<>` is the piped value, so no table can sit in a step, and the value is named first. The plain header is removed after about 16,400 tables change.",
-          "code": "// Compare one value: `light` is read once.\n// Every case is listed, so no `else`.\nwait_secs: fn(light: Light) -> Int {\n    if light == <> {\n        .Red -> 30\n        .Amber -> 5\n        .Green -> 0\n    }\n}\n// A shared test: each arm's value fills `<>` in turn.\n// It gives a value, so it needs `else`: 15 and 3 do not cover every n.\nlabel: fn(n: Int) -> String {\n    if n % <> == 0 {\n        15 -> \"FizzBuzz\"\n        3 -> \"Fizz\"\n        else -> \"{n}\"\n    }\n}\n// `try_lock` runs once, as today.\ncontended: if files.try_lock(path) == <> {\n    .None -> true\n    .Val(_) -> false\n    .Err(_) -> panic(\"probe lock\")\n}\n// `if reader.next() % <> == 0 {` is refused: name `reader.next()` first.\n// No table fits in a pipe step, so the number is named first.\nsize_word: fn(raw: String) -> String {\n    count: Int.parse(raw) ?? 0\n    if count == <> {\n        0 -> \"none\"\n        1 -> \"one\"\n        else -> \"many\"\n    }\n}",
-          "technical": "Keep D-IFHOLE1's required hole and its cutover, with the hole respelled `<>`. Amend its read rule: a header whose whole test, ignoring parentheses, is `subject OP <>` or `<> OP subject` is the comparison table over `subject`. That table reads its subject once and keeps `it`, patterns, ranges and coverage. Every other hole header runs per arm tried. There, the new registered error from A (E0950, with its UI snapshot and machine fix) refuses a call with an effect. A table there that gives a value requires `else` (E0003).\n\nA machine fix inserts the `<>` in every table, and the parser already proves both spellings build the same table. Inside a pipe step `<>` is the step's value, so every table there is refused with the pipe-split fix, and the migration splits such pipes too. The formatter learns to lay out hole tables before the cutover."
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Rust",
-          "note": "Primary reference read on 2026-11-14. A match reads its value once and lists patterns, with optional guards. A shared test such as divisibility repeats in every guard. Source: https://doc.rust-lang.org/reference/expressions/match-expr.html",
-          "code": "match light {\n    Light::Red => 30,\n    Light::Amber => 5,\n    Light::Green => 0,\n}"
-        },
-        {
-          "lang": "Clojure",
-          "note": "Primary documentation and the clojure.core source read on 2026-11-14. `condp` takes one two-input test, one value and candidate clauses, and tries the test with each candidate in order. The macro binds the value once, and plain equality uses the same form with `=`. It is the closest prior art to the hole table, and it never reads the value twice. Source: https://clojuredocs.org/clojure.core/condp",
-          "code": "(condp = light\n  :red 30\n  :amber 5\n  0)\n(condp #(zero? (mod %2 %1)) n\n  15 \"FizzBuzz\"\n  3 \"Fizz\"\n  (str n))"
-        },
-        {
-          "lang": "Scala",
-          "note": "Primary documentation read on 2026-11-14. Scala writes `_` for one unnamed function input and also for the catch-all case, so one mark carries both meanings. That is the double meaning a `<>` hole avoids. Source: https://docs.scala-lang.org/scala3/book/fun-anonymous-functions.html",
-          "code": "val doubled = List(1, 2, 3).map(_ * 2)\nlight match\n  case Red => 30\n  case _ => 0"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "A keeps one spelling for each job and changes no existing table. A plain header reads its subject once. A `<>` in a header means the header runs again for each arm, so Jet refuses a call with an effect there, with a fix that names the value first. Inside a pipe, `<>` keeps its one pipe meaning.",
-        "tradeoff": "A reverses part of your 2026-09-11 choice. `light == <>` is refused with a fix, and the plain header stays. Every other hole table works as ratified, now spelled `<>`.",
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B changes about 16,400 tables and needs a named value before about 5,400 of them. A table written later as `if reader.next() == <> {` silently reads again for each arm, and no table fits in a pipe step."
-          },
-          {
-            "key": "C",
-            "reason": "C gives one table two spellings with the same meaning, so readers must learn both and reviews must pick one."
-          },
-          {
-            "key": "D",
-            "reason": "D keeps the required hole with a one-token change per table. But its `<>` means one read in some headers and a read per arm in others, and no table fits in a pipe step."
-          }
-        ],
-        "losses": [
-          {
-            "loss": "Learners meet two header shapes instead of one rule.",
-            "mitigation": "The docs teach the plain table first and show the `<>` hole only where a test repeats, and both shapes use marks learners already know from pipes."
-          },
-          {
-            "loss": "The every-table-has-a-hole rule is amended.",
-            "mitigation": "Holes keep their full meaning; only the duplicate `subject == <>` spelling is refused, and its fix deletes one token."
-          },
-          {
-            "loss": "A hole table cannot sit directly inside a pipe step.",
-            "mitigation": "The error shows the pipe split into a named value. Plain tables, the common case in a pipe, still work inside steps."
-          }
-        ]
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. Main checked this rewrite against the code and a p138 probe, confirming the error meanings, the read-once `subject == _` table, the pipe example and about 8 existing hole tables. Main found that a hole header could silently repeat a call with an effect, that `else` was unstated and that the header-call count was high; all three are fixed."
-      },
-      "checkInstructions": null,
-      "surface": {
-        "gist": "Should a table that compares one value keep its plain header, with the `<>` hole kept for tests that do more?",
-        "lesson": "A decision table is an `if` whose arms are tried in order. The plain header `if light == {` compares one value with each arm. A hole header puts `<>` in a shared test that each arm's value fills: `if n % <> == 0 {`. One spelling per job must be named.",
-        "trio": {
-          "current": {
-            "note": "Both headers are built; today's hole is `_`, written `<>` in every option.",
-            "code": "if light == {\n    .Red -> 30\n    else -> 0\n}\nif n % <> == 0 {\n    3 -> \"Fizz\"\n    else -> \"{n}\"\n}"
-          },
-          "wild": {
-            "lang": "Rust",
-            "note": "Rust's match reads the value once. A shared test repeats in each guard.",
-            "code": "// doc.rust-lang.org/reference/expressions/match-expr.html\nmatch light {\n    Light::Red => 30,\n    _ => 0,\n}"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Plain header compares; the `<>` hole fills a shared test",
-            "gist": "`if light == {` stays; a `<>` hole is for tests that do more.",
-            "gains": [
-              "One spelling for each job.",
-              "No existing table changes.",
-              "A `<>` always means a value goes there."
-            ],
-            "losses": [
-              "Two header shapes to learn.",
-              "Reverses part of the required-hole rule."
-            ],
-            "proposed": {
-              "code": "if light == {\n    .Red -> 30\n    else -> 0\n}\nif n % <> == 0 {\n    3 -> \"Fizz\"\n    else -> \"{n}\"\n}\n// `if light == <> {` is refused: remove the `<>`.\nraw |> Int.parse(<>) ?? 0 |> if <> == {\n    0 -> \"none\"\n    else -> \"some\"\n}"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Every table holds a `<>` hole, as ratified",
-            "gist": "Every header holds one `<>` and runs per arm tried; about 16,400 tables change.",
-            "gains": [
-              "One header rule for every table.",
-              "A `<>` always means the header runs per arm."
-            ],
-            "losses": [
-              "About 16,400 tables in 2,700 files change.",
-              "About 5,400 header calls need a named value first.",
-              "`if reader.next() == <> {` silently reads per arm."
-            ],
-            "proposed": {
-              "code": "if light == <> {\n    .Red -> 30\n    else -> 0\n}\nlock: files.try_lock(path)\nif lock == <> {\n    .Val(_) -> run()\n    else -> wait()\n}"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Both headers stay",
-            "gist": "`if light == {` and `if light == <> {` build the same table.",
-            "gains": [
-              "No existing table changes.",
-              "Authors pick the spelling they like."
-            ],
-            "losses": [
-              "Two spellings for the same table.",
-              "Readers must learn both."
-            ],
-            "proposed": {
-              "code": "if light == {\n    .Red -> 30\n    else -> 0\n}\nif light == <> {\n    .Red -> 30\n    else -> 0\n}"
-            }
-          },
-          {
-            "key": "D",
-            "name": "Every table holds a `<>` hole; a comparison reads once",
-            "gist": "Every header holds one `<>`, but `subject == <>` still reads its subject once.",
-            "gains": [
-              "One header shape for every table.",
-              "The change adds `<>` and keeps behavior."
-            ],
-            "losses": [
-              "About 16,400 tables in 2,700 files change.",
-              "`<>` means one read here, a read per arm elsewhere."
-            ],
-            "proposed": {
-              "code": "if light == <> {\n    .Red -> 30\n    else -> 0\n}\nif files.try_lock(path) == <> {\n    .Val(_) -> run()\n    else -> wait()\n}\n// `try_lock` runs once."
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A keeps one spelling per job and changes no table. A plain header reads once; a `<>` header runs per arm and refuses a call with an effect.",
-          "gains": [
-            "One spelling per job.",
-            "No migration.",
-            "A compared value is read once."
-          ],
-          "losses": [
-            {
-              "loss": "Learners meet two header shapes.",
-              "mitigation": "The docs teach the plain table first and show the `<>` hole only where a test repeats."
-            },
-            {
-              "loss": "Your required-hole rule is amended.",
-              "mitigation": "Only `subject == <>` is refused, with a fix; other holes work as ratified."
-            },
-            {
-              "loss": "A hole table cannot sit inside a pipe step.",
-              "mitigation": "The error shows the pipe split into a named value."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B changes about 16,400 tables, and about 5,400 header calls repeat per arm unless named first."
-            },
-            {
-              "key": "C",
-              "reason": "C gives one table two spellings, so readers learn both."
-            },
-            {
-              "key": "D",
-              "reason": "D adds `<>` to 16,400 tables and gives `<>` two meanings."
-            }
-          ],
-          "tradeoff": "`light == <>` is refused with a fix; other hole tables work as ratified."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-15T00:09:11.051Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-11-15"
-    },
-    {
       "id": "D-DB-TABLE1",
       "cardId": "c0429qak",
       "group": "library",
@@ -135728,6 +134866,227 @@
       "draft": true,
       "status": "open",
       "created": "2026-11-19T09:40:52.961Z"
+    },
+    {
+      "id": "D-DEBUG-STDIN1",
+      "cardId": "c00ni11n",
+      "group": "tooling",
+      "title": "How a program under jet debug reads its input from a file or pipe",
+      "situation": "Under the Jet debugger, a program cannot read any input today: its first read finds nothing. The debugger takes its own commands from the same place, called stdin, so a keyboard can be shared one line at a time, and that part is already being built. A file or pipe cannot be shared, because the program reads ahead and would swallow the debugger's commands, and an editor already uses that channel for itself. The vote decides where a user names the program's own input: in a launch flag and editor setting, at the debugger's prompt, or by moving the debugger's commands to a file.",
+      "gist": "How should a program under `jet debug` get its input from a file or a pipe, when the debugger reads its own commands from stdin?",
+      "lesson": "A program reads its input, called stdin, from a keyboard, a file or a pipe. Under `jet debug`, stdin also carries the debugger's commands. A keyboard can be shared one line at a time, and that part is already being built. A file or pipe cannot be shared, because the program reads ahead and would swallow commands. So the program's input needs its own name. This vote picks where that name is written.",
+      "explainer": "Beginner path. On a terminal, `jet debug echo.jet` needs nothing new: the program reads what you type while it runs, and the prompt reads what you type while it is stopped. With a file, the beginner writes `jet debug echo.jet --stdin=input.txt`. The prompt stays on the keyboard and the program reads the file. A beginner who writes `jet debug echo.jet < input.txt` gets an unknown-command message that names `--stdin=FILE`.\n\nExpert path. An agent pipes the debugger's commands and names the program's input with the flag, as in `printf 'break 5\\ncontinue\\n' | jet debug echo.jet --stdin=input.txt`. A live producer goes through the shell's process substitution, as in `--stdin=<(producer)`. An editor sets `\"stdin\": \"input.txt\"` in the launch settings. A nested session of the compiler itself runs as `jet debug ./jet --stdin=inner.txt -- debug echo.jet`, with the outer commands piped, and `inner.txt` holding the inner session's commands.",
+      "story": "Ana writes a small program that reads lines and prints them. It works with `jet run echo.jet < input.txt`. One line comes out wrong, so she runs `jet debug echo.jet < input.txt`. The debugger answers ``Unknown command `apple` `` for each line of her file. Then the program finishes without printing anything. Her input became debugger commands, and the program saw empty input.\n\nUnder option A, the first unknown command tells her to use `--stdin=input.txt`. She runs `jet debug echo.jet --stdin=input.txt`, types `break 5` and `continue`, and `print line` shows `apple`. In her editor she adds `\"stdin\": \"input.txt\"` to the launch settings and gets the same run with a click.",
+      "inWild": "gdb shares its terminal with the program by default. For other input it applies shell redirection to its `run` command, as in `run < input.txt`, or points the program at another terminal with `tty`. Its manual says only the program's input is affected; gdb's input still comes from the terminal. Batch runs read commands from a file with `-x` and `-batch`.\n\nlldb names the file when it launches the program: `process launch -i input.txt` (long form `--stdin`), with sibling options for stdout and stderr, and `--tty` for a fresh terminal. The setting `target.input-path` names the file once for every later launch. Batch runs use `lldb -b -s steps.txt`.\n\nDelve redirects at startup with `dlv debug -r stdin:input.txt`, and its `restart` command can change the redirect, as in `restart <input.txt`. The Go extension for VS Code exposes the same thing as the `stdinFrom` launch field. Its manual says the editor captures output but not stdin, and points users who need typed input to the `console` setting.\n\nCodeLLDB has a `stdio` launch list for descriptors 0, 1 and 2, where a string is a file, pipe or terminal path, as in `\"stdio\": [\"input.txt\", null, null]`. The Debug Adapter Protocol hands a program a terminal through the `runInTerminal` reverse request.\n\nrr records the program's reads, so `rr record ./echo < input.txt` followed by `rr replay` needs no input file at replay time.\n\nSources follow, one per line.\ngdb: sourceware.org/gdb/current/onlinedocs/gdb.html/Input_002fOutput.html\nlldb: lldb.llvm.org/use/map.html, the `process launch` options in lldb/source/Commands/Options.td, and `input-path` in lldb/source/Target/TargetProperties.td\nDelve: github.com/go-delve/delve/blob/master/Documentation/usage/dlv_redirect.md and Documentation/cli/README.md, `restart`\nvscode-go: github.com/golang/vscode-go/blob/master/docs/debugging.md\nCodeLLDB: github.com/vadimcn/codelldb/blob/master/MANUAL.md\nDAP: microsoft.github.io/debug-adapter-protocol/specification, RunInTerminal\nrr: github.com/rr-debugger/rr/wiki/Usage",
+      "detail": "Code read on master 6f3f982eec. The program starts in `x64_trace_spawn` in Compiler/JetBackend/Source/Image/Loader.jet. Its comment says the program's standard input reads /dev/null, and the helper process duplicates a /dev/null descriptor onto descriptor 0. Output goes to a scratch file that the session relays.\n\nThe console loop is `jet_cli_debug_commands` in Compiler/JetCLI/Source/CLI/Debug.jet. It reads one line at a time from the debugger's own stdin and echoes each command when stdin is not a terminal. The end of stdin acts as `continue`.\n\nThe program starts before the first prompt. `jet_cli_debug_console` opens the session, which runs to the start of `run`, or to the first `--break` stop. Only then does it read commands.\n\nThe console commands are listed in `NATIVE_DEBUG_HELP` in Compiler/JetDebug/Source/Native.jet. They are step, next, continue, finish, the reverse commands, jump, back, events, break, log, watch, why, breaks, delete, frame, up, down, locals, print, backtrace, tasks, fix, help and quit. There is no run, restart or stdin command. An unknown word answers ``Unknown command `word` `` followed by the help line.\n\nThe flag registry is Compiler/JetFoundation/Source/Registry/CLICommands.jet. Debug has `--raw-frames`, `--dap`, the repeated `--break`, `--attach`, `--record`, `--replay` and `--deep-checks`; there is no `--stdin` or `--commands`. The nearby `--stdin-path` belongs to `jet fmt -` and only labels diagnostics, so option A's help line must say the program reads that file.\n\nThe editor adapter is Compiler/JetCLI/Source/CLI/DebugDap.jet. Its `launch` and `restart` requests read only `stopOnEntry` and `args`. The VS Code extension in Tools/Editors/Vscode declares `program`, `args`, `cwd`, `env`, `stopOnEntry` and `showRawFrames`, and no input field. It starts the adapter in the workspace folder.\n\nThe ratified editor decision, D-DBG-DAP1, speaks the protocol over the adapter's stdio and rules out reverse requests. So `runInTerminal` is unavailable, and a file path is the only way to give an editor-launched program a file's or pipe's input.\n\nThe ratified D-DBG-AUTH1=B treats every path an editor session opens as a capability. Paths are confined to the workspace or the approved working directory, and anything else gets that decision's E2242 refusal, which is not built yet. Its launch preview lists them. An editor `stdin` path joins that list under every option, so it is shared work, not a loss of one option. The terminal flag is typed by the user and needs no preview.\n\nThe terminal-sharing change already being built on this card, which adds no new surface, gives `x64_trace_spawn` an input path that the debugger opens before the fork. It also gives the session an `input_path` that defaults to /dev/null and becomes /dev/stdin when the console's stdin is a terminal. Each start of the program reopens that path. Option A only lets the user set it.\n\nThe runtime fills one shared stdin buffer of up to 65536 bytes per read (Compiler/JetRuntime/Source/TerminalInput.jet, `TERM_INPUT_CAPACITY`). That is why a shared pipe would swallow later commands. The console reads its own stdin through the same kind of buffer.\n\nRecording already covers stdin. Compiler/JetRuntime/Source/ProveJournal.jet says a replay answers stdin from the recording. Reverse commands rerun the program only in a replay. So `--replay` must refuse `--stdin`, while `--record` with `--stdin` keeps the file's bytes in the recording.\n\nEdge cases under option A. A missing or unreadable file is refused before the build with E2105, as ``couldn't open `input.txt` for the program's stdin``. A named pipe opens when the program starts, and the session says it is waiting for a writer, as a shell's `<` would.\n\nA path that names the console's own pipe or file, such as /dev/stdin under a pipe, is refused with E2102. The check compares the opened file with the console's stdin. On a terminal the same path just shares the keyboard, which is the default being built. Process substitution works because jet debug opens the path itself, before the helper closes its other descriptors.\n\nA terminal plus a file splits cleanly: the console keeps the keyboard, and the program reads the file and sees no terminal. `--attach` refuses `--stdin` with E2102, because a running process keeps its own stdin. `--dap` refuses the flag with E2102, as it refuses `--break`, and the editor sets the `stdin` launch field instead.\n\nIn an editor, a relative path resolves against the launch's `cwd`. The adapter does not read `cwd` yet, a gap D-DBG-DAP1 already owns, so until then that is the workspace folder. `restart` reopens the file from its start; a named pipe or a process substitution gives only what is left. Without the field, an editor-launched program still reads end of input, because the protocol owns the adapter's stdin.\n\nThe unknown-command hint has a limit. A redirected file whose lines are all valid commands, such as `n`, `c` or `q`, runs them and prints no hint. The `jet debug` help and the flag's help line still name `--stdin`.\n\nThe nested case runs `jet debug ./jet --stdin=inner.txt -- debug echo.jet` with the outer commands piped, where `./jet` is an unoptimized build of the compiler. The pty case uses keyboard sharing at both levels.",
+      "options": [
+        {
+          "key": "A",
+          "name": "A launch flag and an editor launch field that name the input file",
+          "detail": "`jet debug echo.jet --stdin=input.txt` starts the program with the file as its stdin. The debugger keeps reading commands from its own stdin, whether that is the keyboard or a pipe of commands. In an editor, the launch settings take `\"stdin\": \"input.txt\"` with the same meaning. Without the flag, a keyboard is shared as already planned, and a file or pipe leaves the program with empty input.\n\nA live producer uses the shell's process substitution, `--stdin=<(producer)`, or a named pipe. When the debugger's stdin is not a keyboard, the unknown-command message adds that `--stdin=FILE` gives the program input.",
+          "technical": "The terminal-sharing change in flight gives `x64_trace_spawn` an input path, opened by jet debug before the fork and duplicated onto descriptor 0, and gives `NativeSession` an `input_path`. Option A sets that path. Because jet debug opens it before the helper closes its other descriptors, /dev/fd paths from process substitution work.\n\nCLICommands.jet gains `--stdin` with a value, scoped to debug. Each start of the program reopens `input_path`, including the adapter's `restart`. DebugDap.jet reads `stdin` in `launch` and `restart` under the D-DBG-AUTH1 path law, and the VS Code package.json declares it.\n\nRefusals: E2105 for a path that cannot be opened. E2102 for a path naming the console's own pipe, and for `--stdin` with `--attach`, `--replay`, a crash dump or `--dap`. For an editor path outside the workspace or approved working directory, D-DBG-AUTH1's E2242, which is not built yet.",
+          "code": "$ jet debug echo.jet --stdin=input.txt\n(Jet) break 5\n(Jet) continue\nBreakpoint hit  echo.jet:5  in run()\n(Jet) print line\nline = \"apple\"\n\n// editor launch settings\n\"stdin\": \"input.txt\""
+        },
+        {
+          "key": "B",
+          "name": "A prompt command that restarts the program with an input file",
+          "detail": "`stdin input.txt` at the prompt starts the program again from the beginning, reading that file, and keeps the breakpoints. Later restarts keep the file. This is gdb's `run < input.txt` and lldb's `process launch -i input.txt` in the console's own words. A piped transcript starts with that line.\n\nJet has no prompt before the program starts. The program has already run to the start of `run` with empty input, so the command must restart it.",
+          "technical": "Adds a restart path to the console in Native.jet next to `command()`, plus an input descriptor on `x64_trace_spawn` as in A. The word `run` is not used, because it is also the entry function's name, and `break run` already means a breakpoint there.\n\nThe editor protocol has no prompt, so editors still need a `stdin` launch field. That makes two spellings for one setting.",
+          "code": "$ jet debug echo.jet\n4 |     loop line in io.stdin().lines() {        <- here\n(Jet) stdin input.txt\nRestarted, reading input.txt\n4 |     loop line in io.stdin().lines() {        <- here\n(Jet) continue\ngot apple"
+        },
+        {
+          "key": "C",
+          "name": "Debugger commands from a file, so stdin goes to the program",
+          "detail": "`jet debug echo.jet --commands=steps.txt < input.txt` reads the debugger's commands from steps.txt, and the program inherits the debugger's own stdin. A plain shell pipe then reaches the program: `producer | jet debug echo.jet --commands=steps.txt`. This follows gdb's `-x`, lldb's `-s` and Delve's `--init`.\n\nWhen the commands file ends, the program runs to its end, because stdin belongs to the program. Without the flag, today's piped commands keep working.",
+          "technical": "Adds `--commands` to CLICommands.jet, and `jet_cli_debug_commands` reads lines from that file instead of the terminal. The program inherits descriptor 0 in `x64_trace_spawn`.\n\nUnder the editor protocol, the adapter's stdin carries the protocol, so editors still need a separate `stdin` launch field. Debug cases would split between `stdin:` command transcripts and commands-file fixtures. A restart cannot re-read a pipe that the program has already drained.",
+          "code": "$ jet debug echo.jet --commands=steps.txt < input.txt\n(Jet) break 5\n(Jet) continue\nBreakpoint hit  echo.jet:5  in run()\n\n$ producer | jet debug echo.jet --commands=steps.txt"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "gdb",
+          "note": "Redirection on `run`; the console keeps the terminal. `tty` moves the program to another terminal. Commands from a file need `-x` with `-batch`.",
+          "code": "(gdb) run < input.txt\n(gdb) tty /dev/pts/3\n$ gdb -batch -x steps.txt ./echo"
+        },
+        {
+          "lang": "lldb",
+          "note": "A launch option names the program's stdin file. `--tty` gives the program its own terminal. `-s` sources commands from a file.",
+          "code": "(lldb) process launch -i input.txt\n(lldb) process launch --tty\n$ lldb -b -s steps.txt ./echo"
+        },
+        {
+          "lang": "Go (Delve and vscode-go)",
+          "note": "A startup redirect on the command line and the same setting as an editor launch field. Delve's `restart` can change it.",
+          "code": "$ dlv debug -r stdin:input.txt\n// launch.json\n\"stdinFrom\": \"input.txt\""
+        },
+        {
+          "lang": "CodeLLDB",
+          "note": "One launch list for descriptors 0, 1 and 2; a string is a file, pipe or terminal path, and null keeps the session terminal.",
+          "code": "\"stdio\": [\"input.txt\", null, null]"
+        },
+        {
+          "lang": "rr",
+          "note": "The recording keeps the program's reads, so a replay needs no input. Jet's `--record` and `--replay` already behave this way for stdin.",
+          "code": "$ rr record ./echo < input.txt\n$ rr replay"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "An editor-launched program can only get input from a path, because the protocol owns the adapter's stdin and reverse requests are ruled out. A flag on the command line and a field with the same name in the launch settings give the terminal and the editor one answer. The flag leaves today's piped command transcripts untouched, so the existing Debug cases and agent sessions keep working. A file can be reopened on restart, and Delve with the Go editor extension already ship this shape.",
+        "gains": [
+          "One spelling for the terminal (`--stdin=input.txt`) and the editor (`\"stdin\": \"input.txt\"`).",
+          "Piped debugger commands and the existing Debug cases keep working unchanged.",
+          "The prompt stays interactive while the program reads a file.",
+          "Restart reopens the file from its start, and `--record` keeps its bytes for replay."
+        ],
+        "losses": [
+          {
+            "loss": "Redirecting a file into `jet debug` with `<` still feeds the prompt, not the program.",
+            "mitigation": "When stdin is not a keyboard, the unknown-command message names `--stdin=FILE` as the way to give the program input."
+          },
+          {
+            "loss": "A live producer needs process substitution or a named pipe instead of a plain `|`.",
+            "mitigation": "The help line shows `--stdin=<(producer)`, which bash and zsh support, and the debugger says when it waits for a writer."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Jet starts the program before the first prompt, so a prompt command means a second start and a new restart command. Editors would still need a launch field, giving two spellings for one setting."
+          },
+          {
+            "key": "C",
+            "reason": "It trades the interactive prompt for a plain pipe, splits how commands reach the debugger across test cases, and still needs a separate launch field for editors."
+          }
+        ],
+        "tradeoff": "A accepts a shell spelling for live pipes, `--stdin=<(producer)`, in exchange for one name that works on the command line, in the editor and on restart."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "A Debug case runs a program that loops over `io.stdin().lines()` and prints each line. Its step is `jet debug echo.jet --stdin=input.txt`. The case's `stdin:` file pipes the console commands `break 5`, `continue`, `print line`, `delete 2` and `continue`. It asserts that `print line` shows the first line while stopped. It also asserts that every line prints after the resume.\n\nFurther cases cover a missing file (E2105), `/dev/stdin` under a pipe (E2102), and `--stdin` with `--replay` (E2102). Others cover the editor `stdin` launch field, and a nested `jet debug` of an unoptimized jet driven through a pipe and through a pty.",
+      "surface": {
+        "gist": "How should a program under `jet debug` get its input from a file or pipe?",
+        "lesson": "A program reads its input, called stdin, from a keyboard, a file or a pipe. Under `jet debug`, stdin also carries the debugger's commands. A keyboard can be shared line by line, and that is being built. A file or pipe cannot: the program reads ahead and would swallow commands.",
+        "trio": {
+          "current": {
+            "note": "Today the file's lines become debugger commands, and the program sees empty input.",
+            "code": "$ jet debug echo.jet < input.txt\n4 |     loop line in io.stdin().lines() {        <- here\n(Jet) apple\nUnknown command `apple`. Commands: step (s), …\n(Jet) continue\nProgram finished"
+          },
+          "wild": {
+            "lang": "Go (Delve and vscode-go)",
+            "note": "Delve names the input file at startup; its editor extension has the same field.",
+            "code": "$ dlv debug -r stdin:input.txt\n// launch.json\n\"stdinFrom\": \"input.txt\""
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Launch flag plus editor field",
+            "gist": "`--stdin=FILE` on the command line; `\"stdin\"` in editor launch settings.",
+            "gains": [
+              "One name for the terminal and the editor",
+              "Piped debugger commands work as today",
+              "Restart rereads the file from its start"
+            ],
+            "losses": [
+              "Redirecting with `<` still feeds the prompt",
+              "A live pipe needs `<(producer)` or a named pipe"
+            ],
+            "proposed": {
+              "code": "$ jet debug echo.jet --stdin=input.txt\n(Jet) break 5\n(Jet) continue\nBreakpoint hit  echo.jet:5  in run()\n(Jet) print line\nline = \"apple\"\n\n// editor launch settings\n\"stdin\": \"input.txt\""
+            }
+          },
+          {
+            "key": "B",
+            "name": "Prompt command that restarts",
+            "gist": "Type `stdin input.txt` at the prompt; the program restarts reading that file.",
+            "gains": [
+              "Familiar to gdb and lldb users",
+              "Change the input mid-session"
+            ],
+            "losses": [
+              "The program starts twice, first without input",
+              "Editors still need a launch setting"
+            ],
+            "proposed": {
+              "code": "$ jet debug echo.jet\n(Jet) stdin input.txt\nRestarted, reading input.txt\n(Jet) continue\ngot apple"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Commands from a file",
+            "gist": "`--commands=FILE` feeds the debugger; the program gets the debugger's stdin.",
+            "gains": [
+              "A plain shell pipe reaches the program",
+              "Like gdb `-x` and lldb `-s`"
+            ],
+            "losses": [
+              "No typing at the prompt",
+              "Test cases feed commands two ways",
+              "Editors still need a launch setting"
+            ],
+            "proposed": {
+              "code": "$ jet debug echo.jet --commands=steps.txt < input.txt\n\n$ producer | jet debug echo.jet --commands=steps.txt"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "An editor session can only give the program a file path. One flag and a matching launch field give the terminal and the editor one answer.",
+          "tradeoff": "A live pipe needs a shell spelling, in exchange for one name everywhere.",
+          "gains": [
+            "Same shape as Delve and its editor extension",
+            "Command transcripts stay unchanged"
+          ],
+          "losses": [
+            {
+              "loss": "Redirecting with `<` still feeds the prompt",
+              "mitigation": "The unknown-command message names `--stdin=FILE` when stdin is not a keyboard."
+            },
+            {
+              "loss": "A live pipe needs `<(producer)` or a named pipe",
+              "mitigation": "The help line shows `--stdin=<(producer)`, which bash and zsh support."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "The program would start twice, and editors still need a launch field."
+            },
+            {
+              "key": "C",
+              "reason": "It gives up typing at the prompt, and editors still need a launch field."
+            }
+          ]
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Redirecting a file into `jet debug` with `<` still feeds the prompt, not the program.",
+          "attempts": [
+            "Treat lines that are not commands as program input. Rejected: it guesses, and a mistyped command would silently become input.",
+            "Read commands from the controlling terminal when stdin is a file. Rejected: it breaks every piped transcript and there is no terminal in CI.",
+            "Name `--stdin=FILE` in the unknown-command message when stdin is not a keyboard. Kept."
+          ],
+          "result": "Reduced: the trap remains, but the first wrong line names the fix."
+        },
+        {
+          "loss": "A live producer needs process substitution or a named pipe instead of a plain `|`.",
+          "attempts": [
+            "Accept `--stdin=-` for the debugger's own stdin. Rejected: that is the console's pipe, the conflict this vote resolves.",
+            "Open the path inside jet debug before the helper starts, so `/dev/fd` paths from `<(producer)` work. Kept."
+          ],
+          "result": "Reduced to one shell spelling; a plain `|` keeps carrying debugger commands."
+        }
+      ],
+      "draftedBy": "Main",
+      "reviewedBy": "BallotReviewStdin",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-20T02:32:03.981Z"
     }
   ],
   "questions": [
@@ -136958,19 +136317,6 @@
       "answeredBy": "Main"
     },
     {
-      "id": "q0n7cs1p",
-      "cardId": "c0p39lw2",
-      "decisionId": "D-IFHOLE2",
-      "by": "owner",
-      "kind": "question",
-      "text": "Should the hole be <> instead of _ to match pipe syntax so that <> means the value is inserted here? I also am very confused by this ballot, no idea what it means plainly",
-      "status": "answered",
-      "answer": "Plainly: a decision table is Jet's `if` with arms, like a match. Today you write `if light == { .Red -> 30  .Amber -> 5 }`: Jet compares `light` with each arm in turn. The hole form marks where each arm's value goes: `if n % _ == 0 { 15 -> \"FizzBuzz\"  3 -> \"Fizz\" }` means try `n % 15 == 0`, then `n % 3 == 0`. On 2026-09-11 you ruled that every table must have a hole, so `if light == {` would become `if light == _ {`. That migration never ran. The ballot asks which headers stay: (A) keep `if light == {` for plain comparisons and use a hole only when the test is more than one comparison; (B) migrate all ~16,000 tables to a hole; (C) allow both spellings; (D) require the hole everywhere but read the header once. The catch for B: your rule re-runs the header for each arm tried, so `if files.try_lock(path) == _ {` would call try_lock up to once per arm, and ~6,000 tables call a function in the header and would first need a named value.\n\nOn `<>`: yes, we recommend it. `<>` already means 'a value is inserted here' in pipes, so the hole reuses one idea instead of adding one. `_` already means 'ignore this' in patterns and the catch-all arm, and a hole table would hold both meanings at once (`if try_lock(p) == _ { .Val(_) -> ... }`). The one cost is nesting: a hole table directly inside a pipe step would see two `<>` values. The rule we'd propose: a hole table inside a pipe step names the pipe value first, and the compiler refuses the ambiguous form with that fix. The ballot will be rewritten in plain language with `<>` as the hole in every option and re-reviewed; the hole syntax that landed today (`_`) is a one-token parser change to switch.",
-      "created": "2026-11-15T00:22:10.963Z",
-      "answeredAt": "2026-11-15",
-      "answeredBy": "Main"
-    },
-    {
       "id": "q0vif86a",
       "cardId": "c0py34oh",
       "decisionId": "D-PLACE-DEFAULT1",
@@ -138022,6 +137368,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-20T02:40:54.133Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00ni11n",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-20T02:40:47.744Z",
+      "by": "Main",
+      "action": "decision.post",
+      "ref": "D-DEBUG-STDIN1",
+      "note": "reviewed by BallotReviewStdin"
+    },
+    {
+      "at": "2026-11-20T02:40:46.759Z",
+      "by": "BallotReviewStdin",
+      "action": "decision.review",
+      "ref": "D-DEBUG-STDIN1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-20T02:40:45.715Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-DEBUG-STDIN1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-20T02:32:03.981Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-DEBUG-STDIN1",
+      "note": "How a program under jet debug reads its input from a file or pipe (draft)"
+    },
     {
       "at": "2026-11-20T01:56:55.529Z",
       "by": "Main",

@@ -73465,6 +73465,400 @@
       "comment": "Owner, on the ballot (q39nfnx7), 2026-11-04: A as amended. Comments stay //, /// and nested /* */, and there is NO warning for Python's 7 // 2; the warning half of A is dropped.",
       "ratifiedAt": "2026-11-05",
       "retiredAt": "2026-11-20T01:56:54.335Z"
+    },
+    {
+      "id": "D-IFHOLE1",
+      "cardId": "c0p39lw2",
+      "group": "syntax",
+      "title": "Require one typed dispatch hole and keep Boolean guards",
+      "gist": "Should dispatch tables require one typed `_` hole while keeping Boolean guards?",
+      "lesson": "Each arm supplies a candidate for `_`. A guard adds a true-or-false check. The first successful arm wins; `->` selects its result. Here candidates are whole numbers (`Int`), and tests produce true or false (`Bool`). A pattern checks a value shape; `.Ok(_)` ignores its carried value.",
+      "explainer": "",
+      "story": "User is improving Jet's FizzBuzz example. He wants one shared divisibility test and a clear list of divisors. He also wants per-arm checks such as ready without nesting another if.",
+      "inWild": "A request router can try ordered thresholds and readiness checks in one table:\n```jet\nif queue_depth < _ {\n    8 && primary_ready -> route_primary()\n    32 && (secondary_ready || emergency) -> route_secondary()\n    else -> reject_request()\n}\n```\nThe values 8 and 32 fill the same typed hole. Each extra Boolean check applies to that arm. This is a proposed usage example, not an observed production deployment.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Require one typed hole",
+          "detail": "Every non-else arm fills `_`. `2 && ready` requires both checks; `2 && ready || emergency` accepts an emergency alone. `2 && (ready || emergency)` always requires the candidate test.\n\nGroup Boolean candidates: `(ready && backup)`. Arm-level `|` separates candidates, not bits. Value-returning tables normally need `else`; action-only tables may do nothing. Omitting else requires plain equality, one immutable bound subject, and complete unguarded pattern coverage.\n\nState the shared test once. Keep Boolean guards beside each candidate. Check one input type across the table.\n\nOld headers and independent predicate arms need migration. Boolean candidates need grouping; bitwise-OR candidates need a named value. Header calls can repeat; unneeded candidate computations can be skipped.",
+          "code": "fn label(n: Int) String -> {\n    return if n % _ == 0 {\n        15 -> \"FizzBuzz\"\n        3 -> \"Fizz\"\n        5 -> \"Buzz\"\n        else -> \"{n}\"\n    }\n}",
+          "technical": "Authority and scope\n\nThe owner chose a required typed `_`, one input, ordinary && and ||, and header evaluation per attempted arm. He also chose one candidate per non-else arm and candidate evaluation only when execution reaches `_`. The complete contract still requires this ballot's ratification.\n\nAmend D-IFDIST1, D-IF3, D-MATCHARM1/2, and S68. Preserve D-ARMHEAD-PAREN1 grouping. Do not reopen unrelated syntax or the meaning of payload wildcards.\n\nThe feature is readability-motivated. No speedup, compile-time improvement, or measured peer advantage is claimed.\n\nHeader and typing\n\nWrite `if H[_] { candidate -> body }`. H[_] denotes a header with exactly one typed hole. Filling it must produce a Bool condition. Expression candidates and pattern candidates have the separate filling rules below.\n\nThe `_` is required for dispatch tables. Ordinary `if condition` and subjectless `if { condition -> body }` remain unchanged.\n\nReject zero-hole distributed headers and headers with multiple expression-hole occurrences. Repeated `_` does not name the same argument twice.\n\nThe hole has one static input type for the entire table. Infer it using existing expression, call, literal, and candidate constraints. Never specialize the header independently for each arm. For a pattern candidate, this is the type of value being matched, not a value produced by that pattern.\n\nAmbiguous types receive a normal front-end diagnostic. Resolve ambiguity by typing an existing binding or named predicate. This ballot adds no `_` annotation spelling or conversion rule.\n\nA single input may have any ordinary value type. Existing tuple or struct values remain one input. There is no automatic splitting into multiple arguments.\n\nThe hole belongs only to its own table header. It may occur inside ordinary operators, parentheses, receivers, indexing, or call arguments. It cannot cross into a nested callable, loop body, comprehension body, or another table. Those scopes could defer or repeat evaluation of the hole. Payload wildcard `_` remains a different syntactic role.\n\nHeader names keep their outer lexical bindings. Candidate pattern names cannot capture or rewrite names inside the header.\n\nCandidate and Boolean grammar\n\nThe first arm operand is a candidate or a parenthesized candidate-alternative group. Its static type must fit the hole, regardless of whether that type is Bool.\n\nComparisons or Boolean expressions used as candidates must be parenthesized. Thus `(a < b)` supplies one Bool value, rather than bypassing the header.\n\nAfter the candidate test, && and || take ordinary Bool operands with normal precedence. A bare trailing number is not another implicit candidate.\n\nFor `if n < _`, `2 && ready == true` means `(n < 2) && (ready == true)`.\n\n`2 && ready || emergency` means `((n < 2) && ready) || emergency`. An emergency may select the arm when the candidate comparison is false.\n\n`2 && (ready || emergency)` requires `n < 2` in both cases. The formatter preserves necessary grouping.\n\nA candidate group uses existing `|`. `(1 | 2) && ready` means `(H[1] || H[2]) && ready`. A group next to && or || requires parentheses.\n\nAn explicit parenthesized alternative group may also occur after a Boolean operator. Every member still fills the same hole; no additional input is introduced.\n\nThe group stops at its first successful candidate. If its following guard then fails, continue to the next arm, not another candidate in that group.\n\nAt candidate-group level, | means alternatives, including inside parentheses. To supply a bitwise-OR result as one candidate, compute it in an ordinary binding or nested function argument first. No type-based grammar guessing is permitted.\n\nA whole independent predicate belongs in a subjectless table. A Bool candidate is never silently reclassified as an independent predicate.\n\nEvaluation and errors\n\nThere are two filling rules. An expression candidate x is substituted at the hole's expression position. This is not an eager runtime function call. Substitution preserves lexical bindings and ordinary evaluation order. A pattern candidate instead becomes the pattern operand of an existing equality pattern test. Its matching rule is specified below; it is not evaluated as an expression.\n\nFor each reached candidate, evaluate its completed header as an ordinary condition. An expression candidate is evaluated at most once, only if execution reaches the hole. A pattern candidate is matched only if execution reaches its equality pattern test.\n\nFor `if ready && accepts(_)`, a false ready skips an effectful candidate expression. For `if read() % _ == 0`, each reached candidate can call read again.\n\nNo table-wide caching is implied, even for an equality header. A user-written immutable binding provides one-time evaluation.\n\nStop after the first true complete arm head. Skip later candidates, guards, and bodies when their result is no longer needed. This skipping is short-circuiting. Evaluate only the selected body.\n\nErrors and failures propagate exactly as in the expanded condition. They are not false matches. Do not hide division by zero or retry an error through later arms.\n\nExisting effect, borrowing, and ownership rules apply. Do not add implicit cloning, copying, or deferred effects to make an otherwise-invalid repeated use compile.\n\nPatterns, ranges, and bindings\n\nA structural or range pattern may fill a hole that is an entire operand of an ordinary equality pattern test. `if result == _` and `if _ == result` are examples.\n\nAn enclosing Boolean expression retains ordinary pattern-test rules. Arithmetic and call input positions accept values, not binding patterns.\n\n`if score == _ { 90..100 -> \"A\"; else -> \"other\" }` matches an inclusive band using the existing range-pattern mechanism.\n\n`if n % _ == 0 { 2..5 -> ... }` does not search divisors. A Range cannot fill an Int hole. A function hole whose actual input type is Range may accept a Range value.\n\nIn `.Ok(value) && value > 0`, a successful pattern makes value available to the guard and selected body. The payload wildcard in `.Ok(_)` binds nothing.\n\nNames are local to the arm. Keep the existing strict Boolean-OR rule: a pattern binding introduced beneath || is unavailable after that ||, including in the body. This remains true even when both Boolean branches bind the same name. A binding established before `(ready || emergency)` remains available; that nested OR does not introduce it.\n\nOnly structural | may merge pattern bindings across alternatives. Existing structural or-pattern rules require matching names, types, and binding modes across alternatives. They do not create multiple header inputs.\n\nRead a pattern subject once within each candidate test. Range bounds and payload checks inspect that same value. A later candidate starts a new attempt.\n\nPending guards receive non-consuming read access to pattern-bound payloads. Sema rejects a guard that moves from or mutates the matched payload. Existing ordinary copying rules still apply to copyable values. Commit a permitted by-value pattern move only after the complete head selects the arm. Guard effects on unrelated state remain ordinary effects; there is no rollback.\n\nExhaustiveness and result types\n\nValue tables require else unless existing structural coverage proves that some arm must succeed. Arm result types unify through existing rules. Effect tables may fall through without else.\n\nPer-attempt subject evaluation makes type coverage alone insufficient. If next_result() returns .Err then .Ok, arms .Ok followed by .Err can both miss.\n\nUse one explicit no-else proof rule. Ignoring parentheses, the whole header must be `subject == _` or `_ == subject`. The subject must be an immutable bound value. Unguarded structural pattern arms must cover its closed type using existing coverage rules.\n\nOther guarded arms may be present but contribute no coverage. A Boolean conjunction or disjunction in the header requires else. A call, computed expression, or literal subject also requires else; bind it first to request structural coverage.\n\nFor example, `false && result == _` never becomes exhaustive merely because all result variants are listed. A result stored with `result :: next_result()` may use the ordinary unguarded variant-coverage proof. This proposal does not add a general stability or constant-folding prover.\n\nDo not pretend arbitrary predicate tables are exhaustive by solving their conditions. No runtime fallback may stand in for a missing user else.\n\nCutover and implementation obligations\n\nMigrate every in-repository caller, source producer, example, test, snapshot, formatter case, and affected explanation. Remove acceptance of the old holeless dispatch form.\n\nWhere old code relied on one evaluated subject, insert an explicit binding during migration unless single-evaluation equivalence is proven. Preserve observed meaning rather than mechanically adding `_`. The formatter handles layout after a source-aware semantic repair; it does not invent the repair.\n\nMixed tables with independent predicate arms must become subjectless tables. For example, retain `code == 200` and `ready == true` as separate written conditions. Preserve their ordering and any prior one-time subject binding. A bare unrelated predicate must not be forced into the hole or silently discarded.\n\nRetain unrelated ordinary and subjectless if forms. Register the new contextual hole role in Syntax.rs against this decision. New or changed diagnostics need registered what, why, fix, and UI snapshots.\n\nOne semantic lowering must serve statement and value position, AOT, default run/dev, interpreter/deopt, web, and compile-time evaluation where applicable.\n\nLower to the existing typed conditional and pattern machinery. Do not introduce runtime closures, allocations, backend policy copies, or a compatibility parser.\n\nProve FizzBuzz, joined guards, OR bypass, grouped alternatives, skipped candidate effects, repeated header calls, changing-subject coverage, and pattern ownership. Compare them with explicit reference conditions.\n\nBefore closure, run affected golden, formatter, and diagnostic checks plus actual multi-mode programs. Do not claim these proposed examples have already passed.\n\nConcrete reading and grammar examples\n\nFor an Int n, `n % divisor == 0` tests whether the divisor fits evenly. FizzBuzz returns \"FizzBuzz\" at 15 and \"7\" at 7.\n\nFor a Bool-taking accepts function, `ready && backup -> body()` means `accepts(ready) && backup` under `if accepts(_)`.\n\n`(ready && backup) -> body()` instead means `accepts(ready && backup)`. The parentheses make the whole expression one candidate.\n\nLikewise, write `(a < b)` to supply a comparison result as a Bool candidate. An unparenthesized whole comparison is not an independent predicate-arm escape.\n\nAt candidate-group level, `(Read | Write)` is still two alternatives. For a combined bitmask, first write `both :: Read | Write`, then use `both` as the candidate.\n\nWith read() returning 7, `if read() % _ == 0 { 3 -> hit(); 5 -> hit(); else -> miss() }` performs two reads.\n\nWith `n :: read()` before `if n % _ == 0`, the same candidates use one read. With a false condition before the hole, an effectful candidate is skipped.\n\nThese examples describe the proposed semantics. They are not compiler execution receipts."
+        },
+        {
+          "key": "B",
+          "name": "Keep current tables and name the predicate",
+          "detail": "Share the test through an ordinary function without adding hole syntax. No dispatch-header migration is needed. Reuse the predicate outside the table. Repeat the function call and fixed arguments. A local shared test needs a separate function or lambda.",
+          "code": "fn divides(n: Int, divisor: Int) Bool -> {\n    return n % divisor == 0\n}\nfn label(n: Int) String -> {\n    return if {\n        divides(n, 15) -> \"FizzBuzz\"\n        divides(n, 3) -> \"Fizz\"\n        divides(n, 5) -> \"Buzz\"\n        else -> \"{n}\"\n    }\n}",
+          "technical": "Retain the current distributed comparison and subjectless-table contracts. Share calculations through existing functions or lambdas. This counterfactual records the rejected alternative; it does not satisfy the owner's requested required-hole design."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Primary reference read on 2026-09-11. Rust specifies ordered patterns, Boolean guards, bound-name scope, and guard borrowing. Its or-pattern guard can retry another alternative after a false guard. Jet keeps explicit OR-group semantics instead. No feature-level adoption count was established. Source: https://doc.rust-lang.org/reference/expressions/match-expr.html",
+          "code": "// https://doc.rust-lang.org/reference/expressions/match-expr.html\nfn label(n: i64) -> String {\n    match () {\n        _ if n % 15 == 0 => \"FizzBuzz\".into(),\n        _ if n % 3 == 0 => \"Fizz\".into(),\n        _ if n % 5 == 0 => \"Buzz\".into(),\n        _ => n.to_string(),\n    }\n}"
+        },
+        {
+          "lang": "Scala",
+          "note": "Primary documentation read on 2026-09-11. Scala teaches `_` for a single unnamed function input and expands it into a named lambda. This supports the expression-hole interpretation, not Jet's proposed table grammar. No popularity or performance inference is made. Source: https://docs.scala-lang.org/scala3/book/fun-anonymous-functions.html",
+          "code": "// https://docs.scala-lang.org/scala3/book/fun-anonymous-functions.html\nval doubled = List(1, 2, 3).map(_ * 2)\nval explicit = List(1, 2, 3).map((i: Int) => i * 2)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A states the shared test once. It honors the owner's choices of candidate-only arms and evaluation at the hole.",
+        "gains": [
+          "State the shared test once.",
+          "Keep Boolean guards beside each candidate.",
+          "Check one input type across the table."
+        ],
+        "losses": [
+          {
+            "loss": "Old headers and independent predicate arms need migration.",
+            "mitigation": "Required holes and candidate-only arms remove the old mixed form. Source-aware migration preserves ordering and one-time reads."
+          },
+          {
+            "loss": "Boolean candidates need grouping; bitwise-OR candidates need a named value.",
+            "mitigation": "Grouping separates candidates from guards. A named value distinguishes bitwise OR from the retained alternative separator."
+          },
+          {
+            "loss": "Header calls can repeat; unneeded candidate computations can be skipped.",
+            "mitigation": "These effects follow the chosen per-attempt substitution rule. Bind before the table when the computation must happen once."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B repeats the predicate name and fixed arguments. A removes that source repetition, not runtime calls."
+          }
+        ],
+        "tradeoff": "Headers and mixed arms must migrate. Assume read() returns 7. Candidates 3 and 5 in `if read() % _ == 0` cause two reads.\n\nFor one read, write `n :: read()` before `if n % _ == 0`. Earlier false && checks skip a computation placed at the hole. Grouped Boolean candidates and named bitmasks keep guards and alternatives distinct."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": {
+        "beginner": "Fresh agent: HoleBeginner. Skill: rli5. The beginner pass tested the complete ballot. Added surface explanations for candidate types, FizzBuzz notation, repeated reads, explicit bindings, fallbacks, and the pattern wildcard.",
+        "adversarial": "Author model family: OpenAI. Adversarial model family: OpenAI. Fresh agent: HoleAdversary. The adversarial review attacked the recommendation. Obtained owner choices on candidate timing and mixed arms; clarified pattern filling, borrowing, OR scope, exhaustive coverage, grouping, and source-aware migration."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should dispatch tables require one typed `_` hole while keeping Boolean guards?",
+        "lesson": "Each arm supplies a candidate for `_`. A guard adds a true-or-false check. The first successful arm wins; `->` selects its result. Here candidates are whole numbers (`Int`), and tests produce true or false (`Bool`). A pattern checks a value shape; `.Ok(_)` ignores its carried value.",
+        "trio": {
+          "current": {
+            "note": "`%` gives the remainder; `== 0` tests divisibility. `\"{n}\"` inserts n. 15 gives \"FizzBuzz\"; 7 gives \"7\".",
+            "code": "fn label(n: Int) String -> {\n    return if {\n        n % 15 == 0 -> \"FizzBuzz\"\n        n % 3 == 0 -> \"Fizz\"\n        n % 5 == 0 -> \"Buzz\"\n        else -> \"{n}\"\n    }\n}"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust's ordered match guards repeat the arithmetic.",
+            "code": "// https://doc.rust-lang.org/reference/expressions/match-expr.html\nfn label(n: i64) -> String {\n    match () {\n        _ if n % 15 == 0 => \"FizzBuzz\".into(),\n        _ if n % 3 == 0 => \"Fizz\".into(),\n        _ if n % 5 == 0 => \"Buzz\".into(),\n        _ => n.to_string(),\n    }\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Require one typed hole",
+            "gist": "Every non-else arm fills `_`. `2 && ready` requires both checks; `2 && ready || emergency` accepts an emergency alone. `2 && (ready || emergency)` always requires the candidate test.\n\nGroup Boolean candidates: `(ready && backup)`. Arm-level `|` separates candidates, not bits. Value-returning tables normally need `else`; action-only tables may do nothing. Omitting else requires plain equality, one immutable bound subject, and complete unguarded pattern coverage.",
+            "gains": [
+              "State the shared test once.",
+              "Keep Boolean guards beside each candidate.",
+              "Check one input type across the table."
+            ],
+            "losses": [
+              "Old headers and independent predicate arms need migration.",
+              "Boolean candidates need grouping; bitwise-OR candidates need a named value.",
+              "Header calls can repeat; unneeded candidate computations can be skipped."
+            ],
+            "proposed": {
+              "code": "fn label(n: Int) String -> {\n    return if n % _ == 0 {\n        15 -> \"FizzBuzz\"\n        3 -> \"Fizz\"\n        5 -> \"Buzz\"\n        else -> \"{n}\"\n    }\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep current tables and name the predicate",
+            "gist": "Share the test through an ordinary function without adding hole syntax.",
+            "gains": [
+              "No dispatch-header migration.",
+              "Reuse the predicate outside the table."
+            ],
+            "losses": [
+              "Repeat the function call and fixed arguments.",
+              "A local shared test needs a separate function or lambda."
+            ],
+            "proposed": {
+              "code": "fn divides(n: Int, divisor: Int) Bool -> {\n    return n % divisor == 0\n}\nfn label(n: Int) String -> {\n    return if {\n        divides(n, 15) -> \"FizzBuzz\"\n        divides(n, 3) -> \"Fizz\"\n        divides(n, 5) -> \"Buzz\"\n        else -> \"{n}\"\n    }\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A states the shared test once. It honors the owner's choices of candidate-only arms and evaluation at the hole.",
+          "gains": [
+            "State the shared test once.",
+            "Keep Boolean guards beside each candidate.",
+            "Check one input type across the table."
+          ],
+          "losses": [
+            {
+              "loss": "Old headers and independent predicate arms need migration.",
+              "mitigation": "Required holes and candidate-only arms remove the old mixed form. Source-aware migration preserves ordering and one-time reads."
+            },
+            {
+              "loss": "Boolean candidates need grouping; bitwise-OR candidates need a named value.",
+              "mitigation": "Grouping separates candidates from guards. A named value distinguishes bitwise OR from the retained alternative separator."
+            },
+            {
+              "loss": "Header calls can repeat; unneeded candidate computations can be skipped.",
+              "mitigation": "These effects follow the chosen per-attempt substitution rule. Bind before the table when the computation must happen once."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B repeats the predicate name and fixed arguments. A removes that source repetition, not runtime calls."
+            }
+          ],
+          "tradeoff": "Headers and mixed arms must migrate. Assume read() returns 7. Candidates 3 and 5 in `if read() % _ == 0` cause two reads.\n\nFor one read, write `n :: read()` before `if n % _ == 0`. Earlier false && checks skip a computation placed at the hole. Grouped Boolean candidates and named bitmasks keep guards and alternatives distinct."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-09-11T13:22:07.144Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-09-11",
+      "retiredAt": "2026-11-20T02:32:04.479Z"
+    },
+    {
+      "id": "D-IFHOLE2",
+      "cardId": "c0p39lw2",
+      "group": "syntax",
+      "title": "Keep the plain table header for comparing one value, with the hole written `<>`?",
+      "situation": "A decision table is an `if` followed by a list of arms; Jet tries the arms in order and runs the first one that fits. The plain header `if light == {` compares one value with each arm. The hole header `if n % <> == 0 {` drops each arm's value into the `<>`, so the arm `15 -> \"FizzBuzz\"` tests `n % 15 == 0`. In September you ruled that every table needs a hole. That would change about 16,000 tables and make about 5,400 function calls in headers run again for every arm tried. You asked for the hole to be `<>`, the mark a pipe already uses for \"the value goes here\", so every option below spells it that way. You are asked which headers Jet keeps. We recommend keeping the plain header for comparing one value and using the `<>` hole only for tests that do more.",
+      "gist": "Should a table that compares one value keep its plain header, with the `<>` hole kept for tests that do more?",
+      "lesson": "A decision table is an `if` whose arms are tried in order, like a list of cases. Its header holds the test the arms share. A hole is the mark `<>` in that test, and each arm's value fills it in turn. A pipe already uses `<>` to mean \"the value goes here\", so one mark keeps one meaning. Whichever option wins, the rules, the formatter and the docs name one spelling for each job.",
+      "explainer": "Words used here. A decision table is an `if` followed by a list of arms. Each arm is a value, an arrow and what to do: `15 -> \"FizzBuzz\"`. Jet tries the arms from the top and runs the first one that fits.\n\nThe header is the test written after `if`, before the `{`. A plain header such as `if light == {` compares one value with each arm. A hole header holds the mark `<>`, and each arm's value fills that mark in turn: `if n % <> == 0 {` with the arm `3` tests `n % 3 == 0`.\n\nA pipe passes a value down a chain of steps: `raw |> Int.parse(<>)`. Inside a step, `<>` is the value coming in. The `else` arm runs when no other arm fits.\n\nA call has an effect when it does more than compute an answer: it reads input, takes a lock, changes a value or prints. Calling it twice is not the same as calling it once. A pure call only computes, so a second call gives the same answer.",
+      "story": "Maya teaches Jet to new programmers with a traffic light. Her first table is `if light == { .Red -> 30  .Amber -> 5  .Green -> 0 }`. Later she shows FizzBuzz with `if n % <> == 0 { 15 -> \"FizzBuzz\"  3 -> \"Fizz\" }`. One student asks whether the light table also needs `light == <>`. Another writes `if reader.next() == <> {` and wonders why records go missing. A third ends a pipe with a FizzBuzz table and cannot tell which `<>` is the piped number. Maya wants one answer she can teach without exceptions.",
+      "inWild": "// Rust reference: https://doc.rust-lang.org/reference/expressions/match-expr.html\n// A match reads its value once and lists the arms.\nfn wait_secs(light: Light) -> u32 {\n    match light {\n        Light::Red => 30,\n        Light::Amber => 5,\n        Light::Green => 0,\n    }\n}\n// A shared test repeats in each guard instead of using a hole.\nfn label(n: u32) -> String {\n    match () {\n        _ if n % 15 == 0 => \"FizzBuzz\".into(),\n        _ if n % 3 == 0 => \"Fizz\".into(),\n        _ => n.to_string(),\n    }\n}\n\n;; Clojure condp: https://clojuredocs.org/clojure.core/condp\n;; One shared two-input test, one value read once, candidates in order.\n(condp #(zero? (mod %2 %1)) n\n  15 \"FizzBuzz\"\n  3 \"Fizz\"\n  (str n))",
+      "detail": "What you ruled. On 2026-09-11 you chose D-IFHOLE1=A (card #3067). It says every table header holds exactly one hole and the plain header goes away in one change. It also says the header runs again for each arm tried, with no saving of the first result, even for a plain comparison. That change never ran, so the spec still teaches the plain header.\n\nWhat is built today. The hole landed on 2026-11-14, spelled `_`. Jet rewrites each arm into the header, with the arm's value in the hole, and runs an ordinary list of tests. A header that is exactly `subject == _` is treated as the plain table, so it reads its subject once. That does not match your per-arm rule, so the ruling must settle it either way. Three errors, E0946, E0947 and E0948, refuse a misplaced hole or arm.\n\nWhy `<>` instead of `_`. You asked for it, and it fits. A pipe step already reads its input as `<>`, so `<>` already means \"the value goes here\". The `_` mark already means \"ignore this\" in patterns and in the catch-all arm. With `_` as the hole, one table would use it both ways, as in `if files.try_lock(path) == _ { .Val(_) -> false }`. Switching is a one-token change in the parser, plus respelling the hole's own example, spec rows and tests. A `_` written where the hole goes then gets an error whose fix writes `<>`.\n\nThe pipe rule. A pipe runs each step on the value of the line above, and the step names that value `<>`. A table inside a step could then see two meanings of `<>`. The rule in every option is the one pipes already use: inside a step, `<>` is always the step's value, even inside a lambda or a string. So a table header inside a step cannot hold a hole. A plain header there, such as `|> if <> == {`, compares the piped value and works.\n\nWhat the pipe rule refuses. A table inside a step whose header needs a hole is refused with a registered error. Its fix ends the pipe one line early in a named value and starts the table with that name. The author picks the name, so `jet fix` does not apply it. A pipe written inside a hole header is fine: in `if (raw |> Int.parse(<>) ?? 0) % <> == 0 {`, the `<>` in the parentheses belongs to that pipe and the other is the hole.\n\nHow many tables would change. A scan of dev e3f8a73a8b skips comments and strings and follows headers across lines. It finds 16,351 plain-header tables in 2,724 files. By area: Compiler 6,588, Core 1,530, Examples 427, tests 2,063, Jetpack 5,135, Tools 504 and Docs 104. Markdown pages hold about 117 more. Of these tables, about 5,400 call a function in the header, and about 530 read through an index or a borrow. In Examples, 240 of 427 tables call a function in the header.\n\nWhy a call in the header matters. A header that holds a hole runs again for each arm tried. Then `if reader.next() % <> == 0 {` calls `next` once per arm, and a miss on the first arm skips a record. A test of the hand-written equivalent printed two fetches where the plain header printed one. Under your per-arm rule this holds for every table, so option B must first name about 5,400 header calls, and must do it without reordering other effects.\n\nThe effect rule. Options A, C and D keep hole headers that run per arm, so each refuses a call with an effect in one. Sema already knows each call's effects: reading input, taking a lock, printing, or changing a value through `&` or `&self`. The fix names the value first, as B does: `next: reader.next()` on the line above, then `if next % <> == 0 {`. A pure call such as `fits(<>, size)` stays, since a second run gives the same answer. D allows any call in `subject == <>`, which reads once.\n\nWhen a table needs `else`. A plain table over an enum that lists every case, such as `light == {` with `.Red`, `.Amber` and `.Green`, is proven complete and needs no `else`. A hole table cannot be proven that way: Jet cannot tell that `15` and `3` cover every `n`. So a hole table that gives a value needs `else`, and today a missing one is refused. A hole table used as a statement may leave `else` out and does nothing when no arm fits.\n\nEdge cases. A call that holds the hole, such as `if queue.try_push(<>) {`, cannot be named first, since each arm passes a different value. It gets the same error, and the fix writes the arms as plain tests: `if { queue.try_push(1) -> … }`. A call inside a lambda in the header is checked the same way. A call that only reads, such as `list.len()`, is pure and stays.\n\nSome fixes are shown and not applied. In `total: base() + if next() % <> == 0 {`, the table does not start its statement. Moving `next()` above would run it before `base()`, so the author places it.\n\nThe same tables in each option. Take `if kind == {` in Compiler ItemHeads.jet, `if parse(...) == {` in Core Toml.jet and `if files.try_lock(path) == {` in Examples FilesRootedLifecycle.jet. A leaves all three as they are. B writes `if kind == <> {` and names `parse(...)` and `files.try_lock(path)` first, since a second `try_lock` would take the lock again. C allows either spelling of each. D writes `<>` into all three, and each still reads its subject once.\n\nOne way per meaning (I8). Jet already runs a table two ways: as a comparison against one value, or as a list of tests. A gives each way one spelling, and a `<>` in a header always means the header runs per arm. B runs every table by one per-arm rule. C gives one table two spellings with the same meaning. D keeps one shape, but its `<>` means one read in some headers and a read per arm in others.\n\nBeginners. A learner reads `if light == {` as \"compare light with each arm\". Under A, the hole lesson may invite `light == <>`, which is refused with a fix that deletes `<>`. Under B and D every table looks alike, but `<>` in a plain comparison tells the reader nothing new. Under B, `if reader.next() == <> {` loses records with no warning.\n\nExperts. Experts want one rule and no hidden repeats. A shows the read rule in the syntax and refuses a repeated effect, and B gives one rule with explicit names. C makes each review pick a spelling, and D asks readers to spot which header shapes read once.\n\nFormatter and errors. Under A, the fix for `light == <>` deletes one token, and the parser already proves both spellings build the same table. E0948's fix must stop suggesting `subject == _`. Under B and D the formatter must learn to lay out hole tables before the change, and the change touches files in every live lane at once.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Plain header compares one value; the `<>` hole fills a shared test",
+          "detail": "`if subject == {` stays the one way to compare one value with each arm, and it reads the subject once. The `<>` hole is for a shared test that does more, such as `n % <> == 0` or `fits(<>, size)`. That header runs once per arm tried, so a call with an effect in it is refused, and the fix names the value first. A header that only compares with `<>` is refused, with a fix that removes the `<>`.\n\nA hole table that gives a value needs `else`, because Jet cannot prove its arms cover every value. A plain table over an enum that lists every case needs none. In a pipe step `<>` is the piped value: a plain table works there, and a hole table names the value first. No existing table changes.",
+          "code": "// Compare one value: `light` is read once, and listing every case needs no `else`.\nwait_secs: fn(light: Light) -> Int {\n    if light == {\n        .Red -> 30\n        .Amber -> 5\n        .Green -> 0\n    }\n}\n// A shared test: each arm's value fills `<>` in turn.\n// It gives a value, so it needs `else`: 15 and 3 do not cover every n.\nlabel: fn(n: Int) -> String {\n    if n % <> == 0 {\n        15 -> \"FizzBuzz\"\n        3 -> \"Fizz\"\n        else -> \"{n}\"\n    }\n}\n// A call in a plain header still runs once.\ncontended: if files.try_lock(path) == {\n    .None -> true\n    .Val(_) -> false\n    .Err(_) -> panic(\"probe lock\")\n}\n// A call with an effect in a hole header is refused; the fix names it first.\n// `if reader.next() % <> == 0 {` becomes:\nbatch_size: fn(reader: &Reader) -> Int {\n    next: reader.next()\n    if next % <> == 0 {\n        100 -> 100\n        10 -> 10\n        else -> 1\n    }\n}\n// In a pipe step `<>` is the piped value, so a plain table can test it.\nsize_word: fn(raw: String) -> String {\n    raw |> Int.parse(<>) ?? 0 |> if <> == {\n        0 -> \"none\"\n        1 -> \"one\"\n        else -> \"many\"\n    }\n}\n// `if light == <> {` is refused: the fix removes the `<>`.\n// `raw |> Int.parse(<>) ?? 0 |> if <> % 3 == 0 {` is refused: name the number first.",
+          "technical": "Amend D-IFHOLE1: drop the rule that every table holds a hole, and drop its cutover. Keep D-IF3, D-IFDIST1 and S68 for comparison headers. Respell the hole `<>`. E0437 (`<>` outside a pipe step) narrows to `<>` outside a step or a table header, E0947 retires into it, and a `_` where the hole goes gets an error whose fix writes `<>`.\n\nThe parser refuses a header whose whole test, ignoring parentheses, is `subject OP <>` or `<> OP subject`. That refusal is a registered error with a machine fix that deletes the `<>` and flips the operator when `<>` stood on the left. The queued rewrite of that header into the comparison table becomes this refusal. E0946 stays. E0948 stays, with its fix changed to `if subject == {`.\n\nA new registered error (E0950, the next free code) refuses a call with an effect in a hole header. It reads the call's effect facts: an effect, a `&` argument or a `&self` receiver. A pure call stays. The error ships with a UI snapshot and a machine fix that binds the call to a name on the line above and reads the name in the header.\n\nThe name is the called method's name (`next`), or `value` for another call, with a number added on a clash. The fix applies only when the table starts its statement; otherwise it is shown, not applied, so no effect moves before another. A call that holds the `<>` cannot be named; its fix shows the arms as plain tests. Calls inside a lambda in the header are checked too.\n\nA hole table that gives a value requires `else` (E0003), since its arms are tests, not cases of one type; one used as a statement may leave `else` out. A plain table keeps today's coverage rule.\n\nInside a pipe step `<>` is always the step's value, through lambdas and string holes, as D-PIPE1 says. A table header there that needs a hole is refused with a registered error whose fix shows the pipe split into a named value. The spec, the syntax row and Examples/Basics/DispatchHole.jet drop `shape == _` and spell the hole `<>`."
+        },
+        {
+          "key": "B",
+          "name": "Every table holds a `<>` hole, as ratified",
+          "detail": "D-IFHOLE1 as ratified, with the hole spelled `<>`. Every header holds exactly one `<>`, so `if light == {` becomes `if light == <> {`. The header runs once per arm tried, even for a plain comparison. A header that calls a function gets a named value first, so the call still runs once. A table written later with a call in its header repeats the call per arm, as ratified.\n\nA table needs `else` unless its header compares a named value with every case of an enum. In a pipe step `<>` is the piped value, so a table there names the value first. About 16,400 tables in 2,700 files change, about 5,400 with a call in the header.",
+          "code": "// Compare one value: the header runs once per arm tried.\n// `light` is a named value and every case is listed, so no `else`.\nwait_secs: fn(light: Light) -> Int {\n    if light == <> {\n        .Red -> 30\n        .Amber -> 5\n        .Green -> 0\n    }\n}\n// A shared test: each arm's value fills `<>` in turn.\n// It gives a value, so it needs `else`: 15 and 3 do not cover every n.\nlabel: fn(n: Int) -> String {\n    if n % <> == 0 {\n        15 -> \"FizzBuzz\"\n        3 -> \"Fizz\"\n        else -> \"{n}\"\n    }\n}\n// A call is named first, or it would run once per arm.\nlock: files.try_lock(path)\ncontended: if lock == <> {\n    .None -> true\n    .Val(_) -> false\n    .Err(_) -> panic(\"probe lock\")\n}\n// No table fits in a pipe step, so the number is named first.\nsize_word: fn(raw: String) -> String {\n    count: Int.parse(raw) ?? 0\n    if count == <> {\n        0 -> \"none\"\n        1 -> \"one\"\n        else -> \"many\"\n    }\n}",
+          "technical": "Keep D-IFHOLE1 as written, with the hole respelled `<>`. Remove the plain-header parser path and the `it` subject name, and refuse a plain header with a registered error and a machine fix. Change the queued rewrite so a computed `subject == <>` runs per arm tried and needs a named subject to leave out `else`.\n\nMigrate every table with a source-aware tool that names each computed subject first and moves it without reordering other effects. Inside a pipe step `<>` is the step's value, so every table there is refused with the pipe-split fix, and the migration splits such pipes too. Teach the formatter to lay out hole tables. The examples, spec and teaching pages move to the hole header."
+        },
+        {
+          "key": "C",
+          "name": "Both headers stay",
+          "detail": "Keep both spellings. `if light == {` and `if light == <> {` build the same table, and both read the subject once. Both keep the plain coverage rule, so listing every case of an enum needs no `else`. The formatter keeps whichever was written. No existing table changes.\n\nHole headers that do more than compare work as ratified and run per arm. A call with an effect in one is refused with a fix that names the value first, as in A. Such a table needs `else` when it gives a value. Inside a pipe step `<>` is the piped value: a plain table there works, and a hole table must name the value first.",
+          "code": "// Compare one value, either way: `light` is read once.\n// Every case is listed, so neither needs `else`.\nwait_secs: fn(light: Light) -> Int {\n    if light == {\n        .Red -> 30\n        .Amber -> 5\n        .Green -> 0\n    }\n}\nwait_again: fn(light: Light) -> Int {\n    if light == <> {\n        .Red -> 30\n        .Amber -> 5\n        .Green -> 0\n    }\n}\n// A shared test: each arm's value fills `<>` in turn.\n// It gives a value, so it needs `else`: 15 and 3 do not cover every n.\nlabel: fn(n: Int) -> String {\n    if n % <> == 0 {\n        15 -> \"FizzBuzz\"\n        3 -> \"Fizz\"\n        else -> \"{n}\"\n    }\n}\n// `if reader.next() % <> == 0 {` is refused: name `reader.next()` first.\n// In a pipe step `<>` is the piped value, so a plain table can test it.\nsize_word: fn(raw: String) -> String {\n    raw |> Int.parse(<>) ?? 0 |> if <> == {\n        0 -> \"none\"\n        1 -> \"one\"\n        else -> \"many\"\n    }\n}",
+          "technical": "Keep D-IF3 and D-IFHOLE1 side by side, drop D-IFHOLE1's cutover, and respell the hole `<>`. Amend D-IFHOLE1 so a hole header whose whole test is one comparison reads its subject once, as built, with the plain table's coverage. The formatter keeps the written spelling, and the docs teach both spellings as one table.\n\nEvery other hole header runs per arm tried. The same new registered error as in A (E0950, with a UI snapshot and the same machine fix) refuses a call with an effect there. A hole table that gives a value requires `else` (E0003).\n\nInside a pipe step `<>` is always the step's value, as D-PIPE1 says. A plain header there compares that value. A header there that needs a hole is refused with a registered error whose fix shows the pipe split into a named value."
+        },
+        {
+          "key": "D",
+          "name": "Every table holds a `<>` hole; a plain comparison still reads once",
+          "detail": "Every table header holds one `<>`, as ratified. A header whose whole test is `subject == <>` still reads its subject once, as the parser builds it today. It keeps the plain coverage rule, so listing every case of an enum needs no `else`. The change adds one token per table: `if fetch() == {` becomes `if fetch() == <> {`, with no named value and no change in behavior.\n\nEvery other hole header runs per arm. A call with an effect there is refused with a fix that names the value first, as in A. Such a table needs `else` when it gives a value. Inside a pipe step `<>` is the piped value, so no table can sit in a step, and the value is named first. The plain header is removed after about 16,400 tables change.",
+          "code": "// Compare one value: `light` is read once.\n// Every case is listed, so no `else`.\nwait_secs: fn(light: Light) -> Int {\n    if light == <> {\n        .Red -> 30\n        .Amber -> 5\n        .Green -> 0\n    }\n}\n// A shared test: each arm's value fills `<>` in turn.\n// It gives a value, so it needs `else`: 15 and 3 do not cover every n.\nlabel: fn(n: Int) -> String {\n    if n % <> == 0 {\n        15 -> \"FizzBuzz\"\n        3 -> \"Fizz\"\n        else -> \"{n}\"\n    }\n}\n// `try_lock` runs once, as today.\ncontended: if files.try_lock(path) == <> {\n    .None -> true\n    .Val(_) -> false\n    .Err(_) -> panic(\"probe lock\")\n}\n// `if reader.next() % <> == 0 {` is refused: name `reader.next()` first.\n// No table fits in a pipe step, so the number is named first.\nsize_word: fn(raw: String) -> String {\n    count: Int.parse(raw) ?? 0\n    if count == <> {\n        0 -> \"none\"\n        1 -> \"one\"\n        else -> \"many\"\n    }\n}",
+          "technical": "Keep D-IFHOLE1's required hole and its cutover, with the hole respelled `<>`. Amend its read rule: a header whose whole test, ignoring parentheses, is `subject OP <>` or `<> OP subject` is the comparison table over `subject`. That table reads its subject once and keeps `it`, patterns, ranges and coverage. Every other hole header runs per arm tried. There, the new registered error from A (E0950, with its UI snapshot and machine fix) refuses a call with an effect. A table there that gives a value requires `else` (E0003).\n\nA machine fix inserts the `<>` in every table, and the parser already proves both spellings build the same table. Inside a pipe step `<>` is the step's value, so every table there is refused with the pipe-split fix, and the migration splits such pipes too. The formatter learns to lay out hole tables before the cutover."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Primary reference read on 2026-11-14. A match reads its value once and lists patterns, with optional guards. A shared test such as divisibility repeats in every guard. Source: https://doc.rust-lang.org/reference/expressions/match-expr.html",
+          "code": "match light {\n    Light::Red => 30,\n    Light::Amber => 5,\n    Light::Green => 0,\n}"
+        },
+        {
+          "lang": "Clojure",
+          "note": "Primary documentation and the clojure.core source read on 2026-11-14. `condp` takes one two-input test, one value and candidate clauses, and tries the test with each candidate in order. The macro binds the value once, and plain equality uses the same form with `=`. It is the closest prior art to the hole table, and it never reads the value twice. Source: https://clojuredocs.org/clojure.core/condp",
+          "code": "(condp = light\n  :red 30\n  :amber 5\n  0)\n(condp #(zero? (mod %2 %1)) n\n  15 \"FizzBuzz\"\n  3 \"Fizz\"\n  (str n))"
+        },
+        {
+          "lang": "Scala",
+          "note": "Primary documentation read on 2026-11-14. Scala writes `_` for one unnamed function input and also for the catch-all case, so one mark carries both meanings. That is the double meaning a `<>` hole avoids. Source: https://docs.scala-lang.org/scala3/book/fun-anonymous-functions.html",
+          "code": "val doubled = List(1, 2, 3).map(_ * 2)\nlight match\n  case Red => 30\n  case _ => 0"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps one spelling for each job and changes no existing table. A plain header reads its subject once. A `<>` in a header means the header runs again for each arm, so Jet refuses a call with an effect there, with a fix that names the value first. Inside a pipe, `<>` keeps its one pipe meaning.",
+        "tradeoff": "A reverses part of your 2026-09-11 choice. `light == <>` is refused with a fix, and the plain header stays. Every other hole table works as ratified, now spelled `<>`.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B changes about 16,400 tables and needs a named value before about 5,400 of them. A table written later as `if reader.next() == <> {` silently reads again for each arm, and no table fits in a pipe step."
+          },
+          {
+            "key": "C",
+            "reason": "C gives one table two spellings with the same meaning, so readers must learn both and reviews must pick one."
+          },
+          {
+            "key": "D",
+            "reason": "D keeps the required hole with a one-token change per table. But its `<>` means one read in some headers and a read per arm in others, and no table fits in a pipe step."
+          }
+        ],
+        "losses": [
+          {
+            "loss": "Learners meet two header shapes instead of one rule.",
+            "mitigation": "The docs teach the plain table first and show the `<>` hole only where a test repeats, and both shapes use marks learners already know from pipes."
+          },
+          {
+            "loss": "The every-table-has-a-hole rule is amended.",
+            "mitigation": "Holes keep their full meaning; only the duplicate `subject == <>` spelling is refused, and its fix deletes one token."
+          },
+          {
+            "loss": "A hole table cannot sit directly inside a pipe step.",
+            "mitigation": "The error shows the pipe split into a named value. Plain tables, the common case in a pipe, still work inside steps."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. Main checked this rewrite against the code and a p138 probe, confirming the error meanings, the read-once `subject == _` table, the pipe example and about 8 existing hole tables. Main found that a hole header could silently repeat a call with an effect, that `else` was unstated and that the header-call count was high; all three are fixed."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should a table that compares one value keep its plain header, with the `<>` hole kept for tests that do more?",
+        "lesson": "A decision table is an `if` whose arms are tried in order. The plain header `if light == {` compares one value with each arm. A hole header puts `<>` in a shared test that each arm's value fills: `if n % <> == 0 {`. One spelling per job must be named.",
+        "trio": {
+          "current": {
+            "note": "Both headers are built; today's hole is `_`, written `<>` in every option.",
+            "code": "if light == {\n    .Red -> 30\n    else -> 0\n}\nif n % <> == 0 {\n    3 -> \"Fizz\"\n    else -> \"{n}\"\n}"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust's match reads the value once. A shared test repeats in each guard.",
+            "code": "// doc.rust-lang.org/reference/expressions/match-expr.html\nmatch light {\n    Light::Red => 30,\n    _ => 0,\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Plain header compares; the `<>` hole fills a shared test",
+            "gist": "`if light == {` stays; a `<>` hole is for tests that do more.",
+            "gains": [
+              "One spelling for each job.",
+              "No existing table changes.",
+              "A `<>` always means a value goes there."
+            ],
+            "losses": [
+              "Two header shapes to learn.",
+              "Reverses part of the required-hole rule."
+            ],
+            "proposed": {
+              "code": "if light == {\n    .Red -> 30\n    else -> 0\n}\nif n % <> == 0 {\n    3 -> \"Fizz\"\n    else -> \"{n}\"\n}\n// `if light == <> {` is refused: remove the `<>`.\nraw |> Int.parse(<>) ?? 0 |> if <> == {\n    0 -> \"none\"\n    else -> \"some\"\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Every table holds a `<>` hole, as ratified",
+            "gist": "Every header holds one `<>` and runs per arm tried; about 16,400 tables change.",
+            "gains": [
+              "One header rule for every table.",
+              "A `<>` always means the header runs per arm."
+            ],
+            "losses": [
+              "About 16,400 tables in 2,700 files change.",
+              "About 5,400 header calls need a named value first.",
+              "`if reader.next() == <> {` silently reads per arm."
+            ],
+            "proposed": {
+              "code": "if light == <> {\n    .Red -> 30\n    else -> 0\n}\nlock: files.try_lock(path)\nif lock == <> {\n    .Val(_) -> run()\n    else -> wait()\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Both headers stay",
+            "gist": "`if light == {` and `if light == <> {` build the same table.",
+            "gains": [
+              "No existing table changes.",
+              "Authors pick the spelling they like."
+            ],
+            "losses": [
+              "Two spellings for the same table.",
+              "Readers must learn both."
+            ],
+            "proposed": {
+              "code": "if light == {\n    .Red -> 30\n    else -> 0\n}\nif light == <> {\n    .Red -> 30\n    else -> 0\n}"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Every table holds a `<>` hole; a comparison reads once",
+            "gist": "Every header holds one `<>`, but `subject == <>` still reads its subject once.",
+            "gains": [
+              "One header shape for every table.",
+              "The change adds `<>` and keeps behavior."
+            ],
+            "losses": [
+              "About 16,400 tables in 2,700 files change.",
+              "`<>` means one read here, a read per arm elsewhere."
+            ],
+            "proposed": {
+              "code": "if light == <> {\n    .Red -> 30\n    else -> 0\n}\nif files.try_lock(path) == <> {\n    .Val(_) -> run()\n    else -> wait()\n}\n// `try_lock` runs once."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A keeps one spelling per job and changes no table. A plain header reads once; a `<>` header runs per arm and refuses a call with an effect.",
+          "gains": [
+            "One spelling per job.",
+            "No migration.",
+            "A compared value is read once."
+          ],
+          "losses": [
+            {
+              "loss": "Learners meet two header shapes.",
+              "mitigation": "The docs teach the plain table first and show the `<>` hole only where a test repeats."
+            },
+            {
+              "loss": "Your required-hole rule is amended.",
+              "mitigation": "Only `subject == <>` is refused, with a fix; other holes work as ratified."
+            },
+            {
+              "loss": "A hole table cannot sit inside a pipe step.",
+              "mitigation": "The error shows the pipe split into a named value."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B changes about 16,400 tables, and about 5,400 header calls repeat per arm unless named first."
+            },
+            {
+              "key": "C",
+              "reason": "C gives one table two spellings, so readers learn both."
+            },
+            {
+              "key": "D",
+              "reason": "D adds `<>` to 16,400 tables and gives `<>` two meanings."
+            }
+          ],
+          "tradeoff": "`light == <>` is refused with a fix; other hole tables work as ratified."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-15T00:09:11.051Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-15",
+      "retiredAt": "2026-11-20T02:32:04.479Z"
     }
   ]
 }
