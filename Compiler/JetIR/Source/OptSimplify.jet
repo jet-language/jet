@@ -524,7 +524,11 @@ ir_opt_unreachable: fn(f: &IRFunction, report: &IROptReport) -> Int Never! {
 // `t := a < b; x := !t` is `x := a >= b` when every write of `t` is such a
 // compare that a Not reads right after (only Nops between) and those Nots
 // are its only reads: each compare's value then reaches its own Not alone
-// (a loop OptVersion.jet copied writes and tests the same slot twice).
+// (a loop OptVersion.jet copied writes and tests the same slot twice). The
+// fused compare keeps the compare's code line, and so its inline site: it
+// reads what the compare read, so the compare of an inlined verdict
+// function (`!ok(diff)`) stays in that function's site rather than moving
+// to the caller's code with the Not.
 ir_opt_fuse_compares: fn(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROptReport) -> Int Never! {
     changed := 0
     pairs := [Int]{}
@@ -548,6 +552,7 @@ ir_opt_fuse_compares: fn(m: IRModule, f: &IRFunction, facts: OptFacts, report: &
         f.a[at] = f.a[def]
         f.b[at] = f.b[def]
         f.c[at] = f.c[def]
+        f.code_line[at] = f.code_line[def]
         ir_opt_kill(f, def)
         report.compares_fused += 1
         changed += 1
@@ -1907,4 +1912,31 @@ ir_opt_unwrap: fn(f: &IRFunction) -> Int Never! {
         }
         assert_eq(stepped, 1)
     }
+}
+
+// ok(diff) = diff == 0 inlined into run(diff) = !ok(diff), as the inliner
+// leaves it: the compare at the inline site, the Not in run's own code. The
+// fused Ne stays at the site, so the verdict's compare stays in the verdict
+// function (an emission log's `sites` row names it).
+#Test("A fused compare keeps the inline site of the compare it replaces") {
+    m := ir_module_new()
+    word: ir_type_row(m, Type.IntN{signed: false, bits: 64}) ?? panic("no U64 row")
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    f := ir_function_new("run", "test:run.jet.run", "", "run.jet", 1)
+    diff: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "diff"), 1)
+    f.result = flag
+    f.inline_sites = [Int]{0, 0, 2}
+    zero: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.Const, zero, 0, -1, -1, ir_code_line_at(5, 1))
+    ok: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.Eq, ok, diff, zero, -1, ir_code_line_at(5, 1))
+    bad: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
+    at: ir_emit(f, IROp.Not, bad, ok, -1, -1, 2)
+    _ := ir_emit(f, IROp.Return, -1, bad, -1, -1, 2)
+    report := ir_opt_report(1)
+    facts: ir_opt_facts(f)
+    assert_eq(ir_opt_fuse_compares(m, f, facts, report), 1)
+    assert(f.op[at] == .Ne && f.a[at] == diff && f.b[at] == zero)
+    assert_eq(ir_code_line_site(f.code_line[at]), 1)
+    assert_eq(ir_code_line_source(f.code_line[at]), 5)
 }
