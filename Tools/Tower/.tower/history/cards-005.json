@@ -37265,6 +37265,1549 @@
       "completedAt": "2026-11-17T19:11:04.334Z",
       "questions": [],
       "retiredAt": "2026-11-20T19:32:20.913Z"
+    },
+    {
+      "id": "c0hn7w1n",
+      "num": 6418,
+      "title": "Unbuilt CLI commands: every registered command and flag that reports E2104 \"not built yet\" is built",
+      "body": "One card for the CLI commands that are registered but still answer E2104 \"`jet X` is not built yet\", so their cases rows can carry KNOWN-FAILING links to one place (owner ruling 2026-10-30). ToolsJet-2 owns the cluster, in rows-per-day order. jet prove (#5492), jet build --lib (#6308), jet add/fetch (#4944), jet repl (#6195), the web target (#5201) and service.tree (#4957) keep their own cards.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e20",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "All 154 criteria met; c2 and c18 re-proved on p274 (d7285f91e6)."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c154: jet build --lib landed (7c82de19f0, p267) and writes lib<name>.a plus <name>.h. The witness LibraryOutputs/guest_import_library_calls_native_c_and_cpp_hosts still fails (E1341: export call_host returns a type a C header can't spell), so MetaSuite J35 stays owed. 10 CLI help, man and completions snapshots changed with it; IfHole is fixing both in one SUB."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c3 needs code (G5DevX-1, 2026-11-12). The KF row cli_parts_core/budget_bench_measurement_bootstraps... needs two features that are not built: (1) a BenchMeasurement provider that runs #Test(.measure) 20 times, and (2) RelativeTo baseline history with pooled_samples and history.report_ids. Budget.jet:217 and :219 refuse both with E2104 today."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Known-failing row tests/cases/cli_parts_inspect/test_hardened_profile_catches_a_local_wrong_unsafe_region.case moves to #6011 with its criterion (was c96; submission BoardPlanner-1). The release-profile row (release_hardened_profile_catches_a_local_wrong_unsafe_region, R0802) stays here."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-07: 9e9b45b8b8 deleted Tools/canvas-test/scenario.mjs (88 scenarios) after porting the harness, CanvasDriver.jet (BiDi), Run.jet and the native/driver/gecko lifecycles to Jet. The scenario source is `git show 6b9210090e:Tools/canvas-test/scenario.mjs` (unchanged through 591744cc94); criterion 145 ports it. `Run.jet scenario --scenario N` refuses with \"scenario N is not ported to Jet yet (#6418)\"."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "CoreCliLead-2 triage (7e5c4fd162 rewrote the budget comments to describe the Jet code). c5: explain_e2211_golden's KF reason (#6419 E2104) is wrong; the golden explain_E2211.txt holds retired Rust-era text while the output comes from the registry. The fix (refresh the golden, drop the KF line) is assigned to the Closer. explain_syntax_dictionary_golden and explain_json_uses_the_report_schema_for_registered_queries wait on the at-sign registration ballot. c1: bind <name>, --shape, --freeze, --policy, --update and inspect bind <name> (binding plan) are unbuilt; BindingPlan.jet exists but isn't wired to the CLI. The jet bind <header> spelling: Docs/spec/cli.md wins, so jet inspect bind is canonical (new criterion)."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Moved from G1 to G5 by owner ruling 2026-11-07: CLI commands belong to the developer-experience goal, not to hand-off."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "n3 slice 3 landed in d109a7187e (CoreCliLead-2): CompilerProbe workload preflight, BuildArtifact BinarySize and ArtifactSize (builds and sizes .jet/build/<stem>), ServiceProbe evidence via jetpack __service-probe, and per-kind provider version and isolation (new Cli/BudgetProviders.jet). PASS 4/0, 4 KF lines removed: compiler_probe_rejects_missing_edit_input_and_closed_metric_typos, compiler_probe_rejects_unsupported_target_without_a_report, budget_build_artifact_measures_real_selected_binary, service_probe_unavailable_without_dev_reports_diagnostic. Regression set PASS 14/0. c3 covers 16 of 17 rows. Still open: cli_parts_core/budget_bench_measurement_bootstraps_then_consumes_compatible_history. It needs the statistical history path (compatible-history selection, pooled baseline, statistics, policy and trend JSON) and a BenchMeasurement provider, and that provider needs the raw per-batch (elapsed, iterations) samples that jet test --measure folds into summary fields today."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "n3 slice 2 landed in 98863f491f (CoreCliLead-2): jet budget update (plan first; --yes or a confirmed TTY prompt applies) and Cli/BudgetStore.jet (manifest verify by content hash and audited CAS chain, eligibility, locked CAS apply). The 2 json cases are migrated to jet.status/v1 and jet.report/v3; v3 expresses null-on-failure with null file, line, col and span. 4 KF lines dropped. Lane s1 cases: PASS 12, FAIL 0, UNEXPECTED-PASS 0 (4 new rows plus 8 slice-1 regression rows). Known simplifications: update writes no receipt record, and one baselines lock dir covers both the global and the per-name lock (coarser, still correct). Next: workload preflight, then BuildArtifact, Bench and ServiceProbe."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "n3 slice 1 landed in f32e474d5d (CoreCliLead-2): jet budget check measures from CompilerFacts (new Compiler/JetCli/Source/Cli/BudgetMeasure.jet). Default-tier lane run: 8 PASS (the 7 cli_parts_budget proving rows plus the compile-time guard row), 2 KNOWN-FAILING, 0 unexpected pass; the other 13 budget rows have 0 FAIL and 4 REFUSED by the budget-verify seam (#6317). The lsp budget row moves to #6386. Ruling: the 2 json rows asserting the Rust-era moment/status envelope migrate to jet.status/v1 and jet.report/v3 (greenfield). Next: slice 2, jet budget update."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Examples concept-area cutover (2c3e68a70b) moved paths this card's criteria cite. Read each cited path as its new home: c38: Examples/features/lowlevel/polyglot_go.jet -> Examples/LowLevel/PolyglotGo.jet [new path does not exist yet: the criterion still has to create it]."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match proof on the admitted `jet` (no jetc0, compiler-diff or frozen-Rust evidence)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "HANDOFF 2026-11-06 (Main restart after the session crash): CoreCliLead owns the command families except the Jetpack-engine dispatch rows, which PortsLead owns."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06 (owner approved removal): retired spellings get no teaching fixtures (owner order), D-DECL-COLON1=A and D-ALIAS-GENERIC1 remove the alias keyword and ::, and D-META-HASH1=A removes $. The live impure_no_reason check from the old c75 is kept as a new criterion. Removed as superseded: c75 \"(was #1461 c4) Each retired spelling has a paired teaching fixture under tests/ui, including marker_retired_sql_angle.jet/.stderr, marker_re…\"; c76 \"(was #1513 c5) `rg -n '^\\s*alias\\s+[^;]+\\s=\\s' examples tests --glob '*.jet'` returns no old alias declaration, while `rg -n '^\\s*alias\\s+[^…\"; c92 \"(was #1606 c12) tests/ui/marker_retired_known.jet/.stderr remains green and teaches the $ spelling; no other retired block-marker spelling i…\"."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: c73 follows the owner's no-teaching order. c75, c76 and c92 (teaching fixtures for retired spellings, the alias keyword with ::, and the $ teaching fixture) are proposed for removal as superseded and await owner approval."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c9 partial, 8170c2f082 and dfc887571e (JetpackEngine). jet split and jet fold are built: the front forwards them to the engine's TransitionCommand. package_transition_cli_covers_split_fold_init_restore_and_failures goes KF→PASS; it adopts the retirement of the migration-epoch role-file init, and --restore-role-files is removed from the registry. The host_split row now passes its split step but stays KF, blocked on jet os plan (the engine has no JetOS os verb). The jet init --check write is filed as #6603 (front flag scoping)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "a0fca8c2c4 also removes the stale known-failing row pkg/cli_add_path_into_inline_empty_deps_table (#4944, a frozen card). The row passes --fresh on the HEAD s1 jet with the HEAD-built hosted jetpack."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c8 partial, a0fca8c2c4 (JetpackEngine): jet build --sbom --quiet (both quiet_suppresses_sbom rows) and build_entry/emit_generated_exports pass, and their known-failing rows are removed. Still open: jet run/build --gate (organization_gate_policy_refuses_each_audited_invocation_gate). s1 run, LaneCheck CHECK OK."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c5 partial, d92918cc4f (Builder5): --web-graph is built (see c19). Still open for c5: --cost (cost_cli_projects_generic_specializations), explain tuned.slots, explain_build_reports_package_reuse_reasons, top_level_explain_dispatches_to_jetpack, jetpack_missing_package_explain_golden, and jet test --set. Also, afab0cf28b (Main) has jet run serve a full-stack web.app() entry again (E-WEB-RUN refuses only browser-only programs): app_hello_serves PASS. web_app_run_serves now listens but still fails a ^= response predicate, so its known-failing reason is stale."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c7 partial, a6b917e72e (JetpackEngine): the shape6 registry-route snapshots and quiet_suppresses (E2607 license fixtures) now pass, and their known-failing rows are gone. Remaining: the E1218 publish-time SemVer gate. No sema producer of the public API snapshot exists, so it is filed as #6600."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "2e43f154cf (JetpackEngine): one jetpack engine lookup order, JETPACK_BIN, then beside jet, then PATH; a bad JETPACK_BIN is E1228 with no fall-through. The same choice is the jet test --jetpack setting (flag and setting from one row, per the owner's every-flag-is-a-setting rule); documented in environment.md. Cases A/B vs HEAD s1: the only change is the new engine_dispatch/jetpack_bin case, FAIL to PASS. Unblocks c138's test runs from picking up a stale jetpack."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "7b596406ec (JetpackEngine): c40 partial, since pkg/cli_concurrent_publish_keeps_one_immutable_version passes but the Engine claim 'publication tuf original cli_concurrent_publish...' is still known-failing. c7 partial: shape6_registry_routes snapshot mismatch; quiet_suppresses blocked on jet init writing no license (E2607); the E1218 API-snapshot gate is not ported. c138 blocked: jet fetch runs jetpack __package-v1 but jet finds jetpack next to itself or on PATH and ignores JETPACK_BIN, so tests pick up a stale jetpack (discovery fix next). The Engine AOT test binary hangs in a futex on both patch and baseline; likely #6590."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "JetpackEngine takes c7 (jet publish + registry keygen), c138 (registry publish + fetch, Engine advisory claim), c39/c40 (publish/yank/concurrent rows), c93 (keygen/publish entropy + no-sign cases) and the Engine/publication tuf * known-failing rows; this unblocks #3590 c9's success proof (publish to a file:// registry, fetch on first run, offline second run). Builder4 keeps c5 (--web-graph/--cost open)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c5 partial (8e6182c320, Builder4): --set name=value (build/run/dev/check; undeclared E0302, same-layer conflict E3521) + jet explain <build fact> share one writer chain (BuildFactChain.jet). s1 b486d6c09a A/B: 256->261 PASS, 0 regressions; FAIL->PASS explain_build_fact_golden, explain_typed_build_setting_golden, typed_settings_preserves_tier_parity_and_cli_override, set_flag_refuses_undeclared_malformed_and_conflicting_writers (new), ui typed_settings_undeclared_cli (reblessed to $build.settings). Open: --web-graph (no web graph projection), --cost (no per-fn cost list); jet test still refuses --set"
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "dev 48c09c37bc (SemaParity): 9 tests/cases/debug rows UNEXPECTED-PASS, now unlisted from known-failing (break_then_continue, finish, help, locals_and_print, missing_run_e0101, next_steps_over, quit_e2204, step_into_call_and_backtrace, step_stops_at_first_line); main() frame predicates now expect run(); 2 DAP rows retagged #6386; JetDebug Tests 37/0/0 incl. live lldb. 4 canvas_* debug cases fail on the shared client fixture (url.split on Iter)"
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "c1 bind plan (Builder4, after c3-c7): spec defines it (spec.md:3061 C, :3104 C++, :3116-3480 per language; syntax-decisions:4024 C prototype parser). Order: C binder, then wire the existing Jetpack/Integrations Foreign/Binders through jet->jetpack dispatch, then port the go/java/cs/fortran/ada/pascal/tcl/cobol/py/js binders. Covers 28 known-failing rows"
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "c1 partial dev a1aefb805f (Builder4): jet inspect audit built (signed feed, trust, policy exceptions, --explain, --json); on s1 bed6a833b6ec109b cli_parts_surface/audit_missing_advisory_database_fails_closed, malformed_advisory_database_is_e2607_snapshot, jetpack_engine/jet_inspect_audit_missing_inputs_fails_closed PASS, 3 known-failing rows removed; ui filter=audit 2/2 base and s1; 3 cases filter=audit FAILs also fail on base; LaneCheck CHECK OK. bind still unbuilt (no C header binder); inspect audit --explain help-registry entry deferred"
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "c8 partial dev a48539e5b7 (JetpackModel): jet build --sbom built, cli_build_sbom_writes_spdx passes; --gate and the E2104 cases rows remain"
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Single-source census F26 (Docs/audits/2026-11-05-single-source-census.md): Highlighted keyword tokens. Already owned by #6418 c41, #6168; this is the drift evidence those criteria must clear. One hand-written home: Lexer keyword table plus the contextual-keyword rows. Fix: gen the keyword rows; keep only the class choice by hand. Drift check: `editor-grammars.mjs --check` in s5. Drifted on 2026-11-05: Not drifted: the 4 lexer words missing from Highlights (mut, take, copy, const) are reserved retired words with no grammar rule (`PackageFiles.jet:527-530`) Effort M."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 96 criteria from archived #3, #96, #210, #240, #271, #273, #276, #282, #502, #638, #662, #694, #983, #984, #1127, #1132, #1282, #1461, #1513, #1519, #1520, #1606, #1610, #1866, #1888, #2119, #2120, #2168, #2175, #2240, #2445, #2777, #2795, #2797, #2856, #3044, #3050, #3507, #3949: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "IrTypes-3 notes (2026-11-01): this card has no `jet dev` criterion, although its intent covers the dev tier (I9). Main to add a criterion when the dev-path proof exists."
+        },
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "PROGRESS ONLY, not met: lsp/lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words fails on `jet self lsp` E2104 and now carries a known-failing row on this card (KNOWN-FAILING on s1, IrTypes-47 Test). Seven web_dev rows that run `jet dev` (E2104) get rows on this card too; no criterion names `jet dev` yet. Landed in wave 28 as dev bb770de593 (IrTypes-47)."
+        },
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "PROGRESS ONLY, not met: test_hardened_profile_catches_a_local_wrong_unsafe_region moves here from #5454: `jet test --profile hardened` is E2104 not built; its fixtures use the spec pointer spelling (owner answer q0z3918p 2026-11-01) Landed in wave 28 as dev bb770de593 (IrTypes-45)."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Landed on dev at undefined in GoldC-45 (patch row: criterion/count 1): ledger: output_callable/runnable_contracts_and_selection_fail_in_sema fails only its `jet run --output` step (E2104)"
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Main 2026-10-31 correction: criterion 38 lost two words to shell quoting. It reads in full: \"lowlevel/polyglot_go passes its golden on the run and build tiers: `use go.handles` resolves through jet inspect bind output instead of E1002, and its known-failing row is removed.\""
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "TestGreen-17 landed on dev df84747616: TestGreen-17: grammar/editor_grammars_match_generated_sections known-failing because `jet devtools` is not built yet (E2104), the same row as its sibling seeded_tree_sitter_drift…"
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6308 \"`jet build --lib` is not built: no library archive and no C header for #Export(c) items\" into this card (every registered jet command and flag is built); its 3 open item(s) are carried as \"(was #6308)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6195 \"`jet eval` fails with E3401 even for `print`, and `jet repl` is E2104 not built yet: neither runs a program\" into this card (every registered jet command and flag is built); its 6 open item(s) are carried as \"(was #6195)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #5973 \"Map: jet CLI surface: help, bare jet, build naming, version, doctor, unported commands\" into this card (jet CLI surface: every registered command built); its 11 open item(s) are carried as \"(was #5973)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "C17 scope correction: commit ba6124f2b3 (\"greenfield: remove every retired spelling and its teaching\") removed the retired CLI route table, the retired jetpack verbs and hangar routes, and main.jet auto-migration. Under the Greenfield cutover those parts of C17 are void, and their 7 cases rows are stale tests that TestGreen deletes. What remains of C17 is external `jet-<name>` discovery (D-DX5)."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #5951 \"Help shows only built commands: one `ported` bit drives help, completions, man pages and E2104\" into this card (unbuilt CLI commands); its 7 open item(s) are carried as \"(was #5951)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet inspect bind, inspect codemod and inspect audit (audit copies included) are built. Proof: every tests/known-failing.tsv row on #6418 that reports E2104 for them passes on the default tier, and the rows are removed.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6949 c7, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:58:05.637Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 2,
+          "text": "jet review is built; every cases row that reported E2104 for it passes on the default tier.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev d7285f91e6 (jet review built in 02087a6f98). On batch compiler p274 (dev d7285f91e6): cases Review/ runs `jet review`, which answers ok:true; no row reports E2104. The two FAIL rows (review_uses_a_recorded_rename…, …recorded_move…) fail a JSON stream predicate, not E2104.",
+          "at": "2026-11-17T20:04:54.692Z"
+        },
+        {
+          "n": 3,
+          "text": "jet budget is built, including the BenchMeasurement provider (runs #Test(.measure) 20 times) and the RelativeTo baseline history (pooled_samples, history.report_ids). Proof: `jet test Compiler --profile cases --filter cli_parts_core/budget_bench_measurement_bootstraps_then_consumes_compatible_history`, with its known-failing row removed.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6965 c3, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:58:08.664Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 4,
+          "text": "jet init and jet update jet are built; every cases row that reported E2104 for it passes on the default tier.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Built with no new code. In the a0_033 release candidate kit (dev 6c31e4f192, chain s2 jet fa08aca4357522f7) all 10 rows PASS: cli_commands/misplaced_flag_is_e2102_naming_the_commands_that_take_it; cli_parts_runtime/owns_flag_vocabulary_help_flag_prints_help_not_execute, quiet_accepted_and_suppresses_budget_check_recap, quiet_suppresses_status_output_without_changing_behavior; cli_runtime/owns_flag_vocabulary_help_flag_prints_help_not_execute; inline_deps/jet_init_lifts_uses_into_package_jet, jet_init_without_script_is_unchanged; pkg/cli_jet_new_creates_project_structure; toolchain_pin/init_refuses_to_clobber_reports_e1252, init_report_and_update_roundtrip. CoreCliLead-2 confirmed the same 10 PASS in its lane.",
+          "at": "2026-11-07T11:25:01.848Z"
+        },
+        {
+          "n": 5,
+          "text": "jet explain is built for build facts, the syntax dictionary, build settings and the web graph. Proof: every tests/known-failing.tsv row on #6418 that reports E2104 for `jet explain` passes on the default tier, and the rows are removed.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6967 c6, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:58:12.177Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 6,
+          "text": "jet perf is built. Proof: every tests/known-failing.tsv row on #6418 that reports E2104 for `jet perf` passes on the default tier, and the rows are removed.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6841 c21, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:58:14.911Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 8,
+          "text": "jet build --sbom and jet build --gate are built; every cases row that reported E2104 for it passes on the default tier.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Built in a0fca8c2c4 (sbom) and c69bdbd209 (gate), by JetpackEngine. On the s1 of 0a2f792c37 plus the identical gate patch, these rows PASS: cli_parts_core/organization_gate_policy_refuses_each_audited_invocation_gate (KF E2104→PASS, its KF row removed), configured_organization_unsafe_policy_fails_closed_and_keeps_path (FAIL→PASS), pkg/cli_build_sbom_writes_spdx, and cli_runtime and cli_parts_runtime quiet_suppresses_sbom_write_confirmation ($JET_SCRATCH_ROOT/lanes/Main/land/6418-c8-proof.log). known-failing.tsv has no gate or sbom row left. The lane-check compiler log has 0 errors ($JET_SCRATCH_ROOT/lane-check/jet-lane-check.4150691221701), and the receipt was CHECK OK.",
+          "at": "2026-11-06T08:12:22.419Z"
+        },
+        {
+          "n": 9,
+          "text": "jet devtools and jet split are built; every cases row that reported E2104 for it passes on the default tier.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "jet self devtools grammars landed in e30a4b7640, porting the editor-grammars generator into EditorGrammars.jet; the .mjs and its test are deleted. jet split and jet fold landed in 8170c2f082 and dfc887571e. cases --filter=grammar/ on the s1 of 60adfbb42a: PASS 7, and both former KF rows were UNEXPECTED-PASS, so their KF entries are removed. package_transition_cli is KF→PASS. No E2104 row for devtools, split or fold remains. package_host_split now passes its split step and stops at jet os plan, a different, unbuilt engine verb, now tracked on #6604.",
+          "at": "2026-11-06T08:44:22.092Z"
+        },
+        {
+          "n": 10,
+          "text": "(was #5951) The command model has one `ported` field per command form; `jet help`, shell completions, man pages and `jet help --all` read it, and no form with `ported = false` appears in help, completions or man.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "7fe60e94a9 drops the unported --cost form from lint help (owner answer q07mphiy wording). CoreCliLead-2 lane run on that commit: cases per_command_help, help_all, help_frequency, help_sort_az, man_page_golden and completions_generate_for_every_shell all PASS; Compiler/JetCli/Tests 99 passed, 0 failed.",
+          "at": "2026-11-07T09:04:11.502Z"
+        },
+        {
+          "n": 11,
+          "text": "(was #5951) A test runs every command form in the model and fails if a form answers E2104 \"not built yet\" while marked ported, or works while marked unported.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "On dev c886c5e718 with seed-b9 (jet@a0.0.45), 2026-11-11 23:1x, in a 16G scope (the 10G run was OOM-killed): jet test Compiler/JetCli/Tests/CommandModel.jet --filter=\"command model: rows refuse with their card\" gave 1 passed, 0 failed, 0 skipped, rc 0. The test runs every JET_CLI_FORMS row through jet_cli_plan and fails a ported row that answers E2104 or an unported row that does not.",
+          "at": "2026-11-12T04:09:15.268Z"
+        },
+        {
+          "n": 12,
+          "text": "(was #5951) Every E2104 \"not built yet\" report names the Tower card that owns the port in its Fix line; a test checks that each unported form has a card number.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "On dev c886c5e718 with seed-b9 (jet@a0.0.45), the same 16G run as n11: jet test Compiler/JetCli/Tests/CommandModel.jet --filter=\"command model: rows refuse with their card\" gave 1 passed, 0 failed, rc 0. command_model_run_rows requires each unported refusal to name (card #N) in its Fix line, and command_model_listed_refusals fails any unported row, setting, flag or lock section without a card.",
+          "at": "2026-11-12T04:09:25.572Z"
+        },
+        {
+          "n": 13,
+          "text": "(was #5951) A generated list of not-built forms with their owning cards is checked in and matches the model.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "meet-G5a on dev c886c5e718 with seed-b9 (jet@a0.0.45), 2026-11-11 23:0x: jet test Compiler --profile cases tests/cases/cli_parts_runtime/help_all_lists_not_built_forms_with_cards.case: PASS 1; FAIL, KNOWN-FAILING, UNEXPECTED-PASS, SKIP-HOST, REFUSED, ERROR and TIMEOUT 0. The case compares the checked-in help_all.txt, generated by jet help --all from the command model, with the not-built forms and their cards.",
+          "at": "2026-11-12T04:06:35.931Z"
+        },
+        {
+          "n": 14,
+          "text": "(was #5951) A checked-in capability table lists the 16 Rust-era capabilities of this card's body (PubGrub proof tree #927; cross-compilation #1058-#1060; native debugger #12 #797-#801; LSP coverage #3411-#3413; perf export and hardware counters #1973 #4212; telemetry exporter #3088; GPU backends #1144-#1146; reactive notebook #2445; embeddable engine #1915; service supervision #444 #1076; task/lock replay #4252; fault injection #1916; doc-example gate #4213; live loop law and #Persist #2426 #765; Polars parity and SQL over Parquet #307 #2035; root-cause-first report #2044), each with a `ported` bit.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): describes Rust code or Rust-era commands deleted with the Rust compiler; the Jet-side criteria cover the behavior.",
+          "at": "2026-11-06T23:22:55.066Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 15,
+          "text": "(was #5951) A capability's `ported` bit is true only when a test reruns the acceptance check of its Rust-era card against the self-hosted `jet`; the test fails when bit and check disagree.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): describes Rust code or Rust-era commands deleted with the Rust compiler; the Jet-side criteria cover the behavior.",
+          "at": "2026-11-06T23:22:56.007Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 16,
+          "text": "(was #5951) Every capability with `ported` false names one open card that owns its port, and that card says the Rust-era code is mined, not re-authored; the generated list matches the table.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): describes Rust code or Rust-era commands deleted with the Rust compiler; the Jet-side criteria cover the behavior.",
+          "at": "2026-11-06T23:22:56.925Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 18,
+          "text": "(was #5973) (was #4346) `os.executable()` under `jet run` names the jet binary, so a program that relaunches itself runs `jet <arg>` instead (I9): Examples/features/io/cleanup_matrix.jet match their goldens on o0 (jet run) and",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev d7285f91e6. Examples/features/io/cleanup_matrix.jet went in the concept-area cutover 2c3e68a70b. Its relaunch is now Examples/Systems/Process/ProcessExec.jet, which runs process.cmd([os.executable(), mode]); on batch compiler p274 (dev d7285f91e6): golden Systems/Process/ProcessExec.jet PASS at o0 (jet run), o1 and o2.",
+          "at": "2026-11-17T20:04:45.765Z"
+        },
+        {
+          "n": 19,
+          "text": "(was #5973) (was #4830) Jet front end: jet explain --web-graph --json returns not_ported (public in the Rust driver)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "d92918cc4f (Builder5): jet explain --web-graph --json projects the checked app graph. Verified by Main on the s1 of afab0cf28b, which contains it: web_app_graph/expand_web_lens_and_explain_web_graph_json, web_app/app_graph_facts_json and web_app/web_app_expand_facts_web all PASS, along with the other 8 web_app_graph rows and app_hello_graph ($JET_SCRATCH_ROOT/lanes/Main/land/afab0cf28b-web-graph.log, afab0cf28b-web-help.log)",
+          "at": "2026-11-06T07:32:08.414Z"
+        },
+        {
+          "n": 20,
+          "text": "(was #5973) (was #4847) Jet front end has no package/directory test driver (jet test <dir> refused; single-file only)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "meet-G5a on dev c886c5e718 with seed-b9 (jet@a0.0.45), 2026-11-11 23:0x: jet test tests/guards (a directory run as one test package): 144 passed, 0 failed, 0 skipped, rc 0. jet test <dir> is no longer refused.",
+          "at": "2026-11-12T04:06:36.773Z"
+        },
+        {
+          "n": 21,
+          "text": "`jet test` with a function test override is refused with a registered error, and suite install, status and the runner TLS have a producer, so the TestSuite3 rows run. Proof: `jet test Compiler --profile cases --filter test_suite/`, with no E2104 row left for these forms.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6606 c10, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:58:18.423Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 22,
+          "text": "(was #5973) (was #4940) Restore jet db dev commands (DbOptions/DbRows) removed at self-host cutover: never compiled",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): describes Rust code or Rust-era commands deleted with the Rust compiler; the Jet-side criteria cover the behavior.",
+          "at": "2026-11-06T23:22:57.818Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 23,
+          "text": "(was #5973) (was #4965) Native jet needs JET_COMPILER_IDENTITY from the environment or every compile fails E0003",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "meet-G5a on dev c886c5e718 with seed-b9 (jet@a0.0.45), 2026-11-11 23:0x: a one-file run: fn() { print(\"hi\") } program, run as env -u JET_COMPILER_IDENTITY -u JET_TOOLCHAIN_ROOT jet run h.jet, printed hi with rc 0 and no E0003. The compiler reads the IDENTITY stamp beside its executable.",
+          "at": "2026-11-12T04:06:37.618Z"
+        },
+        {
+          "n": 24,
+          "text": "(was #5973) (was #5810) CLI: palette and cost_cli commands are not part of the Jet-hosted CLI (E2104)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): describes Rust code or Rust-era commands deleted with the Rust compiler; the Jet-side criteria cover the behavior.",
+          "at": "2026-11-06T23:22:58.808Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 25,
+          "text": "`jet build` names the binary from package.jet, prints its path and size on one line, and keeps profiles apart: `jet new hello && cd hello && jet build` prints one line.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #4913 c19, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:58:21.107Z",
+          "closure": "duplicate",
+          "proof": {
+            "profile": "cases",
+            "filter": "cli_build/names_binary_prints_path_and_size"
+          }
+        },
+        {
+          "n": 26,
+          "text": "(was #5973) (was #5958) One version constant feeds `jet --version`, `jet new`, the scaffolded manifest and the compiler identity: `jet --version`, `jet version`, the `jet new` output, the scaffolded `jet:` field and",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Meet g5a (Lander5 meetrun, 2026-11-12 03:19-03:3x) on dev 50a2cbc7e6 with seed-b11 jet@a0.0.45#3667b9a1 (built at 19333b2bb3); every line rc 0 with a judged PASS and zero FAIL/KF/UNEXPECTED-PASS/SKIP/ERROR/TIMEOUT. jet test Compiler --profile cases tests/cases/cli_parts_runtime/new_scaffold_pins_the_version_jet_version_prints.case PASS 1, and help_and_palette_name_the_version_jet_version_prints.case PASS 1. 9bf3162603 removed JET_CLI_VERSION, so jet --version, jet new, the scaffold manifest and IDENTITY all read COMPILER_VERSION. Out: $JET_SCRATCH_ROOT/lanes/Lander/loop/out/meet-g5a/{4,5}.out.",
+          "at": "2026-11-12T08:21:39.277Z"
+        },
+        {
+          "n": 27,
+          "text": "Every `jet self doctor` row comes from running a real probe (for example starting `jet self lsp` and sending `initialize`), never from static text.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6606 c11, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:58:24.165Z",
+          "closure": "duplicate",
+          "proof": {
+            "profile": "cases",
+            "filter": "cli_self/doctor_rows_come_from_probes"
+          }
+        },
+        {
+          "n": 28,
+          "text": "(was #5973) `jet --help` and bare `jet` print the same version as `jet --version`. Today the help banner says \"Welcome to Jet! (v0.0.1)\" while `jet --version` says 0.1.0 (probe on 8fbf094). UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "meet-G5c on dev 5d60ee4241 with seed-b10 (jet@a0.0.45#c089d4d3), 2026-11-11 23:4x: Fix landed in 439480f6ff. jet test Compiler --profile cases tests/cases/cli_parts_runtime/help_and_palette_name_the_version_jet_version_prints.case: PASS 1; FAIL, KNOWN-FAILING, UNEXPECTED-PASS, SKIP-HOST, REFUSED, ERROR and TIMEOUT 0. The case pins the exact stdout banner of jet --help and bare jet against the word jet --version prints.",
+          "at": "2026-11-12T04:38:59.552Z"
+        },
+        {
+          "n": 29,
+          "text": "(was #6195) `jet eval` runs a print and a small program with the same output as `jet run`, with a cases row",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "meet-G5a on dev c886c5e718 with seed-b9 (jet@a0.0.45), 2026-11-11 23:0x: jet test Compiler --profile cases tests/cases/cli_parts_surface/eval_matches_run_for_a_print_and_a_small_program.case: PASS 1; FAIL, KNOWN-FAILING, UNEXPECTED-PASS, SKIP-HOST, REFUSED, ERROR and TIMEOUT 0. jet eval of a print and of a small program prints the same stdout as jet run, with stderr empty.",
+          "at": "2026-11-12T04:06:38.471Z"
+        },
+        {
+          "n": 30,
+          "text": "(was #6195) `jet repl` either runs input on the shared path or gives a single registered refusal naming its card, with a cases row",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "meet-G5a on dev c886c5e718 with seed-b9 (jet@a0.0.45), 2026-11-11 23:0x: jet test Compiler --profile cases tests/cases/repl/repl_unbuilt_forms_refuse_naming_their_card.case: PASS 1; FAIL, KNOWN-FAILING, UNEXPECTED-PASS, SKIP-HOST, REFUSED, ERROR and TIMEOUT 0. jet repl keeps running input after a refusal; :history and --console each give one E2104 naming card #6418.",
+          "at": "2026-11-12T04:06:39.320Z"
+        },
+        {
+          "n": 35,
+          "text": "`jet build --lib` produces the archive and .jet/build/<name>.h. Proof: `jet test Compiler --profile cases --filter library_outputs/guest_import_library_calls_native_c_and_cpp_hosts` on every applicable tier, with the `jet build --lib` known-failing rows removed.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6906 c7, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:58:27.498Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 37,
+          "text": "A C test compiled against the generated header reads and writes an exported default struct, with no hand-written declaration, on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter library_outputs/` on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6906 c8, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:58:30.541Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 38,
+          "text": "lowlevel/polyglot_go (Examples/features/lowlevel/polyglot_go.jet) passes its golden on the run and build tiers:  resolves through jet inspect bind output instead of E1002, and its known-failing row is removed.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6949 c8, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:58:34.905Z",
+          "closure": "duplicate",
+          "proof": {
+            "profile": "golden",
+            "filter": "lowlevel/polyglot_go"
+          }
+        },
+        {
+          "n": 39,
+          "text": "(was #3) Legacy substrate: cache/index envelope schema — completion owned by #395/#421/#434 [precut audit: failing on 9c7ddf1359: C:pkg/cli_publish_unreachable_registry_e1235 KNOWN-FAILING #6418 `jet publish` is not built yet (E2104): stream predicate ~ failed (known-failing #6418: `jet publish` is not built yet (E2104)); C:pkg/cli_yank_flips_index_entry KNOWN-FAILING #6418 `jet…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 7b596406ec (JetpackEngine): jet publish and jet yank are built; the audit cases pkg/cli_publish_unreachable_registry_e1235 and pkg/cli_yank_flips_index_entry pass on s1 of HEAD+patch (--fresh) and left known-failing (11 known-failing rows removed as UNEXPECTED-PASS across cases and the Engine e1234 claim).",
+          "at": "2026-11-06T05:07:26.066Z"
+        },
+        {
+          "n": 40,
+          "text": "(was #96) Legacy substrate: Git registry publish UX — live registry/delivery owned by #423 [precut audit: failing on 9c7ddf1359: C:pkg/cli_concurrent_publish_keeps_one_immutable_version KNOWN-FAILING #6418 `jet keygen` is not built yet (E2104): stream predicate lines failed (known-failing #6418: `jet keygen` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "2358253651 (JetpackEngine): claim cli_concurrent_publish_keeps_one_immutable_version passes default and AOT ($JET_SCRATCH_ROOT/lanes/JetpackEngine/eng-c9c.log:14191, :14881); tests/cases/pkg/cli_concurrent_publish_keeps_one_immutable_version.case PASS via jet test --profile cases --jetpack, now using jet registry key (no keygen E2104)",
+          "at": "2026-11-06T07:16:46.814Z"
+        },
+        {
+          "n": 41,
+          "text": "(was #210) Highlighting: one source of truth across editors [precut audit: failing on 9c7ddf1359: C:grammar/seeded_tree_sitter_drift_fails_the_generated_section_guard KNOWN-FAILING #6418 `jet devtools` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet devtools` is not built yet (E2104)); C:grammar/editor_grammars_match_generated_sections KNOWN-FAILING #6418 `jet…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/grammar/editor_grammars_match_generated_sections.case, tests/cases/grammar/seeded_tree_sitter_drift_fails_the_generated_section_guard.case PASS",
+          "at": "2026-11-06T20:53:20.962Z"
+        },
+        {
+          "n": 42,
+          "text": "(was #240 c2) jet prove implements target resolution, isolated producers, evidence-derived ProofReport summaries, human/JSON output, continuation, and exact exits/diagnostics E2940/E2941 without trusting rustc [precut audit: failing on 9c7ddf1359: C:prove/unknown_lens_is_exact_e2941_in_human_and_json_modes KNOWN-FAILING #6418 unbuilt: E2104 command form not built (E2941): snapshot mismatch: tests/cases/prove/unknown-lens.out (known-failing #6418: unbuilt: E2104 command form not built (E2941)); C:prove/prove_lens_union_is_canonical_and_keeps_the_complete_report KNOWN-FAILING #6035 `jet prove`…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/prove/unknown_lens_is_exact_e2941_in_human_and_json_modes.case, tests/cases/prove/prove_lens_union_is_canonical_and_keeps_the_complete_report.case PASS",
+          "at": "2026-11-06T20:53:25.243Z"
+        },
+        {
+          "n": 43,
+          "text": "(was #271) Canvas graph workbench interactions [precut audit: failing on 9c7ddf1359: C:web_dev/jet_dev_web_exposes_canvas_panel_and_graph KNOWN-FAILING #6418 `jet dev` is not built yet (E2104): stdout ended before recv was satisfied; stdout seen: (known-failing #6418: `jet dev` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6618 (\"Canvas: the `jet dev --canvas` browser workbench\"), outside the G1/G2 deadline.",
+          "at": "2026-11-06T23:24:08.374Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 44,
+          "text": "(was #273) Canvas debugger and execution overlay parity [precut audit: failing on 9c7ddf1359: C:web_dev/jet_dev_web_exposes_canvas_panel_and_graph KNOWN-FAILING #6418 `jet dev` is not built yet (E2104): stdout ended before recv was satisfied; stdout seen: (known-failing #6418: `jet dev` is not built yet (E2104));…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6618 (\"Canvas: the `jet dev --canvas` browser workbench\"), outside the G1/G2 deadline.",
+          "at": "2026-11-06T23:24:09.422Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 45,
+          "text": "(was #276) Canvas public graph and edit protocol [precut audit: failing on 9c7ddf1359: C:web_dev/jet_dev_web_live_canvas_debug_session_round_trip KNOWN-FAILING #6418 `jet dev` is not built yet (E2104): stdout ended before recv was satisfied; stdout seen: (known-failing #6418: `jet dev` is not built yet (E2104));…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6618 (\"Canvas: the `jet dev --canvas` browser workbench\"), outside the G1/G2 deadline.",
+          "at": "2026-11-06T23:24:10.488Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 46,
+          "text": "(was #282) Canvas search refactor and source navigation [precut audit: failing on 9c7ddf1359: C:web_dev/jet_dev_web_project_queries_round_trip_and_reject_stale_revision KNOWN-FAILING #6418 `jet dev` is not built yet (E2104): stdout ended before recv was satisfied; stdout seen: (known-failing #6418: `jet dev` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6618 (\"Canvas: the `jet dev --canvas` browser workbench\"), outside the G1/G2 deadline.",
+          "at": "2026-11-06T23:24:11.850Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 47,
+          "text": "The Go, Java, C# and Fortran binders live behind `jet inspect bind <lang>`. Each has an end-to-end example with a golden, error snapshots, a jetpack-provisioned toolchain, and registered effect roots. Proof: `jet test Compiler --profile cases --filter cli_parts_bindings/` (fortran_bind_runs_checked_column_major_array and the JVM and .NET rows), with their known-failing rows removed.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6949 c9, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:58:38.111Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 48,
+          "text": "(was #638 c1) Every tests/cli.rs site that executes a freshly copied compiler binary retries bounded ExecutableFileBusy failures, mirroring tests/engine_dispatch.rs; no product code changes [precut audit: failing on 9c7ddf1359: C:cli_parts_budget/budget_unreadable_compiler_identity_rejects_before_artifact KNOWN-FAILING #6418 `jet budget` is not built yet (E2104): exit 2; expected 1 (known-failing #6418: `jet budget` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): describes Rust code or Rust-era commands deleted with the Rust compiler; the Jet-side criteria cover the behavior.",
+          "at": "2026-11-06T23:22:59.793Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 52,
+          "text": "(was #662 c3) Shared test server recovers poisoned mutex state while preserving the original failing assertion and isolation [precut audit: failing on 9c7ddf1359: C:lsp/lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words KNOWN-FAILING #6418 `jet self lsp` is not built yet (E2104): stdout ended before recv was satisfied; stdout seen: (known-failing #6418: `jet self lsp` is not built…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): describes Rust code or Rust-era commands deleted with the Rust compiler; the Jet-side criteria cover the behavior.",
+          "at": "2026-11-06T23:23:00.793Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 54,
+          "text": "(was #694 c1) Every behavior named by “Legacy build wrappers: shared typed ActionSpec bridge”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes [precut audit: failing on 9c7ddf1359: C:build_entry/production_legacy_import_rejects_unsupported_project_constructs KNOWN-FAILING #6418 unbuilt: E2101/E2102 command or flag not built (E2102): JSON filter selected no values (known-failing #6418: unbuilt: E2101/E2102 command or flag not built (E2102))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6620 (\"Import Make, CMake and Cargo builds\"), outside the G1/G2 deadline.",
+          "at": "2026-11-06T23:24:42.690Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 55,
+          "text": "(was #694 c2, #1044 c2, #1045 c2, #1046 c2, #1047 c2) Imported commands, tools, inputs, outputs, environment, dependencies, resources, cache identity, provenance, and resulting actions are inspectable in the canonical graph [precut audit: failing on 9c7ddf1359: C:build_entry/production_legacy_import_rejects_unsupported_project_constructs KNOWN-FAILING #6418 unbuilt: E2101/E2102 command or flag not built (E2102): JSON filter selected no values (known-failing #6418: unbuilt: E2101/E2102 command or flag not built (E2102))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6620 (\"Import Make, CMake and Cargo builds\"), outside the G1/G2 deadline.",
+          "at": "2026-11-06T23:24:43.961Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 56,
+          "text": "(was #694 c3, #1044 c3, #1045 c3, #1046 c3, #1047 c3) Policy denial, unsupported project constructs, undeclared access, tool failure, path escape, nondeterminism, and partial import fail clearly without executing an unreviewed fallback command [precut audit: failing on 9c7ddf1359: C:build_entry/production_legacy_import_rejects_unsupported_project_constructs KNOWN-FAILING #6418 unbuilt: E2101/E2102 command or flag not built (E2102): JSON filter selected no values (known-failing #6418: unbuilt: E2101/E2102 command or flag not built (E2102))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6620 (\"Import Make, CMake and Cargo builds\"), outside the G1/G2 deadline.",
+          "at": "2026-11-06T23:24:45.179Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 57,
+          "text": "(was #694 c4, #1044 c4, #1045 c4, #1046 c4, #1047 c4) Focused production-driver tests import a representative project, inspect the graph, execute through ActionSpec, enforce the CI ban, and cover a hostile or unsupported case [precut audit: failing on 9c7ddf1359: C:build_entry/production_legacy_import_rejects_unsupported_project_constructs KNOWN-FAILING #6418 unbuilt: E2101/E2102 command or flag not built (E2102): JSON filter selected no values (known-failing #6418: unbuilt: E2101/E2102 command or flag not built (E2102))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6620 (\"Import Make, CMake and Cargo builds\"), outside the G1/G2 deadline.",
+          "at": "2026-11-06T23:24:46.308Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 58,
+          "text": "(was #983 c6) Breakpoint/run-control gestures are the observable surface: set/clear breakpoint on a node, continue, and step each work through the production protocol and are covered by a test that fails when the gesture path is bypassed [precut audit: failing on 9c7ddf1359: C:debug/canvas_graph_source_id_stays_project_relative_for_relative_entries FAIL exit 1; expected 0; C:debug/canvas_debug_rejects_unbounded_breakpoint_spans_before_execution FAIL exit 1; expected 0; C:web_dev/jet_dev_web_live_canvas_debug_session_round_trip KNOWN-FAILING #6418 `jet dev` is not built yet (E2104): stdout ended before recv was…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6618 (\"Canvas: the `jet dev --canvas` browser workbench\"), outside the G1/G2 deadline.",
+          "at": "2026-11-06T23:24:12.899Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 59,
+          "text": "(was #984 c2, #872 c2, #983 c2) Files, search results, diffs, diagnostics, breakpoints, values, and execution state refer to the same current source revision [precut audit: failing on 9c7ddf1359: C:web_dev/jet_dev_web_live_canvas_debug_session_round_trip KNOWN-FAILING #6418 `jet dev` is not built yet (E2104): stdout ended before recv was satisfied; stdout seen: (known-failing #6418: `jet dev` is not built yet (E2104));…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6618 (\"Canvas: the `jet dev --canvas` browser workbench\"), outside the G1/G2 deadline.",
+          "at": "2026-11-06T23:24:13.982Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 60,
+          "text": "(was #984 c3, #872 c3, #983 c3) Stale indices, moved code, runtime disconnects, large result sets, and failed edits remain bounded, disclose staleness, and preserve user work [precut audit: failing on 9c7ddf1359: C:web_dev/jet_dev_web_live_canvas_debug_session_round_trip KNOWN-FAILING #6418 `jet dev` is not built yet (E2104): stdout ended before recv was satisfied; stdout seen: (known-failing #6418: `jet dev` is not built yet (E2104));…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6618 (\"Canvas: the `jet dev --canvas` browser workbench\"), outside the G1/G2 deadline.",
+          "at": "2026-11-06T23:24:15.067Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 61,
+          "text": "(was #984 c6) Debugger shows real values, stack frames, active node, and traversed wire path from the live runtime session at a breakpoint [precut audit: failing on 9c7ddf1359: C:web_dev/jet_dev_web_live_canvas_debug_session_round_trip KNOWN-FAILING #6418 `jet dev` is not built yet (E2104): stdout ended before recv was satisfied; stdout seen: (known-failing #6418: `jet dev` is not built yet (E2104));…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6618 (\"Canvas: the `jet dev --canvas` browser workbench\"), outside the G1/G2 deadline.",
+          "at": "2026-11-06T23:24:16.231Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 62,
+          "text": "(was #984 c7) Local variables of the paused frame render with types and current values through the production protocol [precut audit: failing on 9c7ddf1359: C:web_dev/jet_dev_web_live_canvas_debug_session_round_trip KNOWN-FAILING #6418 `jet dev` is not built yet (E2104): stdout ended before recv was satisfied; stdout seen: (known-failing #6418: `jet dev` is not built yet (E2104));…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6618 (\"Canvas: the `jet dev --canvas` browser workbench\"), outside the G1/G2 deadline.",
+          "at": "2026-11-06T23:24:17.267Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 63,
+          "text": "(was #984 c8) After source edits move code, breakpoint/value anchors disclose staleness instead of pointing at wrong spans [precut audit: failing on 9c7ddf1359: C:web_dev/jet_dev_web_live_canvas_debug_session_round_trip KNOWN-FAILING #6418 `jet dev` is not built yet (E2104): stdout ended before recv was satisfied; stdout seen: (known-failing #6418: `jet dev` is not built yet (E2104));…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6618 (\"Canvas: the `jet dev --canvas` browser workbench\"), outside the G1/G2 deadline.",
+          "at": "2026-11-06T23:24:18.311Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 64,
+          "text": "(was #984 c9) Negative liveness test: disconnecting the runtime makes the UI show disconnected state; no cached value is presented as live (test fails if the disconnect path is removed) [precut audit: failing on 9c7ddf1359: C:web_dev/jet_dev_web_live_canvas_debug_session_round_trip KNOWN-FAILING #6418 `jet dev` is not built yet (E2104): stdout ended before recv was satisfied; stdout seen: (known-failing #6418: `jet dev` is not built yet (E2104));…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6618 (\"Canvas: the `jet dev --canvas` browser workbench\"), outside the G1/G2 deadline.",
+          "at": "2026-11-06T23:24:19.361Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 65,
+          "text": "(was #1127 c1) Every behavior named by “jet prove: canonical .jproof artifacts”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): duplicate of #6035, which owns jet prove (c21-c23 and c39-c43; #5492 merged into it).",
+          "at": "2026-11-06T23:23:47.920Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 66,
+          "text": "(was #1127 c2, #1129 c2, #1130 c2, #1131 c2, #1132 c2) Artifacts, captures, replay, certificates, budgets, lenses, CLI output, and schema/version metadata are canonical, deterministic, and mutually consistent for the named slice [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): duplicate of #6035, which owns jet prove (c21-c23 and c39-c43; #5492 merged into it).",
+          "at": "2026-11-06T23:23:48.974Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 67,
+          "text": "(was #1127 c3, #1129 c3, #1130 c3, #1131 c3, #1132 c3) Malformed or incompatible artifacts, missing authority, replay divergence, invalid certificates, exhausted budgets, hostile paths, and platform variance fail precisely without accepting unproved claims [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): duplicate of #6035, which owns jet prove (c21-c23 and c39-c43; #5492 merged into it).",
+          "at": "2026-11-06T23:23:50.101Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 68,
+          "text": "(was #1127 c4) Direct targeted tests parse and round-trip the real formats, exercise the named failure modes, and prove detection sensitivity by corrupting or diverging a controlled input [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): duplicate of #6035, which owns jet prove (c21-c23 and c39-c43; #5492 merged into it).",
+          "at": "2026-11-06T23:23:51.226Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 69,
+          "text": "(was #1132 c1) Every behavior named by “jet prove: hostile platform matrix and CLI closeout”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): duplicate of #6035, which owns jet prove (c21-c23 and c39-c43; #5492 merged into it).",
+          "at": "2026-11-06T23:23:52.308Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 70,
+          "text": "(was #1282 c1) jet tasks lists every declared task with its doc line and marks scheduled ones with their #Every schedule [precut audit: failing on 9c7ddf1359: C:cli_parts_core/jobs_lists_documented_scheduled_project_jobs_and_matches_run_outside_projects KNOWN-FAILING #6418 `jet jobs` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet jobs` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/cli_parts_core/jobs_lists_documented_scheduled_project_jobs_and_matches_run_outside_projects.case PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T02:03:04.437Z"
+        },
+        {
+          "n": 71,
+          "text": "(was #1282 c2) the listing comes from the same list E1294 computes, not a second source [precut audit: failing on 9c7ddf1359: C:cli_parts_core/jobs_lists_documented_scheduled_project_jobs_and_matches_run_outside_projects KNOWN-FAILING #6418 `jet jobs` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet jobs` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/cli_parts_core/jobs_lists_documented_scheduled_project_jobs_and_matches_run_outside_projects.case PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T02:03:05.610Z"
+        },
+        {
+          "n": 72,
+          "text": "(was #1282 c3) jet help shows the verb and a non-project directory gives the same error jet run gives [precut audit: failing on 9c7ddf1359: C:cli_parts_core/jobs_lists_documented_scheduled_project_jobs_and_matches_run_outside_projects KNOWN-FAILING #6418 `jet jobs` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet jobs` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/cli_parts_core/jobs_lists_documented_scheduled_project_jobs_and_matches_run_outside_projects.case PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T02:03:06.757Z"
+        },
+        {
+          "n": 73,
+          "text": "(was #1461 c1) Each ratified outcome lands as one registry, spec, formatter, grammar, example, and snapshot migration with no teaching fix for any retired spelling (owner order: no teaching errors for old syntax) [precut audit: failing on 9c7ddf1359: C:grammar/editor_grammars_match_generated_sections KNOWN-FAILING #6418 `jet devtools` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet devtools` is not built yet (E2104)); U:impure_no_reason KNOWN-FAILING #6425 check…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/grammar/editor_grammars_match_generated_sections.case PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T02:03:07.865Z"
+        },
+        {
+          "n": 74,
+          "text": "(was #1461 c2) D-SQL-ARG1's row-type argument and D-HTML-NAME1's site-dependent signature are expressed as ordinary named parameters under D-META-FORM1's declaration shape, not a bespoke ad hoc Rust-only schema field; evidence says which registry source (Prelude declaration or Policy.rs stopgap) the schema change landed on [precut audit: failing on 9c7ddf1359: C:grammar/editor_grammars_match_generated_sections KNOWN-FAILING #6418 `jet devtools` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet devtools` is not built yet (E2104)); U:impure_no_reason KNOWN-FAILING #6425 check…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/grammar/editor_grammars_match_generated_sections.case PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T02:03:09.048Z"
+        },
+        {
+          "n": 77,
+          "text": "(was #1519 c1) settings: .{ tls: Bool = true, api_base: String = \"...\" } parses, type-checks and registers each setting as a fact row; the legal value set is the Tier-0 set from D-GENMOD-VALUE1 (Bool, Int, Char, String, fieldless enum) [precut audit: failing on 9c7ddf1359: C:cli_parts_surface/explain_typed_build_setting_golden KNOWN-FAILING #6418 `jet explain` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet explain` is not built yet (E2104)); C:package_outputs/typed_settings_preserves_tier_parity_and_cli_override KNOWN-FAILING #6418 `jet…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/cli_parts_surface/explain_typed_build_setting_golden.case, tests/cases/package_outputs/typed_settings_preserves_tier_parity_and_cli_override.case PASS",
+          "at": "2026-11-06T20:53:26.069Z"
+        },
+        {
+          "n": 78,
+          "text": "(was #1519 c5) jet build --set tls=false works and jet explain build.settings.tls prints the chain: CLI, profile, default [precut audit: failing on 9c7ddf1359: C:cli_parts_surface/explain_typed_build_setting_golden KNOWN-FAILING #6418 `jet explain` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet explain` is not built yet (E2104)); C:package_outputs/typed_settings_preserves_tier_parity_and_cli_override KNOWN-FAILING #6418 `jet…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/cli_parts_surface/explain_typed_build_setting_golden.case, tests/cases/package_outputs/typed_settings_preserves_tier_parity_and_cli_override.case PASS",
+          "at": "2026-11-06T20:53:26.912Z"
+        },
+        {
+          "n": 79,
+          "text": "(was #1519 c6) I9 parity inside this card: settings fold before codegen and AOT, jet run and the interpreter produce byte-identical output for one golden-tested example under examples/features/packages/ [precut audit: failing on 9c7ddf1359: C:cli_parts_surface/explain_typed_build_setting_golden KNOWN-FAILING #6418 `jet explain` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet explain` is not built yet (E2104)); C:package_outputs/typed_settings_preserves_tier_parity_and_cli_override KNOWN-FAILING #6418 `jet…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/cli_parts_surface/explain_typed_build_setting_golden.case, tests/cases/package_outputs/typed_settings_preserves_tier_parity_and_cli_override.case PASS",
+          "at": "2026-11-06T20:53:28.046Z"
+        },
+        {
+          "n": 80,
+          "text": "(was #1520 c2) The seven contribution layers resolve most-explicit-wins; a profile beats a declared default and a command-line flag beats every standing file [precut audit: failing on 9c7ddf1359: C:cli_parts_surface/explain_build_fact_golden KNOWN-FAILING #6418 `jet explain` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet explain` is not built yet (E2104)); C:cli_parts_surface/explain_typed_build_setting_golden KNOWN-FAILING #6418 `jet…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/cli_parts_surface/explain_build_fact_golden.case, tests/cases/cli_parts_surface/explain_typed_build_setting_golden.case PASS",
+          "at": "2026-11-06T20:53:28.859Z"
+        },
+        {
+          "n": 81,
+          "text": "(was #1520 c3) Two writers at the same layer with different values is a hard error naming both source locations, with a UI snapshot [precut audit: failing on 9c7ddf1359: C:cli_parts_surface/explain_build_fact_golden KNOWN-FAILING #6418 `jet explain` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet explain` is not built yet (E2104)); C:cli_parts_surface/explain_typed_build_setting_golden KNOWN-FAILING #6418 `jet…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/cli_parts_surface/explain_build_fact_golden.case, tests/cases/cli_parts_surface/explain_typed_build_setting_golden.case PASS",
+          "at": "2026-11-06T20:53:29.668Z"
+        },
+        {
+          "n": 82,
+          "text": "(was #1520 c4) A .Force pin at system or fleet layer outranks the command line, and jet explain names the pin as the reason [precut audit: failing on 9c7ddf1359: C:cli_parts_surface/explain_build_fact_golden KNOWN-FAILING #6418 `jet explain` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet explain` is not built yet (E2104)); C:cli_parts_surface/explain_typed_build_setting_golden KNOWN-FAILING #6418 `jet…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/cli_parts_surface/explain_build_fact_golden.case, tests/cases/cli_parts_surface/explain_typed_build_setting_golden.case PASS",
+          "at": "2026-11-06T20:53:30.565Z"
+        },
+        {
+          "n": 83,
+          "text": "(was #1520 c5) jet explain <fact> prints one chain, one line per writer, effective value marked, for facts, settings and policy alike; golden-tested [precut audit: failing on 9c7ddf1359: C:cli_parts_surface/explain_build_fact_golden KNOWN-FAILING #6418 `jet explain` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet explain` is not built yet (E2104)); C:cli_parts_surface/explain_typed_build_setting_golden KNOWN-FAILING #6418 `jet…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/cli_parts_surface/explain_build_fact_golden.case, tests/cases/cli_parts_surface/explain_typed_build_setting_golden.case PASS",
+          "at": "2026-11-06T20:53:31.411Z"
+        },
+        {
+          "n": 84,
+          "text": "(was #1520 c6) Safety facts stay tighten-only at every layer under the one law from D-FACT-LAW1, and no contribution is ambient, proven by a targeted test [precut audit: failing on 9c7ddf1359: C:cli_parts_surface/explain_build_fact_golden KNOWN-FAILING #6418 `jet explain` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet explain` is not built yet (E2104)); C:cli_parts_surface/explain_typed_build_setting_golden KNOWN-FAILING #6418 `jet…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/cli_parts_surface/explain_build_fact_golden.case, tests/cases/cli_parts_surface/explain_typed_build_setting_golden.case PASS",
+          "at": "2026-11-06T20:53:32.241Z"
+        },
+        {
+          "n": 85,
+          "text": "(was #1520 c9) Substrate first: #1571 closed before this card closes, because this card emits .Force as a gate that must land in the ledger [precut audit: failing on 9c7ddf1359: C:cli_parts_surface/explain_build_fact_golden KNOWN-FAILING #6418 `jet explain` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet explain` is not built yet (E2104)); C:cli_parts_surface/explain_typed_build_setting_golden KNOWN-FAILING #6418 `jet…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/cli_parts_surface/explain_build_fact_golden.case, tests/cases/cli_parts_surface/explain_typed_build_setting_golden.case PASS",
+          "at": "2026-11-06T20:53:33.079Z"
+        },
+        {
+          "n": 86,
+          "text": "(was #1520 c10) A .Force pin records to the one gate ledger as a build-kind entry [precut audit: failing on 9c7ddf1359: C:cli_parts_surface/explain_build_fact_golden KNOWN-FAILING #6418 `jet explain` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet explain` is not built yet (E2104)); C:cli_parts_surface/explain_typed_build_setting_golden KNOWN-FAILING #6418 `jet…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/cli_parts_surface/explain_build_fact_golden.case, tests/cases/cli_parts_surface/explain_typed_build_setting_golden.case PASS",
+          "at": "2026-11-06T20:53:33.878Z"
+        },
+        {
+          "n": 87,
+          "text": "(was #1520 c12) Every source, profile, workspace, environment, system, fleet, and CLI consumer calls jet_foundation::Policy::resolve in crates/jet-foundation/src/Policy.rs; rg over crates/jet-jit, crates/jet-comptime, and AOT emit finds no engine-local precedence, conflict, .Force, or default logic [precut audit: failing on 9c7ddf1359: C:cli_parts_surface/explain_build_fact_golden KNOWN-FAILING #6418 `jet explain` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet explain` is not built yet (E2104)); C:cli_parts_surface/explain_typed_build_setting_golden KNOWN-FAILING #6418 `jet…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): describes Rust code or Rust-era commands deleted with the Rust compiler; the Jet-side criteria cover the behavior.",
+          "at": "2026-11-06T23:23:01.735Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 88,
+          "text": "(was #1606 c3) The marker_sequence_leads_to_function lookahead heuristic reads the registry instead of hard-coded marker names [precut audit: failing on 9c7ddf1359: C:grammar/editor_grammars_match_generated_sections KNOWN-FAILING #6418 `jet devtools` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet devtools` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/grammar/editor_grammars_match_generated_sections.case PASS",
+          "at": "2026-11-06T20:53:21.795Z"
+        },
+        {
+          "n": 89,
+          "text": "(was #1606 c4) The function_marker_has_applicator name list is deleted; applicator knowledge lives only on the registry row [precut audit: failing on 9c7ddf1359: C:grammar/editor_grammars_match_generated_sections KNOWN-FAILING #6418 `jet devtools` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet devtools` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/grammar/editor_grammars_match_generated_sections.case PASS",
+          "at": "2026-11-06T20:53:22.650Z"
+        },
+        {
+          "n": 90,
+          "text": "(was #1606 c5) Targeted parser, formatter, and snapshot tests pass; editor grammars are regenerated only if a user-visible surface changed [precut audit: failing on 9c7ddf1359: C:grammar/editor_grammars_match_generated_sections KNOWN-FAILING #6418 `jet devtools` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet devtools` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/grammar/editor_grammars_match_generated_sections.case PASS",
+          "at": "2026-11-06T20:53:23.515Z"
+        },
+        {
+          "n": 91,
+          "text": "(was #1606 c10) One registry-derived accessor yields the marker row and argument values for every block-construct node; the formatter and reflection walks read it instead of matching each Stmt variant [precut audit: failing on 9c7ddf1359: C:grammar/editor_grammars_match_generated_sections KNOWN-FAILING #6418 `jet devtools` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet devtools` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/grammar/editor_grammars_match_generated_sections.case PASS",
+          "at": "2026-11-06T20:53:24.345Z"
+        },
+        {
+          "n": 93,
+          "text": "(was #1610 c1) The three entropy-simulation pkg tests pass: cli_keygen_entropy_failure_is_exact_e1292_and_artifact_free, cli_publish_auto_keygen_entropy_failure_mutates_nothing, cli_publish_no_sign_leaves_signature_empty [precut audit: failing on 9c7ddf1359: C:pkg/cli_publish_no_sign_leaves_signature_empty KNOWN-FAILING #6418 `jet publish` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet publish` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 7b596406ec (JetpackEngine): the three entropy-simulation pkg cases cli_keygen_entropy_failure_is_exact_e1292_and_artifact_free, cli_publish_auto_keygen_entropy_failure_mutates_nothing and cli_publish_no_sign_leaves_signature_empty pass on s1 of HEAD+patch (--fresh) and left known-failing.",
+          "at": "2026-11-06T05:07:26.849Z"
+        },
+        {
+          "n": 95,
+          "text": "(was #1866 c6) Each of run/build/dev/test resolves its package-root command file or the ratified default; CLI tests cover both paths [precut audit: failing on 9c7ddf1359: C:cli_parts_runtime/command_role_home_overrides_stock_and_show_default_reports_stock FAIL exit 1; expected 0]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/cli_parts_runtime/command_role_home_overrides_stock_and_show_default_reports_stock.case PASS",
+          "at": "2026-11-06T20:53:34.695Z"
+        },
+        {
+          "n": 97,
+          "text": "(was #2119 c4) The vocabulary does not overload the existing meaning of hole in E3011, E2902 or D-TOOL2 [precut audit: failing on 9c7ddf1359: C:todo_fill/check_reports_goal_and_fill_only_offers_checked_candidates FAIL stream predicate ~ failed]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/todo_fill/check_reports_goal_and_fill_only_offers_checked_candidates.case PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T02:08:38.709Z"
+        },
+        {
+          "n": 100,
+          "text": "(was #2168 c2) `--canvas` is accepted only by `jet dev`; other commands reject it through the canonical CLI error path [precut audit: failing on 9c7ddf1359: C:canvas_cli_lifecycle/jet_dev_canvas_lifecycle_exit_reuse_and_cleanup KNOWN-FAILING #6418 `jet dev` is not built yet (E2104): exit 1; expected 0 (known-failing #6418: `jet dev` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6618 (\"Canvas: the `jet dev --canvas` browser workbench\"), outside the G1/G2 deadline.",
+          "at": "2026-11-06T23:24:20.420Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 101,
+          "text": "(was #2168 c3) Plain interactive `jet dev` remains terminal-first and does not start the Canvas endpoint or browser [precut audit: failing on 9c7ddf1359: C:canvas_cli_lifecycle/jet_dev_canvas_lifecycle_exit_reuse_and_cleanup KNOWN-FAILING #6418 `jet dev` is not built yet (E2104): exit 1; expected 0 (known-failing #6418: `jet dev` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6618 (\"Canvas: the `jet dev --canvas` browser workbench\"), outside the G1/G2 deadline.",
+          "at": "2026-11-06T23:24:21.479Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 102,
+          "text": "(was #2168 c4) Every interactive terminal dev start prints one compact hint with the exact command `jet dev <source> --canvas` after readiness [precut audit: failing on 9c7ddf1359: C:canvas_cli_lifecycle/jet_dev_canvas_lifecycle_exit_reuse_and_cleanup KNOWN-FAILING #6418 `jet dev` is not built yet (E2104): exit 1; expected 0 (known-failing #6418: `jet dev` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6618 (\"Canvas: the `jet dev --canvas` browser workbench\"), outside the G1/G2 deadline.",
+          "at": "2026-11-06T23:24:22.527Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 103,
+          "text": "(was #2175 c1) Every recognized programmable-build entry has `BuildPlan` as its success value and never treats `BuildPlan` as an error domain [precut audit: failing on 9c7ddf1359: C:build_entry/bare_build_plan_entry_uses_implicit_default_error_route KNOWN-FAILING #6418 unbuilt: E2101/E2102 command or flag not built (E2102): exit 2; expected 0 (known-failing #6418: unbuilt: E2101/E2102 command or flag not built (E2102))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/build_entry/bare_build_plan_entry_uses_implicit_default_error_route.case PASS",
+          "at": "2026-11-06T20:53:35.561Z"
+        },
+        {
+          "n": 104,
+          "text": "(was #2175 c3) Only the recognized build entry gets this success contract; an ordinary function named `build` follows normal callable rules [precut audit: failing on 9c7ddf1359: C:build_entry/bare_build_plan_entry_uses_implicit_default_error_route KNOWN-FAILING #6418 unbuilt: E2101/E2102 command or flag not built (E2102): exit 2; expected 0 (known-failing #6418: unbuilt: E2101/E2102 command or flag not built (E2102))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/build_entry/bare_build_plan_entry_uses_implicit_default_error_route.case PASS",
+          "at": "2026-11-06T20:53:36.422Z"
+        },
+        {
+          "n": 105,
+          "text": "(was #2175 c4) BuildContext failures preserve their exact `BuildError` variant, fields, source span, causes, and context inside the structured report [precut audit: failing on 9c7ddf1359: C:build_entry/bare_build_plan_entry_uses_implicit_default_error_route KNOWN-FAILING #6418 unbuilt: E2101/E2102 command or flag not built (E2102): exit 2; expected 0 (known-failing #6418: unbuilt: E2101/E2102 command or flag not built (E2102))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/build_entry/bare_build_plan_entry_uses_implicit_default_error_route.case PASS",
+          "at": "2026-11-06T20:53:37.309Z"
+        },
+        {
+          "n": 106,
+          "text": "(was #2175 c5) An expert build entry may declare `!BuildError` or a `#Error` union; one unique declared conversion applies automatically [precut audit: failing on 9c7ddf1359: C:build_entry/bare_build_plan_entry_uses_implicit_default_error_route KNOWN-FAILING #6418 unbuilt: E2101/E2102 command or flag not built (E2102): exit 2; expected 0 (known-failing #6418: unbuilt: E2101/E2102 command or flag not built (E2102))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/build_entry/bare_build_plan_entry_uses_implicit_default_error_route.case PASS",
+          "at": "2026-11-06T20:53:38.168Z"
+        },
+        {
+          "n": 107,
+          "text": "(was #2175 c6) The compiler adds no build-only carrier, propagation operator, conversion table, or engine-specific error mapping [precut audit: failing on 9c7ddf1359: C:build_entry/bare_build_plan_entry_uses_implicit_default_error_route KNOWN-FAILING #6418 unbuilt: E2101/E2102 command or flag not built (E2102): exit 2; expected 0 (known-failing #6418: unbuilt: E2101/E2102 command or flag not built (E2102))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/build_entry/bare_build_plan_entry_uses_implicit_default_error_route.case PASS",
+          "at": "2026-11-06T20:53:38.980Z"
+        },
+        {
+          "n": 108,
+          "text": "(was #2175 c9) Programmable-build tests prove a valid plan, implicit failure, explicit BuildError, union conversion, ambiguous conversion, and human/JSON parity [precut audit: failing on 9c7ddf1359: C:build_entry/bare_build_plan_entry_uses_implicit_default_error_route KNOWN-FAILING #6418 unbuilt: E2101/E2102 command or flag not built (E2102): exit 2; expected 0 (known-failing #6418: unbuilt: E2101/E2102 command or flag not built (E2102))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/build_entry/bare_build_plan_entry_uses_implicit_default_error_route.case PASS",
+          "at": "2026-11-06T20:53:39.857Z"
+        },
+        {
+          "n": 110,
+          "text": "(was #2445 c1) Source implementation is complete for this contract: Editing a defining cell reruns only its transitive dependents, records the dependency order, and exposes stale or effect-confirmation state for skipped work. Deferred runtime proof (#2919): tests/notebook_reactivity.rs [precut audit: failing on 9c7ddf1359: C:notebook/jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss KNOWN-FAILING #6418 `jet notebook` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet notebook` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6619 (\"Reactive notebook (`jet notebook`)\"), outside the G1/G2 deadline.",
+          "at": "2026-11-06T23:24:30.445Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 111,
+          "text": "(was #2445 c2) Source implementation is complete for this contract: A typed function argument renders as a validated control, and changing that control reruns the affected cells while preserving an explicit error state for invalid input. Deferred runtime proof (#2919): tests/notebook_controls.rs [precut audit: failing on 9c7ddf1359: C:notebook/jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss KNOWN-FAILING #6418 `jet notebook` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet notebook` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6619 (\"Reactive notebook (`jet notebook`)\"), outside the G1/G2 deadline.",
+          "at": "2026-11-06T23:24:31.692Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 112,
+          "text": "(was #2445 c3) Source implementation is complete for this contract: Deleting a defining cell scrubs its bindings, invalidates dependent outputs, and never displays an old cached value as current. Deferred runtime proof (#2919): tests/notebook_reactivity.rs [precut audit: failing on 9c7ddf1359: C:notebook/jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss KNOWN-FAILING #6418 `jet notebook` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet notebook` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6619 (\"Reactive notebook (`jet notebook`)\"), outside the G1/G2 deadline.",
+          "at": "2026-11-06T23:24:32.798Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 113,
+          "text": "(was #2445 c4) Source implementation is complete for this contract: Closing and reopening the browser reconnects to the same bounded kernel only when source/build identity and authority checks pass; an unauthorized reconnect is rejected with a structured diagnostic. Deferred runtime proof (#2919): tests/notebook_live.rs [precut audit: failing on 9c7ddf1359: C:notebook/jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss KNOWN-FAILING #6418 `jet notebook` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet notebook` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6619 (\"Reactive notebook (`jet notebook`)\"), outside the G1/G2 deadline.",
+          "at": "2026-11-06T23:24:33.949Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 114,
+          "text": "(was #2445 c5) Source implementation is complete for this contract: Text, HTML, SVG, and table results remain attached to their executable cell, imported output stays quarantined, and exports report any dropped semantics. Deferred runtime proof (#2919): tests/notebook.rs [precut audit: failing on 9c7ddf1359: C:notebook/jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss KNOWN-FAILING #6418 `jet notebook` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet notebook` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6619 (\"Reactive notebook (`jet notebook`)\"), outside the G1/G2 deadline.",
+          "at": "2026-11-06T23:24:35.047Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 115,
+          "text": "`jet run --record` is built, and the prim-receipts-G2 probe that found the defect passes.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6012 c10, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:58:41.372Z",
+          "closure": "duplicate",
+          "proof": {
+            "profile": "cases",
+            "filter": "prove/run_recorded_alias_time_receipt_replays_without_execution"
+          }
+        },
+        {
+          "n": 116,
+          "text": "(was #2795 c1) The Web battery and canonical executable/browser packages are complete in source; all execution, build, watcher and golden proof remains #2919 [precut audit: failing on 9c7ddf1359: C:web_app/web_app_run_serves_pages_actions_and_assets KNOWN-FAILING #6418 `jet explain` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet explain` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/web_app/web_app_run_serves_pages_actions_and_assets.case PASS",
+          "at": "2026-11-06T20:53:40.784Z"
+        },
+        {
+          "n": 117,
+          "text": "(was #2795 c2) The executable source uses canonical routes, query/form decoding, SSR/islands, SQLite mutation/invalidation, sessions and authorized local requests; referenced compiler defects remain #2919 [precut audit: failing on 9c7ddf1359: C:web_app/web_app_run_serves_pages_actions_and_assets KNOWN-FAILING #6418 `jet explain` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet explain` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "prove.sh on s1 at dev 6c15482301 ($JET_SCRATCH_ROOT/lanes/Main/prove-6c15b): cases tests/cases/web_app/web_app_run_serves_pages_actions_and_assets.case PASS",
+          "at": "2026-11-06T20:53:41.702Z"
+        },
+        {
+          "n": 121,
+          "text": "(was #3044 c1) Fresh default jet run --profile=compact and --profile=spacious preserve the declared settings and print exactly 2 and 5 respectively without an ICE [precut audit: failing on 9c7ddf1359: C:generics/generic_module_fact_value_example_has_profile_and_tier_parity KNOWN-FAILING #6418 `jet run --set` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet run --set` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/generics/generic_module_fact_value_example_has_profile_and_tier_parity.case PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T02:08:39.624Z"
+        },
+        {
+          "n": 122,
+          "text": "(was #3044 c2) The focused generic_module_fact_value_example_has_profile_and_tier_parity test passes, covering named-profile interpreter dev and release/set precedence [precut audit: failing on 9c7ddf1359: C:generics/generic_module_fact_value_example_has_profile_and_tier_parity KNOWN-FAILING #6418 `jet run --set` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet run --set` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/generics/generic_module_fact_value_example_has_profile_and_tier_parity.case PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T02:08:40.525Z"
+        },
+        {
+          "n": 123,
+          "text": "(was #3044 c3) The artifact request uses the existing resolved profile/command policy; no fixture-name allowlist, silent invalid-profile fallback, or changed fuzz/coverage/test/release precedence [precut audit: failing on 9c7ddf1359: C:generics/generic_module_fact_value_example_has_profile_and_tier_parity KNOWN-FAILING #6418 `jet run --set` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet run --set` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/build_entry/generated_sources_materialize_and_compile_as_one_program.case, tests/cases/build_entry/locked_generated_drift_fails_before_materialization.case PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T02:03:15.015Z"
+        },
+        {
+          "n": 124,
+          "text": "(was #3050 c1) A real top-level dev entry observes the selected package profile and --set override rather than hardcoded dev facts; its artifact identity uses the same context [precut audit: failing on 9c7ddf1359: C:cli_parts_expand/selected_profile_and_settings_reach_dev_test_and_replay_identity KNOWN-FAILING #6418 `jet run --set` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet run --set` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "aaa6331fc0 release candidate kit (chain s2 98d89707fb97975a): tests/cases/cli_parts_expand/selected_profile_and_settings_reach_dev_test_and_replay_identity.case PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T03:48:00.318Z"
+        },
+        {
+          "n": 125,
+          "text": "(was #3050 c2) A real jet test invocation observes --set overrides with the selected profile and preserves coverage/default behavior; replay metadata matches compiled settings [precut audit: failing on 9c7ddf1359: C:cli_parts_expand/selected_profile_and_settings_reach_dev_test_and_replay_identity KNOWN-FAILING #6418 `jet run --set` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet run --set` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "aaa6331fc0 release candidate kit (chain s2 98d89707fb97975a): tests/cases/cli_parts_expand/selected_profile_and_settings_reach_dev_test_and_replay_identity.case PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T03:48:01.354Z"
+        },
+        {
+          "n": 126,
+          "text": "(was #3507 c1) D-BUILD-GENVALUE1 helper values and inline templates are one semantic mechanism; generated function bodies run only when called [precut audit: failing on 9c7ddf1359: C:build_entry/generated_sources_materialize_and_compile_as_one_program KNOWN-FAILING #6418 unbuilt: E2101/E2102 command or flag not built (E2102): exit 2; expected 0 (known-failing #6418: unbuilt: E2101/E2102 command or flag not built (E2102)); C:build_entry/locked_generated_drift_fails_before_materialization KNOWN-FAILING…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/build_entry/generated_sources_materialize_and_compile_as_one_program.case, tests/cases/build_entry/locked_generated_drift_fails_before_materialization.case PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T02:03:18.423Z"
+        },
+        {
+          "n": 127,
+          "text": "(was #3507 c2) Shared preparation can publish checked declarations without invoking fn build; AOT build uses the same representation [precut audit: failing on 9c7ddf1359: C:build_entry/generated_sources_materialize_and_compile_as_one_program KNOWN-FAILING #6418 unbuilt: E2101/E2102 command or flag not built (E2102): exit 2; expected 0 (known-failing #6418: unbuilt: E2101/E2102 command or flag not built (E2102)); C:build_entry/locked_generated_drift_fails_before_materialization KNOWN-FAILING…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/build_entry/generated_sources_materialize_and_compile_as_one_program.case, tests/cases/build_entry/locked_generated_drift_fails_before_materialization.case PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T02:03:19.527Z"
+        },
+        {
+          "n": 128,
+          "text": "(was #3507 c3) Generated ownership, lexical binding, source mapping, materialization and drift checks are complete for all public item categories [precut audit: failing on 9c7ddf1359: C:build_entry/generated_sources_materialize_and_compile_as_one_program KNOWN-FAILING #6418 unbuilt: E2101/E2102 command or flag not built (E2102): exit 2; expected 0 (known-failing #6418: unbuilt: E2101/E2102 command or flag not built (E2102)); C:build_entry/locked_generated_drift_fails_before_materialization KNOWN-FAILING…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/build_entry/generated_sources_materialize_and_compile_as_one_program.case, tests/cases/build_entry/locked_generated_drift_fails_before_materialization.case PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T02:03:20.591Z"
+        },
+        {
+          "n": 129,
+          "text": "(was #3507 c4) Standard generation cannot shadow/replace handwritten meanings or accept raw source as an unchecked macro [precut audit: failing on 9c7ddf1359: C:build_entry/generated_sources_materialize_and_compile_as_one_program KNOWN-FAILING #6418 unbuilt: E2101/E2102 command or flag not built (E2102): exit 2; expected 0 (known-failing #6418: unbuilt: E2101/E2102 command or flag not built (E2102)); C:build_entry/locked_generated_drift_fails_before_materialization KNOWN-FAILING…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/build_entry/generated_sources_materialize_and_compile_as_one_program.case, tests/cases/build_entry/locked_generated_drift_fails_before_materialization.case PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T02:03:21.539Z"
+        },
+        {
+          "n": 130,
+          "text": "(was #3507 c5) [retarget] A helper returning `generate { … }` and the equivalent inline `b.generate` block produce byte-identical generated files and the same source maps under the self-hosted compiler [precut audit: failing on 9c7ddf1359: C:build_entry/generated_sources_materialize_and_compile_as_one_program KNOWN-FAILING #6418 unbuilt: E2101/E2102 command or flag not built (E2102): exit 2; expected 0 (known-failing #6418: unbuilt: E2101/E2102 command or flag not built (E2102)); C:build_entry/locked_generated_drift_fails_before_materialization KNOWN-FAILING…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/build_entry/generated_sources_materialize_and_compile_as_one_program.case, tests/cases/build_entry/locked_generated_drift_fails_before_materialization.case PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T02:03:22.600Z"
+        },
+        {
+          "n": 131,
+          "text": "(was #3507 c6) [retarget] Generated type, impl, constant and function are consumed by handwritten code; collisions, invalid holes and bad types are reported at the helper's line with registered codes [precut audit: failing on 9c7ddf1359: C:build_entry/generated_sources_materialize_and_compile_as_one_program KNOWN-FAILING #6418 unbuilt: E2101/E2102 command or flag not built (E2102): exit 2; expected 0 (known-failing #6418: unbuilt: E2101/E2102 command or flag not built (E2102)); C:build_entry/locked_generated_drift_fails_before_materialization KNOWN-FAILING…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/build_entry/generated_sources_materialize_and_compile_as_one_program.case, tests/cases/build_entry/locked_generated_drift_fails_before_materialization.case PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T02:08:41.467Z"
+        },
+        {
+          "n": 132,
+          "text": "(was #3507 c7) [retarget] Package-opted in-tree materialization fails the build on drift and names the diff path; raw source strings are refused [precut audit: failing on 9c7ddf1359: C:build_entry/generated_sources_materialize_and_compile_as_one_program KNOWN-FAILING #6418 unbuilt: E2101/E2102 command or flag not built (E2102): exit 2; expected 0 (known-failing #6418: unbuilt: E2101/E2102 command or flag not built (E2102)); C:build_entry/locked_generated_drift_fails_before_materialization KNOWN-FAILING…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/build_entry/generated_sources_materialize_and_compile_as_one_program.case, tests/cases/build_entry/locked_generated_drift_fails_before_materialization.case PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T02:08:42.381Z"
+        },
+        {
+          "n": 133,
+          "text": "(was #3507 c8) Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): Proof for criteria 5-7: `jet test Compiler --profile cases build_entry/` passes with new tests (a helper returning `generate { ... }` and the equivalent inline block produce byte-identical .jet/generated files and source maps; generated items are consumed by handwritten code; a hole type error is reported at the helper's line; a raw source string is refused; opt-in in-tree drift fails naming the diff path). Also `jet test Compiler --profile golden tooling/programmable_build` passes after the example is extended to invoke the generated items. Goldens pass on O0, O1 and O2; UI fixtures match their snapshots. [precut audit: failing on 9c7ddf1359: C:build_entry/generated_sources_materialize_and_compile_as_one_program KNOWN-FAILING #6418 unbuilt: E2101/E2102 command or flag not built (E2102): exit 2; expected 0 (known-failing #6418: unbuilt: E2101/E2102 command or flag not built (E2102)); C:build_entry/locked_generated_drift_fails_before_materialization KNOWN-FAILING…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/build_entry/generated_sources_materialize_and_compile_as_one_program.case, tests/cases/build_entry/locked_generated_drift_fails_before_materialization.case PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T02:08:43.339Z"
+        },
+        {
+          "n": 134,
+          "text": "Sealed check-input reads and their read audit (CheckReads, JET_CHECK_READS_AUDIT and JET_CHECK_READS_INJECT) have a Jet implementation.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6967 c7, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:58:44.162Z",
+          "closure": "duplicate",
+          "proof": {
+            "profile": "cases",
+            "filter": "build_entry/check_inputs_are_all_declared"
+          }
+        },
+        {
+          "n": 136,
+          "text": "jet registry vendor is built; tests/cases/pkg/vendor_rejects_symlink_sources_and_traversal_names.case and tests/cases/pkg/cli_vendor_dir_flag_relocates.case pass (symlinked sources and traversal-shaped dependency names are refused without touching anything outside the vendor tree), and their known-failing rows are removed",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "d0f02f2229 (JetpackEngine): jet registry vendor copies every fetched dependency into vendor/ (or --vendor-dir), with a manifest of locked names, versions and fingerprints. Three known-failing rows are removed and pass --fresh on an export of HEAD plus the patch, s1 with the hosted jetpack: pkg/vendor_rejects_symlink_sources_and_traversal_names, pkg/cli_vendor_dir_flag_relocates, and pkg/vendored_offline_locked_build. The last row's fixture now calls the dependency qualified (greeter.greet()) and gains a fingerprint predicate. LaneCheck CHECK OK. The Front.jet vendor routing arm landed in afab0cf28b.",
+          "at": "2026-11-06T07:40:59.793Z"
+        },
+        {
+          "n": 138,
+          "text": "jet registry publish and jet fetch are built; the Engine claim 'publication tuf original registry_fetch_applies_verified_advisory_freshness_before_hangar_ingest' (Jetpack/Provider/Tests/RegistryCliComposition.jet) passes on both tiers and its jetpack-claim known-failing row is removed",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "2358253651 (JetpackEngine): Engine claim publication tuf original registry_fetch_applies_verified_advisory_freshness_before_hangar_ingest passes default and AOT ($JET_SCRATCH_ROOT/lanes/JetpackEngine/eng-c9c.log:14195, :14885); its known-failing row removed in the same commit",
+          "at": "2026-11-06T07:16:45.969Z"
+        },
+        {
+          "n": 139,
+          "text": "jet test-compare resolves the corpus directory: ComparisonHistory.jet:93 and ReceiptIdentity.jet:250 pass the corpus file to AuthorityResolver.authority_walk_root, which needs a directory, so jet test-compare corpus.json fails 'could not resolve comparison corpus directory'. Pass jet_cli_parent(path) as ReceiptIdentity.jet:194 does, and add a case that runs jet test-compare on a one-entry corpus.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "2f0343ad8f: ComparisonHistory.jet and ReceiptIdentity.jet pass the corpus's parent directory (real path) to authority_walk_root, as jet_cli_comparison_input_paths does; jet test-compare corpus.json no longer prints 'could not resolve comparison corpus directory' and writes .jet/receipts; new case receipt_store/status_shows_a_comparison_claim_only_while_its_receipt_is_current runs test-compare on a one-entry corpus: PASS, FAIL on the base jet; land 6035-c26",
+          "at": "2026-11-05T07:21:11.630Z"
+        },
+        {
+          "n": 141,
+          "text": "jet run --no-prepare, jet dev and jet test refuse with E1355 outside the project's declared environment, and the jet_env_boundary cases pass",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 3d2ad15865 (+ f242ad2bbb comments): jet run --no-prepare, jet dev and jet test refuse with E1355 outside the declared environment; s1 from 3939a36606+patch, cases jet_env_boundary 2/2 PASS (declared_package_import_refuses_run_without_prepare_and_gates_dev_test_without_acquiring, toolchain_only_run_and_dev_skip_environment_realization); cases A/B over env/jet_test/lib_use/cli_parts_run/dev_/jet_run: 178 -> 179 PASS, only the E1355 row changes; ui A/B 2398 identical. Path-dependency scope awaits D-ENV-PATHDEP1 (Builder4)",
+          "at": "2026-11-05T22:32:31.245Z"
+        },
+        {
+          "n": 142,
+          "text": "tests/ui/impure_no_reason.jet passes against its snapshot: an empty `#Impure()` reports its registered diagnostic with what, why and fix text.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Main vb7 suite run on s1 built from dev 6c15482301: ui rows tests/ui/impure_no_reason.jet PASS (o0/o1/o2 where the row is tiered). Report: $JET_SCRATCH_ROOT/lanes/Main/vb7/kit/candidate-ui-0.json",
+          "at": "2026-11-06T21:13:16.166Z"
+        },
+        {
+          "n": 144,
+          "text": "Header binding has one canonical spelling, `jet inspect bind <header>`, as Docs/spec/cli.md specifies, and bind no longer sets also_canonical_top_level in CLICommands.jet. Proof: `git grep -n also_canonical_top_level -- Compiler/JetFoundation/Source/Registry/CLICommands.jet` shows no bind row, and `jet test Compiler --profile cases --filter bind/` passes.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #4913 c20, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:58:47.127Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 146,
+          "text": "On O0, the `jet dev` step budget (E2202), `jet debug` (E2203) and the REPL (E1802) each have a working Jet implementation or an owner-ratified retirement. Proof: `jet test Compiler --profile ui --filter E2202` (and the same for E2203 and E1802) shows the working path, or the decision ID is cited.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6772 c6, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:58:51.541Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 147,
+          "text": "Every ratified flag spelling in CLICommands.jet parses: no ratified spelling gets the unknown-flag E2102.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #4913 c21, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:58:54.858Z",
+          "closure": "duplicate",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "tests/guards",
+              "--filter",
+              "cli_ratified_flags_parse"
+            ]
+          }
+        },
+        {
+          "n": 148,
+          "text": "Every help line resolves to a live command and every dispatcher command appears in help, because help is generated from the dispatcher table.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #4913 c22, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:58:58.400Z",
+          "closure": "duplicate",
+          "proof": {
+            "profile": "cases",
+            "filter": "cli_parts_surface/group_help_and_man_inventory_every_nested_description"
+          }
+        },
+        {
+          "n": 149,
+          "text": "(was #1901 c2) jet env --help names env test and env hook [precut audit: failing on 9c7ddf1359: C:cli_parts_surface/group_help_and_man_inventory_every_nested_description KNOWN-FAILING #6004 expected output stream predicate not matched on HEAD (no replayable first error): stream predicate ~ failed (known-failing #6004: expected output stream predicate not matched…] (moved from #6004 c11)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev e7ec019814, seed-b14 (Main ran it): jet env --help prints \"jet env test [-- command]  Run environment checks in a clean environment\" and \"jet env hook <bash|zsh|fish>  Print the shell auto-activation hook\". The broader nested-help inventory (group_help_and_man_inventory_every_nested_description) stays with c148 under #6004.",
+          "at": "2026-11-13T07:29:38.537Z"
+        },
+        {
+          "n": 150,
+          "text": "jet inspect structure --core --json is the one spelling of the Core catalog and prints it from any directory with no package: a positional core would collide with a target named core. The five Core tools (LaneCheck's Core row, LibcCensus, CoreModuleCheck, CoreSurfaceLedger, RuntimeEffectRows), cli.md and the code comments use it, and no positional structure core form remains. On dev 4b334eae76 the tools call the positional form, which fails with E2105, while --core needs a package (E2104). Proof: a ui case for jet inspect structure --core --json at the repo root and in an empty directory, plus LibcCensus --check and CoreSurfaceLedger --check passing on the built compiler. (moved from #5072 c62)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6899 c9, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:59:01.599Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 151,
+          "text": "D-CLI-EVAL1=A is built: `jet eval 'code'` runs code with every power `jet -e` had, `jet -e` and `jet run -e` are removed, and `jet run -` stays. A retired spelling gets the existing generic error, with no teaching text or jet fix rewrite (owner rule). Proof: `jet test Compiler --profile cases --filter cli_eval_`, one case per form.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #4913 c23, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:59:04.714Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 152,
+          "text": "One `--target` flag names the platform for `jet run`, `jet dev`, `jet test` and `jet build`, and `--device` picks a phone (D-RUN-DEVICE1=A). Proof: `jet test Compiler --profile cases --filter cli_target_flag_`, one case per command.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #4913 c24, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:59:07.583Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 153,
+          "text": "Jetpack/PackageModel/Source/Foreign/C/HeaderBinder.jet emits current Jet syntax, not the Rust-era `Task<I64 ! String>`, and special-cases no name (emit_async, unsubscribe). Proof: Examples/Interop/Polyglot callbacks, PolyglotGo and PolyglotPython pass their goldens on O0, O1 and O2 where their host tool exists, with their known-failing lines removed.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6945 c8, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:59:10.454Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 154,
+          "text": "`jet build --lib` builds a library output instead of reporting E2104, so MetaSuite family J35 (dynamic-library exports and generated library targets) passes its witness under Tests/Cases/LibraryOutputs and the MetaSuite check reports no owed J35 row (moved from #6845 c11). Proof: `jet test Compiler --profile cases --filter LibraryOutputs` and `--filter MetaSuite` list no owed J35 row.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 0b33d814a8 (p272). On batch compiler p272 (dev c2737a2a81): cases LibraryOutputs runs (2 PASS, 6 KNOWN-FAILING rows owned elsewhere), and the MetaSuite check names no owed J35 row; its remaining owed rows are J34 only.",
+          "at": "2026-11-17T19:11:16.225Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-31T01:11:55.199Z",
+      "updated": "2026-11-17T20:04:54.692Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 154,
+      "completedAt": "2026-11-17T20:04:49.458Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T20:07:55.427Z"
+    },
+    {
+      "id": "c0vucs0t",
+      "num": 6963,
+      "title": "A recursive list builder of a million elements is stack-safe on every tier",
+      "body": "Destination: a recursive function that builds a list element by element (cons-style) runs for 1,000,000 elements without exhausting the stack on O0, O1 and O2, with stack depth and time measured first; if it is not already stack-safe, one shared JetIR tail-recursion-modulo-cons transform makes it so.\n\nWhy: recursion is the natural way to write many list builders; a stack overflow at scale pushes users to rewrite correct code.\n\nDecisions: I9 (one meaning on every tier); one shared JetIR transform, no per-backend fix.\n\nSource: split from #2865 (text pipelines) on 2026-11-15.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e24",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c1–c3 proved; c3 on p274 (d7285f91e6)."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Plan decided (Main, within scope): stack safety comes from general on-demand stack segments, not TRMC or a new list shape. When the prologue's stack-limit check fails it calls a runtime leaf that continues the call on a heap segment (geometric growth, a per-thread cache, freed or cached on return). E3012 stays for a configured total-stack bound (default about 1 GiB per thread). Unwinding, fault reports and traces walk across segments, and fibers get the same. This makes every deep recursion safe, including the natural push builder (rest := build(n-1); rest.push(n)), which overflows at 1M on gate-p266 at O0 and O2. TRMC can't reach it: the work comes after the call, and Jet lists have no cons. Order: the runtime leaf SUB, then the codegen prologue SUB, then the cases. Owner: DeclTypes."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Stack depth and time are measured for a recursive list builder; if it is not already stack-safe, one shared JetIR tail-recursion-modulo-cons transform makes a 1,000,000-element builder stack-safe. Proof: `jet test Compiler --profile golden --filter Trmc` on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed fd2966ab60 (on-demand stack segments: a stack check on the bodies of call cycles) and c5bc388e54 (Trmc goldens) in p271. On batch compiler p271 (6d6315d3bd), golden Trmc 9/9 (O0, O1, O2): the 1,000,000-element recursive builder is stack-safe.",
+          "at": "2026-11-17T18:42:11.435Z"
+        },
+        {
+          "n": 2,
+          "text": "The stack-segment change leaves the suite green. p271 found three new failures. Cases TaskgroupStack/a_joined_task_runs_on_the_joining_thread and a_stack_group_runs_recursion_the_default_stack_cannot now complete (reached 8000006000010) where they expected exit 70: their expectation has to follow the new meaning, so a stack overflow is reached only past the stack budget. UI E3012_comptime_stack_overflow_names_its_function lost the function name ('Stack overflow' instead of 'Stack overflow in deep'). Proof: those three pass on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 049dc799ed (p273). On batch compiler p273 (dev 049dc799ed): cases TaskgroupStack/ 4/4 PASS and ui E3012_comptime_stack_overflow_names_its_function PASS. RuntimeStops/stack_overflow_under_jet_run…4_gib (1s limit) is the #6963 follow-up in DeclTypes-6-1-p272-fixes (huge-page segments), queued for p274.",
+          "at": "2026-11-17T19:38:09.399Z"
+        },
+        {
+          "n": 3,
+          "text": "RuntimeStops/stack_overflow_under_jet_run_stops_within_a_second_and_4_gib passes again with stack segments (overflow reached within 1 s). Proof: jet test Compiler --profile cases --filter RuntimeStops/stack_overflow_under_jet_run",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed c5393f8a19 (p274, deep stack segments use huge pages). On batch compiler p274 (dev d7285f91e6): cases RuntimeStops/stack_overflow_under_jet_run_stops_within_a_second_and_4_gib PASS.",
+          "at": "2026-11-17T20:01:42.502Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "performance",
+        "codegen"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T05:23:49.254Z",
+      "updated": "2026-11-17T20:01:44.429Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-17T20:01:44.429Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T20:07:55.431Z"
     }
   ]
 }

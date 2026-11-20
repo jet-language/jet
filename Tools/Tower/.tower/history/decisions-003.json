@@ -75596,6 +75596,131 @@
       "outcome": "A",
       "ratifiedAt": "2026-10-31",
       "retiredAt": "2026-11-20T18:52:31.315Z"
+    },
+    {
+      "id": "D-ENV-PATHDEP1",
+      "cardId": "c0hn7w1n",
+      "group": "architecture",
+      "title": "Path dependencies run outside the project environment",
+      "situation": "",
+      "gist": "Should a path dependency need the project's declared environment before `jet run --no-prepare`, `jet dev` or `jet test` can use it?",
+      "lesson": "A project can declare an environment in env.jet. Outside it, `jet run --no-prepare`, `jet dev` and `jet test` stop with E1355 when the code imports a package that needs it. A registry package comes from the hangar, so it needs the environment. A path dependency is source in the tree. Jet exempts it today, but no spec line says so.",
+      "explainer": "",
+      "story": "Ana splits her app into `app` and a local `helper` package and runs `jet test` from a plain shell. With A it runs. With B it stops with E1355 until she enters env.dev, which provides nothing her tests use.",
+      "inWild": "[dependencies]\nhelper = { path = \"helper\" }   # read from disk\nserde = \"1\"                    # needs the registry or its cache\n// Cargo builds path dependencies from the tree. Source: doc.rust-lang.org/cargo/reference/specifying-dependencies.html#specifying-path-dependencies.",
+      "detail": "HOW A'S DOWNSIDES ARE DESIGNED AWAY\n\nReading path manifests. The check runs on the package graph the loader already builds for the run, so it opens no extra file. It stops at the first non-path import. No loss remains.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Exempt path dependencies",
+          "detail": "Imports that resolve to a registry or other non-path dependency need the declared environment, and so do such imports inside a path dependency. The path dependency's own source does not. Spec line, added to Docs/spec/spec.md after line 2462: \"Outside a declared environment, `jet run --no-prepare`, `jet dev` and `jet test` refuse with E1355 for a non-path package import. That includes one reached through a path dependency. A path dependency itself, and a toolchain-only program, need no environment (D-ENV-PATHDEP1=A).\"",
+          "technical": "Compiler/JetCli/Source/Cli/EnvBoundary.jet skips a `path:` dependency today, but does not look inside it. A path package that imports a registry package therefore runs past E1355 and fails later. Under A the walk follows each path dependency's own package.jet dependencies and refuses on the first non-path one. Cases cover a path import that runs, a path import whose package imports a registry package (E1355), a registry import (E1355), and a toolchain-only program (runs).",
+          "code": "use helper      // path dependency with no registry imports: runs\nuse acme.json   // registry dependency: E1355 outside env.dev\n// helper importing acme.json: E1355 outside env.dev"
+        },
+        {
+          "key": "B",
+          "name": "Require the environment for every package import",
+          "detail": "Any package import needs the declared environment. Spec line, added after line 2462: \"Outside a declared environment, `jet run --no-prepare`, `jet dev` and `jet test` refuse with E1355 when the target imports any package (D-ENV-PATHDEP1=B).\"",
+          "technical": "EnvBoundary.jet drops the path-dependency skip; a cases row for a path import outside the environment expects E1355.",
+          "code": "use helper      // error[E1355]: This project declares env.dev; ..."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Cargo",
+          "note": "Path dependencies build from disk; registry crates need the registry or its cache. https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html#specifying-path-dependencies",
+          "code": "helper = { path = \"helper\" }"
+        },
+        {
+          "lang": "Nix",
+          "note": "A flake's devShell supplies tools; local sources in the tree build without entering it. https://nix.dev/manual/nix/stable/command-ref/new-cli/nix3-develop",
+          "code": "nix develop   # enter the dev shell for its tools"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The environment exists to supply realized packages and tools. A path dependency needs neither: it is source the compiler reads from the tree.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B makes every local multi-package project enter the environment even when it uses nothing from it."
+          }
+        ],
+        "tradeoff": "Path packages run anywhere; only packages that come from the hangar need the environment.",
+        "losses": []
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should a path dependency need the project's declared environment before `jet run --no-prepare`, `jet dev` or `jet test` can use it?",
+        "lesson": "A project can declare an environment in env.jet. Outside it, `jet run --no-prepare`, `jet dev` and `jet test` stop with E1355 when the code imports a package that needs it. A registry package comes from the hangar, so it needs the environment. A path dependency is source in the tree. Jet exempts it today, but no spec line says so.",
+        "trio": {
+          "current": {
+            "note": "3d2ad15865 and the Rust driver: only non-path package imports need the environment.",
+            "code": "// package.jet\ndependencies: [\n    \"helper\": { path: \"./helper\" },\n    \"acme/json\": \"1.2\",\n]\n// main.jet\nuse helper      // runs outside env.dev\nuse acme.json   // error[E1355]: This project declares env.dev; ..."
+          },
+          "wild": {
+            "lang": "Cargo",
+            "note": "Cargo builds a path dependency from the tree. Registry crates need the registry or a filled cache. Source: doc.rust-lang.org/cargo/reference/specifying-dependencies.html.",
+            "code": "[dependencies]\nhelper = { path = \"helper\" }   # read from disk\nserde = \"1\"                    # needs the registry or its cache"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Exempt path dependencies",
+            "gist": "Only registry and other non-path package imports need the declared environment.",
+            "gains": [
+              "Local packages run with `jet test` outside the environment.",
+              "A registry import inside a path package still stops at E1355."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "use helper      // path dependency with no registry imports: runs\nuse acme.json   // registry dependency: E1355 outside env.dev\n// helper importing acme.json: E1355 outside env.dev"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Require the environment for every package import",
+            "gist": "Any package import, path or registry, needs the declared environment.",
+            "gains": [
+              "One simple rule: a project with an environment runs its packages inside it."
+            ],
+            "losses": [
+              "Local multi-package projects must enter the environment even when nothing in it is used.",
+              "Changes today's behavior for path packages."
+            ],
+            "proposed": {
+              "code": "use helper      // error[E1355]: This project declares env.dev; ..."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The environment exists to supply realized packages and tools. A path dependency needs neither: it is source the compiler reads from the tree.",
+          "gains": [
+            "Local packages keep working outside the environment, as they always have."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B makes every local multi-package project enter the environment even when it uses nothing from it."
+            }
+          ],
+          "tradeoff": "Path packages run anywhere; only packages that come from the hangar need the environment."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-05T22:30:15.867Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-06",
+      "retiredAt": "2026-11-20T20:07:55.431Z"
     }
   ]
 }
