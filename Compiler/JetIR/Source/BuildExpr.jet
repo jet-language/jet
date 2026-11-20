@@ -8963,6 +8963,9 @@ ir_comptime: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: TCom
             if m.types[row].kind == .Pointer && ir_untag(ty) == (Type.Named{name: "Decimal"}) {
                 return ir_comptime_decimal_handle(m, p, b, ty, fields, span)
             }
+            if m.types[row].kind == .Pointer && ir_untag(ty) == (Type.Named{name: "Authority"}) && ir_type_def(p, "Authority") == None {
+                return ir_comptime_authority_handle(m, p, b, ty, fields, span)
+            }
             return ir_comptime_struct(m, p, b, ty, row, fields, span)
         }
         .Map(entries) -> return ir_comptime_map(m, p, b, ty, row, entries, span)
@@ -9034,6 +9037,18 @@ ir_comptime_decimal_handle: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Ty
     slot: ir_comptime(m, p, b, Type.String, TComptimeValue.String{value: text}, span)
     if ir_failed(b) -> return -1
     ir_precise_route(m, p, b, ty, "Decimal", "from_str", [Int]{slot}, span)
+}
+
+// An Authority constant: its rights List through the `from_rights` route,
+// as `Authority.from_rights([...])` builds one at run time.
+ir_comptime_authority_handle: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, fields: [TComptimeField], span: Span) -> Int Never! {
+    loop field in fields {
+        if field.name != "rights" -> next
+        slot: ir_comptime(m, p, b, Type.List{element: Type.String}, field.value, span)
+        if ir_failed(b) -> return -1
+        return ir_route(m, p, b, "jet_authority_from_rights", [Int]{slot}, [Bool]{true}, ty, span)
+    }
+    ir_fail_slot(b, span, "Authority constant without its rights")
 }
 
 // A Map constant: an empty header, then each entry set in order through

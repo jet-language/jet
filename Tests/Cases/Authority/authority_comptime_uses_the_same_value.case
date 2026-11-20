@@ -1,4 +1,11 @@
-# the original's literal expectations; Jet does not meet them yet (assert not satisfied, Tests/known-failing.tsv).
+# Claim: an Authority built, narrowed and released at compile time keeps the rights the same calls give it at run time
 fixture: AuthorityComptimeUsesTheSameValue/Input
 step: jet check run.jet
-exit: 0 # expect
+exit: 0 # each `#run` Authority reads back as a constant
+step: jet run run.jet
+exit: 0
+stdout: = "authority\n" # the constants still hold `IO` and `FS.Read`
+step: jet run released.jet
+exit: 70 # narrowing the released constant is the run-time refusal
+stdout: = "narrowed\n" # the narrowed constant holds `FS.Read`
+stderr: ~ "authority cannot narrow to `FS.Read` outside its held rights" # the released one holds nothing
