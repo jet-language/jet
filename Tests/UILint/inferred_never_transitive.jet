@@ -2,8 +2,8 @@
 // Direct: `exit_now` panics itself and `spin` loops with no `break`.
 // Transitive: `stop` only calls `exit_now`, and `fail` only calls `stop`.
 // Mutual recursion: `ping` and `pong` only call each other, so no path of
-// theirs proves a stop and neither is reported. `guarded` can return before
-// it calls `fail`, so it is not reported either.
+// theirs proves a stop and L2421 reports neither; L0305 names their cycle.
+// `guarded` can return before it calls `fail`, so it is not reported.
 exit_now: fn(code: Int) {
     print("exit {code}")
     panic("exit")
