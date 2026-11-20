@@ -2811,6 +2811,9 @@ NativeSession: struct {
         // A write a watch saw in code without Jet lines (the runtime) stops
         // in the Jet caller, still reported as the watch's stop.
         watch: if stop.reason.starts_with("watchpoint") -> "{stop.reason}" else -> ""
+        // A pause the session's input made in code without Jet lines is
+        // still that pause once the run returns to its Jet caller.
+        input_paused: self.interrupted
         depth := 0
         loop stop.kind == NativeStopKind.Paused && !native_debug_stop_in_jet(stop.frame) {
             frames: self.backtrace() ?? return Err(err)
@@ -2820,6 +2823,9 @@ NativeSession: struct {
             }
             depth += 1
             stop = if caller && depth <= NATIVE_DEBUG_RUNTIME_DEPTH -> self.step_out() ?? return Err(err) else -> self.continue_run() ?? return Err(err)
+        }
+        if input_paused && stop.kind == NativeStopKind.Paused && stop.reason == "step out" {
+            self.interrupted = true
         }
         if watch != "" && stop.kind == NativeStopKind.Paused && stop.reason == "step out" {
             stop.reason = watch
@@ -3682,9 +3688,22 @@ NativeSession: struct {
             return Err(NativeDebugError{detail: "the program can't be resumed"})
         }
         if going -> self.let_all_go()
+        listening := true
         loop {
-            waited: if going && self.interrupt >= 0 -> x64_trace_wait_or_input(self.trace, self.interrupt) else -> Val(x64_trace_wait(self.trace))
-            stop: waited ?? return self.interrupted_run()
+            waited: if going && listening && self.interrupt >= 0 -> x64_trace_wait_or_input(self.trace, self.interrupt) else -> Val(x64_trace_wait(self.trace))
+            stop: waited ?? {
+                if self.interrupted_run() == {
+                    .Ok(paused) -> {
+                        if paused == .Val(event) -> return Ok(event)
+                    }
+                    .Err(failure) -> return Err(failure)
+                }
+                // Every thread left was let go from its exit and only ends,
+                // so none can take the pause: the run goes on to the
+                // program's end, and the input waits for the stop after it.
+                listening = false
+                next
+            }
             if stop.thread < 0 {
                 return Err(NativeDebugError{detail: "waiting for the program failed (errno {-stop.thread})"})
             }
@@ -3873,16 +3892,31 @@ NativeSession: struct {
 
     // A run of every thread that the session's input stopped (interrupt):
     // every thread stops where it is (halt), the current one's stop a pause
-    // (NativeEvent code -1). The program's end when it ended meanwhile.
-    interrupted_run: fn(&self) -> NativeEvent NativeDebugError! {
+    // (NativeEvent code -1). A current thread let go from its exit only
+    // ends (NativeThread.exiting), and its registers go with it, so the
+    // pause is a stopped thread's instead; None when no thread is stopped.
+    // The program's end when it ended meanwhile.
+    interrupted_run: fn(&self) -> NativeEvent? NativeDebugError! {
         if self.halt() == {
             .Ok(ended) -> {
-                if ended == .Val(event) -> return Ok(event)
+                if ended == .Val(event) -> return Ok(Val(event))
             }
             .Err(failure) -> return Err(failure)
         }
+        row: self.thread_row(self.trace.thread)
+        if row < 0 || self.threads[row].running {
+            paused := -1
+            loop (index, thread) in self.threads {
+                if !thread.running {
+                    paused = index
+                    break
+                }
+            }
+            if paused < 0 -> return Ok(None)
+            self.trace.thread = self.threads[paused].id
+        }
         self.interrupted = true
-        Ok(NativeEvent{kind: NativeStopKind.Paused, code: -1})
+        Ok(Val(NativeEvent{kind: NativeStopKind.Paused, code: -1}))
     }
 
     // Stop every running thread for the current thread's stop: each gets a

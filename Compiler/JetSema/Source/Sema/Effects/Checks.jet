@@ -103,6 +103,7 @@ use jet_foundation.[
     symbol_table_key,
     type_name,
     TextEdit,
+    diagnostic_with_edit,
     diagnostic_with_migration_edit,
     effect_list_entry_removal,
     effect_root_removed,
@@ -1088,7 +1089,7 @@ sema_effect_unknown: fn(name: String, span: Span) -> Diagnostic {
     loop row in EFFECT_VOCABULARY_ROWS {
         if row.name.lower() == wanted {
             diagnostic: sema_error("E0119", span, "`{name}` isn't a known effect", "an effect list names compiler-known effects like `Net`, `FS`, `IO`, `DB`, or `Time`", "write it `{row.name}`, the effect's registered spelling")
-            return diagnostic_with_source_derived_suggestion(diagnostic, span, row.name)
+            return diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: row.name})
         }
     }
     sema_error("E0119", span, "`{name}` isn't a known effect", "an effect list names compiler-known effects like `Net`, `FS`, `IO`, `DB`, or `Time`", "use one of the known effect names, or remove it from the list")

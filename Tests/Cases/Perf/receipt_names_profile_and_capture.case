@@ -11,21 +11,21 @@ step: jet perf run main.jet --profile=debug --capture=urls --out {work}/debug.je
 exit: 0
 stdout: = "ok\n"
 json: file debug.jettrace doc $.content.receipt_sections[?name="perf"] #= 1
-json: file debug.jettrace doc $.content.receipt_sections[0].type_name = "JetPerfReceipt"
-json: file debug.jettrace doc $.content.receipt_sections[0].value.build.profile = "debug" # the profile the words select
-json: file debug.jettrace doc $.content.receipt_sections[0].value.build.options.optimize = "O0" # the stock debug profile's level
-json: file debug.jettrace doc $.content.receipt_sections[0].value.capture.allowlist = "urls" # the privacy field the trace keeps
-json: file debug.jettrace doc $.content.receipt_sections[0].value.capture.sampling.lenses #= 1 # the cpu lens, the default
-json: file debug.jettrace doc $.content.receipt_sections[0].value.capture.sampling.lenses[0] = "cpu"
-json: file debug.jettrace doc $.content.receipt_sections[0].value.capture.sampling.clock = "cpu"
-json: file debug.jettrace doc $.content.receipt_sections[0].value.capture.sampling.interval_us = 125
-json: file debug.jettrace doc $.content.receipt_sections[0].value.capture.sampling.allocations = "call-sites"
+json: file debug.jettrace doc $.content.receipt_sections[?name="perf"][0].type_name = "JetPerfReceipt"
+json: file debug.jettrace doc $.content.receipt_sections[?name="perf"][0].value.build.profile = "debug" # the profile the words select
+json: file debug.jettrace doc $.content.receipt_sections[?name="perf"][0].value.build.options.optimize = "O0" # the stock debug profile's level
+json: file debug.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.allowlist = "urls" # the privacy field the trace keeps
+json: file debug.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.lenses #= 1 # the cpu lens, the default
+json: file debug.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.lenses[0] = "cpu"
+json: file debug.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.clock = "cpu"
+json: file debug.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.interval_us = 125
+json: file debug.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.allocations = "call-sites"
 step: jet perf run main.jet -O2 --out {work}/o2.jettrace
 exit: 0
 stdout: = "ok\n"
-json: file o2.jettrace doc $.content.receipt_sections[0].value.build.profile = null # no profile named
-json: file o2.jettrace doc $.content.receipt_sections[0].value.build.options.optimize = "O2" # the level flag's
-json: file o2.jettrace doc $.content.receipt_sections[0].value.capture.allowlist = null # every privacy field excluded
+json: file o2.jettrace doc $.content.receipt_sections[?name="perf"][0].value.build.profile = null # no profile named
+json: file o2.jettrace doc $.content.receipt_sections[?name="perf"][0].value.build.options.optimize = "O2" # the level flag's
+json: file o2.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.allowlist = null # every privacy field excluded
 step: jet perf view {work}/debug.jettrace
 exit: 0
 stdout: ~ "receipt perf " # the view prints the receipt, its value as canonical JSON

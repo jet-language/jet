@@ -3,8 +3,8 @@
 # file by its name beside the image, which links to the package's symbol
 # store. Given only the image, jet debug follows the link: a breakpoint by Jet
 # file and line resolves and is hit. Once the store is gone the link leads
-# nowhere, and jet debug says the image has no Jet debug information. The
-# fixture is the lldb interop case's.
+# nowhere, and jet debug names the side file it looked for beside the image.
+# The fixture is the lldb interop case's.
 fixture: LldbFindsAnO2SplitDebugFileThroughTheDebugLink.fixture
 env: NO_COLOR=1
 step: jet build -O2 --debug-info=split prog.jet
@@ -19,7 +19,7 @@ remove: .jet/symbols
 step: jet debug {work}/.jet/build/prog --break prog.jet:3
 exit: 1
 stdout+stderr: ~ "Jet.DebuggerUnavailable" # without the store the link leads nowhere
-stdout+stderr: ~ "has no Jet debug information" # and jet debug says why
+stdout+stderr: ~ "keeps its DWARF in `prog.debug`, which is not beside it" # and jet debug says why
 step: {work}/.jet/build/prog
 exit: 0
 stdout: = "332833500\n" # the image runs unchanged

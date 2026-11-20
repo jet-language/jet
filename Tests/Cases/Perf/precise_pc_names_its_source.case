@@ -14,7 +14,7 @@ env: NO_COLOR=1
 step: jet perf run main.jet -O2 --out {work}/spin.jettrace
 exit: 0
 stdout: ~ "spun=" # the program ran to its end
-json: file spin.jettrace doc $.content.receipt_sections[0].value.capture.sampling.pc.source in ["ibs_op","pebs","task_clock","timer"] # a precise sampler, the task clock, or the timer
+json: file spin.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.pc.source in ["ibs_op","pebs","task_clock","timer"] # a precise sampler, the task clock, or the timer
 json: file spin.jettrace doc $.content.receipt_sections[?value.capture.sampling.pc.paranoid=2][?value.capture.sampling.pc.source!="task_clock"] #= 0 # at perf_event_paranoid 2 the task clock takes the samples
 json: file spin.jettrace doc $.content.receipt_sections[?value.capture.sampling.pc.source="task_clock"][?value.capture.sampling.pc.skid!="task_clock_interrupt"] #= 0 # and names its skid source, its interrupt
 json: file spin.jettrace doc $.content.receipt_sections[?value.capture.sampling.pc.source="task_clock"][?value.capture.sampling.pc.precise=true] #= 0 # the task clock is not precise
