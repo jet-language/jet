@@ -1,4 +1,4 @@
-# A replay stops first at run's entry, line 18, before any of its locals is
+# A replay stops first at run's first line, 19, before any of its locals is
 # bound. At every tier that stop lists no local. In an -O1 or -O2 image the
 # optimizer may keep a local's value nowhere; such a local is listed as
 # unavailable only from the line after its binding on (JetDebug Native.jet
@@ -10,18 +10,18 @@ exit: 0
 step: jet debug --replay=bound prog.jet
 stdin: replay_lists_a_local_only_from_its_binding_on.stdin
 exit: 0
-stdout+stderr: ~ "18 | run: fn() {        <- here\nLocals:  (none)\n(Jet) locals\nNo locals here\n" # -O0: nothing is bound yet
+stdout+stderr: ~ "19 |     { sender: results, receiver: lines }: channel<String>(capacity: 2)        <- here\nLocals:  (none)\n(Jet) locals\nNo locals here\n" # -O0: nothing is bound yet
 step: jet build -O1 prog.jet
 exit: 0
 step: jet debug --replay=bound {work}/.jet/build/prog
 stdin: replay_lists_a_local_only_from_its_binding_on.stdin
 exit: 0
-stdout+stderr: ~ "18 | run: fn() {        <- here\nLocals:  (none)\n(Jet) locals\nNo locals here\n" # -O1: nor here
+stdout+stderr: ~ "19 |     { sender: results, receiver: lines }: channel<String>(capacity: 2)        <- here\nLocals:  (none)\n(Jet) locals\nNo locals here\n" # -O1: nor here
 stdout+stderr: !~ "<Unavailable>" # no local shows before its binding
 step: jet build -O2 prog.jet
 exit: 0
 step: jet debug --replay=bound {work}/.jet/build/prog
 stdin: replay_lists_a_local_only_from_its_binding_on.stdin
 exit: 0
-stdout+stderr: ~ "18 | run: fn() {        <- here\nLocals:  (none)\n(Jet) locals\nNo locals here\n" # -O2: nor here
+stdout+stderr: ~ "19 |     { sender: results, receiver: lines }: channel<String>(capacity: 2)        <- here\nLocals:  (none)\n(Jet) locals\nNo locals here\n" # -O2: nor here
 stdout+stderr: !~ "<Unavailable>" # no local shows before its binding
