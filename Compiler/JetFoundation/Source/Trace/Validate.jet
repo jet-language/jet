@@ -423,6 +423,10 @@ jettrace_validate_receipt_sections: fn(value: CanonicalJSON) JetTraceError! {
     loop index in 0..<items.len() {
         label: "content.receipt_sections[{index}]"
         name := jettrace_validate_receipt_section(items[index], label)
+        if name == "instructions" {
+            section: jettrace_object_view(items[index], label)
+            jettrace_validate_instructions(section[jettrace_get(section, "value")].value, "{label}.value")
+        }
         if prior == {
             .Val(previous) -> {
                 if previous > name {

@@ -3,7 +3,7 @@ use jet_foundation.[TRACE_VERSION, TRACE_SCHEMA, TraceSkeleton, TraceToolchain, 
 
 #Test("JetTrace consuming module imports typed schema version and full wire") {
     version: TRACE_VERSION
-    assert_eq(version, U32{2})
+    assert_eq(version, U32{3})
     assert_eq(TRACE_SCHEMA, "jet.trace")
     skeleton: TraceSkeleton{
         command: "run",
@@ -32,5 +32,5 @@ use jet_foundation.[TRACE_VERSION, TRACE_SCHEMA, TraceSkeleton, TraceToolchain, 
     assert_eq((trace_id(verified) ?? panic(err.message)).len(), 64)
     text: String.from_bytes(bytes) ?? panic("UTF8")
     assert(text.contains("\"schema\":\"jet.trace\""))
-    assert(text.contains("\"version\":2"))
+    assert(text.contains("\"version\":3"))
 }

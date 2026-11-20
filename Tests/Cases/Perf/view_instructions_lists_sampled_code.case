@@ -1,0 +1,45 @@
+# `jet perf run` keeps the code its samples landed in as the trace's
+# `instructions` receipt section, and `jet perf view --instructions` lists
+# it with no image: the hottest function bare, a function by its name, a
+# line by FILE:LINE, each instruction with its share of its function's
+# samples, under a line naming the sampler and whether a share can skid.
+# `-O0` keeps `spin_hot_loop` a function of its own. A function or line the
+# section doesn't hold is refused as Jet.PerfNoInstructions (exit 2).
+requires: os-name:linux
+fixture: PrecisePcNamesItsSource.fixture
+env: NO_COLOR=1
+step: jet perf run main.jet -O0 --out {work}/spin.jettrace
+exit: 0
+stdout: ~ "spun=" # the program ran to its end
+json: file spin.jettrace doc $.content.receipt_sections[?name="instructions"] #= 1 # the run kept the code its samples landed in
+json: file spin.jettrace doc $.content.receipt_sections[?name="instructions"][?value.kept>=1] #= 1 # at least one function whole
+step: jet perf view {work}/spin.jettrace
+exit: 0
+stdout: ~ "instructions functions=" # the view counts the code the trace keeps
+step: jet perf view {work}/spin.jettrace --instructions
+exit: 0
+stdout: ~ "spin_hot_loop profile:cpu samples=" # the hottest function first
+stdout: ~ "level=O0; shares below are of spin_hot_loop's samples" # at the level it was built
+stdout: ~ "sampler: " # the sampler line says what a share means
+stdout: ~ "  main.jet:8 spin_hot_loop samples=" # each line of the function heads its instructions
+stdout: ~ "%   +" # an instruction with samples has its share
+step: jet perf view {work}/spin.jettrace --instructions=spin_hot_loop
+exit: 0
+stdout: ~ "spin_hot_loop profile:cpu samples=" # a function by its name
+step: jet perf view {work}/spin.jettrace --instructions=main.jet:8
+exit: 0
+stdout: ~ "  main.jet:8 spin_hot_loop samples=" # a line by FILE:LINE
+stdout: !~ "  main.jet:7 " # and that line alone
+step: jet perf view {work}/spin.jettrace --instructions --json
+exit: 0
+stdout: ~ "\"kind\":\"jet.trace.instructions\"" # the JSON view names its kind
+stdout: ~ "\"symbol\":\"spin_hot_loop\"" # and the function
+step: jet perf view {work}/spin.jettrace --instructions --html
+exit: 0
+stdout: ~ "<pre>spin_hot_loop profile:cpu samples=" # one self-contained page of the listing
+step: jet perf view {work}/spin.jettrace --instructions=nothing_here
+exit: 2
+stdout: = ""
+stderr: ~ "Error: Jet.PerfNoInstructions: " # a function the section doesn't hold is refused
+stderr: ~ "keeps no instruction samples of `nothing_here`" # by the name it was given
+stderr: ~ "`spin_hot_loop`" # naming the functions it does hold

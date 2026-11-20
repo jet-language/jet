@@ -1,9 +1,11 @@
 // Artifact wire; not CompilerTraceSink. Version 2 names a task row's
-// canceled flag `canceled`; a version 1 trace is read only by the
-// american-tokens1 converter (Compiler/Migrations), which moves it to 2.
+// canceled flag `canceled`; version 3 adds a native run's `instructions`
+// receipt section (ValidateInstructions.jet). A version 1 trace is read only
+// by the american-tokens1 converter (Compiler/Migrations), which moves it to
+// the current version; a version 2 one is refused, to be recorded again.
 TRACE_SCHEMA: "jet.trace"
 
-TRACE_VERSION: U32{2}
+TRACE_VERSION: U32{3}
 
 CAPTURE_POLICY_SCHEMA: "5"
 
@@ -83,7 +85,8 @@ verify_jettrace: fn(bytes: [U8]) -> CanonicalJSON JetTraceError! {
             supported: "{TRACE_VERSION}"
             if number != supported {
                 if number.len() < supported.len() || (number.len() == supported.len() && number < supported) {
-                    return Err(jettrace_error("jettrace version {number} is an older format this reader no longer reads (it reads {TRACE_VERSION}); the american-tokens1 migration converts it"))
+                    remedy: if number == "1" -> "the american-tokens1 migration converts it" else -> "record it again with `jet perf run`"
+                    return Err(jettrace_error("jettrace version {number} is an older format this reader no longer reads (it reads {TRACE_VERSION}); {remedy}"))
                 }
                 return Err(jettrace_error("jettrace version {number} needs a newer jet toolchain (this reader supports {TRACE_VERSION})"))
             }

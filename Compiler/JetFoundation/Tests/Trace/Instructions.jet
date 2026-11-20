@@ -1,0 +1,46 @@
+// The `instructions` receipt section's checks: a kept function's code is
+// lowercase hex of its bytes and a cut one keeps none, its rows are in
+// order inside it, its counts are its instructions' sums, and the code
+// kept stays under the cap.
+use jet_foundation.[CanonicalJSON, canonical_json_parse, jettrace_validate_instructions]
+
+// A section of `fib`, its 5 bytes `code` kept, its second sampled
+// instruction at `second` and its samples stated as `samples`, and
+// `memcpy`, cut, keeping `cut_code`, with one sample at +8; under a cap of
+// `cap` bytes.
+instructions_test_section: fn(code: String, second: Int, samples: Int, cut_code: String, cap: Int) -> CanonicalJSON Never! {
+    fib: "{{\"address\":4096,\"code\":\"{code}\",\"cut\":false,\"events\":[30],\"file\":\"fib.jet\",\"instructions\":[{{\"events\":[10],\"offset\":0,\"samples\":3}},{{\"events\":[20],\"offset\":{second},\"samples\":1}}],\"level\":2,\"lines\":[{{\"line\":7,\"offset\":0}}],\"names\":[],\"samples\":{samples},\"size\":5,\"symbol\":\"fib\"}}"
+    memcpy: "{{\"address\":8192,\"code\":\"{cut_code}\",\"cut\":true,\"events\":[0],\"file\":\"\",\"instructions\":[{{\"events\":[0],\"offset\":8,\"samples\":1}}],\"level\":null,\"lines\":[],\"names\":[],\"samples\":1,\"size\":64,\"symbol\":\"memcpy\"}}"
+    text: "{{\"bytes\":5,\"cap_bytes\":{cap},\"counters\":[\"l1d_misses\"],\"cut\":1,\"functions\":[{fib},{memcpy}],\"kept\":1,\"samples\":10}}\n"
+    canonical_json_parse(text.bytes()) ?? panic(err.message)
+}
+
+// The validator's refusal of `value`, "" when it accepts it.
+instructions_test_refusal: fn(value: CanonicalJSON) -> String Never! {
+    return if jettrace_validate_instructions(value, "instructions") == {
+        .Err(error) -> error.message
+        .Ok(_) -> ""
+    }
+}
+
+#Test("an instructions section with its code, rows and sums in order is accepted") {
+    assert_eq(instructions_test_refusal(instructions_test_section("554889e5c3", 4, 4, "", 1048576)), "")
+}
+
+#Test("an instructions section is refused for code that is not its function's bytes in lowercase hex") {
+    wanted: "instructions.functions[0].code is not lowercase hex of its 5 bytes"
+    assert_eq(instructions_test_refusal(instructions_test_section("554889E5C3", 4, 4, "", 1048576)), wanted)
+    assert_eq(instructions_test_refusal(instructions_test_section("554889e5", 4, 4, "", 1048576)), wanted)
+    assert_eq(instructions_test_refusal(instructions_test_section("554889e5c3", 4, 4, "c3", 1048576)), "instructions.functions[1].code is kept for a cut function")
+}
+
+#Test("an instructions section is refused for rows out of order or outside their function") {
+    wanted: "instructions.functions[0].instructions[1].offset is out of order or outside the function"
+    assert_eq(instructions_test_refusal(instructions_test_section("554889e5c3", 0, 4, "", 1048576)), wanted)
+    assert_eq(instructions_test_refusal(instructions_test_section("554889e5c3", 5, 4, "", 1048576)), wanted)
+}
+
+#Test("an instructions section is refused for counts that are not its rows' sums or code past its cap") {
+    assert_eq(instructions_test_refusal(instructions_test_section("554889e5c3", 4, 5, "", 1048576)), "instructions.functions[0]'s samples or events are not its instructions' sums")
+    assert_eq(instructions_test_refusal(instructions_test_section("554889e5c3", 4, 4, "", 4)), "instructions keeps more than its cap of 4 bytes of code")
+}

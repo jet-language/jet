@@ -152,7 +152,10 @@ JetCLIPerfInlines: struct {
 // first, besides the `syscalls_lost` that found no row
 // (jet_cli_perf_system_read). `records_lost` counts the records the
 // program made and could not write, as its clock record or a flight ring's
-// tally says (PerfSamples.jet perf_samples_send).
+// tally says (PerfSamples.jet perf_samples_send). `pcs` holds each program
+// counter a CPU-time or counter sample named, at its entry of `pc_at`, and
+// `instructions` the code of the functions they are in
+// (jet_cli_perf_instructions_section), None when none is in a function.
 JetCLIPerfSamples: struct {
     table: X64Jetline,
     inlines: JetCLIPerfInlines,
@@ -187,6 +190,18 @@ JetCLIPerfSamples: struct {
     syscalls: [JetCLIPerfSyscall]{[JetCLIPerfSyscall]{}},
     syscalls_lost: U64{0},
     records_lost: U64{0},
+    pcs: [JetCLIPerfPc]{[JetCLIPerfPc]{}},
+    pc_at: [Int:Int]{[Int:Int]{}},
+    instructions: TraceReceiptSection?{None},
+}
+
+// A program counter the samples named: its CPU-time samples and, per
+// counter of JetCLIPerfSamples.periods, the events its counter samples
+// weigh.
+JetCLIPerfPc: struct {
+    pc: Int,
+    samples: U64,
+    events: [U64],
 }
 
 // A call site of a runtime table's stack (PerfSamples.jet perf_system): its
@@ -454,6 +469,7 @@ jet_cli_perf_samples_read: fn(path: String, source: String, counters: [TraceCoun
     loop index in 0..<sampled.heaps.len() {
         jet_cli_perf_heap_retain(facts, objects, names, sampled.heaps[index])
     }
+    sampled.instructions = jet_cli_perf_instructions_section(image, facts.level, sampled)
     Val(sampled)
 }
 
@@ -1148,6 +1164,10 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
             sampled.signals += U64{1}
             // A counter the session did not ask for has no period to weigh.
             counter: kind - 1
+            if counter < sampled.periods.len() {
+                named: jet_cli_perf_pc_entry(sampled, pc)
+                sampled.pcs[named].events[counter] = sampled.pcs[named].events[counter] + sampled.periods[counter]
+            }
             loop k in 0..<record {
                 word: at + k * 8
                 if counter >= sampled.periods.len() || word + 8 > words.len() -> break
@@ -1167,6 +1187,8 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
         sample += 1
         sampled.total += U64{1}
         sampled.signals += U64{1}
+        sampled_at: jet_cli_perf_pc_entry(sampled, pc)
+        sampled.pcs[sampled_at].samples += U64{1}
         chain := jet_cli_perf_samples_chain(sampled, places, resolved, owned, pc, false)
         if chain.len() == 0 {
             if !native_at.has_key(pc) {
@@ -1239,6 +1261,17 @@ jet_cli_perf_helper_count: fn(lines: &[JetCLIPerfSampledLine], place: Int, helpe
         }
     }
     lines[place].helpers.push(JetCLIPerfHelperCount{function: helper, count: U64{1}})
+}
+
+// The entry of `sampled.pcs` for program counter `pc`, added with no
+// samples or events when it has none.
+jet_cli_perf_pc_entry: fn(sampled: &JetCLIPerfSamples, pc: Int) -> Int Never! {
+    if sampled.pc_at.get(pc) == .Val(found) -> return found
+    events := [U64]{}
+    loop _ in sampled.periods -> events.push(U64{0})
+    sampled.pc_at[pc] = sampled.pcs.len()
+    sampled.pcs.push(JetCLIPerfPc{pc: pc, samples: U64{0}, events: events})
+    sampled.pcs.len() - 1
 }
 
 // A compiler-emitted helper's image function `name` in Jet's terms: each

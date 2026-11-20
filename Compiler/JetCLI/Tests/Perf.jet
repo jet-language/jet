@@ -1,7 +1,7 @@
 // Pure provider witnesses. Transport permission/pid/race checks need the composed
 // CLI + Core native FS provider; these tests make no hosted parity claim.
 use {
-    jet_backend.[X64DebugEncoding, X64ImageFunction, X64Jetline, X64JetlineFunction]
+    jet_backend.[X64DebugEncoding, X64ImageFunction, X64Jetline, X64JetlineFunction, X64LineRow, x64_jetline_rows]
     jet_cli.[
         JET_CLI_PERF_OBJECT_SOCKET,
         JetCLIPerfAttachCPU,
@@ -45,6 +45,9 @@ use {
         jet_cli_perf_heap_types,
         jet_cli_perf_helper_name,
         jet_cli_perf_helpers_section,
+        jet_cli_perf_instructions_section,
+        jet_cli_perf_instructions_summary,
+        jet_cli_perf_instructions_view,
         jet_cli_perf_live_from,
         jet_cli_perf_line_costs_none,
         jet_cli_perf_line_table,
@@ -96,6 +99,8 @@ use {
         TraceStackFrame,
         TraceToolchain,
         canonical_json_bytes,
+        canonical_json_parse,
+        jettrace_validate_instructions,
         sha256_hex,
         verify_jettrace,
     ]
@@ -1018,4 +1023,79 @@ jet_cli_perf_test_line_row: fn(digest: String, at: Int, name: String) -> TracePr
     assert(json.contains(`{"bodies":[{"function":"narrow_run","line":61}],"columns":["body","start_ns","wall_ns",`))
     assert(json.contains(`"experiments":[null,{"function":"narrow","line":30}],"kept_most":65536,"path":"main.jet",`))
     assert(json.contains(`"rows":[[0,500,1500,0,0,1400,0,0,11,0,0,3,-1],[0,0,1000,1,1,900,50,40,7,100,150,5,2000]],"seen":3}`))
+}
+
+// A run keeps each function its samples landed in, hottest first, with
+// a row per sampled instruction. With no image to read its code from, each
+// is kept cut: the lines of its sampled instructions alone, and the view
+// lists those instructions without their code.
+#Test("a run keeps the code its samples landed in, and the view lists it by function and line") {
+    // fib's code at 0x1000, its rows line 5 at +0 and line 7 at +16; a
+    // runtime function beside it in the symbol table.
+    rows := [U8]{}
+    x64_jetline_rows(rows, [X64LineRow]{X64LineRow{at: 0, line: 5}, X64LineRow{at: 16, line: 7}})
+    end: rows.len()
+    table: X64Jetline{table: rows, functions: [X64JetlineFunction]{X64JetlineFunction{low: 4096, high: 4352, name: "fib", file: "fib.jet", dir: "", decl: 5, rows: 0, rows_end: end}}, ascending: true}
+    functions: [X64ImageFunction]{X64ImageFunction{start: 4096, size: 256, name: "fib.fib"}, X64ImageFunction{start: 12288, size: 16, name: "jet_rt_alloc"}}
+    one: 1 << 48
+    words: jet_cli_perf_test_words([Int]{4112 | one, 4100 | one, 4112 | one, 12292 | one})
+    sampled: jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words, 0)
+    assert_eq(sampled.pcs.len(), 3)
+    section: jet_cli_perf_instructions_section([U8]{}, 2, sampled) ?? panic("fib holds samples")
+    assert_eq(section.type_name, "JetPerfInstructions")
+    json: String.from_bytes(canonical_json_bytes(section.value)) ?? panic("the section is UTF-8")
+    fib: `{"address":4096,"code":"","cut":true,"events":[],"file":"fib.jet","instructions":[{"events":[],"offset":4,"samples":1},{"events":[],"offset":16,"samples":2}],"level":2,"lines":[{"line":5,"offset":4},{"line":7,"offset":16}],"names":[],"samples":3,"size":256,"symbol":"fib"}`
+    alloc: `{"address":12288,"code":"","cut":true,"events":[],"file":"","instructions":[{"events":[],"offset":4,"samples":1}],"level":null,"lines":[],"names":[],"samples":1,"size":16,"symbol":"jet_rt_alloc"}`
+    open: `{"bytes":0,"cap_bytes":1048576,"counters":[],"cut":2,"functions":[`
+    close: `],"kept":0,"samples":4}`
+    expected: "{open}{fib},{alloc}{close}"
+    assert_eq(json, "{expected}\n")
+    jettrace_validate_instructions(section.value, "instructions") ?? panic(err.message)
+    wrapped: `{"content":{"browser":[],"receipt_sections":[{"name":"instructions","value":`
+    trace: canonical_json_parse("{wrapped}{expected}}}]}}}}\n".bytes()) ?? panic(err.message)
+    assert_eq(jet_cli_perf_instructions_summary(trace), Val("instructions functions=2 kept=0 cut=2 code_bytes=0: `--instructions` lists them"))
+    // Bare, the hottest function; no `perf` receipt names its sampler.
+    hottest: jet_cli_perf_instructions_view(trace, "run.jettrace", "", "text", false)
+    assert_eq(hottest.exit_code, 0)
+    cut: "; its code is cut: the trace keeps at most 1048576 bytes of code"
+    sampler: "sampler: not recorded: a share can sit on an instruction after the one that spent the time"
+    line_five: "  fib.jet:5 fib samples=1 share=33%\n  33.3%   +4    (code not kept)\n"
+    line_seven: "  fib.jet:7 fib samples=2 share=67%\n  66.7%   +16   (code not kept)\n"
+    assert_eq(hottest.stdout, "fib profile:cpu samples=3 share=75% level=O2; shares below are of fib's samples{cut}\n{sampler}\n{line_five}{line_seven}")
+    // A line by FILE:LINE, that line alone.
+    by_line: jet_cli_perf_instructions_view(trace, "run.jettrace", "fib.jet:7", "text", false)
+    assert_eq(by_line.stdout, "fib profile:cpu samples=3 share=75% level=O2; shares below are of fib's samples{cut}\n{sampler}\n{line_seven}")
+    // A function outside Jet code by its name: no level and no lines.
+    by_name: jet_cli_perf_instructions_view(trace, "run.jettrace", "jet_rt_alloc", "text", false)
+    assert_eq(by_name.stdout, "jet_rt_alloc profile:cpu samples=1 share=25%; shares below are of jet_rt_alloc's samples{cut}\n{sampler}\n 100.0%   +4    (code not kept)\n")
+    listed: jet_cli_perf_instructions_view(trace, "run.jettrace", "", "json", false)
+    assert(listed.stdout.contains(`"kind":"jet.trace.instructions"`))
+    assert(listed.stdout.contains(`"bytes":null`))
+    // A name the section doesn't hold is refused, naming those it does.
+    missed: jet_cli_perf_instructions_view(trace, "run.jettrace", "nope", "text", false)
+    assert_eq(missed.exit_code, 2)
+    assert(missed.stderr.contains("Jet.PerfNoInstructions: `run.jettrace` keeps no instruction samples of `nope`"))
+    assert(missed.stderr.contains("`fib`, `jet_rt_alloc`"))
+}
+
+// A kept function lists all its code through the one listing builder,
+// each sampled instruction with its share of the function's samples, then
+// of its events per captured counter; the sampler line says a share can
+// skid under the task clock.
+#Test("the instruction view lists kept code with its shares of samples and events") {
+    fib: `{"address":4096,"code":"554889e5c3","cut":false,"events":[30],"file":"src/fib.jet","instructions":[{"events":[10],"offset":0,"samples":3},{"events":[20],"offset":4,"samples":1}],"level":2,"lines":[{"line":7,"offset":0},{"line":8,"offset":4}],"names":[],"samples":4,"size":5,"symbol":"fib"}`
+    kept: `{"name":"instructions","value":{"bytes":5,"cap_bytes":1048576,"counters":["l1d_misses"],"cut":0,"functions":[`
+    perf: `{"name":"perf","value":{"capture":{"sampling":{"pc":{"precise":false,"source":"task_clock"}}}}}`
+    wrapped: `{"content":{"browser":[],"receipt_sections":[`
+    trace: canonical_json_parse("{wrapped}{kept}{fib}],\"kept\":1,\"samples\":10}}}},{perf}]}}}}\n".bytes()) ?? panic(err.message)
+    head: "fib profile:cpu samples=4 share=40% level=O2; shares below are of fib's samples and events\nsampler: task_clock, skid: a share can sit on an instruction after the one that spent the time; precise samples need perf_event_paranoid at most 1\ncolumns: cpu, l1d_misses\n"
+    line_seven: "  fib.jet:7 fib samples=3 share=75%\n  75.0%  33.3%   +0    push   rbp\n                 +1    mov    rbp,rsp\n"
+    line_eight: "  fib.jet:8 fib samples=1 share=25%\n  25.0%  66.7%   +4    ret\n"
+    all: jet_cli_perf_instructions_view(trace, "run.jettrace", "fib", "text", false)
+    assert_eq(all.stdout, "{head}{line_seven}{line_eight}")
+    by_line: jet_cli_perf_instructions_view(trace, "run.jettrace", "fib.jet:8", "text", false)
+    assert_eq(by_line.stdout, "{head}{line_eight}")
+    page: jet_cli_perf_instructions_view(trace, "run.jettrace", "", "html", false)
+    assert(page.stdout.contains("<pre>fib profile:cpu samples=4 share=40%"))
+    assert(page.stdout.contains("push   rbp"))
 }
