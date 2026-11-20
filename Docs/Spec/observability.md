@@ -16,7 +16,7 @@ question it answers.
 |---|---|---|---|---|
 | Live scheduler | What runs, waits, or queues now? | `jet run app.jet --observe`, then `jet inspect live --attach <pid>` (the task tree with each task's name, open log spans and arena allocations, channel depths and waiters, deadlines and effect counts, redrawn every second; `--once` prints one view), or `jet inspect structure --live <pid>` or another named inspect plane | `--observe` publishes bounded `jet.devtools.v1` facts. Use `--json` for a machine projection. Attaching to a process run without `--observe`, or owned by another user, is refused with `E2105` before anything of it is read. | The live snapshot is `jet-observe-<pid>.json` in the host temporary directory. Despite the `.json` name, it holds the runtime's raw records, which `jet inspect` decodes. It carries freshness and process identity and exposes no unpublished values. |
 | GC promotions | Which allocations enter automatic memory management, and what ownership rewrite helps? | `jet run app.jet --gc-trace`, then `jet gc report` | `--gc-trace` records promotion evidence. | `.jet/gc/trace-v1.json` uses `jet.gc.trace` v1. The separate `jet.gc.report` v1 projection requires complete promotion and identity evidence and rejects dropped rows. |
-| Wall-clock session | Which symbols consume wall time, CPU, task, lock, or I/O time? | `jet perf run app.jet`, then `jet perf view <trace.jettrace>` | `jet perf run`, `jet perf test`, and `jet perf attach <pid> --source app.jet` record sessions. The ratified user-verb recorder is `--record=<name>` on `run`, `dev`, and `test`. | The default artifact is `.jet/perf/<stamp>-<short-id>.jettrace`, with schema `jet.trace` v3. |
+| Wall-clock session | Which symbols consume wall time, CPU, task, lock, or I/O time? | `jet perf run app.jet`, then `jet perf view <trace.jettrace>` | `jet perf run`, `jet perf test`, and `jet perf attach <pid> --source app.jet` record sessions; `jet perf attach <pid>` alone samples which functions a process started without `--observe`, the jet CLI included, spends its CPU in. The ratified user-verb recorder is `--record=<name>` on `run`, `dev`, and `test`. | The default artifact is `.jet/perf/<stamp>-<short-id>.jettrace`, with schema `jet.trace` v3. |
 | Browser rows | Which browser, WebAssembly, or DOM rows consume time? | `jet dev --target=web`, then `jet perf attach <pid>` | The dev server sends bounded, payload-free relay rows; `jet perf attach` requests collection. | The request transport uses `jet.browser.request.v1`; `jet perf attach` merges rows into the canonical `.jettrace` rather than creating a second trace format. |
 | Log records | Which modules log, at which level, and who set it? | `jet explain log`, then `JET_LOG=warn,shop.db=debug jet run .` or `jet run --log=warn,shop.db=debug .` | `--log=<filter>` on `run` and `dev` sets the top `core.log` level filter, above `JET_LOG`, the code's `set_level` and the package's `log:` field. | Records go to the `core.log` sink; each carries its `module`. The ladder is in `Docs/Spec/Reference/core-library.md` under `core.log`. |
 
@@ -861,6 +861,29 @@ word that isn't a pid) is E2125 (`Jet.AttachWhichProcess`, exit 2). A flag
 that conflicts with the others, such as `--lens=alloc` without `--source`,
 stays `Jet.UnknownFlag` (exit 2).
 Tests/Cases/Perf/attach_names_each_refusal.case is the worked example.
+
+A process that publishes nothing about itself, as the jet CLI does and as a
+program started without `--observe` does, is sampled from outside: `jet perf
+attach <pid>` with no `--source` asks the kernel to sample the CPU time of
+each thread of it and of the processes it started, and theirs (a `jet
+check` runs its compile-time work in one), every millisecond for a second,
+each sample its frame-pointer call chain, and names the frames by the
+functions of the ELF images of each process's executable: its own, and
+each one it holds as a part, as a jet holds the runtime image its
+compile-time process runs. Code that no image holds (a compile-time
+process's compiled functions) is counted as `unnamed`. It prints the
+`functions` lines before the trace's path (`functions samples=N
+processes=2 threads=35 window_ms=1000 lost=0 unnamed=N`, then a line a
+function, its share of the samples whose innermost frame it is, `self`,
+and with it anywhere on the stack, `total`: `41.6% self  68.2% total ·
+unit.rt_text_append_owner`), and the trace holds them as the
+`functions` receipt section (type `JetPerfFunctions`), which `jet perf
+view` shows. A hung `jet check` or `jet debug` started plainly is profiled
+this way. When the kernel won't sample it (another user's process, or
+`perf_event_paranoid` above 2), the attach is E2124 with the flag to start
+it with.
+Tests/Cases/Perf/attach_samples_a_plain_jet_process.case is the worked
+example.
 
 An attach's profile run window is the attach's own window on the program,
 `live`, not the run since it started, whatever it read: it opens before the

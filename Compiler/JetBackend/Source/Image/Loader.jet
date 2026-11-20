@@ -420,7 +420,7 @@ X64ImageFunction: struct {
     name: String,
 }
 
-// The sized functions of an image's .symtab in table order, or why it has
+// The sized functions of an image's .symtab sorted by start, or why it has
 // none it can name (`failure`, "" when read).
 X64ImageFunctions: struct {
     functions: [X64ImageFunction],
@@ -477,16 +477,21 @@ x64_image_functions: fn(bytes: [U8]) -> X64ImageFunctions Never! {
             }
         }
     }
+    read.functions.sort_by(fn(left: X64ImageFunction, right: X64ImageFunction) { left.start <=> right.start })
     read
 }
 
-// The index of the function of `functions` whose code holds link address
-// `pc`, else -1.
+// The index of the function of `functions`, sorted by start, whose code
+// holds link address `pc`, else -1.
 x64_image_function_find: fn(functions: [X64ImageFunction], pc: Int) -> Int Never! {
-    loop (k, function) in functions {
-        if pc >= function.start && pc < function.start + function.size -> return k
+    low := 0
+    high := functions.len()
+    loop low < high {
+        middle: (low + high) /% 2
+        if functions[middle].start <= pc -> low = middle + 1 else -> high = middle
     }
-    -1
+    if low == 0 -> return -1
+    if pc < functions[low - 1].start + functions[low - 1].size -> low - 1 else -> -1
 }
 
 // Write the perf map of the image `bytes` running as `pid`:
@@ -2862,4 +2867,168 @@ x64_trace_close: fn(trace: &X64Trace) {
         _ := os_unmap(trace.scratch, OS_PAGE_SIZE)
         trace.scratch = 0
     }
+}
+
+// perf_event_open(2), and the attributes x64_sampler_open asks it for: the
+// kernel's task clock of one thread, sampled every period of its CPU time,
+// each sample its user instruction pointer, thread and frame-pointer call
+// chain (PERF_SAMPLE_IP | PERF_SAMPLE_TID | PERF_SAMPLE_CALLCHAIN), the
+// kernel's own frames left out (exclude_kernel, exclude_hv,
+// exclude_callchain_kernel). The attribute block is PERF_ATTR_SIZE_VER5.
+LOADER_SYS_PERF_EVENT_OPEN: 298
+
+LOADER_PERF_ATTR_SIZE: 112
+
+LOADER_PERF_TYPE_SOFTWARE: 1
+
+LOADER_PERF_COUNT_SW_TASK_CLOCK: 1
+
+LOADER_PERF_SAMPLE_TYPE: 35
+
+LOADER_PERF_ATTR_FLAGS: 0x200060
+
+LOADER_PERF_FLAG_FD_CLOEXEC: 8
+
+// MAP_SHARED: the ring the kernel writes samples into.
+LOADER_MAP_SHARED: 0x01
+
+// The data pages of each sampled thread's ring, a power of two, after its
+// header page: 256 KiB, the samples of over a second of a busy thread at a
+// millisecond period, drained far more often than that.
+LOADER_PERF_RING_PAGES: 64
+
+// The ring header's data_head and data_tail words (struct
+// perf_event_mmap_page).
+LOADER_PERF_DATA_HEAD: 1024
+
+LOADER_PERF_DATA_TAIL: 1032
+
+// The record types the ring holds that the sampler reads.
+LOADER_PERF_RECORD_LOST: 2
+
+LOADER_PERF_RECORD_SAMPLE: 9
+
+// One sampled thread of another process: its event's descriptor and the
+// ring the kernel writes its samples into.
+X64SampledThread: struct {
+    thread: Int,
+    fd: Int,
+    ring: Int,
+}
+
+// Threads of another process sampled from outside it by the kernel's task
+// clock (x64_sampler_open): no ptrace, no help from the process, so a
+// program started with no flag at all can be profiled. `failure` names why
+// a thread could not be sampled, "" when every one is.
+X64Sampler: struct {
+    threads: [X64SampledThread],
+    failure: String,
+}
+
+// What x64_sampler_drain read: each sample as its thread, its frame count
+// and then its frames, innermost first (`words`), and the samples the
+// rings lost when they were full.
+X64Samples: struct {
+    words: [Int],
+    samples: Int,
+    lost: Int,
+}
+
+// Sample each of `threads` (thread ids of one process) every `period_ns`
+// of its CPU time until x64_sampler_close. A thread that ended since it was
+// listed is left out; one the kernel refuses names the sampler's failure.
+x64_sampler_open: fn(threads: [Int], period_ns: Int) -> X64Sampler {
+    sampler := X64Sampler{threads: [X64SampledThread]{}, failure: ""}
+    attr: os_map(OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE)
+    if os_failed(attr) {
+        sampler.failure = "mapping the sampling event's attributes failed (errno {-attr})"
+        return sampler
+    }
+    ring_size: (1 + LOADER_PERF_RING_PAGES) * OS_PAGE_SIZE
+    #Unsafe("`attr` is the fresh zeroed page just mapped, which perf_event_open only reads; each ring is a fresh shared mapping of its own event's descriptor") {
+        os_store_word(attr, LOADER_PERF_TYPE_SOFTWARE | LOADER_PERF_ATTR_SIZE << 32)
+        os_store_word(attr + 8, LOADER_PERF_COUNT_SW_TASK_CLOCK)
+        os_store_word(attr + 16, period_ns)
+        os_store_word(attr + 24, LOADER_PERF_SAMPLE_TYPE)
+        os_store_word(attr + 40, LOADER_PERF_ATTR_FLAGS)
+        loop thread in threads {
+            fd: os_syscall(LOADER_SYS_PERF_EVENT_OPEN, attr, thread, -1, -1, LOADER_PERF_FLAG_FD_CLOEXEC, 0)
+            if fd == -LOADER_ESRCH -> next
+            if os_failed(fd) {
+                if sampler.failure == "" {
+                    sampler.failure = "the kernel refused to sample thread {thread} (errno {-fd})"
+                }
+                next
+            }
+            ring: os_map_with(0, ring_size, OS_PROT_READ + OS_PROT_WRITE, LOADER_MAP_SHARED, fd, 0)
+            if os_failed(ring) {
+                loader_close(fd)
+                if sampler.failure == "" {
+                    sampler.failure = "mapping thread {thread}'s sample ring failed (errno {-ring})"
+                }
+                next
+            }
+            sampler.threads.push(X64SampledThread{thread: thread, fd: fd, ring: ring})
+        }
+    }
+    _ := os_unmap(attr, OS_PAGE_SIZE)
+    sampler
+}
+
+// Move the samples each thread's ring holds into `into`, freeing the rings
+// for more.
+x64_sampler_drain: fn(sampler: X64Sampler, into: &X64Samples) {
+    size: LOADER_PERF_RING_PAGES * OS_PAGE_SIZE
+    loop sampled in sampler.threads {
+        data: sampled.ring + OS_PAGE_SIZE
+        #Unsafe("the ring is this sampler's live shared mapping: its header page, then `size` data bytes the kernel wrote up to data_head, read before data_tail lets it write there again") {
+            head: os_load_word(sampled.ring + LOADER_PERF_DATA_HEAD)
+            at := os_load_word(sampled.ring + LOADER_PERF_DATA_TAIL)
+            loop at < head {
+                header: os_load_word(data + at % size)
+                kind: header & 0xffffffff
+                length: (header >> 48) & 0xffff
+                if length < 8 -> break
+                if kind == LOADER_PERF_RECORD_SAMPLE {
+                    ip: os_load_word(data + (at + 8) % size)
+                    thread: (os_load_word(data + (at + 16) % size) >> 32) & 0xffffffff
+                    listed: os_load_word(data + (at + 24) % size)
+                    // A chain the record's length can't hold is none.
+                    count: if listed < 0 || 32 + 8 * listed > length -> 0 else -> listed
+                    into.words.push(thread)
+                    counted: into.words.len()
+                    into.words.push(0)
+                    frames := 0
+                    loop k in 0..<count {
+                        // Kernel addresses and the kernel's context markers
+                        // (PERF_CONTEXT_USER and its kin) are negative.
+                        frame: os_load_word(data + (at + 32 + 8 * k) % size)
+                        if frame <= 0 -> next
+                        into.words.push(frame)
+                        frames += 1
+                    }
+                    if frames == 0 && ip > 0 {
+                        into.words.push(ip)
+                        frames = 1
+                    }
+                    into.words[counted] = frames
+                    into.samples += 1
+                } else if kind == LOADER_PERF_RECORD_LOST {
+                    into.lost += os_load_word(data + (at + 16) % size)
+                }
+                at += length
+            }
+            os_store_word(sampled.ring + LOADER_PERF_DATA_TAIL, head)
+        }
+    }
+}
+
+// Stop sampling: each thread's ring and event go.
+x64_sampler_close: fn(sampler: &X64Sampler) {
+    ring_size: (1 + LOADER_PERF_RING_PAGES) * OS_PAGE_SIZE
+    loop sampled in sampler.threads {
+        _ := os_unmap(sampled.ring, ring_size)
+        loader_close(sampled.fd)
+    }
+    sampler.threads = [X64SampledThread]{}
 }

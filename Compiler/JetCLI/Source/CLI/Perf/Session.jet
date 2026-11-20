@@ -350,10 +350,12 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
 // `attach`: one point capture of a running process. A devserver browser
 // relay supplies browser rows and compiler symbol identities; otherwise the
 // runtime's live observation is attributed to `--source`. A process that
-// publishes neither still gets a schema-valid empty trace. With
-// `--lens=alloc`, the trace also holds a heap snapshot the program takes
-// while it runs (jet_cli_perf_attach_heap).
-jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Time]> JetDriverVerbOutput Never! {
+// publishes neither, as the jet CLI and a program run without `--observe`
+// do, is sampled from outside for a second: the trace and the attach show
+// which of its functions its CPU was in (Outside.jet). With `--lens=alloc`,
+// the trace also holds a heap snapshot the program takes while it runs
+// (jet_cli_perf_attach_heap).
+jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Time, FFI.Asm]> JetDriverVerbOutput Never! {
     pid := Int?{None}
     out := String?{None}
     source := String?{None}
@@ -362,6 +364,8 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
     alloc := false
     held_ns := Int?{None}
     lost := U64{0}
+    // The functions an outside sampling found the program's CPU in.
+    hot := ""
     skip := false
     loop (index, arg) in args {
         if skip {
@@ -478,7 +482,7 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
         observed = true
     } else if source == .Val(path) {
         if live_error == .Val(message) {
-            return jet_cli_perf_attach_unobserved(target_pid, "it publishes no live snapshot jet can read ({message})", "start the program with `jet run --observe`, then attach to the pid it runs as", color)
+            return jet_cli_perf_attach_unobserved(target_pid, "it publishes no live snapshot jet can read ({message})", "start the program with `jet run --observe`, then attach to the pid it runs as; or attach without `--source` to sample which functions its CPU is in", color)
         }
         // The directory the program publishes in and takes requests from;
         // one that isn't this user's alone is refused before any request is
@@ -536,9 +540,17 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
         observed = true
     } else if live_error == None {
         return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2102", "live observe snapshot found, but `--source` is required", "domain capture must attribute facts to a Jet symbol identity", "run `jet perf attach {target_pid} --source <file.jet>`", color), exit_code: JET_DRIVER_EXIT_USAGE}
+    } else {
+        // A process that publishes nothing about itself: the kernel samples
+        // its threads' CPU from outside it.
+        section: jet_cli_perf_outside_sample(target_pid, JET_CLI_PERF_OUTSIDE_WINDOW_MS) ?? return jet_cli_perf_attach_unobserved(target_pid, err.message, "start the program with `jet run --observe`, then attach with `--source <file.jet>`", color)
+        loop line in jet_cli_perf_outside_lines(section.value) -> hot = "{hot}{line}\n"
+        capture.receipts.push(section)
+        read = [String]{"the CPU of its threads and its children's, sampled from outside for {JET_CLI_PERF_OUTSIDE_WINDOW_MS} ms"}
+        observed = true
     }
-    // A trace of a program the attach observed, through a browser relay or
-    // its own runtime.
+    // A trace of a program the attach observed, through a browser relay, its
+    // own runtime or the kernel's samples of it.
     if observed {
         jet_cli_perf_attach_keep_window(capture, target_pid, jet_cli_perf_attach_watched(target_pid, watch), read)
     }
@@ -562,7 +574,7 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
     // Records the program made that the ring never got, which the trace
     // lacks.
     dropped: if lost > (U64{0}) -> "Records lost: {lost}; {JET_CLI_PERF_RING_LOSS}\n" else -> ""
-    JetDriverVerbOutput{stdout: "", stderr: if quiet -> "" else -> "{held}{dropped}Trace: {path}\n", exit_code: JET_DRIVER_EXIT_OK}
+    JetDriverVerbOutput{stdout: "", stderr: if quiet -> "" else -> "{held}{dropped}{hot}Trace: {path}\n", exit_code: JET_DRIVER_EXIT_OK}
 }
 
 // Why a flight-recorded program's records were lost (JetRuntime
