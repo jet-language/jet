@@ -18769,6 +18769,376 @@
       "completedAt": "2026-11-17T00:04:09.872Z",
       "questions": [],
       "retiredAt": "2026-11-20T00:04:54.614Z"
+    },
+    {
+      "id": "c07ywjvi",
+      "num": 6847,
+      "title": "Compile-time evaluation: #run values match run time, fall back cleanly and run once",
+      "body": "Destination: compile-time evaluation (`#run`, `#if`, `#loop`, `NAME: #run value`, and automatic folding of immutable bindings) means exactly what the same code means at run time, reports every failure at its source with a registered code, and never runs twice. Why: compile-time code is ordinary Jet; any drift between the two meanings is a silent wrong answer.\n\nGoverning decisions: D-META-SPELL1=A (`#run`, `#if`, `#loop` replace `comptime`; shipped, cases ratified_p12/d_meta_spell1_forms), D-COMPTIME-WORD1=A, D-PREP-BRANCH1=A, D-PREP-FN1=A, D-MODULE-BUILD1=A (a module-level value that fails or has effects is a build error, E0643), D-EXEC2=A (tiers are O0, O1 and O2; no interpreter). Spec: Docs/spec/reference/metaprogramming.md; the 2026-10-29 and 2026-11-10 entries of Docs/spec/syntax-decisions.md.\n\nCarried from #4276 (closed 2026-11-14).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "All criteria met; c11 on p235 (dev 1c5b311279). The DMA clause of c14 lives on #6518 c8. One parser unit-test interaction with accept3 (a_trait_takes_type_parameters...) is with IfHole on #6857."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "n14 (c), the registered #run stop for dma.start/dma.wait, is dropped from n14: DMA is unreachable on dev 78f4541780. No program reaches DMAStart/DMAWait: (1) sema needs a channel path from an imported `board.<profile>` module, and `use { sensor: board.sensor_v1 }` is E0603 whether board/ is a sibling directory or a dependency package; no repository fixture imports a `board.` module; (2) no shipped TargetMachine declares a DMA channel (hardware.dma_channels is empty for sensor_v1, virt_aarch64, wasm and hosted). A stop that no program reaches can have no I4 UI snapshot, so the comptime refusal (E3010 family) lands with the first reachable DMA path, in the same change that makes it reachable. Probe: PrecompiledCore-4 g7/n14/dma (E0603 output)."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "c16 (a) landed in p210 (7f6c05586e, 7f902dd915): by hand on the p210 gate tree, JET=<p210 jet> JETPACK_TEST_REPO_ROOT=<tree> jet test Jetpack/EnvModel/Tests/ModuleValueParity.jet passes 158 of 158. c16 stays open for (b): b1 is queued for p211, then b2-b7."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "p209: c10 (06c5d8b172) ICEs: comptime_record_of_function_values exits 101 (ir.build unlowered: named function main.jet::double outside the checked program). PrecompiledCore-4 owns the fix (SUB PrecompiledCore-4-g6-c10-fix); c10 stays open."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "c16 plan (Main): (a) EnvModel sends every immutable module value, with the source's functions and types, to the compiler in one request with source offsets kept. The compiler types them (field defaults included), orders them, reports cycles at the value span and gives E3410 and E0643; EnvModel drops its own graph, I/O gate and literal walk for module values. (b) EnvModel's schema walk over env, image and system record fields (EnvFields.jet:214-267, ComputedFields.jet:131-181) is a second typing of Jet literals. Its schema (Env, Lang, Prompt, Preset, package and lifecycle names) becomes Jet types in Jetpack/EnvModel source that the compiler checks record fields against; user syntax stays identical (jetpack-epoch5.md:503-506: the environment model owns typed projections). c16 is met only after (b)."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Sweep of the open proofs on the p207 batch compiler (dev 0e93e25032), by Main. c5 met (FoldConstants o0/o1/o2 pass). n1: comptime_diff 161 pass, 0 fail, 3 known-failing (sequential_comptime_reads_advance_the_shared_reader, comptime_loadable_matches_runtime, loadable_incompatible_defaults_stop_before_rustc); open until those pass. n2, n3, n6, n7, n8, n13 and n14: their filters match no tests yet. n9: passes (comptime_loop_waits_on_named_constant); held for the run-value root loop follow-up queued for p209. n10: queued for p209. n11: waits on the generic-spelling ballot conflict. PrecompiledCore-4 order: n1, n7, n2, n3, n6, n8, n13, n14."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-2",
+          "text": "Owner-wait sweep 2026-11-15 (TowerKeeper-2, for Main): c11 reworded; the owner-only choices are on Main's ballot list (2026-11-15) ($JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv); no question for the owner stays on this card."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Run-time-only reflection, unsupported holes, unsafe raw use, an unknown DSL owner or type and mutable observations each fail at compile time with their registered diagnostic, and compile-time and run-time results agree: every comptime_diff case passes with none marked known-failing.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "`jet test Compiler --profile cases --filter comptime_diff`: 164 rows, 0 failed, none known-failing. p210 batch compiler (dev 7f902dd915, census-clean build), proofs log $JET_STATE_ROOT/lander3-tmp/proofsp210.out",
+          "at": "2026-11-16T08:01:09.284Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "comptime_diff"
+          }
+        },
+        {
+          "n": 2,
+          "text": "Self-cycles, longer cycles, missing or impure dependencies, invalid values and consumer disagreement among compile-time values each report the registered diagnostic at the owning source span, with UI snapshots.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "`jet test Compiler --profile ui --filter comptime_dependency_`: 9 rows, 0 failed (including comptime_dependency_handle_value, E1018). p210 batch compiler (dev 7f902dd915, census-clean build), proofs log $JET_STATE_ROOT/lander3-tmp/proofsp210.out",
+          "at": "2026-11-16T08:01:10.316Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "comptime_dependency_"
+          }
+        },
+        {
+          "n": 3,
+          "text": "An immutable `name: value` inside a block is computed while compiling whenever it can be and quietly falls back to run time for run-time inputs, outside effects, values that cannot be stored, or a step-limit stop; hover and `jet inspect` show the reason it fell back.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p216 batch compiler (census build of dev efb3da4f6c): jet test Compiler --profile cases --filter comptime_fallback_reason PASS (3/3); ui runtime_only_called_while_building PASS",
+          "at": "2026-11-16T16:45:30.743Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "comptime_fallback_reason"
+          }
+        },
+        {
+          "n": 4,
+          "text": "A compile-time fragment can call Core source functions through their loaded signatures (no E0956 'no loaded signature'), and a plain-literal constant registers without re-walking its unit, so registration time stays linear in unit size.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p206 batch compiler (dev fe8c7b89ef; landed as fe8c7b89ef, which also reverts the JetCli Core-assets workaround): jet test Compiler --profile cases --filter comptime_core_call → PASS 1 FAIL 0 (p206 cycle proof row).",
+          "at": "2026-11-16T05:34:09.942Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "comptime_core_call"
+          }
+        },
+        {
+          "n": 5,
+          "text": "Every tier (O0, O1, O2) observes the same compile-time values and result, and a built binary never repeats compile-time work at startup.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "jet test Compiler --profile golden --filter Metaprogramming/Comptime/FoldConstants on the p207 batch compiler (dev 0e93e25032): PASS Examples/Metaprogramming/Comptime/FoldConstants.jet o0, o1 and o2, rc 0 (rerun by Main; first reported by PrecompiledCore-4).",
+          "at": "2026-11-16T06:04:39.765Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "Metaprogramming/Comptime/FoldConstants"
+          }
+        },
+        {
+          "n": 6,
+          "text": "The NoEager policy turns off automatic compile-time evaluation but allows explicit `#run`; Only refuses compile-time execution of marked code; neither blocks ordinary optimizer folding.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p220 batch compiler (dev 17c073989d): jet test Compiler --profile cases --filter comptime_policy_ PASS 3/3 (no_eager_keeps_explicit_run, keeps_optimizer_folding, only_refuses_compile_time_code)",
+          "at": "2026-11-16T18:18:45.129Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "comptime_policy_"
+          }
+        },
+        {
+          "n": 7,
+          "text": "`#run`, `#if`, `#loop` and `#run fn` never fall back silently to run time, never claim false purity and never execute a generated body before it is checked.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "`jet test Compiler --profile cases --filter comptime_no_silent_fallback`: 4 rows, 0 failed; ui comptime_no_silent_fallback_run_fn_call (E1019) passes; goldens Metaprogramming/Comptime/PrepFn and tests/run/Foundations/Exact pass on O0, O1 and O2. p210 batch compiler (dev 7f902dd915, census-clean build), proofs log $JET_STATE_ROOT/lander3-tmp/proofsp210.out",
+          "at": "2026-11-16T08:01:11.340Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "comptime_no_silent_fallback"
+          }
+        },
+        {
+          "n": 8,
+          "text": "`#run` executes ordinary code with no fallback stubs; persistent, session and effect lifetimes stay separate; native and process execution do not inherit host authority; a host/target mismatch is diagnosed before any effect runs.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p215 batch compiler (census build of dev add8c1ce16), proofrun on gate-p215: pc4-hosttarget PASS",
+          "at": "2026-11-16T16:08:03.402Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "comptime_diff_host_target"
+          }
+        },
+        {
+          "n": 9,
+          "text": "The compile-time totality pass always returns a value, a dependency wait set or a registered diagnostic: a top-level `#loop x in NAMED_CONSTANT` whose source waits on another top-level value no longer stops with ICE 101 (seen in the JetCli package on seed-t20), and the ScriptAPI-11r literal-list workaround in JetCli returns to the named constant.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p209 gate (dev a1c3325a65, landed a403b6e912): jet test Compiler --profile cases --filter comptime_loop_waits_on_named_constant n=1 bad=0, and comptime_root_loop_waits_on_run_value n=1 bad=0 ($JET_STATE_ROOT/lander3-tmp/proofs209.out).",
+          "at": "2026-11-16T07:12:47.411Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "comptime_loop_waits_on_named_constant"
+          }
+        },
+        {
+          "n": 10,
+          "text": "A compile-time record collection holding named function values registers and evaluates: a `#run` total over `[Op]`, where `Op: struct { name: String, f: fn(Int) -> Int }` holds two named functions, folds and calls each one with no E0107 (checked by a scratch probe on 2026-10-31; no repository case pins it yet).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "`jet test Compiler --profile cases --filter comptime_record_of_function_values`: 1 row, 0 failed. p210 batch compiler (dev 7f902dd915, census-clean build), proofs log $JET_STATE_ROOT/lander3-tmp/proofsp210.out",
+          "at": "2026-11-16T08:01:12.358Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "comptime_record_of_function_values"
+          }
+        },
+        {
+          "n": 11,
+          "text": "Types made by build-time functions (D-GENERIC-TYPEFN1=A), spelled by the later ruling D-META-SPELL1=A (type parameters `<T>`, const generics `<N: Int>`): type parameters, type-recipe functions, parameterized traits and trait static methods returning Self compile and run, each with an example and golden output on o0, o1 and o2 under Examples/Metaprogramming/Generics/TypeFunctions/.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p235 batch compiler (dev 1c5b311279), commit fd711daac8: jet test Compiler --profile golden --filter Metaprogramming/Generics/TypeFunctions PASS 12/12 (TypeParameters, TypeRecipes, ParameterizedTraits and StaticSelf on o0, o1 and o2). Full golden 5026/5026.",
+          "at": "2026-11-17T00:24:43.806Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "Metaprogramming/Generics/TypeFunctions"
+          }
+        },
+        {
+          "n": 12,
+          "text": "D2 census (D-COMPTIME-PROBE1=A, the run's view is the meaning): for the self-host unit and the comptime corpus, every comptime item whose probe references differ from its run references is listed, each is fixed so the run defines the meaning, and the probe is then deleted. Proof: `git grep -n -i 'comptime_probe' -- Compiler` prints nothing and `jet test Compiler --profile cases --filter Comptime/` passes.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 823706b2d9 (p232 gate), probe removed in commit 823bce8623: git grep -n -i comptime_probe -- Compiler prints nothing; jet test Compiler --profile cases --filter Comptime/ PASS 2/2, 0 FAIL (native_o0_shared_tasks_select, native_o0_closure_kinds). Checked by DeclTypes-6-1 on gate-p230.",
+          "at": "2026-11-16T23:13:53.746Z"
+        },
+        {
+          "n": 13,
+          "text": "Comptime on native O0 supports Shared values, tasks, select, native calls and fixed backing (the operations the retired JetEval host adapter lacked).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 09ad940e3f (p213, dev 78f4541780). p213 batch compiler: jet test Compiler --profile cases --filter comptime/native_o0_shared_tasks_select -> 1 passed, 0 bad (#run runs Shared values, tasks, select, runtime kernels, native calls and fixed backing as a run does). The p213 suite's cases profile has no new comptime failures.",
+          "at": "2026-11-16T09:50:34.311Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "comptime/native_o0_shared_tasks_select"
+          }
+        },
+        {
+          "n": 14,
+          "text": "Comptime on native O0 supports every live CoreClosureCall kind (Spawn, OnCommit, Rollback, Reactive, UI and the rest of BodyCoreClosureKind; Realtime was deleted as dead in 2dfe0cc289; Serve and OnInterrupt are plain Core functions) and the typed-text kernels (SQL, HTML, Sh, URL, Path, DateTime).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 823706b2d9 (p232 gate): jet test Compiler --profile cases --filter Comptime/native_o0_closure_kinds PASS 1/1. It covers all 9 live BodyCoreClosureKind kinds and the 6 typed-text heads. Checked by DeclTypes-6-1 on gate-p230.",
+          "at": "2026-11-16T23:14:06.672Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Comptime/native_o0_closure_kinds"
+          }
+        },
+        {
+          "n": 15,
+          "text": "The Body codec generator's check passes on dev: Compiler/Toolchain/BodyCodec --check reproduces the committed SyntaxCodec.jet and BodyCodecRows.jet byte for byte. Today the generated SyntaxCodec trips the formatter (E0770), so --check fails on 0e93e25032 (reported by MemKernel-6-2 while adding TraitDef.laws). Proof: the BodyCodec --check command, exit 0, on the landing compiler.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p209 gate (dev a1c3325a65, landed c4f916ca2d = MemKernel-6-bodycodec-check-r1): jet run Compiler/Toolchain/BodyCodec/Main.jet -- --check exits 0; it prints 'body codec matches' for Facts/BodyCodec.jet, Facts/SyntaxCodec.jet and Sema/BodyPacketCodec.jet.",
+          "at": "2026-11-16T07:12:48.421Z"
+        },
+        {
+          "n": 16,
+          "text": "I8/I9 one evaluator: Jetpack's EnvModel evaluates no compile-time value itself; every module value it reads (literals, names, list, struct, enum and map values, calls and operators) comes from the compiler's evaluation through the compiler service, so the environment, system, image and fleet consumers see the value the build sees. Today EnvModel is a partial second evaluator (found by PrecompiledCore-4 on dev a1c3325a65):\n- calls already go to the compiler (Jetpack/EnvModel/Source/ModuleEval/CompilerService.jet:77);\n- literals and names are evaluated in ComputedFields.jet:131-181, with no type check and no field defaults (E1333 for map keys);\n- its own dependency graph and cycle check report E0338 at the name span, where the compiler reports at the value (:207-253);\n- its own I/O gate gives E3402 by builtin name, where the compiler gives E3410 (:57-71);\n- it collects only #run module values as globals, where the compiler builds every module value (ModuleEval.jet:165-182).\nProof: cases rows where a typed struct with field defaults, a map value, a cycle and an I/O-reading value each give the same value or the same diagnostic (code and span) through jet build and through the EnvModel consumer, plus a git grep showing ComputedFields.jet no longer evaluates expressions.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p213 gate (dev 78f4541780; b1 7fe39baa66, b2-b7a and b7b 58fec0380f): JETPACK_TEST_REPO_ROOT=<tree> jet test Jetpack/EnvModel/Tests/ModuleValueParity.jet -> 178 passed, 0 failed. Rows for each named shape, each comparing the compiler's evaluation (the program) with the EnvModel consumer: typed struct with field defaults (module_value_typed_struct_with_field_defaults_matches_the_program); map value (environment_schema_types_the_programs_values + module_value_of_a_schema_type_is_its_written_fields, LANGS map); cycle at the value (module_value_cycle_is_the_programs_cycle_at_the_value, env_field_cycle_names_the_fields_at_the_field); I/O-reading value (ambient io in an env field is the compilers refusal at the call). git grep -n -E 'envmodel_evaluate_expression|envmodel_comptime_evaluate|envmodel_evaluate_named_fields|comptime_evaluate' 78f4541780 -- Jetpack -> 0 lines; Jetpack/EnvModel/Source/ComputedFields.jet no longer exists.",
+          "at": "2026-11-16T09:42:25.255Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "meta",
+        "comptime",
+        "metaprogramming"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:10:42.975Z",
+      "updated": "2026-11-17T00:24:45.932Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 16,
+      "completedAt": "2026-11-17T00:24:45.932Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T00:54:55.169Z"
+    },
+    {
+      "id": "c06sazo9",
+      "num": 6866,
+      "title": "Browser tests in jet test: scaffold, UI mode, retry traces and cross-browser runs",
+      "body": "Destination: `jet test` drives real browsers for an app: a scaffold sets up the browser test project, a UI mode shows one run in full, a retry records a trace you can open locally, and runs across browsers are deterministic and keep Jet's diagnostics and source positions.\n\nWhy it matters: end-to-end browser tests are where web apps break; parity with the best browser test runner (Playwright) is part of the web framework's parity bar.\n\nSource: #6552 c15-c18 (from archived #2498 c2-c5). Parent: #6552.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "All 5 criteria met on p234/p235 (dev 1c5b311279)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The browser test scaffold creates an isolated browser test project with its configured browsers and a reusable `jet dev` web server, then runs a first passing test.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p234 batch compiler (dev 77460a182a), commits bf95abc3de + 31080f2e3d (case fix): jet test Compiler --profile cases --filter browser_test_scaffold PASS in the p234 full cases suite and alone (with JETPACK_BIN set, as the suite runs it).",
+          "at": "2026-11-17T00:04:07.024Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "browser_test_scaffold"
+          }
+        },
+        {
+          "n": 2,
+          "text": "UI mode shows the test tree, filters, timeline, DOM snapshots, source, logs, errors, console, network, attachments and watch updates from one test run.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p235 batch compiler (dev 1c5b311279), commit 1c5b311279: jet test Compiler --profile cases --filter browser_test_ui_mode PASS 1/1.",
+          "at": "2026-11-17T00:24:46.977Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "browser_test_ui_mode"
+          }
+        },
+        {
+          "n": 3,
+          "text": "A retried test records a bounded trace that opens in the local viewer with action snapshots, source, DOM, logs and network details, and page payloads are left out unless asked for.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p235 batch compiler (dev 1c5b311279), commit 1c5b311279: jet test Compiler --profile cases --filter browser_test_retry_trace PASS 1/1.",
+          "at": "2026-11-17T00:24:48.056Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "browser_test_retry_trace"
+          }
+        },
+        {
+          "n": 4,
+          "text": "Runs across browsers are deterministic in contexts, retries, reporters and failure exit status, and failures keep Jet's diagnostic and source positions.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p235 batch compiler (dev 1c5b311279), commits 22b864b785 + 13f7b77421: jet test Compiler --profile cases --filter browser_test_cross_browser PASS 1/1 on Chromium 152 and Firefox 155.",
+          "at": "2026-11-17T00:24:49.139Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "browser_test_cross_browser"
+          }
+        },
+        {
+          "n": 5,
+          "text": "page.storage_get works on Firefox the same as on Chromium; today it fails with 'browser protocol failed' on Firefox 155. Proof: jet test Compiler --profile cases --filter browser_test_cross_browser reads storage on both browsers.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p235 batch compiler (dev 1c5b311279), commit 13f7b77421 (the Firefox profile directory lives as long as the engine): browser_test_cross_browser reads storage on both browsers, PASS 1/1.",
+          "at": "2026-11-17T00:24:50.240Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "web",
+        "testing"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:52:17.496Z",
+      "updated": "2026-11-17T00:24:52.520Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 5,
+      "completedAt": "2026-11-17T00:24:52.520Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T00:54:55.169Z"
     }
   ]
 }
