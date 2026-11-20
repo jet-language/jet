@@ -26,8 +26,8 @@ stdout.trim: ~ "READY" # the program is running its loop
 step: sh -c 'n=0; while [ ! -f run/jet/jet-flight-{pid:live}.samples ] && [ $n -lt 200 ]; do sleep 0.05; n=$((n+1)); done; stat -c %a run/jet; ls tmp | grep -c jet-flight'
 exit: 1 # grep counts no line
 stdout: = "700\n0\n" # the ring is in the owner-only directory, and none is in the shared one
-step: unshare --user --map-root-user --map-auto sh -c 'for asked in zones heap-request; do touch run/jet/jet-flight-{pid:live}.samples.$asked && chown 1:1 run/jet/jet-flight-{pid:live}.samples.$asked || exit 1; done'
-exit: 0
+step: unshare --user --map-root-user --map-auto sh -c 'mkdir staged && for asked in zones heap-request; do touch staged/jet-flight-{pid:live}.samples.$asked && chown 1:1 staged/jet-flight-{pid:live}.samples.$asked && mv staged/jet-flight-{pid:live}.samples.$asked run/jet/ || exit 1; done'
+exit: 0 # each request is the other user's before a rename puts it where the program looks, so no publication sees it as this user's
 step: sh -c 'if [ "$(stat -c %u run/jet/jet-flight-{pid:live}.samples.zones)" != "$(id -u)" ]; then echo foreign; fi'
 exit: 0
 stdout: = "foreign\n" # the requests belong to another user

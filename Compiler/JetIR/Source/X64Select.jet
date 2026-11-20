@@ -5325,8 +5325,10 @@ ir_x64_asm_function: fn(m: IRModule, f: IRFunction, leaf: IRAsmLeaf, row: Int, l
     x64_pop(code, X64_RBP)
     ret_at: code.bytes.len()
     x64_ret(code)
+    // After `pop rbp` rbp holds its caller's value and the CFA is rsp + 8.
     dwarf_cfa_advance(cfi, body, ret_at)
     dwarf_cfa_def_cfa(cfi, x64_dwarf_register(X64_RSP), 8)
+    dwarf_cfa_same_value(cfi, x64_dwarf_register(X64_RBP))
     lines := [X64LineRow]{}
     if f.line > 0 {
         lines.push(X64LineRow{at: 0, line: f.line})
@@ -5982,12 +5984,17 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
         dwarf_cfa_offset(cfi, x64_dwarf_register(reg), 3 + order)
         cfa_at = saved
     }
-    // At a tail jump, as at the `ret`, the CFA is rsp + 8; the code between
-    // them keeps the body's frame.
+    // At a tail jump, as at the `ret`, the epilogue's pops have restored rbp
+    // and the callee-saved registers, so each holds its caller's value and
+    // the CFA is rsp + 8; the slots they were saved in are below rsp, where
+    // an unwinder reading a sample's copy of the stack finds nothing. The
+    // code between them keeps the body's frame.
     loop jump in e.tails {
         dwarf_cfa_advance(cfi, cfa_at, jump)
         dwarf_cfa_remember_state(cfi)
         dwarf_cfa_def_cfa(cfi, x64_dwarf_register(X64_RSP), 8)
+        dwarf_cfa_same_value(cfi, x64_dwarf_register(X64_RBP))
+        loop reg in al.saved -> dwarf_cfa_same_value(cfi, x64_dwarf_register(reg))
         dwarf_cfa_advance(cfi, jump, jump + 5)
         dwarf_cfa_restore_state(cfi)
         cfa_at = jump + 5
@@ -5997,6 +6004,8 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     dwarf_cfa_advance(cfi, cfa_at, ret_at)
     dwarf_cfa_remember_state(cfi)
     dwarf_cfa_def_cfa(cfi, x64_dwarf_register(X64_RSP), 8)
+    dwarf_cfa_same_value(cfi, x64_dwarf_register(X64_RBP))
+    loop reg in al.saved -> dwarf_cfa_same_value(cfi, x64_dwarf_register(reg))
     dwarf_cfa_advance(cfi, ret_at, ret_at + 1)
     dwarf_cfa_restore_state(cfi)
     // The grow path (ir_x64_stack_grow) runs before the body's frame: the
@@ -6845,6 +6854,27 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     dwarf_cfa_def_cfa_register(frame, 6)
     assert(cfi.len() >= frame.len())
     loop k in 0..<frame.len() -> assert(cfi[k] == frame[k])
+    // At the closing `ret`, after `pop rbp`, the CFA is rsp + 8 (dwarf
+    // register 7) and rbp holds its caller's value.
+    closing := [U8]{}
+    dwarf_cfa_remember_state(closing)
+    dwarf_cfa_def_cfa(closing, 7, 8)
+    dwarf_cfa_same_value(closing, 6)
+    held := false
+    loop start in 0..<(cfi.len() - closing.len() + 1) {
+        same := true
+        loop k in 0..<closing.len() {
+            if cfi[start + k] != closing[k] {
+                same = false
+                break
+            }
+        }
+        if same {
+            held = true
+            break
+        }
+    }
+    assert(held)
 }
 
 // square(x) = (x + 1) * (x + 1), wrapping: no call anywhere, so its values

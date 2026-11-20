@@ -338,7 +338,8 @@ x64_object_zone_spans: fn(functions: [X64CompiledFunction], offsets: [Int], own_
 }
 
 // `main`'s frame: after `push rbx` the CFA is rsp + 16 with rbx below the
-// return address; at the closing `ret`, after `pop rbx`, it is rsp + 8.
+// return address; at the closing `ret`, after `pop rbx`, it is rsp + 8 and
+// rbx holds its caller's value.
 x64_object_main_debug: fn(main: X64CompiledFunction) -> X64FunctionDebug Never! {
     cfi := [U8]{}
     ret_at: main.code.len() - 1
@@ -347,6 +348,7 @@ x64_object_main_debug: fn(main: X64CompiledFunction) -> X64FunctionDebug Never! 
     dwarf_cfa_offset(cfi, x64_dwarf_register(X64_RBX), 2)
     dwarf_cfa_advance(cfi, 1, ret_at)
     dwarf_cfa_def_cfa_offset(cfi, 8)
+    dwarf_cfa_same_value(cfi, x64_dwarf_register(X64_RBX))
     X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: cfi, ranges: [X64VariableRange]{}}
 }
 

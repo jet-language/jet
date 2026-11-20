@@ -23,7 +23,19 @@
 //
 // A segment is one mapping: a guard page, the stack, and its record in the
 // top STACK_SEGMENT_RECORD bytes: the limit and segment record it replaced
-// @0 and @8, its mapping @16 and the mapping's bytes @24.
+// @0 and @8, its mapping @16, the mapping's bytes @24 and its frontier @32,
+// the lowest byte whose page is backed.
+//
+// A segment is backed ahead of the recursion, STACK_SEGMENT_POPULATE at a
+// time, by one MADV_POPULATE_WRITE each, not by a page fault on each 4 KiB
+// page it reaches: a recursion that runs to the budget took about 262,000
+// faults for its 1 GiB. A segment's limit sits STACK_SEGMENT_RED above its
+// frontier until the frontier reaches the guard page, so the check that
+// passes the frontier backs the next stretch and runs its body in place.
+// Backed memory below the stack pointer of the deepest check that ran is at
+// most STACK_SEGMENT_POPULATE + STACK_SEGMENT_RED (2.25 MiB) per thread
+// (stack_segment_back), unless one frame is larger: then it is backed to the
+// 2 MiB boundary below its end.
 //
 // A thread's stack and its segments together hold at most the budget: the
 // soft RLIMIT_STACK, at least STACK_BUDGET_LEAST, at most
@@ -55,7 +67,16 @@ STACK_SEGMENT_RED: I64{262144}
 // arguments and environment and the frames before the first check.
 STACK_SEGMENT_PROBE_SLACK: I64{1048576}
 
-STACK_SEGMENT_RECORD: I64{32}
+// Five words, rounded up so a segment's top stays 16-byte aligned.
+STACK_SEGMENT_RECORD: I64{48}
+
+// How much of a segment one MADV_POPULATE_WRITE backs: one 2 MiB huge page,
+// so a segment that takes huge pages backs whole ones and a stack holds at
+// most about the backed memory one huge-page fault would add. Larger chunks
+// cost the same time per GiB and only hold more memory ahead.
+STACK_SEGMENT_POPULATE: I64{2097152}
+
+STACK_SEGMENT_HUGE_PAGE: I64{2097152}
 
 // The first segment's stack; each deeper one is twice the one it grows
 // from, up to STACK_SEGMENT_MOST.
@@ -63,12 +84,15 @@ STACK_SEGMENT_FIRST: I64{1048576}
 
 STACK_SEGMENT_MOST: I64{268435456}
 
-// A segment of at least this many bytes takes huge pages (MADV_HUGEPAGE).
-// Only a recursion already megabytes deep maps one, and it then faults in
-// 2 MiB at a time instead of 4 KiB, 512 times fewer faults, so a recursion
-// that runs to the budget reaches its overflow report quickly. A thread's
-// own stack and the first segments keep 4 KiB pages (Thread.jet
-// thread_stack_map), so a shallow stack costs no 2 MiB page.
+// A segment of at least this many bytes is a plain private mapping, with no
+// MAP_STACK and no page-size advice (stack_segment_map), so the system's
+// own policy picks its page size: huge pages where they are free, and never
+// a compaction the recursion waits on. MADV_HUGEPAGE asks for that wait
+// (defrag `madvise` or `defer+madvise`): under memory pressure one 1 GiB
+// overflow took seconds in it. Only a recursion already megabytes deep maps
+// such a segment. A thread's own stack and the first segments keep 4 KiB
+// pages (Thread.jet thread_stack_map), so a shallow stack costs no 2 MiB
+// page.
 STACK_SEGMENT_HUGE: I64{4194304}
 
 // The least total stack budget: 1 GiB.
@@ -140,6 +164,16 @@ stack_main_bytes: fn() -> I64 {
     }
     // Nothing this call reaches grows again.
     sync_store(wrapping(tcb + STACK_TCB_LIMIT), I64{0})
+    // The lowest byte the body's frame and the calls it makes without a
+    // check may reach.
+    reach: wrapping(wrapping(sp - need) - STACK_SEGMENT_RED)
+    running: sync_load(wrapping(tcb + STACK_TCB_SEGMENT))
+    if (running != I64{0} && reach >= wrapping(sync_load(wrapping(running + I64{16})) + THREAD_GUARD_BYTES)) {
+        // The frame fits in the running segment, past its frontier: back
+        // the next stretch and run in place.
+        stack_segment_back(tcb, running, reach)
+        return I64{0}
+    }
     record: stack_segment_take(tcb, need)
     if (record == I64{0}) {
         // Refused: the limit stays 0, so the recursion runs on in place
@@ -149,11 +183,36 @@ stack_main_bytes: fn() -> I64 {
         return I64{0}
     }
     sync_store(record, limit)
-    sync_store(wrapping(record + I64{8}), sync_load(wrapping(tcb + STACK_TCB_SEGMENT)))
+    sync_store(wrapping(record + I64{8}), running)
     sync_store(wrapping(tcb + STACK_TCB_SEGMENT), record)
-    low: wrapping(sync_load(wrapping(record + I64{16})) + THREAD_GUARD_BYTES)
-    sync_store(wrapping(tcb + STACK_TCB_LIMIT), wrapping(low + STACK_SEGMENT_RED))
+    // The trampoline's bridge frame and stack arguments sit below the top.
+    stack_segment_back(tcb, record, wrapping(wrapping(wrapping(record - need) - STACK_SEGMENT_RED) - I64{4096}))
     record
+}
+
+// Backs `record`'s segment from its frontier down by at most
+// STACK_SEGMENT_POPULATE, to a huge-page boundary, or further to the
+// boundary below `reach` when that is lower, never below the guard page,
+// and sets the limit STACK_SEGMENT_RED above the new
+// frontier. A kernel that refuses MADV_POPULATE_WRITE (before Linux 5.14,
+// EINVAL) or can't back the pages now leaves them to fault in as the
+// recursion reaches them; the frontier moves on either way.
+stack_segment_back: fn(tcb: I64, record: I64, reach: I64) {
+    low: wrapping(sync_load(wrapping(record + I64{16})) + THREAD_GUARD_BYTES)
+    frontier: sync_load(wrapping(record + I64{32}))
+    // At most one STACK_SEGMENT_POPULATE below the frontier, ending on a
+    // 2 MiB boundary (rounded up, so never more), unless the frame reaches
+    // further: then down to the boundary below its reach.
+    target := wrapping(wrapping(frontier - STACK_SEGMENT_POPULATE) + wrapping(STACK_SEGMENT_HUGE_PAGE - I64{1})) & wrapping(I64{0} - STACK_SEGMENT_HUGE_PAGE)
+    if (reach < target) { target = reach & wrapping(I64{0} - STACK_SEGMENT_HUGE_PAGE) }
+    if (target < low) { target = low }
+    if (target < frontier) {
+        #Unsafe("target..frontier lies inside the segment, this thread's own mapping above its guard page; populating only backs its pages") {
+            _ := os_syscall_i64(I64{28}, target, wrapping(frontier - target), I64{23}, I64{0}, I64{0}, I64{0})
+        }
+        sync_store(wrapping(record + I64{32}), target)
+    }
+    sync_store(wrapping(tcb + STACK_TCB_LIMIT), wrapping(sync_load(wrapping(record + I64{32})) + STACK_SEGMENT_RED))
 }
 
 // The trampoline is back on the stack the running segment grew from: that
@@ -200,23 +259,37 @@ stack_segment_take: fn(tcb: I64, need: I64) -> I64 {
     room: sync_load(wrapping(tcb + STACK_TCB_ROOM)) & I64{-4096}
     if (wrapping(bytes + THREAD_GUARD_BYTES) > room) { bytes = wrapping(room - THREAD_GUARD_BYTES) }
     if (bytes < least) { return I64{0} }
-    mapping := thread_stack_map(bytes)
+    mapping := stack_segment_map(bytes)
     if (mapping < I64{0} && bytes > least) {
         bytes = least
-        mapping = thread_stack_map(bytes)
+        mapping = stack_segment_map(bytes)
     }
     if (mapping < I64{0}) { return I64{0} }
     total: wrapping(bytes + THREAD_GUARD_BYTES)
-    if (bytes >= STACK_SEGMENT_HUGE) {
-        #Unsafe("the fresh segment is this thread's own mapping and madvise only changes its page size; a refused advice keeps 4 KiB pages") {
-            _ := os_syscall_i64(I64{28}, mapping, total, I64{14}, I64{0}, I64{0}, I64{0})
-        }
-    }
     sync_store(wrapping(tcb + STACK_TCB_ROOM), wrapping(sync_load(wrapping(tcb + STACK_TCB_ROOM)) - total))
     record: wrapping(wrapping(mapping + total) - STACK_SEGMENT_RECORD)
     sync_store(wrapping(record + I64{16}), mapping)
     sync_store(wrapping(record + I64{24}), total)
+    sync_store(wrapping(record + I64{32}), record)
     record
+}
+
+// Maps a segment of `bytes` (a page multiple) under a guard page: the
+// mapping's address, or -errno. Below STACK_SEGMENT_HUGE it is a thread
+// stack's mapping (4 KiB pages); from there up a plain one.
+stack_segment_map: fn(bytes: I64) -> I64 {
+    if (bytes < STACK_SEGMENT_HUGE) { return thread_stack_map(bytes) }
+    total: wrapping(bytes + THREAD_GUARD_BYTES)
+    #Unsafe("a fresh private anonymous mapping, owned by this thread's segment chain; its first page becomes the guard") {
+        mapping: os_map_untracked_i64(I64{0}, total, I64{3}, I64{34}, I64{-1}, I64{0})
+        if (mapping < I64{0}) { return mapping }
+        protect: os_syscall_i64(I64{10}, mapping, THREAD_GUARD_BYTES, I64{0}, I64{0}, I64{0}, I64{0})
+        if (protect != I64{0}) {
+            _ := os_unmap_untracked_i64(mapping, total)
+            return protect
+        }
+        return mapping
+    }
 }
 
 // Unmaps the segment of `record`, which no frame runs on, and gives its
