@@ -25,13 +25,14 @@ X64DataExport: struct {
 // tasks (JetDebug Native.jet NativeSession.tasks_text).
 X64_OBSERVE_ROOT_SYMBOL: "jet_rt_observe_root"
 
-// The allocator's words by their module storage names (JetRuntime Alloc.jet),
-// which the runtime object exports as the data symbols x64_debug_eval_symbols
-// names (BuildLibrary.jet ir_build_library): `jet debug` writes them in a
-// stopped program to route an evaluation's allocations to its own heap, and
-// puts them back after (JetDebug NativeEval.jet native_eval_here). Nothing
-// in the program writes them for it.
-X64_DEBUG_EVAL_STORAGE: [String]{"alloc_class_limit", "alloc_check_take_code", "alloc_check_give_code"}
+// The allocator's words and the record/replay mode by their module storage
+// names (JetRuntime Alloc.jet, RecordReplay.jet), which the runtime object
+// exports as the data symbols x64_debug_eval_symbols names (BuildLibrary.jet
+// ir_build_library): `jet debug` writes them in a stopped program to route
+// an evaluation's allocations to its own heap and pause a recording or
+// replay, and puts them back after (JetDebug NativeEval.jet
+// native_eval_routed). Nothing in the program writes them for it.
+X64_DEBUG_EVAL_STORAGE: [String]{"alloc_class_limit", "alloc_check_take_code", "alloc_check_give_code", "replay_mode"}
 
 // The data symbol the runtime object exports its word `storage`
 // (X64_DEBUG_EVAL_STORAGE) as.
@@ -41,3 +42,10 @@ x64_debug_eval_symbol: fn(storage: String) -> String Never! { "jet_rt_{storage}"
 x64_debug_eval_symbols: fn() -> [String] Never! {
     loop storage in X64_DEBUG_EVAL_STORAGE -> x64_debug_eval_symbol(storage)
 }
+
+// The symbol a program built with debug views (IRChecks.debug_views) keeps
+// the drop of a DebugView's [DebugItem] list as (JetIR Build.jet
+// ir_build_program): `jet debug`, which calls a view in the stopped
+// program, calls it on the list the view returned once it has read it
+// (JetDebug NativeEval.jet native_eval_view).
+X64_DEBUG_ITEMS_DROP_SYMBOL: "jet_debug_items_drop"

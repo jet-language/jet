@@ -6,15 +6,20 @@
 // effect, and compiles the program again with that function and an entry
 // that calls it. The session places the new code as `fix` places an edit
 // (NativeFix.jet) and calls it with the captures' bytes read from the frame,
-// then shows the result through the image's debug types. Where the image's
-// runtime exports the allocator's words (JetBackend x64_debug_eval_symbols),
-// the call runs on the stopped thread itself, every other thread stopped
-// (native_eval_here); else in a fork of the stopped program
-// (NativeFork.jet). Either way the program's own values and heap read as
-// they did before. A compiled expression is kept per source line and text,
-// so a condition compiles once and runs at each hit, while the program's
-// sources read as they did when it was compiled (NativeEvaluator.unchanged).
-use jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_DEBUG_EVAL_STORAGE, X64_TRACE_EVENT_EXIT, X64_TRACE_ORIG_RAX, X64_TRACE_RAX, X64_TRACE_RDI, X64_TRACE_RDX, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_resume_to_syscall, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_signal, x64_trace_stop, x64_trace_wait_for, x64_trace_wait_within, x64_trace_write]
+// then shows the result through the image's debug types. The call runs on
+// the stopped thread itself, every other thread stopped, from a room the
+// session maps in the program (native_eval_here); for the call the
+// debugger writes the runtime's allocator words and record/replay mode
+// (JetBackend X64_DEBUG_EVAL_STORAGE) so its allocations come from the room's
+// arena, and writes them back after, so the program's own values and heap
+// read as they did before. A compiled expression is kept per source line
+// and text, so a condition compiles once and runs at each hit, while the
+// program's sources read as they did when it was compiled
+// (NativeEvaluator.unchanged).
+use {
+    native_eval_files: core.files
+    jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_DEBUG_EVAL_STORAGE, X64_TRACE_EVENT_EXIT, X64_TRACE_ORIG_RAX, X64_TRACE_RAX, X64_TRACE_RDI, X64_TRACE_RDX, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, x64_debug_eval_symbols, x64_jetline_find, x64_jetline_line, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_resume_to_syscall, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_signal, x64_trace_stop, x64_trace_wait_for, x64_trace_wait_within, x64_trace_write]
+}
 
 // Why an expression can't be evaluated, as the console shows it after
 // `Can't evaluate `x`: `.
@@ -239,110 +244,13 @@ native_eval_offset: fn(code: NativeEval, plan: NativeFixPlan, name: String) -> I
     None
 }
 
-// Run `code` in a fork of the program `trace` stops, made at the image's
-// `syscall` instruction: its code placed by `plan` near the image's code,
-// the program's trap bytes `sites` and a reverse command's probes `probes`
-// put back, and `captures` (each capture's bytes) passed by address.
-// `typed` holds the captures' debug types.
-native_eval_run: fn(image: NativeImage, trace: X64Trace, sites: [Int:Int], probes: [Int:Int], code: NativeEval, plan: NativeFixPlan, facts: NativeEvalImage, syscall: Int, captures: [[U8]], typed: [Int]) -> NativeEvalValue NativeEvalRefused! {
-    fork: native_fork_make(trace, syscall) ?? return Err(native_eval_refused(err.detail))
-    value: native_eval_in_fork(image, fork, trace.pid, sites, probes, code, plan, facts, captures, typed) ?? {
-        native_fork_end(fork)
-        return Err(err)
-    }
-    native_fork_end(fork)
-    Ok(value)
-}
-
-native_eval_in_fork: fn(image: NativeImage, fork: NativeFork, pid: Int, sites: [Int:Int], probes: [Int:Int], code: NativeEval, plan: NativeFixPlan, facts: NativeEvalImage, captures: [[U8]], typed: [Int]) -> NativeEvalValue NativeEvalRefused! {
-    native_fork_prepare(fork, pid, sites, probes) ?? return Err(native_eval_refused(err.detail))
-    // The region goes where a fix's would, within a rel32 of the image's
-    // code; a taken address moves on.
-    text_end: facts.code.address + facts.code.bytes.len()
-    hint := (text_end + NATIVE_FIX_GAP + NATIVE_FIX_PAGE - 1).div_euclid(NATIVE_FIX_PAGE) * NATIVE_FIX_PAGE
-    base := 0
-    loop _ in 0..<NATIVE_FIX_TRIES {
-        mapped: native_fork_syscall(fork, NATIVE_FORK_SYS_MMAP, [Int]{hint, plan.size, NATIVE_FIX_PROTECTION, NATIVE_FIX_FLAGS, -1, 0}) ?? return Err(native_eval_refused(err.detail))
-        if mapped == hint {
-            base = hint
-            break
-        }
-        hint += NATIVE_FIX_GAP
-    }
-    if base == 0 {
-        return Err(native_eval_refused("there is no room near the program's code for the expression's code"))
-    }
-    if !native_fork_poke(fork, base, native_fix_region(plan, code.edit, facts.symbols, base)) {
-        return Err(native_eval_refused("couldn't write the expression's code in the copy"))
-    }
-    offset: native_eval_entry(code, plan) ?? return Err(native_eval_refused("the compiled expression has no entry"))
-    // The result's cell, then each capture's bytes, below the fork's
-    // scratch room; the call runs below them.
-    least: if code.result.size > 8 -> code.result.size else -> 8
-    cell_size: ((least + 7) >> 3) << 3
-    cell: ((fork.scratch - NATIVE_FORK_RESULT - cell_size) >> 4) << 4
-    if !native_fork_poke(fork, cell, loop _ in 0..<cell_size -> U8{0}) {
-        return Err(native_eval_refused("couldn't write the copy's stack"))
-    }
-    arguments := [Int]{cell}
-    at := cell
-    loop bytes in captures {
-        at = ((at - bytes.len()) >> 4) << 4
-        if !native_fork_poke(fork, at, bytes) {
-            return Err(native_eval_refused("couldn't write the copy's stack"))
-        }
-        arguments.push(at)
-    }
-    if captures.len() > NATIVE_EVAL_CAPTURES {
-        table := [U8]{}
-        loop k in 1..<arguments.len() -> table.extend(native_word_bytes(arguments[k]))
-        at = ((at - table.len()) >> 4) << 4
-        if !native_fork_poke(fork, at, table) {
-            return Err(native_eval_refused("couldn't write the copy's stack"))
-        }
-        arguments = [Int]{cell, at}
-    }
-    // v1 runs the program's own runtime in the copy, so two limits hold:
-    // - a lock another thread held at the stop is never released in the
-    //   copy, which has only the stopped thread; code that takes it waits
-    //   until the budget (NATIVE_FORK_BUDGET_MS, 2 s) ends the call;
-    // - a function value the expression calls runs the image's code for
-    //   it, whatever that code does within the fork's confinement.
-    _ := native_fork_call(fork, image, base + offset, arguments, at - 16) ?? {
-        // A call of a runtime function the image doesn't hold stops at its
-        // trap (native_fix_place_all).
-        if native_fix_absent_at(plan, base, native_fork_pc(fork)) == .Val(why) {
-            return Err(native_eval_refused(why))
-        }
-        return Err(native_eval_refused(err.detail))
-    }
-    memory: NativeMemory{trace: Val(fork.trace), blocks: [NativeBlock]{}}
-    held: native_debug_bytes(memory, cell, cell_size) ?? return Err(native_eval_refused("couldn't read the expression's value"))
-    ty: native_eval_type(image, typed, code.result.name)
-    // A type the image has no DWARF for (a fallible call's Result) shows as
-    // the compile that made the expression's code describes it.
-    value := native_eval_show(image, memory, code.result, ty, held) ?? native_eval_show_compiled(code, memory, held) ?? return Err(native_eval_refused("the image has no debug type to show a `{code.result.name}` with"))
-    // A value whose type has a DebugView shows as `locals` shows it: its
-    // view, run in this same copy, or its fields when the view fails.
-    if ty == .Val(id) && native_debug_view_at(image, id) == .Val(view) {
-        size: native_type_size(image, id)
-        word: native_number(held, 0, 8, X64DebugEncoding.Signed)
-        bytes: if !code.result.inline && size > 8 -> native_debug_bytes(memory, word, size) ?? held.move() else -> held.move()
-        if native_fork_view(fork, image, pid, sites, probes, view, id, bytes) == .Ok(viewed) {
-            value.shown = viewed
-        }
-    }
-    Ok(value)
-}
-
 // An evaluation in the program itself runs from a room the session maps in
 // the program once per run (NativeSession.eval_room), read and written
 // only by the debugger and the evaluation:
 // - at 0, the call (native_eval_room_code): it saves the thread's vector
-//   and floating-point state (xsave), calls the expression's entry with the
-//   words the debugger wrote, stops so the debugger reads the result, calls
-//   the result's drop, puts the state back (its tail), and stops at its
-//   end;
+//   and floating-point state (xsave), calls the entry with the words the
+//   debugger wrote, stops so the debugger reads the result, calls the
+//   result's drop, puts the state back (its tail), and stops at its end;
 // - the take (NATIVE_EVAL_ROOM_TAKE), which hands out blocks of the room's
 //   arena, emptied at each evaluation, as the runtime's checked heap lays
 //   them out, and the give (NATIVE_EVAL_ROOM_GIVE), which leaves a block of
@@ -350,13 +258,15 @@ native_eval_in_fork: fn(image: NativeImage, fork: NativeFork, pid: Int, sites: [
 //   evaluation should only have borrowed, left allocated;
 // - the saved state (NATIVE_EVAL_ROOM_XSAVE), 64-byte aligned, as large as
 //   any CPU's;
-// - the call's words (NATIVE_EVAL_ROOM_DATA), then the result's cell and
-//   the captures' bytes (NATIVE_EVAL_ROOM_PASS);
+// - the call's words (NATIVE_EVAL_ROOM_DATA), then what a call passes: its
+//   result's cell and the bytes its words address (NATIVE_EVAL_ROOM_PASS);
 // - the arena (NATIVE_EVAL_ROOM_ARENA), 4 MiB.
-// No code of the room makes a system call. For the call's run the debugger
-// writes the runtime's allocator words (native_eval_routed), so every
-// allocation and free goes to the room's take and give as checked mode
-// routes them to the checked heap, and writes them back after.
+// No code of the room makes a system call. While an evaluation is in the
+// room (native_eval_enter to native_eval_leave) the debugger has written
+// the runtime's words (native_eval_routed), so every allocation and free
+// goes to the room's take and give, as checked mode routes them to the
+// checked heap, and a recording or a replay pauses: an evaluation neither
+// adds to the recording nor takes from it.
 NATIVE_EVAL_ROOM_TAKE: 512
 
 NATIVE_EVAL_ROOM_GIVE: 768
@@ -375,8 +285,8 @@ NATIVE_EVAL_ROOM_SIZE: 4325376
 // free byte, its end and its start, the count of the program's blocks the
 // evaluation gave back, the call's state (0: not begun; 1: the thread's
 // state saved; 2: the entry running; 3: the result's drop running), the
-// entry, the result's drop (0: none), the result's cell, and
-// the six words the entry is called with.
+// entry, the result's drop (0: none), the result's cell, and the
+// NATIVE_EVAL_WORDS words the entry is called with.
 NATIVE_EVAL_CURSOR: 0
 
 NATIVE_EVAL_END: 8
@@ -394,6 +304,16 @@ NATIVE_EVAL_DROP: 48
 NATIVE_EVAL_CELL: 56
 
 NATIVE_EVAL_ARGS: 64
+
+// The words a call passes in registers: rdi, rsi, rdx, rcx, r8, r9.
+NATIVE_EVAL_WORDS: 6
+
+// How long an evaluation's call may run with no stop before it is stopped
+// and reported.
+NATIVE_EVAL_BUDGET_MS: 2000
+
+// The bytes of a DebugView's result, a [DebugItem] list's header.
+NATIVE_EVAL_ITEMS: 32
 
 // `mov eax, -1; mov edx, -1`: every state component, for xsave and xrstor.
 NATIVE_EVAL_ALL_STATE: [Int]{0xb8, 0xff, 0xff, 0xff, 0xff, 0xba, 0xff, 0xff, 0xff, 0xff}
@@ -538,43 +458,86 @@ NativeEvalHere: struct {
     kept: Int,
 }
 
-// How an evaluation's run in the program went: the value it read, why it
-// failed ("" when it didn't), whether that was the evaluation's own fault,
-// a system call or its budget (`faulted`, which ran the call's tail) and
-// the call's state then, the program's blocks it gave back (`kept`), the
-// signals that came for the program meanwhile (`held`), and whether the
-// call came to its end (`done`) or the program ended (`ended`).
+// One call an evaluation makes from the room (native_eval_room_code):
+// `entry` called with `words` (at most NATIVE_EVAL_WORDS), its result at
+// `cell`, then, when `drop` isn't 0, `drop(cell)` once the debugger has read
+// that result at the middle stop. A `fresh` call empties the arena first
+// (an evaluation's first call); a later one hands out blocks past the ones
+// the evaluation's earlier calls took, whose values are still live.
+NativeEvalCall: struct {
+    entry: Int,
+    words: [Int],
+    drop: Int,
+    cell: Int,
+    fresh: Bool,
+}
+
+// An evaluation's calls in the program, on its stopped thread, every other
+// thread stopped: the room they run from (`room`, its code `layout`), the
+// thread's registers at the stop (`saved`), the stack top below its red
+// zone the calls run on, the trap bytes they step over where they meet one
+// (`traps`), the placed conditions' jumps taken out of the program's code
+// while they run (`lifted`, the bytes put back after), what the runtime's
+// words (X64_DEBUG_EVAL_STORAGE) held before they were routed to the room
+// (`was`), whether a watch is set, the program's blocks the calls gave back
+// (`kept`, NATIVE_EVAL_KEPT), and the signals that came for the program
+// meanwhile (`held`), which it gets once the calls are done.
+NativeEvalRoom: struct {
+    room: Int,
+    layout: NativeEvalCode,
+    saved: [Int],
+    top: Int,
+    traps: [Int:Int],
+    lifted: [NativeCode],
+    was: [Int],
+    watched: Bool,
+    kept: Int{0},
+    held: [Int]{[Int]{}},
+}
+
+// How one call went: why it failed ("" when it didn't), whether that was
+// the call's own fault, a system call or its budget (`faulted`, which ran
+// the room's tail) and the call's state then, whether it waits at the
+// middle stop with its result readable (`middle`), and whether it left the
+// program's heap and state as it found them (`done`: it came to its end,
+// or never began) or the program ended (`ended`). The drive's own state
+// lasts across the middle stop: whether the next stop is the exit of a
+// system call kept from the kernel (`exiting`), whether the budget's
+// SIGSTOP is on its way (`stopping`), whether the tail runs (`failing`),
+// and the text the call wrote to the standard output and error.
 NativeEvalRun: struct {
-    value: NativeEvalValue?,
-    failure: String,
-    faulted: Bool,
-    state: Int,
-    kept: Int,
-    held: [Int],
-    done: Bool,
-    ended: Bool,
+    failure: String{""},
+    faulted: Bool{false},
+    state: Int{0},
+    middle: Bool{false},
+    done: Bool{false},
+    ended: Bool{false},
+    exiting: Bool{false},
+    stopping: Bool{false},
+    failing: Bool{false},
+    text: [U8]{[U8]{}},
 }
 
 // Run `code` in the program `trace` stops, on its stopped thread, every
 // other thread stopped: its code placed by `plan` at `base`, the room
-// (native_eval_room_code) mapped at `room`, the runtime's allocator words
-// (x64_debug_eval_symbols) at `heap_words`, and `captures` (each capture's
-// bytes) passed by address in the room. `typed` holds the captures' debug
-// types.
+// (native_eval_room_code) mapped at `room`, the runtime's words
+// (X64_DEBUG_EVAL_STORAGE) at `words`, and `captures` (each capture's bytes)
+// passed by address in the room. `typed` holds the captures' debug types.
 // The program's trap bytes `sites` and a reverse command's probes `probes`
 // stay, stepped over where the call meets one; the jumps of the conditions
 // `placed` puts in the program's code are taken out while it runs. A value
-// whose type has a DebugView runs its view in a fork made at `syscall`. The
-// thread's registers, its state, the program's heap and its code read as
-// they did before.
-native_eval_here: fn(image: NativeImage, trace: X64Trace, room: Int, heap_words: [Int], code: NativeEval, plan: NativeFixPlan, base: Int, captures: [[U8]], typed: [Int], placed: [NativePlaced], syscall: Int, sites: [Int:Int], probes: [Int:Int], watched: Bool) -> NativeEvalHere NativeEvalRefused! {
+// whose type has a DebugView shows as `locals` shows it: when the image
+// keeps the drop of a view's items (at `items`), the view runs on the
+// result before the result's drop gives it back (native_eval_view); the
+// value shows by its fields when the view fails. The thread's registers,
+// its state, the program's heap and its code read as they did before.
+native_eval_here: fn(image: NativeImage, trace: X64Trace, room: Int, words: [Int], items: Int, code: NativeEval, plan: NativeFixPlan, base: Int, captures: [[U8]], typed: [Int], placed: [NativePlaced], sites: [Int:Int], probes: [Int:Int], watched: Bool) -> NativeEvalHere NativeEvalRefused! {
     entry: native_eval_offset(code, plan, code.entry) ?? return Err(native_eval_refused("the compiled expression has no entry"))
     drop := 0
     if code.drop != "" {
         at: native_eval_offset(code, plan, code.drop) ?? return Err(native_eval_refused("the compiled expression has no drop for its result"))
         drop = base + at
     }
-    saved: x64_trace_registers(trace) ?? return Err(native_eval_refused("couldn't read the program's registers"))
     // The result's cell, then each capture's bytes, then a table of their
     // addresses for more than a call's registers hold.
     least: if code.result.size > 8 -> code.result.size else -> 8
@@ -596,28 +559,134 @@ native_eval_here: fn(image: NativeImage, trace: X64Trace, room: Int, heap_words:
     if NATIVE_EVAL_ROOM_PASS + passed.len() > NATIVE_EVAL_ROOM_ARENA {
         return Err(native_eval_refused("its captures take more than the {NATIVE_EVAL_ROOM_ARENA - NATIVE_EVAL_ROOM_PASS} bytes an evaluation passes"))
     }
-    arena: room + NATIVE_EVAL_ROOM_ARENA
-    words := [U8]{}
-    loop word in ([Int]{arena, room + NATIVE_EVAL_ROOM_SIZE, arena, 0, 0, base + entry, drop, cell}) {
-        words.extend(native_word_bytes(word))
+    ty: native_eval_type(image, typed, code.result.name)
+    view := 0
+    viewed_type := -1
+    if ty == .Val(id) && items != 0 {
+        view = native_debug_view_at(image, id) ?? 0
+        viewed_type = id
     }
-    loop k in 0..<NATIVE_FORK_ARGUMENTS.len() {
-        words.extend(native_word_bytes(if k < arguments.len() -> arguments[k] else -> 0))
+    entered := native_eval_enter(trace, room, words, placed, sites, probes, watched: watched) ?? return Err(err)
+    // With a view, the result's drop waits until the view has run on it.
+    run := native_eval_start(image, trace, entered, NativeEvalCall{entry: base + entry, words: arguments, drop: if view != 0 -> 0 else -> drop, cell: cell, fresh: true}, passed, code.plan, base)
+    value := NativeEvalValue?{None}
+    unread := "couldn't read the expression's value"
+    if run.middle || (run.done && run.failure == "") {
+        if native_eval_here_value(image, trace, code, typed, cell, size) == {
+            .Ok(shown) -> { value = Val(shown) }
+            .Err(refused) -> { unread = refused.message }
+        }
     }
-    loop words.len() < NATIVE_EVAL_ROOM_PASS - NATIVE_EVAL_ROOM_DATA -> words.push(U8{0})
-    words.extend(passed)
-    if !x64_trace_write(trace, room + NATIVE_EVAL_ROOM_DATA, words) {
-        return Err(native_eval_refused("couldn't write the evaluation's words in the program"))
+    if run.middle {
+        run.middle = false
+        native_eval_drive(image, trace, entered, code.plan, base, run)
     }
-    // Every allocation and free of the call goes to the room's take and
-    // give.
-    was: native_eval_swap(trace, heap_words, native_eval_routed(room)) ?? return Err(native_eval_refused("couldn't route the program's allocations to the evaluation's heap"))
+    viewed := String?{None}
+    if view != 0 && run.done && run.failure == "" {
+        // The view borrows the result: the cell's bytes, or the bytes its
+        // word addresses.
+        self_at := cell
+        if !code.result.inline && native_type_size(image, viewed_type) > 8 {
+            self_at = native_number(x64_trace_read(trace, cell, 8) ?? [U8]{0, 0, 0, 0, 0, 0, 0, 0}, 0, 8, X64DebugEncoding.Signed)
+        }
+        list: cell + (((size + 15) >> 4) << 4)
+        looked: native_eval_view(image, trace, entered, view, viewed_type, items, list, loop _ in 0..<NATIVE_EVAL_ITEMS -> U8{0}, self_at, fresh: false)
+        viewed = looked.shown
+        if {
+            looked.run.ended || !looked.run.done -> {
+                run.ended = looked.run.ended
+                run.done = false
+                run.failure = "its DebugView {looked.run.failure}"
+            }
+            drop != 0 -> {
+                dropped: native_eval_start(image, trace, entered, NativeEvalCall{entry: drop, words: [Int]{cell}, drop: 0, cell: cell, fresh: false}, [U8]{}, code.plan, base)
+                if dropped.failure != "" || !dropped.done {
+                    run.ended = dropped.ended
+                    run.done = dropped.done
+                    run.faulted = dropped.faulted
+                    run.state = dropped.state
+                    run.failure = "giving the value back, {dropped.failure}"
+                }
+            }
+        }
+    }
+    left: native_eval_leave(trace, words, entered)
+    if run.ended -> return Err(native_eval_refused(run.failure))
+    if left != "" -> return Err(native_eval_refused(left))
+    if !run.done {
+        return Err(native_eval_refused("{run.failure}; the evaluation couldn't put back the thread's state, so the program can't go on safely"))
+    }
+    kept: if entered.kept > 0 -> "\n{native_eval_kept(entered.kept)}" else -> ""
+    if run.failure != "" {
+        stopped: if run.faulted && run.state >= 2 -> "{run.failure}; the program may keep values alive that the evaluation took references to and could not give back" else -> run.failure
+        return Err(native_eval_refused("{stopped}{kept}"))
+    }
+    shown := value ?? return Err(native_eval_refused("{unread}{kept}"))
+    if viewed == .Val(text) -> shown.shown = text
+    Ok(NativeEvalHere{value: shown, kept: entered.kept})
+}
+
+// The value whose bytes are `value`, of struct type `ty`, as its DebugView
+// at address `view` shows it, run in the program `trace` stops as an
+// evaluation runs (native_eval_here), on a copy of the value in the room;
+// `items` is the image's drop of a view's items. `shown` is None when the
+// view fails or its items can't be read: the value then shows by its
+// fields. `kept` as NativeEvalHere's. Err when the view couldn't put back
+// the program's state, its runtime's words or its registers, or the program
+// ended.
+native_eval_view_here: fn(image: NativeImage, trace: X64Trace, room: Int, words: [Int], items: Int, view: Int, ty: Int, value: [U8], placed: [NativePlaced], sites: [Int:Int], probes: [Int:Int], watched: Bool) -> {shown: String?, kept: Int} NativeEvalRefused! {
+    if NATIVE_EVAL_ITEMS + value.len() > NATIVE_EVAL_ROOM_ARENA - NATIVE_EVAL_ROOM_PASS {
+        return Ok({shown: None, kept: 0})
+    }
+    entered := native_eval_enter(trace, room, words, placed, sites, probes, watched: watched) ?? return Err(err)
+    list: room + NATIVE_EVAL_ROOM_PASS
+    passed := loop _ in 0..<NATIVE_EVAL_ITEMS -> U8{0}
+    loop byte in value -> passed.push(byte)
+    looked: native_eval_view(image, trace, entered, view, ty, items, list, passed, list + NATIVE_EVAL_ITEMS, fresh: true)
+    left: native_eval_leave(trace, words, entered)
+    if looked.run.ended -> return Err(native_eval_refused(looked.run.failure))
+    if left != "" -> return Err(native_eval_refused(left))
+    if !looked.run.done {
+        return Err(native_eval_refused("its DebugView {looked.run.failure}; the view couldn't put back the thread's state, so the program can't go on safely"))
+    }
+    Ok({shown: looked.shown, kept: entered.kept})
+}
+
+// One call of the DebugView at `view` from the `entered` room, on the value
+// at `self_at`, which it borrows as `self`: its [DebugItem] list at `list`
+// (`passed` is written there first), read at the call's middle stop as the
+// value of type `ty` shows (native_debug_view_shown), then given back by
+// the image's drop of a view's items at `items`. `shown` is None when the
+// view failed (a system call, a fault, a trap or its budget; one that
+// failed part way may keep values of the program's alive that it took
+// references to) or its items can't be read. `fresh` as NativeEvalCall's.
+native_eval_view: fn(image: NativeImage, trace: X64Trace, entered: &NativeEvalRoom, view: Int, ty: Int, items: Int, list: Int, passed: [U8], self_at: Int, fresh: Bool) -> {run: NativeEvalRun, shown: String?} Never! {
+    run := native_eval_start(image, trace, entered, NativeEvalCall{entry: view, words: [Int]{list, self_at}, drop: items, cell: list, fresh: fresh}, passed, None, 0)
+    shown := String?{None}
+    if run.middle {
+        shown = native_debug_view_shown(image, NativeMemory{trace: Val(trace), blocks: [NativeBlock]{}}, ty, list)
+        run.middle = false
+        native_eval_drive(image, trace, entered, None, 0, run)
+    }
+    if run.failure != "" -> shown = None
+    {run: run, shown: shown}
+}
+
+// Enter the room mapped at `room` on the stopped thread of the program
+// `trace` stops: its registers read, the runtime's words at `words`
+// (X64_DEBUG_EVAL_STORAGE) routed to the room (native_eval_routed), the
+// program's trap bytes `sites` and a reverse command's probes `probes` to
+// step over, and the jumps of the conditions `placed` puts in the program's
+// code taken out.
+native_eval_enter: fn(trace: X64Trace, room: Int, words: [Int], placed: [NativePlaced], sites: [Int:Int], probes: [Int:Int], watched: Bool) -> NativeEvalRoom NativeEvalRefused! {
+    saved: x64_trace_registers(trace) ?? return Err(native_eval_refused("couldn't read the program's registers"))
     traps := [Int:Int]{}
     loop (address, byte) in sites -> traps[address] = byte
     // A probe where a breakpoint traps replaced the breakpoint's trap byte.
     loop (address, byte) in probes {
         if !traps.has_key(address) -> traps[address] = byte
     }
+    was: native_eval_swap(trace, words, native_eval_routed(room)) ?? return Err(native_eval_refused("couldn't route the program's allocations to the evaluation's heap"))
     // A placed condition's jump would run the condition in the call: the
     // program's own instructions go back while it runs.
     lifted := [NativeCode]{}
@@ -626,57 +695,48 @@ native_eval_here: fn(image: NativeImage, trace: X64Trace, room: Int, heap_words:
         now: x64_trace_read(trace, row.address, row.bytes.len()) ?? [U8]{}
         if now.len() != row.bytes.len() || !x64_trace_write(trace, row.address, row.bytes) {
             loop back in lifted -> _ := x64_trace_write(trace, back.address, back.bytes)
-            _ := native_eval_swap(trace, heap_words, was)
+            _ := native_eval_swap(trace, words, was)
             return Err(native_eval_refused("couldn't take a placed condition's jump out of the program's code"))
         }
         lifted.push(NativeCode{address: row.address, bytes: now})
     }
     below: saved[X64_TRACE_RSP] - NATIVE_DEBUG_RED_ZONE - NATIVE_EVAL_STACK_GAP
     top: below - below % 16
-    call := loop word in saved -> word
-    call[X64_TRACE_RIP] = room
-    call[X64_TRACE_RSP] = top
-    call[X64_TRACE_RAX] = 0
-    call[X64_TRACE_ORIG_RAX] = -1
-    call[NATIVE_EVAL_EFLAGS] = saved[NATIVE_EVAL_EFLAGS] - (saved[NATIVE_EVAL_EFLAGS] & NATIVE_EVAL_FLAGS_CLEARED)
-    layout: native_eval_room_code(room)
-    run := NativeEvalRun{value: None, failure: "couldn't set the program's registers", faulted: false, state: 0, kept: 0, held: [Int]{}, done: false, ended: false}
-    if x64_trace_set_registers(trace, call) {
-        run = native_eval_drive(image, trace, room, layout, code, plan, base, typed, cell, size, top, traps, syscall, sites, probes, watched: watched)
-    }
-    loop back in lifted -> _ := x64_trace_write(trace, back.address, back.bytes)
-    if run.ended -> return Err(native_eval_refused(run.failure))
-    unrouted: native_eval_swap(trace, heap_words, was) != None
-    restored: x64_trace_set_registers(trace, saved)
-    loop signal in run.held -> _ := x64_trace_signal(trace, signal)
-    if !restored -> return Err(native_eval_refused("couldn't put back the program's registers"))
+    Ok(NativeEvalRoom{room: room, layout: native_eval_room_code(room), saved: saved, top: top, traps: traps, lifted: lifted, was: was, watched: watched})
+}
+
+// Leave the `entered` room: the placed conditions' jumps put back, the
+// runtime's words at `words` as they were, the thread's registers as they
+// were at the stop, then the signals that came for the program meanwhile
+// sent again. Why the program can't go on ("" when it can): the words or
+// the registers couldn't be put back.
+native_eval_leave: fn(trace: X64Trace, words: [Int], entered: NativeEvalRoom) -> String Never! {
+    loop back in entered.lifted -> _ := x64_trace_write(trace, back.address, back.bytes)
+    unrouted: native_eval_swap(trace, words, entered.was) != None
+    restored: x64_trace_set_registers(trace, entered.saved)
+    loop signal in entered.held -> _ := x64_trace_signal(trace, signal)
+    if !restored -> return "couldn't put back the program's registers"
     if !unrouted {
-        return Err(native_eval_refused("couldn't put back the program's allocator words, so the program can't go on safely"))
+        return "couldn't put back the program's allocator words, so the program can't go on safely"
     }
-    if !run.done {
-        return Err(native_eval_refused("{run.failure}; the evaluation couldn't put back the thread's state, so the program can't go on safely"))
-    }
-    kept: if run.kept > 0 -> "\n{native_eval_kept(run.kept)}" else -> ""
-    if run.failure != "" {
-        stopped: if run.faulted && run.state >= 2 -> "{run.failure}; the program may keep values alive that the evaluation took references to and could not give back" else -> run.failure
-        return Err(native_eval_refused("{stopped}{kept}"))
-    }
-    value: run.value ?? return Err(native_eval_refused("couldn't read the expression's value{kept}"))
-    Ok(NativeEvalHere{value: value, kept: run.kept})
+    ""
 }
 
-// The line that says an evaluation gave back `count` of the program's
-// blocks (NATIVE_EVAL_KEPT).
-native_eval_kept: fn(count: Int) -> String Never! {
-    "The evaluation gave back {count} of the program's own heap blocks, which it should only have borrowed; they stay allocated (a fault of the debugger's)"
+// The addresses of the runtime's words an evaluation routes
+// (x64_debug_eval_symbols) in the image whose symbols are `symbols`, or None
+// when its runtime doesn't export one of them.
+native_eval_words: fn(symbols: NativeFixSymbols) -> [Int]? Never! {
+    words: loop symbol in x64_debug_eval_symbols() -> native_fix_runtime_address(symbols, symbol)
+    if words.contains(0) -> return None
+    Val(words)
 }
 
-// What the runtime's allocator words (X64_DEBUG_EVAL_STORAGE, in its order)
-// hold while an evaluation runs from the room at `room`: a 0 class limit,
-// so every allocation and free leaves the class path for the code words,
-// and the room's take and give in them.
+// What the runtime's words (X64_DEBUG_EVAL_STORAGE, in its order) hold while
+// an evaluation is in the room at `room`: a 0 class limit, so every
+// allocation and free leaves the class path for the code words, the room's
+// take and give in those, and the record/replay mode off.
 native_eval_routed: fn(room: Int) -> [Int] Never! {
-    [Int]{0, room + NATIVE_EVAL_ROOM_TAKE, room + NATIVE_EVAL_ROOM_GIVE}
+    [Int]{0, room + NATIVE_EVAL_ROOM_TAKE, room + NATIVE_EVAL_ROOM_GIVE, 0}
 }
 
 // Write each of `values` at the stopped program's word at the address of
@@ -694,138 +754,186 @@ native_eval_swap: fn(trace: X64Trace, words: [Int], values: [Int]) -> [Int]? Nev
     Val(was)
 }
 
-// The call's run in the program (native_eval_here), under PTRACE_SYSCALL:
-// each system call stops at its entry, before the kernel runs it. A write
-// to the standard output or error is kept from them and its text read (a
-// panic's message), as though it was written; any other call, a fault, or
-// the budget's end (NATIVE_FORK_BUDGET_MS of no stop) fails the
-// evaluation, which then runs the call's tail from `top`. A stop at a trap
-// byte of `traps` steps over it; a watch's leaves the watch's debug status
-// clear. The result in the cell at `cell` (`size` bytes) is read at the
-// middle stop, with a drop, else at the end.
-native_eval_drive: fn(image: NativeImage, trace: X64Trace, room: Int, layout: NativeEvalCode, code: NativeEval, plan: NativeFixPlan, base: Int, typed: [Int], cell: Int, size: Int, top: Int, traps: [Int:Int], syscall: Int, sites: [Int:Int], probes: [Int:Int], watched: Bool) -> NativeEvalRun Never! {
-    run := NativeEvalRun{value: None, failure: "", faulted: false, state: 0, kept: 0, held: [Int]{}, done: false, ended: false}
-    // Whether the next stop is the exit of a call kept from the kernel,
-    // whether the budget's SIGSTOP is on its way, and whether the tail runs.
-    exiting := false
-    stopping := false
-    failing := false
-    text := [U8]{}
+// Make `call` from the `entered` room, with `passed` (the call's cell, then
+// the bytes its words address) written at its cell: the call's words
+// written, the thread sent to the room's code at the stack's top, and
+// driven (native_eval_drive) to its middle stop or its end. `plan` and
+// `base` place the evaluation's code, which names the runtime function a
+// trap of its own stands for (native_fix_absent_at).
+native_eval_start: fn(image: NativeImage, trace: X64Trace, entered: &NativeEvalRoom, call: NativeEvalCall, passed: [U8], plan: NativeFixPlan?, base: Int) -> NativeEvalRun Never! {
+    run := NativeEvalRun{done: true}
+    room: entered.room
+    arena: room + NATIVE_EVAL_ROOM_ARENA
+    // A later call leaves the arena's next free byte as it is.
+    first: if call.fresh -> NATIVE_EVAL_CURSOR else -> NATIVE_EVAL_END
+    head: [Int]{arena, room + NATIVE_EVAL_ROOM_SIZE, arena, 0, 0, call.entry, call.drop, call.cell}
+    words := [U8]{}
+    loop k in (first >> 3)..<head.len() -> words.extend(native_word_bytes(head[k]))
+    loop k in 0..<NATIVE_EVAL_WORDS {
+        words.extend(native_word_bytes(if k < call.words.len() -> call.words[k] else -> 0))
+    }
+    // A cell at the pass area's start is written with the words, at once.
+    joined: call.cell == room + NATIVE_EVAL_ROOM_PASS
+    if joined {
+        loop words.len() < NATIVE_EVAL_ROOM_PASS - NATIVE_EVAL_ROOM_DATA - first {
+            words.push(U8{0})
+        }
+        loop byte in passed -> words.push(byte)
+    }
+    if !x64_trace_write(trace, room + NATIVE_EVAL_ROOM_DATA + first, words) || (!joined && passed.len() > 0 && !x64_trace_write(trace, call.cell, passed)) {
+        run.failure = "couldn't write the evaluation's words in the program"
+        return run
+    }
+    registers := loop word in entered.saved -> word
+    registers[X64_TRACE_RIP] = room
+    registers[X64_TRACE_RSP] = entered.top
+    registers[X64_TRACE_RAX] = 0
+    registers[X64_TRACE_ORIG_RAX] = -1
+    registers[NATIVE_EVAL_EFLAGS] = entered.saved[NATIVE_EVAL_EFLAGS] - (entered.saved[NATIVE_EVAL_EFLAGS] & NATIVE_EVAL_FLAGS_CLEARED)
+    if !x64_trace_set_registers(trace, registers) {
+        run.failure = "couldn't set the program's registers"
+        return run
+    }
+    run.done = false
+    native_eval_drive(image, trace, entered, plan, base, run)
+    run
+}
+
+// The line that says an evaluation gave back `count` of the program's
+// blocks (NATIVE_EVAL_KEPT).
+native_eval_kept: fn(count: Int) -> String Never! {
+    "The evaluation gave back {count} of the program's own heap blocks, which it should only have borrowed; they stay allocated (a fault of the debugger's)"
+}
+
+// A call's run in the program from the `entered` room (native_eval_start),
+// under PTRACE_SYSCALL: each system call stops at its entry, before the
+// kernel runs it. A write to the standard output or error is kept from
+// them and its text read (a panic's message), as though it was written;
+// any other call, a fault, or the budget's end (NATIVE_EVAL_BUDGET_MS of
+// no stop) fails the call, which then runs the room's tail from the
+// stack's top. A stop at a trap byte of the room's `traps` steps over it; a
+// watch's leaves the watch's debug status clear. It returns at the middle
+// stop (`run.middle`), where the caller reads the call's result and drives
+// it on, and once the call is done, failed or the program ended.
+native_eval_drive: fn(image: NativeImage, trace: X64Trace, entered: &NativeEvalRoom, plan: NativeFixPlan?, base: Int, run: &NativeEvalRun) Never! {
+    room: entered.room
     loop _ in 0..<NATIVE_EVAL_MOST_STOPS {
         // The tail makes no system call.
-        resumed: if failing -> x64_trace_resume(trace, X64TraceResume.Run, 0) else -> x64_trace_resume_to_syscall(trace, 0)
+        resumed: if run.failing -> x64_trace_resume(trace, X64TraceResume.Run, 0) else -> x64_trace_resume_to_syscall(trace, 0)
         if !resumed {
             run.failure = "the program can't be resumed"
-            return run
+            return
         }
-        waited: x64_trace_wait_within(trace, trace.thread, NATIVE_FORK_BUDGET_MS)
+        waited: x64_trace_wait_within(trace, trace.thread, NATIVE_EVAL_BUDGET_MS)
         if waited == None {
-            if stopping || failing {
+            if run.stopping || run.failing {
                 run.failure = "the evaluation can't be stopped"
-                return run
+                return
             }
-            stopping = true
+            run.stopping = true
             _ := x64_trace_stop(trace, trace.thread)
         }
         status: waited ?? x64_trace_wait_for(trace, trace.thread)
         if status < 0 || status & 0xff != 0x7f || ((status >> 8) & 0xff == NATIVE_DEBUG_SIGTRAP && (status >> 16) == X64_TRACE_EVENT_EXIT) {
             run.failure = "the program ended while the evaluation ran"
             run.ended = true
-            return run
+            return
         }
         signal: (status >> 8) & 0xff
         registers := x64_trace_registers(trace) ?? {
             run.failure = "couldn't read the program's registers"
-            return run
+            return
         }
         pc: registers[X64_TRACE_RIP]
         trapped: signal == NATIVE_DEBUG_SIGTRAP
         why := ""
         if {
-            trapped && exiting -> {
-                exiting = false
+            trapped && run.exiting -> {
+                run.exiting = false
                 next
             }
             trapped && registers[X64_TRACE_ORIG_RAX] >= 0 -> {
                 number: registers[X64_TRACE_ORIG_RAX]
                 output: registers[X64_TRACE_RDI]
                 if number == NATIVE_EVAL_SYS_WRITE && (output == 1 || output == 2) {
-                    room_left: NATIVE_EVAL_TEXT - text.len()
+                    room_left: NATIVE_EVAL_TEXT - run.text.len()
                     count: if registers[X64_TRACE_RDX] < room_left -> registers[X64_TRACE_RDX] else -> room_left
                     if count > 0 {
-                        text.extend(x64_trace_read(trace, registers[X64_TRACE_RSI], count) ?? [U8]{})
+                        run.text.extend(x64_trace_read(trace, registers[X64_TRACE_RSI], count) ?? [U8]{})
                     }
                     registers[X64_TRACE_ORIG_RAX] = -1
                     registers[X64_TRACE_RAX] = registers[X64_TRACE_RDX]
                     if !x64_trace_set_registers(trace, registers) {
                         run.failure = "couldn't set the program's registers"
-                        return run
+                        return
                     }
-                    exiting = true
+                    run.exiting = true
                     next
                 }
-                why = if text.len() > 0 -> "the evaluation failed: {native_eval_text(text)}" else -> "the evaluation made system call {number}, which an evaluation may not make, at {native_fork_place(image, pc)}"
+                why = if run.text.len() > 0 -> "the evaluation failed: {native_eval_text(run.text)}" else -> "the evaluation made system call {number}, which an evaluation may not make, at {native_eval_place(image, pc)}"
             }
-            trapped && pc - 1 == room + layout.middle -> {
-                native_eval_read(image, trace, code, typed, cell, size, syscall, sites, probes, run)
-                next
+            trapped && pc - 1 == room + entered.layout.middle -> {
+                run.middle = true
+                return
             }
-            trapped && pc - 1 == room + layout.end -> {
-                if !failing && code.drop == "" {
-                    native_eval_read(image, trace, code, typed, cell, size, syscall, sites, probes, run)
-                }
-                run.kept = native_number(x64_trace_read(trace, room + NATIVE_EVAL_ROOM_DATA + NATIVE_EVAL_KEPT, 8) ?? [U8]{0, 0, 0, 0, 0, 0, 0, 0}, 0, 8, X64DebugEncoding.Signed)
+            trapped && pc - 1 == room + entered.layout.end -> {
+                kept: x64_trace_read(trace, room + NATIVE_EVAL_ROOM_DATA + NATIVE_EVAL_KEPT, 8) ?? [U8]{0, 0, 0, 0, 0, 0, 0, 0}
+                entered.kept += native_number(kept, 0, 8, X64DebugEncoding.Signed)
                 run.done = true
-                if stopping -> native_eval_absorb(trace, run)
-                return run
+                if run.stopping -> native_eval_absorb(trace, entered)
+                return
             }
-            trapped && traps.has_key(pc - 1) -> {
-                why = native_eval_step_over(image, trace, pc - 1, traps.get(pc - 1) ?? NATIVE_DEBUG_TRAP, run)
-                if run.ended -> return run
+            trapped && entered.traps.has_key(pc - 1) -> {
+                why = native_eval_step_over(image, trace, pc - 1, entered.traps.get(pc - 1) ?? NATIVE_DEBUG_TRAP, entered, run)
+                if run.ended {
+                    return
+                }
                 if why == "" -> next
             }
-            trapped && watched -> {
+            trapped && entered.watched -> {
                 // A watch's trap: the call wrote a watched place.
                 _ := x64_trace_set_debug_register(trace, 6, 0)
                 next
             }
             trapped -> {
-                why = "the evaluation stopped at a trap at {native_fork_place(image, pc - 1)}"
+                why = "the evaluation stopped at a trap at {native_eval_place(image, pc - 1)}"
             }
-            signal == NATIVE_DEBUG_SIGSTOP && stopping -> {
-                stopping = false
-                if failing -> next
-                why = "the evaluation ran past its {NATIVE_FORK_BUDGET_MS /% 1000} s budget, at {native_fork_place(image, pc)}"
+            signal == NATIVE_DEBUG_SIGSTOP && run.stopping -> {
+                run.stopping = false
+                if run.failing -> next
+                why = "the evaluation ran past its {NATIVE_EVAL_BUDGET_MS /% 1000} s budget, at {native_eval_place(image, pc)}"
             }
             NATIVE_EVAL_FAULTS.contains(signal) -> {
-                why = native_fix_absent_at(plan, base, pc) ?? "the evaluation stopped with {native_debug_signal_name(signal)} at {native_fork_place(image, pc)}"
+                absent := String?{None}
+                if plan == .Val(placed) -> absent = native_fix_absent_at(placed, base, pc)
+                why = absent ?? "the evaluation stopped with {native_debug_signal_name(signal)} at {native_eval_place(image, pc)}"
             }
             else -> {
-                // A signal for the program: it gets it once the call is done.
-                run.held.push(signal)
+                // A signal for the program: it gets it once the calls are
+                // done.
+                entered.held.push(signal)
                 next
             }
         }
-        if failing {
+        if run.failing {
             run.failure = "{run.failure}; then, putting the program's state back, {why}"
-            return run
+            return
         }
-        // The tail puts the thread's state back.
-        failing = true
+        // The tail puts the heap and the thread's state back.
+        run.failing = true
         run.faulted = true
         state: x64_trace_read(trace, room + NATIVE_EVAL_ROOM_DATA + NATIVE_EVAL_STATE, 1) ?? [U8]{U8{3}}
         run.state = Int{state[0]}
-        registers[X64_TRACE_RIP] = room + layout.tail
-        registers[X64_TRACE_RSP] = top
+        registers[X64_TRACE_RIP] = room + entered.layout.tail
+        registers[X64_TRACE_RSP] = entered.top
         registers[X64_TRACE_ORIG_RAX] = -1
         if !x64_trace_set_registers(trace, registers) {
             run.failure = "{why}; and couldn't set the program's registers"
-            return run
+            return
         }
         run.failure = why.move()
     }
     run.failure = "the evaluation stopped at the debugger's traps more than {NATIVE_EVAL_MOST_STOPS} times"
-    run
 }
 
 // The text an evaluation wrote, as its failure shows it.
@@ -834,34 +942,14 @@ native_eval_text: fn(text: [U8]) -> String Never! {
     "{shown.trim()}"
 }
 
-// Read the result at `cell` into `run`, else say why it can't be read
-// there.
-native_eval_read: fn(image: NativeImage, trace: X64Trace, code: NativeEval, typed: [Int], cell: Int, size: Int, syscall: Int, sites: [Int:Int], probes: [Int:Int], run: &NativeEvalRun) Never! {
-    if native_eval_here_value(image, trace, code, typed, cell, size, syscall, sites, probes) == {
-        .Ok(value) -> { run.value = Val(value) }
-        .Err(refused) -> { run.failure = refused.message }
-    }
-}
-
 // The result in the cell at `cell` (`size` bytes) of the program `trace`
-// stops in its evaluation, shown as native_eval_in_fork shows it. A value
-// whose type has a DebugView runs the view in a fork made at `syscall`, as
-// `locals` does; it shows by its fields when the view fails.
-native_eval_here_value: fn(image: NativeImage, trace: X64Trace, code: NativeEval, typed: [Int], cell: Int, size: Int, syscall: Int, sites: [Int:Int], probes: [Int:Int]) -> NativeEvalValue NativeEvalRefused! {
+// stops in its evaluation, shown through the image's debug types, else
+// those of the compile that made `code`.
+native_eval_here_value: fn(image: NativeImage, trace: X64Trace, code: NativeEval, typed: [Int], cell: Int, size: Int) -> NativeEvalValue NativeEvalRefused! {
     memory: NativeMemory{trace: Val(trace), blocks: [NativeBlock]{}}
     held: native_debug_bytes(memory, cell, size) ?? return Err(native_eval_refused("couldn't read the expression's value"))
     ty: native_eval_type(image, typed, code.result.name)
-    value := native_eval_show(image, memory, code.result, ty, held) ?? native_eval_show_compiled(code, memory, held) ?? return Err(native_eval_refused("the image has no debug type to show a `{code.result.name}` with"))
-    if ty == .Val(id) && native_debug_view_at(image, id) == .Val(view) {
-        viewed: native_type_size(image, id)
-        word: native_number(held, 0, 8, X64DebugEncoding.Signed)
-        bytes: if !code.result.inline && viewed > 8 -> native_debug_bytes(memory, word, viewed) ?? held.move() else -> held.move()
-        fork: native_fork_make(trace, syscall) ?? return Ok(value)
-        if native_fork_view(fork, image, trace.pid, sites, probes, view, id, bytes) == .Ok(text) {
-            value.shown = text
-        }
-        native_fork_end(fork)
-    }
+    value: native_eval_show(image, memory, code.result, ty, held) ?? native_eval_show_compiled(code, memory, held) ?? return Err(native_eval_refused("the image has no debug type to show a `{code.result.name}` with"))
     Ok(value)
 }
 
@@ -869,12 +957,12 @@ native_eval_here_value: fn(image: NativeImage, trace: X64Trace, code: NativeEval
 // byte is `original`, and plant the trap again: "" when the instruction
 // ran, else why the evaluation fails there. A `syscall` there is the
 // call's system call, which the step would make.
-native_eval_step_over: fn(image: NativeImage, trace: X64Trace, address: Int, original: Int, run: &NativeEvalRun) -> String Never! {
+native_eval_step_over: fn(image: NativeImage, trace: X64Trace, address: Int, original: Int, entered: &NativeEvalRoom, run: &NativeEvalRun) -> String Never! {
     registers := x64_trace_registers(trace) ?? return "couldn't read the program's registers"
     if !x64_trace_write(trace, address, [U8]{U8{original}}) {
-        return "couldn't step over a breakpoint at {native_fork_place(image, address)}"
+        return "couldn't step over a breakpoint at {native_eval_place(image, address)}"
     }
-    why := if native_fork_is_syscall(trace, address) -> "the evaluation made system call {registers[X64_TRACE_RAX]}, which an evaluation may not make, at {native_fork_place(image, address)}" else -> ""
+    why := if native_eval_is_syscall(trace, address) -> "the evaluation made system call {registers[X64_TRACE_RAX]}, which an evaluation may not make, at {native_eval_place(image, address)}" else -> ""
     registers[X64_TRACE_RIP] = address
     if why == "" && !x64_trace_set_registers(trace, registers) {
         why = "couldn't set the program's registers"
@@ -896,13 +984,13 @@ native_eval_step_over: fn(image: NativeImage, trace: X64Trace, address: Int, ori
         if {
             signal == NATIVE_DEBUG_SIGTRAP -> stepped = true
             NATIVE_EVAL_FAULTS.contains(signal) -> {
-                why = "the evaluation stopped with {native_debug_signal_name(signal)} at {native_fork_place(image, address)}"
+                why = "the evaluation stopped with {native_debug_signal_name(signal)} at {native_eval_place(image, address)}"
             }
-            else -> run.held.push(signal)
+            else -> entered.held.push(signal)
         }
     }
     if why == "" && !stepped {
-        why = "the evaluation couldn't step over a breakpoint at {native_fork_place(image, address)}"
+        why = "the evaluation couldn't step over a breakpoint at {native_eval_place(image, address)}"
     }
     _ := x64_trace_write(trace, address, [U8]{U8{NATIVE_DEBUG_TRAP}})
     why
@@ -911,7 +999,7 @@ native_eval_step_over: fn(image: NativeImage, trace: X64Trace, address: Int, ori
 // Take the budget's SIGSTOP, which came after the call ended, so the
 // program doesn't stop on it: it stops the thread before any instruction
 // runs. Any other signal on its way is held for the program.
-native_eval_absorb: fn(trace: X64Trace, run: &NativeEvalRun) Never! {
+native_eval_absorb: fn(trace: X64Trace, entered: &NativeEvalRoom) Never! {
     loop _ in 0..<8 {
         if !x64_trace_resume(trace, X64TraceResume.Run, 0) {
             return
@@ -924,8 +1012,38 @@ native_eval_absorb: fn(trace: X64Trace, run: &NativeEvalRun) Never! {
         if signal == NATIVE_DEBUG_SIGSTOP || signal == NATIVE_DEBUG_SIGTRAP {
             return
         }
-        run.held.push(signal)
+        entered.held.push(signal)
     }
+}
+
+// The first `syscall` instruction (0f 05) of the image's `code`, found in
+// its bytes, that the stopped program's code still holds (a planted
+// breakpoint byte doesn't match): one read of the program per candidate,
+// not a scan of its code. None when none is found. Its bytes run as
+// `syscall` wherever they sit in an instruction.
+native_eval_syscall_at: fn(trace: X64Trace, code: NativeCode) -> Int? Never! {
+    if code.bytes.len() < 2 -> return None
+    loop k in 0..<code.bytes.len() - 1 {
+        first: Int{code.bytes[k]}
+        second: Int{code.bytes[k + 1]}
+        if first != 0x0f || second != 0x05 -> next
+        if native_eval_is_syscall(trace, code.address + k) -> return Val(code.address + k)
+    }
+    None
+}
+
+// Whether the stopped program's code at `address` reads `syscall` now.
+native_eval_is_syscall: fn(trace: X64Trace, address: Int) -> Bool Never! {
+    bytes: x64_trace_read(trace, address, 2) ?? return false
+    bytes.len() == 2 && Int{bytes[0]} == 0x0f && Int{bytes[1]} == 0x05
+}
+
+// Where `pc` is, in Jet terms when the line table knows it.
+native_eval_place: fn(image: NativeImage, pc: Int) -> String Never! {
+    index: x64_jetline_find(image.lines, pc)
+    if index < 0 -> return native_debug_hex(pc)
+    function: image.lines.functions[index]
+    "{function.name}() at {native_eval_files.basename(function.file)}:{x64_jetline_line(image.lines, function, pc) ?? 0}"
 }
 
 // Map `size` bytes of code and data at `hint` in the program `trace`
@@ -1164,9 +1282,9 @@ native_log_shown: fn(image: NativeImage, memory: NativeMemory, result: NativeEva
     assert(layout.bytes.len() <= NATIVE_EVAL_ROOM_XSAVE)
 }
 
-#Test("an evaluation routes the class limit to 0 and the code words to the room's take and give") {
+#Test("an evaluation routes the class limit to 0, the code words to the room's take and give, and the replay mode off") {
     room: 0x7000_0000_0000
-    assert_eq(native_eval_routed(room), [Int]{0, room + NATIVE_EVAL_ROOM_TAKE, room + NATIVE_EVAL_ROOM_GIVE})
+    assert_eq(native_eval_routed(room), [Int]{0, room + NATIVE_EVAL_ROOM_TAKE, room + NATIVE_EVAL_ROOM_GIVE, 0})
     assert_eq(native_eval_routed(room).len(), X64_DEBUG_EVAL_STORAGE.len())
 }
 

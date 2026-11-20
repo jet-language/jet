@@ -2,9 +2,9 @@
 // at a stop is compiled with the program, as its build compiled it (its
 // optimization level, the same deep checks, debug info), as a function of
 // the locals it reads, built as a root with an entry that calls it (JetEval
-// jet_eval_native_wrapper); the session places that code in a fork of the
-// stopped program and calls it there. Where every local the expression's
-// names may read is a value no move empties, live at the stop
+// jet_eval_native_wrapper); the session places that code next to the
+// stopped program's and calls it in the program itself. Where every local
+// the expression's names may read is a value no move empties, live at the stop
 // (jet_cli_debug_eval_params), the expression's function takes them as the
 // image's debug types spell them. The session's held checks, which open in
 // the background from the session's start (jet_cli_debug_eval_held_start),
@@ -46,9 +46,9 @@ use {
     debug_eval_time: core.time
     jet_debug.[NATIVE_EVAL_CAPTURES, NativeEval, NativeEvalBinder, NativeEvalPart, NativeEvalRefused, NativeEvaluator, NativeFixEdit, native_eval_name_byte, native_eval_names]
     jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverEvalAsk, JetDriverHeldEval, JetDriverIceRow, JetDriverLoweringInputs, jet_driver_check_failures, jet_driver_checked_declarations, jet_driver_declares_workspace, jet_driver_entry_root_path, jet_driver_held_eval_append, jet_driver_held_eval_check, jet_driver_held_eval_open, jet_driver_inline_package, jet_driver_is_project_configuration]
-    jet_eval.[jet_eval_native_add, jet_eval_native_drop, jet_eval_native_wrapper]
+    jet_eval.[jet_eval_native_add, jet_eval_native_wrapper]
     jet_foundation.[COMMENT_PREFIX, MODULE_CORE_PREFIX, BuildOptions, CompilerThreads, DeclTable, DeepChecks, FnBody, StmtKind, TTypeDef, Type, body_type, deep_checks_flags, foundation_named_type, name_rows_get_text, name_rows_set, type_name, type_unqualified_nominals]
-    jet_ir.[IRBuildResult, IRModule, IRProgram, IRTypeKind, ir_build_held_root, ir_eval_place_refusal, ir_held_append, ir_held_program, ir_module_new, ir_pointer_row, ir_untag, ir_x64_compile_module_logged, ir_x64_debug_program]
+    jet_ir.[IRBuildResult, IRModule, IRProgram, IRTypeKind, ir_build_held_root, ir_cell_drop, ir_eval_place_refusal, ir_held_append, ir_held_program, ir_module_new, ir_pointer_row, ir_untag, ir_x64_compile_module_logged, ir_x64_debug_program]
     jet_parser.[parse_type_text]
     jet_sema.[SemaEvalProbeAnswer, sema_eval_probe_function, sema_eval_probe_parse, sema_ownership_type_is_copy]
 }
@@ -1587,12 +1587,9 @@ jet_cli_debug_eval_native: fn(built: &&IRModule, key: String, names: [String], v
     added: jet_eval_native_add(program, wrapper)
     program.kept.push(added)
     // A result that holds references gives them back once the session has
-    // read it, when the expression runs in the program itself.
+    // read it.
     drop: if program.types[result_row].drop != "" -> JET_CLI_DEBUG_EVAL_DROP else -> ""
-    if drop != "" {
-        dropper: jet_eval_native_drop(program, drop, result_row, pointer)
-        program.kept.push(jet_eval_native_add(program, dropper))
-    }
+    if drop != "" -> program.kept.push(ir_cell_drop(program, drop, result_row))
     selected: ir_x64_compile_module_logged(program, threads, [String]{})
     if selected.errors.len() > 0 {
         return Err(jet_cli_debug_eval_refused("the compiler couldn't build it: {selected.errors[0]}"))

@@ -117,7 +117,11 @@ REPLAY_SELECT_NONE: I64{-1}
 
 REPLAY_SELECT_CLOSED: I64{-2}
 
-// Off, recording or replaying, set once at the start.
+// Off, recording or replaying, set once at the start; off while a
+// debugger's evaluation runs, which writes it in the stopped program and
+// puts it back after (the runtime object exports it, JetBackend
+// X64_DEBUG_EVAL_STORAGE): the evaluation adds no event to a recording and
+// takes none from a replay.
 replay_mode := I64{0}
 
 // State64: turn0, events8, eventCount16 (a replay's), data24, dataUsed32 (a

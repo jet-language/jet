@@ -967,30 +967,32 @@ the optimization level of its build, which the image's debug information
 names (`Jet native backend (O2)`), so the code around the expression is the
 code the program runs, with that function, with the locals' bytes read from
 the frame. It runs in the stopped program itself, on the selected thread,
-when the image's runtime exports its allocator words
-(`jet_rt_alloc_class_limit`, `jet_rt_alloc_check_take_code` and
-`jet_rt_alloc_check_give_code`, data symbols every image that allocates holds;
-nothing in the program writes them for the debugger, so a program no
-debugger touches pays nothing for them): the debugger maps the
-expression's code and a room beside the program's code once per run of the
-program, sets the thread to call it from that room with the other threads
-stopped, and puts the thread's registers, its floating-point state and the
-code the debugger planted back after it. For the call the debugger writes
-the allocator words, as checked mode routes the heap, so the call's
+when the image's runtime exports its allocator words and its record/replay
+mode (`jet_rt_alloc_class_limit`, `jet_rt_alloc_check_take_code`,
+`jet_rt_alloc_check_give_code` and `jet_rt_replay_mode`, data symbols every image
+that allocates holds; nothing in the program writes them for the debugger,
+so a program no debugger touches pays nothing for them): the debugger maps
+the expression's code and a room beside the program's code once per run of
+the program, sets the thread to call it from that room with the other
+threads stopped, and puts the thread's registers, its floating-point state
+and the code the debugger planted back after it. For the call the debugger
+writes the allocator words, as checked mode routes the heap, so the call's
 allocations come from a bump arena in the room, reset each evaluation, and
 writes them back after: the program's heap is unchanged; a block of the
-program's own that the call gives back stays
-allocated and is counted, and the next report says so. The call runs under
-the debugger: a system call is refused (a write to stdout or stderr is
-caught and shown as the failure's text), a fault or the 2 s budget stops it
-where it got to, the thread's state is put back, and the refusal says the
-program may keep values alive that the evaluation took references to and
-could not give back; a breakpoint it passes is stepped over, a watched
-place it writes stops nothing, and a signal sent to the program meanwhile
-is the program's once the call is done. An image without the allocator
-words, and a run that records or replays (`jet debug --record`, `--replay`),
-evaluates in a fork of the stopped program instead; the program itself
-neither runs nor changes. The mapped code holds a fresh copy of the
+program's own that the call gives back stays allocated and is counted, and
+the next report says so. The call runs under the debugger: a system call is
+refused (a write to stdout or stderr is caught and shown as the failure's
+text), a fault or the 2 s budget stops it where it got to, the thread's
+state is put back, and the refusal says the program may keep values alive
+that the evaluation took references to and could not give back; a
+breakpoint it passes is stepped over, a watched place it writes stops
+nothing, and a signal sent to the program meanwhile is the program's once
+the call is done. The debugger also turns the record/replay mode off for
+the call and puts it back after (`jet debug --record`, `--replay`), so an
+evaluation adds nothing to the recording and takes nothing from it. An
+image whose runtime doesn't export those words evaluates nothing: the
+refusal says to build it again with this jet. The
+mapped code holds a fresh copy of the
 function and of every function it calls, which reach the program's own
 data and runtime where its unchanged code does, so the compile's choices
 for the whole program (its `main`, its register use) need not be the
@@ -1000,8 +1002,9 @@ at that level too. An inlined frame is evaluated in as `bt` shows it: the
 expression is checked in the inlined function at its line, the frame it was
 inlined into at the call, and the locals are the frame's own; code inlined
 from another file is refused, since its lines are not that file's. A value whose type has a
-`debug_view` shows as `locals` shows it, the view run in a fork of the
-program as the value stands. A
+`debug_view` shows as `locals` shows it: after the expression, the view
+runs on its result the same way, the list of items it returns given back
+once read, then the result. A
 compiled expression is kept per line, column and text, so a condition compiles once
 and runs at each hit. A `print` at a later stop in the same frame
 of the same function runs the code compiled before when its names read the
@@ -1100,8 +1103,8 @@ debugger: the program runs behind the console (or `--dap`) with
 and once it has ended jet publishes `.jet/replays/<name>.jetproof-replay`
 with the arguments it ran with and says so on stderr. The recording holds
 the run as it went under the debugger (a stop may change which task gets a
-lock first, and the log keeps the order that happened; `print` runs in a
-fork of the program, which records nothing), so `jet debug
+lock first, and the log keeps the order that happened; `print` runs with
+the recording paused, so it records nothing), so `jet debug
 --replay=<name>` replays it as it replays a `jet run` one. The NAME is
 checked before the build, as `jet run` checks it; a built image is refused,
 since the recording binds the source it was built from; and a session that
