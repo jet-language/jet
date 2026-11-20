@@ -10,7 +10,7 @@ recv app until ~ "ok1" timeout 30s # the first build runs before the edit
 stdout: ~ "ok1" # original first execution predicate
 stdout: !~ "Jet.RetiredJitGap" # original retired-diagnostic predicate
 write: app.jet watching_dev_deopts_on_gap_edit_and_recovers.gap.template
-sleep: 800ms
+recv app until ~ "{work}" timeout 30s # the gap build runs (it prints its directory) before the recovering edit
 write: app.jet watching_dev_deopts_on_gap_edit_and_recovers.final.template
 recv app until ~ "ok2" timeout 30s # the recovered build runs before the kill
 stdout: !~ "Jet.RetiredJitGap" # original retired-diagnostic predicate
