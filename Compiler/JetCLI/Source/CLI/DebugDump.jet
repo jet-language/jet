@@ -1,8 +1,9 @@
 // `jet debug <dump.jetdump>`: a typed crash dump an observed run's stop
 // wrote (`.jet/dumps/`, JetRuntime PerfSamples.jet perf_flight_dump), read
-// behind the `(Jet)` console as Compiler/JetDebug NativeDump.jet opens it.
-// It names the dump's parts (the image the run ran, the bytes of its
-// records beside it, and the memory it holds against its budget), then
+// behind the `(Jet)` console as Compiler/JetDebug NativeDump.jet opens it,
+// with the image of its build beside it. It names the dump's parts (the
+// image the run ran, the bytes of its records, and the memory it holds
+// against its budget) and the build and file of the image, then
 // shows the innermost Jet frame of the stop with its source line and its
 // locals; `bt`, `frame N`, `locals` and `print` read the stop as a live
 // session reads one, `tasks` lists every task the dump caught, running or
@@ -28,7 +29,7 @@ jet_cli_debug_dump: fn(path: String, color: Bool) -[FS, Env, IO, Time.Wait, FFI.
     events: native_dump_events(opened.session.image, opened.ring)
     file: cli_files.basename(source)
     shown: native_dump_frame(opened.session, frames, stop, file, lines) ?? return jet_cli_debug_unavailable(err, color)
-    jet_cli_debug_write("Dump of process {opened.pid}, {events.len()} flight events\nImage: {opened.image} bytes, with {opened.records} bytes of records\nMemory: {opened.memory} bytes held, within the {opened.budget}-byte budget; {opened.cut_off} bytes cut off past it\n{shown}")
+    jet_cli_debug_write("Dump of process {opened.pid}, {events.len()} flight events\nImage: {opened.image} bytes, with {opened.records} bytes of records\nBuild: {opened.build}, its image in {cli_files.basename(opened.image_file)} beside the dump\nMemory: {opened.memory} bytes held, within the {opened.budget}-byte budget; {opened.cut_off} bytes cut off past it\n{shown}")
     input := cli_term.stdin()
     echo: !input.is_tty()
     loop {

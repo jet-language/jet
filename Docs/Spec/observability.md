@@ -809,8 +809,14 @@ writes a typed dump while the stopping stack is whole:
 `.jet/dumps/<program>-<UTC time>.jetdump` under the working directory, mode
 0600, `~<n>` after the time when a dump of the same second exists, of which
 the newest three stay. Stderr names it (`dump written: <path>`). The dump
-holds every task's registers, the memory the stop reaches, the flight ring,
-and the program's image, so it opens without the binary. The memory starts
+holds every task's registers, the memory the stop reaches and the flight
+ring, and names the program's image by its build: the 64-bit FNV-1a hash
+of the image's bytes as its copy holds them (with the Secret literals'
+bytes zeroed, below), 16 hexadecimal digits. The image is copied beside the
+dumps as `.jet/dumps/<program>-<build>.image`, mode 0600, only when no copy
+of that build is there, so the dumps of one build share one copy and open
+without the binary; a copy no kept dump names is removed as the dumps
+rotate. The memory starts
 from every thread's and task's stack and the program's globals and follows
 each word that points into the program's writable memory: to its page, or
 to a whole large block (a mapping of its own) at that block's start. The
@@ -824,10 +830,16 @@ that signal, records its task and every general register, and waits until
 the dump is written, so its stack is the one its registers name; a parked
 or queued task's registers are the callee-saved ones its last switch
 saved. A thread that does not answer within 200ms is left out. Every
-`core.crypto.Secret`'s bytes are zeroed before the write.
+`core.crypto.Secret`'s bytes are zeroed before the write, in the dump and
+in the image's copy (a Secret literal's bytes).
 
-`jet debug <file>.jetdump` opens a dump behind the `(Jet)` console: `Dump of
-process <pid>, <n> flight events`, then `Memory: <n> bytes held, within
+`jet debug <file>.jetdump` opens a dump behind the `(Jet)` console with the
+image of its build beside it. A dump whose image is missing is refused,
+naming the build; so is one whose image file's bytes hash to another build
+(another build's image, or a changed copy), naming both builds. It shows
+`Dump of process <pid>, <n> flight events`, `Image: <n> bytes, with <n>
+bytes of records`, `Build: <build>, its image in <program>-<build>.image
+beside the dump`, then `Memory: <n> bytes held, within
 the 33554432-byte budget; <n> bytes cut off past it`, then the innermost Jet
 frame of the stop (`Stopped  main.jet:9  in check()`), its source line and
 its locals. `bt`, `frame N`, `locals` and `print NAME` read the stop as a

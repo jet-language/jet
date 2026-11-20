@@ -4455,8 +4455,11 @@ PERF_FLIGHT_PAGE_MASK: I64{-4096}
 PERF_FLIGHT_FRAMES: I64{65536}
 
 // The dump's text page: the dump's path from its start, then the dump's
-// header words, the oldest dump's name while the dumps rotate
-// (perf_flight_rotate), the word the threads the dump captures wait on
+// header words, the build hashes of the kept dumps while their images
+// rotate (perf_flight_images), the image copy's path while it is written
+// (perf_flight_image) and the oldest dump's name while the dumps rotate
+// (perf_flight_rotate), the image copy's staging path, the word the
+// threads the dump captures wait on
 // (PERF_FLIGHT_CAPTURING, PERF_FLIGHT_CLOSED once their rows are taken,
 // PERF_FLIGHT_RELEASED once the dump is written), the count of rows they
 // wrote, the tid of the stopping thread, which captures itself, and the
@@ -4465,7 +4468,13 @@ PERF_FLIGHT_FRAMES: I64{65536}
 // and zeros that stand for bytes the dump could not read.
 PERF_FLIGHT_WORDS_AT: I64{1024}
 
+PERF_FLIGHT_KEPT_AT: I64{1216}
+
+PERF_FLIGHT_KEPT_MOST: I64{8}
+
 PERF_FLIGHT_OLDEST_AT: I64{1280}
+
+PERF_FLIGHT_STAGING_AT: I64{1664}
 
 PERF_FLIGHT_RELEASE_AT: I64{2048}
 
@@ -4488,9 +4497,20 @@ PERF_FLIGHT_ZEROS: I64{1024}
 // "JETDUMP1", the dump's first word, then its version.
 PERF_FLIGHT_MAGIC: I64{3553425134609253706}
 
-PERF_FLIGHT_VERSION: I64{4}
+PERF_FLIGHT_VERSION: I64{5}
 
-// The kinds of the dump's sections after its image, each [kind, address,
+// The dump's header: its words before the sections.
+PERF_FLIGHT_HEADER: I64{96}
+
+// The build hash's FNV-1a offset and prime (perf_flight_fold), and its
+// hexadecimal digits in an image copy's name.
+PERF_FLIGHT_BUILD_OFFSET: I64{-3750763034362895579}
+
+PERF_FLIGHT_BUILD_PRIME: I64{1099511628211}
+
+PERF_FLIGHT_BUILD_DIGITS: I64{16}
+
+// The kinds of the dump's sections after its words, each [kind, address,
 // bytes] and the bytes padded to a word: a range of reachable memory, the
 // ring, the tasks (perf_flight_tasks), the ranges cut off past the budget
 // (perf_flight_reach), and the end.
@@ -4910,6 +4930,61 @@ perf_flight_image_bytes: fn(image: I64) -> I64 {
     end
 }
 
+// Fold the `length` bytes at `bytes` into the FNV-1a hash in the word at
+// `digest`.
+perf_flight_fold: fn(digest: I64, bytes: I64, length: I64) {
+    hash := rt_text_word(digest)
+    at := I64{0}
+    loop at < length {
+        hash = wrapping((hash ~ rt_text_byte(wrapping(bytes + at))) * PERF_FLIGHT_BUILD_PRIME)
+        at = wrapping(at + I64{1})
+    }
+    rt_text_store(digest, hash)
+}
+
+// `value` as PERF_FLIGHT_BUILD_DIGITS lowercase hexadecimal digits at
+// `at`, the most significant first; the address past them.
+perf_flight_hex_digits: fn(at: I64, value: I64) -> I64 {
+    index := I64{0}
+    loop index < PERF_FLIGHT_BUILD_DIGITS {
+        digit: (value >> wrapping(I64{60} - wrapping(index * I64{4}))) & I64{15}
+        rt_text_put(wrapping(at + index), if (digit < I64{10}) -> wrapping(I64{48} + digit) else -> wrapping(I64{87} + digit))
+        index = wrapping(index + I64{1})
+    }
+    wrapping(at + PERF_FLIGHT_BUILD_DIGITS)
+}
+
+// Copy the image beside the dump as `.jet/dumps/<program>-<build>.image`,
+// `build` its hash in hexadecimal, unless a copy of that build is there:
+// redacted as the dump is, owner-only, written beside it with `~` after
+// its name and renamed over it, so a copy is whole or absent. Whether the
+// copy is there. The dump's path at `text` names the directory and the
+// program (perf_flight_dump_open).
+perf_flight_image: fn(state: I64, text: I64, zeros: I64, image: I64, length: I64, build: I64) -> Bool {
+    named: wrapping(text + PERF_FLIGHT_OLDEST_AT)
+    head: wrapping(I64{11} + rt_text_word(wrapping(state + PERF_FLIGHT_PREFIX)))
+    rt_text_bytes_copy(named, text, head)
+    end: perf_flight_text(perf_flight_hex_digits(wrapping(named + head), build), rt_static_text(".image"))
+    // faccessat(AT_FDCWD, named, F_OK)
+    if (perf_flight_syscall(I64{269}, I64{-100}, named, I64{0}) == I64{0}) { return true }
+    staging: wrapping(text + PERF_FLIGHT_STAGING_AT)
+    size: wrapping(end - named)
+    rt_text_bytes_copy(staging, named, size)
+    _ := perf_flight_text(wrapping(staging + size), rt_static_text("~"))
+    // O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC, mode 0600.
+    fd := I64{-1}
+    #Unsafe("openat reads the image copy's NUL-terminated path in the state's text page") {
+        fd = os_syscall_i64(I64{257}, I64{-100}, staging, I64{524865}, I64{384}, I64{0}, I64{0})
+    }
+    if (fd < I64{0}) { return false }
+    good: perf_flight_redacted(fd, state, zeros, image, length, false, I64{0})
+    _ := perf_flight_syscall(I64{3}, fd, I64{0}, I64{0})
+    // rename
+    if (good && perf_flight_syscall(I64{82}, staging, named, I64{0}) == I64{0}) { return true }
+    _ := perf_flight_syscall(I64{87}, staging, I64{0}, I64{0})
+    false
+}
+
 // A stop that ends the process (Trap.jet trap_root_prepare, through
 // Observe.jet jet_rt_observe_exit), under the flight recorder: the typed
 // dump `jet debug` opens, `.jet/dumps/<program>-<UTC time>.jetdump`,
@@ -4917,19 +4992,21 @@ perf_flight_image_bytes: fn(image: I64) -> I64 {
 // PERF_FLIGHT_MAGIC, PERF_FLIGHT_VERSION, the pid, the Unix time, the load
 // bias, the stopping thread's rip, rsp and rbp, where it captured itself in
 // this frame (perf_flight_capture) or else as its caller resumes, its
-// tid, the image's byte count and the task registry's root (Observe.jet
+// tid, the image's byte count, the task registry's root (Observe.jet
 // observe_root), whose tasks name their controls and so the wait a
-// deadlock held each in; then the image, so the dump needs no other file;
+// deadlock held each in, and the image's build hash (perf_flight_fold);
 // then the sections: the ring, every task's registers
 // (perf_flight_tasks), the memory the stop reaches from every thread's and
 // task's stack and the globals within PERF_FLIGHT_DUMP_BUDGET, and the
-// ranges cut off past it (perf_flight_reach). The other
+// ranges cut off past it (perf_flight_reach). The image is not in the
+// dump: the hash names its copy beside it, written once per build
+// (perf_flight_image), so a dump holds the stop alone. The other
 // threads wait in their capture until the dump is written, so the stacks
 // it holds are the ones their registers name. Every byte after its words
 // is written redacted (perf_flight_redacted), so no dump holds a live
-// Secret's bytes, its literal's in the image nor a copy's in memory; the
-// live Secrets are scrubbed once it is written. Nothing here allocates: the
-// state's scratch serves every buffer.
+// Secret's bytes nor a copy's in memory, and no image copy its literal's;
+// the live Secrets are scrubbed once both are written. Nothing here
+// allocates: the state's scratch serves every buffer.
 perf_flight_dump: fn() {
     state: perf_flight_state
     if (state == I64{0} || sync_swap(wrapping(state + PERF_FLIGHT_DUMPED), I64{1}) != I64{0}) {
@@ -4973,6 +5050,12 @@ perf_flight_dump: fn() {
     }
     image: perf_samples_image
     length: perf_flight_image_bytes(image)
+    // Header word 11, the image's build: the FNV-1a hash of its bytes as
+    // its copy holds them (perf_flight_image), redacted as they are
+    // written, so a reader checks the copy against it.
+    rt_text_store(wrapping(words + I64{88}), PERF_FLIGHT_BUILD_OFFSET)
+    _ := perf_flight_redacted(I64{-1}, state, zeros, image, length, false, wrapping(words + I64{88}))
+    build: rt_text_word(wrapping(words + I64{88}))
     rt_text_store(words, PERF_FLIGHT_MAGIC)
     rt_text_store(wrapping(words + I64{8}), PERF_FLIGHT_VERSION)
     rt_text_store(wrapping(words + I64{16}), process)
@@ -4985,10 +5068,8 @@ perf_flight_dump: fn() {
     rt_text_store(wrapping(words + I64{64}), me)
     rt_text_store(wrapping(words + I64{72}), length)
     rt_text_store(wrapping(words + I64{80}), observe_root)
-    good := perf_flight_bytes(fd, zeros, words, I64{88})
-    if (good) {
-        good = perf_flight_redacted(fd, state, zeros, image, length, false) && perf_flight_bytes(fd, zeros, zeros, wrapping(I64{0} - length) & I64{7})
-    }
+    rt_text_store(wrapping(words + I64{88}), build)
+    good := perf_flight_bytes(fd, zeros, words, PERF_FLIGHT_HEADER)
     if (good && perf_flight_lock(state, I64{10000000})) {
         perf_flight_drain(state)
         good = perf_flight_section(fd, state, words, zeros, PERF_FLIGHT_SECTION_RING, I64{0}, wrapping(state + PERF_FLIGHT_RING_AT), rt_text_word(wrapping(state + PERF_FLIGHT_USED)))
@@ -4999,6 +5080,9 @@ perf_flight_dump: fn() {
     if (good) {
         _ := perf_flight_section(fd, state, words, zeros, PERF_FLIGHT_SECTION_END, I64{0}, I64{0}, I64{0})
     }
+    // The image's copy is redacted as the dump is, so it is written before
+    // the Secrets are scrubbed.
+    if (good) { _ := perf_flight_image(state, text, zeros, image, length, build) }
     if (scrub != I64{0}) { _ := coll_call1(scrub, I64{0}) }
     _ := perf_flight_syscall(I64{3}, fd, I64{0}, I64{0})
     sync_store(release, PERF_FLIGHT_RELEASED)
@@ -5276,7 +5360,7 @@ perf_flight_section: fn(fd: I64, state: I64, words: I64, zeros: I64, kind: I64, 
     rt_text_store(head, kind)
     rt_text_store(wrapping(head + I64{8}), address)
     rt_text_store(wrapping(head + I64{16}), length)
-    perf_flight_bytes(fd, zeros, head, I64{24}) && perf_flight_redacted(fd, state, zeros, bytes, length, false) && perf_flight_bytes(fd, zeros, zeros, wrapping(I64{0} - length) & I64{7})
+    perf_flight_bytes(fd, zeros, head, I64{24}) && perf_flight_redacted(fd, state, zeros, bytes, length, false, I64{0}) && perf_flight_bytes(fd, zeros, zeros, wrapping(I64{0} - length) & I64{7})
 }
 
 // Write `length` bytes at `address` as perf_flight_bytes does, with every
@@ -5286,11 +5370,15 @@ perf_flight_section: fn(fd: I64, state: I64, words: I64, zeros: I64, kind: I64, 
 // a run could still start that the window does not hold whole; the next
 // window starts there, and zeroes the rest of a run this one began. When
 // `scan`, each window written reaches what its words point to
-// (perf_flight_scan), so it is staged even with no Secret live.
-perf_flight_redacted: fn(fd: I64, state: I64, zeros: I64, address: I64, length: I64, scan: Bool) -> Bool {
+// (perf_flight_scan), so it is staged even with no Secret live. With a
+// `digest` word, the bytes are folded into its hash (perf_flight_fold)
+// as they would be written, and `fd` is not written.
+perf_flight_redacted: fn(fd: I64, state: I64, zeros: I64, address: I64, length: I64, scan: Bool, digest: I64) -> Bool {
     table: wrapping(state + PERF_FLIGHT_SECRETS_AT)
     width: secret_redact_table(table, PERF_FLIGHT_SECRETS, PERF_FLIGHT_COPY / I64{2})
-    if (width == I64{0} && !scan) { return perf_flight_bytes(fd, zeros, address, length) }
+    if (width == I64{0} && !scan && digest == I64{0}) {
+        return perf_flight_bytes(fd, zeros, address, length)
+    }
     staged: wrapping(state + PERF_FLIGHT_COPY_AT)
     reach := I64{0}
     at := I64{0}
@@ -5305,7 +5393,8 @@ perf_flight_redacted: fn(fd: I64, state: I64, zeros: I64, address: I64, length: 
             if (window < left) { step = wrapping(window - wrapping(width - I64{1})) }
         }
         if (scan) { perf_flight_scan(state, staged, wrapping(address + at), step) }
-        if (!perf_flight_bytes(fd, zeros, staged, step)) { return false }
+        if (digest != I64{0}) { perf_flight_fold(digest, staged, step) }
+        if (digest == I64{0} && !perf_flight_bytes(fd, zeros, staged, step)) { return false }
         at = wrapping(at + step)
     }
     true
@@ -5421,7 +5510,7 @@ perf_flight_section_scanned: fn(fd: I64, state: I64, words: I64, zeros: I64, add
     rt_text_store(head, PERF_FLIGHT_SECTION_MEMORY)
     rt_text_store(wrapping(head + I64{8}), address)
     rt_text_store(wrapping(head + I64{16}), length)
-    perf_flight_bytes(fd, zeros, head, I64{24}) && perf_flight_redacted(fd, state, zeros, address, length, true) && perf_flight_bytes(fd, zeros, zeros, wrapping(I64{0} - length) & I64{7})
+    perf_flight_bytes(fd, zeros, head, I64{24}) && perf_flight_redacted(fd, state, zeros, address, length, true, I64{0}) && perf_flight_bytes(fd, zeros, zeros, wrapping(I64{0} - length) & I64{7})
 }
 
 // Each readable and writable mapping of /proc/self/maps, in address order,
@@ -5892,7 +5981,96 @@ perf_flight_rotate: fn(state: I64, text: I64) {
         // unlinkat
         if (perf_flight_syscall(I64{263}, directory, oldest, I64{0}) != I64{0}) { break }
     }
+    perf_flight_images(state, text, directory)
     _ := perf_flight_syscall(I64{3}, directory, I64{0}, I64{0})
+}
+
+// Whether `name` is a copy of this program's image: the `length` bytes of
+// `prefix`, PERF_FLIGHT_BUILD_DIGITS digits, then `.image`.
+perf_flight_image_name: fn(name: I64, prefix: I64, length: I64) -> Bool {
+    count: perf_flight_length(name)
+    suffix: rt_static_text(".image")
+    tail: rt_text_len(suffix)
+    count == wrapping(wrapping(length + PERF_FLIGHT_BUILD_DIGITS) + tail) && rt_text_equal_bytes(name, prefix, length) && rt_text_equal_bytes(wrapping(name + wrapping(count - tail)), rt_text_data(suffix), tail)
+}
+
+// Remove each copy of this program's image that no kept dump names: a
+// `<program>-<build>.image` whose build is in none of the headers of the
+// program's dumps in `directory`. A dump of an earlier version names no
+// copy; one whose header can't be read, or more dumps than
+// PERF_FLIGHT_KEPT_MOST, keep every copy.
+perf_flight_images: fn(state: I64, text: I64, directory: I64) {
+    prefix: wrapping(text + I64{11})
+    length: rt_text_word(wrapping(state + PERF_FLIGHT_PREFIX))
+    scratch: wrapping(state + PERF_FLIGHT_SCRATCH_AT)
+    header: wrapping(state + PERF_FLIGHT_COPY_AT)
+    kept: wrapping(text + PERF_FLIGHT_KEPT_AT)
+    count := I64{0}
+    _ := perf_flight_syscall(I64{8}, directory, I64{0}, I64{0})
+    loop {
+        got: perf_flight_syscall(I64{217}, directory, scratch, PERF_FLIGHT_SCRATCH)
+        if (got <= I64{0}) { break }
+        at := I64{0}
+        loop at < got {
+            entry: wrapping(scratch + at)
+            name: wrapping(entry + I64{19})
+            if (perf_flight_dump_name(name, prefix, length)) {
+                if (count >= PERF_FLIGHT_KEPT_MOST) {
+                    return
+                }
+                // O_RDONLY|O_CLOEXEC
+                fd: perf_flight_syscall(I64{257}, directory, name, I64{524288})
+                if (fd < I64{0}) {
+                    return
+                }
+                read: perf_flight_syscall(I64{0}, fd, header, PERF_FLIGHT_HEADER)
+                _ := perf_flight_syscall(I64{3}, fd, I64{0}, I64{0})
+                if (read != PERF_FLIGHT_HEADER || rt_text_word(header) != PERF_FLIGHT_MAGIC) {
+                    return
+                }
+                if (rt_text_word(wrapping(header + I64{8})) == PERF_FLIGHT_VERSION) {
+                    rt_text_store(wrapping(kept + wrapping(count * I64{8})), rt_text_word(wrapping(header + I64{88})))
+                    count = wrapping(count + I64{1})
+                }
+            }
+            step: perf_cfi_u16(wrapping(entry + I64{16}))
+            if (step == I64{0}) { break }
+            at = wrapping(at + step)
+        }
+    }
+    _ := perf_flight_syscall(I64{8}, directory, I64{0}, I64{0})
+    loop {
+        got: perf_flight_syscall(I64{217}, directory, scratch, PERF_FLIGHT_SCRATCH)
+        if (got <= I64{0}) { break }
+        at := I64{0}
+        loop at < got {
+            entry: wrapping(scratch + at)
+            name: wrapping(entry + I64{19})
+            if (perf_flight_image_name(name, prefix, length)) {
+                build := I64{0}
+                digits := I64{0}
+                loop digits < PERF_FLIGHT_BUILD_DIGITS {
+                    digit: perf_flight_hex(rt_text_byte(wrapping(wrapping(name + length) + digits)))
+                    if (digit < I64{0}) { break }
+                    build = (build << I64{4}) | digit
+                    digits = wrapping(digits + I64{1})
+                }
+                named := digits != PERF_FLIGHT_BUILD_DIGITS
+                index := I64{0}
+                loop index < count {
+                    if (rt_text_word(wrapping(kept + wrapping(index * I64{8}))) == build) {
+                        named = true
+                    }
+                    index = wrapping(index + I64{1})
+                }
+                // unlinkat
+                if (!named) { _ := perf_flight_syscall(I64{263}, directory, name, I64{0}) }
+            }
+            step: perf_cfi_u16(wrapping(entry + I64{16}))
+            if (step == I64{0}) { break }
+            at = wrapping(at + step)
+        }
+    }
 }
 
 // The causal lens (`jet perf run --lens=causal`): Coz's virtual speedup

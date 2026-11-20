@@ -1,11 +1,16 @@
 # An observed program that stops writes a typed dump: `.jet/dumps/
-# <program>-<time>.jetdump`, owner-only, the newest three kept. `jet debug`
+# <program>-<time>.jetdump`, owner-only, the newest three kept. The dump
+# holds the stop alone and names its image by build hash; the image is
+# copied beside it as `<program>-<build>.image` only when no copy of that
+# build is there, so four stops of one build leave one copy. `jet debug`
 # opens it as the program was when it stopped: the stopping line, its
 # backtrace, its typed locals, every task's stack (the three sleeping ones
 # too), and the flight ring's last events, each with its task and its place.
 # A task handle that `detach` consumed shows as consumed. A Secret is never
-# in the dump: every run of its bytes is zeroed as the dump is written, its
-# literal's in the image too, and the console shows it redacted.
+# on disk: every run of its bytes is zeroed as the dump is written, its
+# literal's in the image's copy too, and the console shows it redacted. An
+# image copy changed in place, the same size, no longer hashes to the build
+# the dump names, and `jet debug` refuses it, naming both builds.
 requires: os-name:linux
 fixture: CrashDumpOpensTyped.fixture
 env: NO_COLOR=1
@@ -14,14 +19,21 @@ exit: nonzero
 stderr: ~ "count too high: 21" # the panic's own report
 stderr: ~ "dump written: " # and where its dump went
 entries: .jet/dumps ext = "jetdump" = 1 # one stop, one dump
+entries: .jet/dumps ext = "image" = 1 # and its build's image beside it
 capture: dump = sole-entry .jet/dumps ext = "jetdump"
+capture: image = sole-entry .jet/dumps ext = "image"
 capture: mode = permissions file {cap:dump}
 cap:mode: = "600" # owner-only
+capture: image_mode = permissions file {cap:image}
+cap:image_mode: = "600" # the image's copy too
+file: {cap:dump} size <= 4194304 # the stop alone, under 4 MB: the image is beside the dump, not in it
 file: {cap:dump} !~ "hunter2" # the secret's bytes never reach the disk
+file: {cap:image} !~ "hunter2" # nor its literal's, in the image's copy
 step: jet debug {cap:dump}
 stdin: crash_dump_opens_typed.stdin
 exit: 0
 stdout: ~ "Dump of process " # a dump, not a live process
+stdout: ~ ".image beside the dump" # read with the image its build names
 stdout: ~ "Stopped  crash.jet:9  in check()" # the stopping line
 stdout: ~ "#0  check()  at crash.jet:9" # its backtrace
 stdout: ~ "#1  run()  at crash.jet:21" # and its caller
@@ -40,6 +52,15 @@ stdout: ~ "Locals:  first = <consumed>   key = <redacted>   second = <consumed> 
 stdout: !~ "<Unavailable>" # every local of both frames shows what it holds
 stdout: ~ "sample  task 1  at check crash.jet:9" # a sample names its task and its first Jet frame
 stdout: !~ "sample  \n" # no event is left without a place
+capture: build = text stdout.after_first("Build: ").split(",", 0)
+poke: {cap:image} at mid xor "01"
+step: jet debug {cap:dump}
+exit: 1
+stdout: = "" # nothing of the stop is shown from an image that is not its build's
+stderr: ~ "Error: Jet.DebuggerUnavailable: " # the native debugger's registered failure
+stderr: ~ "names build {cap:build}: it is another build's image, or a changed one" # names the dump's build and why the image is refused
+stderr: ~ "` holds build " # and names the build the same-size image's bytes hash to
+stderr: !~ "holds build {cap:build}" # which is not the dump's
 step: jet run --observe crash.jet
 exit: nonzero
 step: jet run --observe crash.jet
@@ -47,3 +68,4 @@ exit: nonzero
 step: jet run --observe crash.jet
 exit: nonzero
 entries: .jet/dumps ext = "jetdump" = 3 # the newest three stay
+entries: .jet/dumps ext = "image" = 1 # one build, one copy of its image
