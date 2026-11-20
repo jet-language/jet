@@ -4,15 +4,18 @@
 # unmarked: every value inlines each call of `mix` (the mark is a guarantee,
 # kept past the size limits and under `off`), auto `bump` too. A callee
 # spliced at every call is unreached, so `dead_code: remove` (the stock)
-# drops it and the image does not name it; always_marked and off keep
-# `bump` and its name. The program prints the same under every value.
+# drops it: the symbol table names no `main.bump`, and only the debug info's
+# record of the inlined `bump` frames names it. always_marked and off keep
+# `bump` as a function, which the symbol table names. The program prints
+# the same under every value.
 fixture: Fixtures/BuildInline
 env: NO_COLOR=1
 step: jet build main.jet
 cwd: open
 exit: 0
 rename: open/.jet/build/main open/.jet/build/main_auto
-file: open/.jet/build/main_auto !~ "bump" # auto splices `bump` at every call
+file: open/.jet/build/main_auto !~ "main.bump" # auto splices `bump` at every call and drops its body
+file: open/.jet/build/main_auto ~ "bump" # the debug info records the inlined `bump` frames
 step: {work}/open/.jet/build/main_auto
 exit: 0
 stdout: = "mixed: 400255\n"
@@ -30,10 +33,14 @@ cwd: open
 exit: 0
 stdout: ~ "in stage_two: mix inlined: marked #Inline(Always)" # off keeps the marked `mix` inlined
 stdout: !~ "bump inlined" # and takes no unmarked callee
+step: jet build --debug-info=false main.jet
+cwd: open
+exit: 0
+file: open/.jet/build/main !~ "bump" # without debug info nothing names `bump`
 step: jet build --inline=off main.jet
 cwd: open
 exit: 0
-file: open/.jet/build/main ~ "bump" # off inlines no unmarked callee, so `bump` stays a function
+file: open/.jet/build/main ~ "main.bump" # off inlines no unmarked callee, so `bump` stays a function
 rename: open/.jet/build/main open/.jet/build/main_off
 step: {work}/open/.jet/build/main_off
 exit: 0
@@ -41,7 +48,7 @@ stdout: = "mixed: 400255\n"
 step: jet build --profile=marked main.jet
 cwd: open
 exit: 0
-file: open/.jet/build/main ~ "bump" # always_marked takes only marked callees
+file: open/.jet/build/main ~ "main.bump" # always_marked takes only marked callees
 step: {work}/open/.jet/build/main
 exit: 0
 stdout: = "mixed: 400255\n"
