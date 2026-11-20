@@ -477,6 +477,14 @@ core_identity_module: fn(key: String) -> String? Never! {
     Val(core_path_parts(rest).module_name)
 }
 
+// Whether `identity` is a Core module's own identity (`<corelib>/core.files`),
+// not a declaration inside one.
+core_identity_is_module: fn(identity: String) -> Bool Never! {
+    if !identity.starts_with("<corelib>/") -> return false
+    module_name: identity.slice("<corelib>/".len(), identity.len())
+    (core_path_module(module_name) ?? return false) == module_name
+}
+
 // The source path of Core module `module_name` (`core.crypto.vault` ->
 // `Core/Crypto/Vault.jet`), from the Core source table.
 core_module_source_path: fn(module_name: String) -> String? Never! {

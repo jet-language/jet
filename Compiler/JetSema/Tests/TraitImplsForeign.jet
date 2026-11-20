@@ -1,0 +1,54 @@
+// An impl of a trait another package declares gains the trait's default
+// bodies before any module is prepared (sema_trait_impls_foreign), whether
+// the impl's module imports the trait or names it bare, as the checker
+// resolves a bare type name no import brings.
+use {
+    jet_sema.[SemaRegistrationForeignHandleFacts, SemaRegistrationImportEdge, SemaRegistrationModuleInput, SemaSourceOrigin, SemaSourceSegment, sema_trait_impls_foreign]
+    jet_parser.[parse_source]
+    jet_foundation.[Item, ModuleTable, Span, module_intern, module_table]
+}
+
+TRAIT_IMPLS_LIB: "Retain: trait {{\n    saved: fn(self) -> Bool,\n    evictable: fn(self) -> Bool {{\n        !self.saved()\n    }}\n}}\n\ncount_evictable: fn<I: Retain>(items: [I]) -> Int {{\n    items.len()\n}}\n"
+
+trait_impls_input: fn(table: &ModuleTable, package: String, name: String, source: String) -> SemaRegistrationModuleInput {
+    parsed := parse_source(source.bytes())
+    assert(parsed.diagnostics.len() == 0, "{name}: {parsed.diagnostics:Debug}")
+    identity: module_intern(table, "{package}.{name}")
+    file: "{name}.jet"
+    segment: SemaSourceSegment{generated: Span{start: 0, end: source.len()}, source_file: file, source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
+    SemaRegistrationModuleInput{package_identity: package, module_identity: identity, module_name: name, core_source_alias: "", module_path: file, source_file: file, source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source}
+}
+
+// Gives the inputs of retain_lib and an app whose module is `app_source`
+// their defaults, and asserts `Rec`'s impl block then holds `saved` and the
+// gained `evictable`.
+assert_trait_impls_gained: fn(app_source: String) {
+    table := module_table()
+    lib: trait_impls_input(table, "retain_lib", "retain", TRAIT_IMPLS_LIB)
+    // The edge takes the import from a parse of its own, so the app's
+    // program keeps its imports.
+    imports_parsed := parse_source(app_source.bytes())
+    app: trait_impls_input(table, "retain_app", "run", app_source)
+    edges := [SemaRegistrationImportEdge]{}
+    loop declaration in imports_parsed.program.imports.move() {
+        edges.push(SemaRegistrationImportEdge{source_module_identity: app.module_identity, target_module_identity: lib.module_identity, target_package_identity: "retain_lib", foreign_binding: None, declaration: declaration})
+    }
+    inputs := [SemaRegistrationModuleInput]{lib, app}
+    sema_trait_impls_foreign(inputs, edges, table)
+    loop item in inputs[1].program.items {
+        if item == .Struct(definition) {
+            methods: definition.trait_impls[0].methods
+            assert(methods.len() == 2 && methods[0].name == "saved" && methods[1].name == "evictable", "`Rec`'s impl holds {methods.len()} methods")
+            return
+        }
+    }
+    panic("the app declares no struct")
+}
+
+#Test("an impl of an imported trait of another package gains its default body") {
+    assert_trait_impls_gained("use retain_lib.[Retain, count_evictable]\n\nRec: struct {{\n    keep: Bool,\n\n    impl Retain {{\n        saved: fn(self) -> Bool {{ self.keep }}\n    }}\n}}\n")
+}
+
+#Test("an impl naming another package's trait bare gains its default body") {
+    assert_trait_impls_gained("use retain_lib.[count_evictable]\n\nRec: struct {{\n    keep: Bool,\n\n    impl Retain {{\n        saved: fn(self) -> Bool {{ self.keep }}\n    }}\n}}\n")
+}

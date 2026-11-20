@@ -22,7 +22,7 @@ use jet_foundation.[
     Type,
     diagnostic_with_edit_grade,
     diagnostic_without_fix,
-    expr_span,
+    expr_source_span,
     ir_runtime_handle_row,
     module_is_core,
     owned_trait_implies,
@@ -432,9 +432,12 @@ sema_key_by_written_path: fn(graph: SemaRegistrationGraph, row: SemaRegistration
     None
 }
 
+// The written path `path` and the last field it reads. A field is spanned
+// at its member, so the path's text runs from its `self`
+// (expr_source_span).
 sema_key_by_path_at: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef, path: Expr, fields: &[Int]) -> SemaKeyByPath? {
     last: sema_key_by_path_fields(graph, row, path, fields) ?? return None
-    Val(SemaKeyByPath{span: expr_span(path), last: last})
+    Val(SemaKeyByPath{span: expr_source_span(path), last: last})
 }
 
 // Whether `left` is a field path of `self` (`self.a.b`) and `right` the

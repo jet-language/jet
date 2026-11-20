@@ -193,6 +193,28 @@ kit_steps_stream_assertion: fn(key: String, original: String) -> KitAssertion? {
     })
 }
 
+// A stdout or stderr match on a diagnostic code alone, such as `E1220` or
+// `L0104`. A report prints its diagnostic's Jet.Name and never the code, so
+// the match fails, or, negated, passes whatever the report says.
+kit_steps_stream_names_bare_code: fn(assertion: KitAssertion) -> Bool {
+    if !assertion.stream.contains("stdout") && !assertion.stream.contains("stderr") -> return false
+    if assertion.mode == "~" || assertion.mode == "!~" {
+        return kit_steps_bare_code(assertion.value)
+    }
+    if assertion.mode == "~any" {
+        return assertion.alternatives.any(fn(text) { kit_steps_bare_code(text) })
+    }
+    false
+}
+
+// `text` is one of E, L or W and four digits.
+kit_steps_bare_code: fn(text: String) -> Bool {
+    bytes: text.bytes()
+    if bytes.len() != 5 -> return false
+    if bytes[0] != (U8{69}) && bytes[0] != (U8{76}) && bytes[0] != (U8{87}) -> return false
+    bytes.slice(1, 5).all(fn(byte) { byte >= (U8{48}) && byte <= (U8{57}) })
+}
+
 kit_steps_ascii_lower: fn(text: String) -> String {
     bytes := text.bytes()
     loop i in 0..<bytes.len() {

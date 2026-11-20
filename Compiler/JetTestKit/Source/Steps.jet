@@ -845,6 +845,10 @@ kit_steps_parse: fn(source: String) -> KitPlan {
             plan.error = "line {line_number}: invalid stream assertion or missing partial reason"
             return plan
         }
+        if kit_steps_stream_names_bare_code(assertion) {
+            plan.error = "line {line_number}: a stream match on a bare diagnostic code; a report prints the diagnostic's Jet.Name, never its code, so match the name (or a --json report's \"code\" field)"
+            return plan
+        }
         target: kit_steps_count_label(assertion.value)
         reference: if assertion.mode == "lines" -> target else -> assertion.value
         if ((assertion.mode == "==" && assertion.stream != "file") || assertion.mode == "first-line==" || (assertion.mode == "lines" && target != "")) && !kit_steps_known_relation(plan, reference, i) {

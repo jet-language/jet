@@ -9,7 +9,7 @@
 // filled the same way. An impl of a trait another module declares gains its
 // default bodies before any module is prepared (sema_trait_impls_foreign).
 use {
-    jet_foundation.[AST_EMPTY_CALL_ARG_FLAGS, AST_NODE_GENERATED, CallArg, Expr, Func, Item, ModuleTable, Span, Stmt, TraitImplBlock, TraitMethodSig, Type, ast_func, import_walk_bindings, module_index, module_text, owned_trait, type_name]
+    jet_foundation.[AST_EMPTY_CALL_ARG_FLAGS, AST_NODE_GENERATED, CallArg, Expr, Func, Item, ModuleTable, Span, Stmt, TraitImplBlock, TraitMethodSig, Type, ast_func, import_walk_bindings, module_index, module_is_core, module_text, owned_trait, type_name]
     jet_parser.[parse_generated_source]
 }
 
@@ -172,10 +172,12 @@ sema_trait_impls_fill_blocks: fn(blocks: &[TraitImplBlock], first: &&SemaTraitIm
 // declares gains that trait's default bodies for the methods it doesn't
 // write, as one of its own module's traits gives them in its preparation
 // (sema_trait_impls_synthesize). The impl names the trait by a selective
-// import's local name, by a module import's `alias.Trait`, or by the bare
-// name another member of its package namespace declares; an import of a
-// namespaced package offers each member's traits. A trait the module
-// declares hides an imported one, and an import hides a namespace member's.
+// import's local name, by a module import's `alias.Trait`, by the bare name
+// another member of its package namespace declares, or by the bare name of
+// the one trait of that name another package declares where the impl sees
+// it; an import of a namespaced package offers each member's traits. A trait
+// the module declares hides an imported one, an import hides a namespace
+// member's, and a namespace member's hides another package's.
 // The traits are read in place: only the bodies an impl gains are copied. A
 // trait the compiler owns and a `using` delegation are left to the impl's
 // own preparation.
@@ -232,7 +234,8 @@ sema_trait_impls_foreign_methods: fn(inputs: [SemaRegistrationModuleInput], posi
 
 // The trait another module declares that an impl in input `position` names
 // `written`: through the module's own imports first, then by the other
-// members of its package namespace.
+// members of its package namespace, then as the one trait of that name
+// another package declares.
 sema_trait_impls_named: fn(inputs: [SemaRegistrationModuleInput], position: Int, edges: [SemaRegistrationImportEdge], positions: [Int:Int], written: String) -> SemaTraitImplForeign? Never! {
     identity: module_index(inputs[position].module_identity)
     qualified: written.split_once(".")
@@ -251,7 +254,53 @@ sema_trait_impls_named: fn(inputs: [SemaRegistrationModuleInput], position: Int,
             }
         }
     }
-    sema_trait_impls_offered(inputs, position, position, written)
+    member: sema_trait_impls_offered(inputs, position, position, written)
+    if member != None || qualified != None -> return member
+    sema_trait_impls_unique_owner(inputs, position, edges, positions, written)
+}
+
+// The one trait named `written` that a module of another package declares
+// and input `position` sees, as the checker resolves a bare type name the
+// module neither declares nor imports (sema_type_graph_unique_type_owner):
+// two such traits name none, unless exactly one is in a package that
+// `position`'s package imports. Core's traits are left to their own routes.
+sema_trait_impls_unique_owner: fn(inputs: [SemaRegistrationModuleInput], position: Int, edges: [SemaRegistrationImportEdge], positions: [Int:Int], written: String) -> SemaTraitImplForeign? Never! {
+    found := SemaTraitImplForeign?{None}
+    seen := 0
+    imported := SemaTraitImplForeign?{None}
+    seen_imported := 0
+    loop (index, input) in inputs {
+        if input.package_identity == inputs[position].package_identity || module_is_core(input.module_identity) {
+            next
+        }
+        item: sema_trait_impls_declared(input.program.items, written) ?? next
+        if input.program.items[item] == .Trait(definition) {
+            visibility: sema_registration_visibility(definition.is_pub, definition.is_package_pub)
+            if !sema_registration_visible(visibility, inputs[position].module_identity, inputs[position].package_identity, input.module_identity, input.package_identity) {
+                next
+            }
+        }
+        seen += 1
+        found = Val(SemaTraitImplForeign{position: index, item: item})
+        if sema_trait_impls_package_imports(inputs, position, edges, positions, input.package_identity) {
+            seen_imported += 1
+            imported = Val(SemaTraitImplForeign{position: index, item: item})
+        }
+    }
+    if seen == 1 -> return found
+    if seen_imported == 1 -> return imported
+    None
+}
+
+// Whether a module of input `position`'s package imports a module of the
+// package `package_identity`.
+sema_trait_impls_package_imports: fn(inputs: [SemaRegistrationModuleInput], position: Int, edges: [SemaRegistrationImportEdge], positions: [Int:Int], package_identity: String) -> Bool Never! {
+    loop edge in edges {
+        if edge.target_package_identity != package_identity -> next
+        source: positions.get(module_index(edge.source_module_identity)) ?? next
+        if inputs[source].package_identity == inputs[position].package_identity -> return true
+    }
+    false
 }
 
 // The trait `name` that input `target` offers an importer: its own, or for a

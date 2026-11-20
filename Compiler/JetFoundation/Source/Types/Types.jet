@@ -525,11 +525,45 @@ symbol_key_names: fn(key: String, name: String) -> Bool Never! {
     before == (U8{46}) || before == (U8{58})
 }
 
-// Whether `owner`, the segment symbol_key_text puts between a member's
-// module and its name, is the owner's own key (`type:m.Point`,
-// `trait:m.Shape`), whose declared name is its leaf (symbol_key_leaf).
-symbol_key_owner_is_key: fn(owner: String) -> Bool Never! {
-    owner.starts_with("type:") || owner.starts_with("trait:")
+// A declaration's key read back into what symbol_key_text joined: its kind
+// word, its module identity, its owner segment and its own name. A member's
+// owner segment is its owner's own key (`type:m.Point`, `function:m.helper`)
+// and `owner_name` that owner's declared name; both are "" for a free
+// declaration, as the module is for a key with no `.` (`type:Int`).
+SymbolKeyParts: struct {
+    kind: String,
+    module_identity: String,
+    owner: String,
+    owner_name: String,
+    name: String,
+}
+
+// `key` cut into its parts (SymbolKeyParts). A module identity holds `.`
+// and `:` of its own, so the module is the longest prefix of the text before
+// the name, cut at a `.`, that `is_module` accepts; None when `key` has no
+// kind word or no prefix is a module.
+symbol_key_parts: fn(key: String, is_module: fn(String) -[Mem.Alloc, Mem.Rc, Time.Wait]> Bool Never!) -> SymbolKeyParts? Never! {
+    split: key.split_once(":") ?? return None
+    bytes: split.after.bytes()
+    name_start: symbol_key_leaf_start(split.after)
+    name: foundation_byte_text(bytes, name_start, bytes.len())
+    if name_start == 0 {
+        return Val(SymbolKeyParts{kind: split.before, module_identity: "", owner: "", owner_name: "", name: name})
+    }
+    head_end: name_start - 1
+    at := head_end
+    loop at > 0 {
+        if at == head_end || bytes[at] == (U8{46}) {
+            module_identity: foundation_byte_text(bytes, 0, at)
+            if is_module(module_identity) {
+                owner: if at == head_end -> "" else -> foundation_byte_text(bytes, at + 1, head_end)
+                owner_name: if owner.contains(":") -> symbol_key_leaf(owner) else -> owner
+                return Val(SymbolKeyParts{kind: split.before, module_identity: module_identity, owner: owner, owner_name: owner_name, name: name})
+            }
+        }
+        at -= 1
+    }
+    None
 }
 
 #Test("symbol keys join kind, module, owner and name with `.`, and read their name back") {
@@ -564,14 +598,21 @@ symbol_key_owner_is_key: fn(owner: String) -> Bool Never! {
     assert_eq(symbol_key_leaf_start("plain"), 0)
 }
 
-#Test("a method's owner segment is its owner's key, read back by its leaf") {
+#Test("a key reads back its module, its owner by its declared name, and its name") {
     user: "module:3:app:src/main.jet"
+    is_user: fn(text: String) -> Bool { text == "module:3:app:src/main.jet" }
     method: symbol_key_text(SymbolKind.Function, user, symbol_key_text(SymbolKind.Type, user, "", "Point"), "area")
     assert_eq(method, "function:module:3:app:src/main.jet.type:module:3:app:src/main.jet.Point.area")
-    owner: method.slice(symbol_key_text(SymbolKind.Function, user, "", "").len(), symbol_key_leaf_start(method) - 1)
-    assert(symbol_key_owner_is_key(owner), "`{owner}` is a key")
-    assert_eq(symbol_key_leaf(owner), "Point")
-    assert(!symbol_key_owner_is_key("Point"), "a bare owner name is no key")
+    read: symbol_key_parts(method, is_user) ?? panic("`{method}` has no module")
+    assert(read.kind == "function" && read.module_identity == user && read.owner == "type:module:3:app:src/main.jet.Point" && read.owner_name == "Point" && read.name == "area", "{read:Debug}")
+    free: symbol_key_parts(symbol_key_text(SymbolKind.Function, user, "", "helper"), is_user) ?? panic("a free function has no module")
+    assert(free.module_identity == user && free.owner == "" && free.owner_name == "" && free.name == "helper", "{free:Debug}")
+    bare: symbol_key_parts(symbol_key_text(SymbolKind.Function, user, "Point", "area"), is_user) ?? panic("a bare owner has no module")
+    assert(bare.owner == "Point" && bare.owner_name == "Point", "{bare:Debug}")
+    builtin: symbol_key_parts("type:Int", is_user) ?? panic("`type:Int` reads no name")
+    assert(builtin.kind == "type" && builtin.module_identity == "" && builtin.name == "Int", "{builtin:Debug}")
+    assert(symbol_key_parts("function:module:4:lib:src/x.jet.run", is_user) == None, "an unknown module reads as none")
+    assert(symbol_key_parts("plain", is_user) == None, "a text with no kind is no key")
 }
 
 symbol_keys: fn(base: Int, bound: Int) -> SymbolKeys Never! {

@@ -3,8 +3,14 @@
 # E0999 at the second marker on every tier, so its denial is never dropped
 # silently. One list holding both entries checks and runs the same on every
 # tier. type.jet is the G8 review's duplicate-cap probe.
-fixture: RepeatedFxCapIsRefusedOnEveryTier/input
+fixture: RepeatedFxCapIsRefusedOnEveryTier/Input
 env: NO_COLOR=1
+# `jet fmt` merges two `#FX` markers into one `#[…]` group, so the sources
+# that write them apart are kept as `.txt`, out of the formatted corpus.
+copy: type.txt type.jet
+copy: module.txt module.jet
+copy: generic.txt generic.jet
+copy: trait.txt trait.jet
 step: jet check type.jet
 exit: 1
 stderr: count "Error: " = 1 # exactly this many

@@ -1,0 +1,19 @@
+# Claim: an impl that names another package's trait bare, without importing
+# it, gains the trait's default methods as an imported trait's impl does:
+# `Rec` answers `evictable` from retain_lib through the generic
+# `count_evictable<Rec>` instantiated in the importing package, and as a
+# direct call (Registration/TraitImpls.jet).
+fixture: TraitDefaultOfAnUnimportedPackageTraitRuns.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check app/run.jet
+exit: 0
+step: jet run app/run.jet
+exit: 0
+stdout: = "2\nfalse\ntrue\n"
+step: jet build app/run.jet
+exit: 0
+step: {work}/app/.jet/build/run
+exit: 0
+stdout: = "2\nfalse\ntrue\n"

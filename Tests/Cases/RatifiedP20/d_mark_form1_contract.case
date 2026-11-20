@@ -20,12 +20,16 @@ step o2: jet run -O2 main.jet
 exit: 0
 stdout: = d_mark_form1_contract.stdout.expected
 stderr: empty
+# `jet fmt` rewrites empty parentheses and adjacent markers to their right form,
+# so those two sources are kept as `.txt`, out of the formatted corpus.
+copy: empty_parens/main.txt empty_parens/main.jet
 step empty_parens: jet check empty_parens/main.jet
 exit: 1
 stderr: ~ "`#Inline()` has empty parentheses" # parentheses only with arguments
 stderr: ~ "--> main.jet:1:8" # located at the empty parentheses
 stderr: ~ "Fix: Write `#Inline`" # the bare form is the fix
 stderr: ~ "jet-lang.dev/e/Jet.StackedRuleLines" # one registered code
+copy: adjacent/main.txt adjacent/main.jet
 step adjacent: jet check adjacent/main.jet
 exit: 1
 stderr: ~ "Adjacent function markers belong in one bracket list" # one `#[A, B]` group

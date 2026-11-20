@@ -138,6 +138,7 @@ use {
         x64_store_u8,
         x64_test_rr,
         x64_test_ri,
+        x64_test_mi,
         x64_ucomisd,
         x64_ucomiss,
         x64_ud2,
@@ -4374,7 +4375,7 @@ ir_x64_stop_point: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
             // of the task control run inline first, so while no stop is asked
             // for the hot path calls nothing.
             if ir_x64_in_loop(e, f) || f.stack_check {
-                tests := ir_x64_stop_quiet(e.code)
+                tests := ir_x64_stop_quiet(e.code, ir_stop_attention(m.functions[f.a[at]].key))
                 loop enter in tests.enter -> ir_x64_patch(e, enter, e.code.bytes.len())
                 skips = tests.quiet.move()
             }
@@ -4464,11 +4465,12 @@ ir_x64_in_loop: fn(e: IRX64Emitter, f: IRFunction) -> Bool Never! {
 // The stop poll's tests that no stop is asked for (ir_x64_stop_poll), into
 // rax: `mov rax, gs:[0]; test rax, rax; jz quiet; cmp qword gs:[448], 0;
 // jnz enter; mov rax, [rax + 16]; test rax, rax; jz quiet;
-// cmp qword [rax + 24], 0; jnz enter; mov rax, [rax + 32]; test rax, rax;
+// test qword [rax + 24], bits; jnz enter; mov rax, [rax + 32]; test rax, rax;
 // jz quiet`. A task whose turn the scheduler asked for (TCB word 448,
 // JetRuntime Scheduler.jet SCHEDULER_TCB_TURN) or with attention raised
-// (control word 24: a strong pause, a cancel or a deadline) enters the
-// poll's routine with no stop asked for (Scheduler.jet scheduler_turn_give,
+// (control word 24: a strong pause, a cancel or a deadline) on `bits`, the
+// ones the poll's routine takes (IR.jet ir_stop_attention), enters that
+// routine with no stop asked for (Scheduler.jet scheduler_turn_give,
 // scheduler_check_loops).
 IRX64StopQuiet: struct {
     // The three rel32 fields to patch to `quiet`.
@@ -4478,7 +4480,7 @@ IRX64StopQuiet: struct {
     enter: [Int],
 }
 
-ir_x64_stop_quiet: fn(code: &X64Code) -> IRX64StopQuiet Never! {
+ir_x64_stop_quiet: fn(code: &X64Code, bits: Int) -> IRX64StopQuiet Never! {
     gs: [U8]{0x65, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0}
     x64_log(code, X64EmitKind.Memory, -1, -1, -1)
     loop byte in gs -> code.bytes.push(byte)
@@ -4494,7 +4496,7 @@ ir_x64_stop_quiet: fn(code: &X64Code) -> IRX64StopQuiet Never! {
     x64_load(code, X64_RAX, X64_RAX, 16)
     x64_test_rr(code, X64_RAX, X64_RAX)
     sites.push(x64_jcc_rel32(code, X64Cond.E))
-    x64_alu_mi(code, X64Alu.Cmp, X64_RAX, 24, 0)
+    x64_test_mi(code, X64_RAX, 24, bits)
     enter.push(x64_jcc_rel32(code, X64Cond.NE))
     x64_load(code, X64_RAX, X64_RAX, 32)
     x64_test_rr(code, X64_RAX, X64_RAX)
@@ -5229,7 +5231,7 @@ IR_X64_POLL_KEEPS: [Int]{1, 2, 6, 7, 8, 9, 10, 11}
 // to its slots and a leaf a leaf:
 //   mov rax, gs:[0]; test rax, rax; jz done; cmp qword gs:[448], 0;
 //   jnz enter; mov rax, [rax + 16]; test rax, rax; jz done;
-//   cmp qword [rax + 24], 0; jnz enter; mov rax, [rax + 32];
+//   test qword [rax + 24], bits; jnz enter; mov rax, [rax + 32];
 //   test rax, rax; jz done; enter:
 //   sub rsp, 296; movups [rsp + 16k], xmm(2 + k) for k in 0..<14;
 //   mov [rsp + 224 + 8k], r for the k-th of rcx, rdx, rsi, rdi, r8-r11;
@@ -5237,7 +5239,7 @@ IR_X64_POLL_KEEPS: [Int]{1, 2, 6, 7, 8, 9, 10, 11}
 //   test rax, rax; setne al; movzx eax, al; done: ret
 ir_x64_stop_poll: fn(f: IRFunction, row: Int) -> IRX64FunctionResult Never! {
     code := x64_code()
-    tests := ir_x64_stop_quiet(code)
+    tests := ir_x64_stop_quiet(code, ir_stop_attention(f.key))
     loop site in tests.enter -> x64_patch_rel32(code.bytes, site, code.bytes.len())
     // The fourteen xmm registers and the eight general ones below an 8-byte
     // pad keep rsp 16-byte aligned at the call.
@@ -7478,6 +7480,29 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
             if tested < 0 && same -> tested = at
         }
         assert(if cycle -> tested > call_at && tested < poll_at else -> tested < 0)
+    }
+}
+
+// A poll after a call enters jet_rt_session_propagate on a strong pause or
+// a cancel only: under a deadline its routine has nothing to take, so a
+// `#Deadline` block's calls stay on the poll's tests. The turn's routine
+// reads the clock, so the deadline bit enters it too.
+#Test("Only the turn poll enters its routine on a deadline's attention bit") {
+    loop key in ([String]{IR_STOP_POLL_KEY, IR_STOP_TRAP_KEY, IR_STOP_TURN_KEY}) {
+        m := ir_module_new()
+        row: ir_stop_poll(m, key)
+        code: ir_x64_stop_poll(m.functions[row], row).function.code
+        bits: if key == IR_STOP_TURN_KEY -> U8{7} else -> U8{3}
+        tested: [U8]{0x48, 0xf7, 0x40, 0x18, bits, 0, 0, 0}
+        found := false
+        loop at in 0..<(code.len() - tested.len()) {
+            same := true
+            loop k in 0..<tested.len() {
+                if code[at + k] != tested[k] -> same = false
+            }
+            if same -> found = true
+        }
+        assert(found)
     }
 }
 

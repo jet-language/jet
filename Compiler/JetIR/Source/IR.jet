@@ -207,6 +207,12 @@ ir_stop_routine: fn(key: String) -> String Never! {
     if key == IR_STOP_TURN_KEY -> "jet_rt_session_turn" else -> "jet_rt_session_propagate"
 }
 
+// The bits of a task control's attention word (JetRuntime Scheduler.jet
+// SCHEDULER_ATTEND_*) on which stop poll `key` enters its routine: every
+// routine takes a strong pause (1) and a cancel (2), only the turn's a
+// deadline (4). A poll after a call under a `#Deadline` stays on its tests.
+ir_stop_attention: fn(key: String) -> Int Never! { if key == IR_STOP_TURN_KEY -> 7 else -> 3 }
+
 // The stack mark leaf (Build.jet ir_stack_mark).
 IR_STACK_MARK_KEY: "jet_ir_stack_mark#asm"
 

@@ -6,7 +6,9 @@ use {
 // The poller wakes a ready waiter after it has released its lock, so the
 // wake can land after the waiter was canceled and removed. Each round
 // cancels a waiter while its datagram arrives; whichever happens first, the
-// waiter must finish and the datagram must stay readable.
+// waiter must finish and the datagram must stay readable. A cancel that lands
+// before the wait parks unwinds the waiter at the check after `send`
+// returns, and its join reports `Canceled`; that waiter finished too.
 #Test("a readiness wake racing the waiter's cancellation finishes both") {
     socket: net.udp_bind("127.0.0.1:0") ?? panic("bind")
     target: net.udp_local_addr(socket) ?? panic("address")
@@ -25,7 +27,12 @@ use {
         time.sleep(1ms)
         _sent: peer.send_to("{at}".bytes(), target, deadline: budget) ?? panic("send")
         waiter.cancel()
-        waiter.join() ?? panic("round {at} waiter")
+        if waiter.join() == {
+            .Ok(_) -> {}
+            .Err(failure) -> {
+                if failure != TaskFailure.Canceled -> panic("round {at} waiter failed: {failure}")
+            }
+        }
         packet: socket.receive(16, deadline: budget) ?? panic("receive")
         assert(net.udp_packet_data(packet) == ("{at}"), "round {at} datagram")
     }

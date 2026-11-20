@@ -1,0 +1,17 @@
+Retain: trait {
+    saved: fn(self) -> Bool,
+    // The default reads `pinned`, a name only this module declares.
+    evictable: fn(self) -> Bool {
+        !self.saved() && !pinned()
+    }
+}
+
+pinned: fn() -> Bool { false }
+
+count_evictable: fn<I: Retain>(items: [I]) -> Int {
+    n := 0
+    loop item in items {
+        if item.evictable() -> n += 1
+    }
+    n
+}

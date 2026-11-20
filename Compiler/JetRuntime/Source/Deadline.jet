@@ -31,11 +31,14 @@ deadline_save: fn(save: I64) {
 
 // A restored deadline arms the stop polls again: a deadline the inner block's
 // wait reported (scheduler_deadline_reported) is not the one in force now.
+// With none restored, the turn polls stop reading the clock.
 #Export(c) jet_ctx_pop_deadline: fn(save: I64) {
     record: context_current()
     sync_store(wrapping(record + CONTEXT_DEADLINE_PRESENT), sync_load(save))
     sync_store(wrapping(record + CONTEXT_DEADLINE_MS), sync_load(wrapping(save + I64{8})))
-    if (sync_load(save) != I64{0}) { scheduler_deadline_attend() }
+    if (sync_load(save) != I64{0}) { scheduler_deadline_attend() } else {
+        scheduler_deadline_leave()
+    }
 }
 
 #Export(c) jet_ctx_set_deadline_min: fn(deadline_ms: I64) {

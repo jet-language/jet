@@ -48,7 +48,7 @@ use jet_foundation.[
     SymbolTable,
     symbol_find,
     symbol_is_local,
-    symbol_key_leaf_start,
+    symbol_key_parts,
     symbol_key_text,
     symbol_table_key,
     ModuleID,
@@ -62,7 +62,6 @@ use jet_foundation.[
     name_intern,
     name_table,
     name_table_sized,
-    foundation_byte_text,
 ]
 
 SemaCoreImport: struct {
@@ -533,15 +532,14 @@ sema_core_check_ui_capabilities: fn(call_facts: [SemaCallSiteFact], graph: SemaR
 }
 
 // `module.member` of a call whose callee is a free function of a Core
-// source module (`function:<module identity>.<member>`), or None.
+// source module (`function:<module identity>.<member>`), or None: a
+// method's key has its owner between them (symbol_key_parts).
 sema_core_source_call_usage: fn(key: String, graph: SemaRegistrationGraph) -> String? Never! {
     if !key.starts_with("function:<corelib>/") -> return None
-    // The text before the member is the module only for a free function: a
-    // method's key has its owner between them (symbol_key_text).
-    cut: symbol_key_leaf_start(key) - 1
-    if cut <= 9 -> return None
-    index: sema_registration_module_index_text(graph, foundation_byte_text(key.bytes(), 9, cut)) ?? return None
-    Val("{graph.modules[index].module_name}.{foundation_byte_text(key.bytes(), cut + 1, key.count_bytes())}")
+    parts: symbol_key_parts(key, fn(text: String) { sema_registration_module_index_text(graph, text) != None }) ?? return None
+    if parts.owner != "" -> return None
+    index: sema_registration_module_index_text(graph, parts.module_identity) ?? return None
+    Val("{graph.modules[index].module_name}.{parts.name}")
 }
 
 sema_core_check_ui_usage: fn(usage: String, span: Span?, needs: [String], reported: &[String], diagnostics: &[Diagnostic]) {

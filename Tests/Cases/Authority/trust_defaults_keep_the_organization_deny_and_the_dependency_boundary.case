@@ -12,7 +12,7 @@ env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 step boundary: jet check boundary/main.jet
 exit: 1
-stderr: ~ E1220 # the dependency stays inside its grant line under the trust default
+stderr: ~ "Jet.DependencyAuthorityExceeded" # the dependency stays inside its grant line under the trust default
 stderr: ~ "`netprobe` function" # the dependency is named
 stderr: ~ "uses the `Net` effect, which its `authority.grants` line doesn't grant" # its effect is outside its grant line
 step open: jet check organization/run.jet
@@ -20,5 +20,5 @@ exit: 0 # the package's own rows allow the Net call
 step organization: jet check organization/run.jet
 env: JET_ORG_UNSAFE_POLICY={work}/org-policy.jet
 exit: 1
-stderr: ~ E0749 # the organization's denial holds under the trust default
+stderr: ~ "Jet.ProhibitedEffectReached" # the organization's denial holds under the trust default
 stderr: ~ "`port_is_free` reaches the `Net` effect, which the organization policy `{work}/org-policy.jet` denies with `authority: { deny: [Net] }`" # the report names the organization policy

@@ -257,3 +257,14 @@ kit_test_steps_env: fn() -> KitEnv {
         assert(kit_steps_parse_case("{source}\n").error != "")
     }
 }
+
+#Test("a stream match on a bare diagnostic code is refused, a name or a JSON code field is not") {
+    loop source in
+        ["step: jet check x.jet\nstderr: ~ E1220 # the report\n", "step: jet check x.jet\nstderr: !~ \"L0104\" # no lint\n", "step: jet check x.jet\nstdout+stderr: !~ W0001 # no warning\n", "step: jet check x.jet\nstderr: ~any E0749 Jet.ProhibitedEffectReached # either\n"] {
+        assert(kit_steps_parse_case(source).error.contains("bare diagnostic code"))
+    }
+    loop source in
+        ["step: jet check x.jet\nstderr: ~ \"Jet.DependencyAuthorityExceeded\" # the report\n", "step: jet check x.jet --json\nstdout: !~ \"\\\"code\\\":\\\"L0104\\\"\" # no lint\n", "step: jet check x.jet\nstderr: ~ E12200 # not a code\n", "step: jet check x.jet\nfile: out.tsv ~ E1220 # a written row\n"] {
+        assert_eq(kit_steps_parse_case(source).error, "")
+    }
+}
