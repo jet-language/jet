@@ -3,8 +3,8 @@
 // Jetpack/, Tools/ and tests/ is in the canonical form `jet fmt` writes, and
 // this tool keeps it so. `--check` names each source the formatter would
 // change; `--write` formats those sources in place (the one deliberate corpus
-// cutover), checks that a second pass changes nothing, and moves every line
-// pin that names a formatted source. The formatter is the one of the compiler
+// cutover), checks that a second pass changes nothing, and moves every pin
+// that means a formatted source. The formatter is the one of the compiler
 // `$JET` names (default `jet`).
 //
 // A format keeps meaning: `jet fmt` itself refuses a source whose formatted
@@ -13,17 +13,36 @@
 // reports each such source and exits 1, so a formatter defect can't change
 // what the corpus means.
 //
-// A line pin is `<file>.jet:<line>` or `<file>.jet:<line>:<column>` in a
-// tracked `.case` or expectation file (`.out`, `.stdout`, `.stderr`, `.err`,
-// `.warn`, `.expected`, `.fixture`, `.log`, `.txt`, `.json`, `.tsv`, `.list`).
+// A pin means a place or the bytes of a source, in a tracked `.case` or
+// expectation file (`.out`, `.stdout`, `.stderr`, `.err`, `.warn`,
+// `.expected`, `.fixture`, `.log`, `.txt`, `.json`, `.tsv`, `.list`):
+// - a line and an optional column: `<file>.jet:<line>[:<column>]`,
+//   `<source>:<line>[:<column>]`, a JSON object (or the one around it) that
+//   names its `path`, `file` or `source` and holds a `line` and an optional
+//   `column`, or a JSON path's `.line = <n>` with the `.column = <n>` of the
+//   same path;
+// - byte offsets: `<file>.jet:<start>..<end>`, a `span=<start>..<end>` after
+//   a named place on its line, or the `start` and `end` of a JSON `span`
+//   object or of an object that names its source;
+// - a digest: the lowercase hex SHA-256 of a source's bytes.
 // `jet fmt` keeps the tokens and changes blank space, besides a few canonical
-// spellings (`Unit` to `()`, a trailing comma), so a pin moves to where the
-// non-blank byte it pointed at (or the next one both texts keep) now sits.
-// A relative name means the sources of a case's fixtures and folder, or of an
-// expectation's stem folder and its nearest folder that holds sources; a name
-// the checkout root resolves means that source. Snapshots of the UI, golden
-// and case suites move too, and `jet test Compiler -u` then rewrites their
-// source excerpts.
+// spellings (`Unit` to `()`, a trailing comma), so a place or an offset moves
+// to where the non-blank byte it pointed at (or the next one both texts keep)
+// now sits, and the digest of a formatted source becomes the digest of its
+// new bytes.
+//
+// A name means the run's sources whose path in a case's fixtures (or in an
+// expectation's stem folder) ends with it, narrowed to the ones the case's
+// last step before the pin names; after a case's `copy:` or `write:` put a
+// file under that name, it means the source that line copied, or none. Else
+// it is joined to the case's folder (or the expectation's nearest folder that
+// holds sources), else to the checkout root. A pin that names no source means
+// the case's fixture sources, or the expectation's same-named source (else its
+// stem folder's), narrowed alike. A pin whose sources move it differently
+// stays as written and is reported, as is a digest in a case whose fixture
+// sources were formatted that is no source's digest (it may hash one with
+// more, as a build key does). Snapshots of the UI, golden and case suites
+// move too, and `jet test Compiler -u` then rewrites their source excerpts.
 //
 // The corpus leaves out, by rule:
 // - generated: a `//` line among a source's first five says a tool generates
@@ -74,6 +93,7 @@
 // file. Those are the rows whose outcome the format changed, not just their
 // excerpts.
 use {
+    crypto: core.crypto
     files: core.files
     process: core.process
     sys: core.sys
@@ -166,8 +186,14 @@ ALIGN_WINDOW: 8
 
 ROOTED_SOURCE: Regex{"(?:Compiler|Core|Examples|Jetpack|Tools|tests)/[A-Za-z0-9_./-]*\.jet"}
 
-// git grep -E patterns (POSIX ERE) for the files worth reading.
-PIN_GREP: "\\.jet:[0-9]"
+// How far either side of a JSON key its object's braces are looked for.
+OBJECT_REACH: 4096
+
+// The JSON keys whose string value names the source of an object's place or span.
+SOURCE_KEYS: [String]{"path", "file", "source"}
+
+// git grep -E patterns (POSIX ERE) for the files worth reading: every pin form.
+PIN_GREP: "\\.jet:[0-9]|<source>:[0-9]|\\.(line|column) = [0-9]|\"(line|start)\\\\?\" ?: ?[0-9]|span\\\\?\"? ?[:=] ?[{{0-9]|[0-9a-f]{{64}}"
 
 // The migration runner a case runs to rewrite its sources to a new spelling.
 MIGRATION_RUNNER: "Compiler/Migrations/Migrate.jet"
@@ -189,21 +215,46 @@ Exclusions: struct {
     trees: [String:String],
 }
 
-// A tracked file whose text may pin source lines, and the folders its
-// relative source names are read against.
+// A tracked file whose text may pin sources: the folders whose sources its
+// names mean by their tail (a case's fixtures, an expectation's stem folder),
+// the folders its names are joined to (the case's own, the expectation's
+// nearest that holds sources), the sources a pin that names none means, and
+// the lines of a case that change what a later name means.
 PinSite: struct {
     path: String,
-    scopes: [String],
+    run: [String],
+    near: [String],
+    own: [String],
+    steps: [CaseStep],
+}
+
+// A case line that changes what a later pin's name means: a step and the
+// sources it names (`to` empty), or a `copy:` or `write:` that puts a file at
+// `to` in the run's folder, copied from `from` ("" for a `write:`); `at` is the
+// line's byte offset in the case.
+CaseStep: struct {
+    at: Int,
+    runs: [String],
+    from: String,
+    to: String,
+}
+
+// The tracked sources: each by path, and the ones beneath each folder above
+// one (`beneath[folder_at[folder]]`).
+Sources: struct {
+    known: [String:Bool],
+    folder_at: [String:Int],
+    beneath: [[String]],
 }
 
 // The corpus sources of a run, the tracked Jet sources in the corpus roots it
 // leaves out (each with its rule), every tracked source it saw, and the files
-// that may pin their lines.
+// that may pin them.
 Corpus: struct {
     sources: [String],
     left_out: [String],
     rules: [String],
-    known: [String:Bool],
+    tracked: Sources,
     sites: [PinSite],
 }
 
@@ -230,16 +281,37 @@ Position: struct {
     column: Int,
 }
 
-// A `<name>.jet:<line>[:<column>]` pin in a text: the name as written, its
-// position, and the byte spans of its line and column numbers (an empty
-// column span when it has none).
+// A pin in a text: the name of the source it means as written ("" when it
+// names none), whether its numbers are byte offsets (one, or a span's start
+// and end) rather than a line and a column (0 when it names only the line),
+// and the byte span each number is written at (empty for a column it leaves
+// out).
 PinSpot: struct {
     name: String,
-    at: Position,
-    line_start: Int,
-    line_end: Int,
-    column_start: Int,
-    column_end: Int,
+    offsets: Bool,
+    numbers: [Int],
+    starts: [Int],
+    ends: [Int],
+}
+
+// A number written in a text, and the byte span it is written at.
+Written: struct {
+    value: Int,
+    start: Int,
+    end: Int,
+}
+
+// The bytes of a text from `start` to `end` (exclusive).
+ByteSpan: struct {
+    start: Int,
+    end: Int,
+}
+
+// A text's bytes from `start` to `end` written as `text`.
+TextEdit: struct {
+    start: Int,
+    end: Int,
+    text: String,
 }
 
 // What moving the pins did: files rewritten, pins moved, and why any pin
@@ -326,7 +398,7 @@ tree_rule: fn(path: String) -> String Never! {
     ""
 }
 
-// Whether `path` is a tracked file whose line pins move with the sources.
+// Whether `path` is a tracked file whose pins move with the sources.
 is_pin_site: fn(path: String) -> Bool Never! {
     loop skipped in UNSCANNED {
         if path.starts_with(skipped) -> return false
@@ -421,25 +493,99 @@ note_parse_lesson: fn(path: String, out: &Exclusions) {
     }
 }
 
-// The folders a case's relative source names mean: its fixtures, then its own folder.
-case_scopes: fn(path: String, text: String) -> [String] Never! {
-    scopes := case_fixtures(path, text)
-    scopes.push(parent(path))
-    scopes
+// Adds to `into` each tracked source beneath `folder` it doesn't hold yet.
+add_beneath: fn(tracked: Sources, folder: String, into: &[String]) {
+    slot: tracked.folder_at.get(folder) ?? -1
+    if slot < 0 {
+        return
+    }
+    loop source in tracked.beneath[slot] {
+        if !into.contains(source) -> into.push(source.copy())
+    }
 }
 
-// The folders an expectation's relative source names mean: the folder named
-// for its stem, then the nearest folder at or above its own that holds
-// sources (`dirs`).
-expectation_scopes: fn(path: String, dirs: [String:Bool]) -> [String] Never! {
-    scopes := [String]{}
-    dir: parent(path)
-    folder: join(dir, base_name(path).partition(".").head)
-    if dirs.has_key(folder) -> scopes.push(folder)
-    up := dir
-    loop up != "" && !dirs.has_key(up) -> up = parent(up)
-    if up != "" -> scopes.push(up)
-    scopes
+// The words of `text` between spaces.
+words: fn(text: String) -> [String] Never! {
+    found := [String]{}
+    loop word in text.split(" ") {
+        trimmed: word.trim()
+        if trimmed != "" -> found.push(trimmed.copy())
+    }
+    found
+}
+
+// The lines of a case's `text` that change what a later pin's name means: each
+// step with the `.jet` paths it names, and each `copy: FROM TO` and
+// `write: TO TEMPLATE`.
+case_steps: fn(text: String) -> [CaseStep] Never! {
+    steps := [CaseStep]{}
+    at := 0
+    loop line in text.split("\n") {
+        start: at
+        at += line.bytes().len() + 1
+        rest: line.partition(":").tail
+        if line.starts_with("step:") || line.starts_with("step ") {
+            runs := [String]{}
+            loop word in words(rest) {
+                if word.ends_with(".jet") -> runs.push(clean_name(word))
+            }
+            steps.push(CaseStep{at: start, runs: runs, from: "", to: ""})
+            next
+        }
+        parts: words(rest)
+        if {
+            line.starts_with("copy:") && parts.len() >= 2 -> {
+                steps.push(CaseStep{at: start, runs: [String]{}, from: clean_name(parts[0]), to: clean_name(parts[1])})
+            }
+            line.starts_with("write:") && parts.len() >= 1 -> {
+                steps.push(CaseStep{at: start, runs: [String]{}, from: "", to: clean_name(parts[0])})
+            }
+        }
+    }
+    steps
+}
+
+// The pins of a case at `path`: its names mean its fixtures' sources by their
+// tail, then its folder's; a pin that names none means its fixture sources.
+case_site: fn(path: String, text: String, tracked: Sources) -> PinSite Never! {
+    run: case_fixtures(path, text)
+    own := [String]{}
+    loop folder in run -> add_beneath(tracked, folder, own)
+    PinSite{path: path.copy(), run: run, near: [String]{parent(path)}, own: own, steps: case_steps(text)}
+}
+
+// The folder named for the stem of an expectation at `path`, else "".
+stem_folder: fn(path: String, folders: [String:Int]) -> String Never! {
+    folder: join(parent(path), base_name(path).partition(".").head)
+    if folders.has_key(folder) -> return folder
+    ""
+}
+
+// The nearest folder at or above the one of `path` that holds sources, else "".
+nearest_folder: fn(path: String, folders: [String:Int]) -> String Never! {
+    up := parent(path)
+    loop up != "" && !folders.has_key(up) -> up = parent(up)
+    up
+}
+
+// The pins of an expectation at `path`: its names mean the sources of the
+// folder named for its stem by their tail, then its nearest folder's; a pin
+// that names none means the source named for its stem beside it, else the
+// stem folder's sources.
+expectation_site: fn(path: String, tracked: Sources) -> PinSite Never! {
+    stem: stem_folder(path, tracked.folder_at)
+    run := [String]{}
+    own := [String]{}
+    beside: join(parent(path), "{base_name(path).partition(".").head}.jet")
+    if {
+        tracked.known.has_key(beside) -> own.push(beside)
+        stem != "" -> add_beneath(tracked, stem, own)
+    }
+    if stem != "" -> run.push(stem)
+    near := [String]{}
+    nearest: nearest_folder(path, tracked.folder_at)
+    if nearest != "" -> near.push(nearest)
+    PinSite{path: path.copy(), run: run, near: near, own: own, steps: [CaseStep]{}}
 }
 
 // The rule that keeps `path` out, else "".
@@ -496,45 +642,57 @@ exclusions: fn(root: String) -[Exec, FS.Read, Time.Wait]> Exclusions CorpusError
     Ok(out)
 }
 
-// Every tracked file at `root` that may pin source lines, outside the
-// evidence; `dirs` are the folders above a tracked source. The sources an
-// evidence file pins (by `known`) are kept out in `out`.
-pin_sites: fn(root: String, dirs: [String:Bool], known: [String:Bool], out: &Exclusions) -[Exec, FS.Read, Time.Wait]> [PinSite] CorpusError! {
+// Every tracked file at `root` that may pin sources, outside the evidence.
+// The sources an evidence file pins by name are kept out in `out`.
+pin_sites: fn(root: String, tracked: Sources, out: &Exclusions) -[Exec, FS.Read, Time.Wait]> [PinSite] CorpusError! {
     sites := [PinSite]{}
     loop path in grep_roots(root, [String]{}, PIN_GREP) ?? return Err(err) {
         if !is_pin_site(path) -> next
         text: if path.ends_with(".case") || path.starts_with(EVIDENCE_TREE) -> read_tracked(root, path) ?? return Err(err) else -> ""
-        scopes: if path.ends_with(".case") -> case_scopes(path, text) else -> expectation_scopes(path, dirs)
+        site: if path.ends_with(".case") -> case_site(path, text, tracked) else -> expectation_site(path, tracked)
         if path.starts_with(EVIDENCE_TREE) {
             loop spot in pin_spots(text) {
-                loop target in pin_targets(spot.name, scopes, known) {
+                if spot.name == "" -> next
+                loop target in pin_targets(site, spot, tracked) {
                     note(out.exact, target, RULE_EVIDENCE)
                 }
             }
             next
         }
-        sites.push(PinSite{path: path.copy(), scopes: scopes})
+        sites.push(site)
     }
     Ok(sites)
+}
+
+// Records the tracked source `path` in `tracked`.
+add_source: fn(tracked: &Sources, path: String) {
+    tracked.known[path.copy()] = true
+    loop dir in ancestors(path) {
+        slot := tracked.folder_at.get(dir) ?? -1
+        if slot < 0 {
+            slot = tracked.beneath.len()
+            tracked.folder_at[dir.copy()] = slot
+            tracked.beneath.push([String]{})
+        }
+        tracked.beneath[slot].push(path.copy())
+    }
 }
 
 // The corpus sources under `prefixes`.
 corpus: fn(root: String, prefixes: [String]) -[Exec, FS.Read, Time.Wait]> Corpus CorpusError! {
     argv := [String]{"git", "ls-files", "--"}
     loop corpus_root in ROOTS -> argv.push(corpus_root.copy())
-    tracked := [String]{}
-    known := [String:Bool]{}
-    dirs := [String:Bool]{}
+    paths := [String]{}
+    tracked := Sources{known: [String:Bool]{}, folder_at: [String:Int]{}, beneath: [[String]]{}}
     loop path in git_lines(root, argv, [Int]{0}) ?? return Err(err) {
         if !path.ends_with(".jet") || !selected(path, prefixes) -> next
-        tracked.push(path.copy())
-        known[path.copy()] = true
-        loop dir in ancestors(path) -> dirs[dir.copy()] = true
+        paths.push(path.copy())
+        add_source(tracked, path)
     }
     out := exclusions(root) ?? return Err(err)
-    sites: pin_sites(root, dirs, known, out) ?? return Err(err)
-    found := Corpus{sources: [String]{}, left_out: [String]{}, rules: [String]{}, known: known, sites: sites}
-    loop path in tracked {
+    sites: pin_sites(root, tracked, out) ?? return Err(err)
+    found := Corpus{sources: [String]{}, left_out: [String]{}, rules: [String]{}, tracked: tracked, sites: sites}
+    loop path in paths {
         rule: exclusion_rule(path, out)
         if {
             rule == "" -> found.sources.push(path.copy())
@@ -580,72 +738,485 @@ holds_at: fn(bytes: [U8], at: Int, marker: [U8]) -> Bool Never! {
     true
 }
 
-// Every `<name>.jet:<line>[:<column>]` pin in `text`, in order.
+// The byte at `at` of `bytes`, or -1 outside them.
+byte_at: fn(bytes: [U8], at: Int) -> Int Never! {
+    if at < 0 || at >= bytes.len() -> return -1
+    Int{bytes[at]}
+}
+
+// The number written in `bytes` from `start`, a digit.
+written: fn(bytes: [U8], start: Int) -> Written Never! {
+    end: digits_end(bytes, start)
+    Written{value: number_at(bytes, start, end), start: start, end: end}
+}
+
+// The text of `bytes` from `start` to `end`.
+text_between: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
+    out := [U8]{}
+    loop at in start..<end -> out.push(bytes[at])
+    String.from_bytes(out) ?? ""
+}
+
+// Whether `bytes` holds `marker` at `at`, then a digit.
+number_follows: fn(bytes: [U8], at: Int, marker: [U8]) -> Bool Never! {
+    holds_at(bytes, at, marker) && is_digit(byte_at(bytes, at + marker.len()))
+}
+
+// Whether `bytes` holds `:` and a digit at `at`.
+colon_follows: fn(bytes: [U8], at: Int) -> Bool Never! {
+    byte_at(bytes, at) == 58 && is_digit(byte_at(bytes, at + 1))
+}
+
+// Whether `bytes` holds `..` and a digit at `at`.
+range_follows: fn(bytes: [U8], at: Int) -> Bool Never! {
+    byte_at(bytes, at) == 46 && byte_at(bytes, at + 1) == 46 && is_digit(byte_at(bytes, at + 2))
+}
+
+// A pin of a line and an optional column.
+place_spot: fn(name: String, line: Written, column: Written?) -> PinSpot Never! {
+    if column == .Val(found) {
+        return PinSpot{name: name.copy(), offsets: false, numbers: [Int]{line.value, found.value}, starts: [Int]{line.start, found.start}, ends: [Int]{line.end, found.end}}
+    }
+    PinSpot{name: name.copy(), offsets: false, numbers: [Int]{line.value, 0}, starts: [Int]{line.start, line.end}, ends: [Int]{line.end, line.end}}
+}
+
+// A pin of a byte offset, or of a span's start and end.
+offset_spot: fn(name: String, start: Written, end: Written?) -> PinSpot Never! {
+    if end == .Val(found) {
+        return PinSpot{name: name.copy(), offsets: true, numbers: [Int]{start.value, found.value}, starts: [Int]{start.start, found.start}, ends: [Int]{start.end, found.end}}
+    }
+    PinSpot{name: name.copy(), offsets: true, numbers: [Int]{start.value}, starts: [Int]{start.start}, ends: [Int]{start.end}}
+}
+
+// Every pin in `text`, named or not.
 pin_spots: fn(text: String) -> [PinSpot] Never! {
     bytes: text.bytes()
-    marker: ".jet:".bytes()
     spots := [PinSpot]{}
+    named_spots(bytes, spots)
+    span_spots(bytes, spots)
+    source_spots(bytes, spots)
+    json_spots(bytes, spots)
+    json_path_spots(bytes, spots)
+    spots
+}
+
+// Each `<name>.jet:<line>[:<column>]` and `<name>.jet:<start>..<end>` in `bytes`.
+named_spots: fn(bytes: [U8], spots: &[PinSpot]) {
+    marker: ".jet:".bytes()
     at := 0
     loop at < bytes.len() {
-        line_start: at + marker.len()
-        if !holds_at(bytes, at, marker) || line_start >= bytes.len() || !is_digit(Int{bytes[line_start]}) {
+        if !number_follows(bytes, at, marker) {
             at += 1
             next
         }
         start := at
         loop start > 0 && is_name_byte(Int{bytes[start - 1]}) -> start -= 1
-        line_end: digits_end(bytes, line_start)
-        column_start := line_end
-        column_end := line_end
-        if line_end + 1 < bytes.len() && (Int{bytes[line_end]}) == 58 && is_digit(Int{bytes[line_end + 1]}) {
-            column_start = line_end + 1
-            column_end = digits_end(bytes, column_start)
+        named: start < at
+        name: text_between(bytes, start, at + 4)
+        first: written(bytes, at + marker.len())
+        if range_follows(bytes, first.end) {
+            last: written(bytes, first.end + 2)
+            if named -> spots.push(offset_spot(name, first, Val(last)))
+            at = last.end
+            next
         }
-        line: number_at(bytes, line_start, line_end)
-        if start < at && line > 0 {
-            name := [U8]{}
-            loop index in start..<at + 4 -> name.push(bytes[index])
-            column: number_at(bytes, column_start, column_end)
-            spots.push(
-                PinSpot{
-                    name: String.from_bytes(name) ?? "",
-                    at: Position{line: line, column: column},
-                    line_start: line_start,
-                    line_end: line_end,
-                    column_start: column_start,
-                    column_end: column_end,
-                },
-            )
-        }
-        at = column_end
+        column: if colon_follows(bytes, first.end) -> Val(written(bytes, first.end + 1)) else -> None
+        at = if column == .Val(found) -> found.end else -> first.end
+        if named && first.value > 0 -> spots.push(place_spot(name, first, column))
     }
-    spots
 }
 
-// The tracked sources (`known`) a pinned `name` can mean: a folder of
-// `scopes`, or the checkout root, joined with a trailing part of `name` cut
-// at a `/`.
-pin_targets: fn(name: String, scopes: [String], known: [String:Bool]) -> [String] Never! {
-    found := [String]{}
+// Whether `bytes` from `start` to `end` hold a line break.
+breaks_line: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! {
+    loop at in start..<end {
+        if byte_at(bytes, at) == 10 -> return true
+    }
+    false
+}
+
+// Each `span=<start>..<end>`, of the source the last named place before it
+// on its line names.
+span_spots: fn(bytes: [U8], spots: &[PinSpot]) {
+    marker: "span=".bytes()
+    named: spots.len()
+    loop at in 0..<bytes.len() {
+        if !number_follows(bytes, at, marker) -> next
+        first: written(bytes, at + marker.len())
+        if !range_follows(bytes, first.end) -> next
+        last: written(bytes, first.end + 2)
+        name := ""
+        loop index in 0..<named {
+            spot: spots[index]
+            if !spot.offsets && spot.starts[0] < at && !breaks_line(bytes, spot.starts[0], at) {
+                name = spot.name.copy()
+            }
+        }
+        spots.push(offset_spot(name, first, Val(last)))
+    }
+}
+
+// Each `<source>:<line>[:<column>]`, which names no source.
+source_spots: fn(bytes: [U8], spots: &[PinSpot]) {
+    marker: "<source>:".bytes()
+    loop at in 0..<bytes.len() {
+        if !number_follows(bytes, at, marker) -> next
+        line: written(bytes, at + marker.len())
+        column: if colon_follows(bytes, line.end) -> Val(written(bytes, line.end + 1)) else -> None
+        if line.value > 0 -> spots.push(place_spot("", line, column))
+    }
+}
+
+// Where the value of the quoted key `key` at `at` of `bytes` starts (`"key": `,
+// its quotes escaped or not), else -1.
+key_end: fn(bytes: [U8], at: Int, key: [U8]) -> Int Never! {
+    if byte_at(bytes, at) != 34 || !holds_at(bytes, at + 1, key) -> return -1
+    i := at + 1 + key.len()
+    if byte_at(bytes, i) == 92 -> i += 1
+    if byte_at(bytes, i) != 34 -> return -1
+    i += 1
+    loop byte_at(bytes, i) == 32 -> i += 1
+    if byte_at(bytes, i) != 58 -> return -1
+    i += 1
+    loop byte_at(bytes, i) == 32 -> i += 1
+    i
+}
+
+// The number the quoted key `key` at `at` of `bytes` holds, else None.
+keyed_number: fn(bytes: [U8], at: Int, key: [U8]) -> Written? Never! {
+    value: key_end(bytes, at, key)
+    if value < 0 || !is_digit(byte_at(bytes, value)) -> return None
+    Val(written(bytes, value))
+}
+
+// The JSON object around byte `at` of `bytes`, from its `{` to past its `}`,
+// each within OBJECT_REACH bytes; None outside one.
+object_around: fn(bytes: [U8], at: Int) -> ByteSpan? Never! {
+    depth := 0
+    open := -1
+    i := at - 1
+    loop i >= 0 && at - i <= OBJECT_REACH {
+        code: byte_at(bytes, i)
+        if {
+            code == 125 || code == 93 -> depth += 1
+            code == 123 || code == 91 -> {
+                if depth == 0 {
+                    if code == 123 -> open = i
+                    break
+                }
+                depth -= 1
+            }
+        }
+        i -= 1
+    }
+    if open < 0 -> return None
+    i = at
+    loop i < bytes.len() && i - at <= OBJECT_REACH {
+        code: byte_at(bytes, i)
+        if {
+            code == 123 || code == 91 -> depth += 1
+            code == 125 || code == 93 -> {
+                if depth == 0 {
+                    if code == 125 -> return Val(ByteSpan{start: open, end: i + 1})
+                    return None
+                }
+                depth -= 1
+            }
+        }
+        i += 1
+    }
+    None
+}
+
+// Where the value of the member `key` of `object` starts (not a nested
+// object's member), else -1.
+member_value: fn(bytes: [U8], object: ByteSpan, key: [U8]) -> Int Never! {
+    depth := 0
+    first: object.start + 1
+    last: object.end - 1
+    loop at in first..<last {
+        code: byte_at(bytes, at)
+        if {
+            code == 123 || code == 91 -> depth += 1
+            code == 125 || code == 93 -> depth -= 1
+            depth == 0 && code == 34 -> {
+                value: key_end(bytes, at, key)
+                if value >= 0 -> return value
+            }
+        }
+    }
+    -1
+}
+
+// The number the member `key` of `object` holds, else None.
+member_number: fn(bytes: [U8], object: ByteSpan, key: [U8]) -> Written? Never! {
+    value: member_value(bytes, object, key)
+    if value < 0 || !is_digit(byte_at(bytes, value)) -> return None
+    Val(written(bytes, value))
+}
+
+// The source a member of `object` names (SOURCE_KEYS), else "".
+member_name: fn(bytes: [U8], object: ByteSpan) -> String Never! {
+    loop key in SOURCE_KEYS {
+        value := member_value(bytes, object, key.bytes())
+        if value < 0 -> next
+        if byte_at(bytes, value) == 92 -> value += 1
+        if byte_at(bytes, value) != 34 -> next
+        end := value + 1
+        loop is_name_byte(byte_at(bytes, end)) -> end += 1
+        name: text_between(bytes, value + 1, end)
+        if name.ends_with(".jet") -> return name
+    }
+    ""
+}
+
+// The source `object`, or the object around it, names; else "".
+object_name: fn(bytes: [U8], object: ByteSpan) -> String Never! {
+    name: member_name(bytes, object)
+    if name != "" -> return name
+    if object_around(bytes, object.start) == .Val(outer) -> return member_name(bytes, outer)
+    ""
+}
+
+// Whether the object that opens at `open` is the value of a `span` key
+// (`"span": {`, its quotes escaped or not, or a JSON path's `.span = {`).
+follows_span_key: fn(bytes: [U8], open: Int) -> Bool Never! {
+    i := open - 1
+    loop is_blank(byte_at(bytes, i)) -> i -= 1
+    if byte_at(bytes, i) != 58 && byte_at(bytes, i) != 61 -> return false
+    i -= 1
+    loop is_blank(byte_at(bytes, i)) -> i -= 1
+    if byte_at(bytes, i) == 34 -> i -= 1
+    if byte_at(bytes, i) == 92 -> i -= 1
+    i >= 3 && holds_at(bytes, i - 3, "span".bytes())
+}
+
+// The places and spans of JSON objects in `bytes`: the `line` (and `column`)
+// of an object that it or the object around it names the source of, unless it
+// counts a `character`; and the `start` (and `end`) of a `span` object or of
+// an object that names its source.
+json_spots: fn(bytes: [U8], spots: &[PinSpot]) {
+    line_key: "line".bytes()
+    column_key: "column".bytes()
+    character_key: "character".bytes()
+    start_key: "start".bytes()
+    end_key: "end".bytes()
+    loop at in 0..<bytes.len() {
+        if byte_at(bytes, at) != 34 -> next
+        if keyed_number(bytes, at, line_key) == .Val(line) {
+            if object_around(bytes, at) == .Val(object) {
+                name: object_name(bytes, object)
+                if name != "" && member_value(bytes, object, character_key) < 0 {
+                    spots.push(place_spot(name, line, member_number(bytes, object, column_key)))
+                }
+            }
+            next
+        }
+        if keyed_number(bytes, at, start_key) == .Val(start) {
+            if object_around(bytes, at) == .Val(object) {
+                sourced: member_name(bytes, object)
+                if sourced != "" || follows_span_key(bytes, object.start) {
+                    name: if sourced != "" -> sourced else -> object_name(bytes, object)
+                    spots.push(offset_spot(name, start, member_number(bytes, object, end_key)))
+                }
+            }
+        }
+    }
+}
+
+// The JSON path that ends at `at` of `bytes`: from the last `$` before it on
+// its line; "" when there is none.
+json_path_before: fn(bytes: [U8], at: Int) -> String Never! {
+    start := at
+    loop start > 0 && byte_at(bytes, start - 1) != 10 && byte_at(bytes, start - 1) != 36 {
+        start -= 1
+    }
+    if byte_at(bytes, start - 1) != 36 -> return ""
+    text_between(bytes, start - 1, at)
+}
+
+// Each JSON path's `.line = <n>`, which names no source, with the
+// `.column = <n>` of the same path.
+json_path_spots: fn(bytes: [U8], spots: &[PinSpot]) {
+    marker: ".line = ".bytes()
+    loop at in 0..<bytes.len() {
+        if !number_follows(bytes, at, marker) -> next
+        line: written(bytes, at + marker.len())
+        if line.value == 0 -> next
+        path: json_path_before(bytes, at)
+        column := Written?{None}
+        if path != "" {
+            column_marker: "{path}.column = ".bytes()
+            loop from in 0..<bytes.len() {
+                if number_follows(bytes, from, column_marker) {
+                    column = Val(written(bytes, from + column_marker.len()))
+                    break
+                }
+            }
+        }
+        spots.push(place_spot("", line, column))
+    }
+}
+
+// `name` from its last part that is empty, `.`, `..` or a `{placeholder}` on:
+// the path it names inside the run's folder, or from the checkout root.
+clean_name: fn(name: String) -> String Never! {
+    kept := [String]{}
+    loop part in name.split("/") {
+        if part == "" || part == "." || part == ".." || part.contains("{{") || part.contains("}}") {
+            kept = [String]{}
+            next
+        }
+        kept.push(part.copy())
+    }
+    kept.join("/")
+}
+
+// The trailing parts of `name` cut at a `/`, longest first.
+name_tails: fn(name: String) -> [String] Never! {
     parts: name.split("/").to_list()
     tails := [String]{}
     tail := ""
     loop index in 0..<parts.len() {
         part: parts[parts.len() - 1 - index]
-        if part == "" || part == "." || part == ".." -> break
         tail = if tail == "" -> part.copy() else -> "{part}/{tail}"
-        tails.push(tail.copy())
+        tails.insert(0, tail.copy())
     }
-    loop scope in scopes {
-        loop relative in tails {
-            candidate: join(scope, relative)
-            if known.has_key(candidate) && !found.contains(candidate) -> found.push(candidate)
+    tails
+}
+
+// Whether a path in a run's folder and a name mean the same file: either ends
+// with the other, cut at a `/`.
+tail_matches: fn(path: String, name: String) -> Bool Never! {
+    path == name || path.ends_with("/{name}") || name.ends_with("/{path}")
+}
+
+// `source` inside the run folder of `site` that holds it.
+run_relative: fn(site: PinSite, source: String) -> String Never! {
+    loop folder in site.run {
+        prefix: "{folder}/"
+        if source.starts_with(prefix) -> return source.removeprefix(prefix)
+    }
+    source.copy()
+}
+
+// The sources in the run folders of `site` whose path there ends with `name`
+// (or that `name` ends with).
+run_sources: fn(site: PinSite, name: String, tracked: Sources) -> [String] Never! {
+    found := [String]{}
+    loop folder in site.run {
+        slot: tracked.folder_at.get(folder) ?? -1
+        if slot < 0 -> next
+        prefix: "{folder}/"
+        loop source in tracked.beneath[slot] {
+            if tail_matches(source.removeprefix(prefix), name) && !found.contains(source) {
+                found.push(source.copy())
+            }
         }
     }
-    loop relative in tails {
-        if known.has_key(relative) && !found.contains(relative) -> found.push(relative.copy())
+    found
+}
+
+// Those of `found` the last step of `site` before byte `at` runs (by their
+// path in the run's folder, or its tail); empty when it runs none of them.
+narrowed: fn(site: PinSite, at: Int, found: [String]) -> [String] Never! {
+    kept := [String]{}
+    loop index in 0..<site.steps.len() {
+        step: site.steps[site.steps.len() - 1 - index]
+        if step.at >= at || step.to != "" -> next
+        loop source in found {
+            relative: run_relative(site, source)
+            loop ran in step.runs {
+                if relative == ran || relative.ends_with("/{ran}") {
+                    kept.push(source.copy())
+                    break
+                }
+            }
+        }
+        return kept
+    }
+    kept
+}
+
+// The last `copy:` or `write:` of `site` before byte `at` that puts a file at
+// `relative` in the run's folder, else -1.
+copy_before: fn(site: PinSite, at: Int, relative: String) -> Int Never! {
+    found := -1
+    loop (index, step) in site.steps {
+        if step.at < at && step.to != "" && step.to == relative -> found = index
     }
     found
+}
+
+// The last `copy:` or `write:` of `site` before byte `at` that puts a file at
+// a path that ends with `name` or that `name` ends with, else -1.
+copy_by_tail: fn(site: PinSite, at: Int, name: String) -> Int Never! {
+    found := -1
+    loop (index, step) in site.steps {
+        if step.at < at && step.to != "" && tail_matches(step.to, name) -> found = index
+    }
+    found
+}
+
+// The sources `found` mean at byte `at` of `site`: a source a `copy:` before
+// it replaced means the sources it copied (`copied`).
+through_copies: fn(site: PinSite, at: Int, found: [String], tracked: Sources) -> [String] Never! {
+    out := [String]{}
+    loop source in found {
+        replacing: copy_before(site, at, run_relative(site, source))
+        if replacing < 0 {
+            if !out.contains(source) -> out.push(source.copy())
+            next
+        }
+        loop from in copied(site, replacing, tracked) {
+            if !out.contains(from) -> out.push(from)
+        }
+    }
+    out
+}
+
+// The tracked sources the `copy:` numbered `step` among the lines of `site`
+// copied from; none for a `write:` or a copy of a file other than a source.
+copied: fn(site: PinSite, step: Int, tracked: Sources) -> [String] Never! {
+    from: site.steps[step].from
+    if !from.ends_with(".jet") -> return [String]{}
+    run_sources(site, from, tracked)
+}
+
+// The tracked sources a pin of `site` can mean (see the head of this file).
+pin_targets: fn(site: PinSite, spot: PinSpot, tracked: Sources) -> [String] Never! {
+    at: spot.starts[0]
+    name: clean_name(spot.name)
+    found := [String]{}
+    if {
+        spot.name == "" -> {
+            loop source in site.own -> found.push(source.copy())
+        }
+        name == "" -> return found
+        else -> {
+            exact: copy_before(site, at, name)
+            if exact >= 0 -> return copied(site, exact, tracked)
+            found = run_sources(site, name, tracked)
+        }
+    }
+    if found.len() > 0 {
+        kept: narrowed(site, at, found)
+        chosen: if kept.len() > 0 -> kept else -> found
+        return through_copies(site, at, chosen, tracked)
+    }
+    if spot.name == "" -> return found
+    replacing: copy_by_tail(site, at, name)
+    if replacing >= 0 -> return copied(site, replacing, tracked)
+    tails: name_tails(name)
+    loop folder in site.near {
+        loop tail in tails {
+            candidate: join(folder, tail)
+            if tracked.known.has_key(candidate) -> return [String]{candidate}
+        }
+    }
+    loop tail in tails {
+        if tracked.known.has_key(tail) -> return [String]{tail.copy()}
+    }
+    [String]{}
 }
 
 // The non-blank bytes of `bytes`, in order.
@@ -771,104 +1342,253 @@ remap: fn(before: [U8], after: [U8], map: [Int], at: Position) -> Position? Neve
     Val(moved)
 }
 
-// `text` with each pin of `spots` set to the matching position of `moved`.
-rewrite_pins: fn(text: String, spots: [PinSpot], moved: [Position]) -> String Never! {
+// How many non-blank bytes of `bytes` come before byte `offset`.
+ink_before_offset: fn(bytes: [U8], offset: Int) -> Int Never! {
+    count := 0
+    loop at in 0..<offset {
+        if !is_blank(Int{bytes[at]}) -> count += 1
+    }
+    count
+}
+
+// Where byte `offset` of `before` sits in `after`, given the `ink_map` of the
+// two: it moves with the non-blank byte at or after it.
+remap_start: fn(before: [U8], after: [U8], map: [Int], offset: Int) -> Int? Never! {
+    if offset > before.len() -> return None
+    count: ink_before_offset(before, offset)
+    if count >= map.len() -> return None
+    ink_offset(after, map[count])
+}
+
+// Where the end `offset` (one past the last byte) of a span of `before` sits
+// in `after`, given the `ink_map` of the two: one past where its last
+// non-blank byte went.
+remap_end: fn(before: [U8], after: [U8], map: [Int], offset: Int) -> Int? Never! {
+    if offset > before.len() -> return None
+    count: ink_before_offset(before, offset)
+    if count == 0 -> return Val(0)
+    Val((ink_offset(after, map[count - 1]) ?? return None) + 1)
+}
+
+// The byte offset of the non-blank byte numbered `index` (from 0) in `bytes`,
+// or their length for the one past the last.
+ink_offset: fn(bytes: [U8], index: Int) -> Int? Never! {
+    count := 0
+    loop (at, byte) in bytes {
+        if is_blank(Int{byte}) -> next
+        if count == index -> return Val(at)
+        count += 1
+    }
+    if count == index -> return Val(bytes.len())
+    None
+}
+
+// The numbers of `spot` moved from `before` to `after`, given the `ink_map`
+// of the two. A pin past the last token names no token, and stays.
+moved_numbers: fn(spot: PinSpot, before: [U8], after: [U8], map: [Int]) -> [Int] Never! {
+    if !spot.offsets {
+        place: remap(before, after, map, Position{line: spot.numbers[0], column: spot.numbers[1]}) ?? return spot.numbers.copy()
+        return [Int]{place.line, place.column}
+    }
+    moved := [Int]{}
+    loop (index, offset) in spot.numbers {
+        at: if index == 1 -> remap_end(before, after, map, offset) else -> remap_start(before, after, map, offset)
+        moved.push(at ?? return spot.numbers.copy())
+    }
+    moved
+}
+
+// Whether two lists of numbers are the same.
+same_numbers: fn(left: [Int], right: [Int]) -> Bool Never! {
+    if left.len() != right.len() -> return false
+    loop (index, number) in left {
+        if number != right[index] -> return false
+    }
+    true
+}
+
+// How a report names `spot`.
+pin_label: fn(spot: PinSpot) -> String Never! {
+    name: if spot.name == "" -> "<unnamed>" else -> spot.name.copy()
+    if spot.offsets && spot.numbers.len() == 2 {
+        return "{name}:{spot.numbers[0]}..{spot.numbers[1]}"
+    }
+    if spot.offsets -> return "{name} byte {spot.numbers[0]}"
+    if spot.numbers[1] > 0 -> return "{name}:{spot.numbers[0]}:{spot.numbers[1]}"
+    "{name}:{spot.numbers[0]}"
+}
+
+// A letter or a digit.
+is_word_byte: fn(code: Int) -> Bool Never! {
+    is_digit(code) || (code >= 97 && code <= 122) || (code >= 65 && code <= 90)
+}
+
+// Each lowercase hex SHA-256 digest in `bytes`: a run of 64 hex digits no
+// other letter or digit touches.
+digest_spans: fn(bytes: [U8]) -> [ByteSpan] Never! {
+    found := [ByteSpan]{}
+    at := 0
+    loop at < bytes.len() {
+        if !is_word_byte(byte_at(bytes, at)) {
+            at += 1
+            next
+        }
+        end := at
+        hex := true
+        loop is_word_byte(byte_at(bytes, end)) {
+            code: byte_at(bytes, end)
+            if !is_digit(code) && (code < 97 || code > 102) -> hex = false
+            end += 1
+        }
+        if hex && end - at == 64 -> found.push(ByteSpan{start: at, end: end})
+        at = end
+    }
+    found
+}
+
+// `text` with each of `edits` (which don't overlap) written in.
+apply_edits: fn(text: String, edits: [TextEdit]) -> String Never! {
     bytes: text.bytes()
+    by_start := [Int:Int]{}
+    loop (index, edit) in edits -> by_start[edit.start] = index
     out := [U8]{}
     at := 0
-    loop (index, spot) in spots {
-        to: moved[index]
-        if to.line == spot.at.line && to.column == spot.at.column -> next
-        loop copied in at..<spot.line_start -> out.push(bytes[copied])
-        loop byte in "{to.line}".bytes() -> out.push(byte)
-        at = spot.line_end
-        if spot.column_end > spot.column_start {
-            loop copied in at..<spot.column_start -> out.push(bytes[copied])
-            loop byte in "{to.column}".bytes() -> out.push(byte)
-            at = spot.column_end
+    loop at < bytes.len() {
+        if by_start.get(at) == .Val(index) {
+            loop byte in edits[index].text.bytes() -> out.push(byte)
+            at = edits[index].end
+            next
         }
+        out.push(bytes[at])
+        at += 1
     }
-    loop copied in at..<bytes.len() -> out.push(bytes[copied])
     String.from_bytes(out) ?? text.copy()
 }
 
-// The sources among `dirty` that a pin of `sites` names, each with its text
+// The sources among `dirty` that a pin of `sites` can mean (and, for a site
+// that holds a digest, the sources its unnamed pins mean), each with its text
 // before formatting.
 pinned_sources: fn(root: String, found: Corpus, dirty: [String]) -[FS.Read]> [String:String] CorpusError! {
     formatting := [String:Bool]{}
     loop path in dirty -> formatting[path.copy()] = true
     before := [String:String]{}
     loop site in found.sites {
-        loop spot in pin_spots(read_tracked(root, site.path) ?? return Err(err)) {
-            loop target in pin_targets(spot.name, site.scopes, found.known) {
-                if formatting.has_key(target) && !before.has_key(target) {
-                    before[target.copy()] = read_tracked(root, target) ?? return Err(err)
-                }
+        text: read_tracked(root, site.path) ?? return Err(err)
+        pinned := [String]{}
+        loop spot in pin_spots(text) {
+            loop target in pin_targets(site, spot, found.tracked) -> pinned.push(target)
+        }
+        if digest_spans(text.bytes()).len() > 0 {
+            loop source in site.own -> pinned.push(source.copy())
+        }
+        loop target in pinned {
+            if formatting.has_key(target) && !before.has_key(target) {
+                before[target.copy()] = read_tracked(root, target) ?? return Err(err)
             }
         }
     }
     Ok(before)
 }
 
-// Moves every pin of `sites` that names a source of `before` (its text before
-// formatting) to the same token in its formatted text.
+// Reads the formatted text of `target`, a source of `before`, into `after`,
+// and the `ink_map` from its old text into `maps`, once; whether `jet fmt`
+// changed it only in blank space and canonical spellings, so its pins move.
+formatted_map: fn(root: String, target: String, before: [String:String], after: &[String:String], maps: &[String:[Int]]) -[FS.Read]> Bool CorpusError! {
+    if !after.has_key(target) {
+        new_text: read_tracked(root, target) ?? return Err(err)
+        maps[target.copy()] = ink_map((before.get(target) ?? "").bytes(), new_text.bytes()) ?? [Int]{}
+        after[target.copy()] = new_text
+    }
+    Ok((maps.get(target) ?? [Int]{}).len() > 0)
+}
+
+// Adds to `edits` the new digest of each formatted source a digest of a
+// site's `bytes` is the old digest of, among the sources its unnamed pins
+// mean; in a case, a digest that is no such source's stays and goes to
+// `problems`. How many digests move.
+move_digests: fn(root: String, site: PinSite, bytes: [U8], before: [String:String], after: &[String:String], maps: &[String:[Int]], edits: &[TextEdit], problems: &[String]) -[FS.Read]> Int CorpusError! {
+    spans: digest_spans(bytes)
+    if spans.len() == 0 -> return Ok(0)
+    digests := [String:String]{}
+    formatted := [String]{}
+    loop source in site.own {
+        if !before.has_key(source) -> next
+        _: formatted_map(root, source, before, after, maps) ?? return Err(err)
+        old: crypto.sha256(before.get(source) ?? "").hex()
+        digests[old] = crypto.sha256(after.get(source) ?? "").hex()
+        formatted.push(source.copy())
+    }
+    if formatted.len() == 0 -> return Ok(0)
+    moved := 0
+    loop span in spans {
+        digest: text_between(bytes, span.start, span.end)
+        if digests.get(digest) == .Val(new) {
+            if new != digest {
+                edits.push(TextEdit{start: span.start, end: span.end, text: new.copy()})
+                moved += 1
+            }
+            next
+        }
+        if site.path.ends_with(".case") {
+            problems.push("{site.path}: digest `{digest}` stays: it is no source's digest, while {formatted.join(", ")} changed (it may hash one with more)")
+        }
+    }
+    Ok(moved)
+}
+
+// Moves every pin of `sites` that means a source of `before` (its text before
+// formatting) to the same token in its formatted text, and every digest of
+// one to the digest of its formatted text.
 move_pins: fn(root: String, found: Corpus, before: [String:String]) -[FS]> PinReport CorpusError! {
     report := PinReport{files: 0, pins: 0, problems: [String]{}}
     after := [String:String]{}
     maps := [String:[Int]]{}
     loop site in found.sites {
         text: read_tracked(root, site.path) ?? return Err(err)
-        spots: pin_spots(text)
-        moved := [Position]{}
+        edits := [TextEdit]{}
         changed := 0
-        loop spot in spots {
-            targets: pin_targets(spot.name, site.scopes, found.known)
+        loop spot in pin_spots(text) {
+            targets: pin_targets(site, spot, found.tracked)
             formatted := false
             loop target in targets {
                 if before.has_key(target) -> formatted = true
             }
-            if !formatted {
-                moved.push(spot.at)
-                next
-            }
-            places := [Position]{}
+            if !formatted -> next
+            moves := [[Int]]{}
             problem := ""
             loop target in targets {
-                old: before.get(target) ?? ""
                 if !before.has_key(target) {
-                    places.push(spot.at)
+                    moves.push(spot.numbers.copy())
                     next
                 }
-                if !after.has_key(target) {
-                    new_text: read_tracked(root, target) ?? return Err(err)
-                    maps[target.copy()] = ink_map(old.bytes(), new_text.bytes()) ?? [Int]{}
-                    after[target.copy()] = new_text
-                }
-                map: maps.get(target) ?? [Int]{}
-                if map.len() == 0 {
+                if !(formatted_map(root, target, before, after, maps) ?? return Err(err)) {
                     problem = "`jet fmt` changed {target} beyond blank space and canonical spellings"
                     break
                 }
-                // A pin past the last token names no token, and stays.
-                places.push(remap(old.bytes(), (after.get(target) ?? "").bytes(), map, spot.at) ?? spot.at)
+                moves.push(moved_numbers(spot, (before.get(target) ?? "").bytes(), (after.get(target) ?? "").bytes(), maps.get(target) ?? [Int]{}))
             }
             if problem == "" {
-                loop place in places {
-                    if place.line != places[0].line || place.column != places[0].column {
-                        problem = "`{spot.name}` can mean {targets.join(", ")}, which move it differently"
+                loop numbers in moves {
+                    if !same_numbers(numbers, moves[0]) {
+                        problem = "it can mean {targets.join(", ")}, which move it differently"
                     }
                 }
             }
             if problem != "" {
-                report.problems.push("{site.path}: pin `{spot.name}:{spot.at.line}` stays: {problem}")
-                moved.push(spot.at)
+                report.problems.push("{site.path}: pin `{pin_label(spot)}` stays: {problem}")
                 next
             }
-            moved.push(places[0])
-            if places[0].line != spot.at.line || places[0].column != spot.at.column -> changed += 1
+            moved := false
+            loop (index, number) in moves[0] {
+                if number == spot.numbers[index] || spot.ends[index] == spot.starts[index] -> next
+                edits.push(TextEdit{start: spot.starts[index], end: spot.ends[index], text: "{number}"})
+                moved = true
+            }
+            if moved -> changed += 1
         }
+        changed += move_digests(root, site, text.bytes(), before, after, maps, edits, report.problems) ?? return Err(err)
         if changed > 0 {
-            files.write("{root}/{site.path}", rewrite_pins(text, spots, moved)) ?? return Err(CorpusError{message: "cannot write {site.path}: {err}"})
+            files.write("{root}/{site.path}", apply_edits(text, edits)) ?? return Err(CorpusError{message: "cannot write {site.path}: {err}"})
             report.files += 1
             report.pins += changed
         }
@@ -1143,7 +1863,7 @@ corpus_main: fn(args: [String]) -[Env, Exec, FS, IO, Time.Wait]> Int CorpusError
     unstable: again.dirty.len() + again.unparsed.len() + again.changed.len()
     hung: failed + wrote.failed.len() + again.failed.len()
     changed: meaning + wrote.changed.len()
-    summary: "formatted {formatted.len()} of {parsed} sources ({unparsed} don't parse, {left_out} left out); moved {pins.pins} line pins in {pins.files} files"
+    summary: "formatted {formatted.len()} of {parsed} sources ({unparsed} don't parse, {left_out} left out); moved {pins.pins} pins in {pins.files} files"
     if unstable > 0 || pins.problems.len() > 0 || changed > 0 || hung > 0 {
         term.eprint("fmt-corpus: {summary}, but {changed} sources would change meaning, {unstable} sources are not stable, {hung} sources hang or crash the formatter and {pins.problems.len()} pins stay as written")
         return Ok(1)
@@ -1241,7 +1961,7 @@ run: fn() {
 #Test("a case's fixtures are relative to its folder or rooted") {
     text: "fixture: fixtures/one\nstep: jet build\nfixture: ./fixtures/two/\nfixture: {{root}}/Examples/Basics\n"
     assert_eq(case_fixtures("Tests/Cases/BuildEntry/x.case", text).join("|"), "Tests/Cases/BuildEntry/fixtures/one|Tests/Cases/BuildEntry/fixtures/two|Examples/Basics")
-    assert_eq(case_scopes("Tests/Cases/a/x.case", "fixture: fixtures/x\n").join("|"), "Tests/Cases/a/fixtures/x|Tests/Cases/a")
+    assert_eq(case_steps("fixture: F\nstep walrus: jet check {{work}}/walrus/main.jet\ncopy: a.txt b.jet\nwrite: c.jet t\n").len(), 3)
     assert(rewrites_sources("step: jet fmt --check main.jet\n"))
     assert(rewrites_sources("step: jet fix --dry-run main.jet\n"))
     assert(rewrites_sources("step: jet inspect codemod apply rename.codemod.json --yes\n"))
@@ -1255,35 +1975,49 @@ run: fn() {
     assert(!is_pin_site("Tools/Tower/.tower/tower.json"))
     assert(is_pin_site("Tools/AgentEval/runs/a/receipt.json"))
     assert(!is_pin_site("Core/Text/Fmt.jet"))
-    dirs := [String:Bool]{}
-    dirs["Tests/Fixtures"] = true
-    dirs["Tests/Fixtures/Prep"] = true
-    dirs["Tests/Fixtures/Prep/Cross"] = true
-    assert_eq(expectation_scopes("Tests/Fixtures/Prep/Cross.stderr", dirs).join("|"), "Tests/Fixtures/Prep/Cross|Tests/Fixtures/Prep")
-    assert_eq(expectation_scopes("Tests/Fixtures/Prep/out/run.expected", dirs).join("|"), "Tests/Fixtures/Prep")
+    tracked := Sources{known: [String:Bool]{}, folder_at: [String:Int]{}, beneath: [[String]]{}}
+    paths: [String]{"Tests/Fixtures/Prep/x.jet", "Tests/Fixtures/Prep/Cross/main.jet", "Tests/Fixtures/Prep/Cross/b.jet"}
+    loop path in paths -> add_source(tracked, path)
+    beside: expectation_site("Tests/Fixtures/Prep/x.stderr", tracked)
+    assert_eq(beside.own.join("|"), "Tests/Fixtures/Prep/x.jet")
+    assert_eq(beside.run.join("|"), "")
+    assert_eq(beside.near.join("|"), "Tests/Fixtures/Prep")
+    stem: expectation_site("Tests/Fixtures/Prep/Cross.stderr", tracked)
+    assert_eq(stem.own.join("|"), "Tests/Fixtures/Prep/Cross/main.jet|Tests/Fixtures/Prep/Cross/b.jet")
+    assert_eq(stem.run.join("|"), "Tests/Fixtures/Prep/Cross")
+    assert_eq(expectation_site("Tests/Fixtures/Prep/out/run.expected", tracked).near.join("|"), "Tests/Fixtures/Prep")
 }
 
 #Test("a pin is a name, a line and an optional column") {
     spots: pin_spots("at {{work}}/src/main.jet:12:5 and Core/Text/Fmt.jet:7, not .jet:3 or x.jet:0 or a.jet:b\n")
     assert_eq(spots.len(), 2)
     assert_eq(spots[0].name, "/src/main.jet")
-    assert_eq(spots[0].at.line, 12)
-    assert_eq(spots[0].at.column, 5)
+    assert_eq(spots[0].numbers, [Int]{12, 5})
     assert_eq(spots[1].name, "Core/Text/Fmt.jet")
-    assert_eq(spots[1].at.line, 7)
-    assert_eq(spots[1].at.column, 0)
+    assert_eq(spots[1].numbers, [Int]{7, 0})
+    assert(!spots[1].offsets)
 }
 
-#Test("a pinned name means a scope's source or a rooted one") {
-    known := [String:Bool]{}
-    known["Tests/Cases/a/fixtures/x/main.jet"] = true
-    known["Tests/Cases/a/fixtures/x/src/run.jet"] = true
-    known["Core/Text/Fmt.jet"] = true
-    scopes: [String]{"Tests/Cases/a/fixtures/x", "Tests/Cases/a"}
-    assert_eq(pin_targets("main.jet", scopes, known).join("|"), "Tests/Cases/a/fixtures/x/main.jet")
-    assert_eq(pin_targets("/tmp/work/src/run.jet", scopes, known).join("|"), "Tests/Cases/a/fixtures/x/src/run.jet")
-    assert_eq(pin_targets("run.jet", scopes, known).join("|"), "")
-    assert_eq(pin_targets("../../Core/Text/Fmt.jet", scopes, known).join("|"), "Core/Text/Fmt.jet")
+#Test("pins are byte spans, JSON places and spans, and places of no named source") {
+    text: "  liveness  run.jet:166..180  x\nmain.jet:9:10  span=202..204  mark=&\n<source>:7\n$.reports[?code=\"E1\"][0].line = 6 and $.reports[?code=\"E1\"][0].column = 3\n{{\"source\":{{\"column\":5,\"line\":12,\"path\":\"calls.jet\"}}}}\n{{\\\"source\\\":\\\"s.jet\\\",\\\"span\\\":{{\\\"start\\\":20,\\\"end\\\":28}}}}\n$.span = {{\"start\":16,\"end\":24}}\n{{\"line\":3,\"character\":4,\"path\":\"lsp.jet\"}} {{\"start\":5,\"end\":9}}\n"
+    spots: pin_spots(text)
+    labels := [String]{}
+    loop spot in spots -> labels.push(pin_label(spot))
+    assert_eq(labels.join(" | "), "run.jet:166..180 | main.jet:9:10 | main.jet:202..204 | <unnamed>:7 | calls.jet:12:5 | s.jet:20..28 | <unnamed>:16..24 | <unnamed>:6:3")
+    assert(spots[0].offsets && spots[2].offsets && !spots[4].offsets)
+}
+
+#Test("a pinned name means the run's source by its tail, the step's, the copied one, or a rooted one") {
+    tracked := Sources{known: [String:Bool]{}, folder_at: [String:Int]{}, beneath: [[String]]{}}
+    paths: [String]{"Tests/Cases/a/F/main.jet", "Tests/Cases/a/F/walrus/main.jet", "Tests/Cases/a/F/src/run.jet", "Tests/Cases/a/F/test.jet", "Tests/Cases/a/F/after.jet", "Tests/Cases/a/other.jet", "Core/Text/Fmt.jet"}
+    loop path in paths -> add_source(tracked, path)
+    text: "fixture: F\nstderr: ~ \"main.jet:1:2\"\nstep walrus: jet check walrus/main.jet\nstderr: ~ \"main.jet:3:10\"\ncopy: test-broken.txt test.jet\nstderr: ~ \"test.jet:4:5\"\ncopy: after.jet run.jet\nstderr: ~ \"/tmp/work/src/run.jet:1\" run.jet:2 other.jet:1 ../../Core/Text/Fmt.jet:7 <source>:3\n"
+    site: case_site("Tests/Cases/a/x.case", text, tracked)
+    found := [String]{}
+    loop spot in pin_spots(text) {
+        found.push(pin_targets(site, spot, tracked).join("+").replace("Tests/Cases/a/", ""))
+    }
+    assert_eq(found.join(" | "), "F/main.jet+F/walrus/main.jet | F/walrus/main.jet |  | F/src/run.jet | F/after.jet | other.jet | Core/Text/Fmt.jet | F/walrus/main.jet")
 }
 
 #Test("a pin moves with its token when only blank space changes") {
@@ -1320,11 +2054,32 @@ run: fn() {
     assert_eq(respelled.column, 26)
 }
 
-#Test("rewriting moves only the pins that changed") {
-    text: "main.jet:7:8 then main.jet:2 then main.jet:3:1\n"
+#Test("an offset moves with its byte, and a span's end with its last byte") {
+    before: "f: fn(a:Int)->Int {{ a+1 }}\n".bytes()
+    after: "f: fn(a: Int) -> Int {{\n    a + 1\n}}\n".bytes()
+    map: ink_map(before, after) ?? [Int]{}
+    spots: pin_spots("x.jet:20..23")
+    assert_eq(moved_numbers(spots[0], before, after, map), [Int]{27, 32})
+    assert_eq(remap_start(before, after, map, 8) ?? -1, 9)
+    assert_eq(remap_end(before, after, map, 17) ?? -1, 20)
+}
+
+#Test("a digest is 64 hex digits no other letter or digit touches") {
+    digest: crypto.sha256("x").hex()
+    spans: digest_spans("a {digest} b x{digest} {digest}0\n".bytes())
+    assert_eq(spans.len(), 1)
+    assert_eq(spans[0].start, 2)
+}
+
+#Test("rewriting writes only the numbers that changed, in any order") {
+    text: "main.jet:7:8 and {{\"column\":6,\"line\":2,\"path\":\"a.jet\"}}\n"
     spots: pin_spots(text)
-    moved: [Position]{Position{line: 6, column: 8}, Position{line: 2, column: 0}, Position{line: 10, column: 12}}
-    assert_eq(rewrite_pins(text, spots, moved), "main.jet:6:8 then main.jet:2 then main.jet:10:12\n")
+    assert_eq(spots.len(), 2)
+    edits := [TextEdit]{}
+    edits.push(TextEdit{start: spots[0].starts[0], end: spots[0].ends[0], text: "10"})
+    edits.push(TextEdit{start: spots[1].starts[1], end: spots[1].ends[1], text: "12"})
+    edits.push(TextEdit{start: spots[1].starts[0], end: spots[1].ends[0], text: "3"})
+    assert_eq(apply_edits(text, edits), "main.jet:10:8 and {{\"column\":12,\"line\":3,\"path\":\"a.jet\"}}\n")
 }
 
 #Test("a fmt case keeps out its fixtures and the sources it names, and the first rule holds") {
