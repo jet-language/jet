@@ -46,9 +46,8 @@
 //
 // The corpus leaves out, by rule:
 // - generated: a `//` line among a source's first five says a tool generates
-//   it, it is an FFI adaptation's `after.jet` facade, or `jet build Compiler`
-//   copies a Prelude text into it (a `target:` of PRELUDE_COPIES); its
-//   generator writes it;
+//   it, or `jet build Compiler` copies a Prelude text into it (a `target:` of
+//   PRELUDE_COPIES); its generator writes it;
 // - formatter input: Tests/Cases/Fmt*/, the machine-door corpus
 //   Tests/Fixtures/MachineDoors/ (its guard runs `jet fmt --check` on a
 //   source that is unformatted on purpose), and the fixtures and named
@@ -148,8 +147,6 @@ UI_FOLDER_SNAPSHOT: "stderr"
 EXCLUDED_TREES: [String]{"Tests/Cases/Fmt", "Tests/Fixtures/MachineDoors/", "Compiler/JetDevServer/", "Tests/AgentWorkloads/", "Tests/Cases/AgentWorkloads/"}
 
 EXCLUDED_TREE_RULES: [String]{RULE_FORMATTER_INPUT, RULE_FORMATTER_INPUT, RULE_DEVSERVER, RULE_EVIDENCE, RULE_EVIDENCE}
-
-ADAPTATION_FILE: "after.jet"
 
 PIN_SUFFIXES: [String]{".case", ".out", ".stdout", ".stderr", ".err", ".warn", ".expected", ".fixture", ".log", ".txt", ".json", ".tsv", ".list"}
 
@@ -392,7 +389,6 @@ tree_rule: fn(path: String) -> String Never! {
     loop (at, tree) in EXCLUDED_TREES {
         if path.starts_with(tree) -> return EXCLUDED_TREE_RULES[at].copy()
     }
-    if base_name(path) == ADAPTATION_FILE -> return RULE_GENERATED
     ""
 }
 
@@ -1947,14 +1943,14 @@ run: fn() {
     if code != 0 -> process.exit(code)
 }
 
-#Test("whole trees and adaptation facades are left out by their rule") {
+#Test("whole trees are left out by their rule") {
     assert_eq(tree_rule("Compiler/JetSema/Source/Sema/Scopes.jet"), "")
     assert_eq(tree_rule("Tests/UI/bare_error_mark_is_not_a_contract.jet"), "")
     assert_eq(tree_rule("Tests/Cases/Fmt/Project/x/main.jet"), RULE_FORMATTER_INPUT)
     assert_eq(tree_rule("Tests/Fixtures/MachineDoors/unformatted.jet"), RULE_FORMATTER_INPUT)
     assert_eq(tree_rule("Compiler/JetDevServer/Source/Session.jet"), RULE_DEVSERVER)
     assert_eq(tree_rule("Tools/AgentEval/runs/a/main.jet"), "")
-    assert_eq(tree_rule("Tests/Fixtures/FFIAdaptations/BorrowedView/after.jet"), RULE_GENERATED)
+    assert_eq(tree_rule("Tests/Conformance/Corpus/Core/Time/after.jet"), "")
     assert_eq(tree_rule("Tests/Conformance/Corpus/Core/Web/Store/listen_selector.jet"), "")
 }
 

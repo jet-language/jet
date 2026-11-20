@@ -14,6 +14,8 @@ use jet_foundation.[
     body_node,
     body_type,
     foundation_byte_text,
+    name_intern,
+    name_table,
     symbol_key,
     symbol_key_leaf,
 ]
@@ -23,7 +25,10 @@ use jet_foundation.[
 // specializations share its source.
 jet_driver_sql_row_loop_lints: fn(load: JetDriverLoadResult, functions: [FnBody], symbols: SymbolTable) -> [Diagnostic] {
     lints := [Diagnostic]{}
-    seen := [String:Bool]{}
+    // The reported calls, each by its file's id in `files` (high half) and
+    // its start offset (low half).
+    files := name_table()
+    seen := [Int:Bool]{}
     loop function in functions {
         if !jet_driver_cost_reports(function) -> next
         tree: function.tree
@@ -42,7 +47,7 @@ jet_driver_sql_row_loop_lints: fn(load: JetDriverLoadResult, functions: [FnBody]
                 if !jet_driver_sql_driver_read(tree, symbols, method) -> next
                 head: jet_driver_sql_head(tree, args[0].value) ?? next
                 if head != "select" && head != "with" -> next
-                site: "{function.source_file}:{node.span.start}"
+                site: (Int{name_intern(files, function.source_file).id} << 32) | node.span.start
                 if seen.get(site) != None -> next
                 seen[site] = true
                 lints.push(jet_driver_diagnostic_at_loaded_site(load, function.module_identity, "L0308", node.span, "This query runs once for every row of the loop around it", "Each pass of the loop makes one more round trip to the database, so N rows cost N + 1 queries, and the loop slows down as the table grows", "Read what the loop needs in one query before it: `WHERE key IN (…)` over the keys the rows hold, or a JOIN with the query that produced the rows"))
@@ -53,8 +58,8 @@ jet_driver_sql_row_loop_lints: fn(load: JetDriverLoadResult, functions: [FnBody]
 }
 
 // Whether a loop whose element has type `element` over a collection of type
-// `collection` walks database rows: the `[String:DBValue]` rows a driver's
-// `query` returns, or a typed `Query<T>`.
+// `collection` walks database rows: the maps from column name to DBValue a
+// driver's `query` returns, or a typed `Query<T>`.
 jet_driver_sql_rows: fn(element: Type, collection: Type) -> Bool Never! {
     if element == .Map(key, _, value) && key == Type.String && value == .Named(name) {
         if name == "DBValue" || name.ends_with(".DBValue") -> return true

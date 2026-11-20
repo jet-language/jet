@@ -1,0 +1,29 @@
+# A fault (SIGSEGV, SIGBUS, SIGILL, SIGFPE) stops the program as a
+# breakpoint does, before its signal reaches the program: the session goes
+# on, at the function and line that faulted, with every thread stopped and
+# the stack whole, so `bt`, `locals`, `tasks` and `disas` read it. The next
+# run command delivers the signal: the runtime's own fault report runs and
+# ends the program, here the stack overflow stop E3012 with status 70.
+# `quit` at the fault ends the session as at any stop. The fixture must
+# stay in jet fmt form: line 2 declares `depth`, line 4 recurses.
+fixture: AFaultStopsLikeABreakpointWithItsStackReadable.fixture
+env: NO_COLOR=1
+env: PATH={work}/no-tools
+step: jet debug prog.jet
+stdin: a_fault_stops_like_a_breakpoint_with_its_stack_readable.stdin
+exit: 0 # the program's own status is reported; the session ends cleanly
+stdout: ~ "(Jet) c\nProgram received SIGSEGV  prog.jet:2  in depth()\n" # the fault stops the session where it struck
+stdout: ~ "(Jet) bt\n#0  depth()  at prog.jet:2\n#1  depth()  at prog.jet:4\n" # `bt` names the faulting function and line, then its callers
+stdout: ~ "(Jet) locals\nn: Int = " # `locals` reads the faulting frame
+stdout: ~ "(Jet) tasks\n" # `tasks` lists the stopped program's tasks
+stdout.filter(~ "#0  depth()  at prog.jet:2"): lines >= 2 # the faulting frame heads the faulting task's stack too
+stdout: ~ "(Jet) disas\ndepth  prog.jet:" # `disas` lists the faulting function
+stdout+stderr: ~ "Stop: Jet.StackOverflow: Stack overflow in `depth`" # continuing delivers the signal to the runtime's report
+stdout+stderr: ~ "Program finished with exit status 70" # which ends the program
+step: jet debug prog.jet
+stdin: a_fault_stops_like_a_breakpoint_with_its_stack_readable.quit.stdin
+exit: 1 # quitting ends the program before it finishes
+stdout: ~ "Program received SIGSEGV  prog.jet:2  in depth()\n" # the stop
+stdout: ~ "(Jet) bt\n#0  depth()  at prog.jet:2\n" # the stack read at it
+stdout+stderr: !~ "Program stopped by" # the fault never ended the session
+stderr: ~ "Jet.DebugSessionQuit" # `quit` did

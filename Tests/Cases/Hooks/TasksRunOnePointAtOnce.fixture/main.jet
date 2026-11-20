@@ -1,0 +1,32 @@
+// 32 tasks at a time, 100 times over, each run the declared decision point
+// `gate` 1000 times. The point is one process cell, so tasks on different
+// threads run its hook and its handler at once.
+use event: core.event
+
+gate: event.decision_point<Int, String>(HookPolicy.FirstCancelElseTransform)
+
+bumped: fn(n: Int) -[]> HookDecision<Int, String> Never! { HookDecision.Transform(n + 1) }
+
+worker: fn(rounds: Int) -> Int {
+    passed := 0
+    loop n in 0..<rounds {
+        passed += if gate.run(n) == {
+            .Continue(kept) -> if kept == n + 1 -> 1 else -> 0
+            .Cancel -> 0
+            .Fail(_) -> 0
+        }
+    }
+    passed
+}
+
+run: fn() {
+    scope: event.scope()
+    _: gate.on(scope, bumped)
+    passed := 0
+    loop _ in 0..<100 {
+        workers := [Task<Int>]{}
+        loop _ in 0..<32 -> workers.push(task { worker(1000) })
+        loop handle in workers -> passed += handle.join() ?? 0
+    }
+    print("{passed} runs passed")
+}

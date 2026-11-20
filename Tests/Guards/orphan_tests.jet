@@ -78,7 +78,9 @@ orphan_git_lines: fn(args: [String]) -> [String] {
 // Tracked and untracked unignored files, less the ones deleted from the tree.
 orphan_tracked: fn() -> [String] {
     deleted := [String:Bool]{}
-    loop path in orphan_git_lines([String]{"git", "-c", "core.quotePath=false", "ls-files", "--deleted"}) -> deleted[path] = true
+    loop path in orphan_git_lines([String]{"git", "-c", "core.quotePath=false", "ls-files", "--deleted"}) {
+        deleted[path] = true
+    }
     paths := [String]{}
     loop path in orphan_git_lines([String]{"git", "-c", "core.quotePath=false", "ls-files", "--cached", "--others", "--exclude-standard"}) {
         if deleted.get(path) == None -> paths.push(path)
@@ -135,9 +137,7 @@ orphan_words: fn(text: String) -> [String] {
         if orphan_delimiter(raw[index]) {
             if start >= 0 -> words.push(policy_slice_raw(raw, start, index))
             start = -1
-        } else if start < 0 {
-            start = index
-        }
+        } else if start < 0 { start = index }
     }
     if start >= 0 -> words.push(policy_slice_raw(raw, start, raw.len()))
     words
@@ -168,7 +168,9 @@ orphan_resolve: fn(word: String, bases: [String], facts: OrphanFacts) -> String?
         path: orphan_named(word, base) ?? next
         if !path.starts_with("Tests/") -> next
         if facts.files.get(path) != None -> return Val(path)
-        if path.split("/").to_list().len() >= 3 && facts.folders.get(path) != None -> return Val(path)
+        if path.split("/").to_list().len() >= 3 && facts.folders.get(path) != None {
+            return Val(path)
+        }
     }
     None
 }
@@ -176,7 +178,9 @@ orphan_resolve: fn(word: String, bases: [String], facts: OrphanFacts) -> String?
 // A Tools program a case line names: the case runs it, so it is a runner.
 orphan_tool: fn(word: String, facts: OrphanFacts) -> String? {
     name: if word.starts_with(ORPHAN_ROOT) -> policy_slice_bytes(word, ORPHAN_ROOT.bytes().len(), word.bytes().len()) else -> word.copy()
-    if name.starts_with("Tools/") && name.ends_with(".jet") && facts.files.get(name) != None -> return Val(name)
+    if name.starts_with("Tools/") && name.ends_with(".jet") && facts.files.get(name) != None {
+        return Val(name)
+    }
     None
 }
 
@@ -251,7 +255,9 @@ orphan_findings: fn(tree: OrphanTree) -> [String] {
         if path != ORPHAN_SELF -> runners.push(path.copy())
     }
     loop path in tree.tracked {
-        if !path.ends_with(".case") || !(path.starts_with("Tests/") || path.starts_with("Examples/")) -> next
+        if !path.ends_with(".case") || !(path.starts_with("Tests/") || path.starts_with("Examples/")) {
+            next
+        }
         if path.starts_with("Tests/Cases/") -> covered[path.copy()] = true
         bases: [String]{path_case_parent(path), ""}
         loop line in orphan_text(tree, path).split("\n") {
@@ -259,7 +265,9 @@ orphan_findings: fn(tree: OrphanTree) -> [String] {
             words: orphan_words(line)
             orphan_cover_words(words, bases, facts, covered)
             loop word in words {
-                if orphan_tool(word, facts) == .Val(tool) && !runners.contains(tool) -> runners.push(tool)
+                if orphan_tool(word, facts) == .Val(tool) && !runners.contains(tool) {
+                    runners.push(tool)
+                }
             }
         }
     }

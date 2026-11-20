@@ -6,6 +6,7 @@
 use {
     jet_sema.[
         JET_CANONICAL_EFFECT_PACKAGE_IDENTITY,
+        SEMA_CORE_BODIES_AHEAD_BYTES_PER_THREAD,
         SEMA_CORE_BODIES_ENTRY_BYTES,
         SEMA_CORE_BODIES_HEADER,
         SEMA_CORE_BODIES_OFFSET_BYTES,
@@ -706,6 +707,21 @@ body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}) {
     }
 }
 
+// Source text of `copies` more functions, each body_codec_source()'s `run`
+// under a name of its own (`run_0`, `run_1`, ...), so the Core library's
+// check captures a record for each.
+body_codec_runs: fn(copies: Int) -> String {
+    body: (body_codec_source().cut_last("\nrun: fn() {{") ?? panic("BodyCodec: the source has no `run`")).after
+    runs := [String]{}
+    loop index in 0..<copies -> runs.push("\n\nrun_{index}: fn() {{{body}")
+    runs.join("")
+}
+
+// The copies of `run` (body_codec_runs) the read-ahead test adds, so its
+// records hold more bytes than one read-ahead thread is worth
+// (SEMA_CORE_BODIES_AHEAD_BYTES_PER_THREAD).
+BODY_CODEC_AHEAD_RUNS: 160
+
 // A module pass's packets read ahead (CoreBodies.jet
 // sema_core_bodies_ahead_load) are decoded by compiler threads as one
 // thread reads them, each with a reader of its own, and the pass's loads
@@ -714,13 +730,14 @@ body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}) {
 // through the host, and a take counts it as that load would.
 #Test("Core function checks read ahead on compiler threads are the checks a load reads") {
     failures := [String]{}
-    captured := body_codec_check(failures, "core", body_codec_hooks(), true) ?? panic("BodyCodec could not check module `main`:\n{failures.join("\n")}")
+    extra: body_codec_runs(BODY_CODEC_AHEAD_RUNS)
+    captured := body_codec_check(failures, "core", body_codec_hooks(), true, extra) ?? panic("BodyCodec could not check module `main`:\n{failures.join("\n")}")
     bodies := sema_core_bodies_read(body_codec_file(captured.core_bodies.move())) ?? panic("BodyCodec: the bodies file does not read back")
-    stage := body_codec_declared(failures, "core", true, true, "") ?? panic("BodyCodec could not declare module `main`:\n{failures.join("\n")}")
+    stage := body_codec_declared(failures, "core", true, true, extra) ?? panic("BodyCodec could not declare module `main`:\n{failures.join("\n")}")
     declared := stage.graph.move()
     graph := declared.move() ?? panic("BodyCodec: the declaration pass lost its registration graph")
     count: bodies.head.count
-    if count < 6 -> panic("BodyCodec: only {count} function checks were captured")
+    if count < 6 + BODY_CODEC_AHEAD_RUNS -> panic("BodyCodec: only {count} function checks were captured")
     shared := BodyCodecIn{at: 0, end: 0, failed: false, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}}
     loads := [String]{}
     total := 0
@@ -733,6 +750,9 @@ body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}) {
             total += end - at
             loads.push("{packet:Debug}")
         } else { loads.push("") }
+    }
+    if total < SEMA_CORE_BODIES_AHEAD_BYTES_PER_THREAD {
+        panic("BodyCodec: the records that load hold {total} bytes, fewer than one read-ahead thread is worth ({SEMA_CORE_BODIES_AHEAD_BYTES_PER_THREAD})")
     }
     // The lent file of the read-ahead through the host: the head, with every
     // record's bytes blanked, so a record sliced from it would not load.
@@ -752,13 +772,37 @@ body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}) {
     }
 }
 
-// Reads ahead every record of the bodies file lent in `hooks` on four
-// compiler threads (sema_core_bodies_ahead_load), one reading and those its
-// bytes admit decoding: sliced from the lent file, or read through the host
-// (BodyCodecRecords) when `hooks` has one. Then takes each as a module
-// pass's load would: each packet is `loads[position]`, the one a load reads
-// ("" where none loads), and the takes count `total` bytes read.
-body_codec_ahead: fn(failures: &[String], graph: SemaRegistrationGraph, hooks: &SemaRegistrationHostHooks, loads: [String], total: Int, mode: String) {
+// Records holding fewer bytes than one read-ahead thread is worth
+// (SEMA_CORE_BODIES_AHEAD_BYTES_PER_THREAD) are not read ahead: no decoder
+// thread starts (no packet is decoded ahead), and each record loads at its
+// turn on the pass's thread.
+#Test("Core function checks holding fewer bytes than a read-ahead thread is worth are not read ahead") {
+    failures := [String]{}
+    captured := body_codec_check(failures, "core", body_codec_hooks(), true) ?? panic("BodyCodec could not check module `main`:\n{failures.join("\n")}")
+    bodies := sema_core_bodies_read(body_codec_file(captured.core_bodies.move())) ?? panic("BodyCodec: the bodies file does not read back")
+    stage := body_codec_declared(failures, "core", true, true, "") ?? panic("BodyCodec could not declare module `main`:\n{failures.join("\n")}")
+    declared := stage.graph.move()
+    graph := declared.move() ?? panic("BodyCodec: the declaration pass lost its registration graph")
+    total: bodies.bytes.len() - sema_core_bodies_offset(bodies.bytes, bodies.head, 0)
+    if total >= SEMA_CORE_BODIES_AHEAD_BYTES_PER_THREAD {
+        panic("BodyCodec: the records hold {total} bytes, not fewer than one read-ahead thread is worth ({SEMA_CORE_BODIES_AHEAD_BYTES_PER_THREAD})")
+    }
+    hooks := SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}
+    hooks.core_bodies = Val(bodies.move())
+    found := body_codec_records(hooks)
+    sema_core_bodies_ahead_load(graph, hooks, found.move(), CompilerThreads{cap: None, cores: 4, memory_available: None})
+    loop (position, row) in hooks.core_bodies_ahead {
+        if row != None -> failures.push("record {position} was read ahead")
+    }
+    if hooks.core_bodies_read != 0 -> failures.push("the read-ahead counted {hooks.core_bodies_read} bytes read")
+    if failures.len() > 0 {
+        panic("BodyCodec collected {failures.len()} failures:\n{failures.join("\n")}")
+    }
+}
+
+// A record of each function check of the bodies file `hooks` lends, in
+// file order, as a module pass finds them for sema_core_bodies_ahead_load.
+body_codec_records: fn(hooks: SemaRegistrationHostHooks) -> [SemaCoreBodyRecord] {
     found := [SemaCoreBodyRecord]{}
     if hooks.core_bodies == .Val(bodies) {
         loop position in 0..<bodies.head.count {
@@ -767,6 +811,17 @@ body_codec_ahead: fn(failures: &[String], graph: SemaRegistrationGraph, hooks: &
             found.push(SemaCoreBodyRecord{owner: SymbolID{id: U32{position}}, position: position, at: at, size: end - at})
         }
     }
+    found
+}
+
+// Reads ahead every record of the bodies file lent in `hooks` on four
+// compiler threads (sema_core_bodies_ahead_load), one reading and those its
+// bytes admit decoding: sliced from the lent file, or read through the host
+// (BodyCodecRecords) when `hooks` has one. Then takes each as a module
+// pass's load would: each packet is `loads[position]`, the one a load reads
+// ("" where none loads), and the takes count `total` bytes read.
+body_codec_ahead: fn(failures: &[String], graph: SemaRegistrationGraph, hooks: &SemaRegistrationHostHooks, loads: [String], total: Int, mode: String) {
+    found := body_codec_records(hooks)
     count: found.len()
     sema_core_bodies_ahead_load(graph, hooks, found.move(), CompilerThreads{cap: None, cores: 4, memory_available: None})
     ahead := 0

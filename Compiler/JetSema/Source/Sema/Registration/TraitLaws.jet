@@ -10,7 +10,7 @@
 // internal-compiler-error report, every other test still runs, and `jet
 // test` ends as an internal compiler error (exit 101).
 use {
-    jet_foundation.[Func, Item, MARKER_WAIVE, Marker, OWNED_TRAITS, Span, TestDef, TraitImplBlock, Type, checked_test_artifact_key, foundation_byte_text, module_is_core, module_text, owned_trait, symbol_intern, type_name]
+    jet_foundation.[Func, Item, MARKER_WAIVE, Marker, NameTable, OWNED_TRAITS, Span, TestDef, TraitImplBlock, Type, checked_test_artifact_key, foundation_byte_text, module_is_core, module_text, name_find, name_index, name_intern, name_table, owned_trait, symbol_intern, type_name]
     jet_parser.[parse_generated_source]
 }
 
@@ -31,21 +31,32 @@ SemaTraitLaw: struct {
     source: String,
 }
 
+// The laws the graph's traits declare: those of the trait whose name has id
+// `id` in `names` are laws[first[id] ..< first[id] + count[id]].
+SemaTraitLawTable: struct {
+    names: NameTable,
+    first: [Int],
+    count: [Int],
+    laws: [SemaTraitLaw],
+}
+
 sema_trait_laws_add: fn(graph: &SemaRegistrationGraph) Never! {
-    declared := [String:[SemaTraitLaw]]{}
+    declared := SemaTraitLawTable{names: name_table(), first: [Int]{0}, count: [Int]{0}, laws: [SemaTraitLaw]{}}
     loop row in graph.modules {
         bytes := [U8]{}
         loop item in row.program.items {
             if item == .Trait(definition) {
-                if definition.laws.len() == 0 || declared.get(definition.name) != None -> next
+                if definition.laws.len() == 0 || name_find(declared.names, definition.name) != None -> next
                 if bytes.len() == 0 -> bytes = row.source.bytes()
-                laws := [SemaTraitLaw]{}
+                _ := name_intern(declared.names, definition.name)
+                first: declared.laws.len()
                 loop law in definition.laws {
                     if law.span.start < 0 || law.span.end > bytes.len() -> next
                     source: String.from_bytes(bytes.slice(law.span.start, law.span.end)) ?? next
-                    laws.push(SemaTraitLaw{name: law.name ?? "", source: source})
+                    declared.laws.push(SemaTraitLaw{name: law.name ?? "", source: source})
                 }
-                declared["{definition.name}"] = laws
+                declared.first.push(first)
+                declared.count.push(declared.laws.len() - first)
             }
         }
     }
@@ -78,9 +89,13 @@ sema_trait_laws_add: fn(graph: &SemaRegistrationGraph) Never! {
 
 // The laws of the trait `trait_name` names: its declaration's in the graph,
 // else the Core trait's.
-sema_trait_laws_of: fn(trait_name: String, declared: [String:[SemaTraitLaw]]) -> [SemaTraitLaw] Never! {
+sema_trait_laws_of: fn(trait_name: String, declared: SemaTraitLawTable) -> [SemaTraitLaw] Never! {
     name: sema_trait_law_leaf(trait_name)
-    if declared.get(name) == .Val(laws) -> return laws
+    if name_find(declared.names, name) == .Val(found) {
+        id: name_index(found)
+        laws: loop at in declared.first[id]..<declared.first[id] + declared.count[id] -> declared.laws[at]
+        return laws
+    }
     owned: owned_trait(name) ?? return [SemaTraitLaw]{}
     loop law in owned.laws -> SemaTraitLaw{name: law.name, source: law.source}
 }

@@ -220,6 +220,15 @@ the DWARF from the same rows). It then re-raises the signal with its default act
 status is the signal's (128 + number in a shell). Addresses other than the
 faulting one are not printed, because they differ between the two tiers.
 
+Under `jet debug` the fault stops the program first, before its signal
+reaches it, as a breakpoint does: every thread stops, and the session reads
+`Program received SIGNAME  file:line  in function()` at the innermost Jet
+frame, whose stack `bt`, `locals`, `tasks` and `disas` read. The next run
+command delivers the signal, so the report above runs and ends the program
+(`Program stopped by SIGNAME`, or the stack overflow's status 70); the
+report's re-raise goes on unstopped. The DAP adapter reports the stop as an
+`exception` one.
+
 A release image (`debug_info: split`) holds no location table, so its report
 keeps the first line with the address in place of the name, then
 `Build <id> (names and lines: jet crash)` and `Backtrace:` with the faulting

@@ -32,6 +32,10 @@ use {
         compiler_event_record,
         compiler_event_stage,
         module_is_core,
+        name_find,
+        name_index,
+        name_intern,
+        name_table,
         symbol_is_local,
         symbol_is_none,
         symbol_key_leaf,
@@ -127,19 +131,24 @@ jet_driver_checked_events: fn(graph: SemaGraphResult, symbols: SymbolTable) -> [
     events := [CompilerEventRecord]{}
     loop row in order {
         graph_module: graph.modules[row.index]
-        // Each function's row of `declared`, by its key.
+        // Each function's row of `declared`, by its key's id in `keys`; -1
+        // at id 0, the empty key, which no function has.
         first: declared.len()
-        places := [String:Int]{}
+        keys := name_table()
+        places := [Int]{-1}
         loop function in graph_module.functions {
             if graph_module.injected_function_keys.contains(function.key) -> next
-            places[function.key] = declared.len()
+            id: name_index(name_intern(keys, function.key))
+            if id == places.len() -> places.push(declared.len()) else -> places[id] = declared.len()
             declared.push(JetDriverDeclared{name: function.name, module: graph_module.module_name, calls: [String]{}, complete: graph_module.complete})
         }
         loop fact in graph_module.call_facts {
             callee: fact.callee ?? next
             if symbol_is_none(callee) || symbol_is_local(callee) -> next
             called: symbol_key_leaf(symbol_table_key(symbols, callee))
-            at: places.get(fact.caller_key) ?? next
+            caller: name_find(keys, fact.caller_key) ?? next
+            at: places[name_index(caller)]
+            if at < 0 -> next
             if !declared[at].calls.contains(called) -> declared[at].calls.push(called)
         }
         loop at in first..<declared.len() {

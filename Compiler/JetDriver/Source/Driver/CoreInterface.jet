@@ -66,7 +66,12 @@ use {
         compiler_threads_failure_text,
         compiler_threads_partition,
         compiler_threads_single,
+        name_count,
+        name_find,
+        name_index,
+        name_intern,
         name_table,
+        name_table_sized,
     ]
     jet_lexer.[TOKEN_LBRACE, TOKEN_RBRACE, lex_generated_threads]
     jet_parser.[parse_lexed_with_source_threads]
@@ -869,20 +874,23 @@ jet_driver_core_interface_put_fragments: fn(out: &[U8], fragments: [JetDriverCor
 }
 
 // A unit's catalog mentions: a flag, then each identifier with its span,
-// the unqualified names and the suffixes, the maps' names sorted.
+// the unqualified names and the suffixes, the identifiers in name order.
 jet_driver_core_interface_put_mentions: fn(out: &[U8], mentions: SemaUnitSourceMentions?) Never! {
     if mentions == .Val(row) {
         jet_driver_core_interface_put_flag(out, true)
-        names := row.identifiers.keys().to_list()
-        names.sort()
-        jet_driver_core_interface_put(out, names.len())
-        loop name in names {
-            jet_driver_core_interface_put_string(out, name)
-            jet_driver_core_interface_put_span(out, row.identifiers.get(name))
+        order := (loop id in 1..<name_count(row.names) -> id)
+        order.sort_by(fn(left: Int, right: Int) { row.names.texts[left] <=> row.names.texts[right] })
+        jet_driver_core_interface_put(out, order.len())
+        unqualified := 0
+        loop id in order {
+            jet_driver_core_interface_put_string(out, row.names.texts[id])
+            jet_driver_core_interface_put_span(out, Val(row.spans[id]))
+            if row.unqualified[id] -> unqualified += 1
         }
-        unqualified := row.unqualified.keys().to_list()
-        unqualified.sort()
-        jet_driver_core_interface_put_strings(out, unqualified)
+        jet_driver_core_interface_put(out, unqualified)
+        loop id in order {
+            if row.unqualified[id] -> jet_driver_core_interface_put_string(out, row.names.texts[id])
+        }
         jet_driver_core_interface_put(out, row.suffixes.len())
         loop suffix in row.suffixes {
             jet_driver_core_interface_put_string(out, suffix.text)
@@ -1222,14 +1230,19 @@ jet_driver_core_interface_fragments: fn(bytes: [U8], cursor: &JetDriverCoreInter
 
 jet_driver_core_interface_read_mentions: fn(bytes: [U8], cursor: &JetDriverCoreInterfaceCursor) -> SemaUnitSourceMentions? Never! {
     if !jet_driver_core_interface_flag(bytes, cursor) -> return None
-    identifiers := [String:Span]{}
+    names := name_table_sized(16)
+    spans := [Span]{Span{start: 0, end: 0}}
     loop _ in 0..<jet_driver_core_interface_count(bytes, cursor, 8) {
         name: jet_driver_core_interface_string(bytes, cursor)
         span: jet_driver_core_interface_read_span(bytes, cursor) ?? return jet_driver_core_interface_no_mentions(cursor)
-        identifiers[name] = span
+        id: name_index(name_intern(names, name))
+        if id == spans.len() -> spans.push(span) else -> spans[id] = span
     }
-    unqualified := [String:Bool]{}
-    loop name in jet_driver_core_interface_strings(bytes, cursor) -> unqualified[name] = true
+    unqualified := (loop _ in spans -> false)
+    loop name in jet_driver_core_interface_strings(bytes, cursor) {
+        found: name_find(names, name) ?? return jet_driver_core_interface_no_mentions(cursor)
+        unqualified[name_index(found)] = true
+    }
     suffixes := [SemaUnitSuffixMention]{}
     loop _ in 0..<jet_driver_core_interface_count(bytes, cursor, 12) {
         text: jet_driver_core_interface_string(bytes, cursor)
@@ -1237,7 +1250,7 @@ jet_driver_core_interface_read_mentions: fn(bytes: [U8], cursor: &JetDriverCoreI
         digit_span: jet_driver_core_interface_read_span(bytes, cursor)
         suffixes.push(SemaUnitSuffixMention{text: text, from_span: from_span, digit_span: digit_span})
     }
-    Val(SemaUnitSourceMentions{identifiers: identifiers.move(), unqualified: unqualified.move(), suffixes: suffixes.move()})
+    Val(SemaUnitSourceMentions{names: names.move(), spans: spans.move(), unqualified: unqualified.move(), suffixes: suffixes.move()})
 }
 
 jet_driver_core_interface_read_span: fn(bytes: [U8], cursor: &JetDriverCoreInterfaceCursor) -> Span? Never! {
@@ -1247,7 +1260,7 @@ jet_driver_core_interface_read_span: fn(bytes: [U8], cursor: &JetDriverCoreInter
     Val(Span{start: start, end: end})
 }
 
-// An identifier mention with no span: the read fails.
+// A mention with no identifier span: the read fails.
 jet_driver_core_interface_no_mentions: fn(cursor: &JetDriverCoreInterfaceCursor) -> SemaUnitSourceMentions? Never! {
     cursor.failed = true
     None

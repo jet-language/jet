@@ -408,10 +408,10 @@ SemaEffectNode: struct {
     memory_events: [SemaMemoryEvent]{[SemaMemoryEvent]{}},
     // User-function call sites and loop spans for arena multiplicity.
     memory_calls: [SemaMemoryCall]{[SemaMemoryCall]{}},
-    // The `memory_calls` rows by callee and span
+    // The `memory_calls` rows by callee node and span start
     // (sema_effect_memory_call_key), so a call site found again is one
     // lookup, not a scan of the body's calls.
-    memory_call_rows: [String:Bool]{[String:Bool]{}},
+    memory_call_rows: [Int:Bool]{[Int:Bool]{}},
     loop_spans: [Span]{[Span]{}},
     // This pure body made a non-deterministic Core call (E3403 reported).
     nondeterministic_call: Bool{false},
@@ -778,9 +778,10 @@ sema_effect_memory_executions: fn(node: SemaEffectNode, span: Span) -> Int? {
     Val(1)
 }
 
-// The key of a `memory_calls` row: one call site is one row.
-sema_effect_memory_call_key: fn(callee: String, span: Span) -> String Never! {
-    "{span.start}:{span.end}:{callee}"
+// The key of a `memory_calls` row: one call site, a callee's node `callee`
+// called at the span starting at `span.start`, is one row.
+sema_effect_memory_call_key: fn(callee: Int, span: Span) -> Int Never! {
+    (callee << 32) | span.start
 }
 
 sema_effect_push_memory_event: fn(nodes: &[SemaEffectNode], node_index: Int, span: Span, operation: String, kind: String, bytes: Int?) {
@@ -2750,13 +2751,14 @@ sema_effect_record_fact: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex
         return
     }
     callee_key: if fact.callee == .Val(callee) -> symbol_key(facts.symbols, tree.symbols, callee) else -> ""
-    known_callee: callee_key != "" && sema_effect_node_index(facts.node_by_key, callee_key) != None
+    callee_node: if callee_key != "" -> sema_effect_node_index(facts.node_by_key, callee_key) else -> None
+    known_callee: callee_node != None
     if callee_key != "" -> sema_effect_node_add_edge(nodes, node_index, callee_key)
     // One call site is one call: another body node with the call's span finds
     // the same fact, and a second row would count the callee's arena bytes
     // twice.
-    if known_callee {
-        row: sema_effect_memory_call_key(callee_key, fact.span)
+    if callee_node == .Val(callee_row) {
+        row: sema_effect_memory_call_key(callee_row, fact.span)
         if nodes[node_index].memory_call_rows.get(row) == None {
             nodes[node_index].memory_call_rows[row] = true
             executions: sema_effect_memory_executions(nodes[node_index], fact.span)
@@ -3162,9 +3164,9 @@ sema_effect_record_function_arguments: fn(nodes: &[SemaEffectNode], facts: SemaE
             value: body_node(tree, argument.value)
             if value.kind == .ConstRef(symbol) {
                 key: symbol_key(facts.symbols, tree.symbols, symbol)
-                if sema_effect_node_index(facts.node_by_key, key) == None -> next
+                target: sema_effect_node_index(facts.node_by_key, key) ?? next
                 sema_effect_node_add_edge(nodes, node_index, key)
-                nodes[node_index].memory_call_rows[sema_effect_memory_call_key(key, value.span)] = true
+                nodes[node_index].memory_call_rows[sema_effect_memory_call_key(target, value.span)] = true
                 nodes[node_index].memory_calls.push(SemaMemoryCall{callee: key, span: value.span, executions: None})
             }
         }
@@ -4809,10 +4811,10 @@ sema_effect_memory_found: fn(nodes: [SemaEffectNode], parents: [Int], owner: Int
 // program's call that leads to it, whose report names each step and the line
 // that allocates. An open dispatch is no allocation the proof finds: a
 // foreign body runs on the machine's own memory, not the program's heap.
-sema_effect_check_heap_free: fn(nodes: [SemaEffectNode], inputs: [SemaEffectModuleInput], own_modules: [Bool], node_by_key: NameRows, entries: [String], machine: String, diagnostics: &[Diagnostic]) Never! {
+sema_effect_check_heap_free: fn(nodes: [SemaEffectNode], inputs: [SemaEffectModuleInput], own_modules: [Bool], calls: SemaEffectCallIndex, entries: [String], machine: String, diagnostics: &[Diagnostic]) Never! {
     reported := [String]{}
     loop key in entries {
-        root: sema_effect_node_index(node_by_key, key) ?? next
+        root: sema_effect_node_index(calls.node_by_key, key) ?? next
         found: sema_effect_memory_search(nodes, root, "alloc", opens: false) ?? next
         event: found.event ?? next
         // The program's own code runs from the entry to the first step
@@ -6233,7 +6235,7 @@ sema_effect_region_walk: fn(nodes: &[SemaEffectNode], owner: Int, function: FnBo
     region_node.dispatches = [TEffectSpan]{}
     region_node.memory_events = [SemaMemoryEvent]{}
     region_node.memory_calls = [SemaMemoryCall]{}
-    region_node.memory_call_rows = [String:Bool]{}
+    region_node.memory_call_rows = [Int:Bool]{}
     if &region_node.rare == .Val(rare) {
         rare.scoped_calls = [SemaEffectScopedCall]{}
         rare.bare_scope_callees = [String]{}
@@ -6579,7 +6581,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     // promise `-[!Mem.Alloc]>` makes, Core's bodies included.
     if heap_free != "" {
         walks = true
-        sema_effect_check_heap_free(nodes, inputs, denial_modules, calls.node_by_key, entries, heap_free, diagnostics)
+        sema_effect_check_heap_free(nodes, inputs, denial_modules, calls, entries, heap_free, diagnostics)
     }
     // A package's every other denial is a compile-time prohibition on its
     // own functions, exactly as if each wrote `-[!E]>`;
@@ -6676,7 +6678,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     }
     loop module_row in inputs {
         sema_effect_check_discarded(modules[module_row.module_index].call_facts, module_row, nodes, calls.node_by_key, calls.symbols, solved, diagnostics)
-        sema_effect_check_hole_headers(modules[module_row.module_index].call_facts, module_row, nodes, calls.node_by_key, calls.symbols, solved, diagnostics)
+        sema_effect_check_hole_headers(modules[module_row.module_index].call_facts, module_row, nodes, calls, solved, diagnostics)
     }
     // All source reads are finished: stamp the solved rows in place, the
     // frame bound of each function a stack denial reaches, and each uncalled
@@ -7151,7 +7153,7 @@ sema_effect_check_discarded: fn(call_facts: [SemaCallSiteFact], module_row: Sema
 // written call reports once, with the fix its check found
 // (sema_expr_hole_header_fix); a call already refused for a change it makes
 // is not refused again.
-sema_effect_check_hole_headers: fn(call_facts: [SemaCallSiteFact], module_row: SemaEffectModuleInput, nodes: [SemaEffectNode], node_by_key: NameRows, symbols: SymbolTable, solved: [[String]], diagnostics: &[Diagnostic]) {
+sema_effect_check_hole_headers: fn(call_facts: [SemaCallSiteFact], module_row: SemaEffectModuleInput, nodes: [SemaEffectNode], calls: SemaEffectCallIndex, solved: [[String]], diagnostics: &[Diagnostic]) {
     reported := [Diagnostic]{}
     seen := [Span]{}
     loop fact in call_facts {
@@ -7159,8 +7161,8 @@ sema_effect_check_hole_headers: fn(call_facts: [SemaCallSiteFact], module_row: S
         fix: detail.hole_header ?? next
         if fix.reported || seen.contains(fact.span) -> next
         if fact.callee == .Val(callee) {
-            callee_key: sema_effect_run_key(symbols, callee) ?? next
-            node_index: sema_effect_node_index(node_by_key, callee_key) ?? next
+            callee_key: sema_effect_run_key(calls.symbols, callee) ?? next
+            node_index: sema_effect_node_index(calls.node_by_key, callee_key) ?? next
             if sema_effect_deep_check_over(solved[node_index]).len() == 0 -> next
             seen.push(fact.span)
             reported.push(sema_expr_hole_header_diagnostic(nodes[node_index].name, "has an effect", fix, fact.span))

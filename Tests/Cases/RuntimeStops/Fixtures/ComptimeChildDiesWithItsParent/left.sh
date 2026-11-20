@@ -62,6 +62,7 @@ while [ "$left" -gt 0 ] && [ "$(date +%s)" -lt "$end" ]; do
     left=$(live)
 done
 echo "left: $left"
+# A process already reaped fails its kill; the script's status is not that.
 for p in $pids; do
-    kill -KILL "$p" 2>/dev/null
+    kill -KILL "$p" 2>/dev/null || :
 done

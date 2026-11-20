@@ -23,6 +23,11 @@ use jet_foundation.[
     jet_target_machine_validate,
     jet_target_allocator_provides_heap,
     module_is_core,
+    name_find,
+    name_index,
+    name_intern,
+    name_table,
+    NameTable,
     sema_effect_covers,
 ]
 
@@ -115,13 +120,13 @@ sema_target_no_os_reach_check: fn(modules: [SemaGraphModuleResult], graph: SemaR
     if !graph.target_machine.no_os {
         return
     }
-    // Each checked function once: its position in `rows` by key.
-    rows := [SemaTargetSlot]{}
-    positions := [String:Int]{}
+    // Each checked function once, at the id of its key in `keys`: its row of
+    // `rows`. Row 0 stands for id 0, the empty key, which no function has.
+    keys := name_table()
+    rows := [SemaTargetSlot]{SemaTargetSlot{module_index: -1, row: -1}}
     loop module_index in 0..<modules.len() {
         loop (row, function) in modules[module_index].functions {
-            if positions.get(function.key) != None -> next
-            positions[function.key] = rows.len()
+            if name_index(name_intern(keys, function.key)) < rows.len() -> next
             rows.push(SemaTargetSlot{module_index: module_index, row: row})
         }
     }
@@ -130,7 +135,7 @@ sema_target_no_os_reach_check: fn(modules: [SemaGraphModuleResult], graph: SemaR
     parents := (loop _ in rows -> -2)
     reached := [Int]{}
     loop key in sema_target_entry_keys(modules, graph) {
-        position: positions.get(key) ?? next
+        position: sema_target_position(keys, key) ?? next
         if parents[position] != -2 -> next
         parents[position] = -1
         reached.push(position)
@@ -142,17 +147,17 @@ sema_target_no_os_reach_check: fn(modules: [SemaGraphModuleResult], graph: SemaR
         at += 1
         function: modules[rows[position].module_index].functions[rows[position].row]
         if sema_call_core_no_os_hint(function.module_name) != None {
-            sema_target_no_os_reach_report(modules, graph, rows, positions, parents, position, reported, diagnostics)
+            sema_target_no_os_reach_report(modules, graph, rows, keys, parents, position, reported, diagnostics)
             next
         }
         loop edge in function.effects.call_edges {
-            target: positions.get(edge) ?? next
+            target: sema_target_position(keys, edge) ?? next
             if parents[target] != -2 -> next
             parents[target] = position
             reached.push(target)
         }
         loop edge in function.effects.value_edges {
-            target: positions.get(edge) ?? next
+            target: sema_target_position(keys, edge) ?? next
             if parents[target] != -2 -> next
             parents[target] = position
             reached.push(target)
@@ -160,12 +165,19 @@ sema_target_no_os_reach_check: fn(modules: [SemaGraphModuleResult], graph: SemaR
     }
 }
 
+// The row of `rows` (sema_target_no_os_reach_check) of the function whose
+// key is `key`, by its id in `keys`; None for a key no function has.
+sema_target_position: fn(keys: NameTable, key: String) -> Int? Never! {
+    found: name_find(keys, key) ?? return None
+    if name_index(found) == 0 -> None else -> Val(name_index(found))
+}
+
 // The E3301 of a no-OS walk (sema_target_no_os_reach_check) that reached the
 // function at `position`, of a module that needs an OS, along `parents`: at
 // the program's own call that leads out of its code, once per such call. A
 // path that reaches the module straight from the program's own code was
 // refused in that body.
-sema_target_no_os_reach_report: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrationGraph, rows: [SemaTargetSlot], positions: [String:Int], parents: [Int], position: Int, reported: &[String], diagnostics: &[Diagnostic]) Never! {
+sema_target_no_os_reach_report: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrationGraph, rows: [SemaTargetSlot], keys: NameTable, parents: [Int], position: Int, reported: &[String], diagnostics: &[Diagnostic]) Never! {
     back := [Int]{position}
     loop parents[back[back.len() - 1]] >= 0 { back.push(parents[back[back.len() - 1]]) }
     steps: loop at in 0..<back.len() -> back[back.len() - 1 - at]
@@ -184,7 +196,7 @@ sema_target_no_os_reach_report: fn(modules: [SemaGraphModuleResult], graph: Sema
     loop call in modules[caller_slot.module_index].call_facts {
         if call.caller_key != caller.key -> next
         symbol: call.callee ?? next
-        if symbol_is_local(symbol) || positions.get(symbol_table_key(graph.symbols, symbol)) != .Val(steps[own + 1]) {
+        if symbol_is_local(symbol) || sema_target_position(keys, symbol_table_key(graph.symbols, symbol)) != .Val(steps[own + 1]) {
             next
         }
         span = call.span

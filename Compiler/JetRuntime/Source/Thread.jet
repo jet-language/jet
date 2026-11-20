@@ -16,7 +16,7 @@
 // @128 Sentry enabled; @136 Sentry file; @144 Sentry file length;
 // @152 Sentry line; @160 Sentry reason; @168 Sentry reason length;
 // @176 Sentry fence depth; @184 Sentry frames List*; @192 Context thread index
-// (thread_new_tcb; `context.thread`);
+// (thread_new_tcb, Scheduler.jet jet_rt_scheduler_worker; `context.thread`);
 // @200 Comptime request-scope flag; @208 Thread dynamic TLS [I64]*
 // (also owns T1 capture/scope services); @216/@224 Sync absolute futex
 // timespec; @232/@240 Sync/HostIO clock_gettime timespec scratch;
@@ -57,8 +57,8 @@
 // live-TCB native [I64] header@64 containing [tid,tcb,...] word pairs
 // (a fiber's pair is [tcb,tcb], Fiber.jet), the atomic count@88 of threads
 // thread_spawn started that have not registered yet, the fork gate@96,
-// the reap list head@104 (thread_reap), and the atomic next thread
-// index@112 (THREAD_NEXT_INDEX).
+// the reap list head@104 (thread_reap), and the atomic main-index claim@112
+// (THREAD_MAIN_INDEXED).
 // All headers use [len@0,cap@8,data@16]. Root is 120 bytes; closures transfer
 // to the registry for key lifetime. No inherited GS pointer is dereferenced.
 thread_tls_registry := I64{0}
@@ -79,9 +79,16 @@ THREAD_FORK_GATE_HELD: I64{1073741824}
 // The root word heading the detached handles whose thread has finished.
 THREAD_REAP: I64{104}
 
-// The root word handing out thread indices: the first TCB (the process's
-// main thread) takes 0, each later thread the next.
-THREAD_NEXT_INDEX: I64{112}
+// The root word the first TCB (the process's main thread) claims, 0 to 1,
+// to take index 0. Every later TCB takes THREAD_NO_INDEX: a pool carrier
+// then takes its own (Scheduler.jet scheduler_carrier_free_index).
+THREAD_MAIN_INDEXED: I64{112}
+
+// The index of a thread that is neither the main thread nor a pool carrier:
+// a thread the runtime starts for its own work (the timer, the monitor, a
+// poller, a writer, a dispatcher) or a host thread that attaches. Carriers
+// alone number 1 up, densely, so the runtime's threads never shift theirs.
+THREAD_NO_INDEX: I64{-1}
 
 // The TCB word holding the thread index `context.thread` reads. A fiber's
 // TCB takes its carrier thread's each time it runs (Fiber.jet fiber_run).
@@ -134,8 +141,8 @@ thread_new_tcb: fn(tid: I64) -> I64 {
     context_tcb_install_root(tcb)
     sync_store(tcb, tcb)
     sync_store(wrapping(tcb + I64{8}), tid)
-    if (thread_tls_registry != I64{0}) {
-        sync_store(wrapping(tcb + THREAD_TCB_INDEX), sync_add(wrapping(thread_tls_registry + THREAD_NEXT_INDEX), I64{1}))
+    if (thread_tls_registry != I64{0} && sync_cas(wrapping(thread_tls_registry + THREAD_MAIN_INDEXED), I64{0}, I64{1}) != I64{0}) {
+        sync_store(wrapping(tcb + THREAD_TCB_INDEX), THREAD_NO_INDEX)
     }
     tcb
 }

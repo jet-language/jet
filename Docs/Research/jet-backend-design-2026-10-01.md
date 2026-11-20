@@ -3902,9 +3902,11 @@ byte indexing/allocation expectations derived from their stride constant.
 
 `JetRuntime/Source/Events.jet` is the Jet-native provider of the synchronous
 Event family (D-EVENT1=D), one meaning with `ReactiveEventWatch.rs`
-JetEventPolicy/JetEventTrace/JetSubscription/JetEventScope/JetEvent. Its
-single-thread shared cells use plain counts: an `Event<T>` handle is its
-EventCore (strong/weak counts and the ordered listener list); a Subscription
+JetEventPolicy/JetEventTrace/JetSubscription/JetEventScope/JetEvent. A
+declared point is one process cell that tasks on every thread emit and run, so
+its counts are atomic and its listener list is read and edited under the
+core's lock: an `Event<T>` handle is its EventCore (strong/weak counts, the
+ordered listener list and its lock); a Subscription
 holds a weak count on the core and its listener id; each listener holds one
 count per owner (the core's list and every dispatch snapshot), so a handler
 that unsubscribes itself or a later listener keeps its running closure alive

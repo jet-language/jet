@@ -1,0 +1,12 @@
+use time: core.time
+
+which: fn() -> Int { context.thread }
+
+run: fn() {
+    // A deadline wait on the main thread starts the runtime's timer thread
+    // before any task runs, so a thread the runtime starts for its own work
+    // exists before the first carrier does.
+    #Deadline(3600s) { time.sleep(5ms) }
+    first: task which()
+    print("main {context.thread}, first carrier {first.join() ?? -2}")
+}

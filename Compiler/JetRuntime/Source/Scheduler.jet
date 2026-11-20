@@ -1268,17 +1268,18 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
 // pooled (pool, linked through Fiber next@48, and the sizedPools lists of
 // larger stacks, Fiber.jet fiber_sized_pool) the idle ones and fiberSpace
 // the bytes the fiber stacks may still map (Fiber.jet fiber_space_take).
-// carriers is a word list (scheduler_words) of Carrier72 records {argument0
-// handle8 save16 tcb24 tid32 runs40 seenRuns48 seenCpu56 fiber64}, changed
-// only under the lock; fiber64 is the fiber the carrier runs, 0 between
-// fibers (Fiber.jet fiber_run). Every carrier on it stays joinable so
-// jet_rt_scheduler_shutdown can join it. The poolSize carriers start one
-// at a time, on demand: a submit starts one only when no idle carrier is left
-// to wake (idle - woken), so a process that submits a few tasks starts a few
-// threads, not the whole pool. idle counts carriers waiting on workSeq;
-// woken counts the wakes sent them that no carrier has taken yet; started
-// counts the carriers started. watch is the deadline the one idle carrier
-// watching the fiber timers sleeps to (0: none watches).
+// carriers is a word list (scheduler_words) of Carrier80 records {argument0
+// handle8 save16 tcb24 tid32 runs40 seenRuns48 seenCpu56 fiber64 index72},
+// changed only under the lock; fiber64 is the fiber the carrier runs, 0
+// between fibers (Fiber.jet fiber_run), and index72 the carrier's
+// `context.thread` (scheduler_carrier_free_index). Every carrier on it stays
+// joinable so jet_rt_scheduler_shutdown can join it. The poolSize carriers
+// start one at a time, on demand: a submit starts one only when no idle
+// carrier is left to wake (idle - woken), so a process that submits a few
+// tasks starts a few threads, not the whole pool. idle counts carriers
+// waiting on workSeq; woken counts the wakes sent them that no carrier has
+// taken yet; started counts the carriers started. watch is the deadline the
+// one idle carrier watching the fiber timers sleeps to (0: none watches).
 //
 // A carrier blocked in the kernel (a foreign call, a raw read of a FIFO or
 // pipe, any system call that waits) holds its OS thread: no fiber park frees
@@ -1305,7 +1306,10 @@ SCHEDULER_ROOT_BYTES: I64{272}
 
 SCHEDULER_CONTROL_BYTES: I64{232}
 
-SCHEDULER_CARRIER_BYTES: I64{72}
+SCHEDULER_CARRIER_BYTES: I64{80}
+
+// The Carrier80 word holding the carrier's thread index.
+SCHEDULER_CARRIER_INDEX: I64{72}
 
 SCHEDULER_MONITOR_TICK_NS: I64{10000000}
 
@@ -1417,14 +1421,33 @@ scheduler_carrier_list_join: fn(list: I64) -> I64 {
     length
 }
 
+// The lowest thread index no listed carrier holds, from 1: the carriers
+// number 1 up, densely, in the order they start, whatever other threads the
+// runtime starts meanwhile, and a carrier that starts after one retired
+// takes the index it left. Callers hold the root lock.
+scheduler_carrier_free_index: fn(list: I64) -> I64 {
+    length: sync_load(list)
+    data: sync_load(wrapping(list + I64{16}))
+    index := I64{1}
+    at := I64{0}
+    loop at < length {
+        if (sync_load(wrapping(sync_load(wrapping(data + at * I64{8})) + SCHEDULER_CARRIER_INDEX)) == index) {
+            index += I64{1}
+            at = I64{0}
+        } else { at += I64{1} }
+    }
+    index
+}
+
 // The spawn and the handle's publication share one critical section, so a
 // carrier (which locks the root before it reads its handle) and shutdown
-// both see a complete record.
+// both see a complete record, and two starts never take one index.
 scheduler_start_worker: fn(root: I64) {
     record: jet_rt_alloc(SCHEDULER_CARRIER_BYTES, I64{8})
     thread_zero(record, SCHEDULER_CARRIER_BYTES)
     sync_store(record, root)
     sync_thread_lock(root)
+    sync_store(wrapping(record + SCHEDULER_CARRIER_INDEX), scheduler_carrier_free_index(scheduler_carrier_list(root)))
     handle: thread_spawn(rt_scheduler_worker_address(), record)
     if (handle < I64{0}) {
         // The carrier scheduler_submit or the monitor counted for this start
@@ -1901,7 +1924,7 @@ scheduler_carrier_idle: fn(root: I64) {
 }
 
 // A carrier: the pool thread that runs task fibers (Fiber.jet fiber_run)
-// and, idle, fires their timers. The record is its Carrier72; runs turns odd
+// and, idle, fires their timers. The record is its Carrier80; runs turns odd
 // while it runs a job and even again after, for the monitor. A carrier whose
 // fiber just yielded starts a queued job before it takes a ready fiber, so a
 // turn it gave reaches a job that has no fiber yet: with more busy fibers
@@ -1910,6 +1933,9 @@ scheduler_carrier_idle: fn(root: I64) {
 #Export(c) jet_rt_scheduler_worker: fn(record: I64) -> I64 {
     root: sync_load(record)
     sync_store(wrapping(record + I64{24}), thread_base())
+    // Set before this carrier runs any fiber, which reads it (Fiber.jet
+    // fiber_run); the start wrote it under the root lock before the spawn.
+    sync_store(wrapping(thread_base() + THREAD_TCB_INDEX), sync_load(wrapping(record + SCHEDULER_CARRIER_INDEX)))
     tid := I64{0}
     #Unsafe("gettid takes no arguments and retains nothing") {
         tid = os_syscall_i64(I64{186}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})

@@ -850,11 +850,12 @@ JetCLIDap: struct {
     }
 
     // Where `settled` left the program: what the run said on the way, then
-    // `stopped` (for `reason` unless a breakpoint, a watch or its stopping
-    // exit stopped it), or its end. A watch's stop is a `data breakpoint`
-    // one, described by the change it saw; a stopping exit is an
-    // `exception` one, described by its status. The stop is a new one: the
-    // frame ids and variable references of the last name nothing.
+    // `stopped` (for `reason` unless a breakpoint, a watch, its stopping
+    // exit or a fault stopped it), or its end. A watch's stop is a `data
+    // breakpoint` one, described by the change it saw; a stopping exit or a
+    // fault is an `exception` one, described by its status or signal. The
+    // stop is a new one: the frame ids and variable references of the last
+    // name nothing.
     report: fn(&self, session: &NativeSession, settled: NativeSettled, reason: String) -[FS, IO, Time.Wait, FFI.Asm]> Never! {
         self.tell(session, settled.said)
         self.stops = (self.stops + 1) & (JET_CLI_DAP_STOPS - 1)
@@ -867,9 +868,10 @@ JetCLIDap: struct {
                 hit: settled.hit
                 watch: stop.reason.starts_with("watchpoint ")
                 exiting: stop.reason.starts_with("exiting ")
+                fault: stop.reason.starts_with("fault ")
                 why: if {
                     watch -> "data breakpoint"
-                    exiting -> "exception"
+                    exiting || fault -> "exception"
                     hit != None -> "breakpoint"
                     else -> reason
                 }
@@ -877,6 +879,7 @@ JetCLIDap: struct {
                 change: if {
                     watch -> ",\"hitBreakpointIds\":[{stop.reason.after("watchpoint ")}],\"description\":{foundation_json_quote(session.watched)}"
                     exiting -> ",\"description\":{foundation_json_quote("Program exiting with status {stop.code}")}"
+                    fault -> ",\"description\":{foundation_json_quote("Program received {stop.reason.after("fault ")}")}"
                     else -> ""
                 }
                 self.event("stopped", "{{\"reason\":\"{why}\",\"threadId\":{self.task},\"allThreadsStopped\":true{ids}{change}}}")

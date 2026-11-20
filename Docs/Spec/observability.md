@@ -209,15 +209,18 @@ follows the clock speed the cores run at. At 2, or where neither opens, the
 task clock (`PERF_COUNT_SW_TASK_CLOCK`) samples each thread exactly once per
 125 microseconds of its CPU time in user mode, at the program counter its
 interrupt landed on, a few instructions past the one that spent the time (its
-skid); time in the kernel takes no sample. A perf event's sample costs no
-signal: the kernel writes it to the thread's ring with the user registers,
-its frame-pointer walk of the user stack (the callchain, at most
+skid); time in the kernel takes no sample. A perf event's sample takes no
+signal of its own: the kernel writes it to the thread's ring with the user
+registers, its frame-pointer walk of the user stack (the callchain, at most
 `perf_event_max_stack` entries, 127 where the kernel has no such setting)
 and a copy of the stack's top 512 bytes, and the runtime drains the ring in
 batches: whenever the thread's running task changes (a fiber switch, a task's
-start and finish), when the kernel's `SIGPROF` says half the ring filled, as
-the thread ends and at exit. The drain steps out of frameless frames by the
-call frame information over the stack copy, then takes the kernel's walk; a
+start and finish), at the `SIGPROF` of a timer on the thread's CPU clock once
+each 2 milliseconds of it (16 samples), as the thread ends and at exit. The
+kernel would signal a sampler's owner at every sample it takes, so no
+sampler's descriptor asks for a signal. The drain steps out of frameless
+frames by the call frame information over the stack copy, then takes the
+kernel's walk; a
 stack the callchain's cap cut is counted in the `reason`, and a sample the
 kernel found no room for in the ring counts as a lost record. Above 2, or
 where the kernel refuses the task clock, each thread keeps its CPU-time
