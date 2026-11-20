@@ -71,9 +71,11 @@ A patch that touches Compiler/JetIR, Compiler/JetBackend or
 Compiler/JetRuntime lists `jet Tools/Perf/CodegenCeiling.jet --check` in its
 `tests`, the codegen gate over the golden machine-code catalog. The gate needs
 a compiler built from the patch, so it runs on the next batch compiler. A
-count above golden fails the submission. A patch that lowers a count carries
-the gate's `--update` of `Tools/Perf/CodegenCeiling/golden.tsv`, and its
-`msg` gives the before and after counts.
+count above golden fails the submission, and the gate prints each instruction
+the row's golden listing lacks with its function and source line (GREW). A
+patch that lowers a count carries the gate's `--update` of
+`Tools/Perf/CodegenCeiling/golden.tsv` and `listing.tsv`, and its `msg` gives
+the before and after counts.
 
 A patch that adds Prelude or registry rows (a dispatcher row, a fixed
 signature, a new reserved member, a runtime export) and also uses them from
