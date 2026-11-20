@@ -7,6 +7,7 @@
 // name, file, line and debug variables.
 use {
     jet_foundation.[CompilerThreads, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_transfer_rows, sha256_hex]
+    jet_sema.[sema_inline_member_module, sema_inline_member_source_name]
     jet_backend.[
         TIME_DURATION_NS,
         X64CompiledFunction,
@@ -1467,8 +1468,9 @@ ir_x64_zone_sites_symbol: fn(m: IRModule) -> String Never! {
 }
 
 // The object writer's module of `owned`: its data, debug files, types and
-// sources (taken) and per IR function its name, file, line, debug
-// variables (taken) and inline sites.
+// sources (taken) and per IR function its name as its source spells it
+// (ir_x64_member_name), file, line, debug variables (taken) and inline
+// sites.
 ir_x64_object_module: fn(owned: &IRX64Result) -> X64ObjectModule Never! {
     // Popped in function order.
     variables := compiler_take_rows<[X64DebugVariable]>(owned.variables)
@@ -1488,13 +1490,35 @@ ir_x64_object_module: fn(owned: &IRX64Result) -> X64ObjectModule Never! {
                 next
             }
             callee: owned.program.functions[row]
-            inlines.push(X64InlineSite{function: row, name: callee.name, file: owned.tables.file_rows.get(callee.source_file) ?? -1, line: callee.line, parent: parent, call_line: call_line})
+            inlines.push(X64InlineSite{function: row, name: ir_x64_member_name(callee.name) ?? callee.name, file: owned.tables.file_rows.get(callee.source_file) ?? -1, line: callee.line, parent: parent, call_line: call_line})
         }
-        sources.push(X64FunctionSource{name: f.name, file: file, line: f.line, variables: listed.move(), inlines: inlines.move()})
+        sources.push(X64FunctionSource{name: ir_x64_member_name(f.name) ?? f.name, file: file, line: f.line, variables: listed.move(), inlines: inlines.move()})
     }
     X64ObjectModule{
         data: compiler_take_rows<X64Data>(owned.tables.data),
         debug: X64ModuleDebug{directory: owned.program.debug_directory.copy(), files: compiler_take_rows<String>(owned.tables.files), types: compiler_take_rows<X64DebugType>(owned.tables.debug_types), level: owned.program.debug_level, sources: compiler_take_rows<X64DebugSource>(owned.program.debug_sources)},
         functions: sources.move(),
     }
+}
+
+// A lifted module member's name as its source spells it, its module path
+// and its own name (`__jet_small_dbump`, an instance `small` of a generic
+// module: `small.bump`, InlineModules.jet sema_inline_generated_path), and a
+// lambda's in one (`__jet_small_dbump.lambda@40`: `small.bump.lambda@40`),
+// so a debugger's frames, `break small.bump` and a profile's functions read
+// it as written. None for any other name, which is already as written.
+ir_x64_member_name: fn(name: String) -> String? Never! {
+    parts: name.partition(".")
+    path: sema_inline_member_module(parts.head)
+    if path == "" -> return None
+    Val("{path}.{sema_inline_member_source_name(parts.head)}{parts.sep}{parts.tail}")
+}
+
+#Test("A lifted module member's debug name is its module path and its own name") {
+    assert_eq(ir_x64_member_name("__jet_small_dbump"), Val("small.bump"))
+    assert_eq(ir_x64_member_name("__jet_db_dinner_ddeep"), Val("db.inner.deep"))
+    assert_eq(ir_x64_member_name("__jet_small_dbump.lambda@40"), Val("small.bump.lambda@40"))
+    assert_eq(ir_x64_member_name("run"), None)
+    assert_eq(ir_x64_member_name("run.lambda@12"), None)
+    assert_eq(ir_x64_member_name("__jet_lambda_7"), None)
 }

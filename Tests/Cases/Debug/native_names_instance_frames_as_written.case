@@ -1,0 +1,28 @@
+# A generic module's instance members are lifted functions with generated
+# names (`__jet_small_dbump`, JetSema InlineModules.jet). The debug info
+# names each as its source spells it, its instance and member (JetIR
+# X64Module.jet ir_x64_member_name), so a backtrace, a stop and a function
+# breakpoint read `small.bump` and `large.bump`, out of line at -O0 and as
+# inlined frames at -O1. The fixture must stay in jet fmt form.
+fixture: InstanceFrameNames.fixture
+env: NO_COLOR=1
+step: jet debug prog.jet --break prog.jet:6
+stdin: native_names_instance_frames_as_written.stdin
+exit: 0
+stdout+stderr: ~ "Breakpoint hit  prog.jet:6  in small.bump()" # the stop names the instance's member
+stdout+stderr: ~ "#0  small.bump()  at prog.jet:6\n#1  run()  at prog.jet:16" # so does its frame
+stdout+stderr: ~ "Breakpoint set  large.bump" # a breakpoint takes the name as written
+stdout+stderr: ~ "Breakpoint hit  prog.jet:5  in large.bump()" # and stops at the other instance's entry
+stdout+stderr: ~ "#0  large.bump()  at prog.jet:5\n#1  run()  at prog.jet:17" # whose frame is named for it
+stdout+stderr: !~ "__jet_" # no generated name shows
+step: jet build -O1 prog.jet
+exit: 0
+step: {work}/.jet/build/prog
+exit: 0
+stdout: = "bump 9\n9\nbump 66\n66\n" # the image runs unchanged
+step: jet debug {work}/.jet/build/prog --break prog.jet:6
+stdin: native_names_instance_frames_as_written.stdin
+exit: 0
+stdout+stderr: ~ "#0  small.bump()  at prog.jet:6  [inlined]\n#1  run()  at prog.jet:16" # -O1: the inlined frame is named as written
+stdout+stderr: ~ "#0  large.bump()  at prog.jet:6  [inlined]\n#1  run()  at prog.jet:17" # each instance's own
+stdout+stderr: !~ "__jet_" # no generated name shows
