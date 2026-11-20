@@ -10,12 +10,14 @@
 // the background from the session's start (jet_cli_debug_eval_held_start),
 // check that function and their held IR programs build it alone, with no
 // compile of the program. The held check of the package's cut
-// (jet_cli_debug_eval_held_cut) holds only Core and the entry's package
-// carrier: it takes an expression that names nothing of the package but
-// its locals, at any session. The held check of the program
-// (jet_cli_debug_eval_held) takes the rest. Its code calls the image's
-// functions, which compile no copy to compare with the image's, so it
-// answers only while it read the sources the image records it was built
+// (jet_cli_debug_eval_held_cut) opens with only Core and the entry's
+// package carrier: it takes an expression that names nothing of the package
+// but its locals and the functions of the source it is checked in, which
+// the cut gains as the expression reaches them, at any session. The held
+// check of the program (jet_cli_debug_eval_held) takes the rest. Their code
+// calls the image's functions, which compile no copy to compare with the
+// image's, so each answers only while it read the sources the image records
+// it was built
 // from (`.debug_jetsource`, jet_cli_debug_eval_image_same). Every other
 // compile first proves that no item the expression reaches is in a source
 // that reads otherwise than that record (jet_cli_debug_eval_stale): such
@@ -40,10 +42,10 @@ use {
     debug_eval_files: core.files
     debug_eval_time: core.time
     jet_debug.[NATIVE_EVAL_CAPTURES, NativeEval, NativeEvalBinder, NativeEvalPart, NativeEvalRefused, NativeEvaluator, NativeFixEdit, native_eval_name_byte, native_eval_names]
-    jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverEvalAsk, JetDriverHeldEval, JetDriverIceRow, JetDriverLoweringInputs, jet_driver_check_failures, jet_driver_checked_declarations, jet_driver_declares_workspace, jet_driver_entry_root_path, jet_driver_held_eval_check, jet_driver_held_eval_open, jet_driver_inline_package, jet_driver_is_project_configuration]
+    jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverEvalAsk, JetDriverHeldEval, JetDriverIceRow, JetDriverLoweringInputs, jet_driver_check_failures, jet_driver_checked_declarations, jet_driver_declares_workspace, jet_driver_entry_root_path, jet_driver_held_eval_append, jet_driver_held_eval_check, jet_driver_held_eval_open, jet_driver_inline_package, jet_driver_is_project_configuration]
     jet_eval.[jet_eval_native_add, jet_eval_native_wrapper]
-    jet_foundation.[COMMENT_PREFIX, BuildOptions, CompilerThreads, DeclTable, DeepChecks, FnBody, StmtKind, TTypeDef, Type, body_type, deep_checks_flags, foundation_named_type, name_rows_get_text, type_name, type_unqualified_nominals]
-    jet_ir.[IRBuildResult, IRModule, IRProgram, IRTypeKind, ir_build_held_root, ir_eval_place_refusal, ir_held_program, ir_module_new, ir_pointer_row, ir_untag, ir_x64_compile_module_logged, ir_x64_debug_program]
+    jet_foundation.[COMMENT_PREFIX, BuildOptions, CompilerThreads, DeclTable, DeepChecks, FnBody, StmtKind, TTypeDef, Type, body_type, deep_checks_flags, foundation_named_type, name_rows_get_text, name_rows_set, type_name, type_unqualified_nominals]
+    jet_ir.[IRBuildResult, IRModule, IRProgram, IRTypeKind, ir_build_held_root, ir_eval_place_refusal, ir_held_append, ir_held_program, ir_module_new, ir_pointer_row, ir_untag, ir_x64_compile_module_logged, ir_x64_debug_program]
     jet_parser.[parse_type_text]
     jet_sema.[SemaEvalProbeAnswer, sema_eval_probe_function, sema_eval_probe_parse, sema_ownership_type_is_copy]
 }
@@ -176,7 +178,7 @@ jet_cli_debug_eval_compile: fn(entry: String, argv: [String], color: Bool, held:
             }
             .Err(refusal) -> return Err(refusal)
         }
-        if jet_cli_debug_eval_held_cut(held, entry, path, text, params) == {
+        if jet_cli_debug_eval_held_cut(held, entry, running, path, text, params) == {
             .Ok(built) -> {
                 if built == .Val(code) -> return Ok(code)
             }
@@ -918,11 +920,27 @@ jet_cli_debug_eval_held_lower: fn(held: &JetCLIDebugEvalHeldIR, built: &&IRBuild
 // and its held IR program, which owns the checked functions, the symbol
 // table and the checked types the check borrows, opened from the sources
 // `stamp`: a source file that reads other than it did (as a session's `fix`
-// writes one) opens a new one.
+// writes one) opens a new one. A held check of the package's cut keeps the
+// `items` of the sources it read, which it gains functions of
+// (jet_cli_debug_eval_held_append).
 JetCLIDebugEvalHeld: struct {
     eval: JetDriverHeldEval,
     ir: JetCLIDebugEvalHeldIR,
     stamp: JetCLIDebugEvalHeldStamp,
+    items: JetCLIDebugEvalHeldItems?{None},
+}
+
+// The package's sources a held check of its cut read
+// (jet_cli_debug_eval_held_cut_open): their items (`declared`), their
+// paths, entry first, and their sha256 by the path an image built from them
+// records each at (jet_cli_debug_eval_digests), and the names of the
+// functions of them appended to the check so far, which run the image's
+// code only while `read` is the image's record.
+JetCLIDebugEvalHeldItems: struct {
+    declared: JetCLIDebugEvalDeclared,
+    paths: [String],
+    read: [String:[U8]],
+    appended: [String:Bool]{[String:Bool]{}},
 }
 
 // The sources a held check read: the text of each source file of the
@@ -956,8 +974,7 @@ JET_CLI_DEBUG_EVAL_RACY_NS: 1000000000
 // they read when the session last asked whether its kept code is current
 // (jet_cli_debug_eval_unchanged). `cut`, `cut_opening`, `cut_missed`: the
 // session's held check of the package's cut, as `held`, `opening` and
-// `missed` are the program's, and `cut_names`, the names the package's
-// items declare in the sources it read (jet_cli_debug_eval_held_cut).
+// `missed` are the program's (jet_cli_debug_eval_held_cut).
 JetCLIDebugEvalHeldSlot: struct {
     held: JetCLIDebugEvalHeld?{None},
     opening: Bool{false},
@@ -970,7 +987,6 @@ JetCLIDebugEvalHeldSlot: struct {
     cut: JetCLIDebugEvalHeld?{None},
     cut_opening: Bool{false},
     cut_missed: JetCLIDebugEvalHeldStamp?{None},
-    cut_names: [String:Int]{[String:Int]{}},
 }
 
 // A session's held check `slot` and the Condition its open wakes `opened`
@@ -1013,7 +1029,7 @@ jet_cli_debug_eval_held_start: fn(held: JetCLIDebugEvalHeldShared, entry: String
                 cutting.detach()
             }
             .Err(_) -> {
-                uncut: JetCLIDebugEvalHeldCutOpen{open: JetCLIDebugEvalHeldOpen{held: None, missed: None}, names: [String:Int]{}}
+                uncut: JetCLIDebugEvalHeldOpen{held: None, missed: None}
                 jet_cli_debug_eval_held_cut_done(held, uncut)
             }
         }
@@ -1049,57 +1065,54 @@ jet_cli_debug_eval_held_cut_claim: fn(held: JetCLIDebugEvalHeldShared) -[FS]> Bo
 // program's.
 jet_cli_debug_eval_held_cut_prepare: fn(held: JetCLIDebugEvalHeldShared, entry: String, options: BuildOptions, color: Bool{false}) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never! {
     opening: task jet_cli_debug_eval_held_cut_open(entry, color, options)
-    opened: opening.join() ?? JetCLIDebugEvalHeldCutOpen{open: JetCLIDebugEvalHeldOpen{held: None, missed: None}, names: [String:Int]{}}
+    opened: opening.join() ?? JetCLIDebugEvalHeldOpen{held: None, missed: None}
     jet_cli_debug_eval_held_cut_done(held, opened)
 }
 
 // Ends the opening of the held check of the package's cut `held` with the
 // open `opened`.
-jet_cli_debug_eval_held_cut_done: fn(held: JetCLIDebugEvalHeldShared, opened: &&JetCLIDebugEvalHeldCutOpen) Never! {
+jet_cli_debug_eval_held_cut_done: fn(held: JetCLIDebugEvalHeldShared, opened: &&JetCLIDebugEvalHeldOpen) Never! {
     permit := held.slot.guard_edit()
-    permit.value.cut = opened.open.held.move()
-    permit.value.cut_missed = opened.open.missed.move()
-    permit.value.cut_names = opened.names.move()
+    permit.value.cut = opened.held.move()
+    permit.value.cut_missed = opened.missed.move()
     permit.value.cut_opening = false
     held.opened.notify_all()
-}
-
-// An open of the held check of the package's cut
-// (jet_cli_debug_eval_held_cut_open) and the names the package's items
-// declare in the sources it read, by the row of the item that does
-// (JetCLIDebugEvalDeclared.index).
-JetCLIDebugEvalHeldCutOpen: struct {
-    open: JetCLIDebugEvalHeldOpen,
-    names: [String:Int],
 }
 
 // The held check of the package of `entry` cut to Core and its carrier, as
 // jet_cli_debug_eval_alone cuts it for an expression that names nothing of
 // it (each of its sources keeps no item, the entry its `package` block and
-// an empty `run`), and its held IR program built with the image's build
-// `options`, as jet_cli_debug_eval_held_open opens the program's. Its
-// stamp is the package's sources, not their cut.
-jet_cli_debug_eval_held_cut_open: fn(entry: String, color: Bool, options: BuildOptions) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> JetCLIDebugEvalHeldCutOpen {
+// an empty `run`), with the items of the sources it read
+// (JetCLIDebugEvalHeldItems), and its held IR program built with the
+// image's build `options`, as jet_cli_debug_eval_held_open opens the
+// program's. Its stamp is the package's sources, not their cut.
+jet_cli_debug_eval_held_cut_open: fn(entry: String, color: Bool, options: BuildOptions) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> JetCLIDebugEvalHeldOpen {
     since: debug_eval_time.unix_ns()
-    snapshot: jet_cli_debug_eval_snapshot(entry, color) ?? return JetCLIDebugEvalHeldCutOpen{open: JetCLIDebugEvalHeldOpen{held: None, missed: None}, names: [String:Int]{}}
+    snapshot: jet_cli_debug_eval_snapshot(entry, color) ?? return JetCLIDebugEvalHeldOpen{held: None, missed: None}
     stamp: jet_cli_debug_eval_stamp(snapshot, since)
-    members := jet_cli_debug_eval_members_of(snapshot.move()) ?? return JetCLIDebugEvalHeldCutOpen{open: JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}, names: [String:Int]{}}
+    read := jet_cli_debug_eval_digests(snapshot)
+    members := jet_cli_debug_eval_members_of(snapshot.move()) ?? return JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}
     paths := members.paths.move()
     declared := jet_cli_debug_eval_declared(members.sources.move())
-    cut := jet_cli_debug_eval_alone("", [NativeEvalBinder]{}, declared) ?? return JetCLIDebugEvalHeldCutOpen{open: JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}, names: [String:Int]{}}
+    cut := jet_cli_debug_eval_alone("", [NativeEvalBinder]{}, declared) ?? return JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}
     overlays := [JetCLIOverlay]{}
     loop cut.len() > 0 {
         piece := cut.pop() ?? break
-        place := paths.pop() ?? break
-        overlays.push(JetCLIOverlay{path: place, source: piece})
+        overlays.push(JetCLIOverlay{path: "{paths[cut.len()]}", source: piece})
     }
     prepared: jet_cli_prepare_overlays(entry, entry, overlays.move(), color, None, JetDriverCompileMode.Check, appended: true)
-    compiled: jet_cli_compile_prepared(prepared, None, None, hold_check_state: true) ?? return JetCLIDebugEvalHeldCutOpen{open: JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}, names: [String:Int]{}}
+    compiled: jet_cli_compile_prepared(prepared, None, None, hold_check_state: true) ?? return JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}
     if compiled.move() == {
-        .Refused(_) -> return JetCLIDebugEvalHeldCutOpen{open: JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}, names: [String:Int]{}}
-        .Compiled(compile, _) -> return JetCLIDebugEvalHeldCutOpen{open: jet_cli_debug_eval_held_of(compile.move(), stamp.move(), options), names: declared.index.move()}
+        .Refused(_) -> return JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}
+        .Compiled(compile, _) -> {
+            opened := jet_cli_debug_eval_held_of(compile.move(), stamp.move(), options)
+            if &opened.held == .Val(cut_held) {
+                cut_held.items = Val(JetCLIDebugEvalHeldItems{declared: declared.move(), paths: paths.move(), read: read.move()})
+            }
+            return opened
+        }
     }
-    JetCLIDebugEvalHeldCutOpen{open: JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}, names: [String:Int]{}}
+    JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}
 }
 
 // Whether the held check `held` is to be opened now
@@ -1218,29 +1231,141 @@ jet_cli_debug_eval_held_in: fn(slot: &JetCLIDebugEvalHeldSlot, running: [String:
 // as jet_cli_debug_eval_held builds it, checked against the session's held
 // check of the package's cut of `entry` (jet_cli_debug_eval_held_cut_open)
 // in the module of `path`, or the entry's when the stop is in none of the
-// package's sources. Its locals must be of the primitive types and its
-// other names declared by no item of the package: Core's, a field, or a
-// local of a function it makes. None, so the held check of the program or
-// the compiles answer, as jet_cli_debug_eval_held, and when the expression
-// names the package's items.
-jet_cli_debug_eval_held_cut: fn(shared: JetCLIDebugEvalHeldShared, entry: String, path: String, text: String, params: [NativeEvalBinder]) -[FS, Env, Time, Exec.Args]> NativeEval? NativeEvalRefused! {
+// package's sources. Its locals must be of the primitive types. Its names
+// that the package's items declare must be functions of the source it is
+// checked in, which the cut gains first with the functions they reach
+// (jet_cli_debug_eval_held_append) while the image is the cut's sources
+// built at O0 (`running`, as jet_cli_debug_eval_held takes it); its other
+// names are Core's, a field, or a local of a function it makes. None, so
+// the held check of the program or the compiles answer, as
+// jet_cli_debug_eval_held, and when the cut can't gain what it names.
+jet_cli_debug_eval_held_cut: fn(shared: JetCLIDebugEvalHeldShared, entry: String, running: [String:[U8]], path: String, text: String, params: [NativeEvalBinder]) -[FS, Env, Time, Exec.Args]> NativeEval? NativeEvalRefused! {
     if !jet_cli_debug_eval_alone_types(params) -> return Ok(None)
     permit := shared.slot.guard_edit()
-    jet_cli_debug_eval_held_cut_in(permit.value, entry, path, text, params)
+    jet_cli_debug_eval_held_cut_in(permit.value, entry, running, path, text, params)
 }
 
-jet_cli_debug_eval_held_cut_in: fn(slot: &JetCLIDebugEvalHeldSlot, entry: String, path: String, text: String, params: [NativeEvalBinder]) -[FS, Env, Time, Exec.Args]> NativeEval? NativeEvalRefused! {
+jet_cli_debug_eval_held_cut_in: fn(slot: &JetCLIDebugEvalHeldSlot, entry: String, running: [String:[U8]], path: String, text: String, params: [NativeEvalBinder]) -[FS, Env, Time, Exec.Args]> NativeEval? NativeEvalRefused! {
     if slot.cut_opening || slot.cut == None -> return Ok(None)
-    locals: loop param in params -> param.name
-    loop name in native_eval_names(text) {
-        if !locals.contains(name) && slot.cut_names.has_key(name) -> return Ok(None)
-    }
-    taken: jet_cli_debug_eval_held_take(slot.cut.move())
+    taken := jet_cli_debug_eval_held_take(slot.cut.move())
     slot.cut = None
+    gained := false
+    if &taken == .Val(current) {
+        gained = jet_cli_debug_eval_held_append(current, running, path, text, params)
+    }
+    if !gained {
+        slot.cut = taken.move()
+        return Ok(None)
+    }
     run: jet_cli_debug_eval_held_run(taken.move(), path, text, params, otherwise: entry)
     slot.cut = run.held.move()
     if run.refusal.move() == .Val(refusal) -> return Err(refusal)
     Ok(run.built.move())
+}
+
+// Gains the held check of the package's cut `held` the functions of the
+// source `text` is checked in (the stop's `path`, else the entry) that
+// `text`, an expression of the locals `params`, names, with the functions
+// they reach (jet_cli_debug_eval_held_reach), each after those it calls
+// and once a session: each is appended to its check (JetDriver
+// jet_driver_held_eval_append) and its held IR program (JetIR
+// ir_held_append), whose build calls the image's code of it. Whether the
+// check takes `text`: it names nothing of the package but its locals, or
+// the functions reached are gained, which takes the cut's sources being
+// the image's record `running` (jet_cli_debug_eval_image_same) and an
+// image built at O0, which binds its functions.
+jet_cli_debug_eval_held_append: fn(held: &JetCLIDebugEvalHeld, running: [String:[U8]], path: String, text: String, params: [NativeEvalBinder]) -> Bool {
+    locals: loop param in params -> param.name
+    wanted := [String]{}
+    loop name in native_eval_names(text) {
+        if !locals.contains(name) -> wanted.push(name)
+    }
+    // The source the expression checks in, the functions it reaches there
+    // that the cut lacks, and each one's code.
+    file := 0
+    source := ""
+    names := [String]{}
+    codes := [String]{}
+    if held.items == .Val(items) {
+        host: jet_cli_debug_eval_host(items.paths, path) ?? return false
+        if host > 0 -> file = host
+        source = "{items.paths[file]}"
+        order: jet_cli_debug_eval_held_reach(items.declared, file, wanted) ?? return false
+        if order.len() > 0 && (held.ir.level > 0 || !jet_cli_debug_eval_image_same(running, items.read)) {
+            return false
+        }
+        loop slot in order {
+            item: items.declared.files[file][items.declared.rows[slot]]
+            if items.appended.has_key(item.name) -> next
+            names.push(item.name)
+            codes.push(jet_cli_debug_eval_item_code(items.declared.sources[file], items.declared.files[file], items.declared.rows[slot]))
+        }
+    } else { return wanted.len() == 0 }
+    if names.len() == 0 -> return true
+    display: jet_cli_debug_eval_held_module(held.eval, source)
+    if display == "" -> return false
+    loop (at, code) in codes {
+        done := jet_driver_held_eval_append(held.eval, display, held.ir.program.functions, held.ir.program.symbols.move(), held.ir.program.types.move(), code)
+        held.ir.program.symbols = done.symbols.move()
+        held.ir.program.types = done.types.move()
+        appended := done.appended.move() ?? return false
+        key: "{appended.function.key}"
+        row: ir_held_append(held.ir.program, appended.function.move(), appended.decl, code)
+        name_rows_set(held.eval.rows, key, row)
+        if &held.items == .Val(items) -> items.appended[names[at]] = true
+    }
+    true
+}
+
+// The functions of source `file` of `declared` that the names `wanted`
+// reach, by their slots (JetCLIDebugEvalDeclared.index), each after those
+// it reaches: the functions the names declare and, in turn, those the
+// names of each one's code declare. A name no item declares (a local, a
+// field, Core's) reaches nothing. None when a name reached is declared by
+// two sources, by an item other than a function of `file`, by its entry's
+// `run`, or by a `use` block of `file`, or when a function reaches itself
+// through another: the cut gains none of those.
+jet_cli_debug_eval_held_reach: fn(declared: JetCLIDebugEvalDeclared, file: Int, wanted: [String]) -> [Int]? Never! {
+    imported := [String]{}
+    loop at in declared.imports[file] {
+        loop name in jet_cli_debug_eval_item_names(jet_cli_debug_eval_item_code(declared.sources[file], declared.files[file], at)) {
+            if name != "use" -> imported.push(name)
+        }
+    }
+    // Each slot visited: false while those it reaches are, true once placed.
+    placed := [Int:Bool]{}
+    order := [Int]{}
+    loop name in wanted {
+        if !jet_cli_debug_eval_held_visit(declared, file, imported, name, placed, order) {
+            return None
+        }
+    }
+    Val(order.move())
+}
+
+// Places the function `name` declares and those it reaches in `order`
+// (jet_cli_debug_eval_held_reach), `placed` the slots visited. Whether it
+// can be.
+jet_cli_debug_eval_held_visit: fn(declared: JetCLIDebugEvalDeclared, file: Int, imported: [String], name: String, placed: &[Int:Bool], order: &[Int]) -> Bool Never! {
+    if imported.contains(name) -> return false
+    slot: declared.index.get(name) ?? return true
+    if slot < 0 -> return false
+    if placed.get(slot) == .Val(done) -> return done
+    if declared.owners[slot] != file -> return false
+    row: declared.rows[slot]
+    item: declared.files[file][row]
+    if !item.function || item.name == "run" -> return false
+    placed[slot] = false
+    // Its own name, its header's, is no call: a call of itself doesn't check
+    // (JetSema sema_script_probe_append).
+    loop more in jet_cli_debug_eval_item_names(jet_cli_debug_eval_item_code(declared.sources[file], declared.files[file], row)) {
+        if more != name && !jet_cli_debug_eval_held_visit(declared, file, imported, more, placed, order) {
+            return false
+        }
+    }
+    placed[slot] = true
+    order.push(slot)
+    true
 }
 
 // The held check `held`, moved out of its slot: an argument moved from

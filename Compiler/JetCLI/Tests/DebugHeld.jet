@@ -5,9 +5,10 @@
 // check of the program, so its evaluations compile. Those compiles refuse
 // an expression that reaches an item of a source that reads otherwise than
 // the record (jet_cli_debug_eval_stale). The held check of the package's
-// cut calls none of the image's functions, and opens at every session.
+// cut opens at every session, and gains the functions of a source that an
+// expression reaches, callees first (jet_cli_debug_eval_held_reach).
 use {
-    jet_cli.[JetCLIDebugEvalHeldCutOpen, JetCLIDebugEvalHeldOpen, JetCLIDebugEvalHeldShared, JetCLIDebugEvalHeldStamp, jet_cli_debug_eval_digests, jet_cli_debug_eval_held_claim, jet_cli_debug_eval_held_cut_claim, jet_cli_debug_eval_held_cut_done, jet_cli_debug_eval_held_done, jet_cli_debug_eval_held_slot, jet_cli_debug_eval_image_same, jet_cli_debug_eval_stale]
+    jet_cli.[JetCLIDebugEvalDeclared, JetCLIDebugEvalHeldOpen, JetCLIDebugEvalHeldShared, JetCLIDebugEvalHeldStamp, jet_cli_debug_eval_declared, jet_cli_debug_eval_digests, jet_cli_debug_eval_held_claim, jet_cli_debug_eval_held_cut_claim, jet_cli_debug_eval_held_cut_done, jet_cli_debug_eval_held_done, jet_cli_debug_eval_held_reach, jet_cli_debug_eval_held_slot, jet_cli_debug_eval_image_same, jet_cli_debug_eval_stale]
     jet_debug.[NativeEvalBinder]
     jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot]
 }
@@ -39,9 +40,38 @@ held_test_snapshot: fn(util: String) -> JetDriverAuthorizedSourceSnapshot Never!
     held: jet_cli_debug_eval_held_slot()
     assert(jet_cli_debug_eval_held_cut_claim(held))
     assert(!jet_cli_debug_eval_held_cut_claim(held))
-    unopened: JetCLIDebugEvalHeldCutOpen{open: JetCLIDebugEvalHeldOpen{held: None, missed: None}, names: [String:Int]{}}
+    unopened: JetCLIDebugEvalHeldOpen{held: None, missed: None}
     jet_cli_debug_eval_held_cut_done(held, unopened)
     assert(jet_cli_debug_eval_held_cut_claim(held))
+}
+
+// The names of the functions of `declared` at the slots `order`, in order;
+// "-" alone for no order.
+held_test_names: fn(declared: JetCLIDebugEvalDeclared, order: [Int]?) -> [String] Never! {
+    slots: order ?? return [String]{"-"}
+    loop slot in slots -> declared.files[declared.owners[slot]][declared.rows[slot]].name
+}
+
+#Test("the held cut gains the functions of the expression's source that it reaches, callees first") {
+    entry: [String]{
+        "run: fn() {{\n}}",
+        "scaled: fn(x: Int) -> Int {{\n    helper(x) + LIMIT\n}}",
+        "helper: fn(x: Int) -> Int {{\n    x * 2\n}}",
+        "loops: fn(x: Int) -> Int {{\n    again(x)\n}}",
+        "again: fn(x: Int) -> Int {{\n    loops(x)\n}}",
+        "LIMIT: 3",
+        "twice: fn(x: Int) -> Int {{\n    helper(helper(x))\n}}",
+        "",
+    }.join("\n")
+    declared: jet_cli_debug_eval_declared([String]{entry, "far: fn(x: Int) -> Int {{\n    x\n}}\n"})
+    assert_eq(held_test_names(declared, jet_cli_debug_eval_held_reach(declared, 0, [String]{"twice", "helper"})), [String]{"helper", "twice"})
+    assert_eq(held_test_names(declared, jet_cli_debug_eval_held_reach(declared, 0, [String]{"total", "print"})), [String]{})
+    // A constant, a cycle, the entry's `run`, and another source's function.
+    assert(jet_cli_debug_eval_held_reach(declared, 0, [String]{"scaled"}) == None)
+    assert(jet_cli_debug_eval_held_reach(declared, 0, [String]{"loops"}) == None)
+    assert(jet_cli_debug_eval_held_reach(declared, 0, [String]{"run"}) == None)
+    assert(jet_cli_debug_eval_held_reach(declared, 0, [String]{"far"}) == None)
+    assert_eq(held_test_names(declared, jet_cli_debug_eval_held_reach(declared, 1, [String]{"far"})), [String]{"far"})
 }
 
 #Test("the held check answers from the image's recorded sources only, file by file") {

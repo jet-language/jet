@@ -1828,18 +1828,7 @@ IR_HELD_ROOT_SOURCE: "<eval>"
 // IR_HELD_ROOT_SOURCE, whose source is `text`.
 ir_build_held_root: fn(program: &&IRProgram, root: &&FnBody, text: String, threads: CompilerThreads) -> IRBuildKept Never! {
     p := program.move()
-    bytes: text.bytes()
-    if {
-        p.source_rows.get(IR_HELD_ROOT_SOURCE) == .Val(row) -> {
-            p.source_lines[row] = ir_source_line_starts(bytes)
-            p.source_bytes[row] = bytes.move()
-        }
-        else -> {
-            p.source_rows[IR_HELD_ROOT_SOURCE] = p.source_bytes.len()
-            p.source_lines.push(ir_source_line_starts(bytes))
-            p.source_bytes.push(bytes.move())
-        }
-    }
+    ir_held_source_put(p, IR_HELD_ROOT_SOURCE, text)
     owned := [FnBody]{root.move()}
     ir_declared_owners(owned, p.types)
     ir_add_signature_union_types(p.types, p.type_rows, owned)
@@ -1865,6 +1854,55 @@ ir_build_held_root: fn(program: &&IRProgram, root: &&FnBody, text: String, threa
     // evaluation.
     ir_debug_cells_bind(kept.result.program)
     kept
+}
+
+// Puts `text` as the source of the file `file` of held program `program`,
+// in place of any it had.
+ir_held_source_put: fn(program: &IRProgram, file: String, text: String) Never! {
+    bytes: text.bytes()
+    if {
+        program.source_rows.get(file) == .Val(row) -> {
+            program.source_lines[row] = ir_source_line_starts(bytes)
+            program.source_bytes[row] = bytes.move()
+        }
+        else -> {
+            program.source_rows[file] = program.source_bytes.len()
+            program.source_lines.push(ir_source_line_starts(bytes))
+            program.source_bytes.push(bytes.move())
+        }
+    }
+}
+
+// Appends `function`, a function of the program's source that a held check
+// appended to its registration as declaration `decl` (JetDriver
+// jet_driver_held_eval_append), to held program `program`
+// (ir_held_program), as one of its own: a direct call of `decl` calls it,
+// and under IRChecks.held the image's code of it, when no other function
+// of the program has its symbol (ir_held_symbols). Its spans count in its
+// own `text`, which no checked file holds, so its file is
+// IR_HELD_ROOT_SOURCE followed by its key, whose source is `text`. Its row.
+ir_held_append: fn(program: &IRProgram, function: &&FnBody, decl: DeclID, text: String) -> Int Never! {
+    owned := [FnBody]{function.move()}
+    ir_declared_owners(owned, program.types)
+    ir_add_signature_union_types(program.types, program.type_rows, owned)
+    appended := owned.pop() ?? panic("the held append lost its function")
+    appended.source_file = "{IR_HELD_ROOT_SOURCE}{appended.key}"
+    ir_held_source_put(program, appended.source_file, text)
+    if program.checks.held.len() > 0 {
+        symbol: ir_symbol_name(appended)
+        alone := true
+        loop other in program.functions {
+            if ir_symbol_name(other) == symbol -> alone = false
+        }
+        if alone -> program.checks.held[appended.key] = true
+    }
+    row: program.functions.len()
+    name_rows_set(program.rows, appended.key, row)
+    index: decl.row.index()
+    loop program.decl_rows.len() <= index -> program.decl_rows.push(-1)
+    program.decl_rows[index] = row
+    program.functions.push(appended.move())
+    row
 }
 
 // The function the executable starts: `entry` itself when it takes nothing,
@@ -3604,7 +3642,9 @@ ir_word_row: fn(m: &IRModule) -> Int Never! {
 // selection names `ty` at the call (X64Select.jet ir_x64_alloc_type); else
 // `row` itself, so any other build's IR is unchanged. A box answers its box
 // row, which names its type already.
-ir_alloc_row: fn(m: &IRModule, row: Int, ty: Type) -> Int Never! { ir_alloc_row_holding(m, row, ty, -1) }
+ir_alloc_row: fn(m: &IRModule, row: Int, ty: Type) -> Int Never! {
+    ir_alloc_row_holding(m, row, ty, -1)
+}
 
 // ir_alloc_row of storage whose block holds values laid out as row `held`
 // (-1: bytes of no known layout), which the call's DWARF type points at
@@ -3651,7 +3691,9 @@ IRAllocServed: struct {
 // None for a row that is no allocation word.
 ir_alloc_served: fn(m: IRModule, row: Int) -> IRAllocServed? Never! {
     if m.types[row].ty == .Apply(name, args) {
-        if name == IR_ALLOC_TYPE && args.len() == 1 -> return Val(IRAllocServed{name: ir_type_name(args[0]), held: m.alloc_held.get(row) ?? -1})
+        if name == IR_ALLOC_TYPE && args.len() == 1 {
+            return Val(IRAllocServed{name: ir_type_name(args[0]), held: m.alloc_held.get(row) ?? -1})
+        }
     }
     None
 }
