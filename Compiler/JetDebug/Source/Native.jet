@@ -478,6 +478,11 @@ NativeSession: struct {
     // Where each function of the image's line table opens its frame, read
     // from the image's code (native_openings).
     openings: [NativeOpening],
+    // The statement rows of function `step_index` (-1: none read yet),
+    // which `next` looks each step up in (step_rows_of). A fix only adds
+    // functions, so they stand until `load` reads another image.
+    step_index: Int{-1},
+    step_rows: NativeStepRows{NativeStepRows{starts: [Int]{}, lines: [Int]{}}},
     // The functions `fix` placed, latest last, and the address the next fix
     // maps its code at (0: none mapped yet).
     fixed: [NativeFixed]{[NativeFixed]{}},
@@ -1959,6 +1964,7 @@ NativeSession: struct {
         self.observe_root = native_elf_symbol(elf, X64_OBSERVE_ROOT_SYMBOL) ?? 0
         codes: native_elf_codes(elf, ".text")
         self.openings = native_openings(image, codes)
+        self.step_index = -1
         self.program_entry = native_image_entry(image, codes)
         self.image = image
         self.binary = binary
@@ -4973,7 +4979,8 @@ NativeSession: struct {
         start: registers[X64_TRACE_RIP]
         function: x64_jetline_find(self.image.lines, start)
         if function < 0 -> return self.step_out()
-        line: x64_jetline_line(self.image.lines, self.image.lines.functions[function], start) ?? 0
+        self.step_rows_of(function)
+        line: native_step_line_at(self.step_rows, start)
         base: native_frame_base(self.openings, function, registers, start, self.code(start, 1))
         if calls == NativeStepCalls.Over -> return self.line_over(function, line, base, reason)
         loop _ in 0..<NATIVE_DEBUG_MOST_STEPS {
@@ -5028,7 +5035,6 @@ NativeSession: struct {
         }
         low: self.image.lines.functions[index].low
         high: self.image.lines.functions[index].high
-        rows: native_step_rows(self.image, index)
         registers := self.registers() ?? return Err(err)
         loop _ in 0..<NATIVE_DEBUG_LINE_STEPS {
             before: registers
@@ -5054,7 +5060,8 @@ NativeSession: struct {
             if pc < low || pc >= high {
                 return self.line_over_traps(index, line, base, returned, reason)
             }
-            here: native_step_line(rows, pc)
+            self.step_rows_of(index)
+            here: native_step_line(self.step_rows, pc)
             if here < 0 || pc == low -> next
             frame: native_frame_base(self.openings, index, registers, pc, self.code(pc, 1))
             if frame > base -> return self.paused(reason)
@@ -5062,6 +5069,17 @@ NativeSession: struct {
             if here != line -> return self.paused(reason)
         }
         self.line_over_traps(index, line, base, returned, reason)
+    }
+
+    // Read function `index`'s statement rows into `step_rows` unless they
+    // are there: a `next` in a function of many rows looks each step up in
+    // them, not in rows it reads again.
+    step_rows_of: fn(&self, index: Int) Never! {
+        if self.step_index == index {
+            return
+        }
+        self.step_rows = native_step_rows(self.image, index)
+        self.step_index = index
     }
 
     // line_over under traps: a temporary trap on each row of the function
@@ -5630,8 +5648,9 @@ NativeStepRows: struct {
     lines: [Int],
 }
 
-// The statement rows of function `index`, read once for a `next` to look up
-// each address it steps to (native_step_line).
+// The statement rows of function `index`, read once per function for each
+// `next` to look up the addresses it steps to (NativeSession.step_rows_of,
+// native_step_line).
 native_step_rows: fn(image: NativeImage, index: Int) -> NativeStepRows Never! {
     function: image.lines.functions[index]
     rows := NativeStepRows{starts: [Int]{}, lines: [Int]{}}
@@ -5649,6 +5668,20 @@ native_step_rows: fn(image: NativeImage, index: Int) -> NativeStepRows Never! {
 // The line of the row that starts at `pc`, the last of the rows starting
 // there as x64_jetline_line reads it; -1 when no row starts there.
 native_step_line: fn(rows: NativeStepRows, pc: Int) -> Int Never! {
+    found: native_step_row(rows, pc)
+    if found < 0 || rows.starts[found] != pc -> return -1
+    rows.lines[found]
+}
+
+// The line of `pc`, inside the rows' function, as x64_jetline_line reads
+// it: the last row starting at or before it; 0 before the first.
+native_step_line_at: fn(rows: NativeStepRows, pc: Int) -> Int Never! {
+    found: native_step_row(rows, pc)
+    if found < 0 -> 0 else -> rows.lines[found]
+}
+
+// The last of `rows` starting at or before `pc`, -1 when none does.
+native_step_row: fn(rows: NativeStepRows, pc: Int) -> Int Never! {
     // The first row starting past `pc`.
     low := 0
     high := rows.starts.len()
@@ -5659,8 +5692,22 @@ native_step_line: fn(rows: NativeStepRows, pc: Int) -> Int Never! {
             else -> high = middle
         }
     }
-    if low == 0 || rows.starts[low - 1] != pc -> return -1
-    rows.lines[low - 1]
+    low - 1
+}
+
+#Test("a step looks a line up in its function's statement rows as the line table reads it") {
+    rows: NativeStepRows{starts: [Int]{0x1000, 0x1004, 0x1004, 0x100a}, lines: [Int]{1, 5, 6, 8}}
+    assert_eq(native_step_line_at(rows, 0x0fff), 0)
+    assert_eq(native_step_line_at(rows, 0x1000), 1)
+    assert_eq(native_step_line_at(rows, 0x1003), 1)
+    // Of two rows starting together, the last stands.
+    assert_eq(native_step_line_at(rows, 0x1004), 6)
+    assert_eq(native_step_line_at(rows, 0x1009), 6)
+    assert_eq(native_step_line_at(rows, 0x100f), 8)
+    assert_eq(native_step_line(rows, 0x1004), 6)
+    assert_eq(native_step_line(rows, 0x100a), 8)
+    assert_eq(native_step_line(rows, 0x1005), -1)
+    assert_eq(native_step_line(rows, 0x0fff), -1)
 }
 
 // Whether the ascending `sorted` holds `value`.
