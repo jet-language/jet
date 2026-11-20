@@ -148,7 +148,6 @@ DN_RUNS_KEPT: [DnRunKept]{
     {path: "Docs/Audits/BestInExistence20261119/Probes", harness: "the 2026-11-19 best-in-existence review's probes", class: "comparison", until: "", why: "a dated review's peer comparison: lldb, gdb and perf on the image jet debug and jet perf read"},
     {path: "Tests/Cases/ToolInterop", harness: "ToolInterop", class: "interop", until: "", why: DN_WHY_INTEROP},
     {path: "Tests/Cases/Debug/objdump_disassembles_main_from_text_section.case", harness: "objdump reads Jet's image", class: "interop", until: "", why: DN_WHY_INTEROP},
-    {path: "Tools/Perf/JetcProfile", harness: "JetcProfile", class: "gap", until: "#6995 c13", why: "samples a running compiler by pid with perf record; jet perf attach can't sample a process started without --observe"},
     {path: "Tools/Perf/Scaling", harness: "Scaling", class: "gap", until: "#6995 c2", why: "profiles one compile's phases with perf record and perf script, the receipt Gate.jet stores; jet perf run samples no compile of the compiler itself"},
     {path: "Tools/Perf/CompileThroughput", harness: "CompileThroughput", class: "gap", until: "#6995 c14", why: "the compiler's retired instructions and cycles per build, counted by perf stat across revisions; jet perf counts no hardware event of a built binary or a jet command"},
     {path: "Tools/Perf/ReadInto", harness: "ReadInto memory", class: "gap", until: "#6995 c15", why: "reads the counting runtime's allocator facts with a gdb script stopped at exit_group; jet debug stops at no system call or exit, and jet perf reports no allocator totals at exit"},
@@ -360,6 +359,28 @@ dn_run_kept_by: fn(row: DnRunKept, finding: String) -[]> Bool {
     finding.starts_with("{row.path}:") || finding.starts_with("{row.path}/")
 }
 
+// What is wrong with the kept rows `rows`, given the runs `found` (`path:line:
+// tool`): a row with no reason or a class not on the list, a gap row that
+// names no criterion in `until` or a row of another class that names one,
+// and a row that keeps no run any more, as when its harness was ported to a
+// Jet tool. Each problem is one line.
+dn_kept_problems: fn(rows: [DnRunKept], found: [String]) -[]> [String] {
+    problems := [String]{}
+    loop row in rows {
+        if row.why == "" -> problems.push("DN_RUNS_KEPT row {row.path} names no reason")
+        if !DN_RUN_CLASSES.contains(row.class) {
+            problems.push("DN_RUNS_KEPT row {row.path} has class `{row.class}`, not comparison, interop or gap")
+        }
+        if (row.class == "gap") != row.until.starts_with("#") {
+            problems.push("DN_RUNS_KEPT row {row.path}: a gap row, and only a gap row, names in `until` the criterion that removes it")
+        }
+        if found.find(fn(finding) { dn_run_kept_by(row, finding) }) == None {
+            problems.push("DN_RUNS_KEPT row {row.path} keeps no run any more; delete it")
+        }
+    }
+    problems
+}
+
 #Test("no script, skill, tool or case runs an outside debugger or profiler") {
     guards_enter_root()
     found: dn_runs("")
@@ -370,12 +391,17 @@ dn_run_kept_by: fn(row: DnRunKept, finding: String) -[]> Bool {
         }
     }
     assert_eq(refused.join("\n"), "")
-    loop row in DN_RUNS_KEPT {
-        assert(row.why != "", "DN_RUNS_KEPT row {row.path} names no reason")
-        assert(DN_RUN_CLASSES.contains(row.class), "DN_RUNS_KEPT row {row.path} has class `{row.class}`, not comparison, interop or gap")
-        assert((row.class == "gap") == row.until.starts_with("#"), "DN_RUNS_KEPT row {row.path}: a gap row, and only a gap row, names in `until` the criterion that removes it")
-        assert(found.find(fn(finding) { dn_run_kept_by(row, finding) }) != None, "DN_RUNS_KEPT row {row.path} keeps no run any more; delete it")
-    }
+    assert_eq(dn_kept_problems(DN_RUNS_KEPT, found).join("\n"), "")
+}
+
+#Test("a kept row whose harness no longer runs its tool fails, and so does a gap row with no criterion") {
+    found: [String]{"Tools/Perf/Kept/run.sh:4: perf"}
+    kept: DnRunKept{path: "Tools/Perf/Kept", harness: "Kept", class: "gap", until: "#1 c1", why: "still samples with perf record"}
+    ported: DnRunKept{path: "Tools/Perf/Ported", harness: "Ported", class: "gap", until: "#1 c2", why: "sampled with perf record before jet perf attach did"}
+    unnamed: DnRunKept{path: "Tools/Perf/Kept/run.sh", harness: "Kept", class: "gap", until: "", why: "names no criterion"}
+    assert_eq(dn_kept_problems([DnRunKept]{kept}, found), [String]{})
+    assert_eq(dn_kept_problems([DnRunKept]{kept, ported}, found), [String]{"DN_RUNS_KEPT row Tools/Perf/Ported keeps no run any more; delete it"})
+    assert_eq(dn_kept_problems([DnRunKept]{unnamed}, found), [String]{"DN_RUNS_KEPT row Tools/Perf/Kept/run.sh: a gap row, and only a gap row, names in `until` the criterion that removes it"})
 }
 
 #Test("a planted outside debugger run fails, named by file and line") {

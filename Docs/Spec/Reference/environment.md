@@ -137,7 +137,6 @@ object. A URL's user and password never appear in that list.
 | `JET_BASE_ROOT` | path | Checkout tool root (`Tools/Agent/roots.sh`): the published compilers. Unset, `$JET_SCRATCH_ROOT/discovery/base`. |
 | `JET_BOOTSTRAP_*` |  | The runner protocol the scaling gate (`Tools/Perf/Scaling/Gate`) hands a compiler of kind `bootstrap`, in an otherwise cleared environment: `MODE`, `FACTORY_TIER`, `SOURCE_ROOT`, `ENTRY`, `OUTPUT` and `RECEIPT`. |
 | `JET_BUILD_LINE` | text | The build line the gauntlet's performance receipt records. Unset, the receipt records none. |
-| `JET_CALL_GRAPH` | `auto`, `fp` or `dwarf` | How the live compiler profile (`Tools/Perf/JetcProfile/Live`) records stacks; `auto` takes frame pointers and retakes a DWARF window when they are mostly truncated. Unset, `auto`. |
 | `JET_CANVAS_BROWSER` | `chromium` or `firefox` | The browser of a `Tools/CanvasTest/Run.jet` scenario when `--browser` names none. Unset, `chromium`. |
 | `JET_CANVAS_PORT` | port | The `jet dev --canvas` port a `Tools/CanvasTest/Run.jet` scenario drives when `--port` names none. Unset, the scenario serves its own program (`--source`, else `JET_SOURCE`) with `jet dev --canvas` for its length. |
 | `JET_CFFI_ABI` | ABI name | Selects the C-ABI matrix row. Companion `JET_CFFI_CC`, `JET_CFFI_AR`, `JET_CFFI_RUST_TARGET`, `JET_CFFI_RUST_LINKER`, and `JET_CFFI_RUNNER` name that row's tools and target. |
@@ -163,13 +162,12 @@ object. A URL's user and password never appear in that list.
 | `JET_NATIVE_C_WRAPPER_ACTIVE` | `1` | **Set by** `Tools/Packaging/NativeCCompiler.jet` for the C compiler it runs; a run that already has it stops with exit 2, since `CC` resolves back to the wrapper. |
 | `JET_ORCHESTRATOR_DIR` | path | The directory the orchestrator's batch tools (`Batch10.jet`, `Integrate10.jet`, `StreamB10.jet`) run `Integrate10.jet` from. Unset, the running tool's own directory. |
 | `JET_PERF_MAP` | `1` | **Internal** profiling aid for `jet run` and `jet dev`: before a program runs from memory, jet writes `/tmp/perf-<pid>.map` from its image's symbol table, so `perf report` shows its function names (`Compiler/JetBackend/Source/Image/Loader.jet`, `x64_image_perf_map`). Unset, nothing is written. |
-| `JET_PROFILE_OUT` | path | The directory the live compiler profile (`Tools/Perf/JetcProfile/Live`) writes to. Unset, `$JET_SCRATCH_ROOT/sol/SolJetcProfile/jetc-<pid>-<time>`. |
+| `JET_PROFILE_OUT` | path | The directory the live compiler profile (`Tools/Perf/JetcProfile/Live`) writes its `jet perf attach` trace and view to. Unset, `$JET_SCRATCH_ROOT/sol/SolJetcProfile/jetc-<pid>-<time>`. |
 | `JET_READ_SCOPE` | comma-separated paths | **Set by jet** for a program that `jet run --allow='FS.Read("<path>")'`, or the same right in its package's `authority.allow` row, confines to reading those paths: a read the confinement refuses fails with `PermissionDenied`, and its cause names Jet.ApplicationAuthorityDenied and these paths (`Compiler/JetRuntime/Source/CompilerFS.jet`). Setting it yourself confines nothing; it only changes that wording. |
 | `JET_RECHECK_VERIFY` | `1` | **Internal** compiler test switch: each body comptime pass that lands its local values in the bodies holding them, instead of checking the whole program again (`Compiler/JetSema/Source/Sema/Comptime/LocalSplice.jet`), also checks the whole program again, and any difference between the two results stops the compile as an internal compiler problem that names the first differing rows. |
 | `JET_RELEASE_LOCK_HELD` | `1` | **Set by** `Tools/Release/Admit.jet` for the run it starts in the release slot, which inherits its release lock. |
 | `JET_RELEASE_SLOT` | empty | Set empty, `Tools/Release/Admit.jet` runs the gate in place instead of again under `Tools/Agent/Chain.jet slot --release`. |
 | `JET_RELEASE_WORK` | path | The release train's work root, read by `Tools/Release/Admit.jet` and `Tools/Agent/Land.jet`; `paused` in it stops new trains. Unset, `$JET_STATE_ROOT/release`. |
-| `JET_REPO` | path | The checkout the live compiler profile resolves sources in. Unset, the checkout holding the tool. |
 | `JET_RUN_ROOT` | path | Checkout tool root (`Tools/Agent/roots.sh`): the land queue, locks and slot ledger. Unset, `$JET_SCRATCH_ROOT/run`. |
 | `JET_SAFETY_ARTIFACTS` | path | The admitted native artifacts JSON the `safety-gate` row of `Tools/Agent/VerifyFull.jet` runs the full safety gate against (Docs/Spec/safety.md). Unset, the row runs the gate's source leg. |
 | `JET_SCALING_QUEUE_STAMP` | path | **Set by** the proof queue for a queued scaling job: the stamp file whose time `Tools/Perf/Scaling/Enqueue/run.jet` dates the job by. Required. |
@@ -178,7 +176,6 @@ object. A URL's user and password never appear in that list.
 | `JET_SEEDS` | path | Checkout tool root (`Tools/Agent/roots.sh`): the seed store. Unset, `${XDG_DATA_HOME:-~/.local/share}/jet-seeds`. |
 | `JET_SELFHOST_SCRATCH` | path | The directory the self-host study (`Tools/Perf/Selfhost`) makes its run directories in. Unset, `$JET_STATE_ROOT/selfhost`. |
 | `JET_SOURCE` | path | The program `Tools/CanvasTest/Run.jet native-lifecycle` serves with `jet dev --canvas`, and a `scenario` serves when neither `--port` nor `--source` names one. Unset, `Examples/Tooling/CanvasBlueprintDemo.jet`. |
-| `JET_SOURCE_MAP` | path | The compiler source map the live compiler profile resolves addresses through. Unset, the stage-1 self-check's `compiler.map.json` under `$JET_STATE_ROOT`. |
 | `JET_STATE_ROOT` | path | Checkout tool root (`Tools/Agent/roots.sh`): per-user dev state and caches. Each root is read from the environment, else from `${XDG_CONFIG_HOME:-~/.config}/jet/env`. Unset, `${XDG_CACHE_HOME:-~/.cache}/jet-dev`. |
 | `JET_STREAM_BENCH_COMMAND` | command line | The Jet command `Tools/Perf/StreamBench/run.jet` runs, split as a shell splits it. Unset, `Tools/Agent/JetEnv.jet jet`. |
 | `JET_TARGET_ROOT` | path | Checkout tool root (`Tools/Agent/roots.sh`): the build target directories. Unset, `$JET_SCRATCH_ROOT/targets`. |
