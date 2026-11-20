@@ -35611,6 +35611,193 @@
         }
       ],
       "retiredAt": "2026-11-20T06:40:03.865Z"
+    },
+    {
+      "id": "c0lidgow",
+      "num": 6854,
+      "title": "Taint kinds, effect roots, devices and schedulers come from declared rows and providers",
+      "body": "Destination: policy, taint, accelerator devices and schedulers read declared rows and providers, so a package adds a taint kind, an effect root, a device or a scheduler with no compiler or policy-code edit.\n\nWhy it matters: these four vocabularies are closed lists in the compiler today (TaintKind in Core/Compiler/Lang.jet with three copies of the taint tags; the policy key and gate lists in Policy/; the device names in Registry/CoreValueSignatures.jet; the scheduler choice). The four built-in tags themselves become Prelude structs on #6849 c6.\n\nDecisions: D-EXTEND-ARCH1=A, D-HOST-CAPS1 (package hardware kinds), D-ACCEL-LIB1 (device interface), D-CORE-PROVIDER1 (provider traits). Design: Docs/research/2026-10-29-extensibility-every-layer.md sections 4.9, 4.28, 4.31 and 6.2.\n\nSplit from #6202.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e18",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "All five criteria met; c4 closed by the p251 batch compiler: a package-declared target profile selects its Scheduler provider through link-time run-queue hooks (no per-spawn cost), cases target_selects_package_scheduler and program_run_queue_hooks_take_every_spawn PASS."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c4 plan (Main): no new card (owner order: gaps are criteria on the owning card). IfHole builds c4 as SUBs of an hour or less, in order: (1) a package-declared target profile that resolves TargetProfileIdentity.Named, the minimal slice of #758 c11 that c4 needs; (2) a Scheduler provider trait in Core; (3) binding the runtime's jet_rt_native_task_spawn/park/wake to the selected provider at link time, with no per-call cost; (4) the target_selects_package_scheduler case checking the spawn IR is unchanged."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A package declares a taint kind and its sinks as rows, and the checker enforces it at those sinks.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p245 batch compiler (dev 359661f26b; feature 47ced308a6): jet test Compiler --profile ui --filter package_taint_kind_sink n=1 bad=0.",
+          "at": "2026-11-17T04:56:18.073Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "package_taint_kind_sink"
+          }
+        },
+        {
+          "n": 2,
+          "text": "Authority policy reads declared effect roots, not a name list: a package's new effect root is governed by `authority:` rules with no policy-code edit.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 854cdda541 (case predicate fix) on feature 359661f26b: jet test Compiler --profile cases --filter policy_governs_package_effect_root PASS 1/0 on the p245 batch compiler.",
+          "at": "2026-11-17T04:57:40.133Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "policy_governs_package_effect_root"
+          }
+        },
+        {
+          "n": 3,
+          "text": "Device names come from accelerator providers and hardware kinds: core_value_fixed_signature (Registry/CoreValueSignatures.jet) names no device, and an NPU test package adds a device with no compiler edit.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p246 batch compiler (dev 8672bcfd81); feature dc37510ffc: golden Packages/NpuDevice n=3 bad=0 (o0 o1 o2), ui raw_kernel_contract_cannot_be_forged_without_a_provider n=1 bad=0.",
+          "at": "2026-11-17T05:18:30.798Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "Packages/NpuDevice"
+          }
+        },
+        {
+          "n": 4,
+          "text": "A target profile selects a package scheduler provider, with no per-call cost. Proof: `jet test Compiler --profile cases --filter target_selects_package_scheduler` (it checks the IR of a spawn is unchanged).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 2833eeefb5 (Scheduler trait), 00cca6ef48 (runtime hooks), e6c346d445 (program hooks), 4e8120c28a (profile selects provider), 359a1dd3e6 (hooks fix): jet test Compiler --profile cases --filter target_selects_package_scheduler PASS and --filter program_run_queue_hooks_take_every_spawn PASS on the p251 batch compiler.",
+          "at": "2026-11-17T07:25:48.873Z"
+        },
+        {
+          "n": 5,
+          "text": "D-EFFECT-ROOT-WORDS1=A keeps the short effect roots, and the one effect list in Docs/Spec documents what each root covers. Proof: `jet test Tests/Guards --filter effect_list_documents_every_root`. (was #4022 c3)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 5faafa44f4: jet test Tests/Guards --filter effect_list_documents_every_root PASS (1 passed) on the p243 batch compiler; Docs/Spec/spec.md lists every declared effect root.",
+          "at": "2026-11-17T04:06:48.651Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "library",
+        "declarative"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:25:10.153Z",
+      "updated": "2026-11-17T07:25:58.476Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 5,
+      "completedAt": "2026-11-17T07:25:58.476Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T07:40:27.927Z"
+    },
+    {
+      "id": "c0mq8xwu",
+      "num": 6802,
+      "title": "Files: native open and save pickers on Linux, folder access that persists, and the browser's file pickers, as one typed API",
+      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G4).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e19",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "All four criteria met: open_file and save_file on Linux with web refusals, folder access across restarts, and native drop_files on the Linux window (dev 1d12f4ca3f, b96326883d)."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. macOS, Windows, iOS and Android work moved to #6985 (G13)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "native.open_file gives native.PickedFile values, never String paths. A PickedFile has a name, a size, a media type, read and stream. On the Linux desktop it is backed by a path through the XDG desktop portal file chooser; import_tasks in the Crewboard example imports a CSV through it. On a web build native.open_file and native.drop_files are an E-APP-TARGET-FEATURE compile error until #6556 c9.  proof: jet test Compiler --profile cases --filter NativeApp/picked_file_reads_the_same_bytes_on_linux_and_the_web",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 02e159f044 (open_file Linux), 1028647876 (Crewboard import_tasks), d05e77fd0f (drop_files web E-APP-TARGET-FEATURE refusal): jet test Compiler --profile cases --filter NativeApp/picked_file_reads_the_same_bytes_on_linux_and_the_web PASS on the p251 batch compiler (359a1dd3e6).",
+          "at": "2026-11-17T07:25:46.373Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "NativeApp/picked_file_reads_the_same_bytes_on_linux_and_the_web"
+          }
+        },
+        {
+          "n": 2,
+          "text": "native.save_file writes where the person chose: through the portal save dialog on the Linux desktop, and showSaveFilePicker or a download in the browser. Proof: `jet test Compiler --profile cases --filter NativeApp/save_file_writes_where_the_person_chose` on Linux and the web.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 27b11f1656 (case: one XDG_DATA_HOME per step) on features 859c89d9a6 (Linux portal SaveFile), 7fe33590c1 (web runtime export) and c208da3722 (web App.jet caller): jet test Compiler --profile cases --filter NativeApp/save_file_writes_where_the_person_chose PASS on the p248 batch compiler (Linux portal steps and the node web download steps).",
+          "at": "2026-11-17T05:59:14.583Z"
+        },
+        {
+          "n": 3,
+          "text": "Access to a chosen folder survives a restart: on Linux through its path, or its document portal ID inside a sandbox. On a web build it is an E-APP-TARGET-FEATURE compile error until #6556 c9. Proof: `jet test Compiler --profile cases --filter NativeApp/folder_access_survives_a_restart` on Linux and the web refusal.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0d30281606 (open_folder, kept_folder, PickedFolder): jet test Compiler --profile cases --filter NativeApp/folder_access_survives_a_restart PASS on the p249 batch compiler (d6fe44e963).",
+          "at": "2026-11-17T06:31:06.379Z"
+        },
+        {
+          "n": 4,
+          "text": "On the Linux desktop, native.drop_files delivers files dropped on its body to on_drop as path-backed native.PickedFile values (Wayland wl_data_device drag and drop, text/uri-list), on the native app host of #6799 c4. Proof: jet test Compiler --profile cases --filter NativeApp/drop_files_gives_picked_files_on_linux",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 1d12f4ca3f (native drop_files over wl_data_device text/uri-list) + b96326883d (fixture's screen declared Never!): jet test Compiler --profile cases --filter NativeApp/drop_files_gives_picked_files_on_linux PASS on the p254 batch compiler (acc7351dae) with b96326883d applied.",
+          "at": "2026-11-17T08:42:31.782Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": "c0snkbac",
+      "needsAcceptance": false,
+      "created": "2026-11-13T15:13:43.767Z",
+      "updated": "2026-11-17T08:42:43.824Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 4,
+      "completedAt": "2026-11-17T08:42:43.824Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T08:42:45.946Z"
     }
   ]
 }

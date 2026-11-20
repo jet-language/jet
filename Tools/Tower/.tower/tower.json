@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112562,
+    "rev": 112575,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -36908,14 +36908,14 @@
         {
           "n": 2,
           "text": "`jet status` at a workspace root lists members and their entries (no phantom `target run.jet`), and `jet project parts` lists the members.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:12:09.146Z",
+          "evidence": "p346 batch compiler (dev 571ba200dc): jet test Compiler --profile ui --filter WorkspaceStatusListsMembers PASS and --filter WorkspacePartsListsMembers PASS.",
+          "at": "2026-11-20T08:51:50.965Z",
           "proof": {
             "profile": "ui",
-            "filter": "workspace_status_lists_members"
+            "filter": "ListsMembers"
           }
         },
         {
@@ -36955,7 +36955,7 @@
       "parentId": "c06osxzz",
       "needsAcceptance": false,
       "created": "2026-10-28T11:04:13.858Z",
-      "updated": "2026-11-17T19:38:08.301Z",
+      "updated": "2026-11-20T08:52:03.671Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -55793,87 +55793,6 @@
       "completedAt": "2026-11-17T16:05:46.463Z"
     },
     {
-      "id": "c0mq8xwu",
-      "num": 6802,
-      "title": "Files: native open and save pickers on Linux, folder access that persists, and the browser's file pickers, as one typed API",
-      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G4).",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e19",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "All four criteria met: open_file and save_file on Linux with web refusals, folder access across restarts, and native drop_files on the Linux window (dev 1d12f4ca3f, b96326883d)."
-        },
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. macOS, Windows, iOS and Android work moved to #6985 (G13)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "native.open_file gives native.PickedFile values, never String paths. A PickedFile has a name, a size, a media type, read and stream. On the Linux desktop it is backed by a path through the XDG desktop portal file chooser; import_tasks in the Crewboard example imports a CSV through it. On a web build native.open_file and native.drop_files are an E-APP-TARGET-FEATURE compile error until #6556 c9.  proof: jet test Compiler --profile cases --filter NativeApp/picked_file_reads_the_same_bytes_on_linux_and_the_web",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 02e159f044 (open_file Linux), 1028647876 (Crewboard import_tasks), d05e77fd0f (drop_files web E-APP-TARGET-FEATURE refusal): jet test Compiler --profile cases --filter NativeApp/picked_file_reads_the_same_bytes_on_linux_and_the_web PASS on the p251 batch compiler (359a1dd3e6).",
-          "at": "2026-11-17T07:25:46.373Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "NativeApp/picked_file_reads_the_same_bytes_on_linux_and_the_web"
-          }
-        },
-        {
-          "n": 2,
-          "text": "native.save_file writes where the person chose: through the portal save dialog on the Linux desktop, and showSaveFilePicker or a download in the browser. Proof: `jet test Compiler --profile cases --filter NativeApp/save_file_writes_where_the_person_chose` on Linux and the web.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 27b11f1656 (case: one XDG_DATA_HOME per step) on features 859c89d9a6 (Linux portal SaveFile), 7fe33590c1 (web runtime export) and c208da3722 (web App.jet caller): jet test Compiler --profile cases --filter NativeApp/save_file_writes_where_the_person_chose PASS on the p248 batch compiler (Linux portal steps and the node web download steps).",
-          "at": "2026-11-17T05:59:14.583Z"
-        },
-        {
-          "n": 3,
-          "text": "Access to a chosen folder survives a restart: on Linux through its path, or its document portal ID inside a sandbox. On a web build it is an E-APP-TARGET-FEATURE compile error until #6556 c9. Proof: `jet test Compiler --profile cases --filter NativeApp/folder_access_survives_a_restart` on Linux and the web refusal.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 0d30281606 (open_folder, kept_folder, PickedFolder): jet test Compiler --profile cases --filter NativeApp/folder_access_survives_a_restart PASS on the p249 batch compiler (d6fe44e963).",
-          "at": "2026-11-17T06:31:06.379Z"
-        },
-        {
-          "n": 4,
-          "text": "On the Linux desktop, native.drop_files delivers files dropped on its body to on_drop as path-backed native.PickedFile values (Wayland wl_data_device drag and drop, text/uri-list), on the native app host of #6799 c4. Proof: jet test Compiler --profile cases --filter NativeApp/drop_files_gives_picked_files_on_linux",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 1d12f4ca3f (native drop_files over wl_data_device text/uri-list) + b96326883d (fixture's screen declared Never!): jet test Compiler --profile cases --filter NativeApp/drop_files_gives_picked_files_on_linux PASS on the p254 batch compiler (acc7351dae) with b96326883d applied.",
-          "at": "2026-11-17T08:42:31.782Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": "c0snkbac",
-      "needsAcceptance": false,
-      "created": "2026-11-13T15:13:43.767Z",
-      "updated": "2026-11-17T08:42:43.824Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 4,
-      "completedAt": "2026-11-17T08:42:43.824Z"
-    },
-    {
       "id": "c0fqrrpk",
       "num": 6805,
       "title": "Share, clipboard and drag and drop on Linux and the web; drop zones reach app screens from core.ui.host",
@@ -59179,11 +59098,11 @@
         {
           "n": 73,
           "text": "G22: `jet debug --record=NAME` refuses a NAME that is already taken before the program starts, not after the run. Proof: a Debug case that records the same name twice and sees the refusal before any program output.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T03:13:58.673Z"
+          "evidence": "p346 batch compiler (dev 571ba200dc): jet test Compiler --profile cases --filter Debug/record_under_debug_then_replay_why PASS. The case runs `jet debug --record=why prog.jet` twice; the second is refused with \"Error: Jet.ReplayNameTaken: The recording name `why` is taken, and nothing ran\" before any program output. The snapshot Tests/CLI/run_record_name_taken.txt is checked by the JetCLI unit tests, which pass in the p346 suite.",
+          "at": "2026-11-20T08:51:46.896Z"
         },
         {
           "n": 74,
@@ -59332,11 +59251,11 @@
         {
           "n": 90,
           "text": "Turning another user's zones on is refused: an attach request takes effect only when it comes from the program's own user (the request lives in the user's private runtime directory, not in shared /tmp, and is checked for ownership), with a case where a request file owned by another user is ignored.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T05:49:31.341Z"
+          "evidence": "p346 batch compiler (dev 571ba200dc): jet test Compiler --profile cases --filter Perf/attach_ignores_another_users_request PASS (a request file owned by another user is ignored; requests live in the per-user 0700 runtime directory, checked by lstat for owner, no link and no group/other access). The refusal Jet.PerfDirectoryNotPrivate has its snapshot Tests/CLI/perf_attach_directory_not_private.txt, checked by the passing JetCLI unit tests in the p346 suite.",
+          "at": "2026-11-20T08:51:47.885Z"
         },
         {
           "n": 91,
@@ -59359,11 +59278,11 @@
         {
           "n": 93,
           "text": "jet perf attach names each refusal by its cause: a program that is not running or not observed, an ambiguous pid choice and a flag conflict each print their own Jet.Name (not Jet.UnknownFlag for all), each with a UI snapshot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T05:49:34.944Z"
+          "evidence": "p346 batch compiler (dev 571ba200dc): jet test Compiler --profile cases --filter Perf/attach_names_each_refusal PASS. Each refusal has its own name: Jet.AttachTargetNotObserved (not running or not observed), Jet.AttachWhichProcess (ambiguous pid) and Jet.UnknownFlag only for flag conflicts. UI snapshots Tests/CLI/perf_attach_not_running.txt, perf_attach_two_processes.txt and perf_attach_alloc_needs_source.txt are checked by the passing JetCLI unit tests in the p346 suite.",
+          "at": "2026-11-20T08:51:48.746Z"
         },
         {
           "n": 94,
@@ -59389,7 +59308,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-20T07:09:48.675Z",
+      "updated": "2026-11-20T08:51:48.746Z",
       "updatedBy": "Main",
       "criteriaLastN": 95
     },
@@ -59462,6 +59381,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T13:06:35.675Z"
+        },
+        {
+          "n": 5,
+          "text": "One covers rule: the compiler's authority check (Policy/Authority.jet authority_covers) decides coverage through the same runtime covers function on the raw right text, so a right the runtime refuses (`with(\"fs.Write(...)\")`) is never reported covered at check time, with a case showing the compiler and the run agree on a case-differing and a space-padded right.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-20T07:40:27.812Z"
         }
       ],
       "refs": [],
@@ -59471,8 +59399,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T23:11:25.962Z",
-      "updated": "2026-11-20T05:35:24.466Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-20T07:40:27.812Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 5
     },
     {
       "id": "c0ct5o6i",
@@ -60604,108 +60533,6 @@
       "updated": "2026-11-17T09:04:40.675Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
-    },
-    {
-      "id": "c0lidgow",
-      "num": 6854,
-      "title": "Taint kinds, effect roots, devices and schedulers come from declared rows and providers",
-      "body": "Destination: policy, taint, accelerator devices and schedulers read declared rows and providers, so a package adds a taint kind, an effect root, a device or a scheduler with no compiler or policy-code edit.\n\nWhy it matters: these four vocabularies are closed lists in the compiler today (TaintKind in Core/Compiler/Lang.jet with three copies of the taint tags; the policy key and gate lists in Policy/; the device names in Registry/CoreValueSignatures.jet; the scheduler choice). The four built-in tags themselves become Prelude structs on #6849 c6.\n\nDecisions: D-EXTEND-ARCH1=A, D-HOST-CAPS1 (package hardware kinds), D-ACCEL-LIB1 (device interface), D-CORE-PROVIDER1 (provider traits). Design: Docs/research/2026-10-29-extensibility-every-layer.md sections 4.9, 4.28, 4.31 and 6.2.\n\nSplit from #6202.",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e18",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "All five criteria met; c4 closed by the p251 batch compiler: a package-declared target profile selects its Scheduler provider through link-time run-queue hooks (no per-spawn cost), cases target_selects_package_scheduler and program_run_queue_hooks_take_every_spawn PASS."
-        },
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "c4 plan (Main): no new card (owner order: gaps are criteria on the owning card). IfHole builds c4 as SUBs of an hour or less, in order: (1) a package-declared target profile that resolves TargetProfileIdentity.Named, the minimal slice of #758 c11 that c4 needs; (2) a Scheduler provider trait in Core; (3) binding the runtime's jet_rt_native_task_spawn/park/wake to the selected provider at link time, with no per-call cost; (4) the target_selects_package_scheduler case checking the spawn IR is unchanged."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A package declares a taint kind and its sinks as rows, and the checker enforces it at those sinks.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p245 batch compiler (dev 359661f26b; feature 47ced308a6): jet test Compiler --profile ui --filter package_taint_kind_sink n=1 bad=0.",
-          "at": "2026-11-17T04:56:18.073Z",
-          "proof": {
-            "profile": "ui",
-            "filter": "package_taint_kind_sink"
-          }
-        },
-        {
-          "n": 2,
-          "text": "Authority policy reads declared effect roots, not a name list: a package's new effect root is governed by `authority:` rules with no policy-code edit.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 854cdda541 (case predicate fix) on feature 359661f26b: jet test Compiler --profile cases --filter policy_governs_package_effect_root PASS 1/0 on the p245 batch compiler.",
-          "at": "2026-11-17T04:57:40.133Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "policy_governs_package_effect_root"
-          }
-        },
-        {
-          "n": 3,
-          "text": "Device names come from accelerator providers and hardware kinds: core_value_fixed_signature (Registry/CoreValueSignatures.jet) names no device, and an NPU test package adds a device with no compiler edit.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p246 batch compiler (dev 8672bcfd81); feature dc37510ffc: golden Packages/NpuDevice n=3 bad=0 (o0 o1 o2), ui raw_kernel_contract_cannot_be_forged_without_a_provider n=1 bad=0.",
-          "at": "2026-11-17T05:18:30.798Z",
-          "proof": {
-            "profile": "golden",
-            "filter": "Packages/NpuDevice"
-          }
-        },
-        {
-          "n": 4,
-          "text": "A target profile selects a package scheduler provider, with no per-call cost. Proof: `jet test Compiler --profile cases --filter target_selects_package_scheduler` (it checks the IR of a spawn is unchanged).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 2833eeefb5 (Scheduler trait), 00cca6ef48 (runtime hooks), e6c346d445 (program hooks), 4e8120c28a (profile selects provider), 359a1dd3e6 (hooks fix): jet test Compiler --profile cases --filter target_selects_package_scheduler PASS and --filter program_run_queue_hooks_take_every_spawn PASS on the p251 batch compiler.",
-          "at": "2026-11-17T07:25:48.873Z"
-        },
-        {
-          "n": 5,
-          "text": "D-EFFECT-ROOT-WORDS1=A keeps the short effect roots, and the one effect list in Docs/Spec documents what each root covers. Proof: `jet test Tests/Guards --filter effect_list_documents_every_root`. (was #4022 c3)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 5faafa44f4: jet test Tests/Guards --filter effect_list_documents_every_root PASS (1 passed) on the p243 batch compiler; Docs/Spec/spec.md lists every declared effect root.",
-          "at": "2026-11-17T04:06:48.651Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "core",
-        "library",
-        "declarative"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-15T02:25:10.153Z",
-      "updated": "2026-11-17T07:25:58.476Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 5,
-      "completedAt": "2026-11-17T07:25:58.476Z"
     },
     {
       "id": "c0ho9o8j",
@@ -75447,6 +75274,16 @@
         {
           "at": "2026-11-20",
           "by": "Main",
+          "text": "p346 batch compiler (inline turn poll landed): fib(-O2) under jet perf run spends 0% in a poll helper. The view lists only fib lines 5 (57%), 1 (37%) and 2 (4%), against 40% in the stop poll before the change. Run wall 58.2 ms. The indirect-call half (IfHole-6-1-6970-indirect-edx) lands next."
+        },
+        {
+          "at": "2026-11-20",
+          "by": "Main",
+          "text": "SUB IfHole-6-1-6970-indirect-edx (stacked on turn-poll-inline) makes the poll after an indirect call inline too. Before it, recursion through a function value spent 17% in the poll helper, and a table of widened closures 13%. Soundness audit: every value an indirect call can hold is an IR-built body (lambda boxes, named-function adapters, widening, priority-queue key order, zip callbacks, release and transaction helpers), and every return path of such a body sets edx (the epilogue, the frame-free return, the stop exit, the stack regrow and tail calls into bodies). The runtime creates no function values; C enters only through generated adapters; on the web only program bodies set the edx global. After-shares are to be measured on its batch compiler."
+        },
+        {
+          "at": "2026-11-20",
+          "by": "Main",
           "text": "Ranked (IfHole, single runs on dev f2cf0a8324): fib -O2 35 spends 40% in the stop poll, because a turn poll folded after fib(n-1) was lowered as a full call to jet_ir_stop_turn. A counted List loop shows no poll samples (loop checks are already inline). Recursion through a function value spends 17% at the indirect call. SUB IfHole-6-1-6970-turn-poll-inline lowers the post-call poll as an edx test plus an armed-word load and branch to a cold stub (x64 and web); the expected fib share is 0%, to be measured on its batch compiler. Every-N polling is rejected because the spec promises a check at every loop iteration and those checks already cost one load and one branch. Next: indirect calls report stops in edx, so their poll is inline too."
         },
         {
@@ -75558,7 +75395,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:41:51.726Z",
-      "updated": "2026-11-20T06:40:18.236Z",
+      "updated": "2026-11-20T08:18:51.872Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -77023,6 +76860,11 @@
         {
           "at": "2026-11-20",
           "by": "Main",
+          "text": "Dogfooding run on the p346 batch compiler (quiet slot). jet perf: `jet perf run Compiler/JetCLI/run.jet -O1 --out c2.jettrace -- build Compiler/JetCLI/run.jet --output-dir=out` wrote a trace whose view names the hottest compiler functions: ir_opt_facts_refill 4% (6.6 s CPU), ir_x64_allocate 2%, ir_x64_read_form 2%, ir_x64_write 1%, ir_x64_reads_into 1%, ir_opt_compact 1%, body_node 1%, ir_opt_int_facts 1%; run wall 29.7 s; but status=truncated coverage=partial at 4096 rows (new criterion). jet debug: `jet debug Compiler/JetCLI/run.jet --break Sema/CheckProgram.jet:1517 -- check prog.jet` stopped in sema_function_check_passes with locals, printed a 25-frame backtrace and `owner_key = \"function:module:14:source-root:0::prog.jet.half\"`, but `print func.name` was refused by an unnormalized source path, and after `delete 1` / `continue` the session did not end in 15 minutes (two runs). Both are new criteria; IfHole owns the fixes."
+        },
+        {
+          "at": "2026-11-20",
+          "by": "Main",
           "text": "c7: the terminal half (the debuggee shares a terminal stdin, gdb style) is IfHole c7 part 1; the pipe/file half waits on ballot D-DEBUG-STDIN1 (posted 21:4x, reviewed by BallotReviewStdin; recommends --stdin=FILE plus a DAP launch stdin field). The input-path plumbing is built internally so the ratified spelling is a thin front end."
         },
         {
@@ -77103,6 +76945,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-20T01:38:49.275Z"
+        },
+        {
+          "n": 9,
+          "text": "jet debug evaluates in a frame of a source file reached through a relative project path: stopped in Compiler/JetSema/Source/Sema/CheckProgram.jet under `jet debug Compiler/JetCLI/run.jet`, `print func.name` prints the name instead of \"Jet.DriverOperationFailed: `Compiler/JetCLI/../JetSema/Source/Sema/CheckProgram.jet` is not a checked source file\" (the frame path is normalized once where it is resolved). Proof: a Debug case evaluating a field in a frame of a sibling package's file.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-20T08:18:36.774Z"
+        },
+        {
+          "n": 10,
+          "text": "A multi-threaded program under jet debug runs to its exit after `delete` and `continue`: the debugged `jet check` of a three-line file finishes and the session ends, where p346 waited more than 15 minutes in two runs. Proof: a Debug case debugging a program with worker threads through a breakpoint, delete, continue and exit.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-20T08:18:37.641Z"
+        },
+        {
+          "n": 11,
+          "text": "`jet perf run` of a compiler build keeps complete coverage: on p346 the trace of `jet build Compiler/JetCLI/run.jet` reported status=truncated coverage=partial at the 4096-row cap (tasks count=4096 of more), so per-phase and per-task CPU is cut. The trace keeps every task's CPU and its phase within its row bound by summarizing past the cap, never by dropping rows silently. Proof: the view of that trace shows coverage=complete and per-phase CPU microseconds.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-20T08:18:39.085Z"
+        },
+        {
+          "n": 12,
+          "text": "When jet debug ends by any cause (a signal, a timeout, the terminal closing), nothing it started outlives it: the debugged program and every helper process exit with it. On p346, two timed-out `jet debug Compiler/JetCLI/run.jet` sessions left helpers holding 6.1 GB each, waiting in wait4 for 30 minutes. Proof: a Debug case that kills a jet debug session with SIGKILL while its program is stopped and running, and finds no process of the session left.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-20T08:42:45.653Z"
         }
       ],
       "refs": [],
@@ -77110,9 +76988,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-20T02:40:54.133Z",
+      "updated": "2026-11-20T08:42:45.653Z",
       "updatedBy": "Main",
-      "criteriaLastN": 8
+      "criteriaLastN": 12
     }
   ],
   "decisions": [
@@ -137573,6 +137451,125 @@
   ],
   "events": [
     {
+      "at": "2026-11-20T08:52:03.671Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0vzmbkk",
+      "note": "#2: the proof named a filter that matches no test; proof: jet test Compiler --profile ui --filter ListsMembers"
+    },
+    {
+      "at": "2026-11-20T08:51:50.965Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vzmbkk",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-20T08:51:48.746Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#93"
+    },
+    {
+      "at": "2026-11-20T08:51:47.885Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#90"
+    },
+    {
+      "at": "2026-11-20T08:51:46.896Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#73"
+    },
+    {
+      "at": "2026-11-20T08:42:45.653Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "12 criteria, soft limit 6: gap found doing c5, as c5 requires"
+    },
+    {
+      "at": "2026-11-20T08:42:45.653Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#12 When jet debug ends by any cause (a signal, a timeout, the t"
+    },
+    {
+      "at": "2026-11-20T08:18:51.872Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c05y3url",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-20T08:18:40.100Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00ni11n",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-20T08:18:39.085Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "11 criteria, soft limit 6: gaps found doing c5 become criteria here, as c5 requires"
+    },
+    {
+      "at": "2026-11-20T08:18:39.085Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#11 `jet perf run` of a compiler build keeps complete coverage: "
+    },
+    {
+      "at": "2026-11-20T08:18:37.641Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "10 criteria, soft limit 6: gaps found doing c5 become criteria here, as c5 requires"
+    },
+    {
+      "at": "2026-11-20T08:18:37.641Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#10 A multi-threaded program under jet debug runs to its exit af"
+    },
+    {
+      "at": "2026-11-20T08:18:36.774Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "9 criteria, soft limit 6: gaps found doing c5 become criteria here, as c5 requires"
+    },
+    {
+      "at": "2026-11-20T08:18:36.774Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#9 jet debug evaluates in a frame of a source file reached thro"
+    },
+    {
+      "at": "2026-11-20T07:40:27.812Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0in2dft",
+      "note": "#5 One covers rule: the compiler's authority check (Policy/Auth"
+    },
+    {
+      "at": "2026-11-20T07:19:11.084Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c05y3url",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-11-20T07:09:48.675Z",
       "by": "Main",
       "action": "decision.post",
@@ -141029,713 +141026,6 @@
       "action": "card.criteria-add",
       "ref": "c06m6abh",
       "note": "#15 An inline module refuses one name declared twice, as a file "
-    },
-    {
-      "at": "2026-11-18T05:21:13.382Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rl2anf",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-18T05:21:11.832Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rl2anf",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-18T05:21:01.428Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rl2anf",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-18T05:20:59.524Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rl2anf",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-18T04:39:23.802Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#21"
-    },
-    {
-      "at": "2026-11-18T04:26:45.879Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c06m6abh",
-      "note": "11 criteria, soft limit 6: a gap found while building c12 belongs on the card that owns inline module imports (standing order)"
-    },
-    {
-      "at": "2026-11-18T04:26:45.879Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c06m6abh",
-      "note": "#14 A union match arm over an inline module's member type works "
-    },
-    {
-      "at": "2026-11-18T04:12:58.433Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08idy63",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-18T04:12:56.665Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c08idy63",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-18T04:12:55.654Z",
-      "by": "Main",
-      "action": "card.criteria-reopen",
-      "ref": "c08idy63",
-      "note": "#6: re-proved at close: the old evidence names no commit"
-    },
-    {
-      "at": "2026-11-18T04:12:24.610Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06m6abh",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-18T04:12:23.562Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06m6abh",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-18T04:12:22.595Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06m6abh",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-18T04:12:21.552Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06m6abh",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-18T04:12:20.593Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06m6abh",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-18T04:12:19.359Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c08idy63",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-18T04:06:57.342Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "33 criteria, soft limit 6: a gap found by c12 work belongs on the card that owns jet perf (standing order)"
-    },
-    {
-      "at": "2026-11-18T04:06:57.342Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#33 jet perf's short-program source attribution is repeatable: t"
-    },
-    {
-      "at": "2026-11-18T03:45:52.312Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#30"
-    },
-    {
-      "at": "2026-11-18T03:45:50.417Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-18T03:19:31.651Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08idy63",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T03:19:29.914Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c08idy63",
-      "note": "#3: Ratified outcome is B (owner overrode recommendation A).; was: T.$layout.size stays null for default layouts (layout_facts golden unchanged)."
-    },
-    {
-      "at": "2026-11-18T03:19:28.352Z",
-      "by": "Main",
-      "action": "card.criteria-reopen",
-      "ref": "c08idy63",
-      "note": "#3: D-LAYOUT-SHOW1 was ratified as B (every size a language value), not A; the old c3 text describes A and is superseded."
-    },
-    {
-      "at": "2026-11-18T03:18:54.963Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c08idy63",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-18T03:18:52.565Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c08idy63",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-18T03:18:50.835Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c08idy63",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-18T03:18:42.224Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c08idy63",
-      "note": "#2: The named golden filter Comptime/LayoutFacts selects nothing; the layout facts golden is Examples/Metaprogramming/Reflection/LayoutFacts.; was: Hand-derived fixtures (padded struct, unit struct, three-case enum with one dominant case, niche-eligible optional, a closure with captures) match the shapes JSON for x86_64 Linux and one 32-bit or Ar"
-    },
-    {
-      "at": "2026-11-18T03:18:16.165Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0mhdm27",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T03:18:15.302Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c08idy63",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-18T03:18:14.399Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0mhdm27",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-18T03:18:13.165Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0yk1mno",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-18T03:15:07.480Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c05gn07n",
-      "note": "#17: Owner order 2026-11-17 to resolve the open question; the 2026-11-18 adversarial review (Docs/Audits/ballot-redesign-r5-review-2026-11-18.md) holds the strict-win gate.; was: D-ARRAY-ZIPCOLUMNS1 (Tower draft, repaired by the 2026-11-17 adversarial review) is posted with evidence: a scratch prototype of Columns<T> join/split (owning from_columns/into_columns, borrowed view_"
-    },
-    {
-      "at": "2026-11-18T03:14:55.960Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c05gn07n",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T03:14:55.070Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08zzpo5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T03:14:54.220Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0zy9mhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T03:14:53.366Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0mhdm27",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T03:13:35.073Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0eve9h3",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-18T03:13:13.257Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0a8z3u0",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T03:12:02.317Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-SERVICE-CURRENT1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-18T03:12:00.785Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-FNVAL-COPY1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-18T03:11:58.767Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-CALLBACK-ONCE1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-18T02:47:17.279Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0d4kf8m",
-      "note": "11 criteria, soft limit 6: A codegen gap belongs on the card that owns moves into destinations (owner order: no new card for a gap)"
-    },
-    {
-      "at": "2026-11-18T02:47:17.279Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0d4kf8m",
-      "note": "#11 A record returned from a call is built in its caller's desti"
-    },
-    {
-      "at": "2026-11-18T02:45:04.041Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0tgtjtu",
-      "note": "13 criteria, soft limit 6: A gap belongs on the card that owns the value model (owner order: no new card for a gap)"
-    },
-    {
-      "at": "2026-11-18T02:45:04.041Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0tgtjtu",
-      "note": "#16 A task launch that passes a noncopyable local by value (task"
-    },
-    {
-      "at": "2026-11-18T02:42:58.428Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#31"
-    },
-    {
-      "at": "2026-11-18T02:42:56.706Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#29"
-    },
-    {
-      "at": "2026-11-18T02:42:54.916Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#28"
-    },
-    {
-      "at": "2026-11-18T02:42:53.113Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0tgtjtu",
-      "note": "12 criteria, soft limit 6: A soundness gap belongs on the card that owns the value and ref memory model (owner order: no new card for a gap)"
-    },
-    {
-      "at": "2026-11-18T02:42:53.113Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0tgtjtu",
-      "note": "#15 Generic code that moves a resource field out of a value with"
-    },
-    {
-      "at": "2026-11-18T02:42:50.725Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0tgtjtu",
-      "note": "11 criteria, soft limit 6: A soundness gap belongs on the card that owns the value and ref memory model (owner order: no new card for a gap)"
-    },
-    {
-      "at": "2026-11-18T02:42:50.725Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0tgtjtu",
-      "note": "#14 A call through a function value whose parameter is consuming"
-    },
-    {
-      "at": "2026-11-18T02:19:48.755Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0yk1mno",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T02:19:47.691Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0429qak",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-18T02:19:46.267Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0e5gz4o",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-18T02:10:44.633Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0nwrfck",
-      "note": "#28: Repointed to the existing case that proves it (DeclTypes, 2026-11-18); the named case was never written.; was: lldb on an -O2 jet build shows inlined frames and prints at least the live locals of a probe. Proof: `jet test Compiler --profile cases --filter Debug/o2_inlined_frames_and_live_locals` (SKIP-HOST wit"
-    },
-    {
-      "at": "2026-11-18T02:10:43.279Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#27"
-    },
-    {
-      "at": "2026-11-18T02:10:41.777Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0nwrfck",
-      "note": "#27: Repointed to the existing case that proves it (DeclTypes, 2026-11-18); the named case was never written.; was: No local is shown before its binding runs: each local's DWARF range starts at its binding, not at function entry. The stale 'generated Rust' comments in Examples/Tooling/Debugging (Debug.jet, DebugNat"
-    },
-    {
-      "at": "2026-11-18T02:10:40.352Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#26"
-    },
-    {
-      "at": "2026-11-18T02:10:38.436Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0nwrfck",
-      "note": "#26: Repointed to the existing case that proves it (DeclTypes, 2026-11-18); the named case was never written.; was: Bounds stops (E3010) name the faulting function and show its locals, like every other stop report."
-    },
-    {
-      "at": "2026-11-18T02:10:37.000Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#25"
-    },
-    {
-      "at": "2026-11-18T02:10:35.541Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0nwrfck",
-      "note": "#25: Repointed to the existing case that proves it (DeclTypes, 2026-11-18); the named case was never written.; was: lldb finds an O2 build's split debug file under .jet/symbols through the binary's debug link."
-    },
-    {
-      "at": "2026-11-18T02:10:34.118Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#24"
-    },
-    {
-      "at": "2026-11-18T02:10:32.620Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0nwrfck",
-      "note": "#24: Repointed to the existing case that proves it (DeclTypes, 2026-11-18); the named case was never written.; was: String, struct, list and Decimal locals render their values, because the DWARF types them as what they are, not Opaque, Aggregate or void*. Proof: `jet test Compiler --profile cases --filter Debug/loc"
-    },
-    {
-      "at": "2026-11-18T02:10:31.011Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#23"
-    },
-    {
-      "at": "2026-11-18T02:10:29.727Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0nwrfck",
-      "note": "#23: Repointed to the existing case that proves it (DeclTypes, 2026-11-18); the named case was never written.; was: A bignum Int local shows its value, not its tagged pointer word. Proof: `jet test Compiler --profile cases --filter Debug/bignum_local_shows_value` with lldb on PATH."
-    },
-    {
-      "at": "2026-11-18T02:09:44.878Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "32 criteria, soft limit 6: A gap belongs on the card that owns the debugger (owner order: no new card for a gap)"
-    },
-    {
-      "at": "2026-11-18T02:09:44.878Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#32 The debug cases test the code users ship: the case kit's JET"
-    },
-    {
-      "at": "2026-11-18T02:02:36.263Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0mhdm27",
-      "note": "9 criteria, soft limit 6: A gap belongs on the card whose work needs it (owner order: no new card for a gap)"
-    },
-    {
-      "at": "2026-11-18T02:02:36.263Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0mhdm27",
-      "note": "#9 A Core-declared generic struct carried inside an error resul"
-    },
-    {
-      "at": "2026-11-18T02:00:26.201Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-18T02:00:26.201Z"
-    },
-    {
-      "at": "2026-11-18T01:58:59.675Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0m58g8t",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T01:57:42.747Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0m58g8t",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T01:57:39.813Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0m58g8t",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-18T01:57:36.657Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0m58g8t",
-      "note": "#6: The old text (Auto uses a GPU when one is available) contradicts the ratified D-COMPUTE-PLACE1=D, which outranks the criterion; the proof is repointed to the existing case.; was: On the web host, `.Auto` placement uses a GPU when one is available and otherwise fails or reports exactly as the native host does (one meaning, I9). Proof: `jet test Compiler --profile cases --filter"
-    },
-    {
-      "at": "2026-11-18T01:56:08.232Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0m58g8t",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T01:55:31.425Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0gmf0y4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T01:55:30.480Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c06m6abh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T01:54:34.575Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0jxsy7l",
-      "note": "14 criteria, soft limit 6: A gap belongs on the card that owns last-use moves (owner order: no new card for a gap)"
-    },
-    {
-      "at": "2026-11-18T01:54:34.575Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0jxsy7l",
-      "note": "#16 A struct literal moves a named binding at its last use inste"
-    },
-    {
-      "at": "2026-11-18T01:53:20.483Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0mhdm27",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T01:53:19.541Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0itvqcw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T01:53:00.061Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T01:48:13.131Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T01:48:11.878Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rn7rnu",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-18T01:48:09.785Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "31 criteria, soft limit 6: Owner 2026-11-18: one card for the cohesive native debugger and profiler; #6918 folds in"
-    },
-    {
-      "at": "2026-11-18T01:48:09.785Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#31 moved from #6918 c9"
-    },
-    {
-      "at": "2026-11-18T01:48:09.785Z",
-      "by": "Main",
-      "action": "card.criteria-move",
-      "ref": "c0rn7rnu",
-      "note": "#9 → #6841 c31"
-    },
-    {
-      "at": "2026-11-18T01:48:08.437Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "30 criteria, soft limit 6: Owner 2026-11-18: one card for the cohesive native debugger and profiler; #6918 folds in"
-    },
-    {
-      "at": "2026-11-18T01:48:08.437Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#30 moved from #6918 c8"
-    },
-    {
-      "at": "2026-11-18T01:48:08.437Z",
-      "by": "Main",
-      "action": "card.criteria-move",
-      "ref": "c0rn7rnu",
-      "note": "#8 → #6841 c30"
-    },
-    {
-      "at": "2026-11-18T01:48:07.023Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "29 criteria, soft limit 6: Owner 2026-11-18: one card for the cohesive native debugger and profiler; #6918 folds in"
-    },
-    {
-      "at": "2026-11-18T01:48:07.023Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#29 moved from #6918 c7"
-    },
-    {
-      "at": "2026-11-18T01:48:07.023Z",
-      "by": "Main",
-      "action": "card.criteria-move",
-      "ref": "c0rn7rnu",
-      "note": "#7 → #6841 c29"
-    },
-    {
-      "at": "2026-11-18T01:48:05.748Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "28 criteria, soft limit 6: Owner 2026-11-18: one card for the cohesive native debugger and profiler; #6918 folds in"
-    },
-    {
-      "at": "2026-11-18T01:48:05.748Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#28 moved from #6918 c6"
-    },
-    {
-      "at": "2026-11-18T01:48:05.748Z",
-      "by": "Main",
-      "action": "card.criteria-move",
-      "ref": "c0rn7rnu",
-      "note": "#6 → #6841 c28"
-    },
-    {
-      "at": "2026-11-18T01:48:04.367Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "27 criteria, soft limit 6: Owner 2026-11-18: one card for the cohesive native debugger and profiler; #6918 folds in"
-    },
-    {
-      "at": "2026-11-18T01:48:04.367Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#27 moved from #6918 c5"
-    },
-    {
-      "at": "2026-11-18T01:48:04.367Z",
-      "by": "Main",
-      "action": "card.criteria-move",
-      "ref": "c0rn7rnu",
-      "note": "#5 → #6841 c27"
-    },
-    {
-      "at": "2026-11-18T01:48:02.996Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "26 criteria, soft limit 6: Owner 2026-11-18: one card for the cohesive native debugger and profiler; #6918 folds in"
     }
   ],
   "nextNum": 368,
