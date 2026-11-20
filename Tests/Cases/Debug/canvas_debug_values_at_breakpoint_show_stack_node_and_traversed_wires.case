@@ -1,0 +1,59 @@
+# At a breakpoint the Canvas debugger shows real values, the stack frames, the
+# active node and the traversed wire path from the live runtime session
+# (scenario debug_values_at_breakpoint). A native session stops at a breakpoint
+# in `scale`, which `run` called: the stack holds both frames, the locals the
+# callee's argument, and the active node is the statement the stop is on, with
+# no wire walked yet. Then `finish` returns to `run` and four `next`s step
+# through the taken `if` arm to the print: the stack is `run` alone, the values
+# are the ones the program computed, and the wire path is the control wires the
+# steps took, oldest first, the newest active, never the untaken else wire.
+fixture: CanvasDebugValuesAtBreakpoint.fixture
+env: NO_COLOR=1
+step: jet build client/run.jet
+exit: 0
+copy: client/.jet/build/run canvas-client
+session canvas raw: jet dev jet_debug_canvas_values_at_breakpoint.jet --canvas --canvas-port 0
+env: JET_CANVAS_BROWSER=/definitely/missing/canvas-browser
+recv canvas until ~ "Canvas: http" within 60s # jet dev prints the Canvas URL on stdout once it serves
+capture: url = text stdout.after_first("Canvas: ").line(0)
+capture: revision = sha256 file jet_debug_canvas_values_at_breakpoint.jet
+write: request.json canvas_debug_values_at_breakpoint_show_stack_node_and_traversed_wires.first.json
+step first: {work}/canvas-client
+env: S1_CANVAS_URL={cap:url}
+env: S1_METHOD=POST
+env: S1_PATH=/__jet_canvas/debug
+exit: 0
+stdout: ^= "HTTP/1.1 200" # the native session runs
+stdout: ~ "\"runtime_state\":\"live\"" # the facts come from the paused program
+stdout: ~ "\"active_line\":2," # it stops at the breakpoint span 31:39, `y: x * 2` in `scale`
+stdout: ~ "\"call_stack\":[\"#0 scale() at jet_debug_canvas_values_at_breakpoint.jet:2\",\"#1 run() at jet_debug_canvas_values_at_breakpoint.jet:8\"]" # the callee's frame, then its caller's at the call
+stdout: ~ "{\"name\":\"x\",\"type\":\"Int\",\"value\":\"2\"}" # the argument `run` passed
+stdout: ~ "\"active_node_id\":\"fn:jet_debug_canvas_values_at_breakpoint.jet.scale@0-5:stmt:1:binding\"" # the statement the stop is on
+stdout: ~ "\"active_wire_id\":\"\",\"wire_path\":[]" # no step has walked a wire yet
+capture: session = text stdout.after_first("\"id\":\"canvas-debug-").split("\"", 0).prepend("canvas-debug-")
+write: request.json canvas_debug_values_at_breakpoint_show_stack_node_and_traversed_wires.steps.json
+step steps: {work}/canvas-client
+env: S1_CANVAS_URL={cap:url}
+env: S1_METHOD=POST
+env: S1_PATH=/__jet_canvas/debug
+exit: 0
+stdout: ^= "HTTP/1.1 200" # the same session returns and steps
+stdout: ~ "\"id\":\"{cap:session}\"" # on the session the first request opened
+stdout: ~ "\"runtime_state\":\"live\"" # still paused in the program
+stdout: ~ "\"active_line\":13," # at the print
+stdout: ~ "\"call_stack\":[\"#0 run() at jet_debug_canvas_values_at_breakpoint.jet:13\"]" # `scale` returned: one frame
+stdout: ~ "{\"name\":\"total\",\"type\":\"Int\",\"value\":\"5\"}" # scale(2) is 4, and the taken arm made it (4 - 3) * 5
+stdout: ~ "\"active_node_id\":\"fn:jet_debug_canvas_values_at_breakpoint.jet.run@49-52:expr:4:call:print\"" # the print statement, not a value node on its line
+stdout: ~ "\"active_wire_id\":\"fn:jet_debug_canvas_values_at_breakpoint.jet.run@49-52:wire:14\",\"wire_path\":[\"fn:jet_debug_canvas_values_at_breakpoint.jet.run@49-52:wire:13\",\"fn:jet_debug_canvas_values_at_breakpoint.jet.run@49-52:wire:12\",\"fn:jet_debug_canvas_values_at_breakpoint.jet.run@49-52:wire:11\",\"fn:jet_debug_canvas_values_at_breakpoint.jet.run@49-52:wire:14\"]" # call to `if`, `if` into its arm, through the arm, arm to print; the newest is active
+stdout: !~ "run@49-52:wire:15" # the else wire the run never took
+write: request.json canvas_debug_values_at_breakpoint_show_stack_node_and_traversed_wires.stop.json
+step stop: {work}/canvas-client
+env: S1_CANVAS_URL={cap:url}
+env: S1_METHOD=POST
+env: S1_PATH=/__jet_canvas/debug
+exit: 0
+stdout: ^= "HTTP/1.1 200" # the session ends
+stdout: ~ "\"state\":\"stopped\"" # and says so
+signal canvas: INT
+wait: canvas
+exit: any # the case asserts the debug responses, not the dev server's shutdown status

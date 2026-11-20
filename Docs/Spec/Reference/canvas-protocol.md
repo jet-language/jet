@@ -330,6 +330,18 @@ listed with `"line":null`, `"source_span":null`, its `anchor` and
 its `anchor` and `"state":"stale"`, with no value. A `start:end` anchor that
 names no span of the source is stale too.
 
+`active_node_id` is the statement node that starts first on the active line,
+or the narrowest node touching the line when no statement starts there.
+`wire_path` is the control wires the run took to reach the stop, oldest first:
+each `step` or `next` that stays in its frame adds the wires from the
+statement it left to the one it reached, when the graph allows exactly one way
+through the rest of the line it left. Any other move (`continue`, `finish`, a
+reverse command, a step into or out of a call) starts the path again at its
+stop, so the path never spans a stretch the debugger didn't see.
+`active_wire_id` is the newest wire of the path, or `""` when it is empty. The
+path keeps the newest 64 wires, and `limits.wire_path_truncated` says when it
+dropped older ones.
+
 Stop requests check source path, revision, and tier before removing the session.
 A mismatched tier or source is refused; a stale request returns `conflict` and
 keeps a newer live session. The bounded limits are 32 live sessions, 64

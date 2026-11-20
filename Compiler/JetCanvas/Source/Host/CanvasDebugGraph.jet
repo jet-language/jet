@@ -1,6 +1,7 @@
-// Where a Canvas debug stop sits on the graph: the graph document's node and
-// wires whose source spans touch the stopped line. The dev loop (JetCLI
-// CanvasDebug.jet) places each stop on the graph of the source it ran.
+// Where a Canvas debug stop sits on the graph: the graph document's node for
+// the stopped line and the control wires the run took to reach it. The dev
+// loop (JetCLI CanvasDebug.jet) places each stop on the graph of the source
+// it ran.
 use {
     core.encoding.[Dyn]
     jet_foundation.[Span, foundation_json_integer, foundation_json_parse]
@@ -9,8 +10,11 @@ use {
 // At most this many wires on one stop's path.
 CANVAS_DEBUG_MAX_WIRE_PATH: 64
 
-// The narrowest node whose span touches the stop, the graph that holds it,
-// and the wires whose spans touch it (at most CANVAS_DEBUG_MAX_WIRE_PATH).
+// The most control wires one step can take within the line it leaves.
+CANVAS_DEBUG_MAX_STEP_WIRES: 4
+
+// The node of the stop, the graph that holds it, and the control wires the
+// run took to reach it, oldest first: the newest CANVAS_DEBUG_MAX_WIRE_PATH.
 // Every id is "" or empty when the graph is not of the stopped revision.
 CanvasDebugPlace: struct {
     graph_id: String,
@@ -19,38 +23,133 @@ CanvasDebugPlace: struct {
     wires_truncated: Bool,
 }
 
+// A node or wire of the graph document: its id and source span, and for a
+// wire its kind and the pins it joins.
 CanvasDebugRecord: struct {
     id: String,
     span: Span,
+    kind: String{""},
+    from_pin: String{""},
+    to_pin: String{""},
 }
 
-// The place of `active` on the last good graph, when that graph is of
-// `revision`.
-canvas_host_debug_place: fn(state: Shared<CanvasHostState>, revision: String, active: Span) -> CanvasDebugPlace {
+// A control wire, by the nodes it joins.
+CanvasDebugEdge: struct {
+    id: String,
+    from: String,
+    to: String,
+}
+
+// The place of a stop on the last good graph, when that graph is of
+// `revision`. `stops` are the line spans of the stops one stepping run made,
+// oldest first, each the line after the one before it in the same frame; the
+// last is the stop being placed. Its node is the first statement that starts
+// on its line, or else the narrowest node that touches it. The wire path is
+// the control wires each step took from its line's statement to the next
+// one's, when the graph allows exactly one way within the line it left.
+canvas_host_debug_place: fn(state: Shared<CanvasHostState>, revision: String, stops: [Span]) -> CanvasDebugPlace {
     place := CanvasDebugPlace{graph_id: "", node_id: "", wire_ids: [String]{}, wires_truncated: false}
+    if stops.len() == 0 -> return place
     root: canvas_debug_graph_root(state, revision) ?? return place
     nodes := [CanvasDebugRecord]{}
     canvas_debug_records(root, "node_id", nodes)
     wires := [CanvasDebugRecord]{}
     canvas_debug_records(root, "wire_id", wires)
-    width := -1
-    loop node in nodes {
-        if !spans_touch(node.span, active) -> next
-        span_width: if node.span.end > node.span.start -> node.span.end - node.span.start else -> 0
-        if width >= 0 && span_width >= width -> next
-        width = span_width
-        place.node_id = node.id
-    }
+    // The statements: the nodes control wires join, by their spans' starts.
+    edges := [CanvasDebugEdge]{}
+    starts := [String:Int]{}
     loop wire in wires {
-        if !spans_touch(wire.span, active) || place.wire_ids.contains(wire.id) -> next
-        if place.wire_ids.len() >= CANVAS_DEBUG_MAX_WIRE_PATH {
-            place.wires_truncated = true
-            break
-        }
-        place.wire_ids.push(wire.id)
+        if wire.kind != "control" -> next
+        edge: CanvasDebugEdge{id: wire.id, from: canvas_debug_pin_node(wire.from_pin), to: canvas_debug_pin_node(wire.to_pin)}
+        if edge.from == "" || edge.to == "" -> next
+        starts[edge.from] = -1
+        starts[edge.to] = -1
+        edges.push(edge)
     }
+    loop node in nodes {
+        if starts.has_key(node.id) -> starts[node.id] = node.span.start
+    }
+    active: stops[stops.len() - 1]
+    place.node_id = canvas_debug_statement(nodes, starts, active)
+    if place.node_id == "" {
+        width := -1
+        loop node in nodes {
+            if !spans_touch(node.span, active) -> next
+            span_width: if node.span.end > node.span.start -> node.span.end - node.span.start else -> 0
+            if width >= 0 && span_width >= width -> next
+            width = span_width
+            place.node_id = node.id
+        }
+    }
+    path := [String]{}
+    loop index in 1..<stops.len() {
+        from: canvas_debug_statement(nodes, starts, stops[index - 1])
+        to: canvas_debug_statement(nodes, starts, stops[index])
+        if from == "" || to == "" || from == to -> next
+        found := [String]{}
+        taken := [String]{}
+        canvas_debug_walk(edges, starts, from, to, stops[index - 1], taken, found)
+        if found.len() != 1 -> next
+        loop wire in found[0].split("\n").to_list() -> path.push(wire)
+    }
+    first: if path.len() > CANVAS_DEBUG_MAX_WIRE_PATH -> path.len() - CANVAS_DEBUG_MAX_WIRE_PATH else -> 0
+    place.wires_truncated = first > 0
+    loop index in first..<path.len() -> place.wire_ids.push(path[index])
     place.graph_id = canvas_debug_graph_id(place.node_id)
     place
+}
+
+// The statement a stop on `line` sits at: of the statements that start on
+// the line, the first, and of those the widest; "" when none does.
+canvas_debug_statement: fn(nodes: [CanvasDebugRecord], starts: [String:Int], line: Span) -> String Never! {
+    found := ""
+    start := -1
+    width := -1
+    loop node in nodes {
+        if !starts.has_key(node.id) || node.span.start < line.start || node.span.start > line.end {
+            next
+        }
+        span_width: node.span.end - node.span.start
+        if start >= 0 && (node.span.start > start || (node.span.start == start && span_width <= width)) {
+            next
+        }
+        found = node.id
+        start = node.span.start
+        width = span_width
+    }
+    found
+}
+
+// Every way from statement `at` to `to` along control wires through
+// statements that start on `line` (the rest of the line a step left), each
+// as its wire ids joined by newlines, until a second is found. `taken` is the
+// way so far.
+canvas_debug_walk: fn(edges: [CanvasDebugEdge], starts: [String:Int], at: String, to: String, line: Span, taken: &[String], found: &[String]) Never! {
+    if found.len() > 1 || taken.len() >= CANVAS_DEBUG_MAX_STEP_WIRES {
+        return
+    }
+    loop edge in edges {
+        if edge.from != at || taken.contains(edge.id) -> next
+        if edge.to == to {
+            taken.push(edge.id)
+            found.push(taken.join("\n"))
+            _: taken.pop()
+            next
+        }
+        start: starts.get(edge.to) ?? -1
+        if start < line.start || start > line.end -> next
+        taken.push(edge.id)
+        canvas_debug_walk(edges, starts, edge.to, to, line, taken, found)
+        _: taken.pop()
+    }
+}
+
+// The node a pin belongs to: the pin id before its `:input:` or `:output:`
+// part; "" when it has neither.
+canvas_debug_pin_node: fn(pin: String) -> String Never! {
+    if pin.split_once(":input:") == .Val(parts) -> return parts.before
+    if pin.split_once(":output:") == .Val(parts) -> return parts.before
+    ""
 }
 
 // The last good graph document, parsed, when it is of `revision`.
@@ -64,18 +163,25 @@ canvas_debug_graph_root: fn(state: Shared<CanvasHostState>, revision: String) ->
 }
 
 // Every object under `value` that carries a string `id_key` and a
-// `source_span` object, in document order.
+// `source_span` object, in document order, with its `wire_kind`,
+// `from_pin` and `to_pin` when it has them.
 canvas_debug_records: fn(value: Dyn, id_key: String, records: &[CanvasDebugRecord]) Never! {
     if value == {
         .Object(members) -> {
             id := String?{None}
             span := Span?{None}
+            kind := ""
+            from_pin := ""
+            to_pin := ""
             loop member in members {
                 if member.key == id_key && member.value == .Text(text) -> id = Val(text)
                 if member.key == "source_span" -> span = canvas_debug_span(member.value)
+                if member.key == "wire_kind" && member.value == .Text(text) -> kind = text
+                if member.key == "from_pin" && member.value == .Text(text) -> from_pin = text
+                if member.key == "to_pin" && member.value == .Text(text) -> to_pin = text
             }
             if id == .Val(found) && span == .Val(range) {
-                records.push(CanvasDebugRecord{id: found, span: range})
+                records.push(CanvasDebugRecord{id: found, span: range, kind: kind, from_pin: from_pin, to_pin: to_pin})
             }
             loop member in members -> canvas_debug_records(member.value, id_key, records)
         }

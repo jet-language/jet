@@ -1,0 +1,105 @@
+use {
+    jet_canvas.[CanvasHostState, canvas_host_debug_place, canvas_host_new, canvas_host_publish_graph]
+    jet_foundation.[Span]
+}
+
+// The graph of `run` in
+//
+//     run: fn() {
+//         n := 2
+//         total := scale(n)
+//         if total > 3 {
+//             total -= 3
+//         }
+//         print("total is {total}")
+//     }
+//
+// as the projection draws it from a file where `run` starts at byte 49, so
+// that its call, `if`, arm and print lines span 72:93, 94:112, 113:131 and
+// 138:167.
+DEBUG_PLACE_GRAPH: "fn:prog.jet.run@49-52"
+
+DEBUG_PLACE_REVISION: "sha256-debug-place"
+
+debug_place_node: fn(id: String, start: Int, end: Int) -> String {
+    "{{\"node_id\":\"{DEBUG_PLACE_GRAPH}:{id}\",\"source_span\":{{\"start\":{start},\"end\":{end}}}}}"
+}
+
+debug_place_wire: fn(number: Int, kind: String, from: String, to: String, start: Int, end: Int) -> String {
+    "{{\"wire_id\":\"{DEBUG_PLACE_GRAPH}:wire:{number}\",\"wire_kind\":\"{kind}\",\"from_pin\":\"{DEBUG_PLACE_GRAPH}:{from}\",\"to_pin\":\"{DEBUG_PLACE_GRAPH}:{to}\",\"source_span\":{{\"start\":{start},\"end\":{end}}}}}"
+}
+
+debug_place_run_graph: fn() -> String {
+    nodes := [String]{}
+    nodes.push(debug_place_node("entry", 49, 52))
+    nodes.push(debug_place_node("stmt:1:binding", 65, 76))
+    nodes.push(debug_place_node("value:1:init:70-71", 70, 71))
+    nodes.push(debug_place_node("stmt:2:binding", 76, 91))
+    nodes.push(debug_place_node("expr:2:call:scale", 85, 90))
+    nodes.push(debug_place_node("value:get:n", 91, 92))
+    nodes.push(debug_place_node("stmt:3:branch", 98, 100))
+    nodes.push(debug_place_node("stmt:311:assign", 121, 126))
+    nodes.push(debug_place_node("expr:4:call:print", 142, 147))
+    wires := [String]{}
+    wires.push(debug_place_wire(2, "data", "value:get:n:output:n", "expr:2:call:scale:input:arg1", 91, 92))
+    wires.push(debug_place_wire(9, "control", "stmt:1:binding:output:then", "stmt:2:binding:input:exec", 76, 91))
+    wires.push(debug_place_wire(10, "control", "stmt:3:branch:output:then", "stmt:311:assign:input:exec", 121, 126))
+    wires.push(debug_place_wire(11, "control", "stmt:2:binding:output:then", "stmt:3:branch:input:exec", 98, 100))
+    wires.push(debug_place_wire(12, "control", "stmt:311:assign:output:then", "expr:4:call:print:input:exec", 142, 147))
+    wires.push(debug_place_wire(13, "control", "stmt:3:branch:output:else", "expr:4:call:print:input:exec", 142, 147))
+    wires.push(debug_place_wire(14, "control", "entry:output:then", "stmt:1:binding:input:exec", 65, 76))
+    "{{\"graphs\":[{{\"graph_id\":\"{DEBUG_PLACE_GRAPH}\",\"nodes\":[{nodes.join(",")}],\"wires\":[{wires.join(",")}]}}]}}"
+}
+
+debug_place_state: fn(graph: String) -> Shared<CanvasHostState> {
+    state: canvas_host_new("prog.jet", "prog.jet", "127.0.0.1") ?? panic("cannot open a Canvas session: {err.message}")
+    canvas_host_publish_graph(state, DEBUG_PLACE_REVISION, graph, 0)
+    state
+}
+
+#Test("a stepped run's stops place the statement and the wires it took") {
+    state: debug_place_state(debug_place_run_graph())
+    place: canvas_host_debug_place(state, DEBUG_PLACE_REVISION, [Span]{Span{start: 72, end: 93}, Span{start: 94, end: 112}, Span{start: 113, end: 131}, Span{start: 138, end: 167}})
+    assert_eq(place.graph_id, DEBUG_PLACE_GRAPH)
+    assert_eq(place.node_id, "{DEBUG_PLACE_GRAPH}:expr:4:call:print")
+    assert_eq(place.wire_ids.join(" "), "{DEBUG_PLACE_GRAPH}:wire:11 {DEBUG_PLACE_GRAPH}:wire:10 {DEBUG_PLACE_GRAPH}:wire:12")
+    assert(!place.wires_truncated)
+}
+
+#Test("a step past an untaken branch arm follows its else wire") {
+    state: debug_place_state(debug_place_run_graph())
+    place: canvas_host_debug_place(state, DEBUG_PLACE_REVISION, [Span]{Span{start: 94, end: 112}, Span{start: 138, end: 167}})
+    assert_eq(place.wire_ids.join(" "), "{DEBUG_PLACE_GRAPH}:wire:13")
+}
+
+#Test("a stop places the statement that starts on its line, not a value or the statement before") {
+    state: debug_place_state(debug_place_run_graph())
+    place: canvas_host_debug_place(state, DEBUG_PLACE_REVISION, [Span]{Span{start: 72, end: 93}})
+    assert_eq(place.node_id, "{DEBUG_PLACE_GRAPH}:stmt:2:binding")
+    assert_eq(place.wire_ids.len(), 0)
+}
+
+#Test("a stop on another revision's graph places nothing") {
+    state: debug_place_state(debug_place_run_graph())
+    place: canvas_host_debug_place(state, "sha256-other", [Span]{Span{start: 72, end: 93}, Span{start: 94, end: 112}})
+    assert_eq(place.graph_id, "")
+    assert_eq(place.node_id, "")
+    assert_eq(place.wire_ids.len(), 0)
+}
+
+#Test("a step with two ways through the line it left takes no wire") {
+    // `if ready -> count += 1` on one line, then `print(count)`: the step
+    // went through the arm or past it, and the graph can't tell which.
+    nodes := [String]{}
+    nodes.push(debug_place_node("stmt:1:branch", 10, 12))
+    nodes.push(debug_place_node("stmt:101:assign", 20, 25))
+    nodes.push(debug_place_node("expr:2:call:print", 31, 36))
+    wires := [String]{}
+    wires.push(debug_place_wire(1, "control", "stmt:1:branch:output:then", "stmt:101:assign:input:exec", 20, 25))
+    wires.push(debug_place_wire(2, "control", "stmt:1:branch:output:else", "expr:2:call:print:input:exec", 31, 36))
+    wires.push(debug_place_wire(3, "control", "stmt:101:assign:output:then", "expr:2:call:print:input:exec", 31, 36))
+    state: debug_place_state("{{\"graphs\":[{{\"graph_id\":\"{DEBUG_PLACE_GRAPH}\",\"nodes\":[{nodes.join(",")}],\"wires\":[{wires.join(",")}]}}]}}")
+    place: canvas_host_debug_place(state, DEBUG_PLACE_REVISION, [Span]{Span{start: 0, end: 30}, Span{start: 31, end: 50}})
+    assert_eq(place.node_id, "{DEBUG_PLACE_GRAPH}:expr:2:call:print")
+    assert_eq(place.wire_ids.len(), 0)
+}

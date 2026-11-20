@@ -65,6 +65,10 @@ JET_CLI_CANVAS_DEBUG_MAX_MESSAGE_BYTES: 16384
 // The lines of source the overlay carries on each side of the stop.
 JET_CLI_CANVAS_DEBUG_SOURCE_CONTEXT: 12
 
+// The most stepped stops a session's trail keeps: enough for the wire path
+// (CANVAS_DEBUG_MAX_WIRE_PATH, JetCanvas) of one wire a step.
+JET_CLI_CANVAS_DEBUG_MAX_TRAIL: 65
+
 // A refused debug request: its jet.canvas.debug error kind and message.
 #Error
 JetCLICanvasDebugError: struct {
@@ -78,6 +82,9 @@ JetCLICanvasDebugError: struct {
 // stopped, a dump's flight ring records, the lines it has breakpoints on,
 // how many commands it has run, and the console's report since the last
 // answer. Its tier follows from these (jet_cli_canvas_debug_tier_name).
+// `trail` is the lines of the stops the run stepped through to its stop,
+// oldest first and the stop's last, at most JET_CLI_CANVAS_DEBUG_MAX_TRAIL,
+// all in one frame `trail_depth` Jet frames deep (-1: not known).
 JetCLICanvasDebugSession: struct {
     source_id: String,
     revision: String,
@@ -91,6 +98,8 @@ JetCLICanvasDebugSession: struct {
     breakpoints: [Int],
     commands: Int,
     transcript: String,
+    trail: [Int]{[Int]{}},
+    trail_depth: Int{-1},
 }
 
 // The tier a request asks for: its `name`, whether the request named it,
@@ -103,7 +112,9 @@ JetCLICanvasDebugTier: struct {
 
 // What one request's commands did: the session and its tier, the console's
 // transcript, the stop's facts (None outside Jet code), the `tasks` list's
-// lines, and whether the program is still paused in the session.
+// lines, whether the program is still paused in the session, and the lines
+// the run stepped through to the snapshot's stop (the session's trail; empty
+// when the snapshot shows another frame).
 JetCLICanvasDebugRun: struct {
     id: String,
     tier: String,
@@ -111,6 +122,7 @@ JetCLICanvasDebugRun: struct {
     snapshot: DebugSnapshot?,
     tasks: [String],
     running: Bool,
+    trail: [Int],
 }
 
 // One bounded list of a debug document, as JSON items.
@@ -156,7 +168,7 @@ JetCLICanvasDebugSessions: struct {
         }
         loop command in commands {
             if failed != None -> break
-            if jet_cli_canvas_debug_step(session, command) == .Err(failure) -> failed = Val(failure)
+            if jet_cli_canvas_debug_walk(session, command) == .Err(failure) -> failed = Val(failure)
         }
         if failed == None && jet_cli_canvas_debug_step(session, "locals") == .Err(failure) {
             failed = Val(failure)
@@ -174,7 +186,7 @@ JetCLICanvasDebugSessions: struct {
         if stop.kind != NativeStopKind.Paused {
             jet_cli_canvas_debug_close(session)
             if stop.kind == NativeStopKind.Exited && stop.code == 0 {
-                return Ok(JetCLICanvasDebugRun{id: id, tier: jet_cli_canvas_debug_tier_name(session), transcript: transcript, snapshot: None, tasks: [String]{}, running: false})
+                return Ok(JetCLICanvasDebugRun{id: id, tier: jet_cli_canvas_debug_tier_name(session), transcript: transcript, snapshot: None, tasks: [String]{}, running: false, trail: [Int]{}})
             }
             return Err(jet_cli_canvas_debug_error("diagnostic", transcript))
         }
@@ -197,8 +209,12 @@ JetCLICanvasDebugSessions: struct {
             if line.trim() != "" -> tasks.push(line)
         }
         on: jet_cli_canvas_debug_tier_name(session)
+        trail := [Int]{}
+        if snapshot == .Val(found) && session.stop.frame == .Val(frame) && frame.line == found.line {
+            loop line in session.trail -> trail.push(line)
+        }
         self.sessions[id] = session
-        Ok(JetCLICanvasDebugRun{id: id, tier: on, transcript: transcript, snapshot: snapshot, tasks: tasks, running: true})
+        Ok(JetCLICanvasDebugRun{id: id, tier: on, transcript: transcript, snapshot: snapshot, tasks: tasks, running: true, trail: trail})
     }
 
     // Take the session `id` out to run `count` more commands in it. One
@@ -357,6 +373,9 @@ jet_cli_canvas_debug_open: fn(file: String, source_id: String, revision: String,
         jet_cli_canvas_debug_remove(dir)
         return Err(jet_cli_canvas_debug_error("diagnostic", "`{jet_file}` has no `run` function to debug"))
     }
+    trail := [Int]{}
+    if first.stop.frame == .Val(frame) -> trail.push(frame.line)
+    trail_depth: live.jet_depth() ?? -1
     Ok(
         JetCLICanvasDebugSession{
             source_id: source_id,
@@ -371,6 +390,8 @@ jet_cli_canvas_debug_open: fn(file: String, source_id: String, revision: String,
             breakpoints: [Int]{},
             commands: 0,
             transcript: first.text,
+            trail: trail,
+            trail_depth: trail_depth,
         },
     )
 }
@@ -419,18 +440,49 @@ jet_cli_canvas_debug_open_dump: fn(file: String, source_id: String, revision: St
 }
 
 // Run one console command in a paused session, adding its report to the
-// session's transcript. A session whose program has ended runs nothing; a
-// dump's reads what it holds, as `jet debug <dump>` does, and never moves.
-jet_cli_canvas_debug_step: fn(session: &JetCLICanvasDebugSession, input: String) NativeDebugError! {
-    if session.stop.kind != NativeStopKind.Paused -> return Ok()
+// session's transcript, and answer the move it made the program take
+// (NativeDebugStep.moved). A session whose program has ended runs nothing;
+// a dump's reads what it holds, as `jet debug <dump>` does, and never moves.
+jet_cli_canvas_debug_step: fn(session: &JetCLICanvasDebugSession, input: String) -> String NativeDebugError! {
+    if session.stop.kind != NativeStopKind.Paused -> return Ok("")
     if jet_cli_canvas_debug_tier_name(session) == JET_CLI_CANVAS_DEBUG_DUMP {
         text: jet_cli_debug_dump_command(session.live, input, session.events, session.jet_file, session.jet_lines) ?? return Err(err)
         session.transcript = "{session.transcript}{text}"
-        return Ok()
+        return Ok("")
     }
     step: session.live.command(input, session.stop, session.jet_file, session.jet_lines) ?? return Err(err)
     session.transcript = "{session.transcript}{step.text}"
     session.stop = step.stop
+    Ok(step.moved)
+}
+
+// Run one of a request's console commands (jet_cli_canvas_debug_step) and
+// follow the run's path: a `step` or `next` that stays in its frame adds
+// the line it reached to the session's trail, any other move starts the
+// trail again at its stop, and a command that runs nothing keeps it.
+jet_cli_canvas_debug_walk: fn(session: &JetCLICanvasDebugSession, input: String) NativeDebugError! {
+    left: session.stop.frame
+    moved: jet_cli_canvas_debug_step(session, input) ?? return Err(err)
+    if moved == "" -> return Ok()
+    reached: if session.stop.kind == NativeStopKind.Paused -> session.stop.frame else -> None
+    frame: reached ?? {
+        session.trail = [Int]{}
+        session.trail_depth = -1
+        return Ok()
+    }
+    depth: session.live.jet_depth() ?? return Err(err)
+    last: if session.trail.len() > 0 -> session.trail[session.trail.len() - 1] else -> -1
+    if (moved == "s" || moved == "n") && depth == session.trail_depth && left == .Val(from) && from.file == frame.file && from.line == last {
+        if frame.line != last -> session.trail.push(frame.line)
+        if session.trail.len() > JET_CLI_CANVAS_DEBUG_MAX_TRAIL {
+            kept := [Int]{}
+            loop index in 1..<session.trail.len() -> kept.push(session.trail[index])
+            session.trail = kept
+        }
+        return Ok()
+    }
+    session.trail = [Int]{frame.line}
+    session.trail_depth = depth
     Ok()
 }
 
@@ -830,7 +882,12 @@ jet_cli_canvas_debug_document: fn(state: Shared<CanvasHostState>, src: String, s
     if ran.snapshot == .Val(snapshot) {
         active_span = jet_cli_canvas_debug_line_span(src, snapshot.line)
         line_json = "{snapshot.line}"
-        place = canvas_host_debug_place(state, revision, active_span)
+        // The run's stepped stops end at this one; a stop it didn't step
+        // to is all of its path.
+        stops := [Span]{}
+        loop line in ran.trail -> stops.push(jet_cli_canvas_debug_line_span(src, line))
+        if stops.len() == 0 -> stops.push(jet_cli_canvas_debug_line_span(src, snapshot.line))
+        place = canvas_host_debug_place(state, revision, stops)
         locals = jet_cli_canvas_debug_locals(snapshot, None)
         watch_values = jet_cli_canvas_debug_locals(snapshot, Val(watches))
         call_stack = jet_cli_canvas_debug_call_stack(snapshot, source_id)
@@ -865,7 +922,7 @@ jet_cli_canvas_debug_document: fn(state: Shared<CanvasHostState>, src: String, s
     }
     wires := [String]{}
     loop wire in place.wire_ids -> wires.push(foundation_json_quote(wire))
-    active_wire: if place.wire_ids.len() > 0 -> place.wire_ids[0] else -> ""
+    active_wire: if place.wire_ids.len() > 0 -> place.wire_ids[place.wire_ids.len() - 1] else -> ""
     marks := [String]{}
     loop line in breakpoints {
         marks.push("{{\"line\":{line},\"source_span\":{jet_cli_canvas_debug_span_json(jet_cli_canvas_debug_line_span(src, line))},\"state\":\"valid\"}}")

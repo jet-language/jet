@@ -2094,7 +2094,7 @@ NativeSession: struct {
                 settled: self.run(short) ?? return Err(err)
                 loop said in settled.said -> text = "{text}{said.text}"
                 shown: self.report(settled.stop, file, lines) ?? return Err(err)
-                return Ok(NativeDebugStep{text: "{text}{shown}", stop: settled.stop})
+                return Ok(NativeDebugStep{text: "{text}{shown}", stop: settled.stop, moved: short})
             }
             "rs" | "reverse-step" | "rn" | "reverse-next" | "rf" | "reverse-finish" | "rc" | "reverse-continue" -> {
                 refusal: self.reverse_refusal()
@@ -2110,9 +2110,9 @@ NativeSession: struct {
                 settled: self.reverse(short) ?? return Err(err)
                 shown: self.report(settled.stop, file, lines) ?? return Err(err)
                 if self.nowhere != "" {
-                    return Ok(NativeDebugStep{text: "{native_debug_refused(self.nowhere)}{shown}", stop: settled.stop})
+                    return Ok(NativeDebugStep{text: "{native_debug_refused(self.nowhere)}{shown}", stop: settled.stop, moved: "r{short}"})
                 }
-                return Ok(NativeDebugStep{text: shown, stop: settled.stop})
+                return Ok(NativeDebugStep{text: shown, stop: settled.stop, moved: "r{short}"})
             }
             "jump" | "back" -> {
                 refusal: self.replay_refusal("`{word}`")
@@ -2139,7 +2139,7 @@ NativeSession: struct {
                 }
                 settled: self.jump(event) ?? return Err(err)
                 shown: self.report(settled.stop, file, lines) ?? return Err(err)
-                return Ok(NativeDebugStep{text: "Event {event}\n{shown}", stop: settled.stop})
+                return Ok(NativeDebugStep{text: "Event {event}\n{shown}", stop: settled.stop, moved: "jump"})
             }
             "events" -> {
                 refusal: self.replay_refusal("`events`")
@@ -5663,10 +5663,14 @@ NATIVE_DEBUG_RED_ZONE: 128
 // How deep a readout follows a value's members and elements.
 NATIVE_DEBUG_SHOWN_DEPTH: 4
 
-// What one console command printed, and where it left the program.
+// What one console command printed, where it left the program, and the
+// move it made the program take: the short word of its run (`s`, `n`, `f`,
+// `c`, a reverse one's `rs`, `rn`, `rf`, `rc`, or `jump`), "" when the
+// program didn't run.
 NativeDebugStep: struct {
     text: String,
     stop: NativeStop,
+    moved: String{""},
 }
 
 native_debug_stop_in_jet: fn(frame: NativeFrame?) -> Bool Never! {
