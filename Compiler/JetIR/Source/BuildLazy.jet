@@ -1422,9 +1422,11 @@ ir_text_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, vari
         _: ir_binder_holds(m, p, b, variable, position, span)
         b.bindings.push(IRBinding{name: variable.name, slot: position})
         _: ir_binder_holds(m, p, b, second, item, span)
+        ir_walk_item_named(m, b, item, second)
         b.bindings.push(IRBinding{name: second.name, slot: item, owned: true})
     } else {
         _: ir_binder_holds(m, p, b, variable, item, span)
+        ir_walk_item_named(m, b, item, variable)
         b.bindings.push(IRBinding{name: variable.name, slot: item, owned: true})
     }
     ir_stmts(m, p, b, body)
@@ -1621,9 +1623,11 @@ ir_line_next_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?,
         _: ir_binder_holds(m, p, b, variable, position, span)
         b.bindings.push(IRBinding{name: variable.name, slot: position})
         _: ir_binder_holds(m, p, b, second, item, span)
+        ir_walk_item_named(m, b, item, second)
         b.bindings.push(IRBinding{name: second.name, slot: item, owned: true})
     } else {
         _: ir_binder_holds(m, p, b, variable, item, span)
+        ir_walk_item_named(m, b, item, variable)
         b.bindings.push(IRBinding{name: variable.name, slot: item, owned: true})
     }
     ir_close_arm(m, p, b, item, false, span)
@@ -1904,9 +1908,11 @@ ir_stdin_lines_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String
         _: ir_binder_holds(m, p, b, variable, position, span)
         b.bindings.push(IRBinding{name: variable.name, slot: position})
         _: ir_binder_holds(m, p, b, second, item, span)
+        ir_walk_item_named(m, b, item, second)
         b.bindings.push(IRBinding{name: second.name, slot: item, owned: true})
     } else {
         _: ir_binder_holds(m, p, b, variable, item, span)
+        ir_walk_item_named(m, b, item, variable)
         b.bindings.push(IRBinding{name: variable.name, slot: item, owned: true})
     }
     ir_close_arm(m, p, b, item, false, span)
@@ -2004,11 +2010,13 @@ ir_lazy_walk_source: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String
         b.bindings.push(IRBinding{name: variable.name, slot: position})
         if item >= 0 {
             _: ir_binder_holds(m, p, b, second, item, span)
+            ir_walk_item_named(m, b, item, second)
             b.bindings.push(IRBinding{name: second.name, slot: item, owned: owned})
             if owned -> ir_close_arm(m, p, b, item, false, span)
         }
     } else if item >= 0 {
         _: ir_binder_holds(m, p, b, variable, item, span)
+        ir_walk_item_named(m, b, item, variable)
         b.bindings.push(IRBinding{name: variable.name, slot: item, owned: owned})
         if owned -> ir_close_arm(m, p, b, item, false, span)
     }
