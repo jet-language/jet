@@ -848,8 +848,12 @@ it does not turn an unavailable panel or command into a silent no-op.
 ## The debugger console
 
 `jet debug <file.jet>` stops at the start of `run` (or at `--break
-<file>:<line>`) and reads one command a line at the `(Jet) ` prompt.
-D-DBG-VERBS1=A names the commands:
+<file>:<line>`) and reads one command a line at the `(Jet) ` prompt. When
+its stdin is a terminal, the program shares it, as a shell's job does: the
+program reads the terminal while it runs and the console while it is
+stopped. Otherwise the program's stdin is empty, and its reads end at
+once; `jet debug --dap` keeps stdin for its protocol, so its program's
+stdin is empty too. D-DBG-VERBS1=A names the commands:
 
 - `step` (`s`), `next` (`n`), `continue` (`c`) and `finish` (`f`) run the
   program.
