@@ -1,0 +1,14 @@
+// WASI Preview 2 has TCP and UDP sockets and nothing else: the Core
+// operations a program reaches are named by their dotted path
+// (`core.net.unix_listen`), and the ones the target has no adapter for are
+// found by the module and member that path ends in.
+use jet_sema.[sema_target_wasip2_unsupported_operations]
+
+#Test("wasip2 finds the unsupported operations by their dotted Core path") {
+    used: [String]{"core.http.get", "core.net.tcp_listen", "core.net.unix_listen", "core.net.tls.connect", "core.time.now"}
+    found: sema_target_wasip2_unsupported_operations(used)
+    assert(found.len() == 3, found.join(", "))
+    assert(found.contains("core.http.get"), found.join(", "))
+    assert(found.contains("core.net.unix_listen"), found.join(", "))
+    assert(found.contains("core.net.tls.connect"), found.join(", "))
+}
