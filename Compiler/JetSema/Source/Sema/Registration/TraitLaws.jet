@@ -31,6 +31,22 @@ SemaTraitLaw: struct {
     source: String,
 }
 
+// A law test the compiler could not make (SemaRegistrationGraph.law_faults):
+// the test's key, and why.
+SemaTraitLawFault: struct {
+    key: String,
+    fault: String,
+}
+
+// The row of `faults` that says why the compiler could not make the law test
+// whose key is `key`, if it could not.
+sema_trait_law_fault: fn(faults: [SemaTraitLawFault], key: String) -> Int? Never! {
+    loop (index, row) in faults {
+        if row.key == key -> return Val(index)
+    }
+    None
+}
+
 // The laws the graph's traits declare: those of the trait whose name has id
 // `id` in `names` are laws[first[id] ..< first[id] + count[id]].
 SemaTraitLawTable: struct {
@@ -80,7 +96,7 @@ sema_trait_laws_add: fn(graph: &SemaRegistrationGraph) Never! {
         identity: module_text(graph.module_table, graph.modules[module_index].module_identity)
         loop (index, test) in tests {
             key: checked_test_artifact_key(identity, test)
-            if faults[index] == .Val(fault) -> graph.law_faults["{key}"] = "{fault}"
+            if faults[index] == .Val(fault) -> graph.law_faults.push(SemaTraitLawFault{key: "{key}", fault: "{fault}"})
             _ := symbol_intern(graph.symbols, key)
             graph.modules[module_index].program.items.push(Item.Test{value: test})
         }
