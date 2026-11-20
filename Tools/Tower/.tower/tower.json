@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112544,
+    "rev": 112550,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -59436,6 +59436,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-20T03:14:12.504Z"
+        },
+        {
+          "n": 90,
+          "text": "Turning another user's zones on is refused: an attach request takes effect only when it comes from the program's own user (the request lives in the user's private runtime directory, not in shared /tmp, and is checked for ownership), with a case where a request file owned by another user is ignored.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-20T05:49:31.341Z"
+        },
+        {
+          "n": 91,
+          "text": "No profile event is lost silently: a sample dropped because the record socket is full is counted and the count reaches the trace and the attach report (`perf_samples_put_one` checks its write), and the program drains its ring a last time at exit so a watcher sees the final turn, with cases for both.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-20T05:49:32.197Z"
+        },
+        {
+          "n": 92,
+          "text": "Profiling leaves no files behind: the .spans file is bounded, and the ring, its image and its .spans are removed at normal exit and cleaned up for a killed program by the next jet perf run or attach, with a case that kills a profiled program and finds no files left after the next attach.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-20T05:49:33.014Z"
         }
       ],
       "refs": [],
@@ -59443,9 +59470,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-20T04:26:43.407Z",
+      "updated": "2026-11-20T05:49:33.014Z",
       "updatedBy": "Main",
-      "criteriaLastN": 89
+      "criteriaLastN": 92
     },
     {
       "id": "c0in2dft",
@@ -135286,6 +135313,305 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-20T05:20:23.199Z"
+    },
+    {
+      "id": "D-LIVE-TIMELINE1",
+      "cardId": "c0nwrfck",
+      "group": "tooling",
+      "title": "A live timeline: watch a running program's work as it happens",
+      "situation": "A timeline is the picture a profiler draws of what a program did over time: which work ran, how long it took, and what it waited on. Today Jet draws it only after a recording ends, in jet perf view or in Canvas's Profile view. A game that stutters every few seconds must be recorded, stopped and reopened before you can see why. Tracy, the best-known game profiler, draws its timeline while the game runs, so you watch the stutter as it happens. You decide how Jet's timeline becomes live. We recommend that jet perf attach --follow and a Live switch in Canvas's Profile view read the buffer of recent events an observed program already keeps, shared with them as it fills.",
+      "gist": "Should Jet's timeline draw a running program's work as it happens, from the buffer of recent events the program already keeps?",
+      "lesson": "An observed program is one started with jet run --observe. It keeps a flight ring: a fixed-size buffer of its latest events, like an aircraft's flight recorder. The events are CPU samples, task waits and wakes, and file and network transfers. Every 100 ms a helper thread in the program saves the buffer to a private file, which jet perf attach copies once today. Zones are named, timed pieces of work marked with perf.zone. They cost about 2 ns until a profiler turns them on.",
+      "explainer": "Beginner path: run jet dev --canvas live.jet, open the Profile view and press Live. Canvas starts the program observed, and the lanes scroll as it runs: zones, frames, waits, I/O and the hottest lines. Press Stop and the run so far stays open as an ordinary trace you can zoom. In a terminal, start jet run --observe live.jet, then run jet perf attach --follow in another. With one observed program of yours running, no process id or source path is needed.\n\nExpert path: jet perf attach PID --follow --out run.jettrace follows one process by its id. In a terminal it redraws the last 5 seconds as events arrive. Piped, it prints one line per event on stdout, as jet perf view's timeline does. Ctrl-C, or the program ending, stops it. It then writes the followed window as a .jettrace, prints its path on stderr and exits 0. Canvas's profile request takes pid or live in place of trace, and answers the same lanes plus the program's end and its losses.\n\nRefusals exit 2 with a named diagnostic. A process that publishes no flight ring, or is not yours, gets Jet.PerfNotObserved, with the jet run --observe command that fixes it. Several observed programs and no id gets Jet.PerfWhichProcess, which lists each pid with its source. --follow beside --zones= or --lens=alloc gets Jet.UnknownFlag, because those are one-time captures. Another user's program is never followed: its files live in its owner's private runtime directory, which nobody else can read or write.\n\nTwo watchers each read every event, and a point attach beside them changes nothing for them. Zones stay on until the last holder leaves, and a holder killed without warning is dropped at the next turn. Events lost because a watcher fell behind, or because the program's record queue was full, show as a marked gap with their count. A program that exits prints its exit status after its last events. One killed outright is reported as ended without its final turn.\n\nA program paused in jet debug draws nothing new until it resumes. A build whose zones are stripped shows a zones lane that says so. On the web tier, a page under jet dev already sends its spans to the dev server's owner-only relay file. Following the dev server's pid, or pressing Live on a web entry, reads that file as it grows. The relay keeps its newest rows past its 4096-row bound instead of stopping, and a watcher that missed rows sees a counted gap.",
+      "story": "Mia's game hitches about every three seconds. She opens Canvas, presses Live in the Profile view and keeps playing. On the next hitch she sees a load_level zone 40 ms long, beside a file read the frame waited on. She presses Stop and zooms into that frame, which is still there as a trace.",
+      "inWild": "// Tracy: the game links Tracy's client, and the profiler window\n// draws each zone while the game runs.\n#include <tracy/Tracy.hpp>\nvoid tick() {\n    ZoneScopedN(\"tick\");   // a zone on the live timeline\n    simulate();\n    FrameMark;              // one frame on the live timeline\n}",
+      "detail": "Code read on dev f2cf0a8324, and probed on 2026-11-20 with a dev compiler on Tests/Cases/Perf/AttachTurnsZonesOn.fixture. jet perf attach is a point capture (Compiler/JetCLI/Source/CLI/Perf/Session.jet:341). It copies the published ring <temp>/jet-flight-<pid>.samples and its image once (jet_cli_perf_attach_flight, line 530), then writes one .jettrace. Every attach refusal prints Jet.UnknownFlag and exits 2, even one that says a process is not running or not visible to this user (probe).\n\nThe observation writer turns every 100 ms (Compiler/JetRuntime/Source/ObserveLive.jet:596). Each turn, perf_flight_publish (PerfSamples.jet:4415) drains a nonblocking datagram socket into the 256 KiB ring and rewrites the owner-only ring file whole. A full ring drops its oldest records down to half (perf_flight_keep, line 4334). Threads send each record with one write whose result is ignored (perf_samples_put_one, line 1213). A record sent while the socket is full is lost uncounted.\n\nWith --zones=WINDOW, attach leaves <ring>.zones, waits the window, removes it and copies <ring>.spans 250 ms later (jet_cli_perf_attach_zones, line 618). While the request stands, zone, frame, plot and log rows gather in one 64 KiB buffer under one lock. The thread that fills it writes it out (perf_zone_row, line 1708). Each turn the writer flushes it with a write while holding that lock (perf_spans_flush, line 1747).\n\nThe request is one file, checked only for existence, so the first attach to finish turns zones off for every other. An attach that turns zones on in the 250 ms after another's window empties the rows the other has not yet copied. The spans file has no bound and stays behind after the program exits (probe). Any local user can create the request in the shared temp directory and turn your zones on, though not read the rows.\n\nAt exit, perf_flight_end (line 4525) removes the ring and image without a last drain, so the final turn's records reach no reader. A killed program leaves its ring and image behind; the probe's image was 53 MB. The probe's 500 ms zones attach took 0.83 s and held 48 tick zones, 48 frames and 629 waits, about six seconds of ring.\n\nAttach uses no ptrace; it reads files, so kernel.yama.ptrace_scope does not limit it. Canvas's profile request (Docs/Spec/Reference/canvas-protocol.md:375-402) draws one finished .jettrace, or profiles the entry with jet perf run and keeps that trace. Its lanes are spans, zones, waits and io, reduced to the width shown. An observed run publishes the source path it was given as its source_id (Compiler/JetCLI/Source/CLI/Host.jet:2562).\n\nA jet dev page beacons its spans to the dev server, which appends them to an owner-only relay file and drops rows past 4096 after one marker (Compiler/JetDevServer/Source/BrowserTrace.jet). A recorded zone costs 59.25 ns and an idle zone site 1.94 ns (Docs/Audits/2026-11-19-debug-profile-best-in-existence.md, P2). This ballot is that review's gap G37, owned by #6841. D-OBSERVE-LIVE1=A made live attach opt-in with --observe, D-OBSERVE-FLIGHT1=B made the flight ring, and D-DBG-UI1=A made Canvas the one profile window.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Share the program's buffer as it fills",
+          "detail": "jet perf attach --follow and Canvas's Live switch read the flight ring and zone rows straight from memory the program shares with its owner. Each draws new events as they arrive, until you stop or the program ends. Following adds no work to the program's own threads, and zones are on only while someone watches. Stopping writes the watched window as an ordinary .jettrace. Point attach, follow and Canvas share one reader.",
+          "technical": "The program publishes its ring as a shared mapping of an owner-only file in a private directory. That is $XDG_RUNTIME_DIR/jet, else a jet-<uid> directory in the temp directory, which must be the user's own with mode 0700. The ring becomes circular, under a header that counts the records and bytes written. Zone, frame, plot and log rows go to a second 4 MiB circular region of the same mapping. The zone stores its row under today's lock, with no write call.\n\nEach reader keeps its own position, copies new records, then rereads the count. Records overwritten meanwhile are counted as lost, never drawn. A send that finds the record socket full adds one to a lost count in the header. The program keeps its own counters privately and only writes the shared copy, so nothing another process writes there can steer it. Point attach is the same reader, stopped after one read or after its --zones= window.\n\nEach holder leaves a request named by its pid and start time: a follower, Canvas, or a point attach with --zones=. Zones stay on while any holder lives, and the writer drops a dead one's request at its next turn. While any request stands, the writer turns every 20 ms instead of 100 ms. At exit it drains once more, marks the run ended with its status, then removes the name. A reader already holding the mapping reads to the end.\n\nattach's pid becomes optional: with exactly one live observed program of this user, it is that one. Files whose pid no longer runs that program are skipped and removed. --source defaults to the published source_id, resolved against the program's working directory. Jet.PerfNotObserved and Jet.PerfWhichProcess are registered, and attach's other refusals move to them. jet.canvas.profile gains pid, live and stop in place of trace. Its answer gains live {pid, ended, exit, lost, zones}. The dev server's relay keeps its newest rows past 4096.",
+          "code": "// live.jet: each turn runs a `tick` zone, plots `sum`, marks a frame,\n// then sleeps 10 ms (Tests/Cases/Perf/AttachTurnsZonesOn.fixture).\n$ jet run --observe live.jet &\n$ jet perf attach --follow | cat      # piped: one line per event\nfollowing 48213 live.jet: zones on while you watch; Ctrl-C stops\n[5941855470..5942197591] live.jet#tick\n[5942198273..5942198273] live.jet#frame\n[5942198350..5952254410] task 1 in time sleep at live.jet:28, woken by its timeout\n[5952258427..5952491962] live.jet#tick · 1 sample · live.jet:13\n[5952500000..5953100000] lost 412 records: this watcher fell behind\n^C\nTrace: /home/user/game/.jet/perf/1795089901-a41b55f6.jettrace\n$ echo $?\n0\n\n// When the program ends first, the follower ends too, exit 0:\nprocess 48213 ended with exit 0\nTrace: /home/user/game/.jet/perf/1795089907-c03e9d12.jettrace\n\n// Two observed programs and no pid, exit 2:\n$ jet perf attach --follow\nError: Jet.PerfWhichProcess: 2 observed programs of yours are running: 48213 live.jet, 48390 server.jet\n Why: jet follows one program, and a guess could show the wrong one\n Fix: Run `jet perf attach 48213 --follow`\nMore: jet-lang.dev/e/Jet.PerfWhichProcess\n\n// Canvas: jet dev --canvas live.jet, Profile view, press Live.\n// The lanes scroll as it runs; Stop keeps the run as a trace."
+        },
+        {
+          "key": "B",
+          "name": "Repeat today's one-time capture",
+          "detail": "No new command. To watch a program, repeat jet perf attach --zones=1s in a loop and reopen the newest trace each time. Canvas reloads a trace path when asked again. Each picture is one finished second, drawn after that second ends.",
+          "technical": "No runtime or protocol change. Each pass copies the whole 256 KiB ring and the program's image, 53 MB for live.jet in the probe. It turns zones on for its window, then off, and waits 250 ms more for the rows, so a 1 s pass takes about 1.3 s. A zone that spans two windows is cut at the edge, and each pass rewrites its trace file. Today's uncounted losses and shared request file stay as they are.",
+          "code": "// live.jet, unchanged.\n$ jet run --observe live.jet &\n$ while true; do\n    jet perf attach 48213 --source live.jet --zones=1s --out last.jettrace\n  done\nTrace: /home/user/game/last.jettrace\nTrace: /home/user/game/last.jettrace\n// In Canvas: open last.jettrace in the Profile view, ask again each second.\n// Each picture is the last finished second; between passes zones are off."
+        },
+        {
+          "key": "C",
+          "name": "Stream to a connected viewer, Tracy's way",
+          "detail": "Every observed program also listens on a private socket. jet perf attach --follow and Canvas's Live switch connect to it, and the program's helper thread sends each new event down the connection. The view looks the same as A's.",
+          "technical": "A Unix socket per observed program, owner-only, beside the published ring. Each turn, the writer sends the new records and zone rows to every connected viewer, so its work grows with each viewer. A slow viewer either holds the writer up or loses records. Point attach, crash dumps and jet debug keep reading the published ring, so the same records leave the program two ways, with two readers to keep in step. Unlike Tracy's TCP port, a Unix socket does not reach another machine.",
+          "code": "// live.jet, unchanged.\n$ jet run --observe live.jet &      # also listens on a private socket\n$ jet perf attach 48213 --follow --source live.jet\nconnected to 48213 live.jet; Ctrl-C stops\n[5952258427..5952491962] live.jet#tick · 1 sample · live.jet:13\n^C\nTrace: /home/user/game/.jet/perf/1795089901-a41b55f6.jettrace\n// Canvas: Profile view, press Live; Canvas connects the same way."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "C++ (Tracy)",
+          "note": "The game's Tracy client queues each zone, and a helper thread streams it over TCP to the profiler window, which can run on another machine. Its manual measures 2.25 ns a zone across 12 threads, about 27 ns per thread. In on-demand mode zones record only while a viewer is connected. This is C's shape; A gives the same live view on the same machine.",
+          "code": "ZoneScopedN(\"tick\");   // drawn live in the Tracy window\nFrameMark;"
+        },
+        {
+          "lang": "Swift (Instruments)",
+          "note": "In Immediate mode Instruments draws its tracks as it records, signpost intervals included, and Windowed mode keeps only the last seconds, like a flight ring. It is the closest live peer for a native app, and it reads the system's own buffers, as A reads the program's.",
+          "code": "let log = OSLog(subsystem: \"game\", category: .pointsOfInterest)\nos_signpost(.begin, log: log, name: \"tick\")   // drawn as it records\nsimulate()\nos_signpost(.end, log: log, name: \"tick\")"
+        },
+        {
+          "lang": "C++ (Superluminal)",
+          "note": "It samples at 8 kHz with full stacks and attaches to a running process with no code change. Its timeline opens only after you press Start analyzing, which ends the capture, so its live shape is B's. Its strength is the view after the capture.",
+          "code": "PERFORMANCEAPI_INSTRUMENT(\"tick\");   // shown once the capture ends\nsimulate();"
+        },
+        {
+          "lang": "C++ (Perfetto, Chrome tracing)",
+          "note": "Perfetto can keep the last seconds in a ring buffer, and Chrome DevTools records a page's work. Both draw the timeline after you stop the recording, so they have B's shape.",
+          "code": "TRACE_EVENT(\"game\", \"tick\");   // in the trace once it is stopped\nsimulate();"
+        },
+        {
+          "lang": "Go (runtime/trace)",
+          "note": "The flight recorder keeps the last few seconds of the trace in memory and writes them on request. The trace is opened afterward with go tool trace, so Go has B's shape.",
+          "code": "fr := trace.NewFlightRecorder(trace.FlightRecorderConfig{MinAge: 5 * time.Second})\nfr.Start()\n// later, when something looks wrong:\nfr.WriteTo(file)   // then: go tool trace file"
+        },
+        {
+          "lang": "Linux perf top",
+          "note": "It refreshes a list of the hottest functions every two seconds while the program runs. It is live but has no timeline: it shows where time went, not when.",
+          "code": "$ perf top -p 48213"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A gives Tracy's live picture by sharing the buffer the program already keeps, so point attach, follow, Canvas and crash dumps all read the same bytes. Following adds no work to the program's own threads. The watched window becomes an ordinary trace, so the live and finished views are one view.",
+        "gains": [
+          "A stutter is seen while it happens, in the terminal or in Canvas.",
+          "One way out for events: point attach, follow, Canvas and crash dumps read the same shared buffer.",
+          "Following adds no work on the program's own threads, however many watch.",
+          "What was watched is kept as a normal trace, ready to zoom and compare.",
+          "Beginners need no process id and no source path.",
+          "Every loss is counted and drawn, and other users can no longer turn your zones on."
+        ],
+        "losses": [
+          {
+            "loss": "Samples, waits and I/O trail the program by up to one 20 ms turn of the helper thread.",
+            "mitigation": "Zones and frames show at once, and every event carries the program's own clock, so the delay moves when it is drawn, never what it measures."
+          },
+          {
+            "loss": "Recorded zones cost the program while someone watches: 59 ns each today, behind one lock every thread shares.",
+            "mitigation": "Zones are on only while watched, and the header shows how many were recorded and their cost. G36 on #6841 brings each under Tracy's 27 ns with a record per thread."
+          },
+          {
+            "loss": "A watcher stalled for longer than the shared buffer holds loses the oldest events it had not read.",
+            "mitigation": "Each loss is drawn as a marked gap with its exact count, in the view and in the saved trace. A stalled watcher costs the program nothing."
+          },
+          {
+            "loss": "A program killed outright loses its last turn: at most 20 ms of samples and waits.",
+            "mitigation": "The follower says the program ended without its final turn. Zone rows are stored straight into shared memory, so all of them survive."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Each picture arrives more than a second late and copies the program's 53 MB image again. A zone across two windows is cut in half, and zones are off between passes. The stutter that prompted the look can fall in a gap."
+          },
+          {
+            "key": "C",
+            "reason": "It gives A's view through a second exit for the same events, with a second reader to keep in step and a listening socket in every observed program. The writer's work grows with each viewer. A Unix socket reaches no other machine either; ssh running A's follower there does."
+          }
+        ],
+        "tradeoff": "A helper thread that turns five times faster while someone watches, and 4 MiB of shared memory for zone rows, in exchange for Tracy's live timeline with one way out for events."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Under A: a new case, Perf/attach_follow_draws_zone_before_exit.case, starts live.jet with jet run --observe. It runs jet perf attach --follow piped and receives a live.jet#tick line before live.jet prints done. It interrupts the follower, which exits 0 and names a trace whose jet perf view shows zone tick.\n\nThe same case runs a point attach with --zones=500ms and a second follower during the follow. It checks that both followers see the same tick lines and that zones stay on for the first one. It kills the second follower with KILL and checks that zones turn off within two turns of the first one's Ctrl-C.\n\nA second case lets live.jet end while followed and checks for its last tick line and process ended with exit 0. A third stops a follower of a busy fixture with STOP for two seconds, resumes it, and checks for a lost line with a count. A fourth runs attach --follow with two observed programs and checks for Jet.PerfWhichProcess and exit 2.\n\nA Canvas protocol case posts jet.canvas.profile with pid and gets a zones lane with marks and live.ended false. A web case follows a jet dev page past 4096 rows. Under B: the same first case can only show tick lines in a finished one-second trace. Under C: the same first case, with the follower connected over the socket.\n\nEvidence labels: every current-behavior fact is read from code on dev f2cf0a8324, and the probe facts were run on 2026-11-20. No option is built, and no option's output was run. The 59.25 ns and 1.94 ns zone costs are measured in the 2026-11-19 review. The cost of the 20 ms turn and of the zone lock under many threads is not measured.",
+      "surface": {
+        "gist": "Should Jet's timeline draw a running program's work as it happens, from the event buffer it already keeps?",
+        "lesson": "An observed program keeps a small buffer of its latest events, saved to a private file every 100 ms. Today jet perf attach copies it once. A shares that buffer with watchers as it fills, B repeats the one-time copy, and C streams events over a socket.",
+        "options": [
+          {
+            "key": "A",
+            "name": "Share the program's buffer",
+            "gist": "The timeline scrolls as the program runs, in the terminal or in Canvas.",
+            "gains": [
+              "A stutter is seen while it happens.",
+              "One way out for events; watchers add no work to the program.",
+              "Stopping keeps the watched window as a normal trace."
+            ],
+            "losses": [
+              "Samples trail the program by up to 20 ms.",
+              "Zones cost the program while someone watches."
+            ],
+            "proposed": {
+              "code": "$ jet run --observe live.jet &\n$ jet perf attach --follow\nfollowing 48213 live.jet: zones on while you watch\n[5952258427..5952491962] live.jet#tick · 1 sample · live.jet:13\n^C\nTrace: /home/user/game/.jet/perf/1795089901-a41b55f6.jettrace\n// Canvas: Profile view, press Live"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Repeat the one-time capture",
+            "gist": "Loop today's attach and reopen the newest trace each second.",
+            "gains": [
+              "Nothing new to build or learn."
+            ],
+            "losses": [
+              "Each picture arrives more than a second late.",
+              "A zone across two windows is cut in half.",
+              "Zones are off between passes."
+            ],
+            "proposed": {
+              "code": "$ while true; do\n    jet perf attach 48213 --source live.jet --zones=1s --out last.jettrace\n  done\n// reopen last.jettrace each second"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Stream over a socket",
+            "gist": "Each observed program listens on a private socket that viewers connect to.",
+            "gains": [
+              "The same live view as A."
+            ],
+            "losses": [
+              "A second way out for the same events.",
+              "A listening socket in every observed program."
+            ],
+            "proposed": {
+              "code": "$ jet perf attach 48213 --follow --source live.jet\nconnected to 48213 live.jet; Ctrl-C stops"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A gives Tracy's live picture from the buffer the program already keeps. Watchers add no work to the program, and what you watched stays as an ordinary trace.",
+          "gains": [
+            "Live view in the terminal and in Canvas.",
+            "No process id or source path for beginners.",
+            "The watched window is kept as a trace."
+          ],
+          "losses": [
+            {
+              "loss": "Samples trail by up to 20 ms.",
+              "mitigation": "Zones show at once, and events carry the program's own clock, so the delay never changes a measurement."
+            },
+            {
+              "loss": "Zones cost the program while watched.",
+              "mitigation": "Only while watched, the cost is shown in the header, and planned work brings it under Tracy's."
+            },
+            {
+              "loss": "A stalled watcher can lose events.",
+              "mitigation": "Each loss is drawn as a marked gap with its count."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A second late, with gaps where the stutter can hide."
+            },
+            {
+              "key": "C",
+              "reason": "The same view through a second exit for the same events."
+            }
+          ],
+          "tradeoff": "A faster helper thread while watched, for a live timeline with one way out for events."
+        },
+        "trio": {
+          "current": {
+            "note": "Today attach copies the buffer once, and the timeline is drawn after the capture ends.",
+            "code": "$ jet perf attach 48213 --source live.jet --zones=500ms --out z.jettrace\n$ jet perf view z.jettrace   # drawn after the window closes"
+          },
+          "wild": {
+            "lang": "C++ (Tracy)",
+            "note": "The profiler window connects to the running game and draws each zone as it arrives.",
+            "code": "ZoneScopedN(\"tick\");   // drawn live in the Tracy window\nFrameMark;"
+          }
+        }
+      },
+      "designAway": [
+        {
+          "loss": "A's view trails the program.",
+          "attempts": [
+            "Keep the 100 ms turn: rejected, a 60 Hz game would show six frames at a time.",
+            "Turn every 20 ms while someone watches: kept. The writer's pace is unchanged when nobody watches.",
+            "Store zone rows straight into shared memory: kept, so zones and frames show at once.",
+            "Draw on the program's own clock: kept, so the delay never changes a measured time."
+          ],
+          "result": "Up to one 20 ms turn of delay for samples, waits and I/O, none for zones, and none in any number shown."
+        },
+        {
+          "loss": "Zones cost the program while watched.",
+          "attempts": [
+            "Keep zones off and draw samples alone: rejected, zones are what a game developer marks to find a stutter.",
+            "Zones on only while a holder's request stands: kept.",
+            "Show the zone count and its measured cost in the header: kept.",
+            "Drop the write call a zone makes when the shared buffer fills, and the writer's flush under the zone lock: kept, rows go straight to shared memory."
+          ],
+          "result": "The cost exists only while someone watches and is always shown. G36 lowers it under Tracy's and removes the shared lock."
+        },
+        {
+          "loss": "Feeding watchers could add a second way out and work that grows with each watcher.",
+          "attempts": [
+            "A file per watcher that the writer appends to each turn, capped at 64 MiB: rejected. It is a second exit beside the published buffer, the writer's work grows with each watcher, and point attach would read a different file.",
+            "One shared buffer that every reader reads at its own pace: kept."
+          ],
+          "result": "Watchers cost the program nothing, and point attach, follow and Canvas share one reader."
+        },
+        {
+          "loss": "Two watchers, or a watcher and a point attach, turn zones on and off under each other.",
+          "attempts": [
+            "One request per holder, named by its pid and start time, with zones on while any holder lives: kept.",
+            "Drop a dead holder's request at the next turn: kept, so a killed watcher never leaves zones on, and a reused pid never holds them."
+          ],
+          "result": "Watchers never disturb each other."
+        },
+        {
+          "loss": "Lost events could go unseen.",
+          "attempts": [
+            "Count the sends a full record socket refuses, in the shared header: kept.",
+            "Count the records a reader was lapped by: kept.",
+            "Cap a stalled watcher's backlog in a file: rejected with the file per watcher."
+          ],
+          "result": "Every loss is drawn with its count, in the terminal, in Canvas and in the saved trace."
+        },
+        {
+          "loss": "Another user could turn a program's zones on, as any local user can today.",
+          "attempts": [
+            "Keep the files in the shared temp directory, owner-only: rejected, anyone can create a request beside them.",
+            "Move every published file and request into the user's private runtime directory: kept."
+          ],
+          "result": "Only the program's owner can read its events or turn its zones on."
+        },
+        {
+          "loss": "A program that exits mid-follow takes its last events with it.",
+          "attempts": [
+            "Drain once more at exit and mark the run ended with its status before removing the name: kept.",
+            "For a program killed outright: its zone rows survive in shared memory, and its last turn of samples is reported missing, not hidden."
+          ],
+          "result": "A normal exit shows every event; a kill loses at most 20 ms of samples and says so."
+        },
+        {
+          "loss": "Beginners must find a process id and repeat the source path.",
+          "attempts": [
+            "Follow the one live observed program of this user when no id is given, and list them when there are several: kept.",
+            "Skip and remove files left by a program that no longer runs: kept.",
+            "Default --source to the source the program published, resolved against its working directory: kept.",
+            "Canvas's Live button starts the program observed itself: kept."
+          ],
+          "result": "jet perf attach --follow, or one button in Canvas."
+        },
+        {
+          "loss": "On the web tier the relay stops at 4096 rows, so a follow would go quiet.",
+          "attempts": [
+            "Keep the newest rows past the bound, and count the rows a watcher missed: kept."
+          ],
+          "result": "A web page is followed the same way as a native program."
+        }
+      ],
+      "draftedBy": "Main",
+      "reviewedBy": null,
+      "draft": true,
+      "status": "open",
+      "created": "2026-11-20T05:37:12.212Z"
     }
   ],
   "questions": [
@@ -137567,6 +137893,69 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-20T05:49:33.014Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "92 criteria, soft limit 6: same review"
+    },
+    {
+      "at": "2026-11-20T05:49:33.014Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#92 Profiling leaves no files behind: the .spans file is bounded"
+    },
+    {
+      "at": "2026-11-20T05:49:32.197Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "91 criteria, soft limit 6: same review"
+    },
+    {
+      "at": "2026-11-20T05:49:32.197Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#91 No profile event is lost silently: a sample dropped because "
+    },
+    {
+      "at": "2026-11-20T05:49:31.341Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "90 criteria, soft limit 6: defects found by the D-LIVE-TIMELINE1 review in today's perf attach; they belong to this card's area"
+    },
+    {
+      "at": "2026-11-20T05:49:31.341Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#90 Turning another user's zones on is refused: an attach reques"
+    },
+    {
+      "at": "2026-11-20T05:49:14.060Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-LIVE-TIMELINE1",
+      "note": "review cleared by the edit"
+    },
+    {
+      "at": "2026-11-20T05:48:41.141Z",
+      "by": "BallotReviewLiveTimeline",
+      "action": "decision.review",
+      "ref": "D-LIVE-TIMELINE1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-20T05:37:12.212Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-LIVE-TIMELINE1",
+      "note": "A live timeline: watch a running program's work as it happens (draft)"
+    },
     {
       "at": "2026-11-20T05:35:24.466Z",
       "by": "Main",
