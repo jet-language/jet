@@ -5,7 +5,7 @@
 // then fails the build as E1293 naming the exact lint and site instead of
 // only printing a warning. Lint names resolve through the one generated
 // diagnostic registry; no second code/name table exists here.
-use jet_foundation.[DIAGNOSTIC_LINT, Diagnostic, diagnostic_from_registry, diagnostic_registry_row]
+use jet_foundation.[DIAGNOSTIC_LINT, Diagnostic, diagnostic_display_name, diagnostic_from_registry, diagnostic_registry_row]
 
 // The stable lint name of a rendered diagnostic code, if it is a lint.
 pkg_lint_name_for_code: fn(code: String) -> String? Never! {
@@ -39,7 +39,7 @@ pkg_lint_e1293: fn(original: Diagnostic) -> Diagnostic Never! {
     loop why.ends_with(".") -> why = why.removesuffix(".")
     holes: [{key: String, value: String}]{
         {key: "name", value: name},
-        {key: "code", value: original.code},
+        {key: "diagnostic", value: diagnostic_display_name(original.code)},
         {key: "what_text", value: original.what},
         {key: "why_text", value: why},
         {key: "fix_text", value: original.fix},

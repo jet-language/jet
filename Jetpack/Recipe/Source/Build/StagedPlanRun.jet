@@ -66,7 +66,7 @@ PlanSandbox: struct {
         source: if recipe_confined_source(self.source_dir, path, false) == {
             .Ok(resolved) -> resolved
             .Err(error) -> {
-                return Err(StagedPlanActionError.Failed("{error.code}: {error.what}"))
+                return Err(StagedPlanActionError.Failed(diagnostic_headline(error.code, error.what)))
             }
         }
         bytes: if recipe_read_file_nofollow(source, RECIPE_MAX_READ_BYTES) == {

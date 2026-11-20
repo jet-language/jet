@@ -43,7 +43,7 @@ publication_pkg_integration_entry: fn(name: String, version: String, hash: Strin
     if publication_ensure_index_clone(registry) == {
         .Err(error) -> {
             rendered: diagnostic_render(error.diagnostic, "package.jet", "", false)
-            assert(rendered.contains("E1235"))
+            assert(rendered.contains("Jet.RegistryUnreachable"))
             assert(!rendered.contains("super-secret"))
         }
         .Ok(_) -> panic("embedded credentials accepted")
@@ -52,7 +52,7 @@ publication_pkg_integration_entry: fn(name: String, version: String, hash: Strin
     if publication_ensure_index_clone(query) == {
         .Err(error) -> {
             rendered: diagnostic_render(error.diagnostic, "package.jet", "", false)
-            assert(rendered.contains("E1235"))
+            assert(rendered.contains("Jet.RegistryUnreachable"))
             assert(!rendered.contains("super-secret"))
         }
         .Ok(_) -> panic("credential-bearing parameters accepted")

@@ -35,6 +35,7 @@ use {
         gate_kind_name,
         gate_ledger_sort,
         diagnostic_from_registry,
+        diagnostic_headline,
         diagnostic_render_all,
         sha256_hex,
         TFailureCarrier,
@@ -332,7 +333,7 @@ jet_cli_review_load: fn(path: String) -> JetCLIReviewLoaded {
 jet_cli_review_side: fn(path: String, result: JetDriverCompileResult) -> JetCLIReviewLoaded {
     errors: jet_cli_errors(result.diagnostics)
     if errors.len() > 0 {
-        lines: loop diagnostic in errors -> "{diagnostic.code}: {diagnostic.what}"
+        lines: loop diagnostic in errors -> diagnostic_headline(diagnostic.code, diagnostic.what)
         return JetCLIReviewLoaded.Failed{message: lines.join("\n")}
     }
     if result.internal_problem == .Val(problem) {
@@ -369,7 +370,7 @@ jet_cli_review_side: fn(path: String, result: JetDriverCompileResult) -> JetCLIR
     }
     if ledger.diagnostic_rows.len() > 0 {
         first: ledger.diagnostic_rows[0].diagnostic
-        return JetCLIReviewLoaded.Failed{message: "{first.code}: {first.what}"}
+        return JetCLIReviewLoaded.Failed{message: diagnostic_headline(first.code, first.what)}
     }
     gate_ledger_sort(ledger)
     index: jet_cli_checked_semindex(result)

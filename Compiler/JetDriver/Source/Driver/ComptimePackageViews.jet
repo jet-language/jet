@@ -6,7 +6,7 @@
 // public projections (PackageViews.jet). A failure is a `CompilerPackageError`
 // {code, message, file, cause}, never a diagnostic: the caller decides.
 use {
-    jet_foundation.[Diagnostic, TComptimeField, TComptimeReport, TComptimeValue, diagnostic_from_registry]
+    jet_foundation.[Diagnostic, TComptimeField, TComptimeReport, TComptimeValue, diagnostic_from_registry, diagnostic_headline]
     jet_eval.[
         jet_eval_compiler_services_int,
         jet_eval_compiler_services_option_string,
@@ -76,7 +76,7 @@ jet_driver_package_authority_reason: fn(cause: AuthorityError) -> String Never! 
 }
 
 jet_driver_package_authority_error: fn(file: String, message: String, cause: AuthorityError) -> JetDriverPackageReadError Never! {
-    jet_driver_package_read_error(file, message, "{cause.diagnostic().code}: {jet_driver_package_authority_reason(cause)}")
+    jet_driver_package_read_error(file, message, diagnostic_headline(cause.diagnostic().code, jet_driver_package_authority_reason(cause)))
 }
 
 // `authority_diagnostic`: an authority failure as the profile evaluator's
@@ -86,8 +86,10 @@ jet_driver_package_authority_diagnostic: fn(cause: AuthorityError) -> EnvModelEv
 }
 
 jet_driver_package_diagnostic_cause: fn(diagnostic: Diagnostic) -> String Never! {
-    if diagnostic.detail == .Val(detail) -> return "{diagnostic.code}: {diagnostic.what}; {detail}"
-    "{diagnostic.code}: {diagnostic.what}"
+    if diagnostic.detail == .Val(detail) {
+        return diagnostic_headline(diagnostic.code, "{diagnostic.what}; {detail}")
+    }
+    diagnostic_headline(diagnostic.code, diagnostic.what)
 }
 
 jet_driver_package_inline_parse_error: fn(error: PackageParseError) -> JetDriverPackageReadError Never! {
@@ -119,7 +121,7 @@ jet_driver_package_inline_carrier: fn(resolver: AuthorityResolver) -[FS, Env]> J
         block := InlinePackageBlock?{None}
         if pkg_extract_inline_package(source) == {
             .Ok(found) -> block = found
-            .Err(error) -> return Err(jet_driver_package_read_error(PACKAGE_FILE, "could not read the inline package", "{error.diagnostic().code}: inline Package carrier is malformed; fix the leading package block and try again"))
+            .Err(error) -> return Err(jet_driver_package_read_error(PACKAGE_FILE, "could not read the inline package", diagnostic_headline(error.diagnostic().code, "inline Package carrier is malformed; fix the leading package block and try again")))
         }
         resolver.revalidate_file(checked) ?? return Err(jet_driver_package_authority_error(PACKAGE_FILE, "the inline package carrier changed while it was being read", err))
         if block == .Val(inline) {

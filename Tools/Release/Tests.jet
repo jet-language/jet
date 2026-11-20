@@ -967,8 +967,9 @@ boot_seeds: fn(label: String) -[FS, Env]> String Never! {
 }
 
 // A released jet that reads Core from JET_TOOLCHAIN_ROOT and fails as a
-// compiler that can't read it does, with E2105, when the tree lacks Core.
-CORE_READING_JET: "#!/bin/sh\nif [ ! -f \"$JET_TOOLCHAIN_ROOT/Core/Core.jet\" ]; then\n  echo \"error[E2105]: Can't read Core/Core.jet\" >&2\n  exit 1\nfi\necho preflight probe\n"
+// compiler that can't read it does, with Jet.DriverOperationFailed, when the
+// tree lacks Core.
+CORE_READING_JET: "#!/bin/sh\nif [ ! -f \"$JET_TOOLCHAIN_ROOT/Core/Core.jet\" ]; then\n  echo \"Error: Jet.DriverOperationFailed: Can't read Core/Core.jet\" >&2\n  exit 1\nfi\necho preflight probe\n"
 
 #Test("an admit whose release column's compiler can't read its tree's Core is refused at preflight, with no gains or losses") {
     seeds: files.mkdtemp("jet-release-preflight-") ?? panic("scratch: {err}")
@@ -991,7 +992,7 @@ CORE_READING_JET: "#!/bin/sh\nif [ ! -f \"$JET_TOOLCHAIN_ROOT/Core/Core.jet\" ];
     files.create_dir_all(broken.release_tree) ?? panic("tree: {err}")
     refused: gate_preflight(broken) ?? panic("a compiler that can't read its tree's Core passed preflight")
     assert(refused.starts_with("the release column's compiler {column.jet} ({column.identity}) cannot check a one-line program against the Core of its tree {COMMIT.slice(0..<10)} (rc=1)"))
-    assert(refused.contains("E2105"))
+    assert(refused.contains("Jet.DriverOperationFailed"))
     assert_eq((loop found in broken.rows -> "{found.check} {found.status}"), [String]{"preflight:release FAIL"})
     assert_eq(broken.suites.len(), 0)
     assert_eq(broken.jetpack_fixed.len(), 0)

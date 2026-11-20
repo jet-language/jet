@@ -39,7 +39,7 @@ use {
     child.stdin.close()
     out: child.wait() ?? panic("wait for services up")
     assert_eq(out.code, 2)
-    assert(out.errors.contains("E1255"), "stderr: {out.errors}")
+    assert(out.errors.contains("Jet.UntrustedEnvironment"), "stderr: {out.errors}")
     assert(!files.exists(claim.service_dir("fixture")), "an untrusted project must not start its services")
     claim.remove()
 }
@@ -65,7 +65,7 @@ use {
     claim.write_project("fixture: {{ run: [\"sleep\", \"30\"], ready: \"false\" }}", "run: fn() {{}}\n")
     out: claim.run([String]{"services", "wait", "fixture", "--no-color"}, cli_test_health_timeout("500"))
     assert_eq(out.code, 1)
-    assert(out.errors.contains("E1261"), "stderr: {out.errors}")
+    assert(out.errors.contains("Jet.ServiceNeverHealthy"), "stderr: {out.errors}")
     assert(out.errors.contains("Service `fixture` is not ready"), "stderr: {out.errors}")
     claim.remove()
 }
@@ -79,7 +79,7 @@ use {
     out: claim.run([String]{"services", "up", "timeout", "--no-color"}, cli_test_health_timeout("500"))
     assert(!out.success, "readiness timeout unexpectedly succeeded")
     output: "{out.output}{out.errors}"
-    assert(output.contains("E1261"), "output: {output}")
+    assert(output.contains("Jet.ServiceNeverHealthy"), "output: {output}")
     service_dir: claim.service_dir("timeout")
     lifecycle: files.read(files.join(service_dir, "lifecycle")) ?? panic("read lifecycle")
     assert(lifecycle.contains("phase=failed"), lifecycle)
@@ -94,7 +94,7 @@ use {
     claim.write_project("fixture: {{ run: [\"sleep\", \"30\"], prot: 5432 }}", "run: fn() {{}}\n")
     out: claim.run([String]{"services", "up", "--no-color"}, cli_test_no_env())
     assert_eq(out.code, 2)
-    assert(out.errors.contains("E1262"), "stderr: {out.errors}")
+    assert(out.errors.contains("Jet.UnknownServiceField"), "stderr: {out.errors}")
     claim.remove()
 }
 
@@ -124,7 +124,7 @@ use {
     claim.write_project("fixture: {{ run: [\"sh\", \"-c\", \"exit 7\"], restart: .OnFailure{{ max: 1, backoff_ms: 1 }} }}", "run: fn() {{}}\n")
     up: claim.run([String]{"services", "up", "--no-color"}, cli_test_health_timeout("500"))
     assert(!up.success, up.errors)
-    assert(up.errors.contains("E1261"), "stderr: {up.errors}")
+    assert(up.errors.contains("Jet.ServiceNeverHealthy"), "stderr: {up.errors}")
     cli_test_wait_for_missing(files.join(claim.service_dir("fixture"), "pid"))
     assert(files.is_file(files.join(claim.service_dir("fixture"), "supervisor.error")), "restart exhaustion must leave a supervisor error")
     health: claim.run([String]{"services", "health", "--no-color"}, cli_test_health_timeout("500"))
@@ -227,7 +227,7 @@ use {
     claim.write_project("database: {{ run: [\"sleep\", \"30\"] }}, api: {{ run: [\"sleep\", \"30\"], depends_on: [\"database\"] }}", "run: fn() {{}}\n")
     out: claim.run([String]{"services", "up", "--no-color"}, cli_test_no_env())
     assert_eq(out.code, 2)
-    assert(out.errors.contains("E1262"), out.errors)
+    assert(out.errors.contains("Jet.UnknownServiceField"), out.errors)
     assert(!files.exists(files.join(claim.service_dir("api"), "pid")))
     claim.remove()
 }
@@ -243,7 +243,7 @@ use {
     assert_eq(out.code, 2)
     elapsed_ms: time.elapsed(watch).ns /% 1000000
     assert(elapsed_ms < 3000, "readiness probe was not bounded: {elapsed_ms} ms")
-    assert(out.errors.contains("E1261"))
+    assert(out.errors.contains("Jet.ServiceNeverHealthy"))
     assert(!files.exists(files.join(claim.service_dir("fixture"), "pid")))
     claim.remove()
 }

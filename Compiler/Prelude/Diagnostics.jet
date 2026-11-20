@@ -8904,11 +8904,11 @@ ScopeMemberArgumentMismatch: struct {
         what: fn(self) -> String { "This scope member has the wrong arguments." }
 
         why: fn(self) -> String {
-            "`.timeout` takes one duration value; `.setup` takes none; `.expect_fail` takes an optional registered E30xx code and optional `message: \"text\"` with a non-empty literal matched as a case-sensitive substring; `.skip` takes an optional reason string."
+            "`.timeout` takes one duration value; `.setup` takes none; `.expect_fail` takes an optional registered runtime stop name and optional `message: \"text\"` with a non-empty literal matched as a case-sensitive substring; `.skip` takes an optional reason string."
         }
 
         fix: fn(self) -> String {
-            "Match the member's shape, e.g. `.timeout(500ms) {{ … }}`, `.expect_fail(E3001, message: \"reason\") {{ … }}`, or `.skip(\"reason\") {{ … }}`."
+            "Match the member's shape, e.g. `.timeout(500ms) {{ … }}`, `.expect_fail(Jet.Panic, message: \"reason\") {{ … }}`, or `.skip(\"reason\") {{ … }}`."
         }
     }
 }
@@ -19769,7 +19769,7 @@ MissingRandomness: struct {
 
 DeniedLint: struct {
     name: String,
-    code: String,
+    diagnostic: String,
     what_text: String,
     why_text: String,
     fix_text: String,
@@ -19785,7 +19785,7 @@ DeniedLint: struct {
         fix_next: "Apply the underlying lint fix, or remove the lint from `policy.lints.deny`.",
 
         what: fn(self) -> String {
-            "Lint `{self.name}` (`{self.code}`) is denied by policy: {self.what_text}"
+            "Lint `{self.name}` (`{self.diagnostic}`) is denied by policy: {self.what_text}"
         }
 
         why: fn(self) -> String {

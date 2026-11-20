@@ -16,6 +16,7 @@ use jet_foundation.[
     diagnostic_explanation_render,
     diagnostic_from_registry,
     diagnostic_is_tidy,
+    diagnostic_registry_row,
     diagnostic_render_all,
     diagnostic_without_fix,
     diagnostic_theme_dim,
@@ -198,12 +199,16 @@ jet_driver_present_diagnostics: fn(diagnostics: [Diagnostic], snapshot: JetDrive
 }
 
 // Rendered problems, a blank line, the summary verdict, and the pointer that
-// names the first code.
+// names the first report, when `jet explain` knows it: a registered row or a
+// library's own type path.
 jet_driver_problem_report: fn(file: String, source: String, diagnostics: [Diagnostic], summary: String, color: Bool) -> String Never! {
     if diagnostics.len() == 0 -> return ""
     rendered: diagnostic_render_all(file, source, diagnostics, color)
-    pointer: jet_driver_explain_pointer_line(diagnostics[0].code, color)
-    "{rendered}\n{summary}\n{pointer}\n"
+    code: diagnostics[0].code
+    if diagnostic_registry_row(code) == None && !code.contains(".") {
+        return "{rendered}\n{summary}\n"
+    }
+    "{rendered}\n{summary}\n{jet_driver_explain_pointer_line(code, color)}\n"
 }
 
 jet_driver_plural: fn(count: Int) -> String Never! { if count == 1 -> "" else -> "s" }

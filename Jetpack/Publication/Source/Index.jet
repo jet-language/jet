@@ -5,7 +5,7 @@
 // Rust's InvalidData reports InvalidInput (CORE-GAPS 11); open/create/fsync and
 // Stat.modified nanoseconds owe #3593. No Other-kind fallback.
 use {
-    jet_foundation.[foundation_parse_protocol_json]
+    jet_foundation.[diagnostic_headline, foundation_parse_protocol_json]
     jet_pkg_model.[
         PublicationRegistryTier,
         pkg_json_bool,
@@ -335,7 +335,7 @@ publication_write_index_entry_locked: fn(repo: String, entry: PublicationIndexEn
         entries.push(existing)
     }
     if publication_validate_takeover(repo, entries, entry) == .Err(error) {
-        return Err(publication_index_error(.PermissionDenied, path, "{error.diagnostic.code}: {error.diagnostic.what}"))
+        return Err(publication_index_error(.PermissionDenied, path, diagnostic_headline(error.diagnostic.code, error.diagnostic.what)))
     }
     separator: if text != "" && !text.ends_with("\n") -> "\n" else -> ""
     // Evidence must finish BEFORE the new immutable version becomes visible.

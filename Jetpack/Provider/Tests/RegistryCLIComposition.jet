@@ -84,7 +84,7 @@ publication_tuf_test_command: fn(root: String, project: String, bare: String, st
     _: publication_tuf_test_git(project, [String]{"commit", "-m", "snapshot api"})
     duplicate: publication_tuf_test_command(root, project, bare, store, [String]{"registry", "publish"}).run() ?? panic("republish")
     assert(!duplicate.success)
-    assert(duplicate.errors.contains("E1234"))
+    assert(duplicate.errors.contains("Jet.VersionAlreadyPublished"))
     files.remove_all(root) ?? panic("cleanup")
 }
 
@@ -106,7 +106,7 @@ publication_tuf_test_command: fn(root: String, project: String, bare: String, st
     b: right_child.wait() ?? panic("wait right")
     assert(a.success != b.success, "exactly one concurrent immutable publish must win")
     loser: if a.success -> b else -> a
-    assert(loser.errors.contains("E1234"))
+    assert(loser.errors.contains("Jet.VersionAlreadyPublished"))
     index: publication_tuf_test_git(root, [String]{"--git-dir", bare, "show", "HEAD:index/racekit/racekit.jsonl"}).output
     count := 0
     loop line in index.lines() {
@@ -147,7 +147,7 @@ publication_tuf_test_command: fn(root: String, project: String, bare: String, st
     files.write(files.join(consumer, "package.jet"), "{publication_tuf_test_manifest("ref-consumer", "0.1.0")}\ndeps: {{\n    refkit: refkit#1.2.0,\n}}\n") ?? panic("consumer manifest")
     denied: publication_tuf_test_command(root, consumer, bare, store, [String]{"fetch"}).run() ?? panic("fetch")
     assert(!denied.success)
-    assert(denied.errors.contains("E1207"))
+    assert(denied.errors.contains("Jet.UnresolvedRegistryDependency"))
     assert(denied.errors.contains("restore the immutable OCI referrer set") || denied.errors.contains("OCI referrer index digest"))
     roots: HangarRoots.at(files.join(root, "jetpack-root"))
     loop stored in store_list(verification, roots) {
@@ -344,7 +344,7 @@ registry_cli_test_entry_with: fn(verification: &StoreVerification, roots: Hangar
     roots: HangarRoots.at(files.join(root, "jetpack-root"))
     immature: registry_cli_test_fetch(root, consumer, bare, store, "200")
     assert(!immature.success, "an immature registry release must not fetch")
-    assert(immature.errors.contains("E2609"), immature.errors)
+    assert(immature.errors.contains("Jet.ImmaturePackage"), immature.errors)
     assert(immature.errors.contains("freshlib#1.2.0"), immature.errors)
     assert(!files.exists(files.join(files.join(files.join(files.join(consumer, ".jet"), "build"), "deps"), "freshlib")), "an immature release must not materialize")
     loop stored in store_list(verification, roots) {

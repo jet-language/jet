@@ -415,6 +415,15 @@ diagnostic_display_name: fn(code: String) -> String Never! {
     code.copy()
 }
 
+// One line that states a diagnostic: `Jet.Name: what` for a registered row
+// and `web.BadPath: what` for a library's own diagnostic. Any other code is a
+// number no reader can look up, so the line is the plain `what`.
+diagnostic_headline: fn(code: String, what: String) -> String Never! {
+    if diagnostic_registry_row(code) == .Val(row) -> return "{row.name}: {what}"
+    if code.contains(".") -> return "{code}: {what}"
+    what.copy()
+}
+
 // A tidy error (DiagnosticTier.Tidy): a lint whose registered row is on the
 // tidy tier.
 diagnostic_is_tidy: fn(diagnostic: Diagnostic) -> Bool Never! {

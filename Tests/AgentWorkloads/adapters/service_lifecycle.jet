@@ -39,7 +39,7 @@ run: fn(args: WorkloadArgs) {
     if {
         case_name == "service-lifecycle-readiness-timeout" -> {
             failed: service_run("{jetpack}", "{project}", "{home}", "{root}", "{state}", "{path}", ["services", "up", "timeout", "--trust", "--no-color"], "200")
-            if failed.success || (!failed.output.contains("E1261") && !failed.errors.contains("E1261")) -> panic("readiness timeout did not fail with E1261")
+            if failed.success || (!failed.output.contains("Jet.ServiceNeverHealthy") && !failed.errors.contains("Jet.ServiceNeverHealthy")) -> panic("readiness timeout did not fail with Jet.ServiceNeverHealthy")
             lifecycle: fs.read("{project}/.jet/services/timeout/lifecycle") ?? panic("failed service lost lifecycle")
             if !lifecycle.contains("phase=failed") || !lifecycle.contains("recovery=startup-failed") -> panic("failed service lost lifecycle receipt")
             if fs.exists("{project}/.jet/services/timeout/pid") -> panic("failed service retained pid")

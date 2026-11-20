@@ -36,7 +36,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `name: T -> expr` | computed struct field: a read-time formula read like a field; nothing assigns, lends for writing or takes it, even inside its module (E0339), so a public one over `priv` storage is a read-only field |
 | `Name: enum { A, B(T) } / .A / Name.A` | enum declaration: its cases are written bare and separated as struct fields are; a value or pattern names a case with its leading dot where the type is known (`.A`) or with the enum's name (`Name.A`); a dotted declaration is not Jet syntax |
 | `#` | attached marker; #[A, B] stacks |
-| `.expect_fail(message: "text")` | test region requires a stop with an optional E30xx code and non-empty case-sensitive raw-message substring |
+| `.expect_fail(message: "text")` | test region requires a stop with an optional runtime stop name (`Jet.Panic`) and non-empty case-sensitive raw-message substring |
 | `Name: struct { impl Marker { group: #[A, B] } }` | fixed named marker-group declaration; expands at each use without hiding gates or refusals |
 | `#module.Marker / #[module.Marker, Other]` | library marker through the import's local name; its declaration is public unless `priv` |
 | `#Inline / #Scalar / #Kernel / #Static` | separate callable promise, scalar hint, kernel proof and constant storage rules |

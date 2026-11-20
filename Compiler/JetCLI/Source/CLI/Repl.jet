@@ -41,6 +41,7 @@ use {
         deep_checks_malformed,
         deep_checks_read,
         diagnostic_from_registry,
+        diagnostic_headline,
         diagnostic_render_all,
         diagnostic_theme_accent,
         diagnostic_theme_bold,
@@ -802,7 +803,7 @@ jet_cli_repl_render: fn(session: JetCLIReplSession, text: String, diagnostics: [
 }
 
 jet_cli_repl_error_summary: fn(diagnostics: [Diagnostic]) -> String Never! {
-    parts: loop diagnostic in diagnostics -> "{diagnostic.code}: {diagnostic.what}"
+    parts: loop diagnostic in diagnostics -> diagnostic_headline(diagnostic.code, diagnostic.what)
     parts.join("; ")
 }
 

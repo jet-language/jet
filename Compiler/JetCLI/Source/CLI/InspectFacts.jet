@@ -35,6 +35,7 @@ use {
         ENV_JET_FACTS_ANSWER,
         Span,
         TComptimeValue,
+        diagnostic_headline,
         symbol_key_names,
     ]
     jet_sema.[SemaComptimeItemKind]
@@ -413,7 +414,7 @@ jet_cli_facts_answer: fn(kind: String) -> JetCLIFactsOutcome Never! {
     if result.internal_problem == .Val(problem) -> return JetCLIFactsOutcome.Failed{reason: problem}
     loop diagnostic in result.diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR {
-            return JetCLIFactsOutcome.Failed{reason: "{diagnostic.code}: {diagnostic.what}"}
+            return JetCLIFactsOutcome.Failed{reason: diagnostic_headline(diagnostic.code, diagnostic.what)}
         }
     }
     snapshot := ""
@@ -454,7 +455,7 @@ jet_cli_facts_run_answer: fn(path: String, kind: String) -> JetCLIFactsOutcome N
     if result.internal_problem == .Val(problem) -> return JetCLIFactsOutcome.Failed{reason: problem}
     loop diagnostic in result.diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR {
-            return JetCLIFactsOutcome.Failed{reason: "{diagnostic.code}: {diagnostic.what}"}
+            return JetCLIFactsOutcome.Failed{reason: diagnostic_headline(diagnostic.code, diagnostic.what)}
         }
     }
     loop value in result.comptime_values {
@@ -478,14 +479,14 @@ jet_cli_facts_invoke: fn(program: String, args: [TComptimeValue], core_sources: 
     }
     loop diagnostic in compiled.diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR {
-            return JetCLIFactsOutcome.Failed{reason: "{diagnostic.code}: {diagnostic.what}"}
+            return JetCLIFactsOutcome.Failed{reason: diagnostic_headline(diagnostic.code, diagnostic.what)}
         }
     }
     inputs := selection.inputs.move() ?? return JetCLIFactsOutcome.Failed{reason: "the query program lost its checked functions"}
     run := jet_driver_invocation_run(inputs, args, jet_eval_runtime_config(request.eval_config), Span{start: 0, end: 0})
     evaluated := run.result.move() ?? return JetCLIFactsOutcome.Failed{reason: run.problem.move() ?? "the query program did not run"}
     if evaluated.error == .Val(failure) {
-        return JetCLIFactsOutcome.Failed{reason: "{failure.diagnostic.code}: {failure.diagnostic.what}"}
+        return JetCLIFactsOutcome.Failed{reason: diagnostic_headline(failure.diagnostic.code, failure.diagnostic.what)}
     }
     if evaluated.internal_problem == .Val(internal) {
         return JetCLIFactsOutcome.Failed{reason: internal.message.copy()}

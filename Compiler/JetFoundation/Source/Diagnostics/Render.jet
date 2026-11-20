@@ -339,7 +339,7 @@ diagnostic_render_with: fn(diagnostic: Diagnostic, file: String, source: String,
     fix: diagnostic_escape_terminal_text(diagnostic.fix)
     label: diagnostic_theme_severity(color, diagnostic, if diagnostic_is_warning(diagnostic) -> "Warning" else -> "Error")
     out := [U8]{}
-    diagnostic_push_text(out, "{label}: {diagnostic_display_name(diagnostic.code)}: {what}\n")
+    diagnostic_push_text(out, "{label}: {diagnostic_headline(diagnostic.code, what)}\n")
     if diagnostic.span != None || diagnostic.labels.len() > 0 {
         position: diagnostic_source_position(sources, diagnostic.origin, source)
         if diagnostic.span == .Val(span) {
@@ -374,8 +374,9 @@ diagnostic_render_with: fn(diagnostic: Diagnostic, file: String, source: String,
             diagnostic_push_text(out, " {diagnostic_theme_bold(color, "Nearest granting scope:")} {diagnostic_escape_terminal_text(scope)}\n")
         }
     }
-    // Jet's own codes have a reference page; a library diagnostic's code is its type path.
-    if !diagnostic.code.contains(".") {
+    // A registered row has a reference page; a library diagnostic's code is its
+    // type path, and any other code names no page.
+    if diagnostic_registry_row(diagnostic.code) != None {
         diagnostic_push_text(out, diagnostic_more_line(diagnostic.code))
     }
     String.from_bytes(out) ?? ""
