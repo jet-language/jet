@@ -601,10 +601,10 @@ the worked example.
 The same waits give off-CPU time by stack, as an off-CPU flame graph does.
 `jet perf view` sums the waits' time by stack, outermost frame first, ending
 with the wait the stack blocked in, and lists the 16 longest under `off-cpu
-by stack`: `150212345ns waits=1 · run main.jet:5 > pause main.jet:15 > time
-sleep`. A function that ends in a call, as `nap: fn(span: Duration) {
-time.sleep(span) }` does, jumps to it and leaves no frame of its own. A
-stack holds the checked source's frames only,
+by stack`: `150212345ns waits=1 · run main.jet:5 > pause main.jet:15 > nap
+main.jet:10 > time sleep`. A function whose call ends it as a tail call
+(Compiler/JetIR/Source/TailCalls.jet) jumps to its callee and leaves no
+frame of its own on the stack. A stack holds the checked source's frames only,
 as the CPU-time profile's lines do; a wait whose stack holds none counts
 under its name alone. Tests/Cases/Perf/off_cpu_time_by_stack.case is the
 worked example.
