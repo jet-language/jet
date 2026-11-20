@@ -601,3 +601,84 @@ cost_projection_spill_source: fn() -> String {
     spill: "An exact Int operation may spill to bigint inside a loop | To keep the Int on the packed rail, give it a range type such as `Int(0..1000)` or a fixed width such as `I64`, or cap it in the loop's condition."
     assert_eq(tidy, [String]{spill, spill, spill, spill})
 }
+
+// Hashes a loop multiplies each turn under `wrapping` or `saturating`: an
+// Int FNV-1a that mixes the byte in before the product, an Int polynomial
+// hash that adds it in a statement before, an Int counter `wrapping` adds
+// to, and the FNV-1a on U64. Last a canonical Huffman code, an Int a loop
+// shifts after adding to it: a shift grows only the Int itself, not a mixed
+// one.
+cost_projection_wrapping_hash_source: fn() -> String {
+    [String]{
+        "PRIME: 1099511628211",
+        "fnv: fn(data: [U8]) -> Int {{",
+        "    h := -3750763034362895579",
+        "    loop b in data {{",
+        "        h = wrapping((h ~ Int{{b}}) * PRIME)",
+        "    }}",
+        "    h",
+        "}}",
+        "polynomial: fn(data: [U8]) -> Int {{",
+        "    h := 7",
+        "    loop b in data {{",
+        "        h = h + Int{{b}}",
+        "        h = saturating(h * 31)",
+        "    }}",
+        "    h",
+        "}}",
+        "count: fn(data: [U8]) -> Int {{",
+        "    n := 0",
+        "    loop _ in data {{",
+        "        n = wrapping(n + 1)",
+        "    }}",
+        "    n",
+        "}}",
+        "word: fn(data: [U8]) -> U64 {{",
+        "    h := U64{{14695981039346656037}}",
+        "    loop b in data {{",
+        "        h = wrapping((h ~ U64{{b}}) * U64{{1099511628211}})",
+        "    }}",
+        "    h",
+        "}}",
+        "huffman: fn(counts: [Int]) -> Int {{",
+        "    code := 0",
+        "    loop n in counts {{",
+        "        code = (code + n) << 1",
+        "    }}",
+        "    code",
+        "}}",
+        "",
+    }.join("\n")
+}
+
+#Test("an Int product a loop grows under wrapping or saturating is the exact product and marked growing; the same hash on U64 and a shift of a mixed Int are no spill site") {
+    request := cost_projection_request(cost_projection_wrapping_hash_source())
+    request.capture_cost_report = true
+    captured := jet_driver_compile(request)
+    assert(captured.complete, "the fixture checks: {captured.diagnostics.map(fn(row) { row.what })}")
+    report: captured.cost_report.move() ?? panic("a captured check keeps its cost report")
+    spills := [String]{}
+    loop site in report.sites {
+        if site.kind == TCostKind.ExactIntSpill && site.loop_depth > 0 {
+            spills.push("{site.function} main.jet:{site.line} {site.state:Debug} grows {site.grows}")
+        }
+    }
+    spills.sort()
+    assert_eq(
+        spills,
+        [String]{
+            "count main.jet:20 SemanticRemainder grows false",
+            "fnv main.jet:5 SemanticRemainder grows true",
+            "huffman main.jet:34 SemanticRemainder grows false",
+            "polynomial main.jet:12 SemanticRemainder grows false",
+            "polynomial main.jet:13 SemanticRemainder grows true",
+        },
+    )
+    compiled := jet_driver_compile(cost_projection_request(cost_projection_wrapping_hash_source()))
+    tidy := [String]{}
+    loop row in compiled.diagnostics {
+        if row.code == "L2511" -> tidy.push("{row.what}")
+    }
+    spill: "An exact Int operation may spill to bigint inside a loop"
+    assert_eq(tidy, [String]{spill, spill})
+}

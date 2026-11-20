@@ -7543,10 +7543,13 @@ attached targets. Restart rebuilds through the same pipeline and preserves
 source breakpoints while invalidating every object reference.
 
 The default projection never exposes generated Rust names, paths, helper
-threads, backend values, addresses, secrets, or raw backend text. Explicit
+threads, backend values, secrets, or raw backend text, and no addresses but
+each Jet frame's `instructionPointerReference`. Explicit
 `showRawFrames` appends clearly marked raw frames/scopes without changing
-stepping or evaluation semantics. Mutation, memory read/write, reverse
-execution, disassembly, and other unimplemented advanced requests are
+stepping or evaluation semantics. Under **D-DISASM1=A** the `disassemble`
+request lists the program's machine code with its source lines; stepping by
+instruction and instruction breakpoints stay unsupported. Mutation, memory
+read/write, reverse execution, and other unimplemented advanced requests are
 truthfully unsupported. Conformance vendors a pinned Microsoft DAP schema,
 model-tests every legal and illegal transition/reference lifetime, and drives
 the current VS Code client plus native backend tests without skip on supported

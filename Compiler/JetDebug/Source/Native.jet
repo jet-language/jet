@@ -67,7 +67,10 @@ native_debug_refused: fn(detail: String) -> String Never! {
 // source node; `column` is 0 when the frame names a line only.
 // `file` is the source's name, which the console shows, and `path` the
 // source itself as the line table names it (native_line_source; "" for
-// none), which the session reads it by (NativeSession.frame_source).
+// none), which the session reads it by (NativeSession.frame_source). `pc`
+// is where the frame's code is at, a caller's its return address, and the
+// same for an inlined frame as for the frame it is inlined into; 0 when
+// the frame was not unwound (a stop's own frame).
 NativeFrame: struct {
     function: String,
     file: String,
@@ -75,6 +78,7 @@ NativeFrame: struct {
     inlined: Bool,
     column: Int{0},
     path: String{""},
+    pc: Int{0},
 }
 
 // One frame a backtrace shows, against the frames the unwinder found: the
@@ -2179,6 +2183,7 @@ NativeSession: struct {
                 found[own].line = call.line
                 found[own].column = call.column
             }
+            loop k in 0..<found.len() -> found[k].pc = frame.pc
             loop row in found.move() -> shown.push(row)
         }
         Ok(shown)

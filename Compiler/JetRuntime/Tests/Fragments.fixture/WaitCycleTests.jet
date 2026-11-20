@@ -1,0 +1,67 @@
+// The wait-cycle stop under the real scheduler root, on the main task's
+// control and one task control the fragment enters, as a task's body and its
+// release run on it.
+wait_cycle_test_require: fn(ok: Bool) {
+    if !ok -> jet_rt_unreachable(I64{0}, I64{0})
+}
+
+// A task canceled before its body ran holds the Sender its spawner handed it
+// until its release takes and drops it, which can come after the main task
+// blocked on the channel. That drop ends the task's ledger row, so it wakes
+// the main task's receive, whose wait arms again and finds the main task the
+// only holder left: a cycle of one, delivered, instead of a sleep forever. A
+// drop that leaves the task holding another Sender wakes nothing.
+wait_cycle_tests: fn() {
+    main: scheduler_control_current()
+    wait_cycle_test_require(main != I64{0} && wait_cycle_lock() != I64{0})
+    endpoints: jet_rt_alloc(I64{16}, I64{8})
+    save: jet_rt_alloc(I64{32}, I64{8})
+    jet_rt_native_channel(I64{0}, I64{0}, endpoints, wrapping(endpoints + I64{8}))
+    tx: sync_load(endpoints)
+    rx: sync_load(wrapping(endpoints + I64{8}))
+    // The spawn hands the task a clone of the main task's Sender.
+    handed: jet_rt_native_sender_clone(tx)
+    jet_rt_native_sender_pass(handed)
+    // The main task blocks on the receive before the task runs: no row
+    // counts the handed Sender yet, so the wait closes no cycle.
+    slot: sync_park_new()
+    node: channel_wait_new(slot)
+    sync_mutex_lock(rx)
+    channel_wait_add(rx, node, false)
+    sync_mutex_unlock(rx)
+    wait_cycle_note(main, WAIT_CYCLE_RECEIVE, rx)
+    wait_cycle_test_require(wait_cycle_arm(main, slot))
+    wait_cycle_test_require(!wait_cycle_delivered(main))
+    // The task's release, its body never started, takes the handed Sender
+    // and drops it. A drop that leaves it another Sender wakes nothing.
+    task: scheduler_control_new()
+    scheduler_control_enter(task, save)
+    jet_rt_native_sender_take(handed)
+    spare: jet_rt_native_sender_clone(handed)
+    jet_rt_native_sender_drop(spare)
+    wait_cycle_test_require((sync_load(wrapping(node + I64{16})) & I64{1}) != I64{0})
+    jet_rt_native_sender_drop(handed)
+    scheduler_control_leave(save)
+    scheduler_control_drop(task)
+    wait_cycle_test_require(sync_load(wrapping(node + I64{16})) == I64{2})
+    wait_cycle_test_require(sync_load(wrapping(rx + I64{144})) == I64{0})
+    // Woken, the receive parks again and its re-armed wait is the cycle.
+    wait_cycle_disarm(main)
+    wait_cycle_test_require(wait_cycle_arm(main, slot))
+    wait_cycle_test_require(wait_cycle_delivered(main))
+    record: sync_load(wrapping(main + I64{184}))
+    wait_cycle_test_require(sync_load(wrapping(record + I64{8})) == I64{1} && sync_load(wait_cycle_entry(record, I64{0})) == main)
+    wait_cycle_disarm(main)
+    lock: wait_cycle_lock()
+    sync_mutex_lock(lock)
+    sync_store(wrapping(main + I64{184}), I64{0})
+    sync_mutex_unlock(lock)
+    wait_cycle_release(record)
+    wait_cycle_note(main, I64{0}, I64{0})
+    jet_rt_free(node, I64{24}, I64{8})
+    sync_park_drop(slot)
+    jet_rt_native_sender_drop(tx)
+    jet_rt_native_receiver_drop(rx)
+    jet_rt_free(endpoints, I64{16}, I64{8})
+    jet_rt_free(save, I64{32}, I64{8})
+}

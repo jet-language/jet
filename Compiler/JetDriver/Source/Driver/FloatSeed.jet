@@ -1,0 +1,97 @@
+// The L0306 tidy error: a `:=` Float binding seeded with infinity, which every
+// assignment sets to a widened Int. The seed is only a sentinel, and each
+// Int crossing into the Float changes the result's type (`5` reads `5.0`).
+use jet_foundation.[
+    BodyPlace,
+    BodyTree,
+    Diagnostic,
+    FnBody,
+    SymbolID,
+    SymbolTable,
+    TUnaryOp,
+    Type,
+    body_node,
+    symbol_key,
+    symbol_key_leaf,
+]
+
+// The L0306 tidy errors of `functions`, whose constants' keys `symbols`
+// holds: one per seeded binding, at its name, once however many
+// specializations share its source.
+jet_driver_float_seed_lints: fn(load: JetDriverLoadResult, functions: [FnBody], symbols: SymbolTable) -> [Diagnostic] {
+    lints := [Diagnostic]{}
+    seen := [String:Bool]{}
+    loop function in functions {
+        if !jet_driver_cost_reports(function) -> next
+        tree: function.tree
+        loop statement in tree.stmts {
+            if statement == .Let(local, _, init, _, _, _) && local.mutable && local.ty == Type.Float {
+                symbol: local.symbol_id ?? next
+                sign: jet_driver_float_seed_sign(tree, symbols, init) ?? next
+                if !jet_driver_float_seed_int_only(tree, symbol) -> next
+                site: "{function.source_file}:{local.span.start}"
+                if seen.get(site) != None -> next
+                seen[site] = true
+                seed: if sign > 0 -> "infinity" else -> "-infinity"
+                bound: if sign > 0 -> "Int.MAX" else -> "Int.MIN"
+                lints.push(jet_driver_diagnostic_at_loaded_site(load, function.module_identity, "L0306", local.span, "`{local.name}` is a Float seeded with {seed}, but every value assigned to it is an Int", "Each Int widens to Float as it is assigned, so the result reads `5.0` where the input held `5`, and an Int beyond 2^53 stops the program", "Make `{local.name}` an `Int?` that starts as `None`, or an Int that starts at `{bound}`"))
+            }
+        }
+    }
+    lints
+}
+
+// 1 when node `id` of `tree` is positive infinity (`Float.INFINITY`,
+// `math.INFINITY` or an infinite literal), -1 when it is negative infinity
+// (`Float.NEG_INFINITY` or a negated infinity), else None.
+jet_driver_float_seed_sign: fn(tree: BodyTree, symbols: SymbolTable, id: Int) -> Int? Never! {
+    kind: body_node(tree, id).kind
+    if kind == .Unary(op, operand) && op == TUnaryOp.Neg {
+        inner: jet_driver_float_seed_sign(tree, symbols, operand) ?? return None
+        return Val(-inner)
+    }
+    if kind == .FloatLit(value) && value.is_infinite() -> return Val(if value > 0.0 -> 1 else -> -1)
+    if kind == .HostCall(.NumericBounds(ty, member)) && ty == Type.Float {
+        if member == "INFINITY" -> return Val(1)
+        if member == "NEG_INFINITY" -> return Val(-1)
+    }
+    if kind == .ConstRef(constant) {
+        key: symbol_key(symbols, tree.symbols, constant)
+        if symbol_key_leaf(key) == "INFINITY" && key.contains("core.math.") -> return Val(1)
+    }
+    None
+}
+
+// Whether `tree` assigns the local `symbol` at least once, every time a
+// plain `=` of an Int widened to Float, and never borrows it or takes its
+// address, through which some other write could reach it.
+jet_driver_float_seed_int_only: fn(tree: BodyTree, symbol: SymbolID) -> Bool Never! {
+    assigned := false
+    loop statement in tree.stmts {
+        if statement == .Assign(place, op, value, _, _) && jet_driver_float_seed_place(tree, place, symbol) {
+            if op != None -> return false
+            widened: body_node(tree, value).kind == .NumericMethod(_, .CheckedIntToFloat(_, _, _))
+            if !widened -> return false
+            assigned = true
+        }
+    }
+    if !assigned -> return false
+    loop node in tree.nodes {
+        if node.kind == .Borrow(place, _) && jet_driver_float_seed_place(tree, BodyPlace.Expr{value: place}, symbol) {
+            return false
+        }
+        if node.kind == .RawAddressOf(place) && jet_driver_float_seed_place(tree, place, symbol) {
+            return false
+        }
+    }
+    true
+}
+
+// Whether `place` of `tree` is the local `symbol` itself.
+jet_driver_float_seed_place: fn(tree: BodyTree, place: BodyPlace, symbol: SymbolID) -> Bool Never! {
+    if place == .Local(local) -> return local.symbol_id == Val((symbol))
+    if place == .Expr(value) && body_node(tree, value).kind == .Local(local) {
+        return local.symbol_id == Val((symbol))
+    }
+    false
+}

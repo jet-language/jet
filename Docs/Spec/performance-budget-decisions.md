@@ -965,11 +965,17 @@ never compares that Int, alone or plus, less, times or shifted by some Int,
 against another Int (`loop capacity < slots` stops it below twice `slots`;
 so does `loop span * 2 <= limit`), because geometric growth leaves the packed Int
 rail within a few dozen turns; the repair is a range type or a fixed-width
-`I64`. Only an Int that carries its value into the loop's next turn grows:
-a local the loop doesn't bind afresh each turn, or a field or element the
-same on every turn, its index a literal, a constant or a local bound before
-the loop and never assigned in it. An element whose index changes with the
-turn (`loop i in 0..<n -> xs[i] = xs[i] * k`) is scaled once and is no
+`I64`. A product under `wrapping` or `saturating` counts the same, since on
+an Int either word is the exact product and never wraps, as does one of the
+Int first mixed by `+`, `-`, `~` or `|` (FNV-1a's `h = wrapping((h ~
+Int{b}) * PRIME)`); a left shift counts only of the Int itself, not of a
+mixed one (a canonical Huffman code's `code = (code + count) << 1`, which
+its bit-length loop bounds). Only an Int that carries its value into the
+loop's next turn grows: a local the loop doesn't bind afresh each turn, or
+a field or element the same on every turn, its index a literal, a constant
+or a local bound before the loop and never assigned in it. An element whose index
+changes with the turn (`loop i in 0..<n -> xs[i] = xs[i] * k`) is scaled
+once and is no
 L2511. Additive growth never is: reaching the rail's end by a step takes
 about 2^63 / step turns, so a sum stays an L2510 row.
 

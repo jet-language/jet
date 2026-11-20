@@ -195,9 +195,9 @@ checked_cost_int_fact: fn(operands: [TIntegerBounds?], result: TIntegerBounds?) 
 // one being written that allocates (a share site's copy of a value still
 // used later, or a materialized argument; a bitwise copy or a Shared
 // handle's count bump is Scalar and no site), an edit of a map's possibly
-// shared backing store, exact Int `+`, `-`, `*` or negation, a list read
-// through the generic representation, or an operation that builds an Option
-// or a Result. The
+// shared backing store, exact Int `+`, `-`, `*` (written, or under
+// `wrapping`/`saturating`) or negation, a list read through the generic
+// representation, or an operation that builds an Option or a Result. The
 // `Ok` checking wraps a fallible function's plain result in spans exactly its
 // payload; no construction is written there, so it is no site. A view made
 // owned where the source writes the copy (a written `copy`, `freeze(view)`)
@@ -225,13 +225,11 @@ body_cost_fact: fn(tree: BodyTree, node: BodyNode) -> TCostFact? Never! {
     if ty == Type.Int {
         if node.kind == .Binary(op, _, _, left, right) {
             if op == TBinaryOp.Add || op == TBinaryOp.Sub || op == TBinaryOp.Mul {
-                lhs: body_cost_integer_bounds(tree, left)
-                rhs: body_cost_integer_bounds(tree, right)
-                result := TIntegerBounds?{None}
-                if lhs == .Val(first) && rhs == .Val(second) {
-                    result = checked_cost_combine_bounds(op, first, second)
-                }
-                return Val(checked_cost_int_fact([TIntegerBounds?]{lhs, rhs}, result))
+                return Val(body_cost_int_operation_fact(tree, op, left, right))
+            }
+        } else if node.kind == .OverflowOpt(prefix, operation, _, left, right) {
+            if body_cost_int_policy_operator(prefix, operation) == .Val(op) {
+                return Val(body_cost_int_operation_fact(tree, op, left, right))
             }
         } else if node.kind == .Unary(op, operand) {
             if op == TUnaryOp.Neg {
@@ -259,6 +257,33 @@ body_cost_fact: fn(tree: BodyTree, node: BodyNode) -> TCostFact? Never! {
         if ty == .Result(_, _) -> return Val(outcome)
     }
     None
+}
+
+// The cost of the exact Int `left op right`, `op` `+`, `-` or `*`
+// (body_cost_fact).
+body_cost_int_operation_fact: fn(tree: BodyTree, op: TBinaryOp, left: Int, right: Int) -> TCostFact Never! {
+    lhs: body_cost_integer_bounds(tree, left)
+    rhs: body_cost_integer_bounds(tree, right)
+    result := TIntegerBounds?{None}
+    if lhs == .Val(first) && rhs == .Val(second) {
+        result = checked_cost_combine_bounds(op, first, second)
+    }
+    checked_cost_int_fact([TIntegerBounds?]{lhs, rhs}, result)
+}
+
+// The operator a `wrapping(…)` or `saturating(…)` of an Int `+`, `-` or `*`
+// (an `.OverflowOpt` node, `prefix` the word and `operation` the operator's
+// name) computes: on an unbounded Int either word is the exact operator
+// itself (JetIR ir_overflow_opt), so it grows as the operator does. None
+// for any other word or operator.
+body_cost_int_policy_operator: fn(prefix: String, operation: String) -> TBinaryOp? Never! {
+    if prefix != "wrapping" && prefix != "saturating" -> return None
+    if operation == {
+        "add" -> Val(TBinaryOp.Add)
+        "sub" -> Val(TBinaryOp.Sub)
+        "mul" -> Val(TBinaryOp.Mul)
+        else -> None
+    }
 }
 
 // Whether a node of kind `kind` builds the Option or Result it has: a

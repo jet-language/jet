@@ -6605,6 +6605,62 @@ GoneFailureArm: struct {
     }
 }
 
+UnconditionalRecursion: struct {
+    cycle: String,
+    function: String,
+
+    impl Diagnostic {
+        code: "L0305",
+        meaning: "A function whose every path calls itself again, directly or around a cycle of calls",
+        severity: .Lint,
+        tier: .Tidy,
+        lint_name: "unconditional_recursion",
+        stage: [.Compile],
+        detail: true,
+        no_fix: .Behavior,
+        fix_next: "Give the function a path that returns without calling again.",
+
+        what: fn(self) -> String { "{self.cycle}, so no call of `{self.function}` returns" }
+
+        why: fn(self) -> String {
+            "No path through the body reaches a `return` or its end without calling again, so the calls nest until the stack runs out"
+        }
+
+        fix: fn(self) -> String {
+            "Give `{self.function}` a path that returns without calling again, such as a check on an argument that ends the recursion"
+        }
+    }
+}
+
+FloatInfinitySeedIntOnly: struct {
+    name: String,
+    seed: String,
+    bound: String,
+
+    impl Diagnostic {
+        code: "L0306",
+        meaning: "A Float binding seeded with infinity that every assignment sets to an Int",
+        severity: .Lint,
+        tier: .Tidy,
+        lint_name: "float_infinity_seed_int_only",
+        stage: [.Compile],
+        no_fix: .Behavior,
+        fix_next: "Make the binding an `Int?` that starts as `None`, or an Int seeded with `Int.MAX` or `Int.MIN`.",
+
+        what: fn(self) -> String {
+            "`{self.name}` is a Float seeded with {self.seed}, but every value assigned to it is an Int"
+        }
+
+        why: fn(self) -> String {
+            "Each Int widens to Float as it is assigned, so the result reads `5.0` where the input held `5`, and an Int beyond 2^53 stops the program"
+        }
+
+        fix: fn(self) -> String {
+            "Make `{self.name}` an `Int?` that starts as `None`, or an Int that starts at `{self.bound}`"
+        }
+    }
+}
+
 SqlQueryInRowLoop: struct {
     impl Diagnostic {
         code: "L0308",

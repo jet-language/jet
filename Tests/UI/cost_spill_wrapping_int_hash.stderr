@@ -1,0 +1,17 @@
+Error: Jet.HiddenCopyInLoop: An exact Int operation may spill to bigint inside a loop
+  --> Tests/UI/cost_spill_wrapping_int_hash.jet:8:27
+    |
+  8 |     loop b in data -> h = wrapping((h ~ Int{b}) * PRIME)
+    |                           ^^^^^^^^
+ Why: The loop multiplies or shifts this Int on every turn and nothing caps it, so it outgrows the packed Int rail and goes on as a bigint.
+ Fix: To keep the Int on the packed rail, give it a range type such as `Int(0..1000)` or a fixed width such as `I64`, or cap it in the loop's condition.
+More: jet-lang.dev/e/Jet.HiddenCopyInLoop
+
+Error: Jet.HiddenCopyInLoop: An exact Int operation may spill to bigint inside a loop
+  --> Tests/UI/cost_spill_wrapping_int_hash.jet:16:13
+    |
+ 16 |         h = saturating(h * 31)
+    |             ^^^^^^^^^^
+ Why: The loop multiplies or shifts this Int on every turn and nothing caps it, so it outgrows the packed Int rail and goes on as a bigint.
+ Fix: To keep the Int on the packed rail, give it a range type such as `Int(0..1000)` or a fixed width such as `I64`, or cap it in the loop's condition.
+More: jet-lang.dev/e/Jet.HiddenCopyInLoop

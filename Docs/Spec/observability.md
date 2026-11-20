@@ -630,14 +630,17 @@ rest are counted. The trace records the `threads` receipt section (type
 `lost`, then each number and stack's `name`, `number`, `count`, `time_ns`
 and `stack`. Each site is its `function`, `file`, `line` and whether the
 line is in the checked source (`own`), innermost first, the runtime's own
-frames of the spawn and the counting left out. `jet perf view` prints
+frames of the spawn and the counting left out. The prelinked runtime image
+keeps symbols for its code but no line table, so a site in the runtime is
+its symbol (`unit.spawn_pipe`, `jet_rt_process_execution_worker`) with
+line 0 and a null `file`. `jet perf view` prints
 `threads count=2 claimed=2`, each as `thread 4251
 jet_rt_process_execution_worker stack=8388608 cpu_ns=81234
-off_cpu_ns=2104567 · spawned at ProcessExecutionCollect.jet:117
-process_execution_collect_start from main.jet:4 run`, then `syscalls
+off_cpu_ns=2104567 · spawned at unit.process_execution_collect_start from
+main.jet:4 run`, then `syscalls
 calls=40 time_ns=812345` and up to 32 calls summed by name and calling
 site, the most time first: `pipe2 count=3 time_ns=6123 · at
-HostSpawn.jet:159 spawn_pipe from main.jet:4 run`. A process run's first
+unit.spawn_pipe from main.jet:4 run`. A process run's first
 wait parks until its collector wakes it at the child's end, so its
 `process wait` is woken by the runtime, not by a timeout.
 Tests/Cases/Perf/threads_and_syscalls_name_their_callers.case is the
@@ -1224,7 +1227,8 @@ reports the pause there, so its stack always has the program's first Jet
 frame (a breakpoint reached first, or the program's end, is reported
 instead); `disconnect` ends the session;
 `restart` starts the program again (an attached one does not restart); a
-request about a stop (`stackTrace`, `scopes`, `variables`, `evaluate`) or a
+request about a stop (`stackTrace`, `scopes`, `variables`, `evaluate`,
+`disassemble`) or a
 run command waits for the next stop, the program running on to it, and is
 answered there in the order it came; any other request is answered with the
 program stopped, and it runs on. The end of stdin ends the session once the
@@ -1249,6 +1253,26 @@ text: Core's sources are no files of the program, and the debugger reads
 them, as it compiles them, from the Core the program was compiled with,
 never from the working directory. The console shows a Core frame's line
 the same way.
+
+Each Jet frame of `stackTrace` carries its pc as its
+`instructionPointerReference` (a caller's is its return address), and
+`initialize` answers `supportsDisassembleRequest`, so an editor's
+disassembly view opens at the stop. `disassemble` answers
+`instructionCount` instructions from the `instructionOffset`th one after
+the instruction holding `memoryReference` plus `offset` (before it, for a
+negative offset), through the console's one listing builder: each
+instruction's `address`, its `instructionBytes`, its text (`call
+0x404110 <fib>`), the code it is in as `symbol` (`fib+14`), and the
+`location` and `line` of its function's source. The window runs on across
+functions that meet or are a gap of padding apart; an address no code is
+known at answers `presentationHint: "invalid"`, one byte a row, as the
+protocol asks, and the debugger's own code (a placed condition's, the
+evaluation room's) is named `[debugger]`. A `memoryReference` that is no
+address, or an `instructionCount` past 65536, is E2236. Stepping by
+instruction and instruction breakpoints are not offered, so the editor
+steps by line from its disassembly view.
+Tests/Cases/Debug/dap_disassemble_lists_the_stop.case is the worked
+example.
 
 Every expression the debugger is given (`print`, `watch`, a condition, a
 logpoint's message, the adapter's `evaluate`) has one evaluator, the

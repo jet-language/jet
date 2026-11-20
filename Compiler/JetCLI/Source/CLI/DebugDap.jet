@@ -21,7 +21,8 @@
 // starting, before any code of its own, runs on to the start of its entry
 // and stops there, so the stop has a Jet frame; `disconnect` ends the session;
 // `restart` starts the program again; a request about a stop (a stack, a
-// scope, variables, `evaluate`) or a run command waits for the next stop;
+// scope, variables, `evaluate`, `disassemble`) or a run command waits for
+// the next stop;
 // any other request is answered with the program stopped, which then runs
 // on. `restart` takes the launch
 // configuration's `stopOnEntry` and `args` again; an attached program does
@@ -31,11 +32,19 @@
 // `evaluate` answers in. A task's frames are its Jet frames: a running
 // task's its thread's, a parked task's those its fiber saved when it
 // parked; a queued task has none yet. A frame's one scope holds its locals
-// as the console shows them, each with its Jet type. `showRawFrames` adds
+// as the console shows them, each with its Jet type. Each Jet frame carries
+// its pc as its `instructionPointerReference`. `showRawFrames` adds
 // the machine frames, each named `[raw]` with its instruction pointer, and
 // each its one scope, `[raw] Locals`, of its pc and canonical frame address.
 // A frame in Core names its source by a `sourceReference`, and the `source`
 // request answers that source's text as the program's Core holds it.
+// `disassemble` answers the program's code around a `memoryReference`, as
+// jet_debug's NativeListing.jet lists it: each instruction's address, bytes,
+// text, the code it is in (`fib+14`; `[debugger]` for the debugger's own,
+// a placed condition's or the evaluation room's) and its source line. An
+// address no code is known at answers `presentationHint` `invalid`.
+// Stepping by instruction and instruction breakpoints are not offered, so
+// an editor steps by line from its disassembly view.
 // A frame id or variable reference names the stop it was made at; once the
 // program runs again, it names nothing.
 // A breakpoint may carry a `condition` and a `logMessage`, and `evaluate`
@@ -79,7 +88,7 @@ use {
     dap_files: core.files
     dap_json: core.encoding.json
     dap_term: core.term
-    jet_debug.[NATIVE_ATTACH_INVALID, NATIVE_DEBUG_REFUSED, NATIVE_DEBUG_TASK_RUNNING, NativeDebugError, NativeEvalRefused, NativeLocal, NativeSaid, NativeSession, NativeSettled, NativeStop, NativeStopKind, NativeWatched, native_debug_hex, native_debug_jet_frame, native_debug_report, native_debug_rule_place, native_function_at, native_lookup]
+    jet_debug.[NATIVE_ATTACH_INVALID, NATIVE_DEBUG_REFUSED, NATIVE_DEBUG_TASK_RUNNING, NativeDebugError, NativeEvalRefused, NativeListedRow, NativeLocal, NativeSaid, NativeSession, NativeSettled, NativeStop, NativeStopKind, NativeWatched, native_debug_hex, native_debug_jet_frame, native_debug_report, native_debug_rule_place, native_function_at, native_listing_bytes, native_listing_window, native_lookup]
     jet_foundation.[DeepChecks, Diagnostic, MODULE_CORE_PREFIX, foundation_json_integer, foundation_json_quote]
 }
 
@@ -128,6 +137,9 @@ JET_CLI_DAP_RAW: 32768
 
 JET_CLI_DAP_STOPS: 8192
 
+// The most instructions one `disassemble` answers.
+JET_CLI_DAP_MOST_INSTRUCTIONS: 65536
+
 // The adapter's state across requests.
 JetCLIDap: struct {
     // The last message's sequence number.
@@ -175,7 +187,7 @@ JetCLIDap: struct {
         if request.command == {
             "initialize" -> {
                 back: if session.replaying() -> ",\"supportsStepBack\":true" else -> ""
-                self.respond(request, "{{\"supportsConfigurationDoneRequest\":true,\"supportsConditionalBreakpoints\":true,\"supportsLogPoints\":true,\"supportsEvaluateForHovers\":true,\"supportsRestartRequest\":true,\"supportsDataBreakpoints\":true{back}}}")
+                self.respond(request, "{{\"supportsConfigurationDoneRequest\":true,\"supportsConditionalBreakpoints\":true,\"supportsLogPoints\":true,\"supportsEvaluateForHovers\":true,\"supportsRestartRequest\":true,\"supportsDataBreakpoints\":true,\"supportsDisassembleRequest\":true{back}}}")
             }
             "launch" -> {
                 self.stop_on_entry = jet_cli_dap_bool(request.arguments, "stopOnEntry")
@@ -460,6 +472,23 @@ JetCLIDap: struct {
                 text: session.source_text(path) ?? return self.fail(request, "couldn't read `{path}`")
                 self.respond(request, "{{\"content\":{foundation_json_quote(text)}}}")
             }
+            "disassemble" -> {
+                if !self.launched || !session.alive() {
+                    return self.fail(request, "the program is not paused")
+                }
+                reference: jet_cli_dap_string(request.arguments, "memoryReference")
+                address: jet_cli_dap_address(reference) ?? return self.refuse(request, NATIVE_ATTACH_INVALID, "field memoryReference must be an address, as 0x401000")
+                count: jet_cli_dap_int(request.arguments, "instructionCount")
+                if count < 0 || count > JET_CLI_DAP_MOST_INSTRUCTIONS {
+                    return self.refuse(request, NATIVE_ATTACH_INVALID, "field instructionCount must be from 0 to {JET_CLI_DAP_MOST_INSTRUCTIONS}")
+                }
+                at: address + jet_cli_dap_offset(request.arguments, "offset")
+                rows := [String]{}
+                loop row in native_listing_window(session, at, jet_cli_dap_offset(request.arguments, "instructionOffset"), count) {
+                    rows.push(self.instruction(row, entry))
+                }
+                self.respond(request, "{{\"instructions\":[{rows.join(",")}]}}")
+            }
             "fix" -> {
                 if !self.launched || !session.alive() {
                     return self.fail(request, "the program is not paused")
@@ -706,7 +735,7 @@ JetCLIDap: struct {
                         return
                     }
                 }
-                "stackTrace" | "scopes" | "variables" | "evaluate" | "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue" | "jump" | "back" | "events" -> {
+                "stackTrace" | "scopes" | "variables" | "evaluate" | "disassemble" | "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue" | "jump" | "back" | "events" -> {
                     self.waiting.push(request.move())
                 }
                 else -> self.handle(session, request.move(), entry, deep_checks)
@@ -723,25 +752,24 @@ JetCLIDap: struct {
 
     // `stackTrace` of task `task` at this stop: its Jet frames, innermost
     // first, each by its row in `frames`, which `scopes`, `variables` and
-    // `evaluate` name it by; with `raw`, then its machine frames. A task
-    // with no stack yet (a queued one) has none. A Core frame's source is
-    // no file: the `source` request reads it by its `sourceReference`
-    // (NativeSession.source_text).
+    // `evaluate` name it by, with the pc `disassemble` lists its code from;
+    // with `raw`, then its machine frames. A task with no stack yet (a
+    // queued one) has none.
     stack: fn(&self, session: &NativeSession, entry: String, task: Int, raw: Bool) -> String NativeDebugError! {
         if !(self.focus(session, task) ?? return Err(err)) {
             return Ok("{{\"stackFrames\":[],\"totalFrames\":0}}")
         }
         frames: session.backtrace() ?? return Err(err)
-        base: if entry.starts_with("/") -> dap_files.dirname(entry) else -> dap_files.join(dap_files.cwd() ?? ".", dap_files.dirname(entry))
         rows := [String]{}
         loop (index, frame) in frames {
             if !native_debug_jet_frame(frame) -> next
             id: self.frame_id(task, index) ?? return Err(NativeDebugError{detail: "this stop's frames outnumber the frame ids a stop has"})
-            source: if frame.path.starts_with(MODULE_CORE_PREFIX) -> "{{\"name\":{foundation_json_quote(dap_files.basename(frame.file))},\"path\":{foundation_json_quote(frame.path)},\"sourceReference\":{self.source_reference(frame.path)}}}" else -> "{{\"name\":{foundation_json_quote(dap_files.basename(frame.file))},\"path\":{foundation_json_quote(dap_files.join(base, frame.file))}}}"
+            source: self.source(frame.file, frame.path, entry)
             // A caller's frame at a call with a call-site row names the
             // call's column; any other frame its line.
             column: if frame.column > 0 -> frame.column else -> 1
-            rows.push("{{\"id\":{id},\"name\":{foundation_json_quote(frame.function)},\"source\":{source},\"line\":{frame.line},\"column\":{column}}}")
+            pointer: if frame.pc > 0 -> ",\"instructionPointerReference\":\"{native_debug_hex(frame.pc)}\"" else -> ""
+            rows.push("{{\"id\":{id},\"name\":{foundation_json_quote(frame.function)},\"source\":{source},\"line\":{frame.line},\"column\":{column}{pointer}}}")
         }
         if raw {
             machine: session.unwind() ?? return Err(err)
@@ -752,6 +780,32 @@ JetCLIDap: struct {
             }
         }
         Ok("{{\"stackFrames\":[{rows.join(",")}],\"totalFrames\":{rows.len()}}}")
+    }
+
+    // The DAP source of the file `file` (as the line table names it) whose
+    // source is `path` (native_line_source), taken from the entry's
+    // directory. A Core source is no file: the `source` request reads it by
+    // its `sourceReference` (NativeSession.source_text).
+    source: fn(&self, file: String, path: String, entry: String) -> String Never! {
+        name: foundation_json_quote(dap_files.basename(file))
+        if path.starts_with(MODULE_CORE_PREFIX) {
+            return "{{\"name\":{name},\"path\":{foundation_json_quote(path)},\"sourceReference\":{self.source_reference(path)}}}"
+        }
+        base: if entry.starts_with("/") -> dap_files.dirname(entry) else -> dap_files.join(dap_files.cwd() ?? ".", dap_files.dirname(entry))
+        "{{\"name\":{name},\"path\":{foundation_json_quote(dap_files.join(base, file))}}}"
+    }
+
+    // One instruction `disassemble` answers: its address, bytes, text and
+    // the code it is in, its source and line when its function has them;
+    // an address no code is known at is `invalid`, as DAP asks.
+    instruction: fn(&self, row: NativeListedRow, entry: String) -> String Never! {
+        address: native_debug_hex(row.address)
+        if !row.valid {
+            return "{{\"address\":\"{address}\",\"instruction\":\"(no code)\",\"presentationHint\":\"invalid\"}}"
+        }
+        symbol: if row.symbol == "" -> "" else -> ",\"symbol\":{foundation_json_quote(row.symbol)}"
+        place: if row.line > 0 && row.file != "" -> ",\"location\":{self.source(row.file, row.path, entry)},\"line\":{row.line}" else -> ""
+        "{{\"address\":\"{address}\",\"instructionBytes\":\"{native_listing_bytes(row.bytes)}\",\"instruction\":{foundation_json_quote(row.text)}{symbol}{place}}}"
     }
 
     // Read task `task`'s frames (NativeSession.focus_task) unless the
@@ -1073,6 +1127,40 @@ jet_cli_dap_string: fn(members: [{key: String, value: Dyn}], name: String) -> St
         if member.key == name && member.value == .Text(text) -> return text
     }
     ""
+}
+
+// The integer member `name`, or 0 when it is absent or no integer: an
+// offset DAP leaves optional.
+jet_cli_dap_offset: fn(members: [{key: String, value: Dyn}], name: String) -> Int Never! {
+    loop member in members {
+        if member.key == name -> return foundation_json_integer(member.value) ?? 0
+    }
+    0
+}
+
+// The address a `memoryReference` names, as `instructionPointerReference`
+// gives it (`0x401000`) or in decimal; None for any other text, or one
+// past 15 hex digits.
+jet_cli_dap_address: fn(text: String) -> Int? Never! {
+    if !text.starts_with("0x") && !text.starts_with("0X") {
+        return Val(Int.parse(text) ?? return None)
+    }
+    digits: text.slice(2, text.len())
+    if digits.len() == 0 || digits.len() > 15 -> return None
+    value := 0
+    loop byte in digits.bytes() {
+        digit: Int{byte}
+        nibble: if {
+            digit >= 48 && digit <= 57 -> digit - 48
+            digit >= 97 && digit <= 102 -> digit - 87
+            digit >= 65 && digit <= 70 -> digit - 55
+            else -> {
+                return None
+            }
+        }
+        value = (value << 4) | nibble
+    }
+    Val(value)
 }
 
 // `threads`: each task of the stopped program by its id, named by its

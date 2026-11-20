@@ -24,6 +24,7 @@ use {
         TIntegerBounds,
         Type,
         body_cost_fact,
+        body_cost_int_policy_operator,
         body_cost_integer_bounds,
         body_cost_type,
         body_each_expr_child,
@@ -567,11 +568,14 @@ jet_driver_cost_grown_shift: fn(grown: [Int:Bool], id: Int) -> TCostFact? Never!
 }
 
 // Marks the Int updates of `tree` a loop repeats and grows geometrically:
-// in `nodes` by its operation's node id, a `target = target op
-// step` (or `step * target`); in `updates` by its value's node id, a
-// `target op= step`. A product grows unless its factor stays within -1..1,
-// and a left shift unless it shifts by nothing. A sum or difference never
-// counts: reaching the rail's end by a step takes about 2^63 / step turns.
+// in `nodes` by its operation's node id, a `target = target op step` (or
+// `step * target`, a product's target maybe mixed first as in `(target ~
+// byte) * step`), the operation written or under `wrapping` or
+// `saturating`, which on an Int is the operation itself; in `updates` by
+// its value's node id, a `target op= step`. A product grows unless its
+// factor stays within -1..1, and a left shift unless it shifts by nothing.
+// A sum or difference never counts: reaching the rail's end by a step
+// takes about 2^63 / step turns.
 // Only a target that carries its value from one turn into the next grows:
 // a local the loop doesn't bind afresh each turn, or a place reached the
 // same way on every turn (jet_driver_cost_turn_path), so `xs[i] *= k` under
@@ -625,20 +629,48 @@ jet_driver_cost_growth: fn(tree: BodyTree, nodes: &[Int:Bool], updates: &[Int:Bo
                 if jet_driver_cost_step_grows(tree, operator, value) -> updates[value] = true
                 next
             }
-            if body_node(tree, value).kind == .Binary(operator, _, _, left, right) {
-                step := Int?{None}
-                if jet_driver_cost_updates_place(tree, place, left, turn, binds) {
-                    step = Val(right)
+            operation: body_node(tree, value).kind
+            if operation == .Binary(operator, _, _, left, right) {
+                if jet_driver_cost_operation_grows(tree, place, operator, left, right, turn, binds) {
+                    nodes[value] = true
                 }
-                if step == None && operator == TBinaryOp.Mul && jet_driver_cost_updates_place(tree, place, right, turn, binds) {
-                    step = Val(left)
-                }
-                if step == .Val(by) && jet_driver_cost_step_grows(tree, operator, by) {
+            } else if operation == .OverflowOpt(prefix, name, _, left, right) && body_cost_int_policy_operator(prefix, name) == .Val(operator) {
+                if jet_driver_cost_operation_grows(tree, place, operator, left, right, turn, binds) {
                     nodes[value] = true
                 }
             }
         }
     }
+}
+
+// Whether the Int update `place = left operator right` of `tree` grows
+// geometrically (jet_driver_cost_growth): one operand carries the place,
+// the left one or either of a product, and the other is a step that grows
+// it. A product's operand may carry it mixed first
+// (jet_driver_cost_carries_place); a shift's must read it as it is, so a
+// canonical Huffman code's `code = (code + count) << 1`, which its bit-length
+// loop bounds, is no spill site.
+jet_driver_cost_operation_grows: fn(tree: BodyTree, place: BodyPlace, operator: TBinaryOp, left: Int, right: Int, turn: [Int:Bool], binds: JetDriverCostBinds) -> Bool Never! {
+    product: operator == TBinaryOp.Mul
+    step := Int?{None}
+    if jet_driver_cost_carries_place(tree, place, left, product, turn, binds) -> step = Val(right)
+    if step == None && product && jet_driver_cost_carries_place(tree, place, right, true, turn, binds) {
+        step = Val(left)
+    }
+    if step == .Val(by) -> return jet_driver_cost_step_grows(tree, operator, by)
+    false
+}
+
+// Whether operand `id` of a growing update of `tree` carries the place
+// `place` at its size: a read of the place, or with `mixed` one mixed by
+// `+`, `-`, `~` or `|` with anything, as FNV's `(h ~ byte) * PRIME` mixes a
+// byte in before the product.
+jet_driver_cost_carries_place: fn(tree: BodyTree, place: BodyPlace, id: Int, mixed: Bool, turn: [Int:Bool], binds: JetDriverCostBinds) -> Bool Never! {
+    if jet_driver_cost_updates_place(tree, place, id, turn, binds) -> return true
+    if mixed && body_node(tree, id).kind == .Binary(op, _, _, left, right) && (op == TBinaryOp.Add || op == TBinaryOp.Sub || op == TBinaryOp.BitXor || op == TBinaryOp.BitOr) {
+        return jet_driver_cost_carries_place(tree, place, left, true, turn, binds) || jet_driver_cost_carries_place(tree, place, right, true, turn, binds)
+    }
+    false
 }
 
 // The locals of a body the growth rule asks about (jet_driver_cost_growth),

@@ -685,7 +685,7 @@ canvas_debug_limits: fn(commands: [String], breakpoints: [Int], watches: [String
             return Err(canvas_debug_error("limit", "Canvas debug command and watch names are limited to 256 bytes"))
         }
         if !canvas_debug_known(command) {
-            return Err(canvas_debug_error("unsupported", "Canvas debug command `{command}` is not one of step, next, continue, finish, reverse-step, reverse-next, reverse-finish, reverse-continue, why, locals, print, backtrace, frame, tasks, task or events"))
+            return Err(canvas_debug_error("unsupported", "Canvas debug command `{command}` is not one of step, next, continue, finish, reverse-step, reverse-next, reverse-finish, reverse-continue, why, locals, print, backtrace, frame, tasks, task, events or disassemble"))
         }
     }
     loop watch in watches {
@@ -780,22 +780,26 @@ canvas_debug_ints: fn(value: Dyn) -> [Int] Never! {
 
 // Whether `command` is one of the source-level debugger's commands with the
 // operands it takes: the live, replay and dump consoles' vocabulary.
+// `disassemble` (`disas`) takes a name or line and `--bytes`, each optional.
 canvas_debug_known: fn(command: String) -> Bool Never! {
     count := 0
-    wanted := 0
+    least := 0
+    most := 0
     loop word in command.replace("\t", " ").split(" ") {
         if word == "" -> next
         if count == 0 {
-            wanted = if word == {
+            most = if word == {
                 "step" | "s" | "next" | "n" | "continue" | "c" | "finish" | "f" | "locals" | "backtrace" | "bt" | "tasks" | "events" -> 1
                 "reverse-step" | "rs" | "reverse-next" | "rn" | "reverse-finish" | "rf" | "reverse-continue" | "rc" -> 1
                 "print" | "p" | "why" | "frame" | "task" -> 2
+                "disassemble" | "disas" -> 3
                 else -> 0
             }
+            least = if word == "disassemble" || word == "disas" -> 1 else -> most
         }
         count += 1
     }
-    wanted > 0 && count == wanted
+    most > 0 && count >= least && count <= most
 }
 
 // How many space-separated words `text` has.

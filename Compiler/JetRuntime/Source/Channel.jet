@@ -537,6 +537,13 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
     if (sync_add(wrapping(channel + I64{120}), I64{-1}) == I64{1}) {
         sync_store(wrapping(channel + I64{88}), I64{1})
         channel_wake_all(channel, false)
+    } else if (dropped != I64{0}) {
+        // The dropping task holds none of the channel's Senders now. A
+        // receive armed while it held one found no cycle through it, so each
+        // receiver wakes and parks again, and its re-armed wait walks the
+        // holders left (WaitCycle.jet): a task canceled before its body ran
+        // drops its Sender after the receiver blocked.
+        channel_wake_all(channel, false)
     }
     channel_update(channel)
     replay_log(REPLAY_SENDER_DROP, object)

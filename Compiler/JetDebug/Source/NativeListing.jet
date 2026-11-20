@@ -234,6 +234,156 @@ native_listing_table: fn(session: &NativeSession, symbols: &[X64ListingSymbol], 
     }
 }
 
+// One instruction of a window of the program's code (native_listing_window):
+// its address, bytes and text, the code it is in and its offset there
+// (`fib+14`; "" for padding between functions), and its function's source
+// `file` and `path` and its line (0: none). `valid` is false for an address
+// no code is known at, whose row is that address alone.
+NativeListedRow: struct {
+    address: Int,
+    bytes: [U8],
+    text: String,
+    symbol: String,
+    file: String,
+    path: String,
+    line: Int,
+    valid: Bool,
+}
+
+// One stretch of the program's code a window walks: [low, high), its name,
+// its function of the line table (-1: none).
+NativeListingSpan: struct {
+    low: Int,
+    high: Int,
+    name: String,
+    function: Int,
+}
+
+// The most bytes between two stretches of code a window lists as padding;
+// a wider gap ends the code it walks.
+NATIVE_LISTING_GAP: 4096
+
+// The debugger's own code, a placed condition's or the room an evaluation
+// runs from, is named so and never as the program's.
+NATIVE_LISTING_DEBUGGER: "[debugger]"
+
+// `count` instructions of the program's code around `address`, from the
+// `skip`th instruction after the one holding it (before it, for a negative
+// `skip`), as the editor adapter's `disassemble` asks. The code runs on
+// across functions where one ends at the next one's start or a gap of
+// padding apart; an address past the code is listed as invalid, a byte a
+// row. Bytes are read as NativeSession.code reads them.
+native_listing_window: fn(session: &NativeSession, address: Int, skip: Int, count: Int) -> [NativeListedRow] Never! {
+    symbols: native_listing_symbols(session)
+    spans: native_listing_spans(session, symbols)
+    at := -1
+    loop (index, span) in spans {
+        if address >= span.low && address < span.high -> at = index
+    }
+    shown := [NativeListedRow]{}
+    if at < 0 {
+        loop index in 0..<count -> shown.push(native_listing_invalid(address + skip + index))
+        return shown
+    }
+    rows := native_listing_span_rows(session, symbols, spans[at])
+    here := 0
+    loop (index, row) in rows {
+        if row.address <= address -> here = index
+    }
+    first := at
+    last := at
+    loop here + skip < 0 && first > 0 && spans[first - 1].high == spans[first].low {
+        first -= 1
+        earlier := native_listing_span_rows(session, symbols, spans[first])
+        here += earlier.len()
+        loop row in rows.move() -> earlier.push(row)
+        rows = earlier
+    }
+    loop here + skip + count > rows.len() && last + 1 < spans.len() && spans[last + 1].low == spans[last].high {
+        last += 1
+        loop row in native_listing_span_rows(session, symbols, spans[last]) -> rows.push(row)
+    }
+    start: here + skip
+    end: start + count
+    lowest: if rows.len() > 0 -> rows[0].address else -> spans[first].low
+    loop index in start..<0 -> shown.push(native_listing_invalid(lowest + index))
+    total: rows.len()
+    loop (index, row) in rows.move() {
+        if index >= start && index < end -> shown.push(row)
+    }
+    loop index in total..<end {
+        if index >= start -> shown.push(native_listing_invalid(spans[last].high + index - total))
+    }
+    shown
+}
+
+// The row of an address no code is known at.
+native_listing_invalid: fn(address: Int) -> NativeListedRow Never! {
+    NativeListedRow{address: address, bytes: [U8]{}, text: "", symbol: "", file: "", path: "", line: 0, valid: false}
+}
+
+// The stretches of code a window walks, in address order: each function of
+// the line table and sized `.symtab` symbol (`symbols`), the code `fix`
+// placed, under its function's name, and the debugger's own: each placed
+// condition's region, the evaluation room's code (its first
+// NATIVE_EVAL_ROOM_XSAVE bytes) and its expressions' code space up to the
+// next free byte. Then, between two of them at most NATIVE_LISTING_GAP
+// bytes apart, the padding. A stretch overlapping an earlier one is left
+// out.
+native_listing_spans: fn(session: &NativeSession, symbols: [X64ListingSymbol]) -> [NativeListingSpan] Never! {
+    found := [NativeListingSpan]{}
+    loop symbol in symbols {
+        if symbol.size <= 0 -> next
+        index: x64_jetline_find(session.image.lines, symbol.address)
+        function: if index >= 0 && session.image.lines.functions[index].low == symbol.address -> index else -> -1
+        found.push(NativeListingSpan{low: symbol.address, high: symbol.address + symbol.size, name: "{symbol.name}", function: function})
+    }
+    loop fixed in session.fixed {
+        found.push(NativeListingSpan{low: fixed.address, high: fixed.address + fixed.code.len(), name: "{fixed.name}", function: -1})
+    }
+    loop placed in session.placed {
+        found.push(NativeListingSpan{low: placed.low, high: placed.high, name: NATIVE_LISTING_DEBUGGER, function: -1})
+    }
+    if session.eval_room != 0 {
+        found.push(NativeListingSpan{low: session.eval_room, high: session.eval_room + NATIVE_EVAL_ROOM_XSAVE, name: NATIVE_LISTING_DEBUGGER, function: -1})
+        code: session.eval_room + NATIVE_EVAL_ROOM_SIZE
+        if session.eval_code > 0 {
+            found.push(NativeListingSpan{low: code, high: code + session.eval_code, name: NATIVE_LISTING_DEBUGGER, function: -1})
+        }
+    }
+    found.sort_by(fn(left: NativeListingSpan, right: NativeListingSpan) { (left.low <=> right.low).then(right.function <=> left.function) })
+    spans := [NativeListingSpan]{}
+    loop span in found.move() {
+        if spans.len() > 0 {
+            end: spans[spans.len() - 1].high
+            if span.low < end -> next
+            if span.low > end && span.low - end <= NATIVE_LISTING_GAP {
+                spans.push(NativeListingSpan{low: end, high: span.low, name: "", function: -1})
+            }
+        }
+        spans.push(span)
+    }
+    spans
+}
+
+// The rows of the stretch `span`, through the one listing builder.
+native_listing_span_rows: fn(session: &NativeSession, symbols: [X64ListingSymbol], span: NativeListingSpan) -> [NativeListedRow] Never! {
+    file := ""
+    path := ""
+    if span.function >= 0 {
+        file = "{session.image.lines.functions[span.function].file}"
+        path = native_line_source(session.image.lines.functions[span.function].dir, session.image.lines.functions[span.function].file)
+    }
+    listed := [NativeListedRow]{}
+    loop row in x64_listing(session.code(span.low, span.high - span.low), span.low, session.image.lines, span.function, symbols, [Int:String]{}) {
+        text: x64_listing_text(row, span.low, span.high)
+        symbol: if span.name == "" -> "" else -> "{span.name}+{row.offset}"
+        line: if span.function >= 0 -> row.line else -> 0
+        listed.push(NativeListedRow{address: row.address, bytes: row.bytes, text: text, symbol: symbol, file: "{file}", path: "{path}", line: line, valid: true})
+    }
+    listed
+}
+
 // Where each local of the frame stopped at `lookup`, in inlined run `site`
 // (-1: the function's own frame), lives there, as its location list says:
 // `  at the pc: n in rbx, total at [rbp-0x18]`; "" when none is in a

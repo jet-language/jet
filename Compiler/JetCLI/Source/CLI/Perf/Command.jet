@@ -1618,8 +1618,8 @@ JetCLIPerfSyscallSum: struct {
 // (jet_cli_perf_syscalls_section), summed by name and calling site:
 // `syscalls calls=9 time_ns=81234`, with ` lost=…` for the calls the
 // runtime's table had no row for, then each, the most time first, at most
-// 32: `  pipe2 count=3 time_ns=6123 · at HostSpawn.jet:159 spawn_pipe from
-// main.jet:4 run` (jet_cli_perf_sites_text). A call that never returned,
+// 32: `  pipe2 count=3 time_ns=6123 · at unit.spawn_pipe from main.jet:4
+// run` (jet_cli_perf_sites_text). A call that never returned,
 // as a successful execve, counts with no time.
 jet_cli_perf_syscall_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     lines := [String]{}
@@ -1670,8 +1670,9 @@ jet_cli_perf_syscall_lines: fn(trace: CanonicalJSON) -> [String] Never! {
 // The calling site of a `threads` or `syscalls` row's sites `key`
 // (jet_cli_perf_sites_json): its innermost site, then ` from ` the
 // innermost of the checked source when that is another, each as
-// `<file>:<line> <function>` or, for an inlined function's line from
-// another file, `<function> line <line>`. None with no sites.
+// `<file>:<line> <function>`, for an inlined function's line from another
+// file `<function> line <line>`, and for the runtime's own code, which has
+// no line, its symbol alone. None with no sites.
 jet_cli_perf_sites_text: fn(row: CanonicalJSON, key: String) -> String? Never! {
     fields: jettrace_object_view(row, "receipt row") ?? return None
     at: jet_cli_perf_key(fields, key) ?? return None
@@ -1695,6 +1696,7 @@ jet_cli_perf_sites_text: fn(row: CanonicalJSON, key: String) -> String? Never! {
 jet_cli_perf_call_site_text: fn(site: CanonicalJSON) -> String Never! {
     name: jet_cli_perf_member_text(site, "function") ?? "?"
     line: jet_cli_perf_member_integer(site, "line") ?? "?"
+    if line == "0" -> return name
     file: jet_cli_perf_member_text(site, "file") ?? return "{name} line {line}"
     "{cli_files.basename(file)}:{line} {name}"
 }
