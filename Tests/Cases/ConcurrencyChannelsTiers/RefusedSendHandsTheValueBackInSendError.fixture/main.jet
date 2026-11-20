@@ -1,7 +1,9 @@
 // A send the channel refuses fails with `SendError<T>`, whose `value` is the
 // payload handed back unsent.
 
-// A bare send propagates: `relay` fails with `SendError<String>`.
+// A bare send propagates: `relay` infers the default Err, since a Core error
+// family member like `SendError<String>` is no typed member of an inferred
+// failure union, so the refused send reads "send on a closed channel".
 relay: fn(tx: Sender<String>, text: &&String) { tx.send(text) }
 
 // Through the default Err, a refused send reads "send on a closed channel".
@@ -13,6 +15,6 @@ run: fn() {
     print(rx.receive() ?? "closed")
     rx.close()
     tx.send("second") ?? print("refused {err.value}")
-    relay(tx, "third") ?? print("relay kept {err.value}")
+    relay(tx, "third") ?? print("relay: {err}")
     forward(tx, "fourth") ?? print("forward: {err}")
 }
