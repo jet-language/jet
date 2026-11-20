@@ -47,7 +47,10 @@ CPU-time samples at each source line, hottest first, at most 24 lines, each
 with its share of every line's samples and the line's typed cost facts
 (D-COSTLAW1), as `jet explain --cost` reports them
 (`  main.jet:11 spin_hot_loop samples=592 share=99% · cost: exact Int spill ×2
-— semantic remainder (loop depth 1, repeats every loop turn)`). A fact
+— semantic remainder (loop depth 1, repeats every loop turn)`), then the
+line's samples in each compiler-emitted helper it called, from the
+`helpers` receipt, with their share of every line's samples (`· stop poll
+samples=34 share=34%`). A fact
 describes the code that ran: the view runs `jet explain --cost` once, on the
 trace's checked source, whose report gives the sites of its whole program,
 and keeps those of each source the trace names whose file still holds the
@@ -146,7 +149,13 @@ writes at exit under the `alloc` lens, so an allocation in the runtime or a
 core module counts at the line of the source that called into it; a run
 without that lens leaves it null. A sample in a compiler-emitted
 helper (a `jet_ir_` symbol, such as the stop poll `jet_ir_stop_turn`) counts
-at the Jet line that called it, and the `reason` counts those samples.
+at the Jet line that called it, and the `reason` counts those samples. The
+`helpers` receipt (type `JetPerfHelpers`) splits them out by line: each row
+a line's `path`, `line` and `function`, the `helper` named in Jet's terms
+(`stop poll` for every `jet_ir_stop_` poll, another helper its name past
+`jet_ir_` with spaces for `_`) and its `samples`, the most first; `jet
+explain --cost` names the stop poll each loop and each recursive call keeps
+as a cost fact on its line.
 `coverage` is `complete` when every sample landed in those sources and
 `partial` when some ran in the runtime or the toolchain's library, which the
 `reason` counts and, for samples outside every Jet function, names by the

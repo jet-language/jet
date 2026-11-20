@@ -5,8 +5,9 @@
 // lints, the implicit copy a loop repeats, the String copy `lines()` makes,
 // which is an L2510 lint but no L2511 hidden copy, the Int arithmetic a range
 // loop's counter keeps on the packed rail, a view read in place as a
-// receiver, a plain check's L2511 tidy errors, and a map edit's L2511 only
-// where its loop shares the map each turn.
+// receiver, a plain check's L2511 tidy errors, a map edit's L2511 only
+// where its loop shares the map each turn, and the stop polls a loop and a
+// recursive call keep.
 use {
     jet_driver.[
         JetDriverAuthorizedSourceFile,
@@ -73,15 +74,16 @@ cost_projection_held: fn(source: String) -> JetDriverHeldState {
 
 #Test("the cost projection reports the program's own sites, a generic function's per specialization") {
     held: cost_projection_held(cost_projection_source())
-    cover: jet_driver_cost_cover(held.functions, jet_driver_cost_callees(held.functions, held.modules, held.registration.decls, held.registration.symbols))
+    callees: jet_driver_cost_callees(held.functions, held.modules, held.registration.decls, held.registration.symbols)
+    cover: jet_driver_cost_cover(held.functions, callees)
     assert_eq(cover.gaps.len(), 0)
     covered: loop row in cover.covered -> row.name
     assert(covered.contains("helper") && covered.contains("measure"), "the non-generic functions are covered: {covered}")
     assert(covered.contains("pick__generic__Int") && covered.contains("pick__generic__Bool") && !covered.contains("pick"), "a generic function is covered per specialization: {covered}")
-    report: jet_driver_cost_report(held.functions, cover.covered)
+    report: jet_driver_cost_report(held.functions, cover.covered, callees)
     assert_eq(report.functions, covered)
     sites: loop site in report.sites -> "{site.function} {site.kind:Debug} {site.state:Debug} depth {site.loop_depth}"
-    assert_eq(sites, [String]{"helper ExactIntSpill SemanticRemainder depth 0", "measure ExactIntSpill SemanticRemainder depth 0", "measure ExactIntSpill SemanticRemainder depth 1"})
+    assert_eq(sites, [String]{"helper ExactIntSpill SemanticRemainder depth 0", "measure ExactIntSpill SemanticRemainder depth 0", "measure ExactIntSpill SemanticRemainder depth 1", "measure StopPoll SemanticRemainder depth 1"})
 }
 
 #Test("a reachable callee with no checked body is a projection gap at its call") {
@@ -100,7 +102,7 @@ cost_projection_held: fn(source: String) -> JetDriverHeldState {
     assert(compiled.complete, "the fixture checks: {compiled.diagnostics.map(fn(row) { row.what })}")
     report: compiled.cost_report.move() ?? panic("a captured check keeps its cost report")
     sites: loop site in report.sites -> "{site.function} {site.path}:{site.line} depth {site.loop_depth}"
-    assert_eq(sites, [String]{"helper main.jet:1 depth 0", "measure main.jet:10 depth 0", "measure main.jet:6 depth 1"})
+    assert_eq(sites, [String]{"helper main.jet:1 depth 0", "measure main.jet:10 depth 0", "measure main.jet:6 depth 1", "measure main.jet:5 depth 1"})
     lints := [String]{}
     loop row in compiled.advice {
         if row.code == "L2510" -> lints.push(row.what)
@@ -172,7 +174,34 @@ cost_projection_counter_source: fn() -> String {
     assert(compiled.complete, "the fixture checks: {compiled.diagnostics.map(fn(row) { row.what })}")
     report: compiled.cost_report.move() ?? panic("a captured check keeps its cost report")
     sites: loop site in report.sites -> "{site.kind:Debug} {site.state:Debug} {site.path}:{site.line} depth {site.loop_depth}"
-    assert_eq(sites, [String]{"ExactIntSpill OptimizerRemoved main.jet:3 depth 1", "ExactIntSpill OptimizerRemoved main.jet:3 depth 1", "ExactIntSpill SemanticRemainder main.jet:7 depth 1"})
+    assert_eq(sites, [String]{"ExactIntSpill OptimizerRemoved main.jet:3 depth 1", "ExactIntSpill OptimizerRemoved main.jet:3 depth 1", "ExactIntSpill SemanticRemainder main.jet:7 depth 1", "StopPoll SemanticRemainder main.jet:2 depth 1", "StopPoll SemanticRemainder main.jet:6 depth 1"})
+}
+
+// A recursive function and a caller outside its cycle.
+cost_projection_recursive_source: fn() -> String {
+    [String]{
+        "fib: fn(n: Int) -> Int {{",
+        "    if n < 2 -> return n",
+        "    fib(n - 1) + fib(n - 2)",
+        "}}",
+        "twice: fn(n: Int) -> Int {{ fib(n) * 2 }}",
+        "",
+    }.join("\n")
+}
+
+#Test("a stop poll is a cost site at each call on a cycle back to its caller, and none at a call outside it") {
+    request := cost_projection_request(cost_projection_recursive_source())
+    request.capture_cost_report = true
+    compiled := jet_driver_compile(request)
+    assert(compiled.complete, "the fixture checks: {compiled.diagnostics.map(fn(row) { row.what })}")
+    report: compiled.cost_report.move() ?? panic("a captured check keeps its cost report")
+    polls := [String]{}
+    loop site in report.sites {
+        if site.kind == TCostKind.StopPoll {
+            polls.push("{site.function} {site.state:Debug} {site.path}:{site.line} depth {site.loop_depth}")
+        }
+    }
+    assert_eq(polls, [String]{"fib SemanticRemainder main.jet:3 depth 0", "fib SemanticRemainder main.jet:3 depth 0"})
 }
 
 // The cost law's example: `log.lines()` copies each line of `log` out into an
@@ -197,7 +226,7 @@ cost_projection_lines_source: fn() -> String {
     assert(compiled.complete, "the fixture checks: {compiled.diagnostics.map(fn(row) { row.what })}")
     report: compiled.cost_report.move() ?? panic("a captured check keeps its cost report")
     sites: loop site in report.sites -> "{site.kind:Debug} `{site.view}` {site.state:Debug} {site.path}:{site.line} depth {site.loop_depth}"
-    assert_eq(sites, [String]{"OutcomeConstruction `` OptimizerRemoved main.jet:4 depth 1", "ViewMaterialization `String` SemanticRemainder main.jet:4 depth 1"})
+    assert_eq(sites, [String]{"OutcomeConstruction `` OptimizerRemoved main.jet:4 depth 1", "ViewMaterialization `String` SemanticRemainder main.jet:4 depth 1", "StopPoll `` SemanticRemainder main.jet:3 depth 1"})
     lints := [String]{}
     loop row in compiled.advice {
         if row.code == "L2510" -> lints.push(row.what)

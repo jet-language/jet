@@ -54,7 +54,9 @@ JET_CLI_PERF_SAMPLE_US: 125
 // stack holds it innermost of the checked source's lines; `events`, per
 // counter, the events of that counter's samples whose stack holds it so;
 // `topdown`, per topdown event (CLI/Perf/Topdown.jet), the samples of
-// that event whose program counter is on it, empty while it has none.
+// that event whose program counter is on it, empty while it has none;
+// `helpers` the samples of its `count` that landed in a compiler-emitted
+// helper it called, by helper.
 JetCLIPerfSampledLine: struct {
     name: String,
     line: Int,
@@ -65,6 +67,15 @@ JetCLIPerfSampledLine: struct {
     topdown: [Int],
     own: Bool,
     file: Int,
+    helpers: [JetCLIPerfHelperCount]{[JetCLIPerfHelperCount]{}},
+}
+
+// The samples of a line in one compiler-emitted helper
+// (JET_CLI_PERF_HELPER_PREFIX), its image function `function`
+// (JetCLIPerfSamples.functions).
+JetCLIPerfHelperCount: struct {
+    function: Int,
+    count: U64,
 }
 
 // A function and line a code address stands for, whether the line is in
@@ -1126,6 +1137,7 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
                     if held.len() == 0 -> next
                     chain = held
                     sampled.helpers += U64{1}
+                    jet_cli_perf_helper_count(sampled.lines, chain[0], native)
                     break
                 }
             }
@@ -1172,6 +1184,26 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
         sampled.heaps[index].sites.sort_by(fn(left: JetCLIPerfHeapSite, right: JetCLIPerfHeapSite) { (right.bytes <=> left.bytes).then(right.blocks <=> left.blocks).then(left.name <=> right.name).then(left.line <=> right.line).then(left.type_name <=> right.type_name) })
     }
     sampled
+}
+
+// One more sample of `lines[place]` in the helper image function `helper`.
+jet_cli_perf_helper_count: fn(lines: &[JetCLIPerfSampledLine], place: Int, helper: Int) Never! {
+    loop index in 0..<lines[place].helpers.len() {
+        if lines[place].helpers[index].function == helper {
+            lines[place].helpers[index].count += U64{1}
+            return
+        }
+    }
+    lines[place].helpers.push(JetCLIPerfHelperCount{function: helper, count: U64{1}})
+}
+
+// A compiler-emitted helper's image function `name` in Jet's terms: each
+// stop poll (JetIR Build.jet ir_stop_poll) is `stop poll`, another helper
+// its name past JET_CLI_PERF_HELPER_PREFIX with spaces for `_`.
+jet_cli_perf_helper_name: fn(name: String) -> String Never! {
+    if name.starts_with("jet_ir_stop_") -> return "stop poll"
+    rest: if name.starts_with(JET_CLI_PERF_HELPER_PREFIX) -> name.slice(JET_CLI_PERF_HELPER_PREFIX.len()..<name.len()) else -> name
+    rest.replace("_", " ")
 }
 
 // The events line `line` counted of counter `counter` (an index of
@@ -1460,6 +1492,67 @@ jet_cli_perf_syscalls_section: fn(calls: &&[JetCLIPerfSyscall], lost: U64) -> Tr
     Val(TraceReceiptSection{name: "syscalls", type_name: "JetPerfSyscalls", digest: canonical_json_sha256(value), value: value})
 }
 
+// The trace's `helpers` receipt section (type `JetPerfHelpers`): the
+// samples that landed in a compiler-emitted helper, which count at the line
+// that called it, split out by line and helper. Each row is a line's
+// `path`, `line` and `function`, the `helper` in Jet's terms
+// (jet_cli_perf_helper_name) and its `samples`, the most first. A line
+// outside the checked `source` and the program's other `sources` (each at
+// its `source_at` entry, JetCLIPerfSamples) has no row, as it has no
+// profile row. None when no sample landed in a helper.
+jet_cli_perf_helpers_section: fn(source: String, lines: [JetCLIPerfSampledLine], functions: [X64ImageFunction], sources: [JetCLIPerfProgramSource], source_at: [Int]) -> TraceReceiptSection? Never! {
+    found := [JetCLIPerfLineHelper]{}
+    loop place in lines {
+        if place.helpers.len() == 0 -> next
+        other: if place.own || place.file < 0 || place.file >= source_at.len() -> -1 else -> source_at[place.file]
+        if !place.own && other < 0 -> next
+        path: if place.own -> "{source}" else -> "{sources[other].identity.path}"
+        loop held in place.helpers {
+            helper: jet_cli_perf_helper_name(functions[held.function].name)
+            at := -1
+            loop index in 0..<found.len() {
+                if found[index].line == place.line && found[index].helper == helper && found[index].function == place.name && found[index].path == path {
+                    at = index
+                    break
+                }
+            }
+            if at < 0 {
+                at = found.len()
+                found.push(JetCLIPerfLineHelper{path: "{path}", line: place.line, function: "{place.name}", helper: helper, samples: 0})
+            }
+            found[at].samples += Int{held.count}
+        }
+    }
+    if found.len() == 0 -> return None
+    found.sort_by(fn(left: JetCLIPerfLineHelper, right: JetCLIPerfLineHelper) { (right.samples <=> left.samples).then(left.path <=> right.path).then(left.line <=> right.line).then(left.function <=> right.function).then(left.helper <=> right.helper) })
+    rows := [CanonicalJSON]{}
+    loop row in found.move() {
+        rows.push(
+            CanonicalJSON.Object(
+                [CanonicalJSONField]{
+                    {key: "function", value: CanonicalJSON.String(row.function.move())},
+                    {key: "helper", value: CanonicalJSON.String(row.helper.move())},
+                    {key: "line", value: CanonicalJSON.Integer("{row.line}")},
+                    {key: "path", value: CanonicalJSON.String(row.path.move())},
+                    {key: "samples", value: CanonicalJSON.Integer("{row.samples}")},
+                },
+            ),
+        )
+    }
+    value: CanonicalJSON.Object([CanonicalJSONField]{{key: "helpers", value: CanonicalJSON.Array(rows.move())}})
+    Val(TraceReceiptSection{name: "helpers", type_name: "JetPerfHelpers", digest: canonical_json_sha256(value), value: value})
+}
+
+// The samples of a line in a compiler-emitted helper, by the helper's name
+// in Jet's terms (jet_cli_perf_helpers_section).
+JetCLIPerfLineHelper: struct {
+    path: String,
+    line: Int,
+    function: String,
+    helper: String,
+    samples: Int,
+}
+
 // Call sites as a receipt's rows: each its `function`, `file` (null for an
 // inlined function's line from another file), `line` and whether the line
 // is in the checked source (`own`).
@@ -1639,7 +1732,7 @@ jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSa
         named.push("{sampled.functions[native.function].name} {native.count}")
     }
     natives: if named.len() == 0 -> "" else -> "; outside Jet functions: {named.join(", ")}"
-    helpers: if sampled.helpers == (U64{0}) -> "" else -> "; {sampled.helpers} samples in compiler-emitted helpers, such as stop polls, count at the line that called them"
+    helpers: if sampled.helpers == (U64{0}) -> "" else -> "; {sampled.helpers} samples in compiler-emitted helpers, such as stop polls, count at the line that called them, which the `helpers` receipt splits out by line"
     stackless: if sampled.stackless == (U64{0}) -> "" else -> "; {sampled.stackless} samples in Jet code kept no stack: their frames could not be walked, or other threads' samples held every record buffer"
     nominal: if sampled.cost == .Val(cost) -> "; it kept {sampled.total} of the {cost.cpu_ns / U64{JET_CLI_PERF_SAMPLE_US * 1000}} samples that {cost.cpu_ns / U64{1000000}} ms of CPU time under sampling gives" else -> ""
     cpu_ns: if sampled.cost == .Val(cost) -> Val(cost.cpu_ns) else -> U64?{None}

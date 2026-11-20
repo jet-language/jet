@@ -1459,7 +1459,9 @@ A reachable callable without a complete checked body or specialization refuses
 with E2104; it never produces a clean-cost claim. The collector retains nested
 loop depth through control flow and closure bodies. `lint --cost` reports each retained
 cost inside a loop once per site and operation as L2510 (view
-materialization included) and omits optimizer-proven removals; `jet check`
+materialization included) and omits optimizer-proven removals and stop polls
+(the turn poll each loop iteration starts with, and the one at a call that
+recurses), which `explain --cost` lists as `stop poll` sites; `jet check`
 does not report L2510. Without `--cost`, `jet check` and `jet build` list each
 hidden copy a loop repeats (a view made owned, or an implicit copy whose type's
 clone allocates: a `String`, `List`, `Map` or a value holding one; never a

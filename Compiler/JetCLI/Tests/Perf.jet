@@ -17,6 +17,9 @@ use {
         JetCLIPerfHeapSnapshot,
         JetCLIPerfIO,
         JetCLIPerfInlines,
+        JetCLIPerfLineHelper,
+        JetCLIPerfLineTotal,
+        JetCLIPerfLineTotals,
         JetCLIPerfObservation,
         JetCLIPerfPlotTotal,
         JetCLIPerfRetained,
@@ -32,7 +35,11 @@ use {
         jet_cli_perf_heap_retain,
         jet_cli_perf_heap_retention_lines,
         jet_cli_perf_heap_types,
+        jet_cli_perf_helper_name,
+        jet_cli_perf_helpers_section,
         jet_cli_perf_live_from,
+        jet_cli_perf_line_costs_none,
+        jet_cli_perf_line_table,
         jet_cli_perf_log_spans_read,
         jet_cli_perf_observed,
         jet_cli_perf_pc_json,
@@ -278,6 +285,15 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     assert_eq(sampled.lines[0].inclusive, U64{2})
     assert_eq(sampled.natives.len(), 1)
     assert_eq(sampled.functions[sampled.natives[0].function].name, "jet_rt_alloc")
+    // The helper's sample is split out at fib's line, named in Jet's terms.
+    assert_eq(sampled.lines[0].helpers.len(), 1)
+    assert_eq(sampled.functions[sampled.lines[0].helpers[0].function].name, "jet_ir_stop_turn")
+    assert_eq(sampled.lines[0].helpers[0].count, U64{1})
+    helpers: jet_cli_perf_helpers_section("fib.jet", sampled.lines, sampled.functions, sampled.sources, sampled.source_at) ?? panic("fib's line holds a helper sample")
+    assert_eq(helpers.type_name, "JetPerfHelpers")
+    assert_eq(String.from_bytes(canonical_json_bytes(helpers.value)) ?? "", "{{\"helpers\":[{{\"function\":\"fib\",\"helper\":\"stop poll\",\"line\":5,\"path\":\"fib.jet\",\"samples\":1}}]}}\n")
+    assert_eq(jet_cli_perf_helper_name("jet_ir_stop_poll"), "stop poll")
+    assert_eq(jet_cli_perf_helper_name("jet_ir_stack_mark"), "stack mark")
     text: "\n\n\n\nfib: fn(n: Int) -> Int {{ n }}\n"
     profile: jet_cli_perf_samples_profile(jet_cli_perf_source("fib.jet", text), sampled) ?? panic("fib's line holds samples")
     assert(profile.reason.contains("; 1 of 3 samples are outside fib.jet; outside Jet functions: jet_rt_alloc 1; 1 samples in compiler-emitted helpers, such as stop polls, count at the line that called them"))
@@ -287,6 +303,14 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     assert_eq(profile.overhead_status, "measured")
     assert_eq(profile.overhead_ns, Val(U64{9000}))
     assert_eq(profile.overhead_reason, "the sampler took 9 microseconds, 0.22% of the 4000 microseconds of CPU time sampled: 6 in its handlers and 3 signals at the 1000 nanoseconds the kernel took to deliver and return from one as sampling started")
+}
+
+#Test("the per-line table splits a line's samples in a stop poll out of its own") {
+    names: [String]{"", "fib.jet", "fib"}
+    rows: [JetCLIPerfLineTotal]{JetCLIPerfLineTotal{path: 1, line: 7, function: 2, samples: 71}, JetCLIPerfLineTotal{path: 1, line: 5, function: 2, samples: 29}}
+    helpers: [JetCLIPerfLineHelper]{JetCLIPerfLineHelper{path: "fib.jet", line: 7, function: "fib", helper: "stop poll", samples: 34}}
+    table: jet_cli_perf_line_table(JetCLIPerfLineTotals{names: names, rows: rows, helpers: helpers}, jet_cli_perf_line_costs_none())
+    assert_eq(table, [String]{"  fib.jet:7 fib samples=71 share=71% · stop poll samples=34 share=34%", "  fib.jet:5 fib samples=29 share=29%"})
 }
 
 #Test("perf names the sampler that took the CPU-time samples and why the timer took them") {

@@ -6548,7 +6548,8 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         cost_report := TCostReport?{None}
         if request.capture_cost_report {
             jet_driver_trace_step_begin(request.trace_sink, "driver.check.cost")
-            cost_cover: jet_driver_cost_cover(checked_functions, jet_driver_cost_callees(checked_functions, runtime_semantic_modules, registration_graph.decls, registration_graph.symbols))
+            cost_callees: jet_driver_cost_callees(checked_functions, runtime_semantic_modules, registration_graph.decls, registration_graph.symbols)
+            cost_cover: jet_driver_cost_cover(checked_functions, cost_callees)
             loop gap in cost_cover.gaps {
                 load.diagnostics.push(jet_driver_cost_gap_diagnostic(load, checked_functions[gap.caller], decl_table_key(registration_graph.decls, registration_graph.symbols, gap.callee), gap.span))
             }
@@ -6556,7 +6557,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
                 jet_driver_trace_step_end(request.trace_sink, "driver.check.cost", cost_cover.covered.len())
                 return jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Check), false, trace)
             }
-            report := jet_driver_cost_report(checked_functions, cost_cover.covered)
+            report := jet_driver_cost_report(checked_functions, cost_cover.covered, cost_callees)
             jet_driver_cost_place(load, report)
             loop lint in jet_driver_cost_lints(load, report) -> load.diagnostics.push(lint)
             cost_report = Val(report.move())

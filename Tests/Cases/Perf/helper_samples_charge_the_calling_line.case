@@ -2,7 +2,10 @@
 # such as the stop poll at a recursive body's entry, counts at the Jet line
 # that called it, and the receipt counts those samples: an -O2 fib names no
 # helper outside Jet functions, where about a third of its samples used to
-# land under `jet_ir_stop_turn`.
+# land under `jet_ir_stop_turn`. The `helpers` receipt splits them out by
+# line and helper, named in Jet's terms, and the view's row of the line that
+# recurses shows the stop poll's samples beside its cost facts, which name
+# the poll at each of its two calls.
 requires: os-name:linux
 fixture: RecursiveInclusiveTime.fixture
 env: NO_COLOR=1
@@ -12,3 +15,10 @@ stdout: = "fib=9227465\n"
 json: file fib.jettrace doc $.content.profile.reason ~ " samples in compiler-emitted helpers, such as stop polls, count at the line that called them" # the receipt counts the helper samples
 json: file fib.jettrace doc $.content.profile.reason !~ "jet_ir_" # and names no helper outside Jet functions
 json: file fib.jettrace doc $.content.profile.rows[0].symbol.name = "fib" # the helper samples count at fib's lines
+file: fib.jettrace ~ "\"function\":\"fib\",\"helper\":\"stop poll\",\"line\":" # the helpers receipt names the poll in Jet's terms
+file: fib.jettrace !~ "\"helper\":\"jet_ir_" # never by its symbol
+step: jet perf view {work}/fib.jettrace
+exit: 0
+capture: row = text stdout.after_first("  fib.jet:7 fib samples=").split("\n", 0)
+cap:row: ~ " · cost: stop poll ×2 — semantic remainder (loop depth 0)" # the poll at each recursive call is a cost fact
+cap:row: ~ " · stop poll samples=" # and the line's samples in the poll are split out

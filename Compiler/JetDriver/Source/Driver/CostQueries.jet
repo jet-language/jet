@@ -184,14 +184,93 @@ jet_driver_cost_gap_diagnostic: fn(load: JetDriverLoadResult, caller: FnBody, ca
 }
 
 // The cost report of the `covered` functions of `functions`: each one's name
-// and sites, in cover order.
-jet_driver_cost_report: fn(functions: [FnBody], covered: [JetDriverCostCovered]) -> TCostReport Never! {
+// and sites, in cover order, its stop polls (jet_driver_cost_stop_polls)
+// after its other sites. `callees` are the callee facts the cover read.
+jet_driver_cost_report: fn(functions: [FnBody], covered: [JetDriverCostCovered], callees: JetDriverCostCallees) -> TCostReport Never! {
     report := TCostReport{}
-    loop row in covered {
+    nodes: loop row in covered -> jet_driver_cost_nodes(functions[row.position])
+    // Each function's direct callers among the covered, by position.
+    callers := [Int:[Int]]{}
+    loop (at, row) in covered {
+        loop id in nodes[at] {
+            node: body_node(functions[row.position].tree, id)
+            if node.kind == .Call(callee, _, _) {
+                if callees.bodies[callee.row.index()] == .Val(target) {
+                    if callers.get(target) == None -> callers[target] = [Int]{}
+                    callers[target].push(row.position)
+                }
+            }
+        }
+    }
+    loop (at, row) in covered {
+        depths: jet_driver_cost_loop_depths(functions[row.position].tree)
         report.functions.push(row.name)
-        jet_driver_cost_function_sites(functions[row.position], row.name, jet_driver_cost_nodes(functions[row.position]), jet_driver_cost_loop_depths(functions[row.position].tree), report.sites)
+        jet_driver_cost_function_sites(functions[row.position], row.name, nodes[at], depths, report.sites)
+        jet_driver_cost_stop_polls(functions[row.position], row.position, row.name, nodes[at], depths, callees, callers, report.sites)
     }
     report
+}
+
+// Pushes onto `sites` the stop polls the compiler emits into `function`
+// (JetIR Build.jet), at `position` among the projected functions and
+// reported as `name`, each a semantic remainder: the turn poll each
+// iteration of a loop starts with (ir_loop_check), at the loop, at the depth
+// of its body; and, at each direct call of a function on a cycle of calls
+// back to this one, itself included, the turn poll that callee's entry
+// keeps (ir_entry_check, ir_recursion_checks), at the call's depth.
+// `callers` holds each covered function's direct callers, by position.
+jet_driver_cost_stop_polls: fn(function: FnBody, position: Int, name: String, nodes: [Int], depths: [Int:Int], callees: JetDriverCostCallees, callers: [Int:[Int]], sites: &[TCostSite]) Never! {
+    tree: function.tree
+    loop statement in tree.stmts {
+        span: jet_driver_cost_loop_span(statement) ?? next
+        iterated := [Int]{}
+        jet_driver_cost_iterated(tree, statement, iterated)
+        // The loop's body is at the least depth of what it runs.
+        depth := 0
+        loop id in iterated {
+            at: depths.get(id) ?? 1
+            if depth == 0 || at < depth -> depth = at
+        }
+        if depth == 0 -> depth = 1
+        sites.push(TCostSite{function: name, module_identity: function.module_identity, span: span, loop_depth: depth, kind: TCostKind.StopPoll, state: TCostState.SemanticRemainder, view: ""})
+    }
+    // The functions that reach this one through direct calls.
+    reaching := [Int:Bool]{}
+    pending := [Int]{position}
+    loop pending.len() > 0 {
+        at: pending.pop() ?? break
+        if callers.get(at) == .Val(direct) {
+            loop caller in direct {
+                if reaching.get(caller) != None -> next
+                reaching[caller] = true
+                pending.push(caller)
+            }
+        }
+    }
+    if reaching.len() == 0 {
+        return
+    }
+    loop id in nodes {
+        node: body_node(tree, id)
+        if node.kind == .Call(callee, _, _) {
+            if callees.bodies[callee.row.index()] == .Val(target) {
+                if reaching.get(target) != None {
+                    sites.push(TCostSite{function: name, module_identity: function.module_identity, span: node.span, loop_depth: depths.get(id) ?? 0, kind: TCostKind.StopPoll, state: TCostState.SemanticRemainder, view: ""})
+                }
+            }
+        }
+    }
+}
+
+// The span of a loop statement, None for any other.
+jet_driver_cost_loop_span: fn(statement: StmtKind) -> Span? Never! {
+    if statement == .Loop(_, _, span) -> return Val(span)
+    if statement == .While(_, _, _, span) -> return Val(span)
+    if statement == .CountedLoop(_, _, _, _, _, _, span) -> return Val(span)
+    if statement == .ForRange(_, _, _, _, _, _, _, _, span) -> return Val(span)
+    if statement == .Range(_, _, _, _, _, _, _, _, _, span) -> return Val(span)
+    if statement == .ForIn(_, _, _, _, _, _, _, _, _, _, _, span) -> return Val(span)
+    None
 }
 
 // Each site of `report` placed in its source file: the file's path and the
@@ -207,12 +286,15 @@ jet_driver_cost_place: fn(load: JetDriverLoadResult, report: &TCostReport) {
 }
 
 // The L2510 lints of `report`: one per distinct site a loop repeats whose
-// cost remains in the emitted code.
+// cost remains in the emitted code, but a stop poll, which a loop keeps so a
+// stop can reach it.
 jet_driver_cost_lints: fn(load: JetDriverLoadResult, report: TCostReport) -> [Diagnostic] {
     lints := [Diagnostic]{}
     seen := [String:Bool]{}
     loop site in report.sites {
-        if site.loop_depth == 0 || site.state != TCostState.SemanticRemainder -> next
+        if site.loop_depth == 0 || site.state != TCostState.SemanticRemainder || site.kind == TCostKind.StopPoll {
+            next
+        }
         operation: jet_driver_cost_operation(site)
         key: "{site.module_identity:Debug} {site.span.start} {site.span.end} {operation}"
         if seen.get(key) != None -> next
@@ -266,6 +348,7 @@ jet_driver_cost_kind_label: fn(kind: TCostKind) -> String Never! {
         .ExactIntSpill -> "exact Int spill"
         .OutcomeConstruction -> "outcome construction"
         .RepresentationFallback -> "generic representation fallback"
+        .StopPoll -> "stop poll"
     }
 }
 
@@ -286,6 +369,7 @@ jet_driver_cost_operation: fn(site: TCostSite) -> String Never! {
         .ExactIntSpill -> "An exact Int operation may spill to bigint"
         .OutcomeConstruction -> "Constructing an Outcome carrier"
         .RepresentationFallback -> "Using a generic collection representation"
+        .StopPoll -> "A stop poll"
     }
 }
 
@@ -298,6 +382,7 @@ jet_driver_cost_fix: fn(kind: TCostKind) -> String Never! {
         .ExactIntSpill -> "bound the operands so the result stays on the packed Int rail, or accept the exact bigint cost"
         .OutcomeConstruction -> "consume the outcome through an immediate fast path when one exists"
         .RepresentationFallback -> "provide the collection shape proof that selects the direct representation"
+        .StopPoll -> "keep it: the poll is where a cancel, a passed deadline or a pause reaches the loop"
     }
 }
 

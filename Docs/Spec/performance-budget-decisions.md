@@ -939,6 +939,14 @@ loop item in items {
 }
 ```
 
+A seventh row, the **stop poll**, names the turn poll the compiler emits
+where a cancel, a passed deadline or a pause can reach running code: one at
+each loop, which every iteration starts with, at the depth of the loop's
+body, and one at each call to a function on a cycle of calls back to its
+caller, whose entry keeps one. It is a semantic remainder `jet explain
+--cost` lists so a profile's samples in the poll have a fact on their line,
+but never a lint: the poll is the price of stopping, not a hidden cost.
+
 Cost lints are opt-in: `jet check` never reports L2510. `jet lint --cost
 file.jet` reports the semantic remainders a loop repeats.
 `jet explain --cost file.jet` reports semantic remainders and
