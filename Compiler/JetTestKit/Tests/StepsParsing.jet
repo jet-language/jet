@@ -57,7 +57,7 @@ kit_test_steps_env: fn() -> KitEnv {
 
 #Test("missing host skips before a declarative capability refusal") {
     env: kit_test_steps_env()
-    missing: kit_steps_parse("requires: os:not-{sys.family()}\nrefused: missing Windows COM host\n")
+    missing: kit_steps_parse("requires: os:!{sys.family()}\nrefused: missing Windows COM host\n")
     skipped: kit_steps_execute(kit_steps_context(missing, "case", env, env.root, env.scratch, env.root, kit_test_steps_bless()), kit_steps_hooks())
     assert_eq(skipped.verdict.status, "SKIP-HOST")
     present: kit_steps_parse("requires: os:{sys.family()}\nrefused: missing Windows COM host\n")

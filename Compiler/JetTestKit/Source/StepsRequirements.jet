@@ -17,6 +17,45 @@ kit_steps_host_arch: fn() -> String {
     arch
 }
 
+// The names a host requirement (`requires: os:unix`) or condition (`when os
+// unix`) chooses from, each after its kind: `os` names a family, `os-name` an
+// OS and `arch` an architecture, as kit_steps_host_name and
+// kit_steps_host_arch normalize them. A name off this list matches no host,
+// so a case naming one would skip on every host; the kit refuses it instead.
+KIT_HOST_NAMES: [String]{"os unix", "os windows", "os-name linux", "os-name macos", "os-name windows", "os-name android", "os-name ios", "os-name freebsd", "os-name openbsd", "os-name netbsd", "arch x86_64", "arch aarch64", "arch x86"}
+
+// The host's name of `kind` (`os`, `os-name` or `arch`).
+kit_steps_host_value: fn(kind: String) -> String {
+    if kind == "os" -> return sys.family()
+    if kind == "os-name" -> return kit_steps_host_name()
+    kit_steps_host_arch()
+}
+
+// The names `kind` may choose from.
+kit_steps_host_known: fn(kind: String) -> [String] {
+    prefix: "{kind} "
+    known := [String]{}
+    loop row in KIT_HOST_NAMES {
+        if row.starts_with(prefix) {
+            known.push(kit_steps_byte_slice(row, prefix.count_bytes(), row.count_bytes()))
+        }
+    }
+    known
+}
+
+// Why `choices` (`a|b` or `!a|b`) can't be chosen for `kind`: the first name
+// off its list, or "" when every name is on it.
+kit_steps_host_unknown: fn(kind: String, choices: String) -> String {
+    known: kit_steps_host_known(kind)
+    names: if choices.starts_with("!") -> kit_steps_byte_slice(choices, 1, choices.count_bytes()) else -> choices
+    loop name in names.split("|") {
+        if !kit_expect_named(known, name) {
+            return "`{name}` matches no host: {kind} chooses from {known.join(", ")}"
+        }
+    }
+    ""
+}
+
 kit_steps_host_matches: fn(actual: String, choices: String) -> Bool {
     negative: choices.starts_with("!")
     names: if negative -> kit_steps_byte_slice(choices, 1, choices.count_bytes()) else -> choices

@@ -126,7 +126,7 @@ kit_test_golden_step: fn(argv: [String], action: String) -> KitStep {
     missing: kit_golden_run_entry(entry, tier, env, files.join(root, "missing"), kit_test_golden_bless())
     assert_eq(missing.verdict.status, "FAIL")
     assert(missing.verdict.detail.contains("missing expected stream"))
-    kit_exec_write(files.join(root, "{entry.expected}.case"), "requires: os:not-this-host\n")
+    kit_exec_write(files.join(root, "{entry.expected}.case"), "requires: os:!{sys.family()}\n")
     host_skip: kit_golden_run_entry(entry, tier, env, files.join(root, "host-skip"), kit_test_golden_bless())
     assert_eq(host_skip.verdict.status, "SKIP-HOST")
     kit_exec_write(files.join(root, "{entry.expected}.case"), "run: none\n")

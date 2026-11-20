@@ -126,7 +126,7 @@ cases_test_source: fn(root: String, name: String, text: String) {
 
 #Test("cases host skips precede refusals and malformed scenarios do not spawn") {
     root: cases_test_root("refusals")
-    cases_test_source(root, "skip", "requires: os:not-{sys.family()}\nrefused: missing host capability\n")
+    cases_test_source(root, "skip", "requires: os:!{sys.family()}\nrefused: missing host capability\n")
     cases_test_source(root, "refused", "requires: os:{sys.family()}\nrefused: missing host capability\n")
     cases_test_source(root, "grammar", "step: jet -c 'exit 0'\nstdout: ~ unstable\n")
     cases_test_source(root, "empty", "# empty case\n")
@@ -197,7 +197,7 @@ cases_test_source: fn(root: String, name: String, text: String) {
     cases_test_source(root, "ledger", "step: jet -c 'exit 0'\n")
     assert_eq(kit_cases_run(cases_test_entry("header"), context)[0].verdict.status, "UNEXPECTED-PASS")
     assert_eq(kit_cases_run(cases_test_entry("ledger"), context)[0].verdict.status, "UNEXPECTED-PASS")
-    cases_test_source(root, "header", "# KNOWN-FAILING #4865\nrequires: os:not-{sys.family()}\nstep: jet -c 'exit 7'\n")
+    cases_test_source(root, "header", "# KNOWN-FAILING #4865\nrequires: os:!{sys.family()}\nstep: jet -c 'exit 7'\n")
     assert_eq(kit_cases_run(cases_test_entry("header"), context)[0].verdict.status, "SKIP-HOST")
     cases_test_source(root, "header", "# KNOWN-FAILING #4865\nstdout: ~ invalid\n")
     assert_eq(kit_cases_run(cases_test_entry("header"), context)[0].verdict.status, "REFUSED")

@@ -201,10 +201,11 @@ use files: core.files
     root: cases_test_root("filesystem-assertion-guards")
     directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "tree/value"), "ready")
-    source: "fixture: tree\nwhen os not-a-host: mkdir: absent\nfile: absent absent\nfile: value = \"ready\"\nwhen os not-a-host\nfile: value = \"wrong\"\nend when\nfile: value = \"ready\"\n"
+    other: cases_test_other_host("os")
+    source: "fixture: tree\nwhen os {other}: mkdir: absent\nfile: absent absent\nfile: value = \"ready\"\nwhen os {other}\nfile: value = \"wrong\"\nend when\nfile: value = \"ready\"\n"
     assert_eq(kit_steps_parse_case(source).error, "")
     assert_eq(cases_test_advanced(root, "independent", source).verdict.status, "PASS")
-    assert_eq(cases_test_advanced(root, "must-check", "fixture: tree\nwhen os not-a-host: mkdir: absent\nfile: value = \"wrong\"\n").verdict.status, "FAIL")
+    assert_eq(cases_test_advanced(root, "must-check", "fixture: tree\nwhen os {other}: mkdir: absent\nfile: value = \"wrong\"\n").verdict.status, "FAIL")
     files.remove_all(root) ?? panic("remove assertion guard scratch")
 }
 
