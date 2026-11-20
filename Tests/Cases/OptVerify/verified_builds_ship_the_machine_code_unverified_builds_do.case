@@ -1,0 +1,90 @@
+# The optimizer's verify (JET_OPT_VERIFY, which the kit sets for every case)
+# only reads: IR Lint after each pass and a copy of each body taken out of
+# SSA change no body, so a verified build ships the machine code an
+# unverified one does, at every level. Three programs, each built with the
+# verifier off and on: the hot loop the profiler cases sample, which -O1 and
+# -O2 inline into its caller; a loop whose local joins at its `break` exit
+# and whose function -O1 and -O2 inline into `run`; and Core's TLS stack,
+# whose constant-time primitives' machine code the emission log keeps.
+fixture: ../Perf/PrecisePcNamesItsSource.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+copy: {root}/Tests/Cases/Debug/LocalJoinedAtABreakExitStaysVisible.fixture/prog.jet joined.jet
+step: jet build -O0 main.jet
+env: JET_OPT_VERIFY=
+exit: 0
+copy: .jet/build/main main.off0
+step: jet build -O0 main.jet
+exit: 0
+file: main.off0 == .jet/build/main # the hot loop at -O0
+step: jet build -O1 main.jet
+env: JET_OPT_VERIFY=
+exit: 0
+copy: .jet/build/main main.off1
+step: jet build -O1 main.jet
+exit: 0
+file: main.off1 == .jet/build/main # the hot loop inlined at -O1
+step: jet build -O2 main.jet
+env: JET_OPT_VERIFY=
+exit: 0
+copy: .jet/build/main main.off2
+step: jet build -O2 main.jet
+exit: 0
+file: main.off2 == .jet/build/main # and at -O2
+step: jet build -O0 joined.jet
+env: JET_OPT_VERIFY=
+exit: 0
+copy: .jet/build/joined joined.off0
+step: jet build -O0 joined.jet
+exit: 0
+file: joined.off0 == .jet/build/joined # the local joined at the loop's exit keeps its slot at -O0
+step: jet build -O1 joined.jet
+env: JET_OPT_VERIFY=
+exit: 0
+copy: .jet/build/joined joined.off1
+step: jet build -O1 joined.jet
+exit: 0
+file: joined.off1 == .jet/build/joined # the loop inlined into `run` at -O1
+step: jet build -O2 joined.jet
+env: JET_OPT_VERIFY=
+exit: 0
+copy: .jet/build/joined joined.off2
+step: jet build -O2 joined.jet
+exit: 0
+file: joined.off2 == .jet/build/joined # and at -O2
+step: jet test {root}/Core/Net/SSL/TLS.jet -O0 --filter=emission
+env: JET_OPT_VERIFY=
+env: JET_X64_EMIT_LOG=Core/Crypto/,Core/Net/SSL/
+env: JET_X64_EMIT_LOG_REPORT={work}/off.log
+timeout: 900s
+exit: 0
+step: jet test {root}/Core/Net/SSL/TLS.jet -O0 --filter=emission
+env: JET_X64_EMIT_LOG=Core/Crypto/,Core/Net/SSL/
+env: JET_X64_EMIT_LOG_REPORT={work}/on.log
+timeout: 900s
+exit: 0
+file: off.log == on.log # the constant-time primitives at -O0
+step: jet test {root}/Core/Net/SSL/TLS.jet -O1 --filter=emission
+env: JET_OPT_VERIFY=
+env: JET_X64_EMIT_LOG=Core/Crypto/,Core/Net/SSL/
+env: JET_X64_EMIT_LOG_REPORT={work}/off.log
+timeout: 900s
+exit: 0
+step: jet test {root}/Core/Net/SSL/TLS.jet -O1 --filter=emission
+env: JET_X64_EMIT_LOG=Core/Crypto/,Core/Net/SSL/
+env: JET_X64_EMIT_LOG_REPORT={work}/on.log
+timeout: 900s
+exit: 0
+file: off.log == on.log # at -O1
+step: jet test {root}/Core/Net/SSL/TLS.jet -O2 --filter=emission
+env: JET_OPT_VERIFY=
+env: JET_X64_EMIT_LOG=Core/Crypto/,Core/Net/SSL/
+env: JET_X64_EMIT_LOG_REPORT={work}/off.log
+timeout: 900s
+exit: 0
+step: jet test {root}/Core/Net/SSL/TLS.jet -O2 --filter=emission
+env: JET_X64_EMIT_LOG=Core/Crypto/,Core/Net/SSL/
+env: JET_X64_EMIT_LOG_REPORT={work}/on.log
+timeout: 900s
+exit: 0
+file: off.log == on.log # and at -O2

@@ -456,14 +456,19 @@ sync_park: fn(slot: I64, timeout_ns: I64) {
 sync_park_wake: fn(slot: I64) { sync_park_wake_as(slot, I64{-1}) }
 
 // sync_park_wake, which under `jet perf run` records the wake when it
-// reaches a waiter or one about to park, timed before it publishes, as
-// task `waker`'s (-1: the current task's; PerfSamples.jet perf_samples_wake).
+// reaches a waiter or one about to park (the slot not already notified),
+// as task `waker`'s (-1: the current task's; PerfSamples.jet
+// perf_samples_wake). The record is written before the wake publishes: the
+// woken task may run on to the program's exit before this thread runs
+// again, and a record written after the wake would then be lost, leaving
+// the wait ended by its timeout.
 sync_park_wake_as: fn(slot: I64, waker: I64) {
-    at: if (perf_samples_fd >= I64{0}) -> time_host_monotonic_i64() else -> I64{0}
+    if (perf_samples_fd >= I64{0} && sync_load(slot) != I64{1}) {
+        perf_samples_wake(slot, time_host_monotonic_i64(), waker)
+    }
     previous: sync_swap(slot, I64{1})
     if (previous == I64{2}) { sync_futex_wake(slot, I64{1}) }
     if (previous > I64{2}) { _ := coll_call1(sync_load(wrapping(sync_lot + I64{32})), previous) }
-    if (at != I64{0} && previous != I64{1}) { perf_samples_wake(slot, at, waker) }
 }
 
 // Once: 0 empty, 1 initializer running, 2 published. The initializer must not

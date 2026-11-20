@@ -1,12 +1,9 @@
 # The debugger reads the code a build ships. `total` leaves its loop two
 # ways, by the loop's test and by the `break`, so after the loop its value
-# is the join of both. The IR verifier's SSA round trip (JET_OPT_VERIFY)
-# moves such a value into a fresh unnamed slot, where no debugger finds
-# `total`; no build a user runs makes that round trip, and the kit leaves
-# the verifier off for Debug cases. Stopped on the line after the loop,
-# `total` is a local with the value the `break` left, listed after the
-# parameter `n`, which no register holds there any more: it reads as the
-# value it entered with.
+# is the join of both. Stopped on the line after the loop, `total` is a
+# local with the value the `break` left, listed after the parameter `n`,
+# which no register holds there any more: it reads as the value it entered
+# with.
 # The fixture must stay in jet fmt form.
 fixture: LocalJoinedAtABreakExitStaysVisible.fixture
 env: NO_COLOR=1

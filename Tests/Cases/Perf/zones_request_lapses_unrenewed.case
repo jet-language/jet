@@ -24,9 +24,9 @@ exit: 0
 step: sh -c 'ls run/jet | grep -c "samples.zones$"'
 exit: 1 # grep counts no line
 stdout: = "0\n" # unrenewed, the request lapsed and the program removed it
-step: sh -c 'od -A n -v -t d8 -w8 run/jet/jet-flight-{pid:live}.samples.spans | grep -c -x " *25769803816"'
+step: sh -c 'od -A n -v -t u1 -w1 run/jet/jet-flight-{pid:live}.samples.spans | awk -f window_rows.awk'
 exit: 0
-stdout: = "1\n" # and closed the window once: one row of kind 6 holding five words (40 | 6 << 32)
+stdout: = "1\n" # and closed the window once: one row of kind 6 holding five words, walked row by row, as a name's bytes leave the next row unaligned
 signal live: KILL
 close live
 exit: any # the case's KILL ends the program

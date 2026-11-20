@@ -613,11 +613,17 @@ JET_CLI_PERF_WINDOW_LOSS: "the program could not write them to its zones window'
 // PerfSamples.jet perf_flight_publish) and the image beside it, copied out
 // of its way, then read as a run's samples are, each CPU-time sample
 // standing for the flight recorder's interval; the program keeps
-// publishing its own. Lines in `source` are its own. None when it publishes
-// no ring.
+// publishing its own. Its observation writer first publishes the ring at
+// its first turn, up to 100 ms after the program starts, so an attach
+// that early waits for it, JET_CLI_PERF_FLIGHT_WAITS at most. Lines in
+// `source` are its own. None when it publishes no ring.
 jet_cli_perf_attach_flight: fn(pid: Int, home: String, source: String) -[FS, Env, Time]> JetCLIPerfSamples? Never! {
     published: perf_files.join(home, "jet-flight-{pid}.samples")
     taken: perf_files.join(home, "jet-perf-attach-{perf_process.current_pid()}-{pid}-{perf_time.unix_ns()}.samples")
+    loop _ in 0..<JET_CLI_PERF_FLIGHT_WAITS {
+        if perf_files.exists(published) && perf_files.exists("{published}.image") -> break
+        perf_time.sleep(25ms)
+    }
     perf_files.copy(published, taken) ?? return None
     if perf_files.copy("{published}.image", "{taken}.image") == .Err(_) {
         perf_files.remove(taken).drop("the attach reads the ring it copied once")
@@ -698,6 +704,10 @@ JetCLIPerfAttachHeap: struct {
 // The 25 ms waits an attach gives the program to answer a heap snapshot
 // request: 5 s, fifty of its publications.
 JET_CLI_PERF_HEAP_WAITS: 200
+
+// The 25 ms waits an attach gives a program that has not published its
+// flight ring yet: 300 ms, three of the writer's turns.
+JET_CLI_PERF_FLIGHT_WAITS: 12
 
 // `--zones=` window: whole milliseconds or seconds (`500ms`, `2s`), above 0.
 jet_cli_perf_attach_window: fn(text: String) -> Int? Never! {

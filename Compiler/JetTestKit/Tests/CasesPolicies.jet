@@ -147,14 +147,14 @@ use {
     files.remove_all(root) ?? panic("remove argv environment scratch")
 }
 
-#Test("cases build under JET_OPT_VERIFY but Debug cases, whose debuggers read the code a build ships") {
+#Test("every case builds under JET_OPT_VERIFY, a Debug case's too") {
     root: cases_test_root("opt-verify")
     step: "step: jet -c 'printf \"[%s]\" \"$JET_OPT_VERIFY\"'\n"
     kit_exec_write(files.join(root, "Tests/Cases/group/on.out"), "[1]")
     cases_test_source(root, "verify", "{step}stdout: = on.out\n")
     debug: "Tests/Cases/Debug/verify.case"
-    kit_exec_write(files.join(root, "Tests/Cases/Debug/off.out"), "[]")
-    kit_exec_write(files.join(root, debug), "{step}stdout: = off.out\n")
+    kit_exec_write(files.join(root, "Tests/Cases/Debug/on.out"), "[1]")
+    kit_exec_write(files.join(root, debug), "{step}stdout: = on.out\n")
     context: cases_test_context(root, files.join(root, "scratch"))
     assert_eq(kit_cases_run(cases_test_entry("verify"), context)[0].verdict.status, "PASS")
     assert_eq(kit_cases_run(KitEntry{path: debug, expected: debug, project: "Tests/Cases/Debug", suite: "cases", mode: ""}, context)[0].verdict.status, "PASS")

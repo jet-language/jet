@@ -171,9 +171,11 @@ image's `.symtab` function, hottest first, as `perf report` names them. The
 `reason`
 also gives how many samples the CPU time sampled should give beside how many
 the session kept, and counts any sample in Jet code that kept no stack. The
-profile's overhead is `measured`: `overhead_ns` is the time the sampler's
-handlers and drains ran plus, for each signal that carried a sample, the
-kernel's delivery and return, which the runtime times as sampling starts by
+profile's overhead is `measured`: `overhead_ns` is the CPU time the
+sampler's handlers and drains took on their threads' CPU clocks (not the
+time a busy machine kept them preempted) plus, for each signal that carried
+a sample, the kernel's delivery and return, which the runtime times as
+sampling starts by
 sending its own thread 64 signals, plus, under a perf event, the kernel's
 time to write each sample to its thread's ring, which the runtime times as
 sampling starts with a second sampler of the same source at a shallow and a
@@ -875,7 +877,9 @@ reads no request, and `jet perf attach` refuses with E2123
 leaves a request there.
 `jet perf attach <pid> --source app.jet` copies both and reads the copies,
 so its trace holds the waits and transfers
-the program made before the attach: each wait's task, line, object and
+the program made before the attach. An attach in a program's first 100ms,
+before the writer first published its ring, waits for that publication,
+300ms at most. The trace holds each wait's task, line, object and
 waker, and each transfer's `io` row. A wait of a task the live snapshot no
 longer holds becomes no row. Tests/Cases/Perf/attach_drains_flight_ring.case
 is the worked example.

@@ -164,9 +164,12 @@ ir_opt_report_text: fn(r: IROptReport) -> String Never! {
     text
 }
 
-ir_opt_report_add: fn(total: &IROptReport, part: IROptReport) Never! {
+// Adds `part`'s counts to `total` and moves its rows there, after
+// `total`'s: `part` is left without rows, so each caller passes a report
+// it is done with.
+ir_opt_report_add: fn(total: &IROptReport, part: &IROptReport) Never! {
     total.inlined_calls += part.inlined_calls
-    loop row in part.inlines -> total.inlines.push(row.copy())
+    total.inlines.extend(compiler_take_rows<IROptInlined>(part.inlines))
     total.direct_calls += part.direct_calls
     total.folded += part.folded
     total.branches_folded += part.branches_folded
@@ -184,15 +187,15 @@ ir_opt_report_add: fn(total: &IROptReport, part: IROptReport) Never! {
     total.ssa_fresh += part.ssa_fresh
     total.reduced += part.reduced
     total.reductions_declined += part.reductions_declined
-    loop note in part.reductions -> total.reductions.push(note.copy())
+    total.reductions.extend(compiler_take_rows<String>(part.reductions))
     total.stepped += part.stepped
     total.steps_declined += part.steps_declined
     total.factors += part.factors
     total.factors_declined += part.factors_declined
-    loop note in part.steps -> total.steps.push(note.copy())
-    loop note in part.text_lengths -> total.text_lengths.push(note.copy())
-    loop dump in part.dumps -> total.dumps.push(dump.copy())
-    loop finding in part.lint -> total.lint.push(finding.copy())
+    total.steps.extend(compiler_take_rows<String>(part.steps))
+    total.text_lengths.extend(compiler_take_rows<String>(part.text_lengths))
+    total.dumps.extend(compiler_take_rows<String>(part.dumps))
+    total.lint.extend(compiler_take_rows<IRLintFinding>(part.lint))
 }
 
 // Optimizing threads (compiler_threads_admit): a thread is admitted for at
@@ -344,14 +347,16 @@ ir_opt_module_start: fn(m: &IRModule, options: IROptOptions, threads: CompilerTh
 // points and the `#unique<..>` helpers they know. A body's facts read only
 // its own instructions and the view, so the bodies are claimed one by one
 // (ir_opt_bodies): every body and the report are the same for any thread
-// count.
+// count. Under verify, IR Lint reads every callee's signature (the copy
+// ir_opt_ssa_facts checks).
 ir_opt_module_facts: fn(m: &IRModule, options: IROptOptions, report: &IROptReport, threads: CompilerThreads) Never! {
     if !ir_opt_enabled(options, "range") || !ir_opt_enabled(options, "ssa") {
         return
     }
     work: IROptBodyWork{facts: true, versions: false, lint: false, drop: false, serial: false, poll: -1, trap: -1, turn: -1}
     found := [IRLintFinding]{}
-    ir_opt_module_bodies(m, work, options, ir_lint_context_none(), "", threads, report, found)
+    lint: if options.verify -> ir_lint_context(m) else -> ir_lint_context_none()
+    ir_opt_module_bodies(m, work, options, lint, "", threads, report, found)
 }
 
 // A compiled program's O0 back end before selection, after
@@ -514,7 +519,7 @@ ir_opt_body_claimed: fn(view: IRModule, claims: IROptClaims, work: IROptBodyWork
 // One body through `work` (IROptBodyWork).
 ir_opt_body_run: fn(view: IRModule, work: IROptBodyWork, options: IROptOptions, lint: IRLintContext, pass: String, f: &IRFunction, report: &IROptReport, found: &[IRLintFinding]) Never! {
     if work.versions -> ir_opt_version_body(view, f, options, lint, report)
-    if work.facts -> _ := ir_opt_ssa_facts(view, f, options, report)
+    if work.facts -> _ := ir_opt_ssa_facts(view, f, options, lint, report)
     if work.lint -> ir_lint_function(view, lint, f, pass, found)
     if !work.drop || f.asm != None {
         return
@@ -554,7 +559,7 @@ ir_opt_version_body: fn(m: IRModule, f: &IRFunction, options: IROptOptions, lint
         return
     }
     before: report.lint.len()
-    ir_opt_ssa(m, f, options, report)
+    ir_opt_ssa(m, f, options, lint, report)
     if options.verify && report.lint.len() == before -> _ := ir_opt_lint(m, lint, f, "ssa", report)
 }
 
@@ -1027,7 +1032,7 @@ ir_opt_function: fn(m: IRModule, bodies: [[IRFunction]], keys: [String], f: &&IR
         }
         if !ssa_done && ir_opt_enabled(options, "ssa") && (checking || !options.verify) {
             before: report.lint.len()
-            ir_opt_ssa(m, out, options, report)
+            ir_opt_ssa(m, out, options, lint, report)
             if checking {
                 checking = report.lint.len() == before && ir_opt_lint(m, lint, out, "ssa", report)
             }
@@ -1066,13 +1071,15 @@ ir_opt_lint: fn(m: IRModule, lint: IRLintContext, f: IRFunction, pass: String, r
 // (OptRange.jet), and back to slots (ir_opt_ssa_facts), then Simplify over
 // what the facts decided. No pass on the form gives a value a new slot (the
 // facts only drop reads, fold a compare into its own slot or keep a read's
-// slot), so the slot code stays valid as it is, and leaving SSA (SsaOut.jet)
-// runs only for verify and stress, which exercise it. Without either, a
-// function the facts cannot touch (no Int or word slot, or "range" off)
-// builds no form. An invalid form is an IR Lint row of "ir.opt.ssa" (rule
-// ssa.form), and the function leaves the round trip as it came.
-ir_opt_ssa: fn(m: IRModule, f: &IRFunction, options: IROptOptions, report: &IROptReport) Never! {
-    if ir_opt_ssa_facts(m, f, options, report) <= 0 {
+// slot), so the slot code stays valid as it is. Leaving SSA (SsaOut.jet)
+// rewrites the body only under stress; verify takes a copy of it out of SSA
+// and checks the copy with IR Lint (`lint`), so a verified build ships the
+// code an unverified one does. Without either, a function the facts cannot
+// touch (no Int or word slot, or "range" off) builds no form. An invalid
+// form is an IR Lint row of "ir.opt.ssa" (rule ssa.form), and the function
+// leaves the round trip as it came.
+ir_opt_ssa: fn(m: IRModule, f: &IRFunction, options: IROptOptions, lint: IRLintContext, report: &IROptReport) Never! {
+    if ir_opt_ssa_facts(m, f, options, lint, report) <= 0 {
         return
     }
     // The comparisons the ranges decided leave constant branches and Nops.
@@ -1096,8 +1103,9 @@ ir_opt_ssa: fn(m: IRModule, f: &IRFunction, options: IROptOptions, report: &IROp
 // The SSA round trip's facts (O0 runs these alone, ir_opt_module_facts):
 // the form, verified when asked, its inline Int facts, and once the stop
 // points they dropped left the form stale, the facts of a fresh form. The
-// facts rewritten, -1 for an invalid form.
-ir_opt_ssa_facts: fn(m: IRModule, f: &IRFunction, options: IROptOptions, report: &IROptReport) -> Int Never! {
+// facts rewritten, -1 for an invalid form. Under verify, IR Lint (`lint`)
+// checks a copy of `f` taken out of SSA; `f` stays as it is.
+ir_opt_ssa_facts: fn(m: IRModule, f: &IRFunction, options: IROptOptions, lint: IRLintContext, report: &IROptReport) -> Int Never! {
     if f.op.len() == 0 -> return 0
     ranges: ir_opt_enabled(options, "range") && ir_range_wanted(m, f)
     if !ranges && !options.verify && !options.stress -> return 0
@@ -1115,13 +1123,17 @@ ir_opt_ssa_facts: fn(m: IRModule, f: &IRFunction, options: IROptOptions, report:
     }
     report.int_facts += facts
     report.ssa_functions += 1
-    if options.verify || options.stress {
-        stats: ir_ssa_out(m, f, s, options.stress)
+    if options.stress {
+        stats: ir_ssa_out(m, f, s, true)
         if stats.changed {
             report.ssa_changed += 1
             report.ssa_moves += stats.moves
             report.ssa_fresh += stats.fresh
         }
+    } else if options.verify {
+        out := f.copy()
+        _ := ir_ssa_out(m, out, s, false)
+        _ := ir_opt_lint(m, lint, out, "ssa", report)
     }
     facts
 }
@@ -1277,8 +1289,8 @@ ir_opt_scheduled: fn(m: &IRModule, functions: &[IRFunction], keys: &&[String], o
     cells: ir_opt_cells(functions)
     view: ir_opt_view(m, keys)
     graph: Shared{IROptGraph{views: [IRModule]{view.move()}, keys: keys.move(), recursive: order.recursive.copy(), sites: sites.move(), options: options.copy(), lint: lint.move(), cells: cells.move(), sizes: sizes.move(), pending: pending.move(), ranks: ranks.move(), callee_start: callee_start.move(), callees: callees.move(), caller_start: caller_start.move(), callers: callers.move(), queue: Shared{IROptQueue{heap: heap.move(), claimed: 0, count: count, failed: false}}, changed: Condition.new()}}
-    parts: ir_opt_schedulers(graph, workers) ?? panic("the IR optimizing threads failed")
-    loop part in parts -> ir_opt_report_add(report, part)
+    parts := ir_opt_schedulers(graph, workers) ?? panic("the IR optimizing threads failed")
+    loop at in 0..<parts.len() -> ir_opt_report_add(report, parts[at])
     held := graph.guard_edit()
     bodies := [[IRFunction]]{}
     loop cell in held.value.cells {

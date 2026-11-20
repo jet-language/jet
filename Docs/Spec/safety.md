@@ -237,14 +237,14 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1634,
+  "total": 1635,
   "counts": {
     "Compiler": 799,
     "Core": 179,
     "Docs": 13,
     "Examples": 45,
     "Jetpack": 8,
-    "Tests": 562,
+    "Tests": 563,
     "Tools": 28
   },
   "regions": [
@@ -3702,476 +3702,476 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 664,
+      "line": 674,
       "column": 5,
       "reason": "clock_gettime writes the sampler's two words of the thread-owned TCB; no pointer escapes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 701,
+      "line": 711,
       "column": 5,
       "reason": "timer_create reads the sigevent and writes the timer id in the scratch words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 719,
+      "line": 729,
       "column": 13,
       "reason": "timer_settime reads the itimerspec in the scratch words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 807,
+      "line": 817,
       "column": 5,
       "reason": "only the observation writer changes it, under the flight recorder's lock; a starting thread reads it again after it arms"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 824,
+      "line": 834,
       "column": 17,
       "reason": "timer_settime reads the itimerspec this call owns"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 854,
+      "line": 864,
       "column": 5,
       "reason": "set once, before the table is published; a host call or spawn that reads perf_system 0 keeps no row"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 928,
+      "line": 938,
       "column": 5,
       "reason": "host_call's audited caller supplies the Linux syscall's valid word arguments"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 1083,
+      "line": 1093,
       "column": 9,
       "reason": "the table and the depth are set before the first sampler is armed, so no handler reads them before"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 1093,
+      "line": 1103,
       "column": 17,
       "reason": "no sampler is armed yet, so no thread reads the source or its period"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 1100,
+      "line": 1110,
       "column": 21,
       "reason": "no sampler is armed yet, so no thread reads the source"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 1109,
+      "line": 1119,
       "column": 13,
       "reason": "no sampler is armed yet, so no thread reads the source"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 1116,
+      "line": 1126,
       "column": 13,
       "reason": "no sampler is armed, so no handler reads the table"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 1127,
+      "line": 1137,
       "column": 9,
       "reason": "eight writes of a stack-local word, which the kernel copies before each call returns"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 1185,
+      "line": 1195,
       "column": 5,
       "reason": "perf_event_open reads the attribute words of the scratch"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 1265,
+      "line": 1275,
       "column": 5,
       "reason": "perf_event_open reads the attribute words of the scratch"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 1366,
+      "line": 1376,
       "column": 9,
       "reason": "the main thread's sampler is disabled and no other thread samples yet, so no drain reads the cost"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 1814,
+      "line": 1824,
       "column": 9,
       "reason": "one write of a stack-local word, which the kernel copies before the call returns"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 1904,
+      "line": 1914,
       "column": 5,
       "reason": "the exit and a window's close, under the flight recorder's lock, alone clear it; a handler reads it only while it holds its buffer, which the claims below order"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 1942,
+      "line": 1952,
       "column": 5,
       "reason": "clock_gettime writes the two timespec words of the scratch"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 2124,
+      "line": 2134,
       "column": 9,
       "reason": "registrations never overlap, since constructors run one at a time, and the fence below orders this store before a turn reads the tables"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 2168,
+      "line": 2178,
       "column": 9,
       "reason": "registrations never overlap, and a turn reads the page only once it is stored"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 2183,
+      "line": 2193,
       "column": 5,
       "reason": "the observation start, before the entry, and then its writer store the same roots"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 2199,
+      "line": 2209,
       "column": 9,
       "reason": "turns run one at a time, the observation start's before the entry and then its writer's, and a registration reads the code only after the zones word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 2207,
+      "line": 2217,
       "column": 9,
       "reason": "turns run one at a time, the observation start's before the entry and then its writer's, and a zone route reads the rings' head and a registration the lock only after the zones word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 2212,
+      "line": 2222,
       "column": 5,
       "reason": "turns run one at a time; the lock orders their patches with a registration's"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 2318,
+      "line": 2328,
       "column": 5,
       "reason": "pwrite64 copies one byte from the thread-owned TCB scratch and retains no pointer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 2359,
+      "line": 2369,
       "column": 5,
       "reason": "rdtsc only reads the time-stamp counter, which the zones' calibration found invariant and enabled for this process"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 2376,
+      "line": 2386,
       "column": 5,
       "reason": "the first turn of zones runs alone, before it stores the zones word that every zone route reads first"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 2410,
+      "line": 2420,
       "column": 9,
       "reason": "x86 pause only hints that this thread is waiting in a spin loop"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 2782,
+      "line": 2792,
       "column": 5,
       "reason": "fork copies the held live list into a child whose only thread writes the snapshot and exits, never returning from here"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 2830,
+      "line": 2840,
       "column": 5,
       "reason": "this thread holds the live list, or is the fork's child, whose copy of it its one thread held"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 2841,
+      "line": 2851,
       "column": 9,
       "reason": "block is a tracked live payload of the held live list"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 2854,
+      "line": 2864,
       "column": 9,
       "reason": "block is a tracked live payload of the held live list"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 2912,
+      "line": 2922,
       "column": 5,
       "reason": "this thread holds the live list, or is the fork's child, whose copy of it its one thread held"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 2925,
+      "line": 2935,
       "column": 5,
       "reason": "this thread holds the live list, or is the fork's child, whose copy of it its one thread held"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 2936,
+      "line": 2946,
       "column": 5,
       "reason": "this thread holds the live list, or is the fork's child, whose copy of it its one thread held"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 2941,
+      "line": 2951,
       "column": 9,
       "reason": "block is a tracked live payload of the held live list"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 2967,
+      "line": 2977,
       "column": 9,
       "reason": "block is a tracked live payload of the held live list"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 2998,
+      "line": 3008,
       "column": 9,
       "reason": "link is a live [saved rbp][return address] pair of this thread's frame pointer chain, above the snapshot's own frames"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 3025,
+      "line": 3035,
       "column": 9,
       "reason": "link is a live [saved rbp][return address] pair of this thread's frame pointer chain, above the snapshot's own frames"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 3057,
+      "line": 3067,
       "column": 5,
       "reason": "this thread holds the live list, or is the fork's child, whose copy of it its one thread held; the head goes back below"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 3097,
+      "line": 3107,
       "column": 5,
       "reason": "the head this scan took from the live list goes back before the list is let go"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 3277,
+      "line": 3287,
       "column": 5,
       "reason": "the observation start runs before the program's entry, whose takes read it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 3373,
+      "line": 3383,
       "column": 5,
       "reason": "the held quarantine lock guards the count; every take reads it under the lock"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 3443,
+      "line": 3453,
       "column": 5,
       "reason": "the observation start runs before the entry, whose span closes read it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 3840,
+      "line": 3850,
       "column": 9,
       "reason": "two writes of a stack-local word, which the kernel copies before each call returns"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 3894,
+      "line": 3904,
       "column": 5,
       "reason": "fcntl reads the two-word f_owner_ex built at `owner`"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 3922,
+      "line": 3932,
       "column": 5,
       "reason": "perf_event_open reads the attribute words the held buffer keeps"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 4179,
+      "line": 4189,
       "column": 5,
       "reason": "five writes of a stack-local word, which the kernel copies before each call returns"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 4219,
+      "line": 4229,
       "column": 9,
       "reason": "four writes of a stack-local word, which the kernel copies before each call returns"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 4228,
+      "line": 4238,
       "column": 5,
       "reason": "the observation start runs before the exit that reads these"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 4243,
+      "line": 4253,
       "column": 5,
       "reason": "the exit runs on one thread, after the start set these"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 4828,
+      "line": 4838,
       "column": 5,
       "reason": "the observation start runs before the timer whose handler reads these is armed"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 4919,
+      "line": 4930,
       "column": 9,
       "reason": "one write of a stack-local word, which the kernel copies before the call returns"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 5009,
+      "line": 5020,
       "column": 9,
       "reason": "each followed link ascends by less than 16 MiB or crosses a stack segment's bridge frame, so frame stays on the thread's chain"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 5116,
+      "line": 5127,
       "column": 9,
       "reason": "only the observation writer opens a window, under the flight recorder's lock"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 5123,
-      "column": 5,
-      "reason": "only the observation writer opens a window, under the flight recorder's lock; a handler reads the descriptor once, and the buffering only while it holds its buffer (perf_samples_flush)"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
       "line": 5134,
       "column": 5,
+      "reason": "only the observation writer opens a window, under the flight recorder's lock; a handler reads the descriptor once, and the buffering only while it holds its buffer (perf_samples_flush)"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
+      "line": 5145,
+      "column": 5,
       "reason": "only the observation writer opens a window, under the flight recorder's lock"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 5164,
+      "line": 5175,
       "column": 5,
       "reason": "only the observation writer and the exit close a window, under the flight recorder's lock; a handler reads the descriptor once"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 5441,
+      "line": 5452,
       "column": 5,
       "reason": "socketpair writes its two descriptors into the fresh state's receive buffer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 5454,
+      "line": 5465,
       "column": 5,
       "reason": "the observation start runs before the writer and the stop that read it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 5476,
+      "line": 5487,
       "column": 9,
       "reason": "read fills the state's receive buffer with one datagram"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 5927,
+      "line": 5938,
       "column": 5,
       "reason": "openat reads the image copy's NUL-terminated path in the state's text page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 6270,
+      "line": 6281,
       "column": 5,
       "reason": "the dump's calls take words alone or borrow the state's scratch or the process's own mappings for their duration"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 6374,
+      "line": 6385,
       "column": 5,
       "reason": "the vectors name the state's copy and a range of this process's own mappings; the kernel copies between them, faulting on neither"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 6874,
+      "line": 6885,
       "column": 9,
       "reason": "openat reads the dump's NUL-terminated path in the state's text page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 7404,
+      "line": 7415,
       "column": 5,
       "reason": "getrusage writes the struct rusage in this thread's own entry"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 7500,
+      "line": 7511,
       "column": 5,
       "reason": "getcpu writes the CPU's 32-bit number into this thread's own entry"
     },
@@ -7698,10 +7698,45 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "Tests",
+      "file": "Tests/Cases/Cffi/CffiBorrowedByteViewCrossesForTheCall.fixture/main.jet",
+      "line": 13,
+      "column": 5,
+      "reason": "the block holds the four bytes for the whole call, C keeps no pointer to it, and it is released once"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Cffi/CffiNullStringReturnReadsAsAbsent.fixture/main.jet",
+      "line": 14,
+      "column": 9,
+      "reason": "a non-null result names a static NUL-terminated string C never frees"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Cffi/CffiPartialReadReturnsItsStatusAndLength.fixture/main.jet",
+      "line": 14,
+      "column": 5,
+      "reason": "both blocks are live for the call, C writes at most `output_cap` bytes and keeps no pointer, and each is released once"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Cffi/CffiPointerAndCountCrossTogether.fixture/main.jet",
+      "line": 13,
+      "column": 5,
+      "reason": "the block holds the three bytes for the whole call, C keeps no pointer to it, and it is released once"
+    },
+    {
+      "package": "Tests",
       "file": "Tests/Cases/Cffi/CffiRawStatusOutPointerReadsOnlyOnSuccess.fixture/main.jet",
       "line": 23,
       "column": 5,
       "reason": "store_load receives a live non-null slot; bytes are read only after status zero"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/Cffi/CffiStatusAndWrittenCountBothReturn.fixture/main.jet",
+      "line": 14,
+      "column": 5,
+      "reason": "both blocks are live for the calls, C writes at most `output_cap` bytes and keeps no pointer, and each is released once"
     },
     {
       "package": "Tests",
@@ -10673,55 +10708,6 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "Tests",
-      "file": "Tests/Fixtures/UnsafeObligations/run.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "local pointer"
-    },
-    {
-      "package": "Tests",
-      "file": "Tests/Fixtures/explicit_cleanup_order.jet",
-      "line": 39,
-      "column": 5,
-      "reason": "exercise the explicit process-stop cleanup boundary"
-    },
-    {
-      "package": "Tests",
-      "file": "Tests/Fixtures/ffi_stack4_i64.jet",
-      "line": 2,
-      "column": 1,
-      "reason": "the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return"
-    },
-    {
-      "package": "Tests",
-      "file": "Tests/Fixtures/ffi_stack4_i64.jet",
-      "line": 49,
-      "column": 5,
-      "reason": "Linux getpid syscall 39 ignores all argument registers and retains no stack pointer"
-    },
-    {
-      "package": "Tests",
-      "file": "Tests/Fixtures/fmt_import_c_bindings.jet",
-      "line": 7,
-      "column": 1,
-      "reason": "audited C boundary"
-    },
-    {
-      "package": "Tests",
-      "file": "Tests/Fixtures/fmt_import_c_bindings.jet",
-      "line": 10,
-      "column": 1,
-      "reason": "audited C boundary"
-    },
-    {
-      "package": "Tests",
-      "file": "Tests/Fixtures/native_global_word.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "the fixture's one-threaded caller (run, or global-word.c) is the only writer"
-    },
-    {
-      "package": "Tests",
       "file": "Tests/Fixtures/native_inline_c_shared_state.jet",
       "line": 4,
       "column": 1,
@@ -10869,10 +10855,31 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "Tests",
+      "file": "Tests/Run/UnsafeAndRuntime/AsmSevenInputsPushToTheStack.jet",
+      "line": 7,
+      "column": 1,
+      "reason": "the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Run/UnsafeAndRuntime/AsmSevenInputsPushToTheStack.jet",
+      "line": 54,
+      "column": 5,
+      "reason": "Linux getpid syscall 39 ignores all argument registers and retains no stack pointer"
+    },
+    {
+      "package": "Tests",
       "file": "Tests/Run/UnsafeAndRuntime/MemFromAddrDirect.jet",
       "line": 11,
       "column": 5,
       "reason": "the borrowed value is live in the caller and the pointer never escapes"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Run/UnsafeAndRuntime/NativeGlobalWord.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "run, the program's one thread, is the only writer"
     },
     {
       "package": "Tests",
@@ -11699,9 +11706,9 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Docs | 13 |
 | Examples | 45 |
 | Jetpack | 8 |
-| Tests | 562 |
+| Tests | 563 |
 | Tools | 28 |
-| **total** | **1634** |
+| **total** | **1635** |
 
 ### Regions
 
@@ -12200,74 +12207,74 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 597:9 | "no timer is armed, so no handler reads the descriptor" |
 | Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 611:5 | "only the exit reads it, and no exit runs before the start returns" |
 | Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 634:5 | "rt_sigaction borrows the four-word action on the stack; the handler is this runtime's three-word C-ABI export and the restorer its rt_sigreturn rail" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 664:5 | "clock_gettime writes the sampler's two words of the thread-owned TCB; no pointer escapes" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 701:5 | "timer_create reads the sigevent and writes the timer id in the scratch words" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 719:13 | "timer_settime reads the itimerspec in the scratch words" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 807:5 | "only the observation writer changes it, under the flight recorder's lock; a starting thread reads it again after it arms" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 824:17 | "timer_settime reads the itimerspec this call owns" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 854:5 | "set once, before the table is published; a host call or spawn that reads perf_system 0 keeps no row" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 928:5 | "host_call's audited caller supplies the Linux syscall's valid word arguments" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 1083:9 | "the table and the depth are set before the first sampler is armed, so no handler reads them before" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 1093:17 | "no sampler is armed yet, so no thread reads the source or its period" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 1100:21 | "no sampler is armed yet, so no thread reads the source" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 1109:13 | "no sampler is armed yet, so no thread reads the source" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 1116:13 | "no sampler is armed, so no handler reads the table" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 1127:9 | "eight writes of a stack-local word, which the kernel copies before each call returns" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 1185:5 | "perf_event_open reads the attribute words of the scratch" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 1265:5 | "perf_event_open reads the attribute words of the scratch" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 1366:9 | "the main thread's sampler is disabled and no other thread samples yet, so no drain reads the cost" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 1814:9 | "one write of a stack-local word, which the kernel copies before the call returns" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 1904:5 | "the exit and a window's close, under the flight recorder's lock, alone clear it; a handler reads it only while it holds its buffer, which the claims below order" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 1942:5 | "clock_gettime writes the two timespec words of the scratch" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2124:9 | "registrations never overlap, since constructors run one at a time, and the fence below orders this store before a turn reads the tables" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2168:9 | "registrations never overlap, and a turn reads the page only once it is stored" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2183:5 | "the observation start, before the entry, and then its writer store the same roots" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2199:9 | "turns run one at a time, the observation start's before the entry and then its writer's, and a registration reads the code only after the zones word" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2207:9 | "turns run one at a time, the observation start's before the entry and then its writer's, and a zone route reads the rings' head and a registration the lock only after the zones word" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2212:5 | "turns run one at a time; the lock orders their patches with a registration's" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2318:5 | "pwrite64 copies one byte from the thread-owned TCB scratch and retains no pointer" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2359:5 | "rdtsc only reads the time-stamp counter, which the zones' calibration found invariant and enabled for this process" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2376:5 | "the first turn of zones runs alone, before it stores the zones word that every zone route reads first" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2410:9 | "x86 pause only hints that this thread is waiting in a spin loop" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2782:5 | "fork copies the held live list into a child whose only thread writes the snapshot and exits, never returning from here" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2830:5 | "this thread holds the live list, or is the fork's child, whose copy of it its one thread held" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2841:9 | "block is a tracked live payload of the held live list" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2854:9 | "block is a tracked live payload of the held live list" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2912:5 | "this thread holds the live list, or is the fork's child, whose copy of it its one thread held" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2925:5 | "this thread holds the live list, or is the fork's child, whose copy of it its one thread held" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2936:5 | "this thread holds the live list, or is the fork's child, whose copy of it its one thread held" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2941:9 | "block is a tracked live payload of the held live list" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2967:9 | "block is a tracked live payload of the held live list" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2998:9 | "link is a live [saved rbp][return address] pair of this thread's frame pointer chain, above the snapshot's own frames" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 3025:9 | "link is a live [saved rbp][return address] pair of this thread's frame pointer chain, above the snapshot's own frames" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 3057:5 | "this thread holds the live list, or is the fork's child, whose copy of it its one thread held; the head goes back below" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 3097:5 | "the head this scan took from the live list goes back before the list is let go" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 3277:5 | "the observation start runs before the program's entry, whose takes read it" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 3373:5 | "the held quarantine lock guards the count; every take reads it under the lock" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 3443:5 | "the observation start runs before the entry, whose span closes read it" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 3840:9 | "two writes of a stack-local word, which the kernel copies before each call returns" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 3894:5 | "fcntl reads the two-word f_owner_ex built at `owner`" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 3922:5 | "perf_event_open reads the attribute words the held buffer keeps" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 4179:5 | "five writes of a stack-local word, which the kernel copies before each call returns" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 4219:9 | "four writes of a stack-local word, which the kernel copies before each call returns" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 4228:5 | "the observation start runs before the exit that reads these" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 4243:5 | "the exit runs on one thread, after the start set these" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 4828:5 | "the observation start runs before the timer whose handler reads these is armed" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 4919:9 | "one write of a stack-local word, which the kernel copies before the call returns" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 5009:9 | "each followed link ascends by less than 16 MiB or crosses a stack segment's bridge frame, so frame stays on the thread's chain" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 5116:9 | "only the observation writer opens a window, under the flight recorder's lock" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 5123:5 | "only the observation writer opens a window, under the flight recorder's lock; a handler reads the descriptor once, and the buffering only while it holds its buffer (perf_samples_flush)" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 5134:5 | "only the observation writer opens a window, under the flight recorder's lock" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 5164:5 | "only the observation writer and the exit close a window, under the flight recorder's lock; a handler reads the descriptor once" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 5441:5 | "socketpair writes its two descriptors into the fresh state's receive buffer" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 5454:5 | "the observation start runs before the writer and the stop that read it" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 5476:9 | "read fills the state's receive buffer with one datagram" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 5927:5 | "openat reads the image copy's NUL-terminated path in the state's text page" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 6270:5 | "the dump's calls take words alone or borrow the state's scratch or the process's own mappings for their duration" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 6374:5 | "the vectors name the state's copy and a range of this process's own mappings; the kernel copies between them, faulting on neither" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 6874:9 | "openat reads the dump's NUL-terminated path in the state's text page" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 7404:5 | "getrusage writes the struct rusage in this thread's own entry" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 7500:5 | "getcpu writes the CPU's 32-bit number into this thread's own entry" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 674:5 | "clock_gettime writes the sampler's two words of the thread-owned TCB; no pointer escapes" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 711:5 | "timer_create reads the sigevent and writes the timer id in the scratch words" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 729:13 | "timer_settime reads the itimerspec in the scratch words" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 817:5 | "only the observation writer changes it, under the flight recorder's lock; a starting thread reads it again after it arms" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 834:17 | "timer_settime reads the itimerspec this call owns" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 864:5 | "set once, before the table is published; a host call or spawn that reads perf_system 0 keeps no row" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 938:5 | "host_call's audited caller supplies the Linux syscall's valid word arguments" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 1093:9 | "the table and the depth are set before the first sampler is armed, so no handler reads them before" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 1103:17 | "no sampler is armed yet, so no thread reads the source or its period" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 1110:21 | "no sampler is armed yet, so no thread reads the source" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 1119:13 | "no sampler is armed yet, so no thread reads the source" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 1126:13 | "no sampler is armed, so no handler reads the table" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 1137:9 | "eight writes of a stack-local word, which the kernel copies before each call returns" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 1195:5 | "perf_event_open reads the attribute words of the scratch" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 1275:5 | "perf_event_open reads the attribute words of the scratch" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 1376:9 | "the main thread's sampler is disabled and no other thread samples yet, so no drain reads the cost" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 1824:9 | "one write of a stack-local word, which the kernel copies before the call returns" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 1914:5 | "the exit and a window's close, under the flight recorder's lock, alone clear it; a handler reads it only while it holds its buffer, which the claims below order" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 1952:5 | "clock_gettime writes the two timespec words of the scratch" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2134:9 | "registrations never overlap, since constructors run one at a time, and the fence below orders this store before a turn reads the tables" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2178:9 | "registrations never overlap, and a turn reads the page only once it is stored" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2193:5 | "the observation start, before the entry, and then its writer store the same roots" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2209:9 | "turns run one at a time, the observation start's before the entry and then its writer's, and a registration reads the code only after the zones word" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2217:9 | "turns run one at a time, the observation start's before the entry and then its writer's, and a zone route reads the rings' head and a registration the lock only after the zones word" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2222:5 | "turns run one at a time; the lock orders their patches with a registration's" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2328:5 | "pwrite64 copies one byte from the thread-owned TCB scratch and retains no pointer" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2369:5 | "rdtsc only reads the time-stamp counter, which the zones' calibration found invariant and enabled for this process" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2386:5 | "the first turn of zones runs alone, before it stores the zones word that every zone route reads first" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2420:9 | "x86 pause only hints that this thread is waiting in a spin loop" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2792:5 | "fork copies the held live list into a child whose only thread writes the snapshot and exits, never returning from here" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2840:5 | "this thread holds the live list, or is the fork's child, whose copy of it its one thread held" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2851:9 | "block is a tracked live payload of the held live list" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2864:9 | "block is a tracked live payload of the held live list" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2922:5 | "this thread holds the live list, or is the fork's child, whose copy of it its one thread held" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2935:5 | "this thread holds the live list, or is the fork's child, whose copy of it its one thread held" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2946:5 | "this thread holds the live list, or is the fork's child, whose copy of it its one thread held" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2951:9 | "block is a tracked live payload of the held live list" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 2977:9 | "block is a tracked live payload of the held live list" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 3008:9 | "link is a live [saved rbp][return address] pair of this thread's frame pointer chain, above the snapshot's own frames" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 3035:9 | "link is a live [saved rbp][return address] pair of this thread's frame pointer chain, above the snapshot's own frames" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 3067:5 | "this thread holds the live list, or is the fork's child, whose copy of it its one thread held; the head goes back below" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 3107:5 | "the head this scan took from the live list goes back before the list is let go" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 3287:5 | "the observation start runs before the program's entry, whose takes read it" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 3383:5 | "the held quarantine lock guards the count; every take reads it under the lock" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 3453:5 | "the observation start runs before the entry, whose span closes read it" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 3850:9 | "two writes of a stack-local word, which the kernel copies before each call returns" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 3904:5 | "fcntl reads the two-word f_owner_ex built at `owner`" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 3932:5 | "perf_event_open reads the attribute words the held buffer keeps" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 4189:5 | "five writes of a stack-local word, which the kernel copies before each call returns" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 4229:9 | "four writes of a stack-local word, which the kernel copies before each call returns" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 4238:5 | "the observation start runs before the exit that reads these" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 4253:5 | "the exit runs on one thread, after the start set these" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 4838:5 | "the observation start runs before the timer whose handler reads these is armed" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 4930:9 | "one write of a stack-local word, which the kernel copies before the call returns" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 5020:9 | "each followed link ascends by less than 16 MiB or crosses a stack segment's bridge frame, so frame stays on the thread's chain" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 5127:9 | "only the observation writer opens a window, under the flight recorder's lock" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 5134:5 | "only the observation writer opens a window, under the flight recorder's lock; a handler reads the descriptor once, and the buffering only while it holds its buffer (perf_samples_flush)" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 5145:5 | "only the observation writer opens a window, under the flight recorder's lock" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 5175:5 | "only the observation writer and the exit close a window, under the flight recorder's lock; a handler reads the descriptor once" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 5452:5 | "socketpair writes its two descriptors into the fresh state's receive buffer" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 5465:5 | "the observation start runs before the writer and the stop that read it" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 5487:9 | "read fills the state's receive buffer with one datagram" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 5938:5 | "openat reads the image copy's NUL-terminated path in the state's text page" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 6281:5 | "the dump's calls take words alone or borrow the state's scratch or the process's own mappings for their duration" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 6385:5 | "the vectors name the state's copy and a range of this process's own mappings; the kernel copies between them, faulting on neither" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 6885:9 | "openat reads the dump's NUL-terminated path in the state's text page" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 7415:5 | "getrusage writes the struct rusage in this thread's own entry" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 7511:5 | "getcpu writes the CPU's 32-bit number into this thread's own entry" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 28:5 | "the kernel enters this restorer only from a returning handler, on its signal frame" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 38:5 | "rt_sigaction borrows the four-word action on the stack; handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 61:9 | "written under the scheduler root mutex" |
@@ -12771,7 +12778,12 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Tests | Tests/Cases/CLIPartsInspect/Fixtures/Team/unsafe/main.jet | 2:5 | "audit" |
 | Tests | Tests/Cases/CLIPartsInspect/Fixtures/TestHardened/hardened/main.jet | 5:5 | "test deliberately reads after arena reset" |
 | Tests | Tests/Cases/CLIPartsInspect/Fixtures/TestHardened/release/main.jet | 5:5 | "test deliberately reads after arena reset" |
+| Tests | Tests/Cases/Cffi/CffiBorrowedByteViewCrossesForTheCall.fixture/main.jet | 13:5 | "the block holds the four bytes for the whole call, C keeps no pointer to it, and it is released once" |
+| Tests | Tests/Cases/Cffi/CffiNullStringReturnReadsAsAbsent.fixture/main.jet | 14:9 | "a non-null result names a static NUL-terminated string C never frees" |
+| Tests | Tests/Cases/Cffi/CffiPartialReadReturnsItsStatusAndLength.fixture/main.jet | 14:5 | "both blocks are live for the call, C writes at most `output_cap` bytes and keeps no pointer, and each is released once" |
+| Tests | Tests/Cases/Cffi/CffiPointerAndCountCrossTogether.fixture/main.jet | 13:5 | "the block holds the three bytes for the whole call, C keeps no pointer to it, and it is released once" |
 | Tests | Tests/Cases/Cffi/CffiRawStatusOutPointerReadsOnlyOnSuccess.fixture/main.jet | 23:5 | "store_load receives a live non-null slot; bytes are read only after status zero" |
+| Tests | Tests/Cases/Cffi/CffiStatusAndWrittenCountBothReturn.fixture/main.jet | 14:5 | "both blocks are live for the calls, C writes at most `output_cap` bytes and keeps no pointer, and each is released once" |
 | Tests | Tests/Cases/Cffi/FFICapabilityBoundaryIsSafeOnlyInsideUnsafe/Input/o2/run.jet | 8:5 | "the foreign call may write through the borrowed value" |
 | Tests | Tests/Cases/Cffi/FFICapabilityBoundaryIsSafeOnlyInsideUnsafe/Input/o3/run.jet | 8:5 | "the foreign call may write through the borrowed value" |
 | Tests | Tests/Cases/Cffi/RuntimeExitImportExitsWithItsArgument.fixture/main.jet | 1:1 | "this program owns the exit status it passes" |
@@ -13196,13 +13208,6 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Tests | Tests/Conformance/Corpus/Core/Sys/waitpid.jet | 5:5 | "poll for a child that this witness does not have" |
 | Tests | Tests/Conformance/Corpus/Core/Tasks/queued_handle.jet | 17:5 | "the handles stay in this program and never reach the runtime's queue" |
 | Tests | Tests/Conformance/Corpus/Core/Tasks/queued_task.jet | 5:5 | "the handle stays in this program and never reaches the runtime's queue" |
-| Tests | Tests/Fixtures/UnsafeObligations/run.jet | 5:5 | "local pointer" |
-| Tests | Tests/Fixtures/explicit_cleanup_order.jet | 39:5 | "exercise the explicit process-stop cleanup boundary" |
-| Tests | Tests/Fixtures/ffi_stack4_i64.jet | 2:1 | "the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return" |
-| Tests | Tests/Fixtures/ffi_stack4_i64.jet | 49:5 | "Linux getpid syscall 39 ignores all argument registers and retains no stack pointer" |
-| Tests | Tests/Fixtures/fmt_import_c_bindings.jet | 7:1 | "audited C boundary" |
-| Tests | Tests/Fixtures/fmt_import_c_bindings.jet | 10:1 | "audited C boundary" |
-| Tests | Tests/Fixtures/native_global_word.jet | 6:5 | "the fixture's one-threaded caller (run, or global-word.c) is the only writer" |
 | Tests | Tests/Fixtures/native_inline_c_shared_state.jet | 4:1 | "updates this program's private counter" |
 | Tests | Tests/Fixtures/native_inline_c_shared_state.jet | 13:1 | "reads the counter defined by fixture_bump" |
 | Tests | Tests/Fixtures/native_inline_c_shared_state.jet | 25:5 | "the counter is private to these two bodies" |
@@ -13224,7 +13229,10 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Tests | Tests/Run/Dyn/NumberInUnsafe.jet | 7:5 | "the literal below is a valid JSON number lexeme" |
 | Tests | Tests/Run/FailureFoundation/TransactOSStop.jet | 34:5 | "the stop runs the shared cleanup boundary" |
 | Tests | Tests/Run/PatternsAndFields/FixedSizeListWidensAtCoreCall.jet | 5:5 | "fixed signature vector" |
+| Tests | Tests/Run/UnsafeAndRuntime/AsmSevenInputsPushToTheStack.jet | 7:1 | "the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return" |
+| Tests | Tests/Run/UnsafeAndRuntime/AsmSevenInputsPushToTheStack.jet | 54:5 | "Linux getpid syscall 39 ignores all argument registers and retains no stack pointer" |
 | Tests | Tests/Run/UnsafeAndRuntime/MemFromAddrDirect.jet | 11:5 | "the borrowed value is live in the caller and the pointer never escapes" |
+| Tests | Tests/Run/UnsafeAndRuntime/NativeGlobalWord.jet | 6:5 | "run, the program's one thread, is the only writer" |
 | Tests | Tests/UI/AuditedGateLadderForbidden/run.jet | 3:5 | "the organization policy refuses this audited escape" |
 | Tests | Tests/UI/E3113PackageWithoutKernelFiles/run.jet | 6:1 | "the caller releases the storage with `free_raw`, exactly once" |
 | Tests | Tests/UI/E3113RawMemoryOutsideKernel/kernel.jet | 4:1 | "the caller releases the storage with `free_raw`, exactly once" |
