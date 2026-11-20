@@ -1,9 +1,85 @@
 // A diagnostic names a generic alias as its source writes it, then its one
-// full expansion; any other type keeps its usual words.
+// full expansion; any other type keeps its usual words. An alias stands for
+// its target: the target's values, home and privacy are the alias's.
+use {
+    jet_foundation.[
+        Span,
+        compiler_threads_single,
+        effect_vocabulary_module,
+        jet_target_machine_hosted,
+        module_intern,
+        module_table,
+    ]
+    jet_parser.[parse_generated_source]
+    jet_driver.[jet_driver_canonical_effect_module]
+    jet_sema.[
+        SemaBuildFacts,
+        SemaComptimeFunctionResult,
+        SemaComptimeItemValue,
+        SemaForeignProviderInput,
+        SemaRegistrationForeignHandleFacts,
+        SemaRegistrationHostHooks,
+        SemaRegistrationImportEdge,
+        SemaRegistrationModuleInput,
+        SemaRegistrationPackagePolicy,
+        SemaSourceOrigin,
+        SemaSourceSegment,
+        sema_collect_comptime_declarations,
+        sema_finalize_registration_graph,
+        sema_registration_prepare_graph,
+    ]
+}
+
 alias_reports: fn(source: String) -> String {
     rows := [String]{}
     loop diagnostic in core_failure_record_diagnostics(source, "user/fixture") {
         rows.push("{diagnostic.code}: {diagnostic.what}")
+    }
+    rows.join("; ")
+}
+
+// The package of a source root's modules: a directory with no package.
+FILE_MODULE_PACKAGE: "source-root:user"
+
+// The reports for `main_source`, a module whose `use geo` imports the file
+// module `geo_source` beside it. Both sit in a source root, whose modules
+// keep their `priv` declarations to themselves.
+file_module_reports: fn(main_source: &&String, geo_source: &&String) -> String {
+    table := module_table()
+    main_id: module_intern(table, "user/main")
+    geo_id: module_intern(table, "user/geo")
+    main_parsed := parse_generated_source(main_source.bytes())
+    geo_parsed := parse_generated_source(geo_source.bytes())
+    // Each import edge owns its declaration, as the loader's do; a second
+    // parse of `main_source` gives them.
+    imports_parsed := parse_generated_source(main_source.bytes())
+    if main_parsed.diagnostics.len() != 0 || geo_parsed.diagnostics.len() != 0 {
+        panic("fixture did not parse")
+    }
+    edges := [SemaRegistrationImportEdge]{}
+    loop declaration in imports_parsed.program.imports.move() {
+        edges.push(SemaRegistrationImportEdge{source_module_identity: main_id, target_module_identity: geo_id, target_package_identity: FILE_MODULE_PACKAGE, foreign_binding: None, declaration: declaration})
+    }
+    main_segment: SemaSourceSegment{generated: Span{start: 0, end: main_source.len()}, source_file: "user/main.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
+    geo_segment: SemaSourceSegment{generated: Span{start: 0, end: geo_source.len()}, source_file: "user/geo.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
+    main_input: SemaRegistrationModuleInput{package_identity: FILE_MODULE_PACKAGE, module_identity: main_id, module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "user/main.jet", source_segments: [SemaSourceSegment]{main_segment}, source_origin: SemaSourceOrigin.Snapshot, program: main_parsed.program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: main_source.move()}
+    geo_input: SemaRegistrationModuleInput{package_identity: FILE_MODULE_PACKAGE, module_identity: geo_id, module_name: "geo", core_source_alias: "", module_path: "geo.jet", source_file: "user/geo.jet", source_segments: [SemaSourceSegment]{geo_segment}, source_origin: SemaSourceOrigin.Snapshot, program: geo_parsed.program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: geo_source.move()}
+    effects: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? panic("canonical effect module declares no effects")
+    effects_id: effects.module_identity
+    facts: SemaBuildFacts{package_name: "user", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
+    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{main_input, geo_input, effects}, edges, FILE_MODULE_PACKAGE, main_id, effects_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? panic("registration failed {err}")
+    hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}}
+    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None) ?? panic("declaration checking failed {err}")
+    declared := stage.graph.move()
+    stage.graph = None
+    registration := declared.move() ?? panic("the declaration pass lost its registration graph")
+    checked := sema_finalize_registration_graph(registration, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None) ?? panic("finalization failed {err}")
+    // Finalization repeats the declaration pass's reports beside its own
+    // (`jet check` shows each once), so a row repeated is listed once.
+    rows := [String]{}
+    loop diagnostic in checked.diagnostics {
+        row: "{diagnostic.code}: {diagnostic.what}"
+        if diagnostic.code.starts_with("E") && !rows.contains(row) -> rows.push(row)
     }
     rows.join("; ")
 }
@@ -34,4 +110,95 @@ run: fn() { print(firsts().len()) }
 run: fn() { print(total([Int]{1, 2})) }
 `
     assert_eq(alias_reports(source), "E0112: `total` wants [[Int]] for argument 1, but this is [Int]")
+}
+
+#Test("a value of an alias's target passes where the alias is wanted, and the reverse") {
+    source: `Grid<T>: [[T]]
+
+geo: module {
+    Point: struct {
+        x: Int,
+    }
+}
+
+Spot: geo.Point
+
+total: fn(grid: Grid<Int>) -> Int { grid.len() }
+
+plain: fn(rows: [[Int]]) -> Int { rows.len() }
+
+as_grid: fn() -> Grid<Int> { [[Int]]{[Int]{1}, [Int]{2}} }
+
+spot_x: fn(spot: Spot) -> Int { spot.x }
+
+point_x: fn(point: geo.Point) -> Int { point.x }
+
+as_spot: fn() -> Spot { geo.Point{x: 5} }
+
+run: fn() {
+    print(plain(as_grid()) + total([[Int]]{[Int]{3}}))
+    print(spot_x(geo.Point{x: 4}) + point_x(as_spot()) + as_spot().x)
+}
+`
+    assert_eq(alias_reports(source), "")
+}
+
+#Test("an error about an alias of a module's type names that type by its home") {
+    source: `geo: module {
+    Point: struct {
+        x: Int,
+    }
+}
+
+Spot: geo.Point
+
+spot_x: fn(spot: Spot) -> Int { spot.x }
+
+run: fn() { print(spot_x(7)) }
+`
+    // The report keeps the fixture module's key ahead of the type's path;
+    // `jet check` drops it (Tests/UI/alias_names_its_target_by_home).
+    report: alias_reports(source)
+    assert(report.starts_with("E0112: `spot_x` wants `") && report.ends_with(".geo.Point` for argument 1, but this is Int (a whole number)"))
+}
+
+#Test("an alias of another module's priv type is refused as naming the type is") {
+    module_source: `geo: module {
+    priv Secret: struct {
+        key: Int,
+    }
+
+    secret_key: fn() -> Int { Secret{key: 7}.key }
+}
+
+run: fn() { print(geo.secret_key()) }
+`
+    refused: "E0605: `Secret` is private to module `geo`"
+    assert_eq(alias_reports("{module_source}\npeek: fn(s: geo.Secret) -> Int {{ s.key }}\n"), refused)
+    assert_eq(alias_reports("{module_source}\nMine: geo.Secret\n"), refused)
+}
+
+// A file module `geo` that keeps its `Secret` type to itself.
+secret_geo_source: fn() -> String {
+    `priv Secret: struct {
+    key: Int,
+}
+
+secret_key: fn() -> Int { Secret{key: 7}.key }
+`
+}
+
+// A module that uses `geo` and reads only its public function.
+secret_main_source: fn() -> String {
+    `use geo
+
+run: fn() { print(geo.secret_key()) }
+`
+}
+
+#Test("an alias of a file module's priv type is refused as naming the type is") {
+    refused: "E0605: `Secret` is private to module `geo`"
+    assert_eq(file_module_reports(secret_main_source(), secret_geo_source()), "")
+    assert_eq(file_module_reports("{secret_main_source()}\naccepts: fn(s: geo.Secret) -> Bool {{ true }}\n", secret_geo_source()), refused)
+    assert_eq(file_module_reports("{secret_main_source()}\nMine: geo.Secret\n", secret_geo_source()), refused)
 }

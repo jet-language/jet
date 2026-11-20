@@ -5,6 +5,8 @@ use jet_foundation.[
     Diagnostic,
     Expr,
     Func,
+    Item,
+    Param,
     Measure,
     MeasureRule,
     UnOp,
@@ -1555,6 +1557,42 @@ sema_type_alias_shown: fn(graph: SemaRegistrationGraph, written: Type, caller: I
         return Val("`{shown}` (which is {sema_type_show(expanded)})")
     }
     None
+}
+
+// Each parameter in `items` whose written type applies a generic alias, by
+// the offset of its name: the alias as written and its one expansion
+// (sema_type_alias_shown), as hover names the parameter. `caller` is the
+// items' module.
+sema_type_alias_shown_params: fn(graph: SemaRegistrationGraph, caller: Int, items: [Item]) -[]> [Int:String] {
+    shown := [Int:String]{}
+    loop item in items {
+        if item == .Func(function) {
+            sema_type_alias_shown_add(graph, caller, function.params, shown)
+        }
+        if item == .Struct(value) {
+            loop method in value.methods {
+                sema_type_alias_shown_add(graph, caller, method.params, shown)
+            }
+        }
+        if item == .Enum(value) {
+            loop method in value.methods {
+                sema_type_alias_shown_add(graph, caller, method.params, shown)
+            }
+        }
+        if item == .Impl(value) {
+            loop method in value.methods {
+                sema_type_alias_shown_add(graph, caller, method.params, shown)
+            }
+        }
+    }
+    shown
+}
+
+sema_type_alias_shown_add: fn(graph: SemaRegistrationGraph, caller: Int, params: [Param], shown: &[Int:String]) -[]> {
+    loop param in params {
+        text: sema_type_alias_shown(graph, param.ty, caller, [TGenericParam]{}) ?? next
+        shown[param.name_span.start] = text
+    }
 }
 
 // The type an alias stands for under `args`, with `names` (its parameters, or

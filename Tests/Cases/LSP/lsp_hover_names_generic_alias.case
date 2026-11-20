@@ -1,0 +1,22 @@
+# Hover on a parameter whose type applies a generic alias names the alias as
+# written, then its one full expansion, as diagnostics do: `grid` is
+# `Grid<Int>` (which is [[Int]]), never the expansion alone.
+session lsp content-length: jet self lsp
+send lsp: Messages/LSPHoverNamesGenericAlias/0.json
+recv lsp
+stdout: ~ "hoverProvider" # the server answers initialize
+send lsp: Messages/LSPHoverNamesGenericAlias/1.json
+send lsp: Messages/LSPHoverNamesGenericAlias/2.json
+recv lsp
+stdout: ~ "publishDiagnostics" # the document is checked
+send lsp: Messages/LSPHoverNamesGenericAlias/3.json
+recv lsp
+stdout: ~ "grid: Grid<Int>" # the parameter's type as its source spells it
+stdout: ~ "Type: `Grid<Int>` (which is [[Int]])" # the alias, then its one expansion
+stdout: !~ "grid: [[Int]]" # never the expansion alone
+stdout: !~ "(which is [[Int]]) (which is" # one expansion, not two
+send lsp: Messages/LSPHoverNamesGenericAlias/4.json
+recv lsp
+stdout: ~ "result" # the server shuts down
+close lsp
+exit: any # the session's exit status is not what this case proves

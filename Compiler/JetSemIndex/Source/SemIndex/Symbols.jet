@@ -945,7 +945,12 @@ semindex_build_symbols: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [S
                 }
                 scope = semindex_symbol_scope(scopes, def.module_path, def.def_span, false)
             }
-            .Param(_) -> scope = semindex_symbol_scope(scopes, def.module_path, def.def_span, true)
+            .Param(_) -> {
+                if semindex_symbol_alias_shown(modules, def.module_path, def.def_span.start) == .Val(shown) {
+                    docs.summary = if docs.summary == "" -> "Type: {shown}" else -> "{docs.summary}\n\nType: {shown}"
+                }
+                scope = semindex_symbol_scope(scopes, def.module_path, def.def_span, true)
+            }
             .Module | .Function(_) | .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) | .Const | .EnumVariant(_) | .Field(_, _) -> {}
         }
         identity: if scope != None -> "{def.identity}@{def.def_span.start}" else -> def.identity
@@ -971,4 +976,14 @@ semindex_build_symbols: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [S
         semindex_symbol_collect_inline_imports(index, symbols, modules, doc_module, doc_module.items, None)
     }
     semindex_symbol_index(symbols)
+}
+
+// How hover names a parameter whose written type applies a generic alias
+// (JetDriverDocModule.alias_shown): the alias as written plus its one
+// expansion. None for any other parameter.
+semindex_symbol_alias_shown: fn(modules: [JetDriverDocModule], module_path: String, start: Int) -> String? Never! {
+    loop doc_module in modules {
+        if doc_module.path == module_path -> return doc_module.alias_shown.get(start)
+    }
+    None
 }

@@ -1419,9 +1419,6 @@ sema_failure_union_names_generic: fn(members: [Type], generic_names: [String]) -
 // declaration `alias` keeps private.
 sema_check_private_module_type: fn(name: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
     qualified: name.split_once(".") ?? return
-    if name.contains(".") {
-        return
-    }
     if program.registration_graph == .Val(graph) {
         caller: sema_scope_caller_row(environment, graph)
         if caller < 0 {
