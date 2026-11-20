@@ -1,0 +1,17 @@
+# A Core generic struct (core.prelude's SendError<T>) carried in an error
+# result lowers and reads back on every tier: at a concrete argument, at a
+# generic function's parameter, and around a program generic struct.
+fixture: CoreGenericStructCarriesAnErrorResult.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step check: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "concrete [a]\ngeneric [b]\nnested [c] full\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "concrete [a]\ngeneric [b]\nnested [c] full\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "concrete [a]\ngeneric [b]\nnested [c] full\n"
