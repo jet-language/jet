@@ -1478,6 +1478,12 @@ plus, less, times or shifted by some Int, against any Int (`loop capacity <
 slots`, `loop span * 2 <= limit`), which stops it below twice that Int,
 since an uncapped doubling leaves the packed Int rail within a few dozen
 turns; its fix names a range type (`Int(0..1000)`) or a fixed width (`I64`).
+The product counts under `wrapping` or `saturating` too, which on an Int is
+the exact product and never wraps, and with the Int mixed by `+`, `-`, `~`
+or `|` before it, as in FNV-1a's `h = wrapping((h ~ Int{b}) * PRIME)`; a
+left shift counts only of the Int itself, so a canonical Huffman code's
+`code = (code + count) << 1` is none. On `U64` the same hash stays in 64
+bits and is no L2511.
 Only an Int that carries its value from one turn into the next grows: a
 local the loop doesn't bind afresh each turn, or a field or element reached
 the same way on every turn, its index a literal, a constant or a local bound

@@ -1,0 +1,16 @@
+// 64-bit FNV-1a over 1 MB on U64: `wrapping` on a fixed width is one
+// machine multiply, so the hash takes milliseconds at every level.
+PRIME: U64{1099511628211}
+
+OFFSET: U64{14695981039346656037}
+
+run: fn() {
+    data := [U8]{}
+    loop i in 0..<1048576 -> data.push(U8{i % 251})
+    h := OFFSET
+    loop b in data {
+        h = h ~ U64{b}
+        h = wrapping(h * PRIME)
+    }
+    print("{h}")
+}
