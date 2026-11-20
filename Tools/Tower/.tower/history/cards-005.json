@@ -38808,6 +38808,158 @@
       "completedAt": "2026-11-17T20:01:44.429Z",
       "questions": [],
       "retiredAt": "2026-11-20T20:07:55.431Z"
+    },
+    {
+      "id": "c0zlsxzv",
+      "num": 6652,
+      "title": "jet lint --cost: an incomplete reachable cost projection ICEs or is accepted",
+      "body": "From #6651 (a0_032 gate kit, dev 34290833a9). cli_parts_surface/cost_cli_surfaces_hot_loop_rows_and_optimizer_proofs: `jet lint --cost cost_rows.jet` exits 101 with 'cost.project unlowered: -: the checked projection did not complete' (I2). cli_parts_surface/cost_cli_rejects_incomplete_reachable_projection: `jet check` exits 0 on tests/cli/cost_incomplete_generic.jet, but an incomplete reachable cost projection must be rejected with a registered diagnostic.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e24",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "All criteria met on dev dbf05f4ced (p276): the cost CLI cases pass."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c2 ruling (Main): the L2510 cost lints are opt-in, run only by jet lint --cost and jet explain --cost like the other optional jet lint checks. Plain jet check adds no cost warnings; it carries only the projection's completeness refusal (E2104), so existing snapshots don't churn. The hot-loop case's jet check step is dropped."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c2 ruling (Main): no valid source reaches an incomplete reachable projection (a bodyless fn is E0081, foreign is exempt, every checked callee has a FnBody row). The producer still reports E2104 for a reachable non-foreign callee with no body row; a JetDriver unit test that drops a body row proves it, and the existing E2104 UI snapshots cover the rendering. That meets c2's 'UI snapshot' part. No UI fixture is contorted to force it."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c2 ruling (Main, within scope): cost_incomplete_generic.jet is byte-identical to the fixture cost_cli_projects_generic_specializations needs to pass, so both cases can't pass. Valid generic and foreign programs project completely. E2104 stays for a genuinely incomplete reachable projection (a reachable checked callable with no body row), forced by a dedicated fixture with its UI snapshot, and the rejects case is rewritten to use that fixture. Owner: Speed."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "Main, 2026-11-11, #4260 c29 cleanup (G5DevX-dead-codes-3): diagnostic code L2510 is removed from the registry because nothing emits it, and its known-failing cases go with it. When this card builds the behavior, it registers the code again with its emitter, what/why/fix text and a UI snapshot. The behavior the deleted cases expected: cli_parts_surface/cost_cli_surfaces_hot_loop_rows_and_optimizer_proofs.case and tests/ui_lint/cost_hidden_in_loop.warn: hidden dynamic cost inside a loop is a lint and a --cost row."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "c1 met at 6d50143539 (G1 part). Moved to G11 for c2, the cost producer port. Its KF lines keep naming this card."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "No exit 101 from the cost surface: `jet lint --cost` and `jet explain --cost` are unbuilt forms in the CLI forms model (registered E2101/E2104 naming this card), so cases cli_parts_surface/cost_cli_surfaces_hot_loop_rows_and_optimizer_proofs and cost_cli_rejects_incomplete_reachable_projection report KNOWN-FAILING #6652, never ERROR, in a release kit.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev dbf05f4ced (batch compiler p276 suite): `jet test Compiler --profile cases --filter CLIPartsSurface/cost_cli_` passes 3 of 3 (cost_cli_projects_generic_specializations, cost_cli_projects_generic_and_foreign_calls_completely, cost_cli_surfaces_hot_loop_rows_and_optimizer_proofs), and `--profile ui --filter E2104` passes 1 of 1 (inspect_target_live_scope_e2104). The cost surface is built, so no case reaches exit 101 or KNOWN-FAILING.",
+          "at": "2026-11-17T21:05:49.686Z"
+        },
+        {
+          "n": 2,
+          "text": "The cost producer is ported: cost facts and the loop-depth collector over BodyTree feed jet lint --cost and jet check; an incomplete reachable projection is E2104 with a UI snapshot; jet explain --cost and the L2510 view-into-owned-slot lint are built; both cost cases PASS on a release kit. Proof: `jet test Compiler --profile cases --filter CLIPartsSurface/cost_cli_` and `jet test Compiler --profile ui --filter E2104`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev dbf05f4ced (batch compiler p276 suite): `jet test Compiler --profile cases --filter CLIPartsSurface/cost_cli_` passes 3 of 3 (cost_cli_projects_generic_specializations, cost_cli_projects_generic_and_foreign_calls_completely, cost_cli_surfaces_hot_loop_rows_and_optimizer_proofs), and `--profile ui --filter E2104` passes 1 of 1 (inspect_target_live_scope_e2104). The cost surface is built, so no case reaches exit 101 or KNOWN-FAILING.",
+          "at": "2026-11-17T21:05:50.659Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T06:50:52.522Z",
+      "updated": "2026-11-17T21:05:52.430Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-17T21:05:52.430Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T21:07:54.220Z"
+    },
+    {
+      "id": "c0hicd7a",
+      "num": 6916,
+      "title": "A handled Core error prints and names its type: ParseError is declared, and {err}, {err:Debug}, err.message and the E0915 and E0112 fixes all work",
+      "body": "Destination: inside a `??` handler, a Core error value such as Int.parse's ParseError has a declaration a program can name. It prints with `{err}` and `{err:Debug}`, and `err.message` works, on O0, O1 and O2. The fixes E0915 and E0112 suggest for such values compile.\n\nWhy it matters: G5DevX-2 found on 2026-11-13 that `{err}` gives E0915, `{err:Debug}` gives E0112 and `err.message` gives E0302, so a learner cannot even print the error they caught.\n\nSource: #3720 c47, c49, c84 (from #3703).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e20",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "All criteria met on dev dbf05f4ced (p276)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Int.parse's error type, ParseError, has a declaration in Core, so a `??` handler can name it. Proof: `jet test Compiler --profile cases --filter Errors/parse_error_named_in_handler` on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev dbf05f4ced (p276 suite): `jet test Compiler --profile cases --filter Errors/` passes parse_error_named_in_handler and core_error_renders_in_handler, and `--profile ui` passes E0915_fix_compiles and E0112_fix_compiles at o0, o1 and o2 (fixed companion run exit 0). Landed in 4315716f03.",
+          "at": "2026-11-17T21:05:53.444Z"
+        },
+        {
+          "n": 2,
+          "text": "Inside a `??` handler, `{err}`, `{err:Debug}` and `err.message` all render a Core error value on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev dbf05f4ced (p276 suite): `jet test Compiler --profile cases --filter Errors/` passes parse_error_named_in_handler and core_error_renders_in_handler, and `--profile ui` passes E0915_fix_compiles and E0112_fix_compiles at o0, o1 and o2 (fixed companion run exit 0). Landed in 4315716f03.",
+          "at": "2026-11-17T21:05:54.440Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Errors/core_error_renders_in_handler"
+          }
+        },
+        {
+          "n": 3,
+          "text": "The fixes suggested by E0915 and E0112 never propose a spelling that fails for the same value, and each suggested fix compiles. Proof: `jet test Compiler --profile ui --filter E0915_fix_compiles` and `--filter E0112_fix_compiles`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev dbf05f4ced (p276 suite): `jet test Compiler --profile cases --filter Errors/` passes parse_error_named_in_handler and core_error_renders_in_handler, and `--profile ui` passes E0915_fix_compiles and E0112_fix_compiles at o0, o1 and o2 (fixed companion run exit 0). Landed in 4315716f03.",
+          "at": "2026-11-17T21:05:55.469Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "diagnostics",
+        "errors"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:06:31.841Z",
+      "updated": "2026-11-17T21:05:57.861Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-17T21:05:57.861Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T21:07:54.221Z"
     }
   ]
 }
