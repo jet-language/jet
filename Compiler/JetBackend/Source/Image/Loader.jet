@@ -2112,7 +2112,8 @@ X64TraceStop: struct {
 // Start the image file at `path` with `argv` (argv[0] included) and the
 // environment `env` (as X64Launch.env: None is this process's), traced by
 // the trace's helper and stopped before its first instruction. Its standard
-// input reads /dev/null; its output and errors append to the existing file
+// input reads the file `input` (`/dev/null` for none, `/dev/stdin` for this
+// process's own); its output and errors append to the existing file
 // `output`. The helper ends when this process does (its channel closes),
 // and the kernel kills the program when the helper ends. Every thread the
 // program starts is traced too (LOADER_PTRACE_O_TRACECLONE): x64_trace_wait
@@ -2120,7 +2121,7 @@ X64TraceStop: struct {
 // (LOADER_ADDR_NO_RANDOMIZE), so each run of a replay puts its stacks and
 // heap at the same addresses: `why` follows a place's address from one run
 // to the next.
-x64_trace_spawn: fn(path: String, argv: [String], output: String, env: [String]?) -> X64Trace {
+x64_trace_spawn: fn(path: String, argv: [String], output: String, input: String, env: [String]?) -> X64Trace {
     trace := X64Trace{pid: -1, scratch: 0, failure: ""}
     scratch: os_map_with(0, OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE, LOADER_MAP_SHARED_ANONYMOUS, -1, 0)
     if os_failed(scratch) {
@@ -2144,13 +2145,13 @@ x64_trace_spawn: fn(path: String, argv: [String], output: String, env: [String]?
         }
     }
     out: loader_open_as(output, OS_O_APPEND_CLOEXEC)
-    null: loader_open("/dev/null")
+    source: loader_open(input)
     helper := -1
-    if !os_failed(pair) && !os_failed(out) && !os_failed(null) {
+    if !os_failed(pair) && !os_failed(out) && !os_failed(source) {
         // The words the helper and the program use, made before the fork.
         call: I64{scratch + LOADER_TRACE_CALL}
         channel: I64{theirs}
-        input: I64{null}
+        input_fd: I64{source}
         output_fd: I64{out}
         program_path: I64{exec.path}
         program_argv: I64{exec.argv}
@@ -2165,7 +2166,7 @@ x64_trace_spawn: fn(path: String, argv: [String], output: String, env: [String]?
                 // of this process's files open. No signal but a kill
                 // reaches it.
                 moved: os_syscall_i64(I64{OS_SYS_FCNTL}, channel, I64{LOADER_F_DUPFD_CLOEXEC}, I64{LOADER_TRACE_FD}, I64{0}, I64{0}, I64{0})
-                _ := os_syscall_i64(I64{OS_SYS_DUP2}, input, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+                _ := os_syscall_i64(I64{OS_SYS_DUP2}, input_fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
                 _ := os_syscall_i64(I64{OS_SYS_DUP2}, output_fd, I64{1}, I64{0}, I64{0}, I64{0}, I64{0})
                 _ := os_syscall_i64(I64{OS_SYS_DUP2}, output_fd, I64{2}, I64{0}, I64{0}, I64{0}, I64{0})
                 if moved != (I64{LOADER_TRACE_FD}) {
@@ -2191,14 +2192,18 @@ x64_trace_spawn: fn(path: String, argv: [String], output: String, env: [String]?
     }
     if theirs >= 0 -> loader_close(theirs)
     if !os_failed(out) -> loader_close(out)
-    if !os_failed(null) -> loader_close(null)
+    if !os_failed(source) -> loader_close(source)
     _ := os_unmap(exec.block, exec.size)
     if os_failed(pair) {
         trace.failure = "making the tracer's channel failed (errno {-pair})"
         return trace
     }
-    if os_failed(out) || os_failed(null) {
-        trace.failure = "can't open the program's output `{output}` (errno {-(if os_failed(out) -> out else -> null)})"
+    if os_failed(out) {
+        trace.failure = "can't open the program's output `{output}` (errno {-out})"
+        return trace
+    }
+    if os_failed(source) {
+        trace.failure = "can't open the program's input `{input}` (errno {-source})"
         return trace
     }
     if os_failed(helper) {

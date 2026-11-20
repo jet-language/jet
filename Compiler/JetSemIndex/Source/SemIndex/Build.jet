@@ -2668,14 +2668,10 @@ semindex_convert_defs: fn(db: SemDB, modules: [JetDriverDocModule]) -> [SemDefin
 // same program.
 semindex_build: fn(modules: [JetDriverDocModule], effect_projection: SemEffectProjection) -> SemIndex {
     db := semindex_db()
-    named_paths := [String:String]{}
-    loop doc_module in modules -> named_paths[doc_module.module_name] = doc_module.path
+    // A reference's symbol names its module by ModuleID; each checked module
+    // carries its own, so the id finds the module's path directly.
     module_paths := [Int:String]{}
-    loop doc_module in modules {
-        if named_paths.get(doc_module.module_identity) == .Val(path) {
-            module_paths[Int{doc_module.module_id.id}] = path
-        }
-    }
+    loop doc_module in modules -> module_paths[Int{doc_module.module_id.id}] = doc_module.path
     summaries: semindex_summaries(modules)
     loop doc_module in modules {
         // copy: `doc_module.block_spans` stays in the iterated collection (`doc_module` is a view

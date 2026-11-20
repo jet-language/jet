@@ -297,11 +297,12 @@ jet_cli_doc_add_function: fn(output: &[JetCLIDocItem], unit: JetCLIDocUnit, func
     jet_cli_doc_add_item(output, unit, "function", function.name, parent, function.is_pub || inherited_public, function.is_package_pub, function.span, function.name_span, jet_cli_doc_marker_names(function.markers))
 }
 
-// Each re-export as an item: its declaration as written, then `Target: ` and
-// the signature of the declaration its path reaches.
+// Each re-export as an item under the inline module that declares it: its
+// declaration as written, then `Target: ` and the signature of the
+// declaration its path reaches.
 jet_cli_doc_add_reexports: fn(output: &[JetCLIDocItem], unit: JetCLIDocUnit, reexports: [SemaPublicAPIReexport]) -[]> {
     loop reexport in reexports {
-        jet_cli_doc_add_item(output, unit, "reexport", reexport.name, "", true, false, reexport.span, reexport.span, [String]{})
+        jet_cli_doc_add_item(output, unit, "reexport", reexport.name, reexport.parent, reexport.public, false, reexport.span, reexport.span, [String]{})
         last: output.len() - 1
         output[last].signature = "{output[last].signature}\nTarget: {reexport.signature}"
     }

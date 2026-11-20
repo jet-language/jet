@@ -1,15 +1,23 @@
 # tests/fmt.rs::fmt_simplify_keeps_a_struct_literal_return_braced at tests/fmt.rs:1362; hand-port
-# Claim: braced struct-literal return survives simplify (tests/fmt.rs:1373-1376)
+# Claim: braced struct-literal return survives simplify with its `Rect` head (tests/fmt.rs:1373-1376)
 # Claim: no `:: Rect{` or `:: {` collapse (tests/fmt.rs:1377-1380)
 # Claim: second simplify pass identical (tests/fmt.rs:1381-1385)
+# Claim: the one-line body parses to the same tree as the source
 fixture: FmtSimplifyKeepsAStructLiteralReturnBraced.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
+step: jet emit --ast lit/run.jet
+exit: 0
+capture: source_ast = text stdout
 step: jet fmt --simplify lit/run.jet
 exit: 0 # tests/fmt.rs:1371 simplify succeeds
-file: lit/run.jet ~ "make: fn(width: Int, height: Int) -> Rect { return {" # tests/fmt.rs:1373-1380
+file: lit/run.jet ~ "make: fn(width: Int, height: Int) -> Rect { return Rect{width: width, height: height} }\n" # tests/fmt.rs:1373-1380
 file: lit/run.jet !~ ":: Rect{" # tests/fmt.rs:1373-1380
 file: lit/run.jet !~ ":: {" # tests/fmt.rs:1373-1380
 step: jet fmt --simplify --check lit/run.jet
 exit: 0 # tests/fmt.rs:1381-1385 stable
+step: jet emit --ast lit/run.jet
+exit: 0
+capture: simplified_ast = text stdout
+cap:simplified_ast: = "{cap:source_ast}" # the rewrite keeps the tree

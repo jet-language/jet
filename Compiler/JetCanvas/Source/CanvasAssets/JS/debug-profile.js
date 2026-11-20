@@ -93,7 +93,8 @@
     const state = debugViewElement("debug-view-state");
     if (state) {
       const line = overlay && overlay.active_line ? " · line " + overlay.active_line : "";
-      state.textContent = (debugSessionId ? "Paused" : overlay ? "Finished" : "No session") + line;
+      const engine = debugSessionInfo ? " · " + debugEngineLabel(debugSessionInfo.tier) : "";
+      state.textContent = (debugSessionId ? "Paused" : overlay ? "Finished" : "No session") + line + engine;
     }
     // Reverse steps and `why` run in a replay; a dump runs nothing.
     const tier = debugSessionId && debugSessionInfo ? debugSessionInfo.tier : "";
@@ -135,10 +136,16 @@
     debugViewFill("debug-stack-rows", stack.map((frame) => debugViewRow([[frame, ""]])), "Not paused");
     const locals = (overlay && overlay.locals) || [];
     debugViewFill("debug-locals-rows", locals.map((local) => debugViewRow([[local.name, "key"], [local.value, ""], [local.type, "type"]])), "Not paused");
+    // Each watch with the value the stop read, or why it has none: stale
+    // when it was drawn on another revision, else out of the stop's scope.
     const watched = (overlay && overlay.watches) || [];
-    const watchRows = (debugState.watches || []).map((name) => {
-      const found = watched.find((watch) => watch.name === name);
-      return debugViewRow([[name, "key"], [found ? found.value : "(not in scope)", ""], [found ? found.type : "", "type"]]);
+    const watchRows = (debugState.watches || []).map((watch) => {
+      const stale = !!overlay && watch.revision !== overlay.revision;
+      const found = watched.find((entry) => entry.name === watch.name && (entry.state === "stale") === stale);
+      const value = !found ? "(not in scope)" : stale ? "(stale: source changed)" : found.value;
+      const row = debugViewRow([[watch.name, "key"], [value, ""], [found && found.type || "", "type"]]);
+      row.dataset.anchor = (watch.anchor ? watch.anchor + "@" : "") + watch.revision;
+      return row;
     });
     debugViewFill("debug-watches-rows", watchRows, "No watches");
     const tasks = (overlay && overlay.tasks) || [];
@@ -341,16 +348,11 @@
       add("input", "debug-view-dump", ".jetdump path", "Dump to open");
       add("button", "debug-view-open-dump", "Open dump", "Debug a .jetdump of the entry");
     }
-    // A new session on `open`'s tier, ending the one shown.
-    const openSession = (open) => {
-      if (debugSessionId) stopDebug();
-      runDebug([], open);
-    };
     const valueOf = (id) => {
       const input = debugViewElement(id);
       return input ? input.value.trim() : "";
     };
-    bind("debug-view-run", () => openSession(null));
+    bind("debug-view-run", () => openDebugSession());
     bind("debug-view-continue", () => debugViewCommand(["continue"]));
     bind("debug-view-next", () => debugViewCommand(["next"]));
     bind("debug-view-step", () => debugViewCommand(["step"]));
@@ -362,11 +364,11 @@
     bind("debug-view-reverse-continue", () => debugViewCommand(["reverse-continue"]));
     bind("debug-view-replay", () => {
       const recording = valueOf("debug-view-recording");
-      if (recording) openSession({ tier: "native-recorded", recording });
+      if (recording) openDebugSession({ tier: "native-recorded", recording });
     });
     bind("debug-view-open-dump", () => {
       const dump = valueOf("debug-view-dump");
-      if (dump) openSession({ tier: "native-dump", dump });
+      if (dump) openDebugSession({ tier: "native-dump", dump });
     });
     const whyInput = debugViewElement("debug-view-why");
     if (whyInput) whyInput.addEventListener("keydown", (ev) => {
@@ -383,13 +385,13 @@
       if (debugSessionId) runDebug([command]);
       else runDebug([]);
     });
+    // A typed watch is anchored to the stop it was typed at, when there is
+    // one.
     const watchInput = debugViewElement("debug-watch-input");
     if (watchInput) watchInput.addEventListener("keydown", (ev) => {
       if (ev.key !== "Enter" || !watchInput.value.trim()) return;
-      addWatch(watchInput.value.trim());
+      addWatch(watchInput.value.trim(), debugStopIsLive() ? debugOverlay.active_span : null);
       watchInput.value = "";
-      if (debugSessionId) runDebug([]);
-      else renderDebugView();
     });
     document.addEventListener("keydown", (ev) => {
       if (viewMode !== "debug" || (ev.target && ev.target.tagName === "INPUT")) return;

@@ -350,6 +350,10 @@ direct indexed compound updates remain E0164 (copy, update, then store), and a
 map slot with a starting value takes them in place: `counts[w, or: 0] += 1`.
 User-record compound arithmetic requires the same operator hook as its binary
 form; without that hook sema reports E0360, before any execution tier runs.
+An exact number (`Decimal`, `Fraction`, `Complex`) updates as its binary form
+does too: `total += value` takes the same operand pairs, Int lift and result
+type as `total = total + value`, so a `Decimal /= Decimal` (a Fraction
+quotient) is refused as the expanded form is.
 Operator implementation identity includes the left type, trait, and right type
 (D-OPMIX1). Hooks with different right types are distinct trait instantiations,
 not ordinary method-name overloads. Binary operators and explicit calls such as
@@ -2747,12 +2751,12 @@ binds; a one-word name a file `use` row binds re-exports that file module
 (`Point: geo.Point`) is the ordinary alias. A call, an annotation, a generic
 instance, an enum case or a parenthesized path stays a constant, and inside a
 function `f: other.f` stays a local binding. Like any declaration, a
-re-export is public unless `priv`. `jet doc` lists a file's re-export as
-written followed by `Target:` and the signature of the declaration it names,
-and the publish API snapshot holds it as a `reexport` row with that signature
-(`reexport clamp = fn core.math.clamp(…)`), so retargeting a re-export, or a
-change to its target's signature, is a public API change. A re-export inside
-an inline module body is not yet listed.
+re-export is public unless `priv`. `jet doc` lists a re-export, in a file or
+in an inline module body, as written followed by `Target:` and the signature
+of the declaration it names, and the publish API snapshot holds it as a
+`reexport` row with that signature (`reexport clamp = fn core.math.clamp(…)`,
+`reexport geo.clamp = …` inside `geo: module { … }`), so retargeting a
+re-export, or a change to its target's signature, is a public API change.
 
 **U3 / D-SHAPE-MODULEINTERNAL1=A — Module declarations and internal discovery**
 *(ratified 2026-07-15, card #602)*: `name: module { … }` is the single outermost
@@ -6732,7 +6736,7 @@ opt-in (D-PKGSIGN1). `jet registry vendor`, `jet inspect audit`, `jet build --sb
 package and asks sema for its public API rows (every public fn with its solved
 effect row, struct with its fields, enum with its variants, trait with its
 required and defaulted members, method, `impl`, distinct, type, const and unit
-family, a `reexport` row for each re-export a file declares, with its target's
+family, a `reexport` row for each re-export a file or inline module declares, with its target's
 signature, and a
 `cap` row for each written `#FX(…)` cap of a public type, trait
 or module; another module's names carry the module prefix, and an inline

@@ -1,0 +1,17 @@
+// An alias stands for its target: `Spot` is `geo.Point`, so a `geo.Point`
+// passes where a `Spot` is wanted, and an error about a `Spot` names
+// `geo.Point`, the type at its home.
+geo: module {
+    Point: struct {
+        x: Int,
+    }
+}
+
+Spot: geo.Point
+
+spot_x: fn(spot: Spot) -> Int { spot.x }
+
+run: fn() {
+    print(spot_x(geo.Point{x: 4}))
+    print(spot_x(7))
+}

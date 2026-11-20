@@ -2,14 +2,21 @@
 # Claim: fence range emitted, `<: 0..3 :>` or `<:0..3:>` (tests/fmt.rs:1394-1397)
 # Claim: listed integer run `0, 1, 2, 3` gone (tests/fmt.rs:1398-1401)
 # Claim: second simplify pass identical (tests/fmt.rs:1414-1417)
-# Not ported: AST equality via Lexer/Parser (tests/fmt.rs:1403-1413): Rust API
+# Claim: the range parses to the same tree as the listed run (tests/fmt.rs:1403-1413)
 fixture: FmtSimplifyRewritesListedFenceIntegersToARange.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
+step: jet emit --ast fence/run.jet
+exit: 0
+capture: listed_ast = text stdout
 step: jet fmt --simplify fence/run.jet
 exit: 0 # tests/fmt.rs:1392 simplify succeeds
 file: fence/run.jet ~ "0..3" # tests/fmt.rs:1394-1401 range present, list gone
 file: fence/run.jet !~ "0, 1, 2, 3" # tests/fmt.rs:1394-1401 range present, list gone
 step: jet fmt --simplify --check fence/run.jet
 exit: 0 # tests/fmt.rs:1414-1417 stable
+step: jet emit --ast fence/run.jet
+exit: 0
+capture: range_ast = text stdout
+cap:range_ast: = "{cap:listed_ast}" # tests/fmt.rs:1403-1413 the rewrite keeps the tree

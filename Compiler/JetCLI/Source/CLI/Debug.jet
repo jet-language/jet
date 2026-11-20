@@ -4,9 +4,11 @@
 // Compiler/JetDebug Native.jet. It stops at the start of `run`, or with
 // `--break <file.jet>:<line>` (repeatable) at the first of those lines the
 // program reaches, then reads one command a line; the end of stdin runs the
-// program to its end, and `quit` ends it early (E2204). `--dap` serves the
-// same session to an editor over the Debug Adapter Protocol instead
-// (DebugDap.jet), whose launch request carries the arguments. The image
+// program to its end, and `quit` ends it early (E2204). A stdin that is a
+// terminal is the program's too, read by it while it runs; otherwise its
+// stdin is empty. `--dap` serves the same session to an editor over the
+// Debug Adapter Protocol instead (DebugDap.jet), whose launch request
+// carries the arguments. The image
 // keeps the deep checks `--deep-checks` selects, as a `jet build` with the
 // same flags does. A path that isn't a `.jet` file
 // is an image already built: it is debugged as it is, against the source its
@@ -299,6 +301,12 @@ jet_cli_debug_session: fn(image: String, entry: String, lines: [String], scratch
         return jet_cli_fail(refused.code, refused.what, refused.why, refused.fix, color, refused.exit_code)
     }
     session.env = env
+    // A console on a terminal shares it with the program, as a shell's job
+    // does: the program reads it while it runs and the console while it is
+    // stopped. The adapter's stdin carries its protocol, so its program's
+    // reads end at once, as they do when the console's stdin is not a
+    // terminal.
+    if !dap && cli_term.stdin().is_tty() -> session.input_path = "/dev/stdin"
     source_file: if entry == "" -> session.run_source() else -> entry
     // `print`, `watch`, conditions, logpoints and the adapter's `evaluate`
     // compile their expressions with this program (DebugCompile.jet).

@@ -3095,10 +3095,15 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [String:[String]]
         }
         .Distinct(value) -> {
             derives = sema_checked_derive_names(value.derives)
+            sema_checked_private_written_types(graph, module_row, value.base, value.base_span, diagnostics)
             base: sema_checked_qualify_type_with_generics(graph, value.base, module_row.module_identity, generic_params)
             kind = Val(TTypeDefKind.Distinct{base: base, range: value.range.map(fn(item) { TIntegerRange{lo: item.lo, hi: item.hi} })})
         }
         .TypeAlias(value) -> {
+            sema_checked_private_written_types(graph, module_row, value.target, value.target_span, diagnostics)
+            loop choice in value.choices {
+                sema_checked_private_written_types(graph, module_row, choice.target, choice.target_span, diagnostics)
+            }
             if value.choices.len() > 0 {
                 sema_checked_computed_alias(graph, module_row, value, diagnostics)
             }
@@ -3142,6 +3147,23 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [String:[String]]
         shown: if leaf == name -> "" else -> leaf,
         path: if sema_comptime_reflection_bare_module(module_row) -> "" else -> "{module_row.module_name}.{name}",
         kind: type_kind,
+    }
+}
+
+// E0605 for a type an alias or distinct type writes (`Mine: geo.Secret`) that
+// its module may not name: the declaration stands for that type, so it keeps
+// the type's privacy and reaches no further than naming the type does.
+sema_checked_private_written_types: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, ty: Type, span: Span, diagnostics: &[Diagnostic]) {
+    names := [String]{}
+    sema_public_failure_collect_named(ty, names)
+    loop name in names {
+        if sema_registration_private_module_path(graph, module_row.module_identity, name) == .Val(path) {
+            diagnostics.push(sema_registration_private_module_error(path, span))
+        } else if name.split_once(".") == .Val(qualified) {
+            if !qualified.after.contains(".") && sema_registration_private_member(graph, module_row.module_identity, qualified.before, qualified.after) {
+                diagnostics.push(sema_registration_private_member_error(qualified.after, qualified.before, span))
+            }
+        }
     }
 }
 

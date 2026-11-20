@@ -406,6 +406,11 @@ NativeSession: struct {
     trace: X64Trace,
     output_path: String,
     output_read: Int,
+    // The file the program reads as its standard input, from the start of
+    // each run: `/dev/stdin` keeps the debugger's own (a terminal both
+    // share, the program reading while it runs and the console while it
+    // stops).
+    input_path: String{"/dev/null"},
     // Whether the program has been launched or attached to; while it runs,
     // its trace has a pid, and the trace's thread is the one the last stop
     // is in. An `attached` program ran before the session and goes on
@@ -1598,7 +1603,7 @@ NativeSession: struct {
         self.probe.sites = [Int:Int]{}
         // A watch names a frame of the run that ended.
         self.watches = [NativeWatch]{}
-        self.trace = x64_trace_spawn(self.binary, self.argv, self.output_path, self.env)
+        self.trace = x64_trace_spawn(self.binary, self.argv, self.output_path, self.input_path, self.env)
         if self.trace.pid < 0 {
             failure: self.trace.failure.copy()
             x64_trace_close(self.trace)

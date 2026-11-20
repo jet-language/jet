@@ -72,7 +72,8 @@ DEBUG_SNAPSHOT: """
   return {{
     liveness: s.debugLiveness,
     session: s.debugSession,
-    overlay: o && {{ debug_overlay: o.debug_overlay, runtime_state: o.runtime_state, active_line: o.active_line, active_node_id: o.active_node_id, breakpoints: o.breakpoints, trace: (o.trace || []).slice(-6) }},
+    overlay: o && {{ debug_overlay: o.debug_overlay, runtime_state: o.runtime_state, active_line: o.active_line, active_node_id: o.active_node_id, breakpoints: o.breakpoints, locals: o.locals, trace: (o.trace || []).slice(-6) }},
+    values: s.debugValues,
     toast: s.lastToast,
     requests: ((window.__debugProof || {{}}).requests || []).map((e) => ({{ request: e.request, status: e.status, session: e.response && e.response.session, line: e.response && e.response.overlay && e.response.overlay.active_line, message: e.response && e.response.message }}))
   }};
@@ -183,23 +184,36 @@ open_debug_controls: fn(c: Ctx) Failure! {
     click_element(c, "document.querySelector('#debug-menu summary')", "Debug Controls")
 }
 
+// The number of debug requests the page sent so far, stops not counted.
+debug_sent: fn(c: Ctx) -> Int Failure! {
+    Ok(int(eval(c, "window.__debugProof.requests.filter((e) => !e.request.stop).length")))
+}
+
+// Wait for the page to show the answer to its debug request number `sent`
+// (stops not counted), which `label` sent; that request with its answer,
+// which must come on the debug protocol.
+debug_answer: fn(c: Ctx, sent: Int, label: String) -> Dyn Failure! {
+    wait_debug(
+        c,
+        "(() => {{ const sent = window.__debugProof.requests.filter((e) => !e.request.stop); return sent.length > {sent} && sent[{sent}].status > 0 && document.getElementById('debug-liveness').dataset.state !== 'connecting'; }})()",
+        "the answer to {label}",
+    )
+    entry: eval(c, "window.__debugProof.requests.filter((e) => !e.request.stop)[{sent}]")
+    if int(at(entry, "status")) != 200 || text(at(entry, "response.protocol")) != "jet.canvas.debug" || !truthy(at(entry, "response.ok")) {
+        return Err(fail_with("{label} must be answered on the debug protocol: HTTP {int(at(entry, "status"))} {short_text(js(at(entry, "response")), 800)}"))
+    }
+    Ok(entry)
+}
+
 // Click the Debug Controls button `button` and wait for the page to show the
 // answer to the request the click sent: that request, `commands` (a JSON
 // array), with its answer.
 debug_gesture: fn(c: Ctx, button: String, commands: String) -> Dyn Failure! {
-    sent: int(eval(c, "window.__debugProof.requests.filter((e) => !e.request.stop).length"))
+    sent: debug_sent(c)
     click_element(c, "document.getElementById({q(button)})", button)
-    wait_debug(
-        c,
-        "(() => {{ const sent = window.__debugProof.requests.filter((e) => !e.request.stop); return sent.length > {sent} && sent[{sent}].status > 0 && document.getElementById('debug-liveness').dataset.state !== 'connecting'; }})()",
-        "the answer to {button}",
-    )
-    entry: eval(c, "window.__debugProof.requests.filter((e) => !e.request.stop)[{sent}]")
+    entry: debug_answer(c, sent, button)
     if js(at(entry, "request.commands")) != commands {
         return Err(fail_with("{button} must send the commands {commands}: {js(at(entry, "request"))}"))
-    }
-    if int(at(entry, "status")) != 200 || text(at(entry, "response.protocol")) != "jet.canvas.debug" || !truthy(at(entry, "response.ok")) {
-        return Err(fail_with("{button} must be answered on the debug protocol: HTTP {int(at(entry, "status"))} {short_text(js(at(entry, "response")), 800)}"))
     }
     Ok(entry)
 }
@@ -252,7 +266,7 @@ breakpoint_gestures: fn(c: Ctx) Failure! {
     if int(at(stopped, "response.overlay.active_line")) != target.line || text(at(stopped, "response.overlay.active_node_id")) != target.node_id || !traced(stopped, "Breakpoint hit") {
         return Err(fail_with("Continue must stop at the breakpoint on line {target.line}, node {target.node_id}: {short_text(js(at(stopped, "response.overlay")), 1200)}"))
     }
-    wait_debug(c, "s.debugLiveness === 'Runtime live' && s.selectedNodeId === {q(target.node_id)} && document.body.classList.contains('is-debug-active')", "the stop shown live on {target.title}")
+    wait_debug(c, "s.debugLiveness === 'Runtime live · jet dev O0' && s.selectedNodeId === {q(target.node_id)} && document.body.classList.contains('is-debug-active')", "the stop shown live on {target.title}")
 
     stepped: debug_gesture(c, "debug-step", "[\"s\"]")
     if text(at(stepped, "request.session_id")) != session || text(at(stepped, "response.overlay.runtime_state")) != "live" || int(at(stepped, "response.overlay.active_line")) == target.line {
@@ -263,7 +277,7 @@ breakpoint_gestures: fn(c: Ctx) Failure! {
     if text(at(ran_out, "request.session_id")) != session || text(at(ran_out, "response.overlay.debug_overlay")) != "finished" {
         return Err(fail_with("Continue past the breakpoint's only stop must finish the program: {short_text(js(at(ran_out, "response.overlay")), 1200)}"))
     }
-    wait_debug(c, "s.debugLiveness === 'Runtime finished' && !document.body.classList.contains('is-debug-active')", "the finished run shown")
+    wait_debug(c, "s.debugLiveness === 'Runtime finished · jet dev O0' && !document.body.classList.contains('is-debug-active')", "the finished run shown")
 
     switch_graph(c, "scale")
     node_menu_pick(c, target, "Remove Breakpoint")
@@ -300,7 +314,7 @@ stop_at: fn(c: Ctx, target: DebugTarget) -> Dyn Failure! {
     if text(at(stopped, "request.session_id")) != session || text(at(stopped, "response.overlay.runtime_state")) != "live" || int(at(stopped, "response.overlay.active_line")) != target.line {
         return Err(fail_with("Continue must stop session {session} live at the breakpoint on line {target.line}: {short_text(js(at(stopped, "response.overlay")), 1200)}"))
     }
-    wait_debug(c, "s.debugLiveness === 'Runtime live' && s.selectedNodeId === {q(target.node_id)}", "the stop shown live on {target.title}")
+    wait_debug(c, "s.debugLiveness === 'Runtime live · jet dev O0' && s.selectedNodeId === {q(target.node_id)}", "the stop shown live on {target.title}")
     Ok(stopped)
 }
 
@@ -371,7 +385,7 @@ debug_values_at_breakpoint: fn(c: Ctx) Failure! {
     }
     wait_debug(c, "{shows_row("#details .debug-detail .pin-row", "x | Int | 2")} && {shows_row("#details .debug-detail .pin-row", "frame | {stack[0]}")}", "the stop's values in the node's details")
     open_debug_view(c)
-    wait_debug(c, "{shows_row("#debug-stack-rows .row", stack[1])} && {shows_row("#debug-locals-rows .row", "x | 2 | Int")} && document.getElementById('debug-view-state').textContent === 'Paused · line 2'", "the stop in the Debug view")
+    wait_debug(c, "{shows_row("#debug-stack-rows .row", stack[1])} && {shows_row("#debug-locals-rows .row", "x | 2 | Int")} && document.getElementById('debug-view-state').textContent === 'Paused · line 2 · jet dev O0'", "the stop in the Debug view")
 
     finished: debug_gesture(c, "debug-view-finish", "[\"finish\"]")
     if text(at(finished, "request.session_id")) != session || frames(finished).len() != 1 {
@@ -393,7 +407,7 @@ debug_values_at_breakpoint: fn(c: Ctx) Failure! {
     if !text(at(last, "response.overlay.active_node_id")).ends_with(":call:print") || items(at(last, "response.overlay.wire_path")).len() == 0 {
         return Err(fail_with("at the print the active node must be the print, reached by a wire: {short_text(js(at(last, "response.overlay")), 1200)}"))
     }
-    wait_debug(c, "{shows_row("#debug-stack-rows .row", at_print[0])} && document.querySelectorAll('#debug-stack-rows .row').length === 1 && {shows_row("#debug-locals-rows .row", "total | 5 | Int")} && document.getElementById('debug-view-state').textContent === 'Paused · line 13'", "the print's stop in the Debug view")
+    wait_debug(c, "{shows_row("#debug-stack-rows .row", at_print[0])} && document.querySelectorAll('#debug-stack-rows .row').length === 1 && {shows_row("#debug-locals-rows .row", "total | 5 | Int")} && document.getElementById('debug-view-state').textContent === 'Paused · line 13 · jet dev O0'", "the print's stop in the Debug view")
     debug_stop(c, "debug-view-stop")
 }
 
@@ -462,9 +476,168 @@ debug_disconnect_not_live: fn(c: Ctx) Failure! {
     }
     wait_debug(
         c,
-        "s.debugLiveness === 'Runtime disconnected' && document.getElementById('debug-liveness').dataset.state === 'disconnected' && !s.debugSessionId && !document.body.classList.contains('is-debug-active') && document.getElementById('details').textContent.includes('runtime disconnected; live values cleared') && document.querySelectorAll('#details .debug-detail .pin-row').length === 0",
+        "s.debugLiveness === 'Runtime disconnected · jet dev O0' && document.getElementById('debug-liveness').dataset.state === 'disconnected' && !s.debugSessionId && !document.body.classList.contains('is-debug-active') && document.getElementById('details').textContent.includes('runtime disconnected; live values cleared') && document.querySelectorAll('#details .debug-detail .pin-row').length === 0",
         "the disconnect shown with no live value",
     )
     open_debug_view(c)
     wait_debug(c, "!{shows_row("#debug-locals-rows .row", "total | 6 | Int")} && document.querySelectorAll('#debug-stack-rows .row').length === 0 && document.getElementById('debug-view-stop').disabled", "the Debug view with nothing live")
+}
+
+// --- the debug overlay --------------------------------------------------------------
+
+// A JavaScript test that the page drew `value` at the stop on the output pin
+// whose id ends with `pin` and on every data wire of the shown graph leaving
+// it.
+draws_value: fn(pin: String, value: String) -> String {
+    "(s.debugValues.pins.some((p) => p.pin_id.endsWith({q(pin)}) && p.value === {q(value)}) && s.doc.graphs.find((g) => g.graph_id === s.graphId).wires.filter((w) => w.from_pin.endsWith({q(pin)}) && w.wire_kind !== 'control').every((w) => s.debugValues.wires.some((x) => x.wire_id === w.wire_id && x.value === {q(value)})))"
+}
+
+// A JavaScript test that the page drew no value on the output pin whose id
+// ends with `pin`, nor on a wire leaving it.
+draws_no_value: fn(pin: String) -> String {
+    "(!s.debugValues.pins.some((p) => p.pin_id.endsWith({q(pin)})) && !s.debugValues.wires.some((w) => w.from_pin.endsWith({q(pin)})))"
+}
+
+// A JavaScript test that the session selector lists the sessions `ids`, each
+// named by its engine, with `shown` picked and shown.
+lists_sessions: fn(ids: [String], shown: String) -> String {
+    labels := [String]{}
+    loop id in ids -> labels.push("{id} · jet dev O0")
+    "(() => {{ const picker = document.getElementById('debug-session'); return Array.from(picker.options).map((o) => o.textContent).join(' | ') === {q(labels.join(" | "))} && picker.value === {q(shown)} && s.debugSessionId === {q(shown)} && s.debugSessions.length === {ids.len()}; }})()"
+}
+
+// The pulse layer over the graph, sampled twice 400 ms apart: the frames it
+// drew between, whether its pixels moved, whether it lets the pointer
+// through and whether it covers the graph exactly.
+PULSE_PROBE: """
+(async () => {{
+  const layer = document.getElementById("debug-pulse-layer");
+  if (!layer) return {{ error: "no pulse layer" }};
+  const view = document.getElementById("jet-canvas-view").getBoundingClientRect();
+  const over = layer.getBoundingClientRect();
+  const before = window.__jetCanvasDebugPulse.frames;
+  const first = layer.toDataURL();
+  await new Promise((done) => setTimeout(done, 400));
+  return {{
+    frames: window.__jetCanvasDebugPulse.frames - before,
+    moved: layer.toDataURL() !== first,
+    inert: getComputedStyle(layer).pointerEvents === "none",
+    covers: ["left", "top", "width", "height"].every((side) => Math.abs(view[side] - over[side]) < 1)
+  }};
+}})()
+"""
+
+// On the program of Tests/Cases/Debug/CanvasDebugValuesAtBreakpoint.fixture,
+// the overlay of a stop in `run`. At `if total > 3`, where the debugger reads
+// `total` alone, the read of `total` and its wire show 4; the binding of
+// `total`, which the program writes again later, and the binding and read
+// of `n`, which the stop didn't read, show nothing; the liveness chip and the
+// session selector name the engine. Watch in Debug Controls, with the
+// binding of `total` selected, sends the watch anchored to the shown revision
+// and keeps it with the node's source span; the Debug view shows its value. A
+// Next into the taken arm moves the pulse along exactly the wires the Next
+// took and around its node, and the read of `total` before the stop, which
+// the arm writes, shows nothing. Run in the Debug view opens a second
+// session beside the first; the arrow key in the selector shows the first
+// again. Stopping the shown session shows the other; stopping that leaves
+// none, and nothing pulses.
+debug_overlay: fn(c: Ctx) Failure! {
+    debug_prepare(c)
+    revision: text(at(state(c), "doc.revision"))
+    target: debug_target(c, "run", 9)
+    stopped: stop_at(c, target)
+    first: text(at(stopped, "request.session_id"))
+    wait_debug(c, "{draws_value(":value:get:total:output:total", "4")} && s.debugValues.wires.length === 1 && {draws_no_value(":binding:output:total")} && {draws_no_value(":binding:output:n")} && {draws_no_value(":value:get:n:output:n")}", "total = 4 on its read and wire at line 9, and nothing the stop didn't read")
+    wait_debug(c, lists_sessions([String]{first}, first), "the one session in the selector")
+
+    found: eval(
+        c,
+        """
+        (() => {{
+          const s = window.__jetCanvasTest;
+          const graph = s.doc.graphs.find((g) => g.graph_id === s.graphId);
+          const node = graph && graph.nodes.find((n) => n.kind === "binding" && n.title === "total");
+          if (!node) return {{ error: "run shows no binding of total" }};
+          return {{ node_id: node.node_id, anchor: node.source_span.start + ":" + node.source_span.end }};
+        }})()
+        """,
+    )
+    problem: text(at(found, "error"))
+    if problem != "" -> return Err(fail_with(problem))
+    binding: DebugTarget{node_id: text(at(found, "node_id")), title: "total", anchor: text(at(found, "anchor")), line: 8}
+    p: node_center(c, binding.node_id)
+    click(c, p.x, p.y)
+    wait_debug(c, "s.selectedNodeId === {q(binding.node_id)}", "the binding of total selected")
+    open_debug_controls(c)
+    sent: debug_sent(c)
+    click_element(c, "document.getElementById('debug-watch')", "Watch")
+    watched: debug_answer(c, sent, "Watch")
+    if js(at(watched, "request.watches")) != js(Dyn.Array([Dyn]{Dyn.Text("total@{revision}")})) || text(at(watched, "request.session_id")) != first {
+        return Err(fail_with("Watch must send total at revision {revision} in session {first}: {js(at(watched, "request"))}"))
+    }
+    if !holds_local(at(watched, "response.overlay.watches"), "total", "Int", "4") {
+        return Err(fail_with("the watch must read total = 4: {js(at(watched, "response.overlay.watches"))}"))
+    }
+    wait_debug(
+        c,
+        "(() => {{ const kept = JSON.parse(localStorage.getItem('jet.canvas.debug:' + (s.doc.source_id || 'source')) || 'null'); return !!kept && kept.watches.length === 1 && kept.watches[0].name === 'total' && kept.watches[0].anchor === {q(binding.anchor)} && kept.watches[0].revision === {q(revision)}; }})()",
+        "the watch kept with the span {binding.anchor} and revision {revision}",
+    )
+
+    open_debug_controls(c)
+    stepped: debug_gesture(c, "debug-next", "[\"n\"]")
+    path: js(at(stepped, "response.overlay.wire_path"))
+    active: text(at(stepped, "response.overlay.active_node_id"))
+    if int(at(stepped, "response.overlay.active_line")) != 10 || items(at(stepped, "response.overlay.wire_path")).len() == 0 || active == "" {
+        return Err(fail_with("Next must stop on line 10, reached by a wire: {short_text(js(at(stepped, "response.overlay")), 1200)}"))
+    }
+    wait_debug(c, "{draws_no_value(":value:get:total:output:total")} && {draws_no_value(":binding:output:total")}", "no value on the reads and writes of total before line 10")
+    wait_debug(
+        c,
+        "(() => {{ const p = window.__jetCanvasDebugPulse; return !!p && p.moving && JSON.stringify([...p.wire_ids].sort()) === JSON.stringify([...{path}].sort()) && p.node_id === {q(active)}; }})()",
+        "the pulse on the wires {path} and the node {active}",
+    )
+    pulse: eval(c, PULSE_PROBE)
+    if text(at(pulse, "error")) != "" || int(at(pulse, "frames")) < 2 || !truthy(at(pulse, "moved")) || !truthy(at(pulse, "inert")) || !truthy(at(pulse, "covers")) {
+        return Err(fail_with("the pulse must move over the graph and let the pointer through: {js(pulse)}"))
+    }
+
+    open_debug_view(c)
+    wait_debug(
+        c,
+        "{shows_row("#debug-watches-rows .row", "total | 4 | Int")} && document.querySelector('#debug-watches-rows .row').dataset.anchor === {q("{binding.anchor}@{revision}")} && document.getElementById('debug-view-state').textContent === 'Paused · line 10 · jet dev O0'",
+        "the watch in the Debug view",
+    )
+    sent_run: debug_sent(c)
+    click_element(c, "document.getElementById('debug-view-run')", "Run")
+    opened: debug_answer(c, sent_run, "Run")
+    second: text(at(opened, "response.session.id"))
+    if text(at(opened, "request.session_id")) != "" || second == "" || second == first || text(at(opened, "response.session.state")) != "running" {
+        return Err(fail_with("Run must open a second running session beside {first}: {short_text(js(at(opened, "response")), 800)}"))
+    }
+    wait_debug(c, lists_sessions([String]{first, second}, second), "both sessions in the selector")
+
+    open_debug_controls(c)
+    sent_pick: debug_sent(c)
+    click_element(c, "document.getElementById('debug-session')", "the session selector")
+    press(c, "ArrowUp")
+    press(c, "Enter")
+    picked: debug_answer(c, sent_pick, "the session picked in the selector")
+    if text(at(picked, "request.session_id")) != first || js(at(picked, "request.commands")) != "[]" || int(at(picked, "response.overlay.active_line")) != 10 {
+        return Err(fail_with("picking {first} must show it again at line 10: {short_text(js(at(picked, "request")), 400)} {short_text(js(at(picked, "response.overlay")), 800)}"))
+    }
+    wait_debug(c, "{lists_sessions([String]{first, second}, first)} && document.getElementById('debug-view-state').textContent === 'Paused · line 10 · jet dev O0'", "the first session shown again")
+
+    stops: int(eval(c, "window.__debugProof.requests.filter((e) => e.request.stop).length"))
+    sent_stop: debug_sent(c)
+    click_element(c, "document.getElementById('debug-view-stop')", "Stop")
+    shown: debug_answer(c, sent_stop, "the session shown after the stop")
+    wait_debug(c, "window.__debugProof.requests.filter((e) => e.request.stop).length > {stops} && window.__debugProof.requests.filter((e) => e.request.stop)[{stops}].status > 0", "the answer to Stop")
+    stop: eval(c, "window.__debugProof.requests.filter((e) => e.request.stop)[{stops}]")
+    if text(at(stop, "request.session_id")) != first || text(at(stop, "response.session.state")) != "stopped" || text(at(shown, "request.session_id")) != second {
+        return Err(fail_with("Stop must stop {first} and show {second}: {js(at(stop, "request"))} then {js(at(shown, "request"))}"))
+    }
+    wait_debug(c, lists_sessions([String]{second}, second), "the other session shown")
+    debug_stop(c, "debug-view-stop")
+    wait_debug(c, "(() => {{ const p = window.__jetCanvasDebugPulse; return !p.moving && p.wire_ids.length === 0 && !p.node_id && s.debugValues.pins.length === 0 && document.getElementById('debug-session').disabled; }})()", "no pulse and no value once every session stopped")
 }

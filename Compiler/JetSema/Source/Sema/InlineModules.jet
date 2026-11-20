@@ -1915,9 +1915,9 @@ sema_inline_private_type_span: fn(item: Item) -> Span? Never! {
 // the enclosing file (and its inline modules) by their qualified name. The
 // file's own structs, enums and tests name them the same way, so a field
 // `stream: transport.BodyStream` holds the hoisted member type.
-sema_inline_rewrite_exported: fn(items: [Item], rewrite: &SemaInlineRewrite) -> [Item] Never! {
+sema_inline_rewrite_exported: fn(items: &&[Item], rewrite: &SemaInlineRewrite) -> [Item] Never! {
     mapped := [Item]{}
-    loop item in items {
+    loop item in items.move() {
         if item == {
             .Func(function) -> {
                 mapped.push(Item.Func{value: sema_inline_rewrite_func(rewrite, function)})
@@ -1933,29 +1933,50 @@ sema_inline_rewrite_exported: fn(items: [Item], rewrite: &SemaInlineRewrite) -> 
             // module path (`impl inner.Loud.inner.Shout`), so it binds to the
             // hoisted declarations the module's own impls bind to.
             .Impl(definition) -> {
-                updated := definition.copy()
-                updated.type_name = sema_inline_mapped_name(rewrite, definition.type_name)
-                if definition.trait_name == .Val(trait_name) {
+                updated := definition.move()
+                updated.type_name = sema_inline_mapped_name(rewrite, updated.type_name)
+                if updated.trait_name == .Val(trait_name) {
                     updated.trait_name = Val(sema_inline_mapped_name(rewrite, trait_name))
                 }
-                updated.methods = sema_inline_rewrite_funcs(rewrite, definition.methods)
+                updated.methods = sema_inline_rewrite_funcs(rewrite, updated.methods)
                 mapped.push(Item.Impl{value: updated})
             }
             // A module's own bodies may name its `priv` member types.
             .CodeModule(definition) -> {
-                updated := definition.copy()
-                if definition.body == .Val(body) {
+                updated := definition.move()
+                taken: updated.body.move()
+                updated.body = None
+                if taken == .Val(body) {
                     // The body reads as its module's own; after it, the path
                     // drops that module's segment again.
-                    rewrite.sibling_module = if rewrite.sibling_module == "" -> "{definition.name}" else -> "{rewrite.sibling_module}.{definition.name}"
-                    updated.body = Val(sema_inline_rewrite_exported(body, rewrite))
+                    rewrite.sibling_module = if rewrite.sibling_module == "" -> "{updated.name}" else -> "{rewrite.sibling_module}.{updated.name}"
+                    updated.body = Val(sema_inline_rewrite_exported(body.move(), rewrite))
                     enclosing: rewrite.sibling_module.cut_last(".")
                     rewrite.sibling_module = if enclosing == .Val(parts) -> parts.before else -> ""
                 }
                 mapped.push(Item.CodeModule{value: updated})
             }
-            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
-                mapped.push(item.copy())
+            // An alias stands for its target, and a distinct type is built on
+            // its base: a member type there is the hoisted type itself, under
+            // the same privacy as where any other type names it.
+            .TypeAlias(definition) -> {
+                updated := definition.move()
+                sema_inline_private_types(rewrite, updated.target, updated.target_span)
+                updated.target = sema_inline_rewrite_type(rewrite, updated.target)
+                loop index in 0..<updated.choices.len() {
+                    sema_inline_private_types(rewrite, updated.choices[index].target, updated.choices[index].target_span)
+                    updated.choices[index].target = sema_inline_rewrite_type(rewrite, updated.choices[index].target)
+                }
+                mapped.push(Item.TypeAlias{value: updated})
+            }
+            .Distinct(definition) -> {
+                updated := definition.move()
+                sema_inline_private_types(rewrite, updated.base, updated.base_span)
+                updated.base = sema_inline_rewrite_type(rewrite, updated.base)
+                mapped.push(Item.Distinct{value: updated})
+            }
+            .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
+                mapped.push(item)
             }
         }
     }
@@ -2576,7 +2597,7 @@ sema_inline_modules_lower: fn(program: &Program, diagnostics: &[Diagnostic]) -> 
         exported.types = hoist.exported
         exported.private_types = hoist.private_types
         sema_inline_bind_type_imports(program.imports, exported, type_imports)
-        program.items = sema_inline_rewrite_exported(program.items, exported)
+        program.items = sema_inline_rewrite_exported(program.items.move(), exported)
         loop diagnostic in exported.diagnostics -> diagnostics.push(diagnostic)
     }
 

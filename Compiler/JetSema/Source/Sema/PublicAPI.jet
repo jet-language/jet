@@ -11,6 +11,7 @@ use jet_foundation.[
     EnumDef,
     FnBody,
     Func,
+    ImportDecl,
     Item,
     ModuleCap,
     Param,
@@ -483,42 +484,126 @@ sema_public_api_unit_family: fn(definition: UnitFamilyDef, prefix: String) -> Pu
     PublicAPIItem{kind: "unit", name: name, signature: "unit {name}{dimension}{base}{owner} {{ {members.join(", ")} }}"}
 }
 
-// A re-export a module declares (`clamp: core.math.clamp`): its name, the
-// path it names as written, the signature of the declaration that path
-// reaches, spelled under the path as that declaration's own row spells it,
-// and the declaration's span. A module target's signature is
-// `module <path>`.
+// A re-export a module declares (`clamp: core.math.clamp`): the inline
+// module that declares it (`parent`, its dotted path, "" for the file), its
+// name, the path it names as written, the signature of the declaration that
+// path reaches, spelled under the path as that declaration's own row spells
+// it, and the declaration's span. A module target's signature is
+// `module <path>`. `public` holds when dependents can name it: every inline
+// module on `parent` is public and named.
 SemaPublicAPIReexport: struct {
+    parent: String,
     name: String,
     target: String,
     signature: String,
     span: Span,
+    public: Bool,
 }
 
-// The re-exports module row `module_index` of `graph` declares, in
-// declaration order. A function target reads its solved effect row from the
-// checked bodies of `result`, as the declaring package's own row does.
-// A re-export names a function, a value or a module, so those are the
+// The re-exports module row `module_index` of `graph` declares, the file's
+// then its inline modules', in declaration order. Both are read from the
+// module's registration row: a file's re-export is a public, non-comptime
+// import binding that a bare-path declaration lowered to, and an inline
+// module's is the binding its surface holds (sema_inline_bind_module_imports),
+// whose target is a member function this row lifted or a member of a module
+// one of its imports binds. A function target reads its solved effect row
+// from the checked bodies of `result`, as the declaring package's own row
+// does. A re-export names a function, a value or a module, so those are the
 // targets read.
 sema_public_api_reexports: fn(graph: SemaRegistrationGraph, result: SemaGraphResult, module_index: Int) -[]> [SemaPublicAPIReexport] {
     reexports := [SemaPublicAPIReexport]{}
     loop import in graph.modules[module_index].imports {
         if !import.declaration.is_pub || import.declaration.comptime_span != None -> next
         loop binding in import.bindings {
-            target: if import.declaration.kind == {
-                .Unqualified(module_alias, _, _, _, _) -> "{module_alias}.{binding.original}"
-                .Module(name, _) -> "{name}"
-                .File(path, _) -> "\"{path}\""
-            }
+            target: sema_public_api_reexport_target(import.declaration, binding.original)
             signature := "module {target}"
             if binding.declaration_position == .Val(position) {
                 owner: binding.target_module_index ?? next
                 signature = sema_public_api_reexport_signature(graph, result, owner, position, target) ?? next
             } else if import.declaration.kind == .Unqualified(_, _, _, _, _) { next }
-            reexports.push(SemaPublicAPIReexport{name: "{binding.local}", target: target, signature: signature, span: import.declaration.span})
+            reexports.push(SemaPublicAPIReexport{parent: "", name: "{binding.local}", target: target, signature: signature, span: import.declaration.span, public: true})
         }
     }
+    sema_public_api_inline_reexports(graph, result, module_index, graph.modules[module_index].program.items, "", true, reexports)
     reexports
+}
+
+// The path a re-export declaration names for its member `original`, as
+// written: `core.math.lerp`, `shapes.area`, or a file module's quoted path.
+sema_public_api_reexport_target: fn(declaration: ImportDecl, original: String) -[]> String {
+    if declaration.kind == {
+        .Unqualified(module_alias, _, _, _, _) -> "{module_alias}.{original}"
+        .Module(name, _) -> "{name}"
+        .File(path, _) -> "\"{path}\""
+    }
+}
+
+// The re-exports of each inline module among `items` (nested under the
+// inline module `parent`, reachable by dependents when `reachable`), depth
+// first: each public `name: path` row of its body that its surface bound.
+priv sema_public_api_inline_reexports: fn(graph: SemaRegistrationGraph, result: SemaGraphResult, module_index: Int, items: [Item], parent: String, reachable: Bool, reexports: &[SemaPublicAPIReexport]) -[]> {
+    module_row: graph.modules[module_index]
+    loop item in items {
+        if item == .CodeModule(definition) {
+            body: definition.body ?? next
+            path: if parent == "" -> "{definition.name}" else -> "{parent}.{definition.name}"
+            public: reachable && definition.is_pub && sema_public_api_named(definition.name)
+            surface: loop (index, candidate) in module_row.inline_bindings.modules {
+                if candidate.path == path {
+                    break index
+                }
+            } ?? -1
+            if surface >= 0 {
+                loop declaration in definition.imports {
+                    if !declaration.is_pub || declaration.comptime_span != None -> next
+                    // Each name the row binds, with the member it names.
+                    if declaration.kind == {
+                        .Unqualified(_, _, members, _, _) -> {
+                            loop member in members {
+                                sema_public_api_inline_reexport(graph, result, module_index, surface, declaration, sema_registration_import_local(member), member.original, path, public, reexports)
+                            }
+                        }
+                        .Module(_, _) -> {
+                            sema_public_api_inline_reexport(graph, result, module_index, surface, declaration, "{declaration.alias}", "", path, public, reexports)
+                        }
+                        .File(_, _) -> {}
+                    }
+                }
+            }
+            sema_public_api_inline_reexports(graph, result, module_index, body, path, public, reexports)
+        }
+    }
+}
+
+// The re-export row of `local`, the name the inline module row at `surface`
+// binds to the member `original` of `declaration`, under the module `path`;
+// none when the binding names no function or value of a module row.
+priv sema_public_api_inline_reexport: fn(graph: SemaRegistrationGraph, result: SemaGraphResult, module_index: Int, surface: Int, declaration: ImportDecl, local: &&String, original: String, path: String, public: Bool, reexports: &[SemaPublicAPIReexport]) -[]> {
+    bound: graph.modules[module_index].inline_bindings.modules[surface].reexports.get(local) ?? return
+    found: sema_public_api_inline_target(graph, module_index, bound) ?? return
+    owner: sema_registration_module_index(graph, found.source_module_identity) ?? return
+    position: found.declaration_position ?? return
+    target: sema_public_api_reexport_target(declaration, original)
+    signature: sema_public_api_reexport_signature(graph, result, owner, position, target) ?? return
+    reexports.push(SemaPublicAPIReexport{parent: "{path}", name: local.move(), target: target, signature: signature, span: declaration.span, public: public})
+}
+
+// The declaration an inline module's re-export `bound` names: a member
+// function the module row lifted, or (qualified) a member of the module a
+// file-level import of the row binds under `bound.module_alias`.
+sema_public_api_inline_target: fn(graph: SemaRegistrationGraph, module_index: Int, bound: SemaInlineTarget) -[]> SemaRegistrationExport? {
+    module_row: graph.modules[module_index]
+    if !bound.qualified {
+        return sema_registration_direct_symbol(module_row, sema_inline_member_name(bound.module_alias, bound.member))
+    }
+    loop import in module_row.imports {
+        if import.declaration.alias != bound.module_alias || sema_registration_import_is_unqualified(import.declaration) {
+            next
+        }
+        target_index: sema_registration_module_index(graph, import.target_module_identity) ?? return None
+        return sema_registration_resolve_export(graph, target_index, bound.member, module_row.module_identity, module_row.package_identity, [String]{})
+    }
+    None
 }
 
 // The row signature, spelled under `target`, of the declaration at
@@ -541,12 +626,14 @@ sema_public_api_reexport_signature: fn(graph: SemaRegistrationGraph, result: Sem
 }
 
 // One `reexport` row per re-export dependents can name, under `prefix` as
-// the module's other rows: `reexport clamp = fn core.math.clamp(…) -[]> Int`.
-// A changed target, or a target whose signature changed, changes the row.
+// the module's other rows and under its inline module's path:
+// `reexport clamp = fn core.math.clamp(…) -[]> Int`,
+// `reexport geo.clamp = …`. A changed target, or a target whose signature
+// changed, changes the row.
 sema_public_api_reexport_rows: fn(reexports: [SemaPublicAPIReexport], prefix: String, rows: &[PublicAPIItem]) -[]> {
     loop reexport in reexports {
-        if !sema_public_api_named(reexport.name) -> next
-        name: "{prefix}{reexport.name}"
+        if !reexport.public || !sema_public_api_named(reexport.name) -> next
+        name: if reexport.parent == "" -> "{prefix}{reexport.name}" else -> "{prefix}{reexport.parent}.{reexport.name}"
         rows.push(PublicAPIItem{kind: "reexport", name: name.copy(), signature: "reexport {name} = {reexport.signature}"})
     }
 }

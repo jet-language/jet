@@ -1,9 +1,10 @@
 # A re-export is listed with its target's signature: `jet doc` shows the
 # declaration as written and the signature of the declaration it names, and
 # the public API snapshot `jet registry publish` uploads holds a `reexport`
-# row with that signature. Retargeting the re-export under a minor bump is a
-# public API change the SemVer gate reports (E1218), and the registry is
-# untouched.
+# row with that signature. A re-export written in an inline module body is
+# listed the same way, under its module's path. Retargeting a re-export under
+# a minor bump is a public API change the SemVer gate reports (E1218), and the
+# registry is untouched.
 fixture: DocReexportTargetSignature.fixture
 requires: tool:git
 mkdir: store
@@ -12,6 +13,10 @@ exit: 0
 stdout: ~ "blend: core.math.lerp" # the re-export as written
 stdout: ~ "Target: fn core.math.lerp(a: Float, b: Float, t: Float)" # the signature of the declaration it names
 stdout: ~ "Blends two values" # its doc comment
+stdout: ~ "\"qualified_name\":\"geo.spread\"" # an inline module's re-export, under its module's path
+stdout: ~ "spread: core.math.lerp\\nTarget: fn core.math.lerp(a: Float, b: Float, t: Float)" # as written, with its target's signature
+stdout: ~ "Spreads two values" # its doc comment
+stdout: ~ "area: shapes.area\\nTarget: fn shapes.area(width: Float, height: Float)" # a re-export of a sibling inline module's function
 step: git init --bare {work}/registry.git
 exit: 0
 step: git init -b main
@@ -63,14 +68,16 @@ stdout: ~ "Semver: first release" # the gate's progress line; the rest is the pu
 step: git --git-dir {work}/registry.git show HEAD:apis/blender/1.0.0.api
 exit: 0
 stdout: ~ "\nreexport blend = fn core.math.lerp(a: Float, b: Float, t: Float)" # the re-export's row
+stdout: ~ "\nreexport geo.spread = fn core.math.lerp(a: Float, b: Float, t: Float)" # the inline module's re-export's row
+stdout: ~ "\nreexport geo.area = fn shapes.area(width: Float, height: Float)" # and its re-export of a sibling's function
 step: git add .
 cwd: {work}/proj
 exit: 0
 step: git commit -m "snapshot api"
 cwd: {work}/proj
 exit: 0
-# `blend` names another Core function under a minor bump: E1218, and the
-# registry is untouched.
+# `blend` and `geo.spread` name another Core function under a minor bump:
+# E1218 for each, and the registry is untouched.
 copy: run-retarget.jet proj/run.jet
 copy: package-1.1.0.jet proj/package.jet
 step: git commit -am "retarget blend"
@@ -87,5 +94,10 @@ stderr: ~ "breaks the public API item `blend`" # the gate names the item
 stderr: ~ "public reexport `blend` changed signature" # and why it breaks
 stderr: ~ "| was: reexport blend = fn core.math.lerp(a: Float, b: Float, t: Float)" # the published row
 stderr: ~ "| now: reexport blend = fn core.math.clamp_float(value: Float, low: Float, high: Float)" # the row it would publish
+stderr: ~ "breaks the public API item `geo.spread`" # the inline module's re-export is an item of its own
+stderr: ~ "public reexport `geo.spread` changed signature" # and why it breaks
+stderr: ~ "| was: reexport geo.spread = fn core.math.lerp(a: Float, b: Float, t: Float)" # the published row
+stderr: ~ "| now: reexport geo.spread = fn core.math.clamp_float(value: Float, low: Float, high: Float)" # the row it would publish
+stderr: !~ "public API item `geo.area`" # an unchanged re-export is no change
 step: git --git-dir {work}/registry.git cat-file -e HEAD:apis/blender/1.1.0.api
 exit: nonzero

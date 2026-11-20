@@ -1,0 +1,20 @@
+# Claim: on a terminal, `jet debug` shares it with the program as a shell's
+# job does. The program reads the terminal while it runs and the console
+# reads it while the program is stopped, so typed lines go to whichever is
+# reading: each line the program echoes is the one `print` shows at the stop
+# before its echo.
+fixture: ProgramSharesTheConsoleTerminalWhileItRuns.fixture
+requires: os:unix
+env: NO_COLOR=1
+env: PATH={work}/no-tools
+normalize: replace "\r" ""
+step: jet debug echo.jet
+pty: true
+stdin: program_shares_the_console_terminal_while_it_runs.stdin
+exit: 0 # the program read `end`, finished, and the session ended with it
+stdout: ~ "Breakpoint set  echo.jet:8" # the console read its first command
+stdout: ~ "line = \"first\"" # the program read the line typed after `c`
+stdout: ~ "echo first" # and runs on with it after the stop
+stdout: ~ "line = \"second\"" # the next line typed after `c` is the program's again
+stdout: ~ "echo second" # the step prints it
+stdout: ~ "done" # the program read `end` and finished

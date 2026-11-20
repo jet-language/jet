@@ -1,10 +1,20 @@
 /// Blends two values, as Core's `lerp` does.
 blend: core.math.lerp
 
+shapes: module {
+    area: fn(width: Float, height: Float) -> Float { width * height }
+}
+
+geo: module {
+    /// Spreads two values, as Core's `lerp` does.
+    spread: core.math.lerp
+    area: shapes.area
+}
+
 #Test("smoke") {
     assert(mix() == 1.0)
 }
 
 mix: fn() -> Float { blend(0.0, 2.0, 0.5) }
 
-run: fn() { print(mix()) }
+run: fn() { print(mix() + geo.spread(0.0, 2.0, 0.5) + geo.area(1.0, 2.0)) }

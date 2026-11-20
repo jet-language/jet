@@ -402,12 +402,16 @@ jfmt_fmt_statement_switch_attr: fn(f: &JetFmt, marker: Marker, body: [Stmt]) {
 }
 
 // `place = place op value`, the place written twice, prints as
-// `place op= value` when the place is a name or a field path (no call or
-// index runs twice; an indexed compound is E0164) and the operator's compound
-// form means the same (`jfmt_has_compound_form`); false (nothing written) for
-// any other assignment. Text joined with `+` is E0109 while `+=` appends it,
-// so a text operand keeps the expanded form. `grouping` counts the
-// parentheses around the value.
+// `place op= value` when the place is a name or a name's field (`p.hp`) and
+// the operator's compound form means the same (`jfmt_has_compound_form`);
+// false (nothing written) for any other assignment. Those are the places
+// whose compound update sema checks as the binary form whatever the place's
+// type, which the formatter does not know: an indexed compound is E0164 (and
+// its call or index would run twice), and a deeper field path (`a.b.v`) of an
+// operator-hooked or exact-number type is E0362, so both keep the expanded
+// form. Text joined with `+` is E0109 while `+=` appends it, so a text
+// operand keeps the expanded form too. `grouping` counts the parentheses
+// around the value.
 jfmt_fmt_expanded_compound: fn(f: &JetFmt, target: LValue, op_span: Span, value: Expr, grouping: Int) -> Bool {
     if value == .Paren(inner, _, _) {
         return jfmt_fmt_expanded_compound(f, target, op_span, inner, grouping + 1)
@@ -433,8 +437,8 @@ jfmt_lvalue_place_text: fn(target: LValue) -> String? Never! {
     if target == {
         .Local(name, _) -> Val(name)
         .Field(base, field, _) -> {
-            root: jfmt_place_text(base) ?? return None
-            Val("{root}.{field}")
+            if base == .Ident(name, _, _) -> return Val("{name}.{field}")
+            None
         }
         .Index(_, _, _, _) -> None
     }

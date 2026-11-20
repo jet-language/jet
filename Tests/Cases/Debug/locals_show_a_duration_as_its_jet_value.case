@@ -1,0 +1,13 @@
+# A Duration local is a runtime handle the program holds by address, yet
+# `locals` shows it as Jet writes its type and value, its nanoseconds, not
+# as a pointer.
+fixture: LocalsShowADurationAsItsJetValue.fixture
+env: NO_COLOR=1
+step: jet debug prog.jet
+stdin: locals_show_a_duration_as_its_jet_value.stdin
+exit: 0 # `c` runs the program to its end, and the session ends with it
+stdout+stderr: ~ "Breakpoint set  prog.jet:4" # the break is placed
+stdout+stderr: ~ "pause: Duration = Duration{ns: 1500000000}" # the handle's Jet type and value
+stdout+stderr: ~ "count: Int = 3" # beside an ordinary local
+stdout+stderr: !~ "Pointer" # never as an address
+stdout+stderr: ~ "Program finished\n" # the program ran on to its end

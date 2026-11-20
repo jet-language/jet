@@ -1,10 +1,20 @@
 /// Blends two values, as Core's `clamp_float` does.
 blend: core.math.clamp_float
 
+shapes: module {
+    area: fn(width: Float, height: Float) -> Float { width * height }
+}
+
+geo: module {
+    /// Spreads two values, as Core's `clamp_float` does.
+    spread: core.math.clamp_float
+    area: shapes.area
+}
+
 #Test("smoke") {
     assert(mix() == 0.5)
 }
 
 mix: fn() -> Float { blend(0.0, 0.5, 2.0) }
 
-run: fn() { print(mix()) }
+run: fn() { print(mix() + geo.spread(0.0, 0.5, 2.0) + geo.area(1.0, 2.0)) }

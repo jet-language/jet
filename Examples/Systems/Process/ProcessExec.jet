@@ -27,11 +27,9 @@ run: fn() {
     loop mode in ["status", "signal", "missing"] {
         receipt: process.run_spec(process.cmd([exe.copy(), mode.copy()])) ?? panic("relaunching {exe} failed")
         print("{mode}: exit {receipt.code}")
-        #Allow(Jet.HiddenCopyInLoop, "the compiler materializes this view; no source spelling avoids it yet") loop line in
-            receipt.output.lines() -> print("  stdout: {line}")
+        loop line in receipt.output.lines() -> print("  stdout: {line}")
         // The error text after the command's name is the OS's own.
-        #Allow(Jet.HiddenCopyInLoop, "the compiler materializes this view; no source spelling avoids it yet") loop line in
-            receipt.errors.lines() {
+        loop line in receipt.errors.lines() {
             print("  stderr: {if line.starts_with("jet-no-such-command: ") -> "jet-no-such-command: …" else -> line}")
         }
     }
