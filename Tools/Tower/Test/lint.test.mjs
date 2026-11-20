@@ -374,10 +374,10 @@ test('cli: tower lint --json exits 1 for shared open test references', () => {
   assert.ok(findings.some(f => f.rule === 'duplicate-suspect' && f.ref === '#1,#2'));
 });
 
-test('cli: tower next --burndown scopes to current epoch + sidequests', () => {
+test('cli: tower next --burndown scopes to the chain\'s active epoch + sidequests', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'tower-next-burndown-'));
   run(cwd, ['init', '--name', 'Burndown Test']);
-  run(cwd, ['epoch', 'update', 'e1', '--status', 'planned']);
+  run(cwd, ['epoch', 'update', 'e1', '--status', 'done']);
   run(cwd, ['epoch', 'add', 'e3', '--name', 'E3']);
   run(cwd, ['epoch', 'add', 'e4', '--name', 'E4']);
   run(cwd, ['epoch', 'current', 'e3']);

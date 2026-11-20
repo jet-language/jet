@@ -30,7 +30,7 @@ test('normalizeReports refuses anything that is not a titled Tower doc or https 
     [{ title: 'x' }, /exactly one of path/],
     [{ title: 'x', path: AUDIT.path, url: SOURCE.url }, /exactly one of path/],
     [{ title: 'x', path: '/home/user/notes.md' }, /not a Tower doc/],
-    [{ title: 'x', path: 'Docs/audits/../../secret.md' }, /not a Tower doc/],
+    [{ title: 'x', path: 'Docs/Audits/../../secret.md' }, /not a Tower doc/],
     [{ title: 'x', path: 'Compiler/Main.jet' }, /not a Tower doc/],
     [{ title: 'x', url: 'http://example.com/a' }, /https address/],
     [{ title: 'x', url: 'javascript:alert(1)' }, /https address/],
@@ -56,7 +56,7 @@ test('a ballot stores, replaces and clears its reports through add and update', 
 test('the ballot intro shows its reports right under the situation, escaped', () => {
   const html = renderBallotIntro({ id: 'D-R1', situation: 'Pick one.', reports: [AUDIT, { title: 'A <b> source', url: SOURCE.url }] });
   assert.ok(html.indexOf('class="situation"') < html.indexOf('class="reports"'));
-  assert.match(html, /<a class="reports__link" href="#docs" data-doc-path="Docs\/audits\/2026-11-10-port-bars-first-run.md">Port bars, first run<\/a>/);
+  assert.match(html, /<a class="reports__link" href="#docs" data-doc-path="Docs\/Audits\/2026-11-10-port-bars-first-run.md">Port bars, first run<\/a>/);
   assert.match(html, /<div class="reports__note">Every tool twin measured.<\/div>/);
   assert.match(html, /href="https:\/\/www.rfc-editor.org\/rfc\/rfc9106" target="_blank" rel="noopener noreferrer">A &lt;b&gt; source<\/a>/);
   assert.equal(renderReports([]), '');

@@ -3041,7 +3041,7 @@ function verdictSupersededBy(s, p) {
 // measurements and audits behind it. A report is a Tower doc under Docs/
 // (`path`) or an outside https source (`url`), with a title and an optional
 // one-line note on what it shows.
-const REPORT_PATH_RE = /^Docs\/(?:audits|research|proposals|spec)\/(?:[\w.-]+\/)*[\w.-]+\.(?:md|html)$/;
+const REPORT_PATH_RE = /^Docs\/(?:Audits|Research|Proposals|Spec)\/(?:[\w.-]+\/)*[\w.-]+\.(?:md|html)$/;
 const MAX_REPORTS = 20;
 export function normalizeReports(list) {
   if (list == null) return [];
@@ -3977,7 +3977,7 @@ export function nextCards(s, { epoch, track, agent, limit = 5, scope } = {}) {
 // sentence punctuation (. , ; : ) ] " ') never becomes part of the match —
 // the final captured char is always a path char ([\w/]), so a greedy match
 // backtracks off any trailing punctuation.
-const REF_RE = /\b(?:Docs|Examples|Tools|Source|crates|tests|Tower)\/[\w./-]*[\w/]/g;
+const REF_RE = /\b(?:Docs|Examples|Tools|Source|crates|Tests|Tower)\/[\w./-]*[\w/]/g;
 function harvestRefs(text) {
   return text ? [...String(text).matchAll(REF_RE)].map(m => m[0]) : [];
 }

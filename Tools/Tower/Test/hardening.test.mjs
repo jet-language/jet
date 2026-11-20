@@ -163,7 +163,7 @@ test('unknown seam aliases converge through triage and survive archive reuse', (
     assert.equal(oldLookup.id, triaged.id);
     assert.equal(newLookup.id, triaged.id);
 
-    const fixture = join(b.root, 'tests', 'conformance', 'corpus', 'F-ARCHIVE.jet');
+    const fixture = join(b.root, 'Tests', 'Conformance', 'Corpus', 'F-ARCHIVE.jet');
     mkdirSync(dirname(fixture), { recursive: true });
     writeFileSync(fixture, '// F-ARCHIVE permanent regression fixture\n');
     cli(b.data, ['card', 'update', '#1', '--hardening-fixture', 'Tests/Conformance/Corpus/F-ARCHIVE.jet', '--by', 'hardening-rig']);
@@ -225,7 +225,7 @@ test('hardening card cannot close without a fixture naming its finding and recur
     assert.equal(refused.code, 1);
     assert.match(refused.out, /E_HARDENING_FIXTURE|permanent corpus fixture/);
 
-    const fixture = join(b.root, 'tests', 'conformance', 'corpus', 'F-FIXTURE.jet');
+    const fixture = join(b.root, 'Tests', 'Conformance', 'Corpus', 'F-FIXTURE.jet');
     mkdirSync(dirname(fixture), { recursive: true });
     writeFileSync(fixture, '// finding F-FIXTURE\n');
     cli(b.data, ['card', 'update', '#1', '--hardening-fixture', 'Tests/Conformance/Corpus/F-FIXTURE.jet', '--by', 'hardening-rig']);
