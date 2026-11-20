@@ -85,6 +85,10 @@ kit_ui_directives: fn() -> [KitUIDirective] {
         {name: "repl_deny", argv: ["repl", "--deny=FS"], parent: false, exit: "nonzero", streams: "stderr", capability: ""},
         {name: "CommandOverrideConflict", argv: ["run"], parent: true, exit: "nonzero", streams: "both", capability: ""},
         {name: "gate", argv: ["check", "--gate", "$arg", "$file"], parent: false, exit: "any", streams: "rendered", capability: ""},
+        // `jet status` and `jet project parts` in the project directory: at a
+        // workspace root each lists the members.
+        {name: "status_cli", argv: ["status"], parent: true, exit: "any", streams: "both", capability: ""},
+        {name: "parts_cli", argv: ["project", "parts"], parent: true, exit: "any", streams: "both", capability: ""},
         {name: "compiler_extension", argv: [], parent: false, exit: "any", streams: "", capability: ""},
         {name: "requires", argv: [], parent: false, exit: "any", streams: "", capability: ""},
         // `@org_policy FILE` runs the invocation under that organization

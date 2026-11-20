@@ -903,7 +903,8 @@ jet_cli_gc: fn(argv: [String], args: [String], color: Bool, json: Bool) -[FS, En
 
 // `run_status`: the one target (by default the stock project entry, relative to
 // the working directory) read against the receipt root `jet prove <target>`
-// selects (`receipt_root_for` / `target_path`).
+// selects (`receipt_root_for` / `target_path`). With no target at a workspace
+// root, the members and their entries (jet_cli_project_status_workspace).
 jet_cli_status: fn(status_args: [String], color: Bool, json: Bool) -[FS, Env, Time.Wait]> JetCLIPlan Never! {
     cwd: cli_files.cwd() ?? "."
     explicit := String?{None}
@@ -914,6 +915,12 @@ jet_cli_status: fn(status_args: [String], color: Bool, json: Bool) -[FS, Env, Ti
     notices := [String]{}
     target := explicit ?? ""
     if explicit == None {
+        here: cli_files.realpath(cwd) ?? cwd
+        if jet_cli_workspace_source(here, color) == {
+            .Index(index_path) -> return jet_cli_with_notices(notices, jet_cli_project_status_workspace(here, index_path, color, json, notices))
+            .Failed(plan) -> return plan
+            .Absent | .Authority(_) -> {}
+        }
         root: jet_cli_manifest_root(cwd) ?? cwd
         entry := ""
         found_entry: jet_cli_find_project_entry(root, "status", color, notices)
