@@ -3,12 +3,13 @@
 // wrapper, with the checked declaration's C ABI. Every C compile here applies
 // the one native C policy (NativeCPolicy.jet).
 use {
+    cli_crypto: core.crypto
     cli_files: core.files
     cli_json: core.encoding.json
     cli_process: core.process
     cli_sys: core.sys
     jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCDependency, JetDriverForeignLinkFacts, JetDriverInlineC, jet_driver_c_dependencies]
-    jet_foundation.[BUILD_REUSE_SAVED_WORK, BuildOptions, ENV_JET_CC_PACK_ROOT, Type, build_options_list, sha256_bytes, sha256_hex_bytes]
+    jet_foundation.[BUILD_REUSE_SAVED_WORK, BuildOptions, ENV_JET_CC_PACK_ROOT, Type, build_options_list]
     jet_pkg_model.[JET_VERSION]
     jetpack_foundation.[foundation_find_folder, foundation_library_folders]
 }
@@ -131,10 +132,14 @@ JetCLINativeCTools: struct {
 // The tools a Jet program's foreign C closure compiles with, the platform
 // archives it links once (musl's libc, the compiler builtins and, for a Rust
 // helper, the unwinder), and the flags of the inline C proof link.
+// `tool_digest` is the hash of the compiler's and the archiver's bytes,
+// taken the first time one of the link's C builds needs it
+// (jet_cli_native_c_tool_digest) and empty until then.
 JetCLIClosureCTools: struct {
     tools: JetCLINativeCTools,
     platform: [String],
     proof: [String],
+    tool_digest: String,
 }
 
 // The pack's glibc target: what `jet run` of a C or C++ file builds.
@@ -203,7 +208,7 @@ jet_cli_closure_c_tools: fn(rust_helper: String?) -[FS, Env, Exec, Time.Wait]> J
                 host: jet_cli_native_c_host_tools() ?? return Err(jet_cli_foreign_link_error("a Rust helper needs an unwinder, which jet's C toolchain pack does not ship: {err.message}"))
                 platform.push(jet_cli_native_c_host_archive(host, "libgcc_eh.a") ?? return Err(err))
             }
-            return Ok(JetCLIClosureCTools{tools: tools, platform: platform, proof: [String]{"-static", "-nostartfiles"}})
+            return Ok(JetCLIClosureCTools{tools: tools, platform: platform, proof: [String]{"-static", "-nostartfiles"}, tool_digest: ""})
         }
     }
     tools: jet_cli_native_c_host_tools() ?? return Err(err)
@@ -212,7 +217,7 @@ jet_cli_closure_c_tools: fn(rust_helper: String?) -[FS, Env, Exec, Time.Wait]> J
     loop name in ([String]{"libgcc_eh.a", "libgcc.a"}) {
         platform.push(jet_cli_native_c_host_archive(tools, name) ?? return Err(err))
     }
-    Ok(JetCLIClosureCTools{tools: tools, platform: platform, proof: [String]{"-shared", "-Wl,--no-undefined"}})
+    Ok(JetCLIClosureCTools{tools: tools, platform: platform, proof: [String]{"-shared", "-Wl,--no-undefined"}, tool_digest: ""})
 }
 
 // The `jetpack` engine of this jet's version beside it, if any.
@@ -298,18 +303,16 @@ jet_cli_native_c_argv: fn(tools: JetCLINativeCTools) -> [String] Never! {
     argv
 }
 
-// Hash the compiler/archiver bytes, target, every flag (policy included) and
-// the compiler wrapper's environment inputs: a Nix cc wrapper adds
-// NIX_CFLAGS_COMPILE(_BEFORE) and the NIX_HARDENING_ENABLE features to every
-// compile, so two environments with the same tool bytes can emit different
-// objects and must not share a store entry.
-jet_cli_native_c_identity: fn(identity: &[U8], schema: String, tools: JetCLINativeCTools, flags: [String]) -[FS, Env]> JetCLIForeignLinkError! {
+// Hash the tools (the digest of their bytes, `tool_digest`), target, every
+// flag (policy included) and the compiler wrapper's environment inputs: a
+// Nix cc wrapper adds NIX_CFLAGS_COMPILE(_BEFORE) and the
+// NIX_HARDENING_ENABLE features to every compile, so two environments with
+// the same tool bytes can emit different objects and must not share a store
+// entry.
+jet_cli_native_c_identity: fn(identity: &cli_crypto.Hasher, schema: String, tools: JetCLINativeCTools, tool_digest: String, flags: [String]) -[Env]> Never! {
     jet_cli_foreign_hash_field(identity, "schema", schema.bytes())
     jet_cli_foreign_hash_field(identity, "target", tools.target.bytes())
-    loop (index, tool) in ([String]{tools.compiler, tools.archiver}) {
-        content: cli_files.read_bytes(tool) ?? return Err(jet_cli_foreign_link_error("couldn't read C tool `{tool}`: {err}"))
-        jet_cli_foreign_hash_field(identity, if index == 0 -> "compiler" else -> "archiver", content)
-    }
+    jet_cli_foreign_hash_field(identity, "tools", tool_digest.bytes())
     loop flag in tools.flags -> jet_cli_foreign_hash_field(identity, "tool-flag", flag.bytes())
     loop flag in flags -> jet_cli_foreign_hash_field(identity, "flag", flag.bytes())
     loop flag in JET_CLI_NATIVE_C_FLAGS {
@@ -322,6 +325,38 @@ jet_cli_native_c_identity: fn(identity: &[U8], schema: String, tools: JetCLINati
         ([String]{"NIX_CFLAGS_COMPILE", "NIX_CFLAGS_COMPILE_BEFORE", "NIX_HARDENING_ENABLE"}) {
         jet_cli_foreign_hash_field(identity, "env-{name}", (cli_sys.get(name) ?? "").bytes())
     }
+}
+
+// How much of a C tool one read takes while it is hashed: the pack's clang
+// is ~200 MB, which is never held whole.
+JET_CLI_NATIVE_C_TOOL_CHUNK: 1048576
+
+// Fill `closure.tool_digest` with the SHA-256 of the compiler's and the
+// archiver's bytes, each framed as an identity field, unless an earlier C
+// build of this link already did: the tools are read and hashed once per
+// link, however many C libraries and inline C units it builds. A tool that
+// changes while it is read is refused.
+jet_cli_native_c_tool_digest: fn(closure: &JetCLIClosureCTools) -[FS, Time.Wait]> JetCLIForeignLinkError! {
+    if closure.tool_digest != "" -> return Ok()
+    digest := cli_crypto.Hasher.new()
+    chunk := [U8]{}
+    loop (index, tool) in ([String]{closure.tools.compiler, closure.tools.archiver}) {
+        reader := cli_files.open(tool) ?? return Err(jet_cli_foreign_link_error("couldn't read C tool `{tool}`: {err}"))
+        opened: reader.stat() ?? return Err(jet_cli_foreign_link_error("couldn't read C tool `{tool}`: {err}"))
+        jet_cli_foreign_hash_head(digest, if index == 0 -> "compiler" else -> "archiver", opened.size)
+        read := 0
+        loop {
+            chunk.clear()
+            count: reader.read_into(chunk, JET_CLI_NATIVE_C_TOOL_CHUNK) ?? return Err(jet_cli_foreign_link_error("couldn't read C tool `{tool}`: {err}"))
+            if count == 0 -> break
+            digest.update(chunk)
+            read += count
+        }
+        if read != opened.size {
+            return Err(jet_cli_foreign_link_error("C tool `{tool}` changed while it was read: {opened.size} bytes when opened, {read} read"))
+        }
+    }
+    closure.tool_digest = digest.digest()
     Ok()
 }
 
@@ -332,7 +367,7 @@ jet_cli_native_c_cached: fn(archive: String) -[FS]> Bool Never! {
     if !BUILD_REUSE_SAVED_WORK -> return false
     bytes: cli_files.read_bytes(archive) ?? return false
     digest: cli_files.read("{archive}.sha256") ?? ""
-    digest.trim() == sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))
+    digest.trim() == cli_crypto.sha256(bytes).hex()
 }
 
 // Archive `objects` deterministically and publish it with its digest
@@ -346,7 +381,7 @@ jet_cli_native_c_publish: fn(tools: JetCLINativeCTools, lib: String, temporary: 
         return Err(jet_cli_foreign_link_error("C archiver rejected `{lib}`: {receipt.errors}"))
     }
     bytes: cli_files.read_bytes(staged) ?? return Err(jet_cli_foreign_link_error("couldn't read compiled C archive: {err}"))
-    digest: sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))
+    digest: cli_crypto.sha256(bytes).hex()
     cli_files.rename(staged, archive) ?? return Err(jet_cli_foreign_link_error("couldn't publish C archive: {err}"))
     cli_files.write("{temporary}/digest", digest) ?? return Err(jet_cli_foreign_link_error("couldn't write C archive digest: {err}"))
     cli_files.rename("{temporary}/digest", "{archive}.sha256") ?? return Err(jet_cli_foreign_link_error("couldn't publish C archive digest: {err}"))
@@ -354,13 +389,23 @@ jet_cli_native_c_publish: fn(tools: JetCLINativeCTools, lib: String, temporary: 
     Ok()
 }
 
-// A length-delimited identity avoids concatenation aliases.
-jet_cli_foreign_hash_field: fn(identity: &[U8], name: String, value: [U8]) Never! {
+// A length-delimited identity avoids concatenation aliases: a field is its
+// name's byte count, its name, its value's byte count and its value, each
+// count eight little-endian bytes.
+jet_cli_foreign_hash_field: fn(identity: &cli_crypto.Hasher, name: String, value: [U8]) Never! {
+    jet_cli_foreign_hash_head(identity, name, value.len())
+    identity.update(value)
+}
+
+// A field's head: its name's byte count, its name and the byte count
+// `size` of the value that follows.
+jet_cli_foreign_hash_head: fn(identity: &cli_crypto.Hasher, name: String, size: Int) Never! {
     name_bytes: name.bytes()
-    loop shift in 0..<8 -> identity.push(U8{(name_bytes.len() >> (shift * 8)) & 255})
-    loop byte in name_bytes -> identity.push(byte)
-    loop shift in 0..<8 -> identity.push(U8{(value.len() >> (shift * 8)) & 255})
-    loop byte in value -> identity.push(byte)
+    head := [U8]{}
+    loop shift in 0..<8 -> head.push(U8{(name_bytes.len() >> (shift * 8)) & 255})
+    head.extend(name_bytes)
+    loop shift in 0..<8 -> head.push(U8{(size >> (shift * 8)) & 255})
+    identity.update(head)
 }
 
 // The per-process build directory (`build-<pid>`, `probe-<pid>`) never
@@ -374,7 +419,8 @@ jet_cli_native_c_build_map: fn(directory: String) -> String Never! {
 // Realize a local c@path directory. All .c translation units are compiled;
 // local source/header bytes, exact flags, target and tools own the cache key.
 // Published archives are immutable, with a digest sidecar checked on reuse.
-jet_cli_foreign_compile: fn(closure: JetCLIClosureCTools, lib: String, directory: String, cache: String) -[FS, Env, Exec, Time.Wait]> String JetCLIForeignLinkError! {
+jet_cli_foreign_compile: fn(closure: &JetCLIClosureCTools, lib: String, directory: String, cache: String) -[FS, Env, Exec, Time.Wait]> String JetCLIForeignLinkError! {
+    jet_cli_native_c_tool_digest(closure) ?? return Err(err)
     tools: closure.tools
     flags: [String]{"-std=c11", "-O2", "-fPIC", "-fno-stack-protector", "-fno-asynchronous-unwind-tables", "-fno-unwind-tables", "-D_GNU_SOURCE"}
     paths := [String]{}
@@ -384,8 +430,8 @@ jet_cli_foreign_compile: fn(closure: JetCLIClosureCTools, lib: String, directory
     }
     paths = jet_cli_sorted_set(paths)
     sources := [String]{}
-    identity := [U8]{}
-    jet_cli_native_c_identity(identity, "jet-native-c-v4", tools, flags) ?? return Err(err)
+    identity := cli_crypto.Hasher.new()
+    jet_cli_native_c_identity(identity, "jet-native-c-v5", tools, closure.tool_digest, flags)
     loop path in paths {
         content: cli_files.read_bytes(path) ?? return Err(jet_cli_foreign_link_error("couldn't read C input `{path}`: {err}"))
         relative: path.removeprefix("{directory}/")
@@ -418,7 +464,7 @@ jet_cli_foreign_compile: fn(closure: JetCLIClosureCTools, lib: String, directory
         jet_cli_foreign_hash_field(identity, "preprocessed", receipt.output.bytes())
         preprocessed.push(receipt.output)
     }
-    key: sha256_hex_bytes(sha256_bytes(identity[0..<identity.len()]))
+    key: identity.digest()
     store: "{cache}/{key}"
     archive: "{store}/lib{lib}.a"
     if jet_cli_native_c_cached(archive) -> return Ok(archive)
@@ -503,7 +549,7 @@ jet_cli_inline_c_source: fn(row: JetDriverInlineC, body: String) -> String Never
 // shared object with the host C compiler), so bodies may share C state but
 // nothing may stay unresolved; then one archive joins the native link. None
 // when the program has no inline C body.
-jet_cli_native_inline_c: fn(closure: JetCLIClosureCTools, facts: JetDriverForeignLinkFacts, cache: String) -[FS, Env, Exec, Time.Wait]> String? JetCLIForeignLinkError! {
+jet_cli_native_inline_c: fn(closure: &JetCLIClosureCTools, facts: JetDriverForeignLinkFacts, cache: String) -[FS, Env, Exec, Time.Wait]> String? JetCLIForeignLinkError! {
     units := [String]{}
     loop row in facts.inline_c {
         if row.cpp {
@@ -513,13 +559,14 @@ jet_cli_native_inline_c: fn(closure: JetCLIClosureCTools, facts: JetDriverForeig
         units.push(jet_cli_inline_c_source(row, body))
     }
     if units.len() == 0 -> return Ok(None)
+    jet_cli_native_c_tool_digest(closure) ?? return Err(err)
     tools: closure.tools
     // The Rust original compiles each unit with the compiler's own dialect and
     // `-fPIC`; the native static link adds the c@path code-generation
     // constraints.
     flags: [String]{"-fPIC", "-fno-stack-protector", "-fno-asynchronous-unwind-tables", "-fno-unwind-tables"}
-    identity := [U8]{}
-    jet_cli_native_c_identity(identity, "jet-native-inline-c-v3", tools, flags) ?? return Err(err)
+    identity := cli_crypto.Hasher.new()
+    jet_cli_native_c_identity(identity, "jet-native-inline-c-v4", tools, closure.tool_digest, flags)
     store_root: "{cache}/inline"
     cli_files.create_dir_all(store_root) ?? return Err(jet_cli_foreign_link_error("couldn't create inline C cache `{store_root}`: {err}"))
     probe: "{store_root}/probe-{cli_sys.pid()}"
@@ -555,7 +602,7 @@ jet_cli_native_inline_c: fn(closure: JetCLIClosureCTools, facts: JetDriverForeig
         jet_cli_foreign_hash_field(identity, "preprocessed", receipt.output.bytes())
     }
     if staging_failure == .Val(failure) -> return Err(jet_cli_foreign_link_error(failure))
-    key: sha256_hex_bytes(sha256_bytes(identity[0..<identity.len()]))
+    key: identity.digest()
     store: "{store_root}/{key}"
     archive: "{store}/libjet_inline_native.a"
     if jet_cli_native_c_cached(archive) {
@@ -600,7 +647,7 @@ jet_cli_native_inline_c: fn(closure: JetCLIClosureCTools, facts: JetDriverForeig
     Ok(Val(archive))
 }
 
-jet_cli_foreign_static_archive: fn(closure: JetCLIClosureCTools, lib: String, directories: [String], cache: String, source_provider: Bool) -[FS, Env, Exec, Time.Wait]> String JetCLIForeignLinkError! {
+jet_cli_foreign_static_archive: fn(closure: &JetCLIClosureCTools, lib: String, directories: [String], cache: String, source_provider: Bool) -[FS, Env, Exec, Time.Wait]> String JetCLIForeignLinkError! {
     name: lib.removeprefix("static=").removeprefix("dylib=")
     loop directory in directories {
         path: "{directory}/lib{name}.a"
@@ -654,7 +701,7 @@ jet_cli_foreign_option_path: fn(root: String, written: String) -> String Never! 
 // the `libs` and `link_args` build options add), the `link_args` archives,
 // the realized Rust helper archive `rust_helper` (its exact StaticLibrary)
 // and the inline C archive, in that order.
-jet_cli_native_c_closure: fn(closure: JetCLIClosureCTools, facts: JetDriverForeignLinkFacts, rust_helper: String?, sources: JetCLIForeignSources) -[FS, Env, Exec, Time.Wait]> JetCLIForeignInputs JetCLIForeignLinkError! {
+jet_cli_native_c_closure: fn(closure: &JetCLIClosureCTools, facts: JetDriverForeignLinkFacts, rust_helper: String?, sources: JetCLIForeignSources) -[FS, Env, Exec, Time.Wait]> JetCLIForeignInputs JetCLIForeignLinkError! {
     inputs := JetCLIForeignInputs{names: [String]{}, bytes: [[U8]]{}, paths: [String]{}}
     root: sources.root
     // Every archive key hashes the tools, flags, source and preprocessed
@@ -790,7 +837,7 @@ jet_cli_native_c_inputs: fn(facts: JetDriverForeignLinkFacts, rust_helper: Strin
     if !linked && facts.inline_c.len() == 0 && rust_helper == None && sources.libs.len() == 0 && sources.link_args.len() == 0 {
         return Ok(JetCLIForeignInputs{names: [String]{}, bytes: [[U8]]{}, paths: [String]{}})
     }
-    closure: jet_cli_closure_c_tools(rust_helper) ?? return Err(err)
+    closure := jet_cli_closure_c_tools(rust_helper) ?? return Err(err)
     inputs := jet_cli_native_c_closure(closure, facts, rust_helper, sources) ?? return Err(err)
     if !linked && inputs.names.len() == 0 -> return Ok(inputs)
     loop path in closure.platform -> jet_cli_foreign_add(inputs, path) ?? return Err(err)
