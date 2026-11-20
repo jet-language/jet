@@ -4,8 +4,8 @@
 use {
     native_test_process: core.process
     native_test_files: core.files
-    jet_debug.[NATIVE_CFI_RETURN, NATIVE_CFI_SAME, NATIVE_CFI_SAVED, NATIVE_DEBUG_CUT_OFF, NATIVE_DEBUG_NOT_KEPT, NativeAbstract, NativeBlock, NativeBreak, NativeCallArgument, NativeCode, NativeCut, NativeDebugError, NativeEnumerator, NativeFde, NativeFrame, NativeFrames, NativeFunction, NativeImage, NativeInlined, NativeLocal, NativeMember, NativeMemory, NativeSession, NativeStop, NativeStopKind, NativeType, NativeUnwound, NativeVariable, NativeVariableRole, NativeVariants, native_cfi_row, native_debug_backtrace, native_debug_build_argv, native_debug_decimal_text, native_debug_hit_breakpoint, native_debug_int, native_debug_locals_typed, native_debug_precise, native_debug_string, native_frame_locals, native_frames_index, native_function_at, native_inline_chain, native_jet_spelling]
-    jet_backend.[X64DebugEncoding, X64Jetline, X64JetlineFunction, x64_jetline_sleb]
+    jet_debug.[NATIVE_CFI_RETURN, NATIVE_CFI_SAME, NATIVE_CFI_SAVED, NATIVE_DEBUG_CUT_OFF, NATIVE_DEBUG_NOT_KEPT, NativeAbstract, NativeBlock, NativeBreak, NativeCallArgument, NativeCode, NativeCut, NativeDebugError, NativeEnumerator, NativeFde, NativeFrame, NativeFrames, NativeFunction, NativeImage, NativeInlined, NativeLocal, NativeMember, NativeMemory, NativeSession, NativeStop, NativeStopKind, NativeType, NativeUnwound, NativeVariable, NativeVariableRole, NativeVariants, native_cfi_row, native_debug_backtrace, native_debug_build_argv, native_debug_decimal_text, native_debug_hit_breakpoint, native_debug_int, native_debug_locals_typed, native_debug_precise, native_debug_string, native_frame_locals, native_frames_index, native_function_at, native_inline_chain, native_jet_spelling, native_line_addresses]
+    jet_backend.[X64DebugEncoding, X64Jetline, X64JetlineFunction, x64_jetline_find, x64_jetline_sleb]
     jet_foundation.[DeepChecks]
 }
 
@@ -189,6 +189,45 @@ native_test_unwound: fn(pc: Int) -> NativeUnwound {
     assert_eq(native_function_at(image, 0x1010) == None, true)
     assert_eq(native_function_at(image, 0xfff) == None, true)
     assert_eq(native_function_at(image, 0x1030) == None, true)
+}
+
+// Three functions of a line table, the middle one empty and starting where
+// the last one does.
+native_test_line_functions: fn() -> [X64JetlineFunction] {
+    [X64JetlineFunction]{
+        X64JetlineFunction{low: 0x1000, high: 0x1010, name: "first", file: "a.jet", dir: "", decl: 1, rows: 0, rows_end: 0},
+        X64JetlineFunction{low: 0x1020, high: 0x1020, name: "empty", file: "a.jet", dir: "", decl: 2, rows: 0, rows_end: 0},
+        X64JetlineFunction{low: 0x1020, high: 0x1030, name: "second", file: "a.jet", dir: "", decl: 3, rows: 0, rows_end: 0},
+    }
+}
+
+// An ascending line table is halved to the function holding an address and
+// finds what a search in order finds; a gap, the end and an empty function
+// hold none.
+#Test("a_line_table_lookup_halves_an_ascending_table") {
+    halved: X64Jetline{table: [U8]{}, functions: native_test_line_functions(), ascending: true}
+    in_order: X64Jetline{table: [U8]{}, functions: native_test_line_functions()}
+    pcs: [Int]{0xfff, 0x1000, 0x100f, 0x1010, 0x1020, 0x102f, 0x1030}
+    loop pc in pcs { assert_eq(x64_jetline_find(halved, pc), x64_jetline_find(in_order, pc)) }
+    assert_eq(x64_jetline_find(halved, 0x1000), 0)
+    assert_eq(x64_jetline_find(halved, 0x1020), 2)
+    assert_eq(x64_jetline_find(halved, 0x1010), -1)
+    assert_eq(x64_jetline_find(halved, 0x1030), -1)
+}
+
+// Two packages' files of one base name: a path picks one, by its last
+// components or whole under the compilation directory; the base name, or a
+// path neither file's ends with, names both.
+#Test("a_breakpoint_path_picks_one_of_two_same_named_files") {
+    // One row each: line 5 at the function's start.
+    rows: [U8]{U8{0}, U8{4}}
+    sema: X64JetlineFunction{low: 0x1000, high: 0x1010, name: "sema_check", file: "Compiler/JetSema/Source/Check.jet", dir: "/src", decl: 5, rows: 0, rows_end: 2}
+    eval: X64JetlineFunction{low: 0x1020, high: 0x1030, name: "eval_check", file: "Compiler/JetEval/Source/Check.jet", dir: "/src", decl: 5, rows: 0, rows_end: 2}
+    image: NativeImage{lines: X64Jetline{table: rows, functions: [X64JetlineFunction]{sema, eval}}, functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}}
+    assert_eq(native_line_addresses(image, "Check.jet", 5), [Int]{0x1000, 0x1020})
+    assert_eq(native_line_addresses(image, "JetSema/Source/Check.jet", 5), [Int]{0x1000})
+    assert_eq(native_line_addresses(image, "/src/Compiler/JetEval/Source/Check.jet", 5), [Int]{0x1020})
+    assert_eq(native_line_addresses(image, "Other/Check.jet", 5), [Int]{0x1000, 0x1020})
 }
 
 #Test("an_unavailable_debugger_is_e2203") {

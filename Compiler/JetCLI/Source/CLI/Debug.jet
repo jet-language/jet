@@ -252,8 +252,9 @@ jet_cli_debug_unstarted: fn(image: String, act: String) -> JetCLIProveRefusal Ne
     JetCLIProveRefusal{code: "E2104", what: "`{image}` can't {act}", why: "the program starts no task and makes no channel, live value or event, so its runtime has no observation start, where a recording and its replay begin", fix: "record and replay a program that synchronizes; a program with none runs the same with `jet run`", exit_code: JET_DRIVER_EXIT_USAGE}
 }
 
-// A `--break` value, `<file.jet>:<line>`: the file by its base name, as the
-// image's line table names it.
+// A `--break` value, `<file.jet>:<line>`: the file by its base name, or by a
+// path that picks one of the image's same-named files, as
+// `Sema/CheckProgram.jet:1517` does (NativeSession.break_at).
 jet_cli_debug_break: fn(spec: String) -> NativeBreak? Never! {
     colon: spec.rfind(":")
     if colon <= 0 -> return None
@@ -261,7 +262,7 @@ jet_cli_debug_break: fn(spec: String) -> NativeBreak? Never! {
     bytes: spec.bytes()
     line: Int.parse(foundation_byte_text(bytes, colon + 1, bytes.len())) ?? return None
     if line < 1 -> return None
-    Val(NativeBreak{file: cli_files.basename(foundation_byte_text(bytes, 0, colon)), line: line})
+    Val(NativeBreak{file: foundation_byte_text(bytes, 0, colon), line: line})
 }
 
 // Build `entry` at O0 into `scratch`, then debug the image with the program

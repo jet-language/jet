@@ -111,8 +111,8 @@ NativeStop: struct {
     routines: String{""},
 }
 
-// A breakpoint `jet debug --break` asks for: a Jet source file's base name,
-// as the line table names it, and a line of it.
+// A breakpoint `jet debug --break` asks for: a Jet source file, by its base
+// name or a path (native_line_addresses), and a line of it.
 NativeBreak: struct {
     file: String,
     line: Int,
@@ -552,8 +552,9 @@ NativeSession: struct {
         Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: output_path, output_read: 0, started: false, threads: [NativeThread]{}, observe_root: observe_root, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: None, task: 0, replay_start: native_elf_symbol(elf, NATIVE_REPLAY_START_SYMBOL) != None})
     }
 
-    // A breakpoint on `line` of the Jet source `file` (its base name, as the
-    // line table names it): its number, or None when no code is on that line.
+    // A breakpoint on `line` of the Jet source `file` (a base name or a path,
+    // native_line_addresses): its number, or None when no code is on that
+    // line.
     break_at: fn(&self, file: String, line: Int) -> Int? NativeDebugError! {
         self.place(self.line_starts(file, line))
     }
@@ -5373,16 +5374,30 @@ native_debug_word: fn(trace: X64Trace, address: Int) -> Int? Never! {
     Val(native_number(bytes, 0, 8, X64DebugEncoding.Signed))
 }
 
-// The addresses of `line` in the Jet source `file` (by base name): in each
-// function, the first row of the line in its own code and in each inlined
-// copy it holds (two instances of a generic module's member inlined into one
-// caller are two copies). A function with no row of the line, but rows on or
-// before it, gives its first row of the nearest later line instead.
+// The addresses of `line` in the Jet source `file`. A path names the files
+// whose recorded path (native_line_source) is it or ends with it, so
+// `Sema/CheckProgram.jet` or an editor's absolute path picks one of the
+// image's same-named files; a base name, or a path no file's matches, names
+// every file of that base name. In each function, the first row of the line
+// in its own code and in each inlined copy it holds (two instances of a
+// generic module's member inlined into one caller are two copies). A
+// function with no row of the line, but rows on or before it, gives its
+// first row of the nearest later line instead.
 native_line_addresses: fn(image: NativeImage, file: String, line: Int) -> [Int] Never! {
     wanted: native_files.basename(file)
+    by_path := false
+    if file.contains("/") {
+        loop function in image.lines.functions {
+            if native_line_file_is(function.dir, function.file, file) {
+                by_path = true
+                break
+            }
+        }
+    }
     addresses := [Int]{}
     loop function in image.lines.functions {
-        if native_files.basename(function.file) != wanted -> next
+        named: if by_path -> native_line_file_is(function.dir, function.file, file) else -> native_files.basename(function.file) == wanted
+        if !named -> next
         described: native_function_at(image, function.low)
         sites := [NativeLineSite]{}
         covers := false
@@ -5966,6 +5981,14 @@ native_bare_move: fn(word: String, mark: NativeMark) -> NativeMove Never! {
 native_line_source: fn(dir: String, file: String) -> String Never! {
     if dir == "" || file.starts_with("/") || file.starts_with(MODULE_CORE_PREFIX) -> return "{file}"
     native_files.join(dir, file)
+}
+
+// Whether `path` names the source a line-table function records as `file`
+// under `dir`: its path (native_line_source), or that path's last
+// components.
+native_line_file_is: fn(dir: String, file: String, path: String) -> Bool Never! {
+    source: native_line_source(dir, file)
+    source == path || source.ends_with("/{path}")
 }
 
 // Line `line` (1 for the first) of `lines`; "" when they have no such line.

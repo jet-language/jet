@@ -830,6 +830,10 @@ native_fix_lines: fn(lines: &X64Jetline, low: Int, size: Int, debug: X64Function
         address = row.at
         line = row.line
     }
+    // A function placed below the table's last one leaves the table out of
+    // order, searched function by function (X64Jetline.ascending).
+    count: lines.functions.len()
+    if count > 0 && low < lines.functions[count - 1].high -> lines.ascending = false
     lines.functions.push(X64JetlineFunction{low: low, high: low + size, name: name, file: file, dir: dir, decl: decl, rows: rows, rows_end: lines.table.len()})
 }
 
