@@ -18,7 +18,7 @@ use {
     jet_driver.[JET_DRIVER_EXIT_OK]
 }
 
-jet_cli_debug_dump: fn(path: String, color: Bool) -[FS, IO, Time.Wait, FFI.Asm]> JetCLIPlan Never! {
+jet_cli_debug_dump: fn(path: String, color: Bool) -[FS, Env, IO, Time.Wait, FFI.Asm]> JetCLIPlan Never! {
     opened := native_dump_open(path) ?? return jet_cli_debug_unavailable(err, color)
     frames: opened.session.backtrace() ?? return jet_cli_debug_unavailable(err, color)
     stop: native_dump_jet_frame(frames, 0) ?? 0

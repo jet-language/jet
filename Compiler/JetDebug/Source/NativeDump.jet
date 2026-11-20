@@ -543,12 +543,12 @@ native_dump_located: fn(frames: [NativeFrame], file: String) -> String Never! {
     shown
 }
 
-// Frame `index` of `frames`: where it is, its Jet source line when `file`
-// (with the text `lines`) holds it, and its locals.
+// Frame `index` of `frames`: where it is, its Jet source line
+// (NativeSession.frame_source), and its locals.
 native_dump_frame: fn(session: &NativeSession, frames: [NativeFrame], index: Int, file: String, lines: [String]) -> String NativeDebugError! {
     if index >= frames.len() -> return Ok("No Jet frame in the dump\n")
     frame: frames[index]
-    source: if frame.file == file && frame.line >= 1 && frame.line <= lines.len() -> lines[frame.line - 1] else -> ""
+    source: session.frame_source(frame, file, lines)
     locals: native_dump_locals(session) ?? return Err(err)
     Ok("Stopped  {frame.file}:{frame.line}  in {frame.function}()\n{frame.line} | {source}        <- here\n{native_debug_locals_line(locals)}\n")
 }

@@ -38,9 +38,14 @@ NativeEvalRefused: struct {
 // ask; the first ask, and one that finds them changed, takes them as they
 // read now. Code compiled before a change may not be what the source says
 // now, so the session drops the code it kept then.
+// `source`: the text of the source `path` names, a stop's as the line table
+// names it (NativeSession.source_at, NativeFrame.path), as the compile reads
+// it: a Core source's is the Core the program compiles with, never a file
+// under the working directory. None when it can't be read.
 NativeEvaluator: trait {
     compile: fn(self, path: String, line: Int, column: Int, text: String, binders: [NativeEvalBinder]?, owned: Bool, running: [String:[U8]]) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval NativeEvalRefused!,
     unchanged: fn(self) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Bool Never!,
+    source: fn(self, path: String) -[FS, Env]> String? Never!,
 }
 
 // A variable a name of an evaluated expression may read at the stop: its

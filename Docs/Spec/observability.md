@@ -939,7 +939,12 @@ local or field path of a frame of the stopped task, named by its scope's
 breakpoint` one whose description is the change (`total: 0 -> 2`). A
 place no watch can take has no data id, its description E2237's What and
 its `jetCode` E2237; a data id of an earlier stop is not verified, with
-E2238's.
+E2238's. A frame in a Core function names its source by a
+`sourceReference`, which the `source` request answers with that source's
+text: Core's sources are no files of the program, and the debugger reads
+them, as it compiles them, from the Core the program was compiled with,
+never from the working directory. The console shows a Core frame's line
+the same way.
 
 Every expression the debugger is given (`print`, `watch`, a condition, a
 logpoint's message, the adapter's `evaluate`) has one evaluator, the

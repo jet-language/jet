@@ -37,14 +37,17 @@
 // stopped (JetSema EvalProbe.jet): its type, the locals it captures, and a
 // refusal for an effect, which names the effect; the second compiles the
 // program with the expression as a function of its captures appended to
-// the stop's source.
+// the stop's source. A stop's source in Core is its row in the Core the
+// program compiles with (jet_cli_debug_source_text), never a file under the
+// working directory, and those compiles read that row whole
+// (jet_cli_debug_eval_prepare).
 use {
     debug_eval_files: core.files
     debug_eval_time: core.time
     jet_debug.[NATIVE_EVAL_CAPTURES, NativeEval, NativeEvalBinder, NativeEvalPart, NativeEvalRefused, NativeEvaluator, NativeFixEdit, native_eval_name_byte, native_eval_names]
     jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverEvalAsk, JetDriverHeldEval, JetDriverIceRow, JetDriverLoweringInputs, jet_driver_check_failures, jet_driver_checked_declarations, jet_driver_declares_workspace, jet_driver_entry_root_path, jet_driver_held_eval_append, jet_driver_held_eval_check, jet_driver_held_eval_open, jet_driver_inline_package, jet_driver_is_project_configuration]
     jet_eval.[jet_eval_native_add, jet_eval_native_wrapper]
-    jet_foundation.[COMMENT_PREFIX, BuildOptions, CompilerThreads, DeclTable, DeepChecks, FnBody, StmtKind, TTypeDef, Type, body_type, deep_checks_flags, foundation_named_type, name_rows_get_text, name_rows_set, type_name, type_unqualified_nominals]
+    jet_foundation.[COMMENT_PREFIX, MODULE_CORE_PREFIX, BuildOptions, CompilerThreads, DeclTable, DeepChecks, FnBody, StmtKind, TTypeDef, Type, body_type, deep_checks_flags, foundation_named_type, name_rows_get_text, name_rows_set, type_name, type_unqualified_nominals]
     jet_ir.[IRBuildResult, IRModule, IRProgram, IRTypeKind, ir_build_held_root, ir_eval_place_refusal, ir_held_append, ir_held_program, ir_module_new, ir_pointer_row, ir_untag, ir_x64_compile_module_logged, ir_x64_debug_program]
     jet_parser.[parse_type_text]
     jet_sema.[SemaEvalProbeAnswer, sema_eval_probe_function, sema_eval_probe_parse, sema_ownership_type_is_copy]
@@ -79,6 +82,10 @@ JetCLIDebugEvaluator: struct {
 
         unchanged: fn(self) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Bool Never! {
             jet_cli_debug_eval_unchanged(self.held, self.entry)
+        }
+
+        source: fn(self, path: String) -[FS, Env]> String? Never! {
+            Val(jet_cli_debug_source_text(self.entry, path) ?? return None)
         }
     }
 }
@@ -185,7 +192,7 @@ jet_cli_debug_eval_compile: fn(entry: String, argv: [String], color: Bool, held:
             .Err(refusal) -> return Err(refusal)
         }
     }
-    source: debug_eval_files.read(path) ?? return Err(jet_cli_debug_eval_refused("couldn't read `{path}`: {err}"))
+    source: jet_cli_debug_source_text(entry, path) ?? return Err(err)
     options: jet_cli_debug_eval_options(entry, argv, color: color) ?? return Err(err)
     reading: jet_cli_debug_eval_snapshot(entry, color) ?? return Err(jet_cli_debug_eval_refused("couldn't read the sources of `{entry}`"))
     if jet_cli_debug_eval_stale(reading, running, text, binders) == .Val(refusal) {
@@ -219,8 +226,7 @@ jet_cli_debug_eval_compile: fn(entry: String, argv: [String], color: Bool, held:
     answer: jet_cli_debug_eval_answer(entry, color, options, path, offset, line, text, core_bound: Val(core)) ?? return Err(err)
     function: sema_eval_probe_function(answer, text, JET_CLI_DEBUG_EXPRESSION) ?? return Err(jet_cli_debug_eval_refused("`{text}` has no value"))
     value: answer.value_type ?? return Err(jet_cli_debug_eval_refused("`{text}` has no value"))
-    overlay: JetCLIOverlay{path: path, source: "{source}\n{function}"}
-    prepared: jet_cli_prepare_overlays(entry, entry, [JetCLIOverlay]{overlay}, color, None, JetDriverCompileMode.Program, appended: true)
+    prepared: jet_cli_debug_eval_prepare(entry, color, path, Val("{source}\n{function}"))
     compiled: jet_cli_compile_executable(prepared, None, options, None, None, color, core_bound: Val(core)) ?? return Err(jet_cli_debug_eval_refused("the compiler stopped before finishing it"))
     if compiled.move() == {
         .Refused(refusal) -> Err(jet_cli_debug_eval_refused("the compiler refused it: {refusal.stderr.trim()}"))
@@ -773,9 +779,7 @@ jet_cli_debug_eval_direct: fn(entry: String, color: Bool, options: BuildOptions,
     lead: "{JET_CLI_DEBUG_EXPRESSION}: fn({typed.join(", ")}) {{\n    "
     // The ask's offset is the statement's first byte in the appended source.
     offset: source.len() + 1 + lead.len()
-    overlays := [JetCLIOverlay]{JetCLIOverlay{path: path, source: "{source}\n{lead}_ := {text}\n}}\n"}}
-    overlays.extend(others)
-    asked: if jet_cli_prepare_overlays(entry, entry, overlays, color, None, JetDriverCompileMode.Program, appended: true) == {
+    asked: if jet_cli_debug_eval_prepare(entry, color, path, Val("{source}\n{lead}_ := {text}\n}}\n"), others: others.move()) == {
         .Refused(output) -> JetCLIPrepared.Refused{output: output}
         .Prepared(request, snapshot) -> {
             held := request
@@ -1592,7 +1596,7 @@ jet_cli_debug_eval_native: fn(built: &&IRModule, key: String, names: [String], v
 // which names an effect it uses).
 jet_cli_debug_eval_answer: fn(entry: String, color: Bool, options: BuildOptions, path: String, offset: Int, line: Int, text: String, core_bound: Bool?{None}) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> SemaEvalProbeAnswer NativeEvalRefused! {
     answers := [SemaEvalProbeAnswer]{}
-    asked: if jet_cli_prepare_overlays(entry, entry, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Program) == {
+    asked: if jet_cli_debug_eval_prepare(entry, color, path, None) == {
         .Refused(output) -> JetCLIPrepared.Refused{output: output}
         .Prepared(request, snapshot) -> {
             held := request
@@ -1625,6 +1629,58 @@ jet_cli_debug_eval_answer: fn(entry: String, color: Bool, options: BuildOptions,
     Ok(answer)
 }
 
+// The request that compiles the program of `entry` with the stop's source
+// `path` reading `source` (None: as it reads), and the sources `others` in
+// place of their files, as overlays a debugger's expression appends to
+// (jet_cli_prepare_snapshot `appended`). A Core source
+// (jet_cli_debug_core_row) is no file of the program: its Core row reads
+// `source` as the Core source under test (JetDriverCompileRequest
+// core_tests), which the compile reads whole, its functions' bodies
+// checked and kept for the build, as a `jet test` of it does.
+jet_cli_debug_eval_prepare: fn(entry: String, color: Bool, path: String, source: String?, others: &&[JetCLIOverlay]{[JetCLIOverlay]{}}) -> JetCLIPrepared {
+    row: jet_cli_debug_core_row(path)
+    if row == "" {
+        overlays := [JetCLIOverlay]{}
+        if source == .Val(text) -> overlays.push(JetCLIOverlay{path: path, source: text})
+        overlays.extend(others)
+        return jet_cli_prepare_overlays(entry, entry, overlays, color, None, JetDriverCompileMode.Program, appended: true)
+    }
+    if jet_cli_prepare_snapshot(entry, entry, others, color, appended: true) == {
+        .Refused(output) -> JetCLIPrepared.Refused{output: output}
+        .Held(snapshot) -> jet_cli_prepare_request(snapshot, color, None, JetDriverCompileMode.Program, core_tests: row, core_tested_source: source)
+    }
+}
+
+// The text of the stop's source `path` (JetDebug native_line_source) in the
+// program of `entry`: a Core source's is its row's in the Core that program
+// compiles with, its toolchain tree's or the one built into jet
+// (jet_cli_core_sources), never a file under the working directory; any
+// other source's is its file's.
+jet_cli_debug_source_text: fn(entry: String, path: String) -[FS, Env]> String NativeEvalRefused! {
+    row: jet_cli_debug_core_row(path)
+    if row == "" {
+        return Ok(debug_eval_files.read(path) ?? return Err(jet_cli_debug_eval_refused("couldn't read `{path}`: {err}")))
+    }
+    sources: if jet_cli_core_sources(entry) == {
+        .Loaded(loaded) -> loaded
+        .Missing(what, _) -> {
+            return Err(jet_cli_debug_eval_refused(what))
+        }
+    }
+    loop unit in sources {
+        if unit.path == row -> return Ok(unit.source())
+    }
+    Err(jet_cli_debug_eval_refused("the Core this program compiles with has no `{row}`"))
+}
+
+// The Core row (`Core/Net/URL.jet`) of the stop's source `path` when it is
+// a Core source, under the Core root (`<corelib>/Core/Net/URL.jet`); "" for
+// any other.
+jet_cli_debug_core_row: fn(path: String) -> String Never! {
+    if !path.starts_with(MODULE_CORE_PREFIX) -> return ""
+    path.slice(MODULE_CORE_PREFIX.len()..<path.len())
+}
+
 // Whether the checked source file `source` is `path`, the line table's: the
 // same path, or one is the other's trailing components, either without its
 // leading `./` (an image built where it is debugged records its entry under
@@ -1648,6 +1704,12 @@ debug_eval_path_plain: fn(path: String) -> String Never! {
     assert(debug_eval_path_same("prog.jet", "/work/prog.jet"))
     assert(!debug_eval_path_same("/work/prog.jet", "./other.jet"))
     assert(!debug_eval_path_same("/work/myprog.jet", "./prog.jet"))
+}
+
+#Test("a stop's Core source is its Core row, never a file under the working directory") {
+    assert_eq(jet_cli_debug_core_row("<corelib>/Core/Net/URL.jet"), "Core/Net/URL.jet")
+    assert_eq(jet_cli_debug_core_row("./prog.jet"), "")
+    assert_eq(jet_cli_debug_core_row("./<corelib>/Core/Net/URL.jet"), "")
 }
 
 #Test("an evaluated expression starts at its line's first byte, or at the call's column") {
