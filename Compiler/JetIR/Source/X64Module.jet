@@ -16,6 +16,7 @@ use {
         X64DebugEncoding,
         X64DebugEnumerator,
         X64DebugMember,
+        X64DebugSource,
         X64DebugType,
         X64DebugTypeKind,
         X64DebugVariant,
@@ -1451,9 +1452,9 @@ ir_x64_zone_sites_symbol: fn(m: IRModule) -> String Never! {
     "{IR_X64_ZONE_SITES_NAME}_{digest.slice(0..<16)}"
 }
 
-// The object writer's module of `owned`: its data, debug files and types
-// and per IR function its name, file, line, debug variables (taken) and
-// inline sites.
+// The object writer's module of `owned`: its data, debug files, types and
+// sources (taken) and per IR function its name, file, line, debug
+// variables (taken) and inline sites.
 ir_x64_object_module: fn(owned: &IRX64Result) -> X64ObjectModule Never! {
     // Popped in function order.
     variables := compiler_take_rows<[X64DebugVariable]>(owned.variables)
@@ -1479,7 +1480,7 @@ ir_x64_object_module: fn(owned: &IRX64Result) -> X64ObjectModule Never! {
     }
     X64ObjectModule{
         data: compiler_take_rows<X64Data>(owned.tables.data),
-        debug: X64ModuleDebug{directory: owned.program.debug_directory.copy(), files: compiler_take_rows<String>(owned.tables.files), types: compiler_take_rows<X64DebugType>(owned.tables.debug_types), level: owned.program.debug_level},
+        debug: X64ModuleDebug{directory: owned.program.debug_directory.copy(), files: compiler_take_rows<String>(owned.tables.files), types: compiler_take_rows<X64DebugType>(owned.tables.debug_types), level: owned.program.debug_level, sources: compiler_take_rows<X64DebugSource>(owned.program.debug_sources)},
         functions: sources.move(),
     }
 }

@@ -30,12 +30,16 @@ NativeEvalRefused: struct {
 // the image can't list them (an inlined run). `owned` is whether the
 // image's `main` owns the program's run (native_eval_owned): the compile
 // owns its main only then, so its functions' code is the image's.
+// `running` is the sha256 of each source the program's code was compiled
+// from, by path (NativeImage.sources, which a `fix` replaces): the compile
+// refuses an expression that reaches an item of a source that reads
+// otherwise now, whose code the program doesn't run.
 // `unchanged`: whether the program's sources read as they did at the last
 // ask; the first ask, and one that finds them changed, takes them as they
 // read now. Code compiled before a change may not be what the source says
 // now, so the session drops the code it kept then.
 NativeEvaluator: trait {
-    compile: fn(self, path: String, line: Int, column: Int, text: String, binders: [NativeEvalBinder]?, owned: Bool) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval NativeEvalRefused!,
+    compile: fn(self, path: String, line: Int, column: Int, text: String, binders: [NativeEvalBinder]?, owned: Bool, running: [String:[U8]]) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval NativeEvalRefused!,
     unchanged: fn(self) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Bool Never!,
 }
 
@@ -75,10 +79,8 @@ NativeEvalPart: struct {
 // (NativePlace.jet). A `held` evaluation was built alone against the
 // program's held check (JetCLI DebugCompile.jet
 // jet_cli_debug_eval_held_build), calling the functions the image holds
-// there: its own copies of the rest differ from the image's by the
-// whole-program return slots an O0 image keeps, so they say nothing of
-// whether the source is the program's (native_eval_refusal). The held
-// check answers only while it read the sources the image was built from.
+// there. The held check answers only while it read the sources the image
+// was built from.
 NativeEval: struct {
     text: String,
     edit: NativeFixEdit,
@@ -205,24 +207,6 @@ native_eval_word_captures: fn(compiled: Shared<NativeEval>) -> Bool Never! {
         if !capture.word -> return false
     }
     true
-}
-
-// Why the code `plan` (native_fix_place_all) places for `code` isn't the
-// program's: a function it places that the program runs too, compiled
-// differently (`diff`, native_fix_diff), means the source is no longer the
-// program's. Code the expression doesn't reach is not asked: the
-// compile's whole-program choices may differ from the image's there; nor
-// is a `held` evaluation's (NativeEval.held). "" when it can be placed.
-native_eval_refusal: fn(code: NativeEval, diff: NativeFixPlan, plan: NativeFixPlan) -> String Never! {
-    if code.held -> return ""
-    changed := [Int:Bool]{}
-    loop row in diff.changed -> changed[row] = true
-    loop row in plan.changed {
-        if diff.running[row] >= 0 && changed.has_key(row) {
-            return "`{native_fix_shown(code.edit, row)}` in the source is not the code the program runs; rebuild the program, or `fix` it first"
-        }
-    }
-    ""
 }
 
 // The offset in the plan's region of the expression's entry.

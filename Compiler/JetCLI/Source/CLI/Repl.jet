@@ -479,7 +479,7 @@ jet_cli_repl_built: fn(session: &JetCLIReplSession, program: JetCLIReplSource, i
     if jet_cli_authority_refusal(jet_cli_application_authority(result, session.invocation)) == .Val(refusal) {
         return JetCLIReplChecked.Failed{diagnostics: jet_cli_repl_unplaced([Diagnostic]{refusal}), reports: false}
     }
-    built := jet_cli_build_binary(session.anchor, "repl", "run", false, options, result, inputs, snapshot, session.invocation)
+    built := jet_cli_build_binary(session.anchor, "repl", "run", false, options, result, inputs, snapshot, session.invocation, jet_cli_build_digests(snapshot, options))
     if built.move() == {
         .Failed(failure) -> JetCLIReplChecked.Refused{report: "{failure.stdout}{failure.stderr}"}
         .Image(executable, _) -> jet_cli_repl_written(session, executable, locals)

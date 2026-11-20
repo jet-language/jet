@@ -99,7 +99,10 @@
 // Calls and runtime routes use the System V ABI of the existing x86-64
 // selector; runtime symbols are the old backend's, so a program behaves the
 // same on both paths.
-use jet_foundation.[NameRows, TComptimeValue, Type, TypeTable, name_rows, name_rows_get, name_rows_hash, name_rows_set, name_rows_set_hashed, name_rows_value, sha256_bytes, sha256_hex, sha256_hex_bytes, stable_id]
+use {
+    jet_foundation.[NameRows, TComptimeValue, Type, TypeTable, name_rows, name_rows_get, name_rows_hash, name_rows_set, name_rows_set_hashed, name_rows_value, sha256_bytes, sha256_hex, sha256_hex_bytes, stable_id]
+    jet_backend.[X64DebugSource]
+}
 
 IROp: enum {
     Nop,
@@ -651,6 +654,10 @@ IRModule: struct {
     // DWARF unit names (JetBackend Image/Dwarf.jet): a debugger compiles an
     // expression at the level the program was built at.
     debug_level: Int{0},
+    // The sources the module was compiled from, which its image records
+    // (JetBackend Image/Dwarf.jet dwarf_sources) for a debugger to prove
+    // the code it binds to is theirs.
+    debug_sources: [X64DebugSource]{[X64DebugSource]{}},
     host_literals: [String:TComptimeValue]{[String:TComptimeValue]{}},
     struct_fields: [String]{[String]{}},
     debug_members: [Int:Int]{[Int:Int]{}},

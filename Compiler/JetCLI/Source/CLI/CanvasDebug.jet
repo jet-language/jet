@@ -302,9 +302,10 @@ jet_cli_canvas_debug_open: fn(file: String, source_id: String, revision: String,
     dir: cli_files.tmpdir("jet-canvas-debug") ?? return Err(jet_cli_canvas_debug_error("io", "couldn't create the Canvas debug build directory: {err}"))
     out_dir: cli_files.join(dir, "out")
     // The held check opens while the image builds, at its level, O0
-    // (jet_cli_debug_eval_held_start), from the sources the build reads.
-    held: jet_cli_debug_eval_held_slot(built: true)
-    jet_cli_debug_eval_held_start(held, file, jet_cli_debug_eval_argv(DeepChecks{}, 0))
+    // (jet_cli_debug_eval_held_start), from the sources the build reads and
+    // its debug info records.
+    held: jet_cli_debug_eval_held_slot()
+    jet_cli_debug_eval_held_start(held, file, jet_cli_debug_eval_argv(DeepChecks{}, 0), program: true)
     built: cli_process.cmd(native_debug_build_argv(cli_sys.executable(), file, out_dir, DeepChecks{})).stdout(.Capture).stderr(.Capture).run() ?? {
         jet_cli_canvas_debug_remove(dir)
         return Err(jet_cli_canvas_debug_error("io", "couldn't run the Canvas debug build: {err}"))

@@ -1372,6 +1372,9 @@ x64_object_file: fn(dwarf: X64DwarfSections, text: [X64ObjectPiece], text_align:
     if zone_spans.len() > 0 {
         sections.push(x64_object_debug_section(X64_OBJECT_ZONE_SPANS, zone_spans))
     }
+    if dwarf.sources.len() > 0 {
+        sections.push(x64_object_debug_section(".debug_jetsource", dwarf.sources))
+    }
     if xindex.len() > 0 {
         sections.push(X64ObjectSection{name: ".symtab_shndx", kind: ELF64_SHT_SYMTAB_SHNDX, flags: 0, bytes: [U8]{}, pieces: xindex, link: ELF64_OBJECT_SYMTAB, info: 0, align: 4, entry_size: 4})
     }

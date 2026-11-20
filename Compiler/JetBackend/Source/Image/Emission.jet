@@ -206,12 +206,22 @@ X64DebugVariable: struct {
 // `directory` is the compilation directory relative `files` resolve
 // against; "" leaves that to the debugger (its working directory). `level`
 // is the optimization level the code was built at, which the unit's
-// producer names (`Jet native backend (O2)`).
+// producer names (`Jet native backend (O2)`). `sources`: the sources the
+// module was compiled from, which the image records (Dwarf.jet
+// dwarf_sources).
 X64ModuleDebug: struct {
     directory: String,
     files: [String],
     types: [X64DebugType],
     level: Int{0},
+    sources: [X64DebugSource]{[X64DebugSource]{}},
+}
+
+// A source a module was compiled from: its path relative to the entry
+// package's root, as the compile names it, and the sha256 of its text.
+X64DebugSource: struct {
+    path: String,
+    digest: [U8],
 }
 
 // Read-only module objects, including immutable aggregate constant trees.

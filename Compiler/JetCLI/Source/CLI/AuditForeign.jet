@@ -260,7 +260,7 @@ jet_cli_audit_foreign: fn(file: String, source: String, color: Bool, json: Bool)
             }
             facts: result.foreign_link.copy()
             effects: result.entry_effects.copy()
-            built := jet_cli_build_binary(file, jet_cli_stem(file), "run", color, options, result, inputs, snapshot, None)
+            built := jet_cli_build_binary(file, jet_cli_stem(file), "run", color, options, result, inputs, snapshot, None, jet_cli_build_digests(snapshot, options))
             if built.move() == {
                 .Failed(failure) -> failure
                 .Image(executable, _) -> {
