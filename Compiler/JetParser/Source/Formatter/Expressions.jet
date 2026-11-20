@@ -1203,7 +1203,9 @@ jfmt_fmt_typed_lit: fn(f: &JetFmt, head: Type?, body: TypedLitBody, span: Span) 
         jfmt_fmt_type_at(f, head_type, Val(span))
         if f.comment_i < f.comments.len() {
             pending: f.comments[f.comment_i].span.start
-            if pending < braces.start && jfmt_line_of(f, pending) == jfmt_line_of(f, braces.start) -> jfmt_emit_leading(f, braces.start)
+            if pending < braces.start && jfmt_line_of(f, pending) == jfmt_line_of(f, braces.start) {
+                jfmt_emit_leading(f, braces.start)
+            }
         }
     }
     jfmt_write(f, "{{")

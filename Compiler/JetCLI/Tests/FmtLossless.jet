@@ -1391,7 +1391,9 @@ fl_typed_literal_dot_rewrite: fn(original: [FmtTok], original_i: Int, formatted:
 // payload in braces (spec.md: "labeled payloads use
 // `Type.Variant{label: value}` rather than call parentheses").
 fl_labeled_payload_parens: fn(tokens: [FmtTok], open: Int) -> Bool {
-    if fl_kind(tokens, open) != TOKEN_LPAREN || fl_kind(tokens, open - 2) != TOKEN_DOT || !fl_is_ident(tokens, open - 1) -> return false
+    if fl_kind(tokens, open) != TOKEN_LPAREN || fl_kind(tokens, open - 2) != TOKEN_DOT || !fl_is_ident(tokens, open - 1) {
+        return false
+    }
     fl_uppercase_start(tokens[open - 1].text) && fl_is_ident(tokens, open + 1) && fl_kind(tokens, open + 2) == TOKEN_COLON
 }
 
