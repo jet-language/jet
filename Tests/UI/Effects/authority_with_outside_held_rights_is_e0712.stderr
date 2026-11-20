@@ -1,0 +1,8 @@
+Error: Jet.EffectWithoutAuthority: `authority` doesn't hold `FS.Write`, so `with` can't narrow to it
+  --> Tests/UI/Effects/authority_with_outside_held_rights_is_e0712.jet:3:23
+    |
+  3 |     _: authority.with("FS.Write")
+    |                       ^^^^^^^^^^
+ Why: `authority` holds `FS.Read("repo")` and `FS.Write(".jet/build")`, from `Authority.workspace()` on line 2; a scoped right never covers the bare one
+ Fix: Ask for a right `authority` holds, such as `FS.Write(".jet/build")`, or build the authority with `FS.Write`
+More: jet-lang.dev/e/Jet.EffectWithoutAuthority

@@ -171,12 +171,24 @@ SemaScopeBinding: struct {
     // value's type is expected it is a one-value window, used as `w[0]`
     // (sema_expr_check_ident).
     map_slot: Bool{false},
+    // A `:` name bound to an `Authority` whose rights sema can see keeps
+    // them, and where they came from: `with` on the name refuses a right
+    // none of them covers (sema_call_authority_narrowing).
+    authority_rights: SemaAuthorityRights?{None},
 }
 
 SemaOriginFact: struct {
     source: String,
     line: Int?,
     column: Int?,
+}
+
+// The rights an `Authority` value holds, as the runtime keeps them (sorted
+// and unique), and the words that say where they came from: "from
+// `Authority.workspace()` on line 3".
+SemaAuthorityRights: struct {
+    rights: [String],
+    origin: String,
 }
 
 SemaScopeDeclaration: struct {
@@ -2897,6 +2909,14 @@ sema_scope_mark_fresh_cell: fn(table: &SemaScopeTable, name: String, init: Expr)
     sema_scope_note_binding_edit(table, index)
     // copy: `init` is the binding statement's initializer, which the statement keeps.
     table.bindings[index].fresh_cell = Val(init.copy())
+}
+
+// Keeps the rights of the `Authority` the binding `name` just declared holds
+// (see SemaScopeBinding.authority_rights).
+sema_scope_mark_authority_rights: fn(table: &SemaScopeTable, name: String, rights: &&SemaAuthorityRights) Never! {
+    index: sema_scope_resolve_index(table, name) ?? return
+    sema_scope_note_binding_edit(table, index)
+    table.bindings[index].authority_rights = Val(rights)
 }
 
 // Marks the `:` binding `name` just declared as a cell the body built (see

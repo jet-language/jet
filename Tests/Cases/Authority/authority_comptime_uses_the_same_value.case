@@ -6,6 +6,8 @@ step: jet run run.jet
 exit: 0
 stdout: = "authority\n" # the constants still hold `IO` and `FS.Read`
 step: jet run released.jet
-exit: 70 # narrowing the released constant is the run-time refusal
+exit: 70 # sema can't see a constant's rights, so narrowing the released one is the run-time refusal
 stdout: = "narrowed\n" # the narrowed constant holds `FS.Read`
-stderr: ~ "authority cannot narrow to `FS.Read` outside its held rights" # the released one holds nothing
+stderr: ~ "Stop: Jet.EffectWithoutAuthority: No held authority covers `FS.Read`" # the released one holds nothing
+stderr: ~ "released.jet:8" # the stop names the asking line
+stderr: !~ "<core.prelude>" # never the prelude's panic site

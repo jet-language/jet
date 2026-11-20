@@ -253,19 +253,19 @@ authority_covers_bytes: fn(held: I64, length: I64, requested: I64, other: I64) -
     authority_covers(held, need)
 }
 
+// A `with` that asks for a right none of the held rights covers: the
+// registered E0712 stop at the asking line (Trap.jet trap_located_stop), exit
+// 70, whose message is the row's `what`.
 authority_narrow_failure: fn(requested: I64) -> I64 {
     length: rt_text_len(requested)
-    if (length > I64{9223372036854775807} - I64{60}) { rt_seq_capacity_overflow_stop() }
-    message: rt_text_builder_with_capacity(length + I64{60})
-    // One exact seed message: Jet.EffectWithoutAuthority: authority cannot narrow to `...` outside its held rights.
-    jet_rt_string_builder_push(message, rt_static_text("Jet.EffectWithoutAuthority: authority cannot narrow to `"))
+    if (length > I64{9223372036854775807} - I64{40}) { rt_seq_capacity_overflow_stop() }
+    message: rt_text_builder_with_capacity(length + I64{40})
+    jet_rt_string_builder_push(message, rt_static_text("No held authority covers `"))
     rt_text_append(message, rt_text_data(requested), length)
-    jet_rt_string_builder_push(message, rt_static_text("` outside its held rights"))
-    // NL21: seed raw Rust panic/exit101 is a seed defect. Use the one Jet panic
-    // mechanism (task publication, otherwise root report/exit70), not a new stop.
-    jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
+    jet_rt_string_builder_push(message, rt_static_text("`"))
+    trap_located_stop(rt_static_text("E0712"), message)
     jet_rt_string_drop(message)
-    I64{0}  // canonical stopped handle if the scheduler published the failure
+    I64{0}  // the stopped handle when a task body published the stop
 }
 
 #Export(c) jet_authority_with: fn(value: I64, requested: I64) -> I64 {

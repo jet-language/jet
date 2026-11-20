@@ -4,6 +4,12 @@
 // declarations already present in SemaScopeTable.
 use jet_foundation.[
     AST_NODE_GENERATED,
+    AUTHORITY_PROCESS_GRANTS,
+    authority_covers,
+    authority_covers_any,
+    authority_holds,
+    authority_parse_right,
+    authority_uncovered,
     BUILTIN_METHOD_ROWS,
     BinOp,
     COLLECTION_OPERATIONS,
@@ -41,6 +47,7 @@ use jet_foundation.[
     diagnostic_registry_row,
     diagnostic_with_edit,
     expr_span,
+    effect_scope_base,
     OWNED_TRAITS,
     owned_trait,
     owned_trait_declares,
@@ -230,7 +237,9 @@ sema_call_try_builtin_host_route: fn(receiver: Expr, receiver_value: TExpr, meth
 }
 
 // `authority.with(right)` / `authority.without(right)` on the Core Authority
-// handle: the narrowing family, each a new handle from the runtime route.
+// handle: the narrowing family, each a new handle from the runtime route. A
+// `with` that sema can answer, and whose answer is no, is refused here
+// (sema_call_authority_narrowing).
 sema_call_try_authority_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if method != "with" && method != "without" {
         return SemaMethodSpecialCheck{handled: false, value: None}
@@ -253,11 +262,201 @@ sema_call_try_authority_method: fn(receiver: Expr, receiver_value: TExpr, method
     if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "Authority.{method}", span, [EffectRowEntry]{}, diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
+    if method == "with" && !sema_call_authority_narrowing(receiver, receiver_value, right, args[0].span, environment, scopes, diagnostics) {
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
     handle: TCallArg{value: receiver_value, template_items: [SymbolID]{}, borrow: true, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
     text: TCallArg{value: right, template_items: [SymbolID]{}, borrow: true, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
     reference: TMethodRef{symbol: sema_symbol_id(program, context, SymbolKind.Function, "", "JetAuthority", method), name: method, mangled: false, trait_owner: None, operator_identity: None}
     value: sema_tree_node(Type.Named{name: "Authority"}, TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: true, path: "JetAuthority", generics: [TPreludeArg]{}}, owner_type: None, method: reference, type_args: [Type]{}, args: [TCallArg]{handle, text}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+}
+
+// `with` on an authority whose rights sema can see, asking for a right it can
+// see: when none of the held rights covers the request, the narrowing is
+// refused here (E0712) and nothing runs. Any other `with` is the runtime's to
+// answer, which stops at the asking line under the same code. False when it
+// reports.
+sema_call_authority_narrowing: fn(receiver: Expr, receiver_value: TExpr, right: TExpr, span: Span, environment: SemaScopeEnvironment, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    requested: sema_call_authority_text(right) ?? return true
+    if sema_call_authority_binding(receiver_value, scopes) == .Val(index) {
+        if scopes.bindings[index].authority_rights == .Val(held) {
+            return sema_call_authority_refuse(receiver, held, requested, span, diagnostics)
+        }
+        return true
+    }
+    held: sema_call_authority_rights(receiver_value, environment, scopes) ?? return true
+    sema_call_authority_refuse(receiver, held, requested, span, diagnostics)
+}
+
+// Reports E0712 when none of `held`'s rights covers `requested`, the right
+// `with` asks `receiver` for. False when it reports.
+sema_call_authority_refuse: fn(receiver: Expr, held: SemaAuthorityRights, requested: String, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    if authority_covers_any(held.rights, requested) -> return true
+    subject := "the authority"
+    if receiver == .Ident(written, _, _) -> subject = "`{written}`"
+    bare: effect_scope_base(requested) == requested
+    // The held right whose unscoped form would cover the request: the one to
+    // ask for instead.
+    nearest := Int?{None}
+    loop (index, held_right) in held.rights {
+        if held_right != effect_scope_base(held_right) && authority_covers(effect_scope_base(held_right), requested) {
+            nearest = Val(index)
+            break
+        }
+    }
+    scoped: if bare && nearest != None -> "; a scoped right never covers the bare one" else -> ""
+    instead: if nearest == .Val(at) -> ", such as `{held.rights[at]}`" else -> ""
+    what: "{subject} doesn't hold `{requested}`, so `with` can't narrow to it"
+    why: "{subject} holds {sema_call_authority_rights_words(held.rights)}, {held.origin}{scoped}"
+    fix: "Ask for a right {subject} holds{instead}, or build the authority with `{requested}`"
+    diagnostics.push(sema_error("E0712", span, what, why, fix))
+    false
+}
+
+// The binding a `:` name's `Authority` value reads, whose rights sema may
+// keep (SemaScopeBinding.authority_rights), or None for any other value.
+sema_call_authority_binding: fn(value: TExpr, scopes: SemaScopeTable) -> Int? Never! {
+    if value.kind == .Clone(inner, _) -> return sema_call_authority_binding(inner, scopes)
+    if value.kind == .ExplicitCopy(inner) -> return sema_call_authority_binding(inner, scopes)
+    if value.kind == .Borrow(inner, _) -> return sema_call_authority_binding(inner, scopes)
+    if value.kind == .Local(local) {
+        index: sema_scope_resolve_index(scopes, local.name) ?? return None
+        if local.symbol_id == .Val(id) {
+            if id.id != scopes.bindings[index].symbol.id.id -> return None
+        }
+        return Val(index)
+    }
+    None
+}
+
+// The rights an `Authority` value sema builds holds: one built by
+// `Authority.workspace()` or by `Authority.from_rights` over written texts,
+// and `with` or `without` with a written text over such a value or over a
+// binding that keeps its rights. None for any other value (a parameter, a
+// constant, a text computed at run time); a name's rights are read where it
+// is used (sema_call_authority_binding), so a name bound to another name
+// keeps none.
+sema_call_authority_rights: fn(value: TExpr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> SemaAuthorityRights? {
+    if value.kind == .Clone(inner, _) {
+        return sema_call_authority_rights(inner, environment, scopes)
+    }
+    if value.kind == .ExplicitCopy(inner) {
+        return sema_call_authority_rights(inner, environment, scopes)
+    }
+    if value.kind == .Borrow(inner, _) {
+        return sema_call_authority_rights(inner, environment, scopes)
+    }
+    if value.kind == .StaticCall(owner, _, method, _, args) {
+        if owner == .Prelude(_, path, _) {
+            if path != "JetAuthority" -> return None
+        }
+        if owner == .User(_) -> return None
+        if method.name == "workspace" && args.len() == 0 {
+            // Each workspace grant's right in its canonical spelling.
+            rights := [String]{}
+            loop grant in AUTHORITY_PROCESS_GRANTS {
+                if grant.workspace -> rights.push(authority_parse_right(grant.right) ?? return None)
+            }
+            return Val(SemaAuthorityRights{rights: authority_holds(rights), origin: sema_call_authority_origin("`Authority.workspace()`", value.span, environment)})
+        }
+        if method.name == "from_rights" && args.len() == 1 {
+            rights: sema_call_authority_texts(args[0].value) ?? return None
+            return Val(SemaAuthorityRights{rights: authority_holds(rights), origin: sema_call_authority_origin("`Authority.from_rights(…)`", value.span, environment)})
+        }
+        if (method.name == "with" || method.name == "without") && args.len() == 2 {
+            requested: sema_call_authority_text(args[1].value) ?? return None
+            origin: sema_call_authority_origin("`{method.name}(\"{requested}\")`", value.span, environment)
+            if sema_call_authority_binding(args[0].value, scopes) == .Val(index) {
+                if scopes.bindings[index].authority_rights == .Val(base) {
+                    return sema_call_authority_narrowed(base, method.name, requested, origin)
+                }
+                return None
+            }
+            base: sema_call_authority_rights(args[0].value, environment, scopes) ?? return None
+            return sema_call_authority_narrowed(base, method.name, requested, origin)
+        }
+    }
+    None
+}
+
+// What `method`, `with` or `without`, asking `base` for `requested` holds:
+// for `with`, the requested right alone, or None when no held right covers
+// it; for `without`, the held rights the requested one doesn't cover.
+sema_call_authority_narrowed: fn(base: SemaAuthorityRights, method: String, requested: &&String, origin: &&String) -> SemaAuthorityRights? Never! {
+    if method == "with" {
+        if !authority_covers_any(base.rights, requested) -> return None
+        return Val(SemaAuthorityRights{rights: [String]{requested}, origin: origin})
+    }
+    Val(SemaAuthorityRights{rights: authority_uncovered(base.rights, [String]{requested}), origin: origin})
+}
+
+// "from `Authority.workspace()` on line 3": where a value's rights came from.
+sema_call_authority_origin: fn(source: String, span: Span, environment: SemaScopeEnvironment) -> String {
+    line: sema_source_line_at(environment.source_segments, span) ?? return "from {source}"
+    "from {source} on line {line}"
+}
+
+// The text of a right written as a string literal, or None.
+sema_call_authority_text: fn(value: TExpr) -> String? Never! {
+    if value.kind == .Clone(inner, _) -> return sema_call_authority_text(inner)
+    if value.kind == .ExplicitCopy(inner) -> return sema_call_authority_text(inner)
+    if value.kind == .StrLit(parts) {
+        text := ""
+        loop part in parts {
+            if part == .Literal(piece) -> text = "{text}{piece}" else -> return None
+        }
+        return Val(text)
+    }
+    None
+}
+
+// The texts of a list literal of rights each written as a string literal,
+// or None.
+sema_call_authority_texts: fn(value: TExpr) -> [String]? Never! {
+    if value.kind == .Clone(inner, _) -> return sema_call_authority_texts(inner)
+    if value.kind == .ExplicitCopy(inner) -> return sema_call_authority_texts(inner)
+    texts := [String]{}
+    if value.kind == .ListLit(values) {
+        loop item in values -> texts.push(sema_call_authority_text(item) ?? return None)
+        return Val(texts)
+    }
+    if value.kind == .List(values, _) {
+        loop item in values -> texts.push(sema_call_authority_text(item) ?? return None)
+        return Val(texts)
+    }
+    None
+}
+
+// "`FS.Read(\"repo\")` and `FS.Write(\".jet/build\")`", or "no right".
+sema_call_authority_rights_words: fn(rights: [String]) -> String Never! {
+    if rights.len() == 0 -> return "no right"
+    words := ""
+    loop (index, held_right) in rights {
+        if index > 0 -> words = if index == rights.len() - 1 -> "{words} and " else -> "{words}, "
+        words = "{words}`{held_right}`"
+    }
+    words
+}
+
+// Keeps the rights of the `Authority` that `statement`, the `:` binding
+// `name` just declared, binds, when sema can see them (see
+// SemaScopeBinding.authority_rights).
+sema_call_authority_note_binding: fn(scopes: &SemaScopeTable, name: String, statement: TStmt, environment: SemaScopeEnvironment) {
+    if statement == .Let(_, _, init, _, _, _) {
+        rights: sema_call_authority_rights(init, environment, scopes) ?? return
+        sema_scope_mark_authority_rights(scopes, name, rights)
+    }
+}
+
+// Keeps the rights of a `#FX(…)` head's handle `name`: the caps the head
+// lists, in their canonical spelling (see SemaScopeBinding.authority_rights).
+// A cap that is not a vocabulary right (a package's own effect) leaves the
+// handle's rights to the runtime.
+sema_call_authority_note_scope_head: fn(scopes: &SemaScopeTable, name: String, caps: [NamedSpan], span: Span, environment: SemaScopeEnvironment) {
+    rights := [String]{}
+    loop cap in caps -> rights.push(authority_parse_right(cap.name) ?? return)
+    sema_scope_mark_authority_rights(scopes, name, SemaAuthorityRights{rights: authority_holds(rights), origin: sema_call_authority_origin("its `#FX(…)` head", span, environment)})
 }
 
 // Only the canonical primitive selects this route. Nominal types named Int

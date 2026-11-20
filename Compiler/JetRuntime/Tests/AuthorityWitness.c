@@ -1,6 +1,6 @@
-/* Real composed Jet native exports only..
- * denied mode must take the canonical Jet panic exit70 with the exact E0712
- * message (seed exit101 is a registered seed defect, not a parity claim).
+/* Real composed Jet native exports only.
+ * Denied mode must take the registered E0712 stop (`Stop:
+ * Jet.EffectWithoutAuthority`) at exit 70.
  * Workspace is called directly here; IR reachability is separately regen-owed. */
 #include <assert.h>
 #include <stdbool.h>

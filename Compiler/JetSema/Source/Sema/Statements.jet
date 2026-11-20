@@ -9896,6 +9896,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         }
                         if !binding.mutable && binding.pattern == None {
                             sema_scope_mark_lambda_binding(scopes, binding.name, value)
+                            sema_call_authority_note_binding(scopes, binding.name, value, environment)
                         }
                         if !binding.mutable && binding.pattern == None && sema_stmt_binds_map_slot(value) {
                             sema_scope_mark_map_slot(scopes, binding.name)
@@ -11637,6 +11638,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
                         // A scope head's handle names the scope; holding it
                         // is its use.
                         state.used_ids[id.id] = true
+                        sema_call_authority_note_scope_head(scopes, handle.name, caps, handle.span, environment)
                         // A used handle is an ordinary runtime
                         // `Authority` built from the resolved cap list.
                         if sema_ownership_last_use_statements(body, handle.name) {

@@ -1,8 +1,20 @@
-# Claim: narrowing an Authority with a right it does not hold (`with("FS.Write")` outside the held set) is E0712
+# Claim: narrowing an Authority whose held rights sema can see to a right none of them covers (`with("FS.Write")` on `Authority.workspace()`) is the check-time E0712: check, build and run refuse it and nothing runs
 fixture: AuthorityWithOutsideHeldRightsIsE0712.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # sema sees both the held rights and the request
+stdout: empty
+stderr: ~ "Error: Jet.EffectWithoutAuthority: `authority` doesn't hold `FS.Write`, so `with` can't narrow to it" # E0712 at check time
+stderr: ~ "main.jet:3:23" # at the requested right
+stderr: ~ "Why: `authority` holds `FS.Read(\"repo\")` and `FS.Write(\".jet/build\")`, from `Authority.workspace()` on line 2; a scoped right never covers the bare one"
+stderr: ~ "Fix: Ask for a right `authority` holds, such as `FS.Write(\".jet/build\")`, or build the authority with `FS.Write`"
+step: jet build main.jet
+exit: 1 # the build is refused
+stderr: ~ "Error: Jet.EffectWithoutAuthority"
 step: jet run main.jet
-exit: 1 # the run is refused
-stderr: ~ "Jet.EffectWithoutAuthority" # the narrowing outside the held rights reports E0712
+exit: 1 # the run is refused and nothing runs
+stdout: empty
+stderr: ~ "Error: Jet.EffectWithoutAuthority"
+stderr: !~ "Stop: " # never a run-time stop
