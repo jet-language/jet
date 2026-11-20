@@ -75,8 +75,7 @@ search: fn(root: String, pattern: String) -> [SearchHit] {
     loop entry in entries {
         text: fs.read(entry.path) ?? panic("cli search read")
         line_no := 0
-        #Allow(Jet.HiddenCopyInLoop, "the compiler materializes this view; no source spelling avoids it yet") loop line in
-            text.lines() {
+        loop line in text.lines() {
             line_no += 1
             if regex.is_match(line) {
                 hits.push(
