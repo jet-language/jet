@@ -235,12 +235,13 @@ sema_web_placement_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegist
         }
         reached.push(found)
     }
-    reported := [String:Bool]{}
+    // The functions reported, by key.
+    reported := name_table_sized(metas.len() * 2)
     loop at in 0..<metas.len() {
         meta: metas[at]
         if meta.row < 0 || module_is_core(graph.modules[meta.registration].module_identity) -> next
         function: modules[meta.slot].functions[meta.row]
-        if reported.get(function.key) != None -> next
+        if name_find(reported, function.key) != None -> next
         name: sema_app_caller_name(function)
         marker: if function.endpoint != "" -> function.endpoint else -> function.system_run
         found := [Diagnostic]{}
@@ -259,7 +260,7 @@ sema_web_placement_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegist
             }
         }
         if found.len() == 0 -> next
-        reported[function.key] = true
+        _ := name_intern(reported, function.key)
         sema_attach_diagnostic_source_locations(found, 0, graph.modules[meta.registration].source_segments)
         loop diagnostic in found -> diagnostics.push(diagnostic)
     }
