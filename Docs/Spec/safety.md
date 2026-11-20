@@ -237,14 +237,14 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1635,
+  "total": 1636,
   "counts": {
     "Compiler": 799,
     "Core": 179,
     "Docs": 13,
     "Examples": 45,
     "Jetpack": 8,
-    "Tests": 563,
+    "Tests": 564,
     "Tools": 28
   },
   "regions": [
@@ -2694,112 +2694,112 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 57,
+      "line": 63,
       "column": 5,
       "reason": "the image's entry calls this before it starts any other thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 72,
+      "line": 78,
       "column": 9,
       "reason": "jet_rt_main calls this on the main thread before the entry runs"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 88,
+      "line": 97,
       "column": 5,
       "reason": "rt_sigaction borrows the four-word action on the stack; handler is this runtime's C-ABI export with the (signal, info, context) signature"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 101,
+      "line": 110,
       "column": 5,
       "reason": "stack is a fresh private mapping; sigaltstack copies its first three words (ss_sp, ss_flags, ss_size)"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 121,
+      "line": 130,
       "column": 5,
       "reason": "stack is this thread's registered alternate stack, unused outside a handler; sigaltstack copies its first three words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 155,
+      "line": 175,
       "column": 5,
       "reason": "rt_sigaction borrows the four-word SIG_DFL action on the stack; tgkill signals this thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 212,
+      "line": 232,
       "column": 5,
       "reason": "stub is a fresh private page that holds `mov rax, rbp; ret` and becomes read+execute before the call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 234,
+      "line": 254,
       "column": 9,
       "reason": "path is a fresh private page; the executable is mapped read-only and only read"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 361,
+      "line": 381,
       "column": 5,
       "reason": "the trace made this mapping and holds no pointer into it past this call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 451,
+      "line": 471,
       "column": 5,
       "reason": "image is a read-only mapping of this executable's ELF64 file; every offset read comes from its own header and section table"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 486,
+      "line": 506,
       "column": 9,
       "reason": "frame is an active caller's [saved rbp][return address] pair on this thread's stack"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 493,
+      "line": 513,
       "column": 9,
       "reason": "each followed link ascends by less than 16 MiB or crosses a stack segment's bridge frame, so frame stays on this thread's chain"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 528,
+      "line": 548,
       "column": 9,
       "reason": "frame is an active caller's [saved rbp][return address] pair on this thread's stack"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 541,
+      "line": 561,
       "column": 9,
       "reason": "each followed link ascends by less than 16 MiB or crosses a stack segment's bridge frame, so frame stays on this thread's chain"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 611,
+      "line": 631,
       "column": 9,
       "reason": "block + 12 is inside this block, which lies in the read-only table"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 704,
+      "line": 724,
       "column": 5,
       "reason": "at lies in a mapping the trace reads: the executable's read-only ELF header, program or section table, notes or location table, or the page the host's frames were written to"
     },
@@ -3625,7 +3625,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Observe.jet",
-      "line": 445,
+      "line": 485,
       "column": 9,
       "reason": "an idempotent install: every writer stores the same code address"
     },
@@ -4143,35 +4143,35 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 6309,
+      "line": 6314,
       "column": 5,
       "reason": "the dump's calls take words alone or borrow the state's scratch or the process's own mappings for their duration"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 6413,
+      "line": 6418,
       "column": 5,
       "reason": "the vectors name the state's copy and a range of this process's own mappings; the kernel copies between them, faulting on neither"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 6913,
+      "line": 6918,
       "column": 9,
       "reason": "openat reads the dump's NUL-terminated path in the state's text page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 7443,
+      "line": 7448,
       "column": 5,
       "reason": "getrusage writes the struct rusage in this thread's own entry"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 7539,
+      "line": 7544,
       "column": 5,
       "reason": "getcpu writes the CPU's 32-bit number into this thread's own entry"
     },
@@ -8020,6 +8020,13 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "Tests",
+      "file": "Tests/Cases/Debug/AFaultNamesItsRoutineAndTask.fixture/main.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "the program copies from an address it never mapped, to fault"
+    },
+    {
+      "package": "Tests",
       "file": "Tests/Cases/DevPartsRoutine/JIT1216AdversarialRegressions.fixture/raw_alias/run.jet",
       "line": 5,
       "column": 5,
@@ -11706,9 +11713,9 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Docs | 13 |
 | Examples | 45 |
 | Jetpack | 8 |
-| Tests | 563 |
+| Tests | 564 |
 | Tools | 28 |
-| **total** | **1635** |
+| **total** | **1636** |
 
 ### Regions
 
@@ -12063,22 +12070,22 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/DynCodec.jet | 137:9 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/DynCodec.jet | 167:9 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/EnvOverlay.jet | 40:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 57:5 | "the image's entry calls this before it starts any other thread" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 72:9 | "jet_rt_main calls this on the main thread before the entry runs" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 88:5 | "rt_sigaction borrows the four-word action on the stack; handler is this runtime's C-ABI export with the (signal, info, context) signature" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 101:5 | "stack is a fresh private mapping; sigaltstack copies its first three words (ss_sp, ss_flags, ss_size)" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 121:5 | "stack is this thread's registered alternate stack, unused outside a handler; sigaltstack copies its first three words" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 155:5 | "rt_sigaction borrows the four-word SIG_DFL action on the stack; tgkill signals this thread" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 212:5 | "stub is a fresh private page that holds `mov rax, rbp; ret` and becomes read+execute before the call" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 234:9 | "path is a fresh private page; the executable is mapped read-only and only read" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 361:5 | "the trace made this mapping and holds no pointer into it past this call" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 451:5 | "image is a read-only mapping of this executable's ELF64 file; every offset read comes from its own header and section table" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 486:9 | "frame is an active caller's [saved rbp][return address] pair on this thread's stack" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 493:9 | "each followed link ascends by less than 16 MiB or crosses a stack segment's bridge frame, so frame stays on this thread's chain" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 528:9 | "frame is an active caller's [saved rbp][return address] pair on this thread's stack" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 541:9 | "each followed link ascends by less than 16 MiB or crosses a stack segment's bridge frame, so frame stays on this thread's chain" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 611:9 | "block + 12 is inside this block, which lies in the read-only table" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 704:5 | "at lies in a mapping the trace reads: the executable's read-only ELF header, program or section table, notes or location table, or the page the host's frames were written to" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 63:5 | "the image's entry calls this before it starts any other thread" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 78:9 | "jet_rt_main calls this on the main thread before the entry runs" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 97:5 | "rt_sigaction borrows the four-word action on the stack; handler is this runtime's C-ABI export with the (signal, info, context) signature" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 110:5 | "stack is a fresh private mapping; sigaltstack copies its first three words (ss_sp, ss_flags, ss_size)" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 130:5 | "stack is this thread's registered alternate stack, unused outside a handler; sigaltstack copies its first three words" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 175:5 | "rt_sigaction borrows the four-word SIG_DFL action on the stack; tgkill signals this thread" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 232:5 | "stub is a fresh private page that holds `mov rax, rbp; ret` and becomes read+execute before the call" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 254:9 | "path is a fresh private page; the executable is mapped read-only and only read" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 381:5 | "the trace made this mapping and holds no pointer into it past this call" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 471:5 | "image is a read-only mapping of this executable's ELF64 file; every offset read comes from its own header and section table" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 506:9 | "frame is an active caller's [saved rbp][return address] pair on this thread's stack" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 513:9 | "each followed link ascends by less than 16 MiB or crosses a stack segment's bridge frame, so frame stays on this thread's chain" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 548:9 | "frame is an active caller's [saved rbp][return address] pair on this thread's stack" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 561:9 | "each followed link ascends by less than 16 MiB or crosses a stack segment's bridge frame, so frame stays on this thread's chain" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 631:9 | "block + 12 is inside this block, which lies in the read-only table" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 724:5 | "at lies in a mapping the trace reads: the executable's read-only ELF header, program or section table, notes or location table, or the page the host's frames were written to" |
 | Compiler | Compiler/JetRuntime/Source/FaultAllocation.jet | 21:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/FaultSchedule.jet | 34:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/Fiber.jet | 127:5 | "the carrier saved its stack at carrier+16 when it switched to this fiber and runs nothing else until this switch resumes it" |
@@ -12196,7 +12203,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/Observe.jet | 29:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Observe.jet | 35:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Observe.jet | 235:5 | "an idempotent flag: every writer stores the same 1" |
-| Compiler | Compiler/JetRuntime/Source/Observe.jet | 445:9 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/Observe.jet | 485:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 83:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 184:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 234:9 | "an idempotent install: every writer stores the same code address" |
@@ -12270,11 +12277,11 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 5493:5 | "the observation start runs before the writer and the stop that read it" |
 | Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 5515:9 | "read fills the state's receive buffer with one datagram" |
 | Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 5966:5 | "openat reads the image copy's NUL-terminated path in the state's text page" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 6309:5 | "the dump's calls take words alone or borrow the state's scratch or the process's own mappings for their duration" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 6413:5 | "the vectors name the state's copy and a range of this process's own mappings; the kernel copies between them, faulting on neither" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 6913:9 | "openat reads the dump's NUL-terminated path in the state's text page" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 7443:5 | "getrusage writes the struct rusage in this thread's own entry" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 7539:5 | "getcpu writes the CPU's 32-bit number into this thread's own entry" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 6314:5 | "the dump's calls take words alone or borrow the state's scratch or the process's own mappings for their duration" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 6418:5 | "the vectors name the state's copy and a range of this process's own mappings; the kernel copies between them, faulting on neither" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 6918:9 | "openat reads the dump's NUL-terminated path in the state's text page" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 7448:5 | "getrusage writes the struct rusage in this thread's own entry" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 7544:5 | "getcpu writes the CPU's 32-bit number into this thread's own entry" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 28:5 | "the kernel enters this restorer only from a returning handler, on its signal frame" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 38:5 | "rt_sigaction borrows the four-word action on the stack; handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 61:9 | "written under the scheduler root mutex" |
@@ -12824,6 +12831,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Tests | Tests/Cases/Custom/Fixtures/SentryFaultsAreTierParity/unsafe_sentries_provenance/unsafe_sentries_provenance.jet | 6:5 | "external address must be a live allocation" |
 | Tests | Tests/Cases/Custom/Fixtures/SentryFaultsAreTierParity/unsafe_sentries_quarantine/unsafe_sentries_quarantine.jet | 7:5 | "pointer is used only after arena reset to prove quarantine" |
 | Tests | Tests/Cases/Custom/Fixtures/SentrySourcePolicyOffIsTierParity/fixture.jet | 7:5 | "the local cell is live for this raw read" |
+| Tests | Tests/Cases/Debug/AFaultNamesItsRoutineAndTask.fixture/main.jet | 6:5 | "the program copies from an address it never mapped, to fault" |
 | Tests | Tests/Cases/DevPartsRoutine/JIT1216AdversarialRegressions.fixture/raw_alias/run.jet | 5:5 | "the pointer stays inside this stack frame" |
 | Tests | Tests/Cases/DevPartsRoutine/UnsafeBlocksAreEvaluatedWithLiveSentries.fixture/fault.jet | 4:5 | "mapped address is valid and aligned" |
 | Tests | Tests/Cases/DiagnosticsCoverage/SentryMetadataUsesTheReturnedFaultExitCode.fixture/app/main.jet | 4:5 | "calls the audited dependency" |

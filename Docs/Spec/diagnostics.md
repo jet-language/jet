@@ -214,11 +214,24 @@ source line and exits 70. Deep recursion reaches it only past the thread's
 total stack budget, since a recursive body moves onto stack segments as it
 goes deeper (spec.md, `#MaxDepth`). Any other SIGSEGV, SIGBUS, SIGILL or SIGFPE prints
 `Fault [SIGNAME]: invalid memory access at address 0x…` (or the signal's own
-reason) and a backtrace of the Jet frames (`name at file:line`, from the
-image's location table, `.debug_jetline`, which the compiler writes beside
-the DWARF from the same rows). It then re-raises the signal with its default action, so the
+reason) and a backtrace: the runtime routines it faulted in, by their
+function symbols (`.symtab`), up to the first Jet frame, then the Jet frames
+(`name at file:line`, from the image's location table, `.debug_jetline`,
+which the compiler writes beside the DWARF from the same rows). A fault
+fetching its own instruction (a call to a bad address) names the calling
+frame from the return address that call pushed. It then re-raises the signal with its default action, so the
 status is the signal's (128 + number in a shell). Addresses other than the
 faulting one are not printed, because they differ between the two tiers.
+
+One thread reports: a second thread that faults meanwhile waits for the
+process's end, and a fault inside the report itself takes the signal's
+default action at once. After either report, a program with a task, a
+recording or an observer names the faulting task (`Task: 2 (label)`, or
+`Task: none (a runtime thread)`) and writes its recording's sync-order log,
+so `jet run --record=NAME` keeps a faulting run and `jet debug
+--replay=NAME` reruns it to the fault. Under `--observe` it writes the typed
+dump (observability.md) at the faulting instruction, where `jet debug
+<dump>` opens it.
 
 Under `jet debug` the fault stops the program first, before its signal
 reaches it, as a breakpoint does: every thread stops, and the session reads

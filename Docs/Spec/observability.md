@@ -1025,7 +1025,9 @@ Tests/Cases/Perf/heap_snapshot_types_retention_and_diff.case is the worked
 example.
 
 A stop that ends an observed process (a panic, a trap, a contract failure)
-writes a typed dump while the stopping stack is whole:
+writes a typed dump while the stopping stack is whole, and so does a fault
+(SIGSEGV, SIGBUS, SIGILL, SIGFPE), after its report, with the faulting
+thread's registers as the fault left them:
 `.jet/dumps/<program>-<UTC time>.jetdump` under the working directory, mode
 0600, `~<n>` after the time when a dump of the same second exists, of which
 the newest three stay. Stderr names it (`dump written: <path>`). The dump
