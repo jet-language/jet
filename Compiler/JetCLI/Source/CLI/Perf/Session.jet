@@ -11,7 +11,7 @@ use {
     perf_sys: core.sys
     perf_time: core.time
     jet_backend.[link_debug_addr]
-    jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE]
+    jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[
         CanonicalJSON,
         CanonicalJSONField,
@@ -456,15 +456,19 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
         if live_error == .Val(message) {
             return jet_cli_perf_error(message, "start the program with `jet run --observe`, then attach", color)
         }
+        // The directory the program publishes in and takes requests from;
+        // one that isn't this user's alone is refused before any request is
+        // left in it.
+        home: jet_cli_perf_flight_home() ?? return jet_cli_perf_home_refused(err, color)
         text: perf_files.read(path) ?? return jet_cli_perf_error("cannot read source {path}: {jet_cli_io_error_text(err)}", JET_CLI_PERF_FIX, color)
         // With `--zones=`, the program's zones, frame marks, plots and log
         // spans for that window, before its ring is read, and the window
         // they cover.
         watched := JetCLIPerfRuntimeWindow?{None}
-        spans: if zones_ms > 0 -> jet_cli_perf_attach_zones(target_pid, zones_ms, watched) else -> None
+        spans: if zones_ms > 0 -> jet_cli_perf_attach_zones(target_pid, home, zones_ms, watched) else -> None
         // The flight ring the program publishes: its recent samples, waits,
         // wakes, spawns and transfers, read as a run's are.
-        flight: jet_cli_perf_attach_flight(target_pid, path)
+        flight: jet_cli_perf_attach_flight(target_pid, home, path)
         capture = jet_cli_perf_capture_source(path, text, observations, flight, target, None) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
         // The header's window is the one the zones were recorded in, not
         // the run since it started.
@@ -473,7 +477,7 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
             capture.profile.window_reason = "the attach's zones window: wall time on jet's monotonic clock, the program's process CPU across it"
         }
         if alloc {
-            heap: jet_cli_perf_attach_heap(target_pid, path) ?? return jet_cli_perf_error(err.message, "start the program with `jet run --observe --checked-alloc {path}`, then attach with `--lens=alloc`", color)
+            heap: jet_cli_perf_attach_heap(target_pid, home, path) ?? return jet_cli_perf_error(err.message, "start the program with `jet run --observe --checked-alloc {path}`, then attach with `--lens=alloc`", color)
             held_ns = Val(heap.held_ns)
             // copy: the attach keeps its source; the section owns its own.
             if jet_cli_perf_session_heaps(path.copy(), heap.samples.heaps.move()) == .Val(section) {
@@ -522,14 +526,15 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
     JetDriverVerbOutput{stdout: "", stderr: if quiet -> "" else -> "{held}Trace: {path}\n", exit_code: JET_DRIVER_EXIT_OK}
 }
 
-// The flight ring the observed program `pid` publishes in the temporary
-// directory (JetRuntime PerfSamples.jet perf_flight_publish) and the image
-// beside it, copied out of its way, then read as a run's samples are; the
-// program keeps publishing its own. Lines in `source` are its own. None when
-// it publishes no ring.
-jet_cli_perf_attach_flight: fn(pid: Int, source: String) -[FS, Env, Time]> JetCLIPerfSamples? Never! {
-    published: perf_files.join(perf_sys.temp_dir(), "jet-flight-{pid}.samples")
-    taken: perf_files.join(perf_sys.temp_dir(), "jet-perf-attach-{pid}-{perf_time.unix_ns()}.samples")
+// The flight ring the observed program `pid` publishes in this user's
+// private directory `home` (jet_cli_perf_flight_home; JetRuntime
+// PerfSamples.jet perf_flight_publish) and the image beside it, copied out
+// of its way, then read as a run's samples are; the program keeps
+// publishing its own. Lines in `source` are its own. None when it publishes
+// no ring.
+jet_cli_perf_attach_flight: fn(pid: Int, home: String, source: String) -[FS, Env, Time]> JetCLIPerfSamples? Never! {
+    published: perf_files.join(home, "jet-flight-{pid}.samples")
+    taken: perf_files.join(home, "jet-perf-attach-{pid}-{perf_time.unix_ns()}.samples")
     perf_files.copy(published, taken) ?? return None
     if perf_files.copy("{published}.image", "{taken}.image") == .Err(_) {
         perf_files.remove(taken).drop("the attach reads the ring it copied once")
@@ -540,18 +545,19 @@ jet_cli_perf_attach_flight: fn(pid: Int, source: String) -[FS, Env, Time]> JetCL
 
 // `--lens=alloc`'s heap snapshot of the flight-recorded program `pid`, taken
 // while it runs, and how long it held the program, in nanoseconds. The
-// request is left beside the program's published ring; the writer thread
-// that publishes the ring every 100 ms notices it there (JetRuntime
-// PerfSamples.jet perf_flight_heap) and answers in `<ring>.heap`: the hold,
+// request, a file only this user can write, is left beside the ring the
+// program publishes in `home`; the writer thread that publishes the ring
+// every 100 ms notices it there (JetRuntime PerfSamples.jet
+// perf_flight_heap) and answers in `<ring>.heap`: the hold,
 // -1 when the program keeps no list of its live blocks, then the snapshot's
 // records, read beside a copy of the ring's image as a run's samples are.
 // Lines in `source` are its own.
-jet_cli_perf_attach_heap: fn(pid: Int, source: String) -[FS, Env, Time]> JetCLIPerfAttachHeap JetCLIReadError! {
-    ring: perf_files.join(perf_sys.temp_dir(), "jet-flight-{pid}.samples")
+jet_cli_perf_attach_heap: fn(pid: Int, home: String, source: String) -[FS, Env, Time]> JetCLIPerfAttachHeap JetCLIReadError! {
+    ring: perf_files.join(home, "jet-flight-{pid}.samples")
     answer: "{ring}.heap"
     request: "{ring}.heap-request"
     perf_files.remove(answer).drop("an earlier attach's answer is none to this request")
-    perf_files.write(request, "") ?? return Err(jet_cli_read_error("cannot ask process {pid} for a heap snapshot: {jet_cli_io_error_text(err)}"))
+    _: perf_files.create(request, mode: Val(0o600), links: .Refuse) ?? return Err(jet_cli_read_error("cannot ask process {pid} for a heap snapshot: {jet_cli_io_error_text(err)}"))
     answered := false
     loop _ in 0..<JET_CLI_PERF_HEAP_WAITS {
         perf_time.sleep(25ms)
@@ -572,7 +578,7 @@ jet_cli_perf_attach_heap: fn(pid: Int, source: String) -[FS, Env, Time]> JetCLIP
     if bytes[7] == (U8{255}) {
         return Err(jet_cli_read_error("process {pid} keeps no list of its live blocks: it was not started with allocation tracking"))
     }
-    taken: perf_files.join(perf_sys.temp_dir(), "jet-perf-attach-{pid}-{perf_time.unix_ns()}.heap")
+    taken: perf_files.join(home, "jet-perf-attach-{pid}-{perf_time.unix_ns()}.heap")
     perf_files.write_bytes(taken, bytes.slice(8, bytes.len())) ?? return Err(jet_cli_read_error("cannot keep process {pid}'s heap snapshot: {jet_cli_io_error_text(err)}"))
     if perf_files.copy("{ring}.image", "{taken}.image") == .Err(failure) {
         perf_files.remove(taken).drop("the attach reads the snapshot it kept once")
@@ -607,20 +613,21 @@ jet_cli_perf_attach_window: fn(text: String) -> Int? Never! {
 }
 
 // Turn zones on in the flight-recorded program `pid` for `window_ms`: leave
-// the request beside its published ring (JetRuntime PerfSamples.jet
-// perf_flight_zones), which its next publication (every 100 ms) answers by
-// recording zones, frame marks, plots and log spans to `<ring>.spans`;
+// the request, a file only this user can write, beside the ring it
+// publishes in `home` (JetRuntime PerfSamples.jet perf_flight_zones), which
+// its next publication (every 100 ms) answers by recording zones, frame
+// marks, plots and log spans to `<ring>.spans`;
 // remove it after the window and wait two publications, so the program has
 // turned them off and written its rows. The rows, copied out of the
 // program's way; None when it wrote none. `window` becomes the window from
 // the request to its removal: its wall time on jet's clock and the process
 // CPU the program spent in it, None where /proc doesn't show that CPU.
-jet_cli_perf_attach_zones: fn(pid: Int, window_ms: Int, window: &JetCLIPerfRuntimeWindow?) -[FS, Env, Time]> String? Never! {
-    ring: perf_files.join(perf_sys.temp_dir(), "jet-flight-{pid}.samples")
+jet_cli_perf_attach_zones: fn(pid: Int, home: String, window_ms: Int, window: &JetCLIPerfRuntimeWindow?) -[FS, Env, Time]> String? Never! {
+    ring: perf_files.join(home, "jet-flight-{pid}.samples")
     request: "{ring}.zones"
     cpu_before: jet_cli_perf_attach_cpu(pid)
     started: perf_time.instant()
-    perf_files.write(request, "") ?? return None
+    _: perf_files.create(request, mode: Val(0o600), links: .Refuse) ?? return None
     loop _ in 0..<(window_ms + 24) /% 25 -> perf_time.sleep(25ms)
     perf_files.remove(request).drop("a request the program no longer sees turns zones off")
     wall: started.elapsed().ns
@@ -628,9 +635,64 @@ jet_cli_perf_attach_zones: fn(pid: Int, window_ms: Int, window: &JetCLIPerfRunti
     cpu: if cpu_before == .Val(first) && cpu_after == .Val(last) && last >= first -> Val(last - first) else -> None
     window = Val(JetCLIPerfRuntimeWindow{elapsed_ns: U64{wall}, cpu_ns: cpu, exit: false})
     perf_time.sleep(250ms)
-    taken: perf_files.join(perf_sys.temp_dir(), "jet-perf-attach-{pid}-{perf_time.unix_ns()}.spans")
+    taken: perf_files.join(home, "jet-perf-attach-{pid}-{perf_time.unix_ns()}.spans")
     perf_files.copy("{ring}.spans", taken) ?? return None
     Val(taken)
+}
+
+// This user's private directory, where a flight-recorded program publishes
+// its ring and image and reads an attach's requests (JetRuntime
+// PerfSamples.jet perf_flight_home finds the same one): `jet` in
+// `$XDG_RUNTIME_DIR` when that names an absolute path, else `jet-<uid>` in
+// the temporary directory, made owner-only when missing. One already there
+// is used only when it is a directory, not a link, this user owns and no
+// one else can open: a directory someone else made or opened could hold
+// their requests and show them the ring.
+jet_cli_perf_flight_home: fn() -[FS, Env]> String JetCLIPerfHomeError! {
+    runtime: perf_sys.get("XDG_RUNTIME_DIR") ?? ""
+    private: runtime.starts_with("/")
+    parent: if private -> runtime else -> perf_sys.temp_dir()
+    name: if private -> "jet" else -> "jet-{perf_sys.geteuid()}"
+    home: perf_files.join(parent, name)
+    held: perf_files.open_directory(parent) ?? return Err(JetCLIPerfHomeError{home: home, cause: "cannot open {parent}: {jet_cli_io_error_text(err)}", shared: false})
+    if held.create_directory(name, mode: Val(0o700)) == {
+        .Ok(_) -> {}
+        .Err(.AlreadyExists(_)) -> {}
+        .Err(failure) -> return Err(JetCLIPerfHomeError{home: home, cause: "cannot make {home}: {jet_cli_io_error_text(failure)}", shared: false})
+    }
+    facts: perf_files.stat(home) ?? return Err(JetCLIPerfHomeError{home: home, cause: "cannot inspect {home}: {jet_cli_io_error_text(err)}", shared: false})
+    cause: if {
+        facts.is_symlink -> "it is a link"
+        !facts.is_dir -> "it isn't a directory"
+        facts.owner != Val(perf_sys.geteuid()) -> "another user owns it"
+        facts.mode & 0o077 != 0 -> "other users can open it"
+        else -> ""
+    }
+    if cause != "" -> return Err(JetCLIPerfHomeError{home: home, cause: cause, shared: true})
+    Ok(home)
+}
+
+// Why jet_cli_perf_flight_home found no private directory: `shared` when
+// `home` is there but not this user's alone, for `cause`; otherwise the
+// file operation that failed, in `cause`.
+#Error
+JetCLIPerfHomeError: struct {
+    home: String,
+    cause: String,
+    shared: Bool,
+}
+
+// An attach refused for its flight directory (jet_cli_perf_flight_home):
+// E2123 when the directory isn't this user's alone, else the failed
+// operation.
+jet_cli_perf_home_refused: fn(failure: JetCLIPerfHomeError, color: Bool) -> JetDriverVerbOutput Never! {
+    if !failure.shared {
+        return jet_cli_report_output("", "E2105", failure.cause, jet_cli_why("E2105"), "correct the named problem, then attach again", color, JET_DRIVER_EXIT_USER_ERROR)
+    }
+    what: "jet won't profile through `{failure.home}`: {failure.cause}"
+    why: "A flight-recorded program publishes its ring in that directory and takes attach requests from it, so whoever else can reach it could read the program's profile or turn its zones on."
+    fix: "remove `{failure.home}`, or set `XDG_RUNTIME_DIR` to a directory only you can open; then start the program again with `jet run --observe` and attach"
+    jet_cli_report_output("", "E2123", what, why, fix, color, JET_DRIVER_EXIT_USER_ERROR)
 }
 
 // The process CPU program `pid` has spent since its run started (/proc's

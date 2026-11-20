@@ -4363,8 +4363,9 @@ perf_samples_periods: fn(signal: I64, info: I64) -> I64 {
 // full, lost: no handler ever waits. The observation writer (ObserveLive.jet
 // jet_rt_observe_writer) drains the socket into the ring at each
 // publication (perf_flight_publish), dropping the oldest records once the
-// ring fills, and publishes it as `<temp>/jet-flight-<pid>.samples`, the
-// image beside it as `.image`: the pair `jet perf attach` reads. A stop
+// ring fills, and publishes it as `jet-flight-<pid>.samples` in this
+// user's private directory (perf_flight_home), the image beside it as
+// `.image`: the pair `jet perf attach` reads. A stop
 // that ends the process writes a typed dump that holds the ring
 // (perf_flight_dump), which `jet debug` opens.
 PERF_FLIGHT_INTERVAL_US: I64{10000}
@@ -4643,7 +4644,7 @@ perf_flight_keep: fn(state: I64, record: I64, bytes: I64) {
     rt_text_store(wrapping(state + PERF_FLIGHT_USED), wrapping(kept + bytes))
 }
 
-// `<directory>/jet-flight-<pid>.samples`, a fresh text.
+// `<home>/jet-flight-<pid>.samples`, a fresh text.
 perf_flight_path: fn(directory: I64) -> I64 {
     builder: jet_rt_string_builder_new()
     observe_append_directory(builder, directory)
@@ -4694,11 +4695,61 @@ perf_flight_beside: fn(path: I64, suffix: I64) -> I64 {
     jet_rt_string_builder_finish(builder)
 }
 
+// The flight recorder's own directory, apart from the temporary directory
+// other users share: `jet` in `$XDG_RUNTIME_DIR` when that names an
+// absolute path, else `jet-<euid>` in `temp`, made owner-only when missing
+// (Session.jet jet_cli_perf_flight_home finds the same one). A fresh text;
+// 0 when it is not this user's alone (another user's, a link, or open to
+// others), and then nothing is published there and no request is read
+// from it.
+perf_flight_home: fn(temp: I64) -> I64 {
+    builder: jet_rt_string_builder_new()
+    runtime: jet_rt_logical_env_get(rt_static_text("XDG_RUNTIME_DIR"))
+    if (runtime != I64{0} && rt_text_len(runtime) > I64{0} && trap_byte(rt_text_data(runtime)) == I64{47}) {
+        observe_append_directory(builder, runtime)
+        jet_rt_string_builder_push(builder, rt_static_text("jet"))
+    } else {
+        observe_append_directory(builder, temp)
+        jet_rt_string_builder_push(builder, rt_static_text("jet-"))
+        // geteuid
+        observe_decimal_unsigned(builder, observe_syscall(I64{107}, I64{0}, I64{0}, I64{0}, I64{0}))
+    }
+    if (runtime != I64{0}) { jet_rt_string_drop(runtime) }
+    home: jet_rt_string_builder_finish(builder)
+    name: observe_cstring(home)
+    // mkdir(name, 0700); one already there is checked as a new one is.
+    _ := observe_syscall(I64{83}, name, I64{448}, I64{0}, I64{0})
+    private: perf_flight_owned(name, I64{16384})
+    jet_rt_free(name, wrapping(rt_text_len(home) + I64{1}), I64{1})
+    if (!private) {
+        jet_rt_string_drop(home)
+        return I64{0}
+    }
+    home
+}
+
+// Whether the C string `name` names, its final link not followed, a file of
+// `kind` (S_IFDIR or S_IFREG) this user owns, closed to others when it is a
+// directory. A request another user left is not this user's, so it is
+// ignored.
+perf_flight_owned: fn(name: I64, kind: I64) -> Bool {
+    facts: jet_rt_alloc(I64{144}, I64{8})
+    // lstat: st_mode, then st_uid, at byte 24.
+    found: observe_syscall(I64{6}, name, facts, I64{0}, I64{0}) == I64{0}
+    word: if (found) -> rt_text_word(wrapping(facts + I64{24})) else -> I64{0}
+    jet_rt_free(facts, I64{144}, I64{8})
+    mode: word & I64{65535}
+    // geteuid
+    owner: observe_syscall(I64{107}, I64{0}, I64{0}, I64{0}, I64{0})
+    (mode & I64{61440}) == kind && ((word >> I64{32}) & I64{4294967295}) == owner && (kind != I64{16384} || (mode & I64{63}) == I64{0})
+}
+
 // At each of the observation writer's publications: drain the socket into
-// the ring and publish it in `directory`, the image beside it the first
-// time, answering an attach's zones (perf_flight_zones) and heap snapshot
-// (perf_flight_heap) requests. A publication that finds the lock held (a
-// dump) skips its turn.
+// the ring and publish it in this user's private directory beside the
+// temporary directory `directory` (perf_flight_home), the image beside it
+// the first time, answering an attach's zones (perf_flight_zones) and heap
+// snapshot (perf_flight_heap) requests. A publication that finds the lock
+// held (a dump) skips its turn.
 perf_flight_publish: fn(directory: I64) {
     state: perf_flight_state
     if (state == I64{0} || !perf_flight_lock(state, I64{1})) {
@@ -4706,25 +4757,33 @@ perf_flight_publish: fn(directory: I64) {
     }
     if (rt_text_word(wrapping(state + PERF_FLIGHT_ENDED)) == I64{0}) {
         perf_flight_drain(state)
-        path: perf_flight_path(directory)
-        perf_flight_zones(path)
-        if (rt_text_word(wrapping(state + PERF_FLIGHT_IMAGE)) == I64{0}) {
-            image: perf_flight_beside(path, rt_static_text(".image"))
-            if (perf_flight_file(image, perf_samples_image, perf_flight_image_bytes(perf_samples_image))) {
-                rt_text_store(wrapping(state + PERF_FLIGHT_IMAGE), I64{1})
+        home: perf_flight_home(directory)
+        if (home == I64{0}) {
+            // No request stands where others could have left it.
+            if (perf_zones_on != I64{0}) { perf_zones_set(I64{0}) }
+        } else {
+            path: perf_flight_path(home)
+            jet_rt_string_drop(home)
+            perf_flight_zones(path)
+            if (rt_text_word(wrapping(state + PERF_FLIGHT_IMAGE)) == I64{0}) {
+                image: perf_flight_beside(path, rt_static_text(".image"))
+                if (perf_flight_file(image, perf_samples_image, perf_flight_image_bytes(perf_samples_image))) {
+                    rt_text_store(wrapping(state + PERF_FLIGHT_IMAGE), I64{1})
+                }
+                jet_rt_string_drop(image)
             }
-            jet_rt_string_drop(image)
+            // After the image, which the attach reads the snapshot beside.
+            perf_flight_heap(path)
+            _ := perf_flight_file(path, wrapping(state + PERF_FLIGHT_RING_AT), rt_text_word(wrapping(state + PERF_FLIGHT_USED)))
+            jet_rt_string_drop(path)
         }
-        // After the image, which the attach reads the snapshot beside.
-        perf_flight_heap(path)
-        _ := perf_flight_file(path, wrapping(state + PERF_FLIGHT_RING_AT), rt_text_word(wrapping(state + PERF_FLIGHT_USED)))
-        jet_rt_string_drop(path)
     }
     sync_store(state, I64{0})
 }
 
 // `jet perf attach` turns zones on in a flight-recorded run by leaving
 // `<ring>.zones` beside the published ring `path`, and off by removing it.
+// Only a request this user owns counts (perf_flight_owned).
 // While the request stands, zones, frame marks, plots and log spans write
 // their rows to `<ring>.spans` (perf_spans_fd_set), emptied when a request
 // turns zones on and written out at each publication; once it is gone the
@@ -4732,8 +4791,7 @@ perf_flight_publish: fn(directory: I64) {
 perf_flight_zones: fn(path: I64) {
     request: perf_flight_beside(path, rt_static_text(".zones"))
     name: observe_cstring(request)
-    // faccessat(AT_FDCWD, name, F_OK)
-    wanted: observe_syscall(I64{269}, I64{-100}, name, I64{0}, I64{0}) == I64{0}
+    wanted: perf_flight_owned(name, I64{32768})
     jet_rt_free(name, wrapping(rt_text_len(request) + I64{1}), I64{1})
     jet_rt_string_drop(request)
     if (wanted && perf_zones_on == I64{0}) {
@@ -4757,7 +4815,8 @@ perf_flight_zones: fn(path: I64) {
 }
 
 // `jet perf attach --lens=alloc` asks a flight-recorded run for a heap
-// snapshot by leaving `<ring>.heap-request` beside the published ring
+// snapshot by leaving `<ring>.heap-request`, a file this user owns
+// (perf_flight_owned), beside the published ring
 // `path`. The publication that finds it answers in `<ring>.heap`, staged
 // beside it and renamed over it, then removes the request: first a word,
 // the nanoseconds the snapshot held the program's allocations and frees
@@ -4769,8 +4828,7 @@ perf_flight_zones: fn(path: I64) {
 perf_flight_heap: fn(path: I64) {
     request: perf_flight_beside(path, rt_static_text(".heap-request"))
     asked: observe_cstring(request)
-    // faccessat(AT_FDCWD, asked, F_OK)
-    wanted: observe_syscall(I64{269}, I64{-100}, asked, I64{0}, I64{0}) == I64{0}
+    wanted: perf_flight_owned(asked, I64{32768})
     if (wanted) {
         answer: perf_flight_beside(path, rt_static_text(".heap"))
         staged: perf_flight_beside(path, rt_static_text(".heap.stage"))
@@ -4817,12 +4875,16 @@ perf_flight_end: fn() {
     rt_text_store(wrapping(state + PERF_FLIGHT_ENDED), I64{1})
     writer: sync_load(wrapping(observe_root + I64{72}))
     if (writer != I64{0}) {
-        path: perf_flight_path(sync_load(wrapping(writer + I64{96})))
-        image: perf_flight_beside(path, rt_static_text(".image"))
-        perf_flight_unlink(path)
-        perf_flight_unlink(image)
-        jet_rt_string_drop(image)
-        jet_rt_string_drop(path)
+        home: perf_flight_home(sync_load(wrapping(writer + I64{96})))
+        if (home != I64{0}) {
+            path: perf_flight_path(home)
+            jet_rt_string_drop(home)
+            image: perf_flight_beside(path, rt_static_text(".image"))
+            perf_flight_unlink(path)
+            perf_flight_unlink(image)
+            jet_rt_string_drop(image)
+            jet_rt_string_drop(path)
+        }
     }
     sync_store(state, I64{0})
 }

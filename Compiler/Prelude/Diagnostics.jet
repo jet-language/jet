@@ -20574,6 +20574,31 @@ DottedPathPrefixUnresolved: struct {
     }
 }
 
+PerfDirectoryNotPrivate: struct {
+    home: String,
+    cause: String,
+
+    impl Diagnostic {
+        code: "E2123",
+        safety_class: .Soundness,
+        safety_reason: "A directory someone else made or can open could hold their requests, which would turn the program's zones on or take its heap, and would show them its profile.",
+        expert_path: "none: the profile is kept where only its user can reach it",
+        stage: [.Jet],
+        meaning: "`jet perf attach` finds the flight recorder's directory is not its user's alone",
+        detail: true,
+
+        what: fn(self) -> String { "jet won't profile through `{self.home}`: {self.cause}" }
+
+        why: fn(self) -> String {
+            "A flight-recorded program publishes its ring in that directory and takes attach requests from it, so whoever else can reach it could read the program's profile or turn its zones on."
+        }
+
+        fix: fn(self) -> String {
+            "Remove `{self.home}`, or set `XDG_RUNTIME_DIR` to a directory only you can open; then start the program again with `jet run --observe` and attach."
+        }
+    }
+}
+
 RetiredDevPrescan: struct {
     impl Diagnostic {
         code: "E2201",

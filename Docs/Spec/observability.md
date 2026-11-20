@@ -736,18 +736,35 @@ spawns and file and network transfers, as `jet perf run` does, into a
 256 KiB ring. Each record is one datagram on a nonblocking socket pair, sent
 whole or, while the socket is full, lost, so no record ever waits. The observe
 writer drains the socket into the ring every 100ms, the oldest records going
-once it fills, and publishes `<temp>/jet-flight-<pid>.samples` beside the live snapshot, and the
-program's image as `.image` once. `jet perf attach <pid> --source app.jet`
-copies both and reads the copies, so its trace holds the waits and transfers
+once it fills, and publishes `jet-flight-<pid>.samples`, and the program's
+image as `.image` once, in the user's private directory: `jet` in
+`$XDG_RUNTIME_DIR` when that names an absolute path, else `jet-<uid>` in the
+temporary directory, made mode 0700 when missing. One already there is used
+only when it is a directory, not a link, the user owns and no one else can
+open, since a directory someone else made first or can open could hold their
+requests and show them the ring. Otherwise the program publishes no ring and
+reads no request, and `jet perf attach` refuses with E2123
+(`Jet.PerfDirectoryNotPrivate`), naming the directory and why, before it
+leaves a request there.
+`jet perf attach <pid> --source app.jet` copies both and reads the copies,
+so its trace holds the waits and transfers
 the program made before the attach: each wait's task, line, object and
 waker, and each transfer's `io` row. A wait of a task the live snapshot no
 longer holds becomes no row. Tests/Cases/Perf/attach_drains_flight_ring.case
 is the worked example.
 
+An attach asks the program for zones or a heap snapshot by leaving a request
+file beside the ring, mode 0600 and never through a link. The program acts
+on a request only when it is a regular file its own user owns, so no other
+user turns its zones on or takes its heap, even where the directory is
+reachable to them; a request another user left is ignored.
+Tests/Cases/Perf/attach_ignores_another_users_request.case is the worked
+example.
+
 `core.perf` zones, frame marks and plots stay off in such a run: each zone
 site tests one runtime word and calls nothing while it is clear.
 `jet perf attach <pid> --source app.jet --zones=500ms` turns them on for the
-window. It leaves `<temp>/jet-flight-<pid>.samples.zones` beside the ring,
+window. It leaves `jet-flight-<pid>.samples.zones` beside the ring,
 which the writer's next publication answers by setting the word and writing
 the zone, frame, plot and log span rows to `.samples.spans`. It then removes
 the request, so the next publication clears the word, and reads the rows into
@@ -761,7 +778,7 @@ Tests/Cases/Perf/attach_turns_zones_on.case is the worked example.
 `jet run --observe --checked-alloc app.jet` keeps the live list as a `jet
 perf run --lens=alloc` does, which `jet perf attach <pid> --source app.jet
 --lens=alloc` snapshots while the program runs. It leaves
-`<temp>/jet-flight-<pid>.samples.heap-request` beside the ring, which the
+`jet-flight-<pid>.samples.heap-request` beside the ring, which the
 writer's next publication notices as it looks for the zones request: it
 takes the snapshot on the writer's thread, named `attach`, with the live
 list held as a `heap_mark` holds it, so no block joins or leaves it while
@@ -772,8 +789,8 @@ its `heap` section, and stderr states how long the program's allocations
 and frees waited, `Heap snapshot: held the program's allocations and frees
 for 412 µs`. A program not started with `--checked-alloc` keeps no live
 list: the attach is refused with that reason and the command that starts
-one, and writes no trace. An observed run that is never attached pays one
-`faccessat` a publication, every 100ms, for the request.
+one, and writes no trace. An observed run that is never attached pays, every
+100ms, a `mkdir` and an `lstat` for its directory and one `lstat` a request.
 Tests/Cases/Perf/heap_snapshot_types_retention_and_diff.case is the worked
 example.
 
