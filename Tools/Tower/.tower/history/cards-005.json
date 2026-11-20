@@ -36578,6 +36578,346 @@
       "completedAt": "2026-11-17T16:05:46.463Z",
       "questions": [],
       "retiredAt": "2026-11-20T16:07:16.229Z"
+    },
+    {
+      "id": "c0heplig",
+      "num": 6317,
+      "title": "Case-suite seams the kit refuses: store ingest, hangar realization and fixtures, budget verify, receipt store and other unported kit forms",
+      "body": "Found by TestGreen's cases classification at dev 82d3369757 ($JET_SCRATCH_ROOT/lanes/TestGreen/GROUPS.tsv, cases-g2n). These rows are REFUSED because the case kit form has no product primitive under it; this host could run them. Rows: store-ingest 19, hangar-verified-realization 17, budget-verify 13, hangar-verified-fixture 8, hangar-fixture-backdate 7, receipt-store 5, crypto-provider-failure 3, process-file-fd 2, package-tests 2, core-tls-server 2, codec-allocation-probe 2, build-target 2, PENDING-SEAM(term-is-terminal) 2, and 1 each for sparse-set-len, runtime-http-internals, process-merge-stderr, manifest-facts-parse, lock-fixture and core-sys-raw-env. The PTY (41) and session read_bytes (22) rows belong to the frozen #3594 and are not in this card.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e23",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Closed: c29 was the last open criterion (5 clean cases runs, p266-p270)."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c29: run 2 of 3 clean. The p266 full cases run has 0 musl or toolchain-pack failures."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c29 progress: dev 7f7d5ee831 landed in p264 (one shared musl build, locked per pack and target, plus the signal or exit code on failure). jetpack-current was rebuilt from gate-p264 so the provider change is live. p265 full cases run: 0 rows with 'building musl ... failed' or 'toolchain pack is unavailable', and golden CBind o0 passes again (it failed on p263 and p264 with the old jetpack). Run 1 of 3; the packages musl filter passed 3/3 on p264."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c29 root (read on dev aa80e241d2): Jetpack/Provider/Source/Toolchain/CcToolchainPack.jet realizes each target under a pid-named stem and provider_cc_pack_build_musl runs process.run_all(specs, sys.cpu_count()) per realization, so N concurrent cases each spawn cpu_count clangs inside the 14G cases scope. The kit shares the unpacked pack (JET_CC_PACK_ROOT, Kit.jet kit_cc_pack_root) only for golden, and the jetpack provider never reads JET_CC_PACK_ROOT. Fix shape: build musl once per pack digest and triple into a shared directory under a files.lock, copy libc and crt objects from it, share the pack root with cases too, and report receipt.code/receipt.signal in 'building musl … failed'."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15 by TowerKeeper-1: this card keeps the kit seams (c1-c5) and the E1315 fixture (c9). The product outcomes carried by the precut audit moved to their homes: #5966 (channel locks), #3665 (HTTPS default), #6933 (store), #6939 (advisory trust), #6941 (executable leases), #6040 (ladder continuity), #6856 (providers) and #6944 (stdin lines). Their cases stay refused until the seam here lands."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT)."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "agent",
+          "text": "E0983 (UnrealizedLibrary) is retired in the registry by Recover-c59retire: without the hangar realized-library search root (the hangar-verified-realization seam, c2) the driver reports E0603 and nothing emits E0983. Re-register E0983 with its emitter, and restore tests/ui/use_unrealized_library/ from $JET_SCRATCH_ROOT/held/2026-11-05/recover3/c59-E0983, when that seam lands."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 23 criteria from archived #200, #213, #295, #625, #918, #957, #960, #1415, #2242, #2881, #2923: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The store-ingest (19), receipt-store (5) and lock-fixture (1) kit forms run against the real Jetpack store and receipt APIs, so those rows pass or fail on product behavior and none is REFUSED. Proof: `jet test Compiler --profile cases` reports no REFUSED row for these forms.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6933 c13, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:56:08.315Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 2,
+          "text": "The hangar-verified-realization (17), hangar-verified-fixture (8) and hangar-fixture-backdate (7) kit forms drive the real hangar verification and fixture paths, and none of those rows is REFUSED. Proof: `jet test Compiler --profile cases` reports no REFUSED row for these forms.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6933 c14, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:56:11.241Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 3,
+          "text": "The budget-verify (13) and codec-allocation-probe (2) kit forms read the real budget and allocation reports, and none of those rows is REFUSED. Proof: `jet test Compiler --profile cases` reports no REFUSED row for these forms.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6933 c15, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:56:14.924Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 4,
+          "text": "The remaining seams (crypto-provider-failure, process-file-fd, package-tests, core-tls-server, build-target, term-is-terminal, sparse-set-len, runtime-http-internals, process-merge-stderr, manifest-facts-parse, core-sys-raw-env) each have a product primitive the kit form calls, and none of those rows is REFUSED. Proof: `jet test Compiler --profile cases` reports no REFUSED row for these forms.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6933 c16, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:56:18.735Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 5,
+          "text": "A cases run at the landing commit shows 0 REFUSED rows outside #3594's PTY and read_bytes rows. Proof: the `jet test Compiler --profile cases` summary line at that commit.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6933 c17, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:56:22.992Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 6,
+          "text": "(was #200) U21 channel refs and outdated [precut audit: not proven on 9c7ddf1359: C:jetpack_engine/channel_update_writes_exact_lock_and_build_uses_it_offline not run: the testkit refuses its seam (hangar-verified-fixture); C:jetpack_engine/channel_build_without_lock_is_e1271 not run: it needs jetpack, and the base's jetpack bootstrap failed (Jetpack compiler slice drifted from…]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #5966 c6: channel locks belong on the lockfile card #5966",
+          "at": "2026-11-15T04:55:00.732Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 7,
+          "text": "(was #213) HTTPS by default in core.http [precut audit: not proven on 9c7ddf1359: C:http_client_law/https_to_http_redirect_denied_unless_allow_http_downgrade not run: the testkit refuses its seam (core-tls-server); C:http_client_law/https_negotiates_h2_with_an_explicit_root not run: the testkit refuses its seam (core-tls-server)]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #3665 c35: core.http belongs on #3665",
+          "at": "2026-11-15T04:55:01.618Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 8,
+          "text": "(was #295) corelib audit: core.time ring — calendar parity with java.time/jiff [precut audit: not proven on 9c7ddf1359: C:corelib_parts_platform/core_time_calendar_zone_and_dst_run not run: the testkit refuses its seam (line 4: environment tokens are argv-only)]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "6c31e4f192 release candidate kit (chain s2 jet fa08aca4357522f7, a0_033): tests/cases/corelib_parts_platform/core_time_calendar_zone_and_dst_run.case PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T11:07:23.296Z"
+        },
+        {
+          "n": 9,
+          "text": "tests/ui/hangar_verify_digest_mismatch reaches E1315 through a real CLI fixture API (jetpack_hangar_digest_mismatch) and pins Jet-owned what/why/fix output, and diagnostics coverage counts E1315 with no scanner exception or allowlist. Proof: `jet test Compiler --profile ui --filter hangar_verify_digest_mismatch` and `jet test tests/guards --filter diagnostics_coverage`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6933 c18, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:56:26.787Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 10,
+          "text": "(was #625 c2) diagnostic_snapshots and diagnostics_coverage pass with E1315 covered; no scanner exception or allowlist is added [precut audit: not proven on 9c7ddf1359: U:hangar_verify_digest_mismatch not run: the testkit refuses its seam (missing CLI fixture API: jetpack_hangar_digest_mismatch)]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6317 c9: the coverage half of the same E1315 fixture outcome",
+          "at": "2026-11-15T04:54:59.825Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 12,
+          "text": "(was #918 c2, #919 c2, #920 c2, #921 c2, #922 c2, #994 c2, #1020 c2) Store identity, reachability, receipts, and projections agree. Repeated operations are safe and deterministic [precut audit: not proven on 9c7ddf1359: C:jetpack_platform/platform_tier_gate_exercises_native_lease_diagnostics_and_audit not run: the testkit refuses its seam (line 37: undefined capture token); C:jetpack_platform/audit_reports_stale_executable_lease_golden not run: it needs jetpack, and the base's jetpack bootstrap failed (Jetpack…]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6933 c6: store card #6933",
+          "at": "2026-11-15T04:55:02.567Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 13,
+          "text": "(was #918 c3, #919 c3, #920 c3, #921 c3, #922 c3, #994 c3, #1020 c3) Crash, corruption, stale lease, path escape, and concurrent-update cases preserve live data and give a safe repair or rollback path [precut audit: not proven on 9c7ddf1359: C:jetpack_platform/platform_tier_gate_exercises_native_lease_diagnostics_and_audit not run: the testkit refuses its seam (line 37: undefined capture token); C:jetpack_platform/audit_reports_stale_executable_lease_golden not run: it needs jetpack, and the base's jetpack bootstrap failed (Jetpack…]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6933 c7: store card #6933",
+          "at": "2026-11-15T04:55:03.497Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 14,
+          "text": "(was #957 c2) Identity, signatures, provenance, locks, advisory policy, and offline state produce one deterministic allow or deny result [precut audit: not proven on 9c7ddf1359: C:pkg/cli_signed_advisory_feed_receipt_and_tamper_fail_closed not run: the testkit refuses its seam (package-tests)]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6939 c6: trust card #6939",
+          "at": "2026-11-15T04:55:04.449Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 15,
+          "text": "(was #957 c3) Tamper, rollback, freeze, mix-and-match, stale metadata, and compromised-key cases fail closed with a useful recovery path [precut audit: not proven on 9c7ddf1359: C:pkg/cli_signed_advisory_feed_receipt_and_tamper_fail_closed not run: the testkit refuses its seam (package-tests)]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6939 c6: the fail-closed half of the same advisory outcome",
+          "at": "2026-11-15T04:55:05.370Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 16,
+          "text": "(was #960 c2, #965 c2) Executable identity, lease ownership, replacement, restart, receipts, and rollback agree under concurrent processes and upgrades [precut audit: not proven on 9c7ddf1359: C:jetpack_engine/parent_env_unchanged_after_use not run: the testkit refuses its seam (hangar-verified-realization); C:jetpack_engine/use_fails_closed_when_executable_lease_service_key_is_invalid not run: the testkit refuses its seam (hangar-verified-realization); C:jetpack_platform/platform_gate_reaches_store_authenticated_lease_service not run: the testkit refuses its seam…]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6941 c14: executable replacement belongs with user tool updates on #6941",
+          "at": "2026-11-15T04:55:06.470Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 17,
+          "text": "(was #960 c3) Crash, lock contention, antivirus interference, interrupted replacement, stale leases, and reboot cannot publish a partial executable or delete the last good version [precut audit: not proven on 9c7ddf1359: C:jetpack_engine/parent_env_unchanged_after_use not run: the testkit refuses its seam (hangar-verified-realization); C:jetpack_engine/use_fails_closed_when_executable_lease_service_key_is_invalid not run: the testkit refuses its seam (hangar-verified-realization); C:jetpack_platform/platform_gate_reaches_store_authenticated_lease_service not run: the testkit refuses its seam…]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6941 c15: executable replacement belongs with #6941",
+          "at": "2026-11-15T04:55:07.368Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 18,
+          "text": "(was #1415 c3) Each stage preserves observable meaning and reuses the same functions, types, errors, and Core APIs. No second script mode or manual semantic rewrite appears [precut audit: not proven on 9c7ddf1359: C:script_to_system/script_to_system_continuity_preserves_one_source not run: the testkit refuses its seam (line 159: invalid stream assertion or missing partial reason)]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6040 c11: script-to-system ladder belongs on #6040",
+          "at": "2026-11-15T04:55:08.272Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 19,
+          "text": "(was #1415 c4) Split, fold, install, export, and rollback preserve source ownership, graph identity, dependencies, diagnostics, and reproducible outputs [precut audit: not proven on 9c7ddf1359: C:script_to_system/script_to_system_continuity_preserves_one_source not run: the testkit refuses its seam (line 159: invalid stream assertion or missing partial reason)]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6040 c11: same continuity case",
+          "at": "2026-11-15T04:55:09.218Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 21,
+          "text": "(was #2242 c1) Each supported `ProviderKind` uses one adapter module for trust checks, cache expectations, download planning, approval facts, and realization; source classification and adapter lookup stay single [precut audit: not proven on 9c7ddf1359: C:jetpack_engine/typed_env_build_hook_approval_binds_declared_dependency_refs not run: the testkit refuses its seam (hangar-verified-realization); C:jetpack_acquisition/non_tty_download_without_yes_fails_before_realization not run: it needs jetpack, and the base's jetpack bootstrap failed (Jetpack compiler slice drifted from…]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6856 c5: providers card #6856",
+          "at": "2026-11-15T04:55:10.147Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 22,
+          "text": "(was #2242 c2) Core, Nix, CRAN, LuaRocks, and script registry behavior keeps its current cache identity, offline rules, authority checks, progress facts, diagnostic codes, and unsupported-provider error [precut audit: not proven on 9c7ddf1359: C:jetpack_engine/typed_env_build_hook_approval_binds_declared_dependency_refs not run: the testkit refuses its seam (hangar-verified-realization); C:jetpack_acquisition/non_tty_download_without_yes_fails_before_realization not run: it needs jetpack, and the base's jetpack bootstrap failed (Jetpack compiler slice drifted from…]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6856 c6: providers card #6856",
+          "at": "2026-11-15T04:55:11.073Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 23,
+          "text": "(was #2242 c3) Targeted tests exercise planning and realization through Core, Nix, and one script registry adapter, including trusted cache reuse and offline rejection [precut audit: not proven on 9c7ddf1359: C:jetpack_engine/typed_env_build_hook_approval_binds_declared_dependency_refs not run: the testkit refuses its seam (hangar-verified-realization); C:jetpack_acquisition/non_tty_download_without_yes_fails_before_realization not run: it needs jetpack, and the base's jetpack bootstrap failed (Jetpack compiler slice drifted from…]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6856 c6: the targeted tests are PROVKEEP's proof",
+          "at": "2026-11-15T04:55:12.153Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 24,
+          "text": "(was #2242 c4) The final dependency graph keeps provider, network, shell, and realization work inside `jetpack`; no new dependency or compiler back-edge is added [precut audit: not proven on 9c7ddf1359: C:jetpack_engine/typed_env_build_hook_approval_binds_declared_dependency_refs not run: the testkit refuses its seam (hangar-verified-realization); C:jetpack_acquisition/non_tty_download_without_yes_fails_before_realization not run: it needs jetpack, and the base's jetpack bootstrap failed (Jetpack compiler slice drifted from…]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6856 c7: providers card #6856",
+          "at": "2026-11-15T04:55:13.248Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 25,
+          "text": "(was #2881 c1) The read-until-blank program prints `a`, `b`, `c` with exit 0 on O0, O1 and O2 with piped stdin [precut audit: not proven on 9c7ddf1359: C:terminal/stdin_lines_emit_before_eof_and_stop_at_blank not run: the testkit refuses its seam (process-file-fd)]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6944 c1: the read-until-blank program is the same outcome",
+          "at": "2026-11-15T04:55:15.138Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 26,
+          "text": "(was #2923 c1) O0, O1 and O2 echo the first stdin line before EOF, then terminate at a blank sentinel without requiring input closure [precut audit: not proven on 9c7ddf1359: C:terminal/stdin_lines_emit_before_eof_and_stop_at_blank not run: the testkit refuses its seam (process-file-fd)]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6944 c1: stdin lines card",
+          "at": "2026-11-15T04:55:14.210Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 27,
+          "text": "(was #2923 c2) After the blank sentinel, io.readline returns the next unread line on all three tiers; the loop neither consumes nor discards that tail [precut audit: not proven on 9c7ddf1359: C:terminal/stdin_lines_emit_before_eof_and_stop_at_blank not run: the testkit refuses its seam (process-file-fd)]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6944 c2: stdin lines card",
+          "at": "2026-11-15T04:55:16.089Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 28,
+          "text": "(was #2923 c3) The eager jet_jit_stdin_lines materializer and its host registration are removed; current consumers use the canonical LinesStdin cursor [precut audit: not proven on 9c7ddf1359: C:terminal/stdin_lines_emit_before_eof_and_stop_at_blank not run: the testkit refuses its seam (process-file-fd)]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 6cea1699f9: git grep -n jet_jit_stdin_lines -- ':!Docs' ':!Tools/tower' -> no match (materializer and host registration removed)",
+          "at": "2026-11-13T02:23:52.587Z"
+        },
+        {
+          "n": 29,
+          "text": "The cases suite never fails a C case on a racing musl sysroot build. Each run, one random C case fails: p197 fiber_liveness/a_foreign_call_that_blocks_its_carrier, p199 meta_suite J33 FFI.jet, p200 authority/ffi_library_grant_covers_its_own_library_only. Each case's engine builds musl itself, under run_all at cpu_count inside the 14G cases scope, and a clang dies with empty stderr ('Building musl ... failed: '). Fix: build the Hangar musl sysroot once per suite, shared and locked. Also, Jetpack/Provider/Source/Toolchain/CcToolchainPack.jet stops dropping the build receipt's signal and exit code. Proof: three full cases runs with no musl failure; a forced clang kill shows its signal in the error.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 7f7d5ee831 (p264): the C toolchain pack builds musl once per pack digest and target, shared and locked; the test kit hands the cases suite the run's pack root; and a failed musl compile names its signal, timeout or exit code. Five full cases runs since then show no musl failure: p266, p267, p268, p269 and p270 each give 0 lines for 'building musl|toolchain pack is unavailable' in suite-pNNN/cases.out, with no C, FFI or fiber-liveness row failing on it. Forced-kill half: Jetpack/Provider/Tests/CcToolchain.jet drives a stub clang killed by SIGKILL and checks that the error names signal 9 and nothing is published. That test is worker-run with the SUB and landed through the p264 census's Jetpack area checks.",
+          "at": "2026-11-17T16:24:20.755Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-30T14:11:07.271Z",
+      "updated": "2026-11-17T16:24:22.924Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 29,
+      "completedAt": "2026-11-17T16:24:22.924Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T17:09:56.117Z"
     }
   ]
 }
