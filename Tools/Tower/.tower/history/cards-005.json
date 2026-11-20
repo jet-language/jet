@@ -37026,6 +37026,245 @@
       "completedAt": "2026-11-17T18:43:54.167Z",
       "questions": [],
       "retiredAt": "2026-11-20T18:52:31.314Z"
+    },
+    {
+      "id": "c0byuovb",
+      "num": 6422,
+      "title": "Fonts leave Core: Core/Font/Font.jet and RouteAFont.jet go to a first-party `font` package",
+      "body": "Move card for #6149 (D-RAYLIB-FONT-HOME1=A, ratified 2026-10-31: \"Moves under A, one card each\").\n\n- Moves: Core/Font/Font.jet and Compiler/JetRuntime/Source/RouteAFont.jet to\n  Jetpack/Provider/Batteries/font/. Jetpack/Provider/Batteries/gui adds `font` to its\n  dependencies.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e21",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [
+        "D-GAME-PLATFORM1"
+      ],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c1 and c2 proved on p272 (c2737a2a81)."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Decision (Main): UICapability.FontShaping (code 6) stays. Removing it changes Examples/Apps/UI/Surface.out and three web_build goldens, which contradicts c1 (\"goldens unchanged\"). font-battery meets #6422 c2 and #6423 c1 without the removal. No owner ballot is needed: no criterion asks for the removal."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Examples concept-area cutover (2c3e68a70b) moved paths this card's criteria cite. Read each cited path as its new home: c1: Examples/features/ui/surface.jet -> Examples/Apps/UI/Surface.jet."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Examples/features/ui/surface.jet and the gui battery build with `use font`. Their goldens are unchanged. Proof: `jet test Compiler --profile golden --filter UI/Surface` on O0, O1 and O2 with `use font`, goldens unchanged.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 34d1c88713 (p272). On batch compiler p272 (dev c2737a2a81): golden UI/Surface 3/3 (O0, O1, O2), goldens unchanged.",
+          "at": "2026-11-17T19:11:12.250Z"
+        },
+        {
+          "n": 2,
+          "text": "The `UI.FontShaping` host power is no longer a Core power. The font package reaches its host edge through the mechanisms that any package can use. Proof: `git grep -n FontShaping -- Compiler Core` prints nothing.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 34d1c88713 (p272): the font battery asks through core.ui.host.provider_capability. On dev c2737a2a81, git grep -n FontShaping -- Compiler Core prints nothing.",
+          "at": "2026-11-17T19:11:13.265Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-31T05:09:37.133Z",
+      "updated": "2026-11-17T19:11:15.157Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-17T19:11:15.157Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T19:32:20.912Z"
+    },
+    {
+      "id": "c0akrada",
+      "num": 6818,
+      "title": "Native sessions on Linux: short access tokens, refresh tokens in the Secret Service, revocation",
+      "body": "Gap card K4 from the #6792 r2 proposal (Docs/proposals/2026-11-13-web-app-framework-shape.md) and review round 1 (Docs/audits/2026-11-13-web-app-framework-shape-review.md). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e19",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c1 proved on p272 (c2737a2a81)."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. macOS, Windows, iOS and Android work moved to #6993 (G13)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The Linux desktop app signs in with a short-lived access token and a refresh token stored in the Secret Service (libsecret); revoking a device ends its refresh within one access-token lifetime. Proof: `jet test Compiler --profile cases --filter app_native_session_` runs a client on the Linux native target against a running server: it signs in, refreshes, is revoked, and its next refresh after one access-token lifetime is refused, with the same output on O0, O1 and O2. (#6792 r2 gap K4)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 545ae24c0c (native sessions mechanism, p271) and ec73fa4ed5 (case, p272). On batch compiler p272 (dev c2737a2a81): cases NativeApp/app_native_session_refreshes_and_ends_on_revoke PASS (sign in, refresh, revoke ends the refresh).",
+          "at": "2026-11-17T19:11:07.659Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": "c0snkbac",
+      "needsAcceptance": false,
+      "created": "2026-11-13T15:43:23.640Z",
+      "updated": "2026-11-17T19:11:11.235Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-17T19:11:11.235Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T19:32:20.913Z"
+    },
+    {
+      "id": "c0yhga63",
+      "num": 6917,
+      "title": "Progress and errors never tear: one bottom status region on a terminal, plain sequential output elsewhere",
+      "body": "Destination: realization progress (jetpack env, jet build) renders in one bottom-anchored status region, and errors print atomically above it through one writer. Non-TTY, NO_COLOR and CI output is plain and sequential, with no cursor movement.\n\nWhy it matters: torn progress lines mid-error were seen in a real session. The Rust-era fix (#2215) went with the Rust code and is unproven on the self-hosted toolchain.\n\nSource: #3720 c68, c69 (from #2215).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e20",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c1 and c2 proved on p272 with Jetpack rebuilt."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Realization progress renders in a single bottom-anchored status region, and errors print atomically above it with no interleaved or torn lines. Proof: `jet test Compiler --profile cases --filter CLIOutput/progress_region_no_torn_lines` (pty).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 03ea375bc4 (p272). On batch compiler p272 (dev c2737a2a81) with Jetpack rebuilt from that tree: cases CLIOutput/progress_region_no_torn_lines PASS (pty).",
+          "at": "2026-11-17T19:12:34.494Z"
+        },
+        {
+          "n": 2,
+          "text": "Non-TTY, NO_COLOR and CI runs use the plain sequential fallback, and a test asserts no ANSI cursor movement in that mode.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 03ea375bc4 (p272). On batch compiler p272 (dev c2737a2a81) with Jetpack rebuilt from that tree: cases CLIOutput/plain_fallback_no_cursor_moves PASS (piped with color forced, pty with NO_COLOR, pty under CI: zero cursor-moving or erasing controls).",
+          "at": "2026-11-17T19:12:36.187Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "CLIOutput/plain_fallback_no_cursor_moves"
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "cli",
+        "output"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:06:32.867Z",
+      "updated": "2026-11-17T19:12:38.863Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-17T19:12:38.863Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T19:32:20.913Z"
+    },
+    {
+      "id": "c0povfh0",
+      "num": 6943,
+      "title": "The CLI battery builds, installs and passes its goldens, using only canonical library APIs",
+      "body": "Destination: the first-party CLI battery (#CLI(Standard) root help with typed subcommands and ten options, config files and ignore-aware search, process streams with stdin writes and EOF, typed records through #Codable CSV, environment overlays and exact exit codes, jobs, script mode and a release install) and its typed executable consumer build, install and pass their goldens, and every consumer path uses canonical APIs.\n\nSource: #6632 c78 and c79 (carried from #2797 and #6418; #2797 met the source half in the retired Rust tree).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e21",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c1 and c2 proved on p272 (c2737a2a81)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The CLI battery and its typed executable consumer build, install and pass their goldens on O0, O1, O2 and a release build. Proof: `jet test Compiler --profile cases --filter CLI/Battery` (Jetpack/Provider/Batteries/cli).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 53b81dd7f8 (p272). On batch compiler p272 (dev c2737a2a81): cases CLI/Battery 2/2 PASS and golden CLI/Battery 3/3 PASS.",
+          "at": "2026-11-17T19:11:00.570Z"
+        },
+        {
+          "n": 2,
+          "text": "Every named library path in the battery consumer uses canonical APIs, including closed stdin and the ignore-aware walk. Proof: `jet test Compiler --profile cases --filter CLI/Battery` (Jetpack/Provider/Batteries/cli) and git grep finds no private helper in the battery for a path Core provides.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 53b81dd7f8 (p272). On batch compiler p272 (dev c2737a2a81): cases CLI/Battery 2/2 PASS. git grep over Jetpack/Provider/Batteries/cli finds no private helper for a Core path; its only 'private' hit is the fixture file name private.secret.",
+          "at": "2026-11-17T19:11:01.570Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "battery",
+        "cli"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:52:34.672Z",
+      "updated": "2026-11-17T19:11:04.334Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-17T19:11:04.334Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T19:32:20.913Z"
     }
   ]
 }
