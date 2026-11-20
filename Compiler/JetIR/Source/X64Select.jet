@@ -4314,9 +4314,11 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
 // poll's call is a slow path (IRX64ColdKind.Poll) that takes the edge or
 // comes back. Right after a runtime route the selector open-codes
 // (IRX64Emitter.routed), that route's slow path falls into the poll's: a
-// stop poll keeps no hot code and a turn its armed word. In a loop any
-// other poll's tests run inline first
-// (ir_x64_stop_quiet). The edge goes after the epilogue (ir_x64_pads); one
+// stop poll keeps no hot code and a turn its armed word. In a loop, and in
+// a body on a call cycle (IRFunction.stack_check: a recursion, through a
+// function value's call too), any other poll's tests run inline first
+// (ir_x64_stop_quiet), so a recursion's hot path calls no poll after a
+// drop or an inlined body. The edge goes after the epilogue (ir_x64_pads); one
 // only slow paths enter has no hot branch of its own. A trap poll
 // keeps no hot code: the slow paths that publish a numeric stop (colds from
 // `traps` on) take the edge (IRX64Cold.pad), and after an operation
@@ -4368,10 +4370,10 @@ ir_x64_stop_point: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
             if falls -> e.colds[traps].falls = true
             ir_x64_armed_poll(e, at, branch, !falls || f.a[at] == turn)
         } else {
-            // In a loop any other poll's own tests of the task control run
-            // inline first, so while no stop is asked for the hot path calls
-            // nothing.
-            if ir_x64_in_loop(e, f) {
+            // In a loop or a body on a call cycle, any other poll's own tests
+            // of the task control run inline first, so while no stop is asked
+            // for the hot path calls nothing.
+            if ir_x64_in_loop(e, f) || f.stack_check {
                 tests := ir_x64_stop_quiet(e.code)
                 loop enter in tests.enter -> ir_x64_patch(e, enter, e.code.bytes.len())
                 skips = tests.quiet.move()
@@ -7416,6 +7418,66 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
             turned: key == IR_STOP_TURN_KEY
             assert(if turned -> armed_at > tested && poll_at > armed_at else -> armed_at < 0 && poll_at < 0)
         }
+    }
+}
+
+// f calls body g, adds, and then polls: the poll checks g's call but does
+// not follow it, so it calls the poll's routine. In a body on a call cycle
+// it first runs the task control's quiet tests inline (`cmp qword
+// gs:[448], 0` among them), as one in a loop does, so a recursion's hot
+// path calls nothing; elsewhere it calls the routine outright.
+#Test("A poll that checks a call it does not follow tests the task control inline in a body on a call cycle") {
+    loop cycle in ([Bool]{false, true}) {
+        m := ir_module_new()
+        m.stop_points = true
+        int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
+        flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+        poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
+        g := ir_function_new("g", "test:cycle.jet.g", "", "cycle.jet", 1)
+        n: ir_slot(g, int_row, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
+        g.result = int_row
+        _ := ir_emit(g, IROp.Return, -1, n, -1, -1, 1)
+        m.functions.push(g)
+        f := ir_function_new("f", "test:cycle.jet.f", "", "cycle.jet", 2)
+        f.stack_check = cycle
+        x: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "x"), 2)
+        f.result = int_row
+        r: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+        y: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+        stopped: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
+        passed: ir_args(f, [Int]{x})
+        _ := ir_emit(f, IROp.Call, r, poll + 1, passed, 1, 3)
+        _ := ir_emit(f, IROp.Add, y, r, x, -1, 3)
+        none: ir_args(f, [Int]{})
+        _ := ir_emit(f, IROp.Call, stopped, poll, none, 0, 3)
+        _ := ir_open_if(f, stopped, 3)
+        _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 3)
+        ir_end(f, 3)
+        _ := ir_emit(f, IROp.Return, -1, y, -1, -1, 4)
+        m.functions.push(f)
+        compiled: ir_x64_compile_function(m, ir_x64_tables(m), m.functions.len() - 1).function
+        call_at := -1
+        poll_at := -1
+        loop reloc in compiled.relocs {
+            if reloc.target == {
+                .Function(id) -> {
+                    if id.value == poll + 1 -> call_at = reloc.at
+                    if id.value == poll -> poll_at = reloc.at
+                }
+                .Runtime(_) | .RuntimeData(_) | .Data(_) -> {}
+            }
+        }
+        assert(call_at >= 0 && poll_at > call_at)
+        turn: [U8]{0x65, 0x48, 0x83, 0x3c, 0x25, 0xc0, 0x01, 0, 0, 0}
+        tested := -1
+        loop at in call_at..<(compiled.code.len() - turn.len()) {
+            same := true
+            loop k in 0..<turn.len() {
+                if compiled.code[at + k] != turn[k] -> same = false
+            }
+            if tested < 0 && same -> tested = at
+        }
+        assert(if cycle -> tested > call_at && tested < poll_at else -> tested < 0)
     }
 }
 
