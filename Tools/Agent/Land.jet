@@ -3039,6 +3039,10 @@ seal: fn(dir: String, pre: String, composed: Composed, work: String, from: Strin
     files.create_dir_all(jet) ?? return "{jet}: {err}"
     files.copy("{from}/jet", "{jet}/jet") ?? return "{from}/jet: {err}"
     files.set_mode("{jet}/jet", 0o755) ?? return "{jet}/jet: {err}"
+    // jet's DWARF, which its `.gnu_debuglink` names for `jet debug`.
+    if files.is_file("{from}/jet.debug") {
+        files.copy("{from}/jet.debug", "{jet}/jet.debug") ?? return "{from}/jet.debug: {err}"
+    }
     if files.is_dir("{from}/jet-runtime") {
         files.copy_dir("{from}/jet-runtime", "{jet}/jet-runtime") ?? return "{from}/jet-runtime: {err}"
     }
@@ -3643,7 +3647,8 @@ publish_main: fn(args: [String]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Neve
 }
 
 // `publish latest`: the batch-verified compiler (the census s1, built from
-// HEAD and the batch) with the runtime pack its build made becomes
+// HEAD and the batch) with its DWARF (jet.debug, which its `.gnu_debuglink`
+// names) and the runtime pack its build made becomes
 // $JET_SCRATCH_ROOT/discovery/b2/install-latest (an atomic swap), with COMMIT
 // (HEAD of the worktree `dir`) and IDENTITY (the seed's).
 publish_latest: fn(dir: String) -[Exec, Env, FS, Time.Wait]> Step Never! {
@@ -3660,6 +3665,9 @@ publish_latest: fn(dir: String) -[Exec, Env, FS, Time.Wait]> Step Never! {
     files.create_dir_all(staged) ?? return Step{ok: false, line: "publish-latest: {staged} cannot be created: {err}"}
     files.copy(s1, "{staged}/jet") ?? return Step{ok: false, line: "publish-latest: {s1} cannot be copied: {err}"}
     files.set_mode("{staged}/jet", 0o755) ?? return Step{ok: false, line: "publish-latest: {staged}/jet cannot be made executable: {err}"}
+    if files.is_file("{s1}.debug") {
+        files.copy("{s1}.debug", "{staged}/jet.debug") ?? return Step{ok: false, line: "publish-latest: {s1}.debug cannot be copied: {err}"}
+    }
     files.copy_dir(pack, "{staged}/jet-runtime") ?? return Step{ok: false, line: "publish-latest: the runtime pack {pack} cannot be copied: {err}"}
     commit: git(dir, [String]{"rev-parse", "HEAD"}).output.trim()
     files.write("{staged}/COMMIT", "{commit}\n") ?? return Step{ok: false, line: "publish-latest: COMMIT cannot be written: {err}"}
@@ -3673,7 +3681,7 @@ publish_latest: fn(dir: String) -[Exec, Env, FS, Time.Wait]> Step Never! {
 }
 
 // `publish base COMMIT`: keep install-latest, which must say COMMIT, as
-// $JET_BASE_ROOT/<sha>/{jet,jet-runtime/,IDENTITY,COMMIT,GENERATION} for
+// $JET_BASE_ROOT/<sha>/{jet,jet.debug,jet-runtime/,IDENTITY,COMMIT,GENERATION} for
 // lanes (base/latest names the newest; the BASE_KEEP newest stay), seed it
 // into the chain stage store (`Tools/Agent/Chain.jet seed-published`), copy a jetpack an
 // input-identical published commit has, and want its golden census.
@@ -3723,7 +3731,7 @@ publish_base: fn(tools: String, repo: String, commit: String) -[Exec, Env, FS, I
 }
 
 // Copy the compiler of the install `from` into the new directory `to`; "" or
-// what failed.
+// what failed. jet.debug, jet's DWARF, goes with it when the install has one.
 copy_install: fn(from: String, to: String) -[FS]> String Never! {
     files.create_dir_all(to) ?? return "{to}: {err}"
     names: [String]{"jet", "IDENTITY", "COMMIT"}
@@ -3731,6 +3739,9 @@ copy_install: fn(from: String, to: String) -[FS]> String Never! {
         files.copy("{from}/{name}", "{to}/{name}") ?? return "{from}/{name}: {err}"
     }
     files.set_mode("{to}/jet", 0o755) ?? return "{to}/jet: {err}"
+    if files.is_file("{from}/jet.debug") {
+        files.copy("{from}/jet.debug", "{to}/jet.debug") ?? return "{from}/jet.debug: {err}"
+    }
     files.copy_dir("{from}/jet-runtime", "{to}/jet-runtime") ?? return "{from}/jet-runtime: {err}"
     ""
 }

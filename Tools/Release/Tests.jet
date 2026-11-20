@@ -1358,3 +1358,58 @@ row_file_verdict: fn(text: String) -> String Never! {
     assert(gate.check_gate)
     assert_eq(gate.errors.len(), 0)
 }
+
+// An ELF image with no code whose one named section is a `.gnu_debuglink`
+// naming `name` with the CRC-32 `crc`, as the compiler build leaves jet.
+linked_image: fn(name: String, crc: Int) -> [U8] Never! {
+    names := [U8]{U8{0}}
+    names.extend(".shstrtab".bytes())
+    names.push(U8{0})
+    names.extend(".gnu_debuglink".bytes())
+    names.push(U8{0})
+    names_at: 64
+    link_at: names_at + names.len()
+    link_size: (name.len() + 4) /% 4 * 4 + 4
+    headers_at: (link_at + link_size + 7) /% 8 * 8
+    image := [U8]{}
+    loop _ in 0..<headers_at + 3 * 64 -> image.push(U8{0})
+    loop (index, byte) in ([U8]{U8{0x7f}, U8{0x45}, U8{0x4c}, U8{0x46}, U8{2}, U8{1}, U8{1}}) {
+        image[index] = byte
+    }
+    put_le(image, 40, headers_at, 8)
+    put_le(image, 58, 64, 2)
+    put_le(image, 60, 3, 2)
+    put_le(image, 62, 1, 2)
+    loop (index, byte) in names -> image[names_at + index] = byte
+    loop (index, byte) in name.bytes() -> image[link_at + index] = byte
+    put_le(image, link_at + link_size - 4, crc, 4)
+    rows: [{name: Int, kind: Int, at: Int, size: Int}]{{name: 1, kind: 3, at: names_at, size: names.len()}, {name: 11, kind: 1, at: link_at, size: link_size}}
+    loop (index, row) in rows {
+        header: headers_at + (index + 1) * 64
+        put_le(image, header, row.name, 4)
+        put_le(image, header + 4, row.kind, 4)
+        put_le(image, header + 24, row.at, 8)
+        put_le(image, header + 32, row.size, 8)
+    }
+    image
+}
+
+#Test("a jet's side debug file must be the one its debug link names, by CRC-32") {
+    scratch: files.mkdtemp("jet-release-debug-") ?? panic("scratch: {err}")
+    jet: files.join(scratch, "jet")
+    dwarf: "the DWARF of this jet".bytes()
+    image: linked_image("jet.debug", hex.crc32(dwarf))
+    files.write_bytes(jet, image) ?? panic("write jet: {err}")
+    missing: debug_file_problem(image, jet)
+    assert(missing.starts_with("{jet} keeps its DWARF in jet.debug, which is not beside it at {jet}.debug: "), missing)
+    files.write_bytes("{jet}.debug", "the DWARF of another jet".bytes()) ?? panic("write other: {err}")
+    other: debug_file_problem(image, jet)
+    assert(other.starts_with("{jet}.debug is not the DWARF of {jet}: its CRC-32 is "), other)
+    assert(other.ends_with("but the jet's .gnu_debuglink asks for {crc_text(hex.crc32(dwarf))}"), other)
+    files.write_bytes("{jet}.debug", dwarf) ?? panic("write side: {err}")
+    assert_eq(debug_file_problem(image, jet), "")
+    // A jet without a debug link (one from before the build moved its
+    // DWARF out, or no ELF image at all) needs no side file.
+    assert_eq(debug_file_problem("#!/bin/sh\necho jet\n".bytes(), jet), "")
+    files.remove_all(scratch) ?? panic("cleanup: {err}")
+}

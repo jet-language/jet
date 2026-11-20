@@ -26,7 +26,7 @@
 // --auto picks the level from `plan` (the reasons go to REPORT.md). Results:
 // DIR (default TREE/.chain) holds RESULT (TSV: stage status rc wall_s
 // peak_rss_mb sha256 key note, then a verdict row), REPORT.md, s1/ s2/ s3/ t1/
-// (jet, jet.o, jet-runtime/), keys/ and logs/. The base is --base, else the
+// (jet, jet.debug, jet.o, jet-runtime/), keys/ and logs/. The base is --base, else the
 // commit `export` wrote to TREE/.chain-base, else dev HEAD. full and
 // full+threads need the tree's preflight receipt for the seed (`Land.jet
 // receipt check`); --check-gate only checks it. --dry-run builds nothing,
@@ -1334,7 +1334,7 @@ meta_of: fn(entry: String, name: String) -[FS]> String Never! {
 
 touch_used: fn(entry: String) -[FS]> { files.write(files.join(entry, ".used"), "") ?? () }
 
-// Store `src` (a build's jet and jet.o, a pack's jet-runtime/, or a check's
+// Store `src` (a build's jet, jet.debug and jet.o, a pack's jet-runtime/, or a check's
 // logs) under `k` with meta `lines`, built in a temp dir and renamed in; then
 // evict the store to its cap.
 store_put: fn(c: &Chain, k: String, kind: String, src: String, lines: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> {
@@ -1346,7 +1346,7 @@ store_put: fn(c: &Chain, k: String, kind: String, src: String, lines: [String]) 
     files.remove_all(tmp) ?? ()
     files.create_dir_all(tmp) ?? fail("cannot create `{tmp}`: {err}")
     if kind == "build" {
-        names: [String]{"jet", "jet.o"}
+        names: [String]{"jet", "jet.debug", "jet.o"}
         loop name in names {
             if files.exists(files.join(src, name)) {
                 copy_plain(files.join(src, name), files.join(tmp, name))
@@ -1461,7 +1461,7 @@ bind: fn(from: String, to: String) -[Exec, IO, Time.Wait]> Bool Never! {
     receipt.success
 }
 
-// build_stage: NAME (jet, jet.o and its runtime pack jet-runtime/) built by
+// build_stage: NAME (jet, jet.debug, jet.o and its runtime pack jet-runtime/) built by
 // BUILDER_DIR/jet (sha BUILDER, its pack hash BUILDER_PACK) under IDENTITY:
 // `jet build -O1 --threads THREADS Compiler` at the canonical
 // root, in the dev shell with no Rust tool on PATH; the build compiles no C.
@@ -1482,9 +1482,13 @@ build_stage: fn(c: &Chain, n: String, builder_dir: String, builder: String, buil
         if c.mode != "dry" {
             files.create_dir_all(dir) ?? fail("cannot create `{dir}`: {err}")
             files.remove(jet) ?? ()
+            files.remove("{jet}.debug") ?? ()
             files.remove("{jet}.o") ?? ()
             files.remove_all(files.join(dir, "jet-runtime")) ?? ()
             copy_plain(files.join(found, "jet"), jet)
+            if files.exists(files.join(found, "jet.debug")) {
+                copy_plain(files.join(found, "jet.debug"), "{jet}.debug")
+            }
             if files.exists(files.join(found, "jet.o")) {
                 copy_plain(files.join(found, "jet.o"), "{jet}.o")
             }
@@ -1524,6 +1528,7 @@ build_stage: fn(c: &Chain, n: String, builder_dir: String, builder: String, buil
     pack: files.join(dir, "jet-runtime")
     if files.is_file(built) {
         files.copy(built, jet) ?? ()
+        if files.is_file("{built}.debug") -> files.copy("{built}.debug", "{jet}.debug") ?? ()
         if files.is_file("{built}.o") -> files.copy("{built}.o", "{jet}.o") ?? ()
     }
     if files.is_file(files.join(build_out, "jet-runtime/native.key")) {
@@ -1794,6 +1799,9 @@ seed_published: fn(c: &Chain, install: String) -[Env, Exec, FS, IO, Time, Time.W
     s1: files.join(c.out, "s1")
     files.create_dir_all(s1) ?? fail("cannot create `{s1}`: {err}")
     copy_plain(files.join(seedpub, "jet"), files.join(s1, "jet"))
+    if files.exists(files.join(seedpub, "jet.debug")) {
+        copy_plain(files.join(seedpub, "jet.debug"), files.join(s1, "jet.debug"))
+    }
     copy_tree(pack, files.join(s1, "jet-runtime"))
     hash: dirhash(files.join(s1, "jet-runtime"))
     lines := [String]{"stage=s1", "kind=build", "sha256={published}", "packhash={hash}", "native_key={first_line(files.join(s1, "jet-runtime/native.key"))}", "wall_s=-", "rss_mb=-", "lane=lander census", "tree={c.r.root} ({first_line(files.join(seedpub, "COMMIT"))})"}

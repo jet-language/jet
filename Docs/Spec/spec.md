@@ -6051,6 +6051,17 @@ doesn't hold is E2115.
 `backtrace: full` stays legal with `split`. A user who wants the debug info
 in a release image writes `--debug-info=true` or `debug_info: true` in a
 `release` profile.
+`jet debug` of an image without DWARF of its own follows its
+`.gnu_debuglink`: it reads the named file beside the image, else, for an
+image with a build id, `.jet/symbols/.build-id/<first two hex
+digits>/<rest>.debug` in the image's directory or the nearest directory
+above it that holds one. Only a file whose CRC-32 is the link's is read: a
+file of that name from another build is refused by name, and so is a link
+to a file in neither place (E2203), so the debugger never shows another
+build's frames. The toolchain's own `jet` is built this way: the compiler
+build moves its DWARF to `jet.debug` beside it and keeps its symbols and
+its Jet line table in `jet`, so `jet`'s fault reports and profiles name
+their frames without the side file.
 
 ### Deep checks
 

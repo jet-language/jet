@@ -49,7 +49,10 @@
 //    link_trace_lines). When nothing reads the unwind
 //    tables at run time (no unwinder is linked; link_eh_unloaded), a split
 //    link moves them from the read-only segment to the side file as
-//    `.debug_frame` (link_debug_frame).
+//    `.debug_frame` (link_debug_frame). An executable already linked whole
+//    can move its DWARF alone to a side file afterward
+//    (x64_executable_debug_apart), keeping its symbols and Jet line table:
+//    the compiler build does this to the `jet` it ships.
 //
 // Inputs are read in place. Section headers and local symbols are not copied
 // into tables (a runtime codegen unit has ~63k sections): they are read from
@@ -3658,6 +3661,370 @@ link_elf_sections: fn(elf: &[U8], shoff: Int, count: Int) Never! {
         elf[58 + 2 * index] = U8{value & 255}
         elf[59 + 2 * index] = U8{(value >> 8) & 255}
     }
+}
+
+// A linked executable whose DWARF is in a side debug file
+// (x64_executable_debug_apart).
+X64DebugApart: struct {
+    // The executable: its segments, moved down over the bytes the moved
+    // sections held, then its kept unloaded sections, an unloaded
+    // `.note.gnu.build-id`, the `.gnu_debuglink` naming the side file and the
+    // section headers.
+    bytes: [U8],
+    // The side debug file: an ELF header with no program headers, the
+    // build-id note, the moved sections, a SHT_NOBITS header per loaded
+    // section and the section headers.
+    debug_file: [U8],
+    // The 20-byte id both notes hold.
+    build_id: [U8],
+}
+
+// Whether x64_executable_debug_apart moves the unloaded section `name` to
+// the side file: every `.debug_*` section but the Jet line table and its
+// sources' digests, which the running program's fault report reads from its
+// own image (JetRuntime Fault.jet), as traces and profiles do.
+link_debug_moves: fn(name: String) -> Bool Never! {
+    name.starts_with(".debug_") && name != ".debug_jetline" && name != ".debug_jetsource"
+}
+
+// The linked static executable `image` with its unloaded `.debug_*`
+// sections (link_debug_moves) in a side debug file, which the image's
+// `.gnu_debuglink` names `debug_link` (a file name, which debuggers look
+// for beside the image) with its CRC-32, taken on `threads` (link_crc32).
+// The image keeps its segments, its symbol table and every other section.
+// Each segment, in file order, moves down to the first offset past the one
+// before it that keeps its address's offset within its page, closing the
+// gap the moved sections held; the program headers' and loaded sections'
+// offsets follow their segments, and the kept unloaded sections follow the
+// segments, renumbered, with their symbols' section indexes (a symbol of a
+// moved section becomes absolute). Both files get a `.note.gnu.build-id`
+// (unloaded in the image) holding the first 20 bytes of the side file's
+// SHA-256 taken with the id zero, which finds the side file in a build-id
+// store. Refused for an image with no section headers, nothing to move, a
+// part of it outside its segments, a first segment that doesn't start the
+// file, or a `.gnu_debuglink` or build id already.
+x64_executable_debug_apart: fn(image: [U8], debug_link: String, threads: CompilerThreads) -> X64DebugApart Err! {
+    plan: x64_image_segments(image)
+    if plan.failure != "" -> return Err(plan.failure)
+    shoff: loader_u64(image, 40)
+    count: loader_u16(image, 60)
+    names_index: loader_u16(image, 62)
+    if shoff == 0 || count == 0 || loader_u16(image, 58) != 64 || shoff + count * 64 > image.len() || names_index == 0 || names_index >= count {
+        return Err("the image has no section headers")
+    }
+    names_at: loader_u64(image, shoff + names_index * 64 + 24)
+    // Each section's index in the image afterwards; 0 for a moved one and
+    // the name table, which is written anew.
+    index_of := [Int]{0}
+    moving := 0
+    kept := 0
+    loop k in 1..<count {
+        at: shoff + k * 64
+        name: x64_jetline_text(image, names_at + loader_u32(image, at))
+        if name == ".gnu_debuglink" || name == ".note.gnu.build-id" {
+            return Err("the image already has a `{name}`")
+        }
+        if {
+            k == names_index -> index_of.push(0)
+            loader_u64(image, at + 8) & 2 == 0 && link_debug_moves(name) -> {
+                index_of.push(0)
+                moving += 1
+            }
+            else -> {
+                kept += 1
+                index_of.push(kept)
+            }
+        }
+    }
+    if moving == 0 -> return Err("the image has no debug sections to move")
+    // Each segment's new file offset, placed in file order.
+    placed := [Int]{}
+    loop _ in plan.segments -> placed.push(-1)
+    order := [Int]{}
+    cursor := 0
+    loop order.len() < plan.segments.len() {
+        lowest := -1
+        loop (k, segment) in plan.segments {
+            if placed[k] < 0 && (lowest < 0 || segment.offset < plan.segments[lowest].offset) {
+                lowest = k
+            }
+        }
+        if order.len() == 0 && plan.segments[lowest].offset != 0 {
+            return Err("the image's first segment in the file doesn't start it")
+        }
+        at := cursor - cursor % OS_PAGE_SIZE + plan.segments[lowest].vaddr % OS_PAGE_SIZE
+        if at < cursor -> at += OS_PAGE_SIZE
+        placed[lowest] = at
+        order.push(lowest)
+        cursor = at + plan.segments[lowest].file_size
+    }
+    out := [U8]{}
+    loop k in order {
+        segment: plan.segments[k]
+        link_pad_to(out, placed[k], 0)
+        out.extend(image[segment.offset..<segment.offset + segment.file_size])
+    }
+    phoff: link_apart_offset(plan, placed, loader_u64(image, 32))
+    if phoff < 0 -> return Err("the image's program headers are outside its segments")
+    link_put64(out, 32, phoff)
+    load := 0
+    loop k in 0..<loader_u16(image, 56) {
+        row: phoff + k * 56
+        offset: loader_u64(out, row + 8)
+        if {
+            loader_u32(out, row) == 1 -> {
+                link_put64(out, row + 8, placed[load])
+                load += 1
+            }
+            offset > 0 || loader_u64(out, row + 32) > 0 -> {
+                moved: link_apart_offset(plan, placed, offset)
+                if moved < 0 {
+                    return Err("program header {k} of the image is outside its segments")
+                }
+                link_put64(out, row + 8, moved)
+            }
+            else -> {}
+        }
+    }
+    side := image[0..<LINK_EHDR_SIZE]
+    link_put64(side, 32, 0)
+    loop at in 54..<58 -> side[at] = U8{0}
+    link_build_id_note(side)
+    side_headers := [LinkSectionHeader]{LinkSectionHeader{name: ".note.gnu.build-id", kind: LINK_SHT_NOTE, flags: 0, addr: 0, offset: LINK_EHDR_SIZE, size: LINK_BUILD_ID_NOTE_SIZE, link: 0, info: 0, align: 4, entry_size: 0}}
+    headers := [LinkSectionHeader]{}
+    loop k in 1..<count {
+        if k == names_index -> next
+        at: shoff + k * 64
+        header := link_section_header_read(image, at, names_at)
+        from: header.offset
+        align: if header.align > 1 -> header.align else -> 1
+        if header.kind != LINK_SHT_NOBITS && header.flags & 2 == 0 && (from < 0 || from + header.size > image.len()) {
+            return Err("the section `{header.name}` is outside the image")
+        }
+        if index_of[k] == 0 {
+            elf64_pad(side, align)
+            header.offset = side.len()
+            if header.kind != LINK_SHT_NOBITS -> side.extend(image[from..<from + header.size])
+            header.link = 0
+            header.info = 0
+            side_headers.push(header)
+            next
+        }
+        if {
+            header.flags & 2 != 0 -> {
+                moved: link_apart_address(plan, placed, header.addr)
+                if moved < 0 {
+                    return Err("the loaded section `{header.name}` is outside the image's segments")
+                }
+                header.offset = moved
+                nobits := link_section_header_read(image, at, names_at)
+                nobits.kind = LINK_SHT_NOBITS
+                nobits.offset = side.len()
+                nobits.link = 0
+                nobits.info = 0
+                side_headers.push(nobits)
+            }
+            else -> {
+                elf64_pad(out, align)
+                header.offset = out.len()
+                if header.kind != LINK_SHT_NOBITS {
+                    out.extend(image[from..<from + header.size])
+                    if header.kind == LINK_SHT_SYMTAB {
+                        link_apart_symbols(out, header.offset, header.size, header.entry_size, index_of)
+                    }
+                }
+            }
+        }
+        header.link = link_apart_index(index_of, header.link)
+        // SHT_REL (9) and SHT_RELA name the section they relocate in sh_info.
+        if header.kind == LINK_SHT_RELA || header.kind == 9 || header.flags & LINK_SHF_INFO_LINK != 0 {
+            header.info = link_apart_index(index_of, header.info)
+        }
+        headers.push(header)
+    }
+    elf64_pad(out, 4)
+    note: out.len()
+    link_build_id_note(out)
+    headers.push(LinkSectionHeader{name: ".note.gnu.build-id", kind: LINK_SHT_NOTE, flags: 0, addr: 0, offset: note, size: LINK_BUILD_ID_NOTE_SIZE, link: 0, info: 0, align: 4, entry_size: 0})
+    named: out.len()
+    // The name, its NUL, padding to 4 bytes, then the side file's CRC-32.
+    loop byte in debug_link.bytes() -> out.push(byte)
+    out.push(U8{0})
+    elf64_pad(out, 4)
+    crc: out.len()
+    loop _ in 0..<4 -> out.push(U8{0})
+    headers.push(LinkSectionHeader{name: ".gnu_debuglink", kind: LINK_SHT_PROGBITS, flags: 0, addr: 0, offset: named, size: out.len() - named, link: 0, info: 0, align: 4, entry_size: 0})
+    out_count: headers.len() + 2
+    out_headers: link_write_section_headers(out, 0, headers)
+    link_elf_sections(out, out_headers, out_count)
+    side_count: side_headers.len() + 2
+    side_headers_at: link_write_section_headers(side, 0, side_headers)
+    link_elf_sections(side, side_headers_at, side_count)
+    hash: sha256_bytes(side[0..<side.len()])
+    id := [U8]{}
+    loop k in 0..<LINK_BUILD_ID_SIZE {
+        out[note + 16 + k] = hash[k]
+        side[LINK_EHDR_SIZE + 16 + k] = hash[k]
+        id.push(hash[k])
+    }
+    link_put32(out, crc, link_crc32(side, threads))
+    Ok(X64DebugApart{bytes: out, debug_file: side, build_id: id})
+}
+
+// The section header at file offset `at` of `elf`, whose name table starts
+// at file offset `names`.
+link_section_header_read: fn(elf: [U8], at: Int, names: Int) -> LinkSectionHeader Never! {
+    LinkSectionHeader{name: x64_jetline_text(elf, names + loader_u32(elf, at)), kind: loader_u32(elf, at + 4), flags: loader_u64(elf, at + 8), addr: loader_u64(elf, at + 16), offset: loader_u64(elf, at + 24), size: loader_u64(elf, at + 32), link: loader_u32(elf, at + 40), info: loader_u32(elf, at + 44), align: loader_u64(elf, at + 48), entry_size: loader_u64(elf, at + 56)}
+}
+
+// The new file offset of the file offset `offset` of a segment of `plan`,
+// whose segments x64_executable_debug_apart placed at `placed`: in a
+// segment's bytes, else at one's end; -1 when it is in none.
+link_apart_offset: fn(plan: X64Segments, placed: [Int], offset: Int) -> Int Never! {
+    loop (k, segment) in plan.segments {
+        if offset >= segment.offset && offset < segment.offset + segment.file_size {
+            return offset - segment.offset + placed[k]
+        }
+    }
+    loop (k, segment) in plan.segments {
+        if offset == segment.offset + segment.file_size {
+            return offset - segment.offset + placed[k]
+        }
+    }
+    -1
+}
+
+// The new file offset of the address `addr` in a segment of `plan` placed
+// at `placed` (link_apart_offset); -1 when no segment's memory holds it.
+link_apart_address: fn(plan: X64Segments, placed: [Int], addr: Int) -> Int Never! {
+    loop (k, segment) in plan.segments {
+        if addr >= segment.vaddr && addr <= segment.vaddr + segment.memory_size {
+            return addr - segment.vaddr + placed[k]
+        }
+    }
+    -1
+}
+
+// The new index of the section index `index` (x64_executable_debug_apart's
+// `index_of`); none and the reserved indexes stay as they are.
+link_apart_index: fn(index_of: [Int], index: Int) -> Int Never! {
+    if index <= 0 || index >= index_of.len() -> return index
+    index_of[index]
+}
+
+// Renumber the section index of each symbol of the symbol table at `at` in
+// `out`, `size` bytes of `entry`-byte rows, by `index_of`; a symbol of a
+// moved section becomes absolute (SHN_ABS).
+link_apart_symbols: fn(out: &[U8], at: Int, size: Int, entry: Int, index_of: [Int]) Never! {
+    if entry < 24 {
+        return
+    }
+    loop row in 0..<size /% entry {
+        field: at + row * entry + 6
+        index: Int{out[field]} | Int{out[field + 1]} << 8
+        if index == 0 || index >= 0xff00 || index >= index_of.len() -> next
+        renumbered: if index_of[index] > 0 -> index_of[index] else -> 0xfff1
+        link_put16(out, field, renumbered)
+    }
+}
+
+#Test("debug sections move to a side file the image's debuglink names, and the segments close their gap") {
+    image := [U8]{}
+    loop byte in ([Int]{0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0}) {
+        image.push(U8{byte})
+    }
+    elf64_u16(image, 2)
+    elf64_u16(image, 62)
+    elf64_u32(image, 1)
+    elf64_u64(image, 0x4000b0)
+    elf64_u64(image, 64)
+    elf64_u64(image, 0)
+    elf64_u32(image, 0)
+    elf64_u16(image, 64)
+    elf64_u16(image, 56)
+    elf64_u16(image, 2)
+    elf64_u16(image, 64)
+    elf64_u16(image, 0)
+    elf64_u16(image, 0)
+    link_phdr(image, 0, 1, 5, 0x400000, 0xc0, 0xc0, OS_PAGE_SIZE)
+    link_phdr(image, 0x3000, 1, 4, 0x403000, 0x10, 0x10, OS_PAGE_SIZE)
+    loop image.len() < 0xc0 -> image.push(U8{0xc3})
+    // The debug info fills the gap below the second segment.
+    loop image.len() < 0x2c0 -> image.push(U8{7})
+    link_pad_to(image, 0x3000, 0)
+    loop k in 0..<16 -> image.push(U8{k + 1})
+    loop _ in 0..<4 -> image.push(U8{9})
+    elf64_pad(image, 8)
+    symbols: image.len()
+    loop _ in 0..<24 -> image.push(U8{0})
+    // One symbol of `.rodata` (section 3) and one of `.debug_info` (1).
+    elf64_u32(image, 1)
+    elf64_u32(image, 0x30000)
+    elf64_u64(image, 0x403000)
+    elf64_u64(image, 16)
+    elf64_u32(image, 4)
+    elf64_u32(image, 0x10000)
+    elf64_u64(image, 0)
+    elf64_u64(image, 0)
+    strings: image.len()
+    loop byte in ([Int]{0, 0x72, 0x6f, 0, 0x64, 0x69, 0}) -> image.push(U8{byte})
+    sections: [LinkSectionHeader]{
+        LinkSectionHeader{name: ".debug_info", kind: LINK_SHT_PROGBITS, flags: 0, addr: 0, offset: 0xc0, size: 0x200, link: 0, info: 0, align: 1, entry_size: 0},
+        LinkSectionHeader{name: ".text", kind: LINK_SHT_PROGBITS, flags: 6, addr: 0x4000b0, offset: 0xb0, size: 0x10, link: 0, info: 0, align: 16, entry_size: 0},
+        LinkSectionHeader{name: ".rodata", kind: LINK_SHT_PROGBITS, flags: 2, addr: 0x403000, offset: 0x3000, size: 0x10, link: 0, info: 0, align: 16, entry_size: 0},
+        LinkSectionHeader{name: ".debug_jetline", kind: LINK_SHT_PROGBITS, flags: 0, addr: 0, offset: 0x3010, size: 4, link: 0, info: 0, align: 1, entry_size: 0},
+        LinkSectionHeader{name: ".symtab", kind: LINK_SHT_SYMTAB, flags: 0, addr: 0, offset: symbols, size: 72, link: 6, info: 1, align: 8, entry_size: 24},
+        LinkSectionHeader{name: ".strtab", kind: 3, flags: 0, addr: 0, offset: strings, size: 7, link: 0, info: 0, align: 1, entry_size: 0},
+    }
+    image_headers: link_write_section_headers(image, 0, sections)
+    link_elf_sections(image, image_headers, 8)
+    apart: x64_executable_debug_apart(image, "jet.debug", compiler_threads_single()) ?? panic("the debug sections move: {err:Debug}")
+    out: apart.bytes
+    side: apart.debug_file
+    // The second segment moves down from 0x3000 to the next page past the
+    // first: the file shrinks by the gap.
+    plan: x64_image_segments(out)
+    assert_eq(plan.failure, "")
+    assert_eq(plan.segments[1].offset, 0x1000)
+    assert_eq(out[0x1000], U8{1})
+    assert(out.len() < image.len(), "the image shrinks")
+    shoff: loader_u64(out, 40)
+    names: loader_u64(out, shoff + loader_u16(out, 62) * 64 + 24)
+    found := [String]{}
+    loop k in 0..<loader_u16(out, 60) {
+        found.push(link_section_header_read(out, shoff + k * 64, names).name)
+    }
+    assert_eq(found, [String]{"", ".text", ".rodata", ".debug_jetline", ".symtab", ".strtab", ".note.gnu.build-id", ".gnu_debuglink", ".shstrtab"})
+    assert_eq(link_section_header_read(out, shoff + 2 * 64, names).offset, 0x1000)
+    assert_eq(out[link_section_header_read(out, shoff + 3 * 64, names).offset], U8{9})
+    table: link_section_header_read(out, shoff + 4 * 64, names)
+    assert_eq(table.link, 5)
+    assert_eq(loader_u16(out, table.offset + 24 + 6), 2)
+    assert_eq(loader_u16(out, table.offset + 48 + 6), 0xfff1)
+    link: link_section_header_read(out, shoff + 7 * 64, names)
+    assert_eq(x64_jetline_text(out, link.offset), "jet.debug")
+    assert_eq(loader_u32(out, link.offset + 12), link_crc32(side, compiler_threads_single()))
+    note: link_section_header_read(out, shoff + 6 * 64, names).offset
+    assert_eq(out[note + 16..<note + 36], apart.build_id[0..<20])
+    assert_eq(side[LINK_EHDR_SIZE + 16..<LINK_EHDR_SIZE + 36], apart.build_id[0..<20])
+    // The side file has no program headers; it holds the moved bytes and
+    // the loaded sections as SHT_NOBITS.
+    assert_eq(loader_u16(side, 56), 0)
+    side_shoff: loader_u64(side, 40)
+    side_names: loader_u64(side, side_shoff + loader_u16(side, 62) * 64 + 24)
+    side_found := [String]{}
+    loop k in 0..<loader_u16(side, 60) {
+        side_found.push(link_section_header_read(side, side_shoff + k * 64, side_names).name)
+    }
+    assert_eq(side_found, [String]{"", ".note.gnu.build-id", ".debug_info", ".text", ".rodata", ".shstrtab"})
+    info: link_section_header_read(side, side_shoff + 2 * 64, side_names)
+    assert_eq(info.size, 0x200)
+    assert_eq(side[info.offset], U8{7})
+    assert_eq(link_section_header_read(side, side_shoff + 3 * 64, side_names).kind, LINK_SHT_NOBITS)
+    assert(x64_executable_debug_apart(out, "jet.debug", compiler_threads_single()) == .Err(_), "an image with a debuglink already is refused")
+    headless := image[0..<image.len()]
+    link_put64(headless, 40, 0)
+    assert(x64_executable_debug_apart(headless, "jet.debug", compiler_threads_single()) == .Err(_), "an image without section headers is refused")
 }
 
 // ---------------------------------------------------------------------------

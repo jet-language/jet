@@ -5,6 +5,7 @@
 use {
     crypto: core.crypto
     files: core.files
+    hex: core.encoding.hex
     json: core.encoding.json
 }
 
@@ -12,8 +13,10 @@ use {
 // absent from some, and a missing name is skipped as there. RELEASE names the
 // release, so jet can download its own C toolchain pack. VERSION (`a0.0.N
 // <commit> <YYYY-MM-DD>`) is the stamp `jet --version` prints the release from
-// (Jetpack/PackageModel Manifest.jet pkg_jet_build).
-SEED_FILES: [String]{"jet", "jet-cc", "jet-cxx", "jet-c++", "jetpack", "jet-runtime", "IDENTITY", "RELEASE", "VERSION"}
+// (Jetpack/PackageModel Manifest.jet pkg_jet_build). jet.debug is jet's DWARF,
+// which jet's `.gnu_debuglink` names (debug_file_problem); a jet from before
+// the build moved it there carries its DWARF and ships none.
+SEED_FILES: [String]{"jet", "jet.debug", "jet-cc", "jet-cxx", "jet-c++", "jetpack", "jet-runtime", "IDENTITY", "RELEASE", "VERSION"}
 
 // Where a tree declares its Jet version, and the declaration's prefix.
 JET_VERSION_SOURCE: "Jetpack/PackageModel/Source/Manifest/Manifest.jet"
@@ -236,6 +239,62 @@ identity_digest_file: fn(path: String) -[FS]> String Never! {
     identity_digest(bytes)
 }
 
+// The bytes of the section `name` of the ELF image `image`; None without
+// that section.
+image_section: fn(image: [U8], name: String) -> [U8]? Never! {
+    if image.len() < 64 -> return None
+    shoff: le_number(image, 40, 8)
+    shnum: le_number(image, 60, 2)
+    names_index: le_number(image, 62, 2)
+    if shoff <= 0 || names_index >= shnum || shoff + shnum * 64 > image.len() -> return None
+    names_at: le_number(image, shoff + names_index * 64 + 24, 8)
+    label: name.bytes()
+    loop k in 0..<shnum {
+        header: shoff + k * 64
+        at: names_at + le_number(image, header, 4)
+        if at + label.len() >= image.len() || image[at + label.len()] != 0 -> next
+        named := true
+        loop index in 0..<label.len() {
+            if image[at + index] != label[index] -> named = false
+        }
+        if !named -> next
+        from: le_number(image, header + 24, 8)
+        size: le_number(image, header + 32, 8)
+        if from < 0 || from + size > image.len() -> return None
+        return Val(image[from..<from + size])
+    }
+    None
+}
+
+// Why the side debug file beside the jet at `path`, whose bytes are
+// `image`, is not that jet's; "" when it is, or when the jet names none. A
+// jet's `.gnu_debuglink` names the file that holds its DWARF (Compiler/JetCLI
+// RuntimeEmbed.jet), NUL-padded to four bytes, then the file's CRC-32: the
+// file must sit beside the jet with that CRC, or `jet debug` of that jet
+// refuses it.
+debug_file_problem: fn(image: [U8], path: String) -[FS]> String Never! {
+    link: image_section(image, ".gnu_debuglink") ?? return ""
+    end := 0
+    loop {
+        if end >= link.len() || link[end] == 0 -> break
+        end += 1
+    }
+    if end == 0 || link.len() < 8 -> return "{path} has a malformed .gnu_debuglink"
+    name: String.from_bytes_lossy(link[0..<end])
+    wanted: le_number(link, link.len() - 4, 4)
+    side: files.join(files.dirname(path), name)
+    bytes: files.read_bytes(side) ?? return "{path} keeps its DWARF in {name}, which is not beside it at {side}: {err}"
+    found: hex.crc32(bytes)
+    if found != wanted {
+        return "{side} is not the DWARF of {path}: its CRC-32 is {crc_text(found)}, but the jet's .gnu_debuglink asks for {crc_text(wanted)}"
+    }
+    ""
+}
+
+crc_text: fn(crc: Int) -> String Never! {
+    hex.encode([U8]{U8{(crc >> 24) & 255}, U8{(crc >> 16) & 255}, U8{(crc >> 8) & 255}, U8{crc & 255}})
+}
+
 read_text: fn(path: String) -[FS]> String? Never! {
     text: files.read(path) ?? return None
     Val(text)
@@ -317,6 +376,8 @@ read_release: fn(dir: String) -[FS]> Release Never! {
     release.jet_sha256 = sha256_hex(jet)
     release.identity_sha256 = identity_digest(jet)
     release.runtime_packer = image_part_text(jet, RUNTIME_PACKER_PART).trim().copy()
+    debug_problem: debug_file_problem(jet, files.join(dir, "jet"))
+    if debug_problem != "" -> release.problems.push(problem(INPUT, debug_problem))
     release.shipped = shipped_artifacts(dir)
     release.sums = read_text(files.join(dir, "SHA256SUMS")) ?? ""
     release.runtime_key = first_line(read_text(files.join(dir, "jet-runtime/native.key")) ?? "")

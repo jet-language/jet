@@ -4,9 +4,10 @@
 use {
     native_test_process: core.process
     native_test_files: core.files
+    native_test_hex: core.encoding.hex
     jet_debug.[NATIVE_CFI_RETURN, NATIVE_CFI_SAME, NATIVE_CFI_SAVED, NATIVE_DEBUG_CUT_OFF, NATIVE_DEBUG_NOT_KEPT, NATIVE_DEBUG_UNAVAILABLE, NativeAbstract, NativeBlock, NativeBreak, NativeCallArgument, NativeCode, NativeCut, NativeDebugError, NativeEnumerator, NativeFde, NativeFrame, NativeFrames, NativeFunction, NativeImage, NativeInlined, NativeLocal, NativeMember, NativeMemory, NativeSession, NativeStop, NativeStopKind, NativeType, NativeUnwound, NativeVariable, NativeVariableRole, NativeVariants, native_cfi_row, native_debug_backtrace, native_debug_build_argv, native_debug_decimal_text, native_debug_hit_breakpoint, native_debug_int, native_debug_locals_typed, native_debug_precise, native_debug_string, native_debug_unbound, native_frame_locals, native_frames_index, native_function_at, native_inline_chain, native_jet_spelling, native_line_addresses]
-    jet_backend.[X64DebugEncoding, X64Jetline, X64JetlineFunction, x64_jetline_find, x64_jetline_sleb]
-    jet_foundation.[DeepChecks]
+    jet_backend.[X64DebugEncoding, X64Jetline, X64JetlineFunction, x64_executable_debug_apart, x64_jetline_find, x64_jetline_sleb]
+    jet_foundation.[DeepChecks, compiler_threads_single]
 }
 
 #Test("the_debug_build_keeps_the_selected_deep_checks") {
@@ -688,14 +689,85 @@ NATIVE_TEST_RECOVER: "bump: fn(rounds: Int) -> Int {{\n    rounds * 2\n}}\n\ndou
     }
     assert_eq(resolved, 1)
     session.close()
-    // Without the side file the link leads nowhere.
-    native_test_files.remove(native_test_files.join(root, "out/prog.debug")) ?? panic("unlink: {err}")
+    // The name beside the image links to the symbol store's file, which
+    // the image's build id finds without the link; with neither, the report
+    // names the file the link asks for.
+    linked: native_test_files.join(root, "out/prog.debug")
+    stored: native_test_files.read_link(linked) ?? panic("the side file links to the store: {err}")
+    native_test_files.remove(linked) ?? panic("unlink: {err}")
+    by_id := NativeSession.start(native_test_files.join(root, "out/prog"), native_test_files.join(root, "output.txt")) ?? panic("start from the store: {err.detail}")
+    by_id.close()
+    native_test_files.remove(stored) ?? panic("unlink the stored file: {err}")
     if NativeSession.start(native_test_files.join(root, "out/prog"), native_test_files.join(root, "output.txt")) == {
         .Ok(_) -> { panic("an image with no debug information started") }
         .Err(failure) -> {
-            assert(failure.detail.contains("has no Jet debug information"), failure.detail)
+            assert(failure.detail.contains("keeps its DWARF in `prog.debug`, which is not beside it"), failure.detail)
         }
     }
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+}
+
+// An image whose DWARF moved to a side file after its link, as the
+// compiler's own does (JetBackend x64_executable_debug_apart): it keeps its
+// line table and reads its locals from the side file beside it, or from the
+// build-id store above it; a side file that is another build's, or none,
+// is refused by name.
+#Test("an_image_with_its_dwarf_apart_shows_locals_from_the_side_file") {
+    scratch: native_test_files.temp_dir("jet-debug-apart") ?? panic("scratch: {err}")
+    root: scratch.path
+    built := native_test_session(root, NATIVE_TEST_PROGRAM, [String]{"-O0"})
+    built.close()
+    whole: native_test_files.read_bytes(native_test_files.join(root, "out/prog")) ?? panic("read: {err}")
+    apart: x64_executable_debug_apart(whole, "apart.debug", compiler_threads_single()) ?? panic("apart: {err:Debug}")
+    binary: native_test_files.join(root, "out/apart")
+    side: native_test_files.join(root, "out/apart.debug")
+    native_test_files.write_bytes(binary, apart.bytes) ?? panic("write: {err}")
+    native_test_files.set_mode(binary, 493) ?? panic("mode: {err}")
+    native_test_files.write_bytes(side, apart.debug_file) ?? panic("write side: {err}")
+    output: native_test_files.join(root, "output.txt")
+    session := NativeSession.start(binary, output) ?? panic("start: {err.detail}")
+    resolved := -1
+    if session.break_at("prog.jet", 2) == {
+        .Ok(number) -> { resolved = number ?? -1 }
+        .Err(failure) -> panic("break: {failure.detail}")
+    }
+    assert_eq(resolved, 1)
+    paused: session.launch([String]{}) ?? panic("launch: {err.detail}")
+    frame: paused.frame ?? panic("pause frame")
+    assert_eq(frame.function, "double")
+    locals: session.locals() ?? panic("locals: {err.detail}")
+    assert_eq(locals[0].name, "x")
+    assert_eq(locals[0].type_name, "Int")
+    assert_eq(locals[0].value, "0")
+    frames: session.backtrace() ?? panic("backtrace: {err.detail}")
+    assert_eq(frames[1].function, "run")
+    assert_eq(frames[1].line, 9)
+    session.close()
+    // Another build's side file under the name is refused by its CRC-32.
+    other := native_test_files.read_bytes(side) ?? panic("read side: {err}")
+    other[other.len() - 1] = U8{Int{other[other.len() - 1]} ~ 1}
+    native_test_files.write_bytes(side, other) ?? panic("write other: {err}")
+    if NativeSession.start(binary, output) == {
+        .Ok(_) -> { panic("an image started with another build's side file") }
+        .Err(failure) -> {
+            assert(failure.detail.contains("apart.debug` is not the debug file of"), failure.detail)
+            assert(failure.detail.contains("its CRC-32 is"), failure.detail)
+        }
+    }
+    native_test_files.remove(side) ?? panic("unlink: {err}")
+    if NativeSession.start(binary, output) == {
+        .Ok(_) -> { panic("an image started without its side file") }
+        .Err(failure) -> {
+            assert(failure.detail.contains("keeps its DWARF in `apart.debug`, which is not beside it"), failure.detail)
+        }
+    }
+    // The build-id store above the image holds it too.
+    id: apart.build_id
+    store: native_test_files.join(root, ".jet/symbols/.build-id/{native_test_hex.encode(id[0..<1])}")
+    native_test_files.create_dir_all(store) ?? panic("store: {err}")
+    native_test_files.write_bytes(native_test_files.join(store, "{native_test_hex.encode(id[1..<id.len()])}.debug"), apart.debug_file) ?? panic("write stored: {err}")
+    stored := NativeSession.start(binary, output) ?? panic("start from the store: {err.detail}")
+    stored.close()
     native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
 }
 
