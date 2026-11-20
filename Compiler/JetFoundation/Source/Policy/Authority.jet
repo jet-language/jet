@@ -147,12 +147,11 @@ authority_parse_right: fn(right: String) -> String? Never! {
 
 // A bound covers itself and every descendant in the rights tree, and a
 // scoped bound covers by its scope's law (EffectScope.jet): `/data` covers
-// `/data/a.txt` but not `/database`.
+// `/data/a.txt` but not `/database`. This is the runtime's one rule on the
+// text as written, so `fs.Write` or ` FS.Write` is no spelling of `FS.Write`
+// here either; the manifest and command-line readers canonicalize a row.
 authority_covers: fn(bound: String, right: String) -> Bool Never! {
-    canonical_bound: authority_parse_right(bound) ?? bound.trim()
-    canonical_right: authority_parse_right(right) ?? right.trim()
-    if canonical_right == canonical_bound -> return true
-    effect_scope_covers(canonical_bound, canonical_right)
+    effect_scope_covers(bound, right)
 }
 
 authority_covers_any: fn(bounds: [String], right: String) -> Bool Never! {
