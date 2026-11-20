@@ -1875,6 +1875,8 @@
   function runDebug(commands, open = null) {
     if (!latestDoc || !canvasCapability("runtime_output")) return;
     loadDebugState(latestDoc);
+    // A refused command keeps the session it named, shown as it was.
+    const shownState = debugConnectionState;
     debugConnectionState = "connecting";
     syncDebugSessionPicker();
     const requestGeneration = ++debugRequestGeneration;
@@ -1934,12 +1936,15 @@
         if (!result.ok) {
           const kind = result.json && result.json.kind;
           const keepSession = requestedSession && ["bad_request", "schema", "unsupported", "limit"].includes(kind);
-          if (!keepSession) {
+          if (keepSession) {
+            debugConnectionState = shownState;
+            syncDebugSessionPicker();
+          } else {
             releaseDebugSession(requestedSession);
             clearDebugClientState(kind === "conflict" ? "stale" : "failed");
           }
           showToast((result.json.message || "Debug rejected").split("\n")[0], { isError: true });
-          if (!keepSession) drawGraph(latestDoc);
+          drawGraph(latestDoc);
           return;
         }
         debugSessionInfo = result.json.session || null;

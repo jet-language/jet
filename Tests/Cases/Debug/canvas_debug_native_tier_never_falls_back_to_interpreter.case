@@ -1,17 +1,15 @@
 # tests/debug.rs::canvas_debug_native_tier_never_falls_back_to_interpreter
 # Exact production WebHost Canvas requests/subclaims, original source unchanged.
-# PENDING-SAME-HEAD, runtime UNRUN. Core.net client mirrors the existing raw HTTP fixture pattern.
+# Core.net client mirrors the existing raw HTTP fixture pattern.
 fixture: CanvasDebugNativeTierNeverFallsBackToInterpreter.fixture
 env: NO_COLOR=1
 step: jet build client/run.jet
 exit: 0
 copy: client/.jet/build/run canvas-client
-spawn canvas: jet dev jet_debug_canvas_native_protocol.jet --canvas --canvas-port 0
+session canvas raw: jet dev jet_debug_canvas_native_protocol.jet --canvas --canvas-port 0
 env: JET_CANVAS_BROWSER=/definitely/missing/canvas-browser
-stdout: file canvas.stdout
-stderr: file canvas.stderr
-await: file canvas.stderr ~ "Canvas: http" timeout 60s every 50ms # transport readiness bridge: Source/CmdDevTools.rs:777-783 emits the Canvas URL on configured browser launch failure; retain the ported 60s/50ms gate
-capture: url = text file.after_first("Canvas: ").line(0) canvas.stderr
+recv canvas until ~ "Canvas: http" within 60s # jet dev prints the Canvas URL on stdout once it serves
+capture: url = text stdout.after_first("Canvas: ").line(0)
 capture: revision = sha256 file jet_debug_canvas_native_protocol.jet
 capture: original_source = text file jet_debug_canvas_native_protocol.jet
 write: request.json canvas_debug_native_tier_never_falls_back_to_interpreter.request.json
