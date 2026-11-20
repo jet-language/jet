@@ -1,0 +1,22 @@
+# `print` of a Shared value's field reads the value as it stands while the
+# world is stopped, without its lock: the helper task, stopped with the
+# rest of the program, may hold the lock or be waiting on it, and an
+# evaluation that waited on it or took it would leave the program's lock
+# state changed. The read and a read guard take no lock, so they answer;
+# an edit guard would take the lock, so its evaluation is refused at the
+# entry before it does. The program then runs on to its end with its own
+# locks as they were. The helper races the loop, so only the field's name
+# is asserted, not its count.
+# The fixture must stay in jet fmt form; line 21 adds `d` to the total.
+fixture: ReplayReverse.fixture
+env: NO_COLOR=1
+step: jet debug prog.jet
+stdin: print_reads_a_shared_value_without_its_lock.stdin
+timeout: 60s
+exit: 0
+stdout: ~ "(Jet) print tally.count\ntally.count = " # the field reads without the lock
+stdout: ~ "(Jet) print tally.guard_read().value.count\ntally.guard_read().value.count = " # a read guard is taken and dropped without the lock
+stdout+stderr: ~ "a lock of the program's or wait on another of its threads in jet_rt_native_shared_guard_edit" # an edit guard is refused before it takes the lock
+stdout: ~ "total 6 tally " # the program's own output: it takes its locks after the evaluations
+stdout: ~ "Program finished\n" # the session runs the program to its end
+stdout+stderr: !~ "may not make" # no evaluation waits on a lock

@@ -1163,8 +1163,27 @@ state is put back, and the refusal says the program may keep values alive
 that the evaluation took references to and could not give back; a
 breakpoint it passes is stepped over, a watched place it writes stops
 nothing, and a signal sent to the program meanwhile is the program's once
-the call is done. The debugger also turns the record/replay mode off for
-the call and puts it back after (`jet debug --record`, `--replay`), so an
+the call is done. The other threads, stopped, may hold a lock the call
+would wait on, and a call refused part way through taking one would leave
+it taken, so for the call the debugger keeps it from the program's locks
+and its scheduler: a `Shared` or `Cell` value's read (`tally.count`,
+`tally.read(…)`) jumps to a read in the room that calls the closure on the
+value as it stands, without its lock; a read guard
+(`tally.guard_read().value`) is the value's cell itself, taken and dropped
+without its lock; its drop of a value with another owner takes the count
+down without the cell's mutex; the stop polls, cleanup shields, the
+stack's growth and a stop's publication answer at once, so the call gives
+the scheduler no turn, a failure's report is its text and no stop reaches
+the program. An edit, an edit guard, a wait, a last owner's drop, a
+transaction, a memo, a task's spawn, join, cancel, pause or resume, a
+parallel walk, a channel's make, send, receive or select, a generator, a
+fiber's park or wake, and the runtime's own lock, wait, park and yield trap
+at their entry, which refuses the call before it takes the lock or waits.
+Every entry is put back after the call, so the program's locks and
+scheduler read as they did whether the call answered or was refused. The
+debugger also turns the
+record/replay mode off for the call and puts it back after (`jet debug
+--record`, `--replay`), so an
 evaluation adds nothing to the recording and takes nothing from it. An
 image whose runtime doesn't export those words evaluates nothing: the
 refusal says to build it again with this jet. The

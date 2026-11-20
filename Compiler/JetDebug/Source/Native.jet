@@ -1109,7 +1109,7 @@ NativeSession: struct {
                 }
             }
             items: native_fix_runtime_address(facts.value.symbols, X64_DEBUG_ITEMS_DROP_SYMBOL)
-            here: native_eval_here(self.image, self.trace, self.eval_room, words, items, permit.value, plan, permit.value.placed, captures, typed, self.placed, self.sites, self.probe.sites, watched: self.watches.len() > 0) ?? return Err(err)
+            here: native_eval_here(self.image, self.trace, self.eval_room, words, items, permit.value, plan, permit.value.placed, captures, typed, self.placed, native_eval_locks(facts.value.symbols), self.sites, self.probe.sites, watched: self.watches.len() > 0) ?? return Err(err)
             if here.kept > 0 -> self.notes = "{self.notes}{native_eval_kept(here.kept)}\n"
             return Ok(here.value)
         }
@@ -2113,7 +2113,7 @@ NativeSession: struct {
         if items == 0 -> return Ok(None)
         syscall: self.syscall_site(facts.value.code) ?? return Ok(None)
         self.eval_ready(facts.value.code, syscall) ?? return Ok(None)
-        viewed: native_eval_view_here(self.image, self.trace, self.eval_room, words, items, view, ty, value, self.placed, self.sites, self.probe.sites, watched: self.watches.len() > 0) ?? return Err(NativeDebugError{detail: err.message})
+        viewed: native_eval_view_here(self.image, self.trace, self.eval_room, words, items, view, ty, value, self.placed, native_eval_locks(facts.value.symbols), self.sites, self.probe.sites, watched: self.watches.len() > 0) ?? return Err(NativeDebugError{detail: err.message})
         if viewed.kept > 0 -> self.notes = "{self.notes}{native_eval_kept(viewed.kept)}\n"
         Ok(viewed.shown)
     }
