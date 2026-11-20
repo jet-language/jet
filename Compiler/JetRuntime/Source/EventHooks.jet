@@ -1,6 +1,7 @@
 // Synchronous hooks over the Event listener cells. One meaning with the Rust
-// reference types JetHook, JetDecisionHook. Single-thread shared cells, as
-// Events.jet.
+// reference types JetHook, JetDecisionHook. A declared hook or decision
+// point is one process cell every task runs, so the box count is atomic and
+// the listener cell is the locked core of Events.jet.
 //
 // HookBox32: refs0 core8 fallback16 meta24
 //   A Hook<T, R> or DecisionHook<T, E> handle. Its clones share the box (Rust
@@ -44,7 +45,7 @@ hook_value_clone: fn(source: I64, target: I64, meta: I64) {
 }
 
 #Export(c) jet_rt_handle_clone_jet_hook: fn(hook: I64) -> I64 {
-    event_store(hook, event_word(hook) + I64{1})
+    _ := sync_add(hook, I64{1})
     hook
 }
 
@@ -52,9 +53,7 @@ hook_value_clone: fn(source: I64, target: I64, meta: I64) {
     if (hook == I64{0}) {
         return
     }
-    refs: event_word(hook) - I64{1}
-    event_store(hook, refs)
-    if (refs != I64{0}) {
+    if (sync_add(hook, I64{-1}) != I64{1}) {
         return
     }
     jet_rt_handle_drop_jet_event(event_word(wrapping(hook + I64{8})))
@@ -80,7 +79,7 @@ hook_value_clone: fn(source: I64, target: I64, meta: I64) {
 #Export(c) jet_hook_trace: fn(hook: I64) -> I64 {
     text: jet_rt_string_builder_new()
     jet_rt_string_builder_push(text, rt_static_text("hook listeners="))
-    rt_text_push_number(text, event_active_listeners(event_word(wrapping(hook + I64{8}))))
+    rt_text_push_number(text, event_core_active_listeners(event_word(wrapping(hook + I64{8}))))
     jet_rt_string_builder_finish(text)
 }
 
@@ -92,7 +91,7 @@ hook_value_clone: fn(source: I64, target: I64, meta: I64) {
 // count on the box: a handler that drops the last Hook handle leaves it
 // alive until the run releases it.
 #Export(c) jet_hook_run: fn(hook: I64, payload: I64, fallback: I64, out: I64) {
-    event_store(hook, event_word(hook) + I64{1})
+    _ := sync_add(hook, I64{1})
     core: event_word(wrapping(hook + I64{8}))
     meta: event_word(wrapping(hook + I64{24}))
     size: coll_payload(meta)
@@ -165,7 +164,7 @@ OUTCOME_FAIL_AT: I64{104}
 // (HandlerContinue, HandlerTransform, HandlerCancel, HandlerFail), then the
 // Terminal Continue, Cancel or Fail.
 #Export(c) jet_decision_hook_run: fn(hook: I64, payload: I64, layout: I64) -> I64 {
-    event_store(hook, event_word(hook) + I64{1})
+    _ := sync_add(hook, I64{1})
     core: event_word(wrapping(hook + I64{8}))
     t_meta: event_word(wrapping(layout + DECISION_T_META))
     e_meta: event_word(wrapping(layout + DECISION_E_META))

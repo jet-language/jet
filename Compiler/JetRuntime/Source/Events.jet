@@ -1,17 +1,24 @@
 // Synchronous typed events. One meaning with the Rust reference types
-// JetEventPolicy, JetEventTrace, JetSubscription, JetEventScope, JetEvent. The
-// Event carriers are single-thread shared cells (Rust Rc/Cell/RefCell), so
-// their counts are plain words. A Subscription is also the state of an
-// AsyncEvent listener (AsyncEvents.jet), whose dispatch runs on a scheduler
-// thread: its count and active flag are atomic.
+// JetEventPolicy, JetEventTrace, JetSubscription, JetEventScope, JetEvent. A
+// dispatch runs its handlers on the emitting thread, but a carrier is not
+// confined to one: a declared point (`gate: event.decision_point<...>()`)
+// is one process cell every task reads, so tasks on different carriers
+// emit, run, listen and drop through the same core at once. The carrier
+// counts (core, hook box, listener) are atomic, and the core's listener
+// list is read and edited only under the core's lock, which no section
+// holds across a handler call or a closure release. A Subscription is also
+// the state of an AsyncEvent listener (AsyncEvents.jet), whose dispatch
+// runs on a scheduler thread: its count and active flag are atomic.
 //
-// EventCore72: strong0 weak8 next_id16 listeners{len24 cap32 data40} policy48
-//   id56 source64
+// EventCore80: strong0 weak8 next_id16 listeners{len24 cap32 data40} policy48
+//   id56 source64 lock72
 //   An Event handle is its core (Rust: Rc<RefCell<Vec<JetListener>>>); a
-//   subscription's cleanup holds a weak count (Rust: Rc.downgrade). source
-//   is the observations' static source text ("Event", "DecisionHook"), 0 for
-//   a Hook, which records none; id is the identity they name it by
-//   (ObserveLive.jet observe_event_id).
+//   subscription's cleanup holds a weak count (Rust: Rc.downgrade), and the
+//   strong handles together hold one more, so the last weak release frees
+//   the core. source is the observations' static source text ("Event",
+//   "DecisionHook"), 0 for a Hook, which records none; id is the identity
+//   they name it by (ObserveLive.jet observe_event_id). lock guards
+//   next_id and the listener list.
 // Listener64: refs0 id8 priority16 once24 sub32 env40 invoke48 release56
 //   One count for the core's list, one per dispatch snapshot holding it
 //   (Rust: the entry clones its handler Rc), so a handler that unsubscribes
@@ -35,6 +42,11 @@
 event_word: fn(address: I64) -> I64 { trap_word(address) }
 
 event_store: fn(address: I64, value: I64) { trap_store(address, value) }
+
+// The lock of the sync core `core` (EventCore lock72).
+event_core_lock: fn(core: I64) { sync_mutex_lock(wrapping(core + I64{72})) }
+
+event_core_unlock: fn(core: I64) { sync_mutex_unlock(wrapping(core + I64{72})) }
 
 // Word vectors embedded at `base`: len0 cap8 data16.
 event_words_push: fn(base: I64, word: I64) {
@@ -132,21 +144,28 @@ event_sub_unsubscribe: fn(sub: I64) {
     }
     event_note_observe(event_word(wrapping(sub + I64{32})), I64{0}, rt_static_text("Removed"), rt_static_text("None"))
     core: event_word(wrapping(sub + I64{16}))
-    if (core == I64{0} || event_word(core) == I64{0}) {
+    if (core == I64{0}) {
         return
     }
     id: event_word(wrapping(sub + I64{24}))
-    base: wrapping(core + I64{24})
-    at := I64{0}
-    loop at < event_word(base) {
-        listener: event_words_get(base, at)
-        if event_word(wrapping(listener + I64{8})) == id {
-            event_words_remove(base, at)
-            event_listener_release(listener)
-            return
+    event_core_lock(core)
+    // The last Event handle took the list once the strong count reached 0.
+    found := I64{0}
+    if (sync_load(core) != I64{0}) {
+        base: wrapping(core + I64{24})
+        at := I64{0}
+        loop at < event_word(base) {
+            listener: event_words_get(base, at)
+            if event_word(wrapping(listener + I64{8})) == id {
+                event_words_remove(base, at)
+                found = listener
+                break
+            }
+            at += I64{1}
         }
-        at += I64{1}
     }
+    event_core_unlock(core)
+    if (found != I64{0}) { event_listener_release(found) }
 }
 
 // Gives the registered `sub` its observation note (EventNote64) while the
@@ -210,12 +229,10 @@ event_core_dispatch: fn(core: I64) -> I64 {
 
 // ---- Listener --------------------------------------------------------------
 
-event_listener_retain: fn(listener: I64) { event_store(listener, event_word(listener) + I64{1}) }
+event_listener_retain: fn(listener: I64) { _ := sync_add(listener, I64{1}) }
 
 event_listener_release: fn(listener: I64) {
-    refs: event_word(listener) - I64{1}
-    if (refs != I64{0}) {
-        event_store(listener, refs)
+    if (sync_add(listener, I64{-1}) != I64{1}) {
         return
     }
     sub: event_word(wrapping(listener + I64{32}))
@@ -439,9 +456,10 @@ event_trace_with_summary: fn(delivered: I64, queued: I64, dropped: I64, summary:
 // EventPolicy.Sync, JetEvent.new), whose observations name `source` (0 for
 // none, a Hook's).
 event_core_new: fn(ordinal: I64, source: I64) -> I64 {
-    core: jet_rt_alloc(I64{72}, I64{8})
-    coll_zero(core, I64{72})
+    core: jet_rt_alloc(I64{80}, I64{8})
+    coll_zero(core, I64{80})
     event_store(core, I64{1})
+    event_store(wrapping(core + I64{8}), I64{1})
     event_store(wrapping(core + I64{48}), ordinal)
     if (source != I64{0}) {
         event_store(wrapping(core + I64{56}), observe_event_id())
@@ -451,39 +469,36 @@ event_core_new: fn(ordinal: I64, source: I64) -> I64 {
 }
 
 #Export(c) jet_rt_handle_clone_jet_event: fn(core: I64) -> I64 {
-    event_store(core, event_word(core) + I64{1})
+    _ := sync_add(core, I64{1})
     core
 }
 
 event_core_free: fn(core: I64) {
     event_words_free(event_word(wrapping(core + I64{40})), event_word(wrapping(core + I64{32})))
-    jet_rt_free(core, I64{72}, I64{8})
+    jet_rt_free(core, I64{80}, I64{8})
 }
 
 event_core_weak_release: fn(core: I64) {
-    weak: event_word(wrapping(core + I64{8})) - I64{1}
-    event_store(wrapping(core + I64{8}), weak)
-    if (weak == I64{0} && event_word(core) == I64{0}) { event_core_free(core) }
+    if (sync_add(wrapping(core + I64{8}), I64{-1}) == I64{1}) { event_core_free(core) }
 }
 
 // The last Event handle drops its listeners (handlers and their counts on
-// each subscription). Subscriptions outlive it: their cleanup finds no event.
+// each subscription), then the weak count the strong handles held.
+// Subscriptions outlive it: their cleanup finds no event.
 #Export(c) jet_rt_handle_drop_jet_event: fn(core: I64) {
     if (core == I64{0}) {
         return
     }
-    strong: event_word(core) - I64{1}
-    event_store(core, strong)
-    if (strong != I64{0}) {
+    if (sync_add(core, I64{-1}) != I64{1}) {
         return
     }
-    // Hold the cell while released listeners drop their subscriptions' weak counts.
-    event_store(wrapping(core + I64{8}), event_word(wrapping(core + I64{8})) + I64{1})
     base: wrapping(core + I64{24})
+    event_core_lock(core)
     length: event_word(base)
     capacity: event_word(wrapping(base + I64{8}))
     data: event_word(wrapping(base + I64{16}))
     event_words_take(base)
+    event_core_unlock(core)
     at := I64{0}
     loop at < length {
         event_listener_release(event_word(wrapping(data + at * I64{8})))
@@ -504,21 +519,23 @@ event_core_weak_release: fn(core: I64) {
         event_release_closure(env, release)
         return sub
     }
-    id: event_word(wrapping(core + I64{16}))
-    event_store(wrapping(core + I64{16}), id + I64{1})
     listener: jet_rt_alloc(I64{64}, I64{8})
     event_store(listener, I64{1})
-    event_store(wrapping(listener + I64{8}), id)
     event_store(wrapping(listener + I64{16}), priority)
     event_store(wrapping(listener + I64{24}), if (once != I64{0}) -> I64{1} else -> I64{0})
     event_store(wrapping(listener + I64{32}), event_sub_retain(sub))
     event_store(wrapping(listener + I64{40}), env)
     event_store(wrapping(listener + I64{48}), invoke)
     event_store(wrapping(listener + I64{56}), release)
-    event_words_push(wrapping(core + I64{24}), listener)
-    event_store(wrapping(sub + I64{16}), core)
+    _ := sync_add(wrapping(core + I64{8}), I64{1})
+    event_core_lock(core)
+    id: event_word(wrapping(core + I64{16}))
+    event_store(wrapping(core + I64{16}), id + I64{1})
+    event_store(wrapping(listener + I64{8}), id)
     event_store(wrapping(sub + I64{24}), id)
-    event_store(wrapping(core + I64{8}), event_word(wrapping(core + I64{8})) + I64{1})
+    event_store(wrapping(sub + I64{16}), core)
+    event_words_push(wrapping(core + I64{24}), listener)
+    event_core_unlock(core)
     source: event_word(wrapping(core + I64{64}))
     if (source != I64{0}) {
         note: event_note_new(sub, source, event_word(wrapping(core + I64{56})), scope, priority, I64{0}, I64{0}, rt_static_text("None"))
@@ -548,9 +565,19 @@ event_snapshot_insert: fn(rows: I64, count: I64, listener: I64) {
 }
 
 // The active listeners of the listener list of `core` (an EventCore or a
-// hook's), snapshot for one dispatch.
+// hook's), snapshot for one dispatch under the core's lock. An empty list
+// takes no lock: a point nothing listens to dispatches with two counts and
+// no lock, and a listener a racing registration adds is one this dispatch
+// would equally miss had it run a moment earlier.
 event_snapshot: fn(core: I64) -> I64 {
     base: wrapping(core + I64{24})
+    if (sync_load(base) == I64{0}) {
+        empty: jet_rt_alloc(I64{16}, I64{8})
+        event_store(empty, I64{0})
+        event_store(wrapping(empty + I64{8}), I64{0})
+        return empty
+    }
+    event_core_lock(core)
     length: event_word(base)
     snapshot: jet_rt_alloc((length + I64{2}) * I64{8}, I64{8})
     event_store(wrapping(snapshot + I64{8}), length)
@@ -565,6 +592,7 @@ event_snapshot: fn(core: I64) -> I64 {
         }
         at += I64{1}
     }
+    event_core_unlock(core)
     event_store(snapshot, count)
     snapshot
 }
@@ -603,7 +631,7 @@ event_listener_call: fn(listener: I64, payload: I64, out: I64) {
 // Observed: DispatchStarted, each handler's HandlerStarted and
 // HandlerDelivered, then the Delivered Terminal.
 #Export(c) jet_event_emit: fn(core: I64, payload: I64) -> I64 {
-    event_store(core, event_word(core) + I64{1})
+    _ := sync_add(core, I64{1})
     dispatch: event_core_dispatch(core)
     event_core_observe(core, dispatch, rt_static_text("DispatchStarted"), rt_static_text("None"), rt_static_text("None"))
     snapshot: event_snapshot(core)
@@ -639,13 +667,20 @@ event_listener_call: fn(listener: I64, payload: I64, out: I64) {
 }
 
 // Keeps only listeners whose subscription is still active (dispatch :795).
+// One pass decides each row once, so an unsubscribe on another thread
+// between two reads of its flag cannot split it from its row.
 event_prune_listeners: fn(core: I64) {
-    if (event_word(core) == I64{0}) {
+    base: wrapping(core + I64{24})
+    // An empty list has no row to drop; only a dispatch's listeners make one.
+    if (sync_load(base) == I64{0}) {
         return
     }
-    base: wrapping(core + I64{24})
-    length: event_word(base)
+    event_core_lock(core)
+    // The last Event handle took the list once the strong count reached 0.
+    length: if (sync_load(core) == I64{0}) -> I64{0} else -> event_word(base)
     data: event_word(wrapping(base + I64{16}))
+    dropped := I64{0}
+    removed := I64{0}
     kept := I64{0}
     at := I64{0}
     loop at < length {
@@ -653,32 +688,25 @@ event_prune_listeners: fn(core: I64) {
         if event_sub_active(event_word(wrapping(listener + I64{32}))) {
             event_store(wrapping(data + kept * I64{8}), listener)
             kept += I64{1}
+        } else {
+            if (dropped == I64{0}) { dropped = jet_rt_alloc(length * I64{8}, I64{8}) }
+            event_store(wrapping(dropped + removed * I64{8}), listener)
+            removed += I64{1}
         }
         at += I64{1}
     }
-    if kept == length {
+    if (removed != I64{0}) { event_store(base, kept) }
+    event_core_unlock(core)
+    if (removed == I64{0}) {
         return
     }
-    removed: length - kept
-    dropped: jet_rt_alloc(removed * I64{8}, I64{8})
-    out := I64{0}
-    at = I64{0}
-    // Collect the inactive rows before releasing any (release runs closure drops).
-    loop at < length {
-        listener: event_word(wrapping(data + at * I64{8}))
-        if !event_sub_active(event_word(wrapping(listener + I64{32}))) {
-            event_store(wrapping(dropped + out * I64{8}), listener)
-            out += I64{1}
-        }
-        at += I64{1}
-    }
-    event_store(base, kept)
+    // Released outside the lock: a release runs the closure's drop.
     at = I64{0}
     loop at < removed {
         event_listener_release(event_word(wrapping(dropped + at * I64{8})))
         at += I64{1}
     }
-    jet_rt_free(dropped, removed * I64{8}, I64{8})
+    jet_rt_free(dropped, length * I64{8}, I64{8})
 }
 
 event_active_listeners: fn(core: I64) -> I64 {
@@ -694,15 +722,23 @@ event_active_listeners: fn(core: I64) -> I64 {
     count
 }
 
+// The active listeners of the sync core `core`, read under its lock.
+event_core_active_listeners: fn(core: I64) -> I64 {
+    event_core_lock(core)
+    count: event_active_listeners(core)
+    event_core_unlock(core)
+    count
+}
+
 #Export(c) jet_event_listener_count: fn(core: I64) -> I64 {
-    jet_int_owned_from_i64(event_active_listeners(core))
+    jet_int_owned_from_i64(event_core_active_listeners(core))
 }
 
 // JetEvent.trace :814-816.
 #Export(c) jet_event_trace: fn(core: I64) -> I64 {
     text: jet_rt_string_builder_new()
     jet_rt_string_builder_push(text, rt_static_text("listeners="))
-    rt_text_push_number(text, event_active_listeners(core))
+    rt_text_push_number(text, event_core_active_listeners(core))
     jet_rt_string_builder_push(text, rt_static_text(" queued=0 dropped=0"))
     jet_rt_string_builder_finish(text)
 }

@@ -1,0 +1,17 @@
+# Tasks on different threads run one declared decision point at once, at
+# -O0, -O1 and -O2: 32 tasks at a time, 100 times over, each run `gate`,
+# whose handler transforms every value, 1000 times. The point is one process
+# cell, so the runs share its hook box, its listener list and its listener's
+# counts. Counted in plain words, two threads lost an update and freed the
+# hook while other runs still used it.
+fixture: TasksRunOnePointAtOnce.fixture
+env: NO_COLOR=1
+step default: jet run -O0 main.jet
+exit: 0
+stdout: = "3200000 runs passed\n"
+step balanced: jet run -O1 main.jet
+exit: 0
+stdout: == default
+step release: jet run -O2 main.jet
+exit: 0
+stdout: == default
