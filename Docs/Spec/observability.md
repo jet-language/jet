@@ -738,6 +738,10 @@ which the writer's next publication answers by setting the word and writing
 the zone, frame, plot and log span rows to `.samples.spans`. It then removes
 the request, so the next publication clears the word, and reads the rows into
 the trace beside the ring's, each zone holding the ring's samples inside it.
+The profile's run window is then that window, `live`: its wall time from the
+request to its removal on jet's monotonic clock, and the process CPU the
+program spent across it (its `/proc` utime and stime at each end), not the
+run since it started.
 Tests/Cases/Perf/attach_turns_zones_on.case is the worked example.
 
 `jet run --observe --checked-alloc app.jet` keeps the live list as a `jet

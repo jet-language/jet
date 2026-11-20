@@ -9,6 +9,8 @@ kit_steps_capture_valid: fn(words: [String], original: String) -> Bool {
     if words[1] == "=" {
         kind: words[2]
         if kind == "first-spawnable" -> return words.len() > 3
+        // `NAME = elapsed`: the last step's wall time, in nanoseconds.
+        if kind == "elapsed" -> return words.len() == 3
         if kind == "prefixed" {
             if words.len() < 5 || !kit_steps_subject_valid(words[3]) -> return false
             loop index in 4..<words.len() {
@@ -257,6 +259,7 @@ kit_steps_range_word: fn(word: String, captures: [KitCapture]) -> String? {
 kit_steps_capture_value: fn(words: [String], context: KitStepCtx, state: KitStepState) -> KitSubjectResult {
     if words[1] == "=" {
         kind: words[2]
+        if kind == "elapsed" -> return kit_steps_capture_result("{state.last.elapsed_ns}")
         if kind == "first-spawnable" {
             start := 3
             loop index in 3..<(words.len() + 1) {
