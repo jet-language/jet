@@ -3,16 +3,37 @@ use {
     sys: core.sys
 }
 
+// A name of `kind` the kit knows that is not this host's.
+cases_test_other_host: fn(kind: String) -> String {
+    loop name in kit_steps_host_known(kind) {
+        if name != kit_steps_host_value(kind) -> return name
+    }
+    panic("every {kind} name the kit knows is this host's")
+}
+
 #Test("host names families and normalized architectures support any-of and negation from case text") {
     root: cases_test_root("host-requirements")
-    loop pair in
-        [["os", sys.family()], ["os-name", kit_steps_host_name()], ["arch", kit_steps_host_arch()]] {
-        pass: "requires: {pair[0]}:absent|{pair[1]}\nstep: printf ok\nstdout: ~ ok # original predicate\n"
+    loop kind in ["os", "os-name", "arch"] {
+        host: kit_steps_host_value(kind)
+        pass: "requires: {kind}:{cases_test_other_host(kind)}|{host}\nstep: printf ok\nstdout: ~ ok # original predicate\n"
         assert_eq(cases_test_advanced(root, "matches", pass).verdict.status, "PASS")
-        skip: "requires: {pair[0]}:!{pair[1]}\nstep: printf ok\n"
+        skip: "requires: {kind}:!{host}\nstep: printf ok\n"
         assert_eq(cases_test_advanced(root, "negated", skip).verdict.status, "SKIP-HOST")
     }
     files.remove_all(root) ?? panic("remove host scratch")
+}
+
+#Test("a host name no host has is refused, not skipped on every host") {
+    root: cases_test_root("host-unknown")
+    loop requirement in ["os:linux", "os-name:unix", "arch:amd64", "os:!linux|unix"] {
+        assert_eq(cases_test_advanced(root, "requires", "requires: {requirement}\nstep: printf ok\n").verdict.status, "REFUSED")
+    }
+    assert_eq(cases_test_advanced(root, "detail", "requires: os:linux\nstep: printf ok\n").verdict.detail, "requires: os:linux: `linux` matches no host: os chooses from unix, windows")
+    loop condition in ["os linux", "os-name !unix", "arch x64"] {
+        assert_eq(cases_test_advanced(root, "when", "step: printf ok\nwhen {condition}: stdout: ~ ok # original predicate\n").verdict.status, "REFUSED")
+    }
+    assert_eq(kit_steps_parse_case("step: printf ok\nwhen os linux: stdout: ~ ok # original predicate\n").error, "line 2: invalid when condition: `linux` matches no host: os chooses from unix, windows")
+    files.remove_all(root) ?? panic("remove unknown host scratch")
 }
 
 #Test("host probes check exit and JSON output and alternatives fail rather than silently skip") {
@@ -348,11 +369,12 @@ use {
     root: cases_test_root("host-capture-platform-join")
     directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "tree/value"), "ready")
-    source: "fixture: tree\nwhen os-name {kit_steps_host_name()}\ncapture: chosen = text file value\nend when\nwhen os-name not-a-host\ncapture: chosen = text file absent\nend when\ncap:chosen: = \"ready\"\n"
+    other: cases_test_other_host("os-name")
+    source: "fixture: tree\nwhen os-name {kit_steps_host_name()}\ncapture: chosen = text file value\nend when\nwhen os-name {other}\ncapture: chosen = text file absent\nend when\ncap:chosen: = \"ready\"\n"
     assert_eq(kit_steps_parse_case(source).error, "")
     assert_eq(cases_test_advanced(root, "platform", source).verdict.status, "PASS")
     assert_eq(cases_test_advanced(root, "wrong", source.replace("cap:chosen: = \"ready\"", "cap:chosen: = \"wrong\"")).verdict.status, "FAIL")
-    loops: "step producer: printf 'a\\\\nb\\\\n'\nfor line stdout as row\nwhen os-name {kit_steps_host_name()}: capture: chosen = text stdout.line(0)\nwhen os-name not-a-host: capture: chosen = text stderr\ncap:chosen: = \"a\"\nend for\nfor line stdout as row\ncapture: chosen = text stdout.line(0)\ncap:chosen: = \"a\"\nend for\n"
+    loops: "step producer: printf 'a\\\\nb\\\\n'\nfor line stdout as row\nwhen os-name {kit_steps_host_name()}: capture: chosen = text stdout.line(0)\nwhen os-name {other}: capture: chosen = text stderr\ncap:chosen: = \"a\"\nend for\nfor line stdout as row\ncapture: chosen = text stdout.line(0)\ncap:chosen: = \"a\"\nend for\n"
     assert_eq(kit_steps_parse_case(loops).error, "")
     assert_eq(cases_test_advanced(root, "scopes", loops).verdict.status, "PASS")
     files.remove_all(root) ?? panic("remove platform capture scratch")

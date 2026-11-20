@@ -1,4 +1,7 @@
-use jet_backend.[X64DebugEncoding, link_debug_uleb, x64_decode, x64_jetline_sleb]
+use {
+    jet_backend.[X64DebugEncoding, link_debug_uleb, x64_decode, x64_jetline_sleb]
+    jet_foundation.[RUNTIME_C_EXPORTS]
+}
 
 // A breakpoint whose condition runs in the program itself: a hit where the
 // condition is false goes on with no stop, so a breakpoint whose condition
@@ -16,14 +19,18 @@ use jet_backend.[X64DebugEncoding, link_debug_uleb, x64_decode, x64_jetline_sleb
 // debugger reports the breakpoint with the thread at the breakpoint's
 // address. The condition's allocations go to a scratch arena mapped in its
 // region, which each hit empties as it starts; a hit that finds another
-// thread using the arena, or fills it, calls out. Its other runtime calls
-// (stop polls, stack growth, a slow path of exact Int arithmetic, a stop)
-// all go to one stub that finds the trampoline's frame through the frame
-// chain and traps a second way, after which the debugger checks that hit
-// as an evaluation (NativeEval.jet), as it does a condition whose code
-// can't be placed in the program's. JetIR EvalPlace.jet says which
-// conditions may: the code placed writes nothing but its own stack and the
-// blocks it allocates.
+// thread using the arena, or fills it, calls out. The runtime's routines
+// that build, render, compare and drop text (NATIVE_PLACE_PACKED) run from
+// the runtime pack, placed afresh with the routines they reach
+// (NativeFixPack.jet native_fix_pack_fresh), their allocations and frees
+// sent to the arena too. Its other runtime calls (stop polls, stack
+// growth, a slow path of exact Int arithmetic, a stop) all go to one stub
+// that finds the trampoline's frame through the frame chain and traps a
+// second way, after which the debugger checks that hit as an evaluation
+// (NativeEval.jet), as it does a condition whose code can't be placed in
+// the program's. JetIR EvalPlace.jet says which conditions may: the code
+// placed writes nothing but its own stack, the blocks it allocates and the
+// text it makes.
 //
 // A logpoint whose `{…}` parts each pass that scan runs in the program the
 // same way, with no stop at each hit: its trampoline claims the next slot
@@ -140,27 +147,60 @@ NATIVE_PLACE_ARENA_BUSY: 32
 NATIVE_PLACE_ARENA_WORDS: 64
 
 // Which of the arena's entries a placed call's runtime call of `symbol`
-// goes to (NativePlaceCode): 0 the take, of jet_rt_alloc and
-// jet_rt_alloc_value; 1 take_8, of their align-8 entries; 2 the give, of
-// jet_rt_free and jet_rt_free_8; -1 for any other, which calls out.
+// goes to (NativePlaceCode), by the name the runtime pack gives it: 0 the
+// take, of jet_rt_alloc and jet_rt_alloc_value; 1 take_8, of their align-8
+// entries and of a text's buffer; 2 the give, of jet_rt_free, jet_rt_free_8
+// and a text's buffer; 3 a text buffer's growth, which leaves the old
+// buffer to the give; 4 the answer 0, of the allocator a `#Context` block
+// serves values from (none: the heap's entries, which are the arena's) and
+// of a pending stop (none: an arena with no room calls out); -1 for any
+// other, which calls out.
 native_place_arena_route: fn(symbol: String) -> Int Never! {
     if {
         symbol == "jet_rt_alloc" || symbol == "jet_rt_alloc_value" -> 0
-        symbol == "jet_rt_alloc_8" || symbol == "jet_rt_alloc_value_8" -> 1
-        symbol == "jet_rt_free" || symbol == "jet_rt_free_8" -> 2
+        symbol == "jet_rt_alloc_8" || symbol == "jet_rt_alloc_value_8" || symbol == "unit.alloc_bytes" -> 1
+        symbol == "jet_rt_free" || symbol == "jet_rt_free_8" || symbol == "unit.free_bytes" -> 2
+        symbol == "unit.alloc_grow_bytes" -> 3
+        symbol == "unit.alloc_user_current" || symbol == "unit.scheduler_delivered_status" -> 4
         else -> -1
     }
 }
 
+// The runtime routines a placed call runs from the runtime pack, placed
+// afresh (NativeFixPack.jet native_fix_pack_fresh): those that build,
+// render, compare and drop text. Each writes only text it makes or is
+// given to drop, which JetIR EvalPlace.jet keeps to text the code made.
+// Each is one of the runtime's C exports (RUNTIME_C_EXPORTS), which
+// NATIVE_PLACE_PACKED_CHECKED holds it to.
+NATIVE_PLACE_PACKED: [String]{"jet_rt_string_builder_new", "jet_rt_string_builder_value", "jet_rt_string_builder_push", "jet_rt_string_builder_push_static", "jet_rt_string_builder_finish", "jet_rt_string_serve", "jet_rt_string_from_static", "jet_rt_string_byte_len", "jet_rt_int_to_string", "jet_rt_i64_to_string", "jet_rt_u64_to_string", "jet_rt_bool_to_string", "jet_rt_char_to_string", "jet_rt_string_eq", "jet_rt_string_compare", "jet_rt_string_clone", "jet_rt_string_drop", "jet_string_contains", "jet_string_starts_with", "jet_string_ends_with"}
+
+NATIVE_PLACE_PACKED_CHECKED: #run native_eval_exports_checked("NATIVE_PLACE_PACKED", NATIVE_PLACE_PACKED, RUNTIME_C_EXPORTS)
+
+// The routines those reach that leave the placed code, so a call of one
+// calls out: the runtime's stops, and the allocator's paths for a request
+// the arena doesn't serve.
+NATIVE_PLACE_OUT: [String]{"jet_rt_numeric_stop", "jet_rt_fixed_shift_stop", "jet_rt_unreachable", "unit.rt_seq_capacity_overflow_stop", "unit.alloc_grow_large", "unit.alloc_user_need"}
+
+// Whether a routine the runtime pack names `symbol`, reached by the code of
+// a routine of NATIVE_PLACE_PACKED, is the trampoline's rather than placed
+// with it: one of the arena's (native_place_arena_route), one that leaves
+// the placed code (NATIVE_PLACE_OUT) or an `#FFI(asm)` routine (a system
+// call), which calls out.
+native_place_routed: fn(symbol: String) -> Bool Never! {
+    native_place_arena_route(symbol) >= 0 || NATIVE_PLACE_OUT.contains(symbol) || symbol.ends_with("__asm")
+}
+
 // Where in the trampoline `built` a runtime call of `symbol` goes: the
-// arena's entry for an allocation or a free, when it has an arena, else
-// the stub, which calls out.
+// arena's entry for it (native_place_arena_route), when it has an arena,
+// else the stub, which calls out.
 native_place_routine: fn(built: NativePlaceCode, symbol: String) -> Int Never! {
     route: native_place_arena_route(symbol)
     if {
         route == 0 && built.alloc >= 0 -> built.alloc
         route == 1 && built.alloc_8 >= 0 -> built.alloc_8
         route == 2 && built.free >= 0 -> built.free
+        route == 3 && built.grow >= 0 -> built.grow
+        route == 4 && built.zero >= 0 -> built.zero
         else -> built.out
     }
 }
@@ -170,7 +210,9 @@ native_place_routine: fn(built: NativePlaceCode, symbol: String) -> Int Never! {
 // instructions and the stub its runtime calls go to. With an arena, the
 // entries its allocations go to (`alloc`, of jet_rt_alloc(size, align) and
 // jet_rt_alloc_value; `alloc_8`, of their align-8 entries, which take the
-// size alone) and its frees (`free`); -1 without one.
+// size alone; `grow`, of a text buffer's growth, which takes the old
+// buffer, then the size), its frees (`free`) and the answer 0 (`zero`); -1
+// without one.
 NativePlaceCode: struct {
     bytes: [U8],
     truth: Int,
@@ -181,6 +223,8 @@ NativePlaceCode: struct {
     alloc: Int{-1},
     alloc_8: Int{-1},
     free: Int{-1},
+    grow: Int{-1},
+    zero: Int{-1},
 }
 
 // One placed condition or logpoint of the session: the breakpoint
@@ -571,10 +615,13 @@ native_place_code: fn(base: Int, address: Int, calls: [NativePlaceCall], ring: N
     if arena == 0 {
         return Val(NativePlaceCode{bytes: out, truth: truth, unknown: unknown, moved: moved, moved_end: moved_end, out: stub})
     }
-    // The arena's entries. alloc_8: mov esi,8; then alloc: call the take
+    // The arena's entries. grow: mov rdi,rsi (the size, past the old
+    // buffer); then alloc_8: mov esi,8; then alloc: call the take
     // (NativeEval.jet native_eval_take_code, past the 10 bytes that
     // follow the call); test rax,rax; je stub; ret. An arena with no room
     // left calls out.
+    grow: out.len()
+    native_place_emit(out, [Int]{0x48, 0x89, 0xf7})
     alloc_8: out.len()
     native_place_emit(out, [Int]{0xbe, 8, 0, 0, 0})
     alloc: out.len()
@@ -588,7 +635,7 @@ native_place_code: fn(base: Int, address: Int, calls: [NativePlaceCall], ring: N
     // free: a block of the arena is left be (the next hit empties it); a
     // free of any other is the program's memory, so the hit calls out:
     // movabs r11,arena; cmp rdi,[r11+base]; jb stub; cmp rdi,[r11+end];
-    // jae stub; xor eax,eax; ret
+    // jae stub; then zero: xor eax,eax; ret
     free: out.len()
     native_eval_r11(out, arena)
     native_place_emit(out, [Int]{0x49, 0x3b, 0x7b, NATIVE_EVAL_BASE, 0x0f, 0x82})
@@ -597,8 +644,9 @@ native_place_code: fn(base: Int, address: Int, calls: [NativePlaceCall], ring: N
     native_place_emit(out, [Int]{0x49, 0x3b, 0x7b, NATIVE_EVAL_END, 0x0f, 0x83})
     past: out.len()
     native_place_word(out, stub - (past + 4), 4)
+    zero: out.len()
     native_place_emit(out, [Int]{0x31, 0xc0, 0xc3})
-    Val(NativePlaceCode{bytes: out, truth: truth, unknown: unknown, moved: moved, moved_end: moved_end, out: stub, alloc: alloc, alloc_8: alloc_8, free: free})
+    Val(NativePlaceCode{bytes: out, truth: truth, unknown: unknown, moved: moved, moved_end: moved_end, out: stub, alloc: alloc, alloc_8: alloc_8, free: free, grow: grow, zero: zero})
 }
 
 // Gives up the arena at `arena` (native_place_code): movabs r11,arena;
@@ -833,7 +881,10 @@ native_place_find: fn(bytes: [U8], wanted: [Int]) -> Int Never! {
     first: native_place_find(bytes, release)
     assert(first > claim)
     assert(native_place_find(bytes[first + 8..<bytes.len()], release) >= 0)
-    // alloc_8 sets the align, then alloc calls the take past its own tail.
+    // grow moves the size into place, alloc_8 sets the align, then alloc
+    // calls the take past its own tail.
+    assert_eq(placed.alloc_8, placed.grow + 3)
+    assert_eq(Int{bytes[placed.grow + 2]}, 0xf7)
     assert_eq(Int{bytes[placed.alloc_8]}, 0xbe)
     assert_eq(placed.alloc, placed.alloc_8 + 5)
     assert_eq(Int{bytes[placed.alloc]}, 0xe8)
@@ -842,9 +893,12 @@ native_place_find: fn(bytes: [U8], wanted: [Int]) -> Int Never! {
     assert_eq(native_place_find(bytes[core..<core + taken.len()], [Int]{0x49, 0xbb}), 0)
     // No room calls out: je stub.
     assert_eq(placed.alloc + 10 + 4 + native_number(bytes, placed.alloc + 10, 4, X64DebugEncoding.Signed), placed.out)
-    // A free of a block past the arena calls out too.
+    // A free of a block past the arena calls out too; one inside it
+    // answers 0, as zero does.
     assert(placed.free > core)
     assert_eq(placed.free + 16 + 4 + native_number(bytes, placed.free + 16, 4, X64DebugEncoding.Signed), placed.out)
+    assert_eq(placed.zero, placed.free + 30)
+    assert_eq(bytes[placed.zero..<placed.zero + 3], [U8]{0x31, 0xc0, 0xc3})
 }
 
 #Test("a logpoint's String part copies the local's length and text into the hit's slot") {
@@ -884,7 +938,20 @@ native_place_find: fn(bytes: [U8], wanted: [Int]) -> Int Never! {
     assert_eq(native_place_routine(placed, "jet_rt_free_8"), placed.free)
     assert_eq(native_place_routine(placed, "jet_rt_session_poll"), placed.out)
     assert_eq(native_place_arena_route("jet_rt_session_poll"), -1)
+    // The text routines placed from the pack reach the allocator's own
+    // entries by their pack names.
+    assert_eq(native_place_routine(placed, "unit.alloc_bytes"), placed.alloc_8)
+    assert_eq(native_place_routine(placed, "unit.free_bytes"), placed.free)
+    assert_eq(native_place_routine(placed, "unit.alloc_grow_bytes"), placed.grow)
+    assert_eq(native_place_routine(placed, "unit.alloc_user_current"), placed.zero)
+    assert_eq(native_place_routine(placed, "unit.scheduler_delivered_status"), placed.zero)
+    // A stop, and a system call, leave the placed code.
+    assert(native_place_routed("jet_rt_numeric_stop"))
+    assert_eq(native_place_routine(placed, "jet_rt_numeric_stop"), placed.out)
+    assert(native_place_routed("unit_os_syscall_i64__asm"))
+    assert(!native_place_routed("unit.rt_text_append"))
     // Without an arena, an allocation calls out too.
     bare: native_place_code(0x200000, 0x1000, calls, None, 0, code, 0, insns) ?? panic("code")
     assert_eq(native_place_routine(bare, "jet_rt_alloc"), bare.out)
+    assert_eq(native_place_routine(bare, "unit.alloc_user_current"), bare.out)
 }

@@ -1,8 +1,12 @@
 // Whether a debugger's condition may run in the program (EvalPlace.jet
 // ir_eval_place_refusal): it may write only its own stack and the blocks it
-// allocates, and may not take a reference, call a function value or run an
-// `#FFI(asm)` template, in its own code or in a function it calls.
-use jet_ir.[IRAsmLeaf, IRFunction, IRModule, IROp, IRSlotKind, IR_STOP_TRAP_KEY, ir_args, ir_emit, ir_eval_place_refusal, ir_function_new, ir_intern_name, ir_module_new, ir_slot]
+// allocates, may copy or drop only text it made, and may not take a
+// reference, call a function value or run an `#FFI(asm)` template, in its
+// own code or in a function it calls.
+use {
+    jet_foundation.[Type]
+    jet_ir.[IRAsmLeaf, IRClass, IRFunction, IRModule, IROp, IRSlotKind, IRType, IRTypeKind, IR_STOP_TRAP_KEY, ir_args, ir_emit, ir_eval_place_refusal, ir_function_new, ir_intern_name, ir_intern_type, ir_module_new, ir_slot]
+}
 
 place_test_fn: fn(name: String, params: Int, temps: Int) -> IRFunction {
     f := ir_function_new(name, name, name, "probe.jet", 1)
@@ -110,4 +114,45 @@ place_test_module: fn(body: &&IRFunction, callee: &&IRFunction) -> IRModule {
     _ := ir_emit(m.functions[0], IROp.CallRuntime, 3, other, block, 1, 1)
     _ := ir_emit(m.functions[0], IROp.Store, -1, 3, 0, 0, 1)
     assert_eq(ir_eval_place_refusal(m, 0), "it writes memory it did not take on its own stack or allocate")
+}
+
+// A String type that drops through the runtime, as a program's does.
+place_test_string: fn(m: &IRModule) -> Int {
+    ir_intern_type(m, "String", IRType{ty: Type.String, kind: IRTypeKind.String, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "jet_rt_string_drop"})
+}
+
+#Test("a condition copies and drops the text it made in the program; a parameter's text keeps it out") {
+    f := place_test_fn("condition", 1, 3)
+    callee := place_test_fn("unused", 0, 0)
+    m := place_test_module(f.move(), callee.move())
+    text: place_test_string(m)
+    m.functions[0].slot_type[1] = text
+    m.functions[0].slot_type[2] = text
+    m.functions[0].slot_type[3] = text
+    // A rendered Int, a static text and a copy of the rendered one, each
+    // dropped.
+    render: ir_intern_name(m, "jet_rt_int_to_string")
+    number: ir_args(m.functions[0], [Int]{0})
+    _ := ir_emit(m.functions[0], IROp.CallRuntime, 1, render, number, 1, 1)
+    _ := ir_emit(m.functions[0], IROp.ConstText, 2, 0, -1, -1, 1)
+    _ := ir_emit(m.functions[0], IROp.Copy, 3, 1, -1, -1, 1)
+    _ := ir_emit(m.functions[0], IROp.Drop, -1, 1, -1, -1, 1)
+    _ := ir_emit(m.functions[0], IROp.Drop, -1, 2, -1, -1, 1)
+    _ := ir_emit(m.functions[0], IROp.Drop, -1, 3, -1, -1, 1)
+    assert_eq(ir_eval_place_refusal(m, 0), "")
+    // The parameter's text is the program's.
+    m.functions[0].slot_type[0] = text
+    _ := ir_emit(m.functions[0], IROp.Drop, -1, 0, -1, -1, 1)
+    assert_eq(ir_eval_place_refusal(m, 0), "it copies or drops a String it did not make")
+}
+
+#Test("text loaded from the program's memory is not text the condition made") {
+    f := place_test_fn("condition", 1, 1)
+    callee := place_test_fn("unused", 0, 0)
+    m := place_test_module(f.move(), callee.move())
+    m.functions[0].slot_type[1] = place_test_string(m)
+    _ := ir_emit(m.functions[0], IROp.Load, 1, 0, 0, -1, 1)
+    _ := ir_emit(m.functions[0], IROp.Copy, 1, 1, -1, -1, 1)
+    _ := ir_emit(m.functions[0], IROp.Drop, -1, 1, -1, -1, 1)
+    assert_eq(ir_eval_place_refusal(m, 0), "it copies or drops a String it did not make")
 }

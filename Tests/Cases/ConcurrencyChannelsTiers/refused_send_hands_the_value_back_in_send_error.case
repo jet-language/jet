@@ -2,23 +2,31 @@
 # refuses the value, and `err.value` hands the value back: a send after the
 # receiver closed is recovered with `??`, a bare send propagates out of an
 # inferred function and converts to the default Err with a fixed message, on
-# O0, O1 and O2. closed.jet sends inside a `Closed` contract, which a
-# `SendError<Int>` does not fit; handled.jet handles that send and checks.
+# O0, O1 and O2. That is the law in spec.md's Channels text ("A bare send
+# propagates it, and it converts to the default `Err` as `send on a closed
+# channel`"): `SendError` is a Core error family member
+# (e68a01aeab), and a family member is no typed member of an inferred failure
+# union (sema_failure_union_typed, FailureUnion.jet), so `relay` fails with Err
+# and has no `value` to hand back. closed.jet sends inside a `Closed`
+# contract, which a `SendError<Int>` does not fit: a typed failure with no
+# route into the caller's contract is E2404, as
+# Tests/UI/E2404_alloc_error_into_never.jet pins for AllocError.
+# handled.jet handles that send and checks.
 fixture: RefusedSendHandsTheValueBackInSendError.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 step: jet run -O0 main.jet
 exit: 0
-stdout: = "first\nrefused second\nrelay kept third\nforward: send on a closed channel\n"
+stdout: = "first\nrefused second\nrelay: send on a closed channel\nforward: send on a closed channel\n"
 step: jet run -O1 main.jet
 exit: 0
-stdout: = "first\nrefused second\nrelay kept third\nforward: send on a closed channel\n"
+stdout: = "first\nrefused second\nrelay: send on a closed channel\nforward: send on a closed channel\n"
 step: jet run -O2 main.jet
 exit: 0
-stdout: = "first\nrefused second\nrelay kept third\nforward: send on a closed channel\n"
+stdout: = "first\nrefused second\nrelay: send on a closed channel\nforward: send on a closed channel\n"
 step: jet check closed.jet
 exit: 1
-stderr: ~ "Jet.FailureDomainMismatch" # the send's failure does not fit the Closed contract
+stderr: ~ "Jet.ErrorNotPropagatable" # the send's failure has no route into the Closed contract
 stderr: ~ "SendError" # the report names the refused send's error
 step: jet run -O0 handled.jet
 exit: 0

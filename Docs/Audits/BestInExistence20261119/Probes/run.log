@@ -1727,6 +1727,40 @@ Detached from process 120887
 the target after the session: running
 
 
+== Canvas: the Debug and Profile views, their first paint and panels, against RemedyBG
+
+# Run.jet's canvas axis on the gate p372 compiler (the axes above ran on p339): the third of three runs back to back, whose Continue painted the stop in 74.7 and 93.4 ms
+
+# the browser: Chromium 152.0.7977.64, headless, 1440x900
+
+$ jetpack browser lock chromium --binary chromium --version 152.0.7977.64 --protocol bidi-2025.5 --driver chromedriver
+  jetpack  locked chromium 152.0.7977.64 -> chromium (sha256-f2bdb5101d9f834e00f344835e5ddfa6943210083024beb74213915e83222df9)
+(exit 0; wall 3 ms, cpu 3 ms, load 9.51 82.60 110.77)
+
+$ env NO_COLOR=1 JET_BIN=jet 'JET_PROJECT_ROOT=<work>' jet run --allow=Env,Exec,FS,IO,Net,Time '<repo>/Tools/CanvasTest/Run.jet' -- scenario --scenario debug_first_paint --source jet_debug_canvas_values_at_breakpoint.jet
+page: loaded and drawn in 279.0 ms
+debug: Start to the entry shown paused in 124.2 ms (Paused · line 7 · jet dev O0)
+debug: Continue to the stop painted in 56.6 ms (line 2 active in the source, 2 frames, x = 2)
+debug: a watch of x entered to its value painted in 182.6 ms
+debug panel: Source: in the window, 14 rows
+debug panel: Call Stack: in the window, 2 rows
+debug panel: Locals: in the window, 1 row
+debug panel: Watches: in the window, 1 row
+debug panel: Tasks: in the window, 3 rows
+debug panel: Debug Console: in the window, 3 rows
+profile: Profile entry to the timeline painted in 235.7 ms (1 ns shown · 1 samples · /tmp/jet_canvas_profile_1589343_1795207818931076222/canvas.jettrace)
+profile panel: Profile Timeline: in the window, a canvas 936x198
+profile panel: Hot Lines: in the window, 1 row
+profile panel: Selection: in the window, 0 rows
+PASS chromium debug_first_paint
+(exit 0; wall 3487 ms, cpu 4978 ms, load 9.51 82.60 110.77)
+
+RemedyBG's panels at a stop in the Debug view's window: 5 of 8
+not shown: Memory, Registers, Disassembly
+Continue to the stop painted: 56.6 ms, against RemedyBG's well under a second (not measured: RemedyBG runs on Windows alone)
+Verdict: does not hold: no Memory, Registers, Disassembly panel at the stop
+
+
 == Generic instances: a breakpoint in a generic module's instance at -O0, -O1 and -O2
 
 $ jet debug prog.jet --break prog.jet:7  (one command at a time)

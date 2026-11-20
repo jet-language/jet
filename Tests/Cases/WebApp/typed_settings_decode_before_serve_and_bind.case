@@ -1,9 +1,10 @@
 # Claim: `web.serve<Settings>(prefix:, build:)` and
 # `web.bind<Settings>(address, prefix:, build:)` decode the typed settings
 # record before any socket binds. Settings that do not decode stop with E2416
-# and exit 78: every failure on its own line with its variable and field path,
-# a secret-named value hidden, and nothing listens. Good settings build the app
-# that serves (its home route answers with them) or the bound server.
+# and exit 78 at the serving or binding call's line: every failure on its own
+# line with its variable and field path, a secret-named value hidden, and
+# nothing listens. Good settings build the app that serves (its home route
+# answers with them) or the bound server.
 fixture: TypedSettingsDecodeBeforeServeAndBind.fixture
 env: NO_COLOR=1
 mkdir: client
@@ -15,14 +16,14 @@ env: APP_POOL_SIZE=lots
 env: APP_API_TOKEN=tok-abc
 exit: 78
 stdout: = ""
-stderr: = "Stop: Jet.EnvDecodeFailed: The app's settings did not decode, so it does not listen:\n  Jet.EnvDecodeFailed: env var APP_GREETING -> greeting: Jet.MissingRequiredField: missing required field `greeting`\n  Jet.EnvDecodeFailed: env var APP_POOL_SIZE -> pool_size: expected Int, found text \"lots\"\n  Jet.EnvDecodeFailed: env var APP_API_TOKEN -> api_token: secret value rejected\n Why: Runtime config decoding uses the shared `__jet_Decode` codec, so a bad value, missing field, or unknown field is reported at its typed path while secret values stay redacted.\n Fix: Fix the named environment variable or field path, or adjust `prefix:`, `file:`, and `allow:` so the intended source reaches the typed record.\nMore: jet-lang.dev/e/Jet.EnvDecodeFailed\n"
+stderr: = "Stop: Jet.EnvDecodeFailed: The app's settings did not decode, so it does not listen:\n  --> serve.jet:26 in run\n  Jet.EnvDecodeFailed: env var APP_GREETING -> greeting: Jet.MissingRequiredField: missing required field `greeting`\n  Jet.EnvDecodeFailed: env var APP_POOL_SIZE -> pool_size: expected Int, found text \"lots\"\n  Jet.EnvDecodeFailed: env var APP_API_TOKEN -> api_token: secret value rejected\n Why: Runtime config decoding uses the shared `__jet_Decode` codec, so a bad value, missing field, or unknown field is reported at its typed path while secret values stay redacted.\n Fix: Fix the named environment variable or field path, or adjust `prefix:`, `file:`, and `allow:` so the intended source reaches the typed record.\nMore: jet-lang.dev/e/Jet.EnvDecodeFailed\n"
 
 step bind_refuses: jet run -A bind.jet
 env: APP_POOL_SIZE=lots
 env: APP_API_TOKEN=tok-abc
 exit: 78
 stdout: = ""
-stderr: = "Stop: Jet.EnvDecodeFailed: The app's settings did not decode, so it does not listen:\n  Jet.EnvDecodeFailed: env var APP_GREETING -> greeting: Jet.MissingRequiredField: missing required field `greeting`\n  Jet.EnvDecodeFailed: env var APP_POOL_SIZE -> pool_size: expected Int, found text \"lots\"\n  Jet.EnvDecodeFailed: env var APP_API_TOKEN -> api_token: secret value rejected\n Why: Runtime config decoding uses the shared `__jet_Decode` codec, so a bad value, missing field, or unknown field is reported at its typed path while secret values stay redacted.\n Fix: Fix the named environment variable or field path, or adjust `prefix:`, `file:`, and `allow:` so the intended source reaches the typed record.\nMore: jet-lang.dev/e/Jet.EnvDecodeFailed\n"
+stderr: = "Stop: Jet.EnvDecodeFailed: The app's settings did not decode, so it does not listen:\n  --> bind.jet:26 in run\n  Jet.EnvDecodeFailed: env var APP_GREETING -> greeting: Jet.MissingRequiredField: missing required field `greeting`\n  Jet.EnvDecodeFailed: env var APP_POOL_SIZE -> pool_size: expected Int, found text \"lots\"\n  Jet.EnvDecodeFailed: env var APP_API_TOKEN -> api_token: secret value rejected\n Why: Runtime config decoding uses the shared `__jet_Decode` codec, so a bad value, missing field, or unknown field is reported at its typed path while secret values stay redacted.\n Fix: Fix the named environment variable or field path, or adjust `prefix:`, `file:`, and `allow:` so the intended source reaches the typed record.\nMore: jet-lang.dev/e/Jet.EnvDecodeFailed\n"
 
 # The receipt redacts a secret-named variable's value from captured output, so
 # the good token is ten digits, which no port in the ready line can contain.

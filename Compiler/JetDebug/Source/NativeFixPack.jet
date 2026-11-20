@@ -17,6 +17,14 @@
 //   (one that only another object points at);
 // - thread-local data;
 // - a relocation of a kind the pack's code doesn't use.
+//
+// A breakpoint's condition placed in the program (NativePlace.jet) runs
+// the runtime's routines that build, render, compare and drop text from the
+// pack too (native_fix_pack_fresh), whether the image holds them or not:
+// their code, and every routine it reaches, is placed afresh, so their
+// allocations and frees reach the condition's arena rather than the
+// program's heap, and a routine that leaves the condition's code
+// (native_place_routed) is reached in its trampoline instead.
 use jet_backend.[X64CompiledFunction, X64Data, X64DebugEncoding, X64DebugType, X64DebugVariable, X64FunctionDebug, X64FunctionID, X64FunctionSource, X64ModuleDebug, X64ObjectModule, X64Reloc, X64RelocTarget, link_debug_addr, link_debug_le, x64_jetline_text]
 
 // The pack's sections and symbols, read once a session
@@ -56,13 +64,16 @@ NativeFixLoaded: struct {
 
 // A relocation of a placed pack section: its field at `at`, of the pack's
 // `kind` (R_X86_64_64, PC32 or PLT32), reaches `addend` past the placed
-// section `loaded`, or past the image's `address` when `loaded` is -1.
+// section `loaded`, or past the image's `address` when `loaded` is -1, or,
+// when `routed` names a routine, `addend` past `address` bytes into where a
+// placed condition's trampoline has that routine (NativeFixPlan.routes).
 NativeFixLoadedReloc: struct {
     at: Int,
     kind: Int,
     loaded: Int,
     address: Int,
     addend: Int,
+    routed: String{""},
 }
 
 // What a plan places from the pack (native_fix_pack_place): the sections,
@@ -260,12 +271,34 @@ native_fix_pack_placeable: fn(pack: NativeFixPack, symbols: NativeFixSymbols, s:
     true
 }
 
+// The name a relocation of the pack reaches by its symbol `symbol`, in
+// section `target`: the symbol's own, or, for a section's symbol, that
+// section's function or object.
+native_fix_pack_named: fn(pack: NativeFixPack, symbol: Int, target: Int) -> String Never! {
+    if pack.names[symbol] != "" || target <= 0 -> return pack.names[symbol]
+    owner: pack.owners[target]
+    if owner < 0 -> "" else -> pack.names[owner]
+}
+
+// What native_fix_pack_place places a runtime routine for: an edit's call of
+// one the image lacks (Absent, native_fix_pack_load), or a placed
+// condition's call, which runs afresh from the pack (Fresh,
+// native_fix_pack_fresh).
+NativeFixPackUse: enum {
+    Absent,
+    Fresh,
+}
+
 // The sections that placing the pack's section `start` adds
 // (NativeFixReach), apart from those already in `rows` (placed) or `held`.
-// None when one of them can't be placed (native_fix_pack_placeable), when
-// one reaches a symbol that neither the pack nor the image defines, or when
-// one has a relocation of another kind.
-native_fix_pack_reach: fn(pack: NativeFixPack, symbols: NativeFixSymbols, code: NativeCode, start: Int, rows: [Int:Int], held: [Int:Int]) -> NativeFixReach? Never! {
+// For a placed condition (Fresh), code the image holds is placed afresh
+// too, and a routine native_place_routed names is not reached. None when
+// one of them can't be placed (native_fix_pack_placeable), when one reaches
+// a symbol that neither the pack nor the image defines (for a placed
+// condition, one the pack leaves undefined), or when one has a relocation
+// of another kind.
+native_fix_pack_reach: fn(pack: NativeFixPack, symbols: NativeFixSymbols, code: NativeCode, start: Int, rows: [Int:Int], held: [Int:Int], purpose: NativeFixPackUse) -> NativeFixReach? Never! {
+    fresh: purpose == .Fresh
     reach := NativeFixReach{placed: [Int]{}, held: [Int:Int]{}}
     seen := [Int:Bool]{}
     pending := [Int]{start}
@@ -274,7 +307,8 @@ native_fix_pack_reach: fn(pack: NativeFixPack, symbols: NativeFixSymbols, code: 
         if s <= 0 || s >= pack.kinds.len() -> return None
         if seen.has_key(s) || rows.has_key(s) || held.has_key(s) -> next
         seen[s] = true
-        if native_fix_pack_held(pack, symbols, code, s) == .Val(address) {
+        afresh: fresh && (pack.flags[s] & NATIVE_FIX_PACK_EXEC) != 0
+        if !afresh && native_fix_pack_held(pack, symbols, code, s) == .Val(address) {
             reach.held[s] = address
             next
         }
@@ -289,8 +323,11 @@ native_fix_pack_reach: fn(pack: NativeFixPack, symbols: NativeFixSymbols, code: 
             symbol: link_debug_le(pack.elf, at + 12, 4)
             if symbol < 0 || symbol >= pack.sections.len() -> return None
             target: pack.sections[symbol]
+            if fresh && native_place_routed(native_fix_pack_named(pack, symbol, target)) -> next
             if target == 0 {
-                if native_fix_pack_image(symbols, pack.names[symbol]) == None -> return None
+                if fresh || native_fix_pack_image(symbols, pack.names[symbol]) == None {
+                    return None
+                }
                 next
             }
             pending.push(target)
@@ -300,22 +337,25 @@ native_fix_pack_reach: fn(pack: NativeFixPack, symbols: NativeFixSymbols, code: 
 }
 
 // Places, from `offset` in the region on, the pack's code for each runtime
-// function that `absent` names (in the order of its calls), when the pack
+// function that `wanted` names (in the order of its calls), when the pack
 // defines it and native_fix_pack_reach can place it, along with everything
-// it reaches that the image lacks. `symbols` are the image's symbols and
-// `code` its code. A function it can't place stays out of `entries`.
-native_fix_pack_place: fn(pack: NativeFixPack, symbols: NativeFixSymbols, code: NativeCode, absent: [String:Int], offset: Int) -> NativeFixLoads Never! {
+// it reaches that the image lacks, or, for a placed condition (Fresh),
+// every routine it reaches but those native_place_routed names, whose
+// relocations are `routed`. `symbols` are the image's symbols and `code`
+// its code. A function it can't place stays out of `entries`.
+native_fix_pack_place: fn(pack: NativeFixPack, symbols: NativeFixSymbols, code: NativeCode, wanted: [String:Int], offset: Int, purpose: NativeFixPackUse) -> NativeFixLoads Never! {
+    fresh: purpose == .Fresh
     loads := NativeFixLoads{loaded: [NativeFixLoaded]{}, entries: [String:Int]{}, end: offset}
     // Each placed section's row in `loads.loaded`, and each held one's
     // address in the image.
     rows := [Int:Int]{}
     held := [Int:Int]{}
-    loop place in 0..<absent.len() {
-        loop (symbol, at) in absent {
+    loop place in 0..<wanted.len() {
+        loop (symbol, at) in wanted {
             if at != place -> next
             root: pack.defined.get(symbol) ?? next
             start: pack.sections[root]
-            reach: native_fix_pack_reach(pack, symbols, code, start, rows, held) ?? next
+            reach: native_fix_pack_reach(pack, symbols, code, start, rows, held, purpose) ?? next
             if !rows.has_key(start) && !reach.placed.contains(start) -> next
             loop s in reach.placed {
                 align: if pack.aligns[s] > 0 -> pack.aligns[s] else -> 1
@@ -336,9 +376,16 @@ native_fix_pack_place: fn(pack: NativeFixPack, symbols: NativeFixSymbols, code: 
                     kind: link_debug_le(pack.elf, entry + 8, 4)
                     addend: native_number(pack.elf, entry + 16, 8, X64DebugEncoding.Signed)
                     placed: if target == 0 -> -1 else -> rows.get(target) ?? -1
-                    // A symbol the pack leaves undefined is the image's; a
-                    // section's is placed or held.
+                    name: native_fix_pack_named(pack, symbol_row, target)
+                    // A routed routine is the trampoline's; a symbol the
+                    // pack leaves undefined is the image's; a section's is
+                    // placed or held.
                     reloc: if {
+                        fresh && native_place_routed(name) -> {
+                            owner: if target > 0 -> pack.owners[target] else -> -1
+                            start_value: if owner >= 0 -> pack.values[owner] else -> 0
+                            NativeFixLoadedReloc{at: field, kind: kind, loaded: -1, address: pack.values[symbol_row] - start_value, addend: addend, routed: name}
+                        }
                         target == 0 -> NativeFixLoadedReloc{at: field, kind: kind, loaded: -1, address: native_fix_pack_image(symbols, pack.names[symbol_row]) ?? 0, addend: addend}
                         placed >= 0 -> NativeFixLoadedReloc{at: field, kind: kind, loaded: placed, address: 0, addend: addend + pack.values[symbol_row]}
                         else -> NativeFixLoadedReloc{at: field, kind: kind, loaded: -1, address: (held.get(target) ?? 0) + pack.values[symbol_row], addend: addend}
@@ -362,7 +409,26 @@ native_fix_pack_load: fn(plan: &NativeFixPlan, pack: NativeFixPack, symbols: Nat
     if plan.absent.len() == 0 {
         return
     }
-    loads: native_fix_pack_place(pack, symbols, code, plan.absent, plan.traps)
+    loads: native_fix_pack_place(pack, symbols, code, plan.absent, plan.traps, .Absent)
+    native_fix_pack_add(plan, loads.move())
+}
+
+// `plan`, a placed condition's (NativePlace.jet), with the runtime routines
+// `wanted` names (each by its place in the order of the calls; those of
+// NATIVE_PLACE_PACKED it calls) placed afresh from the pack, where it can
+// place them (native_fix_pack_place), after its data. The traps of the
+// absent functions it didn't place then follow those sections.
+native_fix_pack_fresh: fn(plan: &NativeFixPlan, pack: NativeFixPack, symbols: NativeFixSymbols, code: NativeCode, wanted: [String:Int]) Never! {
+    if wanted.len() == 0 {
+        return
+    }
+    loads: native_fix_pack_place(pack, symbols, code, wanted, plan.traps, .Fresh)
+    native_fix_pack_add(plan, loads.move())
+}
+
+// `plan` with the sections `loads` places at its traps, which then follow
+// them, less those of the functions `loads` placed.
+native_fix_pack_add: fn(plan: &NativeFixPlan, loads: &&NativeFixLoads) Never! {
     if loads.entries.len() == 0 {
         return
     }
@@ -381,13 +447,18 @@ native_fix_pack_load: fn(plan: &NativeFixPlan, pack: NativeFixPack, symbols: Nat
 }
 
 // Writes the pack's sections `loaded` into `region`, which is mapped at
-// `base`, with every relocation resolved.
-native_fix_pack_write: fn(region: &[U8], loaded: [NativeFixLoaded], base: Int) Never! {
+// `base`, with every relocation resolved, a routed one at the address
+// `routes` gives its routine.
+native_fix_pack_write: fn(region: &[U8], loaded: [NativeFixLoaded], base: Int, routes: [String:Int]) Never! {
     loop placed in loaded {
         loop (k, byte) in placed.bytes -> region[placed.offset + k] = byte
         loop reloc in placed.relocs {
             at: placed.offset + reloc.at
-            reached: if reloc.loaded >= 0 -> base + loaded[reloc.loaded].offset + reloc.addend else -> reloc.address + reloc.addend
+            reached: if {
+                reloc.routed != "" -> (routes.get(reloc.routed) ?? 0) + reloc.address + reloc.addend
+                reloc.loaded >= 0 -> base + loaded[reloc.loaded].offset + reloc.addend
+                else -> reloc.address + reloc.addend
+            }
             width: if reloc.kind == NATIVE_FIX_PACK_R64 -> 8 else -> 4
             value: if width == 8 -> reached else -> reached - (base + at)
             native_fix_put(region, at, value, width)
@@ -443,4 +514,57 @@ native_fix_pack_write: fn(region: &[U8], loaded: [NativeFixLoaded], base: Int) N
     assert_eq(region[32], U8{7})
     assert_eq(region[40], U8{0x0f})
     assert_eq(native_fix_absent_at(plan, base, base + 40), Val("it needs the runtime's `jet_int_compare`, which the running image does not hold: the program never needed it"))
+}
+
+#Test("a placed condition runs a text routine afresh from the pack, though the image holds it, and its frees reach the trampoline") {
+    // The pack's section 1 is jet_rt_string_drop's 16 bytes. They call
+    // jet_rt_free_8 at 1, which the pack leaves undefined, and take the
+    // address of section 2's constant at 8, by the two relocations at 24.
+    elf := loop _ in 0..<72 -> U8{0x90}
+    loop k in 16..<24 -> elf[k] = U8{7}
+    native_fix_put(elf, 24, 1, 8)
+    native_fix_put(elf, 32, NATIVE_FIX_PACK_PLT32, 4)
+    native_fix_put(elf, 36, 1, 4)
+    native_fix_put(elf, 40, -4, 8)
+    native_fix_put(elf, 48, 8, 8)
+    native_fix_put(elf, 56, NATIVE_FIX_PACK_PC32, 4)
+    native_fix_put(elf, 60, 2, 4)
+    native_fix_put(elf, 64, -4, 8)
+    defined := [String:Int]{}
+    defined["jet_rt_string_drop"] = 3
+    pack: NativeFixPack{elf: elf, kinds: [Int]{0, NATIVE_FIX_PACK_PROGBITS, NATIVE_FIX_PACK_PROGBITS}, flags: [Int]{0, NATIVE_FIX_PACK_ALLOC | NATIVE_FIX_PACK_EXEC, NATIVE_FIX_PACK_ALLOC}, offsets: [Int]{0, 0, 16}, sizes: [Int]{0, 16, 8}, aligns: [Int]{0, 16, 8}, relas: [Int]{0, 24, 0}, rela_rows: [Int]{0, 2, 0}, names: [String]{"", "jet_rt_free_8", "", "jet_rt_string_drop"}, sections: [Int]{0, 0, 2, 1}, values: [Int]{0, 0, 0, 0}, defined: defined, owners: [Int]{-1, 3, -1}, readers: [Int:[Int]]{}}
+    slots := [String:Int]{}
+    slots["jet_rt_string_drop"] = 0
+    symbols: NativeFixSymbols{slots: slots, named: [[NativeFixSymbol]]{[NativeFixSymbol]{NativeFixSymbol{address: 0x401000, size: 16}}}}
+    // `call rel32` to the runtime's jet_rt_string_drop, then `ret`.
+    condition: X64CompiledFunction{id: X64FunctionID{value: 0}, name: "p.eval", code: [U8]{0xe8, 0, 0, 0, 0, 0xc3}, relocs: [X64Reloc]{X64Reloc{at: 1, target: X64RelocTarget.Runtime{symbol: "jet_rt_string_drop"}}}, align: 16}
+    object: X64ObjectModule{data: [X64Data]{}, debug: X64ModuleDebug{directory: "", files: [String]{}, types: [X64DebugType]{}}, functions: [X64FunctionSource]{X64FunctionSource{name: "eval", file: -1, line: 1, variables: [X64DebugVariable]{}}}}
+    edit: NativeFixEdit{object: object, functions: [X64CompiledFunction]{condition}, debug: [X64FunctionDebug]{}}
+    targets: NativeFixTargets{functions: [Int:Int]{}, data: [Int:Int]{}, runtime: [String:Int]{}, clashed: [String:Bool]{}}
+    found: NativeFixPlan{changed: [Int]{}, pieces: [NativeFixPiece]{}, size: 0, targets: targets, placed: [Int:Int]{}, copied: [Int:Int]{}}
+    plan := native_fix_place_all(edit, symbols, found, "p.eval") ?? panic("refused: {err.detail}")
+    assert_eq(plan.absent.len(), 0)
+    wanted := [String:Int]{}
+    wanted["jet_rt_string_drop"] = 0
+    native_fix_pack_fresh(plan, pack, symbols, NativeCode{address: 0x401000, bytes: [U8]{}}, wanted)
+    // jet_rt_string_drop's code is at 16 and its constant at 32; its call
+    // of jet_rt_free_8 is routed, not placed.
+    assert_eq(plan.entries.get("jet_rt_string_drop"), Val(16))
+    assert_eq(plan.loaded.len(), 2)
+    assert_eq(plan.loaded[0].relocs[0].routed, "jet_rt_free_8")
+    assert_eq(plan.traps, 40)
+    base: 0x40000000
+    plan.routes["jet_rt_free_8"] = 0x40001020
+    region: native_fix_region(plan, edit, symbols, base)
+    // The condition's call reaches the placed copy, not the image's; the
+    // copy's call reaches the trampoline's free, and its rel32 the placed
+    // constant.
+    assert_eq(native_number(region, 1, 4, X64DebugEncoding.Signed), 16 - 5)
+    assert_eq(native_number(region, 17, 4, X64DebugEncoding.Signed), 0x40001020 - 4 - (base + 17))
+    assert_eq(native_number(region, 24, 4, X64DebugEncoding.Signed), 4)
+    assert_eq(region[32], U8{7})
+    // Without the route, an evaluation's load leaves it to the image.
+    held := native_fix_place_all(edit, symbols, found, "p.eval") ?? panic("refused: {err.detail}")
+    native_fix_pack_load(held, pack, symbols, NativeCode{address: 0x401000, bytes: [U8]{}})
+    assert_eq(held.loaded.len(), 0)
 }

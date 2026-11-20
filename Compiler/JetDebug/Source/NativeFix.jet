@@ -102,12 +102,16 @@ NativeFixPlan: struct {
     // traps past `traps`, the offset of the first in the region
     // (native_fix_place_all). An evaluation's plan places what it can of
     // those from the runtime pack instead (NativeFixPack.jet
-    // native_fix_pack_load): its sections are `loaded`, and `entries` holds
-    // the region offset of each function placed that way.
+    // native_fix_pack_load), and a placed condition's the routines it runs
+    // from the pack (native_fix_pack_fresh): their sections are `loaded`,
+    // `entries` holds the region offset of each function placed that way,
+    // and `routes` where the condition's trampoline has each routine their
+    // code reaches there (NativeFixLoadedReloc.routed).
     absent: [String:Int]{[String:Int]{}},
     traps: Int{0},
     loaded: [NativeFixLoaded]{[NativeFixLoaded]{}},
     entries: [String:Int]{[String:Int]{}},
+    routes: [String:Int]{[String:Int]{}},
 }
 
 // The bytes of a trap, `ud2`.
@@ -782,7 +786,7 @@ native_fix_region: fn(plan: NativeFixPlan, edit: NativeFixEdit, symbols: NativeF
             native_fix_put(region, piece.offset + reloc.offset, reached + reloc.addend, 8)
         }
     }
-    native_fix_pack_write(region, plan.loaded, base)
+    native_fix_pack_write(region, plan.loaded, base, plan.routes)
     region
 }
 

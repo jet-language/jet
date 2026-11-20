@@ -21,11 +21,6 @@ The attach does not yet give what the perf-based profile did: a window longer
 than one second, each function's declaration file and line, the compiler phase
 of each sample, and folded stacks for a flame graph.
 
-`Profile.mjs` and its twin `Profile/run.jet` still turn a `perf script` of a
-Rust-built jetc into Jet-named reports (`top.txt`, `phases.txt`,
-`stacks.folded`, `flamegraph.svg`, `summary.json`).
-Re-render: `node Tools/Perf/JetcProfile/Profile.mjs render stacks.folded flamegraph.svg`.
-
 ## Wall time is not an off-CPU trace
 
 A cycle-sampled busiest-thread estimate subtracted from wall time does not

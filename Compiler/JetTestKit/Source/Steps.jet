@@ -92,7 +92,8 @@ kit_steps_parse: fn(source: String) -> KitPlan {
             end: delimiter ?? line.count_bytes()
             condition: kit_steps_byte_slice(line, 5, end).trim().copy()
             if !kit_steps_condition_valid(condition) {
-                plan.error = "line {line_number}: invalid when condition"
+                problem: kit_steps_condition_host_problem(condition)
+                plan.error = if problem == "" -> "line {line_number}: invalid when condition" else -> "line {line_number}: invalid when condition: {problem}"
                 return plan
             }
             if delimiter == None {

@@ -29,7 +29,10 @@ kit_steps_condition_atom_valid: fn(text: String) -> Bool {
     words: kit_steps_words(kit_steps_body(text)) ?? return false
     if words.len() == 0 -> return false
     kind: words[0]
-    if kit_expect_named(["os", "os-name", "arch", "env", "env-set", "captured", "dir-readable"], kind) {
+    if kit_expect_named(["os", "os-name", "arch"], kind) {
+        return words.len() == 2 && kit_steps_host_unknown(kind, words[1]) == ""
+    }
+    if kit_expect_named(["env", "env-set", "captured", "dir-readable"], kind) {
         return words.len() == 2 && words[1] != ""
     }
     if kind == "tool" -> return words.len() == 2 && words[1] != ""
@@ -48,6 +51,20 @@ kit_steps_condition_atom_valid: fn(text: String) -> Bool {
         return (words.len() == 3 && kit_expect_named(["=", "!=", "~", "!~"], words[1])) || (words.len() >= 3 && words[1] == "~any")
     }
     false
+}
+
+// Why the `when` condition `text` can't be chosen on any host: the first `os`,
+// `os-name` or `arch` name in it off its list, or "".
+kit_steps_condition_host_problem: fn(text: String) -> String {
+    words: kit_steps_words(kit_steps_body(text)) ?? return ""
+    loop index in 1..<words.len() {
+        kind: words[index - 1]
+        if kit_expect_named(["os", "os-name", "arch"], kind) {
+            problem: kit_steps_host_unknown(kind, words[index])
+            if problem != "" -> return problem
+        }
+    }
+    ""
 }
 
 // Filesystem and captured-value assertions observe state without inventing a
@@ -82,9 +99,9 @@ kit_steps_condition_atom: fn(text: String, context: KitStepCtx, state: KitStepSt
     words: kit_steps_words(kit_steps_body(text)) ?? return false
     if words.len() == 0 -> return false
     kind: words[0]
-    if kind == "os" -> return kit_steps_host_matches(sys.family(), words[1])
-    if kind == "os-name" -> return kit_steps_host_matches(kit_steps_host_name(), words[1])
-    if kind == "arch" -> return kit_steps_host_matches(kit_steps_host_arch(), words[1])
+    if kit_expect_named(["os", "os-name", "arch"], kind) {
+        return kit_steps_host_matches(kit_steps_host_value(kind), words[1])
+    }
     if kind == "env" || kind == "env-set" {
         negative: words[1].starts_with("!")
         name: if negative -> kit_steps_byte_slice(words[1], 1, words[1].count_bytes()) else -> words[1]

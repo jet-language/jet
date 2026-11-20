@@ -883,3 +883,118 @@ debug_typed: fn(c: Ctx, typed: String) -> Dyn Failure! {
 logs: fn(note: String) -> String {
     "Array.from(document.querySelectorAll('#debug-console-log .row')).some((r) => r.textContent.includes({q(note)}))"
 }
+
+// --- the first painted stop ----------------------------------------------------------
+
+// What the probe axis `canvas` of Docs/Audits/BestInExistence20261119/Probes
+// measures against RemedyBG on the program of
+// Tests/Cases/Debug/CanvasDebugValuesAtBreakpoint.fixture, in a 1440x900
+// window, each time taken in the page from the input event to the first
+// frame painted after the view shows its result:
+// - with a breakpoint on `y: x * 2` in `scale`, Start in the Debug view to
+//   the entry shown paused (the build and the launch), then Continue to the
+//   stop painted on line 2: its source line active, both frames and x = 2;
+// - at that stop, a watch of `x` typed and entered to its value painted;
+// - every panel of the Debug view at that stop, whether it is in the window
+//   then and how many rows it shows;
+// - Profile entry in the Profile view to its timeline painted, and that
+//   view's panels.
+// Each measure prints as one line; a stop or a profile the views don't show
+// fails the scenario.
+debug_first_paint: fn(c: Ctx) Failure! {
+    debug_prepare(c)
+    loaded: eval_text(c, "(() => {{ const n = performance.getEntriesByType('navigation')[0]; return (performance.now() - (n ? n.startTime : 0)).toFixed(1); }})()")
+    print("page: loaded and drawn in {loaded} ms")
+    target: debug_target(c, "scale", 2)
+    node_menu_pick(c, target, "Set Breakpoint")
+    wait_debug(c, "s.lastToast.includes('Breakpoint anchored')", "the breakpoint on {target.title}")
+    open_debug_view(c)
+
+    timed_paint(c, "debug-view-run", "click", "document.getElementById('debug-view-state').textContent.startsWith('Paused · line ')")
+    click_element(c, "document.getElementById('debug-view-run')", "Start")
+    started: painted_ms(c, "the entry shown paused")
+    entry_state: eval_text(c, "document.getElementById('debug-view-state').textContent")
+    print("debug: Start to the entry shown paused in {started} ms ({entry_state})")
+
+    stop: "document.getElementById('debug-view-state').textContent === 'Paused · line 2 · jet dev O0' && !!document.querySelector('#debug-source-lines .is-active[data-line=\"2\"]') && document.querySelectorAll('#debug-stack-rows .row').length === 2 && {shows_row("#debug-locals-rows .row", "x | 2 | Int")}"
+    timed_paint(c, "debug-view-continue", "click", stop)
+    click_element(c, "document.getElementById('debug-view-continue')", "Continue")
+    stopped: painted_ms(c, "the stop on line 2 in the Debug view")
+    print("debug: Continue to the stop painted in {stopped} ms (line 2 active in the source, 2 frames, x = 2)")
+
+    timed_paint(c, "debug-watch-input", "keydown", shows_row("#debug-watches-rows .row", "x | 2 | Int"))
+    click_element(c, "document.getElementById('debug-watch-input')", "Add Watch")
+    type_text(c, "x")
+    press(c, "Enter")
+    watched: painted_ms(c, "the watch of x in the Debug view")
+    print("debug: a watch of x entered to its value painted in {watched} ms")
+
+    debug_panels: panel_lines(c, "#debug-view")
+    loop line in debug_panels -> print("debug panel: {line}")
+    debug_stop(c, "debug-view-stop")
+
+    click_element(c, "document.querySelector('[data-view-mode=\"profile\"]')", "the Profile view")
+    wait_debug(c, "document.getElementById('profile-view').getBoundingClientRect().height > 0", "the Profile view shown")
+    timed_paint(c, "profile-view-run", "click", "(() => {{ const t = document.getElementById('profile-view-state').textContent; return t.includes(' shown · ') && t.includes(' samples'); }})()")
+    click_element(c, "document.getElementById('profile-view-run')", "Profile entry")
+    profiled: painted_ms(c, "the profile's timeline")
+    profile_state: eval_text(c, "document.getElementById('profile-view-state').textContent")
+    print("profile: Profile entry to the timeline painted in {profiled} ms ({profile_state})")
+    profile_panels: panel_lines(c, "#profile-view")
+    loop line in profile_panels -> print("profile panel: {line}")
+    Ok()
+}
+
+// Time the next `event` on the element `id`: from the event's time to the
+// first frame painted after `painted` (a JavaScript test, `s` the Canvas
+// test state) holds. A frame's callback that finds it holding runs before
+// that frame paints, so the time is taken at the next frame's callback.
+timed_paint: fn(c: Ctx, id: String, event: String, painted: String) Failure! {
+    armed: eval_bool(
+        c,
+        """
+        (() => {{
+          const el = document.getElementById({q(id)});
+          if (!el) return false;
+          window.__paintTook = null;
+          el.addEventListener({q(event)}, (e) => {{
+            const start = e.timeStamp;
+            const tick = () => {{
+              const s = window.__jetCanvasTest;
+              if (s && ({painted})) requestAnimationFrame(() => {{ window.__paintTook = (performance.now() - start).toFixed(1); }});
+              else requestAnimationFrame(tick);
+            }};
+            requestAnimationFrame(tick);
+          }}, {{ capture: true, once: true }});
+          return true;
+        }})()
+        """,
+    )
+    check(armed, "the page has no {id} to time")
+}
+
+// The milliseconds timed_paint took, once the page has them.
+painted_ms: fn(c: Ctx, label: String) -> String Failure! {
+    wait_debug(c, "window.__paintTook !== null", label)
+    Ok(eval_text(c, "window.__paintTook"))
+}
+
+// Each panel of the view `view` (a selector), by its label: whether it is in
+// the window, and the rows it shows, the input rows aside.
+panel_lines: fn(c: Ctx, view: String) -> [String] Failure! {
+    found: eval(
+        c,
+        """
+        Array.from(document.querySelectorAll({q("{view} .debug-panel, {view} canvas")})).map((p) => {{
+          const r = p.getBoundingClientRect();
+          const shown = r.width > 0 && r.height > 0 && r.left < innerWidth && r.top < innerHeight && r.right > 0 && r.bottom > 0;
+          const count = p.querySelectorAll("div.row").length;
+          const rows = p.tagName === "CANVAS" ? "a canvas " + p.width + "x" + p.height : count + (count === 1 ? " row" : " rows");
+          return (p.getAttribute("aria-label") || p.id).split(".")[0] + ": " + (shown ? "in the window" : "not in the window") + ", " + rows;
+        }})
+        """,
+    )
+    lines := [String]{}
+    loop line in items(found) -> lines.push(text(line))
+    Ok(lines)
+}

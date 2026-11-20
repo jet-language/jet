@@ -1461,13 +1461,15 @@ NativeSession: struct {
 
     // Run breakpoint `number`'s condition, or its logpoint's message, in
     // the program at `address`, where no trap byte is: the code of the
-    // condition or of each `{…}` part of the message, and the functions it
-    // calls, placed in a region mapped near the code with the trampoline
-    // (NativePlace.jet) and, for a logpoint, its ring; their allocations
-    // and frees sent to the arena after the ring, their other runtime calls
-    // to the trampoline's stub, then the jump written at `address`. A part
-    // read as text has no code: the trampoline copies its String. Why it
-    // can't, "" when it does.
+    // condition or of each `{…}` part of the message, the functions it
+    // calls and the runtime's text routines it calls, placed afresh from
+    // the runtime pack (NativeFixPack.jet native_fix_pack_fresh), in a
+    // region mapped near the code with the trampoline (NativePlace.jet)
+    // and, for a logpoint, its ring; their allocations and frees sent to
+    // the arena after the ring, their other runtime calls to the
+    // trampoline's stub, then the jump written at `address`. A part read
+    // as text has no code: the trampoline copies its String. Why it can't,
+    // "" when it does.
     place_rule: fn(&self, number: Int, address: Int) -> String Never! {
         calls := [Shared<NativeEval>]{}
         reads := [Bool]{}
@@ -1523,17 +1525,29 @@ NativeSession: struct {
             }
             permit: compiled.guard_read()
             diff: native_fix_diff(self.image, permit.value.edit, facts.value.symbols, facts.value.code.bytes, facts.value.code.address, self.fixed) ?? return err.detail
-            plan: native_fix_place_all(permit.value.edit, facts.value.symbols, diff, permit.value.entry) ?? return err.detail
-            entries.push(native_eval_entry(permit.value, plan) ?? return "the compiled condition has no entry")
-            size = (size + plan.size + NATIVE_FIX_ALIGN - 1).div_euclid(NATIVE_FIX_ALIGN) * NATIVE_FIX_ALIGN
+            plan := native_fix_place_all(permit.value.edit, facts.value.symbols, diff, permit.value.entry) ?? return err.detail
+            // The text routines it calls, in the order of their calls.
+            packed := [String:Int]{}
             loop piece in plan.pieces {
                 if piece.function < 0 -> next
                 loop reloc in permit.value.edit.functions[piece.function].relocs {
                     if reloc.target == .Runtime(symbol) {
                         if native_place_arena_route(symbol) >= 0 -> allocates = true
+                        if NATIVE_PLACE_PACKED.contains(symbol) && !packed.has_key(symbol) {
+                            packed[symbol] = packed.len()
+                        }
                     }
                 }
             }
+            if packed.len() > 0 {
+                self.read_pack()
+                if self.pack == .Val(pack) {
+                    native_fix_pack_fresh(plan, pack, facts.value.symbols, facts.value.code, packed)
+                }
+                if plan.loaded.len() > 0 -> allocates = true
+            }
+            entries.push(native_eval_entry(permit.value, plan) ?? return "the compiled condition has no entry")
+            size = (size + plan.size + NATIVE_FIX_ALIGN - 1).div_euclid(NATIVE_FIX_ALIGN) * NATIVE_FIX_ALIGN
             plans.push(Val(plan))
         }
         // A logpoint's ring follows the trampoline's page, and the
@@ -1566,7 +1580,16 @@ NativeSession: struct {
         }
         region := loop _ in 0..<size -> U8{0}
         loop (k, planned) in plans {
-            plan: planned ?? next
+            plan := planned ?? next
+            // The text routines placed from the pack reach the arena's
+            // entries, and the stub, where the trampoline has them.
+            loop section in plan.loaded {
+                loop reloc in section.relocs {
+                    if reloc.routed != "" {
+                        plan.routes[reloc.routed] = trampoline + native_place_routine(built, reloc.routed)
+                    }
+                }
+            }
             permit: calls[k].guard_read()
             placed: native_fix_region(plan, permit.value.edit, facts.value.symbols, base + offsets[k])
             loop (at, byte) in placed -> region[offsets[k] + at] = byte
@@ -1574,6 +1597,7 @@ NativeSession: struct {
                 if piece.function < 0 -> next
                 loop reloc in permit.value.edit.functions[piece.function].relocs {
                     if reloc.target == .Runtime(symbol) {
+                        if plan.entries.has_key(symbol) -> next
                         at: offsets[k] + piece.offset + reloc.at
                         native_fix_put(region, at, trampoline + native_place_routine(built, symbol) - (base + at + 4), 4)
                     }

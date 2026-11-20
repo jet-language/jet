@@ -7027,7 +7027,9 @@ serve(port: 9000)`). Once the socket listens the program prints one ready
 line, `serving http://127.0.0.1:8080` (D-WEBAPP-SERVE1=D). `jet run` and `jet dev` share this
 listen step: under `jet run` a port another program holds, or one the system
 refuses, stops the program with E2809 (`Jet.AppPortUnavailable`), which names
-the address and how to choose another port. `jet dev` sets `JET_DEV=1` for the
+the address and how to choose another port. Each E2809 stop gives, after its
+first line, the `-->` line of the `serve` or `serve_on` call that chose the
+port, on every tier. `jet dev` sets `JET_DEV=1` for the
 program it runs; the app then moves past a busy port to the next free one,
 adds ` (live reload)` to the ready line, and serves live reload: every HTML
 page carries a script that reads the run's boot id from the `/__jet/reload`
@@ -7039,8 +7041,9 @@ after a change and a new run answers with another id.
 typed settings record with `sys.decode<Settings>(prefix:)` before any socket
 binds, then serve (as `App.serve(port)`) or bind (as `App.bind`) the app
 `build(settings)` makes. Settings that do not decode stop the program with
-E2416 and exit 78 (`EX_CONFIG`): every decoder failure on its own line, with
-its variable and field path and a secret-named value hidden, then the E2416
+E2416 and exit 78 (`EX_CONFIG`): the `-->` line of the `web.serve` or
+`web.bind` call, then every decoder failure on its own line, with its
+variable and field path and a secret-named value hidden, then the E2416
 row's Why, Fix and More lines. A `build` that fails stops the program with
 exit 78 and its failure on one line, so no socket binds for an app that was
 never made.

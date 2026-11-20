@@ -123,7 +123,12 @@ streams and sidecars live beside their source or project directory.
 
 Sidecars replace filename-specific harness rules. `requires:` declares foreign
 tools, host OS or architecture, or environment requirements; missing hosts
-report `SKIP-HOST`.
+report `SKIP-HOST`. `os:` names a family (`unix`, `windows`), `os-name:` an OS
+(`linux`, `macos`, `windows`, `android`, `ios`, `freebsd`, `openbsd`,
+`netbsd`) and `arch:` an architecture (`x86_64`, `aarch64`, `x86`), each a
+name, `a|b` or `!a|b`, and so does a `when os`, `when os-name` or `when arch`
+condition. A name off its list matches no host, so it is refused, not skipped
+on every host.
 `run: none` keeps a serves-until-stopped entry compile-only. `host-port: N`
 declares a fixed TCP port the program binds; the kit holds the host-wide flock
 `/tmp/jet-host-port-N.lock` while the case runs, waiting at most one step

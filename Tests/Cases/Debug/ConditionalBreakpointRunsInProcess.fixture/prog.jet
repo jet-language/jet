@@ -27,6 +27,10 @@ run: fn() -[IO, Time]> {
     started: time.start()
     first: count_up(1000000)
     took: time.elapsed(started).ns
-    print(if took < 1000000000 -> "a million hits under a second" else -> "a million hits took {took} ns")
-    print("totals {first} {count_up(5)} {sums(4)}")
+    print(if took < 1000000000 -> "count_up: a million hits under a second" else -> "count_up: a million hits took {took} ns")
+    again: time.start()
+    second: sums(1000000)
+    text_took: time.elapsed(again).ns
+    print(if text_took < 1000000000 -> "sums: a million hits under a second" else -> "sums: a million hits took {text_took} ns")
+    print("totals {first} {second} {count_up(5)} {sums(4)}")
 }
