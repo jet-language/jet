@@ -1,13 +1,15 @@
 # A CPU-time sample in a helper the compiler emits into the program's code,
-# such as the stop poll after a call through a function value, counts at the
-# Jet line that called it, and the receipt counts those samples: a recursion
-# through a function value names no helper outside Jet functions. The
-# `helpers` receipt splits them out by line and helper, named in Jet's terms,
-# and the view's row of the line that makes the calls shows the stop poll's
-# samples. An -O2 fib keeps its stop polls as cost facts, one at each of its
-# two recursive calls, but they run inline while no other task asks for a
-# stop: about a third of its samples used to land under `jet_ir_stop_turn`,
-# and now none land in a helper.
+# such as the closure release and drop after a call that passes a function
+# value, counts at the Jet line that called it, and the receipt counts those
+# samples: a recursion through a function value names no helper outside Jet
+# functions. The `helpers` receipt splits them out by line and helper, named
+# in Jet's terms, and the view's row of the line that makes the calls shows
+# the helpers' samples. The stop polls after the calls, direct or through
+# the function value, run inline while no other task asks for a stop, so
+# none of the recursion's samples land in a stop poll's helper. An -O2 fib
+# keeps its stop polls as cost facts, one at each of its two recursive
+# calls: about a third of its samples used to land under
+# `jet_ir_stop_turn`, and now none land in a helper.
 requires: os-name:linux
 fixture: HelperSamples.fixture
 env: NO_COLOR=1
@@ -16,12 +18,14 @@ exit: 0
 stdout: = "deep=2178309\n"
 json: file deep.jettrace doc $.content.profile.reason ~ " samples in compiler-emitted helpers, such as stop polls, count at the line that called them" # the receipt counts the helper samples
 json: file deep.jettrace doc $.content.profile.reason !~ "jet_ir_" # and names no helper outside Jet functions
-file: deep.jettrace ~ "\"function\":\"twice\",\"helper\":\"stop poll\",\"line\":11" # the helpers receipt names the poll in Jet's terms, at the calling line
+file: deep.jettrace ~ "\"function\":\"deep\",\"helper\":\"closure " # the helpers receipt names the closure's helpers in Jet's terms
+file: deep.jettrace !~ "\"helper\":\"stop poll\"" # and no stop poll: those run inline
 file: deep.jettrace !~ "\"helper\":\"jet_ir_" # never by its symbol
 step: jet perf view {work}/deep.jettrace
 exit: 0
-capture: row = text stdout.after_first("  deep.jet:11 twice samples=").split("\n", 0)
-cap:row: ~ " · stop poll samples=" # the line's samples in the poll are split out
+capture: row = text stdout.after_first("  deep.jet:8 deep samples=").split("\n", 0)
+cap:row: ~ " · closure " # the line's samples in the closure's helpers are split out
+cap:row: !~ " · stop poll samples=" # and none in a stop poll
 step: jet perf run -O2 fib.jet --out {work}/fib.jettrace -- 35
 exit: 0
 stdout: = "fib=9227465\n"

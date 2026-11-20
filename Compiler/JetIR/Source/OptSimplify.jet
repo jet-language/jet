@@ -1006,6 +1006,7 @@ ir_opt_propagate: fn(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROp
         }
         if target >= 0 -> replace[slot] = target
     }
+    ir_opt_propagate_binds(f, facts, replace)
     changed := 0
     loop at in 0..<f.op.len() {
         if killed[at] {
@@ -1028,6 +1029,38 @@ ir_opt_propagate_adjacent: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: I
     reads := [Int]{}
     ir_x64_reads_into(f, at + 1, reads)
     reads.contains(x)
+}
+
+// A named slot propagate folds away is located in its source from then on
+// (IRFunction.binds), and a bind into a replaced slot follows it, when that
+// source is written once (a parameter: never), so it holds the value
+// wherever the debugger reads it; otherwise the bind goes.
+ir_opt_propagate_binds: fn(f: &IRFunction, facts: OptFacts, replace: [Int]) Never! {
+    kept := [Int]{}
+    pair := 0
+    loop pair + 1 < f.binds.len() {
+        named: f.binds[pair]
+        held: f.binds[pair + 1]
+        pair += 2
+        moved: ir_opt_renamed(replace, held)
+        if moved != held && facts.defs[moved] != 1 -> next
+        kept.push(named)
+        kept.push(moved)
+    }
+    loop (slot, source) in replace {
+        if source < 0 || f.slot_name[slot] < 0 || facts.defs[source] != 1 -> next
+        kept.push(slot)
+        kept.push(source)
+    }
+    f.binds = kept
+}
+
+// Renames `from` to `to` among the slots IRFunction.binds locates named
+// slots in.
+ir_opt_rebind: fn(f: &IRFunction, from: Int, to: Int) Never! {
+    loop k in 0..<(f.binds.len() /% 2) {
+        if f.binds[2 * k + 1] == from -> f.binds[2 * k + 1] = to
+    }
 }
 
 // Rewrites the slots instruction `at` reads through `replace` (-1: kept).
@@ -1223,6 +1256,7 @@ ir_opt_coalesce: fn(f: &IRFunction, facts: OptFacts, report: &IROptReport) -> In
         }
         if !clean -> next
         f.dst[def] = x
+        ir_opt_rebind(f, t, x)
         ir_opt_kill(f, at)
         report.copies_coalesced += 1
         changed += 1
@@ -1593,6 +1627,35 @@ ir_opt_unwrap: fn(f: &IRFunction) -> Int Never! {
         }
         assert(masks > 0)
     }
+}
+
+// pick(p): propagate replaces b by p, e by c (written twice) and the named x
+// and the temporary t by p. The bind of a into b follows it to p, the bind
+// of d into e goes (c changes under it), and x is bound to p.
+#Test("A bind follows its slot's replacement only to a slot written once") {
+    m := ir_module_new()
+    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    f := ir_function_new("pick", "test:pick.jet.pick", "", "pick.jet", 1)
+    p: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "p"), 1)
+    a: ir_slot(f, word, IRSlotKind.Local, ir_intern_name(m, "a"), 2)
+    b: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    d: ir_slot(f, word, IRSlotKind.Local, ir_intern_name(m, "d"), 3)
+    e: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    c: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    x: ir_slot(f, word, IRSlotKind.Local, ir_intern_name(m, "x"), 4)
+    t: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.Const, c, 2, -1, -1, 2)
+    _ := ir_emit(f, IROp.Const, c, 3, -1, -1, 3)
+    _ := ir_emit(f, IROp.Return, -1, c, -1, -1, 4)
+    f.binds = [Int]{a, b, d, e}
+    replace := loop _ in 0..<f.slot_type.len() -> -1
+    replace[b] = p
+    replace[e] = c
+    replace[x] = p
+    replace[t] = p
+    facts: ir_opt_facts(f)
+    ir_opt_propagate_binds(f, facts, replace)
+    assert_eq(f.binds, [Int]{a, p, x, p})
 }
 
 // hyp(x, y) = (x*x + y*y) * sqrt(x*x + y*y) over Floats, the sum spelled

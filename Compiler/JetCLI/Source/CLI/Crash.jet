@@ -11,7 +11,7 @@
 use {
     cli_files: core.files
     cli_term: core.term
-    jet_backend.[X64Jetline, X64JetlineFunction, x64_jetline_find, x64_jetline_line, x64_jetline_read]
+    jet_backend.[X64Jetline, X64JetlineFunction, x64_jetline_find, x64_jetline_place, x64_jetline_read]
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[diagnostic_registry_row, diagnostic_stop_footer, diagnostic_stop_line]
 }
@@ -151,7 +151,8 @@ jet_cli_crash_stop: fn(head: String, addresses: [Int], table: X64Jetline) -[FS]>
 }
 
 // report.S's signal report: the first line, then, with a backtrace, the
-// faulting instruction's frame and the named callers.
+// faulting instruction's frame and the named callers, each at the row of
+// its call (a call row too, as report.S `line` reads it).
 jet_cli_crash_fault: fn(head: String, backtrace: Bool, addresses: [Int], table: X64Jetline) -> String Never! {
     if !backtrace -> return "{head}\n"
     out := "{head}\nBacktrace:\n"
@@ -163,9 +164,12 @@ jet_cli_crash_fault: fn(head: String, backtrace: Bool, addresses: [Int], table: 
             next
         }
         function: table.functions[found]
-        if x64_jetline_line(table, function, pc) == .Val(line) {
-            out = "{out}  {function.name} at {function.file}:{line}\n"
-        } else { out = "{out}  {function.name}\n" }
+        if {
+            x64_jetline_place(table, function, pc) == .Val(row) -> {
+                out = "{out}  {function.name} at {function.file}:{row.line}\n"
+            }
+            else -> out = "{out}  {function.name}\n"
+        }
     }
     out
 }

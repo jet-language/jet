@@ -1,0 +1,22 @@
+# At -O2 the optimizer gives a word a Loop shares with the code around it a
+# slot of its own inside the Loop (JetIR OptSplit.jet), so inside the Loop
+# `k` and `total` live in the split's register and their own places hold the
+# values from before the Loop. The location lists name the split's place
+# over its range (X64Select.jet ir_x64_variables), so each pass's stop shows
+# that pass's values, never the stale 0s. The fixture must stay in jet fmt
+# form.
+fixture: O2LoopLocalsHoldEachPass.fixture
+env: NO_COLOR=1
+step: jet build -O2 prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog --break prog.jet:10
+stdin: native_shows_o2_loop_locals_at_each_pass.stdin
+exit: 0
+stdout+stderr: ~ "k: Int = 0" # the first pass
+stdout+stderr: ~ "k: Int = 1" # the second pass reads k from the split's register
+stdout+stderr: ~ "k: Int = 2" # and the third
+stdout+stderr: ~ "total: Int = 2" # total before the third pass's add, 0 + 0 + 2
+stdout+stderr: ~ "total 6" # the program ran to its end
+step: {work}/.jet/build/prog
+exit: 0
+stdout: = "total 6\n" # the image runs unchanged

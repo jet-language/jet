@@ -169,10 +169,12 @@ ir_opt_entry_build: fn(caller: IRFunction, guards: [[IRFunction]], keys: [String
     out.call_sites = caller.call_sites
     loop slot in 0..<caller.slot_type.len() {
         _ := ir_slot(out, caller.slot_type[slot], caller.slot_kind[slot], caller.slot_name[slot], caller.slot_line[slot])
+        out.slot_site[slot] = caller.slot_site[slot]
     }
     out.slot_fixed = caller.slot_fixed.copy()
     out.result = caller.result
     loop value in caller.args -> out.args.push(value)
+    loop value in caller.binds -> out.binds.push(value)
     at := 0
     loop at < caller.op.len() {
         last: lasts[at]

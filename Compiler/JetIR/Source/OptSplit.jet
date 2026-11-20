@@ -13,7 +13,9 @@
 // function). A Move makes no value of its own (no clone, no drop), so the
 // two slots hold the one value and the code reads, writes and drops it as
 // before. Constants and frame addresses keep their slot: the backend holds
-// them in no place.
+// them in no place. Each split is a pair of IRFunction.splits (the split,
+// then its slot), so debug info locates the variable in the split's place
+// over the split's live range, an outer Loop's split before an inner one's.
 use jet_foundation.[Type]
 
 // Splits `f`'s Loops (the header comment); returns how many slots it split.
@@ -83,6 +85,8 @@ ir_opt_split_loops: fn(m: IRModule, f: &IRFunction) -> Int Never! {
             split_slot.push(slot)
             split: ir_slot(f, f.slot_type[slot], .Temp, -1, f.slot_line[slot])
             f.slot_fixed[split] = f.slot_fixed[slot]
+            f.splits.push(split)
+            f.splits.push(slot)
             split_new.push(split)
             split_old.push(-1)
             split_written.push(changed[slot])
@@ -277,6 +281,9 @@ ir_opt_split_put: fn(code: &IROptCode, f: &IRFunction, current: [Int], at: Int) 
     assert(f.op[4] == .Move && f.a[4] == i && f.op[5] == .Move && f.a[5] == total && f.op[6] == .Loop)
     inner_i: f.dst[4]
     inner_total: f.dst[5]
+    // Each split stands for its slot (IRFunction.splits), for debug info.
+    assert_eq(f.splits.len(), 4)
+    assert(f.splits[0] == inner_i && f.splits[1] == i && f.splits[2] == inner_total && f.splits[3] == total)
     assert(f.op[7] == .Ge && f.a[7] == inner_i && f.b[7] == n)
     assert(f.op[15] == .Add && f.dst[15] == inner_total && f.a[15] == inner_total && f.b[15] == inner_i)
     assert(f.op[16] == .Const && f.dst[16] == one)

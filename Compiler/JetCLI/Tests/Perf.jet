@@ -4,6 +4,7 @@ use {
     jet_backend.[X64DebugEncoding, X64ImageFunction, X64Jetline, X64JetlineFunction]
     jet_cli.[
         JET_CLI_PERF_OBJECT_SOCKET,
+        JetCLIPerfAttachCPU,
         JetCLIPerfExperiment,
         JetCLIPerfHeap,
         JetCLIPerfHeapBlock,
@@ -24,14 +25,18 @@ use {
         JetCLIPerfPlotTotal,
         JetCLIPerfRetained,
         JetCLIPerfSpawn,
+        JetCLIPerfTimed,
         JetCLIPerfWait,
         JetCLIPerfWake,
         JetCLIPerfZoneSampled,
         JetCLIPerfZoneTotal,
+        jet_cli_perf_attach_closed,
+        jet_cli_perf_attach_keep_window,
         jet_cli_perf_browser_decode,
         jet_cli_perf_causal_section,
         jet_cli_perf_capture_bytes,
         jet_cli_perf_capture_source,
+        jet_cli_perf_file_pid,
         jet_cli_perf_heap_retain,
         jet_cli_perf_heap_retention_lines,
         jet_cli_perf_heap_types,
@@ -44,6 +49,8 @@ use {
         jet_cli_perf_observed,
         jet_cli_perf_pc_json,
         jet_cli_perf_pc_words,
+        jet_cli_perf_profile_summary,
+        jet_cli_perf_records_section,
         jet_cli_perf_sampler_reason,
         jet_cli_perf_samples_count,
         jet_cli_perf_samples_profile,
@@ -194,6 +201,48 @@ jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
     _: verify_jettrace(bytes) ?? panic(err.message)
 }
 
+#Test("an attach's window counts each thread's CPU in it, names the threads that exited, and its header names a tick resolution") {
+    opened := [Int:U64]{}
+    opened[1] = U64{1000}
+    opened[2] = U64{500}
+    opened[3] = U64{700}
+    // Thread 1 ran 600 ns more, thread 2 slept, thread 3 exited and thread 4
+    // started in the window.
+    shut := [Int:U64]{}
+    shut[1] = U64{1600}
+    shut[2] = U64{500}
+    shut[4] = U64{300}
+    first: JetCLIPerfAttachCPU{ns: U64{2200}, resolution_ns: U64{1}, threads: opened}
+    last: JetCLIPerfAttachCPU{ns: U64{2400}, resolution_ns: U64{1}, threads: shut}
+    precise: jet_cli_perf_attach_closed(U64{5000}, Val(first), Val(last))
+    assert_eq(precise.window.elapsed_ns, U64{5000})
+    assert_eq(precise.window.cpu_ns, Val(U64{900}))
+    assert_eq(precise.resolution_ns, Val(U64{1}))
+    assert_eq(precise.exited, 1)
+    early: JetCLIPerfAttachCPU{ns: U64{20000000}, resolution_ns: U64{10000000}, threads: [Int:U64]{}}
+    late: JetCLIPerfAttachCPU{ns: U64{50000000}, resolution_ns: U64{10000000}, threads: [Int:U64]{}}
+    ticked: jet_cli_perf_attach_closed(U64{5000}, Val(early), Val(late))
+    assert_eq(ticked.window.cpu_ns, Val(U64{30000000}))
+    assert_eq(ticked.resolution_ns, Val(U64{10000000}))
+    // Ends counted differently, or an end with no CPU, give the window none.
+    assert_eq(jet_cli_perf_attach_closed(U64{5000}, Val(first), Val(late)).window.cpu_ns, None)
+    assert_eq(jet_cli_perf_attach_closed(U64{5000}, None, Val(late)).window.cpu_ns, None)
+    live: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(17))
+    observations: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{0}, live: live}}
+    toolchain: TraceToolchain{jet_version: "test", compiler_build_id: "test", stdlib_id: "test", runner_id: "test"}
+    hardware: TraceHardware{cpu_arch: "x86_64", logical_cpus: U64{1}, os: "linux", target: "x86_64-unknown-linux-gnu"}
+    exact := jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    jet_cli_perf_attach_keep_window(exact, 7, precise, [String]{"its live snapshot", "its flight ring"})
+    assert(exact.profile.window_reason.contains("from its first read of the program to its last (its live snapshot, its flight ring)"))
+    assert(exact.profile.window_reason.contains("less that of the threads that exited in it (1)"))
+    exact_trace: verify_jettrace(jet_cli_perf_capture_bytes(exact, "attach", [String]{"attach", "7"}, toolchain, hardware) ?? panic(err.message)) ?? panic(err.message)
+    assert((jet_cli_perf_profile_summary(exact_trace) ?? "").ends_with(" window=live run_wall=5000ns run_cpu=900ns"))
+    coarse := jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    jet_cli_perf_attach_keep_window(coarse, 7, ticked, [String]{"its live snapshot"})
+    coarse_trace: verify_jettrace(jet_cli_perf_capture_bytes(coarse, "attach", [String]{"attach", "7"}, toolchain, hardware) ?? panic(err.message)) ?? panic(err.message)
+    assert((jet_cli_perf_profile_summary(coarse_trace) ?? "").ends_with(" window=live run_wall=5000ns run_cpu=30000000ns run_cpu_resolution=10ms"))
+}
+
 #Test("perf observations of a run sit on its own clock, from its start") {
     early: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(17))
     late := jet_cli_perf_live_from(jet_cli_perf_test_snapshot(17))
@@ -305,6 +354,30 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     assert_eq(profile.overhead_reason, "the sampler took 9 microseconds, 0.22% of the 4000 microseconds of CPU time sampled: 6 in its handlers and 3 signals at the 1000 nanoseconds the kernel took to deliver and return from one as sampling started")
 }
 
+// Each record the runtime could not write is counted. A flight ring keeps
+// tally records, clock records with 1 for their address: the losses so far,
+// then whether the run ended, each counting every loss before it. A `jet
+// perf run` exit's clock record carries the count as its seventh word. The
+// trace's `records` section keeps the count; a run that lost none has none.
+#Test("perf samples count the records the program could not write, and the trace keeps the count") {
+    clock: 13 << 59
+    tally: clock | (3 << 48) | 1
+    ring: jet_cli_perf_test_words([Int]{tally, 4, 0, tally, 9, 0, tally, 9, 1})
+    flight: jet_cli_perf_samples_count(X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, [X64ImageFunction]{}, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, ring, 0)
+    assert_eq(flight.records_lost, U64{9})
+    assert_eq(flight.total, U64{0})
+    assert(flight.cost == None)
+    file: jet_cli_perf_test_words([Int]{clock | (7 << 48), 4000000, 6000, 1000, 0, 0, 3})
+    run: jet_cli_perf_samples_count(X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, [X64ImageFunction]{}, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, file, 0)
+    assert_eq(run.records_lost, U64{3})
+    assert(run.cost != None)
+    section: jet_cli_perf_records_section(U64{3}, "the samples file refused their writes") ?? panic("3 records were lost")
+    assert_eq(section.name, "records")
+    assert_eq(section.type_name, "JetPerfRecords")
+    assert_eq(String.from_bytes(canonical_json_bytes(section.value)) ?? "", "{{\"lost\":3,\"reason\":\"the samples file refused their writes\"}}\n")
+    assert(jet_cli_perf_records_section(U64{0}, "the samples file refused their writes") == None)
+}
+
 #Test("the per-line table splits a line's samples in a stop poll out of its own") {
     names: [String]{"", "fib.jet", "fib"}
     rows: [JetCLIPerfLineTotal]{JetCLIPerfLineTotal{path: 1, line: 7, function: 2, samples: 71}, JetCLIPerfLineTotal{path: 1, line: 5, function: 2, samples: 29}}
@@ -390,7 +463,7 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     assert_eq(jet_cli_perf_timed_first(sampled.timed, 1501), 2)
     assert_eq(jet_cli_perf_timed_first(sampled.timed, 9000), 4)
     zone: JetCLIPerfZoneTotal{name: "solve", count: 1, total: 3000, longest: 3000, samples: 3, lines: [Int:Int]{5: 2}}
-    section: jet_cli_perf_zones_section([JetCLIPerfZoneTotal]{zone}, [Int]{}, [JetCLIPerfPlotTotal]{}, [JetCLIPerfZoneSampled]{JetCLIPerfZoneSampled{name: "solve", start_ns: U64{0}, end_ns: U64{3000}, samples: 3, line: 5}}, "fib.jet", "")
+    section: jet_cli_perf_zones_section([JetCLIPerfZoneTotal]{zone}, [Int]{}, [JetCLIPerfPlotTotal]{}, [JetCLIPerfZoneSampled]{JetCLIPerfZoneSampled{name: "solve", start_ns: U64{0}, end_ns: U64{3000}, samples: 3, line: 5}}, "fib.jet", "", "")
     json: String.from_bytes(canonical_json_bytes(section.value)) ?? panic("the section is UTF-8")
     assert(json.contains(`"sampled":[{"end_ns":3000,"line":5,"name":"solve","samples":3,"start_ns":0}]`))
     assert(json.contains(`"source":"fib.jet"`))
@@ -442,6 +515,40 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     json: String.from_bytes(canonical_json_bytes(capture.receipts[capture.receipts.len() - 1].value)) ?? panic("the section is UTF-8")
     assert(json.contains(`"sampled":[{"end_ns":4293,"line":5,"name":"solve","samples":2,"start_ns":1293}]`))
     assert(json.contains(`{"count":1,"lines":[{"line":5,"samples":2}],"longest_ns":3000,"name":"solve","samples":2,"total_ns":3000}`))
+}
+
+// A spans file that reached its bound ends in a row saying so (the
+// runtime's perf_spans_write): the rows before it stay trace rows, and the
+// zones section names the cut, which is no row of its own.
+#Test("a spans file cut at its bound keeps its earlier rows and names the cut in the zones section") {
+    row := jet_cli_perf_test_words([Int]{100, 400, 7, 5 | (1 << 32)})
+    row.extend("solve".bytes())
+    reason: "the spans file reached its 16 MiB bound, so the rows after this were dropped"
+    row.extend(jet_cli_perf_test_words([Int]{0, 0, 0, reason.len() | (5 << 32)}))
+    row.extend(reason.bytes())
+    path: "{perf_test_sys.temp_dir()}/jet-perf-zone-cut-{perf_test_process.current_pid()}.spans"
+    perf_test_files.write_bytes(path, row) ?? panic("the spans file: {err}")
+    capture := jet_cli_perf_capture_source("fib.jet", "fib: fn() -> Int {{ 1 }}", [JetCLIPerfObservation]{}, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    spans: capture.spans.len()
+    jet_cli_perf_log_spans_read(capture, path, "fib.jet", 0, [JetCLIPerfTimed]{})
+    assert(!perf_test_files.exists(path))
+    assert_eq(capture.spans.len(), spans + 1)
+    json: String.from_bytes(canonical_json_bytes(capture.receipts[capture.receipts.len() - 1].value)) ?? panic("the section is UTF-8")
+    assert(json.starts_with(`{"cut":"the spans file reached its 16 MiB bound, so the rows after this were dropped","frames":`))
+    assert(json.contains(`"name":"solve"`))
+}
+
+// A killed profiled program's files are swept by the process their name
+// holds: a flight ring's program, a session's or an attach's own pid.
+#Test("a profiling file names its process, and no other file does") {
+    assert_eq(jet_cli_perf_file_pid("jet-flight-4123.samples"), Val(4123))
+    assert_eq(jet_cli_perf_file_pid("jet-flight-4123.samples.spans"), Val(4123))
+    assert_eq(jet_cli_perf_file_pid("jet-perf-77-1700000000.samples.image"), Val(77))
+    assert_eq(jet_cli_perf_file_pid("jet-perf-attach-90-4123-1700000000.spans"), Val(90))
+    assert_eq(jet_cli_perf_file_pid("jet-perf-zone-clock-12.spans"), None)
+    assert_eq(jet_cli_perf_file_pid("jet-flight-4123"), None)
+    assert_eq(jet_cli_perf_file_pid("jet-flight-0.samples"), None)
+    assert_eq(jet_cli_perf_file_pid("jet-observe-4123.json"), None)
 }
 
 // A short task can start and end between two observations, so none sees
@@ -623,8 +730,8 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     // run's code at 0x1000: its rows give line 6 at 0x1000 (sum_squares's
     // body, inlined), 14 at 0x1040, 3 at 0x1080 (max's body, inlined from
     // file 2) and 15 at 0x1090.
-    rows: [U8]{0, 5, 64, 8, 64, 117, 16, 12}
-    table: X64Jetline{table: rows, functions: [X64JetlineFunction]{X64JetlineFunction{low: 4096, high: 4352, name: "run", file: "prog.jet", dir: "", decl: 10, rows: 0, rows_end: 8}}}
+    rows: [U8]{0, 5, 0x80, 1, 8, 0x80, 1, 117, 32, 12}
+    table: X64Jetline{table: rows, functions: [X64JetlineFunction]{X64JetlineFunction{low: 4096, high: 4352, name: "run", file: "prog.jet", dir: "", decl: 10, rows: 0, rows_end: 10}}}
     runs: [NativeInlined]{
         NativeInlined{die: 10, origin: 1, low: 4096, high: 4160, call_line: 14, parent: -1, file: 1, call_file: 1},
         NativeInlined{die: 20, origin: 2, low: 4224, high: 4240, call_line: 15, parent: -1, file: 2, call_file: 1},

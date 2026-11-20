@@ -1068,7 +1068,9 @@ jet_cli_perf_first_sample: fn(trace: CanonicalJSON) -> JetCLIPerfSample? Never! 
     Val(JetCLIPerfSample{domain: domain, ns: ns, symbol: symbol})
 }
 
-// `profile method=… status=… coverage=… rows=… clocks=… overhead=… window=… run_wall=… run_cpu=…`.
+// `profile method=… status=… coverage=… rows=… clocks=… overhead=… window=… run_wall=… run_cpu=…`,
+// and `run_cpu_resolution=…` where an attach's window counted its CPU in
+// ticks (its `window` receipt section).
 jet_cli_perf_profile_summary: fn(trace: CanonicalJSON) -> String? Never! {
     profile: jet_cli_perf_profile(trace) ?? return None
     status: jet_cli_perf_field_text(profile, "status") ?? return None
@@ -1087,7 +1089,24 @@ jet_cli_perf_profile_summary: fn(trace: CanonicalJSON) -> String? Never! {
     window: jet_cli_perf_field_text(profile, "window_status") ?? return None
     run_wall: if jet_cli_perf_field_integer(profile, "window_wall_ns") == .Val(ns) -> "{ns}ns" else -> "unavailable"
     run_cpu: if jet_cli_perf_field_integer(profile, "window_cpu_ns") == .Val(ns) -> "{ns}ns" else -> "unavailable"
-    Val("profile method={method} status={status} coverage={coverage} rows={rows.len()} clocks={clock_list} overhead={overhead} window={window} run_wall={run_wall} run_cpu={run_cpu}")
+    Val("profile method={method} status={status} coverage={coverage} rows={rows.len()} clocks={clock_list} overhead={overhead} window={window} run_wall={run_wall} run_cpu={run_cpu}{jet_cli_perf_cpu_resolution(trace)}")
+}
+
+// ` run_cpu_resolution=10ms`, say, where the trace's `window` receipt
+// section counted the run's CPU in steps above a nanosecond; else empty.
+jet_cli_perf_cpu_resolution: fn(trace: CanonicalJSON) -> String Never! {
+    items: jet_cli_perf_rows(trace, "receipt_sections") ?? return ""
+    loop item in items {
+        section: trace_receipt_section_from_json(item) ?? next
+        if section.name != "window" -> next
+        digits: jet_cli_perf_member_integer(section.value, "cpu_resolution_ns") ?? return ""
+        step: Int.parse(digits) ?? return ""
+        if step <= 1 -> return ""
+        if step % 1000000 == 0 -> return " run_cpu_resolution={step /% 1000000}ms"
+        if step % 1000 == 0 -> return " run_cpu_resolution={step /% 1000}µs"
+        return " run_cpu_resolution={step}ns"
+    }
+    ""
 }
 
 jet_cli_perf_allocation_summary: fn(trace: CanonicalJSON) -> String? Never! {
@@ -1242,13 +1261,14 @@ jet_cli_perf_log_span_summary: fn(trace: CanonicalJSON) -> String? Never! {
 
 // The core.perf zones, frame marks and plots of the trace's `zones`
 // receipt section (jet_cli_perf_zones_section): why zones stayed off when
-// the runtime could not turn them on; each zone name with how many closed,
-// the CPU-time samples taken inside them, their total and longest time,
-// heaviest first, and the lines of the source most of those samples were
-// on, each with its samples; the frames with how many and their mean and
-// longest interval; and each plot with how many values and its last. The
-// section counts every one the run closed, the spans past the trace's row
-// limit too.
+// the runtime could not turn them on; that the spans file reached its
+// bound, so the rows after it were dropped; each zone name with how many
+// closed, the CPU-time samples taken inside them, their total and longest
+// time, heaviest first, and the lines of the source most of those samples
+// were on, each with its samples; the frames with how many and their mean
+// and longest interval; and each plot with how many values and its last.
+// The section counts every one the run closed, the spans past the trace's
+// row limit too.
 jet_cli_perf_zone_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     lines := [String]{}
     items: jet_cli_perf_rows(trace, "receipt_sections") ?? return lines
@@ -1259,6 +1279,9 @@ jet_cli_perf_zone_lines: fn(trace: CanonicalJSON) -> [String] Never! {
         source: jet_cli_perf_field_text(fields, "source") ?? ""
         if jet_cli_perf_member_text(section.value, "refused") == .Val(reason) {
             lines.push("zones off: {reason}")
+        }
+        if jet_cli_perf_member_text(section.value, "cut") == .Val(reason) {
+            lines.push("spans cut: {reason}")
         }
         if jet_cli_perf_key(fields, "zones") == .Val(zones_at) {
             if jettrace_array(fields[zones_at].value, "receipt zones.zones") == .Ok(zones) {

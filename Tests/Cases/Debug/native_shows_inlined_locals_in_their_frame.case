@@ -1,0 +1,41 @@
+# At -O1 and -O2 `small.bump` is inlined into `run`, and the optimizer folds
+# its locals away: bump's `by` reads run's argument, and `total` and run's
+# own `by` are the temporaries that compute them (JetIR IRFunction.binds).
+# Each is still located in that temporary's place, as a local of the frame
+# it belongs to (IRFunction.slot_site): stopped in bump, `by` and then
+# `total` are bump's, with values, and run's frame lists its own `by` alone,
+# as at -O0. The fixture must stay in jet fmt form.
+fixture: InlinedLocalsInTheirFrame.fixture
+env: NO_COLOR=1
+step: jet debug prog.jet --break prog.jet:7
+stdin: native_shows_inlined_locals_in_their_frame.stdin
+exit: 0
+stdout+stderr: ~ "(Jet) locals\nby: Int = 1\n(Jet) up" # -O0: bump's frame holds its parameter
+stdout+stderr: ~ "(Jet) locals\nby: Int = 1\n(Jet) b prog.jet:8" # run's frame holds its own `by` alone
+stdout+stderr: ~ "total: Int = 9\n(Jet) c" # bump's `total` once written
+stdout+stderr: ~ "bump 9\n9\nProgram finished" # the program ran to its end
+step: jet build -O1 prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog --break prog.jet:7
+stdin: native_shows_inlined_locals_in_their_frame.stdin
+exit: 0
+stdout+stderr: ~ "(Jet) locals\nby: Int = 1\n(Jet) up" # -O1: the inlined frame holds bump's `by`, its argument's value
+stdout+stderr: ~ "(Jet) locals\nby: Int = 1\n(Jet) b prog.jet:8" # run's frame holds its own folded `by` alone, not bump's locals
+stdout+stderr: ~ "total: Int = 9\n(Jet) c" # bump's folded `total` once written
+stdout+stderr: !~ "<Unavailable>" # never unavailable
+stdout+stderr: !~ "No locals here" # nor missing from the inlined frame
+stdout+stderr: ~ "bump 9\n9\nProgram finished" # the program ran to its end
+step: jet build -O2 prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog --break prog.jet:7
+stdin: native_shows_inlined_locals_in_their_frame.stdin
+exit: 0
+stdout+stderr: ~ "(Jet) locals\nby: Int = 1\n(Jet) up" # -O2 the same
+stdout+stderr: ~ "(Jet) locals\nby: Int = 1\n(Jet) b prog.jet:8" # run's own `by` alone
+stdout+stderr: ~ "total: Int = 9\n(Jet) c" # bump's `total`
+stdout+stderr: !~ "<Unavailable>" # never unavailable
+stdout+stderr: !~ "No locals here" # nor missing from the inlined frame
+stdout+stderr: ~ "bump 9\n9\nProgram finished" # the program ran to its end
+step: {work}/.jet/build/prog
+exit: 0
+stdout: = "bump 9\n9\n" # the image runs unchanged

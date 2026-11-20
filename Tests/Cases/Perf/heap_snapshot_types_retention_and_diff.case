@@ -12,7 +12,9 @@
 # snapshot is also taken on attach: held.jet keeps the same bodies, by line
 # 24, while it runs under `jet run --observe --checked-alloc`, and `jet perf
 # attach --lens=alloc` snapshots them there and says how long it held the
-# program; a run not started with allocation tracking is refused.
+# program, its run window running from its first read of the program to the
+# snapshot's answer with the program's CPU in it; a run not started with
+# allocation tracking is refused.
 requires: os-name:linux
 requires: arch:x86_64
 fixture: HeapSnapshotRetention.fixture
@@ -74,13 +76,20 @@ recv held
 stdout.trim: ~ "READY" # every body is live and the program waits
 step attach: jet perf attach {pid:held} --lens=alloc --source held.jet --out {work}/attach.jettrace
 exit: 0
+capture: took = elapsed
 stderr: ~ "Heap snapshot: held the program's allocations and frees for " # how long the snapshot held the program
 json: file attach.jettrace doc $.content.receipt_sections[?name="heap"][0].value.snapshots[0].name = "attach"
 json: file attach.jettrace doc $.content.receipt_sections[?name="heap"][0].value.snapshots[0].sites[?line=24][?type="[Int]"][?blocks=200] #= 1 # every body, by its type and line, while the program runs
 json: file attach.jettrace doc $.content.receipt_sections[?name="heap"][0].value.snapshots[0].sites[?line=null] #= 0 # each live block has its line
+json: file attach.jettrace doc $.content.profile.window_status = "live" # the header's window is the attach's, from its first read of the program to the snapshot's answer
+json: file attach.jettrace doc $.content.profile.window_wall_ns <= {cap:took}+0 # no more than the attach took, not the run since it started
+json: file attach.jettrace doc $.content.profile.window_cpu_ns > 0 # the program's CPU in it: the writer's publication that took the snapshot
+json: file attach.jettrace doc $.content.receipt_sections[?name="window"][0].value.cpu_clock = "schedstat" # counted to the nanosecond
 step attachview: jet perf view {work}/attach.jettrace
 exit: 0
 stdout: ~ "  [Int]  held.jet:24 run  200 blocks  " # the view names them so too
+stdout: ~ " window=live run_wall=" # the header's window is the attach's
+stdout: !~ " run_cpu=0ns" # with the program's CPU in it
 signal held: KILL
 close held
 exit: any # the case's KILL ends the program

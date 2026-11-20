@@ -445,6 +445,11 @@ native_dump_event: fn(image: NativeImage, ring: [U8], at: Int, words: Int) -> St
     if kind == NATIVE_DUMP_WAKE {
         return "wake    task {id}{native_dump_where(image, ring, at, 0, 3, words)}"
     }
+    // A tally (1 in the address bits): the records the program made and
+    // could not write, as its record socket was full.
+    if kind == NATIVE_DUMP_CLOCK && id == 1 {
+        return "lost    {native_dump_word(ring, at + 8)} records: the record socket was full"
+    }
     if kind == NATIVE_DUMP_CLOCK {
         return "clock   {native_dump_word(ring, at + 8) / 1000000}ms of CPU time"
     }
@@ -470,7 +475,8 @@ native_dump_event: fn(image: NativeImage, ring: [U8], at: Int, words: Int) -> St
 
 // `  at <function> <file>:<line>` for the innermost Jet frame of `pc` (a
 // sample's own address, 0 for none) then the call sites in words `first`
-// up to `words` of the record at `at`; "" when none is Jet code.
+// up to `words` of the record at `at`, each at its call row's line
+// (native_call_row) when it has one; "" when none is Jet code.
 native_dump_where: fn(image: NativeImage, ring: [U8], at: Int, pc: Int, first: Int, words: Int) -> String Never! {
     if pc > 0 {
         frame: native_frame_at(image, pc)
@@ -479,7 +485,8 @@ native_dump_where: fn(image: NativeImage, ring: [U8], at: Int, pc: Int, first: I
     loop index in first..<words {
         site: native_dump_word(ring, at + 8 * index)
         if site <= 0 -> next
-        frame: native_frame_at(image, site - 1)
+        frame := native_frame_at(image, site - 1)
+        if native_call_row(image, site - 1) == .Val(call) -> frame.line = call.line
         if native_debug_jet_frame(frame) -> return "  at {frame.function} {frame.file}:{frame.line}"
     }
     ""

@@ -136,7 +136,7 @@ link_direct_bind: fn(c: &LinkContext, exe: &X64Executable, program: X64ObjectMod
     // A loaded section of no bytes still moves what follows to its
     // alignment; the object route lays it out.
     if (data_live && data.len() == 0) || (rodata_live && rodata.len() == 0) -> return false
-    eh: dwarf_eh_frame(debug, offsets, sizes, X64DwarfSymbols{text: ELF64_OBJECT_SYMBOL_TEXT, abbrev: ELF64_OBJECT_SYMBOL_ABBREV, line: ELF64_OBJECT_SYMBOL_LINE, loclists: ELF64_OBJECT_SYMBOL_LOCLISTS, functions: [Int]{}})
+    eh: dwarf_eh_frame(debug, offsets, sizes, X64DwarfSymbols{text: ELF64_OBJECT_SYMBOL_TEXT, abbrev: ELF64_OBJECT_SYMBOL_ABBREV, line: ELF64_OBJECT_SYMBOL_LINE, loclists: ELF64_OBJECT_SYMBOL_LOCLISTS, addr: ELF64_OBJECT_SYMBOL_ADDR, rnglists: ELF64_OBJECT_SYMBOL_RNGLISTS, functions: [Int]{}})
     frames: link_image_defines(c, view, "__register_frame_info")
     startup: link_bind_startup(frames)
     // link_bind_layout's layout: the program header table, `.rodata` and

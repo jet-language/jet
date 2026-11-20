@@ -27,6 +27,7 @@ use {
         artifact_extension,
         canonical_json_object,
         canonical_json_sha256,
+        jet_live_stat_ticks,
         trace_id,
         trace_profile_unsupported,
         verify_jettrace,
@@ -201,6 +202,8 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
         // copy: the parsed argv keeps its words; the spawn owns its own.
         argv.push(arg.copy())
     }
+    // What killed programs, sessions and attaches left behind goes first.
+    jet_cli_perf_sweep_leftovers()
     spec := perf_process.cmd(argv).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
     // A run's program samples into a file of this session's (the runtime's
     // PerfSamples.jet), beside which `jet run` writes the program's image
@@ -320,6 +323,9 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
             if jet_cli_perf_syscalls_section(found.syscalls.move(), found.syscalls_lost) == .Val(section) {
                 capture.receipts.push(section)
             }
+            if jet_cli_perf_records_section(found.records_lost, "the samples file refused their writes") == .Val(section) {
+                capture.receipts.push(section)
+            }
         }
     }
     full := [String]{action}
@@ -346,6 +352,7 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
     zones_ms := 0
     alloc := false
     held_ns := Int?{None}
+    lost := U64{0}
     skip := false
     loop (index, arg) in args {
         if skip {
@@ -425,6 +432,12 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
         return jet_cli_perf_attach_unobserved(target_pid, "it isn't running, or this user can't see it", "start the program with `jet run --observe`, then attach to the pid it runs as", color)
     }
     target: jet_cli_perf_session_target()
+    // The attach's window on the program opens before its first read of it
+    // and closes after its last (jet_cli_perf_attach_watch); the header's
+    // run window is that window, whatever the attach read in it.
+    watch: jet_cli_perf_attach_watch(target_pid)
+    read := [String]{"its live snapshot"}
+    observed := false
     // Attach is a point capture: the trace session's origin is now.
     observations := [JetCLIPerfObservation]{}
     live_error := String?{None}
@@ -452,6 +465,8 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
             }
         }
         capture = jet_cli_perf_capture_browser(relayed, observations, target) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
+        read.push("its browser relay's rows")
+        observed = true
     } else if source == .Val(path) {
         if live_error == .Val(message) {
             return jet_cli_perf_attach_unobserved(target_pid, "it publishes no live snapshot jet can read ({message})", "start the program with `jet run --observe`, then attach to the pid it runs as", color)
@@ -460,22 +475,18 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
         // one that isn't this user's alone is refused before any request is
         // left in it.
         home: jet_cli_perf_flight_home() ?? return jet_cli_perf_home_refused(err, color)
+        // What killed programs, sessions and attaches left in it goes first.
+        jet_cli_perf_sweep_leftovers()
         text: perf_files.read(path) ?? return jet_cli_perf_error("cannot read source {path}: {jet_cli_io_error_text(err)}", JET_CLI_PERF_FIX, color)
         // With `--zones=`, the program's zones, frame marks, plots and log
-        // spans for that window, before its ring is read, and the window
-        // they cover.
-        watched := JetCLIPerfRuntimeWindow?{None}
-        spans: if zones_ms > 0 -> jet_cli_perf_attach_zones(target_pid, home, zones_ms, watched) else -> None
+        // spans for that window, before its ring is read.
+        spans: if zones_ms > 0 -> jet_cli_perf_attach_zones(target_pid, home, zones_ms) else -> None
+        if zones_ms > 0 -> read.push("its zones for {zones_ms} ms")
         // The flight ring the program publishes: its recent samples, waits,
         // wakes, spawns and transfers, read as a run's are.
         flight: jet_cli_perf_attach_flight(target_pid, home, path)
+        read.push("its flight ring")
         capture = jet_cli_perf_capture_source(path, text, observations, flight, target, None) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
-        // The header's window is the one the zones were recorded in, not
-        // the run since it started.
-        if watched == .Val(window) {
-            jet_cli_perf_window(capture.profile, window)
-            capture.profile.window_reason = "the attach's zones window: wall time on jet's monotonic clock, the program's process CPU across it"
-        }
         if alloc {
             heap: jet_cli_perf_attach_heap(target_pid, home, path) ?? {
                 if err.unobserved {
@@ -484,6 +495,7 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
                 return jet_cli_report_output("", "E2105", err.message, jet_cli_why("E2105"), "correct the named problem, then attach again", color, JET_DRIVER_EXIT_USER_ERROR)
             }
             held_ns = Val(heap.held_ns)
+            read.push("its heap snapshot")
             // copy: the attach keeps its source; the section owns its own.
             if jet_cli_perf_session_heaps(path.copy(), heap.samples.heaps.move()) == .Val(section) {
                 capture.receipts.push(section)
@@ -506,10 +518,20 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
             timed = found.timed.move()
             jet_cli_perf_waits_read(capture, found.waits.move(), found.wakes, found.spawns, found.transfers, path, origin)
             jet_cli_perf_io_read(capture, found.transfers.move(), path, origin)
+            lost = found.records_lost
+            if jet_cli_perf_records_section(lost, JET_CLI_PERF_RING_LOSS) == .Val(section) {
+                capture.receipts.push(section)
+            }
         }
         if spans == .Val(taken) -> jet_cli_perf_log_spans_read(capture, taken, path, origin, timed)
+        observed = true
     } else if live_error == None {
         return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2102", "live observe snapshot found, but `--source` is required", "domain capture must attribute facts to a Jet symbol identity", "run `jet perf attach {target_pid} --source <file.jet>`", color), exit_code: JET_DRIVER_EXIT_USAGE}
+    }
+    // A trace of a program the attach observed, through a browser relay or
+    // its own runtime.
+    if observed {
+        jet_cli_perf_attach_keep_window(capture, target_pid, jet_cli_perf_attach_watched(target_pid, watch), read)
     }
     argv := [String]{"attach", "{target_pid}"}
     // The attach request's last use of its source: the recorded argv owns it.
@@ -528,8 +550,15 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
     // How long the snapshot held the program: its allocations and frees
     // waited while the runtime forked the copy that wrote it.
     held: if held_ns == .Val(ns) -> "Heap snapshot: held the program's allocations and frees for {ns /% 1000} µs\n" else -> ""
-    JetDriverVerbOutput{stdout: "", stderr: if quiet -> "" else -> "{held}Trace: {path}\n", exit_code: JET_DRIVER_EXIT_OK}
+    // Records the program made that the ring never got, which the trace
+    // lacks.
+    dropped: if lost > (U64{0}) -> "Records lost: {lost}; {JET_CLI_PERF_RING_LOSS}\n" else -> ""
+    JetDriverVerbOutput{stdout: "", stderr: if quiet -> "" else -> "{held}{dropped}Trace: {path}\n", exit_code: JET_DRIVER_EXIT_OK}
 }
+
+// Why a flight-recorded program's records were lost (JetRuntime
+// PerfSamples.jet perf_samples_send).
+JET_CLI_PERF_RING_LOSS: "the program's record socket was full when it made them, as its flight recorder drains it every 100 ms"
 
 // The flight ring the observed program `pid` publishes in this user's
 // private directory `home` (jet_cli_perf_flight_home; JetRuntime
@@ -539,7 +568,7 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
 // no ring.
 jet_cli_perf_attach_flight: fn(pid: Int, home: String, source: String) -[FS, Env, Time]> JetCLIPerfSamples? Never! {
     published: perf_files.join(home, "jet-flight-{pid}.samples")
-    taken: perf_files.join(home, "jet-perf-attach-{pid}-{perf_time.unix_ns()}.samples")
+    taken: perf_files.join(home, "jet-perf-attach-{perf_process.current_pid()}-{pid}-{perf_time.unix_ns()}.samples")
     perf_files.copy(published, taken) ?? return None
     if perf_files.copy("{published}.image", "{taken}.image") == .Err(_) {
         perf_files.remove(taken).drop("the attach reads the ring it copied once")
@@ -584,7 +613,7 @@ jet_cli_perf_attach_heap: fn(pid: Int, home: String, source: String) -[FS, Env, 
     if bytes[7] == (U8{255}) {
         return Err(JetCLIPerfHeapError{message: "it keeps no list of its live blocks: it was not started with allocation tracking", unobserved: true})
     }
-    taken: perf_files.join(home, "jet-perf-attach-{pid}-{perf_time.unix_ns()}.heap")
+    taken: perf_files.join(home, "jet-perf-attach-{perf_process.current_pid()}-{pid}-{perf_time.unix_ns()}.heap")
     perf_files.write_bytes(taken, bytes.slice(8, bytes.len())) ?? return Err(jet_cli_perf_heap_failed("cannot keep process {pid}'s heap snapshot: {jet_cli_io_error_text(err)}"))
     if perf_files.copy("{ring}.image", "{taken}.image") == .Err(failure) {
         perf_files.remove(taken).drop("the attach reads the snapshot it kept once")
@@ -639,23 +668,15 @@ jet_cli_perf_attach_window: fn(text: String) -> Int? Never! {
 // marks, plots and log spans to `<ring>.spans`;
 // remove it after the window and wait two publications, so the program has
 // turned them off and written its rows. The rows, copied out of the
-// program's way; None when it wrote none. `window` becomes the window from
-// the request to its removal: its wall time on jet's clock and the process
-// CPU the program spent in it, None where /proc doesn't show that CPU.
-jet_cli_perf_attach_zones: fn(pid: Int, home: String, window_ms: Int, window: &JetCLIPerfRuntimeWindow?) -[FS, Env, Time]> String? Never! {
+// program's way; None when it wrote none.
+jet_cli_perf_attach_zones: fn(pid: Int, home: String, window_ms: Int) -[FS, Env, Time]> String? Never! {
     ring: perf_files.join(home, "jet-flight-{pid}.samples")
     request: "{ring}.zones"
-    cpu_before: jet_cli_perf_attach_cpu(pid)
-    started: perf_time.instant()
     _: perf_files.create(request, mode: Val(0o600), links: .Refuse) ?? return None
     loop _ in 0..<(window_ms + 24) /% 25 -> perf_time.sleep(25ms)
     perf_files.remove(request).drop("a request the program no longer sees turns zones off")
-    wall: started.elapsed().ns
-    cpu_after: jet_cli_perf_attach_cpu(pid)
-    cpu: if cpu_before == .Val(first) && cpu_after == .Val(last) && last >= first -> Val(last - first) else -> None
-    window = Val(JetCLIPerfRuntimeWindow{elapsed_ns: U64{wall}, cpu_ns: cpu, exit: false})
     perf_time.sleep(250ms)
-    taken: perf_files.join(home, "jet-perf-attach-{pid}-{perf_time.unix_ns()}.spans")
+    taken: perf_files.join(home, "jet-perf-attach-{perf_process.current_pid()}-{pid}-{perf_time.unix_ns()}.spans")
     perf_files.copy("{ring}.spans", taken) ?? return None
     Val(taken)
 }
@@ -664,18 +685,15 @@ jet_cli_perf_attach_zones: fn(pid: Int, home: String, window_ms: Int, window: &J
 // its ring and image and reads an attach's requests (JetRuntime
 // PerfSamples.jet perf_flight_home finds the same one): `jet` in
 // `$XDG_RUNTIME_DIR` when that names an absolute path, else `jet-<uid>` in
-// the temporary directory, made owner-only when missing. One already there
-// is used only when it is a directory, not a link, this user owns and no
-// one else can open: a directory someone else made or opened could hold
-// their requests and show them the ring.
+// the temporary directory (jet_cli_perf_flight_place), made owner-only
+// when missing. One already there is used only when it is a directory, not
+// a link, this user owns and no one else can open: a directory someone else
+// made or opened could hold their requests and show them the ring.
 jet_cli_perf_flight_home: fn() -[FS, Env]> String JetCLIPerfHomeError! {
-    runtime: perf_sys.get("XDG_RUNTIME_DIR") ?? ""
-    private: runtime.starts_with("/")
-    parent: if private -> runtime else -> perf_sys.temp_dir()
-    name: if private -> "jet" else -> "jet-{perf_sys.geteuid()}"
-    home: perf_files.join(parent, name)
-    held: perf_files.open_directory(parent) ?? return Err(JetCLIPerfHomeError{home: home, cause: "cannot open {parent}: {jet_cli_io_error_text(err)}", shared: false})
-    if held.create_directory(name, mode: Val(0o700)) == {
+    place: jet_cli_perf_flight_place()
+    home: perf_files.join(place.parent, place.name)
+    held: perf_files.open_directory(place.parent) ?? return Err(JetCLIPerfHomeError{home: home, cause: "cannot open {place.parent}: {jet_cli_io_error_text(err)}", shared: false})
+    if held.create_directory(place.name, mode: Val(0o700)) == {
         .Ok(_) -> {}
         .Err(.AlreadyExists(_)) -> {}
         .Err(failure) -> return Err(JetCLIPerfHomeError{home: home, cause: "cannot make {home}: {jet_cli_io_error_text(failure)}", shared: false})
@@ -690,6 +708,93 @@ jet_cli_perf_flight_home: fn() -[FS, Env]> String JetCLIPerfHomeError! {
     }
     if cause != "" -> return Err(JetCLIPerfHomeError{home: home, cause: cause, shared: true})
     Ok(home)
+}
+
+// Where jet_cli_perf_flight_home's directory is: its parent and its name.
+jet_cli_perf_flight_place: fn() -[Env]> {parent: String, name: String} Never! {
+    runtime: perf_sys.get("XDG_RUNTIME_DIR") ?? ""
+    if runtime.starts_with("/") -> return {parent: runtime, name: "jet"}
+    {parent: perf_sys.temp_dir(), name: "jet-{perf_sys.geteuid()}"}
+}
+
+// What a killed profiled program, session or attach left behind, removed
+// by the next `jet perf run` or attach (jet_cli_perf_sweep): in the
+// temporary directory, a session's samples and the files beside them
+// (`jet-perf-<pid>-…`) and an attach's copies (`jet-perf-attach-<pid>-…`);
+// in this user's flight directory, when it is there and theirs alone, a
+// flight-recorded program's ring, image, zones' rows and requests
+// (`jet-flight-<pid>.…`) and an attach's copies. A program that exits
+// removes its own (JetRuntime PerfSamples.jet perf_flight_end), and a
+// session or attach removes what it reads.
+jet_cli_perf_sweep_leftovers: fn() -[FS, Env, Time]> {
+    jet_cli_perf_sweep(perf_sys.temp_dir())
+    place: jet_cli_perf_flight_place()
+    home: perf_files.join(place.parent, place.name)
+    facts: perf_files.lstat(home) ?? return
+    if facts.is_dir && !facts.is_symlink && facts.owner == Val(perf_sys.geteuid()) && facts.mode & 0o077 == 0 {
+        jet_cli_perf_sweep(home)
+    }
+}
+
+// Remove each file of `dir` this user owns that names a process
+// (jet_cli_perf_file_pid) which is gone, or is a later one under the same
+// pid: one that started more than JET_CLI_PERF_SWEEP_SLACK_NS after the
+// file was last written. Only where /proc shows when the host booted, so
+// a host without /proc loses no file.
+jet_cli_perf_sweep: fn(dir: String) -[FS, Env, Time]> {
+    boot_ns: jet_cli_perf_boot_ns() ?? return
+    listed: perf_files.list_dir(dir) ?? return
+    loop entry in listed {
+        pid: jet_cli_perf_file_pid(entry.name) ?? next
+        path: perf_files.join(dir, entry.name)
+        facts: perf_files.lstat(path) ?? next
+        if !facts.is_file || facts.is_symlink || facts.owner != Val(perf_sys.geteuid()) -> next
+        written: facts.modified.to_unix_ns() ?? next
+        if jet_cli_perf_process_start(pid) == .Ok(ticks) {
+            // /proc's start is in clock ticks after the boot, 100 a second.
+            started: boot_ns + (Int.parse(ticks) ?? next) * 10000000
+            if started <= written + JET_CLI_PERF_SWEEP_SLACK_NS -> next
+        }
+        perf_files.remove(path).drop("a file whose process is gone is only tidied away")
+    }
+}
+
+// How much later than a file's last write its process may seem to have
+// started and still own it: /proc/stat gives the boot to the second.
+JET_CLI_PERF_SWEEP_SLACK_NS: 2000000000
+
+// When this host booted, in nanoseconds since the Unix epoch, from
+// /proc/stat's `btime`; None where /proc doesn't show it.
+jet_cli_perf_boot_ns: fn() -[FS]> Int? Never! {
+    text: perf_files.read("/proc/stat") ?? return None
+    loop line in text.split("\n") {
+        if line.starts_with("btime ") {
+            return Val((Int.parse(line.slice(6..<line.len())) ?? return None) * 1000000000)
+        }
+    }
+    None
+}
+
+// The process a profiling file is named for: `jet-flight-<pid>.…`,
+// `jet-perf-attach-<pid>-…` or `jet-perf-<pid>-…`; None for any other name.
+jet_cli_perf_file_pid: fn(name: String) -> Int? Never! {
+    rest: if {
+        name.starts_with("jet-flight-") -> name.slice(11..<name.len())
+        name.starts_with("jet-perf-attach-") -> name.slice(16..<name.len())
+        name.starts_with("jet-perf-") -> name.slice(9..<name.len())
+        else -> {
+            return None
+        }
+    }
+    bytes: rest.bytes()
+    digits := 0
+    loop digits < bytes.len() && bytes[digits] >= (U8{48}) && bytes[digits] <= (U8{57}) {
+        digits += 1
+    }
+    if digits == 0 || digits == bytes.len() -> return None
+    if bytes[digits] != (U8{46}) && bytes[digits] != (U8{45}) -> return None
+    pid: Int.parse(rest.slice(0..<digits)) ?? return None
+    if pid > 0 -> Val(pid) else -> None
 }
 
 // Why jet_cli_perf_flight_home found no private directory: `shared` when
@@ -709,7 +814,7 @@ jet_cli_perf_home_refused: fn(failure: JetCLIPerfHomeError, color: Bool) -> JetD
     if !failure.shared {
         return jet_cli_report_output("", "E2105", failure.cause, jet_cli_why("E2105"), "correct the named problem, then attach again", color, JET_DRIVER_EXIT_USER_ERROR)
     }
-    what: "jet won't profile through `{failure.home}`: {failure.cause}"
+    what: "Jet won't profile through `{failure.home}`: {failure.cause}"
     why: "A flight-recorded program publishes its ring in that directory and takes attach requests from it, so whoever else can reach it could read the program's profile or turn its zones on."
     fix: "remove `{failure.home}`, or set `XDG_RUNTIME_DIR` to a directory only you can open; then start the program again with `jet run --observe` and attach"
     jet_cli_report_output("", "E2123", what, why, fix, color, JET_DRIVER_EXIT_USER_ERROR)
@@ -719,7 +824,7 @@ jet_cli_perf_home_refused: fn(failure: JetCLIPerfHomeError, color: Bool) -> JetD
 // publish what the attach reads, for `cause`; `fix` starts it as it needs.
 jet_cli_perf_attach_unobserved: fn(pid: Int, cause: String, fix: String, color: Bool) -> JetDriverVerbOutput Never! {
     why: "An attach reads what a running program publishes about itself: its live snapshot and flight ring under `jet run --observe`, and its live blocks under `--checked-alloc` too. A process that publishes none of it has nothing to read."
-    jet_cli_report_output("", "E2124", "jet can't attach to process {pid}: {cause}", why, fix, color, JET_DRIVER_EXIT_USER_ERROR)
+    jet_cli_report_output("", "E2124", "Jet can't attach to process {pid}: {cause}", why, fix, color, JET_DRIVER_EXIT_USER_ERROR)
 }
 
 // An attach whose command line names no one process (E2125), as `problem`
@@ -729,11 +834,140 @@ jet_cli_perf_attach_which: fn(problem: String, fix: String, color: Bool) -> JetD
     jet_cli_report_output("", "E2125", problem, why, fix, color, JET_DRIVER_EXIT_USAGE)
 }
 
-// The process CPU program `pid` has spent since its run started (/proc's
-// utime and stime), None when its live snapshot can't be read.
-jet_cli_perf_attach_cpu: fn(pid: Int) -[FS.Read, Env, Time]> U64? Never! {
+// An attach's window on its program, open (jet_cli_perf_attach_watch):
+// when it opened on jet's monotonic clock, and the program's CPU then.
+JetCLIPerfAttachWatch: struct {
+    started: Instant,
+    cpu: JetCLIPerfAttachCPU?,
+}
+
+// A program's CPU at one moment (jet_cli_perf_attach_cpu), `ns` in all,
+// counted in steps of `resolution_ns`: by per-thread schedstat, each live
+// thread's time on a CPU, by its thread id, to the nanosecond; else the
+// process's /proc utime and stime since its run started, in clock ticks,
+// and no `threads`.
+JetCLIPerfAttachCPU: struct {
+    ns: U64,
+    resolution_ns: U64,
+    threads: [Int:U64],
+}
+
+// An attach's window on its program, closed (jet_cli_perf_attach_watched):
+// its wall time and the program's CPU in it; that CPU's resolution, None
+// where /proc showed no CPU at one end; and the threads that exited in it.
+JetCLIPerfAttachWindow: struct {
+    window: JetCLIPerfRuntimeWindow,
+    resolution_ns: U64?,
+    exited: Int,
+}
+
+// Open an attach's window on program `pid`, before the attach's first read
+// of it.
+jet_cli_perf_attach_watch: fn(pid: Int) -[FS.Read, Env, Time]> JetCLIPerfAttachWatch Never! {
+    cpu: jet_cli_perf_attach_cpu(pid)
+    JetCLIPerfAttachWatch{started: perf_time.instant(), cpu: cpu}
+}
+
+// Close the window `watch` opened on program `pid`, after the attach's last
+// read of it (jet_cli_perf_attach_closed).
+jet_cli_perf_attach_watched: fn(pid: Int, watch: JetCLIPerfAttachWatch) -[FS.Read, Env, Time]> JetCLIPerfAttachWindow Never! {
+    wall: watch.started.elapsed().ns
+    jet_cli_perf_attach_closed(U64{wall}, watch.cpu, jet_cli_perf_attach_cpu(pid))
+}
+
+// A window of `wall_ns` with the program's CPU `before` it and `after` it.
+// By schedstat, its CPU is each thread's time since the window opened, all
+// of a thread's that started in it; a thread that exited in it takes its
+// time there with it, since /proc keeps a dead thread's time only in the
+// process's ticks. By ticks, it is the process's utime and stime at the
+// close less at the open. None where an end has no CPU or the ends counted
+// it differently.
+jet_cli_perf_attach_closed: fn(wall_ns: U64, before: JetCLIPerfAttachCPU?, after: JetCLIPerfAttachCPU?) -> JetCLIPerfAttachWindow Never! {
+    cpu := U64?{None}
+    resolution := U64?{None}
+    exited := 0
+    if before == .Val(first) && after == .Val(last) && first.resolution_ns == last.resolution_ns {
+        if {
+            last.resolution_ns == (U64{1}) -> {
+                spent := U64{0}
+                loop (thread, ns) in last.threads {
+                    prior: first.threads.get(thread) ?? U64{0}
+                    // A reused thread id: its time before the open is gone.
+                    spent += if ns >= prior -> ns - prior else -> ns
+                }
+                loop (thread, _) in first.threads {
+                    if !last.threads.has_key(thread) -> exited += 1
+                }
+                cpu = Val(spent)
+                resolution = Val(last.resolution_ns)
+            }
+            last.ns >= first.ns -> {
+                cpu = Val(last.ns - first.ns)
+                resolution = Val(last.resolution_ns)
+            }
+            else -> {}
+        }
+    }
+    JetCLIPerfAttachWindow{window: JetCLIPerfRuntimeWindow{elapsed_ns: wall_ns, cpu_ns: cpu, exit: false}, resolution_ns: resolution, exited: exited}
+}
+
+// Program `pid`'s CPU now: the sum of its live threads' schedstat run time
+// (/proc/<pid>/task/<tid>/schedstat's first field, in nanoseconds); where
+// the kernel keeps no schedstat, its live snapshot's utime and stime, in
+// clock ticks. None when neither can be read.
+jet_cli_perf_attach_cpu: fn(pid: Int) -[FS.Read, Env, Time]> JetCLIPerfAttachCPU? Never! {
+    if perf_files.exists("/proc/{pid}/schedstat") {
+        tasks: perf_files.list_dir("/proc/{pid}/task") ?? return None
+        threads := [Int:U64]{}
+        total := U64{0}
+        loop task in tasks {
+            thread: Int.parse(task.name) ?? next
+            // A thread that exited since the listing has no file left.
+            text: perf_files.read("/proc/{pid}/task/{task.name}/schedstat") ?? next
+            words: jet_cli_find_words(text)
+            if words.len() == 0 -> next
+            ns: jet_live_stat_ticks(words[0]) ?? next
+            threads[thread] = ns
+            total += ns
+        }
+        if threads.len() > 0 {
+            return Val(JetCLIPerfAttachCPU{ns: total, resolution_ns: U64{1}, threads: threads})
+        }
+    }
     live: jet_cli_perf_live_read(pid) ?? return None
-    live.runtime.cpu_ns
+    ns: live.runtime.cpu_ns ?? return None
+    if live.clock_hz <= 0 -> return None
+    Val(JetCLIPerfAttachCPU{ns: ns, resolution_ns: U64{1000000000} /% U64{live.clock_hz}, threads: [Int:U64]{}})
+}
+
+// Record the attach's window on program `pid` in its trace: the profile's
+// run window, with why, and the `window` receipt section (type
+// `JetPerfAttachWindow`): its CPU's clock, `schedstat` or `ticks`, and
+// resolution, null where it has no CPU, and the threads that exited in it.
+// `read` is what the attach read of the program, in order.
+jet_cli_perf_attach_keep_window: fn(capture: &JetCLIPerfCapture, pid: Int, closed: JetCLIPerfAttachWindow, read: [String]) Never! {
+    jet_cli_perf_window(capture.profile, closed.window)
+    clock := CanonicalJSON.Null
+    resolution := CanonicalJSON.Null
+    how := "/proc showed no CPU for it at one end"
+    if closed.resolution_ns == .Val(step) {
+        resolution = CanonicalJSON.Integer("{step}")
+        clock = CanonicalJSON.String(if step == (U64{1}) -> "schedstat" else -> "ticks")
+        how = if {
+            step > (U64{1}) -> "the program's CPU is its process's utime and stime in it, in {step} ns ticks: this kernel keeps no schedstat"
+            closed.exited > 0 -> "the program's CPU is its threads' schedstat run time in it, to the nanosecond, less that of the threads that exited in it ({closed.exited}), which /proc keeps only in the process's ticks"
+            else -> "the program's CPU is its threads' schedstat run time in it, to the nanosecond"
+        }
+    }
+    capture.profile.window_reason = "the attach's window on process {pid}, from its first read of the program to its last ({read.join(", ")}): its wall time on jet's monotonic clock; {how}"
+    value: CanonicalJSON.Object(
+        [CanonicalJSONField]{
+            {key: "cpu_clock", value: clock},
+            {key: "cpu_resolution_ns", value: resolution},
+            {key: "exited_threads", value: CanonicalJSON.Integer("{closed.exited}")},
+        },
+    )
+    capture.receipts.push(TraceReceiptSection{name: "window", type_name: "JetPerfAttachWindow", value: value, digest: canonical_json_sha256(value)})
 }
 
 // The start of the first row of the spans file `path`, 0 when it has none.

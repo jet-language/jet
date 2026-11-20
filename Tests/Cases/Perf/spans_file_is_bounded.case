@@ -1,0 +1,23 @@
+# Under `jet perf run` a program's closed log spans, zones, frame marks and
+# plots are rows of a spans file beside its samples, which holds at most
+# 16 MiB. A program that closes more keeps the rows that fit and a last row
+# saying the rest were dropped, which the trace's zones section and
+# `jet perf view` name. The session removes the file once it has read it.
+requires: os-name:linux
+fixture: SpansFileIsBounded.fixture
+env: NO_COLOR=1
+env: TMPDIR={work}/tmp
+step: mkdir tmp
+exit: 0
+step: jet perf run main.jet --out spans.jettrace
+exit: 0
+stdout: = "closed\n"
+stderr: ~ "Trace:" # jet perf run names the trace it wrote
+file: spans.jettrace ~ "\"kind\":\"log_span\"" # the rows that fit are trace rows
+file: spans.jettrace ~ "\"cut\":\"the spans file reached its 16 MiB bound, so the rows after this were dropped\"" # the zones section names the cut
+step: sh -c 'ls -A tmp | grep -c "^jet-perf-"'
+exit: 1 # grep counts no line
+stdout: = "0\n" # the session left no samples or spans file
+step: jet perf view spans.jettrace
+exit: 0
+stdout: ~ "spans cut: the spans file reached its 16 MiB bound, so the rows after this were dropped" # the view names the cut

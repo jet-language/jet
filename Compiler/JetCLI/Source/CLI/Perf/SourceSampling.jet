@@ -10,7 +10,7 @@ use {
     perf_files: core.files
     perf_math: core.math
     perf_ip: core.net.ip
-    jet_backend.[X64ImageFunction, X64Jetline, link_debug_addr, link_debug_le, x64_image_function_find, x64_image_functions, x64_jetline_find, x64_jetline_line]
+    jet_backend.[X64ImageFunction, X64Jetline, link_debug_addr, link_debug_le, x64_image_function_find, x64_image_functions, x64_jetline_find, x64_jetline_line, x64_jetline_place]
     jet_debug.[NativeAbstract, NativeFunction, native_image_read, native_inline_chain, native_jet_spelling]
     jet_driver.[jet_driver_inline_package, jet_driver_mask_inline_package]
     jet_foundation.[
@@ -148,7 +148,9 @@ JetCLIPerfInlines: struct {
 // they were spawned, of the `threads_claimed` that asked for a row, and
 // `syscalls` its host calls by number and calling stack, the most time
 // first, besides the `syscalls_lost` that found no row
-// (jet_cli_perf_system_read).
+// (jet_cli_perf_system_read). `records_lost` counts the records the
+// program made and could not write, as its clock record or a flight ring's
+// tally says (PerfSamples.jet perf_samples_send).
 JetCLIPerfSamples: struct {
     table: X64Jetline,
     inlines: JetCLIPerfInlines,
@@ -181,6 +183,7 @@ JetCLIPerfSamples: struct {
     threads_claimed: U64{0},
     syscalls: [JetCLIPerfSyscall]{[JetCLIPerfSyscall]{}},
     syscalls_lost: U64{0},
+    records_lost: U64{0},
 }
 
 // A call site of a runtime table's stack (PerfSamples.jet perf_system): its
@@ -804,7 +807,9 @@ jet_cli_perf_code_low: fn(image: [U8]) -> Int {
 // innermost such line of its stack, and a transfer's record a file or
 // network transfer with the checked source's frames on its stack; none
 // counts time. The clock record, the last one the runtime wrote, gives what
-// sampling cost. A heap snapshot's mark record starts its snapshot and
+// sampling cost, and it and a flight ring's tally records (a clock record
+// with 1 for its address) the records the program could not write. A heap
+// snapshot's mark record starts its snapshot and
 // each of its site records counts live blocks at the innermost such line
 // of their allocating stack, for the type DIE `allocs` gives the innermost
 // of its return addresses it holds (an allocating call of a typed image,
@@ -937,8 +942,23 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
             at += record * 8
             next
         }
+        if kind == JET_CLI_PERF_CLOCK_KIND && pc == 1 {
+            // A flight ring's tally (PerfSamples.jet perf_flight_tally): the
+            // records the program could not write so far, then whether the
+            // run ended. Each counts every loss before it, so the most wins.
+            if record >= 3 && at + record * 8 <= words.len() {
+                lost: checked(U64{link_debug_addr(words, at + 8)}) ?? U64{0}
+                if lost > sampled.records_lost -> sampled.records_lost = lost
+            }
+            at += record * 8
+            next
+        }
         if kind == JET_CLI_PERF_CLOCK_KIND {
             if record >= 4 && at + record * 8 <= words.len() {
+                // The records the program could not write, which a runtime
+                // whose record stops at the sixth word doesn't count.
+                lost: if record >= 7 -> checked(U64{link_debug_addr(words, at + 48)}) ?? U64{0} else -> U64{0}
+                if lost > sampled.records_lost -> sampled.records_lost = lost
                 if checked(U64{link_debug_addr(words, at + 8)}) == .Val(cpu) {
                     if checked(U64{link_debug_addr(words, at + 16)}) == .Val(handler) {
                         if checked(U64{link_debug_addr(words, at + 24)}) == .Val(delivery) {
@@ -1245,9 +1265,9 @@ jet_cli_perf_samples_chain: fn(sampled: &JetCLIPerfSamples, places: &[String:Int
 // (`owned`) and the line is in that same file, which an inlined function's
 // line, or a call in one, need not be; its `file` is its function's entry
 // of the program's other sources (`sampled.files`) when it is in that same
-// file, else -1. A return
-// address (`caller`) is looked up at the call before it, as the debugger's
-// frames are (JetDebug Native.jet native_lookup).
+// file, else -1. A return address (`caller`) is looked up at the call
+// before it, as the debugger's frames are (JetDebug Native.jet
+// native_lookup), at the line of its call row when it has one.
 jet_cli_perf_samples_frames: fn(sampled: JetCLIPerfSamples, owned: [Bool], address: Int, caller: Bool) -> [JetCLIPerfFrame] Never! {
     frames := [JetCLIPerfFrame]{}
     lookup: if caller -> address - 1 else -> address
@@ -1256,7 +1276,12 @@ jet_cli_perf_samples_frames: fn(sampled: JetCLIPerfSamples, owned: [Bool], addre
     function: sampled.table.functions[found]
     own: found < owned.len() && owned[found]
     file: if found < sampled.files.len() -> sampled.files[found] else -> -1
-    line := x64_jetline_line(sampled.table, function, lookup) ?? function.decl
+    line := function.decl
+    if {
+        caller && x64_jetline_place(sampled.table, function, lookup) == .Val(row) -> line = row.line
+        !caller && x64_jetline_line(sampled.table, function, lookup) == .Val(at) -> line = at
+        else -> {}
+    }
     // The file of `line` agrees with the function's: unknown outside
     // inlined code, where the table's line is the function's own.
     same := true
@@ -1490,6 +1515,21 @@ jet_cli_perf_syscalls_section: fn(calls: &&[JetCLIPerfSyscall], lost: U64) -> Tr
         },
     )
     Val(TraceReceiptSection{name: "syscalls", type_name: "JetPerfSyscalls", digest: canonical_json_sha256(value), value: value})
+}
+
+// The trace's `records` receipt section (type `JetPerfRecords`): how many
+// records the program made and could not write (`lost`, its
+// JetCLIPerfSamples.records_lost) and why (`reason`). None when it lost
+// none.
+jet_cli_perf_records_section: fn(lost: U64, reason: String) -> TraceReceiptSection? Never! {
+    if lost == (U64{0}) -> return None
+    value: CanonicalJSON.Object(
+        [CanonicalJSONField]{
+            {key: "lost", value: CanonicalJSON.Integer("{lost}")},
+            {key: "reason", value: CanonicalJSON.String(reason)},
+        },
+    )
+    Val(TraceReceiptSection{name: "records", type_name: "JetPerfRecords", digest: canonical_json_sha256(value), value: value})
 }
 
 // The trace's `helpers` receipt section (type `JetPerfHelpers`): the
@@ -1901,8 +1941,10 @@ jet_cli_perf_window: fn(profile: &TraceProfile, window: JetCLIPerfRuntimeWindow)
 // of `source` they were on. Every zone, frame mark and plotted value counts
 // in the `zones` receipt section, the rows past the limit too
 // (jet_cli_perf_zones_section), and so does why zones could not turn on (a
-// JET_CLI_PERF_ZONE_REFUSED row's name), which is no timeline row. The file
-// is removed once read; a row cut short ends the read.
+// JET_CLI_PERF_ZONE_REFUSED row's name) and that the file reached its bound
+// and dropped the rows after it (a JET_CLI_PERF_ZONE_CUT row's name), which
+// are no timeline rows. The file is removed once read; a row cut short ends
+// the read.
 jet_cli_perf_log_spans_read: fn(capture: &JetCLIPerfCapture, path: String, source: String, origin_ns: Int, timed: [JetCLIPerfTimed]) -[FS]> Never! {
     bytes: perf_files.read_bytes(path) ?? [U8]{}
     perf_files.remove(path).drop("the session reads its log spans once")
@@ -1915,6 +1957,7 @@ jet_cli_perf_log_spans_read: fn(capture: &JetCLIPerfCapture, path: String, sourc
     // The zone rows of `capture` that hold samples.
     sampled := [JetCLIPerfZoneSampled]{}
     refused := ""
+    cut := ""
     at := 0
     loop at + 32 <= bytes.len() {
         start: link_debug_addr(bytes, at)
@@ -1928,6 +1971,10 @@ jet_cli_perf_log_spans_read: fn(capture: &JetCLIPerfCapture, path: String, sourc
         at += 32 + length
         if kind == JET_CLI_PERF_ZONE_REFUSED {
             refused = name
+            next
+        }
+        if kind == JET_CLI_PERF_ZONE_CUT {
+            cut = name
             next
         }
         // The zone's samples, and the line most of them were on.
@@ -1989,10 +2036,10 @@ jet_cli_perf_log_spans_read: fn(capture: &JetCLIPerfCapture, path: String, sourc
         symbol: JetSymbolRef{path: source, name: label}
         capture.spans.push(TraceSpan{awaited_task_id: None, channel_id: None, clock: "monotonic", start_ns: Val(since), end_ns: Val(until), kind: row, local_address: None, parent_task_id: None, peer_address: None, reason: "", spawn_line: None, status: "captured", symbol: symbol, task_id: None, wait_stack: [TraceStackFrame]{}, waker: "", waker_line: None, waker_task_id: None})
     }
-    if zones.len() > 0 || frames.len() > 0 || plots.len() > 0 || refused != "" {
+    if zones.len() > 0 || frames.len() > 0 || plots.len() > 0 || refused != "" || cut != "" {
         zones.sort_by(fn(left: JetCLIPerfZoneTotal, right: JetCLIPerfZoneTotal) { (right.total <=> left.total).then(left.name <=> right.name) })
         frames.sort()
-        capture.receipts.push(jet_cli_perf_zones_section(zones, frames, plots, sampled, source, refused))
+        capture.receipts.push(jet_cli_perf_zones_section(zones, frames, plots, sampled, source, refused, cut))
     }
 }
 
@@ -2026,11 +2073,12 @@ JetCLIPerfZoneSampled: struct {
 // lines of `source` most of those were on; the frames with how many and
 // their mean and longest interval; each plot with how many values and its
 // last; each zone row of the trace that holds samples (`sampled`), by its
-// name, start and end, with how many and the line most were on; and, when
-// the runtime could not turn zones on, why (`refused`, empty otherwise).
-// `jet perf view` shows them (jet_cli_perf_zone_lines,
-// jet_cli_perf_timeline).
-jet_cli_perf_zones_section: fn(zones: [JetCLIPerfZoneTotal], frames: [Int], plots: [JetCLIPerfPlotTotal], sampled: [JetCLIPerfZoneSampled], source: String, refused: String) -> TraceReceiptSection Never! {
+// name, start and end, with how many and the line most were on; when
+// the runtime could not turn zones on, why (`refused`, empty otherwise);
+// and when the spans file reached its bound, that its later rows were
+// dropped (`cut`, empty otherwise). `jet perf view` shows them
+// (jet_cli_perf_zone_lines, jet_cli_perf_timeline).
+jet_cli_perf_zones_section: fn(zones: [JetCLIPerfZoneTotal], frames: [Int], plots: [JetCLIPerfPlotTotal], sampled: [JetCLIPerfZoneSampled], source: String, refused: String, cut: String) -> TraceReceiptSection Never! {
     widest := 0
     loop at in 1..<frames.len() {
         if frames[at] - frames[at - 1] > widest -> widest = frames[at] - frames[at - 1]
@@ -2087,8 +2135,12 @@ jet_cli_perf_zones_section: fn(zones: [JetCLIPerfZoneTotal], frames: [Int], plot
             ),
         )
     }
-    fields := [CanonicalJSONField]{
-        {
+    fields := [CanonicalJSONField]{}
+    if cut != "" {
+        fields.push(CanonicalJSONField{key: "cut", value: CanonicalJSON.String("{cut}")})
+    }
+    fields.push(
+        CanonicalJSONField{
             key: "frames",
             value: CanonicalJSON.Object(
                 [CanonicalJSONField]{
@@ -2098,8 +2150,8 @@ jet_cli_perf_zones_section: fn(zones: [JetCLIPerfZoneTotal], frames: [Int], plot
                 },
             ),
         },
-        {key: "plots", value: CanonicalJSON.Array(plot_rows)},
-    }
+    )
+    fields.push(CanonicalJSONField{key: "plots", value: CanonicalJSON.Array(plot_rows)})
     if refused != "" {
         fields.push(CanonicalJSONField{key: "refused", value: CanonicalJSON.String("{refused}")})
     }
@@ -2121,8 +2173,8 @@ JetCLIPerfZoneLine: struct {
 }
 
 // What a row of the spans file is (PerfSamples.jet PERF_ZONE_LOG and the
-// others): a closed log span, a closed zone, a frame mark, a plot, or why
-// zones could not turn on.
+// others): a closed log span, a closed zone, a frame mark, a plot, why
+// zones could not turn on, or the file's bound reached.
 JET_CLI_PERF_ZONE_ZONE: 1
 
 JET_CLI_PERF_ZONE_FRAME: 2
@@ -2130,6 +2182,8 @@ JET_CLI_PERF_ZONE_FRAME: 2
 JET_CLI_PERF_ZONE_PLOT: 3
 
 JET_CLI_PERF_ZONE_REFUSED: 4
+
+JET_CLI_PERF_ZONE_CUT: 5
 
 // Each task's wait the program recorded (`waits`) as a `task_wait`
 // row of `capture`, timed from `origin_ns` as the log spans are: its task

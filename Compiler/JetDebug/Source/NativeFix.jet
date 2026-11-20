@@ -22,7 +22,7 @@
 // in its old code, would pass it the old ones, when it changes the entry
 // the program has already run, or when it reaches a runtime routine the
 // image does not hold.
-use jet_backend.[X64CompiledFunction, X64Data, X64DebugEncoding, X64DebugMember, X64DebugType, X64DebugTypeKind, X64DebugVariable, X64FunctionDebug, X64FunctionID, X64FunctionSource, X64Jetline, X64JetlineFunction, X64ModuleDebug, X64ObjectModule, X64Reloc, X64RelocTarget, link_debug_addr, link_debug_le, x64_jetline_find, x64_jetline_text]
+use jet_backend.[X64CompiledFunction, X64Data, X64DebugEncoding, X64DebugMember, X64DebugType, X64DebugTypeKind, X64DebugVariable, X64FunctionDebug, X64FunctionID, X64FunctionSource, X64Jetline, X64JetlineFunction, X64ModuleDebug, X64ObjectModule, X64Reloc, X64RelocTarget, link_debug_addr, link_debug_le, x64_jetline_find, x64_jetline_rows, x64_jetline_text]
 
 // What `fix` compiled: the program's module (its data objects, debug types
 // and functions' source facts), its compiled functions with their
@@ -789,47 +789,11 @@ native_fix_jump: fn(from: Int, to: Int) -> [U8] Never! {
     jump
 }
 
-// The unsigned and signed LEB128 of `value`, onto `out`.
-native_fix_uleb: fn(out: &[U8], value: Int) Never! {
-    rest := value
-    loop {
-        byte: rest & 127
-        rest = rest >> 7
-        if rest == 0 {
-            out.push(U8{byte})
-            return
-        }
-        out.push(U8{byte | 128})
-    }
-}
-
-native_fix_sleb: fn(out: &[U8], value: Int) Never! {
-    rest := value
-    loop {
-        byte: rest & 127
-        rest = rest >> 7
-        done: (rest == 0 && byte & 64 == 0) || (rest == -1 && byte & 64 != 0)
-        if done {
-            out.push(U8{byte})
-            return
-        }
-        out.push(U8{byte | 128})
-    }
-}
-
 // Add the placed function `function` at `low` to the line table `lines`,
 // named, filed and declared as `like` says, its rows from `debug`.
 native_fix_lines: fn(lines: &X64Jetline, low: Int, size: Int, debug: X64FunctionDebug, name: String, file: String, dir: String, decl: Int) Never! {
     rows: lines.table.len()
-    address := 0
-    line := 1
-    loop row in debug.lines {
-        if row.line <= 0 -> next
-        native_fix_uleb(lines.table, row.at - address)
-        native_fix_sleb(lines.table, row.line - line)
-        address = row.at
-        line = row.line
-    }
+    x64_jetline_rows(lines.table, debug.lines)
     // A function placed below the table's last one leaves the table out of
     // order, searched function by function (X64Jetline.ascending).
     count: lines.functions.len()
@@ -837,11 +801,11 @@ native_fix_lines: fn(lines: &X64Jetline, low: Int, size: Int, debug: X64Function
     lines.functions.push(X64JetlineFunction{low: low, high: low + size, name: name, file: file, dir: dir, decl: decl, rows: rows, rows_end: lines.table.len()})
 }
 
-// The address of the first row of `line` in `debug`, placed at `low`; None
-// when no code is on it.
+// The address of the first statement row of `line` in `debug`, placed at
+// `low`; None when no code is on it.
 native_fix_line_address: fn(debug: X64FunctionDebug, low: Int, line: Int) -> Int? Never! {
     loop row in debug.lines {
-        if row.line == line -> return Val(low + row.at)
+        if !row.call && row.line == line -> return Val(low + row.at)
     }
     None
 }

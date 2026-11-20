@@ -5,13 +5,18 @@
 // function's start relocates below `.text`, to its offset in its own
 // section. Its debug records name code the image doesn't hold: its
 // subprogram in `.debug_info` with its variables' location lists in
-// `.debug_loclists`, its sequence in `.debug_line` and its record in
-// `.debug_jetline`. They leave together, after relocation: a record goes
-// exactly when its start address is outside [text_start, text_end). The
-// kept bytes keep their order, and the offsets into them (unit lengths,
-// DW_AT_stmt_list, DW_AT_location and DW_FORM_ref4 values) move with them.
-// A `.debug_info` unit the walk can't read (a form Image/Dwarf.jet doesn't
-// write) leaves the three DWARF sections as linked.
+// `.debug_loclists` and its inline runs' range lists in `.debug_rnglists`,
+// its sequence in `.debug_line` and its record in `.debug_jetline`. They
+// leave together, after relocation: a record goes exactly when its start
+// address (a subprogram's DW_AT_low_pc, an index into `.debug_addr`) is
+// outside [text_start, text_end). The kept bytes keep their order, and the
+// offsets into them (unit lengths, DW_AT_stmt_list, DW_AT_loclists_base,
+// DW_AT_rnglists_base and DW_FORM_ref4 values) move with them. A list
+// unit keeps its offsets table, so the list indexes (DW_FORM_loclistx,
+// DW_FORM_rnglistx) stay; `.debug_addr` stays as linked, a dropped
+// function's slot naming its start below `.text`. A `.debug_info` unit the
+// walk can't read (a form Image/Dwarf.jet doesn't write) leaves the DWARF
+// sections as linked.
 //
 // `.debug_jetline` arrives as the object blocks Image/Dwarf.jet
 // dwarf_jet_line writes, fixed-size records the relocations fill in, and
@@ -45,26 +50,29 @@ link_debug_bytes: fn(c: &LinkContext, debug: LinkDebug, pieces: &LinkPieces, tex
     abbrev := -1
     line := -1
     lists := -1
+    ranges := -1
+    addr := -1
     loop (group, name) in debug.names {
         if name == ".debug_info" -> info = group
         if name == ".debug_abbrev" -> abbrev = group
         if name == ".debug_line" -> line = group
         if name == ".debug_loclists" -> lists = group
+        if name == ".debug_rnglists" -> ranges = group
+        if name == ".debug_addr" -> addr = group
         if name == ".debug_jetline" && !link_jetline_link(groups[group], text_start, text_end) {
             c.errors.push("malformed .debug_jetline: a block's records, strings or rows run past it")
         }
     }
     if info < 0 || abbrev < 0 -> return groups
-    plan: link_info_plan(groups[info], groups[abbrev], text_start, text_end) ?? return groups
+    planned: if addr >= 0 -> link_info_plan(groups[info], groups[abbrev], groups[addr], text_start, text_end) else -> link_info_plan(groups[info], groups[abbrev], [U8]{}, text_start, text_end)
+    plan: planned ?? return groups
     line_offsets := [Int:Int]{}
     if line >= 0 -> link_line_prune(groups[line], text_start, text_end, line_offsets)
-    list_offsets := [Int:Int]{}
-    if lists >= 0 {
-        referred := [Int]{}
-        loop at in plan.lists -> referred.push(link_debug_le(groups[info], at, 4))
-        link_lists_prune(groups[lists], referred, list_offsets)
-    }
-    link_info_rewrite(groups[info], plan, line_offsets, list_offsets)
+    list_tables := [Int:Int]{}
+    if lists >= 0 -> link_lists_prune(groups[lists], plan.list_refs, list_tables)
+    range_tables := [Int:Int]{}
+    if ranges >= 0 -> link_lists_prune(groups[ranges], plan.range_refs, range_tables, ranges: true)
+    link_info_rewrite(groups[info], plan, line_offsets, list_tables, range_tables)
     groups
 }
 
@@ -135,8 +143,11 @@ link_debug_form_end: fn(bytes: [U8], at: Int, form: Int) -> Int Never! {
     if form == 0x01 || form == 0x07 -> return at + 8
     // DW_FORM_string.
     if form == 0x08 -> return link_debug_cstr_end(bytes, at)
-    // DW_FORM_sdata, DW_FORM_udata.
-    if form == 0x0d || form == 0x0f -> return link_debug_leb_end(bytes, at)
+    // DW_FORM_sdata, DW_FORM_udata, DW_FORM_addrx, DW_FORM_loclistx,
+    // DW_FORM_rnglistx.
+    if form == 0x0d || form == 0x0f || form == 0x1b || form == 0x22 || form == 0x23 {
+        return link_debug_leb_end(bytes, at)
+    }
     // DW_FORM_exprloc.
     if form == 0x18 {
         end := at
@@ -193,23 +204,37 @@ link_debug_abbrevs: fn(bytes: [U8], from: Int) -> LinkAbbrevs? Never! {
 }
 
 // What pruning `.debug_info` changes: the dropped subprograms' extents
-// (start, end pairs, ascending), each unit's start, and the places of the
-// kept DIEs' ref4 values (with their unit's start), DW_AT_stmt_list values
-// and DW_AT_location list offsets.
+// (start, end pairs, ascending), each unit's start, the places of the kept
+// DIEs' ref4 values (with their unit's start), DW_AT_stmt_list values and
+// DW_AT_loclists_base and DW_AT_rnglists_base values, and per kept list
+// index (DW_FORM_loclistx, DW_FORM_rnglistx) a pair: its unit's base and
+// the index.
 LinkInfoPlan: struct {
     drops: [Int],
     units: [Int],
     refs: [Int],
     ref_units: [Int],
     lines: [Int],
-    lists: [Int],
+    list_bases: [Int],
+    range_bases: [Int],
+    list_refs: [Int],
+    range_refs: [Int],
+}
+
+// A unit's DW_AT_addr_base, DW_AT_loclists_base and DW_AT_rnglists_base;
+// -1 for none.
+LinkUnitBases: struct {
+    addr: Int,
+    lists: Int,
+    ranges: Int,
 }
 
 // The attributes of a DIE of abbreviation `entry` from `at`: the offset
-// after them, or -1 when the walk can't read one. With `record` its ref4,
-// stmt_list and location places join `plan`; `low_pc` is its DW_AT_low_pc
-// address, or -1.
-link_info_attributes: fn(info: [U8], table: LinkAbbrevs, entry: Int, from: Int, unit: Int, plan: &LinkInfoPlan, record: Bool, low_pc: &Int) -> Int Never! {
+// after them, or -1 when the walk can't read one. The unit DIE's bases go
+// to `bases`. With `record` its ref4, stmt_list, base and list index
+// places join `plan`; `low_pc` is its DW_AT_low_pc address (an index into
+// `addr`, the linked `.debug_addr`, past `bases.addr`), or -1.
+link_info_attributes: fn(info: [U8], table: LinkAbbrevs, entry: Int, from: Int, unit: Int, addr: [U8], bases: &LinkUnitBases, plan: &LinkInfoPlan, record: Bool, low_pc: &Int) -> Int Never! {
     at := from
     loop pair in table.starts[entry]..<table.starts[entry + 1] {
         attribute: table.attributes[pair]
@@ -219,8 +244,35 @@ link_info_attributes: fn(info: [U8], table: LinkAbbrevs, entry: Int, from: Int, 
             plan.ref_units.push(unit)
         }
         if record && form == 0x17 && attribute == 0x10 -> plan.lines.push(at)
-        if record && form == 0x17 && attribute == 0x02 -> plan.lists.push(at)
+        if form == 0x17 && attribute == 0x73 -> bases.addr = link_debug_le(info, at, 4)
+        if form == 0x17 && attribute == 0x8c {
+            bases.lists = link_debug_le(info, at, 4)
+            if record -> plan.list_bases.push(at)
+        }
+        if form == 0x17 && attribute == 0x74 {
+            bases.ranges = link_debug_le(info, at, 4)
+            if record -> plan.range_bases.push(at)
+        }
+        if record && (form == 0x22 || form == 0x23) {
+            index_at := at
+            index: link_debug_uleb(info, index_at)
+            if {
+                form == 0x22 -> {
+                    plan.list_refs.push(bases.lists)
+                    plan.list_refs.push(index)
+                }
+                else -> {
+                    plan.range_refs.push(bases.ranges)
+                    plan.range_refs.push(index)
+                }
+            }
+        }
         if attribute == 0x11 && form == 0x01 -> low_pc = link_debug_addr(info, at)
+        if attribute == 0x11 && form == 0x1b {
+            slot_at := at
+            slot: link_debug_uleb(info, slot_at)
+            low_pc = if slot < 0 || bases.addr < 0 -> -1 else -> link_debug_addr(addr, bases.addr + 8 * slot)
+        }
         at = link_debug_form_end(info, at, form)
         if at < 0 || at > info.len() -> return -1
     }
@@ -249,11 +301,12 @@ link_info_sums: fn(drops: [Int]) -> [Int] Never! {
 }
 
 // Walk every unit of `info` (DWARF 5 compile units, 8-byte addresses): a
-// subprogram child of the unit whose low_pc is outside the live text drops
-// with its children. None when a unit can't be walked or a kept ref4
-// refers into a drop.
-link_info_plan: fn(info: [U8], abbrev: [U8], text_start: Int, text_end: Int) -> LinkInfoPlan? Never! {
-    plan := LinkInfoPlan{drops: [Int]{}, units: [Int]{}, refs: [Int]{}, ref_units: [Int]{}, lines: [Int]{}, lists: [Int]{}}
+// subprogram child of the unit whose low_pc (in `addr`, the linked
+// `.debug_addr`, for an index) is outside the live text drops with its
+// children. None when a unit can't be walked or a kept ref4 refers into a
+// drop.
+link_info_plan: fn(info: [U8], abbrev: [U8], addr: [U8], text_start: Int, text_end: Int) -> LinkInfoPlan? Never! {
+    plan := LinkInfoPlan{drops: [Int]{}, units: [Int]{}, refs: [Int]{}, ref_units: [Int]{}, lines: [Int]{}, list_bases: [Int]{}, range_bases: [Int]{}, list_refs: [Int]{}, range_refs: [Int]{}}
     at := 0
     loop at < info.len() {
         unit: at
@@ -266,6 +319,7 @@ link_info_plan: fn(info: [U8], abbrev: [U8], text_start: Int, text_end: Int) -> 
         table: link_debug_abbrevs(abbrev, link_debug_le(info, unit + 8, 4)) ?? return None
         plan.units.push(unit)
         pos := unit + 12
+        bases := LinkUnitBases{addr: -1, lists: -1, ranges: -1}
         // The level of the next DIE: the unit's children are at 1.
         depth := 0
         drop_start := -1
@@ -287,7 +341,7 @@ link_info_plan: fn(info: [U8], abbrev: [U8], text_start: Int, text_end: Int) -> 
             candidate: drop_start < 0 && depth == 1 && table.tags[entry] == 0x2e
             low_pc := -1
             body: pos
-            pos = link_info_attributes(info, table, entry, body, unit, plan, drop_start < 0 && !candidate, low_pc)
+            pos = link_info_attributes(info, table, entry, body, unit, addr, bases, plan, drop_start < 0 && !candidate, low_pc)
             if pos < 0 || pos > end -> return None
             if candidate {
                 if low_pc >= 0 && (low_pc < text_start || low_pc >= text_end) {
@@ -296,7 +350,7 @@ link_info_plan: fn(info: [U8], abbrev: [U8], text_start: Int, text_end: Int) -> 
                         plan.drops.push(pos)
                     }
                 } else {
-                    _ := link_info_attributes(info, table, entry, body, unit, plan, true, low_pc)
+                    _ := link_info_attributes(info, table, entry, body, unit, addr, bases, plan, true, low_pc)
                 }
             }
             if table.children[entry] -> depth += 1
@@ -314,10 +368,10 @@ link_info_plan: fn(info: [U8], abbrev: [U8], text_start: Int, text_end: Int) -> 
 }
 
 // `info` without `plan.drops`: unit lengths shrink by their drops, ref4
-// values follow the DIEs they name, and stmt_list and location values the
-// moved `.debug_line` units and `.debug_loclists` lists (an offset not in
-// the maps stays).
-link_info_rewrite: fn(info: &[U8], plan: LinkInfoPlan, lines: [Int:Int], lists: [Int:Int]) Never! {
+// values follow the DIEs they name, and stmt_list values the moved
+// `.debug_line` units and loclists and rnglists bases the moved offsets
+// tables (link_lists_prune; an offset not in the maps stays).
+link_info_rewrite: fn(info: &[U8], plan: LinkInfoPlan, lines: [Int:Int], lists: [Int:Int], ranges: [Int:Int]) Never! {
     sums: link_info_sums(plan.drops)
     loop (k, at) in plan.refs {
         unit: plan.ref_units[k]
@@ -329,9 +383,13 @@ link_info_rewrite: fn(info: &[U8], plan: LinkInfoPlan, lines: [Int:Int], lists: 
         offset: link_debug_le(info, at, 4)
         dwarf_patch_u32(info, at, lines.get(offset) ?? offset)
     }
-    loop at in plan.lists {
+    loop at in plan.list_bases {
         offset: link_debug_le(info, at, 4)
         dwarf_patch_u32(info, at, lists.get(offset) ?? offset)
+    }
+    loop at in plan.range_bases {
+        offset: link_debug_le(info, at, 4)
+        dwarf_patch_u32(info, at, ranges.get(offset) ?? offset)
     }
     if plan.drops.len() == 0 {
         return
@@ -352,7 +410,7 @@ link_info_rewrite: fn(info: &[U8], plan: LinkInfoPlan, lines: [Int:Int], lists: 
 }
 
 // ---------------------------------------------------------------------------
-// .debug_line and .debug_loclists.
+// .debug_line, .debug_loclists and .debug_rnglists.
 
 // Drop each sequence of `line` (DWARF 5 units) whose DW_LNE_set_address is
 // outside the live text; `moved` maps each unit's old offset to its new
@@ -459,51 +517,121 @@ link_list_end: fn(lists: [U8], from: Int, end: Int) -> Int Never! {
     return -1
 }
 
-// Keep only the lists of `lists` (DWARF 5 units without offset tables) at
-// `referred`, ascending offsets; `moved` maps each kept list's old offset
-// to its new one. Lists it can't read leave `lists` and `moved` as they
-// were.
-link_lists_prune: fn(lists: &[U8], referred: [Int], moved: &[Int:Int]) Never! {
-    loop k in 1..<referred.len() {
-        if referred[k] <= referred[k - 1] {
+// The offset after the range list at `at`; -1 when it runs past `end`.
+link_range_end: fn(lists: [U8], from: Int, end: Int) -> Int Never! {
+    at := from
+    loop at < end {
+        kind: Int{lists[at]}
+        at += 1
+        // DW_RLE_end_of_list.
+        if kind == 0 -> return at
+        if kind > 7 -> return -1
+        at = if {
+            // DW_RLE_base_addressx: one uleb.
+            kind == 1 -> link_debug_leb_end(lists, at)
+            // DW_RLE_base_address: an address.
+            kind == 5 -> at + 8
+            // DW_RLE_start_end: two addresses.
+            kind == 6 -> at + 16
+            // DW_RLE_start_length: an address and a uleb.
+            kind == 7 -> link_debug_leb_end(lists, at + 8)
+            // DW_RLE_startx_endx, startx_length, offset_pair: two ulebs.
+            else -> link_debug_leb_end(lists, link_debug_leb_end(lists, at))
+        }
+    }
+    return -1
+}
+
+// Keep only the referred lists of `lists` (DWARF 5 units, location lists
+// or with `ranges` range lists): `referred` holds pairs, an offsets
+// table's start (a unit's DW_AT_loclists_base or DW_AT_rnglists_base) and
+// an index into it. A unit keeps its table, so the indexes stay: a
+// referred entry names its list's kept copy (one per list), an entry
+// nothing refers to one empty list at the unit's end. A unit without a
+// table stays whole. `moved` maps each table's old start to its new one.
+// Lists it can't read leave `lists` and `moved` as they were.
+link_lists_prune: fn(lists: &[U8], referred: [Int], moved: &[Int:Int], ranges: Bool{false}) Never! {
+    starts := [Int]{}
+    counts := [Int]{}
+    // Per table start, its unit's number.
+    tables := [Int:Int]{}
+    at := 0
+    loop at < lists.len() {
+        length: link_debug_le(lists, at, 4)
+        if length < 8 || length >= 0xfffffff0 || at + 4 + length > lists.len() || link_debug_le(lists, at + 4, 2) != 5 {
             return
         }
+        count: link_debug_le(lists, at + 8, 4)
+        if 8 + 4 * count > length {
+            return
+        }
+        tables.add(at + 12, starts.len()).drop("unit offsets are unique")
+        starts.push(at)
+        counts.push(count)
+        at += 4 + length
+    }
+    wanted := [[Bool]]{}
+    loop count in counts {
+        row := [Bool]{}
+        loop _ in 0..<count -> row.push(false)
+        wanted.push(row)
+    }
+    loop pair in 0..<(referred.len() >> 1) {
+        unit: tables.get(referred[2 * pair]) ?? return
+        index: referred[2 * pair + 1]
+        if index < 0 || index >= counts[unit] {
+            return
+        }
+        wanted[unit][index] = true
     }
     kept := [U8]{}
     olds := [Int]{}
     news := [Int]{}
-    next_list := 0
-    at := 0
-    loop at < lists.len() {
-        unit: at
-        length: link_debug_le(lists, unit, 4)
-        if length < 8 || length >= 0xfffffff0 || unit + 4 + length > lists.len() || link_debug_le(lists, unit + 4, 2) != 5 || link_debug_le(lists, unit + 8, 4) != 0 {
-            return
-        }
-        end: unit + 4 + length
+    loop (k, unit) in starts {
+        end: unit + 4 + link_debug_le(lists, unit, 4)
+        table: unit + 12
         new_unit: kept.len()
-        kept.extend(lists[unit..<unit + 12])
-        loop next_list < referred.len() && referred[next_list] < end {
-            from: referred[next_list]
-            if from < unit + 12 {
-                return
+        new_table: new_unit + 12
+        kept.extend(lists[unit..<table])
+        if {
+            counts[k] == 0 -> kept.extend(lists[table..<end])
+            else -> {
+                loop _ in 0..<counts[k] -> elf64_u32(kept, 0)
+                // Per kept list, its old start and its new offset.
+                copied := [Int:Int]{}
+                loop index in 0..<counts[k] {
+                    if !wanted[k][index] -> next
+                    from: table + link_debug_le(lists, table + 4 * index, 4)
+                    offset := copied.get(from) ?? -1
+                    if offset < 0 {
+                        to: if ranges -> link_range_end(lists, from, end) else -> link_list_end(lists, from, end)
+                        if from < table + 4 * counts[k] || to < 0 {
+                            return
+                        }
+                        offset = kept.len() - new_table
+                        copied.add(from, offset).drop("checked absent above")
+                        kept.extend(lists[from..<to])
+                    }
+                    dwarf_patch_u32(kept, new_table + 4 * index, offset)
+                }
+                empty := -1
+                loop index in 0..<counts[k] {
+                    if wanted[k][index] -> next
+                    if empty < 0 {
+                        empty = kept.len() - new_table
+                        kept.push(U8{0})
+                    }
+                    dwarf_patch_u32(kept, new_table + 4 * index, empty)
+                }
             }
-            to: link_list_end(lists, from, end)
-            if to < 0 {
-                return
-            }
-            olds.push(from)
-            news.push(kept.len())
-            kept.extend(lists[from..<to])
-            next_list += 1
         }
         dwarf_patch_u32(kept, new_unit, kept.len() - new_unit - 4)
-        at = end
+        olds.push(table)
+        news.push(new_table)
     }
-    if next_list != referred.len() {
-        return
+    loop (k, old) in olds {
+        if old != news[k] -> moved.add(old, news[k]).drop("table offsets are unique")
     }
-    loop (k, old) in olds -> moved.add(old, news[k]).drop("list offsets are unique")
     lists = kept
 }
 
@@ -565,10 +693,7 @@ link_jetline_block: fn(linked: &[U8], table: [U8], records: Int, count: Int, str
             return false
         }
         from: rows + link_debug_le(table, record + 24, 4)
-        to := from
-        loop _ in 0..<link_debug_le(table, record + 28, 4) {
-            to = link_debug_leb_end(table, link_debug_leb_end(table, to))
-        }
+        to: from + link_debug_le(table, record + 28, 4)
         if from > end || to > end -> return false
         // Sorted by start, a start is never below the previous start; it is
         // below the previous end only where two records overlap.

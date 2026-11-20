@@ -1,0 +1,18 @@
+use core.process
+
+counter: module<T>(start: Int) {
+    HITS: start
+
+    bump: fn(by: Int) -> Int {
+        total := HITS + by
+        print("bump {total}")
+        total
+    }
+}
+
+small: counter<Int>(8)
+
+run: fn() {
+    by: process.args().len() + 1
+    print("{small.bump(by)}")
+}

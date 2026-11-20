@@ -404,6 +404,23 @@ IRFunction: struct {
     // a call cycle (through a function value's call too), in a module with
     // stop points.
     stack_check: Bool{false},
+    // The Loop splits of the body (OptSplit.jet ir_opt_split_loops), two
+    // words each: a slot that stands for another inside one Loop, and that
+    // slot. Over the split's live range the value is in the split's place,
+    // and the other slot's place is stale (X64Select.jet ir_x64_variables).
+    splits: [Int]{[Int]{}},
+    // Per slot, the inline site it belongs to (0: the function's own code;
+    // a callee's slot inlined here: OptInline.jet ir_opt_splice). Its
+    // variable is a local of that inline site's frame (X64Select.jet
+    // ir_x64_variables). ir_slot adds every slot to site 0.
+    slot_site: [Int]{[Int]{}},
+    // The named slots a pass folded into another slot, two words each: the
+    // named slot, which is no longer written, and the slot holding its value
+    // (OptSimplify.jet ir_opt_propagate; an inlined parameter's argument,
+    // OptInline.jet ir_opt_splice). A pass that renames the second slot
+    // renames it here too. The named slot's variable is located in the
+    // second slot's place (X64Select.jet ir_x64_variables).
+    binds: [Int]{[Int]{}},
 }
 
 // The frame bound of a function with a body of bound `inlined` spliced into
@@ -831,6 +848,7 @@ ir_slot: fn(f: &IRFunction, ty: Int, kind: IRSlotKind, name: Int, line: Int) -> 
     f.slot_name.push(name)
     f.slot_line.push(line)
     f.slot_fixed.push(false)
+    f.slot_site.push(0)
     if kind == .Param -> f.param_count += 1
     id
 }

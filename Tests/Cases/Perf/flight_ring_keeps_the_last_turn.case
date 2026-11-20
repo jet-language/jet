@@ -1,0 +1,31 @@
+# A watcher sees a flight-recorded program's last turn. The program writes
+# its ring's new records into the published file in place, and at its exit
+# drains its record socket a last time and writes those records, then a
+# tally that says the run ended, into that file before removing it. A
+# reader that opened the ring while the program ran reads, from the file it
+# holds open, the clock record the exit wrote and the closing tally, though
+# no file is left on disk.
+requires: os-name:linux
+fixture: FlightRingKeepsTheLastTurn.fixture
+env: NO_COLOR=1
+env: XDG_RUNTIME_DIR={work}/run
+env: TMPDIR={work}/tmp
+step: mkdir -m 700 run tmp
+exit: 0
+session live line: jet run --observe live.jet
+stderr: null
+recv live
+stdout.trim: = "READY" # the program runs, its ring published
+step: sh -c 'exec 3< run/jet/jet-flight-{pid:live}.samples && touch stop && n=0; while [ -e run/jet/jet-flight-{pid:live}.samples ] && [ $n -lt 500 ]; do sleep 0.02; n=$((n+1)); done; cat <&3 > last.samples'
+exit: 0
+close live
+exit: 0 # the stop file ends the program
+step: sh -c 'ls -A run/jet | grep -c jet-flight'
+exit: 1 # grep counts no line
+stdout: = "0\n" # at its exit the program removed its ring and image
+step: sh -c 'n=$(wc -c < last.samples); od -A n -t x8 -N 8 -j $((n - 80)) last.samples'
+exit: 0
+stdout.trim: = "6807000000000000" # the clock record the exit wrote: 7 words, of the clock record's kind 13
+step: sh -c 'n=$(wc -c < last.samples); od -A n -t x8 -w24 -j $((n - 24)) last.samples'
+exit: 0
+stdout.trim: = "6803000000000001 0000000000000000 0000000000000001" # then the tally: 3 words, the clock record's kind with 1 for its address, no record lost, the run ended

@@ -8,7 +8,7 @@
 use {
     native_files: core.files
     native_math: core.math
-    jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_DEBUG_ITEMS_DROP_SYMBOL, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_EVENT_EXIT, X64_TRACE_EVENT_STOP, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, link_debug_uleb, x64_debug_eval_symbols, x64_jetline_find, x64_jetline_line, x64_jetline_sleb, x64_jetline_text, x64_trace_attach, x64_trace_close, x64_trace_debug_register, x64_trace_detach, x64_trace_event_message, x64_trace_follow_exits, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_seize, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait, x64_trace_wait_for, x64_trace_wait_or_input, x64_trace_write]
+    jet_backend.[X64DebugEncoding, X64LineRow, X64Trace, X64TraceResume, X64_DEBUG_ITEMS_DROP_SYMBOL, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_EVENT_EXIT, X64_TRACE_EVENT_STOP, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, link_debug_uleb, x64_debug_eval_symbols, x64_jetline_find, x64_jetline_line, x64_jetline_next, x64_jetline_place, x64_jetline_sleb, x64_jetline_text, x64_trace_attach, x64_trace_close, x64_trace_debug_register, x64_trace_detach, x64_trace_event_message, x64_trace_follow_exits, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_seize, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait, x64_trace_wait_for, x64_trace_wait_or_input, x64_trace_write]
     jet_foundation.[DeepChecks, Diagnostic, ENV_JET_RECORD, MODULE_CORE_PREFIX, deep_checks_flags, diagnostic_display_identities, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all, foundation_named_type]
 }
 
@@ -61,9 +61,9 @@ native_debug_refused: fn(detail: String) -> String Never! {
 // One frame of a stop: the Jet function and its source position, or a frame
 // without line information (the runtime's start code) with line 0. An
 // `inlined` frame is code the optimizer inlined into the frame below it,
-// which shows the call at its line. A caller's frame whose call has a
-// call-site row (NativeImage.calls) shows the line and character `column`
-// of the call's source node; `column` is 0 when the frame names a line only.
+// which shows the call at its line. A caller's frame whose call has a call
+// row (native_call_row) shows the line and character `column` of the call's
+// source node; `column` is 0 when the frame names a line only.
 // `file` is the source's name, which the console shows, and `path` the
 // source itself as the line table names it (native_line_source; "" for
 // none), which the session reads it by (NativeSession.frame_source).
@@ -816,7 +816,7 @@ NativeSession: struct {
                 address = breakpoint.addresses[0]
             }
         }
-        at: self.source_at(address, -1) ?? return Err(native_eval_refused("breakpoint {number} is not on a line of Jet code"))
+        at: self.source_at(address) ?? return Err(native_eval_refused("breakpoint {number} is not on a line of Jet code"))
         self.versioned += 1
         rule := NativeRule{condition: None, log: None, shown: shown, version: self.versioned}
         if condition.trim() != "" || log != "" -> self.keep_current()
@@ -886,18 +886,18 @@ NativeSession: struct {
 
     // The source file (its path, as the image's line table records it),
     // line and character column (0: the line's first node) of the Jet code
-    // at `lookup`. A caller's frame passes the return address `call` of
-    // its call (-1 for none): a call-site row there names the call's own
-    // node, not the first node of its line.
-    source_at: fn(self, lookup: Int, call: Int) -> {path: String, line: Int, column: Int}? Never! {
+    // at `lookup`. In a `caller`'s frame, looked up at its return address -
+    // 1, a call row there (native_call_row) names the call's own node, not
+    // the first node of its statement.
+    source_at: fn(self, lookup: Int, caller: Bool{false}) -> {path: String, line: Int, column: Int}? Never! {
         index: x64_jetline_find(self.image.lines, lookup)
         if index < 0 -> return None
         function: self.image.lines.functions[index]
         line := x64_jetline_line(self.image.lines, function, lookup) ?? return None
         column := 0
-        if self.image.calls.get(call) == .Val(site) {
-            line = site.line
-            column = site.column
+        if caller && native_call_row(self.image, lookup) == .Val(call) {
+            line = call.line
+            column = call.column
         }
         path: native_line_source(function.dir, function.file)
         Val({path: path, line: line, column: column})
@@ -1170,9 +1170,8 @@ NativeSession: struct {
     level_source: fn(self, frames: [NativeUnwound], level: NativeLevel) -> {path: String, line: Int, column: Int} NativeEvalRefused! {
         pc: frames[level.frame].pc
         lookup: native_lookup(level.frame, pc)
-        call: if level.frame > 0 -> pc else -> -1
         function: native_function_at(self.image, lookup) ?? {
-            found: self.source_at(lookup, call) ?? return Err(native_eval_refused("the selected frame is not Jet code"))
+            found: self.source_at(lookup, caller: level.frame > 0) ?? return Err(native_eval_refused("the selected frame is not Jet code"))
             return Ok(found)
         }
         // The run just inside the level, -1 when the level is innermost.
@@ -1188,7 +1187,7 @@ NativeSession: struct {
         if file >= 0 && function.file >= 0 && file != function.file {
             return Err(native_eval_refused("the selected frame is code inlined from another file, which the debugger can't place an expression in"))
         }
-        at: self.source_at(lookup, if inner >= 0 -> -1 else -> call) ?? return Err(native_eval_refused("the selected frame is not Jet code"))
+        at: self.source_at(lookup, caller: inner < 0 && level.frame > 0) ?? return Err(native_eval_refused("the selected frame is not Jet code"))
         if inner < 0 -> return Ok(at)
         Ok({path: at.path, line: function.inlined[inner].call_line, column: 0})
     }
@@ -1924,17 +1923,18 @@ NativeSession: struct {
     }
 
     // The frames of a stack whose innermost registers are `registers`, as
-    // backtrace shows them: a caller's own frame at its call's call-site
-    // row (NativeImage.calls) when the call has one.
+    // backtrace shows them: a caller's own frame at its call's call row
+    // (native_call_row) when the call has one.
     backtrace_from: fn(self, registers: [Int]) -> [NativeFrame] NativeDebugError! {
         frames: self.unwind_from(registers) ?? return Err(err)
         shown := [NativeFrame]{}
         loop (index, frame) in frames {
-            found := native_frames_at(self.image, native_lookup(index, frame.pc))
-            if index > 0 && self.image.calls.get(frame.pc) == .Val(site) {
+            lookup: native_lookup(index, frame.pc)
+            found := native_frames_at(self.image, lookup)
+            if index > 0 && found.len() > 0 && native_call_row(self.image, lookup) == .Val(call) {
                 own: found.len() - 1
-                found[own].line = site.line
-                found[own].column = site.column
+                found[own].line = call.line
+                found[own].column = call.column
             }
             loop row in found.move() -> shown.push(row)
         }
@@ -2072,6 +2072,7 @@ NativeSession: struct {
         shown := native_frame_locals(self.image, memory, frames[index], lookup, level.site, caller)
         function: native_function_at(self.image, lookup) ?? return Ok(shown)
         // The variables native_frame_locals shows, in its order.
+        line: native_site_line(self.image, lookup, level.site)
         at := 0
         loop variable in function.variables {
             if variable.site != level.site -> next
@@ -2079,7 +2080,7 @@ NativeSession: struct {
             if variable.list >= 0 {
                 located = native_variable_covering(self.image, variable, lookup)
                 if located == None && variable.role != .Parameter -> next
-            }
+            } else if native_debug_unbound(variable, line) { next }
             local: at
             at += 1
             range: located ?? next
@@ -5346,14 +5347,13 @@ native_opening: fn(image: NativeImage, index: Int, code: NativeCode) -> NativeOp
     start: native_code_at(code, function.low)
     if native_frame_open(start) >= 0 -> return NativeOpening{at: function.low, prologue: start}
     at := function.rows
-    address := function.low
+    row := X64LineRow{at: function.low, line: 1}
     loop at < function.rows_end {
-        address += link_debug_uleb(image.lines.table, at)
-        _ := x64_jetline_sleb(image.lines.table, at)
-        if address == function.low -> next
-        bytes: native_code_at(code, address)
+        x64_jetline_next(image.lines.table, at, row)
+        if row.call || row.at == function.low -> next
+        bytes: native_code_at(code, row.at)
         if native_bytes_at(bytes, 0, [U8]{0x55, 0x48, 0x89, 0xe5}) {
-            return NativeOpening{at: address, prologue: bytes}
+            return NativeOpening{at: row.at, prologue: bytes}
         }
     }
     NativeOpening{at: function.low, prologue: start}
@@ -5381,11 +5381,11 @@ native_debug_word: fn(trace: X64Trace, address: Int) -> Int? Never! {
 // whose recorded path (native_line_source) is it or ends with it, so
 // `Sema/CheckProgram.jet` or an editor's absolute path picks one of the
 // image's same-named files; a base name, or a path no file's matches, names
-// every file of that base name. In each function, the first row of the line
-// in its own code and in each inlined copy it holds (two instances of a
-// generic module's member inlined into one caller are two copies). A
-// function with no row of the line, but rows on or before it, gives its
-// first row of the nearest later line instead.
+// every file of that base name. In each function, the first statement row
+// (no call row) of the line in its own code and in each inlined copy it
+// holds (two instances of a generic module's member inlined into one caller
+// are two copies). A function with no row of the line, but rows on or
+// before it, gives its first row of the nearest later line instead.
 native_line_addresses: fn(image: NativeImage, file: String, line: Int) -> [Int] Never! {
     wanted: native_files.basename(file)
     by_path := false
@@ -5407,23 +5407,22 @@ native_line_addresses: fn(image: NativeImage, file: String, line: Int) -> [Int] 
         nearest := -1
         nearest_line := 0
         at := function.rows
-        address := function.low
-        current := 1
+        row := X64LineRow{at: function.low, line: 1}
         loop at < function.rows_end {
-            address += link_debug_uleb(image.lines.table, at)
-            current += x64_jetline_sleb(image.lines.table, at)
-            if current <= line -> covers = true
-            if current > line && (nearest < 0 || current < nearest_line) {
-                nearest = address
-                nearest_line = current
+            x64_jetline_next(image.lines.table, at, row)
+            if row.call -> next
+            if row.line <= line -> covers = true
+            if row.line > line && (nearest < 0 || row.line < nearest_line) {
+                nearest = row.at
+                nearest_line = row.line
             }
-            if current != line -> next
-            site: native_line_site(described, address)
+            if row.line != line -> next
+            site: native_line_site(described, row.at)
             seen := false
             loop found in sites {
                 if found.site == site -> seen = true
             }
-            if !seen -> sites.push(NativeLineSite{site: site, address: address})
+            if !seen -> sites.push(NativeLineSite{site: site, address: row.at})
         }
         loop found in sites -> addresses.push(found.address)
         if sites.len() == 0 && covers && nearest >= 0 -> addresses.push(nearest)
@@ -5446,39 +5445,38 @@ native_line_site: fn(function: NativeFunction?, address: Int) -> Int Never! {
     if chain.len() == 0 -> -1 else -> chain[0]
 }
 
-// The first address past function `index`'s prologue: its second row, or
-// its start when it has one row.
+// The first address past function `index`'s prologue: its second statement
+// row, or its start when it has one.
 native_body_start: fn(image: NativeImage, index: Int) -> Int Never! {
     function: image.lines.functions[index]
     at := function.rows
-    address := function.low
+    row := X64LineRow{at: function.low, line: 1}
     loop at < function.rows_end {
-        address += link_debug_uleb(image.lines.table, at)
-        _ := x64_jetline_sleb(image.lines.table, at)
-        if address > function.low -> return address
+        x64_jetline_next(image.lines.table, at, row)
+        if !row.call && row.at > function.low -> return row.at
     }
     function.low
 }
 
-// The rows of one function, in address order: each row's start and line.
+// The statement rows of one function, in address order: each row's start
+// and line.
 NativeStepRows: struct {
     starts: [Int],
     lines: [Int],
 }
 
-// The rows of function `index`, read once for a `next` to look up each
-// address it steps to (native_step_line).
+// The statement rows of function `index`, read once for a `next` to look up
+// each address it steps to (native_step_line).
 native_step_rows: fn(image: NativeImage, index: Int) -> NativeStepRows Never! {
     function: image.lines.functions[index]
     rows := NativeStepRows{starts: [Int]{}, lines: [Int]{}}
     at := function.rows
-    address := function.low
-    current := 1
+    row := X64LineRow{at: function.low, line: 1}
     loop at < function.rows_end {
-        address += link_debug_uleb(image.lines.table, at)
-        current += x64_jetline_sleb(image.lines.table, at)
-        rows.starts.push(address)
-        rows.lines.push(current)
+        x64_jetline_next(image.lines.table, at, row)
+        if row.call -> next
+        rows.starts.push(row.at)
+        rows.lines.push(row.line)
     }
     rows
 }
@@ -5515,34 +5513,32 @@ native_sorted_has: fn(sorted: [Int], value: Int) -> Bool Never! {
     false
 }
 
-// The rows of function `index` a `next` on `line` may stop at: each on
-// another line. The function's first address, which only a deeper call
-// reaches, is left out.
+// The statement rows of function `index` a `next` on `line` may stop at:
+// each on another line. The function's first address, which only a deeper
+// call reaches, is left out.
 native_step_targets: fn(image: NativeImage, index: Int, line: Int) -> [Int] Never! {
     function: image.lines.functions[index]
     targets := [Int]{}
     at := function.rows
-    address := function.low
-    current := 1
+    row := X64LineRow{at: function.low, line: 1}
     loop at < function.rows_end {
-        address += link_debug_uleb(image.lines.table, at)
-        current += x64_jetline_sleb(image.lines.table, at)
-        if address == function.low -> next
-        if current != line -> targets.push(address)
+        x64_jetline_next(image.lines.table, at, row)
+        if row.call || row.at == function.low -> next
+        if row.line != line -> targets.push(row.at)
     }
     targets
 }
 
-// Whether `pc` starts a row of function `index`.
+// Whether `pc` starts a statement row of function `index`.
 native_row_start: fn(image: NativeImage, index: Int, pc: Int) -> Bool Never! {
     function: image.lines.functions[index]
     at := function.rows
-    address := function.low
+    row := X64LineRow{at: function.low, line: 1}
     loop at < function.rows_end {
-        address += link_debug_uleb(image.lines.table, at)
-        _ := x64_jetline_sleb(image.lines.table, at)
-        if address == pc -> return true
-        if address > pc -> return false
+        x64_jetline_next(image.lines.table, at, row)
+        if row.call -> next
+        if row.at == pc -> return true
+        if row.at > pc -> return false
     }
     false
 }
@@ -5660,6 +5656,18 @@ native_frame_at: fn(image: NativeImage, lookup: Int) -> NativeFrame Never! {
 // The address a frame's code is looked up at: the stop itself for the
 // innermost frame (`index` 0), else the call before its return address `pc`.
 native_lookup: fn(index: Int, pc: Int) -[]> Int { if index == 0 -> pc else -> pc - 1 }
+
+// The call row holding `lookup` (X64LineRow.call, with the column of a
+// call's node; the row back on a statement after a call has column 0): in
+// a caller's frame, looked up at its return address - 1, its call's own
+// line and column. None at any other row.
+native_call_row: fn(image: NativeImage, lookup: Int) -> X64LineRow? Never! {
+    index: x64_jetline_find(image.lines, lookup)
+    if index < 0 -> return None
+    row: x64_jetline_place(image.lines, image.lines.functions[index], lookup) ?? return None
+    if !row.call || row.column <= 0 -> return None
+    Val(row)
+}
 
 // The frames `lookup` stands for, innermost first: one per inlined run that
 // holds it, named by its abstract subprogram, then the function's own frame.
@@ -6203,18 +6211,22 @@ native_debug_cut: fn(memory: NativeMemory, address: Int, count: Int) -> Bool Nev
 
 // The parameters and locals live at `lookup` in `frame` that belong to the
 // inlined run `site` (-1: the function's own frame), rendered as Jet values;
-// a variable the image gives no location shows as unavailable, and a
-// parameter no range covers as not kept. A parameter located by its entry
-// value (DW_OP_entry_value) reads the value its `caller` passed, or, with no
-// DW_OP_stack_value after it (an aggregate's), the bytes at that address.
+// a variable the image gives no location shows as unavailable from its
+// binding on (native_debug_unbound), and a parameter no range covers as not
+// kept. A parameter located by its entry value (DW_OP_entry_value) reads the
+// value its `caller` passed, or, with no DW_OP_stack_value after it (an
+// aggregate's), the bytes at that address.
 native_frame_locals: fn(image: NativeImage, memory: NativeMemory, frame: NativeUnwound, lookup: Int, site: Int, caller: NativeUnwound?) -> [NativeLocal] Never! {
     locals := [NativeLocal]{}
     function: native_function_at(image, lookup) ?? return locals
+    line: native_site_line(image, lookup, site)
     loop variable in function.variables {
         if variable.site != site -> next
         type_name: native_type_name(image, variable.ty)
         if variable.list < 0 {
-            locals.push(NativeLocal{name: variable.name, type_name: type_name, value: NATIVE_DEBUG_UNAVAILABLE})
+            if !native_debug_unbound(variable, line) {
+                locals.push(NativeLocal{name: variable.name, type_name: type_name, value: NATIVE_DEBUG_UNAVAILABLE})
+            }
             next
         }
         located: native_variable_covering(image, variable, lookup) ?? {
@@ -6231,6 +6243,25 @@ native_frame_locals: fn(image: NativeImage, memory: NativeMemory, frame: NativeU
         locals.push(NativeLocal{name: variable.name, type_name: type_name, value: value})
     }
     locals
+}
+
+// The line the frame of the inlined run `site` (-1: the function's own
+// frame) stands at while `lookup` runs, as native_frames_at shows it.
+native_site_line: fn(image: NativeImage, lookup: Int, site: Int) -[]> Int {
+    shown: native_frames_at(image, lookup)
+    function: native_function_at(image, lookup) ?? return shown[shown.len() - 1].line
+    loop (index, run) in native_inline_chain(function, lookup) {
+        if run == site -> return shown[index].line
+    }
+    shown[shown.len() - 1].line
+}
+
+// Whether `variable`, which the image gives no location, is a local whose
+// binding has not run while its frame stands at `line`. Such a local is
+// listed from the line after its own on, as a located local is from its
+// binding on, so no stop lists a local whose binding is still to come.
+native_debug_unbound: fn(variable: NativeVariable, line: Int) -[]> Bool {
+    variable.role == .Local && line <= variable.line
 }
 
 // The register (a DWARF number) whose value at the function's entry the
@@ -6297,7 +6328,7 @@ native_call_value: fn(memory: NativeMemory, frame: NativeUnwound, value: [U8]) -
 
 // The first range of `variable`'s location list that covers `lookup`.
 native_variable_covering: fn(image: NativeImage, variable: NativeVariable, lookup: Int) -> NativeRange? Never! {
-    loop range in native_ranges(image, variable.list, variable.base) {
+    loop range in native_ranges(image, variable) {
         if lookup >= range.start && lookup < range.end -> return Val(range)
     }
     None
@@ -6346,7 +6377,8 @@ NativePlaceBase: struct {
 
 // The address the operation at `bytes[from]` computes in `frame`: a
 // register's or the frame base's (rbp) plus an offset (DW_OP_breg*,
-// DW_OP_bregx, DW_OP_fbreg). None for any other operation.
+// DW_OP_bregx, DW_OP_fbreg), or a constant (DW_OP_consts, a value with
+// DW_OP_stack_value after it). None for any other operation.
 native_place_base: fn(frame: NativeUnwound, bytes: [U8], from: Int) -> NativePlaceBase? Never! {
     op: Int{bytes[from]}
     at := from + 1
@@ -6365,6 +6397,7 @@ native_place_base: fn(frame: NativeUnwound, bytes: [U8], from: Int) -> NativePla
             if !frame.known[X64_TRACE_RBP] -> return None
             address = frame.registers[X64_TRACE_RBP] + x64_jetline_sleb(bytes, at)
         }
+        op == 0x11 -> address = x64_jetline_sleb(bytes, at)
         else -> return None
     }
     Val(NativePlaceBase{address: address, next: at})
@@ -6441,7 +6474,7 @@ native_watch_place: fn(image: NativeImage, memory: NativeMemory, frame: NativeUn
             value: native_register_value(frame, dwarf) ?? return native_watch_refusal("`{path.root}`'s register is not known in this frame")
             if path.fields.len() == 0 && index < 0 {
                 ranges := [NativeRange]{}
-                loop range in native_ranges(image, variable.list, variable.base) {
+                loop range in native_ranges(image, variable) {
                     if native_location_register(image.loclists, range.from, range.to) == dwarf {
                         ranges.push(NativeRange{start: range.start, end: range.end, from: range.from, to: range.to})
                     }

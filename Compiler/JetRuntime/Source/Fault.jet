@@ -457,17 +457,34 @@ priv trace_frame: fn(text: I64, table: I64, table_end: I64, pc: I64, with_functi
 // The line of `pc` in the function [low, high) whose rows are [rows,
 // rows_end): the row before the first row past it, or the last row's line
 // through the function's end. 0 when no row holds it (report.S `line`).
+// A call row (its uleb's low bit, a column uleb after it) counts as any
+// other, so a caller's frame, looked up at its return address - 1, is at
+// its call's line.
 trace_line: fn(rows: I64, rows_end: I64, low: I64, high: I64, pc: I64) -> I64 {
+    trace_rows_line(rows, rows_end, low, high, pc, true)
+}
+
+// trace_line without the call rows: the line of the statement `pc` is in.
+trace_statement_line: fn(rows: I64, rows_end: I64, low: I64, high: I64, pc: I64) -> I64 {
+    trace_rows_line(rows, rows_end, low, high, pc, false)
+}
+
+// trace_line, its call rows only with `calls`.
+priv trace_rows_line: fn(rows: I64, rows_end: I64, low: I64, high: I64, pc: I64, calls: Bool) -> I64 {
     at := rows
     address := low
     line := I64{1}
     previous := I64{-1}
     previous_line := I64{0}
     loop at < rows_end {
-        address = wrapping(address + trace_uleb(at))
+        advance: trace_uleb(at)
+        address = wrapping(address + (advance >> I64{1}))
         at = trace_leb_end(at)
+        call: advance & I64{1} != I64{0}
+        if (call) { at = trace_leb_end(at) }
         line = wrapping(line + trace_sleb(at))
         at = trace_leb_end(at)
+        if (call && !calls) { next }
         if (previous >= I64{0} && pc >= previous && pc < address) { return previous_line }
         previous = address
         previous_line = line
