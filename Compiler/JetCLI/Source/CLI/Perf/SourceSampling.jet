@@ -251,16 +251,23 @@ JetCLIPerfTimed: struct {
 
 // The clock record (PerfSamples.jet perf_samples_exit), in nanoseconds: the
 // CPU time the process used while sampled, the time the sampler's handlers
-// ran, and the kernel's time to deliver one signal and return from its
-// handler, which the runtime timed as sampling started; then the
+// and drains ran, and the kernel's time to deliver one signal and return
+// from its handler, which the runtime timed as sampling started; then the
 // allocations the alloc lens counted and the time it spent on them (0 each
-// without it, or from a runtime whose record stops at the third).
+// without it, or from a runtime whose record stops at the third); then the
+// samples the drains took from the kernel's rings, the kernel's time to
+// write them there as the runtime timed it when sampling started, and those
+// whose callchain the kernel cut (0 each under the timer, or from a runtime
+// whose record stops at the seventh).
 JetCLIPerfCost: struct {
     cpu_ns: U64,
     handler_ns: U64,
     delivery_ns: U64,
     alloc_count: U64,
     alloc_ns: U64,
+    ring_samples: U64,
+    ring_ns: U64,
+    cut: U64,
 }
 
 // The allocations the alloc lens counted at one line for one type
@@ -504,7 +511,9 @@ jet_cli_perf_counters_read: fn(samples: String?) -[FS]> [TraceCounter] Never! {
 // sampling, PEBS and the task clock each with, or 0 for one it never tried
 // or that opened; perf_event_paranoid, None where the kernel has none; the
 // source's period, in cycles for a precise source, else in nanoseconds of
-// CPU time; and whether the causal lens kept the timer (`kept`).
+// CPU time; whether the causal lens kept the timer (`kept`); and the most
+// callchain entries the kernel writes of a perf event's sample (`depth`), 0
+// under the timer or from a runtime whose file stops at the seventh word.
 JetCLIPerfSampler: struct {
     source: Int,
     ibs: Int,
@@ -513,6 +522,7 @@ JetCLIPerfSampler: struct {
     paranoid: Int?,
     period: Int,
     kept: Bool,
+    depth: Int,
 }
 
 // The sampler, from the file the runtime keeps beside the `samples` file
@@ -529,11 +539,13 @@ jet_cli_perf_pc_read: fn(samples: String?) -[FS]> JetCLIPerfSampler? Never! {
 // The sampler the `.pc` file's `words` hold (PerfSamples.jet
 // perf_precise_choose): seven words, its source, the three errnos,
 // perf_event_paranoid (1000 where the kernel has none), the period and 1
-// where the causal lens kept the timer. None for a shorter file.
+// where the causal lens kept the timer, then the callchain's depth. None
+// for a shorter file.
 jet_cli_perf_pc_words: fn(words: [U8]) -> JetCLIPerfSampler? Never! {
     if words.len() < 56 -> return None
     paranoid: link_debug_addr(words, 32)
-    Val(JetCLIPerfSampler{source: link_debug_addr(words, 0), ibs: link_debug_addr(words, 8), pebs: link_debug_addr(words, 16), task: link_debug_addr(words, 24), paranoid: if paranoid == 1000 -> None else -> Val(paranoid), period: link_debug_addr(words, 40), kept: link_debug_addr(words, 48) == 1})
+    depth: if words.len() >= 64 -> link_debug_addr(words, 56) else -> 0
+    Val(JetCLIPerfSampler{source: link_debug_addr(words, 0), ibs: link_debug_addr(words, 8), pebs: link_debug_addr(words, 16), task: link_debug_addr(words, 24), paranoid: if paranoid == 1000 -> None else -> Val(paranoid), period: link_debug_addr(words, 40), kept: link_debug_addr(words, 48) == 1, depth: depth})
 }
 
 // The source `source` of a sampler (JetCLIPerfSampler) by its receipt name.
@@ -580,16 +592,18 @@ jet_cli_perf_pc_json: fn(sampler: JetCLIPerfSampler?) -> CanonicalJSON Never! {
 
 // What the sampler `used` says of a profile's `total` samples over `cpu_ns`
 // of sampled CPU time: the source that took them and, for a precise one,
-// the rate it reached, which follows the clock speed; for the timer, its
-// cap of one sample a tick and why the run kept it.
+// the rate it reached, which follows the clock speed; for a perf event,
+// that the kernel walked each sample's stack into its thread's ring; for
+// the timer, its cap of one sample a tick and why the run kept it.
 jet_cli_perf_sampler_reason: fn(used: JetCLIPerfSampler, total: U64, cpu_ns: U64?) -> String Never! {
+    ring: if used.depth > 0 -> ", and the kernel walked each sample's stack into its thread's ring, at most {used.depth} callchain entries" else -> ""
     if used.source == 3 {
-        return "; the task clock took them, a perf event on each thread's CPU time in user mode, so time in the kernel takes none"
+        return "; the task clock took them, a perf event on each thread's CPU time in user mode, so time in the kernel takes none{ring}"
     }
     if used.source == 1 || used.source == 2 {
         named: if used.source == 1 -> "IBS op sampling" else -> "PEBS"
         rate: if cpu_ns == .Val(ns) && ns > (U64{0}) -> ": it reached {jet_cli_perf_per_ms(total, ns)} samples per millisecond of CPU time" else -> ""
-        return "; {named} took them once per {used.period} cycles, the cycles a core ran in {JET_CLI_PERF_SAMPLE_US} microseconds as sampling started, so its rate follows the clock speed{rate}"
+        return "; {named} took them once per {used.period} cycles, the cycles a core ran in {JET_CLI_PERF_SAMPLE_US} microseconds as sampling started, so its rate follows the clock speed{rate}{ring}"
     }
     why: if {
         used.kept -> "the causal lens keeps it, since its experiments' periods are CPU time's"
@@ -990,7 +1004,13 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
                                 count = earlier.alloc_count
                                 spent = earlier.alloc_ns
                             }
-                            sampled.cost = .Val(JetCLIPerfCost{cpu_ns: cpu, handler_ns: handler, delivery_ns: delivery, alloc_count: count, alloc_ns: spent})
+                            // The rings' tallies, which a runtime whose
+                            // record stops at the seventh word doesn't keep.
+                            rings: record >= 10
+                            ring_samples: if rings -> checked(U64{link_debug_addr(words, at + 56)}) ?? U64{0} else -> U64{0}
+                            ring_ns: if rings -> checked(U64{link_debug_addr(words, at + 64)}) ?? U64{0} else -> U64{0}
+                            cut: if rings -> checked(U64{link_debug_addr(words, at + 72)}) ?? U64{0} else -> U64{0}
+                            sampled.cost = .Val(JetCLIPerfCost{cpu_ns: cpu, handler_ns: handler, delivery_ns: delivery, alloc_count: count, alloc_ns: spent, ring_samples: ring_samples, ring_ns: ring_ns, cut: cut})
                         }
                     }
                 }
@@ -1862,15 +1882,22 @@ jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSa
     // The memory lens or the alloc lens without the cpu lens takes no
     // CPU-time samples.
     alone: if sampled.periods.len() == 0 && sampled.sited -> "the alloc lens alone: each row holds its allocations" else -> "the memory lens alone: each row holds its counters' events"
-    reason: if sampled.total == (U64{0}) -> "no CPU-time samples, as under {alone}{natives}{sites}{fold.note}" else -> "{timed}{fold.note}{taken}{natives}{helpers}{stackless}{nominal}{sites}"
+    cut: if sampled.cost == .Val(cost) && cost.cut > (U64{0}) && sampled.sampler == .Val(used) -> "; {cost.cut} samples' stacks were cut at the {used.depth} callchain entries the kernel writes (perf_event_max_stack), so their outermost callers are missing" else -> ""
+    reason: if sampled.total == (U64{0}) -> "no CPU-time samples, as under {alone}{natives}{sites}{fold.note}" else -> "{timed}{fold.note}{taken}{natives}{helpers}{stackless}{cut}{nominal}{sites}"
     profile := TraceProfile{method: "sampling", counters: [TraceCounter]{}, status: status, coverage: coverage, rows: rows, row_limit: U64{TRACE_PROFILE_ROW_LIMIT}, rows_truncated: truncated, overhead_ns: None, overhead_status: "not_measured", overhead_reason: "the runtime recorded no sampling cost", reason: reason, window_status: "unavailable", window_wall_ns: None, window_cpu_ns: None, window_reason: "the runtime published no run window"}
     if sampled.cost == .Val(cost) {
         // Each signal pays the kernel's delivery and return besides the
-        // handler's own time.
-        took: cost.handler_ns + sampled.signals * cost.delivery_ns
+        // handler's own time. A sample the kernel wrote to a ring took no
+        // signal: its drain's time is the handlers', with the delivery of
+        // each signal that the ring filled, and the kernel's time to write
+        // it is the rings' own.
+        drained: if cost.ring_samples < sampled.signals -> cost.ring_samples else -> sampled.signals
+        signals: sampled.signals - drained
+        took: cost.handler_ns + signals * cost.delivery_ns + cost.ring_ns
         profile.overhead_ns = Val(took)
         profile.overhead_status = "measured"
-        profile.overhead_reason = "the sampler took {took / U64{1000}} microseconds, {jet_cli_perf_hundredths(took, cost.cpu_ns)} of the {cost.cpu_ns / U64{1000}} microseconds of CPU time sampled: {cost.handler_ns / U64{1000}} in its handlers and {sampled.signals} signals at the {cost.delivery_ns} nanoseconds the kernel took to deliver and return from one as sampling started"
+        sampler: "the sampler took {took / U64{1000}} microseconds, {jet_cli_perf_hundredths(took, cost.cpu_ns)} of the {cost.cpu_ns / U64{1000}} microseconds of CPU time sampled: "
+        profile.overhead_reason = if cost.ring_samples == (U64{0}) -> "{sampler}{cost.handler_ns / U64{1000}} in its handlers and {sampled.signals} signals at the {cost.delivery_ns} nanoseconds the kernel took to deliver and return from one as sampling started" else -> "{sampler}{cost.handler_ns / U64{1000}} in its handlers and drains, each signal a ring filled delivered within them, {signals} signals at the {cost.delivery_ns} nanoseconds the kernel took to deliver and return from one as sampling started, and {cost.ring_ns / U64{1000}} microseconds the kernel took to write the {cost.ring_samples} samples to the threads' rings, as timed when sampling started"
     }
     Val(profile)
 }

@@ -282,6 +282,9 @@ task_run: fn(child: I64) {
         sync_store(wrapping(base + I64{112}), I64{1})
         sync_store(wrapping(base + I64{120}), I64{0})
     }
+    // The samples taken so far are the running task's (PerfSamples.jet
+    // perf_samples_turn).
+    perf_samples_turn(base)
     sync_store(wrapping(base + I64{16}), control)
     sync_store(wrapping(base + I64{24}), I64{0})
     sync_store(wrapping(base + I64{32}), saved_wait + I64{1})
@@ -342,6 +345,7 @@ task_run: fn(child: I64) {
         sync_store(wrapping(base + I64{120}), saved_world_slot)
     }
     context_leave(saved_context)
+    perf_samples_turn(base)
     sync_store(wrapping(base + I64{16}), saved_control)
     sync_store(wrapping(base + I64{24}), saved_shield)
     sync_store(wrapping(base + I64{32}), saved_wait)

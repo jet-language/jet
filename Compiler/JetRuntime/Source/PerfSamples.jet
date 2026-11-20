@@ -11,10 +11,13 @@
 // at most 1, a precise sampler, IBS op sampling or PEBS, whose sample's
 // program counter is the instruction the sampler names rather than the one
 // its interrupt landed on; the start writes which source it chose to
-// `<samples>.pc`. A handler fills a record
-// buffer of its own (perf_samples_claim), so a sample on one thread never
-// costs another thread's its stack. Each SIGPROF appends one record: the
-// program counter it interrupted, then the call site of each caller,
+// `<samples>.pc`. A perf event's kernel takes each sample, with the user
+// registers, its frame pointer walk and a copy of the stack's top, into the
+// thread's ring, which the program drains in batches with no signal for
+// each sample (perf_samples_ring_drain). A handler or a drain fills a
+// record buffer of its own (perf_samples_claim), so a sample on one thread
+// never costs another thread's its stack. Each sample appends one record:
+// the program counter it interrupted, then the call site of each caller,
 // innermost first, each less the image's load bias: by the image's call frame
 // information through frames without a frame pointer, then up the frame
 // pointer chain. Each is a link-time address in the image `jet run` writes
@@ -305,8 +308,25 @@ perf_samples_code_high := I64{0}
 // topdown lens's events; then the nanoseconds every handler has run
 // (perf_samples_charge), then how many recorded lock waits are blocked now
 // (perf_samples_lock_block), then how many records the program made and
-// could not write (perf_samples_send).
+// could not write (perf_samples_send), then the rings' tallies
+// (PERF_SAMPLES_RING_COUNT).
 perf_samples_buffer := I64{0}
+
+// The rings' tallies, words of the record buffer after the lost records'
+// (perf_samples_tally): the samples the drains took from the rings
+// (perf_samples_ring_sample), the picoseconds the kernel took to write
+// them (perf_precise_cost), and how many of them the kernel's callchain
+// cut at perf_precise_depth entries.
+PERF_SAMPLES_RING_COUNT: I64{3}
+
+PERF_SAMPLES_RING_PS: I64{4}
+
+PERF_SAMPLES_RING_CUT: I64{5}
+
+// The words of the record buffer past its PERF_SAMPLES_DEPTH + 1 and its
+// counters' slots: the handlers' nanoseconds, the blocked lock waits, the
+// lost records and the rings' three tallies.
+PERF_SAMPLES_TALLIES: I64{6}
 
 // PERF_SAMPLES_SLOTS more record buffers (perf_samples_claim), 0 when the
 // start could not map them; the process's CPU time in nanoseconds when
@@ -417,19 +437,63 @@ PERF_PARANOID_NONE: I64{1000}
 
 // Under the task clock or a precise source, each thread's sampler's ring by
 // its descriptor, a table of PERF_PRECISE_FDS words, 0 for a descriptor
-// that is none; 0 under the timer.
+// that is none, then the exit's word (PERF_PRECISE_EXITING); 0 under the
+// timer.
 perf_precise_rings := I64{0}
 
 PERF_PRECISE_FDS: I64{65536}
 
+// The table's word after its descriptors: 1 once the exit drains every ring
+// (perf_precise_rings_drain), after which an ending thread's ring stays
+// mapped (perf_precise_end).
+PERF_PRECISE_EXITING: I64{524288}
+
 // A sampler's ring: its control page, then PERF_PRECISE_PAGES of samples.
+// The kernel signals the thread each time half of them fill
+// (perf_precise_open's watermark).
 PERF_PRECISE_PAGE: I64{4096}
 
-PERF_PRECISE_PAGES: I64{8}
+PERF_PRECISE_PAGES: I64{16}
+
+// The control page's word, past the kernel's, that is 1 while a drain
+// holds the ring (perf_samples_ring_drain), so one drain at a time moves
+// its tail.
+PERF_PRECISE_LOCK: I64{2048}
+
+// The bytes of the thread's stack, from rsp up, each sample copies, for
+// the call frame information's steps out of frames that keep no frame
+// pointer (perf_samples_ring_sample).
+PERF_PRECISE_STACK: I64{512}
+
+// A sample's callchain starts with this context marker, PERF_CONTEXT_USER,
+// then the interrupted rip and each return address of the kernel's frame
+// pointer walk.
+PERF_PRECISE_CONTEXT_USER: I64{-512}
+
+// The most callchain entries the kernel writes of a sample's stack
+// (/proc/sys/kernel/perf_event_max_stack), 0 under the timer; read before
+// the first sampler is armed.
+perf_precise_depth := I64{0}
+
+// The kernel's cap on a sample's callchain entries where it has no
+// perf_event_max_stack setting (PERF_MAX_STACK_DEPTH).
+PERF_PRECISE_MAX_STACK: I64{127}
+
+// The kernel's time to take one sample into a ring, as the start timed it
+// (perf_precise_cost): picoseconds per sample, and per callchain entry.
+perf_precise_cost_ps := I64{0}
+
+perf_precise_frame_ps := I64{0}
 
 // A thread's perf event sampler (perf_samples_thread_start) is its descriptor
 // with this bit, which no timer id has.
 PERF_PRECISE_TAG: I64{4294967296}
+
+// The TCB word (Thread.jet) that holds the ring of the thread's sampler, 0
+// for none; a fiber borrows its carrier's (perf_rings_lend), so the turns
+// that change the task a sample is charged to drain the ring first
+// (perf_samples_turn).
+PERF_SAMPLES_TCB_RING: I64{776}
 
 // Start sampling once per process: into the file JET_PERF_SAMPLES names,
 // or, when it is unset, into the flight recorder's ring (perf_flight_open),
@@ -475,7 +539,7 @@ perf_samples_start: fn() {
     perf_cfi_start(image)
     // The spawn, wait and wake records walk their stacks (perf_samples_stack).
     alloc_frames_start()
-    buffer: alloc_map_try(wrapping(wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_SLOTS) + I64{3}) * I64{8}))
+    buffer: alloc_map_try(wrapping(wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_SLOTS) + PERF_SAMPLES_TALLIES) * I64{8}))
     if (buffer != I64{0}) {
         // No counter is open yet (perf_counter_of).
         index := I64{0}
@@ -510,10 +574,8 @@ perf_samples_start: fn() {
     if (status >= I64{0}) {
         // While the descriptor is still -1 the handler returns at once.
         delivery: perf_samples_delivery()
-        cpu: perf_samples_process_cpu_ns()
         #Unsafe("no timer is armed yet, so no handler reads these before they are set") {
             perf_samples_delivery_ns = delivery
-            perf_samples_cpu_start = cpu
             perf_samples_fd = fd
         }
     }
@@ -536,6 +598,12 @@ perf_samples_start: fn() {
         if (threads >= I64{0}) { _ := host_call(I64{3}, threads, I64{0}, I64{0}) }
         if (calls >= I64{0}) { _ := host_call(I64{3}, calls, I64{0}, I64{0}) }
         return
+    }
+    // The CPU time sampled starts once the sampler is chosen, after the
+    // time the choice and its cost's calibration took (perf_precise_cost).
+    cpu: perf_samples_process_cpu_ns()
+    #Unsafe("only the exit reads it, and no exit runs before the start returns") {
+        perf_samples_cpu_start = cpu
     }
     perf_counters_start(buffer, counters)
     perf_topdown_start(buffer, topdown)
@@ -636,13 +704,16 @@ perf_samples_thread_start: fn() -> I64 {
 }
 
 // End this thread's sampler (perf_samples_thread_start, `sampler`) as the
-// thread ends: a perf event closed, a timer deleted; nothing when it
-// has none.
+// thread ends: a perf event's ring drained (perf_samples_turn) and the
+// event closed, a timer deleted; nothing when it has none.
 perf_samples_thread_end: fn(sampler: I64) {
     if (sampler < I64{0}) {
         return
     }
     if ((sampler & PERF_PRECISE_TAG) != I64{0}) {
+        tcb: thread_base()
+        perf_samples_turn(tcb)
+        sync_store(wrapping(tcb + PERF_SAMPLES_TCB_RING), I64{0})
         perf_precise_end(sampler & I64{4294967295})
         return
     }
@@ -887,23 +958,27 @@ perf_system_write: fn(fd: I64, bytes: I64, size: I64) {
 // perf_precise_period cycles. Else, or where neither opens, at most 2, the
 // task clock. Else (-1) each thread's timer, which the flight recorder and
 // the causal lens keep (`timer`), since a causal experiment's periods are
-// CPU time's. Writes seven words to `file` (`<samples>.pc`, -1 for none),
-// and closes it: the source, the errno IBS op sampling, PEBS and the task
-// clock were each refused with, or 0, perf_event_paranoid
+// CPU time's. A perf event's cost per sample is timed once it is armed
+// (perf_precise_cost). Writes eight words to `file` (`<samples>.pc`, -1 for
+// none), and closes it: the source, the errno IBS op sampling, PEBS and the
+// task clock were each refused with, or 0, perf_event_paranoid
 // (PERF_PARANOID_NONE where the kernel has none), the source's period (in
-// cycles for a precise one, else in nanoseconds of CPU time) and 1 where
-// `timer` kept the timer. The armed sampler's handle (perf_precise_arm), or
-// -1.
+// cycles for a precise one, else in nanoseconds of CPU time), 1 where
+// `timer` kept the timer, and the most callchain entries the kernel writes
+// of a perf event's sample (perf_precise_depth, 0 under the timer). The
+// armed sampler's handle (perf_precise_arm), or -1.
 perf_precise_choose: fn(file: I64, timer: Bool) -> I64 {
     ibs := I64{0}
     pebs := I64{0}
     task := I64{0}
-    paranoid: perf_samples_paranoid()
+    paranoid: perf_samples_sysctl(rt_static_text("/proc/sys/kernel/perf_event_paranoid"))
     handle := I64{-1}
-    rings: if (timer) -> I64{0} else -> alloc_map_try(wrapping(PERF_PRECISE_FDS * I64{8}))
+    rings: if (timer) -> I64{0} else -> alloc_map_try(wrapping(PERF_PRECISE_EXITING + I64{8}))
     if (rings != I64{0}) {
-        #Unsafe("the table is set before the first sampler is armed, so no handler reads it before") {
+        max: perf_samples_sysctl(rt_static_text("/proc/sys/kernel/perf_event_max_stack"))
+        #Unsafe("the table and the depth are set before the first sampler is armed, so no handler reads them before") {
             perf_precise_rings = rings
+            perf_precise_depth = if (max == PERF_PARANOID_NONE) -> PERF_PRECISE_MAX_STACK else -> max
         }
         if (paranoid <= I64{1}) {
             cycles: perf_precise_cycles()
@@ -937,14 +1012,15 @@ perf_precise_choose: fn(file: I64, timer: Bool) -> I64 {
             #Unsafe("no sampler is armed, so no handler reads the table") {
                 perf_precise_rings = I64{0}
                 perf_precise_source = PERF_PC_TIMER
+                perf_precise_depth = I64{0}
             }
-            alloc_unmap(rings, wrapping(PERF_PRECISE_FDS * I64{8}))
-        }
+            alloc_unmap(rings, wrapping(PERF_PRECISE_EXITING + I64{8}))
+        } else { perf_precise_cost(perf_precise_source, handle & I64{4294967295}) }
     }
     if (file >= I64{0}) {
         precise: perf_precise_source == PERF_PC_IBS_OP || perf_precise_source == PERF_PC_PEBS
         period: if (precise) -> perf_precise_period else -> wrapping(perf_samples_interval_us * I64{1000})
-        #Unsafe("seven writes of a stack-local word, which the kernel copies before each call returns") {
+        #Unsafe("eight writes of a stack-local word, which the kernel copies before each call returns") {
             _ := os_write_word_i64(file, perf_precise_source, I64{8})
             _ := os_write_word_i64(file, ibs, I64{8})
             _ := os_write_word_i64(file, pebs, I64{8})
@@ -952,16 +1028,17 @@ perf_precise_choose: fn(file: I64, timer: Bool) -> I64 {
             _ := os_write_word_i64(file, paranoid, I64{8})
             _ := os_write_word_i64(file, period, I64{8})
             _ := os_write_word_i64(file, if (timer) -> I64{1} else -> I64{0}, I64{8})
+            _ := os_write_word_i64(file, perf_precise_depth, I64{8})
         }
         _ := host_call(I64{3}, file, I64{0}, I64{0})
     }
     handle
 }
 
-// The kernel's /proc/sys/kernel/perf_event_paranoid, a decimal number with
-// an optional sign; PERF_PARANOID_NONE where it can't be read.
-perf_samples_paranoid: fn() -> I64 {
-    path: rt_static_text("/proc/sys/kernel/perf_event_paranoid")
+// The kernel setting the text `path` names under /proc/sys (such as
+// perf_event_paranoid), a decimal number with an optional sign;
+// PERF_PARANOID_NONE where it can't be read.
+perf_samples_sysctl: fn(path: I64) -> I64 {
     name: fd_c_path(path)
     fd: host_call(I64{2}, name, I64{524288}, I64{0})
     fd_c_path_drop(name, path)
@@ -1027,52 +1104,71 @@ perf_precise_cycles: fn() -> I64 {
     if (cycles < I64{16}) -> I64{16} else -> cycles & I64{-16}
 }
 
-// Open this thread's sampler of `source`: a perf event of this thread in
-// user mode, each sample its instruction pointer, written to a ring the
-// table keeps by its descriptor (perf_precise_attach). The task clock is
-// the software event of this thread's CPU clock, sampled once per
-// perf_samples_interval_us of it; time in the kernel takes no sample.
-// IBS op sampling is the PMU whose sysfs directory is `ibs_op`, filtered
-// to user mode in software (swfilt, config2 bit 0); PEBS is the core PMU's
-// cycles at precise_ip 2; each sampled once per perf_precise_period
-// cycles. The descriptor with PERF_PRECISE_TAG, or the negated errno of the
-// call the kernel refused, ENOENT where there is no `ibs_op` PMU.
+// Arm this thread's sampler of `source` (perf_precise_open) at its period:
+// once per perf_samples_interval_us of the thread's CPU time for the task
+// clock, once per perf_precise_period cycles for a precise source, its ring
+// kept in the table by its descriptor (perf_precise_attach). The
+// descriptor with PERF_PRECISE_TAG, or the negated errno of the call the
+// kernel refused, ENOENT where there is no `ibs_op` PMU.
 perf_precise_arm: fn(source: I64) -> I64 {
-    attr: jet_rt_alloc(I64{72}, I64{8})
-    thread_zero(attr, I64{72})
+    attr: jet_rt_alloc(I64{96}, I64{8})
+    period: if (source == PERF_PC_TASK_CLOCK) -> wrapping(perf_samples_interval_us * I64{1000}) else -> perf_precise_period
+    fd := perf_precise_open(attr, source, period)
+    if (fd >= I64{0}) { fd = perf_precise_attach(fd, attr) }
+    jet_rt_free(attr, I64{96}, I64{8})
+    fd
+}
+
+// perf_event_open of a sampler of `source` on this thread in user mode,
+// once per `period`, disabled, its attribute words built in the 96 bytes at
+// `attr`. The task clock is the software event of this thread's CPU clock,
+// its period in nanoseconds of it; time in the kernel takes no sample. IBS
+// op sampling is the PMU whose sysfs directory is `ibs_op`, filtered to
+// user mode in software (swfilt, config2 bit 0); PEBS is the core PMU's
+// cycles at precise_ip 2; each period in cycles. Each sample is the
+// kernel's: the sampled instruction pointer, its time on the monotonic
+// clock, the callchain of the kernel's frame pointer walk of the user
+// stack, at most perf_precise_depth entries, the user rbp, rsp and rip, and
+// PERF_PRECISE_STACK bytes of the stack from rsp (the record
+// perf_samples_ring_sample reads), and the kernel signals the thread's
+// owner once half the ring fills. The descriptor, or the negated errno of
+// the call the kernel refused.
+perf_precise_open: fn(attr: I64, source: I64, period: I64) -> I64 {
+    thread_zero(attr, I64{96})
     kind := if (source == PERF_PC_TASK_CLOCK) -> I64{1} else -> I64{0}
     if (source == PERF_PC_IBS_OP) {
         kind = perf_topdown_pmu(rt_static_text("/sys/bus/event_source/devices/ibs_op/type"), attr)
     }
-    fd := kind
-    if (kind >= I64{0}) {
-        // perf_event_attr through config2 (PERF_ATTR_SIZE_VER1): its type
-        // and size, config 0 (IBS's cycle count, or cycles) or 1
-        // (PERF_COUNT_SW_TASK_CLOCK), the sample period, sample_type
-        // PERF_SAMPLE_IP, the flags disabled | exclude_kernel | exclude_hv,
-        // with precise_ip 2 for PEBS, a wakeup at each sample, and config2.
-        clock: source == PERF_PC_TASK_CLOCK
-        rt_text_store(attr, kind | (I64{72} << I64{32}))
-        rt_text_store(wrapping(attr + I64{8}), if (clock) -> I64{1} else -> I64{0})
-        rt_text_store(wrapping(attr + I64{16}), if (clock) -> wrapping(perf_samples_interval_us * I64{1000}) else -> perf_precise_period)
-        rt_text_store(wrapping(attr + I64{24}), I64{1})
-        rt_text_store(wrapping(attr + I64{40}), if (source == PERF_PC_PEBS) -> I64{65633} else -> I64{97})
-        rt_text_store(wrapping(attr + I64{48}), I64{1})
-        rt_text_store(wrapping(attr + I64{64}), if (source == PERF_PC_IBS_OP) -> I64{1} else -> I64{0})
-        #Unsafe("perf_event_open reads the attribute words of the scratch") {
-            fd = os_syscall_i64(I64{298}, attr, I64{0}, I64{-1}, I64{-1}, I64{8}, I64{0})
-        }
+    if (kind < I64{0}) { return kind }
+    // perf_event_attr through clockid (PERF_ATTR_SIZE_VER3): its type and
+    // size, config 0 (IBS's cycle count, or cycles) or 1
+    // (PERF_COUNT_SW_TASK_CLOCK), the sample period, sample_type
+    // PERF_SAMPLE_IP | TIME | CALLCHAIN | REGS_USER | STACK_USER, the flags
+    // disabled | exclude_kernel | exclude_hv | watermark |
+    // exclude_callchain_kernel | use_clockid, with precise_ip 2 for PEBS,
+    // the wakeup watermark, config2, sample_regs_user rbp, rsp and rip
+    // (bits 6, 7 and 8), sample_stack_user and clockid CLOCK_MONOTONIC.
+    clock: source == PERF_PC_TASK_CLOCK
+    rt_text_store(attr, kind | (I64{96} << I64{32}))
+    rt_text_store(wrapping(attr + I64{8}), if (clock) -> I64{1} else -> I64{0})
+    rt_text_store(wrapping(attr + I64{16}), period)
+    rt_text_store(wrapping(attr + I64{24}), I64{12325})
+    rt_text_store(wrapping(attr + I64{40}), if (source == PERF_PC_PEBS) -> I64{35733601} else -> I64{35668065})
+    rt_text_store(wrapping(attr + I64{48}), wrapping(PERF_PRECISE_PAGES * PERF_PRECISE_PAGE) >> I64{1})
+    rt_text_store(wrapping(attr + I64{64}), if (source == PERF_PC_IBS_OP) -> I64{1} else -> I64{0})
+    rt_text_store(wrapping(attr + I64{80}), I64{448})
+    rt_text_store(wrapping(attr + I64{88}), PERF_PRECISE_STACK | (I64{1} << I64{32}))
+    #Unsafe("perf_event_open reads the attribute words of the scratch") {
+        return os_syscall_i64(I64{298}, attr, I64{0}, I64{-1}, I64{-1}, I64{8}, I64{0})
     }
-    if (fd >= I64{0}) { fd = perf_precise_attach(fd, attr) }
-    jet_rt_free(attr, I64{72}, I64{8})
-    fd
 }
 
-// Map sampler `fd`'s ring into the table, write its tail once, have each
-// sample signal this thread with SIGPROF (perf_event_signal, its
-// f_owner_ex built at `owner`) and enable it. A sampler the kernel refuses
-// any of that for is closed. Its handle, or the negated errno of the call
-// the kernel refused.
+// Map sampler `fd`'s ring into the table, write its tail once, have the
+// ring signal this thread with SIGPROF as it fills (perf_event_signal, its
+// f_owner_ex built at `owner`), enable it and keep it in this thread's
+// TCB (PERF_SAMPLES_TCB_RING). A sampler the kernel refuses any of that
+// for is closed. Its handle, or the negated errno of the call the kernel
+// refused.
 perf_precise_attach: fn(fd: I64, owner: I64) -> I64 {
     if (fd >= PERF_PRECISE_FDS) {
         _ := host_call(I64{3}, fd, I64{0}, I64{0})
@@ -1085,12 +1181,12 @@ perf_precise_attach: fn(fd: I64, owner: I64) -> I64 {
         // that the kernel abandons, and retries from user mode, whenever a
         // signal is pending. The memory lens's page-fault counter queues
         // PERF_COUNTERS_SIGNAL at each fault it counts, the retry included,
-        // so the handler's first tail store (perf_samples_put) made once
+        // so a drain's first tail store (perf_samples_ring_drain) made once
         // that counter is armed faults forever. The tail's first store is
         // made here, before this sampler is enabled; the main thread
         // attaches its sampler before perf_counters_start arms the
         // counters, and they count the main thread alone, so no armed
-        // counter counts this store's fault.
+        // counter counts this store's fault. The drain lock shares the page.
         sync_store(wrapping(ring + I64{1032}), I64{0})
         sync_store(wrapping(perf_precise_rings + wrapping(fd * I64{8})), ring)
         result = perf_event_signal(fd, PERF_SAMPLES_SIGNAL, owner, thread_tid())
@@ -1104,6 +1200,7 @@ perf_precise_attach: fn(fd: I64, owner: I64) -> I64 {
         perf_precise_end(fd)
         return result
     }
+    sync_store(wrapping(thread_base() + PERF_SAMPLES_TCB_RING), ring)
     fd | PERF_PRECISE_TAG
 }
 
@@ -1113,13 +1210,176 @@ perf_precise_ring_bytes: fn() -> I64 {
 }
 
 // Close sampler `fd` and unmap its ring, its table slot cleared first, so
-// that a signal still pending finds no ring.
+// that a signal still pending finds no ring. The ring is unmapped once no
+// drain holds it; once the exit drains every ring
+// (perf_precise_rings_drain), which may have read it from the table before
+// it was cleared, it stays mapped for the process's last moments.
 perf_precise_end: fn(fd: I64) {
-    slot: wrapping(perf_precise_rings + wrapping(fd * I64{8}))
+    rings: perf_precise_rings
+    slot: wrapping(rings + wrapping(fd * I64{8}))
     ring: sync_load(slot)
     sync_store(slot, I64{0})
     _ := host_call(I64{3}, fd, I64{0}, I64{0})
-    if (ring != I64{0}) { alloc_unmap(ring, perf_precise_ring_bytes()) }
+    if (ring == I64{0}) {
+        return
+    }
+    // The lock's swap orders the cleared slot before the exit word's read,
+    // as the exit's swap of that word orders it before its reads of the
+    // table, so either the exit finds the slot cleared or this finds the
+    // exit.
+    loop sync_cas(wrapping(ring + PERF_PRECISE_LOCK), I64{0}, I64{1}) != (I64{0}) {
+        _ := host_call(I64{24}, I64{0}, I64{0}, I64{0})
+    }
+    if (sync_load(wrapping(rings + PERF_PRECISE_EXITING)) == I64{0}) {
+        alloc_unmap(ring, perf_precise_ring_bytes())
+    }
+}
+
+// Time the kernel's part of one sample of `source`, whose armed sampler
+// `fd` is held disabled meanwhile: a second sampler of `source`, with no
+// signal, samples perf_precise_spin's steps at a twelfth of the source's
+// period, first called from here and then PERF_PRECISE_DEEP calls deeper,
+// each against the same steps with that sampler disabled, the fastest of
+// PERF_PRECISE_ROUNDS each, on the monotonic clock, which counts the
+// interrupt's time that the thread's CPU clock may leave out. The
+// difference per sample at each depth gives the kernel's picoseconds per
+// sample and per callchain entry (perf_precise_cost_ps,
+// perf_precise_frame_ps), which each drained sample adds to the tally
+// (PERF_SAMPLES_RING_PS). Both stay 0 where the second sampler does not
+// open or its samples do not tell the depths apart.
+perf_precise_cost: fn(source: I64, fd: I64) {
+    #Unsafe("ioctl PERF_EVENT_IOC_DISABLE takes no argument") {
+        _ := os_syscall_i64(I64{16}, fd, I64{9217}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    // The attribute's 96 bytes, then the counts of a round: its samples and
+    // their callchain entries.
+    scratch: jet_rt_alloc(I64{112}, I64{8})
+    period: if (source == PERF_PC_TASK_CLOCK) -> PERF_PRECISE_COST_NS else -> (perf_precise_period / I64{12}) & I64{-16}
+    timer: perf_precise_open(scratch, source, if (period < I64{16}) -> I64{16} else -> period)
+    ring: if (timer < I64{0}) -> I64{-1} else -> alloc_map_shared(perf_precise_ring_bytes(), timer)
+    if (ring >= I64{0}) {
+        sync_store(wrapping(ring + I64{1032}), I64{0})
+        shallow: perf_precise_cost_at(timer, ring, scratch, I64{0})
+        frames: rt_text_word(wrapping(scratch + I64{104}))
+        deep: perf_precise_cost_at(timer, ring, scratch, PERF_PRECISE_DEEP)
+        more: wrapping(rt_text_word(wrapping(scratch + I64{104})) - frames)
+        each: if (more >= PERF_PRECISE_DEEP / I64{2} && deep > shallow) -> wrapping(wrapping(deep - shallow) * I64{1000}) / more else -> I64{0}
+        base: wrapping(wrapping(shallow * I64{1000}) - wrapping(each * frames))
+        #Unsafe("the main thread's sampler is disabled and no other thread samples yet, so no drain reads the cost") {
+            perf_precise_cost_ps = if (base < I64{0}) -> I64{0} else -> base
+            perf_precise_frame_ps = each
+        }
+        alloc_unmap(ring, perf_precise_ring_bytes())
+    }
+    if (timer >= I64{0}) { _ := host_call(I64{3}, timer, I64{0}, I64{0}) }
+    jet_rt_free(scratch, I64{112}, I64{8})
+    #Unsafe("ioctl PERF_EVENT_IOC_ENABLE takes no argument") {
+        _ := os_syscall_i64(I64{16}, fd, I64{9216}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+}
+
+// The task clock's period while its cost is timed (perf_precise_cost): 10
+// microseconds, the shortest the kernel's timer takes.
+PERF_PRECISE_COST_NS: I64{10000}
+
+// The rounds of each depth's timing, the steps of perf_precise_spin each
+// of a round's PERF_PRECISE_CHUNKS takes, and the calls deeper the deep
+// timing runs them: few enough samples between chunks that the ring never
+// fills, and a deep stack the kernel's walk still reads whole.
+PERF_PRECISE_ROUNDS: I64{3}
+
+PERF_PRECISE_CHUNKS: I64{8}
+
+PERF_PRECISE_SPIN: I64{100000}
+
+PERF_PRECISE_DEEP: I64{64}
+
+// The nanoseconds per sample the sampler `timer`, whose ring is `ring`,
+// adds to perf_precise_spin's steps run `depth` calls below this one: the
+// fastest round with it enabled less the fastest without, over the samples
+// of the fastest enabled round, 0 for none. The words of `scratch` at 96
+// and 104 hold that round's samples and their callchain entries.
+perf_precise_cost_at: fn(timer: I64, ring: I64, scratch: I64, depth: I64) -> I64 {
+    off := I64{-1}
+    on := I64{-1}
+    samples := I64{0}
+    entries := I64{0}
+    round := I64{0}
+    loop round < wrapping(PERF_PRECISE_ROUNDS * I64{2}) {
+        enabled: round & I64{1} != I64{0}
+        if (enabled) {
+            #Unsafe("ioctl PERF_EVENT_IOC_ENABLE takes no argument") {
+                _ := os_syscall_i64(I64{16}, timer, I64{9216}, I64{0}, I64{0}, I64{0}, I64{0})
+            }
+        }
+        rt_text_store(wrapping(scratch + I64{96}), I64{0})
+        rt_text_store(wrapping(scratch + I64{104}), I64{0})
+        began: perf_samples_cpu_clock_ns(I64{1})
+        chunk := I64{0}
+        seed := round
+        loop chunk < PERF_PRECISE_CHUNKS {
+            seed = perf_precise_deep(depth, seed)
+            perf_precise_ring_count(ring, scratch)
+            chunk = wrapping(chunk + I64{1})
+        }
+        took: wrapping(perf_samples_cpu_clock_ns(I64{1}) - began)
+        if (enabled) {
+            #Unsafe("ioctl PERF_EVENT_IOC_DISABLE takes no argument") {
+                _ := os_syscall_i64(I64{16}, timer, I64{9217}, I64{0}, I64{0}, I64{0}, I64{0})
+            }
+            perf_precise_ring_count(ring, scratch)
+            if (on < I64{0} || took < on) {
+                on = took
+                samples = rt_text_word(wrapping(scratch + I64{96}))
+                entries = rt_text_word(wrapping(scratch + I64{104}))
+            }
+        } else if (off < I64{0} || took < off) { off = took }
+        // The steps' last state, kept where no optimizer drops them.
+        rt_text_store(scratch, seed)
+        round = wrapping(round + I64{1})
+    }
+    rt_text_store(wrapping(scratch + I64{96}), samples)
+    rt_text_store(wrapping(scratch + I64{104}), if (samples == I64{0}) -> I64{0} else -> entries / samples)
+    if (samples == I64{0} || on <= off) -> I64{0} else -> wrapping(on - off) / samples
+}
+
+// perf_precise_spin `depth` calls below this one; its last state.
+perf_precise_deep: fn(depth: I64, seed: I64) -> I64 {
+    if (depth <= I64{0}) { return perf_precise_spin(seed) }
+    wrapping(perf_precise_deep(wrapping(depth - I64{1}), seed) + I64{1})
+}
+
+// PERF_PRECISE_SPIN steps of a linear congruential generator from `seed`;
+// its last state.
+perf_precise_spin: fn(seed: I64) -> I64 {
+    state := seed
+    step := I64{0}
+    loop step < PERF_PRECISE_SPIN {
+        state = wrapping(wrapping(state * I64{6364136223846793005}) + I64{1442695040888963407})
+        step = wrapping(step + I64{1})
+    }
+    state
+}
+
+// Count the samples ring `ring` holds past its tail into the words of
+// `scratch` at 96 (samples) and 104 (their callchain entries), and free
+// them for the kernel.
+perf_precise_ring_count: fn(ring: I64, scratch: I64) {
+    data: wrapping(ring + PERF_PRECISE_PAGE)
+    mask: wrapping(wrapping(PERF_PRECISE_PAGES * PERF_PRECISE_PAGE) - I64{1})
+    filled: sync_load(wrapping(ring + I64{1024}))
+    tail := rt_text_word(wrapping(ring + I64{1032}))
+    loop tail < filled {
+        header: rt_text_word(wrapping(data + (tail & mask)))
+        size: (header >> I64{48}) & I64{65535}
+        if (size == I64{0}) { break }
+        if ((header & I64{4294967295}) == I64{9}) {
+            rt_text_store(wrapping(scratch + I64{96}), wrapping(rt_text_word(wrapping(scratch + I64{96})) + I64{1}))
+            rt_text_store(wrapping(scratch + I64{104}), wrapping(rt_text_word(wrapping(scratch + I64{104})) + rt_text_word(wrapping(data + (wrapping(tail + I64{24}) & mask)))))
+        }
+        tail = wrapping(tail + size)
+    }
+    sync_store(wrapping(ring + I64{1032}), filled)
 }
 
 // The ring of the sampler whose sample the SIGPROF `info` reports (a
@@ -1138,52 +1398,278 @@ perf_precise_ring: fn(info: I64) -> I64 {
     if (ring == I64{0}) -> I64{-1} else -> ring
 }
 
-// Write a sample's record: the `record` words after its first, whose first
-// word, `head` (its word count and kind) above a program counter, each
-// write fills in; or, where `record` is 0, that first word alone. A timer's
-// sample (`ring` 0) is `pc`, written once for each of its `periods`; a
-// perf event's is each sample its ring holds past the tail (a
-// PERF_RECORD_SAMPLE, type 9, its size in the header's top 16 bits and its
-// instruction pointer after the header), by that pointer less the image's
-// bias, under the callers perf_samples_put_precise finds, and the tail then
-// moves to the head, freeing them for the kernel. `side` is the record
-// buffer's side (perf_samples_side), 0 for none, and `scratch` its rules'
-// scratch (perf_samples_scratch).
-perf_samples_put: fn(fd: I64, side: I64, scratch: I64, record: I64, head: I64, pc: I64, ring: I64, periods: I64) {
-    if (ring == I64{0}) {
-        written := I64{0}
-        loop written < periods {
-            perf_samples_put_one(fd, side, record, head, pc)
-            written = wrapping(written + I64{1})
-        }
-        return
+// Write a timer's sample: `pc`, once for each of its `periods`, the
+// `record` words after its first, whose first word, `head` (its word count
+// and kind) above a program counter, each write fills in; or, where
+// `record` is 0, that first word alone. `side` is the record buffer's side
+// (perf_samples_side), 0 for none.
+perf_samples_put: fn(fd: I64, side: I64, record: I64, head: I64, pc: I64, periods: I64) {
+    written := I64{0}
+    loop written < periods {
+        perf_samples_put_one(fd, side, record, head, pc)
+        written = wrapping(written + I64{1})
     }
-    data: wrapping(ring + PERF_PRECISE_PAGE)
-    mask: wrapping(wrapping(PERF_PRECISE_PAGES * PERF_PRECISE_PAGE) - I64{1})
-    filled: sync_load(wrapping(ring + I64{1024}))
-    tail := rt_text_word(wrapping(ring + I64{1032}))
-    loop tail < filled {
-        header: rt_text_word(wrapping(data + (tail & mask)))
-        size: (header >> I64{48}) & I64{65535}
-        if (size == I64{0}) { break }
-        if ((header & I64{4294967295}) == I64{9}) {
-            ip: rt_text_word(wrapping(data + (wrapping(tail + I64{8}) & mask)))
-            perf_samples_put_precise(fd, side, scratch, record, head, pc, wrapping(ip - perf_samples_bias))
-        }
-        tail = wrapping(tail + size)
-    }
-    sync_store(wrapping(ring + I64{1032}), filled)
 }
 
-// One write of a precise sample's record (perf_samples_put) at program
-// counter `precise`. The handler walked the interrupted context: `record`'s
-// word 1 is left for its program counter `pc`, and the words after it, to
-// `head`'s count, are its callers. The signal comes some instructions past
-// the sampled one (its skid), so the interrupted code can be another
+// Under a perf event the kernel takes each sample into the thread's ring,
+// its stack walked there, and the program drains the ring in batches, with
+// no signal for each sample: at each turn that changes the task its
+// samples are charged to (perf_samples_turn), when the kernel signals that
+// half the ring filled (jet_rt_perf_samples_signal), as the thread ends
+// (perf_samples_thread_end) and at exit (perf_precise_rings_drain). A drain
+// holds the ring's lock (PERF_PRECISE_LOCK), so a handler that finds
+// another drain holding it leaves the ring to that drain, which reads on
+// until the ring holds nothing past its tail. Each sample
+// (PERF_RECORD_SAMPLE, type 9) is written in a record buffer the drain
+// claims (perf_samples_ring_sample), charged to the task the TCB `tcb`
+// runs (perf_samples_task_of), 0 for none; the samples the kernel found no
+// room for (PERF_RECORD_LOST, type 2, its count after its id) count as
+// lost records. The rings' tallies (PERF_SAMPLES_RING_COUNT) add the
+// drained samples, the kernel's time for them and those the kernel's
+// callchain cut. Each tail store frees what the drain read for the kernel.
+perf_samples_ring_drain: fn(ring: I64, tcb: I64) {
+    fd: perf_samples_fd
+    lock: wrapping(ring + PERF_PRECISE_LOCK)
+    if (fd < I64{0} || sync_cas(lock, I64{0}, I64{1}) != I64{0}) {
+        return
+    }
+    buffer: perf_samples_buffer
+    task: perf_samples_task_of(tcb)
+    data: wrapping(ring + PERF_PRECISE_PAGE)
+    slot := I64{0}
+    samples := I64{0}
+    entries := I64{0}
+    cut := I64{0}
+    tail := rt_text_word(wrapping(ring + I64{1032}))
+    filled := sync_load(wrapping(ring + I64{1024}))
+    loop tail != filled {
+        if (slot == I64{0} && buffer != I64{0}) { slot = perf_samples_claim(buffer) }
+        loop tail < filled {
+            header: perf_samples_ring_word(data, tail)
+            size: (header >> I64{48}) & I64{65535}
+            if (size == I64{0}) {
+                tail = filled
+                break
+            }
+            kind: header & I64{4294967295}
+            if (kind == I64{9}) {
+                chain: perf_samples_ring_sample(fd, buffer, slot, data, tail, task)
+                samples = wrapping(samples + I64{1})
+                entries = wrapping(entries + chain)
+                if (wrapping(chain - I64{1}) >= perf_precise_depth) { cut = wrapping(cut + I64{1}) }
+            } else if (kind == I64{2}) {
+                lost: perf_samples_lost_word()
+                if (lost != I64{0}) {
+                    _ := sync_add(lost, perf_samples_ring_word(data, wrapping(tail + I64{16})))
+                }
+            }
+            tail = wrapping(tail + size)
+        }
+        sync_store(wrapping(ring + I64{1032}), tail)
+        filled = sync_load(wrapping(ring + I64{1024}))
+    }
+    if (slot != I64{0}) { sync_store(slot, I64{0}) }
+    sync_store(lock, I64{0})
+    if (buffer != I64{0} && samples != I64{0}) {
+        _ := sync_add(perf_samples_tally(buffer, PERF_SAMPLES_RING_COUNT), samples)
+        _ := sync_add(perf_samples_tally(buffer, PERF_SAMPLES_RING_PS), wrapping(wrapping(samples * perf_precise_cost_ps) + wrapping(entries * perf_precise_frame_ps)))
+        if (cut != I64{0}) { _ := sync_add(perf_samples_tally(buffer, PERF_SAMPLES_RING_CUT), cut) }
+    }
+}
+
+// The word of a sampler's ring at `at` past `data`, its samples, which
+// wrap at PERF_PRECISE_PAGES; each of a record's words is 8-aligned, so
+// none straddles the wrap.
+perf_samples_ring_word: fn(data: I64, at: I64) -> I64 {
+    rt_text_word(wrapping(data + (at & wrapping(wrapping(PERF_PRECISE_PAGES * PERF_PRECISE_PAGE) - I64{1}))))
+}
+
+// The address of tally `index` of the record buffer `buffer`: its words
+// past its PERF_SAMPLES_DEPTH + 1 and its counters' slots.
+perf_samples_tally: fn(buffer: I64, index: I64) -> I64 {
+    wrapping(buffer + wrapping(wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_SLOTS) + index) * I64{8}))
+}
+
+// Write the sample at `at` of a ring (perf_samples_ring_drain), past
+// `data`, as a CPU-time sample's record in the record buffer `slot`
+// (perf_samples_claim), charged to task `task`: its instruction pointer
+// alone where `slot` is 0. The kernel read the user registers and walked
+// the stack as it took the sample. Where the interrupted rip is in the
+// image's code, the call frame information (perf_cfi_rules) first steps out
+// of each frame whose CFA is rsp-based, a function without a frame pointer
+// or one before its prologue sets it, reading the return address and,
+// where it was saved, rbp from the sample's copy of the stack
+// (perf_samples_ring_stack). At the first frame that keeps rbp, when rbp
+// is still the sampled one, the callers are the kernel's frame pointer
+// walk from it, past the context marker and the interrupted rip, while the
+// call site is in the image's code; when the rules restored another rbp,
+// its chain is followed while it stays in the copy. The record ends in the
+// sample's time on the process-relative monotonic clock zones are timed on
+// and its task (PERF_SAMPLES_TIMED), and is written by the sampled
+// instruction pointer, under the callers perf_samples_put_precise finds.
+// The callchain's entry count, which the drain tallies.
+perf_samples_ring_sample: fn(fd: I64, buffer: I64, slot: I64, data: I64, at: I64, task: I64) -> I64 {
+    bias: perf_samples_bias
+    precise: wrapping(perf_samples_ring_word(data, wrapping(at + I64{8})) - bias)
+    entries: perf_samples_ring_word(data, wrapping(at + I64{24}))
+    if (slot == I64{0}) {
+        perf_samples_put_one(fd, I64{0}, I64{0}, I64{1} << PERF_SAMPLES_ADDRESS_BITS, precise)
+        return entries
+    }
+    chain: wrapping(at + I64{32})
+    regs: wrapping(chain + wrapping(entries * I64{8}))
+    abi: perf_samples_ring_word(data, regs)
+    pc: if (abi == I64{0}) -> precise else -> wrapping(perf_samples_ring_word(data, wrapping(regs + I64{24})) - bias)
+    room: wrapping(PERF_SAMPLES_DEPTH - PERF_SAMPLES_TIMED)
+    count := I64{2}
+    side: perf_samples_side(slot, buffer)
+    rows: if (side == I64{0}) -> I64{0} else -> perf_samples_side_rows(side)
+    rules: perf_samples_scratch(slot, buffer)
+    if (abi != I64{0} && perf_samples_in_code(pc)) {
+        bp: perf_samples_ring_word(data, wrapping(regs + I64{8}))
+        stack: perf_samples_ring_word(data, wrapping(regs + I64{16}))
+        // The copy's size word, its bytes, then how many of them the
+        // kernel copied.
+        sized: wrapping(regs + I64{32})
+        size: perf_samples_ring_word(data, sized)
+        bytes: wrapping(sized + I64{8})
+        copied: if (size == I64{0}) -> I64{0} else -> perf_samples_ring_word(data, wrapping(bytes + size))
+        frame := bp
+        sp := stack
+        address := pc
+        loop rules != (I64{0}) && count < room {
+            row: perf_cfi_rules(rows, rules, address)
+            if (row == I64{0}) { break }
+            register: rt_text_word(wrapping(row + PERF_CFI_CFA_REG))
+            // A frame that keeps rbp: the walks below take it from here.
+            if (register == PERF_CFI_RBP) { break }
+            cfa: wrapping(sp + rt_text_word(wrapping(row + PERF_CFI_CFA_OFFSET)))
+            if (register != PERF_CFI_RSP || rt_text_word(wrapping(row + PERF_CFI_RA_RULE)) != PERF_CFI_SAVED || cfa <= sp || cfa & I64{7} != I64{0}) {
+                frame = I64{0}
+                break
+            }
+            rule: rt_text_word(wrapping(row + PERF_CFI_RBP_RULE))
+            if {
+                (rule == PERF_CFI_SAVED) -> {
+                    frame = perf_samples_ring_stack(data, bytes, copied, stack, wrapping(cfa + rt_text_word(wrapping(row + PERF_CFI_RBP_OFFSET))))
+                }
+                (rule == PERF_CFI_UNKNOWN) -> frame = I64{0}
+                else -> {}
+            }
+            site: wrapping(wrapping(perf_samples_ring_stack(data, bytes, copied, stack, wrapping(cfa + rt_text_word(wrapping(row + PERF_CFI_RA_OFFSET)))) - I64{1}) - bias)
+            if (!perf_samples_in_code(site)) {
+                frame = I64{0}
+                break
+            }
+            rt_text_store(wrapping(slot + wrapping(wrapping(count + I64{1}) * I64{8})), site)
+            count = wrapping(count + I64{1})
+            sp = cfa
+            address = site
+        }
+        if (frame == bp && frame >= sp && perf_samples_ring_word(data, chain) == PERF_PRECISE_CONTEXT_USER) {
+            index := I64{2}
+            loop index < entries && count < room {
+                site: wrapping(wrapping(perf_samples_ring_word(data, wrapping(chain + wrapping(index * I64{8}))) - I64{1}) - bias)
+                if (!perf_samples_in_code(site)) { break }
+                rt_text_store(wrapping(slot + wrapping(wrapping(count + I64{1}) * I64{8})), site)
+                count = wrapping(count + I64{1})
+                index = wrapping(index + I64{1})
+            }
+        } else {
+            loop frame != (I64{0}) && count < room {
+                if (frame < sp || frame & I64{7} != I64{0}) { break }
+                site: wrapping(wrapping(perf_samples_ring_stack(data, bytes, copied, stack, wrapping(frame + I64{8})) - I64{1}) - bias)
+                if (!perf_samples_in_code(site)) { break }
+                rt_text_store(wrapping(slot + wrapping(wrapping(count + I64{1}) * I64{8})), site)
+                count = wrapping(count + I64{1})
+                caller: perf_samples_ring_stack(data, bytes, copied, stack, frame)
+                frame = if (caller > frame) -> caller else -> I64{0}
+            }
+        }
+    }
+    // Its time from the process epoch, as the handler times a timer's
+    // sample (jet_rt_perf_samples_signal): the kernel took it on the same
+    // monotonic clock.
+    epoch: time_host_epoch_ns(perf_zone_clock)
+    time: perf_samples_ring_word(data, wrapping(at + I64{16}))
+    rt_text_store(wrapping(slot + wrapping(wrapping(count + I64{1}) * I64{8})), if (epoch == I64{0}) -> I64{-1} else -> wrapping(time - epoch))
+    rt_text_store(wrapping(slot + wrapping(wrapping(count + I64{2}) * I64{8})), task)
+    count = wrapping(count + PERF_SAMPLES_TIMED)
+    perf_samples_put_precise(fd, side, rules, wrapping(slot + I64{8}), count << PERF_SAMPLES_ADDRESS_BITS, pc, precise)
+    entries
+}
+
+// The word at `address` of the stack a sample copied: `copied` bytes from
+// rsp `stack`, at `bytes` past `data` in its ring; 0 outside them.
+perf_samples_ring_stack: fn(data: I64, bytes: I64, copied: I64, stack: I64, address: I64) -> I64 {
+    offset: wrapping(address - stack)
+    if (offset < I64{0} || offset & I64{7} != I64{0} || wrapping(offset + I64{8}) > copied) {
+        return I64{0}
+    }
+    perf_samples_ring_word(data, wrapping(bytes + offset))
+}
+
+// The task a CPU-time sample taken while the TCB `tcb` ran is charged to:
+// 0 outside every task's or root's control and for no TCB, else the
+// observed task its TLS names (Observe.jet observe_current_task), 1 for
+// none.
+perf_samples_task_of: fn(tcb: I64) -> I64 {
+    if (tcb == I64{0} || sync_load(wrapping(tcb + I64{16})) == I64{0}) { return I64{0} }
+    id: perf_flight_task(tcb, false)
+    if (id == I64{0}) -> I64{1} else -> id
+}
+
+// Drain the ring of the sampler the TCB `tcb` holds (PERF_SAMPLES_TCB_RING)
+// before the task it runs changes, so each sample is charged to the task
+// that ran as it was taken: as a carrier switches to a fiber and back
+// (Fiber.jet fiber_run), and as a task starts and finishes on it (Task.jet
+// task_run). Nothing while the ring holds nothing past its tail. Its time
+// is the handlers' (perf_samples_charge); a handler that interrupts it
+// between the clock's read and its words' only makes it start later.
+perf_samples_turn: fn(tcb: I64) {
+    ring: sync_load(wrapping(tcb + PERF_SAMPLES_TCB_RING))
+    if (ring == I64{0} || sync_load(wrapping(ring + I64{1024})) == rt_text_word(wrapping(ring + I64{1032}))) {
+        return
+    }
+    began: perf_samples_clock()
+    perf_samples_ring_drain(ring, tcb)
+    perf_samples_charge(perf_samples_buffer, began)
+}
+
+// At exit, drain every sampler's ring (perf_samples_ring_drain): this
+// thread's charged to its task, every other thread's to none, 0, since
+// another thread's task is not read while it runs. The exit word, set
+// first, keeps the ring of a thread that ends meanwhile mapped
+// (perf_precise_end).
+perf_precise_rings_drain: fn() {
+    rings: perf_precise_rings
+    if (rings == I64{0}) {
+        return
+    }
+    _ := sync_cas(wrapping(rings + PERF_PRECISE_EXITING), I64{0}, I64{1})
+    began: perf_samples_clock()
+    tcb: thread_base()
+    own: sync_load(wrapping(tcb + PERF_SAMPLES_TCB_RING))
+    if (own != I64{0}) { perf_samples_ring_drain(own, tcb) }
+    index := I64{0}
+    loop index < PERF_PRECISE_FDS {
+        ring: sync_load(wrapping(rings + wrapping(index * I64{8})))
+        if (ring != I64{0} && ring != own) { perf_samples_ring_drain(ring, I64{0}) }
+        index = wrapping(index + I64{1})
+    }
+    perf_samples_charge(perf_samples_buffer, began)
+}
+
+// One write of a precise sample's record (perf_samples_ring_sample) at
+// program counter `precise`. The drain walked the stack the kernel read at
+// the sampler's interrupt: `record`'s word 1 is left for the interrupted
+// program counter `pc`, and the words after it, to `head`'s count, are its
+// callers. A precise source's interrupt comes some instructions past the
+// sampled one (its skid), so the interrupted code can be another
 // function's: the sampled function's caller, once it returned, or its
 // callee, once it called one. So the callers are those of the innermost
 // walked frame in the sampled function (its call frame information's
-// range); when none is, the sampled function returned before the signal
+// range); when none is, the sampled function returned before the interrupt
 // came, and the interrupted frame is its caller. A sample outside every
 // range keeps the interrupted frame's callers. A CPU-time sample's record
 // (kind 0) ends in PERF_SAMPLES_TIMED words, which are no callers.
@@ -1373,39 +1859,51 @@ perf_samples_cpu_clock_ns: fn(clock: I64) -> I64 {
 // record of what sampling cost, so that the session can say how many of the
 // samples the CPU time should give it kept and what the sampler took of
 // that time. Its words after the first: the CPU time the process used since
-// sampling started, the time every handler ran (perf_samples_charge), the
-// kernel's time for one signal (perf_samples_delivery), each in
-// nanoseconds, then the allocations the alloc lens counted and the
-// nanoseconds it spent on them (perf_samples_alloc_write), then the records
-// the program made and could not write (perf_samples_lost). A second exit
-// writes a later one. Under the alloc lens the heap snapshot named `exit`
-// comes first (perf_samples_heap), then the allocations' records. The spans
-// buffer's rows and the records the handlers keep (perf_samples_flush) are
-// written out first, then the causal lens's idle table
-// (perf_causal_idle_write) and tasks' timings (perf_causal_rows_write), and
-// the threads and host calls (perf_system_exit).
+// sampling started, the time every handler and drain ran
+// (perf_samples_charge), the kernel's time for one signal
+// (perf_samples_delivery), each in nanoseconds, then the allocations the
+// alloc lens counted and the nanoseconds it spent on them
+// (perf_samples_alloc_write), then the records the program made and could
+// not write (perf_samples_lost), then the samples the drains took from the
+// kernel's rings, the kernel's nanoseconds for them as the start timed it
+// (perf_precise_cost), and those whose callchain the kernel cut at
+// perf_precise_depth entries (PERF_SAMPLES_RING_COUNT), all 0 under the
+// timer. A second exit writes a later one. Under the alloc lens the heap
+// snapshot named `exit` comes first (perf_samples_heap), then the
+// allocations' records. Every ring's samples are drained first
+// (perf_precise_rings_drain), then the spans buffer's rows and the records
+// the handlers keep (perf_samples_flush) are written out, then the causal
+// lens's idle table (perf_causal_idle_write) and tasks' timings
+// (perf_causal_rows_write), and the threads and host calls
+// (perf_system_exit).
 perf_samples_exit: fn() {
     perf_spans_flush()
     fd: perf_samples_fd
     if (fd < I64{0}) {
         return
     }
+    perf_precise_rings_drain()
     perf_samples_flush(fd)
     perf_causal_idle_write(fd)
     perf_causal_rows_write(fd)
     perf_system_exit()
     perf_samples_heap(rt_static_text("exit"))
     buffer: perf_samples_buffer
-    handlers: if (buffer == I64{0}) -> I64{0} else -> sync_load(wrapping(buffer + wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_SLOTS) * I64{8})))
-    record: jet_rt_alloc(I64{56}, I64{8})
+    record: jet_rt_alloc(I64{80}, I64{8})
+    thread_zero(record, I64{80})
     perf_samples_alloc_write(fd, wrapping(record + I64{32}))
-    rt_text_store(record, (I64{7} << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_CLOCK << PERF_SAMPLES_KIND_BITS))
+    rt_text_store(record, (I64{10} << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_CLOCK << PERF_SAMPLES_KIND_BITS))
     rt_text_store(wrapping(record + I64{8}), wrapping(perf_samples_process_cpu_ns() - perf_samples_cpu_start))
-    rt_text_store(wrapping(record + I64{16}), handlers)
     rt_text_store(wrapping(record + I64{24}), perf_samples_delivery_ns)
     rt_text_store(wrapping(record + I64{48}), perf_samples_lost())
-    perf_samples_send(fd, record, I64{56})
-    jet_rt_free(record, I64{56}, I64{8})
+    if (buffer != I64{0}) {
+        rt_text_store(wrapping(record + I64{16}), sync_load(perf_samples_tally(buffer, I64{0})))
+        rt_text_store(wrapping(record + I64{56}), sync_load(perf_samples_tally(buffer, PERF_SAMPLES_RING_COUNT)))
+        rt_text_store(wrapping(record + I64{64}), sync_load(perf_samples_tally(buffer, PERF_SAMPLES_RING_PS)) / I64{1000})
+        rt_text_store(wrapping(record + I64{72}), sync_load(perf_samples_tally(buffer, PERF_SAMPLES_RING_CUT)))
+    }
+    perf_samples_send(fd, record, I64{80})
+    jet_rt_free(record, I64{80}, I64{8})
     perf_topdown_exit()
 }
 
@@ -1503,7 +2001,7 @@ PERF_ZONE_RING_SKIP: I64{15}
 PERF_ZONE_RING_RECORD_MOST: I64{4096}
 
 // The TCB word (Thread.jet's layout) of the thread's zone ring, which a
-// fiber borrows from the carrier it runs on (perf_zone_ring_lend).
+// fiber borrows from the carrier it runs on (perf_rings_lend).
 PERF_ZONE_TCB_RING: I64{760}
 
 // A site's opcode byte: `test eax, imm32`, whose flags nothing reads,
@@ -1938,12 +2436,15 @@ perf_zone_ring: fn() -> I64 {
     ring
 }
 
-// Hands the zone ring `from`'s TCB holds to `to`'s, as the hazard record
-// is (IntHazard.jet int_hazard_lend): a carrier lends its ring to the fiber
-// it switches to and takes back the one the fiber holds when it switches
-// out, so one thread at a time writes a ring.
-perf_zone_ring_lend: fn(from: I64, to: I64) {
+// Hands the zone ring and the sampler's ring `from`'s TCB holds to `to`'s
+// (PERF_ZONE_TCB_RING, PERF_SAMPLES_TCB_RING), as the hazard record is
+// (IntHazard.jet int_hazard_lend): a carrier lends its rings to the fiber
+// it switches to and takes back the ones the fiber holds when it switches
+// out, so one thread at a time writes a zone ring, and the fiber's turns
+// drain the carrier's sampler (perf_samples_turn).
+perf_rings_lend: fn(from: I64, to: I64) {
     sync_store(wrapping(to + PERF_ZONE_TCB_RING), sync_load(wrapping(from + PERF_ZONE_TCB_RING)))
+    sync_store(wrapping(to + PERF_SAMPLES_TCB_RING), sync_load(wrapping(from + PERF_SAMPLES_TCB_RING)))
 }
 
 // Drains the full ring `ring` of this thread into the spans buffer, or
@@ -4315,14 +4816,14 @@ perf_cfi_sort: fn(table: I64, count: I64) {
 // (perf_samples_keep), and reads each frame's rules from the rows the side
 // keeps (perf_cfi_cached); a write the kernel refuses loses those records,
 // and O_APPEND puts each write after the last. Under the task clock or a
-// precise source (perf_precise_choose) a SIGPROF reports its sampler's ring
-// instead, and the record is written once for each sample the ring holds,
-// by the program counter the sample names, under the callers its function
-// has in the stack walked from the interrupted context
-// (perf_samples_put_precise). A counter's record has its kind, and the
-// counter is armed again once it is written. A topdown event's record is
-// one word, its program counter alone, 0 outside the image's code, and its
-// event's index above it.
+// precise source (perf_precise_choose) the kernel takes each sample into
+// the thread's ring with its stack, and a SIGPROF says the ring filled to
+// its watermark: the handler drains it (perf_samples_ring_drain), and
+// charges the signal's delivery with its own time, since no record counts
+// that signal. A counter's record has its kind, and the counter is armed
+// again once it is written. A topdown event's record is one word, its
+// program counter alone, 0 outside the image's code, and its event's index
+// above it.
 #Export(c) jet_rt_perf_samples_signal: fn(signal: I64, info: I64, context: I64) -> I64 {
     if (signal == PERF_FLIGHT_CAPTURE_SIGNAL) {
         perf_flight_capture(context)
@@ -4351,8 +4852,13 @@ perf_cfi_sort: fn(table: I64, count: I64) {
         perf_samples_charge(buffer, began)
         return I64{0}
     }
-    // Under a perf event, the sample is its ring's (perf_precise_ring).
+    // Under a perf event, the signal is its ring's (perf_precise_ring).
     ring: if (signal == PERF_SAMPLES_SIGNAL) -> perf_precise_ring(info) else -> I64{0}
+    if (ring > I64{0}) {
+        perf_samples_ring_drain(ring, thread_base())
+        perf_samples_charge(buffer, wrapping(began - perf_samples_delivery_ns))
+        return I64{0}
+    }
     if (ring < I64{0}) {
         perf_samples_charge(buffer, began)
         return I64{0}
@@ -4369,17 +4875,15 @@ perf_cfi_sort: fn(table: I64, count: I64) {
     walked: perf_samples_in_code(pc)
     slot: if (buffer == I64{0}) -> I64{0} else -> perf_samples_claim(buffer)
     if (slot == I64{0}) {
-        perf_samples_put(fd, I64{0}, I64{0}, I64{0}, (I64{1} << PERF_SAMPLES_ADDRESS_BITS) | kind, pc, ring, periods)
+        perf_samples_put(fd, I64{0}, I64{0}, (I64{1} << PERF_SAMPLES_ADDRESS_BITS) | kind, pc, periods)
         perf_counter_rearm(buffer, counter)
         perf_samples_charge(buffer, began)
         return I64{0}
     }
-    // A precise sample's record leaves word 1 for the interrupted program
-    // counter (perf_samples_put_precise). A CPU-time sample's record ends in
-    // PERF_SAMPLES_TIMED words.
+    // A CPU-time sample's record ends in PERF_SAMPLES_TIMED words.
     timed: kind == I64{0}
     room: if (timed) -> wrapping(PERF_SAMPLES_DEPTH - PERF_SAMPLES_TIMED) else -> PERF_SAMPLES_DEPTH
-    count := if (ring != I64{0}) -> I64{2} else -> I64{1}
+    count := I64{1}
     stack: rt_text_word(wrapping(context + I64{160}))
     frame := if (walked) -> rt_text_word(wrapping(context + I64{120})) else -> I64{0}
     // The buffer's side keeps the records not yet written and the rule
@@ -4444,10 +4948,10 @@ perf_cfi_sort: fn(table: I64, count: I64) {
         // time init hook in an image whose zones never turn on.
         epoch: time_host_epoch_ns(perf_zone_clock)
         rt_text_store(wrapping(slot + wrapping(wrapping(count + I64{1}) * I64{8})), if (epoch == I64{0}) -> I64{-1} else -> wrapping(began - epoch))
-        rt_text_store(wrapping(slot + wrapping(wrapping(count + I64{2}) * I64{8})), if (scheduler_control_current() == I64{0}) -> I64{0} else -> observe_current_task())
+        rt_text_store(wrapping(slot + wrapping(wrapping(count + I64{2}) * I64{8})), perf_samples_task_of(thread_base()))
         count = wrapping(count + PERF_SAMPLES_TIMED)
     }
-    perf_samples_put(fd, side, rules, wrapping(slot + I64{8}), (count << PERF_SAMPLES_ADDRESS_BITS) | kind, pc, ring, periods)
+    perf_samples_put(fd, side, wrapping(slot + I64{8}), (count << PERF_SAMPLES_ADDRESS_BITS) | kind, pc, periods)
     sync_store(slot, I64{0})
     perf_counter_rearm(buffer, counter)
     perf_samples_charge(buffer, began)

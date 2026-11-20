@@ -251,9 +251,12 @@ fiber_run: fn(root: I64, record: I64, fiber: I64) -> I64 {
         if (fiber_clock_on != I64{0}) {
             sync_store(wrapping(fiber + I64{192}), sync_thread_cpu_ns())
         }
+        // The carrier's samples so far are its task's; the fiber's go to
+        // its own (PerfSamples.jet perf_samples_turn).
+        perf_samples_turn(tcb)
         alloc_cache_lend(tcb, fiber_tcb)
         int_hazard_lend(tcb, fiber_tcb)
-        perf_zone_ring_lend(tcb, fiber_tcb)
+        perf_rings_lend(tcb, fiber_tcb)
         // The fiber runs on this carrier: `context.thread` reads its index.
         sync_store(wrapping(fiber_tcb + THREAD_TCB_INDEX), sync_load(wrapping(tcb + THREAD_TCB_INDEX)))
         sync_store(wrapping(record + I64{64}), fiber)
@@ -261,11 +264,12 @@ fiber_run: fn(root: I64, record: I64, fiber: I64) -> I64 {
         #Unsafe("the fiber's saved stack is owned by no running thread: it is fresh, pooled or committed PARKED/RUNNABLE, and this carrier alone took it") {
             os_fiber_switch_i64(wrapping(record + I64{16}), sync_load(wrapping(fiber + I64{8})))
         }
+        perf_samples_turn(fiber_tcb)
         sync_store(wrapping(record + I64{64}), I64{0})
         fiber_gs_write(root, tcb)
         alloc_cache_reclaim(fiber_tcb, tcb)
         int_hazard_lend(fiber_tcb, tcb)
-        perf_zone_ring_lend(fiber_tcb, tcb)
+        perf_rings_lend(fiber_tcb, tcb)
         if (fiber_clock_on != I64{0}) { fiber_clock_settle(fiber) }
         action: sync_load(wrapping(fiber + I64{64}))
         if (action == FIBER_PARK) {
