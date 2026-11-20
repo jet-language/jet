@@ -1,7 +1,7 @@
 // Read-only fn-build staging: ordinary Driver checking and comptime execution,
 // followed by Core's checked finish. No action or generated-file write occurs.
 use {
-    jet_foundation.[DIAGNOSTIC_ERROR, CompilerThreads, Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, Item, Marker, ModuleID, SourceFile, Span, TComptimeValue, TextEdit, Type, compiler_threads_limit, diagnostic_from_registry, diagnostic_registry_row, diagnostic_sentence_case_line, diagnostic_with_source_path, name_find, name_index, name_intern, name_table, sha256_hex]
+    jet_foundation.[DIAGNOSTIC_ERROR, CompilerThreads, Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, Item, Marker, ModuleID, SourceFile, Span, TComptimeValue, TextEdit, Type, compiler_threads_limit, diagnostic_from_registry, diagnostic_registry_row, diagnostic_sentence_case_line, diagnostic_with_source_path, name_find, name_index, name_intern, name_table, name_table_sized, sha256_hex]
     jet_eval.[JetEvalConfig, jet_eval_build_context_value, jet_eval_build_session_input, jet_eval_build_session_output, jet_eval_build_session_diagnostic, jet_eval_runtime_config]
     jet_eval.[jet_eval_build_failed_diagnostic]
     core.build.[BuildGraph, BuildGraphNode, BuildGraphInputDigest]
@@ -204,15 +204,29 @@ jet_driver_build_output_nodes: fn(request: JetDriverCompileRequest, owned_checks
     checks.move()
 }
 
+// One output's options identity (JetFoundation build_options_identity), by
+// output name.
+JetDriverOutputOptions: struct {
+    output: String,
+    identity: String,
+}
+
 // `owned_nodes` (jet_driver_build_output_nodes: checks, then compiles, then
 // links) keyed under the options each output was built with: a compile node
-// whose output's options identity (`identities` by output name, else
-// `otherwise`; JetFoundation build_options_identity) is not "" takes it as
-// one more input, `options:<identity>` over its SHA-256, and its link node
-// follows the compile node's key. Stock options add no input, so a stock
-// build keeps the plan's keys, and two builds whose options shape one image
-// share every key.
-jet_driver_build_nodes_under_options: fn(owned_nodes: &&[BuildGraphNode], identities: [String:String], otherwise: String) -> [BuildGraphNode] Never! {
+// whose output's options identity (its last row of `outputs`, else
+// `otherwise`) is not "" takes it as one more input, `options:<identity>`
+// over its SHA-256, and its link node follows the compile node's key. Stock
+// options add no input, so a stock build keeps the plan's keys, and two
+// builds whose options shape one image share every key.
+jet_driver_build_nodes_under_options: fn(owned_nodes: &&[BuildGraphNode], outputs: [JetDriverOutputOptions], otherwise: String) -> [BuildGraphNode] Never! {
+    // Each output name's last row of `outputs`, by name id (-1 at id 0, the
+    // empty name).
+    names := name_table_sized(outputs.len() * 2 + 2)
+    rows := [Int]{-1}
+    loop (row, options) in outputs {
+        id: name_index(name_intern(names, options.output))
+        if id == rows.len() -> rows.push(row) else -> rows[id] = row
+    }
     nodes := [BuildGraphNode]{}
     links := [BuildGraphNode]{}
     loop node in owned_nodes.move() {
@@ -221,7 +235,10 @@ jet_driver_build_nodes_under_options: fn(owned_nodes: &&[BuildGraphNode], identi
             nodes.push(node)
             next
         }
-        identity: identities.get(node.subject) ?? otherwise
+        identity := otherwise
+        if name_find(names, node.subject) == .Val(found) && rows[name_index(found)] >= 0 {
+            identity = outputs[rows[name_index(found)]].identity
+        }
         inputs := node.input_digests
         if identity != "" {
             inputs.push(BuildGraphInputDigest{name: "options:{identity}", digest: sha256_hex(identity)})
