@@ -1,0 +1,16 @@
+# A program that ends with a status other than 0 pauses as it exits, in the
+# Jet frame that stopped it, with the stack and locals that ended it whole.
+# `Int{7 / 2}` stops with E3010, whether the program holds core.math or not.
+fixture: StoppingExitPausesWithTheStackWhole.fixture
+env: NO_COLOR=1
+env: PATH={work}/no-tools
+step: jet debug prog.jet
+stdin: stopping_exit_pauses_with_the_stack_whole.stdin
+exit: 0 # the program's own status is reported; the session ends cleanly
+stdout+stderr: ~ "Program exiting with status 70  prog.jet:4  in half()" # the pause names the stopping frame
+stdout+stderr: ~ "4 |     Int{share}        <- here" # and shows its line
+stdout+stderr: ~ "#0  half()  at prog.jet:4\n#1  run()  at prog.jet:9" # `bt` reads the stack that ended the program
+stdout+stderr: ~ "share: Fraction = 7/2\ntotal: Int = 7" # `locals` reads the values that stopped it
+stdout+stderr: ~ "E3010" # the stop is the numeric law's, not a defect
+stdout+stderr: !~ "status 101" # never a Jet defect
+stdout+stderr: ~ "Program finished with exit status 70" # the next run command lets it end

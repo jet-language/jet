@@ -452,6 +452,7 @@ rt_thread_entry_address: fn() -> I64 {
     argument: sync_load(wrapping(start + I64{8}))
     handle: sync_load(wrapping(start + I64{16}))
     stack_bytes: sync_load(wrapping(start + I64{32}))
+    perf_row: sync_load(wrapping(start + I64{40}))
     jet_rt_free(start, THREAD_START_BYTES, I64{8})
     // Its stack segments: a raw clone's stack is the handle's mapping above
     // its guard; a libc thread's top only a probe finds.
@@ -459,10 +460,14 @@ rt_thread_entry_address: fn() -> I64 {
     if (mapping != I64{0}) {
         stack_arm(thread_base(), wrapping(mapping + THREAD_GUARD_BYTES), stack_bytes)
     } else { stack_arm_probe(thread_base(), stack_bytes) }
+    // Its row of `jet perf run`'s thread table: its id, its stack and its
+    // CPU time (PerfSamples.jet perf_threads_begin, perf_threads_end).
+    perf_threads_begin(perf_row, stack_bytes)
     result := I64{0}
     #Unsafe("the caller transferred a System V I64->I64 code address and one argument to this thread") {
         result = os_call_address_i64(entry, argument)
     }
+    perf_threads_end(perf_row)
     perf_samples_thread_end(perf_sampler)
     fault_stack_end(fault_stack)
     jet_rt_thread_detach()
@@ -544,8 +549,10 @@ THREAD_DETACHED: I64{1}
 THREAD_FINISHED: I64{2}
 
 // The start record jet_rt_thread_entry frees: entry@0, argument@8, handle@16,
-// the spawner's signal mask@24, the stack's bytes below its top@32.
-THREAD_START_BYTES: I64{40}
+// the spawner's signal mask@24, the stack's bytes below its top@32, the
+// thread's row of `jet perf run`'s table (PerfSamples.jet
+// perf_threads_spawn; 0 for none)@40.
+THREAD_START_BYTES: I64{48}
 
 // The PROT_NONE page below each stack.
 THREAD_GUARD_BYTES: I64{4096}
@@ -604,6 +611,7 @@ thread_spawn: fn(entry: I64, argument: I64) -> I64 {
     sync_store(wrapping(start + I64{8}), argument)
     sync_store(wrapping(start + I64{16}), handle)
     sync_store(wrapping(start + I64{32}), bytes)
+    sync_store(wrapping(start + I64{40}), perf_threads_spawn(entry))
     // The child pops jet_rt_thread_entry's address and its start record.
     stack: wrapping(wrapping(mapping + total) - I64{16})
     sync_store(stack, rt_thread_entry_address())
@@ -688,6 +696,7 @@ thread_libc_spawn: fn(entry: I64, argument: I64, bytes: I64) -> I64 {
     sync_store(start, entry)
     sync_store(wrapping(start + I64{8}), argument)
     sync_store(wrapping(start + I64{16}), handle)
+    sync_store(wrapping(start + I64{40}), perf_threads_spawn(entry))
     // masks: every signal@0, this thread's mask@8.
     masks: jet_rt_alloc(I64{16}, I64{8})
     sync_store(masks, I64{-1})

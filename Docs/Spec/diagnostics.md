@@ -100,7 +100,9 @@ code.
 The fixed headings are `Error: Jet.Name: what` and `Warning: Jet.Name: what`,
 naming the diagnostic type; a tidy error (a lint on the `.Tidy` tier) heads
 `Error: Jet.Name:` too, and a runtime stop heads `Stop: Jet.Name:`. A library
-diagnostic heads with its own name, as in `Error: web.BadPath: what`. A report
+diagnostic heads with its own name, as in `Error: web.BadPath: what`, and a
+build rule's finding with the code its `b.error` call gave, as in
+`Error: ORG01: what`. A report
 with a span includes its source location and
 underline; a report without a span omits that block. Every report keeps `Why:`,
 `Fix:`, and `More: jet-lang.dev/e/Jet.Name` in that order, with optional detail

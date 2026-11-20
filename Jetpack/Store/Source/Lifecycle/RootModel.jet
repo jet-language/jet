@@ -264,13 +264,11 @@ StoreRevision: struct {
 }
 
 // Only the Store tests read the protected set and the composite revision.
-// Those two fields are public, since the check of an area built on Engine
-// holds Store's sources without its tests.
 LifecycleSnapshot: struct {
     priv roots: [String:LifecycleRoot],
-    protected_targets: [String],
+    priv protected_targets: [String],
     priv revision: LifecycleRevision,
-    store_revision: StoreRevision,
+    priv store_revision: StoreRevision,
 
     // Roots in root-id order.
     root_list: fn(self) -> [LifecycleRoot] Never! {

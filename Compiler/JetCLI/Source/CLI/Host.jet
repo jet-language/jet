@@ -827,10 +827,17 @@ JET_CLI_RUNTIME_PART_PREFIX: "jet.runtime/"
 JET_CLI_IDENTITY_PART: "jet.identity"
 
 // jet-runtime/ beside the `jet` executable. Only a jet that doesn't carry
-// its runtime (jet_cli_runtime_embedded), jet-bare, reads it.
+// its runtime (jet_cli_runtime_embedded), jet-bare, reads it. A jet that
+// `jet run` runs from its source (`jet run Compiler/JetCLI/run.jet`, as
+// `jet perf run` profiles the compiler) has that source as its executable
+// (jet_cli_launch_plan) and reads the runtime the compiler build lays out
+// for it, .jet/build/jet-runtime in the source's package (Compiler/build.jet
+// RUNTIME_DIR).
 jet_cli_runtime_dir: fn() -[Env]> String Never! {
-    parts := cli_sys.executable().split("/").to_list()
+    executable: cli_sys.executable()
+    parts := executable.split("/").to_list()
     _ := parts.pop()
+    if executable.ends_with(".jet") -> return "{parts.join("/")}/.jet/build/jet-runtime"
     "{parts.join("/")}/jet-runtime"
 }
 
@@ -2354,7 +2361,7 @@ jet_cli_build_effects_json: fn(authority: JetCLIAuthority, result: JetDriverComp
 // `jet build --sbom`: the SPDX 2.3 document of the build's
 // package and its locked dependencies (the project's `.jet/lock`; none for a
 // loose file), written next to `binary` as `<name>.spdx`; `quiet` drops the
-// `sbom: <path>` confirmation.
+// `SBOM: <path>` confirmation.
 jet_cli_build_sbom: fn(file: String, name: String, source: String, binary: String, color: Bool, quiet: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
     directory: jet_cli_parent(file) ?? "."
     project: jet_cli_manifest_root(directory) ?? directory

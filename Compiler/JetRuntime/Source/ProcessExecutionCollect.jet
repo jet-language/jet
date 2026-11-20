@@ -344,15 +344,20 @@ process_execution_wait: fn(child: I64, ok: I64, err: I64) -> I64 {
     pipe_detach(fd_word(child, PROCESS_EXECUTION_STDOUT))
     pipe_detach(fd_word(child, PROCESS_EXECUTION_STDERR))
     // The first waiter lends the collector a reference to its park slot,
-    // which the collector wakes as it sets done. An aliased waiter behind it
-    // keeps the seed's 10ms scheduler poll on its own slot.
+    // which the collector wakes as it sets done, so it parks until then
+    // (or its cancellation or deadline). An aliased waiter behind it keeps
+    // the seed's 10ms scheduler poll on its own slot: under `jet perf run`
+    // each of its polls is a `process wait` its timeout ended.
+    lent := false
     if (fd_word(child, I64{64}) == I64{0} && sync_load(wrapping(child + I64{40})) == I64{0}) {
         sync_park_retain(park)
         fd_put(child, I64{64}, park)
+        lent = true
     }
     sync_mutex_unlock(child)
+    timeout: if lent -> I64{-1} else -> I64{10000000}
     loop sync_load(wrapping(child + I64{40})) == (I64{0}) {
-        if (scheduler_yield(rt_static_text("process wait"), park, I64{10000000}) != I64{0}) {
+        if (scheduler_yield(rt_static_text("process wait"), park, timeout) != I64{0}) {
             process_execution_park_return(child, I64{64}, park)
             process_execution_stop(child)
             process_execution_await_cleanup(child)

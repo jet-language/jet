@@ -5218,11 +5218,12 @@ Ring: struct {
 
 `print` and `locals` then show a `Ring` as `Ring{0: 3, 1: 4, 2: 5}`. A build
 with debug information keeps every implementation on a non-generic struct,
-called or not. The debugger runs it on a copy of the value in a fork of the
-stopped program, never in the program itself, which neither runs nor changes.
-The fork may compute and allocate. A system call other than memory
-management is refused, as is a fault, a trap or running past the 2-second
-budget. A view that doesn't return leaves the value shown by its fields.
+called or not. The debugger calls it on a copy of the value in the stopped
+program, on the stopped thread with the other threads stopped, and the
+program's own code doesn't run meanwhile. The view may compute and
+allocate; its allocations come from the debugger's own arena. A system call
+is refused, as is a fault, a trap or running past the 2-second budget. A
+view that doesn't return leaves the value shown by its fields.
 
 ### `core.testing` — deterministic test helpers
 

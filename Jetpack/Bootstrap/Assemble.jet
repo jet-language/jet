@@ -35,8 +35,9 @@
 // Environment:
 //   JETPACK_BOOTSTRAP_SOURCE_ROOT  the tree to assemble (default: the working directory)
 //   JETPACK_BOOTSTRAP_AREAS        comma-separated `# == Area ==` sections (unset: all)
-//   JETPACK_BOOTSTRAP_OWN_AREA     the area being proved: only its tests run and
-//                                  only its unlisted files fail the inventory
+//   JETPACK_BOOTSTRAP_OWN_AREA     the area being proved: only its tests run, only its
+//                                  unlisted files fail the inventory, and only its
+//                                  members are judged (allow_members)
 //   JETPACK_BOOTSTRAP_TEST_AREAS   comma-separated tests.list sections whose claims run
 //   JETPACK_BOOTSTRAP_DEPS_FROM_HEAD=1  dependency sections read HEAD's manifests and bytes
 //   JETPACK_WORKER                 the scratch directory's writer name (default lead)
@@ -393,9 +394,11 @@ assemble: fn(config: Config, members: [String]) -> Assembled Err! {
     // repeated single-line Core import after its first occurrence is blanked
     // the same way (a duplicate import name is E0105), and grouped Core member
     // imports are deduplicated per member. The hosted unit is no file's own
-    // check, so there each struct and enum declaration then carries its
-    // member-liveness allowance (allow_members): lines still match, and only
-    // that line's columns shift.
+    // check, and an area's unit (JETPACK_BOOTSTRAP_OWN_AREA) is only its own
+    // files' check: it holds its dependency areas without their tests. So
+    // there each struct and enum declaration of a file the unit doesn't
+    // judge carries its member-liveness allowance (allow_members): lines
+    // still match, and only that line's columns shift.
     seen_imports := [String:Bool]{}
     seen_members := [String:Bool]{}
     claims := [Claim]{}
@@ -409,7 +412,8 @@ assemble: fn(config: Config, members: [String]) -> Assembled Err! {
         packages_blanked: blank_package_imports(unblock_uses(entry.text), PACKAGE_NAMES)
         members_kept: blank_repeated_members(packages_blanked, seen_members)
         imports_kept: blank_repeated_imports(members_kept, seen_imports)
-        text: if config.mode == "hosted" -> allow_members(imports_kept) else -> imports_kept
+        judged: if config.mode == "hosted" -> false else if config.own == .Val(own) -> entry.section == own else -> true
+        text: if judged -> imports_kept else -> allow_members(imports_kept)
         if test_paths.get(entry.path) ?? false {
             render_tests(text, entry.path, entry.section, claims, claim_seen) ?? return Err(err.message)
         }
@@ -1911,13 +1915,15 @@ unblock_uses: fn(text: String) -> String {
 
 // --- member liveness -----------------------------------------------------------------
 
-// The hosted unit is a build of the engine, not any file's own check: each
-// file's package (or area unit) judges its unread fields and unbuilt cases. So
-// every struct and enum the hosted unit declares at a line start carries the
-// allowance for its member lint. A marker line above the declaration takes it
-// into its bracket list (adjacent markers are E0999); otherwise the
-// declaration line opens with it. Either way every line of the source map
-// still matches, and only that line's columns shift.
+// The hosted unit is a build of the engine, not any file's own check, and an
+// area's unit checks only that area's files: it holds its dependency areas
+// without the tests that read some of their members. Each file's package (or
+// area unit) judges its unread fields and unbuilt cases. So every struct and
+// enum a unit doesn't judge declares at a line start carries the allowance
+// for its member lint. A marker line above the declaration takes it into its
+// bracket list (adjacent markers are E0999); otherwise the declaration line
+// opens with it. Either way every line of the source map still matches, and
+// only that line's columns shift.
 STRUCT_ALLOW: "Allow(Jet.UnreadField, \"judged by its own package's check\")"
 
 ENUM_ALLOW: "Allow(Jet.UnbuiltCase, \"judged by its own package's check\")"
@@ -2069,6 +2075,20 @@ read_map: fn(root: String, mode: String) -> Dyn {
         .Err(error) -> { assert(error.message.contains("JETPACK_BOOTSTRAP_TEST_AREAS names CLI")) }
         .Ok(_) -> assert(false)
     }
+    files.remove_all(root) ?? ()
+}
+
+#Test("an area's unit judges only its own members") {
+    root: area_fixture()
+    put(root, "Jetpack/Foundation/Source/Fixture.jet", "FoundationFixture: struct {{\n    tag: Int,\n}}\n")
+    put(root, "Jetpack/Store/Source/Fixture.jet", "StoreFixture: struct {{\n    size: Int,\n}}\n")
+    _ := assemble(fixture_config(root, "check", Val("Engine"), None), [String]{}) ?? panic(err.message)
+    source: files.read("{root}/scratch/check/project/src/jetpack.jet") ?? panic("{err}")
+    assert(source.contains("\n#{STRUCT_ALLOW} FoundationFixture: struct"))
+    assert(source.contains("\nStoreFixture: struct"))
+    _ := assemble(fixture_config(root, "check", None, None), [String]{}) ?? panic(err.message)
+    whole: files.read("{root}/scratch/check/project/src/jetpack.jet") ?? panic("{err}")
+    assert(!whole.contains(STRUCT_ALLOW))
     files.remove_all(root) ?? ()
 }
 

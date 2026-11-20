@@ -178,7 +178,7 @@ publication_tuf_test_command: fn(root: String, project: String, bare: String, st
     denied: publication_tuf_test_command(root, consumer, bare, store, [String]{"fetch"}).run() ?? panic("denied fetch")
     assert(!denied.success)
     loop detail in
-        ([String]{"E1207", "source authority", "consumer -> textkit#1.2.0", "Package `consumer`", "Use an allowed source"}) {
+        ([String]{"Jet.UnresolvedRegistryDependency", "source authority", "consumer -> textkit#1.2.0", "Package `consumer`", "Use an allowed source"}) {
         assert(denied.errors.contains(detail), denied.errors)
     }
     roots: HangarRoots.at(files.join(root, "jetpack-root"))

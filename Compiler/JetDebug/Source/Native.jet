@@ -8,7 +8,7 @@
 use {
     native_files: core.files
     native_math: core.math
-    jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_EVENT_EXIT, X64_TRACE_EVENT_STOP, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, link_debug_uleb, x64_jetline_find, x64_jetline_line, x64_jetline_sleb, x64_jetline_text, x64_trace_attach, x64_trace_close, x64_trace_debug_register, x64_trace_detach, x64_trace_follow_exits, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_seize, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait, x64_trace_wait_for, x64_trace_wait_or_input, x64_trace_write]
+    jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_DEBUG_ITEMS_DROP_SYMBOL, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_EVENT_EXIT, X64_TRACE_EVENT_STOP, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, link_debug_uleb, x64_debug_eval_symbols, x64_jetline_find, x64_jetline_line, x64_jetline_sleb, x64_jetline_text, x64_trace_attach, x64_trace_close, x64_trace_debug_register, x64_trace_detach, x64_trace_event_message, x64_trace_follow_exits, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_seize, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait, x64_trace_wait_for, x64_trace_wait_or_input, x64_trace_write]
     jet_foundation.[DeepChecks, Diagnostic, ENV_JET_RECORD, MODULE_CORE_PREFIX, deep_checks_flags, diagnostic_display_identities, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all, foundation_named_type]
 }
 
@@ -100,15 +100,19 @@ NativeStopKind: enum {
 
 // Where a run-control command left the program: paused at `frame` for
 // `reason`, exited with `code`, or ended by the signal named in `reason`.
+// A pause at the program's stopping exit has its status in `code` and in
+// `routines` the functions outside Jet source between `frame` and the exit,
+// outermost first (`jet_fraction_to_int > precise_fault > trap_defect_exit`).
 NativeStop: struct {
     kind: NativeStopKind,
     reason: String,
     code: Int,
     frame: NativeFrame?,
+    routines: String{""},
 }
 
-// A breakpoint `jet debug --break` asks for: a Jet source file's base name,
-// as the line table names it, and a line of it.
+// A breakpoint `jet debug --break` asks for: a Jet source file, by its base
+// name or a path (native_line_addresses), and a line of it.
 NativeBreak: struct {
     file: String,
     line: Int,
@@ -347,13 +351,17 @@ NativeThread: struct {
 // What resuming the program ended in: a SIGTRAP stop (Paused: a trap byte,
 // a finished single step, or with `code` the number of the watch whose
 // bytes a write changed), its exit with `code`, or its death by the signal
-// `code`.
+// `code`. A Paused event with `exiting` is the program's stopping exit,
+// paused before it ends with that status (NativeSession.stopping_exit).
 NativeEvent: struct {
     kind: NativeStopKind,
     code: Int,
+    exiting: Int{0},
 
     // Whether the event ends a run: anything but a plain SIGTRAP stop.
-    ends_run: fn(self) -> Bool Never! { self.kind != NativeStopKind.Paused || self.code > 0 }
+    ends_run: fn(self) -> Bool Never! {
+        self.kind != NativeStopKind.Paused || self.code > 0 || self.exiting > 0
+    }
 }
 
 // What running to a return address ended in: the return, or another stop.
@@ -470,9 +478,16 @@ NativeSession: struct {
     evals: [String:Shared<NativeEval>]{[String:Shared<NativeEval>]{}},
     eval_image: Shared<NativeEvalImage>?{None},
     eval_read: NativeEvalRead?{None},
-    // A `syscall` instruction of the image's code, which forks and code
-    // mappings run (syscall_site); 0 until the first needs one.
+    // A `syscall` instruction of the image's code, which the evaluation
+    // room's and code's mappings run (syscall_site); 0 until the first needs
+    // one.
     syscall: Int{0},
+    // The room an evaluation in the program runs from (NativeEval.jet
+    // native_eval_here), 0 until the first maps it, and the count of the
+    // program's runs, which says whether an expression's code placed in the
+    // program (NativeEval.placed_in) is this run's.
+    eval_room: Int{0},
+    eval_runs: Int{0},
     // The conditions and logpoints placed in the program (NativePlace.jet),
     // latest last, and whether the last stop was a condition of them that
     // held.
@@ -512,15 +527,22 @@ NativeSession: struct {
     // The reads of the placed logpoints' rings that the next report has
     // yet to say; the address of the sequence word their hits share (0:
     // none mapped yet); and whether the program's threads stop as they
-    // exit, so their last hits are read.
+    // exit, so their last hits are read and the program pauses at its
+    // stopping exit (stopping_exit), which `ending` says it paused at
+    // already: it ends when it goes on.
     logged: [NativeLogRead]{[NativeLogRead]{}},
     clock: Int{0},
     exits: Bool{false},
+    ending: Bool{false},
     // The descriptor whose input stops a run of every thread where it is
     // (the DAP adapter's requests), -1 for none; and whether that input
     // stopped the last run.
     interrupt: Int{-1},
     interrupted: Bool{false},
+    // The program's entry, the Jet function its image's `main` hands the
+    // run to (native_image_entry), as an index of the line table's
+    // functions; -1 when the image names none.
+    program_entry: Int{-1},
 
     // Load the debug facts of `binary` (a native image with debug info, its
     // own or in the side file its `.gnu_debuglink` names). The program's
@@ -530,12 +552,14 @@ NativeSession: struct {
         image: native_image_load(binary, elf) ?? return Err(NativeDebugError{detail: "`{binary}` has no Jet debug information; build it with `jet build -O0`"})
         native_files.write(output_path, "") ?? return Err(NativeDebugError{detail: "couldn't create the program output file: {err}"})
         observe_root: native_elf_symbol(elf, X64_OBSERVE_ROOT_SYMBOL) ?? 0
-        openings: native_openings(image, native_elf_codes(elf, ".text"))
-        Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: output_path, output_read: 0, started: false, threads: [NativeThread]{}, observe_root: observe_root, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: None, task: 0, replay_start: native_elf_symbol(elf, NATIVE_REPLAY_START_SYMBOL) != None})
+        codes: native_elf_codes(elf, ".text")
+        openings: native_openings(image, codes)
+        Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: output_path, output_read: 0, started: false, threads: [NativeThread]{}, observe_root: observe_root, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: None, task: 0, replay_start: native_elf_symbol(elf, NATIVE_REPLAY_START_SYMBOL) != None, program_entry: native_image_entry(image, codes)})
     }
 
-    // A breakpoint on `line` of the Jet source `file` (its base name, as the
-    // line table names it): its number, or None when no code is on that line.
+    // A breakpoint on `line` of the Jet source `file` (a base name or a path,
+    // native_line_addresses): its number, or None when no code is on that
+    // line.
     break_at: fn(&self, file: String, line: Int) -> Int? NativeDebugError! {
         self.place(self.line_starts(file, line))
     }
@@ -561,6 +585,13 @@ NativeSession: struct {
             if found.name == function -> addresses.push(self.entry(index))
         }
         self.place(addresses)
+    }
+
+    // A breakpoint at the start of the program's entry (`program_entry`);
+    // None when the image names none.
+    break_in_entry: fn(&self) -> Int? NativeDebugError! {
+        if self.program_entry < 0 -> return Ok(None)
+        self.place([Int]{self.entry(self.program_entry)})
     }
 
     // Where a breakpoint on the start of function `index` traps: past the
@@ -1005,8 +1036,10 @@ NativeSession: struct {
         Val(binders)
     }
 
-    // Run `compiled` in a fork of the stopped program with the captures it
-    // reads from the selected frame (NativeEval.jet).
+    // Run `compiled` with the captures it reads from the selected frame, in
+    // the stopped program itself (NativeEval.jet native_eval_here). An image
+    // whose runtime doesn't export the words an evaluation routes its heap
+    // through (x64_debug_eval_symbols) evaluates nothing.
     run_eval: fn(&self, compiled: Shared<NativeEval>) -> NativeEvalValue NativeEvalRefused! {
         self.ready() ?? return Err(native_eval_refused(err.detail))
         frames: self.unwind() ?? return Err(native_eval_refused(err.detail))
@@ -1043,15 +1076,74 @@ NativeSession: struct {
         }
         if permit.value.plan == None || permit.value.planned != self.fixed.len() {
             diff: native_fix_diff(self.image, permit.value.edit, facts.value.symbols, facts.value.code.bytes, facts.value.code.address, self.fixed) ?? return Err(native_eval_refused(err.detail))
-            plan: native_fix_place_all(permit.value.edit, facts.value.symbols, diff, permit.value.entry) ?? return Err(native_eval_refused(err.detail))
+            plan: native_fix_place_all(permit.value.edit, facts.value.symbols, diff, permit.value.entry, also: permit.value.drop) ?? return Err(native_eval_refused(err.detail))
             permit.value.plan = Val(plan)
             permit.value.planned = self.fixed.len()
+            permit.value.placed = 0
         }
-        syscall: self.syscall_site(facts.value.code) ?? return Err(native_eval_refused("the program's code holds no system call to copy it with"))
+        words: native_eval_words(facts.value.symbols) ?? return Err(native_eval_refused("the program's runtime doesn't export the words evaluations route its heap through ({x64_debug_eval_symbols().join(", ")}): rebuild the program with this jet"))
+        syscall: self.syscall_site(facts.value.code) ?? return Err(native_eval_refused("the program's code holds no system call to map the evaluation's room with"))
+        self.eval_ready(facts.value.code, syscall) ?? return Err(native_eval_refused(err.detail))
         if permit.value.plan == .Val(plan) {
-            return native_eval_run(self.image, self.trace, self.originals(), self.probe.sites, permit.value, plan, facts.value, syscall, captures, typed)
+            if {
+                permit.value.placed == 0 || permit.value.placed_in != self.eval_runs -> {
+                    base: self.eval_map(plan.size, facts.value.code, syscall) ?? return Err(native_eval_refused(err.detail))
+                    region: native_fix_region(plan, permit.value.edit, facts.value.symbols, base)
+                    if !x64_trace_write(self.trace, base, region) {
+                        return Err(native_eval_refused("couldn't write the expression's code in the program"))
+                    }
+                    permit.value.placed = base
+                    permit.value.placed_in = self.eval_runs
+                    permit.value.region = region
+                }
+                else -> {
+                    // The data the expression's code reaches, as placed: its
+                    // last run may have written it.
+                    loop piece in plan.pieces {
+                        if piece.data < 0 -> next
+                        end: piece.offset + permit.value.edit.object.data[piece.data].bytes.len()
+                        if !x64_trace_write(self.trace, permit.value.placed + piece.offset, permit.value.region[piece.offset..<end]) {
+                            return Err(native_eval_refused("couldn't write the expression's data in the program"))
+                        }
+                    }
+                }
+            }
+            items: native_fix_runtime_address(facts.value.symbols, X64_DEBUG_ITEMS_DROP_SYMBOL)
+            here: native_eval_here(self.image, self.trace, self.eval_room, words, items, permit.value, plan, permit.value.placed, captures, typed, self.placed, self.sites, self.probe.sites, watched: self.watches.len() > 0) ?? return Err(err)
+            if here.kept > 0 -> self.notes = "{self.notes}{native_eval_kept(here.kept)}\n"
+            return Ok(here.value)
         }
         Err(native_eval_refused("the expression has no plan"))
+    }
+
+    // Map the room evaluations run from in the program, with its code, near
+    // the image's `code`, unless it is mapped.
+    eval_ready: fn(&self, code: NativeCode, syscall: Int) NativeDebugError! {
+        if self.eval_room != 0 -> return Ok()
+        room: self.eval_map(NATIVE_EVAL_ROOM_SIZE, code, syscall) ?? return Err(err)
+        if !x64_trace_write(self.trace, room, native_eval_room_code(room).bytes) {
+            return Err(NativeDebugError{detail: "couldn't write the evaluation's room in the program"})
+        }
+        self.eval_room = room
+        Ok()
+    }
+
+    // Map `size` bytes in the program for an evaluation, near the image's
+    // `code`, where `fix` maps its code (map_code), injecting mmap(2) at its
+    // `syscall` instruction (native_eval_map), which leaves a signal the
+    // stopped thread holds for it to the thread.
+    eval_map: fn(&self, size: Int, code: NativeCode, syscall: Int) -> Int NativeDebugError! {
+        after: code.address + code.bytes.len()
+        hint := if self.fix_next > 0 -> self.fix_next else -> (after + NATIVE_FIX_GAP).div_euclid(NATIVE_FIX_PAGE) * NATIVE_FIX_PAGE
+        loop _ in 0..<NATIVE_FIX_TRIES {
+            mapped: native_eval_map(self.trace, syscall, hint, size) ?? return Err(err)
+            if mapped == hint {
+                self.fix_next = hint + size
+                return Ok(hint)
+            }
+            hint += NATIVE_FIX_GAP
+        }
+        Err(NativeDebugError{detail: "there is no room near the program's code for the evaluation"})
     }
 
     // The image's code facts evaluations place code against: the read
@@ -1433,8 +1525,9 @@ NativeSession: struct {
 
     // Thread `id`, faulting in the code of a placed condition, sent to that
     // condition's runtime stub, as a runtime call of it would be, so the
-    // debugger checks the hit in a fork, where the fault is the
-    // evaluation's; false when it is not in such code.
+    // debugger checks the hit by evaluating the condition in the program,
+    // where the fault is the evaluation's; false when it is not in such
+    // code.
     divert: fn(&self, id: Int) -> Bool Never! {
         current: self.trace.thread
         self.trace.thread = id
@@ -1610,6 +1703,11 @@ NativeSession: struct {
             return Err(NativeDebugError{detail: "couldn't start the program: {failure}"})
         }
         self.threads = [NativeThread]{NativeThread{id: self.trace.pid, running: false, halting: false, signal: 0}}
+        // A program ending with a status other than 0 (a stop, a Jet
+        // defect, a fault) pauses as it exits, its stack whole
+        // (stopping_exit).
+        self.exits = x64_trace_follow_exits(self.trace, self.trace.pid, kill: true)
+        self.ending = false
         self.plant_breakpoints()
     }
 
@@ -1708,7 +1806,9 @@ NativeSession: struct {
         elf: native_files.read_bytes(binary) ?? return Err(NativeDebugError{detail: "couldn't read the program `{binary}`: {err}"})
         image: native_image_load(binary, elf) ?? return Err(NativeDebugError{detail: "`{binary}` has no Jet debug information; build it with `jet build -O0`"})
         self.observe_root = native_elf_symbol(elf, X64_OBSERVE_ROOT_SYMBOL) ?? 0
-        self.openings = native_openings(image, native_elf_codes(elf, ".text"))
+        codes: native_elf_codes(elf, ".text")
+        self.openings = native_openings(image, codes)
+        self.program_entry = native_image_entry(image, codes)
         self.image = image
         self.binary = binary
         self.breakpoints = [NativeBreakpoint]{}
@@ -1998,23 +2098,23 @@ NativeSession: struct {
 
     // The value whose bytes are `value`, of struct type `ty`, as its
     // DebugView shows it: the view at address `view` runs on a copy of the
-    // value in a fork of the stopped program (NativeFork.jet), never in the
-    // program, which neither runs nor changes. None when the fork can't be
-    // made or the view doesn't return there (a refused system call, a
-    // fault, a trap or the budget's end), or its items can't be read: the
-    // value then shows by its fields.
+    // value in the stopped program itself, as an evaluation runs
+    // (NativeEval.jet native_eval_view_here). None when the image's runtime
+    // doesn't export the words an evaluation routes its heap through or the
+    // drop of a view's items, the room can't be mapped, the view fails (a
+    // refused system call, a fault, a trap or the budget's end), or its
+    // items can't be read: the value then shows by its fields.
     view: fn(&self, view: Int, ty: Int, value: [U8]) -> String? NativeDebugError! {
-        // The image's code holds the runtime's `syscall` instructions.
         facts_cell: self.eval_facts() ?? return Ok(None)
         facts: facts_cell.guard_read()
+        words: native_eval_words(facts.value.symbols) ?? return Ok(None)
+        items: native_fix_runtime_address(facts.value.symbols, X64_DEBUG_ITEMS_DROP_SYMBOL)
+        if items == 0 -> return Ok(None)
         syscall: self.syscall_site(facts.value.code) ?? return Ok(None)
-        fork: native_fork_make(self.trace, syscall) ?? return Ok(None)
-        viewed: native_fork_view(fork, self.image, self.trace.pid, self.originals(), self.probe.sites, view, ty, value) ?? {
-            native_fork_end(fork)
-            return Ok(None)
-        }
-        native_fork_end(fork)
-        Ok(Val(viewed))
+        self.eval_ready(facts.value.code, syscall) ?? return Ok(None)
+        viewed: native_eval_view_here(self.image, self.trace, self.eval_room, words, items, view, ty, value, self.placed, self.sites, self.probe.sites, watched: self.watches.len() > 0) ?? return Err(NativeDebugError{detail: err.message})
+        if viewed.kept > 0 -> self.notes = "{self.notes}{native_eval_kept(viewed.kept)}\n"
+        Ok(viewed.shown)
     }
 
     // Select frame `index` of the current thread's backtrace (0 is innermost).
@@ -2047,19 +2147,12 @@ NativeSession: struct {
         self.forget_placed()
     }
 
-    // The source file of the program's `run`, as the image's line table
-    // records it; an -O2 image inlines `run` into its entry wrapper
-    // (JetIR Build.jet's `entry`), whose file is `run`'s. "" when the image
-    // holds neither.
-    run_source: fn(&self) -> String Never! {
-        wrapper := ""
-        loop found in self.image.lines.functions {
-            if found.name == "run" -> return native_line_source(found.dir, found.file)
-            if found.name == "entry" && wrapper == "" {
-                wrapper = native_line_source(found.dir, found.file)
-            }
-        }
-        wrapper
+    // The source file of the program's entry (`program_entry`), as the
+    // image's line table records it; "" when the image names no entry.
+    entry_source: fn(&self) -> String Never! {
+        if self.program_entry < 0 -> return ""
+        found: self.image.lines.functions[self.program_entry]
+        native_line_source(found.dir, found.file)
     }
 
     // The optimization level the program was built at (0, 1 or 2), which an
@@ -2067,18 +2160,14 @@ NativeSession: struct {
     // again around them only at the same level.
     level: fn(&self) -> Int Never! { self.image.level }
 
-    // Run the program with `args` to the start of its `run`, in the Jet
-    // source `file` whose text is `lines`: of its entry wrapper when `run`
-    // is inlined there (run_source). None when the program has neither.
+    // Run the program with `args` to the start of its entry (`program_entry`),
+    // in the Jet source `file` whose text is `lines`. None when the image
+    // names no entry.
     open: fn(&self, file: String, lines: [String], args: [String]) -> NativeDebugStep? NativeDebugError! {
         start := -1
-        named: [String]{"run", "entry"}
-        loop function in named {
-            if self.break_in(function) == {
-                .Ok(placed) -> start = placed ?? -1
-                .Err(failure) -> return Err(failure)
-            }
-            if start >= 0 -> break
+        if self.break_in_entry() == {
+            .Ok(placed) -> start = placed ?? -1
+            .Err(failure) -> return Err(failure)
         }
         if start < 0 -> return Ok(None)
         first: self.launch(args) ?? return Err(err)
@@ -3052,6 +3141,10 @@ NativeSession: struct {
                 if stop.reason.starts_with("watchpoint ") {
                     text = "{text}Watchpoint {stop.reason.after("watchpoint ")} hit  {frame.file}:{frame.line}  in {frame.function}()\n{self.watched}\n"
                 }
+                if stop.reason.starts_with("exiting ") {
+                    text = "{text}Program exiting with status {stop.code}  {frame.file}:{frame.line}  in {frame.function}()\n"
+                    if stop.routines != "" -> text = "{text}  through {stop.routines}\n"
+                }
                 source: self.frame_source(frame, file, lines)
                 locals: self.locals() ?? return Err(err)
                 text = "{text}{frame.line} | {source}        <- here\n{native_debug_locals_line(locals)}\n"
@@ -3188,13 +3281,13 @@ NativeSession: struct {
 
     // A `syscall` instruction of the image's `code` that the program still
     // holds, found in the image's bytes at the first need
-    // (native_fork_syscall_at) and kept: a later need reads its two bytes
+    // (native_eval_syscall_at) and kept: a later need reads its two bytes
     // back, and looks again only when they no longer read `syscall`.
     syscall_site: fn(&self, code: NativeCode) -> Int? Never! {
-        if self.syscall != 0 && native_fork_is_syscall(self.trace, self.syscall) {
+        if self.syscall != 0 && native_eval_is_syscall(self.trace, self.syscall) {
             return Val(self.syscall)
         }
-        found: native_fork_syscall_at(self.trace, code) ?? return None
+        found: native_eval_syscall_at(self.trace, code) ?? return None
         self.syscall = found
         Val(found)
     }
@@ -3376,15 +3469,24 @@ NativeSession: struct {
                 if mine || going -> _ := self.let_go(at, mode)
                 next
             }
-            // A thread exiting, its memory still there (x64_trace_follow_exits
-            // once a logpoint runs in the program): what the logpoints
-            // logged is read before it ends.
+            // A thread exiting, its memory still there (x64_trace_follow_exits):
+            // the program's stopping exit pauses, every thread stopped, with
+            // the stack that ended it whole; any other exit has what the
+            // logpoints logged read before it ends.
             if (status >> 16) == X64_TRACE_EVENT_EXIT {
-                if self.drain_halted() == {
-                    .Ok(ended) -> {
-                        if ended == .Val(event) -> return Ok(event)
+                exiting: self.stopping_exit(stop.thread)
+                if exiting > 0 || self.clock != 0 {
+                    if self.drain_halted() == {
+                        .Ok(ended) -> {
+                            if ended == .Val(event) -> return Ok(event)
+                        }
+                        .Err(failure) -> return Err(failure)
                     }
-                    .Err(failure) -> return Err(failure)
+                }
+                if exiting > 0 {
+                    self.trace.thread = stop.thread
+                    self.ending = true
+                    return Ok(NativeEvent{kind: NativeStopKind.Paused, code: 0, exiting: exiting})
                 }
                 if mine || going -> _ := self.let_go(at, X64TraceResume.Run)
                 if going -> self.let_all_go()
@@ -3583,6 +3685,23 @@ NativeSession: struct {
         }
         self.drain()
         Ok(None)
+    }
+
+    // The status the program exits with when thread `id`, stopped at its
+    // exit, ends the whole program with a status other than 0 (its
+    // exit_group: a stop, 70, or a Jet defect, 101); 0 otherwise, and once
+    // the program paused at its stopping exit already (`ending`).
+    stopping_exit: fn(&self, id: Int) -> Int Never! {
+        if self.ending -> return 0
+        current: self.trace.thread
+        self.trace.thread = id
+        registers: x64_trace_registers(self.trace) ?? [Int]{}
+        status: x64_trace_event_message(self.trace) ?? 0
+        self.trace.thread = current
+        if registers.len() == 0 || registers[X64_TRACE_ORIG_RAX] != NATIVE_DEBUG_EXIT_GROUP || status & 0x7f != 0 {
+            return 0
+        }
+        (status >> 8) & 0xff
     }
 
     // Thread `id`, stopped by a trap byte it ran, back on that byte; by a
@@ -4572,21 +4691,26 @@ NativeSession: struct {
     }
 
     // The program's code is gone, or new: so are its placed conditions and
-    // logpoints, their sequence word and the stop at each thread's exit.
+    // logpoints, their sequence word, the stop at each thread's exit, and
+    // the evaluations' room and code.
     forget_placed: fn(&self) Never! {
         self.placed = [NativePlaced]{}
         self.clock = 0
         self.exits = false
+        self.eval_room = 0
+        self.eval_runs += 1
     }
 
     // The stop `event` is: a write a watch saw, a trap byte's breakpoint,
     // rewinding the pc onto it, a trap the program made itself, a pause
-    // the session's input made (interrupted_run), or its end.
+    // the session's input made (interrupted_run), its stopping exit, or its
+    // end.
     stopped: fn(&self, event: NativeEvent) -> NativeStop NativeDebugError! {
         if event.kind == {
             .Exited -> Ok(NativeStop{kind: NativeStopKind.Exited, reason: "exited", code: event.code, frame: None})
             .Signaled -> Ok(NativeStop{kind: NativeStopKind.Signaled, reason: native_debug_signal_name(event.code), code: -1, frame: None})
             .Paused -> {
+                if event.exiting > 0 -> return self.exiting(event.exiting)
                 if event.code < 0 -> return self.paused("pause")
                 registers := self.registers() ?? return Err(err)
                 // The trap comes after the write: its line holds pc - 1.
@@ -4611,6 +4735,24 @@ NativeSession: struct {
     paused: fn(self, reason: String) -> NativeStop NativeDebugError! {
         registers: self.registers() ?? return Err(err)
         Ok(NativeStop{kind: NativeStopKind.Paused, reason: reason, code: 0, frame: Val(native_frames_at(self.image, registers[X64_TRACE_RIP])[0])})
+    }
+
+    // The pause at the program's stopping exit with `status`
+    // (stopping_exit): in the innermost Jet frame on its stack, the one
+    // that stopped or faulted, as an attach selects it; no frame when no
+    // Jet code is on the stack. Its `code` is the status.
+    exiting: fn(&self, status: Int) -> NativeStop NativeDebugError! {
+        reason: "exiting {status}"
+        frames: self.backtrace() ?? return Err(err)
+        routines := [String]{}
+        loop (index, frame) in frames.move() {
+            if native_debug_jet_frame(frame) {
+                self.selected = index
+                return Ok(NativeStop{kind: NativeStopKind.Paused, reason: reason, code: status, frame: Val(frame), routines: routines.join(" > ")})
+            }
+            if frame.function != "" && frame.function != "?" -> routines.insert(0, frame.function)
+        }
+        Ok(NativeStop{kind: NativeStopKind.Paused, reason: reason, code: status, frame: None, routines: routines.join(" > ")})
     }
 
     // Run the program until the frame whose canonical frame address is `cfa`
@@ -5022,6 +5164,10 @@ NATIVE_DEBUG_WATCH_HITS: 15
 
 NATIVE_DEBUG_SIGSTOP: 19
 
+// The system call that ends every thread of a program (exit_group), as a
+// thread stopped at its exit holds it.
+NATIVE_DEBUG_EXIT_GROUP: 231
+
 // The errors x64_trace_seize reports: the system refused the trace, and the
 // thread has ended.
 NATIVE_DEBUG_EPERM: 1
@@ -5231,16 +5377,30 @@ native_debug_word: fn(trace: X64Trace, address: Int) -> Int? Never! {
     Val(native_number(bytes, 0, 8, X64DebugEncoding.Signed))
 }
 
-// The addresses of `line` in the Jet source `file` (by base name): in each
-// function, the first row of the line in its own code and in each inlined
-// copy it holds (two instances of a generic module's member inlined into one
-// caller are two copies). A function with no row of the line, but rows on or
-// before it, gives its first row of the nearest later line instead.
+// The addresses of `line` in the Jet source `file`. A path names the files
+// whose recorded path (native_line_source) is it or ends with it, so
+// `Sema/CheckProgram.jet` or an editor's absolute path picks one of the
+// image's same-named files; a base name, or a path no file's matches, names
+// every file of that base name. In each function, the first row of the line
+// in its own code and in each inlined copy it holds (two instances of a
+// generic module's member inlined into one caller are two copies). A
+// function with no row of the line, but rows on or before it, gives its
+// first row of the nearest later line instead.
 native_line_addresses: fn(image: NativeImage, file: String, line: Int) -> [Int] Never! {
     wanted: native_files.basename(file)
+    by_path := false
+    if file.contains("/") {
+        loop function in image.lines.functions {
+            if native_line_file_is(function.dir, function.file, file) {
+                by_path = true
+                break
+            }
+        }
+    }
     addresses := [Int]{}
     loop function in image.lines.functions {
-        if native_files.basename(function.file) != wanted -> next
+        named: if by_path -> native_line_file_is(function.dir, function.file, file) else -> native_files.basename(function.file) == wanted
+        if !named -> next
         described: native_function_at(image, function.low)
         sites := [NativeLineSite]{}
         covers := false
@@ -5672,6 +5832,10 @@ NATIVE_DEBUG_NOT_KEPT: "unavailable (not kept at this point)"
 // budget.
 NATIVE_DEBUG_CUT_OFF: "<cut off>"
 
+// The value shown for a Task, Sender or Receiver handle its code consumed
+// (native_debug_runtime_handle).
+NATIVE_DEBUG_CONSUMED: "<consumed>"
+
 // The deepest run of runtime frames a step finishes out of before it lets the
 // program continue.
 NATIVE_DEBUG_RUNTIME_DEPTH: 16
@@ -5824,6 +5988,14 @@ native_bare_move: fn(word: String, mark: NativeMark) -> NativeMove Never! {
 native_line_source: fn(dir: String, file: String) -> String Never! {
     if dir == "" || file.starts_with("/") || file.starts_with(MODULE_CORE_PREFIX) -> return "{file}"
     native_files.join(dir, file)
+}
+
+// Whether `path` names the source a line-table function records as `file`
+// under `dir`: its path (native_line_source), or that path's last
+// components.
+native_line_file_is: fn(dir: String, file: String, path: String) -> Bool Never! {
+    source: native_line_source(dir, file)
+    source == path || source.ends_with("/{path}")
 }
 
 // Line `line` (1 for the first) of `lines`; "" when they have no such line.
@@ -6913,8 +7085,11 @@ native_debug_runtime_handle_type: fn(type_name: String) -> Bool Never! {
 // ended. An endpoint shows as its channel (Channel.jet's state: len16,
 // bound48, closed88, observe136, an observed run's channel id), `channel
 // N, H of B held` (`H held` when unbounded), with `, closed` once closed.
-// An unobserved run's id is 0: `a task`, `a channel`.
+// An unobserved run's id is 0: `a task`, `a channel`. A handle whose state
+// is 0 holds none any more: its code consumed it (a task's `detach`), and
+// it shows as NATIVE_DEBUG_CONSUMED.
 native_debug_runtime_handle: fn(type_name: String, address: Int, memory: NativeMemory) -> String? Never! {
+    if address == 0 -> return Val(NATIVE_DEBUG_CONSUMED)
     if type_name.starts_with("Task<") {
         state: native_debug_read(memory, address, 8, 4) ?? return None
         control: native_debug_read(memory, state[1], 8, 8) ?? return None
@@ -6950,6 +7125,9 @@ native_debug_runtime_handle: fn(type_name: String, address: Int, memory: NativeM
     assert_eq(native_debug_runtime_handle("Task<Int>", 16384, memory), String?{Val("task 2, done")})
     assert_eq(native_debug_runtime_handle("Sender<Int>", 20480, memory), String?{Val("a channel, 3 held, closed")})
     assert_eq(native_debug_runtime_handle("Task<Int>", 40960, memory), String?{None})
+    // A handle its code consumed holds no state.
+    assert_eq(native_debug_runtime_handle("Task<Int>", 0, memory), String?{Val("<consumed>")})
+    assert_eq(native_debug_runtime_handle("Sender<Int>", 0, memory), String?{Val("<consumed>")})
     assert(native_debug_runtime_handle_type("Receiver<Order>") && !native_debug_runtime_handle_type("Pointer"), "only a handle's typedef reads as one")
 }
 

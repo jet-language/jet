@@ -1095,6 +1095,98 @@ native_function_at: fn(image: NativeImage, pc: Int) -> NativeFunction? Never! {
     Val(image.functions[low - 1])
 }
 
+// The program's entry in `image`, whose code is `codes` (its `.text`
+// sections): native_main_entry on its `main`'s bytes. -1 when it has no
+// `main`, or no section holds that function's code.
+native_image_entry: fn(image: NativeImage, codes: [NativeCode]) -> Int Never! {
+    loop function in image.functions {
+        if function.name != "main" -> next
+        loop code in codes {
+            from: function.low - code.address
+            to: function.high - code.address
+            if from < 0 || to > code.bytes.len() -> next
+            bytes: loop k in from..<to -> code.bytes[k]
+            return native_main_entry(bytes, function.low, image.lines.functions)
+        }
+    }
+    -1
+}
+
+// The entry the image's `main` hands the run to (JetBackend
+// x64_object_main), as an index of the line table's `functions`, whatever
+// its name. `code` is main's bytes at `low`. After its `push rbx`, a rooted
+// main's calls lead to `lea rdi, [rip + entry]`, the address it passes
+// jet_rt_main; a main that owns the run calls the entry after its runtime
+// calls. The first call or `lea` target that starts one of `functions`; -1
+// at any other instruction before it. A generated entry function (JetIR
+// Build.jet ir_entry_function, named `entry`, at the file and line of the
+// entry it runs) stands for that entry when the image keeps it whole.
+native_main_entry: fn(code: [U8], low: Int, functions: [X64JetlineFunction]) -> Int Never! {
+    at := if (code.len() > 0 && code[0] == U8{0x53}) -> 1 else -> 0
+    loop at < code.len() {
+        target := -1
+        if {
+            (at + 5 <= code.len() && code[at] == U8{0xE8}) -> {
+                target = low + at + 5 + native_number(code, at + 1, 4, X64DebugEncoding.Signed)
+                at += 5
+            }
+            (at + 7 <= code.len() && code[at] == U8{0x48} && code[at + 1] == U8{0x8D} && code[at + 2] == U8{0x3D}) -> {
+                target = low + at + 7 + native_number(code, at + 3, 4, X64DebugEncoding.Signed)
+                at += 7
+            }
+            else -> return -1
+        }
+        loop (index, found) in functions {
+            if found.low != target -> next
+            if found.name == "entry" {
+                loop (other, run) in functions {
+                    if other != index && run.name != "entry" && run.file == found.file && run.dir == found.dir && run.decl == found.decl {
+                        return other
+                    }
+                }
+            }
+            return index
+        }
+    }
+    -1
+}
+
+#Test("main hands the run to its entry, by whatever name the image gives it") {
+    helper: X64JetlineFunction{low: 0x4000, high: 0x4010, name: "helper", file: "tool.jet", dir: "", decl: 1, rows: 0, rows_end: 0}
+    entry: X64JetlineFunction{low: 0x2000, high: 0x2010, name: "tool_main", file: "tool.jet", dir: "", decl: 3, rows: 0, rows_end: 0}
+    functions: [X64JetlineFunction]{helper, entry}
+    // push rbx; two runtime calls; lea rdi, [rip + 0x2000]; call jet_rt_main;
+    // mov rbx, rax.
+    rooted: [U8]{0x53, 0xE8, 0, 0, 0, 0, 0xE8, 0, 0, 0, 0, 0x48, 0x8D, 0x3D, 0xEE, 0x0F, 0, 0, 0xE8, 0, 0, 0, 0, 0x48, 0x89, 0xC3}
+    assert_eq(native_main_entry(rooted, 0x1000, functions), 1)
+    // push rbx; two runtime calls; call jet_rt_main_owned_start at 0x3000;
+    // call 0x2000; call the flush.
+    owned: [U8]{0x53, 0xE8, 0, 0, 0, 0, 0xE8, 0, 0, 0, 0, 0xE8, 0xF0, 0x1F, 0, 0, 0xE8, 0xEB, 0x0F, 0, 0, 0xE8, 0, 0, 0, 0}
+    assert_eq(native_main_entry(owned, 0x1000, functions), 1)
+    // A main that names no line-table function before another instruction.
+    bare: [U8]{0x53, 0xE8, 0, 0, 0, 0, 0x5B, 0xC3}
+    assert_eq(native_main_entry(bare, 0x1000, functions), -1)
+    // A generated entry function at 0x2000 runs `run`, declared at its line:
+    // the entry is `run`. Kept only inlined there, the generated one is.
+    wrapper: X64JetlineFunction{low: 0x2000, high: 0x2040, name: "entry", file: "main.jet", dir: "", decl: 7, rows: 0, rows_end: 0}
+    run: X64JetlineFunction{low: 0x5000, high: 0x5010, name: "run", file: "main.jet", dir: "", decl: 7, rows: 0, rows_end: 0}
+    assert_eq(native_main_entry(rooted, 0x1000, [X64JetlineFunction]{helper, wrapper, run}), 2)
+    assert_eq(native_main_entry(rooted, 0x1000, [X64JetlineFunction]{helper, wrapper}), 1)
+}
+
+#Test("an image's entry is read from its main's code where a section holds it") {
+    wrapper: X64JetlineFunction{low: 0x2000, high: 0x2040, name: "entry", file: "main.jet", dir: "", decl: 7, rows: 0, rows_end: 0}
+    image: NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{wrapper}}, functions: [NativeFunction]{NativeFunction{low: 0x1000, high: 0x101A, name: "main", file: 0, variables: [NativeVariable]{}, inlined: [NativeInlined]{}}}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}}
+    // main at 0x1000 in a section loaded at 0xFF0: 16 bytes of other code
+    // first, then main's rooted form.
+    main: [U8]{0x53, 0xE8, 0, 0, 0, 0, 0xE8, 0, 0, 0, 0, 0x48, 0x8D, 0x3D, 0xEE, 0x0F, 0, 0, 0xE8, 0, 0, 0, 0, 0x48, 0x89, 0xC3}
+    text := loop _ in 0..<16 -> U8{0xCC}
+    loop byte in main -> text.push(byte)
+    assert_eq(native_image_entry(image, [NativeCode]{NativeCode{address: 0x3000, bytes: [U8]{0xC3}}, NativeCode{address: 0xFF0, bytes: text}}), 0)
+    // A section that holds only part of main is not main's code.
+    assert_eq(native_image_entry(image, [NativeCode]{NativeCode{address: 0xFF0, bytes: [U8]{0x53}}}), -1)
+}
+
 // A fallible call's carrier as the compiler describes it (JetIR X64Module.jet
 // ir_x64_debug_variants): a typedef of a pointer to a box whose tag selects
 // `Ok` (1) or `Err` (0), each payload at 8.

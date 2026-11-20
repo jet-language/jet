@@ -31,7 +31,7 @@ prelude_build_rows_same: fn<T: Encode>(built: T, read: T, what: String) {
     built_bytes: cbor.to_bytes(built) ?? panic("the build-time {what} does not encode: {err}")
     read_bytes: cbor.to_bytes(read) ?? panic("the {what} read now does not encode: {err}")
     if built_bytes != read_bytes {
-        panic("the build-time {what} ({built_bytes.len()} CBOR bytes) differs from the {what} read now ({read_bytes.len()} bytes); from Compiler/, run jet run Toolchain/PreludeRows/Main.jet -- --write")
+        panic("the build-time {what} ({built_bytes.len()} CBOR bytes) differs from the {what} read now ({read_bytes.len()} bytes); from the checkout root, run jet Compiler/Toolchain/PreludeRows/Main.jet --write")
     }
 }
 

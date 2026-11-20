@@ -374,3 +374,38 @@ run: fn() {
     }
     eval_probe_report(failures)
 }
+
+// A bare name of a value the stopped function doesn't own, a read parameter
+// or a loop's element, is lent: the probe checks it with no refusal, and the
+// function takes it (`&&`) and returns it as-is, so nothing copies it.
+#Test("eval_probe_function_takes_a_lent_name") {
+    failures := [String]{}
+    source: `size: fn(word: String) -> Int {
+    word.len()
+}
+
+run: fn() {
+    names: [String]{"a", "bc"}
+    loop name in names {
+        print("{name} {size(name)}")
+    }
+}
+`
+    asks: [EvalProbeAsk]{
+        EvalProbeAsk{offset: source.find(`print("{name}`), texts: [String]{"name"}},
+        EvalProbeAsk{offset: source.find("word.len()"), texts: [String]{"word"}},
+    }
+    probed: eval_probe_run(source, asks, failures)
+    names: [String]{"name", "word"}
+    loop (probe, text) in names {
+        answer: eval_probe_answer(probed, probe, 0, failures) ?? next
+        if !answer.complete || answer.refusals.len() > 0 || !answer.lent {
+            failures.push("`{text}` was not lent: {answer:Debug}")
+        }
+        function: eval_probe_function_checks(source, probed, probe, 0, text, failures)
+        if !function.contains("({text}: &&String) -> String {{\n    {text}\n}}") {
+            failures.push("`{text}` is not a function returning the name it takes:\n{function}")
+        }
+    }
+    eval_probe_report(failures)
+}

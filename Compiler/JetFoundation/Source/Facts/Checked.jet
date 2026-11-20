@@ -945,6 +945,9 @@ TFuncKind: enum {
     TraitMethod(is_unsafe: Bool, self_convention: AccessConvention?, owner_type: Type, trait_name: SymbolID, serde_codec: TSerdeCodec?),
 }
 
+// A typed cost site's kind. StopPoll is a check the compiler emits where a
+// stop can be delivered (JetIR Build.jet ir_loop_check, ir_entry_check),
+// which JetDriver CostQueries.jet jet_driver_cost_stop_polls places.
 TCostKind: enum {
     ViewMaterialization,
     ImplicitCopy,
@@ -952,6 +955,7 @@ TCostKind: enum {
     ExactIntSpill,
     OutcomeConstruction,
     RepresentationFallback,
+    StopPoll,
 }
 
 TCostState: enum {

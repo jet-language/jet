@@ -2,6 +2,7 @@
 // handle yet fails its function with one message naming the construct; the
 // module build keeps going and reports every failure (collect-all).
 use {
+    jet_backend.[X64_DEBUG_ITEMS_DROP_SYMBOL]
     jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, CompilerTraceSink, DeclID, DeclTable, decl_table_find, ModuleID, Span, SymbolID, SymbolTable, Type, TypeTable, TypeTupleField, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_take_rows, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, type_table_find, type_table_intern, NameRows, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
     jet_sema.[SemaCheckedForeignFunction, sema_inference_type_mentions_param, sema_instance_type, sema_instance_types]
 }
@@ -1678,7 +1679,9 @@ ir_symbol_name: fn(function: FnBody) -> String Never! {
 // non-generic function of checks.modules is a root too, so the image carries
 // the package's unreached functions; with checks.debug_views each
 // non-generic DebugView implementation's `debug_view` is one, so a debugger
-// can call it; each runtime provider hook the program defines
+// can call it, and the drop of the [DebugItem] list they return is kept as
+// X64_DEBUG_ITEMS_DROP_SYMBOL, so the debugger gives back the list a view
+// it called returned; each runtime provider hook the program defines
 // (checks.hooks) is one, which the object exports (IRModule.hooks). With
 // `trace_sink` the build's steps are
 // spans inside the host's `ir.build`: `ir.build.program` (the checked
@@ -1741,6 +1744,16 @@ ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
     loop hook in waves.program.checks.hooks.move() {
         at: name_rows_get_text(built.program.function_rows, hook.key) ?? next
         built.program.hooks.push(IRLibraryExport{function: at, symbol: hook.symbol, init_priority: -1, fini_priority: -1, guards: [Int]{}})
+    }
+    if waves.program.checks.debug_views {
+        loop view in (waves.program.trait_methods.get("DebugView|debug_view") ?? [Int]{}) {
+            at: name_rows_get_text(built.program.function_rows, waves.program.functions[view].key) ?? next
+            items: built.program.functions[at].result
+            if items >= 0 && built.program.types[items].drop != "" {
+                built.program.kept.push(ir_cell_drop(built.program, X64_DEBUG_ITEMS_DROP_SYMBOL, items))
+            }
+            break
+        }
     }
     if trace_sink == .Val(sink) -> sink.begin("ir.build.core_cells", "", -1, -1)
     if waves.program.checks.core == .Val(image) -> ir_core_cells_bind(built.program, image)
@@ -3533,6 +3546,24 @@ ir_stop_poll: fn(m: &IRModule, key: String) -> Int Never! {
     id: m.functions.len()
     m.functions.push(f)
     name_rows_set(m.function_rows, key, id)
+    id
+}
+
+// `name(cell)`, built into `m`: drops the value of the type row `ty`, which
+// has a drop, held in `cell`: an aggregate's bytes are the cell, else its
+// word. A debugger that calls a function in a stopped program calls this
+// once it has read the result the function left in `cell`, so the
+// references the result holds are given back.
+ir_cell_drop: fn(m: &IRModule, name: String, ty: Int) -> Int Never! {
+    d := ir_function_new(name, name, name, "", 0)
+    cell: ir_slot(d, ir_pointer_row(m), IRSlotKind.Param, ir_intern_name(m, "cell"), 0)
+    value: ir_slot(d, ty, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(d, if m.types[ty].kind == .Aggregate -> IROp.Offset else -> IROp.Load, value, cell, 0, -1, 0)
+    _ := ir_emit(d, IROp.Drop, -1, value, -1, -1, 0)
+    _ := ir_emit(d, IROp.Return, -1, -1, -1, -1, 0)
+    id: m.functions.len()
+    name_rows_set(m.function_rows, name, id)
+    m.functions.push(d)
     id
 }
 

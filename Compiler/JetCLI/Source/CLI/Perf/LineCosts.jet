@@ -8,7 +8,7 @@ use {
     perf_json: core.encoding.json
     perf_process: core.process
     perf_sys: core.sys
-    core.encoding.[Dyn]
+    core.encoding.[Dyn, EncodingLimits]
     jet_foundation.[CanonicalJSON, foundation_json_integer, sha256_hex]
 }
 
@@ -36,12 +36,17 @@ jet_cli_perf_line_costs_none: fn() -> JetCLIPerfLineCosts Never! {
 }
 
 // The cost facts of each `.jet` source in the trace's source identity that
-// is on disk with its recorded digest.
+// is on disk with its recorded digest. The sources are one program's, the
+// checked source first: one `jet explain --cost` run on it gives the sites
+// of the whole program, each named by its path from the package root.
 jet_cli_perf_line_costs: fn(trace: CanonicalJSON) -[FS, Env, Exec, Time]> JetCLIPerfLineCosts Never! {
     found := jet_cli_perf_line_costs_none()
     sources: jet_cli_perf_rows(trace, "source_identity") ?? return found
     exe: perf_sys.executable()
     if exe == "" -> return found
+    // Each source on disk as the trace recorded it, by its canonical path,
+    // as the trace names it.
+    named := [String:String]{}
     loop source in sources {
         path: jet_cli_perf_member_text(source, "path") ?? next
         digest: jet_cli_perf_member_text(source, "sha256") ?? next
@@ -54,43 +59,81 @@ jet_cli_perf_line_costs: fn(trace: CanonicalJSON) -[FS, Env, Exec, Time]> JetCLI
             found.notes.push("cost facts: none, `{path}` changed since this capture")
             next
         }
-        ran: perf_process.cmd([String]{"{exe}", "explain", "--cost", "{path}", "--json"}).stdout(.Capture).stderr(.Capture).run() ?? {
-            found.notes.push("cost facts: none, `jet explain --cost {path}` didn't start: {err}")
-            next
-        }
-        if !ran.success {
-            found.notes.push("cost facts: none, `jet explain --cost {path}` failed; run it to see why")
-            next
-        }
-        report: perf_json.parse(ran.output) ?? {
-            found.notes.push("cost facts: none, `jet explain --cost {path} --json` printed no JSON")
-            next
-        }
-        sites: jet_cli_perf_optional(report, "sites") ?? next
-        if sites == .Array(items) {
-            // The child names the entry's own sites by the path it resolved.
-            absolute: perf_files.absolute(path) ?? ""
-            canonical: perf_files.canonicalize(path) ?? ""
-            loop site in items {
-                place: jet_cli_perf_site_text(site, "path") ?? next
-                if place != path && place != absolute && place != canonical -> next
-                at: jet_cli_perf_optional(site, "line") ?? next
-                line: foundation_json_integer(at) ?? next
-                nesting: jet_cli_perf_optional(site, "loop_depth") ?? next
-                depth: foundation_json_integer(nesting) ?? next
-                kind: jet_cli_perf_site_text(site, "kind") ?? next
-                state: jet_cli_perf_site_text(site, "state") ?? next
-                view: jet_cli_perf_site_text(site, "view") ?? ""
-                repeated: jet_cli_perf_optional(site, "repeats") ?? next
-                repeats := false
-                if repeated == .Bool(flag) -> repeats = flag
-                copied: if view == "" -> "" else -> " of `{view}`"
-                turns: if repeats -> ", repeats every loop turn" else -> ""
-                found.costs.push(JetCLIPerfLineCost{path: "{path}", line: line, kind: "{kind}{copied}", detail: "{state} (loop depth {depth}{turns})"})
+        canonical: perf_files.canonicalize(path) ?? next
+        named[canonical] = path
+    }
+    if sources.len() == 0 -> return found
+    first: jet_cli_perf_member_text(sources[0], "path") ?? return found
+    entry: perf_files.canonicalize(first) ?? return found
+    path: named.get(entry) ?? return found
+    ran: perf_process.cmd([String]{"{exe}", "explain", "--cost", "{path}", "--json"}).stdout(.Capture).stderr(.Capture).run() ?? {
+        found.notes.push("cost facts: none, `jet explain --cost {path}` didn't start: {err}")
+        return found
+    }
+    if !ran.success {
+        found.notes.push("cost facts: none, `jet explain --cost {path}` failed; run it to see why")
+        return found
+    }
+    // A whole program's sites run past the default item bound; the report is
+    // already in memory, so its own size bounds it.
+    limits := EncodingLimits.safe()
+    if ran.output.count_bytes() > limits.max_item_bytes {
+        limits.max_item_bytes = ran.output.count_bytes()
+    }
+    report: perf_json.parse_with_limits(ran.output, limits) ?? {
+        found.notes.push("cost facts: none, `jet explain --cost {path} --json` printed no JSON")
+        return found
+    }
+    sites: jet_cli_perf_optional(report, "sites") ?? return found
+    if sites == .Array(items) {
+        // Each site path's source, "" for one the trace doesn't name.
+        resolved := [String:String]{}
+        loop site in items {
+            place: jet_cli_perf_site_text(site, "path") ?? next
+            if !resolved.has_key(place) {
+                resolved[place] = jet_cli_perf_site_source(place, entry, named)
             }
+            source: resolved[place]
+            if source == "" -> next
+            at: jet_cli_perf_optional(site, "line") ?? next
+            line: foundation_json_integer(at) ?? next
+            nesting: jet_cli_perf_optional(site, "loop_depth") ?? next
+            depth: foundation_json_integer(nesting) ?? next
+            kind: jet_cli_perf_site_text(site, "kind") ?? next
+            state: jet_cli_perf_site_text(site, "state") ?? next
+            view: jet_cli_perf_site_text(site, "view") ?? ""
+            repeated: jet_cli_perf_optional(site, "repeats") ?? next
+            repeats := false
+            if repeated == .Bool(flag) -> repeats = flag
+            copied: if view == "" -> "" else -> " of `{view}`"
+            turns: if repeats -> ", repeats every loop turn" else -> ""
+            found.costs.push(JetCLIPerfLineCost{path: named[source], line: line, kind: "{kind}{copied}", detail: "{state} (loop depth {depth}{turns})"})
         }
     }
     found
+}
+
+// The canonical path of the trace source (`named`) an explain site at
+// `place` is in, "" for none: the entry's own sites name the path it
+// resolved, the others their path from the package root, a directory that
+// holds the explained `entry`, or from the working directory.
+jet_cli_perf_site_source: fn(place: String, entry: String, named: [String:String]) -[FS]> String Never! {
+    if place == "" -> return ""
+    if !place.starts_with("/") {
+        dir := entry
+        loop {
+            slash: dir.rfind("/")
+            if slash <= 0 -> break
+            dir = dir.slice(0..<slash)
+            if perf_files.canonicalize("{dir}/{place}") == .Ok(canonical) && named.has_key(canonical) {
+                return canonical
+            }
+        }
+    }
+    if perf_files.canonicalize(place) == .Ok(canonical) && named.has_key(canonical) {
+        return canonical
+    }
+    ""
 }
 
 // The text of member `key` of an `explain.cost` site; None when it has none.

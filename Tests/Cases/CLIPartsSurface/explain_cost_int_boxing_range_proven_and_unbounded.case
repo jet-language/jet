@@ -5,8 +5,8 @@
 # spill to a bigint every turn, so its row is a semantic remainder and the one
 # L2510 `jet lint --cost` reports. The same view names every other kind on
 # its own line: the copies (a view made owned, an implicit copy, a shared
-# map's clone), the representation fallback, and the allocation of an
-# Outcome carrier each turn.
+# map's clone), the representation fallback, the allocation of an Outcome
+# carrier each turn, and the stop poll each turn of the loop starts with.
 fixture: Fixtures/Cost
 step: jet explain --cost {work}/tests/cli/cost_int_boxing.jet
 env: NO_COLOR=1
@@ -29,3 +29,4 @@ stdout: count "cost_rows.jet:15 fn run — map copy-on-write — semantic remain
 stdout: count "cost_rows.jet:16 fn run — exact Int spill — semantic remainder (loop depth 1, repeats every loop turn; tier=shared-tir)" = 1 # boxing: `total += index` has no range bounding `total`
 stdout: count "cost_rows.jet:17 fn run — generic representation fallback — semantic remainder (loop depth 1, repeats every loop turn; tier=shared-tir)" = 1 # fallback: the indexed read of `values`
 stdout: count "cost_rows.jet:18 fn run — outcome construction — semantic remainder (loop depth 1, repeats every loop turn; tier=shared-tir)" = 1 # allocation: `read_u8()` builds its Result each turn
+stdout: count "cost_rows.jet:10 fn run — stop poll — semantic remainder (loop depth 1, repeats every loop turn; tier=shared-tir)" = 1 # poll: the turn poll each iteration of the loop starts with

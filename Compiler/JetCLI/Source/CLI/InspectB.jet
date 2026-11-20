@@ -338,7 +338,7 @@ jet_cli_digest_structured_fix: fn(fix: DiagnosticRegistryFix?) -> String Never! 
 // The current registry meaning: retired rows are never reported, so the
 // digest leaves them out.
 jet_cli_digest_diagnostic_text: fn() -> String Never! {
-    out := "code\tstatus\tstage\tseverity\tmoment\tmeaning\twhat\twhy\tfix\tdetail\tstructured-fix"
+    out := "name\tstatus\tstage\tseverity\tmoment\tmeaning\twhat\twhy\tfix\tdetail\tstructured-fix"
     loop row in diagnostic_registry_rows() {
         if row.status == .Retired -> next
         status: if row.status == .Active -> "active" else -> "reserved"
@@ -350,7 +350,7 @@ jet_cli_digest_diagnostic_text: fn() -> String Never! {
             .Tool -> "tool"
         }
         detail: if row.detail -> "true" else -> "false"
-        out = "{out}\n{row.code}\t{status}\t{row.stage}\t{severity}\t{moment}\t{jet_cli_digest_one_line(row.meaning)}\t{jet_cli_digest_one_line(row.what)}\t{jet_cli_digest_one_line(row.why)}\t{jet_cli_digest_one_line(row.fix)}\t{detail}\t{jet_cli_digest_structured_fix(row.structured_fix)}"
+        out = "{out}\n{row.name}\t{status}\t{row.stage}\t{severity}\t{moment}\t{jet_cli_digest_one_line(row.meaning)}\t{jet_cli_digest_one_line(row.what)}\t{jet_cli_digest_one_line(row.why)}\t{jet_cli_digest_one_line(row.fix)}\t{detail}\t{jet_cli_digest_structured_fix(row.structured_fix)}"
     }
     out
 }
@@ -407,7 +407,7 @@ jet_cli_llm_digest: fn() -> String Never! {
     core_rules_body: core_rules_lines.join("\n")
     marker_body: "User marker spelling is `#Name(arguments)`; rows below are registry declarations.\n\n```text\n{marker_text}\n```"
     core_body: "Use a module alias, then call an indexed item: `use term: core.term`; `term.print(\"hi\")`.\n\n```text\n{jet_cli_digest_core_module_text()}\n```"
-    diagnostic_body: "Diagnostic rows use current registry meaning. Match code first; follow `fix`. Rows marked reserved are not current syntax.\n\n```text\n{jet_cli_digest_diagnostic_text()}\n```"
+    diagnostic_body: "Diagnostic rows use current registry meaning. Match the name a report prints first; follow `fix`. Rows marked reserved are not current syntax.\n\n```text\n{jet_cli_digest_diagnostic_text()}\n```"
     sections: [String]{
         "# Jet LLM surface digest",
         "",

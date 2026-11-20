@@ -417,13 +417,14 @@ diagnostic_display_name: fn(code: String) -> String Never! {
     code.copy()
 }
 
-// One line that states a diagnostic: `Jet.Name: what` for a registered row
-// and `web.BadPath: what` for a library's own diagnostic. Any other code is a
-// number no reader can look up, so the line is the plain `what`.
+// One line that states a diagnostic: `Jet.Name: what` for a registered row.
+// Any other code is its author's own name for it, a library's type path
+// (`web.BadPath: what`) or a build rule's code (`ORG01: what`), so the line
+// keeps it; a report with no code is the plain `what`.
 diagnostic_headline: fn(code: String, what: String) -> String Never! {
     if diagnostic_registry_row(code) == .Val(row) -> return "{row.name}: {what}"
-    if code.contains(".") -> return "{code}: {what}"
-    what.copy()
+    if code == "" -> return what.copy()
+    "{code}: {what}"
 }
 
 // A tidy error (DiagnosticTier.Tidy): a lint whose registered row is on the

@@ -1,8 +1,9 @@
-# `jet debug` renders a value's DebugView in a fork of the stopped program,
-# never in the program itself. The fork may compute and allocate, so the
-# ring shows its items; a system call there is refused, so the view that
-# writes a file shows the value's fields instead and the file never appears.
-# The program then runs on unchanged.
+# `jet debug` renders a value's DebugView by calling the view in the
+# stopped program, on its stopped thread, with the view's allocations in
+# the debugger's own arena; the program itself doesn't run meanwhile. The
+# view may compute and allocate, so the ring shows its items; a system call
+# there is refused, so the view that writes a file shows the value's fields
+# instead and the file never appears. The program then runs on unchanged.
 fixture: DebugViewRendersWithoutRunningTheTarget.fixture
 env: NO_COLOR=1
 step: jet debug prog.jet
@@ -13,4 +14,4 @@ stdout: ~ "(Jet) print ring\nring = Ring{0: 3, 1: 4, 2: 5}\n" # the view's items
 stdout: ~ "ring: Ring = Ring{0: 3, 1: 4, 2: 5}\n" # `locals` shows the same view
 stdout: ~ "(Jet) print noted\nnoted = Noted{note: \"hello\"}\n" # the writing view was refused: its fields
 stdout: !~ "Noted{note: hello}" # never the writing view's items
-stdout: ~ "3 items, hello\nviewed.txt exists: false\nProgram finished\n" # the view never ran in the program
+stdout: ~ "3 items, hello\nviewed.txt exists: false\nProgram finished\n" # the view's write never happened

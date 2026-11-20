@@ -71,3 +71,14 @@ use files: core.files
     }
     files.remove_all(root) ?? panic("remove median scratch")
 }
+
+#Test("an elapsed capture holds the last step's wall time in nanoseconds") {
+    root: cases_test_root("numeric-elapsed-capture")
+    // The step sleeps 50 ms, so it took at least 50000000 ns.
+    prefix: "step: sleep 0.05\ncapture: took = elapsed\nwrite: n.json = \"50000000\"\n"
+    assert_eq(cases_test_advanced(root, "at-least", "{prefix}json: file n.json doc $ <= {{cap:took}}+0\n").verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "not-more", "{prefix}json: file n.json doc $ >= {{cap:took}}+0\n").verdict.status, "FAIL")
+    assert_eq(cases_test_advanced(root, "no-step", "capture: took = elapsed\n").verdict.status, "REFUSED")
+    assert_eq(cases_test_advanced(root, "extra-word", "step: printf x\ncapture: took = elapsed now\n").verdict.status, "REFUSED")
+    files.remove_all(root) ?? panic("remove elapsed capture scratch")
+}

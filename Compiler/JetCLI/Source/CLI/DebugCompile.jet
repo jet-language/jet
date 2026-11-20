@@ -2,9 +2,9 @@
 // at a stop is compiled with the program, as its build compiled it (its
 // optimization level, the same deep checks, debug info), as a function of
 // the locals it reads, built as a root with an entry that calls it (JetEval
-// jet_eval_native_wrapper); the session places that code in a fork of the
-// stopped program and calls it there. Where every local the expression's
-// names may read is a value no move empties, live at the stop
+// jet_eval_native_wrapper); the session places that code next to the
+// stopped program's and calls it in the program itself. Where every local
+// the expression's names may read is a value no move empties, live at the stop
 // (jet_cli_debug_eval_params), the expression's function takes them as the
 // image's debug types spell them. The session's held checks, which open in
 // the background from the session's start (jet_cli_debug_eval_held_start),
@@ -48,7 +48,7 @@ use {
     jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverEvalAsk, JetDriverHeldEval, JetDriverIceRow, JetDriverLoweringInputs, jet_driver_check_failures, jet_driver_checked_declarations, jet_driver_declares_workspace, jet_driver_entry_root_path, jet_driver_held_eval_append, jet_driver_held_eval_check, jet_driver_held_eval_open, jet_driver_inline_package, jet_driver_is_project_configuration]
     jet_eval.[jet_eval_native_add, jet_eval_native_wrapper]
     jet_foundation.[COMMENT_PREFIX, MODULE_CORE_PREFIX, BuildOptions, CompilerThreads, DeclTable, DeepChecks, FnBody, StmtKind, TTypeDef, Type, body_type, deep_checks_flags, foundation_named_type, name_rows_get_text, name_rows_set, type_name, type_unqualified_nominals]
-    jet_ir.[IRBuildResult, IRModule, IRProgram, IRTypeKind, ir_build_held_root, ir_eval_place_refusal, ir_held_append, ir_held_program, ir_module_new, ir_pointer_row, ir_untag, ir_x64_compile_module_logged, ir_x64_debug_program]
+    jet_ir.[IRBuildResult, IRModule, IRProgram, IRTypeKind, ir_build_held_root, ir_cell_drop, ir_eval_place_refusal, ir_held_append, ir_held_program, ir_module_new, ir_pointer_row, ir_untag, ir_x64_compile_module_logged, ir_x64_debug_program]
     jet_parser.[parse_type_text]
     jet_sema.[SemaEvalProbeAnswer, sema_eval_probe_function, sema_eval_probe_parse, sema_ownership_type_is_copy]
 }
@@ -59,6 +59,10 @@ JET_CLI_DEBUG_EXPRESSION: "jet_debug_expression"
 // The entry that calls it with its result's cell and its captures'
 // addresses (NativeEval.entry).
 JET_CLI_DEBUG_EVAL_ENTRY: "jet_debug_eval"
+
+// The function that drops the result its cell holds (NativeEval.drop), for
+// a result whose type has a drop.
+JET_CLI_DEBUG_EVAL_DROP: "jet_debug_eval_drop"
 
 // The prefix of the debugger's own refusals in the checker's answer, which
 // the console's `Can't evaluate` says already; the checker's other
@@ -241,7 +245,11 @@ jet_cli_debug_eval_compile: fn(entry: String, argv: [String], color: Bool, held:
             checked: inputs.move() ?? return Err(jet_cli_debug_eval_refused("the compiler finished without its checked functions"))
             at: jet_cli_debug_eval_function(checked, path) ?? return Err(jet_cli_debug_eval_refused("the compiled program has no function for it"))
             names: loop capture in answer.captures -> capture.source
-            jet_cli_debug_eval_build(result, checked, snapshot, options, entry, at, names, value, text, owned)
+            built := jet_cli_debug_eval_build(result, checked, snapshot, options, entry, at, names, value, text, owned) ?? return Err(err)
+            // A lent name's result is the stopped frame's own value
+            // (SemaEvalProbeAnswer.lent): the session drops nothing of it.
+            if answer.lent -> built.drop = ""
+            Ok(built)
         }
     }
 }
@@ -1578,6 +1586,10 @@ jet_cli_debug_eval_native: fn(built: &&IRModule, key: String, names: [String], v
     wrapper: jet_eval_native_wrapper(program, JET_CLI_DEBUG_EVAL_ENTRY, row, params, result_row, pointer, loads: true, table: params.len() > NATIVE_EVAL_CAPTURES)
     added: jet_eval_native_add(program, wrapper)
     program.kept.push(added)
+    // A result that holds references gives them back once the session has
+    // read it.
+    drop: if program.types[result_row].drop != "" -> JET_CLI_DEBUG_EVAL_DROP else -> ""
+    if drop != "" -> program.kept.push(ir_cell_drop(program, drop, result_row))
     selected: ir_x64_compile_module_logged(program, threads, [String]{})
     if selected.errors.len() > 0 {
         return Err(jet_cli_debug_eval_refused("the compiler couldn't build it: {selected.errors[0]}"))
@@ -1587,7 +1599,7 @@ jet_cli_debug_eval_native: fn(built: &&IRModule, key: String, names: [String], v
         return Err(jet_cli_debug_eval_refused("the compiler couldn't build it: {lowered.errors[0]}"))
     }
     edit: NativeFixEdit{object: lowered.program.move(), functions: lowered.functions.move(), debug: lowered.debug.move()}
-    Ok(NativeEval{text: text, edit: edit, entry: JET_CLI_DEBUG_EVAL_ENTRY, captures: captures, result: part, refusal: refusal})
+    Ok(NativeEval{text: text, edit: edit, entry: JET_CLI_DEBUG_EVAL_ENTRY, captures: captures, result: part, refusal: refusal, drop: drop})
 }
 
 // How the checker checks `text` at byte `offset` of `path` in the program of

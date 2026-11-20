@@ -1,8 +1,10 @@
 // `jet debug <file.jet|image> [-- args…]`: the program's native O0 image,
 // built by this `jet`, run with the words after `--` as its arguments under
 // Jet's own native debugger behind the `(Jet)` console of
-// Compiler/JetDebug Native.jet. It stops at the start of `run`, or with
-// `--break <file.jet>:<line>` (repeatable) at the first of those lines the
+// Compiler/JetDebug Native.jet. It stops at the start of the program's
+// entry (the Jet function its image's `main` runs: NativeSession
+// program_entry), or with `--break <file.jet>:<line>` (repeatable) at the
+// first of those lines the
 // program reaches, then reads one command a line; the end of stdin runs the
 // program to its end, and `quit` ends it early (E2204). A stdin that is a
 // terminal is the program's too, read by it while it runs; otherwise its
@@ -252,8 +254,9 @@ jet_cli_debug_unstarted: fn(image: String, act: String) -> JetCLIProveRefusal Ne
     JetCLIProveRefusal{code: "E2104", what: "`{image}` can't {act}", why: "the program starts no task and makes no channel, live value or event, so its runtime has no observation start, where a recording and its replay begin", fix: "record and replay a program that synchronizes; a program with none runs the same with `jet run`", exit_code: JET_DRIVER_EXIT_USAGE}
 }
 
-// A `--break` value, `<file.jet>:<line>`: the file by its base name, as the
-// image's line table names it.
+// A `--break` value, `<file.jet>:<line>`: the file by its base name, or by a
+// path that picks one of the image's same-named files, as
+// `Sema/CheckProgram.jet:1517` does (NativeSession.break_at).
 jet_cli_debug_break: fn(spec: String) -> NativeBreak? Never! {
     colon: spec.rfind(":")
     if colon <= 0 -> return None
@@ -261,7 +264,7 @@ jet_cli_debug_break: fn(spec: String) -> NativeBreak? Never! {
     bytes: spec.bytes()
     line: Int.parse(foundation_byte_text(bytes, colon + 1, bytes.len())) ?? return None
     if line < 1 -> return None
-    Val(NativeBreak{file: cli_files.basename(foundation_byte_text(bytes, 0, colon)), line: line})
+    Val(NativeBreak{file: foundation_byte_text(bytes, 0, colon), line: line})
 }
 
 // Build `entry` at O0 into `scratch`, then debug the image with the program
@@ -307,7 +310,7 @@ jet_cli_debug_session: fn(image: String, entry: String, lines: [String], scratch
     // reads end at once, as they do when the console's stdin is not a
     // terminal.
     if !dap && cli_term.stdin().is_tty() -> session.input_path = "/dev/stdin"
-    source_file: if entry == "" -> session.run_source() else -> entry
+    source_file: if entry == "" -> session.entry_source() else -> entry
     // `print`, `watch`, conditions, logpoints and the adapter's `evaluate`
     // compile their expressions with this program (DebugCompile.jet).
     level: session.level()
@@ -353,7 +356,7 @@ jet_cli_debug_recorded: fn(status: Int, argv: &&[String], record: JetCLIDebugRec
 jet_cli_debug_attach: fn(pid: Int, scratch: String, deep_checks: DeepChecks, color: Bool) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> JetCLIPlan Never! {
     binary: native_attach_program(pid, "") ?? return jet_cli_debug_refused(err, color)
     session := NativeSession.start(binary, cli_files.join(scratch, "output.txt")) ?? return jet_cli_debug_refused(NativeAttachRefused{code: NATIVE_ATTACH_FAILED, detail: err.detail}, color)
-    source_file: session.run_source()
+    source_file: session.entry_source()
     level: session.level()
     argv: jet_cli_debug_eval_argv(deep_checks, level)
     // The process's image was built before the session: evaluations have a
@@ -477,7 +480,7 @@ jet_cli_debug_commands: fn(session: &NativeSession, first: NativeDebugStep, file
 jet_cli_debug_why: fn(session: &NativeSession, operand: String, entry: String, scratch: String, deep_checks: DeepChecks, recovery: &String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> String NativeDebugError! {
     asked: session.why(operand) ?? return Err(err)
     if !asked.recover || entry != "" -> return Ok(asked.text)
-    source: session.run_source()
+    source: session.entry_source()
     if source == "" || !cli_files.exists(source) -> return Ok(asked.text)
     if recovery == "" {
         out_dir: cli_files.join(scratch, "why")

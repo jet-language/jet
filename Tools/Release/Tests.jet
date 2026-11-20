@@ -425,7 +425,7 @@ texts: fn(items: [Dyn]) -> [String] Never! {
     fixture := new_fixture("flaky")
     fixture.evidence.push(runner(fixture.scratch, "ev-rerun", fixture.dir, 0, 1, "FAIL", [Dyn]{scope_row("gates", "PASS"), scope_row("Tests/golden", "FAIL")}))
     outcome: candidate(fixture)
-    expect(outcome, "BLOCKED", FLAKY, "tests/golden on {TARGET} was PASS in one run and FAIL")
+    expect(outcome, "BLOCKED", FLAKY, "Tests/golden on {TARGET} was PASS in one run and FAIL")
     expect(outcome, "BLOCKED", FLAKY, "a flaky gate")
     assert(!files.exists(files.join(fixture.dir, CANDIDATE_FILE)))
 }
@@ -1181,7 +1181,7 @@ row_file_verdict: fn(text: String) -> String Never! {
     }
     sources: [String:String]{"Tests/Cases/q/help.case": "stdout: = ../../cli/help.txt\n", "Tests/Cases/r/core.case": "run: jet check {{root}}/Core\n"}
     paths: [String]{"Tests/UI/edited/x.jet", "Tests/Cases/p/fixtures/main.jet", "Tests/CLI/help.txt", KNOWN_LEDGER}
-    ledger: ledger_changes("Tests/UI/ledger/x\t#1\twhy\ntests/ui/kept/x.jet\t#2\twhy\n", "# id\tcard\treason\ntests/ui/kept/x.jet\t#2\twhy\ntests/ui/new/x.jet\t#3\twhy\n")
+    ledger: ledger_changes("Tests/UI/ledger/x\t#1\twhy\nTests/UI/kept/x.jet\t#2\twhy\n", "# id\tcard\treason\nTests/UI/kept/x.jet\t#2\twhy\nTests/UI/new/x.jet\t#3\twhy\n")
     assert_eq(ledger.len(), 2)
     assert(ledger.has_key("Tests/UI/ledger/x") && ledger.has_key("Tests/UI/new/x.jet"))
     stale: carried_stale(rows, paths, sources, ledger)
@@ -1200,7 +1200,7 @@ row_file_verdict: fn(text: String) -> String Never! {
 }
 
 #Test("a ledger names its row IDs and owns a project by its directory and a file entry by its stem") {
-    known: ledger_ids("# id\tcard\treason\n\ntests/golden/a\t#1\twhy\ntests/ui/b.jet\t#2\twhy\ntests/cases/c.case\t#3\twhy\nshort\tline\n")
+    known: ledger_ids("# id\tcard\treason\n\ntests/golden/a\t#1\twhy\nTests/UI/b.jet\t#2\twhy\nTests/Cases/c.case\t#3\twhy\nshort\tline\n")
     assert_eq(known.len(), 3)
     assert(ledger_owns(known, "tests/golden/a/run.jet"))
     assert(ledger_owns(known, "tests/golden/a.jet"))

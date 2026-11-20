@@ -308,7 +308,16 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
             if jet_cli_perf_session_allocations("{source}", found.sited, found.allocated.move(), found.cost) == .Val(section) {
                 capture.receipts.push(section)
             }
+            if jet_cli_perf_helpers_section("{source}", found.lines, found.functions, found.sources, found.source_at) == .Val(section) {
+                capture.receipts.push(section)
+            }
             if jet_cli_perf_session_heaps(source.move(), found.heaps.move()) == .Val(section) {
+                capture.receipts.push(section)
+            }
+            if jet_cli_perf_threads_section(found.threads.move(), found.threads_claimed) == .Val(section) {
+                capture.receipts.push(section)
+            }
+            if jet_cli_perf_syscalls_section(found.syscalls.move(), found.syscalls_lost) == .Val(section) {
                 capture.receipts.push(section)
             }
         }
@@ -449,12 +458,20 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
         }
         text: perf_files.read(path) ?? return jet_cli_perf_error("cannot read source {path}: {jet_cli_io_error_text(err)}", JET_CLI_PERF_FIX, color)
         // With `--zones=`, the program's zones, frame marks, plots and log
-        // spans for that window, before its ring is read.
-        spans: if zones_ms > 0 -> jet_cli_perf_attach_zones(target_pid, zones_ms) else -> None
+        // spans for that window, before its ring is read, and the window
+        // they cover.
+        watched := JetCLIPerfRuntimeWindow?{None}
+        spans: if zones_ms > 0 -> jet_cli_perf_attach_zones(target_pid, zones_ms, watched) else -> None
         // The flight ring the program publishes: its recent samples, waits,
         // wakes, spawns and transfers, read as a run's are.
         flight: jet_cli_perf_attach_flight(target_pid, path)
         capture = jet_cli_perf_capture_source(path, text, observations, flight, target, None) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
+        // The header's window is the one the zones were recorded in, not
+        // the run since it started.
+        if watched == .Val(window) {
+            jet_cli_perf_window(capture.profile, window)
+            capture.profile.window_reason = "the attach's zones window: wall time on jet's monotonic clock, the program's process CPU across it"
+        }
         if alloc {
             heap: jet_cli_perf_attach_heap(target_pid, path) ?? return jet_cli_perf_error(err.message, "start the program with `jet run --observe --checked-alloc {path}`, then attach with `--lens=alloc`", color)
             held_ns = Val(heap.held_ns)
@@ -595,17 +612,32 @@ jet_cli_perf_attach_window: fn(text: String) -> Int? Never! {
 // recording zones, frame marks, plots and log spans to `<ring>.spans`;
 // remove it after the window and wait two publications, so the program has
 // turned them off and written its rows. The rows, copied out of the
-// program's way; None when it wrote none.
-jet_cli_perf_attach_zones: fn(pid: Int, window_ms: Int) -[FS, Env, Time]> String? Never! {
+// program's way; None when it wrote none. `window` becomes the window from
+// the request to its removal: its wall time on jet's clock and the process
+// CPU the program spent in it, None where /proc doesn't show that CPU.
+jet_cli_perf_attach_zones: fn(pid: Int, window_ms: Int, window: &JetCLIPerfRuntimeWindow?) -[FS, Env, Time]> String? Never! {
     ring: perf_files.join(perf_sys.temp_dir(), "jet-flight-{pid}.samples")
     request: "{ring}.zones"
+    cpu_before: jet_cli_perf_attach_cpu(pid)
+    started: perf_time.instant()
     perf_files.write(request, "") ?? return None
     loop _ in 0..<(window_ms + 24) /% 25 -> perf_time.sleep(25ms)
     perf_files.remove(request).drop("a request the program no longer sees turns zones off")
+    wall: started.elapsed().ns
+    cpu_after: jet_cli_perf_attach_cpu(pid)
+    cpu: if cpu_before == .Val(first) && cpu_after == .Val(last) && last >= first -> Val(last - first) else -> None
+    window = Val(JetCLIPerfRuntimeWindow{elapsed_ns: U64{wall}, cpu_ns: cpu, exit: false})
     perf_time.sleep(250ms)
     taken: perf_files.join(perf_sys.temp_dir(), "jet-perf-attach-{pid}-{perf_time.unix_ns()}.spans")
     perf_files.copy("{ring}.spans", taken) ?? return None
     Val(taken)
+}
+
+// The process CPU program `pid` has spent since its run started (/proc's
+// utime and stime), None when its live snapshot can't be read.
+jet_cli_perf_attach_cpu: fn(pid: Int) -[FS.Read, Env, Time]> U64? Never! {
+    live: jet_cli_perf_live_read(pid) ?? return None
+    live.runtime.cpu_ns
 }
 
 // The start of the first row of the spans file `path`, 0 when it has none.

@@ -20,10 +20,14 @@ X64JetlineFunction: struct {
     rows_end: Int,
 }
 
-// A linked `.debug_jetline` and its functions in table order.
+// A linked `.debug_jetline` and its functions in table order; `ascending`
+// when each function starts at or past the end of the one before it, so a
+// lookup halves the table (x64_jetline_find): an image of the compiler holds
+// tens of thousands of functions, and a step looks one up per instruction.
 X64Jetline: struct {
     table: [U8],
     functions: [X64JetlineFunction],
+    ascending: Bool{false},
 }
 
 // The location table of the ELF file `elf` (an image or its side debug
@@ -53,6 +57,8 @@ x64_jetline_read: fn(elf: [U8]) -> X64Jetline? Never! {
 // runs past its end ends the read.
 x64_jetline_parse: fn(table: &&[U8]) -> X64Jetline Never! {
     functions := [X64JetlineFunction]{}
+    ascending := true
+    reached := 0
     at := 0
     loop at + 20 <= table.len() {
         end: at + 4 + link_debug_le(table, at, 4)
@@ -66,6 +72,8 @@ x64_jetline_parse: fn(table: &&[U8]) -> X64Jetline Never! {
             if cursor >= end -> break
             low: address + x64_jetline_sleb(table, cursor)
             high: low + link_debug_uleb(table, cursor)
+            if low < reached -> ascending = false
+            reached = high
             name: link_debug_uleb(table, cursor)
             file: link_debug_uleb(table, cursor)
             decl: link_debug_uleb(table, cursor)
@@ -88,11 +96,27 @@ x64_jetline_parse: fn(table: &&[U8]) -> X64Jetline Never! {
         }
         at = end
     }
-    X64Jetline{table: table.move(), functions: functions}
+    X64Jetline{table: table.move(), functions: functions, ascending: ascending}
 }
 
-// The index of the function holding link-time address `pc`, else -1.
+// The index of the function holding link-time address `pc`, else -1. An
+// ascending table is halved down to the last function starting at or before
+// `pc`; another is searched in order.
 x64_jetline_find: fn(lines: X64Jetline, pc: Int) -> Int Never! {
+    if lines.ascending {
+        // The first function starting past `pc`.
+        low := 0
+        high := lines.functions.len()
+        loop low < high {
+            middle: (low + high) >> 1
+            if {
+                (lines.functions[middle].low <= pc) -> low = middle + 1
+                else -> high = middle
+            }
+        }
+        if low > 0 && pc < lines.functions[low - 1].high -> return low - 1
+        return -1
+    }
     loop (k, function) in lines.functions {
         if pc >= function.low && pc < function.high -> return k
     }

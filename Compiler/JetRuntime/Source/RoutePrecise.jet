@@ -38,6 +38,15 @@ precise_fault: fn(message: I64) -> I64 {
     I64{0}
 }
 
+// `Int{x}` over an exact number that isn't whole, for a program that doesn't
+// hold the core.math helper that converts it (`__fraction_to_int`,
+// `__decimal_to_int`): the helper's E3010 stop with its `message`, which
+// names every rounding that makes the value whole.
+precise_inexact_int: fn(message: I64) -> I64 {
+    jet_numeric_stop(message)
+    I64{0}
+}
+
 // native(): the Int argument must fit the host i64.
 precise_native_fits: fn(value: I64) -> Bool {
     _ := jet_int_owned_to_i64(value)
@@ -249,9 +258,11 @@ fraction_render: fn(value: I64) -> I64 {
 
 #Export(c) jet_fraction_is_zero: fn(value: I64) -> Bool { precise_top(value) == I64{0} }
 
+// `Int{x}` over a Fraction: one that isn't whole stops with E3010
+// (precise_inexact_int).
 #Export(c) jet_fraction_to_int: fn(value: I64) -> I64 {
     if (precise_bottom(value) != I64{1}) {
-        return precise_fault(rt_static_text("Fraction is not an integer"))
+        return precise_inexact_int(rt_static_text("Int{{x}} needs a whole Fraction; pick the rounding with math.trunc, math.floor, math.ceil, math.round or math.round_even"))
     }
     jet_rt_int_clone(precise_top(value))
 }
@@ -588,13 +599,15 @@ decimal_integral: fn(value: I64, mode: I64) -> I64 {
 
 #Export(c) jet_decimal_round: fn(value: I64) -> I64 { decimal_integral(value, I64{2}) }
 
+// `Int{x}` over a Decimal: one that isn't whole stops with E3010
+// (precise_inexact_int).
 #Export(c) jet_decimal_to_int: fn(value: I64) -> I64 {
     denominator: precise_pow10(precise_bottom(value))
     remainder: precise_rem(precise_top(value), denominator)
     if (remainder != I64{0}) {
         jet_rt_int_drop(remainder)
         jet_rt_int_drop(denominator)
-        return precise_fault(rt_static_text("Decimal is not an integer"))
+        return precise_inexact_int(rt_static_text("Int{{x}} needs a whole Decimal; pick the rounding with math.trunc, math.floor, math.ceil, math.round or math.round_even"))
     }
     quotient: precise_div(precise_top(value), denominator)
     jet_rt_int_drop(denominator)

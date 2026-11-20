@@ -47,10 +47,14 @@ CPU-time samples at each source line, hottest first, at most 24 lines, each
 with its share of every line's samples and the line's typed cost facts
 (D-COSTLAW1), as `jet explain --cost` reports them
 (`  main.jet:11 spin_hot_loop samples=592 share=99% · cost: exact Int spill ×2
-— semantic remainder (loop depth 1, repeats every loop turn)`). A fact
-describes the code that ran: the view reads them by running
-`jet explain --cost` on each source the trace names whose file still holds
-the digest the trace recorded. A source it can't read, or that changed since
+— semantic remainder (loop depth 1, repeats every loop turn)`), then the
+line's samples in each compiler-emitted helper it called, from the
+`helpers` receipt, with their share of every line's samples (`· stop poll
+samples=34 share=34%`). A fact
+describes the code that ran: the view runs `jet explain --cost` once, on the
+trace's checked source, whose report gives the sites of its whole program,
+and keeps those of each source the trace names whose file still holds the
+digest the trace recorded. A source it can't read, or that changed since
 the capture, gets a `cost facts: none, …` line above the sections instead.
 A pprof or OTLP export carries no source, so its table has no facts. `--html`
 prints one self-contained page of the same three, which a browser opens with
@@ -127,10 +131,14 @@ the optimizer inlined from the image's DWARF inlined subroutines: a sample in
 `-O2` code inlined into a caller counts at the inlined function's line under
 that function's name, and inclusive at each call it was inlined for, as the
 debugger's inlined frames show it; a line of an inlined function from another
-file counts outside the checked source. A caller's frame is looked up at its
+file counts in that file. A caller's frame is looked up at its
 call, the byte before its return address. The rows are `cpu` rows, one per
-function and line of the checked
-source, hottest first. A row's `sample_count` is its exclusive time, the
+function and line of the checked source and of the program's other sources
+(each file of a Jet function the image names that resolves on disk, by its
+path from the working directory; the toolchain's library names none), whose
+identities the trace records beside the checked source's, hottest first, at
+most 4096 (`status=truncated` past that). A row's `sample_count` is its
+exclusive time, the
 samples whose program counter is on it; its `inclusive_count` is its inclusive
 time, the samples that hold it anywhere on the stack, each once however often
 (a recursive call's line counts once per sample), so a line the stack only
@@ -141,11 +149,18 @@ writes at exit under the `alloc` lens, so an allocation in the runtime or a
 core module counts at the line of the source that called into it; a run
 without that lens leaves it null. A sample in a compiler-emitted
 helper (a `jet_ir_` symbol, such as the stop poll `jet_ir_stop_turn`) counts
-at the Jet line that called it, and the `reason` counts those samples.
-`coverage` is `complete` when every sample landed in that source and
-`partial` when some ran in the runtime or another file, which the `reason`
-counts and, for samples outside every Jet function, names by the image's
-`.symtab` function, hottest first, as `perf report` names them. The `reason`
+at the Jet line that called it, and the `reason` counts those samples. The
+`helpers` receipt (type `JetPerfHelpers`) splits them out by line: each row
+a line's `path`, `line` and `function`, the `helper` named in Jet's terms
+(`stop poll` for every `jet_ir_stop_` poll, another helper its name past
+`jet_ir_` with spaces for `_`) and its `samples`, the most first; `jet
+explain --cost` names the stop poll each loop and each recursive call keeps
+as a cost fact on its line.
+`coverage` is `complete` when every sample landed in those sources and
+`partial` when some ran in the runtime or the toolchain's library, which the
+`reason` counts and, for samples outside every Jet function, names by the
+image's `.symtab` function, hottest first, as `perf report` names them. The
+`reason`
 also gives how many samples the CPU time sampled should give beside how many
 the session kept, and counts any sample in Jet code that kept no stack. The
 profile's overhead is `measured`: `overhead_ns` is the time the sampler's
@@ -153,9 +168,16 @@ handlers ran plus, for each sample's signal, the kernel's delivery and
 return, which the runtime times as sampling starts by sending its own thread
 64 signals; `overhead_reason` gives it as a share of the CPU time sampled.
 `jet perf view` sums the rows per function with its share of the
-samples, then its hottest lines with their exclusive and inclusive samples and
-allocations (`line 7 samples=12 inclusive=40 allocations=300`). A run whose
-samples never reach the checked source (a short program, `jet perf test`, `jet
+samples and the CPU time they stand for, one sample per 125 microseconds,
+then its hottest lines with their exclusive and inclusive samples and
+allocations (`line 7 samples=12 cpu_us=1500 inclusive=40 allocations=300`;
+`cpu_us` only for a line with samples of its own). When the rows span more
+than one package (the directory that holds a source's `Source/`, else the
+source's own), `cpu by package` follows: each package's samples, CPU time and
+share, heaviest first, at most 12, so a profile of `jet build Compiler` gives
+the compiler's time by phase (`Compiler/JetIR samples=652042
+cpu_us=81505250 share=57%`). A run whose
+samples never reach its sources (a short program, `jet perf test`, `jet
 perf attach`) keeps the observation rows, which attribute to the parsed `run:
 fn` declaration (`fn` through its closing brace) and do not separate the
 functions that `run` calls; their `inclusive_count` and `allocation_count` are
@@ -547,10 +569,46 @@ Tests/Cases/Perf/socket_wait_names_its_peer.case are the worked examples.
 The same waits give off-CPU time by stack, as an off-CPU flame graph does.
 `jet perf view` sums the waits' time by stack, outermost frame first, ending
 with the wait the stack blocked in, and lists the 16 longest under `off-cpu
-by stack`: `150212345ns waits=1 · run main.jet:5 > pause main.jet:12 > nap
-main.jet:10 > time sleep`. A stack holds the checked source's frames only,
+by stack`: `150212345ns waits=1 · run main.jet:5 > pause main.jet:15 > time
+sleep`. A function that ends in a call, as `nap: fn(span: Duration) {
+time.sleep(span) }` does, jumps to it and leaves no frame of its own. A
+stack holds the checked source's frames only,
 as the CPU-time profile's lines do; a wait whose stack holds none counts
 under its name alone. Tests/Cases/Perf/off_cpu_time_by_stack.case is the
+worked example.
+
+`jet perf run` names every thread the runtime starts and every host call
+it makes, with no tool outside the sampler. A thread the runtime spawns (a
+process run's collector, the I/O poller, a scheduler worker, ...) claims a
+row of a table the sampler maps at the start, with the Jet call sites of
+the spawning stack, and fills it as it runs: its kernel id, the function
+it runs, its stack's bytes, its time alive and, as it ends, its CPU time;
+a thread still running at the exit has its CPU time read then, from its
+own CPU-time clock. The main thread's row has its stack limit. Every host
+call through the runtime's central wrapper (HostProcess.jet `host_call`)
+is counted in a row keyed by its number and its calling stack, with its
+time: a vfork child's PATH probes count in the table it shares with its
+parent, and a call that never returns, a successful `execve`, counts with
+no time. At most 256 threads and 1024 numbers and stacks are kept; the
+rest are counted. The trace records the `threads` receipt section (type
+`JetPerfThreads`): `claimed`, then each thread's `tid`, `name`,
+`stack_bytes` (null for an unlimited main stack), `cpu_ns`, `off_cpu_ns`
+(its time alive less its CPU time), `state` (`ended` or `running`) and
+`spawned_at`; and the `syscalls` receipt section (type `JetPerfSyscalls`):
+`lost`, then each number and stack's `name`, `number`, `count`, `time_ns`
+and `stack`. Each site is its `function`, `file`, `line` and whether the
+line is in the checked source (`own`), innermost first, the runtime's own
+frames of the spawn and the counting left out. `jet perf view` prints
+`threads count=2 claimed=2`, each as `thread 4251
+jet_rt_process_execution_worker stack=8388608 cpu_ns=81234
+off_cpu_ns=2104567 · spawned at ProcessExecutionCollect.jet:117
+process_execution_collect_start from main.jet:4 run`, then `syscalls
+calls=40 time_ns=812345` and up to 32 calls summed by name and calling
+site, the most time first: `pipe2 count=3 time_ns=6123 · at
+HostSpawn.jet:159 spawn_pipe from main.jet:4 run`. A process run's first
+wait parks until its collector wakes it at the child's end, so its
+`process wait` is woken by the runtime, not by a timeout.
+Tests/Cases/Perf/threads_and_syscalls_name_their_callers.case is the
 worked example.
 
 `jet perf run` puts the program's file and network I/O on the timeline too,
@@ -689,6 +747,10 @@ which the writer's next publication answers by setting the word and writing
 the zone, frame, plot and log span rows to `.samples.spans`. It then removes
 the request, so the next publication clears the word, and reads the rows into
 the trace beside the ring's, each zone holding the ring's samples inside it.
+The profile's run window is then that window, `live`: its wall time from the
+request to its removal on jet's monotonic clock, and the process CPU the
+program spent across it (its `/proc` utime and stime at each end), not the
+run since it started.
 Tests/Cases/Perf/attach_turns_zones_on.case is the worked example.
 
 `jet run --observe --checked-alloc app.jet` keeps the live list as a `jet
@@ -738,7 +800,9 @@ the 33554432-byte budget; <n> bytes cut off past it`, then the innermost Jet
 frame of the stop (`Stopped  main.jet:9  in check()`), its source line and
 its locals. `bt`, `frame N`, `locals` and `print NAME` read the stop as a
 live session reads one, with typed locals; a `Secret` shows as
-`<redacted>`, and a value whose bytes the dump cut off as `<cut off>`.
+`<redacted>`, a value whose bytes the dump cut off as `<cut off>`, and a
+task or channel handle its code consumed (a task's `detach`) as
+`<consumed>`, here and in live sessions.
 The runtime's frames between the stop and the program are stepped out of
 by the image's call frame information (`.eh_frame`), so a register they
 saved holds its value in the program's frames.
@@ -754,9 +818,11 @@ inside it (`task 3  parked in sleep() at time.jet:41, from run() at
 main.jet:14`); `task N` selects task N for `bt`, `frame`, `locals` and
 `print`. `events [--last N]` (20 by default) lists the ring's records,
 oldest first, each at the first Jet frame of its stack: `sample`, `spawn`,
-`wake`, `clock`, `wait` and `io`. A run-control command answers that a
-dump doesn't run. Tests/Cases/Debug/crash_dump_opens_typed.case is the
-worked example; Tests/Cases/Debug/crash_dump_keeps_its_budget.case shows
+`wake`, `clock`, `wait` and `io`. A CPU-time sample also names its task
+(`sample  task 1  at check main.jet:9`, or `outside every task`), and one
+whose stack holds no Jet frame is `in the runtime`. A run-control command
+answers that a dump doesn't run. Tests/Cases/Debug/crash_dump_opens_typed.case
+is the worked example; Tests/Cases/Debug/crash_dump_keeps_its_budget.case shows
 the budget and a value cut off past it.
 
 ## Canonical devtools protocol
@@ -847,8 +913,10 @@ it does not turn an unavailable panel or command into a silent no-op.
 
 ## The debugger console
 
-`jet debug <file.jet>` stops at the start of `run` (or at `--break
-<file>:<line>`) and reads one command a line at the `(Jet) ` prompt. When
+`jet debug <file.jet>` stops at the start of the program's entry, the Jet
+function its image's `main` runs (`run`, a script's statements, or an -O2
+image's entry wrapper that keeps `run` inlined), or at `--break
+<file>:<line>`, and reads one command a line at the `(Jet) ` prompt. When
 its stdin is a terminal, the program shares it, as a shell's job does: the
 program reads the terminal while it runs and the console while it is
 stopped. Otherwise the program's stdin is empty, and its reads end at
@@ -916,13 +984,27 @@ inspect live` publishes), read from the stopped program's memory. A parked
 task's frames come from the stack its fiber saved when it parked.
 `jet debug --dap` still shows the program as one thread.
 
+A program that ends with a status other than 0 pauses as it exits, once
+per run, with every thread stopped and the stack that ended it whole. That
+covers a stop (70) and a Jet defect or fault (101). `Program exiting with
+status 101  prog.jet:4  in half()` names the innermost Jet frame, which is
+selected, and `through …` names the runtime routines between it and the
+exit, outermost first. `bt`, `locals` and `print` read the stack there,
+and the next run command lets the program end. `jet debug --dap` reports
+the pause as an `exception` stop described by its status.
+
 A step that passes a breakpoint which does not stop goes on to where the
 step would have ended. `jet debug --dap` settles every run the same way
 (`Compiler/JetDebug/Source/Native.jet`, NativeSession.settle).
 
 While `jet debug --dap` runs the program on (`continue`, and the start from
 `configurationDone` or `restart`), the next request stops every thread where
-it is: `pause` answers and reports the stop; `disconnect` ends the session;
+it is: `pause` answers and reports the stop; a pause that finds the program
+still starting, before any code of its own has run, lets it run on to the
+start of its entry, where the console and `stopOnEntry` stop too, and
+reports the pause there, so its stack always has the program's first Jet
+frame (a breakpoint reached first, or the program's end, is reported
+instead); `disconnect` ends the session;
 `restart` starts the program again (an attached one does not restart); a
 request about a stop (`stackTrace`, `scopes`, `variables`, `evaluate`) or a
 run command waits for the next stop, the program running on to it, and is
@@ -965,9 +1047,34 @@ that line and column. A row names where the node starts, so two calls of one
 chain that start together share a row. The program is compiled again at
 the optimization level of its build, which the image's debug information
 names (`Jet native backend (O2)`), so the code around the expression is the
-code the program runs, with that function, which runs in a fork of the
-stopped program, with the locals' bytes read from the frame; the program
-itself neither runs nor changes. The fork holds a fresh copy of the
+code the program runs, with that function, with the locals' bytes read from
+the frame. It runs in the stopped program itself, on the selected thread,
+when the image's runtime exports its allocator words and its record/replay
+mode (`jet_rt_alloc_class_limit`, `jet_rt_alloc_check_take_code`,
+`jet_rt_alloc_check_give_code` and `jet_rt_replay_mode`, data symbols every image
+that allocates holds; nothing in the program writes them for the debugger,
+so a program no debugger touches pays nothing for them): the debugger maps
+the expression's code and a room beside the program's code once per run of
+the program, sets the thread to call it from that room with the other
+threads stopped, and puts the thread's registers, its floating-point state
+and the code the debugger planted back after it. For the call the debugger
+writes the allocator words, as checked mode routes the heap, so the call's
+allocations come from a bump arena in the room, reset each evaluation, and
+writes them back after: the program's heap is unchanged; a block of the
+program's own that the call gives back stays allocated and is counted, and
+the next report says so. The call runs under the debugger: a system call is
+refused (a write to stdout or stderr is caught and shown as the failure's
+text), a fault or the 2 s budget stops it where it got to, the thread's
+state is put back, and the refusal says the program may keep values alive
+that the evaluation took references to and could not give back; a
+breakpoint it passes is stepped over, a watched place it writes stops
+nothing, and a signal sent to the program meanwhile is the program's once
+the call is done. The debugger also turns the record/replay mode off for
+the call and puts it back after (`jet debug --record`, `--replay`), so an
+evaluation adds nothing to the recording and takes nothing from it. An
+image whose runtime doesn't export those words evaluates nothing: the
+refusal says to build it again with this jet. The
+mapped code holds a fresh copy of the
 function and of every function it calls, which reach the program's own
 data and runtime where its unchanged code does, so the compile's choices
 for the whole program (its `main`, its register use) need not be the
@@ -977,19 +1084,21 @@ at that level too. An inlined frame is evaluated in as `bt` shows it: the
 expression is checked in the inlined function at its line, the frame it was
 inlined into at the call, and the locals are the frame's own; code inlined
 from another file is refused, since its lines are not that file's. A value whose type has a
-`debug_view` shows as `locals` shows it, the view run in that same fork. A
+`debug_view` shows as `locals` shows it: after the expression, the view
+runs on its result the same way, the list of items it returns given back
+once read, then the result. A
 compiled expression is kept per line, column and text, so a condition compiles once
-and runs in a fork at each hit. A `print` at a later stop in the same frame
+and runs at each hit. A `print` at a later stop in the same frame
 of the same function runs the code compiled before when its names read the
 same variables there (the debug information's variables of each name
 declared by the stop's line, and whether each one's location covers the
 stop) and each local it reads is a number, Bool or Char, which no move
-empties; any other expression compiles again. The fork runs the program's own runtime, so
-a lock another thread held at the stop is never released there (code that
+empties; any other expression compiles again. The call runs the program's own runtime, so
+a lock another thread held at the stop is never released while it runs (code that
 takes it fails at the 2 s budget), and a function value runs the image's
 code. An expression that calls a function that can fail shows its result as
 `locals` shows a fallible result, `parse(s) = Ok(3)` or `Err(ParseError.Empty)`,
-so a condition that can fail is refused, not a Bool. A call, in the fork
+so a condition that can fail is refused, not a Bool. A call, of an evaluation
 or of a condition run in the program, passes up to 5 locals in registers
 and more by a table of their addresses on the stack, so a condition that
 reads more than 5 runs in the program too. A local's own name is no
@@ -1076,8 +1185,8 @@ debugger: the program runs behind the console (or `--dap`) with
 and once it has ended jet publishes `.jet/replays/<name>.jetproof-replay`
 with the arguments it ran with and says so on stderr. The recording holds
 the run as it went under the debugger (a stop may change which task gets a
-lock first, and the log keeps the order that happened; `print` runs in a
-fork of the program, which records nothing), so `jet debug
+lock first, and the log keeps the order that happened; `print` runs with
+the recording paused, so it records nothing), so `jet debug
 --replay=<name>` replays it as it replays a `jet run` one. The NAME is
 checked before the build, as `jet run` checks it; a built image is refused,
 since the recording binds the source it was built from; and a session that

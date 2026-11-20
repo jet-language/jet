@@ -1,0 +1,21 @@
+# In a replay `print` runs its compiled expression in the replayed program
+# itself, as it does in a live session: the runtime pauses the replay while
+# the evaluation runs, so the evaluation takes no event from the recording
+# and the replay stays faithful to it. At the third hit of line 21 the
+# total is 2 and `d` is 4. The helper task's tally races the loop, so only
+# the main task's total is asserted.
+# The fixture must stay in jet fmt form; line 20 calls `double`, line 21
+# adds its result.
+fixture: ReplayReverse.fixture
+env: NO_COLOR=1
+step: jet run --record=print prog.jet
+exit: 0
+stdout: ~ "total 6 tally " # the program's own output among the session's
+step: jet debug --replay=print prog.jet
+stdin: replay_print_runs_in_the_program.stdin
+exit: 0
+stdout: ~ "(Jet) print total + d\ntotal + d = 6\n" # an expression of the frame's locals
+stdout: ~ "(Jet) print double(total)\ndouble(total) = 4\n" # a call of the program's own function
+stdout: ~ "total 6 tally " # the program runs on to its end
+stdout: ~ "Program finished\n" # the session runs the program to its end
+stdout+stderr: !~ "replay diverged" # the evaluations took nothing from the recording

@@ -430,7 +430,7 @@ canvas_debug_open_dump: fn(file: String, source_id: String, revision: String, na
     path: session_files.join(session_files.dirname(file), named)
     opened := native_dump_open(path) ?? return Err(canvas_debug_unavailable(err))
     live := opened.session.move()
-    program: native_dump_source(path, live.run_source())
+    program: native_dump_source(path, live.entry_source())
     if (session_files.realpath(program) ?? program) != (session_files.realpath(file) ?? file) {
         return Err(canvas_debug_error("bad_request", "the dump `{named}` is of `{program}`, not of the entry `{session_files.basename(file)}` this session is bound to"))
     }

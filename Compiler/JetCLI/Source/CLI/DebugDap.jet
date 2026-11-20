@@ -17,7 +17,9 @@
 // (`output` with the program's new output, then `stopped`, or `exited` and
 // `terminated`). While the program runs on (`continue`, and its start from
 // `configurationDone` or `restart`), the next request stops every thread
-// where it is: `pause` reports that stop; `disconnect` ends the session;
+// where it is: `pause` reports that stop, except that a program still
+// starting, before any code of its own, runs on to the start of its entry
+// and stops there, so the stop has a Jet frame; `disconnect` ends the session;
 // `restart` starts the program again; a request about a stop (a stack, a
 // scope, variables, `evaluate`) or a run command waits for the next stop;
 // any other request is answered with the program stopped, which then runs
@@ -597,8 +599,8 @@ JetCLIDap: struct {
     }
 
     // Run the program as the console run command `word` says, or, for "",
-    // as `configurationDone` does: from its start, to the start of `run`
-    // under `stopOnEntry`.
+    // as `configurationDone` does: from its start, to the start of its
+    // entry (NativeSession.program_entry) under `stopOnEntry`.
     start: fn(&self, session: &NativeSession, word: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeSettled NativeDebugError! {
         if word != "" -> return session.run(word)
         if !self.stop_on_entry {
@@ -606,13 +608,31 @@ JetCLIDap: struct {
             return session.settle_launch(first)
         }
         entry := -1
-        if session.break_in("run") == {
+        if session.break_in_entry() == {
             .Ok(found) -> entry = found ?? -1
             .Err(failure) -> return Err(failure)
         }
         stop: session.launch(self.args) ?? return Err(err)
         if entry >= 0 -> session.delete_breakpoint(entry) ?? return Err(err)
         Ok(NativeSettled{stop: stop, hit: None, said: [NativeSaid]{}})
+    }
+
+    // Run a program that a pause found still starting (jet_cli_dap_starting)
+    // on to the start of its entry, the Jet function its image's `main`
+    // hands the run to (NativeSession.program_entry), so the pause's stop
+    // has the program's first Jet frame. A breakpoint the program reaches
+    // first, or its end, is the stop instead. None when the image names no
+    // entry.
+    to_start: fn(&self, session: &NativeSession) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeSettled? NativeDebugError! {
+        number := -1
+        if session.break_in_entry() == {
+            .Ok(found) -> number = found ?? return Ok(None)
+            .Err(failure) -> return Err(failure)
+        }
+        reached := session.run("c") ?? return Err(err)
+        session.delete_breakpoint(number) ?? return Err(err)
+        if (reached.hit ?? -1) == number -> reached.hit = None
+        Ok(Val(reached))
     }
 
     // Run the program as `word` says (a console run command, or "" to
@@ -664,6 +684,14 @@ JetCLIDap: struct {
                 "pause" -> {
                     self.respond(request, "{{}}")
                     settled.said = [NativeSaid]{}
+                    if (jet_cli_dap_starting(session) ?? return self.stopped_by(err)) {
+                        if self.to_start(session) == {
+                            .Ok(reached) -> {
+                                if reached.move() == .Val(found) -> settled = found
+                            }
+                            .Err(failure) -> return self.stopped_by(failure)
+                        }
+                    }
                     return self.report(session, settled, "pause")
                 }
                 "disconnect" -> {
@@ -768,10 +796,11 @@ JetCLIDap: struct {
     }
 
     // Where `settled` left the program: what the run said on the way, then
-    // `stopped` (for `reason` unless a breakpoint or a watch stopped it), or
-    // its end. A watch's stop is a `data breakpoint` one, described by the
-    // change it saw. The stop is a new one: the frame ids and variable
-    // references of the last name nothing.
+    // `stopped` (for `reason` unless a breakpoint, a watch or its stopping
+    // exit stopped it), or its end. A watch's stop is a `data breakpoint`
+    // one, described by the change it saw; a stopping exit is an
+    // `exception` one, described by its status. The stop is a new one: the
+    // frame ids and variable references of the last name nothing.
     report: fn(&self, session: &NativeSession, settled: NativeSettled, reason: String) -[FS, IO, Time.Wait, FFI.Asm]> Never! {
         self.tell(session, settled.said)
         self.stops = (self.stops + 1) & (JET_CLI_DAP_STOPS - 1)
@@ -783,13 +812,19 @@ JetCLIDap: struct {
                 self.task = session.stopped_task()
                 hit: settled.hit
                 watch: stop.reason.starts_with("watchpoint ")
+                exiting: stop.reason.starts_with("exiting ")
                 why: if {
                     watch -> "data breakpoint"
+                    exiting -> "exception"
                     hit != None -> "breakpoint"
                     else -> reason
                 }
                 ids: if hit == .Val(number) -> ",\"hitBreakpointIds\":[{number}]" else -> ""
-                change: if watch -> ",\"hitBreakpointIds\":[{stop.reason.after("watchpoint ")}],\"description\":{foundation_json_quote(session.watched)}" else -> ""
+                change: if {
+                    watch -> ",\"hitBreakpointIds\":[{stop.reason.after("watchpoint ")}],\"description\":{foundation_json_quote(session.watched)}"
+                    exiting -> ",\"description\":{foundation_json_quote("Program exiting with status {stop.code}")}"
+                    else -> ""
+                }
                 self.event("stopped", "{{\"reason\":\"{why}\",\"threadId\":{self.task},\"allThreadsStopped\":true{ids}{change}}}")
             }
             .Exited -> {
@@ -1051,6 +1086,20 @@ jet_cli_dap_threads: fn(session: &NativeSession) -> String NativeDebugError! {
         rows.push("{{\"id\":{row.task.id},\"name\":{foundation_json_quote(name)}}}")
     }
     Ok("{{\"threads\":[{rows.join(",")}]}}")
+}
+
+// Whether the stopped thread has yet to run any of the program's own code:
+// no machine frame of its stack lies in a function of the image, only in
+// the runtime that starts the program.
+jet_cli_dap_starting: fn(session: &NativeSession) -> Bool NativeDebugError! {
+    session.focus = None
+    machine: session.unwind() ?? return Err(err)
+    loop (index, frame) in machine {
+        if native_function_at(session.image, native_lookup(index, frame.pc)) != None {
+            return Ok(false)
+        }
+    }
+    Ok(true)
 }
 
 // The key of task `task`'s frame `index` among a stop's listed frames

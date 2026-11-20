@@ -4,8 +4,8 @@
 use {
     native_test_process: core.process
     native_test_files: core.files
-    jet_debug.[NATIVE_CFI_RETURN, NATIVE_CFI_SAME, NATIVE_CFI_SAVED, NATIVE_DEBUG_CUT_OFF, NATIVE_DEBUG_NOT_KEPT, NativeAbstract, NativeBlock, NativeBreak, NativeCallArgument, NativeCode, NativeCut, NativeDebugError, NativeEnumerator, NativeFde, NativeFrame, NativeFrames, NativeFunction, NativeImage, NativeInlined, NativeLocal, NativeMember, NativeMemory, NativeSession, NativeStop, NativeStopKind, NativeType, NativeUnwound, NativeVariable, NativeVariableRole, NativeVariants, native_cfi_row, native_debug_backtrace, native_debug_build_argv, native_debug_decimal_text, native_debug_hit_breakpoint, native_debug_int, native_debug_locals_typed, native_debug_precise, native_debug_string, native_frame_locals, native_frames_index, native_function_at, native_inline_chain, native_jet_spelling]
-    jet_backend.[X64DebugEncoding, X64Jetline, X64JetlineFunction, x64_eval_fork_filter, x64_jetline_sleb]
+    jet_debug.[NATIVE_CFI_RETURN, NATIVE_CFI_SAME, NATIVE_CFI_SAVED, NATIVE_DEBUG_CUT_OFF, NATIVE_DEBUG_NOT_KEPT, NativeAbstract, NativeBlock, NativeBreak, NativeCallArgument, NativeCode, NativeCut, NativeDebugError, NativeEnumerator, NativeFde, NativeFrame, NativeFrames, NativeFunction, NativeImage, NativeInlined, NativeLocal, NativeMember, NativeMemory, NativeSession, NativeStop, NativeStopKind, NativeType, NativeUnwound, NativeVariable, NativeVariableRole, NativeVariants, native_cfi_row, native_debug_backtrace, native_debug_build_argv, native_debug_decimal_text, native_debug_hit_breakpoint, native_debug_int, native_debug_locals_typed, native_debug_precise, native_debug_string, native_frame_locals, native_frames_index, native_function_at, native_inline_chain, native_jet_spelling, native_line_addresses]
+    jet_backend.[X64DebugEncoding, X64Jetline, X64JetlineFunction, x64_jetline_find, x64_jetline_sleb]
     jet_foundation.[DeepChecks]
 }
 
@@ -14,28 +14,6 @@ use {
     assert_eq(off, [String]{"jet", "build", "-O0", "--dead-code=keep", "--output-dir=out", "prog.jet"})
     kept: native_debug_build_argv("jet", "prog.jet", "out", DeepChecks{all: true, scopes: [String]{"tree", "tree.run"}})
     assert_eq(kept, [String]{"jet", "build", "-O0", "--dead-code=keep", "--deep-checks", "--deep-checks=tree", "--deep-checks=tree.run", "--output-dir=out", "prog.jet"})
-}
-
-// The evaluation fork's seccomp program: 32 instructions of 8 bytes (code,
-// jt, jf, k), every jump landing inside it, ending with the allow its
-// admitted calls jump to.
-#Test("the_evaluation_fork_filter_jumps_inside_itself_and_ends_allowing") {
-    filter: x64_eval_fork_filter()
-    assert_eq(filter.len(), 256)
-    count: filter.len() >> 3
-    loop index in 0..<count {
-        at: 8 * index
-        code: Int{filter[at]} | (Int{filter[at + 1]} << 8)
-        // BPF_JMP class: the conditional jumps count from the next one.
-        if code & 7 == 5 {
-            assert(index + 1 + Int{filter[at + 2]} < count, "instruction {index}'s true jump leaves the program")
-            assert(index + 1 + Int{filter[at + 3]} < count, "instruction {index}'s false jump leaves the program")
-        }
-    }
-    last: 8 * (count - 1)
-    allow: Int{filter[last + 4]} | (Int{filter[last + 5]} << 8) | (Int{filter[last + 6]} << 16) | (Int{filter[last + 7]} << 24)
-    assert_eq(Int{filter[last]}, 6)
-    assert_eq(allow, 0x7fff0000)
 }
 
 #Test("a_breakpoint_stop_names_its_breakpoint") {
@@ -213,6 +191,45 @@ native_test_unwound: fn(pc: Int) -> NativeUnwound {
     assert_eq(native_function_at(image, 0x1030) == None, true)
 }
 
+// Three functions of a line table, the middle one empty and starting where
+// the last one does.
+native_test_line_functions: fn() -> [X64JetlineFunction] {
+    [X64JetlineFunction]{
+        X64JetlineFunction{low: 0x1000, high: 0x1010, name: "first", file: "a.jet", dir: "", decl: 1, rows: 0, rows_end: 0},
+        X64JetlineFunction{low: 0x1020, high: 0x1020, name: "empty", file: "a.jet", dir: "", decl: 2, rows: 0, rows_end: 0},
+        X64JetlineFunction{low: 0x1020, high: 0x1030, name: "second", file: "a.jet", dir: "", decl: 3, rows: 0, rows_end: 0},
+    }
+}
+
+// An ascending line table is halved to the function holding an address and
+// finds what a search in order finds; a gap, the end and an empty function
+// hold none.
+#Test("a_line_table_lookup_halves_an_ascending_table") {
+    halved: X64Jetline{table: [U8]{}, functions: native_test_line_functions(), ascending: true}
+    in_order: X64Jetline{table: [U8]{}, functions: native_test_line_functions()}
+    pcs: [Int]{0xfff, 0x1000, 0x100f, 0x1010, 0x1020, 0x102f, 0x1030}
+    loop pc in pcs { assert_eq(x64_jetline_find(halved, pc), x64_jetline_find(in_order, pc)) }
+    assert_eq(x64_jetline_find(halved, 0x1000), 0)
+    assert_eq(x64_jetline_find(halved, 0x1020), 2)
+    assert_eq(x64_jetline_find(halved, 0x1010), -1)
+    assert_eq(x64_jetline_find(halved, 0x1030), -1)
+}
+
+// Two packages' files of one base name: a path picks one, by its last
+// components or whole under the compilation directory; the base name, or a
+// path neither file's ends with, names both.
+#Test("a_breakpoint_path_picks_one_of_two_same_named_files") {
+    // One row each: line 5 at the function's start.
+    rows: [U8]{U8{0}, U8{4}}
+    sema: X64JetlineFunction{low: 0x1000, high: 0x1010, name: "sema_check", file: "Compiler/JetSema/Source/Check.jet", dir: "/src", decl: 5, rows: 0, rows_end: 2}
+    eval: X64JetlineFunction{low: 0x1020, high: 0x1030, name: "eval_check", file: "Compiler/JetEval/Source/Check.jet", dir: "/src", decl: 5, rows: 0, rows_end: 2}
+    image: NativeImage{lines: X64Jetline{table: rows, functions: [X64JetlineFunction]{sema, eval}}, functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}}
+    assert_eq(native_line_addresses(image, "Check.jet", 5), [Int]{0x1000, 0x1020})
+    assert_eq(native_line_addresses(image, "JetSema/Source/Check.jet", 5), [Int]{0x1000})
+    assert_eq(native_line_addresses(image, "/src/Compiler/JetEval/Source/Check.jet", 5), [Int]{0x1020})
+    assert_eq(native_line_addresses(image, "Other/Check.jet", 5), [Int]{0x1000, 0x1020})
+}
+
 #Test("an_unavailable_debugger_is_e2203") {
     diagnostic: NativeDebugError{detail: "the program has no Jet debug information"}.diagnostic()
     assert_eq(diagnostic.code, "E2203")
@@ -334,7 +351,7 @@ NATIVE_TEST_RING: "Ring: struct {{\n    items: [Int],\n    start: Int,\n    coun
         if local.name == "ring" -> shown = local.value
     }
     assert_eq(shown, "Ring{{0: 3, 1: 4, 2: 5}}")
-    // The view ran in a fork; the program goes on where it stopped.
+    // The view ran in the program; it goes on where it stopped.
     session.clear_breakpoints() ?? panic("clear: {err.detail}")
     finished: session.continue_run() ?? panic("continue: {err.detail}")
     assert(finished.kind == NativeStopKind.Exited)
@@ -345,9 +362,9 @@ NATIVE_TEST_RING: "Ring: struct {{\n    items: [Int],\n    start: Int,\n    coun
 }
 
 // A view that prints, then opens a file. The program never calls it, so its
-// print in the output would be the debugger's doing; in the evaluation fork
-// the print stays in the fork's copy of the output buffer and the open is a
-// refused system call.
+// print in the output would be the debugger's doing; run in the program,
+// the view's write is kept from the kernel and the open is a refused system
+// call.
 NATIVE_TEST_LOUD: "use {{\n    process: core.process\n    files: core.files\n}}\n\nLoud: struct {{\n    count: Int,\n\n    debug_view: fn(self) -> [DebugItem] {{\n        print(\"viewed\")\n        name: files.read(\"/proc/self/comm\") ?? \"\"\n        [DebugItem]{{DebugItem{{label: \"seen\", value: \"{{self.count}} {{name.len()}}\"}}}}\n    }}\n}}\n\nrun: fn() {{\n    loud: Loud{{count: 7}}\n    if process.args().len() > 5 -> print(\"{{loud.debug_view().len()}}\")\n    print(\"count {{loud.count}}\")\n}}\n"
 
 #Test("a_debug_view_that_makes_a_system_call_is_refused_and_the_program_never_runs_it") {
@@ -356,15 +373,14 @@ NATIVE_TEST_LOUD: "use {{\n    process: core.process\n    files: core.files\n}}\
     session := native_test_session(root, NATIVE_TEST_LOUD, [String]{"-O0"})
     paused: session.run_to([NativeBreak]{{file: "prog.jet", line: 19}}, "prog.jet", NATIVE_TEST_LOUD.split("\n").to_list(), [String]{}) ?? panic("run_to: {err.detail}")
     assert(native_debug_hit_breakpoint(paused.stop) != None, paused.text)
-    // Twice: each view runs in a fresh fork.
+    // Twice: each view runs, and is refused, afresh.
     loop _ in 0..<2 {
         locals: session.locals() ?? panic("locals: {err.detail}")
         shown := ""
         loop local in locals {
             if local.name == "loud" -> shown = local.value
         }
-        // The open is refused in the fork, so the value shows by its
-        // fields.
+        // The open is refused, so the value shows by its fields.
         assert(shown.contains("7"), shown)
         assert(!shown.contains("seen"), shown)
     }
@@ -391,8 +407,8 @@ NATIVE_TEST_SPIN: "use process: core.process\n\nSpin: struct {{\n    count: Int,
     loop local in locals {
         if local.name == "spin" -> shown = local.value
     }
-    // The fork is stopped at the budget and killed: the value shows by its
-    // fields.
+    // The view is stopped at the budget and its state put back: the value
+    // shows by its fields.
     assert(shown.contains("1000000000000000"), shown)
     assert(!shown.contains("total"), shown)
     session.clear_breakpoints() ?? panic("clear: {err.detail}")
@@ -468,9 +484,43 @@ NATIVE_TEST_INLINED_RUN: "work: fn(n: Int) -> Int {{\n    n * 2\n}}\n\nrun: fn()
         }
     } ?? false
     assert(!named, "run is inlined into the entry at -O2")
-    assert_eq(native_test_files.basename(session.run_source()), "prog.jet")
+    assert_eq(native_test_files.basename(session.entry_source()), "prog.jet")
+    // The image's `main` hands the run to the entry wrapper, which keeps run's
+    // code inlined: the wrapper is the program's entry.
+    assert(session.program_entry >= 0, "the image's main names its entry")
+    assert_eq(session.image.lines.functions[session.program_entry].name, "entry")
     lines: NATIVE_TEST_INLINED_RUN.split("\n").to_list()
     first: session.open("prog.jet", lines, [String]{}) ?? panic("the entry wrapper opens the session")
+    rest: session.command("c", first.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    assert(rest.text.contains("got 42\nProgram finished\n"), rest.text)
+    session.close()
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+}
+
+// A `run` that can fail is run by a generated entry function (JetIR
+// ir_entry_function), which the image's `main` hands the run to.
+NATIVE_TEST_FALLIBLE_RUN: "run: fn() Err! {{\n    n: 21\n    print(\"got {{n * 2}}\")\n}}\n"
+
+// The program's entry is the function its image's `main` runs, whatever
+// it is named: through a generated entry function to the `run` it runs, so
+// the session opens at run's first line, not in the wrapper.
+#Test("a_session_opens_at_the_entry_its_image_runs") {
+    scratch: native_test_files.temp_dir("jet-debug-entry") ?? panic("scratch: {err}")
+    root: scratch.path
+    session := native_test_session(root, NATIVE_TEST_FALLIBLE_RUN, [String]{"-O0"})
+    wrapped: loop found in session.image.lines.functions {
+        if found.name == "entry" {
+            break true
+        }
+    } ?? false
+    assert(wrapped, "a fallible run is run by a generated entry function")
+    assert(session.program_entry >= 0, "the image's main names its entry")
+    assert_eq(session.image.lines.functions[session.program_entry].name, "run")
+    assert_eq(native_test_files.basename(session.entry_source()), "prog.jet")
+    lines: NATIVE_TEST_FALLIBLE_RUN.split("\n").to_list()
+    first: session.open("prog.jet", lines, [String]{}) ?? panic("the session opens at the entry")
+    assert(first.text.contains("in run()"), first.text)
+    assert(first.text.contains("2 |     n: 21"), first.text)
     rest: session.command("c", first.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
     assert(rest.text.contains("got 42\nProgram finished\n"), rest.text)
     session.close()

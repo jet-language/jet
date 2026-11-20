@@ -157,7 +157,8 @@ jet_cli_perf_capture_observations: fn(capture: &JetCLIPerfCapture, observations:
 // map, with no samples and no run window (`capture_from_source` with no
 // snapshot). `wall_ns` is jet_cli_perf_capture_observations'. The profile
 // rows are the program's CPU-time `samples` (`jet perf run`) where any landed
-// in the source, else the observations of its `run`. A core.game run's
+// in the source or the program's other sources, whose identities it records
+// too, else the observations of its `run`. A core.game run's
 // relayed frames join it (jet_cli_perf_games_capture).
 jet_cli_perf_capture_source: fn(path: String, text: String, observations: [JetCLIPerfObservation], samples: JetCLIPerfSamples?, target: String, wall_ns: U64?) -> JetCLIPerfCapture JetCLIReadError! {
     if observations.len() > 4096 {
@@ -170,8 +171,13 @@ jet_cli_perf_capture_source: fn(path: String, text: String, observations: [JetCL
     loop observed in observations {
         if observed.live.runtime.cpu_ns != None -> cpu_samples += U64{1}
     }
+    identities := [SourceIdentity]{}
+    if sampled != None && samples == .Val(found) {
+        loop other in found.sources -> identities.push(other.identity)
+    }
     profile: sampled ?? jet_cli_perf_source_profile(source, U64{observations.len()}, cpu_samples, false)
-    capture := jet_cli_perf_capture_new(profile, [SourceIdentity]{source.identity})
+    identities.insert(0, source.identity)
+    capture := jet_cli_perf_capture_new(profile, identities)
     // copy: the run symbol below keeps the path; the source map owns its own.
     capture.source_maps.push(trace_source_map_jet_with_source(path.copy(), text) ?? return Err(jet_cli_read_error(err.message)))
     if observations.len() == 0 -> return Ok(capture)

@@ -260,6 +260,8 @@ jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String]
     loop line in jet_cli_perf_memory_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_topdown_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_off_cpu_lines(trace) -> out = "{out}{line}\n"
+    loop line in jet_cli_perf_thread_lines(trace) -> out = "{out}{line}\n"
+    loop line in jet_cli_perf_syscall_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_game_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_receipt_lines(trace) -> out = "{out}{line}\n"
     if frames == "all" {
@@ -602,18 +604,20 @@ jet_cli_perf_receipt_sections: fn(trace: CanonicalJSON) -> [JetDriverRunReceiptS
 
 // `receipt <name> <value>` for each receipt section the trace records, the
 // value as its canonical JSON, but the allocations, the heap snapshots, the
-// causal predictions, the topdown lens's and the zones, which
-// jet_cli_perf_allocation_lines, jet_cli_perf_heap_lines,
-// jet_cli_perf_causal_lines, jet_cli_perf_topdown_lines and
-// jet_cli_perf_zone_lines show.
+// causal predictions, the topdown lens's, the zones, the threads, the host
+// calls and the helpers, which jet_cli_perf_allocation_lines,
+// jet_cli_perf_heap_lines, jet_cli_perf_causal_lines,
+// jet_cli_perf_topdown_lines, jet_cli_perf_zone_lines,
+// jet_cli_perf_thread_lines, jet_cli_perf_syscall_lines and the per-line
+// table (jet_cli_perf_line_table) show.
 jet_cli_perf_receipt_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     items: jet_cli_perf_rows(trace, "receipt_sections") ?? return [String]{}
     lines := [String]{}
+    // The sections their own lines show.
+    shown: [String]{"allocations", "heap", "causal", "topdown", "zones", "threads", "syscalls", "helpers"}
     loop item in items {
         section: trace_receipt_section_from_json(item) ?? next
-        if section.name == "allocations" || section.name == "heap" || section.name == "causal" || section.name == "topdown" || section.name == "zones" {
-            next
-        }
+        if shown.contains(section.name) -> next
         bytes: canonical_json_bytes(section.value)
         text: String.from_bytes(bytes.slice(0, bytes.len() - 1)) ?? next
         lines.push("receipt {section.name} {text}")
@@ -1465,6 +1469,133 @@ jet_cli_perf_off_cpu_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     lines
 }
 
+// The threads of the trace's `threads` receipt section
+// (jet_cli_perf_threads_section): `threads count=2 claimed=1`, then each,
+// in spawn order: `  thread 4251 jet_rt_process_execution_worker
+// stack=8388608 cpu_ns=81234 off_cpu_ns=2104567 · spawned at
+// ProcessExecutionCollect.jet:117 process_execution_collect_start from
+// main.jet:4 run` (jet_cli_perf_sites_text). The main thread's stack is
+// its limit, `stack=unlimited` with none; ` running at exit` marks a thread
+// the exit found running, its times measured then.
+jet_cli_perf_thread_lines: fn(trace: CanonicalJSON) -> [String] Never! {
+    lines := [String]{}
+    items: jet_cli_perf_rows(trace, "receipt_sections") ?? return lines
+    loop item in items {
+        section: trace_receipt_section_from_json(item) ?? next
+        if section.name != "threads" -> next
+        fields: jettrace_object_view(section.value, "receipt threads") ?? next
+        at: jet_cli_perf_key(fields, "threads") ?? next
+        rows: jettrace_array(fields[at].value, "receipt threads.threads") ?? next
+        claimed: jet_cli_perf_field_integer(fields, "claimed") ?? "0"
+        lines.push("threads count={rows.len()} claimed={claimed}")
+        loop row in rows {
+            tid: jet_cli_perf_member_integer(row, "tid") ?? "?"
+            name: jet_cli_perf_member_text(row, "name") ?? "?"
+            stack: jet_cli_perf_member_integer(row, "stack_bytes") ?? "unlimited"
+            cpu: jet_cli_perf_member_integer(row, "cpu_ns") ?? "0"
+            off: jet_cli_perf_member_integer(row, "off_cpu_ns") ?? "0"
+            state: if (jet_cli_perf_member_text(row, "state") ?? "") == "running" -> " running at exit" else -> ""
+            spawn: if jet_cli_perf_sites_text(row, "spawned_at") == .Val(text) -> " · spawned at {text}" else -> ""
+            lines.push("  thread {tid} {name} stack={stack} cpu_ns={cpu} off_cpu_ns={off}{state}{spawn}")
+        }
+    }
+    lines
+}
+
+// The host calls of one name from one calling site, summed
+// (jet_cli_perf_syscall_lines).
+JetCLIPerfSyscallSum: struct {
+    name: String,
+    caller: String,
+    count: Int,
+    ns: Int,
+}
+
+// The host calls of the trace's `syscalls` receipt section
+// (jet_cli_perf_syscalls_section), summed by name and calling site:
+// `syscalls calls=9 time_ns=81234`, with ` lost=…` for the calls the
+// runtime's table had no row for, then each, the most time first, at most
+// 32: `  pipe2 count=3 time_ns=6123 · at HostSpawn.jet:159 spawn_pipe from
+// main.jet:4 run` (jet_cli_perf_sites_text). A call that never returned,
+// as a successful execve, counts with no time.
+jet_cli_perf_syscall_lines: fn(trace: CanonicalJSON) -> [String] Never! {
+    lines := [String]{}
+    items: jet_cli_perf_rows(trace, "receipt_sections") ?? return lines
+    loop item in items {
+        section: trace_receipt_section_from_json(item) ?? next
+        if section.name != "syscalls" -> next
+        fields: jettrace_object_view(section.value, "receipt syscalls") ?? next
+        at: jet_cli_perf_key(fields, "syscalls") ?? next
+        rows: jettrace_array(fields[at].value, "receipt syscalls.syscalls") ?? next
+        found := [JetCLIPerfSyscallSum]{}
+        calls := 0
+        time := 0
+        loop row in rows {
+            count: jet_cli_perf_member_number(row, "count") ?? next
+            ns: jet_cli_perf_member_number(row, "time_ns") ?? 0
+            name: jet_cli_perf_member_text(row, "name") ?? "?"
+            caller: jet_cli_perf_sites_text(row, "stack") ?? "unknown"
+            calls += count
+            time += ns
+            place := -1
+            loop index in 0..<found.len() {
+                if found[index].name == name && found[index].caller == caller {
+                    place = index
+                    break
+                }
+            }
+            if place < 0 {
+                place = found.len()
+                found.push(JetCLIPerfSyscallSum{name: name, caller: caller, count: 0, ns: 0})
+            }
+            found[place].count += count
+            found[place].ns += ns
+        }
+        lost: jet_cli_perf_field_integer(fields, "lost") ?? "0"
+        dropped: if lost == "0" -> "" else -> " lost={lost}"
+        lines.push("syscalls calls={calls} time_ns={time}{dropped}")
+        found.sort_by(fn(left: JetCLIPerfSyscallSum, right: JetCLIPerfSyscallSum) { (right.ns <=> left.ns).then(left.name <=> right.name).then(left.caller <=> right.caller) })
+        shown: if found.len() > 32 -> 32 else -> found.len()
+        loop index in 0..<shown {
+            row: found[index]
+            lines.push("  {row.name} count={row.count} time_ns={row.ns} · at {row.caller}")
+        }
+    }
+    lines
+}
+
+// The calling site of a `threads` or `syscalls` row's sites `key`
+// (jet_cli_perf_sites_json): its innermost site, then ` from ` the
+// innermost of the checked source when that is another, each as
+// `<file>:<line> <function>` or, for an inlined function's line from
+// another file, `<function> line <line>`. None with no sites.
+jet_cli_perf_sites_text: fn(row: CanonicalJSON, key: String) -> String? Never! {
+    fields: jettrace_object_view(row, "receipt row") ?? return None
+    at: jet_cli_perf_key(fields, key) ?? return None
+    sites: jettrace_array(fields[at].value, "receipt row.{key}") ?? return None
+    if sites.len() == 0 -> return None
+    text := jet_cli_perf_call_site_text(sites[0])
+    loop index in 0..<sites.len() {
+        site: jettrace_object_view(sites[index], "receipt site") ?? next
+        own_at: jet_cli_perf_key(site, "own") ?? next
+        if site[own_at].value == .Bool(own) {
+            if own {
+                if index > 0 -> text = "{text} from {jet_cli_perf_call_site_text(sites[index])}"
+                break
+            }
+        }
+    }
+    Val(text)
+}
+
+// One site of jet_cli_perf_sites_text, its file by its last component.
+jet_cli_perf_call_site_text: fn(site: CanonicalJSON) -> String Never! {
+    name: jet_cli_perf_member_text(site, "function") ?? "?"
+    line: jet_cli_perf_member_integer(site, "line") ?? "?"
+    file: jet_cli_perf_member_text(site, "file") ?? return "{name} line {line}"
+    "{cli_files.basename(file)}:{line} {name}"
+}
+
 // The text `key` of a row `item`'s symbol: its `path` or `name`.
 jet_cli_perf_member_symbol_text: fn(item: CanonicalJSON, key: String) -> String? Never! {
     fields: jettrace_object_view(item, "jettrace row") ?? return None
@@ -1632,17 +1763,62 @@ jet_cli_perf_flame_profile: fn(rows: &&[JetCLIPerfProfileRow]) -> [String] Never
         }
         weight: functions[index].weight
         share: if total > 0 -> weight * 100 /% total else -> 0
-        out.push("{functions[index].symbol} profile:{functions[index].clock} samples={weight} share={share}%")
+        cpu: functions[index].clock == "cpu"
+        out.push("{functions[index].symbol} profile:{functions[index].clock} samples={weight}{jet_cli_perf_cpu_us(cpu, weight)} share={share}%")
         functions[index].lines.sort_by(fn(left: {line: Int, weight: Int, inclusive: Int?, allocations: Int?, events: String}, right: {line: Int, weight: Int, inclusive: Int?, allocations: Int?, events: String}) { (right.weight <=> left.weight).then((right.inclusive ?? 0) <=> (left.inclusive ?? 0)).then((right.allocations ?? 0) <=> (left.allocations ?? 0)).then(left.line <=> right.line) })
         shown: if functions[index].lines.len() > 3 -> 3 else -> functions[index].lines.len()
         loop at in 0..<shown {
             row: functions[index].lines[at]
             inclusive: if row.inclusive == .Val(count) -> " inclusive={count}" else -> ""
             allocations: if row.allocations == .Val(count) -> " allocations={count}" else -> ""
-            out.push("  line {row.line} samples={row.weight}{inclusive}{allocations}{row.events}")
+            out.push("  line {row.line} samples={row.weight}{jet_cli_perf_cpu_us(cpu, row.weight)}{inclusive}{allocations}{row.events}")
+        }
+    }
+    // The CPU-time samples by their rows' packages, when the rows span more
+    // than one: the program's parts, as a compiler's phases are its
+    // packages. Heaviest first, at most 12.
+    parts := [{dir: String, weight: Int}]{}
+    total := 0
+    loop function in functions {
+        if function.clock != "cpu" -> next
+        total += function.weight
+        dir: jet_cli_perf_symbol_package(function.symbol)
+        found: loop (index, part) in parts {
+            if part.dir == dir {
+                break index
+            }
+        } ?? -1
+        if found >= 0 -> parts[found].weight += function.weight else {
+            parts.push({dir: dir, weight: function.weight})
+        }
+    }
+    if parts.len() > 1 && total > 0 {
+        parts.sort_by(fn(left: {dir: String, weight: Int}, right: {dir: String, weight: Int}) { (right.weight <=> left.weight).then(left.dir <=> right.dir) })
+        out.push("cpu by package")
+        listed: if parts.len() > 12 -> 12 else -> parts.len()
+        loop part in parts[0..<listed] {
+            out.push("  {part.dir} samples={part.weight}{jet_cli_perf_cpu_us(true, part.weight)} share={part.weight * 100 /% total}%")
         }
     }
     out
+}
+
+// ` cpu_us=…`, the CPU time `samples` CPU-time samples stand for, one per
+// JET_CLI_PERF_SAMPLE_US; "" off the CPU clock (`cpu` false) or for none.
+jet_cli_perf_cpu_us: fn(cpu: Bool, samples: Int) -> String Never! {
+    if cpu && samples > 0 -> " cpu_us={samples * JET_CLI_PERF_SAMPLE_US}" else -> ""
+}
+
+// The package of the source a `path#name` symbol names: the directory that
+// holds its `Source/` directory, else the source's own directory, "." for
+// a path with none.
+jet_cli_perf_symbol_package: fn(symbol: String) -> String Never! {
+    hash: symbol.find("#")
+    path: if hash < 0 -> symbol else -> symbol.slice(0..<hash)
+    sources: path.find("/Source/")
+    if sources > 0 -> return path.slice(0..<sources)
+    slash: path.rfind("/")
+    if slash < 0 -> "." else -> path.slice(0..<slash)
 }
 
 // The line of a profile row whose source is one line.
@@ -1659,10 +1835,13 @@ jet_cli_perf_row_line: fn(row: CanonicalJSON) -> Int? Never! {
 // source line, its file and function as places in `names`, whose first is
 // "" as in pprof's string table (jet_cli_perf_pprof_string). A trace's come
 // from its profile (jet_cli_perf_line_totals), an export's from the export
-// (PeerExport.jet jet_cli_perf_import).
+// (PeerExport.jet jet_cli_perf_import). `helpers` are a trace's samples of
+// those that landed in a compiler-emitted helper the line called, from its
+// `helpers` receipt section (jet_cli_perf_helpers_section).
 JetCLIPerfLineTotals: struct {
     names: [String],
     rows: [JetCLIPerfLineTotal],
+    helpers: [JetCLIPerfLineHelper]{[JetCLIPerfLineHelper]{}},
 }
 
 JetCLIPerfLineTotal: struct {
@@ -1695,16 +1874,42 @@ jet_cli_perf_line_totals: fn(trace: CanonicalJSON) -> JetCLIPerfLineTotals Never
         name_at: jet_cli_perf_pprof_string(totals.names, name)
         totals.rows.push(JetCLIPerfLineTotal{path: path_at, line: line, function: name_at, samples: samples})
     }
+    totals.helpers = jet_cli_perf_line_helpers(trace)
     totals
+}
+
+// The rows of the trace's `helpers` receipt section
+// (jet_cli_perf_helpers_section); empty without one.
+jet_cli_perf_line_helpers: fn(trace: CanonicalJSON) -> [JetCLIPerfLineHelper] Never! {
+    helpers := [JetCLIPerfLineHelper]{}
+    items: jet_cli_perf_rows(trace, "receipt_sections") ?? return helpers
+    loop item in items {
+        section: trace_receipt_section_from_json(item) ?? next
+        if section.name != "helpers" -> next
+        fields: jettrace_object_view(section.value, "receipt helpers") ?? next
+        at: jet_cli_perf_key(fields, "helpers") ?? next
+        rows: jettrace_array(fields[at].value, "receipt helpers.helpers") ?? next
+        loop row in rows {
+            path: jet_cli_perf_member_text(row, "path") ?? next
+            line: jet_cli_perf_member_number(row, "line") ?? next
+            function: jet_cli_perf_member_text(row, "function") ?? next
+            helper: jet_cli_perf_member_text(row, "helper") ?? next
+            samples: jet_cli_perf_member_number(row, "samples") ?? next
+            helpers.push(JetCLIPerfLineHelper{path: path, line: line, function: function, helper: helper, samples: samples})
+        }
+    }
+    helpers
 }
 
 // The per-line table: each function's samples at each source line, the
 // rows of one function and line summed, hottest first, then by file, line
 // and function, at most JET_CLI_PERF_LINE_ROWS of them, each with its share
-// of every line's samples and its typed cost facts from `costs`
-// (`  main.jet:5 spin samples=812 share=64% · cost: exact Int spill —
-// semantic remainder (loop depth 1, repeats every loop turn)`). Empty when
-// no line has a sample.
+// of every line's samples, its typed cost facts from `costs`, then the
+// samples of those in each compiler-emitted helper it called with their
+// share of every line's (`  main.jet:5 spin samples=812 share=64% · cost:
+// exact Int spill — semantic remainder (loop depth 1, repeats every loop
+// turn) · stop poll samples=203 share=16%`). Empty when no line has a
+// sample.
 jet_cli_perf_line_table: fn(totals: JetCLIPerfLineTotals, costs: JetCLIPerfLineCosts) -> [String] Never! {
     // Each distinct line's first row, and the samples of all of its rows.
     firsts := [Int]{}
@@ -1746,7 +1951,14 @@ jet_cli_perf_line_table: fn(totals: JetCLIPerfLineTotals, costs: JetCLIPerfLineC
         row: totals.rows[firsts[place]]
         share: sums[place] * 100 /% total
         facts: jet_cli_perf_line_cost_text(costs, totals.names[row.path], row.line)
-        lines.push("  {totals.names[row.path]}:{row.line} {totals.names[row.function]} samples={sums[place]} share={share}%{facts}")
+        helpers := ""
+        loop held in totals.helpers {
+            if held.line != row.line || held.path != totals.names[row.path] || held.function != totals.names[row.function] {
+                next
+            }
+            helpers = "{helpers} · {held.helper} samples={held.samples} share={held.samples * 100 /% total}%"
+        }
+        lines.push("  {totals.names[row.path]}:{row.line} {totals.names[row.function]} samples={sums[place]} share={share}%{facts}{helpers}")
     }
     lines
 }
