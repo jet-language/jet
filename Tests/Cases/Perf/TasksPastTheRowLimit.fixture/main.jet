@@ -1,0 +1,40 @@
+// Two phases of 2500 tasks each, every task inside a zone named for its
+// phase: with the run's own task, 5001 tasks, more than a trace's 4096 task
+// rows.
+use perf: core.perf
+
+churn: fn(seed: Int) -> Int Never! {
+    acc := seed
+    loop i in 0..<20000 -> acc = (acc * 31 + i) % 1000003
+    acc
+}
+
+parse: fn(count: Int) -> Int {
+    total := 0
+    loop at in 0..<count {
+        worker: task {
+            _zone: perf.zone("parse")
+            churn(at)
+        }
+        total += (worker.join() ?? 0) % 2
+    }
+    total
+}
+
+lower: fn(count: Int) -> Int {
+    total := 0
+    loop at in 0..<count {
+        worker: task {
+            _zone: perf.zone("lower")
+            churn(at)
+        }
+        total += (worker.join() ?? 0) % 2
+    }
+    total
+}
+
+run: fn() {
+    parsed: parse(2500)
+    lowered: lower(2500)
+    print("odd results {parsed + lowered}")
+}

@@ -137,8 +137,14 @@ function and line of the checked source and of the program's other sources
 (each file of a Jet function the image names that resolves on disk, by its
 path from the working directory; the toolchain's library names none), whose
 identities the trace records beside the checked source's, hottest first, at
-most 4096 (`status=truncated` past that). A row's `sample_count` is its
-exclusive time, the
+most 4096. Past that the coldest lines fold, so no sample is cut: the hottest
+rows stay, and the rest sum into one row per function and source, from its
+first folded line to its last, with no `inclusive_count`; when those alone
+pass 4096, into one per source, named by how many functions it holds
+(`12 functions`). The `reason` says how many lines folded into how many
+rows, and the status stays `captured`; only a run whose sampled sources alone
+pass 4096 cuts the coldest sources' rows past them, which the `reason`
+counts (`status=truncated`). A row's `sample_count` is its exclusive time, the
 samples whose program counter is on it; its `inclusive_count` is its inclusive
 time, the samples that hold it anywhere on the stack, each once however often
 (a recursive call's line counts once per sample), so a line the stack only
@@ -570,6 +576,27 @@ tcp read at main.jet:15 on socket 127.0.0.1:4000 with peer 127.0.0.1:51000,
 woken by task 2 at main.jet:25`, or `, woken by its peer`.
 Tests/Cases/Perf/every_wait_names_its_waker.case and
 Tests/Cases/Perf/socket_wait_names_its_peer.case are the worked examples.
+
+A task spawned with no row yet gets a row of the trace's `tasks`, under its
+spawner's, while the 4096 rows last. Past them the tasks with the most
+CPU-time samples, each with its spawners, keep their rows, and the rest
+keep none; the `tasks` receipt section (type `JetPerfTasks`) still counts
+every task of the run. A task's phase is the name of the first zone or log
+span it opened (the earliest, and of those the longest), else its
+spawner's, else none. The section's `count` is every task, `rows` those
+with a row, and each of its `phases`, the most samples first, is a phase's
+`name` (null for none), its `tasks` and their CPU-time `samples`, and of
+those the tasks with no row, `folded`, and theirs, `folded_samples`. Its
+`coverage` is `complete` when every sample of a task counts in a phase;
+the samples of a task the run neither observed nor recorded the spawn of
+are its `unattributed_samples`, and leave it `partial`. `jet perf view`
+prints `tasks count=5001 children=5000 rows=4096 coverage=complete ·
+main.jet#run`, then each phase as `task phase parse tasks=2500
+cpu_us=198625 samples=1589 · folded tasks=452 cpu_us=36250 samples=290`,
+one sample per 125 microseconds, `(none)` for the tasks of no phase, and
+`task phase unattributed cpu_us=… samples=…` for the samples it left out.
+Tests/Cases/Perf/tasks_past_the_row_limit_keep_their_phase_and_cpu.case is
+the worked example.
 
 The same waits give off-CPU time by stack, as an off-CPU flame graph does.
 `jet perf view` sums the waits' time by stack, outermost frame first, ending
@@ -1153,9 +1180,10 @@ the optimization level of its build, which the image's debug information
 names (`Jet native backend (O2)`), so the code around the expression is the
 code the program runs, with that function, with the locals' bytes read from
 the frame. It runs in the stopped program itself, on the selected thread,
-when the image's runtime exports its allocator words and its record/replay
-mode (`jet_rt_alloc_class_limit`, `jet_rt_alloc_check_take_code`,
-`jet_rt_alloc_check_give_code` and `jet_rt_replay_mode`, data symbols every image
+when the image's runtime exports its allocator words, its record/replay
+mode and its stdout switch (`jet_rt_alloc_class_limit`,
+`jet_rt_alloc_check_take_code`, `jet_rt_alloc_check_give_code`,
+`jet_rt_replay_mode` and `jet_rt_host_stdout_direct`, data symbols every image
 that allocates holds; nothing in the program writes them for the debugger,
 so a program no debugger touches pays nothing for them): when it starts or
 attaches to the program the debugger maps one room within a jump's reach of
@@ -1206,7 +1234,10 @@ it grew or made from the arena never reaches the program. The debugger
 also turns the
 record/replay mode off for the call and puts it back after (`jet debug
 --record`, `--replay`), so an
-evaluation adds nothing to the recording and takes nothing from it. An
+evaluation adds nothing to the recording and takes nothing from it, and
+sets stdout direct for it, so a `print` the call makes is a write it
+catches, never bytes left in the program's stdout buffer for the program
+to print later, and stderr leaves the program's pending stdout as it was. An
 image whose runtime doesn't export those words evaluates nothing: the
 refusal says to build it again with this jet. The
 mapped code holds a fresh copy of the

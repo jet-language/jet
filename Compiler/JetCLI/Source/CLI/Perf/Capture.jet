@@ -8,8 +8,10 @@ JetCLIPerfObservation: struct {
 }
 
 // `task_ids` maps each observed task's runtime id to the id its trace row
-// carries. `game_frames` and `game_draw_events` are a core.game run's
-// relayed frames and callbacks (GameCapture.jet).
+// carries, and `task_phases` each task's runtime id to the name of the
+// first zone or log span it opened (jet_cli_perf_log_spans_read).
+// `game_frames` and `game_draw_events` are a core.game run's relayed frames
+// and callbacks (GameCapture.jet).
 JetCLIPerfCapture: struct {
     samples: [TraceSample],
     profile: TraceProfile,
@@ -27,10 +29,11 @@ JetCLIPerfCapture: struct {
     policy: CapturePolicy,
     receipts: [TraceReceiptSection],
     task_ids: [U64:U64],
+    task_phases: [U64:String],
 }
 
 jet_cli_perf_capture_new: fn(profile: TraceProfile, sources: [SourceIdentity]) -> JetCLIPerfCapture Never! {
-    JetCLIPerfCapture{samples: [TraceSample]{}, profile: profile, allocations: [TraceAllocation]{}, browser: [TraceBrowser]{}, game_frames: [TraceGameFrame]{}, game_draw_events: [TraceGameDrawEvent]{}, tasks: [TraceTask]{}, locks: [TraceLock]{}, io: [TraceIO]{}, native: [TraceNative]{}, spans: [TraceSpan]{}, source_identity: sources, source_maps: [TraceSourceMap]{}, policy: capture_policy_default_exclusions(), receipts: [TraceReceiptSection]{}, task_ids: [U64:U64]{}}
+    JetCLIPerfCapture{samples: [TraceSample]{}, profile: profile, allocations: [TraceAllocation]{}, browser: [TraceBrowser]{}, game_frames: [TraceGameFrame]{}, game_draw_events: [TraceGameDrawEvent]{}, tasks: [TraceTask]{}, locks: [TraceLock]{}, io: [TraceIO]{}, native: [TraceNative]{}, spans: [TraceSpan]{}, source_identity: sources, source_maps: [TraceSourceMap]{}, policy: capture_policy_default_exclusions(), receipts: [TraceReceiptSection]{}, task_ids: [U64:U64]{}, task_phases: [U64:String]{}}
 }
 
 // `wall_ns` is the session's wall time on its own clock (`jet perf run`:

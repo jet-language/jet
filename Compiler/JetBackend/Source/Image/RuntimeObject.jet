@@ -25,14 +25,16 @@ X64DataExport: struct {
 // tasks (JetDebug Native.jet NativeSession.tasks_text).
 X64_OBSERVE_ROOT_SYMBOL: "jet_rt_observe_root"
 
-// The allocator's words and the record/replay mode by their module storage
-// names (JetRuntime Alloc.jet, RecordReplay.jet), which the runtime object
-// exports as the data symbols x64_debug_eval_symbols names (BuildLibrary.jet
-// ir_build_library): `jet debug` writes them in a stopped program to route
-// an evaluation's allocations to its own heap and pause a recording or
-// replay, and puts them back after (JetDebug NativeEval.jet
-// native_eval_routed). Nothing in the program writes them for it.
-X64_DEBUG_EVAL_STORAGE: [String]{"alloc_class_limit", "alloc_check_take_code", "alloc_check_give_code", "replay_mode"}
+// The allocator's words, the record/replay mode and stdout's direct switch
+// by their module storage names (JetRuntime Alloc.jet, RecordReplay.jet,
+// Host.jet), which the runtime object exports as the data symbols
+// x64_debug_eval_symbols names (BuildLibrary.jet ir_build_library): `jet
+// debug` writes them in a stopped program to route an evaluation's
+// allocations to its own heap, pause a recording or replay and send its
+// output past the program's stdout buffer, and puts them back after
+// (JetDebug NativeEval.jet native_eval_routed). Nothing in the program
+// writes them for it.
+X64_DEBUG_EVAL_STORAGE: [String]{"alloc_class_limit", "alloc_check_take_code", "alloc_check_give_code", "replay_mode", "host_stdout_direct"}
 
 // The data symbol the runtime object exports its word `storage`
 // (X64_DEBUG_EVAL_STORAGE) as.

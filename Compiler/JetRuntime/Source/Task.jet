@@ -288,7 +288,10 @@ task_run: fn(child: I64) {
     sync_store(wrapping(base + I64{64}), I64{0})
     jet_rt_observe_task_enter(sync_load(wrapping(control + I64{56})))
     perf_causal_task_start(child, sync_load(wrapping(child + I64{72})))
-    _ := scheduler_wait_while_paused()
+    // A paused task waits here before its body starts. Only the park is
+    // taken: the propagate a wait point does after it would take a raised
+    // cancel attention bit and deliver a cancel at the start (below).
+    _ := scheduler_park_while_paused(control)
     aborted: sync_load(wrapping(control + I64{8})) != I64{0} && sync_load(wrapping(control + I64{16})) != I64{0}
     if aborted -> scheduler_deliver_cancel()
     frame: scheduler_task_completion_begin()

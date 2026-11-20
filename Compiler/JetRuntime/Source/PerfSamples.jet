@@ -803,11 +803,17 @@ perf_syscall_key: fn(number: I64, into: I64) -> I64 {
 // (its end mark still 0). `<samples>.syscalls`: the words of a row less its
 // key, how many rows follow, how many calls found no row, then each taken
 // row less its key. A forked child that inherited the table writes none.
+// Its two buffers are the observation's own blocks (Alloc.jet
+// alloc_check_own_enter), which the exit's heap snapshot, taken after,
+// leaves out: an ending process's frees give nothing back (Alloc.jet
+// alloc_give, #5478), so a tracked buffer would stay on the live list as a
+// block with no line of the program's.
 perf_system_exit: fn() {
     table: perf_system
     if (table == I64{0} || rt_text_word(table) != perf_system_pid()) {
         return
     }
+    alloc_check_own_enter()
     now: time_host_monotonic_i64()
     claimed: sync_load(wrapping(table + I64{8}))
     kept: if (claimed > PERF_THREADS_ROWS) -> PERF_THREADS_ROWS else -> claimed
@@ -861,6 +867,7 @@ perf_system_exit: fn() {
     }
     perf_system_write(perf_syscalls_fd, calls, calls_size)
     jet_rt_free(calls, calls_size, I64{8})
+    alloc_check_own_leave()
 }
 
 // The `size` bytes at `bytes` as the whole of the file `fd`, which appends.
@@ -1334,9 +1341,13 @@ perf_samples_flush: fn(fd: I64) {
 perf_samples_process_cpu_ns: fn() -> I64 { perf_samples_cpu_clock_ns(I64{2}) }
 
 // The CPU-time clock `clock` (CLOCK_PROCESS_CPUTIME_ID 2 or
-// CLOCK_THREAD_CPUTIME_ID 3) in nanoseconds, 0 when it cannot be read.
+// CLOCK_THREAD_CPUTIME_ID 3) in nanoseconds, 0 when it cannot be read. Its
+// scratch is the observation's own block (Alloc.jet alloc_check_own_enter):
+// a heap snapshot leaves it out, and the alloc lens does not count it.
 perf_samples_cpu_clock_ns: fn(clock: I64) -> I64 {
+    alloc_check_own_enter()
     scratch: jet_rt_alloc(I64{16}, I64{8})
+    alloc_check_own_leave()
     status := I64{-1}
     #Unsafe("clock_gettime writes the two timespec words of the scratch") {
         status = os_syscall_i64(I64{228}, clock, scratch, I64{0}, I64{0}, I64{0}, I64{0})

@@ -330,10 +330,16 @@ NativeWhy: struct {
 // is numbered -1, which no stop reports; the local it is (`root`, of the
 // inlined run `site` of the Jet function `function`, a line-table index)
 // tells a write that binds it. Each write that changed the bytes is kept.
+// A local held in a register is written in its own frame alone, and the
+// code inlined into that frame is the frame's own, as at -O0, where the
+// call returned the value: `outer`, when above 0, counts the backtrace's
+// frames from the one `why` was asked in outward, and each write is kept at
+// that frame.
 NativeTrail: struct {
     function: Int{-1},
     site: Int{-1},
     root: String{""},
+    outer: Int{0},
     writes: [NativeWrite]{[NativeWrite]{}},
 }
 
@@ -4426,7 +4432,12 @@ NativeSession: struct {
             mark: self.probe.passes[opened].mark
             self.moves.push(native_bare_move("seek", mark))
         }
-        self.trail = NativeTrail{function: function, site: level.site, root: root, writes: [NativeWrite]{}}
+        outer: if {
+            !held -> 0
+            self.selected < levels.len() -> levels.len() - self.selected
+            else -> levels.len()
+        }
+        self.trail = NativeTrail{function: function, site: level.site, root: root, outer: outer, writes: [NativeWrite]{}}
         followed := [NativeWrite]?{None}
         failed := NativeDebugError?{None}
         if self.follow(NativeMark{task: task, address: pc, pass: arrivals}, place, cfa, spans, now) == {
@@ -4601,6 +4612,16 @@ NativeSession: struct {
     trail_note: fn(&self, registers: [Int], before: String, after: String, binds: Bool{false}) NativeDebugError! {
         task: self.thread_task(self.trace.thread, registers).task
         frames := self.backtrace_from(registers) ?? return Err(err)
+        // A register's write is kept at the frame `why` was asked in
+        // (NativeTrail.outer); its inlined callees' frames are left out.
+        cut: frames.len() - self.trail.outer
+        if self.trail.outer > 0 && cut > 0 {
+            own := [NativeFrame]{}
+            loop (at, shown) in frames.move() {
+                if at >= cut -> own.push(shown)
+            }
+            frames = own.move()
+        }
         stack: native_debug_backtrace(frames, indent: "  ")
         // The write keeps its innermost Jet frame.
         jet: loop (at, shown) in frames {

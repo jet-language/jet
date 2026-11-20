@@ -302,8 +302,13 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     if parsed.source.move() == .Val(source) {
         if sampled.move() == .Val(found) {
             // The task_wait rows take the waits, which the transfers may
-            // have ended, then the I/O rows take the transfers.
-            jet_cli_perf_waits_read(capture, found.waits.move(), found.wakes, found.spawns, found.transfers, source, 0)
+            // have ended, then the I/O rows take the transfers; past the
+            // task row limit, the `tasks` section counts every task.
+            took: jet_cli_perf_task_samples(found.timed)
+            jet_cli_perf_waits_read(capture, found.waits.move(), found.wakes, found.spawns, took, found.transfers, source, 0)
+            if jet_cli_perf_tasks_section(capture.task_ids, capture.task_phases, found.spawns, took) == .Val(section) {
+                capture.receipts.push(section)
+            }
             jet_cli_perf_io_read(capture, found.transfers.move(), source, 0)
             if causal {
                 capture.receipts.push(jet_cli_perf_causal_section("{source}", found.experiments.move(), found.points.move(), found.idle.move()))
@@ -516,7 +521,7 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
                 if origin == 0 || transfer.start_ns < origin -> origin = transfer.start_ns
             }
             timed = found.timed.move()
-            jet_cli_perf_waits_read(capture, found.waits.move(), found.wakes, found.spawns, found.transfers, path, origin)
+            jet_cli_perf_waits_read(capture, found.waits.move(), found.wakes, found.spawns, jet_cli_perf_task_samples(timed), found.transfers, path, origin)
             jet_cli_perf_io_read(capture, found.transfers.move(), path, origin)
             lost = found.records_lost
             if jet_cli_perf_records_section(lost, JET_CLI_PERF_RING_LOSS) == .Val(section) {

@@ -9,9 +9,10 @@
 // then shows the result through the image's debug types. The call runs on
 // the stopped thread itself, every other thread stopped, from a room the
 // session maps in the program (native_eval_here); for the call the
-// debugger writes the runtime's allocator words and record/replay mode
-// (JetBackend X64_DEBUG_EVAL_STORAGE) so its allocations come from the room's
-// arena, and writes them back after, so the program's own values and heap
+// debugger writes the runtime's allocator words, record/replay mode and
+// stdout switch (JetBackend X64_DEBUG_EVAL_STORAGE) so its allocations come
+// from the room's arena and its output past the program's stdout buffer,
+// and writes them back after, so the program's own values, heap and output
 // read as they did before. A compiled expression is kept per source line
 // and text, so a condition compiles once and runs at each hit, while the
 // program's sources read as they did when it was compiled
@@ -1141,9 +1142,11 @@ native_eval_words: fn(symbols: NativeFixSymbols) -> [Int]? Never! {
 // What the runtime's words (X64_DEBUG_EVAL_STORAGE, in its order) hold while
 // an evaluation is in the room at `room`: a 0 class limit, so every
 // allocation and free leaves the class path for the code words, the room's
-// take and give in those, and the record/replay mode off.
+// take and give in those, the record/replay mode off, and stdout direct, so
+// a print is a write the drive keeps from the kernel rather than bytes left
+// in the program's stdout buffer.
 native_eval_routed: fn(room: Int) -> [Int] Never! {
-    [Int]{0, room + NATIVE_EVAL_ROOM_TAKE, room + NATIVE_EVAL_ROOM_GIVE, 0}
+    [Int]{0, room + NATIVE_EVAL_ROOM_TAKE, room + NATIVE_EVAL_ROOM_GIVE, 0, 1}
 }
 
 // Write each of `values` at the stopped program's word at the address of
@@ -1870,9 +1873,9 @@ native_log_shown: fn(image: NativeImage, memory: NativeMemory, result: NativeEva
     assert_eq(native_eval_guard_code(), [U8]{0x48, 0x89, 0xf8, 0xc3})
 }
 
-#Test("an evaluation routes the class limit to 0, the code words to the room's take and give, and the replay mode off") {
+#Test("an evaluation routes the class limit to 0, the code words to the room's take and give, the replay mode off and stdout direct") {
     room: 0x7000_0000_0000
-    assert_eq(native_eval_routed(room), [Int]{0, room + NATIVE_EVAL_ROOM_TAKE, room + NATIVE_EVAL_ROOM_GIVE, 0})
+    assert_eq(native_eval_routed(room), [Int]{0, room + NATIVE_EVAL_ROOM_TAKE, room + NATIVE_EVAL_ROOM_GIVE, 0, 1})
     assert_eq(native_eval_routed(room).len(), X64_DEBUG_EVAL_STORAGE.len())
 }
 

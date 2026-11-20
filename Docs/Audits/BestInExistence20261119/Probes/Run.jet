@@ -100,12 +100,14 @@ probe_repr: fn(text: String) -> String Never! {
     "'{text.replace("\\", "\\\\").replace("\n", "\\n").replace("'", "\\'")}'"
 }
 
-// `text` without the newlines it ends with.
+// `text` without the newlines it ends with. The cut is made on its bytes:
+// a String slice counts characters, and output with a multi-byte character
+// (the `—` of Jet.DebugSessionQuit) has more bytes than characters.
 probe_chomp: fn(text: String) -> String Never! {
     bytes: text.bytes()
     end := bytes.len()
     loop end > 0 && bytes[end - 1] == (U8{10}) -> end -= 1
-    "{text.slice(0, end)}"
+    String.from_bytes_lossy(bytes[0..<end])
 }
 
 // The host's three load averages.
