@@ -6,8 +6,10 @@
 // build's side debug file in the symbol store (`.jet/symbols/.build-id/`,
 // Host.jet jet_cli_symbols_file) of the working directory or one above it,
 // and prints the report a dev build of the program prints (report.S), from
-// the side file's location table (JetBackend Image/Jetline.jet). The text
-// before and after the report passes through.
+// the side file's location table (JetBackend Image/Jetline.jet). A stop's
+// report gives its callers the same way (JetRuntime Fault.jet
+// trace_release_callers), and this names the one its `-->` line stands at.
+// The text before, between and after the reports passes through.
 use {
     cli_files: core.files
     cli_term: core.term
@@ -19,6 +21,12 @@ use {
 JET_CLI_CRASH_BUILD: "Build "
 
 JET_CLI_CRASH_NAMES: " (names and lines: jet crash)"
+
+// The line after a stop's `Build` line: its callers' return addresses
+// follow, and its `-->` line names the function only after the second.
+JET_CLI_CRASH_CALLERS: "Callers:"
+
+JET_CLI_CRASH_CALLERS_IN: "Callers with function:"
 
 JET_CLI_CRASH_FRAME: "  0x"
 
@@ -44,26 +52,82 @@ jet_cli_crash: fn(args: [String], color: Bool) -[FS, Env, IO]> JetCLIPlan Never!
     side: jet_cli_crash_side(store) ?? return jet_cli_crash_missing(id, color)
     bytes: cli_files.read_bytes(side) ?? return jet_cli_fail("E2105", "couldn't read the debug info `{side}`: {err}", jet_cli_why("E2105"), "check that the file is readable, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     table: x64_jetline_read(bytes) ?? return jet_cli_fail("E2105", "the debug info `{side}` has no `.debug_jetline` location table", jet_cli_why("E2105"), "rebuild the program with `jet build --release` to save its debug info again", color, JET_DRIVER_EXIT_USER_ERROR)
-    // The report's frames: its backtrace's addresses, the first the faulting
-    // instruction, the rest return addresses.
-    at := build + 1
-    backtrace := false
-    addresses := [Int]{}
-    if at < lines.len() && lines[at] == "Backtrace:" {
-        backtrace = true
-        at += 1
-        loop at < lines.len() {
-            address: jet_cli_crash_frame(lines[at]) ?? break
-            addresses.push(address)
+    out := [String]{}
+    at := 0
+    loop at < lines.len() {
+        if at == 0 || jet_cli_crash_build_id(lines[at]) == .None {
+            out.push(lines[at])
             at += 1
+            next
         }
+        label: if at + 1 < lines.len() -> lines[at + 1] else -> ""
+        if label == JET_CLI_CRASH_CALLERS || label == JET_CLI_CRASH_CALLERS_IN {
+            at = jet_cli_crash_callers(lines, at + 1, table, out)
+            next
+        }
+        // A fault's frames: its backtrace's addresses, the first the
+        // faulting instruction, the rest return addresses.
+        head: out.pop() ?? ""
+        at += 1
+        backtrace := false
+        addresses := [Int]{}
+        if at < lines.len() && lines[at] == "Backtrace:" {
+            backtrace = true
+            at += 1
+            loop at < lines.len() {
+                address: jet_cli_crash_frame(lines[at]) ?? break
+                addresses.push(address)
+                at += 1
+            }
+        }
+        report: if head.starts_with(jet_cli_crash_stop_head()) -> jet_cli_crash_stop(head, addresses, table) else -> jet_cli_crash_fault(head, backtrace, addresses, table)
+        out.push(report.slice(0, report.len() - 1))
     }
-    head: lines[build - 1]
-    report: if head.starts_with(jet_cli_crash_stop_head()) -> jet_cli_crash_stop(head, addresses, table) else -> jet_cli_crash_fault(head, backtrace, addresses, table)
-    before: jet_cli_prefix(lines, build - 1)
-    after: jet_cli_tail(lines, at)
-    leading: if before.len() == 0 -> "" else -> "{before.join("\n")}\n"
-    jet_cli_done("{leading}{report}{after.join("\n")}", "", JET_DRIVER_EXIT_OK)
+    jet_cli_done(out.join("\n"), "", JET_DRIVER_EXIT_OK)
+}
+
+// A stop's callers, the label at line `at` (JET_CLI_CRASH_CALLERS, or
+// JET_CLI_CRASH_CALLERS_IN to name the function too) and the return
+// addresses after it, in place of them: the `-->` line a dev build's report
+// gives (JetRuntime Trap.jet trap_user_frame), at the innermost caller whose
+// function is outside Core, then the report's lines after them less the
+// Core site it fell back to. With no such caller the fallback stays, as it
+// does in a dev build's report. Returns the index of the first line it
+// leaves.
+jet_cli_crash_callers: fn(lines: [String], at: Int, table: X64Jetline, out: &[String]) -> Int Never! {
+    with_function: lines[at] == JET_CLI_CRASH_CALLERS_IN
+    next_line := at + 1
+    named := String?{None}
+    loop next_line < lines.len() {
+        address: jet_cli_crash_frame(lines[next_line]) ?? break
+        next_line += 1
+        if named != .None -> next
+        found: x64_jetline_find(table, address - 1)
+        if found < 0 -> next
+        function: table.functions[found]
+        if function.file == "" || function.file.starts_with("<corelib>/") -> next
+        line: if x64_jetline_place(table, function, address - 1) == .Val(row) -> row.line else -> 0
+        named = Val(if with_function && function.name != "" -> "  --> {function.file}:{line} in {function.name}" else -> "  --> {function.file}:{line}")
+    }
+    found: named ?? return next_line
+    out.push(found)
+    loop next_line < lines.len() && jet_cli_crash_site_line(lines[next_line]) -> next_line += 1
+    next_line
+}
+
+// A line of the Core site a stop's report falls back to: its `-->` line,
+// or a gutter line of its source and caret.
+jet_cli_crash_site_line: fn(line: String) -> Bool Never! {
+    if line.starts_with("  --> ") -> return true
+    trimmed: line.trim_start()
+    if trimmed.starts_with("|") -> return true
+    digits := 0
+    loop byte in trimmed.bytes() {
+        digit: Int{byte}
+        if digit < 48 || digit > 57 -> break
+        digits += 1
+    }
+    digits > 0 && trimmed.slice(digits, trimmed.len()).starts_with(" |")
 }
 
 jet_cli_crash_missing: fn(id: String, color: Bool) -> JetCLIPlan Never! {
