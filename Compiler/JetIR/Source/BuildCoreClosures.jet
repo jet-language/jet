@@ -164,8 +164,10 @@ ir_closure_box: fn(m: &IRModule, b: &IRBuilder, row: Int, bytes: Int, captures: 
 // capture the box took from its variable and drops each capture the box
 // owns as an aggregate's glue drops its members (ir_glue_drops), never a
 // held place, then frees the box. A capture the body owns ends with the
-// body; when the body never started, the helper closes and drops it as the
-// body's scope end would have. One per capture shape.
+// body; when the body never started, the helper takes and drops it as the
+// body's start and scope end would have, so a Sender handed to the task
+// (ir_hand_senders) leaves the runtime's sender ledger exact. One per
+// capture shape.
 ir_closure_release: fn(m: &IRModule, bytes: Int, captures: [IRCaptureSlot]) -> Int Never! {
     owned := [IRCaptureSlot]{}
     unstarted := [IRCaptureSlot]{}
@@ -200,6 +202,9 @@ ir_closure_release: fn(m: &IRModule, bytes: Int, captures: [IRCaptureSlot]) -> I
         ir_open_if(a.f, never, a.line)
         loop capture in unstarted {
             value: ir_load_at(m, a, boxed, capture.offset, capture.row)
+            if ir_sender_owned(m, capture) {
+                _: ir_runtime(m, a, "jet_rt_native_sender_take", [Int]{value}, -1)
+            }
             if capture.close >= 0 -> ir_close_call(a, capture.close, value)
             if m.types[capture.row].drop != "" -> ir_emit(a.f, IROp.Drop, -1, value, -1, -1, a.line)
         }

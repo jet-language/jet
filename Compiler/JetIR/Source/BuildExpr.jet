@@ -8629,12 +8629,13 @@ ir_build_lambda: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, job: IRLambdaJob)
             // parameter: its scope end closes and drops what the body did
             // not move on.
             value: ir_load_at(m, b, env, capture.offset, capture.row)
+            b.bindings.push(IRBinding{name: capture.name, slot: value, owned: ir_has_drop(m, b, value)})
             // A Sender the spawner handed over (ir_hand_senders) becomes
-            // the task's in the runtime's sender ledger.
+            // the task's in the runtime's sender ledger. It is bound first,
+            // so a stop the take's poll delivers drops it with the body.
             if ir_sender_owned(m, capture) {
                 _: ir_runtime(m, b, "jet_rt_native_sender_take", [Int]{value}, -1)
             }
-            b.bindings.push(IRBinding{name: capture.name, slot: value, owned: ir_has_drop(m, b, value)})
             ir_close_arm(m, p, b, value, false, span)
         } else if capture.by_ref {
             pointer_row: ir_pointer_row(m)

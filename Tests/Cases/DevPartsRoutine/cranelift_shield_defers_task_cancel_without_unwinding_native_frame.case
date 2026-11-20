@@ -1,10 +1,9 @@
 # tests/dev_parts/routine.rs::cranelift_shield_defers_task_cancel_without_unwinding_native_frame at tests/dev_parts/routine.rs:4942; hand-port
-# The task is canceled as soon as it is spawned, most often before a carrier
-# starts it. Its start is no check, so its body still runs into the `#Shield`
-# it opens with: the receive there waits out the cancel, takes 42, prints it
-# and acks, and the cancel lands as the block exits, so `print(99)` never
-# runs. A start that took the cancel would skip the body, and `run` would wait
-# for the ack forever.
+# The task signals from inside the `#Shield` it opens with, and `run` cancels
+# it only then, so the cancel comes while the shield holds it (a cancel that
+# came before the task started would win and skip its body). The receive in
+# the shield waits out the cancel, takes 42, prints it and acks, and the
+# cancel lands as the block exits, so `print(99)` never runs.
 fixture: CraneliftShieldDefersTaskCancelWithoutUnwindingNativeFrame.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
