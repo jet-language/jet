@@ -460,8 +460,10 @@ sema_liveness_unreachable_reexports: fn(graph: SemaRegistrationGraph, module_ind
 // foreign signature, an effect row (an effect type's members are named
 // there) and a module constant, whose compile-time loops and `#run` blocks
 // leave no checked body, read every field its type holds and build every
-// case. A generic module's enum argument builds its case. A checked `#Test`
-// of the package reads and builds as any body does. Only
+// case. A body that reads the program's own compiler index (a build's
+// `b.program.types()` or `b.program.definitions()`) reflects every type the
+// program declares. A generic module's enum argument builds its case. A
+// checked `#Test` of the package reads and builds as any body does. Only
 // snapshot modules are judged: an application's members, and a library's
 // members unless the type and the member are public.
 
@@ -480,9 +482,12 @@ SemaLivenessMemberUses: struct {
     read_types: [String:Bool],
     // Types whose every case counts as built, by last name segment.
     built_types: [String:Bool],
+    // A body read the program's own compiler index, which reflects every
+    // type the program declares.
+    program_index: Bool,
 
     empty: fn() -> SemaLivenessMemberUses Never! {
-        SemaLivenessMemberUses{fields: [String:Bool]{}, field_names: [String:Bool]{}, cases: [U32:Bool]{}, case_names: [String:Bool]{}, read_types: [String:Bool]{}, built_types: [String:Bool]{}}
+        SemaLivenessMemberUses{fields: [String:Bool]{}, field_names: [String:Bool]{}, cases: [U32:Bool]{}, case_names: [String:Bool]{}, read_types: [String:Bool]{}, built_types: [String:Bool]{}, program_index: false}
     }
 }
 
@@ -683,6 +688,13 @@ sema_liveness_member_body_uses: fn(function: FnBody, uses: &SemaLivenessMemberUs
                 loop name in path -> uses.field_names[name] = true
             }
         }
+        // The program's compiler index (`b.program.types()`,
+        // `b.program.definitions()`) reflects every type the program declares.
+        if kind == .HostCall(call) && call == .Method(receiver, method, _) && (method == "types" || method == "definitions") {
+            if checked_expr_type_id(tree.expr_types, receiver) == .Val(index) && sema_call_compiler_value_owner(tree.types.types[index]) == Val("ProgramInfo") {
+                uses.program_index = true
+            }
+        }
         if kind == .PatternMatches(_, pattern) -> sema_liveness_pattern_uses(pattern.shape, uses)
         if kind == .IfExpr(condition, _, _, _, _) -> sema_liveness_condition_uses(condition, uses)
         if kind == .EnumCtor(_, variant, _) -> uses.cases[variant.id] = true
@@ -815,6 +827,7 @@ sema_liveness_member_uses: fn(graph: SemaRegistrationGraph, modules: [SemaGraphM
         loop (name, _) in checked.test_member_uses.case_names -> uses.case_names[name] = true
         loop (name, _) in checked.test_member_uses.read_types -> uses.read_types[name] = true
         loop (name, _) in checked.test_member_uses.built_types -> uses.built_types[name] = true
+        if checked.test_member_uses.program_index -> uses.program_index = true
         // A value computed while compiling (a local's, Comptime/LocalValues.jet,
         // or a `T.reflect()` record) holds its result in place of the code
         // that made it, so the cases that code names are built and the types
@@ -1005,6 +1018,10 @@ sema_liveness_carries_marker: fn(type_markers: [Marker], derives: [NamedSpan], m
 }
 
 sema_liveness_unused_members: fn(graph: SemaRegistrationGraph, module_index: Int, application: String?, uses: SemaLivenessMemberUses, verdicts: &[SemaLivenessVerdict]) -[Mem.Alloc]> Never! {
+    // The program's own compiler index reflects every member.
+    if uses.program_index {
+        return
+    }
     module_row: graph.modules[module_index]
     judge_pub: if application == .Val(package) -> package == module_row.package_identity else -> false
     loop nominal in module_row.nominals {

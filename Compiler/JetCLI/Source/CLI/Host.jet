@@ -71,6 +71,7 @@ use {
         jet_driver_check_outcome,
         jet_driver_check_failures,
         jet_driver_check_reported,
+        jet_driver_problems_exit,
         jet_driver_is_a11y_lint,
         jet_driver_present_diagnostics,
         JetDriverIceRow,
@@ -549,7 +550,7 @@ jet_cli_check_json_outcome: fn(file: String, source: String, diagnostics: [Diagn
     base: jet_cli_report_base(file)
     failed: jet_driver_check_reported(diagnostics)
     if failed.len() > 0 {
-        return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("diagnostics", false, base, file, source, failed), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("diagnostics", false, base, file, source, failed), stderr: "", exit_code: jet_driver_problems_exit(failed)}
     }
     lints := [Diagnostic]{}
     loop diagnostic in diagnostics {
@@ -2258,9 +2259,9 @@ jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool
     if result.trace_sink == .Val(sink) -> sink.end("cli.diagnostics", errors.len())
     if errors.len() > 0 {
         if json {
-            return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("diagnostics", false, jet_cli_report_base(file), file, source, errors), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+            return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("diagnostics", false, jet_cli_report_base(file), file, source, errors), stderr: "", exit_code: jet_driver_problems_exit(errors)}
         }
-        return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, errors, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, errors, color, true), exit_code: jet_driver_problems_exit(errors)}
     }
     if jet_cli_build_machine_refusal(options, color) == .Val(refused) -> return refused
     authority: jet_cli_traced_authority(invocation, result)
@@ -2857,7 +2858,7 @@ jet_cli_run_build: fn(file: String, source: String, color: Bool, options: BuildO
     if errors.len() > 0 {
         presented := jet_cli_present_shown(result, snapshot, verbose)
         if !json -> jet_cli_full_path_origins(presented)
-        return JetCLIBuilt.Failed{output: JetDriverVerbOutput{stdout: "", stderr: jet_cli_run_problems(file, source, presented, color, json), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
+        return JetCLIBuilt.Failed{output: JetDriverVerbOutput{stdout: "", stderr: jet_cli_run_problems(file, source, presented, color, json), exit_code: jet_driver_problems_exit(presented)}}
     }
     authority: jet_cli_traced_authority(invocation, result)
     if jet_cli_authority_report(file, source, color, json, authority) == .Val(refusal) {
@@ -2988,9 +2989,9 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
         shown: jet_cli_present_shown(result, snapshot, verbose)
         // As `jet build --json`: the compile reports' status line on stdout.
         if options.json {
-            return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("diagnostics", false, jet_cli_report_base(file), file, source, shown), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+            return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("diagnostics", false, jet_cli_report_base(file), file, source, shown), stderr: "", exit_code: jet_driver_problems_exit(shown)}
         }
-        return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, shown, color, verbose), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, shown, color, verbose), exit_code: jet_driver_problems_exit(shown)}
     }
     if verbose {
         jet_cli_write_verbose_lints(file, source, color, false, jet_cli_present_shown(result, snapshot, true))

@@ -2263,6 +2263,9 @@ class Host {
         return 0n;
       },
       jet_rt_host_wait: JSPI ? new WebAssembly.Suspending((address, expected, deadline) => host.wait(address, expected, deadline)) : () => BigInt(-E.NOSYS),
+      // The page's threads are coroutines on its one thread: none runs while
+      // another computes.
+      jet_rt_host_parallel: () => 0n,
       getauxval: (type) => {
         if (type === 6n) return 4096n;
         if (type === 25n) return BigInt(AUX_RANDOM);

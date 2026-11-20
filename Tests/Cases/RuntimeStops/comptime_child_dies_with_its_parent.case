@@ -1,0 +1,24 @@
+# A compile-time child process dies with its parent: a `jet check`, `jet
+# build` or `jet run` killed (SIGKILL included) while its compile-time work
+# runs takes the process that work runs in with it. The child holds the
+# read end of a pipe whose write end only jet holds, set to signal the
+# child (SIGIO, whose default ends it) once that end closes, which the
+# kernel does however jet ends. PR_SET_PDEATHSIG can't do this: it follows
+# the thread that started the child, which may end first.
+# left.sh starts the command as a shell does, kills it once its compile-time
+# work runs, and counts the processes below it that outlive it.
+requires: os-name:linux
+fixture: Fixtures/ComptimeChildDiesWithItsParent
+env: NO_COLOR=1
+step: sh left.sh check
+exit: 0
+stdout: ~ "jet: 137\nleft: 0\n" # the check ends on the KILL, and nothing below it outlives it
+stdout: !~ "below: 0\n" # the check's compile-time work runs in a child
+step: sh left.sh build
+exit: 0
+stdout: ~ "jet: 137\nleft: 0\n" # the build ends on the KILL, and nothing below it outlives it
+stdout: !~ "below: 0\n" # the build's compile-time work runs in a child
+step: sh left.sh run
+exit: 0
+stdout: ~ "jet: 137\nleft: 0\n" # the run ends on the KILL, and nothing below it outlives it
+stdout: !~ "below: 0\n" # the run's compile-time work runs in a child

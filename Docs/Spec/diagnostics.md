@@ -129,8 +129,11 @@ type is handed to, a C layout, a foreign signature and an effect row (which
 names an effect type's members) read every field and build every case; derived
 cloning never reads. A value computed while compiling (a local's, a
 `T.reflect()` record's) builds the cases and reflects the types its code
-names, an entry `run` reads the failure it returns (it is shown when it
-escapes), and a `#Web.Form` model's fields are read as its form's controls.
+names, a body that reads the program's own compiler index (a build's
+`b.program.types()` or `b.program.definitions()`) reflects every type the
+program declares, an entry `run` reads the failure it returns (it is shown
+when it escapes), and a `#Web.Form` model's fields are read as its form's
+controls.
 While a module's check is incomplete no member is judged, since a body that
 failed to check records no uses. A library's
 public members are exempt; an application's members and a library's private

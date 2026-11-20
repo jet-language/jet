@@ -1,0 +1,88 @@
+use time: core.time
+
+// Counts with no wait point: only the check each iteration starts with can
+// stop it, once the deadline's timer has marked the task.
+spin: fn() -> Int {
+    counter: Atomic<Int>.try_new(0) ?? return -1
+    n := 0
+    loop n >= 0 {
+        n += 1
+        if n % 4096 == 0 -> counter.store(n)
+    }
+    n
+}
+
+failure_label: fn(error: TaskFailure) -> String {
+    if error == {
+        .Canceled -> {
+            return "canceled"
+        }
+        .DeadlineBlown -> {
+            return "deadline"
+        }
+        .Panicked(_) -> {
+            return "panicked"
+        }
+    }
+}
+
+// How the task ended, and whether it ended no earlier than its deadline,
+// `low` ms after `watch` started, and before `high` ms. A deadline is kept
+// in whole milliseconds, so it can pass up to 1 ms before `low`.
+report: fn(name: String, handle: &&Task<Int>, watch: time.Stopwatch, low: Int, high: Int) {
+    if handle.join() == {
+        .Ok(_) -> { print("{name}: finished") }
+        .Err(error) -> {
+            ms: time.elapsed(watch).ns /% 1000000
+            timing: if {
+                ms < low - 1 -> "early ({ms} ms)"
+                ms >= high -> "late ({ms} ms)"
+                else -> "on time"
+            }
+            print("{name}: {failure_label(error)}, {timing}")
+        }
+    }
+}
+
+// The task this spawns inherits the function's deadline, which ends with
+// the function, long before the task does.
+#Deadline(40ms) spawn_under_a_deadline: fn() -> Task<Int> { task spin() }
+
+// A spin under a deadline of its own, nested in its caller's.
+#Deadline(30ms) spin_for_30ms: fn() -> Int { spin() }
+
+run: fn() {
+    // An inner deadline shortens the one in force: its timer replaces the
+    // outer one's, and the spinner stops at the inner deadline.
+    nested_watch: time.start()
+    nested: task {
+        task.timeout(60s)
+        spin_for_30ms()
+    }
+    report("nested", nested, nested_watch, 30, 30000)
+
+    // An inner deadline that ends before it passes gives the outer one back:
+    // the spinner stops at the outer deadline, not at the inner one.
+    restored_watch: time.start()
+    restored: task {
+        task.timeout(80ms)
+        #Deadline(10ms) { time.sleep(1ms) }
+        spin()
+    }
+    report("restored", restored, restored_watch, 80, 30000)
+
+    // A wait under the deadline that ends before it leaves the timer
+    // running: the spin after the wait stops at the deadline.
+    waited_watch: time.start()
+    waited: task {
+        task.timeout(50ms)
+        time.sleep(20ms)
+        spin()
+    }
+    report("after a wait", waited, waited_watch, 50, 30000)
+
+    // A task inherits its spawner's deadline with a timer of its own.
+    inherited_watch: time.start()
+    inherited: spawn_under_a_deadline()
+    report("inherited", inherited, inherited_watch, 40, 30000)
+}

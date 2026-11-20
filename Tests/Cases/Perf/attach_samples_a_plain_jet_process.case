@@ -24,8 +24,6 @@ step: jet perf view busy.jettrace
 exit: 0
 stdout: ~ "functions samples=" # the view shows the section's lines
 stdout: ~ "% total · unit.rt_text_append_owner\n" # with the hot function
-step: sh -c 'kill -KILL $(cat /proc/{pid:busy}/task/*/children)'
-exit: 0 # the compile-time process outlives a killed jet check while it spins
 signal busy: KILL
 wait: busy
-exit: any # the case's KILL ends the jet check
+exit: any # the case's KILL ends the jet check, and its compile-time process with it

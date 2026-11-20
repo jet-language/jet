@@ -3,14 +3,15 @@
 // the compiler drives over ComptimeWire.jet frames and loads each comptime
 // batch's code into. The child runs in its own address space, so a stop, a
 // refused effect or a crash never reaches the compiler; seccomp refuses its
-// effects.
+// effects. It ends with the compiler however the compiler ends
+// (x64_comptime_tie).
 use {
     core.mem
     jet_foundation.[NameTable, name_find, name_find_bytes, name_index, name_intern_bytes, name_table_sized]
 }
 
 // The child's descriptors are kept above every descriptor the child is given
-// (0..4), so moving them into place never collides.
+// (0..5), so moving them into place never collides.
 X64_COMPTIME_FD_FLOOR: 100
 
 X64_COMPTIME_BUFFER: 65536
@@ -33,6 +34,9 @@ X64ComptimeChild: struct {
     // The wait status once the child ended, else -1.
     status: Int{-1},
     failure: String{""},
+    // The write end of the child's lifeline (x64_comptime_tie), which only
+    // this process holds and nothing writes; -1 once closed.
+    lifeline: Int{-1},
     // The spawn's random cookie, which the child's refusal handler passes
     // when it reissues a call of an admitted `#Impure` block
     // (x64_comptime_admit_block), and whether the child admits them now
@@ -56,9 +60,9 @@ x64_comptime_spawn: fn(image: X64Executable, stdout: Bool, budget: Int) -> X64Co
         return child
     }
     child.scratch = scratch
-    // command, reply, output, errors: [read end, write end] each.
+    // command, reply, output, errors, lifeline: [read end, write end] each.
     pipes := [Int]{}
-    loop _ in 0..<4 {
+    loop _ in 0..<5 {
         ends := [Int]{}
         #Unsafe("the scratch mapping is the child's own, made above") {
             ends = x64_comptime_pipe(scratch)
@@ -72,10 +76,10 @@ x64_comptime_spawn: fn(image: X64Executable, stdout: Bool, budget: Int) -> X64Co
         pipes.push(ends[0])
         pipes.push(ends[1])
     }
-    // No parent_death: the compile's child may outlive the worker thread that spawned it; it ends when its command pipe closes.
+    // No parent_death: the compile's child may outlive the worker thread that spawned it, and PR_SET_PDEATHSIG follows that thread; the lifeline ends it with the compiler instead.
     launch: X64Launch{argv: [String]{"jet-comptime"}, env: Val([String]{}), executable: "", name: "jet-comptime", relaunch: [String]{}, parent_death: false, read_scope: [String]{}}
     // The child's standard input stays the compiler's; its filter refuses reading it.
-    fds: [Int]{-1, pipes[5], pipes[7], pipes[0], pipes[3]}
+    fds: [Int]{-1, pipes[5], pipes[7], pipes[0], pipes[3], pipes[8]}
     loaded: x64_executable_load(image)
     spawned := X64Spawned{pid: -1, failure: ""}
     if loaded.failure == "" {
@@ -95,12 +99,21 @@ x64_comptime_spawn: fn(image: X64Executable, stdout: Bool, budget: Int) -> X64Co
     child.reply = pipes[2]
     child.output = pipes[4]
     child.errors = pipes[6]
+    child.lifeline = pipes[9]
     if spawned.failure != "" {
+        x64_comptime_close_fd(pipes[8])
         child.failure = "can't start the comptime child: {spawned.failure}"
         x64_comptime_close(child)
         return child
     }
     child.pid = spawned.pid
+    tied: x64_comptime_tie(pipes[8], child.pid)
+    x64_comptime_close_fd(pipes[8])
+    if tied != 0 {
+        child.failure = "can't tie the comptime child to this process ({-tied})"
+        x64_comptime_close(child)
+        return child
+    }
     hello: x64_comptime_receive(child) ?? {
         child.failure = x64_comptime_end_text(child, "before it started")
         x64_comptime_close(child)
@@ -196,6 +209,31 @@ x64_comptime_close_fd: fn(fd: Int) {
         return
     }
     #Unsafe("closes our own descriptor") { _ := os_syscall(3, fd, 0, 0, 0, 0, 0) }
+}
+
+// Ties child `pid` to this process through its lifeline's read end `fd`,
+// which the child holds as descriptor 5: the read end signals SIGIO to the
+// child (F_SETOWN, then O_ASYNC through F_SETFL) once the pipe's last write
+// end closes, and SIGIO's default action ends the child. Only this process
+// holds the write end (X64ComptimeChild.lifeline, close-on-exec, and every
+// other child closes the descriptors it isn't given), and the kernel closes
+// it when this process ends, by a signal (SIGKILL included) or otherwise:
+// the child then ends too, even mid-call in compile-time code that never
+// reads its command pipe again. PR_SET_PDEATHSIG can't do this, since it
+// follows the thread that spawned the child, which may end first. 0, or the
+// failed call's result.
+x64_comptime_tie: fn(fd: Int, pid: Int) -> Int {
+    owned := 0
+    #Unsafe("fcntl F_SETOWN names our own child as the owner of our own descriptor's signals") {
+        owned = os_syscall(72, fd, 8, pid, 0, 0, 0)
+    }
+    if os_failed(owned) -> return owned
+    flagged := 0
+    #Unsafe("fcntl F_SETFL sets O_ASYNC on our own descriptor") {
+        flagged = os_syscall(72, fd, 4, 8192, 0, 0, 0)
+    }
+    if os_failed(flagged) -> return flagged
+    0
 }
 
 // Writes all of `bytes` to `fd` through the `size`-byte buffer at `buffer`;
@@ -387,10 +425,13 @@ x64_comptime_reap: fn(child: &X64ComptimeChild, kill: Bool) {
     x64_comptime_close_fd(child.reply)
     x64_comptime_close_fd(child.output)
     x64_comptime_close_fd(child.errors)
+    // The child is gone, so closing its lifeline signals nothing.
+    x64_comptime_close_fd(child.lifeline)
     child.command = -1
     child.reply = -1
     child.output = -1
     child.errors = -1
+    child.lifeline = -1
 }
 
 // Ends a live child and releases its buffers.
@@ -403,10 +444,12 @@ x64_comptime_close: fn(child: &X64ComptimeChild) {
     x64_comptime_close_fd(child.reply)
     x64_comptime_close_fd(child.output)
     x64_comptime_close_fd(child.errors)
+    x64_comptime_close_fd(child.lifeline)
     child.command = -1
     child.reply = -1
     child.output = -1
     child.errors = -1
+    child.lifeline = -1
     if child.scratch != 0 {
         _ := os_unmap(child.scratch, 4096 + X64_COMPTIME_BUFFER)
         child.scratch = 0

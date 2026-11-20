@@ -262,6 +262,16 @@ jet_driver_check_reported: fn(diagnostics: [Diagnostic]) -> [Diagnostic] Never! 
     jet_driver_check_shown(diagnostics)
 }
 
+// The status a command that `problems` stop ends with: 128 plus the signal
+// from outside jet that ended a process one of them reports (E3007), as a
+// shell reports a process that signal ended; else a user error's.
+jet_driver_problems_exit: fn(problems: [Diagnostic]) -> Int Never! {
+    loop problem in problems {
+        if problem.outside_signal == .Val(signal) -> return 128 + signal
+    }
+    JET_DRIVER_EXIT_USER_ERROR
+}
+
 // `jet check` human output for presented diagnostics, the accessibility lints
 // left out: errors fail with the problem count; with none, a tidy error fails
 // with every lint; warnings alone end in one `ok:` verdict; a clean check says
@@ -270,7 +280,7 @@ jet_driver_check_reported: fn(diagnostics: [Diagnostic]) -> [Diagnostic] Never! 
 jet_driver_check_outcome: fn(file: String, source: String, diagnostics: [Diagnostic], color: Bool, quiet: Bool) -> JetDriverVerbOutput Never! {
     failed: jet_driver_check_reported(diagnostics)
     if failed.len() > 0 {
-        return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, failed, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, failed, color, true), exit_code: jet_driver_problems_exit(failed)}
     }
     shown: jet_driver_check_shown(diagnostics)
     count: shown.len()

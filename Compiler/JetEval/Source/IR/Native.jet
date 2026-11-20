@@ -869,7 +869,10 @@ jet_eval_native_serve: fn(s: &JetEvalIRState) -> Bool {
 }
 
 // The call's child ended before its DONE: out of fuel, out of stack, a
-// runtime exit (a stop's report on standard error, or a program's exit).
+// runtime exit (a stop's report on standard error, or a program's exit), or
+// a signal from outside jet (jet_eval_native_outside_signal), which is no
+// defect of jet's and no failure of the code: the build stops with E3007,
+// whose command ends with 128 plus the signal.
 jet_eval_native_ended: fn(s: &JetEvalIRState) {
     if jet_eval_ir_failed(s) {
         return
@@ -889,6 +892,12 @@ jet_eval_native_ended: fn(s: &JetEvalIRState) {
         jet_eval_ir_source_fail(s, "compile-time call depth exceeds {depth}")
         return
     }
+    if jet_eval_native_outside_signal(signal) == .Val(name) {
+        diagnostic := diagnostic_from_registry("E3007", Val(s.span), "compile-time code was ended by {name} from outside jet", "jet runs compile-time code in a process of its own, and another process or the system (as when memory runs out) sent that process {name}, so the code never finished; jet and the program did not raise it", "build again without stopping it; if the system ended it because memory ran out, free memory or make the compile-time work smaller")
+        diagnostic.outside_signal = Val(signal)
+        s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: diagnostic})
+        return
+    }
     if signal != 0 {
         jet_eval_ir_problem(s, "the comptime child ended on signal {signal}")
         return
@@ -904,6 +913,24 @@ jet_eval_native_ended: fn(s: &JetEvalIRState) {
         return
     }
     jet_eval_ir_source_fail(s, if report == "" -> "the runtime exited with status {code}" else -> report)
+}
+
+// The name of `signal` when it is one that something outside a process
+// sends to end it: the terminal closing (SIGHUP), an interrupt (SIGINT), a
+// kill (SIGKILL, also the kernel's when memory runs out) or a request to
+// stop (SIGTERM). A signal a process raises on itself, as a fault's SIGSEGV
+// or an abort's SIGABRT, is none of these and stays a defect. The compiler
+// ends its child only with SIGKILL, and then records why first (fuel, a
+// failed wait, a host route without an answer), so an unexplained one came
+// from outside.
+jet_eval_native_outside_signal: fn(signal: Int) -> String? Never! {
+    if signal == {
+        1 -> Val("SIGHUP")
+        2 -> Val("SIGINT")
+        9 -> Val("SIGKILL")
+        15 -> Val("SIGTERM")
+        else -> None
+    }
 }
 
 // The child's E3012 stop (JetRuntime FaultReport report.S) names the

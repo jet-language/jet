@@ -1,0 +1,16 @@
+// A command that stays busy in its compile-time work: the constant's work
+// builds text over and over, for far longer than the case lets it run, and
+// the case kills the command.
+spin: fn() -> Int {
+    total := 0
+    loop total >= 0 {
+        text := ""
+        loop _ in 0..<2000 -> text = "{text}x"
+        total += text.len()
+    }
+    total
+}
+
+#StepLimit(4000000000) FOREVER: #run spin()
+
+run: fn() { print("{FOREVER}") }

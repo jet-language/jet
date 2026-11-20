@@ -1,12 +1,13 @@
 // L8a scheduler: an OS worker runs each task to completion. A wait returns a
 // delivered stop word; no Jet frame unwinds. Linux synchronization is Sync.jet.
-// Control216: refs0 paused8 canceled16 attention24 status32 stop40 pending48
+// Control232: refs0 paused8 canceled16 attention24 status32 stop40 pending48
 // observe56 park64 mutex72 waiters80 callbacks88 inline96 scopeFlags104
 // requestedRootCode112 capture120 openGroups128 joinedReason136
 // joinedSite144 site152 waitKind160 waitTarget168 waitArmed176 waitCycle184
 // (WaitCycle.jet's deadlock stops) replayId192 replayOrdinal200
 // (RecordReplay.jet) leaky208 (Channel.jet's sender ledger no longer counts
-// the task as a holder). StopCleanup's opaque token
+// the task as a holder) deadlineWatch216 watchedDeadline224
+// (scheduler_deadline_watch). StopCleanup's opaque token
 // owns old flags. openGroups heads the task groups the task has open
 // (TaskGroup.jet task_group_open), linked through each group and read under
 // mutex72. joinedReason and joinedSite are the reason and site of the last
@@ -32,7 +33,7 @@ SCHEDULER_SCOPE_MASK_KIND: I64{1792}
 // Nonzero while any task's stop poll may have something to deliver that no
 // call of its own published: a stop published to another task's control or
 // by a memory hook (scheduler_hook_checks_arm), an interrupt, a cancel, a
-// strong pause, a deadline or a turn request. A program's loops read it (as
+// strong pause, a passed deadline or a turn request. A program's loops read it (as
 // the runtime object's data symbol jet_rt_checks_armed, JetIR
 // X64Select.jet ir_x64_stop_point; on the web, at
 // the address the runtime partition's receipt names, JetWeb Select.jet
@@ -43,7 +44,7 @@ SCHEDULER_SCOPE_MASK_KIND: I64{1792}
 scheduler_checks_armed := I64{0}
 
 // Nonzero once a request other than a turn armed the polls (stops, cancels,
-// pauses, deadlines: scheduler_checks_arm). Those stay pending on a task's
+// pauses, passed deadlines: scheduler_checks_arm). Those stay pending on a task's
 // own control, which no other task can see, so they keep the polls armed for
 // good. Turn requests alone are the monitor's, which settles the word once
 // no work waits (scheduler_checks_settle).
@@ -136,31 +137,72 @@ scheduler_attention_set: fn(control: I64, bits: I64, on: Bool) {
     }
 }
 
-// The current task or root has a deadline (Deadline.jet): its turn polls
-// read the clock from now on, so a busy loop stops once the deadline passes.
+// The current task or root has a deadline in force (Deadline.jet): its
+// control watches for it to pass.
 scheduler_deadline_attend: fn() {
     control: scheduler_control_current()
-    if (control != I64{0}) { scheduler_attention_set(control, SCHEDULER_ATTEND_DEADLINE, true) }
+    if (control != I64{0}) { scheduler_deadline_watch(control, jet_ctx_deadline_ms()) }
 }
 
-// The context's deadlines all ended (Deadline.jet jet_ctx_pop_deadline): its
-// turn polls stop reading the clock.
+// A control's deadline watch (deadlineWatch216, for the wall-millisecond
+// deadline at watchedDeadline224): a timer of the wheel
+// (scheduler_timer_schedule) that raises the control's deadline bit once
+// `deadline_ms` has passed. Until then the turn polls test that bit and read
+// no clock. A deadline that has already passed raises the bit now, one that
+// never passes needs no watch, and a pending watch for the same deadline
+// stays. A world's clock moves only when the world advances it, which no
+// timer sees, and a host that runs no thread alongside a computing one
+// (Sync.jet jet_rt_host_parallel) runs no timer then either: there the bit
+// is raised now and the turn polls read the clock.
+scheduler_deadline_watch: fn(control: I64, deadline_ms: I64) {
+    remaining: deadline_remaining_ns(deadline_ms)
+    if (remaining == I64{0} || world_current() != I64{0} || jet_rt_host_parallel() == I64{0}) {
+        scheduler_deadline_unwatch(control)
+        scheduler_attention_set(control, SCHEDULER_ATTEND_DEADLINE, true)
+        return
+    }
+    node: sync_load(wrapping(control + I64{216}))
+    if (node != I64{0} && sync_load(wrapping(node + I64{24})) != I64{0} && sync_load(wrapping(control + I64{224})) == deadline_ms) {
+        return
+    }
+    scheduler_deadline_unwatch(control)
+    if (remaining == I64{9223372036854775807}) {
+        return
+    }
+    sync_store(wrapping(control + I64{224}), deadline_ms)
+    sync_store(wrapping(control + I64{216}), scheduler_timer_schedule(sync_deadline(remaining), I64{0}, control))
+}
+
+// Ends the control's deadline watch. The cancel takes the wheel's lock, under
+// which a due timer raises its bit, so no watch raises the bit after this.
+scheduler_deadline_unwatch: fn(control: I64) {
+    node: sync_swap(wrapping(control + I64{216}), I64{0})
+    if (node != I64{0}) { scheduler_timer_cancel(node) }
+}
+
+// The context's deadlines all ended (Deadline.jet jet_ctx_pop_deadline): the
+// watch ends and the turn polls are quiet again.
 scheduler_deadline_leave: fn() {
     control: scheduler_control_current()
-    if (control != I64{0}) { scheduler_attention_set(control, SCHEDULER_ATTEND_DEADLINE, false) }
+    if (control == I64{0}) {
+        return
+    }
+    scheduler_deadline_unwatch(control)
+    scheduler_attention_set(control, SCHEDULER_ATTEND_DEADLINE, false)
 }
 
 // A wait that returns its typed timeout (`DeadlineBlown`) has delivered the
-// deadline in force when that deadline is what ended it: the stop polls leave
-// it to the wait points until a deadline is set or restored again
-// (scheduler_deadline_attend). A wait counts on its own clock, which can end
-// a slice (10 ms) ahead of the context's; a timeout from the wait's own
-// shorter limit delivers nothing.
+// deadline in force when that deadline is what ended it: the watch ends and
+// the stop polls leave it to the wait points until a deadline is set or
+// restored again (scheduler_deadline_attend). A wait counts on its own clock,
+// which can end a slice (10 ms) ahead of the context's; a timeout from the
+// wait's own shorter limit delivers nothing.
 scheduler_deadline_reported: fn() {
     control: scheduler_control_current()
     if (control == I64{0}) || !jet_ctx_deadline_present() || (jet_deadline_remaining_ms() > I64{10}) {
         return
     }
+    scheduler_deadline_unwatch(control)
     scheduler_attention_set(control, SCHEDULER_ATTEND_DEADLINE, false)
 }
 
@@ -281,6 +323,7 @@ scheduler_control_drop: fn(control: I64) {
     scheduler_stop_drop(sync_load(wrapping(control + I64{40})))
     jet_rt_string_drop(scheduler_root_capture_take(control))
     sync_park_drop(sync_load(wrapping(control + I64{64})))
+    scheduler_deadline_unwatch(control)
     // Scoped waiter/callback guards retain the control and unregister first;
     // an open group retains its opener until it closes.
     if (sync_load(wrapping(control + I64{80})) != I64{0} || sync_load(wrapping(control + I64{88})) != I64{0} || sync_load(wrapping(control + I64{128})) != I64{0}) {
@@ -1081,10 +1124,12 @@ scheduler_check_loops: fn(control: I64) {
     }
 }
 
-// Once a deadline has been set (the bit stays), each turn poll of compiled
-// code (jet_rt_session_turn, at a loop's turn or a recursive body's entry)
-// and jet_scheduler_native_poll read the clock while the context holds a
-// deadline and no stop is published, and deliver E3003 once it has passed.
+// A control's deadline bit is up once its watch saw the deadline in force
+// pass (scheduler_deadline_watch). Each turn poll of compiled code
+// (jet_rt_session_turn, at a loop's turn or a recursive body's entry) and
+// jet_scheduler_native_poll then read the clock while no stop is published,
+// and deliver E3003 once it has passed. A watch that ended early (the wall
+// clock moved back) clears the bit and watches again.
 // The stop poll after a call (jet_rt_session_propagate) and the runtime's
 // own stop checks (jet_scheduler_native_propagate) leave it to the wait
 // points: a wait that returned its typed timeout keeps it, a typed join
@@ -1096,9 +1141,17 @@ scheduler_check_loop_deadline: fn(control: I64) {
     if (attention & SCHEDULER_ATTEND_DEADLINE == I64{0}) || scheduler_shielded() || (scheduler_control_status(control) != I64{0}) {
         return
     }
-    if jet_ctx_deadline_present() && jet_deadline_remaining_ms() <= (I64{0}) {
-        scheduler_deliver_deadline(rt_static_text("a loop"))
+    if !jet_ctx_deadline_present() {
+        scheduler_attention_set(control, SCHEDULER_ATTEND_DEADLINE, false)
+        return
     }
+    deadline: jet_ctx_deadline_ms()
+    if (deadline_remaining_ns(deadline) == I64{0}) {
+        scheduler_deliver_deadline(rt_static_text("a loop"))
+        return
+    }
+    scheduler_attention_set(control, SCHEDULER_ATTEND_DEADLINE, false)
+    scheduler_deadline_watch(control, deadline)
 }
 
 scheduler_wait_point_cancel_check: fn() -> I64 {
@@ -1250,7 +1303,7 @@ scheduler_root := I64{0}
 
 SCHEDULER_ROOT_BYTES: I64{272}
 
-SCHEDULER_CONTROL_BYTES: I64{216}
+SCHEDULER_CONTROL_BYTES: I64{232}
 
 SCHEDULER_CARRIER_BYTES: I64{72}
 
@@ -2009,10 +2062,15 @@ scheduler_idle: fn() -> Bool {
     }
 }
 
-// Timer root48B mutex0 sequence8 head16 ready24 stop32 thread40. Timer node40B
-// next0 absoluteMonotonicNs8 borrowedPark16 active24 refs32. Queue and caller
-// each own a ref; cancel synchronizes with wake before the caller frees Park.
-// The timer thread needs the root only, never the worker pool.
+// Timer root48B mutex0 sequence8 head16 until24 stop32 thread40. Timer node48B
+// next0 absoluteMonotonicNs8 borrowedPark16 active24 refs32 control40. Queue
+// and caller each own a ref; cancel synchronizes with wake before the caller
+// frees Park. A node with a control is a deadline watch
+// (scheduler_deadline_watch): when due it raises that control's deadline bit
+// instead of waking a park. until24 is the time the timer thread sleeps to
+// (-1: until a timer is scheduled; 0: it has not slept yet), so a timer due
+// no earlier leaves it asleep. The timer thread needs the root only, never
+// the worker pool.
 scheduler_timer_root: fn() -> I64 {
     root: scheduler_root_required()
     value: sync_load(wrapping(root + I64{104}))
@@ -2033,27 +2091,37 @@ scheduler_timer_root: fn() -> I64 {
 
 scheduler_timer_node_drop: fn(node: I64) {
     if (sync_add(wrapping(node + I64{32}), I64{-1}) == I64{1}) {
-        jet_rt_free(node, I64{40}, I64{8})
+        jet_rt_free(node, I64{48}, I64{8})
     }
 }
 
-scheduler_timer_schedule: fn(deadline_ns: I64, slot: I64) -> I64 {
+// A timer due at the monotonic `deadline_ns` that wakes the park `slot`, or
+// with a `control` raises that control's deadline bit.
+scheduler_timer_schedule: fn(deadline_ns: I64, slot: I64, control: I64) -> I64 {
     wheel: scheduler_timer_root()
-    node: jet_rt_alloc(I64{40}, I64{8})
+    node: jet_rt_alloc(I64{48}, I64{8})
     sync_store(wrapping(node + I64{8}), deadline_ns)
     sync_store(wrapping(node + I64{16}), slot)
     sync_store(wrapping(node + I64{24}), I64{1})
     sync_store(wrapping(node + I64{32}), I64{2})
+    sync_store(wrapping(node + I64{40}), control)
     sync_mutex_lock(wheel)
     sync_store(node, sync_load(wrapping(wheel + I64{16})))
     sync_store(wrapping(wheel + I64{16}), node)
-    sync_cond_notify_one(wrapping(wheel + I64{8}))
+    until: sync_load(wrapping(wheel + I64{24}))
+    if (until <= I64{0} || deadline_ns < until) { sync_cond_notify_one(wrapping(wheel + I64{8})) }
     sync_mutex_unlock(wheel)
     node
 }
 
+// A wheel the shutdown freed had no timer pending, so the caller's node has
+// fired and only its ref is left.
 scheduler_timer_cancel: fn(node: I64) {
     wheel: sync_load(wrapping(scheduler_root + I64{104}))
+    if (wheel == I64{0}) {
+        scheduler_timer_node_drop(node)
+        return
+    }
     sync_mutex_lock(wheel)
     if (sync_load(wrapping(node + I64{24})) != I64{0}) {
         scheduler_node_unlink(wheel + I64{16}, node)
@@ -2082,8 +2150,12 @@ scheduler_timer_cancel: fn(node: I64) {
                 deadline <= now -> {
                     sync_store(link, sync_load(node))
                     sync_store(wrapping(node + I64{24}), I64{0})
-                    // Waking under wheel lock serializes cancellation + slot free.
-                    sync_park_wake(sync_load(wrapping(node + I64{16})))
+                    // Waking or raising under wheel lock serializes
+                    // cancellation with the slot's or the control's free.
+                    control: sync_load(wrapping(node + I64{40}))
+                    if (control != I64{0}) {
+                        scheduler_attention_set(control, SCHEDULER_ATTEND_DEADLINE, true)
+                    } else { sync_park_wake(sync_load(wrapping(node + I64{16}))) }
                     scheduler_timer_node_drop(node)
                 }
                 else -> {
@@ -2092,6 +2164,7 @@ scheduler_timer_cancel: fn(node: I64) {
                 }
             }
         }
+        sync_store(wrapping(wheel + I64{24}), earliest)
         _ := sync_cond_wait(wrapping(wheel + I64{8}), wheel, earliest)
         sync_mutex_unlock(wheel)
     }

@@ -806,9 +806,16 @@ core_member_params: fn(module_path: String, member_name: String, signature: Stri
 }
 
 core_member_return_type: fn(module_path: String, member_name: String) -> String {
-    typed: core_member_signature(module_path, member_name) ?? return "Void"
+    typed: core_member_signature(module_path, member_name) ?? return core_source_member_return_type(module_path, member_name)
     ret: typed.return_type ?? return "Void"
     type_name(ret)
+}
+
+// A source-owned Core call has no fixed signature: its Core source declares
+// it. The event constructors that take no type arguments name their type.
+core_source_member_return_type: fn(module_path: String, member_name: String) -> String {
+    if module_path == "core.event" -> return constructor_type(member_name, "") ?? "Void"
+    "Void"
 }
 
 // The checked signature of a Core call at its declared arity.

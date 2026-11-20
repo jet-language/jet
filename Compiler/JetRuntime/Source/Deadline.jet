@@ -29,9 +29,10 @@ deadline_save: fn(save: I64) {
     scheduler_deadline_attend()
 }
 
-// A restored deadline arms the stop polls again: a deadline the inner block's
-// wait reported (scheduler_deadline_reported) is not the one in force now.
-// With none restored, the turn polls stop reading the clock.
+// A restored deadline is watched again (Scheduler.jet
+// scheduler_deadline_watch): a deadline the inner block's wait reported
+// (scheduler_deadline_reported) is not the one in force now. With none
+// restored, the watch ends.
 #Export(c) jet_ctx_pop_deadline: fn(save: I64) {
     record: context_current()
     sync_store(wrapping(record + CONTEXT_DEADLINE_PRESENT), sync_load(save))
@@ -117,21 +118,23 @@ deadline_parse_i64: fn(text: I64, out: I64) -> Bool {
     true
 }
 
-deadline_wall_now_ms: fn() -> I64 {
+// The host's wall clock (CLOCK_REALTIME) in nanoseconds; 0 before the epoch.
+deadline_wall_now_ns: fn() -> I64 {
     scratch: wrapping(thread_base() + I64{232})
     sync_clock_read(I64{0}, scratch)
     seconds: sync_load(scratch)
     if (seconds < I64{0}) { return I64{0} }
-    wrapping(seconds * I64{1000} + sync_load(wrapping(scratch + I64{8})) /% I64{1000000})
+    wrapping(seconds * I64{1000000000} + sync_load(wrapping(scratch + I64{8})))
 }
+
+deadline_wall_now_ms: fn() -> I64 { deadline_wall_now_ns() /% I64{1000000} }
 
 // CoreReview2 #49 Rust's std.env reads the immutable host
 // startup capture, never the Jet env overlay. RtL7 owns the one rt_env_get view.
 // That capture never changes, so the replay or epoch override it names is
 // parsed once (time_host_root @32..55) instead of on every clock read.
-jet_std_time_now: fn() -> I64 {
-    world: world_current()
-    if (world != I64{0}) { return jet_world_now(world) }
+// Whether the host clock reads that fixed override (@48).
+deadline_time_fixed: fn() -> Bool {
     root: time_host_root
     once: wrapping(root + I64{32})
     if sync_once_enter(once) {
@@ -151,16 +154,18 @@ jet_std_time_now: fn() -> I64 {
         sync_store(wrapping(root + I64{40}), if accepted -> I64{1} else -> I64{0})
         sync_once_complete(once)
     }
-    if (sync_load(wrapping(root + I64{40})) != I64{0}) {
-        return sync_load(wrapping(root + I64{48}))
-    }
+    sync_load(wrapping(root + I64{40})) != I64{0}
+}
+
+jet_std_time_now: fn() -> I64 {
+    world: world_current()
+    if (world != I64{0}) { return jet_world_now(world) }
+    if deadline_time_fixed() -> return sync_load(wrapping(time_host_root + I64{48}))
     deadline_wall_now_ms()
 }
 
-jet_deadline_remaining_ms: fn() -> I64 {
-    if !jet_ctx_deadline_present() -> return I64{9223372036854775807}
-    deadline: jet_ctx_deadline_ms()
-    now: jet_std_time_now()
+// `deadline` minus `now` in milliseconds, saturated.
+deadline_until: fn(deadline: I64, now: I64) -> I64 {
     if (now > I64{0} && deadline < I64{-9223372036854775808} + now) {
         return I64{-9223372036854775808}
     }
@@ -168,6 +173,33 @@ jet_deadline_remaining_ms: fn() -> I64 {
         return I64{9223372036854775807}
     }
     deadline - now
+}
+
+jet_deadline_remaining_ms: fn() -> I64 {
+    if !jet_ctx_deadline_present() -> return I64{9223372036854775807}
+    deadline_until(jet_ctx_deadline_ms(), jet_std_time_now())
+}
+
+// The time left until the wall-millisecond `deadline_ms` in nanoseconds, on
+// the clock jet_std_time_now reads: 0 once it has passed there, and the
+// largest I64 for one that never passes. A world's clock counts whole
+// milliseconds. A fixed replay or epoch time never moves, so a deadline it
+// has not reached never passes. The host's wall clock counts to the
+// nanosecond, so a watch for the time left (Scheduler.jet
+// scheduler_deadline_watch) ends at the millisecond tick at which
+// jet_deadline_remaining_ms reaches 0, not before it.
+deadline_remaining_ns: fn(deadline_ms: I64) -> I64 {
+    world: world_current()
+    if (world != I64{0}) {
+        return deadline_ms_to_ns(deadline_until(deadline_ms, jet_world_now(world)))
+    }
+    if deadline_time_fixed() {
+        return if (deadline_until(deadline_ms, sync_load(wrapping(time_host_root + I64{48}))) <= I64{0}) -> I64{0} else -> I64{9223372036854775807}
+    }
+    if (deadline_ms > I64{9223372036854}) { return I64{9223372036854775807} }
+    if (deadline_ms <= I64{0}) { return I64{0} }
+    remaining: deadline_ms * I64{1000000} - deadline_wall_now_ns()
+    if remaining <= (I64{0}) -> I64{0} else -> remaining
 }
 
 scheduler_deadline_message: fn(wait_kind: I64) -> I64 {

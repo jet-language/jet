@@ -10,11 +10,12 @@ use {
     jet_devserver.[DebugSessions, PausedEvaluateHost, debug_sessions]
 }
 
-// A scratch directory holding `src` as `name`.
+// A scratch directory holding `src` as `name`. It stays until the test
+// removes it: a `temp_dir` would be removed when this helper returns.
 debug_test_scratch: fn(name: String, src: String) -> String {
-    scratch: debug_test_files.temp_dir("jet-canvas-debug-test") ?? panic("scratch: {err}")
-    debug_test_files.write(debug_test_files.join(scratch.path, name), src) ?? panic("source: {err}")
-    scratch.path
+    scratch: debug_test_files.tmpdir("jet-canvas-debug-test") ?? panic("scratch: {err}")
+    debug_test_files.write(debug_test_files.join(scratch, name), src) ?? panic("source: {err}")
+    scratch
 }
 
 debug_test_state: fn(path: String, source_id: String) -> Shared<CanvasHostState> {

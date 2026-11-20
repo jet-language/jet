@@ -601,7 +601,6 @@ TerminalHost: struct {
         self.build_id = projection.build_id
         self.world_id = projection.world_id
         self.revision = Val(projection.revision)
-        self.observed_at = Val(projection.observed_at)
         self.status = Val(terminal_bounded_status(projection.status))
         previous_time_cursor: self.time_cursor
         previous_cursor: self.cursor
@@ -614,7 +613,9 @@ TerminalHost: struct {
                 self.append_event(TerminalHostEvent.from_devtools_event(event, projection.protocol, projection.session_id, projection.revision, panel_id))
             }
         }
+        // The projection's own cursor and observed time, not the last appended event's.
         self.cursor = Val(projection.sequence)
+        self.observed_at = Val(projection.observed_at)
         if previous_time_cursor == None {
             self.time_cursor = None
             if projection.sequence != 0 -> self.time_cursor = Val(projection.sequence)

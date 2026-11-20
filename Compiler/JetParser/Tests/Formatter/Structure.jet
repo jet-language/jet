@@ -276,6 +276,24 @@ structure_kept: fn(source: String, kept: String) {
     structure_kept("use lang: core.compiler.lang\n\n#Target(lang.Target.Web)\nhelper: fn() {{}}\n", "#Target(lang.Target.Web)\n")
 }
 
+#Test("a lone marker keeps its written list brackets") {
+    structure_kept("#[Codable]\nWidget: struct {{\n    label: String,\n}}\n", "#[Codable]\nWidget: struct {{\n")
+}
+
+#Test("a marker keeps its written empty parentheses") {
+    structure_kept("#Fast() helper: fn() {{}}\n", "#Fast() helper: fn() {{}}\n")
+}
+
+#Test("marker groups written on separate lines stay separate") {
+    structure_kept("#Target(JS)\n#Allow(Jet.UnconditionalRecursion, \"why\")\nspin: fn() {{ spin() }}\n", "#Target(JS)\n#Allow(Jet.UnconditionalRecursion, \"why\")\nspin: fn()")
+    structure_kept("#[Target(JS), Inline]\n#Pure\nmul: fn(a: Int) -> Int {{ a * 2 }}\n", "#[Target(JS), Inline]\n#Pure\nmul: fn(")
+}
+
+#Test("a build-time dispatch arm keeps its written braces or none") {
+    structure_kept("run: fn() {{\n    #if #build.settings.mode == {{\n        .Fast -> print(\"fast\")\n        else -> print(\"other\")\n    }}\n}}\n", "        .Fast -> print(\"fast\")\n        else -> print(\"other\")\n")
+    structure_kept("run: fn() {{\n    #if #build.settings.mode == {{\n        .Fast -> {{ print(\"fast\") }}\n        else -> {{ print(\"other\") }}\n    }}\n}}\n", "        .Fast -> {{ print(\"fast\") }}\n        else -> {{ print(\"other\") }}\n")
+}
+
 #Test("a persisted binding keeps its comptime value") {
     structure_kept("#Persist SEEDED: #run {{ 20 + 1 }}\n", "#Persist SEEDED: #run {{ 20 + 1 }}\n")
 }
