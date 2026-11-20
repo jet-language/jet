@@ -700,33 +700,25 @@ latency_rows: fn(options: LatencyOptions, runs: LatencyRuns) -> [String] Never! 
     rows
 }
 
-// The bars `jet debug` is held to, each with its verdict: per_step within
-// LLDB's plus 1 ms; print_place within LLDB's plus 10 ms; print_again and
-// watch_per_stop within twice LLDB's; print_first at most 250 ms; and
-// second_eval at most 100 ms. A bar against LLDB is judged only when LLDB
-// was timed; condition_per_hit has no bar.
+// The bars `jet debug` is held to, each with its verdict: every measure,
+// first_stop with them, at most LLDB's on the same image and host, judged
+// only when LLDB was timed.
 latency_verdicts: fn(runs: LatencyRuns) -> [String] Never! {
     verdicts := [String]{}
+    if runs.lldb == .Val(lldb) {
+        verdicts.push(latency_bar("first_stop", met: runs.debug_stop <= lldb.stop))
+    }
     loop row in runs.rows {
-        if row.measure == "print_first" {
-            verdicts.push("# bar: jet_debug print_first at most 250 ms: {latency_verdict(met: row.jet <= 250000)}")
-        }
-        if row.measure == "second_eval" {
-            verdicts.push("# bar: jet_debug second_eval at most 100 ms: {latency_verdict(met: row.jet <= 100000)}")
-        }
         if row.lldb == .Val(lldb_us) {
-            if row.measure == "per_step" {
-                verdicts.push("# bar: jet_debug per_step at most lldb's + 1 ms: {latency_verdict(met: row.jet <= lldb_us + 1000)}")
-            }
-            if row.measure == "print_place" {
-                verdicts.push("# bar: jet_debug print_place at most lldb's + 10 ms: {latency_verdict(met: row.jet <= lldb_us + 10000)}")
-            }
-            if row.measure == "print_again" || row.measure == "watch_per_stop" {
-                verdicts.push("# bar: jet_debug {row.measure} at most twice lldb's: {latency_verdict(met: row.jet <= 2 * lldb_us)}")
-            }
+            verdicts.push(latency_bar(row.measure, met: row.jet <= lldb_us))
         }
     }
     verdicts
+}
+
+// The bar on `measure`: at most LLDB's, and whether it was `met`.
+latency_bar: fn(measure: String, met: Bool{false}) -> String Never! {
+    "# bar: jet_debug {measure} at most lldb's: {latency_verdict(met: met)}"
 }
 
 latency_verdict: fn(met: Bool{false}) -> String Never! { if met -> "met" else -> "missed" }
@@ -883,12 +875,16 @@ run: fn() {
     assert(text.contains("print_place\t15.0\t4.0\n"), text)
     assert(text.contains("condition_per_hit\t2.4\t0.3\n"), text)
     assert(text.contains("# condition_per_hit under jet_debug: the program resident 1532 KiB, 0 KiB of it in huge pages; load 1.00 2.00 3.00"), text)
-    assert(text.contains("# bar: jet_debug per_step at most lldb's + 1 ms: met"), text)
-    assert(text.contains("# bar: jet_debug print_place at most lldb's + 10 ms: missed"), text)
-    assert(text.contains("# bar: jet_debug print_first at most 250 ms: missed"), text)
-    assert(text.contains("# bar: jet_debug second_eval at most 100 ms: met"), text)
-    assert(text.contains("# bar: jet_debug watch_per_stop at most twice lldb's: met"), text)
-    assert(!text.contains("bar: jet_debug condition_per_hit"), text)
+    assert(text.contains("# bar: jet_debug first_stop at most lldb's: missed"), text)
+    assert(text.contains("# bar: jet_debug per_step at most lldb's: met"), text)
+    assert(text.contains("# bar: jet_debug print_place at most lldb's: missed"), text)
+    assert(text.contains("# bar: jet_debug print_first at most lldb's: missed"), text)
+    assert(text.contains("# bar: jet_debug second_eval at most lldb's: missed"), text)
+    assert(text.contains("# bar: jet_debug watch_per_stop at most lldb's: missed"), text)
+    assert(text.contains("# bar: jet_debug condition_per_hit at most lldb's: missed"), text)
+    fast: [LatencyRow]{LatencyRow{measure: "print_first", jet: 7000, lldb: Val(7400)}}
+    even: latency_verdicts(LatencyRuns{image_sha256: "ab12", jet_version: "jet 0.1", build: 300, debug_stop: 400, lldb: Val(lldb), rows: fast})
+    assert_eq(even, [String]{"# bar: jet_debug first_stop at most lldb's: met", "# bar: jet_debug print_first at most lldb's: met"})
 }
 
 // c34: the measurement needs nothing but jet; the bar fails the run after

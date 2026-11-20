@@ -95,7 +95,7 @@ envmodel_test_redact_dir: fn(rendered: String, dir: String, slug: String) -> Str
 // Compare a rendered diagnostic with its pinned snapshot; `UPDATE_EXPECT`
 // rewrites the snapshot first.
 envmodel_test_check_snapshot: fn(code: String, rendered: String) -[FS, Env]> {
-    assert(rendered.starts_with("Error [{diagnostic_display_name(code)}]:"))
+    assert(rendered.starts_with("Error: {diagnostic_display_name(code)}:"))
     assert(rendered.contains("\n Why: "))
     assert(rendered.contains("\n Fix: "))
     path: files.join(envmodel_test_repo_root(), "Tests/Fixtures/ModuleEvalDiagnostics/{code}.stderr")

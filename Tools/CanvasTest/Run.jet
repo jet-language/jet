@@ -836,7 +836,7 @@ debug_replay: fn(canvas_url: String) Failure! {
     // headline sentence-cased (`No recording …`).
     missing: canvas_post(debug_url, token, debug_request(revision, "main.jet", [{key: String, value: String}]{{key: "recording", value: "missing"}}, [Int]{}, [String]{}))
     refused: text(at(missing.tree, "canvas.message"))
-    if missing.status != 409 || text(at(missing.tree, "canvas.kind")) != "diagnostic" || !refused.contains("[jet.CorruptReplay]: No recording") || !refused.contains("jet-lang.dev/e/E3622") {
+    if missing.status != 409 || text(at(missing.tree, "canvas.kind")) != "diagnostic" || !refused.contains("Jet.CorruptReplay: No recording") || !refused.contains("jet-lang.dev/e/Jet.CorruptReplay") {
         return Err(fail_with("a recording that is not there must be refused with its E3622 report: HTTP {missing.status} {short_text(missing.body, 800)}"))
     }
     unnamed: canvas_post(debug_url, token, debug_request(revision, "main.jet", [{key: String, value: String}]{{key: "tier", value: "native-recorded"}}, [Int]{}, [String]{}))

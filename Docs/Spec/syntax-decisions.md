@@ -212,7 +212,8 @@ a check fails and the lock is older than the running `jet`, it adds one line
 naming the two toolchains. Each rewrite has an old-spelling fixture that
 Tests/Cases/Migrations replays. Built today: the registered rewrites
 (`lambda-shape1`, `codable-options1`, `sig-arrow1`, `bit-sigils1`,
-`paren-tuple1`, `brace-layout1`, `american-ident1`, `american-tokens1`) run
+`paren-tuple1`, `brace-layout1`, `american-ident1`, `american-tokens1`,
+`diagnostic-names1`) run
 one at a time through `jet run Compiler/Migrations/Migrate.jet -- <plan>
 --write PATH...`; `jet fix` reading the lock is not yet built. The
 `american-tokens1` plan converts data, not source: a file Jet wrote in an old
@@ -8002,7 +8003,7 @@ web, desktop and phones. A method of a mounted service is an endpoint only
 when it is marked `#App.SignedIn` (a signed-in caller reaches it) or
 `#App.Public` (any caller reaches it); Core's `app` module declares both
 markers. An unmarked method is server-only: a client call to it through
-`app.Remote<S>` fails to compile with E2812 (`jet.ServerOnlyMethod`), which
+`app.Remote<S>` fails to compile with E2812 (`Jet.ServerOnlyMethod`), which
 names the method. A call through `app.Remote<S>` is typed: direct on the
 server, a checked remote call elsewhere. `jet inspect choices` lists each
 marked method under its marker.

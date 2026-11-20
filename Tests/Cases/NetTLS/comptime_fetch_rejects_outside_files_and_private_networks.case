@@ -9,12 +9,12 @@ capture: source = text file.replace("WORK", "{work}") file.in
 write: proj/main.jet = "{cap:source}"
 step: jet check proj/main.jet
 exit: nonzero # tests/net_tls.rs:53-54 comptime fetch must not read outside its source directory
-stderr: ~ "[jet.FetchFailed]" # tests/net_tls.rs:55
+stderr: ~ "Jet.FetchFailed" # tests/net_tls.rs:55
 copy: loopback.in proj/main.jet
 step: jet check proj/main.jet
 exit: nonzero # tests/net_tls.rs:78-79 comptime fetch must reject loopback destinations
-stderr: ~ "[jet.FetchFailed]" # tests/net_tls.rs:80
+stderr: ~ "Jet.FetchFailed" # tests/net_tls.rs:80
 copy: reserved.in proj/main.jet
 step: jet check proj/main.jet
 exit: nonzero # tests/net_tls.rs:88-89 comptime fetch must reject reserved IPv4 destinations
-stderr: ~ "[jet.FetchFailed]" # tests/net_tls.rs:90
+stderr: ~ "Jet.FetchFailed" # tests/net_tls.rs:90

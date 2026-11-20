@@ -15,11 +15,11 @@ err_spaces: fn(out: I64, depth: I64) {
 err_root: fn(out: I64, error: I64, depth: I64) {
     if (depth == I64{0}) {
         code: rt_text_word(wrapping(error + ERR_CODE))
-        if (code != I64{0}) {
-            rt_text_push_word(out, I64{25649898748801605}, I64{7})  // Error [
+        rt_text_push_word(out, I64{9071462425195077}, I64{7})  // "Error: "
+        if (code != I64{0} && rt_text_len(code) != I64{0}) {
             err_append(out, code)
-            rt_text_push_word(out, I64{2112093}, I64{3})  // ]:
-        } else { rt_text_push_word(out, I64{9071462425195077}, I64{7}) }
+            rt_text_push_word(out, I64{8250}, I64{2})  // ": "
+        }
     } else {
         err_spaces(out, depth)
         rt_text_push_word(out, I64{9071406657921379}, I64{7})  // cause:

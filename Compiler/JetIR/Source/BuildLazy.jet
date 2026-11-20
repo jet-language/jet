@@ -2038,7 +2038,7 @@ ir_walk_stride: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, step: Int?) -> Int
     one: ir_const_like(m, b, stride, 1)
     below: ir_bool_op(m, b, IROp.Lt, stride, one)
     ir_open_if(b.f, below, b.line)
-    message: ir_static_text(m, b, "E0123: loop stride must be positive")
+    message: ir_static_text(m, b, "Jet.InvalidLoopStride: loop stride must be positive")
     _: ir_runtime(m, b, "jet_rt_panic_message", message, -1)
     ir_emit(b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
     ir_end(b.f, b.line)

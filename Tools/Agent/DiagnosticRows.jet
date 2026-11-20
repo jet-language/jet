@@ -5,14 +5,14 @@
 // (Tests/diagnostics_coverage_baseline.txt), the snapshot-coverage allowlist
 // (Tests/diagnostics_coverage_allowlist.tsv, from the rows, the codes the
 // sources name and the reports the snapshots render) and the explain pages
-// (Docs/Site/Dist/e/<CODE>/index.html). Each type is a struct whose `String`
+// (Docs/Site/Dist/e/<Jet.Name>/index.html). Each type is a struct whose `String`
 // fields come first and whose last member is its `impl Diagnostic` block; the
 // block is read as source text: its constants are literals, and its what, why
 // and fix bodies are one string literal each whose `{self.field}` holes the
 // registry keeps as `{{field}}` placeholders.
 // Both modes also read every `.jet` and `.S` file under Compiler/, Core/ and
 // Jetpack/ (tests and fixtures aside): no hand-written file may build report
-// text (a `Error [CODE]`-style heading or a `jet-lang.dev/e/` link), since
+// text (an `Error: Jet.Name:`-style heading or a `jet-lang.dev/e/` link), since
 // every report renders from its row through Diagnostics/Render.jet, and each
 // generated or assembly copy of a runtime report must match its row. They
 // read every spec page under Docs/Spec too: each `E####` or `L####` code a
@@ -64,9 +64,9 @@ SNAPSHOT_DIRS: [String]{"Tests/UI", LINT_SNAPSHOT_DIR}
 // compares with `stderr: =`, searched after the ui corpora.
 CASE_SNAPSHOT_DIRS: [String]{"Tests/Cases/UILintStyle"}
 
-// The path a compiler diagnostic's type name is read under: reports print
-// `Error [jet.UnusedParameter]`, and `#Allow` and `jet explain` take it.
-NAME_PATH: "jet."
+// The path a compiler diagnostic's name is read under: reports print
+// `Error: Jet.UnusedParameter: …`, and `#Allow` and `jet explain` take it.
+NAME_PATH: "Jet."
 
 // The spec pages, whose diagnostic codes must each name a row.
 SPEC_DIR: "Docs/Spec"
@@ -94,9 +94,16 @@ SAFETY_RANGES: [String]{"E00", "E01", "E02", "E03", "E04", "E05", "E06", "E07", 
 SEMA_ROOT: "Compiler/JetSema/"
 
 // A diagnostic code in compiler source: quoted whole, as `sema_error("E0212", …)`
-// passes it, at the head of a message, as `"E2416: env var …"`, or in a runtime
-// report's brackets, as `Runtime fault [R0801]: …`.
-QUOTED_CODE: Regex{"[\x22\[]((?:E|R|JT|L|W)[0-9]{{4}}|E-[A-Z]+(?:-[A-Z]+)*)[\x22\]:]"}
+// passes it, or in a runtime report's brackets, as `Runtime fault [R0801]: …`.
+QUOTED_CODE: Regex{"[\x22\[]((?:E|R|JT|L|W)[0-9]{{4}}|E-[A-Z]+(?:-[A-Z]+)*)[\x22\]]"}
+
+// A row's name at the head of a message, as `"Jet.EnvDecodeFailed: env var …"`
+// writes it, or in a heading: the line reports that row's code.
+MESSAGE_NAME: Regex{"(?:^|[^A-Za-z0-9_.])(Jet\.[A-Z][A-Za-z0-9]*): "}
+
+// A code at the head of a message, as `"E2416: env var …"` wrote it before
+// messages opened with the row's name.
+MESSAGE_CODE: Regex{"(?:^|[^A-Za-z0-9_\[])((?:E|R|JT|L|W)[0-9]{{4}}): "}
 
 // The active rows no source reports yet: the `jet os` verbs whose engine has
 // not landed, which Jetpack/JetOS refuses until it does. Every other active
@@ -176,7 +183,7 @@ TextFile: struct {
 // What one row gives the coverage baseline, its explain page and the safety audit.
 RowFacts: struct {
     code: String,
-    // The type path a report's header prints: `jet.` and the impl's type.
+    // The name a report's header prints: `Jet.` and the impl's type.
     name: String,
     active: Bool,
     // A `.Error` row, not a `.Lint`.
@@ -688,7 +695,7 @@ COVERAGE_SKIPPED: [String]{"Tests", "Fixtures", "fixtures"}
 // the files directly in it.
 COVERAGE_REPORTS: [String]{"Tests/CLI\t.txt", "Tests/Release\t.txt", "Tests/Fixtures/CLIDiagnostics\t.stderr", "Tests/Fixtures/JetpackDiagnostics\t.stderr", "Tests/Fixtures/ModuleEvalDiagnostics\t.stderr"}
 
-REPORT_OPENERS: [String]{"Error [", "Warning [", "Stop [", "Lint ["}
+REPORT_OPENERS: [String]{"Error: ", "Warning: ", "Stop: ", "Lint: "}
 
 code_byte: fn(byte: Int) -> Bool Never! {
     (byte >= 65 && byte <= 90) || (byte >= 48 && byte <= 57) || byte == 45
@@ -724,8 +731,10 @@ add_code: fn(codes: &[String], code: String) {
     if !codes.contains(code) -> codes.push(code.copy())
 }
 
-// The codes `text` names in double quotes or square brackets.
-source_codes: fn(text: String, codes: &[String]) {
+// The codes `text` names: in double quotes or square brackets, or by the
+// name a message or report heading in it opens with
+// (`"Jet.EnvDecodeFailed: …"`, `"Stop: Jet.ZipLengthMismatch: …"`).
+source_codes: fn(facts: [RowFacts], text: String, codes: &[String]) {
     bytes: text.bytes()
     loop (index, raw) in bytes {
         byte: Int{raw}
@@ -737,43 +746,44 @@ source_codes: fn(text: String, codes: &[String]) {
         code: String.from_bytes(bytes.slice(index + 1, end)) ?? next
         if source_code(code) -> add_code(codes, code)
     }
+    loop named in MESSAGE_NAME.matches(text) {
+        if row_named(facts, named.groups[0]) == .Val(row) -> add_code(codes, row.code)
+    }
 }
 
 // The codes the `.jet` sources under `directory` name, outside test, fixture
 // and hidden directories (a build's `.jet` holds generated copies of the
 // registry) and the registry's own two files.
-emitted_codes: fn(directory: String, codes: &[String]) -[FS]> DiagnosticRowsError! {
+emitted_codes: fn(facts: [RowFacts], directory: String, codes: &[String]) -[FS]> DiagnosticRowsError! {
     if !files.exists(directory) -> return Ok()
     loop child in
         (files.list_dir(directory) ?? return Err(rows_fail("cannot list {directory}: {err}"))) {
         path: "{directory}/{child.name}"
         if child.is_dir {
             if !child.name.starts_with(".") && !COVERAGE_SKIPPED.contains(child.name) {
-                emitted_codes(path, codes) ?? return Err(err)
+                emitted_codes(facts, path, codes) ?? return Err(err)
             }
         } else if child.name.ends_with(".jet") && path != SOURCE_PATH && path != ROWS_PATH {
             text: files.read(path) ?? return Err(rows_fail("cannot read {path}: {err}"))
-            source_codes(text, codes)
+            source_codes(facts, text, codes)
         }
     }
     Ok()
 }
 
 // The codes the report headers in `text` name: a header names a row by its
-// type path (`Error [jet.UnknownName]`) or names a code.
+// name (`Error: Jet.UnknownName: …`), or prints a code no row owns. A row's
+// code after the label is message text, such as an `Err` whose message opens
+// with a code, since every row's heading prints its name.
 report_codes: fn(facts: [RowFacts], text: String, codes: &[String]) {
     loop line in text.split("\n") {
-        loop opener in REPORT_OPENERS {
-            if !line.starts_with(opener) -> next
-            rest: text_after(line, opener)
-            if !rest.contains("]") -> break
-            token: text_before(rest, "]")
-            if token.starts_with(NAME_PATH) {
-                loop row in facts {
-                    if row.name == token -> add_code(codes, row.code)
-                }
-            } else if report_code(token) { add_code(codes, token) }
-            break
+        token: heading_name(line) ?? next
+        if token.starts_with(NAME_PATH) {
+            loop row in facts {
+                if row.name == token -> add_code(codes, row.code)
+            }
+        } else if report_code(token) && !facts.any(fn(row) { row.code == token }) {
+            add_code(codes, token)
         }
     }
 }
@@ -870,7 +880,7 @@ allowlist: fn(facts: [RowFacts]) -[FS]> String DiagnosticRowsError! {
     kit: files.read(KIT_UI_PATH) ?? return Err(rows_fail("cannot read {KIT_UI_PATH}: {err}"))
     excluded: excluded_codes(kit) ?? return Err(err)
     emitted := [String]{}
-    loop root in COVERAGE_ROOTS -> emitted_codes(root, emitted) ?? return Err(err)
+    loop root in COVERAGE_ROOTS -> emitted_codes(facts, root, emitted) ?? return Err(err)
     rendered: rendered_codes(facts) ?? return Err(err)
     committed: if files.exists(ALLOWLIST_PATH) -> files.read(ALLOWLIST_PATH) ?? return Err(rows_fail("cannot read {ALLOWLIST_PATH}: {err}")) else -> ""
     render_allowlist(facts, emitted, rendered, excluded, committed)
@@ -973,17 +983,30 @@ folded_name_order: fn(left: String, right: String) -> Ordering Never! {
     left <=> right
 }
 
-// Each `[jet.Name]` marker's first snapshot, as an index into `snapshots`.
+// Each heading's `Jet.Name` first snapshot, as an index into `snapshots`.
 first_snapshots: fn(snapshots: [TextFile]) -> [String:Int] Never! {
     first := [String:Int]{}
     loop (at, snapshot) in snapshots {
-        loop (index, part) in snapshot.text.split("[jet.").to_list() {
-            if index == 0 || !part.contains("]") -> next
-            name: "jet.{part.split("]").to_list()[0]}"
-            if first.get(name) == None -> first[name] = at
+        loop line in snapshot.text.split("\n") {
+            name: heading_name(line.trim_start()) ?? next
+            if name.starts_with(NAME_PATH) && first.get(name) == None -> first[name] = at
         }
     }
     first
+}
+
+// The name a report heading line prints after its opener: the text before
+// the next `: `, with no space in it. None for a line that is no heading.
+heading_name: fn(line: String) -> String? Never! {
+    loop opener in REPORT_OPENERS {
+        if !line.starts_with(opener) -> next
+        rest: text_after(line, opener)
+        if !rest.contains(": ") -> return None
+        name: text_before(rest, ": ")
+        if name == "" || name.contains(" ") -> return None
+        return Val(name)
+    }
+    None
 }
 
 html_escape: fn(value: String) -> String Never! {
@@ -1005,16 +1028,17 @@ html_escape: fn(value: String) -> String Never! {
     String.from_bytes(out) ?? value.copy()
 }
 
-// A row's explain page: its what, why and fix as a reader sees them, and the
-// first UI snapshot that names it as the worked example.
+// A row's explain page, under its name: its what, why and fix as a reader
+// sees them, and the first UI snapshot that names it as the worked example.
 render_page: fn(row: RowFacts, example: TextFile?) -> String Never! {
     code: html_escape(row.code)
+    name: html_escape(row.name)
     what: html_escape(row.what)
     why: html_escape(row.why)
     fix: html_escape(row.fix)
     worked: if example == {
-        .Val(snapshot) -> "<p>First UI snapshot mentioning <code>{code}</code>: <code>{html_escape(snapshot.path)}</code>.</p>\n<pre class=\"diag\">{html_escape(snapshot.text)}</pre>"
-        .None -> "<p>No UI snapshot currently mentions this code.</p>"
+        .Val(snapshot) -> "<p>First UI snapshot mentioning <code>{name}</code>: <code>{html_escape(snapshot.path)}</code>.</p>\n<pre class=\"diag\">{html_escape(snapshot.text)}</pre>"
+        .None -> "<p>No UI snapshot currently mentions this diagnostic.</p>"
     }
     lines: [String]{
         PAGE_GENERATED_BY,
@@ -1023,9 +1047,9 @@ render_page: fn(row: RowFacts, example: TextFile?) -> String Never! {
         "<head>",
         "<meta charset=\"utf-8\">",
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
-        "<title>{code} — Jet diagnostic</title>",
+        "<title>{name} — Jet diagnostic</title>",
         "<meta name=\"description\" content=\"{what}\">",
-        "<meta property=\"og:title\" content=\"{code} — Jet diagnostic\">",
+        "<meta property=\"og:title\" content=\"{name} — Jet diagnostic\">",
         "<meta property=\"og:description\" content=\"{what}\">",
         "<link rel=\"icon\" type=\"image/svg+xml\" href=\"../../assets/favicon.svg\">",
         "<link rel=\"stylesheet\" href=\"../../assets/site.css\">",
@@ -1042,8 +1066,8 @@ render_page: fn(row: RowFacts, example: TextFile?) -> String Never! {
         "<main>",
         "<section class=\"wrap page\">",
         "<div class=\"page-header\">",
-        "<p class=\"eyebrow\">// diagnostic</p>",
-        "<h1>{code}</h1>",
+        "<p class=\"eyebrow\">// diagnostic {code}</p>",
+        "<h1>{name}</h1>",
         "<p>{what}</p>",
         "</div>",
         "</section>",
@@ -1071,7 +1095,7 @@ render_page: fn(row: RowFacts, example: TextFile?) -> String Never! {
     "{lines.join("\n")}\n"
 }
 
-page_path: fn(code: String) -> String Never! { "{PAGES_DIR}/{code}/index.html" }
+page_path: fn(name: String) -> String Never! { "{PAGES_DIR}/{name}/index.html" }
 
 render_pages: fn(facts: [RowFacts], snapshots: [TextFile]) -> [TextFile] Never! {
     first: first_snapshots(snapshots)
@@ -1079,7 +1103,7 @@ render_pages: fn(facts: [RowFacts], snapshots: [TextFile]) -> [TextFile] Never! 
     loop row in facts {
         example := TextFile?{None}
         if first.get(row.name) == .Val(at) -> example = Val(snapshots[at].copy())
-        pages.push(TextFile{path: page_path(row.code), text: render_page(row, example)})
+        pages.push(TextFile{path: page_path(row.name), text: render_page(row, example)})
     }
     pages
 }
@@ -1197,24 +1221,25 @@ line_literals: fn(line: String, jet: Bool) -> [String] Never! {
     found
 }
 
-// The files that hold the report rows themselves, and the one renderer that
-// turns a row into report text. Report text written anywhere else is a copy.
-REPORT_HOMES: [String]{SOURCE_PATH, ROWS_PATH, "Compiler/JetFoundation/Source/Diagnostics/Render.jet"}
+// The files that hold the report rows themselves, the one renderer that
+// turns a row into report text, and the diagnostic-names1 migration, which
+// rewrites report text of the older spellings. Report text written anywhere
+// else is a copy.
+REPORT_HOMES: [String]{SOURCE_PATH, ROWS_PATH, "Compiler/JetFoundation/Source/Diagnostics/Render.jet", "Compiler/Migrations/DiagnosticNames1.jet"}
 
 // The source trees whose programs print reports.
 REPORT_ROOTS: [String]{"Compiler", "Core", "Jetpack"}
 
-// A report heading that names a code or type, the way a hand-built report
-// writes it: `Error [E0102]`, `Stop [{code}]`, `warning [jet.Name]`, or a
-// literal that ends at the bracket for a `+` to finish.
-REPORT_HEADING: Regex{"(?:Error|Warning|Stop|error|warning) ?\[(?:\x7B|jet\.|[A-Z][A-Z]?[0-9][0-9][0-9][0-9]|$)"}
+// A report heading the way a hand-built report writes it: `Error: Jet.Name`,
+// `Stop: {name}: ` or `Warning: E0102: `.
+REPORT_HEADING: Regex{"(?:Error|Warning|Stop): (?:\x7B[^\x7D]*\x7D: |Jet\.[A-Z]|[A-Z][A-Z]?[0-9][0-9][0-9][0-9]: )"}
 
 REPORT_LINK: "jet-lang.dev/e/"
 
-// A copied report's heading code and its More link's code.
-COPY_HEADING: Regex{"\[([A-Z][A-Z]?[0-9][0-9][0-9][0-9])\]: "}
+// A copied report's heading name and its More link's name.
+COPY_HEADING: Regex{"(?:Error|Warning|Stop): (Jet\.[A-Za-z0-9]+): "}
 
-COPY_LINK: Regex{"More: jet-lang\.dev/e/([A-Z][A-Z]?[0-9][0-9][0-9][0-9])"}
+COPY_LINK: Regex{"More: jet-lang\.dev/e/(Jet\.[A-Za-z0-9]+)"}
 
 // What the report-site check read and found. `code_sites` maps a code to
 // the `path:line` that best shows where the compiler reports it, and
@@ -1247,9 +1272,9 @@ report_sources: fn(directory: String) -[FS]> [String] DiagnosticRowsError! {
     Ok(found)
 }
 
-row_for: fn(rows: [RowFacts], code: String) -> RowFacts? Never! {
+row_named: fn(rows: [RowFacts], name: String) -> RowFacts? Never! {
     loop row in rows {
-        if row.code == code -> return Val(row)
+        if row.name == name -> return Val(row)
     }
     None
 }
@@ -1275,42 +1300,42 @@ text_before: fn(text: String, marker: String) -> String Never! {
 copy_problems: fn(rows: [RowFacts], text: String, at: String) -> [String] Never! {
     problems := [String]{}
     loop heading in COPY_HEADING.matches(text) {
-        code: heading.groups[0]
-        row: row_for(rows, code) ?? {
-            problems.push("{at}: `[{code}]` names no diagnostic row")
+        name: heading.groups[0]
+        row: row_named(rows, name) ?? {
+            problems.push("{at}: `{name}` names no diagnostic row")
             next
         }
         stem: text_before(row.what, "{{")
         // A What that writes its own heading (`Runtime fault [R0801]: …`) is
         // copied whole, heading and all.
-        if stem.contains("[{code}]: ") {
+        if stem.contains("[{row.code}]: ") {
             if !text.contains(stem) {
-                problems.push("{at}: the {code} What `{text.replace("\n", "\\n")}` is not its row's What `{row.what}`")
+                problems.push("{at}: the {name} What `{text.replace("\n", "\\n")}` is not its row's What `{row.what}`")
             }
             next
         }
-        shown: text_before(text_after(text, "[{code}]: "), "\n")
+        shown: text_before(text_after(text, "{name}: "), "\n")
         if !shown.starts_with(stem) && !stem.starts_with(shown) {
-            problems.push("{at}: the {code} heading `{shown}` is not its row's What `{row.what}`")
+            problems.push("{at}: the {name} heading `{shown}` is not its row's What `{row.what}`")
         }
     }
     loop link in COPY_LINK.matches(text) {
-        code: link.groups[0]
-        row: row_for(rows, code) ?? {
-            problems.push("{at}: `More: {REPORT_LINK}{code}` names no diagnostic row")
+        name: link.groups[0]
+        row: row_named(rows, name) ?? {
+            problems.push("{at}: `More: {REPORT_LINK}{name}` names no diagnostic row")
             next
         }
         parts: text_before(text, link.text).split(" Fix: ").to_list()
         if parts.len() < 2 -> next
         fix: parts[parts.len() - 1].remove_suffix("\n")
         if fix != row.fix {
-            problems.push("{at}: the {code} Fix `{fix}` is not its row's Fix `{row.fix}`")
+            problems.push("{at}: the {name} Fix `{fix}` is not its row's Fix `{row.fix}`")
         }
         if !parts[parts.len() - 2].contains(" Why: ") -> next
         whys: parts[parts.len() - 2].split(" Why: ").to_list()
         why: whys[whys.len() - 1].remove_suffix("\n")
         if why != row.why {
-            problems.push("{at}: the {code} Why `{why}` is not its row's Why `{row.why}`")
+            problems.push("{at}: the {name} Why `{why}` is not its row's Why `{row.why}`")
         }
     }
     problems
@@ -1329,14 +1354,23 @@ file_report_problems: fn(rows: [RowFacts], path: String, text: String) -> Report
             if copied {
                 named: COPY_HEADING.is_match(literal) || COPY_LINK.is_match(literal)
                 if named -> found.copies += 1
-                // A copy is checked by its code, so a `generated by` line
-                // cannot excuse a heading or link that names none.
+                // A copy is checked by its row's name, so a `generated by`
+                // line cannot excuse a heading or link that names none.
                 if !named && (REPORT_HEADING.is_match(literal) || literal.contains(REPORT_LINK)) {
-                    found.problems.push("{at}: generated report text `{literal.replace("\n", "\\n")}` names no code, so no row can check it; spell the row's code")
+                    found.problems.push("{at}: generated report text `{literal.replace("\n", "\\n")}` names no row, so no row can check it; spell the row's name")
                 }
                 loop problem in copy_problems(rows, literal, at) -> found.problems.push(problem)
             } else if REPORT_HEADING.is_match(literal) || literal.contains(REPORT_LINK) {
                 found.problems.push("{at}: hand-built report text `{literal.replace("\n", "\\n")}`; build its Diagnostic and render it with diagnostic_render")
+            } else {
+                loop named in MESSAGE_NAME.matches(literal) {
+                    if row_named(rows, named.groups[0]) == None {
+                        found.problems.push("{at}: the message `{literal.replace("\n", "\\n")}` opens with `{named.groups[0]}`, which names no diagnostic row")
+                    }
+                }
+                loop coded in MESSAGE_CODE.matches(literal) {
+                    found.problems.push("{at}: the message `{literal.replace("\n", "\\n")}` opens with the code {coded.groups[0]}; open it with its row's name, or with plain text when no row owns the code")
+                }
             }
         }
     }
@@ -1344,7 +1378,8 @@ file_report_problems: fn(rows: [RowFacts], path: String, text: String) -> Report
 }
 
 // Every source file a report may be printed from, checked against the rows,
-// and the line that best shows where each quoted code is reported.
+// and the line that best shows where each quoted code is reported. A copy's
+// heading names its row, so it reports that row's code.
 report_sites: fn(rows: [RowFacts]) -[FS]> ReportSites DiagnosticRowsError! {
     sites := ReportSites{files: 0, copies: 0, problems: [String]{}, code_sites: [String:String]{}, site_ranks: [String:Int]{}}
     loop root in REPORT_ROOTS {
@@ -1355,10 +1390,16 @@ report_sites: fn(rows: [RowFacts]) -[FS]> ReportSites DiagnosticRowsError! {
             sites.files += 1
             sites.copies += one.copies
             loop problem in one.problems -> sites.problems.push(problem)
-            if !QUOTED_CODE.is_match(text) -> next
+            if one.copies == 0 && !QUOTED_CODE.is_match(text) && !MESSAGE_NAME.is_match(text) {
+                next
+            }
             loop (index, line) in text.split("\n").to_list() {
-                loop quoted in QUOTED_CODE.matches(line) {
-                    code: quoted.groups[0]
+                codes := [String]{}
+                loop quoted in QUOTED_CODE.matches(line) -> codes.push(quoted.groups[0].copy())
+                loop named in MESSAGE_NAME.matches(line) {
+                    if row_named(rows, named.groups[0]) == .Val(row) -> codes.push(row.code.copy())
+                }
+                loop code in codes {
                     rank: site_rank(path, line, code)
                     if (sites.site_ranks.get(code) ?? 4) <= rank -> next
                     sites.site_ranks[code.copy()] = rank
@@ -1837,11 +1878,12 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\",\n
     assert_eq(site_rank("Compiler/JetSema/b.jet", "    codes: [\"E0298\", \"E0299\"]", "E0299"), 2)
     assert_eq(site_rank("Compiler/JetCLI/c.jet", "    codes: [\"E0298\", \"E0299\"]", "E0299"), 3)
     quoted := [String]{}
-    lines: [String]{"    sema_error(\"E-SUBJECT-CALL\", span)", "    push(rt_static_text(\"E2416: env var \"))", "    rt_static_text(\"Runtime fault [R0801]: raw\")", "    row(\"JT0198\")", "    lint(\"L0530\", span)", "    codes: [\"W0410\"]", "    x: \"Error\" + \"E-mail\""}
+    lines: [String]{"    sema_error(\"E-SUBJECT-CALL\", span)", "    push(rt_static_text(\"Jet.EnvDecodeFailed: env var \"))", "    rt_static_text(\"Runtime fault [R0801]: raw\")", "    row(\"JT0198\")", "    lint(\"L0530\", span)", "    codes: [\"W0410\"]", "    x: \"Error\" + \"E-mail\"", "    y: \"core.Jet.Thing: z\""}
     loop line in lines {
         loop found in QUOTED_CODE.matches(line) -> quoted.push(found.groups[0].copy())
+        loop found in MESSAGE_NAME.matches(line) -> quoted.push(found.groups[0].copy())
     }
-    assert_eq(quoted.join(" "), "E-SUBJECT-CALL E2416 R0801 JT0198 L0530 W0410")
+    assert_eq(quoted.join(" "), "E-SUBJECT-CALL Jet.EnvDecodeFailed R0801 JT0198 L0530 W0410")
     assert(audit.contains("| E0299 | BadPath | soundness | a \\| b |"))
     lifted: (render_rows(row.replace(code, "{sound}        expert_path: \"an `#Unsafe` block\",\n")) ?? panic(err.message)).facts
     assert(render_audit(lifted, sites).contains("| E0299 | BadPath | an `#Unsafe` block |"))
@@ -1851,7 +1893,7 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\",\n
 #Test("an active row needs a report site, and the unreported codes only shrink") {
     facts: (render_rows(MINIMAL_ROW) ?? panic(err.message)).facts
     sites := ReportSites{files: 0, copies: 0, problems: [String]{}, code_sites: [String:String]{}, site_ranks: [String:Int]{}}
-    assert_eq(unreported_problems(facts, sites, [String]{}, 0), [String]{"E9999 (jet.BadPath) is an active row that no line under Compiler, Core, Jetpack reports; add the check that reports it, or retire the row"})
+    assert_eq(unreported_problems(facts, sites, [String]{}, 0), [String]{"E9999 (Jet.BadPath) is an active row that no line under Compiler, Core, Jetpack reports; add the check that reports it, or retire the row"})
     assert_eq(unreported_problems(facts, sites, [String]{"E9999"}, 1), [String]{})
     assert_eq(unreported_problems(facts, sites, [String]{"E9999"}, 0), [String]{"UNREPORTED_CODES holds 1 codes, more than its ceiling of 0; the list only shrinks"})
     assert_eq(unreported_problems(facts, sites, [String]{"E9999", "E8888"}, 2), [String]{"E8888 is in UNREPORTED_CODES but names no active row; remove it from the list"})
@@ -1871,26 +1913,29 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\",\n
 
 #Test("only the renderer builds report text, and a runtime copy matches its row") {
     rows: (render_rows(MINIMAL_ROW.replace("E9999", "E3999")) ?? panic(err.message)).facts
-    built: file_report_problems(rows, "a.jet", "f: fn() {{\n    x: \"Error [{{code}}]: {{what}}\"\n}}\n")
+    built: file_report_problems(rows, "a.jet", "f: fn() {{\n    x: \"Error: {{code}}: {{what}}\"\n}}\n")
     assert_eq(built.problems.len(), 1)
     assert(built.problems[0].starts_with("a.jet:2: hand-built report text"), built.problems[0])
-    assert_eq(file_report_problems(rows, "a.jet", "y: \"More: jet-lang.dev/e/E0001\"\n").problems.len(), 1)
-    assert_eq(file_report_problems(rows, "a.jet", "y: \"Stop [jet.BadPath]: no\"\n").problems.len(), 1)
-    assert_eq(file_report_problems(rows, "a.jet", "y: \"Warning [\" + code + \"]: no\"\n").problems.len(), 1)
-    assert_eq(file_report_problems(rows, "a.jet", "// Error [E0001] in a comment\nz: \"no report here\"\n").problems.len(), 0)
-    head: "a: fn() -> I64 {{ t(\"Stop [E3999]: route `\") }}"
-    tail: "b: fn() -> I64 {{ t(\"` must start with /\\n Why: routes are matched from the \\\"site\\\" root\\n Fix: write {{{{/path}}}}\\nMore: jet-lang.dev/e/E3999\\n\") }}"
+    assert_eq(file_report_problems(rows, "a.jet", "y: \"More: jet-lang.dev/e/Jet.BadPath\"\n").problems.len(), 1)
+    assert_eq(file_report_problems(rows, "a.jet", "y: \"Stop: Jet.BadPath: no\"\n").problems.len(), 1)
+    assert_eq(file_report_problems(rows, "a.jet", "y: \"Warning: E0001: no\"\n").problems.len(), 1)
+    assert_eq(file_report_problems(rows, "a.jet", "// Error: Jet.BadPath: in a comment\nz: \"Error: no package here\"\n").problems.len(), 0)
+    assert_eq(file_report_problems(rows, "a.jet", "y: \"Jet.BadPath: no\" + \"Runtime fault [R0801]: no\"\n").problems.join("\n"), "")
+    assert(file_report_problems(rows, "a.jet", "y: \"Jet.BadPaths: no\"\n").problems[0].contains("names no diagnostic row"))
+    assert(file_report_problems(rows, "a.jet", "y: \"x; E3999: no\"\n").problems[0].contains("opens with the code E3999"))
+    head: "a: fn() -> I64 {{ t(\"Stop: Jet.BadPath: route `\") }}"
+    tail: "b: fn() -> I64 {{ t(\"` must start with /\\n Why: routes are matched from the \\\"site\\\" root\\n Fix: write {{{{/path}}}}\\nMore: jet-lang.dev/e/Jet.BadPath\\n\") }}"
     generated: "// Generated by a generator; do not hand-edit.\n{head}\n{tail}\n"
     matched: file_report_problems(rows, "b.jet", generated)
     assert_eq(matched.problems.join("\n"), "")
     assert_eq(matched.copies, 2)
-    assert(file_report_problems(rows, "b.jet", generated.replace("are matched", "are routed")).problems[0].contains("the E3999 Why"))
-    assert(file_report_problems(rows, "b.jet", generated.replace("{{{{/path}}}}", "{{{{path}}}}")).problems[0].contains("the E3999 Fix"))
-    assert(file_report_problems(rows, "b.jet", generated.replace("route `", "path `")).problems[0].contains("the E3999 heading"))
-    assert(file_report_problems(rows, "b.jet", generated.replace("e/E3999", "e/E3998")).problems[0].contains("names no diagnostic row"))
-    unnamed: file_report_problems(rows, "b.jet", "// Generated by a generator; do not hand-edit.\ny: \"Error [{{code}}]: {{what}}\"\n")
-    assert(unnamed.problems.len() == 1 && unnamed.problems[0].contains("names no code"))
-    assembly: "texts:\n    .asciz \"Stop [E3999]: route\"\n    .asciz \" Fix: write {{/path}}\\nMore: jet-lang.dev/e/E3999\\n\"\n"
+    assert(file_report_problems(rows, "b.jet", generated.replace("are matched", "are routed")).problems[0].contains("the Jet.BadPath Why"))
+    assert(file_report_problems(rows, "b.jet", generated.replace("{{{{/path}}}}", "{{{{path}}}}")).problems[0].contains("the Jet.BadPath Fix"))
+    assert(file_report_problems(rows, "b.jet", generated.replace("route `", "path `")).problems[0].contains("the Jet.BadPath heading"))
+    assert(file_report_problems(rows, "b.jet", generated.replace("e/Jet.BadPath", "e/Jet.BadPaths")).problems[0].contains("names no diagnostic row"))
+    unnamed: file_report_problems(rows, "b.jet", "// Generated by a generator; do not hand-edit.\ny: \"Error: {{code}}: {{what}}\"\n")
+    assert(unnamed.problems.len() == 1 && unnamed.problems[0].contains("names no row,"))
+    assembly: "texts:\n    .asciz \"Stop: Jet.BadPath: route\"\n    .asciz \" Fix: write {{/path}}\\nMore: jet-lang.dev/e/Jet.BadPath\\n\"\n"
     assert_eq(file_report_problems(rows, "c.S", assembly).problems.join("\n"), "")
     assert_eq(file_report_problems(rows, "c.S", assembly.replace("{{/path}}", "/path")).problems.len(), 1)
 }
@@ -1909,7 +1954,7 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\",\n
 
 #Test("a row's page shows its texts as a reader sees them") {
     facts: (render_rows(MINIMAL_ROW) ?? panic("the minimal row did not render: {err.message}")).facts[0]
-    assert_eq(facts.name, "jet.BadPath")
+    assert_eq(facts.name, "Jet.BadPath")
     assert_eq(facts.what, "route `{{path}}` must start with /")
     assert_eq(facts.why, "routes are matched from the \"site\" root")
     assert_eq(facts.fix, "write {{/path}}")
@@ -1917,20 +1962,23 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\",\n
     assert(page.starts_with("{PAGE_GENERATED_BY}\n"))
     assert(page.contains("<p class=\"diag-copy what\" data-registry-field=\"what\">route `{{path}}` must start with /</p>"))
     assert(page.contains("<p class=\"diag-copy why\" data-registry-field=\"why\">routes are matched from the &quot;site&quot; root</p>"))
-    assert(page.contains("<p>No UI snapshot currently mentions this code.</p>"))
-    cited: render_page(facts, Val(TextFile{path: "Tests/UI/a.stderr", text: "Error [jet.BadPath]: <x>"}))
-    assert(cited.contains("<code>Tests/UI/a.stderr</code>.</p>\n<pre class=\"diag\">Error [jet.BadPath]: &lt;x&gt;</pre>"))
+    assert(page.contains("<p>No UI snapshot currently mentions this diagnostic.</p>"))
+    assert(page.contains("<h1>Jet.BadPath</h1>"))
+    assert_eq(page_path(facts.name), "{PAGES_DIR}/Jet.BadPath/index.html")
+    cited: render_page(facts, Val(TextFile{path: "Tests/UI/a.stderr", text: "Error: Jet.BadPath: <x>"}))
+    assert(cited.contains("<code>Tests/UI/a.stderr</code>.</p>\n<pre class=\"diag\">Error: Jet.BadPath: &lt;x&gt;</pre>"))
 }
 
 #Test("a page cites the first snapshot that names its row") {
     snapshots: [TextFile]{
-        TextFile{path: "a", text: "Error [jet.Foo]: one\n"},
-        TextFile{path: "b", text: "[jet.Foo] [jet.[jet.Bar] [jet.Baz"},
+        TextFile{path: "a", text: "Error: Jet.Foo: one\n"},
+        TextFile{path: "b", text: "Jet.Foo\n  Error: Jet.Bar: two\nError: Jet.Baz\nWarning: game.Lint: x\n"},
     }
     first: first_snapshots(snapshots)
-    assert(first.get("jet.Foo") == Val(0))
-    assert(first.get("jet.Bar") == Val(1))
-    assert(first.get("jet.Baz") == None)
+    assert(first.get("Jet.Foo") == Val(0))
+    assert(first.get("Jet.Bar") == Val(1))
+    assert(first.get("Jet.Baz") == None)
+    assert(first.get("game.Lint") == None)
 }
 
 #Test("a page's example search orders names with case set aside") {
@@ -1965,7 +2013,7 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\",\n
         "Tests/UILint/l.stderr",
     }
     loop path in written {
-        files.write("{root}/{path}", "Error [jet.Foo]: {path}\n") ?? panic("{path}: {err}")
+        files.write("{root}/{path}", "Error: Jet.Foo: {path}\n") ?? panic("{path}: {err}")
     }
     files.write("{root}/Tests/UI/mod.jet", "// @fixture_module\nhelper: fn() {{}}\n") ?? panic("mod.jet: {err}")
     ui: (ui_snapshots(root, "Tests/UI", false) ?? panic(err.message)).map(fn(file) { file.path })
@@ -1976,7 +2024,7 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\",\n
     files.create_dir_all("{root}/Tests/Cases/s/c.fixture") ?? panic("case dir: {err}")
     planted: [String]{"Tests/Cases/s/c.case", "Tests/Cases/s/c.warn", "Tests/Cases/s/c.fixture/c.warn"}
     loop path in planted {
-        files.write("{root}/{path}", "Warning [jet.Foo]: {path}\n") ?? panic("{path}: {err}")
+        files.write("{root}/{path}", "Warning: Jet.Foo: {path}\n") ?? panic("{path}: {err}")
     }
     cases: (case_snapshots(root, "Tests/Cases/s") ?? panic(err.message)).map(fn(file) { file.path })
     assert_eq(cases, [String]{"Tests/Cases/s/c.warn"})
@@ -1995,7 +2043,7 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\",\n
         files.write("{root}/{path}", "report: \"{text_after(row, "\t")}\"\n") ?? panic("{path}: {err}")
     }
     codes := [String]{}
-    emitted_codes("{root}/src", codes) ?? panic(err.message)
+    emitted_codes([RowFacts]{}, "{root}/src", codes) ?? panic(err.message)
     assert_eq(codes, [String]{"E9991"})
     files.remove_all(root) ?? panic("remove scratch: {err}")
 }
@@ -2016,12 +2064,12 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\",\n
 }
 
 #Test("the coverage allowlist lists each uncovered code and never gains one") {
-    codes := [String]{}
-    source_codes("x: \"E0109\" [L0302] \"FS\" \"E-WEB-ABI-TYPE\" \"JT0001\" \"E-X\" \"E01090\" [W0001", codes)
-    assert_eq(codes, [String]{"E0109", "L0302", "E-WEB-ABI-TYPE", "JT0001"})
     rows: render_rows(MINIMAL_ROW) ?? panic(err.message)
+    codes := [String]{}
+    source_codes(rows.facts, "x: \"E0109\" [L0302] \"FS\" \"E-WEB-ABI-TYPE\" \"JT0001\" \"E-X\" \"E01090\" [W0001 \"Stop: Jet.BadPath: x\" \"Error: Jet.Unknown: y\"", codes)
+    assert_eq(codes, [String]{"E0109", "L0302", "E-WEB-ABI-TYPE", "JT0001", "E9999"})
     rendered := [String]{}
-    report_codes(rows.facts, "Error [jet.BadPath]: x\n Warning [E0001]: indented\nStop [FFI01]: meta\nLint [jet.Unknown]: y\n", rendered)
+    report_codes(rows.facts, "Error: E9999: an Err message\nError: Jet.BadPath: x\n Warning: E0001: indented\nStop: FFI01: meta\nLint: Jet.Unknown: y\nError: couldn't read: x\n", rendered)
     assert_eq(rendered, [String]{"E9999", "FFI01"})
     assert_eq(excluded_codes("{KIT_UI_EXCLUDED}\"E0061\", \"E0277\"], code)\n") ?? panic(err.message), [String]{"E0061", "E0277"})
     if excluded_codes("{KIT_UI_EXCLUDED}E0061], code)\n") == .Ok(found) {

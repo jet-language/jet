@@ -866,7 +866,8 @@ NativeSession: struct {
     // Drops the code kept for expressions (`evals`) once the program's
     // sources read other than when it was compiled
     // (NativeEvaluator.unchanged): it may not be what the source says now,
-    // which the next compile checks against the image's code.
+    // which the next compile checks against the image's record of its
+    // sources (NativeImage.sources).
     keep_current: fn(&self) Never! {
         current := true
         if self.evaluator == .Val(evaluator) -> current = evaluator.unchanged()
@@ -883,7 +884,7 @@ NativeSession: struct {
         owned: facts.guard_read().value.owned
         made := NativeEval?{None}
         if self.evaluator == .Val(evaluator) {
-            made = Val(evaluator.compile(path, line, column, text, binders, owned) ?? return Err(err))
+            made = Val(evaluator.compile(path, line, column, text, binders, owned, self.image.sources) ?? return Err(err))
         }
         code: made ?? return Err(native_eval_refused("this session has no compiler to evaluate expressions with"))
         cell: Shared{code.move()}
@@ -1013,8 +1014,6 @@ NativeSession: struct {
         if permit.value.plan == None || permit.value.planned != self.fixed.len() {
             diff: native_fix_diff(self.image, permit.value.edit, facts.value.symbols, facts.value.code.bytes, facts.value.code.address, self.fixed) ?? return Err(native_eval_refused(err.detail))
             plan: native_fix_place_all(permit.value.edit, facts.value.symbols, diff, permit.value.entry) ?? return Err(native_eval_refused(err.detail))
-            refusal: native_eval_refusal(permit.value, diff, plan)
-            if refusal != "" -> return Err(native_eval_refused(refusal))
             permit.value.plan = Val(plan)
             permit.value.planned = self.fixed.len()
         }
@@ -1199,8 +1198,6 @@ NativeSession: struct {
             permit: compiled.guard_read()
             diff: native_fix_diff(self.image, permit.value.edit, facts.value.symbols, facts.value.code.bytes, facts.value.code.address, self.fixed) ?? return err.detail
             plan: native_fix_place_all(permit.value.edit, facts.value.symbols, diff, permit.value.entry) ?? return err.detail
-            stale: native_eval_refusal(permit.value, diff, plan)
-            if stale != "" -> return stale
             entries.push(native_eval_entry(permit.value, plan) ?? return "the compiled condition has no entry")
             offsets.push(size)
             size = (size + plan.size + NATIVE_FIX_ALIGN - 1).div_euclid(NATIVE_FIX_ALIGN) * NATIVE_FIX_ALIGN
@@ -2097,7 +2094,7 @@ NativeSession: struct {
                 settled: self.run(short) ?? return Err(err)
                 loop said in settled.said -> text = "{text}{said.text}"
                 shown: self.report(settled.stop, file, lines) ?? return Err(err)
-                return Ok(NativeDebugStep{text: "{text}{shown}", stop: settled.stop})
+                return Ok(NativeDebugStep{text: "{text}{shown}", stop: settled.stop, moved: short})
             }
             "rs" | "reverse-step" | "rn" | "reverse-next" | "rf" | "reverse-finish" | "rc" | "reverse-continue" -> {
                 refusal: self.reverse_refusal()
@@ -2113,9 +2110,9 @@ NativeSession: struct {
                 settled: self.reverse(short) ?? return Err(err)
                 shown: self.report(settled.stop, file, lines) ?? return Err(err)
                 if self.nowhere != "" {
-                    return Ok(NativeDebugStep{text: "{native_debug_refused(self.nowhere)}{shown}", stop: settled.stop})
+                    return Ok(NativeDebugStep{text: "{native_debug_refused(self.nowhere)}{shown}", stop: settled.stop, moved: "r{short}"})
                 }
-                return Ok(NativeDebugStep{text: shown, stop: settled.stop})
+                return Ok(NativeDebugStep{text: shown, stop: settled.stop, moved: "r{short}"})
             }
             "jump" | "back" -> {
                 refusal: self.replay_refusal("`{word}`")
@@ -2142,7 +2139,7 @@ NativeSession: struct {
                 }
                 settled: self.jump(event) ?? return Err(err)
                 shown: self.report(settled.stop, file, lines) ?? return Err(err)
-                return Ok(NativeDebugStep{text: "Event {event}\n{shown}", stop: settled.stop})
+                return Ok(NativeDebugStep{text: "Event {event}\n{shown}", stop: settled.stop, moved: "jump"})
             }
             "events" -> {
                 refusal: self.replay_refusal("`events`")
@@ -2201,14 +2198,17 @@ NativeSession: struct {
         true
     }
 
-    // Swap `edit`, the program compiled again, into the stopped program
-    // (NativeFix.jet): what the console shows of it. Before anything is
-    // written the fix checks the checkpoint it installs at: the program's
-    // file is still the image the process runs (runs_image), the edit's
-    // types keep their layout (native_fix_plan), and no frame on a stack
-    // would pass a changed function its old parameters (native_fix_types).
-    // Nothing changes when the fix is refused.
-    fix: fn(&self, edit: NativeFixEdit) -> String NativeDebugError! {
+    // Swap `edit`, the program compiled again from the sources `sources`
+    // (their sha256 by path, as the image records its own), into the
+    // stopped program (NativeFix.jet): what the console shows of it. Before
+    // anything is written the fix checks the checkpoint it installs at: the
+    // program's file is still the image the process runs (runs_image), the
+    // edit's types keep their layout (native_fix_plan), and no frame on a
+    // stack would pass a changed function its old parameters
+    // (native_fix_types). The program then runs the code those sources say,
+    // which the session's record of its sources (NativeImage.sources) says
+    // from then on. Nothing changes when the fix is refused.
+    fix: fn(&self, edit: NativeFixEdit, sources: [String:[U8]]) -> String NativeDebugError! {
         self.ready() ?? return Err(err)
         elf: native_files.read_bytes(self.binary) ?? return Err(NativeDebugError{detail: "couldn't read the program `{self.binary}`: {err}"})
         symbols: native_fix_symbols(elf)
@@ -2218,6 +2218,7 @@ NativeSession: struct {
         }
         plan: native_fix_plan(self.image, edit, symbols, code.bytes, code.address, self.fixed) ?? return Ok("Fix refused: {err.detail}; restart the program to run the edit\n")
         if plan.changed.len() == 0 {
+            self.image.sources = sources
             return Ok("Nothing to fix: the program already runs this code\n")
         }
         live: self.live_frames() ?? return Err(err)
@@ -2334,8 +2335,9 @@ NativeSession: struct {
             }
         }
         // An expression compiled before the fix was checked against the
-        // source the fix replaced.
+        // sources the fix replaced.
         self.evals = [String:Shared<NativeEval>]{}
+        self.image.sources = sources
         Ok("Fixed {shown.join(", ")}: the edit runs from the next call\n")
     }
 
@@ -5661,10 +5663,14 @@ NATIVE_DEBUG_RED_ZONE: 128
 // How deep a readout follows a value's members and elements.
 NATIVE_DEBUG_SHOWN_DEPTH: 4
 
-// What one console command printed, and where it left the program.
+// What one console command printed, where it left the program, and the
+// move it made the program take: the short word of its run (`s`, `n`, `f`,
+// `c`, a reverse one's `rs`, `rn`, `rf`, `rc`, or `jump`), "" when the
+// program didn't run.
 NativeDebugStep: struct {
     text: String,
     stop: NativeStop,
+    moved: String{""},
 }
 
 native_debug_stop_in_jet: fn(frame: NativeFrame?) -> Bool Never! {

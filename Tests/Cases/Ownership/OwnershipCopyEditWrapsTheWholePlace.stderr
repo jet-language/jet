@@ -1,29 +1,29 @@
-Error [jet.ReadOnlyValueNotOwned]: `outer.inner.name` is read in place, so it cannot fill an owned value as-is
+Error: Jet.ReadOnlyValueNotOwned: `outer.inner.name` is read in place, so it cannot fill an owned value as-is
   --> main.jet:12:5
     |
  12 | first_name: fn(outer: Outer) -> String { outer.inner.name ?? "" }
     |                                          ^^^^^^^^^^^^^^^^
  Why: The place keeps its value, so this owning position would copy it, and `copies: .Explicit` is active, so the copy must be written
  Fix: Copy it explicitly with `outer.inner.name.copy()`
-More: jet-lang.dev/e/E0120
+More: jet-lang.dev/e/Jet.ReadOnlyValueNotOwned
 
-Error [jet.ReadOnlyValueNotOwned]: This element is read in place, so it cannot fill an owned value as-is
+Error: Jet.ReadOnlyValueNotOwned: This element is read in place, so it cannot fill an owned value as-is
   --> main.jet:16:5
     |
  14 | indexed: fn(outer: Outer) -> String { outer.names[0] ?? "" }
     |                                       ^^^^^^^^^^^^^^
  Why: The place keeps its value, so this owning position would copy it, and `copies: .Explicit` is active, so the copy must be written
  Fix: Copy it explicitly with the element's `.copy()`
-More: jet-lang.dev/e/E0120
+More: jet-lang.dev/e/Jet.ReadOnlyValueNotOwned
 
-Error [jet.ReadOnlyValueNotOwned]: `picked` is read in place, so it cannot fill an owned value as-is
+Error: Jet.ReadOnlyValueNotOwned: `picked` is read in place, so it cannot fill an owned value as-is
   --> main.jet:21:5
     |
  18 |     picked
     |     ^^^^^^
  Why: The place keeps its value, so this owning position would copy it, and `copies: .Explicit` is active, so the copy must be written
  Fix: Copy it explicitly with `picked.copy()`
-More: jet-lang.dev/e/E0120
+More: jet-lang.dev/e/Jet.ReadOnlyValueNotOwned
 
 3 problems found
-Run `jet explain E0120` to learn more
+Run `jet explain Jet.ReadOnlyValueNotOwned` to learn more

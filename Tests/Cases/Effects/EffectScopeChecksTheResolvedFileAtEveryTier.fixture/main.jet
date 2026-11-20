@@ -10,8 +10,8 @@ use files: core.files
 verdict: fn(error: IOError) -> String {
     if error == .PermissionDenied(context) {
         cause: context.cause ?? ""
-        if cause.starts_with("E0740: ") -> return "refused"
-        if cause.starts_with("E0749: ") -> return "denied"
+        if cause.starts_with("Jet.EffectBoundExceeded: ") -> return "refused"
+        if cause.starts_with("Jet.ProhibitedEffectReached: ") -> return "denied"
     }
     "failed"
 }

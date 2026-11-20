@@ -45,7 +45,9 @@ use {
         SemaProgramTables,
         SemaScopeEnvironment,
         SemaScriptProbe,
+        SemaScriptProbeAppended,
         SemaScriptProbeChecked,
+        sema_script_probe_append,
         sema_script_probe_check_func,
         sema_script_probe_enter,
         sema_script_probe_over,
@@ -6915,6 +6917,47 @@ jet_driver_held_eval_check: fn(held: &JetDriverHeldEval, path: String, functions
 // and checked types lent to it.
 JetDriverHeldChecked: struct {
     checked: SemaScriptProbeChecked,
+    symbols: SymbolTable,
+    types: [TTypeDef],
+}
+
+// A function of the program's source `text` that `held`'s registration
+// lacks (JetCLI DebugCompile.jet appends those a held check of the
+// program's cut left out and an expression calls), appended by `held`'s
+// probe (sema_script_probe_append) to the module whose source file is
+// `path`, with the program's symbol table `symbols` and checked types
+// `types` lent as jet_driver_held_eval_check lends them, and judged against
+// the program's checked `functions` at the rows of JetDriverHeldEval.rows.
+// Spans count from 0 in `text`. None, with the registration as it was,
+// when the text is not one function, no checked module has `path`, or the
+// probe doesn't keep it.
+jet_driver_held_eval_append: fn(held: &JetDriverHeldEval, path: String, functions: [FnBody], symbols: &&SymbolTable, types: &&[TTypeDef], text: String) -> JetDriverHeldAppended {
+    parsed := parse_source(text.bytes())
+    if jet_driver_has_errors(parsed.diagnostics) || parsed.program.items.len() != 1 {
+        return JetDriverHeldAppended{appended: None, symbols: symbols.move(), types: types.move()}
+    }
+    item := parsed.program.items.pop() ?? return JetDriverHeldAppended{appended: None, symbols: symbols.move(), types: types.move()}
+    going := jet_driver_held_eval_lend(held.probe.program.registration_graph.move(), symbols.move(), types.move())
+    held.probe.program.registration_graph = going.graph.move()
+    held.probe.program.checked_types = going.types.move()
+    // The module scope reads the symbol table, so the probe enters the
+    // module while the table is lent.
+    appended := SemaScriptProbeAppended?{None}
+    if held.modules.get(path) == .Val(module_identity) {
+        if sema_script_probe_enter(held.probe, module_identity) {
+            appended = sema_script_probe_append(held.probe, item.move(), functions, held.rows)
+        }
+    }
+    back := jet_driver_held_eval_lend(held.probe.program.registration_graph.move(), going.symbols.move(), held.probe.program.checked_types.move())
+    held.probe.program.registration_graph = back.graph.move()
+    held.probe.program.checked_types = [TTypeDef]{}
+    JetDriverHeldAppended{appended: appended.move(), symbols: back.symbols.move(), types: back.types.move()}
+}
+
+// A held append's function (jet_driver_held_eval_append), and the symbol
+// table and checked types lent to it.
+JetDriverHeldAppended: struct {
+    appended: SemaScriptProbeAppended?,
     symbols: SymbolTable,
     types: [TTypeDef],
 }

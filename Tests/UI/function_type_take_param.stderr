@@ -1,4 +1,4 @@
-Error [jet.MoveWithoutMarker]: `f` takes `words`, but `words` is used again later
+Error: Jet.MoveWithoutMarker: `f` takes `words`, but `words` is used again later
   --> Tests/UI/function_type_take_param.jet:19:14
     |
  19 |     first: f(words)
@@ -9,13 +9,13 @@ Error [jet.MoveWithoutMarker]: `f` takes `words`, but `words` is used again late
     |               ^^^^^ `words` is used again here
  Why: `f` takes ownership of this argument, and a call never copies on its own, so `words` has no value after this call
  Fix: Write `words.copy()` to pass a copy and keep `words`, or reorder so this call is the last use of `words`
-More: jet-lang.dev/e/E0209
+More: jet-lang.dev/e/Jet.MoveWithoutMarker
 
-Error [jet.MarkedFunctionValue]: `count` can't be used as a function value because its parameter `words` is `&&`
+Error: Jet.MarkedFunctionValue: `count` can't be used as a function value because its parameter `words` is `&&`
   --> Tests/UI/function_type_take_param.jet:24:29
     |
  24 |     slots: Slots{read_only: count, taking: count}
     |                             ^^^^^
  Why: A function type gives each parameter plain read access unless it marks a write (`fn(&T)`) or a take (`fn(&&T)`), so a value of `count` would drop the `&&` its parameter declares
  Fix: Call `count` directly, mark the parameter in the function type (`fn(&&T)`), or pass a lambda that makes that call
-More: jet-lang.dev/e/E0227
+More: jet-lang.dev/e/Jet.MarkedFunctionValue

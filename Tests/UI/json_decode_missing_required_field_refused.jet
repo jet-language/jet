@@ -1,0 +1,19 @@
+// @run_cli
+// A typed decode of an object without a required field is refused with the
+// registered Jet.MissingRequiredField, and the entry returns the refusal.
+package: {
+    name: "json_decode_missing_required_field_refused"
+    authority: { allow: [IO] }
+}
+
+use json: core.encoding.json
+
+#Codable
+Person: struct {
+    name: String,
+}
+
+run: fn() {
+    person: json.decode<Person>("{{}}") ?? return Err(err[0].reason)
+    print("name: {person.name}")
+}

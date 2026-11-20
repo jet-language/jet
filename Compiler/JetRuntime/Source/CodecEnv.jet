@@ -382,10 +382,12 @@ env_frame_error: fn(error: I64, origins: I64) {
         at += I64{2}
     }
     if (origin >= I64{0}) {
-        jet_rt_string_builder_push(target, rt_static_text("E2416: env var "))
+        jet_rt_string_builder_push(target, rt_static_text("Jet.EnvDecodeFailed: env var "))
         jet_rt_string_builder_push(target, csv_words_get(origins, origin))
         jet_rt_string_builder_push(target, rt_static_text(" -> "))
-    } else { jet_rt_string_builder_push(target, rt_static_text("E2416: config field ")) }
+    } else {
+        jet_rt_string_builder_push(target, rt_static_text("Jet.EnvDecodeFailed: config field "))
+    }
     jet_rt_string_builder_push(target, path)
     jet_rt_string_builder_push(target, rt_static_text(": "))
     jet_rt_string_builder_push(target, if env_secret_path(path) -> rt_static_text("secret value rejected") else -> reason)
@@ -464,7 +466,7 @@ env_fail: fn(prefix: I64, middle: I64, suffix: I64, errors: I64, errors_len: I64
 // (borrowed tree, value out, status out, errors out, length out) -> 0.
 #Export(c) jet_rt_codec_env: fn(prefix: I64, file: I64, allow: I64, names: I64, invoke: I64, value: I64, errors: I64, errors_len: I64) -> I64 {
     if !env_file_relative(file) {
-        return codec_fail(jet_rt_string_clone(rt_static_text("E2416: Dotenv.file must be project-relative")), errors, errors_len)
+        return codec_fail(jet_rt_string_clone(rt_static_text("Jet.EnvDecodeFailed: Dotenv.file must be project-relative")), errors, errors_len)
     }
     values: csv_words_new()
     if (rt_text_len(file) != I64{0}) {
@@ -475,7 +477,7 @@ env_fail: fn(prefix: I64, middle: I64, suffix: I64, errors: I64, errors_len: I64
             jet_rt_free(out, I64{8}, I64{8})
             env_values_free(values)
             target: jet_rt_string_builder_new()
-            jet_rt_string_builder_push(target, rt_static_text("E2416: cannot read Dotenv.file `"))
+            jet_rt_string_builder_push(target, rt_static_text("Jet.EnvDecodeFailed: cannot read Dotenv.file `"))
             jet_rt_string_builder_push(target, file)
             jet_rt_string_builder_push(target, rt_static_text("`: "))
             jet_rt_string_builder_push(target, reason)
@@ -489,7 +491,7 @@ env_fail: fn(prefix: I64, middle: I64, suffix: I64, errors: I64, errors_len: I64
             if (failure != I64{0}) {
                 jet_rt_free(out, I64{8}, I64{8})
                 env_values_free(values)
-                result: env_fail(rt_static_text("E2416: "), failure, rt_static_text(""), errors, errors_len)
+                result: env_fail(rt_static_text("Jet.EnvDecodeFailed: "), failure, rt_static_text(""), errors, errors_len)
                 jet_rt_string_drop(failure)
                 return result
             }

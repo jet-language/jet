@@ -1,17 +1,17 @@
-Error [jet.ReadOnlyValueNotOwned]: `value` was not moved here, so it cannot be returned as-is
+Error: Jet.ReadOnlyValueNotOwned: `value` was not moved here, so it cannot be returned as-is
   --> Tests/UI/Taint/scrub_removes_only_its_named_tag.jet:5:56
     |
   5 | #Scrub(PII) redact: fn(value: #PII String) -> String { value }
     |                                                        ^^^^^
  Why: This function has read access only and does not own the value
  Fix: Return a copy: `return value.copy()` — or take ownership: `value: &&#PII String`. To return borrowed data, declare `-> View<T> from value` and return a view derived from `value`
-More: jet-lang.dev/e/E0120
+More: jet-lang.dev/e/Jet.ReadOnlyValueNotOwned
 
-Error [jet.TaggedValueDenied]: A `Input` value is denied at `process.cmd`
+Error: Jet.TaggedValueDenied: A `Input` value is denied at `process.cmd`
   --> Tests/UI/Taint/scrub_removes_only_its_named_tag.jet:9:16
     |
   9 |     _: process.cmd(["echo", value])
     |                ^^^
  Why: The declaration for `Input` denies `Exec`, which covers this destination
  Fix: Remove the destination use, or pass the value through a matching `#Scrub(Input)` function
-More: jet-lang.dev/e/E0721
+More: jet-lang.dev/e/Jet.TaggedValueDenied

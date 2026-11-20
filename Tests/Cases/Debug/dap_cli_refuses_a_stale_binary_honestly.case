@@ -2,10 +2,11 @@
 # the adapter answers for that code or says it can't. Stopped in the loop,
 # `evaluate` of `scaled(5)` calls the program's `scaled`: 10. Then the
 # source of `scaled` changes on disk (x * 3), and the same `evaluate` is
-# refused: the source's `scaled` is not the code the program runs, and the
-# refusal says to rebuild or `fix` it. An expression that doesn't reach the
-# changed code still answers, and the program runs on to the total its
-# image computes, 6, not the edited source's 9.
+# refused: the image records the sha256 of each source it was built from
+# (`.debug_jetsource`), `scaled`'s no longer matches, and the refusal says
+# to rebuild or `fix` it. An expression that doesn't reach the changed
+# code still answers, and the program runs on to the total its image
+# computes, 6, not the edited source's 9.
 # The fixtures must stay in jet fmt form: line 8 is the loop's body.
 fixture: DapCLIRefusesAStaleBinaryHonestly.fixture
 env: NO_COLOR=1
@@ -28,7 +29,8 @@ copy: edited.src main.jet
 send dap: "{\"seq\":6,\"type\":\"request\",\"command\":\"evaluate\",\"arguments\":{\"expression\":\"scaled(5)\",\"context\":\"repl\"}}"
 recv dap until $.request_seq = 6 timeout 60s every 100ms
 json: stdout doc $.success = false
-stdout: ~ "`scaled` in the source is not the code the program runs; rebuild the program, or `fix` it first" # the edited function is refused, with what to do
+stdout: ~ "`scaled`'s source `" # the refusal names the reached item and its source
+stdout: ~ "changed since the program was built; rebuild the program, or `fix` it first" # it says why and what to do
 send dap: "{\"seq\":7,\"type\":\"request\",\"command\":\"evaluate\",\"arguments\":{\"expression\":\"k + 40\",\"context\":\"repl\"}}"
 recv dap until $.request_seq = 7 timeout 60s every 100ms
 json: stdout doc $.success = true

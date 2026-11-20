@@ -8,34 +8,34 @@ step: jet run main.jet
 exit: 0
 stdout: ~ "red" # run runs the program
 stdout: !~ "again" # the unreachable arm never runs
-stdout+stderr: !~ "[jet.Unused" # run hides tidy errors
-stdout+stderr: !~ "[jet.UnreachableDispatchArm]" # run hides tidy errors
+stdout+stderr: !~ "Jet.Unused" # run hides tidy errors
+stdout+stderr: !~ "Jet.UnreachableDispatchArm" # run hides tidy errors
 step: jet run --json main.jet
 exit: 0
-stdout+stderr: !~ "L0103" # the JSON run reports what the human run shows
+stdout+stderr: !~ "Jet.UnusedImport" # the JSON run reports what the human run shows
 stdout+stderr: !~ "\"severity\":\"tidy\"" # the JSON run reports what the human run shows
 step: jet dev main.jet --watch=off
 exit: 0
 stdout: ~ "red" # dev runs the program
-stdout+stderr: !~ "[jet.Unused" # dev hides tidy errors
-stdout+stderr: !~ "[jet.UnreachableDispatchArm]" # dev hides tidy errors
+stdout+stderr: !~ "Jet.Unused" # dev hides tidy errors
+stdout+stderr: !~ "Jet.UnreachableDispatchArm" # dev hides tidy errors
 step: jet test --capture=all main.jet
 exit: 0
 stdout+stderr: ~ "1 passed, 0 failed" # test runs despite tidy errors
-stdout+stderr: !~ "[jet.Unused" # test hides tidy errors
-stdout+stderr: !~ "[jet.UnreachableDispatchArm]" # test hides tidy errors
+stdout+stderr: !~ "Jet.Unused" # test hides tidy errors
+stdout+stderr: !~ "Jet.UnreachableDispatchArm" # test hides tidy errors
 step: jet check main.jet
 exit: 1
-stderr: ~ "Error [jet.UnusedImport]" # check lists the unused import
-stderr: ~ "Error [jet.UnusedLocalBinding]" # check lists the unused local
-stderr: ~ "Error [jet.UnreachableDispatchArm]" # check lists the unreachable arm
+stderr: ~ "Error: Jet.UnusedImport" # check lists the unused import
+stderr: ~ "Error: Jet.UnusedLocalBinding" # check lists the unused local
+stderr: ~ "Error: Jet.UnreachableDispatchArm" # check lists the unreachable arm
 stderr: ~ "3 problems found" # check counts every tidy error
-stderr: !~ "Warning [" # a tidy error is no warning
+stderr: !~ "Warning: " # a tidy error is no warning
 step: jet build main.jet
 exit: 1
-stderr: ~ "Error [jet.UnusedImport]" # build lists the unused import
-stderr: ~ "Error [jet.UnusedLocalBinding]" # build lists the unused local
-stderr: ~ "Error [jet.UnreachableDispatchArm]" # build lists the unreachable arm
+stderr: ~ "Error: Jet.UnusedImport" # build lists the unused import
+stderr: ~ "Error: Jet.UnusedLocalBinding" # build lists the unused local
+stderr: ~ "Error: Jet.UnreachableDispatchArm" # build lists the unreachable arm
 stderr: ~ "3 problems found" # build counts every tidy error
 step: jet check --json main.jet
 exit: 1

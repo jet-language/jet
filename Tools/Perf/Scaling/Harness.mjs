@@ -231,7 +231,7 @@ function argvFor(config, compiler, run) {
 }
 
 // Diagnostics a compile reported: the bootstrap receipt's report rows, or
-// `Error [CODE]` lines of `jet`.
+// `Error: CODE` lines of `jet`.
 function outcome(compiler, run, code, text) {
   if (compiler.kind === 'bootstrap') {
     const receipt = fs.existsSync(run.receipt) ? fs.readFileSync(run.receipt, 'utf8') : '';
@@ -239,7 +239,7 @@ function outcome(compiler, run, code, text) {
       .filter(report => !String(report.code ?? '').startsWith('L')).length;
     return { complete: /^complete=true$/m.test(receipt), errors };
   }
-  return { complete: code === 0, errors: (text.match(/^Error \[E/gm) ?? []).length };
+  return { complete: code === 0, errors: (text.match(/^Error: /gm) ?? []).length };
 }
 
 // One measured compile of one corpus.

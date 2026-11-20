@@ -3677,7 +3677,7 @@ DataLoaderPortRecord: struct {
 #Test("data CSV and JSON preserve malformed input field-error strings") {
     if csv<Int>("n\n\"7\"x") == {
         .Err(error) -> {
-            assert_eq(error.reason, "E2701: CSV row 2, line 2, column 4 — only quote, comma, CRLF, LF, or EOF may follow a closing quote")
+            assert_eq(error.reason, "Jet.MalformedRingInput: CSV row 2, line 2, column 4 — only quote, comma, CRLF, LF, or EOF may follow a closing quote")
         }
         .Ok(_) -> panic("malformed CSV accepted")
     }

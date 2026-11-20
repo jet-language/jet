@@ -13,28 +13,28 @@ env: JETPACK_ROOT={work}/jetpack
 step: jet check main.jet
 cwd: b1
 exit: 1 # tests/marker_groups_modules.rs:82,88 bare #LibraryNote -> E0085
-stderr: ~ "E0085" # tests/marker_groups_modules.rs:82,88 bare #LibraryNote -> E0085
+stderr: ~ "Jet.UnqualifiedLibraryMarker" # tests/marker_groups_modules.rs:82,88 bare #LibraryNote -> E0085
 step: jet check main.jet
 cwd: b2
 exit: 1 # #Lib.Missing -> E1023
-stderr: ~ "E1023" # a qualified marker no imported module declares
+stderr: ~ "Jet.UnknownLibraryMarker" # a qualified marker no imported module declares
 step: jet check main.jet
 cwd: b3
 exit: 1 # tests/marker_groups_modules.rs:84,88 #Missing -> E0927
-stderr: ~ "E0927" # tests/marker_groups_modules.rs:84,88 #Missing -> E0927
+stderr: ~ "Jet.UnknownAppliedRule" # tests/marker_groups_modules.rs:84,88 #Missing -> E0927
 step: jet check main.jet
 cwd: b4
 exit: 1 # tests/marker_groups_modules.rs:85,88 #Lib.Inner.Hidden (priv module member) -> E0605
-stderr: ~ "E0605" # tests/marker_groups_modules.rs:85,88 #Lib.Inner.Hidden (priv module member) -> E0605
+stderr: ~ "Jet.PrivateItem" # tests/marker_groups_modules.rs:85,88 #Lib.Inner.Hidden (priv module member) -> E0605
 step: jet check main.jet
 cwd: b5
 exit: 1 # tests/marker_groups_modules.rs:90-93 UI/QualifiedMarkerBare -> E0085 (main.jet/library.jet copied from ui fixture)
-stderr: ~ "E0085" # tests/marker_groups_modules.rs:90-93 UI/QualifiedMarkerBare -> E0085 (main.jet/library.jet copied from ui fixture)
+stderr: ~ "Jet.UnqualifiedLibraryMarker" # tests/marker_groups_modules.rs:90-93 UI/QualifiedMarkerBare -> E0085 (main.jet/library.jet copied from ui fixture)
 step: jet check main.jet
 cwd: b6
 exit: 1 # tests/marker_groups_modules.rs:95-98 two imports sharing alias lib -> E0086
-stderr: ~ "E0086" # tests/marker_groups_modules.rs:95-98 two imports sharing alias lib -> E0086
+stderr: ~ "Jet.AmbiguousMarker" # tests/marker_groups_modules.rs:95-98 two imports sharing alias lib -> E0086
 step: jet check main.jet
 cwd: b7
 exit: 1 # tests/marker_groups_modules.rs:100-102 UI/QualifiedMarkerAmbiguous -> E0086
-stderr: ~ "E0086" # tests/marker_groups_modules.rs:100-102 UI/QualifiedMarkerAmbiguous -> E0086
+stderr: ~ "Jet.AmbiguousMarker" # tests/marker_groups_modules.rs:100-102 UI/QualifiedMarkerAmbiguous -> E0086

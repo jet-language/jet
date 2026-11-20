@@ -13,7 +13,7 @@ stdin: ReplNonTTYSessionNamesAFileWriteAndRunsIt.fixture/input0.txt
 exit: 0
 stderr: ~ "note: this session now " # the session names what the turn does before it runs
 stderr: ~ "writes files (-A hides this)" # the write is named, not refused
-stdout|stderr: !~ "E1803" # nothing denies the write
+stdout|stderr: !~ "Jet.ApplicationAuthorityDenied" # nothing denies the write
 file: project/written.txt = "yes"
 remove: project/written.txt
 step denied: jet repl --project {work}/project --deny=FS.Write
@@ -21,7 +21,7 @@ env: NO_COLOR=1
 env: XDG_STATE_HOME={work}/state
 stdin: ReplNonTTYSessionNamesAFileWriteAndRunsIt.fixture/input0.txt
 exit: nonzero
-stdout|stderr: ~ "E1803" # the command's deny row stops the turn
+stdout|stderr: ~ "Jet.ApplicationAuthorityDenied" # the command's deny row stops the turn
 stdout|stderr: ~ "FS.Write" # and names the denied right
 stdout|stderr: !~ "note: this session" # a denied turn names nothing
 file: project/written.txt absent

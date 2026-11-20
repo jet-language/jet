@@ -1,8 +1,8 @@
-Error [jet.ComptimeMethodCalledAtRunTime]: `Small.from_literal` is a `#run fn`, which runs while building, but run-time code calls it here
+Error: Jet.ComptimeMethodCalledAtRunTime: `Small.from_literal` is a `#run fn`, which runs while building, but run-time code calls it here
   --> Tests/UI/comptime_no_silent_fallback_run_fn_call.jet:16:18
     |
  16 |     small: Small.from_literal(500)
     |                  ^^^^^^^^^^^^
  Why: A `#run fn` runs only while the program builds. Called from code in the shipped program, it would run at run time instead, and a panic or print in it would happen there instead of stopping the build.
  Fix: Compute the value while building with `value: #run Small.from_literal(…)` and use `value` here, or call `Small.from_literal` from compile-time code.
-More: jet-lang.dev/e/E1019
+More: jet-lang.dev/e/Jet.ComptimeMethodCalledAtRunTime

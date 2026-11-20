@@ -16,7 +16,7 @@ use {
 jetpack_service_fixture_usage: fn(output: JetDriverVerbOutput, needle: String) Never! {
     assert_eq(output.exit_code, JET_DRIVER_EXIT_USAGE)
     assert_eq(output.stdout, "")
-    assert(output.stderr.contains("E2104"), output.stderr)
+    assert(output.stderr.contains("Jet.InvalidCommandInput"), output.stderr)
     assert(output.stderr.contains(needle), output.stderr)
 }
 
@@ -58,5 +58,5 @@ jetpack_service_fixture_usage: fn(output: JetDriverVerbOutput, needle: String) N
     // A check whose entry can't be read keeps the loader's refusal.
     missing: jet_cli_compiler_service_answer(JET_COMPILER_SERVICE_CHECK_ENTRY, compiler_service_check_request("/nonexistent/jetpack-service/main.jet", "run: fn() {{ }}\n"))
     assert(missing.exit_code != JET_DRIVER_EXIT_OK, "an unreadable entry is not a clean check")
-    assert(missing.stderr.contains("E2105"), missing.stderr)
+    assert(missing.stderr.contains("Jet.DriverOperationFailed"), missing.stderr)
 }

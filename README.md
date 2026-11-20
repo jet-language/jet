@@ -105,14 +105,14 @@ Every error says what happened, why the rule exists, and how to fix it:
 
 ```console
 $ jet run oops.jet
-Error [jet.ImmutableAssignment]: `total` was made with `:`, so it can't change
+Error: Jet.ImmutableAssignment: `total` was made with `:`, so it can't change
   --> oops.jet:3:23
     |
   3 |     loop n in 1..3 -> total = total + n
     |                       ^^^^^
  Why: Only `:=` bindings and parameters declared with the write mark `&` can be changed
  Fix: Declare it with `total := ...` instead
-More: jet-lang.dev/e/E0111
+More: jet-lang.dev/e/Jet.ImmutableAssignment
 ```
 
 Each code has a lesson behind it: `jet explain E0111`.

@@ -6,12 +6,12 @@ fixture: PanicAndMemGrantsAreRefused.fixture
 env: NO_COLOR=1
 step mem: jet check needs_mem
 exit: 1
-stderr: ~ "Error [jet.InvalidAuthorityBlock]" # the authority block is refused
+stderr: ~ "Error: Jet.InvalidAuthorityBlock" # the authority block is refused
 stderr: ~ "`Mem.Alloc` is deny-only and cannot be declared in `authority.needs`" # a Mem leaf is no grant
 step panic: jet check needs_panic
 exit: 1
 stderr: ~ "`Panic` is deny-only and cannot be declared in `authority.needs`" # nor is Panic
 step bound: jet check bound_panic.jet
 exit: 1
-stderr: ~ "Error [jet.PanicGranted]: `Panic` can't be granted, only denied" # a positive bound can't grant Panic
-stderr: ~ "E0751" # its code
+stderr: ~ "Error: Jet.PanicGranted: `Panic` can't be granted, only denied" # a positive bound can't grant Panic
+stderr: ~ "Jet.PanicGranted" # its code

@@ -1676,7 +1676,7 @@ civil_checked_epoch: fn(value: Int, unit: String) -> Int RangeError! {
     seconds: value /% 1000000000
     if seconds > -9223372036 && seconds < 9223372036 -> return Ok(value)
     if value < time_int_min() || value > time_int_max() {
-        return Err(RangeError{reason: "E2704: Unix epoch {unit} do not fit in Int"})
+        return Err(RangeError{reason: "Jet.EpochOutOfRange: Unix epoch {unit} do not fit in Int"})
     }
     Ok(value)
 }
@@ -2554,19 +2554,23 @@ civil_format_checked: fn(pattern: String, date: LocalDate, t: LocalTime, zone: {
                     i += width
                 }
             }
-            if !closed -> return Err(TextError{message: "E2703: unterminated format literal"})
+            if !closed {
+                return Err(TextError{message: "Jet.InvalidTimeFormat: unterminated format literal"})
+            }
             marker: "{literals.len()}"
             normalized = "{normalized}{marker}"
             literals.push({marker: marker, value: literal})
             next
         }
         if byte == (U8{37}) {
-            if i + 1 >= raw.len() -> return Err(TextError{message: "E2703: format ends after `%`"})
+            if i + 1 >= raw.len() {
+                return Err(TextError{message: "Jet.InvalidTimeFormat: format ends after `%`"})
+            }
             code: civil_byte_character(raw[i + 1])
             if code == "-" {
                 flagged: if i + 2 < raw.len() -> civil_byte_character(raw[i + 2]) else -> ""
                 if !([String]{"H", "I", "M", "S", "d", "m", "j"}.contains(flagged)) {
-                    return Err(TextError{message: "E2703: unsupported format token `%-{flagged}`"})
+                    return Err(TextError{message: "Jet.InvalidTimeFormat: unsupported format token `%-{flagged}`"})
                 }
                 normalized = "{normalized}%-{flagged}"
                 i += 3
@@ -2581,10 +2585,10 @@ civil_format_checked: fn(pattern: String, date: LocalDate, t: LocalTime, zone: {
                 next
             }
             if !([String]{"%", "A", "a", "B", "b", "Y", "y", "m", "d", "e", "j", "H", "I", "M", "S", "p", "z", "Z", "F", "T", "R", "D", "f"}.contains(code)) {
-                return Err(TextError{message: "E2703: unsupported format token `%{code}`"})
+                return Err(TextError{message: "Jet.InvalidTimeFormat: unsupported format token `%{code}`"})
             }
             if (code == "z" || code == "Z") && zone == None {
-                return Err(TextError{message: "E2703: format token `%{code}` requires a zone"})
+                return Err(TextError{message: "Jet.InvalidTimeFormat: format token `%{code}` requires a zone"})
             }
             normalized = "{normalized}%{code}"
             i += 2
@@ -2600,10 +2604,10 @@ civil_format_checked: fn(pattern: String, date: LocalDate, t: LocalTime, zone: {
                 }
             }
             if token == "" {
-                return Err(TextError{message: "E2703: unsupported format token `{civil_byte_character(byte)}`"})
+                return Err(TextError{message: "Jet.InvalidTimeFormat: unsupported format token `{civil_byte_character(byte)}`"})
             }
             if (token == "VV" || token == "XXX") && zone == None {
-                return Err(TextError{message: "E2703: format token `{token}` requires a zone"})
+                return Err(TextError{message: "Jet.InvalidTimeFormat: format token `{token}` requires a zone"})
             }
             normalized = "{normalized}{token}"
             i += token.bytes().len()

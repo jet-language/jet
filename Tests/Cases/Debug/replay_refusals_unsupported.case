@@ -1,6 +1,6 @@
 # Going back and `why` run the program again, which only a recording makes
 # the same: a session without `--replay` refuses them with E2237
-# (jet.DebugRequestRefused) and stays at its stop. At the console the
+# (Jet.DebugRequestRefused) and stays at its stop. At the console the
 # refusal is the rendered diagnostic; over `--dap` the adapter offers no
 # `supportsStepBack`, and `stepBack` fails with E2237 as its `jetCode`.
 # The fixture must stay in jet fmt form; line 21 adds to `total`.
@@ -9,10 +9,10 @@ env: NO_COLOR=1
 step: jet debug prog.jet
 stdin: replay_refusals_unsupported.stdin
 exit: 0
-stdout: ~ "(Jet) rs\nError [jet.DebugRequestRefused]: The debugger can't do this here: going back needs a replay: start the session with `jet debug --replay=NAME`.\n Why: " # a reverse step is refused with E2237
-stdout: ~ "(Jet) reverse-continue\nError [jet.DebugRequestRefused]: The debugger can't do this here: going back needs a replay: start the session with `jet debug --replay=NAME`.\n" # and so is a reverse continue
-stdout: ~ "(Jet) why total\nError [jet.DebugRequestRefused]: The debugger can't do this here: `why` needs a replay: start the session with `jet debug --replay=NAME`.\n" # and `why`
-stdout: ~ "More: jet-lang.dev/e/E2237\n" # the refusal names its page
+stdout: ~ "(Jet) rs\nError: Jet.DebugRequestRefused: The debugger can't do this here: going back needs a replay: start the session with `jet debug --replay=NAME`.\n Why: " # a reverse step is refused with E2237
+stdout: ~ "(Jet) reverse-continue\nError: Jet.DebugRequestRefused: The debugger can't do this here: going back needs a replay: start the session with `jet debug --replay=NAME`.\n" # and so is a reverse continue
+stdout: ~ "(Jet) why total\nError: Jet.DebugRequestRefused: The debugger can't do this here: `why` needs a replay: start the session with `jet debug --replay=NAME`.\n" # and `why`
+stdout: ~ "More: jet-lang.dev/e/Jet.DebugRequestRefused\n" # the refusal names its page
 stdout: ~ "total 6 tally " # the session stayed at its stop, and the program runs on to its end
 stdout: ~ "Program finished\n" # the session runs the program to its end
 session dap content-length: jet debug --dap {work}/prog.jet

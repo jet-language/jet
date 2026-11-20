@@ -41,6 +41,11 @@
 //   of `.text`), so the lists need no relocations. With one section per
 //   function, which a linker places apart or drops, the entries are start
 //   addresses and lengths, the addresses relocations.
+// - `.debug_jetsource`: not DWARF. The sources the image was compiled from
+//   (X64ModuleDebug.sources), each its path, a NUL and the 32 bytes of its
+//   sha256, so path length + 33 bytes a source (dwarf_sources): `jet debug`
+//   proves a source reads as the image's build read it, so its code is the
+//   image's, before it binds to that code (JetDebug NativeFacts.jet).
 //
 // Addresses and section offsets in the other sections are relocations
 // against section symbols, so any ELF linker can place the sections.
@@ -81,6 +86,8 @@ X64DwarfSections: struct {
     jet_line_relas: [X64ObjectRela],
     loclists: [X64ObjectPiece],
     loclists_relas: [X64ObjectRela],
+    // `.debug_jetsource` (dwarf_sources).
+    sources: [U8]{[U8]{}},
 }
 
 // One section's bytes and their relocations.
@@ -1369,11 +1376,12 @@ dwarf_jet_line: fn(program: X64ObjectModule, functions: [X64CompiledFunction], d
 // of its own section, and `sizes` bytes long: the object writer holds their
 // code by then; debug[i] belongs to functions[i]); the subprograms of
 // `.debug_info` on the threads `threads` admits. With `debug_info` false
-// only `.eh_frame` is built; the DWARF sections and `.debug_jetline` stay
-// empty. Each section reads only the inputs, so when `threads` admits a
-// second thread for the line rows, `.eh_frame`, `.debug_line` and
-// `.debug_jetline` are each built on a thread of their own while this
-// thread builds `.debug_info`: the bytes are the same for any thread count.
+// only `.eh_frame` is built; the DWARF sections, `.debug_jetline` and
+// `.debug_jetsource` stay empty. Each section reads only the inputs, so
+// when `threads` admits a second thread for the line rows, `.eh_frame`,
+// `.debug_line` and `.debug_jetline` are each built on a thread of their
+// own while this thread builds `.debug_info`: the bytes are the same for
+// any thread count.
 x64_dwarf_sections: fn(program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], sizes: [Int], text_size: Int, symbols: X64DwarfSymbols, threads: CompilerThreads, debug_info: Bool) -> X64DwarfSections Never! {
     sections := X64DwarfSections{
         eh_frame: [U8]{},
@@ -1397,7 +1405,10 @@ x64_dwarf_sections: fn(program: X64ObjectModule, functions: [X64CompiledFunction
     loop row in debug {
         if row.allocs.len() > 0 -> sites = true
     }
-    if debug_info -> sections.abbrev = dwarf_abbrevs(symbols.functions.len() > 0, sites)
+    if debug_info {
+        sections.abbrev = dwarf_abbrevs(symbols.functions.len() > 0, sites)
+        sections.sources = dwarf_sources(program.debug.sources)
+    }
     if {
         !debug_info -> frame = dwarf_eh_frame(debug, offsets, sizes, symbols)
         compiler_threads_admit(threads, functions.len(), rows, DWARF_LINE_MIN_ROWS_PER_THREAD, 0, 0) <= 1 -> {
@@ -1425,6 +1436,34 @@ x64_dwarf_sections: fn(program: X64ObjectModule, functions: [X64CompiledFunction
     sections.jet_line = jet_line.bytes.move()
     sections.jet_line_relas = jet_line.relas.move()
     sections
+}
+
+// The `.debug_jetsource` bytes of `sources`: per source its path, a NUL
+// and the 32 bytes of its sha256.
+dwarf_sources: fn(sources: [X64DebugSource]) -> [U8] Never! {
+    bytes := [U8]{}
+    loop source in sources {
+        bytes.extend(source.path.bytes())
+        bytes.push(U8{0})
+        bytes.extend(source.digest)
+    }
+    bytes
+}
+
+// The sources a `.debug_jetsource` section's `bytes` records
+// (dwarf_sources); None when they are not such a record.
+x64_dwarf_sources_parse: fn(bytes: [U8]) -> [X64DebugSource]? Never! {
+    sources := [X64DebugSource]{}
+    at := 0
+    loop at < bytes.len() {
+        end := at
+        loop end < bytes.len() && bytes[end] != 0 -> end += 1
+        if end + 33 > bytes.len() -> return None
+        path: String.from_bytes(bytes[at..<end]) ?? return None
+        sources.push(X64DebugSource{path: path, digest: bytes[end + 1..<end + 33]})
+        at = end + 33
+    }
+    Val(sources)
 }
 
 // Fewest line rows (a function counts one besides its rows) a section
@@ -1517,7 +1556,9 @@ dwarf_test_bytes: fn(pieces: [X64ObjectPiece]) -> [U8] Never! {
     assert_eq(sited.abbrev, dwarf_abbrevs(false, true))
     returns := [Int]{}
     loop rela in sited.info_relas {
-        if rela.symbol == symbols.text && rela.kind == ELF64_R_X86_64_64 -> returns.push(rela.addend)
+        if rela.symbol == symbols.text && rela.kind == ELF64_R_X86_64_64 {
+            returns.push(rela.addend)
+        }
     }
     // The unit's range, then per function its start and its call site.
     assert_eq(returns, [Int]{0, 0, 5, 32, 36})
@@ -1552,4 +1593,25 @@ dwarf_test_bytes: fn(pieces: [X64ObjectPiece]) -> [U8] Never! {
     }
     assert(found)
     assert(link_info_plan(info, built.abbrev, 0, 64) != None)
+}
+
+// An image records each source it was compiled from, its path and sha256,
+// and reads them back; an image without debug info records none.
+#Test("the image records its sources and their digests") {
+    digest := [U8]{}
+    loop k in 0..<32 -> digest.push(U8{k})
+    recorded: [X64DebugSource]{X64DebugSource{path: "prog.jet", digest: digest}, X64DebugSource{path: "../lib/b.jet", digest: digest}}
+    bytes: dwarf_sources(recorded)
+    assert_eq(bytes.len(), "prog.jet".len() + 33 + "../lib/b.jet".len() + 33)
+    read: x64_dwarf_sources_parse(bytes) ?? panic("the record didn't parse")
+    assert_eq(read.len(), 2)
+    assert_eq(read[1].path, "../lib/b.jet")
+    assert_eq(read[1].digest, digest)
+    assert(x64_dwarf_sources_parse(bytes[0..<bytes.len() - 1]) == None)
+    program: X64ObjectModule{data: [X64Data]{}, debug: X64ModuleDebug{directory: "", files: [String]{}, types: [X64DebugType]{}, sources: recorded}, functions: [X64FunctionSource]{}}
+    symbols: X64DwarfSymbols{text: 1, abbrev: 2, line: 3, loclists: 4, functions: [Int]{}}
+    built: x64_dwarf_sections(program, [X64CompiledFunction]{}, [X64FunctionDebug]{}, [Int]{}, [Int]{}, 0, symbols, compiler_threads_single(), true)
+    assert_eq(built.sources, bytes)
+    stripped: x64_dwarf_sections(program, [X64CompiledFunction]{}, [X64FunctionDebug]{}, [Int]{}, [Int]{}, 0, symbols, compiler_threads_single(), false)
+    assert_eq(stripped.sources.len(), 0)
 }

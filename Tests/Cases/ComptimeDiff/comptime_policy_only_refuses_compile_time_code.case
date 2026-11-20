@@ -10,16 +10,16 @@ env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 step: jet check call.jet
 exit: nonzero
-stderr: ~ "Error [jet.RuntimeOnlyAtBuildTime]: Compile-time code calls `stamp()` while building, but `#Runtime(.Only)` keeps it to the running program\n  --> call.jet:4:17\n" # the `#run` calls the marked function
+stderr: ~ "Error: Jet.RuntimeOnlyAtBuildTime: Compile-time code calls `stamp()` while building, but `#Runtime(.Only)` keeps it to the running program\n  --> call.jet:4:17\n" # the `#run` calls the marked function
 step: jet check through.jet
 exit: nonzero
-stderr: ~ "Error [jet.RuntimeOnlyAtBuildTime]: Compile-time code calls `stamp()` while building, but `#Runtime(.Only)` keeps it to the running program\n  --> through.jet:3:23\n" # the call inside the function the `#run` value calls
+stderr: ~ "Error: Jet.RuntimeOnlyAtBuildTime: Compile-time code calls `stamp()` while building, but `#Runtime(.Only)` keeps it to the running program\n  --> through.jet:3:23\n" # the call inside the function the `#run` value calls
 step: jet check inside.jet
 exit: nonzero
-stderr: ~ "Error [jet.RuntimeOnlyAtBuildTime]: This `#run` runs its code while building, but `#Runtime(.Only)` keeps it to the running program\n  --> inside.jet:2:" # the `#run` inside the marked function
+stderr: ~ "Error: Jet.RuntimeOnlyAtBuildTime: This `#run` runs its code while building, but `#Runtime(.Only)` keeps it to the running program\n  --> inside.jet:2:" # the `#run` inside the marked function
 step: jet check nested.jet
 exit: nonzero
-stderr: ~ "Error [jet.RuntimeOnlyAtBuildTime]: This `#run` runs its code while building, but `#Runtime(.Only)` keeps it to the running program\n  --> nested.jet:4:" # the `.NoEager` block stays `.Only`
+stderr: ~ "Error: Jet.RuntimeOnlyAtBuildTime: This `#run` runs its code while building, but `#Runtime(.Only)` keeps it to the running program\n  --> nested.jet:4:" # the `.NoEager` block stays `.Only`
 step: jet run --trace runs.jet
 exit: 0
 stdout: = "8\n16\n"

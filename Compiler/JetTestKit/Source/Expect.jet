@@ -21,10 +21,38 @@ kit_expect_unified: fn(path: String, expected: String, actual: String) -> String
     out
 }
 
+// The words a report heading opens with (`Error: Jet.UnknownName: what`):
+// each `Severity` case, and the `Stop` that opens a runtime stop.
+KIT_EXPECT_OPENERS: #run kit_expect_openers()
+
+kit_expect_openers: fn() -> [String] {
+    openers := [String]{}
+    loop severity in Severity.reflect().values -> openers.push("{severity}: ")
+    openers.push("Stop: ")
+    openers
+}
+
+// The diagnostic name a report heading prints after its opener, or None for
+// a line that is no heading (`Error: couldn't read the file`): the name runs
+// to the next `: ` and holds only letters, digits, `.`, `_` and `-`.
+kit_expect_heading_name: fn(line: String) -[]> String? Never! {
+    loop opener in KIT_EXPECT_OPENERS {
+        if !line.starts_with(opener) -> next
+        rest: line.slice(opener.len(), line.len())
+        end: rest.index(": ") ?? return None
+        name: rest.slice(0, end)
+        named: name.bytes().all(fn(byte) { (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122})) || (byte >= (U8{48}) && byte <= (U8{57})) || byte == (U8{46}) || byte == (U8{95}) || byte == (U8{45}) })
+        if name == "" || !named -> return None
+        return Val(name)
+    }
+    None
+}
+
+// The error, warning and stop reports `text` holds, one per heading.
 kit_expect_diagnostics: fn(text: String) -[]> Int Never! {
     count := 0
     loop line in text.split("\n") {
-        if line.starts_with("Error [") || line.starts_with("Warning [") || line.starts_with("Stop [") {
+        if !line.starts_with("{Severity.Lint}: ") && kit_expect_heading_name(line) != None {
             count += 1
         }
     }

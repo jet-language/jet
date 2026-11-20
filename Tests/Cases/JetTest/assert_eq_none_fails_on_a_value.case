@@ -1,0 +1,13 @@
+# `assert_eq(x, None)` on an Optional that holds a value checks with no
+# report, and its run stops with the assertion's E3001 report at the
+# assert's line, never reaching the print.
+fixture: AssertEqNoneFailsOnAValue.fixture
+env: NO_COLOR=1
+step: jet check run.jet --json
+exit: 0
+json: stdout doc $.reports #= 0
+step: jet run run.jet
+exit: 70
+stdout: = "" # the run stops at the assert, before the print
+stderr: ~ "Stop [E3001]: `panic: expected: None, got: Val(2)`" # what it got
+stderr: ~ "--> run.jet:12 in run" # the failing assert's Jet line

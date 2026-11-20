@@ -19,7 +19,7 @@ exit: 0
 step all: node .jet/build/app.js
 exit: 70
 stdout: = "valid: loaded 6 keys\nvalid: lookup 6: found\n"
-stderr: ~ "Stop [E3001]: `panic: the snapshot's tree is out of order`" # the stop headline; the report goes on with the stock E3001 text
+stderr: ~ "Stop: Jet.Panic: `panic: the snapshot's tree is out of order`" # the stop headline; the report goes on with the stock E3001 text
 stderr: ~ "--> run.jet:76 in load" # the stop names the deep check's line and function
 step function_build: jet build --target web --deep-checks=tree.run run.jet
 timeout: 120s
@@ -27,5 +27,5 @@ exit: 0
 step function: node .jet/build/app.js
 exit: 70
 stdout: = "valid: loaded 6 keys\nvalid: lookup 6: found\ncorrupt: loaded 5 keys\n"
-stderr: ~ "Stop [E3001]: `panic: a lookup of 6 disagrees with the stored keys`" # the stop headline; the report goes on with the stock E3001 text
+stderr: ~ "Stop: Jet.Panic: `panic: a lookup of 6 disagrees with the stored keys`" # the stop headline; the report goes on with the stock E3001 text
 stderr: ~ "--> run.jet:114 in run" # the stop names the deep check's line and function

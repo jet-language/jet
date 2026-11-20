@@ -1,0 +1,15 @@
+// @run_cli
+// An instant whose Unix microseconds do not fit in Int is refused with the
+// registered Jet.EpochOutOfRange, and the entry returns the refusal.
+package: {
+    name: "time_epoch_overflow_refused"
+    authority: { allow: [IO] }
+}
+
+use time: core.time
+
+run: fn() {
+    far: time.from_unix_seconds(10000000000000)
+    micros: far.to_unix_us() ?? return Err(err.reason)
+    print("microseconds: {micros}")
+}

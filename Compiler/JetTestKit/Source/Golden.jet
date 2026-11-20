@@ -84,10 +84,10 @@ kit_golden_discover: fn(root: String, corpora: [String]) -> [KitEntry] {
 // diagnostic report is a front-end rejection, exit 1 whether a build or the
 // direct tier's `jet run` printed it.
 kit_golden_failure_exit: fn(expected: String, report: String) -> Int? {
-    if report.starts_with("Stop [") || report.starts_with("Error [E3003]:") {
+    if report.starts_with("Stop: ") || report.starts_with("Error: Jet.DeadlineExceeded:") {
         return Val(KIT_EXIT_RUNTIME_PANIC)
     }
-    if report.starts_with("Error [jet.") -> return Val(1)
+    if report.starts_with("Error: Jet.") -> return Val(1)
     if report.starts_with("Runtime fault [R0801]:") || report.starts_with("Runtime fault [R0802]:") {
         loop raw in report.split("\n") {
             line: raw.trim().copy()
@@ -185,11 +185,11 @@ kit_golden_build: fn(entry: KitEntry, tier: KitTier, plan: KitPlan, env: KitEnv,
         .Val(value) -> return KitOutcome{verdict: value, run: result}
         .None -> {}
     }
-    if result.stderr.contains("Warning [jet.BranchArmTable]") {
-        return KitOutcome{verdict: kit_expect_verdict("FAIL", "feature example emitted L0507"), run: result}
+    if result.stderr.contains("Warning: Jet.BranchArmTable:") {
+        return KitOutcome{verdict: kit_expect_verdict("FAIL", "feature example emitted Jet.BranchArmTable"), run: result}
     }
     if result.code != 0 {
-        unsupported: result.stderr.contains("Error [jet.InvalidCommandInput]")
+        unsupported: result.stderr.contains("Error: Jet.InvalidCommandInput:")
         verdict: kit_expect_verdict(if unsupported -> "UNSUPPORTED" else -> "FAIL", "front end/build exit {result.code}: {result.stderr}")
         return KitOutcome{verdict: verdict, run: result}
     }
@@ -470,8 +470,8 @@ kit_golden_step_invoke: fn(step: KitStep, index: Int, context: KitStepCtx, previ
 
 kit_golden_step_check: fn(step: KitStep, index: Int, context: KitStepCtx, state: KitStepState) -> KitVerdict {
     golden: context.golden ?? panic("golden step context required")
-    if state.last.stderr.contains("Warning [jet.BranchArmTable]") {
-        return kit_expect_verdict("FAIL", "feature example emitted L0507")
+    if state.last.stderr.contains("Warning: Jet.BranchArmTable:") {
+        return kit_expect_verdict("FAIL", "feature example emitted Jet.BranchArmTable")
     }
     checked := step
     if step.argv[0] != "build" && index == context.plan.steps.len() - 1 && !golden.last_explicit {

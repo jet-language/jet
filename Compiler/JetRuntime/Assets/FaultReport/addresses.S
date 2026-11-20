@@ -4,13 +4,13 @@
 # and the frames as addresses, which `jet crash` (JetCLI CLI/Crash.jet)
 # names from the side debug file the id finds, in report.S's words:
 #
-#   Stop [E3012]: Stack overflow in `??` at 0x401a2c
+#   Stop: Jet.StackOverflow: Stack overflow in `??` at 0x401a2c
 #   Build 9f2c41d07a3be9150c6d1e2f3a4b5c6d7e8f9012 (names and lines: jet crash)
 #   Backtrace:
 #     0x401a2c
 #     0x401b10
 #
-# `backtrace: off` ends a stop at `Stop [E3012]: Stack overflow` and writes
+# `backtrace: off` ends a stop at `Stop: Jet.StackOverflow: Stack overflow` and writes
 # no backtrace; brief only the faulting address; full, and every stack
 # overflow (whose innermost Jet function may be a caller), the return
 # addresses of up to 64 callers too. Tools/Agent/RuntimeGenerators.jet
@@ -307,7 +307,7 @@ flush:
     ret
 
 texts:
-    .asciz "Stop [E3012]: Stack overflow"
+    .asciz "Stop: Jet.StackOverflow: Stack overflow"
     .asciz " in `??` at \1\n"
     .asciz "\n"
     .asciz "Fault [SIGSEGV]: invalid memory access at address \1\n"

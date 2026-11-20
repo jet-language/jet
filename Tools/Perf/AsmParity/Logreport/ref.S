@@ -1158,13 +1158,13 @@ s_sp:
 s_nl:
     .ascii "\n"
 e_ts:
-    .ascii "Stop [E3001]: `panic: bad timestamp`\n"
+    .ascii "Stop: Jet.Panic: `panic: bad timestamp`\n"
     .ascii "  --> run.jet:9 in parse_millis\n"
     .ascii "    |\n"
     .ascii "9 |     (time.parse_rfc3339(stamp) ?? panic(\"bad timestamp\")).to_unix_ms()\n"
     .ascii "    |                                   ^^^^^\n"
 e_bl:
-    .ascii "Stop [E3001]: `panic: bad line`\n"
+    .ascii "Stop: Jet.Panic: `panic: bad line`\n"
 e_bl0:
     .ascii "  --> run.jet:25 in run\n"
     .ascii "     |\n"
@@ -1185,12 +1185,12 @@ e_locals:
 e_last:
     .ascii ", last_ms = "
 e_u8:
-    .ascii "Stop [E3001]: `panic: invalid input during read `"
+    .ascii "Stop: Jet.Panic: `panic: invalid input during read `"
 e_u8b:
     .ascii "`: stream did not contain valid UTF-8`\n"
     .ascii "  --> <core.prelude>:0\n"
 e_tail:
-    .ascii " Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms (I2).\n"
+    .ascii " Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms.\n"
     .ascii " Fix: Fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.\n"
-    .ascii "More: jet-lang.dev/e/E3001\n"
+    .ascii "More: jet-lang.dev/e/Jet.Panic\n"
 e_end:

@@ -8,13 +8,13 @@ env: JET_PACKAGE_STORE_DIR={work}/store
 copy: {root}/Tests/Cases/Pkg/Fixtures/Sources/unused.txt run.jet
 step: jet build run.jet
 exit: nonzero
-stderr: ~ "Error [jet.UnusedLocalBinding]" # a tidy error fails jet build
-stderr: ~ "L0101" # original predicate
+stderr: ~ "Error: Jet.UnusedLocalBinding" # a tidy error fails jet build
+stderr: ~ "Jet.UnusedLocalBinding" # original predicate
 stderr: !~ "effects:" # the failed build ends before its effect summary
-stderr: !~ "E1293" # original predicate
+stderr: !~ "Jet.DeniedLint" # original predicate
 copy: {root}/Tests/Cases/Pkg/Fixtures/Manifests/unused-deny.txt package.jet
 step: jet build run.jet
 exit: nonzero
-stderr: ~ "E1293" # original predicate
-stderr: ~ "L0101" # original predicate
-stderr: !~ "Warning [jet.UnusedLocalBinding]" # original predicate
+stderr: ~ "Jet.DeniedLint" # original predicate
+stderr: ~ "Jet.UnusedLocalBinding" # original predicate
+stderr: !~ "Warning: Jet.UnusedLocalBinding" # original predicate

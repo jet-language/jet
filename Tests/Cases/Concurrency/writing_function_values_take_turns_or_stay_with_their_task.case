@@ -9,16 +9,16 @@ env: NO_COLOR=1
 step: jet run -O0 refused.jet
 exit: 1
 stdout: = ""
-stderr: ~ "Error [jet.UseAfterMove]: `counter` was consumed by a task that captures it, so it can't be used here" # the owner's call after the task took the value
+stderr: ~ "Error: Jet.UseAfterMove: `counter` was consumed by a task that captures it, so it can't be used here" # the owner's call after the task took the value
 stderr: ~ "spawn the task in a `task.group`, whose child borrows `counter` until the join" # a function value has no copy to give
 step: jet run -O1 refused.jet
 exit: 1
 stdout: = ""
-stderr: ~ "Error [jet.UseAfterMove]: `counter` was consumed by a task that captures it, so it can't be used here" # the same refusal on O1
+stderr: ~ "Error: Jet.UseAfterMove: `counter` was consumed by a task that captures it, so it can't be used here" # the same refusal on O1
 step: jet run -O2 refused.jet
 exit: 1
 stdout: = ""
-stderr: ~ "Error [jet.UseAfterMove]: `counter` was consumed by a task that captures it, so it can't be used here" # the same refusal on O2
+stderr: ~ "Error: Jet.UseAfterMove: `counter` was consumed by a task that captures it, so it can't be used here" # the same refusal on O2
 step: jet run --checked-alloc -O0 main.jet
 exit: 0
 stdout: = "18003000\n6001\n8002000\n4000\n"

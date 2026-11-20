@@ -13,13 +13,13 @@ stdout: ~ '-[Bucket{size: 2, name: "photos"}]>' # the census reports the value a
 copy: bare-callee.jet main.jet
 step bare: jet check main.jet
 exit: nonzero
-stderr: ~ "E0740" # a value doesn't cover the bare effect
+stderr: ~ "Jet.EffectBoundExceeded" # a value doesn't cover the bare effect
 stderr: ~ "`upload` uses the effect `Bucket`, which its signature doesn't allow" # the report names the bare effect the call reaches
 stderr: ~ "doesn't cover every value of `Bucket`" # and why the value doesn't cover it
 copy: denied-value.jet main.jet
 step denied: jet check main.jet
 exit: nonzero
-stderr: ~ "E0749" # denying a value denies the bare effect, which names every value
+stderr: ~ "Jet.ProhibitedEffectReached" # denying a value denies the bare effect, which names every value
 stderr: ~ '`quiet` reaches the library effect `Bucket`, which it prohibits with `-[!Bucket{name: "photos", size: 2}]>`' # the report names the denied value
 copy: bad-values.jet main.jet
 step values: jet check main.jet

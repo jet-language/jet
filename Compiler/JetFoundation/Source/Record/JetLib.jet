@@ -449,11 +449,11 @@ pkg_jetlib_c_symbol: fn(name: String) -> String Never! {
 
 pkg_jetlib_validate_payload_digest: fn(stamp: JetLibStamp, payload: View<U8>) Err! {
     if stamp.payload_digest == "" {
-        return Err("E1341: library `{pkg_jetlib_display_name(stamp)}` has no native payload digest")
+        return Err("Jet.InvalidLibraryOutput: library `{pkg_jetlib_display_name(stamp)}` has no native payload digest")
     }
     actual: pkg_jetlib_payload_digest(payload)
     if stamp.payload_digest != actual {
-        return Err("E1341: library `{stamp.library_name}` payload digest is `{stamp.payload_digest}`, but the artifact contains `{actual}`")
+        return Err("Jet.InvalidLibraryOutput: library `{stamp.library_name}` payload digest is `{stamp.payload_digest}`, but the artifact contains `{actual}`")
     }
     return
 }
@@ -496,57 +496,57 @@ jetlib_metadata_failure: fn(reason: String, unsupported: Bool) -> JetLibMetadata
 pkg_jetlib_validate_load_metadata: fn(stamp: JetLibStamp, target: String, loader: Bool) -> JetLibMetadataFailure? Never! {
     name: if loader -> stamp.library_name else -> pkg_jetlib_display_name(stamp)
     if stamp.abi_version != (U32{JETLIB_ABI_VERSION}) {
-        return jetlib_metadata_failure("E1341: library `{name}` uses unsupported .jetlib ABI version {stamp.abi_version}; this loader accepts ABI version {JETLIB_ABI_VERSION}", true)
+        return jetlib_metadata_failure("Jet.InvalidLibraryOutput: library `{name}` uses unsupported .jetlib ABI version {stamp.abi_version}; this loader accepts ABI version {JETLIB_ABI_VERSION}", true)
     }
     if stamp.library_name == "" || stamp.library_name.contains(JETLIB_NUL) {
-        return jetlib_metadata_failure("E1341: .jetlib metadata has no valid Library name", false)
+        return jetlib_metadata_failure("Jet.InvalidLibraryOutput: .jetlib metadata has no valid Library name", false)
     }
     if stamp.entry == .Val(entry) {
         if entry == "" || entry.contains(JETLIB_NUL) {
-            return jetlib_metadata_failure("E1341: .jetlib metadata has an invalid output entry", false)
+            return jetlib_metadata_failure("Jet.InvalidLibraryOutput: .jetlib metadata has an invalid output entry", false)
         }
     }
     if stamp.compiler_build == "" || stamp.compiler_build.contains(JETLIB_NUL) {
-        return jetlib_metadata_failure("E1341: .jetlib metadata has no valid compiler build", false)
+        return jetlib_metadata_failure("Jet.InvalidLibraryOutput: .jetlib metadata has no valid compiler build", false)
     }
     if stamp.target_triple == "" || stamp.target_triple.contains(JETLIB_NUL) {
-        return jetlib_metadata_failure("E1341: .jetlib metadata has no valid target triple", false)
+        return jetlib_metadata_failure("Jet.InvalidLibraryOutput: .jetlib metadata has no valid target triple", false)
     }
     if stamp.linker_identity == "" || stamp.linker_identity.contains(JETLIB_NUL) {
-        return jetlib_metadata_failure("E1341: .jetlib metadata has no valid linker identity", false)
+        return jetlib_metadata_failure("Jet.InvalidLibraryOutput: .jetlib metadata has no valid linker identity", false)
     }
     if stamp.abi_identity != JETLIB_ABI_IDENTITY {
-        return jetlib_metadata_failure("E1341: library `{stamp.library_name}` uses unsupported native ABI identity `{stamp.abi_identity}`", true)
+        return jetlib_metadata_failure("Jet.InvalidLibraryOutput: library `{stamp.library_name}` uses unsupported native ABI identity `{stamp.abi_identity}`", true)
     }
     if !pkg_jetlib_valid_payload_digest(stamp.payload_digest) {
-        reason: if loader -> "E1341: library `{stamp.library_name}` has no valid native payload digest" else -> "E1341: library `{stamp.library_name}` has an invalid payload digest"
+        reason: if loader -> "Jet.InvalidLibraryOutput: library `{stamp.library_name}` has no valid native payload digest" else -> "Jet.InvalidLibraryOutput: library `{stamp.library_name}` has an invalid payload digest"
         return jetlib_metadata_failure(reason, false)
     }
     if stamp.target != target {
-        return jetlib_metadata_failure("E1341: library `{stamp.library_name}` targets `{stamp.target}`, but this loader targets `{target}`", true)
+        return jetlib_metadata_failure("Jet.InvalidLibraryOutput: library `{stamp.library_name}` targets `{stamp.target}`, but this loader targets `{target}`", true)
     }
     if stamp.exports.len() == 0 {
-        return jetlib_metadata_failure("E1341: library `{stamp.library_name}` has no exported functions", false)
+        return jetlib_metadata_failure("Jet.InvalidLibraryOutput: library `{stamp.library_name}` has no exported functions", false)
     }
     names := [String:Bool]{}
     symbols := [String:Bool]{}
     loop export in stamp.exports {
         if export.name == "" || export.name.contains(JETLIB_NUL) {
-            return jetlib_metadata_failure("E1341: .jetlib metadata has an invalid export name", false)
+            return jetlib_metadata_failure("Jet.InvalidLibraryOutput: .jetlib metadata has an invalid export name", false)
         }
         if export.symbol == "" || export.symbol.contains(JETLIB_NUL) || export.symbol != pkg_jetlib_c_symbol(export.name) {
-            return jetlib_metadata_failure("E1341: .jetlib export `{export.name}` has an invalid native symbol `{export.symbol}`", false)
+            return jetlib_metadata_failure("Jet.InvalidLibraryOutput: .jetlib export `{export.name}` has an invalid native symbol `{export.symbol}`", false)
         }
         if names.has_key(export.name) {
-            return jetlib_metadata_failure("E1341: .jetlib metadata repeats export `{export.name}`", false)
+            return jetlib_metadata_failure("Jet.InvalidLibraryOutput: .jetlib metadata repeats export `{export.name}`", false)
         }
         names[export.name] = true
         if symbols.has_key(export.symbol) {
-            return jetlib_metadata_failure("E1341: .jetlib metadata repeats native symbol `{export.symbol}`", false)
+            return jetlib_metadata_failure("Jet.InvalidLibraryOutput: .jetlib metadata repeats native symbol `{export.symbol}`", false)
         }
         symbols[export.symbol] = true
         if (Int{export.params}) > JETLIB_MAX_EXPORT_PARAMS || export.conventions.len() != (Int{export.params}) {
-            return jetlib_metadata_failure("E1341: .jetlib export `{export.name}` has invalid access-convention metadata", false)
+            return jetlib_metadata_failure("Jet.InvalidLibraryOutput: .jetlib export `{export.name}` has invalid access-convention metadata", false)
         }
     }
     None

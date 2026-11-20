@@ -567,9 +567,9 @@ run_check: fn(repo: String, jet: String, command: [String], scratch: String) -[E
     }
 }
 
-// A compiler diagnostic's first line: `error[...]`, `error:` or `Error [...]`.
+// A compiler diagnostic's first line: `error[...]`, `error:` or `Error: Name: `.
 diagnostic_head: fn(line: String) -> Bool Never! {
-    line.starts_with("error[") || line.starts_with("error:") || line.starts_with("Error [")
+    line.starts_with("error[") || line.starts_with("error:") || line.starts_with("Error: ")
 }
 
 Located: struct {
@@ -1193,13 +1193,13 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
     loop n in 1..<9 {
         text = "{text}error[E0308]: independent error {n}\n  --> src/shared.jet:{n}:1\n"
     }
-    text = "{text}Error [jet.StrayCharacter]: bad escape\n  --> other.jet:3:7\n    |\ncomplete diagnostic tail retained\n"
+    text = "{text}Error: Jet.StrayCharacter: bad escape\n  --> other.jet:3:7\n    |\ncomplete diagnostic tail retained\n"
     grouped: report(text, 101)
     assert(grouped.starts_with("CHECK FAILED — 9 error(s) in 2 file(s)\n"))
     loop n in 1..<9 {
         assert(grouped.contains("src/shared.jet:{n}:1: error[E0308]: independent error {n}"))
     }
-    assert(grouped.contains("\nother.jet\n  other.jet:3:7: Error [jet.StrayCharacter]: bad escape\n"))
+    assert(grouped.contains("\nother.jet\n  other.jet:3:7: Error: Jet.StrayCharacter: bad escape\n"))
     assert(grouped.ends_with("--- complete compiler output ---\n{text}"))
 }
 
@@ -1248,8 +1248,8 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
     assert_eq(unit.lines[11].line, 8)
     assert_eq(unit.lines[16].line, 3)
     assert(core_use("use core.files") && core_use("use cf: core.files") && !core_use("use jet_backend.x") && !core_use("use a b: core.x"))
-    moved: runtime_locations("Error [jet.UnknownFunction]: no\n  --> /s/unit.jet:17:5 here\n  --> other.jet:9:5\n  --> /s/unit.jet:1:1\n", "/s/unit.jet", unit.lines)
-    assert_eq(moved, "Error [jet.UnknownFunction]: no\n  --> R/Text.jet:3:5 here\n  --> other.jet:9:5\n  --> /s/unit.jet:1:1\n")
+    moved: runtime_locations("Error: Jet.UnknownFunction: no\n  --> /s/unit.jet:17:5 here\n  --> other.jet:9:5\n  --> /s/unit.jet:1:1\n", "/s/unit.jet", unit.lines)
+    assert_eq(moved, "Error: Jet.UnknownFunction: no\n  --> R/Text.jet:3:5 here\n  --> other.jet:9:5\n  --> /s/unit.jet:1:1\n")
 }
 
 #Test("a Prelude source is routed to its generator check and the prelude mode") {

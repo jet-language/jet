@@ -10,13 +10,13 @@ env: XDG_STATE_HOME={work}/state
 stdin: ReplProjectLoadsItems.fixture/input0.txt
 exit: any # original library predicates did not assert process status
 stdout|stderr: ~ "13 : Int" # original predicate
-stdout: !~ "E0102" # original predicate
-stderr: !~ "E0102" # original predicate
-stdout: !~ "E0107" # original predicate; a report names its code in its More line
-stderr: !~ "E0107" # original predicate; a report names its code in its More line
+stdout: !~ "Jet.UnknownFunction" # original predicate
+stderr: !~ "Jet.UnknownFunction" # original predicate
+stdout: !~ "Jet.UnknownName" # original predicate; a report names its code in its More line
+stderr: !~ "Jet.UnknownName" # original predicate; a report names its code in its More line
 step: jet repl
 env: NO_COLOR=1
 env: XDG_STATE_HOME={work}/state
 stdin: ReplProjectLoadsItems.fixture/input1.txt
 exit: any # original library predicates did not assert process status
-stdout|stderr: ~ "Error [" # original `error` needle came from run_transcript's `error [CODE]`; the CLI renders the fixed `Error [CODE]:` heading (Docs/Spec/diagnostics.md:64)
+stdout|stderr: ~ "Error: " # original `error` needle came from run_transcript's `error [CODE]`; the CLI renders the fixed `Error: CODE:` heading (Docs/Spec/diagnostics.md:64)

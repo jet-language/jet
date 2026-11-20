@@ -257,8 +257,8 @@ authority_narrow_failure: fn(requested: I64) -> I64 {
     length: rt_text_len(requested)
     if (length > I64{9223372036854775807} - I64{60}) { rt_seq_capacity_overflow_stop() }
     message: rt_text_builder_with_capacity(length + I64{60})
-    // One exact seed message: E0712: authority cannot narrow to `...` outside its held rights.
-    jet_rt_string_builder_push(message, rt_static_text("E0712: authority cannot narrow to `"))
+    // One exact seed message: Jet.EffectWithoutAuthority: authority cannot narrow to `...` outside its held rights.
+    jet_rt_string_builder_push(message, rt_static_text("Jet.EffectWithoutAuthority: authority cannot narrow to `"))
     rt_text_append(message, rt_text_data(requested), length)
     jet_rt_string_builder_push(message, rt_static_text("` outside its held rights"))
     // NL21: seed raw Rust panic/exit101 is a seed defect. Use the one Jet panic
@@ -629,7 +629,7 @@ effect_scope_cause: fn(node: I64, verdict: I64, marker: I64, resource: I64, leng
     size: sync_load(wrapping(node + I64{16}))
     name_end: effect_scope_line_end(data, size, I64{0})
     text: jet_rt_string_builder_new()
-    jet_rt_string_builder_push(text, if (verdict == I64{2}) -> rt_static_text("E0749: `") else -> rt_static_text("E0740: `"))
+    jet_rt_string_builder_push(text, if (verdict == I64{2}) -> rt_static_text("Jet.ProhibitedEffectReached: `") else -> rt_static_text("Jet.EffectBoundExceeded: `"))
     rt_text_append(text, data, name_end)
     jet_rt_string_builder_push(text, rt_static_text("` reached "))
     rt_text_append(text, wrapping(sync_load(wrapping(marker + I64{8})) + I64{1}), sync_load(wrapping(marker + I64{16})) - I64{1})

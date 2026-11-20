@@ -10,7 +10,7 @@ env: JET_STORE_DIR={work}/cache
 step envzero: jet run -O0 --deny=Env service.jet
 exit: 1
 stdout: = "" # the tree never starts
-stderr: ~ "Error [jet.ApplicationAuthorityDenied]: Application authority denies `Env`" # the store path's working-directory read
+stderr: ~ "Error: Jet.ApplicationAuthorityDenied: Application authority denies `Env`" # the store path's working-directory read
 stderr: ~ "This program reads environment variables" # the notice words for Env
 step envone: jet run -O1 --deny=Env service.jet
 exit: 1
@@ -23,7 +23,7 @@ stderr: ~ "Application authority denies `Env`" # the same refusal on O2
 step randzero: jet run -O0 --deny=Rand service.jet
 exit: 1
 stdout: = "" # the tree never starts
-stderr: ~ "Error [jet.ApplicationAuthorityDenied]: Application authority denies `Rand`" # the authority token's entropy draw
+stderr: ~ "Error: Jet.ApplicationAuthorityDenied: Application authority denies `Rand`" # the authority token's entropy draw
 stderr: ~ "This program draws random numbers" # the notice words for Rand
 step randone: jet run -O1 --deny=Rand service.jet
 exit: 1
@@ -36,7 +36,7 @@ stderr: ~ "Application authority denies `Rand`" # the same refusal on O2
 step timezero: jet run -O0 --deny=Time service.jet
 exit: 1
 stdout: = "" # the tree never starts
-stderr: ~ "Error [jet.ApplicationAuthorityDenied]: Application authority denies `Time`" # the record stamps' wall-clock read
+stderr: ~ "Error: Jet.ApplicationAuthorityDenied: Application authority denies `Time`" # the record stamps' wall-clock read
 stderr: ~ "This program reads the clock" # the notice words for Time
 step timeone: jet run -O1 --deny=Time service.jet
 exit: 1
@@ -52,7 +52,7 @@ stdout: = "started\n" # without a deny, the same tree starts and stops
 step homezero: jet run -O0 --deny=Env home.jet
 exit: 1
 stdout: = "" # nothing prints
-stderr: ~ "Error [jet.ApplicationAuthorityDenied]: Application authority denies `Env`" # HOME is an environment read
+stderr: ~ "Error: Jet.ApplicationAuthorityDenied: Application authority denies `Env`" # HOME is an environment read
 step homeone: jet run -O1 --deny=Env home.jet
 exit: 1
 stdout: = "" # nothing prints

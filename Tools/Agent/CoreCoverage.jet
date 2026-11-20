@@ -5,7 +5,7 @@
 // host-embedded Jet programs do. Every public declaration (methods included)
 // has its own row. Unresolved dynamic receivers stay uncovered rather than
 // crediting same-named methods. The census measures the user-callable Core
-// surface: a reserved `__` name (a user call is jet.ReservedDunderName), an
+// surface: a reserved `__` name (a user call is Jet.ReservedDunderName), an
 // extern declaration (`name: fn(…) = "symbol"`, no Jet body) and every member
 // of a compiler-private source part (Compiler/Prelude/CoreSourceParts.tsv: not
 // a Core module, not importable, its members not user items) are outside it,
@@ -531,7 +531,7 @@ body_kind: fn(source: [U8], close: Int) -> String Never! {
 
 // Whether a declaration is outside the user-callable Core surface: an extern
 // member has no Jet body, a part member is no user item, and a user call to a
-// reserved `__` name (its own or its owner type's) is jet.ReservedDunderName.
+// reserved `__` name (its own or its owner type's) is Jet.ReservedDunderName.
 outside_surface: fn(row: Function) -> Bool Never! {
     if row.foreign || row.part -> return true
     loop part in row.name.split(".") {

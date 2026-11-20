@@ -10,17 +10,19 @@
 # at least; or the program's threads waited for a CPU longer than the lens
 # trusts, and it withheld every gain, naming the wait; or the threads waited
 # that long while measured by hand, so no truth was measured; or the CPUs
-# that ran the rounds clocked down more than the lens trusts, and it flagged
-# its gains with the drop, or the hand measurement had slower CPUs than the
-# run. A measured speedup above the 30% a line 30% faster can give is an
-# error, not a pass.
+# that ran the rounds clocked down more than the lens trusts and it could
+# not fit how much slower that made a task after its CPU idled, so it
+# flagged its gains with the drop. A fit that holds warms the gains, and the
+# run is compared. A measured speedup above the 30% a line 30% faster can
+# give is an error, not a pass.
 # Which line gains more depends on the CPUs the run gets, so neither is
 # required to rank first. Each finished task is a progress point of its own.
 # A run too short to rank is refused with the reason, and the lens refuses
 # the company of lenses whose readings its delays would skew.
-# With JET_CAUSAL_CASE_PATHS naming a file, each tier's check appends the
-# outcome it took to it, with its numbers: compared, contention (the
-# profiled run's wait, or the hand measurement's) or clock.
+# Each tier's check prints the outcome it took on stderr, with its numbers
+# and the receipt's fit (slope, R² and residuals): compared, contention (the
+# profiled run's wait, or the hand measurement's) or clock. With
+# JET_CAUSAL_CASE_PATHS naming a file, it appends that line to it too.
 requires: os-name:linux
 requires: arch:x86_64
 fixture: CausalProfilePredictsSpeedup.fixture
@@ -67,6 +69,7 @@ json: file causal.jettrace doc $.content.receipt_sections[?name="causal"][0].val
 json: file causal.jettrace doc $.content.receipt_sections[?name="causal"][0].value.points[?name="task"] #= 1 # finished tasks are a point ranked apart
 json: file causal.jettrace doc $.content.receipt_sections[?name="causal"][0].value.cpu_wait_ms >= 0 # the receipt keeps the threads' wait for a CPU
 json: file causal.jettrace doc $.content.receipt_sections[?name="causal"][0].value.clock_high_mhz >= 0 # and the clocks of the CPUs they ran on
+json: file causal.jettrace doc $.content.receipt_sections[?name="causal"][0].value.clock_fit.r2_thousandths >= 0 # and the fit of its tasks' run time against the idle gap before them
 step: jet perf view causal.jettrace
 exit: 0
 stdout: ~ "causal\n  " # the view gives the lens's ranking or its refusal

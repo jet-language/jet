@@ -1,8 +1,8 @@
-Error [jet.RecursiveInlineAlways]: `pong` calls `ping`, whose calls lead back to `pong`, so `#Inline(Always)` cannot expand them
+Error: Jet.RecursiveInlineAlways: `pong` calls `ping`, whose calls lead back to `pong`, so `#Inline(Always)` cannot expand them
   --> Tests/UI/inline_always_cycle.jet:5:66
     |
   5 | #Inline(Always) pong: fn(n: Int) -> Int { if n <= 0 -> 1 else -> ping(n - 1) }
     |                                                                  ^^^^
  Why: Each inlined copy would hold the next one, so expanding the cycle would never end. `#Inline(Always)` guarantees that every direct call is inlined on every tier, or the program is refused: sema refuses a function that calls itself or closes a cycle of marked calls (E0917), one used as a value (E0918), one over the size ceiling (E0919), a `#Scrub` routine (E1016), one that reads `context.trace` (E1017) and one with a foreign body (E1021).
  Fix: Drop `#Inline(Always)` from one function of the cycle (use `#Inline` as a hint), or break the cycle.
-More: jet-lang.dev/e/E0917
+More: jet-lang.dev/e/Jet.RecursiveInlineAlways

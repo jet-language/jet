@@ -81,8 +81,8 @@ terminal_test_env: fn(name: String, value: String?) {
     }
     collector.record(false, "E1272", "nix-bridge", "Nix realization needs a bridge", "the native Nix bridge is not available", "install the bridge and retry the realization.")
     rendered: collector.render()
-    assert_eq(terminal_test_count(rendered, "Error [jet.NixCacheAdmissionFailed]"), 1)
-    assert_eq(terminal_test_count(rendered, "Error [jet.MissingNixOutput]"), 1)
+    assert_eq(terminal_test_count(rendered, "Error: Jet.NixCacheAdmissionFailed"), 1)
+    assert_eq(terminal_test_count(rendered, "Error: Jet.MissingNixOutput"), 1)
     assert_eq(terminal_test_count(rendered, "Next:"), 1)
     assert(rendered.contains("7 more objects failed with the same cause."))
 }
@@ -150,7 +150,7 @@ terminal_test_env: fn(name: String, value: String?) {
 #Test("terminal permanent text prints whole above the region") {
     esc: terminal_esc()
     drawn: terminal_region_replace(TerminalRegion{text: "", rows: 0}, [String]{"Downloading 2/3"}).region
-    card: "Error [jet.X]: failed\n Why: because\n Fix: retry\n"
+    card: "Error: Jet.X: failed\n Why: because\n Fix: retry\n"
     write: terminal_region_print(drawn, card)
     // The region is erased, the card follows whole, and the region is drawn
     // again under it.

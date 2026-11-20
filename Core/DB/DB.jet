@@ -2714,7 +2714,7 @@ priv scope_confine: fn(driver: &DBDriver, policy: RowPolicy, scoped: SQL, allow_
     table: sql_lower_text(policy.table)
     loop name in tables {
         if sql_lower_text(name) != table {
-            return Val(db_error("E2477: a scope over `{policy.table}` cannot reach `{name}`; query it through the store or a scope over it"))
+            return Val(db_error("Jet.ScopedQueryOutsideScope: a scope over `{policy.table}` cannot reach `{name}`; query it through the store or a scope over it"))
         }
     }
     target: sql_target_index(tokens, tokens[0].word)
@@ -4453,7 +4453,7 @@ priv driver_cache_parity_probe: fn() Never! {
     scope: store.with_policy(RowPolicy{table: "tasks", owner: true}, "alice")
     assert_eq((scope.query(sql_raw("SELECT 1 AS one")) ?? panic("select 1: {err}")).len(), 1)
     assert_eq((scope.query(sql_raw("SELECT title FROM tasks")) ?? panic("tasks: {err}")).len(), 1)
-    outside: "E2477: a scope over `tasks` cannot reach `other`; query it through the store or a scope over it"
+    outside: "Jet.ScopedQueryOutsideScope: a scope over `tasks` cannot reach `other`; query it through the store or a scope over it"
     reads: [{sql: String, message: String}]{
         {sql: "SELECT title FROM other", message: outside},
         {sql: "SELECT other.title FROM other JOIN tasks", message: outside},

@@ -4342,9 +4342,9 @@ labeled_line: fn(line: String, label: String) -> Bool Never! {
     after.chars().len() >= 2 && after.trim_start() == after
 }
 
-// /^Error \[jet\.[A-Z]\w+\]: \S.+/m on one line.
+// /^Error: Jet\.[A-Z]\w+: \S.+/m on one line.
 error_line: fn(line: String) -> Bool Never! {
-    if !line.starts_with("Error [jet.") -> return false
+    if !line.starts_with("Error: Jet.") -> return false
     bytes: line.removesuffix("\r").bytes()
     at := 11
     if at >= bytes.len() -> return false
@@ -4353,7 +4353,7 @@ error_line: fn(line: String) -> Bool Never! {
     at += 1
     end: word_end(bytes, at)
     if end == at -> return false
-    labeled_line(byte_tail(String.from_bytes_lossy(bytes), end), "]: ")
+    labeled_line(byte_tail(String.from_bytes_lossy(bytes), end), ": ")
 }
 
 // The blank-line-separated entries of a diagnostics stream.
@@ -4402,16 +4402,16 @@ validate_core_api_syntax_coverage: fn(root: String) -[FS]> Int LedgerError! {
     }
     loop pair in
         ([{path: String, name: String}]{
-        {path: "Tests/UI/variadic_not_last.stderr", name: "jet.MisplacedVariadicParameter"},
-        {path: "Tests/UI/spread_bad_call.stderr", name: "jet.SpreadWithoutVariadic"},
-        {path: "Tests/UI/yield_type_mismatch.stderr", name: "jet.YieldTypeMismatch"},
-        {path: "Tests/UI/user_policy_bad_args.stderr", name: "jet.MissingArgument"},
+        {path: "Tests/UI/variadic_not_last.stderr", name: "Jet.MisplacedVariadicParameter"},
+        {path: "Tests/UI/spread_bad_call.stderr", name: "Jet.SpreadWithoutVariadic"},
+        {path: "Tests/UI/yield_type_mismatch.stderr", name: "Jet.YieldTypeMismatch"},
+        {path: "Tests/UI/user_policy_bad_args.stderr", name: "Jet.MissingArgument"},
     }) {
         diagnostics: read_source(root, pair.path) ?? return Err(err)
         complete := false
         found := false
         loop entry in diagnostic_entries(diagnostics) {
-            if found || !entry[0].starts_with("Error [{pair.name}]: ") -> next
+            if found || !entry[0].starts_with("Error: {pair.name}: ") -> next
             found = true
             has_error := false
             has_why := false

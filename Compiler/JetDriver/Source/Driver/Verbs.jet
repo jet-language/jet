@@ -11,6 +11,7 @@ use jet_foundation.[
     TextEdit,
     DIAGNOSTIC_ERROR,
     DIAGNOSTIC_LINT,
+    diagnostic_display_name,
     diagnostic_explanation,
     diagnostic_explanation_render,
     diagnostic_from_registry,
@@ -51,9 +52,10 @@ JetDriverVerbOutput: struct {
 // Accessibility lints that only `jet lint --a11y` shows.
 jet_driver_is_a11y_lint: fn(code: String) -> Bool Never! { code == "E2930" || code == "E2931" }
 
-// The one dim teaching pointer after a rendered report.
+// The one dim teaching pointer after a rendered report: the report's name,
+// or a library's own code.
 jet_driver_explain_pointer_line: fn(code: String, color: Bool) -> String Never! {
-    diagnostic_theme_dim(color, "Run `jet explain {code}` to learn more")
+    diagnostic_theme_dim(color, "Run `jet explain {diagnostic_display_name(code)}` to learn more")
 }
 
 // `jet explain <CODE>` for a registered diagnostic code: the essay on stdout,

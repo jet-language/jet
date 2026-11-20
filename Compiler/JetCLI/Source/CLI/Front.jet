@@ -2633,9 +2633,9 @@ jet_cli_explain: fn(jet_argv: [String], args: [String], color: Bool, json: Bool,
     }
     if args.len() == 2 && jet_cli_explain_policy(query, color, json) == .Val(plan) -> return plan
     if jet_cli_explain_registration(query, color, json) == .Val(plan) -> return plan
-    // `jet.` names Jet's own diagnostic types, every one a registry row
-    // (found above): an unknown one is an unknown code, not a module to load.
-    if query.starts_with("jet.") {
+    // `Jet.` names Jet's own diagnostics, every one a registry row (found
+    // above): an unknown one is an unknown code, not a module to load.
+    if query.starts_with("Jet.") {
         return JetCLIPlan.Done{output: jet_driver_explain_code(Val(query), color)}
     }
     if jet_cli_is_diagnostic_type_path(query) {

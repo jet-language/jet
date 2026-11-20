@@ -50,7 +50,7 @@ step: jet run run.jet
 cwd: cpp
 env: NO_COLOR=1
 exit: nonzero
-stdout+stderr: ~ "E3208" # original mixed_assert_failed_with helper422-428
+stdout+stderr: ~ "Jet.BindingGenerationFailed" # original mixed_assert_failed_with helper422-428
 copy: archive.before cpp/libcounter_impl.a
 copy: cpp/counter.hpp source.before
 append: cpp/counter.hpp "\n// stale binding source\n"
@@ -58,7 +58,7 @@ step: jet run run.jet
 cwd: cpp
 env: NO_COLOR=1
 exit: nonzero
-stdout+stderr: ~ "E3208" # original mixed_assert_failed_with helper422-428
+stdout+stderr: ~ "Jet.BindingGenerationFailed" # original mixed_assert_failed_with helper422-428
 copy: source.before cpp/counter.hpp
 step: jet check run.jet
 cwd: cpp
@@ -113,7 +113,7 @@ step: jet check run.jet
 cwd: cpp
 env: NO_COLOR=1
 exit: nonzero
-stdout+stderr: ~ "E3208" # original mixed_assert_failed_with helper422-428
+stdout+stderr: ~ "Jet.BindingGenerationFailed" # original mixed_assert_failed_with helper422-428
 step: jet inspect bind cpp counter.hpp --target {jet-build-target} --clang {cap:clang} --ar {cap:ar} --pkg counter --namespace acme -I {work}/cpp -L {work}/cpp -l counter_impl -l pthread
 cwd: cpp
 env: NO_COLOR=1
@@ -131,7 +131,7 @@ step: jet run run.jet
 cwd: cpp
 env: NO_COLOR=1
 exit: nonzero
-stdout+stderr: ~ "E3201" # original mixed_assert_failed_with helper422-428
+stdout+stderr: ~ "Jet.CLibraryNotFound" # original mixed_assert_failed_with helper422-428
 step: jet inspect bind cpp counter.hpp --target {jet-build-target} --clang {cap:clang} --ar {cap:ar} --pkg counter --namespace acme -I {work}/cpp -L {work}/cpp -l counter_impl -l pthread
 cwd: cpp
 env: NO_COLOR=1
@@ -149,7 +149,7 @@ step: jet run run.jet
 cwd: cpp
 env: NO_COLOR=1
 exit: nonzero
-stdout+stderr: ~ "E3208" # original mixed_assert_failed_with helper422-428
+stdout+stderr: ~ "Jet.BindingGenerationFailed" # original mixed_assert_failed_with helper422-428
 step: jet inspect bind cpp counter.hpp --target {jet-build-target} --clang {cap:clang} --ar {cap:ar} --pkg counter --namespace acme -I {work}/cpp -L {work}/cpp -l counter_impl -l pthread
 cwd: cpp
 env: NO_COLOR=1

@@ -237,7 +237,7 @@ int main(void) {
     equal(jet_rt_handle_display_jet_err(clone),"outer");
     equal(jet_rt_handle_show_jet_err(clone),"outer");
     equal(jet_rt_handle_debug_jet_err(clone),"outer");
-    equal(jet_render_err(clone),"Error [E42]: outer (type: Source)\n  cause: inner\n  context (main.jet:7): note\n\t\"\\\177\302\200\n  conversion: Source -> Target");
+    equal(jet_render_err(clone),"Error: E42: outer (type: Source)\n  cause: inner\n  context (main.jet:7): note\n\t\"\\\177\302\200\n  conversion: Source -> Target");
     equal(jet_error_report_json(clone,NULL),"{\"schema\":\"jet.err/v1\",\"message\":\"outer\",\"code\":\"E42\",\"cause\":{\"schema\":\"jet.err/v1\",\"message\":\"inner\",\"code\":null,\"cause\":null},\"typed_identity\":\"Source\",\"context_frames\":[{\"text\":\"note\\n\\t\\\"\\\\\\u007f\\u0080\",\"file\":\"main.jet\",\"line\":7}],\"conversion_history\":[{\"source\":\"Source\",\"target\":\"Target\"}],\"details\":{\"variant\":\"Variant\",\"fields\":{\"n\":[1,{\"x\":true}]},\"source_span\":{\"start\":10,\"end\":20}}}");
     W getter_live=jet_rt_program_allocator_fact(2);
     for (unsigned i=0;i<1000;i++) {
@@ -250,10 +250,11 @@ int main(void) {
         assert(jet_rt_program_allocator_fact(2)==getter_live);
     }
     jet_rt_handle_drop_jet_err(clone);
-    // Empty code differs from None; absent projections never initialize slots.
+    // Empty code differs from None in projections; a report heading names no
+    // empty code, so it renders as None does. Absent projections never initialize slots.
     message=text(""); code=text(""); value=jet_rt_record_new_jet_err(message,&code,NULL);
     jet_rt_string_drop(message); jet_rt_string_drop(code);
-    equal(jet_render_err(value),"Error []: ");
+    equal(jet_render_err(value),"Error: ");
     projected_cause=NULL; assert(!jet_rt_record_get_jet_err_cause(value,&projected_cause) && !projected_cause);
     jet_rt_handle_drop_jet_err(value);
     assert(jet_rt_program_allocator_fact(2)==0); // LIVE BYTES, not allocation history

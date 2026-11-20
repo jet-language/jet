@@ -1,4 +1,4 @@
-Error [jet.ImpureCallInPureContext]: `write` writes a cell through `c`
+Error: Jet.ImpureCallInPureContext: `write` writes a cell through `c`
   --> Tests/UI/Effects/pure_fn_writing_through_parameter_is_e3401.jet:8:5
     |
   8 |     c.value += 1
@@ -7,9 +7,9 @@ Error [jet.ImpureCallInPureContext]: `write` writes a cell through `c`
  Fix: Take the cell as a `&` parameter so the caller lends it for writing, return the new value instead, or drop the `-[]>` bound from `write` so its effects are inferred
  Denial: pure
  Call chain: write
-More: jet-lang.dev/e/E3401
+More: jet-lang.dev/e/Jet.ImpureCallInPureContext
 
-Error [jet.ImpureCallInPureContext]: `relay` reaches a write of a cell through `c`
+Error: Jet.ImpureCallInPureContext: `relay` reaches a write of a cell through `c`
   --> Tests/UI/Effects/pure_fn_writing_through_parameter_is_e3401.jet:13:5
     |
  13 |     c.value += 1
@@ -18,4 +18,4 @@ Error [jet.ImpureCallInPureContext]: `relay` reaches a write of a cell through `
  Fix: Move the write out of `write_back`, or drop the `-[]>` bound from `relay` so its effects are inferred
  Denial: pure
  Call chain: relay → write_back
-More: jet-lang.dev/e/E3401
+More: jet-lang.dev/e/Jet.ImpureCallInPureContext

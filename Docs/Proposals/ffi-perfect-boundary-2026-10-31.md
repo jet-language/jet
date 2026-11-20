@@ -239,7 +239,7 @@ fn first_two(db: sql.Database) -> String sql.SqliteError! {
 
 ```text
 $ jet check mistake.jet
-Error [jet.UseWhileWriteActive]: `stmt` is written by `&stmt.step()` while `first` still borrows it.
+Error: Jet.UseWhileWriteActive: `stmt` is written by `&stmt.step()` while `first` still borrows it.
   --> mistake.jet:6:10
     |
   5 |     first :: stmt.column_text(0)
@@ -250,7 +250,7 @@ Error [jet.UseWhileWriteActive]: `stmt` is written by `&stmt.step()` while `firs
     |          ------- the view is used here
  Why: SQLite frees a row's text when the statement steps; the pack ties the view to `stmt`.
  Fix: Keep a copy before stepping: `first :: stmt.column_text(0).copy()`.
-More: jet-lang.dev/e/E0204
+More: jet-lang.dev/e/Jet.UseWhileWriteActive
 ```
 
 Competitor: **Rust `rusqlite`**, which is about 15,000 lines of hand-written safe wrapper over
@@ -454,7 +454,7 @@ PROPOSED in ballot D-FFI-CALLBACK3, which amends D-CABI-CALLBACK1.
 Today the same program is rejected, from `Tests/UI/cffi_callback_capture.stderr`:
 
 ```text
-Error [jet.NonCAbiType]: `fn(I32) -[]> I32` is not a C-compatible type for a foreign function parameter or return.
+Error: Jet.NonCAbiType: `fn(I32) -[]> I32` is not a C-compatible type for a foreign function parameter or return.
  Why: `#Import` / `#Export` functions must use types with a stable C ABI at the edge.
  Fix: Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.
 ```
@@ -486,7 +486,7 @@ fn run() {
 
 ```text
 $ jet check ticker.jet
-Error [E3233]: the callback for `on_tick` runs on the library's own thread, but it writes `seen`, which lives in this task.
+Error: E3233: the callback for `on_tick` runs on the library's own thread, but it writes `seen`, which lives in this task.
   --> ticker.jet:10:28
     |
  10 |     sub :: clock.on_tick((event) -> {
@@ -594,18 +594,18 @@ fn leak_rows() -> View<U8> {
 ```
 
 ```text
-Error [jet.ReadOnlyValueNotOwned]: `image.rows()` borrows `image`, which closes when `leak_rows` returns.
+Error: Jet.ReadOnlyValueNotOwned: `image.rows()` borrows `image`, which closes when `leak_rows` returns.
   --> leak.jet:3:5
  Why: the rows belong to libpng's decoder [pack c/libpng@1.6: rows valid while decoder lives].
  Fix: Return an owned copy, `image.rows().copy()`, or return the `Image` itself.
-More: jet-lang.dev/e/E0120
+More: jet-lang.dev/e/Jet.ReadOnlyValueNotOwned
 ```
 
 With no fact, the safe default for an unannotated `char*` return is: copy it, never free it,
 and warn.
 
 ```text
-Warning [W3230]: `legacy_name` returns `char*` and nothing says who frees it; Jet copies it and frees nothing.
+Warning: W3230: `legacy_name` returns `char*` and nothing says who frees it; Jet copies it and frees nothing.
  Why: freeing memory the library still owns would crash; never freeing memory you own leaks.
  Fix: If the caller frees it, add `#Close(free)` to the row (or to the pack); if it is borrowed, add `#Borrowed`.
 More: jet-lang.dev/e/W3230
@@ -902,7 +902,7 @@ serving http://localhost:8080  (chart.wasm 182 KB, chart.js loaded from the hang
 If the server sends `["12", 30]`:
 
 ```text
-[browser console] Stop [E3234]: `response.json<[Int]>()` got a string at index 0 where `Int` was declared.
+[browser console] Stop: E3234: `response.json<[Int]>()` got a string at index 0 where `Int` was declared.
  Why: values from JavaScript are checked at the crossing; Jet never lets an untyped value in.
  Fix: Declare the field as `String` and parse it, or fix the server to send numbers.
 ```
@@ -1182,7 +1182,7 @@ dies:
 ```text
 $ jet run thumbs
 ok.png: 640x480
-Stop [E3236]: native code crashed: SIGSEGV in fastimg (decode.c:211 fi_inflate_row) during `fi.decode_file`.
+Stop: E3236: native code crashed: SIGSEGV in fastimg (decode.c:211 fi_inflate_row) during `fi.decode_file`.
   last crossing: thumbs/run.jet:5:12  fi.decode_file("evil.png")  thread main
  Why: in-process C shares this program's memory; a fault there ends the program.
  Fix: Run fastimg isolated: add `isolate: { fastimg: .Wasm }` to package.jet (its C source is available).
@@ -1286,11 +1286,11 @@ $ jet run popcount.jet
 If the signature and the C disagree, the error names both sides:
 
 ```text
-Error [jet.InlineForeignBuildFailed]: `#FFI(c)` body defines `int32_t bits_c(uint32_t)` but the Jet signature says `U64`.
+Error: Jet.InlineForeignBuildFailed: `#FFI(c)` body defines `int32_t bits_c(uint32_t)` but the Jet signature says `U64`.
   --> popcount.jet:8:4
  Why: inline foreign contracts are ABI boundaries; the binder read the body with the pinned clang.
  Fix: Change the parameter to `U32`, or the C parameter to `uint64_t`.
-More: jet-lang.dev/e/E3222
+More: jet-lang.dev/e/Jet.InlineForeignBuildFailed
 ```
 
 Competitors:
@@ -1358,7 +1358,7 @@ is a typed error, not undefined behavior. For a `.so` with no note, the same two
 `#Unsafe("reason")`, exactly as ratified in D-FFI-PRIMS1:
 
 ```text
-Error [E3237]: `libdemo.so` has no contract note, so `lib.symbol<fn() -> I32>` cannot be checked.
+Error: E3237: `libdemo.so` has no contract note, so `lib.symbol<fn() -> I32>` cannot be checked.
  Fix: Wrap the lookup in `#Unsafe("libdemo exports int32_t demo_version(void)")`, or rebuild the plugin with Jet.
 ```
 
@@ -1388,7 +1388,7 @@ At build time:
 
 ```text
 $ jet build shapes
-Error [E3225]: the contract for `c.geom` changed since it was frozen (.jet/lock, accepted 2026-10-02).
+Error: E3225: the contract for `c.geom` changed since it was frozen (.jet/lock, accepted 2026-10-02).
   geom.h 1.4 -> 2.0 (sha256 41c0… -> 9e7d…)
   row quad_area:  out-parameter `float *out_area`  ->  `double *out_area`      result F32 -> F64
   row geom_name:  result ownership  borrowed (static)  ->  owned (free)        [header: __attribute__((malloc(free)))]
@@ -1403,7 +1403,7 @@ soname:
 
 ```text
 $ ./shapes
-Stop [E3226]: libgeom.so.1 at /usr/lib/libgeom.so.1 does not match the contract this program was built with.
+Stop: E3226: libgeom.so.1 at /usr/lib/libgeom.so.1 does not match the contract this program was built with.
   missing symbol version GEOM_1.4 (library offers GEOM_2.0)
   row quad_area: library's debug info says `double *out_area`, program expects `float *`
  Why: calling it would write 8 bytes into a 4-byte slot.
@@ -1439,13 +1439,13 @@ called from Jet, and C++ called back into Jet:
 
 ```text
 $ jet run sim
-Stop [E3001]: index 12 is out of range for a list of length 12
+Stop: Jet.Panic: index 12 is out of range for a list of length 12
   in Jet      sim/run.jet:31:17          on_contact(a, b)               [callback, call-scoped]
   in C++      physics/world.cpp:208      World::dispatch_contacts()     [libphysics.a]
   in C++      physics/world.cpp:144      World::step(float)             [libphysics.a]
   ── crossing: cpp.physics World.step (shim physics_World_step) ──
   in Jet      sim/run.jet:19:9           run()
- Why: …  Fix: …  More: jet-lang.dev/e/E3001
+ Why: …  Fix: …  More: jet-lang.dev/e/Jet.Panic
  note: the stop did not unwind through C++. `on_contact` has no failure value for C++, so Jet
        printed this report at the crossing and ended the program.
 ```
@@ -1637,11 +1637,11 @@ built .jet/build/release/dodge (1.9 MB static, raylib 5.5 linked statically; sta
 Mistakes the design catches:
 
 ```text
-Error [E3231]: `rl.DrawText` must run on the main thread [pack c/raylib@5.5: thread .Main], but this call is inside `task`.
+Error: E3231: `rl.DrawText` must run on the main thread [pack c/raylib@5.5: thread .Main], but this call is inside `task`.
   --> dodge/run.jet:44:9
  Fix: Draw from `run()`, or send the text to the main loop through a channel.
 
-Error [jet.UseAfterMove]: `ship` is used after it was moved by `rl.UnloadTexture(^ship)`.
+Error: Jet.UseAfterMove: `ship` is used after it was moved by `rl.UnloadTexture(^ship)`.
  Fix: Let `ship` close at scope end, or stop using it after unloading.
 ```
 

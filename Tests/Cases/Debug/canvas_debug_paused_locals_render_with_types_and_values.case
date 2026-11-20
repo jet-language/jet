@@ -1,0 +1,57 @@
+# The paused frame's locals reach the Canvas Debug view with their Jet types
+# and current values through the production protocol (scenario
+# debug_paused_locals). A native session stops at a breakpoint span; every
+# local of the frame is listed as name, type and value: a String, a list, a
+# struct, a Bool and an Int. A `next` moves the frame on, and the Int it
+# assigned shows its new value, never the one read at the earlier stop. The
+# client is the same raw Core.net HTTP client the other production Canvas
+# debug cases use.
+fixture: CanvasDebugPausedLocals.fixture
+env: NO_COLOR=1
+step: jet build client/run.jet
+exit: 0
+copy: client/.jet/build/run canvas-client
+session canvas raw: jet dev jet_debug_canvas_paused_locals.jet --canvas --canvas-port 0
+env: JET_CANVAS_BROWSER=/definitely/missing/canvas-browser
+recv canvas until ~ "Canvas: http" within 60s # jet dev prints the Canvas URL on stdout once it serves
+capture: url = text stdout.after_first("Canvas: ").line(0)
+capture: revision = sha256 file jet_debug_canvas_paused_locals.jet
+write: request.json canvas_debug_paused_locals_render_with_types_and_values.first.json
+step first: {work}/canvas-client
+env: S1_CANVAS_URL={cap:url}
+env: S1_METHOD=POST
+env: S1_PATH=/__jet_canvas/debug
+exit: 0
+stdout: ^= "HTTP/1.1 200" # the native session runs
+stdout: ~ "\"runtime_state\":\"live\"" # the values come from the paused program
+stdout: ~ "\"active_line\":12," # it stops at the breakpoint span 162:172, `count += 1`
+stdout: ~ "{\"name\":\"name\",\"type\":\"String\",\"value\":\"\\\"hello world\\\"\"}" # a String, quoted
+stdout: ~ "{\"name\":\"xs\",\"type\":\"[Int]\",\"value\":\"[1, 2, 3]\"}" # a list and its elements
+stdout: ~ "{\"name\":\"p\",\"type\":\"Point\",\"value\":\"Point{x: 3, y: 4}\"}" # a struct and its members
+stdout: ~ "{\"name\":\"ready\",\"type\":\"Bool\",\"value\":\"true\"}" # a Bool
+stdout: ~ "{\"name\":\"count\",\"type\":\"Int\",\"value\":\"1\"}" # the Int before the line assigns it
+stdout: !~ "<Unavailable>" # every local is read
+capture: session = text stdout.after_first("\"id\":\"canvas-debug-").split("\"", 0).prepend("canvas-debug-")
+write: request.json canvas_debug_paused_locals_render_with_types_and_values.next.json
+step next: {work}/canvas-client
+env: S1_CANVAS_URL={cap:url}
+env: S1_METHOD=POST
+env: S1_PATH=/__jet_canvas/debug
+exit: 0
+stdout: ^= "HTTP/1.1 200" # the same session steps over the line
+stdout: ~ "\"id\":\"{cap:session}\"" # on the session the first request opened
+stdout: ~ "\"active_line\":13," # to the print
+stdout: ~ "{\"name\":\"count\",\"type\":\"Int\",\"value\":\"2\"}" # the Int shows the value the line assigned
+stdout: !~ "{\"name\":\"count\",\"type\":\"Int\",\"value\":\"1\"}" # not the value read at the earlier stop
+stdout: ~ "{\"name\":\"p\",\"type\":\"Point\",\"value\":\"Point{x: 3, y: 4}\"}" # the other locals are read again
+write: request.json canvas_debug_paused_locals_render_with_types_and_values.stop.json
+step stop: {work}/canvas-client
+env: S1_CANVAS_URL={cap:url}
+env: S1_METHOD=POST
+env: S1_PATH=/__jet_canvas/debug
+exit: 0
+stdout: ^= "HTTP/1.1 200" # the session ends
+stdout: ~ "\"state\":\"stopped\"" # and says so
+signal canvas: INT
+wait: canvas
+exit: any # the case asserts the debug responses, not the dev server's shutdown status

@@ -29,16 +29,16 @@ end when
 step pastnone: jet run -O0 past.jet
 exit: 70
 stdout: = "33\n"
-stderr: ~ "Stop [E3010]" # the View's bounds stop, whose source line follows
+stderr: ~ "Stop: Jet.ArithmeticOrBoundsFailure" # the View's bounds stop, whose source line follows
 stderr: ~ "print(ints[4])" # the stop quotes the faulting index
 step pastfull: jet run -O2 past.jet
 exit: 70
 stdout: = "33\n"
-stderr: ~ "Stop [E3010]" # the View's bounds stop, whose source line follows
+stderr: ~ "Stop: Jet.ArithmeticOrBoundsFailure" # the View's bounds stop, whose source line follows
 stderr: ~ "print(ints[4])" # the stop quotes the faulting index
 step released: jet check released.jet
 exit: 1
-stderr: ~ "Error [jet.OwnerMovedWhileViewed]" # the release moves the owner while its View is still read
+stderr: ~ "Error: Jet.OwnerMovedWhileViewed" # the release moves the owner while its View is still read
 stderr: ~ "released.jet:37:13" # at `release(words)`
 step releasedrun: jet run -O2 released.jet
 exit: == released

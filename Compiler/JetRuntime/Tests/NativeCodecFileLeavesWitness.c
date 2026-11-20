@@ -204,7 +204,7 @@ static void csv(void) {
     assert(jet_rt_codec_csv(s, (uintptr_t)csv_int_row, &integer, &rows, &errors, &count) == 0 && count == 1);
     jet_rt_string_drop(s);
     text_is(jet_rt_record_get_field_error_path((void *)errors[0]), "");
-    text_is(jet_rt_record_get_field_error_reason((void *)errors[0]), "E2701: CSV row 2, line 2, column 2 \xe2\x80\x94 quote inside an unquoted field");
+    text_is(jet_rt_record_get_field_error_reason((void *)errors[0]), "Jet.MalformedRingInput: CSV row 2, line 2, column 2 \xe2\x80\x94 quote inside an unquoted field");
     jet_rt_handle_drop_field_error((void *)errors[0]); jet_rt_free(errors, (W)sizeof(uintptr_t), 8);
 }
 // A checked Decode callback for `struct { port: Int }`: the field's errors
@@ -237,13 +237,13 @@ static void env(void) {
     jet_rt_string_drop(setting);
     assert(jet_rt_codec_env(prefix, file, &allow, names, (uintptr_t)env_port, &value, &errors, &count) == 0 && count == 1);
     text_is(jet_rt_record_get_field_error_path((void *)errors[0]), "port");
-    text_is(jet_rt_record_get_field_error_reason((void *)errors[0]), "E2416: env var JET_WITNESS_PORT -> port: expected Int, found text \"eighty\"");
+    text_is(jet_rt_record_get_field_error_reason((void *)errors[0]), "Jet.EnvDecodeFailed: env var JET_WITNESS_PORT -> port: expected Int, found text \"eighty\"");
     jet_rt_handle_drop_field_error((void *)errors[0]); jet_rt_free(errors, (W)sizeof(uintptr_t), 8);
     assert(jet_rt_logical_env_unset(key) == 1);
     jet_rt_string_drop(key); jet_rt_string_drop(file);
     file = text("/etc/.env");
     assert(jet_rt_codec_env(prefix, file, &allow, names, (uintptr_t)env_port, &value, &errors, &count) == 0 && count == 1);
-    text_is(jet_rt_record_get_field_error_reason((void *)errors[0]), "E2416: Dotenv.file must be project-relative");
+    text_is(jet_rt_record_get_field_error_reason((void *)errors[0]), "Jet.EnvDecodeFailed: Dotenv.file must be project-relative");
     jet_rt_handle_drop_field_error((void *)errors[0]); jet_rt_free(errors, (W)sizeof(uintptr_t), 8);
     jet_rt_string_drop(file); jet_rt_string_drop(prefix); jet_rt_string_drop(names);
 }

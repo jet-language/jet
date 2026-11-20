@@ -1,9 +1,12 @@
 # A first `print` that calls a program function, at a stop outside the
 # entry's file, answers in under 250 ms on a program of 20,000 functions.
-# The stop is in lib.jet's `step`, which the entry prog.jet calls; the
-# package's sources are compiled cut to the functions the expression
-# reaches (DebugCompile.jet jet_cli_debug_eval_sliced), not the program.
-# Before, it compiled the program again: 4,300 ms (gate jet of 5f090c020d).
+# The stop is in lib.jet's `step`, which the entry prog.jet calls. The
+# session's held check of the package's cut gains f_1, a function of the
+# stop's source, and its code calls the image's (DebugCompile.jet
+# jet_cli_debug_eval_held_append); while that check opens, the package's
+# sources are compiled cut to the functions the expression reaches
+# (jet_cli_debug_eval_sliced), not the program. Before, it compiled the
+# program again: 4,300 ms (gate jet of 5f090c020d).
 # The print reads `total`, 0 at the stop, and calls f_1(x) = (x + 1) % 1000.
 # gen/gen.jet writes lib.jet and prog.jet: step's first call, the stop, is
 # lib.jet line 100003.

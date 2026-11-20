@@ -17,7 +17,7 @@ env: NO_COLOR=1
 step direct: jet run run.jet -- --minutes 1
 exit: 0
 stdout: = script_to_system_continuity_preserves_one_source.out
-stdout|stderr: ~ "L0104" # original compiler_text predicate; needle cannot span labeled stream boundary
+stdout|stderr: ~ "Jet.UnusedPrivateFn" # original compiler_text predicate; needle cannot span labeled stream boundary
 step dev: jet dev run.jet
 exit: 0
 stdout: = script_to_system_continuity_preserves_one_source.out
@@ -46,7 +46,7 @@ capture: package_before_install = opt-bytes file package.jet
 capture: lock_before_install = opt-bytes file .jet/lock
 step install: jetpack tool install ./ --as pulse --trust --no-color
 exit: != 0 # original predicate: !status.success()
-stdout|stderr: ~ "E1272" # original compiler_text predicate; needle cannot span labeled stream boundary
+stdout|stderr: ~ "Jet.MissingNixOutput" # original compiler_text predicate; needle cannot span labeled stream boundary
 stdout|stderr: ~ "need a pinned compatibility output" # original compiler_text predicate
 stdout|stderr: ~ "does not invoke an installed Nix executable" # original compiler_text predicate
 stdout|stderr: ~ "Provide a pinned fixture or verified Hangar output" # original compiler_text predicate

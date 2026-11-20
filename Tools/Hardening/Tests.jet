@@ -587,8 +587,8 @@ forged: fn(decls: String, body: String) -> Generated Never! {
     assert_eq(generated_severity(changed.class), "P0")
     refused := clean.copy()
     refused.check.exit = Val(1)
-    refused.check.stderr = "Error [jet.UnknownName]: Nothing named `x` exists here\n  --> case.jet:3:5\n"
-    assert_eq(classify(program, refused).mismatch, "{REJECTED_VALID}|{CHECK_STAGE}|exit 1 Error [jet.UnknownName]: Nothing named `x` exists here")
+    refused.check.stderr = "Error: Jet.UnknownName: Nothing named `x` exists here\n  --> case.jet:3:5\n"
+    assert_eq(classify(program, refused).mismatch, "{REJECTED_VALID}|{CHECK_STAGE}|exit 1 Error: Jet.UnknownName: Nothing named `x` exists here")
     missing_tier := clean.copy()
     missing_tier.runs = [TierRun]{clean.runs[1].copy()}
     assert_eq(classify(program, missing_tier).class, UNLOWERED)

@@ -45,20 +45,20 @@ stdout+stderr: ~ "marker=query: unsupported: marker facts of the run store" # th
 step: jet inspect facts --store=run --kind=marker run.receipt
 env: NO_COLOR=1
 exit: nonzero
-stderr: ~ "E2105" # the query refusal's code; the rest of the report is the renderer's
+stderr: ~ "Jet.DriverOperationFailed" # the query refusal's code; the rest of the report is the renderer's
 stderr: ~ "unsupported: marker facts of the run store" # a run holds no markers
 step: jet inspect facts --store=run --kind=claim missing.receipt
 env: NO_COLOR=1
 exit: nonzero
-stderr: ~ "E2105" # the query refusal's code; the rest of the report is the renderer's
+stderr: ~ "Jet.DriverOperationFailed" # the query refusal's code; the rest of the report is the renderer's
 stderr: ~ "receipt: unavailable before emission: no run receipt at `missing.receipt`" # a missing receipt is no store, named by its path
 step: jet inspect facts --store=run --kind=claim corrupt.receipt
 env: NO_COLOR=1
 exit: nonzero
-stderr: ~ "E2105" # the query refusal's code; the rest of the report is the renderer's
+stderr: ~ "Jet.DriverOperationFailed" # the query refusal's code; the rest of the report is the renderer's
 stderr: ~ "`corrupt.receipt` is not a valid run receipt: receipt digest does not authenticate its body" # the refusal names the file and the failed digest check
 step: jet inspect facts --store=run --kind=claim
 env: NO_COLOR=1
 exit: nonzero
-stderr: ~ "E2104" # the usage refusal's code; its text names the CLI's own help
+stderr: ~ "Jet.InvalidCommandInput" # the usage refusal's code; its text names the CLI's own help
 stderr: ~ "name its RECEIPT file" # the run store's missing-operand refusal

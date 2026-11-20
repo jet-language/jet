@@ -11701,7 +11701,7 @@ AllowReason: struct {
         }
 
         fix: fn(self) -> String {
-            "Add the reason slot: `#Allow(jet.LintName, \"why this lint does not apply\")`."
+            "Add the reason slot: `#Allow(Jet.LintName, \"why this lint does not apply\")`."
         }
     }
 }
@@ -20858,7 +20858,7 @@ InvalidTimeFormat: struct {
         detail: true,
         no_fix: .Behavior,
 
-        what: fn(self) -> String { "`E2703: {self.detail}`" }
+        what: fn(self) -> String { "`Jet.InvalidTimeFormat: {self.detail}`" }
 
         why: fn(self) -> String {
             "The checked formatter accepts one closed token grammar so a typo cannot silently become literal output, and zone fields cannot claim context that the value does not carry."
@@ -20883,7 +20883,9 @@ EpochOutOfRange: struct {
         detail: true,
         no_fix: .Behavior,
 
-        what: fn(self) -> String { "`E2704: Unix epoch {self.unit} do not fit in Int`" }
+        what: fn(self) -> String {
+            "`Jet.EpochOutOfRange: Unix epoch {self.unit} do not fit in Int`"
+        }
 
         why: fn(self) -> String {
             "The DateTime is representable in seconds, but scaling it to the requested subsecond unit would overflow the current Int carrier; clamping would silently change the instant."
@@ -21692,7 +21694,7 @@ MissingRequiredField: struct {
         fix_next: "Mark the field optional, give it a compile-time default, or provide the missing input key.",
 
         what: fn(self) -> String {
-            "`E2410: missing required field `{self.field}`` (runtime `FieldError`)."
+            "`Jet.MissingRequiredField: missing required field `{self.field}`` (runtime `FieldError`)."
         }
 
         why: fn(self) -> String {
@@ -21744,7 +21746,9 @@ UnknownDecodedField: struct {
         detail: true,
         no_fix: .Ambiguous,
 
-        what: fn(self) -> String { "`E2412: unknown field `{self.field}`` (runtime `FieldError`)." }
+        what: fn(self) -> String {
+            "`Jet.UnknownDecodedField: unknown field `{self.field}`` (runtime `FieldError`)."
+        }
 
         why: fn(self) -> String {
             "The struct is marked `#Codable(unknown: .Deny)` and the input carried a key the struct doesn't declare, so decoding fails instead of silently dropping it."

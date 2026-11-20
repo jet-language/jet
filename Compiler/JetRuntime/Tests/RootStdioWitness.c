@@ -68,7 +68,7 @@ static char **witness_argv;
 // The direct machine panic captures header/reason/prelude/footer as the
 // root's report; jet_rt_main writes those bytes after cleanup, unre-rendered.
 static const char root_stop_report[] =
-    "Stop [E3001]: `panic: stdio-root-stop`\n"
+    "Stop: Jet.Panic: `panic: stdio-root-stop`\n"
     "  --> <core.prelude>:0\n"
     " Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, "
     "a bounds/key check triggered at runtime, or another program-side stop. "
@@ -78,7 +78,7 @@ static const char root_stop_report[] =
     " Fix: Fix the logic that led to the failure. Program-side stops exit 70 "
     "through the shared boundary; unhandled entry errors print their report "
     "and exit 1; exit 101 is reserved for Jet defects.\n"
-    "More: jet-lang.dev/e/E3001\n";
+    "More: jet-lang.dev/e/Jet.Panic\n";
 // An unhandled entry error is the same root stop with status 1: its full
 // report (ErrReport.jet, no journey planted) follows the cleanup output.
 static const char entry_error_report[] = "Error: stdio-entry-error\n";

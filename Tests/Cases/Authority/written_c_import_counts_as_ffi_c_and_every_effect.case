@@ -14,16 +14,16 @@ stdout: = "pid>0=true\n"
 stderr: = "jet run: effects used: FFI.C(\"c\"), IO\n"
 step bounded: jet check bounded/run.jet
 exit: 1 # the IO ceiling does not hold a C call
-stderr: ~ "E0740" # the IO ceiling does not hold a C call
+stderr: ~ "Jet.EffectBoundExceeded" # the IO ceiling does not hold a C call
 stderr: ~ "uses the effect `Browser, DB, Env, Exec, FFI, FS, GPU, Log, Meta, Net, Rand, Secret, Time`" # every effect; the C call's `FFI.C("c")` is a scoped need that the bare `FFI` covers, so it is not named twice
 step denied: jet check denied/run.jet
 exit: 1 # the package denies FFI
-stderr: ~ "E0749" # the package denies FFI
+stderr: ~ "Jet.ProhibitedEffectReached" # the package denies FFI
 stderr: ~ "authority: { deny: [FFI] }" # the deny row is named
 step shell: jet run -A shell/run.jet
 exit: 1 # the package denies Exec and FS
 stdout: = "" # no user code ran
-stderr: ~ "E0749" # the C call reaches the denied effects
+stderr: ~ "Jet.ProhibitedEffectReached" # the C call reaches the denied effects
 stderr: ~ "which the package denies with `authority: { deny: [" # the deny row is named
 file: escaped.txt absent # the shell never ran
 file: shell/escaped.txt absent # the shell never ran

@@ -5,11 +5,12 @@
 // note line, and rebuilt. The store is off: a build reads and writes it only
 // while saved work is reused (BUILD_REUSE_SAVED_WORK), so every build compiles.
 use {
+    cache_crypto: core.crypto
     cli_files: core.files
     cli_sys: core.sys
-    jet_backend.[X64Executable]
-    jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileResult, JetDriverComptimeInputRecord, JetDriverLoweringInputs, JetDriverVerbOutput]
-    jet_foundation.[BUILD_REUSE_SAVED_WORK, BuildOptions, build_options_key, sha256_hex, sha256_hex_bytes]
+    jet_backend.[X64DebugSource, X64Executable]
+    jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileResult, JetDriverComptimeInputRecord, JetDriverLoweringInputs, JetDriverVerbOutput, jet_driver_display_path, jet_driver_entry_root_path]
+    jet_foundation.[BUILD_REUSE_SAVED_WORK, BuildOptions, build_options_key, build_options_value, sha256_hex, sha256_hex_bytes]
     jet_pkg_model.[JET_VERSION]
     jetpack_artifact_store.[ArtifactRestore, ArtifactStore]
 }
@@ -36,12 +37,18 @@ jet_cli_build_stored: fn(file: String, name: String, color: Bool, options: Build
     }
     store := ArtifactStore?{None}
     key := ""
+    // Each source hashed once, for the key and the image's source record.
+    digests := [X64DebugSource]{}
     if result.internal_problem == .None && result.complete {
         if jet_cli_build_option_gate_refusal(file, snapshot.roots[0].canonical_path, result, options, color) == .Val(refused) {
             return JetCLIStoredBuild.Failed{output: refused}
         }
-        if BUILD_REUSE_SAVED_WORK && !jet_cli_link_steps(options) {
-            key = jet_cli_build_cache_key(file, name, options, snapshot, result.comptime_inputs) ?? ""
+        keyed: BUILD_REUSE_SAVED_WORK && !jet_cli_link_steps(options)
+        if keyed || build_options_value(options, "debug_info") != "false" {
+            digests = jet_cli_source_digests(snapshot)
+        }
+        if keyed {
+            key = jet_cli_build_cache_key(file, name, options, snapshot, digests, result.comptime_inputs) ?? ""
         }
         if {
             !BUILD_REUSE_SAVED_WORK -> {
@@ -96,7 +103,7 @@ jet_cli_build_stored: fn(file: String, name: String, color: Bool, options: Build
         }
         if verbose -> log = "{log}[build] cache miss -> compiling\n"
     }
-    built := jet_cli_build_binary(file, name, "build", color, options, result, inputs, snapshot, invocation)
+    built := jet_cli_build_binary(file, name, "build", color, options, result, inputs, snapshot, invocation, digests)
     if built.move() == {
         .Failed(failure) -> JetCLIStoredBuild.Failed{output: failure}
         .Image(executable, path) -> JetCLIStoredBuild.Written{path: path, log: "{log}{jet_cli_build_store(store, key, path, executable, verbose)}", reused: false}
@@ -182,12 +189,13 @@ jet_cli_build_store_off: fn(verbose: Bool, reason: String) -> String Never! {
 // file's), the runtime pack it links, the Core sources it compiles (the named
 // tree's files, else the Core built into the compiler, which the compiler's
 // part names), the build options and host, every source of the authorized
-// snapshot, every comptime input the compile read (`comptime_inputs`: an
+// snapshot (`digests`, jet_cli_source_digests, and each foreign cache file),
+// every comptime input the compile read (`comptime_inputs`: an
 // edited `embed_file` asset is a new key) and the functions the package lays
 // out first (jet_cli_hot_text: an edited hot-text.list is a new image), each
 // part length-framed and hashed together. None when the compiler, its runtime
 // or a named tree's Core sources can't be identified.
-jet_cli_build_cache_key: fn(file: String, name: String, options: BuildOptions, snapshot: JetDriverAuthorizedSourceSnapshot, comptime_inputs: [JetDriverComptimeInputRecord]) -[FS, Env]> String? Never! {
+jet_cli_build_cache_key: fn(file: String, name: String, options: BuildOptions, snapshot: JetDriverAuthorizedSourceSnapshot, digests: [X64DebugSource], comptime_inputs: [JetDriverComptimeInputRecord]) -[FS, Env]> String? Never! {
     parts := [String]{"jet-build-binary-v1", JET_VERSION, name, build_options_key(options), "{cli_sys.arch()}-{cli_sys.name()}"}
     compiler: if jet_cli_compiler_identity() == {
         .Val(identity) -> identity
@@ -203,11 +211,14 @@ jet_cli_build_cache_key: fn(file: String, name: String, options: BuildOptions, s
             parts.push(jet_cli_identity_key("file", cli_files.stat(path) ?? return None))
         }
     } else { parts.push("core built in") }
+    // The sources by their paths from the entry root, which itself names
+    // where they are.
+    parts.push(jet_driver_entry_root_path(snapshot))
+    loop source in digests {
+        parts.push("{source.path}")
+        parts.push(sha256_hex_bytes(source.digest))
+    }
     loop root in snapshot.roots {
-        loop source in root.files {
-            parts.push(source.path)
-            parts.push(sha256_hex(source.source))
-        }
         loop source in root.foreign_cache_files {
             parts.push(source.path)
             parts.push(sha256_hex(source.source))
@@ -225,4 +236,29 @@ jet_cli_build_cache_key: fn(file: String, name: String, options: BuildOptions, s
     }
     framed: loop part in parts -> "{part.len()}:{part}"
     Val(sha256_hex(framed.join("\n")))
+}
+
+// Each source of `snapshot`'s roots (their `.jet` files and package
+// manifests; not their foreign caches), hashed once: its path from the
+// entry root (jet_driver_display_path), as the compile names it, and the
+// sha256 of its text. A build's store key (jet_cli_build_cache_key) and its
+// image's source record (`.debug_jetsource`, jet_cli_native_object) take
+// them, and `jet debug` proves a source unchanged since the build with them
+// (DebugCompile.jet). 33 bytes of the record a source, besides its path.
+jet_cli_source_digests: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> [X64DebugSource] Never! {
+    entry_root: jet_driver_entry_root_path(snapshot)
+    digests := [X64DebugSource]{}
+    loop root in snapshot.roots {
+        loop source in root.files {
+            digests.push(X64DebugSource{path: jet_driver_display_path(entry_root, source.path), digest: cache_crypto.sha256(source.source).as_bytes()})
+        }
+    }
+    digests
+}
+
+// The source record an image built under `options` carries: none without
+// `debug_info`, whose image has no debug sections.
+jet_cli_build_digests: fn(snapshot: JetDriverAuthorizedSourceSnapshot, options: BuildOptions) -> [X64DebugSource] Never! {
+    if build_options_value(options, "debug_info") == "false" -> return [X64DebugSource]{}
+    jet_cli_source_digests(snapshot)
 }

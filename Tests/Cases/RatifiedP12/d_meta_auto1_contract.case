@@ -28,7 +28,7 @@ exit: 1
 stderr: ~ "`Mixed` doesn't support `==`" # `#!Equatable` refuses the generated equality
 stderr: ~ "--> main.jet:16:11" # a == b
 stderr: ~ "`<` can't compare or combine" # `#!Comparable` refuses the generated order
-stderr: ~ "jet-lang.dev/e/E0109" # the operator-capability code
+stderr: ~ "jet-lang.dev/e/Jet.OperatorTypeMismatch" # the operator-capability code
 stderr: ~ "--> main.jet:20:11" # c < d
 stderr: !~ "main.jet:19:" # Unordered keeps its generated equality
 stderr: ~ "2 problems found" # exactly the two refusals
@@ -37,7 +37,7 @@ exit: 1
 stderr: ~ "`Plain` doesn't support `==`" # deny: [auto_derive] refuses the silent equality
 stderr: ~ "--> main.jet:19:11" # c == d
 stderr: ~ "`<` can't compare or combine" # and the silent order
-stderr: ~ "jet-lang.dev/e/E0109" # the operator-capability code
+stderr: ~ "jet-lang.dev/e/Jet.OperatorTypeMismatch" # the operator-capability code
 stderr: ~ "--> main.jet:20:11" # c < d
 stderr: !~ "main.jet:15:" # #Equatable still opts Marked in
 stderr: !~ "main.jet:16:" # #Comparable still opts Marked in
@@ -45,9 +45,9 @@ stderr: ~ "2 problems found" # exactly the two silent derives
 step boolean: jet check boolean/main.jet
 exit: 1
 stderr: ~ "`policy.auto_derive` is not a field" # the retired boolean has no meaning
-stderr: ~ "jet-lang.dev/e/E1215" # the unknown-field code
+stderr: ~ "jet-lang.dev/e/Jet.InvalidPackageManifest" # the unknown-field code
 step optin: jet check optin/main.jet
 exit: 1
 stderr: ~ "`Point` has no method `display`" # Display is never generated
 stderr: ~ "--> main.jet:9:29" # the call to the missing method
-stderr: ~ "jet-lang.dev/e/E0102" # the missing-member code
+stderr: ~ "jet-lang.dev/e/Jet.UnknownFunction" # the missing-member code

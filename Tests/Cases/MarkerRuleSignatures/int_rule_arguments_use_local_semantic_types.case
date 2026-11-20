@@ -8,9 +8,9 @@ env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jet check valid/main.jet
 exit: 0 # tests/marker_rule_signatures.rs:452 no E0930/E0762
-stderr: !~ "E0930" # tests/marker_rule_signatures.rs:452 no E0930/E0762
-stderr: !~ "E0762" # tests/marker_rule_signatures.rs:452 no E0930/E0762
+stderr: !~ "Jet.MarkerArgumentMismatch" # tests/marker_rule_signatures.rs:452 no E0930/E0762
+stderr: !~ "Jet.ContextFieldTypeMismatch" # tests/marker_rule_signatures.rs:452 no E0930/E0762
 step: jet check wrong/main.jet
 exit: 1 # tests/marker_rule_signatures.rs:464 E0930 once; :469 no E0762
-stderr: ~ "E0930" # tests/marker_rule_signatures.rs:464 E0930 once; :469 no E0762
-stderr: !~ "E0762" # tests/marker_rule_signatures.rs:464 E0930 once; :469 no E0762
+stderr: ~ "Jet.MarkerArgumentMismatch" # tests/marker_rule_signatures.rs:464 E0930 once; :469 no E0762
+stderr: !~ "Jet.ContextFieldTypeMismatch" # tests/marker_rule_signatures.rs:464 E0930 once; :469 no E0762

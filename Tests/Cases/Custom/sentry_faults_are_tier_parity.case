@@ -56,14 +56,14 @@ stderr: ~ "Runtime fault [R0803]" # the report around the code carries the fault
 stderr: ~ "unsafe_sentries_misaligned_list.jet:7:15, in #Unsafe gate" # the faulting read's line and column
 stderr: ~ "This raw `read` needs an aligned pointer, but address 0x" # the faulting address varies with ASLR
 stderr: ~ "is not aligned to 8 bytes." # the faulting address varies with ASLR
-stderr: !~ "R0801" # the fault is not misread as an extent fault
+stderr: !~ "Jet.RawAccessOutsideProvenance" # the fault is not misread as an extent fault
 step: jet build unsafe_sentries_misaligned_list/unsafe_sentries_misaligned_list.jet
 step: built
 exit: 70
 stdout: empty
 stderr: ~ "Runtime fault [R0803]" # the report around the code carries the faulting address, which varies with ASLR
 stderr: ~ "is not aligned to 8 bytes." # the faulting address varies with ASLR
-stderr: !~ "R0801" # the fault is not misread as an extent fault
+stderr: !~ "Jet.RawAccessOutsideProvenance" # the fault is not misread as an extent fault
 # Sentries are a development-tier watch: a plain release build runs the read unwatched
 # (the same split as Examples/Memory/Unsafe/UnsafeSentries.o2.out), so the misaligned
 # little-endian read of `1, 2` at byte offset 1 prints 2 << 56.

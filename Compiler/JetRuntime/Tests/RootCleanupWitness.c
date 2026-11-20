@@ -73,7 +73,7 @@ extern void jet_ctx_push_deadline(int64_t, int64_t);
 extern void jet_ctx_pop_deadline(int64_t);
 extern void jet_task_sleep_ms_defaulted(int64_t);
 
-static const unsigned char report[] = "Error [E3001]: fixture\nMore: jet-lang.dev/e/E3001";
+static const unsigned char report[] = "Error: Jet.Panic: fixture\nMore: jet-lang.dev/e/Jet.Panic";
 static void take(int64_t root, int64_t expected_code, const unsigned char *bytes, size_t length) {
     int64_t code = INT64_MIN;
     int64_t record = jet_rt_root_take_stop(root, WORD(&code));
@@ -321,10 +321,10 @@ int main(int argc, char **argv, char **envp) {
         assert(jet_rt_session_status() == 0);
     } else if (!strcmp(mode, "deadline")) {
         static const unsigned char deadline[] =
-            "Error [E3003]: `deadline exceeded while waiting in time sleep`.\n"
+            "Error: Jet.DeadlineExceeded: `deadline exceeded while waiting in time sleep`.\n"
             " Why: A wait/IO point observed an active `#Deadline(…)` budget and the remaining time reached zero before the operation completed.\n"
             " Fix: Raise the deadline budget, shorten the work before the wait point, or remove/adjust the ambient deadline for this scope.\n"
-            "More: jet-lang.dev/e/E3003";
+            "More: jet-lang.dev/e/Jet.DeadlineExceeded";
         int64_t deadline_save[2];
         jet_ctx_push_deadline(-1, WORD(deadline_save));
         jet_task_sleep_ms_defaulted(0);

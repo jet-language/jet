@@ -24,17 +24,17 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
 #Test("UI plain success ignores lints; failures retain renderer and exact normalized paths") {
     call: kit_ui_invocation("run: fn() {{}}", "Tests/UI/example.jet", false)
     assert_eq(call.argv, ["check", "Tests/UI/example.jet"])
-    assert_eq(kit_ui_actual(call, kit_ui_test_run(0, "Warning [jet.SameEnumGuardTable]: advisory\n")), "(no errors)\n")
-    report: "Error [jet.OperatorTypeMismatch]: mismatch\n\n1 problem found\nRun `jet explain E0109` to learn more\n"
-    assert_eq(kit_ui_actual(call, kit_ui_test_run(1, report)), "Error [jet.OperatorTypeMismatch]: mismatch\n")
-    assert_eq(kit_ui_rendered_only("Error [jet.OperatorTypeMismatch]: mismatch\n\n1 problem found\nnot a hint\n"), "Error [jet.OperatorTypeMismatch]: mismatch\n\n1 problem found\nnot a hint\n")
+    assert_eq(kit_ui_actual(call, kit_ui_test_run(0, "Warning: Jet.SameEnumGuardTable: advisory\n")), "(no errors)\n")
+    report: "Error: Jet.OperatorTypeMismatch: mismatch\n\n1 problem found\nRun `jet explain Jet.OperatorTypeMismatch` to learn more\n"
+    assert_eq(kit_ui_actual(call, kit_ui_test_run(1, report)), "Error: Jet.OperatorTypeMismatch: mismatch\n")
+    assert_eq(kit_ui_rendered_only("Error: Jet.OperatorTypeMismatch: mismatch\n\n1 problem found\nnot a hint\n"), "Error: Jet.OperatorTypeMismatch: mismatch\n\n1 problem found\nnot a hint\n")
     crlf: "\r\n"
     assert_eq(kit_ui_normalize("Tests/UI/project/workspace.jet", "/staged/Tests/UI/project/member.jet{crlf}Blocking waiting for file lock on package cache\n", "/staged"), "/tmp/member.jet\n")
     lint: kit_ui_invocation("", "Tests/UILint/one.jet", true)
     assert_eq(lint.argv, ["check", "--verbose", "Tests/UILint/one.jet"])
-    assert_eq(kit_ui_actual(lint, kit_ui_test_run(0, "Warning [jet.SameEnumGuardTable]: lint\n\nOK: `one.jet` has no errors (1 warning)\nRun `jet explain L0302` to learn more\n")), "Warning [jet.SameEnumGuardTable]: lint\n")
+    assert_eq(kit_ui_actual(lint, kit_ui_test_run(0, "Warning: Jet.SameEnumGuardTable: lint\n\nOK: `one.jet` has no errors (1 warning)\nRun `jet explain Jet.SameEnumGuardTable` to learn more\n")), "Warning: Jet.SameEnumGuardTable: lint\n")
     all: kit_ui_invocation("// @all_diags\nrun: fn() {{}}", "Tests/UI/example.jet", false)
-    assert_eq(kit_ui_actual(all, kit_ui_test_run(0, "Warning [jet.DivergentStatePaths]: split\n\nOK: `example.jet` has no errors (1 warning)\nRun `jet explain L0152` to learn more\n")), "Warning [jet.DivergentStatePaths]: split\n")
+    assert_eq(kit_ui_actual(all, kit_ui_test_run(0, "Warning: Jet.DivergentStatePaths: split\n\nOK: `example.jet` has no errors (1 warning)\nRun `jet explain Jet.DivergentStatePaths` to learn more\n")), "Warning: Jet.DivergentStatePaths: split\n")
     assert_eq(kit_ui_actual(all, kit_ui_test_run(0, "")), "(no errors)\n")
 }
 
@@ -43,15 +43,15 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     entry: KitEntry{path: "Tests/UI/example.jet", expected: "Tests/UI/example.stderr", project: "Tests/UI", suite: "ui", mode: "plain"}
     call: kit_ui_invocation("", entry.path, false)
     ctx: kit_ui_test_context(root, "case")
-    short: "Error [jet.OperatorTypeMismatch]: mismatch\n  --> example.jet:2:4\n Why: example.jet must stay in the message\n  --> imported.jet:8:3\n"
-    canonical: "Error [jet.OperatorTypeMismatch]: mismatch\n  --> Tests/UI/example.jet:2:4\n Why: example.jet must stay in the message\n  --> imported.jet:8:3\n"
+    short: "Error: Jet.OperatorTypeMismatch: mismatch\n  --> example.jet:2:4\n Why: example.jet must stay in the message\n  --> imported.jet:8:3\n"
+    canonical: "Error: Jet.OperatorTypeMismatch: mismatch\n  --> Tests/UI/example.jet:2:4\n Why: example.jet must stay in the message\n  --> imported.jet:8:3\n"
     assert_eq(kit_ui_primary_source_headers(entry.path, short), canonical)
     kit_exec_write(files.join(root, entry.expected), canonical)
     assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(1, short), short, ctx).status, "PASS")
     kit_exec_write(files.join(root, entry.expected), short)
     assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(1, canonical), canonical, ctx).status, "PASS")
     loop changed in
-        [short.replace("jet.OperatorTypeMismatch", "jet.ArgumentTypeMismatch"), short.replace("mismatch", "different"), short.replace(":2:4", ":2:5"), short.replace("Why: example.jet", "Why: Tests/UI/example.jet"), short.replace("imported.jet", "elsewhere.jet")] {
+        [short.replace("Jet.OperatorTypeMismatch", "Jet.ArgumentTypeMismatch"), short.replace("mismatch", "different"), short.replace(":2:4", ":2:5"), short.replace("Why: example.jet", "Why: Tests/UI/example.jet"), short.replace("imported.jet", "elsewhere.jet")] {
         assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(1, changed), changed, ctx).status, "FAIL")
     }
     files.remove_all(root) ?? panic("remove primary-source scratch: {err}")
@@ -195,12 +195,12 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     kit_exec_write(files.join(root, "Tests/UI/project/state/authored"), "state")
     kit_exec_write(files.join(root, "Tests/UI/published.published.snapshot"), "type = Record\nfield = old\n")
     loop path in ["Tests/UI/bad.stderr", "Tests/UI/project/stderr"] {
-        kit_exec_write(files.join(root, path), "Error [jet.OperatorTypeMismatch]: mismatch\n")
+        kit_exec_write(files.join(root, path), "Error: Jet.OperatorTypeMismatch: mismatch\n")
     }
     loop path in ["Tests/UI/clean.stderr", "Tests/UI/published.stderr", "Tests/UI/extension.stderr"] {
         kit_exec_write(files.join(root, path), "(no errors)\n")
     }
-    kit_exec_write(files.join(root, "Tests/UILint/lint.warn"), "Warning [jet.SameEnumGuardTable]: lint\n")
+    kit_exec_write(files.join(root, "Tests/UILint/lint.warn"), "Warning: Jet.SameEnumGuardTable: lint\n")
     kit_ui_stage(root, root, true, kit_test_checkout_options(root).ui_corpora)
     entries: kit_ui_discover(kit_ui_test_context(root, "discovery"))
     loop (index, entry) in entries {
@@ -222,9 +222,9 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
         kit_exec_write(files.join(root, path), "run: fn() {{}}\n")
     }
     loop path in ["Tests/UI/owned.stderr", "Tests/UI/unowned.stderr", "Tests/UI/dir_owned/stderr"] {
-        kit_exec_write(files.join(root, path), "Error [jet.UnknownName]: other\n")
+        kit_exec_write(files.join(root, path), "Error: Jet.UnknownName: other\n")
     }
-    kit_exec_write(files.join(root, "Tests/UI/stale.stderr"), "Error [jet.OperatorTypeMismatch]: mismatch\n")
+    kit_exec_write(files.join(root, "Tests/UI/stale.stderr"), "Error: Jet.OperatorTypeMismatch: mismatch\n")
     kit_exec_write(kit_test_ledger(root), "# repo-relative ID\tcard\treason\nTests/UI/owned\t#4868\towned ui mismatch\nTests/UI/stale\t#4869\tstale ui row\nTests/UI/dir_owned\t#4870\towned ui project\n")
     kit_ui_stage(root, root, true, kit_test_checkout_options(root).ui_corpora)
     entries: kit_ui_discover(kit_ui_test_context(root, "discovery"))
@@ -279,7 +279,7 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     assert_eq(kit_ui_requirements("// @requires {met}\nrun: fn() {{}}\n//\t@requires\t{missing}\n// @requires_not\n"), [met, missing])
     assert_eq(kit_ui_invocation("// @requires {missing}\n", "a.jet", false).refused, "")
     kit_exec_write(files.join(root, "Tests/UI/needs_tool.jet"), "run: fn() {{}}\n// @requires {missing}\n")
-    kit_exec_write(files.join(root, "Tests/UI/needs_tool.stderr"), "Error [jet.UnknownName]: never compared\n")
+    kit_exec_write(files.join(root, "Tests/UI/needs_tool.stderr"), "Error: Jet.UnknownName: never compared\n")
     // The CLI double passes only `clean` entries; `needs_tool` would fail if it ran.
     kit_exec_write(files.join(root, "Tests/UI/clean_companion.jet"), "run: fn() {{}}\n")
     kit_exec_write(files.join(root, "Tests/UI/clean_companion.fixed.jet"), "// @requires {met}\n// @requires {missing}\nrun: fn() {{}}\n")
@@ -344,7 +344,7 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     root: kit_ui_test_scratch("public-cli")
     fixture: "// @jetpack_e1250\nrun: fn() {{}}\n"
     kit_exec_write(files.join(root, "Tests/UI/unlocked.jet"), fixture)
-    kit_exec_write(files.join(root, "Tests/UI/unlocked.stderr"), "Error [jet.UnlockedToolchainChannel]: unlocked toolchain\n")
+    kit_exec_write(files.join(root, "Tests/UI/unlocked.stderr"), "Error: Jet.UnlockedToolchainChannel: unlocked toolchain\n")
     context: kit_ui_test_context(root, "case")
     entries: kit_ui_discover(context)
     assert_eq(entries.len(), 1)
@@ -377,7 +377,7 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     assert_eq(report.argv, ["lint", "Tests/UILint/report.jet"])
     assert_eq(report.exit, "any")
     assert_eq(report.streams, "lint")
-    assert_eq(kit_ui_rendered_only("Warning [jet.HiddenAllocContext]: advice\n\n1 report found\nRun `jet explain L0506` to learn more\n"), "Warning [jet.HiddenAllocContext]: advice\n")
+    assert_eq(kit_ui_rendered_only("Warning: Jet.HiddenContextAllocation: advice\n\n1 report found\nRun `jet explain Jet.HiddenContextAllocation` to learn more\n"), "Warning: Jet.HiddenContextAllocation: advice\n")
     files.remove_all(root) ?? panic("remove public CLI scratch: {err}")
 }
 
@@ -388,32 +388,35 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     ctx := kit_ui_test_context(root, "scratch")
     ctx.bless.ids = [entry.path]
     assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(0, ""), "", ctx).status, "FAIL")
-    assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(1, "Warning [jet.SameEnumGuardTable]: lint\n"), "Warning [jet.SameEnumGuardTable]: lint\n", ctx).status, "FAIL")
-    kit_exec_write(files.join(root, entry.expected), "Warning [jet.SameEnumGuardTable]: lint\nWarning [jet.RepeatedListHead]: another\n")
-    assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(0, "Warning [jet.SameEnumGuardTable]: lint\n"), "Warning [jet.SameEnumGuardTable]: lint\n", ctx).status, "REFUSED")
+    assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(1, "Warning: Jet.SameEnumGuardTable: lint\n"), "Warning: Jet.SameEnumGuardTable: lint\n", ctx).status, "FAIL")
+    kit_exec_write(files.join(root, entry.expected), "Warning: Jet.SameEnumGuardTable: lint\nWarning: Jet.RepeatedListHead: another\n")
+    assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(0, "Warning: Jet.SameEnumGuardTable: lint\n"), "Warning: Jet.SameEnumGuardTable: lint\n", ctx).status, "REFUSED")
     ctx.bless.allow_shrink = [entry.path]
-    assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(0, "Warning [jet.SameEnumGuardTable]: lint\n"), "Warning [jet.SameEnumGuardTable]: lint\n", ctx).status, "PASS")
-    assert_eq(files.read(files.join(root, entry.expected)) ?? "", "Warning [jet.SameEnumGuardTable]: lint\n")
+    assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(0, "Warning: Jet.SameEnumGuardTable: lint\n"), "Warning: Jet.SameEnumGuardTable: lint\n", ctx).status, "PASS")
+    assert_eq(files.read(files.join(root, entry.expected)) ?? "", "Warning: Jet.SameEnumGuardTable: lint\n")
     files.remove_all(root) ?? panic("remove UI bless scratch: {err}")
 }
 
 // A tidy lint fails `jet check` and renders as an error; a fixture whose check
-// fails on lints alone still compiled, and one with a real error did not.
+// fails on lints alone (each heading names a `.Lint` row) still compiled, and
+// one with a real error did not.
 #Test("a UI lint fixture may fail its check on tidy lints alone") {
     root: kit_ui_test_scratch("tidy")
     entry: KitEntry{path: "Tests/UILint/lint.jet", expected: "Tests/UILint/lint.warn", project: "Tests/UILint", suite: "ui", mode: "lint"}
     call: kit_ui_invocation("", entry.path, true)
     ctx: kit_ui_test_context(root, "scratch")
-    tidy: "Error [jet.UnusedImport]: unused\nMore: jet-lang.dev/e/L0103\n"
+    registry: "UnusedImport: struct {{\n    impl Diagnostic {{\n        code: \"L0103\",\n        severity: .Lint,\n    }}\n}}\n\nStrayCharacter: struct {{\n    impl Diagnostic {{\n        code: \"E0001\",\n    }}\n}}\n"
+    kit_exec_write(files.join(root, "Compiler/Prelude/Diagnostics.jet"), registry)
+    tidy: "Error: Jet.UnusedImport: unused\nMore: jet-lang.dev/e/Jet.UnusedImport\n"
     kit_exec_write(files.join(root, entry.expected), tidy)
     assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(1, tidy), tidy, ctx).status, "PASS")
-    broken: "{tidy}\nError [jet.TypeMismatch]: broken\nMore: jet-lang.dev/e/E0001\n"
+    broken: "{tidy}\nError: Jet.StrayCharacter: broken\nMore: jet-lang.dev/e/Jet.StrayCharacter\n"
     assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(1, broken), broken, ctx).status, "FAIL")
     files.remove_all(root) ?? panic("remove UI tidy scratch: {err}")
 }
 
 #Test("UI coverage independently derives source codes report openers and allowances") {
-    row: KitUIRegistryRow{code: "E0109", name: "jet.OperatorTypeMismatch", active: true}
+    row: KitUIRegistryRow{code: "E0109", name: "Jet.OperatorTypeMismatch", active: true, lint: false}
     kept := [String]{}
     assert_eq(kit_ui_set_coverage([row], ["E0109"], [], "", kept).status, "FAIL")
     assert_eq(kit_ui_set_coverage([row], ["E0109"], [], "E0109\tleft-only\tTower #2093\n", kept).status, "PASS")
@@ -424,20 +427,23 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     over := ""
     loop _ in 0..<153 -> over = "{over}E0109\tleft-only\tTower #2093\n"
     assert(kit_ui_set_coverage([row], ["E0109"], [], over, kept).detail.contains("ceiling 152"))
-    assert_eq(kit_ui_extract_reports("Error [jet.OperatorTypeMismatch]: root\n Warning [jet.SameEnumGuardTable]: indented\n Fix: E0001\nStop [E3003]: runtime\nLint [L0302]: lint\nError [jet.Unknown]: unregistered\n", [row]), ["E0109", "E3003", "L0302"])
+    stop: KitUIRegistryRow{code: "E3003", name: "Jet.DeadlineExceeded", active: true, lint: false}
+    lint: KitUIRegistryRow{code: "L0302", name: "Jet.SameEnumGuardTable", active: true, lint: true}
+    assert_eq(kit_ui_extract_reports("Error: Jet.OperatorTypeMismatch: root\n Warning: Jet.SameEnumGuardTable: indented\n Fix: E0001\nStop: Jet.DeadlineExceeded: runtime\nLint: Jet.SameEnumGuardTable: lint\nError: Jet.Unknown: unregistered\nError: FFI01: foreign\nError: couldn't read it: no\n", [row, stop, lint]), ["E0109", "E3003", "L0302", "FFI01"])
     assert_eq(kit_ui_extract_source("\"E0109\" [L0302] \"FS\" \"E-WEB-ABI-TYPE\" \"JT0001\""), ["E0109", "L0302", "E-WEB-ABI-TYPE", "JT0001"])
-    parsed: kit_ui_registry("// header\nA: struct {{\n    impl Diagnostic {{\n        code: \"E0109\",\n        structured_fix: .CryptoMisuse,\n        no_fix: None,\n        what: fn(self) -> String {{ \"w\" }}\n    }}\n}}\n\nB: struct {{\n    path: String,\n\n    impl Diagnostic {{\n        code: \"E0001\",\n        stage: [.Jet, .Parse],\n    }}\n}}\n\nC: struct {{\n    impl Diagnostic {{\n        code: \"E0004\",\n        status: .Retired,\n    }}\n}}\n")
+    parsed: kit_ui_registry("// header\nA: struct {{\n    impl Diagnostic {{\n        code: \"E0109\",\n        severity: .Lint,\n        structured_fix: .CryptoMisuse,\n        no_fix: None,\n        what: fn(self) -> String {{ \"w\" }}\n    }}\n}}\n\nB: struct {{\n    path: String,\n\n    impl Diagnostic {{\n        code: \"E0001\",\n        stage: [.Jet, .Parse],\n    }}\n}}\n\nC: struct {{\n    impl Diagnostic {{\n        code: \"E0004\",\n        status: .Retired,\n    }}\n}}\n")
     assert_eq(parsed.len(), 3)
     assert_eq(parsed[0].code, "E0109")
-    assert_eq(parsed[0].name, "jet.A")
+    assert_eq(parsed[0].name, "Jet.A")
     assert(parsed[0].active && parsed[1].active)
-    assert_eq(parsed[1].name, "jet.B")
+    assert(parsed[0].lint && !parsed[1].lint)
+    assert_eq(parsed[1].name, "Jet.B")
     assert(!parsed[2].active)
 }
 
 #Test("a blessed coverage run keeps every allowance it still needs and drops only stale ones") {
-    row: KitUIRegistryRow{code: "E0109", name: "jet.OperatorTypeMismatch", active: true}
-    other: KitUIRegistryRow{code: "E0001", name: "jet.StrayCharacter", active: true}
+    row: KitUIRegistryRow{code: "E0109", name: "Jet.OperatorTypeMismatch", active: true, lint: false}
+    other: KitUIRegistryRow{code: "E0001", name: "Jet.StrayCharacter", active: true, lint: false}
     allowlist: "# code\tside\tcard\nE0109\tleft-only\tTower #2093\nE0001\tleft-only\tTower #1\n"
     kept := [String]{}
     verdict: kit_ui_set_coverage([row, other], ["E0109", "E0001"], ["E0001"], allowlist, kept)

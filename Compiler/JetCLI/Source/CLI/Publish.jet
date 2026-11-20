@@ -254,7 +254,7 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
             if dirty.len() > 10 -> log.err("    … and {dirty.len() - 10} more\n")
             return log.finish(JET_DRIVER_EXIT_USER_ERROR)
         }
-        log.err("Warning [--force]: working tree has {dirty.len()} uncommitted change(s) — publishing anyway.\n")
+        log.err("Warning: working tree has {dirty.len()} uncommitted change(s) — publishing anyway (--force)\n")
         loop (index, line) in dirty {
             if index >= 5 -> break
             log.err("  {line}\n")
@@ -346,7 +346,7 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
 
     if !build_ok || !tests_ok {
         if !force -> return log.finish(JET_DRIVER_EXIT_USER_ERROR)
-        log.err("Warning [--force]: pre-publish gate failed but continuing anyway.\n")
+        log.err("Warning: pre-publish gate failed — publishing anyway (--force)\n")
         log.err("  This publish would be rejected by a registry that enforces the pre-publish gate.\n")
     }
 
@@ -407,7 +407,7 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
                 log.out("  Semver: OK — v{version} is a breaking release after v{baseline.version} ({breaking.len()} breaking change(s))")
             }
         } else if force {
-            log.err("Warning [--force]: v{version} breaks {breaking.len()} public API item(s) of v{baseline.version} without a breaking version bump (E1218) — publishing anyway.\n")
+            log.err("Warning: v{version} breaks {breaking.len()} public API item(s) of v{baseline.version} without a breaking version bump (E1218) — publishing anyway (--force)\n")
             loop change in breaking -> log.err("  {change.description}\n")
         } else {
             bump: publication_classify_bump(before, release)

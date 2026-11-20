@@ -6,13 +6,13 @@ env: NO_COLOR=1
 step: jet run main.jet
 exit: 0
 stdout: = "2\n" # run runs the program
-stdout+stderr: !~ "[jet.HiddenCopyInLoop]" # run hides the tidy error
+stdout+stderr: !~ "Jet.HiddenCopyInLoop" # run hides the tidy error
 step: jet check main.jet
 exit: 1
-stderr: ~ "Error [jet.HiddenCopyInLoop]: Editing a shared map backing store inside a loop" # check lists the hidden copy
+stderr: ~ "Error: Jet.HiddenCopyInLoop: Editing a shared map backing store inside a loop" # check lists the hidden copy
 stderr: ~ "1 problem found" # it is the only problem
 step: jet build main.jet
 exit: 1
-stderr: ~ "Error [jet.HiddenCopyInLoop]: Editing a shared map backing store inside a loop" # build lists the hidden copy too
+stderr: ~ "Error: Jet.HiddenCopyInLoop: Editing a shared map backing store inside a loop" # build lists the hidden copy too
 stderr: ~ "main.jet:8:15" # at the edit the loop repeats
 stderr: ~ "1 problem found" # and fails on it alone

@@ -330,6 +330,18 @@ listed with `"line":null`, `"source_span":null`, its `anchor` and
 its `anchor` and `"state":"stale"`, with no value. A `start:end` anchor that
 names no span of the source is stale too.
 
+`active_node_id` is the statement node that starts first on the active line,
+or the narrowest node touching the line when no statement starts there.
+`wire_path` is the control wires the run took to reach the stop, oldest first:
+each `step` or `next` that stays in its frame adds the wires from the
+statement it left to the one it reached, when the graph allows exactly one way
+through the rest of the line it left. Any other move (`continue`, `finish`, a
+reverse command, a step into or out of a call) starts the path again at its
+stop, so the path never spans a stretch the debugger didn't see.
+`active_wire_id` is the newest wire of the path, or `""` when it is empty. The
+path keeps the newest 64 wires, and `limits.wire_path_truncated` says when it
+dropped older ones.
+
 Stop requests check source path, revision, and tier before removing the session.
 A mismatched tier or source is refused; a stale request returns `conflict` and
 keeps a newer live session. The bounded limits are 32 live sessions, 64
@@ -526,7 +538,7 @@ command is not advertised as a Canvas action.
 A receipt records the checked command and its result:
 
 ```json
-{"protocol":"jet.canvas.command_receipt","schema_version":1,"ok":true,"action_id":"canvas.command:check","title":"Check project","revision":"sha256-...","checked_revision":"sha256-...","command":["jet","check","main.jet"],"writes":"none","success":false,"exit_code":1,"elapsed_ms":42,"stdout":"","stderr":"Error [jet.UnknownName]: ...","diagnostics":[{"code":"E0107","severity":"error","what":"nothing named `missing` exists here","why":"only names that have been defined can be used","fix":"define `missing` before this line","message":"nothing named `missing` exists here","rendered":"Error [jet.UnknownName]: ...\n Why: ...\n Fix: ...\n","source_span":{"start":15,"end":22,"line":2,"column":5},"source_path":"/repo/main.jet"}]}
+{"protocol":"jet.canvas.command_receipt","schema_version":1,"ok":true,"action_id":"canvas.command:check","title":"Check project","revision":"sha256-...","checked_revision":"sha256-...","command":["jet","check","main.jet"],"writes":"none","success":false,"exit_code":1,"elapsed_ms":42,"stdout":"","stderr":"Error: Jet.UnknownName: ...","diagnostics":[{"code":"E0107","severity":"error","what":"nothing named `missing` exists here","why":"only names that have been defined can be used","fix":"define `missing` before this line","message":"nothing named `missing` exists here","rendered":"Error: Jet.UnknownName: ...\n Why: ...\n Fix: ...\n","source_span":{"start":15,"end":22,"line":2,"column":5},"source_path":"/repo/main.jet"}]}
 ```
 
 For Check, `source_text` is optional. When present, Canvas checks the open

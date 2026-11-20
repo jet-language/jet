@@ -23,7 +23,7 @@ session tls raw: openssl s_server -quiet -WWW -accept {free-port:tls} -cert serv
 sleep: 250ms
 step no_terminal: jet run https://localhost:{free-port:tls}/tool.jet
 exit: 1
-stderr: ~ "jet.RemoteRunNeedsConsent" # E1804
+stderr: ~ "Jet.RemoteRunNeedsConsent" # E1804
 stderr: ~ "there is no terminal to ask" # the diagnostic says it
 stdout: !~ "tool ran" # this step must not print it
 entries: state/jet/remote >= 1 # the fetch is pinned before the question
@@ -51,22 +51,22 @@ stdout: ~ "tool ran" # the step prints it
 step locked: jet run --locked https://localhost:{free-port:tls}/tool.jet
 exit: 0
 stdout: ~ "tool ran" # the step prints it
-stderr: !~ "jet.RemoteRunNeedsConsent" # this step must not print it
+stderr: !~ "Jet.RemoteRunNeedsConsent" # this step must not print it
 step pin_mismatch: jet run --sha256=0000000000000000000000000000000000000000000000000000000000000000 https://localhost:{free-port:tls}/tool.jet
 exit: 1
-stderr: ~ "jet.RemoteSourceRefused" # E1805
+stderr: ~ "Jet.RemoteSourceRefused" # E1805
 stderr: ~ "doesn't match the bytes pinned" # the diagnostic says it
 step own_allow_row: jet run https://localhost:{free-port:tls}/self_allowed.jet
 exit: 1
-stderr: ~ "jet.RemoteRunNeedsConsent" # the registered code
+stderr: ~ "Jet.RemoteRunNeedsConsent" # the registered code
 stdout: !~ "self allowed ran" # this step must not print it
 step allow_all: jet run -A https://localhost:{free-port:tls}/self_allowed.jet
 exit: 0
 stdout: ~ "self allowed ran" # the step prints it
-stderr: !~ "jet.RemoteRunNeedsConsent" # this step must not print it
+stderr: !~ "Jet.RemoteRunNeedsConsent" # this step must not print it
 step first_fetch_mismatch: jet run --sha256=0000000000000000000000000000000000000000000000000000000000000000 https://localhost:{free-port:tls}/clock.jet
 exit: 1
-stderr: ~ "jet.RemoteSourceRefused" # the registered code
+stderr: ~ "Jet.RemoteSourceRefused" # the registered code
 stderr: ~ "don't match `--sha256`" # the diagnostic says it
 stdout: !~ "tool ran" # this step must not print it
 signal tls: KILL

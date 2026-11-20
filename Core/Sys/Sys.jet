@@ -2397,13 +2397,13 @@ __decode_tree: fn(prefix: String, file: String, allow: [String], names: [{env_na
     platform: if core.files.__path_windows() -> PathPlatform.Windows else -> PathPlatform.Unix
     path: host_path.from_text(file, platform)
     if host_path.is_absolute(path) {
-        return Err(config_error("E2416: Dotenv.file must be project-relative"))
+        return Err(config_error("Jet.EnvDecodeFailed: Dotenv.file must be project-relative"))
     }
     cursor := host_path.components(path)
     loop {
         part: host_path.next(path, cursor) ?? break
         if part.kind == .ParentDir {
-            return Err(config_error("E2416: Dotenv.file must be project-relative"))
+            return Err(config_error("Jet.EnvDecodeFailed: Dotenv.file must be project-relative"))
         }
     }
     dotenv := String?{None}
@@ -2412,7 +2412,7 @@ __decode_tree: fn(prefix: String, file: String, allow: [String], names: [{env_na
             .Ok(value) -> { dotenv = Val(value) }
             .Err(error) -> {
                 if !error.not_found {
-                    return Err(config_error("E2416: cannot read Dotenv.file `{file}`: {error.cause}"))
+                    return Err(config_error("Jet.EnvDecodeFailed: cannot read Dotenv.file `{file}`: {error.cause}"))
                 }
             }
         }
@@ -2465,8 +2465,8 @@ __decode_errors: fn(errors: [FieldError], origins: [{name: String, path: String}
         }
         reason: if hidden -> "secret value rejected" else -> error.reason
         message: if variable == {
-            .Val(name) -> "E2416: env var {name} -> {error.path}: {reason}"
-            .None -> "E2416: config field {error.path}: {reason}"
+            .Val(name) -> "Jet.EnvDecodeFailed: env var {name} -> {error.path}: {reason}"
+            .None -> "Jet.EnvDecodeFailed: config field {error.path}: {reason}"
         }
         framed.push(FieldError{path: error.path, reason: message})
     }
@@ -2600,7 +2600,7 @@ config_entries: fn(prefix: String, dotenv: String?, allow: [String], process: [{
                 if bytes.len() >= 7 && slice_ascii(bytes, 0, 7) == "export " {
                     line = slice_ascii(bytes, 7, bytes.len())
                 }
-                equal: config_find(line.bytes(), "=".bytes()) ?? return Err(config_error("E2416: invalid .env line {line_index}"))
+                equal: config_find(line.bytes(), "=".bytes()) ?? return Err(config_error("Jet.EnvDecodeFailed: invalid .env line {line_index}"))
                 name: core.text.trim(slice_ascii(line.bytes(), 0, equal))
                 if config_allowed(name, allow) {
                     value: config_dotenv_value(slice_ascii(line.bytes(), equal + 1, line.bytes().len()))
@@ -2702,27 +2702,27 @@ config_tree: fn(tree: &&ConfigTree) -> Dyn Never! {
 
 #Test("Dotenv malformed unallowed lines still error and decoder secret errors are redacted") {
     if config_entries("", Val("not an assignment"), [String]{"ONLY_THIS"}, [{name: String, value: String}]{}) == {
-        .Err(errors) -> { assert_eq(errors[0].reason, "E2416: invalid .env line 1") }
+        .Err(errors) -> { assert_eq(errors[0].reason, "Jet.EnvDecodeFailed: invalid .env line 1") }
         .Ok(_) -> assert(false)
     }
     no_names: [{env_name: String, key: String}]{}
     errors: __decode_errors([FieldError]{FieldError{path: "db.password", reason: "rejected supersecret"}}, [{name: String, path: String}]{{name: "APP_DB__PASSWORD", path: "db.password"}}, "APP_", no_names)
-    assert_eq(errors[0].reason, "E2416: env var APP_DB__PASSWORD -> db.password: secret value rejected")
+    assert_eq(errors[0].reason, "Jet.EnvDecodeFailed: env var APP_DB__PASSWORD -> db.password: secret value rejected")
     joined: __decode_errors([FieldError]{FieldError{path: "db_password", reason: "expected Int, found text \"hunter2\""}, FieldError{path: "api_key", reason: "expected Int, found text \"sk-live\""}, FieldError{path: "port", reason: "expected Int, found text \"x\""}}, [{name: String, path: String}]{{name: "APP_DB_PASSWORD", path: "db_password"}, {name: "APP_API_KEY", path: "api_key"}, {name: "APP_PORT", path: "port"}}, "APP_", no_names)
-    assert_eq(joined[0].reason, "E2416: env var APP_DB_PASSWORD -> db_password: secret value rejected")
-    assert_eq(joined[1].reason, "E2416: env var APP_API_KEY -> api_key: secret value rejected")
-    assert_eq(joined[2].reason, "E2416: env var APP_PORT -> port: expected Int, found text \"x\"")
+    assert_eq(joined[0].reason, "Jet.EnvDecodeFailed: env var APP_DB_PASSWORD -> db_password: secret value rejected")
+    assert_eq(joined[1].reason, "Jet.EnvDecodeFailed: env var APP_API_KEY -> api_key: secret value rejected")
+    assert_eq(joined[2].reason, "Jet.EnvDecodeFailed: env var APP_PORT -> port: expected Int, found text \"x\"")
     // A renamed variable whose name holds the secret word hides the value too.
     renamed: [{env_name: String, key: String}]{{env_name: "STRIPE_SECRET", key: "stripe"}, {env_name: "DB_URL", key: "db_url"}, {env_name: "SERVICE_HOST", key: "host"}}
     hidden: __decode_errors([FieldError]{FieldError{path: "stripe", reason: "expected Int, found text \"sk\""}}, [{name: String, path: String}]{{name: "APP_STRIPE_SECRET", path: "stripe"}}, "APP_", renamed)
-    assert_eq(hidden[0].reason, "E2416: env var APP_STRIPE_SECRET -> stripe: secret value rejected")
+    assert_eq(hidden[0].reason, "Jet.EnvDecodeFailed: env var APP_STRIPE_SECRET -> stripe: secret value rejected")
     // A missing value names the variable that would have supplied it.
     missing: __decode_errors([FieldError]{FieldError{path: "db_url", reason: "missing"}, FieldError{path: "db.host", reason: "missing"}, FieldError{path: "hosts[0]", reason: "missing"}}, [{name: String, path: String}]{}, "APP_", renamed)
-    assert_eq(missing[0].reason, "E2416: env var APP_DB_URL -> db_url: missing")
-    assert_eq(missing[1].reason, "E2416: env var APP_DB__HOST -> db.host: missing")
-    assert_eq(missing[2].reason, "E2416: config field hosts[0]: missing")
+    assert_eq(missing[0].reason, "Jet.EnvDecodeFailed: env var APP_DB_URL -> db_url: missing")
+    assert_eq(missing[1].reason, "Jet.EnvDecodeFailed: env var APP_DB__HOST -> db.host: missing")
+    assert_eq(missing[2].reason, "Jet.EnvDecodeFailed: config field hosts[0]: missing")
     full: __decode_errors([FieldError]{FieldError{path: "host", reason: "missing"}}, [{name: String, path: String}]{}, "SERVICE_", renamed)
-    assert_eq(full[0].reason, "E2416: env var SERVICE_HOST -> host: missing")
+    assert_eq(full[0].reason, "Jet.EnvDecodeFailed: env var SERVICE_HOST -> host: missing")
 }
 
 #Test("Dotenv tree replacement preserves sibling order and nested values") {

@@ -1,0 +1,15 @@
+// @run_cli
+// A checked format refuses a literal that never closes with the registered
+// Jet.InvalidTimeFormat, and the entry returns the refusal.
+package: {
+    name: "time_format_checked_unterminated_literal_refused"
+    authority: { allow: [IO] }
+}
+
+use time: core.time
+
+run: fn() {
+    datetime: time.datetime(2024, 3, 9, 12, 34, 56)
+    text: datetime.format_checked("'broken") ?? return Err(err.message)
+    print("formatted: {text}")
+}

@@ -70,7 +70,7 @@ step: jet run run.jet
 cwd: js
 env: NO_COLOR=1
 exit: nonzero
-stdout+stderr: ~ "E3208" # original mixed_assert_failed_with helper422-428
+stdout+stderr: ~ "Jet.BindingGenerationFailed" # original mixed_assert_failed_with helper422-428
 copy: source.before js/ops.mjs
 capture: before = text file js/.jet/bindings/js/ops.jet
 capture: stale_descriptor = text file.replace_first("jet-ffi-descriptor=", "jet-ffi-descriptor=stale-") js/.jet/bindings/js/ops.jet
@@ -80,7 +80,7 @@ step: jet check run.jet
 cwd: js
 env: NO_COLOR=1
 exit: nonzero
-stdout+stderr: ~ "E3208" # original mixed_assert_failed_with helper422-428
+stdout+stderr: ~ "Jet.BindingGenerationFailed" # original mixed_assert_failed_with helper422-428
 step: jet inspect bind js ops.d.ts --runtime ops.mjs --pkg ops
 cwd: js
 env: NO_COLOR=1
@@ -94,7 +94,7 @@ step: jet inspect bind js broken.d.ts --runtime ops.mjs --pkg broken
 cwd: js
 env: NO_COLOR=1
 exit: nonzero
-stdout+stderr: ~ "E3208" # original mixed_assert_failed_with helper422-428
+stdout+stderr: ~ "Jet.BindingGenerationFailed" # original mixed_assert_failed_with helper422-428
 file: js/.jet/bindings/js/broken.jet absent
 capture: stale_runtime = text file.replace("return left + right", "return left + right + 1") js/ops.mjs
 write: js/ops.mjs = "{cap:stale_runtime}"

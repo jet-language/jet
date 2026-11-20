@@ -493,7 +493,7 @@ cli_test_environment_image_index: fn(claim: EnvironmentImageClaim) -[FS, Env, Ex
     files.write(files.join(project, "env.jet"), "env.dev: module {{\n    imports: [env.cloud.credentials(\"super_secret_value\")]\n}}\nimage.server: module {{ from: env.dev }}\n") ?? panic("write env.jet")
     out: cli_test_image_jetpack(project, [String]{"image", "server"}).run() ?? panic("run jetpack image")
     assert_eq(out.code, 2)
-    assert(out.errors.contains("E1335"), "stderr: {out.errors}")
+    assert(out.errors.contains("Jet.EnvironmentIntegrationConflict"), "stderr: {out.errors}")
     assert(!out.errors.contains("super_secret_value"), "secret input leaked: {out.errors}")
     files.remove_all(project).drop("scratch cleanup is best-effort")
 }
@@ -502,7 +502,7 @@ cli_test_environment_image_index: fn(claim: EnvironmentImageClaim) -[FS, Env, Ex
 cli_test_e1336_block: fn(stderr: String) -> String {
     blocks: stderr.split("\n\n")
     loop block in blocks {
-        if !block.contains("Error [jet.ImageProjectionFailed]") -> next
+        if !block.contains("Error: Jet.ImageProjectionFailed") -> next
         lines := [String]{}
         loop line in block.split("\n") {
             if line != "" -> lines.push(line.trim())

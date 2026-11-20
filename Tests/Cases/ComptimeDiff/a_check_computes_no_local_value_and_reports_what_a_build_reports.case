@@ -11,14 +11,14 @@ write: main.jet = "divide: fn(a: Int, b: Int) -> Int {\n    a /% b\n}\n\nchecked
 step: jet check main.jet
 exit: nonzero
 stdout: empty
-stderr: = "Error [jet.ErrorNotPropagatable]: `checked` fails with `Err`, which can't propagate into `Never` here\n  --> main.jet:12:5\n    |\n 12 |     checked(row) + quotient\n    |     ^^^^^^^\n Why: `checked` is defined at `main.jet:5:1` with effective failure contract `implicit default Err!`; the caller's `explicit Never! (proven unreachable)` contract has no route from `Err` to `Never`\n Fix: The caller is declared `Never!`, so it can't fail: declare `Err!` in its return type, or handle `checked` locally with `??`\nMore: jet-lang.dev/e/E2404\n\n1 problem found\nRun `jet explain E2404` to learn more\n"
+stderr: = "Error: Jet.ErrorNotPropagatable: `checked` fails with `Err`, which can't propagate into `Never` here\n  --> main.jet:12:5\n    |\n 12 |     checked(row) + quotient\n    |     ^^^^^^^\n Why: `checked` is defined at `main.jet:5:1` with effective failure contract `implicit default Err!`; the caller's `explicit Never! (proven unreachable)` contract has no route from `Err` to `Never`\n Fix: The caller is declared `Never!`, so it can't fail: declare `Err!` in its return type, or handle `checked` locally with `??`\nMore: jet-lang.dev/e/Jet.ErrorNotPropagatable\n\n1 problem found\nRun `jet explain Jet.ErrorNotPropagatable` to learn more\n"
 step: jet check --trace main.jet
 exit: nonzero
 stderr: !~ "comptime.eval quotient" # the check never computes `quotient`
 stderr: !~ "# comptime.programs_built = 1" # nor builds a compile-time program for it
 step: jet build main.jet
 exit: nonzero
-stderr: ~ "Error [jet.ErrorNotPropagatable]: `checked` fails with `Err`, which can't propagate into `Never` here\n  --> main.jet:12:5\n    |\n 12 |     checked(row) + quotient\n    |     ^^^^^^^\n Why: `checked` is defined at `main.jet:5:1` with effective failure contract `implicit default Err!`; the caller's `explicit Never! (proven unreachable)` contract has no route from `Err` to `Never`\n Fix: The caller is declared `Never!`, so it can't fail: declare `Err!` in its return type, or handle `checked` locally with `??`\nMore: jet-lang.dev/e/E2404\n" # the build reports the check's error word for word
+stderr: ~ "Error: Jet.ErrorNotPropagatable: `checked` fails with `Err`, which can't propagate into `Never` here\n  --> main.jet:12:5\n    |\n 12 |     checked(row) + quotient\n    |     ^^^^^^^\n Why: `checked` is defined at `main.jet:5:1` with effective failure contract `implicit default Err!`; the caller's `explicit Never! (proven unreachable)` contract has no route from `Err` to `Never`\n Fix: The caller is declared `Never!`, so it can't fail: declare `Err!` in its return type, or handle `checked` locally with `??`\nMore: jet-lang.dev/e/Jet.ErrorNotPropagatable\n" # the build reports the check's error word for word
 step: jet build --trace main.jet
 exit: nonzero
 stderr: ~ "comptime.eval quotient" # the build computes `quotient` while compiling

@@ -339,7 +339,7 @@ diagnostic_render_with: fn(diagnostic: Diagnostic, file: String, source: String,
     fix: diagnostic_escape_terminal_text(diagnostic.fix)
     label: diagnostic_theme_severity(color, diagnostic, if diagnostic_is_warning(diagnostic) -> "Warning" else -> "Error")
     out := [U8]{}
-    diagnostic_push_text(out, "{label} [{diagnostic_display_name(diagnostic.code)}]: {what}\n")
+    diagnostic_push_text(out, "{label}: {diagnostic_display_name(diagnostic.code)}: {what}\n")
     if diagnostic.span != None || diagnostic.labels.len() > 0 {
         position: diagnostic_source_position(sources, diagnostic.origin, source)
         if diagnostic.span == .Val(span) {
@@ -381,21 +381,25 @@ diagnostic_render_with: fn(diagnostic: Diagnostic, file: String, source: String,
     String.from_bytes(out) ?? ""
 }
 
-// The reference line that closes every report of a Jet code.
-diagnostic_more_line: fn(code: String) -> String Never! { "More: jet-lang.dev/e/{code}\n" }
+// The reference line that closes every report of a Jet code: the page of its
+// name (`Jet.UnknownName`), which the code only aliases.
+diagnostic_more_line: fn(code: String) -> String Never! {
+    "More: jet-lang.dev/e/{diagnostic_display_name(code)}\n"
+}
 
-DIAGNOSTIC_STOP_OPEN: "Stop ["
+DIAGNOSTIC_STOP_OPEN: "Stop: "
 
-DIAGNOSTIC_STOP_CLOSE: "]: "
+DIAGNOSTIC_STOP_CLOSE: ": "
 
-// A runtime stop's first line, `Stop [CODE]: what`, as the runtime prints a
-// stop row (its code, not its name).
+// A runtime stop's first line, `Stop: Jet.Name: what`: the stop row's name,
+// which its code only aliases.
 diagnostic_stop_line: fn(code: String, what: String) -> String Never! {
-    "{DIAGNOSTIC_STOP_OPEN}{code}{DIAGNOSTIC_STOP_CLOSE}{what}"
+    "{DIAGNOSTIC_STOP_OPEN}{diagnostic_display_name(code)}{DIAGNOSTIC_STOP_CLOSE}{what}"
 }
 
 // The code and What of one line `diagnostic_stop_line` wrote, as a tool reads
-// back the stop another Jet program printed; None for any other line.
+// back the stop another Jet program printed; None for any other line. A
+// registered name reads back as its row's code; a library's name stays.
 DiagnosticStopHead: struct {
     code: String,
     what: String,
@@ -403,13 +407,18 @@ DiagnosticStopHead: struct {
 
 diagnostic_stop_parse: fn(line: String) -> DiagnosticStopHead? Never! {
     if !line.starts_with(DIAGNOSTIC_STOP_OPEN) -> return None
-    open: DIAGNOSTIC_STOP_OPEN.bytes().len()
-    close: line.find(DIAGNOSTIC_STOP_CLOSE)
-    if close <= open -> return None
     bytes: line.bytes()
-    code: String.from_bytes(bytes.slice(open, close)) ?? ""
-    what: String.from_bytes(bytes.slice(close + DIAGNOSTIC_STOP_CLOSE.bytes().len(), bytes.len())) ?? ""
-    Val(DiagnosticStopHead{code: code, what: what})
+    open: DIAGNOSTIC_STOP_OPEN.bytes().len()
+    rest: String.from_bytes(bytes.slice(open, bytes.len())) ?? ""
+    close: rest.find(DIAGNOSTIC_STOP_CLOSE)
+    if close <= 0 -> return None
+    name: String.from_bytes(bytes.slice(open, open + close)) ?? ""
+    if name.contains(" ") -> return None
+    what: String.from_bytes(bytes.slice(open + close + DIAGNOSTIC_STOP_CLOSE.bytes().len(), bytes.len())) ?? ""
+    if diagnostic_registry_row_named(name) == .Val(row) {
+        return Val(DiagnosticStopHead{code: row.code, what: what})
+    }
+    Val(DiagnosticStopHead{code: name, what: what})
 }
 
 // The lines that close a runtime stop: its row's Why and Fix, then More.

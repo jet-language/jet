@@ -3,8 +3,8 @@
 fixture: Fixtures/LoaderImportBoundaries
 step: jet check denied/ui.jet
 exit: nonzero
-stderr.after_first("Error ["): ^= "jet.ImportDeniedByBoundary]" # original first_diag_code predicate
-stderr.after_first("Error [jet.ImportDeniedByBoundary]:").split("\n", 0): ~ "app.ui" # original error[0].what contains predicate
-stderr.after_first("Error [jet.ImportDeniedByBoundary]:").split("\n", 0): ~ "app.db" # original error[0].what contains predicate
+stderr.after_first("Error: "): ^= "Jet.ImportDeniedByBoundary:" # original first_diag_code predicate
+stderr.after_first("Error: Jet.ImportDeniedByBoundary:").split("\n", 0): ~ "app.ui" # original error[0].what contains predicate
+stderr.after_first("Error: Jet.ImportDeniedByBoundary:").split("\n", 0): ~ "app.db" # original error[0].what contains predicate
 step: jet check unused/ui.jet
-stderr: ~ "[jet.BoundaryRule]" # original diagnostic code membership
+stderr: ~ "Jet.BoundaryRule" # original diagnostic code membership

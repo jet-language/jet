@@ -1,8 +1,8 @@
-// Site rungs: `#Allow(jet.UnusedParameter, "why")` on a
+// Site rungs: `#Allow(Jet.UnusedParameter, "why")` on a
 // statement, a function or method, a struct field, or a struct or enum type
 // silences that one lint inside its target. The lint is named by its
-// diagnostic type path.
-// MarkerRules validates the reason (L3103) and refuses `jet.AllowReason`
+// diagnostic name.
+// MarkerRules validates the reason (L3103) and refuses `Jet.AllowReason`
 // (E0355); this pass only applies the allowance.
 use jet_foundation.[
     DIAGNOSTIC_LINT,
@@ -27,7 +27,7 @@ SemaLintAllowance: struct {
     target: Span,
 }
 
-// The lint type path an `#Allow` marker names (`jet.UnusedParameter`), if it
+// The lint name an `#Allow` marker names (`Jet.UnusedParameter`), if it
 // is one.
 sema_lint_allowance_name: fn(marker: Marker) -> String? Never! {
     if marker.name != MARKER_ALLOW || marker.negated || marker.args.len() == 0 -> return None

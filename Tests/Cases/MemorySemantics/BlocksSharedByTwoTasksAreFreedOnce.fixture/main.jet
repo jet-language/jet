@@ -14,10 +14,10 @@ run: fn() {
     total := 0
     loop round in 1..2000 {
         a := "payload-{round}-".repeat(3)
-        #Allow(jet.HiddenCopyInLoop, "the case shares the text block between two tasks on purpose") b := a
+        #Allow(Jet.HiddenCopyInLoop, "the case shares the text block between two tasks on purpose") b := a
         xs := [Int]{}
         loop n in 1..(round % 7 + 1) -> xs.push(n * round)
-        #Allow(jet.HiddenCopyInLoop, "the case shares the list block between two tasks on purpose") ys := xs
+        #Allow(Jet.HiddenCopyInLoop, "the case shares the list block between two tasks on purpose") ys := xs
         task.group g {
             t1: task first(a, xs)
             t2: task second(b, ys)

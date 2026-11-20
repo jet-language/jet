@@ -20,16 +20,16 @@ stdout: = "9\n"
 step: jet build single/main.jet
 exit: 1
 stderr: ~ "`meta.add_struct` was given the type `geo.Point` for the field `at`, which the generated module can't see" # the field's type names a module out of its scope
-stderr: ~ "jet-lang.dev/e/E3502" # the build host's refusal
+stderr: ~ "jet-lang.dev/e/Jet.BuildPlanFailed" # the build host's refusal
 stderr: !~ "There's no type called `geo" # refused before the generated module is checked
-stderr: before "jet-lang.dev/e/E3502" "There's no type called `Pin`" # the refusal comes first, then the staged report it explains
+stderr: before "jet-lang.dev/e/Jet.BuildPlanFailed" "There's no type called `Pin`" # the refusal comes first, then the staged report it explains
 file: single/.jet/build/app absent
 step: jet build list/main.jet
 exit: 1
 stderr: ~ "`meta.add_struct` was given the type `[geo.Point]` for the field `at`, which the generated module can't see" # the list's element type names a module out of its scope
-stderr: ~ "jet-lang.dev/e/E3502" # the build host's refusal
+stderr: ~ "jet-lang.dev/e/Jet.BuildPlanFailed" # the build host's refusal
 stderr: !~ "There's no type called `geo" # refused before the generated module is checked
-stderr: before "jet-lang.dev/e/E3502" "There's no type called `Pin`" # the refusal comes first, then the staged report it explains
+stderr: before "jet-lang.dev/e/Jet.BuildPlanFailed" "There's no type called `Pin`" # the refusal comes first, then the staged report it explains
 file: list/.jet/build/app absent
 step: jet build imported/main.jet
 exit: 0

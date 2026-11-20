@@ -44,7 +44,7 @@ step offline: jetpack env --env dev --prep --trust --yes --no-color --offline
 isolate: no-nix network=enabled
 unset: JETPACK_FIXTURES
 exit: 1
-stderr: ~ "E1350" # original: the offline replay fails closed
+stderr: ~ "Jet.NixCacheAdmissionFailed" # original: the offline replay fails closed
 stderr: ~ "ripgrep@jetpack" # original: the offline error names the affected locked package
 step: built counts {cap:port}
 exit: 0
@@ -64,7 +64,7 @@ step rejected: jetpack env --env dev --prep --trust --yes --no-color
 isolate: no-nix network=enabled
 unset: JETPACK_FIXTURES
 exit: 1
-stderr: ~ "E1350" # original: a forged index authority fails closed
+stderr: ~ "Jet.NixCacheAdmissionFailed" # original: a forged index authority fails closed
 step: built counts {cap:port}
 exit: 0
 json: stdout doc $.info = 0

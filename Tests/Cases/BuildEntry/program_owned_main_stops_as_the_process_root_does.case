@@ -24,11 +24,11 @@ stdout: ~ "Main: process root: " # the deferred close runs on a stop edge
 step: jet run owned.jet
 exit: 70
 stdout: = "body\n"
-stderr: ~ "Stop [E3010]" # the overflow's report, written with no root
+stderr: ~ "Stop: Jet.ArithmeticOrBoundsFailure" # the overflow's report, written with no root
 step: jet run --release owned.jet
 exit: 70
 stdout: = "body\n"
-stderr: ~ "Stop [E3010]" # the same at O2
+stderr: ~ "Stop: Jet.ArithmeticOrBoundsFailure" # the same at O2
 step: jet build owned.jet
 exit: 0
 file: .jet/build/owned !~ "jet_rt_root_begin" # the image links no process root
@@ -37,26 +37,26 @@ file: .jet/build/owned ~ "jet_rt_thread_attach" # it may allocate (the sum's tex
 step: {work}/.jet/build/owned
 exit: 70
 stdout: = "body\n"
-stderr: ~ "Stop [E3010]" # the built image stops the same way
+stderr: ~ "Stop: Jet.ArithmeticOrBoundsFailure" # the built image stops the same way
 step: jet build plain.jet
 exit: 0
 file: .jet/build/plain !~ "jet_rt_thread_attach" # it never allocates, so its main thread gets no TCB
 step: {work}/.jet/build/plain
 exit: 70
 stdout: = "body\n"
-stderr: ~ "Stop [E3010]" # the same stop with the main thread unattached
+stderr: ~ "Stop: Jet.ArithmeticOrBoundsFailure" # the same stop with the main thread unattached
 step: jet run --release plain.jet
 exit: 70
 stdout: = "body\n"
-stderr: ~ "Stop [E3010]" # the same at O2
+stderr: ~ "Stop: Jet.ArithmeticOrBoundsFailure" # the same at O2
 step: jet run rooted.jet
 exit: 70
 stdout: = "body\nclose resource\n"
-stderr: ~ "Stop [E3010]" # the close runs before the report
+stderr: ~ "Stop: Jet.ArithmeticOrBoundsFailure" # the close runs before the report
 step: jet run --release rooted.jet
 exit: 70
 stdout: = "body\nclose resource\n"
-stderr: ~ "Stop [E3010]" # the same at O2
+stderr: ~ "Stop: Jet.ArithmeticOrBoundsFailure" # the same at O2
 step: jet build rooted.jet
 exit: 0
 file: .jet/build/rooted ~ "jet_rt_root_begin" # the image runs the entry under the root
@@ -65,7 +65,7 @@ file: .jet/build/rooted ~ "jet_rt_thread_attach" # the root runs on an attached 
 step: {work}/.jet/build/rooted
 exit: 70
 stdout: = "body\nclose resource\n"
-stderr: ~ "Stop [E3010]" # the built image runs the close too
+stderr: ~ "Stop: Jet.ArithmeticOrBoundsFailure" # the built image runs the close too
 step: jet inspect decisions exact.jet
 exit: 0
 stdout: ~ "Main: program-owned" # big Int arithmetic, memory-only drops and cleanup scopes need no root

@@ -5,7 +5,7 @@
 // their location lists and their types. The reader knows exactly the
 // abbreviations and forms that writer emits; a unit using any other form
 // ends the read of that unit.
-use jet_backend.[X64DebugEncoding, X64DebugEnumerator, X64DebugMember, X64DebugType, X64DebugTypeKind, X64DebugVariant, X64Jetline, X64JetlineFunction, X64ModuleDebug, link_debug_abbrevs, link_debug_addr, link_debug_form_end, link_debug_le, link_debug_uleb, x64_jetline_parse, x64_jetline_sleb, x64_jetline_text]
+use jet_backend.[X64DebugEncoding, X64DebugEnumerator, X64DebugMember, X64DebugSource, X64DebugType, X64DebugTypeKind, X64DebugVariant, X64Jetline, X64JetlineFunction, X64ModuleDebug, link_debug_abbrevs, link_debug_addr, link_debug_form_end, link_debug_le, link_debug_uleb, x64_dwarf_sources_parse, x64_jetline_parse, x64_jetline_sleb, x64_jetline_text]
 
 // The DW_TAG codes of the DIEs the reader keeps; it skips every other.
 NATIVE_TAG_ENUM: 0x04
@@ -160,7 +160,10 @@ NativeAbstract: struct {
 // by the call's return address; `arguments` the values each such call
 // passes in its argument registers (DW_TAG_call_site_parameter); `level`
 // the optimization level the program was built at, as its unit's producer
-// names it (native_producer_level); `frames` its call frame information.
+// names it (native_producer_level); `frames` its call frame information;
+// `sources` the sha256 of each source it was compiled from, by its path
+// from the entry root (`.debug_jetsource`; empty when the image records
+// none).
 NativeImage: struct {
     lines: X64Jetline,
     functions: [NativeFunction],
@@ -175,6 +178,7 @@ NativeImage: struct {
     arguments: [NativeCallArgument]{[NativeCallArgument]{}},
     level: Int{0},
     frames: NativeFrames{NativeFrames{sections: [NativeCode]{}, fdes: [NativeFde]{}}},
+    sources: [String:[U8]]{[String:[U8]]{}},
 }
 
 // The source node a call's lowering came from: its line and character
@@ -208,6 +212,11 @@ NativeRange: struct {
 native_image_read: fn(elf: [U8]) -> NativeImage? Never! {
     table: native_elf_section(elf, ".debug_jetline") ?? return None
     image := NativeImage{lines: x64_jetline_parse(table), functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: native_elf_section(elf, ".debug_loclists") ?? [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}, frames: native_frames_read(elf)}
+    if native_elf_section(elf, ".debug_jetsource") == .Val(record) {
+        // A record that doesn't parse is none.
+        listed: x64_dwarf_sources_parse(record) ?? [X64DebugSource]{}
+        loop source in listed -> image.sources[source.path] = source.digest
+    }
     info: native_elf_section(elf, ".debug_info") ?? return Val(image)
     abbrev: native_elf_section(elf, ".debug_abbrev") ?? return Val(image)
     at := 0

@@ -452,7 +452,7 @@ oom_pre: .ascii "memory allocation of "
 oom_post: .ascii " bytes failed\n"
     .set oom_post_len, . - oom_post
 texts:
-    .asciz "Stop [E3012]: Stack overflow"
+    .asciz "Stop: Jet.StackOverflow: Stack overflow"
     .asciz " in `??` at \1\n"
     .asciz "\n"
     .asciz "Fault [SIGSEGV]: invalid memory access at address \1\n"

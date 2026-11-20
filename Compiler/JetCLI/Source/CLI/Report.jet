@@ -18,6 +18,7 @@ use {
         DIAGNOSTIC_LINT,
         TextEdit,
         diagnostic_from_registry,
+        diagnostic_display_name,
         diagnostic_is_tidy,
         diagnostic_source_column,
         diagnostic_source_line,
@@ -408,7 +409,7 @@ jet_cli_report_json_with: fn(diagnostic: Diagnostic, base: JetCLIReportBase?, fi
         diagnostic_is_tidy(diagnostic) -> "tidy"
         else -> "warning"
     }
-    out := "{{\"schema\":{jet_cli_json_string(JET_CLI_REPORT_SCHEMA)},\"moment\":{jet_cli_json_string(jet_cli_report_moment(diagnostic.moment))},\"severity\":{jet_cli_json_string(severity)},\"code\":{jet_cli_json_string(diagnostic.code)},\"what\":{jet_cli_json_string(diagnostic.what)},\"why\":{jet_cli_json_string(diagnostic.why)},\"fix\":{jet_cli_json_string(diagnostic.fix)}"
+    out := "{{\"schema\":{jet_cli_json_string(JET_CLI_REPORT_SCHEMA)},\"moment\":{jet_cli_json_string(jet_cli_report_moment(diagnostic.moment))},\"severity\":{jet_cli_json_string(severity)},\"code\":{jet_cli_json_string(diagnostic.code)},\"name\":{jet_cli_json_string(diagnostic_display_name(diagnostic.code))},\"what\":{jet_cli_json_string(diagnostic.what)},\"why\":{jet_cli_json_string(diagnostic.why)},\"fix\":{jet_cli_json_string(diagnostic.fix)}"
     if diagnostic.applicability == .Val(applicability) {
         grade: if applicability == {
             .Safe -> "safe"

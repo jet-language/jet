@@ -122,10 +122,10 @@ impl HTTPMux {
     // `mux.get(pattern, handler)` and its sibling verbs land here.
     __route :: fn(self, method: String, pattern: String, handler: ^fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!) -[Net]> Never! {
         parsed :: __route_parse(pattern)
-        if parsed.problem != "" -> panic("E2805: invalid HTTP route `{pattern}`: {parsed.problem}")
+        if parsed.problem != "" -> panic("Jet.InvalidRoute: invalid HTTP route `{pattern}`: {parsed.problem}")
         shape :: __route_shape(parsed.segments)
         loop existing in __mux_routes(self) {
-            if existing.method == method && __route_shape(existing.segments) == shape -> panic("E2804: duplicate route `{method} {pattern}`")
+            if existing.method == method && __route_shape(existing.segments) == shape -> panic("Jet.AmbiguousRoute: duplicate route `{method} {pattern}`")
         }
         guard := self.__state.guard_edit()
         &guard.value.routes.push(__HTTPRoute{method: method, pattern: pattern, segments: parsed.segments, handler: __handler(^handler)})

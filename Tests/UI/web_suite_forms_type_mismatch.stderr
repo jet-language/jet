@@ -1,17 +1,17 @@
-Error [jet.ValueTypeMismatch]: `field` wants `WebForm` for argument 1, but this is String (text)
+Error: Jet.ValueTypeMismatch: `field` wants `WebForm` for argument 1, but this is String (text)
   --> Tests/UI/web_suite_forms_type_mismatch.jet:5:25
     |
   5 | run: fn() { forms.field("wrong-form", "carrier", "String", true) }
     |                         ^^^^^^^^^^^^
  Why: Every argument must match its parameter's type
  Fix: Use `WebForm` here
-More: jet-lang.dev/e/E0112
+More: jet-lang.dev/e/Jet.ValueTypeMismatch
 
-Error [jet.MissingErrorConversion]: This implicit fallible call can't convert `WebFormError` into `Err` — no declared conversion exists
+Error: Jet.MissingErrorConversion: This implicit fallible call can't convert `WebFormError` into `Err` — no declared conversion exists
   --> Tests/UI/web_suite_forms_type_mismatch.jet:5:19
     |
   5 | run: fn() { forms.field("wrong-form", "carrier", "String", true) }
     |                   ^^^^^
  Why: Ordinary fallible calls propagate automatically; `WebFormError` can reach `Err` only through `impl Err.From(WebFormError)`
  Fix: Handle this call locally with `??`, add `impl Err.From(WebFormError) { … }`, or change the return type
-More: jet-lang.dev/e/E2402
+More: jet-lang.dev/e/Jet.MissingErrorConversion

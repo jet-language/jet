@@ -270,20 +270,20 @@ module_value_refusal_matches_the_program: fn(declarations: String, slug: String)
 
 #Test("module_value_cycle_is_the_programs_cycle_at_the_value") {
     head: module_value_refusal_matches_the_program("TOTAL: #run {{ TOTAL + 1 }}\n", "module-value-cycle-parity")
-    assert(head.contains("jet.ComputedFieldCycle"), head)
+    assert(head.contains("Jet.ComputedFieldCycle"), head)
     assert(head.contains("TOTAL -> TOTAL"), head)
     assert(head.contains("--> main.jet:1:15"), head)
 }
 
 #Test("module_value_effect_without_gate_is_the_programs_refusal") {
     head: module_value_refusal_matches_the_program("noisy: fn() -> Int {{\n    print(\"hi\")\n    3\n}}\n\nTOTAL: #run noisy()\n", "module-value-effect-parity")
-    assert(head.contains("jet.ComptimeEffectWithoutImpure"), head)
+    assert(head.contains("Jet.ComptimeEffectWithoutImpure"), head)
     assert(head.contains("--> main.jet:6:13"), head)
 }
 
 #Test("module_value_not_built_is_the_programs_refusal") {
     head: module_value_refusal_matches_the_program("counted: fn() -> Int {{\n    print(\"counting\")\n    3\n}}\n\nTOTAL: counted()\n", "module-value-not-built-parity")
-    assert(head.contains("jet.ModuleValueNotBuilt"), head)
+    assert(head.contains("Jet.ModuleValueNotBuilt"), head)
     assert(head.contains("--> main.jet:6:8"), head)
 }
 
@@ -415,7 +415,7 @@ dev: module {
     error: envmodel_test_env_error(envmodel_evaluate_env(source, dir))
     files.remove_all(dir) ?? panic("remove the environment")
     head: module_value_refusal_head(envmodel_test_render("main.jet", source, error))
-    assert(head.contains("jet.BindingTypeMismatch"), head)
+    assert(head.contains("Jet.BindingTypeMismatch"), head)
     assert(head.contains("--> main.jet:5:32"), head)
     assert(!error.what.contains("ENVMODEL_VALUE"), error.what)
 }

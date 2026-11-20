@@ -5,13 +5,13 @@ fixture: SQLQueryInRowLoop.fixture
 env: NO_COLOR=1
 step: jet run main.jet
 exit: 0
-stdout+stderr: !~ "[jet.SqlQueryInRowLoop]" # run hides the tidy error
+stdout+stderr: !~ "Jet.SqlQueryInRowLoop" # run hides the tidy error
 step: jet check main.jet
 exit: 1
-stderr: ~ "Error [jet.SqlQueryInRowLoop]: This query runs once for every row of the loop around it" # check lists the query
+stderr: ~ "Error: Jet.SqlQueryInRowLoop: This query runs once for every row of the loop around it" # check lists the query
 stderr: ~ "1 problem found" # it is the only problem
 step: jet build main.jet
 exit: 1
-stderr: ~ "Error [jet.SqlQueryInRowLoop]: This query runs once for every row of the loop around it" # build lists the query too
+stderr: ~ "Error: Jet.SqlQueryInRowLoop: This query runs once for every row of the loop around it" # build lists the query too
 stderr: ~ "main.jet:18:23" # at the query the loop repeats
 stderr: ~ "1 problem found" # and fails on it alone

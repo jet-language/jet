@@ -64,16 +64,16 @@ stderr: ~ "(16 bytes) and runs past its end" # the tuple's two Ints, which the t
 step outside: jet run -O0 outside.jet
 exit: nonzero
 stdout: empty
-stderr.filter(~ "Stop [E3001]:").line(0).split(" — ", 0): = "Stop [E3001]: `panic: can't slice 3 items from 2 to 4 (exclusive)`" # the slice stop line without the source suffix
+stderr.filter(~ "Stop: Jet.Panic:").line(0).split(" — ", 0): = "Stop: Jet.Panic: `panic: can't slice 3 items from 2 to 4 (exclusive)`" # the slice stop line without the source suffix
 step: jet run -O2 outside.jet
 exit: == outside
 stdout: empty
-stderr.filter(~ "Stop [E3001]:").line(0).split(" — ", 0): == outside # the slice stop line without the source suffix
+stderr.filter(~ "Stop: Jet.Panic:").line(0).split(" — ", 0): == outside # the slice stop line without the source suffix
 step negative: jet run -O0 negative.jet
 exit: nonzero
 stdout: empty
-stderr.filter(~ "Stop [E3001]:").line(0).split(" — ", 0): = "Stop [E3001]: `panic: can't slice 3 items from 1 to 0 (exclusive)`" # a negative count is a range that runs backward
+stderr.filter(~ "Stop: Jet.Panic:").line(0).split(" — ", 0): = "Stop: Jet.Panic: `panic: can't slice 3 items from 1 to 0 (exclusive)`" # a negative count is a range that runs backward
 step: jet run -O2 negative.jet
 exit: == negative
 stdout: empty
-stderr.filter(~ "Stop [E3001]:").line(0).split(" — ", 0): == negative # the slice stop line without the source suffix
+stderr.filter(~ "Stop: Jet.Panic:").line(0).split(" — ", 0): == negative # the slice stop line without the source suffix

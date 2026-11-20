@@ -32,7 +32,7 @@ step: jet build --post-link=tools.sign --post-link=tools.notarize app.jet
 cwd: open
 exit: nonzero
 stderr: ~ "`--post-link=tools.sign --post-link=tools.notarize` names `tools.sign`, which is no function marked `#On(build.before_write)`" # each flag is one more step, and the first runs first
-stderr: ~ "jet-lang.dev/e/E3506" # the post-link step's code
+stderr: ~ "jet-lang.dev/e/Jet.LinkStepFailed" # the post-link step's code
 file: open/.jet/build/app absent # a failed post-link step leaves no executable
 step: jet run --profile=relinked app.jet
 cwd: open
@@ -50,4 +50,4 @@ step: jet build
 cwd: code
 exit: nonzero
 stderr: ~ "`b.link(tools.relink)` at build.jet:2 names `tools.relink`, which is no function marked `#On(build.link)`" # fn build writes the hook as a path
-stderr: ~ "jet-lang.dev/e/E3506" # the link step's code
+stderr: ~ "jet-lang.dev/e/Jet.LinkStepFailed" # the link step's code

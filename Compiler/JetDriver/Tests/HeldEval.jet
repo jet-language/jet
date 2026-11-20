@@ -6,7 +6,9 @@
 // function uses it itself or a function it calls does (the call's solved
 // row). One probe checks one function after another, in the module each
 // names, with the program's symbol table and checked types lent to each
-// check and given back.
+// check and given back. A function of the program's source the held check
+// lacks is appended to it (jet_driver_held_eval_append) when it is pure and
+// calls only functions it holds.
 use {
     jet_driver.[
         JetDriverAuthorizedSourceFile,
@@ -16,10 +18,12 @@ use {
         JetDriverCoreSource,
         JetDriverHeldOpened,
         jet_driver_compile,
+        jet_driver_held_eval_append,
         jet_driver_held_eval_check,
         jet_driver_held_eval_open,
     ]
     jet_cli.[jet_cli_driver_request]
+    jet_foundation.[name_rows_set]
     jet_sema.[SemaScriptProbeChecked]
 }
 
@@ -67,16 +71,30 @@ held_eval_check: fn(opened: &JetDriverHeldOpened, path: String, text: String) ->
     done.checked.move()
 }
 
-#Test("an expression's function checks against the held program's signatures, one after another on one probe") {
-    snapshot: JetDriverAuthorizedSourceSnapshot{
+// Appends `text` to `opened`'s module of `path`, its function kept among
+// the checked functions where the next check finds the functions it calls.
+// Whether it was.
+held_eval_append: fn(opened: &JetDriverHeldOpened, path: String, text: String) -> Bool {
+    done := jet_driver_held_eval_append(opened.eval, path, opened.inputs.functions, opened.inputs.symbols.move(), opened.types.move(), text)
+    opened.inputs.symbols = done.symbols.move()
+    opened.types = done.types.move()
+    appended := done.appended.move() ?? return false
+    name_rows_set(opened.eval.rows, appended.function.key, opened.inputs.functions.len())
+    opened.inputs.functions.push(appended.function.move())
+    true
+}
+
+// The fixture's snapshot: its entry `main` and `lib.jet`'s `lib`.
+held_eval_snapshot: fn(main: String, lib: String) -> JetDriverAuthorizedSourceSnapshot {
+    JetDriverAuthorizedSourceSnapshot{
         roots: [JetDriverAuthorizedSourceRoot]{
             JetDriverAuthorizedSourceRoot{
                 canonical_path: "/held-fixture",
                 identity: "held-root",
                 allow_hardlinks: false,
                 files: [JetDriverAuthorizedSourceFile]{
-                    JetDriverAuthorizedSourceFile{path: HELD_EVAL_PATH, relative_path: "main.jet", identity: "held-file", source: held_eval_source()},
-                    JetDriverAuthorizedSourceFile{path: HELD_EVAL_LIB_PATH, relative_path: "lib.jet", identity: "held-lib-file", source: held_eval_lib_source()},
+                    JetDriverAuthorizedSourceFile{path: HELD_EVAL_PATH, relative_path: "main.jet", identity: "held-file", source: main},
+                    JetDriverAuthorizedSourceFile{path: HELD_EVAL_LIB_PATH, relative_path: "lib.jet", identity: "held-lib-file", source: lib},
                     JetDriverAuthorizedSourceFile{path: HELD_EVAL_MANIFEST_PATH, relative_path: "package.jet", identity: "held-manifest", source: HELD_EVAL_MANIFEST},
                 },
                 foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
@@ -85,12 +103,20 @@ held_eval_check: fn(opened: &JetDriverHeldOpened, path: String, text: String) ->
         entry_root_identity: "held-root",
         entry_path: HELD_EVAL_PATH,
     }
+}
+
+// `snapshot`'s held check, opened.
+held_eval_opened: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverHeldOpened {
     request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(1), JetDriverCompileMode.Check)
     request.hold_check_state = true
     compiled := jet_driver_compile(request)
     assert(compiled.complete, "the fixture checks: {compiled.diagnostics.map(fn(row) { row.what })}")
     held := compiled.held.move() ?? panic("a held check keeps its compile state")
-    opened := jet_driver_held_eval_open(held) ?? panic("the held program opens at its entry module")
+    jet_driver_held_eval_open(held) ?? panic("the held program opens at its entry module")
+}
+
+#Test("an expression's function checks against the held program's signatures, one after another on one probe") {
+    opened := held_eval_opened(held_eval_snapshot(held_eval_source(), held_eval_lib_source()))
     assert(opened.inputs.functions.any(fn(row) { row.name == "helper" }), "the lowering inputs hold the checked functions")
     assert(opened.types.len() > 0, "the probe's checked types are handed to the lowering")
 
@@ -123,4 +149,32 @@ held_eval_check: fn(opened: &JetDriverHeldOpened, path: String, text: String) ->
     nowhere := held_eval_check(opened, "other.jet", "jet_debug_expression: fn(total: Int) -> Int {{\n    total\n}}\n")
     assert(!nowhere.complete && nowhere.function == None, "a file no checked module has checks nothing")
     assert(opened.inputs.symbols.ranges.len() > 0 && opened.types.len() > 0, "each check gives the symbol table and the checked types back")
+}
+
+#Test("a held check of the program's cut gains the pure functions an expression calls, callees first") {
+    opened := held_eval_opened(held_eval_snapshot("run: fn() {{}}\n", ""))
+    unbound := held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    twice(total)\n}}\n")
+    assert(unbound.diagnostics.len() > 0, "the cut binds no function of the program's source")
+
+    assert(!held_eval_append(opened, HELD_EVAL_DISPLAY_PATH, "twice: fn(value: Int) -> Int {{ helper(helper(value)) }}\n"), "a function whose callee isn't held is not appended")
+    assert(held_eval_append(opened, HELD_EVAL_DISPLAY_PATH, "helper: fn(value: Int) -> Int {{ value * 2 }}\n"), "a pure function is appended")
+    assert(held_eval_append(opened, HELD_EVAL_DISPLAY_PATH, "twice: fn(value: Int) -> Int {{ helper(helper(value)) }}\n"), "a function that calls an appended one is appended after it")
+    assert(!held_eval_append(opened, HELD_EVAL_DISPLAY_PATH, "helper: fn(value: Int) -> Int {{ value * 3 }}\n"), "a name the module binds is not appended again")
+
+    sum := held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    twice(total) + helper(total)\n}}\n")
+    assert(sum.complete && sum.diagnostics.len() == 0, "an expression calls the appended functions: {sum.diagnostics.map(fn(row) { row.what })}")
+
+    // Each refusal leaves the module as it was.
+    assert(!held_eval_append(opened, HELD_EVAL_DISPLAY_PATH, "shout: fn(value: Int) -> Int {{\n    print(value)\n    value\n}}\n"), "a function that uses an effect is not appended")
+    assert(!held_eval_append(opened, HELD_EVAL_DISPLAY_PATH, "count: fn(value: Int) -> Int {{\n    if value > 0 -> return count(value - 1)\n    0\n}}\n"), "a function that calls itself is not appended")
+    assert(!held_eval_append(opened, HELD_EVAL_DISPLAY_PATH, "pick: fn<T>(value: T) -> T {{ value }}\n"), "a generic function is not appended")
+    assert(!held_eval_append(opened, "other.jet", "third: fn(value: Int) -> Int {{ value * 3 }}\n"), "a file no checked module has gains nothing")
+    shouted := held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    shout(total) + count(total)\n}}\n")
+    assert(shouted.diagnostics.len() > 0, "a refused function stays unbound")
+    again := held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    twice(total)\n}}\n")
+    assert(again.complete && again.diagnostics.len() == 0, "the appended functions still check after a refusal: {again.diagnostics.map(fn(row) { row.what })}")
+
+    assert(held_eval_append(opened, HELD_EVAL_LIB_DISPLAY_PATH, "third: fn(value: Int) -> Int {{ value * 3 }}\n"), "another module gains its own function")
+    third := held_eval_check(opened, HELD_EVAL_LIB_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    third(total)\n}}\n")
+    assert(third.complete && third.diagnostics.len() == 0, "the other module's appended function checks there: {third.diagnostics.map(fn(row) { row.what })}")
 }

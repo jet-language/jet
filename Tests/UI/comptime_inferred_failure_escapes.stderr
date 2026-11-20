@@ -1,8 +1,8 @@
-Error [jet.ErrorNotPropagatable]: `halve` fails with `Err`, which can't propagate into `Never` here
+Error: Jet.ErrorNotPropagatable: `halve` fails with `Err`, which can't propagate into `Never` here
   --> Tests/UI/comptime_inferred_failure_escapes.jet:8:41
     |
   8 |     loop index in 0..<count -> total += halve(index)
     |                                         ^^^^^
  Why: `halve` is defined at `comptime_inferred_failure_escapes.jet:1:1` with effective failure contract `implicit default Err!`; the caller's `explicit Never! (proven unreachable)` contract has no route from `Err` to `Never`
  Fix: The caller is declared `Never!`, so it can't fail: declare `Err!` in its return type, or handle `halve` locally with `??`
-More: jet-lang.dev/e/E2404
+More: jet-lang.dev/e/Jet.ErrorNotPropagatable

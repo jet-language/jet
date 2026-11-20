@@ -62,7 +62,7 @@ use {
 }
 
 #Test("frame_lines_keeps_diagnostic_words_verbatim") {
-    diagnostic: "Error [jet.UnknownFunction]: nothing named `nonexistent_function_xyz` exists here\n  8 | nonexistent_function_xyz()\n    | ^^^^^^^^^^^^^^^^^^^^^^^^\nWhy: only defined names can be called\nFix: define it first"
+    diagnostic: "Error: Jet.UnknownFunction: nothing named `nonexistent_function_xyz` exists here\n  8 | nonexistent_function_xyz()\n    | ^^^^^^^^^^^^^^^^^^^^^^^^\nWhy: only defined names can be called\nFix: define it first"
     framed: frame_lines("E0102", diagnostic)
     loop line in diagnostic.split("\n") {
         assert(framed.contains("│ {line}"), "missing verbatim line {line}")
@@ -136,7 +136,7 @@ use {
     facts.ready(10, true)
     assert_eq(facts.version, 2)
     facts.building()
-    facts.failed("E0003", "Error [jet.InvalidStatement]: bad")
+    facts.failed("E0003", "Error: Jet.InvalidStatement: bad")
     failed: facts.json()
     assert(failed.contains("\"version\":2,"), failed)
     assert(failed.contains("\"candidate\":3,"), failed)
@@ -144,7 +144,7 @@ use {
     assert(failed.contains("\"accepted_revision\":2,"), failed)
     assert(failed.ends_with("\"last_good_revision\":2}}"), failed)
     facts.building()
-    facts.failed("E0003", "Error [jet.InvalidStatement]: bad")
+    facts.failed("E0003", "Error: Jet.InvalidStatement: bad")
     assert_eq(facts.accepted() ?? 0, 2)
     assert_eq(facts.candidate ?? 0, 3)
     assert_eq(facts.diagnostic_revision() ?? 0, 3)
@@ -169,11 +169,11 @@ use {
     building: facts.json()
     assert(building.contains("\"state\":\"reconnecting\""), building)
     assert(building.contains("\"last_build_ms\":425"), building)
-    facts.failed("E0102", "Error [jet.UnknownFunction]: missing")
+    facts.failed("E0102", "Error: Jet.UnknownFunction: missing")
     error: facts.json()
     assert(error.contains("\"state\":\"reconnecting\""), error)
     assert(error.contains("\"code\":\"E0102\""), error)
-    assert(error.contains("Error [jet.UnknownFunction]: missing"), error)
+    assert(error.contains("Error: Jet.UnknownFunction: missing"), error)
     assert(error.contains("\"last_build_ms\":425"), error)
     facts.reconnecting = false
     recovered: facts.json()

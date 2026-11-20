@@ -13,18 +13,18 @@ step: jet run main.jet
 cwd: open
 exit: 70
 stdout: = "depth: 3\n"
-stderr: ~ "Stop [E3012]: Stack overflow in `depth`" # with debug info the stop names the function
+stderr: ~ "Stop: Jet.StackOverflow: Stack overflow in `depth`" # with debug info the stop names the function
 stderr: ~ "--> main.jet:" # and its line
 step: jet run --debug-info=false main.jet
 cwd: open
 exit: 70
 stdout: = "depth: 3\n"
-stderr: ~ "Stop [E3012]: Stack overflow in `??` at 0x" # without debug info the stop prints the address
+stderr: ~ "Stop: Jet.StackOverflow: Stack overflow in `??` at 0x" # without debug info the stop prints the address
 stderr: !~ "--> main.jet:" # and no line
 step: jet run --profile=lean main.jet
 cwd: open
 exit: 70
-stderr: ~ "Stop [E3012]: Stack overflow in `??` at 0x" # the profile field turns debug info off
+stderr: ~ "Stop: Jet.StackOverflow: Stack overflow in `??` at 0x" # the profile field turns debug info off
 step: jet build main.jet
 cwd: open
 exit: 0
@@ -39,7 +39,7 @@ file: open/.jet/build/main !~ ".debug_info" # `debug_info: false` leaves the DWA
 step: jet run --debug-info=split main.jet
 cwd: open
 exit: 70
-stderr: ~ "Stop [E3012]: Stack overflow in `depth`" # jet run keeps split debug info in the image
+stderr: ~ "Stop: Jet.StackOverflow: Stack overflow in `depth`" # jet run keeps split debug info in the image
 step: jet build --debug-info=split main.jet
 cwd: open
 exit: 0
@@ -51,7 +51,7 @@ file: open/.jet/build/main.debug !~ ".eh_frame" # and the image loads no unwind 
 step: {work}/open/.jet/build/main
 exit: 70
 stdout: = "depth: 3\n"
-stderr: ~ "Stop [E3012]: Stack overflow in `??` at 0x" # the split image's report prints addresses
+stderr: ~ "Stop: Jet.StackOverflow: Stack overflow in `??` at 0x" # the split image's report prints addresses
 remove: open/.jet/build/main.debug
 step: jet build --release main.jet
 cwd: open
@@ -66,11 +66,11 @@ exit: 0
 step: jet build --debug-info=maybe main.jet
 cwd: open
 exit: 2
-stderr: ~ "Error [jet.InvalidCommandInput]: `--debug-info=maybe` isn't a value of `debug_info`" # debug_info takes true, false or split
+stderr: ~ "Error: Jet.InvalidCommandInput: `--debug-info=maybe` isn't a value of `debug_info`" # debug_info takes true, false or split
 step: jet build --small=false --small main.jet
 cwd: open
 exit: 2
-stderr: ~ "Error [jet.InvalidCommandInput]: `--small=false` and `--small` disagree" # the bare flag is true
+stderr: ~ "Error: Jet.InvalidCommandInput: `--small=false` and `--small` disagree" # the bare flag is true
 step: jet build
 cwd: code
 exit: 0
@@ -83,5 +83,5 @@ step: jet build
 cwd: refused_code
 exit: 1
 stderr: = ../../CLI/build_option_bool_value_e3502.txt
-stderr: ~ "Error [jet.BuildPlanFailed]: This isn't a value of build option `debug_info`" # a Bool row takes a Bool literal
+stderr: ~ "Error: Jet.BuildPlanFailed: This isn't a value of build option `debug_info`" # a Bool row takes a Bool literal
 stderr: ~ "Fix: Write `b.debug_info(false)`" # the fix spells the row's value

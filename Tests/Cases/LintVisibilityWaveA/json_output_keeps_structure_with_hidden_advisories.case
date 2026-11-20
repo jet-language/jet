@@ -5,10 +5,10 @@ env: NO_COLOR=1
 step: jet run --json main.jet
 exit: 0
 stdout: = json_output_keeps_structure_with_hidden_advisories.stdout.expected
-stdout+stderr: !~ "[jet.UnusedLocalBinding]" # original predicate
+stdout+stderr: !~ "Jet.UnusedLocalBinding" # original predicate
 step: jet check --json main.jet
 exit: 1
-stdout: ~ "L0101" # original predicate
+stdout: ~ "Jet.UnusedLocalBinding" # original predicate
 stdout: ~ "\"severity\":\"tidy\"" # the tidy error carries its kind
 stdout: ~ "\"ok\":false" # a tidy error fails jet check
 stdout: !~ "\"ok\":true" # a tidy error fails jet check
@@ -17,5 +17,5 @@ exit: 0
 stdout.trim_start: ^= "{" # original predicate
 stdout: ~ "\"action\":\"test\"" # original predicate
 stdout: ~ "\"ok\":true" # original predicate
-stdout+stderr: !~ "L0101" # original predicate
+stdout+stderr: !~ "Jet.UnusedLocalBinding" # original predicate
 

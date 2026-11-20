@@ -331,10 +331,20 @@ kit_ui_actual: fn(call: KitUICall, run: KitRun) -> String {
 
 // Whether a lint fixture's check compiled and emitted a lint. A tidy lint is
 // an error to `jet check`, so a check that fails on lints alone (each report
-// links an `L` code, none an `E` code) still compiled.
-kit_ui_lint_compiled: fn(code: Int, actual: String) -> Bool {
-    if code == 0 -> return actual.split("\n").any(fn(line) { line.starts_with("Warning [") })
-    actual.contains("jet-lang.dev/e/L") && !actual.contains("jet-lang.dev/e/E")
+// heading names a `.Lint` row of the registry under `root`) still compiled.
+kit_ui_lint_compiled: fn(code: Int, actual: String, root: String) -> Bool {
+    if code == 0 {
+        return actual.split("\n").any(fn(line) { line.starts_with("Warning: ") && kit_expect_heading_name(line) != None })
+    }
+    registry: files.read(files.join(root, "Compiler/Prelude/Diagnostics.jet")) ?? return false
+    rows: kit_ui_registry(registry)
+    reports := 0
+    loop line in actual.split("\n") {
+        name: kit_expect_heading_name(line) ?? next
+        if !rows.any(fn(row) { row.lint && row.name == name }) -> return false
+        reports += 1
+    }
+    reports > 0
 }
 
 kit_ui_snapshot: fn(entry: KitEntry, call: KitUICall, result: KitRun, actual: String, ctx: KitCtx) -> KitVerdict {
@@ -342,7 +352,7 @@ kit_ui_snapshot: fn(entry: KitEntry, call: KitUICall, result: KitRun, actual: St
     if call.exit == "nonzero" && result.code == 0 {
         return kit_expect_verdict("FAIL", "directive requires nonzero exit")
     }
-    if call.streams == "lint" && !kit_ui_lint_compiled(result.code, actual) {
+    if call.streams == "lint" && !kit_ui_lint_compiled(result.code, actual, ctx.root) {
         return kit_expect_verdict("FAIL", "lint fixture must compile and emit a lint")
     }
     if (call.streams == "rendered" || call.streams == "rendered-both") && result.code != 0 && kit_expect_diagnostics(actual) == 0 {
@@ -649,25 +659,25 @@ kit_ui_hangar_tamper: fn(ctx: KitCtx, source: String, overlay: [KitEnvVar]) -> S
 
 // The typed rows from their one home, the diagnostic types in
 // Compiler/Prelude/Diagnostics.jet: each `X: struct {` whose last member is its
-// `impl Diagnostic` block. A row's report header names it by its type path,
-// `jet.X`. Tools/Agent/DiagnosticRows.jet owns the rows' other facts and the
+// `impl Diagnostic` block. A row's report header names it by its name,
+// `Jet.X`. Tools/Agent/DiagnosticRows.jet owns the rows' other facts and the
 // repair-coverage baseline it generates from them.
 kit_ui_registry: fn(text: String) -> [KitUIRegistryRow] {
     rows := [KitUIRegistryRow]{}
-    row := KitUIRegistryRow{code: "", name: "", active: false}
+    row := KitUIRegistryRow{code: "", name: "", active: false, lint: false}
     name := ""
     open := false
     loop line in text.split("\n") {
         if line.ends_with(": struct {{") && !line.starts_with(" ") {
             name = kit_steps_byte_slice(line, 0, line.count_bytes() - 10)
         } else if line == "    impl Diagnostic {{" {
-            row = KitUIRegistryRow{code: "", name: "jet.{name}", active: true}
+            row = KitUIRegistryRow{code: "", name: "Jet.{name}", active: true, lint: false}
             open = true
         } else if !open { next } else if line.starts_with("        code: \"") && line.ends_with("\",") {
             row.code = kit_steps_byte_slice(line, 15, line.count_bytes() - 2)
         } else if line.starts_with("        status: .") {
             row.active = line == "        status: .Active,"
-        } else if line == "    }}" {
+        } else if line == "        severity: .Lint," { row.lint = true } else if line == "    }}" {
             rows.push(row.copy())
             open = false
         }
@@ -761,22 +771,17 @@ kit_ui_emitted: fn(root: String, directory: String, codes: &[String]) {
 }
 
 // The registered codes the report headers in `text` name. A header names a
-// registered row by its type path (`Error [jet.UnknownName]`) or names a code.
+// registered row by its name (`Error: Jet.UnknownName: …`), or prints a code
+// no row names.
 kit_ui_extract_reports: fn(text: String, rows: [KitUIRegistryRow]) -> [String] {
     codes := [String]{}
     loop line in text.split("\n") {
-        loop prefix in ["Error [", "Warning [", "Stop [", "Lint ["] {
-            if !line.starts_with(prefix) -> next
-            end: line.index("]") ?? -1
-            if end < prefix.count_bytes() -> next
-            token: kit_steps_byte_slice(line, prefix.count_bytes(), end)
-            if token.starts_with("jet.") {
-                loop row in rows {
-                    if row.name == token -> kit_ui_add_code(codes, row.code)
-                }
-            } else if kit_ui_report_code(token) { kit_ui_add_code(codes, token) }
-            break
-        }
+        token: kit_expect_heading_name(line) ?? next
+        if token.starts_with("Jet.") {
+            loop row in rows {
+                if row.name == token -> kit_ui_add_code(codes, row.code)
+            }
+        } else if kit_ui_report_code(token) { kit_ui_add_code(codes, token) }
     }
     codes
 }

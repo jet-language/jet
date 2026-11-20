@@ -19,7 +19,7 @@ stdout: ~ "always_small: FAIL" # the property is the failing claim
 stderr: ~ "property failed on case " # the report names the failing case
 stderr: ~ "; replay with JET_PROP_SEED=" # and how to replay its seed
 stderr: ~ "minimized_inputs: n = 50" # the failure shrinks to the boundary input
-stderr: ~ "E3001" # with the minimized case's own assertion report
+stderr: ~ "Jet.Panic" # with the minimized case's own assertion report
 
 step seeded: jet test fail.jet
 env: JET_PROP_SEED=424242
@@ -40,4 +40,4 @@ stderr: ~ "JET_PROP_SEED must be an integer from 0 to 9223372036854775807" # the
 
 step bad_type: jet test bad_type.jet
 exit: nonzero # an ungeneratable parameter type is refused before running
-stderr: ~ "E0613" # the property-test generator diagnostic
+stderr: ~ "Jet.UngeneratablePropertyParameter" # the property-test generator diagnostic

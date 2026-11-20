@@ -29,14 +29,14 @@ step unproved: jet run unproved/main.jet
 exit: 70 # the plain Int index keeps its runtime check
 stdout: = "six\n"
 stderr: ~ "the list has 7 items, so position 7 doesn't exist" # the kept check stops
-stderr: ~ "jet-lang.dev/e/E3010" # the runtime stop code
+stderr: ~ "jet-lang.dev/e/Jet.ArithmeticOrBoundsFailure" # the runtime stop code
 step out_of_range: jet check out_of_range/main.jet
 exit: 1
 stderr: ~ "Index 6 is out of range for a fixed-size list of 6 elements" # the range upper bound reaches the prover
 stderr: ~ "--> main.jet:3:58" # located at the index
-stderr: ~ "jet-lang.dev/e/E0965" # one registered code
+stderr: ~ "jet-lang.dev/e/Jet.FixedListIndexOutOfRange" # one registered code
 step invariant: jet check invariant/main.jet
 exit: 1
 stderr: ~ "`#Invariant` isn't a known applied rule" # the retired marker is unknown
-stderr: ~ "jet-lang.dev/e/E0927" # the unknown-marker code
+stderr: ~ "jet-lang.dev/e/Jet.UnknownAppliedRule" # the unknown-marker code
 stderr: !~ "distinct Int(" # no teaching diagnostic for the retired marker

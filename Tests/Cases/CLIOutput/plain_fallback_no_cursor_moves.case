@@ -32,7 +32,7 @@ exit: 0
 stdout: = "cursor controls: 0\n" # a pipe is never redrawn, even with color forced
 step: jet run --allow=FS.Read screen.jet -- screen piped.out
 exit: 0
-stdout: ~ "Error [jet.NixCacheAdmissionFailed]" # the card still prints
+stdout: ~ "Error: Jet.NixCacheAdmissionFailed" # the card still prints
 step no_color: script -qfec "stty rows 30 cols 120; exec '{jetpack}' env --prep --trust --yes --local-nix-catalog '{work}/catalog'" /dev/null
 cwd: project
 env: NO_COLOR=1
@@ -45,7 +45,7 @@ exit: 0
 stdout: = "cursor controls: 0\n" # NO_COLOR on a terminal appends plain lines only
 step: jet run --allow=FS.Read screen.jet -- screen no-color.out
 exit: 0
-stdout: ~ "Error [jet.NixCacheAdmissionFailed]" # the card still prints
+stdout: ~ "Error: Jet.NixCacheAdmissionFailed" # the card still prints
 step ci: script -qfec "stty rows 30 cols 120; exec '{jetpack}' env --prep --trust --yes --local-nix-catalog '{work}/catalog'" /dev/null
 cwd: project
 env: CI=true
@@ -58,7 +58,7 @@ exit: 0
 stdout: = "cursor controls: 0\n" # CI on a terminal appends plain lines only
 step: jet run --allow=FS.Read screen.jet -- screen ci.out
 exit: 0
-stdout: ~ "Error [jet.NixCacheAdmissionFailed]" # the card still prints
+stdout: ~ "Error: Jet.NixCacheAdmissionFailed" # the card still prints
 step: built stop {cap:port}
 exit: 0
 wait: peer

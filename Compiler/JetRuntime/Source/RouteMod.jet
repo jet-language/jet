@@ -659,7 +659,7 @@ mod_c_symbol: fn(context: I64, span: I64) -> I64 {
 }
 
 mod_library_error: fn(opening: I64, context: I64, tail: I64) -> I64 {
-    reason: mod_reason(opening, rt_static_text("E1341: library `"))
+    reason: mod_reason(opening, rt_static_text("Jet.InvalidLibraryOutput: library `"))
     mod_push_span(reason, context, MOD_LIBRARY_NAME)
     jet_rt_string_builder_push(reason, tail)
     reason
@@ -677,13 +677,13 @@ mod_check_exports: fn(context: I64) -> I64 {
         name: wrapping(row - context)
         symbol: wrapping(name + I64{16})
         if mod_span_invalid(context, name) {
-            return jet_rt_string_clone(rt_static_text("Invalid: E1341: .jetlib metadata has an invalid export name"))
+            return jet_rt_string_clone(rt_static_text("Invalid: Jet.InvalidLibraryOutput: .jetlib metadata has an invalid export name"))
         }
         expected: mod_c_symbol(context, name)
         matches: mod_span_is(context, symbol, expected)
         jet_rt_string_drop(expected)
         if (mod_span_invalid(context, symbol) || !matches) {
-            reason: mod_reason(rt_static_text("Invalid: "), rt_static_text("E1341: .jetlib export `"))
+            reason: mod_reason(rt_static_text("Invalid: "), rt_static_text("Jet.InvalidLibraryOutput: .jetlib export `"))
             mod_push_span(reason, context, name)
             jet_rt_string_builder_push(reason, rt_static_text("` has an invalid native symbol `"))
             mod_push_span(reason, context, symbol)
@@ -694,7 +694,7 @@ mod_check_exports: fn(context: I64) -> I64 {
         loop earlier < index {
             other: wrapping(wrapping(rows + earlier * MOD_EXPORT_BYTES) - context)
             if mod_spans_equal(context, name, other) {
-                reason: mod_reason(rt_static_text("Invalid: "), rt_static_text("E1341: .jetlib metadata repeats export `"))
+                reason: mod_reason(rt_static_text("Invalid: "), rt_static_text("Jet.InvalidLibraryOutput: .jetlib metadata repeats export `"))
                 mod_push_span(reason, context, name)
                 jet_rt_string_builder_push(reason, rt_static_text("`"))
                 return reason
@@ -705,7 +705,7 @@ mod_check_exports: fn(context: I64) -> I64 {
         loop earlier < index {
             other: wrapping(wrapping(wrapping(rows + earlier * MOD_EXPORT_BYTES) - context) + I64{16})
             if mod_spans_equal(context, symbol, other) {
-                reason: mod_reason(rt_static_text("Invalid: "), rt_static_text("E1341: .jetlib metadata repeats native symbol `"))
+                reason: mod_reason(rt_static_text("Invalid: "), rt_static_text("Jet.InvalidLibraryOutput: .jetlib metadata repeats native symbol `"))
                 mod_push_span(reason, context, symbol)
                 jet_rt_string_builder_push(reason, rt_static_text("`"))
                 return reason
@@ -724,7 +724,7 @@ mod_check: fn(context: I64) -> I64 {
     // which Tests/Guards/jet_version.jet holds this literal to); a library
     // from another is E1338.
     if !mod_span_is(context, MOD_COMPILER_VERSION, rt_static_text("a0.0.45")) {
-        reason: mod_reason(rt_static_text("Unsupported: "), rt_static_text("E1338: library `"))
+        reason: mod_reason(rt_static_text("Unsupported: "), rt_static_text("Jet.LibraryIdentityMismatch: library `"))
         mod_push_span(reason, context, MOD_LIBRARY_NAME)
         jet_rt_string_builder_push(reason, rt_static_text("` was built by Jet `"))
         mod_push_span(reason, context, MOD_COMPILER_VERSION)
@@ -739,19 +739,19 @@ mod_check: fn(context: I64) -> I64 {
         return reason
     }
     if mod_span_invalid(context, MOD_LIBRARY_NAME) {
-        return jet_rt_string_clone(rt_static_text("Invalid: E1341: .jetlib metadata has no valid Library name"))
+        return jet_rt_string_clone(rt_static_text("Invalid: Jet.InvalidLibraryOutput: .jetlib metadata has no valid Library name"))
     }
     if (mod_word(context, MOD_ENTRY_PRESENT) == I64{1} && mod_span_invalid(context, MOD_ENTRY)) {
-        return jet_rt_string_clone(rt_static_text("Invalid: E1341: .jetlib metadata has an invalid output entry"))
+        return jet_rt_string_clone(rt_static_text("Invalid: Jet.InvalidLibraryOutput: .jetlib metadata has an invalid output entry"))
     }
     if mod_span_invalid(context, MOD_COMPILER_BUILD) {
-        return jet_rt_string_clone(rt_static_text("Invalid: E1341: .jetlib metadata has no valid compiler build"))
+        return jet_rt_string_clone(rt_static_text("Invalid: Jet.InvalidLibraryOutput: .jetlib metadata has no valid compiler build"))
     }
     if mod_span_invalid(context, MOD_TARGET_TRIPLE) {
-        return jet_rt_string_clone(rt_static_text("Invalid: E1341: .jetlib metadata has no valid target triple"))
+        return jet_rt_string_clone(rt_static_text("Invalid: Jet.InvalidLibraryOutput: .jetlib metadata has no valid target triple"))
     }
     if mod_span_invalid(context, MOD_LINKER) {
-        return jet_rt_string_clone(rt_static_text("Invalid: E1341: .jetlib metadata has no valid linker identity"))
+        return jet_rt_string_clone(rt_static_text("Invalid: Jet.InvalidLibraryOutput: .jetlib metadata has no valid linker identity"))
     }
     if !mod_span_is(context, MOD_ABI_IDENTITY, rt_static_text("jet.library.abi.v2;call=extern-c;scalar=homogeneous;access=read-write-move;text=jet-text-v1;ptr-len=checked-utf8")) {
         reason: mod_library_error(rt_static_text("Unsupported: "), context, rt_static_text("` uses unsupported native ABI identity `"))
@@ -783,7 +783,7 @@ mod_check: fn(context: I64) -> I64 {
         if (length >= I64{3} && rt_text_equal_bytes(data, rt_text_data(rt_static_text("FS.")), I64{3})) {
             next
         }
-        reason: mod_reason(rt_static_text("Denied: "), rt_static_text("E1339: library `"))
+        reason: mod_reason(rt_static_text("Denied: "), rt_static_text("Jet.LibraryEffectNotGranted: library `"))
         mod_push_span(reason, context, MOD_LIBRARY_NAME)
         jet_rt_string_builder_push(reason, rt_static_text("` declares `"))
         mod_push_span(reason, context, declared)
