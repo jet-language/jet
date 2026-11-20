@@ -1180,8 +1180,15 @@ parallel walk, a channel's make, send, receive or select, a generator, a
 fiber's park or wake, and the runtime's own lock, wait, park and yield trap
 at their entry, which refuses the call before it takes the lock or waits.
 Every entry is put back after the call, so the program's locks and
-scheduler read as they did whether the call answered or was refused. The
-debugger also turns the
+scheduler read as they did whether the call answered or was refused. A
+failure the call returns (`print parse("")`, `Err(ParseError.Empty)`)
+starts or extends no error journey of the thread's: the journey's origin,
+frames, adoption and reset answer at once and a context frame is the error
+as it was, so the program's own report trail shows only its own failures.
+The thread's TLS, its slot table and slots, is put back after the call as
+the stop found it, so a slot the call set (a `#MaxDepth` count) or a table
+it grew or made from the arena never reaches the program. The debugger
+also turns the
 record/replay mode off for the call and puts it back after (`jet debug
 --record`, `--replay`), so an
 evaluation adds nothing to the recording and takes nothing from it. An
