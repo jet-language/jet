@@ -3117,10 +3117,12 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
         stderr_handle.write("jet test: using fn test override\n").drop("jet stderr")
     }
     spec := cli_process.cmd([String]{binary})
-    // A code suite stamps its builds with the jet under test's identity, and
-    // this jet is the one under test: its identity reaches the suite even
-    // when the caller set none (jet_cli_compiler_identity reads IDENTITY).
-    if code_suite && jet_cli_compiler_identity() == .Val(identity) {
+    // Every test process gets this jet's identity, even when the caller set
+    // none (jet_cli_compiler_identity reads the identity part or IDENTITY): a
+    // code suite stamps its builds with it, and a #Test that compiles through
+    // the native host needs it in the driver's host facts, which version the
+    // target layout by it.
+    if jet_cli_compiler_identity() == .Val(identity) {
         spec = spec.env(JET_CLI_COMPILER_IDENTITY_ENV, identity)
     }
     // The test process finds the jet under test in JET, as a profile's
