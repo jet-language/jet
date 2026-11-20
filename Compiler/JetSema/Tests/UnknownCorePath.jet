@@ -1,0 +1,28 @@
+// A `core.<module>.<item>` path written without its import is E0107 on
+// `core`, and its fix is the `use` line and the path through the module's
+// name: the fix the bare module name gets.
+
+unknown_core_path_fixes: fn(source: String) -> String {
+    fixes := ""
+    loop diagnostic in core_failure_record_diagnostics(source, "user/fixture") {
+        if diagnostic.code != "E0107" || fixes.contains(diagnostic.fix) -> next
+        fixes = if fixes == "" -> diagnostic.fix else -> "{fixes}; {diagnostic.fix}"
+    }
+    fixes
+}
+
+#Test("a core path without its use gets the import and the path through it") {
+    called: unknown_core_path_fixes("run: fn() {{\n    text: core.files.read(\"x.txt\") ?? return\n    print(text)\n}}\n")
+    assert(called.ends_with("use files: core.files` and write `files.read(...)`"), called)
+    nested: unknown_core_path_fixes("run: fn() {{ print(core.archive.gzip.is_gzip([U8]{{}})) }}\n")
+    assert(nested.ends_with("use gzip: core.archive.gzip` and write `gzip.is_gzip(...)`"), nested)
+    value: unknown_core_path_fixes("run: fn() {{\n    read: core.files.read\n    print(read(\"x.txt\") ?? \"\")\n}}\n")
+    assert(value.ends_with("use files: core.files` and write `files.read`"), value)
+}
+
+// The fixed file is Tests/UI/core_path_with_use.jet: this fixture checker
+// wires no Core import edges.
+#Test("a core path that names no Core module keeps the declare fix") {
+    other: unknown_core_path_fixes("run: fn() {{ print(core.nothing_here.x) }}\n")
+    assert(other.contains("`core: ...`"), other)
+}
