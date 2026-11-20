@@ -6,7 +6,7 @@ An error refuses a program for one of two reasons. A soundness error stops a mem
 
 Each row states its class in `safety_class` and why in `safety_reason`. A soundness row also states its `expert_path`: the opt-in that reaches the same program, or `none:` and why nothing can.
 
-Classified ranges: E00xx, E01xx, E02xx, E03xx, E04xx, E05xx, E06xx, E07xx, E08xx, E09xx, E10xx, E11xx, E12xx, E13xx, E14xx, E18xx, E20xx, E21xx, E22xx, E23xx, E24xx, E25xx, E26xx, E27xx, E28xx, E29xx, E30xx, E31xx, E32xx, E33xx, E34xx, E35xx, E36xx, E42xx, E-Axx, E-Cxx, E-Exx, E-Fxx, E-Mxx, E-Oxx, E-Sxx, E-Txx, E-Wxx, JT0xx, L11xx, R08xx. They hold 871 active error rows: 748 soundness and 123 opinion. The other ranges hold 0 active error rows with no class yet.
+Classified ranges: E00xx, E01xx, E02xx, E03xx, E04xx, E05xx, E06xx, E07xx, E08xx, E09xx, E10xx, E11xx, E12xx, E13xx, E14xx, E18xx, E20xx, E21xx, E22xx, E23xx, E24xx, E25xx, E26xx, E27xx, E28xx, E29xx, E30xx, E31xx, E32xx, E33xx, E34xx, E35xx, E36xx, E42xx, E-Axx, E-Cxx, E-Exx, E-Fxx, E-Mxx, E-Oxx, E-Sxx, E-Txx, E-Wxx, JT0xx, L11xx, R08xx. They hold 872 active error rows: 749 soundness and 123 opinion. The other ranges hold 0 active error rows with no class yet.
 
 ## Sealed floors
 
@@ -25,7 +25,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E-SUBJECT-CALL-ARITY | MemberShorthandArity | Compiler/JetSema/Source/Sema/Expressions.jet:7855 | a lambda names every parameter |
 | E-WEB-ABI-TYPE | WebBoundaryTypeNotAllowed | Compiler/JetSema/Source/Sema/WebPartition.jet:639 | an ABI-safe type crosses the boundary |
 | E-WEB-CROSS-PARTITION | WebPartitionCrossed | Compiler/JetSema/Source/Sema/WebPartition.jet:184 | both functions live in one partition |
-| E-WEB-RUN | WebProgramRunNotSupported | Compiler/JetCLI/Source/CLI/Front.jet:2201 | run it in a browser |
+| E-WEB-RUN | WebProgramRunNotSupported | Compiler/JetCLI/Source/CLI/Front.jet:2208 | run it in a browser |
 | E-WEB-TARGET-BROWSER | WasmFunctionUsesBrowser | Compiler/JetSema/Source/Sema/WebPartition.jet:170 | browser calls stay in JS code |
 | E-WEB-UNSUPPORTED | WebConstructNotSupported | Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet:442 | the function uses constructs the web output lowers |
 | E0001 | StrayCharacter | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:1013 | no opt-in gives a meaningless character a meaning |
@@ -168,7 +168,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0603 | UseTargetNotFound | Compiler/JetCLI/Source/CLI/Inspect.jet:1786 | no opt-in imports a file that is not there |
 | E0604 | UseCycle | Compiler/JetSema/Source/Sema/InlineModules.jet:2263 | move the shared names into a module both import |
 | E0605 | PrivateItem | Compiler/JetSema/Source/Sema/Calls/Core.jet:461 | reach the item through its module's public declarations |
-| E0606 | AmbiguousModule | Compiler/JetCLI/Source/CLI/Project.jet:124 | the full module path names one module |
+| E0606 | AmbiguousModule | Compiler/JetCLI/Source/CLI/Project.jet:130 | the full module path names one module |
 | E0607 | ModuleFileNotFound | Compiler/JetDriver/Source/Driver/Loader.jet:2859 | no opt-in declares a module without its file |
 | E0608 | UnknownInlineModuleFunction | Compiler/JetSema/Source/Sema/InlineModules.jet:881 | no opt-in calls a function the module does not define |
 | E0609 | UsePrivateModuleItem | Compiler/JetSema/Source/Sema/InlineModules.jet:1046 | reach the item through its enclosing module's public declarations |
@@ -391,7 +391,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1214 | UnsupportedLockVersion | Jetpack/PackageModel/Source/Lock/Verify.jet:391 | the lock is written in a supported format |
 | E1215 | InvalidPackageManifest | Compiler/JetCLI/Source/CLI/TestOutcome.jet:241 | `package.jet` follows the Package vocabulary |
 | E1216 | UnknownTargetsField | Jetpack/PackageModel/Source/Manifest/Manifest.jet:580 | `targets:` takes its declared fields |
-| E1219 | UnknownProfile | Compiler/JetCLI/Source/CLI/Front.jet:1560 | the profile is built in or declared in `package.jet` |
+| E1219 | UnknownProfile | Compiler/JetCLI/Source/CLI/Front.jet:1567 | the profile is built in or declared in `package.jet` |
 | E1220 | DependencyAuthorityExceeded | Jetpack/PackageModel/Source/Policy/EffectBudget.jet:581 | the effect is added to the dependency's grant line |
 | E1221 | InvalidAuthorityBlock | Compiler/JetDriver/Source/Driver/Loader.jet:303 | `authority:` is written in its one block form |
 | E1222 | InvalidProgramAllocator | Compiler/JetDriver/Source/Driver/Loader.jet:804 | `mem.Heap` or a counting allocator over it with a valid cap |
@@ -469,7 +469,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1330 | InvalidTaskMetadata | Jetpack/CLI/Source/Jobs/JobRunner.jet:102 | task metadata stays deterministic and project-contained |
 | E1332 | EnvironmentDefinitionConflict | Jetpack/EnvModel/Source/ModuleEval/EnvFields.jet:232 | the conflict is resolved in source |
 | E1333 | InvalidEnvironmentFact | Jetpack/CLI/Source/Commands/ImageCommand.jet:126 | the fact matches the catalog |
-| E1334 | InvalidWorkspaceMember | Compiler/JetCLI/Source/CLI/Project.jet:36 | members name Package directories |
+| E1334 | InvalidWorkspaceMember | Compiler/JetCLI/Source/CLI/Project.jet:42 | members name Package directories |
 | E1335 | EnvironmentIntegrationConflict | Jetpack/CLI/Source/Env/ComposeEnv.jet:321 | integrations lower to one consistent set of facts |
 | E1336 | ImageProjectionFailed | Jetpack/CLI/Source/Commands/ImageCommand.jet:103 | the layer projects verified output |
 | E1337 | UnknownEnvironmentModule | Jetpack/EnvModel/Source/ModuleEval/EnvPlanBuilder.jet:580 | the plan names a declared module |
@@ -507,7 +507,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2112 | InvalidMemoryLedger | Compiler/JetCLI/Source/CLI/AuditMemory.jet:196 | the ledger is recorded by exercised runs |
 | E2114 | CrashReportWithoutBuild | Compiler/JetCLI/Source/CLI/Crash.jet:39 | the report keeps its build line |
 | E2115 | CrashSymbolsMissing | Compiler/JetCLI/Source/CLI/Crash.jet:70 | run `jet crash` where the build saved its symbols |
-| E2116 | UnhandledSourceExtension | Compiler/JetCLI/Source/CLI/Front.jet:991 | pass a file the command takes |
+| E2116 | UnhandledSourceExtension | Compiler/JetCLI/Source/CLI/Front.jet:998 | pass a file the command takes |
 | E2117 | FlagNotASetting | Compiler/JetCLI/Source/CLI/CommandSettings.jet:223 | the flag is typed on the run that needs it |
 | E2118 | CcProjectInputsTooLarge | Jetpack/CLI/Source/CcDriver/DriverInvocation.jet:564 | the project root names the source directory |
 | E2119 | DeepCheckScopeMalformed | Compiler/JetFoundation/Source/Registry/BuildOptions.jet:409 | the scope is a package name, alone or then dotted names |
@@ -681,14 +681,15 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3540 | DuplicateCommandOverride | Compiler/JetCLI/Source/CLI/Entry.jet:910 | one override per command |
 | E3611 | CorruptProofArtifact | Compiler/JetCLI/Source/CLI/ProveReport.jet:1859 | produce the artifact again |
 | E3614 | UnsafeProofArtifactPath | Compiler/JetCLI/Source/CLI/ProveReport.jet:1855 | a plain path |
-| E3620 | ReplaySchemaMismatch | Compiler/JetCLI/Source/CLI/ProveReplay.jet:1622 | capture with a matching `jet prove` |
+| E3620 | ReplaySchemaMismatch | Compiler/JetCLI/Source/CLI/ProveReplay.jet:1624 | capture with a matching `jet prove` |
 | E3621 | ReplayIdentityMismatch | Compiler/JetCLI/Source/CLI/Debug.jet:241 | capture again for this target |
 | E3622 | CorruptReplay | Compiler/JetCLI/Source/CLI/Debug.jet:232 | capture again |
-| E3623 | ReplayDiverged | Compiler/JetCLI/Source/CLI/ProveReplay.jet:1380 | capture again |
+| E3623 | ReplayDiverged | Compiler/JetCLI/Source/CLI/ProveReplay.jet:1382 | capture again |
 | E3624 | ReplayTargetNotUnique | Compiler/JetCLI/Source/CLI/Prove.jet:71 | select one runnable target |
-| E3625 | UnmodeledReplayOperation | Compiler/JetCLI/Source/CLI/ProveReplay.jet:1498 | keep the operation off the captured path |
-| E3628 | ReplayTooLarge | Compiler/JetCLI/Source/CLI/ProveReplay.jet:1252 | capture a smaller run |
+| E3625 | UnmodeledReplayOperation | Compiler/JetCLI/Source/CLI/ProveReplay.jet:1500 | keep the operation off the captured path |
+| E3628 | ReplayTooLarge | Compiler/JetCLI/Source/CLI/ProveReplay.jet:1254 | capture a smaller run |
 | E3629 | ReplayFinalizeFailed | Compiler/JetCLI/Source/CLI/ProveReplay.jet:1104 | the destination is fixed |
+| E3630 | ReplayNameTaken | Compiler/JetCLI/Source/CLI/ProveReplay.jet:1109 | a recording is never replaced |
 | E4201 | TlsHandshakeFailed | Jetpack/Foundation/Source/Net/FetchError.jet:18 | an HTTPS server at the URL |
 | E4202 | UntrustedCertificate | Jetpack/Foundation/Source/Net/FetchError.jet:19 | a certificate valid for the host |
 | E4203 | MissingCertificateRoots | Jetpack/Foundation/Source/Net/FetchError.jet:20 | install the system certificate bundle |
@@ -1641,6 +1642,7 @@ These soundness rows have no expert path, but no line under Compiler, Core, Jetp
 | E3627 | ReplaySensitiveData | soundness | The capture would record sensitive data nobody consented to store. |
 | E3628 | ReplayTooLarge | soundness | The replay exceeded its bounded budget or recorded no authority, so there is no usable artifact. |
 | E3629 | ReplayFinalizeFailed | soundness | The write was refused, so no durable artifact exists. |
+| E3630 | ReplayNameTaken | soundness | The recording under that name stays as it was and the program never ran, so no run's work is lost and no recording is replaced. |
 | E4201 | TlsHandshakeFailed | soundness | The connection never became secure, so data sent over it would travel unprotected. |
 | E4202 | UntrustedCertificate | soundness | The certificate cannot be verified for the host, so the server could be anyone. |
 | E4203 | MissingCertificateRoots | soundness | With no root set no certificate can be verified, so no HTTPS connection can be trusted. |
