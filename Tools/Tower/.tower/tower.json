@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6995,
-    "rev": 112475,
+    "nextNum": 6996,
+    "rev": 112481,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -92842,6 +92842,80 @@
       "updatedBy": "Main",
       "criteriaLastN": 2,
       "completedAt": "2026-11-19T16:08:30.035Z"
+    },
+    {
+      "id": "c00ni11n",
+      "num": 6995,
+      "title": "Dogfood jet debug and jet perf: every debugging and profiling job runs on them, and every friction is fixed",
+      "body": "Owner order 2026-11-19: Jet code (the compiler and every tool included) is debugged with jet debug and profiled with jet perf, never an external debugger or profiler except as a named comparison baseline. Every friction found in use becomes a criterion here with its reproduction, the same hour. Rule in AGENTS.md (Dogfood the debugger and profiler); usage in the diagnosing-bugs skill.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e20",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A guard (in Tests/Guards, run by every lane check) refuses a committed script, skill, tool or case that runs gdb, lldb, Linux perf, valgrind, rr or strace on a Jet program, outside a named allowlist of comparison harnesses (Tools/Perf/DebugLatency and the peer harnesses), each allowlist row naming the harness and why. Proof: the guard passes on dev, and a fixture adding `lldb prog` to a Tools script fails it naming the file and line.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-20T00:56:39.073Z"
+        },
+        {
+          "n": 2,
+          "text": "The compile-speed profile that ranks the compile-speed epoch comes from `jet perf run` on the compiler compiling Compiler (CPU microseconds per phase and per hot function), with a recorded command, and no external profiler is used. Proof: the command and its .jettrace summary on the card, matching the ranked plan.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-20T00:56:41.627Z"
+        },
+        {
+          "n": 3,
+          "text": "The codegen gate (Tools/Perf/CodegenCeiling.jet) prints, for each REGRESSION row, the jet perf or disassembly facts that name what grew (the function, its added instructions and the source lines they lower from), so a regression reaches its author with its cause. Proof: a seeded regression in a fixture prints the grown lines.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-20T00:56:43.857Z"
+        },
+        {
+          "n": 4,
+          "text": "A compiler crash (exit 101) or a runtime fault in a batch suite run is triaged with jet debug: the landing cycle keeps a --record replay or the fault report for each new exit-101 row, and the triage note shows the jet debug commands that found the cause. Proof: one such triage on a real row, its commands and output on the card.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-20T00:56:46.227Z"
+        },
+        {
+          "n": 5,
+          "text": "jet debug and jet perf debug and profile the compiler itself: `jet debug` stops at a breakpoint in Compiler/JetSema on a real `jet check` of a test file and prints the checked item, and `jet perf run` of `jet build Compiler` writes a .jettrace whose view names the hottest compiler functions. Every gap found doing this is a criterion here. Proof: both transcripts on the card.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-20T00:56:48.830Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-20T00:56:36.847Z",
+      "updated": "2026-11-20T00:56:48.830Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 5
     }
   ],
   "decisions": [
@@ -157767,6 +157841,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-20T00:56:48.830Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#5 jet debug and jet perf debug and profile the compiler itself"
+    },
+    {
+      "at": "2026-11-20T00:56:46.227Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#4 A compiler crash (exit 101) or a runtime fault in a batch su"
+    },
+    {
+      "at": "2026-11-20T00:56:43.857Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#3 The codegen gate (Tools/Perf/CodegenCeiling.jet) prints, for"
+    },
+    {
+      "at": "2026-11-20T00:56:41.627Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#2 The compile-speed profile that ranks the compile-speed epoch"
+    },
+    {
+      "at": "2026-11-20T00:56:39.074Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#1 A guard (in Tests/Guards, run by every lane check) refuses a"
+    },
+    {
+      "at": "2026-11-20T00:56:36.848Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c00ni11n",
+      "note": "Dogfood jet debug and jet perf: every debugging and profiling job runs on them, and every friction is fixed"
+    },
     {
       "at": "2026-11-20T00:54:54.777Z",
       "by": "owner",
