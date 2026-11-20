@@ -52,6 +52,9 @@ use jet_foundation.[
     symbol_key_text,
     symbol_table_key,
     checked_symbol_local,
+    name_count,
+    name_intern,
+    name_table_sized,
     type_identity_equal,
     type_name,
     ModuleID,
@@ -1034,13 +1037,14 @@ sema_failure_union_record_propagation: fn(callee: SemaFailureCallee?, error: Typ
 
 // The failure-union edges a body appended
 // (sema_failure_union_record_propagation), each once, in the order first
-// appended.
+// appended. An edge is new when interning it into `seen` adds a name.
 sema_failure_union_edges_once: fn(edges: &&[String]) -> [String] Never! {
-    seen := [String:Bool]{}
+    seen := name_table_sized(edges.len() * 2)
     once := [String]{}
     loop edge in edges.move() {
-        if seen.get(edge) != None -> next
-        seen[edge] = true
+        known: name_count(seen)
+        _ := name_intern(seen, edge)
+        if name_count(seen) == known -> next
         once.push(edge)
     }
     once
