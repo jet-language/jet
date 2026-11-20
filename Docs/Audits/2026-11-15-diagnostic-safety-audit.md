@@ -505,8 +505,8 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2106 | UnknownSyntaxToken | Compiler/JetCLI/Source/CLI/SyntaxExplain.jet:53 | registered syntax is used |
 | E2110 | GcFailed | Compiler/JetCLI/Source/CLI/GCReport.jet:318 | the workload or trace path is fixed |
 | E2112 | InvalidMemoryLedger | Compiler/JetCLI/Source/CLI/AuditMemory.jet:196 | the ledger is recorded by exercised runs |
-| E2114 | CrashReportWithoutBuild | Compiler/JetCLI/Source/CLI/Crash.jet:39 | the report keeps its build line |
-| E2115 | CrashSymbolsMissing | Compiler/JetCLI/Source/CLI/Crash.jet:70 | run `jet crash` where the build saved its symbols |
+| E2114 | CrashReportWithoutBuild | Compiler/JetCLI/Source/CLI/Crash.jet:47 | the report keeps its build line |
+| E2115 | CrashSymbolsMissing | Compiler/JetCLI/Source/CLI/Crash.jet:134 | run `jet crash` where the build saved its symbols |
 | E2116 | UnhandledSourceExtension | Compiler/JetCLI/Source/CLI/Front.jet:998 | pass a file the command takes |
 | E2117 | FlagNotASetting | Compiler/JetCLI/Source/CLI/CommandSettings.jet:223 | the flag is typed on the run that needs it |
 | E2118 | CcProjectInputsTooLarge | Jetpack/CLI/Source/CcDriver/DriverInvocation.jet:564 | the project root names the source directory |
@@ -518,11 +518,11 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2124 | AttachTargetNotObserved | Compiler/JetCLI/Source/CLI/Perf/Session.jet:836 | the program runs under `jet run --observe` |
 | E2125 | AttachWhichProcess | Compiler/JetCLI/Source/CLI/Perf/Session.jet:843 | one attach names one process id |
 | E2126 | PerfNoInstructions | Compiler/JetCLI/Source/CLI/Perf/Instructions.jet:672 | the trace of a native `jet perf run` keeps the code its samples landed in |
-| E2203 | DebuggerUnavailable | Compiler/JetDebug/Source/Native.jet:25 | the program is a native -O0 image this machine can run traced |
+| E2203 | DebuggerUnavailable | Compiler/JetDebug/Source/Native.jet:26 | the program is a native -O0 image this machine can run traced |
 | E2204 | DebugSessionQuit | Compiler/JetCLI/Source/CLI/Debug.jet:461 | let the program run to its end |
-| E2231 | DebugAttachFailed | Compiler/JetDebug/Source/Native.jet:49 | attach to a process of your user that the system lets you trace |
-| E2236 | DebugConfigInvalid | Compiler/JetDebug/Source/Native.jet:47 | name the process and its program as they are |
-| E2237 | DebugRequestRefused | Compiler/JetDebug/Source/Native.jet:54 | ask where the session can answer |
+| E2231 | DebugAttachFailed | Compiler/JetDebug/Source/Native.jet:50 | attach to a process of your user that the system lets you trace |
+| E2236 | DebugConfigInvalid | Compiler/JetDebug/Source/Native.jet:48 | name the process and its program as they are |
+| E2237 | DebugRequestRefused | Compiler/JetDebug/Source/Native.jet:55 | ask where the session can answer |
 | E2238 | DebugStaleReference | Compiler/JetCLI/Source/CLI/DebugDap.jet:116 | refresh the view after the next stop |
 | E2305 | ViewOutlivesOwner | Compiler/JetSema/Source/Sema/Calls/Checking.jet:335 | the view's owner lives as long as the view |
 | E2307 | StringViewOutlivesOwner | Compiler/JetSema/Source/Sema/Calls/Checking.jet:335 | the string's owner lives as long as the view, or the string is copied |
@@ -620,7 +620,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3006 | Deadlock | Compiler/JetRuntime/Source/WaitCycle.jet:420 | one task of the cycle stops waiting for the others |
 | E3010 | ArithmeticOrBoundsFailure | Compiler/JetEval/Source/EvalValues.jet:170 | the operands or index are checked first |
 | E3011 | TodoReached | Compiler/JetEval/Source/IR/Native.jet:1008 | the `#Todo` is written |
-| E3012 | StackOverflow | Compiler/JetCLI/Source/CLI/Crash.jet:119 | the recursion is bounded |
+| E3012 | StackOverflow | Compiler/JetCLI/Source/CLI/Crash.jet:183 | the recursion is bounded |
 | E3015 | UnhandledEntryFailure | Jetpack/Store/Source/Build/Cache.jet:1012 | the entry handles the failure |
 | E3016 | OutputCheckNotRun | Compiler/JetCLI/Source/CLI/Host.jet:2972 | the fatal trap is fixed |
 | E3105 | UnsafeForbiddenByPolicy | Compiler/JetSema/Source/Sema/UnsafeObligations.jet:906 | the policy owner changes the outer policy |
