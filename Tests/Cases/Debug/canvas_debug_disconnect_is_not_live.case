@@ -1,0 +1,54 @@
+# A Canvas debug session whose program is killed out from under the debugger
+# answers disconnected, with nothing of the gone runtime presented as live.
+# The program pauses at its breakpoint with a live value, then kills itself
+# with SIGKILL when it continues: the answer is the session `disconnected`,
+# with no stop, value or call stack, and the session is gone. The client is
+# the same raw Core.net HTTP client the other production Canvas debug cases
+# use.
+fixture: CanvasDebugStopRequiresMatchingSourceRevisionAndTier.fixture
+env: NO_COLOR=1
+step: jet build client/run.jet
+exit: 0
+copy: client/.jet/build/run canvas-client
+write: jet_debug_canvas_stop_binding.jet canvas_debug_disconnect_is_not_live.program.template
+capture: revision = sha256 file jet_debug_canvas_stop_binding.jet
+session canvas raw: jet dev jet_debug_canvas_stop_binding.jet --canvas --canvas-port 0
+env: JET_CANVAS_BROWSER=/definitely/missing/canvas-browser
+recv canvas until ~ "Canvas: http" within 60s # jet dev prints the Canvas URL on stdout once it serves
+capture: url = text stdout.after_first("Canvas: ").line(0)
+write: request.json canvas_debug_disconnect_is_not_live.first.json
+step first: {work}/canvas-client
+env: S1_CANVAS_URL={cap:url}
+env: S1_METHOD=POST
+env: S1_PATH=/__jet_canvas/debug
+exit: 0
+stdout: ^= "HTTP/1.1 200" # the native session runs
+stdout: ~ "\"runtime_state\":\"live\"" # paused in the program
+stdout: ~ "\"active_line\":8," # at the breakpoint on the print
+stdout: ~ "\"watches\":[{\"name\":\"total\",\"type\":\"Int\",\"value\":\"6\"" # with the live value of its watch
+capture: session = text stdout.after_first("\"id\":\"canvas-debug-").split("\"", 0).prepend("canvas-debug-")
+write: request.json canvas_debug_disconnect_is_not_live.killed.json
+step killed: {work}/canvas-client
+env: S1_CANVAS_URL={cap:url}
+env: S1_METHOD=POST
+env: S1_PATH=/__jet_canvas/debug
+exit: 0
+stdout: ^= "HTTP/1.1 200" # the continue is answered
+stdout: ~ "\"state\":\"disconnected\"" # the session ends disconnected
+stdout: ~ "\"runtime_state\":\"disconnected\"" # and its overlay says the runtime is gone
+stdout: !~ "\"runtime_state\":\"live\"" # nothing of it is live
+stdout: ~ "\"active_line\":null," # there is no stop
+stdout: ~ "\"locals\":[]," # no locals
+stdout: ~ "\"watches\":[]," # no watch value, not the 6 the last stop read
+stdout: ~ "\"call_stack\":[]," # and no stack
+stdout: !~ "after the kill" # the program never ran past the kill
+step gone: {work}/canvas-client
+env: S1_CANVAS_URL={cap:url}
+env: S1_METHOD=POST
+env: S1_PATH=/__jet_canvas/debug
+exit: 0
+stdout: ^= "HTTP/1.1 409" # the disconnected session can't be continued
+stdout: ~ "\"kind\":\"session\"" # it is no longer live
+signal canvas: INT
+wait: canvas
+exit: any # the case asserts the debug responses, not the dev server's shutdown status

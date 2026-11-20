@@ -1,0 +1,15 @@
+use {
+    sys: core.sys
+}
+
+run: fn() {
+    total := 0
+    loop i in 1..3 -> total += i
+    print(total)
+    // SIGKILL can't be caught: the program drops out from under its
+    // debugger, with nothing of it left to answer.
+    #Unsafe("the program kills itself to leave its debugger without a runtime") {
+        sys.kill(sys.pid(), 9) ?? panic("the kill failed")
+    }
+    print("after the kill")
+}

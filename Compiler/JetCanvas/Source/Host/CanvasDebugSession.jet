@@ -130,7 +130,8 @@ CanvasDebugTier: struct {
 // What one request's commands did: the session and its tier, the image it
 // runs ("" for a dump), the console's transcript, the stop's facts (None
 // outside Jet code), the `tasks` list's lines, whether the program is still
-// paused in the session, and the lines the run stepped through to the
+// paused in the session, whether it ended disconnected (killed out from
+// under the debugger), and the lines the run stepped through to the
 // snapshot's stop (the session's trail; empty when the snapshot shows
 // another frame).
 CanvasDebugRun: struct {
@@ -141,6 +142,7 @@ CanvasDebugRun: struct {
     snapshot: DebugSnapshot?,
     tasks: [String],
     running: Bool,
+    disconnected: Bool,
     trail: [Int],
 }
 
@@ -171,8 +173,10 @@ CanvasDebugSessions: struct {
 
     // Run `commands` in the session `requested` names (a new one on `tier`
     // when None, with `host`'s evaluator), with breakpoints on `breakpoints`
-    // first. A program that ends ends its session; one that fails ends it
-    // and answers its transcript.
+    // first. A program that ends ends its session; one killed out from under
+    // the debugger (SIGKILL, which nothing it runs can catch) ends it
+    // disconnected; one that fails otherwise ends it and answers its
+    // transcript.
     run: fn(&self, host: CanvasDebugHost, file: String, source_id: String, revision: String, requested: String?, tier: CanvasDebugTier, commands: [String], breakpoints: [Int]) -> CanvasDebugRun CanvasDebugError! {
         if requested == None -> self.evict()
         id: if requested == {
@@ -215,8 +219,9 @@ CanvasDebugSessions: struct {
         stop: session.stop
         if stop.kind != NativeStopKind.Paused {
             canvas_debug_close(session)
-            if stop.kind == NativeStopKind.Exited && stop.code == 0 {
-                return Ok(CanvasDebugRun{id: id, tier: canvas_debug_tier_name(session), image: session.image, transcript: transcript, snapshot: None, tasks: [String]{}, running: false, trail: [Int]{}})
+            disconnected: stop.kind == NativeStopKind.Signaled && stop.reason == "SIGKILL"
+            if disconnected || (stop.kind == NativeStopKind.Exited && stop.code == 0) {
+                return Ok(CanvasDebugRun{id: id, tier: canvas_debug_tier_name(session), image: session.image, transcript: transcript, snapshot: None, tasks: [String]{}, running: false, disconnected: disconnected, trail: [Int]{}})
             }
             return Err(canvas_debug_error("diagnostic", transcript))
         }
@@ -245,7 +250,7 @@ CanvasDebugSessions: struct {
         }
         image: session.image
         self.sessions[id] = session
-        Ok(CanvasDebugRun{id: id, tier: on, image: image, transcript: transcript, snapshot: snapshot, tasks: tasks, running: true, trail: trail})
+        Ok(CanvasDebugRun{id: id, tier: on, image: image, transcript: transcript, snapshot: snapshot, tasks: tasks, running: true, disconnected: false, trail: trail})
     }
 
     // Take the session `id` out to run `count` more commands in it. One
@@ -877,8 +882,8 @@ canvas_debug_error_json: fn(kind: String, message: String) -> String Never! {
     "{{\"protocol\":\"jet.canvas.debug\",\"schema_version\":{CANVAS_DEBUG_SCHEMA},\"ok\":false,\"kind\":{foundation_json_quote(kind)},\"message\":{foundation_json_quote(bounded.json)}}}"
 }
 
-// The session document of a session in `state` ("running", "finished" or
-// "stopped").
+// The session document of a session in `state` ("running", "finished",
+// "disconnected" or "stopped").
 canvas_debug_session_json: fn(id: String, state: String, tier: String, source_id: String, revision: String) -> String Never! {
     "{{\"id\":{foundation_json_quote(id)},\"state\":{foundation_json_quote(state)},\"tier\":{foundation_json_quote(tier)},\"persistence\":\"local-source-span\",\"source_id\":{foundation_json_quote(source_id)},\"revision\":{foundation_json_quote(revision)}}}"
 }
@@ -938,9 +943,15 @@ canvas_debug_document: fn(state: Shared<CanvasHostState>, src: String, source_id
     }
     trace: canvas_debug_newest(canvas_debug_lines(ran.transcript))
     tasks: canvas_debug_newest(ran.tasks)
-    phase: if ran.running -> "running" else -> "finished"
+    // A disconnected run's runtime is gone: it shows no stop, values or
+    // stack, nothing it read before as live.
+    phase: if {
+        ran.running -> "running"
+        ran.disconnected -> "disconnected"
+        else -> "finished"
+    }
     runtime_state: if {
-        !ran.running -> "finished"
+        !ran.running -> phase
         ran.snapshot != None -> "live"
         else -> "unavailable"
     }
