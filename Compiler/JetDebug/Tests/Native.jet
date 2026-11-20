@@ -968,3 +968,61 @@ NATIVE_TEST_WORKER_EXIT: "use process: core.process\n\nhalf: fn(n: Int) -> Int {
     session.close()
     native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
 }
+
+// Recursion without end: the call that runs past the stack's guard page
+// faults (SIGSEGV), which the runtime's fault handler reports as the
+// stack overflow stop E3012, ending the program with status 70.
+NATIVE_TEST_OVERFLOW: "depth: fn(n: Int) -> Int {{\n    if n == 0 -> return 0\n    1 + depth(n - 1)\n}}\n\nrun: fn() {{\n    print(\"{{depth(1000000000)}}\")\n}}\n"
+
+#Test("a_fault_stops_like_a_breakpoint_and_continuing_delivers_it") {
+    scratch: native_test_files.temp_dir("jet-debug-fault") ?? panic("scratch: {err}")
+    root: scratch.path
+    session := native_test_session(root, NATIVE_TEST_OVERFLOW, [String]{"-O0"})
+    lines: NATIVE_TEST_OVERFLOW.split("\n").to_list()
+    first: session.run_to([NativeBreak]{{file: "prog.jet", line: 7}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
+    assert(first.text.contains("Breakpoint hit  prog.jet:7  in run()"), first.text)
+    // The fault stops the program before its signal reaches it, in the
+    // function that faulted, with the stack whole.
+    faulted: session.command("c", first.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    assert(faulted.text.contains("Program received SIGSEGV  prog.jet:1  in depth()"), faulted.text)
+    assert(!faulted.text.contains("Program stopped by"), faulted.text)
+    shown: session.command("bt", faulted.stop, "prog.jet", lines) ?? panic("bt: {err.detail}")
+    assert(shown.text.starts_with("#0  depth()  at prog.jet:1\n#1  depth()  at prog.jet:3\n"), shown.text)
+    tasks: session.command("tasks", faulted.stop, "prog.jet", lines) ?? panic("tasks: {err.detail}")
+    assert(tasks.text.contains("#0  depth()  at prog.jet:1"), tasks.text)
+    locals: session.command("locals", faulted.stop, "prog.jet", lines) ?? panic("locals: {err.detail}")
+    assert(locals.text.starts_with("n: Int = "), locals.text)
+    listed: session.command("disas", faulted.stop, "prog.jet", lines) ?? panic("disas: {err.detail}")
+    assert(listed.text.starts_with("depth  prog.jet:1-"), listed.text)
+    // Continuing delivers the signal: the runtime's report of the stack
+    // overflow ends the program with the stop's status, 70.
+    ended: session.command("c", faulted.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    assert(ended.text.contains("Stop: Jet.StackOverflow: Stack overflow in `depth`"), ended.text)
+    assert(ended.text.contains("Program finished with exit status 70"), ended.text)
+    session.close()
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+}
+
+// A SIGSEGV the program sends itself stops as a fault does; continuing
+// runs the runtime's fault report, whose re-raise of the signal ends the
+// program unstopped.
+NATIVE_TEST_SIGNALED: "use sys: core.sys\n\ncrash: fn(n: Int) -> Int {{\n    #Unsafe(\"the program sends itself SIGSEGV, as a fault would\") {{\n        sys.kill(sys.pid(), 11) ?? panic(\"the kill failed\")\n    }}\n    n\n}}\n\nrun: fn() {{\n    print(\"{{crash(4)}}\")\n}}\n"
+
+#Test("a_fault_s_report_after_its_stop_ends_the_program_by_its_signal") {
+    scratch: native_test_files.temp_dir("jet-debug-fault-report") ?? panic("scratch: {err}")
+    root: scratch.path
+    session := native_test_session(root, NATIVE_TEST_SIGNALED, [String]{"-O0"})
+    lines: NATIVE_TEST_SIGNALED.split("\n").to_list()
+    first: session.run_to([NativeBreak]{{file: "prog.jet", line: 11}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
+    assert(first.text.contains("Breakpoint hit  prog.jet:11  in run()"), first.text)
+    faulted: session.command("c", first.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    assert(faulted.text.contains("Program received SIGSEGV  "), faulted.text)
+    shown: session.command("bt", faulted.stop, "prog.jet", lines) ?? panic("bt: {err.detail}")
+    assert(shown.text.contains("crash()  at prog.jet:5\n"), shown.text)
+    assert(shown.text.contains("run()  at prog.jet:11\n"), shown.text)
+    ended: session.command("c", faulted.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    assert(ended.text.contains("Fault [SIGSEGV]"), ended.text)
+    assert(ended.text.contains("Program stopped by SIGSEGV"), ended.text)
+    session.close()
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+}
