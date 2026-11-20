@@ -75252,6 +75252,350 @@
       "outcome": "A",
       "ratifiedAt": "2026-11-16",
       "retiredAt": "2026-11-20T16:07:16.230Z"
+    },
+    {
+      "id": "D-TEXT-FIXED1",
+      "cardId": "c0l7lwif",
+      "group": "language",
+      "title": "Text v2: one String type, fixed through `::` and edited in place through `:=`",
+      "situation": "You asked for fixed strings plus a way to build text, and said you lean toward one type for simplicity. Today Jet has one type, String. A `::` name never changes, and a `:=` name grows with `+=`, in place when nothing else shares the text. No call can reserve space, insert, remove or truncate. This vote picks between one String with in-place editing, a fixed String plus a second buffer type, and today's model.",
+      "gist": "Should Jet keep one String type, where a `:=` name may be edited in place and every other holder keeps its own value?",
+      "lesson": "A String is a value, like a number. Giving it to another name gives that name its own text. A `::` name never changes, and a `:=` name may be edited, and no edit ever reaches another holder's copy.",
+      "explainer": "",
+      "story": "Ana writes a report with `out += \"- {item}\\n\"`, as she would in Python. Later she prints a million CSV rows with one reused line, trimmed and prefixed in place. Under A both are the same String type, and the text she passed to a helper earlier never changes.",
+      "inWild": "// Swift: one String with value semantics; a copy is made only when a shared string is edited.\nvar title = name          // title is its own value\ntitle.insert(contentsOf: \"Dr. \", at: title.startIndex)   // name is unchanged\n// Go and Java: a fixed string plus a separate builder.\nvar b strings.Builder; b.WriteString(\"x\"); s := b.String()",
+      "detail": "What Jet does today, probed on O0, O1 and O2. `s :: \"a\"` then `s += \"b\"` is E0111. `s := \"ab\"`, `t :: s`, `s += \"c\"` prints `abc ab`, so the shared text never changes. The runtime appends in place only for a sole owner (Compiler/JetRuntime/Source/Text.jet:54-58, 357-367). `push`, `clear` and `insert` are E0311, and `String.with_capacity` is E0107.\n\nThe memory model already chose this. D-COPY-DEFAULT1=A gives every heap value copy on first write, and removes the sharing test for values the compiler proves unique. Lists already work this way, with edits marked `&xs.push(v)`.\n\nSpeed. A `+=` loop runs 6.9 times Rust's cycles at O2 today, from two allocations per text and a runtime call per append. That gap is compiler work under every option. A buffer type would run the same runtime calls.\n\nJet's own code has 1,449 text locals made with `:= \"…\"`, of which 405 grow, across 1,397 sites. There are 45 `&String` parameters.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One String: `::` is fixed, `:=` may be edited in place",
+          "detail": "String stays the only text type and stays a value. A `::` name never changes. A `:=` name or a `&String` parameter may grow with `+=`. It may also be edited with `&` calls, as lists are: `&s.insert(at, text)`, `&s.remove(from, to)`, `&s.truncate(n)` and `&s.reserve(n)`. `String.with_capacity(n)` and `s.capacity()` join them, and `&s.try_push(x)` is fixed.\n\nAppending stays `+=`, and emptying stays `s = \"\"`, so no `push` or `clear` is added. Positions count characters, as `len()` and `slice` do.\n\nBehavior changes: none for existing code. D-STR-DECLINE1 is amended to allow these verbs. `s = \"\"` on a `:=` String nothing else holds now always keeps its storage, which D-STRING-EMPTY1 only allowed.",
+          "technical": "The verbs are Write-access builtins in BuiltinMethods.jet, like `try_push`. Each runs the existing copy on first write when the text is shared or a literal, then edits in place with geometric growth. For a value proved unique, D-COPY-DEFAULT1 drops the sharing test, so the edit is a plain store.\n\nD-EFF-FORMAT-WRITER1 keeps String as the one public text type, and `out += \"{x}\"` already streams `x` into `out`. D-CORE-IO-BUF1 stands: `Bytes` stays the byte buffer, and text needs no second buffer.",
+          "code": "// Beginner: unchanged. `out` is a := name, so it may grow.\nfn report(items: [String]) -> String {\n    out := \"\"\n    loop item in items -> out += \"- {item}\\n\"\n    out\n}\n\n// Expert: one String reused for every row, edited in place.\nfn print_rows(rows: [[String]]) {\n    line := String.with_capacity(256)\n    loop row in rows {\n        line = \"\"                            // keeps the 256 bytes\n        loop cell in row -> line += \"{cell},\"\n        &line.truncate(line.len() - 1)       // drop the last comma\n        &line.insert(0, \"> \")\n        print(line)\n    }\n}\n\nfn run() {\n    print(report([\"milk\", \"eggs\"]))\n    print_rows([[\"a\", \"b\"], [\"c\", \"d\"]])\n    name :: \"Ada\"\n    title := name                            // a value: title is its own text\n    &title.insert(0, \"Dr. \")                 // first edit copies the shared bytes once\n    print(\"{name} / {title}\")                // Ada / Dr. Ada\n}\n// &name.insert(0, \"x\") is an error: a :: name never changes."
+        },
+        {
+          "key": "B",
+          "name": "A fixed String plus a separate StringBuffer",
+          "detail": "String keeps no editing calls. `s += x` on a `:=` name still works by giving the name a new String. A new Core type, `StringBuffer`, holds `push`, `insert`, `remove`, `clear`, `truncate`, `reserve` and `with_capacity`. It prints like a String, and `to_string()` makes one.\n\nThis matches Java, Go, C# and Dart, and keeps String free of editing verbs. Every text API must pick one of two types, and moving text between them is a conversion call.",
+          "technical": "StringBuffer is a Core value type written like a list. `to_string()` at its last use hands over storage with no copy (D-DROP-ASAP1). It runs the same append runtime as String `+=`, so it is not faster.\n\nReopens D-EFF-FORMAT-WRITER1 (String is the one public text type) and D-CORE-IO-BUF1 (the text buffer was deleted). The 5 `try_push` sites move to the buffer.",
+          "code": "// Beginner: unchanged. `+=` gives `out` a new fixed String.\nfn report(items: [String]) -> String {\n    out := \"\"\n    loop item in items -> out += \"- {item}\\n\"\n    out\n}\n\n// Expert: a second type, StringBuffer, does the editing.\nfn print_rows(rows: [[String]]) {\n    line := StringBuffer.with_capacity(256)\n    loop row in rows {\n        &line.clear()                        // keeps the 256 bytes\n        loop cell in row -> &line.push(\"{cell},\")\n        &line.truncate(line.len() - 1)\n        &line.insert(0, \"> \")\n        print(line)\n    }\n}\n\nfn run() {\n    print(report([\"milk\", \"eggs\"]))\n    print_rows([[\"a\", \"b\"], [\"c\", \"d\"]])\n    name :: \"Ada\"\n    title := StringBuffer.from(name)         // copies into a buffer\n    &title.insert(0, \"Dr. \")\n    print(\"{name} / {title.to_string()}\")    // Ada / Dr. Ada\n}\n// No String method changes a String; String.insert does not exist."
+        },
+        {
+          "key": "C",
+          "name": "Keep today's model",
+          "detail": "One String, `+=` on `:=` names, and no editing calls. Insert, remove and truncate are written as new Strings built from slices, and reserving space is not possible.\n\nNo new names. Every edit other than appending copies the whole text.",
+          "technical": "No change. Each `slice` scans and copies the text today (Text.jet:686-733). The broken `try_push` still needs its own fix.",
+          "code": "// Beginner: unchanged.\nfn report(items: [String]) -> String {\n    out := \"\"\n    loop item in items -> out += \"- {item}\\n\"\n    out\n}\n\n// Expert: no editing calls. Every edit builds a new String.\nfn print_rows(rows: [[String]]) {\n    line := \"\"\n    loop row in rows {\n        line = \"\"\n        loop cell in row -> line += \"{cell},\"\n        line = line.slice(0, line.len() - 1) // copies the text\n        line = \"> {line}\"                    // copies it again\n        print(line)\n    }\n}\n\nfn run() {\n    print(report([\"milk\", \"eggs\"]))\n    print_rows([[\"a\", \"b\"], [\"c\", \"d\"]])\n    name :: \"Ada\"\n    title :: \"Dr. {name}\"                    // a new String\n    print(\"{name} / {title}\")                // Ada / Dr. Ada\n}\n// No reserve, insert, remove or truncate exists."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Swift",
+          "note": "One String with value semantics and copy on write. Edits need a `var`; a `let` string never changes. Source: developer.apple.com/documentation/swift/string.",
+          "code": "var title = name\ntitle.insert(contentsOf: \"Dr. \", at: title.startIndex)\n// name is unchanged"
+        },
+        {
+          "lang": "Rust",
+          "note": "One growable String, edited through `let mut`; `&str` is the fixed view. Source: doc.rust-lang.org/std/string/struct.String.html.",
+          "code": "let mut s = String::with_capacity(256);\ns.push_str(\"a,\");\ns.insert_str(0, \"> \");"
+        },
+        {
+          "lang": "Go",
+          "note": "A fixed string, and strings.Builder grows in place. Source: pkg.go.dev/strings#Builder.",
+          "code": "var b strings.Builder\nb.WriteString(\"x\")\nout := b.String()"
+        },
+        {
+          "lang": "Java",
+          "note": "An immutable String, and StringBuilder edits in place. Source: docs.oracle.com, java.lang.StringBuilder.",
+          "code": "var b = new StringBuilder();\nb.append(\"x\").insert(0, \"> \");\nString s = b.toString();"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A gives one text type with the guarantee you want from fixed strings: no edit ever reaches text another name holds, and a `::` name never changes. Experts edit in place on the same type, and lists already work this way.",
+        "gains": [
+          "One text type for every API.",
+          "No edit reaches another holder's text.",
+          "Reserve, insert, remove and truncate in place.",
+          "Existing code and decisions stay as they are."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B adds a second type and conversions at every hand-off, but no safety, because String values are already never changed under another holder. It runs the same append code, so it is not faster."
+          },
+          {
+            "key": "C",
+            "reason": "C leaves no way to reserve, insert or truncate in place, so experts copy the whole text for each edit."
+          }
+        ],
+        "tradeoff": "String gains a few editing calls, used only through `:=` names and `&` parameters."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Use the dev jet from $JET_SCRATCH_ROOT/discovery/base/latest with JET_TOOLCHAIN_ROOT set to a dev export. In $JET_SCRATCH_ROOT/lanes/SurfaceDesign/probes run node gen6342.mjs and node gen6342b.mjs, then ./run.sh m6342 and ./run.sh m6342b, then node summ.mjs on each. Probes s01-s18 and b05-b06 show today's growth and editing rules. KD=k6342 RD=r6342 ./pstat.sh gives the speed rows. Run node b2/census6342b.mjs on the export for the site counts.",
+      "surface": {
+        "gist": "Should Jet keep one String type, where a `:=` name may be edited in place and every other holder keeps its own value?",
+        "lesson": "A String is a value. A `::` name never changes, a `:=` name may be edited, and no edit reaches another holder.",
+        "trio": {
+          "current": {
+            "note": "Today a `:=` String grows with `+=`, but nothing can reserve, insert or truncate in place.",
+            "code": "s := \"ab\"\ns += \"c\"           // fine: in place when nothing else holds it\n&s.insert(0, \">\")  // E0311: no such method"
+          },
+          "wild": {
+            "lang": "Swift",
+            "note": "One String value with copy on write; `var` names may be edited, `let` names never change.",
+            "code": "var title = name\ntitle.insert(contentsOf: \"Dr. \", at: title.startIndex)"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "One String: `::` is fixed, `:=` may be edited in place",
+            "gist": "One text type. `:=` names and `&` parameters may be edited in place; other holders keep their text.",
+            "gains": [
+              "One text type everywhere.",
+              "In-place edits for experts."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "line := String.with_capacity(256)\nline += \"{cell},\"\n&line.truncate(line.len() - 1)\n&line.insert(0, \"> \")"
+            }
+          },
+          {
+            "key": "B",
+            "name": "A fixed String plus a separate StringBuffer",
+            "gist": "String has no editing calls; a second type, StringBuffer, edits in place.",
+            "gains": [
+              "String has no editing verbs.",
+              "Familiar from Java and Go."
+            ],
+            "losses": [
+              "Two text types and conversions.",
+              "No faster than A."
+            ],
+            "proposed": {
+              "code": "line := StringBuffer.with_capacity(256)\n&line.push(\"{cell},\")\n&line.insert(0, \"> \")\nprint(line.to_string())"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep today's model",
+            "gist": "One String, `+=` only; other edits rebuild the text.",
+            "gains": [
+              "Nothing new to learn."
+            ],
+            "losses": [
+              "No reserve, insert or truncate.",
+              "Each edit copies the text."
+            ],
+            "proposed": {
+              "code": "line += \"{cell},\"\nline = \"> {line}\"   // copies"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One text type with the fixed-string guarantee already built in, and in-place editing for experts, as lists already have.",
+          "gains": [
+            "One text type everywhere.",
+            "No edit reaches another holder."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A second type adds conversions but no safety or speed."
+            },
+            {
+              "key": "C",
+              "reason": "Experts copy the whole text for every edit."
+            }
+          ],
+          "tradeoff": "String gains a few editing calls, used only through `:=` names."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "String gains editing calls that D-STR-DECLINE1 declined.",
+          "attempts": [
+            "Put the calls on a second type, as B does: rejected, it adds a type and conversions for no safety or speed."
+          ],
+          "result": "D-STR-DECLINE1 declined them because they would change an immutable String. Here no value changes under another holder: edits act on a `:=` name or `&` parameter, as list edits do. `push` and `clear` stay declined, since `+=` and `s = \"\"` cover them."
+        },
+        {
+          "loss": "Editing a shared String copies it once, and the copy is not written in the code.",
+          "attempts": [
+            "Require `.copy()` before editing a shared String: rejected, D-COPY-DEFAULT1 already chose copy on first write for every heap value, lists included."
+          ],
+          "result": "The copy happens at most once, on the first edit, and never for a value the compiler proves unique, which is the usual `out := \"\"` case."
+        },
+        {
+          "loss": "A `::` String could look fixed only by convention.",
+          "attempts": [
+            "A separate fixed type: rejected, the binding already enforces it."
+          ],
+          "result": "`s += \"b\"` on a `::` name is E0111 today, and `&xs.push(2)` on a `::` list is E0202. The same check covers the new String calls, so fixed is checked, not a convention."
+        }
+      ],
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-30T18:26:48.625Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-30",
+      "retiredAt": "2026-11-20T18:52:31.315Z"
+    },
+    {
+      "id": "D-TEXT-NAMES1",
+      "cardId": "c0l7lwif",
+      "group": "language",
+      "title": "The name of Jet's one text type: `String` or `Text`",
+      "situation": "Jet has one text type, and the board has ruled that it stays one type. You asked why it is called String and not Text. The word string comes from logic and linguistics, where a string is a row of symbols. Early text-processing languages took the word in the 1950s and 1960s, and almost every language since has kept it. The type appears 81,344 times in Jet's own code. We recommend keeping String.",
+      "gist": "Should Jet's one text type keep the name `String`, or be renamed `Text`?",
+      "lesson": "A string is a row of symbols, as in a string of beads. Logicians used the word by 1918, and the first text-processing languages, COMIT and SNOBOL, made it the programmer's word. Nearly every language since says String. Text is plainer English, and Haskell's text library, Unison and Dhall use it.",
+      "explainer": "",
+      "story": "Kai comes from Python and writes `fn greet(name: String)`. Under A that is right with no explanation. Under B the compiler says String is unknown and offers Text, and Kai learns the new word once.",
+      "inWild": "// The everyday text type elsewhere:\n// Python str, Java String, C# string, Go string, Kotlin String,\n// Swift String, Rust String, Elm String, Lean String\n// Haskell Data.Text, Unison Text, Dhall Text",
+      "detail": "History. \"String\" meant things in a row for centuries, and 19th-century typesetters measured a compositor's \"string\" of type. Logic took the word for a row of marks: C. I. Lewis wrote of \"strings of recognisable marks\" in 1918.\n\nComputing took it from there. COMIT (Yngve, late 1950s) and SNOBOL (Farber, Griswold and Polonsky, 1964) were the first string-processing languages. ALGOL 60's report names quoted literals strings, in section 2.6.\n\nFrom then on the word stuck. PL/I had character strings and bit strings, BASIC had string variables, and C++, Java, C#, Python, Go, Swift, Kotlin, Rust and JavaScript all name the type string or String.\n\nWhere Text appears. Pascal used `text` for a text file, not a value. Haskell's Prelude String is a list of characters, so the faster library type is Data.Text. Unison and Dhall name their built-in type Text, and SQL databases have a TEXT column.\n\nSo Text usually marks a newer design choice, such as Haskell's packed text over a list. Jet's String is already packed UTF-8, so Text would not mark a difference.\n\nToday in Jet. The census counts 81,344 mentions of `String` in 17,636 Jet files: Compiler 36,082, Core 6,730, Examples 2,169, tests 9,488, Jetpack 24,309 and Tools 2,566. A parameter typed `Text` is E0119 today (probe m6342c/p_Text.jet).\n\nD-TEXT-FIXED1=A (2026-10-30) ruled one text type, fixed through `::` and edited through `:=`. So this vote names only that one type, and no buffer type needs a name.\n\nReview. Authors: Claude (SurfaceDesign lanes); v3 adds the history from card 6379 and drops the buffer-type branch. No fresh adversarial pass has run on this draft.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep `String`",
+          "detail": "The type keeps its name, so no existing line changes. Docs and diagnostics keep saying `String (text)`, so the plain word still explains it.\n\nE0119 for an unknown `Text` gains a fix line pointing to `String`.",
+          "technical": "No migration. E0119, the unknown-type error, gains one fix line for the common guess `Text`.",
+          "code": "fn report(items: [String]) -> String {\n    out := \"\"\n    loop item in items -> out += \"- {item}\\n\"\n    out\n}\n\nfn greet(name: String) -> String -> \"hello {name}\"\n\n// the type's name also shows in errors and docs:\n// error[E0112]: expected String, found Int"
+        },
+        {
+          "key": "B",
+          "name": "Rename to `Text`",
+          "detail": "The type becomes `Text`, a plain word for what it holds. `jet fix` renames 81,344 mentions in one cutover, plus spec, guides and diagnostics.\n\nNewcomers from almost every language type `String` first and meet E0119 with a fix line to `Text`.",
+          "technical": "`jet fix` renames the type by symbol across all 17,636 files. `String` becomes an unknown type with a teaching fix line, and no alias remains. Method names such as `to_string()` would need their own rename vote.",
+          "code": "fn report(items: [Text]) -> Text {\n    out := \"\"\n    loop item in items -> out += \"- {item}\\n\"\n    out\n}\n\nfn greet(name: Text) -> Text -> \"hello {name}\"\n\n// the type's name also shows in errors and docs:\n// error[E0112]: expected Text, found Int"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Haskell",
+          "note": "Prelude String is a list of characters; Data.Text is the packed type. Source: hackage.haskell.org/package/text.",
+          "code": "import qualified Data.Text as T\ngreet :: T.Text -> T.Text"
+        },
+        {
+          "lang": "Unison",
+          "note": "The built-in text type is Text. Source: unison-lang.org/docs.",
+          "code": "greet : Text -> Text\ngreet name = \"hello \" ++ name"
+        },
+        {
+          "lang": "Python",
+          "note": "str is the one text type. Source: docs.python.org/3/library/stdtypes.html#str.",
+          "code": "def greet(name: str) -> str:\n    return f\"hello {name}\""
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps the name nearly every language uses, so nothing is renamed. Text marks a packed type only where a slower String exists, which Jet does not have.",
+        "gains": [
+          "No existing line changes.",
+          "Newcomers' first guess is right.",
+          "One name for type and `to_string()`."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B renames 81,344 mentions, and newcomers' first guess, `String`, stops existing."
+          }
+        ],
+        "tradeoff": "`String` is a programmer's word rather than a plain English one."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "History sources: answers/6379.md in $JET_SCRATCH_ROOT/lanes/SurfaceDesign-3. Counts: node $JET_SCRATCH_ROOT/lanes/SurfaceDesign/b2/census6342.mjs on a dev export. Probe: jet check probes/m6342c/p_Text.jet gives E0119.",
+      "surface": {
+        "gist": "Should Jet's one text type keep the name `String`, or be renamed `Text`?",
+        "lesson": "A string is a row of symbols, as in a string of beads. Logicians used the word by 1918, and the first text-processing languages, COMIT and SNOBOL, made it the programmer's word. Nearly every language since says String. Text is plainer English, and Haskell's text library, Unison and Dhall use it.",
+        "trio": {
+          "current": {
+            "note": "Today `String` is the one text type; `Text` is an unknown type.",
+            "code": "fn greet(name: String) -> String -> \"hello {name}\"\n// a guess of Text today:\nfn greet2(name: Text) -> Text   // error[E0119]: unknown type Text"
+          },
+          "wild": {
+            "lang": "Haskell",
+            "note": "Haskell's packed text type is called Text, beside a list-based String.",
+            "code": "greet :: Text -> Text"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Keep `String`",
+            "gist": "No rename; the name most programmers know stays.",
+            "gains": [
+              "Nothing renamed.",
+              "Newcomers' first guess is right.",
+              "`to_string()` and the type keep one name."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "fn report(items: [String]) -> String {\n    out := \"\"\n    loop item in items -> out += \"- {item}\\n\"\n    out\n}\n\nfn greet(name: String) -> String -> \"hello {name}\"\n\n// the type's name also shows in errors and docs:\n// error[E0112]: expected String, found Int"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Rename to `Text`",
+            "gist": "A plain English name for the one text type.",
+            "gains": [
+              "Plain English word."
+            ],
+            "losses": [
+              "81,344 mentions renamed.",
+              "Newcomers' first guess fails."
+            ],
+            "proposed": {
+              "code": "fn report(items: [Text]) -> Text {\n    out := \"\"\n    loop item in items -> out += \"- {item}\\n\"\n    out\n}\n\nfn greet(name: Text) -> Text -> \"hello {name}\"\n\n// the type's name also shows in errors and docs:\n// error[E0112]: expected Text, found Int"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A keeps the name nearly every language uses, so nothing is renamed. Text marks a packed type only where a slower String exists, which Jet does not have.",
+          "gains": [
+            "No existing line changes.",
+            "Newcomers' first guess is right.",
+            "One name for type and `to_string()`."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B renames 81,344 mentions, and newcomers' first guess, `String`, stops existing."
+            }
+          ],
+          "tradeoff": "`String` is a programmer's word rather than a plain English one."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Your suggestion of `Text` is not taken.",
+          "attempts": [
+            "Rename `String` to `Text`, as B does: rejected, it renames 81,344 mentions.",
+            "Accept both names: rejected, Jet keeps one spelling per thing."
+          ],
+          "result": "Docs and diagnostics keep saying `String (text)`, and E0119 for `Text` points to `String`."
+        }
+      ],
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-30T18:26:50.005Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-31",
+      "retiredAt": "2026-11-20T18:52:31.315Z"
     }
   ]
 }

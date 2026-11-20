@@ -36918,6 +36918,114 @@
       "completedAt": "2026-11-17T16:24:22.924Z",
       "questions": [],
       "retiredAt": "2026-11-20T17:09:56.117Z"
+    },
+    {
+      "id": "c0l7lwif",
+      "num": 6342,
+      "title": "String edited in place: insert, remove, truncate, reserve and capacity (D-TEXT-FIXED1=A)",
+      "body": "Owner, 2026-10-30: \"Relook at string types: string should be constant, not flexible, and string builders (don't love the name). String builders are the mutable version that can grow, shrink, change, etc.; strings should generally be fixed. Maybe strings would be like Odin string builders and text would be static unchangeable constant strings? Open to suggestions for both concepts' names.\" Today Jet's one text type is String (about 2,250 uses in Examples), and D-STRING-EMPTY1 covers reusing it. Owner: SurfaceDesign (design only).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e21",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "All criteria met; c5 proved on p271 (6d6315d3bd)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: c5 restated for D-DECL-COLON1=A (fixed names are name: value) and D-CALLSITE-MARK2=A (edits are plain calls)."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "C5 root (CardClose-1): D-TEXT-FIXED1=A names String.with_capacity(n) and s.capacity(). The runtime has rt_text_builder_with_capacity internally but exports only jet_rt_string_builder_new() with no capacity. Needs a runtime export (jet_rt_string_with_capacity), a BuiltinMethods static row and a TBuiltinOp lowering."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "All criteria met: research note landed (e784bb1ffe), ballots posted, gaps carded (#6357-#6363)"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A dated Docs/research note answers the owner's questions on string mutability and naming: today's String surface (growth, in-place edits, sharing and copies, literals, slices and views, interpolation), the cost of each, and peers (Odin string vs strings.Builder, Rust &str/String, Swift, Go string/strings.Builder, Zig, Java/C# StringBuilder, Mojo); with a name study for the fixed type and the growable type, with every claim about Jet probed on o0, o1 and o2 or cited to file:line, and every peer claim cited.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Docs/Research/2026-10-30-fixed-text-and-buffer.md, landed e784bb1ffe.",
+          "at": "2026-11-17T18:43:52.227Z"
+        },
+        {
+          "n": 2,
+          "text": "Every owner choice the note raises is a Tower-ready ballot (readycheck READY, plaincheck PLAIN OK, recommendation.losses = []), with same-program alternatives and beginner and expert paths; implementation-only findings become criteria or cards, not ballots.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "The note's ballots D-TEXT-FIXED1 and D-TEXT-NAMES1 were posted on Tower and are ratified (A and A); the research note landed in e784bb1ffe.",
+          "at": "2026-11-17T18:43:49.930Z",
+          "closure": "decision"
+        },
+        {
+          "n": 3,
+          "text": "The note sizes the migration (call sites by kind across Compiler, Core, Examples and tests) and the jet fix rule a cutover needs, and states the performance effect of each option with paired-cell plans.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Sections 1.4 and 4-6 of Docs/Research/2026-10-30-fixed-text-and-buffer.md (landed e784bb1ffe) size the migration and give the jet fix rule and paired-cell plans.",
+          "at": "2026-11-17T18:43:51.114Z"
+        },
+        {
+          "n": 4,
+          "text": "Every ballot on this card is decided by the owner (the card stays open while one is still open, so the ballot keeps a live card for questions).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner decisions D-TEXT-FIXED1=A and D-TEXT-NAMES1=A are ratified on Tower; this card has no open ballot.",
+          "at": "2026-11-17T18:43:35.401Z",
+          "closure": "decision"
+        },
+        {
+          "n": 5,
+          "text": "D-TEXT-FIXED1=A is built: a := String or &String parameter is edited in place with plain calls (D-CALLSITE-MARK2=A): s.insert(at, text), s.remove(from, to), s.truncate(n), s.reserve(n) and s.try_push(x); String.with_capacity(n) and s.capacity() exist; positions count characters; a name: value String (D-DECL-COLON1=A) rejects every edit with a registered diagnostic; a paired perf cell compares against building a new String. Proof: `jet test Compiler --profile golden --filter Text/StringEditInPlace` on O0, O1 and O2 and `jet test Compiler --profile ui --filter string_edit_fixed_name`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 6d6315d3bd (p271). On batch compiler p271: golden Text/StringEditInPlace 3/3 (O0, O1, O2) and ui string_edit_fixed_name 1/1.",
+          "at": "2026-11-17T18:42:07.853Z"
+        },
+        {
+          "n": 6,
+          "text": "D-TEXT-NAMES1=A is built: E0119 for an unknown `Text` type gains a fix line pointing to `String`, with a UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed in 2a64086b44, which added Tests/UI/unknown_type_text_points_to_string (E0119 for Text: the Why says Jet's text type is String and the Fix says to write String). It passes in the p271 ui suite on 6d6315d3bd.",
+          "at": "2026-11-17T18:43:27.628Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-30T17:30:09.329Z",
+      "updated": "2026-11-17T18:43:54.167Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-17T18:43:54.167Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T18:52:31.314Z"
     }
   ]
 }

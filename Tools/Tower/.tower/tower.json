@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112650,
+    "rev": 112655,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -23980,6 +23980,11 @@
         {
           "at": "2026-11-20",
           "by": "Main",
+          "text": "c13 depends on #3526: no compiler-session API exists (#3527 was merged into #3526, unbuilt), so Session/diagnostics_carry_origin has no consumer to test. No stand-in test; c13 stays open until #3526 builds the session API. c19: typed values equal the CLI JSON for digest, definitions, references, calls and effects (Errors3202 c19-typed-consumers plus host-records-lower); state_graphs, fact_registry and derivations need ballot D-SEMINDEX-TYPED1. c18: the case lands; the unlocated-cause driver half is pending."
+        },
+        {
+          "at": "2026-11-20",
+          "by": "Main",
           "text": "Decision (Main, within the ratified naming scope): c32 (the code-number area/topic law) is removed. Names are the identifier users see; codes stay stable aliases and are never renumbered (diagnostics.md). Errors3202 found no area/topic key anywhere and the registry broadly outside it."
         },
         {
@@ -24090,7 +24095,11 @@
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T12:53:28.352Z"
+          "at": "2026-11-16T12:53:28.352Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "LSP/lsp_diagnostics_"
+          }
         },
         {
           "n": 11,
@@ -24129,7 +24138,8 @@
           "proof": {
             "profile": "cases",
             "filter": "Session/diagnostics_carry_origin"
-          }
+          },
+          "blockedBy": "#5050"
         },
         {
           "n": 17,
@@ -24280,11 +24290,11 @@
         {
           "n": 31,
           "text": "D-DIAG-HEADER1=A: every diagnostic's header, More: link and closing hint show the type name (jet.ValueTypeMismatch), with the link at jet-lang.dev/e/<name>. The E-code stays the stable code: jet.report/v3 JSON carries both name and code, `jet explain E0112` still works, and the site redirects old E-code pages. Runtime reports (TrapMessages.jet, ServicesMessages.jet, report.S) print the name too. Every UI snapshot is regenerated from real output. Proof: `jet test Compiler --profile ui` and goldens pass on O0, O1 and O2. (was #3720 c81)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T01:09:57.149Z"
+          "evidence": "Proved on gate-p369 (dev a4b5354a26), 2026-11-20. Header, More: and closing hint: `jet check` prints \"Error: Jet.OperatorTypeMismatch: …\", \"More: jet-lang.dev/e/Jet.OperatorTypeMismatch\" and \"Run `jet explain Jet.OperatorTypeMismatch`\". JSON: `jet check --json` (schema jet.report) carries name Jet.OperatorTypeMismatch and code E0109. `jet explain E0112` prints Jet.ValueTypeMismatch. Site: DiagnosticRows.jet render_redirect writes Dist/e/E0112/index.html as a meta refresh to ../Jet.ValueTypeMismatch/ (its unit test asserts it). Runtime: an out-of-bounds index prints \"Stop: Jet.ArithmeticOrBoundsFailure: …\" at O0 (jet run), O1 and O2 (built image, exit 70). Suite p369: ui 3070 pass 0 fail; golden 5101 pass 0 fail on every tier. The 23 KNOWN-FAILING golden rows are unbuilt features unrelated to naming (foreign language bindings #6418, JetWeb ICE fixed by IfHole jetweb-form-type-args, FFI callbacks #6947, sandbox guest #6930), and they print `Error: Jet.<Name>` too. Their owning cards are tracked by #6843 c7.",
+          "at": "2026-11-20T18:57:05.286Z"
         },
         {
           "n": 33,
@@ -24341,7 +24351,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-20T16:07:18.641Z",
+      "updated": "2026-11-20T18:57:05.286Z",
       "updatedBy": "Main",
       "workOrder": 19,
       "criteriaLastN": 35
@@ -42250,112 +42260,6 @@
       "updated": "2026-11-20T00:58:04.855Z",
       "updatedBy": "owner",
       "criteriaLastN": 10
-    },
-    {
-      "id": "c0l7lwif",
-      "num": 6342,
-      "title": "String edited in place: insert, remove, truncate, reserve and capacity (D-TEXT-FIXED1=A)",
-      "body": "Owner, 2026-10-30: \"Relook at string types: string should be constant, not flexible, and string builders (don't love the name). String builders are the mutable version that can grow, shrink, change, etc.; strings should generally be fixed. Maybe strings would be like Odin string builders and text would be static unchangeable constant strings? Open to suggestions for both concepts' names.\" Today Jet's one text type is String (about 2,250 uses in Examples), and D-STRING-EMPTY1 covers reusing it. Owner: SurfaceDesign (design only).",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e21",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "All criteria met; c5 proved on p271 (6d6315d3bd)."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Owner deconfliction 2026-11-06: c5 restated for D-DECL-COLON1=A (fixed names are name: value) and D-CALLSITE-MARK2=A (edits are plain calls)."
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "C5 root (CardClose-1): D-TEXT-FIXED1=A names String.with_capacity(n) and s.capacity(). The runtime has rt_text_builder_with_capacity internally but exports only jet_rt_string_builder_new() with no capacity. Needs a runtime export (jet_rt_string_with_capacity), a BuiltinMethods static row and a TBuiltinOp lowering."
-        },
-        {
-          "at": "2026-10-30",
-          "by": "Main",
-          "text": "All criteria met: research note landed (e784bb1ffe), ballots posted, gaps carded (#6357-#6363)"
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A dated Docs/research note answers the owner's questions on string mutability and naming: today's String surface (growth, in-place edits, sharing and copies, literals, slices and views, interpolation), the cost of each, and peers (Odin string vs strings.Builder, Rust &str/String, Swift, Go string/strings.Builder, Zig, Java/C# StringBuilder, Mojo); with a name study for the fixed type and the growable type, with every claim about Jet probed on o0, o1 and o2 or cited to file:line, and every peer claim cited.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Docs/Research/2026-10-30-fixed-text-and-buffer.md, landed e784bb1ffe.",
-          "at": "2026-11-17T18:43:52.227Z"
-        },
-        {
-          "n": 2,
-          "text": "Every owner choice the note raises is a Tower-ready ballot (readycheck READY, plaincheck PLAIN OK, recommendation.losses = []), with same-program alternatives and beginner and expert paths; implementation-only findings become criteria or cards, not ballots.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "The note's ballots D-TEXT-FIXED1 and D-TEXT-NAMES1 were posted on Tower and are ratified (A and A); the research note landed in e784bb1ffe.",
-          "at": "2026-11-17T18:43:49.930Z",
-          "closure": "decision"
-        },
-        {
-          "n": 3,
-          "text": "The note sizes the migration (call sites by kind across Compiler, Core, Examples and tests) and the jet fix rule a cutover needs, and states the performance effect of each option with paired-cell plans.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Sections 1.4 and 4-6 of Docs/Research/2026-10-30-fixed-text-and-buffer.md (landed e784bb1ffe) size the migration and give the jet fix rule and paired-cell plans.",
-          "at": "2026-11-17T18:43:51.114Z"
-        },
-        {
-          "n": 4,
-          "text": "Every ballot on this card is decided by the owner (the card stays open while one is still open, so the ballot keeps a live card for questions).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner decisions D-TEXT-FIXED1=A and D-TEXT-NAMES1=A are ratified on Tower; this card has no open ballot.",
-          "at": "2026-11-17T18:43:35.401Z",
-          "closure": "decision"
-        },
-        {
-          "n": 5,
-          "text": "D-TEXT-FIXED1=A is built: a := String or &String parameter is edited in place with plain calls (D-CALLSITE-MARK2=A): s.insert(at, text), s.remove(from, to), s.truncate(n), s.reserve(n) and s.try_push(x); String.with_capacity(n) and s.capacity() exist; positions count characters; a name: value String (D-DECL-COLON1=A) rejects every edit with a registered diagnostic; a paired perf cell compares against building a new String. Proof: `jet test Compiler --profile golden --filter Text/StringEditInPlace` on O0, O1 and O2 and `jet test Compiler --profile ui --filter string_edit_fixed_name`.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed 6d6315d3bd (p271). On batch compiler p271: golden Text/StringEditInPlace 3/3 (O0, O1, O2) and ui string_edit_fixed_name 1/1.",
-          "at": "2026-11-17T18:42:07.853Z"
-        },
-        {
-          "n": 6,
-          "text": "D-TEXT-NAMES1=A is built: E0119 for an unknown `Text` type gains a fix line pointing to `String`, with a UI snapshot.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed in 2a64086b44, which added Tests/UI/unknown_type_text_points_to_string (E0119 for Text: the Why says Jet's text type is String and the Fix says to write String). It passes in the p271 ui suite on 6d6315d3bd.",
-          "at": "2026-11-17T18:43:27.628Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-10-30T17:30:09.329Z",
-      "updated": "2026-11-17T18:43:54.167Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-17T18:43:54.167Z"
     },
     {
       "id": "c0smtxuc",
@@ -63408,6 +63312,19 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T01:16:03.344Z"
+        },
+        {
+          "n": 14,
+          "text": "Full duplex on one connection: a program can read from a TCPStream in one task while another task writes to it (the reader and writer pattern every bidirectional protocol needs: WebSocket, chat, proxies). Today Core/Net/Net.jet has no read/write split and no clone, every read and write takes `&TCPStream`, a task capturing the stream takes it, and a task.group child borrows it exclusively, so the pattern cannot be written; the only workaround is one owner interleaving with `ready` (HTTPI9 hostile_chunked was rewritten that way, IfHole 2026-11-20). The surface (a split into owned read and write halves, or another shape) is a new public API: ballot D-NET-DUPLEX1 with same-program alternatives first. Proof: a case where a reader task and a writer task share one connection on every native tier, with close ordering and EOF checked.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-20T18:27:51.837Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "CoreNet/full_duplex_"
+          }
         }
       ],
       "refs": [],
@@ -63418,9 +63335,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:22:53.996Z",
-      "updated": "2026-11-17T01:49:02.632Z",
+      "updated": "2026-11-20T18:27:51.837Z",
       "updatedBy": "Main",
-      "criteriaLastN": 13
+      "criteriaLastN": 14
     },
     {
       "id": "c0r8ohhq",
@@ -113753,348 +113670,6 @@
       "ratifiedAt": "2026-10-30"
     },
     {
-      "id": "D-TEXT-FIXED1",
-      "cardId": "c0l7lwif",
-      "group": "language",
-      "title": "Text v2: one String type, fixed through `::` and edited in place through `:=`",
-      "situation": "You asked for fixed strings plus a way to build text, and said you lean toward one type for simplicity. Today Jet has one type, String. A `::` name never changes, and a `:=` name grows with `+=`, in place when nothing else shares the text. No call can reserve space, insert, remove or truncate. This vote picks between one String with in-place editing, a fixed String plus a second buffer type, and today's model.",
-      "gist": "Should Jet keep one String type, where a `:=` name may be edited in place and every other holder keeps its own value?",
-      "lesson": "A String is a value, like a number. Giving it to another name gives that name its own text. A `::` name never changes, and a `:=` name may be edited, and no edit ever reaches another holder's copy.",
-      "explainer": "",
-      "story": "Ana writes a report with `out += \"- {item}\\n\"`, as she would in Python. Later she prints a million CSV rows with one reused line, trimmed and prefixed in place. Under A both are the same String type, and the text she passed to a helper earlier never changes.",
-      "inWild": "// Swift: one String with value semantics; a copy is made only when a shared string is edited.\nvar title = name          // title is its own value\ntitle.insert(contentsOf: \"Dr. \", at: title.startIndex)   // name is unchanged\n// Go and Java: a fixed string plus a separate builder.\nvar b strings.Builder; b.WriteString(\"x\"); s := b.String()",
-      "detail": "What Jet does today, probed on O0, O1 and O2. `s :: \"a\"` then `s += \"b\"` is E0111. `s := \"ab\"`, `t :: s`, `s += \"c\"` prints `abc ab`, so the shared text never changes. The runtime appends in place only for a sole owner (Compiler/JetRuntime/Source/Text.jet:54-58, 357-367). `push`, `clear` and `insert` are E0311, and `String.with_capacity` is E0107.\n\nThe memory model already chose this. D-COPY-DEFAULT1=A gives every heap value copy on first write, and removes the sharing test for values the compiler proves unique. Lists already work this way, with edits marked `&xs.push(v)`.\n\nSpeed. A `+=` loop runs 6.9 times Rust's cycles at O2 today, from two allocations per text and a runtime call per append. That gap is compiler work under every option. A buffer type would run the same runtime calls.\n\nJet's own code has 1,449 text locals made with `:= \"…\"`, of which 405 grow, across 1,397 sites. There are 45 `&String` parameters.",
-      "options": [
-        {
-          "key": "A",
-          "name": "One String: `::` is fixed, `:=` may be edited in place",
-          "detail": "String stays the only text type and stays a value. A `::` name never changes. A `:=` name or a `&String` parameter may grow with `+=`. It may also be edited with `&` calls, as lists are: `&s.insert(at, text)`, `&s.remove(from, to)`, `&s.truncate(n)` and `&s.reserve(n)`. `String.with_capacity(n)` and `s.capacity()` join them, and `&s.try_push(x)` is fixed.\n\nAppending stays `+=`, and emptying stays `s = \"\"`, so no `push` or `clear` is added. Positions count characters, as `len()` and `slice` do.\n\nBehavior changes: none for existing code. D-STR-DECLINE1 is amended to allow these verbs. `s = \"\"` on a `:=` String nothing else holds now always keeps its storage, which D-STRING-EMPTY1 only allowed.",
-          "technical": "The verbs are Write-access builtins in BuiltinMethods.jet, like `try_push`. Each runs the existing copy on first write when the text is shared or a literal, then edits in place with geometric growth. For a value proved unique, D-COPY-DEFAULT1 drops the sharing test, so the edit is a plain store.\n\nD-EFF-FORMAT-WRITER1 keeps String as the one public text type, and `out += \"{x}\"` already streams `x` into `out`. D-CORE-IO-BUF1 stands: `Bytes` stays the byte buffer, and text needs no second buffer.",
-          "code": "// Beginner: unchanged. `out` is a := name, so it may grow.\nfn report(items: [String]) -> String {\n    out := \"\"\n    loop item in items -> out += \"- {item}\\n\"\n    out\n}\n\n// Expert: one String reused for every row, edited in place.\nfn print_rows(rows: [[String]]) {\n    line := String.with_capacity(256)\n    loop row in rows {\n        line = \"\"                            // keeps the 256 bytes\n        loop cell in row -> line += \"{cell},\"\n        &line.truncate(line.len() - 1)       // drop the last comma\n        &line.insert(0, \"> \")\n        print(line)\n    }\n}\n\nfn run() {\n    print(report([\"milk\", \"eggs\"]))\n    print_rows([[\"a\", \"b\"], [\"c\", \"d\"]])\n    name :: \"Ada\"\n    title := name                            // a value: title is its own text\n    &title.insert(0, \"Dr. \")                 // first edit copies the shared bytes once\n    print(\"{name} / {title}\")                // Ada / Dr. Ada\n}\n// &name.insert(0, \"x\") is an error: a :: name never changes."
-        },
-        {
-          "key": "B",
-          "name": "A fixed String plus a separate StringBuffer",
-          "detail": "String keeps no editing calls. `s += x` on a `:=` name still works by giving the name a new String. A new Core type, `StringBuffer`, holds `push`, `insert`, `remove`, `clear`, `truncate`, `reserve` and `with_capacity`. It prints like a String, and `to_string()` makes one.\n\nThis matches Java, Go, C# and Dart, and keeps String free of editing verbs. Every text API must pick one of two types, and moving text between them is a conversion call.",
-          "technical": "StringBuffer is a Core value type written like a list. `to_string()` at its last use hands over storage with no copy (D-DROP-ASAP1). It runs the same append runtime as String `+=`, so it is not faster.\n\nReopens D-EFF-FORMAT-WRITER1 (String is the one public text type) and D-CORE-IO-BUF1 (the text buffer was deleted). The 5 `try_push` sites move to the buffer.",
-          "code": "// Beginner: unchanged. `+=` gives `out` a new fixed String.\nfn report(items: [String]) -> String {\n    out := \"\"\n    loop item in items -> out += \"- {item}\\n\"\n    out\n}\n\n// Expert: a second type, StringBuffer, does the editing.\nfn print_rows(rows: [[String]]) {\n    line := StringBuffer.with_capacity(256)\n    loop row in rows {\n        &line.clear()                        // keeps the 256 bytes\n        loop cell in row -> &line.push(\"{cell},\")\n        &line.truncate(line.len() - 1)\n        &line.insert(0, \"> \")\n        print(line)\n    }\n}\n\nfn run() {\n    print(report([\"milk\", \"eggs\"]))\n    print_rows([[\"a\", \"b\"], [\"c\", \"d\"]])\n    name :: \"Ada\"\n    title := StringBuffer.from(name)         // copies into a buffer\n    &title.insert(0, \"Dr. \")\n    print(\"{name} / {title.to_string()}\")    // Ada / Dr. Ada\n}\n// No String method changes a String; String.insert does not exist."
-        },
-        {
-          "key": "C",
-          "name": "Keep today's model",
-          "detail": "One String, `+=` on `:=` names, and no editing calls. Insert, remove and truncate are written as new Strings built from slices, and reserving space is not possible.\n\nNo new names. Every edit other than appending copies the whole text.",
-          "technical": "No change. Each `slice` scans and copies the text today (Text.jet:686-733). The broken `try_push` still needs its own fix.",
-          "code": "// Beginner: unchanged.\nfn report(items: [String]) -> String {\n    out := \"\"\n    loop item in items -> out += \"- {item}\\n\"\n    out\n}\n\n// Expert: no editing calls. Every edit builds a new String.\nfn print_rows(rows: [[String]]) {\n    line := \"\"\n    loop row in rows {\n        line = \"\"\n        loop cell in row -> line += \"{cell},\"\n        line = line.slice(0, line.len() - 1) // copies the text\n        line = \"> {line}\"                    // copies it again\n        print(line)\n    }\n}\n\nfn run() {\n    print(report([\"milk\", \"eggs\"]))\n    print_rows([[\"a\", \"b\"], [\"c\", \"d\"]])\n    name :: \"Ada\"\n    title :: \"Dr. {name}\"                    // a new String\n    print(\"{name} / {title}\")                // Ada / Dr. Ada\n}\n// No reserve, insert, remove or truncate exists."
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Swift",
-          "note": "One String with value semantics and copy on write. Edits need a `var`; a `let` string never changes. Source: developer.apple.com/documentation/swift/string.",
-          "code": "var title = name\ntitle.insert(contentsOf: \"Dr. \", at: title.startIndex)\n// name is unchanged"
-        },
-        {
-          "lang": "Rust",
-          "note": "One growable String, edited through `let mut`; `&str` is the fixed view. Source: doc.rust-lang.org/std/string/struct.String.html.",
-          "code": "let mut s = String::with_capacity(256);\ns.push_str(\"a,\");\ns.insert_str(0, \"> \");"
-        },
-        {
-          "lang": "Go",
-          "note": "A fixed string, and strings.Builder grows in place. Source: pkg.go.dev/strings#Builder.",
-          "code": "var b strings.Builder\nb.WriteString(\"x\")\nout := b.String()"
-        },
-        {
-          "lang": "Java",
-          "note": "An immutable String, and StringBuilder edits in place. Source: docs.oracle.com, java.lang.StringBuilder.",
-          "code": "var b = new StringBuilder();\nb.append(\"x\").insert(0, \"> \");\nString s = b.toString();"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "A gives one text type with the guarantee you want from fixed strings: no edit ever reaches text another name holds, and a `::` name never changes. Experts edit in place on the same type, and lists already work this way.",
-        "gains": [
-          "One text type for every API.",
-          "No edit reaches another holder's text.",
-          "Reserve, insert, remove and truncate in place.",
-          "Existing code and decisions stay as they are."
-        ],
-        "losses": [],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B adds a second type and conversions at every hand-off, but no safety, because String values are already never changed under another holder. It runs the same append code, so it is not faster."
-          },
-          {
-            "key": "C",
-            "reason": "C leaves no way to reserve, insert or truncate in place, so experts copy the whole text for each edit."
-          }
-        ],
-        "tradeoff": "String gains a few editing calls, used only through `:=` names and `&` parameters."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": null,
-      "checkInstructions": "Use the dev jet from $JET_SCRATCH_ROOT/discovery/base/latest with JET_TOOLCHAIN_ROOT set to a dev export. In $JET_SCRATCH_ROOT/lanes/SurfaceDesign/probes run node gen6342.mjs and node gen6342b.mjs, then ./run.sh m6342 and ./run.sh m6342b, then node summ.mjs on each. Probes s01-s18 and b05-b06 show today's growth and editing rules. KD=k6342 RD=r6342 ./pstat.sh gives the speed rows. Run node b2/census6342b.mjs on the export for the site counts.",
-      "surface": {
-        "gist": "Should Jet keep one String type, where a `:=` name may be edited in place and every other holder keeps its own value?",
-        "lesson": "A String is a value. A `::` name never changes, a `:=` name may be edited, and no edit reaches another holder.",
-        "trio": {
-          "current": {
-            "note": "Today a `:=` String grows with `+=`, but nothing can reserve, insert or truncate in place.",
-            "code": "s := \"ab\"\ns += \"c\"           // fine: in place when nothing else holds it\n&s.insert(0, \">\")  // E0311: no such method"
-          },
-          "wild": {
-            "lang": "Swift",
-            "note": "One String value with copy on write; `var` names may be edited, `let` names never change.",
-            "code": "var title = name\ntitle.insert(contentsOf: \"Dr. \", at: title.startIndex)"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "One String: `::` is fixed, `:=` may be edited in place",
-            "gist": "One text type. `:=` names and `&` parameters may be edited in place; other holders keep their text.",
-            "gains": [
-              "One text type everywhere.",
-              "In-place edits for experts."
-            ],
-            "losses": [],
-            "proposed": {
-              "code": "line := String.with_capacity(256)\nline += \"{cell},\"\n&line.truncate(line.len() - 1)\n&line.insert(0, \"> \")"
-            }
-          },
-          {
-            "key": "B",
-            "name": "A fixed String plus a separate StringBuffer",
-            "gist": "String has no editing calls; a second type, StringBuffer, edits in place.",
-            "gains": [
-              "String has no editing verbs.",
-              "Familiar from Java and Go."
-            ],
-            "losses": [
-              "Two text types and conversions.",
-              "No faster than A."
-            ],
-            "proposed": {
-              "code": "line := StringBuffer.with_capacity(256)\n&line.push(\"{cell},\")\n&line.insert(0, \"> \")\nprint(line.to_string())"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Keep today's model",
-            "gist": "One String, `+=` only; other edits rebuild the text.",
-            "gains": [
-              "Nothing new to learn."
-            ],
-            "losses": [
-              "No reserve, insert or truncate.",
-              "Each edit copies the text."
-            ],
-            "proposed": {
-              "code": "line += \"{cell},\"\nline = \"> {line}\"   // copies"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "One text type with the fixed-string guarantee already built in, and in-place editing for experts, as lists already have.",
-          "gains": [
-            "One text type everywhere.",
-            "No edit reaches another holder."
-          ],
-          "losses": [],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "A second type adds conversions but no safety or speed."
-            },
-            {
-              "key": "C",
-              "reason": "Experts copy the whole text for every edit."
-            }
-          ],
-          "tradeoff": "String gains a few editing calls, used only through `:=` names."
-        }
-      },
-      "designAway": [
-        {
-          "loss": "String gains editing calls that D-STR-DECLINE1 declined.",
-          "attempts": [
-            "Put the calls on a second type, as B does: rejected, it adds a type and conversions for no safety or speed."
-          ],
-          "result": "D-STR-DECLINE1 declined them because they would change an immutable String. Here no value changes under another holder: edits act on a `:=` name or `&` parameter, as list edits do. `push` and `clear` stay declined, since `+=` and `s = \"\"` cover them."
-        },
-        {
-          "loss": "Editing a shared String copies it once, and the copy is not written in the code.",
-          "attempts": [
-            "Require `.copy()` before editing a shared String: rejected, D-COPY-DEFAULT1 already chose copy on first write for every heap value, lists included."
-          ],
-          "result": "The copy happens at most once, on the first edit, and never for a value the compiler proves unique, which is the usual `out := \"\"` case."
-        },
-        {
-          "loss": "A `::` String could look fixed only by convention.",
-          "attempts": [
-            "A separate fixed type: rejected, the binding already enforces it."
-          ],
-          "result": "`s += \"b\"` on a `::` name is E0111 today, and `&xs.push(2)` on a `::` list is E0202. The same check covers the new String calls, so fixed is checked, not a convention."
-        }
-      ],
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-30T18:26:48.625Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-30"
-    },
-    {
-      "id": "D-TEXT-NAMES1",
-      "cardId": "c0l7lwif",
-      "group": "language",
-      "title": "The name of Jet's one text type: `String` or `Text`",
-      "situation": "Jet has one text type, and the board has ruled that it stays one type. You asked why it is called String and not Text. The word string comes from logic and linguistics, where a string is a row of symbols. Early text-processing languages took the word in the 1950s and 1960s, and almost every language since has kept it. The type appears 81,344 times in Jet's own code. We recommend keeping String.",
-      "gist": "Should Jet's one text type keep the name `String`, or be renamed `Text`?",
-      "lesson": "A string is a row of symbols, as in a string of beads. Logicians used the word by 1918, and the first text-processing languages, COMIT and SNOBOL, made it the programmer's word. Nearly every language since says String. Text is plainer English, and Haskell's text library, Unison and Dhall use it.",
-      "explainer": "",
-      "story": "Kai comes from Python and writes `fn greet(name: String)`. Under A that is right with no explanation. Under B the compiler says String is unknown and offers Text, and Kai learns the new word once.",
-      "inWild": "// The everyday text type elsewhere:\n// Python str, Java String, C# string, Go string, Kotlin String,\n// Swift String, Rust String, Elm String, Lean String\n// Haskell Data.Text, Unison Text, Dhall Text",
-      "detail": "History. \"String\" meant things in a row for centuries, and 19th-century typesetters measured a compositor's \"string\" of type. Logic took the word for a row of marks: C. I. Lewis wrote of \"strings of recognisable marks\" in 1918.\n\nComputing took it from there. COMIT (Yngve, late 1950s) and SNOBOL (Farber, Griswold and Polonsky, 1964) were the first string-processing languages. ALGOL 60's report names quoted literals strings, in section 2.6.\n\nFrom then on the word stuck. PL/I had character strings and bit strings, BASIC had string variables, and C++, Java, C#, Python, Go, Swift, Kotlin, Rust and JavaScript all name the type string or String.\n\nWhere Text appears. Pascal used `text` for a text file, not a value. Haskell's Prelude String is a list of characters, so the faster library type is Data.Text. Unison and Dhall name their built-in type Text, and SQL databases have a TEXT column.\n\nSo Text usually marks a newer design choice, such as Haskell's packed text over a list. Jet's String is already packed UTF-8, so Text would not mark a difference.\n\nToday in Jet. The census counts 81,344 mentions of `String` in 17,636 Jet files: Compiler 36,082, Core 6,730, Examples 2,169, tests 9,488, Jetpack 24,309 and Tools 2,566. A parameter typed `Text` is E0119 today (probe m6342c/p_Text.jet).\n\nD-TEXT-FIXED1=A (2026-10-30) ruled one text type, fixed through `::` and edited through `:=`. So this vote names only that one type, and no buffer type needs a name.\n\nReview. Authors: Claude (SurfaceDesign lanes); v3 adds the history from card 6379 and drops the buffer-type branch. No fresh adversarial pass has run on this draft.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Keep `String`",
-          "detail": "The type keeps its name, so no existing line changes. Docs and diagnostics keep saying `String (text)`, so the plain word still explains it.\n\nE0119 for an unknown `Text` gains a fix line pointing to `String`.",
-          "technical": "No migration. E0119, the unknown-type error, gains one fix line for the common guess `Text`.",
-          "code": "fn report(items: [String]) -> String {\n    out := \"\"\n    loop item in items -> out += \"- {item}\\n\"\n    out\n}\n\nfn greet(name: String) -> String -> \"hello {name}\"\n\n// the type's name also shows in errors and docs:\n// error[E0112]: expected String, found Int"
-        },
-        {
-          "key": "B",
-          "name": "Rename to `Text`",
-          "detail": "The type becomes `Text`, a plain word for what it holds. `jet fix` renames 81,344 mentions in one cutover, plus spec, guides and diagnostics.\n\nNewcomers from almost every language type `String` first and meet E0119 with a fix line to `Text`.",
-          "technical": "`jet fix` renames the type by symbol across all 17,636 files. `String` becomes an unknown type with a teaching fix line, and no alias remains. Method names such as `to_string()` would need their own rename vote.",
-          "code": "fn report(items: [Text]) -> Text {\n    out := \"\"\n    loop item in items -> out += \"- {item}\\n\"\n    out\n}\n\nfn greet(name: Text) -> Text -> \"hello {name}\"\n\n// the type's name also shows in errors and docs:\n// error[E0112]: expected Text, found Int"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Haskell",
-          "note": "Prelude String is a list of characters; Data.Text is the packed type. Source: hackage.haskell.org/package/text.",
-          "code": "import qualified Data.Text as T\ngreet :: T.Text -> T.Text"
-        },
-        {
-          "lang": "Unison",
-          "note": "The built-in text type is Text. Source: unison-lang.org/docs.",
-          "code": "greet : Text -> Text\ngreet name = \"hello \" ++ name"
-        },
-        {
-          "lang": "Python",
-          "note": "str is the one text type. Source: docs.python.org/3/library/stdtypes.html#str.",
-          "code": "def greet(name: str) -> str:\n    return f\"hello {name}\""
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "A keeps the name nearly every language uses, so nothing is renamed. Text marks a packed type only where a slower String exists, which Jet does not have.",
-        "gains": [
-          "No existing line changes.",
-          "Newcomers' first guess is right.",
-          "One name for type and `to_string()`."
-        ],
-        "losses": [],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B renames 81,344 mentions, and newcomers' first guess, `String`, stops existing."
-          }
-        ],
-        "tradeoff": "`String` is a programmer's word rather than a plain English one."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": null,
-      "checkInstructions": "History sources: answers/6379.md in $JET_SCRATCH_ROOT/lanes/SurfaceDesign-3. Counts: node $JET_SCRATCH_ROOT/lanes/SurfaceDesign/b2/census6342.mjs on a dev export. Probe: jet check probes/m6342c/p_Text.jet gives E0119.",
-      "surface": {
-        "gist": "Should Jet's one text type keep the name `String`, or be renamed `Text`?",
-        "lesson": "A string is a row of symbols, as in a string of beads. Logicians used the word by 1918, and the first text-processing languages, COMIT and SNOBOL, made it the programmer's word. Nearly every language since says String. Text is plainer English, and Haskell's text library, Unison and Dhall use it.",
-        "trio": {
-          "current": {
-            "note": "Today `String` is the one text type; `Text` is an unknown type.",
-            "code": "fn greet(name: String) -> String -> \"hello {name}\"\n// a guess of Text today:\nfn greet2(name: Text) -> Text   // error[E0119]: unknown type Text"
-          },
-          "wild": {
-            "lang": "Haskell",
-            "note": "Haskell's packed text type is called Text, beside a list-based String.",
-            "code": "greet :: Text -> Text"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Keep `String`",
-            "gist": "No rename; the name most programmers know stays.",
-            "gains": [
-              "Nothing renamed.",
-              "Newcomers' first guess is right.",
-              "`to_string()` and the type keep one name."
-            ],
-            "losses": [],
-            "proposed": {
-              "code": "fn report(items: [String]) -> String {\n    out := \"\"\n    loop item in items -> out += \"- {item}\\n\"\n    out\n}\n\nfn greet(name: String) -> String -> \"hello {name}\"\n\n// the type's name also shows in errors and docs:\n// error[E0112]: expected String, found Int"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Rename to `Text`",
-            "gist": "A plain English name for the one text type.",
-            "gains": [
-              "Plain English word."
-            ],
-            "losses": [
-              "81,344 mentions renamed.",
-              "Newcomers' first guess fails."
-            ],
-            "proposed": {
-              "code": "fn report(items: [Text]) -> Text {\n    out := \"\"\n    loop item in items -> out += \"- {item}\\n\"\n    out\n}\n\nfn greet(name: Text) -> Text -> \"hello {name}\"\n\n// the type's name also shows in errors and docs:\n// error[E0112]: expected Text, found Int"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A keeps the name nearly every language uses, so nothing is renamed. Text marks a packed type only where a slower String exists, which Jet does not have.",
-          "gains": [
-            "No existing line changes.",
-            "Newcomers' first guess is right.",
-            "One name for type and `to_string()`."
-          ],
-          "losses": [],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B renames 81,344 mentions, and newcomers' first guess, `String`, stops existing."
-            }
-          ],
-          "tradeoff": "`String` is a programmer's word rather than a plain English one."
-        }
-      },
-      "designAway": [
-        {
-          "loss": "Your suggestion of `Text` is not taken.",
-          "attempts": [
-            "Rename `String` to `Text`, as B does: rejected, it renames 81,344 mentions.",
-            "Accept both names: rejected, Jet keeps one spelling per thing."
-          ],
-          "result": "Docs and diagnostics keep saying `String (text)`, and E0119 for `Text` points to `String`."
-        }
-      ],
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-30T18:26:50.005Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-31"
-    },
-    {
       "id": "D-LINK-STEP1",
       "cardId": "c0gmf0y4",
       "group": "tooling",
@@ -136031,6 +135606,48 @@
   ],
   "events": [
     {
+      "at": "2026-11-20T18:57:05.286Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dktg7a",
+      "note": "#31"
+    },
+    {
+      "at": "2026-11-20T18:52:35.261Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dktg7a",
+      "note": "#13: no compiler-session API exists yet; #5050 (jet.session.v1) is the open card that builds it; blocked by #5050"
+    },
+    {
+      "at": "2026-11-20T18:52:31.060Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dktg7a",
+      "note": "#10: LSP cases live in Tests/Cases/LSP (TitleCase folder rule) and the filter is case-sensitive; the CompilerAPI/ half stays in the text; proof: jet test Compiler --profile cases --filter LSP/lsp_diagnostics_"
+    },
+    {
+      "at": "2026-11-20T18:42:13.094Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0dktg7a",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-20T18:27:51.837Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0v54mn1",
+      "note": "14 criteria, soft limit 6: gap found 2026-11-20 while fixing HTTPI9 hostile_chunked; #6884 owns core.net sockets"
+    },
+    {
+      "at": "2026-11-20T18:27:51.837Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0v54mn1",
+      "note": "#14 Full duplex on one connection: a program can read from a TCP"
+    },
+    {
       "at": "2026-11-20T17:55:35.725Z",
       "by": "Main",
       "action": "card.over-limit",
@@ -139515,720 +139132,6 @@
       "action": "decision.add",
       "ref": "D-PERF-TOPDOWN1",
       "note": "A topdown lens that says why each hot line is slow on the CPU"
-    },
-    {
-      "at": "2026-11-18T13:48:46.057Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-PERF-HEAP1",
-      "note": "Typed heap snapshots, their diffs and retention paths, inside the existing alloc lens"
-    },
-    {
-      "at": "2026-11-18T13:48:45.066Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-PERF-CAUSAL1",
-      "note": "A causal profile lens that predicts which line is worth speeding up"
-    },
-    {
-      "at": "2026-11-18T13:48:44.076Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-OBSERVE-FLIGHT1",
-      "note": "An always-on flight recorder and typed crash dumps that jet debug opens"
-    },
-    {
-      "at": "2026-11-18T13:48:43.074Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-DBG-VERBS1",
-      "note": "The jet debug console words for conditions, logpoints, watches, frames, tasks, attach and fix"
-    },
-    {
-      "at": "2026-11-18T13:48:42.158Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-DBG-UI1",
-      "note": "The debugger and profiler window is Canvas, grown to RemedyBG's panels and one timeline"
-    },
-    {
-      "at": "2026-11-18T13:48:41.212Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-DBG-DEADLOCK1",
-      "note": "A wait cycle among tasks stops the program and names the cycle"
-    },
-    {
-      "at": "2026-11-18T13:48:33.042Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-LOOP-PAIRS1",
-      "note": "What a two-name loop over a list of records binds"
-    },
-    {
-      "at": "2026-11-18T13:44:01.492Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "42 criteria, soft limit 6: review 4 findings belong to the c40 redesign they review; one criterion keeps them together"
-    },
-    {
-      "at": "2026-11-18T13:44:01.492Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#42 The native debugger evaluator build answers review 4 (Docs/A"
-    },
-    {
-      "at": "2026-11-18T13:35:18.476Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T13:35:15.710Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0nwrfck",
-      "note": "#14: D-PERF-MEMORY1=A: memory is a lens (--lens=memory, combinable --lens=cpu,memory), not a method; p295's c14-c16.r4 ships --method=memory, a defect against the ratified surface; was: `jet perf run` with the memory method reports L1D, LLC and dTLB misses and page faults per source line on Linux x86-64. Proof: `jet test Compiler --profile cases --filter PerfRun/memory_counters_per_l"
-    },
-    {
-      "at": "2026-11-18T13:09:34.486Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0uxxmpm",
-      "note": "#5 A mutable module variable in a generic module body checks an"
-    },
-    {
-      "at": "2026-11-18T13:09:33.334Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "41 criteria, soft limit 6: defect found by the debug-eval r4 probes; the debugger owns breakpoint placement"
-    },
-    {
-      "at": "2026-11-18T13:09:33.334Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#41 A breakpoint on a member of a generic-module instance hits, "
-    },
-    {
-      "at": "2026-11-18T12:57:28.658Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c09hk13a",
-      "note": "#13: #3857 (39b713f09a) made assert_eq(x, None) check and run; there is no error to register, and L0528 is Retired; was: `assert_eq(x, None)` gets its registered error, and L0528 does not fire on generated bodies (#3903). Proof: `jet test Compiler --profile ui --filter assert_eq_none` and `--filter L0528_generated`. (wa"
-    },
-    {
-      "at": "2026-11-18T12:57:27.807Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c09hk13a",
-      "note": "20 criteria, soft limit 6: split from c5: the L0302 half waits on the #6326 c4 gate"
-    },
-    {
-      "at": "2026-11-18T12:57:27.807Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c09hk13a",
-      "note": "#20 L0302 takes the form the state-machine design gate on #6326  (blocked by #6326)"
-    },
-    {
-      "at": "2026-11-18T12:57:26.569Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c09hk13a",
-      "note": "#5: IfHole's 2026-11-18 survey: the Rust-era proof filter selects 0 tests on dev; this names the tests that hold the rule; L0302 split into its own criterion behind #6326 c4; was: L0301 exists as a tidy error with fixtures, and L0302 follows the state-machine design gate on #6326 c4."
-    },
-    {
-      "at": "2026-11-18T12:57:25.719Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c09hk13a",
-      "note": "#19: IfHole's 2026-11-18 survey: the Rust-era proof filter selects 0 tests on dev; this names the tests that hold the rule; was: JetSema reports the serde errors E2408, E2414 and E2415 (#3907). Proof: `jet test Compiler --profile ui --filter E2408`, `--filter E2414` and `--filter E2415`. (was #6425 c27)"
-    },
-    {
-      "at": "2026-11-18T12:57:24.832Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c09hk13a",
-      "note": "#17: IfHole's 2026-11-18 survey: the Rust-era proof filter selects 0 tests on dev; this names the tests that hold the rule; was: JetSema reports doctest E2901 (#3905). Proof: `jet test Compiler --profile ui --filter E2901`. (was #6425 c25)"
-    },
-    {
-      "at": "2026-11-18T12:57:23.926Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c09hk13a",
-      "note": "#16: IfHole's 2026-11-18 survey: the Rust-era proof filter selects 0 tests on dev; this names the tests that hold the rule; was: JetSema reports the task detach and freeze rules the Rust checker had (#3900). Proof: `jet test Compiler --profile ui --filter task_detach_` and `--filter task_freeze_`. (was #6425 c24)"
-    },
-    {
-      "at": "2026-11-18T12:57:23.005Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c09hk13a",
-      "note": "#12: IfHole's 2026-11-18 survey: the Rust-era proof filter selects 0 tests on dev; this names the tests that hold the rule; was: JetSema reports the #Test scope and test-runner rules the Rust checker had (#3899). Proof: `jet test Compiler --profile ui --filter test_scope_`. (was #6425 c9)"
-    },
-    {
-      "at": "2026-11-18T12:50:54.427Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0jt78qz",
-      "note": "#5: D-RECORD-ORDER1=A (written member order) supersedes D-TUPLE-ORDER1's label order; spec S73 and core-library.md follow it; was: Named tuples sort by label order (D-TUPLE-ORDER1=A): S73 in Docs/Spec/syntax-decisions.md says so, the List.sort and sort_desc docs say so, and an example shows label order and the sort_by spelling. P"
-    },
-    {
-      "at": "2026-11-18T12:07:43.513Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T12:04:24.172Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c05efrmn",
-      "note": "34 criteria, soft limit 6: defect found by #6841 r3 probes"
-    },
-    {
-      "at": "2026-11-18T12:04:24.172Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c05efrmn",
-      "note": "#37 ProhibitedEffectReached prints a denial-only row as written "
-    },
-    {
-      "at": "2026-11-18T12:04:22.475Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c05efrmn",
-      "note": "33 criteria, soft limit 6: defect found by #6841 r3 probes"
-    },
-    {
-      "at": "2026-11-18T12:04:22.475Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c05efrmn",
-      "note": "#36 A `#FX: (…)` body line in a `-[]>` function is checked as a "
-    },
-    {
-      "at": "2026-11-18T12:04:20.867Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c05efrmn",
-      "note": "32 criteria, soft limit 6: defect found by #6841 r3 probes; effect-policy markers are this card's area"
-    },
-    {
-      "at": "2026-11-18T12:04:20.867Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c05efrmn",
-      "note": "#35 The block form `#FX(!E) { … }` accepts denial entries as the"
-    },
-    {
-      "at": "2026-11-18T11:59:35.513Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0gokkbf",
-      "note": "#4: D-FMT-SIMPLIFY1 (ratified) keeps plain jet fmt at its one default style, and c1 requires plain fmt to leave unformatted code unchanged; the arm-table rewrite is a simplify rewrite; was: `jet fmt` rewrites the old arm-table shapes (adds an explicit `else` arm, removes redundant returns and fallback tails), keeping comments, bindings, order, effects and spans, and reports nothing."
-    },
-    {
-      "at": "2026-11-18T11:43:45.084Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08i9ox6",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T11:43:42.969Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c08i9ox6",
-      "note": "13 criteria, soft limit 6: follow-up of c14's fix, which stops Core bodies staging local values so both modes agree"
-    },
-    {
-      "at": "2026-11-18T11:43:42.969Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08i9ox6",
-      "note": "#15 Core and Prelude bodies compute their local values while com"
-    },
-    {
-      "at": "2026-11-18T10:45:00.111Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "40 criteria, soft limit 6: review gaps of the owner-prioritized debugger card; gaps become criteria on the owning card"
-    },
-    {
-      "at": "2026-11-18T10:45:00.111Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#40 R3/R8 debugger expression evaluation stays unbuilt until a r"
-    },
-    {
-      "at": "2026-11-18T10:44:58.561Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0jt78qz",
-      "note": "#1: the ratified D-RANGE-BACKWARD1 text names check error E0170, which already fires; a ratified decision outranks the card wording; was: A loop over a constant range that can never run (`10..1`, or a step pointing away from the end) is a tidy error that offers the minus step (D-RANGE-BACKWARD1=A); a computed backward range stays empty;; proof: jet test Compiler --profile ui --filter range_backward_constant"
-    },
-    {
-      "at": "2026-11-18T10:44:33.436Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c08i9ox6",
-      "note": "12 criteria, soft limit 6: release determinism defect found by the a0.0.45 admit; it belongs to the keep-going card"
-    },
-    {
-      "at": "2026-11-18T10:44:33.436Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08i9ox6",
-      "note": "#14 Keep-going never changes emitted code: `jet build -O1 Compil"
-    },
-    {
-      "at": "2026-11-18T10:19:54.426Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0i4ehbt",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T09:59:23.170Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0i4ehbt",
-      "note": "#6: IfHole's measured residual (367+ additive-growth sites in Compiler, none of which can plausibly reach 2^63) shows additive growth is not a real fallback risk; only geometric growth is; was: L2511 covers representation fallbacks precisely: an ExactIntSpill in a loop fires only for non-constant growth (an accumulator, product or shift), never for a ±constant counter a loop bound limits, an"
-    },
-    {
-      "at": "2026-11-18T09:54:27.540Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00gioxt",
-      "note": "#5 Prefixed type names in Compiler/ (SemaScopeTable, JetCLIPlan"
-    },
-    {
-      "at": "2026-11-18T09:26:46.318Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00gioxt",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T09:12:12.794Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0i4ehbt",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T08:55:55.424Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0i4ehbt",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T08:41:26.230Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0i4ehbt",
-      "note": "#6 L2511 covers representation fallbacks precisely: an ExactInt"
-    },
-    {
-      "at": "2026-11-18T08:39:28.746Z",
-      "by": "Main",
-      "action": "question.answer",
-      "ref": "q77siog1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-18T08:39:17.795Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-CALLBACK-ONCE1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-18T08:35:11.827Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0qetodj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T08:35:09.990Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0qetodj",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-18T08:34:25.698Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0aha21c",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-18T08:34:24.779Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0aha21c",
-      "note": "#7: The grep also matched two dated research notes (Docs/Research/Evidence20260929/3289-message-catalog.md, 3310-message-catalog-extraction.md) that study message catalogs; they are evidence, not generated catalogs, and research is kept intact.; was: Generated documentation catalogs and their producers are removed, while the executable registry and proof checks keep their input coverage. Proof: `git ls-files Docs | grep -i -E 'generated|catalog'` "
-    },
-    {
-      "at": "2026-11-18T08:34:23.917Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pmy5fy",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-18T08:32:29.201Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0t5gnhs",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-18T08:31:49.711Z",
-      "by": "Main",
-      "action": "question.answer",
-      "ref": "q6eygb5d",
-      "note": ""
-    },
-    {
-      "at": "2026-11-18T08:31:36.021Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-GUARD-LINT1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-18T08:30:48.493Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0wowe4m",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-18T08:30:47.150Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0qetodj",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-18T08:30:45.779Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-18T08:30:44.069Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-18T08:12:09.603Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T08:12:05.074Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "39 criteria, soft limit 6: owner 2026-11-18: best debugging and profiling tool in existence"
-    },
-    {
-      "at": "2026-11-18T08:12:05.074Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#39 Best in existence: a dated adversarial review in Docs/Audits"
-    },
-    {
-      "at": "2026-11-18T08:03:01.490Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q77siog1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-18T07:58:05.647Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FNVAL-COPY1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-18T07:56:11.837Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SERVICE-CURRENT1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-18T07:55:05.562Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0nwrfck",
-      "note": "#11: owner 2026-11-18: debugger and profiler need nothing but jet; exports are interop, not proof; was: `jet perf --pprof` writes the protobuf that `go tool pprof` opens, and an OTLP export exists; each is proved by opening the file in the peer tool (Docs/Audits/2026-11-14-debugging-profiling-review.md)"
-    },
-    {
-      "at": "2026-11-18T07:54:50.172Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T07:54:48.457Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "38 criteria, soft limit 6: owner: jet-native debugger and profiler"
-    },
-    {
-      "at": "2026-11-18T07:54:48.457Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#38 jet perf's own sampler keeps whole stacks without frame poin"
-    },
-    {
-      "at": "2026-11-18T07:54:47.536Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "37 criteria, soft limit 6: owner: jet-native debugger and profiler"
-    },
-    {
-      "at": "2026-11-18T07:54:47.536Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#37 No text tells a user that Jet's debugger or profiler is lldb"
-    },
-    {
-      "at": "2026-11-18T07:54:46.603Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "36 criteria, soft limit 6: owner: jet-native debugger and profiler"
-    },
-    {
-      "at": "2026-11-18T07:54:46.603Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#36 jet debug covers the everyday debugger workflow natively, in"
-    },
-    {
-      "at": "2026-11-18T07:54:45.381Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "35 criteria, soft limit 6: owner: jet-native debugger and profiler"
-    },
-    {
-      "at": "2026-11-18T07:54:45.381Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#35 jet debug's own engine does what the lldb interop cases prov"
-    },
-    {
-      "at": "2026-11-18T07:54:44.348Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "34 criteria, soft limit 6: owner: jet-native debugger and profiler"
-    },
-    {
-      "at": "2026-11-18T07:54:44.348Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#34 jet alone debugs and profiles: every Debug and Perf case tha"
-    },
-    {
-      "at": "2026-11-18T07:53:28.091Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-18T07:53:28.091Z"
-    },
-    {
-      "at": "2026-11-18T07:53:27.301Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-18T07:53:27.301Z"
-    },
-    {
-      "at": "2026-11-18T07:50:31.985Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0i4ehbt",
-      "note": "#5 A view local used only as a method receiver (`trimmed.len()`"
-    },
-    {
-      "at": "2026-11-18T07:38:09.954Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c01vsb2c",
-      "note": "#6 E0514 for a never-reassigned binding inside a generic module"
-    },
-    {
-      "at": "2026-11-18T07:31:32.207Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0i4ehbt",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T07:30:11.013Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0i4ehbt",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T07:29:38.869Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0i4ehbt",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T07:24:49.009Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0a8z3u0",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-18T06:54:21.451Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06m6abh",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-18T06:54:20.537Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06m6abh",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-18T06:36:33.637Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0a8z3u0",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-18T06:36:32.712Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06m6abh",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-18T06:36:31.781Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06m6abh",
-      "note": "#14"
-    },
-    {
-      "at": "2026-11-18T06:36:30.851Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06m6abh",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-18T06:36:29.952Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c00gioxt",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-18T06:36:29.046Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#32"
-    },
-    {
-      "at": "2026-11-18T06:36:28.000Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#33"
-    },
-    {
-      "at": "2026-11-18T06:36:26.788Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-18T06:31:52.311Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0a8z3u0",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T06:22:33.527Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c06m6abh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-18T06:18:23.775Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c01vsb2c",
-      "note": "#5 A JET_KEEP_GOING check of a package that mixes Compiler, Too"
-    },
-    {
-      "at": "2026-11-18T05:45:11.211Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c01vsb2c",
-      "note": "#4 E0514 has no false positives when Core or compiler bodies ar"
-    },
-    {
-      "at": "2026-11-18T05:23:05.263Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c06m6abh",
-      "note": "12 criteria, soft limit 6: gap found by #6612 c1 key cutover; inline module namespace is this card's"
-    },
-    {
-      "at": "2026-11-18T05:23:05.263Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c06m6abh",
-      "note": "#15 An inline module refuses one name declared twice, as a file "
     }
   ],
   "nextNum": 368,
