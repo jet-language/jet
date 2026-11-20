@@ -4,7 +4,7 @@ fixture: Fixtures/SealedDependency
 env: JET_STORE_DIR={work}/store
 step: jet check lib.jet
 exit: nonzero
-stderr: ~ E3401 # Original cold diagnostic assertion.
+stderr: ~ "Jet.ImpureCallInPureContext" # Original cold diagnostic assertion.
 step first: jet inspect explain-build lib.jet --json
 env: JET_STORE_DIR={work}/store
 json: stdout doc $.nodes[?kind="package"][?subject~="util"][*].why_ran ^= "checked+published" # Original find-first lookup has a unique match.
