@@ -1,7 +1,8 @@
-// Every idiom row a missing method's Fix can give names a real API: its
-// witness program writes the row's spelling and checks clean through the
-// real loader and checker, with every Core unit read from the tree. A row
-// whose API is gone fails here.
+// Every idiom row a missing method's, field's or function's Fix can give
+// names a real API: its witness program writes the row's spelling, and any
+// rename the row edits to, and checks clean through the real loader and
+// checker, with every Core unit read from the tree. A row whose API is gone
+// fails here.
 use {
     idiom_files: core.files
     jet_driver.[JetDriverCompileMode, JetDriverCoreSource, jet_driver_compile, jet_driver_core_text, jet_driver_has_errors, jet_driver_runtime_interface_sources]
@@ -12,6 +13,7 @@ use {
 #Test("every method idiom row's spelling checks clean in its witness") {
     loop idiom in SEMA_METHOD_IDIOMS {
         assert(idiom.witness.contains(idiom.spelling), "the witness for `{idiom.foreign}` on {idiom.receiver} does not write `{idiom.spelling}`")
+        assert(idiom.rename == "" || idiom.spelling.contains("{idiom.rename}("), "the spelling for `{idiom.foreign}` on {idiom.receiver} does not call its rename `{idiom.rename}`")
         request := seams_request(idiom.witness, JetDriverCompileMode.Program)
         request.core_sources = idiom_core_rows()
         result: jet_driver_compile(request)

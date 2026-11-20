@@ -586,6 +586,14 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
         diagnostics.push(diagnostic_with_edit(renamed, TextEdit{span: Span{start: span.end - member.len(), end: span.end}, new_text: "type"}))
         return None
     }
+    // `items.length`: a field another language reads where Jet calls a
+    // method (an idiom row in Calls/Methods.jet).
+    idiom: sema_call_method_idiom_index(base.ty, member)
+    if idiom >= 0 && SEMA_METHOD_IDIOMS[idiom].rename != "" {
+        called: sema_error("E0302", span, "`.{member}` isn't a field of this value", SEMA_METHOD_IDIOMS[idiom].note, "write `{SEMA_METHOD_IDIOMS[idiom].spelling}`")
+        diagnostics.push(diagnostic_with_edit(called, TextEdit{span: Span{start: span.end - member.len(), end: span.end}, new_text: "{SEMA_METHOD_IDIOMS[idiom].rename}()"}))
+        return None
+    }
     diagnostics.push(sema_error("E0302", span, "`.{member}` only works on a declared struct or tuple field", "field access needs declaration metadata instead of guessing a successful type", "use a declared field on a struct or tuple"))
     None
 }

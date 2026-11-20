@@ -48,6 +48,7 @@ use {
         core_module_has_type,
         diagnostic_registry_row,
         name_rows,
+        diagnostic_with_edit,
         diagnostic_with_edit_grade,
         expr_span,
         symbol_find,
@@ -1314,11 +1315,11 @@ sema_check_failure_contract_type: fn(ty: Type, span: Span, in_return: Bool, gene
                     declared = sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) != None
                 }
                 if !declared {
-                    diagnostics.push(sema_unknown_type_name(name, span, sema_failure_declared_type_names(environment)))
+                    diagnostics.push(sema_unknown_type_name(name, span, sema_failure_declared_type_names(environment), sema_call_source_word_span(environment, program, span, name)))
                 }
             }
             if !unresolved && sema_failure_written_name_unknown(name, generic_names, environment, program) {
-                diagnostics.push(sema_unknown_type_name(name, span, sema_failure_declared_type_names(environment)))
+                diagnostics.push(sema_unknown_type_name(name, span, sema_failure_declared_type_names(environment), sema_call_source_word_span(environment, program, span, name)))
             }
         }
         // An alias can hide a second optional layer: `Maybe<Int>?` where
@@ -1484,8 +1485,9 @@ sema_type_hole: fn(span: Span) -> Diagnostic {
 // E0119: a written type name that names nothing. A name that writes a
 // lexicon acronym word-cased (`HttpRequest`) gets E0358 with its spelling.
 // The common guess `Text` points at `String`; any other near miss of a Jet
-// type or of a `declared` type (`Strng`) is suggested by name.
-sema_unknown_type_name: fn(name: String, span: Span, declared: [String]) -> Diagnostic {
+// type or of a `declared` type (`Strng`) is suggested by name, and renamed
+// in place when the caller knows `name_span`, where the name alone is written.
+sema_unknown_type_name: fn(name: String, span: Span, declared: [String], name_span: Span?) -> Diagnostic {
     if name == "Text" {
         return sema_error("E0119", span, "there's no type called `Text`", "Jet's text type is `String`", "write `String` instead of `Text`")
     }
@@ -1498,10 +1500,24 @@ sema_unknown_type_name: fn(name: String, span: Span, declared: [String]) -> Diag
     // A short name needs a closer match: one edit per three letters.
     limit: if name.count_bytes() /% 3 > 1 -> name.count_bytes() /% 3 else -> 1
     fix := "check the spelling, or define the struct or enum first"
+    suggested := String?{None}
     if sema_suggest_field(name, candidates) == .Val(near) {
-        if sema_taint_edit_distance(name, near) <= limit -> fix = "did you mean `{near}`?"
+        if sema_taint_edit_distance(name, near) <= limit {
+            fix = "did you mean `{near}`?"
+            suggested = Val("{near}")
+        }
     }
-    sema_error("E0119", span, "there's no type called `{name}`", "the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)", fix)
+    unknown: sema_error("E0119", span, "there's no type called `{name}`", "the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)", fix)
+    if suggested == .Val(near) && name_span == .Val(written) {
+        return diagnostic_with_edit(unknown, TextEdit{span: written, new_text: near})
+    }
+    unknown
+}
+
+// The span of `name` when `span` is the name alone.
+sema_type_name_span: fn(name: String, span: Span) -> Span? Never! {
+    if span.end - span.start == name.count_bytes() -> return Val(span)
+    None
 }
 
 // The types module row `caller` declares, the near misses E0119 suggests.

@@ -1,0 +1,78 @@
+// A call, method, field, name or text habit from another language is
+// reported with the edits that write it in Jet: applying every edit of
+// every error leaves source that checks clean.
+
+HabitIdiomEdit: struct {
+    start: Int,
+    end: Int,
+    text: String,
+}
+
+// The source with every error's edits applied, last edit first. An error
+// without an edit (a later read of the undeclared name) is left to the
+// recheck.
+habit_idiom_fixed: fn(source: String) -> String {
+    edits := [HabitIdiomEdit]{}
+    loop diagnostic in core_failure_record_diagnostics(source, "user/fixture") {
+        if diagnostic.severity != 1 -> next
+        if diagnostic.edit == .Val(first) {
+            edits.push(HabitIdiomEdit{start: first.span.start, end: first.span.end, text: "{first.new_text}"})
+            loop extra in diagnostic.fix_edits {
+                edits.push(HabitIdiomEdit{start: extra.span.start, end: extra.span.end, text: "{extra.new_text}"})
+            }
+        }
+    }
+    assert(edits.len() > 0, "no edit for: {source}")
+    used := [Bool]{}
+    loop index in 0..<edits.len() -> used.push(false)
+    fixed := "{source}"
+    loop _ in 0..<edits.len() {
+        best := -1
+        loop index in 0..<edits.len() {
+            if !used[index] && (best < 0 || edits[index].start > edits[best].start) -> best = index
+        }
+        used[best] = true
+        bytes: fixed.bytes()
+        before: String.from_bytes(bytes.slice(0, edits[best].start)) ?? ""
+        after: String.from_bytes(bytes.slice(edits[best].end, bytes.len())) ?? ""
+        fixed = "{before}{edits[best].text}{after}"
+    }
+    fixed
+}
+
+// The habit's fix is `expected`, and it checks without an error.
+assert_idiom_fix: fn(source: String, expected: String) {
+    fixed: habit_idiom_fixed(source)
+    assert_eq(fixed, expected)
+    loop diagnostic in core_failure_record_diagnostics(fixed, "user/fixture") {
+        if diagnostic.severity == 1 {
+            panic("the fixed source still reports {diagnostic.code} `{diagnostic.what}`:\n{fixed}")
+        }
+    }
+}
+
+idiom_in_run: fn(body: String) -> String { "run: fn() {{\n{body}}}\n" }
+
+#Test("another language's function is rewritten to the Jet spelling") {
+    assert_idiom_fix(idiom_in_run("    items: [1, 2, 3]\n    print(len(items))\n"), idiom_in_run("    items: [1, 2, 3]\n    print(items.len())\n"))
+    assert_idiom_fix(idiom_in_run("    loop i in range(3) {{\n        print(i)\n    }}\n"), idiom_in_run("    loop i in 0..<3 {{\n        print(i)\n    }}\n"))
+    assert_idiom_fix(idiom_in_run("    n: 7\n    label: str(n)\n    print(label)\n"), idiom_in_run("    n: 7\n    label: \"{{n}}\"\n    print(label)\n"))
+    assert_idiom_fix(idiom_in_run("    console.log(\"hi\")\n"), idiom_in_run("    print(\"hi\")\n"))
+}
+
+#Test("text built with str and plus is one interpolated string") {
+    assert_idiom_fix(idiom_in_run("    n: 7\n    label: \"n=\" + str(n)\n    print(label)\n"), idiom_in_run("    n: 7\n    label: \"n={{n}}\"\n    print(label)\n"))
+    assert_idiom_fix(idiom_in_run("    n: 7\n    label: \"n=\" + str(n) + \"!\"\n    print(label)\n"), idiom_in_run("    n: 7\n    label: \"n={{n}}!\"\n    print(label)\n"))
+    assert_idiom_fix(idiom_in_run("    n: 1\n    print(\"a\" + n)\n"), idiom_in_run("    n: 1\n    print(\"a{{n}}\")\n"))
+}
+
+#Test("another language's method or field is renamed to the Jet member") {
+    assert_idiom_fix(idiom_in_run("    items: [1, 2, 3]\n    print(items.length)\n"), idiom_in_run("    items: [1, 2, 3]\n    print(items.len())\n"))
+    assert_idiom_fix(idiom_in_run("    name: \"ada\"\n    print(name.toUpperCase())\n"), idiom_in_run("    name: \"ada\"\n    print(name.to_upper())\n"))
+}
+
+#Test("an undeclared name or type is declared or renamed") {
+    assert_idiom_fix(idiom_in_run("    total = 0\n    print(total)\n"), idiom_in_run("    total := 0\n    print(total)\n"))
+    point: "Point: struct {{\n    x: Int,\n    y: Int,\n}}\n\n"
+    assert_idiom_fix("{point}{idiom_in_run("    p: Pont{{x: 1, y: 2}}\n    print(p.x)\n")}", "{point}{idiom_in_run("    p: Point{{x: 1, y: 2}}\n    print(p.x)\n")}")
+}

@@ -1,0 +1,16 @@
+# The habit corpus keeps its floor: Tools/Agent/HabitCorpus.jet --check runs
+# every case of Tests/Habits/habits.corpus through the jet under test and
+# Python 3.13. It fails unless at least 45 of the 51 Jet cases are fixed by
+# their own `fix_edits`, and unless Python hints on fewer cases than Jet fixes.
+# It prints both counts.
+# The checker finds its checkout from its own path, so no cwd override.
+requires: tool:python3.13
+env: JET={jet}
+env: NO_COLOR=1
+env: TMPDIR={work}
+# It checks each of the 51 cases once, and again once their edits are applied.
+step: jet {root}/Tools/Agent/HabitCorpus.jet --check
+timeout: 600s
+exit: 0
+stdout: ~ "habit corpus: " # both counts
+stdout: ~ " of 51 Jet cases carry fix_edits after which jet check passes; Python 3.13 says did-you-mean on " # the corpus size
