@@ -1632,17 +1632,62 @@ jet_cli_perf_flame_profile: fn(rows: &&[JetCLIPerfProfileRow]) -> [String] Never
         }
         weight: functions[index].weight
         share: if total > 0 -> weight * 100 /% total else -> 0
-        out.push("{functions[index].symbol} profile:{functions[index].clock} samples={weight} share={share}%")
+        cpu: functions[index].clock == "cpu"
+        out.push("{functions[index].symbol} profile:{functions[index].clock} samples={weight}{jet_cli_perf_cpu_us(cpu, weight)} share={share}%")
         functions[index].lines.sort_by(fn(left: {line: Int, weight: Int, inclusive: Int?, allocations: Int?, events: String}, right: {line: Int, weight: Int, inclusive: Int?, allocations: Int?, events: String}) { (right.weight <=> left.weight).then((right.inclusive ?? 0) <=> (left.inclusive ?? 0)).then((right.allocations ?? 0) <=> (left.allocations ?? 0)).then(left.line <=> right.line) })
         shown: if functions[index].lines.len() > 3 -> 3 else -> functions[index].lines.len()
         loop at in 0..<shown {
             row: functions[index].lines[at]
             inclusive: if row.inclusive == .Val(count) -> " inclusive={count}" else -> ""
             allocations: if row.allocations == .Val(count) -> " allocations={count}" else -> ""
-            out.push("  line {row.line} samples={row.weight}{inclusive}{allocations}{row.events}")
+            out.push("  line {row.line} samples={row.weight}{jet_cli_perf_cpu_us(cpu, row.weight)}{inclusive}{allocations}{row.events}")
+        }
+    }
+    // The CPU-time samples by their rows' packages, when the rows span more
+    // than one: the program's parts, as a compiler's phases are its
+    // packages. Heaviest first, at most 12.
+    parts := [{dir: String, weight: Int}]{}
+    total := 0
+    loop function in functions {
+        if function.clock != "cpu" -> next
+        total += function.weight
+        dir: jet_cli_perf_symbol_package(function.symbol)
+        found: loop (index, part) in parts {
+            if part.dir == dir {
+                break index
+            }
+        } ?? -1
+        if found >= 0 -> parts[found].weight += function.weight else {
+            parts.push({dir: dir, weight: function.weight})
+        }
+    }
+    if parts.len() > 1 && total > 0 {
+        parts.sort_by(fn(left: {dir: String, weight: Int}, right: {dir: String, weight: Int}) { (right.weight <=> left.weight).then(left.dir <=> right.dir) })
+        out.push("cpu by package")
+        listed: if parts.len() > 12 -> 12 else -> parts.len()
+        loop part in parts[0..<listed] {
+            out.push("  {part.dir} samples={part.weight}{jet_cli_perf_cpu_us(true, part.weight)} share={part.weight * 100 /% total}%")
         }
     }
     out
+}
+
+// ` cpu_us=…`, the CPU time `samples` CPU-time samples stand for, one per
+// JET_CLI_PERF_SAMPLE_US; "" off the CPU clock (`cpu` false) or for none.
+jet_cli_perf_cpu_us: fn(cpu: Bool, samples: Int) -> String Never! {
+    if cpu && samples > 0 -> " cpu_us={samples * JET_CLI_PERF_SAMPLE_US}" else -> ""
+}
+
+// The package of the source a `path#name` symbol names: the directory that
+// holds its `Source/` directory, else the source's own directory, "." for
+// a path with none.
+jet_cli_perf_symbol_package: fn(symbol: String) -> String Never! {
+    hash: symbol.find("#")
+    path: if hash < 0 -> symbol else -> symbol.slice(0..<hash)
+    sources: path.find("/Source/")
+    if sources > 0 -> return path.slice(0..<sources)
+    slash: path.rfind("/")
+    if slash < 0 -> "." else -> path.slice(0..<slash)
 }
 
 // The line of a profile row whose source is one line.

@@ -270,14 +270,16 @@ loader_c_string: fn(text: String) -> Int {
     address
 }
 
-// A memfd for the image's bytes, or -errno. It is never executed:
-// MFD_CLOEXEC | MFD_NOEXEC_SEAL, or MFD_CLOEXEC on kernels before 6.3.
-loader_memfd: fn() -> Int {
+// A memfd for the image's bytes, or -errno. One the loader maps is never
+// executed: MFD_CLOEXEC | MFD_NOEXEC_SEAL. One x64_executable_spawn_file
+// has execve run (`exec`) is MFD_CLOEXEC | MFD_EXEC. Kernels before 6.3
+// know neither seal flag: MFD_CLOEXEC there.
+loader_memfd: fn(exec: Bool) -> Int {
     name: loader_c_string("jet-image")
     if name == 0 -> return -12
     fd := 0
     #Unsafe("memfd_create reads the NUL-terminated name at `name`") {
-        fd = os_syscall(OS_SYS_MEMFD_CREATE, name, 9, 0, 0, 0, 0)
+        fd = os_syscall(OS_SYS_MEMFD_CREATE, name, if exec -> 17 else -> 9, 0, 0, 0, 0)
         if fd == -22 -> fd = os_syscall(OS_SYS_MEMFD_CREATE, name, 1, 0, 0, 0, 0)
     }
     _ := os_unmap(name, 16)
@@ -519,7 +521,7 @@ x64_image_load: fn(bytes: [U8]) -> X64LoadedImage {
     if reserved != "" -> return loader_failed(reserved)
     size: bytes.len()
     image := X64LoadedImage{low: plan.low, high: plan.high, entry: plan.entry, phdr: plan.phdr, phnum: plan.phnum, file: 0, file_size: size, failure: ""}
-    fd: loader_memfd()
+    fd: loader_memfd(false)
     if fd < 0 {
         x64_image_unload(image)
         return loader_failed("memfd_create failed (errno {-fd})")
@@ -588,7 +590,7 @@ x64_executable_load: fn(exe: X64Executable) -> X64LoadedImage {
         return loader_failed(failure)
     }
     image := X64LoadedImage{low: plan.low, high: plan.high, entry: plan.entry, phdr: plan.phdr, phnum: plan.phnum, file: 0, file_size: exe.tail_at + exe.tail.len(), failure: ""}
-    memfd: loader_memfd()
+    memfd: loader_memfd(false)
     failure = if memfd < 0 -> "memfd_create failed (errno {-memfd})" else -> loader_fill(memfd, exe.tail)
     loop segment in plan.segments {
         if failure != "" -> break
@@ -1404,6 +1406,35 @@ loader_executor_fill: fn(executor: Int) -> Int {
     os_protect(executor, OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_EXEC)
 }
 
+// The records that open a forking plan: the fork, then PR_SET_PDEATHSIG:
+// a `jet run` or `jet dev` child gets SIGTERM when jet ends, however it
+// ends, as the program would if it ran in jet's process; a killed jet
+// leaves no orphan. Their spawn runs on jet's main thread, whose end is
+// jet's end. A jet that ends between the fork and this record still
+// orphans the child.
+loader_fork_records: fn(rows: &[Int], launch: X64Launch) Never! {
+    loader_record(rows, OS_SYS_FORK, 0, 0, 0, 0, 0, 0, 1)
+    if launch.parent_death -> loader_record(rows, OS_SYS_PRCTL, 1, 15, 0, 0, 0, 0, 0)
+}
+
+// The records that make child descriptor i this process's fds[i] (-1: stays
+// i) and close every descriptor from fds.len() up: two rounds through
+// descriptors above every source, so no move overwrites a source a later
+// move reads.
+loader_fd_records: fn(rows: &[Int], fds: [Int]) Never! {
+    spare := fds.len()
+    loop fd in fds {
+        if fd >= spare -> spare = fd + 1
+    }
+    loop (k, fd) in fds {
+        if fd >= 0 -> loader_record(rows, OS_SYS_DUP2, fd, spare + k, 0, 0, 0, 0, 0)
+    }
+    loop (k, fd) in fds {
+        if fd >= 0 -> loader_record(rows, OS_SYS_DUP2, spare + k, k, 0, 0, 0, 0, 0)
+    }
+    loader_record(rows, OS_SYS_CLOSE_RANGE, fds.len(), 0xffffffff, 0, 0, 0, 0, 0)
+}
+
 // Build everything the executor needs to start `image` with `launch`.
 // `fds` empty: descriptors as execve leaves them (close-on-exec ones closed);
 // else child descriptor i becomes this process's fds[i] (-1: stays i) and every
@@ -1437,28 +1468,8 @@ loader_plan: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool
     }
 
     rows := [Int]{}
-    if fork -> loader_record(rows, OS_SYS_FORK, 0, 0, 0, 0, 0, 0, 1)
-    // PR_SET_PDEATHSIG: a `jet run` or `jet dev` child gets SIGTERM when jet
-    // ends, however it ends, as the program would if it ran in jet's
-    // process; a killed jet leaves no orphan. Their spawn runs on jet's main
-    // thread, whose end is jet's end. A jet that ends between the fork and
-    // this record still orphans the child.
-    if fork && launch.parent_death -> loader_record(rows, OS_SYS_PRCTL, 1, 15, 0, 0, 0, 0, 0)
-    if fds.len() > 0 {
-        // Two rounds through descriptors above every source, so no move
-        // overwrites a source a later move reads.
-        spare := fds.len()
-        loop fd in fds {
-            if fd >= spare -> spare = fd + 1
-        }
-        loop (k, fd) in fds {
-            if fd >= 0 -> loader_record(rows, OS_SYS_DUP2, fd, spare + k, 0, 0, 0, 0, 0)
-        }
-        loop (k, fd) in fds {
-            if fd >= 0 -> loader_record(rows, OS_SYS_DUP2, spare + k, k, 0, 0, 0, 0, 0)
-        }
-        loader_record(rows, OS_SYS_CLOSE_RANGE, fds.len(), 0xffffffff, 0, 0, 0, 0, 0)
-    } else {
+    if fork -> loader_fork_records(rows, launch)
+    if fds.len() > 0 -> loader_fd_records(rows, fds) else {
         listed: loader_files.list_dir("/proc/self/fd") ?? return loader_plan_failed(plan, "couldn't list /proc/self/fd: {err}")
         loop entry in listed {
             fd: Int.parse(entry.name) ?? next
@@ -1659,6 +1670,93 @@ x64_image_exec: fn(image: X64LoadedImage, launch: X64Launch) -> String {
 x64_image_spawn: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int]) -> X64Spawned {
     plan: loader_plan(image, launch, fds, true)
     if plan.failure != "" -> return X64Spawned{pid: -1, failure: plan.failure}
+    confined: x64_confine_reads(launch.read_scope)
+    if confined != "" {
+        loader_free(plan)
+        return X64Spawned{pid: -1, failure: confined}
+    }
+    pid: loader_fork(plan)
+    loader_free(plan)
+    if os_failed(pid) -> return X64Spawned{pid: -1, failure: "fork failed (errno {-pid})"}
+    X64Spawned{pid: pid, failure: ""}
+}
+
+// Start the executable `exe` in a forked child that execve runs from a
+// memfd holding its file (x64_executable_write), fds as for loader_plan:
+// the spawn of an image this process can't load (x64_executable_load), as
+// when its own image holds the image's address range (a compiler that
+// `jet run` runs at LINK_RUN_BASE, starting its comptime child, linked at
+// LINK_RUN_BASE too). The kernel gives the child an address space of its
+// own; its runtime reads from /proc/self what the loader's auxiliary vector
+// would carry. Between the fork and execve the child runs only the
+// executor's records. A launch with a read scope confines this thread
+// before the fork, as x64_image_spawn does.
+x64_executable_spawn_file: fn(exe: X64Executable, launch: X64Launch, fds: [Int]) -> X64Spawned {
+    memfd: loader_memfd(true)
+    if memfd < 0 -> return X64Spawned{pid: -1, failure: "memfd_create failed (errno {-memfd})"}
+    spawned: loader_spawn_memfd(exe, launch, fds, memfd)
+    loader_close(memfd)
+    spawned
+}
+
+// x64_executable_spawn_file with the memfd `memfd`, which the child gets as
+// the descriptor after `fds` and execve runs through its /proc link.
+loader_spawn_memfd: fn(exe: X64Executable, launch: X64Launch, fds: [Int], memfd: Int) -> X64Spawned {
+    written: x64_executable_write(exe, "/proc/self/fd/{memfd}")
+    if written != "" {
+        return X64Spawned{pid: -1, failure: "couldn't write the image to its memfd: {written}"}
+    }
+    moved := [Int]{}
+    loop fd in fds -> moved.push(fd)
+    moved.push(memfd)
+    image_fd: fds.len()
+    exec: loader_exec_block("/proc/self/fd/{image_fd}", launch.argv, launch.env)
+    if exec.failure != "" -> return X64Spawned{pid: -1, failure: exec.failure}
+    rows := [Int]{}
+    loader_fork_records(rows, launch)
+    loader_fd_records(rows, moved)
+    // F_SETFD FD_CLOEXEC: execve opens the image through the link, and the
+    // program keeps no descriptor of it.
+    loader_record(rows, OS_SYS_FCNTL, image_fd, 2, 1, 0, 0, 0, 0)
+    // execve keeps the signal mask; the program starts with none blocked.
+    loader_record(rows, OS_SYS_RT_SIGPROCMASK, 2, exec.block, 0, 8, 0, 0, 0)
+    loader_record(rows, OS_SYS_EXECVE, exec.path, exec.argv, exec.envp, 0, 0, 0, 0)
+    loader_record(rows, OS_SYS_EXIT_GROUP, 127, 0, 0, 0, 0, 0, 0)
+    started: loader_spawn_records(rows, launch)
+    _ := os_unmap(exec.block, exec.size)
+    started
+}
+
+// Fork and run `rows`, records that end in execve and exit_group, from an
+// executor and record block of their own, freed once the fork returns.
+loader_spawn_records: fn(rows: [Int], launch: X64Launch) -> X64Spawned {
+    plan := LoaderPlan{plan: 0, plan_size: 0, executor: 0, data: 0, stack_low: 0, stack_size: 0, failure: ""}
+    executor: os_map(OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE)
+    if os_failed(executor) {
+        return X64Spawned{pid: -1, failure: "mapping the executor failed (errno {-executor})"}
+    }
+    plan.executor = executor
+    protected := 0
+    #Unsafe("`executor` is the one-page read+write mapping just made for it") {
+        protected = loader_executor_fill(executor)
+    }
+    if os_failed(protected) {
+        loader_free(plan)
+        return X64Spawned{pid: -1, failure: "executable memory was refused (errno {-protected})"}
+    }
+    // The record block: count, records, then the stack and entry the
+    // executor never reaches.
+    plan.plan_size = os_page_round((rows.len() + 3) * 8)
+    block: os_map(plan.plan_size, OS_PROT_READ + OS_PROT_WRITE)
+    if os_failed(block) {
+        loader_free(plan)
+        return X64Spawned{pid: -1, failure: "mapping the launch plan failed (errno {-block})"}
+    }
+    plan.plan = block
+    #Unsafe("the block is this plan's own fresh mapping of plan_size bytes") {
+        os_store_word(block, rows.len() /% 8)
+        loop (k, word) in rows { os_store_word(block + 8 + k * 8, word) }
+    }
     confined: x64_confine_reads(launch.read_scope)
     if confined != "" {
         loader_free(plan)

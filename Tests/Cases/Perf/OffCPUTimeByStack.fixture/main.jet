@@ -6,7 +6,7 @@ run: fn() {
     print("napped, paused {paused}ms")
 }
 
-// Every nap blocks at this one line; each path that calls it is its own stack.
+// Every nap ends in this sleep, a tail call that leaves nap no frame.
 nap: fn(span: Duration) -[Time.Wait]> { time.sleep(span) }
 
 // pause hands back its span after its nap, so the nap is no tail call (a

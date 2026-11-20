@@ -44,8 +44,10 @@ use {
 JET_CLI_PERF_SAMPLE_US: 125
 
 // The samples of one function and source line: `name` is the function's,
-// the inlined function's for code inlined there, and `own` says whether
-// the line is in the checked source.
+// the inlined function's for code inlined there, `own` says whether the
+// line is in the checked source, and `file` is the entry of the program's
+// other sources (JetCLIPerfFiles.paths) it is in, -1 in the checked source
+// or outside them (jet_cli_perf_samples_files).
 // `count` is its exclusive time, the samples whose program counter is on
 // it; `inclusive` its inclusive time, the samples that hold it anywhere on
 // the stack, once each however often; `allocations` the allocations whose
@@ -62,14 +64,33 @@ JetCLIPerfSampledLine: struct {
     events: [U64],
     topdown: [Int],
     own: Bool,
+    file: Int,
 }
 
-// A function and line a code address stands for, and whether the line is
-// in the checked source (jet_cli_perf_samples_frames).
+// A function and line a code address stands for, whether the line is in
+// the checked source, and the entry of the program's other sources it is
+// in, -1 for none (jet_cli_perf_samples_frames).
 JetCLIPerfFrame: struct {
     name: String,
     line: Int,
     own: Bool,
+    file: Int,
+}
+
+// A source of the program besides the checked one that a profile row is
+// in: its identity and each line's end column, the first line's first
+// (jet_cli_perf_line_ends).
+JetCLIPerfProgramSource: struct {
+    identity: SourceIdentity,
+    ends: [U64],
+}
+
+// The program's sources besides the checked one, each path once as rows
+// name it (`paths`), and each function of a line table's entry of them
+// (`at`, -1 in the checked source or outside them).
+JetCLIPerfFiles: struct {
+    at: [Int],
+    paths: [String],
 }
 
 // The inlined runs of an image's Jet functions (JetDebug NativeFacts.jet):
@@ -105,7 +126,11 @@ JetCLIPerfInlines: struct {
 // CPU-time sample its time and task, in time order. `experiments`,
 // `points` and `idle` are the causal lens's experiments, progress points'
 // names and idle table (PerfSamples.jet perf_causal_idle_write: its words
-// after the header, empty when no exit wrote one).
+// after the header, empty when no exit wrote one). `files` holds each
+// function of `table`'s entry of the program's other sources
+// (JetCLIPerfFiles.at), and `sources` those that lines are in, each at its
+// path's entry of `source_at` (-1 for one no line is in or that couldn't be
+// read).
 JetCLIPerfSamples: struct {
     table: X64Jetline,
     inlines: JetCLIPerfInlines,
@@ -131,6 +156,9 @@ JetCLIPerfSamples: struct {
     points: [Int:String],
     idle: [Int],
     timed: [JetCLIPerfTimed],
+    files: [Int]{[Int]{}},
+    sources: [JetCLIPerfProgramSource]{[JetCLIPerfProgramSource]{}},
+    source_at: [Int]{[Int]{}},
 }
 
 // A CPU-time sample on the monotonic clock zones are timed on, at `at_ns`,
@@ -311,7 +339,8 @@ JetCLIPerfHeapSite: struct {
 // run` wrote beside it (Host.jet jet_cli_perf_samples_image), named by the
 // image's location table and its DWARF's inlined runs and, outside Jet
 // functions, its symbol table; each line marked `own` when it is in
-// `source`. A counter sample
+// `source`, and named by the program source it is in, whose text is read
+// for its rows (jet_cli_perf_samples_sources). A counter sample
 // weighs its counter's period in `counters`; the CPU-time samples are
 // `sampler`'s. Both files are removed once
 // read. None when either is missing or the image has no table.
@@ -331,6 +360,7 @@ jet_cli_perf_samples_read: fn(path: String, source: String, counters: [TraceCoun
         if function.inlined.len() > 0 -> inlines.functions[function.low] = function
     }
     owned: jet_cli_perf_samples_owned(facts.lines, source)
+    files: jet_cli_perf_samples_files(facts.lines, source)
     periods := [U64]{}
     loop counter in counters -> periods.push(counter.period ?? U64{0})
     // The type DIE each typed allocating call allocates for, by its call
@@ -346,8 +376,9 @@ jet_cli_perf_samples_read: fn(path: String, source: String, counters: [TraceCoun
         }
     }
     objects: jet_cli_perf_heap_objects(image)
-    sampled := jet_cli_perf_samples_count(facts.lines, functions, inlines, owned, periods, allocs, names, words, jet_cli_perf_code_low(image))
+    sampled := jet_cli_perf_samples_count(facts.lines, functions, inlines, owned, periods, allocs, names, words, jet_cli_perf_code_low(image), files: files.at)
     sampled.sampler = sampler
+    jet_cli_perf_samples_sources(sampled, files.paths)
     loop index in 0..<sampled.heaps.len() {
         jet_cli_perf_heap_retain(facts, objects, names, sampled.heaps[index])
     }
@@ -511,6 +542,65 @@ jet_cli_perf_samples_owned: fn(table: X64Jetline, source: String) -[FS]> [Bool] 
     owned
 }
 
+// The program's sources besides the checked one, by their paths from the
+// working directory (absolute outside it), and the entry of them each
+// function of `table` is in: -1 for the checked source, `source` (its
+// lines are `owned`), and for a function whose file does not resolve, as
+// none of the toolchain's library does.
+jet_cli_perf_samples_files: fn(table: X64Jetline, source: String) -[FS]> JetCLIPerfFiles Never! {
+    files := JetCLIPerfFiles{at: [Int]{}, paths: [String]{}}
+    real: perf_files.realpath(source) ?? ""
+    here: perf_files.realpath(".") ?? ""
+    named := [String:Int]{}
+    loop function in table.functions {
+        file: perf_files.join(function.dir, function.file)
+        if !named.has_key(file) {
+            at := -1
+            if function.file.ends_with(".jet") && perf_files.realpath(file) == .Ok(resolved) && resolved != real {
+                at = files.paths.len()
+                files.paths.push(if here != "" -> resolved.removeprefix("{here}/") else -> resolved)
+            }
+            named[file] = at
+        }
+        files.at.push(named[file])
+    }
+    files
+}
+
+// Reads each of the program's other sources (`paths`, JetCLIPerfFiles)
+// that a line of `sampled` is in, for the rows of its lines
+// (JetCLIPerfProgramSource).
+jet_cli_perf_samples_sources: fn(sampled: &JetCLIPerfSamples, paths: &&[String]) -[FS]> Never! {
+    wanted := (loop _ in paths -> false)
+    loop line in sampled.lines {
+        if line.file >= 0 -> wanted[line.file] = true
+    }
+    sampled.source_at = (loop _ in paths -> -1)
+    loop (at, path) in paths.move() {
+        if !wanted[at] -> next
+        text: perf_files.read(path) ?? next
+        sampled.source_at[at] = sampled.sources.len()
+        sampled.sources.push(JetCLIPerfProgramSource{identity: SourceIdentity{path: path, sha256: sha256_hex(text), symbols: [{name: String, kind: String}]{}}, ends: jet_cli_perf_line_ends(text)})
+    }
+}
+
+// Each line's end column of `text`, the first line's first, as
+// jet_cli_perf_line_end gives them.
+jet_cli_perf_line_ends: fn(text: String) -> [U64] Never! {
+    ends := [U64]{}
+    column := U64{1}
+    loop byte in text.bytes() {
+        if byte == (U8{10}) {
+            ends.push(column)
+            column = U64{1}
+            next
+        }
+        if byte < (U8{128}) || byte >= (U8{192}) -> column += U64{1}
+    }
+    ends.push(column)
+    ends
+}
+
 // A sample record's first word holds its program counter below this bit,
 // its word count from it up to bit 58 and its kind from bit 59 up to bit
 // 62: 0 for a CPU-time sample, a counter's index plus one for that
@@ -654,10 +744,11 @@ jet_cli_perf_code_low: fn(image: [U8]) -> Int {
 // of its return addresses it holds (an allocating call of a typed image,
 // reached through the runtime's own calls when they allocate for it), which
 // `names` spells. Its block and root records are its retention records
-// (JetCLIPerfHeap).
-jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFunction], inlines: &&JetCLIPerfInlines, owned: [Bool], periods: &&[U64], allocs: [Int:Int], names: [Int:String], words: [U8], code_low: Int) -> JetCLIPerfSamples Never! {
-    sampled := JetCLIPerfSamples{table: table, inlines: inlines, lines: [JetCLIPerfSampledLine]{}, total: U64{0}, outside: U64{0}, helpers: U64{0}, stackless: U64{0}, signals: U64{0}, cost: None, sampler: None, functions: functions, natives: [JetCLIPerfNative]{}, sited: false, allocated: [JetCLIPerfAllocSite]{}, periods: periods, spawns: [JetCLIPerfSpawn]{}, waits: [JetCLIPerfWait]{}, wakes: [JetCLIPerfWake]{}, transfers: [JetCLIPerfIO]{}, heaps: [JetCLIPerfHeap]{}, experiments: [JetCLIPerfExperiment]{}, points: [Int:String]{}, idle: [Int]{}, timed: [JetCLIPerfTimed]{}}
-    // One key per function, line and ownership.
+// (JetCLIPerfHeap). `files` holds each function's entry of the program's
+// other sources (JetCLIPerfFiles.at).
+jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFunction], inlines: &&JetCLIPerfInlines, owned: [Bool], periods: &&[U64], allocs: [Int:Int], names: [Int:String], words: [U8], code_low: Int, files: &&[Int]{[Int]{}}) -> JetCLIPerfSamples Never! {
+    sampled := JetCLIPerfSamples{table: table, inlines: inlines, lines: [JetCLIPerfSampledLine]{}, total: U64{0}, outside: U64{0}, helpers: U64{0}, stackless: U64{0}, signals: U64{0}, cost: None, sampler: None, functions: functions, natives: [JetCLIPerfNative]{}, sited: false, allocated: [JetCLIPerfAllocSite]{}, periods: periods, spawns: [JetCLIPerfSpawn]{}, waits: [JetCLIPerfWait]{}, wakes: [JetCLIPerfWake]{}, transfers: [JetCLIPerfIO]{}, heaps: [JetCLIPerfHeap]{}, experiments: [JetCLIPerfExperiment]{}, points: [Int:String]{}, idle: [Int]{}, timed: [JetCLIPerfTimed]{}, files: files}
+    // One key per function, line, ownership and source.
     places := [String:Int]{}
     // Each address's entries in `lines`, innermost first, by twice the
     // address, plus one for a return address; none outside every Jet
@@ -1044,12 +1135,12 @@ jet_cli_perf_samples_chain: fn(sampled: &JetCLIPerfSamples, places: &[String:Int
     if resolved.has_key(key) -> return resolved[key]
     chain := [Int]{}
     loop frame in jet_cli_perf_samples_frames(sampled, owned, address, caller) {
-        name: "{frame.name}\n{frame.line}\n{frame.own}"
+        name: "{frame.name}\n{frame.line}\n{frame.own}\n{frame.file}"
         if !places.has_key(name) {
             places[name] = sampled.lines.len()
             events := [U64]{}
             loop _ in sampled.periods -> events.push(U64{0})
-            sampled.lines.push(JetCLIPerfSampledLine{name: frame.name, line: frame.line, count: U64{0}, inclusive: U64{0}, allocations: U64{0}, events: events, topdown: [Int]{}, own: frame.own})
+            sampled.lines.push(JetCLIPerfSampledLine{name: frame.name, line: frame.line, count: U64{0}, inclusive: U64{0}, allocations: U64{0}, events: events, topdown: [Int]{}, own: frame.own, file: frame.file})
         }
         chain.push(places[name])
     }
@@ -1065,9 +1156,11 @@ jet_cli_perf_samples_chain: fn(sampled: &JetCLIPerfSamples, places: &[String:Int
 // outermost run's call. Elsewhere in Jet code, its function and line
 // alone. A line is `own` when its function's file is the checked source
 // (`owned`) and the line is in that same file, which an inlined function's
-// line, or a call in one, need not be. A return address (`caller`) is
-// looked up at the call before it, as the debugger's frames are (JetDebug
-// Native.jet native_lookup).
+// line, or a call in one, need not be; its `file` is its function's entry
+// of the program's other sources (`sampled.files`) when it is in that same
+// file, else -1. A return
+// address (`caller`) is looked up at the call before it, as the debugger's
+// frames are (JetDebug Native.jet native_lookup).
 jet_cli_perf_samples_frames: fn(sampled: JetCLIPerfSamples, owned: [Bool], address: Int, caller: Bool) -> [JetCLIPerfFrame] Never! {
     frames := [JetCLIPerfFrame]{}
     lookup: if caller -> address - 1 else -> address
@@ -1075,6 +1168,7 @@ jet_cli_perf_samples_frames: fn(sampled: JetCLIPerfSamples, owned: [Bool], addre
     if found < 0 -> return frames
     function: sampled.table.functions[found]
     own: found < owned.len() && owned[found]
+    file: if found < sampled.files.len() -> sampled.files[found] else -> -1
     line := x64_jetline_line(sampled.table, function, lookup) ?? function.decl
     // The file of `line` agrees with the function's: unknown outside
     // inlined code, where the table's line is the function's own.
@@ -1084,12 +1178,12 @@ jet_cli_perf_samples_frames: fn(sampled: JetCLIPerfSamples, owned: [Bool], addre
             run: facts.inlined[site]
             if index == 0 -> same = run.file == facts.file
             name: if sampled.inlines.abstracts.get(run.origin) == .Val(origin) -> origin.name else -> function.name
-            frames.push(JetCLIPerfFrame{name: name, line: line, own: own && same})
+            frames.push(JetCLIPerfFrame{name: name, line: line, own: own && same, file: if same -> file else -> -1})
             line = run.call_line
             same = run.call_file == facts.file
         }
     }
-    frames.push(JetCLIPerfFrame{name: function.name, line: line, own: own && same})
+    frames.push(JetCLIPerfFrame{name: function.name, line: line, own: own && same, file: if same -> file else -> -1})
     frames
 }
 
@@ -1146,20 +1240,26 @@ jet_cli_perf_samples_stack_frames: fn(sampled: JetCLIPerfSamples, owned: [Bool],
     frames
 }
 
-// The CPU-time profile `sampled` gives the checked `source`: one row per
-// function and line in it, with its exclusive and inclusive samples, its
-// allocations and the events of each counter it captured, hottest first,
+// The CPU-time profile `sampled` gives the checked `source` and the
+// program's other sources: one row per function and line in them, with
+// its exclusive and inclusive samples, its allocations and the events of
+// each counter it captured, hottest first,
 // and in its reason the hottest image functions outside Jet code, by their
 // symbols, the samples in compiler-emitted helpers, the samples in Jet
 // code that kept no stack, and how many samples the CPU time sampled
 // should give; and, when the runtime recorded it, what sampling cost as
-// its overhead. None when no sample landed in it.
+// its overhead. None when no sample landed in them.
 jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSamples) -> TraceProfile? Never! {
     rows := [TraceProfileRow]{}
     elsewhere := sampled.outside
     truncated := false
     loop place in sampled.lines {
-        end: if place.own -> jet_cli_perf_line_end(source.text, place.line) else -> U64?{None}
+        // The line's other source of the program, -1 for none.
+        other: if place.own || place.file < 0 || place.file >= sampled.source_at.len() -> -1 else -> sampled.source_at[place.file]
+        end := U64?{None}
+        if place.own -> end = jet_cli_perf_line_end(source.text, place.line) else if other >= 0 && place.line >= 1 && place.line <= sampled.sources[other].ends.len() {
+            end = Val(sampled.sources[other].ends[place.line - 1])
+        }
         column: end ?? {
             elsewhere += place.count
             next
@@ -1169,8 +1269,10 @@ jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSa
             elsewhere += place.count
             next
         }
-        location: TraceProfileSource{path: source.identity.path, sha256: source.identity.sha256, start_line: U64{place.line}, start_column: U64{1}, end_line: U64{place.line}, end_column: column}
-        symbol: JetSymbolRef{path: source.identity.path, name: place.name}
+        // The checked source's identity or the other source's, as the
+        // location and the symbol name it.
+        location: TraceProfileSource{path: if place.own -> source.identity.path else -> sampled.sources[other].identity.path, sha256: if place.own -> source.identity.sha256 else -> sampled.sources[other].identity.sha256, start_line: U64{place.line}, start_column: U64{1}, end_line: U64{place.line}, end_column: column}
+        symbol: JetSymbolRef{path: if place.own -> source.identity.path else -> sampled.sources[other].identity.path, name: place.name}
         allocations: if sampled.sited -> Val(place.allocations) else -> U64?{None}
         rows.push(
             TraceProfileRow{
@@ -1218,7 +1320,8 @@ jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSa
     cpu_ns: if sampled.cost == .Val(cost) -> Val(cost.cpu_ns) else -> U64?{None}
     taken: if sampled.sampler == .Val(used) -> jet_cli_perf_sampler_reason(used, sampled.total, cpu_ns) else -> ""
     sites: if sampled.sited -> "; each allocation counts at the innermost line of {source.identity.path} on its stack" else -> ""
-    timed: "one CPU-time sample per {JET_CLI_PERF_SAMPLE_US} microseconds of each thread's CPU time, at the function and source line its program counter is in and, inclusive, once at each line on its stack; {elsewhere} of {sampled.total} samples are outside {source.identity.path}"
+    others: if sampled.sources.len() == 0 -> "" else -> " and the program's {sampled.sources.len()} other sources its rows are in"
+    timed: "one CPU-time sample per {JET_CLI_PERF_SAMPLE_US} microseconds of each thread's CPU time, at the function and source line its program counter is in and, inclusive, once at each line on its stack; {elsewhere} of {sampled.total} samples are outside {source.identity.path}{others}"
     // The memory lens or the alloc lens without the cpu lens takes no
     // CPU-time samples.
     alone: if sampled.periods.len() == 0 && sampled.sited -> "the alloc lens alone: each row holds its allocations" else -> "the memory lens alone: each row holds its counters' events"

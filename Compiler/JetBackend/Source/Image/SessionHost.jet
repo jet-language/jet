@@ -44,7 +44,10 @@ X64ComptimeChild: struct {
 // Starts the linked executable `image` (Image/Loader.jet
 // x64_executable_load: a bound one's image part is mapped from its file,
 // not copied) in a child and receives its entries; `stdout` admits the
-// child's own standard output. A failure leaves `failure` set.
+// child's own standard output. An image this process can't load, as when
+// its own image holds the image's range (a compiler `jet run` runs), starts
+// from a file instead (x64_executable_spawn_file). A failure leaves
+// `failure` set.
 x64_comptime_spawn: fn(image: X64Executable, stdout: Bool, budget: Int) -> X64ComptimeChild {
     child := X64ComptimeChild{budget: budget}
     scratch: os_map(4096 + X64_COMPTIME_BUFFER, OS_PROT_READ + OS_PROT_WRITE)
@@ -69,14 +72,20 @@ x64_comptime_spawn: fn(image: X64Executable, stdout: Bool, budget: Int) -> X64Co
         pipes.push(ends[0])
         pipes.push(ends[1])
     }
+    // No parent_death: the compile's child may outlive the worker thread that spawned it; it ends when its command pipe closes.
+    launch: X64Launch{argv: [String]{"jet-comptime"}, env: Val([String]{}), executable: "", name: "jet-comptime", relaunch: [String]{}, parent_death: false, read_scope: [String]{}}
+    // The child's standard input stays the compiler's; its filter refuses reading it.
+    fds: [Int]{-1, pipes[5], pipes[7], pipes[0], pipes[3]}
     loaded: x64_executable_load(image)
-    spawned := X64Spawned{pid: -1, failure: loaded.failure}
+    spawned := X64Spawned{pid: -1, failure: ""}
     if loaded.failure == "" {
-        // No parent_death: the compile's child may outlive the worker thread that spawned it; it ends when its command pipe closes.
-        launch: X64Launch{argv: [String]{"jet-comptime"}, env: Val([String]{}), executable: "", name: "jet-comptime", relaunch: [String]{}, parent_death: false, read_scope: [String]{}}
-        // The child's standard input stays the compiler's; its filter refuses reading it.
-        spawned = x64_image_spawn(loaded, launch, [Int]{-1, pipes[5], pipes[7], pipes[0], pipes[3]})
+        spawned = x64_image_spawn(loaded, launch, fds)
         x64_image_unload(loaded)
+    } else {
+        spawned = x64_executable_spawn_file(image, launch, fds)
+        if spawned.failure != "" {
+            spawned.failure = "{loaded.failure}; from a file: {spawned.failure}"
+        }
     }
     x64_comptime_close_fd(pipes[0])
     x64_comptime_close_fd(pipes[3])

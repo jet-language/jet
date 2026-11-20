@@ -48,9 +48,10 @@ with its share of every line's samples and the line's typed cost facts
 (D-COSTLAW1), as `jet explain --cost` reports them
 (`  main.jet:11 spin_hot_loop samples=592 share=99% · cost: exact Int spill ×2
 — semantic remainder (loop depth 1, repeats every loop turn)`). A fact
-describes the code that ran: the view reads them by running
-`jet explain --cost` on each source the trace names whose file still holds
-the digest the trace recorded. A source it can't read, or that changed since
+describes the code that ran: the view runs `jet explain --cost` once, on the
+trace's checked source, whose report gives the sites of its whole program,
+and keeps those of each source the trace names whose file still holds the
+digest the trace recorded. A source it can't read, or that changed since
 the capture, gets a `cost facts: none, …` line above the sections instead.
 A pprof or OTLP export carries no source, so its table has no facts. `--html`
 prints one self-contained page of the same three, which a browser opens with
@@ -127,10 +128,14 @@ the optimizer inlined from the image's DWARF inlined subroutines: a sample in
 `-O2` code inlined into a caller counts at the inlined function's line under
 that function's name, and inclusive at each call it was inlined for, as the
 debugger's inlined frames show it; a line of an inlined function from another
-file counts outside the checked source. A caller's frame is looked up at its
+file counts in that file. A caller's frame is looked up at its
 call, the byte before its return address. The rows are `cpu` rows, one per
-function and line of the checked
-source, hottest first. A row's `sample_count` is its exclusive time, the
+function and line of the checked source and of the program's other sources
+(each file of a Jet function the image names that resolves on disk, by its
+path from the working directory; the toolchain's library names none), whose
+identities the trace records beside the checked source's, hottest first, at
+most 4096 (`status=truncated` past that). A row's `sample_count` is its
+exclusive time, the
 samples whose program counter is on it; its `inclusive_count` is its inclusive
 time, the samples that hold it anywhere on the stack, each once however often
 (a recursive call's line counts once per sample), so a line the stack only
@@ -142,10 +147,11 @@ core module counts at the line of the source that called into it; a run
 without that lens leaves it null. A sample in a compiler-emitted
 helper (a `jet_ir_` symbol, such as the stop poll `jet_ir_stop_turn`) counts
 at the Jet line that called it, and the `reason` counts those samples.
-`coverage` is `complete` when every sample landed in that source and
-`partial` when some ran in the runtime or another file, which the `reason`
-counts and, for samples outside every Jet function, names by the image's
-`.symtab` function, hottest first, as `perf report` names them. The `reason`
+`coverage` is `complete` when every sample landed in those sources and
+`partial` when some ran in the runtime or the toolchain's library, which the
+`reason` counts and, for samples outside every Jet function, names by the
+image's `.symtab` function, hottest first, as `perf report` names them. The
+`reason`
 also gives how many samples the CPU time sampled should give beside how many
 the session kept, and counts any sample in Jet code that kept no stack. The
 profile's overhead is `measured`: `overhead_ns` is the time the sampler's
@@ -153,9 +159,16 @@ handlers ran plus, for each sample's signal, the kernel's delivery and
 return, which the runtime times as sampling starts by sending its own thread
 64 signals; `overhead_reason` gives it as a share of the CPU time sampled.
 `jet perf view` sums the rows per function with its share of the
-samples, then its hottest lines with their exclusive and inclusive samples and
-allocations (`line 7 samples=12 inclusive=40 allocations=300`). A run whose
-samples never reach the checked source (a short program, `jet perf test`, `jet
+samples and the CPU time they stand for, one sample per 125 microseconds,
+then its hottest lines with their exclusive and inclusive samples and
+allocations (`line 7 samples=12 cpu_us=1500 inclusive=40 allocations=300`;
+`cpu_us` only for a line with samples of its own). When the rows span more
+than one package (the directory that holds a source's `Source/`, else the
+source's own), `cpu by package` follows: each package's samples, CPU time and
+share, heaviest first, at most 12, so a profile of `jet build Compiler` gives
+the compiler's time by phase (`Compiler/JetIR samples=652042
+cpu_us=81505250 share=57%`). A run whose
+samples never reach its sources (a short program, `jet perf test`, `jet
 perf attach`) keeps the observation rows, which attribute to the parsed `run:
 fn` declaration (`fn` through its closing brace) and do not separate the
 functions that `run` calls; their `inclusive_count` and `allocation_count` are
@@ -547,8 +560,10 @@ Tests/Cases/Perf/socket_wait_names_its_peer.case are the worked examples.
 The same waits give off-CPU time by stack, as an off-CPU flame graph does.
 `jet perf view` sums the waits' time by stack, outermost frame first, ending
 with the wait the stack blocked in, and lists the 16 longest under `off-cpu
-by stack`: `150212345ns waits=1 · run main.jet:5 > pause main.jet:12 > nap
-main.jet:10 > time sleep`. A stack holds the checked source's frames only,
+by stack`: `150212345ns waits=1 · run main.jet:5 > pause main.jet:15 > time
+sleep`. A function that ends in a call, as `nap: fn(span: Duration) {
+time.sleep(span) }` does, jumps to it and leaves no frame of its own. A
+stack holds the checked source's frames only,
 as the CPU-time profile's lines do; a wait whose stack holds none counts
 under its name alone. Tests/Cases/Perf/off_cpu_time_by_stack.case is the
 worked example.
