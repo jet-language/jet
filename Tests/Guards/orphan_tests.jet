@@ -9,13 +9,16 @@
 // - every `.case` file, Examples' included: the lines that are not comments,
 //   relative to the case's folder or to `{root}`;
 // - the string literals of the runner sources: Compiler, Jetpack, Examples,
-//   Tests/Guards, and the Tools programs a case runs;
+//   Tests/Guards, the Tools programs a case runs, and the case sources under
+//   Tests/Cases: the `.jet` files, the `.template` files a case's `write:`
+//   turns into a program, and the scripts a case runs;
 // - the data files (`.tsv`, `.json`, `.list`, `.txt`) a reader names by
 //   file, relative to their own folder.
 //
 // A `{…}` part of a name ends the name at the folder before it. A name of a
 // top tree alone (`Tests/Cases`) covers nothing: naming a tree is no sign of
-// reading every file in it.
+// reading every file in it. A case's expected output names what the program
+// printed, so it reads nothing.
 use {
     orphan_files: core.files
     orphan_process: core.process
@@ -44,12 +47,15 @@ ORPHAN_CORPORA: [OrphanCorpus]{
 
 ORPHAN_DATA_EXTENSIONS: [String]{".tsv", ".json", ".list", ".txt"}
 
-ORPHAN_SOURCE_EXTENSIONS: [String]{".jet", ".tsv", ".json", ".list", ".txt", ".toml"}
+ORPHAN_SOURCE_EXTENSIONS: [String]{".jet", ".template", ".sh", ".py", ".tsv", ".json", ".list", ".txt", ".toml"}
+
+// The files under Tests/Cases that are programs a case runs.
+ORPHAN_CASE_SOURCE_EXTENSIONS: [String]{".jet", ".template", ".sh", ".py"}
 
 // The trees whose runner sources may name a path under Tests/: the members,
 // whose #Tests the packages suite runs, Core, whose #Tests the core suite
-// runs, the examples the golden suite runs, and the guards.
-ORPHAN_SOURCE_TREES: [String]{"Compiler", "Core", "Jetpack", "Examples", "Tests/Guards"}
+// runs, the examples the golden suite runs, the guards, and the case sources.
+ORPHAN_SOURCE_TREES: [String]{"Compiler", "Core", "Jetpack", "Examples", "Tests/Guards", "Tests/Cases"}
 
 OrphanTree: struct {
     // Every file in the working tree that git tracks or would track.
@@ -190,10 +196,10 @@ orphan_cover_words: fn(words: [String], bases: [String], facts: OrphanFacts, cov
     }
 }
 
-// The words of a runner source: a Jet file's string literals outside
-// comment lines, any other file's every word.
+// The words of a runner source: a Jet file's or template's string literals
+// outside comment lines, any other file's every word.
 orphan_source_words: fn(path: String, text: String) -> [String] {
-    if !path.ends_with(".jet") -> return orphan_words(text)
+    if !(path.ends_with(".jet") || path.ends_with(".template")) -> return orphan_words(text)
     words := [String]{}
     loop line in text.split("\n") {
         if line.trim().starts_with("//") -> next
@@ -252,7 +258,10 @@ orphan_findings: fn(tree: OrphanTree) -> [String] {
     loop corpus in ORPHAN_CORPORA -> covered[corpus.root.copy()] = true
     runners := [String]{}
     loop path in tree.sources {
-        if path != ORPHAN_SELF -> runners.push(path.copy())
+        if path == ORPHAN_SELF || path.ends_with(".case") -> next
+        case_data: path.starts_with("Tests/Cases/") && !orphan_has_extension(path, ORPHAN_CASE_SOURCE_EXTENSIONS)
+        if case_data -> next
+        runners.push(path.copy())
     }
     loop path in tree.tracked {
         if !path.ends_with(".case") || !(path.starts_with("Tests/") || path.starts_with("Examples/")) {
@@ -304,11 +313,15 @@ orphan_findings: fn(tree: OrphanTree) -> [String] {
     tracked: [String]{
         "Compiler/Thing/Tests/Reads.jet",
         "Tests/Cases/Topic/kept.case",
+        "Tests/Cases/Topic/kept.out",
+        "Tests/Cases/Topic/read.template",
         "Tests/Cases/Topic/Kept.fixture/run.jet",
         "Tests/Cases/Topic/Stray.fixture/run.jet",
         "Tests/Fixtures/Commented/run.jet",
         "Tests/Fixtures/Documented/README.md",
+        "Tests/Fixtures/Golden/expected.golden",
         "Tests/Fixtures/Named/run.jet",
+        "Tests/Fixtures/Printed/expected.golden",
         "Tests/Fixtures/Templated/a.jet",
         "Tests/Fixtures/orphan.jet",
         "Tests/UI/walked.jet",
@@ -316,10 +329,13 @@ orphan_findings: fn(tree: OrphanTree) -> [String] {
         "Tests/Workloads/manifest.tsv",
     }
     texts: [String:String]{
-        "Tests/Cases/Topic/kept.case": "# Tests/Fixtures/orphan.jet, named in a comment only\nfixture: Kept.fixture\ncopy: {{root}}/Tests/Workloads/manifest.tsv manifest.tsv\n",
+        "Tests/Cases/Topic/kept.case": "# Tests/Fixtures/orphan.jet, named in a comment only\nfixture: Kept.fixture\ncopy: {{root}}/Tests/Workloads/manifest.tsv manifest.tsv\nwrite: run.jet read.template\nstdout: = kept.out\n",
+        "Tests/Cases/Topic/kept.out": "Tests/Fixtures/Printed/expected.golden\n",
+        "Tests/Cases/Topic/read.template": "run: fn() {{\n    print(testing.golden(\"{{root}}/Tests/Fixtures/Golden/expected.golden\", \"expected\\n\"))\n}}\n",
         "Tests/Workloads/manifest.tsv": "task\tFixtures/listed.jet\n",
         "Compiler/Thing/Tests/Reads.jet": "// Tests/Fixtures/Commented/run.jet\nread: fn() {{\n    files.read(\"Tests/Fixtures/Named/run.jet\")\n    files.read(\"Tests/Fixtures/Templated/{{name}}.jet\")\n    files.read(\"Tests\")\n}}\n",
     }
-    findings: orphan_findings(OrphanTree{tracked: tracked, sources: [String]{"Compiler/Thing/Tests/Reads.jet"}, texts: texts})
-    assert_eq(findings.join("\n"), "Tests/Cases/Topic/Stray.fixture/run.jet\nTests/Fixtures/Commented/run.jet\nTests/Fixtures/orphan.jet")
+    sources: [String]{"Compiler/Thing/Tests/Reads.jet", "Tests/Cases/Topic/kept.case", "Tests/Cases/Topic/kept.out", "Tests/Cases/Topic/read.template"}
+    findings: orphan_findings(OrphanTree{tracked: tracked, sources: sources, texts: texts})
+    assert_eq(findings.join("\n"), "Tests/Cases/Topic/Stray.fixture/run.jet\nTests/Fixtures/Commented/run.jet\nTests/Fixtures/Printed/expected.golden\nTests/Fixtures/orphan.jet")
 }

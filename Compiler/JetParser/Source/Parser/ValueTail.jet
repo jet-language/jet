@@ -169,10 +169,10 @@ parser_final_return_edit: fn(keyword: Int, value: Int) -[]> TextEdit Never! {
 
 // The one edit, from the table's `if` to the end of its default return,
 // that gives an `ElseArm` table its `else`: each arm loses its `return`
-// keyword (and an authored `;`), the table gains `else -> { default }`
-// before its closing brace, and the default return goes; every comment and
-// space stays where it was written. None when `raw` does not hold the parts
-// in order.
+// keyword (and an authored `;`), the table gains `else -> default` before
+// its closing brace, and the default return goes; every comment and space
+// stays where it was written, and no brace is added that the source did not
+// write. None when `raw` does not hold the parts in order.
 parser_else_arm_edit: fn(raw: [U8], table: Span, returns: [ParserArmReturn], fallback: Int, default: Span) -[]> TextEdit? Never! {
     // The cuts run in source order; inserts[i] replaces cuts[i].
     cuts := [Span]{}
@@ -189,7 +189,7 @@ parser_else_arm_edit: fn(raw: [U8], table: Span, returns: [ParserArmReturn], fal
     default_text: parser_tail_text(raw, default) ?? return None
     prefix: if close > table.start && !parser_tail_space(raw[close - 1]) -> " " else -> ""
     cuts.push(Span{start: close, end: close})
-    inserts.push("{prefix}else -> {{ {default_text} }}")
+    inserts.push("{prefix}else -> {default_text}")
     cuts.push(parser_return_keyword(raw, fallback) ?? return None)
     inserts.push("")
     end := default.end
