@@ -79,7 +79,7 @@ use {
         type_identity,
         ast_comptime_value_show,
         type_name,
-        type_unqualified_nominals,
+        type_identity_unqualified_nominals,
         foundation_named_type,
         module_is_core,
         module_text,
@@ -1509,11 +1509,12 @@ sema_comptime_reflection_setting_value: fn(graph: SemaRegistrationGraph, ty: Str
 // A type's TypeId. Its `identity` names each declared type by its module, as
 // TypeInfo.identity does (`shapes.Point`, `[shapes.Point]`), so two
 // reflected types are one type exactly when their identities are equal; its
-// `name` is the type as the checker prints it (`Point`, `[Point]`), with no
-// declaring module's internal `module.` qualifier (a Core type a corelib
-// signature names reads `SourceLocation`); its `signature` is a function
-// type's CallableSignature, each type in it a TypeId named the same way
-// (sema_comptime_reflection_type_signature), and None for any other type.
+// `name` is the type as the checker prints it (`Point`, `[geo.Point]`), with
+// a module path the source writes and no declaring module's internal
+// identity (a Core type a corelib signature names reads `SourceLocation`);
+// its `signature` is a function type's CallableSignature, each type in it a
+// TypeId named the same way (sema_comptime_reflection_type_signature), and
+// None for any other type.
 // `caller` is the row of the module the type is written in, -1 for none.
 sema_comptime_reflection_type_id: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type) -> TComptimeValue {
     signature := sema_comptime_reflection_none(Type.Named{name: "CallableSignature"})
@@ -1522,7 +1523,7 @@ sema_comptime_reflection_type_id: fn(graph: SemaRegistrationGraph, caller: Int, 
         returned: if sema_comptime_reflection_success_type(ret) == .Val(success) -> sema_comptime_reflection_some(sema_comptime_reflection_type_id(graph, caller, success)) else -> sema_comptime_reflection_none(Type.Named{name: "TypeId"})
         signature = sema_comptime_reflection_type_signature(ty, types, returned)
     }
-    sema_comptime_reflection_type_id_signed(type_name(sema_comptime_reflection_qualified_type(graph, caller, ty)), type_name(type_unqualified_nominals(ty)), signature)
+    sema_comptime_reflection_type_id_signed(type_name(sema_comptime_reflection_qualified_type(graph, caller, ty)), type_name(type_identity_unqualified_nominals(ty)), signature)
 }
 
 // A type's TypeId when a registration `graph` may be absent: with none, the
@@ -2369,7 +2370,7 @@ sema_comptime_reflection_declared_type_id: fn(graph: SemaRegistrationGraph, call
         return sema_comptime_reflection_type_id(graph, caller, Type.Named{name: type_name})
     }
     identity: Type.Apply{name: sema_comptime_reflection_qualified_name(graph, caller, type_name), args: loop binding in bindings -> sema_comptime_reflection_qualified_type(graph, caller, binding.ty)}
-    written: Type.Apply{name: type_name, args: loop binding in bindings -> type_unqualified_nominals(binding.ty)}
+    written: Type.Apply{name: type_name, args: loop binding in bindings -> type_identity_unqualified_nominals(binding.ty)}
     sema_comptime_reflection_type_id_of(identity, written)
 }
 
