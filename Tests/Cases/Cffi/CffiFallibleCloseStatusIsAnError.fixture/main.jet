@@ -1,0 +1,33 @@
+use handle: c.handle
+
+#Import c.handle: module {
+    open_handle: fn() -> U64 = "open_handle"
+    handle_value: fn(handle: U64) -> I32 = "handle_value"
+    close_handle: fn(handle: U64) -> I32 = "close_handle"
+}
+
+#Error
+CloseError: struct {
+    status: I32,
+}
+
+// Closing hands the handle back to C once; a nonzero status is an error,
+// never dropped.
+close_checked: fn(opened: U64) CloseError! {
+    status: handle.close_handle(opened)
+    if status != 0 -> return Err(CloseError{status: status})
+    Ok()
+}
+
+run: fn() {
+    opened: handle.open_handle()
+    print(handle.handle_value(opened))
+    if close_checked(opened) == {
+        .Ok(_) -> { print("closed") }
+        .Err(err) -> { print("close failed {err.status}") }
+    }
+    if close_checked(U64{0}) == {
+        .Ok(_) -> { print("closed") }
+        .Err(err) -> { print("close failed {err.status}") }
+    }
+}

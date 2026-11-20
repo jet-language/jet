@@ -1,0 +1,15 @@
+# A pointer and its element count cross together, and C reads exactly
+# that many bytes.
+requires: tool:cc|gcc|clang
+fixture: CffiPointerAndCountCrossTogether.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "60\n"
+step: jet run main.jet
+exit: 0
+stdout: = "60\n"

@@ -26,7 +26,7 @@ from zoneinfo import ZoneInfo, reset_tzpath
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VECTOR_PATH = ROOT / "Tests/Fixtures/datetime_accuracy.tsv"
+VECTOR_PATH = ROOT / "Tests/Cases/DatetimeAccuracy/DatetimeAccuracyDifferentialAndProperties.fixture/vectors.tsv"
 SOURCE_PATHS = {
     "epoch_parse": ROOT / "Tests/Run/CoreTimeFoundations/DateTimeAccuracyEpochParse.jet",
     "civil_arithmetic": ROOT / "Tests/Run/CoreTimeFoundations/DateTimeAccuracyCivilArithmetic.jet",

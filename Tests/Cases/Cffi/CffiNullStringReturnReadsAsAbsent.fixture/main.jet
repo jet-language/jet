@@ -1,0 +1,29 @@
+use {
+    core.mem
+    names: c.names
+}
+
+#Import c.names: module {
+    find_name: fn(id: U64) -> *U8 = "find_name"
+}
+
+// A null `const char *` is an absent name; a non-null one is read up to its
+// NUL.
+run: fn() {
+    loop id in ([U64]{7, 8}) {
+        #Unsafe("a non-null result names a static NUL-terminated string C never frees") {
+            found: names.find_name(id)
+            if mem.address_of(found.*) == 0 {
+                print("absent")
+                next
+            }
+            text := [U8]{}
+            at := 0
+            loop found.byte_offset(at).* != 0 {
+                text.push(found.byte_offset(at).*)
+                at += 1
+            }
+            print(String.from_utf8(text) ?? panic("C name is not UTF-8"))
+        }
+    }
+}

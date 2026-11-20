@@ -1,0 +1,15 @@
+# An opaque C handle is opened, read and closed once, and a nonzero close
+# status comes back as an error instead of being dropped.
+requires: tool:cc|gcc|clang
+fixture: CffiFallibleCloseStatusIsAnError.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "42\nclosed\nclose failed -1\n"
+step: jet run main.jet
+exit: 0
+stdout: = "42\nclosed\nclose failed -1\n"
