@@ -1,0 +1,18 @@
+use retain_lib.[count_evictable]
+
+// `Retain` is not imported: the bare name is the one trait of that name the
+// imported package declares.
+Rec: struct {
+    keep: Bool,
+
+    impl Retain {
+        saved: fn(self) -> Bool { self.keep }
+    }
+}
+
+run: fn() {
+    items: [Rec]{Rec{keep: true}, Rec{keep: false}, Rec{keep: false}}
+    print(count_evictable<Rec>(items))
+    print(items[0].evictable())
+    print(items[1].evictable())
+}
