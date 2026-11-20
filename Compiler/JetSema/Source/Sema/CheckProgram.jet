@@ -196,10 +196,10 @@ sema_target_socket_surface: fn(path: String) -> String? Never! {
 sema_target_wasip2_unsupported_operations: fn(used_core: [String]) -> [String] Never! {
     operations := [String]{}
     loop usage in used_core {
-        separator: usage.find(".")
+        separator: usage.rfind(".")
         if separator < 0 -> next
         module_name: foundation_byte_text(usage.bytes(), 0, separator)
-        member: foundation_byte_text(usage.bytes(), separator + 2, usage.count_bytes())
+        member: foundation_byte_text(usage.bytes(), separator + 1, usage.count_bytes())
         unsupported: if module_name == {
             "core.net" -> if member == {
                 "tcp_connect_happy" | "tcp_ready" | "udp_ready" | "tls_connect" | "tls_read" | "tls_write" | "tls_close" | "dns_a" | "dns_aaaa" | "dns_txt" | "dns_ptr" | "dns_srv" -> true

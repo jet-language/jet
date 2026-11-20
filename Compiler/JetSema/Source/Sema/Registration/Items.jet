@@ -1144,9 +1144,10 @@ SemaCanonicalNominals: struct {
     // names[module_index][row]: the nominal row's canonical spelling.
     names: [[String]],
     // Canonical spelling -> row of `owners`/`leaves`: the module `module_rows`
-    // gives its `module_name` and its leaf name, exactly the module and name a
-    // cut at its last `.` finds (sema_type_graph_lookup_symbol_at). Spellings
-    // whose leaf holds `.`, or whose module is not registered, are left out.
+    // gives its `module_name` and the row's whole name, which a cut at the last
+    // `.` (sema_type_graph_lookup_symbol_at) also finds unless the name holds a
+    // `.` itself, as a protocol's `Payment.Client` does: only this table finds
+    // those. Spellings whose module is not registered are left out.
     rows: NameRows,
     owners: [Int],
     leaves: [String],
@@ -1815,7 +1816,6 @@ sema_registration_index_canonical_nominals: fn(graph: &SemaRegistrationGraph) Ne
         loop row in 0..<graph.modules[module_index].nominals.len() {
             spelling: "{module_text(graph.module_table, graph.modules[module_index].nominals[row].symbol.module_identity)}.{graph.modules[module_index].nominals[row].symbol.name}"
             names.push(spelling.copy())
-            if graph.modules[module_index].nominals[row].symbol.name.contains(".") -> next
             owner: sema_registration_module_index(graph, graph.modules[module_index].nominals[row].symbol.module_identity) ?? next
             if name_rows_get_text(table.rows, spelling) != None -> next
             name_rows_set(table.rows, spelling, table.owners.len())

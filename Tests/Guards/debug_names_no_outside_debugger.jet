@@ -1,76 +1,21 @@
 use dn_files: core.files
 
-// Jet's debugger and profiler are its own engines, and one walk of the
-// repository holds the line in two places.
-//
-// Names: no text a user reads says that `jet debug` runs under LLDB or GDB or
-// that `jet perf` is Linux perf, and no debug tier is named after one of them:
-// the spellings below fail here, in any letter case. Audits, research notes
-// and proposals are dated records and are not read for names.
-//
-// Runs: no committed script, skill, tool or case runs gdb, lldb, Linux perf,
-// valgrind, rr or strace on a Jet program (AGENTS.md, "Dogfood jet debug and
-// jet perf"), outside the comparison and measurement harnesses DN_HARNESSES
-// names, each with why it needs the outside tool. Skills and the audits'
-// probe programs are read for runs too.
-//
-// Interop cases keep both: a `.case` that requires lldb, gdb, perf, strace,
-// valgrind, rr, go or otelcol checks Jet's output against that tool.
+// Jet's debugger and profiler are its own engines. No text a user reads says
+// that `jet debug` runs under LLDB or GDB or that `jet perf` is Linux perf, and
+// no debug tier is named after one of them: the spellings below fail here, in
+// any letter case. Interop cases keep the tools' names: a `.case` that requires
+// lldb, gdb, perf, go or otelcol checks Jet's DWARF or symbol map against that
+// tool. Audits, research notes and proposals are dated records and are not read.
 DN_ROOTS: [String]{"Compiler", "Core", "Examples", "Jetpack", "Tools", "Tests", "Docs/Spec", "Docs/Site", "Docs/README.md"}
-
-// Read only for runs.
-DN_RUN_ROOTS: [String]{".agents", "Docs/Audits"}
 
 DN_SKIPPED: [String]{"target", "node_modules"}
 
 DN_SPELLINGS: [String]{"under lldb", "under gdb", "under linux perf", "native-lldb", "nativelldb"}
 
-DN_INTEROP_TOOLS: [String]{"tool:lldb", "tool:gdb", "tool:perf", "tool:strace", "tool:valgrind", "tool:rr", "tool:go", "tool:otelcol"}
+DN_INTEROP_TOOLS: [String]{"tool:lldb", "tool:gdb", "tool:perf", "tool:go", "tool:otelcol"}
 
 // This guard spells what it refuses.
 DN_GUARD: "Tests/Guards/debug_names_no_outside_debugger.jet"
-
-// The files read for runs: scripts, Jet programs, cases, and (DN_SKILL_DIR)
-// skills. A file with no extension is read when it opens with `#!`.
-DN_RUN_EXTENSIONS: [String]{".sh", ".bash", ".zsh", ".py", ".mjs", ".cjs", ".js", ".ts", ".jet", ".case"}
-
-DN_SKILL_DIR: "/skills/"
-
-// A harness that runs an outside tool on a Jet program on purpose: every
-// file under `path` (a file or a directory) may run one.
-DnHarness: struct {
-    path: String,
-    harness: String,
-    why: String,
-}
-
-DN_HARNESSES: [DnHarness]{
-    {path: "Tools/Perf/DebugLatency/", harness: "DebugLatency", why: "times jet debug against lldb on the same image and stop; lldb is the baseline each bar is judged by"},
-    {path: "Docs/Audits/BestDebuggerProfiler20261118/Probes/", harness: "the 2026-11-18 debugger and profiler review's probes", why: "a dated review's peer comparison: lldb, gdb, perf and rr on the image jet debug and jet perf read"},
-    {path: "Docs/Audits/BestInExistence20261119/Probes/", harness: "the 2026-11-19 best-in-existence review's probes", why: "a dated review's peer comparison: lldb, gdb and perf on the image jet debug and jet perf read"},
-    {path: "Compiler/JetBackend/Tests/X64Decode.jet", harness: "X64Decode", why: "decoder text parity against objdump -M intel: objdump is a peer oracle for Jet's x86-64 decoder, and the test skips visibly where objdump is absent"},
-    {path: "Tools/Gauntlet/Harness/", harness: "the gauntlet", why: "the standings' run cycles: one counter, perf stat -e cycles:u, read the same way for Jet and every peer language's program"},
-    {path: "Tools/Perf/AsmParity/", harness: "AsmParity", why: "user-mode cycles and instructions of a Jet build and of its hand-written asm ceiling, counted by perf stat the same way for both"},
-    {path: "Tools/Perf/CompileThroughput/", harness: "CompileThroughput", why: "the compiler's own retired instructions and cycles per build, counted by perf stat, the figure its rows compare across revisions"},
-    {path: "Tools/Perf/ReadInto/Memory.jet", harness: "ReadInto memory", why: "reads the counting runtime's allocator facts with a gdb Python script stopped at exit_group; jet debug stops at no syscall"},
-    {path: "Tools/Perf/StdoutBuffer/", harness: "StdoutBuffer", why: "counts the fd-1 write and writev syscalls of Jet and of python3 printing the same lines; jet perf has no syscall view, so strace gives the one count for both"},
-}
-
-// A shell command's start: the line's start, a shell operator, `$(`, or a
-// case step, then an optional `$ ` prompt and the words that run a command
-// (`exec`, `timeout 5`, `taskset -c 8`, `NAME=value`, ...).
-// The tool word follows, then what it takes: an argument for gdb, lldb,
-// valgrind and strace, and a subcommand for perf and rr, so `jet perf run`
-// and a name such as `rr :=` are no run.
-DN_RUN_SHELL_TOOL: Regex{"(^|[;&|(]|\$\(|(step|run)( [a-z0-9_]+)?:)\s*(\$\s+)?((exec|sudo|command|nohup|time|env)\s+|timeout\s+\S+\s+|taskset\s+(-c\s+)?\S+\s+|nice\s+(-n\s+)?\S+\s+|[A-Z_][A-Z0-9_]*=\S*\s+)*(gdb|lldb|valgrind|strace)\s+[^\s:=(.,)\]}}]"}
-
-DN_RUN_SHELL_PERF: Regex{"(^|[;&|(]|\$\(|(step|run)( [a-z0-9_]+)?:)\s*(\$\s+)?((exec|sudo|command|nohup|time|env)\s+|timeout\s+\S+\s+|taskset\s+(-c\s+)?\S+\s+|nice\s+(-n\s+)?\S+\s+|[A-Z_][A-Z0-9_]*=\S*\s+)*(perf\s+(record|stat|report|script|annotate|top|trace|mem|c2c|sched|probe|lock|kvm|bench)|rr\s+(record|replay))([^A-Za-z0-9_-]|$)"}
-
-// An argument list a program runs: the tool (a string or a name holding its
-// path) and, after a comma, an option or a perf or rr subcommand.
-DN_RUN_ARGV: Regex{"(^|[^A-Za-z0-9_])((gdb|lldb|valgrind|strace)[\"']?\]?\s*,\s*\[?[\"']-|perf[\"']?\]?\s*,\s*\[?[\"'](record|stat|report|script|annotate|top|trace|mem|c2c|sched|probe|lock|kvm|bench)[\"']|rr[\"']?\]?\s*,\s*\[?[\"'](record|replay)[\"'])"}
-
-DN_RUN_TOOLS: [String]{"strace", "valgrind", "lldb", "gdb", "perf", "rr"}
 
 // The first refused spelling in `text`, in any letter case, or None.
 dn_spelling: fn(text: String) -[]> String? {
@@ -94,89 +39,17 @@ dn_interop_case: fn(path: String, text: String) -[]> Bool {
     false
 }
 
-// Whether `path` is read for runs.
-dn_run_kind: fn(path: String, text: String) -[]> Bool {
-    if path.contains(DN_SKILL_DIR) && path.ends_with(".md") -> return true
-    loop extension in DN_RUN_EXTENSIONS {
-        if path.ends_with(extension) -> return true
-    }
-    parts: path.split("/").to_list()
-    !parts[parts.len() - 1].contains(".") && text.starts_with("#!")
-}
-
-// The harness `path` belongs to, or None.
-dn_harness: fn(path: String) -[]> DnHarness? {
-    loop row in DN_HARNESSES {
-        if path.starts_with(row.path) -> return Val(row)
-    }
-    None
-}
-
-// The outside tool the command text `text` runs, or None.
-dn_run_command: fn(text: String) -[]> String? {
-    found := DN_RUN_SHELL_TOOL.find(text)
-    if found == None -> found = DN_RUN_SHELL_PERF.find(text)
-    if found == None -> found = DN_RUN_ARGV.find(text)
-    hit: found ?? return None
-    loop tool in DN_RUN_TOOLS {
-        if hit.contains(tool) -> return Val(tool)
-    }
-    None
-}
-
-// The outside tool a line of a script, a program or a case runs, or None. A
-// comment runs nothing.
-dn_run_tool: fn(line: String) -[]> String? {
-    word: line.trim()
-    if word.starts_with("//") || word.starts_with("#") || word.starts_with("*") || word.starts_with("/*") {
-        return None
-    }
-    dn_run_command(line)
-}
-
-// The outside tool a line of a skill runs, or None. Only code runs: a line of
-// a fenced block (`fenced`), and the text of a code span.
-dn_skill_tool: fn(line: String, fenced: Bool) -[]> String? {
-    if fenced -> return dn_run_command(line)
-    parts: line.split("`").to_list()
-    loop index in 0..<parts.len() {
-        if index % 2 == 0 -> next
-        if dn_run_command(parts[index]) == .Val(tool) -> return Val(tool)
-    }
-    None
-}
-
-// Every line of `text`, the file at `path`, that runs an outside tool, as
-// `path:line: runs tool`, unless a harness or an interop case holds it.
-dn_run_lines: fn(path: String, text: String, out: &[String]) -[]> {
-    if !dn_run_kind(path, text) || dn_harness(path) != None || dn_interop_case(path, text) {
-        return
-    }
-    skill: path.ends_with(".md")
-    fenced := false
-    loop (index, line) in text.lines() {
-        if skill && line.trim().starts_with("```") {
-            fenced = !fenced
-            next
-        }
-        found: if skill -> dn_skill_tool(line, fenced) else -> dn_run_tool(line)
-        tool: found ?? next
-        out.push("{path}:{index + 1}: runs {tool}")
-    }
-}
-
-// Every line under `path` that spells a refused name (when `names`), as
-// `path:line: spelling`, and every line that runs an outside tool.
+// Every line under `path` that spells a refused name, as `path:line: spelling`.
 // Symbolic links, hidden entries, build output and installed node modules are
 // skipped, and so are files that are not text.
-dn_lines: fn(path: String, names: Bool, spelled: &[String], runs: &[String]) -[FS]> {
+dn_lines: fn(path: String, out: &[String]) -[FS]> {
     if dn_files.is_symlink(path) {
         return
     }
     if dn_files.is_dir(path) {
         loop child in (dn_files.list_dir(path) ?? panic("list {path}: {err}")) {
             if child.name.starts_with(".") || DN_SKIPPED.contains(child.name) -> next
-            dn_lines(child.path, names, spelled, runs)
+            dn_lines(child.path, out)
         }
         return
     }
@@ -184,33 +57,23 @@ dn_lines: fn(path: String, names: Bool, spelled: &[String], runs: &[String]) -[F
         return
     }
     text: dn_files.read(path) ?? return
-    dn_run_lines(path, text, runs)
-    if !names || dn_spelling(text) == None || dn_interop_case(path, text) {
+    if dn_spelling(text) == None || dn_interop_case(path, text) {
         return
     }
     loop (index, line) in text.lines() {
         spelling: dn_spelling(line) ?? next
-        spelled.push("{path}:{index + 1}: {spelling}")
+        out.push("{path}:{index + 1}: {spelling}")
     }
 }
 
 #Test("debug_names_no_outside_debugger") {
     guards_enter_root()
-    spelled := [String]{}
-    runs := [String]{}
+    found := [String]{}
     loop root in DN_ROOTS {
         assert(dn_files.exists(root), "the root {root} must exist")
-        dn_lines(root, true, spelled, runs)
+        dn_lines(root, found)
     }
-    loop root in DN_RUN_ROOTS {
-        assert(dn_files.exists(root), "the root {root} must exist")
-        dn_lines(root, false, spelled, runs)
-    }
-    assert_eq(spelled.join("\n"), "")
-    assert_eq(runs.join("\n"), "")
-    loop row in DN_HARNESSES {
-        assert(dn_files.exists(row.path), "the harness {row.harness} must be at {row.path}")
-    }
+    assert_eq(found.join("\n"), "")
     // The matcher sees each spelling in any letter case, and an interop case
     // is one whose requires line names an outside tool.
     assert(dn_spelling("// steps it under LLDB, with Core") == Val("under lldb"))
@@ -219,38 +82,327 @@ dn_lines: fn(path: String, names: Bool, spelled: &[String], runs: &[String]) -[F
     assert(dn_spelling("the samples Linux perf records under perf record") == None)
     assert(dn_spelling("lldb reads the split debug file") == None)
     assert(dn_interop_case("Tests/Cases/Debug/x.case", "requires: tool:lldb\nrun: jet build\n"))
-    assert(dn_interop_case("Tests/Cases/Report/x.case", "requires: tool:strace\nstep: strace -f {{jet}} build x.jet\n"))
     assert(!dn_interop_case("Tests/Cases/Debug/x.case", "requires: os-name:linux\n"))
     assert(!dn_interop_case("Tests/Cases/Debug/x.json", "requires: tool:lldb\n"))
 }
 
-#Test("an outside tool a committed file runs is refused at its line") {
-    runs := [String]{}
-    dn_run_lines("Tools/Probe/run.sh", "#!/bin/sh\njet build prog.jet\nlldb prog\n", runs)
-    assert_eq(runs.join("\n"), "Tools/Probe/run.sh:3: runs lldb")
-    // Each shape a script, a program, a case or a skill runs a tool in.
-    assert(dn_run_tool("timeout 60 gdb -batch -ex run ./prog") == Val("gdb"))
-    assert(dn_run_tool("out=$(strace -f -o t.txt ./prog)") == Val("strace"))
-    assert(dn_run_tool("taskset -c 8 perf stat -e cycles:u ./prog") == Val("perf"))
-    assert(dn_run_tool("rr record ./prog && rr replay") == Val("rr"))
-    assert(dn_run_tool("step build: valgrind --leak-check=full {{work}}/prog") == Val("valgrind"))
-    assert(dn_run_tool("run([PEERS[\"perf\"], \"record\", \"-g\", \"prog\"], work)") == Val("perf"))
-    assert(dn_run_tool("    _: probe_run(probe, [String]{{lldb, \"-b\", \"-o\", \"run\", prog}}, work)") == Val("lldb"))
-    assert(dn_run_tool("spawnSync(\"strace\", [\"-f\", exe])") == Val("strace"))
-    assert(dn_skill_tool("Then run `perf record -g ./prog` on it.", false) == Val("perf"))
-    assert(dn_skill_tool("$ lldb -b -o run ./prog", true) == Val("lldb"))
-    // A comment, a name, a list of tools, `jet perf` and prose run nothing.
-    assert(dn_run_tool("// a stop as lldb -b reads it") == None)
-    assert(dn_run_tool("# perf stat counts it") == None)
-    assert(dn_run_tool("    rr := mpi()") == None)
-    assert(dn_run_tool("    lldb: if probe.lldb == .Val(path) -> path else -> \"\"") == None)
-    assert(dn_run_tool("KIT_OUTSIDE_TOOLS: [String]{{\"lldb\", \"gdb\", \"perf\", \"go\"}}") == None)
-    assert(dn_run_tool("step: jet perf run --lens=alloc alloc.jet") == None)
-    assert(dn_run_tool("    meaning: \"so `perf report` shows its function names\"") == None)
-    assert(dn_skill_tool("lldb and gdb show `<optimized out>` often.", false) == None)
-    // A harness's files and an interop case may run one.
-    held := [String]{}
-    dn_run_lines("Tools/Perf/DebugLatency/run.sh", "lldb -b prog\n", held)
-    dn_run_lines("Tests/Cases/ToolInterop/x.case", "requires: tool:lldb\nstep: lldb -b {{work}}/prog\n", held)
-    assert_eq(held.len(), 0)
+// Nor does a committed script, skill, tool or case run an outside debugger,
+// profiler or disassembler: `jet debug` and `jet perf` answer those questions
+// about every Jet program, and using them is how their gaps are found
+// (AGENTS.md, "Dogfood the debugger and profiler"). A run is the tool in a
+// command position: the first word of a shell command (a script line, a
+// `.case` step or a fenced block of a skill or README), or, in a Jet,
+// JavaScript or Python tool, a string literal that is the tool's path, its
+// `--tool` option, a command line starting with it, the head of an argv whose
+// next word is an option or a subcommand, or the one argument of a lookup
+// (`which("lldb")`). Comments and prose are not read. Under Compiler, Core
+// and Jetpack only a package's Tests tree is, and under Docs only scripts and
+// programs: a document's code block records a command, it runs nothing.
+DN_RUN_TOOLS: [String]{"gdb", "lldb", "perf", "valgrind", "rr", "strace", "ltrace", "objdump"}
+
+// The subcommands of perf and rr that start a run, as a command's second word.
+DN_RUN_SUBCOMMANDS: [String]{"record", "stat", "report", "script", "top", "trace", "annotate", "replay"}
+
+DN_RUN_ROOTS: [String]{"Tools", "Tests", "Examples", "Docs", ".agents/skills", "Compiler", "Core", "Jetpack"}
+
+DN_RUN_TESTS_ONLY: [String]{"Compiler", "Core", "Jetpack"}
+
+// The words that run the command after them.
+DN_RUN_WRAPPERS: [String]{"timeout", "env", "exec", "nice", "command", "sudo", "time", "nohup", "xargs", "then", "do", "else", "if", "while", "until", "!"}
+
+// The bytes that start a new shell command: | ; & ( ) ` ' " { }
+DN_RUN_BREAKS: [Int]{124, 59, 38, 40, 41, 96, 39, 34, 123, 125}
+
+// A kept run's class: a comparison harness (the outside tool measures Jet and
+// a peer, a baseline or an oracle the same way), an interop case (the outside
+// tool reading what Jet writes is the subject), or a gap (a Jet tool can't do
+// the job yet). A gap row's `until` names the Tower criterion that gives a Jet
+// tool the job (`#6995 c16`); the row leaves when that criterion is met.
+DnRunKept: struct {
+    path: String,
+    harness: String,
+    class: String,
+    until: String,
+    why: String,
+}
+
+DN_RUN_CLASSES: [String]{"comparison", "interop", "gap"}
+
+DN_WHY_SYSCALLS: "traces the system calls a jet command or a built program makes with strace; no jet tool traces another process's system calls"
+
+DN_WHY_FAULT: "makes perf_event_open fail with strace's fault injection to reach jet perf's refusal; jet perf has no way to run as if the kernel refused it"
+
+DN_WHY_IMAGE: "reads a built image's disassembly, symbol table or program headers with objdump; no jet command reads a built image's code or tables"
+
+DN_WHY_INTEROP: "the outside tool is the subject, reading the DWARF, symbols or perf map Jet writes for it"
+
+// The harnesses that still run an outside tool, each named with its class
+// and why. A row is a file or a directory; a row that no longer keeps a run
+// fails, so the list only shrinks.
+DN_RUNS_KEPT: [DnRunKept]{
+    {path: "Tools/Perf/DebugLatency", harness: "DebugLatency", class: "comparison", until: "", why: "times jet debug against lldb on the same image and stops; lldb is the baseline each latency bar is judged by"},
+    {path: "Compiler/JetBackend/Tests/X64Decode.jet", harness: "X64Decode", class: "comparison", until: "", why: "the decoder's parity oracle: objdump -M intel is a peer decoder Jet's x86-64 decoder must spell every instruction as, and the test skips where objdump is absent"},
+    {path: "Tools/Gauntlet/Harness", harness: "the gauntlet", class: "comparison", until: "", why: "the standings' run cycles: perf stat -e cycles:u, read the same way for Jet's program and every peer language's"},
+    {path: "Tools/Perf/AsmParity", harness: "AsmParity", class: "comparison", until: "", why: "cycles and instructions of a Jet build and of its hand-written assembly ceiling, counted by perf stat the same way for both, and the assembly side's lines read with objdump --dwarf=decodedline"},
+    {path: "Tools/Perf/StdoutBuffer", harness: "StdoutBuffer", class: "comparison", until: "", why: "counts the write and writev system calls of Jet and of python3 printing the same lines, strace giving the one count for both"},
+    {path: "Docs/Audits/BestInExistence20261119/Probes", harness: "the 2026-11-19 best-in-existence review's probes", class: "comparison", until: "", why: "a dated review's peer comparison: lldb, gdb and perf on the image jet debug and jet perf read"},
+    {path: "Tests/Cases/ToolInterop", harness: "ToolInterop", class: "interop", until: "", why: DN_WHY_INTEROP},
+    {path: "Tests/Cases/Debug/objdump_disassembles_main_from_text_section.case", harness: "objdump reads Jet's image", class: "interop", until: "", why: DN_WHY_INTEROP},
+    {path: "Tools/Perf/JetcProfile", harness: "JetcProfile", class: "gap", until: "#6995 c13", why: "samples a running compiler by pid with perf record; jet perf attach can't sample a process started without --observe"},
+    {path: "Tools/Perf/Scaling", harness: "Scaling", class: "gap", until: "#6995 c2", why: "profiles one compile's phases with perf record and perf script, the receipt Gate.jet stores; jet perf run samples no compile of the compiler itself"},
+    {path: "Tools/Perf/CompileThroughput", harness: "CompileThroughput", class: "gap", until: "#6995 c14", why: "the compiler's retired instructions and cycles per build, counted by perf stat across revisions; jet perf counts no hardware event of a built binary or a jet command"},
+    {path: "Tools/Perf/ReadInto", harness: "ReadInto memory", class: "gap", until: "#6995 c15", why: "reads the counting runtime's allocator facts with a gdb script stopped at exit_group; jet debug stops at no system call or exit, and jet perf reports no allocator totals at exit"},
+    {path: "Tools/Perf/CoreStrace", harness: "CoreStrace", class: "gap", until: "#6995 c16", why: "the receipt that `jet run` opens no Core or Prelude source file, from strace's file calls; no jet tool lists the paths a jet command opens"},
+    {path: "Tools/Perf/CodegenCeiling.jet", harness: "CodegenCeiling", class: "gap", until: "#6995 c17", why: "counts each catalog function's instructions in the release image with objdump -d; no jet command disassembles a built image's function"},
+    {path: "Tests/Cases/AllocatorFamilies/checked_alloc_is_chosen_at_build_time.case", harness: "checked alloc symbol", class: "gap", until: "#6995 c17", why: DN_WHY_IMAGE},
+    {path: "Tests/Cases/Perf/ZonesStripSettingLeavesNoSite.fixture/hot.sh", harness: "zone strip headers", class: "gap", until: "#6995 c17", why: DN_WHY_IMAGE},
+    {path: "Tests/Cases/Perf/zone_only_code_is_laid_after_hot_code.case", harness: "zone layout", class: "gap", until: "#6995 c17", why: DN_WHY_IMAGE},
+    {path: "Tests/Cases/Perf/zone_sites_are_patched_jumps.case", harness: "zone sites", class: "gap", until: "#6995 c17", why: DN_WHY_IMAGE},
+    {path: "Tests/Cases/Perf/zones_strip_setting_leaves_no_site.case", harness: "zone strip", class: "gap", until: "#6995 c17", why: DN_WHY_IMAGE},
+    {path: "Tests/Cases/SimdWitness/default_and_scalar_float_witnesses_print_identical_values_on_every_tier.case", harness: "SIMD witness", class: "gap", until: "#6995 c17", why: DN_WHY_IMAGE},
+    {path: "Tests/Cases/SingleThreadRc", harness: "single-thread counts", class: "gap", until: "#6995 c17", why: DN_WHY_IMAGE},
+    {path: "Tests/Cases/CLICompilerSpeed/jet_run_of_a_small_program_starts_only_the_compile_thread.case", harness: "compile threads", class: "gap", until: "#6995 c16", why: DN_WHY_SYSCALLS},
+    {path: "Tests/Cases/CLICompilerSpeed/jet_run_opens_its_own_file_once.case", harness: "file opens", class: "gap", until: "#6995 c16", why: DN_WHY_SYSCALLS},
+    {path: "Tests/Cases/ControlAndData/process_exit_leaves_heap_to_kernel_after_user_cleanup.case", harness: "exit munmaps", class: "gap", until: "#6995 c16", why: DN_WHY_SYSCALLS},
+    {path: "Tests/Cases/JetpackJetOS/nixos_migration_protects_stage_before_writing_inputs.case", harness: "migration stage files", class: "gap", until: "#6995 c16", why: DN_WHY_SYSCALLS},
+    {path: "Tests/Cases/JetpackJetOS/nixos_migration_publish_stage_is_private_and_collision_safe.case", harness: "migration publish files", class: "gap", until: "#6995 c16", why: DN_WHY_SYSCALLS},
+    {path: "Tests/Cases/Report/ordinary_build_opens_no_network_connection.case", harness: "no network", class: "gap", until: "#6995 c16", why: DN_WHY_SYSCALLS},
+    {path: "Tests/Cases/TaskgroupStack/a_joined_task_runs_on_the_joining_thread.case", harness: "joining thread", class: "gap", until: "#6995 c16", why: DN_WHY_SYSCALLS},
+    {path: "Tests/Cases/PerfRun/no_counters_reports_unavailable.case", harness: "a host without counters", class: "gap", until: "#6995 c18", why: DN_WHY_FAULT},
+    {path: "Tests/Cases/PerfRun/topdown_unavailable_names_the_refusal.case", harness: "a host without topdown", class: "gap", until: "#6995 c18", why: DN_WHY_FAULT},
+}
+
+// The outside tool `word` names, bare or as a path, or None.
+dn_run_tool: fn(word: String) -[]> String? {
+    parts: word.trim().split("/").to_list()
+    name: parts[parts.len() - 1]
+    loop tool in DN_RUN_TOOLS {
+        if name == tool -> return Val(tool)
+    }
+    None
+}
+
+// The outside tool one shell command runs, or None: its first word that is
+// not a wrapper, an option, a number or an assignment.
+dn_command_tool: fn(command: String) -[]> String? {
+    loop word in command.split(" ").to_list() {
+        bare: word.trim()
+        if bare == "" || DN_RUN_WRAPPERS.contains(bare) || bare.starts_with("-") || bare.contains("=") {
+            next
+        }
+        first: Int{bare.bytes()[0]}
+        if first >= 48 && first <= 57 -> next
+        return dn_run_tool(bare.removeprefix("$"))
+    }
+    None
+}
+
+// The outside tool a shell line runs, or None. Quotes, braces, pipes, lists
+// and substitutions each start a command, so `sh -c 'objdump -d x'` and
+// `prefix=(strace -f)` run their tools too.
+dn_shell_tool: fn(line: String) -[]> String? {
+    bytes: line.bytes()
+    start := 0
+    at := 0
+    loop at <= bytes.len() {
+        if at == bytes.len() || DN_RUN_BREAKS.contains(Int{bytes[at]}) {
+            tool: dn_command_tool(String.from_bytes(bytes[start..<at]) ?? "")
+            if tool != None -> return tool
+            start = at + 1
+        }
+        at += 1
+    }
+    None
+}
+
+// The outside tool the code literal `text` runs, or None. `before` is the
+// code byte before its opening quote (0 for none), and `after` the code after
+// its closing one.
+dn_text_tool: fn(text: String, before: Int, after: String) -[]> String? {
+    if text.starts_with("--") -> return dn_run_tool(text.removeprefix("--"))
+    words: text.split(" ").to_list()
+    named: dn_run_tool(words[0]) ?? return None
+    if words.len() > 1 {
+        if words[1].starts_with("-") || DN_RUN_SUBCOMMANDS.contains(words[1]) -> return Val(named)
+        return None
+    }
+    if words[0].contains("/") -> return Val(named)
+    if before != 40 && before != 91 && before != 123 -> return None
+    rest: after.trim()
+    if rest.starts_with(")") -> return Val(named)
+    if !rest.starts_with(",") -> return None
+    argument: rest.removeprefix(",").trim()
+    if argument.starts_with("[") -> return Val(named)
+    word: argument.removeprefix("\"").removeprefix("'")
+    if word == argument -> return None
+    if word.starts_with("-") || DN_RUN_SUBCOMMANDS.find(fn(sub) { word.starts_with("{sub}\"") || word.starts_with("{sub}'") }) != None {
+        return Val(named)
+    }
+    None
+}
+
+// The outside tool the string literals of one code line run, or None. A `//`
+// outside a literal ends the code of the line.
+dn_literal_tool: fn(line: String) -[]> String? {
+    bytes: line.bytes()
+    before := 0
+    at := 0
+    loop at < bytes.len() {
+        quote: Int{bytes[at]}
+        if quote == 47 && at + 1 < bytes.len() && (Int{bytes[at + 1]}) == 47 -> break
+        if quote != 34 && quote != 39 && quote != 96 {
+            if quote != 32 -> before = quote
+            at += 1
+            next
+        }
+        start: at + 1
+        at = start
+        loop at < bytes.len() && (Int{bytes[at]}) != quote {
+            at += if (Int{bytes[at]}) == 92 -> 2 else -> 1
+        }
+        end: if at < bytes.len() -> at else -> bytes.len()
+        text: String.from_bytes(bytes[start..<end]) ?? ""
+        after: if end < bytes.len() -> String.from_bytes(bytes[(end + 1)..<bytes.len()]) ?? "" else -> ""
+        tool: dn_text_tool(text, before, after)
+        if tool != None -> return tool
+        before = quote
+        at += 1
+    }
+    None
+}
+
+// How a file's lines are read: "code", "shell", "case", "markdown", or "" for
+// a file that is none of them.
+dn_run_kind: fn(path: String, text: String) -[]> String {
+    if path.ends_with(".jet") || path.ends_with(".mjs") || path.ends_with(".js") || path.ends_with(".ts") || path.ends_with(".py") {
+        return "code"
+    }
+    if path.ends_with(".sh") || path.ends_with(".bash") -> return "shell"
+    if path.ends_with(".case") -> return "case"
+    if path.ends_with(".md") -> return "markdown"
+    parts: path.split("/").to_list()
+    if !parts[parts.len() - 1].contains(".") && text.starts_with("#!") && text.lines()[0].contains("sh") {
+        return "shell"
+    }
+    ""
+}
+
+// The outside tool one line of a `kind` file runs, or None. Comment lines and
+// a markdown file's prose run nothing.
+dn_line_tool: fn(kind: String, line: String, fenced: Bool) -[]> String? {
+    bare: line.trim()
+    if kind == "code" {
+        if bare.starts_with("//") || bare.starts_with("#") || bare.starts_with("*") || bare.starts_with("/*") {
+            return None
+        }
+        return dn_literal_tool(line)
+    }
+    if bare.starts_with("#") -> return None
+    if kind == "markdown" && !fenced -> return None
+    if kind != "case" -> return dn_shell_tool(line)
+    if !bare.starts_with("step") -> return None
+    step: bare.split_once(":") ?? return None
+    dn_shell_tool(step.after)
+}
+
+// Every run of an outside tool in `text`, as `path:line: tool`.
+dn_text_runs: fn(path: String, text: String, out: &[String]) -[]> {
+    kind: dn_run_kind(path, text)
+    if kind == "" {
+        return
+    }
+    fenced := false
+    loop (index, line) in text.lines() {
+        if kind == "markdown" && line.trim().starts_with("```") {
+            fenced = !fenced
+            next
+        }
+        if dn_line_tool(kind, line, fenced) == .Val(tool) -> out.push("{path}:{index + 1}: {tool}")
+    }
+}
+
+// Every run of an outside tool under `base/rel`, its paths relative to `base`.
+// Under Compiler, Core and Jetpack only paths inside a Tests tree are read,
+// and under Docs no markdown.
+dn_runs_under: fn(base: String, rel: String, tests_only: Bool, out: &[String]) -[FS]> {
+    path: if base == "" -> rel.copy() else -> "{base}/{rel}"
+    if dn_files.is_symlink(path) {
+        return
+    }
+    if dn_files.is_dir(path) {
+        loop child in (dn_files.list_dir(path) ?? panic("list {path}: {err}")) {
+            if child.name.starts_with(".") || DN_SKIPPED.contains(child.name) -> next
+            dn_runs_under(base, "{rel}/{child.name}", tests_only, out)
+        }
+        return
+    }
+    if rel == DN_GUARD || (tests_only && !rel.contains("/Tests/")) || (rel.starts_with("Docs/") && rel.ends_with(".md")) {
+        return
+    }
+    text: dn_files.read(path) ?? return
+    dn_text_runs(rel, text, out)
+}
+
+// Every run of an outside tool in the checkout at `base` ("" for the working
+// directory).
+dn_runs: fn(base: String) -[FS]> [String] {
+    found := [String]{}
+    loop root in DN_RUN_ROOTS {
+        path: if base == "" -> root.copy() else -> "{base}/{root}"
+        if !dn_files.exists(path) -> next
+        dn_runs_under(base, root, DN_RUN_TESTS_ONLY.contains(root), found)
+    }
+    found
+}
+
+// Whether `finding` (`path:line: tool`) lies in the kept harness `row`.
+dn_run_kept_by: fn(row: DnRunKept, finding: String) -[]> Bool {
+    finding.starts_with("{row.path}:") || finding.starts_with("{row.path}/")
+}
+
+#Test("no script, skill, tool or case runs an outside debugger or profiler") {
+    guards_enter_root()
+    found: dn_runs("")
+    refused := [String]{}
+    loop finding in found {
+        if DN_RUNS_KEPT.find(fn(row) { dn_run_kept_by(row, finding) }) == None {
+            refused.push(finding)
+        }
+    }
+    assert_eq(refused.join("\n"), "")
+    loop row in DN_RUNS_KEPT {
+        assert(row.why != "", "DN_RUNS_KEPT row {row.path} names no reason")
+        assert(DN_RUN_CLASSES.contains(row.class), "DN_RUNS_KEPT row {row.path} has class `{row.class}`, not comparison, interop or gap")
+        assert((row.class == "gap") == row.until.starts_with("#"), "DN_RUNS_KEPT row {row.path}: a gap row, and only a gap row, names in `until` the criterion that removes it")
+        assert(found.find(fn(finding) { dn_run_kept_by(row, finding) }) != None, "DN_RUNS_KEPT row {row.path} keeps no run any more; delete it")
+    }
+}
+
+#Test("a planted outside debugger run fails, named by file and line") {
+    root: dn_files.mkdtemp("debug-runs") ?? panic("a temporary directory cannot be made: {err}")
+    dn_files.create_dir_all("{root}/Tools/Probe") ?? panic("create {root}/Tools/Probe: {err}")
+    dn_files.write("{root}/Tools/Probe/run.sh", "#!/bin/sh\n# lldb prog in a comment is prose\nlldb prog\n") ?? panic("write the planted script: {err}")
+    assert_eq(dn_runs(root), [String]{"Tools/Probe/run.sh:3: lldb"})
+    dn_files.remove_all(root) ?? panic("remove {root}: {err}")
+    // Each command position runs its tool; prose and Jet's own tools do not.
+    assert(dn_shell_tool("timeout 60 strace -f -o out prog") == Val("strace"))
+    assert(dn_shell_tool("sh -c 'objdump -d .jet/build/main | grep -c x'") == Val("objdump"))
+    assert(dn_shell_tool("  [ -n \"$trace\" ] && prefix=(strace -f -qq)") == Val("strace"))
+    assert(dn_shell_tool("FOO=1 /usr/bin/gdb -batch prog") == Val("gdb"))
+    assert(dn_shell_tool("jet perf run prog.jet") == None)
+    assert(dn_shell_tool("lldb-vscode is not lldb") == None)
+    assert(dn_literal_tool("    spawn([String]{{\"valgrind\", \"--leak-check=full\", binary}})") == Val("valgrind"))
+    assert(dn_literal_tool("    run([\"perf\", \"stat\", \"-x,\"])") == Val("perf"))
+    assert(dn_literal_tool("    path: \"{{dir}}/strace\"") == Val("strace"))
+    assert(dn_literal_tool("    gdb: argument(argv, \"--gdb\", tool)") == Val("gdb"))
+    assert(dn_literal_tool("    found: process.which(\"lldb\")") == Val("lldb"))
+    assert(dn_literal_tool("    shown: \"strace -f -c {{probe}}\"") == Val("strace"))
+    assert(dn_literal_tool("    run(jet, [String]{{\"debug\", \"prog.jet\"}})") == None)
+    assert(dn_literal_tool("    run(jet, [String]{{\"perf\", \"run\", \"prog.jet\"}})") == None)
+    assert(dn_literal_tool("    hidden: [String]{{\"lldb\", \"gdb\"}}") == None)
+    assert(dn_literal_tool("    if comm == \"perf\" -> return true") == None)
+    assert(dn_literal_tool("    reason: \"perf unavailable\"") == None)
+    assert(dn_run_kind("Tests/Cases/X/a.case", "") == "case")
+    assert(dn_run_kind("Tools/Gauntlet/Entries/X/Fixtures/fake-perf", "#!/bin/sh\nexit 0\n") == "shell")
+    assert(dn_run_kind("Tools/X/data", "plain\n") == "")
 }

@@ -251,6 +251,14 @@ sema_context_get: fn(receiver: Expr, method: String, method_span: Span, args: [C
     if args[0].expr == .Ident(written, _, _) -> name = written
     resolved: if name == "" -> SemaContextKey?{None} else -> sema_context_key_resolve(name, environment, program, scopes)
     found: resolved ?? {
+        // A constant whose value is still being computed while building has
+        // no type yet, so it can't be read as a key; reading the name records
+        // the wait, and the check runs again once the value lands
+        // (sema_check_comptime_function).
+        if name != "" && sema_context_key_waits(name, environment, scopes) {
+            _ := sema_check_expression(args[0].expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
+            return failed
+        }
         diagnostics.push(sema_error("E0761", expr_span(args[0].expr), "`context.get` needs a context key", "only a constant declared with `#ContextKey` names a context value", "declare a snake_case key such as `#ContextKey frame_index: 0` and pass its name"))
         return failed
     }
@@ -261,4 +269,11 @@ sema_context_get: fn(receiver: Expr, method: String, method_span: Span, args: [C
     equatable: sema_type_equatable(environment, program, found.ty)
     read: sema_tree_node(found.ty, TExprKind.HostCall{call: THostCall.ContextGet{key: found.key, default: default, equatable: equatable}}, span)
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(read, expected, environment, program, diagnostics)}
+}
+
+// Whether `name` binds a constant whose type a value computed while building
+// has not given yet.
+sema_context_key_waits: fn(name: String, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Bool {
+    index: sema_scope_resolve_index(scopes, name) ?? return false
+    sema_scope_binding_symbol(environment, scopes, index).kind == SymbolKind.Constant && sema_scope_binding_type(environment, scopes, index) == None
 }

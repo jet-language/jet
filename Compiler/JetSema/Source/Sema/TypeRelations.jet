@@ -1819,8 +1819,8 @@ sema_type_graph_lookup_symbol_at: fn(graph: SemaRegistrationGraph, caller: Int, 
         local: sema_registration_lookup_name_at(graph, caller, graph.modules[caller].module_identity, name)
         if local != None -> return local
     }
-    // A canonical nominal spelling's owner and leaf were cut with the graph
-    // (SemaCanonicalNominals): the module and name the cut below finds.
+    // A canonical nominal spelling's owner and whole name (SemaCanonicalNominals),
+    // which the cut below also finds unless the name itself holds a `.`.
     if graph.canonical_nominals == .Val(canonical_table) {
         if name_rows_get_text(canonical_table.rows, name) == .Val(row) {
             return sema_registration_lookup_name_at(graph, canonical_table.owners[row], graph.modules[canonical_table.owners[row]].module_identity, canonical_table.leaves[row])
