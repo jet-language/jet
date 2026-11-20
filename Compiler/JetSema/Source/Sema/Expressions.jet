@@ -3367,7 +3367,7 @@ sema_expr_registration_method_candidates: fn(graph: SemaRegistrationGraph, calle
     caller_row: if sema_registration_module_index(graph, caller_module) == .Val(index) -> index else -> -1
     scoped_row: sema_type_resolve_nominal_row_at(graph, lookup_type, caller_row)
     found_owner := false
-    loop nominal_row in sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(receiver_name)) {
+    loop nominal_row in sema_registration_nominal_rows_named(graph, sema_expr_method_row_name(graph, scoped_row, receiver_name)) {
         owner_index: nominal_row.module_index
         nominal: graph.modules[owner_index].nominals[nominal_row.row]
         if scoped_row == .Val(scoped) && graph.modules[scoped.module_index].nominals[scoped.row].kind != SemaRegistrationNominalKind.TypeAlias && (scoped.module_index != owner_index || scoped.row != nominal_row.row) {
@@ -8089,4 +8089,15 @@ sema_check_expression_with_lambda_escapes: fn(expr: Expr, expected: Type?, envir
     assert_eq(sema_expr_geometry_result(BinOp.Add, point, delta), Val(point))
     assert_eq(sema_expr_geometry_result(BinOp.Add, point, world), Val(Type.Named{name: "__GeometrySpaceMismatch"}))
     assert(!sema_expr_geometry_is_point(Type.Named{name: "user.ScreenPoint"}))
+}
+
+// The name a receiver's nominal rows are registered under: the row the
+// caller's scope resolves it to (whose name may hold `.`, as a protocol's
+// `Payment.Client` does), or else the receiver's last segment. An alias row
+// gives no name; its target's rows hold the methods.
+sema_expr_method_row_name: fn(graph: SemaRegistrationGraph, scoped_row: SemaRegistrationRowRef?, receiver_name: String) -> String Never! {
+    if scoped_row == .Val(scoped) && graph.modules[scoped.module_index].nominals[scoped.row].kind != SemaRegistrationNominalKind.TypeAlias {
+        return "{graph.modules[scoped.module_index].nominals[scoped.row].symbol.name}"
+    }
+    sema_expr_operator_row_name(receiver_name)
 }

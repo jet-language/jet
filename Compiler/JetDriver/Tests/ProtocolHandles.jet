@@ -1,0 +1,51 @@
+// A protocol's generated handles are named `Payment.Client` and
+// `Payment.Server`: a name holding `.` that registers whole in its module, so
+// the handles, their constructors and their methods resolve, and an
+// out-of-order step is the typestate error.
+use jet_driver.[JetDriverCompileMode, jet_driver_compile]
+
+PROTOCOL_HANDLES_HEAD: [String]{
+    "ProtocolError: struct {{ msg: String }}",
+    "",
+    "protocol Payment {{",
+    "    client: Hello(version: Int)",
+    "    server: Ack(session: Int)",
+    "    client: Charge(cents: Int)",
+    "    server: Receipt(id: Int)",
+    "}}",
+    "",
+    "run: fn() {{",
+    "    h: Payment.Client.client()",
+    "    h1: h.Hello(1) ?? panic(\"hello failed\")",
+}
+
+// The codes of the errors `run` gets when its steps after `Hello` are `steps`.
+protocol_handles_codes: fn(steps: [String]) -> [String] {
+    lines := [String]{}
+    loop line in PROTOCOL_HANDLES_HEAD -> lines.push("{line}")
+    loop line in steps -> lines.push("{line}")
+    lines.push("}}")
+    lines.push("")
+    request := seams_request(lines.join("\n"), JetDriverCompileMode.Check)
+    request.core_sources = idiom_core_rows()
+    result: jet_driver_compile(request)
+    codes := [String]{}
+    loop diagnostic in result.diagnostics {
+        if diagnostic.severity == 1 -> codes.push("{diagnostic.code} {diagnostic.what}")
+    }
+    codes
+}
+
+#Test("a protocol's handles run its steps in order") {
+    steps: [String]{
+        "    h2: h1.recv_Ack() ?? panic(\"ack failed\")",
+        "    h3: h2.Charge(500) ?? panic(\"charge failed\")",
+        "    h3.recv_Receipt()",
+    }
+    assert_eq(protocol_handles_codes(steps), [String]{})
+}
+
+#Test("a protocol step out of order is the typestate error") {
+    codes: protocol_handles_codes([String]{"    _: h1.Charge(500) ?? panic(\"charge failed\")"})
+    assert(codes.len() == 1 && codes[0].starts_with("E0150 "), codes.join("; "))
+}
