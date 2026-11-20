@@ -1068,10 +1068,11 @@ perf_precise_arm: fn(source: I64) -> I64 {
     fd
 }
 
-// Map sampler `fd`'s ring into the table, have each sample signal this
-// thread with SIGPROF (perf_event_signal, its f_owner_ex built at `owner`)
-// and enable it. A sampler the kernel refuses any of that for is closed.
-// Its handle, or the negated errno of the call the kernel refused.
+// Map sampler `fd`'s ring into the table, write its tail once, have each
+// sample signal this thread with SIGPROF (perf_event_signal, its
+// f_owner_ex built at `owner`) and enable it. A sampler the kernel refuses
+// any of that for is closed. Its handle, or the negated errno of the call
+// the kernel refused.
 perf_precise_attach: fn(fd: I64, owner: I64) -> I64 {
     if (fd >= PERF_PRECISE_FDS) {
         _ := host_call(I64{3}, fd, I64{0}, I64{0})
@@ -1080,6 +1081,17 @@ perf_precise_attach: fn(fd: I64, owner: I64) -> I64 {
     ring: alloc_map_shared(perf_precise_ring_bytes(), fd)
     result := if (ring < I64{0}) -> ring else -> I64{0}
     if (result >= I64{0}) {
+        // The first store to a perf ring's first page takes a write fault
+        // that the kernel abandons, and retries from user mode, whenever a
+        // signal is pending. The memory lens's page-fault counter queues
+        // PERF_COUNTERS_SIGNAL at each fault it counts, the retry included,
+        // so the handler's first tail store (perf_samples_put) made once
+        // that counter is armed faults forever. The tail's first store is
+        // made here, before this sampler is enabled; the main thread
+        // attaches its sampler before perf_counters_start arms the
+        // counters, and they count the main thread alone, so no armed
+        // counter counts this store's fault.
+        sync_store(wrapping(ring + I64{1032}), I64{0})
         sync_store(wrapping(perf_precise_rings + wrapping(fd * I64{8})), ring)
         result = perf_event_signal(fd, PERF_SAMPLES_SIGNAL, owner, thread_tid())
     }
