@@ -525,6 +525,13 @@ symbol_key_names: fn(key: String, name: String) -> Bool Never! {
     before == (U8{46}) || before == (U8{58})
 }
 
+// Whether `owner`, the segment symbol_key_text puts between a member's
+// module and its name, is the owner's own key (`type:m.Point`,
+// `trait:m.Shape`), whose declared name is its leaf (symbol_key_leaf).
+symbol_key_owner_is_key: fn(owner: String) -> Bool Never! {
+    owner.starts_with("type:") || owner.starts_with("trait:")
+}
+
 #Test("symbol keys join kind, module, owner and name with `.`, and read their name back") {
     core: "<corelib>/core.files"
     user: "module:3:app:src/main.jet"
@@ -555,6 +562,16 @@ symbol_key_names: fn(key: String, name: String) -> Bool Never! {
     assert(!symbol_key_names("type:Int", "type:Int"), "the kind is no name")
     assert_eq(symbol_key_leaf("plain"), "plain")
     assert_eq(symbol_key_leaf_start("plain"), 0)
+}
+
+#Test("a method's owner segment is its owner's key, read back by its leaf") {
+    user: "module:3:app:src/main.jet"
+    method: symbol_key_text(SymbolKind.Function, user, symbol_key_text(SymbolKind.Type, user, "", "Point"), "area")
+    assert_eq(method, "function:module:3:app:src/main.jet.type:module:3:app:src/main.jet.Point.area")
+    owner: method.slice(symbol_key_text(SymbolKind.Function, user, "", "").len(), symbol_key_leaf_start(method) - 1)
+    assert(symbol_key_owner_is_key(owner), "`{owner}` is a key")
+    assert_eq(symbol_key_leaf(owner), "Point")
+    assert(!symbol_key_owner_is_key("Point"), "a bare owner name is no key")
 }
 
 symbol_keys: fn(base: Int, bound: Int) -> SymbolKeys Never! {
@@ -1518,22 +1535,35 @@ type_union_member_tag_name: fn(raw: String) -> String Never! {
 
 // `ty` with each nominal head read without its `module.` qualifier.
 type_unqualified_nominals: fn(ty: Type) -> Type Never! {
+    type_nominals_unqualified(ty, false)
+}
+
+// `ty` as a module writes it: each nominal head read without the module
+// identity a checker key qualifies it by (`<corelib>/core.prelude.Span` is
+// `Span`), and a module path the source writes kept (`geo.Point` stays).
+type_identity_unqualified_nominals: fn(ty: Type) -> Type Never! {
+    type_nominals_unqualified(ty, true)
+}
+
+// `ty` with each nominal head unqualified: by any `module.` qualifier, or
+// with `identities_only` by a module identity alone (type_unqualified_text).
+type_nominals_unqualified: fn(ty: Type, identities_only: Bool) -> Type Never! {
     if ty == {
-        .Named(name) -> Type.Named{name: type_unqualified_name(name)}
-        .Apply(name, args) -> Type.Apply{name: type_unqualified_name(name), args: loop arg in args -> type_unqualified_nominals(arg)}
-        .List(inner) -> Type.List{element: type_unqualified_nominals(inner)}
-        .Shared(inner) -> Type.Shared{inner: type_unqualified_nominals(inner)}
-        .Option(inner) -> Type.Option{inner: type_unqualified_nominals(inner)}
+        .Named(name) -> Type.Named{name: type_unqualified_text(name, identities_only)}
+        .Apply(name, args) -> Type.Apply{name: type_unqualified_text(name, identities_only), args: loop arg in args -> type_nominals_unqualified(arg, identities_only)}
+        .List(inner) -> Type.List{element: type_nominals_unqualified(inner, identities_only)}
+        .Shared(inner) -> Type.Shared{inner: type_nominals_unqualified(inner, identities_only)}
+        .Option(inner) -> Type.Option{inner: type_nominals_unqualified(inner, identities_only)}
         // copy: `key_span` is a payload of read parameter `ty`, which keeps the original; field `key_span` of the new Type.Map owns this one
-        .Map(key, key_span, value) -> Type.Map{key: type_unqualified_nominals(key), key_span: key_span.copy(), value: type_unqualified_nominals(value)}
-        .Result(ok, err) -> Type.Result{ok: type_unqualified_nominals(ok), err: type_unqualified_nominals(err)}
+        .Map(key, key_span, value) -> Type.Map{key: type_nominals_unqualified(key, identities_only), key_span: key_span.copy(), value: type_nominals_unqualified(value, identities_only)}
+        .Result(ok, err) -> Type.Result{ok: type_nominals_unqualified(ok, identities_only), err: type_nominals_unqualified(err, identities_only)}
         // copy: `len` is a payload of read parameter `ty`, which keeps the original; field `len` of the new Type.FixedList owns this one
-        .FixedList(elem, len) -> Type.FixedList{elem: type_unqualified_nominals(elem), len: len.copy()}
+        .FixedList(elem, len) -> Type.FixedList{elem: type_nominals_unqualified(elem, identities_only), len: len.copy()}
         // copy: `marker` is a payload of read parameter `ty`, which keeps the original; field `marker` of the new Type.Tagged owns this one
-        .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: type_unqualified_nominals(inner)}
-        .Union(members) -> Type.Union{members: loop member in members -> type_unqualified_nominals(member)}
-        .Case(name, payload) -> Type.Case{name: name, payload: type_unqualified_nominals(payload)}
-        .Tuple(fields) -> Type.Tuple{fields: loop field in fields -> TypeTupleField{name: field.name, ty: type_unqualified_nominals(field.ty)}}
+        .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: type_nominals_unqualified(inner, identities_only)}
+        .Union(members) -> Type.Union{members: loop member in members -> type_nominals_unqualified(member, identities_only)}
+        .Case(name, payload) -> Type.Case{name: name, payload: type_nominals_unqualified(payload, identities_only)}
+        .Tuple(fields) -> Type.Tuple{fields: loop field in fields -> TypeTupleField{name: field.name, ty: type_nominals_unqualified(field.ty, identities_only)}}
         // copy: a read-parameter rewriter returns a type with no nominal to unqualify unchanged as
         // a new tree (owner: the result) while the caller keeps the input (owner: the read
         // parameter, a payload view of the caller's tree); taking the input would need a consuming
@@ -1543,9 +1573,26 @@ type_unqualified_nominals: fn(ty: Type) -> Type Never! {
 }
 
 type_unqualified_name: fn(name: String) -> String Never! {
+    type_unqualified_text(name, false)
+}
+
+// `name` without its `module.` qualifier; with `identities_only`, only a
+// module identity (`module:…`, `<corelib>/…`, which hold `:` or start with
+// `<`) is a qualifier, and a written module path stays.
+type_unqualified_text: fn(name: String, identities_only: Bool) -> String Never! {
     leaf := name
-    loop part in name.split(".") -> leaf = part
+    if !identities_only || name.contains(":") || name.starts_with("<") {
+        loop part in name.split(".") -> leaf = part
+    }
     leaf
+}
+
+#Test("a type as a module writes it keeps a written module path and drops a module identity") {
+    written: Type.List{element: Type.Named{name: "geo.Point"}}
+    assert_eq(type_name(type_identity_unqualified_nominals(written)), "[geo.Point]")
+    assert_eq(type_name(type_unqualified_nominals(written)), "[Point]")
+    assert_eq(type_name(type_identity_unqualified_nominals(Type.Named{name: "<corelib>/core.prelude.SourceLocation"})), "SourceLocation")
+    assert_eq(type_name(type_identity_unqualified_nominals(Type.Named{name: "module:3:app:src/geo.jet.Point"})), "Point")
 }
 
 function_parameter_names: fn(params: [Type], param_contract: [CallContractRow]?) -> String Never! {

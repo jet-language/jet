@@ -2027,9 +2027,11 @@ capabilities. CDP requires the first `goog:cdp` field to be exactly true.
 The whole runtime is Jet source in `Core/Browser/Browser.jet`: commands, event
 capture, trace bounds, locators, reports, and the test server run over
 `core.net.ws`, `core.process`, and `core.files`. Wire operations carry `Net`
-and `Time`, because each command measures its own deadline. A `Browser` and its
-contexts, pages, frames, locators, intercepts, and protocol handles stay on the
-thread that opened them (**E1102**).
+and `Time`, because each command measures its own deadline. A command whose
+deadline passes fails with `timeout`; the reply that comes after it is
+dropped, so the session's next command or event wait gets its own. A
+`Browser` and its contexts, pages, frames, locators, intercepts, and protocol
+handles stay on the thread that opened them (**E1102**).
 
 | API | Result | Description |
 | --- | --- | --- |

@@ -270,10 +270,13 @@ Browser: struct {
         if browser_closed(self) -> return Err(BrowserError{kind: "closed"})
         if browser_pop_event(self) == .Val(queued) -> return Ok(queued)
         started: time.instant()
-        value: browser_recv_json(self, started, timeout.milliseconds)
-        if !browser_capture_event(self, value) -> return Err(BrowserError{kind: "protocol"})
-        event: browser_pop_event(self) ?? return Err(BrowserError{kind: "protocol"})
-        Ok(event)
+        loop {
+            value: browser_recv_json(self, started, timeout.milliseconds)
+            if browser_late_reply(value, browser_peek_id(self)) -> next
+            if !browser_capture_event(self, value) -> return Err(BrowserError{kind: "protocol"})
+            event: browser_pop_event(self) ?? return Err(BrowserError{kind: "protocol"})
+            return Ok(event)
+        }
     }
 
     add_intercept: fn(self, phase: String) -[Net, Time]> BrowserIntercept BrowserError! {
@@ -746,6 +749,7 @@ BrowserProtocol: struct {
         started: time.instant()
         loop {
             value: browser_recv_json(self.__browser, started, timeout.milliseconds)
+            if browser_late_reply(value, browser_peek_id(self.__browser)) -> next
             if !browser_capture_event(self.__browser, value) {
                 return Err(BrowserError{kind: "protocol"})
             }
@@ -1343,8 +1347,9 @@ browser_command: fn(browser: Browser, method: String, params: &&Dyn) -[Net, Time
     browser_command_with_timeout(browser, method, params, browser_timeout_ms(browser))
 }
 
-// One command: send `{id, method, params}`, queue interleaved events, and
-// accept only the matching success reply before the deadline.
+// One command: send `{id, method, params}`, queue interleaved events, drop
+// late replies (browser_late_reply), and accept only the matching success
+// reply before the deadline.
 browser_command_with_timeout: fn(browser: Browser, method: String, params: &&Dyn, timeout_ms: Int) -[Net, Time]> Dyn BrowserError! {
     browser_check_command(browser, method)
     started: time.instant()
@@ -1358,6 +1363,7 @@ browser_command_with_timeout: fn(browser: Browser, method: String, params: &&Dyn
     loop {
         response: browser_recv_json(browser, started, timeout_ms)
         if browser_capture_event(browser, response) -> next
+        if browser_late_reply(response, id) -> next
         if browser_id(response) != Val(id) -> return Err(BrowserError{kind: "protocol"})
         response_type: browser_string(response, "type")
         if response_type == "error" || browser_get(response, "error") != None {
@@ -1571,6 +1577,21 @@ browser_id: fn(value: Dyn) -> Int? Never! {
     id: dyn_int(field) ?? return None
     if id < 0 -> return None
     Val(id)
+}
+
+// Whether `value` replies to a command whose id is below `current`: commands
+// go one at a time with rising ids (browser_next_id), so such a reply
+// answers one whose deadline passed before its reply came, and is dropped.
+browser_late_reply: fn(value: Dyn, current: Int) -> Bool Never! {
+    got: browser_id(value) ?? return false
+    got < current
+}
+
+// The id the next command takes; every reply below it is late
+// (browser_late_reply) while no command waits.
+browser_peek_id: fn(browser: Browser) -> Int Never! {
+    guard: browser.__state.guard_read()
+    guard.value.next_id
 }
 
 // FNV-1a 64 of the UTF-8 bytes as 16 lowercase hex digits: the hash every

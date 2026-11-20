@@ -1102,16 +1102,23 @@ scheduler_observe_update: fn(state: I64, wait: I64) {
     jet_rt_observe_task_wait(state, wait, if jet_ctx_deadline_present() -> I64{1} else -> I64{0}, jet_deadline_remaining_ms())
 }
 
+// True while the current thread's waits run on a World's virtual clock
+// (World.jet), whose parks observe no ambient deadline.
+scheduler_virtual_wait: fn() -> Bool {
+    (sync_load(wrapping(thread_base() + I64{112})) & I64{2}) != I64{0}
+}
+
 // Including its per-site interrupt order.
 scheduler_yield: fn(wait_kind: I64, slot: I64, timeout_ns: I64) -> I64 {
     scheduler_yield_policy(wait_kind, slot, timeout_ns, true, I64{0})
 }
 
 // scheduler_yield whose park observes the ambient deadline only when
-// `deadline` holds: a join of a typed task its own deadline already bounds
-// waits for that task's result instead. Under `jet perf run` a task's park
-// that is not a yield records its wait (PerfSamples.jet perf_samples_wait),
-// naming `object` (perf_samples_object; 0 for none).
+// `deadline` holds: a join observes its joiner's deadline itself, so a
+// finished child wins over a late wake (Task.jet task_join_wait). Under
+// `jet perf run` a task's park that is not a yield records its wait
+// (PerfSamples.jet perf_samples_wait), naming `object` (perf_samples_object;
+// 0 for none).
 scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline: Bool, object: I64) -> I64 {
     // A canceled root wait point returns its fallback without parking.
     if scheduler_root_cancel_observed() -> return I64{0}
@@ -1134,7 +1141,7 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
     }
     waiter: if !shielded -> scheduler_cancel_waiter_register(control, slot) else -> I64{0}
     wait := timeout_ns
-    virtual_wait: (sync_load(wrapping(thread_base() + I64{112})) & I64{2}) != I64{0}
+    virtual_wait: scheduler_virtual_wait()
     if virtual_wait {
         if (wait != I64{0}) { wait = I64{-1} }
     }

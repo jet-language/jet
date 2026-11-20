@@ -1,0 +1,54 @@
+// A wait whose deadline ends while its query is in flight, after which the
+// page still answers: an event wait, then the page's DOM, a screenshot and
+// its title. Each prints its result or its error's kind.
+use browser: core.browser
+
+PAGE: "data:text/html,<title>late</title><h1 id=title>Notes</h1>"
+
+waited: fn(page: BrowserPage) -[Net, Time, Time.Wait]> String {
+    page.get_by_css("#later").wait(browser.timeout(1)) ?? return err.kind
+    "found"
+}
+
+event: fn(session: Browser) -[Net, Time]> String {
+    next: session.next_event(browser.timeout(300)) ?? return err.kind
+    next.kind()
+}
+
+dom: fn(page: BrowserPage) -[Net, Time]> String {
+    text: page.dom() ?? return err.kind
+    "has title: {text.contains("<h1 id=\"title\">Notes</h1>")}"
+}
+
+shot: fn(page: BrowserPage) -[Net, Time]> String {
+    bytes: page.screenshot() ?? return err.kind
+    "png: {bytes.len() > 0}"
+}
+
+title: fn(page: BrowserPage) -[Net, Time]> String { page.title() ?? return err.kind }
+
+run: fn() {
+    session: browser.launch("chromium") ?? {
+        print("launch failed: {err}")
+        return
+    }
+    context: session.context() ?? {
+        print("context failed: {err}")
+        return
+    }
+    page: context.page() ?? {
+        print("page failed: {err}")
+        return
+    }
+    page.goto(PAGE) ?? {
+        print("goto failed: {err}")
+        return
+    }
+    print("wait: {waited(page)}")
+    print("event: {event(session)}")
+    print("wait: {waited(page)}")
+    print("dom: {dom(page)}")
+    print("screenshot: {shot(page)}")
+    print("title: {title(page)}")
+    session.close() ?? print("close failed: {err}")
+}

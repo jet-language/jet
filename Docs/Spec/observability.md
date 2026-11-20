@@ -114,10 +114,10 @@ profile is `no_samples` with no window.
 `jet perf run` samples the program's CPU time: the runtime arms a timer on
 each thread's own CPU clock (`timer_create` on `CLOCK_THREAD_CPUTIME_ID`,
 delivered to that thread, one sample per 125 microseconds of its CPU, 8 kHz),
-so threads that run at once each keep their samples, and records the program
-counter each `SIGPROF` interrupted with the call site of each caller, each
-handler in a record buffer of its own so no sample loses its stack to another
-thread's.
+or the perf event below where the kernel allows one, so threads that run at
+once each keep their samples, and records the program counter each sample
+interrupted with the call site of each caller, each handler or drain in a
+record buffer of its own so no sample loses its stack to another thread's.
 A frame without a frame pointer (code before a function's prologue sets one,
 a compiler-emitted helper such as the stop poll, a frameless runtime
 routine, a C library function) is stepped out of by the image's own call
@@ -170,9 +170,12 @@ image's `.symtab` function, hottest first, as `perf report` names them. The
 also gives how many samples the CPU time sampled should give beside how many
 the session kept, and counts any sample in Jet code that kept no stack. The
 profile's overhead is `measured`: `overhead_ns` is the time the sampler's
-handlers ran plus, for each sample's signal, the kernel's delivery and
-return, which the runtime times as sampling starts by sending its own thread
-64 signals; `overhead_reason` gives it as a share of the CPU time sampled.
+handlers and drains ran plus, for each signal that carried a sample, the
+kernel's delivery and return, which the runtime times as sampling starts by
+sending its own thread 64 signals, plus, under a perf event, the kernel's
+time to write each sample to its thread's ring, which the runtime times as
+sampling starts with a second sampler of the same source at a shallow and a
+deep stack; `overhead_reason` gives it as a share of the CPU time sampled.
 `jet perf view` sums the rows per function with its share of the
 samples and the CPU time they stand for, one sample per 125 microseconds,
 then its hottest lines with their exclusive and inclusive samples and
@@ -190,8 +193,8 @@ functions that `run` calls; their `inclusive_count` and `allocation_count` are
 null.
 
 Unless the run is a causal experiment or a flight recording, each thread
-samples by a perf event of its own, written to a ring its `SIGPROF` reports,
-where `perf_event_paranoid` allows one. At 1 or below, on a host with a
+samples by a perf event of its own where `perf_event_paranoid` allows one. At
+1 or below, on a host with a
 precise sampler, the runtime charges each sample by the instruction that
 spent the time: AMD's IBS op sampling (`perf_event_open` on the `ibs_op` PMU,
 filtered to user mode in software), else Intel's PEBS (cycles at
@@ -201,13 +204,24 @@ follows the clock speed the cores run at. At 2, or where neither opens, the
 task clock (`PERF_COUNT_SW_TASK_CLOCK`) samples each thread exactly once per
 125 microseconds of its CPU time in user mode, at the program counter its
 interrupt landed on, a few instructions past the one that spent the time (its
-skid); time in the kernel takes no sample. Above 2, or where the kernel
-refuses the task clock, each thread keeps its CPU-time timer, whose `SIGPROF`
-the kernel checks once a tick, so each thread takes at most one sample a tick,
-at the program counter the signal interrupted. The callers still come from
-the interrupted stack, which the skid can leave in another function: the
+skid); time in the kernel takes no sample. A perf event's sample costs no
+signal: the kernel writes it to the thread's ring with the user registers,
+its frame-pointer walk of the user stack (the callchain, at most
+`perf_event_max_stack` entries, 127 where the kernel has no such setting)
+and a copy of the stack's top 512 bytes, and the runtime drains the ring in
+batches: whenever the thread's running task changes (a fiber switch, a task's
+start and finish), when the kernel's `SIGPROF` says half the ring filled, as
+the thread ends and at exit. The drain steps out of frameless frames by the
+call frame information over the stack copy, then takes the kernel's walk; a
+stack the callchain's cap cut is counted in the `reason`, and a sample the
+kernel found no room for in the ring counts as a lost record. Above 2, or
+where the kernel refuses the task clock, each thread keeps its CPU-time
+timer, whose `SIGPROF` the kernel checks once a tick, so each thread takes at
+most one sample a tick, at the program counter the signal interrupted, and
+the `reason` says the timer took the samples and why. The callers still come
+from the interrupted stack, which the skid can leave in another function: the
 sample keeps the callers of the innermost interrupted frame in its own
-function, and when no frame is (the function returned before the signal
+function, and when no frame is (the function returned before the interrupt
 came), the interrupted frame is its caller. The main thread arms the first
 source the kernel accepts, and each thread after it arms that source. The
 receipt's `capture.sampling.pc` names the source, and the profile's `reason`

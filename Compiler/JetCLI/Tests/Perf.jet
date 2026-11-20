@@ -374,6 +374,46 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     assert_eq(profile.overhead_reason, "the sampler took 9 microseconds, 0.22% of the 4000 microseconds of CPU time sampled: 6 in its handlers and 3 signals at the 1000 nanoseconds the kernel took to deliver and return from one as sampling started")
 }
 
+#Test("perf charges a ring's samples the kernel's write and no signal, and says where the kernel cut a stack") {
+    table: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{X64JetlineFunction{low: 4096, high: 4352, name: "fib", file: "fib.jet", dir: "", decl: 5, rows: 0, rows_end: 0}}}
+    functions: [X64ImageFunction]{X64ImageFunction{start: 4096, size: 256, name: "fib.fib"}}
+    one: 1 << 48
+    ten: 10 << 48
+    words: jet_cli_perf_test_words(
+        [Int]{
+            4112 | one,
+            4116 | one,
+            4120 | one,
+            // The clock record: 4 ms of CPU sampled, 6 microseconds in the
+            // handlers and drains, 1 microsecond for each signal's
+            // delivery, no allocations or lost records, then the three
+            // samples the drains took from the rings, the kernel's 1.5
+            // microseconds to write them, and one stack the kernel cut.
+            (13 << 59) | ten,
+            4000000,
+            6000,
+            1000,
+            0,
+            0,
+            0,
+            3,
+            1500,
+            1,
+        },
+    )
+    sampled := jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words, 0)
+    // The task clock, its .pc file's eighth word the kernel's callchain
+    // depth.
+    sampled.sampler = jet_cli_perf_pc_words(jet_cli_perf_test_words([Int]{3, 0, 0, 0, 2, 125000, 0, 127}))
+    assert_eq(sampled.total, U64{3})
+    text: "\n\n\n\nfib: fn(n: Int) -> Int {{ n }}\n"
+    profile: jet_cli_perf_samples_profile(jet_cli_perf_source("fib.jet", text), sampled) ?? panic("fib's line holds samples")
+    assert(profile.reason.contains("; the task clock took them, a perf event on each thread's CPU time in user mode, so time in the kernel takes none, and the kernel walked each sample's stack into its thread's ring, at most 127 callchain entries"))
+    assert(profile.reason.contains("; 1 samples' stacks were cut at the 127 callchain entries the kernel writes (perf_event_max_stack), so their outermost callers are missing"))
+    assert_eq(profile.overhead_ns, Val(U64{7500}))
+    assert_eq(profile.overhead_reason, "the sampler took 7 microseconds, 0.18% of the 4000 microseconds of CPU time sampled: 6 in its handlers and drains, each signal a ring filled delivered within them, 0 signals at the 1000 nanoseconds the kernel took to deliver and return from one as sampling started, and 1 microseconds the kernel took to write the 3 samples to the threads' rings, as timed when sampling started")
+}
+
 // Each record the runtime could not write is counted. A flight ring keeps
 // tally records, clock records with 1 for their address: the losses so far,
 // then whether the run ended, each counting every loss before it. A `jet

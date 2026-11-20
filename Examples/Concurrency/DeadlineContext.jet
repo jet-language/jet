@@ -6,12 +6,15 @@ package: {
 use time: core.time
 
 run: fn() {
-    #Deadline(20ms) {
-        slow: task {
+    // The fast task needs 10ms of a 1s budget, a margin far beyond any
+    // scheduling delay; the slow one asks for 40ms of a 20ms budget, so its
+    // sleep always ends at the deadline.
+    #Deadline(1s) {
+        fast: task {
             time.sleep(10ms)
             print("finished fast")
         }
-        slow.join() ?? panic("fast task failed")
+        fast.join() ?? panic("fast task failed")
     }
     #Deadline(20ms) {
         slow: task {
