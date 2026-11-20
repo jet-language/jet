@@ -2,9 +2,7 @@
 // map the loop never shares clones it at most once, so it is no L2511.
 tally: fn(keys: [String]) -> [String:Int] {
     counts := [String:Int]{}
-    loop key in keys {
-        counts[key] = (counts.get(key) ?? 0) + 1
-    }
+    loop key in keys -> counts[key] = (counts.get(key) ?? 0) + 1
     counts
 }
 
@@ -12,9 +10,7 @@ tally: fn(keys: [String]) -> [String:Int] {
 after_snapshot: fn(keys: [String]) -> Int {
     counts := [String:Int]{}
     before: counts.copy()
-    loop key in keys {
-        counts[key] = 1
-    }
+    loop key in keys -> counts[key] = 1
     before.len() + counts.len()
 }
 

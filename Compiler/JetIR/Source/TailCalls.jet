@@ -140,7 +140,9 @@ ir_tail_ownable: fn(m: IRModule, f: IRFunction) -> Int Never! {
     }
     mask := 0
     loop slot in 0..<f.param_count {
-        if !written[slot] && m.types[f.slot_type[slot]].kind != .Aggregate -> mask += ir_tail_bit(slot)
+        if !written[slot] && m.types[f.slot_type[slot]].kind != .Aggregate {
+            mask += ir_tail_bit(slot)
+        }
     }
     mask
 }

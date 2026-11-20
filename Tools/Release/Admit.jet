@@ -1641,7 +1641,9 @@ reuse_plan: fn(ctx: &Ctx) -[Env, Exec, FS, Time.Wait]> ReusePlan Never! {
         if {
             changed_path == KNOWN_LEDGER && status == "M" -> {
                 loop item in file.rows {
-                    if ledger_owns(ledger, item.id) && !plan.ledger.contains(item.id) -> plan.ledger.push(item.id.copy())
+                    if ledger_owns(ledger, item.id) && !plan.ledger.contains(item.id) {
+                        plan.ledger.push(item.id.copy())
+                    }
                 }
             }
             has_prefix(changed_path, REUSE_QUIET) -> {}
@@ -2009,7 +2011,9 @@ reused_suites: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
         after: suite_part(SuiteRun{rows: plan.rows.copy(), error: ""}, suite).rows
         changed := rerun_ids(after, plan.paths)
         loop item in after {
-            if plan.ledger.contains(item.id) && !changed.contains(item.id) -> changed.push(item.id.copy())
+            if plan.ledger.contains(item.id) && !changed.contains(item.id) {
+                changed.push(item.id.copy())
+            }
         }
         // copy: the rows a change reaches stay apart from the failures run again.
         ids := changed.copy()
@@ -2175,9 +2179,7 @@ registries_verdict: fn(texts: [String], sha: String, dispositions: [Disposition]
             one: text_field(entry, "status")
             if one == "PASS" -> next
             id: text_field(entry, "id")
-            if disposition_for(dispositions, REGISTRY_SUITE, id, "-") != None {
-                carded += 1
-            } else {
+            if disposition_for(dispositions, REGISTRY_SUITE, id, "-") != None -> carded += 1 else {
                 untracked.push("{id} {one}")
             }
         }

@@ -35,13 +35,13 @@ run: fn() {
     left: task transfer(savings, checking)
     right: task transfer(checking, savings)
     if left.join() == {
-        .Ok(_) -> print("left: finished")
-        .Err(.Panicked(reason)) -> print("left: {reason}")
+        .Ok(_) -> { print("left: finished") }
+        .Err(.Panicked(reason)) -> { print("left: {reason}") }
         .Err(_) -> print("left: stopped")
     }
     if right.join() == {
-        .Ok(_) -> print("right: finished")
-        .Err(.Panicked(reason)) -> print("right: {reason}")
+        .Ok(_) -> { print("right: finished") }
+        .Err(.Panicked(reason)) -> { print("right: {reason}") }
         .Err(_) -> print("right: stopped")
     }
     print("ticker: {worker.join() ?? 0}")

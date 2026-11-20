@@ -11,15 +11,15 @@ fixture: Fixtures/Cost
 step: jet explain --cost {work}/tests/cli/cost_int_boxing.jet
 env: NO_COLOR=1
 exit: 0
-stdout: count "cost_int_boxing.jet:3 fn run — exact Int spill — optimizer-proven removed (loop depth 1; tier=shared-tir)" = 2 # `index * 2` and `+ 1` on the counter of `0..<4`
-stdout: !~ "cost_int_boxing.jet:3 fn run — exact Int spill — semantic remainder" # the range proves the counter's arithmetic never spills
-stdout: count "cost_int_boxing.jet:7 fn run — exact Int spill — semantic remainder (loop depth 1, repeats every loop turn; tier=shared-tir)" = 1 # `count += 1` has no range to bound it
+stdout: count "cost_int_boxing.jet:2 fn run — exact Int spill — optimizer-proven removed (loop depth 1; tier=shared-tir)" = 2 # `index * 2` and `+ 1` on the counter of `0..<4`
+stdout: !~ "cost_int_boxing.jet:2 fn run — exact Int spill — semantic remainder" # the range proves the counter's arithmetic never spills
+stdout: count "cost_int_boxing.jet:5 fn run — exact Int spill — semantic remainder (loop depth 1, repeats every loop turn; tier=shared-tir)" = 1 # `count += 1` has no range to bound it
 step: jet lint --cost {work}/tests/cli/cost_int_boxing.jet
 env: NO_COLOR=1
 exit: 1
 stderr: count "An exact Int operation may spill to bigint" = 1 # only the unbounded counter
-stderr: ~ "cost_int_boxing.jet:7" # on the unbounded counter's line
-stderr: !~ "cost_int_boxing.jet:3" # never on the range-proven line
+stderr: ~ "cost_int_boxing.jet:5" # on the unbounded counter's line
+stderr: !~ "cost_int_boxing.jet:2" # never on the range-proven line
 step: jet explain --cost {work}/tests/cli/cost_rows.jet
 env: NO_COLOR=1
 exit: 0

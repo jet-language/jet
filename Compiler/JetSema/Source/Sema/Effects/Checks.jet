@@ -3607,7 +3607,9 @@ sema_effect_resolve_type_params: fn(nodes: &[SemaEffectNode], calls: SemaEffectC
         span: nodes[index].span
         loop at in 0..<settled {
             callee: sema_effect_node_index(calls.node_by_key, nodes[index].call_edges[at]) ?? next
-            if open[callee].len() == 0 || bound_callees.contains(nodes[index].call_edges[at]) -> next
+            if open[callee].len() == 0 || bound_callees.contains(nodes[index].call_edges[at]) {
+                next
+            }
             loop dispatch in open[callee] {
                 sema_effect_add_dispatch_union(nodes, calls, index, dispatch.impls_key, span)
             }

@@ -169,7 +169,9 @@ body_cost_range_bounds: fn(tree: BodyTree, start: Int, end: Int, step: Int?, sho
     if step == .Val(stride) {
         by: body_cost_integer_bounds(tree, stride) ?? return checked_cost_bounded(checked_cost_min(first.lo, last.lo), checked_cost_max(first.hi, last.hi))
         if by.hi <= -1 -> return checked_cost_bounded(last.lo + short, first.hi)
-        if by.lo < 1 -> return checked_cost_bounded(checked_cost_min(first.lo, last.lo), checked_cost_max(first.hi, last.hi))
+        if by.lo < 1 {
+            return checked_cost_bounded(checked_cost_min(first.lo, last.lo), checked_cost_max(first.hi, last.hi))
+        }
     }
     checked_cost_bounded(first.lo, last.hi - short)
 }

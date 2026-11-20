@@ -399,7 +399,9 @@ cli_test_wait_for_file_lines: fn(path: String, minimum: Int) -[FS, Time]> {
         // after an unterminated last line.
         newlines: text.count("\n")
         counted: if text != "" && !text.ends_with("\n") -> newlines + 1 else -> newlines
-        if counted >= minimum -> return
+        if counted >= minimum {
+            return
+        }
         assert(time.elapsed(watch).ns < 5000000000, "timed out waiting for {minimum} lines in {path}")
         time.sleep(time.duration_ms(50))
     }

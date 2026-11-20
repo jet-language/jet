@@ -520,7 +520,9 @@ symbol_key_leaf: fn(key: String) -> String Never! {
 symbol_key_names: fn(key: String, name: String) -> Bool Never! {
     key_bytes: key.bytes()
     name_bytes: name.bytes()
-    if name_bytes.len() == 0 || name_bytes.len() >= key_bytes.len() || !key.ends_with(name) -> return false
+    if name_bytes.len() == 0 || name_bytes.len() >= key_bytes.len() || !key.ends_with(name) {
+        return false
+    }
     before: key_bytes[key_bytes.len() - name_bytes.len() - 1]
     before == (U8{46}) || before == (U8{58})
 }
@@ -585,7 +587,9 @@ symbol_key_parts: fn(key: String, is_module: fn(String) -[Mem.Alloc, Mem.Rc, Tim
     assert_eq(keys[6], "type:Int")
     loop (index, key) in keys {
         assert(!key.contains("::"), "`{key}` holds `::`")
-        loop other in index + 1..<keys.len() -> assert(key != keys[other], "two declarations share `{key}`")
+        loop other in index + 1..<keys.len() {
+            assert(key != keys[other], "two declarations share `{key}`")
+        }
     }
     names: [String]{"exists", "Point", "Point", "area", "x", "display", "Int"}
     loop (index, key) in keys {
@@ -1575,9 +1579,7 @@ type_union_member_tag_name: fn(raw: String) -> String Never! {
 }
 
 // `ty` with each nominal head read without its `module.` qualifier.
-type_unqualified_nominals: fn(ty: Type) -> Type Never! {
-    type_nominals_unqualified(ty, false)
-}
+type_unqualified_nominals: fn(ty: Type) -> Type Never! { type_nominals_unqualified(ty, false) }
 
 // `ty` as a module writes it: each nominal head read without the module
 // identity a checker key qualifies it by (`<corelib>/core.prelude.Span` is
@@ -1613,9 +1615,7 @@ type_nominals_unqualified: fn(ty: Type, identities_only: Bool) -> Type Never! {
     }
 }
 
-type_unqualified_name: fn(name: String) -> String Never! {
-    type_unqualified_text(name, false)
-}
+type_unqualified_name: fn(name: String) -> String Never! { type_unqualified_text(name, false) }
 
 // `name` without its `module.` qualifier; with `identities_only`, only a
 // module identity (`module:…`, `<corelib>/…`, which hold `:` or start with

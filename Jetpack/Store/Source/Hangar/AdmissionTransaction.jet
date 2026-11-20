@@ -106,7 +106,9 @@ AdmissionTransaction: struct {
             if files.create_dir_all(candidate) == {
                 .Ok(_) -> return Ok(AdmissionTransaction{verification: verification.copy(), roots: roots, stage: candidate, objects: [AdmissionObject]{}, published: [PublishedObject]{}, receipts: [String]{}, committed: false})
                 .Err(error) -> {
-                    if !StoreError.IO(error.copy()).is_already_exists() -> return Err(StoreError.IO(error))
+                    if !StoreError.IO(error.copy()).is_already_exists() {
+                        return Err(StoreError.IO(error))
+                    }
                 }
             }
         }

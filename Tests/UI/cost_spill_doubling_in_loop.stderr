@@ -1,8 +1,8 @@
 Error: Jet.HiddenCopyInLoop: An exact Int operation may spill to bigint inside a loop
-  --> Tests/UI/cost_spill_doubling_in_loop.jet:7:9
+  --> Tests/UI/cost_spill_doubling_in_loop.jet:6:23
     |
-  7 |         span *= 2
-    |         ^^^^^^^^^
+  6 |     loop _ in rows -> span *= 2
+    |                       ^^^^^^^^^
  Why: The loop multiplies or shifts this Int on every turn and nothing caps it, so it outgrows the packed Int rail and goes on as a bigint.
  Fix: To keep the Int on the packed rail, give it a range type such as `Int(0..1000)` or a fixed width such as `I64`, or cap it in the loop's condition.
 More: jet-lang.dev/e/Jet.HiddenCopyInLoop

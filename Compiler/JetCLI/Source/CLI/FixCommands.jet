@@ -84,7 +84,9 @@ jet_cli_fix_collect: fn(file: String, source: String, files: [JetCLIFixFile], te
             }
             // The advice (JetDriverCompileResult.advice) carries fixes too.
             found := jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
-            loop diagnostic in jet_driver_present_diagnostics(result.advice, snapshot, result.generated_source_files) -> found.push(diagnostic)
+            loop diagnostic in jet_driver_present_diagnostics(result.advice, snapshot, result.generated_source_files) {
+                found.push(diagnostic)
+            }
             loop diagnostic in found.move() {
                 if diagnostic.origin == .Val(origin) {
                     if origin.path != canonical || origin.source != source {

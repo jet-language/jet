@@ -3,12 +3,12 @@
 // the first session's edit changes the parameters of `score` while `rounds`,
 // which calls it, is on the stack; the second's is a plain edit, but the
 // program also writes over its own binary first.
-use files: core.files
-use sys: core.sys
-
-score: fn(round: Int) -> Int {
-    round * 10
+use {
+    files: core.files
+    sys: core.sys
 }
+
+score: fn(round: Int) -> Int { round * 10 }
 
 // The second session's edit, and the binary written over.
 rebuild: fn() {
@@ -27,6 +27,4 @@ rounds: fn() {
     }
 }
 
-run: fn() {
-    rounds()
-}
+run: fn() { rounds() }
