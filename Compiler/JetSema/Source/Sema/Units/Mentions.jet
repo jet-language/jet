@@ -166,7 +166,9 @@ sema_units_suffix_start: fn(mentions: SemaUnitSourceMentions, member: String) ->
 // Whether the source mentions catalog member `member`, whose type name
 // (sema_registration_unit_type_name) is `type_name`.
 sema_units_member: fn(mentions: SemaUnitSourceMentions, member: String, type_name: String) -> Bool Never! {
-    if sema_units_mention(mentions, type_name) == .Val(id) && mentions.unqualified[id] -> return true
+    if sema_units_mention(mentions, type_name) == .Val(id) && mentions.unqualified[id] {
+        return true
+    }
     at: sema_units_suffix_start(mentions, member)
     at < mentions.suffixes.len() && mentions.suffixes[at].text.starts_with(member)
 }

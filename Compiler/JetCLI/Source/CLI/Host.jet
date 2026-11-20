@@ -171,7 +171,11 @@ use {
         compiler_threads_failure_text,
         CompilerThreads,
         CompilerTraceSink,
+        NameTable,
+        name_find,
+        name_intern,
         name_rows_value,
+        name_table_sized,
         TConstantDef,
         TImplDef,
         TEST_SETTINGS_PLAN_ENV,
@@ -1462,19 +1466,19 @@ jet_cli_runtime_export_names: fn(runtime: JetCLIRuntimeExports) -> [String] Neve
 }
 
 // The runtime routes no stop poll follows in a program built over `runtime`
-// (IRChecks.quiet_routes): its exports that its stops receipt leaves out.
-// None without the receipt: every route polls.
-jet_cli_runtime_quiet_routes: fn(runtime: JetCLIRuntimeExports) -> [String:Bool] Never! {
-    quiet := [String:Bool]{}
+// (IRChecks.quiet_routes): its exports that its stops receipt leaves out,
+// interned. None without the receipt: every route polls.
+jet_cli_runtime_quiet_routes: fn(runtime: JetCLIRuntimeExports) -> NameTable Never! {
+    quiet := name_table_sized(2)
     receipt: runtime.stops ?? return quiet
     stops: String.from_bytes(receipt) ?? return quiet
     exports: String.from_bytes(runtime.exports) ?? return quiet
-    stopping := [String:Bool]{}
+    stopping := name_table_sized(2)
     stop_rows: stops.split("\n").to_list()
-    loop symbol in stop_rows.move() -> stopping[symbol] = true
+    loop symbol in stop_rows.move() -> _ := name_intern(stopping, symbol)
     export_rows: exports.split("\n").to_list()
     loop symbol in export_rows.move() {
-        if symbol != "" && stopping.get(symbol) == None -> quiet[symbol] = true
+        if symbol != "" && name_find(stopping, symbol) == None -> _ := name_intern(quiet, symbol)
     }
     quiet
 }

@@ -445,7 +445,8 @@ ir_hook_run: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: I
 ir_quiet_point_read: fn(p: IRProgram, b: IRBuilder, receiver: Int) -[]> Bool {
     if p.quiet_points.len() == 0 -> return false
     if ir_body_node(p, b, receiver).kind == .ConstRef(symbol) {
-        return p.quiet_points.get(ir_body_symbol_key(p, b, symbol)) != None
+        row: p.constants.get(ir_body_symbol_key(p, b, symbol)) ?? return false
+        return p.quiet_points.get(row) != None
     }
     false
 }

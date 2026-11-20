@@ -6,9 +6,15 @@
 //   E3012 stop names the innermost Jet function with its file, declaration
 //   line and source line, and the process exits 70 like every registered stop.
 // - Any other fatal signal prints the signal, the faulting address (SIGSEGV,
-//   SIGBUS) and the Jet frames (function and file:line), then the signal's
+//   SIGBUS) and the frames: the runtime routines it faulted in by their
+//   symbols, then the Jet frames (function and file:line). Then the signal's
 //   default action ends the process: status 128 + signal, with a core dump
 //   where enabled, exactly as without the report.
+// Either way the program's observe step for a fault runs after the report
+// (Observe.jet jet_rt_observe_exit): the faulting task, an observed run's
+// dump and a recording's sync-order log. One thread reports; any other that
+// faults meanwhile waits for the end, and a fault inside the report or the
+// observe step takes the signal's default action at once.
 // How much of the stack follows a report's first line is the image's
 // `backtrace` build option (fault_backtrace).
 // The report is machine code the static linker writes into each image
@@ -47,7 +53,7 @@ fault_main_stack := I64{0}
 
 // The `backtrace` build option of the running image (0 full, 1 brief, 2 off;
 // JetIR IRBacktrace): what a report prints after its first line. Full lists
-// the Jet frames; brief only the faulting frame (a stack overflow names its
+// the frames; brief only the faulting frame (a stack overflow names its
 // innermost Jet function either way); off no frame.
 fault_backtrace := I64{0}
 
@@ -80,13 +86,16 @@ fault_start: fn() {
     fault_action(I64{8}, handler)
 }
 
-// sa_flags SA_SIGINFO | SA_RESTORER | SA_ONSTACK | SA_NODEFER | SA_RESETHAND.
-// x86-64 refuses a handler without SA_RESTORER; the handler never returns,
-// so its restorer is never used. SA_RESETHAND makes a fault inside the report
-// take the default action; SA_NODEFER lets the report re-raise its signal.
+// sa_flags SA_SIGINFO | SA_RESTORER | SA_ONSTACK | SA_NODEFER. x86-64
+// refuses a handler without SA_RESTORER; the handler never returns, so its
+// restorer is never used. SA_NODEFER lets a fault inside the report reach
+// the handler again, which then takes the default action, and lets the
+// report re-raise its signal (fault_raise). No SA_RESETHAND: the handler is
+// the process's, so resetting it at the first fault would end the process
+// at a second thread's fault before the first's report is written.
 fault_action: fn(signal: I64, handler: I64) {
     #Unsafe("rt_sigaction borrows the four-word action on the stack; handler is this runtime's C-ABI export with the (signal, info, context) signature") {
-        _ := os_syscall_stack4_i64(I64{13}, signal, handler, I64{3422552068}, I64{0}, I64{0}, I64{8})
+        _ := os_syscall_stack4_i64(I64{13}, signal, handler, I64{1275068420}, I64{0}, I64{0}, I64{8})
     }
 }
 
@@ -132,18 +141,29 @@ priv fault_stack_end: fn(stack: I64) {
 // rbp 120, rsp 160, rip 168), as the kernel passes them to an SA_SIGINFO
 // handler. It never returns; the I64 result is the address-target shape.
 #Export(c) jet_rt_fault_signal: fn(signal: I64, info: I64, context: I64) -> I64 {
-    // One report per process: a second faulting thread waits for the exit.
-    if (fault_main_stack != I64{0} && sync_cas(wrapping(fault_main_stack + I64{24}), I64{0}, I64{1}) != I64{0}) {
-        loop -> _ := trap_syscall(I64{34}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    // One report per process, claimed by the reporting thread's id: another
+    // faulting thread waits for the end, and the reporting thread faulting
+    // again, inside its report or observe step, ends the process now.
+    if (fault_main_stack != I64{0}) {
+        me: trap_syscall(I64{186}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        holder: sync_cas(wrapping(fault_main_stack + I64{24}), I64{0}, me)
+        if (holder == me) { fault_raise(signal) }
+        if (holder != I64{0}) {
+            loop -> _ := trap_syscall(I64{34}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        }
     }
     // No Secret outlives the process in its memory or its core (#5478),
     // even if the report itself faults.
     secret_scrub()
     host_stdout_flush_fault()
     image: alloc_check_image()
-    if (rt_fault_print(signal, info, context, fault_backtrace, image, alloc_check_bias(image)) == EXIT_RUNTIME_PANIC) {
-        trap_defect_exit(EXIT_RUNTIME_PANIC)
-    }
+    status: rt_fault_print(signal, info, context, fault_backtrace, image, alloc_check_bias(image))
+    // The observe step, installed by a program with a task, a recording or
+    // an observer (Main.jet main_observe_exit_code), takes the fault's
+    // context in place of a stop's 1.
+    observe: main_observe_exit_code
+    if (observe != I64{0}) { _ := coll_call1(observe, context) }
+    if (status == EXIT_RUNTIME_PANIC) { trap_defect_exit(EXIT_RUNTIME_PANIC) }
     fault_raise(signal)
     I64{0}
 }

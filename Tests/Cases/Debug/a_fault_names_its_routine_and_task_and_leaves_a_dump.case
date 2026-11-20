@@ -1,0 +1,31 @@
+# A fault in a runtime routine (here the copy `mem.list_append` makes from
+# an address the program never mapped; a release build, so no checked
+# access stops it first) prints the report: the signal and address, the
+# routine by its symbol, then the Jet frames, then the faulting task. The
+# signal's default action ends the program, status 139. Under `--observe`
+# the fault also writes the typed dump, which `jet debug` opens at the
+# faulting thread's registers. The fixture must stay in jet fmt form: line 7
+# copies.
+requires: os-name:linux
+fixture: AFaultNamesItsRoutineAndTask.fixture
+env: NO_COLOR=1
+step: jet run --release --debug-info=true main.jet
+exit: 139
+stdout: = "before the fault\n"
+stderr: ~ "Fault [SIGSEGV]: invalid memory access at address 0x40\nBacktrace:\n  " # the signal and the address
+stderr: !~ "  ??\n" # the routine it faulted in is named, not unknown
+stderr: ~ " at main.jet:7\n" # then the Jet frame that called it
+stderr: ~ "\nTask: " # then the task that faulted
+stderr: !~ "Task: none" # a task, not a runtime thread
+stderr: !~ "jetdump" # no dump without an observer
+step: jet run --release --debug-info=true --observe main.jet
+exit: 139
+stderr: ~ "Fault [SIGSEGV]: invalid memory access at address 0x40\n" # the same report
+stderr: ~ "dump written: " # and where the fault's dump went
+entries: .jet/dumps ext = "jetdump" = 1 # one fault, one dump
+capture: dump = sole-entry .jet/dumps ext = "jetdump"
+step: jet debug {cap:dump}
+stdin: a_fault_names_its_routine_and_task_and_leaves_a_dump.stdin
+exit: 0
+stdout: ~ "Dump of process " # a dump, not a live process
+stdout: ~ "main.jet:7" # its stack reaches the Jet frame that faulted

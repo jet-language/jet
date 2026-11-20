@@ -556,8 +556,9 @@ replay_read: fn(bytes: I64, length: I64, result: I64) -> I64 {
     recorded
 }
 
-// The run's exit or stop (Observe.jet jet_rt_observe_exit, `stop` 1 for a
-// stop), once: a recording is written; a replay that exits before its log's
+// The run's exit, stop or fault (Observe.jet jet_rt_observe_exit, `stop`
+// nonzero for a stop or a fault), once: a recording is written, so a run
+// that faults replays to its fault; a replay that exits before its log's
 // end diverged there.
 replay_exit: fn(stop: I64) {
     if (replay_mode == REPLAY_OFF || sync_swap(wrapping(replay_root + I64{56}), I64{1}) != I64{0}) {
@@ -573,27 +574,36 @@ replay_exit: fn(stop: I64) {
     }
 }
 
+// Writes the recording: its header, events and data. Nothing here
+// allocates, as a fault's report runs it (Fault.jet jet_rt_fault_signal):
+// one fresh page holds the header and the NUL-terminated path.
 replay_write: fn() {
     path: sync_load(wrapping(replay_root + I64{40}))
     count: replay_count()
     used: sync_load(wrapping(replay_root + I64{32}))
     bytes: if (used > REPLAY_DATA_MAX) -> REPLAY_DATA_MAX else -> used
-    header: jet_rt_alloc(REPLAY_HEADER_BYTES, I64{8})
+    length: rt_text_len(path)
+    size: alloc_align(wrapping(REPLAY_HEADER_BYTES + wrapping(length + I64{1})), I64{4096})
+    header: alloc_map_try(size)
+    if (header == I64{0}) {
+        return
+    }
     rt_text_store(header, REPLAY_MAGIC)
     rt_text_store(wrapping(header + I64{8}), REPLAY_VERSION)
     rt_text_store(wrapping(header + I64{16}), count)
     rt_text_store(wrapping(header + I64{24}), bytes)
-    name: fd_c_path(path)
+    // The fresh mapping is zeroed, so the copy ends at a NUL.
+    name: wrapping(header + REPLAY_HEADER_BYTES)
+    rt_text_bytes_copy(name, rt_text_data(path), length)
     // O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, owner-only.
     fd: host_call(I64{2}, name, I64{524865}, I64{384})
-    fd_c_path_drop(name, path)
     if (fd >= I64{0}) {
         _ := host_write_all(fd, header, REPLAY_HEADER_BYTES)
         _ := host_write_all(fd, replay_event(I64{0}), count * REPLAY_EVENT_BYTES)
         _ := host_write_all(fd, replay_data(), bytes)
         _ := host_call(I64{3}, fd, I64{0}, I64{0})
     }
-    jet_rt_free(header, REPLAY_HEADER_BYTES, I64{8})
+    alloc_unmap(header, size)
 }
 
 replay_push: fn(text: I64, part: I64) {

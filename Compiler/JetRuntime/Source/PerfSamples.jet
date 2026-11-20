@@ -5976,12 +5976,15 @@ perf_flight_image: fn(state: I64, text: I64, zeros: I64, image: I64, length: I64
 }
 
 // A stop that ends the process (Trap.jet trap_root_prepare, through
-// Observe.jet jet_rt_observe_exit), under the flight recorder: the typed
+// Observe.jet jet_rt_observe_exit), or a fault (Fault.jet
+// jet_rt_fault_signal, through the same) whose ucontext_t is `fault` (0:
+// none), under the flight recorder: the typed
 // dump `jet debug` opens, `.jet/dumps/<program>-<UTC time>.jetdump`,
 // owner-only, of which the newest PERF_FLIGHT_DUMPS_KEPT stay. Its words:
 // PERF_FLIGHT_MAGIC, PERF_FLIGHT_VERSION, the pid, the Unix time, the load
 // bias, the stopping thread's rip, rsp and rbp, where it captured itself in
-// this frame (perf_flight_capture) or else as its caller resumes, its
+// this frame (perf_flight_capture) or else as its caller resumes, or a
+// fault's at the faulting instruction with every general register, its
 // tid, the image's byte count, the task registry's root (Observe.jet
 // observe_root), whose tasks name their controls and so the wait a
 // deadlock held each in, and the image's build hash (perf_flight_fold);
@@ -5997,7 +6000,7 @@ perf_flight_image: fn(state: I64, text: I64, zeros: I64, image: I64, length: I64
 // Secret's bytes nor a copy's in memory, and no image copy its literal's;
 // the live Secrets are scrubbed once both are written. Nothing here
 // allocates: the state's scratch serves every buffer.
-perf_flight_dump: fn() {
+perf_flight_dump: fn(fault: I64) {
     state: perf_flight_state
     if (state == I64{0} || sync_swap(wrapping(state + PERF_FLIGHT_DUMPED), I64{1}) != I64{0}) {
         return
@@ -6011,7 +6014,9 @@ perf_flight_dump: fn() {
     // perf_flight_capture takes them when the tgkill to itself returns
     // here, in this frame the dump outlives, so its debugger unwinds the
     // callee-saved registers from here (the frames' call frame rules).
-    // Without the capture, its rip, rsp and rbp as its caller resumes.
+    // Without the capture, its rip, rsp and rbp as its caller resumes. A
+    // fault's are those the fault interrupted, all known, so the debugger
+    // opens the dump at the faulting instruction.
     stop: wrapping(text + PERF_FLIGHT_STOP_AT)
     // What the captured threads and the held tasks (perf_flight_await) wait
     // on: PERF_FLIGHT_RELEASED once the dump is written or can't be.
@@ -6019,7 +6024,7 @@ perf_flight_dump: fn() {
     process: perf_flight_syscall(I64{39}, I64{0}, I64{0}, I64{0})
     me: thread_tid()
     sync_store(wrapping(text + PERF_FLIGHT_SELF_AT), me)
-    if (perf_samples_handle(PERF_FLIGHT_CAPTURE_SIGNAL) >= I64{0}) {
+    if (fault != I64{0}) { perf_flight_context(stop, fault) } else if (perf_samples_handle(PERF_FLIGHT_CAPTURE_SIGNAL) >= I64{0}) {
         // tgkill of this thread, whose handler copies the registers it
         // interrupts into the text page and returns.
         _ := perf_flight_syscall(I64{234}, process, me, PERF_FLIGHT_CAPTURE_SIGNAL)

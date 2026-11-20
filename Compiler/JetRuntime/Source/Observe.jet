@@ -419,12 +419,19 @@ observe_cancel_live_tasks: fn() {
 // writing the record of the CPU time `jet perf run` sampled (PerfSamples.jet
 // perf_samples_exit) and ending the flight recorder's publication
 // (perf_flight_end). `stop` 1 is a stop that ends the process, while its
-// stack is whole (Trap.jet trap_root_prepare): the flight recorder's typed
-// dump (perf_flight_dump), and nothing else, as the exit still follows.
+// stack is whole (Trap.jet trap_root_prepare); any other nonzero `stop` is
+// the ucontext_t of a fault, after its report (Fault.jet
+// jet_rt_fault_signal), which first names its task (observe_fault_task).
+// Either writes a recording's sync-order log (RecordReplay.jet replay_exit)
+// and the flight recorder's typed dump at the stop or the faulting
+// instruction (perf_flight_dump), and nothing else, as the end still
+// follows.
 #Export(c) jet_rt_observe_exit: fn(stop: I64) -> I64 {
+    fault: if (stop > I64{1}) -> stop else -> I64{0}
+    if (fault != I64{0}) { observe_fault_task() }
     replay_exit(stop)
-    if (stop == I64{1}) {
-        perf_flight_dump()
+    if (stop != I64{0}) {
+        perf_flight_dump(fault)
         return I64{0}
     }
     perf_samples_exit()
@@ -433,6 +440,39 @@ observe_cancel_live_tasks: fn() {
     if sync_swap(wrapping(observe_root + I64{64}), I64{1}) != (I64{0}) -> return I64{0}
     observe_publish_exit()
     I64{0}
+}
+
+// A fault report's task line: `Task: <id> (<label>)` for the task the
+// faulting thread runs (PerfSamples.jet perf_flight_task: the main thread
+// outside every task is task 1), or `Task: none (a runtime thread)`. It
+// writes to fd 2 and reads the registry without its lock, as a debugger
+// reads a stopped program's, since the faulting thread may hold it.
+observe_fault_task: fn() {
+    main: trap_syscall(I64{186}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) == trap_syscall(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    id: perf_flight_task(thread_base(), main)
+    observe_fault_write(rt_static_text("Task: "))
+    if (id == I64{0}) {
+        observe_fault_write(rt_static_text("none (a runtime thread)\n"))
+        return
+    }
+    divisor := I64{1}
+    loop id /% divisor >= (I64{10}) -> divisor *= I64{10}
+    loop divisor > (I64{0}) {
+        trap_write_word_raw(wrapping(I64{48} + (id /% divisor) % I64{10}), I64{1})
+        divisor = divisor /% I64{10}
+    }
+    node: if (observe_root == I64{0}) -> I64{0} else -> observe_task_find(id)
+    label: if (node == I64{0}) -> I64{0} else -> sync_load(wrapping(node + I64{32}))
+    if (label != I64{0}) {
+        observe_fault_write(rt_static_text(" ("))
+        observe_fault_write(label)
+        observe_fault_write(rt_static_text(")"))
+    }
+    observe_fault_write(rt_static_text("\n"))
+}
+
+observe_fault_write: fn(text: I64) {
+    _ := perf_flight_syscall(I64{1}, I64{2}, rt_text_data(text), rt_text_len(text))
 }
 
 #Export(c) jet_rt_observe_pool: fn(workers: I64, queued_delta: I64) {

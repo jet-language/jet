@@ -95,6 +95,31 @@ run: fn() {
     assert_eq(jet_format_source(simplified, true).text, simplified)
 }
 
+// `--simplify` gives a table of returns its default return as an `else` arm
+// with no braces the source did not write; an arm keeps the braces it wrote.
+#Test("simplified_else_arm_adds_no_braces_and_arms_keep_written_ones") {
+    source: `describe: fn(code: Int) -> String {
+    if code == {
+        1 -> { return "one" }
+        2 -> return "two"
+    }
+    return "other"
+}
+`
+    expected: `describe: fn(code: Int) -> String {
+    if code == {
+        1 -> { "one" }
+        2 -> "two"
+        else -> "other"
+    }
+}
+`
+    simplified: jet_format_source(source, true)
+    assert(simplified.ok)
+    assert_eq(simplified.text, expected)
+    assert_eq(jet_format_source(expected, true).text, expected)
+}
+
 #Test("failure_formatter_keeps_prefix_and_contextual_roles") {
     formatted: fmt_core_stable("load: fn() -> Int? IOError! {{ read()?(\n    \"loading\"\n) }}\n")
     assert(formatted.contains("load: fn() -> Int? IOError!"))

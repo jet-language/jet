@@ -1,0 +1,23 @@
+# A recorded run that faults (here a stack overflow, a SIGSEGV past the
+# guard page) still writes its sync-order log: the fault's report runs the
+# recording's exit step, so `jet run --record=NAME` publishes the recording
+# with the run's own status, and `jet debug --replay=NAME` reruns it to the
+# fault, which stops the session as a breakpoint does, with no divergence.
+# The fixture is the fault stop's (a_fault_stops_like_a_breakpoint_with_its_
+# stack_readable): line 2 declares `depth`.
+requires: os-name:linux
+fixture: AFaultStopsLikeABreakpointWithItsStackReadable.fixture
+env: NO_COLOR=1
+step: jet run --record=over prog.jet
+exit: 70
+stderr: ~ "Stop: Jet.StackOverflow: Stack overflow in `depth`" # the fault's report
+stderr: ~ "jet run: recorded replay `.jet/replays/over.jetproof-replay`" # and the recording it no longer loses
+stderr: !~ "ReplayFinalizeFailed" # the sync-order log was written
+file: .jet/replays/over.jetproof-replay is-file
+step: jet debug --replay=over prog.jet
+stdin: a_faulting_recording_replays_to_its_fault.stdin
+exit: 0
+stdout: ~ "Program received SIGSEGV  prog.jet:2  in depth()\n" # the replay reaches the fault
+stdout: ~ "(Jet) bt\n#0  depth()  at prog.jet:2\n" # with its stack readable
+stdout+stderr: ~ "Stop: Jet.StackOverflow: Stack overflow in `depth`" # continuing delivers it to the report
+stdout+stderr: !~ "replay diverged" # the replay stays faithful to the recording

@@ -1,0 +1,18 @@
+use mem: core.mem
+
+// Appends `count` bytes from `address`, which the program never mapped.
+spill: fn(address: Int, count: Int) -> Int {
+    held := [U8]{}
+    #Unsafe("the program copies from an address it never mapped, to fault") {
+        _ := mem.list_append(held, mem.from_addr<U8>(address), count)
+    }
+    held.len()
+}
+
+worker: fn(address: Int) -> Int { spill(address, 100000) + 1 }
+
+run: fn() {
+    print("before the fault")
+    job: task { worker(64) }
+    print(job.join() ?? 0)
+}

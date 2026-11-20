@@ -3941,7 +3941,10 @@ sema_check_registration_module_test: fn(environment: SemaScopeEnvironment, progr
                     module_result.injected_function_keys.push(function.key)
                     module_result.functions.push(function)
                     fact := checked_test_artifact_fact(environment.tables, environment.module_identity, module_text(graph.module_table, environment.module_identity), test, graph.modules[module_index].source)
-                    fact.compiler_fault = graph.law_faults.get(fact.key)
+                    // The fact outlives the borrowed graph, so it owns its copy of the fault.
+                    if sema_trait_law_fault(graph.law_faults, fact.key) == .Val(row) {
+                        fact.compiler_fault = Val(graph.law_faults[row].fault.copy())
+                    }
                     module_result.tests.push(fact)
                 }
             }
@@ -6043,7 +6046,7 @@ sema_check_module_value_consumers: fn(program: SemaProgramTables, module_index: 
         updated.labels.push(DiagnosticLabel{span: agreeing.span, message: "`{agreeing.consumer}` reads it here{shown}"})
         moved.push({position: position, diagnostic: sema_diagnostic_with_source_location(updated, segments)})
     }
-    loop row in moved -> module_result.diagnostics[row.position] = row.diagnostic.copy()
+    loop row in moved.move() -> module_result.diagnostics[row.position] = row.diagnostic
 }
 
 // Another consumer's read of `read`'s value that no error fails.

@@ -14,6 +14,7 @@ use {
         JetDriverFailure,
         JetDriverGeneratedModule,
         JetDriverVerbOutput,
+        JetDriverOutputOptions,
         jet_driver_query_build_plan,
         jet_driver_build_nodes_under_options,
         jet_driver_physical_path,
@@ -330,13 +331,13 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
     // Each compile node is keyed under the options its target builds with
     // (the `os` of its toolchain over every build option), so the receipt
     // names a different image by a different key.
-    identities := [String:String]{}
+    output_options := [JetDriverOutputOptions]{}
     loop row in graph.targets {
         loop output in row.outputs {
-            identities[output] = build_options_identity(jet_cli_build_toolchain_options(graph, row, selected_options))
+            output_options.push(JetDriverOutputOptions{output: output, identity: build_options_identity(jet_cli_build_toolchain_options(graph, row, selected_options))})
         }
     }
-    projected.nodes = jet_driver_build_nodes_under_options(projected.nodes.move(), identities, build_options_identity(selected_options))
+    projected.nodes = jet_driver_build_nodes_under_options(projected.nodes.move(), output_options, build_options_identity(selected_options))
     // Every source a selected target declares exists before any action runs or
     // the lock is written, so a missing one leaves neither behind. A source a
     // build action declares as its output is the action's to produce: the
@@ -938,9 +939,12 @@ jet_cli_build_code_options: fn(file: String, set: [BuildSessionOption]) -> [Buil
     root: jet_cli_manifest_root(directory) ?? directory
     relative := file.copy()
     if file.starts_with("{root}/") -> relative = file.slice(root.len() + 1..<file.len())
+    // A dependency's site (`../tool/tool.jet`) resolves against the root's
+    // canonical path, which a relative root (`handed`, `.`) is not.
+    physical: build_files.realpath(root) ?? root
     loop option in set {
         site: if option.file == "" -> relative else -> option.file
-        source: build_files.read(jet_driver_physical_path(root, site)) ?? ""
+        source: build_files.read(jet_driver_physical_path(physical, site)) ?? ""
         bytes: source.bytes()
         end := option.start
         if end > bytes.len() -> end = bytes.len()

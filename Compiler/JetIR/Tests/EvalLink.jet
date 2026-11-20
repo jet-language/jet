@@ -5,8 +5,8 @@
 // composed unit's functions read by the source each stands in.
 use {
     jet_backend.[X64_ASM_UNKNOWN]
-    jet_ir.[IRAsmLeaf, IRFunction, IRLibraryExport, IRModule, IROp, IRSlotKind, ir_args, ir_emit, ir_eval_link_receipt, ir_function_new, ir_module_new, ir_slot]
-    jet_sema.[SemaUnitMap, sema_unsafe_unit_map]
+    jet_ir.[IRAsmLeaf, IREvalUnit, IRFunction, IRLibraryExport, IRModule, IROp, IRSlotKind, ir_args, ir_emit, ir_eval_link_receipt, ir_function_new, ir_module_new, ir_slot]
+    jet_sema.[sema_unsafe_unit_map]
 }
 
 eval_test_fn: fn(name: String, file: String, params: Int, temps: Int) -> IRFunction {
@@ -112,7 +112,7 @@ eval_test_exports: fn() -> [IRLibraryExport] {
 }
 
 #Test("the eval receipt follows syscall numbers through wrappers and refuses what no constant fixes") {
-    receipt: ir_eval_link_receipt(eval_test_library(), eval_test_exports(), [String:SemaUnitMap]{})
+    receipt: ir_eval_link_receipt(eval_test_library(), eval_test_exports(), [IREvalUnit]{})
     assert(receipt.contains("export\tjet_fd_created_raw\trefused\tsyscall 332\tfd_created > host_call > os_syscall_i64"))
     assert(receipt.contains("export\tjet_rt_wake\tallowed"))
     assert(receipt.contains("export\tjet_rt_wait\trefused\tfutex wait (operation 128)\twait > os_syscall_i64"))
@@ -123,7 +123,7 @@ eval_test_exports: fn() -> [IRLibraryExport] {
 }
 
 #Test("the stop report is stubbed by function: a Trap helper the success path calls is checked itself") {
-    receipt: ir_eval_link_receipt(eval_test_library(), eval_test_exports(), [String:SemaUnitMap]{})
+    receipt: ir_eval_link_receipt(eval_test_library(), eval_test_exports(), [IREvalUnit]{})
     assert(receipt.contains("stub\ttrap_stop\tstop-report"))
     assert(receipt.contains("stub\ttrap_header\tstop-report"))
     assert(!receipt.any(fn(row) { row.starts_with("stub\ttrap_word\t") }))
@@ -149,7 +149,7 @@ eval_test_exports: fn() -> [IRLibraryExport] {
     m.functions.push(raise)
     exports := eval_test_exports()
     exports.push(eval_test_export(19, "jet_rt_parallel_raise"))
-    receipt: ir_eval_link_receipt(m, exports, [String:SemaUnitMap]{})
+    receipt: ir_eval_link_receipt(m, exports, [IREvalUnit]{})
     assert(receipt.contains("stub\ttrap_header\tstop-report"))
     assert(receipt.contains("stub\ttrap_write\tstop-report"))
     assert(receipt.contains("export\tjet_rt_parallel_raise\tallowed"))
@@ -164,7 +164,7 @@ eval_test_exports: fn() -> [IRLibraryExport] {
     exports := eval_test_exports()
     exports.push(eval_test_export(17, "jet_rt_shared_wake"))
     exports.push(eval_test_export(18, "jet_rt_stacked_futex"))
-    receipt: ir_eval_link_receipt(m, exports, [String:SemaUnitMap]{})
+    receipt: ir_eval_link_receipt(m, exports, [IREvalUnit]{})
     assert(receipt.contains("export\tjet_rt_shared_wake\trefused\tshared futex (operation 1)\tshared_wake > host_call > os_syscall_i64"))
     assert(receipt.contains("export\tjet_rt_stacked_futex\trefused\ta futex operation no constant fixes\tstacked_futex > os_syscall_stack4_i64"))
 }
@@ -192,7 +192,7 @@ eval_test_exports: fn() -> [IRLibraryExport] {
     exports := eval_test_exports()
     exports.push(eval_test_export(19, "jet_rt_int_add"))
     exports.push(eval_test_export(20, "jet_rt_guarded"))
-    receipt: ir_eval_link_receipt(m, exports, [String:SemaUnitMap]{})
+    receipt: ir_eval_link_receipt(m, exports, [IREvalUnit]{})
     assert(receipt.contains("stub\ttrap_footer\tstop-report"))
     assert(receipt.contains("export\tjet_rt_int_add\tallowed"))
     assert(!receipt.any(fn(row) { row.starts_with("stub\ttrap_write\t") }))
@@ -227,9 +227,7 @@ eval_test_exports: fn() -> [IRLibraryExport] {
     eval_test_call(checked, 2, [Int]{})
     m.functions.push(checked)
     exports: [IRLibraryExport]{eval_test_export(2, "jet_rt_numeric_stop"), eval_test_export(4, "jet_fd_created_raw"), eval_test_export(5, "jet_rt_checked")}
-    units := [String:SemaUnitMap]{}
-    units["Compiler/JetRuntime/Source/unit.jet"] = unit
-    receipt: ir_eval_link_receipt(m, exports, units)
+    receipt: ir_eval_link_receipt(m, exports, [IREvalUnit]{IREvalUnit{path: "Compiler/JetRuntime/Source/unit.jet", map: unit}})
     assert(receipt.contains("stub\ttrap_header\tstop-report"))
     assert(receipt.contains("stub\tnumeric_stop\tstop-report"))
     assert(receipt.contains("stub\talloc_bytes\talloc"))
@@ -237,7 +235,7 @@ eval_test_exports: fn() -> [IRLibraryExport] {
     assert(receipt.contains("export\tjet_fd_created_raw\trefused\tsyscall 332\tfd_created > os_syscall_i64"))
     assert(receipt.contains("export\tjet_rt_checked\tallowed"))
     // Read as one file, the unit has no stub, and the allocator's wait counts.
-    whole: ir_eval_link_receipt(m, exports, [String:SemaUnitMap]{})
+    whole: ir_eval_link_receipt(m, exports, [IREvalUnit]{})
     assert(!whole.any(fn(row) { row.starts_with("stub\t") }))
     assert(whole.contains("export\tjet_rt_checked\trefused\tfutex wait (operation 128)\tchecked > alloc_bytes > os_syscall_i64"))
 }

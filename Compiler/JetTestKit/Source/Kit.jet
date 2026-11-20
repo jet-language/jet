@@ -482,9 +482,9 @@ kit_steps_hook_check: fn(hooks: KitStepHooks, step: KitStep, index: Int, context
     }
 }
 
-// The host-wide lock file for a fixed TCP port. Ports are host-wide, so the
-// name is fixed instead of living under a run's scratch, and every testkit run
-// on the host takes the same flock.
+// The host-wide lock file for a TCP port, fixed by `host-port:` or handed out
+// as a free port. Ports are host-wide, so the name is fixed instead of living
+// under a run's scratch, and every testkit run on the host takes the same flock.
 kit_steps_host_port_path: fn(port: Int) -> String { "/tmp/jet-host-port-{port}.lock" }
 
 // A host port lock the case could not take: TIMEOUT naming how long it waited
@@ -556,9 +556,12 @@ kit_steps_execute: fn(original_context: KitStepCtx, hooks: KitStepHooks) -> KitO
         kit_exec_copy_tree(fixture, context.work, true, true)
     }
     port_names: kit_steps_case_port_names(context)
+    // Each free port's host-wide lock is held until the case ends, so no other run is handed the port
+    // between the probe and the case's own bind.
+    _free_port_locks := [files.FileLock]{}
     if port_names.len() > 0 {
         ports := [Int]{}
-        if kit_steps_free_ports(context, port_names.len(), ports) == .Val(failure) {
+        if kit_steps_free_ports(context, port_names.len(), ports, _free_port_locks) == .Val(failure) {
             return kit_steps_finish(state, failure)
         }
         loop index in 0..<port_names.len() {

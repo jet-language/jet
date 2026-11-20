@@ -29,7 +29,7 @@ use {
         core_identity_in_module,
         foundation_byte_text,
     ]
-    jet_foundation.[DeclTable, ModuleID, NameRows, NameTable, Span, SymbolTable, Type, decl_table_find, decl_table_key, module_is_core, name_find, name_index, name_intern, name_rows, name_rows_get_text, name_rows_set_first, name_table_sized, symbol_key]
+    jet_foundation.[DeclTable, ModuleID, NameRows, NameTable, Span, SymbolTable, Type, decl_table_find, decl_table_key, module_is_core, name_count, name_find, name_index, name_intern, name_rows, name_rows_get_text, name_rows_set_first, name_table_sized, symbol_key]
 }
 
 ir_core_reach_is_top_level: fn(kind: TFuncKind) -> Bool Never! {
@@ -842,14 +842,13 @@ ir_core_reach_template_key: fn(key: String) -> String Never! {
 // one row, which names the methods and constants a body reaches) leave for
 // the threads and come back unchanged. `decls` is the run's declaration
 // table the direct calls name. A body that reads a constant whose landed
-// value holds named functions (`held`: constant key -> those function keys,
-// `f: double` in a folded record) reaches them, as it reaches a function it
-// names as a value: the program makes each function value where it reads
-// the constant (ir_comptime). In a traced compile the calling thread
-// reports the rows read so far to `trace_sink` as `lower` progress, of the
-// candidate rows: a candidate no kept body names is never read, so the count
-// can end below the total.
-ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, symbols: &[SymbolTable], candidates: &&[Bool], core_module_identities: [ModuleID], rooted_keys: NameTable, held: &&[String:[String]], threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> [Bool] {
+// value holds named functions (`held`, `f: double` in a folded record)
+// reaches them, as it reaches a function it names as a value: the program
+// makes each function value where it reads the constant (ir_comptime). In a
+// traced compile the calling thread reports the rows read so far to
+// `trace_sink` as `lower` progress, of the candidate rows: a candidate no
+// kept body names is never read, so the count can end below the total.
+ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, symbols: &[SymbolTable], candidates: &&[Bool], core_module_identities: [ModuleID], rooted_keys: NameTable, held: &&IRReachHeld, threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> [Bool] {
     if core_module_identities.len() == 0 -> return candidates
     core_modules := [U32:Bool]{}
     loop identity in core_module_identities -> core_modules[identity.id] = true
@@ -889,7 +888,14 @@ ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, symbols: &[Sy
             weights.push(sizes[index])
         }
     }
-    slot: Shared{IRReachShared{functions: [[FnBody]]{compiler_take_rows<FnBody>(functions)}, symbols: compiler_take_rows<SymbolTable>(symbols), by_key: [NameRows]{by_key.move()}, source_keys: [IRReachSources]{source_keys.move()}, decl_rows: decl_rows.move(), held: [[String:[String]]]{held}}}
+    // Each function a held constant names, as its candidate row (-1: none).
+    held_rows := [Int]{}
+    loop key in held.functions {
+        target := name_rows_get_text(by_key, key)
+        if target == None -> target = name_rows_get_text(by_key, ir_core_reach_template_key(key))
+        held_rows.push(target ?? -1)
+    }
+    slot: Shared{IRReachShared{functions: [[FnBody]]{compiler_take_rows<FnBody>(functions)}, symbols: compiler_take_rows<SymbolTable>(symbols), by_key: [NameRows]{by_key.move()}, source_keys: [IRReachSources]{source_keys.move()}, decl_rows: decl_rows.move(), held: [IRReachHeld]{held}, held_rows: held_rows.move()}}
     read := 0
     loop {
         reached := [Int]{}
@@ -947,17 +953,60 @@ ir_core_reach_has: fn(table: NameTable, text: String) -> Bool Never! {
     name_index(found) > 0
 }
 
+// The functions each landed constant's value names, by constant key
+// (ir_reachable_core_rows): the constant `constants` interns as id `id`
+// names the function keys `functions[starts[id - 1]..<ends[id - 1]]`.
+IRReachHeld: struct {
+    constants: NameTable{name_table_sized(2)},
+    starts: [Int]{[Int]{}},
+    ends: [Int]{[Int]{}},
+    functions: [String]{[String]{}},
+}
+
+// Records that constant `key`'s landed value names the functions
+// `functions` interns, but the empty name. A value that names none records
+// nothing; a later record of the same constant replaces its functions.
+ir_reach_held_add: fn(held: &IRReachHeld, key: String, functions: &&NameTable) Never! {
+    if name_count(functions) <= 1 {
+        return
+    }
+    id: name_index(name_intern(held.constants, key))
+    if id == 0 {
+        return
+    }
+    start: held.functions.len()
+    loop text in functions.texts.move() {
+        if text != "" -> held.functions.push(text)
+    }
+    if id > held.starts.len() {
+        held.starts.push(start)
+        held.ends.push(held.functions.len())
+        return
+    }
+    held.starts[id - 1] = start
+    held.ends[id - 1] = held.functions.len()
+}
+
+// The row of constant `key` in `held`'s starts and ends, -1 when its value
+// names no function.
+ir_reach_held_row: fn(held: IRReachHeld, key: String) -> Int Never! {
+    found: name_find(held.constants, key) ?? return -1
+    name_index(found) - 1
+}
+
 // What every reachability thread reads: the checked functions, the run's
 // symbol table, their rows by key, the by-name source helpers' keys and the
 // functions each constant's landed value holds, each the one row of its
-// list, and the function rows by DeclID row.
+// list, the function rows by DeclID row, and the candidate row of each
+// held function (-1: none).
 IRReachShared: struct {
     functions: [[FnBody]],
     symbols: [SymbolTable],
     by_key: [NameRows],
     source_keys: [IRReachSources],
     decl_rows: [Int],
-    held: [[String:[String]]],
+    held: [IRReachHeld],
+    held_rows: [Int],
 }
 
 // Where a wave stands in the trace's `lower` progress: the rows the waves
@@ -1057,32 +1106,26 @@ ir_core_reach_part_targets: fn(slot: Shared<IRReachShared>, rows: [Int], first: 
             }
         }
         // Passed straight through: a local binding of the guarded rows would copy them.
-        ir_core_reach_row_targets(inputs.value.functions[0], inputs.value.symbols[0], inputs.value.by_key[0], inputs.value.source_keys[0], inputs.value.decl_rows, inputs.value.held[0], rows[position], targets)
+        ir_core_reach_row_targets(inputs.value.functions[0], inputs.value.symbols[0], inputs.value.by_key[0], inputs.value.source_keys[0], inputs.value.decl_rows, inputs.value.held[0], inputs.value.held_rows, rows[position], targets)
     }
     targets
 }
 
 // The rows checked function row `row` names (a direct call's by its
 // DeclID row; others by key, or by their generic declaration's key), and
-// the functions held by each constant it reads (`held`), appended to
-// `targets`.
-ir_core_reach_row_targets: fn(functions: [FnBody], symbols: SymbolTable, by_key: NameRows, source_keys: IRReachSources, decl_rows: [Int], held: [String:[String]], row: Int, targets: &[Int]) Never! {
+// the candidate rows (`held_rows`) of the functions held by each constant
+// it reads (`held`), appended to `targets`.
+ir_core_reach_row_targets: fn(functions: [FnBody], symbols: SymbolTable, by_key: NameRows, source_keys: IRReachSources, decl_rows: [Int], held: IRReachHeld, held_rows: [Int], row: Int, targets: &[Int]) Never! {
     loop key in ir_core_reach_function_keys(functions[row], functions, symbols, source_keys, decl_rows, targets) {
-        ir_core_reach_key_target(by_key, key, targets)
-        if held.get(key) == .Val(function_keys) {
-            loop function_key in function_keys {
-                ir_core_reach_key_target(by_key, function_key, targets)
-            }
+        target := name_rows_get_text(by_key, key)
+        if target == None -> target = name_rows_get_text(by_key, ir_core_reach_template_key(key))
+        if target == .Val(found) -> targets.push(found)
+        constant: ir_reach_held_row(held, key)
+        if constant < 0 -> next
+        loop index in held.starts[constant]..<held.ends[constant] {
+            if held_rows[index] >= 0 -> targets.push(held_rows[index])
         }
     }
-}
-
-// The row of function key `key`, or of its generic declaration's key,
-// appended to `targets` when a candidate has one.
-ir_core_reach_key_target: fn(by_key: NameRows, key: String, targets: &[Int]) Never! {
-    target := name_rows_get_text(by_key, key)
-    if target == None -> target = name_rows_get_text(by_key, ir_core_reach_template_key(key))
-    if target == .Val(found) -> targets.push(found)
 }
 
 #Test("Precise reachability roots the closed source registry at any Core path") {

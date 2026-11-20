@@ -38,6 +38,9 @@ use {
         decl_table_find,
         decl_table_find_symbol,
         module_is_core,
+        name_count,
+        name_intern,
+        name_table_sized,
         sema_casing_is_alphanumeric,
         type_name,
     ]
@@ -154,7 +157,8 @@ jet_driver_cost_cover: fn(functions: [FnBody], callees: JetDriverCostCallees) ->
             cover.covered.push(JetDriverCostCovered{position: position, name: functions[position].name})
         }
     }
-    specializations := [String:Bool]{}
+    // Each covered specialization's `<target>/<name>`, interned once.
+    specializations := name_table_sized(16)
     gap_rows := [Int:Bool]{}
     cursor := 0
     loop cursor < cover.covered.len() {
@@ -168,8 +172,9 @@ jet_driver_cost_cover: fn(functions: [FnBody], callees: JetDriverCostCallees) ->
                 if callees.bodies[row] == .Val(target) {
                     if jet_driver_cost_reports(functions[target]) && functions[target].generic_params.len() > 0 {
                         specialization: "{functions[target].name}__generic__{jet_driver_cost_type_suffix(type_args)}"
-                        if specializations.get("{target}/{specialization}") == None {
-                            specializations["{target}/{specialization}"] = true
+                        known: name_count(specializations)
+                        _ := name_intern(specializations, "{target}/{specialization}")
+                        if name_count(specializations) > known {
                             cover.covered.push(JetDriverCostCovered{position: target, name: specialization})
                         }
                     }
@@ -296,15 +301,16 @@ jet_driver_cost_place: fn(load: JetDriverLoadResult, report: &TCostReport) {
 // stop can reach it.
 jet_driver_cost_lints: fn(load: JetDriverLoadResult, report: TCostReport) -> [Diagnostic] {
     lints := [Diagnostic]{}
-    seen := [String:Bool]{}
+    seen := name_table_sized(16)
     loop site in report.sites {
         if site.loop_depth == 0 || site.state != TCostState.SemanticRemainder || site.kind == TCostKind.StopPoll {
             next
         }
         operation: jet_driver_cost_operation(site)
         key: "{site.module_identity:Debug} {site.span.start} {site.span.end} {operation}"
-        if seen.get(key) != None -> next
-        seen[key] = true
+        known: name_count(seen)
+        _ := name_intern(seen, key)
+        if name_count(seen) == known -> next
         lints.push(jet_driver_diagnostic_at_loaded_site(load, site.module_identity, "L2510", site.span, "{operation} inside a loop", "A repeated copy or representation fallback can make a growing value's cost super-linear.", "To keep the loop's cost linear, {jet_driver_cost_fix(site.kind)}."))
     }
     lints
@@ -323,15 +329,16 @@ jet_driver_cost_copy_lints: fn(load: JetDriverLoadResult, functions: [FnBody]) -
         jet_driver_cost_function_sites(function, function.name, jet_driver_cost_nodes(function), depths, sites)
     }
     lints := [Diagnostic]{}
-    seen := [String:Bool]{}
+    seen := name_table_sized(16)
     loop site in sites {
         if site.loop_depth == 0 || site.state != TCostState.SemanticRemainder || !jet_driver_cost_tidy(site) {
             next
         }
         operation: jet_driver_cost_operation(site)
         key: "{site.module_identity:Debug} {site.span.start} {site.span.end} {operation}"
-        if seen.get(key) != None -> next
-        seen[key] = true
+        known: name_count(seen)
+        _ := name_intern(seen, key)
+        if name_count(seen) == known -> next
         lints.push(jet_driver_diagnostic_at_loaded_site(load, site.module_identity, "L2511", site.span, "{operation} inside a loop", jet_driver_cost_tidy_why(site.kind), jet_driver_cost_tidy_fix(site.kind)))
     }
     lints
@@ -588,16 +595,16 @@ jet_driver_cost_growth: fn(tree: BodyTree, nodes: &[Int:Bool], updates: &[Int:Bo
     conditions := [Int:Int]{}
     owners := [Int:Int]{}
     turns := [[Int:Bool]]{}
-    binds := JetDriverCostBinds{lets: [String:Int]{}, assigned: [String:[Int]]{}}
+    binds := JetDriverCostBinds{lets: [Int:Int]{}, latest: [Int:Int]{}, values: [Int]{}, previous: [Int]{}}
     loop statement in tree.stmts {
         if statement == .Let(local, _, init, _, _, _) && local.symbol_id == .Val(symbol) {
-            binds.lets["{symbol:Debug}"] = init
+            binds.lets[Int{symbol.id}] = init
         }
         if statement == .Assign(place, _, value, _, _) && place == .Local(local) && local.symbol_id == .Val(symbol) {
-            key: "{symbol:Debug}"
-            values := binds.assigned.remove(key) ?? [Int]{}
-            values.push(value)
-            binds.assigned[key] = values
+            key: Int{symbol.id}
+            binds.previous.push(binds.latest.get(key) ?? -1)
+            binds.latest[key] = binds.values.len()
+            binds.values.push(value)
         }
         iterated := [Int]{}
         jet_driver_cost_iterated(tree, statement, iterated)
@@ -674,11 +681,15 @@ jet_driver_cost_carries_place: fn(tree: BodyTree, place: BodyPlace, id: Int, mix
 }
 
 // The locals of a body the growth rule asks about (jet_driver_cost_growth),
-// by their symbol's spelling: the initializer node of the `let` that binds
-// each, and the value node of each assignment that stores it.
+// by symbol id: the initializer node of the `let` that binds each, and the
+// value node of each assignment that stores it, chained from the latest
+// store: store row `row` holds value node `values[row]`, and `previous[row]`
+// is the row of the same local's store before it (-1 for none).
 JetDriverCostBinds: struct {
-    lets: [String:Int],
-    assigned: [String:[Int]],
+    lets: [Int:Int],
+    latest: [Int:Int],
+    values: [Int],
+    previous: [Int],
 }
 
 // Whether assignment place `place` of `tree` carries its value from one
@@ -696,7 +707,7 @@ jet_driver_cost_carried: fn(tree: BodyTree, place: BodyPlace, turn: [Int:Bool], 
 // whose expressions are `turn`: no `let` inside the loop binds it.
 jet_driver_cost_outlives_turn: fn(symbol: SymbolID?, turn: [Int:Bool], binds: JetDriverCostBinds) -> Bool Never! {
     known: symbol ?? return false
-    if binds.lets.get("{known:Debug}") == .Val(init) -> return turn.get(init) == None
+    if binds.lets.get(Int{known.id}) == .Val(init) -> return turn.get(init) == None
     true
 }
 
@@ -733,14 +744,14 @@ jet_driver_cost_turn_key: fn(tree: BodyTree, id: Int, turn: [Int:Bool], binds: J
     if node.kind == .IntLit(value, _) -> return Val("{value}")
     if node.kind == .ConstRef(symbol) -> return Val("{symbol:Debug}")
     if node.kind == .Local(local) && local.symbol_id == .Val(symbol) {
-        key: "{symbol:Debug}"
-        init: binds.lets.get(key) ?? return None
+        init: binds.lets.get(Int{symbol.id}) ?? return None
         if turn.get(init) != None -> return None
-        stores: binds.assigned.get(key) ?? [Int]{}
-        loop value in stores {
-            if turn.get(value) != None -> return None
+        row := binds.latest.get(Int{symbol.id}) ?? -1
+        loop row >= 0 {
+            if turn.get(binds.values[row]) != None -> return None
+            row = binds.previous[row]
         }
-        return Val(key)
+        return Val("{symbol:Debug}")
     }
     None
 }

@@ -49,17 +49,22 @@ BuildOptionRow: struct {
     // `check_removal` gate (GateKind.CheckRemoval) the owning policy can refuse
     // (E3415), and it applies only to code the built package wrote.
     removes_check: [String],
+    // Whether the value shapes the image's bytes, so the options' cache key
+    // and compile identity name it (build_options_key). false for a row that
+    // only places a product, bounds a step's time or writes a copy of a
+    // source for inspection.
+    shapes_image: Bool,
     help: String,
 }
 
 JET_BUILD_OPTIONS: #run { [BuildOptionRow]{
     // The native backend's level (AGENTS.md I9). `jet build` is O2;
     // `jet run`, `jet dev` and `jet test` are O0.
-    {name: "optimize", kind: BuildOptionKind.Level, values: [String]{"O0", "O1", "O2"}, stock_build: "O2", stock_run: "O0", removes_check: [String]{}, help: "How hard to optimize: O0, O1 or O2"},
+    {name: "optimize", kind: BuildOptionKind.Level, values: [String]{"O0", "O1", "O2"}, stock_build: "O2", stock_run: "O0", removes_check: [String]{}, shapes_image: true, help: "How hard to optimize: O0, O1 or O2"},
     // A failed list bounds check: fatal stops the program (the stock), report
     // writes the failure to stderr and goes on with the access unchecked, off
     // drops the check.
-    {name: "bounds", kind: BuildOptionKind.Choice, values: [String]{"fatal", "report", "off"}, stock_build: "fatal", stock_run: "fatal", removes_check: [String]{"report", "off"}, help: "What a failed bounds check does: fatal, report or off"},
+    {name: "bounds", kind: BuildOptionKind.Choice, values: [String]{"fatal", "report", "off"}, stock_build: "fatal", stock_run: "fatal", removes_check: [String]{"report", "off"}, shapes_image: true, help: "What a failed bounds check does: fatal, report or off"},
     // false leaves the DWARF sections (.debug_*) out of the image; .eh_frame
     // stays, and a crash report then names addresses, not functions and lines.
     // split (the stock `release` profile's) has `jet build` write the DWARF,
@@ -68,78 +73,79 @@ JET_BUILD_OPTIONS: #run { [BuildOptionRow]{
     // `.jet/symbols/.build-id/`, both found by the image's GNU build id; the
     // other commands keep it in the image as with true. `build: fn` writes
     // true or false only (build_option_method_values).
-    {name: "debug_info", kind: BuildOptionKind.Bool, values: [String]{"true", "false", "split"}, stock_build: "true", stock_run: "true", removes_check: [String]{}, help: "Whether the image carries DWARF debug info: true, false or split"},
+    {name: "debug_info", kind: BuildOptionKind.Bool, values: [String]{"true", "false", "split"}, stock_build: "true", stock_run: "true", removes_check: [String]{}, shapes_image: true, help: "Whether the image carries DWARF debug info: true, false or split"},
     // true keeps the optimizer's inlining to the O1 limits at any level, so
     // inlining grows the code no more than `optimize: O1` does.
-    {name: "small", kind: BuildOptionKind.Bool, values: [String]{"false", "true"}, stock_build: "false", stock_run: "false", removes_check: [String]{}, help: "Favor a smaller binary by keeping inlining to the O1 limits: true or false"},
+    {name: "small", kind: BuildOptionKind.Bool, values: [String]{"false", "true"}, stock_build: "false", stock_run: "false", removes_check: [String]{}, shapes_image: true, help: "Favor a smaller binary by keeping inlining to the O1 limits: true or false"},
     // Which unmarked callees the optimizer inlines (O1 and O2): auto picks
     // them by size, always_marked and off take none. Every `#Inline(Always)`
     // callee is inlined under each value and on every tier, O0 included.
-    {name: "inline", kind: BuildOptionKind.Choice, values: [String]{"auto", "always_marked", "off"}, stock_build: "auto", stock_run: "auto", removes_check: [String]{}, help: "Which calls the optimizer inlines: auto, always_marked or off"},
+    {name: "inline", kind: BuildOptionKind.Choice, values: [String]{"auto", "always_marked", "off"}, stock_build: "auto", stock_run: "auto", removes_check: [String]{}, shapes_image: true, help: "Which calls the optimizer inlines: auto, always_marked or off"},
     // What a native fault report prints after its first line (JetRuntime
     // Fault.jet): full the Jet frames (function and file:line), brief only the
     // faulting frame, off none. Naming a frame needs the image's debug info, so
     // `backtrace: full` written with `debug_info: false` is refused (E2104).
-    {name: "backtrace", kind: BuildOptionKind.Choice, values: [String]{"full", "brief", "off"}, stock_build: "full", stock_run: "full", removes_check: [String]{}, help: "What a fault report shows of the stack: full, brief or off"},
+    {name: "backtrace", kind: BuildOptionKind.Choice, values: [String]{"full", "brief", "off"}, stock_build: "full", stock_run: "full", removes_check: [String]{}, shapes_image: true, help: "What a fault report shows of the stack: full, brief or off"},
     // remove builds only the functions the entry reaches (the stock); keep
     // also builds every other non-generic function of the built package, so the
     // image carries each one (a debugger or a profiler can name it).
-    {name: "dead_code", kind: BuildOptionKind.Choice, values: [String]{"remove", "keep"}, stock_build: "remove", stock_run: "remove", removes_check: [String]{}, help: "Whether the image keeps unreached functions, the package's and the runtime's: remove or keep"},
+    {name: "dead_code", kind: BuildOptionKind.Choice, values: [String]{"remove", "keep"}, stock_build: "remove", stock_run: "remove", removes_check: [String]{}, shapes_image: true, help: "Whether the image keeps unreached functions, the package's and the runtime's: remove or keep"},
     // true links the checked heap (JetRuntime Alloc.jet, checked mode): every
     // heap block carries guards and its allocating call chain, and a double,
     // foreign or wrong-layout free, a write past the end or a write after free
     // stops the program with a report naming the call sites. false (the stock)
     // links none of it and the program reads nothing at start for it. A web
     // build has no checked heap, so true with `os: web` is refused (E2104).
-    {name: "checked_alloc", kind: BuildOptionKind.Bool, values: [String]{"false", "true"}, stock_build: "false", stock_run: "false", removes_check: [String]{}, help: "Build with the checked memory allocator, which stops at a bad free or a write after free: true or false"},
+    {name: "checked_alloc", kind: BuildOptionKind.Bool, values: [String]{"false", "true"}, stock_build: "false", stock_run: "false", removes_check: [String]{}, shapes_image: true, help: "Build with the checked memory allocator, which stops at a bad free or a write after free: true or false"},
     // on writes each source `build: fn` generates (`b.generate`) to its
     // `.jet/generated/<package>/<name>.jet` path under the package root for
-    // inspection; off (the stock) writes none.
-    {name: "write_generated", kind: BuildOptionKind.Choice, values: [String]{"off", "on"}, stock_build: "off", stock_run: "off", removes_check: [String]{}, help: "Whether fn build's generated sources are written to .jet/generated/: off or on"},
+    // inspection; off (the stock) writes none. The compile reads the
+    // generated sources from memory either way, so the image is the same.
+    {name: "write_generated", kind: BuildOptionKind.Choice, values: [String]{"off", "on"}, stock_build: "off", stock_run: "off", removes_check: [String]{}, shapes_image: false, help: "Whether fn build's generated sources are written to .jet/generated/: off or on"},
     // keep (the stock) builds each core.perf zone site as a jump over its
     // call that the image's site table lists, so the site does nothing until
     // `jet perf run` or `jet perf attach` patches it on; strip leaves the
     // zone sites out of the image, so no profiler can turn them on.
-    {name: "zones", kind: BuildOptionKind.Choice, values: [String]{"keep", "strip"}, stock_build: "keep", stock_run: "keep", removes_check: [String]{}, help: "Whether the image keeps its profiler zone sites, which stay off until jet perf run or jet perf attach turns them on: keep or strip"},
+    {name: "zones", kind: BuildOptionKind.Choice, values: [String]{"keep", "strip"}, stock_build: "keep", stock_run: "keep", removes_check: [String]{}, shapes_image: true, help: "Whether the image keeps its profiler zone sites, which stay off until jet perf run or jet perf attach turns them on: keep or strip"},
     // Where `jet build` writes its executables: a directory under the package
     // root, or an absolute one; "" (the stock) is `.jet/build`. A run builds
     // its image in memory and writes none.
-    {name: "output_dir", kind: BuildOptionKind.Text, values: [String]{}, stock_build: "", stock_run: "", removes_check: [String]{}, help: "The directory jet build writes its executables to (\"\" is .jet/build)"},
+    {name: "output_dir", kind: BuildOptionKind.Text, values: [String]{}, stock_build: "", stock_run: "", removes_check: [String]{}, shapes_image: false, help: "The directory jet build writes its executables to (\"\" is .jet/build)"},
     // More C libraries the native link resolves foreign symbols against, each
     // a static archive found as an undeclared `#Link` library is (pkg-config,
     // then the C compiler's search path; ForeignLink.jet).
-    {name: "libs", kind: BuildOptionKind.List, values: [String]{}, stock_build: "", stock_run: "", removes_check: [String]{}, help: "More C libraries the native link resolves foreign symbols against"},
+    {name: "libs", kind: BuildOptionKind.List, values: [String]{}, stock_build: "", stock_run: "", removes_check: [String]{}, shapes_image: true, help: "More C libraries the native link resolves foreign symbols against"},
     // More native link inputs, each `-L<dir>` (a directory `libs` and `-l`
     // are found in first), `-l<name>` (a library, as in `libs`) or the path
     // of a static `.a` archive. The native linker takes no flags and reads
     // archives only, so any other word is refused (E2104). A non-empty value
     // is a `link_override` gate the owning policy can
     // refuse (E3415).
-    {name: "link_args", kind: BuildOptionKind.List, values: [String]{}, stock_build: "", stock_run: "", removes_check: [String]{}, help: "More native link inputs: -L<dir>, -l<name> or a .a archive path"},
+    {name: "link_args", kind: BuildOptionKind.List, values: [String]{}, stock_build: "", stock_run: "", removes_check: [String]{}, shapes_image: true, help: "More native link inputs: -L<dir>, -l<name> or a .a archive path"},
     // The operating system the image runs on: the key of each TARGET_OS_ALL
     // OS, in that order. The native backend writes Linux x86-64 ELF images,
     // and `jet build` also writes web builds (`--target web`), so every other
     // value is refused (E2104).
-    {name: "os", kind: BuildOptionKind.Choice, values: [String]{"linux", "macos", "windows", "web", "wasm", "freestanding"}, stock_build: "linux", stock_run: "linux", removes_check: [String]{}, help: "The operating system the image runs on: linux, macos, windows, web, wasm or freestanding"},
+    {name: "os", kind: BuildOptionKind.Choice, values: [String]{"linux", "macos", "windows", "web", "wasm", "freestanding"}, stock_build: "linux", stock_run: "linux", removes_check: [String]{}, shapes_image: true, help: "The operating system the image runs on: linux, macos, windows, web, wasm or freestanding"},
     // The oldest OS version the image runs on (a Mach-O image's minimum
     // version). A Linux ELF image has no versioned ABI floor, so a non-empty
     // value is refused (E2104).
-    {name: "min_os", kind: BuildOptionKind.Text, values: [String]{}, stock_build: "", stock_run: "", removes_check: [String]{}, help: "The oldest OS version the image runs on (\"\" is none)"},
+    {name: "min_os", kind: BuildOptionKind.Text, values: [String]{}, stock_build: "", stock_run: "", removes_check: [String]{}, shapes_image: true, help: "The oldest OS version the image runs on (\"\" is none)"},
     // How long one build step (`b.run`) may run before it is stopped and the
     // build fails; a step's own `.timeout(...)` replaces it for that step.
-    {name: "action_timeout", kind: BuildOptionKind.Duration, values: [String]{}, stock_build: "30s", stock_run: "30s", removes_check: [String]{}, help: "How long one build step may run, such as 10min"},
+    {name: "action_timeout", kind: BuildOptionKind.Duration, values: [String]{}, stock_build: "30s", stock_run: "30s", removes_check: [String]{}, shapes_image: false, help: "How long one build step may run, such as 10min"},
     // The link step of each executable `jet build` writes: default is Jet's
     // own link, and a hook path names a `#On(build.link)` function whose
     // build action links the image instead. A run, a test and `jet dev` link
     // their image in memory, and a web build writes a module no native link
     // makes, so each refuses a hook (E2104).
-    {name: "link", kind: BuildOptionKind.Hook, values: [String]{"default"}, stock_build: "default", stock_run: "default", removes_check: [String]{}, help: "The link step of each executable: default, or a link hook such as tools.relink"},
+    {name: "link", kind: BuildOptionKind.Hook, values: [String]{"default"}, stock_build: "default", stock_run: "default", removes_check: [String]{}, shapes_image: true, help: "The link step of each executable: default, or a link hook such as tools.relink"},
     // The steps `jet build` runs on each linked executable, in order: each
     // names a `#On(build.before_write)` function whose build action turns the
     // linked file into the one written. A run, a test and `jet dev` keep
     // their image in memory, and a web build writes no linked executable, so
     // each refuses a step (E2104).
-    {name: "post_link", kind: BuildOptionKind.Hooks, values: [String]{}, stock_build: "", stock_run: "", removes_check: [String]{}, help: "The hooks run on each linked executable, in order, such as tools.sign"},
+    {name: "post_link", kind: BuildOptionKind.Hooks, values: [String]{}, stock_build: "", stock_run: "", removes_check: [String]{}, shapes_image: true, help: "The hooks run on each linked executable, in order, such as tools.sign"},
 } }
 
 // The runtime exports of the checked heap (JetRuntime Alloc.jet): its link
@@ -699,10 +705,6 @@ build_option_join: fn(words: [String]) -> String Never! {
     out
 }
 
-// The rows that only place a product, not shape its bytes, so no cache key
-// names them.
-JET_BUILD_OPTIONS_UNKEYED: [String]{"output_dir", "action_timeout"}
-
 // The profile a compile selects when no `--profile` names one: every compile
 // request starts at it (JetDriverCompileRequest), and every record that names
 // the selected profile names it then.
@@ -715,7 +717,7 @@ JET_BUILD_DEFAULT_PROFILE: "dev"
 build_options_key: fn(options: BuildOptions) -> String Never! {
     out := if options.profile == "" -> JET_BUILD_DEFAULT_PROFILE else -> options.profile
     loop choice in options.values {
-        if !JET_BUILD_OPTIONS_UNKEYED.contains(choice.name) {
+        if JET_BUILD_OPTIONS[build_option_index(choice.name)].shapes_image {
             out = "{out};{choice.name}={choice.value}"
         }
     }
@@ -737,7 +739,7 @@ build_options_identity: fn(options: BuildOptions) -> String Never! {
     stock: build_options_stock(options.command)
     parts := [String]{}
     loop choice in options.values {
-        if JET_BUILD_OPTIONS_UNKEYED.contains(choice.name) -> next
+        if !JET_BUILD_OPTIONS[build_option_index(choice.name)].shapes_image -> next
         if build_options_value(stock, choice.name) == choice.value -> next
         parts.push("{choice.name}={choice.value}")
     }

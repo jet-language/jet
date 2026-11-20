@@ -20,8 +20,11 @@
 #
 # Frames come from the frame-pointer chain and the location table
 # (.debug_jetline as the linker writes it, Image/DebugPrune.jet) of the
-# image's section headers. Every byte goes through one 4 KiB buffer on the
-# stack, from templates with seven field codes: no allocation, no unwinder.
+# image's section headers; a frame outside Jet source before the first Jet
+# one (the runtime routine that faulted, every frame of a runtime thread)
+# is named by its function symbol in .symtab. Every byte goes through one
+# 4 KiB buffer on the stack, from templates with seven field codes: no
+# allocation, no unwinder.
     .intel_syntax noprefix
 
     # The frame: these words below rbp, the report buffer from rbp, then
@@ -50,7 +53,11 @@
     .set V_TABEND, -176
     .set V_LOW, -184            # the function find matched: its link-time
     .set V_HIGH, -192           # start and end
-    .set WORDS, 192
+    .set V_JET, -200            # 1 once a Jet frame is written
+    .set V_SYM, -208            # .symtab: start (0: none) and end, and the
+    .set V_SYMEND, -216         # names its symbols point into
+    .set V_STR, -224
+    .set WORDS, 224
     .set OUT_SIZE, 4096
     .set PATH, OUT_SIZE
     .set FRAME, WORDS + OUT_SIZE + 8192
@@ -94,14 +101,18 @@
     mov [rbp + V_IP], rax
     mov [rbp + V_HEX], rax
 
-    # The location table: the image's section named .debug_jetline.
+    # The location table: the image's section named .debug_jetline; and
+    # its symbols: the SHT_SYMTAB section and the names its sh_link names.
     xor eax, eax
     mov [rbp + V_TAB], rax
     mov [rbp + V_TABEND], rax
+    mov [rbp + V_JET], rax
+    mov [rbp + V_SYM], rax
     test r8, r8
     jz 3f
     mov r10, r8
     add r10, [r8 + 40]          # e_shoff
+    mov rbx, r10
     movzx r9d, word ptr [r8 + 58]   # e_shentsize
     movzx edx, word ptr [r8 + 60]   # e_shnum
     movzx eax, word ptr [r8 + 62]   # e_shstrndx
@@ -110,7 +121,19 @@
     add r11, r8
 1:  test edx, edx
     jz 3f
-    mov eax, [r10]              # sh_name
+    cmp dword ptr [r10 + 4], 2  # sh_type SHT_SYMTAB
+    jne 4f
+    mov rax, [r10 + 24]         # sh_offset, sh_size
+    add rax, r8
+    mov [rbp + V_SYM], rax
+    add rax, [r10 + 32]
+    mov [rbp + V_SYMEND], rax
+    mov eax, [r10 + 40]         # sh_link: the names' section
+    imul eax, r9d
+    mov rax, [rbx + rax + 24]
+    add rax, r8
+    mov [rbp + V_STR], rax
+4:  mov eax, [r10]              # sh_name
     lea rsi, [r11 + rax]
     lea rdi, [rip + jetline]
     push 15
@@ -172,7 +195,7 @@
     pop rax
     jmp done
 
-    # Any other fatal signal: its name, the address, the Jet frames.
+    # Any other fatal signal: its name, the address, the frames.
 signal:
     mov rax, [rbp + V_ADDR]
     mov [rbp + V_HEX], rax
@@ -208,7 +231,20 @@ signal:
     call say
 3:  cmp byte ptr [rbp + V_MODE], 1
     je 6f
-    push 64
+    # A SIGSEGV fetching its own instruction (a call to a bad address):
+    # the return address that call pushed names the calling frame, which
+    # the frame-pointer chain skips.
+    cmp byte ptr [rbp + V_SIG], 11
+    jne 7f
+    mov rax, [rbp + V_IP]
+    cmp rax, [rbp + V_ADDR]
+    jne 7f
+    mov rax, [rbp + V_SP]
+    test al, 7
+    jnz 7f
+    mov rax, [rax]
+    call r13
+7:  push 64
     pop rdx
     call walk
     jmp 6f
@@ -293,24 +329,63 @@ walk_address:
 
 walk_frame:
     dec rax
-# `  name at file:line\n` (or `  name\n`) for the Jet function holding rax:
-# eax 1, else 0 and nothing written.
+# `  name at file:line\n` (or `  name\n`) for the Jet function holding rax;
+# before the first Jet frame, `  name\n` for the function symbol holding
+# it: eax 1, else 0 and nothing written.
 frame_at:
     push rbx
     mov rbx, rax
     call find
     test eax, eax
     jz 1f
+    mov byte ptr [rbp + V_JET], 1
     mov rdi, rbx
     sub rdi, [rbp + V_BIAS]
     call line
     mov cl, al
     mov al, T_FRAME + 1
     sub al, cl
-    call say
+    jmp 2f
+1:  cmp byte ptr [rbp + V_JET], 0
+    jne 3f
+    mov rax, rbx
+    call symbol
+    test eax, eax
+    jz 3f
+    mov al, T_FRAME + 1
+2:  call say
     push 1
     pop rax
-1:  pop rbx
+3:  pop rbx
+    ret
+
+# The function symbol of .symtab holding run-time pc rax: eax 1 and its
+# name in [V_NAME], else eax 0. Clobbers rcx, rdx and rsi.
+symbol:
+    sub rax, [rbp + V_BIAS]
+    mov rsi, [rbp + V_SYM]
+    test rsi, rsi
+    jz 3f
+1:  lea rdx, [rsi + 24]
+    cmp rdx, [rbp + V_SYMEND]
+    ja 3f
+    mov cl, [rsi + 4]           # st_info: STT_FUNC
+    and cl, 15
+    cmp cl, 2
+    jne 2f
+    mov rcx, rax                # st_value <= pc < st_value + st_size
+    sub rcx, [rsi + 8]
+    cmp rcx, [rsi + 16]
+    jae 2f
+    mov ecx, [rsi]              # st_name
+    add rcx, [rbp + V_STR]
+    mov [rbp + V_NAME], rcx
+    push 1
+    pop rax
+    ret
+2:  mov rsi, rdx
+    jmp 1b
+3:  xor eax, eax
     ret
 
 # The Jet function holding run-time pc rax: eax 1 and its name, file,

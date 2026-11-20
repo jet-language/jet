@@ -737,7 +737,9 @@ BODY_CODEC_AHEAD_RUNS: 160
     declared := stage.graph.move()
     graph := declared.move() ?? panic("BodyCodec: the declaration pass lost its registration graph")
     count: bodies.head.count
-    if count < 6 + BODY_CODEC_AHEAD_RUNS -> panic("BodyCodec: only {count} function checks were captured")
+    if count < 6 + BODY_CODEC_AHEAD_RUNS {
+        panic("BodyCodec: only {count} function checks were captured")
+    }
     shared := BodyCodecIn{at: 0, end: 0, failed: false, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}}
     loads := [String]{}
     total := 0
@@ -794,7 +796,9 @@ BODY_CODEC_AHEAD_RUNS: 160
     loop (position, row) in hooks.core_bodies_ahead {
         if row != None -> failures.push("record {position} was read ahead")
     }
-    if hooks.core_bodies_read != 0 -> failures.push("the read-ahead counted {hooks.core_bodies_read} bytes read")
+    if hooks.core_bodies_read != 0 {
+        failures.push("the read-ahead counted {hooks.core_bodies_read} bytes read")
+    }
     if failures.len() > 0 {
         panic("BodyCodec collected {failures.len()} failures:\n{failures.join("\n")}")
     }
