@@ -14,8 +14,8 @@ step: jet debug prog.jet
 stdin: watch_expression_uses_compiler_parser.stdin
 exit: 0
 stdout: ~ "Breakpoint hit  prog.jet:8  in run_order()\n" # the breakpoint stops before the item is written
-stdout: ~ "Error [jet.DebugRequestRefused]: The debugger can't do this here: `order.lines[` can't be watched: `order.lines[` is not a Jet expression: " # the parser's diagnostic refuses a malformed place
-stdout: ~ "Error [jet.DebugRequestRefused]: The debugger can't do this here: `order.total + 1` can't be watched: `order.total + 1` names no place; a place is a local or a field path under one" # an expression that is no place is refused
+stdout: ~ "Error: Jet.DebugRequestRefused: The debugger can't do this here: `order.lines[` can't be watched: `order.lines[` is not a Jet expression: " # the parser's diagnostic refuses a malformed place
+stdout: ~ "Error: Jet.DebugRequestRefused: The debugger can't do this here: `order.total + 1` can't be watched: `order.total + 1` names no place; a place is a local or a field path under one" # an expression that is no place is refused
 stdout: ~ "Watchpoint 3  order.lines[i + 1] = 3\n" # the index expression is evaluated and the watch reads the item
 stdout: ~ "Watchpoint 4  order.total = 0\n" # a field path reads the field
 stdout: ~ "Watchpoint 3 hit  prog.jet:8  in run_order()\norder.lines[i + 1]: 3 -> 7\n" # the write to the item stops

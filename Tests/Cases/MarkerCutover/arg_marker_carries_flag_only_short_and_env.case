@@ -35,13 +35,13 @@ step misuse: jet check misuse/main.jet
 exit: 1
 stderr: ~ "`#Arg(flag_only: true)` on `verbose` has nothing to opt out of" # a Bool is already flag-only
 stderr: ~ "--> main.jet:3:10" # located at the flag_only argument
-stderr: ~ "jet-lang.dev/e/E1309" # redundant flag_only
+stderr: ~ "jet-lang.dev/e/Jet.RedundantFlagMarker" # redundant flag_only
 stderr: ~ "`#Arg(short: \"pp\")` is not a one-letter option" # a short option is one letter
 stderr: ~ "--> main.jet:4:17" # located at the short argument
-stderr: ~ "jet-lang.dev/e/E1318" # invalid short name
+stderr: ~ "jet-lang.dev/e/Jet.InvalidShortName" # invalid short name
 stderr: ~ "`#Arg(env:)` has no CLI mapping for field `quiet`" # a Bool flag has no env value
 stderr: ~ "--> main.jet:5:15" # located at the env argument
-stderr: ~ "jet-lang.dev/e/E1319" # unmapped env
+stderr: ~ "jet-lang.dev/e/Jet.UnmappedCliMarker" # unmapped env
 stderr: ~ "3 problems found" # every misuse is reported
 step retired: jet check retired/main.jet
 exit: 1
@@ -51,5 +51,5 @@ stderr: ~ "`#Short` isn't a known applied rule" # retired
 stderr: ~ "--> main.jet:4:6" # located at `#Short`
 stderr: ~ "`#Env` isn't a known applied rule" # retired
 stderr: ~ "--> main.jet:5:6" # located at `#Env`
-stderr: ~ "jet-lang.dev/e/E0927" # unknown marker, no teaching diagnostic
+stderr: ~ "jet-lang.dev/e/Jet.UnknownAppliedRule" # unknown marker, no teaching diagnostic
 stderr: ~ "3 problems found" # one diagnostic per retired marker

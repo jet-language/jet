@@ -1,0 +1,19 @@
+# The registered diagnostic-names1 plan (toolchain a0.0.45) names every Jet
+# diagnostic `Jet.Name`: a bracketed heading of a code or an old `jet.` name
+# becomes `Error: Jet.Name:` (likewise `Lint` and `Stop`), a More link and a
+# closing hint name the row's name, a bracketed `[jet.Name]` is the bare name,
+# an `#Allow` and any other `jet.Name` take `Jet.`, and a jet.report object
+# gains its `name`. A library's own name keeps its spelling, and a `jet.` name
+# no row owns is reported and left alone. A second run finds nothing left to
+# rewrite.
+fixture: DiagnosticNames1NamesEveryJetDiagnostic/Input
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- diagnostic-names1 --write before.jet guide.md
+exit: 0
+stdout: = "EDIT before.jet 3\nSKIP guide.md:14: `jet.NotARegisteredDiagnostic` names no registered diagnostic, left alone\nEDIT guide.md 10\nTOTAL 13 sites in 2 files\n"
+file: before.jet = DiagnosticNames1NamesEveryJetDiagnostic/before.out
+file: guide.md = DiagnosticNames1NamesEveryJetDiagnostic/guide.out
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- diagnostic-names1 --write before.jet guide.md
+exit: 0
+stdout: = "SKIP guide.md:14: `jet.NotARegisteredDiagnostic` names no registered diagnostic, left alone\nTOTAL 0 sites in 0 files\n"
+file: before.jet = DiagnosticNames1NamesEveryJetDiagnostic/before.out
+file: guide.md = DiagnosticNames1NamesEveryJetDiagnostic/guide.out

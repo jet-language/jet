@@ -1577,7 +1577,7 @@ The report is a human renderable: `--json` suppresses successful report bytes,
 while missing or malformed package authority remains an error.
 
 `jet explain` takes a diagnostic as its code (`E0001`), its full name
-(`jet.StrayCharacter`), or its bare name (`StrayCharacter`), and all three print
+(`Jet.StrayCharacter`), or its bare name (`StrayCharacter`), and all three print
 the same registry entry. A bare name that is not a registered diagnostic falls
 through to the other lookups.
 

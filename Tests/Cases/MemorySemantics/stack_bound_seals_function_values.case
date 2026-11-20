@@ -9,7 +9,7 @@ fixture: StackBoundSealsFunctionValues.fixture
 env: NO_COLOR=1
 step sealed: jet check sealed.jet
 exit: 0
-stderr: !~ "Error [" # the only target is `double`, so `run` has a bound
+stderr: !~ "Error: " # the only target is `double`, so `run` has a bound
 step report: jet inspect memory -O0 sealed.jet
 exit: 0
 stdout: ~ "Stack bound: " # sema's bound for the entry
@@ -22,7 +22,7 @@ stderr: ~ "`!Mem.Stack(above: 65536)` cannot be proved for grown.run: recursion 
 stderr: ~ " with no `#MaxDepth(n)` on its cycle" # the report says what would bound it
 step marked: jet check marked.jet
 exit: 0
-stderr: !~ "Error [" # `#MaxDepth(8)` on `again` bounds the cycle
+stderr: !~ "Error: " # `#MaxDepth(8)` on `again` bounds the cycle
 step markedreport: jet inspect memory -O0 marked.jet
 exit: 0
 stdout: !~ "Stack bound: unbounded" # the marked cycle has a bound

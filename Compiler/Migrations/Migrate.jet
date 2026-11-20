@@ -36,6 +36,7 @@ migration_plans: fn() -> [MigrationPlan] {
         MigrationPlan{name: "brace-layout1", toolchain: "a0.0.45"},
         MigrationPlan{name: "american-ident1", toolchain: "a0.0.45"},
         MigrationPlan{name: "american-tokens1", toolchain: "a0.0.45"},
+        MigrationPlan{name: "diagnostic-names1", toolchain: "a0.0.45"},
     }
 }
 
@@ -49,6 +50,7 @@ migration_rewrite: fn(plan: String, path: String, text: String, source: Bool) ->
         "brace-layout1" -> brace_layout1_file(path, text, source)
         "american-ident1" -> american_ident1_file(path, text, source)
         "american-tokens1" -> american_tokens1_file(path, text)
+        "diagnostic-names1" -> diagnostic_names1_file(path, text, source)
         else -> panic("no migration plan named {plan}")
     }
 }

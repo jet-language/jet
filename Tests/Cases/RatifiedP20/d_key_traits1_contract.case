@@ -27,29 +27,29 @@ stderr: empty
 step fallible: jet check fallible/main.jet
 exit: 1
 stderr: ~ "`Email.key` can fail with `Err`" # an error suffix on the key
-stderr: ~ "jet-lang.dev/e/E0502" # the KeyBy contract code
+stderr: ~ "jet-lang.dev/e/Jet.InvalidMapKeyType" # the KeyBy contract code
 step effectful: jet check effectful/main.jet
 exit: 1
 stderr: ~ "`Email.key` performs `Time`" # an effect row on the key
-stderr: ~ "jet-lang.dev/e/E0502" # the KeyBy contract code
+stderr: ~ "jet-lang.dev/e/Jet.InvalidMapKeyType" # the KeyBy contract code
 step written: jet check written/main.jet
 exit: 1
 stderr: ~ "`impl Equatable` on `Email` is a second `Equatable` beside its `KeyBy`" # a hand-written equal
 stderr: ~ "`Email` implements `KeyBy` here" # names the KeyBy declaration too
-stderr: ~ "jet-lang.dev/e/E0908" # the second-rule code
+stderr: ~ "jet-lang.dev/e/Jet.DuplicateTraitImpl" # the second-rule code
 step marker: jet check marker/main.jet
 exit: 1
 stderr: ~ "`#!Comparable` on `Email` is a second `Comparable` beside its `KeyBy`" # a signed marker
 stderr: ~ "`Email` implements `KeyBy` here" # names the KeyBy declaration too
-stderr: ~ "jet-lang.dev/e/E0908" # the second-rule code
+stderr: ~ "jet-lang.dev/e/Jet.DuplicateTraitImpl" # the second-rule code
 step shared: jet check shared/main.jet
 exit: 1
 stderr: ~ "`Tracked` holds `Shared<Counter>`, so its key could change while it is stored" # a Shared field
-stderr: ~ "jet-lang.dev/e/E0502" # the KeyBy contract code
+stderr: ~ "jet-lang.dev/e/Jet.InvalidMapKeyType" # the KeyBy contract code
 step cycle: jet check cycle/main.jet
 exit: 1
 stderr: ~ "key of `Node` comes back to `Node`" # Node keys by Link, which keys by Node
 step float: jet check float/main.jet
 exit: 1
 stderr: ~ "`Reading` can't be a map key type" # its key is a Float
-stderr: ~ "jet-lang.dev/e/E0502" # the Map-key code
+stderr: ~ "jet-lang.dev/e/Jet.InvalidMapKeyType" # the Map-key code

@@ -193,7 +193,7 @@ means the item is a framework gap that a card now tracks; the app does not
 work around it.
 
 **A hole in revision 2's evidence.** In revision 2, every package that
-depends on `Screens` stopped at `jet.DependencyCheckFailed` before the seed
+depends on `Screens` stopped at `Jet.DependencyCheckFailed` before the seed
 checked its own code, because the checked copy of `Screens` had errors. So
 the "clean" rows for `Web`, `Desktop`, `Phone` and every file under
 `examples/` were not checked. Revision 3 adds two stub transforms (TR5 and
@@ -2768,12 +2768,12 @@ the round-two review.
 
 | Need | Gap | Card |
 |---|---|---|
-| Typed IDs on the wire | A `distinct` type is not `#Codable` (`jet.NotSerializable`), so the checked files drop the markers in Logic | #6819 c1 |
-| `logic.ProjectID.from_string(...)` and `app.CachePolicy.Public(...)` from another package | `jet.ModuleAsValue`: a static call or payload case through a module path is refused. Same-package calls and a contextual `.Public(...)` work. | #6819 c2 |
+| Typed IDs on the wire | A `distinct` type is not `#Codable` (`Jet.NotSerializable`), so the checked files drop the markers in Logic | #6819 c1 |
+| `logic.ProjectID.from_string(...)` and `app.CachePolicy.Public(...)` from another package | `Jet.ModuleAsValue`: a static call or payload case through a module path is refused. Same-package calls and a contextual `.Public(...)` work. | #6819 c2 |
 | A struct alias fix-it | The AliasWithoutParameters fix-it suggests `Name: struct(BaseType)`, which does not parse | #6819 c3 |
-| A generic type taken from an annotated closure parameter (r3) | `ui.drop_zone(..., on_drop: fn(task: logic.Task) {...})` gives `jet.UninferableTypeArgument` | #6819 c4 |
-| A closure ending in a call that returns nothing, where `fn() -> R E!` is expected | `jet.UninferableTypeArgument` for `R` | #6819 c5 |
-| A clean `validate` block (r3) | L0530 `jet.RedundantFinalReturn` fires on `validate {` | #6819 c6 |
+| A generic type taken from an annotated closure parameter (r3) | `ui.drop_zone(..., on_drop: fn(task: logic.Task) {...})` gives `Jet.UninferableTypeArgument` | #6819 c4 |
+| A closure ending in a call that returns nothing, where `fn() -> R E!` is expected | `Jet.UninferableTypeArgument` for `R` | #6819 c5 |
+| A clean `validate` block (r3) | L0530 `Jet.RedundantFinalReturn` fires on `validate {` | #6819 c6 |
 | An error conversion declared in a dependency (r3) | the seed does not find `impl TaskError -> app.Notice` from `Screens` | #6819 c7 |
 | Policy write semantics and a creator rule (r4) | `db.Op`; an update judged on both rows; a policy's reads see the transaction's earlier writes but not the write being judged; the creator rule tied to `created_by` (r5) | #3709 c22 |
 | Removing members and changing roles (r4) | the last owner, live queries, assignments and System jobs after a removal | #6826 |
@@ -2868,9 +2868,9 @@ steal: fn(crew: app.Remote<logic.Crew>, project: logic.ProjectID) -> Int logic.T
 The seed rejects both calls:
 
 ```text
-Error [jet.UnknownFunction]: `CrewRemote` has no method `webhook_secret`
+Error: Jet.UnknownFunction: `CrewRemote` has no method `webhook_secret`
   --> cl1_server_only.jet:9:13
-Error [jet.UnknownFunction]: `CrewRemote` has no method `tell_assignee`
+Error: Jet.UnknownFunction: `CrewRemote` has no method `tell_assignee`
   --> cl1_server_only.jet:10:13
 ```
 
@@ -3934,7 +3934,7 @@ Every drag has a keyboard and single-pointer alternative, as WCAG 2.2 SC
 - That is why `label:` is required on both `ui.draggable` and `ui.drop_zone`.
 
 This file keeps a known seed error. `fn(task: logic.Task) {...}` passed to a
-generic `on_drop` is `jet.UninferableTypeArgument` today. That is the
+generic `on_drop` is `Jet.UninferableTypeArgument` today. That is the
 closure-parameter inference gap (#6819 c4; A.4).
 
 `examples/drag.jet`
@@ -4228,7 +4228,7 @@ This section proposes the rest (#6817). It is choice S1 on the ballot.
   takes it as `style: ui.style(card_style)`. There is no wrapper and no
   closure, and the seed checks this form today. Each field has its own type,
   so a `ui.Paint` cannot go where a `ui.Space` belongs. A literal sets each
-  field once; setting one twice is `jet.InvalidConstructionField` today.
+  field once; setting one twice is `Jet.InvalidConstructionField` today.
 - **The theme type is checked.** The graph builder is the only place that
   sets a theme (`.theme(crew_theme())` in `Screens/shell.jet`, a `ui.Theme<CrewTheme>`), as
   it is the only place that registers screens (#6445 c6). Sema reads the
@@ -4799,7 +4799,7 @@ and CSS" is measured in 6.5, not assumed.
 | Motion | `motion: ui.ease(duration)`; reduced motion makes changes instant | `moving_card_style` below | CSS transitions and `prefers-reduced-motion` [MDN-RM]; Qt Quick animations [QT-ANIM] | matches; reduced motion is the default, not opt-in |
 | Overlays | `kit.dialog`, `kit.sheet` and `kit.popover`, and the frame's notices, draw in one top layer above the screen, in opening order; a dialog holds focus until it closes, and Escape or Back closes it | `confirm_delete` below | the HTML `dialog` element and the top layer [MDN-DIALOG]; SwiftUI `.sheet`; Compose `Dialog` | matches the `dialog` element |
 | Scroll containers and sticky headers | `ui.scroll(body, sticky:)`; the sticky child stays at the edge while the rest scrolls | `scrolling_board` below | CSS `overflow` and `position: sticky`; SwiftUI `ScrollView` with pinned headers | matches |
-| View identity | a `kit.list` row is identified by its `key:`; `ui.local` state belongs to that row, so filtering or moving cards keeps each card's state | `column` in `Screens/board.jet` (3.3) | SwiftUI `ForEach` identity [SWIFTUI-ID]; Compose `key` [COMPOSE-KEY]; React keys | matches; `key:` is a required parameter of `kit.list`, so a list without one is `jet.MissingArgument` with the seed today |
+| View identity | a `kit.list` row is identified by its `key:`; `ui.local` state belongs to that row, so filtering or moving cards keeps each card's state | `column` in `Screens/board.jet` (3.3) | SwiftUI `ForEach` identity [SWIFTUI-ID]; Compose `key` [COMPOSE-KEY]; React keys | matches; `key:` is a required parameter of `kit.list`, so a list without one is `Jet.MissingArgument` with the seed today |
 | Reusable styles and tokens | a token struct; styles are plain functions | `theme.jet` | Tailwind theme; vanilla-extract and StyleX [VE] [STYLEX]; Flutter `ThemeExtension` | matches vanilla-extract |
 | Per-platform adaptation | `native.theme()` preset; `comptime if` per target (D-PLATFORM-OVERRIDE1) | `system_theme` below | SwiftUI and Compose follow the platform by default; Qt Quick Controls styles [QT-STYLE] | behind: the preset is one look per platform, not the full native control set |
 | Accessibility: contrast, focus, reduced motion | focus rings on by default; reduced motion honored; contrast checked by a lint (6.4) | `access.jet` (5.1.8) | WCAG 2.2 contrast minimum [WCAG-CONTRAST]; platform a11y tools | partly behind: the contrast lint is #6817 c2 work |
@@ -4936,12 +4936,12 @@ bug, as documented behavior.
 
 | # | Bug | Jet S1 A with the seed today | CSS in a browser | Tailwind | SwiftUI |
 |---|---|---|---|---|---|
-| b1 | a token name with a typo (`t.crad`) | `jet.UnknownField`: "`CrewTheme` has no field `crad`" | `var(--crad)` is unset; the property falls back with no error | `bg-crad` generates no CSS; the editor plugin warns | `Color("Crad")` compiles; generated asset symbols make it a compile error |
-| b2 | a color where a length belongs | `jet.BindingTypeMismatch`: "This needs Space?, but the value is `Paint`" | the declaration is invalid and ignored | the class generates nothing | compile error |
-| b3 | one property set twice | `jet.InvalidConstructionField`: "Field `padding` appears more than once" | the later declaration wins, silently | both classes apply; the generated CSS order decides | two `.padding` modifiers both apply |
-| b4 | an image with no text alternative | `jet.MissingArgument`: "missing `alt`" | valid HTML to the browser; checkers such as axe flag it | the same | compiles |
-| b5 | an icon-only button with no name | `jet.MissingArgument`: "missing `label`" | no accessible name; checkers flag it | the same | compiles |
-| b6 | a state that does not exist (`hovered:`) | `jet.UnknownArgumentLabel` | an invalid selector drops the whole rule | an unknown variant generates nothing | no such API |
+| b1 | a token name with a typo (`t.crad`) | `Jet.UnknownField`: "`CrewTheme` has no field `crad`" | `var(--crad)` is unset; the property falls back with no error | `bg-crad` generates no CSS; the editor plugin warns | `Color("Crad")` compiles; generated asset symbols make it a compile error |
+| b2 | a color where a length belongs | `Jet.BindingTypeMismatch`: "This needs Space?, but the value is `Paint`" | the declaration is invalid and ignored | the class generates nothing | compile error |
+| b3 | one property set twice | `Jet.InvalidConstructionField`: "Field `padding` appears more than once" | the later declaration wins, silently | both classes apply; the generated CSS order decides | two `.padding` modifiers both apply |
+| b4 | an image with no text alternative | `Jet.MissingArgument`: "missing `alt`" | valid HTML to the browser; checkers such as axe flag it | the same | compiles |
+| b5 | an icon-only button with no name | `Jet.MissingArgument`: "missing `label`" | no accessible name; checkers flag it | the same | compiles |
+| b6 | a state that does not exist (`hovered:`) | `Jet.UnknownArgumentLabel` | an invalid selector drops the whole rule | an unknown variant generates nothing | no such API |
 | b7 | a class the S1 C sheet does not define | **not caught** by the stub; #6817's sheet parser must make it an error | matches nothing | matches nothing | — |
 | b8 | muted text on a muted background | **not caught**; #6817's contrast lint must check each text paint on its background in both themes against WCAG 1.4.3 [WCAG-CONTRAST] | not caught; audit tools flag it | the same | Accessibility Inspector audits flag it |
 
@@ -5550,7 +5550,7 @@ CL5 waits on #6557.
 
 | ID | Claim | Strongest existing | Evidence today | Verdict | Next test |
 |---|---|---|---|---|---|
-| CL1 | No method is reachable from a client unless it is marked | Convex internal functions [CVX-INTERNAL] | `app.Remote<Crew>` offers only marked methods; the `cl1_server_only` probe fails with `jet.UnknownFunction` on a signing key and a job (4.1) | matches Convex | find a path from client code to an unmarked method once #6445 generates the remote (c3) |
+| CL1 | No method is reachable from a client unless it is marked | Convex internal functions [CVX-INTERNAL] | `app.Remote<Crew>` offers only marked methods; the `cl1_server_only` probe fails with `Jet.UnknownFunction` on a signing key and a job (4.1) | matches Convex | find a path from client code to an unmarked method once #6445 generates the remote (c3) |
 | CL2 | Every decoder runs the type's `validate` block | ASP.NET Core `[ApiController]` [ASPNET-API]; FastAPI [FASTAPI-BODY] | D-VALIDATE-DECODE1=B; every endpoint takes its form's type (`TaskDraft`, `ProjectDraft`, `InviteDraft`, `TaskBatch`), all in `Logic`, so no rule is written twice and no endpoint takes loose fields (4.3); database-aware checks through `app.field_error` (#6831). Round 3's test (`invite` with any string as an email) now fails at the decoder | matches | find a decode path that skips validation |
 | CL3 | One route set serves web addresses, deep links, windows and push on every target | Navigation Compose [NAV-TYPESAFE]; Expo Router [EXPO-ROUTER] | `.screen` only in the graph builder (#6445 c6); entries add views, not routes (4.4) | matches | find a state a target can link to or push that has no route on another target |
 | CL4 | Prediction runs the server method's body, minus what needs the server | Meteor methods [METEOR-METHODS]; Zero [ZERO] | D-OPTIMISTIC1; the subset rule in 4.6 now names everything the client skips: policies, version checks, database rules, `app.enqueue` and so every job, push and mail, and the server's clock; and it covers creates with a client-made ID, which `new_task` predicts (#6555) | matches | find an eligible method whose prediction differs from the server for a reason outside the subset rule |
@@ -6803,21 +6803,21 @@ full.
 The seed reports 48 distinct warnings across the packages: 10 in `Logic`
 and 38 in `Screens`; `Desktop` and the examples have none.
 
-- 41 are `jet.InferredNeverReturn`. They come from the stubs: a stub body is
+- 41 are `Jet.InferredNeverReturn`. They come from the stubs: a stub body is
   `panic("stub")`, so a function that calls one always diverges.
-- 4 are `jet.RedundantFinalReturn` at `validate {`, which is A.6 finding 6.
-- 3 are `jet.UnusedParameter` from the files: `projects`, `mine` and
+- 4 are `Jet.RedundantFinalReturn` at `validate {`, which is A.6 finding 6.
+- 3 are `Jet.UnusedParameter` from the files: `projects`, `mine` and
   `sign_in` take their screen's view as every route does, though the view
   holds no data.
 
 | File | Lines | Errors |
 |---|---|---|
-| `style_bugs/b1_token_typo.jet` | 10 | `jet.UnknownField` at 10 |
-| `style_bugs/b2_wrong_kind.jet` | 10 | `jet.BindingTypeMismatch` at 10 |
-| `style_bugs/b3_conflict.jet` | 10 | `jet.InvalidConstructionField` at 10 |
-| `style_bugs/b4_image_alt.jet` | 10 | `jet.MissingArgument` at 10 |
-| `style_bugs/b5_icon_label.jet` | 10 | `jet.MissingArgument` at 10 |
-| `style_bugs/b6_unknown_state.jet` | 10 | `jet.UnknownArgumentLabel` at 10 |
+| `style_bugs/b1_token_typo.jet` | 10 | `Jet.UnknownField` at 10 |
+| `style_bugs/b2_wrong_kind.jet` | 10 | `Jet.BindingTypeMismatch` at 10 |
+| `style_bugs/b3_conflict.jet` | 10 | `Jet.InvalidConstructionField` at 10 |
+| `style_bugs/b4_image_alt.jet` | 10 | `Jet.MissingArgument` at 10 |
+| `style_bugs/b5_icon_label.jet` | 10 | `Jet.MissingArgument` at 10 |
+| `style_bugs/b6_unknown_state.jet` | 10 | `Jet.UnknownArgumentLabel` at 10 |
 | `style_bugs/b7_sheet_class.jet` | 13 | clean |
 | `style_bugs/b8_contrast.jet` | 10 | clean |
 | `crewboard/Desktop/desktop.jet` | 78 | clean |
@@ -6845,7 +6845,7 @@ and 38 in `Screens`; `Desktop` and the examples have none.
 | `examples/access.jet` | 21 | clean |
 | `examples/background.jet` | 25 | clean |
 | `examples/camera.jet` | 26 | clean |
-| `examples/drag.jet` | 21 | `jet.UninferableTypeArgument` at 20 |
+| `examples/drag.jet` | 21 | `Jet.UninferableTypeArgument` at 20 |
 | `examples/files.jet` | 67 | clean |
 | `examples/lifecycle.jet` | 24 | clean |
 | `examples/links.jet` | 17 | clean |
@@ -6858,15 +6858,15 @@ and 38 in `Screens`; `Desktop` and the examples have none.
 | `examples/tray.jet` | 32 | clean |
 | `examples/web_delivery.jet` | 24 | clean |
 | `examples/words.jet` | 16 | clean |
-| `probes/cl1_server_only.jet` | 11 | `jet.UnknownFunction` at 9; `jet.UnknownFunction` at 10 |
+| `probes/cl1_server_only.jet` | 11 | `Jet.UnknownFunction` at 9; `Jet.UnknownFunction` at 10 |
 | `probes/cl5_secret_print.jet` | 8 | clean |
 
 ### A.4 Known errors, each with its card
 
 | File | Error | Cause | Card |
 |---|---|---|---|
-| `examples/drag.jet` | `jet.UninferableTypeArgument` at line 20 | a closure `fn(task: logic.Task) {...}` passed to a generic `on_drop` does not fix the type argument from its parameter | #6819 c4 |
-| `probes/cl1_server_only.jet` | `jet.UnknownFunction` at lines 9 and 10 | intended: a screen calls the signing key and a job through `app.Remote<Crew>` (CL1) | — |
+| `examples/drag.jet` | `Jet.UninferableTypeArgument` at line 20 | a closure `fn(task: logic.Task) {...}` passed to a generic `on_drop` does not fix the type argument from its parameter | #6819 c4 |
+| `probes/cl1_server_only.jet` | `Jet.UnknownFunction` at lines 9 and 10 | intended: a screen calls the signing key and a job through `app.Remote<Crew>` (CL1) | — |
 | `probes/cl5_secret_print.jet` | none | expected today: the secret rule is proposed in #6557 and not built, so the seed accepts a printed secret (CL5) | #6557 |
 | `style_bugs/b1`–`b6` | one error each, as section 6.5 lists | seeded on purpose | — |
 | `style_bugs/b7`, `b8` | none | not caught today; section 6.5 | #6817 c1, c2 |
@@ -6886,24 +6886,24 @@ and 38 in `Screens`; `Desktop` and the examples have none.
 Found while checking these files. Each is filed under #6819.
 
 1. A distinct type such as `ProjectID: distinct Int` does not derive a codec
-   (`jet.NotSerializable`).
+   (`Jet.NotSerializable`).
 2. A static call or a payload case through a module path from another package
    (`logic.ProjectID.from_int(1)`, `app.CachePolicy.Public(max_age: 10min)`)
-   gives `jet.ModuleAsValue`. A contextual `.Public(...)` works.
+   gives `Jet.ModuleAsValue`. A contextual `.Public(...)` works.
 3. A closure passed where the parameter is `fn() -> R E!` gives
-   `jet.UninferableTypeArgument` for `R` when its last call returns nothing.
+   `Jet.UninferableTypeArgument` for `R` when its last call returns nothing.
    The stubs type every handler as `fn() app.Notice!`, which has no `R`.
 4. The `AliasWithoutParameters` fix-it suggests `Name: struct(BaseType)`,
    which does not parse.
 5. An unknown key in a package manifest makes path dependencies on that
-   package fail with `jet.UseTargetNotFound` instead of naming the key.
-6. Every `validate {` block gets the warning `jet.RedundantFinalReturn`
+   package fail with `Jet.UseTargetNotFound` instead of naming the key.
+6. Every `validate {` block gets the warning `Jet.RedundantFinalReturn`
    (L0530), though it has no `return`: the four in `Logic/model.jet`, at
    lines 52, 65, 78 and 90 as written.
 7. Package B declares `impl Oops -> pa.Notice` for its own error and a type
    from package A. The conversion works inside B, but package C does not
    find it. Propagating B's error with `_:` in C gives
-   `jet.MissingErrorConversion` or `jet.ErrorNotPropagatable` (#6819 c7).
+   `Jet.MissingErrorConversion` or `Jet.ErrorNotPropagatable` (#6819 c7).
    This is why TR6 exists. The three-package probe is kept in the kit.
 
 ### A.7 Running it again

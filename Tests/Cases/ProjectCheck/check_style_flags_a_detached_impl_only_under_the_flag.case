@@ -7,12 +7,12 @@ env: NO_COLOR=1
 copy: main.source main.jet
 step: jet check main.jet
 exit: 0 # a plain check passes
-stderr: !~ "L0535" # the style lint is off by default
+stderr: !~ "Jet.DetachedImpl" # the style lint is off by default
 stderr: !~ "DetachedImpl" # no style finding without the flag
 step: jet check --style main.jet
 exit: 0 # a style finding is a warning, not an error
-stderr: ~ "Warning [jet.DetachedImpl]: `impl Shape` sits outside the body of `Shape`" # inherent impl flagged
-stderr: ~ "Warning [jet.DetachedImpl]: `impl Shape.Display` sits outside the body of `Shape`" # trait impl flagged
-stderr: ~ "Warning [jet.DetachedImpl]: `impl Color` sits outside the body of `Color`" # enum impl flagged
+stderr: ~ "Warning: Jet.DetachedImpl: `impl Shape` sits outside the body of `Shape`" # inherent impl flagged
+stderr: ~ "Warning: Jet.DetachedImpl: `impl Shape.Display` sits outside the body of `Shape`" # trait impl flagged
+stderr: ~ "Warning: Jet.DetachedImpl: `impl Color` sits outside the body of `Color`" # enum impl flagged
 stderr: !~ "`impl Shape.Label`" # the target-specific impl stays outside
 stderr: ~ "has no errors (3 warnings)" # exactly the three detached impls

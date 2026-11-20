@@ -9,7 +9,7 @@ fixture: PureFnCannotWriteHeldStateOnEveryTier/Input
 env: NO_COLOR=1
 step: jet check alias.jet
 exit: 1
-stderr: count "Error [" = 1 # exactly this many
+stderr: count "Error: " = 1 # exactly this many
 stderr: ~ "`write` writes a cell through `c`" # the parameter route
 stderr: ~ "`c` may hold a module cell" # the reason names the holder
 step: jet run -O0 alias.jet
@@ -26,7 +26,7 @@ stderr: ~ "`write` writes a cell through `c`" # O2 refuses it
 stdout: !~ "1" # nothing runs
 step: jet check held.jet
 exit: 1
-stderr: count "Error [" = 5 # bump, alias, leased, hidden and relay
+stderr: count "Error: " = 5 # bump, alias, leased, hidden and relay
 stderr: ~ "writes a cell through `self`" # a read receiver's cell
 stderr: ~ "`alias` writes a cell through `held`" # a local alias of a module cell
 stderr: ~ "`leased` writes a cell through `c`" # an edit lease is the write
@@ -36,17 +36,17 @@ stderr: ~ "`relay` reaches a write of a cell through `c`" # through an inferred 
 stderr: ~ "Call chain: relay → write_back" # the chain names the helper
 step: jet run -O0 held.jet
 exit: 1
-stderr: count "Error [" = 5 # O0 refuses the receiver, alias, lease, lambda and helper routes
+stderr: count "Error: " = 5 # O0 refuses the receiver, alias, lease, lambda and helper routes
 stderr: ~ "`hidden` writes module state `HITS`" # the lambda route on O0
 stdout: = "" # nothing runs
 step: jet run -O1 held.jet
 exit: 1
-stderr: count "Error [" = 5 # O1 refuses all five routes
+stderr: count "Error: " = 5 # O1 refuses all five routes
 stderr: ~ "`alias` writes a cell through `held`" # the alias route on O1
 stdout: = "" # nothing runs
 step: jet run -O2 held.jet
 exit: 1
-stderr: count "Error [" = 5 # O2 refuses all five routes
+stderr: count "Error: " = 5 # O2 refuses all five routes
 stderr: ~ "`relay` reaches a write of a cell through `c`" # the helper route on O2
 stdout: = "" # nothing runs
 step: jet check trait.jet
@@ -63,7 +63,7 @@ exit: 1
 stderr: ~ "`total` reaches a write of module state `HITS`" # O2 refuses it
 step: jet check lent.jet
 exit: 1
-stderr: count "Error [" = 1 # pin only; add writes the place it is lent
+stderr: count "Error: " = 1 # pin only; add writes the place it is lent
 stderr: ~ "`pin` writes module state `pinned`" # lending module state is the caller's write
 step: jet check ok.jet
 exit: 0

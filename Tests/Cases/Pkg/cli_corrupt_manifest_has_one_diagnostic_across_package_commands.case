@@ -8,10 +8,10 @@ copy: {root}/Tests/Cases/Pkg/Fixtures/Sources/hi.txt run.jet
 copy: {root}/Tests/Cases/Pkg/Fixtures/Dependency/mylib/package.jet mylib/package.jet
 step fetch: jet fetch
 exit: nonzero
-stderr: line ^= "Error [jet.InvalidPackageManifest]:" # original predicate: some line starts with "Error [jet.InvalidPackageManifest]:"
+stderr: line ^= "Error: Jet.InvalidPackageManifest:" # original predicate: some line starts with "Error: Jet.InvalidPackageManifest:"
 step: jet build run.jet
 exit: nonzero
-stderr.filter(^= "Error [jet.InvalidPackageManifest]:").line(0): == fetch # original predicate: first line starting with "Error [jet.InvalidPackageManifest]:" equals fetch's
+stderr.filter(^= "Error: Jet.InvalidPackageManifest:").line(0): == fetch # original predicate: first line starting with "Error: Jet.InvalidPackageManifest:" equals fetch's
 step: jet add mylib --path ./mylib
 exit: nonzero
-stderr.filter(^= "Error [jet.InvalidPackageManifest]:").line(0): == fetch # original predicate: first line starting with "Error [jet.InvalidPackageManifest]:" equals fetch's
+stderr.filter(^= "Error: Jet.InvalidPackageManifest:").line(0): == fetch # original predicate: first line starting with "Error: Jet.InvalidPackageManifest:" equals fetch's

@@ -9,22 +9,22 @@ fixture: AClosureThatCapturesItsOwnCellStronglyIsRefused.fixture
 env: NO_COLOR=1
 step returned: jet check returned.jet
 exit: 1
-stderr: ~ "jet.SharedReferenceCycle" # the returned closure stored in the cell is refused (E0221)
+stderr: ~ "Jet.SharedReferenceCycle" # the returned closure stored in the cell is refused (E0221)
 stderr: ~ "returned.jet:21:5" # at the store
 stderr: ~ "A function value keeps alive everything it captures" # the reason names the capture
 step inline: jet check inline.jet
 exit: 1
-stderr: ~ "jet.SharedReferenceCycle" # the closure written in place is refused (E0221)
+stderr: ~ "Jet.SharedReferenceCycle" # the closure written in place is refused (E0221)
 stderr: ~ "inline.jet:10:5" # at the write
 step assigned: jet check assigned.jet
 exit: 1
-stderr: ~ "jet.SharedReferenceCycle" # the closure assigned to the callback field is refused (E0221)
+stderr: ~ "Jet.SharedReferenceCycle" # the closure assigned to the callback field is refused (E0221)
 stderr: ~ "assigned.jet:11:5" # at the assignment
 step weak: jet check weak.jet
 exit: 0
 step web: jet check returned.jet --target web
 exit: 1
-stderr: ~ "jet.SharedReferenceCycle" # refused for the web target too
+stderr: ~ "Jet.SharedReferenceCycle" # refused for the web target too
 stderr: ~ "returned.jet:21:5" # at the same store
 step o0: jet run -O0 weak.jet
 exit: 0

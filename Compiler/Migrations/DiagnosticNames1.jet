@@ -1,0 +1,466 @@
+// Toolchain a0.0.45: Jet's own diagnostics are named `Jet.Name`, and the
+// name is the one identifier a report prints. A heading names it instead of
+// a bracketed code or path: `Error [E0113]: …` and
+// `Error [jet.ReturnTypeMismatch]: …` are both
+// `Error: Jet.ReturnTypeMismatch: …`, and `Warning`, `Stop` and `Lint`
+// headings move alike (a library's own name, such as `game.FrameHold`, and a
+// code no row owns keep their spelling). The More link and the closing hint
+// take the name (`More: jet-lang.dev/e/Jet.ReturnTypeMismatch`, "Run `jet
+// explain Jet.ReturnTypeMismatch` to learn more"), a bracketed `[jet.Name]`
+// outside a heading is the bare name, any other `jet.Name` is `Jet.Name`
+// (`#Allow(Jet.FloatMoney, "…")`), a jet.report object gains its `name`
+// after its `code`, and a `.case` predicate that matches a code alone matches
+// its name. Each code and name maps through the diagnostic registry; a
+// `jet.Name`, link or hint the registry does not know is left alone and
+// reported. The rewrite is textual, so it reads every kind of file alike. A
+// Jet source that parsed cleanly keeps its text unless the rewrite parses
+// cleanly too.
+use jet_foundation.[diagnostic_registry_row, diagnostic_registry_row_named]
+
+// The words a report heading opens with.
+DIAGNOSTIC_NAMES1_LABELS: [String]{"Error", "Warning", "Stop", "Lint"}
+
+// The path a report's More link names its diagnostic under.
+DIAGNOSTIC_NAMES1_LINK: "jet-lang.dev/e/"
+
+// The closing hint's command and the words after it.
+DIAGNOSTIC_NAMES1_HINT: "`jet explain "
+
+DIAGNOSTIC_NAMES1_HINT_END: "` to learn more"
+
+// The operators a `.case` predicate matches its quoted text with.
+DIAGNOSTIC_NAMES1_MATCHES: [String]{": ~ \"", ": !~ \""}
+
+// Rewrites every old diagnostic name, heading, link, hint and jet.report
+// object of one file of any kind.
+diagnostic_names1_file: fn(path: String, text: String, source: Bool) -[]> MigrationOutcome {
+    skipped := [String]{}
+    rewritten := 0
+    result := text
+    loop pass in 0..<7 {
+        bytes: result.bytes()
+        outcome: if pass == {
+            0 -> diagnostic_names1_headings(path, bytes)
+            1 -> diagnostic_names1_links(path, bytes)
+            2 -> diagnostic_names1_hints(path, bytes)
+            3 -> diagnostic_names1_reports(bytes)
+            4 -> diagnostic_names1_bracketed(path, bytes)
+            5 -> diagnostic_names1_predicates(path, result)
+            else -> diagnostic_names1_bare(path, bytes)
+        }
+        loop reason in outcome.skipped {
+            if !skipped.contains(reason) -> skipped.push(reason)
+        }
+        if outcome.rewritten == 0 -> next
+        rewritten += outcome.rewritten
+        result = outcome.text
+    }
+    if rewritten == 0 -> return MigrationOutcome{text: text, rewritten: 0, skipped: skipped}
+    if (source || path.ends_with(".jet") || path.ends_with(".template")) && lambda_shape1_errors(text) == 0 {
+        after_errors: lambda_shape1_errors(result)
+        if after_errors > 0 {
+            return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{"{path}: the rewrite does not parse ({after_errors} errors), file left alone"}}
+        }
+    }
+    MigrationOutcome{text: result, rewritten: rewritten, skipped: skipped}
+}
+
+// The registered name `token` stands for: its row's name when it is a code,
+// or the `Jet.` name a `jet.` name became. None when no row owns it.
+diagnostic_names1_name: fn(token: String) -[]> String? {
+    if token.starts_with("jet.") {
+        moved: diagnostic_registry_row_named("Jet.{token.remove_prefix("jet.")}") ?? return None
+        return Val(moved.name)
+    }
+    row: diagnostic_registry_row(token) ?? return None
+    Val(row.name)
+}
+
+// `Error [token]` and the other labels: `Error: name`.
+diagnostic_names1_headings: fn(path: String, bytes: [U8]) -[]> MigrationOutcome {
+    edits := DiagnosticNames1Edits{out: [String]{}, cursor: 0, rewritten: 0, skipped: [String]{}}
+    at := 0
+    loop at < bytes.len() {
+        start: at
+        at += 1
+        if !diagnostic_names1_word_start(bytes, start) -> next
+        label: diagnostic_names1_label(bytes, start) ?? next
+        open: start + label.count_bytes() + 2
+        end: diagnostic_names1_path_end(bytes, open)
+        if end == open || end >= bytes.len() || bytes[end] != 93 || !diagnostic_names1_letter(bytes[open]) {
+            next
+        }
+        token: String.from_bytes(bytes[open..<end]) ?? next
+        name: diagnostic_names1_name(token) ?? {
+            if token.starts_with("jet.") {
+                diagnostic_names1_skip(edits, path, bytes, open, token)
+                next
+            }
+            token
+        }
+        diagnostic_names1_splice(edits, bytes, start, end + 1, "{label}: {name}")
+        at = end + 1
+    }
+    diagnostic_names1_finish(edits, bytes)
+}
+
+// `jet-lang.dev/e/<code or jet.Name>`: the link names the row's name.
+diagnostic_names1_links: fn(path: String, bytes: [U8]) -[]> MigrationOutcome {
+    edits := DiagnosticNames1Edits{out: [String]{}, cursor: 0, rewritten: 0, skipped: [String]{}}
+    link: DIAGNOSTIC_NAMES1_LINK.bytes()
+    at := 0
+    loop at < bytes.len() {
+        start: at + link.len()
+        if !diagnostic_names1_at(bytes, at, link) {
+            at += 1
+            next
+        }
+        at = start
+        end: diagnostic_names1_path_end(bytes, start)
+        token: String.from_bytes(bytes[start..<end]) ?? next
+        if token == "" || token.starts_with("Jet.") -> next
+        name: diagnostic_names1_name(token) ?? {
+            diagnostic_names1_skip(edits, path, bytes, start, token)
+            next
+        }
+        diagnostic_names1_splice(edits, bytes, start, end, name)
+        at = end
+    }
+    diagnostic_names1_finish(edits, bytes)
+}
+
+// "Run `jet explain <code>` to learn more": the hint names the row's name.
+diagnostic_names1_hints: fn(path: String, bytes: [U8]) -[]> MigrationOutcome {
+    edits := DiagnosticNames1Edits{out: [String]{}, cursor: 0, rewritten: 0, skipped: [String]{}}
+    hint: DIAGNOSTIC_NAMES1_HINT.bytes()
+    after: DIAGNOSTIC_NAMES1_HINT_END.bytes()
+    at := 0
+    loop at < bytes.len() {
+        start: at + hint.len()
+        if !diagnostic_names1_at(bytes, at, hint) {
+            at += 1
+            next
+        }
+        at = start
+        end: diagnostic_names1_path_end(bytes, start)
+        if end == start || !diagnostic_names1_at(bytes, end, after) -> next
+        token: String.from_bytes(bytes[start..<end]) ?? next
+        if token.starts_with("Jet.") -> next
+        name: diagnostic_names1_name(token) ?? {
+            diagnostic_names1_skip(edits, path, bytes, start, token)
+            next
+        }
+        diagnostic_names1_splice(edits, bytes, start, end, name)
+        at = end
+    }
+    diagnostic_names1_finish(edits, bytes)
+}
+
+// A jet.report object, `"code":"E0102","what":…`, plain or escaped inside a
+// string, gains `"name":"Jet.UnknownFunction"` after its code; a code no row
+// owns is its own name.
+diagnostic_names1_reports: fn(bytes: [U8]) -[]> MigrationOutcome {
+    edits := DiagnosticNames1Edits{out: [String]{}, cursor: 0, rewritten: 0, skipped: [String]{}}
+    at := 0
+    loop at < bytes.len() {
+        start: at
+        at += 1
+        quote := "\""
+        if {
+            diagnostic_names1_at(bytes, start, "\\\"code\\\"".bytes()) -> quote = "\\\""
+            !diagnostic_names1_at(bytes, start, "\"code\"".bytes()) -> next
+        }
+        colon: start + quote.count_bytes() * 2 + 4
+        if !diagnostic_names1_at(bytes, colon, ":".bytes()) -> next
+        gap := ""
+        if diagnostic_names1_at(bytes, colon + 1, " ".bytes()) -> gap = " "
+        open: colon + 1 + gap.count_bytes()
+        if !diagnostic_names1_at(bytes, open, quote.bytes()) -> next
+        token_start: open + quote.count_bytes()
+        token_end: diagnostic_names1_path_end(bytes, token_start)
+        if token_end == token_start || !diagnostic_names1_at(bytes, token_end, quote.bytes()) {
+            next
+        }
+        comma: token_end + quote.count_bytes()
+        what: comma + 1 + gap.count_bytes()
+        if !diagnostic_names1_at(bytes, comma, ",{gap}".bytes()) || !diagnostic_names1_at(bytes, what, "{quote}what{quote}".bytes()) {
+            next
+        }
+        token: String.from_bytes(bytes[token_start..<token_end]) ?? next
+        if token.starts_with("jet.") -> next
+        name: diagnostic_names1_name(token) ?? token
+        diagnostic_names1_splice(edits, bytes, what, what, "{quote}name{quote}:{gap}{quote}{name}{quote},{gap}")
+        at = what
+    }
+    diagnostic_names1_finish(edits, bytes)
+}
+
+// `[jet.Name]` outside a heading: the bare name. A Markdown link's text,
+// followed by `(`, keeps its brackets.
+diagnostic_names1_bracketed: fn(path: String, bytes: [U8]) -[]> MigrationOutcome {
+    edits := DiagnosticNames1Edits{out: [String]{}, cursor: 0, rewritten: 0, skipped: [String]{}}
+    open: "[jet.".bytes()
+    at := 0
+    loop at < bytes.len() {
+        start: at
+        at += 1
+        if !diagnostic_names1_at(bytes, start, open) -> next
+        end: diagnostic_names1_word_end(bytes, start + open.len())
+        if end == start + open.len() || end >= bytes.len() || bytes[end] != 93 -> next
+        if end + 1 < bytes.len() && bytes[end + 1] == 40 -> next
+        token: String.from_bytes(bytes[start + 1..<end]) ?? next
+        name: diagnostic_names1_name(token) ?? {
+            diagnostic_names1_skip(edits, path, bytes, start + 1, token)
+            next
+        }
+        diagnostic_names1_splice(edits, bytes, start, end + 1, name)
+        at = end + 1
+    }
+    diagnostic_names1_finish(edits, bytes)
+}
+
+// A `.case` predicate that matches a code alone, `stderr: ~ "E0113"` or
+// `~ "[E0113]"`, matches the row's name: a report prints its name, not its
+// code. An explain step's predicates keep their codes, since the essay still
+// titles itself with its code. A literal that matches a heading's opening
+// moves to the new opening (diagnostic_names1_opener).
+diagnostic_names1_predicates: fn(path: String, text: String) -[]> MigrationOutcome {
+    if !path.ends_with(".case") {
+        return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
+    }
+    out := [String]{}
+    rewritten := 0
+    explain := false
+    loop line in text.split("\n") {
+        trimmed: line.trim()
+        if trimmed.starts_with("step:") -> explain = trimmed.contains("jet explain")
+        if !trimmed.starts_with("#") {
+            named: if explain -> None else -> diagnostic_names1_predicate(line)
+            moved: named ?? line
+            if diagnostic_names1_opener(moved) == .Val(opened) {
+                out.push(opened)
+                rewritten += 1
+                next
+            }
+            if named == .Val(renamed) {
+                out.push(renamed)
+                rewritten += 1
+                next
+            }
+        }
+        out.push(line)
+    }
+    if rewritten == 0 -> return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
+    MigrationOutcome{text: out.join("\n"), rewritten: rewritten, skipped: [String]{}}
+}
+
+// `line` with each literal that matches a heading's opening word and bracket
+// moved to the new opening: `count "Error [" = 1` counts `"Error: "`, an
+// unquoted `!~ Error [` matches `"Error: "`, `"Error [jet.` is
+// `"Error: Jet.`, and a predicate on the text after `"Error ["` that ends at
+// the bracket (`^= "Jet.MissingGit]"`) ends at the colon.
+diagnostic_names1_opener: fn(line: String) -[]> String? {
+    moved := "{line}"
+    loop label in DIAGNOSTIC_NAMES1_LABELS {
+        moved = moved.replace("\"{label} [\"", "\"{label}: \"").replace("\"{label} [jet.", "\"{label}: Jet.")
+        moved = moved.replace("~ {label} [ ", "~ \"{label}: \" ")
+        if moved.ends_with("~ {label} [") {
+            moved = "{moved.remove_suffix("{label} [")}\"{label}: \""
+        }
+        if line.contains(".after_first(\"{label} [\")") {
+            parts: moved.split("^= \"").to_list()
+            if parts.len() == 2 && parts[1].contains("]\"") {
+                moved = "{parts[0]}^= \"{parts[1].replace("]\"", ":\"")}"
+            }
+        }
+    }
+    if moved == line -> return None
+    Val(moved)
+}
+
+// `line` with its predicate's code, alone or in brackets, made the row's name.
+diagnostic_names1_predicate: fn(line: String) -[]> String? {
+    bytes: line.bytes()
+    loop operator in DIAGNOSTIC_NAMES1_MATCHES {
+        at := 0
+        loop at < bytes.len() && !diagnostic_names1_at(bytes, at, operator.bytes()) -> at += 1
+        if at >= bytes.len() -> next
+        open: at + operator.count_bytes()
+        close := open
+        loop close < bytes.len() && bytes[close] != 34 -> close += 1
+        if close >= bytes.len() || close == open -> return None
+        start := open
+        end := close
+        if bytes[open] == 91 && bytes[close - 1] == 93 {
+            start = open + 1
+            end = close - 1
+        }
+        if end <= start -> return None
+        token: String.from_bytes(bytes[start..<end]) ?? return None
+        row: diagnostic_registry_row(token) ?? return None
+        if row.name == token -> return None
+        before: String.from_bytes(bytes[0..<open]) ?? return None
+        after: String.from_bytes(bytes[close..<bytes.len()]) ?? return None
+        return Val("{before}{row.name}{after}")
+    }
+    None
+}
+
+// Any other `jet.Name` not inside a longer dotted path: `Jet.Name`.
+diagnostic_names1_bare: fn(path: String, bytes: [U8]) -[]> MigrationOutcome {
+    edits := DiagnosticNames1Edits{out: [String]{}, cursor: 0, rewritten: 0, skipped: [String]{}}
+    prefix: "jet.".bytes()
+    at := 0
+    loop at < bytes.len() {
+        start: at
+        at += 1
+        if !diagnostic_names1_at(bytes, start, prefix) -> next
+        if !diagnostic_names1_word_start(bytes, start) || (start > 0 && (bytes[start - 1] == 46 || bytes[start - 1] == 45)) {
+            next
+        }
+        first: start + prefix.len()
+        if first >= bytes.len() || bytes[first] < 65 || bytes[first] > 90 -> next
+        end: diagnostic_names1_word_end(bytes, first)
+        token: String.from_bytes(bytes[start..<end]) ?? next
+        name: diagnostic_names1_name(token) ?? {
+            diagnostic_names1_skip(edits, path, bytes, start, token)
+            next
+        }
+        diagnostic_names1_splice(edits, bytes, start, end, name)
+        at = end
+    }
+    diagnostic_names1_finish(edits, bytes)
+}
+
+// One pass's rewritten pieces: the text before `cursor` is in `out`.
+DiagnosticNames1Edits: struct {
+    out: [String],
+    cursor: Int,
+    rewritten: Int,
+    skipped: [String],
+}
+
+// Replaces `bytes[start..<end]` with `with`.
+diagnostic_names1_splice: fn(edits: &DiagnosticNames1Edits, bytes: [U8], start: Int, end: Int, with: &&String) Never! {
+    edits.out.push(String.from_bytes(bytes[edits.cursor..<start]) ?? "")
+    edits.out.push(with)
+    edits.cursor = end
+    edits.rewritten += 1
+}
+
+diagnostic_names1_skip: fn(edits: &DiagnosticNames1Edits, path: String, bytes: [U8], at: Int, token: String) Never! {
+    line := 1
+    loop byte in bytes[0..<at] {
+        if byte == 10 -> line += 1
+    }
+    edits.skipped.push("{path}:{line}: `{token}` names no registered diagnostic, left alone")
+}
+
+diagnostic_names1_finish: fn(edits: DiagnosticNames1Edits, bytes: [U8]) -[]> MigrationOutcome {
+    if edits.rewritten == 0 {
+        return MigrationOutcome{text: String.from_bytes(bytes) ?? "", rewritten: 0, skipped: edits.skipped}
+    }
+    out := edits.out
+    out.push(String.from_bytes(bytes[edits.cursor..<bytes.len()]) ?? "")
+    MigrationOutcome{text: out.join(""), rewritten: edits.rewritten, skipped: edits.skipped}
+}
+
+// The heading label that opens at `at`, followed by ` [`.
+diagnostic_names1_label: fn(bytes: [U8], at: Int) -[]> String? {
+    loop label in DIAGNOSTIC_NAMES1_LABELS {
+        if diagnostic_names1_at(bytes, at, "{label} [".bytes()) -> return Val(label)
+    }
+    None
+}
+
+// Whether `bytes` holds `needle` at `at`.
+diagnostic_names1_at: fn(bytes: [U8], at: Int, needle: [U8]) -[]> Bool {
+    if at < 0 || at + needle.len() > bytes.len() -> return false
+    loop (index, byte) in needle {
+        if bytes[at + index] != byte -> return false
+    }
+    true
+}
+
+// The end of the run of word bytes from `at`.
+diagnostic_names1_word_end: fn(bytes: [U8], at: Int) -[]> Int {
+    end := at
+    loop end < bytes.len() && diagnostic_names1_word_byte(bytes[end]) -> end += 1
+    end
+}
+
+// The end of the code or dotted name from `at`: word bytes and `-`, joined
+// by single dots; a dot that ends a sentence is not part of it.
+diagnostic_names1_path_end: fn(bytes: [U8], at: Int) -[]> Int {
+    end := at
+    loop end < bytes.len() {
+        byte: bytes[end]
+        if {
+            diagnostic_names1_word_byte(byte) || byte == 45 -> end += 1
+            byte == 46 && end > at && end + 1 < bytes.len() && diagnostic_names1_word_byte(bytes[end + 1]) -> end += 1
+            else -> break
+        }
+    }
+    end
+}
+
+// Whether a heading or name may start at `at`: the text's start, after a byte
+// no word holds, or after the `\n` or `\t` escape a string literal writes.
+diagnostic_names1_word_start: fn(bytes: [U8], at: Int) -[]> Bool {
+    if at == 0 || !diagnostic_names1_word_byte(bytes[at - 1]) -> return true
+    at >= 2 && bytes[at - 2] == 92 && (bytes[at - 1] == 110 || bytes[at - 1] == 116)
+}
+
+diagnostic_names1_word_byte: fn(byte: U8) -[]> Bool {
+    diagnostic_names1_letter(byte) || (byte >= 48 && byte <= 57) || byte == 95
+}
+
+diagnostic_names1_letter: fn(byte: U8) -[]> Bool {
+    (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
+}
+
+#Test("a heading, its link and its hint name the row") {
+    old: "Error [E0113]: no\nWarning [jet.ReturnTypeMismatch]: no\nStop [game.FrameHold]: no\nMore: jet-lang.dev/e/E0113\nRun `jet explain E0113` to learn more\n"
+    outcome: diagnostic_names1_file("a.txt", old, false)
+    assert_eq(outcome.text, "Error: Jet.ReturnTypeMismatch: no\nWarning: Jet.ReturnTypeMismatch: no\nStop: game.FrameHold: no\nMore: jet-lang.dev/e/Jet.ReturnTypeMismatch\nRun `jet explain Jet.ReturnTypeMismatch` to learn more\n")
+    assert_eq(outcome.rewritten, 5)
+    assert_eq(diagnostic_names1_file("a.txt", outcome.text, false).rewritten, 0)
+}
+
+#Test("a heading after a string literal's newline escape moves too") {
+    old: "say(\"Error [jet.ReturnTypeMismatch]: a\\nStop [E0113]: b\\n\")\nsplit\\nError [E0113]: c\n"
+    outcome: diagnostic_names1_file("a.txt", old, false)
+    assert_eq(outcome.text, "say(\"Error: Jet.ReturnTypeMismatch: a\\nStop: Jet.ReturnTypeMismatch: b\\n\")\nsplit\\nError: Jet.ReturnTypeMismatch: c\n")
+    assert_eq(outcome.rewritten, 3)
+}
+
+#Test("a jet name anywhere else is the Jet name, and an unknown one is reported") {
+    old: "#Allow(jet.ReturnTypeMismatch, \"x\")\ncontains(\"[jet.ReturnTypeMismatch]\")\nmain.jet.Point dev.jet.Session [jet.ReturnTypeMismatch](x)\njet.NoSuchName.\n"
+    outcome: diagnostic_names1_file("a.txt", old, false)
+    assert_eq(outcome.text, "#Allow(Jet.ReturnTypeMismatch, \"x\")\ncontains(\"Jet.ReturnTypeMismatch\")\nmain.jet.Point dev.jet.Session [Jet.ReturnTypeMismatch](x)\njet.NoSuchName.\n")
+    assert_eq(outcome.skipped, [String]{"a.txt:4: `jet.NoSuchName` names no registered diagnostic, left alone"})
+}
+
+#Test("a jet.report object gains its name after its code") {
+    plain: diagnostic_names1_file("a.json", "{{\"code\":\"E0113\",\"what\":\"no\"}} {{\"code\": \"E9999\", \"what\": \"no\"}}", false)
+    assert_eq(plain.text, "{{\"code\":\"E0113\",\"name\":\"Jet.ReturnTypeMismatch\",\"what\":\"no\"}} {{\"code\": \"E9999\", \"name\": \"E9999\", \"what\": \"no\"}}")
+    escaped: diagnostic_names1_file("a.case", "stdout: = \"{{\\\"code\\\":\\\"E0113\\\",\\\"what\\\":\\\"no\\\"}}\"", false)
+    assert_eq(escaped.text, "stdout: = \"{{\\\"code\\\":\\\"E0113\\\",\\\"name\\\":\\\"Jet.ReturnTypeMismatch\\\",\\\"what\\\":\\\"no\\\"}}\"")
+}
+
+#Test("a case predicate on a code alone matches its name, but not after an explain step") {
+    old: "step: jet check main.jet\nstderr: ~ \"E0113\" # the mismatch\nwhen exit == 70: stderr: !~ \"[E0113]\"\nstderr: ~ \"E0113 is\"\n# stderr: ~ \"E0113\"\nstep: jet explain E0113\nstdout: ~ \"E0113\"\n"
+    outcome: diagnostic_names1_file("a.case", old, false)
+    assert_eq(outcome.text, "step: jet check main.jet\nstderr: ~ \"Jet.ReturnTypeMismatch\" # the mismatch\nwhen exit == 70: stderr: !~ \"Jet.ReturnTypeMismatch\"\nstderr: ~ \"E0113 is\"\n# stderr: ~ \"E0113\"\nstep: jet explain E0113\nstdout: ~ \"E0113\"\n")
+    assert_eq(outcome.rewritten, 2)
+    assert_eq(diagnostic_names1_file("a.txt", old, false).rewritten, 0)
+    assert_eq(diagnostic_names1_file("a.case", outcome.text, false).rewritten, 0)
+}
+
+#Test("a case literal on a heading's opening matches the new opening") {
+    old: "stderr: count \"Error [\" = 1 # one\nstdout: !~ Error [ # none\nstdout: !~ Stop [\nstderr: ~ \"Error [jet.\"\nstderr.after_first(\"Error [\"): ^= \"Jet.MissingGit]\" # first\nstderr: ~any \"Error [\" \"Warning [\"\nstderr: ~ \"Error [E0113]\"\n"
+    outcome: diagnostic_names1_file("a.case", old, false)
+    assert_eq(outcome.text, "stderr: count \"Error: \" = 1 # one\nstdout: !~ \"Error: \" # none\nstdout: !~ \"Stop: \"\nstderr: ~ \"Error: Jet.\"\nstderr.after_first(\"Error: \"): ^= \"Jet.MissingGit:\" # first\nstderr: ~any \"Error: \" \"Warning: \"\nstderr: ~ \"Error: Jet.ReturnTypeMismatch\"\n")
+    assert_eq(diagnostic_names1_file("a.case", outcome.text, false).rewritten, 0)
+    assert_eq(diagnostic_names1_file("a.txt", old, false).text, old.replace("Error [E0113]", "Error: Jet.ReturnTypeMismatch"))
+}

@@ -84,7 +84,7 @@ than invented. The missing-evidence contract (its registered code is card
 For example, the ratified render remains:
 
 ```text
-Error [jet.MissingProofEvidence]: required proof evidence is unavailable
+Error: Jet.MissingProofEvidence: required proof evidence is unavailable
 Why: the complete_required policy needs statistical budget checkout-p95, but no matching baseline exists
 Fix: run jet test --measure src/payments.jet on the pinned profile to record the baseline
 ```
@@ -428,10 +428,10 @@ replay record; those belong to card #441 and `.jettrace`.
 The non-interactive sensitive boundary is observable as:
 
 ```text
-Error [jet.ReplaySensitiveData]: replay capture refused sensitive data
+Error: Jet.ReplaySensitiveData: replay capture refused sensitive data
  Why: non-interactive `--capture-sensitive` cannot collect TTY consent for raw Rand/IO/Net values
  Fix: run from a TTY and type `capture sensitive`, or use safe `--capture` for Time-only roots
-More: jet-lang.dev/e/E3627
+More: jet-lang.dev/e/Jet.ReplaySensitiveData
 ```
 
 **Rule.** Replay identity binds schema, Jet build, Core ABI, IR schema and
@@ -611,7 +611,7 @@ constructor's sentence case and code quoted in backticks, as in every other
 diagnostic:
 
 ```text
-Error [jet.SolverCounterexample]: Solver found a counterexample to function postcondition `add_fee`
+Error: Jet.SolverCounterexample: Solver found a counterexample to function postcondition `add_fee`
 Why: `cents = 1` and `result = 1` satisfy the precondition but make `result > cents` false
 Fix: Change `add_fee` so every return is greater than `cents`, or correct the `#Post` claim
 ```
@@ -719,10 +719,10 @@ new machine schema from growing out of display spelling.
 The executable snapshot is:
 
 ```text
-Error [jet.UnknownProofLens]: Unknown proof lens `test`
+Error: Jet.UnknownProofLens: Unknown proof lens `test`
  Why: `jet prove` accepts all, refinements, effects, taint, contracts, tests, budgets, replay, solver
  Fix: Try `jet prove plain.jet --lens tests`
-More: jet-lang.dev/e/E2941
+More: jet-lang.dev/e/Jet.UnknownProofLens
 ```
 
 The registry, exact UI/CLI snapshot, `jet explain`, generated reference, and I4

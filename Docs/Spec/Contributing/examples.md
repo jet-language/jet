@@ -102,7 +102,7 @@ streams for that tier alone, for a program whose output follows its build
 profile. A rejected build compares its stderr against the tier's `.err.out`
 with exit 1, and no run follows it. On `o0` an entry whose sidecar spells no
 steps gets no separate `jet check`: its `jet run` reports the rejection, and a
-diagnostic report (`Error [jet.…]`) expects exit 1 there too.
+diagnostic report (`Error: Jet.…`) expects exit 1 there too.
 A PASS/FAIL disagreement is reported as `tier-split`, not blessed separately.
 An E2104 build refusal is `UNSUPPORTED` only on a native tier.
 

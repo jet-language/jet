@@ -11,13 +11,13 @@ env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step omitted: jet check omitted/run.jet
 exit: 1 # the row leaves out FFI.C("c")
-stderr: ~ "E0749" # the package row is the ceiling
+stderr: ~ "Jet.ProhibitedEffectReached" # the package row is the ceiling
 stderr: ~ "reaches the `FFI.C(\"c\")` effect" # the C call's own effect is named
 step listed: jet run listed/run.jet
 exit: 0 # the row lists FFI.C("c"), so the C call is inside it
 stdout: = "pid>0=true\n"
 step jet_side: jet check jet_side/run.jet
 exit: 1 # FFI.C("c") does not hold the Jet call to `net.tcp_connect`
-stderr: ~ "E0749" # the package row is the ceiling
+stderr: ~ "Jet.ProhibitedEffectReached" # the package row is the ceiling
 stderr: ~ "reaches the `Net` effect" # the Jet-side effect is named
 stderr: !~ "reaches the `FFI.C(\"c\")` effect" # the C call itself is inside the row

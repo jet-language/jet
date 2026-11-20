@@ -1005,7 +1005,7 @@ Float held in a vector register can't be watched. Globals can't be watched
 yet, because the debug information has no global variables. A watch the
 debugger can't place (a place the parser doesn't read as one, no such
 local or field, no bytes, no free debug register) is refused with E2237
-(`jet.DebugRequestRefused`), which names why.
+(`Jet.DebugRequestRefused`), which names why.
 
 ## Recorder boundary
 
@@ -1072,7 +1072,7 @@ breakpoint); it then runs them once more to the pass the command wants,
 which becomes the stop. The program's output is not shown again.
 Breakpoints stay as they are; a watch set after the point it goes back to
 ends, with a note. With nothing earlier the program comes back to the
-same stop, refused with E2237 (`jet.DebugRequestRefused`), which says
+same stop, refused with E2237 (`Jet.DebugRequestRefused`), which says
 so; under `--dap` the request fails with it, and the stop's frame ids still
 hold. Outside a replay, and after `fix` (a new run would run the code
 before the fix), they are refused with E2237.

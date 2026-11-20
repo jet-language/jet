@@ -17,17 +17,17 @@ step resolution: jet check resolution/main.jet
 exit: 1
 stderr: ~ "`resolution` changes how the compiler checks code, so `Merged` can't set it" # a package marker can't set resolution
 stderr: ~ "--> main.jet:6:9" # located at the setting
-stderr: ~ "jet-lang.dev/e/E0936" # the marker-setting code
+stderr: ~ "jet-lang.dev/e/Jet.UnknownTraitConstant" # the marker-setting code
 stderr: ~ "1 problem found" # one refusal
 step tighten: jet check tighten/main.jet
 exit: 1
 stderr: ~ "Invalid effective `sentries` policy" # the inner block widens the module's setting
 stderr: ~ "--> main.jet:6:5" # located at the inner #Policy
 stderr: ~ "the module rung sets `sentries: .Off` here" # naming the rung it widens
-stderr: ~ "jet-lang.dev/e/E0355" # the scoped-policy code
+stderr: ~ "jet-lang.dev/e/Jet.InvalidScopedPolicy" # the scoped-policy code
 step word: jet check word/main.jet
 exit: 1
 stderr: ~ "`marker` is not a Jet word" # the old declaration word is gone
-stderr: ~ "jet-lang.dev/e/E0003" # the ordinary parse code
+stderr: ~ "jet-lang.dev/e/Jet.InvalidStatement" # the ordinary parse code
 stderr: !~ "impl Marker" # no teaching diagnostic names the new form
 stderr: ~ "1 problem found" # one parse error

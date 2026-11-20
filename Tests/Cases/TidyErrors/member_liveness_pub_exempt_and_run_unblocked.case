@@ -8,13 +8,13 @@ env: NO_COLOR=1
 step: jet run app/main.jet
 exit: 0
 stdout: = "shapes\n3\non\n" # run runs the program
-stdout+stderr: !~ "[jet.UnreadField]" # run hides tidy errors
-stdout+stderr: !~ "[jet.UnbuiltCase]" # run hides tidy errors
+stdout+stderr: !~ "Jet.UnreadField" # run hides tidy errors
+stdout+stderr: !~ "Jet.UnbuiltCase" # run hides tidy errors
 step: jet dev app/main.jet --watch=off
 exit: 0
 stdout: ~ "shapes" # dev runs the program
-stdout+stderr: !~ "[jet.UnreadField]" # dev hides tidy errors
-stdout+stderr: !~ "[jet.UnbuiltCase]" # dev hides tidy errors
+stdout+stderr: !~ "Jet.UnreadField" # dev hides tidy errors
+stdout+stderr: !~ "Jet.UnbuiltCase" # dev hides tidy errors
 step: jet check shapes
 exit: 1
 stderr: ~ "Field `Shape.tag` is never read" # a library's private field is judged

@@ -427,7 +427,7 @@ chooses B.
 | defect | stderr | exit | under A |
 |---|---|---|---|
 | out of memory | `memory allocation of 9223372036854775800 bytes failed` | SIGABRT | the same |
-| invalid layout | ``Stop [E3001]: `panic: invalid box layout` `` then `--> <core.prelude>:0` and the E3001 why/fix lines | 70 in a Jet program | the same |
+| invalid layout | ``Stop: Jet.Panic: `panic: invalid box layout` `` then `--> <core.prelude>:0` and the E3001 why/fix lines | 70 in a Jet program | the same |
 | GS failure | the defect-unreachable header, from Trap.jet `trap_gs_failure` (not triggerable in a test) | 101 | the same |
 
 Out of memory and invalid layout are from `run-alloc-parity.mjs`, run on the

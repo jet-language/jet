@@ -1,5 +1,5 @@
 # Going back where the replay holds nothing earlier is refused with E2237
-# (jet.DebugRequestRefused): the program comes back to the same stop. At
+# (Jet.DebugRequestRefused): the program comes back to the same stop. At
 # the console `rc` from the first hit of line 21 has no earlier breakpoint
 # or watch hit to go to, past the stop at the start of `run`, so a second
 # `rc` is refused there at the latest. Over `--dap`, `reverseContinue` from
@@ -13,8 +13,8 @@ exit: 0
 step: jet debug --replay=back prog.jet
 stdin: replay_refusals_empty_history.stdin
 exit: 0
-stdout: ~ "(Jet) rc\nError [jet.DebugRequestRefused]: The debugger can't do this here: the replay holds no breakpoint or watch hit before this stop.\n" # nothing earlier to go back to
-stdout: ~ "More: jet-lang.dev/e/E2237\n" # the refusal names its page
+stdout: ~ "(Jet) rc\nError: Jet.DebugRequestRefused: The debugger can't do this here: the replay holds no breakpoint or watch hit before this stop.\n" # nothing earlier to go back to
+stdout: ~ "More: jet-lang.dev/e/Jet.DebugRequestRefused\n" # the refusal names its page
 stdout: ~ "total 6 tally " # the program runs on to its end
 stdout: ~ "Program finished\n" # the session runs the program to its end
 stdout+stderr: !~ "replay diverged" # the replay stays faithful to the recording

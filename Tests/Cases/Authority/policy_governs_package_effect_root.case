@@ -10,7 +10,7 @@ env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step outside: jet check outside/main.jet
 exit: 1 # `allow: [IO]` doesn't name the dependency's effect root
-stderr: ~ "E1220" # the dependency is outside the budget
+stderr: ~ "Jet.DependencyAuthorityExceeded" # the dependency is outside the budget
 stderr: ~ "`ledger`" # the dependency is named
 stderr: ~ "uses the `ledger.Ledger` effect" # its root is named as the manifest writes it
 stderr: ~ "Add `ledger.Ledger` to `authority.allow`" # the fix names the row entry
@@ -22,7 +22,7 @@ exit: 0 # the allow row names the root
 stdout: = "4\n"
 step denied: jet check denied/main.jet
 exit: 1 # deny wins over allow
-stderr: ~ "E1220" # the dependency reaches a denied effect
+stderr: ~ "Jet.DependencyAuthorityExceeded" # the dependency reaches a denied effect
 stderr: ~ "`ledger.Ledger`" # the denied root is named
 step granted: jet run granted/main.jet
 exit: 0 # the dependency's grant line names its root

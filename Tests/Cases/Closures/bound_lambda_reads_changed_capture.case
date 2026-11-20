@@ -17,10 +17,10 @@ exit: 0
 stdout: = "1\n2\n12\n"
 step refused: jet check refused.jet
 exit: 1
-stderr: ~ "jet.UseWhileWriteActive" # the stale call is refused (E0204)
+stderr: ~ "Jet.UseWhileWriteActive" # the stale call is refused (E0204)
 stderr: ~ "refused.jet:6:11" # at the call of `f` after `v.push(2)`
 stderr: ~ "refused.jet:10:11" # at the call of `g` after `k = 5`
 stderr: ~ "reads its own copy of `v`, made before `v` changed" # naming why
 step refused_run: jet run -O0 refused.jet
 exit: 1
-stderr: ~ "jet.UseWhileWriteActive" # the run stops at the same check
+stderr: ~ "Jet.UseWhileWriteActive" # the run stops at the same check

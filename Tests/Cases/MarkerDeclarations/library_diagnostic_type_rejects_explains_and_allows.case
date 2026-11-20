@@ -8,7 +8,7 @@ env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jet check web.jet
 exit: 1
-stderr: ~ "Error [web.BadPath]: `serve` serves no absolute path" # the header names the library type and fills its hole
+stderr: ~ "Error: web.BadPath: `serve` serves no absolute path" # the header names the library type and fills its hole
 stderr: ~ "web.jet:23:1" # the span is the marker use site
 stderr: ~ "Fix: Give `serve` a path that starts with `/`" # the fix text is the impl's literal with its hole filled
 stderr: !~ "More:" # a library code has no registry page
@@ -19,5 +19,5 @@ stdout: ~ "`{self.name}` serves no absolute path" # explain prints the what lite
 stdout: ~ "give `{self.name}` a path that starts with `/`" # explain prints the fix literal with its hole
 step: jet check drafts.jet
 exit: 0
-stderr: ~ "Warning [drafts.DraftRoute]: `shown` is a draft route" # an unallowed .Warning still reports
+stderr: ~ "Warning: drafts.DraftRoute: `shown` is a draft route" # an unallowed .Warning still reports
 stderr: !~ "`reviewed` is a draft route" # the #Allow site is silenced

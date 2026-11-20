@@ -23,10 +23,10 @@ step dead_else: jet check dead_else.jet
 exit: 1
 stderr: ~ "This `else` can never run; every case of `Shape` is already handled" # the E0641 headline for the complete table plus an else
 stderr: ~ "Fix: Delete the `else` arm" # its fix gives back the complete table the o0 step runs
-stderr: ~ "E0641" # the closed-set else code
-stderr: !~ "E0003" # the table parses
+stderr: ~ "Jet.ClosedSetElse" # the closed-set else code
+stderr: !~ "Jet.InvalidStatement" # the table parses
 step missing: jet check missing.jet
 exit: 1
 stderr: ~ "This `if` doesn't cover every case — missing: Rect" # the guarded arm covers no case, so Rect is missing
-stderr: ~ "E0307" # the non-exhaustive dispatch code
-stderr: !~ "E0003" # the table parses
+stderr: ~ "Jet.NonExhaustiveDispatch" # the non-exhaustive dispatch code
+stderr: !~ "Jet.InvalidStatement" # the table parses

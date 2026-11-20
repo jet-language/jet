@@ -10,31 +10,31 @@ env: NO_COLOR=1
 step: jet run main.jet
 cwd: open
 exit: 70
-stderr: ~ "Stop [E3012]: Stack overflow in `depth`" # full names the function
+stderr: ~ "Stop: Jet.StackOverflow: Stack overflow in `depth`" # full names the function
 stderr: ~ "--> main.jet:" # and its line
 step: jet run --backtrace=brief main.jet
 cwd: open
 exit: 70
-stderr: ~ "Stop [E3012]: Stack overflow in `depth`" # an overflow names its innermost frame under brief too
+stderr: ~ "Stop: Jet.StackOverflow: Stack overflow in `depth`" # an overflow names its innermost frame under brief too
 step: jet run --profile=quiet main.jet
 cwd: open
 exit: 70
 stdout: = "depth: 3\n"
-stderr: ~ "Stop [E3012]: Stack overflow\n" # off prints no frame
+stderr: ~ "Stop: Jet.StackOverflow: Stack overflow\n" # off prints no frame
 stderr: !~ "--> main.jet:" # and no line
 step: jet build --backtrace=off main.jet
 cwd: open
 exit: 0
 step: {work}/open/.jet/build/main
 exit: 70
-stderr: ~ "Stop [E3012]: Stack overflow\n" # the built image keeps the option
+stderr: ~ "Stop: Jet.StackOverflow: Stack overflow\n" # the built image keeps the option
 step: jet build --debug-info=false main.jet
 cwd: open
 exit: 0
 step: jet build --backtrace=full --debug-info=false main.jet
 cwd: open
 exit: 2
-stderr: ~ "Error [jet.InvalidCommandInput]: `--backtrace=full` needs debug info, which `--debug-info=false` leaves out" # a written full backtrace needs DWARF
+stderr: ~ "Error: Jet.InvalidCommandInput: `--backtrace=full` needs debug info, which `--debug-info=false` leaves out" # a written full backtrace needs DWARF
 step: jet build --profile=refused main.jet
 cwd: open
 exit: 2
@@ -42,7 +42,7 @@ stderr: ~ "needs debug info, which `debug_info: false` in profile `refused` of p
 step: jet build --backtrace=sometimes main.jet
 cwd: open
 exit: 2
-stderr: ~ "Error [jet.InvalidCommandInput]: `--backtrace=sometimes` isn't a value of `backtrace`" # full, brief or off
+stderr: ~ "Error: Jet.InvalidCommandInput: `--backtrace=sometimes` isn't a value of `backtrace`" # full, brief or off
 step: jet build main.jet
 cwd: dead
 exit: 0
@@ -61,7 +61,7 @@ cwd: code
 exit: 0
 step: {work}/code/.jet/build/main
 exit: 70
-stderr: ~ "Stop [E3012]: Stack overflow\n" # b.backtrace(.Off) in fn build
+stderr: ~ "Stop: Jet.StackOverflow: Stack overflow\n" # b.backtrace(.Off) in fn build
 step: jet build --backtrace=brief
 cwd: code
 exit: 0

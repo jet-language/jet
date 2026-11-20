@@ -24,11 +24,11 @@ step effect: jet check effect/main.jet
 exit: 1
 stderr: ~ "`greeting()` is a Tier-2 comptime effect" # the effect row refuses the helper
 stderr: ~ ":11:18" # at the call
-stderr: ~ "jet-lang.dev/e/E3410" # one registered code
+stderr: ~ "jet-lang.dev/e/Jet.ComptimeEffectWithoutImpure" # one registered code
 step closed: jet run impure/main.jet
 exit: 1
 stderr: ~ "but its package doesn't hold `Meta.Host`" # `#Impure` alone does not open the gate
-stderr: ~ "jet-lang.dev/e/E3411" # one registered code
+stderr: ~ "jet-lang.dev/e/Jet.ImpureGateNotAllowed" # one registered code
 write: impure/package.jet = "name: \"d_ctcore1_impure\"\nversion: \"0.1.0\"\nauthority: {\n    allow: [IO, FS, Meta.Host]\n}\n"
 step open: jet run impure/main.jet
 exit: 0

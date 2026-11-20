@@ -13,8 +13,8 @@ write: fixtures/foreign/npm/plotly-plotly_version_2_35_0/.jet/bindings/js/plotly
 step: jet fetch
 cwd: stale
 exit: nonzero # tests/pkg.rs:1962 stale provider binding must fail before ingestion
-stderr: ~ "E1256" # tests/pkg.rs:1963
-stderr: !~ "E2104" # the failure comes from fetch itself, not from an unbuilt command
+stderr: ~ "Jet.EnvironmentNotProjectable" # tests/pkg.rs:1963
+stderr: !~ "Jet.InvalidCommandInput" # the failure comes from fetch itself, not from an unbuilt command
 write: fixtures/foreign/npm/plotly-plotly_version_2_35_0/.jet/bindings/js/plotly.jet foreign_package_provider_fetch_lock_and_locked_round_trip.binding.template
 step: jet fetch
 cwd: proj
@@ -33,6 +33,6 @@ remove: fixtures/foreign/npm
 step: jet fetch
 cwd: failed
 exit: nonzero # tests/pkg.rs:2042 missing provider artifact must fail before foreign fetch succeeds
-stderr: ~ "E1256" # tests/pkg.rs:2043
-stderr: !~ "E2104" # the failure comes from fetch itself, not from an unbuilt command
+stderr: ~ "Jet.EnvironmentNotProjectable" # tests/pkg.rs:2043
+stderr: !~ "Jet.InvalidCommandInput" # the failure comes from fetch itself, not from an unbuilt command
 file: failed/.jet/lock absent # tests/pkg.rs:2044

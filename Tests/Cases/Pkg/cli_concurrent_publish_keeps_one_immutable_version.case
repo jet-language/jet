@@ -83,11 +83,11 @@ env: JET_KEYS_DIR={work}/keys
 wait: left
 exit: any # Original asserts exactly one success collectively below.
 when exit == 0: append: wins.txt "left\n"
-when exit != 0: stderr: ~ "E1234" # Original loser immutable-version diagnostic.
+when exit != 0: stderr: ~ "Jet.VersionAlreadyPublished" # Original loser immutable-version diagnostic.
 wait: right
 exit: any # Original asserts exactly one success collectively below.
 when exit == 0: append: wins.txt "right\n"
-when exit != 0: stderr: ~ "E1234" # Original loser immutable-version diagnostic.
+when exit != 0: stderr: ~ "Jet.VersionAlreadyPublished" # Original loser immutable-version diagnostic.
 file: wins.txt lines = 1 # original exactly one publish succeeds
 step: git --git-dir {work}/registry.git show HEAD:index/racekit/racekit.jsonl
 exit: 0

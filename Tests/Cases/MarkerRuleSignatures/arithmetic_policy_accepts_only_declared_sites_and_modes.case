@@ -8,10 +8,10 @@ env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jet check valid/main.jet
 exit: 0 # tests/marker_rule_signatures.rs:90 valid sites must be empty
-stderr: !~ "Error [" # tests/marker_rule_signatures.rs:90 valid sites must be empty
+stderr: !~ "Error: " # tests/marker_rule_signatures.rs:90 valid sites must be empty
 step: jet check bad_site/main.jet
 exit: 1 # tests/marker_rule_signatures.rs:94 wrong site expects E0355
-stderr: ~ "E0355" # tests/marker_rule_signatures.rs:94 wrong site expects E0355
+stderr: ~ "Jet.InvalidScopedPolicy" # tests/marker_rule_signatures.rs:94 wrong site expects E0355
 step: jet check bad_mode/main.jet
 exit: 1 # tests/marker_rule_signatures.rs:100 wrong mode expects E0930
-stderr: ~ "E0930" # tests/marker_rule_signatures.rs:100 wrong mode expects E0930
+stderr: ~ "Jet.MarkerArgumentMismatch" # tests/marker_rule_signatures.rs:100 wrong mode expects E0930

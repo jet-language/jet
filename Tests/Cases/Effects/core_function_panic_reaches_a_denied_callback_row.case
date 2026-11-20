@@ -6,14 +6,14 @@ fixture: CoreFunctionPanicReachesADeniedCallbackRow.fixture
 env: NO_COLOR=1
 step: jet check main.jet
 exit: 1
-stderr: count "Error [jet.CallbackEffectBoundExceeded]" = 2 # one per call
+stderr: count "Error: Jet.CallbackEffectBoundExceeded" = 2 # one per call
 stderr: ~ "This callback uses the effect `Panic`, which the parameter doesn't allow\n  --> main.jet:11:38" # the local's initializer
 stderr: ~ "This callback uses the effect `Panic`, which the parameter doesn't allow\n  --> main.jet:13:35" # the printed call
 step: jet run -O0 main.jet
 exit: 1
-stderr: count "Error [jet.CallbackEffectBoundExceeded]" = 2 # O0 refuses both
-stderr: ~ "jet-lang.dev/e/E0747" # the refusal is E0747
+stderr: count "Error: Jet.CallbackEffectBoundExceeded" = 2 # O0 refuses both
+stderr: ~ "jet-lang.dev/e/Jet.CallbackEffectBoundExceeded" # the refusal is E0747
 step: jet run -O2 main.jet
 exit: 1
-stderr: count "Error [jet.CallbackEffectBoundExceeded]" = 2 # O2 refuses both
-stderr: ~ "jet-lang.dev/e/E0747" # the refusal is E0747
+stderr: count "Error: Jet.CallbackEffectBoundExceeded" = 2 # O2 refuses both
+stderr: ~ "jet-lang.dev/e/Jet.CallbackEffectBoundExceeded" # the refusal is E0747

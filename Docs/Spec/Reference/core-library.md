@@ -5438,7 +5438,7 @@ path, from the calling file's own directory, so `asset("brand/logo.svg")`
 called in `Screens/home.jet` names `Screens/brand/logo.svg`. The compiler
 checks a path written as a string literal while the program builds. One that
 is absolute or has a `..` part is E0957, as for `embed_bytes`; one that names
-no file, a directory among them, is E2822 (`jet.MissingAsset`), which names
+no file, a directory among them, is E2822 (`Jet.MissingAsset`), which names
 the path it resolved to. Both are reported at the path. A path built at run
 time is not checked.
 
@@ -5961,7 +5961,7 @@ that starts at an `#App.Public` method, a webhook or its signing-key method,
 a `task` spawned where a caller was certain, or a function nothing in the
 program calls (the program's entry and what it schedules, a test outside
 `as_caller`, a handler passed as a value) is E2815
-(`jet.CallerWithoutSignedInPath`) at the call, and the report names the
+(`Jet.CallerWithoutSignedInPath`) at the call, and the report names the
 path. `maybe_caller()` is the form for such code. A function value that
 another task runs is a path the compiler cannot follow: a `caller()` that
 runs there acting for no account stops the task.
@@ -5970,7 +5970,7 @@ runs there acting for no account stops the task.
 that `#App.SignedIn` (a signed-in caller) or `#App.Public` (any caller)
 marks, and `jet inspect choices` lists those methods as endpoints. A call of
 any other method of `S` through a Remote, such as an unmarked method, a job,
-a webhook or a signing key, is E2812 (`jet.ServerOnlyMethod`): the report
+a webhook or a signing key, is E2812 (`Jet.ServerOnlyMethod`): the report
 names the method and suggests a marker. The service is a private field of the
 Remote, which no code outside `app` reads. A call through the Remote that
 `remote(service)` makes runs the method on that service directly.
@@ -6057,7 +6057,7 @@ element by `[n]`, as in `assignee` or `steps[{index}].title`. It is a string
 literal, interpolated only inside a `[…]` index, so the compiler checks that
 it names a field of an argument of the function it is written in. A path that
 names none, or one computed elsewhere, is E2813
-(`jet.FieldErrorPathUnknown`), whose fix lists the fields the path can name
+(`Jet.FieldErrorPathUnknown`), whose fix lists the fields the path can name
 at the step that failed. The error then shows beside that field, as a failed
 `validate` check does.
 
@@ -6072,7 +6072,7 @@ HMAC-SHA256 of the body) or `Stripe` (`Stripe-Signature: t=<seconds>,v1=<mac>`,
 the HMAC-SHA256 of `<seconds>.<body>`). `key:` names the service's method
 marked `#App.SigningKey`. That method takes some of the webhook's path
 parameters by name and returns the key as `String?`. A `key:` that names no
-such method is E2814 (`jet.WebhookKeyNotSigningKey`). Each delivery runs the
+such method is E2814 (`Jet.WebhookKeyNotSigningKey`). Each delivery runs the
 signing-key method first. A None key, a missing signature header, or a
 signature that does not match the MAC is answered 401, and the body is never
 decoded. The MAC is compared in constant time. A delivery that passes runs
@@ -6112,7 +6112,7 @@ such as a notice to send. `app.enqueue(fn() { self.notify(task, to) })`, in a
 method of the same service, queues one call of the job method `notify`. The
 closure takes no parameters and its whole body is that one call on `self`,
 with each argument in its place and of a type that derives `Encode` and
-`Decode`; anything else is E2817 (`jet.EnqueueNotOneJobCall`). The arguments
+`Decode`; anything else is E2817 (`Jet.EnqueueNotOneJobCall`). The arguments
 are evaluated and encoded where `enqueue` is called. Inside a call, the job
 is kept in the call's transaction, as a row of the `__jet_jobs` table of the
 first store the call used, under a random key of its own: a call that rolls
@@ -6151,7 +6151,7 @@ contract. Every engine core.db opens keeps it, a database file or an
 in-memory database; an in-memory database's jobs last as long as the rows
 that queued them. A mounted service's job method takes read-only
 `self`, a concrete signature and parameters whose types derive `Encode` and
-`Decode`; anything else is E2805 (`jet.InvalidRoute`) at its marker.
+`Decode`; anything else is E2805 (`Jet.InvalidRoute`) at its marker.
 
 A method marked `#App.Every(cron: "0 8 * * 1-5")` is a schedule: it runs at
 each minute its cron line allows, in UTC, once a server first serves its
@@ -6162,7 +6162,7 @@ day of the month (1-31), month (1-12) and day of the week (0-7, Sunday 0 or
 stepped (`*/15`, `1-30/2`); a line that names both a day of the month and a
 day of the week runs on either. The method takes only `self`. A line that
 isn't static or doesn't parse, and a method of another shape, are E2805
-(`jet.InvalidRoute`). Each run is a call of its own, as the
+(`Jet.InvalidRoute`). Each run is a call of its own, as the
 system, and each store it uses records it in the call's transaction, as a
 row of the store's `__jet_schedules` table: that row is the lease that runs
 each minute on one server across replicas. A store that has recorded the
@@ -6179,7 +6179,7 @@ A job, a schedule, a webhook and a webhook's signing key are server-only: no
 Remote calls one, and `app.endpoints<S>()` lists none. A method that
 `#App.SignedIn` or `#App.Public` marks beside `#App.Job`, `#App.Every`,
 `#App.Webhook` or `#App.SigningKey` is E2819
-(`jet.ServerOnlyMethodMarkedEndpoint`), at the endpoint marker. As no account
+(`Jet.ServerOnlyMethodMarkedEndpoint`), at the endpoint marker. As no account
 calls one, each runs as the system (`db.Who.System`), which no row policy
 limits, and `jet inspect choices` lists it as a `rights` row under its
 marker.
@@ -6187,10 +6187,10 @@ marker.
 Code runs on the side of the app boundary that has what it uses. An
 endpoint, a job, a schedule, a webhook and a signing key run on the server,
 so such a method that uses the `Browser` effect is E2824
-(`jet.ServerCodeUsesBrowser`), at the method's name. In a program that opts
+(`Jet.ServerCodeUsesBrowser`), at the method's name. In a program that opts
 in to the web partition, a function the partition places in JS runs in the
 page, so one that reaches a server resource (`DB` or `Secret`) is E2823
-(`jet.BrowserCodeReachesServerResource`), at the function where the page
+(`Jet.BrowserCodeReachesServerResource`), at the function where the page
 first reaches it: the one whose own JS callees reach none. A function uses an
 effect when its body or its written row holds it, or when it calls a
 function that does; a call through a closure or another open-world call
@@ -6212,7 +6212,7 @@ own with the request key the Remote gave it, as a served endpoint does. A
 Remote of a service the graph doesn't mount posts each call to the
 `.api` path. The graph mounts the service alone: a prefix, and a method
 that `#App.Webhook`, `#App.Every` or an HTTP route marker marks, is E2805
-(`jet.InvalidRoute`), as those answer only the server's `web.App`. A method
+(`Jet.InvalidRoute`), as those answer only the server's `web.App`. A method
 `#App.Job` marks is a job of the graph, as on a served App. The graph's
 rate limits apply only to served endpoints. `graph.offline(.Queue)` makes
 the device keep its writes while offline (`app.Offline`: `.Off`, the
@@ -6259,7 +6259,7 @@ q: String`) goes after `?`. Every other field must be a path segment. A
 path that is not a string literal starting with `/`, a field in neither
 place, a segment that names no field or names a query field, a view of
 another shape, and a state that two screens register are E2820
-(`jet.InvalidScreen`). `signed_in: true` marks a screen only a signed-in
+(`Jet.InvalidScreen`). `signed_in: true` marks a screen only a signed-in
 caller opens. A renderer walks the graph's screens in the order they were
 added, each with its path, state, query fields, `signed_in` and an opener
 that makes the state from an address's field texts and runs the view.
@@ -6325,7 +6325,7 @@ browser through Web Push.
 `app.current<BoardView>()` gives the current screen's state, made back from
 its address, when it is a `BoardView`, and None otherwise or before a
 screen opens. A value that is no struct declared outside Core is E2821
-(`jet.StateWithoutScreen`) in any program. In a program that registers
+(`Jet.StateWithoutScreen`) in any program. In a program that registers
 screens, so is a state that no screen opens. A program that registers no
 screen, such as a library checked on its own, is not checked against a
 graph. Running `url_of` or `go` before the process has built its graph
@@ -7011,7 +7011,7 @@ which source chose the port to stderr (`web app port 8123: JET_APP_PORT, over
 serve(port: 9000)`). Once the socket listens the program prints one ready
 line, `serving http://127.0.0.1:8080` (D-WEBAPP-SERVE1=D). `jet run` and `jet dev` share this
 listen step: under `jet run` a port another program holds, or one the system
-refuses, stops the program with E2809 (`jet.AppPortUnavailable`), which names
+refuses, stops the program with E2809 (`Jet.AppPortUnavailable`), which names
 the address and how to choose another port. `jet dev` sets `JET_DEV=1` for the
 program it runs; the app then moves past a busy port to the next free one,
 adds ` (live reload)` to the ready line, and serves live reload: every HTML
@@ -7036,7 +7036,7 @@ A `web.app()` owns one route table. Pages (`GET`), server functions (`POST
 `app.mount(value)` and `app.mount(prefix, value)`, `app.static_files` and the
 first `assets` root each register a row as their call runs, and every call
 returns the App, so registrations chain. Two rows with one method and address
-are E2804 (`jet.AmbiguousRoute`), naming both registrations: while building
+are E2804 (`Jet.AmbiguousRoute`), naming both registrations: while building
 when both addresses are literal, otherwise when the later row registers.
 `app.middleware(layer)`, `app.cors(policy)` and `app.request_id()` wrap every
 row, pages included. `web.openapi(app)` documents the handler rows; pages,

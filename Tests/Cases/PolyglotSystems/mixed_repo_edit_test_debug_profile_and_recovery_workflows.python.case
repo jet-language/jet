@@ -70,7 +70,7 @@ step: jet run run.jet
 cwd: python
 env: NO_COLOR=1
 exit: nonzero
-stdout+stderr: ~ "E3208" # original mixed_assert_failed_with helper422-428
+stdout+stderr: ~ "Jet.BindingGenerationFailed" # original mixed_assert_failed_with helper422-428
 copy: source.before python/ops.py
 capture: before = text file python/.jet/bindings/py/ops.jet
 capture: stale_descriptor = text file.replace_first("jet-ffi-descriptor=", "jet-ffi-descriptor=stale-") python/.jet/bindings/py/ops.jet
@@ -80,7 +80,7 @@ step: jet check run.jet
 cwd: python
 env: NO_COLOR=1
 exit: nonzero
-stdout+stderr: ~ "E3208" # original mixed_assert_failed_with helper422-428
+stdout+stderr: ~ "Jet.BindingGenerationFailed" # original mixed_assert_failed_with helper422-428
 step: jet inspect bind py ops.py --pkg ops
 cwd: python
 env: NO_COLOR=1
@@ -94,7 +94,7 @@ step: jet inspect bind py broken.py --pkg broken
 cwd: python
 env: NO_COLOR=1
 exit: nonzero
-stdout+stderr: ~ "E3208" # original mixed_assert_failed_with helper422-428
+stdout+stderr: ~ "Jet.BindingGenerationFailed" # original mixed_assert_failed_with helper422-428
 file: python/.jet/bindings/py/broken.jet absent
 capture: stale_runtime = text file.replace("return left + right", "return left + right + 1") python/ops.py
 write: python/ops.py = "{cap:stale_runtime}"

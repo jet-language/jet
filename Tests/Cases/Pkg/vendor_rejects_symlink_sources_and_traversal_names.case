@@ -11,10 +11,10 @@ env: JET_PACKAGE_STORE_DIR={work}/store
 step: jet registry vendor --vendor-dir vendor-symlink
 cwd: sym
 exit: nonzero # tests/pkg.rs:6412 vendor must refuse source symlinks
-stderr: !~ "E2104" # the refusal comes from vendor itself, not from an unbuilt command
+stderr: !~ "Jet.InvalidCommandInput" # the refusal comes from vendor itself, not from an unbuilt command
 file: outside = "must survive\n" # tests/pkg.rs:6415
 step: jet registry vendor --vendor-dir vendor-name
 cwd: name
 exit: nonzero # tests/pkg.rs:6429 vendor must refuse traversal-shaped dependency names
-stderr: !~ "E2104" # the refusal comes from vendor itself, not from an unbuilt command
+stderr: !~ "Jet.InvalidCommandInput" # the refusal comes from vendor itself, not from an unbuilt command
 file: name/escape absent # tests/pkg.rs:6432 !tmp.join("escape").exists()

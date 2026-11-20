@@ -9,7 +9,7 @@ fixture: BareFxCapIsPureOnEveryTier/input
 env: NO_COLOR=1
 step: jet check type.jet
 exit: 1
-stderr: count "Error [" = 1 # exactly this many
+stderr: count "Error: " = 1 # exactly this many
 stderr: ~ "`go` uses the effect `IO`, which type `Bad`'s `#FX(…)` cap doesn't allow" # the bare cap admits nothing
 stderr: ~ "The type's cap allows no effects in every method of the type" # the reason names the empty cap
 step: jet run -O0 type.jet
@@ -26,7 +26,7 @@ stderr: ~ "`go` uses the effect `IO`, which type `Bad`'s `#FX(…)` cap doesn't 
 stdout: !~ "escaped" # nothing runs
 step: jet check module.jet
 exit: 1
-stderr: count "Error [" = 1 # exactly this many
+stderr: count "Error: " = 1 # exactly this many
 stderr: ~ "`hush` uses the effect `IO`, which module `quiet`'s `#FX(…)` cap doesn't allow" # a module's bare cap
 step: jet run -O0 module.jet
 exit: 1
@@ -39,8 +39,8 @@ exit: 1
 stderr: ~ "`hush` uses the effect `IO`, which module `quiet`'s `#FX(…)` cap doesn't allow" # O2 refuses it
 step: jet check trait.jet
 exit: 1
-stderr: count "Error [" = 1 # exactly this many
-stderr: ~ "[jet.TraitCapExceeded]: `text` uses the effect `IO`, which trait `Source`'s `#FX(…)` cap doesn't allow" # a trait's bare cap binds its impls
+stderr: count "Error: " = 1 # exactly this many
+stderr: ~ "Jet.TraitCapExceeded: `text` uses the effect `IO`, which trait `Source`'s `#FX(…)` cap doesn't allow" # a trait's bare cap binds its impls
 step: jet run -O0 trait.jet
 exit: 1
 stderr: ~ "`text` uses the effect `IO`, which trait `Source`'s `#FX(…)` cap doesn't allow" # O0 refuses it
@@ -52,12 +52,12 @@ exit: 1
 stderr: ~ "`text` uses the effect `IO`, which trait `Source`'s `#FX(…)` cap doesn't allow" # O2 refuses it
 step: jet check row.jet
 exit: 1
-stderr: count "Error [" = 1 # exactly this many
+stderr: count "Error: " = 1 # exactly this many
 stderr: ~ "`say`'s row declares `IO`, which type `Logger`'s `#FX(…)` cap doesn't allow" # a row can't widen the bare cap
 stderr: ~ "Write `-[]>` as `say`'s row" # the fix names the pure row
 step: jet check head.jet
 exit: 1
-stderr: count "Error [" = 2 # load and run
+stderr: count "Error: " = 2 # load and run
 stderr: ~ "`load` uses the effect `FS.Read(" # the bare file head caps the file
 step: jet fmt head.jet
 exit: 0

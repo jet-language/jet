@@ -6,12 +6,12 @@
 fixture: NetAndWebSocketCallsNameEveryEffectTheyUse.fixture
 step: jet check understated.jet
 exit: nonzero
-stderr: ~ "Error [jet.EffectBoundExceeded]: `host_env_only` uses the effect `FS.Read(\"/etc/hostname\")`" # gethostname reads a file
-stderr: ~ "Error [jet.ProhibitedEffectReached]: `addr_no_wait` reaches the `Time.Wait` effect" # socket_addr waits on the resolver
-stderr: ~ "Error [jet.ProhibitedEffectReached]: `dial_no_wait` reaches the `Time.Wait` effect" # ws.connect waits on the handshake
-stderr: ~ "Error [jet.ProhibitedEffectReached]: `upgrade_no_wait` reaches the `Time.Wait` effect" # ws.upgrade waits on the handshake
-stderr: ~ "Error [jet.EffectBoundExceeded]: `upgrade_wait_only` uses the effect `Net`" # ws.upgrade writes the handshake
-stderr: count "Error [" = 5 # only the understated ceilings fail
+stderr: ~ "Error: Jet.EffectBoundExceeded: `host_env_only` uses the effect `FS.Read(\"/etc/hostname\")`" # gethostname reads a file
+stderr: ~ "Error: Jet.ProhibitedEffectReached: `addr_no_wait` reaches the `Time.Wait` effect" # socket_addr waits on the resolver
+stderr: ~ "Error: Jet.ProhibitedEffectReached: `dial_no_wait` reaches the `Time.Wait` effect" # ws.connect waits on the handshake
+stderr: ~ "Error: Jet.ProhibitedEffectReached: `upgrade_no_wait` reaches the `Time.Wait` effect" # ws.upgrade waits on the handshake
+stderr: ~ "Error: Jet.EffectBoundExceeded: `upgrade_wait_only` uses the effect `Net`" # ws.upgrade writes the handshake
+stderr: count "Error: " = 5 # only the understated ceilings fail
 step: jet check truthful.jet
 exit: 0
-stderr: !~ "Error [" # every truthful ceiling checks clean
+stderr: !~ "Error: " # every truthful ceiling checks clean

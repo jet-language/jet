@@ -18,7 +18,7 @@ step all: jet run --deep-checks main.jet
 exit: 70
 stdout: empty
 stderr: ~ "panic: tree size is wrong" # the selected deep check runs and fails
-stderr: ~ "jet-lang.dev/e/E3001" # the program-side stop
+stderr: ~ "jet-lang.dev/e/Jet.Panic" # the program-side stop
 step function: jet run --deep-checks=sizes.run main.jet
 exit: 70
 stdout: empty
@@ -31,7 +31,7 @@ step unselected: jet run --deep-checks=sizes.leaf main.jet
 exit: 1
 stdout: empty
 stderr: ~ "`--deep-checks=sizes.leaf` selects `sizes.leaf`, and none of them holds a deep check" # refused before the run
-stderr: ~ "jet-lang.dev/e/E2121" # the diagnostic's code link
+stderr: ~ "jet-lang.dev/e/Jet.DeepCheckScopeHoldsNone" # the diagnostic's code link
 step package_off: jet run tree/run.jet -- --bad tree
 exit: 0
 stdout: = "done\n" # no flag, so no deep check runs
@@ -72,37 +72,37 @@ step package_unselected: jet run --deep-checks=tree.run tree/run.jet -- --bad tr
 exit: 1
 stdout: empty
 stderr: ~ "`--deep-checks=tree.run` selects `tree.run`, and none of them holds a deep check" # the E2121 headline; its fix names the scopes that hold one
-stderr: ~ "jet-lang.dev/e/E2121" # the diagnostic's code link
+stderr: ~ "jet-lang.dev/e/Jet.DeepCheckScopeHoldsNone" # the diagnostic's code link
 step unknown: jet run --deep-checks=tree.nowhere tree/run.jet -- --bad tree
 exit: 1
 stdout: empty
 stderr: ~ "`--deep-checks=tree.nowhere` names no package, module, type or function of this program" # the E2120 headline; its fix lists the scopes that exist
-stderr: ~ "jet-lang.dev/e/E2120" # the diagnostic's code link
+stderr: ~ "jet-lang.dev/e/Jet.DeepCheckScopeUnknown" # the diagnostic's code link
 step unknown_prefix: jet run --deep-checks=forest.run tree/run.jet -- --bad tree
 exit: 1
 stdout: empty
 stderr: ~ "`forest.run` starts with no module of this program" # read at its longest module prefix, which names none
-stderr: ~ "jet-lang.dev/e/E2122" # the diagnostic's code link
+stderr: ~ "jet-lang.dev/e/Jet.DottedPathPrefixUnresolved" # the diagnostic's code link
 step malformed: jet run --deep-checks=tree..run tree/run.jet -- --bad tree
 exit: 2
 stdout: empty
 stderr: ~ "`--deep-checks=tree..run` isn't a deep-check scope" # an empty name between the dots
-stderr: ~ "jet-lang.dev/e/E2119" # the diagnostic's code link
+stderr: ~ "jet-lang.dev/e/Jet.DeepCheckScopeMalformed" # the diagnostic's code link
 step checked: jet check checked/main.jet
 exit: 1
 stderr: ~ "Nothing named `missing_name` exists here" # a deep check's body is type-checked without the flag
 stderr: ~ "--> main.jet:2:23" # located at the unknown name inside the deep check
-stderr: ~ "jet-lang.dev/e/E0107" # the ordinary unknown-name code
+stderr: ~ "jet-lang.dev/e/Jet.UnknownName" # the ordinary unknown-name code
 step pairing: jet check pairing/main.jet
 exit: 1
 stderr: ~ "`#Off(.Deep)` is not a switch attribute" # `.Deep` belongs to `#On`
 stderr: ~ "Write `#On(.Deep)`" # the E0397 fix names the marker the condition belongs to
 stderr: ~ "`#On(.Release)` is not a switch attribute" # `.Release` belongs to `#Off`
 stderr: ~ "Write `#Off(.Release)`" # the E0397 fix names the marker the condition belongs to
-stderr: ~ "jet-lang.dev/e/E0397" # the switch-condition code
+stderr: ~ "jet-lang.dev/e/Jet.SwitchConditionMismatch" # the switch-condition code
 stderr: ~ "2 problems found" # one report per mismatched marker
 step doubled: jet check doubled/main.jet
 exit: 1
 stderr: ~ "Only one switch attribute can be written on a statement" # `#Off` and `#On` on one statement
 stderr: ~ "--> main.jet:2:10" # located at the second marker
-stderr: ~ "jet-lang.dev/e/E0344" # the duplicate switch code
+stderr: ~ "jet-lang.dev/e/Jet.DuplicateSwitchOff" # the duplicate switch code

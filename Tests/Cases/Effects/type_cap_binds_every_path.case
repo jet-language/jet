@@ -9,7 +9,7 @@ fixture: TypeCapBindsEveryPath/Input
 env: NO_COLOR=1
 step: jet check closure.jet
 exit: 1
-stderr: count "Error [" = 1 # exactly this many
+stderr: count "Error: " = 1 # exactly this many
 stderr: ~ "`loud` reaches the `IO` effect, which type `Maker` denies" # the lambda's print belongs to the method
 step: jet run -O0 closure.jet
 exit: 1
@@ -22,7 +22,7 @@ exit: 1
 stderr: ~ "`loud` reaches the `IO` effect, which type `Maker` denies" # O2 refuses it
 step: jet check default.jet
 exit: 1
-stderr: count "Error [" = 1 # exactly this many
+stderr: count "Error: " = 1 # exactly this many
 stderr: ~ "`show` reaches the `IO` effect, which type `Square` denies" # the inherited default body is the type's method
 stderr: ~ "default.jet:5:5" # reported at the default body
 stderr: ~ "type `Square` is capped here" # the cap is the secondary label
@@ -37,7 +37,7 @@ exit: 1
 stderr: ~ "`show` reaches the `IO` effect, which type `Square` denies" # O2 refuses it
 step: jet check close.jet
 exit: 1
-stderr: count "Error [" = 1 # exactly this many
+stderr: count "Error: " = 1 # exactly this many
 stderr: ~ "`close` reaches the `IO` effect, which type `Handle` denies" # the Close impl is bound
 step: jet run -O0 close.jet
 exit: 1
@@ -50,9 +50,9 @@ exit: 1
 stderr: ~ "`close` reaches the `IO` effect, which type `Handle` denies" # O2 refuses it
 step: jet check field.jet
 exit: 1
-stderr: count "Error [" = 2 # the field and the method that calls it
+stderr: count "Error: " = 2 # the field and the method that calls it
 stderr: ~ "`go` reaches the `IO` effect, which type `Holder` denies" # the field's fixed row counts at the call
-stderr: ~ "[jet.TypeFieldCapExceeded]: Field `act`'s row declares `IO`, which type `Holder` doesn't allow" # the field path has its own code
+stderr: ~ "Jet.TypeFieldCapExceeded: Field `act`'s row declares `IO`, which type `Holder` doesn't allow" # the field path has its own code
 step: jet run -O0 field.jet
 exit: 1
 stderr: ~ "`go` reaches the `IO` effect, which type `Holder` denies" # O0 refuses it
@@ -64,7 +64,7 @@ exit: 1
 stderr: ~ "`go` reaches the `IO` effect, which type `Holder` denies" # O2 refuses it
 step: jet check trait_field.jet
 exit: 1
-stderr: count "Error [" = 1 # exactly this many
+stderr: count "Error: " = 1 # exactly this many
 stderr: ~ "`show` reaches the `FS.Read` effect, which type `Report` denies" # the trait-value field brings Disk's read
 step: jet run -O0 trait_field.jet
 exit: 1
@@ -77,7 +77,7 @@ exit: 1
 stderr: ~ "`show` reaches the `FS.Read` effect, which type `Report` denies" # O2 refuses it
 step: jet check row.jet
 exit: 1
-stderr: count "Error [" = 1 # exactly this many
+stderr: count "Error: " = 1 # exactly this many
 stderr: ~ "`say` reaches the `IO` effect, which type `Logger` denies" # a row can't widen the cap
 step: jet run -O0 row.jet
 exit: 1

@@ -10,10 +10,10 @@ exit: 0
 stdout: = "50 1250\n"
 step: jet build source1/main.jet
 exit: nonzero
-stderr: ~ "Error [E3010]" # the hook's panic stops the build
+stderr: ~ "Error: Jet.ArithmeticOrBoundsFailure" # the hook's panic stops the build
 stderr: ~ "too big for Small" # the panic's own message
-stderr: !~ "Stop [E3001]" # nothing ran
+stderr: !~ "Stop: Jet.Panic" # nothing ran
 step: jet build source2/main.jet
 exit: nonzero
-stderr: ~ "E3410" # printing is an effect compile-time code is refused
+stderr: ~ "Jet.ComptimeEffectWithoutImpure" # printing is an effect compile-time code is refused
 stdout: !~ "hook ran" # the hook printed nothing

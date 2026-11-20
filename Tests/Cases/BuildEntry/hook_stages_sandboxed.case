@@ -16,29 +16,29 @@ step: jet fmt main.jet
 cwd: fmt/app
 exit: nonzero
 stderr: ~ "`fmt.block` hook for `main.jet` did not run" # the hook stopped at its call
-stderr: ~ "jet-lang.dev/e/E3410" # with the refusal's own code
+stderr: ~ "jet-lang.dev/e/Jet.ComptimeEffectWithoutImpure" # with the refusal's own code
 file: fmt/app/main.jet == fmt/app/main.before
 step: jet build --link=tools.peek --allow=Exec,FS app.jet
 cwd: link
 exit: nonzero
 stderr: ~ "names the link step `tools.peek`, which did not run" # the link hook stopped at its call
-stderr: ~ "jet-lang.dev/e/E3410" # with the refusal's own code
+stderr: ~ "jet-lang.dev/e/Jet.ComptimeEffectWithoutImpure" # with the refusal's own code
 file: link/.jet/build/app absent
 step: jet build --link=tools.borrow --allow=Exec,FS app.jet
 cwd: link
 exit: nonzero
 stderr: ~ "whose Jet link reads `../borrowed.o`, outside the project" # the Jet link reads nothing outside the project
-stderr: ~ "jet-lang.dev/e/E3506" # a failed link step
+stderr: ~ "jet-lang.dev/e/Jet.LinkStepFailed" # a failed link step
 file: link/.jet/build/app absent
 step: jet build --link=tools.dial --allow=Exec,FS app.jet
 cwd: link
 exit: nonzero
 stderr: ~ "Build action `relink` needs `Net`, which this build does not grant" # the step asks for Net
-stderr: ~ "jet-lang.dev/e/E3503" # which the build doesn't grant
+stderr: ~ "jet-lang.dev/e/Jet.BuildAuthorityDenied" # which the build doesn't grant
 file: link/.jet/build/app absent
 step: jet build --post-link=tools.stamp --allow=Exec,FS app.jet
 cwd: link
 exit: nonzero
 stderr: ~ "names the post-link step `tools.stamp`, which did not run" # the post-link hook stopped at its call
-stderr: ~ "jet-lang.dev/e/E3410" # with the refusal's own code
+stderr: ~ "jet-lang.dev/e/Jet.ComptimeEffectWithoutImpure" # with the refusal's own code
 file: link/.jet/build/app absent

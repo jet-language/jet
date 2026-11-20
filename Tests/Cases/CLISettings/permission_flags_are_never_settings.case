@@ -8,8 +8,8 @@ env: NO_COLOR=1
 copy: allow.package package.jet
 step: jet run main.jet
 exit: 2
-stderr: ~ "Error [jet.FlagNotASetting]: `run.allow`" # the package's remembered permission is refused
-stderr: ~ "jet-lang.dev/e/E2117" # with its registered diagnostic
+stderr: ~ "Error: Jet.FlagNotASetting: `run.allow`" # the package's remembered permission is refused
+stderr: ~ "jet-lang.dev/e/Jet.FlagNotASetting" # with its registered diagnostic
 stdout: !~ "ran" # the program never starts
 remove: package.jet
 mkdir: config/jet
@@ -17,13 +17,13 @@ copy: gate.settings config/jet/settings.jet
 step: jet run main.jet
 env: XDG_CONFIG_HOME={work}/config
 exit: 2
-stderr: ~ "Error [jet.FlagNotASetting]: `run.gate`" # the user file's remembered permission is refused
+stderr: ~ "Error: Jet.FlagNotASetting: `run.gate`" # the user file's remembered permission is refused
 stdout: !~ "ran" # the program never starts
 copy: trust.settings config/jet/settings.jet
 step: jet run main.jet
 env: XDG_CONFIG_HOME={work}/config
 exit: 2
-stderr: ~ "Error [jet.FlagNotASetting]: `self.trust_key`" # a remembered trust key is refused too
+stderr: ~ "Error: Jet.FlagNotASetting: `self.trust_key`" # a remembered trust key is refused too
 stderr: ~ "permissions are given on the command line each run" # for the authority reason
 stdout: !~ "ran" # the program never starts
 step: jet run main.jet

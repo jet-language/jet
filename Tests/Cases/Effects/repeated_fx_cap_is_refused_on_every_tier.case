@@ -7,7 +7,7 @@ fixture: RepeatedFxCapIsRefusedOnEveryTier/input
 env: NO_COLOR=1
 step: jet check type.jet
 exit: 1
-stderr: count "Error [" = 1 # exactly this many
+stderr: count "Error: " = 1 # exactly this many
 stderr: ~ "`#FX` is already applied to this type" # the second marker is refused
 stderr: ~ "type.jet:2:1" # at the second marker
 step: jet run -O0 type.jet
@@ -24,20 +24,20 @@ stderr: ~ "`#FX` is already applied to this type" # O2 refuses it
 stdout: !~ "escaped" # nothing runs
 step: jet check module.jet
 exit: 1
-stderr: count "Error [" = 1 # exactly this many
+stderr: count "Error: " = 1 # exactly this many
 stderr: ~ "`#FX` is already applied to this module" # a module's cap is one list
 step: jet check inbody.jet
 exit: 1
-stderr: count "Error [" = 1 # exactly this many
+stderr: count "Error: " = 1 # exactly this many
 stderr: ~ "`#FX` is already applied to this type" # two in-body lines are two markers
 stderr: ~ "inbody.jet:3:5" # at the second line
 step: jet check trait.jet
 exit: 1
-stderr: count "Error [" = 1 # exactly this many
+stderr: count "Error: " = 1 # exactly this many
 stderr: ~ "`#FX` is already applied to this trait" # a trait's cap is one list
 step: jet check generic.jet
 exit: 1
-stderr: count "Error [" = 1 # exactly this many
+stderr: count "Error: " = 1 # exactly this many
 stderr: ~ "`#FX` is already applied to this module" # a generic module's cap is one list
 step: jet run -O0 module.jet
 exit: 1

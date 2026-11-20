@@ -34,7 +34,7 @@ stdout: !~ "Runs: aot, dev" # and never under jet dev
 step: jet inspect target nowhere
 env: NO_COLOR=1
 exit: nonzero
-stderr: ~ "E3302" # an unknown machine is refused
+stderr: ~ "Jet.UnknownTarget" # an unknown machine is refused
 stderr: ~ "Target `nowhere` is not available" # by name
 stderr: ~ "wasm.browser" # and the fix lists the declared machines
 step: jet inspect target
@@ -49,5 +49,5 @@ stdout: ~ '{"name":"wasm.wasi","triple":"wasm32-wasip2","environment":"wasi","ex
 step: jet inspect target --live 1
 env: NO_COLOR=1
 exit: nonzero
-stderr: ~ "E2104" # a live scope is a usage error
+stderr: ~ "Jet.InvalidCommandInput" # a live scope is a usage error
 stderr: ~ "reads no live process or replay" # that says the target plane reads only the machine table

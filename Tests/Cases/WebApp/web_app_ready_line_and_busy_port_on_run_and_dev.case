@@ -23,10 +23,10 @@ step busy: jet run {root}/Examples/Apps/Web/AppHello.jet
 env: JET_APP_PORT={free-port:app}
 exit: 70
 stdout: = ""
-stderr: ~ "Stop [E2809]: The web app can't listen on 127.0.0.1:{free-port:app}: another program is already listening on that port." # the registered diagnostic names the port
+stderr: ~ "Stop: Jet.AppPortUnavailable: The web app can't listen on 127.0.0.1:{free-port:app}: another program is already listening on that port." # the registered diagnostic names the port
 stderr: ~ " Fix: Stop the program that holds the port, or choose another port" # and how to choose another
 stderr: !~ "panic" # a registered stop, not a panic
-stderr: !~ "E3001" # nor a generic program-side stop
+stderr: !~ "Jet.Panic" # nor a generic program-side stop
 # A spawn's `stdout: file` is written only once the child ends, so the dev
 # ready line is read live from a session.
 session dev raw: jet dev {work}/app.jet

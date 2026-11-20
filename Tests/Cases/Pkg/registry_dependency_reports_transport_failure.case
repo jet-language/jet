@@ -10,7 +10,7 @@ env: JET_REGISTRY_URL=file://{work}/absent.git
 env: JET_REGISTRY_CACHE_DIR={work}/cache
 step: jet fetch
 exit: nonzero
-stderr.after_first("Error ["): ^= "jet.RegistryUnreachable]" # the first diagnostic is the transport failure
+stderr.after_first("Error: "): ^= "Jet.RegistryUnreachable:" # the first diagnostic is the transport failure
 stderr: ~ "Couldn't reach the registry index at `file://{work}/absent.git`" # names the unreachable registry
 stderr: ~ "Why: The git operation against the registry failed (network, auth, or a stale local clone)" # the transport cause
 stderr: ~ "Fix: Check network access and credentials for `file://{work}/absent.git`, or set `JET_REGISTRY_URL` to a reachable mirror." # how to point at a mirror

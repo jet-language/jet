@@ -2617,7 +2617,7 @@ an optional `User`, and `&&Texture?` takes an optional `Texture`. A marker both
 before the parameter name and on its type is E0029:
 
 ```text
-Error [jet.DuplicateAccessMarker]: `p` has two access markers
+Error: Jet.DuplicateAccessMarker: `p` has two access markers
   --> file.jet:4:10
     |
   4 | bad: fn(&p: &&Player) { print(p.hp) }
@@ -3478,12 +3478,12 @@ use site, and the owning policy file.
 
 These keys are package/organization settings, not source settings:
 `#Policy(lint_allow)` is E0355. Source writes the concrete gate instead. A
-lint exemption is `#Allow(jet.LintName, "why this lint does not apply")`,
-naming the lint by its diagnostic type path (`jet.UnitScalarRewrap`); its
-reason slot is optional, but omission emits `jet.AllowReason` (L3103). It
+lint exemption is `#Allow(Jet.LintName, "why this lint does not apply")`,
+naming the lint by its diagnostic name (`Jet.UnitScalarRewrap`); its
+reason slot is optional, but omission emits `Jet.AllowReason` (L3103). It
 covers its target: a statement, a function or method, a struct field, or a
 whole struct or enum type with its fields and cases.
-`#Allow(jet.AllowReason)` cannot suppress that audit and is E0355. Reviewed
+`#Allow(Jet.AllowReason)` cannot suppress that audit and is E0355. Reviewed
 corpus exemptions keep reasons at these source sites, not in manifest rows.
 `jet fix` rewrites the retired `#allow(lint_name, …)` spelling to `#Allow`.
 
@@ -6123,7 +6123,7 @@ first line. `full` prints every Jet frame with its file and line, read from the
 image's debug info. `brief` prints only the faulting frame. A stack-overflow
 report names the innermost Jet function and its line under both `full` and
 `brief`. `off` prints no frame: the report is the stop line alone, for example
-`Stop [E3012]: Stack overflow`. Naming frames needs `debug_info`, so writing
+`Stop: Jet.StackOverflow: Stack overflow`. Naming frames needs `debug_info`, so writing
 `backtrace: full` (in a profile, in `build: fn` or as `--backtrace=full`)
 together with `debug_info: false` is refused with E2104. The stock `full` under
 `debug_info: false` prints the return addresses instead. A program stop (a

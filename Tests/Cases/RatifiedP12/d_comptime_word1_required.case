@@ -32,31 +32,31 @@ step fmt: jet fmt --check main.jet runtime/main.jet fuel/main.jet plain/main.jet
 exit: 0 # every fixture file is in `jet fmt` form
 step runtime: jet check runtime/main.jet
 exit: 1
-stderr: ~ "jet-lang.dev/e/E0640" # `#run` code can't read a parameter
+stderr: ~ "jet-lang.dev/e/Jet.CompileTimeReadsRuntimeValue" # `#run` code can't read a parameter
 stderr: ~ "--> main.jet:2:19" # the parameter read inside the block
 stderr: ~ "1 problem found" # nothing else is reported
 step fuel: jet check fuel/main.jet
 exit: 1
-stderr: ~ "jet-lang.dev/e/E0952" # the marked value ran out of steps
+stderr: ~ "jet-lang.dev/e/Jet.ComptimeFuelExhausted" # the marked value ran out of steps
 stderr: ~ "--> main.jet:7:14" # at the marked value
 stderr: ~ "1 problem found" # nothing else is reported
 step plain: jet check plain/main.jet
 exit: 1
-stderr: ~ "jet-lang.dev/e/E0643" # a file constant must be computable early
+stderr: ~ "jet-lang.dev/e/Jet.ModuleValueNotBuilt" # a file constant must be computable early
 stderr: ~ "ran past its step limit" # under the same step limit as `#run`
 stderr: ~ "--> main.jet:7:8" # at the constant's value
 stderr: ~ "1 problem found" # nothing else is reported
 step assert: jet check assert/main.jet
 exit: 1
-stderr: ~ "jet-lang.dev/e/E3010" # a failed static assertion stops the build
+stderr: ~ "jet-lang.dev/e/Jet.ArithmeticOrBoundsFailure" # a failed static assertion stops the build
 stderr: ~ "SLOTS must exceed 8" # the assertion's own message
 stderr: ~ "--> main.jet:4:5" # at the assertion
 stderr: ~ "1 problem found" # nothing else is reported
 step length: jet check length/main.jet
 exit: 1
 stderr: ~ "reads `count`, a run-time value of the function around it" # `[T#N]` needs a length computed while building
-stderr: ~ "jet-lang.dev/e/E0963" # the run-time length code
+stderr: ~ "jet-lang.dev/e/Jet.InvalidFixedListLength" # the run-time length code
 stderr: ~ "--> main.jet:4:13" # at the list type
-stderr: ~ "jet-lang.dev/e/E0103" # so does `mem.Fixed.new(size:)`
+stderr: ~ "jet-lang.dev/e/Jet.EmptyPrint" # so does `mem.Fixed.new(size:)`
 stderr: ~ "--> main.jet:8:47" # at the size argument
 stderr: ~ "2 problems found" # one per site
