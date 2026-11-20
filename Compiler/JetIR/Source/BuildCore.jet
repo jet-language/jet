@@ -237,11 +237,10 @@ ir_build_core_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&Sy
 // the library, built before any program, never sees. So the library's run of
 // a public point dispatches through the point's cell, which it exports and
 // the program binds (ir_core_cells_bind), and the two share its handlers.
-ir_core_quiet_points: fn(p: IRProgram) -[]> [String:Bool] {
-    kept := [String:Bool]{}
-    loop (key, _) in p.quiet_points {
-        row: p.constants.get(key) ?? next
-        if p.constant_defs[row].visibility != .Public -> kept[key] = true
+ir_core_quiet_points: fn(p: IRProgram) -[]> [Int:Bool] {
+    kept := [Int:Bool]{}
+    loop (row, _) in p.quiet_points {
+        if p.constant_defs[row].visibility != .Public -> kept[row] = true
     }
     kept
 }

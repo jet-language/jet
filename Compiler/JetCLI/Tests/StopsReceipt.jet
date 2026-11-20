@@ -1,6 +1,9 @@
 // The runtime's stops receipt as a program build reads it (Host.jet
 // jet_cli_runtime_quiet_routes): the runtime routes no stop poll follows.
-use jet_cli.[JetCLIRuntimeExports, jet_cli_runtime_quiet_routes]
+use {
+    jet_cli.[JetCLIRuntimeExports, jet_cli_runtime_quiet_routes]
+    jet_foundation.[name_count, name_find]
+}
 
 stops_test_runtime: fn(stops: String?) -> JetCLIRuntimeExports Never! {
     receipt := [U8]?{None}
@@ -10,14 +13,16 @@ stops_test_runtime: fn(stops: String?) -> JetCLIRuntimeExports Never! {
 
 #Test("the routes no poll follows are the exports the stops receipt leaves out") {
     quiet: jet_cli_runtime_quiet_routes(stops_test_runtime(Val("jet_rt_sleep")))
-    assert(quiet.get("jet_rt_pure") != None)
-    assert(quiet.get("memcpy") != None)
-    assert(quiet.get("jet_rt_sleep") == None)
+    assert(name_find(quiet, "jet_rt_pure") != None)
+    assert(name_find(quiet, "memcpy") != None)
+    assert(name_find(quiet, "jet_rt_sleep") == None)
     // A Core function or any symbol the runtime does not export polls.
-    assert(quiet.get("jet_core_time_sleep_until") == None)
-    assert_eq(quiet.len(), 2)
+    assert(name_find(quiet, "jet_core_time_sleep_until") == None)
+    // The two routes, after the empty spelling every table holds.
+    assert_eq(name_count(quiet), 3)
 }
 
 #Test("without a stops receipt every route polls") {
-    assert_eq(jet_cli_runtime_quiet_routes(stops_test_runtime(None)).len(), 0)
+    // Only the empty spelling every table holds.
+    assert_eq(name_count(jet_cli_runtime_quiet_routes(stops_test_runtime(None))), 1)
 }

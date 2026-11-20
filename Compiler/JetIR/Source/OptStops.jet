@@ -15,7 +15,7 @@
 // drops of Int and word slots move (no code of theirs can publish or mask
 // a stop), and only into an edge E that never comes back
 // (OptUnique.jet ir_opt_dead_end), so each path drops once.
-use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, name_rows_value]
+use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, name_intern, name_rows_value]
 
 ir_opt_stops_after_calls: fn(f: &IRFunction, m: IRModule, keys: [String]) Never! {
     count: f.op.len()
@@ -960,7 +960,7 @@ ir_opt_polls_br_end: fn(f: IRFunction, at: Int, level: Int) -> Int Never! {
         word: ir_word_row(m)
         poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
         route: ir_intern_name(m, "jet_rt_alloc")
-        if quiet -> m.quiet_routes["jet_rt_alloc"] = true
+        if quiet -> _ := name_intern(m.quiet_routes, "jet_rt_alloc")
         f := ir_function_new("f", "test:quiet.jet.f", "", "quiet.jet", 1)
         size: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "size"), 1)
         box: ir_slot(f, word, IRSlotKind.Temp, -1, 0)

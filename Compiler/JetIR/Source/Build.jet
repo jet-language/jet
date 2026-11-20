@@ -3,7 +3,7 @@
 // module build keeps going and reports every failure (collect-all).
 use {
     jet_backend.[X64_DEBUG_ITEMS_DROP_SYMBOL]
-    jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, CompilerTraceSink, DeclID, DeclTable, decl_table_find, ModuleID, Span, SymbolID, SymbolTable, Type, TypeTable, TypeTupleField, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_take_rows, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, type_table_find, type_table_intern, NameRows, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
+    jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, CompilerTraceSink, DeclID, DeclTable, decl_table_find, ModuleID, Span, SymbolID, SymbolTable, Type, TypeTable, TypeTupleField, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_take_rows, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, type_table_find, type_table_intern, NameRows, NameTable, name_find, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value, name_table_sized, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
     jet_sema.[SemaCheckedForeignFunction, sema_inference_type_mentions_param, sema_instance_type, sema_instance_types]
 }
 
@@ -444,7 +444,7 @@ IRChecks: struct {
     // The runtime routes the runtime's stops receipt proves deliver no stop
     // (JetCLI Host.jet jet_cli_runtime_quiet_routes), which no stop poll
     // follows (ir_route_can_stop); empty without a receipt.
-    quiet_routes: [String:Bool]{[String:Bool]{}},
+    quiet_routes: NameTable{name_table_sized(2)},
     // A debugger's evaluation against a running O0 image (ir_held_program):
     // the program functions, by key, that the image holds under their own
     // symbol (ir_symbol_name), which no other function shares. A direct
@@ -625,13 +625,14 @@ IRProgram: struct {
     // (FnBody.role), in row order, found once by ir_program_bind: a precise
     // operation finds its helper among them (ir_core_role_row).
     core_roles: [Int]{[Int]{}},
-    // The declared hook and decision points that no handler can reach, found
-    // once by ir_program_bind (ir_quiet_points): every read of one is the
-    // receiver of a `run`, so no code attaches a handler, and each run is its
-    // fallback (ir_hook_run) or its own payload, continued
-    // (ir_decision_hook_run). The Core library keeps only the points no
-    // program can name (BuildCore.jet ir_core_quiet_points).
-    quiet_points: [String:Bool]{[String:Bool]{}},
+    // The declared hook and decision points that no handler can reach, by
+    // constant row (`constants`), found once by ir_program_bind
+    // (ir_quiet_points): every read of one is the receiver of a `run`, so no
+    // code attaches a handler, and each run is its fallback (ir_hook_run) or
+    // its own payload, continued (ir_decision_hook_run). The Core library
+    // keeps only the points no program can name (BuildCore.jet
+    // ir_core_quiet_points).
+    quiet_points: [Int:Bool]{[Int:Bool]{}},
     // Whether this program's code computes compile-time values (comptime
     // items, not a build invocation): outside an `#Impure` block, a Core
     // call that reads ambient host or process state with no system call the
@@ -1256,9 +1257,10 @@ ir_declared_owner: fn(declared: [String:String], module_identity: ModuleID, owne
 // `once` or an `on_priority`, nor passes it along to code that could, so no
 // handler is ever attached: each Hook run returns its own fallback, and each
 // DecisionHook run continues with its own payload.
-ir_quiet_points: fn(p: IRProgram) -[]> [String:Bool] {
-    run := [String:Bool]{}
-    other := [String:Bool]{}
+ir_quiet_points: fn(p: IRProgram) -[]> [Int:Bool] {
+    // Constant rows read as a `run`'s receiver, and read any other way.
+    run := [Int:Bool]{}
+    other := [Int:Bool]{}
     loop function in p.functions {
         receivers := [Int:Bool]{}
         loop node in function.tree.nodes {
@@ -1271,16 +1273,16 @@ ir_quiet_points: fn(p: IRProgram) -[]> [String:Bool] {
         loop node in function.tree.nodes {
             if node.kind == .ConstRef(symbol) {
                 key: if symbol_is_local(symbol) -> symbol_local_keys_text(function.tree.symbols, symbol) else -> symbol_table_key(p.symbols, symbol)
-                if receivers.get(node.id) != None -> run[key] = true else -> other[key] = true
+                row: p.constants.get(key) ?? next
+                if receivers.get(node.id) != None -> run[row] = true else -> other[row] = true
             }
         }
     }
-    quiet := [String:Bool]{}
-    loop (key, _) in run {
-        if other.get(key) != None -> next
-        row: p.constants.get(key) ?? next
+    quiet := [Int:Bool]{}
+    loop (row, _) in run {
+        if other.get(row) != None -> next
         definition: p.constant_defs[row]
-        if ir_point_type(p, definition.ty) && !definition.is_storage -> quiet[key] = true
+        if ir_point_type(p, definition.ty) && !definition.is_storage -> quiet[row] = true
     }
     quiet
 }
@@ -3179,7 +3181,7 @@ ir_runtime: fn(m: &IRModule, b: &IRBuilder, symbol: String, args: [Int], ty: Int
 // BuildLibrary.jet ir_stop_exports), so without a receipt, and for a Core
 // export or any symbol the runtime does not export, every call polls.
 ir_route_can_stop: fn(m: IRModule, symbol: String) -> Bool Never! {
-    m.quiet_routes.get(symbol) == None
+    symbol == "" || name_find(m.quiet_routes, symbol) == None
 }
 
 // After a call that can deliver a stop: the poll (IR_STOP_POLL_KEY) returns

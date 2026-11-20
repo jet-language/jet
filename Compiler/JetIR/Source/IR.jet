@@ -100,7 +100,7 @@
 // selector; runtime symbols are the old backend's, so a program behaves the
 // same on both paths.
 use {
-    jet_foundation.[NameRows, TComptimeValue, Type, TypeTable, name_rows, name_rows_get, name_rows_hash, name_rows_set, name_rows_set_hashed, name_rows_value, sha256_bytes, sha256_hex, sha256_hex_bytes, stable_id]
+    jet_foundation.[NameRows, NameTable, TComptimeValue, Type, TypeTable, name_rows, name_rows_get, name_rows_hash, name_rows_set, name_rows_set_hashed, name_rows_value, name_table_sized, sha256_bytes, sha256_hex, sha256_hex_bytes, stable_id]
     jet_backend.[X64DebugSource]
 }
 
@@ -649,7 +649,7 @@ IRModule: struct {
     helper_errors: NameRows,
     helper_messages: [String],
     stop_points: Bool{false},
-    quiet_routes: [String:Bool]{[String:Bool]{}},
+    quiet_routes: NameTable{name_table_sized(2)},
     owned_main: Bool{false},
     owned_attach: Bool{false},
     single_thread: Bool{false},
