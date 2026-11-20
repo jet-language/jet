@@ -875,7 +875,9 @@ reads no request, and `jet perf attach` refuses with E2123
 leaves a request there.
 `jet perf attach <pid> --source app.jet` copies both and reads the copies,
 so its trace holds the waits and transfers
-the program made before the attach: each wait's task, line, object and
+the program made before the attach. An attach in a program's first 100ms,
+before the writer first published its ring, waits for that publication,
+300ms at most. The trace holds each wait's task, line, object and
 waker, and each transfer's `io` row. A wait of a task the live snapshot no
 longer holds becomes no row. Tests/Cases/Perf/attach_drains_flight_ring.case
 is the worked example.
