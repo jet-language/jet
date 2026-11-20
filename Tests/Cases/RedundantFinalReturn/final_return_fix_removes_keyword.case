@@ -19,7 +19,7 @@ stdout: = "42\n"
 step: jet fix run.jet
 exit: 0
 file: run.jet !~ "return 42" # tests/redundant_final_return.rs:128 final return survived
-file: run.jet ~ "    42\n" # tests/redundant_final_return.rs:129 implicit tail was not formed
+file: run.jet ~ "value: fn() -> Int { 42 }" # tests/redundant_final_return.rs:129 implicit tail was not formed
 step: jet check run.jet
 exit: 0
 stderr: !~ "Jet.RedundantFinalReturn" # tests/redundant_final_return.rs:135-138 the fixed source carries no L0530

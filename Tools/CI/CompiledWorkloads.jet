@@ -2797,6 +2797,13 @@ canaries: fn(state: SelfCheck) -[FS]> [Canary] Never! {
     }
     cxx_candidate: peer_key("candidate", "cxx")
     rust_candidate: peer_key("candidate", "rust")
+    tier_loss_edits: [Edit]{
+        set("tiers.tsv", 7, "loss", "first-jet={loss_task}"),
+        set("tiers.tsv", 9, loss_owner, "first-jet={loss_task}"),
+        set("tier_receipts.tsv", 10, "loss", "first-jet={loss_task}"),
+        set("outcomes.tsv", 13, "loss", "task={loss_task}"),
+        set("outcomes.tsv", 15, loss_owner, "task={loss_task}"),
+    }
     list := [Canary]{
         canary("missing-review", "report must contain external review.tsv", false, remove("review.tsv")),
         canary("stale-external-review", "external review candidate is stale or invalid", false, [Edit]{set("review.tsv", 3, zero_commit, "row2")}),
@@ -2826,18 +2833,7 @@ canaries: fn(state: SelfCheck) -[FS]> [Canary] Never! {
         canary("embedded-review-claim", "producer report already carries review claims", true, [Edit]{set("outcomes.tsv", 16, "pass", "row2"), set("outcomes.tsv", 17, "self-claimed", "row2")}),
         canary("stale-candidate", "comparison candidate is stale", true, [Edit]{set("outcomes.tsv", 8, "candidate={zero_commit}", "row2-candidate")}),
         canary("unowned-metric-loss", "Jet metric loss is not recorded", true, [Edit]{set("measurements.tsv", 5, "2", "row2")}),
-        canary(
-            "required-tier-loss",
-            "compiled workload superiority failed",
-            true,
-            [Edit]{
-                set("tiers.tsv", 7, "loss", "first-jet={loss_task}"),
-                set("tiers.tsv", 9, loss_owner, "first-jet={loss_task}"),
-                set("tier_receipts.tsv", 10, "loss", "first-jet={loss_task}"),
-                set("outcomes.tsv", 13, "loss", "task={loss_task}"),
-                set("outcomes.tsv", 15, loss_owner, "task={loss_task}"),
-            },
-        ),
+        canary("required-tier-loss", "compiled workload superiority failed", true, tier_loss_edits),
         canary("toolchain-drift", "measurement toolchain identity disagreed with report identity", true, [Edit]{set("measurements.tsv", 7, "drifted-toolchain", "row2")}),
         canary("missing-peer-coverage", "missing peer measurement", true, drop_last("peer_measurements.tsv")),
         canary("candidate-peer-loss", "peer comparison loss", true, [Edit]{set("peer_measurements.tsv", 8, "1", "runtime={cxx_candidate}"), set("peer_measurements.tsv", 9, "1", "runtime={cxx_candidate}"), set("peer_measurements.tsv", 10, "1", "runtime={cxx_candidate}")}),
