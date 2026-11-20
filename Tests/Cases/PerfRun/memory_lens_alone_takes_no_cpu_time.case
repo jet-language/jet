@@ -18,11 +18,11 @@ json: file walk.jettrace doc $.content.profile.counters[?name="l1d_misses"][?sta
 json: file walk.jettrace doc $.content.profile.rows[?sample_count>=1] #= 0 # no CPU-time sample without the cpu lens
 json: file walk.jettrace doc $.content.profile.rows[?source.start_line=30][?l1d_miss_count>=100000] #= 1 # an L1D miss at nearly every read
 json: file walk.jettrace doc $.content.profile.reason ~ "no CPU-time samples, as under the memory lens alone" # the reason says why no row holds CPU time
-json: file walk.jettrace doc $.content.receipt_sections[0].value.capture.sampling.lenses #= 1
-json: file walk.jettrace doc $.content.receipt_sections[0].value.capture.sampling.lenses[0] = "memory"
-json: file walk.jettrace doc $.content.receipt_sections[0].value.capture.sampling.clock = null
-json: file walk.jettrace doc $.content.receipt_sections[0].value.capture.sampling.interval_us = null
-json: file walk.jettrace doc $.content.receipt_sections[0].value.capture.sampling.pc = null
+json: file walk.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.lenses #= 1
+json: file walk.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.lenses[0] = "memory"
+json: file walk.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.clock = null
+json: file walk.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.interval_us = null
+json: file walk.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.pc = null
 step: jet perf view {work}/walk.jettrace
 exit: 0
 stdout: ~ "memory by line:" # the view's memory table
