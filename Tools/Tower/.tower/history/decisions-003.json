@@ -74387,6 +74387,444 @@
       "outcome": "A",
       "ratifiedAt": "2026-10-22",
       "retiredAt": "2026-11-20T06:40:03.866Z"
+    },
+    {
+      "id": "D-PRIM-ANY1",
+      "cardId": "c0reo0hk",
+      "group": "types",
+      "title": "How code takes one type back out of a list of mixed values",
+      "situation": "Some lists must hold values of different types chosen by other code. Log fields are the common case: log.info(\"saved\", 14, \"notes.txt\", 120ms) carries an Int, a text and a Duration. Jet keeps such values in a list of a trait the types opt into, and printing each one works today. But the log writer wants one type back, to print a Duration as milliseconds, and Jet has no way to ask a trait value for its type. The vote decides how that question is written. We recommend a type arm: if field == .Duration(d) means \"if this field is a Duration, call it d\".",
+      "gist": "A list holds values of different types. How does code ask \"is this a Duration?\" and get it back?",
+      "lesson": "A Jet list holds one type. To mix types, the types opt into a shared trait, such as Field below. Printing each value already works. What Jet cannot do today is ask one item \"are you a Duration?\" and use it as a Duration. The options differ in how that question is written and when a wrong question is caught.",
+      "explainer": "A Jet list holds one element type, so to mix 14, \"hi\" and a Point that type must fit all three. It can be a fixed set of types, a trait each stored type opts into, or Any under option E. A value held as a trait is a trait value. Under E or C, the type arm .Point(p) runs only for a stored Point and binds it as p; else takes the rest. Under option B a trait method returns the Point.",
+      "story": "Lin writes the log writer for her team's service. Each log line carries extra fields: a user ID, a file name, how long the save took. She wants every field printed as is, except a Duration, which should print as milliseconds. Today she cannot take the Duration back out of the field list.",
+      "inWild": "Java holds any object as Object and recovers a type with a pattern test that binds only where it matched. Since Java 21, a pattern switch over Object needs a default label or an unconditional pattern, while a switch over a sealed set needs neither.\n\nfor (Object item : List.of(14, \"hi\", new Point(1, 2))) {\n    System.out.println(item);\n    if (item instanceof Point p) System.out.println(p.x());\n}\n\nGo's type switch works on any interface value; each case type must implement that interface, a case may name another interface, and default is optional. Go 1.13's errors.As \"behaves like a type assertion\", and its blog warns that \"wrapping an error makes that error part of your API\". C# type patterns and Kotlin's is test and bind a type, and Kotlin's when over a sealed class needs no else.\n\nRust 1.86 lets a trait object upcast to dyn Any when its trait names Any as a supertrait; downcast_ref then returns a reference, &T, and needs a 'static type. C++'s std::any_cast<T>(&a) returns a pointer or null, while any_cast<T>(a) copies or throws. Swift's as? returns an optional. Jai stores a type-info pointer beside a value pointer; Odin stores a type ID that maps to type info.",
+      "detail": "This ballot challenges a frozen wall: \"no top type\" stands among the walls in Docs/audits/whole-language-frame.md:32. Docs/audits/whole-language-audit-prompt.md:17 says such a challenge must carry worked code, the measured cost of the wall today, and a named amendment. The worked code is each option's program. Option E adds Any and needs the amendments below. Options B and C keep the wall.\n\nD-ANY-JAI1 (Docs/spec/syntax-decisions.md:751-754, card #169) has three parts. Heterogeneous varargs are trait-bounded, parts: ...Renderable. There is no top type, so general Any is rejected. Its ratified story, an inspector panel for game entities, is served by reflect.of, the read-only floor in Docs/spec/reference/core-library.md:2550-2593. D-DYNAMIC-TYPE1 (Tower card c3gdynamic, ratified 2026-06-30) also chose \"No general Any\", and rejected an Any gated to boundaries with an explicit downcast.\n\nreflect.of needs no opt-in. Probe x10 keeps reflect.of of 14, \"hi\", a Point and 69.420 in one list. It prints each type name and value on O0, O1 and O2. Over a trait value it reports the internal key, module:14:…::Shown, not the stored type (n09, n13, #6845 c16). It cannot give a value back: the floor has no runtime type registry, and get, copy and equal stay declined (core-library.md:2589-2593).\n\nE would supersede D-ANY-JAI1's no-top-type part and keep its varargs part and reflect.of. Ten more places would change. D-DYNAMIC-TYPE1's \"No general Any\" is superseded on Tower. D-UNIONTYPE1's sentence \"Does not reopen D-ANY-JAI1\" (line 765) is struck. D-TYPESWITCH1's \"no Any type (D-ANY-JAI1 stands)\" (lines 796-797) becomes \"unions, or Any for an open set\". The Dyn note's \"(D-ANY-JAI1 stands)\" (line 5355) is dropped; Dyn still holds data only.\n\nDocs/spec/spec.md:7235-7236 leaves \"Deliberately absent\", and Any gets a spec section. Typed selection (syntax-decisions.md:1166-1169) says a checked downcast of a foreign value is not Jet syntax; it gains an exception for the checked case over an Any. The frozen wall loses \"no top type\". Card #744 c10, \"D-ANY-JAI1 remains intact\", is recorded as superseded. Docs/proposals/reflection-2026-11-04.md:66 points to D-PRIM-ANY1. Examples/Types/NoAnyAlternatives.jet is rewritten to say when Any beats an enum, a generic, ?T or Dyn.\n\nAn earlier draft offered A: the same Any, entered only through a written box, Any{value}. Its merit, from Docs/research/2026-11-09-any-type.md:253-256, is that an argument not written Any{...} is refused at compile time. The review rules allow three options, so A is kept as a variant of E in its design-away record. A keeps E's law cost, makes Any the only trait whose conversion is written, against S48, and Any{...} still accepts every value.\n\nOption C keeps D-ANY-JAI1, D-DYNAMIC-TYPE1, reflect.of and the frozen wall, and amends two ratified sentences. D-TYPESWITCH1's \"Run-time dispatch over mixed values uses unions\" (line 796) becomes \"uses unions, or type arms over a trait value\". Typed selection's last clause (line 1169) gains \"or held as a trait value and selected with a type arm\". Its foreign-value clause is unchanged, since a trait value is a Jet value. Its loan rules (lines 1163-1166) apply to a type arm's binding as written.\n\nC also extends D-UNIONTYPE1's member arm, .Point(p) (lines 760-762), to a trait subject, and \"Does not reopen D-ANY-JAI1\" stays true. spec.md:945-948 on trait values gains the type arm. E0305's sema texts change (Compiler/JetSema/Source/Sema/Patterns.jet:294, :338). So does its Prelude entry (Compiler/Prelude/Diagnostics.jet:4702-4716): its safety reason, \"would read the value's bytes as that type\", and its expert path, \"none\", gain the checked arm.\n\nC also amends spec.md:641-646, landed with dev a1c3325a65. Its first sentence keeps two same-named types as two members, each value keeping the member it was built as; C keeps it, and the leaf rule below relies on it. Its second sentence makes a bare .Point arm name neither member (E0305) and lets a table keep its else without E0641; its third offers named cases. C replaces both with the next paragraph's text, so one rule names a type over a union and a trait value (Patterns.jet:152-169).\n\n\"A bare .Point arm names the member Point names in type position there; a package's own Point is .Point(p) beside geo.Point. If Point names no type there, it names the one member whose leaf is Point. A generic's one instance takes its generic's name and leaf; two instances spell their arguments, .Box<Int>(b), as do generic arms over a trait value. Any other bare arm is E0305, offering .geo.Point(p). So every member has an arm; an else in a table is E0641.\"\n\nSo spec.md:903-905's rule, an else over a union is E0641, holds with no exemption. Coverage.jet:988-991 exempts two module members of one leaf today, but not two instances of one generic (f01b); C removes it. E0307's fix at Coverage.jet:521-523 names the arm each missing member takes, in place of \"no arm can name\" (a04, a04b, a09, f05, f06). E0641's fix offers each member's arm, never the internal tags .M_Box_Int_ it offers today (f01c, f01d, m33, #6839 c55).\n\nTwo agent notes are corrected. Docs/audits/2026-10-07-owner-notes-digest.md:113 says a trait value has no downcast. Docs/research/evidence-2026-09-29/3389-typed-selection.md:100-101 says a foreign downcast helper needs its own ballot; C is not foreign, and this ballot records it anyway.\n\nC is not D-DYNAMIC-TYPE1's rejected option C. That option was a boxed Any that any value could become, with an explicit downcast at interop edges. Under option C no type exists that every value fits. A value enters a trait value only if its type opted into that trait, and an arm may name only such a type.\n\nThe wall's measured cost, counting each program's body: E's is five lines. B's open-set form is eleven (review probe x7): a three-line trait, three impl lines, one carrying a one-line override, and the five-line loop. C's is nine: a one-line empty trait, three empty impl lines and E's five lines (c1). B's named-enum form adds a five-line enum, writes .Num(14) for 14, and reads with an eight-line table (r8).\n\nJobs and today's answers on p210, the same on O0, O1 and O2. A type the caller picks uses D-TYPESWITCH1's generic type table: g1 prints 15 and hi, and a bare 2.5 takes the Decimal arm (x4). A known set uses a named enum: r8 prints the four lines, and f1 adds 2.5 as a Float payload. A single union value runs (b3, f2), but not as a generic function's parameter (a07c, #6839 c49); a union list is an internal compiler error (#6839 c26, r6).\n\nAn open set uses a user trait: x7 and b13 print every item and take the Point back. That holds for local and inline-module types (v01e). A file-module type in the user's trait passes checking, then stops ir.build with an internal compiler error, and a direct call is E0102 (v01, v01b, v01c). So B's and C's open set across files needs #6839 c39.\n\nA call with mixed arguments, such as print or format (comment #111), uses D-ANY-JAI1's trait-bounded variadic with no box: x5 prints 14, Float{69.420}, hi and the Point. reflect.of inspects a concrete value (x10), and Dyn holds loose data (d1). Typed lookup by a type parameter, the clip's get_ini_field($T), is Dyn's decode<T> or Core/Encoding/Ini.jet:125-140's typed getters under every option.\n\nD-LITCARRIER1=D (syntax-decisions.md:2107-2113) makes a bare 2.5 a Decimal and Float{2.5} a Float. A type table sends a bare 2.5 to its Decimal arm (x4). The ratified suffix 2.5f is not built; it gives E0134 (x2, #4730 c6). Float{69.420} enters a trait list and prints 69.42 (x6), and enters ...Printable varargs (x5). So the clip's 69.420, read as Jet reads it, is a Decimal.\n\nA Decimal cannot enter a trait value today. With no impl, a bare 2.5 entering a trait list stops the compiler (x3), where a Bool gets E0112 (x12); #6727 c9 asks for E0112. impl Decimal.Shown {} is E0301 although spec.md:927-929 allows it (x1, #6839 c30). impl math.Decimal.Shown {} passes checking and crashes ir.build on \"unlowered … type math.Decimal\" (x1c, #6727 c9). A Decimal at a ...Printable bound gets a wrong E0904 (x5b, x5c, #6839 c30).\n\nThese defects fall on B and C, whose programs box a Decimal into a user trait; Float{69.420} works for them today (x6). Under E an Any holding 69.420 holds a Decimal, so .Decimal(d) matches it and .Float(f) does not. Whether boxing a Decimal into Any would share x1c's crash cannot be probed, since Any does not exist.\n\nUnder E, recovery is D-UNIONTYPE1's member test, .Point(p), extended to an open set. A table over an Any needs else, because types are an open set, as D-TYPESWITCH1 already requires for type tables. An Any holding a Dyn matches .Int(n) as the type Int, never as Dyn's Int case. A generic instance such as .Pair<Int, String>(p) does not parse today (E0003, g6). A list, an optional or a function value has no arm spelling, so it reaches else; Go's type switch names those types.\n\nOption C lets a type arm test a trait value. In if item == .Point(p), item is a Shown value; the arm runs only when the stored type is Point, and binds it as p. The arm must name a type that implements Shown, and any other type is a compile error, as Go requires of its type switch cases. A table needs else, because another module may add an implementer; D-TYPESWITCH1's open-set rule already says so.\n\nOver a trait value or a union, C's arm names a type as type position names it at that spot. A local type, or one imported with use geo.[Point] after use geo, is .Point(p). A type from another module is .geo.Point(p): the path after the dot, as the impl head impl Local.types.Named writes one (spec.md:3619-3622, D-IMPLDOT1). An arm through an alias names its target, as D-TYPESWITCH1 says of type tables.\n\nOver a trait value the name resolves by scope, so a new module never changes an arm. Over a union, a name that type position does not know falls back to the one member with that leaf, as o7's arm does. A package's own Point is .Point(p) beside geo.Point; today only an else reaches it, binding nothing (a04b, f05). A name for a non-member type, or a leaf two members share with neither in scope, is E0305, naming both and .geo.Point(p) (v03, a09).\n\nSo where Point names a type, .Point(p) names it throughout the file, over a union or a trait value. Where it names none, each union's arm names that union's own Point member, as .Red names each enum's own case. Over Int | geo.Point and Int | geo2.Point, the same text binds geo.Point and geo2.Point (k01). Today E0305 offers named cases and spells a local member filestem.Point, which fails (a04c, #6839 c52). Mine(Point) | Theirs(geo2.Point) runs (f04), but changes the type and every construction site.\n\nA named case is never ambiguous: its name is the union's own, as an enum case's is. A type of its name in scope leaves its arm alone, today and under C (z02), an imported one too (a06). So does a case carrying the same-named struct, Point(Point) | Int (a05). No member may share a named case's name (E0363).\n\nThis keeps today's bare arms that work, such as o7's .Point(p) over Int | geo.Point. Letting type position alone decide over a union would refuse that arm, since only geo is in scope; hence the leaf fallback. Three kinds of program change, all at compile time with a fix. The bare arms of v03 and m31b bind today; under C both are E0305. A union whose named case shares a member's leaf (y09d) becomes E0363. No working arm changes meaning: a04 and f03 are E0305 today.\n\nEdge cases follow. A member imported with use geo.[Point], or an alias naming it, is the same type, so it is not ambiguous. An alias named Point for another type is E0305, as v03's local Point is. A qualified arm, .geo.Point(p) or .outer.inner.Point(p), is never ambiguous; today both fail (n03b, v11, #6839 c35). A generic member such as .Box(b) needs #6833 c3, which names that spelling over an Any, a union and a trait value (v05, k04).\n\nTwo instances of one generic, Box<Int> | Box<String>, share the leaf Box. Over Int | Box<Int> the bare .Box(b) names Box<Int>; today it is E0305 \"doesn't belong\", local or imported (v05, k04). Over boxes.Box<Int> | kit.Box with no Box in scope, two members have the leaf Box, so the bare .Box(b) is E0305 naming both. Today it binds kit.Box, and boxes.Box<Int> takes only the internal tag .M_Box_Int_ (m31, m31b, #6833 c5).\n\nWith two instances, each arm is .Box<Int>(b), and the bare .Box(b) is E0305 naming both. Today that arm also says \"doesn't belong\", and E0641's fix offers the internal tags .M_Box_Int_ | .M_Box_String_, which bind (f01-f01d). C refuses them with E0305, as it refuses the identity tag (a08, #6839 c55).\n\nA named case whose name is a member type's leaf, as in Point(Int) | geo.Point, is refused with E0363, as D-ALT-CASES1 refuses Point(Int) | Point (y09b). A qualified member's name is its last segment, so this is D-ALT-CASES1 as written. Today that union is accepted and the bare .Point(n) binds the case (y09d, #6839 c43). spec.md:641-643 already calls geo.Point and map.Point two types named Point. y09b's E0363 is followed by an E0305 whose fix does not parse (z07, #6839 c47).\n\nNone of this spelling works everywhere today. With file modules, .Point(p) over Int | geo.Point runs, and an alias arm works in a type table (o7, o8i). With inline modules the bare arm is E0305 (n03a, n04), and use geo.[Point] is E0611 (n14, #4723 c12). The dotted arm .geo.Point(p) is E0107 with an empty name (n03b, o8a, #6839 c35). An alias in a union arm is E0305 (o1, o8e, #6839 c38). These are C's build criteria.\n\nA worse defect sat under the spelling rule. On p207, with file modules, geo2.Point | map2.Point was accepted as one member, and a map2.Point{name: \"harbor\"} printed as Point { x: 35184415600640, y: 2 } (o8f, o8b). Dev a1c3325a65 fixed it: on p209 the union keeps two members, and the bare .Point(p) is E0305 naming both, with a named-case fix. spec.md:641-646 now says such an arm names neither member and a table keeps its else without E0641. #6839 c36 is met.\n\nInline modules have more naming gaps. A type-table arm cannot name geo.Point (E0608, o5b). An alias of an inline-module struct is not its target: a call says \"wants geo.Point, but this is geo.Point\" (o5c), and a type-table arm through it takes else (o5). The same alias works with a file module (o7, o8i). These are #6839 c37.\n\nA stored enum whose case shares a type's name does not change the arm. Over a Shown value, .Point(p) names the type Point; a stored Item.Point(…) is an Item and takes an .Item(i) arm or else. A union behaves so today: over Item | Point, Item.Point(…) takes .Item (o6). No lint warns, since implementers change with the build and such a warning would come and go. Union clashes stay E0363, because a union is closed.\n\nA union value passed as a trait value boxes the member it holds, with that member's own key, so .Int(n) matches a boxed Int. Every member must implement the trait; otherwise the call gets E0905. Boxing the union's own identity was rejected, since every member arm would then miss. Today the call is an internal compiler error (n01, #6839 c34).\n\nAn arm may not name a trait; that is E0305, with a fix pointing to the trait's methods. Testing for a second trait needs trait-to-trait conversion, an internal compiler error today (#6727 c7). Type tables refuse a trait arm too (n11, E0119), so both forms keep one rule. Go, Swift, Java, C# and Kotlin allow such a test; C can add it later as an arm, by its own decision, since #6727 c7 refuses that conversion under B and C.\n\nA union may not hold a trait member: Shown | Int is refused at the type with E0363. E0363 already says an anonymous union holds concrete closed types, not trait objects (Compiler/Prelude/Diagnostics.jet:5866-5880). A trait written by its name slips past that check today (v04, #6839 c40). The fix is a named enum, or a Shown value with Int implementing Shown.\n\nE0363's check looks inside member types, including lists, maps, optionals, results, tuples, named cases and generic arguments (FailureLaw.jet:1540-1561). So c40's fix refuses [Shown] | Int and S(Shown) | Int too, as it already refuses a trait object or a function type there. [fn(Int) -> Int] | Int is E0363 today, then a cascade E0641 (z03, #6839 c48); [Shown] | Int is accepted (y10). The fix is a named struct holding the list, a closed member.\n\nAccepting .Shown(s) as a member arm instead would put an open set inside a closed union. Then .Point(p) over Shown | Int would have two meanings, a member or a reach into the box; today it is E0305 (w06). So an arm naming a trait has no union exception.\n\nD-TYPESWITCH1's identity rules apply to type arms. An alias is its target; a distinct type, F32 or Int? is not Int, so a stored UserID takes else (o5). The bare arm .Point -> runs the same test as .Point(_), as over a union today (o3). A Shown? subject takes no type arm, as (Int | Point)? takes none today (o4, E0305); unwrap it with Val(item) first (o4b).\n\nOnly named types implement traits (impl [Int].Shown is E0003, b6), so under C no unnameable value is ever stored; a list rides in a one-field struct (b7). A generic implementer such as Pair<Int, String> needs #6727 c6 to be stored and #6833 c3's arm spelling to be named. #6833 c3 names that spelling over an Any, a union and a trait value. Under E, #6727 c7 converts a trait value to Any keeping its inner key; under B and C it refuses the conversion (m43, m46).\n\nAn expert writes one generic function for a library: recover: fn<T: Shown>(item: Shown) -> T? from item, whose body is if item == .T(p) -> return Val(p), then None. The arm .T(p) names the type parameter, so each instance compares against its own type's key. The name take is reserved (E0003, n07b); recover is an ordinary name (o2). Today a type parameter in a type-table arm is E0119 (x8), and a trait method cannot take its own type parameter (x9).\n\nrecover returns a read view. The checker tracks it only while a plain local holds it: moving or changing the owner then is E0212 (w01b, w02b, y11, h01, h03, m01-m03). A value-producing if or table loses it, even with the call in a branch (h06, h08-h10). So does a lambda, struct, tuple, map, enum payload, list, defer, method value or Shared cell holding it, or a Shared owner (a01, a03b, e01-e09, h02, h05). A plain arm binding escapes too (e10, h11): the hole is the loan checker's, not C's.\n\nA case payload already leaves this way through -> Point? from item: from an enum (w01), a union (w02) or a list (v07, v07b, v07c). The loan survives generic instantiation (y04, y05), and the view cannot be written (y11b).\n\nWhat runs is not yet a pointer. At O0, a function under from item and the same function without it emit identical IR (y12). Each allocates a new 24-byte T? cell, copies the payload's bytes and retains its shared heap block; jet audit counts only the form without from as a copy. Rust's downcast_ref also returns a borrow, &T, but as a pointer with no allocation, and needs a 'static type.\n\nSo the copy is gone from direct use, not from the machine. Its address differs from the payload's on O0, O1 and O2: mem.address_of needs no audit gate (spec.md:3164-3166; z01, z01b). Through an escape its value differs too: with the owner rewritten, the held view still reads 41 (e11, h12, a03b). The ranking rests on b8, not on this: B's program copies too (b13), and a library trait's user cannot add B's method (b8, m41-m46).\n\nA checked loan needs a lowering change and a complete loan checker. The lowering makes a T? from result a pointer into the owner's payload. A value converted at the call, or read through a Shared handle, lives in a cell released right after it (z04 IR; a03b IR op 70). That cell must outlive the result, or the call is E2305, as for a temporary. A path returning a value no owner holds (z05) keeps its own cell and a caller's drop, or is refused.\n\nThe checker must keep the owner borrowed through every holder: a lambda, local, stored or returned (#6839 c50), a Shared read (c51) and every carrier (c54). So must branch joins (c56; spec.md:1963-1965, 2057-2059, 2066-2069). Moving or rewriting the owner while a holder lives is E0212. No task receives the view, also inside a Shared cell (E1102: a02; e09 passes today). Every from result and arm binding needs this: #6839 c46, after c50, c51, c54 and c56 (y12, z01b, z04, z05, a01, a03b, e01-e11, h02, h05, h06-h12).\n\nOther subjects follow the enum rules. A temporary subject's view cannot leave its statement (E2305: y06b, y06c). A && subject moves the payload out with no from (y07); a from clause naming a && parameter is accepted, then its call gets a misleading E0209 (y07b, #6839 c45). An arm over a & subject binds read-only, as an enum's does (y08, E0205 blaming item: #6839 c44). So C has no downcast_mut analogue.\n\nA copy is written, Val(p.copy()), with no from clause, and the caller owns it (w04). Today an unmarked Val(p) of a read value with no from clause also copies (n15b, v08); a bare return is E0120 and a take E0201 (v08, v08b). #6839 c41 refuses that hidden copy, since Jet never hides a clone (spec.md:1892-1895). A Val(p) under a from clause naming its owner stays a view; c41 spares it.\n\nB's trait method can lend the same way, point: fn(self) -> Point? from self (w03). On p209 the loan was not tracked through dispatch: the list moved or changed while the result lived (w03b, w03c), and the result was a copy (y01). Dev c1fca7426c, in batch p210, tracks it: w03b, w03c and y01 are E0212 on O0, O1 and O2 (#6839 c42; the copy remains c46's). B's shared program copies with self.copy() (b13). C needs no c42: a trait value's loan without dispatch is tracked (y03, y05).\n\nToday C's program fails at the arm with E0305 on O0, O1 and O2 (c1, and c3 for a table), plus a cascade E0107 on the arm's binding (#6839 c53). Its other lines compile, but a value of a trait with no methods prints as an empty line (c2, c2b, #6845 c15). The box already stores its type key at offset 0 and the payload at offset 8 (Compiler/JetIR/Source/BuildTraits.jet:332-354, :457).\n\nThe arm adds no storage and no allocation. An arm loads the 8-byte key, compares it with a constant and views the payload behind it; q1's 32-byte struct sits at offset 8 of its 40-byte box (q1 IR). The key is the first 56 bits of a SHA-256 of the type's identity, plus one (BuildTraits.jet:9-28). The key depends on that identity alone. recover's T? result allocates its own cell today, as the copy form's does (y12 IR, O0).\n\nToday a key collision panics (BuildTraits.jet:21-24). #6845 c18 makes it a registered diagnostic naming both types, as the collect-all rule requires. C needs c18, since the key is what an arm tests.\n\nA table of N type arms costs up to N compares, where a union's tag can switch. C's compiler work is the pattern checker, the IR compare, the arm spelling for qualified, imported and alias names, union-to-trait boxing, the spec and an example. It also changes E0305's texts and Prelude entry and E0307's and E0641's fixes, and removes the E0641 exemption (Coverage.jet:521-523, :988-991). A beginner writes the .Point(p) they already use for unions; an expert writes one recover<T> for a library.\n\nDeclarations are public by default, and priv is the only hiding form (spec.md:3509-3512, 3568-3569). So under C a caller can arm any public type a library stores behind its trait values. The library then cannot change that type without breaking those arms. Go's errors blog names the cost: \"wrapping an error makes that error part of your API\" (go.dev/blog/go1.13-errors). Its errors.As still \"behaves like a type assertion\", C's mechanism.\n\nTwo remedies were weighed. A signed marker, #!Debug (spec.md:953-954), opts a type out of a derivable trait. Using one to seal type arms would add a second hiding form beside priv, against spec.md:3568. Rust 1.86 asks the trait's author to opt in with an Any supertrait; that would bring back B's loss for every library trait whose author did not opt in. C keeps priv as the one hiding form.\n\nA priv type cannot be named outside its package, or outside its module when declared inside one (S18, syntax-decisions.md:2531-2538). So a type arm cannot reach it, and it takes else. From a file module a priv struct is refused today, though with E0119 where E0605 belongs (o8d, #4723 c13). Inside an inline module it leaks with no diagnostic (n12, n12b, #4723 c11). print and reflect.of already show a library's concrete type and name (n05), so C adds recovery, not disclosure.\n\nB checks at compile time that a type opted in: a String with no impl is E0905 (b9e). Taking a type back needs a trait method per type, as point() does in x7. That bites only for values a library hands over already boxed as its own trait: the user cannot add a method there, and .Point(p) is E0305 (b8). For the user's own trait, a method gives back any type (b13). B's matching gain is control: a library decides which types callers take back.\n\nThe library trait's user has no other route. A free type table sees only the trait, so a library Point takes else (m41). Adding a method to the library trait from outside is E0003, and a second impl of it is E0902 (m42, m45). A trait of the user's, implemented for the library's Point, would reach it only through a conversion that keeps the key. That conversion is an internal compiler error today (m43, m46), and #6727 c7 refuses it under B and C.\n\nOne constraint holds for every option and is stated once. A stored type the reader did not plan for reaches else under E and C, and has no method under B. Probe r7 stores a Point3 and prints found a Point: false on O0-O2. Full compile-time checking of recovery comes only from a closed set: a table over the named enum that forgets .At is E0307 (b12).\n\nWhat Any would gain is real. Under E no stored type needs an impl line, so the clip's Table(string, Any) works with no declarations. A list, an optional or a closure goes in without a wrapper struct, though taking one back needs an arm spelling (#6833 c3). Comment #4 calls this the case where sum types are clumsy. B and C pay one impl line per stored type.\n\nPrerequisites differ by option. Trait-value printing, #6845 c13, is met (x7, r9), so print(item) works for every option. Every trait value carries a key, so every option needs #6845 c18. E needs generic trait values (#6727 c6) and trait-to-trait conversion (#6727 c7). B's and C's open set across files needs #6839 c39, and c6 only if a generic type opts in. A bare Decimal needs #6727 c9 and #6839 c30 under B and C.\n\nC also needs the type arm and its spelling rules (#6833 c3 and c5, #6839 c35, c37, c38, c43, c47, c52 and c55, #4723 c12-c13). It needs union-to-trait boxing (#6839 c34), a trait member refused in a union with one report (#6839 c40, c48) and no hidden copy in Val (#6839 c41). Its view must keep its loan through every holder (#6839 c50, c51, c54, c56). It needs private types enforced (#4723 c11) and empty-trait printing (#6845 c15).\n\nToday every option allocates per stored value. A conversion to a trait value allocates a heap box and copies the payload, read arguments included: a 32-byte struct allocates 40 bytes and copies 32 (q1). A union argument allocates 24 bytes (b3 IR), and a named-enum list allocates per element (b4 IR). A union or enum has a known size and can be stored inline, while a trait value or an Any needs a box or a bounded inline buffer.\n\nOdin's any is a data pointer and a type ID, and a literal passed to it lives in the caller's stack frame. A written box, A's variant, would show the allocation that E hides. Inline storage for small values is G11 work for every trait value, proved by a paired cell. O1 and O2 IR could not be read, because jet emit refuses both with E2102.\n\nClosed-world dispatch is today's implementation, not law: BuildTraits.jet stops on an unknown key at jet_rt_unreachable. D-LIB-DYNTRUST1=A ratifies loadable .jetlib libraries, pinned to one compiler identity, with a checked export table (Docs/spec/reference/library-reuse-and-linking.md:116-139). An Any from a loaded library (E) and a type arm on a loaded trait value (C) need type identity shared across libraries. A trait value (B) needs the same dispatch. This is #3102 c17.\n\nDefects found on the way are filed apart from this ballot. Trait-to-trait conversion and a closure in a trait list are internal compiler errors (#6727 c7, c8). The Decimal defects are #6727 c9 and #6839 c30, and 2.5f is #4730 c6. Reviews 4-11 filed #4723 c11-c13, #6839 c34-c58, #6845 c16-c18 and #3102 c17. The empty-trait print is #6845 c15, [Printable]{14} is #6839 c32, and x9 is #6839 c31.\n\nIf E wins, #6833 c3 carries three build duties: generic arguments in member arms, unnameable types reaching else, and the provenance diagnostic for a view of a local escaping through Any. If C wins, it carries the first and third for trait values and unions, and #6833 c5 carries the arm spelling rules above. Today a read trait value returned as-is is E0120 (l1). #6833 c4 holds E's diagnostic snapshot for the extended member test. C's refusals are snapshotted under #6839 c35, c38 and c40.\n\nIf B or C wins, E0119 on the name Any should point to an enum, a trait or reflect.of. Today fn(value: Any) says only \"There's no type called Any\" (x11, #6839 c33). E0350, which once named D-DYNAMIC-TYPE1, is retired (Compiler/Prelude/Diagnostics.jet:5563). The adversarial review is Docs/audits/any-type-info-pointer-2026-11-15.md, from mining run any-NXt-20261115. Recall audits 1 and 2 failed and the run was re-mined after each; audits 3-11 passed, audit 11 (seed 14666) matching 125 concepts with no miss.",
+      "options": [
+        {
+          "key": "E",
+          "name": "Any with implicit conversion",
+          "code": "write_fields: fn(fields: [Any]) {  // no opt-in lines needed\n    loop f in fields {\n        if f == {\n            .Duration(d) -> print(\"took {d.ns / 1000000} ms\")\n            else -> print(f)\n        }\n    }\n}",
+          "detail": "Any is a Core trait every type implements, so a value converts to it implicitly, as to every trait. print shows the concrete value, and the type arm .Point(p) tests the stored type and binds it. The intended output is 14, hi, Point { x: 1, y: 2 } and 1. Today this stops at the first item with E0112, because no type is called Any (probe e1). It also needs #6727 c6 and c7.",
+          "technical": "Sema adds the Core trait and records each type the program converts to Any. The dispatch switch must cover those types, every implementer of a trait value converted to Any, and every generic instance converted inside generic code. Converting a trait value keeps its inner key; ir_trait_box already returns a trait value unchanged. The pattern checker extends D-UNIONTYPE1's member test to an Any subject and requires else. Build duties sit on #6833 c3."
+        },
+        {
+          "key": "B",
+          "name": "No Any: fixed lists, and trait methods to take a type back",
+          "code": "Field: trait {\n    duration: fn(self) -> Duration? { None }  // one method per type taken back\n}\nimpl Duration.Field { duration: fn(self) -> Duration? { self } }\n\nwrite_fields: fn(fields: [Field]) {\n    loop f in fields {\n        if f.duration() == Val(d) -> print(\"took {d.ns / 1000000} ms\") else -> print(f)\n    }\n}",
+          "detail": "No Any; D-ANY-JAI1 stands. A known set uses a named enum, the documenting form D-UNIONTYPE1 keeps, and a table that forgets a case is E0307 (probe b12). An open set uses a user trait: print(item) shows each value, and a default point() returns None except in Point's impl. The program prints the four lines twice on O0, O1 and O2 on p210 (probe b13). A union list, the other known-set form, is an internal compiler error today (#6839 c26).",
+          "technical": "No compiler change. The trait value boxes as spec.md:945-946 says. A type with no impl is refused where it enters: a String gets E0905 (probe b9e). Taking a type back needs a trait method per type. For the user's own trait that works (b13); a library trait's user cannot add one, and .Point(p) over it is E0305 (b8, m41-m46). A library decides which types callers take back. A Decimal entering the trait needs #6727 c9 and #6839 c30; Float{69.420} works (x6)."
+        },
+        {
+          "key": "C",
+          "name": "No Any: type arms over a trait value",
+          "code": "Field: trait {}  // the types a log line may carry\nimpl Int.Field {}\nimpl String.Field {}\nimpl Duration.Field {}\n\nwrite_fields: fn(fields: [Field]) {\n    loop f in fields {\n        if f == {\n            .Duration(d) -> print(\"took {d.ns / 1000000} ms\")  // f is a Duration: call it d\n            else -> print(f)\n        }\n    }\n}\n// .Bool(b) here is a compile error: Bool never opted into Field.",
+          "detail": "No Any; D-ANY-JAI1 and D-DYNAMIC-TYPE1 stand. Each stored type opts into a trait with one empty line, and print(item) shows each value. The type arm .Point(p) tests the trait value's stored type and binds it, with else required in a table. Each arm must name a type that implements the trait; a type from another module is .geo.Point(p). The intended output is E's. Today the arm is E0305 (probe c1), and an empty trait's value prints as an empty line (c2, #6845 c15).",
+          "technical": "The pattern checker accepts a type arm over a trait value when the named type implements the trait, resolving the name as type position does, and requires else in a table. IR loads the box's type key at offset 0, compares it with the arm type's key, and binds a read view, which recover<T> returns under from item. The arm adds no storage or allocation. A union passed as a trait value boxes its member (#6839 c34). An arm naming a bounded type parameter compares against each instance's key."
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "recommendation": {
+        "rec": "C",
+        "why": "C asks the question in one checked arm, for any trait, without adding a type every value fits.",
+        "gains": [
+          "The same arm form as enums: .Duration(d).",
+          "Arms are checked when compiling."
+        ],
+        "losses": [
+          {
+            "loss": "Needs compiler work first.",
+            "mitigation": "B's form runs today and stays valid."
+          },
+          {
+            "loss": "A caller can depend on which types a library stores.",
+            "mitigation": "A table needs else, and a private type cannot be named in an arm."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "E",
+            "reason": "With Any, a wrong question is found only when the program runs."
+          },
+          {
+            "key": "B",
+            "reason": "B needs a method per type, and a library's users cannot add one."
+          }
+        ],
+        "tradeoff": "Compiler work buys checked type questions without Any."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: AnyReview11. The adversarial review attacked the recommendation on p210: every route from a user to a library trait's type stayed closed, and every move of a view's owner was refused. It repaired the generic arm rule for boxes.Box<Int> | kit.Box and tied B's loss to #6727 c7."
+      },
+      "checkInstructions": "Probes ran on the p210 batch compiler (dev 7f902dd915) at $JET_STATE_ROOT/lander3-tmp/gate-p210/tree/Compiler/JetCli/.jet/build/jet. Its identity is jet@a0.0.45#8e7e97c2b52745d37c75a7c6a78688ef33bc908c74df3d3499e197dea8dea508, in the IDENTITY file beside the binary. Set JET_COMPILER_IDENTITY to it and unset JET_TOOLCHAIN_ROOT. The tiers are flags: -O0, -O1 and jet build -O2; --optimize=basic does not exist (E2102). Every file line number cited (spec.md, core-library.md, BuildTraits.jet and the rest) is at dev 7f902dd915; Tower criteria are quoted as they stood on 2026-11-16.\n\nEvery probe this ballot cites, the eleven reviews' probes included, is in $JET_SCRATCH_ROOT/lanes/AnyBallot/probes. Run ./run.sh NAME.jet there. It writes NAME.p210.out (jet run -O0), NAME.p210.O1.out (jet run -O1) and NAME.p210.O2.out (jet build -O2, then the binary), each ending in its exit code. MODE=emit FLAGS=--ir writes O0 IR as NAME.p210.ir.out. All three tiers matched for every probe.\n\nEvery probe also matched its p209 output (NAME.p209.out, dev a1c3325a65), except five. w03b, w03c, y01 and y02 are E0212 on p210, which carries #6839 c42's check (dev c1fca7426c); y01's IR is p209's. n05's reflect.of now names the private type Secret, not M3LibSecret. Every probe older than review 8 also matched its p207 output, with two changes. On p209 and p210, o8b, o8f and vf f are E0305 (c36, met); their p207 outputs record the old defect. y09b's E0363 now has a cascade E0305 (#6839 c47).\n\nFile-module probes are named by folder: ./run.sh o7_file_module/main.jet, o8_file_modules/NAME.jet, vf/NAME.jet or fm/NAME.jet. Their outputs sit beside the others, as o7_file_module, o8X_file_NAME, vf_NAME and fm_NAME.\n\nRe-run b13 for B; c1, c2, c2b and c3 for C; e1 for E. For C's arm spelling re-run n03a, n03b, n04, n14, o1, o7, o8a, o8b, o8e, o8f, o8h, o8i, v03, v11 and w07. For privacy re-run n05, n12b and o8d. For the forks re-run n01, n02, n11, o3, o4, o4b, o5, o6, v04, w05, w06, y10 and z03. For named cases re-run y09, y09b, y09c, y09d, z02, z07, a05 and fm a06.\n\nFor a package's own same-leaf member re-run fm a04, a04b, a04c, a09, f03, f04, f05 and f06, and fm a08 for the identity tag. For two instances of one generic re-run fm f01, f01b, f01c and f01d, and fm f02 for a nested pair.\n\nFor one instance re-run fm k04 and v05, and m33 for its E0641 fix. For a same-leaf member beside it re-run fm m31, m31b and m32. For one arm text over two unions re-run fm k01, for file-wide names fm k02 and k03, and for arm syntax t01-t04 (t03 is #6839 c57).\n\nFor a library trait's user re-run b8 and fm m41-m47; fm lib8 is the library.\n\nFor recover re-run n07b, o2, n15b, w01, w01b, w02, w02b, w04, v07, v07b, v07c, v08, v08b, y04, y05, y11, y11b and y12, with MODE=emit FLAGS=--ir for y12's IR. For the copy's address and a true loan re-run z01, z01b, z04 (with its IR), z05 and z06.\n\nFor the paths that escape the view check re-run a01 against a01b, a02, a03 and a03b (with its IR), and e01-e11 against e01b and e07b; e04 is E0212. Re-run h02-h12 (h04 and h07 omitted), which escape, against h01 and h03, which are E0212. m01-m09 move or write the owner while a plain local holds the view; each is refused.\n\nFor a union in a generic function re-run a07, a07b and a07c (#6839 c49). For other subjects re-run y06, y06b, y06c, y07, y07b and y08. For a lending trait method re-run w03-w03d, y01, y01d, y02 and y03; w03b, w03c and y01 are E0212 on p210 (dev 7f902dd915), which carries #6839 c42's check. For another file's type in a user trait re-run vf v01, v01b, v01c and v01d, and v01e.\n\nRe-run r7 and b12 for the shared fall-through and the closed set, x10 and n09 for reflect.of, and x3, x4, x6, x1, x1c and x5b for Decimal. If an option wins, re-run its program with the built feature on every tier.\n\nUnprobed edges: a comptime value as an Any, a move-only resource in an Any or a trait value, a key collision (source reading only, #6845 c18), and executing the web build. Also unprobed: O1 and O2 IR (jet emit refuses both, E2102), and key stability across builds that add a module. z06 lends a Close enum payload under from; it closes once.",
+      "surface": {
+        "gist": "A list holds values of different types. How does code ask \"is this a Duration?\" and get it back?",
+        "lesson": "A Jet list holds one type. To mix types, the types opt into a shared trait, such as Field below. Printing each value already works. What Jet cannot do today is ask one item \"are you a Duration?\" and use it as a Duration. The options differ in how that question is written and when a wrong question is caught.",
+        "trio": {
+          "current": {
+            "note": "Printing each field works; asking for the Duration does not.",
+            "code": "Field: trait {}  // the types a log line may carry\nimpl Int.Field {}\nimpl String.Field {}\nimpl Duration.Field {}\n\nwrite_fields: fn(fields: [Field]) {\n    loop f in fields {\n        print(f)  // works today: 14, notes.txt, 120ms\n        // no way to ask: is f a Duration?\n    }\n}"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "A type switch asks an interface value for its type and binds it.",
+            "code": "for _, f := range fields {\n    switch v := f.(type) {\n    case time.Duration:\n        fmt.Printf(\"took %d ms\\n\", v.Milliseconds())\n    default:\n        fmt.Println(v)\n    }\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "E",
+            "name": "Add Any",
+            "gist": "Every value fits in Any with no opt-in, and a type arm takes it back.",
+            "gains": [
+              "No opt-in lines."
+            ],
+            "losses": [
+              "Asking for a type no value can have is found only when running.",
+              "Reverses the settled rule that Jet has no Any."
+            ],
+            "proposed": {
+              "code": "write_fields: fn(fields: [Any]) {  // no opt-in lines needed\n    loop f in fields {\n        if f == {\n            .Duration(d) -> print(\"took {d.ns / 1000000} ms\")\n            else -> print(f)\n        }\n    }\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "A method per type",
+            "gist": "The trait gets one method per type code wants back.",
+            "gains": [
+              "Works today with no compiler change."
+            ],
+            "losses": [
+              "One method per type taken back.",
+              "Users of a library's trait cannot add one."
+            ],
+            "proposed": {
+              "code": "Field: trait {\n    duration: fn(self) -> Duration? { None }  // one method per type taken back\n}\nimpl Duration.Field { duration: fn(self) -> Duration? { self } }\n\nwrite_fields: fn(fields: [Field]) {\n    loop f in fields {\n        if f.duration() == Val(d) -> print(\"took {d.ns / 1000000} ms\") else -> print(f)\n    }\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Type arms",
+            "gist": "The arm .Duration(d) asks a trait value for its type and binds it.",
+            "gains": [
+              "One arm takes back any opted-in type, library traits included.",
+              "A wrong arm is a compile error."
+            ],
+            "losses": [
+              "Needs compiler work first."
+            ],
+            "proposed": {
+              "code": "write_fields: fn(fields: [Field]) {\n    loop f in fields {\n        if f == {\n            .Duration(d) -> print(\"took {d.ns / 1000000} ms\")  // f is a Duration: call it d\n            else -> print(f)\n        }\n    }\n}\n// .Bool(b) here is a compile error: Bool never opted into Field."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "C",
+          "why": "C asks the question in one checked arm, for any trait, without adding a type every value fits.",
+          "gains": [
+            "The same arm form as enums: .Duration(d).",
+            "Arms are checked when compiling."
+          ],
+          "losses": [
+            {
+              "loss": "Needs compiler work first.",
+              "mitigation": "B's form runs today and stays valid."
+            },
+            {
+              "loss": "A caller can depend on which types a library stores.",
+              "mitigation": "A table needs else, and a private type cannot be named in an arm."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "E",
+              "reason": "With Any, a wrong question is found only when the program runs."
+            },
+            {
+              "key": "B",
+              "reason": "B needs a method per type, and a library's users cannot add one."
+            }
+          ],
+          "tradeoff": "Compiler work buys checked type questions without Any."
+        }
+      },
+      "designAway": [
+        {
+          "option": "E",
+          "loss": "It reverses ratified law: D-ANY-JAI1, D-DYNAMIC-TYPE1 and nine more places that rely on them.",
+          "attempts": [
+            "Keep named enums, unions, traits, generics and Dyn as the first answer for every job they already cover.",
+            "Keep D-ANY-JAI1's varargs part and reflect.of, which already serve mixed arguments and inspection (probes x5, x10)."
+          ],
+          "result": "Not removable. E supersedes D-ANY-JAI1 and D-DYNAMIC-TYPE1 and amends the eleven places in the detail, each with its named amendment."
+        },
+        {
+          "option": "E",
+          "loss": "A wrong value entering an Any is not a compile-time error anywhere.",
+          "attempts": [
+            "Give an Any value no members, calls or operators.",
+            "Require else in every table over an Any, as type tables already do.",
+            "Require a written box, Any{value}, the former option A: an argument not written Any{...} is refused at compile time."
+          ],
+          "result": "Reduced, not removed: the mistake surfaces at the reader's else. A written box makes Any the only trait with a written conversion, against S48, and Any{...} still accepts any value."
+        },
+        {
+          "option": "E",
+          "loss": "Recovery over an Any extends D-UNIONTYPE1's member test to an open set.",
+          "attempts": [
+            "Resolve .X over an Any as any type in scope, with else required, as D-TYPESWITCH1 does for type tables."
+          ],
+          "result": "Required build criterion #6833 c4: a diagnostic snapshot for the extended test."
+        },
+        {
+          "option": "E",
+          "loss": "Generic instances and structural types have no arm spelling.",
+          "attempts": [
+            "Parse generic arguments in member arms, such as .Pair<Int, String>(p).",
+            "Send lists, optionals, function types and closures to else."
+          ],
+          "result": "Required build criterion #6833 c3. Go's arms name such types, so the gap is Jet's spelling, not Any."
+        },
+        {
+          "option": "E",
+          "loss": "A view of a local could escape through an Any value.",
+          "attempts": [
+            "Apply the provenance rule every trait value follows; a read trait value returned as-is is E0120 today (probe l1)."
+          ],
+          "result": "Required build criterion #6833 c3: a returned Any holding a view of a local fails with the provenance diagnostic."
+        },
+        {
+          "option": "E",
+          "loss": "Trait-to-trait conversion, which keeps the inner key, is an internal compiler error today.",
+          "attempts": [
+            "Keep the inner key and never box a box, as ir_trait_box already does in IR."
+          ],
+          "result": "Required fix #6727 c7 before E ships. Under B and C, c7 refuses converting a trait value to another trait, so a library trait's user cannot reach its values through a trait of their own (m43, m46)."
+        },
+        {
+          "option": "E",
+          "loss": "Each conversion to Any, a read argument included, allocates one heap box and copies the value, hidden at the call.",
+          "attempts": [
+            "Store small values inline in every trait value.",
+            "Pass a read trait parameter as key and pointer with no box."
+          ],
+          "result": "Not removed: G11 work for every trait value, proved by a paired cell. Today B's forms allocate too; a fixed list can be inline by design."
+        },
+        {
+          "option": "B",
+          "loss": "Taking a type back from a library's trait needs a method its author wrote; the user cannot add one (probe b8).",
+          "attempts": [
+            "For the user's own trait, a default method returns the type, so the program runs (probe b13).",
+            "A generic helper with a type table empties every impl line (review probe r3b), but each target type still needs its own trait method.",
+            "A generic trait method pick<T>() would serve any type, but trait methods take no type parameters (review probe x9).",
+            "A type parameter in a type table arm would compare stored types, but it is E0119 (review probe x8).",
+            "Lend the payload from a trait method, -> Point? from self; untracked through dispatch on p209 (w03b, w03c, y01), tracked as E0212 from dev c1fca7426c (p210), a copy until #6839 c46.",
+            "A free generic function's type table sees only the trait: T is Shown, so a library Point takes else (m41).",
+            "Add a method to the library trait from outside: E0003 (m42); a second impl of it for the library's type is E0902 (m45).",
+            "Convert the value to a trait of the user's, implemented for the library's Point: an internal compiler error today (m43, m46), refused by #6727 c7 under B and C. impl lib8.Shown.Back {} is accepted but gives the value no method (m44, m44b, m47; #6839 c58)."
+          ],
+          "result": "Not removable inside B for values a library hands over already boxed as its own trait. Option C removes it with a type arm."
+        },
+        {
+          "option": "B",
+          "loss": "Each stored type needs an impl line, and structural types need a wrapper struct.",
+          "attempts": [
+            "Default methods leave each impl line empty except each recoverable type's override (probe x7).",
+            "Use a Core trait such as Printable as the element type, which builtins already implement; today [Printable]{14} is E0112 (probes c4, c4b).",
+            "Wrap a list in a one-field struct (probe b7)."
+          ],
+          "result": "Reduced to one line per stored type, empty except overrides. C shares this cost."
+        },
+        {
+          "option": "B",
+          "loss": "A bare decimal such as 69.420, a Decimal, cannot enter the trait today (review probes x1, x3, x1c).",
+          "attempts": [
+            "Write Float{69.420}, which enters and prints 69.42 (review probe x6).",
+            "Store numbers in the named enum, which takes 2.5 as a Float payload (probe f1)."
+          ],
+          "result": "Removed by #6727 c9 and #6839 c30, which C needs too. Float{69.420} works today."
+        },
+        {
+          "option": "B",
+          "loss": "A file-module type in a user trait is an internal compiler error today (v01, v01b); a direct call is E0102 (v01c).",
+          "attempts": [
+            "Declare the type locally or in an inline module, which runs (v01e)."
+          ],
+          "result": "Required fix #6839 c39, shared with C."
+        },
+        {
+          "option": "C",
+          "loss": "It amends two ratified sentences: D-TYPESWITCH1 line 796 and typed selection line 1169.",
+          "attempts": [
+            "Keep the top-type wall, D-ANY-JAI1, D-DYNAMIC-TYPE1 and reflect.of unchanged.",
+            "Keep typed selection's foreign-value clause, since a trait value is a Jet value."
+          ],
+          "result": "Not removable: the two sentences gain trait values by name, with no top type added."
+        },
+        {
+          "option": "C",
+          "loss": "Readers may branch on a stored type where a trait method fits better.",
+          "attempts": [
+            "Require else in every table over a trait value.",
+            "Refuse an arm naming a type that does not implement the trait."
+          ],
+          "result": "Reduced: the arm is for taking a value back; behavior stays on trait methods, as in Go and Rust."
+        },
+        {
+          "option": "C",
+          "loss": "It needs a compiler change; today the arm is E0305 (probe c1).",
+          "attempts": [
+            "Write it in today's language: a generic trait method (x9) and a type-parameter arm (x8) both fail.",
+            "Use B's per-type method until C ships; its program runs (probe b13)."
+          ],
+          "result": "Required build: the pattern checker, a key compare in IR, the arm spelling rules, union-to-trait boxing, E0305's texts and Prelude entry, E0307's and E0641's fixes, removing the E0641 exemption, the spec and an example. Prerequisites: #6833 c3 and c5, #6839 c34, c35, c37-c41, c43, c47, c48, c50-c52, c54-c56, #4723 c11-c13 and #6845 c15 and c18."
+        },
+        {
+          "option": "C",
+          "loss": "A value of a trait with no methods prints as an empty line today (probes c2, c2b).",
+          "attempts": [
+            "Give the trait one default method, which prints correctly (review probe x7)."
+          ],
+          "result": "Required fix #6845 c15: printing dispatches on the key for every trait."
+        },
+        {
+          "option": "C",
+          "loss": "Generic implementers need a stored instance and an arm spelling.",
+          "attempts": [
+            "Store generic instances (#6727 c6).",
+            "Parse generic arguments in member arms, such as .Pair<Int, String>(p) (#6833 c3)."
+          ],
+          "result": "Required build criteria #6727 c6 and #6833 c3, shared with E; c3 covers arms over an Any, a union and a trait value, including two instances of one generic, .Box<Int>(b) (f01-f01d, #6839 c55)."
+        },
+        {
+          "option": "C",
+          "loss": "A library's callers can branch on the public type behind its trait value, so changing that type can break them.",
+          "attempts": [
+            "Keep the type private: priv is the only hiding form (spec.md:3568), and an arm cannot name a priv type outside its package or module, so it reaches else.",
+            "Let a type author opt out with a signed marker, #!X (spec.md:953-954); rejected as a second hiding form beside priv.",
+            "Ask the trait's author to opt in, as Rust 1.86's Any supertrait does; that brings back B's loss for every library trait whose author did not opt in."
+          ],
+          "result": "Reduced, as in Go: a library hides a type with priv, which needs #4723 c11 and c13. print and reflect.of already show the type (n05)."
+        },
+        {
+          "option": "C",
+          "loss": "An arm must name a type from another module, two types sharing a name, or an imported name.",
+          "attempts": [
+            "Over a trait value, resolve the arm name as type position does: .Point(p) after use geo.[Point], .geo.Point(p) for a qualified type, and an alias as its target.",
+            "Over a union, give a package's own Point beside geo.Point no arm, so only an else exempt from E0641 reaches it; rejected, since that else binds nothing (f05) and silently takes a member added later (a04b).",
+            "Let type position alone decide over a union; rejected, since it refuses o7's bare arm.",
+            "Adopted: type position first, then the one member with that leaf, and E0305 otherwise (v03, a09). Every member has an arm and no else is exempt. The cost is a two-step lookup, and v03's working arm becomes E0305.",
+            "A named case keeps its bare arm even with a type of its name in scope (z02). A named case whose name is a member's leaf, Point(Int) | geo.Point, is E0363, as D-ALT-CASES1 refuses Point(Int) | Point (y09b, y09d).",
+            "A bare .Box(b) names a union's one instance of Box, local or imported (v05, k04); two instances spell their arguments, .Box<Int>(b), and the internal tags E0641 offers today are refused (f01c, f01d, #6839 c55)."
+          ],
+          "result": "Required build criteria #6833 c5, #6839 c35, c37, c38, c43, c47, c52, c55 and #4723 c12-c13: n03a, n03b, n04, n14, v11 and o1 refuse a sound spelling today, and o8f read one same-named member's bytes as the other on p207 (c36, now met)."
+        },
+        {
+          "option": "C",
+          "loss": "recover<T> returned a copy, where Rust's downcast_ref returns a borrow.",
+          "attempts": [
+            "Read the payload inside the arm, where the binding is a loan of the box.",
+            "Return the payload as a view of the box, -> T? from item, as a case payload already leaves (w01, w02, v07b); owner moves are E0212 (w01b, w02b, y11), and writes are refused (y11b).",
+            "Lower a T? from result as a pointer into the owner's payload, keeping a converted or Shared-read argument's cell alive (z04, a03b), giving an owned path its own cell (z05), and keeping the loan through every holder: lambdas, carriers, tuples, maps, branch joins, defers, method values and Shared cells (a01, e01-e09, h02, h05, h06, h09). A change for every from result, not built (#6839 c46, after c50, c51, c54 and c56)."
+          ],
+          "result": "Removed for direct use, not yet at run time: recover returns a view under from item that the checker tracks only while a plain local holds it, and today it is a byte copy in a new optional cell at another address (y12, z01). #6839 c46 makes it a pointer, after c50, c51, c54 and c56 keep the loan through every holder (a01, a03b, e01-e11, h02-h12). A copy is opt-in, Val(p.copy()) (w04), and #6839 c41 refuses the unmarked one."
+        },
+        {
+          "option": "C",
+          "loss": "An arm cannot test for a second trait, which Go, Swift, Java, C# and Kotlin allow.",
+          "attempts": [
+            "Convert the trait value to the second trait, keeping the inner key; today an internal compiler error (#6727 c7), which c7 makes a refusal under B and C."
+          ],
+          "result": "Not removed now: an arm naming a trait is E0305, as type tables refuse one (n11). A union with a trait member is refused at the type (E0363, #6839 c40), at any depth of a member (y10), so no union exception exists. A second-trait arm can follow by its own decision."
+        }
+      ],
+      "reports": [
+        {
+          "title": "Adversarial review: a Jai-style Any for Jet",
+          "path": "Docs/audits/any-type-info-pointer-2026-11-15.md",
+          "note": "Claims about Any and type arms attacked against Rust, Go, Swift, C++, Java, C#, Kotlin, Jai and Odin with p210 probes: the eleven places the ruling lives, reflect.of, arm spelling, privacy, loans, Decimal defects, prerequisites, and recall audits 1-11."
+        },
+        {
+          "title": "Any type research (2026-11-09)",
+          "path": "Docs/research/2026-11-09-any-type.md",
+          "note": "The former option A's merit: no value becomes Any unless written, so a wrong argument is refused."
+        },
+        {
+          "title": "JEP 394: pattern matching for instanceof",
+          "url": "https://openjdk.org/jeps/394"
+        },
+        {
+          "title": "JEP 441: pattern matching for switch",
+          "url": "https://openjdk.org/jeps/441"
+        },
+        {
+          "title": "Go type switches",
+          "url": "https://go.dev/ref/spec#Type_switches"
+        },
+        {
+          "title": "Odin any and typeid",
+          "url": "https://odin-lang.org/docs/overview/"
+        },
+        {
+          "title": "Rust Any identity and lifetime limits",
+          "url": "https://doc.rust-lang.org/std/any/trait.Any.html"
+        },
+        {
+          "title": "Swift existential container layout",
+          "url": "https://github.com/swiftlang/swift/blob/main/docs/ABI/TypeLayout.rst"
+        },
+        {
+          "title": "Rust 1.86: trait upcasting to dyn Any",
+          "url": "https://blog.rust-lang.org/2025/04/03/Rust-1.86.0/"
+        },
+        {
+          "title": "Swift type casting (as?)",
+          "url": "https://docs.swift.org/swift-book/documentation/the-swift-programming-language/typecasting/"
+        },
+        {
+          "title": "TypeScript 3.0: the unknown top type",
+          "url": "https://www.typescriptlang.org/docs/handbook/release-notes/typescript-3-0.html"
+        },
+        {
+          "title": "C# boxing and unboxing",
+          "url": "https://learn.microsoft.com/en-us/dotnet/csharp/programming-guide/types/boxing-and-unboxing"
+        },
+        {
+          "title": "Zig anytype parameters",
+          "url": "https://ziglang.org/documentation/master/#Function-Parameter-Type-Inference"
+        },
+        {
+          "title": "Go 1.13 errors: \"wrapping an error makes that error part of your API\"",
+          "url": "https://go.dev/blog/go1.13-errors"
+        },
+        {
+          "title": "C# type patterns",
+          "url": "https://learn.microsoft.com/dotnet/csharp/language-reference/operators/patterns"
+        },
+        {
+          "title": "Kotlin is and smart casts",
+          "url": "https://kotlinlang.org/docs/typecasts.html"
+        },
+        {
+          "title": "Kotlin sealed classes",
+          "url": "https://kotlinlang.org/docs/sealed-classes.html"
+        },
+        {
+          "title": "C++ std::any_cast",
+          "url": "https://en.cppreference.com/w/cpp/utility/any/any_cast"
+        }
+      ],
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-13T23:02:23.383Z",
+      "outcome": "C",
+      "ratifiedAt": "2026-11-16",
+      "retiredAt": "2026-11-20T11:23:55.413Z"
     }
   ]
 }

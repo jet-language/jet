@@ -35798,6 +35798,247 @@
       "completedAt": "2026-11-17T08:42:43.824Z",
       "questions": [],
       "retiredAt": "2026-11-20T08:42:45.946Z"
+    },
+    {
+      "id": "c07k91t6",
+      "num": 6733,
+      "title": "Acronyms in caps in every file and folder name (Core/Net/TLS.jet, not Tls.jet): one cutover plus a guard",
+      "body": "OWNER HARD REQUIREMENT (2026-11-09): acronyms are all caps in types AND file names, Title Case otherwise (Core/Net/TLS.jet, not Core/Net/Tls.jet). S66 and D-ONCE-CASE1 already require this for type names (E0358) and name the lexicon for file names, but nothing enforces file names. A census of dev (lexicon Compiler/JetFoundation/Data/Syntax/Acronyms.jet) finds 156 distinct file and folder names with a word-cased acronym (642 path hits), e.g. Ast.jet, Cbor.jet, Cli/, Db/, Http/, Tls.jet, CanonicalJson.jet. Greenfield cutover: rename every one and migrate every import, module path mapping, reference, generated artifact and doc in one commit stack; no aliases.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e20",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Every criterion met. c2: the self-host chain's fixed point on dev b7588ea8e5 after the debug-info determinism fix (b5e5c48bba); golden is clean on p260."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c2 chain run on dev aa80e241d2 (export $JET_SCRATCH_ROOT/lanes/Main/chain6733, seed batch compiler p257, admitted by the p258 census receipt): s1, s2 and s3 built rc=0 rows=0 traps=0, about 46 s each. Verdict NOT_FIXED: s2 27d15d5dc24a6a99 != s3 919fe728be450a16. A per-section compare shows only .debug_info differs; .text, .data, .debug_str and .debug_line are byte-identical. The set of structs given member lists, and whether a type name is module-qualified, changes from build to build (thread-order dependent debug type rows in JetIR X64Module ir_x64_debug_types and m.debug_members). The rename itself is not the cause. Fix dispatched to IfHole (deterministic debug info, plus a --threads 1 vs 16 byte-identical test); c2 is met when the chain gives FIXED_POINT."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Open criteria renamed to the cut-over paths: 1595 edits (paths and --filter strings; each filter resolved against the corpus its profile runs: cases .case stems, ui .stderr stems, golden .out IDs), 0 failures, a re-plan shows 0 edits left. Tools/tower stays as it is until c4. Twelve broad filters have no single new filter that selects exactly the same tests; each takes the form that keeps the most and is listed here:\n- #3024 c9: NARROWED entry -> Entry (keeps 203 of 284): no filter keeps its 284 cases IDs (folders form selects 105)\n- #3594 c2: NARROWED process -> process (keeps 75 of 91): no filter keeps its 91 cases IDs (folders form selects 75)\n- #3594 c5: NARROWED pty -> pty (keeps 55 of 67): no filter keeps its 67 cases IDs (folders form selects 55)\n- #5201 c1: NARROWED web -> web (keeps 31 of 32): no filter keeps its 32 ui IDs (folders form selects 31)\n- #6520 c2: NARROWED policy_ -> policy_ (keeps 22 of 29): no filter keeps its 29 ui IDs (folders form selects 22)\n- #6760 c4: NARROWED encoding -> Encoding (keeps 91 of 100): no filter keeps its 100 cases IDs (folders form selects 21)\n- #6846 c1: NARROWED meta_ladder_ -> meta_ladder_ (keeps 7 of 12): no filter keeps its 12 ui IDs (folders form selects 7)\n- #6846 c6: NARROWED generate_ -> Generate (keeps 1 of 1): no filter keeps its 1 ui IDs (folders form selects 0)\n- #6852 c3: NARROWED taint -> Taint (keeps 46 of 48): no filter keeps its 48 ui IDs (folders form selects 11)\n- #6877 c9: NARROWED enum_unknown_ -> enum_unknown_ (keeps 1 of 2): no filter keeps its 2 ui IDs (folders form selects 1)\n- #6925 c9: NARROWED crypto -> Crypto (keeps 40 of 46): no filter keeps its 46 cases IDs (folders form selects 14); NARROWED tls -> tls (keeps 20 of 26): no filter keeps its 26 cases IDs (folders form selects 20)\n- #6925 c10: NARROWED crypto -> Crypto (keeps 40 of 46): no filter keeps its 46 cases IDs (folders form selects 14)"
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Cutover landed on dev: ba783d11b9 (tree a74ed030aa, parent aa8715dacd), built from scripts only (genmap, rewrite, repair, restore, digests, fixups in the Main titlecase lane). Its full ttc run (bridge build rc=0; census check/build/selfcheck/core-bodies/runtime clean) gave golden 4987 PASS / 0 FAIL. Every row that was newly failing in cases, ui and core was rerun alone and passes, once the review digests and the CoreSurfaceLedger fixup were applied: the C-toolchain cases, CoreSurfaceLedger x2, CompiledWorkloads self-check and the AgentWorkloads baseline guard. Gap (c1, c3): the AcronymPathCase guard fails on dev. 3473 names are flagged, nearly all in trees the cutover kept (fixture contents, fixture: roots, test-project insides, AgentWorkloads data, digit-leading names); one PATH_CASE_DATA row is stale; and the c1 proof filter finds 0 tests, because the guard is a separate package. IfHole-6-1 is aligning the guard's kept classes with the cutover's rules, as SUB IfHole-6-1-6733-c1-path-case-guard. c2: the chain fixed point runs on the next batch compiler (p215, built from the cutover). Queued SUBs are being translated by replaying the cutover over the p215 queue (titlecase/replay.sh)."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Cutover scope settled by the first full validation run (census plus ui/golden/cases/core on the bridge build of a 78f4541780 cutover). (1) Folders only, plus acronym casing in PascalCase names (c1, c3). Renaming snake_case corpus files is out: a .jet file's stem is its module name, so renaming it changes program meaning and every snapshot that names the module. (2) Kept names, each listed in the generated exemption table with its reason: the whole state/ and fixture-state/ subtrees (planted as .jet by the test kit); Jetpack/Provider/Batteries/<name> (a version dependency resolves to the battery folder named after its package, jet_cli_first_party_battery); and the contents of fixtures (inside *.fixture/ or a fixtures/<name>/ root; the fixture folder itself is renamed), because a fixture reproduces a project as its users lay it out and its steps, manifests and foreign build files name those paths. (3) The rewrite also covers fixture: line values, bare sibling names with _ - or . in corpus files, a {root}/child segment where the file spells the parent path as a full literal, the sema fuzz kind list, the docs-index link literal, and the byte-order pairs in closed_lists duplicates.tsv. The next validation runs on p214's tip."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Owner 2026-11-15: folder TitleCase done \"as soon as we can reasonably do it\"; exceptions only where another language or tool requires the casing. Main owns the cutover (c1-c3 together, one stack), landed at the precompiled-Core to G6 hand-off so no in-flight agent patch is broken by the renames."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "Owner: 'That is a hard requirement.' Starts after the post-a0_042 held-SUB batch lands, so the renames don't conflict with the held stacks."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A committed guard (a closed-list check beside Tests/Guards/closed_lists) fails on any tracked path whose PascalCase file or folder word spells a lexicon acronym in any other case, and the guard's census over dev is empty (receipt).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 6d616e7873 (guard SUB IfHole-6-1-6733-c1-path-case-guard on cutover ba783d11b9): `jet test Tests/Guards --filter acronym_path_case` -> 4 passed, 0 failed; the census over the cut-over dev tree reports 0 findings (3473 before). Whole package `jet test Tests/Guards` -> 187 passed, 0 failed. Run by Main 2026-11-16 in the dev worktree.",
+          "at": "2026-11-16T13:20:00.716Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Tests/Guards",
+              "--filter",
+              "acronym_path_case"
+            ]
+          }
+        },
+        {
+          "n": 2,
+          "text": "Every in-repository import, module mapping, test, example, golden, generated table and doc reference follows the rename in the same stack; the case, ui and golden suites pass on O0/O1/O2 and the self-host chain reaches its fixed point. Proof: `jet test Compiler --profile cases`, `--profile ui` and `--profile golden` pass on O0, O1 and O2, and the self-host chain reaches its fixed point.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Self-host chain reaches its fixed point on dev b7588ea8e5 (cycle p260, which includes IfHole's debug-info determinism fix b5e5c48bba): `Chain.jet $JET_SCRATCH_ROOT/lanes/Main/chain6733b full`, seed = batch compiler p259, admitted by the p260 census receipt. s1, s2 and s3 BUILT rc=0, FIXED_POINT s2 == s3 (jet e9cb317451f1cbae). The earlier run on aa80e241d2 differed only in .debug_info (s2 27d15d5dc24a6a99 != s3 919fe728be450a16). On batch compiler p260: golden 5056 PASS / 0 FAIL on o0, o1 and o2; cases thread_count_builds_are_byte_identical 1/0. No cases or ui failure of the p260 run names a pre-rename path (tests/, Tools/tower, JetCli, lowercase cases/guards/fixtures); the remaining failures are the steady-state set owned by their own cards.",
+          "at": "2026-11-17T11:21:31.944Z"
+        },
+        {
+          "n": 3,
+          "text": "OWNER 2026-11-09, restated 2026-11-15 (\"as soon as we can reasonably do it\"): every folder in the repository is TitleCase with acronyms in capitals, top level included: tests/ becomes Tests/ and every lowercase folder under it (cases, guards, fixtures, ui, ...) and elsewhere follows. The ONLY exceptions are names another language or tool REQUIRES (for example .git, and Tower or Rust/node files where their tool fixes the casing), each listed in the guard with the code or tool rule that requires it. The AGENTS.md line 'tests/ keeps its lowercase name' is replaced in the same cutover, and the guard from c1 also refuses lowercase folders. Scheduled ahead of the goal chain by owner order: Main writes the rename codemod now and lands the whole cutover as one stack at the first point with no agent patch in flight (the precompiled-Core to G6 hand-off). Proof: the c1 guard also refuses lowercase folders, and `git ls-files` lists no lowercase folder outside the named exceptions.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev ba783d11b9 + 6d616e7873: every folder is TitleCase with capital acronyms (tests/ -> Tests/ and every folder under it). The c1 guard refuses lowercase folders: its planted self-test refuses exactly Core/Net/Tls.jet and Tests/cases, and its census over every tracked path (git ls-files) is 0, so no lowercase folder remains outside the named kept rows, each with the tool rule that requires it. AGENTS.md no longer says tests/ keeps its lowercase name; it states the TitleCase rule and names the guard. Proof run: `jet test Tests/Guards --filter acronym_path_case` -> 4 passed, 0 failed.",
+          "at": "2026-11-16T13:20:02.312Z"
+        },
+        {
+          "n": 4,
+          "text": "Tools/tower becomes Tools/Tower in its own step: the board directory moves with it on master (Tools/Tower/.tower), every tower command and doc follows in one cutover, and the owner-run tower serve is restarted on the new path, so no board write is lost. Until then, the path-case guard keeps Tools/tower as a kept tree with that reason. Proof: the guard passes with PATH_CASE_KEPT_TREES empty, and `node Tools/Tower/tower.mjs state` reads the board.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 1a5c040b76 moves Tools/tower to Tools/Tower (App, App/UI, Test, Test/Fixtures, Held and Examples inside it), and every import, path, command, skill, doc, gate and fixture follows. The path-case guard's PATH_CASE_KEPT_TREES is empty, and only Tools/Tower/skills keeps its name (a plugin-layout row). dev 4eb966c078 fixes the CLI contract test's buffer. Master 98f12dd38f (promote of p257, tip 7d9dd2696d) carries the board at Tools/Tower/.tower; the untracked backups and secrets moved with it. tower serve was stopped, the board committed (2a8f5084e0), and serve restarted on Tools/Tower: data Tools/Tower/.tower/tower.json, HTTP 200 on 7878. Proof on the p257 compiler: jet test Tests/Guards --filter acronym_path_case gives 4 passed, 0 failed. node Tools/Tower/tower.mjs state reads the board at rev 111772. The Tools/Tower node tests show no new failure against the pre-move base.",
+          "at": "2026-11-17T10:00:00.589Z"
+        },
+        {
+          "n": 5,
+          "text": "No UI snapshot ledger spells a pre-cutover path: the 3 UISnapshots tests whose ledgers still name tests/ui/ pass. Proof: `jet test Compiler/JetTestKit/Tests/UISnapshots.jet` reports 0 failed.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 03c86eb8b4: the kit tests' ledgers and retired-with-Rust table spell Tests/UI and Tests/Cases IDs, and the check_core test inserts a member with its comma. On the p255 batch compiler, jet test Compiler/JetTestKit/Tests/UISnapshots.jet gives 258 passed, 0 failed, and so does jet test Compiler/JetTestKit/Tests/CasesSuite.jet. Run by Main.",
+          "at": "2026-11-17T09:09:42.554Z"
+        },
+        {
+          "n": 6,
+          "text": "Each diagnostic page in Docs/Site/Dist/e cites a worked example chosen by a rule that does not depend on folder-name case: after the TitleCase rename, DiagnosticRows' first-by-name rule moved pages such as E0003's from a dedicated snapshot to an unrelated C FFI one. Proof: `jet Tools/Agent/DiagnosticRows.jet --check` exits 0 and Docs/Site/Dist/e/E0003/index.html cites Tests/UI/bare_error_mark_is_not_a_contract.stderr.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 11c79b14f8: DiagnosticRows walks the snapshot corpora with names compared case-folded, then by bytes (folded_name_order, with a test), so folder casing never decides a page's example. jet Tools/Agent/DiagnosticRows.jet --check exits 0 (1111 copies match) and Docs/Site/Dist/e/E0003/index.html cites Tests/UI/bare_error_mark_is_not_a_contract.stderr; jet test Tools/Agent/DiagnosticRows.jet 23 passed. Run by Main on the p254 batch compiler.",
+          "at": "2026-11-17T09:06:14.441Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T15:56:40.028Z",
+      "updated": "2026-11-17T11:21:34.194Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 6,
+      "completedAt": "2026-11-17T11:21:34.194Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T11:23:55.412Z"
+    },
+    {
+      "id": "c0reo0hk",
+      "num": 6833,
+      "title": "A dynamically typed value (any) and explicit Any construction (D-PRIM-ANY1)",
+      "body": "Split out of #5021 (Jai parity, G6) by owner order 2026-11-13: the dynamically typed value is its own card and belongs to no goal. D-PRIM-ANY1 asks whether hiding an arbitrary concrete type requires explicit Any construction. The owner has paused that ballot; this card waits on it.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e18",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Every criterion met. c3 closed by dev dfda44db91, proved on batch compiler p260."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-PRIM-ANY1 is ratified by the owner (the ballot is owner-paused). Proof: `timeout 120 node Tools/tower/tower.mjs decision show D-PRIM-ANY1` shows it ratified.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tower decision show D-PRIM-ANY1: status ratified, outcome C.",
+          "at": "2026-11-17T04:25:00.489Z",
+          "closure": "decision"
+        },
+        {
+          "n": 2,
+          "text": "If adopted: the any value has its registry row, an executable example with golden output on every tier, and a UI snapshot for its misuse diagnostic. If refused: the spec lists it with its reason and the Jet mechanism that covers the use case. Proof: `jet test Compiler --profile golden --filter Prim/Any` on every tier and `jet test Compiler --profile ui --filter Prim/any`, or the spec row with its reason.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 890feb6258: Docs/Spec/spec.md 'Deliberately absent' lists `any` with its reason and the covering mechanism (union or opted-in trait, compile-time type arms, reflect.of); syntax-decisions.md records D-PRIM-ANY1=C (option C keeps the no-top-type wall).",
+          "at": "2026-11-17T05:18:33.641Z"
+        },
+        {
+          "n": 3,
+          "text": "Under D-PRIM-ANY1=C (no Any value; type arms over unions and trait values): member arms accept generic arguments (.Pair<Int, String>(p); today E0003). A value whose type has no arm spelling ([Int], Int?, function types) reaches else. A trait value holding a view of a local, returned from its function, fails with the provenance diagnostic. Proof: cases rows plus a UI snapshot for the escape (found by the 2026-11-15 D-PRIM-ANY1 adversarial review on p201; probe in $JET_SCRATCH_ROOT/lanes/GoalsA-1-4/any-review, g6, q1). The same spelling holds over union and trait-value subjects. It separates two instances of one generic: over Box<Int> | Box<String>, the arms are .Box<Int>(b) and .Box<String>(b) (qualified: .geo.Box<Int>(b)). The bare .Box(b) is E0305 'names more than one member' and offers both arms, and a table of both arms needs no else (review 9 probes f01-f01d). Over a union with one instance of a generic, Int \\| Box<Int>, the bare .Box(b) names that instance, whether Box is local or imported when no other member has that leaf; today both are E0305 'doesn't belong' (v05; k04 in $JET_SCRATCH_ROOT/lanes/AnyReview10/probes/fm). Over a trait value a generic arm always spells its arguments. In an arm, .Name< opens type arguments; as an expression it would be a direction-changing chain, E0333 (t04).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev dfda44db91 (DeclTypes-6-1-6833-c3-trait-bare-generic-arm, cycle p260) on top of the earlier union and trait-arm work. On batch compiler p260 (dev b7588ea8e5): cases trait_value_type_arms 1/0 (.Box<Int>(b) and .Box<String>(b) separate two instances held by trait values; Box<Bool> reaches else, on default, -O0 and -O2), union_arms_spell_type_arguments 1/0, union_arms_name_the_type_in_type_position 1/0; ui UnionArmNamesTwoInstances 1/0, TraitArmNamesBareGeneric 1/0 (bare .Box(b) over a trait value is E0305), returned_trait_value_view_cannot_outlive_local_owner 1/0 (the provenance diagnostic for the escape).",
+          "at": "2026-11-17T11:19:03.542Z"
+        },
+        {
+          "n": 4,
+          "text": "If D-PRIM-ANY1 adopts E: the extended member test (a .Type(x) arm read over an Any subject) has a registered diagnostic, with what/why/fix and a UI snapshot, for an arm naming a type that cannot be a member (an enum case in case position, an unknown type, or a type the arm spelling cannot name), following the resolution rule in the ballot: on an enum .X is a case (E0305), on a union a member type or named case, on an Any any type in scope. Proof: jet test Compiler --profile ui --filter any_member_arm.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "D-PRIM-ANY1 was ratified C, not E; the option-E diagnostic is not built. Option C's arm rule is c5.",
+          "at": "2026-11-17T04:25:02.905Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 5,
+          "text": "If D-PRIM-ANY1 adopts C: a bare arm over a union or a trait value names the type its name names in type position. Over a union only, a name that names no type there names the union's one member with that leaf. Every member has an arm, so a package's own Point is .Point(p) beside geo2.Point. Where Point names a type in scope, .Point(p) names it throughout the file; where it names none, each union's arm names its own member (k01). o7's fallback still works, and v03, whose arm binds geo.Point today, becomes E0305. The E0641 exemption for same-leaf members (Sema/Coverage.jet's same-name skip) is removed, so an else over a later-added member is E0641 (a04b). E0307's fix names each member's arm (f06, with #6839 c52). Proof: cases rows for o7, k01, the package's own member's arm and the generic arms; UI snapshots for v03 (E0305), a04b (E0641) and f05; probes are in $JET_SCRATCH_ROOT/lanes/AnyReview9/probes, lanes/AnyReview10/probes/fm and lanes/AnyBallot/probes/fm. Over boxes.Box<Int> | kit.Box (both imported, no Box in scope) the bare .Box(b) is E0305 naming .boxes.Box<Int>(b) and .kit.Box(b); today it binds kit.Box, and E0641 offers .M_Box_Int_ (D-PRIM-ANY1 review 11, probes fm/m31 and fm/m31b). Proof: a UI snapshot of the E0305.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "On the p254 batch compiler (acc7351dae, trait-arms-fix.r2 71586a086f): cases union_arms_name_the_type_in_type_position (steps fallback = o7, per_union = k01, own/own_o0/own_o2 = the package's own member's arm, generic/local_generic = generic arms) PASS, trait_value_type_arms PASS, union_arms_spell_type_arguments PASS; ui UnionArmNamesLocalType (v03 E0305), UnionElseOverOwnMember (a04b E0641), UnionQualifiedArmBesideOwnMember (f05), UnionArmNamesGenericAndPlain (m31 boxes.Box<Int>|kit.Box E0305), UnionArmNamesTwoMembers, UnionMissingSameLeafMembers all PASS.",
+          "at": "2026-11-17T08:55:08.079Z"
+        },
+        {
+          "n": 6,
+          "text": "`err.as<T>()` recovers a typed failure from an Err carrier as `T?`, using the typed identity recorded at conversion (D-ERR-TRAIT1=A). Proof: `jet test Compiler --profile golden --filter ErrorsAndEffects/Failures/ErrAs` on o0, o1 and o2. (moved from #3838 c9 by owner order 2026-11-16: the Any work must not block G6)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 01c4dab0b2 (typed identity recorded at conversion, payload node handed to jet_err_apply_conversion) + c171cc3e6f (err.as<T>()): jet test Compiler --profile golden --filter ErrorsAndEffects/Failures/ErrAs PASS n=3 (o0, o1, o2) on the p252 batch compiler (c171cc3e6f); all 200 ErrorsAndEffects goldens pass.",
+          "at": "2026-11-17T07:54:14.583Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "owner-paused",
+        "types"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-13T23:01:38.012Z",
+      "updated": "2026-11-17T11:19:06.831Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 6,
+      "completedAt": "2026-11-17T11:19:06.830Z",
+      "questions": [
+        {
+          "id": "q2mon6f4",
+          "cardId": "c0reo0hk",
+          "decisionId": "D-PRIM-ANY1",
+          "by": "owner",
+          "kind": "question",
+          "text": "i dont really think i understand what this is or how it works in practice with the recommended option. please make it easier to understand & give a better example",
+          "status": "answered",
+          "answer": "Rewritten around a real job instead of 14, \"hi\" and a Point. Plainly: sometimes one list must hold values of different types, and log fields are the everyday case. log.info(\"saved\", 14, \"notes.txt\", 120ms) carries an Int, a text and a Duration. In Jet those types opt into a shared trait (Field), and printing each field already works. The missing piece is asking one field \"are you a Duration?\" and using it as one, say to print it as milliseconds. The recommendation, C, writes that question the way Jet already matches enum cases: inside loop f in fields, the table if f == { .Duration(d) -> print(\"took {d.ns / 1000000} ms\")  else -> print(f) }. .Duration(d) means \"if f is a Duration, call it d\". It is checked when compiling: .Bool(b) is an error, because Bool never opted into Field, and the table needs else. In practice: you write the trait and one empty impl line per type once, then use ordinary arms wherever you need a type back. The other options: E adds Any (no opt-in lines, but a wrong question is found only when the program runs), and B gives the trait one method per type you want back (works today, but a library's users cannot add methods).",
+          "created": "2026-11-16T13:15:14.654Z",
+          "answeredAt": "2026-11-16",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-20T11:23:55.412Z"
     }
   ]
 }
