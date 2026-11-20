@@ -469,6 +469,159 @@
     wireEndpointHit.push({ x: to.x - r, y: to.y - r, w: r * 2, h: r * 2, cx: to.x, cy: to.y, wire, endpoint: "to", pin: to.pin, other: from.pin });
   }
 
+  // Whether the overlay shows a live stop: a running session paused in the
+  // program, not a finished or disconnected one.
+  function debugStopIsLive() {
+    return !!(debugSessionId && debugConnectionState === "live" && debugOverlay && debugOverlay.debug_overlay === "running" && debugOverlay.runtime_state === "live");
+  }
+
+  // The local each output pin of the stopped graph carries at a live stop,
+  // matched to the stop's locals by name: a parameter; a binding made
+  // before the stop's line that is its name's only write; a read on the
+  // stop's line, or before it of a local written at most once. A pin an
+  // earlier write of a reassigned or shadowed name fed carries nothing,
+  // since the program may have changed that local since.
+  function debugPinValues(graph) {
+    const values = new Map();
+    if (!debugStopIsLive() || graph.graph_id !== debugOverlay.active_graph_id || !debugOverlay.active_span) return values;
+    const locals = new Map((debugOverlay.locals || []).map((local) => [local.name, local]));
+    const writes = new Map();
+    for (const node of graph.nodes) {
+      const name = node.kind === "binding" ? node.title : node.kind === "assign" ? String(node.title || "").split(" ")[0] : "";
+      if (name) writes.set(name, (writes.get(name) || 0) + 1);
+    }
+    const nodes = new Map(graph.nodes.map((node) => [node.node_id, node]));
+    const stop = debugOverlay.active_span;
+    for (const pin of graph.pins || []) {
+      const node = nodes.get(pin.node_id);
+      const local = locals.get(pin.name);
+      if (pin.direction !== "output" || isExecPin(pin) || !node || !node.source_span || !local) continue;
+      const start = node.source_span.start;
+      const writers = writes.get(pin.name) || 0;
+      const carries = node.kind === "entry"
+        ? writers === 0
+        : node.kind === "binding"
+          ? writers === 1 && start < stop.start
+          : node.kind === "variable_get" && ((start >= stop.start && start < stop.end) || (writers <= 1 && start < stop.start));
+      if (carries) values.set(pin.pin_id, local);
+    }
+    return values;
+  }
+
+  // The stop's values on the graph: a chip by each output pin that carries
+  // one and on each data wire leaving it. Answers what was drawn.
+  function drawDebugValues(graph, values) {
+    const shown = { pins: [], wires: [] };
+    if (!values.size) return shown;
+    for (const wire of graph.wires || []) {
+      const local = values.get(wire.from_pin);
+      const from = pinPoints.get(wire.from_pin);
+      const to = pinPoints.get(wire.to_pin);
+      if (wire.wire_kind === "control" || !local || !from || !to) continue;
+      const at = bezierPoint(from, to, .35);
+      drawDebugValueChip(local.value, at.x, at.y, true);
+      shown.wires.push({ wire_id: wire.wire_id, from_pin: wire.from_pin, name: local.name, value: local.value });
+    }
+    for (const [pinId, local] of values) {
+      const point = pinPoints.get(pinId);
+      if (!point) continue;
+      drawDebugValueChip(local.value, point.x + 10 * view.zoom, point.y - 16 * view.zoom, false);
+      shown.pins.push({ pin_id: pinId, name: local.name, value: local.value });
+    }
+    return shown;
+  }
+
+  function drawDebugValueChip(value, x, y, centered) {
+    const label = clipText(value, 24);
+    ctx.font = `${Math.max(9, 10.5 * view.zoom)}px ${MONO_FONT}`;
+    const padX = 6 * view.zoom;
+    const w = ctx.measureText(label).width + padX * 2;
+    const h = 18 * view.zoom;
+    const left = centered ? x - w / 2 : x;
+    roundRect(left, y - h / 2, w, h, 5 * view.zoom);
+    ctx.fillStyle = "rgba(66,52,6,.94)";
+    ctx.fill();
+    ctx.strokeStyle = "#facc15";
+    ctx.lineWidth = Math.max(.8, view.zoom);
+    ctx.stroke();
+    ctx.fillStyle = "#fef9c3";
+    ctx.textAlign = "left";
+    ctx.fillText(label, left + padX, y + 3.5 * view.zoom);
+  }
+
+  // The exec pulse: a dash running along the wires the paused run took and a
+  // ring breathing around its node, on a layer over the graph so the graph
+  // is drawn again only when it changes. Only a live stop pulses, and under
+  // prefers-reduced-motion the pulse holds still.
+  function syncDebugPulse() {
+    if (debugPulse.handle) cancelAnimationFrame(debugPulse.handle);
+    debugPulse.handle = 0;
+    drawDebugPulse(performance.now());
+  }
+
+  function drawDebugPulse(time) {
+    debugPulse.handle = 0;
+    const pulsing = debugPulse.wires.length > 0 || !!debugPulse.node;
+    if (!debugPulse.layer && pulsing) {
+      const created = document.createElement("canvas");
+      created.id = "debug-pulse-layer";
+      created.setAttribute("aria-hidden", "true");
+      created.style.position = "absolute";
+      created.style.pointerEvents = "none";
+      canvas.insertAdjacentElement("afterend", created);
+      debugPulse.layer = created;
+    }
+    const layer = debugPulse.layer;
+    const moving = pulsing && !(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    if (layer) {
+      const dpr = window.devicePixelRatio || 1;
+      const width = canvas.clientWidth;
+      const height = canvas.clientHeight;
+      layer.style.display = pulsing ? "" : "none";
+      layer.style.left = canvas.offsetLeft + "px";
+      layer.style.top = canvas.offsetTop + "px";
+      layer.style.width = width + "px";
+      layer.style.height = height + "px";
+      if (layer.width !== Math.floor(width * dpr)) layer.width = Math.floor(width * dpr);
+      if (layer.height !== Math.floor(height * dpr)) layer.height = Math.floor(height * dpr);
+      const pulse = layer.getContext("2d");
+      pulse.setTransform(dpr, 0, 0, dpr, 0, 0);
+      pulse.clearRect(0, 0, width, height);
+      const phase = moving ? time / 1000 : 0;
+      pulse.lineCap = "round";
+      for (const wire of debugPulse.wires) {
+        const controls = bezierControls(wire.from, wire.to);
+        pulse.beginPath();
+        pulse.moveTo(wire.from.x, wire.from.y);
+        pulse.bezierCurveTo(controls.c1.x, controls.c1.y, controls.c2.x, controls.c2.y, wire.to.x, wire.to.y);
+        pulse.setLineDash([8 * view.zoom, 18 * view.zoom]);
+        pulse.lineDashOffset = -phase * 60 * view.zoom;
+        pulse.strokeStyle = "#fffbe6";
+        pulse.lineWidth = Math.max(2, 2.6 * view.zoom);
+        pulse.stroke();
+      }
+      if (debugPulse.node) {
+        const node = debugPulse.node;
+        const breath = moving ? (1 + Math.sin(phase * 4)) / 2 : .5;
+        const grow = 3 + breath * 6 * view.zoom;
+        pulse.setLineDash([]);
+        pulse.beginPath();
+        pulse.roundRect(node.x - grow, node.y - grow, node.w + grow * 2, node.h + grow * 2, 12 * view.zoom);
+        pulse.strokeStyle = `rgba(250,204,21,${(.25 + .5 * breath).toFixed(3)})`;
+        pulse.lineWidth = Math.max(1.5, 2 * view.zoom);
+        pulse.stroke();
+      }
+    }
+    if (pulsing) debugPulse.frames++;
+    window.__jetCanvasDebugPulse = {
+      wire_ids: debugPulse.wires.map((wire) => wire.wire_id),
+      node_id: debugPulse.node ? debugPulse.node.node_id : "",
+      frames: debugPulse.frames,
+      moving
+    };
+    if (moving) debugPulse.handle = requestAnimationFrame(drawDebugPulse);
+  }
+
   function hitWireEndpointAt(x, y) {
     let best = null;
     let bestDistance = Infinity;
@@ -582,7 +735,7 @@
       return;
     }
     const selected = selectedNodeIds.has(node.node_id);
-    const active = debugSessionId && debugConnectionState === "live" && debugOverlay && debugOverlay.debug_overlay === "running" && debugOverlay.runtime_state === "live" && debugOverlay.active_node_id === node.node_id;
+    const active = debugStopIsLive() && debugOverlay.active_node_id === node.node_id;
     const searchHit = (searchState.spans || []).some((span) => spansOverlap(node.source_span, span));
     const diagnostics = nodeDiagnostics(node);
     const breakpoint = nodeBreakpoint(node);
@@ -800,16 +953,17 @@
     if (document.getElementById("execute-command-authority")) return;
     const source = doc.source_text || "";
     const reprojected = lastDrawnSource !== null && lastDrawnSource !== source;
-    const previousDebugSession = debugSessionSnapshot();
     lastDrawnSource = source;
     latestDoc = doc;
-    if (debugOverlay && (
+    // Every session ran one revision of one source: another one makes them
+    // all stale.
+    if ((debugOverlay && (
       debugOverlay.revision !== doc.revision
       || debugOverlay.source_id !== currentCanvasSourceId()
       || (debugOverlay.runtime_state === "live" && !debugSessionId)
-    )) {
+    )) || debugSessions.some((session) => session.revision !== doc.revision)) {
       debugRequestGeneration++;
-      releaseDebugSession(previousDebugSession);
+      releaseDebugSessions();
       clearDebugClientState("stale");
     }
     loadDebugState(doc);
@@ -849,6 +1003,9 @@
         graphOverview.innerHTML = '<div class="details-empty"><b>No graph yet</b><span>Add a function such as <code>run: fn()</code> in Code or Split view.</span></div>';
       }
       syncWireStatus(null);
+      debugPulse.wires = [];
+      debugPulse.node = null;
+      syncDebugPulse();
       window.__jetCanvasTest = Object.assign({}, window.__jetCanvasTest || {}, {
         hitMap: window.__jetCanvasHitMap,
         nodeBounds: window.__jetCanvasNodeBounds,
@@ -929,15 +1086,18 @@
       drawNode(graph, node, inlineByNode);
     }
 
+    const pinValues = debugPinValues(graph);
+    debugPulse.wires = [];
     for (const wire of graph.wires) {
       const from = pinPoints.get(wire.from_pin);
       const to = pinPoints.get(wire.to_pin);
       if (!from || !to) continue;
       if (!visibleIds.has(from.pin.node_id) && !visibleIds.has(to.pin.node_id)) continue;
-      const activeWire = debugSessionId && debugConnectionState === "live" && debugOverlay && debugOverlay.debug_overlay === "running" && debugOverlay.runtime_state === "live" && ((debugOverlay.wire_path || []).includes(wire.wire_id) || debugOverlay.active_wire_id === wire.wire_id);
+      const activeWire = debugStopIsLive() && ((debugOverlay.wire_path || []).includes(wire.wire_id) || debugOverlay.active_wire_id === wire.wire_id);
       const selectedWire = selectedNodeIds.has(from.pin.node_id) || selectedNodeIds.has(to.pin.node_id);
       rememberWireEndpoint(wire, from, to);
       drawWire(wire, from, to, activeWire, selectedWire);
+      if (activeWire) debugPulse.wires.push({ wire_id: wire.wire_id, from: { x: from.x, y: from.y }, to: { x: to.x, y: to.y } });
       if (detailToggles.types && (activeWire || selectedWire || view.zoom >= 1.05)) drawWireTypeBadge(wire, from, to);
     }
 
@@ -948,6 +1108,11 @@
     for (const node of visibleNodes) {
       drawNode(graph, node, inlineByNode, false);
     }
+
+    const shownValues = drawDebugValues(graph, pinValues);
+    const pulseNode = debugStopIsLive() ? hit.find((h) => h.node.node_id === debugOverlay.active_node_id) : null;
+    debugPulse.node = pulseNode ? { node_id: pulseNode.node.node_id, x: pulseNode.x, y: pulseNode.y, w: pulseNode.w, h: pulseNode.h } : null;
+    syncDebugPulse();
 
     if (drag && drag.mode === "pin") {
       drawCompatibleDropTargets(graph, drag.pin, drag);
@@ -1090,6 +1255,8 @@
       debugSession: debugSessionInfo,
       debugSessionId,
       debugOverlay,
+      debugSessions: debugSessions.map((session) => ({ id: session.id, tier: session.tier, revision: session.revision })),
+      debugValues: shownValues,
       debugState: window.__jetCanvasDebugState || null,
       debugLiveness: debugLiveness && debugLiveness.textContent || "",
       execConvergencePreview: window.__jetCanvasExecConvergencePreview || null,

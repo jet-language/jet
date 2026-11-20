@@ -112,6 +112,12 @@
   let debugOverlay = null;
   let debugSessionId = null;
   let debugSessionInfo = null;
+  // Every session this page holds open, in the order they opened: the
+  // selector lists them, and debugSessionId is the one the overlay shows.
+  let debugSessions = [];
+  // The exec pulse over the paused stop: the wires the run took and its node,
+  // in canvas coordinates, on a layer of its own over the graph.
+  let debugPulse = { wires: [], node: null, layer: null, handle: 0, frames: 0 };
   let debugConnectionState = "idle";
   let debugRequestGeneration = 0;
   let debugState = { breakpoints: [], watches: [], staleBreakpoints: [] };

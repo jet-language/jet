@@ -924,14 +924,15 @@
   debugNext.addEventListener("click", () => runDebug(["n"]));
   debugContinue.addEventListener("click", () => runDebug(["c"]));
   debugStop.addEventListener("click", stopDebug);
+  debugSession.addEventListener("change", () => selectDebugSession(debugSession.value));
   debugBreak.addEventListener("click", () => {
     const graph = latestDoc ? currentGraph(latestDoc) : null;
     const node = graph ? graph.nodes.find((n) => n.node_id === selectedNodeId) : null;
     if (node) toggleBreakpoint(node);
   });
   debugWatch.addEventListener("click", () => {
-    const name = window.prompt("Watch local", "");
-    addWatch(name && name.trim());
+    const graph = latestDoc ? currentGraph(latestDoc) : null;
+    watchNode(graph ? graph.nodes.find((n) => n.node_id === selectedNodeId) : null);
   });
   canvasSearch.addEventListener("input", runCanvasSearch);
   window.addEventListener("hashchange", applySourceHash);

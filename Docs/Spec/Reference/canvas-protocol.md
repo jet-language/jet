@@ -358,6 +358,20 @@ The overlay's `source` carries the stopped source around the active line:
 stack, locals, watches and the console transcript from one answer without a
 second request.
 
+The page keeps every session it opened. Its session selector lists them,
+each with its engine (`jet dev O0` for `native`, `compiled run replay` for
+`native-recorded`, `compiled run dump` for `native-dump`), which the liveness
+chip and the Debug view name too; Run in the Debug view opens one more
+session, and stopping the shown session shows the newest one left. At a live
+stop the page draws each local's value on the output pins of the stopped graph
+that carry it, and on the data wires leaving them: a parameter never written,
+a binding before the stop that is its name's only write, and a read on the
+stop's line or, of a local written at most once, before it. A pin fed by an
+earlier write of a name written again shows nothing. A pulse runs along the
+`wire_path` wires and around the active node at a live stop only, and holds
+still under reduced motion. A watch added from a node is kept with the node's
+source span and the revision it was drawn on, and sent as `name@REVISION`.
+
 ## Profile
 
 `POST /__jet_canvas/profile`, `POST /canvas/profile`, and `/panel/profile`

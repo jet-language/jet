@@ -388,7 +388,7 @@
       row.className = "pin-row";
       appendText(row, "b", "", item && item.name || "frame");
       if (item && item.type) appendText(row, "code", "tag", item.type);
-      appendText(row, "span", "tag", item && item.value !== undefined ? item.value : String(item));
+      appendText(row, "span", "tag", item && item.value !== undefined ? item.value : item && item.state === "stale" ? "stale: source changed" : String(item));
       fragment.appendChild(row);
     }
     return fragment;
@@ -1743,7 +1743,7 @@
     const toggle = document.getElementById("debug-toggle-break");
     if (toggle) toggle.addEventListener("click", () => toggleBreakpoint(node));
     const watch = document.getElementById("debug-add-watch");
-    if (watch) watch.addEventListener("click", () => addWatch((window.prompt("Watch local", node.title) || "").trim()));
+    if (watch) watch.addEventListener("click", () => watchNode(node));
     details.querySelectorAll("[data-region-delete]").forEach((button) => button.addEventListener("click", () => {
       const id = button.getAttribute("data-region-delete");
       postTransaction({ schema_version: 1, op: "delete_comment_region", revision: latestDoc.revision, region_id: id });

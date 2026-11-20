@@ -1632,7 +1632,7 @@
     const storedWatches = Array.isArray(debugState.watches) ? debugState.watches : [];
     debugState.breakpoints = storedBreakpoints.filter((b) => b && typeof b === "object").slice(0, 128);
     debugState.staleBreakpoints = debugState.breakpoints.filter((b) => b.revision !== doc.revision);
-    debugState.watches = storedWatches.filter((watch) => typeof watch === "string" && watch.trim()).slice(0, 32);
+    debugState.watches = storedWatches.filter((watch) => watch && typeof watch === "object" && typeof watch.name === "string" && watch.name.trim()).slice(0, 32);
     const discarded = storedBreakpoints.length > debugState.breakpoints.length || storedWatches.length > debugState.watches.length;
     if (discarded && (!previous || previous.revision !== doc.revision)) {
       showToast("Debug state was bounded; source was kept", { isError: true });
@@ -1682,18 +1682,32 @@
     drawGraph(latestDoc);
   }
 
-  function addWatch(name) {
+  // A watch, anchored like a breakpoint: to the revision it was drawn on and
+  // the source span it was drawn from (a node's, or the stop's), so an edit
+  // makes it stale instead of moving it. One watch per name and revision.
+  function addWatch(name, span = null) {
     if (!latestDoc || !name) return;
     loadDebugState(latestDoc);
-    if (!debugState.watches.includes(name)) {
+    if (!debugState.watches.some((watch) => watch.name === name && watch.revision === latestDoc.revision)) {
       if (debugState.watches.length >= 32) {
         showToast("Watch limit reached; source was kept", { isError: true });
         return;
       }
-      debugState.watches.push(name);
+      debugState.watches.push({ name, anchor: spanAnchor(span), source_span: span, revision: latestDoc.revision });
     }
     saveDebugState();
     showToast("Watch added: " + name);
+    if (debugSessionId) runDebug([]);
+    else renderDebugView();
+  }
+
+  // Watch the local `node` names, anchored to its span: a binding or a read
+  // names its local; any other node asks which local to watch.
+  function watchNode(node) {
+    if (!node) return;
+    const named = node.kind === "binding" || node.kind === "variable_get";
+    const name = named ? node.title : (window.prompt("Watch local", node.title || "") || "").trim();
+    addWatch(name, node.source_span || null);
   }
 
   function debugSessionSnapshot(id = debugSessionId, info = debugSessionInfo, doc = latestDoc) {
@@ -1732,6 +1746,7 @@
       revision: persisted.revision || latestDoc.revision
     };
     debugConnectionState = "connecting";
+    rememberDebugSession(debugSessionInfo);
     syncDebugSessionPicker();
     runDebug([]);
   }
@@ -1752,7 +1767,31 @@
       });
   }
 
+  // Ends every session the page holds: they all ran the revision an edit
+  // or a source switch left behind.
+  function releaseDebugSessions() {
+    for (const session of debugSessions) {
+      releaseDebugSession({ id: session.id, revision: session.revision, sourceId: session.source_id, tier: session.tier });
+    }
+    debugSessions = [];
+  }
+
+  // Keep the page's list of sessions in step with an answer about one: a
+  // running session is listed (in place, when known), any other dropped.
+  function rememberDebugSession(session) {
+    if (!session || !session.id) return;
+    const at = debugSessions.findIndex((known) => known.id === session.id);
+    if (session.state !== "running") {
+      if (at >= 0) debugSessions.splice(at, 1);
+    } else if (at >= 0) {
+      debugSessions[at] = session;
+    } else {
+      debugSessions.push(session);
+    }
+  }
+
   function clearDebugClientState(state = "idle") {
+    if (debugSessionId) debugSessions = debugSessions.filter((session) => session.id !== debugSessionId);
     debugSessionId = null;
     debugSessionInfo = null;
     debugOverlay = null;
@@ -1760,6 +1799,14 @@
     syncDebugSessionPicker();
     syncDebugActive();
     renderDebugView();
+  }
+
+  // The engine a session runs on, as the selector, the liveness chip and the
+  // Debug view name it: `jet dev`'s O0 build of the entry, or a compiled
+  // run's recording or dump.
+  function debugEngineLabel(tier) {
+    const labels = { native: "jet dev O0", "native-recorded": "compiled run replay", "native-dump": "compiled run dump" };
+    return labels[tier] || tier || "";
   }
 
   function syncDebugLiveness() {
@@ -1777,22 +1824,50 @@
     const suffix = staleCount && debugConnectionState !== "live" && debugConnectionState !== "connecting"
       ? " · " + staleCount + " stale anchor" + (staleCount === 1 ? "" : "s")
       : "";
-    debugLiveness.textContent = (labels[debugConnectionState] || labels.idle) + suffix;
+    const engine = debugSessionInfo ? debugEngineLabel(debugSessionInfo.tier) : "";
+    debugLiveness.textContent = (labels[debugConnectionState] || labels.idle) + (engine ? " · " + engine : "") + suffix;
     debugLiveness.dataset.state = debugConnectionState;
   }
 
   function syncDebugSessionPicker() {
     if (debugSession) {
       debugSession.innerHTML = "";
-      const option = document.createElement("option");
-      option.value = debugSessionId || "none";
-      option.textContent = debugSessionInfo && debugSessionInfo.state === "running"
-        ? "Canvas · " + (debugSessionInfo.tier || "live session")
-        : "No live session";
-      debugSession.appendChild(option);
-      debugSession.disabled = !debugSessionId;
+      if (!debugSessionId) {
+        const option = document.createElement("option");
+        option.value = "none";
+        option.textContent = debugSessions.length ? "Pick a session" : "No live session";
+        debugSession.appendChild(option);
+      }
+      for (const session of debugSessions) {
+        const option = document.createElement("option");
+        option.value = session.id;
+        option.textContent = session.id + " · " + debugEngineLabel(session.tier);
+        debugSession.appendChild(option);
+      }
+      debugSession.value = debugSessionId || "none";
+      debugSession.disabled = !debugSessions.length;
     }
     syncDebugLiveness();
+  }
+
+  // Show session `id` of the ones the page holds, reading its stop afresh.
+  function selectDebugSession(id) {
+    const session = debugSessions.find((known) => known.id === id);
+    if (!session || session.id === debugSessionId) return;
+    debugSessionId = session.id;
+    debugSessionInfo = session;
+    debugOverlay = null;
+    runDebug([]);
+  }
+
+  // Open a new session beside the ones already open, on the tier `open`
+  // names ({ tier, recording } or { tier, dump }), else `native`; the
+  // selector switches between them.
+  function openDebugSession(open = null) {
+    debugSessionId = null;
+    debugSessionInfo = null;
+    debugOverlay = null;
+    runDebug([], open);
   }
 
   // Run `commands` in the session shown, or open a new one: on the tier
@@ -1815,7 +1890,8 @@
       // reports one from another revision stale instead of placing it.
       breakpoint_spans: (debugState.breakpoints || [])
         .map((b) => b.anchor + "@" + b.revision),
-      watches: debugState.watches || []
+      // Each watch names the revision it was drawn on, like a breakpoint.
+      watches: (debugState.watches || []).map((watch) => watch.name + "@" + watch.revision)
     };
     if (requestedSourceId) body.source_id = requestedSourceId;
     if (requestedSession) {
@@ -1829,8 +1905,13 @@
     fetch(debugUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
       .then((r) => r.json().then((j) => ({ ok: r.ok, json: canvasPayload(j) })))
       .then((result) => {
+        // A superseded answer: a session the page still holds (another one
+        // was picked while this answer was on its way) stays open; any other
+        // is ended.
         if (requestGeneration !== debugRequestGeneration) {
-          releaseDebugSession(debugResponseSnapshot(result.json));
+          const late = debugResponseSnapshot(result.json);
+          if (late && debugSessions.some((session) => session.id === late.id)) rememberDebugSession(result.json.session);
+          else releaseDebugSession(late);
           return;
         }
         const responseSourceId = result.json && (result.json.source_id || (result.json.session && result.json.session.source_id));
@@ -1844,6 +1925,7 @@
           ))
         )) {
           releaseDebugSession(debugResponseSnapshot(result.json) || requestedSession);
+          releaseDebugSessions();
           clearDebugClientState("stale");
           showToast("Debug result is stale; current source was kept", { isError: true });
           drawGraph(latestDoc);
@@ -1862,6 +1944,7 @@
         }
         debugSessionInfo = result.json.session || null;
         debugSessionId = debugSessionInfo && debugSessionInfo.state === "running" ? debugSessionInfo.id : null;
+        rememberDebugSession(debugSessionInfo);
         debugOverlay = result.json.overlay || null;
         debugConnectionState = debugOverlay && debugOverlay.runtime_state === "live"
           ? "live"
@@ -1891,6 +1974,8 @@
       });
   }
 
+  // End the session shown; the newest one the page still holds is shown
+  // next.
   function stopDebug() {
     const doc = latestDoc;
     const session = debugSessionSnapshot();
@@ -1899,4 +1984,6 @@
     if (session && doc) releaseDebugSession(session, true);
     showToast("Debug overlay stopped");
     if (latestDoc) drawGraph(latestDoc);
+    const next = debugSessions[debugSessions.length - 1];
+    if (next) selectDebugSession(next.id);
   }

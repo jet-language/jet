@@ -1,0 +1,22 @@
+# The Canvas debug overlay at a live stop: the stop's values on the pins and
+# wires that carry them and none on a binding written again later, a watch
+# added for the selected node and kept with its source span and revision, the
+# pulse moving along exactly the wires a Next took and around its node, and a
+# second session in the selector, each named by its engine, picked with the
+# arrow key; stopping the shown session shows the other, and with none left
+# nothing pulses. Tools/CanvasTest/Run.jet `scenario` serves the program with
+# `jet dev --canvas` and checks each answer the page received and what it drew
+# (Tools/CanvasTest/DebugScenarios.jet).
+requires: os-name:linux
+requires: tool:chromium
+requires: tool:chromedriver
+fixture: CanvasDebugValuesAtBreakpoint.fixture
+env: NO_COLOR=1
+env: JET_PROJECT_ROOT={work}
+env: JET_BIN={jet}
+env: TMPDIR={scratch}
+step: jetpack browser lock chromium --binary {tool:chromium} --version 152.0.7977.64 --protocol bidi-2025.5 --driver {tool:chromedriver}
+exit: 0
+step: jet run --allow=Env,Exec,FS,IO,Net,Time {root}/Tools/CanvasTest/Run.jet -- scenario --scenario debug_overlay --source jet_debug_canvas_values_at_breakpoint.jet
+exit: 0
+stdout: ~ "PASS chromium debug_overlay" # the scenario's one pass line; it fails on the first value, pulse or session the page doesn't show
