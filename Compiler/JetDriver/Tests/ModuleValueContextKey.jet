@@ -1,0 +1,27 @@
+// A `#ContextKey` constant computed while building has no type until its
+// value lands, so a module value whose call reads it waits for the key and
+// then is refused for reading the context (E0643), never for naming no key.
+use jet_driver.[JetDriverCompileMode, jet_driver_compile]
+
+#Test("a module value reading a context key waits for the key") {
+    source: [String]{
+        "#ContextKey scale: 2",
+        "",
+        "scaled: fn(n: Int) -> Int {{ n * context.get(scale) }}",
+        "",
+        "EARLY: scaled(5)",
+        "",
+        "run: fn() {{",
+        "    #Context(scale: 3) {{ print(\"module value {{EARLY}}\") }}",
+        "}}",
+        "",
+    }
+    request := seams_request(source.join("\n"), JetDriverCompileMode.Program)
+    request.core_sources = idiom_core_rows()
+    result: jet_driver_compile(request)
+    codes := [String]{}
+    loop diagnostic in result.diagnostics {
+        if diagnostic.severity == 1 -> codes.push("{diagnostic.code} {diagnostic.what}")
+    }
+    assert(codes.len() == 1 && codes[0].starts_with("E0643 "), codes.join("; "))
+}
