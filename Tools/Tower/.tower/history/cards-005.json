@@ -35259,6 +35259,98 @@
       "completedAt": "2026-11-17T02:29:08.389Z",
       "questions": [],
       "retiredAt": "2026-11-20T02:32:04.479Z"
+    },
+    {
+      "id": "c00fktgk",
+      "num": 6855,
+      "title": "Packages extend the editor, formatter, debugger and law tests through declared hooks",
+      "body": "Destination: a package that adds a block marker, a container type or an open trait also teaches the tools about it through declared hooks: editor stages, a formatter stage for block bodies, a Core DebugView trait and law tests that `jet test` runs.\n\nWhy it matters: without hooks, every package feature needs a change to the LSP, the formatter or the debugger.\n\nDecisions: D-HOOK-STAGES1=A (the compiler and tool moments packages may hook), D-HOOK-ONE1 (an unattached hook emits nothing), D-EXTEND-ARCH1=A rule 3 (laws travel with the interface), D-CORE-LAWS1. Design: Docs/research/2026-10-29-extensibility-every-layer.md sections 4.17-4.20 and 6.2.\n\nSplit from #6202.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e18",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "All criteria met on p243 (c1 c2) and p240 (c3)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A package block marker gets completion, semantic tokens and inlay hints through `#On(lsp.…)` stages, with no LSP code change.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p243 batch compiler (dev 220ae562d7): jet test Compiler --profile cases --filter lsp_package_marker_stages n=1 bad=0 (feature 8182df2b05, Loader fix 220ae562d7).",
+          "at": "2026-11-17T04:07:17.771Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "lsp_package_marker_stages"
+          }
+        },
+        {
+          "n": 2,
+          "text": "`jet fmt` formats a `#SQL { … }` body through a package `#On(fmt.block)` hook and leaves the surrounding Jet code untouched.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p243 batch compiler (dev 220ae562d7): jet test Compiler --profile cases --filter fmt_block_package_hook n=1 bad=0 (feature 8182df2b05, Loader fix 220ae562d7).",
+          "at": "2026-11-17T04:07:18.754Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "fmt_block_package_hook"
+          }
+        },
+        {
+          "n": 3,
+          "text": "The debugger has one scalar-name source (today debug_scalar_class in Debug/Snapshot.jet and the safe_value and jet_type_name lists in Inferior.jet), and a package ring buffer shows its items through a Core `DebugView` impl.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p240 batch compiler (dev 8182df2b05): jet test Compiler --profile cases --filter debug_view_package_ring_buffer PASS (n=1 bad=0); Compiler/JetLSP/Tests/LSP/ToolStages.jet PASS.",
+          "at": "2026-11-17T02:58:37.363Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "debug_view_package_ring_buffer"
+          }
+        },
+        {
+          "n": 4,
+          "text": "`jet test` on a package whose impl of an open Core trait breaks one of the trait's laws fails and names the law.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p211 gate (dev d6d482c5f7, MemKernel-6-law-kit-fix): jet test Compiler --profile cases --filter law_kit_names_broken_law -> n=1 bad=0.",
+          "at": "2026-11-16T09:23:37.930Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "law_kit_names_broken_law"
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "tooling",
+        "declarative"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:25:11.055Z",
+      "updated": "2026-11-17T04:07:20.491Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-17T04:07:20.491Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T04:26:43.526Z"
     }
   ]
 }
