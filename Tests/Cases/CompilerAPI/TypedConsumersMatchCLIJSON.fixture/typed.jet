@@ -16,11 +16,13 @@ REFERENCES: #run (loop r in INDEX.references -> (if r.module == "core.compiler" 
 
 CALLS: #run (loop c in INDEX.calls -> "call {c.caller} {c.callee} {c.module} {c.span.start}-{c.span.end}\n").join("")
 
+EFFECTS: #run (loop e in INDEX.effects -> (if e.function.starts_with("fn:core_compiler.") -> "effect {e.function} direct={e.direct.join("+")} callees={e.callees.join("+")} inferred={e.inferred.join("+")} maximal={e.maximal} provenance={(loop p in e.provenance -> "{p.effect}:{p.call_path.join(">")}@{(loop s in p.spans -> "{s.start}-{s.end}").join("+")}").join(";")}\n" else -> "")).join("")
+
 BROKEN_CODES: #run (loop d in BROKEN.diagnostics() -> d.code).join(",")
 
 BROKEN_INDEX: #run { (if BROKEN.semantic_index() == None -> "absent" else -> "present") }
 
 run: fn() {
     print("digest {DIGEST}")
-    print("{DEFINITIONS}{REFERENCES}{CALLS}broken {BROKEN_CODES} index {BROKEN_INDEX}")
+    print("{DEFINITIONS}{REFERENCES}{CALLS}{EFFECTS}broken {BROKEN_CODES} index {BROKEN_INDEX}")
 }

@@ -1,5 +1,5 @@
 # Typed code reading `compiler.check` and the CLI's `jet inspect compiler check` see one result: each index fact typed.jet prints from main.jet is the same value in the CLI JSON, and a text with a semantic error keeps its diagnostics and has no index on both sides.
-# Covers the members typed code can read: source_digest, definitions, references and calls. The typed index record does not carry state_graphs, fact_registry or derivations, and typed reads of effects stop the comptime evaluator, so those are not compared here.
+# Covers the members typed code can read: source_digest, definitions, references, calls and effects. The typed index record does not carry state_graphs, fact_registry or derivations, so those are not compared here.
 fixture: TypedConsumersMatchCLIJSON.fixture
 env: NO_COLOR=1
 step: jet run typed.jet
@@ -10,6 +10,8 @@ stdout: ~ "definition run fn:core_compiler.run core.compiler 45-48" # the CLI JS
 stdout: ~ "definition value param:core_compiler.helper.value core.compiler 11-16" # the CLI JSON row for the parameter below
 stdout: ~ "reference value core.compiler 32-37" # the one reference in main.jet
 stdout: ~ "call fn:core_compiler.run fn:core_compiler.helper core.compiler 63-69" # the one call
+stdout: ~ "effect fn:core_compiler.helper direct= callees= inferred= maximal=false provenance=" # helper has no effect
+stdout: ~ "effect fn:core_compiler.run direct=IO callees=fn:core_compiler.helper inferred=IO maximal=false provenance=IO:fn:core_compiler.run@57-62" # run's IO comes from its own print
 stdout: ~ "broken E0107 index absent" # broken.jet keeps its diagnostic and has no index
 step: jet inspect compiler check main.jet
 exit: 0
@@ -33,6 +35,20 @@ json: stdout doc $.compiler.value.semantic_index.calls[0].callee = "fn:core_comp
 json: stdout doc $.compiler.value.semantic_index.calls[0].module = "core.compiler"
 json: stdout doc $.compiler.value.semantic_index.calls[0].span.start = 63
 json: stdout doc $.compiler.value.semantic_index.calls[0].span.end = 69
+json: stdout doc $.compiler.value.semantic_index.effects[?function="fn:core_compiler.helper"][0].direct = []
+json: stdout doc $.compiler.value.semantic_index.effects[?function="fn:core_compiler.helper"][0].callees = []
+json: stdout doc $.compiler.value.semantic_index.effects[?function="fn:core_compiler.helper"][0].inferred = []
+json: stdout doc $.compiler.value.semantic_index.effects[?function="fn:core_compiler.helper"][0].maximal = false
+json: stdout doc $.compiler.value.semantic_index.effects[?function="fn:core_compiler.helper"][0].provenance = []
+json: stdout doc $.compiler.value.semantic_index.effects[?function="fn:core_compiler.run"][0].direct = ["IO"]
+json: stdout doc $.compiler.value.semantic_index.effects[?function="fn:core_compiler.run"][0].callees = ["fn:core_compiler.helper"]
+json: stdout doc $.compiler.value.semantic_index.effects[?function="fn:core_compiler.run"][0].inferred = ["IO"]
+json: stdout doc $.compiler.value.semantic_index.effects[?function="fn:core_compiler.run"][0].maximal = false
+json: stdout doc $.compiler.value.semantic_index.effects[?function="fn:core_compiler.run"][0].provenance #= 1
+json: stdout doc $.compiler.value.semantic_index.effects[?function="fn:core_compiler.run"][0].provenance[0].effect = "IO"
+json: stdout doc $.compiler.value.semantic_index.effects[?function="fn:core_compiler.run"][0].provenance[0].call_path = ["fn:core_compiler.run"]
+json: stdout doc $.compiler.value.semantic_index.effects[?function="fn:core_compiler.run"][0].provenance[0].spans[*].start = [57]
+json: stdout doc $.compiler.value.semantic_index.effects[?function="fn:core_compiler.run"][0].provenance[0].spans[*].end = [62]
 step: jet inspect compiler check broken.jet
 exit: 0
 json: stdout doc $.compiler.value.diagnostics[*].code = ["E0107"] # the semantic error stays a diagnostic
