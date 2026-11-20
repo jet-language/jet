@@ -27,6 +27,7 @@ use {
         TraceStackFrame,
         TraceIO,
         TRACE_IO_ROW_LIMIT,
+        TRACE_PROFILE_ROW_LIMIT,
         TRACE_SPAN_ROW_LIMIT,
         TRACE_TASK_ROW_LIMIT,
         TraceTask,
@@ -1701,7 +1702,8 @@ jet_cli_perf_syscall_name: fn(number: U64) -> String Never! {
 // The CPU-time profile `sampled` gives the checked `source` and the
 // program's other sources: one row per function and line in them, with
 // its exclusive and inclusive samples, its allocations and the events of
-// each counter it captured, hottest first,
+// each counter it captured, hottest first, the coldest folded past the
+// row limit (jet_cli_perf_profile_fold),
 // and in its reason the hottest image functions outside Jet code, by their
 // symbols, the samples in compiler-emitted helpers, the samples in Jet
 // code that kept no stack, and how many samples the CPU time sampled
@@ -1710,7 +1712,6 @@ jet_cli_perf_syscall_name: fn(number: U64) -> String Never! {
 jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSamples) -> TraceProfile? Never! {
     rows := [TraceProfileRow]{}
     elsewhere := sampled.outside
-    truncated := false
     loop place in sampled.lines {
         // The line's other source of the program, -1 for none.
         other: if place.own || place.file < 0 || place.file >= sampled.source_at.len() -> -1 else -> sampled.source_at[place.file]
@@ -1719,11 +1720,6 @@ jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSa
             end = Val(sampled.sources[other].ends[place.line - 1])
         }
         column: end ?? {
-            elsewhere += place.count
-            next
-        }
-        if rows.len() >= 4096 {
-            truncated = true
             elsewhere += place.count
             next
         }
@@ -1749,6 +1745,11 @@ jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSa
             },
         )
     }
+    // Past the row limit the coldest rows fold, so every sample keeps one.
+    fold := jet_cli_perf_profile_fold(rows.move())
+    rows = fold.rows.move()
+    elsewhere += fold.dropped
+    truncated: fold.dropped > (U64{0})
     // The rows are hottest first, by their own samples, then by the ones
     // they hold, then by their LLC and L1D misses: when no row holds a
     // sample, a counter's event or an allocation, every sample landed
@@ -1783,8 +1784,8 @@ jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSa
     // The memory lens or the alloc lens without the cpu lens takes no
     // CPU-time samples.
     alone: if sampled.periods.len() == 0 && sampled.sited -> "the alloc lens alone: each row holds its allocations" else -> "the memory lens alone: each row holds its counters' events"
-    reason: if sampled.total == (U64{0}) -> "no CPU-time samples, as under {alone}{natives}{sites}" else -> "{timed}{taken}{natives}{helpers}{stackless}{nominal}{sites}"
-    profile := TraceProfile{method: "sampling", counters: [TraceCounter]{}, status: status, coverage: coverage, rows: rows, row_limit: U64{4096}, rows_truncated: truncated, overhead_ns: None, overhead_status: "not_measured", overhead_reason: "the runtime recorded no sampling cost", reason: reason, window_status: "unavailable", window_wall_ns: None, window_cpu_ns: None, window_reason: "the runtime published no run window"}
+    reason: if sampled.total == (U64{0}) -> "no CPU-time samples, as under {alone}{natives}{sites}{fold.note}" else -> "{timed}{fold.note}{taken}{natives}{helpers}{stackless}{nominal}{sites}"
+    profile := TraceProfile{method: "sampling", counters: [TraceCounter]{}, status: status, coverage: coverage, rows: rows, row_limit: U64{TRACE_PROFILE_ROW_LIMIT}, rows_truncated: truncated, overhead_ns: None, overhead_status: "not_measured", overhead_reason: "the runtime recorded no sampling cost", reason: reason, window_status: "unavailable", window_wall_ns: None, window_cpu_ns: None, window_reason: "the runtime published no run window"}
     if sampled.cost == .Val(cost) {
         // Each signal pays the kernel's delivery and return besides the
         // handler's own time.
@@ -1794,6 +1795,125 @@ jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSa
         profile.overhead_reason = "the sampler took {took / U64{1000}} microseconds, {jet_cli_perf_hundredths(took, cost.cpu_ns)} of the {cost.cpu_ns / U64{1000}} microseconds of CPU time sampled: {cost.handler_ns / U64{1000}} in its handlers and {sampled.signals} signals at the {cost.delivery_ns} nanoseconds the kernel took to deliver and return from one as sampling started"
     }
     Val(profile)
+}
+
+// The rows of a profile past the row limit, folded (jet_cli_perf_profile_fold):
+// the rows, the words for the profile's reason, empty with nothing folded,
+// and the samples of the rows past the limit all the same, 0 but for a run
+// whose sampled sources alone pass it.
+JetCLIPerfFold: struct {
+    rows: [TraceProfileRow],
+    note: String,
+    dropped: U64,
+}
+
+// Folds the coldest of the profile rows `rows` (hottest first, one per line)
+// into TRACE_PROFILE_ROW_LIMIT rows, so no sample is dropped: the hottest
+// rows stay as they are and the rest sum into one row per function and
+// source, which spans its folded lines, from the first to the last; or,
+// when those alone pass the limit, one per source, named by how many
+// functions it holds. A folded row holds its lines' own samples,
+// allocations and counters' events, and no inclusive count, which would
+// count twice a sample on two of its lines. The rows fit already, or the
+// sampled sources alone pass the limit: then the coldest sources' rows past
+// it are dropped, their samples counted.
+jet_cli_perf_profile_fold: fn(rows: [TraceProfileRow]) -> JetCLIPerfFold Never! {
+    if rows.len() <= TRACE_PROFILE_ROW_LIMIT {
+        return JetCLIPerfFold{rows: rows, note: "", dropped: U64{0}}
+    }
+    by_function := true
+    keep := jet_cli_perf_profile_kept(rows, true)
+    if keep < 0 {
+        by_function = false
+        keep = jet_cli_perf_profile_kept(rows, false)
+    }
+    if keep < 0 -> keep = 0
+    folded := [TraceProfileRow]{}
+    // Each folded row's place in `folded` by its key, and the functions of
+    // each, by "path\nname", when they fold by source.
+    places := [String:Int]{}
+    functions := [Int]{}
+    seen := [String:Bool]{}
+    loop at in keep..<rows.len() {
+        row: rows[at]
+        key: jet_cli_perf_profile_fold_key(row, by_function)
+        named: "{row.source.path}\n{row.symbol.name}"
+        if !places.has_key(key) {
+            seen[named] = true
+            places[key] = folded.len()
+            first := row
+            first.inclusive_count = None
+            folded.push(first)
+            functions.push(1)
+            next
+        }
+        index: places[key]
+        if !seen.has_key(named) {
+            seen[named] = true
+            functions[index] = functions[index] + 1
+        }
+        into := folded[index]
+        into.sample_count += row.sample_count
+        into.sample_weight += row.sample_weight
+        into.allocation_count = jet_cli_perf_count_sum(into.allocation_count, row.allocation_count)
+        into.dtlb_miss_count = jet_cli_perf_count_sum(into.dtlb_miss_count, row.dtlb_miss_count)
+        into.l1d_miss_count = jet_cli_perf_count_sum(into.l1d_miss_count, row.l1d_miss_count)
+        into.llc_miss_count = jet_cli_perf_count_sum(into.llc_miss_count, row.llc_miss_count)
+        into.page_fault_count = jet_cli_perf_count_sum(into.page_fault_count, row.page_fault_count)
+        if row.source.start_line < into.source.start_line {
+            into.source.start_line = row.source.start_line
+        }
+        if row.source.end_line > into.source.end_line {
+            into.source.end_line = row.source.end_line
+            into.source.end_column = row.source.end_column
+        }
+        folded[index] = into
+    }
+    out := [TraceProfileRow]{}
+    loop at in 0..<keep -> out.push(rows[at])
+    dropped := U64{0}
+    loop (index, row) in folded {
+        if out.len() >= TRACE_PROFILE_ROW_LIMIT {
+            dropped += row.sample_count
+            next
+        }
+        named := row
+        if functions[index] > 1 -> named.symbol.name = "{functions[index]} functions"
+        out.push(named)
+    }
+    by: if by_function -> "function" else -> "source, named by how many functions it holds"
+    past: if dropped > (U64{0}) -> ", and the {dropped} samples of the coldest sources past the limit are outside them" else -> ""
+    JetCLIPerfFold{rows: out, note: "; past the {TRACE_PROFILE_ROW_LIMIT}-row limit its {rows.len() - keep} coldest lines fold into {folded.len()} rows, one per {by}, each from its first folded line to its last{past}", dropped: dropped}
+}
+
+// How many of the profile rows `rows`, hottest first, stay as they are
+// when the rest fold by function (`by_function`) or by source into
+// TRACE_PROFILE_ROW_LIMIT rows; -1 when the folded rows alone pass it.
+jet_cli_perf_profile_kept: fn(rows: [TraceProfileRow], by_function: Bool) -> Int Never! {
+    groups := [String:Bool]{}
+    keep := TRACE_PROFILE_ROW_LIMIT
+    loop at in keep..<rows.len() {
+        groups[jet_cli_perf_profile_fold_key(rows[at], by_function)] = true
+    }
+    loop keep + groups.len() > TRACE_PROFILE_ROW_LIMIT {
+        if keep == 0 -> return -1
+        keep -= 1
+        groups[jet_cli_perf_profile_fold_key(rows[keep], by_function)] = true
+    }
+    keep
+}
+
+// The fold a profile row joins (jet_cli_perf_profile_fold): its source and
+// function, or its source alone.
+jet_cli_perf_profile_fold_key: fn(row: TraceProfileRow, by_function: Bool) -> String Never! {
+    if by_function -> "{row.source.path}\n{row.symbol.name}" else -> "{row.source.path}"
+}
+
+// Two counts summed, None when neither was counted.
+jet_cli_perf_count_sum: fn(left: U64?, right: U64?) -> U64? Never! {
+    if left == .Val(counted) -> return Val(counted + (right ?? U64{0}))
+    if right == .Val(counted) -> return Val(counted)
+    None
 }
 
 // `part` as a percentage of `whole`, to two decimals: "1.25%".
@@ -1943,8 +2063,9 @@ jet_cli_perf_window: fn(profile: &TraceProfile, window: JetCLIPerfRuntimeWindow)
 // (jet_cli_perf_zones_section), and so does why zones could not turn on (a
 // JET_CLI_PERF_ZONE_REFUSED row's name) and that the file reached its bound
 // and dropped the rows after it (a JET_CLI_PERF_ZONE_CUT row's name), which
-// are no timeline rows. The file is removed once read; a row cut short ends
-// the read.
+// are no timeline rows. Each task's first zone or log span, the earliest
+// opened and of those the longest, names its phase (`capture.task_phases`).
+// The file is removed once read; a row cut short ends the read.
 jet_cli_perf_log_spans_read: fn(capture: &JetCLIPerfCapture, path: String, source: String, origin_ns: Int, timed: [JetCLIPerfTimed]) -[FS]> Never! {
     bytes: perf_files.read_bytes(path) ?? [U8]{}
     perf_files.remove(path).drop("the session reads its log spans once")
@@ -1958,6 +2079,9 @@ jet_cli_perf_log_spans_read: fn(capture: &JetCLIPerfCapture, path: String, sourc
     sampled := [JetCLIPerfZoneSampled]{}
     refused := ""
     cut := ""
+    // The start and end of each task's phase, by its runtime id.
+    opened := [U64:Int]{}
+    closed := [U64:Int]{}
     at := 0
     loop at + 32 <= bytes.len() {
         start: link_debug_addr(bytes, at)
@@ -1976,6 +2100,14 @@ jet_cli_perf_log_spans_read: fn(capture: &JetCLIPerfCapture, path: String, sourc
         if kind == JET_CLI_PERF_ZONE_CUT {
             cut = name
             next
+        }
+        if kind != JET_CLI_PERF_ZONE_FRAME && kind != JET_CLI_PERF_ZONE_PLOT && task > 0 {
+            owner: U64{task}
+            if !opened.has_key(owner) || start < opened[owner] || (start == opened[owner] && end > closed[owner]) {
+                opened[owner] = start
+                closed[owner] = end
+                capture.task_phases[owner] = "{name}"
+            }
         }
         // The zone's samples, and the line most of them were on.
         held := 0
@@ -2203,16 +2335,20 @@ JET_CLI_PERF_ZONE_CUT: 5
 // outside the program. Each task of `spawns` no observation saw gets a
 // done task's row first, under its spawner's, so a wait, a wake or a
 // transfer of a short task still names it; a task whose spawner has no row
-// gets none, and a wait of a task with no row keeps none either. Each
+// gets none, and a wait of a task with no row keeps none either. Past the
+// task row limit the tasks with the most CPU-time samples (`samples`, by
+// runtime id) keep their rows (jet_cli_perf_tasks_admitted) and the rest
+// count in the `tasks` receipt section (jet_cli_perf_tasks_section). Each
 // wait's name, addresses and stack move into its row.
-jet_cli_perf_waits_read: fn(capture: &JetCLIPerfCapture, waits: &&[JetCLIPerfWait], wakes: [JetCLIPerfWake], spawns: [JetCLIPerfSpawn], transfers: [JetCLIPerfIO], source: String, origin_ns: Int) Never! {
+jet_cli_perf_waits_read: fn(capture: &JetCLIPerfCapture, waits: &&[JetCLIPerfWait], wakes: [JetCLIPerfWake], spawns: [JetCLIPerfSpawn], samples: [U64:U64], transfers: [JetCLIPerfIO], source: String, origin_ns: Int) Never! {
     // Each spawned task's line by its runtime id, and its row when no
     // observation gave it one; a spawner's spawn came before its own.
+    admitted: jet_cli_perf_tasks_admitted(capture.task_ids, TRACE_TASK_ROW_LIMIT - U64{capture.tasks.len()}, spawns, samples)
     lines := [U64:U64]{}
     loop spawn in spawns {
         if spawn.line == .Val(line) -> lines[spawn.task] = line
         if capture.task_ids.has_key(spawn.task) || !capture.task_ids.has_key(spawn.parent) -> next
-        if (U64{capture.tasks.len()}) >= TRACE_TASK_ROW_LIMIT {
+        if !admitted.has_key(spawn.task) {
             capture.policy.task_rows_truncated = true
             next
         }
@@ -2288,6 +2424,143 @@ jet_cli_perf_waits_read: fn(capture: &JetCLIPerfCapture, waits: &&[JetCLIPerfWai
         symbol: JetSymbolRef{path: source, name: wait.name.move()}
         capture.spans.push(TraceSpan{awaited_task_id: awaited, channel_id: channel_id, clock: "monotonic", end_ns: Val(jet_cli_perf_since(wait.end_ns, origin_ns)), kind: "task_wait", local_address: local_address, parent_task_id: None, peer_address: peer_address, reason: "", spawn_line: spawn_line, start_ns: Val(jet_cli_perf_since(wait.start_ns, origin_ns)), status: "captured", symbol: symbol, task_id: Val(capture.task_ids[wait.task]), wait_stack: stack, waker: waker, waker_line: waker_line, waker_task_id: waker_task_id})
     }
+}
+
+// The CPU-time samples of `timed` each task took, by its runtime id; the
+// samples outside every task count for none.
+jet_cli_perf_task_samples: fn(timed: [JetCLIPerfTimed]) -> [U64:U64] Never! {
+    counts := [U64:U64]{}
+    loop sample in timed {
+        if sample.task <= 0 -> next
+        task: U64{sample.task}
+        counts[task] = (counts.get(task) ?? U64{0}) + U64{1}
+    }
+    counts
+}
+
+// Which tasks of `spawns` with no row yet (`rowed`, by runtime id) get one
+// in the `room` rows left under the task row limit: every one when they
+// fit; else, from the most CPU-time samples (`samples`, by runtime id) to
+// the fewest, ties in spawn order, each task with its spawners that have
+// no row yet, while they fit. A task none of whose spawners has a row gets
+// none.
+jet_cli_perf_tasks_admitted: fn(rowed: [U64:U64], room: U64, spawns: [JetCLIPerfSpawn], samples: [U64:U64]) -> [U64:Bool] Never! {
+    parents := [U64:U64]{}
+    fresh := [U64]{}
+    loop spawn in spawns {
+        if rowed.has_key(spawn.task) || parents.has_key(spawn.task) -> next
+        parents[spawn.task] = spawn.parent
+        fresh.push(spawn.task)
+    }
+    admitted := [U64:Bool]{}
+    if (U64{fresh.len()}) <= room {
+        loop task in fresh -> admitted[task] = true
+        return admitted
+    }
+    order := [Int]{}
+    loop index in 0..<fresh.len() -> order.push(index)
+    order.sort_by(fn(left: Int, right: Int) { ((samples.get(fresh[right]) ?? U64{0}) <=> (samples.get(fresh[left]) ?? U64{0})).then(left <=> right) })
+    taken := U64{0}
+    loop index in order {
+        if taken == room -> break
+        // The task and its spawners up to one with a row.
+        chain := [U64]{}
+        rooted := true
+        at := fresh[index]
+        loop !rowed.has_key(at) && !admitted.has_key(at) {
+            if !parents.has_key(at) {
+                rooted = false
+                break
+            }
+            chain.push(at)
+            at = parents[at]
+        }
+        if !rooted || taken + (U64{chain.len()}) > room -> next
+        loop task in chain -> admitted[task] = true
+        taken += U64{chain.len()}
+    }
+    admitted
+}
+
+// A phase's tasks (jet_cli_perf_tasks_section): its name, empty for none,
+// how many tasks and CPU-time samples it holds, and of those the tasks with
+// no trace row and their samples, folded into it.
+JetCLIPerfTaskPhase: struct {
+    name: String,
+    tasks: Int,
+    samples: U64,
+    folded: Int,
+    folded_samples: U64,
+}
+
+// The `tasks` receipt section: every task of the run, those with a trace
+// row (`rowed`, by runtime id) and those past the task row limit alike, by
+// its phase, the name of the first zone or log span it opened (`named`, by
+// runtime id), else its spawner's (`spawns`), else none; each phase with
+// its tasks and the CPU-time samples they took (`samples`, by runtime id),
+// and of those the tasks with no row and theirs, the phase with the most
+// samples first: `{"count":5001,"coverage":"complete","phases":[{"folded":
+// 452,"folded_samples":300,"name":"lower","samples":1632,"tasks":2500},…],
+// "rows":4096,"unattributed_samples":0}`, a phase of none named null. Its
+// coverage is complete when every sample of a task counts in a phase: the
+// samples of a task the run neither observed nor recorded the spawn of are
+// unattributed. `jet perf view` shows it (jet_cli_perf_task_phase_lines).
+// None when the run had no task.
+jet_cli_perf_tasks_section: fn(rowed: [U64:U64], named: [U64:String], spawns: [JetCLIPerfSpawn], samples: [U64:U64]) -> TraceReceiptSection? Never! {
+    // Each task's phase by its runtime id; a spawner's spawn came before
+    // its own.
+    phase := [U64:String]{}
+    loop task in rowed.keys() -> phase[task] = named.get(task) ?? ""
+    loop spawn in spawns {
+        phase[spawn.task] = named.get(spawn.task) ?? phase.get(spawn.parent) ?? ""
+    }
+    if phase.len() == 0 -> return None
+    totals := [JetCLIPerfTaskPhase]{}
+    at := [String:Int]{}
+    loop task in phase.keys() {
+        name: phase[task]
+        if !at.has_key(name) {
+            at[name] = totals.len()
+            totals.push(JetCLIPerfTaskPhase{name: "{name}", tasks: 0, samples: U64{0}, folded: 0, folded_samples: U64{0}})
+        }
+        index: at[name]
+        took: samples.get(task) ?? U64{0}
+        totals[index].tasks += 1
+        totals[index].samples += took
+        if !rowed.has_key(task) {
+            totals[index].folded += 1
+            totals[index].folded_samples += took
+        }
+    }
+    unattributed := U64{0}
+    loop task in samples.keys() {
+        if !phase.has_key(task) -> unattributed += samples[task]
+    }
+    totals.sort_by(fn(left: JetCLIPerfTaskPhase, right: JetCLIPerfTaskPhase) { (right.samples <=> left.samples).then(left.name <=> right.name) })
+    phases := [CanonicalJSON]{}
+    loop total in totals {
+        phases.push(
+            CanonicalJSON.Object(
+                [CanonicalJSONField]{
+                    {key: "folded", value: CanonicalJSON.Integer("{total.folded}")},
+                    {key: "folded_samples", value: CanonicalJSON.Integer("{total.folded_samples}")},
+                    {key: "name", value: if total.name == "" -> CanonicalJSON.Null else -> CanonicalJSON.String("{total.name}")},
+                    {key: "samples", value: CanonicalJSON.Integer("{total.samples}")},
+                    {key: "tasks", value: CanonicalJSON.Integer("{total.tasks}")},
+                },
+            ),
+        )
+    }
+    value: CanonicalJSON.Object(
+        [CanonicalJSONField]{
+            {key: "count", value: CanonicalJSON.Integer("{phase.len()}")},
+            {key: "coverage", value: CanonicalJSON.String(if unattributed == (U64{0}) -> "complete" else -> "partial")},
+            {key: "phases", value: CanonicalJSON.Array(phases)},
+            {key: "rows", value: CanonicalJSON.Integer("{rowed.len()}")},
+            {key: "unattributed_samples", value: CanonicalJSON.Integer("{unattributed}")},
+        },
+    )
+    Val(TraceReceiptSection{name: "tasks", type_name: "JetPerfTasks", value: value, digest: canonical_json_sha256(value)})
 }
 
 // The task of the program whose act at a connection's other end ended a

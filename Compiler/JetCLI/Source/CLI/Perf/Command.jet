@@ -257,6 +257,7 @@ jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String]
     }
     loop line in jet_cli_perf_counter_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_zone_lines(trace) -> out = "{out}{line}\n"
+    loop line in jet_cli_perf_task_phase_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_memory_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_topdown_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_off_cpu_lines(trace) -> out = "{out}{line}\n"
@@ -604,17 +605,19 @@ jet_cli_perf_receipt_sections: fn(trace: CanonicalJSON) -> [JetDriverRunReceiptS
 
 // `receipt <name> <value>` for each receipt section the trace records, the
 // value as its canonical JSON, but the allocations, the heap snapshots, the
-// causal predictions, the topdown lens's, the zones, the threads, the host
-// calls and the helpers, which jet_cli_perf_allocation_lines,
-// jet_cli_perf_heap_lines, jet_cli_perf_causal_lines,
-// jet_cli_perf_topdown_lines, jet_cli_perf_zone_lines,
-// jet_cli_perf_thread_lines, jet_cli_perf_syscall_lines and the per-line
-// table (jet_cli_perf_line_table) show.
+// causal predictions, the topdown lens's, the zones, the tasks, the
+// threads, the host calls and the helpers, which
+// jet_cli_perf_allocation_lines, jet_cli_perf_heap_lines,
+// jet_cli_perf_causal_lines, jet_cli_perf_topdown_lines,
+// jet_cli_perf_zone_lines, jet_cli_perf_task_summary with
+// jet_cli_perf_task_phase_lines, jet_cli_perf_thread_lines,
+// jet_cli_perf_syscall_lines and the per-line table
+// (jet_cli_perf_line_table) show.
 jet_cli_perf_receipt_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     items: jet_cli_perf_rows(trace, "receipt_sections") ?? return [String]{}
     lines := [String]{}
     // The sections their own lines show.
-    shown: [String]{"allocations", "heap", "causal", "topdown", "zones", "threads", "syscalls", "helpers"}
+    shown: [String]{"allocations", "heap", "causal", "topdown", "zones", "tasks", "threads", "syscalls", "helpers"}
     loop item in items {
         section: trace_receipt_section_from_json(item) ?? next
         if shown.contains(section.name) -> next
@@ -1130,6 +1133,11 @@ jet_cli_perf_browser_line: fn(trace: CanonicalJSON) -> String? Never! {
     Val("browser count={browser.count} · {browser.symbol}")
 }
 
+// `tasks count=… children=… · <symbol>` of the trace's task rows; with the
+// trace's `tasks` receipt section (jet_cli_perf_tasks_section), the count
+// and children are of every task of the run, then its rows and coverage:
+// `tasks count=5001 children=5000 rows=4096 coverage=complete · …`, each
+// task past the rows a spawned one.
 jet_cli_perf_task_summary: fn(trace: CanonicalJSON) -> String? Never! {
     items: jet_cli_perf_rows(trace, "tasks") ?? return None
     if items.len() == 0 -> return None
@@ -1141,7 +1149,50 @@ jet_cli_perf_task_summary: fn(trace: CanonicalJSON) -> String? Never! {
         }
         if symbol == None -> symbol = jet_cli_perf_member_symbol(item)
     }
+    if jet_cli_perf_tasks_receipt(trace) == .Val(section) {
+        count: jet_cli_perf_member_number(section, "count") ?? items.len()
+        coverage: jet_cli_perf_member_text(section, "coverage") ?? "partial"
+        return Val("tasks count={count} children={children + count - items.len()} rows={items.len()} coverage={coverage} · {symbol ?? "?"}")
+    }
     Val("tasks count={items.len()} children={children} · {symbol ?? "?"}")
+}
+
+// The value of the trace's `tasks` receipt section; None without one.
+jet_cli_perf_tasks_receipt: fn(trace: CanonicalJSON) -> CanonicalJSON? Never! {
+    items: jet_cli_perf_rows(trace, "receipt_sections") ?? return None
+    loop item in items {
+        section: trace_receipt_section_from_json(item) ?? next
+        if section.name == "tasks" -> return Val(section.value)
+    }
+    None
+}
+
+// Each phase of the trace's `tasks` receipt section, the most CPU time
+// first: `task phase lower tasks=2500 cpu_us=204000 samples=1632`, then,
+// when tasks of it have no row, ` · folded tasks=452 cpu_us=37500
+// samples=300`; `(none)` names the tasks that opened no zone or log span
+// and no spawner of which did; a last `task phase unattributed
+// cpu_us=… samples=…` holds the samples of tasks the run did not record.
+jet_cli_perf_task_phase_lines: fn(trace: CanonicalJSON) -> [String] Never! {
+    lines := [String]{}
+    section: jet_cli_perf_tasks_receipt(trace) ?? return lines
+    fields: jettrace_object_view(section, "receipt tasks") ?? return lines
+    at: jet_cli_perf_key(fields, "phases") ?? return lines
+    phases: jettrace_array(fields[at].value, "receipt tasks.phases") ?? return lines
+    loop phase in phases {
+        name: jet_cli_perf_member_text(phase, "name") ?? "(none)"
+        tasks: jet_cli_perf_member_number(phase, "tasks") ?? 0
+        samples: jet_cli_perf_member_number(phase, "samples") ?? 0
+        folded: jet_cli_perf_member_number(phase, "folded") ?? 0
+        folded_samples: jet_cli_perf_member_number(phase, "folded_samples") ?? 0
+        past: if folded > 0 -> " · folded tasks={folded} cpu_us={folded_samples * JET_CLI_PERF_SAMPLE_US} samples={folded_samples}" else -> ""
+        lines.push("task phase {name} tasks={tasks} cpu_us={samples * JET_CLI_PERF_SAMPLE_US} samples={samples}{past}")
+    }
+    unattributed: jet_cli_perf_member_number(section, "unattributed_samples") ?? 0
+    if unattributed > 0 {
+        lines.push("task phase unattributed cpu_us={unattributed * JET_CLI_PERF_SAMPLE_US} samples={unattributed}")
+    }
+    lines
 }
 
 jet_cli_perf_lock_summary: fn(trace: CanonicalJSON) -> String? Never! {

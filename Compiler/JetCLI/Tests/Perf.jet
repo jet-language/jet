@@ -49,6 +49,7 @@ use {
         jet_cli_perf_observed,
         jet_cli_perf_pc_json,
         jet_cli_perf_pc_words,
+        jet_cli_perf_profile_fold,
         jet_cli_perf_profile_summary,
         jet_cli_perf_records_section,
         jet_cli_perf_sampler_reason,
@@ -57,6 +58,7 @@ use {
         jet_cli_perf_source,
         jet_cli_perf_source_position,
         jet_cli_perf_source_profile,
+        jet_cli_perf_tasks_section,
         jet_cli_perf_timed_first,
         jet_cli_perf_waits_read,
         jet_cli_perf_zones_section,
@@ -84,7 +86,10 @@ use {
         JetLiveSnapshot,
         JetLiveTask,
         JetLiveValue,
+        JetSymbolRef,
         TraceHardware,
+        TraceProfileRow,
+        TraceProfileSource,
         TraceStackFrame,
         TraceToolchain,
         canonical_json_bytes,
@@ -582,7 +587,7 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     assert_eq(sampled.spawns.len(), 1)
     observations: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{10}, live: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(1))}}
     capture := jet_cli_perf_capture_source("fib.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
-    jet_cli_perf_waits_read(capture, sampled.waits.move(), sampled.wakes.move(), sampled.spawns.move(), sampled.transfers.move(), "fib.jet", 0)
+    jet_cli_perf_waits_read(capture, sampled.waits.move(), sampled.wakes.move(), sampled.spawns.move(), [U64:U64]{}, sampled.transfers.move(), "fib.jet", 0)
     assert_eq(capture.tasks.len(), 2)
     assert_eq(capture.tasks[1].id, U64{2})
     assert_eq(capture.tasks[1].parent, U64{1})
@@ -607,7 +612,7 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     capture := jet_cli_perf_capture_source("fib.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
     waits := [JetCLIPerfWait]{JetCLIPerfWait{task: U64{1}, slot: 64, start_ns: 100, end_ns: 200, class: JET_CLI_PERF_OBJECT_SOCKET, id: U64{3}, local: "127.0.0.1:4000", peer: "127.0.0.1:5000", name: "tcp read", frames: [TraceStackFrame]{}}}
     wakes: [JetCLIPerfWake]{JetCLIPerfWake{task: U64{0}, slot: 64, at_ns: 150, line: Val(7)}}
-    jet_cli_perf_waits_read(capture, waits, wakes, [JetCLIPerfSpawn]{}, [JetCLIPerfIO]{}, "fib.jet", 0)
+    jet_cli_perf_waits_read(capture, waits, wakes, [JetCLIPerfSpawn]{}, [U64:U64]{}, [JetCLIPerfIO]{}, "fib.jet", 0)
     wait: capture.spans[capture.spans.len() - 1]
     assert_eq(wait.kind, "task_wait")
     assert_eq(wait.waker, "peer")
@@ -616,6 +621,96 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     toolchain: TraceToolchain{jet_version: "test", compiler_build_id: "test", stdlib_id: "test", runner_id: "test"}
     hardware: TraceHardware{cpu_arch: "x86_64", logical_cpus: U64{1}, os: "linux", target: "x86_64-unknown-linux-gnu"}
     _: jet_cli_perf_capture_bytes(capture, "run", [String]{"fib.jet"}, toolchain, hardware) ?? panic(err.message)
+}
+
+// Past the task row limit, the tasks with the fewest CPU-time samples have
+// no row; the `tasks` section still counts each, with its samples, in its
+// phase.
+#Test("tasks past the row limit fold into their phases with their samples, the fewest samples first") {
+    observations: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{10}, live: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(1))}}
+    capture := jet_cli_perf_capture_source("fib.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    // Task 1 spawns tasks 2 to 4100: 4099 tasks beside it, 4 past the 4096
+    // rows. Tasks 2 to 5 took one sample each, the rest two, and task 1
+    // three; tasks 2 to 2049 opened `parse`, the rest `lower`.
+    spawns := [JetCLIPerfSpawn]{}
+    samples := [U64:U64]{}
+    samples[U64{1}] = U64{3}
+    loop task in 2..<4101 {
+        spawns.push(JetCLIPerfSpawn{task: U64{task}, parent: U64{1}, line: None})
+        samples[U64{task}] = if task <= 5 -> U64{1} else -> U64{2}
+        capture.task_phases[U64{task}] = if task <= 2049 -> "parse" else -> "lower"
+    }
+    jet_cli_perf_waits_read(capture, [JetCLIPerfWait]{}, [JetCLIPerfWake]{}, spawns, samples, [JetCLIPerfIO]{}, "fib.jet", 0)
+    assert_eq(capture.tasks.len(), 4096)
+    assert(capture.policy.task_rows_truncated)
+    assert(!capture.task_ids.has_key(U64{2}))
+    assert(!capture.task_ids.has_key(U64{5}))
+    assert(capture.task_ids.has_key(U64{6}))
+    assert(capture.task_ids.has_key(U64{4100}))
+    section: jet_cli_perf_tasks_section(capture.task_ids, capture.task_phases, spawns, samples) ?? panic("the run has tasks")
+    assert_eq(section.type_name, "JetPerfTasks")
+    expected: `{"count":4100,"coverage":"complete","phases":[{"folded":0,"folded_samples":0,"name":"lower","samples":4102,"tasks":2051},{"folded":4,"folded_samples":4,"name":"parse","samples":4092,"tasks":2048},{"folded":0,"folded_samples":0,"name":null,"samples":3,"tasks":1}],"rows":4096,"unattributed_samples":0}`
+    assert_eq(String.from_bytes(canonical_json_bytes(section.value)) ?? "", "{expected}\n")
+    capture.receipts.push(section)
+    toolchain: TraceToolchain{jet_version: "test", compiler_build_id: "test", stdlib_id: "test", runner_id: "test"}
+    hardware: TraceHardware{cpu_arch: "x86_64", logical_cpus: U64{1}, os: "linux", target: "x86_64-unknown-linux-gnu"}
+    _: jet_cli_perf_capture_bytes(capture, "run", [String]{"fib.jet"}, toolchain, hardware) ?? panic(err.message)
+}
+
+// A task that opened no zone or log span takes its spawner's phase; the
+// samples of a task the run recorded no spawn of count in none.
+#Test("a task's phase is its spawner's when it opened none, and an unrecorded task's samples leave the coverage partial") {
+    rowed := [U64:U64]{}
+    rowed[U64{1}] = U64{1}
+    rowed[U64{2}] = U64{2}
+    named := [U64:String]{}
+    named[U64{2}] = "parse"
+    spawns: [JetCLIPerfSpawn]{JetCLIPerfSpawn{task: U64{2}, parent: U64{1}, line: None}, JetCLIPerfSpawn{task: U64{3}, parent: U64{2}, line: None}, JetCLIPerfSpawn{task: U64{4}, parent: U64{1}, line: None}}
+    samples := [U64:U64]{}
+    samples[U64{1}] = U64{1}
+    samples[U64{3}] = U64{2}
+    samples[U64{4}] = U64{4}
+    samples[U64{7}] = U64{5}
+    section: jet_cli_perf_tasks_section(rowed, named, spawns, samples) ?? panic("the run has tasks")
+    expected: `{"count":4,"coverage":"partial","phases":[{"folded":1,"folded_samples":4,"name":null,"samples":5,"tasks":2},{"folded":1,"folded_samples":2,"name":"parse","samples":2,"tasks":2}],"rows":2,"unattributed_samples":5}`
+    assert_eq(String.from_bytes(canonical_json_bytes(section.value)) ?? "", "{expected}\n")
+}
+
+// The profile row of line `at + 1` of a.jet in function `name`, hotter for
+// a lower `at`.
+jet_cli_perf_test_line_row: fn(digest: String, at: Int, name: String) -> TraceProfileRow Never! {
+    source: TraceProfileSource{path: "a.jet", sha256: digest, start_line: U64{at + 1}, start_column: U64{1}, end_line: U64{at + 1}, end_column: U64{9}}
+    TraceProfileRow{clock: "cpu", allocation_count: Val(U64{1}), dtlb_miss_count: None, execution_count: None, inclusive_count: Val(U64{6000}), l1d_miss_count: None, llc_miss_count: None, page_fault_count: None, sample_count: U64{5000 - at}, sample_weight: U64{5000 - at}, source: source, symbol: JetSymbolRef{path: "a.jet", name: name}}
+}
+
+// One profile row per line, hottest first: past the row limit the coldest
+// lines fold by function, or by source when the functions alone pass it.
+#Test("profile rows past the row limit fold by function, else by source, keeping every sample") {
+    digest: sha256_hex("run")
+    by_function := [TraceProfileRow]{}
+    by_source := [TraceProfileRow]{}
+    loop at in 0..<4100 {
+        by_function.push(jet_cli_perf_test_line_row(digest, at, if at < 4090 -> "hot" else -> "cold"))
+        by_source.push(jet_cli_perf_test_line_row(digest, at, "f{at}"))
+    }
+    // Rows 4095 to 4099, all of `cold`, fold into one.
+    fold: jet_cli_perf_profile_fold(by_function)
+    assert_eq(fold.rows.len(), 4096)
+    assert_eq(fold.dropped, U64{0})
+    last: fold.rows[4095]
+    assert_eq(last.symbol.name, "cold")
+    assert_eq(last.sample_count, U64{905 + 904 + 903 + 902 + 901})
+    assert_eq(last.allocation_count, Val(U64{5}))
+    assert_eq(last.inclusive_count, None)
+    assert_eq(last.source.start_line, U64{4096})
+    assert_eq(last.source.end_line, U64{4100})
+    assert_eq(fold.note, "; past the 4096-row limit its 5 coldest lines fold into 1 rows, one per function, each from its first folded line to its last")
+    // Each line its own function: they fold by source, named by how many.
+    folded: jet_cli_perf_profile_fold(by_source)
+    assert_eq(folded.rows.len(), 4096)
+    assert_eq(folded.rows[4095].symbol.name, "5 functions")
+    assert_eq(folded.rows[4095].sample_count, U64{4515})
+    assert(folded.note.contains("one per source, named by how many functions it holds"))
 }
 
 #Test("a heap snapshot's blocks count by their line and by the type their innermost typed allocating call names") {
