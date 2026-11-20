@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112540,
+    "rev": 112544,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -55992,69 +55992,6 @@
       "completedAt": "2026-11-17T08:42:43.824Z"
     },
     {
-      "id": "c097myt8",
-      "num": 6803,
-      "title": "Camera, sensors and location as typed streams behind declared device permissions, on Linux and the web",
-      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G5).",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e19",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "c1 (p243) and c2 (p244) met."
-        },
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. macOS, Windows, iOS and Android work moved to #6986 (G13)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "After native.ask grants access, native.take_photo gives a PickedFile photo (no path string) and native.location gives a Place on Linux, through the camera portal (PipeWire) and GeoClue; on a web build they are an E-APP-TARGET-FEATURE compile error until #6556. Proof: `jet test Compiler --profile cases --filter NativeApp/camera_and_location_give_typed_values_after_a_grant` on Linux.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p243 batch compiler (dev 7238d48abc; feature 6a6fad6c04): jet test Compiler --profile cases --filter NativeApp/camera_and_location_give_typed_values_after_a_grant n=1 bad=0 (Linux portal steps and the web E-APP-TARGET-FEATURE step).",
-          "at": "2026-11-17T04:07:22.537Z"
-        },
-        {
-          "n": 2,
-          "text": "native.location_updates and the motion sensors are typed streams that stop when their scope ends, with no listener left registered, on Linux; on a web build they are an E-APP-TARGET-FEATURE compile error until #6556.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p244 batch compiler (dev 5613c2f956); feature 7d3f53beeb: cases NativeApp/sensor_streams_stop_with_their_scope n=1 bad=0 (Linux streams stop with their scope; web step E-APP-TARGET-FEATURE).",
-          "at": "2026-11-17T04:28:14.099Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "NativeApp/sensor_streams_stop_with_their_scope"
-          }
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": "c0snkbac",
-      "needsAcceptance": false,
-      "created": "2026-11-13T15:13:45.126Z",
-      "updated": "2026-11-17T04:28:15.898Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 2,
-      "completedAt": "2026-11-17T04:28:15.898Z"
-    },
-    {
       "id": "c0fqrrpk",
       "num": 6805,
       "title": "Share, clipboard and drag and drop on Linux and the web; drop zones reach app screens from core.ui.host",
@@ -56156,65 +56093,6 @@
       "updatedBy": "Main",
       "criteriaLastN": 3,
       "completedAt": "2026-11-17T23:46:47.073Z"
-    },
-    {
-      "id": "c02inyar",
-      "num": 6806,
-      "title": "Device permissions: declared in package.jet, prompted at first use, with a typed denied result on Linux and the web",
-      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G8).",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e19",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "c1 (p244) and c2 (p243) met."
-        },
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. macOS, Windows, iOS and Android work moved to #6989 (G13)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A call that needs a permission with no purposes: line fails the build, naming the call and the missing key. Proof: `jet test Compiler --profile cases --filter NativeApp/permission_without_a_purpose_fails_the_build` on the Linux and web outputs.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p244 batch compiler (dev 5613c2f956); fix ece00fe4a4 on feature e6fe0f39f4: cases NativeApp/permission_without_a_purpose_fails_the_build n=1 bad=0 (Linux and web steps), ui app_permission_without_a_purpose n=1 bad=0.",
-          "at": "2026-11-17T04:28:11.149Z"
-        },
-        {
-          "n": 2,
-          "text": "native.ask gives Granted, Denied or Restricted on Linux (through the desktop portals) and prompts only at first use; native.open_settings opens the app's settings page. On a web build, both calls are an E-APP-TARGET-FEATURE compile error, not a silent no-op, until the page runtime of #6556 brings the Permissions API. Proof: `jet test Compiler --profile cases --filter NativeApp/ask_gives_a_typed_grant_on_every_target` on Linux, and the web build refusal case.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p243 batch compiler (dev c0d0eeb2ed; feature 012f77615c): jet test Compiler --profile cases --filter NativeApp/ask_gives_a_typed_grant_on_every_target n=1 bad=0 (Linux portal grant steps and the web E-APP-TARGET-FEATURE step).",
-          "at": "2026-11-17T04:07:21.528Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": "c0snkbac",
-      "needsAcceptance": false,
-      "created": "2026-11-13T15:13:49.075Z",
-      "updated": "2026-11-17T04:28:13.040Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 2,
-      "completedAt": "2026-11-17T04:28:13.040Z"
     },
     {
       "id": "c0rom5jy",
@@ -59590,6 +59468,11 @@
         {
           "at": "2026-11-20",
           "by": "Main",
+          "text": "Ballot D-AUTH-WITH1 posted for c2's last row (authority_with_outside_held_rights): A (recommended) refuses at check time when the rights are visible and otherwise has `with` return AuthorityError.NotHeld; B stops at the line (exit 70); C is a run-time stop only. The reviewer also found that the compiler's authority_covers ignores case while the runtime does not, and that a misspelled right is covered today; both are named in the ballot. The rest of c2 has landed or is queued (c2.r2 landed in p345; c2-rest.r3 is queued)."
+        },
+        {
+          "at": "2026-11-20",
+          "by": "Main",
           "text": "c2: the row authority_with_outside_held_rights_is_e0712 needs an owner decision before code. Today `Authority.workspace().with(\"FS.Write\")` with rights the caller does not hold fails at run time as a panic (exit 70); the case expects exit 1 with E0712. Choices: (a) sema tracks the static rights of Authority values through locals and refuses at check time (E0712 today covers only #FX regions); (b) a failed run-time narrowing becomes an exit-1 refusal, which moves the panic/exit-70 boundary. Ballot to follow. The rest of c2 is in Closer4723-6843-c2 (the EffectBudget alias.fn key regression) and Closer4723-6843-c2-rest (comptime Authority)."
         }
       ],
@@ -59642,7 +59525,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T23:11:25.962Z",
-      "updated": "2026-11-20T02:55:36.859Z",
+      "updated": "2026-11-20T05:35:24.466Z",
       "updatedBy": "Main"
     },
     {
@@ -135192,6 +135075,217 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-20T02:32:03.981Z"
+    },
+    {
+      "id": "D-AUTH-WITH1",
+      "cardId": "c0in2dft",
+      "group": "language",
+      "title": "When narrowing an Authority to a right it doesn't hold is reported",
+      "situation": "An Authority is a value that carries a list of permissions, such as reading the repo folder or writing build output. Calling with on it makes a smaller Authority that keeps one permission the list already covers. Today, asking for a permission it doesn't cover is found only while the program runs. The program then stops with a generic panic that points into the standard library, not at the line that asked. In the example, Authority.workspace() holds only two folder-scoped file rights, so with(\"FS.Write\"), which asks to write anywhere, stops the run. You decide when this mistake is reported and with which exit code. We recommend refusing it before the run whenever the compiler can see both the list and the request, and otherwise stopping at the asking line with the same named report.",
+      "gist": "When should Jet report narrowing an Authority to a permission it doesn't hold?",
+      "lesson": "An Authority is a list of rights a program hands to a child process or a plugin. authority.with(right) returns a smaller Authority holding just that right, and only when a right in the list covers it. A folder-scoped right, like writing to .jet/build, never covers the bare one, writing anywhere. One function decides coverage, and the compiler and the running program already share it. So whenever the compiler knows both the list and the request, it can give the same answer the run would give.",
+      "explainer": "Beginner path: Mia writes the example program below. Under A, jet check, jet run and her editor flag the with line before anything runs. The report lists what the authority holds and suggests the scoped right. Under B and C, the program runs until that line, then ends there: with exit 1 under B, and exit 70 under C.\n\nExpert path: Theo builds an Authority from a config file and narrows it to a right named at run time. The compiler can't know either one, so under every option the check happens when the line runs. Under A and C that is a stop at his line with exit 70, like a failed bounds check. Under B it is exit 1, the code an unhandled returned error gets.\n\nEdge cases under A. Generics: rights are not part of the Authority type, so a generic function's Authority parameter is unknown and checked at run time. A generic body is checked once, never per caller. Closures: a lambda that captures a `:` binding sees the same value, so its rights stay known; a lambda's own parameter is unknown. Comptime: a #run Authority is a constant whose rights are known, so a #run narrowing outside them is refused at check time.\n\nEffect rows: with and without have no effects, so no row, callback bound or function value changes the answer. An Authority passed through a function value is simply unknown. A `:=` binding, a struct field, a function result and an if that picks between authorities are unknown too. without never fails. A misspelled right such as FS.Wrte is covered by nothing, so it is refused like any other.",
+      "story": "Mia copies an example that hands a build step the workspace authority. She narrows it to FS.Write so the step can write its output. Under A, jet run refuses before building anything: the report points at her with line, lists the two rights the workspace holds, and suggests FS.Write(\".jet/build\"). Under B, the program does its earlier work, then ends at that line with exit 1. Under C, it does the same work, then stops at that line with exit 70.",
+      "inWild": "// Rust: a literal that can't fit is refused by the compiler; a run-time value is checked when it runs.\nlet a: u8 = 300;           // error: literal out of range for `u8`\nlet b: u8 = n.try_into()?; // checked at run time, returns an error\n// Fuchsia: a duplicated handle may only keep rights the original has.\nzx_handle_duplicate(h, ZX_RIGHT_READ | ZX_RIGHT_WRITE, &out); // ZX_ERR_INVALID_ARGS without ZX_RIGHT_WRITE",
+      "detail": "Code read on dev f2cf0a8324. Sema's narrowing check (Compiler/JetSema/Source/Sema/Calls/Methods.jet:234-261) checks only the argument count and that the right is a String. It records an empty effect row (line 253). The runtime's jet_authority_with (Compiler/JetRuntime/Source/Authority.jet:271-285) keeps the request when a held right covers it. Otherwise authority_narrow_failure (lines 256-269) raises the shared panic.\n\nThe row's case was run on the gate compiler. It exits 70 with `Stop: Jet.Panic: panic: Jet.EffectWithoutAuthority: authority cannot narrow to FS.Write outside its held rights`. The report points at <core.prelude>:0, not main.jet. Authority.workspace() holds FS.Read(\"repo\") and FS.Write(\".jet/build\") (Compiler/JetRuntime/Source/ProcessGrants.jet:3-7 and 37-44). A scoped right never covers the bare one (Docs/Spec/spec.md:2993-2995).\n\nOne covers rule answers for the checker and the runtime (spec.md:2988-2991). Compiler/JetFoundation/Source/Policy/EffectScope.jet:139-143 calls the runtime's covers. The runtime's from_rights sorts and dedups the raw text without respelling it (Authority.jet:32-55). The compiler's CanonicalAuthority.from_rights respells (Policy/Authority.jet:256-260). So A's check must compare the raw text, as the runtime does, or the two could disagree.\n\nPrecedent: E1003 and E0123 are registered with stage [.Sema, .Runtime] (Compiler/Prelude/Diagnostics.jet:15287-15306 and 2400-2419). A constant is refused at check time, and a run-time value stops with exit 70. See Tests/Cases/FailureTierParity/runtime_e1003_is_a_stop_with_exit_70_on_every_hosted_tier.case and Compiler/JetIR/Source/BuildLazy.jet:2030-2044. Effect rows treat a constant file path the same way (spec.md:2997-3021).\n\nThe exit law is spec.md:1897-1904: program-side stops exit 70, and an unhandled entry error exits 1. E0712 is registered today for #FX regions only (Diagnostics.jet:9760-9783, a sema row). It is reported from Compiler/JetSema/Source/Sema/Effects/Checks.jet:4268. Docs/Spec/syntax-decisions.md:4115-4118 gives it the wider meaning: an effect without a backing grant.\n\nThe Rust original (tests/authority.rs before commit 845a39cdce) asserted only that the JIT run's stderr held E0712, with no exit code. Its erased-scope test counted one compile-time E0712 in a file that also narrows workspace() to FS.Write twice. That case, erased_authority_scope_does_not_survive_erasure, passes today (run on the gate compiler). Under A it would count three, so its assertion moves to the region report's own text.\n\nEvery other narrowing in the repository asks for a right its #FX head holds. About thirty fixtures write authority.with(\"IO\") inside #FX(authority: IO). So A refuses nothing else that checks today. without has no failure path (Authority.jet:287-309).",
+      "options": [
+        {
+          "key": "A",
+          "name": "Refuse it before the run when the compiler can see it",
+          "detail": "When the compiler knows both the Authority's rights and the requested right, an uncovered right is E0712 at check time. jet check, jet build and jet run refuse with exit 1, and nothing runs. Anything the compiler can't see is checked when the line runs, as today. That run-time stop now names E0712 and the asking line, with exit 70.",
+          "technical": "Known rights come from Authority.workspace(), Authority.from_rights with a list of constant strings, a named #FX head, and a #run constant. They also come from with or without, with a constant right, applied to a known Authority held in a `:` binding. Sema asks the runtime's covers on the raw text.\n\nE0712's registry row gains stage [.Sema, .Runtime], like E1003. Its meaning widens from #FX regions to any effect or right with no authority behind it. The runtime failure becomes a registered `Stop: Jet.EffectWithoutAuthority` at the caller's line instead of Jet.Panic at <core.prelude>:0.",
+          "code": "run: fn() {\n    // holds FS.Read(\"repo\") and FS.Write(\".jet/build\")\n    authority: Authority.workspace()\n    _: authority.with(\"FS.Write\")\n}\n// jet run main.jet: exit 1, nothing runs\n// Error: Jet.EffectWithoutAuthority: `authority` doesn't hold `FS.Write`, so `with` can't narrow to it\n//   --> main.jet:4:23\n//  Why: `authority` holds `FS.Read(\"repo\")` and `FS.Write(\".jet/build\")`, from `Authority.workspace()` at main.jet:3; a scoped right never covers the bare one\n//  Fix: Ask for a right it holds, such as `FS.Write(\".jet/build\")`, or build the authority with `FS.Write`\n// More: jet-lang.dev/e/Jet.EffectWithoutAuthority\n\n// A right known only at run time is checked when the line runs:\nnarrow: fn(authority: Authority, right: String) -> Authority {\n    authority.with(right) // Stop: Jet.EffectWithoutAuthority at this line, exit 70\n}"
+        },
+        {
+          "key": "B",
+          "name": "Check it at run time and exit 1",
+          "detail": "The compiler adds nothing. When with fails while the program runs, the runtime prints `Error: Jet.EffectWithoutAuthority` at the asking line, runs cleanup and exits 1 instead of 70. The row keeps its exit 1 and becomes a run-time case.",
+          "technical": "The runtime gains a program-side stop that exits 1. The exit law in spec.md, where program-side stops exit 70 and exit 1 means an unhandled entry error, gains an exception for this report. E0712 gains stage .Runtime with moment .Run.",
+          "code": "run: fn() {\n    // holds FS.Read(\"repo\") and FS.Write(\".jet/build\")\n    authority: Authority.workspace()\n    _: authority.with(\"FS.Write\")\n}\n// jet run main.jet: the check passes, the program runs to line 4, then exit 1\n// Error: Jet.EffectWithoutAuthority: authority cannot narrow to `FS.Write` outside its held rights\n//   --> main.jet:4:23\n\nnarrow: fn(authority: Authority, right: String) -> Authority {\n    authority.with(right) // the same report and exit 1 when it fails\n}"
+        },
+        {
+          "key": "C",
+          "name": "Check it at run time and stop with exit 70",
+          "detail": "The compiler adds nothing. A failed with stops the program with `Stop: Jet.EffectWithoutAuthority` at the asking line and exit 70, like every other program-side stop. The row's case changes its exit from 1 to 70.",
+          "technical": "Only the runtime report changes: the registered stop replaces Jet.Panic at <core.prelude>:0. E0712 gains stage .Runtime. The case row rewrites its exit line.",
+          "code": "run: fn() {\n    // holds FS.Read(\"repo\") and FS.Write(\".jet/build\")\n    authority: Authority.workspace()\n    _: authority.with(\"FS.Write\")\n}\n// jet run main.jet: the check passes, the program runs to line 4, then exit 70\n// Stop: Jet.EffectWithoutAuthority: authority cannot narrow to `FS.Write` outside its held rights\n//   --> main.jet:4:23\n\nnarrow: fn(authority: Authority, right: String) -> Authority {\n    authority.with(right) // the same stop and exit 70 when it fails\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "A literal that can't fit its type is a compile error, and a run-time value is checked when it runs. This is A's shape.",
+          "code": "let a: u8 = 300;           // error: literal out of range for `u8`\nlet b: u8 = n.try_into()?; // checked at run time"
+        },
+        {
+          "lang": "C (Fuchsia)",
+          "note": "Duplicating a handle may only keep rights the original has. Asking for more fails when the call runs, as a returned status. This is a run-time check, like B and C.",
+          "code": "zx_status_t s = zx_handle_duplicate(h, ZX_RIGHT_READ | ZX_RIGHT_WRITE, &out);\n// s == ZX_ERR_INVALID_ARGS when h lacks ZX_RIGHT_WRITE"
+        },
+        {
+          "lang": "TypeScript (Deno)",
+          "note": "Permissions are granted with flags and checked when an operation runs. Nothing is checked before the run, as in B and C.",
+          "code": "// deno run --allow-write=.jet/build main.ts\nawait Deno.writeTextFile(\"/etc/x\", \"y\"); // throws when the run lacks write access there"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Jet already refuses constants it can see and checks the rest at run time: an out-of-range number, a constant loop step, and a constant file path outside an effect row. A applies that rule here. The mistake is found before anything runs, at the line that made it. Its run-time half is C, so A gives up nothing C has.",
+        "gains": [
+          "A wrong request the compiler can see never reaches a run.",
+          "Every report, at either moment, names E0712 and the asking line instead of the standard library.",
+          "Exit codes keep one meaning each: 1 for refused before the run, 70 for a stop."
+        ],
+        "losses": [
+          {
+            "loss": "The same mistake is reported at two moments: at check time when the compiler can see it, and at run time otherwise.",
+            "mitigation": "Both reports share one name, one text and the asking line, and jet explain describes both, as it does for out-of-range numbers."
+          },
+          {
+            "loss": "A narrowing in code that never runs is still refused.",
+            "mitigation": "Every check-time report works this way. The fix is one edit, and #Off already removes code that should not be checked."
+          },
+          {
+            "loss": "One passing case, erased_authority_scope_does_not_survive_erasure, would count three E0712 reports instead of one.",
+            "mitigation": "Its assertion moves to the region report's own text, which is what the case is about. No other check in the repository changes."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It finds the mistake only after the program has done its earlier work. It also gives exit 1 a second meaning: a tool reading exit 1 could no longer tell a mid-run stop from an error the entry returned."
+          },
+          {
+            "key": "C",
+            "reason": "It keeps the exit law, but it waits for the run even when the compiler can see the mistake, and the line may sit in a branch that rarely runs. A's run-time half is exactly C."
+          }
+        ],
+        "tradeoff": "A second report moment for one rule, in exchange for catching every visible wrong request before the program runs."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Under A, Tests/Cases/Authority/authority_with_outside_held_rights_is_e0712.case passes as written: exit 1 with Jet.EffectWithoutAuthority, before the run. A new case narrows a parameter's Authority to a right named at run time and expects `Stop: Jet.EffectWithoutAuthority` at the caller's line with exit 70. erased_authority_scope_does_not_survive_erasure counts the region report's text.\n\nUnder B, the same row passes with the run-time report and exit 1. Under C, the row's exit becomes 70.\n\nEvidence labels: today's stop (exit 70, pointing at <core.prelude>:0) and the passing erased-scope case were observed by running those cases on the gate compiler at f2cf0a8324. No option is built.",
+      "surface": {
+        "gist": "When should Jet report narrowing an Authority to a permission it doesn't hold?",
+        "lesson": "An Authority is a list of permissions you can hand to a child process. with(right) makes a smaller one, and works only when the list already covers that right. Today a wrong request is found only while the program runs. Its report then points into the standard library, not at your line.",
+        "options": [
+          {
+            "key": "A",
+            "name": "Before the run, when visible",
+            "gist": "Refuse it at check time when the compiler sees both sides; otherwise stop at the line.",
+            "gains": [
+              "Found before anything runs, at the asking line.",
+              "Same rule Jet uses for constant numbers and file paths."
+            ],
+            "losses": [
+              "Two report moments for one rule."
+            ],
+            "proposed": {
+              "code": "authority: Authority.workspace()\n_: authority.with(\"FS.Write\")\n// jet run: exit 1, nothing runs\n// Error: Jet.EffectWithoutAuthority:\n//   `authority` doesn't hold `FS.Write`\n//   --> main.jet:4:23"
+            }
+          },
+          {
+            "key": "B",
+            "name": "At run time, exit 1",
+            "gist": "The program runs until that line, then ends with an error report and exit 1.",
+            "gains": [
+              "The compiler doesn't change."
+            ],
+            "losses": [
+              "Found only when the line runs.",
+              "Exit 1 would mean two different things."
+            ],
+            "proposed": {
+              "code": "_: authority.with(\"FS.Write\")\n// earlier work runs, then exit 1\n// Error: Jet.EffectWithoutAuthority\n//   --> main.jet:4:23"
+            }
+          },
+          {
+            "key": "C",
+            "name": "At run time, exit 70",
+            "gist": "The program runs until that line, then stops with a named report and exit 70.",
+            "gains": [
+              "Exit codes keep their meaning.",
+              "Smallest change: one runtime report."
+            ],
+            "losses": [
+              "Found only when the line runs."
+            ],
+            "proposed": {
+              "code": "_: authority.with(\"FS.Write\")\n// earlier work runs, then exit 70\n// Stop: Jet.EffectWithoutAuthority\n//   --> main.jet:4:23"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Jet already refuses mistakes it can see in constants and checks the rest at run time. A applies that rule here, and its run-time half is C.",
+          "gains": [
+            "Visible mistakes never reach a run.",
+            "Every report names the asking line.",
+            "Exit codes keep one meaning each."
+          ],
+          "losses": [
+            {
+              "loss": "One mistake has two report moments.",
+              "mitigation": "Both share one name, one text and the asking line, as out-of-range numbers do."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It finds the mistake late and gives exit 1 a second meaning."
+            },
+            {
+              "key": "C",
+              "reason": "It waits for the run even when the compiler can see the mistake."
+            }
+          ],
+          "tradeoff": "A second report moment, for catching every visible wrong request before the run."
+        },
+        "trio": {
+          "current": {
+            "note": "Today the run stops with a generic panic and exit 70, and the report points into the standard library.",
+            "code": "_: Authority.workspace().with(\"FS.Write\")\n// Stop: Jet.Panic: `panic: Jet.EffectWithoutAuthority:\n//   authority cannot narrow to `FS.Write` ...`\n//   --> <core.prelude>:0"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "A literal that can't fit is a compile error; a run-time value is checked when it runs.",
+            "code": "let a: u8 = 300;           // error: literal out of range\nlet b: u8 = n.try_into()?; // checked at run time"
+          }
+        }
+      },
+      "designAway": [
+        {
+          "loss": "A reports one mistake at two moments.",
+          "attempts": [
+            "Check only at run time (C): rejected, because it gives up the check-time catch.",
+            "Refuse every narrowing the compiler can't see: rejected, because a right from a parameter or a config file is legitimate and can't be known.",
+            "Use one name, one text and the asking line at both moments, as E1003 does: kept."
+          ],
+          "result": "The two moments read as one rule; only the time it is found differs."
+        },
+        {
+          "loss": "A refuses a wrong narrowing in code that never runs.",
+          "attempts": [
+            "Skip code the compiler proves unreachable: rejected, because no other check-time report does, and #Off already removes code that should not be checked."
+          ],
+          "result": "Negligible: the fix is one edit, and the code was wrong."
+        },
+        {
+          "loss": "B gives exit 1 a second meaning.",
+          "attempts": [
+            "Make with return `Authority AuthorityError!`, so an unhandled failure exits 1 under the existing law: rejected, because every existing call (about thirty in the repository) would need ? or ?? for a failure that can't happen."
+          ],
+          "result": "Not removable under B; a reason to prefer A."
+        }
+      ],
+      "draftedBy": "Main",
+      "reviewedBy": "BallotReviewE0712",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-20T05:20:23.199Z"
     }
   ],
   "questions": [
@@ -137473,6 +137567,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-20T05:35:24.466Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0in2dft",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-20T05:35:23.455Z",
+      "by": "Main",
+      "action": "decision.post",
+      "ref": "D-AUTH-WITH1",
+      "note": "reviewed by BallotReviewE0712"
+    },
+    {
+      "at": "2026-11-20T05:34:48.112Z",
+      "by": "BallotReviewE0712",
+      "action": "decision.review",
+      "ref": "D-AUTH-WITH1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-20T05:20:23.199Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-AUTH-WITH1",
+      "note": "When narrowing an Authority to a right it doesn't hold is reported (draft)"
+    },
     {
       "at": "2026-11-20T04:26:43.408Z",
       "by": "Main",

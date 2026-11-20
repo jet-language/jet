@@ -35351,6 +35351,132 @@
       "completedAt": "2026-11-17T04:07:20.491Z",
       "questions": [],
       "retiredAt": "2026-11-20T04:26:43.526Z"
+    },
+    {
+      "id": "c097myt8",
+      "num": 6803,
+      "title": "Camera, sensors and location as typed streams behind declared device permissions, on Linux and the web",
+      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G5).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e19",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c1 (p243) and c2 (p244) met."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. macOS, Windows, iOS and Android work moved to #6986 (G13)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "After native.ask grants access, native.take_photo gives a PickedFile photo (no path string) and native.location gives a Place on Linux, through the camera portal (PipeWire) and GeoClue; on a web build they are an E-APP-TARGET-FEATURE compile error until #6556. Proof: `jet test Compiler --profile cases --filter NativeApp/camera_and_location_give_typed_values_after_a_grant` on Linux.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p243 batch compiler (dev 7238d48abc; feature 6a6fad6c04): jet test Compiler --profile cases --filter NativeApp/camera_and_location_give_typed_values_after_a_grant n=1 bad=0 (Linux portal steps and the web E-APP-TARGET-FEATURE step).",
+          "at": "2026-11-17T04:07:22.537Z"
+        },
+        {
+          "n": 2,
+          "text": "native.location_updates and the motion sensors are typed streams that stop when their scope ends, with no listener left registered, on Linux; on a web build they are an E-APP-TARGET-FEATURE compile error until #6556.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p244 batch compiler (dev 5613c2f956); feature 7d3f53beeb: cases NativeApp/sensor_streams_stop_with_their_scope n=1 bad=0 (Linux streams stop with their scope; web step E-APP-TARGET-FEATURE).",
+          "at": "2026-11-17T04:28:14.099Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "NativeApp/sensor_streams_stop_with_their_scope"
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": "c0snkbac",
+      "needsAcceptance": false,
+      "created": "2026-11-13T15:13:45.126Z",
+      "updated": "2026-11-17T04:28:15.898Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-17T04:28:15.898Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T05:20:23.311Z"
+    },
+    {
+      "id": "c02inyar",
+      "num": 6806,
+      "title": "Device permissions: declared in package.jet, prompted at first use, with a typed denied result on Linux and the web",
+      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G8).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e19",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c1 (p244) and c2 (p243) met."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. macOS, Windows, iOS and Android work moved to #6989 (G13)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A call that needs a permission with no purposes: line fails the build, naming the call and the missing key. Proof: `jet test Compiler --profile cases --filter NativeApp/permission_without_a_purpose_fails_the_build` on the Linux and web outputs.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p244 batch compiler (dev 5613c2f956); fix ece00fe4a4 on feature e6fe0f39f4: cases NativeApp/permission_without_a_purpose_fails_the_build n=1 bad=0 (Linux and web steps), ui app_permission_without_a_purpose n=1 bad=0.",
+          "at": "2026-11-17T04:28:11.149Z"
+        },
+        {
+          "n": 2,
+          "text": "native.ask gives Granted, Denied or Restricted on Linux (through the desktop portals) and prompts only at first use; native.open_settings opens the app's settings page. On a web build, both calls are an E-APP-TARGET-FEATURE compile error, not a silent no-op, until the page runtime of #6556 brings the Permissions API. Proof: `jet test Compiler --profile cases --filter NativeApp/ask_gives_a_typed_grant_on_every_target` on Linux, and the web build refusal case.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p243 batch compiler (dev c0d0eeb2ed; feature 012f77615c): jet test Compiler --profile cases --filter NativeApp/ask_gives_a_typed_grant_on_every_target n=1 bad=0 (Linux portal grant steps and the web E-APP-TARGET-FEATURE step).",
+          "at": "2026-11-17T04:07:21.528Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": "c0snkbac",
+      "needsAcceptance": false,
+      "created": "2026-11-13T15:13:49.075Z",
+      "updated": "2026-11-17T04:28:13.040Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-17T04:28:13.040Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T05:20:23.311Z"
     }
   ]
 }
