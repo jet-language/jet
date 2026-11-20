@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112600,
+    "rev": 112603,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -58097,6 +58097,11 @@
         {
           "at": "2026-11-20",
           "by": "Main",
+          "text": "Sweep on p348 (Closer4723): c75 FAIL (axis d3 -O2 break panics: cannot slice 693 characters from 0 to 694 in <core.builtin>), c79/c80/c81 FAIL (jet debug on a dump spends minutes in native_dump_digest, a per-byte FNV over a 53 MB image; fix in progress), c86 FAIL (a stop poll row after a call through an inlined function value; fix held for a codegen regression), c94 FAIL (exit heap snapshot has a site with line null at -O0), c89 not met (window wall 844 ms for a 500 ms window, at load 32-84; needs a quiet run)."
+        },
+        {
+          "at": "2026-11-20",
+          "by": "Main",
           "text": "D-LIVE-TIMELINE1 redesigned after the owner asked that its downsides be engineered away (redesign: BallotLiveTimelineRedesign; fresh adversarial review: BallotReviewLiveTimeline2, verdict holds after repairs). The review repaired: full-tmpfs SIGBUS (fallocate slots at thread start, tmpfs placement, private-memory fallback), record sizes and lap times (48 B zones; reread at half full), per-wait getsockname/getpeername (addresses once at connect), an explicit D-PERF-ZONES1 amendment for observed runs, the versioned ssh stream with untrusted-input bounds checks, the web relay as a 4096-row ring with counted refusals, the AttachTargetNotObserved exit code (1), and option C made fair. The ballot was already live, so tower decision review refused to record the pass; this log is the review record."
         },
         {
@@ -59267,20 +59272,20 @@
         {
           "n": 91,
           "text": "No profile event is lost silently: a sample dropped because the record socket is full is counted and the count reaches the trace and the attach report (`perf_samples_put_one` checks its write), and the program drains its ring a last time at exit so a watcher sees the final turn, with cases for both.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T05:49:32.197Z"
+          "evidence": "p348 batch compiler (dev e2069b5709), single runs by Closer4723, reviewed by Main: jet test Compiler --profile cases --filter Perf/flight_ring_counts_lost_records PASS and --filter Perf/flight_ring_keeps_the_last_turn PASS.",
+          "at": "2026-11-20T10:37:09.238Z"
         },
         {
           "n": 92,
           "text": "Profiling leaves no files behind: the .spans file is bounded, and the ring, its image and its .spans are removed at normal exit and cleaned up for a killed program by the next jet perf run or attach, with a case that kills a profiled program and finds no files left after the next attach.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T05:49:33.014Z"
+          "evidence": "p348 batch compiler (dev e2069b5709), single runs by Closer4723, reviewed by Main: jet test Compiler --profile cases --filter Perf/profiling_leaves_no_files PASS (kills a profiled program and finds no files after the next attach) and --filter Perf/spans_file_is_bounded PASS.",
+          "at": "2026-11-20T10:37:12.291Z"
         },
         {
           "n": 93,
@@ -59315,7 +59320,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-20T10:37:04.999Z",
+      "updated": "2026-11-20T10:37:15.288Z",
       "updatedBy": "Main",
       "criteriaLastN": 95
     },
@@ -137572,6 +137577,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-20T10:37:15.288Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-20T10:37:12.291Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#92"
+    },
+    {
+      "at": "2026-11-20T10:37:09.238Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#91"
+    },
     {
       "at": "2026-11-20T10:37:04.999Z",
       "by": "Main",
