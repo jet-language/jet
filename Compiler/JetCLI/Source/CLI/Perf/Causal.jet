@@ -198,14 +198,15 @@ jet_cli_perf_causal_gain: fn(base: JetCLIPerfCausalRate, line: JetCLIPerfCausalR
 }
 
 // The next of the resampling's random numbers below `bound`: a fixed seed,
-// so the same trace gives the same intervals.
-jet_cli_perf_causal_draw: fn(state: &Int, bound: Int) -> Int Never! {
-    state = wrapping(wrapping(state * 6364136223846793005) + 1442695040888963407) & 9223372036854775807
-    (state >> 17) %% bound
+// so the same trace gives the same intervals. The step is a 64-bit linear
+// congruential one, kept to its low 63 bits.
+jet_cli_perf_causal_draw: fn(state: &U64, bound: Int) -> Int Never! {
+    state = wrapping(wrapping(state * U64{6364136223846793005}) + U64{1442695040888963407}) & U64{9223372036854775807}
+    Int{state >> 17} %% bound
 }
 
 // `chosen` drawn again with replacement.
-jet_cli_perf_causal_resample: fn(chosen: [Int], state: &Int) -> [Int] Never! {
+jet_cli_perf_causal_resample: fn(chosen: [Int], state: &U64) -> [Int] Never! {
     loop _ in 0..<chosen.len() -> chosen[jet_cli_perf_causal_draw(state, chosen.len())]
 }
 
@@ -215,7 +216,7 @@ jet_cli_perf_causal_resample: fn(chosen: [Int], state: &Int) -> [Int] Never! {
 jet_cli_perf_causal_line: fn(experiments: [JetCLIPerfExperiment], base: [Int], chosen: [Int], slot: Int, fit: JetCLIPerfCausalFit) -> JetCLIPerfCausalLine? Never! {
     virtual: jet_cli_perf_causal_gain(jet_cli_perf_causal_sum(experiments, base, slot), jet_cli_perf_causal_sum(experiments, chosen, slot)) ?? return None
     gain: jet_cli_perf_causal_warm(fit, virtual)
-    state := 88172645463325252 + slot
+    state := U64{88172645463325252 + slot}
     gains := [Int]{}
     loop _ in 0..<JET_CLI_PERF_CAUSAL_RESAMPLES {
         drawn_base: jet_cli_perf_causal_sum(experiments, jet_cli_perf_causal_resample(base, state), slot)
