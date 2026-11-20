@@ -256,14 +256,14 @@ files_code: fn() -> HTML {
 
 diag_block: fn() -> HTML {
     HTML{"""
-    <div class="diag"><span class="e">Error [jet.ValueTypeMismatch]:</span> `plan` wants Int (a whole number) for argument 2, but this is String (text)
+    <div class="diag"><span class="e">Error: Jet.ValueTypeMismatch:</span> `plan` wants Int (a whole number) for argument 2, but this is String (text)
       <span class="loc">--&gt; broken.jet:4:26</span>
         |
       4 |     print(plan("Lisbon", "three"))
         |                          <span class="pointer">^^^^^^^</span>
      <span class="why">Why: every argument must match its parameter's type</span>
      <span class="fix">Fix: use Int (a whole number) here</span>
-    <span class="more">More: jet-lang.dev/e/E0112</span></div>
+    <span class="more">More: jet-lang.dev/e/Jet.ValueTypeMismatch</span></div>
     """}
 }
 
@@ -340,15 +340,15 @@ index_body: fn() -> HTML {
           </div>
           <div class="pillar">
             <h3>Errors are part of the product</h3>
-            <p>Every diagnostic has a registered code, a what, a why, and a fix, and its text is snapshot-tested like any feature. This one is real:</p>
-            <div class="diag"><span class="e">Error [jet.ValueTypeMismatch]:</span> `plan` wants Int (a whole number) for argument 2, but this is String (text)
+            <p>Every diagnostic has a registered name, a what, a why, and a fix, and its text is snapshot-tested like any feature. This one is real:</p>
+            <div class="diag"><span class="e">Error: Jet.ValueTypeMismatch:</span> `plan` wants Int (a whole number) for argument 2, but this is String (text)
       <span class="loc">--&gt; broken.jet:4:26</span>
         |
       4 |     print(plan("Lisbon", "three"))
         |                          <span class="pointer">^^^^^^^</span>
      <span class="why">Why: every argument must match its parameter's type</span>
      <span class="fix">Fix: use Int (a whole number) here</span>
-    <span class="more">More: jet-lang.dev/e/E0112</span></div>
+    <span class="more">More: jet-lang.dev/e/Jet.ValueTypeMismatch</span></div>
           </div>
         </div>
       </section>
@@ -570,7 +570,7 @@ install_body: fn() -> HTML {
     <span class="out">hello, world</span></div>
     """}
     breaks_term: HTML{"""
-    <div class="term"><span class="ps">$</span> <span class="cmd">jet explain E0112</span>
+    <div class="term"><span class="ps">$</span> <span class="cmd">jet explain Jet.ValueTypeMismatch</span>
     <span class="ps">$</span> <span class="cmd">jet fix run.jet</span></div>
     """}
     HTML{"""
@@ -601,7 +601,7 @@ install_body: fn() -> HTML {
 
       <section>
         <h2>When something breaks</h2>
-        <p>Every Jet error has a registered code, a what, a why, and a fix. jet explain takes any code you see and gives the full story offline; jet fix applies the compiler's own suggested repairs to your file.</p>
+        <p>Every Jet error has a registered name, a what, a why, and a fix. jet explain takes any name you see and gives the full story offline; jet fix applies the compiler's own suggested repairs to your file.</p>
         {breaks_term}
       </section>
 
@@ -626,11 +626,11 @@ error_body: fn() -> HTML {
       <div class="page-header">
         <p class="eyebrow">// error codes</p>
         <h1>You followed a link the compiler printed.</h1>
-        <p>Every Jet diagnostic carries a code and links here. Each code has a generated page with the registered What, Why, Fix, and its first UI snapshot example. <a href="E0112/">See the E0112 page</a>. The same explanation is available offline, instantly, from the toolchain you already have.</p>
+        <p>Every Jet diagnostic carries a name and links here. Each name has a generated page with the registered What, Why, Fix, and its first UI snapshot example. <a href="Jet.ValueTypeMismatch/">See the Jet.ValueTypeMismatch page</a>. The same explanation is available offline, instantly, from the toolchain you already have.</p>
       </div>
     </section>
     <article class="wrap article">
-      <div class="term"><span class="ps">$</span> <span class="cmd">jet explain E0112</span></div>
+      <div class="term"><span class="ps">$</span> <span class="cmd">jet explain Jet.ValueTypeMismatch</span></div>
       <p>Explanations look like this one, which is real:</p>
       {diag}
       <p>If an explanation is wrong or unhelpful, that is a bug in Jet, and reporting it is a contribution.</p>
@@ -640,7 +640,7 @@ error_body: fn() -> HTML {
 
 run: fn() Err! {
     fs.create_dir_all("dist") ?? return
-    // tests/diagnostic_pages.rs owns Dist/e/<CODE>/index.html; this SSG owns the landing page.
+    // Tools/Agent/DiagnosticRows.jet owns Dist/e/<name>/index.html; this SSG owns the landing page.
     fs.create_dir_all("Dist/e") ?? return
     fs.copy_dir("assets", "Dist/assets") ?? return
 
@@ -681,7 +681,7 @@ run: fn() Err! {
     print("wrote Dist/install.html")
 
     error_body_html: error_body()
-    error_page: page_shell("Jet error codes", "Where jet-lang.dev/e links land: every Jet diagnostic has a code, a what, a why, and a fix, available offline through jet explain.", error_body_html, "../", "error")
+    error_page: page_shell("Jet error codes", "Where jet-lang.dev/e links land: every Jet diagnostic has a name, a what, a why, and a fix, available offline through jet explain.", error_body_html, "../", "error")
     fs.write("Dist/e/index.html", error_page.text()) ?? return
     print("wrote Dist/e/index.html")
 

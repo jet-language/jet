@@ -943,9 +943,9 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
         .Ok(_) -> panic("a non-canonical report must be refused")
     }
     rendered: build_report_render(report)
-    assert(rendered.starts_with("Error [E3015]: Entry returned an unhandled error: build action `cc` exited with status 1\n"))
+    assert(rendered.starts_with("Error: Jet.UnhandledEntryFailure: Entry returned an unhandled error: build action `cc` exited with status 1\n"))
     assert(rendered.contains("error code: E3505\ntype: BuildAction::Failed\n  variant: BuildActionFailure\n  action: \"cc\"\n"))
-    assert(rendered.ends_with("More: jet-lang.dev/e/E3015\n"))
+    assert(rendered.ends_with("More: jet-lang.dev/e/Jet.UnhandledEntryFailure\n"))
 }
 
 #Test("cached failures: a recorded failed action replays its report without running again") {

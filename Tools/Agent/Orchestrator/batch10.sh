@@ -4,7 +4,7 @@
 #   2. integrate3.sh BATCH with the rest.
 #   3. If the census failed, a SUB is QUARANTINED when
 #      - a census row names one of its touched files (Core/X/Y.jet, <corelib>/Core/X/Y.jet, or module path Core/X/Y), or
-#      - an error's quoted source line (`NNN | text` under an `Error [` header in census/*.err) is a line its patch adds
+#      - an error's quoted source line (`NNN | text` under an `Error: ` heading in census/*.err) is a line its patch adds
 #        (this attributes failures in concatenated units such as the runtime pack's unit.jet, which have no rows);
 #      with every later SUB of the same lead. integrate3.sh BATCH-r then runs once more with the others.
 # integ-land3.sh lands from whichever pass is all OK.
@@ -47,7 +47,7 @@ fi
 grep -q '^Census rc=0 ' "$I/REPORT.md" && exit 0
 rows=$(cat "$I/census/"*keep-going.tsv "$I/census.out" 2>/dev/null | awk -F'\t' 'NF>=2{print $2}' | sed -e 's#<corelib>/##' -e 's#:[0-9.]*$##' -e 's#\.jet$##' | sort -u)
 # Source lines quoted under Error headers (not warnings), trimmed.
-errlines=$(cat "$I/census/"*.err 2>/dev/null | awk '/^Error \[/{e=1; next} /^(Warning|Note) \[/{e=0} e && /^ *[0-9]+ \| /{sub(/^ *[0-9]+ \| */,""); sub(/[ \t]+$/,""); if (length($0)>8) print}' | sort -u)
+errlines=$(cat "$I/census/"*.err 2>/dev/null | awk '/^Error: /{e=1; next} /^(Warning|Note): /{e=0} e && /^ *[0-9]+ \| /{sub(/^ *[0-9]+ \| */,""); sub(/[ \t]+$/,""); if (length($0)>8) print}' | sort -u)
 keep=(); blamed=()
 for s in "${run[@]}"; do
   n=$(basename "$s"); hit=0

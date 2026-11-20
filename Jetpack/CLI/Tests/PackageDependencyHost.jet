@@ -57,14 +57,14 @@ use files: core.files
         .Ok(_) -> { panic("missing dependency name") }
         .Err(error) -> {
             assert_eq(error.output.stdout, "")
-            assert(error.output.stderr.starts_with("Error [jet.InvalidCommandInput]: `jet add` needs a dependency name\n"), error.output.stderr)
+            assert(error.output.stderr.starts_with("Error: Jet.InvalidCommandInput: `jet add` needs a dependency name\n"), error.output.stderr)
             assert_eq(error.output.exit_code, EXIT_USER_ERROR)
         }
     }
     if cli_package_dependency_words([String]{"fetch", "--path", "x"}, false, false) == {
         .Ok(_) -> { panic("fetch takes no --path") }
         .Err(error) -> {
-            assert(error.output.stderr.starts_with("Error [jet.UnknownFlag]: `--path` isn't a `jet fetch` flag\n"), error.output.stderr)
+            assert(error.output.stderr.starts_with("Error: Jet.UnknownFlag: `--path` isn't a `jet fetch` flag\n"), error.output.stderr)
             assert_eq(error.output.exit_code, EXIT_USAGE)
         }
     }
@@ -100,7 +100,7 @@ use files: core.files
     assert_eq(files.read(path) ?? panic("read concurrent carrier"), concurrent)
     absent: cli_package_dependency(root, path, [String]{"remove", "absent"}, false, false)
     assert_eq(absent.stdout, "")
-    assert(absent.stderr.starts_with("Error [jet.InvalidCommandInput]: Dependency `absent` is not present in run.jet\n"), absent.stderr)
+    assert(absent.stderr.starts_with("Error: Jet.InvalidCommandInput: Dependency `absent` is not present in run.jet\n"), absent.stderr)
     assert_eq(absent.exit_code, EXIT_USER_ERROR)
     files.remove_all(root).drop("scratch cleanup")
 }

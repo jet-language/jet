@@ -121,7 +121,7 @@ DcRow: struct {
 
 // The typed rows from their one home: each `X: struct {` in
 // Compiler/Prelude/Diagnostics.jet whose `impl Diagnostic` block names its
-// `code` and, unless it is active, its `status` is the type `jet.X`.
+// `code` and, unless it is active, its `status` is the row named `Jet.X`.
 dc_registered_rows: fn() -> [DcRow] {
     rows := [DcRow]{}
     name := ""
@@ -129,7 +129,7 @@ dc_registered_rows: fn() -> [DcRow] {
     status := ""
     loop line in dc_read("Compiler/Prelude/Diagnostics.jet").split("\n") {
         if !line.starts_with(" ") && line.ends_with(": struct {{") {
-            name = "jet.{dc_slice(line, 0, line.count_bytes() - 10)}"
+            name = "Jet.{dc_slice(line, 0, line.count_bytes() - 10)}"
         } else if line == "    impl Diagnostic {{" {
             code = ""
             status = "active"
@@ -180,17 +180,20 @@ dc_snapshot_texts: fn() -> [{path: String, text: String}] {
     out
 }
 
-// tests/diagnostics_coverage.rs report openers: `Error [ID]`, `Warning [ID]`,
-// `Stop [ID]`, `Lint [ID]` at the start of a line, where ID is a registered
-// row's type path (`jet.UnknownName`) or a runtime code.
+// tests/diagnostics_coverage.rs report openers: `Error: ID: `, `Warning: ID: `,
+// `Stop: ID: `, `Lint: ID: ` at the start of a line, where ID is a registered
+// row's name (`Jet.UnknownName`) or a code no row names; ID runs to the next
+// `: ` and holds no space.
 dc_report_codes: fn(text: String) -> [String] {
     codes := [String]{}
     loop line in text.split("\n") {
-        loop prefix in ["Error [", "Warning [", "Stop [", "Lint ["] {
+        loop prefix in ["Error: ", "Warning: ", "Stop: ", "Lint: "] {
             if !line.starts_with(prefix) -> next
-            end: line.index("]") ?? -1
-            if end > prefix.count_bytes() {
-                dc_add(codes, dc_slice(line, prefix.count_bytes(), end))
+            rest: dc_slice(line, prefix.count_bytes(), line.count_bytes())
+            end: rest.index(": ") ?? -1
+            if end > 0 {
+                id: dc_slice(rest, 0, end)
+                if !id.contains(" ") -> dc_add(codes, id)
             }
             break
         }

@@ -487,7 +487,7 @@ exclusions: fn(root: String) -[Exec, FS.Read, Time.Wait]> Exclusions CorpusError
     types := parse_diagnostic_types(read_tracked(root, DIAGNOSTIC_ROWS) ?? return Err(err))
     loop name in FMT_REPAIRED_ERRORS -> types.push(name.copy())
     if types.len() > 0 {
-        lesson_grep: "^Error \\[jet\\.({types.join("|")})\\]"
+        lesson_grep: "^Error: Jet\\.({types.join("|")}): "
         argv: [String]{"git", "grep", "-l", "-I", "-E", "-e", lesson_grep, "--", UI_TREE}
         loop path in git_lines(root, argv, [Int]{0, 1}) ?? return Err(err) {
             note_parse_lesson(path, out)
@@ -994,7 +994,7 @@ fmt_crash: fn(signal: Int?, code: Int, finished: [Int], errors: String) -> Strin
 fmt_unlocated_refusal: fn(errors: String) -> Bool Never! {
     if fmt_refused_source(errors) != None -> return false
     loop line in errors.lines() {
-        if line.starts_with("Error [") -> return true
+        if line.starts_with("Error: ") -> return true
     }
     false
 }
@@ -1357,22 +1357,22 @@ run: fn() {
     errors: "internal compiler error: `jet fmt` would change the syntax tree of `Tests/a.jet`, so the file stays as written; the first difference is in `If`: `x` became `y`\n  --> Tests/a.jet\nThis is a bug in jet, NOT in your program. Please report it,\n"
     assert_eq(fmt_refused_source(errors) ?? "", "Tests/a.jet")
     assert_eq(fmt_meaning_change(errors) ?? "", "`jet fmt` would change the syntax tree of `Tests/a.jet`, so the file stays as written; the first difference is in `If`: `x` became `y`")
-    assert_eq(fmt_meaning_change("Error [jet.X]: no\n  --> Tests/b.jet:4:27\n") ?? "none", "none")
+    assert_eq(fmt_meaning_change("Error: Jet.X: no\n  --> Tests/b.jet:4:27\n") ?? "none", "none")
 }
 
 #Test("code frames are the gutter lines a diagnostic shows") {
-    shown: "Error [jet.X]: no\n  --> main.jet:4:27\n    |\n  4 | bare: fn() -> Int {{\n    |                   ^\n Why: because\n"
-    assert_eq(without_frames(shown), "Error [jet.X]: no\n  --> main.jet:4:27\n Why: because")
+    shown: "Error: Jet.X: no\n  --> main.jet:4:27\n    |\n  4 | bare: fn() -> Int {{\n    |                   ^\n Why: because\n"
+    assert_eq(without_frames(shown), "Error: Jet.X: no\n  --> main.jet:4:27\n Why: because")
 }
 
 #Test("the refused source is the path of the first diagnostic location") {
-    errors: "Error [jet.InvalidStatement]: A unit-fallible signature has no `->`\n  --> Tests/UI/bare.jet:4:27\n    |\n"
+    errors: "Error: Jet.InvalidStatement: A unit-fallible signature has no `->`\n  --> Tests/UI/bare.jet:4:27\n    |\n"
     assert_eq(fmt_refused_source(errors) ?? "", "Tests/UI/bare.jet")
     assert_eq(fmt_refused_source("") ?? "none", "none")
 }
 
 #Test("a formatter run crashes on a signal or an exit no refusal explains") {
-    refusal: "Error [jet.InvalidStatement]: no\n  --> Tests/UI/bare.jet:4:27\n"
+    refusal: "Error: Jet.InvalidStatement: no\n  --> Tests/UI/bare.jet:4:27\n"
     checking: [Int]{0, 1}
     writing: [Int]{0}
     assert_eq(fmt_crash(Val(11), 0, writing, ""), "crash: `jet fmt` stopped on signal 11")
@@ -1384,9 +1384,9 @@ run: fn() {
 }
 
 #Test("a diagnostic that names no source refuses the run, and is no crash") {
-    manifest: "Error [jet.InvalidPackageManifest]: `package.jet` has a shape error\n Why: Package metadata policy is malformed\n"
+    manifest: "Error: Jet.InvalidPackageManifest: `package.jet` has a shape error\n Why: Package metadata policy is malformed\n"
     assert(fmt_unlocated_refusal(manifest))
-    assert(!fmt_unlocated_refusal("Error [jet.InvalidStatement]: no\n  --> Tests/UI/bare.jet:4:27\n"))
+    assert(!fmt_unlocated_refusal("Error: Jet.InvalidStatement: no\n  --> Tests/UI/bare.jet:4:27\n"))
     assert(!fmt_unlocated_refusal(""))
     assert_eq(fmt_crash(None, 2, [Int]{0}, manifest), "")
 }

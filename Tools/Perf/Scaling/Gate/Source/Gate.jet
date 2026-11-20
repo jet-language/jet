@@ -861,7 +861,7 @@ report_code: fn(text: String) -> String Never! {
 }
 
 // Diagnostics a compile reported: the bootstrap receipt's report rows, or
-// `Error [CODE]` lines of `jet`.
+// `Error: Name: ` headings of `jet`.
 outcome: fn(compiler: Compiler, rung: Rung, code: Int, text: String) -> {complete: Bool, errors: Int} Never! {
     errors := 0
     if compiler.kind == "bootstrap" {
@@ -876,7 +876,7 @@ outcome: fn(compiler: Compiler, rung: Rung, code: Int, text: String) -> {complet
         return {complete: complete, errors: errors}
     }
     loop line in text.split("\n") {
-        if line.starts_with("Error [E") -> errors += 1
+        if line.starts_with("Error: ") -> errors += 1
     }
     {complete: code == 0, errors: errors}
 }

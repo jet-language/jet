@@ -45,13 +45,13 @@ check: fn(file: String, flag: String) {
     }
     if file.contains("lint") {
         if flag != "--verbose" -> fail("lint requires verbose\n", 9)
-        say("Warning [jet.SameEnumGuardTable]: lint\n\nOK: `{file}` has no errors (1 warning)\nRun `jet explain L0302` to learn more\n")
+        say("Warning: Jet.SameEnumGuardTable: lint\n\nOK: `{file}` has no errors (1 warning)\nRun `jet explain Jet.SameEnumGuardTable` to learn more\n")
         return
     }
     if file.contains("clean") || file.contains("published") || file.contains("extension") || file.ends_with(".fixed.jet") {
         return
     }
-    fail("Error [jet.OperatorTypeMismatch]: mismatch\n\n1 problem found\nRun `jet explain E0109` to learn more\n", 1)
+    fail("Error: Jet.OperatorTypeMismatch: mismatch\n\n1 problem found\nRun `jet explain Jet.OperatorTypeMismatch` to learn more\n", 1)
 }
 
 build: fn(file: String, mode: String) {
@@ -61,7 +61,7 @@ build: fn(file: String, mode: String) {
         if file != "main.jet" || !files.is_file("package.jet") {
             fail("unlocked fixture was not staged\n", 9)
         }
-        fail("Error [jet.UnlockedToolchainChannel]: unlocked toolchain\n", 1)
+        fail("Error: Jet.UnlockedToolchainChannel: unlocked toolchain\n", 1)
     }
     // A real build writes the entry's artifact under `.jet/build`, named for
     // its stem; a bare file name's directory is the working one.

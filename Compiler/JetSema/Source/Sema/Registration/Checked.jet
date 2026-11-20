@@ -2375,7 +2375,7 @@ sema_checked_validate_struct_field: fn(definition: StructDef, field: Field, diag
         diagnostics.push(sema_error("E1104", definition.layout_span ?? field.name_span, "`#Layout(c)` struct `{definition.name}` has a growable field `{field.name}` ({type_name(field.ty)})", "growable types (`[T]`, `Map`, `String`) don't have a stable C layout", "use a fixed-size array `[T#N]` instead, or remove `#Layout(c)`"))
     }
     if sema_checked_type_is_float(field.ty) && sema_checked_money_like_name(field.name) && !sema_checked_allows_float_money(field.serde_markers) && !sema_checked_allows_float_money(definition.serde_markers) {
-        diagnostics.push(sema_lint("L0504", field.name_span, "field `{field.name}` looks like money but has type `Float`", "floating-point money loses cents on common values like `0.1 + 0.2`", "use `Decimal` for exact money, or suppress with `#Allow(jet.FloatMoney, \"why\")` on the field"))
+        diagnostics.push(sema_lint("L0504", field.name_span, "field `{field.name}` looks like money but has type `Float`", "floating-point money loses cents on common values like `0.1 + 0.2`", "use `Decimal` for exact money, or suppress with `#Allow(Jet.FloatMoney, \"why\")` on the field"))
     }
 }
 
@@ -2402,7 +2402,7 @@ sema_checked_money_like_name: fn(name: String) -> Bool Never! {
 
 sema_checked_allows_float_money: fn(markers: [Marker]) -> Bool Never! {
     loop marker in markers {
-        if (sema_lint_allowance_name(marker) ?? next) == "jet.FloatMoney" -> return true
+        if (sema_lint_allowance_name(marker) ?? next) == "Jet.FloatMoney" -> return true
     }
     false
 }
@@ -3894,9 +3894,7 @@ sema_checked_nested_impl_row: fn(graph: SemaRegistrationGraph, module_row: SemaR
                 rhs: block.operator_rhs ?? Type.Named{name: owner_name}
                 methods.push("{module_name}.{owner_name}.{block.trait_name}.{method.name}<{type_name(rhs)}>")
             }
-            else -> {
-                methods.push("{module_name}.{owner_name}.{block.trait_name}.{method.name}")
-            }
+            else -> { methods.push("{module_name}.{owner_name}.{block.trait_name}.{method.name}") }
         }
     }
     associated: loop value in block.assoc_type_impls -> TAssociatedTypeValue{name: value.name, ty: sema_checked_qualify_type(graph, value.ty, module_row.module_identity), span: value.span}

@@ -79,7 +79,7 @@ ds_opener: fn(line: String) -> String {
     ids[0].copy()
 }
 
-// The registered row an opener names, by type path (`jet.UnknownCommand`) or
+// The registered row an opener names, by name (`Jet.UnknownCommand`) or
 // by code (`E3001`); -1 when none.
 ds_row: fn(rows: [DcRow], id: String) -> Int {
     loop (index, row) in rows {
@@ -122,8 +122,8 @@ ds_part: fn(line: String, label: String) -> Bool {
 // prose, comments, quoted assertions and indented text never do.
 #Test("report_openers_ignore_prose_comments_and_rust_assertion_text") {
     guards_enter_root()
-    text: "Error [E0001]: what; Why: [E9998]; Fix: [E9997]\n// Error [E9996]\nassert!(stderr.contains(\"[E9995]\"));\n  Error [E9994]: indented\nWarning [L0001]: lint\nStop [E0002]: stop\nLint [L0002]: lint\nError [jet.UnknownCommand]: type path\n"
-    assert_eq(dc_report_codes(text).join(" "), "E0001 L0001 E0002 L0002 jet.UnknownCommand")
+    text: "Error: Jet.StrayCharacter: what; Why: [E9998]; Fix: [E9997]\n// Error: E9996: comment\nassert!(stderr.contains(\"[E9995]\"));\n  Error: E9994: indented\nWarning: L0001: lint\nStop: Jet.UnterminatedText: stop\nLint: L0002: lint\nError: Jet.UnknownCommand: name\nError: couldn't read it: prose\n"
+    assert_eq(dc_report_codes(text).join(" "), "Jet.StrayCharacter L0001 Jet.UnterminatedText L0002 Jet.UnknownCommand")
 }
 
 // tests/diagnostics_coverage.rs:967-1067: every report a snapshot opens names a
@@ -141,19 +141,19 @@ ds_part: fn(line: String, label: String) -> Bool {
         lines: dc_read(path).split("\n").to_list()
         loop (start, line) in lines {
             id: ds_opener(line)
-            if id == "" || (!id.starts_with("jet.") && !dc_is_code(id)) -> next
+            if id == "" || (!id.starts_with("Jet.") && !dc_is_code(id)) -> next
             row: ds_row(rows, id)
             if row < 0 {
                 failures.push("{path}:{start + 1} opens unregistered diagnostic {id}")
                 next
             }
-            code: rows[row].code
+            name: rows[row].name
             end := lines.len()
             loop (index, other) in lines {
                 if index > start && index < end && ds_opener(other) != "" -> end = index
             }
-            what: line.index("]: ") ?? -1
-            if what < 0 || dc_slice(line, what + 3, line.count_bytes()).trim() == "" {
+            what: line.index("{id}: ") ?? -1
+            if what < 0 || dc_slice(line, what + id.count_bytes() + 2, line.count_bytes()).trim() == "" {
                 failures.push("{path}:{start + 1} lost What for {id}")
             }
             why := false
@@ -163,12 +163,12 @@ ds_part: fn(line: String, label: String) -> Bool {
                 if index < start || index >= end -> next
                 if ds_part(other, "Why") -> why = true
                 if ds_part(other, "Fix") -> fix = true
-                if other.trim() == ("More: jet-lang.dev/e/{code}") -> more = true
+                if other.trim() == ("More: jet-lang.dev/e/{name}") -> more = true
             }
             if !why -> failures.push("{path}:{start + 1} lost Why for {id}")
             if !fix -> failures.push("{path}:{start + 1} lost Fix for {id}")
             if !more {
-                failures.push("{path}:{start + 1} lost the `More: jet-lang.dev/e/{code}` link for {id}")
+                failures.push("{path}:{start + 1} lost the `More: jet-lang.dev/e/{name}` link for {id}")
             }
         }
     }
@@ -189,18 +189,18 @@ ds_part: fn(line: String, label: String) -> Bool {
 
 // tests/diagnostics_coverage.rs:683-704, re-pointed at the current product:
 // `bench` routes through the active E2101 unknown-command row, which the
-// snapshot renders with its type path and link.
+// snapshot renders with its name and link.
 #Test("retired_bench_command_snapshot_keeps_registered_teaching_code") {
     guards_enter_root()
     rows: dc_registered_rows()
-    row: ds_row(rows, "jet.UnknownCommand")
+    row: ds_row(rows, "Jet.UnknownCommand")
     assert(row >= 0, "the unknown-command route must stay registered")
     assert_eq(rows[row].code, "E2101")
     assert_eq(rows[row].status, "active")
     snapshot: dc_read("Tests/UI/bench_command_retired_e2101.stderr")
-    assert(snapshot.starts_with("Error [jet.UnknownCommand]: "), "snapshot lost the E2101 opener: {snapshot}")
+    assert(snapshot.starts_with("Error: Jet.UnknownCommand: "), "snapshot lost the E2101 opener: {snapshot}")
     assert(snapshot.contains("`bench`"), "snapshot lost the retired spelling: {snapshot}")
-    assert(snapshot.contains("\nMore: jet-lang.dev/e/E2101"), "snapshot lost the E2101 link: {snapshot}")
+    assert(snapshot.contains("\nMore: jet-lang.dev/e/Jet.UnknownCommand"), "snapshot lost the E2101 link: {snapshot}")
 }
 
 // The codes only `left` holds and the codes only `right` holds, each sorted.
@@ -222,9 +222,9 @@ ds_set_diff: fn(left: [String], right: [String]) -> {left_only: [String], right_
 // fixture code that is retired or no longer registered.
 #Test("reverse_coverage_diff_names_retired_and_unregistered_fixture_codes") {
     guards_enter_root()
-    diff: ds_set_diff([String]{}, dc_report_codes("Error [E0004]: retired\nError [E9999]: no longer registered\n"))
+    diff: ds_set_diff([String]{}, dc_report_codes("Error: Jet.RetiredStagedParameters: retired\nError: E9999: no longer registered\n"))
     assert_eq(diff.left_only.len(), 0)
-    assert_eq(diff.right_only.join("\n  "), "E0004\n  E9999")
+    assert_eq(diff.right_only.join("\n  "), "E9999\n  Jet.RetiredStagedParameters")
 }
 
 // tests/diagnostics_coverage.rs:1171-1189: the voice scan covers the owned

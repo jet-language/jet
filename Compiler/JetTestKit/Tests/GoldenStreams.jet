@@ -35,20 +35,20 @@ kit_test_golden_env: fn(root: String) -> KitEnv {
     mismatch: kit_golden_stream_verdict("case", hello, "o0", kit_test_golden_run("wrong\n", "", 0), kit_test_golden_bless(), "", "", false)
     assert_eq(mismatch.status, "FAIL")
     assert(mismatch.diff.contains("--- expected/"))
-    assert_eq(kit_golden_stream_verdict("case", error, "o0", kit_test_golden_run("", "Stop [E3003]: expected stop\n", 70), kit_test_golden_bless(), "", "", false).status, "PASS")
-    assert_eq(kit_golden_stream_verdict("case", error, "o0", kit_test_golden_run("", "Stop [E3003]: expected stop\n", 0), kit_test_golden_bless(), "", "", false).status, "FAIL")
-    assert_eq(kit_golden_stream_verdict("case", error, "o0", kit_test_golden_run("", "Stop [E3003]: expected stop\n", 1), kit_test_golden_bless(), "", "", false).status, "FAIL")
-    assert_eq(kit_golden_stream_verdict("case", error, "o0", kit_test_golden_run("unexpected\n", "Stop [E3003]: expected stop\n", 70), kit_test_golden_bless(), "", "", false).status, "FAIL")
+    assert_eq(kit_golden_stream_verdict("case", error, "o0", kit_test_golden_run("", "Stop: Jet.DeadlineExceeded: expected stop\n", 70), kit_test_golden_bless(), "", "", false).status, "PASS")
+    assert_eq(kit_golden_stream_verdict("case", error, "o0", kit_test_golden_run("", "Stop: Jet.DeadlineExceeded: expected stop\n", 0), kit_test_golden_bless(), "", "", false).status, "FAIL")
+    assert_eq(kit_golden_stream_verdict("case", error, "o0", kit_test_golden_run("", "Stop: Jet.DeadlineExceeded: expected stop\n", 1), kit_test_golden_bless(), "", "", false).status, "FAIL")
+    assert_eq(kit_golden_stream_verdict("case", error, "o0", kit_test_golden_run("unexpected\n", "Stop: Jet.DeadlineExceeded: expected stop\n", 70), kit_test_golden_bless(), "", "", false).status, "FAIL")
     assert_eq(kit_golden_stream_verdict("case", stderr, "o0", kit_test_golden_run("hello\n", "notice\n", 0), kit_test_golden_bless(), "", "", false).status, "PASS")
     assert_eq(kit_golden_stream_verdict("case", stderr, "o0", kit_test_golden_run("hello\n", "wrong\n", 0), kit_test_golden_bless(), "", "", false).status, "FAIL")
     assert_eq(kit_golden_stream_verdict("case", kit_test_golden_fixture("missing"), "o0", kit_test_golden_run("", "", 0), kit_test_golden_bless(), "", "", false).status, "FAIL")
 }
 
 #Test("golden failure reports require the exact registered exit oracle") {
-    assert_eq(kit_golden_failure_exit("unknown", "Stop [E3001]: panic\n"), Val(70))
+    assert_eq(kit_golden_failure_exit("unknown", "Stop: Jet.Panic: panic\n"), Val(70))
     assert_eq(kit_golden_failure_exit("unknown", "Runtime fault [R0801]: bad pointer\nexit: 1\n"), None)
     assert_eq(kit_golden_failure_exit("Examples/ErrorsAndEffects/Errors/FatalExit", "entry report\n"), Val(1))
-    assert_eq(kit_golden_failure_exit("Examples/unknown", "Error [jet.InvalidConstructionField]: missing fields\n"), Val(1))
+    assert_eq(kit_golden_failure_exit("Examples/unknown", "Error: Jet.InvalidConstructionField: missing fields\n"), Val(1))
     assert_eq(kit_golden_failure_exit("Examples/unknown", "unregistered report\n"), None)
     assert_eq(kit_golden_failure_exit("Tests/Run/FailureFoundation/MintedFailureLeavesRun", "Error: NotFound(zed) (type: FindError)\n"), Val(1))
 }
@@ -139,7 +139,7 @@ kit_test_golden_step: fn(argv: [String], action: String) -> KitStep {
     kit_exec_write(files.join(root, "{entry.expected}.case"), "env: JET_TESTKIT_WARNING=1\n")
     warning: kit_golden_run_entry(entry, tier, env, files.join(root, "warning"), kit_test_golden_bless())
     assert_eq(warning.verdict.status, "FAIL")
-    assert(warning.verdict.detail.contains("L0507"))
+    assert(warning.verdict.detail.contains("Jet.BranchArmTable"))
     kit_exec_write(files.join(root, "{entry.expected}.case"), "env: JET_TESTKIT_ICE=1\n")
     ice: kit_golden_run_entry(entry, tier, env, files.join(root, "ice"), kit_test_golden_bless())
     assert_eq(ice.verdict.status, "ERROR")
@@ -185,11 +185,11 @@ kit_test_golden_step: fn(argv: [String], action: String) -> KitStep {
     loop outcome in kit_golden_run_suite(entry, context) {
         assert_eq(outcome.verdict.status, "FAIL")
     }
-    kit_exec_write(files.join(root, "{entry.expected}.o1.err.out"), "Error [jet.StrayCharacter]: rejected\n")
+    kit_exec_write(files.join(root, "{entry.expected}.o1.err.out"), "Error: Jet.StrayCharacter: rejected\n")
     rejected: kit_golden_run_suite(entry, context)
     assert_eq(rejected[0].verdict.status, "PASS")
     assert_eq(rejected[1].verdict.status, "FAIL")
-    kit_exec_write(files.join(root, "{entry.expected}.o1.err.out"), "Error [jet.StrayCharacter]: other\n")
+    kit_exec_write(files.join(root, "{entry.expected}.o1.err.out"), "Error: Jet.StrayCharacter: other\n")
     assert_eq(kit_golden_run_suite(entry, context)[0].verdict.status, "FAIL")
     files.remove_all(root) ?? panic("remove tier-expected scratch")
 }

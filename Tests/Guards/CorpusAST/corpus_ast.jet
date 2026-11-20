@@ -1520,10 +1520,10 @@ policy_has_raw_process_boundary: fn(program: Program) -> Bool {
 }
 
 policy_guidance_lint: fn(name: String) -> Bool {
-    name == "jet.MessageText" || name == "jet.RedundantFixedCleanup" || name == "jet.UnitScalarRewrap" || name == "jet.PathContainmentStringPrefix" || name == "jet.CompleteAsciiCaseLadder" || name == "jet.WalkFilesFilter"
+    name == "Jet.MessageText" || name == "Jet.RedundantFixedCleanup" || name == "Jet.UnitScalarRewrap" || name == "Jet.PathContainmentStringPrefix" || name == "Jet.CompleteAsciiCaseLadder" || name == "Jet.WalkFilesFilter"
 }
 
-// The lint type path an `#Allow` names (`jet.UnitScalarRewrap`).
+// The lint type path an `#Allow` names (`Jet.UnitScalarRewrap`).
 policy_allow_lint: fn(expression: Expr) -> String? {
     if expression == .Field(base, member, _, _) {
         if base == .Ident(package, _, _) -> return Val("{package}.{member}")
@@ -2074,12 +2074,12 @@ policy_ast_test_cli_boundaries: fn() PolicyError! {
 policy_ast_test_allow_source_reason: fn() PolicyError! {
     manifest: policy_manifest()
     error := ""
-    if policy_evaluate_source(manifest, "Examples/Text/unreviewed_allow.jet", "run: fn() {{ #Allow(jet.UnitScalarRewrap) print(\"kept\") }}") == {
+    if policy_evaluate_source(manifest, "Examples/Text/unreviewed_allow.jet", "run: fn() {{ #Allow(Jet.UnitScalarRewrap) print(\"kept\") }}") == {
         .Err(failure) -> { error = failure.message }
         .Ok(_) -> panic("maintained guidance allowance must explain itself")
     }
     assert(error.contains("reason at its source site"), error)
-    policy_evaluate_source(manifest, "Examples/Text/reviewed_allow.jet", "run: fn() {{ #Allow(jet.UnitScalarRewrap, \"the example intentionally shows explicit conversion\") print(\"kept\") }}")
+    policy_evaluate_source(manifest, "Examples/Text/reviewed_allow.jet", "run: fn() {{ #Allow(Jet.UnitScalarRewrap, \"the example intentionally shows explicit conversion\") print(\"kept\") }}")
     Ok()
 }
 

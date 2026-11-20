@@ -635,13 +635,13 @@ parse_whole: fn(text: String) -> Dyn EncodingError! {
     json.parse_with_limits(text, limits)
 }
 
-// `jet check` errors (`Error [NAME]: message`, then `--> path:line:col`
+// `jet check` errors (`Error: NAME: message`, then `--> path:line:col`
 // within three lines), mapped through the unit's files. NAME is what the
 // diagnostic renderer prints (diagnostic_display_name): a registry name such
-// as `jet.UnknownType`, else the raw code.
+// as `Jet.UnknownType`, else the raw code.
 locate_check: fn(map: Dyn, log: String) -> String {
     spans: file_spans(map)
-    head: regex.compile("^Error \\[([^\\]]+)\\]: (.*)$") ?? panic("error pattern: {err}")
+    head: regex.compile("^Error: ([^: ]+): (.*)$") ?? panic("error pattern: {err}")
     arrow: regex.compile("-->\\s+(\\S+?):(\\d+):(\\d+)") ?? panic("location pattern: {err}")
     lines: log.split("\n").to_list()
     found := [Located]{}
@@ -976,12 +976,12 @@ check_fixture: fn(name: String) -[FS]> String Never! {
     map: json.parse(CHECK_MAP) ?? panic("{err}")
     log: check_fixture("check-errors.log")
     want: [String]{
-        "Jetpack/A.jet:3:5: E0107 Nothing named `x` exists here",
-        "Jetpack/Foo.jet:3:4: E0119 bad",
-        "Jetpack/A.jet:3:5: jet.UnknownName a registry name",
-        "(generated):99:0: E0001 past the map",
-        "Jetpack/Foo.jet:5:1: E0120 again",
-        "a:1:2: E0002 lazy",
+        "Jetpack/A.jet:3:5: Jet.UnknownName Nothing named `x` exists here",
+        "Jetpack/Foo.jet:3:4: web.BadPath bad",
+        "Jetpack/A.jet:3:5: Jet.UnknownName a registry name",
+        "(generated):99:0: Jet.StrayCharacter past the map",
+        "Jetpack/Foo.jet:5:1: Jet.ReadOnlyValueNotOwned again",
+        "a:1:2: Jet.UnterminatedText lazy",
         "errors per file:",
         "      2  Jetpack/A.jet",
         "      2  Jetpack/Foo.jet",
@@ -997,7 +997,7 @@ check_fixture: fn(name: String) -[FS]> String Never! {
     map: json.parse(CHECK_MAP) ?? panic("{err}")
     log: check_fixture("check-rendered.log")
     want: [String]{
-        "Jetpack/A.jet:5:19: jet.UnknownType There's no type called `PolicyValue`",
+        "Jetpack/A.jet:5:19: Jet.UnknownType There's no type called `PolicyValue`",
         "errors per file:",
         "      1  Jetpack/A.jet",
         "total errors: 1",

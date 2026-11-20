@@ -6,7 +6,7 @@
 //   3. If the census failed, a SUB is QUARANTINED when a census row names
 //      one of its touched files (Core/X/Y.jet, <corelib>/Core/X/Y.jet, or
 //      module path Core/X/Y), or an error's quoted source line (`NNN | text`
-//      under an `Error [` header in census/*.err) is a line its patch adds,
+//      under an `Error: ` heading in census/*.err) is a line its patch adds,
 //      with every later SUB of the same lead. Integrate10.jet BATCH-r then
 //      runs once more with the others.
 //
@@ -74,15 +74,15 @@ census_rows: fn(integ: String) -> [String] {
     loop cells in text.tsv_records().filter(fn(cells) { cells.len() > 1 }) -> place.replace(cells[1].replace("<corelib>/", ""), "").removesuffix(".jet")
 }
 
-// The source lines quoted under Error headers (not warnings or notes) in census/*.err, trimmed, longer than 8.
+// The source lines quoted under Error headings (not warnings or notes) in census/*.err, trimmed, longer than 8.
 error_lines: fn(integ: String) -> [String] {
     quoted: regex.compile("^ *[0-9]+ \\| (.*)$")
     out := [String]{}
     in_error := false
     loop line in read_all("{integ}/census", "*.err").lines() {
         if {
-            line.starts_with("Error [") -> in_error = true
-            line.starts_with("Warning [") || line.starts_with("Note [") -> in_error = false
+            line.starts_with("Error: ") -> in_error = true
+            line.starts_with("Warning: ") || line.starts_with("Note: ") -> in_error = false
             in_error && quoted.match(line) == .Val(m) && m.groups[0].trim().len() > 8 -> {
                 out.push(m.groups[0].trim())
             }

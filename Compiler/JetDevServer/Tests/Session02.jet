@@ -48,7 +48,7 @@ use jet_devserver.[SESSION_CLIENT_TTL_MS, SESSION_MAX_CLIENTS]
     session.remember_last_good_view("debugger", "", "good-revision", "debug-good")
     session.remember_last_good_view("runtime", "", "good-revision", "runtime-good")
     session.observe_source("broken-revision")
-    session.mark_error("E0102", "Error [jet.UnknownFunction]: missing name")
+    session.mark_error("E0102", "Error: Jet.UnknownFunction: missing name")
     json: session.json()
     expectations: [String]{
         "\"source_revision\":\"broken-revision\"",
@@ -59,7 +59,7 @@ use jet_devserver.[SESSION_CLIENT_TTL_MS, SESSION_MAX_CLIENTS]
         "\"diagnostic_revision\":\"broken-revision\"",
         "\"state\":\"error\"",
         "\"diagnostic_code\":\"E0102\"",
-        "Error [jet.UnknownFunction]: missing name",
+        "Error: Jet.UnknownFunction: missing name",
     }
     loop expected in expectations {
         assert(json.contains(expected), "session lost {expected}: {json}")

@@ -66,13 +66,13 @@ script_deps_test_root: fn(path: String, source: String) -> JetDriverAuthorizedSo
     unmatched := [JetDriverAuthorizedSourceRoot]{script_deps_test_root(path, "use textkit#9.9.9\nrun: fn() {{}}\n")}
     rejected := [JetDriverScriptDependency]{}
     refusal: jet_cli_script_dependency_roots(unmatched, "{path}/stats.jet", rejected, false) ?? panic("local package with no matching version must fail")
-    assert(refusal.exit_code != 0 && refusal.stderr.contains("E1253") && refusal.stderr.contains("no version satisfies"))
+    assert(refusal.exit_code != 0 && refusal.stderr.contains("Jet.UnresolvedInlineDependency") && refusal.stderr.contains("no version satisfies"))
     assert(unmatched.len() == 1 && rejected.len() == 0)
 
     cli_files.symlink(".", "{package}/loop") ?? panic("hostile dependency link")
     hostile := [JetDriverAuthorizedSourceRoot]{script_deps_test_root(path, source)}
     refusal_link: jet_cli_script_dependency_roots(hostile, "{path}/stats.jet", rejected, false) ?? panic("hostile source must fail")
-    assert(refusal_link.stderr.contains("E1253") && refusal_link.stderr.contains("symlink"))
+    assert(refusal_link.stderr.contains("Jet.UnresolvedInlineDependency") && refusal_link.stderr.contains("symlink"))
     cli_files.remove("{package}/loop") ?? panic("remove hostile link")
     cli_files.symlink("{path}/.jet/inline-deps", "{path}/alias") ?? panic("hostile ancestor")
     assert(jet_cli_script_dependency_authority("{path}/alias", "textkit") == .Err(_))

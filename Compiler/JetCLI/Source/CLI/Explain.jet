@@ -22,8 +22,9 @@ jet_cli_explanation_output: fn(explanation: DiagnosticExplanation, color: Bool, 
 
 // None means this is not a diagnostic-registry query: the caller continues
 // through its syntax/policy/build-fact lookup rather than inventing a row. A
-// bare diagnostic name, such as `StrayCharacter`, is Jet's own
-// `jet.StrayCharacter`.
+// diagnostic resolves by its name (`Jet.StrayCharacter`) or by the code that
+// aliases it (`E0001`); a bare name, such as `StrayCharacter`, is Jet's own
+// `Jet.StrayCharacter`.
 jet_cli_explain_diagnostic: fn(args: [String], color: Bool, json: Bool) -> JetCLIPlan? Never! {
     if args.len() < 2 {
         return Val(jet_cli_done("", "Usage: jet explain <CODE|FACT> [file]\n       jet explain marker <file>:<line> <policy-key>\n       {JET_CLI_EXPLAIN_EFFECTS_USAGE}\n", JET_DRIVER_EXIT_USAGE))
@@ -35,7 +36,7 @@ jet_cli_explain_diagnostic: fn(args: [String], color: Bool, json: Bool) -> JetCL
     if bytes.len() == 0 || bytes[0] < (U8{65}) || bytes[0] > (U8{90}) || args[1].contains(".") {
         return None
     }
-    explanation: diagnostic_explanation("jet.{args[1]}") ?? return None
+    explanation: diagnostic_explanation("Jet.{args[1]}") ?? return None
     Val(jet_cli_explanation_output(explanation, color, json))
 }
 

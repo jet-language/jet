@@ -54,7 +54,7 @@ trust_pin_test_code: fn(result: String TrustError!) -> String {
 
 // The text of Tests/Fixtures/JetpackDiagnostics/E1224.stderr. It is written here
 // because an embed may not leave this package (E0957).
-TRUST_PIN_E1224_SNAPSHOT: "Error [jet.PackageFileOperationFailed]: Couldn't write .jet/lock\n Why: The lock file records exact toolchain identity\n Fix: Check write permissions: permission denied\nMore: jet-lang.dev/e/E1224\n"
+TRUST_PIN_E1224_SNAPSHOT: "Error: Jet.PackageFileOperationFailed: Couldn't write .jet/lock\n Why: The lock file records exact toolchain identity\n Fix: Check write permissions: permission denied\nMore: jet-lang.dev/e/Jet.PackageFileOperationFailed\n"
 
 // ── T1 ──
 
@@ -241,5 +241,5 @@ TRUST_PIN_E1224_SNAPSHOT: "Error [jet.PackageFileOperationFailed]: Couldn't writ
     files.create_dir_all(files.join(root, ".jet/lock")) ?? panic("lock path held by a directory")
     assert_eq(trust_pin_test_code(trust_pin_move(root, Val("a0.7"), "a9.9.9")), "E1224")
     diagnostic: trust_pin_lock_write_diagnostic("permission denied")
-    assert_eq(TRUST_PIN_E1224_SNAPSHOT, "Error [{diagnostic_display_name(diagnostic.code)}]: {diagnostic.what}\n Why: {diagnostic.why}\n Fix: {diagnostic.fix}\nMore: jet-lang.dev/e/{diagnostic.code}\n")
+    assert_eq(TRUST_PIN_E1224_SNAPSHOT, "Error: {diagnostic_display_name(diagnostic.code)}: {diagnostic.what}\n Why: {diagnostic.why}\n Fix: {diagnostic.fix}\nMore: jet-lang.dev/e/{diagnostic_display_name(diagnostic.code)}\n")
 }

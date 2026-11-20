@@ -62,7 +62,7 @@ WRAPPER_FIXTURES: [String]{"lowlevel_mem_direct_import_without_unsafe", "sys_pos
 
 WRAPPER_DIAGNOSTICS: [Int]{3, 2}
 
-UNSAFE_DIAGNOSTIC: "Error [jet.UnsafeCallOutsideUnsafe]"
+UNSAFE_DIAGNOSTIC: "Error: Jet.UnsafeCallOutsideUnsafe: "
 
 DEFAULT_SEED: 4
 
@@ -2007,7 +2007,7 @@ occurrences: fn(haystack: String, needle: String) -> Int Never! {
 }
 
 // The two unsafe-wrapper fixtures must each report exactly their
-// jet.UnsafeCallOutsideUnsafe diagnostics and exit 1.
+// Jet.UnsafeCallOutsideUnsafe diagnostics and exit 1.
 wrapper_fixtures: fn(gate: &Gate, jet: String, checker_head: String, head: String) -[Env, Exec, FS, IO, Time, Time.Wait]> () {
     loop i in 0..<WRAPPER_FIXTURES.len() {
         fixture: WRAPPER_FIXTURES[i]
@@ -2019,7 +2019,7 @@ wrapper_fixtures: fn(gate: &Gate, jet: String, checker_head: String, head: Strin
         check: command(gate, fixture, [String]{jet, "check", "{gate.repo}/Tests/UI/{fixture}.jet"})
         found: occurrences(check.output, UNSAFE_DIAGNOSTIC)
         verdict: if check.code == 1 && found == expected -> "pass" else -> "fail"
-        add(gate, fixture, verdict, "{check.detail}; {found}/{expected} jet.UnsafeCallOutsideUnsafe; {fixture}.log")
+        add(gate, fixture, verdict, "{check.detail}; {found}/{expected} Jet.UnsafeCallOutsideUnsafe; {fixture}.log")
     }
 }
 

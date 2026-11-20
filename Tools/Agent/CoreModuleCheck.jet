@@ -329,16 +329,16 @@ main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int CheckError! 
 
 #Test("a check counts every error header and names the first") {
     output: [String]{
-        "Error [jet.UseWhileWriteActive]: `tree` is being changed in this call, so it can't be used again here",
+        "Error: Jet.UseWhileWriteActive: `tree` is being changed in this call, so it can't be used again here",
         "  --> <corelib>/Core/Service/Service.jet:920:98",
         "    |",
-        "Warning [jet.UnusedImport]: Import `service` is never used.",
-        "Error [jet.UseWhileWriteActive]: `tree` is being changed in this call, so it can't be used again here",
+        "Warning: Jet.UnusedImport: Import `service` is never used.",
+        "Error: Jet.UseWhileWriteActive: `tree` is being changed in this call, so it can't be used again here",
         "  --> <corelib>/Core/Service/Service.jet:964:98",
     }.join("\n")
     found: check_summary("core.service", output, 1)
     assert_eq(found.errors, 2)
-    assert_eq(found.first, "Error [jet.UseWhileWriteActive]: `tree` is being changed in this call, so it can't be used again here --> <corelib>/Core/Service/Service.jet:920:98")
+    assert_eq(found.first, "Error: Jet.UseWhileWriteActive: `tree` is being changed in this call, so it can't be used again here --> <corelib>/Core/Service/Service.jet:920:98")
     clean: check_summary("core.x", "ok: `x.jet` has no errors\n", 0)
     assert_eq(clean.errors, 0)
     assert_eq(clean.first, "")
@@ -352,17 +352,17 @@ summary_row: fn(name: String, errors: Int, first: String) -> Summary Never! {
 ceiling_row: fn(name: String, errors: Int) -> Ceiling Never! { Ceiling{name: name, errors: errors} }
 
 #Test("the ratchet fails on new or worse modules and on stale ceilings") {
-    results: [Summary]{summary_row("core.a", 0, ""), summary_row("core.b", 3, "Error [E1] b"), summary_row("core.c", 2, "Error [E2] c"), summary_row("core.d", 1, "Error [E3] d")}
+    results: [Summary]{summary_row("core.a", 0, ""), summary_row("core.b", 3, "Error: E1 b"), summary_row("core.c", 2, "Error: E2 c"), summary_row("core.d", 1, "Error: E3 d")}
     ceilings: [Ceiling]{ceiling_row("core.b", 3), ceiling_row("core.c", 1), ceiling_row("core.d", 4)}
     assert_eq(
         ratchet_problems(ceilings, results),
         [String]{
-            "core.c: 2 errors (ceiling 1); Error [E2] c",
+            "core.c: 2 errors (ceiling 1); Error: E2 c",
             "core.d: 1 errors, below its ceiling 4; lower it with --write",
         },
     )
     assert_eq(ratchet_problems([Ceiling]{ceiling_row("core.b", 3)}, [Summary]{summary_row("core.b", 3, "")}).len(), 0)
-    assert_eq(ratchet_problems([Ceiling]{}, [Summary]{summary_row("core.a", 1, "Error [E9] a")}), [String]{"core.a: 1 errors (ceiling 0); Error [E9] a"})
+    assert_eq(ratchet_problems([Ceiling]{}, [Summary]{summary_row("core.a", 1, "Error: E9 a")}), [String]{"core.a: 1 errors (ceiling 0); Error: E9 a"})
 }
 
 #Test("--write lowers and drops ceilings but never raises one") {

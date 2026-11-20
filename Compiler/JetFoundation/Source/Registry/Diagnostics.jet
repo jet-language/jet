@@ -324,7 +324,9 @@ diagnostic_identity_push: fn(bytes: [U8], index: Int, found: &[DiagnosticIdentit
         module_end: path_start + module_name.count_bytes()
         leaf = module_end + 1
         qualifier_start := module_end
-        loop qualifier_start > path_start && diagnostic_byte_at(bytes, qualifier_start - 1) != 46 -> qualifier_start -= 1
+        loop qualifier_start > path_start && diagnostic_byte_at(bytes, qualifier_start - 1) != 46 {
+            qualifier_start -= 1
+        }
         qualifier = foundation_byte_text(bytes, qualifier_start, module_end)
     }
     if leaf >= end -> return -1
@@ -397,7 +399,7 @@ diagnostic_registry_row: fn(code: String) -> DiagnosticRegistryRow? Never! {
     diagnostic_registry_row_in(DIAGNOSTIC_ROWS, code)
 }
 
-// The row whose Diagnostic type path is `name` (`jet.UnknownName`).
+// The row whose name is `name` (`Jet.UnknownName`).
 diagnostic_registry_row_named: fn(name: String) -> DiagnosticRegistryRow? Never! {
     loop row in DIAGNOSTIC_ROWS {
         if row.name == name -> return Val(row)
@@ -405,13 +407,11 @@ diagnostic_registry_row_named: fn(name: String) -> DiagnosticRegistryRow? Never!
     None
 }
 
-// What a report's header prints for `code`: a registered row's type path
-// (`jet.UnknownName`); any other code is already a type path (`web.BadPath`).
-// A row the runtime reports keeps its code, which is what the runtime prints.
+// What a report's header prints for `code`: a registered row's name
+// (`Jet.UnknownName`), of which the code is only a stable alias; any other
+// code is already a library's type path (`web.BadPath`).
 diagnostic_display_name: fn(code: String) -> String Never! {
-    if diagnostic_registry_row(code) == .Val(row) {
-        if !row.has_stage("runtime") -> return row.name
-    }
+    if diagnostic_registry_row(code) == .Val(row) -> return row.name
     code.copy()
 }
 
