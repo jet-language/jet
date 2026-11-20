@@ -1199,10 +1199,14 @@ stdin is empty too. D-DBG-VERBS1=A names the commands:
   that is not a Bool is refused when it is set; one that fails at a hit
   stops and says why. Setting it says where the condition runs: in the
   program, when its code writes only its own stack and the blocks it
-  allocates, which come from an arena of 64 KiB of its own, emptied at
-  each hit (a hit that finds no room left, or frees the program's memory,
-  traps to the debugger, which checks it); else the debugger checks it at
-  each hit, which stops the program each time.
+  allocates, and copies or drops only text it made, its blocks and text
+  coming from an arena of 64 KiB of its own, emptied at each hit (the
+  runtime's routines that build, render, compare and drop text run there
+  as fresh copies from the runtime pack beside this jet, so
+  `"{i}" == "3"` runs in the program; a hit that finds no room left, or
+  frees the program's memory, traps to the debugger, which checks it);
+  else the debugger checks it at each hit, which stops the program each
+  time.
 - `log <file:line> "<text with {expr}>"` sets a logpoint. It prints its
   message with each `{expr}` filled in, then the program runs on. Setting it
   says where it runs. A logpoint with no condition, and whose parts are

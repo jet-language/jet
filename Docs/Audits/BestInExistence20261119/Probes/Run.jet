@@ -496,15 +496,17 @@ probe_d6: fn(probe: &Probe) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
         work: probe_fixture(probe, "Debug", names[index])
         _: probe_console(probe, [String]{probe.jet, "debug", "prog.jet"}, work, probe_stdin_lines(probe, "Debug", cases[index]))
     }
-    probe_note("hits.jet: a million hits of line 15, plain, under a placed logpoint and under a condition that never holds (-O0 image)")
+    probe_note("hits.jet: a million hits of line 15, plain, under a placed logpoint, under a condition that never holds and under a String condition that never holds (-O0 image)")
     work: probe_programs(probe, [String]{"hits.jet"})
     _: probe_run(probe, [String]{probe.jet, "build", "-O0", "hits.jet"}, work)
     plain: probe_run(probe, [String]{files.join(work, ".jet/build/hits"), "1000000"}, work)
     logged: probe_console(probe, [String]{probe.jet, "debug", ".jet/build/hits", "--", "1000000"}, work, [String]{"log hits.jet:15 \"s{{step}}\"", "c"})
     held: probe_console(probe, [String]{probe.jet, "debug", ".jet/build/hits", "--", "1000000"}, work, [String]{"break hits.jet:15 if i == -1", "c"})
+    text: probe_console(probe, [String]{probe.jet, "debug", ".jet/build/hits", "--", "1000000"}, work, [String]{"break hits.jet:15 if \"{{i}}\" == \"-1\"", "c"})
     base: probe_took_ns(plain.text)
     probe_per_hit("placed logpoint", logged, base)
     probe_per_hit("in-process condition", held, base)
+    probe_per_hit("in-process String condition", text, base)
     print("")
     lldb: if probe.lldb == .Val(tool) -> Val([String]{tool, "-b", "-o", "breakpoint set --file hits.jet --line 15 --condition 'i == -1'", "-o", "run", ".jet/build/hits", "--", "100000"}) else -> None
     probe_peer_condition(probe, "lldb", lldb, work)

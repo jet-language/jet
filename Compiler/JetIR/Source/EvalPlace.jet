@@ -4,18 +4,20 @@ use jet_foundation.[name_rows_value]
 // itself, at the breakpoint, rather than stopping the program to evaluate
 // it at each hit (JetDebug NativePlace.jet). The debugger places the
 // condition's function and every function it calls or drops through
-// afresh, next to the program's code. It sends their allocations to a
-// scratch arena of their own, emptied at each hit, and each of their other
-// runtime calls back to it, which then evaluates that hit as before. So
-// what the condition may not do is what that code does inline, read here
-// from the functions as built: write memory other than its own stack or a
-// block it allocated (a Store, StreamStore or CopyBytes through any other
-// address), take a reference (the inline retain), change an atomic in
-// place, copy or drop a String, run an `#FFI(asm)` template, or call a
-// function value, whose code it can't place. A release is left to it:
-// with no retain, a release gives up only a block the code allocated
-// itself, in the arena, whose free goes back to the arena. The stop polls
-// are placed too, and their routine is a runtime call.
+// afresh, next to the program's code, and the runtime's routines that
+// build, render, compare and drop text afresh from the runtime pack. It
+// sends their allocations to a scratch arena of their own, emptied at each
+// hit, and each of their other runtime calls back to it, which then
+// evaluates that hit as before. So what the condition may not do is what
+// that code does inline, read here from the functions as built: write
+// memory other than its own stack or a block it allocated (a Store,
+// StreamStore or CopyBytes through any other address), take a reference
+// (the inline retain), change an atomic in place, copy or drop a String it
+// did not make, run an `#FFI(asm)` template, or call a function value,
+// whose code it can't place. A release is left to it: with no retain, a
+// release gives up only a block the code allocated itself, in the arena,
+// whose free goes back to the arena. The stop polls are placed too, and
+// their routine is a runtime call.
 
 // Why the expression function `row` of `m` can't run in the program, "" when
 // it can: the first thing it, or a function it calls, does inline that the
@@ -31,7 +33,8 @@ ir_eval_place_refusal: fn(m: IRModule, row: Int) -> String Never! {
         if ir_stop_key(f.key) -> next
         place: if id == row -> "" else -> " (in `{f.name}`)"
         if f.asm != None -> return "it runs the `#FFI(asm)` function `{f.name}`"
-        own: ir_eval_place_own(m, f)
+        own: ir_eval_place_own(m, f, false)
+        made: ir_eval_place_own(m, f, true)
         loop at in 0..<f.op.len() {
             if f.op[at] == {
                 .Store | .StreamStore | .CopyBytes -> {
@@ -51,8 +54,8 @@ ir_eval_place_refusal: fn(m: IRModule, row: Int) -> String Never! {
                     slot: f.a[at]
                     if slot >= 0 && slot < f.slot_type.len() && f.slot_type[slot] >= 0 && f.slot_type[slot] < m.types.len() {
                         ty: m.types[f.slot_type[slot]]
-                        if ty.kind == .String && ty.drop != "" {
-                            return "it copies or drops a String{place}"
+                        if ty.kind == .String && ty.drop != "" && !made[slot] {
+                            return "it copies or drops a String it did not make{place}"
                         }
                         // A drop routine the module builds (a List's, a
                         // box's) is placed and called as a function is.
@@ -77,9 +80,13 @@ IR_EVAL_PLACE_ALLOCS: [String]{"jet_rt_alloc", "jet_rt_alloc_value"}
 // Which slots of `f` (of `m`) only ever hold an address on its own stack or
 // in a block it allocated: each write of one is a StackAddress, a call of an
 // allocating routine (IR_EVAL_PLACE_ALLOCS), or an Offset, Copy or Move of
-// such a slot. Each slot written starts as one, and loses it at a write that
-// isn't.
-ir_eval_place_own: fn(m: IRModule, f: IRFunction) -> [Bool] Never! {
+// such a slot. With `text`, which only ever hold text the code made: each
+// write of one is a ConstText (static text, which a copy or drop leaves
+// be), a runtime call's result (text a routine placed with the code made
+// in the arena; a call of any other calls out before it returns), or a
+// Copy or Move of such a slot. Each slot written starts as one, and loses
+// it at a write that isn't.
+ir_eval_place_own: fn(m: IRModule, f: IRFunction, text: Bool) -> [Bool] Never! {
     count: f.slot_type.len()
     own := loop _ in 0..<count -> false
     loop at in 0..<f.op.len() {
@@ -96,9 +103,9 @@ ir_eval_place_own: fn(m: IRModule, f: IRFunction) -> [Bool] Never! {
             if dst < 0 || dst >= count || !own[dst] -> next
             source: f.a[at]
             op: f.op[at]
-            moved: op == IROp.Offset || op == IROp.Copy || op == IROp.Move
-            allocated: op == IROp.CallRuntime && source >= 0 && source < m.names.len() && IR_EVAL_PLACE_ALLOCS.contains(m.names[source])
-            kept: op == IROp.StackAddress || allocated || (moved && source >= 0 && source < count && own[source])
+            moved: op == IROp.Copy || op == IROp.Move || (!text && op == IROp.Offset)
+            made: if text -> op == IROp.ConstText || op == IROp.CallRuntime else -> op == IROp.StackAddress || (op == IROp.CallRuntime && source >= 0 && source < m.names.len() && IR_EVAL_PLACE_ALLOCS.contains(m.names[source]))
+            kept: made || (moved && source >= 0 && source < count && own[source])
             if !kept {
                 own[dst] = false
                 changed = true
