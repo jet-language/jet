@@ -814,7 +814,7 @@ jet_cli_perf_home_refused: fn(failure: JetCLIPerfHomeError, color: Bool) -> JetD
     if !failure.shared {
         return jet_cli_report_output("", "E2105", failure.cause, jet_cli_why("E2105"), "correct the named problem, then attach again", color, JET_DRIVER_EXIT_USER_ERROR)
     }
-    what: "jet won't profile through `{failure.home}`: {failure.cause}"
+    what: "Jet won't profile through `{failure.home}`: {failure.cause}"
     why: "A flight-recorded program publishes its ring in that directory and takes attach requests from it, so whoever else can reach it could read the program's profile or turn its zones on."
     fix: "remove `{failure.home}`, or set `XDG_RUNTIME_DIR` to a directory only you can open; then start the program again with `jet run --observe` and attach"
     jet_cli_report_output("", "E2123", what, why, fix, color, JET_DRIVER_EXIT_USER_ERROR)
@@ -824,7 +824,7 @@ jet_cli_perf_home_refused: fn(failure: JetCLIPerfHomeError, color: Bool) -> JetD
 // publish what the attach reads, for `cause`; `fix` starts it as it needs.
 jet_cli_perf_attach_unobserved: fn(pid: Int, cause: String, fix: String, color: Bool) -> JetDriverVerbOutput Never! {
     why: "An attach reads what a running program publishes about itself: its live snapshot and flight ring under `jet run --observe`, and its live blocks under `--checked-alloc` too. A process that publishes none of it has nothing to read."
-    jet_cli_report_output("", "E2124", "jet can't attach to process {pid}: {cause}", why, fix, color, JET_DRIVER_EXIT_USER_ERROR)
+    jet_cli_report_output("", "E2124", "Jet can't attach to process {pid}: {cause}", why, fix, color, JET_DRIVER_EXIT_USER_ERROR)
 }
 
 // An attach whose command line names no one process (E2125), as `problem`
