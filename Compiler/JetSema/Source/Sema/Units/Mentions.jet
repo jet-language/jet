@@ -1,6 +1,6 @@
 use {
     units_unicode: core.text
-    jet_foundation.[Span, name_find_bytes]
+    jet_foundation.[NameTable, Span, name_find, name_find_bytes, name_index, name_intern_bytes, name_table_sized]
 }
 
 // Offsets are UTF-8 bytes, never String scalar indices. The source is indexed
@@ -11,10 +11,28 @@ SemaUnitSuffixMention: struct {
     digit_span: Span?,
 }
 
+// The wanted identifiers a source names (sema_units_source_mentions), by
+// their id in `names`: `spans` holds each one's first span, and
+// `unqualified` whether any mention of it is not after a `.`. Id 0, the
+// empty name, is no identifier.
 SemaUnitSourceMentions: struct {
-    identifiers: [String:Span],
-    unqualified: [String:Bool],
+    names: NameTable,
+    spans: [Span],
+    unqualified: [Bool],
     suffixes: [SemaUnitSuffixMention],
+}
+
+// The mentions of a source that names no catalog unit.
+sema_units_mentions_empty: fn() -> SemaUnitSourceMentions Never! {
+    SemaUnitSourceMentions{names: name_table_sized(2), spans: [Span]{Span{start: 0, end: 0}}, unqualified: [Bool]{false}, suffixes: [SemaUnitSuffixMention]{}}
+}
+
+// The id of identifier `name` among `mentions`, or None when the source
+// doesn't name it.
+sema_units_mention: fn(mentions: SemaUnitSourceMentions, name: String) -> Int? Never! {
+    found: name_find(mentions.names, name) ?? return None
+    id: name_index(found)
+    if id == 0 -> None else -> Val(id)
 }
 
 // Rust `is_alphanumeric() || == '_'` on the scalar bytes[at..<end]; ASCII
@@ -61,17 +79,18 @@ sema_units_member_prefixed: fn(names: SemaUnitsCatalogNames, bytes: [U8], start:
 
 // Only identifiers named in `names.wanted` (the catalog's family names and
 // member type names, the only names ever looked up; sema_units_catalog_names)
-// are indexed, and only suffixes a member name prefixes: the maps stay
+// are indexed, and only suffixes a member name prefixes: the tables stay
 // catalog-sized instead of holding every identifier of the source. An
-// identifier run is looked up by its bytes and only a wanted one is built as
-// a String. Each scan decides an ASCII byte in place (a scalar of one byte in
+// identifier run is looked up by its bytes and only a wanted one is interned.
+// Each scan decides an ASCII byte in place (a scalar of one byte in
 // valid UTF-8) and calls sema_units_scalar_end and sema_units_ident only for
 // a scalar past ASCII.
 sema_units_source_mentions: fn(source: String, names: SemaUnitsCatalogNames) -> SemaUnitSourceMentions Never! {
     bytes: source.bytes()
     count: bytes.len()
-    identifiers := [String:Span]{}
-    unqualified := [String:Bool]{}
+    identifiers := name_table_sized(16)
+    spans := [Span]{Span{start: 0, end: 0}}
+    unqualified := [Bool]{false}
     suffixes := [String:SemaUnitSuffixMention]{}
     at := 0
     loop at < count {
@@ -103,11 +122,12 @@ sema_units_source_mentions: fn(source: String, names: SemaUnitsCatalogNames) -> 
             }
         }
         if name_find_bytes(names.wanted, bytes, start, at) != None {
-            run: String.from_bytes(bytes[start..<at]) ?? ""
-            if identifiers.get(run) == None -> identifiers[run] = Span{start: start, end: at}
-            if (start == 0 || bytes[start - 1] != (U8{46})) && unqualified.get(run) == None {
-                unqualified[run] = true
+            id: name_index(name_intern_bytes(identifiers, bytes, start, at))
+            if id == spans.len() {
+                spans.push(Span{start: start, end: at})
+                unqualified.push(false)
             }
+            if start == 0 || bytes[start - 1] != (U8{46}) -> unqualified[id] = true
         }
         // Every scalar start of the run, as the ident loop above visited them.
         offset := start
@@ -125,11 +145,11 @@ sema_units_source_mentions: fn(source: String, names: SemaUnitsCatalogNames) -> 
     sorted := [SemaUnitSuffixMention]{}
     loop (_, row) in suffixes -> sorted.push(row)
     sorted.sort_by(fn(left: SemaUnitSuffixMention, right: SemaUnitSuffixMention) { left.text <=> right.text })
-    SemaUnitSourceMentions{identifiers: identifiers.move(), unqualified: unqualified.move(), suffixes: sorted.move()}
+    SemaUnitSourceMentions{names: identifiers.move(), spans: spans.move(), unqualified: unqualified.move(), suffixes: sorted.move()}
 }
 
 sema_units_identifier: fn(mentions: SemaUnitSourceMentions, name: String) -> Bool Never! {
-    mentions.identifiers.get(name) != None
+    sema_units_mention(mentions, name) != None
 }
 
 // Rust partition_point: the first suffix not less than the member.
@@ -146,20 +166,21 @@ sema_units_suffix_start: fn(mentions: SemaUnitSourceMentions, member: String) ->
 // Whether the source mentions catalog member `member`, whose type name
 // (sema_registration_unit_type_name) is `type_name`.
 sema_units_member: fn(mentions: SemaUnitSourceMentions, member: String, type_name: String) -> Bool Never! {
-    if mentions.unqualified.get(type_name) != None -> return true
+    if sema_units_mention(mentions, type_name) == .Val(id) && mentions.unqualified[id] -> return true
     at: sema_units_suffix_start(mentions, member)
     at < mentions.suffixes.len() && mentions.suffixes[at].text.starts_with(member)
 }
 
 sema_units_identifier_span: fn(mentions: SemaUnitSourceMentions, name: String) -> Span? {
-    mentions.identifiers.get(name)
+    id: sema_units_mention(mentions, name) ?? return None
+    Val(mentions.spans[id])
 }
 
 // Rust source_unit_member_span: whole type name, then earliest from_, then
 // earliest digit suffix. Prefix suffix matches deliberately need no end boundary.
 // `type_name` is the member's type name (sema_registration_unit_type_name).
 sema_units_member_span: fn(mentions: SemaUnitSourceMentions, member: String, type_name: String) -> Span? {
-    if mentions.identifiers.get(type_name) == .Val(span) -> return Val(span)
+    if sema_units_mention(mentions, type_name) == .Val(id) -> return Val(mentions.spans[id])
     from := Span?{None}
     digit := Span?{None}
     at := sema_units_suffix_start(mentions, member)
