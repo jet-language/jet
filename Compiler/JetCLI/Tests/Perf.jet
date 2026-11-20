@@ -62,10 +62,14 @@ use {
         jet_cli_perf_sampler_reason,
         jet_cli_perf_samples_count,
         jet_cli_perf_samples_profile,
+        jet_cli_perf_sites_text,
         jet_cli_perf_source,
         jet_cli_perf_source_position,
         jet_cli_perf_source_profile,
+        jet_cli_perf_syscalls_section,
+        jet_cli_perf_system_read,
         jet_cli_perf_tasks_section,
+        jet_cli_perf_threads_section,
         jet_cli_perf_timed_first,
         jet_cli_perf_waits_read,
         jet_cli_perf_zones_section,
@@ -86,6 +90,8 @@ use {
         NativeVariants,
     ]
     jet_foundation.[
+        CanonicalJSON,
+        CanonicalJSONField,
         JetLiveChannel,
         JetLiveEvent,
         JetLiveGameRecord,
@@ -390,6 +396,76 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     assert_eq(section.type_name, "JetPerfRecords")
     assert_eq(String.from_bytes(canonical_json_bytes(section.value)) ?? "", "{{\"lost\":3,\"reason\":\"the samples file refused their writes\"}}\n")
     assert(jet_cli_perf_records_section(U64{0}, "the samples file refused their writes") == None)
+}
+
+// The runtime's code is in the prelinked runtime image's `.symtab` but in
+// no line table, so a thread it runs and a site in it are named by the
+// symbol, at line 0 with no file, and the spawn's and the counting's own
+// frames, by the name the runtime's source writes, are left out. A site
+// with no line reads as its symbol alone.
+#Test("perf names the runtime's threads and host call sites by their symbols") {
+    functions: [X64ImageFunction]{
+        X64ImageFunction{start: 4096, size: 256, name: "unit.thread_spawn"},
+        X64ImageFunction{start: 4352, size: 256, name: "unit.process_execution_collect_start"},
+        X64ImageFunction{start: 4608, size: 256, name: "jet_rt_process_execution_worker"},
+        X64ImageFunction{start: 4864, size: 256, name: "unit.perf_syscall_call"},
+        X64ImageFunction{start: 5120, size: 256, name: "unit.spawn_pipe"},
+    }
+    sampled := jet_cli_perf_samples_count(X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, [U8]{}, 0)
+    // Rows of 10 words: the main thread, the collector spawned through
+    // thread_spawn by the collector's start, and a thread at an address
+    // no symbol holds.
+    threads: jet_cli_perf_test_words(
+        [Int]{
+            10,
+            3,
+            7,
+            0,
+            16777216,
+            0,
+            0,
+            5,
+            0,
+            0,
+            0,
+            0,
+            8,
+            4608,
+            65536,
+            100,
+            400,
+            50,
+            1,
+            2,
+            4112,
+            4384,
+            9,
+            9000,
+            65536,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+        },
+    )
+    // Rows of 6 words: pipe2 twice from the spawn's pipe helper.
+    calls: jet_cli_perf_test_words([Int]{6, 1, 0, 293, 2, 900, 4872, 5160, 0})
+    jet_cli_perf_system_read(sampled, [Bool]{true}, threads, calls)
+    claimed: sampled.threads_claimed
+    threads_section: jet_cli_perf_threads_section(sampled.threads.move(), claimed) ?? panic("three threads ran")
+    assert_eq(String.from_bytes(canonical_json_bytes(threads_section.value)) ?? "", "{{\"claimed\":3,\"threads\":[{{\"cpu_ns\":5,\"name\":\"main\",\"off_cpu_ns\":0,\"spawned_at\":[],\"stack_bytes\":16777216,\"state\":\"running\",\"tid\":7}},{{\"cpu_ns\":50,\"name\":\"jet_rt_process_execution_worker\",\"off_cpu_ns\":250,\"spawned_at\":[{{\"file\":null,\"function\":\"unit.process_execution_collect_start\",\"line\":0,\"own\":false}}],\"stack_bytes\":65536,\"state\":\"ended\",\"tid\":8}},{{\"cpu_ns\":0,\"name\":\"code at 9000\",\"off_cpu_ns\":0,\"spawned_at\":[],\"stack_bytes\":65536,\"state\":\"ended\",\"tid\":9}}]}}\n")
+    lost: sampled.syscalls_lost
+    calls_section: jet_cli_perf_syscalls_section(sampled.syscalls.move(), lost) ?? panic("pipe2 ran")
+    assert_eq(String.from_bytes(canonical_json_bytes(calls_section.value)) ?? "", "{{\"lost\":0,\"syscalls\":[{{\"count\":2,\"name\":\"pipe2\",\"number\":293,\"stack\":[{{\"file\":null,\"function\":\"unit.spawn_pipe\",\"line\":0,\"own\":false}}],\"time_ns\":900}}]}}\n")
+    row: CanonicalJSON.Object(
+        [CanonicalJSONField]{
+            {key: "stack", value: CanonicalJSON.Array([CanonicalJSON]{CanonicalJSON.Object([CanonicalJSONField]{{key: "file", value: CanonicalJSON.Null}, {key: "function", value: CanonicalJSON.String("unit.spawn_pipe")}, {key: "line", value: CanonicalJSON.Integer("0")}, {key: "own", value: CanonicalJSON.Bool(false)}}), CanonicalJSON.Object([CanonicalJSONField]{{key: "file", value: CanonicalJSON.String("/work/main.jet")}, {key: "function", value: CanonicalJSON.String("run")}, {key: "line", value: CanonicalJSON.Integer("7")}, {key: "own", value: CanonicalJSON.Bool(true)}})})},
+        },
+    )
+    assert_eq(jet_cli_perf_sites_text(row, "stack"), Val("unit.spawn_pipe from main.jet:7 run"))
 }
 
 #Test("the per-line table splits a line's samples in a stop poll out of its own") {

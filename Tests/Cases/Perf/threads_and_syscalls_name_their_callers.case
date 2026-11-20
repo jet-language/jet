@@ -4,8 +4,9 @@
 # its function with its stack's bytes, its CPU and off-CPU time and the
 # line of the program that spawned it; the run's pipe2, its execve PATH
 # probes (in the vfork child) and the collector's pidfd_open each count
-# under the runtime function that called them. The run's wait for the
-# child parks until the collector wakes it, not until a timeout.
+# under the runtime function that called them, named by its symbol, as the
+# prelinked runtime image keeps no line table for its code. The run's wait
+# for the child parks until the collector wakes it, not until a timeout.
 requires: os-name:linux
 requires: arch:x86_64
 fixture: ThreadsAndSyscalls.fixture
@@ -18,13 +19,15 @@ json: file calls.jettrace doc $.content.receipt_sections[?name="threads"][0].val
 json: file calls.jettrace doc $.content.receipt_sections[?name="threads"][0].value.threads[?name="jet_rt_process_execution_worker"][?stack_bytes>=65536] #= 1 # the collector, by its function, with its stack
 json: file calls.jettrace doc $.content.receipt_sections[?name="threads"][0].value.threads[?name="jet_rt_process_execution_worker"][0].cpu_ns >= 1 # its CPU time
 json: file calls.jettrace doc $.content.receipt_sections[?name="threads"][0].value.threads[?name="jet_rt_process_execution_worker"][0].off_cpu_ns >= 0 # and the rest of its time alive
-json: file calls.jettrace doc $.content.receipt_sections[?name="threads"][0].value.threads[?name="jet_rt_process_execution_worker"][0].spawned_at[?function="run"][?line=9][?own=true] #= 1 # spawned from the program's run line
+json: file calls.jettrace doc $.content.receipt_sections[?name="threads"][0].value.threads[?name="jet_rt_process_execution_worker"][0].spawned_at[?function="run"][?line=7][?own=true] #= 1 # spawned from the program's run line
+json: file calls.jettrace doc $.content.receipt_sections[?name="threads"][0].value.threads[?name="jet_rt_process_execution_worker"][0].spawned_at[0].function = "unit.process_execution_collect_start" # by the runtime's collector start, its spawn plumbing left out
 json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].type_name = "JetPerfSyscalls"
 json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.syscalls[?name="pipe2"][?count>=1] #> 0 # the run's pipes
-json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.syscalls[?name="pipe2"][0].stack[0].function = "spawn_pipe" # called by the spawn's pipe helper
-json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.syscalls[?name="pipe2"][0].stack[?function="run"][?line=9] #= 1 # from the program's run line
+json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.syscalls[?name="pipe2"][0].stack[0].function = "unit.spawn_pipe" # called by the spawn's pipe helper
+json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.syscalls[?name="pipe2"][0].stack[0].line = 0 # a runtime function, which has no line
+json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.syscalls[?name="pipe2"][0].stack[?function="run"][?line=7] #= 1 # from the program's run line
 json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.syscalls[?name="execve"][?count>=1] #> 0 # the PATH probes and the exec that took
-json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.syscalls[?name="execve"][0].stack[0].function = "spawn_exec_child" # in the vfork child
+json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.syscalls[?name="execve"][0].stack[0].function = "unit.spawn_exec_child" # in the vfork child
 json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.syscalls[?name="pidfd_open"][?count=1] #= 1 # the collector's pidfd
 json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.syscalls[?name="pidfd_open"][0].stack[0].function = "jet_rt_process_execution_worker" # by the collector
 step: jet perf view {work}/calls.jettrace
@@ -32,11 +35,14 @@ exit: 0
 stdout: ~ "threads count=" # the threads, with how many claimed a row
 stdout: ~ " jet_rt_process_execution_worker stack=" # the collector thread, by its function and stack
 stdout: ~ " off_cpu_ns=" # with its CPU and off-CPU time
-stdout: ~ "main.jet:9 run" # the program line that started it
+stdout: ~ "main.jet:7 run" # the program line that started it
+stdout: ~ " · spawned at unit.process_execution_collect_start from main.jet:7 run" # through the runtime's collector start
 stdout: ~ "syscalls calls=" # the host calls, by name and caller
 stdout: ~ "  pipe2 count=" # the run's pipes
-stdout: ~ " spawn_pipe from " # at the spawn's pipe helper, from the program
+stdout: ~ " · at unit.spawn_pipe from main.jet:7 run" # at the spawn's pipe helper, from the program
 stdout: ~ "  execve count=" # the exec and its PATH probes
-stdout: ~ " spawn_exec_child" # in the vfork child
-stdout: ~ "  pidfd_open count=1 " # the collector's pidfd
-stdout: !~ "in process wait at main.jet:9, woken by its timeout" # the run's wait parks until the collector wakes it
+stdout: ~ " · at unit.spawn_exec_child" # in the vfork child
+stdout: ~ "  pidfd_open count=1 time_ns=" # the collector's pidfd
+stdout: ~ " · at jet_rt_process_execution_worker" # by the collector
+stdout: !~ "code at " # every thread and site is named
+stdout: !~ "in process wait at main.jet:7, woken by its timeout" # the run's wait parks until the collector wakes it

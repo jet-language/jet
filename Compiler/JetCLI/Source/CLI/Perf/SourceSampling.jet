@@ -1435,7 +1435,7 @@ jet_cli_perf_system_read: fn(sampled: &JetCLIPerfSamples, owned: [Bool], threads
                 entry: link_debug_addr(threads, at + 8)
                 name := "main"
                 if entry > 0 {
-                    named := jet_cli_perf_samples_frames(sampled, owned, entry, false)
+                    named := jet_cli_perf_system_frames(sampled, owned, entry, false)
                     name = if named.pop() == .Val(outer) -> outer.name.move() else -> "code at {entry}"
                 }
                 stack_bytes: link_debug_addr(threads, at + 16)
@@ -1485,9 +1485,10 @@ jet_cli_perf_system_read: fn(sampled: &JetCLIPerfSamples, owned: [Bool], threads
 }
 
 // The call sites the `count` return addresses at byte `at` of `words`
-// stand for (jet_cli_perf_samples_frames), up to the first 0, innermost
-// first, less the leading ones in the functions `plumbing` names: the
-// runtime's own frames between the table's write and its caller.
+// stand for (jet_cli_perf_system_frames), up to the first 0, innermost
+// first, less the leading ones in the functions `plumbing` names (by
+// jet_cli_perf_bare_name): the runtime's own frames between the table's
+// write and its caller.
 jet_cli_perf_system_stack: fn(sampled: JetCLIPerfSamples, owned: [Bool], words: [U8], at: Int, count: Int, plumbing: [String]) -> [JetCLIPerfSite] Never! {
     stack := [JetCLIPerfSite]{}
     loop k in 0..<count {
@@ -1495,15 +1496,36 @@ jet_cli_perf_system_stack: fn(sampled: JetCLIPerfSamples, owned: [Bool], words: 
         if word + 8 > words.len() -> break
         address: link_debug_addr(words, word)
         if address <= 0 -> break
-        site := jet_cli_perf_samples_frames(sampled, owned, address, true)
+        site := jet_cli_perf_system_frames(sampled, owned, address, true)
         site.reverse()
         loop site.len() > 0 {
             frame: site.pop() ?? break
-            if stack.len() == 0 && plumbing.contains(frame.name) -> next
+            if stack.len() == 0 && plumbing.contains(jet_cli_perf_bare_name(frame.name)) -> next
             stack.push(JetCLIPerfSite{name: frame.name.move(), file: frame.path.move(), line: U64{frame.line}, own: frame.own})
         }
     }
     stack
+}
+
+// The frames link address `address` stands for
+// (jet_cli_perf_samples_frames), else the image's `.symtab` function that
+// holds it, by its symbol, at line 0 with no file: the runtime's own code,
+// which the prelinked runtime image keeps symbols for but no line table.
+// None outside both.
+jet_cli_perf_system_frames: fn(sampled: JetCLIPerfSamples, owned: [Bool], address: Int, caller: Bool) -> [JetCLIPerfFrame] Never! {
+    frames := jet_cli_perf_samples_frames(sampled, owned, address, caller)
+    if frames.len() > 0 -> return frames
+    symbol: x64_image_function_find(sampled.functions, if caller -> address - 1 else -> address)
+    if symbol >= 0 {
+        frames.push(JetCLIPerfFrame{name: "{sampled.functions[symbol].name}", line: 0, own: false, file: -1})
+    }
+    frames
+}
+
+// A function's name less its module path, as the runtime's sources write
+// it: `spawn_pipe` for the symbol `unit.spawn_pipe`.
+jet_cli_perf_bare_name: fn(name: String) -> String Never! {
+    name.slice(name.rfind(".") + 1, name.len())
 }
 
 // The trace's `threads` receipt section (type `JetPerfThreads`): how many

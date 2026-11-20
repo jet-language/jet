@@ -630,14 +630,17 @@ rest are counted. The trace records the `threads` receipt section (type
 `lost`, then each number and stack's `name`, `number`, `count`, `time_ns`
 and `stack`. Each site is its `function`, `file`, `line` and whether the
 line is in the checked source (`own`), innermost first, the runtime's own
-frames of the spawn and the counting left out. `jet perf view` prints
+frames of the spawn and the counting left out. The prelinked runtime image
+keeps symbols for its code but no line table, so a site in the runtime is
+its symbol (`unit.spawn_pipe`, `jet_rt_process_execution_worker`) with
+line 0 and a null `file`. `jet perf view` prints
 `threads count=2 claimed=2`, each as `thread 4251
 jet_rt_process_execution_worker stack=8388608 cpu_ns=81234
-off_cpu_ns=2104567 · spawned at ProcessExecutionCollect.jet:117
-process_execution_collect_start from main.jet:4 run`, then `syscalls
+off_cpu_ns=2104567 · spawned at unit.process_execution_collect_start from
+main.jet:4 run`, then `syscalls
 calls=40 time_ns=812345` and up to 32 calls summed by name and calling
 site, the most time first: `pipe2 count=3 time_ns=6123 · at
-HostSpawn.jet:159 spawn_pipe from main.jet:4 run`. A process run's first
+unit.spawn_pipe from main.jet:4 run`. A process run's first
 wait parks until its collector wakes it at the child's end, so its
 `process wait` is woken by the runtime, not by a timeout.
 Tests/Cases/Perf/threads_and_syscalls_name_their_callers.case is the
