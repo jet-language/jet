@@ -183,6 +183,31 @@ cases_test_other_host: fn(kind: String) -> String {
     files.remove_all(root) ?? panic("remove failing free-port scratch")
 }
 
+#Test("a free port lies below the kernel's ephemeral range and its host-wide lock is held until the case ends") {
+    root: cases_test_root("host-free-port-lease")
+    recorded: files.join(root, "port")
+    lock_template: kit_steps_host_port_path(0).replace("-0.lock", "-{{free-port:app}}.lock")
+    // The case's own steps run while the port's lock is held.
+    cases_test_source(root, "lease", "requires: tool:flock\nstep: sh -c 'printf %s {{free-port:app}} > {recorded}'\nstep: flock -n {lock_template} true\nexit: 1\n")
+    context := cases_test_context(root, files.join(root, "scratch"))
+    context.env.jet = cases_test_real_jet("for the free-port self-test")
+    context.env.root = files.cwd() ?? panic("free-port probe source root")
+    context.env.timeout = 600s
+    assert_eq(kit_cases_run(cases_test_entry("lease"), context)[0].verdict.status, "PASS")
+    port: Int.parse((files.read(recorded) ?? panic("the case recorded no port: {err}")).trim()) ?? panic("the case recorded a line that is not a port")
+    range: files.read("/proc/sys/net/ipv4/ip_local_port_range") ?? panic("the kernel's ephemeral port range: {err}")
+    low: Int.parse(range.trim().split("\t").to_list()[0].trim()) ?? panic("the ephemeral port range is not two ports")
+    assert(port >= 1024 && port < low, "port {port} is not below the ephemeral range, which starts at {low}")
+    // The finished case released the lock.
+    released: if files.try_lock(kit_steps_host_port_path(port)) == {
+        .Val(_) -> true
+        .None -> false
+        .Err(error) -> panic("port {port} lock: {error}")
+    }
+    assert(released, "the finished case still holds port {port}'s lock")
+    files.remove_all(root) ?? panic("remove free-port lease scratch")
+}
+
 #Test("host-port cases hold the port's host-wide lock until they end and refuse malformed ports") {
     plan: kit_steps_parse_case("host-port: 8080\nstep: printf ok\n")
     assert_eq(plan.error, "")

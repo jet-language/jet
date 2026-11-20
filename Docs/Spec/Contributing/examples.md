@@ -132,7 +132,11 @@ on every host.
 `run: none` keeps a serves-until-stopped entry compile-only. `host-port: N`
 declares a fixed TCP port the program binds; the kit holds the host-wide flock
 `/tmp/jet-host-port-N.lock` while the case runs, waiting at most one step
-timeout, so concurrent runs on one host take turns. `normalize: argv0`
+timeout, so concurrent runs on one host take turns. A `{free-port:NAME}` token
+is a port the kit draws below the kernel's ephemeral range
+(`/proc/sys/net/ipv4/ip_local_port_range`), where no `bind` to port 0 and no
+outgoing connect is handed it, and it holds that port's same flock until the
+case ends; a draw another run holds is probed again. `normalize: argv0`
 pins CLI usage to the source name. Ordered `step:` commands accept quoted argv,
 `stdin:`, `exit:`, exact `stdout:` / `stderr:`, and `file:` assertions.
 `step: build` invokes the selected tier; `step: built [args…]` runs its artifact

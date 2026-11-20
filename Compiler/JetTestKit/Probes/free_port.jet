@@ -1,36 +1,82 @@
 use {
+    files: core.files
     net: core.net
     process: core.process
+    random: core.crypto.random
 }
 
-// `jet run free_port.jet -- COUNT` prints COUNT free loopback ports, one per line. Every listener is held
-// until the last port is printed, so the ports are distinct. The original bind/read/drop race is intentional:
-// process exit closes the listeners even on providers without an exposed TCPListener.close operation.
+// The kernel hands every bind to port 0 and every outgoing connect on the host a port from its ephemeral
+// range. A port drawn there and released can go to another socket before the case's server binds it, so
+// the probe draws below that range, where only an explicit bind takes a port.
+FREE_PORT_RANGE_PATH: "/proc/sys/net/ipv4/ip_local_port_range"
+
+// The first port an unprivileged server may bind.
+FREE_PORT_FIRST: 1024
+
+// The fewest ports the draw needs below the ephemeral range, so that draws by concurrent runs seldom meet.
+FREE_PORT_ROOM: 1024
+
+// The draws one port may take before every port tried was bound by another socket.
+FREE_PORT_DRAWS: 64
+
+// `jet run free_port.jet -- COUNT` prints COUNT free loopback ports, one per line, each drawn at random
+// below the kernel's ephemeral range. Every listener is held until the last port is printed, so the ports
+// are distinct. Process exit closes the listeners; the testkit then holds each port's host-wide lock until
+// the case ends (kit_steps_free_ports), so no other run is handed the port meanwhile.
 run: fn() {
     args: process.args()
     count: if args.len() == 0 -> 1 else -> Int.parse(args[args.len() - 1]) ?? panic("free-port count is not an Int")
+    ceiling: free_port_ceiling() ?? process.fail(2, "free-port: {err.message}")
     listeners := [net.TCPListener]{}
-    loop port in free_port_reserve(count, listeners) -> print(port)
+    loop port in free_port_reserve(count, ceiling, listeners) ?? process.fail(2, "free-port: {err.message}") {
+        print(port)
+    }
 }
 
-// Binds `count` loopback listeners on port 0 and returns their ports. Each
-// listener stays in `listeners`, so no port is reused before the caller drops them.
-free_port_reserve: fn(count: Int, listeners: &[net.TCPListener]) -[Net]> [Int] {
+// The first port of the kernel's ephemeral range, which bounds the draw from above. A range that starts too
+// low to leave FREE_PORT_ROOM ports below it is an error, never a draw from inside the range.
+free_port_ceiling: fn() -[FS.Read]> Int Err! {
+    text: files.read(FREE_PORT_RANGE_PATH) ?? return Err("can't read the kernel's ephemeral port range at {FREE_PORT_RANGE_PATH}: {err}")
+    low: Int.parse(text.trim().split("\t").to_list()[0].trim()) ?? return Err("{FREE_PORT_RANGE_PATH} holds `{text.trim()}`, not a port range")
+    if low - FREE_PORT_FIRST < FREE_PORT_ROOM {
+        return Err("the kernel's ephemeral ports start at {low}, which leaves fewer than {FREE_PORT_ROOM} ports from {FREE_PORT_FIRST} below them; raise the range's first port in {FREE_PORT_RANGE_PATH}")
+    }
+    Ok(low)
+}
+
+// Binds `count` loopback listeners on distinct ports drawn from [FREE_PORT_FIRST, ceiling) and returns
+// their ports. A port another socket holds is drawn again. Each listener stays in `listeners`, so no port
+// repeats before the caller drops them.
+free_port_reserve: fn(count: Int, ceiling: Int, listeners: &[net.TCPListener]) -[Net, Rand]> [Int] Err! {
     ports := [Int]{}
     loop _ in 0..<count {
-        listener: net.tcp_listen("127.0.0.1:0") ?? panic("free-port bind failed")
-        address: net.listener_local_socket_addr(listener) ?? panic("free-port local address failed")
-        ports.push(net.socket_port(address))
-        listeners.push(listener)
+        draws := 0
+        loop {
+            if draws == FREE_PORT_DRAWS {
+                return Err("{FREE_PORT_DRAWS} ports drawn from {FREE_PORT_FIRST} to {ceiling - 1} were all bound by other sockets")
+            }
+            draws += 1
+            port: random.int_range(FREE_PORT_FIRST, ceiling) ?? return Err("no random port: {err}")
+            if ports.contains(port) -> next
+            listener: net.tcp_listen("127.0.0.1:{port}") ?? next
+            ports.push(port)
+            listeners.push(listener)
+            break
+        }
     }
-    ports
+    Ok(ports)
 }
 
-#Test("free_port reserves distinct bound loopback ports") {
+#Test("free_port reserves distinct bound loopback ports below the kernel's ephemeral range") {
+    ceiling: free_port_ceiling() ?? panic(err.message)
     listeners := [net.TCPListener]{}
-    ports: free_port_reserve(3, listeners)
+    ports: free_port_reserve(3, ceiling, listeners) ?? panic(err.message)
     assert_eq(ports.len(), 3)
     assert_eq(listeners.len(), 3)
-    loop port in ports -> assert(port > 0 && port < 65536)
+    loop port in ports {
+        assert(port >= FREE_PORT_FIRST && port < ceiling, "port {port} is outside [{FREE_PORT_FIRST}, {ceiling})")
+    }
     assert(ports[0] != ports[1] && ports[0] != ports[2] && ports[1] != ports[2])
+    // A bound port is taken: a second bind on it fails.
+    assert(net.tcp_listen("127.0.0.1:{ports[0]}") == .Err(_))
 }
