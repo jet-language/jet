@@ -1660,18 +1660,25 @@ jet_cli_debug_eval_answer: fn(entry: String, color: Bool, options: BuildOptions,
 // The request that compiles the program of `entry` with the stop's source
 // `path` reading `source` (None: as it reads), and the sources `others` in
 // place of their files, as overlays a debugger's expression appends to
-// (jet_cli_prepare_snapshot `appended`). A Core source
-// (jet_cli_debug_core_row) is no file of the program: its Core row reads
-// `source` as the Core source under test (JetDriverCompileRequest
-// core_tests), which the compile reads whole, its functions' bodies
-// checked and kept for the build, as a `jet test` of it does.
+// (jet_cli_prepare_snapshot `appended`). The source the expression is
+// appended to lowers whole (JetDriverCompileRequest.rooted_source): no body
+// calls the expression, and a path dependency's bodies lower only when
+// reached. A Core source (jet_cli_debug_core_row) is no file of the
+// program: its Core row reads `source` as the Core source under test
+// (JetDriverCompileRequest core_tests), which the compile reads whole, its
+// functions' bodies checked and kept for the build, as a `jet test` of it
+// does.
 jet_cli_debug_eval_prepare: fn(entry: String, color: Bool, path: String, source: String?, others: &&[JetCLIOverlay]{[JetCLIOverlay]{}}) -> JetCLIPrepared {
     row: jet_cli_debug_core_row(path)
     if row == "" {
         overlays := [JetCLIOverlay]{}
         if source == .Val(text) -> overlays.push(JetCLIOverlay{path: path, source: text})
         overlays.extend(others)
-        return jet_cli_prepare_overlays(entry, entry, overlays, color, None, JetDriverCompileMode.Program, appended: true)
+        prepared := jet_cli_prepare_overlays(entry, entry, overlays, color, None, JetDriverCompileMode.Program, appended: true)
+        if source != None && &prepared == .Prepared(request, _) {
+            request.rooted_source = jet_cli_overlay_path(path)
+        }
+        return prepared
     }
     if jet_cli_prepare_snapshot(entry, entry, others, color, appended: true) == {
         .Refused(output) -> JetCLIPrepared.Refused{output: output}

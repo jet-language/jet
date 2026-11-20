@@ -4688,6 +4688,16 @@ jet_driver_prunable_dependency_modules: fn(load: JetDriverLoadResult, modules: [
     identities
 }
 
+// Whether `identity` is the module of the loaded source whose display path
+// (jet_driver_display_path, as JetDriverSourceUnit.path holds it) is `path`.
+jet_driver_source_module: fn(load: JetDriverLoadResult, identity: ModuleID, path: String) -> Bool Never! {
+    loop module_row in load.modules {
+        if module_row.module_identity != identity || module_row.source_unit_index < 0 -> next
+        if load.source_units[module_row.source_unit_index].path == path -> return true
+    }
+    false
+}
+
 // The entry package's own modules (a source root's loose files among them),
 // whose top-level bodies `dead_code: remove` lowers only when the entry's
 // roots (jet_driver_entry_root_keys) reach them, as a dependency's are. Core
@@ -6645,7 +6655,8 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     // function, its diagnostics left to the resolution after lowering). A Test
     // compile keeps every module's bodies, and the Core unit a `jet test` of a
     // Core source runs is rooted whole, as an entry is, so its #Test bodies
-    // lower.
+    // lower; so is the source a debugger's evaluation appends its expression
+    // to (JetDriverCompileRequest.rooted_source).
     prunable_modules := jet_driver_prunable_core_modules(load, request.core_sources, runtime_semantic_modules)
     entry_roots := name_table_sized(2)
     if request.mode != JetDriverCompileMode.Test {
@@ -6665,6 +6676,14 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         kept := [ModuleID]{}
         loop identity in prunable_modules {
             if tested.get(identity.id) == None -> kept.push(identity)
+        }
+        prunable_modules = kept
+    }
+    if request.rooted_source != "" {
+        rooted: jet_driver_display_path(jet_driver_entry_root_path(request.authorized_sources), request.rooted_source)
+        kept := [ModuleID]{}
+        loop identity in prunable_modules {
+            if !jet_driver_source_module(load, identity, rooted) -> kept.push(identity)
         }
         prunable_modules = kept
     }
