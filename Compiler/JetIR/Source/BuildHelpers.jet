@@ -189,42 +189,18 @@ ir_numeric_bound_constant: fn(ty: Type, member: String) -> IRNumericBound? {
                         signed -> {
                             if {
                                 bits == 64 -> { value = 9223372036854775807 }
-                                else -> {
-                                    bound := 1
-                                    shift := 1
-                                    loop shift < bits {
-                                        bound *= 2
-                                        shift += 1
-                                    }
-                                    value = bound - 1
-                                }
+                                else -> { value = (1 << (bits - 1)) - 1 }
                             }
                         }
                         bits == 64 -> { value = -1 }
                         bits == 63 -> { value = 9223372036854775807 }
-                        else -> {
-                            bound := 1
-                            shift := 0
-                            loop shift < bits {
-                                bound *= 2
-                                shift += 1
-                            }
-                            value = bound - 1
-                        }
+                        else -> { value = (1 << bits) - 1 }
                     }
                 }
                 signed -> {
                     if {
                         bits == 64 -> { value = -9223372036854775808 }
-                        else -> {
-                            bound := 1
-                            shift := 1
-                            loop shift < bits {
-                                bound *= 2
-                                shift += 1
-                            }
-                            value = -bound
-                        }
+                        else -> { value = -(1 << (bits - 1)) }
                     }
                 }
             }

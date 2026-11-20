@@ -2,7 +2,8 @@
 # lock runs it as an unrecorded run does, in a child whose runtime logs every
 # sync event and input, and publishes the log as the replay artifact
 # `.jet/replays/NAME.jetproof-replay` that `jet debug --replay=NAME` re-runs.
-# A NAME already recorded is refused before anything runs, a bare `--record`
+# A NAME already recorded is refused before anything runs (E3630, its
+# report the CLI snapshot), with no program output, a bare `--record`
 # is a usage error, and `jet dev --record` stays unbuilt.
 fixture: ReplayThreadsAcrossTiers.fixture
 env: NO_COLOR=1
@@ -14,8 +15,8 @@ stderr: ~ "jet run: recorded replay `.jet/replays/tiers.jetproof-replay`" # the 
 file: .jet/replays/tiers.jetproof-replay is-file
 step: jet run -O2 --record=tiers prog.jet
 exit: 1
-stderr: ~ "The recording `.jet/replays/tiers.jetproof-replay` already exists" # the line that names the refusal or the result
-stdout: !~ "joined" # refused before the program runs
+stdout: = "" # refused before the program runs: none of its output
+stderr: = ../../CLI/run_record_name_taken.txt # the one report: the name is taken, nothing ran, and how to free it
 step: jet run --record prog.jet
 exit: 2
 stderr: ~ "`--record` needs a NAME" # the line that names the refusal or the result

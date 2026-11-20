@@ -1,0 +1,33 @@
+// L2511, the no-fire pair of cost_spill_doubling_in_loop: a
+// doubling the loop's condition compares against any Int, alone or times
+// some Int, stops below twice that Int, and a sum never reaches the rail's
+// end in any loop's turns.
+fit: fn(slots: Int) -> Int {
+    capacity := 2
+    loop capacity < slots -> capacity *= 2
+    capacity
+}
+
+octave: fn(micros: Int) -> Int {
+    whole := 0
+    span := 1
+    loop span * 2 <= micros {
+        span *= 2
+        whole += 1
+    }
+    whole
+}
+
+weigh: fn(weights: [Int]) -> Int {
+    total := 0
+    loop weight in weights {
+        total += weight
+    }
+    total
+}
+
+run: fn() {
+    print(fit(5))
+    print(octave(40))
+    print(weigh([Int]{1, 2, 3}))
+}

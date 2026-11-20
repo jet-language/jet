@@ -81,7 +81,11 @@ they are, the three probe programs beside it
 ([`record_cost.jet`](BestInExistence20261119/Probes/record_cost.jet),
 [`hits.jet`](BestInExistence20261119/Probes/hits.jet) and
 [`zones.jet`](BestInExistence20261119/Probes/zones.jet)), the 2026-11-18
-review's `deadlock.jet`, and `Tools/Perf/DebugLatency`. Every `jet` command runs
+review's `deadlock.jet`, and `Tools/Perf/DebugLatency`. The axes D2, D3, D4, D6
+and generic instances have since moved to
+[`Run.jet`](BestInExistence20261119/Probes/Run.jet) beside it, which takes the
+same arguments but `--perf` and runs the same commands with the same report;
+`run.py` keeps the others. Every `jet` command runs
 with `PATH` set to an empty directory. A console session is driven one command
 at a time, and each command is timed from sending it to the next `(Jet) `
 prompt. A DAP session is timed from each request to its response, or to the
@@ -99,7 +103,7 @@ back to back under the same load.
 Rerun one axis with, for example:
 
 ```sh
-JET_TOOLCHAIN_ROOT=$REPO python3 Docs/Audits/BestInExistence20261119/Probes/run.py \
+JET_TOOLCHAIN_ROOT=$REPO $REPO/Compiler/JetCLI/.jet/build/jet Docs/Audits/BestInExistence20261119/Probes/Run.jet \
   $REPO/Compiler/JetCLI/.jet/build/jet $REPO --lldb "$(command -v lldb)" d6
 ```
 
@@ -754,20 +758,20 @@ each names its proof.
   check the name before the program starts. Proof: a case that records the
   same name twice and sees the refusal before any program output.
 - **G23** (D2). At `-O1` a stop lists not-yet-bound locals as `<Unavailable>`.
-  Fix: list a local only from its binding on, at every tier. Proof: `run.py …
+  Fix: list a local only from its binding on, at every tier. Proof: `Run.jet …
   d2`'s `-O1` replay shows `(none)` at line 18.
 - **G24** (D3). `-O2` location lists name stale places: `k = 0` at every loop
   hit, in jet, lldb and gdb. Fix: end each location range where the value's
   register or slot is redefined, and say `<optimized out>` past it. Proof:
-  `run.py … d3` shows `k` 0, 1, 2 at `-O2` in jet and lldb.
+  `Run.jet … d3` shows `k` 0, 1, 2 at `-O2` in jet and lldb.
 - **G25** (D3). A `Shared` value shows as `Pointer = 0x…`. Fix: type a `Shared`
-  local by its contents. Proof: `run.py … d3` shows `Shared{Score{count: 0}}`.
+  local by its contents. Proof: `Run.jet … d3` shows `Shared{Score{count: 0}}`.
 - **G26** (D4). An expression that needs a runtime entry the image lacks is
-  refused. Fix: load the entry with the expression's code. Proof: `run.py …
+  refused. Fix: load the entry with the expression's code. Proof: `Run.jet …
   d4` prints `x * 1000000000000000000`'s overflow stop or value.
 - **G27** (D6). A condition that allocates, or a logpoint that reads a
   `String`, is not placed. Fix: place it, with its allocations in the scratch
-  arena. Proof: `run.py … d6`'s `[i, 2][0] == 3` condition placed.
+  arena. Proof: `Run.jet … d6`'s `[i, 2][0] == 3` condition placed.
 - **G28** (D8). A deadlock is reported as a panic at `<core.prelude>:0`. Fix: a
   deadlock report at the root task's waiting line. Proof: `run.py … d8`.
 - **G29** (D9). A dump shows a caller frame's live tasks as `<Unavailable>`, and
@@ -783,11 +787,11 @@ each names its proof.
   RemedyBG. Fix: a `run.py` axis that drives Canvas and measures the time to
   the first painted stop and the panels shown. Proof: that axis's log.
 - **G33** (generic instances). Frames are named `__jet_small_dbump`. Fix: name
-  an instance frame as the source spells it (`small.bump`). Proof: `run.py …
+  an instance frame as the source spells it (`small.bump`). Proof: `Run.jet …
   generic`.
 - **G34** (generic instances). At `-O1` and `-O2`, inlined locals are listed
   under the caller, three times as `<Unavailable>`. Fix: scope each inlined
-  local to its inlined frame. Proof: `run.py … generic` shows `by = 1` in the
+  local to its inlined frame. Proof: `Run.jet … generic` shows `by = 1` in the
   inlined frame at every tier.
 - **G35** (P1, P7). The runtime's stop poll takes 33.7% of `fib`'s samples, and
   the view shows it neither by helper nor by line; only the receipt gives one

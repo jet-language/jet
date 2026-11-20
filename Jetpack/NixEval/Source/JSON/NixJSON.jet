@@ -24,7 +24,7 @@ NixEvalJSONNumber: struct {
     // The exact integer value when finite and integral.
     integer: fn(self) -> Int? Never! {
         if self.infinite || self.exponent < 0 -> return None
-        magnitude: self.mantissa * nixeval_power(2, self.exponent)
+        magnitude: self.mantissa * (2).pow(self.exponent)
         if self.negative -> return Val(-magnitude)
         Val(magnitude)
     }
@@ -382,11 +382,11 @@ nixeval_json_round: fn(negative: Bool, mantissa: Int, exponent10: Int) -> NixEva
     numerator := mantissa
     denominator := 1
     if {
-        exponent10 >= 0 -> numerator = mantissa * nixeval_power(10, exponent10)
-        else -> denominator = nixeval_power(10, -exponent10)
+        exponent10 >= 0 -> numerator = mantissa * (10).pow(exponent10)
+        else -> denominator = (10).pow(-exponent10)
     }
     exponent := nixeval_bit_length(numerator) - nixeval_bit_length(denominator) - 53
-    low: nixeval_power(2, 52)
+    low: (2).pow(52)
     high: low * 2
     quotient := nixeval_scaled_quotient(numerator, denominator, exponent)
     loop quotient >= high {
@@ -405,8 +405,8 @@ nixeval_json_round: fn(negative: Bool, mantissa: Int, exponent10: Int) -> NixEva
     scaled_numerator := numerator
     scaled_denominator := denominator
     if {
-        exponent >= 0 -> scaled_denominator = denominator * nixeval_power(2, exponent)
-        else -> scaled_numerator = numerator * nixeval_power(2, -exponent)
+        exponent >= 0 -> scaled_denominator = denominator * (2).pow(exponent)
+        else -> scaled_numerator = numerator * (2).pow(-exponent)
     }
     remainder: scaled_numerator - quotient * scaled_denominator
     twice: remainder * 2
@@ -430,20 +430,8 @@ nixeval_json_round: fn(negative: Bool, mantissa: Int, exponent10: Int) -> NixEva
 
 // floor(numerator / (denominator * 2^exponent)) for non-negative operands.
 nixeval_scaled_quotient: fn(numerator: Int, denominator: Int, exponent: Int) -> Int Never! {
-    if exponent >= 0 -> return numerator /% (denominator * nixeval_power(2, exponent))
-    (numerator * nixeval_power(2, -exponent)) /% denominator
-}
-
-nixeval_power: fn(base: Int, exponent: Int) -> Int Never! {
-    result := 1
-    factor := base
-    remaining := exponent
-    loop remaining > 0 {
-        if remaining % 2 == 1 -> result *= factor
-        factor *= factor
-        remaining /%= 2
-    }
-    result
+    if exponent >= 0 -> return numerator /% (denominator * (2).pow(exponent))
+    (numerator * (2).pow(-exponent)) /% denominator
 }
 
 nixeval_bit_length: fn(value: Int) -> Int Never! {

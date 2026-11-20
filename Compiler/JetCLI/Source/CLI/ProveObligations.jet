@@ -88,11 +88,7 @@ jet_cli_solver_type_bounds: fn(ty: Type) -> JetCLISolverBounds Never! {
     }
 }
 
-jet_cli_solver_pow2: fn(bits: Int) -> Int Never! {
-    value := 1
-    loop _ in 0..<bits -> value *= 2
-    value
-}
+jet_cli_solver_pow2: fn(bits: Int) -> Int Never! { if bits > 0 -> 1 << bits else -> 1 }
 
 // Fixed-width arithmetic can wrap or trap where the formula's integers
 // don't: such an obligation is `machine_overflow`. `Int` never overflows.

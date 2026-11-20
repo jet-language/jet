@@ -61,8 +61,7 @@ run: fn() {
     ]
     loop row in rows {
         start: ip.ipv4_int(ip.ipv4(row.a, row.b, row.c, row.d) ?? panic("profile start"))
-        size := 1
-        loop _ in 0..<32 - row.prefix -> size *= 2
+        size: 1 << 32 - row.prefix
         end: start + size - 1
         check_address(start, row.global)
         check_address(end, row.global)

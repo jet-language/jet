@@ -249,9 +249,8 @@ sema_trait_constant_fit: fn(literal: TComptimeValue, ty: Type) -> TComptimeValue
 // Whether `value` is in the range of the `bits`-wide integer.
 sema_trait_constant_int_fits: fn(value: Int, signed: Bool, bits: Int) -> Bool Never! {
     if bits >= 64 -> return signed || value >= 0
-    limit := 1
     width: if signed -> bits - 1 else -> bits
-    loop _ in 0..<width -> limit *= 2
+    limit: if width > 0 -> 1 << width else -> 1
     if signed -> return value >= 0 - limit && value < limit
     value >= 0 && value < limit
 }

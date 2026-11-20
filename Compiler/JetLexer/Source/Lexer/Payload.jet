@@ -95,8 +95,7 @@ packed_bytes: fn(source: [U8], start: Int, end: Int) -> Int Never! {
 // The scalar a TextEscape escapes, as its diagnostic spells it.
 text_escape_text: fn(escape: TextEscape) -> String Never! {
     width: escape.span.end - escape.span.start - 1
-    scale := 1
-    loop _ in 1..<width -> scale *= 256
+    scale := if width > 1 -> 1 << (8 * (width - 1)) else -> 1
     out := [U8]{}
     loop _ in 0..<width {
         out.push(U8{(escape.bytes /% scale) & 255})

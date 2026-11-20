@@ -1,0 +1,36 @@
+# Every command that ends a run ends it at once. The debugger follows the
+# program's exits, so a thread of a run being ended stops as it exits;
+# ending the run lets each such stop go. A reverse step under replay runs
+# the program again from its start, so it first ends the run it leaves: the
+# step lands at once and the next run goes on to the program's end. `why`
+# runs the replay again behind the stop the same way and comes back to it.
+# `quit` ends the run at a stop, with the helper task's thread live. The
+# fixture must stay in jet fmt form; line 20 calls `double`, line 21 adds
+# its result.
+fixture: ReplayReverse.fixture
+env: NO_COLOR=1
+step: jet run --record=back prog.jet
+exit: 0
+stdout: ~ "total 6 tally " # the program's own output among the session's
+step: jet debug --replay=back prog.jet
+stdin: ending_a_run_lets_its_exit_stops_go.stdin
+timeout: 60s
+exit: 0
+stdout: ~ "(Jet) c\nBreakpoint hit  prog.jet:21  in run()\n21 |         total += d        <- here\n" # the first pass of line 21
+stdout: ~ "(Jet) rn\n20 |         d: double(k)        <- here\n" # the run left ends and the next one reaches the line before
+stdout: ~ "Program finished\n" # the run again goes on to the program's end
+stdout+stderr: !~ "replay diverged" # the replay stays faithful to the recording
+step: jet debug --replay=back prog.jet
+stdin: ending_a_run_lets_its_exit_stops_go.why.stdin
+timeout: 60s
+exit: 0
+stdout: ~ "(Jet) why total\ntotal = 2, set at prog.jet:21 in run() (task 1)\n" # the replay run again behind the stop ends and the session comes back
+stdout: ~ "Program finished\n" # the session runs on from its stop to the end
+stdout+stderr: !~ "didn't come back" # the session comes back to its stop
+step: jet debug prog.jet
+stdin: ending_a_run_lets_its_exit_stops_go.quit.stdin
+timeout: 60s
+exit: any # quit's own exit code is the quit case's to assert
+stdout: ~ "(Jet) c\nBreakpoint hit  prog.jet:21  in run()\n" # the stop quit ends the run at
+stdout+stderr: ~ "Jet.DebugSessionQuit" # the session quits rather than timing out
+stdout+stderr: count-lines = "Program finished" = 0 # quit ends the run, which never finishes

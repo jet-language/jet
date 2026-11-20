@@ -150,7 +150,7 @@ key_rank: fn(scalars: [Int]) -> Int {
         rank = rank * 2097152 + (if used == 0 -> scalar else -> scalar + 1)
         used += 1
     }
-    loop _pad in used..<3 -> rank *= 2097152
+    if used < 3 -> rank <<= 21 * (3 - used)
     rank
 }
 

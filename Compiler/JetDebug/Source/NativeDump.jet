@@ -3,13 +3,17 @@
 // a session that never runs. Its words: NATIVE_DUMP_MAGIC, the version, the
 // pid, the Unix time, the load bias, the stopped thread's rip, rsp and rbp
 // where it captured itself (or as its caller resumes), its tid, the image's
-// byte count and the task registry's root (JetRuntime Observe.jet
-// observe_root; 0: none); the image itself, padded to a word; then sections
-// of [kind, address, bytes] each padded to a word: the flight ring's
+// byte count, the task registry's root (JetRuntime Observe.jet
+// observe_root; 0: none) and the image's build hash; then sections of
+// [kind, address, bytes] each padded to a word: the flight ring's
 // records, every task's registers, a range of the memory the stop reaches
 // (every thread's and task's stack, the globals, and what their words point
 // to, within the dump's budget), the ranges reached but cut off past that
-// budget, and the end. The image's loaded segments stand for the code and
+// budget, and the end. The image is beside the dump, written once per
+// build as `<program>-<build>.image` (PerfSamples.jet perf_flight_image),
+// its build the hash in NATIVE_DUMP_BUILD_DIGITS hexadecimal digits, which
+// the file's bytes must hash to (native_dump_digest), so no other build's
+// image is read as the dump's. Its loaded segments stand for the code and
 // read-only data the dump does not copy, so `bt`, `locals` and `print` read
 // the stop, or the task `task N` selects, as they read a live one, a value
 // cut off showing as NATIVE_DEBUG_CUT_OFF; `tasks` lists every task, each a
@@ -22,10 +26,18 @@ use {
 // "JETDUMP1", the dump's first word.
 NATIVE_DUMP_MAGIC: 3553425134609253706
 
-NATIVE_DUMP_VERSION: 4
+NATIVE_DUMP_VERSION: 5
 
-// The words before the image.
-NATIVE_DUMP_HEADER: 11
+// The words before the sections.
+NATIVE_DUMP_HEADER: 12
+
+// The hexadecimal digits of the build hash in its image's name, and the
+// hash's FNV-1a offset and prime (native_dump_digest).
+NATIVE_DUMP_BUILD_DIGITS: 16
+
+NATIVE_DUMP_BUILD_OFFSET: -3750763034362895579
+
+NATIVE_DUMP_BUILD_PRIME: 1099511628211
 
 // The kernel's register count, as x64_trace_registers reads it.
 NATIVE_DUMP_REGISTERS: 27
@@ -112,9 +124,10 @@ NativeDumpTask: struct {
 }
 
 // An opened dump: its session, the flight ring's records, the pid and Unix
-// time of its stop, and its parts as its bytes hold them: the image's bytes,
-// the reached memory's (the memory sections'), and the records' (every
-// other byte: its words, the ring, the tasks, the cut ranges and the
+// time of its stop, its image's build and the file beside it that holds
+// the image, the image's bytes, and the dump's parts as its bytes hold
+// them: the reached memory's (the memory sections'), and the records'
+// (every other byte: its words, the ring, the tasks, the cut ranges and the
 // sections' own words); then its memory budget and the bytes it cut off
 // past it, as the cut section states them.
 NativeDumpOpened: struct {
@@ -122,6 +135,8 @@ NativeDumpOpened: struct {
     ring: [U8],
     pid: Int,
     seconds: Int,
+    build: String,
+    image_file: String,
     image: Int,
     memory: Int,
     records: Int,
@@ -129,7 +144,7 @@ NativeDumpOpened: struct {
     cut_off: Int,
 }
 
-// Open the dump at `path`.
+// Open the dump at `path`, with its image beside it.
 native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError! {
     bytes: native_dump_files.read_bytes(path) ?? return Err(NativeDebugError{detail: "couldn't read the dump `{path}`: {err}"})
     header: 8 * NATIVE_DUMP_HEADER
@@ -142,10 +157,14 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
     }
     bias: native_dump_word(bytes, 32)
     length: native_dump_word(bytes, 72)
-    if length <= 0 || header + length > bytes.len() {
-        return Err(NativeDebugError{detail: "`{path}` holds no program image"})
+    if length <= 0 -> return Err(NativeDebugError{detail: "`{path}` names no program image"})
+    build: native_dump_build(native_dump_word(bytes, 88))
+    image_file: native_dump_image_file(path, build) ?? return Err(err)
+    elf: native_dump_files.read_bytes(image_file) ?? return Err(NativeDebugError{detail: "couldn't read `{image_file}`, the image of `{path}`: {err}"})
+    held: native_dump_build(native_dump_digest(elf))
+    if held != build {
+        return Err(NativeDebugError{detail: "`{image_file}` holds build {held}, but `{path}` names build {build}: it is another build's image, or a changed one"})
     }
-    elf: bytes[header..<header + length]
     image: native_image_read(elf) ?? return Err(NativeDebugError{detail: "the program of `{path}` has no Jet debug information"})
     // A dump's frames open as the image's code opens them.
     codes: native_elf_codes(elf, ".text")
@@ -161,7 +180,7 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
     memory := 0
     cut_off := 0
     tasks := [NativeDumpTask]{}
-    at := header + native_dump_pad(length)
+    at := header
     loop at + 24 <= bytes.len() {
         kind: native_dump_word(bytes, at)
         address: native_dump_word(bytes, at + 8)
@@ -188,9 +207,10 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
         }
         at += native_dump_pad(size)
     }
-    // The dump's own segments come first, so a writable one's bytes are
-    // the stop's, not the image's.
-    native_dump_loaded(blocks, bytes, header, length, bias)
+    // The image's bytes follow the dump's in the memory's backing, and the
+    // dump's own segments come first, so a writable one's bytes are the
+    // stop's, not the image's.
+    native_dump_loaded(blocks, elf, bytes.len(), bias)
     // A dump whose tasks were not captured still has its stop.
     if tasks.len() == 0 {
         frame: native_dump_word(bytes, 56)
@@ -202,10 +222,46 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
     ring: loop k in ring_at..<ring_at + ring_size -> bytes[k]
     pid: native_dump_word(bytes, 16)
     seconds: native_dump_word(bytes, 24)
-    records: bytes.len() - native_dump_pad(length) - memory
-    dump: NativeDump{tasks: tasks, memory: NativeMemory{trace: None, blocks: blocks, backing: bytes.move(), cut: cut}, registry: registry}
+    records: bytes.len() - memory
+    backing := bytes.move()
+    backing.extend(elf.move())
+    dump: NativeDump{tasks: tasks, memory: NativeMemory{trace: None, blocks: blocks, backing: backing.move(), cut: cut}, registry: registry}
     session: NativeSession{binary: path, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: "", output_read: 0, started: true, threads: [NativeThread]{}, observe_root: 0, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: Val(dump), task: 0, program_entry: program_entry}
-    Ok(NativeDumpOpened{session: session, ring: ring, pid: pid, seconds: seconds, image: length, memory: memory, records: records, budget: budget, cut_off: cut_off})
+    Ok(NativeDumpOpened{session: session, ring: ring, pid: pid, seconds: seconds, build: build, image_file: image_file, image: length, memory: memory, records: records, budget: budget, cut_off: cut_off})
+}
+
+// `build` as the writer names its image beside the dump (PerfSamples.jet
+// perf_flight_hex_digits): NATIVE_DUMP_BUILD_DIGITS lowercase hexadecimal
+// digits, the most significant first.
+native_dump_build: fn(build: Int) -> String Never! {
+    digits: "0123456789abcdef"
+    text := ""
+    loop index in 0..<NATIVE_DUMP_BUILD_DIGITS {
+        digit: (build >> (4 * (NATIVE_DUMP_BUILD_DIGITS - 1 - index))) & 15
+        text = "{text}{digits.slice(digit, digit + 1)}"
+    }
+    text
+}
+
+// The build hash of `bytes`, as the writer takes it of the image's copy
+// (PerfSamples.jet perf_flight_fold): FNV-1a over each byte.
+native_dump_digest: fn(bytes: [U8]) -> Int Never! {
+    hash := NATIVE_DUMP_BUILD_OFFSET
+    loop byte in bytes -> hash = wrapping((hash ~ Int{byte}) * NATIVE_DUMP_BUILD_PRIME)
+    hash
+}
+
+// The file beside the dump at `path` that holds its image of build
+// `build`: one named `<program>-<build>.image` in the dump's directory.
+native_dump_image_file: fn(path: String, build: String) -[FS.Read]> String NativeDebugError! {
+    parent: native_dump_files.dirname(path)
+    folder: if parent == "" -> "." else -> parent
+    named: "*-{build}.image"
+    found: native_dump_files.list_dir(folder, matching: Val(named)) ?? return Err(NativeDebugError{detail: "couldn't list `{folder}` for the image of `{path}`: {err}"})
+    if found.len() == 0 {
+        return Err(NativeDebugError{detail: "the image of `{path}`, build {build}, is not beside it: `jet run --observe` writes it to the dump's directory as `<program>-{build}.image`, and `jet debug` reads the dump with it"})
+    }
+    Ok(native_dump_files.join(folder, found[0].name))
 }
 
 // A Control's delivered deadlock record (JetRuntime WaitCycle.jet
@@ -303,24 +359,25 @@ native_dump_task_state: fn(task: NativeDumpTask, waits: [Int:String]) -> String 
     }
 }
 
-// Each loaded segment (PT_LOAD) of the ELF image of `length` bytes at
-// `image` in `bytes`, as a span of `bytes` at its address plus `bias`.
-native_dump_loaded: fn(blocks: &[NativeBlock], bytes: [U8], image: Int, length: Int, bias: Int) Never! {
+// Each loaded segment (PT_LOAD) of the ELF image `elf`, as a span at its
+// address plus `bias` of the backing that holds `elf` from `from` on.
+native_dump_loaded: fn(blocks: &[NativeBlock], elf: [U8], from: Int, bias: Int) Never! {
+    length: elf.len()
     if length < 64 {
         return
     }
-    table: native_dump_word(bytes, image + 32)
-    entry: native_number(bytes, image + 54, 2, X64DebugEncoding.Unsigned)
-    count: native_number(bytes, image + 56, 2, X64DebugEncoding.Unsigned)
+    table: native_dump_word(elf, 32)
+    entry: native_number(elf, 54, 2, X64DebugEncoding.Unsigned)
+    count: native_number(elf, 56, 2, X64DebugEncoding.Unsigned)
     loop index in 0..<count {
-        at: image + table + index * entry
-        if table < 0 || at + 56 > image + length -> break
-        if native_number(bytes, at, 4, X64DebugEncoding.Unsigned) != 1 -> next
-        offset: native_dump_word(bytes, at + 8)
-        address: native_dump_word(bytes, at + 16)
-        size: native_dump_word(bytes, at + 32)
+        at: table + index * entry
+        if table < 0 || at + 56 > length -> break
+        if native_number(elf, at, 4, X64DebugEncoding.Unsigned) != 1 -> next
+        offset: native_dump_word(elf, at + 8)
+        address: native_dump_word(elf, at + 16)
+        size: native_dump_word(elf, at + 32)
         if offset < 0 || size <= 0 || offset + size > length -> next
-        blocks.push(NativeBlock{address: address + bias, bytes: [U8]{}, from: image + offset, size: size})
+        blocks.push(NativeBlock{address: address + bias, bytes: [U8]{}, from: from + offset, size: size})
     }
 }
 
@@ -590,4 +647,65 @@ native_dump_frame: fn(session: &NativeSession, frames: [NativeFrame], index: Int
         loop word in record -> ring.extend(native_low_bytes(word, 8))
     }
     assert_eq(native_dump_events(image, ring), [String]{"sample  task 3  in the runtime", "sample  outside every task  in the runtime", "sample  a thread  in the runtime"})
+}
+
+// A dump's header words: the magic, the version, then the pid, time, bias,
+// rip, rsp, rbp and tid (all 0 here), the image's byte count, the
+// registry's root and the build; then the end section.
+native_dump_test_bytes: fn(version: Int, length: Int, build: Int) -> [U8] Never! {
+    words: [Int]{NATIVE_DUMP_MAGIC, version, 0, 0, 0, 0, 0, 0, 0, length, 0, build, NATIVE_DUMP_SECTION_END, 0, 0}
+    bytes := [U8]{}
+    loop word in words -> bytes.extend(native_word_bytes(word))
+    bytes
+}
+
+#Test("a dump names its image's build in sixteen hexadecimal digits") {
+    assert_eq(native_dump_build(0x0123456789abcdef), "0123456789abcdef")
+    assert_eq(native_dump_build(-7046029254386353131), "9e3779b97f4a7c15")
+    assert_eq(native_dump_build(-1), "ffffffffffffffff")
+    assert_eq(native_dump_build(0), "0000000000000000")
+}
+
+// FNV-1a's published 64-bit vectors.
+#Test("an image's build is the FNV-1a hash of its bytes") {
+    assert_eq(native_dump_build(native_dump_digest([U8]{})), "cbf29ce484222325")
+    assert_eq(native_dump_build(native_dump_digest("a".bytes())), "af63dc4c8601ec8c")
+    assert_eq(native_dump_build(native_dump_digest("foobar".bytes())), "85944171f73967e8")
+}
+
+#Test("a dump opens with the image of its build beside it, and says which build is missing or wrong") {
+    scratch: native_dump_files.temp_dir("jet-dump-image") ?? panic("scratch: {err}")
+    root: scratch.path
+    dump: native_dump_files.join(root, "crash-20261119T120000Z.jetdump")
+    // The build of the one-byte image "a".
+    native_dump_files.write_bytes(dump, native_dump_test_bytes(NATIVE_DUMP_VERSION, 1, -5808556873153909620)) ?? panic("dump: {err}")
+    if native_dump_open(dump) == {
+        .Ok(_) -> { panic("a dump opened with no image beside it") }
+        .Err(missing) -> {
+            assert_eq(missing.detail, "the image of `{dump}`, build af63dc4c8601ec8c, is not beside it: `jet run --observe` writes it to the dump's directory as `<program>-af63dc4c8601ec8c.image`, and `jet debug` reads the dump with it")
+        }
+    }
+    // Another build's image is not this dump's.
+    native_dump_files.write_bytes(native_dump_files.join(root, "crash-fedcba9876543210.image"), [U8]{1, 2, 3}) ?? panic("image: {err}")
+    image: native_dump_files.join(root, "crash-af63dc4c8601ec8c.image")
+    native_dump_files.write_bytes(image, "a".bytes()) ?? panic("image: {err}")
+    assert_eq(native_dump_image_file(dump, "af63dc4c8601ec8c") ?? panic("image file: {err.detail}"), image)
+    // The image of its build passes the build check; it is no ELF image.
+    if native_dump_open(dump) == {
+        .Ok(_) -> { panic("a dump opened with an image that is no program") }
+        .Err(read) -> assert_eq(read.detail, "the program of `{dump}` has no Jet debug information")
+    }
+    // A same-size image of another build in its place is refused.
+    native_dump_files.write_bytes(image, "b".bytes()) ?? panic("image: {err}")
+    if native_dump_open(dump) == {
+        .Ok(_) -> { panic("a dump opened with another build's image") }
+        .Err(wrong) -> {
+            assert_eq(wrong.detail, "`{image}` holds build af63df4c8601f1a5, but `{dump}` names build af63dc4c8601ec8c: it is another build's image, or a changed one")
+        }
+    }
+    native_dump_files.write_bytes(dump, native_dump_test_bytes(4, 1, 0)) ?? panic("dump: {err}")
+    if native_dump_open(dump) == {
+        .Ok(_) -> { panic("a version 4 dump opened") }
+        .Err(old) -> assert_eq(old.detail, "`{dump}` is a version 4 dump; this jet reads version 5")
+    }
 }

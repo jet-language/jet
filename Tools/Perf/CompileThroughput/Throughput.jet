@@ -343,8 +343,7 @@ memory_bytes: fn(text: String) -> Int? {
     units: [String]{"K", "M", "G"}
     loop at in 0..<units.len() {
         if !text.ends_with(units[at]) -> next
-        scale := 1024
-        loop _ in 0..<at -> scale *= 1024
+        scale: 1 << (10 * (at + 1))
         n: Int.parse(text.remove_suffix(units[at])) ?? return None
         return Val(n * scale)
     }

@@ -1403,6 +1403,52 @@ perf_zone_clock := I64{0}
 
 perf_zone_task_key := I64{0}
 
+// The zones' clock, fixed as zones first turn on (perf_zone_calibrate): 1
+// when a zone's edges read the processor's time-stamp counter, which the
+// drain of the zone rings (perf_zone_rings_drain) converts to the
+// timeline's nanoseconds; 0 when they read the timeline itself
+// (perf_zone_now). The counter's pair at the calibration: its count and the
+// timeline's nanoseconds, read between two counts.
+perf_zone_tsc := I64{0}
+
+perf_zone_tsc_base := I64{0}
+
+perf_zone_ns_base := I64{0}
+
+// How long after the calibration's pair the conversion's second pair is
+// read (perf_zone_scale): 1 ms, so the clock reads' own jitter moves the
+// scale by a few parts in a hundred thousand at most, and less as the run
+// goes on.
+PERF_ZONE_CALIBRATION_NS: I64{1000000}
+
+// The word heading the zone rings (perf_zone_ring), 0 until zones first
+// turn on. A ring is one thread's: its head (bytes written, which its
+// thread alone stores)@0, the next ring@8, its tail (bytes drained, which
+// only a drainer stores, under the spans buffer's lock)@64, then
+// PERF_ZONE_RING_BYTES of records from PERF_ZONE_RING_AT. A record: the
+// zone's start and end on the zones' clock, its task, the name's byte
+// length with its kind from bit 32, then the name, padded to a word. A
+// record that would cross the ring's end starts it over, behind a skip
+// record when 32 bytes are left and none when fewer are.
+perf_zone_rings := I64{0}
+
+PERF_ZONE_RING_TAIL: I64{64}
+
+PERF_ZONE_RING_AT: I64{128}
+
+PERF_ZONE_RING_BYTES: I64{65536}
+
+PERF_ZONE_RING_MASK: I64{65535}
+
+PERF_ZONE_RING_SKIP: I64{15}
+
+// A record past this goes to the spans buffer itself (perf_zone_row).
+PERF_ZONE_RING_RECORD_MOST: I64{4096}
+
+// The TCB word (Thread.jet's layout) of the thread's zone ring, which a
+// fiber borrows from the carrier it runs on (perf_zone_ring_lend).
+PERF_ZONE_TCB_RING: I64{760}
+
 // A site's opcode byte: `test eax, imm32`, whose flags nothing reads,
 // falls through while zones are off; `jmp rel32`, over the same four bytes,
 // enters the site's stub while they are on, which makes the call and jumps
@@ -1490,7 +1536,8 @@ perf_zone_roots_take: fn() {
 // the image's part note and of each registered table
 // (perf_zone_tables_turn). The observation start, before the entry, and
 // then the writer it starts turn zones, one at a time, so the first turn
-// allocates the patches' lock alone. The fence orders the word's store
+// allocates the patches' lock and the rings' head and fixes the zones'
+// clock (perf_zone_calibrate) alone. The fence orders the word's store
 // before the tables' read (see jet_perf_zone_table).
 perf_zones_set: fn(on: I64) {
     perf_zone_roots_take()
@@ -1498,9 +1545,13 @@ perf_zones_set: fn(on: I64) {
         #Unsafe("turns run one at a time (see above), and a registration reads the code only after the zones word") {
             perf_zone_turn_code = rt_perf_zone_turn_address()
         }
+        perf_zone_calibrate()
+        rings: jet_rt_alloc(I64{8}, I64{8})
+        sync_store(rings, I64{0})
         lock: jet_rt_alloc(I64{8}, I64{8})
         sync_store(lock, I64{0})
-        #Unsafe("turns run one at a time (see above), and a registration reads the lock only after the zones word") {
+        #Unsafe("turns run one at a time (see above), and a zone route reads the rings' head and a registration the lock only after the zones word") {
+            perf_zone_rings = rings
             perf_zone_lock = lock
         }
     }
@@ -1630,19 +1681,126 @@ perf_zones_refused: fn() {
     perf_zone_row(PERF_ZONE_REFUSED, now, now, reason)
 }
 
-// core.perf.zone(name): the zone's start on the monotonic clock while
-// zones are on (under `jet perf run`, or while `jet perf attach` holds them
-// on), 0 otherwise. A native zone site calls it only while zones are on,
-// so a zone no profiler records costs its site's skip.
+// core.perf.zone(name): the zone's start on the zones' clock while zones
+// are on (under `jet perf run`, or while `jet perf attach` holds them on),
+// 0 otherwise: the time-stamp counter, or the timeline where the counter
+// does not serve (perf_zone_calibrate). A native zone site calls it only
+// while zones are on, so a zone no profiler records costs its site's skip.
 #Export(c) jet_perf_zone_open: fn() -> I64 {
-    jet_int_owned_from_i64(if (perf_zones_on == I64{0}) -> I64{0} else -> perf_zone_now())
+    jet_int_owned_from_i64(if (perf_zones_on == I64{0}) -> I64{0} else -> perf_zone_edge())
+}
+
+// Now on the zones' clock (perf_zone_tsc): one read of the time-stamp
+// counter, or of the timeline (perf_zone_now).
+perf_zone_edge: fn() -> I64 {
+    if (perf_zone_tsc == I64{0}) { return perf_zone_now() }
+    perf_zone_ticks()
+}
+
+perf_zone_ticks: fn() -> I64 {
+    #Unsafe("rdtsc only reads the time-stamp counter, which the zones' calibration found invariant and enabled for this process") {
+        return os_rdtsc_i64()
+    }
+}
+
+// Fixes the zones' clock as zones first turn on: the time-stamp counter
+// where it is invariant (CPUID.80000007H:EDX bit 8: one rate on every core
+// through every power state) and this process may read it (prctl
+// PR_GET_TSC), with its calibration pair; the timeline otherwise, as in a
+// guest whose host hides the bit.
+perf_zone_calibrate: fn() {
+    if (!perf_zone_tsc_usable()) {
+        return
+    }
+    before: perf_zone_ticks()
+    now: perf_zone_now()
+    after: perf_zone_ticks()
+    #Unsafe("the first turn of zones runs alone, before it stores the zones word that every zone route reads first") {
+        perf_zone_tsc_base = wrapping(before + wrapping(after - before) / I64{2})
+        perf_zone_ns_base = now
+        perf_zone_tsc = I64{1}
+    }
+}
+
+perf_zone_tsc_usable: fn() -> Bool {
+    #Unsafe("cpuid only reports processor identification") {
+        if (os_cpuid_eax_i64(I64{2147483648}, I64{0}) < I64{2147483655}) { return false }
+        if ((os_cpuid_edx_i64(I64{2147483655}, I64{0}) & I64{256}) == I64{0}) { return false }
+    }
+    // prctl(PR_GET_TSC, &state) into the TCB's scratch word: rdtsc faults
+    // unless the state is PR_TSC_ENABLE (1).
+    scratch: wrapping(thread_base() + I64{232})
+    rt_text_store(scratch, I64{0})
+    if (observe_syscall(I64{157}, I64{25}, scratch, I64{0}, I64{0}) != I64{0}) { return false }
+    rt_text_word(scratch) == I64{1}
+}
+
+// The scale from the zones' clock to the timeline's nanoseconds, in
+// nanoseconds per count with 30 fraction bits: the calibration's pair
+// against one read now, at least PERF_ZONE_CALIBRATION_NS after it (a
+// conversion that soon after the calibration waits out the rest). 0 when
+// the zones' clock is the timeline.
+perf_zone_scale: fn() -> I64 {
+    if (perf_zone_tsc == I64{0}) { return I64{0} }
+    ticks := I64{0}
+    elapsed := I64{0}
+    loop {
+        before: perf_zone_ticks()
+        now: perf_zone_now()
+        after: perf_zone_ticks()
+        ticks = wrapping(wrapping(before + wrapping(after - before) / I64{2}) - perf_zone_tsc_base)
+        elapsed = wrapping(now - perf_zone_ns_base)
+        if (elapsed >= PERF_ZONE_CALIBRATION_NS) { break }
+        #Unsafe("x86 pause only hints that this thread is waiting in a spin loop") {
+            os_spin_pause()
+        }
+    }
+    if (ticks <= I64{0}) { return I64{0} }
+    // elapsed / ticks to 30 fraction bits by long division: no product
+    // leaves 64 bits however long the run.
+    scale := elapsed / ticks
+    rest := wrapping(elapsed - wrapping(scale * ticks))
+    bit := I64{0}
+    loop bit < (I64{30}) {
+        rest = rest << I64{1}
+        scale = scale << I64{1}
+        if (rest >= ticks) {
+            rest = wrapping(rest - ticks)
+            scale = wrapping(scale + I64{1})
+        }
+        bit = wrapping(bit + I64{1})
+    }
+    scale
+}
+
+// The timeline's nanoseconds of `edge` on the zones' clock, by `scale`
+// (perf_zone_scale), saturated at 0 as the timeline is.
+perf_zone_ns: fn(edge: I64, scale: I64) -> I64 {
+    if (perf_zone_tsc == I64{0}) { return edge }
+    since: wrapping(edge - perf_zone_tsc_base)
+    span: if (since < I64{0}) -> wrapping(I64{0} - since) else -> since
+    // span * scale >> 30 in two halves: the high word's product shifted up,
+    // the low word's down.
+    high: wrapping(wrapping((span >> I64{32}) * scale) * I64{4})
+    low: wrapping((span & I64{4294967295}) * scale) >> I64{30}
+    scaled: wrapping(high + low)
+    now: if (since < I64{0}) -> wrapping(perf_zone_ns_base - scaled) else -> wrapping(perf_zone_ns_base + scaled)
+    if (now < I64{0}) -> I64{0} else -> now
 }
 
 // Now on the monotonic clock of the run's timeline (HostTime.jet
 // time_host_monotonic_i64), through the time root zones copied as they
 // turned on (perf_zone_clock): only a route that has read the zones word
-// on calls it.
-perf_zone_now: fn() -> I64 { time_host_monotonic_i64_at(perf_zone_clock) }
+// on calls it. Once the root's epoch is set, one clock read less that
+// epoch, saturated at 0 as the timeline saturates a backwards clock: the
+// root's words are only loaded, so a zone pays no once's atomic exchange;
+// before it, the timeline's own first read sets it.
+perf_zone_now: fn() -> I64 {
+    epoch: time_host_epoch_ns(perf_zone_clock)
+    if (epoch == I64{0}) { return time_host_monotonic_i64_at(perf_zone_clock) }
+    now: wrapping(sync_now_ns() - epoch)
+    if (now < I64{0}) -> I64{0} else -> now
+}
 
 // The observed task this thread runs (Observe.jet observe_current_task),
 // through the task key zones copied as they turned on
@@ -1653,18 +1811,136 @@ perf_zone_task: fn() -> I64 {
 }
 
 // The close of the zone named by the borrowed text `name` that opened at
-// `start` (jet_perf_zone_open): its row, from `start` to now.
+// `start` (jet_perf_zone_open): its record, from `start` to now, in this
+// thread's zone ring (perf_zone_ring_put). A close publishes no stop, so its
+// call is no stop point, and a zone that closes on a stop edge still
+// records.
 #Export(c) jet_perf_zone_close: fn(name: I64, start: I64) {
     began: host_native_int(start)
-    if (jet_scheduler_native_propagate() != I64{0}) {
-        return
-    }
     if (began == I64{0} || perf_zones_on == I64{0}) {
         return
     }
-    perf_zone_row(PERF_ZONE_ZONE, began, perf_zone_now(), name)
+    perf_zone_ring_put(began, perf_zone_edge(), name)
     // A closed zone is a progress point of the causal lens.
     perf_causal_progress(name)
+}
+
+// The zone's record in this thread's ring: plain stores, then one store of
+// the head, which publishes it to the drain (perf_zone_rings_drain); no
+// lock. A ring with no room for it is drained first, under the spans
+// buffer's lock (perf_zone_ring_spill). A thread without a ring, or a name
+// too long for one, writes its row to the spans buffer itself.
+perf_zone_ring_put: fn(start: I64, end: I64, name: I64) {
+    length: rt_text_len(name)
+    size: wrapping(I64{32} + (wrapping(length + I64{7}) & I64{-8}))
+    ring: perf_zone_ring()
+    if (ring == I64{0} || size > PERF_ZONE_RING_RECORD_MOST) {
+        scale: perf_zone_scale()
+        perf_zone_row(PERF_ZONE_ZONE, perf_zone_ns(start, scale), perf_zone_ns(end, scale), name)
+        return
+    }
+    head := sync_load(ring)
+    room: wrapping(PERF_ZONE_RING_BYTES - (head & PERF_ZONE_RING_MASK))
+    taken: if (room < size) -> wrapping(room + size) else -> size
+    if (wrapping(wrapping(head + taken) - sync_load(wrapping(ring + PERF_ZONE_RING_TAIL))) > PERF_ZONE_RING_BYTES) {
+        perf_zone_ring_spill(ring)
+    }
+    data: wrapping(ring + PERF_ZONE_RING_AT)
+    if (room < size) {
+        if (room >= I64{32}) {
+            rt_text_store(wrapping(wrapping(data + (head & PERF_ZONE_RING_MASK)) + I64{24}), PERF_ZONE_RING_SKIP << I64{32})
+        }
+        head = wrapping(head + room)
+    }
+    task: if (scheduler_control_current() == I64{0}) -> I64{0} else -> perf_zone_task()
+    perf_zone_row_store(wrapping(data + (head & PERF_ZONE_RING_MASK)), PERF_ZONE_ZONE, start, end, task, rt_text_data(name), length)
+    sync_store(ring, wrapping(head + size))
+}
+
+// This thread's zone ring, made on its first zone and linked on the rings'
+// head for the drain; 0 when its pages cannot be mapped. The ring stays
+// with the process: a thread that ends leaves its records for the drain.
+perf_zone_ring: fn() -> I64 {
+    base: thread_base()
+    held: sync_load(wrapping(base + PERF_ZONE_TCB_RING))
+    if (held != I64{0}) { return held }
+    // Fresh pages read zero: an empty ring, its head and tail at 0.
+    ring: alloc_map_try(wrapping(PERF_ZONE_RING_AT + PERF_ZONE_RING_BYTES))
+    if (ring == I64{0}) { return I64{0} }
+    rings: perf_zone_rings
+    loop {
+        first: sync_load(rings)
+        sync_store(wrapping(ring + I64{8}), first)
+        if (sync_cas(rings, first, ring) == first) { break }
+    }
+    sync_store(wrapping(base + PERF_ZONE_TCB_RING), ring)
+    ring
+}
+
+// Hands the zone ring `from`'s TCB holds to `to`'s, as the hazard record
+// is (IntHazard.jet int_hazard_lend): a carrier lends its ring to the fiber
+// it switches to and takes back the one the fiber holds when it switches
+// out, so one thread at a time writes a ring.
+perf_zone_ring_lend: fn(from: I64, to: I64) {
+    sync_store(wrapping(to + PERF_ZONE_TCB_RING), sync_load(wrapping(from + PERF_ZONE_TCB_RING)))
+}
+
+// Drains the full ring `ring` of this thread into the spans buffer, or
+// drops its records where there is no buffer.
+perf_zone_ring_spill: fn(ring: I64) {
+    buffer: perf_spans_buffer
+    if (buffer == I64{0}) {
+        sync_store(wrapping(ring + PERF_ZONE_RING_TAIL), sync_load(ring))
+        return
+    }
+    sync_thread_lock(buffer)
+    perf_zone_ring_drain(buffer, ring, perf_zone_scale())
+    sync_thread_unlock(buffer)
+}
+
+// Moves every zone ring's records into the spans buffer `buffer`, whose
+// lock the caller holds, each edge on the timeline (perf_zone_ns) by one
+// scale for the whole drain.
+perf_zone_rings_drain: fn(buffer: I64) {
+    rings: perf_zone_rings
+    if (rings == I64{0}) {
+        return
+    }
+    ring := sync_load(rings)
+    if (ring == I64{0}) {
+        return
+    }
+    scale: perf_zone_scale()
+    loop ring != (I64{0}) {
+        perf_zone_ring_drain(buffer, ring, scale)
+        ring = sync_load(wrapping(ring + I64{8}))
+    }
+}
+
+// The records of `ring` its head has published, from its tail, as rows of
+// the spans buffer `buffer` (perf_spans_put), whose lock the caller holds;
+// then the tail, which frees their bytes for the ring's thread.
+perf_zone_ring_drain: fn(buffer: I64, ring: I64, scale: I64) {
+    head: sync_load(ring)
+    tail := sync_load(wrapping(ring + PERF_ZONE_RING_TAIL))
+    data: wrapping(ring + PERF_ZONE_RING_AT)
+    loop tail != head {
+        at: tail & PERF_ZONE_RING_MASK
+        room: wrapping(PERF_ZONE_RING_BYTES - at)
+        record: wrapping(data + at)
+        shape: if (room < I64{32}) -> PERF_ZONE_RING_SKIP << I64{32} else -> rt_text_word(wrapping(record + I64{24}))
+        kind: shape >> I64{32}
+        if (kind == PERF_ZONE_RING_SKIP) {
+            tail = wrapping(tail + room)
+            next
+        }
+        length: shape & I64{4294967295}
+        start: perf_zone_ns(rt_text_word(record), scale)
+        end: perf_zone_ns(rt_text_word(wrapping(record + I64{8})), scale)
+        perf_spans_put(buffer, kind, start, end, rt_text_word(wrapping(record + I64{16})), wrapping(record + I64{32}), length)
+        tail = wrapping(tail + wrapping(I64{32} + (wrapping(length + I64{7}) & I64{-8})))
+    }
+    sync_store(wrapping(ring + PERF_ZONE_RING_TAIL), tail)
 }
 
 // core.perf.progress(name): one pass of the progress point the borrowed
@@ -1703,8 +1979,8 @@ perf_zone_task: fn() -> I64 {
 // with `kind` (PERF_ZONE_LOG and the others) from bit 32, each a
 // little-endian word, then the name. Rows gather in the spans buffer
 // (perf_spans_buffer), written out when it fills and at exit
-// (perf_spans_flush), so a recorded zone costs a copy, not a write; a row
-// larger than the buffer is written alone.
+// (perf_spans_flush); a row larger than the buffer is written alone. A
+// zone's row comes through its thread's zone ring (perf_zone_ring_put).
 perf_zone_row: fn(kind: I64, start: I64, end: I64, name: I64) {
     length: rt_text_len(name)
     size: I64{32} + length
@@ -1712,28 +1988,36 @@ perf_zone_row: fn(kind: I64, start: I64, end: I64, name: I64) {
     buffer: perf_spans_buffer
     if (buffer == I64{0} || size > PERF_SPANS_BUFFER_BYTES) {
         row: jet_rt_alloc(size, I64{8})
-        perf_zone_row_store(row, kind, start, end, task, name, length)
+        perf_zone_row_store(row, kind, start, end, task, rt_text_data(name), length)
         _ := host_write_all(perf_spans_fd, row, size)
         jet_rt_free(row, size, I64{8})
         return
     }
     sync_thread_lock(buffer)
+    perf_spans_put(buffer, kind, start, end, task, rt_text_data(name), length)
+    sync_thread_unlock(buffer)
+}
+
+// One row into the spans buffer `buffer`, whose lock the caller holds, its
+// name the `length` bytes at `data`: the rows it holds are written out
+// first when it has no room for the row.
+perf_spans_put: fn(buffer: I64, kind: I64, start: I64, end: I64, task: I64, data: I64, length: I64) {
+    size: I64{32} + length
     used := rt_text_word(wrapping(buffer + I64{8}))
     if (used + size > PERF_SPANS_BUFFER_BYTES) {
         _ := host_write_all(perf_spans_fd, wrapping(buffer + PERF_SPANS_HEADER_BYTES), used)
         used = I64{0}
     }
-    perf_zone_row_store(wrapping(wrapping(buffer + PERF_SPANS_HEADER_BYTES) + used), kind, start, end, task, name, length)
+    perf_zone_row_store(wrapping(wrapping(buffer + PERF_SPANS_HEADER_BYTES) + used), kind, start, end, task, data, length)
     rt_text_store(wrapping(buffer + I64{8}), used + size)
-    sync_thread_unlock(buffer)
 }
 
-perf_zone_row_store: fn(row: I64, kind: I64, start: I64, end: I64, task: I64, name: I64, length: I64) {
+perf_zone_row_store: fn(row: I64, kind: I64, start: I64, end: I64, task: I64, data: I64, length: I64) {
     rt_text_store(row, start)
     rt_text_store(wrapping(row + I64{8}), end)
     rt_text_store(wrapping(row + I64{16}), task)
     rt_text_store(wrapping(row + I64{24}), length | (kind << I64{32}))
-    coll_copy(rt_text_data(name), wrapping(row + I64{32}), length)
+    coll_copy(data, wrapping(row + I64{32}), length)
 }
 
 // The spans buffer's bytes for rows, and its header: the lock word, then
@@ -1742,14 +2026,17 @@ PERF_SPANS_BUFFER_BYTES: I64{65536}
 
 PERF_SPANS_HEADER_BYTES: I64{16}
 
-// Write out the rows the spans buffer holds (perf_zone_row); at exit
-// (perf_samples_exit) and before the samples' last record.
+// Write out the rows the spans buffer holds (perf_zone_row) and those of
+// the zone rings (perf_zone_rings_drain); at exit (perf_samples_exit),
+// before the samples' last record, and at each publication of a flight
+// recorder whose zones `jet perf attach` turned on (perf_flight_zones).
 perf_spans_flush: fn() {
     buffer: perf_spans_buffer
     if (buffer == I64{0} || perf_spans_fd < I64{0}) {
         return
     }
     sync_thread_lock(buffer)
+    perf_zone_rings_drain(buffer)
     used: rt_text_word(wrapping(buffer + I64{8}))
     if (used > I64{0}) {
         _ := host_write_all(perf_spans_fd, wrapping(buffer + PERF_SPANS_HEADER_BYTES), used)
@@ -4076,8 +4363,9 @@ perf_samples_periods: fn(signal: I64, info: I64) -> I64 {
 // full, lost: no handler ever waits. The observation writer (ObserveLive.jet
 // jet_rt_observe_writer) drains the socket into the ring at each
 // publication (perf_flight_publish), dropping the oldest records once the
-// ring fills, and publishes it as `<temp>/jet-flight-<pid>.samples`, the
-// image beside it as `.image`: the pair `jet perf attach` reads. A stop
+// ring fills, and publishes it as `jet-flight-<pid>.samples` in this
+// user's private directory (perf_flight_home), the image beside it as
+// `.image`: the pair `jet perf attach` reads. A stop
 // that ends the process writes a typed dump that holds the ring
 // (perf_flight_dump), which `jet debug` opens.
 PERF_FLIGHT_INTERVAL_US: I64{10000}
@@ -4167,8 +4455,11 @@ PERF_FLIGHT_PAGE_MASK: I64{-4096}
 PERF_FLIGHT_FRAMES: I64{65536}
 
 // The dump's text page: the dump's path from its start, then the dump's
-// header words, the oldest dump's name while the dumps rotate
-// (perf_flight_rotate), the word the threads the dump captures wait on
+// header words, the build hashes of the kept dumps while their images
+// rotate (perf_flight_images), the image copy's path while it is written
+// (perf_flight_image) and the oldest dump's name while the dumps rotate
+// (perf_flight_rotate), the image copy's staging path, the word the
+// threads the dump captures wait on
 // (PERF_FLIGHT_CAPTURING, PERF_FLIGHT_CLOSED once their rows are taken,
 // PERF_FLIGHT_RELEASED once the dump is written), the count of rows they
 // wrote, the tid of the stopping thread, which captures itself, and the
@@ -4177,7 +4468,13 @@ PERF_FLIGHT_FRAMES: I64{65536}
 // and zeros that stand for bytes the dump could not read.
 PERF_FLIGHT_WORDS_AT: I64{1024}
 
+PERF_FLIGHT_KEPT_AT: I64{1216}
+
+PERF_FLIGHT_KEPT_MOST: I64{8}
+
 PERF_FLIGHT_OLDEST_AT: I64{1280}
+
+PERF_FLIGHT_STAGING_AT: I64{1664}
 
 PERF_FLIGHT_RELEASE_AT: I64{2048}
 
@@ -4200,9 +4497,20 @@ PERF_FLIGHT_ZEROS: I64{1024}
 // "JETDUMP1", the dump's first word, then its version.
 PERF_FLIGHT_MAGIC: I64{3553425134609253706}
 
-PERF_FLIGHT_VERSION: I64{4}
+PERF_FLIGHT_VERSION: I64{5}
 
-// The kinds of the dump's sections after its image, each [kind, address,
+// The dump's header: its words before the sections.
+PERF_FLIGHT_HEADER: I64{96}
+
+// The build hash's FNV-1a offset and prime (perf_flight_fold), and its
+// hexadecimal digits in an image copy's name.
+PERF_FLIGHT_BUILD_OFFSET: I64{-3750763034362895579}
+
+PERF_FLIGHT_BUILD_PRIME: I64{1099511628211}
+
+PERF_FLIGHT_BUILD_DIGITS: I64{16}
+
+// The kinds of the dump's sections after its words, each [kind, address,
 // bytes] and the bytes padded to a word: a range of reachable memory, the
 // ring, the tasks (perf_flight_tasks), the ranges cut off past the budget
 // (perf_flight_reach), and the end.
@@ -4356,7 +4664,7 @@ perf_flight_keep: fn(state: I64, record: I64, bytes: I64) {
     rt_text_store(wrapping(state + PERF_FLIGHT_USED), wrapping(kept + bytes))
 }
 
-// `<directory>/jet-flight-<pid>.samples`, a fresh text.
+// `<home>/jet-flight-<pid>.samples`, a fresh text.
 perf_flight_path: fn(directory: I64) -> I64 {
     builder: jet_rt_string_builder_new()
     observe_append_directory(builder, directory)
@@ -4407,11 +4715,61 @@ perf_flight_beside: fn(path: I64, suffix: I64) -> I64 {
     jet_rt_string_builder_finish(builder)
 }
 
+// The flight recorder's own directory, apart from the temporary directory
+// other users share: `jet` in `$XDG_RUNTIME_DIR` when that names an
+// absolute path, else `jet-<euid>` in `temp`, made owner-only when missing
+// (Session.jet jet_cli_perf_flight_home finds the same one). A fresh text;
+// 0 when it is not this user's alone (another user's, a link, or open to
+// others), and then nothing is published there and no request is read
+// from it.
+perf_flight_home: fn(temp: I64) -> I64 {
+    builder: jet_rt_string_builder_new()
+    runtime: jet_rt_logical_env_get(rt_static_text("XDG_RUNTIME_DIR"))
+    if (runtime != I64{0} && rt_text_len(runtime) > I64{0} && trap_byte(rt_text_data(runtime)) == I64{47}) {
+        observe_append_directory(builder, runtime)
+        jet_rt_string_builder_push(builder, rt_static_text("jet"))
+    } else {
+        observe_append_directory(builder, temp)
+        jet_rt_string_builder_push(builder, rt_static_text("jet-"))
+        // geteuid
+        observe_decimal_unsigned(builder, observe_syscall(I64{107}, I64{0}, I64{0}, I64{0}, I64{0}))
+    }
+    if (runtime != I64{0}) { jet_rt_string_drop(runtime) }
+    home: jet_rt_string_builder_finish(builder)
+    name: observe_cstring(home)
+    // mkdir(name, 0700); one already there is checked as a new one is.
+    _ := observe_syscall(I64{83}, name, I64{448}, I64{0}, I64{0})
+    private: perf_flight_owned(name, I64{16384})
+    jet_rt_free(name, wrapping(rt_text_len(home) + I64{1}), I64{1})
+    if (!private) {
+        jet_rt_string_drop(home)
+        return I64{0}
+    }
+    home
+}
+
+// Whether the C string `name` names, its final link not followed, a file of
+// `kind` (S_IFDIR or S_IFREG) this user owns, closed to others when it is a
+// directory. A request another user left is not this user's, so it is
+// ignored.
+perf_flight_owned: fn(name: I64, kind: I64) -> Bool {
+    facts: jet_rt_alloc(I64{144}, I64{8})
+    // lstat: st_mode, then st_uid, at byte 24.
+    found: observe_syscall(I64{6}, name, facts, I64{0}, I64{0}) == I64{0}
+    word: if (found) -> rt_text_word(wrapping(facts + I64{24})) else -> I64{0}
+    jet_rt_free(facts, I64{144}, I64{8})
+    mode: word & I64{65535}
+    // geteuid
+    owner: observe_syscall(I64{107}, I64{0}, I64{0}, I64{0}, I64{0})
+    (mode & I64{61440}) == kind && ((word >> I64{32}) & I64{4294967295}) == owner && (kind != I64{16384} || (mode & I64{63}) == I64{0})
+}
+
 // At each of the observation writer's publications: drain the socket into
-// the ring and publish it in `directory`, the image beside it the first
-// time, answering an attach's zones (perf_flight_zones) and heap snapshot
-// (perf_flight_heap) requests. A publication that finds the lock held (a
-// dump) skips its turn.
+// the ring and publish it in this user's private directory beside the
+// temporary directory `directory` (perf_flight_home), the image beside it
+// the first time, answering an attach's zones (perf_flight_zones) and heap
+// snapshot (perf_flight_heap) requests. A publication that finds the lock
+// held (a dump) skips its turn.
 perf_flight_publish: fn(directory: I64) {
     state: perf_flight_state
     if (state == I64{0} || !perf_flight_lock(state, I64{1})) {
@@ -4419,25 +4777,33 @@ perf_flight_publish: fn(directory: I64) {
     }
     if (rt_text_word(wrapping(state + PERF_FLIGHT_ENDED)) == I64{0}) {
         perf_flight_drain(state)
-        path: perf_flight_path(directory)
-        perf_flight_zones(path)
-        if (rt_text_word(wrapping(state + PERF_FLIGHT_IMAGE)) == I64{0}) {
-            image: perf_flight_beside(path, rt_static_text(".image"))
-            if (perf_flight_file(image, perf_samples_image, perf_flight_image_bytes(perf_samples_image))) {
-                rt_text_store(wrapping(state + PERF_FLIGHT_IMAGE), I64{1})
+        home: perf_flight_home(directory)
+        if (home == I64{0}) {
+            // No request stands where others could have left it.
+            if (perf_zones_on != I64{0}) { perf_zones_set(I64{0}) }
+        } else {
+            path: perf_flight_path(home)
+            jet_rt_string_drop(home)
+            perf_flight_zones(path)
+            if (rt_text_word(wrapping(state + PERF_FLIGHT_IMAGE)) == I64{0}) {
+                image: perf_flight_beside(path, rt_static_text(".image"))
+                if (perf_flight_file(image, perf_samples_image, perf_flight_image_bytes(perf_samples_image))) {
+                    rt_text_store(wrapping(state + PERF_FLIGHT_IMAGE), I64{1})
+                }
+                jet_rt_string_drop(image)
             }
-            jet_rt_string_drop(image)
+            // After the image, which the attach reads the snapshot beside.
+            perf_flight_heap(path)
+            _ := perf_flight_file(path, wrapping(state + PERF_FLIGHT_RING_AT), rt_text_word(wrapping(state + PERF_FLIGHT_USED)))
+            jet_rt_string_drop(path)
         }
-        // After the image, which the attach reads the snapshot beside.
-        perf_flight_heap(path)
-        _ := perf_flight_file(path, wrapping(state + PERF_FLIGHT_RING_AT), rt_text_word(wrapping(state + PERF_FLIGHT_USED)))
-        jet_rt_string_drop(path)
     }
     sync_store(state, I64{0})
 }
 
 // `jet perf attach` turns zones on in a flight-recorded run by leaving
 // `<ring>.zones` beside the published ring `path`, and off by removing it.
+// Only a request this user owns counts (perf_flight_owned).
 // While the request stands, zones, frame marks, plots and log spans write
 // their rows to `<ring>.spans` (perf_spans_fd_set), emptied when a request
 // turns zones on and written out at each publication; once it is gone the
@@ -4445,8 +4811,7 @@ perf_flight_publish: fn(directory: I64) {
 perf_flight_zones: fn(path: I64) {
     request: perf_flight_beside(path, rt_static_text(".zones"))
     name: observe_cstring(request)
-    // faccessat(AT_FDCWD, name, F_OK)
-    wanted: observe_syscall(I64{269}, I64{-100}, name, I64{0}, I64{0}) == I64{0}
+    wanted: perf_flight_owned(name, I64{32768})
     jet_rt_free(name, wrapping(rt_text_len(request) + I64{1}), I64{1})
     jet_rt_string_drop(request)
     if (wanted && perf_zones_on == I64{0}) {
@@ -4470,7 +4835,8 @@ perf_flight_zones: fn(path: I64) {
 }
 
 // `jet perf attach --lens=alloc` asks a flight-recorded run for a heap
-// snapshot by leaving `<ring>.heap-request` beside the published ring
+// snapshot by leaving `<ring>.heap-request`, a file this user owns
+// (perf_flight_owned), beside the published ring
 // `path`. The publication that finds it answers in `<ring>.heap`, staged
 // beside it and renamed over it, then removes the request: first a word,
 // the nanoseconds the snapshot held the program's allocations and frees
@@ -4482,8 +4848,7 @@ perf_flight_zones: fn(path: I64) {
 perf_flight_heap: fn(path: I64) {
     request: perf_flight_beside(path, rt_static_text(".heap-request"))
     asked: observe_cstring(request)
-    // faccessat(AT_FDCWD, asked, F_OK)
-    wanted: observe_syscall(I64{269}, I64{-100}, asked, I64{0}, I64{0}) == I64{0}
+    wanted: perf_flight_owned(asked, I64{32768})
     if (wanted) {
         answer: perf_flight_beside(path, rt_static_text(".heap"))
         staged: perf_flight_beside(path, rt_static_text(".heap.stage"))
@@ -4530,12 +4895,16 @@ perf_flight_end: fn() {
     rt_text_store(wrapping(state + PERF_FLIGHT_ENDED), I64{1})
     writer: sync_load(wrapping(observe_root + I64{72}))
     if (writer != I64{0}) {
-        path: perf_flight_path(sync_load(wrapping(writer + I64{96})))
-        image: perf_flight_beside(path, rt_static_text(".image"))
-        perf_flight_unlink(path)
-        perf_flight_unlink(image)
-        jet_rt_string_drop(image)
-        jet_rt_string_drop(path)
+        home: perf_flight_home(sync_load(wrapping(writer + I64{96})))
+        if (home != I64{0}) {
+            path: perf_flight_path(home)
+            jet_rt_string_drop(home)
+            image: perf_flight_beside(path, rt_static_text(".image"))
+            perf_flight_unlink(path)
+            perf_flight_unlink(image)
+            jet_rt_string_drop(image)
+            jet_rt_string_drop(path)
+        }
     }
     sync_store(state, I64{0})
 }
@@ -4561,6 +4930,61 @@ perf_flight_image_bytes: fn(image: I64) -> I64 {
     end
 }
 
+// Fold the `length` bytes at `bytes` into the FNV-1a hash in the word at
+// `digest`.
+perf_flight_fold: fn(digest: I64, bytes: I64, length: I64) {
+    hash := rt_text_word(digest)
+    at := I64{0}
+    loop at < length {
+        hash = wrapping((hash ~ rt_text_byte(wrapping(bytes + at))) * PERF_FLIGHT_BUILD_PRIME)
+        at = wrapping(at + I64{1})
+    }
+    rt_text_store(digest, hash)
+}
+
+// `value` as PERF_FLIGHT_BUILD_DIGITS lowercase hexadecimal digits at
+// `at`, the most significant first; the address past them.
+perf_flight_hex_digits: fn(at: I64, value: I64) -> I64 {
+    index := I64{0}
+    loop index < PERF_FLIGHT_BUILD_DIGITS {
+        digit: (value >> wrapping(I64{60} - wrapping(index * I64{4}))) & I64{15}
+        rt_text_put(wrapping(at + index), if (digit < I64{10}) -> wrapping(I64{48} + digit) else -> wrapping(I64{87} + digit))
+        index = wrapping(index + I64{1})
+    }
+    wrapping(at + PERF_FLIGHT_BUILD_DIGITS)
+}
+
+// Copy the image beside the dump as `.jet/dumps/<program>-<build>.image`,
+// `build` its hash in hexadecimal, unless a copy of that build is there:
+// redacted as the dump is, owner-only, written beside it with `~` after
+// its name and renamed over it, so a copy is whole or absent. Whether the
+// copy is there. The dump's path at `text` names the directory and the
+// program (perf_flight_dump_open).
+perf_flight_image: fn(state: I64, text: I64, zeros: I64, image: I64, length: I64, build: I64) -> Bool {
+    named: wrapping(text + PERF_FLIGHT_OLDEST_AT)
+    head: wrapping(I64{11} + rt_text_word(wrapping(state + PERF_FLIGHT_PREFIX)))
+    rt_text_bytes_copy(named, text, head)
+    end: perf_flight_text(perf_flight_hex_digits(wrapping(named + head), build), rt_static_text(".image"))
+    // faccessat(AT_FDCWD, named, F_OK)
+    if (perf_flight_syscall(I64{269}, I64{-100}, named, I64{0}) == I64{0}) { return true }
+    staging: wrapping(text + PERF_FLIGHT_STAGING_AT)
+    size: wrapping(end - named)
+    rt_text_bytes_copy(staging, named, size)
+    _ := perf_flight_text(wrapping(staging + size), rt_static_text("~"))
+    // O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC, mode 0600.
+    fd := I64{-1}
+    #Unsafe("openat reads the image copy's NUL-terminated path in the state's text page") {
+        fd = os_syscall_i64(I64{257}, I64{-100}, staging, I64{524865}, I64{384}, I64{0}, I64{0})
+    }
+    if (fd < I64{0}) { return false }
+    good: perf_flight_redacted(fd, state, zeros, image, length, false, I64{0})
+    _ := perf_flight_syscall(I64{3}, fd, I64{0}, I64{0})
+    // rename
+    if (good && perf_flight_syscall(I64{82}, staging, named, I64{0}) == I64{0}) { return true }
+    _ := perf_flight_syscall(I64{87}, staging, I64{0}, I64{0})
+    false
+}
+
 // A stop that ends the process (Trap.jet trap_root_prepare, through
 // Observe.jet jet_rt_observe_exit), under the flight recorder: the typed
 // dump `jet debug` opens, `.jet/dumps/<program>-<UTC time>.jetdump`,
@@ -4568,19 +4992,21 @@ perf_flight_image_bytes: fn(image: I64) -> I64 {
 // PERF_FLIGHT_MAGIC, PERF_FLIGHT_VERSION, the pid, the Unix time, the load
 // bias, the stopping thread's rip, rsp and rbp, where it captured itself in
 // this frame (perf_flight_capture) or else as its caller resumes, its
-// tid, the image's byte count and the task registry's root (Observe.jet
+// tid, the image's byte count, the task registry's root (Observe.jet
 // observe_root), whose tasks name their controls and so the wait a
-// deadlock held each in; then the image, so the dump needs no other file;
+// deadlock held each in, and the image's build hash (perf_flight_fold);
 // then the sections: the ring, every task's registers
 // (perf_flight_tasks), the memory the stop reaches from every thread's and
 // task's stack and the globals within PERF_FLIGHT_DUMP_BUDGET, and the
-// ranges cut off past it (perf_flight_reach). The other
+// ranges cut off past it (perf_flight_reach). The image is not in the
+// dump: the hash names its copy beside it, written once per build
+// (perf_flight_image), so a dump holds the stop alone. The other
 // threads wait in their capture until the dump is written, so the stacks
 // it holds are the ones their registers name. Every byte after its words
 // is written redacted (perf_flight_redacted), so no dump holds a live
-// Secret's bytes, its literal's in the image nor a copy's in memory; the
-// live Secrets are scrubbed once it is written. Nothing here allocates: the
-// state's scratch serves every buffer.
+// Secret's bytes nor a copy's in memory, and no image copy its literal's;
+// the live Secrets are scrubbed once both are written. Nothing here
+// allocates: the state's scratch serves every buffer.
 perf_flight_dump: fn() {
     state: perf_flight_state
     if (state == I64{0} || sync_swap(wrapping(state + PERF_FLIGHT_DUMPED), I64{1}) != I64{0}) {
@@ -4624,6 +5050,12 @@ perf_flight_dump: fn() {
     }
     image: perf_samples_image
     length: perf_flight_image_bytes(image)
+    // Header word 11, the image's build: the FNV-1a hash of its bytes as
+    // its copy holds them (perf_flight_image), redacted as they are
+    // written, so a reader checks the copy against it.
+    rt_text_store(wrapping(words + I64{88}), PERF_FLIGHT_BUILD_OFFSET)
+    _ := perf_flight_redacted(I64{-1}, state, zeros, image, length, false, wrapping(words + I64{88}))
+    build: rt_text_word(wrapping(words + I64{88}))
     rt_text_store(words, PERF_FLIGHT_MAGIC)
     rt_text_store(wrapping(words + I64{8}), PERF_FLIGHT_VERSION)
     rt_text_store(wrapping(words + I64{16}), process)
@@ -4636,10 +5068,8 @@ perf_flight_dump: fn() {
     rt_text_store(wrapping(words + I64{64}), me)
     rt_text_store(wrapping(words + I64{72}), length)
     rt_text_store(wrapping(words + I64{80}), observe_root)
-    good := perf_flight_bytes(fd, zeros, words, I64{88})
-    if (good) {
-        good = perf_flight_redacted(fd, state, zeros, image, length, false) && perf_flight_bytes(fd, zeros, zeros, wrapping(I64{0} - length) & I64{7})
-    }
+    rt_text_store(wrapping(words + I64{88}), build)
+    good := perf_flight_bytes(fd, zeros, words, PERF_FLIGHT_HEADER)
     if (good && perf_flight_lock(state, I64{10000000})) {
         perf_flight_drain(state)
         good = perf_flight_section(fd, state, words, zeros, PERF_FLIGHT_SECTION_RING, I64{0}, wrapping(state + PERF_FLIGHT_RING_AT), rt_text_word(wrapping(state + PERF_FLIGHT_USED)))
@@ -4650,6 +5080,9 @@ perf_flight_dump: fn() {
     if (good) {
         _ := perf_flight_section(fd, state, words, zeros, PERF_FLIGHT_SECTION_END, I64{0}, I64{0}, I64{0})
     }
+    // The image's copy is redacted as the dump is, so it is written before
+    // the Secrets are scrubbed.
+    if (good) { _ := perf_flight_image(state, text, zeros, image, length, build) }
     if (scrub != I64{0}) { _ := coll_call1(scrub, I64{0}) }
     _ := perf_flight_syscall(I64{3}, fd, I64{0}, I64{0})
     sync_store(release, PERF_FLIGHT_RELEASED)
@@ -4927,7 +5360,7 @@ perf_flight_section: fn(fd: I64, state: I64, words: I64, zeros: I64, kind: I64, 
     rt_text_store(head, kind)
     rt_text_store(wrapping(head + I64{8}), address)
     rt_text_store(wrapping(head + I64{16}), length)
-    perf_flight_bytes(fd, zeros, head, I64{24}) && perf_flight_redacted(fd, state, zeros, bytes, length, false) && perf_flight_bytes(fd, zeros, zeros, wrapping(I64{0} - length) & I64{7})
+    perf_flight_bytes(fd, zeros, head, I64{24}) && perf_flight_redacted(fd, state, zeros, bytes, length, false, I64{0}) && perf_flight_bytes(fd, zeros, zeros, wrapping(I64{0} - length) & I64{7})
 }
 
 // Write `length` bytes at `address` as perf_flight_bytes does, with every
@@ -4937,11 +5370,15 @@ perf_flight_section: fn(fd: I64, state: I64, words: I64, zeros: I64, kind: I64, 
 // a run could still start that the window does not hold whole; the next
 // window starts there, and zeroes the rest of a run this one began. When
 // `scan`, each window written reaches what its words point to
-// (perf_flight_scan), so it is staged even with no Secret live.
-perf_flight_redacted: fn(fd: I64, state: I64, zeros: I64, address: I64, length: I64, scan: Bool) -> Bool {
+// (perf_flight_scan), so it is staged even with no Secret live. With a
+// `digest` word, the bytes are folded into its hash (perf_flight_fold)
+// as they would be written, and `fd` is not written.
+perf_flight_redacted: fn(fd: I64, state: I64, zeros: I64, address: I64, length: I64, scan: Bool, digest: I64) -> Bool {
     table: wrapping(state + PERF_FLIGHT_SECRETS_AT)
     width: secret_redact_table(table, PERF_FLIGHT_SECRETS, PERF_FLIGHT_COPY / I64{2})
-    if (width == I64{0} && !scan) { return perf_flight_bytes(fd, zeros, address, length) }
+    if (width == I64{0} && !scan && digest == I64{0}) {
+        return perf_flight_bytes(fd, zeros, address, length)
+    }
     staged: wrapping(state + PERF_FLIGHT_COPY_AT)
     reach := I64{0}
     at := I64{0}
@@ -4956,7 +5393,8 @@ perf_flight_redacted: fn(fd: I64, state: I64, zeros: I64, address: I64, length: 
             if (window < left) { step = wrapping(window - wrapping(width - I64{1})) }
         }
         if (scan) { perf_flight_scan(state, staged, wrapping(address + at), step) }
-        if (!perf_flight_bytes(fd, zeros, staged, step)) { return false }
+        if (digest != I64{0}) { perf_flight_fold(digest, staged, step) }
+        if (digest == I64{0} && !perf_flight_bytes(fd, zeros, staged, step)) { return false }
         at = wrapping(at + step)
     }
     true
@@ -5072,7 +5510,7 @@ perf_flight_section_scanned: fn(fd: I64, state: I64, words: I64, zeros: I64, add
     rt_text_store(head, PERF_FLIGHT_SECTION_MEMORY)
     rt_text_store(wrapping(head + I64{8}), address)
     rt_text_store(wrapping(head + I64{16}), length)
-    perf_flight_bytes(fd, zeros, head, I64{24}) && perf_flight_redacted(fd, state, zeros, address, length, true) && perf_flight_bytes(fd, zeros, zeros, wrapping(I64{0} - length) & I64{7})
+    perf_flight_bytes(fd, zeros, head, I64{24}) && perf_flight_redacted(fd, state, zeros, address, length, true, I64{0}) && perf_flight_bytes(fd, zeros, zeros, wrapping(I64{0} - length) & I64{7})
 }
 
 // Each readable and writable mapping of /proc/self/maps, in address order,
@@ -5543,7 +5981,96 @@ perf_flight_rotate: fn(state: I64, text: I64) {
         // unlinkat
         if (perf_flight_syscall(I64{263}, directory, oldest, I64{0}) != I64{0}) { break }
     }
+    perf_flight_images(state, text, directory)
     _ := perf_flight_syscall(I64{3}, directory, I64{0}, I64{0})
+}
+
+// Whether `name` is a copy of this program's image: the `length` bytes of
+// `prefix`, PERF_FLIGHT_BUILD_DIGITS digits, then `.image`.
+perf_flight_image_name: fn(name: I64, prefix: I64, length: I64) -> Bool {
+    count: perf_flight_length(name)
+    suffix: rt_static_text(".image")
+    tail: rt_text_len(suffix)
+    count == wrapping(wrapping(length + PERF_FLIGHT_BUILD_DIGITS) + tail) && rt_text_equal_bytes(name, prefix, length) && rt_text_equal_bytes(wrapping(name + wrapping(count - tail)), rt_text_data(suffix), tail)
+}
+
+// Remove each copy of this program's image that no kept dump names: a
+// `<program>-<build>.image` whose build is in none of the headers of the
+// program's dumps in `directory`. A dump of an earlier version names no
+// copy; one whose header can't be read, or more dumps than
+// PERF_FLIGHT_KEPT_MOST, keep every copy.
+perf_flight_images: fn(state: I64, text: I64, directory: I64) {
+    prefix: wrapping(text + I64{11})
+    length: rt_text_word(wrapping(state + PERF_FLIGHT_PREFIX))
+    scratch: wrapping(state + PERF_FLIGHT_SCRATCH_AT)
+    header: wrapping(state + PERF_FLIGHT_COPY_AT)
+    kept: wrapping(text + PERF_FLIGHT_KEPT_AT)
+    count := I64{0}
+    _ := perf_flight_syscall(I64{8}, directory, I64{0}, I64{0})
+    loop {
+        got: perf_flight_syscall(I64{217}, directory, scratch, PERF_FLIGHT_SCRATCH)
+        if (got <= I64{0}) { break }
+        at := I64{0}
+        loop at < got {
+            entry: wrapping(scratch + at)
+            name: wrapping(entry + I64{19})
+            if (perf_flight_dump_name(name, prefix, length)) {
+                if (count >= PERF_FLIGHT_KEPT_MOST) {
+                    return
+                }
+                // O_RDONLY|O_CLOEXEC
+                fd: perf_flight_syscall(I64{257}, directory, name, I64{524288})
+                if (fd < I64{0}) {
+                    return
+                }
+                read: perf_flight_syscall(I64{0}, fd, header, PERF_FLIGHT_HEADER)
+                _ := perf_flight_syscall(I64{3}, fd, I64{0}, I64{0})
+                if (read != PERF_FLIGHT_HEADER || rt_text_word(header) != PERF_FLIGHT_MAGIC) {
+                    return
+                }
+                if (rt_text_word(wrapping(header + I64{8})) == PERF_FLIGHT_VERSION) {
+                    rt_text_store(wrapping(kept + wrapping(count * I64{8})), rt_text_word(wrapping(header + I64{88})))
+                    count = wrapping(count + I64{1})
+                }
+            }
+            step: perf_cfi_u16(wrapping(entry + I64{16}))
+            if (step == I64{0}) { break }
+            at = wrapping(at + step)
+        }
+    }
+    _ := perf_flight_syscall(I64{8}, directory, I64{0}, I64{0})
+    loop {
+        got: perf_flight_syscall(I64{217}, directory, scratch, PERF_FLIGHT_SCRATCH)
+        if (got <= I64{0}) { break }
+        at := I64{0}
+        loop at < got {
+            entry: wrapping(scratch + at)
+            name: wrapping(entry + I64{19})
+            if (perf_flight_image_name(name, prefix, length)) {
+                build := I64{0}
+                digits := I64{0}
+                loop digits < PERF_FLIGHT_BUILD_DIGITS {
+                    digit: perf_flight_hex(rt_text_byte(wrapping(wrapping(name + length) + digits)))
+                    if (digit < I64{0}) { break }
+                    build = (build << I64{4}) | digit
+                    digits = wrapping(digits + I64{1})
+                }
+                named := digits != PERF_FLIGHT_BUILD_DIGITS
+                index := I64{0}
+                loop index < count {
+                    if (rt_text_word(wrapping(kept + wrapping(index * I64{8}))) == build) {
+                        named = true
+                    }
+                    index = wrapping(index + I64{1})
+                }
+                // unlinkat
+                if (!named) { _ := perf_flight_syscall(I64{263}, directory, name, I64{0}) }
+            }
+            step: perf_cfi_u16(wrapping(entry + I64{16}))
+            if (step == I64{0}) { break }
+            at = wrapping(at + step)
+        }
+    }
 }
 
 // The causal lens (`jet perf run --lens=causal`): Coz's virtual speedup

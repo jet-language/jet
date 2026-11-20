@@ -87,20 +87,10 @@ ScaledDecimal: struct {
                 return ScaledDecimal{coefficient: self.coefficient + rhs.coefficient, scale: self.scale}
             }
             if self.scale > rhs.scale {
-                factor := 1
-                power_index := 0
-                loop power_index < self.scale - rhs.scale {
-                    factor *= 10
-                    power_index += 1
-                }
+                factor: (10).pow(self.scale - rhs.scale)
                 return ScaledDecimal{coefficient: self.coefficient + rhs.coefficient * factor, scale: self.scale}
             }
-            factor := 1
-            power_index := 0
-            loop power_index < rhs.scale - self.scale {
-                factor *= 10
-                power_index += 1
-            }
+            factor: (10).pow(rhs.scale - self.scale)
             return ScaledDecimal{coefficient: self.coefficient * factor + rhs.coefficient, scale: rhs.scale}
         }
     }
@@ -111,20 +101,10 @@ ScaledDecimal: struct {
                 return ScaledDecimal{coefficient: self.coefficient - rhs.coefficient, scale: self.scale}
             }
             if self.scale > rhs.scale {
-                factor := 1
-                power_index := 0
-                loop power_index < self.scale - rhs.scale {
-                    factor *= 10
-                    power_index += 1
-                }
+                factor: (10).pow(self.scale - rhs.scale)
                 return ScaledDecimal{coefficient: self.coefficient - rhs.coefficient * factor, scale: self.scale}
             }
-            factor := 1
-            power_index := 0
-            loop power_index < rhs.scale - self.scale {
-                factor *= 10
-                power_index += 1
-            }
+            factor: (10).pow(rhs.scale - self.scale)
             return ScaledDecimal{coefficient: self.coefficient * factor - rhs.coefficient, scale: rhs.scale}
         }
     }
@@ -139,20 +119,10 @@ ScaledDecimal: struct {
         equal: fn(self, rhs: ScaledDecimal) -> Bool {
             if self.scale == rhs.scale -> return self.coefficient == rhs.coefficient
             if self.scale > rhs.scale {
-                factor := 1
-                power_index := 0
-                loop power_index < self.scale - rhs.scale {
-                    factor *= 10
-                    power_index += 1
-                }
+                factor: (10).pow(self.scale - rhs.scale)
                 return self.coefficient == rhs.coefficient * factor
             }
-            factor := 1
-            power_index := 0
-            loop power_index < rhs.scale - self.scale {
-                factor *= 10
-                power_index += 1
-            }
+            factor: (10).pow(rhs.scale - self.scale)
             return self.coefficient * factor == rhs.coefficient
         }
     }
@@ -165,24 +135,14 @@ ScaledDecimal: struct {
                 return Ordering.Equal
             }
             if self.scale > rhs.scale {
-                factor := 1
-                power_index := 0
-                loop power_index < self.scale - rhs.scale {
-                    factor *= 10
-                    power_index += 1
-                }
+                factor: (10).pow(self.scale - rhs.scale)
                 left: self.coefficient
                 right: rhs.coefficient * factor
                 if left < right -> return Ordering.Less
                 if left > right -> return Ordering.Greater
                 return Ordering.Equal
             }
-            factor := 1
-            power_index := 0
-            loop power_index < rhs.scale - self.scale {
-                factor *= 10
-                power_index += 1
-            }
+            factor: (10).pow(rhs.scale - self.scale)
             left: self.coefficient * factor
             right: rhs.coefficient
             if left < right -> return Ordering.Less

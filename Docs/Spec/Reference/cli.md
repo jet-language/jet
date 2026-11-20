@@ -1471,7 +1471,15 @@ once per site as the L2511 tidy error
 dev`. A map edit is L2511 too when the same loop shares that map each turn
 (a `.copy()` or implicit copy of it, or of a value holding it), so every
 edit clones the whole map; an edit of a map the loop never shares clones it
-at most once and stays an L2510 row. A view local read only as the receiver of a builtin scalar read
+at most once and stays an L2510 row. An Int a loop grows geometrically is
+L2511 too: a `*=`, `x = x * y` or left shift whose factor or shift may
+exceed -1..1 or 0, unless the loop's condition compares that Int, alone or
+plus, less, times or shifted by some Int, against any Int (`loop capacity <
+slots`, `loop span * 2 <= limit`), which stops it below twice that Int,
+since an uncapped doubling leaves the packed Int rail within a few dozen
+turns; its fix names a range type (`Int(0..1000)`) or a fixed width (`I64`). A sum is
+never L2511, since it reaches the rail's end only after about 2^63 / step
+turns; `explain --cost` still lists it. A view local read only as the receiver of a builtin scalar read
 (`trimmed.len()`, `is_empty`, `index_of`, …) is read in place, never made
 owned. `lint --cost` findings exit 1 on stderr (diagnostic JSON Lines under
 `--json`) with a `N hidden dynamic cost warnings found` line; clean

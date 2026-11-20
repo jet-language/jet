@@ -422,7 +422,12 @@ receipt section keeps both: per zone name `samples` and `lines`, and per
 sampled zone row of the trace `sampled`. Canvas's profile view draws the
 zones on its zones lane. Outside a perf run a zone costs a call and a
 compare at its open and a call at its close; frame marks and plots cost a
-call each.
+call each. Inside one, a zone's open and close each read the processor's
+time-stamp counter where it is invariant (the monotonic clock elsewhere),
+and its close records it in a ring of its thread's own with plain stores,
+no lock; the run drains the rings as it writes the spans out, converting
+the counter to the monotonic clock from a calibration it took as zones
+turned on.
 
 `jet perf compare base.jettrace head.jettrace` sets the last heap snapshot
 of each trace against each other when both kept one, and
@@ -731,18 +736,45 @@ spawns and file and network transfers, as `jet perf run` does, into a
 256 KiB ring. Each record is one datagram on a nonblocking socket pair, sent
 whole or, while the socket is full, lost, so no record ever waits. The observe
 writer drains the socket into the ring every 100ms, the oldest records going
-once it fills, and publishes `<temp>/jet-flight-<pid>.samples` beside the live snapshot, and the
-program's image as `.image` once. `jet perf attach <pid> --source app.jet`
-copies both and reads the copies, so its trace holds the waits and transfers
+once it fills, and publishes `jet-flight-<pid>.samples`, and the program's
+image as `.image` once, in the user's private directory: `jet` in
+`$XDG_RUNTIME_DIR` when that names an absolute path, else `jet-<uid>` in the
+temporary directory, made mode 0700 when missing. One already there is used
+only when it is a directory, not a link, the user owns and no one else can
+open, since a directory someone else made first or can open could hold their
+requests and show them the ring. Otherwise the program publishes no ring and
+reads no request, and `jet perf attach` refuses with E2123
+(`Jet.PerfDirectoryNotPrivate`), naming the directory and why, before it
+leaves a request there.
+`jet perf attach <pid> --source app.jet` copies both and reads the copies,
+so its trace holds the waits and transfers
 the program made before the attach: each wait's task, line, object and
 waker, and each transfer's `io` row. A wait of a task the live snapshot no
 longer holds becomes no row. Tests/Cases/Perf/attach_drains_flight_ring.case
 is the worked example.
 
+An attach asks the program for zones or a heap snapshot by leaving a request
+file beside the ring, mode 0600 and never through a link. The program acts
+on a request only when it is a regular file its own user owns, so no other
+user turns its zones on or takes its heap, even where the directory is
+reachable to them; a request another user left is ignored.
+Tests/Cases/Perf/attach_ignores_another_users_request.case is the worked
+example.
+
+An attach that can't run is refused by its cause. A process that isn't
+running, or runs without publishing what the attach reads (no live snapshot,
+no flight ring, or no live list for `--lens=alloc`), is E2124
+(`Jet.AttachTargetNotObserved`, exit 1), with the command that starts it
+observed. A command line that names no one process (no pid, two pids, or a
+word that isn't a pid) is E2125 (`Jet.AttachWhichProcess`, exit 2). A flag
+that conflicts with the others, such as `--lens=alloc` without `--source`,
+stays `Jet.UnknownFlag` (exit 2).
+Tests/Cases/Perf/attach_names_each_refusal.case is the worked example.
+
 `core.perf` zones, frame marks and plots stay off in such a run: each zone
 site tests one runtime word and calls nothing while it is clear.
 `jet perf attach <pid> --source app.jet --zones=500ms` turns them on for the
-window. It leaves `<temp>/jet-flight-<pid>.samples.zones` beside the ring,
+window. It leaves `jet-flight-<pid>.samples.zones` beside the ring,
 which the writer's next publication answers by setting the word and writing
 the zone, frame, plot and log span rows to `.samples.spans`. It then removes
 the request, so the next publication clears the word, and reads the rows into
@@ -756,7 +788,7 @@ Tests/Cases/Perf/attach_turns_zones_on.case is the worked example.
 `jet run --observe --checked-alloc app.jet` keeps the live list as a `jet
 perf run --lens=alloc` does, which `jet perf attach <pid> --source app.jet
 --lens=alloc` snapshots while the program runs. It leaves
-`<temp>/jet-flight-<pid>.samples.heap-request` beside the ring, which the
+`jet-flight-<pid>.samples.heap-request` beside the ring, which the
 writer's next publication notices as it looks for the zones request: it
 takes the snapshot on the writer's thread, named `attach`, with the live
 list held as a `heap_mark` holds it, so no block joins or leaves it while
@@ -767,8 +799,8 @@ its `heap` section, and stderr states how long the program's allocations
 and frees waited, `Heap snapshot: held the program's allocations and frees
 for 412 µs`. A program not started with `--checked-alloc` keeps no live
 list: the attach is refused with that reason and the command that starts
-one, and writes no trace. An observed run that is never attached pays one
-`faccessat` a publication, every 100ms, for the request.
+one, and writes no trace. An observed run that is never attached pays, every
+100ms, a `mkdir` and an `lstat` for its directory and one `lstat` a request.
 Tests/Cases/Perf/heap_snapshot_types_retention_and_diff.case is the worked
 example.
 
@@ -777,8 +809,14 @@ writes a typed dump while the stopping stack is whole:
 `.jet/dumps/<program>-<UTC time>.jetdump` under the working directory, mode
 0600, `~<n>` after the time when a dump of the same second exists, of which
 the newest three stay. Stderr names it (`dump written: <path>`). The dump
-holds every task's registers, the memory the stop reaches, the flight ring,
-and the program's image, so it opens without the binary. The memory starts
+holds every task's registers, the memory the stop reaches and the flight
+ring, and names the program's image by its build: the 64-bit FNV-1a hash
+of the image's bytes as its copy holds them (with the Secret literals'
+bytes zeroed, below), 16 hexadecimal digits. The image is copied beside the
+dumps as `.jet/dumps/<program>-<build>.image`, mode 0600, only when no copy
+of that build is there, so the dumps of one build share one copy and open
+without the binary; a copy no kept dump names is removed as the dumps
+rotate. The memory starts
 from every thread's and task's stack and the program's globals and follows
 each word that points into the program's writable memory: to its page, or
 to a whole large block (a mapping of its own) at that block's start. The
@@ -792,10 +830,16 @@ that signal, records its task and every general register, and waits until
 the dump is written, so its stack is the one its registers name; a parked
 or queued task's registers are the callee-saved ones its last switch
 saved. A thread that does not answer within 200ms is left out. Every
-`core.crypto.Secret`'s bytes are zeroed before the write.
+`core.crypto.Secret`'s bytes are zeroed before the write, in the dump and
+in the image's copy (a Secret literal's bytes).
 
-`jet debug <file>.jetdump` opens a dump behind the `(Jet)` console: `Dump of
-process <pid>, <n> flight events`, then `Memory: <n> bytes held, within
+`jet debug <file>.jetdump` opens a dump behind the `(Jet)` console with the
+image of its build beside it. A dump whose image is missing is refused,
+naming the build; so is one whose image file's bytes hash to another build
+(another build's image, or a changed copy), naming both builds. It shows
+`Dump of process <pid>, <n> flight events`, `Image: <n> bytes, with <n>
+bytes of records`, `Build: <build>, its image in <program>-<build>.image
+beside the dump`, then `Memory: <n> bytes held, within
 the 33554432-byte budget; <n> bytes cut off past it`, then the innermost Jet
 frame of the stop (`Stopped  main.jet:9  in check()`), its source line and
 its locals. `bt`, `frame N`, `locals` and `print NAME` read the stop as a
@@ -1311,7 +1355,10 @@ replays. `jet run --record=<name>` links it, runs the program in a child with
 `JET_RECORD` naming a scratch file, and writes the log into
 `.jet/replays/<name>.jetproof-replay` as `RunSync` frames
 (`Docs/Spec/proof-replay-decisions.md`). The artifact is written with mode
-0600 and stays local: its log holds every input's bytes.
+0600 and stays local: its log holds every input's bytes. A recording is
+never replaced: a NAME that already names one is E3630
+(`Jet.ReplayNameTaken`), refused before the program runs, so no run's work
+is lost to it; choose another NAME or remove the old recording.
 
 ## Implementation homes
 

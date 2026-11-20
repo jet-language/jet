@@ -204,6 +204,15 @@ jet_eval_ir_data: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, 
                 digits: if jet_eval_ir_in_range(magnitude, 64, true) -> TComptimeValue.Int{value: magnitude} else -> TComptimeValue.BigInt{decimal: "{magnitude}"}
                 return Val(TComptimeValue.Struct{type_name: "Decimal", fields: [TComptimeField]{TComptimeField{name: "negative", value: TComptimeValue.Bool{value: coefficient < 0}}, TComptimeField{name: "magnitude", value: digits}, TComptimeField{name: "scale", value: TComptimeValue.Int{value: scale}}}})
             }
+            // An Authority is its runtime handle: the List of its held
+            // rights, byte-sorted and unique (JetRuntime Authority.jet). It
+            // reads back as that List, which a constant rebuilds through
+            // `from_rights`.
+            if checked == (Type.Named{name: "Authority"}) && ir_type_def(p, "Authority") == None {
+                rights_row: ir_value_type(m, p, Type.List{element: Type.String}) ?? return jet_eval_ir_transport_fail(s, checked)
+                rights: jet_eval_ir_data(m, p, s, word, rights_row) ?? return None
+                return Val(TComptimeValue.Struct{type_name: "Authority", fields: [TComptimeField]{TComptimeField{name: "rights", value: rights}}})
+            }
             if ir_default_err(p, checked) -> return jet_eval_ir_err_data(s, p, checked, word)
             return jet_eval_ir_transport_fail(s, checked)
         }

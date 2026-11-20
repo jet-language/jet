@@ -48,7 +48,7 @@ grow: fn(n: Int) -> Int {
         bytes := mem.alloc_raw(4 * 8, 8) ?? panic("no memory")
         count := 4
         used := 0
-        loop i in 0..<n {
+        #Allow(Jet.HiddenCopyInLoop, "a full block doubles, so `count` < 2 * `n`") loop i in 0..<n {
             if used == count {
                 fresh: mem.alloc_raw(count * 2 * 8, 8) ?? panic("no memory")
                 mem.copy<I64>(fresh.cast<I64>(), bytes.cast<I64>(), count)

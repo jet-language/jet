@@ -959,7 +959,14 @@ fail on; `jet run` and `jet dev` never stop for it. A bitwise copy, a
 `Shared` share, a copy written as `.copy()`, or one outside any loop, is no
 L2511. A map copy-on-write is L2511 only where the loop that repeats the
 edit also shares the map each turn, so each edit clones it; an edit of a map
-the loop never shares clones it at most once and stays an L2510 row.
+the loop never shares clones it at most once and stays an L2510 row. An Int
+product or left shift a loop repeats is L2511 when the loop's condition
+never compares that Int, alone or plus, less, times or shifted by some Int,
+against another Int (`loop capacity < slots` stops it below twice `slots`;
+so does `loop span * 2 <= limit`), because geometric growth leaves the packed Int
+rail within a few dozen turns; the repair is a range type or a fixed-width
+`I64`. Additive growth never is: reaching the rail's end by a step takes
+about 2^63 / step turns, so a sum stays an L2510 row.
 
 ## Precedence
 

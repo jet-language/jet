@@ -1,0 +1,17 @@
+// A recursion through a function value, with n from the command line so
+// the call can't fold at compile time: each call of `step` may run any
+// function, so the stop poll after it calls the poll's helper.
+use core.process
+
+deep: fn(n: Int) -> Int {
+    if n < 2 -> return n
+    twice(deep, n)
+}
+
+twice: fn(step: fn(Int) -> Int, n: Int) -> Int { step(n - 1) + step(n - 2) }
+
+run: fn() {
+    args: process.args()
+    n: if args.len() > 0 -> Int.parse(args[args.len() - 1]) ?? 30 else -> 30
+    print("deep={deep(n)}")
+}

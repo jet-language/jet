@@ -943,11 +943,7 @@ ladder_for: fn(config: Config, shape: Shape) -> [Int] Never! {
     if shape.kind == .Domain -> return config.domain_ladder.copy()
     base: config.bases.get(shape.name) ?? shape.base
     ladder := [Int]{}
-    size := base
-    loop _ in 0..<config.steps {
-        ladder.push(size)
-        size *= 2
-    }
+    loop step in 0..<config.steps -> ladder.push(base << step)
     ladder
 }
 

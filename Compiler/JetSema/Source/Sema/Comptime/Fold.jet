@@ -345,9 +345,9 @@ sema_comptime_fold_decimal: fn(text: String) -> TComptimeValue? Never! {
         if exponent_negative -> exponent = 0 - exponent
     }
     places := fractional - exponent
-    loop places < 0 {
-        magnitude *= 10
-        places += 1
+    if places < 0 {
+        magnitude *= (10).pow(0 - places)
+        places = 0
     }
     magnitude_value: if sema_comptime_fold_small_int(magnitude) -> TComptimeValue.Int{value: magnitude} else -> TComptimeValue.BigInt{decimal: "{magnitude}"}
     Val(TComptimeValue.Struct{

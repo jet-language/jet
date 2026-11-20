@@ -593,30 +593,10 @@ parser_unit_decimal_to_ratio: fn(text: String) -> UnitRatio Never! {
         }
         index += 1
     }
-    denominator := 1
-    fraction_scale := 0
-    loop fraction_scale < fraction_digits {
-        denominator *= 10
-        fraction_scale += 1
-    }
+    denominator := (10).pow(fraction_digits)
     numerator := sign * (whole * denominator + fraction)
     power: exponent_sign * exponent
-    if {
-        power >= 0 -> {
-            scale := 0
-            loop scale < power {
-                numerator *= 10
-                scale += 1
-            }
-        }
-        else -> {
-            scale := 0
-            loop scale < 0 - power {
-                denominator *= 10
-                scale += 1
-            }
-        }
-    }
+    if power >= 0 -> numerator *= (10).pow(power) else -> denominator *= (10).pow(0 - power)
     UnitRatio{numerator: numerator, denominator: denominator}
 }
 

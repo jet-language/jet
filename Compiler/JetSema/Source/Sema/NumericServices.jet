@@ -68,15 +68,8 @@ sema_numeric_unit_conversion_exact_service: fn(value: Float, scale_numerator: St
         top |= 4503599627370496
         power = exponent - 1075
     }
-    bottom := 1
-    loop power > 0 {
-        top *= 2
-        power -= 1
-    }
-    loop power < 0 {
-        bottom *= 2
-        power += 1
-    }
+    if power > 0 -> top = top << power
+    bottom: if power < 0 -> 1 << (0 - power) else -> 1
     if value < 0.0 -> top = -top
     numerator := top * sema_numeric_ratio_part(scale_numerator) * sema_numeric_ratio_part(offset_denominator) + sema_numeric_ratio_part(offset_numerator) * bottom * sema_numeric_ratio_part(scale_denominator)
     denominator := bottom * sema_numeric_ratio_part(scale_denominator) * sema_numeric_ratio_part(offset_denominator)

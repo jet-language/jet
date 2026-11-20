@@ -31,6 +31,12 @@ jet_cli_project_part_value: fn(name: String, path: String, state: String) -> Jet
 jet_cli_project_parts: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     skipped_only: args.contains("--skipped")
     root: cli_files.cwd() ?? "."
+    here: cli_files.realpath(root) ?? root
+    if jet_cli_workspace_source(here, color) == {
+        .Index(index_path) -> return jet_cli_project_parts_members(here, index_path, skipped_only, color, json)
+        .Failed(plan) -> return plan
+        .Absent | .Authority(_) -> {}
+    }
     files := [JetDriverAuthorizedSourceFile]{}
     if jet_cli_discover_sources(root, files) == .Val(problem) {
         return jet_cli_fail("E1334", "couldn't discover source files authority `{root}`", problem, "restore access to the authority metadata and try again", color, JET_DRIVER_EXIT_USER_ERROR)
@@ -141,4 +147,31 @@ jet_cli_project_parts: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> J
         return jet_cli_done("{jet_cli_status_render("inspect.parts", true, fields)}\n", "", status)
     }
     jet_cli_done(output, diagnostic_render_all("", "", diagnostics, false), status)
+}
+
+// The parts of a workspace root (the index `index_path` of `root`) are its
+// members, in index order: each is a package whose own `jet project parts`
+// lists its modules. A member is never skipped.
+jet_cli_project_parts_members: fn(root: String, index_path: String, skipped_only: Bool, color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
+    members := [JetCLIWorkspaceMember]{}
+    if jet_cli_workspace_members(root, index_path, "project parts", color) == {
+        .Refused(plan) -> return plan
+        .Members(found) -> members = found
+    }
+    part_values := [JetCLIStatusValue]{}
+    output := ""
+    if !skipped_only {
+        loop member in members {
+            part_values.push(jet_cli_project_part_value(member.name, member.path, "member"))
+            output = "{output}{jet_cli_pad("member", 9)} {jet_cli_pad(member.name, 24)} {member.path}\n"
+        }
+    }
+    if json {
+        fields: [JetCLIStatusField]{
+            jet_cli_status_field("parts", jet_cli_status_array(part_values)),
+            jet_cli_status_field("conflicts", jet_cli_status_array([JetCLIStatusValue]{})),
+        }
+        return jet_cli_done("{jet_cli_status_render("inspect.parts", true, fields)}\n", "", JET_DRIVER_EXIT_OK)
+    }
+    jet_cli_done(output, "", JET_DRIVER_EXIT_OK)
 }

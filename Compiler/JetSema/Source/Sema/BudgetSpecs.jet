@@ -981,11 +981,7 @@ sema_budget_enum_key: fn(expr: Expr) -> String? Never! {
 }
 
 // The largest unsigned 128-bit value, the range of every normalized limit.
-sema_budget_u128_max: fn() -> Int Never! {
-    max := 1
-    loop _ in 0..<128 -> max *= 2
-    max - 1
-}
+sema_budget_u128_max: fn() -> Int Never! { (1 << 128) - 1 }
 
 // A nonnegative decimal digit string within the unsigned 128-bit range.
 sema_budget_parse_u128: fn(text: String) -> Int? Never! {

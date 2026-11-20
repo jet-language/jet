@@ -1,0 +1,93 @@
+# Only a program's own user can turn its zones on or take its heap. An
+# observed run publishes its flight ring in its user's private directory,
+# `jet` in `$XDG_RUNTIME_DIR`, made owner-only, not in the temporary
+# directory every user shares, and acts on an attach's request there only
+# when the request is a regular file its own user owns. A zones request and
+# a heap snapshot request that belong to another user (a subordinate id of
+# this one, which a user namespace lets it hand a file to) are ignored: the
+# program writes no zone rows and answers no snapshot. Its own user's attach
+# still turns zones on, through a request only that user can write.
+# A directory already there under that name is used only when it is this
+# user's alone: one others can open, a link, or one another user made first
+# gets no ring from the program, and the attach refuses it as E2123 (its
+# report the CLI snapshot) before it leaves a request there.
+requires: os-name:linux
+requires: probe unshare --user --map-root-user --map-auto true # user namespaces with subordinate ids (newuidmap, /etc/subuid) hand a file to another user
+fixture: AttachTurnsZonesOn.fixture
+env: NO_COLOR=1
+env: XDG_RUNTIME_DIR={work}/run
+env: TMPDIR={work}/tmp
+step: mkdir -m 700 run tmp
+exit: 0
+session live line: jet run --observe live.jet
+stderr: null
+recv live
+stdout.trim: ~ "READY" # the program is running its loop
+step: sh -c 'n=0; while [ ! -f run/jet/jet-flight-{pid:live}.samples ] && [ $n -lt 200 ]; do sleep 0.05; n=$((n+1)); done; stat -c %a run/jet; ls tmp | grep -c jet-flight'
+exit: 1 # grep counts no line
+stdout: = "700\n0\n" # the ring is in the owner-only directory, and none is in the shared one
+step: unshare --user --map-root-user --map-auto sh -c 'for asked in zones heap-request; do touch run/jet/jet-flight-{pid:live}.samples.$asked && chown 1:1 run/jet/jet-flight-{pid:live}.samples.$asked || exit 1; done'
+exit: 0
+step: sh -c 'if [ "$(stat -c %u run/jet/jet-flight-{pid:live}.samples.zones)" != "$(id -u)" ]; then echo foreign; fi'
+exit: 0
+stdout: = "foreign\n" # the requests belong to another user
+step: sleep 1
+exit: 0
+step: sh -c 'ls run/jet | grep -c -e "samples.spans$" -e "samples.heap$"; ls run/jet | grep -c -e "samples.zones$" -e "samples.heap-request$"'
+exit: 0
+stdout: = "0\n2\n" # ten publications later: no zone rows written and no snapshot answered, and both requests left where they were
+step: sh -c 'rm run/jet/jet-flight-{pid:live}.samples.zones run/jet/jet-flight-{pid:live}.samples.heap-request'
+exit: 0
+step: jet perf attach {pid:live} --source live.jet --zones=300ms --out zones.jettrace
+exit: 0
+file: zones.jettrace ~ "\"kind\":\"zone\"" # the program's own user turns its zones on
+step: sh -c 'ls run/jet | grep -c "samples.zones$"'
+exit: 1 # grep counts no line
+stdout: = "0\n" # and withdraws its request
+step: mkdir -m 755 open open/jet
+exit: 0
+step: mkdir -m 700 linked theirs
+exit: 0
+step: ln -s ../run/jet linked/jet
+exit: 0
+step: unshare --user --map-root-user --map-auto sh -c 'mkdir -m 700 theirs/jet && chown 1:1 theirs/jet'
+exit: 0
+session open line: jet run --observe live.jet
+env: XDG_RUNTIME_DIR={work}/open
+stderr: null
+recv open
+stdout.trim: ~ "READY" # a second run, whose directory others can open
+step: sleep 0.5
+exit: 0
+step: sh -c 'ls open/jet | grep -c jet-flight; ls tmp | grep -c jet-flight'
+exit: 1 # grep counts no line
+stdout: = "0\n0\n" # five publications later it has published no ring, there or in the shared directory
+step: jet perf attach {pid:open} --source live.jet --zones=300ms --out open.jettrace
+env: XDG_RUNTIME_DIR={work}/open
+normalize: replace "{work}" "<work>"
+exit: 1
+stdout: = ""
+stderr: = ../../CLI/perf_attach_directory_not_private.txt
+file: open.jettrace absent # refused before it traced anything
+step: sh -c 'ls open/jet | grep -c samples.zones'
+exit: 1 # grep counts no line
+stdout: = "0\n" # and before it left a request
+step: jet perf attach {pid:live} --source live.jet --out linked.jettrace
+env: XDG_RUNTIME_DIR={work}/linked
+exit: 1
+stdout: = ""
+stderr: ~ "Error: Jet.PerfDirectoryNotPrivate: Jet won't profile through" # the refusal is E2123's
+stderr: ~ "/linked/jet`: it is a link" # a link, even to this user's own directory, is refused
+step: jet perf attach {pid:live} --source live.jet --out theirs.jettrace
+env: XDG_RUNTIME_DIR={work}/theirs
+exit: 1
+stdout: = ""
+stderr: ~ "/theirs/jet`: another user owns it" # a directory another user made first is refused
+step: rmdir theirs/jet
+exit: 0 # this user may remove the empty directory from its own parent, which the case's cleanup can't list
+signal open: KILL
+close open
+exit: any # the case's KILL ends the program
+signal live: KILL
+close live
+exit: any # the case's KILL ends the program

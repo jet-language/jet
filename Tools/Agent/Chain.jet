@@ -851,8 +851,7 @@ memory_bytes: fn(text: String) -> Int Never! {
     units: [String]{"K", "M", "G"}
     loop at in 0..<units.len() {
         if !text.ends_with(units[at]) -> next
-        scale := 1024
-        loop _ in 0..<at -> scale *= 1024
+        scale: 1 << (10 * (at + 1))
         return (Int.parse(text.removesuffix(units[at])) ?? 0) * scale
     }
     Int.parse(text) ?? 0

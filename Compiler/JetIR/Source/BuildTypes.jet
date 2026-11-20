@@ -404,9 +404,15 @@ ir_value_type_laid: fn(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -
         }
         return ir_value_type_in(m, p, Type.List{element: element}, laying)
     }
-    if ty == .Shared(_) {
+    if ty == .Shared(inner) {
         // An owned runtime JetShared handle.
-        return Val(ir_intern_type(m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, ty, "jet_rt_native_shared_drop", "jet_rt_native_shared_clone")))
+        interned: ir_intern_type(m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, ty, "jet_rt_native_shared_drop", "jet_rt_native_shared_clone"))
+        // The value's row, for the handle's DWARF type: its cell holds the
+        // value as a List's data holds an element.
+        if laying.len() == 0 && m.list_elements.get(interned) == None {
+            m.list_elements[interned] = ir_value_type_in(m, p, inner, laying) ?? -1
+        }
+        return Val(interned)
     }
     if ir_shared_weak(ty) {
         // `Shared.Weak<T>`: the JetShared cell's address, owning one weak

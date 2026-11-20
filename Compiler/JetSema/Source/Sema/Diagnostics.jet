@@ -654,8 +654,7 @@ sema_type_int_range_text: fn(signed: Bool, bits: Int) -> String Never! {
         return "-170141183460469231731687303715884105728 to 170141183460469231731687303715884105727"
     }
     if bits == 128 -> return "0 to 340282366920938463463374607431768211455"
-    span := 1
-    loop _ in 0..<bits -> span *= 2
+    span: 1 << bits
     if signed -> return "{0 - span / 2} to {span / 2 - 1}"
     "0 to {span - 1}"
 }

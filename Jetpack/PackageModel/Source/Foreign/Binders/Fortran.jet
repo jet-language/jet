@@ -516,10 +516,12 @@ pkg_fortran_render_bridge: fn(module_name: String, lib: String, routines: [Fortr
     "{out}end module jet_fortran_{lib}_bridge\n"
 }
 
+// The element count of an array of `extents`. The bridge passes each
+// element as its own argument, so the count fits an I64.
 pkg_fortran_product: fn(extents: [Int]) -> Int Never! {
-    product := 1
-    loop extent in extents -> product *= extent
-    product
+    product := I64{1}
+    loop extent in extents -> product *= I64{extent}
+    Int{product}
 }
 
 pkg_fortran_join_ints: fn(values: [Int], separator: String) -> String Never! {

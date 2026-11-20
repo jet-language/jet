@@ -6,7 +6,8 @@
 // which is an L2510 lint but no L2511 hidden copy, the Int arithmetic a range
 // loop's counter keeps on the packed rail, a view read in place as a
 // receiver, a plain check's L2511 tidy errors, a map edit's L2511 only
-// where its loop shares the map each turn, and the stop polls a loop and a
+// where its loop shares the map each turn, an Int's L2511 only where its
+// loop grows it geometrically with no cap, and the stop polls a loop and a
 // recursive call keep.
 use {
     jet_driver.[
@@ -466,4 +467,103 @@ cost_projection_map_edit_source: fn() -> String {
         if row.code == "L2511" -> tidy.push("{row.what} | {row.fix}")
     }
     assert_eq(tidy, [String]{"Editing a shared map backing store inside a loop | To keep the copy out of the loop, mutate an exclusive map place, or move the edit outside the loop."})
+}
+
+// Int updates inside loops: a sum of arbitrary list values, a doubling the
+// loop caps by a parameter, a doubling it caps by a length, a left shift, a
+// product written factor-first, a sign flip, a tripling it caps by a
+// constant on one side of `&&`, and a doubling it caps by its own double.
+cost_projection_spill_source: fn() -> String {
+    [String]{
+        "weigh: fn(weights: [Int]) -> Int {{",
+        "    total := 0",
+        "    loop weight in weights {{",
+        "        total += weight",
+        "    }}",
+        "    total",
+        "}}",
+        "grow: fn(limit: Int) -> Int {{",
+        "    size := 1",
+        "    loop size != limit {{",
+        "        size *= 2",
+        "    }}",
+        "    size",
+        "}}",
+        "fit: fn(slots: Int) -> Int {{",
+        "    cap := 1",
+        "    loop cap - 1 < slots {{",
+        "        cap *= 2",
+        "    }}",
+        "    cap",
+        "}}",
+        "bits: fn(rows: [String]) -> Int {{",
+        "    mask := 1",
+        "    loop _ in rows {{",
+        "        mask <<= 1",
+        "    }}",
+        "    mask",
+        "}}",
+        "scale: fn(rows: [String]) -> Int {{",
+        "    total := 1",
+        "    loop _ in rows {{",
+        "        total = 3 * total",
+        "    }}",
+        "    total",
+        "}}",
+        "flip: fn(rows: [String]) -> Int {{",
+        "    sign := 1",
+        "    loop _ in rows {{",
+        "        sign *= -1",
+        "    }}",
+        "    sign",
+        "}}",
+        "bounded: fn() -> Int {{",
+        "    size := 1",
+        "    loop size > 0 && size < 4096 {{",
+        "        size *= 3",
+        "    }}",
+        "    size",
+        "}}",
+        "octave: fn(micros: Int) -> Int {{",
+        "    span := 1",
+        "    loop span * 2 <= micros {{",
+        "        span *= 2",
+        "    }}",
+        "    span",
+        "}}",
+        "",
+    }.join("\n")
+}
+
+#Test("only an Int product or left shift a loop grows with no cap in its condition is marked growing, and a plain check lists each as an L2511 tidy error") {
+    request := cost_projection_request(cost_projection_spill_source())
+    request.capture_cost_report = true
+    captured := jet_driver_compile(request)
+    assert(captured.complete, "the fixture checks: {captured.diagnostics.map(fn(row) { row.what })}")
+    report: captured.cost_report.move() ?? panic("a captured check keeps its cost report")
+    spills := [String]{}
+    loop site in report.sites {
+        if site.kind == TCostKind.ExactIntSpill && site.loop_depth > 0 -> spills.push("{site.function} main.jet:{site.line} {site.state:Debug} grows {site.grows}")
+    }
+    spills.sort()
+    assert_eq(spills, [String]{
+        "bits main.jet:25 SemanticRemainder grows true",
+        "bounded main.jet:46 SemanticRemainder grows false",
+        "fit main.jet:17 SemanticRemainder grows false",
+        "fit main.jet:18 SemanticRemainder grows false",
+        "flip main.jet:39 OptimizerRemoved grows false",
+        "flip main.jet:39 SemanticRemainder grows false",
+        "grow main.jet:11 SemanticRemainder grows true",
+        "octave main.jet:52 SemanticRemainder grows false",
+        "octave main.jet:53 SemanticRemainder grows false",
+        "scale main.jet:32 SemanticRemainder grows true",
+        "weigh main.jet:4 SemanticRemainder grows false",
+    })
+    compiled := jet_driver_compile(cost_projection_request(cost_projection_spill_source()))
+    tidy := [String]{}
+    loop row in compiled.diagnostics {
+        if row.code == "L2511" -> tidy.push("{row.what} | {row.fix}")
+    }
+    spill: "An exact Int operation may spill to bigint inside a loop | To keep the Int on the packed rail, give it a range type such as `Int(0..1000)` or a fixed width such as `I64`, or cap it in the loop's condition."
+    assert_eq(tidy, [String]{spill, spill, spill})
 }
