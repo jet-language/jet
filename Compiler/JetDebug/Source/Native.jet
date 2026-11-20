@@ -2072,6 +2072,7 @@ NativeSession: struct {
         shown := native_frame_locals(self.image, memory, frames[index], lookup, level.site, caller)
         function: native_function_at(self.image, lookup) ?? return Ok(shown)
         // The variables native_frame_locals shows, in its order.
+        line: native_site_line(self.image, lookup, level.site)
         at := 0
         loop variable in function.variables {
             if variable.site != level.site -> next
@@ -2079,7 +2080,7 @@ NativeSession: struct {
             if variable.list >= 0 {
                 located = native_variable_covering(self.image, variable, lookup)
                 if located == None && variable.role != .Parameter -> next
-            }
+            } else if native_debug_unbound(variable, line) { next }
             local: at
             at += 1
             range: located ?? next
@@ -6203,18 +6204,22 @@ native_debug_cut: fn(memory: NativeMemory, address: Int, count: Int) -> Bool Nev
 
 // The parameters and locals live at `lookup` in `frame` that belong to the
 // inlined run `site` (-1: the function's own frame), rendered as Jet values;
-// a variable the image gives no location shows as unavailable, and a
-// parameter no range covers as not kept. A parameter located by its entry
-// value (DW_OP_entry_value) reads the value its `caller` passed, or, with no
-// DW_OP_stack_value after it (an aggregate's), the bytes at that address.
+// a variable the image gives no location shows as unavailable from its
+// binding on (native_debug_unbound), and a parameter no range covers as not
+// kept. A parameter located by its entry value (DW_OP_entry_value) reads the
+// value its `caller` passed, or, with no DW_OP_stack_value after it (an
+// aggregate's), the bytes at that address.
 native_frame_locals: fn(image: NativeImage, memory: NativeMemory, frame: NativeUnwound, lookup: Int, site: Int, caller: NativeUnwound?) -> [NativeLocal] Never! {
     locals := [NativeLocal]{}
     function: native_function_at(image, lookup) ?? return locals
+    line: native_site_line(image, lookup, site)
     loop variable in function.variables {
         if variable.site != site -> next
         type_name: native_type_name(image, variable.ty)
         if variable.list < 0 {
-            locals.push(NativeLocal{name: variable.name, type_name: type_name, value: NATIVE_DEBUG_UNAVAILABLE})
+            if !native_debug_unbound(variable, line) {
+                locals.push(NativeLocal{name: variable.name, type_name: type_name, value: NATIVE_DEBUG_UNAVAILABLE})
+            }
             next
         }
         located: native_variable_covering(image, variable, lookup) ?? {
@@ -6231,6 +6236,25 @@ native_frame_locals: fn(image: NativeImage, memory: NativeMemory, frame: NativeU
         locals.push(NativeLocal{name: variable.name, type_name: type_name, value: value})
     }
     locals
+}
+
+// The line the frame of the inlined run `site` (-1: the function's own
+// frame) stands at while `lookup` runs, as native_frames_at shows it.
+native_site_line: fn(image: NativeImage, lookup: Int, site: Int) -[]> Int {
+    shown: native_frames_at(image, lookup)
+    function: native_function_at(image, lookup) ?? return shown[shown.len() - 1].line
+    loop (index, run) in native_inline_chain(function, lookup) {
+        if run == site -> return shown[index].line
+    }
+    shown[shown.len() - 1].line
+}
+
+// Whether `variable`, which the image gives no location, is a local whose
+// binding has not run while its frame stands at `line`. Such a local is
+// listed from the line after its own on, as a located local is from its
+// binding on, so no stop lists a local whose binding is still to come.
+native_debug_unbound: fn(variable: NativeVariable, line: Int) -[]> Bool {
+    variable.role == .Local && line <= variable.line
 }
 
 // The register (a DWARF number) whose value at the function's entry the
