@@ -1694,13 +1694,17 @@ perf_zones_refused: fn() {
 }
 
 // Now on the zones' clock (perf_zone_tsc): one read of the time-stamp
-// counter, or of the timeline (perf_zone_now).
-perf_zone_edge: fn() -> I64 {
+// counter, or of the timeline (perf_zone_now). Inlined into the zone's open
+// and close on every tier, as is perf_zone_ticks, so an edge is the
+// counter's instructions in the export's own body: x86-64 selection writes
+// a call of the `#FFI(asm)` leaf as its template in place (X64Select.jet
+// ir_x64_asm_inline), and the template keeps r8 and r9.
+#Inline(Always) perf_zone_edge: fn() -> I64 {
     if (perf_zone_tsc == I64{0}) { return perf_zone_now() }
     perf_zone_ticks()
 }
 
-perf_zone_ticks: fn() -> I64 {
+#Inline(Always) perf_zone_ticks: fn() -> I64 {
     #Unsafe("rdtsc only reads the time-stamp counter, which the zones' calibration found invariant and enabled for this process") {
         return os_rdtsc_i64()
     }
