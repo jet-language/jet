@@ -491,10 +491,7 @@ services_bounded_budget: fn(max: Int, backoff_ms: Int, exponential: Bool) -> Ser
 services_restart_delay: fn(backoff_ms: Int, exponential: Bool, attempt: Int) -> Int Never! {
     shift := if attempt > 1 -> attempt - 1 else -> 0
     if shift > 20 -> shift = 20
-    multiplier := 1
-    if exponential {
-        loop _ in 0..<shift -> multiplier *= 2
-    }
+    multiplier: if exponential -> 1 << shift else -> 1
     if backoff_ms > SERVICES_MAX_RESTART_DELAY_MS /% multiplier {
         return SERVICES_MAX_RESTART_DELAY_MS
     }

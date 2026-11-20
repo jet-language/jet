@@ -259,13 +259,12 @@ byte_tail: fn(text: String, start: Int) -> String Never! { byte_slice(text, star
 // sign, with weight 2^56.
 packed_word: fn(bytes: [U8], start: Int, end: Int) -> Int Never! {
     word := 0
-    scale := 1
     loop index in start..<end {
         byte: Int{bytes[index]}
-        if index - start == 7 && byte >= 128 -> word += (byte - 256) * scale else {
-            word += byte * scale
+        weight: 1 << (8 * (index - start))
+        if index - start == 7 && byte >= 128 -> word += (byte - 256) * weight else {
+            word += byte * weight
         }
-        if index - start < 7 -> scale *= 256
     }
     word
 }
@@ -624,11 +623,8 @@ test_scope_literals: fn() -> [MessageLiteral] Never! {
 // A stop code's bytes as one little-endian word.
 code_word: fn(code: String) -> Int Never! {
     word := 0
-    scale := 1
-    loop byte in code.bytes() {
-        word += Int{byte} * scale
-        scale *= 256
-    }
+    code_bytes: code.bytes()
+    loop at in 0..<code_bytes.len() -> word += Int{code_bytes[at]} << (8 * at)
     word
 }
 
@@ -2766,11 +2762,7 @@ fault_report_sources: fn() -> [FaultReportSource] Never! {
 // The little-endian unsigned field of `count` bytes (at most 8) at `at`.
 le_field: fn(bytes: [U8], at: Int, count: Int) -> Int Never! {
     value := 0
-    scale := 1
-    loop index in at..<at + count {
-        value += Int{bytes[index]} * scale
-        if index - at < count - 1 -> scale *= 256
-    }
+    loop index in at..<at + count -> value += Int{bytes[index]} << (8 * (index - at))
     value
 }
 

@@ -57,8 +57,8 @@ kit_steps_offset_ns: fn(text: String) -> Int? {
             digit: Int{byte} - 48
             if digit < 0 || digit > 9 -> return None
             fraction = fraction * 10 + digit
-            denominator *= 10
         }
+        denominator = (10).pow(parts[1].count_bytes())
     }
     // Reject unrepresentable durations rather than wrapping the deadline.
     if whole > 9223372036854775807 /% scale -> return None

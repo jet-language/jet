@@ -428,10 +428,12 @@ pkg_cobol_render_jet: fn(lib: String, layout: CobolRecordLayout, packed: CobolFi
 }
 
 // `10^digits - 1`, the largest magnitude a field of `digits` digits holds.
+// A field holds 1 to 18 digits (pkg_cobol_parse_pic), so the power fits an
+// I64.
 pkg_cobol_max_digits: fn(digits: Int) -> Int Never! {
-    value := 1
-    loop _ in 0..<digits -> value *= 10
-    value - 1
+    value := I64{1}
+    loop _ in 0..<digits -> value *= I64{10}
+    Int{value} - 1
 }
 
 pkg_cobol_render_bridge: fn(program: String, layout: CobolRecordLayout, packed: CobolFieldLayout, input: CobolFieldLayout?, lib: String) -> String Never! {

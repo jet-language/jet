@@ -58,6 +58,10 @@ TCostSite: struct {
     // Whether the cost is the own work of a call the source writes
     // (TCostFact.written); such a site is no hidden copy.
     written: Bool{false},
+    // Whether this ExactIntSpill site is an Int product or left shift a loop
+    // grows geometrically, with no cap in its condition
+    // (jet_driver_cost_growth); false for every other kind.
+    grows: Bool{false},
     // The source file the site is in and the 1-based line it starts on
     // (jet_driver_cost_place); empty and 0 until the site is placed.
     path: String{""},
@@ -304,8 +308,8 @@ jet_driver_cost_lints: fn(load: JetDriverLoadResult, report: TCostReport) -> [Di
     lints
 }
 
-// The L2511 tidy errors of `functions`: one per distinct hidden copy
-// (jet_driver_cost_hidden_copy) that a loop of a function the program wrote
+// The L2511 tidy errors of `functions`: one per distinct site
+// (jet_driver_cost_tidy) that a loop of a function the program wrote
 // repeats. A plain check and a program compile (`jet build`) list them
 // without keeping a cost report, and a function without a loop is not walked.
 jet_driver_cost_copy_lints: fn(load: JetDriverLoadResult, functions: [FnBody]) -> [Diagnostic] {
@@ -319,24 +323,44 @@ jet_driver_cost_copy_lints: fn(load: JetDriverLoadResult, functions: [FnBody]) -
     lints := [Diagnostic]{}
     seen := [String:Bool]{}
     loop site in sites {
-        if site.loop_depth == 0 || site.state != TCostState.SemanticRemainder || !jet_driver_cost_hidden_copy(site) -> next
+        if site.loop_depth == 0 || site.state != TCostState.SemanticRemainder || !jet_driver_cost_tidy(site) -> next
         operation: jet_driver_cost_operation(site)
         key: "{site.module_identity:Debug} {site.span.start} {site.span.end} {operation}"
         if seen.get(key) != None -> next
         seen[key] = true
-        lints.push(jet_driver_diagnostic_at_loaded_site(load, site.module_identity, "L2511", site.span, "{operation} inside a loop", "The loop pays for this copy on every turn and the source doesn't show it, so the loop's cost grows with the copied value's size.", "To keep the copy out of the loop, {jet_driver_cost_fix(site.kind)}."))
+        lints.push(jet_driver_diagnostic_at_loaded_site(load, site.module_identity, "L2511", site.span, "{operation} inside a loop", jet_driver_cost_tidy_why(site.kind), jet_driver_cost_tidy_fix(site.kind)))
     }
     lints
 }
 
 // The cost sites L2511 lists: a copy sema made that the source doesn't
-// write (a view made owned or an implicit copy), and a map edit whose loop
-// shares the map each turn, so the edit clones it each turn. An edit of a
-// map the loop doesn't share clones it at most once. A copy that is the own
-// work of a call the source writes (`text.lines()`) is shown, so it is no
-// hidden copy; L2510 still lists it.
-jet_driver_cost_hidden_copy: fn(site: TCostSite) -> Bool Never! {
+// write (a view made owned or an implicit copy); a map edit whose loop
+// shares the map each turn, so the edit clones it each turn (an edit of a
+// map the loop doesn't share clones it at most once); and an Int product or
+// left shift a loop grows geometrically with no cap, which leaves the packed
+// Int rail within a few dozen turns. A sum never counts: it reaches the
+// rail's end only after about 2^63 / step turns. A copy that is the own work
+// of a call the source writes (`text.lines()`) is shown, so it is no hidden
+// copy; L2510 still lists it.
+jet_driver_cost_tidy: fn(site: TCostSite) -> Bool Never! {
+    if site.kind == TCostKind.ExactIntSpill -> return site.grows
     !site.written && (site.kind == TCostKind.ViewMaterialization || site.kind == TCostKind.ImplicitCopy || (site.kind == TCostKind.CollectionCopyOnWrite && site.shared))
+}
+
+// Why an L2511 site of `kind` costs the loop.
+jet_driver_cost_tidy_why: fn(kind: TCostKind) -> String Never! {
+    if kind == TCostKind.ExactIntSpill {
+        return "The loop multiplies or shifts this Int on every turn and nothing caps it, so it outgrows the packed Int rail and goes on as a bigint."
+    }
+    "The loop pays for this copy on every turn and the source doesn't show it, so the loop's cost grows with the copied value's size."
+}
+
+// How to take an L2511 site of `kind` out of the loop.
+jet_driver_cost_tidy_fix: fn(kind: TCostKind) -> String Never! {
+    if kind == TCostKind.ExactIntSpill {
+        return "To keep the Int on the packed rail, give it a range type such as `Int(0..1000)` or a fixed width such as `I64`, or cap it in the loop's condition."
+    }
+    "To keep the copy out of the loop, {jet_driver_cost_fix(kind)}."
 }
 
 // What a cost kind is, as `explain --cost` names it.
@@ -500,9 +524,12 @@ jet_driver_cost_function_sites: fn(function: FnBody, name: String, nodes: [Int],
     removed := [Int:Bool]{}
     jet_driver_cost_consumed(tree, consumed, removed)
     shared: jet_driver_cost_shared_edits(tree)
+    grown_nodes := [Int:Bool]{}
+    grown_updates := [Int:Bool]{}
+    jet_driver_cost_growth(tree, grown_nodes, grown_updates)
     loop id in nodes {
         node: body_node(tree, id)
-        fact: body_cost_fact(tree, node) ?? next
+        fact: body_cost_fact(tree, node) ?? jet_driver_cost_grown_shift(grown_nodes, id) ?? next
         state := fact.state
         if fact.kind == TCostKind.OutcomeConstruction {
             if removed.get(id) != None -> state = TCostState.OptimizerRemoved else if consumed.get(id) != None {
@@ -517,16 +544,127 @@ jet_driver_cost_function_sites: fn(function: FnBody, name: String, nodes: [Int],
         } else if node.kind == .BuiltinMethod(receiver, _, _) && fact.kind == TCostKind.ViewMaterialization {
             view = type_name(body_type(tree, receiver))
         }
-        sites.push(TCostSite{function: name, module_identity: function.module_identity, span: span, loop_depth: depths.get(id) ?? 0, kind: fact.kind, state: state, view: view, shared: shared.get(id) != None, written: fact.written})
+        sites.push(TCostSite{function: name, module_identity: function.module_identity, span: span, loop_depth: depths.get(id) ?? 0, kind: fact.kind, state: state, view: view, shared: shared.get(id) != None, written: fact.written, grows: fact.kind == TCostKind.ExactIntSpill && grown_nodes.get(id) != None})
     }
     loop statement in tree.stmts {
         if statement == .Assign(place, op, value, _, span) {
-            fact: jet_driver_cost_assign_fact(tree, place, op, value) ?? next
+            fact: jet_driver_cost_assign_fact(tree, place, op, value) ?? jet_driver_cost_grown_shift(grown_updates, value) ?? next
             edited := false
             if place == .Expr(expression) -> edited = shared.get(expression) != None
-            sites.push(TCostSite{function: name, module_identity: function.module_identity, span: span, loop_depth: depths.get(value) ?? 0, kind: fact.kind, state: fact.state, view: "", shared: edited})
+            sites.push(TCostSite{function: name, module_identity: function.module_identity, span: span, loop_depth: depths.get(value) ?? 0, kind: fact.kind, state: fact.state, view: "", shared: edited, grows: fact.kind == TCostKind.ExactIntSpill && grown_updates.get(value) != None})
         }
     }
+}
+
+// The spill site of a left shift a loop grows (jet_driver_cost_growth),
+// which body_cost_fact files none for; None for any node it doesn't mark.
+jet_driver_cost_grown_shift: fn(grown: [Int:Bool], id: Int) -> TCostFact? Never! {
+    if grown.get(id) == None -> return None
+    Val(TCostFact{kind: TCostKind.ExactIntSpill, state: TCostState.SemanticRemainder})
+}
+
+// Marks the Int updates of `tree` a loop repeats and grows geometrically:
+// in `nodes` by its operation's node id, a `target = target op
+// step` (or `step * target`); in `updates` by its value's node id, a
+// `target op= step`. A product grows unless its factor stays within -1..1,
+// and a left shift unless it shifts by nothing. A sum or difference never
+// counts: reaching the rail's end by a step takes about 2^63 / step turns.
+// An update whose innermost loop's condition compares the target against
+// any Int (jet_driver_cost_caps) stops below twice that Int, so it spills
+// only if that Int already sits near the rail's end.
+jet_driver_cost_growth: fn(tree: BodyTree, nodes: &[Int:Bool], updates: &[Int:Bool]) Never! {
+    sizes := [Int:Int]{}
+    conditions := [Int:Int]{}
+    loop statement in tree.stmts {
+        iterated := [Int]{}
+        jet_driver_cost_iterated(tree, statement, iterated)
+        condition := Int?{None}
+        if statement == .While(_, held, _, _) -> condition = Val(held)
+        if statement == .CountedLoop(_, _, counted, _, _, _, _) -> condition = Val(counted)
+        loop id in iterated {
+            if sizes.get(id) == .Val(size) && size <= iterated.len() -> next
+            sizes[id] = iterated.len()
+            _ := conditions.remove(id)
+            if condition == .Val(found) -> conditions[id] = found
+        }
+    }
+    loop statement in tree.stmts {
+        if statement == .Assign(place, op, value, _, _) {
+            if sizes.get(value) == None || !jet_driver_cost_int_place(tree, place) -> next
+            if conditions.get(value) == .Val(capped) && jet_driver_cost_caps(tree, capped, place) -> next
+            if op == .Val(operator) {
+                if jet_driver_cost_step_grows(tree, operator, value) -> updates[value] = true
+                next
+            }
+            if body_node(tree, value).kind == .Binary(operator, _, _, left, right) {
+                step := Int?{None}
+                if jet_driver_cost_updates_place(tree, place, left) -> step = Val(right)
+                if step == None && operator == TBinaryOp.Mul && jet_driver_cost_updates_place(tree, place, right) -> step = Val(left)
+                if step == .Val(by) && jet_driver_cost_step_grows(tree, operator, by) -> nodes[value] = true
+            }
+        }
+    }
+}
+
+// Whether assignment place `place` of `tree` stores an exact Int.
+jet_driver_cost_int_place: fn(tree: BodyTree, place: BodyPlace) -> Bool Never! {
+    if place == .Local(local) -> return local.ty == Type.Int
+    if place == .Expr(expression) && body_cost_type(tree, expression) == .Val(stored) -> return stored == Type.Int
+    false
+}
+
+// Whether loop condition `condition` of `tree` caps the place `place` by
+// comparing it, or it plus, less, times or shifted by some Int, against any
+// Int: `place < cap`, `place * 2 <= cap`, `cap > place` or `cap >= place`,
+// alone or as one side of `&&`.
+jet_driver_cost_caps: fn(tree: BodyTree, condition: Int, place: BodyPlace) -> Bool Never! {
+    if body_node(tree, condition).kind == .Binary(op, _, _, left, right) {
+        if op == TBinaryOp.And -> return jet_driver_cost_caps(tree, left, place) || jet_driver_cost_caps(tree, right, place)
+        if op == TBinaryOp.Lt || op == TBinaryOp.Le -> return jet_driver_cost_capped(tree, place, left)
+        if op == TBinaryOp.Gt || op == TBinaryOp.Ge -> return jet_driver_cost_capped(tree, place, right)
+    }
+    false
+}
+
+// Whether the capped side `id` of a loop condition of `tree` is the place
+// `place`, or it plus, less, times or shifted by some Int
+// (jet_driver_cost_caps).
+jet_driver_cost_capped: fn(tree: BodyTree, place: BodyPlace, id: Int) -> Bool Never! {
+    if body_node(tree, id).kind == .Binary(op, _, _, left, right) && (op == TBinaryOp.Add || op == TBinaryOp.Sub || op == TBinaryOp.Mul || op == TBinaryOp.Shl) {
+        if op == TBinaryOp.Mul && jet_driver_cost_updates_place(tree, place, right) -> return true
+        return jet_driver_cost_updates_place(tree, place, left)
+    }
+    jet_driver_cost_updates_place(tree, place, id)
+}
+
+// Whether node `id` of `tree` reads the place `place` an assignment stores.
+jet_driver_cost_updates_place: fn(tree: BodyTree, place: BodyPlace, id: Int) -> Bool Never! {
+    read: body_node(tree, id)
+    if place == .Local(local) {
+        if read.kind == .Local(other) -> return local.symbol_id != None && other.symbol_id == local.symbol_id
+        return false
+    }
+    if place == .Expr(expression) {
+        stored: jet_driver_cost_place_path(tree, expression) ?? return false
+        read_path: jet_driver_cost_place_path(tree, id) ?? return false
+        return read_path == stored
+    }
+    false
+}
+
+// Whether an Int update by `operator` with step node `step` of `tree` grows
+// geometrically (jet_driver_cost_growth).
+jet_driver_cost_step_grows: fn(tree: BodyTree, operator: TBinaryOp, step: Int) -> Bool Never! {
+    bounds: body_cost_integer_bounds(tree, step)
+    if operator == TBinaryOp.Mul {
+        if bounds == .Val(factor) -> return factor.lo < -1 || factor.hi > 1
+        return true
+    }
+    if operator == TBinaryOp.Shl {
+        if bounds == .Val(shift) -> return shift.hi > 0
+        return true
+    }
+    false
 }
 
 // The map edits of `tree` that a loop repeats while the same loop's body

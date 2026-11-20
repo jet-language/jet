@@ -936,10 +936,8 @@ jet_layout_bits_enum: fn(item: Item) -> Bool Never! {
 // two from 1 to 2^63), None for any other value: the bit a `#Specified`
 // enum's case crosses as in a Set stored as bits.
 jet_layout_one_bit_shift: fn(value: Int) -> Int? Never! {
-    power := 1
     loop shift in 0..<64 {
-        if value == power -> return Val(shift)
-        power *= 2
+        if value == 1 << shift -> return Val(shift)
     }
     None
 }

@@ -39994,7 +39994,9 @@ exact_power: fn(base: Int, exponent: Int) -> Int Never! {
     result := 1
     factor := base
     remaining := exponent
-    loop remaining > 0 {
+    // The power is exact: past the packed rail it goes on as a bigint, which
+    // is what callers ask for (Decimal and Fraction scales, float decoding).
+    #Allow(Jet.HiddenCopyInLoop, "an exact power grows past the packed Int rail by design") loop remaining > 0 {
         if remaining %% 2 != 0 -> result *= factor
         remaining = remaining /% 2
         if remaining != 0 -> factor *= factor

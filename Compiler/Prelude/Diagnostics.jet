@@ -22369,26 +22369,25 @@ HiddenCostInLoop: struct {
 
 HiddenCopyInLoop: struct {
     operation: String,
+    why_text: String,
     fix_text: String,
 
     impl Diagnostic {
         code: "L2511",
-        meaning: "A hidden copy repeated on every turn of a loop",
+        meaning: "A hidden copy or an uncapped Int growth repeated on every turn of a loop",
         severity: .Lint,
         tier: .Tidy,
         lint_name: "hidden_copy_in_loop",
         stage: [.Compile],
         detail: true,
         no_fix: .Behavior,
-        fix_next: "Hand the value over with `.move()`, keep it in its view form, or write the copy explicitly.",
+        fix_next: "Hand the value over with `.move()`, keep it in its view form, or write the copy explicitly; give a growing Int a range type, a fixed width or a cap in the loop's condition.",
 
         what: fn(self) -> String { "{self.operation} inside a loop" }
 
-        why: fn(self) -> String {
-            "The loop pays for this copy on every turn and the source doesn't show it, so the loop's cost grows with the copied value's size."
-        }
+        why: fn(self) -> String { "{self.why_text}" }
 
-        fix: fn(self) -> String { "To keep the copy out of the loop, {self.fix_text}." }
+        fix: fn(self) -> String { "{self.fix_text}" }
     }
 }
 

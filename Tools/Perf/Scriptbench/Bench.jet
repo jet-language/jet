@@ -265,10 +265,7 @@ micros: fn(d: Dyn) -> Int {
     digits: Int.parse("{parts[0]}{frac}") ?? fail("hyperfine: bad number {spelled}")
     k := exp - frac.count_bytes() + 6
     value := digits
-    loop k > 0 {
-        value *= 10
-        k -= 1
-    }
+    if k > 0 -> value *= (10).pow(k)
     loop k < 0 {
         value = value /% 10
         k += 1

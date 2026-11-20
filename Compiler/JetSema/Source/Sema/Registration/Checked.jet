@@ -2431,10 +2431,7 @@ sema_checked_validate_layout: fn(definition: StructDef, diagnostics: &[Diagnosti
 sema_checked_usable_alignment: fn(alignment: Int, target_mode: Bool) -> Int Never! {
     limit: if !target_mode && alignment > 1048576 -> 1048576 else -> alignment
     usable := 1
-    loop {
-        if usable * 2 > limit -> break
-        usable *= 2
-    }
+    loop usable <= limit /% 2 -> usable *= 2
     usable
 }
 

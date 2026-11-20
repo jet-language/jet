@@ -36,23 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Use a value of the expected type, or convert it before passing or interpolating it</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>Jet.ValueTypeMismatch</code>: <code>Tests/UI/alias_shows_source_name_and_expansion.stderr</code>.</p>
-<pre class="diag">Error: Jet.ReturnTypeMismatch: This value is [Int], but `firsts` returns `Grid&lt;Int&gt;` (which is [[Int]])
-  --&gt; Tests/UI/alias_shows_source_name_and_expansion.jet:5:29
+<p>First UI snapshot mentioning <code>Jet.ValueTypeMismatch</code>: <code>Tests/UI/alias_names_its_target_by_home.stderr</code>.</p>
+<pre class="diag">Error: Jet.ValueTypeMismatch: `spot_x` wants `geo.Point` for argument 1, but this is Int (a whole number)
+  --&gt; Tests/UI/alias_names_its_target_by_home.jet:16:18
     |
-  5 | firsts: fn() -&gt; Grid&lt;Int&gt; { [Int]{1} }
-    |                             ^^^^^^^^
- Why: `firsts` declares [[Int]] as its result, so the value it hands back must be [[Int]]
- Fix: Wrap the value in a list: `[value]`
-More: jet-lang.dev/e/Jet.ReturnTypeMismatch
-
-Error: Jet.ValueTypeMismatch: `total` wants `Grid&lt;Int&gt;` (which is [[Int]]) for argument 1, but this is [Int]
-  --&gt; Tests/UI/alias_shows_source_name_and_expansion.jet:7:25
-    |
-  7 | run: fn() { print(total([Int]{1, 2})) }
-    |                         ^^^^^^^^^^^
+ 16 |     print(spot_x(7))
+    |                  ^
  Why: Every argument must match its parameter&#39;s type
- Fix: Use [[Int]] here
+ Fix: Use `geo.Point` here
 More: jet-lang.dev/e/Jet.ValueTypeMismatch
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

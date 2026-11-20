@@ -71,22 +71,19 @@ i64_constant: fn(value: Int) -> String {
 // Truncated division, as C and BigInt divide.
 trunc_div: fn(a: Int, b: Int) -> Int { (a - a %% b) /% b }
 
+// `base` to the `exponent`, squaring by halves: a reference apart from the
+// runtime's own power.
 power: fn(base: Int, exponent: Int) -> Int {
-    result := 1
-    loop _ in 0..<exponent -> result *= base
-    result
+    if exponent <= 0 -> return 1
+    half: power(base, exponent /% 2)
+    if exponent %% 2 == 1 -> return half * half * base
+    half * half
 }
 
 bit_length: fn(value: Int) -> Int {
-    if value == 0 -> return 0
-    high := 1
-    loop value >> high != 0 -> high *= 2
-    low := high /% 2
-    loop low + 1 < high {
-        middle: (low + high) /% 2
-        if (value >> middle) != 0 -> low = middle else -> high = middle
-    }
-    high
+    length := 0
+    loop value >> length != 0 -> length += 1
+    length
 }
 
 // The IEEE binary64 bits of the Float nearest `value`, ties to even; past

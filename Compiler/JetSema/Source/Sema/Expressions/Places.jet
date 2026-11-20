@@ -96,8 +96,7 @@ sema_expression_type_interval: fn(ty: Type) -> TIntegerBounds? Never! {
     if sema_expr_unwrap_tag(ty) == {
         .IntN(signed, bits) -> {
             if bits <= 0 || bits >= 63 -> return None
-            half := 1
-            loop _ in 1..<bits -> half *= 2
+            half: 1 << (bits - 1)
             if signed -> return Val(TIntegerBounds{lo: 0 - half, hi: half - 1})
             Val(TIntegerBounds{lo: 0, hi: half * 2 - 1})
         }
