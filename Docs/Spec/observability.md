@@ -298,11 +298,30 @@ The run is refused with the wait, each point keeps its name with no lines,
 and the reason asks for a run where each thread has a CPU. The section
 also keeps the means over the experiments of the highest and the lowest
 clock (`clock_high_mhz`, `clock_low_mhz`; 0 where the kernel has no
-cpufreq). When the lowest falls more than 10% below the highest, the gains
-are kept but flagged (`clock_flag`, `gains may under-read: idle CPUs
-clocked down …`): a CPU that idled clocks down, and a task begun on it
-runs slower than its siblings until it clocks up, whichever line the
-experiment speeds up. `jet perf view` prints the flag as `flagged: …`
+cpufreq). A CPU that idled clocks down, and a task begun on it runs slower
+than its siblings until it clocks up, whichever line the experiment speeds
+up; a line really faster would leave the other threads idle less between
+tasks, and their tasks would run faster, which a virtual speedup cannot
+show. So the runtime also keeps an idle table: for up to 8 task bodies, and
+for each octave of the time the thread had idled since its last task ended
+(under 1 µs to over 16 ms), the tasks begun after such a gap, their run time
+and their gaps. It counts only tasks during which no delay was inserted, reusing the clock read
+the task's start and end already take, so a task pays a few stores, a row
+lookup and three atomic adds, and nothing while the lens is off
+(`perf_causal_state` is 0). The exit writes it to the samples file. The
+section fits it (`clock_fit`): each body's run times in thousandths of its
+own mean, so long and short tasks share the octaves, and each octave of 30
+tasks or more a point weighted by its tasks, a line of slowness against
+the log of the gap, with its slope, R² and each octave's residual. With at
+least 3 such octaves and an R² of 50% or more, each gain and each resample
+is warmed by it: a line that makes a pass sooner by the gain shortens each
+octave's gap by that share of its gap and run, the fit gives how much
+faster its tasks then run, and the pass's time shrinks by their run-weighted
+mean. A fit that does not hold leaves the gains as they are, and its
+reason is kept. When the lowest clock falls more than 10% below the highest
+and the fit does not hold, the gains are kept but flagged (`clock_flag`,
+`gains may under-read: idle CPUs clocked down …`, naming why the fit
+failed). `jet perf view` prints the flag as `flagged: …`
 before the points, and prints, under `causal`, each point as `` `round`: if this line were
 30% faster, each pass would come sooner by``, then its lines best first
 (`  main.jet:23 narrow  +14.2% (9.8% to 18.0%)`). Experiments are

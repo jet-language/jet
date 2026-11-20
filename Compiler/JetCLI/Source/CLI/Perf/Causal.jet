@@ -12,8 +12,10 @@ use {
 // the baselines' passes per second, predicts how much sooner the passes
 // would come if the line really were that much faster. This file turns the
 // experiments into a ranked prediction per progress point, each with an
-// interval, and refuses a line or a run whose experiments are too few to
-// rank, and a run whose threads waited too long for a CPU to be trusted.
+// interval and warmed by how much slower a task runs after its CPU idled
+// (jet_cli_perf_causal_warm), and refuses a line or a run whose experiments
+// are too few to rank, and a run whose threads waited too long for a CPU
+// to be trusted.
 
 // One experiment's end (PerfSamples.jet perf_causal_next): the line it sped
 // up, by its source line and function (line 0 for a baseline), the speedup
@@ -87,7 +89,9 @@ JET_CLI_PERF_CAUSAL_WAIT_MOST: 200
 // up, so every gain reads low by a share that grows with the drop. On a
 // quiet machine (load 2.6, `-O1`), 1,333 of the fixture's 2,809 slowest
 // rounds had a late task begun at 3,908 MHz beside siblings at 4,993: a
-// drop of 22%, its CPU idle for 1.4 ms before against their 0.7.
+// drop of 22%, its CPU idle for 1.4 ms before against their 0.7. The lens
+// warms its gains by the idle table's fit instead (jet_cli_perf_causal_fit)
+// and flags them only when it cannot fit it.
 JET_CLI_PERF_CAUSAL_CLOCK_MOST: 100
 
 // The wall time of one experiment, PerfSamples.jet
@@ -201,9 +205,11 @@ jet_cli_perf_causal_resample: fn(chosen: [Int], state: &Int) -> [Int] Never! {
 }
 
 // The prediction of the line whose experiments are `chosen` for point
-// `slot` against the baselines `base`; None when either has no pass.
-jet_cli_perf_causal_line: fn(experiments: [JetCLIPerfExperiment], base: [Int], chosen: [Int], slot: Int) -> JetCLIPerfCausalLine? Never! {
-    gain: jet_cli_perf_causal_gain(jet_cli_perf_causal_sum(experiments, base, slot), jet_cli_perf_causal_sum(experiments, chosen, slot)) ?? return None
+// `slot` against the baselines `base`, each gain warmed by `fit`
+// (jet_cli_perf_causal_warm); None when either has no pass.
+jet_cli_perf_causal_line: fn(experiments: [JetCLIPerfExperiment], base: [Int], chosen: [Int], slot: Int, fit: JetCLIPerfCausalFit) -> JetCLIPerfCausalLine? Never! {
+    virtual: jet_cli_perf_causal_gain(jet_cli_perf_causal_sum(experiments, base, slot), jet_cli_perf_causal_sum(experiments, chosen, slot)) ?? return None
+    gain: jet_cli_perf_causal_warm(fit, virtual)
     state := 88172645463325252 + slot
     gains := [Int]{}
     loop _ in 0..<JET_CLI_PERF_CAUSAL_RESAMPLES {
@@ -211,23 +217,228 @@ jet_cli_perf_causal_line: fn(experiments: [JetCLIPerfExperiment], base: [Int], c
         drawn: jet_cli_perf_causal_sum(experiments, jet_cli_perf_causal_resample(chosen, state), slot)
         // A resample with no pass predicts nothing faster: the line made
         // the point's passes stop.
-        gains.push(jet_cli_perf_causal_gain(drawn_base, drawn) ?? -1000)
+        resampled: jet_cli_perf_causal_gain(drawn_base, drawn) ?? -1000
+        gains.push(if resampled == -1000 -> resampled else -> jet_cli_perf_causal_warm(fit, resampled))
     }
     gains.sort()
     first: experiments[chosen[0]]
     Val(JetCLIPerfCausalLine{line: first.line, name: "{first.name}", experiments: chosen.len(), gain: gain, low: gains[JET_CLI_PERF_CAUSAL_TAIL], high: gains[JET_CLI_PERF_CAUSAL_RESAMPLES - 1 - JET_CLI_PERF_CAUSAL_TAIL]})
 }
 
+// The idle table's octaves of idle gap a task body's row holds
+// (PerfSamples.jet PERF_CAUSAL_GAPS), each of three words.
+JET_CLI_PERF_CAUSAL_GAPS: 16
+
+// The tasks a body needs to be fitted, and an octave to be a point of the
+// fit.
+JET_CLI_PERF_CAUSAL_FIT_TASKS: 30
+
+// The octaves the fit needs.
+JET_CLI_PERF_CAUSAL_FIT_CELLS: 3
+
+// The least share of the octaves' spread in run time, in thousandths, the
+// fit must explain (its R²) before the lens warms its gains by it.
+JET_CLI_PERF_CAUSAL_FIT_R2: 500
+
+// One octave of idle gap over the task bodies the fit takes: the tasks
+// that ran after such a gap, their run time and their mean gap, in
+// nanoseconds, the gap's log2 in microseconds, in thousandths
+// (jet_cli_perf_causal_octave), how slowly they ran, in thousandths of
+// their bodies' mean run time, whether it is a point of the fit, and how
+// far its slowness lies from the fit's, in thousandths.
+JetCLIPerfCausalCell: struct {
+    tasks: Int,
+    run_ns: Int,
+    gap_ns: Int,
+    octave: Int,
+    slowness: Int,
+    fitted: Bool,
+    residual: Int,
+}
+
+// How much slower a task runs the longer its CPU idled before it, fitted
+// over the idle table (jet_cli_perf_causal_fit): the octaves, then the
+// line through the fitted ones, weighted by their tasks: their mean
+// octave and slowness, its slope in thousandths of slowness per octave,
+// and its R², in thousandths, and the fitted octaves' range; `refused`
+// says why the lens cannot warm its gains by it ("" when it can).
+JetCLIPerfCausalFit: struct {
+    cells: [JetCLIPerfCausalCell],
+    mean_octave: Int,
+    mean_slowness: Int,
+    slope: Int,
+    r2: Int,
+    low: Int,
+    high: Int,
+    refused: String,
+}
+
+// `ns` nanoseconds as the log2 of its microseconds, in thousandths, linear
+// within each octave; 0 below a microsecond.
+jet_cli_perf_causal_octave: fn(ns: Int) -> Int Never! {
+    micros: ns /% 1000
+    if micros < 1 -> return 0
+    whole := 0
+    span := 1
+    loop span * 2 <= micros {
+        span *= 2
+        whole += 1
+    }
+    whole * 1000 + (micros - span) * 1000 /% span
+}
+
+// The fit of the idle table `idle` (PerfSamples.jet perf_causal_idle_write,
+// its words after the header). Each task body ran at least
+// JET_CLI_PERF_CAUSAL_FIT_TASKS times counts, its tasks' run times taken in
+// thousandths of its own mean, so bodies of different lengths share the
+// octaves; an octave of that many tasks is a point of the fit.
+jet_cli_perf_causal_fit: fn(idle: [Int]) -> JetCLIPerfCausalFit Never! {
+    row: 1 + JET_CLI_PERF_CAUSAL_GAPS * 3
+    tasks := [Int]{}
+    runs := [Int]{}
+    gaps := [Int]{}
+    scaled := [Int]{}
+    loop _ in 0..<JET_CLI_PERF_CAUSAL_GAPS {
+        tasks.push(0)
+        runs.push(0)
+        gaps.push(0)
+        scaled.push(0)
+    }
+    bodies := 0
+    loop kind in 0..<idle.len() /% row {
+        at: kind * row
+        if idle[at] == 0 -> next
+        count := 0
+        run := 0
+        loop cell in 0..<JET_CLI_PERF_CAUSAL_GAPS {
+            count += idle[at + 1 + cell * 3]
+            run += idle[at + 2 + cell * 3]
+        }
+        if count < JET_CLI_PERF_CAUSAL_FIT_TASKS || run /% count <= 0 -> next
+        mean: run /% count
+        bodies += 1
+        loop cell in 0..<JET_CLI_PERF_CAUSAL_GAPS {
+            tasks[cell] = tasks[cell] + idle[at + 1 + cell * 3]
+            runs[cell] = runs[cell] + idle[at + 2 + cell * 3]
+            gaps[cell] = gaps[cell] + idle[at + 3 + cell * 3]
+            scaled[cell] = scaled[cell] + idle[at + 2 + cell * 3] * 1000 /% mean
+        }
+    }
+    cells := [JetCLIPerfCausalCell]{}
+    weight := 0
+    octaves := 0
+    slowness := 0
+    loop cell in 0..<JET_CLI_PERF_CAUSAL_GAPS {
+        if tasks[cell] == 0 -> next
+        gap: gaps[cell] /% tasks[cell]
+        fitted: tasks[cell] >= JET_CLI_PERF_CAUSAL_FIT_TASKS
+        cells.push(JetCLIPerfCausalCell{tasks: tasks[cell], run_ns: runs[cell], gap_ns: gap, octave: jet_cli_perf_causal_octave(gap), slowness: scaled[cell] /% tasks[cell], fitted: fitted, residual: 0})
+        if fitted {
+            weight += tasks[cell]
+            octaves += tasks[cell] * jet_cli_perf_causal_octave(gap)
+            slowness += scaled[cell]
+        }
+    }
+    fit := JetCLIPerfCausalFit{cells: cells, mean_octave: 0, mean_slowness: 0, slope: 0, r2: 0, low: 0, high: 0, refused: ""}
+    if bodies == 0 {
+        fit.refused = if idle.len() == 0 -> "the run wrote no idle table" else -> "no task body ran {JET_CLI_PERF_CAUSAL_FIT_TASKS} times after an idle gap"
+        return fit
+    }
+    points := 0
+    loop cell in fit.cells {
+        if cell.fitted -> points += 1
+    }
+    if points < JET_CLI_PERF_CAUSAL_FIT_CELLS {
+        fit.refused = "only {points} of the octaves of idle gap held {JET_CLI_PERF_CAUSAL_FIT_TASKS} tasks or more, and the fit needs {JET_CLI_PERF_CAUSAL_FIT_CELLS}"
+        return fit
+    }
+    fit.mean_octave = octaves /% weight
+    fit.mean_slowness = slowness /% weight
+    // Weighted least squares over the fitted octaves.
+    across := 0
+    spread := 0
+    total := 0
+    fit.low = -1
+    loop cell in fit.cells {
+        if !cell.fitted -> next
+        if fit.low < 0 -> fit.low = cell.octave
+        fit.high = cell.octave
+        x: cell.octave - fit.mean_octave
+        y: cell.slowness - fit.mean_slowness
+        across += cell.tasks * x * x
+        spread += cell.tasks * x * y
+        total += cell.tasks * y * y
+    }
+    fit.slope = if across > 0 -> spread * 1000 /% across else -> 0
+    left := 0
+    loop index in 0..<fit.cells.len() {
+        residual: fit.cells[index].slowness - jet_cli_perf_causal_fitted(fit, fit.cells[index].octave, clamped: false)
+        fit.cells[index].residual = residual
+        if fit.cells[index].fitted -> left += fit.cells[index].tasks * residual * residual
+    }
+    // The means are whole thousandths, so the residuals can outweigh the
+    // spread by a rounding; the R² stays at 0 or above.
+    fit.r2 = if {
+        total == 0 -> 1000
+        left >= total -> 0
+        else -> 1000 - left * 1000 /% total
+    }
+    if fit.r2 < JET_CLI_PERF_CAUSAL_FIT_R2 {
+        fit.refused = "the fit of run time against idle gap explains {jet_cli_perf_causal_percent(fit.r2)} of the octaves' spread, under the {jet_cli_perf_causal_percent(JET_CLI_PERF_CAUSAL_FIT_R2)} the lens warms its gains by"
+    }
+    fit
+}
+
+// The fit's slowness at octave `octave`, in thousandths; `clamped` holds
+// the octave within the fitted ones, so the fit is never read past them.
+jet_cli_perf_causal_fitted: fn(fit: JetCLIPerfCausalFit, octave: Int, clamped: Bool) -> Int Never! {
+    at := octave
+    if clamped && at < fit.low -> at = fit.low
+    if clamped && at > fit.high -> at = fit.high
+    fit.mean_slowness + fit.slope * (at - fit.mean_octave) /% 1000
+}
+
+// The virtual `gain`, in tenths of a percent, warmed by `fit`. A line made
+// virtually faster leaves the other carriers idle as long as before, but a
+// line really that much faster ends each pass sooner, so they idle that
+// much less before their next task: by the gain's share of the time from a
+// task's start to the next one's, its mean gap and run. Their CPUs clock
+// down less and the tasks run faster, as the fit says a task does after
+// the shorter gap, and each pass's time shrinks by their run-weighted mean.
+// A fit the lens refused, or one where a task runs no slower after a longer
+// gap, leaves the gain as it is.
+jet_cli_perf_causal_warm: fn(fit: JetCLIPerfCausalFit, gain: Int) -> Int Never! {
+    if fit.refused != "" || fit.slope <= 0 || gain == 0 -> return gain
+    weighted := 0
+    total := 0
+    loop cell in fit.cells {
+        before: jet_cli_perf_causal_fitted(fit, cell.octave, clamped: true)
+        if before <= 0 -> next
+        shortened := cell.gap_ns - gain * (cell.gap_ns + cell.run_ns /% cell.tasks) /% 1000
+        if shortened < 0 -> shortened = 0
+        after: jet_cli_perf_causal_fitted(fit, jet_cli_perf_causal_octave(shortened), clamped: true)
+        micros: cell.run_ns /% 1000
+        weighted += micros * (after * 1000 /% before)
+        total += micros
+    }
+    if total == 0 -> return gain
+    1000 - (1000 - gain) * (weighted /% total) /% 1000
+}
+
 // The causal section of the trace of the run of `source`: each progress
 // point's lines, ranked by how much sooner its passes come, each with its
 // interval, and the lines it could not rank with why; or, when no line of
-// any point could be ranked, the reason the run is refused. A run whose
-// threads waited for a CPU more than JET_CLI_PERF_CAUSAL_WAIT_MOST of their
-// run time is refused with the wait, and its points keep their names but
-// none of their lines: each gain would read low. A run whose CPUs clocked
-// down more than JET_CLI_PERF_CAUSAL_CLOCK_MOST keeps its gains, flagged
-// with the drop: they may read low.
-jet_cli_perf_causal_section: fn(source: &&String, experiments: &&[JetCLIPerfExperiment], points: &&[Int:String]) -> TraceReceiptSection Never! {
+// any point could be ranked, the reason the run is refused. Each gain is
+// warmed by the fit of the idle table `idle` (jet_cli_perf_causal_warm),
+// which the section keeps with its residuals. A run whose threads waited
+// for a CPU more than JET_CLI_PERF_CAUSAL_WAIT_MOST of their run time is
+// refused with the wait, and its points keep their names but none of their
+// lines: each gain would read low. A run whose CPUs clocked down more than
+// JET_CLI_PERF_CAUSAL_CLOCK_MOST while the lens could not fit how that
+// slows its tasks keeps its gains, flagged with the drop and why the fit
+// failed: they may read low.
+jet_cli_perf_causal_section: fn(source: &&String, experiments: &&[JetCLIPerfExperiment], points: &&[Int:String], idle: &&[Int]) -> TraceReceiptSection Never! {
+    fit: jet_cli_perf_causal_fit(idle)
     base := [Int]{}
     groups := [JetCLIPerfCausalGroup]{}
     // The speedup the experiments took, in percent.
@@ -283,7 +494,7 @@ jet_cli_perf_causal_section: fn(source: &&String, experiments: &&[JetCLIPerfExpe
             why := ""
             if chosen.len() < JET_CLI_PERF_CAUSAL_MIN || base.len() < JET_CLI_PERF_CAUSAL_MIN {
                 why = "{chosen.len()} experiments on it and {base.len()} baselines; it needs {JET_CLI_PERF_CAUSAL_MIN} of each"
-            } else if jet_cli_perf_causal_line(experiments, base, chosen, slot) == .Val(predicted) {
+            } else if jet_cli_perf_causal_line(experiments, base, chosen, slot, fit) == .Val(predicted) {
                 if predicted.high - predicted.low > JET_CLI_PERF_CAUSAL_WIDEST {
                     why = "its interval is {jet_cli_perf_causal_percent(predicted.low)} to {jet_cli_perf_causal_percent(predicted.high)}, wider than {JET_CLI_PERF_CAUSAL_WIDEST /% 10} points"
                 } else {
@@ -348,10 +559,11 @@ jet_cli_perf_causal_section: fn(source: &&String, experiments: &&[JetCLIPerfExpe
     low_mhz: if clocked > 0 -> khz_low /% clocked /% 1000 else -> 0
     // The drop, in thousandths of the highest clock.
     drop: if high_mhz > 0 -> (high_mhz - low_mhz) * 1000 /% high_mhz else -> 0
-    flag: if drop > JET_CLI_PERF_CAUSAL_CLOCK_MOST -> CanonicalJSON.String("gains may under-read: idle CPUs clocked down {jet_cli_perf_causal_percent(drop)} ({high_mhz} MHz to {low_mhz} MHz) between experiments, above the {jet_cli_perf_causal_percent(JET_CLI_PERF_CAUSAL_CLOCK_MOST)} the lens trusts: a task begun on a CPU that idled runs slower than its siblings until it clocks up, whichever line the experiment speeds up; run it with the CPUs held at one clock") else -> CanonicalJSON.Null
+    flag: if drop > JET_CLI_PERF_CAUSAL_CLOCK_MOST && fit.refused != "" -> CanonicalJSON.String("gains may under-read: idle CPUs clocked down {jet_cli_perf_causal_percent(drop)} ({high_mhz} MHz to {low_mhz} MHz) between experiments, above the {jet_cli_perf_causal_percent(JET_CLI_PERF_CAUSAL_CLOCK_MOST)} the lens trusts, and it could not fit how much slower a task runs after its CPU idled ({fit.refused}): a task begun on a CPU that idled runs slower than its siblings until it clocks up, whichever line the experiment speeds up; run it longer, or with the CPUs held at one clock") else -> CanonicalJSON.Null
     value: CanonicalJSON.Object(
         [CanonicalJSONField]{
             {key: "baselines", value: CanonicalJSON.Integer("{base.len()}")},
+            {key: "clock_fit", value: jet_cli_perf_causal_fit_json(fit)},
             {key: "clock_flag", value: flag},
             {key: "clock_high_mhz", value: CanonicalJSON.Integer("{high_mhz}")},
             {key: "clock_low_mhz", value: CanonicalJSON.Integer("{low_mhz}")},
@@ -366,6 +578,34 @@ jet_cli_perf_causal_section: fn(source: &&String, experiments: &&[JetCLIPerfExpe
     )
     digest: canonical_json_sha256(value)
     TraceReceiptSection{name: "causal", type_name: "JetPerfCausal", value: value, digest: digest}
+}
+
+// The fit as the section keeps it: each octave's mean gap in microseconds,
+// its tasks, their slowness and its residual from the fit, in thousandths,
+// and whether it is a point of the fit; the slope, in thousandths of
+// slowness per octave, the R², in thousandths, and why the lens refused to
+// warm its gains by it (null when it did not).
+jet_cli_perf_causal_fit_json: fn(fit: JetCLIPerfCausalFit) -> CanonicalJSON Never! {
+    CanonicalJSON.Object(
+        [CanonicalJSONField]{
+            {key: "cells", value: CanonicalJSON.Array(loop cell in fit.cells -> jet_cli_perf_causal_cell_json(cell))},
+            {key: "r2_thousandths", value: CanonicalJSON.Integer("{fit.r2}")},
+            {key: "refused", value: if fit.refused == "" -> CanonicalJSON.Null else -> CanonicalJSON.String("{fit.refused}")},
+            {key: "slope_thousandths", value: CanonicalJSON.Integer("{fit.slope}")},
+        },
+    )
+}
+
+jet_cli_perf_causal_cell_json: fn(cell: JetCLIPerfCausalCell) -> CanonicalJSON Never! {
+    CanonicalJSON.Object(
+        [CanonicalJSONField]{
+            {key: "fitted", value: CanonicalJSON.Bool(cell.fitted)},
+            {key: "gap_us", value: CanonicalJSON.Integer("{cell.gap_ns /% 1000}")},
+            {key: "residual_thousandths", value: CanonicalJSON.Integer("{cell.residual}")},
+            {key: "slowness_thousandths", value: CanonicalJSON.Integer("{cell.slowness}")},
+            {key: "tasks", value: CanonicalJSON.Integer("{cell.tasks}")},
+        },
+    )
 }
 
 jet_cli_perf_causal_json: fn(line: &&JetCLIPerfCausalLine) -> CanonicalJSON Never! {

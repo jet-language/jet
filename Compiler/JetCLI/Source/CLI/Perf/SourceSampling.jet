@@ -102,7 +102,10 @@ JetCLIPerfInlines: struct {
 // `wakes` each wake of a waiter and `transfers` each file or network
 // transfer, in the order the program recorded them; `heaps` each heap
 // snapshot the alloc lens took, in the order it took them; `timed` each
-// CPU-time sample its time and task, in time order.
+// CPU-time sample its time and task, in time order. `experiments`,
+// `points` and `idle` are the causal lens's experiments, progress points'
+// names and idle table (PerfSamples.jet perf_causal_idle_write: its words
+// after the header, empty when no exit wrote one).
 JetCLIPerfSamples: struct {
     table: X64Jetline,
     inlines: JetCLIPerfInlines,
@@ -126,6 +129,7 @@ JetCLIPerfSamples: struct {
     heaps: [JetCLIPerfHeap],
     experiments: [JetCLIPerfExperiment],
     points: [Int:String],
+    idle: [Int],
     timed: [JetCLIPerfTimed],
 }
 
@@ -559,8 +563,8 @@ JET_CLI_PERF_HEAP_BLOCK_KIND: 6
 
 JET_CLI_PERF_HEAP_ROOT_KIND: 5
 
-// PerfSamples.jet PERF_SAMPLES_CAUSAL: a causal experiment's end, or (1 in
-// its low bits) a progress point's name.
+// PerfSamples.jet PERF_SAMPLES_CAUSAL: a causal experiment's end, (1 in
+// its low bits) a progress point's name, or (2) the idle table.
 JET_CLI_PERF_CAUSAL_KIND: 8
 
 // What a heap snapshot's root record holds (PerfSamples.jet
@@ -652,7 +656,7 @@ jet_cli_perf_code_low: fn(image: [U8]) -> Int {
 // `names` spells. Its block and root records are its retention records
 // (JetCLIPerfHeap).
 jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFunction], inlines: &&JetCLIPerfInlines, owned: [Bool], periods: &&[U64], allocs: [Int:Int], names: [Int:String], words: [U8], code_low: Int) -> JetCLIPerfSamples Never! {
-    sampled := JetCLIPerfSamples{table: table, inlines: inlines, lines: [JetCLIPerfSampledLine]{}, total: U64{0}, outside: U64{0}, helpers: U64{0}, stackless: U64{0}, signals: U64{0}, cost: None, sampler: None, functions: functions, natives: [JetCLIPerfNative]{}, sited: false, allocated: [JetCLIPerfAllocSite]{}, periods: periods, spawns: [JetCLIPerfSpawn]{}, waits: [JetCLIPerfWait]{}, wakes: [JetCLIPerfWake]{}, transfers: [JetCLIPerfIO]{}, heaps: [JetCLIPerfHeap]{}, experiments: [JetCLIPerfExperiment]{}, points: [Int:String]{}, timed: [JetCLIPerfTimed]{}}
+    sampled := JetCLIPerfSamples{table: table, inlines: inlines, lines: [JetCLIPerfSampledLine]{}, total: U64{0}, outside: U64{0}, helpers: U64{0}, stackless: U64{0}, signals: U64{0}, cost: None, sampler: None, functions: functions, natives: [JetCLIPerfNative]{}, sited: false, allocated: [JetCLIPerfAllocSite]{}, periods: periods, spawns: [JetCLIPerfSpawn]{}, waits: [JetCLIPerfWait]{}, wakes: [JetCLIPerfWake]{}, transfers: [JetCLIPerfIO]{}, heaps: [JetCLIPerfHeap]{}, experiments: [JetCLIPerfExperiment]{}, points: [Int:String]{}, idle: [Int]{}, timed: [JetCLIPerfTimed]{}}
     // One key per function, line and ownership.
     places := [String:Int]{}
     // Each address's entries in `lines`, innermost first, by twice the
@@ -805,6 +809,9 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
                     if length >= 0 && 3 + (length + 7) /% 8 <= record {
                         sampled.points[link_debug_addr(words, at + 8)] = String.from_bytes(words.slice(at + 24, at + 24 + length)) ?? "point"
                     }
+                } else if pc == 2 {
+                    // The idle table: a later exit's holds an earlier one's.
+                    sampled.idle = loop index in 1..<record -> link_debug_addr(words, at + index * 8)
                 } else if record >= 9 {
                     // The line's sampled address (0 for a baseline), the
                     // speedup, the wall time, the delay inserted, the

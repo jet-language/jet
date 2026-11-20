@@ -287,7 +287,7 @@ task_run: fn(child: I64) {
     sync_store(wrapping(base + I64{32}), saved_wait + I64{1})
     sync_store(wrapping(base + I64{64}), I64{0})
     jet_rt_observe_task_enter(sync_load(wrapping(control + I64{56})))
-    perf_causal_task_start()
+    perf_causal_task_start(child, sync_load(wrapping(child + I64{72})))
     _ := scheduler_wait_while_paused()
     aborted: sync_load(wrapping(control + I64{8})) != I64{0} && sync_load(wrapping(control + I64{16})) != I64{0}
     if aborted -> scheduler_deliver_cancel()
@@ -328,7 +328,7 @@ task_run: fn(child: I64) {
     }
     jet_rt_session_cleanup_leave(cleanup)
     jet_rt_observe_task_finish(sync_load(wrapping(control + I64{56})))
-    perf_causal_task_end()
+    perf_causal_task_end(child)
     // A finished task is a progress point of the causal lens.
     perf_causal_progress(rt_static_text("task"))
     if (world != I64{0}) {

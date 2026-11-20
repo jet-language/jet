@@ -1065,7 +1065,8 @@ perf_samples_cpu_clock_ns: fn(clock: I64) -> I64 {
 // writes a later one. Under the alloc lens the heap snapshot named `exit`
 // comes first (perf_samples_heap), then the allocations' records. The spans
 // buffer's rows and the records the handlers keep (perf_samples_flush) are
-// written out first.
+// written out first, then the causal lens's idle table
+// (perf_causal_idle_write).
 perf_samples_exit: fn() {
     perf_spans_flush()
     fd: perf_samples_fd
@@ -1073,6 +1074,7 @@ perf_samples_exit: fn() {
         return
     }
     perf_samples_flush(fd)
+    perf_causal_idle_write(fd)
     perf_samples_heap(rt_static_text("exit"))
     buffer: perf_samples_buffer
     handlers: if (buffer == I64{0}) -> I64{0} else -> sync_load(wrapping(buffer + wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_SLOTS) * I64{8})))
@@ -5320,7 +5322,8 @@ perf_flight_rotate: fn(state: I64, text: I64) {
 // pass for each line, and passes counted over its whole wall time would
 // favor the lines that start near one. The first pass of each point writes
 // a record naming its slot: 1 in its low bits, then the slot, the name's
-// length and the name. JetCLI CLI/Perf/Causal.jet turns them into the
+// length and the name. At exit the idle table follows, 2 in its low bits
+// (perf_causal_idle_write). JetCLI CLI/Perf/Causal.jet turns them into the
 // predictions.
 PERF_SAMPLES_CAUSAL: I64{8}
 
@@ -5347,9 +5350,10 @@ PERF_CAUSAL_THREADS: I64{512}
 // delay at each, the passes after the first), the record being written,
 // then one entry per thread (tid, delay paid, last sample, voluntary
 // context switches by then, a timespec, a struct rusage, the CPU time its
-// pauses took whose samples are still to drop, whether it is pausing, and
-// its schedstat run time and wait at the last experiment's end), then the
-// scratch the schedstat reads go through.
+// pauses took whose samples are still to drop, whether it is pausing, its
+// schedstat run time and wait at the last experiment's end, and the task
+// it runs: perf_causal_task_start), then the scratch the schedstat reads go
+// through, then the idle table (perf_causal_idle_write).
 PERF_CAUSAL_START: I64{8}
 
 PERF_CAUSAL_DELAY: I64{16}
@@ -5378,7 +5382,7 @@ PERF_CAUSAL_RECORD: I64{2128}
 
 PERF_CAUSAL_THREAD_AT: I64{2976}
 
-PERF_CAUSAL_THREAD_BYTES: I64{224}
+PERF_CAUSAL_THREAD_BYTES: I64{272}
 
 PERF_CAUSAL_THREAD_SPUN: I64{192}
 
@@ -5388,11 +5392,44 @@ PERF_CAUSAL_THREAD_RUN: I64{208}
 
 PERF_CAUSAL_THREAD_WAIT: I64{216}
 
+// When the thread last ended a task (0 before its first), the task it runs
+// now (0 when none), the task's start, the global delay then, the idle gap
+// before it and the idle table's cell its run goes to (0 when none).
+PERF_CAUSAL_THREAD_IDLE_FROM: I64{224}
+
+PERF_CAUSAL_THREAD_TASK: I64{232}
+
+PERF_CAUSAL_THREAD_TASK_FROM: I64{240}
+
+PERF_CAUSAL_THREAD_TASK_DELAY: I64{248}
+
+PERF_CAUSAL_THREAD_GAP: I64{256}
+
+PERF_CAUSAL_THREAD_CELL: I64{264}
+
 // Past the last thread's entry: PERF_CAUSAL_THREAD_AT + PERF_CAUSAL_THREADS *
 // PERF_CAUSAL_THREAD_BYTES. It holds SCHEDULER_STAT_BYTES.
-PERF_CAUSAL_SCRATCH: I64{117664}
+PERF_CAUSAL_SCRATCH: I64{142240}
 
-PERF_CAUSAL_BYTES: I64{118784}
+// Past the scratch: the idle table, as the record perf_causal_idle_write
+// writes. Its header word, then PERF_CAUSAL_KINDS rows, one per task body
+// by its address (0 for a free row): the address, then PERF_CAUSAL_GAPS
+// cells, one per octave of the idle gap in microseconds (the last holds
+// every longer gap), each of three words: the tasks that ran after such a
+// gap, their run time and their gaps, in nanoseconds.
+PERF_CAUSAL_IDLE_AT: I64{142752}
+
+PERF_CAUSAL_KINDS: I64{8}
+
+PERF_CAUSAL_GAPS: I64{16}
+
+// 8 + PERF_CAUSAL_GAPS * 24.
+PERF_CAUSAL_KIND_BYTES: I64{392}
+
+// The record's words: its header and PERF_CAUSAL_KINDS rows.
+PERF_CAUSAL_IDLE_WORDS: I64{393}
+
+PERF_CAUSAL_BYTES: I64{147456}
 
 // The causal lens's state, 0 unless the lens is on.
 perf_causal_state := I64{0}
@@ -5571,7 +5608,19 @@ perf_causal_switches: fn(thread: I64) -> I64 {
 // task finishes between samples and pays its delay later, in whatever its
 // thread runs next, which can be the line the experiment speeds up. A
 // thread's park another thread wakes is the third (perf_causal_woken).
-perf_causal_task_start: fn() {
+//
+// They also time each task against the idle gap before it, for the idle
+// table: `task` is the task, `body` its body's address. The gap is the time
+// since its thread last ended a task, when it runs none now: a carrier
+// parks between tasks, and a CPU that idled clocks down, so a task begun
+// after a long gap runs slower. A task is counted when the global delay
+// stayed put while it ran, so no pause is in its run time, and when it
+// ends on the thread that started it; one started inside another task's
+// run (a join that runs it) had no gap and is not. Both reuse the clock
+// read their mark takes: with the lens on, a task costs a few stores, a
+// row lookup and three atomic adds more; with it off, nothing past the
+// state's test.
+perf_causal_task_start: fn(task: I64, body: I64) {
     state: perf_causal_state
     if (state == I64{0}) {
         return
@@ -5585,10 +5634,20 @@ perf_causal_task_start: fn() {
     if (rt_text_word(wrapping(thread + I64{8})) < delay) {
         rt_text_store(wrapping(thread + I64{8}), delay)
     }
-    perf_causal_mark(thread, perf_samples_clock())
+    now: perf_samples_clock()
+    perf_causal_mark(thread, now)
+    idle_from: rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_IDLE_FROM))
+    running: rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TASK))
+    gap: wrapping(now - idle_from)
+    cell: if (idle_from == I64{0} || running != I64{0} || gap < I64{0}) -> I64{0} else -> perf_causal_idle_cell(state, body, gap)
+    rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_TASK), task)
+    rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_TASK_FROM), now)
+    rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_TASK_DELAY), delay)
+    rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_GAP), gap)
+    rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_CELL), cell)
 }
 
-perf_causal_task_end: fn() {
+perf_causal_task_end: fn(task: I64) {
     state: perf_causal_state
     if (state == I64{0}) {
         return
@@ -5597,8 +5656,56 @@ perf_causal_task_end: fn() {
     if (thread == I64{0}) {
         return
     }
-    perf_causal_pay(thread, rt_text_word(wrapping(thread + I64{8})), sync_load(wrapping(state + PERF_CAUSAL_DELAY)))
-    perf_causal_mark(thread, perf_samples_clock())
+    delay: sync_load(wrapping(state + PERF_CAUSAL_DELAY))
+    perf_causal_pay(thread, rt_text_word(wrapping(thread + I64{8})), delay)
+    now: perf_samples_clock()
+    perf_causal_mark(thread, now)
+    cell: rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_CELL))
+    if (rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TASK)) == task && cell != I64{0} && rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TASK_DELAY)) == delay) {
+        _ := sync_add(cell, I64{1})
+        _ := sync_add(wrapping(cell + I64{8}), wrapping(now - rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TASK_FROM))))
+        _ := sync_add(wrapping(cell + I64{16}), rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_GAP)))
+    }
+    // Whichever task ended, the thread ran until now.
+    rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_TASK), I64{0})
+    rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_CELL), I64{0})
+    rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_IDLE_FROM), now)
+}
+
+// The idle table's cell for a task of body `body` begun after an idle gap
+// of `gap` nanoseconds: its body's row (claimed when new) and the octave of
+// the gap in microseconds; 0 when every row is another body's.
+perf_causal_idle_cell: fn(state: I64, body: I64, gap: I64) -> I64 {
+    octave := I64{0}
+    micros := gap / I64{1000}
+    loop micros > (I64{0}) && octave < wrapping(PERF_CAUSAL_GAPS - I64{1}) {
+        micros = micros >> I64{1}
+        octave = wrapping(octave + I64{1})
+    }
+    index := I64{0}
+    loop index < PERF_CAUSAL_KINDS {
+        row: wrapping(wrapping(state + wrapping(PERF_CAUSAL_IDLE_AT + I64{8})) + wrapping(index * PERF_CAUSAL_KIND_BYTES))
+        held: sync_load(row)
+        if (held == body || (held == I64{0} && sync_cas(row, I64{0}, body) == I64{0})) {
+            return wrapping(wrapping(row + I64{8}) + wrapping(octave * I64{24}))
+        }
+        index = wrapping(index + I64{1})
+    }
+    I64{0}
+}
+
+// Write the idle table, as a PERF_SAMPLES_CAUSAL record with 2 in its low
+// bits, to the samples file `fd`: the counts since the lens started, so a
+// later exit's record holds an earlier one's. JetCLI CLI/Perf/Causal.jet
+// fits how much slower a task runs the longer its CPU idled before it.
+perf_causal_idle_write: fn(fd: I64) {
+    state: perf_causal_state
+    if (state == I64{0}) {
+        return
+    }
+    record: wrapping(state + PERF_CAUSAL_IDLE_AT)
+    rt_text_store(record, (PERF_SAMPLES_CAUSAL << PERF_SAMPLES_KIND_BITS) | (PERF_CAUSAL_IDLE_WORDS << PERF_SAMPLES_ADDRESS_BITS) | I64{2})
+    _ := host_write_all(fd, record, wrapping(PERF_CAUSAL_IDLE_WORDS * I64{8}))
 }
 
 // The global delay as this thread parks (Sync.jet sync_park), for
