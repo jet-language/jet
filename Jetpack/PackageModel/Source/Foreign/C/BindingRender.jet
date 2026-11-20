@@ -27,13 +27,11 @@ pkg_cbind_render_binding: fn(p: CProto, used_names: &[String], contract: Foreign
         length_param >= 0 -> Val("[{array_element ?? ""}]")
         else -> pkg_cbind_map_return_type(p.ret, contract, handles, catalog)
     }
-    seed: if {
-        managed_callback != None -> "__jet_native_{p.name}"
-        managed_unsubscribe -> "__jet_native_unsubscribe"
-        managed_emit -> "__jet_native_emit_async"
-        else -> p.name
-    }
-    function_name: pkg_bind_unique_name(used_names, foundation_generated_snake_name(seed, "function"))
+    // A managed row's raw native symbol keeps the reserved `__jet_native_`
+    // prefix the parser and checker key on; only the C name is snake-cased.
+    managed: managed_callback != None || managed_unsubscribe || managed_emit
+    prefix: if managed -> "__jet_native_" else -> ""
+    function_name: pkg_bind_unique_name(used_names, "{prefix}{foundation_generated_snake_name(p.name, "function")}")
     context_index: if managed_callback == {
         .Val(callback_index) -> callback_index + 1
         .None -> -1
@@ -47,9 +45,14 @@ pkg_cbind_render_binding: fn(p: CProto, used_names: &[String], contract: Foreign
             return Err(CBindingSkip{reason: "variadic (`...`) parameters aren't bindable"})
         }
         split: pkg_cbind_split_param_type_and_name(raw, idx)
-        ty: split.ty
-        jet_ty: pkg_cbind_render_param_type(p, idx, ty, length_param, contract, handles, catalog)
         name: pkg_bind_unique_name(used_param_names, foundation_generated_snake_name(split.name, "arg"))
+        // `unsubscribe`'s one `void *` is the registration context the
+        // managed start returned as `*U8`.
+        if managed_unsubscribe {
+            params.push("{name}: *U8")
+            next
+        }
+        jet_ty: pkg_cbind_render_param_type(p, idx, split.ty, length_param, contract, handles, catalog)
         params.push("{name}: {jet_ty}")
     }
     params_str: params.join(", ")

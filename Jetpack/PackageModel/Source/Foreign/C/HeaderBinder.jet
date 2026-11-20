@@ -356,10 +356,10 @@ pkg_cbind_generate_with_descriptor_and_overlay: fn(header_src: String, lib: Stri
                     lines.push("    {proto.name}: fn(callback: fn(FfiCallbackEvent<I64>)) -> FfiCallbackRegistration = {pkg_cbind_quote(proto.name)}\n")
                 }
                 if proto.name == "unsubscribe" && pkg_cbind_native_void_pointer_proto(proto) {
-                    lines.push("    unsubscribe: fn(subscription: &&FfiCallbackRegistration) -> Task<!String> = \"__jet_ffi_callback_unsubscribe\"\n")
+                    lines.push("    unsubscribe: fn(subscription: &&FfiCallbackRegistration) -> Task<Err!> = \"__jet_ffi_callback_unsubscribe\"\n")
                 }
                 if proto.name == "emit_async" {
-                    lines.push("    emit_async: fn(value: I64) -> Task<I64 ! String> = \"__jet_ffi_emit_async\"\n")
+                    lines.push("    emit_async: fn(value: I64) -> Task<I64 Err!> = \"__jet_ffi_emit_async\"\n")
                 }
             }
             .Err(skip) -> skipped.push({name: proto.name, reason: skip.reason})
