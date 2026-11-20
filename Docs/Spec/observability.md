@@ -171,9 +171,11 @@ image's `.symtab` function, hottest first, as `perf report` names them. The
 `reason`
 also gives how many samples the CPU time sampled should give beside how many
 the session kept, and counts any sample in Jet code that kept no stack. The
-profile's overhead is `measured`: `overhead_ns` is the time the sampler's
-handlers and drains ran plus, for each signal that carried a sample, the
-kernel's delivery and return, which the runtime times as sampling starts by
+profile's overhead is `measured`: `overhead_ns` is the CPU time the
+sampler's handlers and drains took on their threads' CPU clocks (not the
+time a busy machine kept them preempted) plus, for each signal that carried
+a sample, the kernel's delivery and return, which the runtime times as
+sampling starts by
 sending its own thread 64 signals, plus, under a perf event, the kernel's
 time to write each sample to its thread's ring, which the runtime times as
 sampling starts with a second sampler of the same source at a shallow and a

@@ -655,26 +655,36 @@ perf_samples_delivery: fn() -> I64 {
     wrapping(perf_samples_cpu_clock_ns(I64{3}) - began) / PERF_SAMPLES_CALIBRATIONS
 }
 
-// The monotonic clock in nanoseconds, for the handler: read into the
+// The monotonic clock in nanoseconds, for the handler (perf_samples_read).
+perf_samples_clock: fn() -> I64 { perf_samples_read(I64{1}) }
+
+// This thread's CPU time (CLOCK_THREAD_CPUTIME_ID) in nanoseconds
+// (perf_samples_read): the clock a handler's or drain's time is charged on
+// (perf_samples_charge). It leaves out the time the thread waits
+// preempted, as the delivery's timing does (perf_samples_delivery), so on
+// a busy machine the other programs' time is not charged to the sampler.
+perf_samples_thread_cpu: fn() -> I64 { perf_samples_read(I64{3}) }
+
+// The clock `clock` in nanoseconds, for the handler: read into the
 // interrupted thread's PERF_SAMPLES_TCB_CLOCK words, which nothing else
 // uses, so it never overwrites the clock words the interrupted code may be
 // reading (sync_now_ns's).
-perf_samples_clock: fn() -> I64 {
+perf_samples_read: fn(clock: I64) -> I64 {
     scratch := I64{0}
     #Unsafe("clock_gettime writes the sampler's two words of the thread-owned TCB; no pointer escapes") {
         scratch = wrapping(os_tls_base_i64() + PERF_SAMPLES_TCB_CLOCK)
-        sync_clock_read(I64{1}, scratch)
+        sync_clock_read(clock, scratch)
     }
     wrapping(wrapping(rt_text_word(scratch) * I64{1000000000}) + rt_text_word(wrapping(scratch + I64{8})))
 }
 
-// Add the nanoseconds since `began` (perf_samples_clock) to those every
-// handler has run, the record buffer's last word.
+// Add this thread's CPU time since `began` (perf_samples_thread_cpu) to
+// the time every handler and drain has run, the record buffer's last word.
 perf_samples_charge: fn(buffer: I64, began: I64) {
     if (buffer == I64{0}) {
         return
     }
-    _ := sync_add(wrapping(buffer + wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_SLOTS) * I64{8})), wrapping(perf_samples_clock() - began))
+    _ := sync_add(wrapping(buffer + wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_SLOTS) * I64{8})), wrapping(perf_samples_thread_cpu() - began))
 }
 
 // Arm this thread's sampler while the process samples CPU time: the perf
@@ -1721,7 +1731,7 @@ perf_samples_turn: fn(tcb: I64) {
     if (ring == I64{0} || sync_load(wrapping(ring + I64{1024})) == rt_text_word(wrapping(ring + I64{1032}))) {
         return
     }
-    began: perf_samples_clock()
+    began: perf_samples_thread_cpu()
     perf_samples_ring_drain(ring, tcb)
     perf_samples_charge(perf_samples_buffer, began)
 }
@@ -1737,7 +1747,7 @@ perf_precise_rings_drain: fn() {
         return
     }
     _ := sync_cas(wrapping(rings + PERF_PRECISE_EXITING), I64{0}, I64{1})
-    began: perf_samples_clock()
+    began: perf_samples_thread_cpu()
     tcb: thread_base()
     own: sync_load(wrapping(tcb + PERF_SAMPLES_TCB_RING))
     if (own != I64{0}) { perf_samples_ring_drain(own, tcb) }
@@ -4904,6 +4914,7 @@ perf_cfi_sort: fn(table: I64, count: I64) {
     if (fd < I64{0} || context == I64{0}) { return I64{0} }
     buffer: perf_samples_buffer
     began: perf_samples_clock()
+    spent: perf_samples_thread_cpu()
     counter := I64{-1}
     if (signal == PERF_COUNTERS_SIGNAL) {
         counter = perf_counter_of(info, buffer)
@@ -4920,18 +4931,18 @@ perf_cfi_sort: fn(table: I64, count: I64) {
             _ := os_write_word_i64(fd, word, I64{8})
         }
         perf_counter_rearm(buffer, counter)
-        perf_samples_charge(buffer, began)
+        perf_samples_charge(buffer, spent)
         return I64{0}
     }
     // Under a perf event, the signal is its ring's (perf_precise_ring).
     ring: if (signal == PERF_SAMPLES_SIGNAL) -> perf_precise_ring(info) else -> I64{0}
     if (ring > I64{0}) {
         perf_samples_ring_drain(ring, thread_base())
-        perf_samples_charge(buffer, wrapping(began - perf_samples_delivery_ns))
+        perf_samples_charge(buffer, wrapping(spent - perf_samples_delivery_ns))
         return I64{0}
     }
     if (ring < I64{0}) {
-        perf_samples_charge(buffer, began)
+        perf_samples_charge(buffer, spent)
         return I64{0}
     }
     // A program counter outside the image's code keeps no callers, but a
@@ -4940,7 +4951,7 @@ perf_cfi_sort: fn(table: I64, count: I64) {
     raw: perf_samples_periods(signal, info)
     periods: if (signal == PERF_SAMPLES_SIGNAL) -> perf_causal_tick(pc, raw) else -> raw
     if (periods == I64{0}) {
-        perf_samples_charge(buffer, began)
+        perf_samples_charge(buffer, spent)
         return I64{0}
     }
     walked: perf_samples_in_code(pc)
@@ -4948,7 +4959,7 @@ perf_cfi_sort: fn(table: I64, count: I64) {
     if (slot == I64{0}) {
         perf_samples_put(fd, I64{0}, I64{0}, (I64{1} << PERF_SAMPLES_ADDRESS_BITS) | kind, pc, periods)
         perf_counter_rearm(buffer, counter)
-        perf_samples_charge(buffer, began)
+        perf_samples_charge(buffer, spent)
         return I64{0}
     }
     // A CPU-time sample's record ends in PERF_SAMPLES_TIMED words.
@@ -5025,7 +5036,7 @@ perf_cfi_sort: fn(table: I64, count: I64) {
     perf_samples_put(fd, side, wrapping(slot + I64{8}), (count << PERF_SAMPLES_ADDRESS_BITS) | kind, pc, periods)
     sync_store(slot, I64{0})
     perf_counter_rearm(buffer, counter)
-    perf_samples_charge(buffer, began)
+    perf_samples_charge(buffer, spent)
     I64{0}
 }
 
