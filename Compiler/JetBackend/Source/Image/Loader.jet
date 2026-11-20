@@ -1936,6 +1936,8 @@ LOADER_PTRACE_CONT: 7
 
 LOADER_PTRACE_SINGLESTEP: 9
 
+LOADER_PTRACE_SYSCALL: 24
+
 LOADER_PTRACE_GETREGS: 12
 
 LOADER_PTRACE_SETREGS: 13
@@ -2474,8 +2476,20 @@ x64_trace_resume: fn(trace: X64Trace, how: X64TraceResume, signal: Int) -> Bool 
         .Run -> LOADER_PTRACE_CONT
         .Step -> LOADER_PTRACE_SINGLESTEP
     }
+    x64_trace_go(trace, request, signal)
+}
+
+// Let the trace's stopped thread run until its next system call
+// (PTRACE_SYSCALL), whose entry stops it before the kernel runs the call,
+// delivering `signal` (0: none). False when the kernel refused.
+x64_trace_resume_to_syscall: fn(trace: X64Trace, signal: Int) -> Bool {
+    x64_trace_go(trace, LOADER_PTRACE_SYSCALL, signal)
+}
+
+// The PTRACE_CONT-like `request` on the trace's stopped thread.
+x64_trace_go: fn(trace: X64Trace, request: Int, signal: Int) -> Bool {
     result := 0
-    #Unsafe("the helper's PTRACE_CONT or PTRACE_SINGLESTEP on its own stopped tracee") {
+    #Unsafe("the helper's PTRACE_CONT, PTRACE_SINGLESTEP or PTRACE_SYSCALL on its own stopped tracee") {
         result = x64_trace_call(trace, OS_SYS_PTRACE, request, trace.thread, 0, signal, 0, 0)
     }
     !os_failed(result)

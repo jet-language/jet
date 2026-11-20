@@ -586,30 +586,34 @@ native_fix_on_stack: fn(image: NativeImage, low: Int, high: Int, live: [Int]) ->
     false
 }
 
-// The plan that places, afresh, the function of `edit` named `entry` and
-// every function it reaches by a call, even those the program runs
-// unchanged, at the targets `plan` (the edit's native_fix_diff) found: an
-// evaluated expression or a breakpoint's condition (NativeEval.jet,
-// NativePlace.jet). Code that only the rest of the program runs stays out,
-// so a compile whose whole-program choices (its main, its register use)
-// differ from the image's still places the same expression. A call of a
-// runtime function the image doesn't hold, because the program never
-// needed it (an Int's path for values past a word, say), goes to a trap in
-// the region (NativeFixPlan.absent), a `ud2` that stops the code with
-// SIGILL: the code runs in a fork or a placed condition's fault goes to
+// The plan that places, afresh, the function of `edit` named `entry` (and
+// the one named `also`, when it isn't "") and every function they reach by
+// a call, even those the program runs unchanged, at the targets `plan` (the
+// edit's native_fix_diff) found: an evaluated expression (and the drop of
+// its result) or a breakpoint's condition (NativeEval.jet, NativePlace.jet).
+// Code that only the rest of the program runs stays out, so a compile whose
+// whole-program choices (its main, its register use) differ from the
+// image's still places the same expression. A call of a runtime function
+// the image doesn't hold, because the program never needed it (an Int's
+// path for values past a word, say), goes to a trap in the region
+// (NativeFixPlan.absent), a `ud2` that stops the code with SIGILL: the code
+// runs in a fork, in the stopped program with its faults kept from it
+// (NativeEval.jet native_eval_here), or a placed condition's fault goes to
 // one (Native.divert), so only a run that takes the call fails, naming the
 // function (native_fix_absent_at).
-native_fix_place_all: fn(edit: NativeFixEdit, symbols: NativeFixSymbols, plan: NativeFixPlan, entry: String) -> NativeFixPlan NativeDebugError! {
+native_fix_place_all: fn(edit: NativeFixEdit, symbols: NativeFixSymbols, plan: NativeFixPlan, entry: String, also: String{""}) -> NativeFixPlan NativeDebugError! {
     row_of := [Int:Int]{}
     start := -1
+    pending := [Int]{}
     loop (row, function) in edit.functions {
         row_of[function.id.value] = row
         if function.name == entry -> start = row
+        if also != "" && function.name == also -> pending.push(row)
     }
     if start < 0 -> return Err(NativeDebugError{detail: "the compiled condition has no `{entry}`"})
+    pending.push(start)
     rows := [Int]{}
     reached := [Int:Bool]{}
-    pending := [Int]{start}
     loop pending.len() > 0 {
         row: pending.pop() ?? -1
         if row < 0 || reached.has_key(row) -> next

@@ -618,6 +618,21 @@ jet_eval_native_wrapper: fn(code: &IRModule, name: String, id: Int, params: [Int
     w
 }
 
+// `name(cell)`: drops the result a wrapper (jet_eval_native_wrapper) stored
+// in `cell`, of the type row `result`, which has a drop: an aggregate's
+// bytes are the cell, else its word. A debugger that runs the wrapper in
+// the stopped program itself calls this once it has read the value, so the
+// references the value holds are given back.
+jet_eval_native_drop: fn(code: &IRModule, name: String, result: Int, pointer: Int) -> IRFunction {
+    d := ir_function_new(name, name, name, "", 0)
+    cell: ir_slot(d, pointer, IRSlotKind.Param, ir_intern_name(code, "cell"), 0)
+    value: ir_slot(d, result, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(d, if code.types[result].kind == .Aggregate -> IROp.Offset else -> IROp.Load, value, cell, 0, -1, 0)
+    _ := ir_emit(d, IROp.Drop, -1, value, -1, -1, 0)
+    _ := ir_emit(d, IROp.Return, -1, -1, -1, -1, 0)
+    d
+}
+
 // Each runtime call of `code` to a symbol neither the runtime image
 // defines nor the batch does calls a stub of its own instead, which asks
 // the compiler (HOST_MISSING): such a call is unsupported where it runs, as

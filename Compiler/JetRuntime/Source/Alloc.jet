@@ -84,10 +84,13 @@ alloc_root := I64{0}
 // The largest payload a size class serves on the ordinary path. Checked mode
 // sets it to 0, so every allocation and free takes the direct-mapping branch,
 // which then hands it to the checked heap: off, checked mode adds no branch
-// to the class path, only this word's load. Written only by
-// alloc_check_start, from jet_rt_alloc_check_init after it installed the
-// checked heap's code words, before any allocation: a 0 limit means the
-// checked heap is installed.
+// to the class path, only this word's load. Written by alloc_check_start,
+// from jet_rt_alloc_check_init after it installed the checked heap's code
+// words, before any allocation, and by a debugger around an evaluation in
+// a stopped program, which writes this word and the code words itself (the
+// runtime object exports them by name, JetBackend X64_DEBUG_EVAL_STORAGE) and
+// puts them back after: a 0 limit means a heap is installed in the code
+// words.
 ALLOC_CLASS_LIMIT: I64{4096}
 
 alloc_class_limit := I64{4096}
@@ -1609,8 +1612,8 @@ priv alloc_grow_large: fn(pointer: I64, size: I64, grown: I64) -> I64 {
 priv alloc_try_validated: fn(size: I64, align: I64) -> I64 {
     slot: alloc_class(size, align, alloc_class_limit)
     if (slot == I64{0}) {
-        // A 0 limit is set only once the checked heap is installed
-        // (alloc_check_start, from jet_rt_alloc_check_init).
+        // A 0 limit is set only once a heap is installed in the code words
+        // (alloc_check_start, or a debugger around an evaluation).
         if (alloc_class_limit == I64{0}) { return coll_call2(alloc_check_take_code, size, align) }
         pointer: alloc_large(size, align)
         alloc_count_init(pointer, align)
@@ -2673,8 +2676,8 @@ priv free_bytes: fn(pointer: I64, size: I64) {
 priv alloc_free_validated: fn(pointer: I64, size: I64, align: I64) {
     slot: alloc_class(size, align, alloc_class_limit)
     if (slot == I64{0}) {
-        // A 0 limit is set only once the checked heap is installed
-        // (alloc_check_start, from jet_rt_alloc_check_init).
+        // A 0 limit is set only once a heap is installed in the code words
+        // (alloc_check_start, or a debugger around an evaluation).
         if (alloc_class_limit == I64{0}) {
             _ := coll_call3(alloc_check_give_code, pointer, size, align)
             return

@@ -965,9 +965,32 @@ that line and column. A row names where the node starts, so two calls of one
 chain that start together share a row. The program is compiled again at
 the optimization level of its build, which the image's debug information
 names (`Jet native backend (O2)`), so the code around the expression is the
-code the program runs, with that function, which runs in a fork of the
-stopped program, with the locals' bytes read from the frame; the program
-itself neither runs nor changes. The fork holds a fresh copy of the
+code the program runs, with that function, with the locals' bytes read from
+the frame. It runs in the stopped program itself, on the selected thread,
+when the image's runtime exports its allocator words
+(`jet_rt_alloc_class_limit`, `jet_rt_alloc_check_take_code` and
+`jet_rt_alloc_check_give_code`, data symbols every image that allocates holds;
+nothing in the program writes them for the debugger, so a program no
+debugger touches pays nothing for them): the debugger maps the
+expression's code and a room beside the program's code once per run of the
+program, sets the thread to call it from that room with the other threads
+stopped, and puts the thread's registers, its floating-point state and the
+code the debugger planted back after it. For the call the debugger writes
+the allocator words, as checked mode routes the heap, so the call's
+allocations come from a bump arena in the room, reset each evaluation, and
+writes them back after: the program's heap is unchanged; a block of the
+program's own that the call gives back stays
+allocated and is counted, and the next report says so. The call runs under
+the debugger: a system call is refused (a write to stdout or stderr is
+caught and shown as the failure's text), a fault or the 2 s budget stops it
+where it got to, the thread's state is put back, and the refusal says the
+program may keep values alive that the evaluation took references to and
+could not give back; a breakpoint it passes is stepped over, a watched
+place it writes stops nothing, and a signal sent to the program meanwhile
+is the program's once the call is done. An image without the allocator
+words, and a run that records or replays (`jet debug --record`, `--replay`),
+evaluates in a fork of the stopped program instead; the program itself
+neither runs nor changes. The mapped code holds a fresh copy of the
 function and of every function it calls, which reach the program's own
 data and runtime where its unchanged code does, so the compile's choices
 for the whole program (its `main`, its register use) need not be the
@@ -977,19 +1000,20 @@ at that level too. An inlined frame is evaluated in as `bt` shows it: the
 expression is checked in the inlined function at its line, the frame it was
 inlined into at the call, and the locals are the frame's own; code inlined
 from another file is refused, since its lines are not that file's. A value whose type has a
-`debug_view` shows as `locals` shows it, the view run in that same fork. A
+`debug_view` shows as `locals` shows it, the view run in a fork of the
+program as the value stands. A
 compiled expression is kept per line, column and text, so a condition compiles once
-and runs in a fork at each hit. A `print` at a later stop in the same frame
+and runs at each hit. A `print` at a later stop in the same frame
 of the same function runs the code compiled before when its names read the
 same variables there (the debug information's variables of each name
 declared by the stop's line, and whether each one's location covers the
 stop) and each local it reads is a number, Bool or Char, which no move
-empties; any other expression compiles again. The fork runs the program's own runtime, so
-a lock another thread held at the stop is never released there (code that
+empties; any other expression compiles again. The call runs the program's own runtime, so
+a lock another thread held at the stop is never released while it runs (code that
 takes it fails at the 2 s budget), and a function value runs the image's
 code. An expression that calls a function that can fail shows its result as
 `locals` shows a fallible result, `parse(s) = Ok(3)` or `Err(ParseError.Empty)`,
-so a condition that can fail is refused, not a Bool. A call, in the fork
+so a condition that can fail is refused, not a Bool. A call, of an evaluation
 or of a condition run in the program, passes up to 5 locals in registers
 and more by a table of their addresses on the stack, so a condition that
 reads more than 5 runs in the program too. A local's own name is no
