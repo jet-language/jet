@@ -551,6 +551,9 @@ parser_parse_statement: fn(state: &JetParserState) -> Stmt {
     parser_skip_semicolons(state)
     token: parser_current(state)
     state.statement_start = token.span.start
+    if parser_report_hash_comment(state) {
+        return Stmt.Expr{expr: Expr.Unit{span: token.span, id: parser_node_id(state)}}
+    }
     if parser_scope_member_ahead(state) -> return parser_parse_scope_member(state)
     if token.kind == {
         TOKEN_KW_IF -> parser_parse_if_statement(state)
@@ -845,6 +848,10 @@ parser_parse_if_body: fn(state: &JetParserState, parts: &[ParserBranchPart], con
         arrow_body: parser_parse_adjacent_effect_body(state)
         parts.push(ParserBranchPart{is_else: false, cond: cond, body: Span{start: body_start, end: parser_prev_token_end(state)}})
         return arrow_body
+    }
+    if token.kind == TOKEN_COLON && parser_report_colon_block(state, "if", token) {
+        parts.push(ParserBranchPart{is_else: false, cond: cond, body: token.span})
+        return [Stmt]{}
     }
     if token.kind != TOKEN_LBRACE && token.kind != TOKEN_SEMI {
         parser_teach_control_braces(state, "if", token.span)
@@ -1237,6 +1244,9 @@ parser_parse_loop_effect_body: fn(state: &JetParserState) -> ParsedBlock {
     }
     if token.kind == TOKEN_KW_IF || token.kind == TOKEN_KW_LOOP {
         parser_add_fatal_code(state, "E0329", token.span, "a nested one-line control body needs braces", "an adjacent loop body owns one simple statement", "wrap the nested control statement in `{{ ... }}`")
+        return ParsedBlock{span: token.span, statements: [Stmt]{}, tail: None}
+    }
+    if token.kind == TOKEN_COLON && parser_report_colon_block(state, "loop", token) {
         return ParsedBlock{span: token.span, statements: [Stmt]{}, tail: None}
     }
     parser_teach_control_braces(state, "loop", token.span)
@@ -1896,6 +1906,9 @@ parser_parse_assignment_or_expression: fn(state: &JetParserState) -> Stmt {
         parser_report_unknown_word(state, false)
         return Stmt.Expr{expr: Expr.Unit{span: start.span, id: parser_node_id(state)}}
     }
+    if parser_report_pass_habit(state) {
+        return Stmt.Expr{expr: Expr.Unit{span: start.span, id: parser_node_id(state)}}
+    }
     named: start.kind == TOKEN_IDENT || start.kind == TOKEN_SELF
     // A lambda value opens with `fn(`; a body's last line may be one.
     lambda: start.kind == TOKEN_KW_FN && parser_kind_at(state, 1) == TOKEN_LPAREN
@@ -1937,6 +1950,7 @@ parser_parse_assignment_or_expression: fn(state: &JetParserState) -> Stmt {
         target: parser_expression_lvalue(state, left.expr, left.span, op_token)
         return Stmt.Assign{target: target.move(), op: parser_assignment_binop(operator), op_span: op_token.span, value: parser_assignment_value(state, op_token, right)}
     }
+    if parser_report_step_habit(state) -> return Stmt.Expr{expr: left.expr}
     if named && !parser_named_line_does_work(state, left.expr) {
         parser_add_error(state, expr_span(left.expr), "this line computes a value but doesn't do anything with it", "only calls, bindings, assignments, and `return` are allowed here", "use the value, e.g. `x: ...` or `print(...)`")
         return Stmt.Expr{expr: left.expr}
@@ -1986,6 +2000,9 @@ parser_unknown_top_word_ahead: fn(state: &JetParserState) -> Bool Never! {
 // A declaration keyword written before its name reaches here as a word
 // (parser_colon_declarations).
 parser_report_unknown_word: fn(state: &JetParserState, top_level: Bool) {
+    if (top_level && (parser_report_import_habit(state) || parser_report_function_word_habit(state))) || parser_report_habit_line(state) || (!top_level && parser_report_keyword_slip(state)) {
+        return
+    }
     token: parser_bump(state)
     if parser_current(state).kind == TOKEN_KW_MUTATE -> parser_bump(state)
     word: parser_text(state, token)

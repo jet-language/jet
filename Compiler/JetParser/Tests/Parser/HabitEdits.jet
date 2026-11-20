@@ -1,0 +1,100 @@
+// A Python or JavaScript habit is reported with the edits that write it in
+// Jet: applying every edit of every report leaves source the parser reads
+// clean.
+use jet_parser.[parse_source]
+
+HabitEdit: struct {
+    start: Int,
+    end: Int,
+    text: String,
+}
+
+// The source with every habit report's edits applied, last edit first.
+habit_fixed: fn(source: String) -> String {
+    parsed: parse_source(source.bytes())
+    edits := [HabitEdit]{}
+    loop diagnostic in parsed.diagnostics {
+        if diagnostic.severity != 1 -> next
+        assert(diagnostic.code == "E0003" || diagnostic.code == "E0002", "not a habit report: {diagnostic.code} {diagnostic.what}")
+        first: diagnostic.edit ?? panic("a habit report without an edit: {diagnostic.what}")
+        edits.push(HabitEdit{start: first.span.start, end: first.span.end, text: "{first.new_text}"})
+        loop extra in diagnostic.fix_edits {
+            edits.push(HabitEdit{start: extra.span.start, end: extra.span.end, text: "{extra.new_text}"})
+        }
+    }
+    assert(edits.len() > 0, "no habit report for: {source}")
+    used := [Bool]{}
+    loop index in 0..<edits.len() -> used.push(false)
+    fixed := "{source}"
+    applied := 0
+    loop applied < edits.len() {
+        best := -1
+        loop index in 0..<edits.len() {
+            if !used[index] && (best < 0 || edits[index].start > edits[best].start) -> best = index
+        }
+        used[best] = true
+        applied += 1
+        bytes: fixed.bytes()
+        before: String.from_bytes(bytes.slice(0, edits[best].start)) ?? ""
+        after: String.from_bytes(bytes.slice(edits[best].end, bytes.len())) ?? ""
+        fixed = "{before}{edits[best].text}{after}"
+    }
+    fixed
+}
+
+// The habit's fix is `expected`, and it parses without an error.
+assert_habit_fix: fn(source: String, expected: String) {
+    fixed: habit_fixed(source)
+    assert_eq(fixed, expected)
+    loop diagnostic in parse_source(fixed.bytes()).diagnostics {
+        if diagnostic.severity == 1 {
+            panic("the fixed source still reports `{diagnostic.what}`:\n{fixed}")
+        }
+    }
+}
+
+in_run: fn(body: String) -> String { "run: fn() {{\n{body}}}\n" }
+
+#Test("operator habits are rewritten to the Jet operator") {
+    assert_habit_fix(in_run("    a: true\n    b: false\n    print(a and b)\n"), in_run("    a: true\n    b: false\n    print(a && b)\n"))
+    assert_habit_fix(in_run("    a: true\n    b: false\n    print(a or b)\n"), in_run("    a: true\n    b: false\n    print(a || b)\n"))
+    assert_habit_fix(in_run("    a: true\n    print(not a)\n"), in_run("    a: true\n    print(!a)\n"))
+    assert_habit_fix(in_run("    x: Int?{{None}}\n    print(x is None)\n"), in_run("    x: Int?{{None}}\n    print(x == None)\n"))
+    assert_habit_fix(in_run("    x: Int?{{None}}\n    print(x is not None)\n"), in_run("    x: Int?{{None}}\n    print(x != None)\n"))
+    assert_habit_fix(in_run("    n: 1\n    print(n === 1)\n"), in_run("    n: 1\n    print(n == 1)\n"))
+    assert_habit_fix(in_run("    n: 1\n    print(n !== 2)\n"), in_run("    n: 1\n    print(n != 2)\n"))
+    assert_habit_fix(in_run("    n: 3\n    print(n ** 2)\n"), in_run("    n: 3\n    print(n.pow(2))\n"))
+    assert_habit_fix(in_run("    print(2 ** 8)\n"), in_run("    print((2).pow(8))\n"))
+}
+
+#Test("statement habits are rewritten to the Jet statement") {
+    assert_habit_fix(in_run("    n := 1\n    n++\n    print(n)\n"), in_run("    n := 1\n    n += 1\n    print(n)\n"))
+    assert_habit_fix(in_run("    n := 1\n    n--\n    print(n)\n"), in_run("    n := 1\n    n -= 1\n    print(n)\n"))
+    assert_habit_fix(in_run("    pass\n"), in_run(""))
+    assert_habit_fix(in_run("    n: 3\n    if n > 5 {{\n        print(1)\n    }} elif n > 2 {{\n        print(2)\n    }}\n"), in_run("    n: 3\n    if n > 5 {{\n        print(1)\n    }} else if n > 2 {{\n        print(2)\n    }}\n"))
+    assert_habit_fix("import math\n\nrun: fn() {{ print(math.sqrt(16.0)) }}\n", "use math: core.math\n\nrun: fn() {{ print(math.sqrt(16.0)) }}\n")
+}
+
+#Test("a Python block after a `:` is put in braces") {
+    assert_habit_fix(in_run("    n := 0\n    while n < 3:\n        n += 1\n    print(n)\n"), in_run("    n := 0\n    loop n < 3 {{\n        n += 1\n    }}\n    print(n)\n"))
+    assert_habit_fix(in_run("    xs: [Int]{{1, 2}}\n    for x in xs:\n        print(x)\n"), in_run("    xs: [Int]{{1, 2}}\n    loop x in xs {{\n        print(x)\n    }}\n"))
+    assert_habit_fix(in_run("    xs: [Int]{{1, 2}}\n    for x in xs {{\n        print(x)\n    }}\n"), in_run("    xs: [Int]{{1, 2}}\n    loop x in xs {{\n        print(x)\n    }}\n"))
+    assert_habit_fix(in_run("    xs: [Int]{{1, 2}}\n    loop x in xs:\n        print(x)\n"), in_run("    xs: [Int]{{1, 2}}\n    loop x in xs {{\n        print(x)\n    }}\n"))
+    assert_habit_fix(in_run("    n: 3\n    if n > 2:\n        print(n)\n    print(0)\n"), in_run("    n: 3\n    if n > 2 {{\n        print(n)\n    }}\n    print(0)\n"))
+}
+
+#Test("another language's function, comment, string and lambda spellings are rewritten") {
+    assert_habit_fix("def add(a: Int, b: Int) -> Int {{\n    a + b\n}}\n\nrun: fn() {{ print(add(1, 2)) }}\n", "add: fn(a: Int, b: Int) -> Int {{\n    a + b\n}}\n\nrun: fn() {{ print(add(1, 2)) }}\n")
+    assert_habit_fix("function add(a: Int, b: Int) -> Int {{\n    a + b\n}}\n\nrun: fn() {{ print(add(1, 2)) }}\n", "add: fn(a: Int, b: Int) -> Int {{\n    a + b\n}}\n\nrun: fn() {{ print(add(1, 2)) }}\n")
+    assert_habit_fix("twice: fn(n: Int) -> Int {{\n    retrun n * 2\n}}\n", "twice: fn(n: Int) -> Int {{\n    return n * 2\n}}\n")
+    assert_habit_fix(in_run("    # the greeting\n    print(\"hello\")\n"), in_run("    // the greeting\n    print(\"hello\")\n"))
+    assert_habit_fix(in_run("    name: \"Ada\"\n    print(f\"hello {{name}}\")\n"), in_run("    name: \"Ada\"\n    print(\"hello {{name}}\")\n"))
+    assert_habit_fix(in_run("    items: [1, 2, 3]\n    doubled: items.map(x => x * 2)\n    print(doubled)\n"), in_run("    items: [1, 2, 3]\n    doubled: items.map(fn(x) {{ x * 2 }})\n    print(doubled)\n"))
+    assert_habit_fix(in_run("    print('hello')\n"), in_run("    print(\"hello\")\n"))
+}
+
+#Test("a first word one slip from a statement keyword is that keyword") {
+    assert_habit_fix("twice: fn(n: Int) -> Int {{\n    retun n * 2\n}}\n", "twice: fn(n: Int) -> Int {{\n    return n * 2\n}}\n")
+    assert_habit_fix("twice: fn(n: Int) -> Int {{\n    returnn n * 2\n}}\n", "twice: fn(n: Int) -> Int {{\n    return n * 2\n}}\n")
+    assert_habit_fix("twice: fn(n: Int) -> Int {{\n    rteurn n * 2\n}}\n", "twice: fn(n: Int) -> Int {{\n    return n * 2\n}}\n")
+}
