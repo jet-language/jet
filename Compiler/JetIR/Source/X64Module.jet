@@ -1539,13 +1539,14 @@ ir_x64_member_name: fn(name: String) -> String? Never! {
     assert_eq(ir_x64_member_name("__jet_lambda_7"), None)
 }
 
-// Shared<Int>: a typedef named as Jet spells it, of a pointer to the cell,
-// whose one unnamed member at the payload word points at the Int's row.
+// A Shared handle of an Int: a typedef named as Jet spells it, of a pointer
+// to the cell, whose one unnamed member at the payload word points at the
+// Int's row.
 #Test("A Shared handle's debug type reaches its value through its cell's payload word") {
     m := ir_module_new()
     int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
     handle: Type.Shared{inner: Type.Int}
-    row: ir_intern_type(m, "Shared<Int>", ir_owned_layout(IRTypeKind.Pointer, handle, "jet_rt_native_shared_drop", "jet_rt_native_shared_clone"))
+    row: ir_intern_type(m, ir_type_name(handle), ir_owned_layout(IRTypeKind.Pointer, handle, "jet_rt_native_shared_drop", "jet_rt_native_shared_clone"))
     m.list_elements[row] = int_row
     tables := ir_x64_tables_start(m)
     ir_x64_debug_types(m, tables)
