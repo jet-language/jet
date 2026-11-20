@@ -289,3 +289,19 @@ seams_deep_refused: fn(scope: String) -> [String] {
     seams_require(seams_deep_refused("tree.nowhere") == [String]{"E2120"}, "a scope naming no declaration is E2120")
     seams_require(seams_deep_refused("forest.check") == [String]{"E2122"}, "a scope whose prefix names no module is E2122")
 }
+
+// A method's holder is named by its type's path and by its own, as a free
+// function's is by its name: how many holders the scope keeps.
+seams_deep_method_kept: fn(scope: String) -> Int {
+    request := seams_request("package: {{ name: \"tree\" }}\nTree: struct {{\n    size: Int,\n\n    check: fn(self) {{\n        #On(.Deep) assert(self.size == 1, \"tree check failed\")\n    }}\n}}\nrun: fn() {{ Tree{{size: 1}}.check() }}", JetDriverCompileMode.Program)
+    request.deep_checks = DeepChecks{scopes: [String]{scope}}
+    front: jet_driver_lowering_inputs(request, None)
+    seams_require(front.compile.complete && !jet_driver_has_errors(front.compile.diagnostics), "`{scope}` compile: {front.compile.diagnostics.map(fn(diagnostic) { "{diagnostic.code} {diagnostic.what}" })}")
+    if front.inputs == .Val(checked) -> return checked.deep_checks.len()
+    0
+}
+
+#Test("embedded_deep_checks_name_a_method_by_its_type") {
+    seams_require(seams_deep_method_kept("tree.Tree") == 1, "the type scope keeps its method's holder")
+    seams_require(seams_deep_method_kept("tree.Tree.check") == 1, "the method scope keeps its holder")
+}

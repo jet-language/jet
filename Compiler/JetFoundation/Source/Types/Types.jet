@@ -525,6 +525,13 @@ symbol_key_names: fn(key: String, name: String) -> Bool Never! {
     before == (U8{46}) || before == (U8{58})
 }
 
+// Whether `owner`, the segment symbol_key_text puts between a member's
+// module and its name, is the owner's own key (`type:m.Point`,
+// `trait:m.Shape`), whose declared name is its leaf (symbol_key_leaf).
+symbol_key_owner_is_key: fn(owner: String) -> Bool Never! {
+    owner.starts_with("type:") || owner.starts_with("trait:")
+}
+
 #Test("symbol keys join kind, module, owner and name with `.`, and read their name back") {
     core: "<corelib>/core.files"
     user: "module:3:app:src/main.jet"
@@ -555,6 +562,16 @@ symbol_key_names: fn(key: String, name: String) -> Bool Never! {
     assert(!symbol_key_names("type:Int", "type:Int"), "the kind is no name")
     assert_eq(symbol_key_leaf("plain"), "plain")
     assert_eq(symbol_key_leaf_start("plain"), 0)
+}
+
+#Test("a method's owner segment is its owner's key, read back by its leaf") {
+    user: "module:3:app:src/main.jet"
+    method: symbol_key_text(SymbolKind.Function, user, symbol_key_text(SymbolKind.Type, user, "", "Point"), "area")
+    assert_eq(method, "function:module:3:app:src/main.jet.type:module:3:app:src/main.jet.Point.area")
+    owner: method.slice(symbol_key_text(SymbolKind.Function, user, "", "").len(), symbol_key_leaf_start(method) - 1)
+    assert(symbol_key_owner_is_key(owner), "`{owner}` is a key")
+    assert_eq(symbol_key_leaf(owner), "Point")
+    assert(!symbol_key_owner_is_key("Point"), "a bare owner name is no key")
 }
 
 symbol_keys: fn(base: Int, bound: Int) -> SymbolKeys Never! {

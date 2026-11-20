@@ -267,6 +267,7 @@ use {
         symbol_key,
         symbol_key_leaf,
         symbol_key_leaf_start,
+        symbol_key_owner_is_key,
         symbol_key_text,
         symbol_table_key,
         body_each_expr_child,
@@ -4472,13 +4473,15 @@ jet_driver_deep_checks: fn(load: JetDriverLoadResult, functions: [FnBody], reque
         package: packages.get(loaded.package_identity) ?? ""
         if package == "" -> next
         // The key is `function:{module}.{owner}.{name}`, with no owner
-        // segment for a free function (symbol_key_text); the module may hold
-        // `.` and `:`, so its own text is cut off first.
+        // segment for a free function and the owner's own key for a method
+        // (symbol_key_text); the module may hold `.` and `:`, so its own text
+        // is cut off first.
         head: symbol_key_text(SymbolKind.Function, module_text(load.module_table, function.module_identity), "", "")
         if !function.key.starts_with(head) -> next
         name: symbol_key_leaf(function.key)
         owner_end: symbol_key_leaf_start(function.key) - 1
-        owner: if owner_end <= head.count_bytes() -> "" else -> foundation_byte_text(function.key.bytes(), head.count_bytes(), owner_end)
+        segment: if owner_end <= head.count_bytes() -> "" else -> foundation_byte_text(function.key.bytes(), head.count_bytes(), owner_end)
+        owner: if symbol_key_owner_is_key(segment) -> symbol_key_leaf(segment) else -> segment
         lifted: if owner == "" -> name else -> owner
         home: if loaded.declared_module == "" -> package else -> "{package}.{loaded.declared_module}"
         inline: sema_inline_member_module(lifted)

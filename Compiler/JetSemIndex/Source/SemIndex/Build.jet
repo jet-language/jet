@@ -44,7 +44,9 @@ use {
         core_identity_module,
         core_path_module,
         foundation_byte_text,
+        symbol_key_leaf,
         symbol_key_leaf_start,
+        symbol_key_owner_is_key,
         derivation_identity,
         derivation_record,
         failure_contract_shown_return,
@@ -1675,7 +1677,9 @@ SemFunctionKey: struct {
 // `key` cut into its module and its local key: the module is the longest
 // prefix, cut at a `.` before the name, that `modules` holds (by module
 // identity) or that is a Core module; a key with neither is a free function
-// of the text before its name.
+// of the text before its name. A method's key names its owner by the owner's
+// own key (`function:m.type:m.Point.area`, symbol_key_text); its local key is
+// the owner's declared name and its own (`Point.area`).
 semindex_function_key: fn(key: String, modules: [String:String]) -> SemFunctionKey? Never! {
     path: key.split_once(":") ?? return None
     name_start: symbol_key_leaf_start(path.after)
@@ -1686,6 +1690,10 @@ semindex_function_key: fn(key: String, modules: [String:String]) -> SemFunctionK
         if bytes[at] == (U8{46}) {
             module_identity: foundation_byte_text(bytes, 0, at)
             if modules.has_key(module_identity) || semindex_core_module_identity(module_identity) {
+                owner: if at + 1 < name_start -> foundation_byte_text(bytes, at + 1, name_start - 1) else -> ""
+                if symbol_key_owner_is_key(owner) {
+                    return Val(SemFunctionKey{module_identity: module_identity, local: "{symbol_key_leaf(owner)}.{foundation_byte_text(bytes, name_start, bytes.len())}"})
+                }
                 return Val(SemFunctionKey{module_identity: module_identity, local: foundation_byte_text(bytes, at + 1, bytes.len())})
             }
         }
