@@ -89,8 +89,9 @@ stderr: null
 recv plain
 stdout.trim: ~ "READY" # an observed run without allocation tracking
 step untracked: jet perf attach {pid:plain} --lens=alloc --source held.jet --out {work}/untracked.jettrace
-exit: 2
-stderr: ~ "keeps no list of its live blocks: it was not started with allocation tracking" # the refusal's reason
+exit: 1
+stderr: ~ "Error: Jet.AttachTargetNotObserved: Jet can't attach to process " # refused by its cause: not observed for the lens
+stderr: ~ ": it keeps no list of its live blocks: it was not started with allocation tracking" # the refusal's reason
 stderr: ~ "jet run --observe --checked-alloc held.jet" # how to start it with tracking
 file: untracked.jettrace absent # no empty snapshot
 signal plain: KILL

@@ -20599,6 +20599,55 @@ PerfDirectoryNotPrivate: struct {
     }
 }
 
+AttachTargetNotObserved: struct {
+    pid: String,
+    cause: String,
+
+    impl Diagnostic {
+        code: "E2124",
+        safety_class: .Soundness,
+        safety_reason: "A process that isn't running, or doesn't publish what the attach reads, has nothing to profile, and a trace made anyway would claim a capture nobody took.",
+        expert_path: "none: the program runs under `jet run --observe`",
+        stage: [.Jet],
+        meaning: "`jet perf attach` names a process that isn't running or isn't observed as the attach needs",
+        detail: true,
+
+        what: fn(self) -> String { "jet can't attach to process {self.pid}: {self.cause}" }
+
+        why: fn(self) -> String {
+            "An attach reads what a running program publishes about itself: its live snapshot and flight ring under `jet run --observe`, and its live blocks under `--checked-alloc` too. A process that publishes none of it has nothing to read."
+        }
+
+        fix: fn(self) -> String {
+            "Start the program with `jet run --observe` (adding `--checked-alloc` for `--lens=alloc`), then attach to the pid it runs as."
+        }
+    }
+}
+
+AttachWhichProcess: struct {
+    problem: String,
+
+    impl Diagnostic {
+        code: "E2125",
+        safety_class: .Soundness,
+        safety_reason: "An attach profiles one process, so jet would have to guess which one the command line means, and the trace would describe a process nobody singled out.",
+        expert_path: "none: one attach names one process id",
+        stage: [.Jet],
+        meaning: "`jet perf attach` is given no process id, more than one, or a word that isn't one",
+        detail: true,
+
+        what: fn(self) -> String { "{self.problem}" }
+
+        why: fn(self) -> String {
+            "One attach profiles one process, named by one process id, so jet won't guess which process you mean."
+        }
+
+        fix: fn(self) -> String {
+            "Attach to one pid at a time: `jet perf attach <pid> --source <file.jet>`."
+        }
+    }
+}
+
 RetiredDevPrescan: struct {
     impl Diagnostic {
         code: "E2201",

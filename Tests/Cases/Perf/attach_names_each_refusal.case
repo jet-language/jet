@@ -1,0 +1,39 @@
+# `jet perf attach` names each refusal by its cause. A flag that conflicts
+# with the others stays Jet.UnknownFlag (exit 2); a process that isn't
+# running, or runs without publishing what the attach reads, is
+# Jet.AttachTargetNotObserved (exit 1); a command line that names no one
+# process (none, two, or a word that isn't a pid) is Jet.AttachWhichProcess
+# (exit 2). Each report is a CLI snapshot.
+requires: os-name:linux
+fixture: AttachTurnsZonesOn.fixture
+env: NO_COLOR=1
+step: jet perf attach 4242 --lens=alloc
+exit: 2
+stdout: = ""
+stderr: = ../../CLI/perf_attach_alloc_needs_source.txt
+step: jet perf attach 4294967295 --source live.jet --out gone.jettrace
+exit: 1
+stdout: = ""
+stderr: = ../../CLI/perf_attach_not_running.txt
+file: gone.jettrace absent # refused before it traced anything
+spawn sleeper: sleep 30
+step: jet perf attach {pid:sleeper} --source live.jet --out plain.jettrace
+exit: 1
+stdout: = ""
+stderr: ~ "Error: Jet.AttachTargetNotObserved: Jet can't attach to process " # a running process jet doesn't observe is refused by that cause
+stderr: ~ ": it publishes no live snapshot jet can read (no live observation is available at " # and says what it lacks
+stderr: ~ "Fix: Start the program with `jet run --observe`, then attach to the pid it runs as" # and how to start it observed
+file: plain.jettrace absent # refused before it traced anything
+signal sleeper: KILL
+wait: sleeper
+exit: any # the case's KILL ends the process
+step: jet perf attach 4242 4343 --source live.jet
+exit: 2
+stdout: = ""
+stderr: = ../../CLI/perf_attach_two_processes.txt
+step: jet perf attach --source live.jet
+exit: 2
+stderr: ~ "Error: Jet.AttachWhichProcess: `jet perf attach` names no process" # no pid is no choice of process
+step: jet perf attach soon --source live.jet
+exit: 2
+stderr: ~ "Error: Jet.AttachWhichProcess: `soon` isn't a process id, so jet can't tell which process to attach to" # nor is a word that isn't a pid

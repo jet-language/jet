@@ -761,6 +761,16 @@ reachable to them; a request another user left is ignored.
 Tests/Cases/Perf/attach_ignores_another_users_request.case is the worked
 example.
 
+An attach that can't run is refused by its cause. A process that isn't
+running, or runs without publishing what the attach reads (no live snapshot,
+no flight ring, or no live list for `--lens=alloc`), is E2124
+(`Jet.AttachTargetNotObserved`, exit 1), with the command that starts it
+observed. A command line that names no one process (no pid, two pids, or a
+word that isn't a pid) is E2125 (`Jet.AttachWhichProcess`, exit 2). A flag
+that conflicts with the others, such as `--lens=alloc` without `--source`,
+stays `Jet.UnknownFlag` (exit 2).
+Tests/Cases/Perf/attach_names_each_refusal.case is the worked example.
+
 `core.perf` zones, frame marks and plots stay off in such a run: each zone
 site tests one runtime word and calls nothing while it is clear.
 `jet perf attach <pid> --source app.jet --zones=500ms` turns them on for the

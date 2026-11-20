@@ -408,21 +408,21 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
         if arg.starts_with("-") {
             return jet_cli_perf_error("unknown `jet perf attach` flag `{arg}`", JET_CLI_PERF_FIX, color)
         }
-        if pid != None {
-            return jet_cli_perf_error("`jet perf attach` takes one process id", JET_CLI_PERF_FIX, color)
-        }
-        value: Int.parse(arg) ?? return jet_cli_perf_error("`{arg}` isn't a process id", JET_CLI_PERF_FIX, color)
+        value: Int.parse(arg) ?? return jet_cli_perf_attach_which("`{arg}` isn't a process id, so jet can't tell which process to attach to", "name the process by its pid, a whole number: `jet perf attach <pid> --source <file.jet>`", color)
         if value < 0 || value > 4294967295 {
-            return jet_cli_perf_error("`{arg}` isn't a process id", JET_CLI_PERF_FIX, color)
+            return jet_cli_perf_attach_which("`{arg}` isn't a process id, so jet can't tell which process to attach to", "name the process by its pid, a whole number: `jet perf attach <pid> --source <file.jet>`", color)
+        }
+        if pid == .Val(first) {
+            return jet_cli_perf_attach_which("`jet perf attach` was given two process ids, `{first}` and `{value}`", "attach to one of them at a time: `jet perf attach {first} --source <file.jet>`", color)
         }
         pid = Val(value)
     }
-    target_pid: pid ?? return jet_cli_perf_error("`jet perf attach` needs a process id", "run `jet perf attach <pid> --source <file.jet>`", color)
+    target_pid: pid ?? return jet_cli_perf_attach_which("`jet perf attach` names no process", "name the process by its pid: `jet perf attach <pid> --source <file.jet>`", color)
     if alloc && source == None {
         return jet_cli_perf_error("`--lens=alloc` names each live block by its line in `--source`, which is missing", "run `jet perf attach {target_pid} --lens=alloc --source <file.jet>`", color)
     }
     if !perf_files.is_dir("/proc/{target_pid}") {
-        return jet_cli_perf_error("process {target_pid} is not running or not visible to this user", "start the program with `jet run --observe`, then attach to that pid", color)
+        return jet_cli_perf_attach_unobserved(target_pid, "it isn't running, or this user can't see it", "start the program with `jet run --observe`, then attach to the pid it runs as", color)
     }
     target: jet_cli_perf_session_target()
     // Attach is a point capture: the trace session's origin is now.
@@ -454,7 +454,7 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
         capture = jet_cli_perf_capture_browser(relayed, observations, target) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
     } else if source == .Val(path) {
         if live_error == .Val(message) {
-            return jet_cli_perf_error(message, "start the program with `jet run --observe`, then attach", color)
+            return jet_cli_perf_attach_unobserved(target_pid, "it publishes no live snapshot jet can read ({message})", "start the program with `jet run --observe`, then attach to the pid it runs as", color)
         }
         // The directory the program publishes in and takes requests from;
         // one that isn't this user's alone is refused before any request is
@@ -477,7 +477,12 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
             capture.profile.window_reason = "the attach's zones window: wall time on jet's monotonic clock, the program's process CPU across it"
         }
         if alloc {
-            heap: jet_cli_perf_attach_heap(target_pid, home, path) ?? return jet_cli_perf_error(err.message, "start the program with `jet run --observe --checked-alloc {path}`, then attach with `--lens=alloc`", color)
+            heap: jet_cli_perf_attach_heap(target_pid, home, path) ?? {
+                if err.unobserved {
+                    return jet_cli_perf_attach_unobserved(target_pid, err.message, "start the program with `jet run --observe --checked-alloc {path}`, then attach with `--lens=alloc`", color)
+                }
+                return jet_cli_report_output("", "E2105", err.message, jet_cli_why("E2105"), "correct the named problem, then attach again", color, JET_DRIVER_EXIT_USER_ERROR)
+            }
             held_ns = Val(heap.held_ns)
             // copy: the attach keeps its source; the section owns its own.
             if jet_cli_perf_session_heaps(path.copy(), heap.samples.heaps.move()) == .Val(section) {
@@ -551,13 +556,14 @@ jet_cli_perf_attach_flight: fn(pid: Int, home: String, source: String) -[FS, Env
 // perf_flight_heap) and answers in `<ring>.heap`: the hold,
 // -1 when the program keeps no list of its live blocks, then the snapshot's
 // records, read beside a copy of the ring's image as a run's samples are.
-// Lines in `source` are its own.
-jet_cli_perf_attach_heap: fn(pid: Int, home: String, source: String) -[FS, Env, Time]> JetCLIPerfAttachHeap JetCLIReadError! {
+// Lines in `source` are its own. A program that publishes no ring, or keeps
+// no list of its live blocks, is refused as not observed for the lens.
+jet_cli_perf_attach_heap: fn(pid: Int, home: String, source: String) -[FS, Env, Time]> JetCLIPerfAttachHeap JetCLIPerfHeapError! {
     ring: perf_files.join(home, "jet-flight-{pid}.samples")
     answer: "{ring}.heap"
     request: "{ring}.heap-request"
     perf_files.remove(answer).drop("an earlier attach's answer is none to this request")
-    _: perf_files.create(request, mode: Val(0o600), links: .Refuse) ?? return Err(jet_cli_read_error("cannot ask process {pid} for a heap snapshot: {jet_cli_io_error_text(err)}"))
+    _: perf_files.create(request, mode: Val(0o600), links: .Refuse) ?? return Err(jet_cli_perf_heap_failed("cannot ask process {pid} for a heap snapshot: {jet_cli_io_error_text(err)}"))
     answered := false
     loop _ in 0..<JET_CLI_PERF_HEAP_WAITS {
         perf_time.sleep(25ms)
@@ -568,24 +574,38 @@ jet_cli_perf_attach_heap: fn(pid: Int, home: String, source: String) -[FS, Env, 
     }
     if !answered {
         perf_files.remove(request).drop("an unanswered request is only withdrawn")
-        return Err(jet_cli_read_error("process {pid} did not answer the heap snapshot request within 5 s: it publishes no flight ring"))
+        return Err(JetCLIPerfHeapError{message: "it did not answer the heap snapshot request within 5 s: it publishes no flight ring", unobserved: true})
     }
-    bytes: perf_files.read_bytes(answer) ?? return Err(jet_cli_read_error("cannot read process {pid}'s heap snapshot: {jet_cli_io_error_text(err)}"))
+    bytes: perf_files.read_bytes(answer) ?? return Err(jet_cli_perf_heap_failed("cannot read process {pid}'s heap snapshot: {jet_cli_io_error_text(err)}"))
     perf_files.remove(answer).drop("the attach reads the answer once")
     if bytes.len() < 8 {
-        return Err(jet_cli_read_error("process {pid} answered the heap snapshot request with no hold"))
+        return Err(jet_cli_perf_heap_failed("process {pid} answered the heap snapshot request with no hold"))
     }
     if bytes[7] == (U8{255}) {
-        return Err(jet_cli_read_error("process {pid} keeps no list of its live blocks: it was not started with allocation tracking"))
+        return Err(JetCLIPerfHeapError{message: "it keeps no list of its live blocks: it was not started with allocation tracking", unobserved: true})
     }
     taken: perf_files.join(home, "jet-perf-attach-{pid}-{perf_time.unix_ns()}.heap")
-    perf_files.write_bytes(taken, bytes.slice(8, bytes.len())) ?? return Err(jet_cli_read_error("cannot keep process {pid}'s heap snapshot: {jet_cli_io_error_text(err)}"))
+    perf_files.write_bytes(taken, bytes.slice(8, bytes.len())) ?? return Err(jet_cli_perf_heap_failed("cannot keep process {pid}'s heap snapshot: {jet_cli_io_error_text(err)}"))
     if perf_files.copy("{ring}.image", "{taken}.image") == .Err(failure) {
         perf_files.remove(taken).drop("the attach reads the snapshot it kept once")
-        return Err(jet_cli_read_error("cannot copy process {pid}'s image: {jet_cli_io_error_text(failure)}"))
+        return Err(jet_cli_perf_heap_failed("cannot copy process {pid}'s image: {jet_cli_io_error_text(failure)}"))
     }
-    samples: jet_cli_perf_samples_read(taken, source, [TraceCounter]{}, None) ?? return Err(jet_cli_read_error("process {pid}'s heap snapshot names no line: its image has no line table"))
+    samples: jet_cli_perf_samples_read(taken, source, [TraceCounter]{}, None) ?? return Err(jet_cli_perf_heap_failed("process {pid}'s heap snapshot names no line: its image has no line table"))
     Ok(JetCLIPerfAttachHeap{samples: samples, held_ns: link_debug_addr(bytes, 0)})
+}
+
+// Why jet_cli_perf_attach_heap took no snapshot: `unobserved` when the
+// program doesn't publish what the lens reads, for `message`; otherwise the
+// operation that failed.
+#Error
+JetCLIPerfHeapError: struct {
+    message: String,
+    unobserved: Bool,
+}
+
+// A heap snapshot whose operation `message` failed.
+jet_cli_perf_heap_failed: fn(message: String) -> JetCLIPerfHeapError Never! {
+    JetCLIPerfHeapError{message: message, unobserved: false}
 }
 
 // An attach's heap snapshot (jet_cli_perf_attach_heap): its records, read,
@@ -693,6 +713,20 @@ jet_cli_perf_home_refused: fn(failure: JetCLIPerfHomeError, color: Bool) -> JetD
     why: "A flight-recorded program publishes its ring in that directory and takes attach requests from it, so whoever else can reach it could read the program's profile or turn its zones on."
     fix: "remove `{failure.home}`, or set `XDG_RUNTIME_DIR` to a directory only you can open; then start the program again with `jet run --observe` and attach"
     jet_cli_report_output("", "E2123", what, why, fix, color, JET_DRIVER_EXIT_USER_ERROR)
+}
+
+// An attach refused for its process (E2124): `pid` isn't running, or doesn't
+// publish what the attach reads, for `cause`; `fix` starts it as it needs.
+jet_cli_perf_attach_unobserved: fn(pid: Int, cause: String, fix: String, color: Bool) -> JetDriverVerbOutput Never! {
+    why: "An attach reads what a running program publishes about itself: its live snapshot and flight ring under `jet run --observe`, and its live blocks under `--checked-alloc` too. A process that publishes none of it has nothing to read."
+    jet_cli_report_output("", "E2124", "jet can't attach to process {pid}: {cause}", why, fix, color, JET_DRIVER_EXIT_USER_ERROR)
+}
+
+// An attach whose command line names no one process (E2125), as `problem`
+// says.
+jet_cli_perf_attach_which: fn(problem: String, fix: String, color: Bool) -> JetDriverVerbOutput Never! {
+    why: "One attach profiles one process, named by one process id, so jet won't guess which process you mean."
+    jet_cli_report_output("", "E2125", problem, why, fix, color, JET_DRIVER_EXIT_USAGE)
 }
 
 // The process CPU program `pid` has spent since its run started (/proc's
