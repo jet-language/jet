@@ -1,0 +1,17 @@
+// A C-exported global word: native_global_store and native_global_load share
+// the storage of one checked unit, and run reads back each stored value.
+native_global_word := I64{0}
+
+#Export(c) native_global_store: fn(value: I64) {
+    #Unsafe("run, the program's one thread, is the only writer") { native_global_word = value }
+}
+
+#Export(c) native_global_load: fn() -> I64 { native_global_word }
+
+run: fn() {
+    print(native_global_load())
+    native_global_store(I64{-7})
+    print(native_global_load())
+    native_global_store(I64.MAX)
+    print(native_global_load())
+}
