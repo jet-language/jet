@@ -638,8 +638,11 @@ sema_core_body_decode: fn(bytes: [U8], at: Int, graph: SemaRegistrationGraph, po
 }
 
 // The fewest record bytes worth a compiler thread of their own in
-// sema_core_bodies_ahead: a record of about 12 KB decodes in about 100 µs,
-// so each thread decodes for some milliseconds.
+// sema_core_bodies_ahead, and so the fewest it reads ahead at all: a record
+// of about 12 KB decodes in about 100 µs (about 120 bytes a µs), so these
+// decode in about 2.2 ms, longer than a compile's first spawn and join of a
+// task, which starts a carrier, takes (1.76 ms, the median of 21 runs; 0.34
+// ms at best). With carriers running a spawn and join takes 11 to 18 µs.
 SEMA_CORE_BODIES_AHEAD_BYTES_PER_THREAD: 262144
 
 // The most record bytes sema_core_bodies_ahead holds read and not yet
@@ -756,7 +759,9 @@ sema_core_bodies_ahead_find: fn(hooks: SemaRegistrationHostHooks, graph: SemaReg
 // Reads the records `found` on this thread, in order, while the compiler
 // threads beside it decode them (sema_core_bodies_ahead_decoder), as many
 // as their bytes admit, then puts each packet that reads into `hooks`
-// (core_bodies_ahead).
+// (core_bodies_ahead). Records holding fewer bytes than one thread is worth
+// (SEMA_CORE_BODIES_AHEAD_BYTES_PER_THREAD) are not read ahead: each loads
+// at its turn on the pass's thread, and no thread starts.
 sema_core_bodies_ahead_load: fn(graph: SemaRegistrationGraph, hooks: &SemaRegistrationHostHooks, found: &&[SemaCoreBodyRecord], threads: CompilerThreads) {
     records: found.move()
     if records.len() == 0 {
@@ -764,6 +769,9 @@ sema_core_bodies_ahead_load: fn(graph: SemaRegistrationGraph, hooks: &SemaRegist
     }
     work := 0
     loop record in records -> work += record.size
+    if work < SEMA_CORE_BODIES_AHEAD_BYTES_PER_THREAD {
+        return
+    }
     decoders: compiler_threads_admit(compiler_threads_beside(threads, 1), records.len(), work, SEMA_CORE_BODIES_AHEAD_BYTES_PER_THREAD, 0, 0)
     feed: Shared{SemaCoreBodiesAheadFeed{records: [SemaCoreBodyRecord]{}, held: 0, read: false, failed: false, decoded: [SemaCoreBodyRecord]{}, packets: [SemaParallelBody?]{}}}
     fed: Condition.new()
