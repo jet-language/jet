@@ -517,13 +517,13 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2123 | PerfDirectoryNotPrivate | Compiler/JetCLI/Source/CLI/Perf/Session.jet:829 | the profile is kept where only its user can reach it |
 | E2124 | AttachTargetNotObserved | Compiler/JetCLI/Source/CLI/Perf/Session.jet:836 | the program runs under `jet run --observe` |
 | E2125 | AttachWhichProcess | Compiler/JetCLI/Source/CLI/Perf/Session.jet:843 | one attach names one process id |
-| E2126 | PerfNoInstructions | Compiler/JetCLI/Source/CLI/Perf/Instructions.jet:672 | the trace of a native `jet perf run` keeps the code its samples landed in |
+| E2126 | PerfNoInstructions | Compiler/JetCLI/Source/CLI/CanvasProfile.jet:154 | the trace of a native `jet perf run` keeps the code its samples landed in |
 | E2203 | DebuggerUnavailable | Compiler/JetDebug/Source/Native.jet:26 | the program is a native -O0 image this machine can run traced |
 | E2204 | DebugSessionQuit | Compiler/JetCLI/Source/CLI/Debug.jet:461 | let the program run to its end |
 | E2231 | DebugAttachFailed | Compiler/JetDebug/Source/Native.jet:50 | attach to a process of your user that the system lets you trace |
 | E2236 | DebugConfigInvalid | Compiler/JetDebug/Source/Native.jet:48 | name the process and its program as they are |
 | E2237 | DebugRequestRefused | Compiler/JetDebug/Source/Native.jet:55 | ask where the session can answer |
-| E2238 | DebugStaleReference | Compiler/JetCLI/Source/CLI/DebugDap.jet:116 | refresh the view after the next stop |
+| E2238 | DebugStaleReference | Compiler/JetCLI/Source/CLI/DebugDap.jet:125 | refresh the view after the next stop |
 | E2305 | ViewOutlivesOwner | Compiler/JetSema/Source/Sema/Calls/Checking.jet:335 | the view's owner lives as long as the view |
 | E2307 | StringViewOutlivesOwner | Compiler/JetSema/Source/Sema/Calls/Checking.jet:335 | the string's owner lives as long as the view, or the string is copied |
 | E2389 | UnprovenEntryResolution | Compiler/JetCLI/Source/CLI/Inspect.jet:2119 | the entry resolves |
@@ -617,7 +617,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3002 | FailureTrail | Compiler/JetRuntime/Source/JourneyReport.jet:170 | a caller handles the failure |
 | E3003 | DeadlineExceeded | Compiler/JetRuntime/Source/SchedulerMessages.jet:84 | a longer deadline, or less work |
 | E3005 | ContractFailed | Compiler/JetCLI/Source/CLI/ProveReport.jet:1047 | the caller or the function is fixed |
-| E3006 | Deadlock | Compiler/JetRuntime/Source/WaitCycle.jet:420 | one task of the cycle stops waiting for the others |
+| E3006 | Deadlock | Compiler/JetRuntime/Source/WaitCycle.jet:422 | one task of the cycle stops waiting for the others |
 | E3010 | ArithmeticOrBoundsFailure | Compiler/JetEval/Source/EvalValues.jet:170 | the operands or index are checked first |
 | E3011 | TodoReached | Compiler/JetEval/Source/IR/Native.jet:1008 | the `#Todo` is written |
 | E3012 | StackOverflow | Compiler/JetCLI/Source/CLI/Crash.jet:183 | the recursion is bounded |
