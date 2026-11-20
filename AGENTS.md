@@ -678,6 +678,34 @@ There is no hosted CI until a pinned native seed release exists
 source-coverage ratchet `Tools/Agent/CoreCoverage.jet`) run locally with the
 admitted `JET`.
 
+## Dogfood the debugger and profiler
+
+This is a standing owner order. Every agent debugs a Jet program with `jet
+debug` and profiles one with `jet perf`, and that includes the compiler and
+every tool, which are Jet programs too. Jet controls the compiler, the runtime
+and the image, so its own tools must answer every question an external one
+would; using them is how their defects are found.
+
+- **No external debugger or profiler on Jet code.** gdb, lldb, Linux `perf`,
+  valgrind, rr, strace and their like run on Jet programs in exactly two
+  places: as the named baseline of a comparison harness (such as
+  `Tools/Perf/DebugLatency`, which times lldb), and for a question the Jet tool
+  cannot answer yet. In the second case the gap goes on the dogfooding card as
+  a criterion first, with the command that failed, and the note names it; the
+  external tool answers that one question only.
+- **Real work runs through them.** Compile-speed ranking takes its profile from
+  `jet perf` on the compiler. A codegen or speed-gate regression is profiled
+  with `jet perf` before it goes back to its author. A crash, hang or wrong
+  value in a Jet program, the compiler included, is diagnosed with `jet debug`
+  (live, `--attach`, or a `--record`ed replay) before anyone reads code to
+  guess.
+- **Every friction is a defect.** A missing command, a wrong or missing value,
+  a slow step, a crash or a confusing output in `jet debug` or `jet perf` goes
+  on the dogfooding card as a criterion with its reproduction, the same hour.
+  Fixing those is ranked like any other defect.
+
+The `diagnosing-bugs` skill shows which command answers which question.
+
 ## References
 
 Read this file first, then load only what the task needs:

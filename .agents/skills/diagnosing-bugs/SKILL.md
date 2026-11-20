@@ -97,13 +97,32 @@ Each probe must map to a specific prediction from Phase 3. **Change one variable
 
 Tool preference:
 
-1. **Debugger / REPL inspection** if the env supports it. One breakpoint beats ten logs.
+1. **Debugger inspection.** One breakpoint beats ten logs. For a Jet program (the compiler and the tools included) that is `jet debug`, never gdb or lldb; see "Jet's own tools" below.
 2. **Targeted logs** at the boundaries that distinguish hypotheses.
 3. Never "log everything and grep".
 
 **Tag every debug log** with a unique prefix, e.g. `[DEBUG-a4f2]`. Cleanup at the end becomes a single grep. Untagged logs survive; tagged logs die.
 
-**Perf branch.** For performance regressions, logs are usually wrong. Instead: establish a baseline measurement (timing harness, `performance.now()`, profiler, query plan), then bisect. Measure first, fix second.
+**Perf branch.** For performance regressions, logs are usually wrong. Instead: establish a baseline measurement, then bisect. For a Jet program the baseline and the profile come from `jet perf`. Measure first, fix second.
+
+### Jet's own tools
+
+AGENTS.md ("Dogfood the debugger and profiler") binds this: Jet code is debugged with `jet debug` and profiled with `jet perf`. When one of them can't answer your question, that is a defect: put it on the dogfooding card with the command that failed before you reach for an external tool, and use the external tool for that one question only.
+
+|Question|Command|
+|---|---|
+|Where does it crash, and with what values?|`jet debug prog.jet -- args` (stops at the fault; `bt`, `locals`, `print EXPR`)|
+|Why does this line compute the wrong value?|`jet debug --break prog.jet:LINE prog.jet`, then `print`, `step`, `watch`|
+|A running or hung process|`jet debug --attach PID`|
+|A failure that happens once in N runs|record it with `jet debug --record=NAME …`, then step back through it with `--replay=NAME` (`back`, `jump N`)|
+|From an editor|`jet debug --dap`|
+|Where does the time go?|`jet perf run prog.jet` writes a `.jettrace`; `jet perf view` shows it|
+|Which line, sped up, would help most?|`jet perf run --lens=causal prog.jet`|
+|What did a change cost?|`jet perf compare before.jettrace after.jettrace`|
+|A slow test|`jet perf test …`|
+|A running service|`jet perf attach PID`|
+
+The compiler is a Jet program: profile a slow compile with `jet perf run` on the compiler's entry, and debug a compiler crash with `jet debug` on the same command line.
 
 ## Phase 5 — Fix + regression test
 
