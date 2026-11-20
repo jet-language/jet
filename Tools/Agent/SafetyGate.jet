@@ -104,7 +104,7 @@ gate_fail: fn(message: String) -> GateError Never! { GateError{message: message.
 // The model discards a program whose evaluation is not defined behavior.
 #Error
 Reject: struct {
-    reason: String,
+    _reason: String,
 }
 
 // ---------------------------------------------------------------- generator
@@ -1352,7 +1352,7 @@ items_value: fn(k: String, items: [Int]) -> Value Never! {
 
 no_signal: fn() -> Signal Never! { Signal{k: "", v: int_value(0)} }
 
-reject: fn(reason: String) -> Reject Never! { Reject{reason: reason.copy()} }
+reject: fn(reason: String) -> Reject Never! { Reject{_reason: reason.copy()} }
 
 within_limits: fn(v: Value) -> Value Reject! {
     if v.k == "int" && (v.i > I64_MAX || v.i < I64_MIN) -> return Err(reject("overflow"))
@@ -1828,10 +1828,12 @@ prepare_corpus: fn(out: String, seed: Int, count: Int) -[FS]> Corpus GateError! 
             made: if kind == "fuzz" -> generate_case(seed, index) ?? return Err(err) else -> generate_core_case(seed, index)
             files.write("{features}/{stem}.jet", made.source) ?? return Err(gate_fail("`{stem}.jet` cannot be written: {err}"))
             files.write("{features}/expected/{stem}.out", made.stdout) ?? return Err(gate_fail("`{stem}.out` cannot be written: {err}"))
-            loop part in ([String]{stem, made.source, made.stdout}) {
-                digest.extend(part.bytes())
-                digest.push(U8{0})
-            }
+            digest.extend(stem.bytes())
+            digest.push(U8{0})
+            digest.extend(made.source.bytes())
+            digest.push(U8{0})
+            digest.extend(made.stdout.bytes())
+            digest.push(U8{0})
             cases.push(Case{stem: stem.copy(), source: made.source.copy(), stdout: made.stdout.copy(), stderr: "", status: Val(0)})
         }
     }

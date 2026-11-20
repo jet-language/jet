@@ -75,7 +75,7 @@ names: fn(list: String) -> [String] Never! {
     out := [String]{}
     loop name in list.split(",") {
         trimmed: name.trim()
-        if trimmed != "" -> out.push(trimmed)
+        if trimmed != "" -> out.push(trimmed.copy())
     }
     out
 }
@@ -188,7 +188,7 @@ marked_lines: fn(source: String, table: String) -> [String] CoreRowsError! {
     out := [String]{}
     loop line in byte_slice(source, start, start + finish).split("\n") {
         row: line.trim()
-        if row.starts_with("{{") || row.starts_with("Collection") -> out.push(row)
+        if row.starts_with("{{") || row.starts_with("Collection") -> out.push(row.copy())
     }
     if out.len() == 0 -> return Err(rows_fail("{OPERATIONS_SOURCE_PATH}: `{table}` has no rows"))
     Ok(out)
@@ -233,7 +233,7 @@ render_operation_tables: fn(source: String) -> String CoreRowsError! {
         if !known {
             return Err(rows_fail("{OPERATIONS_SOURCE_PATH}: {receivers}.{name} names unknown law {law}"))
         }
-        families: if receivers == "Sequence" -> [String]{"List", "Iter"} else -> [String]{receivers}
+        families: if receivers == "Sequence" -> [String]{"List", "Iter"} else -> [String]{receivers.copy()}
         loop family in families {
             key: "{family}.{name}"
             if keys.contains(key) {
@@ -457,7 +457,7 @@ effect_rows: fn(source: String, path: String, machine: [EffectRow]?) -> [EffectR
 effect_kernel_list: fn(line: String, machine: [EffectRow], place: String) -> [String] CoreRowsError! {
     kernel := [String]{}
     loop part in byte_slice(line, "#FX(".len(), line.len() - 1).split(",") {
-        entry: part.trim()
+        entry: part.trim().copy()
         known: loop row in machine {
             if row.name == entry {
                 break true
@@ -486,7 +486,7 @@ effect_fact: fn(body: String?, cases: [String], member: String?) -> Bool? Never!
             term == "true" -> holds = true
             term == "false" -> {}
             term.starts_with("self == .") -> {
-                named: byte_slice(term, "self == .".len(), term.len())
+                named: byte_slice(term.copy(), "self == .".len(), term.len())
                 if member == None || !cases.contains(named) -> return None
                 if member == .Val(case_name) && case_name == named -> holds = true
             }

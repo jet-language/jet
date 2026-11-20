@@ -533,7 +533,7 @@ parse_diagnostic: fn(text: String) -> Dyn? {
     loop line in text.split("\n") {
         trimmed: line.trim()
         if !trimmed.starts_with("{{") -> next
-        candidate: json.parse(trimmed) ?? next
+        candidate: json.parse(trimmed.copy()) ?? next
         if at(candidate, "schema") == Dyn.Text("jet.report/v1") || !unset.contains(at(candidate, "code")) {
             return Val(candidate)
         }

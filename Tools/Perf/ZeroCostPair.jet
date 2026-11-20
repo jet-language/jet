@@ -141,8 +141,8 @@ run_of: fn(report: String) -> Run {
     cycles := -1
     loop line in report.split("\n") {
         fields: line.split(" ").to_list()
-        if fields[0] == "end" -> end = fields
         if fields[0] == "cycles" && fields.len() == 2 -> cycles = Int.parse(fields[1]) ?? -1
+        if fields[0] == "end" -> end = fields
     }
     if end.len() != 8 -> fail("the launcher's report has no end line:\n{report}")
     if end[1] != "0" || end[7] != "0" -> fail("a timed run exited {end[1]} (exec errno {end[7]})")

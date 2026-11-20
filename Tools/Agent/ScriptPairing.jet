@@ -236,7 +236,7 @@ js_imports: fn(repo: String, path: String) -[FS]> [String] Never! {
     loop line in text.lines() {
         trimmed: line.trim()
         if statement == "" && !trimmed.starts_with("import ") {
-            loaded: trimmed.partition("import(").tail.trim()
+            loaded: trimmed.copy().partition("import(").tail.trim()
             if !trimmed.starts_with("//") && (loaded.starts_with("'") || loaded.starts_with("\"")) {
                 specifier: loaded.slice(1, loaded.len()).partition(loaded.slice(0, 1)).head
                 if specifier.starts_with(".") -> out.push(files.normalize("{dir}/{specifier}"))

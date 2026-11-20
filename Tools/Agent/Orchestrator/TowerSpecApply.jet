@@ -75,7 +75,7 @@ apply: fn(s: Dyn, repo: String, writer: String, patches: String, go: Bool{false}
     changes := [String]{}
     rewrite: s.get("rewrite") ?? Dyn.object()
     loop key in rewrite.keys() {
-        at: by_n(crit, Dyn.Text(key), num) ?? return Err(err)
+        at: by_n(crit, Dyn.Text(key.copy()), num) ?? return Err(err)
         if text(crit[at], "status") != "open" {
             return Err("#{num} c{key} is {text(crit[at], "status")}")
         }

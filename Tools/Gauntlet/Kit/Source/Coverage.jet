@@ -185,7 +185,8 @@ load_corpus: fn(repo: String) -[FS, IO]> [CoverageProgram] CoverageError! {
             if language == "jet" || language == "jet-expert" || truthy_at(entry, "non_applicable/{language}") {
                 next
             }
-            peers.push(Twin{peer: language, path: Val(files.join(dir, language_source_dir(language)))})
+            path: files.join(dir, language_source_dir(language))
+            peers.push(Twin{peer: language.move(), path: Val(path)})
         }
         owners := [OwnerCard]{}
         if member(manifest, "loss_owners/{name}") == .Val(.Object(rows)) {
@@ -325,12 +326,13 @@ build_census: fn(programs: [CoverageProgram], report: Dyn, cells: [ScriptBenchCe
                 if reading == {
                     .NotApplicable -> {}
                     .Uncovered(reason) -> {
-                        uncovered.push(CoverageGap{source: program.source, program: program.name, cells: program.cells, peer: peer, metric: metric, reason: reason})
+                        uncovered.push(CoverageGap{source: program.source, program: program.name, cells: program.cells, peer: peer.copy(), metric: metric, reason: reason})
                     }
                     .Won -> { measured += 1 }
                     .Lost(values) -> {
                         measured += 1
-                        losses.push(CoverageLoss{source: program.source, program: program.name, cells: program.cells, peer: peer, metric: metric, jet: values.jet, peer_value: values.peer, ratio: values.ratio, owner: owner_of(program, metric)})
+                        owner: owner_of(program, metric)
+                        losses.push(CoverageLoss{source: program.source, program: program.name, cells: program.cells, peer: peer.copy(), metric: metric, jet: values.jet, peer_value: values.peer, ratio: values.ratio, owner: owner})
                     }
                 }
             }

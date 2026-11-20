@@ -218,7 +218,6 @@ Lane: struct {
     repo: String,
     log_dir: String,
     jet: String,
-    runtime_dir: String,
     object: String,
     evidence: [Dyn],
 }
@@ -284,11 +283,14 @@ parse_options: fn(args: [String]) -[Env, Exec, FS, IO]> Options Never! {
         if name == "--shard" && options.command != "run" -> return fail(USAGE)
         if name == "--shard" -> options.shard = value else {
             resolved: absolute(value)
-            if name == "--jet" -> options.jet = resolved
-            if name == "--manifest" -> options.manifest = resolved
-            if name == "--receipt" -> options.receipt = resolved
-            if name == "--out" -> options.out = resolved
-            if name == "--runtime" -> options.runtime = resolved
+            if {
+                name == "--jet" -> options.jet = resolved
+                name == "--manifest" -> options.manifest = resolved
+                name == "--receipt" -> options.receipt = resolved
+                name == "--out" -> options.out = resolved
+                name == "--runtime" -> options.runtime = resolved
+                else -> {}
+            }
         }
         at += 2
     }
@@ -1485,7 +1487,7 @@ run_transport: fn(entry: Dyn, repo: String, jet: String, log_dir: String, runtim
     files.create_dir_all(out) ?? return Err(problem("`{out}` cannot be created: {err}"))
     files.create_dir_all(log_dir) ?? return Err(problem("`{log_dir}` cannot be created: {err}"))
     staged: stage_toolchain(jet, runtime, "{log_dir}/toolchain") ?? return Err(err)
-    lane := Lane{id: id.copy(), out: out.copy(), repo: repo.copy(), log_dir: log_dir.copy(), jet: staged, runtime_dir: runtime.dir.copy(), object: runtime.object.copy(), evidence: [Dyn]{}}
+    lane := Lane{id: id.copy(), out: out.copy(), repo: repo.copy(), log_dir: log_dir.copy(), jet: staged, object: runtime.object.copy(), evidence: [Dyn]{}}
     if drive(lane, found) == {
         .Ok(_) -> {}
         .Err(failure) -> return {ran: Ran{code: 1, signal: None, timed_out: false, stdout: "", stderr: "{failure.message}\n"}, evidence: lane.evidence.copy()}
@@ -1839,7 +1841,7 @@ age_failures: fn(lane: &Lane, binary: String) -[Env, Exec, FS, IO, Time, Time.Wa
         capture_path: "{material}/{name}.capture.age"
         files.write_bytes(plain_path, plain) ?? return Err(problem("`{plain_path}` cannot be written: {err}"))
         files.write_bytes(cipher_path, cipher) ?? return Err(problem("`{cipher_path}` cannot be written: {err}"))
-        sealed: step_failures("seal {name}", execute(lane, binary, [String]{"seal", text_field(test, "identity"), plain_path, cipher_path, "{count}", capture_path}, lane.out.copy(), [Setting]{}, 0, 60000), "", "")
+        sealed: step_failures("seal {name}", execute(lane, binary, [String]{"seal", text_field(test, "identity"), plain_path, cipher_path, "{count}", capture_path.copy()}, lane.out.copy(), [Setting]{}, 0, 60000), "", "")
         if sealed.len() > 0 {
             failures.extend(sealed)
             next
@@ -2019,7 +2021,7 @@ generate: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Time.Wai
                 entry["status"] = Dyn.Text("BLOCKED")
                 entry["reason"] = Dyn.Text(reason.copy())
             }
-            entries.push(Dyn.Object(entry.copy()))
+            entries.push(Dyn.Object(entry.move()))
             next
         }
         entry := [String:Dyn]{
@@ -2038,7 +2040,7 @@ generate: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Time.Wai
         if reason != "" {
             entry["status"] = Dyn.Text("BLOCKED")
             entry["reason"] = Dyn.Text(reason.copy())
-            entries.push(Dyn.Object(entry.copy()))
+            entries.push(Dyn.Object(entry.move()))
             next
         }
         text: files.read("{repo}/{row.source}") ?? return fail("`{row.source}` cannot be read: {err}")
@@ -2053,7 +2055,7 @@ generate: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Time.Wai
         files.create_dir_all(cwd) ?? return fail("`{cwd}` cannot be created: {err}")
         files.write("{cwd}/registry.jet", body) ?? return fail("`{cwd}/registry.jet` cannot be written: {err}")
         files.write("{cwd}/package.jet", REGISTRY_PACKAGE) ?? return fail("`{cwd}/package.jet` cannot be written: {err}")
-        entries.push(Dyn.Object(entry.copy()))
+        entries.push(Dyn.Object(entry.move()))
     }
     kit: testkit_inventory(repo)
     kit_entry: "{repo}/{KIT_PACKAGE}/package.jet"
@@ -2274,7 +2276,7 @@ run_registries: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Ti
                 }
             }
         }
-        tally.entries.push(Dyn.Object(result.copy()))
+        tally.entries.push(Dyn.Object(result.move()))
         write_json(receipt_path, receipt_dyn("FAIL", header, tally, options.shard, entries.len()))
     }
     if current_head(repo) == {
@@ -2415,7 +2417,9 @@ run_entry: fn(result: &[String:Dyn], entry: Dyn, manifest: Dyn, repo: String, je
             if !child.timed_out && child.signal == None -> code = Dyn.Int(child.code)
             signal = signal_dyn(child.signal)
             failure = if child.timed_out || child.signal != None || child.code != 0 -> exit_problem("registry", child, timeout_ms) else -> ""
-            if key != "" -> runs[key] = PackageRun{command: command.copy(), code: code.copy(), signal: signal.copy(), stdout: stdout.copy(), stderr: stderr.copy(), failure: failure.copy()}
+            if key != "" {
+                runs[key] = PackageRun{command: command.copy(), code: code.copy(), signal: signal.copy(), stdout: stdout.copy(), stderr: stderr.copy(), failure: failure.copy()}
+            }
         }
     }
     files.write("{stem}.stdout", stdout) ?? return Err(problem("`{stem}.stdout` cannot be written: {err}"))

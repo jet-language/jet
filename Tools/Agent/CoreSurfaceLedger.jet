@@ -1719,7 +1719,7 @@ core_surface_inventory: fn(root: String, modules: [ModuleFact], module_paths: [S
         line: raw.trim()
         if line == "" || line.starts_with("//") -> next
         context: "{CORE_SURFACE_INVENTORY_PATH} line {index + 1}"
-        row: INVENTORY_ROW.match(line) ?? return Err(fail("{context} is not a fixed_sig, receivers or methods row"))
+        row: INVENTORY_ROW.match(line.copy()) ?? return Err(fail("{context} is not a fixed_sig, receivers or methods row"))
         kind: row.group(1) ?? ""
         name: row.group(2) ?? ""
         listed: loop item in (row.group(3) ?? "").split(",") -> item.trim()
@@ -3587,8 +3587,8 @@ core_api_inventory_evidence: fn(root: String, cache: &MetricsCache, row: Row, su
         if path == "" {
             return Err(fail("Core API workflow has no surface for {cell.language}: {row.id}"))
         }
-        arms[cell.language] = source_boundary_counts(root, cache, [String]{path}, cases) ?? return Err(err)
         lookups.push("surface:{path}")
+        arms[cell.language] = source_boundary_counts(root, cache, [String]{path}, cases) ?? return Err(err)
     }
     if entries(arms).len() == 0 -> return Err(fail("Core API workflow has no source arm: {row.id}"))
     concepts := [String]{"workflow:{row.id}", "container:{row.container}"}
@@ -4261,7 +4261,7 @@ validate_core_api_fixture_execution: fn(root: String, fixture: Dyn) -[FS]> Int L
                 return Err(fail("Core API fixture tool version is not pinned: {adapter}"))
             }
         }
-        current[adapter] = version
+        current[adapter] = version.copy()
         if !text_is(field(pinned, "toolVersions"), adapter, version) {
             return Err(fail("Core API fixture receipt disagrees with pinned tool: {key}"))
         }

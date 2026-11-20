@@ -539,8 +539,8 @@ execute: fn(context: Context, options: Options) -[Env, Exec, FS, Time, Time.Wait
     loop family in context.families {
         expected: files.read_bytes(family.expected_path) ?? return Err("{err}")
         loop variant in family.variants {
-            inspected := run_process(runner, ["full", compiler, "inspect", "compiler", "check", variant.source_path], root, options.timeout_ms)
-            direct := run_process(runner, ["full", compiler, "run", variant.source_path], root, options.timeout_ms)
+            inspected := run_process(runner, ["full", compiler.copy(), "inspect", "compiler", "check", variant.source_path], root, options.timeout_ms)
+            direct := run_process(runner, ["full", compiler.copy(), "run", variant.source_path], root, options.timeout_ms)
             output: text_or_empty(direct, "stdout").bytes()
             record := variant_record(root, family, variant)
             record["identity"] = identity_with_execution(variant.identity, direct, target, tools)

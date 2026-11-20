@@ -38,7 +38,6 @@ ServeRoot: struct {
 
 HeldDir: struct {
     directory: Directory,
-    stat: Stat,
 }
 
 HeldFile: struct {
@@ -221,7 +220,7 @@ open_entry: fn(root: ServeRoot, parent: Directory, candidate: String, name: Stri
             return Opened.Refused(400)
         }
         if !opened.is_dir -> return Opened.Refused(404)
-        return Opened.Dir(HeldDir{directory: directory, stat: opened})
+        return Opened.Dir(HeldDir{directory: directory})
     }
     if !before.is_file -> return Opened.Refused(400)
     reader: parent.open(name) ?? return open_failed(candidate)

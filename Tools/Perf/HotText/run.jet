@@ -179,7 +179,7 @@ run: fn() -> Never Err! {
         // own unless it runs in the twins' copy; that one also has an empty
         // store and names no toolchain tree, as a cold run out of tree.
         entered: files.join(work.path, "{index}.entered")
-        command := process.cmd([tracer, address_file, entered, "--", jet].concat(trace.argv)).env("XDG_CACHE_HOME", files.join(work.path, "cache-{index}"))
+        command := process.cmd([tracer.copy(), address_file.copy(), entered.copy(), "--", jet.copy()].concat(trace.argv)).env("XDG_CACHE_HOME", files.join(work.path, "cache-{index}"))
         if {
             trace.dir == "" -> {
                 project: files.join(work.path, "trace-{index}")

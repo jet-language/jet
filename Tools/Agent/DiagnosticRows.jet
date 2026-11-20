@@ -828,7 +828,7 @@ excluded_codes: fn(kit: String) -> [String] DiagnosticRowsError! {
     codes := [String]{}
     loop part in listed.split(",") {
         quoted: part.trim()
-        code: if quoted.starts_with("\"") && quoted.ends_with("\"") && quoted.count_bytes() > 2 -> text_before(text_after(quoted, "\""), "\"") else -> ""
+        code: if quoted.starts_with("\"") && quoted.ends_with("\"") && quoted.count_bytes() > 2 -> text_before(text_after(quoted.copy(), "\""), "\"") else -> ""
         if !report_code(code) {
             return Err(rows_fail("{KIT_UI_PATH}: kit_ui_excluded lists `{quoted}`, not a quoted code"))
         }
@@ -899,7 +899,7 @@ fixture_module: fn(source: String) -> Bool Never! {
     loop raw in source.split("\n") {
         line: raw.trim()
         if !line.starts_with("//") -> next
-        directive: text_after(line, "//").trim()
+        directive: text_after(line.copy(), "//").trim()
         if directive == "@fixture_module" || directive.starts_with("@fixture_module ") || directive.starts_with("@fixture_module\t") {
             return true
         }

@@ -68,12 +68,12 @@ peer_comparisons: fn(entry: Dyn, languages: Dyn, rows: Dyn, tiers: Dyn) -> Dyn {
             policy.any(fn(rule) { rule.tier == "run" }) -> "jet-aot-and-run"
             else -> "jet-aot"
         }
-        comparison["jet_configuration"] = configuration
+        comparison["jet_configuration"] = configuration.copy()
         comparison["jet_tiers_ready"] = Dyn.Bool(ready)
         comparison["required_tiers"] = Dyn.Array(required.map(fn(tier) { Dyn.Text(tier.copy()) }))
         comparison["tier_policy"] = tier_policy_object(policy)
         comparison["peer_sample"] = peer_sample(language, peer)
-        comparison["primary_metric"] = primary
+        comparison["primary_metric"] = primary.copy()
         comparison["metrics"] = Dyn.object()
         comparison["tiers"] = Dyn.object()
         comparison["verdicts"] = Dyn.object()
@@ -99,7 +99,7 @@ peer_comparisons: fn(entry: Dyn, languages: Dyn, rows: Dyn, tiers: Dyn) -> Dyn {
                 jet_metrics: member(jet_row, "metrics") ?? Dyn.Null,
                 jet_runtime: member(jet_row, "runtime") ?? Dyn.Null,
                 peer: peer,
-                configuration: configuration,
+                configuration: configuration.copy(),
             }
             cells := Dyn.object()
             loop metric in metrics {

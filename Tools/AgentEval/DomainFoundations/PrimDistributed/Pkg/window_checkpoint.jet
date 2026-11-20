@@ -36,7 +36,10 @@ run: fn() {
         window_key := "{event.key}:{window_start.to_string()}"
         state[window_key] = (state.get(window_key) ?? 0) + event.value
         processed += 1
-        if processed == 3 -> checkpoint = state.copy()
+        // The snapshot copies entry by entry, so `state` keeps a store of its own.
+        if processed == 3 {
+            loop (key, total) in state -> checkpoint[key.copy()] = total
+        }
         print("event key={event.key} ts={event.timestamp} watermark={watermark}")
     }
 

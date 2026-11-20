@@ -1072,7 +1072,6 @@ render_trap_messages: fn(registry: String, routes: String, debug: String) -> Tra
 TrapWritePlan: struct {
     write_source: Bool,
     write_defects: Bool,
-    message: String,
 }
 
 // What one run writes. The ordinary projection is frozen under
@@ -1090,9 +1089,9 @@ trap_messages_plan: fn(check: Bool, defects_only: Bool, source_current: Bool, de
         if !defects_current {
             return Err(generator_fail("TrapDefectMessages.jet is stale; run jet Tools/Agent/RuntimeGenerators.jet"))
         }
-        return Ok(TrapWritePlan{write_source: false, write_defects: false, message: "runtime trap messages and private host-defect rows are current"})
+        return Ok(TrapWritePlan{write_source: false, write_defects: false})
     }
-    Ok(TrapWritePlan{write_source: !defects_only && !source_current, write_defects: !defects_current, message: ""})
+    Ok(TrapWritePlan{write_source: !defects_only && !source_current, write_defects: !defects_current})
 }
 
 // The (word, count) lines of generated function `name` written through `sink`.
@@ -1324,7 +1323,7 @@ signature_parameters: fn(signature: String) -> [String] Never! {
     if close <= 0 -> return items
     loop item in byte_slice(signature, 1, close).split(",") {
         trimmed: item.trim()
-        if trimmed != "" -> items.push(trimmed)
+        if trimmed != "" -> items.push(trimmed.copy())
     }
     items
 }
@@ -1509,7 +1508,7 @@ read_runtime_sources: fn() -[FS]> [RuntimeSource] GeneratorError! {
         path: raw.trim()
         if path == "" || path.starts_with("#") -> next
         if files.read(path) == {
-            .Ok(text) -> { sources.push(RuntimeSource{path: path, text: text}) }
+            .Ok(text) -> { sources.push(RuntimeSource{path: path.copy(), text: text}) }
             .Err(error) -> {
                 problems.push("{RUNTIME_SOURCES_PATH} names {path}, which cannot be read: {error}")
             }
@@ -2632,7 +2631,7 @@ dyn_kind_rows: fn(source: String) -> [DynKind] GeneratorError! {
     }
     rows := [DynKind]{}
     loop line in byte_slice(body, 0, close).split("\n") {
-        arm: line.trim()
+        arm: line.trim().copy()
         arrow: arm.find(" -> ")
         if !arm.starts_with(".") || arrow < 0 {
             return Err(generator_fail("unsupported __dyn_kind arm: {arm}"))
@@ -2843,7 +2842,7 @@ render_fault_reports: fn() -[Exec, FS]> String GeneratorError! {
     problems := [String]{}
     loop report in fault_report_sources() {
         object: files.join(scratch, "report.o")
-        assembled: process.cmd([String]{"as", "--64", "-o", object, report.path}).run() ?? {
+        assembled: process.cmd([String]{"as", "--64", "-o", object.copy(), report.path}).run() ?? {
             problems.push("{report.path}: `as` cannot start: {err}")
             next
         }
@@ -3234,13 +3233,14 @@ process_grant_rows: fn(source: String) -> [ProcessGrant] GeneratorError! {
             closed = true
             break
         }
-        if !trimmed.starts_with(PROCESS_GRANT_ROW) -> return Err(unsupported_grant_row(trimmed))
-        name: grant_text_field(trimmed, "name") ?? return Err(unsupported_grant_row(trimmed))
-        right: grant_text_field(trimmed, "right") ?? return Err(unsupported_grant_row(trimmed))
-        workspace: grant_bool_field(trimmed, "workspace") ?? return Err(unsupported_grant_row(trimmed))
-        program: grant_bool_field(trimmed, "program") ?? return Err(unsupported_grant_row(trimmed))
+        grant: trimmed.copy()
+        if !grant.starts_with(PROCESS_GRANT_ROW) -> return Err(unsupported_grant_row(grant))
+        name: grant_text_field(grant, "name") ?? return Err(unsupported_grant_row(grant))
+        right: grant_text_field(grant, "right") ?? return Err(unsupported_grant_row(grant))
+        workspace: grant_bool_field(grant, "workspace") ?? return Err(unsupported_grant_row(grant))
+        program: grant_bool_field(grant, "program") ?? return Err(unsupported_grant_row(grant))
         if name == "" || leading_name(name) != name || right == "" {
-            return Err(unsupported_grant_row(trimmed))
+            return Err(unsupported_grant_row(grant))
         }
         if program && leading_name(right) != right {
             return Err(generator_fail("{PROCESS_GRANTS_SOURCE_PATH}: the program grant `{right}` must be a bare root"))

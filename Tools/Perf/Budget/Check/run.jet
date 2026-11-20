@@ -856,7 +856,7 @@ gate_limits: fn(doc: String, path: String) -> GateLimits CheckError! {
         }
         if !line.starts_with("|") -> break
         cells := [String]{}
-        loop cell in line.split("|") -> cells.push(cell.trim())
+        loop cell in line.copy().split("|") -> cells.push(cell.trim())
         if cells.len() != 4 {
             return Err(gate_error("{path}: the limit table row `{line}` is not `| measure | limit |`"))
         }
@@ -888,7 +888,7 @@ measure_hello_in: fn(options: HelloOptions, folder: String) -> HelloMeasure Chec
     starts := [Int]{}
     loop starts.len() < options.runs {
         started: time.instant()
-        receipt: process.cmd([String]{executable}).output_limit(OUTPUT_LIMIT).run() ?? return Err(gate_error("cannot run {executable}: {err}"))
+        receipt: process.cmd([String]{executable.copy()}).output_limit(OUTPUT_LIMIT).run() ?? return Err(gate_error("cannot run {executable}: {err}"))
         ns: started.elapsed().ns
         if !receipt.success {
             return Err(gate_error("{executable} exited {receipt.code}: {receipt.errors.trim().last_lines(6).join(" | ")}"))

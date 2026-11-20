@@ -264,7 +264,7 @@ manifest_deps: fn(text: String) -> [String] Never! {
     inside := false
     closed := false
     loop line in text.lines() {
-        current := line
+        current := line.copy()
         if !inside {
             if !line.starts_with("deps:") -> next
             rest: line.removeprefix("deps:").trim()
@@ -724,7 +724,7 @@ member_imports: fn(whole: String, path: String, members: String, seen: &[String:
     parts: members.split(",").to_list()
     bindings := [String]{}
     loop part in parts {
-        name: part.trim()
+        name: part.trim().copy()
         if name == "" {
             bindings.push("")
             next

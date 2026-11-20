@@ -314,7 +314,6 @@ Case: struct {
 
 // A tool entry as the judge reads it; `problems` keep it from being judged.
 Entry: struct {
-    name: String,
     dir: String,
     original: String,
     twin: String,
@@ -422,7 +421,7 @@ one_word: fn(text: String) -> Bool Never! {
 // being judged.
 read_entry: fn(repo: String, name: String) -[FS]> Entry Never! {
     dir: "{ENTRIES_ROOT}/{name}"
-    entry := Entry{name: name.copy(), dir: dir.copy(), original: "", twin: "", fixtures: "", cases: [Case]{}, token_gaps: [String]{}, programs: [[String]]{[String]{}, [String]{}}, problems: [String]{}}
+    entry := Entry{dir: dir.copy(), original: "", twin: "", fixtures: "", cases: [Case]{}, token_gaps: [String]{}, programs: [[String]]{[String]{}, [String]{}}, problems: [String]{}}
     text: files.read(files.join(repo, "{dir}/entry.json")) ?? {
         entry.problems.push("`{dir}/entry.json` cannot be read: {err}")
         return entry
@@ -1169,25 +1168,25 @@ imports_of: fn(text: String, language: Language) -> [String] Never! {
             .JavaScript -> {
                 written: if {
                     !(line.starts_with("import") || line.starts_with("export") || line.starts_with("}}")) -> ""
-                    line.contains(" from ") -> quoted(line.partition(" from ").tail.trim())
-                    else -> quoted(line.removeprefix("import").trim())
+                    line.contains(" from ") -> quoted(line.copy().partition(" from ").tail.trim())
+                    else -> quoted(line.copy().removeprefix("import").trim())
                 }
                 if written.starts_with("./") || written.starts_with("../") -> written else -> ""
             }
             .Shell -> {
-                word: if line.starts_with(". ") || line.starts_with("source ") -> line.partition(" ").tail.trim().replace("\"", "").replace("'", "") else -> ""
+                word: if line.starts_with(". ") || line.starts_with("source ") -> line.copy().partition(" ").tail.trim().replace("\"", "").replace("'", "") else -> ""
                 if {
                     word.starts_with("$(dirname $0)/") -> word.removeprefix("$(dirname $0)/")
                     word.starts_with("$(dirname ${{BASH_SOURCE[0]}})/") -> word.removeprefix("$(dirname ${{BASH_SOURCE[0]}})/")
                     else -> ""
                 }
             }
-            .Python -> python_import(line)
+            .Python -> python_import(line.copy())
             .Jet -> {
                 if line == "use {{" -> in_use_block = true
                 if in_use_block && line == "}}" -> in_use_block = false
                 named: if {
-                    in_use_block || line.starts_with("use ") -> quoted(line.partition(":").tail.trim())
+                    in_use_block || line.starts_with("use ") -> quoted(line.copy().partition(":").tail.trim())
                     else -> ""
                 }
                 if named == "" || named.ends_with(".jet") -> named else -> "{named}.jet"
@@ -1211,7 +1210,7 @@ package_deps: fn(text: String) -> [String] Never! {
         }
         if !in_deps -> next
         if line.starts_with("}}") -> return out
-        pair: line.removesuffix(",").partition(":")
+        pair: line.copy().removesuffix(",").partition(":")
         written: pair.tail.trim()
         path: if written.starts_with("\"") -> quoted(written) else -> written
         if path != "" -> out.push("{pair.head.trim()}\t{path}")
@@ -1233,7 +1232,7 @@ package_names: fn(text: String, name: String) -> [String] Never! {
         }
         if in_use_block && line == "}}" -> in_use_block = false
         if !in_use_block && !line.starts_with("use ") -> next
-        bare: line.removeprefix("use ").trim()
+        bare: line.copy().removeprefix("use ").trim()
         target: if bare.starts_with(prefix) -> bare else -> bare.partition(":").tail.trim()
         if !target.starts_with(prefix) -> next
         rest: target.removeprefix(prefix)
@@ -1570,18 +1569,18 @@ namespace_aliases: fn(text: String, language: Language) -> [String] Never! {
         if language == .Jet {
             if line == "use {{" -> in_use_block = true
             if in_use_block && line == "}}" -> in_use_block = false
-            split: line.removeprefix("use ").partition(":")
+            split: line.copy().removeprefix("use ").partition(":")
             if (in_use_block || line.starts_with("use ")) && quoted(split.tail.trim()) != "" {
                 out.push(split.head.trim())
             }
         }
         if language == .JavaScript && line.starts_with("import * as ") {
-            split: line.removeprefix("import * as ").partition(" from ")
+            split: line.copy().removeprefix("import * as ").partition(" from ")
             spec: quoted(split.tail.trim())
             if spec.starts_with("./") || spec.starts_with("../") -> out.push(split.head.trim())
         }
         if language == .Python && line.starts_with("from .") {
-            split: line.removeprefix("from ").partition(" import ")
+            split: line.copy().removeprefix("from ").partition(" import ")
             if split.head.trim().replace(".", "") != "" -> next
             loop name in split.tail.replace("(", "").replace(")", "").split(",").to_list() {
                 bound: name.trim().rpartition(" as ").tail.trim()

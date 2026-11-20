@@ -152,7 +152,7 @@ run: fn() {
         writer.flush() ?? process.fail(1, "{err}")
         // Core sets whole-second times only; touch keeps the stamp's millisecond.
         when: stamp + (if job.shared -> 0 else -> 1000)
-        touched: process.cmd(["touch", "-d", "@{when /% 1000}.{"{when % 1000}".pad_start(3, "0")}", pending]).run() ?? process.fail(1, "touch cannot start: {err}")
+        touched: process.cmd(["touch", "-d", "@{when /% 1000}.{"{when % 1000}".pad_start(3, "0")}", pending.copy()]).run() ?? process.fail(1, "touch cannot start: {err}")
         if touched.code != 0 -> process.fail(1, "touch {pending}: {touched.errors.trim()}")
         files.rename(pending, file) ?? process.fail(1, "{err}")
         print(file)

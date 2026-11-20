@@ -209,7 +209,7 @@ run: fn() -> Never Err! {
     if built.all(fn(ok) { ok }) {
         loop link in
             [{arm: "O0", libraries: [o0, remaining]}, {arm: "O1", libraries: [o1, remaining]}, {arm: "Rust", libraries: [rust]}] {
-            linked.push(step(steps, out, tree, "link-{link.arm}", ["cc", "-fno-lto", driver].concat(link.libraries).concat(["-lpthread", "-ldl", "-lm", "-o", files.join(out, link.arm)])))
+            linked.push(step(steps, out, tree, "link-{link.arm}", ["cc", "-fno-lto", driver.copy()].concat(link.libraries).concat(["-lpthread", "-ldl", "-lm", "-o", files.join(out, link.arm)])))
         }
     }
     files.write(files.join(out, "build.json"), "{json.stringify(Build{pins: pins.copy(), steps: steps}, 2)}\n")  // copy: result.json repeats the pins
@@ -222,7 +222,7 @@ run: fn() -> Never Err! {
         loop j in 0..<ARMS.len() {
             k: (round + j) %% ARMS.len()
             started: time.instant()
-            ended: spawn(process.cmd(["taskset", "-c", cpu, arms[k].binary]).output_limit(RUN_OUTPUT).timeout(time.duration_seconds(RUN_TIMEOUT_SECONDS)), "taskset")
+            ended: spawn(process.cmd(["taskset", "-c", cpu.copy(), arms[k].binary]).output_limit(RUN_OUTPUT).timeout(time.duration_seconds(RUN_TIMEOUT_SECONDS)), "taskset")
             elapsed: started.elapsed().ns
             ok: ended.rc == Val(0) && ended.output == EXPECTED && ended.errors == ""
             files.append_all(samples, "{json.stringify(Sample{arm: arms[k].name.copy(), round: round + 1, cpu: cpu.copy(), wall_ns: "{elapsed}", rc: ended.rc.encode(), signal: ended.signal.encode(), stdout: ended.output.copy(), stderr: ended.errors.copy(), error: ended.error.copy(), verdict: if ok -> "PASS" else -> "WRONG"}, 0)}\n")  // copy: the arm and the run keep their text

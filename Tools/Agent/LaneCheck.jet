@@ -722,10 +722,11 @@ runtime_sources: fn(repo: String) -[FS]> {paths: [String], problem: String} Neve
     loop raw in text.split("\n") {
         line: raw.trim()
         if line == "" || line.starts_with("#") -> next
-        if paths.contains(line) {
+        owned: line.copy()
+        if paths.contains(owned) {
             return {paths: [String]{}, problem: "{RUNTIME_SOURCES} lists {line} twice"}
         }
-        paths.push(line.copy())
+        paths.push(owned)
     }
     if paths.len() == 0 -> return {paths: paths, problem: "{RUNTIME_SOURCES} lists no source"}
     {paths: paths, problem: ""}

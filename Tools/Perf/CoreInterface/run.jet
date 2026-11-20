@@ -87,15 +87,14 @@ Arm: struct {
     root: String,
 }
 
-// One untraced run: wall (ns), user and sys (µs), own peak (KiB), major and
-// minor faults.
+// One untraced run: wall (ns), user and sys (µs), own peak (KiB) and major
+// faults.
 Sample: struct {
     wall_ns: Int,
     user_us: Int,
     sys_us: Int,
     peak_kib: Int,
     major: Int,
-    minor: Int,
 }
 
 Total: struct {
@@ -389,7 +388,6 @@ sample: fn(jet: String, gnu: String, cpus: [Int], work: String, dir: String, arm
             sys_us: (after.system.ns - used.system.ns) /% 1000,
             peak_kib: Int.parse(fields[0]) ?? 0,
             major: Int.parse(fields[1]) ?? 0,
-            minor: Int.parse(fields[2]) ?? 0,
         },
     )
 }
