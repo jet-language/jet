@@ -1,0 +1,33 @@
+use process: core.process
+
+half: fn(n: Int) -> Int { n /% 2 }
+
+spin: fn(n: Int) -> Int {
+    total := 0
+    loop i in 0..<n -> total += i
+    total
+}
+
+// The compiler's shape: the work runs on a thread of its own, other tasks
+// busy on theirs, and the worker ends the program with status 1, as a
+// failed check does, while the main thread waits for it.
+work: fn(n: Int) -> Int {
+    loop k in 0..<3 {
+        spinning: task spin(1000000000 + k)
+        spinning.detach()
+    }
+    total := 0
+    loop i in 0..<n -> total += half(i)
+    print("total {total}")
+    process.exit(1)
+    total
+}
+
+run: fn() {
+    results := [Int]{}
+    task.group big(stack: 201326592) {
+        worker: task work(7)
+        results.push(worker.join() ?? panic("the worker failed"))
+    }
+    print("{results[0]}")
+}

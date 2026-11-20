@@ -1,0 +1,44 @@
+# A `jet debug` killed however it ends takes its helper and its program
+# with it, the program stopped or running: the helper, the program's
+# tracer, gets SIGKILL when the session's thread that started it ends
+# (PR_SET_PDEATHSIG), and the kernel kills the program, every thread of
+# it, when its tracer ends (PTRACE_O_EXITKILL). A running program keeps
+# its helper waiting on it, never reading the session's channel, so the
+# channel closing alone left that helper, and the program, behind.
+# left.sh records the processes below the session, then counts those
+# still there once it is killed.
+fixture: KilledSessionLeavesNothing.fixture
+env: NO_COLOR=1
+session stopped line: jet debug prog.jet
+send stopped: "break prog.jet:4"
+send stopped: "c"
+recv stopped line until ~ "Breakpoint hit  prog.jet:4  in spin()" timeout 300s # the image builds and the program runs to the stop
+step: sh left.sh record {pid:stopped}
+exit: 0
+stdout: ~ "program: t\n" # the program is stopped at the breakpoint
+stdout: !~ "below: 0\n" # the session has its helper and the program below it
+signal stopped: KILL
+close stopped
+exit: any # the case's KILL ends the session
+step: sh left.sh count
+exit: 0
+stdout: = "left: 0\n" # nothing below the stopped session outlives it
+session running line: jet debug prog.jet
+send running: "break prog.jet:4"
+send running: "c"
+recv running line until ~ "Breakpoint hit  prog.jet:4  in spin()" timeout 300s # the program runs to the stop
+send running: "delete 1"
+recv running line until ~ "Deleted breakpoint 1" timeout 30s
+send running: "c"
+step: sleep 1
+exit: 0
+step: sh left.sh record {pid:running}
+exit: 0
+stdout: ~ "program: R\n" # the program runs on, its helper waiting on it
+stdout: !~ "below: 0\n" # the session has its helper and the program below it
+signal running: KILL
+close running
+exit: any # the case's KILL ends the session
+step: sh left.sh count
+exit: 0
+stdout: = "left: 0\n" # nothing below the running session outlives it
