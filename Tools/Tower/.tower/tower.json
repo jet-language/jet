@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112620,
+    "rev": 112625,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -76790,6 +76790,51 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-20T11:03:12.575Z"
+        },
+        {
+          "n": 14,
+          "text": "jet perf counts the user-mode retired instructions and cycles of any jet command or built binary, not only of a `jet perf run x.jet` program, so Tools/Perf/CompileThroughput (--against and --batch) drops `perf stat`; the counting surface goes on a ballot first if no existing jet perf form fits. Proof: CompileThroughput runs with no external profiler and its counts match perf stat within 1% on one revision.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-20T12:07:12.318Z"
+        },
+        {
+          "n": 15,
+          "text": "The counting runtime allocator facts of a built program (allocations per operation, peak live heap) are read with Jet tools at process exit, by jet debug stopping at the exit or by jet perf reporting the totals, so Tools/Perf/ReadInto/Memory.jet drops gdb. Proof: Memory.jet runs with no external debugger and reports the same numbers on both Jet arms.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-20T12:07:13.254Z"
+        },
+        {
+          "n": 16,
+          "text": "A jet perf syscall view traces the system calls of any jet command or built program with their arguments (opened paths, clone flags, munmap at exit, network calls), extending #6841 c72 beyond Jet programs, so Tools/Perf/CoreStrace and the cases CLICompilerSpeed x2, ControlAndData, JetpackJetOS x2, Report and TaskgroupStack drop strace. Proof: each of those runs with no external tracer and checks the same facts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-20T12:07:14.264Z"
+        },
+        {
+          "n": 17,
+          "text": "Jet tools list a built image symbols and segment headers and disassemble a named function of a built image (the D-DISASM1 listing used without a live session), so Tools/Perf/CodegenCeiling.jet and the cases SingleThreadRc x6, Perf zone x4 (hot.sh), SimdWitness and AllocatorFamilies drop objdump. Proof: each runs with no external disassembler and checks the same facts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-20T12:07:15.105Z"
+        },
+        {
+          "n": 18,
+          "text": "The jet perf refusal when the kernel offers no performance counters is tested without strace fault injection: the PerfRun cases reach the refusal through a supported test seam (for example a seccomp filter the case kit installs) and check the same message. Proof: jet test Compiler --profile cases --filter PerfRun/ with no strace.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-20T12:07:15.922Z"
         }
       ],
       "refs": [],
@@ -76797,9 +76842,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-20T11:23:55.145Z",
+      "updated": "2026-11-20T12:07:15.922Z",
       "updatedBy": "Main",
-      "criteriaLastN": 13
+      "criteriaLastN": 18
     }
   ],
   "decisions": [
@@ -136923,6 +136968,76 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-20T12:07:15.922Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "18 criteria, soft limit 6: a dogfooding gap found by the c1 guard sweep; each keeps one allowlist row alive until met"
+    },
+    {
+      "at": "2026-11-20T12:07:15.922Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#18 The jet perf refusal when the kernel offers no performance c"
+    },
+    {
+      "at": "2026-11-20T12:07:15.105Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "17 criteria, soft limit 6: a dogfooding gap found by the c1 guard sweep; each keeps one allowlist row alive until met"
+    },
+    {
+      "at": "2026-11-20T12:07:15.105Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#17 Jet tools list a built image symbols and segment headers and"
+    },
+    {
+      "at": "2026-11-20T12:07:14.264Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "16 criteria, soft limit 6: a dogfooding gap found by the c1 guard sweep; each keeps one allowlist row alive until met"
+    },
+    {
+      "at": "2026-11-20T12:07:14.264Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#16 A jet perf syscall view traces the system calls of any jet c"
+    },
+    {
+      "at": "2026-11-20T12:07:13.254Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "15 criteria, soft limit 6: a dogfooding gap found by the c1 guard sweep; each keeps one allowlist row alive until met"
+    },
+    {
+      "at": "2026-11-20T12:07:13.254Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#15 The counting runtime allocator facts of a built program (all"
+    },
+    {
+      "at": "2026-11-20T12:07:12.318Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "14 criteria, soft limit 6: a dogfooding gap found by the c1 guard sweep; each keeps one allowlist row alive until met"
+    },
+    {
+      "at": "2026-11-20T12:07:12.318Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#14 jet perf counts the user-mode retired instructions and cycle"
+    },
     {
       "at": "2026-11-20T11:50:59.230Z",
       "by": "Main",
