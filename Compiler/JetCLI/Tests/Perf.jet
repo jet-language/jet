@@ -4,6 +4,7 @@ use {
     jet_backend.[X64DebugEncoding, X64ImageFunction, X64Jetline, X64JetlineFunction, X64LineRow, x64_jetline_rows]
     jet_cli.[
         JET_CLI_PERF_OBJECT_SOCKET,
+        JET_CLI_PERF_SAMPLE_US,
         JetCLIPerfAttachCPU,
         JetCLIPerfCausalPlace,
         JetCLIPerfCausalTasks,
@@ -25,6 +26,7 @@ use {
         JetCLIPerfLineTotals,
         JetCLIPerfObservation,
         JetCLIPerfPlotTotal,
+        JetCLIPerfProfileRow,
         JetCLIPerfRetained,
         JetCLIPerfSpawn,
         JetCLIPerfTimed,
@@ -32,6 +34,7 @@ use {
         JetCLIPerfWake,
         JetCLIPerfZoneSampled,
         JetCLIPerfZoneTotal,
+        JetCLIPerfZonesWindow,
         jet_cli_canvas_profile_instructions,
         jet_cli_perf_attach_closed,
         jet_cli_perf_attach_keep_window,
@@ -41,6 +44,7 @@ use {
         jet_cli_perf_capture_bytes,
         jet_cli_perf_capture_source,
         jet_cli_perf_file_pid,
+        jet_cli_perf_flame_profile,
         jet_cli_perf_heap_retain,
         jet_cli_perf_heap_retention_lines,
         jet_cli_perf_heap_types,
@@ -56,16 +60,20 @@ use {
         jet_cli_perf_observed,
         jet_cli_perf_pc_json,
         jet_cli_perf_pc_words,
+        jet_cli_perf_pprof_profile,
+        jet_cli_perf_pprof_read,
         jet_cli_perf_profile_fold,
         jet_cli_perf_profile_summary,
         jet_cli_perf_records_section,
         jet_cli_perf_sampler_reason,
+        jet_cli_perf_sample_us,
         jet_cli_perf_samples_count,
         jet_cli_perf_samples_profile,
         jet_cli_perf_sites_text,
         jet_cli_perf_source,
         jet_cli_perf_source_position,
         jet_cli_perf_source_profile,
+        jet_cli_perf_spans_window,
         jet_cli_perf_syscalls_section,
         jet_cli_perf_system_read,
         jet_cli_perf_tasks_section,
@@ -666,6 +674,111 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     json: String.from_bytes(canonical_json_bytes(capture.receipts[capture.receipts.len() - 1].value)) ?? panic("the section is UTF-8")
     assert(json.starts_with(`{"cut":"the spans file reached its 16 MiB bound, so the rows after this were dropped","frames":`))
     assert(json.contains(`"name":"solve"`))
+}
+
+// An attach's zones window ends in its row (the runtime's
+// perf_flight_window_close): its opening and end, then five words, the
+// interval its samples stand for, its CPU time, its handlers' time, one
+// signal's delivery and its lost records. It is no trace row, and the rows
+// after it still are.
+#Test("a zones window's row is read for its interval and cost, and the rows beside it stay trace rows") {
+    row := jet_cli_perf_test_words([Int]{1000, 4000, 0, 40 | (6 << 32), 125, 375000, 3000, 1000, 2})
+    row.extend(jet_cli_perf_test_words([Int]{1293, 3293, 7, 5 | (1 << 32)}))
+    row.extend("solve".bytes())
+    window: jet_cli_perf_spans_window(row) ?? panic("the row names a window")
+    assert_eq(window.start_ns, 1000)
+    assert_eq(window.end_ns, 4000)
+    assert_eq(window.interval_us, 125)
+    assert_eq(window.cpu_ns, U64{375000})
+    assert_eq(window.handler_ns, U64{3000})
+    assert_eq(window.delivery_ns, U64{1000})
+    assert_eq(window.lost, U64{2})
+    assert(jet_cli_perf_spans_window(jet_cli_perf_test_words([Int]{1293, 3293, 7, 0 | (1 << 32)})) == None, "a file of zones alone names no window")
+    path: "{perf_test_sys.temp_dir()}/jet-perf-zone-window-{perf_test_process.current_pid()}.spans"
+    perf_test_files.write_bytes(path, row) ?? panic("the spans file: {err}")
+    capture := jet_cli_perf_capture_source("fib.jet", "fib: fn() -> Int {{ 1 }}", [JetCLIPerfObservation]{}, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    spans: capture.spans.len()
+    jet_cli_perf_log_spans_read(capture, path, "fib.jet", 0, [JetCLIPerfTimed]{})
+    assert_eq(capture.spans.len(), spans + 1)
+    assert_eq(capture.spans[spans].kind, "zone")
+    assert_eq(capture.spans[spans].start_ns, Val(U64{1293}))
+}
+
+// An attach's zones window file holds the records its program made while
+// it was open, sampled every 125 microseconds of CPU time, and those a
+// late handler wrote at the flight recorder's interval around it: only the
+// samples stamped inside the window count, each for the window's interval,
+// and its row gives the sampler's cost.
+#Test("a zones window's file counts only the samples stamped inside the window, at its interval and cost") {
+    table: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{X64JetlineFunction{low: 4096, high: 4352, name: "fib", file: "fib.jet", dir: "", decl: 5, rows: 0, rows_end: 0}}}
+    functions: [X64ImageFunction]{X64ImageFunction{start: 4096, size: 256, name: "fib.fib"}}
+    three: 3 << 48
+    words: jet_cli_perf_test_words(
+        [Int]{
+            // Before the window opened.
+            4112 | three,
+            900,
+            7,
+            // Inside it.
+            4112 | three,
+            1500,
+            7,
+            4112 | three,
+            2500,
+            7,
+            4112 | three,
+            4000,
+            9,
+            // After it closed.
+            4112 | three,
+            4001,
+            7,
+            // Before zones ever turned on.
+            4112 | three,
+            -1,
+            7,
+        },
+    )
+    window: JetCLIPerfZonesWindow{start_ns: 1000, end_ns: 4000, interval_us: 125, cpu_ns: U64{375000}, handler_ns: U64{3000}, delivery_ns: U64{1000}, lost: U64{2}}
+    sampled: jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words, 0, window: Val(window))
+    assert_eq(sampled.total, U64{3})
+    assert_eq(sampled.signals, U64{3})
+    assert_eq(sampled.unwindowed, U64{3})
+    assert_eq(sampled.timed.len(), 3)
+    assert_eq(sampled.interval_us, 125)
+    assert_eq(sampled.records_lost, U64{2})
+    text: "\n\n\n\nfib: fn(n: Int) -> Int {{ n }}\n"
+    profile: jet_cli_perf_samples_profile(jet_cli_perf_source("fib.jet", text), sampled) ?? panic("fib's line holds samples")
+    assert(profile.reason.starts_with("one CPU-time sample per 125 microseconds of each thread's CPU time"), profile.reason)
+    assert(profile.reason.contains("; it kept 3 of the 3 samples that 0 ms of CPU time under sampling gives"), profile.reason)
+    assert(profile.reason.contains("; 3 samples the zones window's file held from outside the window count nowhere"), profile.reason)
+    assert_eq(profile.overhead_status, "measured")
+    assert_eq(profile.overhead_ns, Val(U64{6000}))
+    // Without a window, the same file's samples all count, at a run's interval.
+    again: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{X64JetlineFunction{low: 4096, high: 4352, name: "fib", file: "fib.jet", dir: "", decl: 5, rows: 0, rows_end: 0}}}
+    all: jet_cli_perf_samples_count(again, [X64ImageFunction]{X64ImageFunction{start: 4096, size: 256, name: "fib.fib"}}, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words, 0)
+    assert_eq(all.total, U64{6})
+    assert_eq(all.interval_us, JET_CLI_PERF_SAMPLE_US)
+}
+
+// A trace's CPU-time samples stand for the interval its `perf` receipt
+// names: an attach's flight ring 10000 microseconds each, not a run's 125.
+// The view and the pprof export charge them at it; a trace that names none
+// is charged no CPU time.
+#Test("CPU-time samples are charged at the interval the trace's perf receipt names, and at none without one") {
+    perf: `{"name":"perf","value":{"capture":{"sampling":{"interval_us":10000}}}}`
+    trace: canonical_json_parse("{{\"content\":{{\"receipt_sections\":[{perf}]}}}}\n".bytes()) ?? panic(err.message)
+    assert(jet_cli_perf_sample_us(trace) == Val(10000))
+    lines: jet_cli_perf_flame_profile([JetCLIPerfProfileRow]{JetCLIPerfProfileRow{symbol: "live.jet#tick", clock: "cpu", weight: 3, line: Val(13), inclusive: None, allocations: None, events: ""}}, jet_cli_perf_sample_us(trace))
+    assert_eq(lines[0], "live.jet#tick profile:cpu samples=3 cpu_us=30000 share=100%")
+    assert_eq(lines[1], "  line 13 samples=3 cpu_us=30000")
+    exported: jet_cli_perf_pprof_read(jet_cli_perf_pprof_profile(trace)) ?? panic(err.message)
+    assert(exported.interval_us == Val(10000))
+    bare: canonical_json_parse("{{\"content\":{{\"receipt_sections\":[]}}}}\n".bytes()) ?? panic(err.message)
+    assert(jet_cli_perf_sample_us(bare) == None)
+    uncharged: jet_cli_perf_flame_profile([JetCLIPerfProfileRow]{JetCLIPerfProfileRow{symbol: "live.jet#tick", clock: "cpu", weight: 3, line: Val(13), inclusive: None, allocations: None, events: ""}}, jet_cli_perf_sample_us(bare))
+    assert_eq(uncharged[0], "live.jet#tick profile:cpu samples=3 share=100%")
+    assert((jet_cli_perf_pprof_read(jet_cli_perf_pprof_profile(bare)) ?? panic(err.message)).interval_us == None)
 }
 
 // A killed profiled program's files are swept by the process their name

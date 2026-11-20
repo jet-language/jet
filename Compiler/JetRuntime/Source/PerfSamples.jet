@@ -351,7 +351,9 @@ perf_samples_sides := I64{0}
 // 1 while a handler keeps its records in its buffer's side, to write them
 // once PERF_SAMPLES_OUT_BYTES of them fill it: under `jet perf run`, whose
 // file the session reads after the run, from the start to the exit, which
-// writes what the sides hold (perf_samples_flush). The flight recorder's
+// writes what the sides hold (perf_samples_flush), and in a flight
+// recorder's zones window, whose close writes them to the window file
+// (perf_flight_window_close). Outside a window the flight recorder's
 // records are datagrams, each written as it is made.
 perf_samples_buffered := I64{0}
 
@@ -362,8 +364,16 @@ perf_samples_lens_mask := I64{0}
 
 // The microseconds of a thread's CPU time each sample stands for:
 // PERF_SAMPLES_INTERVAL_US, or PERF_FLIGHT_INTERVAL_US for the flight
-// recorder (perf_flight_open).
+// recorder (perf_flight_open) outside an attach's zones window, in which it
+// is PERF_SAMPLES_INTERVAL_US (perf_flight_window_open). A thread arms its
+// timer at it as it starts (perf_samples_thread_start), and every timer is
+// armed again as it changes (perf_samples_rate).
 perf_samples_interval_us := PERF_SAMPLES_INTERVAL_US
+
+// Under the flight recorder, the first page of the table of the threads'
+// sampler timers (perf_samples_timer_keep), which a rate change arms again;
+// 0 otherwise.
+perf_samples_timers := I64{0}
 
 // The log spans file, `<samples>.spans`, -1 unless the start opened it.
 perf_spans_fd := I64{-1}
@@ -551,6 +561,7 @@ perf_samples_start: fn() {
     slots: alloc_map_try(wrapping(PERF_SAMPLES_SLOTS * perf_samples_slot_bytes()))
     sides: alloc_map_try(wrapping(wrapping(PERF_SAMPLES_SLOTS + I64{1}) * perf_samples_side_bytes()))
     causal: if ((lenses & PERF_LENS_CAUSAL) != I64{0}) -> perf_causal_open(image) else -> I64{0}
+    timers: if (flight) -> alloc_map_try(PERF_SAMPLES_TIMER_PAGE) else -> I64{0}
     #Unsafe("the observation start runs before the timer whose handler reads these is armed") {
         perf_causal_state = causal
         perf_samples_bias = bias
@@ -563,6 +574,7 @@ perf_samples_start: fn() {
         perf_samples_buffered = if (flight || sides == I64{0}) -> I64{0} else -> I64{1}
         perf_samples_lens_mask = lenses
         perf_samples_interval_us = interval
+        perf_samples_timers = timers
     }
     status := I64{0}
     // sa_flags SA_SIGINFO | SA_RESTORER | SA_ONSTACK | SA_RESTART: the
@@ -664,7 +676,7 @@ perf_samples_charge: fn(buffer: I64, began: I64) {
 // Arm this thread's sampler while the process samples CPU time: the perf
 // event of the source the start chose (perf_precise_arm), else a timer on
 // this thread's CPU clock (CLOCK_THREAD_CPUTIME_ID) that sends this thread
-// SIGPROF (SIGEV_THREAD_ID) for each PERF_SAMPLES_INTERVAL_US of CPU time
+// SIGPROF (SIGEV_THREAD_ID) for each perf_samples_interval_us of CPU time
 // it uses: its handle, for perf_samples_thread_end; the negated errno the
 // kernel refused it with; -1 when the process does not sample CPU time.
 // A thread whose perf event the kernel refuses goes unsampled.
@@ -687,14 +699,27 @@ perf_samples_thread_start: fn() -> I64 {
     }
     id: rt_text_word(wrapping(scratch + I64{64})) & I64{4294967295}
     if (status >= I64{0}) {
+        // Kept before it is armed: a rate change (perf_samples_rate) either
+        // finds it in the table or stores its interval before the arming
+        // below reads it.
+        perf_samples_timer_keep(id)
         // The interval, then the first expiry, each as seconds and
-        // nanoseconds.
+        // nanoseconds: the interval in force, armed again while a rate
+        // change moved it meanwhile.
         spec: wrapping(scratch + I64{72})
-        rt_text_store(wrapping(spec + I64{8}), wrapping(perf_samples_interval_us * I64{1000}))
-        rt_text_store(wrapping(spec + I64{24}), wrapping(perf_samples_interval_us * I64{1000}))
-        #Unsafe("timer_settime reads the itimerspec in the scratch words; a timer it refuses is deleted") {
-            status = os_syscall_i64(I64{223}, id, I64{0}, spec, I64{0}, I64{0}, I64{0})
-            if (status < I64{0}) {
+        armed := I64{0}
+        loop status >= (I64{0}) && armed != perf_samples_interval_us {
+            armed = perf_samples_interval_us
+            rt_text_store(wrapping(spec + I64{8}), wrapping(armed * I64{1000}))
+            rt_text_store(wrapping(spec + I64{24}), wrapping(armed * I64{1000}))
+            #Unsafe("timer_settime reads the itimerspec in the scratch words") {
+                status = os_syscall_i64(I64{223}, id, I64{0}, spec, I64{0}, I64{0}, I64{0})
+            }
+        }
+        if (status < I64{0}) {
+            // A timer the kernel refuses to arm is deleted.
+            perf_samples_timer_drop(id)
+            #Unsafe("timer_delete takes the id timer_create just gave") {
                 _ := os_syscall_i64(I64{226}, id, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
             }
         }
@@ -717,9 +742,94 @@ perf_samples_thread_end: fn(sampler: I64) {
         perf_precise_end(sampler & I64{4294967295})
         return
     }
+    perf_samples_timer_drop(sampler)
     #Unsafe("timer_delete takes the id this thread's start was given") {
         _ := os_syscall_i64(I64{226}, sampler, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
+}
+
+// The table of sampler timers (perf_samples_timers): pages of
+// PERF_SAMPLES_TIMER_PAGE bytes, each its next page's address, 0 for none,
+// then one word per timer, its id plus one, 0 while free. A page fills
+// before the next is mapped, and none is unmapped, so a rate change walks
+// them while threads start and end.
+PERF_SAMPLES_TIMER_PAGE: I64{4096}
+
+// Keep timer `id` in the table's first free word, mapping a page when every
+// one is taken. Where no page can be mapped the timer is not kept, and keeps
+// the interval it was armed at.
+perf_samples_timer_keep: fn(id: I64) {
+    page := perf_samples_timers
+    loop page != (I64{0}) {
+        at := I64{8}
+        loop at < PERF_SAMPLES_TIMER_PAGE {
+            if (sync_cas(wrapping(page + at), I64{0}, wrapping(id + I64{1})) == I64{0}) {
+                return
+            }
+            at = wrapping(at + I64{8})
+        }
+        if (sync_load(page) == I64{0}) {
+            fresh: alloc_map_try(PERF_SAMPLES_TIMER_PAGE)
+            if (fresh == I64{0}) {
+                return
+            }
+            // Another thread's page may have been linked first.
+            if (sync_cas(page, I64{0}, fresh) != I64{0}) {
+                alloc_unmap(fresh, PERF_SAMPLES_TIMER_PAGE)
+            }
+        }
+        page = sync_load(page)
+    }
+}
+
+// Free the table's word of timer `id`, before the timer is deleted.
+perf_samples_timer_drop: fn(id: I64) {
+    page := perf_samples_timers
+    loop page != (I64{0}) {
+        at := I64{8}
+        loop at < PERF_SAMPLES_TIMER_PAGE {
+            if (sync_cas(wrapping(page + at), wrapping(id + I64{1}), I64{0}) == wrapping(id + I64{1})) {
+                return
+            }
+            at = wrapping(at + I64{8})
+        }
+        page = sync_load(page)
+    }
+}
+
+// Sample each thread's CPU time once per `interval_us` from now on: the
+// interval a starting thread arms its timer at (perf_samples_thread_start),
+// then every timer the table keeps armed again at it. The locked read
+// orders the interval's store before the table's reads, as a starting
+// thread keeps its timer before it reads the interval, so each timer ends
+// armed at the newest. A timer its thread deleted meanwhile is refused.
+perf_samples_rate: fn(interval_us: I64) {
+    #Unsafe("only the observation writer changes it, under the flight recorder's lock; a starting thread reads it again after it arms") {
+        perf_samples_interval_us = interval_us
+    }
+    page := perf_samples_timers
+    if (page == I64{0}) {
+        return
+    }
+    _ := sync_add(page, I64{0})
+    spec: jet_rt_alloc(I64{32}, I64{8})
+    thread_zero(spec, I64{32})
+    rt_text_store(wrapping(spec + I64{8}), wrapping(interval_us * I64{1000}))
+    rt_text_store(wrapping(spec + I64{24}), wrapping(interval_us * I64{1000}))
+    loop page != (I64{0}) {
+        at := I64{8}
+        loop at < PERF_SAMPLES_TIMER_PAGE {
+            kept: sync_load(wrapping(page + at))
+            if (kept != I64{0}) {
+                #Unsafe("timer_settime reads the itimerspec this call owns") {
+                    _ := os_syscall_i64(I64{223}, wrapping(kept - I64{1}), I64{0}, spec, I64{0}, I64{0}, I64{0})
+                }
+            }
+            at = wrapping(at + I64{8})
+        }
+        page = sync_load(page)
+    }
+    jet_rt_free(spec, I64{32}, I64{8})
 }
 
 // Map the thread and host call table (perf_system) once the start has
@@ -1799,17 +1909,19 @@ perf_samples_side_rows: fn(side: I64) -> I64 {
     wrapping(wrapping(side + I64{8}) + PERF_SAMPLES_OUT_BYTES)
 }
 
-// At the exit, before the clock record: writes the records every side
-// holds, each record buffer held as its handler holds it, so that none
-// fills meanwhile; a handler that holds one finishes first. Records are
-// written as they are made from then on: a handler reads
-// perf_samples_buffered once it holds its buffer, after this clears it.
+// At the exit, before the clock record, and as a flight recorder's zones
+// window closes (perf_flight_window_close), to the window file: writes the
+// records every side holds, each record buffer held as its handler holds
+// it, so that none fills meanwhile; a handler that holds one finishes
+// first. Records are written as they are made from then on: a handler
+// reads perf_samples_buffered once it holds its buffer, after this clears
+// it.
 perf_samples_flush: fn(fd: I64) {
     sides: perf_samples_sides
     if (sides == I64{0} || perf_samples_buffered == I64{0}) {
         return
     }
-    #Unsafe("the exit alone clears it; a handler reads it only while it holds its buffer, which the claims below order") {
+    #Unsafe("the exit and a window's close, under the flight recorder's lock, alone clear it; a handler reads it only while it holds its buffer, which the claims below order") {
         perf_samples_buffered = I64{0}
     }
     buffer: perf_samples_buffer
@@ -1870,13 +1982,15 @@ perf_samples_cpu_clock_ns: fn(clock: I64) -> I64 {
 // perf_precise_depth entries (PERF_SAMPLES_RING_COUNT), all 0 under the
 // timer. A second exit writes a later one. Under the alloc lens the heap
 // snapshot named `exit` comes first (perf_samples_heap), then the
-// allocations' records. Every ring's samples are drained first
-// (perf_precise_rings_drain), then the spans buffer's rows and the records
-// the handlers keep (perf_samples_flush) are written out, then the causal
-// lens's idle table (perf_causal_idle_write) and tasks' timings
-// (perf_causal_rows_write), and the threads and host calls
-// (perf_system_exit).
+// allocations' records. An attach's zones window still open closes first
+// (perf_flight_window_end), so the clock record goes to the record socket.
+// Every ring's samples are drained first (perf_precise_rings_drain), then
+// the spans buffer's rows and the records the handlers keep
+// (perf_samples_flush) are written out, then the causal lens's idle table
+// (perf_causal_idle_write) and tasks' timings (perf_causal_rows_write), and
+// the threads and host calls (perf_system_exit).
 perf_samples_exit: fn() {
+    perf_flight_window_end()
     perf_spans_flush()
     fd: perf_samples_fd
     if (fd < I64{0}) {
@@ -1914,8 +2028,9 @@ perf_samples_exit: fn() {
 // What a row of the spans file (perf_spans_fd) is, in the high half of its
 // length word (perf_zone_row): a closed core.log span, a closed
 // core.perf.zone, a frame mark, a plotted value, zones that could not
-// turn on, the row's name saying why (perf_zones_refused), or the file's
-// last row, written when it reached its bound (perf_spans_write).
+// turn on, the row's name saying why (perf_zones_refused), the file's
+// last row, written when it reached its bound (perf_spans_write), or an
+// attach's zones window, its name five words (perf_flight_window_close).
 PERF_ZONE_LOG: I64{0}
 
 PERF_ZONE_ZONE: I64{1}
@@ -1927,6 +2042,8 @@ PERF_ZONE_PLOT: I64{3}
 PERF_ZONE_REFUSED: I64{4}
 
 PERF_ZONE_CUT: I64{5}
+
+PERF_ZONE_WINDOW: I64{6}
 
 // The first zone-site table registered (jet_perf_zone_table), 0 until one
 // is: a library's, so registering it while zones are off is one store.
@@ -4994,6 +5111,144 @@ perf_samples_periods: fn(signal: I64, info: I64) -> I64 {
 // (perf_flight_dump), which `jet debug` opens.
 PERF_FLIGHT_INTERVAL_US: I64{10000}
 
+// An attach's zones window (perf_flight_window_open): the window file's
+// descriptor, `<ring>.window`, opened at the first window and kept, -1
+// before; the record socket the samples descriptor returns to as the window
+// closes; and as it opened, its time on the zones' clock, -1 while no window
+// is open, the process's CPU time, the nanoseconds the handlers had run and
+// the records lost. Only the observation writer opens and closes a window,
+// under the flight recorder's lock, and the exit (perf_flight_window_end).
+perf_flight_window_fd := I64{-1}
+
+perf_flight_socket := I64{-1}
+
+perf_flight_window_at := I64{-1}
+
+perf_flight_window_cpu := I64{0}
+
+perf_flight_window_handled := I64{0}
+
+perf_flight_window_lost := I64{0}
+
+// How long an attach's zones request stands unrenewed (Session.jet
+// jet_cli_perf_attach_zones writes it every 250 ms): 1 s. One older was
+// left by an attach that died, so it is removed, which closes the window.
+PERF_FLIGHT_LEASE_NS: I64{1000000000}
+
+// An attach's zones window opens as zones turn on (perf_flight_zones): the
+// handlers' records go to the window file `<path>.window`, emptied, kept in
+// their sides until PERF_SAMPLES_OUT_BYTES of them fill one
+// (perf_samples_buffered), not to the record socket, whose ring holds too
+// few for a window sampled at 8 kHz; each thread then samples its CPU time
+// every PERF_SAMPLES_INTERVAL_US (perf_samples_rate), as under `jet perf
+// run`; then the window's opening time, CPU time, handler time and lost
+// records are taken. Without the file no window opens, and zones are on at
+// the flight recorder's interval.
+perf_flight_window_open: fn(path: I64) {
+    if (perf_flight_window_at >= I64{0} || perf_samples_fd < I64{0}) {
+        return
+    }
+    fd := perf_flight_window_fd
+    if (fd < I64{0}) {
+        window: perf_flight_beside(path, rt_static_text(".window"))
+        file: observe_cstring(window)
+        // O_WRONLY|O_CREAT|O_TRUNC|O_APPEND|O_CLOEXEC, mode 0600.
+        fd = observe_syscall(I64{257}, I64{-100}, file, I64{525889}, I64{384})
+        jet_rt_free(file, wrapping(rt_text_len(window) + I64{1}), I64{1})
+        jet_rt_string_drop(window)
+        if (fd < I64{0}) {
+            return
+        }
+        #Unsafe("only the observation writer opens a window, under the flight recorder's lock") {
+            perf_flight_window_fd = fd
+        }
+    } else {
+        // ftruncate; the file appends, so the window's first record lands at 0.
+        _ := observe_syscall(I64{77}, fd, I64{0}, I64{0}, I64{0})
+    }
+    #Unsafe("only the observation writer opens a window, under the flight recorder's lock; a handler reads the descriptor once, and the buffering only while it holds its buffer (perf_samples_flush)") {
+        perf_flight_socket = perf_samples_fd
+        perf_samples_buffered = if (perf_samples_sides == I64{0}) -> I64{0} else -> I64{1}
+        perf_samples_fd = fd
+    }
+    perf_samples_rate(PERF_SAMPLES_INTERVAL_US)
+    buffer: perf_samples_buffer
+    cpu: perf_samples_process_cpu_ns()
+    handled: if (buffer == I64{0}) -> I64{0} else -> sync_load(perf_samples_tally(buffer, I64{0}))
+    lost: perf_samples_lost()
+    opened: perf_zone_now()
+    #Unsafe("only the observation writer opens a window, under the flight recorder's lock") {
+        perf_flight_window_cpu = cpu
+        perf_flight_window_handled = handled
+        perf_flight_window_lost = lost
+        perf_flight_window_at = opened
+    }
+}
+
+// The window closes as zones turn off, its attach's request gone or its
+// lease lapsed (perf_flight_zones), and at the exit (perf_flight_window_end):
+// its end, CPU time, handler time and lost records are taken first; each
+// thread then samples at the flight recorder's interval again, the records
+// go to the record socket again, and those the sides kept are written to
+// the window file (perf_samples_flush). Its PERF_ZONE_WINDOW row then goes
+// to the spans buffer: from its opening to its end on the zones' clock,
+// then five words, the interval its samples stand for in microseconds, the
+// process's CPU time in it, the nanoseconds the handlers ran in it, the
+// kernel's to deliver one signal (perf_samples_delivery), and the records
+// lost in it.
+perf_flight_window_close: fn() {
+    opened: perf_flight_window_at
+    if (opened < I64{0}) {
+        return
+    }
+    end: perf_zone_now()
+    cpu: perf_samples_process_cpu_ns()
+    buffer: perf_samples_buffer
+    handled: if (buffer == I64{0}) -> I64{0} else -> sync_load(perf_samples_tally(buffer, I64{0}))
+    lost: perf_samples_lost()
+    perf_samples_rate(PERF_FLIGHT_INTERVAL_US)
+    #Unsafe("only the observation writer and the exit close a window, under the flight recorder's lock; a handler reads the descriptor once") {
+        perf_samples_fd = perf_flight_socket
+        perf_flight_window_at = I64{-1}
+    }
+    perf_samples_flush(perf_flight_window_fd)
+    spans: perf_spans_buffer
+    if (spans == I64{0}) {
+        return
+    }
+    words: jet_rt_alloc(I64{40}, I64{8})
+    rt_text_store(words, PERF_SAMPLES_INTERVAL_US)
+    rt_text_store(wrapping(words + I64{8}), wrapping(cpu - perf_flight_window_cpu))
+    rt_text_store(wrapping(words + I64{16}), wrapping(handled - perf_flight_window_handled))
+    rt_text_store(wrapping(words + I64{24}), perf_samples_delivery_ns)
+    rt_text_store(wrapping(words + I64{32}), wrapping(lost - perf_flight_window_lost))
+    sync_thread_lock(spans)
+    perf_spans_put(spans, PERF_ZONE_WINDOW, opened, end, I64{0}, words, I64{40})
+    sync_thread_unlock(spans)
+    jet_rt_free(words, I64{40}, I64{8})
+}
+
+// At the exit (perf_samples_exit): close a window still open, under the
+// flight recorder's lock, which a publication may hold meanwhile.
+perf_flight_window_end: fn() {
+    state: perf_flight_state
+    if (state == I64{0} || perf_flight_window_at < I64{0} || !perf_flight_lock(state, I64{100000000})) {
+        return
+    }
+    perf_flight_window_close()
+    sync_store(state, I64{0})
+}
+
+// The real-time clock (CLOCK_REALTIME) in nanoseconds, the clock a file's
+// modification time is on.
+perf_flight_realtime: fn() -> I64 {
+    scratch: jet_rt_alloc(I64{16}, I64{8})
+    sync_clock_read(I64{0}, scratch)
+    now: wrapping(wrapping(rt_text_word(scratch) * I64{1000000000}) + rt_text_word(wrapping(scratch + I64{8})))
+    jet_rt_free(scratch, I64{16}, I64{8})
+    now
+}
+
 // The flight recorder's state mapping (perf_flight_state): its lock word,
 // then the socket's read end, the ring's bytes in use, whether the image
 // was published, whether the dump was written, whether the run ended
@@ -5381,7 +5636,7 @@ perf_flight_home: fn(temp: I64) -> I64 {
     name: observe_cstring(home)
     // mkdir(name, 0700); one already there is checked as a new one is.
     _ := observe_syscall(I64{83}, name, I64{448}, I64{0}, I64{0})
-    private: perf_flight_owned(name, I64{16384})
+    private: perf_flight_owned_at(name, I64{16384}) >= I64{0}
     jet_rt_free(name, wrapping(rt_text_len(home) + I64{1}), I64{1})
     if (!private) {
         jet_rt_string_drop(home)
@@ -5390,20 +5645,23 @@ perf_flight_home: fn(temp: I64) -> I64 {
     home
 }
 
-// Whether the C string `name` names, its final link not followed, a file of
+// When the C string `name` names, its final link not followed, a file of
 // `kind` (S_IFDIR or S_IFREG) this user owns, closed to others when it is a
-// directory. A request another user left is not this user's, so it is
+// directory: its last modification on the real-time clock, in nanoseconds;
+// else -1. A request another user left is not this user's, so it is
 // ignored.
-perf_flight_owned: fn(name: I64, kind: I64) -> Bool {
+perf_flight_owned_at: fn(name: I64, kind: I64) -> I64 {
     facts: jet_rt_alloc(I64{144}, I64{8})
-    // lstat: st_mode, then st_uid, at byte 24.
+    // lstat: st_mode, then st_uid, at byte 24; st_mtim at byte 88.
     found: observe_syscall(I64{6}, name, facts, I64{0}, I64{0}) == I64{0}
     word: if (found) -> rt_text_word(wrapping(facts + I64{24})) else -> I64{0}
+    modified: wrapping(wrapping(rt_text_word(wrapping(facts + I64{88})) * I64{1000000000}) + rt_text_word(wrapping(facts + I64{96})))
     jet_rt_free(facts, I64{144}, I64{8})
     mode: word & I64{65535}
     // geteuid
     owner: observe_syscall(I64{107}, I64{0}, I64{0}, I64{0}, I64{0})
-    (mode & I64{61440}) == kind && ((word >> I64{32}) & I64{4294967295}) == owner && (kind != I64{16384} || (mode & I64{63}) == I64{0})
+    owned: (mode & I64{61440}) == kind && ((word >> I64{32}) & I64{4294967295}) == owner && (kind != I64{16384} || (mode & I64{63}) == I64{0})
+    if (owned) -> modified else -> I64{-1}
 }
 
 // At each of the observation writer's publications: drain the socket into
@@ -5423,7 +5681,10 @@ perf_flight_publish: fn(directory: I64) {
         home: perf_flight_home(directory)
         if (home == I64{0}) {
             // No request stands where others could have left it.
-            if (perf_zones_on != I64{0}) { perf_zones_set(I64{0}) }
+            if (perf_zones_on != I64{0}) {
+                perf_flight_window_close()
+                perf_zones_set(I64{0})
+            }
         } else {
             path: perf_flight_path(home)
             jet_rt_string_drop(home)
@@ -5445,20 +5706,27 @@ perf_flight_publish: fn(directory: I64) {
 }
 
 // `jet perf attach` turns zones on in a flight-recorded run by leaving
-// `<ring>.zones` beside the published ring `path`, and off by removing it.
-// Only a request this user owns counts (perf_flight_owned).
-// While the request stands, zones, frame marks, plots and log spans write
-// their rows to `<ring>.spans` (perf_spans_fd_set), emptied when a request
-// turns zones on and written out at each publication; once it is gone the
-// zones word is cleared, and the rows stay for the attach to read. Log
-// spans keep writing rows while zones are off, within the file's bound
-// (PERF_SPANS_FILE_BYTES).
+// `<ring>.zones` beside the published ring `path`, renewing it every 250 ms,
+// and off by removing it. Only a request this user owns counts
+// (perf_flight_owned_at), and only while it was renewed within
+// PERF_FLIGHT_LEASE_NS: an older one was left by an attach that died, and is
+// removed. While the request stands, zones, frame marks, plots and log
+// spans write their rows to `<ring>.spans` (perf_spans_fd_set), emptied
+// when a request turns zones on and written out at each publication, and
+// the zones window is open (perf_flight_window_open); once it is gone the
+// window closes, the zones word is cleared, and the rows stay for the
+// attach to read. Log spans keep writing rows while zones are off, within
+// the file's bound (PERF_SPANS_FILE_BYTES).
 perf_flight_zones: fn(path: I64) {
     request: perf_flight_beside(path, rt_static_text(".zones"))
     name: observe_cstring(request)
-    wanted: perf_flight_owned(name, I64{32768})
+    renewed: perf_flight_owned_at(name, I64{32768})
+    lapsed: renewed >= I64{0} && wrapping(perf_flight_realtime() - renewed) > PERF_FLIGHT_LEASE_NS
+    // unlink
+    if (lapsed) { _ := observe_syscall(I64{87}, name, I64{0}, I64{0}, I64{0}) }
     jet_rt_free(name, wrapping(rt_text_len(request) + I64{1}), I64{1})
     jet_rt_string_drop(request)
+    wanted: renewed >= I64{0} && !lapsed
     if (wanted && perf_zones_on == I64{0}) {
         if (perf_spans_fd < I64{0}) {
             spans: perf_flight_beside(path, rt_static_text(".spans"))
@@ -5473,14 +5741,18 @@ perf_flight_zones: fn(path: I64) {
             perf_spans_truncate()
             perf_zones_set(I64{1})
         }
+        if (perf_zones_on != I64{0}) { perf_flight_window_open(path) }
     }
-    if (!wanted && perf_zones_on != I64{0}) { perf_zones_set(I64{0}) }
+    if (!wanted && perf_zones_on != I64{0}) {
+        perf_flight_window_close()
+        perf_zones_set(I64{0})
+    }
     perf_spans_flush()
 }
 
 // `jet perf attach --lens=alloc` asks a flight-recorded run for a heap
 // snapshot by leaving `<ring>.heap-request`, a file this user owns
-// (perf_flight_owned), beside the published ring
+// (perf_flight_owned_at), beside the published ring
 // `path`. The publication that finds it answers in `<ring>.heap`, staged
 // beside it and renamed over it, then removes the request: first a word,
 // the nanoseconds the snapshot held the program's allocations and frees
@@ -5492,7 +5764,7 @@ perf_flight_zones: fn(path: I64) {
 perf_flight_heap: fn(path: I64) {
     request: perf_flight_beside(path, rt_static_text(".heap-request"))
     asked: observe_cstring(request)
-    wanted: perf_flight_owned(asked, I64{32768})
+    wanted: perf_flight_owned_at(asked, I64{32768}) >= I64{0}
     if (wanted) {
         answer: perf_flight_beside(path, rt_static_text(".heap"))
         staged: perf_flight_beside(path, rt_static_text(".heap.stage"))
@@ -5598,8 +5870,9 @@ perf_flight_pwrite: fn(fd: I64, bytes: I64, length: I64, offset: I64) -> Bool {
 // record (perf_samples_exit): the socket is drained a last time and the
 // ring, its last tally saying the run ended, is written into the published
 // file in place (perf_flight_ring), so a reader that holds it open reads
-// the run's last turn; then the published ring, its image and its zones'
-// rows (`.spans`) go, at once, and no publication follows. A killed run
+// the run's last turn; then the published ring, its image, its zones'
+// rows (`.spans`) and its last zones window's records (`.window`) go, at
+// once, and no publication follows. A killed run
 // removes none of them; the next `jet perf run` or attach does (Session.jet
 // jet_cli_perf_sweep).
 perf_flight_end: fn() {
@@ -5619,9 +5892,12 @@ perf_flight_end: fn() {
             perf_flight_ring(state, path, true)
             image: perf_flight_beside(path, rt_static_text(".image"))
             spans: perf_flight_beside(path, rt_static_text(".spans"))
+            window: perf_flight_beside(path, rt_static_text(".window"))
             perf_flight_unlink(path)
             perf_flight_unlink(image)
             perf_flight_unlink(spans)
+            perf_flight_unlink(window)
+            jet_rt_string_drop(window)
             jet_rt_string_drop(spans)
             jet_rt_string_drop(image)
             jet_rt_string_drop(path)

@@ -65,8 +65,9 @@ jet_cli_perf_pprof_value_type: fn(strings: &[String], kind: &&String, unit: &&St
 // per-line total is a sample whose stack is one location, the total's
 // function at its line, valued by its samples. A row's inclusive samples,
 // allocations and counter events, and the stacks they came from, are not
-// carried, as the profile's comment says. Its period is the runtime's
-// sampling interval (JET_CLI_PERF_SAMPLE_US) in nanoseconds of CPU time.
+// carried, as the profile's comment says. Its period is the CPU time each
+// sample stands for, the trace's interval (Command.jet
+// jet_cli_perf_sample_us) in nanoseconds; none when the trace says none.
 jet_cli_perf_pprof_profile: fn(trace: CanonicalJSON) -> [U8] Never! {
     totals: jet_cli_perf_line_totals(trace)
     samples := [U8]{}
@@ -116,10 +117,11 @@ jet_cli_perf_pprof_profile: fn(trace: CanonicalJSON) -> [U8] Never! {
     loop byte in locations -> out.push(byte)
     loop byte in functions -> out.push(byte)
     period_type: jet_cli_perf_pprof_value_type(strings, "cpu", "nanoseconds")
+    interval: jet_cli_perf_sample_us(trace)
     comment: jet_cli_perf_pprof_string(strings, "jet perf {trace_id(trace) ?? "trace"}: one location per source line; inclusive samples, allocations and counter events are not carried")
     loop text in strings -> jet_cli_perf_pb_text(out, 6, text)
     jet_cli_perf_pb_message(out, 11, period_type)
-    jet_cli_perf_pb_int(out, 12, JET_CLI_PERF_SAMPLE_US * 1000)
+    if interval == .Val(each) -> jet_cli_perf_pb_int(out, 12, each * 1000)
     jet_cli_perf_pb_packed(out, 13, [Int]{comment})
     out
 }
@@ -216,13 +218,15 @@ jet_cli_perf_otlp_metrics: fn(trace: CanonicalJSON) -> String Never! {
 }
 
 // A pprof or OTLP/JSON export read back for `jet perf view`: its format, its
-// per-line totals, its timeline and what it says of itself (a pprof
-// profile's comments).
+// per-line totals, its timeline, what it says of itself (a pprof
+// profile's comments) and the CPU time each sample stands for, in
+// microseconds (a pprof profile's period), None where it says none.
 JetCLIPerfImport: struct {
     format: String,
     totals: JetCLIPerfLineTotals,
     timeline: [String],
     notes: [String],
+    interval_us: Int?,
 }
 
 // The export at `path`: pprof's `profile.proto` (`.pb.gz` gzip-compressed,
@@ -253,11 +257,17 @@ jet_cli_perf_pprof_read: fn(bytes: [U8]) -> JetCLIPerfImport JetCLIReadError! {
     function_name := [Int:Int]{}
     function_file := [Int:Int]{}
     comments := [Int]{}
+    // The profile's period, in nanoseconds of CPU time; 0 for none.
+    period := 0
     cursor := RecordCursor{at: 0, end: bytes.len(), problem: None}
     loop cursor.at < cursor.end && cursor.problem == None {
         key: record_read_uvarint(bytes, cursor)
         field: key >> 3
         wire: key & 7
+        if field == 12 && wire == 0 {
+            period = record_read_uvarint(bytes, cursor)
+            next
+        }
         if field == 13 {
             loop at in jet_cli_perf_pb_ints(bytes, cursor, wire) -> comments.push(at)
             next
@@ -299,7 +309,8 @@ jet_cli_perf_pprof_read: fn(bytes: [U8]) -> JetCLIPerfImport JetCLIReadError! {
         if at >= strings.len() -> return Err(malformed)
         notes.push("comment {strings[at]}")
     }
-    Ok(JetCLIPerfImport{format: "pprof", totals: JetCLIPerfLineTotals{names: strings, rows: rows}, timeline: [String]{}, notes: notes})
+    interval: if period >= 1000 -> Val(period /% 1000) else -> Int?{None}
+    Ok(JetCLIPerfImport{format: "pprof", totals: JetCLIPerfLineTotals{names: strings, rows: rows}, timeline: [String]{}, notes: notes, interval_us: interval})
 }
 
 // A pprof `Sample`: its leaf location (its first) and its first value.
@@ -478,7 +489,7 @@ jet_cli_perf_otlp_read: fn(text: String) -> JetCLIPerfImport JetCLIReadError! {
     }
     notes := [String]{"spans count={spans}"}
     if spans > timeline.len() -> notes.push("timeline shows the first {timeline.len()} spans")
-    Ok(JetCLIPerfImport{format: "otlp", totals: JetCLIPerfLineTotals{names: names, rows: rows}, timeline: timeline, notes: notes})
+    Ok(JetCLIPerfImport{format: "otlp", totals: JetCLIPerfLineTotals{names: names, rows: rows}, timeline: timeline, notes: notes, interval_us: None})
 }
 
 // The value (an OTLP `AnyValue`) of the attribute `key` of `owner`.

@@ -67,8 +67,10 @@ examples.
 `profile.proto` beside the trace (`<stem>.pb.gz`, or `--out <path>`). Each
 CPU-time profile row is one sample whose stack is one location, the row's
 function at its source line, valued by the row's own samples; the period is
-one millisecond of CPU. Inclusive samples, allocations, counter events and
-full stacks are not carried, and the profile's comment says so. `--otel`
+the CPU time each sample stands for, the `interval_us` of the trace's `perf`
+receipt section, and a trace that names none has no period. Inclusive
+samples, allocations, counter events and full stacks are not carried, and
+the profile's comment says so. `--otel`
 prints OTLP/JSON, one export request a line as a collector's file exporter
 writes them: an `ExportTraceServiceRequest` (core.log `otlp_traces_json`) of
 the trace's captured spans and browser rows, then an
@@ -177,7 +179,8 @@ time to write each sample to its thread's ring, which the runtime times as
 sampling starts with a second sampler of the same source at a shallow and a
 deep stack; `overhead_reason` gives it as a share of the CPU time sampled.
 `jet perf view` sums the rows per function with its share of the
-samples and the CPU time they stand for, one sample per 125 microseconds,
+samples and the CPU time they stand for, at the `interval_us` the trace's
+`perf` receipt section names (none without one),
 then its hottest lines with their exclusive and inclusive samples and
 allocations (`line 7 samples=12 cpu_us=1500 inclusive=40 allocations=300`;
 `cpu_us` only for a line with samples of its own). When the rows span more
@@ -607,7 +610,8 @@ are its `unattributed_samples`, and leave it `partial`. `jet perf view`
 prints `tasks count=5001 children=5000 rows=4096 coverage=complete ·
 main.jet#run`, then each phase as `task phase parse tasks=2500
 cpu_us=198625 samples=1589 · folded tasks=452 cpu_us=36250 samples=290`,
-one sample per 125 microseconds, `(none)` for the tasks of no phase, and
+at the trace's `interval_us` as the profile's rows are, `(none)` for the
+tasks of no phase, and
 `task phase unattributed cpu_us=… samples=…` for the samples it left out.
 Tests/Cases/Perf/tasks_past_the_row_limit_keep_their_phase_and_cpu.case is
 the worked example.
@@ -716,7 +720,8 @@ slowest_frame=40123ns · <function> main.jet:13`, then each callback function's
 draw events, the most time first (`game draw <function> main.jet:13 count=40
 ns=82000000`). Tests/Cases/Perf/game_frame_events.case is the worked example.
 
-A `jet perf run` or `jet perf test` trace records the receipt section `perf`
+A `jet perf run`, `jet perf test` or `jet perf attach` trace records the
+receipt section `perf`
 (type `JetPerfReceipt`). Its `build` names the build the program compiled
 under: `profile`, the profile the run's words select (null for none), and
 `options`, every build option's value as `jet run` resolves the words over the
@@ -727,7 +732,9 @@ names the capture's settings: `allowlist`, the privacy fields the trace keeps
 (comma-separated, null for none), and `sampling`, null unless the program
 sampled, else its `lenses` (`["cpu"]`, `["memory"]` or `["cpu","memory"]`),
 `allocations` `call-sites`, and under the `cpu` lens `clock` `cpu`,
-`interval_us` 125 and `pc`, which are null without it. `pc` names what each
+`interval_us`, the CPU time each sample stands for (125 under `jet perf run`,
+10000 for an attach's flight ring, 125 for its `--zones=` window), and `pc`,
+which are null without it. `pc` names what each
 sample was charged by: `source` `ibs_op` or `pebs` with `precise` true and
 `skid` null for a precise sampler, `task_clock` with `precise` false and
 `skid` `task_clock_interrupt`, else `timer` with `precise` false and `skid`
@@ -737,8 +744,8 @@ where the kernel has none); and `period` is the source's period, in
 `period_unit` `cycles` for a precise source, else `ns` of CPU time. `jet perf
 view` prints it as `receipt perf <canonical JSON>`, and `jet perf compare`
 lists each field that differs between two traces' receipts
-(`perf.build.options.optimize: "O0" -> "O2"`). `jet perf attach` records no
-`perf` section.
+(`perf.build.options.optimize: "O0" -> "O2"`). An attach's `build` and `pc`
+are null.
 
 ## Instructions
 
@@ -850,7 +857,8 @@ per million, null when unjudged) and `verdict`.
 
 D-OBSERVE-FLIGHT1=B ratifies an always-on flight recorder under `jet run
 --observe` (when `JET_PERF_SAMPLES` names no `jet perf run` capture). The
-runtime samples its CPU time every 10ms and records its tasks' waits, wakes,
+runtime samples its CPU time every 10ms (so each of the ring's samples
+stands for 10 ms of CPU time) and records its tasks' waits, wakes,
 spawns and file and network transfers, as `jet perf run` does, into a
 256 KiB ring. Each record is one datagram on a nonblocking socket pair, sent
 whole or, while the socket is full, lost, so no record ever waits. The observe
@@ -946,20 +954,33 @@ so a reader that holds it open reads on into them; only after the ring drops
 its oldest records is a whole new file staged and renamed over it. At a
 normal exit the program drains the socket a last time and writes those
 records, the clock record its exit wrote, and a tally that says the run
-ended into the file in place before it removes the ring, its image and its
-`.spans`, so a reader that opened the ring sees the last turn though no file
-is left.
+ended into the file in place before it removes the ring, its image, its
+`.spans` and its `.window`, so a reader that opened the ring sees the last
+turn though no file is left.
 Tests/Cases/Perf/flight_ring_keeps_the_last_turn.case is the worked example.
 
 `core.perf` zones, frame marks and plots stay off in such a run: each zone
 site tests one runtime word and calls nothing while it is clear.
 `jet perf attach <pid> --source app.jet --zones=500ms` turns them on for the
-window. It leaves `jet-flight-<pid>.samples.zones` beside the ring,
-which the writer's next publication answers by setting the word and writing
-the zone, frame, plot and log span rows to `.samples.spans`. It then removes
-the request, so the next publication clears the word, and reads the rows into
-the trace beside the ring's, each zone holding the ring's samples inside it.
-Tests/Cases/Perf/attach_turns_zones_on.case is the worked example.
+window. It leaves `jet-flight-<pid>.samples.zones` beside the ring and
+rewrites it every 250 ms while the window lasts. The writer's next
+publication answers it by setting the word, writing the zone, frame, plot
+and log span rows to `.samples.spans`, and opening the zones window: each
+thread samples its CPU time every 125 microseconds, as under `jet perf
+run`, its records going to `.samples.window` rather than the ring, which
+holds too few at that rate. The attach then removes the request, so the next
+publication clears the word and closes the window: each thread samples every
+10ms again, and a window row in `.spans` names the window's start and end on
+the zones' clock, its interval, the program's CPU time, the handlers' time,
+one signal's delivery time and the records lost in it. A request not
+rewritten within a second was left by an attach that died; the publication
+removes it and closes the window the same way. The attach reads the rows
+into the trace with the window's records, of which only the samples stamped
+inside the window count, each zone holding those inside it; its `overhead`
+is the window's measured cost. Without a window row (no window opened) it
+reads the ring's records instead.
+Tests/Cases/Perf/attach_turns_zones_on.case and
+Tests/Cases/Perf/zones_request_lapses_unrenewed.case are the worked examples.
 
 Profiling leaves no files behind. The spans file, a flight ring's
 `.samples.spans` or a `jet perf run` session's, holds at most 16 MiB of
@@ -967,8 +988,8 @@ rows: a program that closes more zones, log spans, frame marks and plots
 keeps those that fit and a last row saying the rest were dropped, which
 the trace's `zones` section keeps as `cut` and `jet perf view` shows as
 `spans cut: <reason>`. A new zones request empties the flight ring's file
-first. At a normal exit the program removes its ring, the ring's image and
-its `.spans`. A killed program can't, so the next `jet perf run` or
+first. At a normal exit the program removes its ring, the ring's image, its
+`.spans` and its `.window`. A killed program can't, so the next `jet perf run` or
 `jet perf attach` removes, from the temporary directory and the user's
 private directory, each file of this user's named for a process
 (`jet-flight-<pid>.…`, `jet-perf-<pid>-…`, `jet-perf-attach-<pid>-…`, an

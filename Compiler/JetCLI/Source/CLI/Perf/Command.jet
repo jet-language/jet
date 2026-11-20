@@ -190,7 +190,7 @@ jet_cli_perf_view: fn(args: [String], color: Bool) -[FS, Env, Exec, Time]> JetDr
             return jet_cli_perf_error("`--json` views a {extension} trace only", "view a pprof or OTLP export as text or with `--html`", color)
         }
         imported: jet_cli_perf_import(shown) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
-        flame: jet_cli_perf_flame_profile(jet_cli_perf_total_rows(imported.totals))
+        flame: jet_cli_perf_flame_profile(jet_cli_perf_total_rows(imported.totals), imported.interval_us)
         table: jet_cli_perf_line_table(imported.totals, jet_cli_perf_line_costs_none())
         if mode == "html" {
             return JetDriverVerbOutput{stdout: jet_cli_perf_view_html(shown, frames, flame, imported.timeline, table), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
@@ -1204,9 +1204,12 @@ jet_cli_perf_tasks_receipt: fn(trace: CanonicalJSON) -> CanonicalJSON? Never! {
 // samples=300`; `(none)` names the tasks that opened no zone or log span
 // and no spawner of which did; a last `task phase unattributed
 // cpu_us=… samples=…` holds the samples of tasks the run did not record.
+// `cpu_us` is the CPU time the samples stand for at the trace's interval
+// (jet_cli_perf_cpu_us).
 jet_cli_perf_task_phase_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     lines := [String]{}
     section: jet_cli_perf_tasks_receipt(trace) ?? return lines
+    interval: jet_cli_perf_sample_us(trace)
     fields: jettrace_object_view(section, "receipt tasks") ?? return lines
     at: jet_cli_perf_key(fields, "phases") ?? return lines
     phases: jettrace_array(fields[at].value, "receipt tasks.phases") ?? return lines
@@ -1216,12 +1219,12 @@ jet_cli_perf_task_phase_lines: fn(trace: CanonicalJSON) -> [String] Never! {
         samples: jet_cli_perf_member_number(phase, "samples") ?? 0
         folded: jet_cli_perf_member_number(phase, "folded") ?? 0
         folded_samples: jet_cli_perf_member_number(phase, "folded_samples") ?? 0
-        past: if folded > 0 -> " · folded tasks={folded} cpu_us={folded_samples * JET_CLI_PERF_SAMPLE_US} samples={folded_samples}" else -> ""
-        lines.push("task phase {name} tasks={tasks} cpu_us={samples * JET_CLI_PERF_SAMPLE_US} samples={samples}{past}")
+        past: if folded > 0 -> " · folded tasks={folded}{jet_cli_perf_cpu_us(interval, folded_samples)} samples={folded_samples}" else -> ""
+        lines.push("task phase {name} tasks={tasks}{jet_cli_perf_cpu_us(interval, samples)} samples={samples}{past}")
     }
     unattributed: jet_cli_perf_member_number(section, "unattributed_samples") ?? 0
     if unattributed > 0 {
-        lines.push("task phase unattributed cpu_us={unattributed * JET_CLI_PERF_SAMPLE_US} samples={unattributed}")
+        lines.push("task phase unattributed{jet_cli_perf_cpu_us(interval, unattributed)} samples={unattributed}")
     }
     lines
 }
@@ -1791,7 +1794,9 @@ jet_cli_perf_flame: fn(trace: CanonicalJSON) -> [String] Never! {
         loop item in items {
             if jet_cli_perf_profile_row(item) == .Val(row) -> profile.push(row)
         }
-        loop line in jet_cli_perf_flame_profile(profile) -> rows.push(line)
+        loop line in jet_cli_perf_flame_profile(profile, jet_cli_perf_sample_us(trace)) {
+            rows.push(line)
+        }
     }
     if jet_cli_perf_browser_summary(trace) == .Val(browser) {
         rows.push("{browser.symbol} browser {jet_cli_perf_bar(browser.count)}")
@@ -1840,8 +1845,9 @@ JetCLIPerfFlameFunction: struct {
 // The profile rows by function and clock, hottest first: each function's
 // samples and its share of its clock's, then its hottest lines, each with
 // its inclusive samples, its allocations and its counters' events when the
-// row has them. At most 8 functions and 3 lines each.
-jet_cli_perf_flame_profile: fn(rows: &&[JetCLIPerfProfileRow]) -> [String] Never! {
+// row has them. At most 8 functions and 3 lines each. A CPU-time sample
+// stands for `interval_us` of CPU time.
+jet_cli_perf_flame_profile: fn(rows: &&[JetCLIPerfProfileRow], interval_us: Int?) -> [String] Never! {
     functions := [JetCLIPerfFlameFunction]{}
     loop row in rows.move() {
         found := -1
@@ -1870,7 +1876,7 @@ jet_cli_perf_flame_profile: fn(rows: &&[JetCLIPerfProfileRow]) -> [String] Never
         }
         weight: functions[index].weight
         share: if total > 0 -> weight * 100 /% total else -> 0
-        cpu: functions[index].clock == "cpu"
+        cpu: if functions[index].clock == "cpu" -> interval_us else -> Int?{None}
         out.push("{functions[index].symbol} profile:{functions[index].clock} samples={weight}{jet_cli_perf_cpu_us(cpu, weight)} share={share}%")
         functions[index].lines.sort_by(fn(left: {line: Int, weight: Int, inclusive: Int?, allocations: Int?, events: String}, right: {line: Int, weight: Int, inclusive: Int?, allocations: Int?, events: String}) { (right.weight <=> left.weight).then((right.inclusive ?? 0) <=> (left.inclusive ?? 0)).then((right.allocations ?? 0) <=> (left.allocations ?? 0)).then(left.line <=> right.line) })
         shown: if functions[index].lines.len() > 3 -> 3 else -> functions[index].lines.len()
@@ -1904,16 +1910,31 @@ jet_cli_perf_flame_profile: fn(rows: &&[JetCLIPerfProfileRow]) -> [String] Never
         out.push("cpu by package")
         listed: if parts.len() > 12 -> 12 else -> parts.len()
         loop part in parts[0..<listed] {
-            out.push("  {part.dir} samples={part.weight}{jet_cli_perf_cpu_us(true, part.weight)} share={part.weight * 100 /% total}%")
+            out.push("  {part.dir} samples={part.weight}{jet_cli_perf_cpu_us(interval_us, part.weight)} share={part.weight * 100 /% total}%")
         }
     }
     out
 }
 
 // ` cpu_us=…`, the CPU time `samples` CPU-time samples stand for, one per
-// JET_CLI_PERF_SAMPLE_US; "" off the CPU clock (`cpu` false) or for none.
-jet_cli_perf_cpu_us: fn(cpu: Bool, samples: Int) -> String Never! {
-    if cpu && samples > 0 -> " cpu_us={samples * JET_CLI_PERF_SAMPLE_US}" else -> ""
+// `interval_us` microseconds; "" off the CPU clock or where the trace says
+// no interval (None), or for no samples.
+jet_cli_perf_cpu_us: fn(interval_us: Int?, samples: Int) -> String Never! {
+    if interval_us == .Val(each) && samples > 0 -> " cpu_us={samples * each}" else -> ""
+}
+
+// The CPU time each of the trace's CPU-time samples stands for, in
+// microseconds, as its `perf` receipt says (`capture.sampling.interval_us`;
+// Session.jet jet_cli_perf_session_receipt); None when it says none.
+jet_cli_perf_sample_us: fn(trace: CanonicalJSON) -> Int? Never! {
+    perf: jet_cli_perf_section_fields(trace, "perf") ?? return None
+    capture_at: jet_cli_perf_key(perf, "capture") ?? return None
+    capture: jettrace_object_view(perf[capture_at].value, "perf.capture") ?? return None
+    sampling_at: jet_cli_perf_key(capture, "sampling") ?? return None
+    sampling: jettrace_object_view(capture[sampling_at].value, "perf.capture.sampling") ?? return None
+    digits: jet_cli_perf_field_integer(sampling, "interval_us") ?? return None
+    each: Int.parse(digits) ?? return None
+    Val(each)
 }
 
 // The package of the source a `path#name` symbol names: the directory that
