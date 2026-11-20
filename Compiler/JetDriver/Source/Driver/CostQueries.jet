@@ -14,6 +14,7 @@ use {
         ModuleID,
         Span,
         StmtKind,
+        SymbolID,
         SymbolTable,
         TBinaryOp,
         TCostFact,
@@ -323,7 +324,9 @@ jet_driver_cost_copy_lints: fn(load: JetDriverLoadResult, functions: [FnBody]) -
     lints := [Diagnostic]{}
     seen := [String:Bool]{}
     loop site in sites {
-        if site.loop_depth == 0 || site.state != TCostState.SemanticRemainder || !jet_driver_cost_tidy(site) -> next
+        if site.loop_depth == 0 || site.state != TCostState.SemanticRemainder || !jet_driver_cost_tidy(site) {
+            next
+        }
         operation: jet_driver_cost_operation(site)
         key: "{site.module_identity:Debug} {site.span.start} {site.span.end} {operation}"
         if seen.get(key) != None -> next
@@ -569,47 +572,153 @@ jet_driver_cost_grown_shift: fn(grown: [Int:Bool], id: Int) -> TCostFact? Never!
 // `target op= step`. A product grows unless its factor stays within -1..1,
 // and a left shift unless it shifts by nothing. A sum or difference never
 // counts: reaching the rail's end by a step takes about 2^63 / step turns.
-// An update whose innermost loop's condition compares the target against
-// any Int (jet_driver_cost_caps) stops below twice that Int, so it spills
-// only if that Int already sits near the rail's end.
+// Only a target that carries its value from one turn into the next grows:
+// a local the loop doesn't bind afresh each turn, or a place reached the
+// same way on every turn (jet_driver_cost_turn_path), so `xs[i] *= k` under
+// `loop i in …` scales each element once. An update whose innermost loop's
+// condition compares the target against any Int (jet_driver_cost_caps)
+// stops below twice that Int, so it spills only if that Int already sits
+// near the rail's end.
 jet_driver_cost_growth: fn(tree: BodyTree, nodes: &[Int:Bool], updates: &[Int:Bool]) Never! {
     sizes := [Int:Int]{}
     conditions := [Int:Int]{}
+    owners := [Int:Int]{}
+    turns := [[Int:Bool]]{}
+    binds := JetDriverCostBinds{lets: [String:Int]{}, assigned: [String:[Int]]{}}
     loop statement in tree.stmts {
+        if statement == .Let(local, _, init, _, _, _) && local.symbol_id == .Val(symbol) {
+            binds.lets["{symbol:Debug}"] = init
+        }
+        if statement == .Assign(place, _, value, _, _) && place == .Local(local) && local.symbol_id == .Val(symbol) {
+            key: "{symbol:Debug}"
+            values := binds.assigned.remove(key) ?? [Int]{}
+            values.push(value)
+            binds.assigned[key] = values
+        }
         iterated := [Int]{}
         jet_driver_cost_iterated(tree, statement, iterated)
+        if iterated.len() == 0 -> next
         condition := Int?{None}
         if statement == .While(_, held, _, _) -> condition = Val(held)
         if statement == .CountedLoop(_, _, counted, _, _, _, _) -> condition = Val(counted)
+        turn := [Int:Bool]{}
+        loop id in iterated -> turn[id] = true
         loop id in iterated {
             if sizes.get(id) == .Val(size) && size <= iterated.len() -> next
             sizes[id] = iterated.len()
+            owners[id] = turns.len()
             _ := conditions.remove(id)
             if condition == .Val(found) -> conditions[id] = found
         }
+        turns.push(turn)
     }
     loop statement in tree.stmts {
         if statement == .Assign(place, op, value, _, _) {
-            if sizes.get(value) == None || !jet_driver_cost_int_place(tree, place) -> next
-            if conditions.get(value) == .Val(capped) && jet_driver_cost_caps(tree, capped, place) -> next
+            owner: owners.get(value) ?? next
+            if !jet_driver_cost_int_place(tree, place) -> next
+            turn: turns[owner]
+            if !jet_driver_cost_carried(tree, place, turn, binds) -> next
+            if conditions.get(value) == .Val(capped) && jet_driver_cost_caps(tree, capped, place, turn, binds) {
+                next
+            }
             if op == .Val(operator) {
                 if jet_driver_cost_step_grows(tree, operator, value) -> updates[value] = true
                 next
             }
             if body_node(tree, value).kind == .Binary(operator, _, _, left, right) {
                 step := Int?{None}
-                if jet_driver_cost_updates_place(tree, place, left) -> step = Val(right)
-                if step == None && operator == TBinaryOp.Mul && jet_driver_cost_updates_place(tree, place, right) -> step = Val(left)
-                if step == .Val(by) && jet_driver_cost_step_grows(tree, operator, by) -> nodes[value] = true
+                if jet_driver_cost_updates_place(tree, place, left, turn, binds) {
+                    step = Val(right)
+                }
+                if step == None && operator == TBinaryOp.Mul && jet_driver_cost_updates_place(tree, place, right, turn, binds) {
+                    step = Val(left)
+                }
+                if step == .Val(by) && jet_driver_cost_step_grows(tree, operator, by) {
+                    nodes[value] = true
+                }
             }
         }
     }
 }
 
+// The locals of a body the growth rule asks about (jet_driver_cost_growth),
+// by their symbol's spelling: the initializer node of the `let` that binds
+// each, and the value node of each assignment that stores it.
+JetDriverCostBinds: struct {
+    lets: [String:Int],
+    assigned: [String:[Int]],
+}
+
+// Whether assignment place `place` of `tree` carries its value from one
+// turn of the loop whose expressions are `turn` into the next: a local no
+// `let` inside the loop binds, or a place jet_driver_cost_turn_path names.
+jet_driver_cost_carried: fn(tree: BodyTree, place: BodyPlace, turn: [Int:Bool], binds: JetDriverCostBinds) -> Bool Never! {
+    if place == .Local(local) -> return jet_driver_cost_outlives_turn(local.symbol_id, turn, binds)
+    if place == .Expr(expression) {
+        return jet_driver_cost_turn_path(tree, expression, turn, binds) != None
+    }
+    false
+}
+
+// Whether the local with symbol `symbol` outlives each turn of the loop
+// whose expressions are `turn`: no `let` inside the loop binds it.
+jet_driver_cost_outlives_turn: fn(symbol: SymbolID?, turn: [Int:Bool], binds: JetDriverCostBinds) -> Bool Never! {
+    known: symbol ?? return false
+    if binds.lets.get("{known:Debug}") == .Val(init) -> return turn.get(init) == None
+    true
+}
+
+// The place node `id` of `tree` names when it is the same place on every
+// turn of the loop whose expressions are `turn`, spelled as
+// jet_driver_cost_place_path spells it with each index's value: its local
+// outlives the turn, and each index is an Int literal, a constant, or a
+// local a `let` before the loop binds and the loop never assigns. None for
+// any other node, and for a place whose index changes with the turn
+// (`xs[i]` under `loop i in …`).
+jet_driver_cost_turn_path: fn(tree: BodyTree, id: Int, turn: [Int:Bool], binds: JetDriverCostBinds) -> String? Never! {
+    node: body_node(tree, id)
+    if node.kind == .Local(local) {
+        if !jet_driver_cost_outlives_turn(local.symbol_id, turn, binds) -> return None
+        return jet_driver_cost_place_path(tree, id)
+    }
+    if node.kind == .Field(receiver, field) {
+        base: jet_driver_cost_turn_path(tree, receiver, turn, binds) ?? return None
+        return Val("{base}.{field.name}")
+    }
+    if node.kind == .Index(base, index, _, _, _, _) {
+        root: jet_driver_cost_turn_path(tree, base, turn, binds) ?? return None
+        key: jet_driver_cost_turn_key(tree, index, turn, binds) ?? return None
+        return Val("{root}[{key}]")
+    }
+    None
+}
+
+// The spelling of index node `id` of `tree` when it holds one value on
+// every turn of the loop whose expressions are `turn`
+// (jet_driver_cost_turn_path); None for any other index.
+jet_driver_cost_turn_key: fn(tree: BodyTree, id: Int, turn: [Int:Bool], binds: JetDriverCostBinds) -> String? Never! {
+    node: body_node(tree, id)
+    if node.kind == .IntLit(value, _) -> return Val("{value}")
+    if node.kind == .ConstRef(symbol) -> return Val("{symbol:Debug}")
+    if node.kind == .Local(local) && local.symbol_id == .Val(symbol) {
+        key: "{symbol:Debug}"
+        init: binds.lets.get(key) ?? return None
+        if turn.get(init) != None -> return None
+        stores: binds.assigned.get(key) ?? [Int]{}
+        loop value in stores {
+            if turn.get(value) != None -> return None
+        }
+        return Val(key)
+    }
+    None
+}
+
 // Whether assignment place `place` of `tree` stores an exact Int.
 jet_driver_cost_int_place: fn(tree: BodyTree, place: BodyPlace) -> Bool Never! {
     if place == .Local(local) -> return local.ty == Type.Int
-    if place == .Expr(expression) && body_cost_type(tree, expression) == .Val(stored) -> return stored == Type.Int
+    if place == .Expr(expression) && body_cost_type(tree, expression) == .Val(stored) {
+        return stored == Type.Int
+    }
     false
 }
 
@@ -617,11 +726,17 @@ jet_driver_cost_int_place: fn(tree: BodyTree, place: BodyPlace) -> Bool Never! {
 // comparing it, or it plus, less, times or shifted by some Int, against any
 // Int: `place < cap`, `place * 2 <= cap`, `cap > place` or `cap >= place`,
 // alone or as one side of `&&`.
-jet_driver_cost_caps: fn(tree: BodyTree, condition: Int, place: BodyPlace) -> Bool Never! {
+jet_driver_cost_caps: fn(tree: BodyTree, condition: Int, place: BodyPlace, turn: [Int:Bool], binds: JetDriverCostBinds) -> Bool Never! {
     if body_node(tree, condition).kind == .Binary(op, _, _, left, right) {
-        if op == TBinaryOp.And -> return jet_driver_cost_caps(tree, left, place) || jet_driver_cost_caps(tree, right, place)
-        if op == TBinaryOp.Lt || op == TBinaryOp.Le -> return jet_driver_cost_capped(tree, place, left)
-        if op == TBinaryOp.Gt || op == TBinaryOp.Ge -> return jet_driver_cost_capped(tree, place, right)
+        if op == TBinaryOp.And {
+            return jet_driver_cost_caps(tree, left, place, turn, binds) || jet_driver_cost_caps(tree, right, place, turn, binds)
+        }
+        if op == TBinaryOp.Lt || op == TBinaryOp.Le {
+            return jet_driver_cost_capped(tree, place, left, turn, binds)
+        }
+        if op == TBinaryOp.Gt || op == TBinaryOp.Ge {
+            return jet_driver_cost_capped(tree, place, right, turn, binds)
+        }
     }
     false
 }
@@ -629,24 +744,29 @@ jet_driver_cost_caps: fn(tree: BodyTree, condition: Int, place: BodyPlace) -> Bo
 // Whether the capped side `id` of a loop condition of `tree` is the place
 // `place`, or it plus, less, times or shifted by some Int
 // (jet_driver_cost_caps).
-jet_driver_cost_capped: fn(tree: BodyTree, place: BodyPlace, id: Int) -> Bool Never! {
+jet_driver_cost_capped: fn(tree: BodyTree, place: BodyPlace, id: Int, turn: [Int:Bool], binds: JetDriverCostBinds) -> Bool Never! {
     if body_node(tree, id).kind == .Binary(op, _, _, left, right) && (op == TBinaryOp.Add || op == TBinaryOp.Sub || op == TBinaryOp.Mul || op == TBinaryOp.Shl) {
-        if op == TBinaryOp.Mul && jet_driver_cost_updates_place(tree, place, right) -> return true
-        return jet_driver_cost_updates_place(tree, place, left)
+        if op == TBinaryOp.Mul && jet_driver_cost_updates_place(tree, place, right, turn, binds) {
+            return true
+        }
+        return jet_driver_cost_updates_place(tree, place, left, turn, binds)
     }
-    jet_driver_cost_updates_place(tree, place, id)
+    jet_driver_cost_updates_place(tree, place, id, turn, binds)
 }
 
-// Whether node `id` of `tree` reads the place `place` an assignment stores.
-jet_driver_cost_updates_place: fn(tree: BodyTree, place: BodyPlace, id: Int) -> Bool Never! {
+// Whether node `id` of `tree` reads the place `place` an assignment stores,
+// the same one on every turn of the loop whose expressions are `turn`.
+jet_driver_cost_updates_place: fn(tree: BodyTree, place: BodyPlace, id: Int, turn: [Int:Bool], binds: JetDriverCostBinds) -> Bool Never! {
     read: body_node(tree, id)
     if place == .Local(local) {
-        if read.kind == .Local(other) -> return local.symbol_id != None && other.symbol_id == local.symbol_id
+        if read.kind == .Local(other) {
+            return local.symbol_id != None && other.symbol_id == local.symbol_id
+        }
         return false
     }
     if place == .Expr(expression) {
-        stored: jet_driver_cost_place_path(tree, expression) ?? return false
-        read_path: jet_driver_cost_place_path(tree, id) ?? return false
+        stored: jet_driver_cost_turn_path(tree, expression, turn, binds) ?? return false
+        read_path: jet_driver_cost_turn_path(tree, id, turn, binds) ?? return false
         return read_path == stored
     }
     false
@@ -688,13 +808,17 @@ jet_driver_cost_shared_edits: fn(tree: BodyTree) -> [Int:Bool] Never! {
         if shares.len() == 0 -> next
         loop id in iterated {
             if body_node(tree, id).kind == .BuiltinMethod(receiver, operation, _) && checked_builtin_mutates_receiver(operation) && body_cost_type(tree, receiver) == .Val(receiver_type) {
-                if receiver_type == .Map(_, _, _) && jet_driver_cost_shares_place(tree, receiver, shares) -> edits[id] = true
+                if receiver_type == .Map(_, _, _) && jet_driver_cost_shares_place(tree, receiver, shares) {
+                    edits[id] = true
+                }
             }
         }
         loop row in tree.stmts {
             if row == .Assign(place, _, value, _, _) && inside.get(value) != None {
                 if place == .Expr(expression) && body_node(tree, expression).kind == .Index(base, _, kind, _, _, _) {
-                    if (kind == TIndexKind.Map || kind == TIndexKind.MapOr) && jet_driver_cost_shares_place(tree, base, shares) -> edits[expression] = true
+                    if (kind == TIndexKind.Map || kind == TIndexKind.MapOr) && jet_driver_cost_shares_place(tree, base, shares) {
+                        edits[expression] = true
+                    }
                 }
             }
         }
@@ -718,7 +842,9 @@ jet_driver_cost_shared_value: fn(tree: BodyTree, id: Int) -> Int? Never! {
 jet_driver_cost_shares_place: fn(tree: BodyTree, id: Int, shares: [String]) -> Bool Never! {
     path: jet_driver_cost_place_path(tree, id) ?? return false
     loop share in shares {
-        if path == share || path.starts_with("{share}.") || path.starts_with("{share}[") || share.starts_with("{path}.") || share.starts_with("{path}[") -> return true
+        if path == share || path.starts_with("{share}.") || path.starts_with("{share}[") || share.starts_with("{path}.") || share.starts_with("{path}[") {
+            return true
+        }
     }
     false
 }

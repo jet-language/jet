@@ -1477,7 +1477,13 @@ exceed -1..1 or 0, unless the loop's condition compares that Int, alone or
 plus, less, times or shifted by some Int, against any Int (`loop capacity <
 slots`, `loop span * 2 <= limit`), which stops it below twice that Int,
 since an uncapped doubling leaves the packed Int rail within a few dozen
-turns; its fix names a range type (`Int(0..1000)`) or a fixed width (`I64`). A sum is
+turns; its fix names a range type (`Int(0..1000)`) or a fixed width (`I64`).
+Only an Int that carries its value from one turn into the next grows: a
+local the loop doesn't bind afresh each turn, or a field or element reached
+the same way on every turn, its index a literal, a constant or a local bound
+before the loop and never assigned in it (`xs[0] = xs[0] * k`). An element
+whose index changes with the turn (`loop i in 0..<n -> xs[i] = xs[i] * k`)
+is scaled once and is never L2511. A sum is
 never L2511, since it reaches the rail's end only after about 2^63 / step
 turns; `explain --cost` still lists it. A view local read only as the receiver of a builtin scalar read
 (`trimmed.len()`, `is_empty`, `index_of`, …) is read in place, never made
