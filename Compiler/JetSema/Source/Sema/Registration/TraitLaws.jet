@@ -62,7 +62,9 @@ sema_trait_laws_add: fn(graph: &SemaRegistrationGraph) Never! {
         bytes := [U8]{}
         loop item in row.program.items {
             if item == .Trait(definition) {
-                if definition.laws.len() == 0 || name_find(declared.names, definition.name) != None -> next
+                if definition.laws.len() == 0 || name_find(declared.names, definition.name) != None {
+                    next
+                }
                 if bytes.len() == 0 -> bytes = row.source.bytes()
                 _ := name_intern(declared.names, definition.name)
                 first: declared.laws.len()
