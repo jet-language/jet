@@ -5,6 +5,10 @@
 // its side debug file with it. The lookups are the fault report's own
 // (Compiler/JetRuntime/Assets/FaultReport/report.S `find` and `line`), so a
 // release report named here reads as the dev build's report.
+//
+// A function's rows (X64LineRow, from its start and line 1), each: a uleb,
+// twice the address advance from the row before plus 1 for a call row;
+// a call row's character column, a uleb; and an sleb, the line advance.
 
 // One function's record: its link-time code [low, high), its name, file
 // path, compilation directory and declaration line, and its rows' bytes
@@ -123,22 +127,60 @@ x64_jetline_find: fn(lines: X64Jetline, pc: Int) -> Int Never! {
     -1
 }
 
-// The line of `pc` in `function`: the last row at or before it, the last
-// row reaching the function's end; None when no row holds it.
-x64_jetline_line: fn(lines: X64Jetline, function: X64JetlineFunction, pc: Int) -> Int? Never! {
-    at := function.rows
-    address := function.low
+// Each row of `rows` with a source line, in the table's coding (above),
+// onto `out`; the rows are offsets from the function's start.
+x64_jetline_rows: fn(out: &[U8], rows: [X64LineRow]) Never! {
+    at := 0
     line := 1
-    previous := -1
-    previous_line := 0
-    loop at < function.rows_end {
-        address += link_debug_uleb(lines.table, at)
-        line += x64_jetline_sleb(lines.table, at)
-        if previous >= 0 && pc >= previous && pc < address -> return Val(previous_line)
-        previous = address
-        previous_line = line
+    loop row in rows {
+        if row.line <= 0 -> next
+        dwarf_uleb(out, if row.call -> 2 * (row.at - at) + 1 else -> 2 * (row.at - at))
+        if row.call -> dwarf_uleb(out, row.column)
+        dwarf_sleb(out, row.line - line)
+        at = row.at
+        line = row.line
     }
-    if previous >= 0 && pc >= previous && pc < function.high -> return Val(previous_line)
+}
+
+// The row at `at` of `table` after `row` (the one before it, or the
+// function's start and line 1 before the first), advancing `at` past it.
+x64_jetline_next: fn(table: [U8], at: &Int, row: &X64LineRow) Never! {
+    advance: link_debug_uleb(table, at)
+    row.at += advance >> 1
+    row.call = advance & 1 == 1
+    row.column = if row.call -> link_debug_uleb(table, at) else -> 0
+    row.line += x64_jetline_sleb(table, at)
+}
+
+// The line of `pc` in `function` as a statement's: the last statement row
+// at or before it (call rows left out), the last reaching the function's
+// end; None when no row holds it.
+x64_jetline_line: fn(lines: X64Jetline, function: X64JetlineFunction, pc: Int) -> Int? Never! {
+    found: x64_jetline_row(lines, function, pc) ?? return None
+    Val(found.line)
+}
+
+// The row holding `pc` in `function`, call rows too: a caller's frame
+// looked up at its return address - 1 stands at its call's line and
+// column. None when no row holds it.
+x64_jetline_place: fn(lines: X64Jetline, function: X64JetlineFunction, pc: Int) -> X64LineRow? Never! {
+    x64_jetline_row(lines, function, pc, calls: true)
+}
+
+// The last row (a call row only with `calls`) at or before `pc` in
+// `function` whose code reaches it.
+x64_jetline_row: fn(lines: X64Jetline, function: X64JetlineFunction, pc: Int, calls: Bool{false}) -> X64LineRow? Never! {
+    at := function.rows
+    row := X64LineRow{at: function.low, line: 1}
+    // The row before `row` that holds code, its start -1 before the first.
+    held := X64LineRow{at: -1, line: 0}
+    loop at < function.rows_end {
+        x64_jetline_next(lines.table, at, row)
+        if row.call && !calls -> next
+        if held.at >= 0 && pc >= held.at && pc < row.at -> return Val(held)
+        held = X64LineRow{at: row.at, line: row.line, column: row.column, call: row.call}
+    }
+    if held.at >= 0 && pc >= held.at && pc < function.high -> return Val(held)
     None
 }
 
@@ -166,4 +208,43 @@ x64_jetline_text: fn(bytes: [U8], at: Int) -> String Never! {
     end: link_debug_cstr_end(bytes, at)
     if at < 0 || end > bytes.len() -> return ""
     String.from_bytes(bytes[at..<end - 1]) ?? ""
+}
+
+#Test("a function's rows keep their call rows, which only a place lookup reads") {
+    rows: [X64LineRow]{
+        X64LineRow{at: 0, line: 5},
+        X64LineRow{at: 4, line: 6},
+        X64LineRow{at: 4, line: 7, column: 9, call: true},
+        X64LineRow{at: 9, line: 6, call: true},
+        X64LineRow{at: 12, line: 8},
+    }
+    table := [U8]{}
+    x64_jetline_rows(table, rows)
+    // uleb(2 * advance + call), a call row's column, then the line's sleb.
+    assert_eq(table, [U8]{0, 4, 8, 1, 1, 9, 1, 11, 0, 0x7f, 6, 2})
+    size: table.len()
+    lines: X64Jetline{table: table, functions: [X64JetlineFunction]{X64JetlineFunction{low: 0x1000, high: 0x1010, name: "run", file: "run.jet", dir: "", decl: 5, rows: 0, rows_end: size}}}
+    assert_eq(x64_jetline_line(lines, lines.functions[0], 0x1003), Val(5))
+    assert_eq(x64_jetline_line(lines, lines.functions[0], 0x1004), Val(6))
+    assert_eq(x64_jetline_line(lines, lines.functions[0], 0x1008), Val(6))
+    assert_eq(x64_jetline_line(lines, lines.functions[0], 0x100a), Val(6))
+    assert_eq(x64_jetline_line(lines, lines.functions[0], 0x100f), Val(8))
+    assert_eq(x64_jetline_line(lines, lines.functions[0], 0x1010), None)
+    first: x64_jetline_place(lines, lines.functions[0], 0x1003) ?? panic("the opening row")
+    assert(!first.call && first.line == 5 && first.at == 0x1000)
+    call: x64_jetline_place(lines, lines.functions[0], 0x1008) ?? panic("the call's row")
+    assert(call.call && call.at == 0x1004 && call.line == 7 && call.column == 9)
+    back: x64_jetline_place(lines, lines.functions[0], 0x1009) ?? panic("the restore row")
+    assert(back.call && back.line == 6 && back.column == 0)
+    after: x64_jetline_place(lines, lines.functions[0], 0x100c) ?? panic("the last row")
+    assert(!after.call && after.line == 8 && after.column == 0)
+    seen := 0
+    at := 0
+    row := X64LineRow{at: 0x1000, line: 1}
+    loop at < size {
+        x64_jetline_next(lines.table, at, row)
+        seen += 1
+    }
+    assert_eq(seen, 5)
+    assert_eq(row.at, 0x100c)
 }

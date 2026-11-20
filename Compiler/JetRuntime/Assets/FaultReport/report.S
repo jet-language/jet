@@ -381,7 +381,11 @@ find:
 
 # The line of link-time address rdi in the function find matched: the row
 # before the first row past it, the last row's reaching the function's
-# end. eax 1 and [V_LINE], else eax 0.
+# end. A row (Image/Jetline.jet): a uleb, twice the address advance plus 1
+# for a call row, whose column (a uleb) follows; then the sleb line
+# advance. A call row counts as any other, so a caller's frame, looked up
+# at its return address - 1, names its call's line. eax 1 and [V_LINE],
+# else eax 0.
 line:
     push rbx
     push r12
@@ -397,6 +401,11 @@ line:
 1:  cmp rsi, r12
     jae 3f
     call uleb
+    shr rax, 1
+    push rax
+    jnc 7f
+    call uleb
+7:  pop rax
     add r9, rax
     call sleb
     add r10, rax

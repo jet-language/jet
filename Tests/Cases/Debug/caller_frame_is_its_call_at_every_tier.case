@@ -1,0 +1,138 @@
+# A caller's frame is at its call: the line table's call row at the return
+# address minus one gives the call's line and column, on every tier. The
+# image is built with `--inline=off`, so `scale` and `total_of` keep their
+# frames on O1 and O2. Stopped in `scale`, the console's `bt` and the DAP
+# `stackTrace` show `total_of` at the call of `scale` (line 8, column 37,
+# not the loop's column 5) and `run` at the call of `total_of` (line 14,
+# column 10). `evaluate` in `total_of`'s frame reads its parameter. The
+# fixture must stay in jet fmt form. No other debugger is on PATH.
+fixture: CallerFrameIsItsCallAtEveryTier.fixture
+env: NO_COLOR=1
+step: jet build -O0 prog.jet
+exit: 0
+step console_o0: jet debug {work}/.jet/build/prog --break prog.jet:2
+env: PATH={work}/no-tools
+stdin: caller_frame_is_its_call_at_every_tier.stdin
+exit: 0
+stdout: ~ "#0  scale()  at prog.jet:2\n" # the stop
+stdout: ~ "#1  total_of()  at prog.jet:8\n" # its caller, at the call
+stdout: ~ "#2  run()  at prog.jet:14\n" # and run, at its call
+stdout: ~ "18\n" # the program ran to its end
+session o0 content-length: jet debug --dap {work}/.jet/build/prog
+env: PATH={work}/no-tools
+send o0: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\",\"linesStartAt1\":true,\"columnsStartAt1\":true}}"
+recv o0 until $.request_seq = 1 timeout 30s every 100ms
+send o0: "{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{\"program\":\"{work}/.jet/build/prog\",\"stopOnEntry\":false,\"args\":[]}}"
+recv o0 until $.event = "initialized" timeout 30s every 100ms
+send o0: "{\"seq\":3,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/prog.jet\"},\"breakpoints\":[{\"line\":2}]}}"
+recv o0 until $.request_seq = 3 timeout 30s every 100ms
+send o0: "{\"seq\":4,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{}}"
+recv o0 until $.event = "stopped" timeout 30s every 100ms
+send o0: "{\"seq\":5,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":1}}"
+recv o0 until $.request_seq = 5 timeout 30s every 100ms
+json: stdout doc $.body.stackFrames[0].name = "scale"
+json: stdout doc $.body.stackFrames[0].line = 2
+json: stdout doc $.body.stackFrames[1].name = "total_of"
+json: stdout doc $.body.stackFrames[1].line = 8
+json: stdout doc $.body.stackFrames[1].column = 37 # the call of scale, not the loop
+json: stdout doc $.body.stackFrames[2].name = "run"
+json: stdout doc $.body.stackFrames[2].line = 14
+json: stdout doc $.body.stackFrames[2].column = 10 # the call of total_of
+capture: frame_o0 stdout doc $.body.stackFrames[1].id
+send o0: "{\"seq\":6,\"type\":\"request\",\"command\":\"evaluate\",\"arguments\":{\"expression\":\"limit\",\"frameId\":{cap:frame_o0},\"context\":\"repl\"}}"
+recv o0 until $.request_seq = 6 timeout 30s every 100ms
+json: stdout doc $.success = true
+json: stdout doc $.body.result = "4" # the caller's parameter
+send o0: "{\"seq\":7,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/prog.jet\"},\"breakpoints\":[]}}"
+recv o0 until $.request_seq = 7 timeout 30s every 100ms
+send o0: "{\"seq\":8,\"type\":\"request\",\"command\":\"continue\",\"arguments\":{\"threadId\":1}}"
+recv o0 collect until ndjson $[?event="terminated"] #>= 1 timeout 30s
+stdout: ~ "\"exitCode\":0" # the program ran on to its end
+send o0: "{\"seq\":9,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{}}"
+recv o0 until $.request_seq = 9 timeout 30s every 100ms
+close o0
+exit: 0
+step: jet build -O1 --inline=off prog.jet
+exit: 0
+step console_o1: jet debug {work}/.jet/build/prog --break prog.jet:2
+env: PATH={work}/no-tools
+stdin: caller_frame_is_its_call_at_every_tier.stdin
+exit: 0
+stdout: ~ "#0  scale()  at prog.jet:2\n" # the same stop on O1
+stdout: ~ "#1  total_of()  at prog.jet:8\n" # the same caller line
+stdout: ~ "#2  run()  at prog.jet:14\n" # and run's call
+stdout: ~ "18\n" # the program ran to its end
+session o1 content-length: jet debug --dap {work}/.jet/build/prog
+env: PATH={work}/no-tools
+send o1: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\",\"linesStartAt1\":true,\"columnsStartAt1\":true}}"
+recv o1 until $.request_seq = 1 timeout 30s every 100ms
+send o1: "{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{\"program\":\"{work}/.jet/build/prog\",\"stopOnEntry\":false,\"args\":[]}}"
+recv o1 until $.event = "initialized" timeout 30s every 100ms
+send o1: "{\"seq\":3,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/prog.jet\"},\"breakpoints\":[{\"line\":2}]}}"
+recv o1 until $.request_seq = 3 timeout 30s every 100ms
+send o1: "{\"seq\":4,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{}}"
+recv o1 until $.event = "stopped" timeout 30s every 100ms
+send o1: "{\"seq\":5,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":1}}"
+recv o1 until $.request_seq = 5 timeout 30s every 100ms
+json: stdout doc $.body.stackFrames[1].name = "total_of"
+json: stdout doc $.body.stackFrames[1].line = 8
+json: stdout doc $.body.stackFrames[1].column = 37 # the same call column on O1
+json: stdout doc $.body.stackFrames[2].name = "run"
+json: stdout doc $.body.stackFrames[2].line = 14
+json: stdout doc $.body.stackFrames[2].column = 10
+capture: frame_o1 stdout doc $.body.stackFrames[1].id
+send o1: "{\"seq\":6,\"type\":\"request\",\"command\":\"evaluate\",\"arguments\":{\"expression\":\"limit\",\"frameId\":{cap:frame_o1},\"context\":\"repl\"}}"
+recv o1 until $.request_seq = 6 timeout 30s every 100ms
+json: stdout doc $.success = true
+json: stdout doc $.body.result = "4"
+send o1: "{\"seq\":7,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/prog.jet\"},\"breakpoints\":[]}}"
+recv o1 until $.request_seq = 7 timeout 30s every 100ms
+send o1: "{\"seq\":8,\"type\":\"request\",\"command\":\"continue\",\"arguments\":{\"threadId\":1}}"
+recv o1 collect until ndjson $[?event="terminated"] #>= 1 timeout 30s
+stdout: ~ "\"exitCode\":0" # the program ran on to its end
+send o1: "{\"seq\":9,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{}}"
+recv o1 until $.request_seq = 9 timeout 30s every 100ms
+close o1
+exit: 0
+step: jet build -O2 --inline=off prog.jet
+exit: 0
+step console_o2: jet debug {work}/.jet/build/prog --break prog.jet:2
+env: PATH={work}/no-tools
+stdin: caller_frame_is_its_call_at_every_tier.stdin
+exit: 0
+stdout: ~ "#0  scale()  at prog.jet:2\n" # the same stop on O2
+stdout: ~ "#1  total_of()  at prog.jet:8\n" # the same caller line
+stdout: ~ "#2  run()  at prog.jet:14\n" # and run's call
+stdout: ~ "18\n" # the program ran to its end
+session o2 content-length: jet debug --dap {work}/.jet/build/prog
+env: PATH={work}/no-tools
+send o2: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\",\"linesStartAt1\":true,\"columnsStartAt1\":true}}"
+recv o2 until $.request_seq = 1 timeout 30s every 100ms
+send o2: "{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{\"program\":\"{work}/.jet/build/prog\",\"stopOnEntry\":false,\"args\":[]}}"
+recv o2 until $.event = "initialized" timeout 30s every 100ms
+send o2: "{\"seq\":3,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/prog.jet\"},\"breakpoints\":[{\"line\":2}]}}"
+recv o2 until $.request_seq = 3 timeout 30s every 100ms
+send o2: "{\"seq\":4,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{}}"
+recv o2 until $.event = "stopped" timeout 30s every 100ms
+send o2: "{\"seq\":5,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":1}}"
+recv o2 until $.request_seq = 5 timeout 30s every 100ms
+json: stdout doc $.body.stackFrames[1].name = "total_of"
+json: stdout doc $.body.stackFrames[1].line = 8
+json: stdout doc $.body.stackFrames[1].column = 37 # the same call column on O2
+json: stdout doc $.body.stackFrames[2].name = "run"
+json: stdout doc $.body.stackFrames[2].line = 14
+json: stdout doc $.body.stackFrames[2].column = 10
+capture: frame_o2 stdout doc $.body.stackFrames[1].id
+send o2: "{\"seq\":6,\"type\":\"request\",\"command\":\"evaluate\",\"arguments\":{\"expression\":\"limit\",\"frameId\":{cap:frame_o2},\"context\":\"repl\"}}"
+recv o2 until $.request_seq = 6 timeout 30s every 100ms
+json: stdout doc $.success = true
+json: stdout doc $.body.result = "4"
+send o2: "{\"seq\":7,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/prog.jet\"},\"breakpoints\":[]}}"
+recv o2 until $.request_seq = 7 timeout 30s every 100ms
+send o2: "{\"seq\":8,\"type\":\"request\",\"command\":\"continue\",\"arguments\":{\"threadId\":1}}"
+recv o2 collect until ndjson $[?event="terminated"] #>= 1 timeout 30s
+stdout: ~ "\"exitCode\":0" # the program ran on to its end
+send o2: "{\"seq\":9,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{}}"
+recv o2 until $.request_seq = 9 timeout 30s every 100ms
+close o2
+exit: 0

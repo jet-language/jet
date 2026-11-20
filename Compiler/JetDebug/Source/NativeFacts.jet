@@ -158,10 +158,9 @@ NativeAbstract: struct {
 // union's and enumeration's in DIE order, as its group names them;
 // `abstracts` holds each abstract subprogram of inlined code by its offset;
 // `allocs` the type each allocating call of a `--checked-alloc` image
-// allocates for (a `types` key), by the call's return address; `calls` the
-// call-site row of each call that has one (the source node that made it),
-// by the call's return address; `arguments` the values each such call
-// passes in its argument registers (DW_TAG_call_site_parameter); `level`
+// allocates for (a `types` key), by the call's return address; `arguments`
+// the values each call its caller keeps arguments of passes in its argument
+// registers (DW_TAG_call_site_parameter); `level`
 // the optimization level the program was built at, as its unit's producer
 // names it (native_producer_level); `frames` its call frame information;
 // `sources` the sha256 of each source it was compiled from, by its path
@@ -178,19 +177,11 @@ NativeImage: struct {
     loclists: [U8],
     abstracts: [Int:NativeAbstract],
     allocs: [Int:Int],
-    calls: [Int:NativeCallSite]{[Int:NativeCallSite]{}},
     arguments: [NativeCallArgument]{[NativeCallArgument]{}},
     level: Int{0},
     frames: NativeFrames{NativeFrames{sections: [NativeCode]{}, fdes: [NativeFde]{}}},
     sources: [String:[U8]]{[String:[U8]]{}},
     addresses: [U8]{[U8]{}},
-}
-
-// The source node a call's lowering came from: its line and character
-// column (JetBackend Image/Dwarf.jet DW_TAG_call_site).
-NativeCallSite: struct {
-    line: Int,
-    column: Int,
 }
 
 // A value a call passes in argument register `register` (a DWARF register
@@ -737,11 +728,10 @@ native_encoding: fn(code: Int) -> X64DebugEncoding Never! {
 // `discriminant` is the DIE a variant part's discriminant member is,
 // `selects` the discriminant value a variant is selected by, `origin` the
 // abstract subprogram an inlined run is of and `call_line` and `call_file`
-// its call's line and file (and a call site's line and `call_column`);
-// `file` is a declaration's file, `return_pc` a call site's return
-// address and `producer` a unit's producer; `expression` is an exprloc
-// DW_AT_location (a call site parameter's register) and `call_value` a
-// call site parameter's DW_AT_call_value.
+// its call's line and file; `file` is a declaration's file, `return_pc` a
+// call site's return address and `producer` a unit's producer;
+// `expression` is an exprloc DW_AT_location (a call site parameter's
+// register) and `call_value` a call site parameter's DW_AT_call_value.
 NativeDie: struct {
     tag: Int,
     offset: Int,
@@ -763,7 +753,6 @@ NativeDie: struct {
     file: Int,
     call_file: Int,
     return_pc: Int,
-    call_column: Int{0},
     producer: String{""},
     expression: [U8]{[U8]{}},
     call_value: [U8]{[U8]{}},
@@ -888,7 +877,6 @@ native_die_attribute: fn(die: &NativeDie, attribute: Int, form: Int, info: [U8],
         0x3a -> die.file = value
         0x58 -> die.call_file = value
         0x7d -> die.return_pc = value
-        0x57 -> die.call_column = value
         0x25 -> die.producer = x64_jetline_text(info, at)
         0x73 -> bases.addr = value
         0x8c -> bases.lists = value
@@ -1110,9 +1098,6 @@ native_image_die: fn(image: &NativeImage, die: NativeDie, open: [NativeDie], bas
                 return
             }
             if die.ty >= 0 -> image.allocs[die.return_pc] = die.ty
-            if die.call_line > 0 {
-                image.calls[die.return_pc] = NativeCallSite{line: die.call_line, column: die.call_column}
-            }
         }
         code == NATIVE_TAG_CALL_SITE_PARAMETER -> {
             if open.len() == 0 {

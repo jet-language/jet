@@ -6990,7 +6990,7 @@ perf_causal_line: fn(state: I64, pc: I64) -> I64 {
             if (rows_end > end) { return I64{0} }
             if (pc >= low && pc < high) {
                 if (trace_u16(wrapping(strings + file)) & I64{255} == I64{60}) { return I64{0} }
-                line: trace_line(cursor, rows_end, low, high, pc)
+                line: trace_statement_line(cursor, rows_end, low, high, pc)
                 if (line == I64{0}) { return I64{0} }
                 return perf_causal_ranges(state, cursor, rows_end, low, high, line)
             }
@@ -7004,8 +7004,8 @@ perf_causal_line: fn(state: I64, pc: I64) -> I64 {
 }
 
 // Store each row range of line `line` in the function [low, high) whose
-// rows are [rows, rows_end) (Fault.jet trace_line's walk) as the target's;
-// their count.
+// rows are [rows, rows_end) (Fault.jet trace_statement_line's walk: its
+// call rows left out) as the target's; their count.
 perf_causal_ranges: fn(state: I64, rows: I64, rows_end: I64, low: I64, high: I64, line: I64) -> I64 {
     at := rows
     address := low
@@ -7014,10 +7014,14 @@ perf_causal_ranges: fn(state: I64, rows: I64, rows_end: I64, low: I64, high: I64
     previous_line := I64{0}
     count := I64{0}
     loop at < rows_end {
-        address = wrapping(address + trace_uleb(at))
+        advance: trace_uleb(at)
+        address = wrapping(address + (advance >> I64{1}))
         at = trace_leb_end(at)
+        call: advance & I64{1} != I64{0}
+        if (call) { at = trace_leb_end(at) }
         current = wrapping(current + trace_sleb(at))
         at = trace_leb_end(at)
+        if (call) { next }
         if (previous >= I64{0} && previous_line == line && address > previous && count < PERF_CAUSAL_RANGES) {
             perf_causal_range(state, count, previous, address)
             count = wrapping(count + I64{1})

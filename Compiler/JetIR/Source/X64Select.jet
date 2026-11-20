@@ -331,10 +331,13 @@ IRX64Emitter: struct {
     alloc_row: Int,
     alloc_relocs: [Int],
     alloc_rows: [Int],
-    // The calls whose instructions name a call-site row
-    // (ir_code_line_call), each at its unrelaxed return address until the
-    // code is laid out, for X64FunctionDebug.calls; ir_x64_call adds the
-    // arguments its caller keeps (ir_x64_kept_arguments).
+    // Per call whose instruction names a call-site row (ir_code_line_call):
+    // its call row (X64LineRow.call) at its instruction's start and its
+    // return address, both unrelaxed until the code is laid out. Of those
+    // whose caller keeps arguments (ir_x64_kept_arguments), each call site,
+    // for X64FunctionDebug.calls.
+    call_rows: [X64LineRow]{[X64LineRow]{}},
+    call_returns: [Int]{[Int]{}},
     calls: [X64CallSite]{[X64CallSite]{}},
     // Per instruction: of the first of a zone region's instructions
     // (ir_x64_zone_regions), the region's last one, else -1; and the region
@@ -616,6 +619,7 @@ ir_x64_call_out: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Alloc
         ir_x64_keep_routed(e, f, al, true)
     }
     if e.streams && !keeps -> x64_sfence(e.code)
+    start: e.code.bytes.len()
     if indirect {
         e.dynamic = true
         x64_call_reg(e.code, X64_R10)
@@ -627,16 +631,17 @@ ir_x64_call_out: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Alloc
             e.alloc_rows.push(e.alloc_row)
         }
     }
-    ir_x64_call_row(e, f)
+    ir_x64_call_row(e, f, start)
     if !keeps {
         ir_x64_keep_xmms(e, f, al, false)
         ir_x64_keep_routed(e, f, al, false)
     }
 }
 
-// The call just emitted, when its instruction e.code.at names a call-site
-// row: it returns to the end of the code so far.
-ir_x64_call_row: fn(e: &IRX64Emitter, f: IRFunction) Never! {
+// The call just emitted from `start`, when its instruction e.code.at names
+// a call-site row: its call row, and its return, the end of the code so
+// far.
+ir_x64_call_row: fn(e: &IRX64Emitter, f: IRFunction, start: Int) Never! {
     at: e.code.at
     if at < 0 || at >= f.code_line.len() {
         return
@@ -646,7 +651,8 @@ ir_x64_call_row: fn(e: &IRX64Emitter, f: IRFunction) Never! {
     if row == 0 || word + 1 >= f.call_sites.len() {
         return
     }
-    e.calls.push(X64CallSite{at: e.code.bytes.len(), line: f.call_sites[word], column: f.call_sites[word + 1]})
+    e.call_rows.push(X64LineRow{at: start, line: f.call_sites[word], column: f.call_sites[word + 1], call: true})
+    e.call_returns.push(e.code.bytes.len())
 }
 
 // `bytes` pushed below the frame for a while (ir_x64_compile_body's
@@ -722,10 +728,13 @@ ir_x64_call: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocatio
     }
     if sret -> x64_lea(e.code, X64_RDI, X64_RBP, storage)
     if indirect >= 0 -> ir_x64_load(e, m, f, al, indirect, X64_R10)
-    calls: e.calls.len()
+    rows: e.call_rows.len()
     ir_x64_call_out(e, m, f, al, target, indirect >= 0)
-    if e.calls.len() > calls {
-        e.calls[calls].arguments = ir_x64_kept_arguments(al, args, start, places)
+    if e.call_rows.len() > rows {
+        kept: ir_x64_kept_arguments(al, args, start, places)
+        if !kept.is_empty() {
+            e.calls.push(X64CallSite{at: e.call_returns[rows], line: e.call_rows[rows].line, column: e.call_rows[rows].column, arguments: kept})
+        }
     }
     if stacked.len() + pad > 0 -> x64_alu_ri(e.code, X64Alu.Add, X64_RSP, 8 * (stacked.len() + pad))
     if dst < 0 {
@@ -5910,7 +5919,35 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     }
     // An allocating call returns to the end of its rel32 field.
     allocs: loop (k, reloc) in e.alloc_relocs -> X64AllocSite{at: e.relocs[reloc].at + 4, ty: e.alloc_rows[k]}
-    // Each call's return address, relaxed.
+    // The call rows join the statement rows (X64LineRow): each where its
+    // call starts and, unless a row starts at its return, one there back
+    // on its statement's line, so a call row holds its call instruction
+    // alone.
+    if !e.call_rows.is_empty() {
+        merged := [X64LineRow]{}
+        next_row := 0
+        statement := 0
+        loop (k, call) in e.call_rows {
+            loop next_row < lines.len() && lines[next_row].at <= call.at {
+                statement = lines[next_row].line
+                merged.push(lines[next_row])
+                next_row += 1
+            }
+            if call.line <= 0 -> next
+            merged.push(X64LineRow{at: call.at, line: call.line, column: call.column, call: true})
+            back: e.call_returns[k]
+            resumed: (next_row < lines.len() && lines[next_row].at == back) || (k + 1 < e.call_rows.len() && e.call_rows[k + 1].at == back && e.call_rows[k + 1].line > 0)
+            if statement > 0 && !resumed {
+                merged.push(X64LineRow{at: back, line: statement, call: true})
+            }
+        }
+        loop next_row < lines.len() {
+            merged.push(lines[next_row])
+            next_row += 1
+        }
+        lines = merged
+    }
+    // Each call site's return address, relaxed.
     walk = ir_x64_relax_walk()
     loop k in 0..<e.calls.len() -> e.calls[k].at = ir_x64_relaxed_next(relax, walk, e.calls[k].at)
     walk = ir_x64_relax_walk()
@@ -7482,8 +7519,9 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
 }
 
 // check(n) calls report(n, 3) at a call-site row: its call site keeps 3 as
-// a constant for rsi and n for rdi, and past the call, where nothing reads
-// n, n is its entry value, the rdi check's own caller passed.
+// a constant for rsi and n for rdi, its call row names its line and column
+// from its call instruction to its return, and past the call, where
+// nothing reads n, n is its entry value, the rdi check's own caller passed.
 #Test("A call site keeps its arguments and a parameter past its range is its entry value") {
     m := ir_module_new()
     word: ir_word_row(m)
@@ -7513,6 +7551,13 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     assert_eq(kept[0].reg, X64_RDI)
     assert_eq(kept[1].reg, X64_RSI)
     assert(kept[1].value == X64DebugLocation.Constant{value: 3})
+    placed := false
+    loop row in compiled.debug.lines {
+        if row.call && row.line == 3 && row.column == 5 && row.at + 5 == compiled.debug.calls[0].at {
+            placed = true
+        }
+    }
+    assert(placed)
     entered := false
     entry: X64DebugLocation.EntryValue{reg: X64_RDI}
     loop range in compiled.debug.ranges {
@@ -7521,6 +7566,43 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
         }
     }
     assert(entered)
+}
+
+// run() calls ping() at a call-site row of line 4, column 9, in a statement
+// of line 3: a call row at its call instruction names the call, another at
+// its return goes back to line 3, and keeping no argument it has no call
+// site.
+#Test("A call's line and column are a call row, and a call keeping no argument has no call site") {
+    m := ir_module_new()
+    word: ir_word_row(m)
+    ping := ir_function_new("ping", "test:rows.jet.ping", "", "rows.jet", 1)
+    ping.result = word
+    zero: ir_slot(ping, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(ping, IROp.Const, zero, 0, -1, -1, 1)
+    _ := ir_emit(ping, IROp.Return, -1, zero, -1, -1, 1)
+    m.functions.push(ping)
+    f := ir_function_new("run", "test:rows.jet.run", "", "rows.jet", 2)
+    f.result = word
+    result: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    none: ir_args(f, [Int]{})
+    call: ir_emit(f, IROp.Call, result, 0, none, 0, 3)
+    f.code_line[call] = 3 + IR_CODE_LINE_CALL
+    f.call_sites = [Int]{4, 9}
+    _ := ir_emit(f, IROp.Return, -1, result, -1, -1, 3)
+    m.functions.push(f)
+    compiled: ir_x64_compile_function(m, ir_x64_tables(m), 1)
+    assert(compiled.errors.is_empty())
+    assert(compiled.debug.calls.is_empty())
+    calls := [X64LineRow]{}
+    loop row in compiled.debug.lines {
+        if row.call {
+            calls.push(X64LineRow{at: row.at, line: row.line, column: row.column, call: true})
+        }
+    }
+    assert_eq(calls.len(), 2)
+    assert_eq(compiled.function.code[calls[0].at], U8{0xe8})
+    assert(calls[0].line == 4 && calls[0].column == 9)
+    assert(calls[1].at == calls[0].at + 5 && calls[1].line == 3 && calls[1].column == 0)
 }
 
 // second(pair, n) never reads its aggregate `pair`: all along, pair is its

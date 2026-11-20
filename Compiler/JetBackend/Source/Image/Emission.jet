@@ -54,9 +54,19 @@ X64CompiledFunction: struct {
 // where each run of code from one source line starts, the end of the
 // prologue, the call frame instructions of its FDE, and where each debug
 // variable lives over which code range.
+//
+// A `call` row (DWARF's is_stmt false) is no statement's start: one is at
+// each call instruction with a call-site row (JetIR BuildCallSites.jet),
+// naming the line and character column of the source node whose lowering
+// made the call, so a caller's frame, looked up at its return address - 1,
+// stands at its call. Another at the return goes back to the statement's
+// line, column 0 (its first node). Breakpoints and steps read only the
+// other rows; `.debug_line` holds only those.
 X64LineRow: struct {
     at: Int,
     line: Int,
+    column: Int{0},
+    call: Bool{false},
 }
 
 // A register (hardware number; xmm n as 16 + n), a frame slot at `offset`
@@ -98,11 +108,12 @@ X64AllocSite: struct {
     ty: Int,
 }
 
-// A call whose instruction names a call-site row (JetIR BuildCallSites.jet):
-// its return address `at` (an offset in the function's code) and the line
-// and character column of the source node whose lowering made it, which
-// `jet debug` names a caller's frame by (a DW_TAG_call_site, Image/Dwarf.jet),
-// and each argument whose value the caller still holds at the return.
+// A call whose caller still holds some of its arguments while it runs: its
+// return address `at` (an offset in the function's code), the line and
+// character column of the source node whose lowering made it, and each such
+// argument, which `jet debug` reads a callee's parameter's entry value from
+// (a DW_TAG_call_site, Image/Dwarf.jet). A call's own place is its call row
+// (X64LineRow.call).
 X64CallSite: struct {
     at: Int,
     line: Int,
@@ -136,7 +147,8 @@ X64FunctionDebug: struct {
     inlines: [X64InlineRange]{[X64InlineRange]{}},
     // The allocating calls (X64AllocSite), by return address.
     allocs: [X64AllocSite]{[X64AllocSite]{}},
-    // The calls with a call-site row (X64CallSite), by return address.
+    // The calls whose caller keeps arguments (X64CallSite), by return
+    // address.
     calls: [X64CallSite]{[X64CallSite]{}},
 }
 

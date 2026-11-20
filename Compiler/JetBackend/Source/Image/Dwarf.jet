@@ -20,23 +20,24 @@
 //   Code inlined into a function is an inlined subroutine of an abstract
 //   subprogram of the inlined function, so a debugger shows its frame and
 //   locals. Generated functions (glue, helpers, `main`) are artificial
-//   subprograms. Each call the code generator names a source node for is a
-//   call site of its subprogram with its return address and the line and
-//   column of the node (X64FunctionDebug.calls), which `jet debug` names a
-//   caller's frame by, and a call site parameter per argument whose value
-//   the caller keeps while the call runs; past its register's range a
+//   subprograms. Each call whose caller keeps some of its arguments while
+//   it runs is a call site of its subprogram with its return address, the
+//   line and column of its source node and a call site parameter per kept
+//   argument (X64FunctionDebug.calls); past its register's range a
 //   parameter its body never writes is located by its entry value, which
 //   `jet debug` reads from those. A `--checked-alloc` image's allocating
 //   calls are call sites of their subprogram, each with its return address
 //   and the type of what its block holds (X64FunctionDebug.allocs), which
 //   `jet perf` names a heap snapshot's blocks by.
-// - `.debug_line`: one sequence per function with source lines; the row at
-//   the end of the prologue carries `prologue_end`.
+// - `.debug_line`: one sequence per function with source lines, its
+//   statement rows (X64LineRow); the row at the end of the prologue carries
+//   `prologue_end`.
 // - `.debug_jetline`: not DWARF. The location table the runtime's fault
 //   report reads (JetRuntime Assets/FaultReport/report.S) instead of
-//   parsing the DWARF: per Jet function its address
-//   range, name, file, declaration line and the `.debug_line` rows, delta
-//   coded (dwarf_jet_line).
+//   parsing the DWARF: per Jet function its address range, name, file,
+//   declaration line and every row, the call rows too, delta coded
+//   (dwarf_jet_line, Image/Jetline.jet x64_jetline_rows). A caller's frame
+//   is the row at its return address - 1: its call's line and column.
 // - `.debug_addr`: one address per function, its start, in function order;
 //   the subprogram's DW_AT_low_pc is its index (DW_FORM_addrx). Each is a
 //   relocation against the function's section, the only one the function's
@@ -344,11 +345,9 @@ DWARF_ABBREV_CALL_SITE: 25
 
 DWARF_ABBREV_GENERATED_SITES: 26
 
-DWARF_ABBREV_CALL: 27
+DWARF_ABBREV_CALL_ARGUMENTS: 27
 
-DWARF_ABBREV_CALL_ARGUMENTS: 28
-
-DWARF_ABBREV_CALL_ARGUMENT: 29
+DWARF_ABBREV_CALL_ARGUMENT: 28
 
 // Attribute names and forms.
 DW_AT_LOCATION: 0x02
@@ -549,12 +548,11 @@ dwarf_abbrevs: fn(sections: Bool, sites: Bool) -> [U8] Never! {
     dwarf_abbrev(a, DWARF_ABBREV_VARIANT_PART, 0x33, true, [Int]{DW_AT_DISCR, DW_FORM_REF4})
     dwarf_abbrev(a, DWARF_ABBREV_VARIANT, 0x19, true, [Int]{DW_AT_DISCR_VALUE, DW_FORM_SDATA})
     dwarf_abbrev(a, DWARF_ABBREV_DEFAULT_VARIANT, 0x19, true, [Int]{})
-    // A call: its return address and the line and column of the source node
-    // that made it; with arguments, those the caller keeps while it runs,
-    // each its register (DW_OP_reg*) and value there (DW_AT_call_value).
-    call: [Int]{DW_AT_CALL_RETURN_PC, DW_FORM_ADDR, DW_AT_CALL_LINE, DW_FORM_UDATA, DW_AT_CALL_COLUMN, DW_FORM_UDATA}
-    dwarf_abbrev(a, DWARF_ABBREV_CALL, 0x48, false, call)
-    dwarf_abbrev(a, DWARF_ABBREV_CALL_ARGUMENTS, 0x48, true, call)
+    // A call its caller keeps arguments of: its return address, the line
+    // and column of the source node that made it and, as its children,
+    // each kept argument's register (DW_OP_reg*) and value there
+    // (DW_AT_call_value).
+    dwarf_abbrev(a, DWARF_ABBREV_CALL_ARGUMENTS, 0x48, true, [Int]{DW_AT_CALL_RETURN_PC, DW_FORM_ADDR, DW_AT_CALL_LINE, DW_FORM_UDATA, DW_AT_CALL_COLUMN, DW_FORM_UDATA})
     dwarf_abbrev(a, DWARF_ABBREV_CALL_ARGUMENT, 0x49, false, [Int]{DW_AT_LOCATION, DW_FORM_EXPRLOC, DW_AT_CALL_VALUE, DW_FORM_EXPRLOC})
     if sites {
         // An allocating call: its return address and the type of what its
@@ -1292,12 +1290,10 @@ dwarf_info_alloc_sites: fn(info: &[U8], relas: &[X64ObjectRela], sites: [X64Allo
 // indirect place: the address it computes is the value).
 dwarf_info_call_sites: fn(info: &[U8], relas: &[X64ObjectRela], sites: [X64CallSite], offset: Int, symbol: Int) Never! {
     loop site in sites {
-        kept: site.arguments.len() > 0
-        dwarf_uleb(info, if kept -> DWARF_ABBREV_CALL_ARGUMENTS else -> DWARF_ABBREV_CALL)
+        dwarf_uleb(info, DWARF_ABBREV_CALL_ARGUMENTS)
         dwarf_address(info, relas, symbol, offset + site.at)
         dwarf_uleb(info, site.line)
         dwarf_uleb(info, site.column)
-        if !kept -> next
         loop argument in site.arguments {
             dwarf_uleb(info, DWARF_ABBREV_CALL_ARGUMENT)
             register: dwarf_location(X64DebugLocation.Register{reg: argument.reg}, false)
@@ -1419,6 +1415,7 @@ dwarf_line: fn(program: X64ObjectModule, functions: [X64CompiledFunction], debug
         current_line := 1
         current_at := 0
         loop row in rows {
+            if row.call -> next
             if row.line != current_line {
                 dwarf_u8(line, 0x03)
                 dwarf_sleb(line, row.line - current_line)
@@ -1453,11 +1450,11 @@ dwarf_line: fn(program: X64ObjectModule, functions: [X64CompiledFunction], debug
 //   of the strings and u32 of the rows (from the block's start), then per
 //   function 32 bytes: u64 start address (a relocation), u32 code length,
 //   u32 name and u32 file path (string offsets), u32 declaration line,
-//   u32 offset of its rows (in the rows) and u32 row count.
+//   u32 offset of its rows (in the rows) and u32 their byte length.
 //   Strings: the compilation directory (`.` when none) at 0, then the names
 //   and the paths (each path once), NUL terminated.
-//   Rows: per function, per `.debug_line` row the uleb address and sleb
-//   line advance from the previous row (the first from address 0, line 1).
+//   Rows: per function, its rows as Image/Jetline.jet x64_jetline_rows
+//   codes them, the `.debug_line` rows and the call rows.
 // This is the object form: the linker (Image/DebugPrune.jet) drops the
 // records of the functions it dropped and writes the linked form the fault
 // report reads, varint records in address order.
@@ -1494,15 +1491,9 @@ dwarf_jet_line: fn(program: X64ObjectModule, functions: [X64CompiledFunction], d
         elf64_u32(table, paths[facts.file])
         elf64_u32(table, facts.line)
         elf64_u32(table, rows.len())
-        elf64_u32(table, debug[index].lines.len())
-        current_line := 1
-        current_at := 0
-        loop row in debug[index].lines {
-            dwarf_uleb(rows, row.at - current_at)
-            dwarf_sleb(rows, row.line - current_line)
-            current_at = row.at
-            current_line = row.line
-        }
+        from: rows.len()
+        x64_jetline_rows(rows, debug[index].lines)
+        elf64_u32(table, rows.len() - from)
     }
     strings_start: table.len()
     dwarf_patch_u32(table, strings_at, strings_start)

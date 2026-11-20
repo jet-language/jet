@@ -693,10 +693,7 @@ link_jetline_block: fn(linked: &[U8], table: [U8], records: Int, count: Int, str
             return false
         }
         from: rows + link_debug_le(table, record + 24, 4)
-        to := from
-        loop _ in 0..<link_debug_le(table, record + 28, 4) {
-            to = link_debug_leb_end(table, link_debug_leb_end(table, to))
-        }
+        to: from + link_debug_le(table, record + 28, 4)
         if from > end || to > end -> return false
         // Sorted by start, a start is never below the previous start; it is
         // below the previous end only where two records overlap.

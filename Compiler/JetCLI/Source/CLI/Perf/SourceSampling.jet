@@ -10,7 +10,7 @@ use {
     perf_files: core.files
     perf_math: core.math
     perf_ip: core.net.ip
-    jet_backend.[X64ImageFunction, X64Jetline, link_debug_addr, link_debug_le, x64_image_function_find, x64_image_functions, x64_jetline_find, x64_jetline_line]
+    jet_backend.[X64ImageFunction, X64Jetline, link_debug_addr, link_debug_le, x64_image_function_find, x64_image_functions, x64_jetline_find, x64_jetline_line, x64_jetline_place]
     jet_debug.[NativeAbstract, NativeFunction, native_image_read, native_inline_chain, native_jet_spelling]
     jet_driver.[jet_driver_inline_package, jet_driver_mask_inline_package]
     jet_foundation.[
@@ -1265,9 +1265,9 @@ jet_cli_perf_samples_chain: fn(sampled: &JetCLIPerfSamples, places: &[String:Int
 // (`owned`) and the line is in that same file, which an inlined function's
 // line, or a call in one, need not be; its `file` is its function's entry
 // of the program's other sources (`sampled.files`) when it is in that same
-// file, else -1. A return
-// address (`caller`) is looked up at the call before it, as the debugger's
-// frames are (JetDebug Native.jet native_lookup).
+// file, else -1. A return address (`caller`) is looked up at the call
+// before it, as the debugger's frames are (JetDebug Native.jet
+// native_lookup), at the line of its call row when it has one.
 jet_cli_perf_samples_frames: fn(sampled: JetCLIPerfSamples, owned: [Bool], address: Int, caller: Bool) -> [JetCLIPerfFrame] Never! {
     frames := [JetCLIPerfFrame]{}
     lookup: if caller -> address - 1 else -> address
@@ -1276,7 +1276,12 @@ jet_cli_perf_samples_frames: fn(sampled: JetCLIPerfSamples, owned: [Bool], addre
     function: sampled.table.functions[found]
     own: found < owned.len() && owned[found]
     file: if found < sampled.files.len() -> sampled.files[found] else -> -1
-    line := x64_jetline_line(sampled.table, function, lookup) ?? function.decl
+    line := function.decl
+    if {
+        caller && x64_jetline_place(sampled.table, function, lookup) == .Val(row) -> line = row.line
+        !caller && x64_jetline_line(sampled.table, function, lookup) == .Val(at) -> line = at
+        else -> {}
+    }
     // The file of `line` agrees with the function's: unknown outside
     // inlined code, where the table's line is the function's own.
     same := true

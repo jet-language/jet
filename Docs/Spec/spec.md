@@ -4487,8 +4487,8 @@ innermost first: the reading function, then its callers, down to the task's
 or thread's entry. The runtime walks the same frame chain and reads the same
 location table (`.debug_jetline`) as the panic and fault reports, so a record
 names the function, file and line that a report's frame line does. A frame
-the table doesn't hold, such as the runtime's own, has no record. The table
-holds no column or module, so `column` is 0 and `module` is `""`. A release
+the table doesn't hold, such as the runtime's own, has no record. A record
+names no column or module, so `column` is 0 and `module` is `""`. A release
 image keeps the table when its program reads the trace, so every tier gives
 the same records. The optimizer never inlines a function that reads it, but a
 caller inlined into its own caller has no frame of its own. `#Context` does
