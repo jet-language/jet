@@ -1,6 +1,6 @@
 // Stop points right after their calls (O1, O2, last): a stop point
-// (Build.jet ir_stop_point) after a direct call whose argument temporaries
-// are dropped between the two,
+// (Build.jet ir_stop_point) after a direct call, or a call through a
+// function value, whose argument temporaries are dropped between the two,
 //
 //     r := g(t); drop t; stopped := poll(); if stopped { E }
 //
@@ -9,7 +9,9 @@
 //     r := g(t); stopped := poll(); if stopped { drop t; E }; drop t
 //
 // so the poll follows its call and the selector tests the stop g reports
-// in edx instead of calling the poll (X64Select ir_x64_stop_point). Only
+// in edx instead of calling the poll (X64Select ir_x64_stop_point). A turn
+// poll (an entry check or a loop's turn folded into the call's poll,
+// ir_opt_fold_polls) moves the same way. Only
 // drops of Int and word slots move (no code of theirs can publish or mask
 // a stop), and only into an edge E that never comes back
 // (OptUnique.jet ir_opt_dead_end), so each path drops once.
@@ -26,10 +28,10 @@ ir_opt_stops_after_calls: fn(f: &IRFunction, m: IRModule, keys: [String]) Never!
     }
     moved := false
     loop site in 0..<count {
-        if f.op[site] != .Call -> next
+        if f.op[site] != .Call && f.op[site] != .CallIndirect -> next
         k := site + 1
         loop k < count && f.op[k] == .Drop && ir_opt_stops_plain(m, f, f.a[k]) -> k += 1
-        if k == site + 1 || !ir_opt_stops_poll(f, keys, k) -> next
+        if k == site + 1 || !ir_opt_stops_point(f, keys, k) -> next
         if ir_opt_dead_end(f, k + 1) < 0 -> next
         poll_of[site] = k
         after[f.c[k + 1]] = site
@@ -76,6 +78,16 @@ ir_opt_stops_poll: fn(f: IRFunction, keys: [String], at: Int) -> Bool Never! {
     if at + 1 >= f.op.len() || f.op[at] != .Call || f.c[at] != 0 || f.dst[at] < 0 -> return false
     callee: f.a[at]
     if callee < 0 || callee >= keys.len() || keys[callee] != IR_STOP_POLL_KEY -> return false
+    f.op[at + 1] == .If && f.a[at + 1] == f.dst[at] && f.b[at + 1] < 0
+}
+
+// Whether `at` is `stopped := poll()` or `stopped := turn()` followed by
+// `if stopped` with no Else.
+ir_opt_stops_point: fn(f: IRFunction, keys: [String], at: Int) -> Bool Never! {
+    if at + 1 >= f.op.len() || f.op[at] != .Call || f.c[at] != 0 || f.dst[at] < 0 -> return false
+    callee: f.a[at]
+    if callee < 0 || callee >= keys.len() -> return false
+    if keys[callee] != IR_STOP_POLL_KEY && keys[callee] != IR_STOP_TURN_KEY -> return false
     f.op[at + 1] == .If && f.a[at + 1] == f.dst[at] && f.b[at + 1] < 0
 }
 
@@ -526,10 +538,13 @@ ir_opt_polls_reach: fn(f: IRFunction, poll: Int, trap: Int, turn: Int, start: In
 
 // Whether the poll at `at` comes right after a call that is no stop
 // point's (whose callee is no function `poll`, `trap` or `turn`): after a
-// direct call of a body it tests only what the call returned (X64Select.jet
-// ir_x64_stop_point, JetWeb Select.jet web_stop_point).
+// direct call of a body, or a call through a function value, it tests only
+// what the call returned (X64Select.jet ir_x64_stop_point, JetWeb
+// Select.jet web_stop_point).
 ir_opt_polls_after_call: fn(f: IRFunction, poll: Int, trap: Int, turn: Int, at: Int) -> Bool Never! {
-    at > 0 && f.op[at - 1] == .Call && f.a[at - 1] != poll && f.a[at - 1] != trap && f.a[at - 1] != turn
+    if at == 0 -> return false
+    if f.op[at - 1] == .CallIndirect -> return true
+    f.op[at - 1] == .Call && f.a[at - 1] != poll && f.a[at - 1] != trap && f.a[at - 1] != turn
 }
 
 // The End a Br at `at` with depth `level` lands after, or -1 when it
@@ -608,5 +623,72 @@ ir_opt_polls_br_end: fn(f: IRFunction, at: Int, level: Int) -> Int Never! {
         assert_eq(turns.len(), 1)
         assert_eq(turns[0] == widened + 1, !proven)
         if proven -> assert(f.op[turns[0] - 1] == .End && f.op[f.a[turns[0] - 1]] == .Block)
+    }
+}
+
+// An entry poll before r := code(x), a call through a function value, stays:
+// the poll after that call tests only what the call returned, so it can't
+// take a stop another task asked for. With arithmetic in place of the call,
+// the later poll checks no call and the entry poll folds into it.
+#Test("A poll does not fold into the poll after a call through a function value") {
+    loop indirect in ([Bool]{false, true}) {
+        m := ir_module_new()
+        int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
+        flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+        word: ir_word_row(m)
+        poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
+        f := ir_function_new("f", "test:fold.jet.f", "", "fold.jet", 1)
+        x: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
+        code: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "code"), 1)
+        f.result = int_row
+        r: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+        ir_x64_test_stop_edge(f, flag, poll, IROp.Return, 1)
+        passed: ir_args(f, [Int]{x})
+        _ := if indirect -> ir_emit(f, IROp.CallIndirect, r, code, passed, 1, 2) else -> ir_emit(f, IROp.Add, r, x, x, 0, 2)
+        ir_x64_test_stop_edge(f, flag, poll, IROp.Return, 2)
+        _ := ir_emit(f, IROp.Return, -1, r, -1, -1, 3)
+        ir_opt_fold_polls(f, ir_opt_view(m, [String]{}))
+        polls := 0
+        loop (at, op) in f.op {
+            if op == .Call && f.a[at] == poll -> polls += 1
+        }
+        assert_eq(polls, if indirect -> 2 else -> 1)
+    }
+}
+
+// r := g(t) or r := code(t) through a function value, then drop t, then a
+// stop or turn poll whose edge returns: the poll moves right after the
+// call, and t's drop goes after the poll and into its edge.
+#Test("A stop or turn poll moves right after a direct or indirect call") {
+    loop key in ([String]{IR_STOP_POLL_KEY, IR_STOP_TURN_KEY}) {
+        loop indirect in ([Bool]{false, true}) {
+            m := ir_module_new()
+            int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
+            flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+            word: ir_word_row(m)
+            poll: ir_stop_poll(m, key)
+            m.functions.push(ir_function_new("g", "test:moves.jet.g", "", "moves.jet", 1))
+            f := ir_function_new("f", "test:moves.jet.f", "", "moves.jet", 2)
+            x: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "x"), 2)
+            code: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "code"), 2)
+            f.result = int_row
+            t: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+            r: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+            _ := ir_emit(f, IROp.Add, t, x, x, 0, 3)
+            passed: ir_args(f, [Int]{t})
+            call: if indirect -> ir_emit(f, IROp.CallIndirect, r, code, passed, 1, 3) else -> ir_emit(f, IROp.Call, r, poll + 1, passed, 1, 3)
+            _ := ir_emit(f, IROp.Drop, -1, t, -1, -1, 3)
+            ir_x64_test_stop_edge(f, flag, poll, IROp.Return, 3)
+            _ := ir_emit(f, IROp.Return, -1, r, -1, -1, 4)
+            keys: loop g in m.functions -> g.key
+            ir_opt_stops_after_calls(f, m, keys)
+            assert(f.op[call + 1] == .Call && f.a[call + 1] == poll)
+            assert(f.op[call + 2] == .If && f.op[call + 3] == .Drop && f.a[call + 3] == t)
+            drops := 0
+            loop (at, op) in f.op {
+                if op == .Drop && f.a[at] == t -> drops += 1
+            }
+            assert_eq(drops, 2)
+        }
     }
 }

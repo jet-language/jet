@@ -4284,8 +4284,10 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
 
 // A stop point (Build.jet ir_stop_point): `stopped := poll()` at `at`, then
 // `if stopped { edge }` with no Else, its Bool read by nothing else. A stop
-// poll right after a direct call of a selected body (ir_x64_reports_stop)
-// has the hot path `test edx, edx; jnz edge`: every body returns edx 0 from
+// poll right after a call whose callee reports its stop in edx
+// (ir_x64_call_reports: a direct call of a selected body, or a call through
+// a function value) has the hot path `test edx, edx; jnz edge`: every body
+// returns edx 0 from
 // its epilogue and 1 from its stop exit. A turn poll there (an entry check
 // or a loop's turn folded into the call's poll, OptStops.jet
 // ir_opt_fold_polls) adds what a turn observes beyond the call, which only
@@ -4338,7 +4340,7 @@ ir_x64_stop_point: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
     site := -1
     if !wired {
         skips := [Int]{}
-        if (f.a[at] == poll || f.a[at] == turn) && at > 0 && f.op[at - 1] == .Call && ir_x64_reports_stop(m, f.a[at - 1]) {
+        if (f.a[at] == poll || f.a[at] == turn) && at > 0 && ir_x64_call_reports(m, f, at - 1) {
             // test edx, edx
             e.code.bytes.push(0x85)
             e.code.bytes.push(0xd2)
@@ -4403,6 +4405,20 @@ ir_x64_armed_poll: fn(e: &IRX64Emitter, at: Int, branch: Int, armed: Bool) Never
 ir_x64_reports_stop: fn(m: IRModule, id: Int) -> Bool Never! {
     if id < 0 || id >= m.functions.len() || m.functions[id].asm != None -> return false
     !ir_stop_key(m.functions[id].key)
+}
+
+// Whether instruction `at` is a call whose callee reports its stop in edx:
+// a direct call of a selected body (ir_x64_reports_stop), or a call through
+// a function value. A function value's code is always a selected body, in
+// whichever module built it: a lambda, a named function's adapter
+// (BuildExpr.jet ir_function_value), a function value's widening, a
+// transaction hook's runner. It is never an asm leaf, a poll or a C
+// function: C calls Jet through adapters of its own (BuildForeign.jet
+// ir_c_callback), and a runtime address intrinsic's word goes to C, never
+// into a function value.
+ir_x64_call_reports: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
+    if f.op[at] == .CallIndirect -> return true
+    f.op[at] == .Call && ir_x64_reports_stop(m, f.a[at])
 }
 
 // `xor edx, edx`: no stop, as a selected body's return reports it, for a
@@ -7215,62 +7231,68 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     }
 }
 
-// f calls body g and then polls: a stop poll tests only the edx g
-// returned; a turn poll (an entry check folded into the call's poll) tests
-// edx and then the armed word, and calls the turn only on its slow path,
-// laid out past the hot code's `test edx, edx` and the armed word's load.
-#Test("A turn poll right after a body's call tests edx and the armed word, calling nothing") {
+// f calls body g, directly or through a function value, and then polls: a
+// stop poll tests only the edx g returned; a turn poll (an entry check
+// folded into the call's poll) tests edx and then the armed word, and calls
+// the turn only on its slow path, laid out past the hot code's
+// `test edx, edx` and the armed word's load.
+#Test("A turn poll right after a body's or a function value's call tests edx and the armed word, calling nothing") {
     loop key in ([String]{IR_STOP_POLL_KEY, IR_STOP_TURN_KEY}) {
-        m := ir_module_new()
-        m.stop_points = true
-        int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
-        flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
-        poll: ir_stop_poll(m, key)
-        g := ir_function_new("g", "test:turn.jet.g", "", "turn.jet", 1)
-        n: ir_slot(g, int_row, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
-        g.result = int_row
-        _ := ir_emit(g, IROp.Return, -1, n, -1, -1, 1)
-        m.functions.push(g)
-        f := ir_function_new("f", "test:turn.jet.f", "", "turn.jet", 2)
-        x: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "x"), 2)
-        f.result = int_row
-        r: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
-        stopped: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
-        passed: ir_args(f, [Int]{x})
-        _ := ir_emit(f, IROp.Call, r, poll + 1, passed, 1, 3)
-        none: ir_args(f, [Int]{})
-        _ := ir_emit(f, IROp.Call, stopped, poll, none, 0, 3)
-        _ := ir_open_if(f, stopped, 3)
-        _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 3)
-        ir_end(f, 3)
-        _ := ir_emit(f, IROp.Return, -1, r, -1, -1, 4)
-        m.functions.push(f)
-        compiled: ir_x64_compile_function(m, ir_x64_tables(m), m.functions.len() - 1).function
-        call_at := -1
-        poll_at := -1
-        armed_at := -1
-        loop reloc in compiled.relocs {
-            if reloc.target == {
-                .Function(id) -> {
-                    if id.value == poll + 1 -> call_at = reloc.at
-                    if id.value == poll -> poll_at = reloc.at
+        loop indirect in ([Bool]{false, true}) {
+            m := ir_module_new()
+            m.stop_points = true
+            int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
+            flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+            word: ir_word_row(m)
+            poll: ir_stop_poll(m, key)
+            g := ir_function_new("g", "test:turn.jet.g", "", "turn.jet", 1)
+            n: ir_slot(g, int_row, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
+            g.result = int_row
+            _ := ir_emit(g, IROp.Return, -1, n, -1, -1, 1)
+            m.functions.push(g)
+            f := ir_function_new("f", "test:turn.jet.f", "", "turn.jet", 2)
+            x: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "x"), 2)
+            code: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "code"), 2)
+            f.result = int_row
+            r: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+            stopped: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
+            passed: ir_args(f, [Int]{x})
+            _ := if indirect -> ir_emit(f, IROp.CallIndirect, r, code, passed, 1, 3) else -> ir_emit(f, IROp.Call, r, poll + 1, passed, 1, 3)
+            none: ir_args(f, [Int]{})
+            _ := ir_emit(f, IROp.Call, stopped, poll, none, 0, 3)
+            _ := ir_open_if(f, stopped, 3)
+            _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 3)
+            ir_end(f, 3)
+            _ := ir_emit(f, IROp.Return, -1, r, -1, -1, 4)
+            m.functions.push(f)
+            compiled: ir_x64_compile_function(m, ir_x64_tables(m), m.functions.len() - 1).function
+            call_at := -1
+            poll_at := -1
+            armed_at := -1
+            loop reloc in compiled.relocs {
+                if reloc.target == {
+                    .Function(id) -> {
+                        if id.value == poll + 1 -> call_at = reloc.at
+                        if id.value == poll -> poll_at = reloc.at
+                    }
+                    .RuntimeData(symbol) -> {
+                        if symbol == IR_X64_CHECKS_ARMED_SYMBOL -> armed_at = reloc.at
+                    }
+                    .Runtime(_) | .Data(_) -> {}
                 }
-                .RuntimeData(symbol) -> {
-                    if symbol == IR_X64_CHECKS_ARMED_SYMBOL -> armed_at = reloc.at
-                }
-                .Runtime(_) | .Data(_) -> {}
             }
+            // A function value's call has no reloc; its code is a register's.
+            assert(if indirect -> call_at < 0 else -> call_at >= 0)
+            // test edx, edx right after g's call returns.
+            tested := -1
+            loop at in 0..<(compiled.code.len() - 1) {
+                pair: (Int{compiled.code[at]} << 8) | Int{compiled.code[at + 1]}
+                if tested < 0 && at > call_at && pair == 0x85d2 -> tested = at
+            }
+            assert(tested > call_at)
+            turned: key == IR_STOP_TURN_KEY
+            assert(if turned -> armed_at > tested && poll_at > armed_at else -> armed_at < 0 && poll_at < 0)
         }
-        assert(call_at >= 0)
-        // test edx, edx right after g's call returns.
-        tested := -1
-        loop at in call_at..<(compiled.code.len() - 1) {
-            pair: (Int{compiled.code[at]} << 8) | Int{compiled.code[at + 1]}
-            if tested < 0 && pair == 0x85d2 -> tested = at
-        }
-        assert(tested > call_at)
-        turned: key == IR_STOP_TURN_KEY
-        assert(if turned -> armed_at > tested && poll_at > armed_at else -> armed_at < 0 && poll_at < 0)
     }
 }
 
