@@ -1,0 +1,21 @@
+// A function whose every path calls itself again, by itself or around a
+// cycle of such calls, can never return: the tidy error L0305 at the call.
+countdown: fn(n: Int) -> Int {
+    if n > 10 -> print("big")
+    countdown(n - 1)
+}
+
+ping: fn(n: Int) -> Int {
+    print("ping {n}")
+    pong(n + 1)
+}
+
+pong: fn(n: Int) -> Int {
+    if n % 2 == 0 -> return ping(n)
+    ping(n - 1)
+}
+
+run: fn() {
+    print(countdown(3))
+    print(ping(0))
+}

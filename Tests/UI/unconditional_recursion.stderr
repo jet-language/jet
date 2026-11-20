@@ -1,0 +1,26 @@
+Error: Jet.UnconditionalRecursion: Every path through `countdown` calls `countdown` again, so no call of `countdown` returns
+  --> Tests/UI/unconditional_recursion.jet:5:5
+    |
+  5 |     countdown(n - 1)
+    |     ^^^^^^^^^
+ Why: No path through the body reaches a `return` or its end without calling again, so the calls nest until the stack runs out
+ Fix: Give `countdown` a path that returns without calling again, such as a check on an argument that ends the recursion
+More: jet-lang.dev/e/Jet.UnconditionalRecursion
+
+Error: Jet.UnconditionalRecursion: Every path through `ping` calls `pong`, and every path through `pong` leads back to `ping`, so no call of `ping` returns
+  --> Tests/UI/unconditional_recursion.jet:10:5
+    |
+ 10 |     pong(n + 1)
+    |     ^^^^
+ Why: No path through the body reaches a `return` or its end without calling again, so the calls nest until the stack runs out
+ Fix: Give `ping` a path that returns without calling again, such as a check on an argument that ends the recursion
+More: jet-lang.dev/e/Jet.UnconditionalRecursion
+
+Error: Jet.UnconditionalRecursion: Every path through `pong` calls `ping`, and every path through `ping` leads back to `pong`, so no call of `pong` returns
+  --> Tests/UI/unconditional_recursion.jet:14:29
+    |
+ 14 |     if n % 2 == 0 -> return ping(n)
+    |                             ^^^^
+ Why: No path through the body reaches a `return` or its end without calling again, so the calls nest until the stack runs out
+ Fix: Give `pong` a path that returns without calling again, such as a check on an argument that ends the recursion
+More: jet-lang.dev/e/Jet.UnconditionalRecursion

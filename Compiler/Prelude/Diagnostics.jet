@@ -6605,6 +6605,33 @@ GoneFailureArm: struct {
     }
 }
 
+UnconditionalRecursion: struct {
+    cycle: String,
+    function: String,
+
+    impl Diagnostic {
+        code: "L0305",
+        meaning: "A function whose every path calls itself again, directly or around a cycle of calls",
+        severity: .Lint,
+        tier: .Tidy,
+        lint_name: "unconditional_recursion",
+        stage: [.Compile],
+        detail: true,
+        no_fix: .Behavior,
+        fix_next: "Give the function a path that returns without calling again.",
+
+        what: fn(self) -> String { "{self.cycle}, so no call of `{self.function}` returns" }
+
+        why: fn(self) -> String {
+            "No path through the body reaches a `return` or its end without calling again, so the calls nest until the stack runs out"
+        }
+
+        fix: fn(self) -> String {
+            "Give `{self.function}` a path that returns without calling again, such as a check on an argument that ends the recursion"
+        }
+    }
+}
+
 SqlQueryInRowLoop: struct {
     impl Diagnostic {
         code: "L0308",

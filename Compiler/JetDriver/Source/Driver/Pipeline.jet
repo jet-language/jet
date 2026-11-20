@@ -6487,7 +6487,8 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     }
     // A check and a program compile list the tidy errors the driver finds
     // over the checked functions: `jet check` and `jet build` fail on them,
-    // and `jet run` and `jet dev` never stop for one. These are the L0308
+    // and `jet run` and `jet dev` never stop for one. These are the L0305
+    // functions whose every path calls them again (Recursion.jet), the L0308
     // SELECTs run once per row of a loop over database rows (SQLRowLoop.jet)
     // and, unless a check keeps its cost report and lists its L2510 lints
     // instead (below), the L2511 hidden copies and uncapped Int growth a loop
@@ -6497,6 +6498,10 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         tidy := [Diagnostic]{}
         if !request.capture_cost_report {
             tidy = jet_driver_cost_copy_lints(load, checked_functions)
+        }
+        recursion_callees: jet_driver_cost_callees(checked_functions, runtime_semantic_modules, registration_graph.decls, registration_graph.symbols)
+        loop lint in jet_driver_recursion_lints(load, checked_functions, recursion_callees.bodies, registration_graph.decls) {
+            tidy.push(lint)
         }
         loop lint in jet_driver_sql_row_loop_lints(load, checked_functions, registration_graph.symbols) {
             tidy.push(lint)

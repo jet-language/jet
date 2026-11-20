@@ -1,0 +1,32 @@
+// Recursion with a path that returns without calling again is no L0305: a
+// base case, a call only a loop's body or a `&&` may reach, a `??` fallback
+// that returns first, and a call inside a lambda that runs only when called.
+countdown: fn(n: Int) -> Int {
+    if n <= 0 -> return 0
+    countdown(n - 1) + 1
+}
+
+walk: fn(items: [Int]) -> Int {
+    total := 0
+    loop _ in items -> total += walk([Int]{})
+    total
+}
+
+even: fn(n: Int) -> Bool { n == 0 || odd(n - 1) }
+
+odd: fn(n: Int) -> Bool { n != 0 && even(n - 1) }
+
+parse_all: fn(text: String) -> Int {
+    first: Int.parse(text) ?? return 0
+    first + parse_all(text)
+}
+
+later: fn(n: Int) -> fn() -> Int { fn() { if n > 0 -> later(n - 1)() else -> n } }
+
+run: fn() {
+    print(countdown(3))
+    print(walk([1, 2]))
+    print(even(4))
+    print(parse_all("x"))
+    print(later(2)())
+}

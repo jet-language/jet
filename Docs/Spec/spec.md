@@ -2575,6 +2575,14 @@ Past it the call stops with E3012, exit 70. A web build cannot switch stacks:
 its recursion is bounded by the engine's own stack, past which it stops with
 E3012 too.
 
+A function whose every path calls itself again can never return: no path
+through its body reaches a `return` or its end without making that call.
+`jet check` reports it as the tidy error **L0305** at the call, whether the
+function calls itself or every path leads around a cycle of such functions
+back to it. A call that may be skipped leaves a path out: one in a loop body,
+on the right of `&&` or `||`, after a `?` that may pass a failure on, or
+inside a lambda.
+
 The human aliasing rule is: while something is being changed, nobody else may be
 looking at it. Foreign `read` and `write` spellings are not Jet access syntax;
 under D-S14-PAUSE they receive ordinary parse errors, apart from a separately

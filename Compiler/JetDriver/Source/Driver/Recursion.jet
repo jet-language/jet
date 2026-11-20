@@ -1,0 +1,531 @@
+// The L0305 tidy error: a function whose every path calls itself again, by
+// itself or around a cycle of such calls, so no call of it ever returns.
+// A function's must-calls are the functions every path out of its body
+// calls on the way; the rule fires on each cycle of must-calls, at the call
+// that goes on around it. Only functions on a cycle of the plain call graph
+// are walked, and their walks count only the calls that stay on it.
+use jet_foundation.[
+    BodyIfCond,
+    BodyOrFallback,
+    BodyRequireKind,
+    BodyTree,
+    DeclTable,
+    Diagnostic,
+    FnBody,
+    NodeKind,
+    Span,
+    TBinaryOp,
+    body_each_expr_child,
+    body_node,
+    body_stmt,
+    decl_table_find_symbol,
+]
+
+// A call a path makes: the position of the function it reaches and the
+// call's span.
+JetDriverRecursionCall: struct {
+    target: Int,
+    span: Span,
+}
+
+// The ways out of a piece of code and the calls each makes on the way: for
+// falling through, leaving the function (a `return`, a failure `?` passes
+// on, a stop or a labeled jump), and a plain `break` or `continue` to the
+// nearest loop, None when no path leaves that way, else the calls every path
+// that leaves that way makes, each target once at its first call.
+JetDriverRecursionFlow: struct {
+    fall: [JetDriverRecursionCall]?{None},
+    exit: [JetDriverRecursionCall]?{None},
+    brk: [JetDriverRecursionCall]?{None},
+    cont: [JetDriverRecursionCall]?{None},
+}
+
+// The L0305 tidy errors of `functions`, whose direct callees are found by
+// DeclID row through `bodies` (each one's position among `functions`) and
+// `decls`. One per function the program wrote on a cycle of must-calls, at
+// its call to the next function around the cycle.
+jet_driver_recursion_lints: fn(load: JetDriverLoadResult, functions: [FnBody], bodies: [Int?], decls: DeclTable) -> [Diagnostic] {
+    calls := [[Int]]{}
+    loop function in functions {
+        targets := [Int]{}
+        if jet_driver_cost_reports(function) {
+            loop node in function.tree.nodes {
+                target: jet_driver_recursion_target(node.kind, bodies, decls) ?? next
+                if jet_driver_cost_reports(functions[target]) && !targets.contains(target) {
+                    targets.push(target)
+                }
+            }
+        }
+        calls.push(targets)
+    }
+    groups: jet_driver_recursion_components(calls)
+    must := [[Int]]{}
+    spans := [[Span]]{}
+    loop (position, function) in functions {
+        targets := [Int]{}
+        at := [Span]{}
+        if jet_driver_recursion_cyclic(calls, groups, position) {
+            hits := [Int:Int]{}
+            loop node in function.tree.nodes {
+                target: jet_driver_recursion_target(node.kind, bodies, decls) ?? next
+                if groups[target] == groups[position] -> hits[node.id] = target
+            }
+            leaving: jet_driver_recursion_leaving(jet_driver_recursion_statements(function.tree, hits, function.body))
+            loop call in leaving {
+                targets.push(call.target)
+                at.push(call.span)
+            }
+        }
+        must.push(targets)
+        spans.push(at)
+    }
+    cycles: jet_driver_recursion_components(must)
+    lints := [Diagnostic]{}
+    loop (position, function) in functions {
+        if !jet_driver_recursion_cyclic(must, cycles, position) -> next
+        loop (index, target) in must[position] {
+            if cycles[target] != cycles[position] -> next
+            cycle: if target == position -> "Every path through `{function.name}` calls `{function.name}` again" else -> "Every path through `{function.name}` calls `{functions[target].name}`, and every path through `{functions[target].name}` leads back to `{function.name}`"
+            lints.push(jet_driver_diagnostic_at_loaded_site(load, function.module_identity, "L0305", spans[position][index], "{cycle}, so no call of `{function.name}` returns", "No path through the body reaches a `return` or its end without calling again, so the calls nest until the stack runs out", "Give `{function.name}` a path that returns without calling again, such as a check on an argument that ends the recursion"))
+            break
+        }
+    }
+    lints
+}
+
+// The position among the checked functions of the function a call node
+// reaches directly, through `bodies` by DeclID row: a plain call, or a method
+// or static call no trait dispatches. None for any other node.
+jet_driver_recursion_target: fn(kind: NodeKind, bodies: [Int?], decls: DeclTable) -> Int? Never! {
+    if kind == .Call(callee, _, _) -> return bodies[callee.row.index()]
+    if kind == .MethodCall(_, method, _, _) {
+        if method.trait_owner != None -> return None
+        id: decl_table_find_symbol(decls, method.symbol) ?? return None
+        return bodies[id.row.index()]
+    }
+    if kind == .StaticCall(_, _, method, _, _) {
+        if method.trait_owner != None -> return None
+        id: decl_table_find_symbol(decls, method.symbol) ?? return None
+        return bodies[id.row.index()]
+    }
+    None
+}
+
+// Whether node `position` of `edges` lies on a cycle: its component in
+// `groups` holds another node, or it has an edge to itself.
+jet_driver_recursion_cyclic: fn(edges: [[Int]], groups: [Int], position: Int) -> Bool Never! {
+    loop target in edges[position] {
+        if groups[target] == groups[position] -> return true
+    }
+    false
+}
+
+// The strongly connected component of each node of `edges`, numbered from
+// 0 (Tarjan's algorithm, its recursion kept on an explicit stack).
+jet_driver_recursion_components: fn(edges: [[Int]]) -> [Int] Never! {
+    order := [Int]{}
+    low := [Int]{}
+    groups := [Int]{}
+    held := [Bool]{}
+    loop _ in 0..<edges.len() {
+        order.push(-1)
+        low.push(0)
+        groups.push(-1)
+        held.push(false)
+    }
+    stack := [Int]{}
+    frames := [Int]{}
+    cursors := [Int]{}
+    visited := 0
+    count := 0
+    loop root in 0..<edges.len() {
+        if order[root] != -1 -> next
+        order[root] = visited
+        low[root] = visited
+        visited += 1
+        stack.push(root)
+        held[root] = true
+        frames.push(root)
+        cursors.push(0)
+        loop frames.len() > 0 {
+            top: frames.len() - 1
+            node: frames[top]
+            cursor: cursors[top]
+            if cursor < edges[node].len() {
+                cursors[top] = cursor + 1
+                target: edges[node][cursor]
+                if {
+                    order[target] == -1 -> {
+                        order[target] = visited
+                        low[target] = visited
+                        visited += 1
+                        stack.push(target)
+                        held[target] = true
+                        frames.push(target)
+                        cursors.push(0)
+                    }
+                    held[target] && order[target] < low[node] -> low[node] = order[target]
+                }
+                next
+            }
+            if low[node] == order[node] {
+                loop stack.len() > 0 {
+                    member: stack.pop() ?? break
+                    held[member] = false
+                    groups[member] = count
+                    if member == node -> break
+                }
+                count += 1
+            }
+            frames.pop().drop("the finished frame is done")
+            cursors.pop().drop("its cursor goes with it")
+            if frames.len() > 0 {
+                parent: frames[frames.len() - 1]
+                if low[node] < low[parent] -> low[parent] = low[node]
+            }
+        }
+    }
+    groups
+}
+
+// The flow of falling through with no call made.
+jet_driver_recursion_fall: fn() -> JetDriverRecursionFlow Never! {
+    JetDriverRecursionFlow{fall: Val([JetDriverRecursionCall]{})}
+}
+
+// The flow of leaving the function with no call made.
+jet_driver_recursion_exit: fn() -> JetDriverRecursionFlow Never! {
+    JetDriverRecursionFlow{exit: Val([JetDriverRecursionCall]{})}
+}
+
+// Whether `calls` holds a call to `target`.
+jet_driver_recursion_has: fn(calls: [JetDriverRecursionCall], target: Int) -> Bool Never! {
+    jet_driver_recursion_at(calls, target) != None
+}
+
+// Where `calls` calls `target`, if it does.
+jet_driver_recursion_at: fn(calls: [JetDriverRecursionCall], target: Int) -> Span? Never! {
+    loop call in calls {
+        if call.target == target -> return Val(call.span)
+    }
+    None
+}
+
+// The calls both `left` and `right` make, None standing for no path: the
+// calls every path of either kind makes, each at the earlier of its calls.
+jet_driver_recursion_meet: fn(left: &&[JetDriverRecursionCall]?, right: &&[JetDriverRecursionCall]?) -> [JetDriverRecursionCall]? Never! {
+    first: left ?? return right
+    second: right ?? return Val(first)
+    kept := [JetDriverRecursionCall]{}
+    loop call in first {
+        other: jet_driver_recursion_at(second, call.target) ?? next
+        kept.push(JetDriverRecursionCall{target: call.target, span: if other.start < call.span.start -> other else -> call.span})
+    }
+    Val(kept)
+}
+
+// The calls of `calls` with those of `prefix`, which the path made first.
+jet_driver_recursion_after: fn(calls: &&[JetDriverRecursionCall]?, prefix: [JetDriverRecursionCall]) -> [JetDriverRecursionCall]? Never! {
+    later: calls ?? return None
+    if prefix.len() == 0 -> return Val(later)
+    joined := [JetDriverRecursionCall]{}
+    loop call in prefix -> joined.push(JetDriverRecursionCall{target: call.target, span: call.span})
+    loop call in later {
+        if !jet_driver_recursion_has(prefix, call.target) -> joined.push(call)
+    }
+    Val(joined)
+}
+
+// The flow of either `left` or `right`.
+jet_driver_recursion_either: fn(left: &&JetDriverRecursionFlow, right: &&JetDriverRecursionFlow) -> JetDriverRecursionFlow Never! {
+    JetDriverRecursionFlow{
+        fall: jet_driver_recursion_meet(left.fall.move(), right.fall.move()),
+        exit: jet_driver_recursion_meet(left.exit.move(), right.exit.move()),
+        brk: jet_driver_recursion_meet(left.brk.move(), right.brk.move()),
+        cont: jet_driver_recursion_meet(left.cont.move(), right.cont.move()),
+    }
+}
+
+// The flow of code that may not run at all.
+jet_driver_recursion_maybe: fn(flow: &&JetDriverRecursionFlow) -> JetDriverRecursionFlow Never! {
+    jet_driver_recursion_either(flow, jet_driver_recursion_fall())
+}
+
+// The flow of `first` and then, where it falls through, `second`.
+jet_driver_recursion_then: fn(first: &&JetDriverRecursionFlow, second: &&JetDriverRecursionFlow) -> JetDriverRecursionFlow Never! {
+    if first.fall == None -> return first
+    prefix: first.fall.move() ?? [JetDriverRecursionCall]{}
+    JetDriverRecursionFlow{
+        fall: jet_driver_recursion_after(second.fall.move(), prefix),
+        exit: jet_driver_recursion_meet(first.exit.move(), jet_driver_recursion_after(second.exit.move(), prefix)),
+        brk: jet_driver_recursion_meet(first.brk.move(), jet_driver_recursion_after(second.brk.move(), prefix)),
+        cont: jet_driver_recursion_meet(first.cont.move(), jet_driver_recursion_after(second.cont.move(), prefix)),
+    }
+}
+
+// The flow of a loop whose `header` runs first and whose `body` runs any
+// number of times: it falls through as the header does, and a `break` or
+// `continue` of the body stays in it.
+jet_driver_recursion_repeat: fn(header: &&JetDriverRecursionFlow, body: &&JetDriverRecursionFlow) -> JetDriverRecursionFlow Never! {
+    if header.fall == None -> return header
+    prefix: header.fall.move() ?? [JetDriverRecursionCall]{}
+    exit: jet_driver_recursion_meet(header.exit.move(), jet_driver_recursion_after(body.exit.move(), prefix))
+    JetDriverRecursionFlow{fall: Val(prefix), exit: exit}
+}
+
+// The flow of a `loop` with no condition whose body flows as `body`: only
+// a `break` falls out of it, and a body that falls through or continues
+// runs again.
+jet_driver_recursion_forever: fn(body: &&JetDriverRecursionFlow) -> JetDriverRecursionFlow Never! {
+    JetDriverRecursionFlow{fall: body.brk.move(), exit: body.exit.move()}
+}
+
+// The calls every path out of a function body that flows as `flow` makes,
+// by falling off its end or by leaving it; none when no path leaves it.
+jet_driver_recursion_leaving: fn(flow: &&JetDriverRecursionFlow) -> [JetDriverRecursionCall] Never! {
+    jet_driver_recursion_meet(flow.fall.move(), flow.exit.move()) ?? [JetDriverRecursionCall]{}
+}
+
+// The flow of the statements `body` of `tree` in order, each call of
+// `hits` (call node id to the target it reaches) counted.
+jet_driver_recursion_statements: fn(tree: BodyTree, hits: [Int:Int], body: [Int]) -> JetDriverRecursionFlow Never! {
+    flow := jet_driver_recursion_fall()
+    loop statement in body {
+        if flow.fall == None -> break
+        flow = jet_driver_recursion_then(flow, jet_driver_recursion_statement(tree, hits, statement))
+    }
+    flow
+}
+
+// The flow of the expressions `values` of `tree` evaluated in order.
+jet_driver_recursion_sequence: fn(tree: BodyTree, hits: [Int:Int], values: [Int]) -> JetDriverRecursionFlow Never! {
+    flow := jet_driver_recursion_fall()
+    loop value in values {
+        if flow.fall == None -> break
+        flow = jet_driver_recursion_then(flow, jet_driver_recursion_expression(tree, hits, value))
+    }
+    flow
+}
+
+// The flow of the optional expression `value`.
+jet_driver_recursion_optional: fn(tree: BodyTree, hits: [Int:Int], value: Int?) -> JetDriverRecursionFlow Never! {
+    if value == .Val(id) -> return jet_driver_recursion_expression(tree, hits, id)
+    jet_driver_recursion_fall()
+}
+
+// The flow of a jump: a plain one reaches the nearest loop as `jump`, a
+// labeled one may leave more than one loop and counts as leaving the
+// function.
+jet_driver_recursion_jump: fn(label: String?, jump: &&JetDriverRecursionFlow) -> JetDriverRecursionFlow Never! {
+    if label != None -> return jet_driver_recursion_exit()
+    jump
+}
+
+// The flow of statement `statement` of `tree`. A contract check, a failure
+// `?` passes on and a stop leave the function; the body of a debug-only,
+// deep-check, live, scope-member or transaction block may not run, and a
+// deferred or reactive body runs later.
+jet_driver_recursion_statement: fn(tree: BodyTree, hits: [Int:Int], statement: Int) -> JetDriverRecursionFlow Never! {
+    if body_stmt(tree, statement) == {
+        .Contract(_) -> jet_driver_recursion_either(jet_driver_recursion_fall(), jet_driver_recursion_exit())
+        .ContractScope(pre, body, _, _, _) -> {
+            checked: if pre.len() > 0 -> jet_driver_recursion_either(jet_driver_recursion_fall(), jet_driver_recursion_exit()) else -> jet_driver_recursion_fall()
+            jet_driver_recursion_then(checked, jet_driver_recursion_statements(tree, hits, body))
+        }
+        .Let(_, _, init, _, _, _) -> jet_driver_recursion_expression(tree, hits, init)
+        .RefutableBind(_, init, fallback, _) -> jet_driver_recursion_then(jet_driver_recursion_expression(tree, hits, init), jet_driver_recursion_maybe(jet_driver_recursion_statements(tree, hits, fallback)))
+        .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) -> jet_driver_recursion_expression(tree, hits, init)
+        .ListDestructure(_, init, _, _, _, _) -> jet_driver_recursion_expression(tree, hits, init)
+        .Assign(_, _, value, _, _) -> jet_driver_recursion_expression(tree, hits, value)
+        .CountedLoop(_, init, condition, step, _, body, _) -> {
+            header: jet_driver_recursion_then(jet_driver_recursion_statement(tree, hits, init), jet_driver_recursion_expression(tree, hits, condition))
+            turn := jet_driver_recursion_statements(tree, hits, body)
+            if step == .Val(row) {
+                turn = jet_driver_recursion_then(turn, jet_driver_recursion_statement(tree, hits, row))
+            }
+            jet_driver_recursion_repeat(header, turn)
+        }
+        .ForRange(_, _, start, end, step, _, body, _, _) -> {
+            header: jet_driver_recursion_then(jet_driver_recursion_sequence(tree, hits, [start, end]), jet_driver_recursion_optional(tree, hits, step))
+            jet_driver_recursion_repeat(header, jet_driver_recursion_statements(tree, hits, body))
+        }
+        .Range(_, _, source, start, end, step, _, _, body, _) -> {
+            header: jet_driver_recursion_then(jet_driver_recursion_then(jet_driver_recursion_optional(tree, hits, source), jet_driver_recursion_sequence(tree, hits, [start, end])), jet_driver_recursion_optional(tree, hits, step))
+            jet_driver_recursion_repeat(header, jet_driver_recursion_statements(tree, hits, body))
+        }
+        .ForIn(_, _, _, source, collection, step, _, _, _, _, body, _) -> {
+            header: jet_driver_recursion_then(jet_driver_recursion_sequence(tree, hits, [source, collection]), jet_driver_recursion_optional(tree, hits, step))
+            jet_driver_recursion_repeat(header, jet_driver_recursion_statements(tree, hits, body))
+        }
+        .While(_, condition, body, _) -> jet_driver_recursion_repeat(jet_driver_recursion_expression(tree, hits, condition), jet_driver_recursion_statements(tree, hits, body))
+        .Loop(_, body, _) -> jet_driver_recursion_forever(jet_driver_recursion_statements(tree, hits, body))
+        .ExprStmt(value, _) -> jet_driver_recursion_expression(tree, hits, value)
+        .Return(value, _) -> jet_driver_recursion_then(jet_driver_recursion_optional(tree, hits, value), jet_driver_recursion_exit())
+        .Break(label, _) -> jet_driver_recursion_jump(label, JetDriverRecursionFlow{brk: Val([JetDriverRecursionCall]{})})
+        .BreakValue(label, value, _) -> jet_driver_recursion_then(jet_driver_recursion_expression(tree, hits, value), jet_driver_recursion_jump(label, JetDriverRecursionFlow{brk: Val([JetDriverRecursionCall]{})}))
+        .Continue(label, _) -> jet_driver_recursion_jump(label, JetDriverRecursionFlow{cont: Val([JetDriverRecursionCall]{})})
+        .TaskGroup(_, args, body, _) -> {
+            header: jet_driver_recursion_then(jet_driver_recursion_optional(tree, hits, args.limit), jet_driver_recursion_optional(tree, hits, args.stack))
+            jet_driver_recursion_then(header, jet_driver_recursion_statements(tree, hits, body))
+        }
+        .If(condition, then_body, else_body, _, _) -> {
+            otherwise: if else_body == .Val(rows) -> jet_driver_recursion_statements(tree, hits, rows) else -> jet_driver_recursion_fall()
+            jet_driver_recursion_then(jet_driver_recursion_condition(tree, hits, condition), jet_driver_recursion_either(jet_driver_recursion_statements(tree, hits, then_body), otherwise))
+        }
+        .Match(subject, arms, exhaustive, _) -> {
+            branches := if exhaustive -> JetDriverRecursionFlow{} else -> jet_driver_recursion_fall()
+            loop arm in arms {
+                branches = jet_driver_recursion_either(branches, jet_driver_recursion_statements(tree, hits, arm.body))
+            }
+            jet_driver_recursion_then(jet_driver_recursion_expression(tree, hits, subject), branches)
+        }
+        .EnumMatch(scrutinee, arms, else_body, fallthrough, _) -> {
+            branches := if else_body == .Val(rows) -> jet_driver_recursion_statements(tree, hits, rows) else -> jet_driver_recursion_fall()
+            if fallthrough -> branches = jet_driver_recursion_maybe(branches)
+            loop arm in arms {
+                branches = jet_driver_recursion_either(branches, jet_driver_recursion_statements(tree, hits, arm.body))
+            }
+            jet_driver_recursion_then(jet_driver_recursion_expression(tree, hits, scrutinee), branches)
+        }
+        .RangeSwitch(subject, arms, else_body, _) -> {
+            branches := jet_driver_recursion_statements(tree, hits, else_body)
+            loop arm in arms {
+                branches = jet_driver_recursion_either(branches, jet_driver_recursion_statements(tree, hits, arm.body))
+            }
+            jet_driver_recursion_then(jet_driver_recursion_expression(tree, hits, subject), branches)
+        }
+        .MixedSwitch(subject, _, arms, else_body, _) -> {
+            branches := if else_body == .Val(rows) -> jet_driver_recursion_statements(tree, hits, rows) else -> jet_driver_recursion_fall()
+            loop arm in arms {
+                branches = jet_driver_recursion_either(branches, jet_driver_recursion_then(jet_driver_recursion_expression(tree, hits, arm.condition), jet_driver_recursion_statements(tree, hits, arm.body)))
+            }
+            jet_driver_recursion_then(jet_driver_recursion_expression(tree, hits, subject), branches)
+        }
+        .ContextBlock(guards, body, _) -> {
+            values := [Int]{}
+            loop guard in guards -> values.push(guard.value)
+            jet_driver_recursion_then(jet_driver_recursion_sequence(tree, hits, values), jet_driver_recursion_statements(tree, hits, body))
+        }
+        .Inline(body, _) | .Impure(body, _) | .Region(body, _) | .Shield(body, _) -> jet_driver_recursion_statements(tree, hits, body)
+        .Unsafe(_, body) -> jet_driver_recursion_statements(tree, hits, body)
+        .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) -> jet_driver_recursion_statements(tree, hits, body)
+        .Layout(_, _, body, _) -> jet_driver_recursion_statements(tree, hits, body)
+        .DebugOnly(body, _) | .DeepCheck(body, _) | .Live(body, _) -> jet_driver_recursion_maybe(jet_driver_recursion_statements(tree, hits, body))
+        .ScopeMember(_, body, _) -> jet_driver_recursion_maybe(jet_driver_recursion_statements(tree, hits, body))
+        .Transact(_, _, _, body, _) -> jet_driver_recursion_maybe(jet_driver_recursion_statements(tree, hits, body))
+        .GCEdit(_, _, _, _, _, inner, _) -> jet_driver_recursion_statement(tree, hits, inner)
+        .DeferClose(_, _, _) | .Defer(_, _) | .Reactive(_, _) -> jet_driver_recursion_fall()
+    }
+}
+
+// The flow of the condition `condition` of `tree`: the right side of an
+// `&&` runs only when its left side holds.
+jet_driver_recursion_condition: fn(tree: BodyTree, hits: [Int:Int], condition: BodyIfCond) -> JetDriverRecursionFlow Never! {
+    if condition == {
+        .Plain(value) -> jet_driver_recursion_expression(tree, hits, value)
+        .And(left, right) -> jet_driver_recursion_then(jet_driver_recursion_condition(tree, hits, left), jet_driver_recursion_maybe(jet_driver_recursion_condition(tree, hits, right)))
+        .IfLet(_, subject) -> jet_driver_recursion_expression(tree, hits, subject)
+    }
+}
+
+// The direct children of node `id` of `tree`, in evaluation order.
+jet_driver_recursion_child_ids: fn(tree: BodyTree, id: Int) -> [Int] Never! {
+    children := [Int]{}
+    body_each_expr_child(tree, body_node(tree, id), fn(child: Int) { children.push(child) })
+    children
+}
+
+// The flow of the direct children of node `id` of `tree`, evaluated in
+// order.
+jet_driver_recursion_children: fn(tree: BodyTree, hits: [Int:Int], id: Int) -> JetDriverRecursionFlow Never! {
+    jet_driver_recursion_sequence(tree, hits, jet_driver_recursion_child_ids(tree, id))
+}
+
+// The flow of the direct children of node `id` of `tree`, each of which
+// may not run.
+jet_driver_recursion_perhaps: fn(tree: BodyTree, hits: [Int:Int], id: Int) -> JetDriverRecursionFlow Never! {
+    flow := jet_driver_recursion_fall()
+    loop child in jet_driver_recursion_child_ids(tree, id) {
+        flow = jet_driver_recursion_then(flow, jet_driver_recursion_maybe(jet_driver_recursion_expression(tree, hits, child)))
+    }
+    flow
+}
+
+// The flow of evaluating expression `id` of `tree`, each call of `hits`
+// counted once its operands are evaluated. A lambda's body doesn't run
+// where it is written; the right side of `&&` or `||`, a `??` fallback and
+// a `?.` call may not run; a failure `?` passes on and a stop leave the
+// function. The children of a host call, a function value, a core closure
+// call, a shared-guard wait and a lifted Option call may not run.
+jet_driver_recursion_expression: fn(tree: BodyTree, hits: [Int:Int], id: Int) -> JetDriverRecursionFlow Never! {
+    flow: if body_node(tree, id).kind == {
+        .Lambda(_) -> jet_driver_recursion_fall()
+        .InlineBlock(body) -> jet_driver_recursion_statements(tree, hits, body)
+        .Binary(op, _, _, lhs, rhs) -> {
+            right := jet_driver_recursion_expression(tree, hits, rhs)
+            if op == TBinaryOp.And || op == TBinaryOp.Or {
+                right = jet_driver_recursion_maybe(right)
+            }
+            jet_driver_recursion_then(jet_driver_recursion_expression(tree, hits, lhs), right)
+        }
+        .CompareChain(operands, _, _) -> {
+            chain := jet_driver_recursion_fall()
+            loop (index, operand) in operands {
+                step := jet_driver_recursion_expression(tree, hits, operand)
+                if index > 1 -> step = jet_driver_recursion_maybe(step)
+                chain = jet_driver_recursion_then(chain, step)
+            }
+            chain
+        }
+        .Try(value, _, _) -> jet_driver_recursion_then(jet_driver_recursion_expression(tree, hits, value), jet_driver_recursion_either(jet_driver_recursion_fall(), jet_driver_recursion_exit()))
+        .TryWithContext(inner, _, _, _, _, _) -> jet_driver_recursion_then(jet_driver_recursion_expression(tree, hits, inner), jet_driver_recursion_either(jet_driver_recursion_fall(), jet_driver_recursion_exit()))
+        .OrFallback(value, fallback, _) -> jet_driver_recursion_then(jet_driver_recursion_expression(tree, hits, value), jet_driver_recursion_maybe(jet_driver_recursion_fallback(tree, hits, fallback)))
+        .OptMethodCall(base, _, call, _) -> jet_driver_recursion_then(jet_driver_recursion_expression(tree, hits, base), jet_driver_recursion_maybe(jet_driver_recursion_expression(tree, hits, call)))
+        .IfExpr(condition, then_body, then_value, else_body, else_value) -> {
+            then_flow: jet_driver_recursion_then(jet_driver_recursion_statements(tree, hits, then_body), jet_driver_recursion_expression(tree, hits, then_value))
+            else_flow: jet_driver_recursion_then(jet_driver_recursion_statements(tree, hits, else_body), jet_driver_recursion_expression(tree, hits, else_value))
+            jet_driver_recursion_then(jet_driver_recursion_condition(tree, hits, condition), jet_driver_recursion_either(then_flow, else_flow))
+        }
+        .PatternMatches(subject, _) -> jet_driver_recursion_expression(tree, hits, subject)
+        .RequireStop(kind, _, always_stops) -> {
+            stop: if always_stops -> jet_driver_recursion_exit() else -> jet_driver_recursion_either(jet_driver_recursion_fall(), jet_driver_recursion_exit())
+            jet_driver_recursion_then(jet_driver_recursion_require(tree, hits, kind), stop)
+        }
+        .Never(_, _) | .InvariantViolation(_, _) -> jet_driver_recursion_exit()
+        .SharedGuardWait(_, _, _) | .OptionLift2(_, _, _) -> jet_driver_recursion_perhaps(tree, hits, id)
+        .HostCall(_) | .FnValue(_) | .CoreClosureCall(_) -> jet_driver_recursion_perhaps(tree, hits, id)
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) | .GlobalShared(_, _) -> jet_driver_recursion_children(tree, hits, id)
+        .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .StaticCall(_, _, _, _, _) | .AllocNew(_, _) | .CoreCall(_, _, _, _, _, _) -> jet_driver_recursion_children(tree, hits, id)
+        .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .DistinctRaw(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) -> jet_driver_recursion_children(tree, hits, id)
+        .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) -> jet_driver_recursion_children(tree, hits, id)
+        .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) -> jet_driver_recursion_children(tree, hits, id)
+        .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .RawOf(_) | .PoolSlot(_, _, _, _, _, _) -> jet_driver_recursion_children(tree, hits, id)
+        .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .ConditionNotify(_, _) -> jet_driver_recursion_children(tree, hits, id)
+        .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OptField(_, _, _) -> jet_driver_recursion_children(tree, hits, id)
+        .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) -> jet_driver_recursion_children(tree, hits, id)
+        .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .TypeTest(_, _) | .TypePath(_) -> jet_driver_recursion_children(tree, hits, id)
+    }
+    target: hits.get(id) ?? return flow
+    jet_driver_recursion_then(flow, JetDriverRecursionFlow{fall: Val([JetDriverRecursionCall{target: target, span: body_node(tree, id).span}])})
+}
+
+// The flow of a `??` fallback of `tree`.
+jet_driver_recursion_fallback: fn(tree: BodyTree, hits: [Int:Int], fallback: BodyOrFallback) -> JetDriverRecursionFlow Never! {
+    if fallback == {
+        .Value(value) -> jet_driver_recursion_expression(tree, hits, value)
+        .Return(value) -> jet_driver_recursion_then(jet_driver_recursion_optional(tree, hits, value), jet_driver_recursion_exit())
+        .Panic(_, _) | .BreakLabel(_) | .ContinueLabel(_) -> jet_driver_recursion_exit()
+        .Break -> JetDriverRecursionFlow{brk: Val([JetDriverRecursionCall]{})}
+        .Continue -> JetDriverRecursionFlow{cont: Val([JetDriverRecursionCall]{})}
+    }
+}
+
+// The flow of what a stop of `tree` evaluates before it may stop: a
+// `require`'s condition, both sides of a `require_eq`, a panic's message.
+jet_driver_recursion_require: fn(tree: BodyTree, hits: [Int:Int], kind: BodyRequireKind) -> JetDriverRecursionFlow Never! {
+    if kind == {
+        .Require(condition, _) -> jet_driver_recursion_expression(tree, hits, condition)
+        .RequireEq(left, right, _) -> jet_driver_recursion_sequence(tree, hits, [left, right])
+        .Panic(message) -> jet_driver_recursion_expression(tree, hits, message)
+    }
+}
