@@ -39087,6 +39087,56 @@
       "completedAt": "2026-11-17T21:39:26.931Z",
       "questions": [],
       "retiredAt": "2026-11-20T22:00:51.842Z"
+    },
+    {
+      "id": "c0pf4ki0",
+      "num": 6519,
+      "title": "Build `trait Language` and retire the closed FFILanguage and ForeignLanguage enums (D-FFI-LANG1)",
+      "body": "D-FFI-LANG1=A ratified foreign languages as packages implementing the Core trait `Language`. No `.jet` file declares `trait Language` at 68c87ae07b. The language set is closed twice: `enum FFILanguage { C, Cpp, Asm }` (Core/Compiler/Lang.jet:41-45) and `enum ForeignLanguage` (Jetpack/PackageModel/Source/Foreign/Bridge/BinderDescriptor.jet:22).\n\nDone when: `trait Language` is declared in Core source; the c binder implements it; both enums are gone; E1002's reserved-root list is replaced by trait lookup; a test package adds a root without a compiler change.\n\nResearch: Docs/research/declarative-jet-2026-10-31.md (card #6513). Citations are at dev 68c87ae07b. Section 3.2.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e23",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c1 met on p278 (ea15368aa5): trait Language replaces FFILanguage/ForeignLanguage; package_adds_root passes."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`trait Language` is declared in Core and the c binder implements it; `FFILanguage` and `ForeignLanguage` are gone; E1002's reserved-root list is a trait lookup; and a test package adds a root without a compiler change (D-EXTEND-ARCH1=A). Proof: `git grep -nE 'FFILanguage|ForeignLanguage' -- Compiler Core Jetpack` prints nothing and `jet test Compiler --profile cases --filter FFILanguage/package_adds_root`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed in ea15368aa5 (dev, p278 batch compiler 0921df52d9). `git grep -nE \"FFILanguage|ForeignLanguage\" -- Compiler Core Jetpack` prints nothing, Core/Prelude/Prelude.jet declares `Language: trait`, and `jet test Compiler --profile cases --filter FFILanguage/package_adds_root` passes 1/1. The ui ffi_unknown_ rows pass 2/2.",
+          "at": "2026-11-17T22:04:14.298Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "ffi",
+        "declarative"
+      ],
+      "parentId": "c085f598",
+      "needsAcceptance": false,
+      "created": "2026-11-01T01:14:52.833Z",
+      "updated": "2026-11-17T22:04:23.460Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-17T22:04:23.460Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T22:13:19.259Z"
     }
   ]
 }

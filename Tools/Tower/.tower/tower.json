@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112687,
+    "rev": 112688,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -45311,54 +45311,6 @@
       "criteriaLastN": 8
     },
     {
-      "id": "c0pf4ki0",
-      "num": 6519,
-      "title": "Build `trait Language` and retire the closed FFILanguage and ForeignLanguage enums (D-FFI-LANG1)",
-      "body": "D-FFI-LANG1=A ratified foreign languages as packages implementing the Core trait `Language`. No `.jet` file declares `trait Language` at 68c87ae07b. The language set is closed twice: `enum FFILanguage { C, Cpp, Asm }` (Core/Compiler/Lang.jet:41-45) and `enum ForeignLanguage` (Jetpack/PackageModel/Source/Foreign/Bridge/BinderDescriptor.jet:22).\n\nDone when: `trait Language` is declared in Core source; the c binder implements it; both enums are gone; E1002's reserved-root list is replaced by trait lookup; a test package adds a root without a compiler change.\n\nResearch: Docs/research/declarative-jet-2026-10-31.md (card #6513). Citations are at dev 68c87ae07b. Section 3.2.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e23",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "c1 met on p278 (ea15368aa5): trait Language replaces FFILanguage/ForeignLanguage; package_adds_root passes."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "`trait Language` is declared in Core and the c binder implements it; `FFILanguage` and `ForeignLanguage` are gone; E1002's reserved-root list is a trait lookup; and a test package adds a root without a compiler change (D-EXTEND-ARCH1=A). Proof: `git grep -nE 'FFILanguage|ForeignLanguage' -- Compiler Core Jetpack` prints nothing and `jet test Compiler --profile cases --filter FFILanguage/package_adds_root`.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed in ea15368aa5 (dev, p278 batch compiler 0921df52d9). `git grep -nE \"FFILanguage|ForeignLanguage\" -- Compiler Core Jetpack` prints nothing, Core/Prelude/Prelude.jet declares `Language: trait`, and `jet test Compiler --profile cases --filter FFILanguage/package_adds_root` passes 1/1. The ui ffi_unknown_ rows pass 2/2.",
-          "at": "2026-11-17T22:04:14.298Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "ffi",
-        "declarative"
-      ],
-      "parentId": "c085f598",
-      "needsAcceptance": false,
-      "created": "2026-11-01T01:14:52.833Z",
-      "updated": "2026-11-17T22:04:23.460Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 1,
-      "completedAt": "2026-11-17T22:04:23.460Z"
-    },
-    {
       "id": "c0wv2wmp",
       "num": 6520,
       "title": "Build `#Layout(packed)` and first-argument align (D-JAI-LAYOUT1), and add proven `#Policy` promises",
@@ -69592,6 +69544,19 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T01:19:02.939Z"
+        },
+        {
+          "n": 9,
+          "text": "A C function returning a `*U8` string reads as a Jet String? on the native backend: a null result is absent and a non-null result is copied as UTF-8, with no Jet.PointerAcrossCBoundary refusal.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-20T22:13:19.155Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Cffi/cffi_null_string_return_reads_as_absent"
+          }
         }
       ],
       "refs": [],
@@ -69602,9 +69567,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:57:30.778Z",
-      "updated": "2026-11-17T01:51:31.263Z",
+      "updated": "2026-11-20T22:13:19.155Z",
       "updatedBy": "Main",
-      "criteriaLastN": 8
+      "criteriaLastN": 9
     },
     {
       "id": "c05nyh21",
@@ -133686,6 +133651,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-20T22:13:19.155Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0qqeaqb",
+      "note": "9 criteria, soft limit 6: the card destination is every C ABI shape; each shape keeps its own proof, and splitting by shape would scatter one marshaling mechanism over several cards"
+    },
+    {
+      "at": "2026-11-20T22:13:19.155Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qqeaqb",
+      "note": "#9 A C function returning a `*U8` string reads as a Jet String?"
+    },
     {
       "at": "2026-11-20T22:02:35.967Z",
       "by": "Main",
