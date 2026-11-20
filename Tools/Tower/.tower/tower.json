@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112666,
+    "rev": 112675,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74199,7 +74199,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-20T21:29:11.229Z",
+      "updated": "2026-11-20T21:30:00.679Z",
       "updatedBy": "Main",
       "criteriaLastN": 22
     }
@@ -131380,11 +131380,11 @@
       "cardId": "c00ni11n",
       "group": "tooling",
       "title": "How long `jet perf attach` samples a process that publishes nothing",
-      "situation": "`jet perf attach <pid>` with no `--source` samples the process and its children from outside, by the kernel's task clock, for a fixed second (Compiler/JetCLI/Source/CLI/Perf/Outside.jet JET_CLI_PERF_OUTSIDE_WINDOW_MS). The compiler profile JetcProfile sampled for as many seconds as it was given, 20 by default, before it moved to attach. A second of a compiler's run is about 1000 samples per busy thread. That is too few to split a long check by phase or to read a flame graph's narrow towers. You decide how the user sets the window. We recommend a `--for=<duration>` flag, the duration written as `--zones=` already writes one.",
+      "situation": "`jet perf attach <pid>` with no `--source` samples from outside, by the kernel's task clock, for a fixed second. The window is JET_CLI_PERF_OUTSIDE_WINDOW_MS in Compiler/JetCLI/Source/CLI/Perf/Outside.jet. The compiler profile JetcProfile sampled for as many seconds as it was given, 20 by default, before it moved to attach. A second of a compiler's run is about 1000 samples per busy thread. That is too few to split a long check by phase or to read a flame graph's narrow towers. You decide how the user sets the window. We recommend a `--for=<duration>` flag, the duration written as `--zones=` already writes one.",
       "gist": "How does the user say how long an outside attach samples?",
       "lesson": "An outside attach reads nothing the program publishes. The kernel interrupts each of its threads once per millisecond of CPU time and records the stack, and jet names the frames from the program's own executable. More time means more samples. The error of a share falls with the square root of the count: about 3 points at 1000 samples and about 1 point at 10,000.",
       "explainer": "Beginner path: `jet perf attach 4242` samples for one second, as it does today. `jet perf attach 4242 --for=10s` samples for ten. The attach ends early if the process exits, and the trace says so.\n\nExpert path: the window goes in the `functions` section as `window_ms`, and `jet perf view` prints it. The value is checked like `--zones=`: a whole number of `ms` or `s`, at least 1 ms, at most 10 minutes. `--for=` with `--source` is refused, since a published flight ring is read at once and `--zones=` is that path's window.",
-      "story": "A user's `jet check` of the compiler takes 40 seconds and he wants to know which phase holds it. He starts it, runs `jet perf attach $(pgrep -n jet) --for=20s` and gets 20,000 samples split by package (JetSema 46%, JetIR 31%, JetBackend 12%), with a flame graph of the same window.",
+      "story": "A user's `jet check` of the compiler takes 40 seconds, and they want to know which phase holds it. They start it and run `jet perf attach $(pgrep -n jet) --for=20s`. They get 20,000 samples split by package (JetSema 46%, JetIR 31%, JetBackend 12%), with a flame graph of the same window.",
       "inWild": "# Linux perf: the window is the command it runs beside the process.\nperf record -g -p 4242 -- sleep 20\n\n# Go: the window is a query parameter.\ncurl -o cpu.pprof 'localhost:6060/debug/pprof/profile?seconds=20'\n\n# py-spy: an explicit duration flag.\npy-spy record --pid 4242 --duration 20",
       "detail": "Code read on dev 6c1c887a39. Session.jet jet_cli_perf_attach takes `--zones=<duration>` through jet_cli_perf_attach_window, which accepts `500ms` and `2s`. Outside.jet jet_cli_perf_outside_sample(pid, window_ms) already takes the window as a parameter; only its caller fixes it at 1000. No other attach path samples over time: the flight ring and the heap snapshot are read once, and the zones window has its own flag.",
       "options": [
@@ -131447,14 +131447,81 @@
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": null,
-      "checkInstructions": "Under A: the case Perf/attach_gives_the_jetcprofile_facts (#6995 c22) attaches to a busy `jet check` with `--for=3s` and reads window_ms=3000 with more than 1000 samples; `--for=3s --source x.jet` is refused naming `--zones=`. Under B: the case ends the attach by its target exiting.",
-      "surface": "jet perf attach <pid> --for=<duration>",
+      "checkInstructions": "Under A: the case Perf/attach_gives_the_jetcprofile_facts (#6995 c22) attaches to a busy `jet check` with `--for=3s`. It reads window_ms=3000 with more than 1000 samples. `--for=3s --source x.jet` is refused, naming `--zones=`. Under B: the case ends the attach by its target exiting.",
+      "surface": {
+        "gist": "How does the user say how long an outside attach samples?",
+        "lesson": "An outside attach samples a process that publishes nothing. Today it always samples for one second. A adds a flag for the window; B samples until the process exits or Ctrl-C.",
+        "trio": {
+          "current": {
+            "note": "The outside sampler's window is fixed at one second, and no flag changes it.",
+            "code": "$ jet perf attach 4242\nfunctions samples=998 processes=2 threads=9 window_ms=1000 lost=0 unnamed=12"
+          },
+          "wild": {
+            "lang": "py-spy",
+            "note": "`record --duration N` bounds the window; without it, py-spy records until Ctrl-C.",
+            "code": "py-spy record --pid 4242 --duration 20 -o profile.svg"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "`--for=<duration>`",
+            "gist": "A flag sets the window; the default stays one second.",
+            "gains": [
+              "A bounded, scriptable window of any length.",
+              "The trace records the window it asked for and the one it got."
+            ],
+            "losses": [
+              "One more flag on `jet perf attach`."
+            ],
+            "proposed": {
+              "code": "$ jet perf attach 4242 --for=20s\nfunctions samples=19874 processes=2 threads=9 window_ms=20000 lost=0 unnamed=12\n  phases: JetSema 46.1%  JetIR 31.0%  JetBackend 12.4%  ...\nTrace: .jet/perf/20261120-1530-4242.jettrace"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Sample until exit or Ctrl-C",
+            "gist": "No flag; the window ends when the process exits or the user interrupts.",
+            "gains": [
+              "No new flag."
+            ],
+            "losses": [
+              "A script or test needs a signal or `timeout` to bound the window."
+            ],
+            "proposed": {
+              "code": "$ jet perf attach 4242\nSampling 4242 until it exits; Ctrl-C ends the window.\n^C\nfunctions samples=20311 processes=2 threads=9 window_ms=20431 lost=0 unnamed=12"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A window is a number the user knows before starting, and scripts, tests and the compiler profile need a bounded one. A adds one flag that writes a duration the way `--zones=` already does, and today's one-second default is unchanged.",
+          "gains": [
+            "`jet perf attach <pid> --for=20s` gives a compiler profile JetcProfile's 20-second window, with nothing but jet.",
+            "A case or a script bounds the window without signals.",
+            "The trace records the window it asked for and the one it got."
+          ],
+          "losses": [
+            {
+              "loss": "One more flag on `jet perf attach`.",
+              "mitigation": "It applies only to the outside sampler and is refused elsewhere with a fix that names `--zones=`."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "An unbounded window needs a signal to end. A test or a script cannot rely on one, and a long-running server would be sampled until someone remembered it."
+            }
+          ],
+          "tradeoff": "One flag for a bounded, scriptable window."
+        }
+      },
       "designAway": "Considered: reuse `--zones=` as the window for every lens. Rejected: `--zones=` turns zones on in the program, which an unobserved process cannot do, so one flag would carry two meanings.",
-      "draftedBy": "Main",
-      "reviewedBy": null,
+      "draftedBy": "Lens",
+      "reviewedBy": "Main",
       "draft": true,
       "status": "open",
-      "created": "2026-11-20T21:28:56.159Z"
+      "created": "2026-11-20T21:29:59.747Z"
     }
   ],
   "questions": [
@@ -133734,6 +133801,72 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-20T21:30:00.679Z",
+      "by": "Main",
+      "action": "decision.review",
+      "ref": "D-PERF-ATTACH-WINDOW1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-20T21:29:59.747Z",
+      "by": "Lens",
+      "action": "decision.add",
+      "ref": "D-PERF-ATTACH-WINDOW1",
+      "note": "How long `jet perf attach` samples a process that publishes nothing (draft)"
+    },
+    {
+      "at": "2026-11-20T21:29:58.861Z",
+      "by": "Main",
+      "action": "decision.delete",
+      "ref": "D-PERF-ATTACH-WINDOW1",
+      "note": "How long `jet perf attach` samples a process that publishes nothing",
+      "draft": true
+    },
+    {
+      "at": "2026-11-20T21:29:51.245Z",
+      "by": "Main",
+      "action": "decision.review",
+      "ref": "D-PERF-ATTACH-WINDOW1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-20T21:29:50.372Z",
+      "by": "Lens",
+      "action": "decision.add",
+      "ref": "D-PERF-ATTACH-WINDOW1",
+      "note": "How long `jet perf attach` samples a process that publishes nothing (draft)"
+    },
+    {
+      "at": "2026-11-20T21:29:49.583Z",
+      "by": "Main",
+      "action": "decision.delete",
+      "ref": "D-PERF-ATTACH-WINDOW1",
+      "note": "How long `jet perf attach` samples a process that publishes nothing",
+      "draft": true
+    },
+    {
+      "at": "2026-11-20T21:29:24.888Z",
+      "by": "Main",
+      "action": "decision.review",
+      "ref": "D-PERF-ATTACH-WINDOW1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-20T21:29:24.066Z",
+      "by": "Lens",
+      "action": "decision.add",
+      "ref": "D-PERF-ATTACH-WINDOW1",
+      "note": "How long `jet perf attach` samples a process that publishes nothing (draft)"
+    },
+    {
+      "at": "2026-11-20T21:29:23.207Z",
+      "by": "Main",
+      "action": "decision.delete",
+      "ref": "D-PERF-ATTACH-WINDOW1",
+      "note": "How long `jet perf attach` samples a process that publishes nothing",
+      "draft": true
+    },
     {
       "at": "2026-11-20T21:29:11.229Z",
       "by": "Main",
