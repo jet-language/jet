@@ -60,13 +60,13 @@
 //   its receipts stay as run, so their pins don't move; and the agent
 //   workload corpus (Tests/AgentWorkloads/ and the copies its cases run),
 //   whose recorded baselines and SHA256SUMS pin its bytes by digest;
-// - parse lesson: a Tests/UI fixture whose snapshot shows an error the
-//   parser reports (a Compiler/Prelude/Diagnostics.jet row whose `stage:`
-//   names `.Parse`), such as a function with no body, or a checker error
-//   `jet fmt` repairs (FMT_REPAIRED_ERRORS), and the fixtures of a case whose
-//   `stderr:` expects one of those errors; `jet fmt` repairs some of those on
-//   purpose (`#[Codable]` to `#Codable`, `#Fast()` to `#Fast`), and the
-//   fixture's bytes are the lesson;
+// - parse lesson: a Tests/UI fixture whose snapshot shows an error the lexer
+//   or parser reports (a Compiler/Prelude/Diagnostics.jet row whose `stage:`
+//   names `.Lex` or `.Parse`), such as a function with no body, and the
+//   fixtures of a case whose `stderr:` expects one of those errors; `jet fmt`
+//   performs the canonical rewrite of a teaching diagnostic on purpose
+//   (`#[Codable]` to `#Codable`, E0999's fix), and the fixture's bytes
+//   are the lesson;
 // - does not parse: a negative fixture `jet fmt` refuses, found while it runs.
 //
 // The formatter runs over the corpus in batches of BATCH sources, FMT_JOBS
@@ -124,14 +124,9 @@ RULE_UNPARSED: "does not parse"
 
 RULE_PARSE_LESSON: "parse lesson"
 
-// The diagnostic rows, whose `stage:` says which ones the parser reports.
+// The diagnostic rows, whose `stage:` says which ones the lexer and the
+// parser report.
 DIAGNOSTIC_ROWS: "Compiler/Prelude/Diagnostics.jet"
-
-// The checker errors whose source `jet fmt` rewrites into the repaired
-// program: an arm head that repeats the `if`'s comparison loses it, an
-// unbraced control body gains its braces, a loop guard written after a comma
-// loses the comma, and a field's `priv(package)` becomes `priv`.
-FMT_REPAIRED_ERRORS: [String]{"RedundantArmComparison", "EffectBodyWithoutBraces", "GuardAfterComma", "PackagePrivField"}
 
 // The Prelude texts `jet build Compiler` copies into compiler sources: each
 // `target:` names a source under Compiler/ that the build writes.
@@ -471,8 +466,8 @@ case_lesson_grep: fn(types: [String]) -> String Never! {
     "^stderr:.*Jet\\.({types.join("|")})([^A-Za-z0-9_]|$)"
 }
 
-// The diagnostic types `rows` (DIAGNOSTIC_ROWS) says the parser reports: each
-// `Name: struct {` whose `stage:` names `.Parse`.
+// The diagnostic types `rows` (DIAGNOSTIC_ROWS) says the lexer or the parser
+// reports: each `Name: struct {` whose `stage:` names `.Lex` or `.Parse`.
 parse_diagnostic_types: fn(rows: String) -> [String] Never! {
     found := [String]{}
     name := ""
@@ -481,7 +476,7 @@ parse_diagnostic_types: fn(rows: String) -> [String] Never! {
             name = line.removesuffix(": struct {{")
             next
         }
-        if name != "" && line.trim().starts_with("stage: [") && line.contains(".Parse") {
+        if name != "" && line.trim().starts_with("stage: [") && (line.contains(".Parse") || line.contains(".Lex")) {
             found.push(name.copy())
             name = ""
         }
@@ -638,8 +633,7 @@ exclusions: fn(root: String) -[Exec, FS.Read, Time.Wait]> Exclusions CorpusError
             add_fmt_case_inputs(path, read_tracked(root, path) ?? return Err(err), out)
         }
     }
-    types := parse_diagnostic_types(read_tracked(root, DIAGNOSTIC_ROWS) ?? return Err(err))
-    loop name in FMT_REPAIRED_ERRORS -> types.push(name.copy())
+    types: parse_diagnostic_types(read_tracked(root, DIAGNOSTIC_ROWS) ?? return Err(err))
     if types.len() > 0 {
         lesson_grep: "^Error: Jet\\.({types.join("|")}): "
         argv: [String]{"git", "grep", "-l", "-I", "-E", "-e", lesson_grep, "--", UI_TREE}
@@ -2110,8 +2104,8 @@ run: fn() {
 }
 
 #Test("a ui fixture whose snapshot shows a parse error is a parse lesson") {
-    rows: "MissingFunctionBody: struct {{\n    name: String,\n\n    impl Diagnostic {{\n        code: \"E0081\",\n        stage: [.Parse],\n    }}\n}}\n\nTypeMismatch: struct {{\n    impl Diagnostic {{\n        stage: [.Sema],\n    }}\n}}\n\nBareCasePattern: struct {{\n    impl Diagnostic {{\n        stage: [.Parse, .Sema],\n    }}\n}}\n"
-    assert_eq(parse_diagnostic_types(rows).join("|"), "MissingFunctionBody|BareCasePattern")
+    rows: "MissingFunctionBody: struct {{\n    name: String,\n\n    impl Diagnostic {{\n        code: \"E0081\",\n        stage: [.Parse],\n    }}\n}}\n\nTypeMismatch: struct {{\n    impl Diagnostic {{\n        stage: [.Sema],\n    }}\n}}\n\nBareCasePattern: struct {{\n    impl Diagnostic {{\n        stage: [.Parse, .Sema],\n    }}\n}}\n\nDetachedCallableMarker: struct {{\n    impl Diagnostic {{\n        stage: [.Lex],\n    }}\n}}\n"
+    assert_eq(parse_diagnostic_types(rows).join("|"), "MissingFunctionBody|BareCasePattern|DetachedCallableMarker")
     out := no_exclusions()
     note_parse_lesson("Tests/UI/e0081_fn_without_body.stderr", out)
     note_parse_lesson("Tests/UI/E0367_bare_case/stderr", out)

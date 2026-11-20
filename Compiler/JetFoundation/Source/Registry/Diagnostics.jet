@@ -60,6 +60,9 @@ DiagnosticRegistryRow: struct {
     structured_fix: DiagnosticRegistryFix?,
     fix_safety: DiagnosticFixSafety?,
     no_fix_reason: DiagnosticNoFixReason?,
+    // `jet fmt` applies the fix while formatting: a source whose only parse
+    // errors are such rows is rewritten to its canonical form, not refused.
+    fmt_applies_fix: Bool{false},
 
     has_stage: fn(self, stage: String) -> Bool Never! {
         loop component in self.stage.split("/") {

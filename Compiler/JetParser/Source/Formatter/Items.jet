@@ -1619,14 +1619,9 @@ jfmt_fmt_inbody_marker: fn(f: &JetFmt, m: Marker) {
     jfmt_fmt_marker_args(f, m)
 }
 
-// The `(args)` of a marker; `()` when the author wrote it empty, else
-// nothing when it has none. An in-body line's arguments start after its `:`,
-// which the source lookup skips.
+// The `(args)` of a marker, nothing when it has none. An in-body line's
+// arguments start after its `:`, which the source lookup skips.
 jfmt_fmt_marker_args: fn(f: &JetFmt, m: Marker) {
-    if m.args.len() == 0 {
-        if jfmt_marker_written_empty_parens(f, m) -> jfmt_write(f, "()")
-        return
-    }
     // `#State(A -> B)` prints its arrow, not a comma list.
     if m.args.len() == 2 && m.arg_labels.len() == 2 && m.arg_labels[1] == .Val(arrow) && arrow.name == STATE_ARROW_LABEL {
         jfmt_write(f, "(")
@@ -1636,28 +1631,30 @@ jfmt_fmt_marker_args: fn(f: &JetFmt, m: Marker) {
         jfmt_write(f, ")")
         return
     }
-    jfmt_write(f, "(")
-    source: jfmt_source_list_span_after(f, m.name_span.end, JFMT_DELIM_PAREN)
-    multiline: jfmt_comma_begin(f, m.args.len(), source)
-    loop index in 0..<m.args.len() {
-        argument: m.args[index]
-        argument_span: jfmt_marker_call_arg_span(argument)
-        jfmt_comma_before(f, index, multiline, argument_span.start)
-        if index < m.arg_labels.len() {
-            if m.arg_labels[index] == .Val(label) {
-                jfmt_write(f, label.name)
-                jfmt_write(f, ": ")
+    if m.args.len() > 0 {
+        jfmt_write(f, "(")
+        source: jfmt_source_list_span_after(f, m.name_span.end, JFMT_DELIM_PAREN)
+        multiline: jfmt_comma_begin(f, m.args.len(), source)
+        loop index in 0..<m.args.len() {
+            argument: m.args[index]
+            argument_span: jfmt_marker_call_arg_span(argument)
+            jfmt_comma_before(f, index, multiline, argument_span.start)
+            if index < m.arg_labels.len() {
+                if m.arg_labels[index] == .Val(label) {
+                    jfmt_write(f, label.name)
+                    jfmt_write(f, ": ")
+                }
             }
+            // An argument whose answer is required while building keeps its `#run { … }`.
+            required: loop position in m.required if position == index -> position
+            if required.len() > 0 -> jfmt_write(f, "#run {{ ")
+            jfmt_fmt_marker_call_arg(f, argument)
+            if required.len() > 0 -> jfmt_write(f, " }}")
+            jfmt_comma_after(f, multiline, argument_span.end)
         }
-        // An argument whose answer is required while building keeps its `#run { … }`.
-        required: loop position in m.required if position == index -> position
-        if required.len() > 0 -> jfmt_write(f, "#run {{ ")
-        jfmt_fmt_marker_call_arg(f, argument)
-        if required.len() > 0 -> jfmt_write(f, " }}")
-        jfmt_comma_after(f, multiline, argument_span.end)
+        jfmt_comma_end(f, multiline, source)
+        jfmt_write(f, ")")
     }
-    jfmt_comma_end(f, multiline, source)
-    jfmt_write(f, ")")
 }
 
 jfmt_fmt_marker_call_arg: fn(f: &JetFmt, argument: MarkerCallArg) {
@@ -1678,7 +1675,7 @@ jfmt_fmt_type_markers: fn(f: &JetFmt, markers: [Marker], lone_hash_ok: Bool) {
     if markers.len() == 0 {
         return
     }
-    if markers.len() == 1 && !lone_hash_ok && !jfmt_marker_groups_bracketed(f, markers) {
+    if markers.len() == 1 && !lone_hash_ok {
         jfmt_write(f, "#")
         jfmt_fmt_marker(f, markers[0])
         jfmt_write(f, " ")
@@ -1689,78 +1686,17 @@ jfmt_fmt_type_markers: fn(f: &JetFmt, markers: [Marker], lone_hash_ok: Bool) {
 
 // The inline `[A, B]` list of one marker group (without its sigil).
 jfmt_fmt_marker_list: fn(f: &JetFmt, markers: [Marker], source: JetFmtSourceList?) {
-    jfmt_fmt_marker_range(f, markers, 0, markers.len(), source)
-}
-
-// The inline list of markers[start..<end], one marker group.
-jfmt_fmt_marker_range: fn(f: &JetFmt, markers: [Marker], start: Int, end: Int, source: JetFmtSourceList?) {
-    multiline: jfmt_comma_begin(f, end - start, source)
-    loop index in start..<end {
-        jfmt_comma_before(f, index - start, multiline, markers[index].span.start)
+    multiline: jfmt_comma_begin(f, markers.len(), source)
+    loop index in 0..<markers.len() {
+        jfmt_comma_before(f, index, multiline, markers[index].span.start)
         jfmt_fmt_marker(f, markers[index])
         jfmt_comma_after(f, multiline, markers[index].span.end)
     }
     jfmt_comma_end(f, multiline, source)
 }
 
-// One authored marker group, markers[start..<end] of the list it was read
-// from: a lone `#X`, or the rules of one `#[…]` list.
-JetFmtMarkerGroup: struct {
-    start: Int,
-    end: Int,
-    bracketed: Bool,
-}
-
-// The groups the source wrote `markers` in, in order; None when a marker
-// shows no written sigil (a generated one), which keeps the one-list layout.
-jfmt_marker_groups: fn(f: JetFmt, markers: [Marker]) -> [JetFmtMarkerGroup]? Never! {
-    groups := [JetFmtMarkerGroup]{}
-    loop (index, marker) in markers {
-        written: jfmt_marker_written(f, marker)
-        if written == JFMT_MARKER_UNWRITTEN -> return None
-        if written == JFMT_MARKER_JOINS {
-            if groups.len() == 0 -> return None
-            groups[groups.len() - 1].end = index + 1
-        } else {
-            groups.push(JetFmtMarkerGroup{start: index, end: index + 1, bracketed: written == JFMT_MARKER_OPENS})
-        }
-    }
-    Val(groups)
-}
-
-// The source wrote `markers` as one or more groups other than a lone `#X`.
-jfmt_marker_groups_bracketed: fn(f: JetFmt, markers: [Marker]) -> Bool Never! {
-    groups: jfmt_marker_groups(f, markers) ?? return false
-    groups.len() != 1 || groups[0].bracketed
-}
-
-// One marker-list group on a single plane. `sigil` is `"@"` or `"#"`. Rules
-// the source wrote keep their groups, each on its own line: a format never
-// joins two groups or drops a lone rule's brackets.
+// One marker-list group on a single plane. `sigil` is `"@"` or `"#"`.
 jfmt_fmt_marker_group: fn(f: &JetFmt, markers: [Marker], sigil: String, lone_ok: Bool) {
-    if markers.len() == 0 {
-        return
-    }
-    if jfmt_marker_groups(f, markers) == .Val(groups) {
-        loop group in groups {
-            jfmt_write(f, sigil)
-            if group.bracketed {
-                jfmt_write(f, "[")
-                span: jfmt_source_marker_group_span(f, markers[group.start].name_span.start)
-                jfmt_fmt_marker_range(f, markers, group.start, group.end, span)
-                jfmt_write(f, "]")
-            } else { jfmt_fmt_marker(f, markers[group.start]) }
-            jfmt_newline(f)
-        }
-        return
-    }
-    jfmt_fmt_marker_one_list(f, markers, sigil, lone_ok)
-}
-
-// `markers` on one line: a lone marker bare when `lone_ok`, else one `[…]`
-// list. File rules always print this way, since adjacent file markers belong
-// in one bracket list (Jet.StackedRuleLines).
-jfmt_fmt_marker_one_list: fn(f: &JetFmt, markers: [Marker], sigil: String, lone_ok: Bool) {
     if markers.len() == 0 {
         return
     }
@@ -1791,6 +1727,8 @@ jfmt_fmt_trait_impl_block: fn(f: &JetFmt, block: TraitImplBlock) {
     if block.delegation_field == .Val(field) {
         jfmt_write(f, " using ")
         jfmt_write(f, field)
+        // The comment written after the field, on its line.
+        if block.span == .Val(span) -> jfmt_emit_trailing(f, span.end)
         return
     }
     jfmt_write(f, " {{")
@@ -1899,18 +1837,18 @@ jfmt_empty_body_inline: fn(f: JetFmt, span: Span) -> Bool Never! {
     jfmt_items_find(body, COMMENT_PREFIX.bytes(), 0) == None && jfmt_items_find(body, BLOCK_COMMENT_OPEN.bytes(), 0) == None
 }
 
-// The markers written above a function or a trait method signature: one lone
-// `#X` before `fn` on its line, unless it is one that keeps its own line, and
-// otherwise each written group on its own line.
+// The markers written above a function or a trait method signature: one
+// marker before `fn` on its line, unless it is one that keeps its own line,
+// and several as one list.
 jfmt_fmt_callable_markers: fn(f: &JetFmt, markers: [Marker]) {
     above: jfmt_above_markers(markers)
-    if above.len() == 1 && !jfmt_marker_groups_bracketed(f, above) {
+    if above.len() == 1 {
         jfmt_write(f, "#")
         jfmt_fmt_marker(f, above[0])
         if jfmt_callable_marker_needs_line_break(above[0]) -> jfmt_newline(f) else {
             jfmt_write(f, " ")
         }
-    } else if above.len() > 0 { jfmt_fmt_marker_group(f, above, "#", false) }
+    } else if above.len() > 1 { jfmt_fmt_marker_group(f, above, "#", false) }
 }
 
 jfmt_fmt_func: fn(f: &JetFmt, func: Func) {

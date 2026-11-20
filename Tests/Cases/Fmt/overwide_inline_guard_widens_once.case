@@ -1,6 +1,8 @@
 # tests/fmt.rs::OverwideInlineGuardWidensOnce
+# Claim: fmt refuses a file whose adjacent effect `if` body lacks braces (E0372) and leaves its bytes as written
+# Rule: fmt rewrites tokens only where a ratified line names the edit a fix the formatter performs (E20 ruling (a); the cited set is Compiler/JetParser/Tests/Formatter/Teaching.jet); no ratified line makes E0372's added braces one, so this case once blessed an unratified repair
 fixture: OverwideInlineGuardWidensOnce/Input
 step: jet fmt run.jet
-file: run.jet = OverwideInlineGuardWidensOnce/formatted.out
-step: jet fmt run.jet
-file: run.jet = OverwideInlineGuardWidensOnce/formatted.out
+exit: 2 # the parse reports E0372 and fmt writes nothing
+stderr: ~ "Jet.EffectBodyWithoutBraces" # the refusal names the unbraced `if` body
+file: run.jet = OverwideInlineGuardWidensOnce/Input/run.jet

@@ -43,9 +43,9 @@ STRUCTURE_LAID_OUT: "pick: fn(n: Int) -> String {{\n    if {{\n        n == 1 ->
     assert_eq(jfmt_structure(written), jfmt_structure(laid_out))
 }
 
-#Test("a loop's arrow body and a variant pattern's added dot are not structure") {
-    arrow: parse_source("walk: fn(xs: [Shape], first: Shape) -> Int {{\n    loop x in xs -> print(x)\n    if first == {{\n        Circle(r) -> r\n        else -> 0\n    }}\n}}\n".bytes()).program
-    braced: parse_source("walk: fn(xs: [Shape], first: Shape) -> Int {{\n    loop x in xs {{\n        print(x)\n    }}\n    if first == {{\n        .Circle(r) -> r\n        else -> 0\n    }}\n}}\n".bytes()).program
+#Test("a loop's arrow body is not structure") {
+    arrow: parse_source("walk: fn(xs: [Shape]) {{\n    loop x in xs -> print(x)\n}}\n".bytes()).program
+    braced: parse_source("walk: fn(xs: [Shape]) {{\n    loop x in xs {{\n        print(x)\n    }}\n}}\n".bytes()).program
     assert_eq(jfmt_structure(arrow), jfmt_structure(braced))
 }
 
@@ -59,12 +59,13 @@ STRUCTURE_LAID_OUT: "pick: fn(n: Int) -> String {{\n    if {{\n        n == 1 ->
     assert(jfmt_structure(dotted) != jfmt_structure(parse_source(source.bytes()).program))
 }
 
-#Test("a bare Ok or Err pattern takes its dot") {
+// A dotless payload variant other than `Val` is E0367, whose fix no ratified
+// line says fmt performs: the format refuses and the dots stay unwritten.
+#Test("a bare Ok or Err pattern is refused, not dotted") {
     source: "show: fn(result: Int String!) {{\n    if result == {{\n        Ok(n) -> {{ print(n) }}\n        Err(e) -> {{ print(e) }}\n    }}\n}}\n"
     formatted: jet_format_source(source, false)
-    assert(formatted.ok)
-    assert(formatted.text.contains(".Ok(n) -> "))
-    assert(formatted.text.contains(".Err(e) -> "))
+    assert(!formatted.ok)
+    assert(formatted.diagnostics.any(fn(diagnostic) { diagnostic.code == "E0367" }))
 }
 
 // `Inst.Compare{…}` is the `.Compare{…}` pattern under its enum's name, in
@@ -81,7 +82,7 @@ STRUCTURE_LAID_OUT: "pick: fn(n: Int) -> String {{\n    if {{\n        n == 1 ->
     assert_eq(dotted.diagnostics.len(), 0)
     // The qualified spelling keeps its dotless bit; past the name and that
     // bit the two trees are the same.
-    assert_eq(jfmt_structure(written.program).replace("\"Inst.", "\"").replace("\"Step.", "\"").replace("leading_dot: false", "leading_dot: "), jfmt_structure(dotted.program))
+    assert_eq(jfmt_structure(written.program).replace("\"Inst.", "\"").replace("\"Step.", "\"").replace("leading_dot: false", "leading_dot: true"), jfmt_structure(dotted.program))
 }
 
 // In a lambda's last place, `loop … -> value` collects a list, so a braced
@@ -276,17 +277,20 @@ structure_kept: fn(source: String, kept: String) {
     structure_kept("use lang: core.compiler.lang\n\n#Target(lang.Target.Web)\nhelper: fn() {{}}\n", "#Target(lang.Target.Web)\n")
 }
 
-#Test("a lone marker keeps its written list brackets") {
-    structure_kept("#[Codable]\nWidget: struct {{\n    label: String,\n}}\n", "#[Codable]\nWidget: struct {{\n")
+// E0999's fix: one attached rule is `#Rule`, two or more share one
+// `#[A, B]` list, and fmt performs that rewrite in order.
+#Test("a one-item marker list is the bare rule") {
+    structure_kept("#[Codable]\nWidget: struct {{\n    label: String,\n}}\n", "#Codable\nWidget: struct {{\n")
 }
 
-#Test("a marker keeps its written empty parentheses") {
-    structure_kept("#Fast() helper: fn() {{}}\n", "#Fast() helper: fn() {{}}\n")
+// Empty marker parentheses are an error the formatter fixes.
+#Test("a marker's empty parentheses go") {
+    structure_kept("#Fast() helper: fn() {{}}\n", "#Fast helper: fn() {{}}\n")
 }
 
-#Test("marker groups written on separate lines stay separate") {
-    structure_kept("#Target(JS)\n#Allow(Jet.UnconditionalRecursion, \"why\")\nspin: fn() {{ spin() }}\n", "#Target(JS)\n#Allow(Jet.UnconditionalRecursion, \"why\")\nspin: fn()")
-    structure_kept("#[Target(JS), Inline]\n#Pure\nmul: fn(a: Int) -> Int {{ a * 2 }}\n", "#[Target(JS), Inline]\n#Pure\nmul: fn(")
+#Test("adjacent marker stacks join one list in order") {
+    structure_kept("#Target(JS)\n#Allow(Jet.UnconditionalRecursion, \"why\")\nspin: fn() {{ spin() }}\n", "#[Target(JS), Allow(Jet.UnconditionalRecursion, \"why\")]\nspin: fn()")
+    structure_kept("#[Target(JS), Inline]\n#Pure\nmul: fn(a: Int) -> Int {{ a * 2 }}\n", "#[Target(JS), Inline, Pure]\nmul: fn(")
 }
 
 #Test("a build-time dispatch arm keeps its written braces or none") {

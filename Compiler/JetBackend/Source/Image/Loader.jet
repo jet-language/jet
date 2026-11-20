@@ -2371,7 +2371,7 @@ loader_trace_serve: fn(call: I64, program: I64) {
 // killed however it ends leaves no helper, and the kernel kills the program
 // its helper spawned (LOADER_PTRACE_O_EXITKILL). The thread that starts a
 // trace is the session's own, which lives as long as the session.
-#Unsafe("prctl and getppid of the helper itself")
+#Unsafe("prctl, getppid and exit_group of the helper itself, each on words alone")
 loader_trace_hold: fn(starter: I64) {
     _ := os_syscall_i64(I64{OS_SYS_PRCTL}, I64{OS_PR_SET_PDEATHSIG}, I64{LOADER_SIGKILL}, I64{0}, I64{0}, I64{0}, I64{0})
     if os_syscall_i64(I64{OS_SYS_GETPPID}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) != starter {

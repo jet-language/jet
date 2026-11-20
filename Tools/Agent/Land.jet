@@ -60,8 +60,12 @@
 // whole tree), beside one `jet test Tests/Guards/NAME` run per GUARD_PACKAGES
 // package. The compiler the build made then checks a hello world outside any
 // tree with no toolchain root, so with the Core built into it, and must load
-// Core function checks from its Core bodies file (`core-bodies`). Then, with
-// the compiler the build made, at once (phase B):
+// Core function checks from its Core bodies file (`core-bodies`), and runs
+// Tools/Agent/LaneCheck.jet --check (`lane-check`: the tree checks every lane
+// check runs before its compiler check, under the compiler they judge; a
+// REPORTED_PASSES pass, so it prints its lines but neither fails the census
+// nor enters the receipt). Then, with the compiler the build made, at once
+// (phase B):
 // its own `jet check Compiler/JetCLI` (as chain s2 does), its `jet check
 // Core` (every Core body, called or not; it moves to the seed's check once
 // the seed carries `jet check Core`) and Jetpack/Bootstrap/Check.jet of each
@@ -85,8 +89,9 @@
 // is a compiler input (or a runtime, backend, Core or Jetpack source or a
 // sources.list), with every pass, then, for every commit, the repository
 // ratchets `--check` in the worktree with the seed, RATCHET_JOBS at once
-// (RATCHETS: the unsafe-region baseline in Docs/Spec/safety.md, the Core
-// coverage list, the language-surface ceilings, every generator with
+// (RATCHETS: the unsafe-region baseline in Docs/Spec/safety.md, the
+// script-pairing guard, the Core coverage list, the language-surface
+// ceilings, every generator with
 // committed output that is not a step
 // of `jet build Compiler`: the diagnostic, Core source, owned-trait, syntax
 // dictionary and vocabulary rows, the lexical ledger, Jetpack's syntax
@@ -191,6 +196,11 @@ RECEIPT_SCHEMA: "jet.preflight-receipt.v2"
 
 RECEIPT_PASSES: [String]{"check", "build", "guards", "runtime-pack", "core-bodies", "codegen", "selfcheck", "selfcheck-core", "areas"}
 
+// Census passes that print their lines and their phases.tsv row but neither
+// fail the census nor enter the receipt: the lane check's tree checks, until
+// the unsafe-region baseline records the regions the tree has.
+REPORTED_PASSES: [String]{"lane-check"}
+
 IDENTITY_TREES: [String]{"Compiler", "Core", "Jetpack"}
 
 // Test inputs the gate leaves to the tests: cases, ui and run fixtures.
@@ -252,7 +262,7 @@ AREA_MARGIN: 268435456
 CHECKER_PREFIXES: [String]{"Compiler/", "Core/", "Jetpack/Bootstrap/"}
 
 // The census passes in the order their lines print.
-PASS_ORDER: [String]{"check", "build", "guards", "runtime-pack", "core-bodies", "codegen", "selfcheck", "selfcheck-core", "core-tests", "areas"}
+PASS_ORDER: [String]{"check", "build", "guards", "runtime-pack", "core-bodies", "codegen", "lane-check", "selfcheck", "selfcheck-core", "core-tests", "areas"}
 
 // The failing Core #Tests the core-tests pass tolerates: one "FILE: test
 // title" per line (# comments), each file run by the pass.
@@ -262,6 +272,7 @@ CORE_KNOWN: "Tools/Agent/core-known.txt"
 // many run at once.
 RATCHETS: [String]{
     "Tools/Agent/UnsafeRatchet.jet",
+    "Tools/Agent/ScriptPairing.jet",
     "Tools/Agent/CoreCoverage.jet",
     "Tools/Agent/DiagnosticRows.jet",
     "Tools/Agent/CoreSourceRows.jet",
@@ -980,9 +991,9 @@ export_tree: fn(repo: String, commit: String, dir: String, paths: [String]) -[Ex
 }
 
 // Makes the exported `dir` a git view of COMMIT: an index of its tree whose
-// objects are borrowed from `repo`, so a check that lists tracked files
-// (`git ls-files`) sees exactly what it sees in a checkout. No object is
-// copied and nothing is checked out.
+// objects are borrowed from `repo`, and HEAD at COMMIT, so a check that lists
+// tracked files (`git ls-files`) or diffs against HEAD sees exactly what it
+// sees in a checkout. No object is copied and nothing is checked out.
 git_view: fn(repo: String, commit: String, dir: String) -[Exec, FS, Time.Wait]> LandError! {
     common: git(repo, [String]{"rev-parse", "--path-format=absolute", "--git-common-dir"})
     if common.code != 0 {
@@ -996,6 +1007,10 @@ git_view: fn(repo: String, commit: String, dir: String) -[Exec, FS, Time.Wait]> 
     indexed: git(dir, [String]{"read-tree", commit})
     if indexed.code != 0 {
         return Err(LandError{message: "git read-tree {commit} in {dir} failed: {first_line(indexed)}"})
+    }
+    pointed: git(dir, [String]{"update-ref", "--no-deref", "HEAD", commit})
+    if pointed.code != 0 {
+        return Err(LandError{message: "git update-ref HEAD {commit} in {dir} failed: {first_line(pointed)}"})
     }
     Ok()
 }
@@ -1067,11 +1082,12 @@ census_main: fn(args: [String]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never
 
 // The collect-all census: every pass runs and reports, whatever an earlier
 // one found, except those that need what a failed pass did not make (the
-// codegen gate, the self-checks and the areas need the build's compiler).
-// Phase A runs the seed's check, its build and the guard shards at once; then
-// the codegen gate runs alone (about two seconds); phase B runs the
-// self-check, the Core self-check and the Jetpack area lanes. Each pass's
-// seconds (and each area's peak) go to OUT/phases.tsv.
+// codegen gate, the lane check, the self-checks and the areas need the
+// build's compiler). Phase A runs the seed's check, its build and the guard
+// shards at once; then the codegen gate (about two seconds) and the lane
+// check's tree checks run alone; phase B runs the self-check, the Core
+// self-check and the Jetpack area lanes. Each pass's seconds (and each area's
+// peak) go to OUT/phases.tsv.
 census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
     worktree: dev_worktree()
     if worktree == "" {
@@ -1168,6 +1184,7 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
     runs.push(PassRun{name: "runtime-pack", rc: 0, seconds: 0, peak: 0, note: "", lines: [String]{"runtime rc=0 native.key {native_key}"}})
     runs.push(core_bodies_pass(out, self_jet, identity))
     runs.push(codegen_pass(snap, out, self_jet, identity))
+    runs.push(lane_check_pass(snap, out, self_jet, identity))
     if !passes.selfcheck -> return census_finish(runs, out)
 
     task.group phase_b(limit: 3) {
@@ -1193,11 +1210,12 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
     code
 }
 
-// A receipt's rows: each pass that ran, and each area, with its exit.
+// A receipt's rows: each pass that ran but a REPORTED_PASSES one, and each
+// area, with its exit.
 receipt_rows: fn(runs: [PassRun]) -> [Dyn] Never! {
     out := [Dyn]{}
     loop run in runs {
-        if run.name != "" {
+        if run.name != "" && !REPORTED_PASSES.contains(run.name) {
             out.push(Dyn.Object([String:Dyn]{"name": Dyn.Text(run.name.copy()), "rc": Dyn.Int(run.rc), "note": Dyn.Text(run.note.copy())}))
         }
     }
@@ -1229,6 +1247,23 @@ receipt_rows_problem: fn(rows: [Dyn]) -> String Never! {
 // A pass whose task ended without a result.
 lost_pass: fn(name: String) -> PassRun Never! {
     PassRun{name: name.copy(), rc: 1, seconds: 0, peak: 0, note: "lost", lines: [String]{"{name} rc=1 (its task ended without a result)"}}
+}
+
+// The lane check's tree checks (Tools/Agent/LaneCheck.jet --check) of the
+// snapshot, by the compiler the build made (several ask the compiler, and the
+// assembly check needs one that carries the snapshot's Core): the
+// unsafe-region ratchet, the generated rows, the diagnostic census, the
+// script pairing and every other check each lane check runs before its
+// compiler check. It stops at the first that refuses.
+lane_check_pass: fn(snap: String, out: String, self_jet: String, identity: String) -[Exec, FS, Time, Time.Wait]> PassRun Never! {
+    watch: time.start()
+    env: [Setting]{Setting{name: "JET", value: self_jet.copy()}, Setting{name: "JET_COMPILER_IDENTITY", value: identity.copy()}, Setting{name: "JET_TOOLCHAIN_ROOT", value: snap.copy()}}
+    code: run_heavy(snap, 900, CORE_MEMORY, CENSUS_CPUS, [String]{self_jet, "Tools/Agent/LaneCheck.jet", "--check"}, env, "{out}/lane-check")
+    lines := [String]{"lane-check rc={code}"}
+    if code != 0 {
+        lines.push(clip("{files.read("{out}/lane-check.out") ?? ""}{files.read("{out}/lane-check.err") ?? ""}".trim(), 600))
+    }
+    PassRun{name: "lane-check", rc: code, seconds: time.elapsed(watch).ns /% 1000000000, peak: 0, note: "cap {CORE_MEMORY}", lines: lines}
 }
 
 // The codegen gate (Tools/Perf/CodegenCeiling.jet --check) with the built
@@ -1311,9 +1346,10 @@ pass_clean: fn(runs: [PassRun], name: String) -> Bool Never! {
     runs.any(fn(run) { run.name == name && run.rc == 0 })
 }
 
-// The census's exit: 0 when every pass that ran is clean, else 1.
+// The census's exit: 0 when every pass that ran but a REPORTED_PASSES one is
+// clean, else 1.
 census_rc: fn(runs: [PassRun]) -> Int Never! {
-    if runs.any(fn(run) { run.name != "" && run.rc != 0 }) -> 1 else -> 0
+    if runs.any(fn(run) { run.name != "" && run.rc != 0 && !REPORTED_PASSES.contains(run.name) }) -> 1 else -> 0
 }
 
 // A compile `argv` of the snapshot `snap` as the pass `name`: its keep-going
@@ -4395,6 +4431,13 @@ int_field: fn(tree: Dyn, name: String) -> Int? Never! {
     none: core_bodies_counts("JET_PHASE_COUNTERS {{\"phase\":\"sema\",\"items\":1}}\n")
     assert_eq(none.loaded, -1)
     assert_eq(none.from_text, -1)
+}
+
+#Test("a reported pass prints but neither fails the census nor enters the receipt") {
+    runs: [PassRun]{PassRun{name: "check", rc: 0, seconds: 1, peak: 0, note: "", lines: [String]{}}, PassRun{name: "lane-check", rc: 1, seconds: 1, peak: 0, note: "", lines: [String]{"lane-check rc=1"}}}
+    assert_eq(census_rc(runs), 0)
+    assert_eq(receipt_rows(runs).len(), 1)
+    assert_eq(census_rc([PassRun]{PassRun{name: "check", rc: 1, seconds: 1, peak: 0, note: "", lines: [String]{}}}), 1)
 }
 
 #Test("a refusal names the census that would admit the launch") {

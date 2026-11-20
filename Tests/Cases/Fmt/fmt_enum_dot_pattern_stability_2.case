@@ -1,6 +1,8 @@
 # tests/fmt.rs::FmtEnumDotPatternStability
+# Claim: fmt refuses a file whose variant patterns lack the leading `.` (E0367) and leaves its bytes as written
+# Rule: fmt rewrites tokens only where a ratified line names the edit a fix the formatter performs (E20 ruling (a); the cited set is Compiler/JetParser/Tests/Formatter/Teaching.jet); no ratified line makes E0367's added `.` one, so this case once blessed an unratified repair
 fixture: FmtEnumDotPatternStability2/Input
 step: jet fmt run.jet
-file: run.jet = FmtEnumDotPatternStability2/formatted.out
-step: jet fmt run.jet
-file: run.jet = FmtEnumDotPatternStability2/formatted.out
+exit: 2 # the parse reports E0367 and fmt writes nothing
+stderr: ~ "Jet.BareCasePattern" # the refusal names the patterns without a leading `.`
+file: run.jet = FmtEnumDotPatternStability2/Input/run.jet

@@ -1,21 +1,22 @@
 // (deleted in 44561018e9). `jet fmt` must keep every meaningful token of every
 // supported source in order. The oracle compares lexed token streams after a
 // closed list of parser-equivalent rewrites: top-level formatter ordering;
-// file-rule lists (adjacent `#NoPrelude`, `#Target(…)` and `#HTML(…)` print as
-// one `#[…]` list); `Type<T>.method()`; external-method sugar; canonical
-// anonymous union member order; optional declaration and trailing commas;
-// redundant default file aliases; typed-literal constructor dot removal;
+// marker lists (one attached rule is `#Rule`, two or more share one `#[…]`
+// list in order, E0999's fix); `Type<T>.method()`; external-method
+// sugar; canonical anonymous union member order; optional declaration and
+// trailing commas; redundant default file aliases; typed-literal constructor
+// dot removal;
 // arm braces fmt adds (a compact `{ … }` before a leading-dot arm, which
 // would otherwise read as a chain, or a body that no longer fits its line,
-// broken onto its own lines); leading-dot variant patterns,
+// broken onto its own lines);
 // struct shorthand labels and separators; and a required default alias on a
 // dotted module import. Later ratified spellings add: a one-member import
 // list; import grouping; a leading parameter sigil riding the type; `Unit` as
-// `()`; `Result<T, E>` as `T E!`; dropped positional
-// names in a function type; the `,` ending a wrapped loop header; the choice
-// between `-> statement` and a braced control body; and `->` before a foreign
-// declaration's return type. Every other marker group, a marker's empty `()`
-// and a dispatch arm's written braces stay as written, since cases pin them.
+// `()`; `Result<T, E>` as `T E!`; empty marker parentheses (`#X()` is `#X`);
+// dropped positional names in a function type; the `,` ending a wrapped loop
+// header; the choice between `-> statement` and a braced control body; and
+// `->` before a foreign declaration's return type. A dispatch arm's written
+// braces stay as written.
 // No rule can reorder or drop an expression operand, operator, marker payload,
 // named tuple member, comment or string interpolation. Not ported: the `=>` arrow rules
 // (`retired_result_arrow_removal`, the LambdaArrow half of
@@ -70,7 +71,6 @@ use {
         TOKEN_MINUS,
         TOKEN_MINUS_EQ,
         TOKEN_NOT_EQ,
-        TOKEN_NULL,
         TOKEN_PIPE,
         TOKEN_PLUS,
         TOKEN_PLUS_EQ,
@@ -250,7 +250,7 @@ fl_canonical_tokens: fn(src: String, path: String) -> [FmtTok] {
     index := 0
     loop index < kept.len() {
         next_kind: fl_kind(kept, index + 1)
-        if kept[index].kind == TOKEN_COMMA && (next_kind == TOKEN_RPAREN || next_kind == TOKEN_RBRACKET || next_kind == TOKEN_RBRACE) {
+        if kept[index].kind == TOKEN_COMMA && fl_is_closer(fl_kind_past_comments(kept, index + 1)) {
             index += 1
             next
         }
@@ -286,6 +286,14 @@ fl_canonical_tokens: fn(src: String, path: String) -> [FmtTok] {
             canonical.push(fl_synthetic(TOKEN_LPAREN, "("))
             canonical.push(fl_synthetic(TOKEN_RPAREN, ")"))
             index += 1
+            next
+        }
+        // Empty marker parentheses are an error the formatter fixes:
+        // `#Inline()` is `#Inline`.
+        if kept[index].kind == TOKEN_HASH && fl_is_ident(kept, index + 1) && fl_kind(kept, index + 2) == TOKEN_LPAREN && fl_kind(kept, index + 3) == TOKEN_RPAREN {
+            canonical.push(kept[index])
+            canonical.push(kept[index + 1])
+            index += 4
             next
         }
         // `Result<T, E>` is the error contract `T E!`.
@@ -658,6 +666,14 @@ fl_is_closer: fn(kind: Int) -> Bool {
     kind == TOKEN_RBRACE || kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET
 }
 
+// Kind of the first token at or after `index` that is not a comment: a
+// trailing comma may sit before the comments that end a list.
+fl_kind_past_comments: fn(tokens: [FmtTok], index: Int) -> Int {
+    cursor := index
+    loop cursor < tokens.len() && fl_is_comment(tokens[cursor].kind) -> cursor += 1
+    fl_kind(tokens, cursor)
+}
+
 // An `->` that opens the body of a statement-position `loop`, `if`, or
 // `else`. Arm, callable, lambda, and value-position arrows are not bodies.
 fl_is_control_body_arrow: fn(tokens: [FmtTok], arrow: Int) -> Bool {
@@ -706,22 +722,26 @@ fl_control_body_end: fn(tokens: [FmtTok], arrow: Int) -> Int {
 
 // "The formatter chooses the arrow when one simple body
 // fits and braces otherwise." Both spellings of a statement-position control
-// body canonicalize to the braced body; the arrow choice is layout.
+// body canonicalize to the braced body; the arrow choice is layout. A body
+// already written as one block after its arrow (`else -> { ... }`, the arm
+// braces fmt adds around a broken body) is that block.
 fl_canonicalize_control_arrow_bodies: fn(tokens: [FmtTok]) -> [FmtTok] {
     closes := [Int]{}
     loop _ in 0..<tokens.len() + 1 -> closes.push(0)
     bodies := [Bool]{}
+    blocks := [Bool]{}
     loop index in 0..<tokens.len() {
         body: fl_is_control_body_arrow(tokens, index)
-        bodies.push(body)
-        if body {
-            end: fl_control_body_end(tokens, index)
-            closes[end] = closes[end] + 1
-        }
+        end: if body -> fl_control_body_end(tokens, index) else -> -1
+        block: body && fl_kind(tokens, index + 1) == TOKEN_LBRACE && fl_matching(tokens, index + 1, TOKEN_LBRACE, TOKEN_RBRACE) == end - 1
+        bodies.push(body && !block)
+        blocks.push(block)
+        if body && !block -> closes[end] = closes[end] + 1
     }
     out := [FmtTok]{}
     loop index in 0..<tokens.len() {
         loop _ in 0..<closes[index] -> out.push(fl_synthetic(TOKEN_RBRACE, "}}"))
+        if blocks[index] -> next
         if bodies[index] -> out.push(fl_synthetic(TOKEN_LBRACE, "{{")) else {
             out.push(tokens[index])
         }
@@ -950,15 +970,16 @@ fl_file_chunk_category: fn(chunk: [FmtTok]) -> Int {
     3
 }
 
-// A `#[…]` list of file rules is the same rules written one per line: fmt
-// prints adjacent file rules as one list. Every other group stays as written.
+// A `#[…]` list is the same rules written one per line, in order: fmt writes
+// one attached rule as `#Rule` and two or more as one `#[A, B]` list (the
+// E0999 fix).
 fl_expand_marker_groups: fn(tokens: [FmtTok]) -> [FmtTok] {
     out := [FmtTok]{}
     index := 0
     loop index < tokens.len() {
         if tokens[index].kind == TOKEN_HASH && fl_kind(tokens, index + 1) == TOKEN_LBRACKET {
             end: fl_matching(tokens, index + 1, TOKEN_LBRACKET, TOKEN_RBRACKET)
-            if end >= 0 && fl_is_file_rule_list(tokens, index + 1, end) {
+            if end >= 0 {
                 group_start := index + 2
                 paren_depth := 0
                 brace_depth := 0
@@ -987,31 +1008,6 @@ fl_expand_marker_groups: fn(tokens: [FmtTok]) -> [FmtTok] {
         index += 1
     }
     out
-}
-
-// Whether every member of the `[…]` from `open` to `close` is a file rule
-// (`Target`, `HTML`, `NoPrelude`).
-fl_is_file_rule_list: fn(tokens: [FmtTok], open: Int, close: Int) -> Bool {
-    depth := 0
-    at_member := true
-    members := 0
-    loop cursor in open + 1..<close {
-        kind: tokens[cursor].kind
-        if fl_is_trivia(kind) -> next
-        if at_member {
-            if kind != TOKEN_IDENT -> return false
-            name: tokens[cursor].text
-            if name != FL_MARKER_TARGET && name != FL_MARKER_HTML && name != FL_MARKER_NO_PRELUDE {
-                return false
-            }
-            at_member = false
-            members += 1
-        }
-        if fl_is_opener(kind) -> depth += 1
-        if fl_is_closer(kind) -> depth -= 1
-        if kind == TOKEN_COMMA && depth == 0 -> at_member = true
-    }
-    members > 0
 }
 
 // Index of the closer matching the opener at `open`, or -1.
@@ -1267,6 +1263,10 @@ fl_ordered_token_diff: fn(path: String, original: [FmtTok], formatted: [FmtTok])
     // Per open arm block fmt added, innermost last: whether it broke the
     // body onto its own lines.
     added_arm_blocks := [Bool]{}
+    // The original `)` of each labeled payload fmt moved into braces, and of
+    // each in-body marker value whose parentheses fmt dropped, innermost last.
+    braced_payloads := [Int]{}
+    unwrapped_markers := [Int]{}
     loop original_i < original.len() || formatted_i < formatted.len() {
         if original_i < original.len() && formatted_i < formatted.len() && fl_tokens_equal(original[original_i], formatted[formatted_i]) {
             original_i += 1
@@ -1283,16 +1283,35 @@ fl_ordered_token_diff: fn(path: String, original: [FmtTok], formatted: [FmtTok])
             original_i += 1
             next
         }
+        if fl_labeled_payload_parens(original, original_i) && fl_kind(formatted, formatted_i) == TOKEN_LBRACE {
+            braced_payloads.push(fl_matching(original, original_i, TOKEN_LPAREN, TOKEN_RPAREN))
+            original_i += 1
+            formatted_i += 1
+            next
+        }
+        if braced_payloads.len() > 0 && braced_payloads[braced_payloads.len() - 1] == original_i && fl_kind(formatted, formatted_i) == TOKEN_RBRACE {
+            braced_payloads.pop().drop("it is this `)`")
+            original_i += 1
+            formatted_i += 1
+            next
+        }
+        marker_close: fl_inbody_marker_simple_parens(original, original_i)
+        if marker_close >= 0 && fl_kind(formatted, formatted_i) != TOKEN_LPAREN {
+            unwrapped_markers.push(marker_close)
+            original_i += 1
+            next
+        }
+        if unwrapped_markers.len() > 0 && unwrapped_markers[unwrapped_markers.len() - 1] == original_i {
+            unwrapped_markers.pop().drop("it is this `)`")
+            original_i += 1
+            next
+        }
         if fl_formatted_arm_block_opens(formatted, formatted_i) && fl_kind(original, original_i) != TOKEN_LBRACE {
             added_arm_blocks.push(formatted[formatted_i].ends_line)
             formatted_i += 1
             next
         }
-        if fl_formatted_variant_pattern_dot(original, original_i, formatted, formatted_i) {
-            formatted_i += 1
-            next
-        }
-        if added_arm_blocks.len() > 0 && fl_kind(formatted, formatted_i) == TOKEN_RBRACE && (fl_next_token_matches(original, original_i, formatted, formatted_i + 1) || fl_formatted_variant_pattern_dot(original, original_i, formatted, formatted_i + 1)) {
+        if added_arm_blocks.len() > 0 && fl_kind(formatted, formatted_i) == TOKEN_RBRACE && fl_next_token_matches(original, original_i, formatted, formatted_i + 1) {
             broken: added_arm_blocks.pop() ?? false
             if !broken && fl_kind(formatted, formatted_i + 1) != TOKEN_DOT {
                 return "fmt braced an arm on {path} that fits its line and comes before no leading-dot arm"
@@ -1324,6 +1343,8 @@ fl_ordered_token_diff: fn(path: String, original: [FmtTok], formatted: [FmtTok])
         return "fmt changed ordered token {original_i} on {path}:\n  before: {fl_describe(original, original_i)}\n  after: {fl_describe(formatted, formatted_i)}"
     }
     if added_arm_blocks.len() != 0 -> return "fmt left an unmatched arm block on {path}"
+    if braced_payloads.len() != 0 -> return "fmt left a labeled payload's `)` unmatched on {path}"
+    if unwrapped_markers.len() != 0 -> return "fmt left an in-body marker's `)` unmatched on {path}"
     ""
 }
 
@@ -1348,7 +1369,7 @@ fl_formatted_loop_header_comma: fn(tokens: [FmtTok], index: Int) -> Bool {
 }
 
 fl_reordered_simple_union_type: fn(original: [FmtTok], original_i: Int, formatted: [FmtTok], formatted_i: Int) -> FmtStep {
-    if !fl_simple_union_type_annotation(original, original_i) || !fl_simple_union_type_annotation(formatted, formatted_i) {
+    if !fl_union_type_position(original, original_i) || !fl_union_type_position(formatted, formatted_i) {
         return fl_no_step()
     }
     left: fl_simple_union_members(original, original_i)
@@ -1364,6 +1385,44 @@ fl_typed_literal_dot_rewrite: fn(original: [FmtTok], original_i: Int, formatted:
     if body != TOKEN_LBRACE && body != TOKEN_STRING -> return false
     if formatted_i >= formatted.len() -> return false
     fl_tokens_equal(original[original_i + 1], formatted[formatted_i])
+}
+
+// `.Case(label: v)` written with call parentheses: fmt prints a labeled
+// payload in braces (spec.md: "labeled payloads use
+// `Type.Variant{label: value}` rather than call parentheses").
+fl_labeled_payload_parens: fn(tokens: [FmtTok], open: Int) -> Bool {
+    if fl_kind(tokens, open) != TOKEN_LPAREN || fl_kind(tokens, open - 2) != TOKEN_DOT || !fl_is_ident(tokens, open - 1) -> return false
+    fl_uppercase_start(tokens[open - 1].text) && fl_is_ident(tokens, open + 1) && fl_kind(tokens, open + 2) == TOKEN_COLON
+}
+
+// The `)` of an in-body marker line `#X: (v)` with one simple value: a name
+// path, a string or a number. fmt prints it without parentheses (spec.md:
+// "`jet fmt` keeps the placement and prints one simple argument without
+// parentheses"). -1 for any other `(`.
+fl_inbody_marker_simple_parens: fn(tokens: [FmtTok], open: Int) -> Int {
+    if fl_kind(tokens, open) != TOKEN_LPAREN || fl_kind(tokens, open - 1) != TOKEN_COLON || !fl_is_ident(tokens, open - 2) || fl_kind(tokens, open - 3) != TOKEN_HASH {
+        return -1
+    }
+    first: fl_kind(tokens, open + 1)
+    if first == TOKEN_STRING || first == TOKEN_RAW_STRING || first == TOKEN_INT || first == TOKEN_FLOAT || first == TOKEN_UNIT_NUMBER {
+        return if fl_kind(tokens, open + 2) == TOKEN_RPAREN -> open + 2 else -> -1
+    }
+    cursor := open + 1
+    loop fl_is_ident(tokens, cursor) {
+        if fl_kind(tokens, cursor + 1) == TOKEN_RPAREN -> return cursor + 1
+        if fl_kind(tokens, cursor + 1) != TOKEN_DOT -> return -1
+        cursor += 2
+    }
+    -1
+}
+
+// A union the parser sorts: a struct field or parameter
+// annotation, or the parenthesized error side of a fallible type `(E1 | E2)!`.
+fl_union_type_position: fn(tokens: [FmtTok], start: Int) -> Bool {
+    if fl_simple_union_type_annotation(tokens, start) -> return true
+    if fl_kind(tokens, start - 1) != TOKEN_LPAREN -> return false
+    members: fl_simple_union_members(tokens, start)
+    members.end >= 0 && fl_kind(tokens, members.end) == TOKEN_RPAREN && fl_kind(tokens, members.end + 1) == TOKEN_BANG
 }
 
 fl_simple_union_type_annotation: fn(tokens: [FmtTok], start: Int) -> Bool {
@@ -1452,67 +1511,6 @@ fl_sorted: fn(values: [String]) -> [String] {
         }
     }
     out
-}
-
-fl_formatted_variant_pattern_dot: fn(original: [FmtTok], original_i: Int, formatted: [FmtTok], formatted_i: Int) -> Bool {
-    if original_i < 0 || original_i >= original.len() || fl_kind(formatted, formatted_i) != TOKEN_DOT || formatted_i + 1 >= formatted.len() {
-        return false
-    }
-    left: original[original_i]
-    right: formatted[formatted_i + 1]
-    same_variant := false
-    if left.kind == TOKEN_IDENT && right.kind == TOKEN_IDENT {
-        same_variant = left.text == right.text && fl_uppercase_start(left.text)
-    }
-    if left.kind == TOKEN_NULL && right.kind == TOKEN_NULL -> same_variant = true
-    same_variant && fl_variant_pattern_context(original, original_i)
-}
-
-fl_variant_pattern_context: fn(tokens: [FmtTok], index: Int) -> Bool {
-    if fl_kind(tokens, index - 1) == TOKEN_EQ_EQ -> return true
-    brace_depth := 0
-    dispatch_open := -1
-    cursor := index - 1
-    loop cursor >= 0 {
-        kind: tokens[cursor].kind
-        if kind == TOKEN_RBRACE -> brace_depth += 1 else if kind == TOKEN_LBRACE {
-            if brace_depth == 0 {
-                dispatch_open = cursor
-                break
-            }
-            brace_depth -= 1
-        }
-        cursor -= 1
-    }
-    if dispatch_open < 0 -> return false
-    fl_kind(tokens, dispatch_open - 1) == TOKEN_EQ_EQ && fl_same_brace_scope_has_if(tokens, dispatch_open - 1) && fl_pattern_reaches_arrow(tokens, index)
-}
-
-fl_same_brace_scope_has_if: fn(tokens: [FmtTok], before: Int) -> Bool {
-    cursor := before - 1
-    loop cursor >= 0 {
-        kind: tokens[cursor].kind
-        if kind == TOKEN_KW_IF -> return true
-        if kind == TOKEN_LBRACE || kind == TOKEN_RBRACE || fl_is_arrow(kind) -> return false
-        cursor -= 1
-    }
-    false
-}
-
-fl_pattern_reaches_arrow: fn(tokens: [FmtTok], index: Int) -> Bool {
-    paren_depth := 0
-    bracket_depth := 0
-    loop cursor in index + 1..<tokens.len() {
-        kind: tokens[cursor].kind
-        if kind == TOKEN_LPAREN -> paren_depth += 1 else if kind == TOKEN_RPAREN && paren_depth > 0 {
-            paren_depth -= 1
-        } else if kind == TOKEN_LBRACKET { bracket_depth += 1 } else if kind == TOKEN_RBRACKET && bracket_depth > 0 {
-            bracket_depth -= 1
-        } else if fl_is_arrow(kind) && paren_depth == 0 && bracket_depth == 0 { return true } else if (kind == TOKEN_LBRACE || kind == TOKEN_RBRACE) && paren_depth == 0 && bracket_depth == 0 {
-            return false
-        }
-    }
-    false
 }
 
 fl_formatted_arm_block_opens: fn(tokens: [FmtTok], index: Int) -> Bool {
@@ -1791,6 +1789,38 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
     print("formatter corpus: {example_programs} example programs, {example_configs} configs, {ui_parse_valid} parse-valid UI fixtures, {ui_parse_invalid} parse-invalid UI fixtures, {ui_configs} UI manifest configs")
 }
 
+// Every other program source in the tree: fmt keeps every token of each one
+// it accepts, save the rewrites ratified above (#6898 c20). There is no
+// exemption list. Run from the repository root.
+#Test("fmt_is_lossless_on_the_source_tree") {
+    failures := [String]{}
+    checked := 0
+    refused := 0
+    configs := 0
+    roots: [String]{"Compiler", "Core", "Docs", "Jetpack", "Tests", "Tools"}
+    loop root in roots {
+        loop path in fl_collect_sorted(root) {
+            // The test above classifies every UI fixture.
+            if path.starts_with("Tests/UI/") -> next
+            if fl_is_config(path) {
+                configs += 1
+                next
+            }
+            src: fl_files.read(path) ?? panic("cannot read {path}: {err}")
+            if fl_parse_invalid(src) {
+                refused += 1
+                next
+            }
+            formatted: fl_format(src)
+            problem: if !formatted.ok -> "fmt failed on {path}:{formatted.codes}" else if fl_teaching_codes(src).len() > 0 -> fl_check_rewrites_to_canon(path, src, formatted.text) else -> fl_check_preserves(path, src, formatted.text)
+            if problem != "" -> failures.push(problem)
+            checked += 1
+        }
+    }
+    assert(failures.len() == 0, "formatter token-stream failures ({failures.len()} found):\n{failures.join("\n")}")
+    print("formatter tree: {checked} sources checked, {refused} refused, {configs} configs")
+}
+
 // The readable prelude spells only what user code can write (#6281 c1): it
 // parses under the ordinary user rules, and fmt keeps every token of it,
 // a trait method's own `<T: Printable>` included. Run from the repository root.
@@ -1875,30 +1905,34 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
         {"import-hoisted top-level comments", "// helper\nhelper: fn() {{}}\n// import\nuse core.ui as ui\n", "// helper\n// import\nuse core.ui as ui\nhelper: fn() {{}}\n"},
         {"spanless marker comment position", "// web target\n#Target(Web)\nrun: fn() {{}}\n", "#Target(Web)\n// web target\nrun: fn() {{}}\n"},
         {"file-rule grouping", "#Target(Web)\n#HTML\nrun: fn() {{}}\n", "#[Target(Web), HTML]\nrun: fn() {{}}\n"},
+        {"marker grouping", "#Codable\n#Rename(.Camel)\nS: struct {{}}\n", "#[Codable, Rename(.Camel)]\nS: struct {{}}\n"},
+        {"one-item marker list", "#[Codable]\nS: struct {{}}\n", "#Codable\nS: struct {{}}\n"},
         {"static generic call", "run: fn() {{ Pool<Node>.new() }}\n", "run: fn() {{ Pool.new<Node>() }}\n"},
         {"external method", "Point.len: fn(self) -> Int {{ 1 }}\n", "impl Point {{ len: fn(self) -> Int {{ 1 }} }}\n"},
         {"enum group separators", "E: enum {{ G {{ A, B }} }}\n", "E: enum {{ G {{ A B }} }}\n"},
         {"enum case separators", "E: enum {{ A(x: Int, y: Int), B }}\n", "E: enum {{ A(x: Int, y: Int) B }}\n"},
         {"struct declaration separators", "S: struct {{ x: Int, y: Int }}\n", "S: struct {{ x: Int y: Int }}\n"},
         {"trailing comma", "run: fn() {{ xs: [1,] }}\n", "run: fn() {{ xs: [1] }}\n"},
+        {"trailing comma before a comment", "run: fn() {{\n    xs: [\n        1  // one\n    ]\n}}\n", "run: fn() {{\n    xs: [\n        1,  // one\n    ]\n}}\n"},
         {"default file alias", "use \"./foo\" as foo\nrun: fn() {{}}\n", "use \"./foo\"\nrun: fn() {{}}\n"},
         {"typed-literal dot removal", "run: fn() {{ p: Point.{{x: 1}} }}\n", "run: fn() {{ p: Point{{x: 1}} }}\n"},
         {"arm braces before a leading-dot arm", "run: fn() {{\n    if x == {{\n        .A -> print(1)\n        .B -> print(2)\n    }}\n}}\n", "run: fn() {{\n    if x == {{\n        .A -> {{ print(1) }}\n        .B -> print(2)\n    }}\n}}\n"},
         {"arm braces around a body broken onto its lines", "run: fn() {{ if x == {{ 1 -> print(1) }} }}\n", "run: fn() {{\n    if x == {{\n        1 -> {{\n            print(1)\n        }}\n    }}\n}}\n"},
-        {"bare enum variant pattern", "run: fn() {{ if x == {{ A(v) -> print(v) }} }}\n", "run: fn() {{ if x == {{ .A(v) -> print(v) }} }}\n"},
-        {"bare None variant pattern", "run: fn() {{ if x == {{ None -> print(0) }} }}\n", "run: fn() {{ if x == {{ .None -> print(0) }} }}\n"},
         {"struct shorthand label", "run: fn() {{ p: Point{{x}} }}\n", "run: fn() {{ p: Point{{x: x}} }}\n"},
         {"default module alias", "use core.encoding.json\nrun: fn() {{}}\n", "use core.encoding.json as json\nrun: fn() {{}}\n"},
         {"struct literal separator", "run: fn() {{ p: Point{{x: 1 y: 2}} }}\n", "run: fn() {{ p: Point{{x: 1, y: 2}} }}\n"},
         {"anonymous union member order", "S: struct {{ value: String | Char }}\n", "S: struct {{ value: Char | String }}\n"},
+        {"error-side union member order", "run: fn() (String | Bool)! {{}}\n", "run: fn() (Bool | String)! {{}}\n"},
         {"loop arrow body", "run: fn() {{\n    loop i in 0..<3 {{\n        print(i)\n    }}\n}}\n", "run: fn() {{\n    loop i in 0..<3 -> print(i)\n}}\n"},
         {"if arrow body expanded", "run: fn() {{\n    if ok -> return 1\n    print(0)\n}}\n", "run: fn() {{\n    if ok {{\n        return 1\n    }}\n    print(0)\n}}\n"},
         {"else arrow bodies", "run: fn() {{\n    if ok {{\n        a()\n    }} else {{\n        b()\n    }}\n}}\n", "run: fn() {{\n    if ok -> a() else -> b()\n}}\n"},
+        {"else arm braces around a body broken onto its lines", "run: fn() {{ if {{ ok -> a() else -> if {{ done -> b() }} }} }}\n", "run: fn() {{\n    if {{\n        ok -> a()\n        else -> {{\n            if {{ done -> b() }}\n        }}\n    }}\n}}\n"},
         {"single-member import list", "use core.[files]\nrun: fn() {{}}\n", "use core.files\nrun: fn() {{}}\n"},
         {"leading parameter sigil", "f: fn(&&s: String) {{}}\n", "f: fn(s: &&String) {{}}\n"},
         {"unit type name", "f: fn() -> Unit {{}}\n", "f: fn() -> () {{}}\n"},
         {"import grouping", "use core.files\nuse core.term\nrun: fn() {{}}\n", "use {{\n    core.files\n    core.term\n}}\nrun: fn() {{}}\n"},
         {"wrapped loop header comma", "run: fn() {{\n    loop x in [1, 2] {{\n        print(x)\n    }}\n}}\n", "run: fn() {{\n    loop x in\n        [1, 2], {{\n        print(x)\n    }}\n}}\n"},
+        {"empty marker parentheses", "#Inline()\nf: fn() {{}}\n", "#Inline\nf: fn() {{}}\n"},
         {"function type parameter names", "S: struct {{ f: fn(line: String) -> View<str> from line }}\n", "S: struct {{ f: fn(String) -> View<str> from _0 }}\n"},
         {"result type contract", "f: fn() -> Result<Int, IOError> {{ 1 }}\n", "f: fn() -> Int IOError! {{ 1 }}\n"},
         {"optional return type parens", "f: fn() -> (Int?) {{ None }}\n", "f: fn() -> Int? {{ None }}\n"},
@@ -1915,6 +1949,8 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
         {"foreign return without an arrow", "#Import c.m: module {{\n    get: fn(a: Int) Int = \"get\"\n}}\n", "#Import c.m: module {{\n    get: fn(a: Int) -> Int = \"get\"\n}}\n"},
         {"compound assignment", "run: fn() {{\n    n = n + 1\n    p.hp = p.hp - d\n    self.x = self.x * 2\n}}\n", "run: fn() {{\n    n += 1\n    p.hp -= d\n    self.x *= 2\n}}\n"},
         {"grouped compound assignment value", "run: fn() {{\n    n = ((n / 2))\n}}\n", "run: fn() {{\n    n /= 2\n}}\n"},
+        {"in-body marker simple value parentheses", "S: struct {{\n    #Layout: (c)\n    #Deprecated: (\"old\")\n    #Rename: (Case.Camel)\n    #Align: (8)\n    x: Int\n}}\n", "S: struct {{\n    #Layout: c\n    #Deprecated: \"old\"\n    #Rename: Case.Camel\n    #Align: 8\n    x: Int\n}}\n"},
+        {"labeled payload braces", "run: fn() {{\n    s: .Ready(value: x)\n    t: Status.Done(code: 2, note: .Kept(by: y))\n}}\n", "run: fn() {{\n    s: .Ready{{value: x}}\n    t: Status.Done{{code: 2, note: .Kept{{by: y}}}}\n}}\n"},
     }
     loop case in allowed {
         diff: fl_ordered_sources_diff(case[1], case[2])
@@ -1926,8 +1962,7 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
         {"import hoisting does not reorder comments", "// helper\nhelper: fn() {{}}\n// import\nuse core.ui as ui\n", "// import\n// helper\nuse core.ui as ui\nhelper: fn() {{}}\n"},
         {"spanless marker movement does not delete comments", "// web target\n#Target(Web)\nrun: fn() {{}}\n", "#Target(Web)\nrun: fn() {{}}\n"},
         {"file-rule grouping does not reorder rules", "#[Target(Web), HTML]\nrun: fn() {{}}\n", "#[HTML, Target(Web)]\nrun: fn() {{}}\n"},
-        {"marker grouping is for file rules only", "#Codable\n#Rename(.Camel)\nS: struct {{}}\n", "#[Codable, Rename(.Camel)]\nS: struct {{}}\n"},
-        {"a lone marker keeps its brackets", "#[Codable]\nS: struct {{}}\n", "#Codable\nS: struct {{}}\n"},
+        {"marker grouping does not reorder markers", "#[Codable, Rename(.Camel)]\nS: struct {{}}\n", "#[Rename(.Camel), Codable]\nS: struct {{}}\n"},
         {"generic-call rewrite requires a call", "run: fn() {{ value: Pool<Node>.field }}\n", "run: fn() {{ value: Pool.field<Node> }}\n"},
         {"external-method rewrite preserves receiver", "Point.len: fn(self) -> Int {{ 1 }}\n", "impl Other {{ len: fn(self) -> Int {{ 1 }} }}\n"},
         {"task-block rewrite preserves body", "run: fn() {{ task.group g {{ x: task {{ work() }} }} }}\n", "run: fn() {{ task.group g {{ x: task {{ other() }} }} }}\n"},
@@ -1940,8 +1975,8 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
         {"an arm keeps its written braces", "run: fn() {{ if x == {{ .A -> {{ print(1) }} }} }}\n", "run: fn() {{ if x == {{ .A -> print(1) }} }}\n"},
         {"an arm gains no braces", "run: fn() {{ if x == {{ .A -> print(1) }} }}\n", "run: fn() {{ if x == {{ .A -> {{ print(1) }} }} }}\n"},
         {"compact arm braces need a leading-dot arm next", "run: fn() {{\n    if x == {{\n        1 -> print(1)\n        2 -> print(2)\n    }}\n}}\n", "run: fn() {{\n    if x == {{\n        1 -> {{ print(1) }}\n        2 -> print(2)\n    }}\n}}\n"},
-        {"variant-dot rule requires a PascalCase pattern", "run: fn() {{ if x == {{ value -> print(value) }} }}\n", "run: fn() {{ if x == {{ .value -> print(value) }} }}\n"},
-        {"variant-dot rule requires a dispatch arm context", "run: fn() {{ Foo work -> print(1) }}\n", "run: fn() {{ .Foo work -> print(1) }}\n"},
+        {"a variant pattern gains no dot", "run: fn() {{ if x == {{ A(v) -> print(v) }} }}\n", "run: fn() {{ if x == {{ .A(v) -> print(v) }} }}\n"},
+        {"a None pattern gains no dot", "run: fn() {{ if x == {{ None -> print(0) }} }}\n", "run: fn() {{ if x == {{ .None -> print(0) }} }}\n"},
         {"shorthand expansion preserves field value", "run: fn() {{ p: Point{{x}} }}\n", "run: fn() {{ p: Point{{x: y}} }}\n"},
         {"module alias requires exact use-path context", "use core.term as io\nrun: fn() {{ foo.bar }}\n", "use core.term as io\nrun: fn() {{ foo.bar as bar }}\n"},
         {"struct-literal separator rule does not remove commas", "run: fn() {{ p: Point{{x: 1, y: 2}} }}\n", "run: fn() {{ p: Point{{x: 1 y: 2}} }}\n"},
@@ -1950,6 +1985,7 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
         {"union order rule rejects dotted member replacement", "S: struct {{ value: A | B.C }}\n", "S: struct {{ value: B | A.C }}\n"},
         {"union order rule rejects generic member replacement", "S: struct {{ value: A | B<C> }}\n", "S: struct {{ value: B | A<C> }}\n"},
         {"union order rule preserves every member", "S: struct {{ value: A | B }}\n", "S: struct {{ value: A | C }}\n"},
+        {"union order rule rejects grouped operands", "run: fn() {{ value: (left | right) }}\n", "run: fn() {{ value: (right | left) }}\n"},
         {"an import keeps a written alias that repeats its module path", "use {{\n    json: core.encoding.json\n}}\nrun: fn() {{}}\n", "use {{\n    core.encoding.json\n}}\nrun: fn() {{}}\n"},
         {"an import keeps a written alias that repeats its file path", "use {{\n    store: \"./data/store\"\n}}\nrun: fn() {{}}\n", "use {{\n    \"./data/store\"\n}}\nrun: fn() {{}}\n"},
         {"control-arrow rule keeps the body", "run: fn() {{\n    loop i in 0..<3 {{\n        print(i)\n    }}\n}}\n", "run: fn() {{\n    loop i in 0..<3 -> print(0)\n}}\n"},
@@ -1962,7 +1998,6 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
         {"named tuple member order is part of the type", "f: fn(p: {{x: Int, y: Int}}) {{}}\n", "f: fn(p: {{y: Int, x: Int}}) {{}}\n"},
         {"loop comma rule requires a loop header", "run: fn() {{\n    if ok {{\n        print(1)\n    }}\n}}\n", "run: fn() {{\n    if ok, {{\n        print(1)\n    }}\n}}\n"},
         {"a marker keeps its arguments", "#Inline(always)\nf: fn() {{}}\n", "#Inline\nf: fn() {{}}\n"},
-        {"a marker keeps its empty parentheses", "#Inline()\nf: fn() {{}}\n", "#Inline\nf: fn() {{}}\n"},
         {"function-type rule keeps declaration parameter names", "f: fn(line: String) {{}}\n", "f: fn(String) {{}}\n"},
         {"function-type rule keeps labels", "S: struct {{ f: fn(*, label: Bool) }}\n", "S: struct {{ f: fn(*, Bool) }}\n"},
         {"result rule keeps the error type", "f: fn() -> Result<Int, IOError> {{ 1 }}\n", "f: fn() -> Int ParseError! {{ 1 }}\n"},
@@ -1980,6 +2015,15 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
         {"compound rule leaves an indexed place", "run: fn() {{\n    xs[0] = xs[0] + 1\n}}\n", "run: fn() {{\n    xs[0] += 1\n}}\n"},
         {"compound rule leaves an Int-only operator", "run: fn() {{\n    n = n % 2\n}}\n", "run: fn() {{\n    n %= 2\n}}\n"},
         {"compound rule keeps the operator", "run: fn() {{\n    n = n + 1\n}}\n", "run: fn() {{\n    n -= 1\n}}\n"},
+        {"marker paren rule leaves a marker above a declaration", "#Layout(c)\nS: struct {{}}\n", "#Layout c\nS: struct {{}}\n"},
+        {"marker paren rule leaves a value list", "S: struct {{\n    #Layout: (a, b)\n    x: Int\n}}\n", "S: struct {{\n    #Layout: a, b\n    x: Int\n}}\n"},
+        {"marker paren rule leaves a computed value", "S: struct {{\n    #Align: (-8)\n    x: Int\n}}\n", "S: struct {{\n    #Align: -8\n    x: Int\n}}\n"},
+        {"marker paren rule only drops parentheses", "S: struct {{\n    #Layout: c\n    x: Int\n}}\n", "S: struct {{\n    #Layout: (c)\n    x: Int\n}}\n"},
+        {"payload brace rule leaves a positional payload", "run: fn() {{ s: .Ready(x) }}\n", "run: fn() {{ s: .Ready{{x}} }}\n"},
+        {"payload brace rule leaves a labeled call", "run: fn() {{ s: ready(value: x) }}\n", "run: fn() {{ s: ready{{value: x}} }}\n"},
+        {"payload brace rule leaves a labeled method call", "run: fn() {{ s: p.ready(value: x) }}\n", "run: fn() {{ s: p.ready{{value: x}} }}\n"},
+        {"payload brace rule only adds braces", "run: fn() {{ s: .Ready{{value: x}} }}\n", "run: fn() {{ s: .Ready(value: x) }}\n"},
+        {"trailing comma rule keeps a separator before a commented item", "run: fn() {{ f(1, /* a */ 2) }}\n", "run: fn() {{ f(1 /* a */ 2) }}\n"},
     }
     loop case in paired_forbidden {
         assert(fl_ordered_sources_diff(case[1], case[2]) != "", "paired forbidden neighbor was accepted: {case[0]}")
@@ -2057,6 +2101,7 @@ fl_ui_parse_invalid: fn() -> [String] {
         "Tests/UI/computed_fixed_list_noninteger.jet",
         "Tests/UI/computed_fixed_list_range.jet",
         "Tests/UI/context_eq_rejected.jet",
+        "Tests/UI/control_body_needs_braces.jet",
         "Tests/UI/core_crypto_jetc_user_reserved.jet",
         "Tests/UI/core_crypto_private_jetc.jet",
         "Tests/UI/core_shared_sites_reserved.jet",
@@ -2065,6 +2110,8 @@ fl_ui_parse_invalid: fn() -> [String] {
         "Tests/UI/dispatch_hole_tail_needs_else.jet",
         "Tests/UI/dispatch_hole_underscore.jet",
         "Tests/UI/dispatch_hole_value_needs_else.jet",
+        "Tests/UI/dispatch_pattern_needs_eq.jet",
+        "Tests/UI/dispatch_redundant_subject.jet",
         "Tests/UI/dotfield_construction_declined.jet",
         "Tests/UI/dunder_marker_not_generated.jet",
         "Tests/UI/dunder_reserved.jet",
@@ -2080,6 +2127,8 @@ fl_ui_parse_invalid: fn() -> [String] {
         "Tests/UI/enum_backing_on_struct.jet",
         "Tests/UI/enum_group_payload.jet",
         "Tests/UI/enum_multi_positional_payload.jet",
+        "Tests/UI/enum_pattern_needs_dot_or.jet",
+        "Tests/UI/enum_pattern_needs_dot_payload.jet",
         "Tests/UI/error_contract_union_needs_parens.jet",
         "Tests/UI/fact_dollar_member_removed.jet",
         "Tests/UI/fact_plane_type_position.jet",
@@ -2114,6 +2163,7 @@ fl_ui_parse_invalid: fn() -> [String] {
         "Tests/UI/layout_unknown_variant.jet",
         "Tests/UI/layout_unsupported_variant.jet",
         "Tests/UI/loop_bindingless_tuple_missing_name.jet",
+        "Tests/UI/loop_guard_comma_misspelling.jet",
         "Tests/UI/loop_header_typed_literal.jet",
         "Tests/UI/marker_impl_rejected_members.jet",
         "Tests/UI/marker_wrong_at_plane.jet",
@@ -2130,6 +2180,7 @@ fl_ui_parse_invalid: fn() -> [String] {
         "Tests/UI/off_debug_attr_on_expression.jet",
         "Tests/UI/off_debug_doubled_attr.jet",
         "Tests/UI/operator_foreign_guess.jet",
+        "Tests/UI/optional_comparison_bare_variant.jet",
         "Tests/UI/param_label_duplicate.jet",
         "Tests/UI/param_zone_empty.jet",
         "Tests/UI/param_zone_empty_positional.jet",
@@ -2147,6 +2198,7 @@ fl_ui_parse_invalid: fn() -> [String] {
         "Tests/UI/policy_conflicting_module.jet",
         "Tests/UI/policy_site_bound_authority.jet",
         "Tests/UI/prep_value_unclosed.jet",
+        "Tests/UI/protocol_bad_endpoint.jet",
         "Tests/UI/quantity_unknown_kind.jet",
         "Tests/UI/range_constraint_value_rejected.jet",
         "Tests/UI/range_type_empty_range.jet",
@@ -2216,6 +2268,10 @@ fl_ui_parse_invalid: fn() -> [String] {
         "Tests/UI/untyped_param_not_variant_head.jet",
         "Tests/UI/value_dispatch_missing_else.jet",
         "Tests/UI/variadic_not_last.jet",
+        "Tests/UI/vis_priv_package_field.jet",
+        "Tests/UI/vis_priv_package_top_level.jet",
+        "Tests/UI/vis_priv_unknown_qualifier.jet",
+        "Tests/UI/vis_section_label.jet",
         "Tests/UI/web_target_web_on_module.jet",
         "Tests/UI/yielding_loop_missing_item.jet",
         "Tests/UI/yielding_loop_nonfinite.jet",

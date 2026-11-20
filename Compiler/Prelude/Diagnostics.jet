@@ -1377,6 +1377,7 @@ ArrowFunctionBody: struct {
         structured_fix: .SourceEdit,
         no_fix: None,
         fix_safety: .Formatting,
+        fmt_applies_fix: true,
 
         what: fn(self) -> String { "This named function body follows an arrow instead of braces." }
 
@@ -1424,6 +1425,7 @@ MixedLogicWithoutParentheses: struct {
         structured_fix: .SourceEdit,
         no_fix: None,
         fix_safety: .BehaviorPreserving,
+        fmt_applies_fix: true,
 
         what: fn(self) -> String { "`&&` and `||` are mixed here without parentheses" }
 
@@ -1552,6 +1554,7 @@ DetachedCallableMarker: struct {
         safety_class: .Soundness,
         safety_reason: "A detached `->`, effect row, `::` or brace leaves no one reading of where the declaration head ends.",
         expert_path: "none: the marker stays on the line of the closing `)`",
+        stage: [.Lex],
         meaning: "Callable `->`, `-[Effects]>`, or `{{` split incorrectly from the declaration head",
         detail: true,
         no_fix: .Ambiguous,
@@ -1597,6 +1600,7 @@ DispatchMissingComparison: struct {
         stage: [.Parse],
         meaning: "Teaching: implicit dispatch — a multi-arm `if` needs a comparison between the subject and `{{`",
         detail: true,
+        fmt_applies_fix: true,
 
         what: fn(self) -> String {
             "A multi-arm `if` needs a comparison between the subject and `{{`."
@@ -1714,6 +1718,7 @@ RedundantArmComparison: struct {
         code: "E0994",
         safety_class: .Opinion,
         safety_reason: "The arm would compare the same way and run safely, and Jet refuses the repeated comparison so each arm states only its value.",
+        stage: [.Parse],
         meaning: "An arm head that repeats the comparison its `if` already applies",
 
         what: fn(self) -> String {
@@ -1738,6 +1743,7 @@ StackedRuleLines: struct {
         structured_fix: .GeneratedMarkerGroup,
         no_fix: None,
         fix_safety: .Formatting,
+        fmt_applies_fix: true,
 
         what: fn(self) -> String {
             "Teaching: stacked `#[…]` rule lines → one `#[A, B]` list or lone `#A`"
@@ -6165,6 +6171,7 @@ EffectBodyWithoutBraces: struct {
         code: "E0372",
         safety_class: .Opinion,
         safety_reason: "The body's meaning is clear, and Jet keeps one spelling: one statement after `->`, more inside braces.",
+        stage: [.Parse],
         meaning: "Teaching: an adjacent effect `if`, `else`, or `loop` body needs braces",
         detail: true,
 
@@ -6175,7 +6182,7 @@ EffectBodyWithoutBraces: struct {
         }
 
         fix: fn(self) -> String {
-            "Write `-> statement` for one statement, or wrap the body in `{{ ... }}`; `jet fmt` applies this fix."
+            "Write `-> statement` for one statement, or wrap the body in `{{ ... }}`."
         }
     }
 }
@@ -6191,6 +6198,7 @@ ExplicitSemicolon: struct {
         structured_fix: .SourceEdit,
         no_fix: None,
         fix_safety: .BehaviorPreserving,
+        fmt_applies_fix: true,
 
         what: fn(self) -> String { "This explicit semicolon is not part of canonical Jet syntax." }
 
@@ -6307,6 +6315,7 @@ GuardAfterComma: struct {
         code: "E0379",
         safety_class: .Opinion,
         safety_reason: "The comma changes nothing, and Jet keeps one spelling for a loop guard.",
+        stage: [.Parse],
         meaning: "Teaching: a guard follows its source with no comma",
         detail: true,
         structured_fix: .Remove{text: ","},
@@ -7104,6 +7113,7 @@ PackagePrivField: struct {
         safety_class: .Soundness,
         safety_reason: "A type keeps its invariants behind its own module, so a field opened to the whole package could be written past the checks that keep them.",
         expert_path: "none: a field is public or `priv` to its type's module",
+        stage: [.Parse],
         meaning: "`priv(package)` on a field",
         structured_fix: .SourceEdit,
         no_fix: None,
@@ -24738,6 +24748,7 @@ AtomGroupWithoutParentheses: struct {
         structured_fix: .SourceEdit,
         no_fix: None,
         fix_safety: .Formatting,
+        fmt_applies_fix: true,
 
         what: fn(self) -> String { "Distributed atom groups need parentheses before `&&` or `||`." }
 

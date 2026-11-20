@@ -7,7 +7,7 @@ use {
 TWO_FILE: #run { compiler.check(compiler.parse("use \"helper\"\n\nrun: fn() {{ print(helper.value() + missing_local) }}\n") ?? panic("parse")) ?? panic("check") }
 
 // The text of source_free.jet: its manifest problem has no source span.
-SOURCE_FREE: #run { compiler.check(compiler.parse("package: {{ dependencies: {{ nothere: \"1.0\" }} }}\nrun: fn() {{}}\n") ?? panic("parse")) ?? panic("check") }
+SOURCE_FREE: #run { compiler.check(compiler.parse("package: {{ dependencies: {{ nothere: \"1.0\" }} }}\n\nrun: fn() {{}}\n") ?? panic("parse")) ?? panic("check") }
 
 TWO_FILE_ORIGINS: #run (loop d in TWO_FILE.diagnostics() -> (if d.origin == .Val(o) -> "{d.code} {o.path ?? "none"} {o.source_digest}" else -> "{d.code} unplaced")).join("\n")
 

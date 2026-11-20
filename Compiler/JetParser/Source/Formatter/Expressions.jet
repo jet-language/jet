@@ -434,10 +434,14 @@ jfmt_bytes_ends_at: fn(bytes: [U8], from: Int, end: Int, needle: String) -> Bool
     start >= from && jfmt_bytes_starts_at(bytes, start, needle)
 }
 
+// An arm's value keeps the braces its author wrote around it: `1 -> { "one" }`
+// stays braced, collapsed onto the arm's line when it fits.
 jfmt_fmt_guard_arm_value: fn(f: &JetFmt, body: [Stmt], value: Expr) {
-    if body.len() == 0 -> jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK) else {
-        jfmt_fmt_value_block(f, body, value, false)
+    if body.len() == 0 && jfmt_braces_before(f, jfmt_expr_start(value)) == None {
+        jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
+        return
     }
+    jfmt_fmt_value_block(f, body, value, body.len() == 0)
 }
 
 // The next arm of a dispatch table: an `else` If that shares the table span.
@@ -1076,6 +1080,16 @@ jfmt_shorthand_field: fn(field: ExprField) -> Bool Never! {
     false
 }
 
+// The source offset of a literal's `{`, after its head.
+jfmt_literal_brace: fn(f: JetFmt, span: Span) -> Int Never! {
+    loop index in jfmt_first_token_at(f, span.start)..<f.source_toks.len() {
+        token: f.source_toks[index]
+        if token.span.start >= span.end -> break
+        if token.kind == TOKEN_LBRACE -> return token.span.start
+    }
+    span.start
+}
+
 jfmt_fmt_struct_lit_body: fn(f: &JetFmt, fields: [ExprField], span: Span) {
     jfmt_write(f, "{{")
     multiline: jfmt_source_span_multiline(f, span)
@@ -1181,10 +1195,19 @@ jfmt_fmt_err_constructor: fn(f: &JetFmt, fields: [ExprField], span: Span) {
 }
 
 jfmt_fmt_typed_lit: fn(f: &JetFmt, head: Type?, body: TypedLitBody, span: Span) {
-    // Print the head (when present) and the body shape.
-    if head == .Val(head_type) -> jfmt_fmt_type_at(f, head_type, Val(span))
+    // Print the head (when present) and the body shape. The body is laid out
+    // by what is between its braces: a block comment written between the
+    // head and its `{` stays there.
+    braces: Span{start: jfmt_literal_brace(f, span), end: span.end}
+    if head == .Val(head_type) {
+        jfmt_fmt_type_at(f, head_type, Val(span))
+        if f.comment_i < f.comments.len() {
+            pending: f.comments[f.comment_i].span.start
+            if pending < braces.start && jfmt_line_of(f, pending) == jfmt_line_of(f, braces.start) -> jfmt_emit_leading(f, braces.start)
+        }
+    }
     jfmt_write(f, "{{")
-    multiline: jfmt_source_span_multiline(f, span)
+    multiline: jfmt_source_span_multiline(f, braces)
     if multiline {
         jfmt_newline(f)
         f.indent += 1
@@ -1358,6 +1381,7 @@ jfmt_fmt_method_call: fn(f: &JetFmt, receiver: Expr, method: String, method_span
         jfmt_emit_trailing(f, receiver_end)
         f.indent += 1
         jfmt_newline(f)
+        jfmt_emit_leading(f, method_span.start)
         jfmt_write(f, ".")
         jfmt_write_postfix_member(f, method)
         jfmt_fmt_call_type_args(f, type_args, method_span.end)
@@ -1657,6 +1681,7 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
                 jfmt_emit_trailing(f, base_end)
                 f.indent += 1
                 jfmt_newline(f)
+                jfmt_emit_leading(f, span.end)
                 jfmt_write(f, ".")
                 jfmt_write_field_member(f, field, span)
                 f.indent -= 1
@@ -2276,12 +2301,11 @@ jfmt_slot_bind_name: fn(slot: PatSlot) -> String? Never! {
 jfmt_fmt_pattern: fn(f: &JetFmt, pattern: Pattern) {
     if pattern == {
         .Variant(variant, bindings, leading_dot, _) -> {
-            // Leading dot is canonical for variant patterns, except where the
-            // dot means something: a dotless `None` and `Val(x)` test an
-            // optional whatever the subject, and a dotless `Name.Case` names
-            // the case through its enum. Those keep their spelling
-            // (jfmt_structure keeps the bit for them).
-            if leading_dot || !jfmt_pattern_dot_means(variant) -> jfmt_write(f, ".")
+            // A variant pattern keeps its dot as written: a dotless `None`
+            // or `Val(x)` tests an optional whatever the subject, a dotless
+            // `Name.Case` names the case through its enum, and any other
+            // dotless pattern is E0367, which a format refuses.
+            if leading_dot -> jfmt_write(f, ".")
             jfmt_write(f, variant)
             named := false
             loop slot in bindings {

@@ -75,6 +75,26 @@ host_write_line: fn(fd: I64, bytes: I64, length: I64) -> I64 {
     I64{0}
 }
 
+// One register of the processor's identification: CPUID with `leaf` in
+// eax and `subleaf` in ecx, then `register`, one of HOST_CPUID_EAX, _EBX,
+// _ECX and _EDX. Every register reads 0 on WebAssembly (JetWeb Leaf.jet).
+HOST_CPUID_EAX: I64{0}
+
+HOST_CPUID_EBX: I64{1}
+
+HOST_CPUID_ECX: I64{2}
+
+HOST_CPUID_EDX: I64{3}
+
+host_cpuid: fn(leaf: I64, subleaf: I64, register: I64) -> I64 {
+    #Unsafe("cpuid only reports processor identification") {
+        if (register == HOST_CPUID_EAX) { return os_cpuid_eax_i64(leaf, subleaf) }
+        if (register == HOST_CPUID_EBX) { return os_cpuid_ebx_i64(leaf, subleaf) }
+        if (register == HOST_CPUID_ECX) { return os_cpuid_ecx_i64(leaf, subleaf) }
+        return os_cpuid_edx_i64(leaf, subleaf)
+    }
+}
+
 // 1 while `jet debug` runs an evaluation in the stopped program, which
 // writes this word itself and puts it back after (the runtime object exports
 // it, JetBackend X64_DEBUG_EVAL_STORAGE); nothing in the program writes it.

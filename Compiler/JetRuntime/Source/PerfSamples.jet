@@ -576,13 +576,7 @@ perf_samples_start: fn() {
         perf_samples_interval_us = interval
         perf_samples_timers = timers
     }
-    status := I64{0}
-    // sa_flags SA_SIGINFO | SA_RESTORER | SA_ONSTACK | SA_RESTART: the
-    // handler reads the interrupted context, runs on the thread's alternate
-    // signal stack where it has one, and an interrupted system call resumes.
-    #Unsafe("rt_sigaction borrows the four-word action on the stack; the handler is this runtime's three-word C-ABI export and the restorer its rt_sigreturn rail") {
-        status = os_syscall_stack4_i64(I64{13}, PERF_SAMPLES_SIGNAL, rt_perf_samples_signal_address(), I64{469762052}, rt_process_signal_restore_address(), I64{0}, I64{8})
-    }
+    status := perf_samples_handle(PERF_SAMPLES_SIGNAL)
     if (status >= I64{0}) {
         // While the descriptor is still -1 the handler returns at once.
         delivery: perf_samples_delivery()
@@ -630,6 +624,18 @@ perf_samples_start: fn() {
     observe_exit_install()
 }
 
+// Install the sampler's handler (jet_rt_perf_samples_signal) for `signal`,
+// PERF_SAMPLES_SIGNAL, PERF_COUNTERS_SIGNAL or PERF_FLIGHT_CAPTURE_SIGNAL;
+// the status, negative when it cannot be. sa_flags SA_SIGINFO |
+// SA_RESTORER | SA_ONSTACK | SA_RESTART: the handler reads the interrupted
+// context, runs on the thread's alternate signal stack where it has one,
+// and an interrupted system call resumes.
+perf_samples_handle: fn(signal: I64) -> I64 {
+    #Unsafe("rt_sigaction borrows the four-word action on the stack; the handler is this runtime's three-word C-ABI export and the restorer its rt_sigreturn rail") {
+        return os_syscall_stack4_i64(I64{13}, signal, rt_perf_samples_signal_address(), I64{469762052}, rt_process_signal_restore_address(), I64{0}, I64{8})
+    }
+}
+
 // The nanoseconds the kernel takes to deliver one SIGPROF to this thread
 // and return from a handler that returns at once: PERF_SAMPLES_CALIBRATIONS
 // signals the thread sends itself (tgkill) timed together, each also paying
@@ -643,9 +649,7 @@ perf_samples_delivery: fn() -> I64 {
     began: perf_samples_cpu_clock_ns(I64{3})
     index := I64{0}
     loop index < PERF_SAMPLES_CALIBRATIONS {
-        #Unsafe("tgkill takes this process's and thread's ids and a signal whose handler returns at once") {
-            _ := os_syscall_i64(I64{234}, pid, tid, PERF_SAMPLES_SIGNAL, I64{0}, I64{0}, I64{0})
-        }
+        _ := host_call(I64{234}, pid, tid, PERF_SAMPLES_SIGNAL)
         index = wrapping(index + I64{1})
     }
     wrapping(perf_samples_cpu_clock_ns(I64{3}) - began) / PERF_SAMPLES_CALIBRATIONS
@@ -719,9 +723,7 @@ perf_samples_thread_start: fn() -> I64 {
         if (status < I64{0}) {
             // A timer the kernel refuses to arm is deleted.
             perf_samples_timer_drop(id)
-            #Unsafe("timer_delete takes the id timer_create just gave") {
-                _ := os_syscall_i64(I64{226}, id, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-            }
+            _ := observe_syscall(I64{226}, id, I64{0}, I64{0}, I64{0})
         }
     }
     jet_rt_free(scratch, I64{104}, I64{8})
@@ -743,9 +745,7 @@ perf_samples_thread_end: fn(sampler: I64) {
         return
     }
     perf_samples_timer_drop(sampler)
-    #Unsafe("timer_delete takes the id this thread's start was given") {
-        _ := os_syscall_i64(I64{226}, sampler, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-    }
+    _ := observe_syscall(I64{226}, sampler, I64{0}, I64{0}, I64{0})
 }
 
 // The table of sampler timers (perf_samples_timers): pages of
@@ -869,11 +869,7 @@ perf_syscalls_offset: fn() -> I64 {
 }
 
 // This process's id, read without a host call, which the table would count.
-perf_system_pid: fn() -> I64 {
-    #Unsafe("getpid takes no arguments") {
-        return os_syscall_i64(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-    }
-}
+perf_system_pid: fn() -> I64 { observe_syscall(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}) }
 
 // The next thread row of `table` (perf_system), 0 once every row is taken.
 perf_threads_claim: fn(table: I64) -> I64 {
@@ -1056,9 +1052,7 @@ perf_system_write: fn(fd: I64, bytes: I64, size: I64) {
     if (fd < I64{0}) {
         return
     }
-    #Unsafe("ftruncate takes the table's own descriptor") {
-        _ := os_syscall_i64(I64{77}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-    }
+    _ := observe_syscall(I64{77}, fd, I64{0}, I64{0}, I64{0})
     _ := host_write_all(fd, bytes, size)
 }
 
@@ -1301,11 +1295,7 @@ perf_precise_attach: fn(fd: I64, owner: I64) -> I64 {
         sync_store(wrapping(perf_precise_rings + wrapping(fd * I64{8})), ring)
         result = perf_event_signal(fd, PERF_SAMPLES_SIGNAL, owner, thread_tid())
     }
-    if (result >= I64{0}) {
-        #Unsafe("ioctl PERF_EVENT_IOC_ENABLE takes no argument") {
-            result = os_syscall_i64(I64{16}, fd, I64{9216}, I64{0}, I64{0}, I64{0}, I64{0})
-        }
-    }
+    if (result >= I64{0}) { result = observe_syscall(I64{16}, fd, I64{9216}, I64{0}, I64{0}) }
     if (result < I64{0}) {
         perf_precise_end(fd)
         return result
@@ -1358,9 +1348,7 @@ perf_precise_end: fn(fd: I64) {
 // (PERF_SAMPLES_RING_PS). Both stay 0 where the second sampler does not
 // open or its samples do not tell the depths apart.
 perf_precise_cost: fn(source: I64, fd: I64) {
-    #Unsafe("ioctl PERF_EVENT_IOC_DISABLE takes no argument") {
-        _ := os_syscall_i64(I64{16}, fd, I64{9217}, I64{0}, I64{0}, I64{0}, I64{0})
-    }
+    _ := observe_syscall(I64{16}, fd, I64{9217}, I64{0}, I64{0})
     // The attribute's 96 bytes, then the counts of a round: its samples and
     // their callchain entries.
     scratch: jet_rt_alloc(I64{112}, I64{8})
@@ -1383,9 +1371,7 @@ perf_precise_cost: fn(source: I64, fd: I64) {
     }
     if (timer >= I64{0}) { _ := host_call(I64{3}, timer, I64{0}, I64{0}) }
     jet_rt_free(scratch, I64{112}, I64{8})
-    #Unsafe("ioctl PERF_EVENT_IOC_ENABLE takes no argument") {
-        _ := os_syscall_i64(I64{16}, fd, I64{9216}, I64{0}, I64{0}, I64{0}, I64{0})
-    }
+    _ := observe_syscall(I64{16}, fd, I64{9216}, I64{0}, I64{0})
 }
 
 // The task clock's period while its cost is timed (perf_precise_cost): 10
@@ -1417,11 +1403,7 @@ perf_precise_cost_at: fn(timer: I64, ring: I64, scratch: I64, depth: I64) -> I64
     round := I64{0}
     loop round < wrapping(PERF_PRECISE_ROUNDS * I64{2}) {
         enabled: round & I64{1} != I64{0}
-        if (enabled) {
-            #Unsafe("ioctl PERF_EVENT_IOC_ENABLE takes no argument") {
-                _ := os_syscall_i64(I64{16}, timer, I64{9216}, I64{0}, I64{0}, I64{0}, I64{0})
-            }
-        }
+        if (enabled) { _ := observe_syscall(I64{16}, timer, I64{9216}, I64{0}, I64{0}) }
         rt_text_store(wrapping(scratch + I64{96}), I64{0})
         rt_text_store(wrapping(scratch + I64{104}), I64{0})
         began: perf_samples_cpu_clock_ns(I64{1})
@@ -1434,9 +1416,7 @@ perf_precise_cost_at: fn(timer: I64, ring: I64, scratch: I64, depth: I64) -> I64
         }
         took: wrapping(perf_samples_cpu_clock_ns(I64{1}) - began)
         if (enabled) {
-            #Unsafe("ioctl PERF_EVENT_IOC_DISABLE takes no argument") {
-                _ := os_syscall_i64(I64{16}, timer, I64{9217}, I64{0}, I64{0}, I64{0}, I64{0})
-            }
+            _ := observe_syscall(I64{16}, timer, I64{9217}, I64{0}, I64{0})
             perf_precise_ring_count(ring, scratch)
             if (on < I64{0} || took < on) {
                 on = took
@@ -2141,7 +2121,9 @@ PERF_ZONE_SITE_ON: I64{233}
 // other at least once.
 #Export(c) jet_perf_zone_table: fn(table: I64) {
     if (perf_zone_table_first == I64{0}) {
-        #Unsafe("registrations never overlap (see above)") { perf_zone_table_first = table }
+        #Unsafe("registrations never overlap, since constructors run one at a time, and the fence below orders this store before a turn reads the tables") {
+            perf_zone_table_first = table
+        }
     } else if (!perf_zone_tables_add(table)) {
         perf_zone_turn(I64{0})
         return
@@ -2214,7 +2196,7 @@ perf_zone_roots_take: fn() {
 perf_zones_set: fn(on: I64) {
     perf_zone_roots_take()
     if (perf_zone_lock == I64{0}) {
-        #Unsafe("turns run one at a time (see above), and a registration reads the code only after the zones word") {
+        #Unsafe("turns run one at a time, the observation start's before the entry and then its writer's, and a registration reads the code only after the zones word") {
             perf_zone_turn_code = rt_perf_zone_turn_address()
         }
         perf_zone_calibrate()
@@ -2222,7 +2204,7 @@ perf_zones_set: fn(on: I64) {
         sync_store(rings, I64{0})
         lock: jet_rt_alloc(I64{8}, I64{8})
         sync_store(lock, I64{0})
-        #Unsafe("turns run one at a time (see above), and a zone route reads the rings' head and a registration the lock only after the zones word") {
+        #Unsafe("turns run one at a time, the observation start's before the entry and then its writer's, and a zone route reads the rings' head and a registration the lock only after the zones word") {
             perf_zone_rings = rings
             perf_zone_lock = lock
         }
@@ -2399,10 +2381,8 @@ perf_zone_calibrate: fn() {
 }
 
 perf_zone_tsc_usable: fn() -> Bool {
-    #Unsafe("cpuid only reports processor identification") {
-        if (os_cpuid_eax_i64(I64{2147483648}, I64{0}) < I64{2147483655}) { return false }
-        if ((os_cpuid_edx_i64(I64{2147483655}, I64{0}) & I64{256}) == I64{0}) { return false }
-    }
+    if (host_cpuid(I64{2147483648}, I64{0}, HOST_CPUID_EAX) < I64{2147483655}) { return false }
+    if ((host_cpuid(I64{2147483655}, I64{0}, HOST_CPUID_EDX) & I64{256}) == I64{0}) { return false }
     // prctl(PR_GET_TSC, &state) into the TCB's scratch word: rdtsc faults
     // unless the state is PR_TSC_ENABLE (1).
     scratch: wrapping(thread_base() + I64{232})
@@ -2808,11 +2788,7 @@ perf_samples_heap_take: fn(fd: I64, name: I64, frame: I64) -> I64 {
     alloc_check_track_release()
     if (pid > I64{0}) {
         reaped := I64{-4}
-        loop reaped == (I64{-4}) {
-            #Unsafe("wait4 reaps the snapshot's child and writes no status") {
-                reaped = os_syscall_i64(I64{61}, pid, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-            }
-        }
+        loop reaped == (I64{-4}) -> reaped = observe_syscall(I64{61}, pid, I64{0}, I64{0}, I64{0})
     }
     held
 }
@@ -2821,9 +2797,7 @@ perf_samples_heap_take: fn(fd: I64, name: I64, frame: I64) -> I64 {
 // The child is not the process a compiler serves, and it owns nothing to
 // flush.
 perf_samples_heap_child_exit: fn() {
-    #Unsafe("exit_group ends the snapshot's child, which owns nothing to flush") {
-        _ := os_syscall_i64(I64{231}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-    }
+    _ := observe_syscall(I64{231}, I64{0}, I64{0}, I64{0}, I64{0})
 }
 
 // Write heap snapshot `number`, named by text `name`, to the samples file
@@ -3823,13 +3797,11 @@ perf_counter_period: fn(index: I64) -> I64 {
 // other CPU. "AuthenticAMD" is CPUID.0's EBX, EDX, ECX: "Auth", "enti",
 // "cAMD".
 perf_counter_llc_raw: fn() -> I64 {
-    #Unsafe("cpuid only reports processor identification") {
-        amd: os_cpuid_ebx_i64(I64{0}, I64{0}) == I64{1752462657} && os_cpuid_edx_i64(I64{0}, I64{0}) == I64{1769238117} && os_cpuid_ecx_i64(I64{0}, I64{0}) == I64{1145913699}
-        if (!amd) { return I64{0} }
-        signature: os_cpuid_eax_i64(I64{1}, I64{0})
-        family: wrapping(((signature >> I64{8}) & I64{15}) + ((signature >> I64{20}) & I64{255}))
-        if (family < I64{25}) { return I64{0} }
-    }
+    amd: host_cpuid(I64{0}, I64{0}, HOST_CPUID_EBX) == I64{1752462657} && host_cpuid(I64{0}, I64{0}, HOST_CPUID_EDX) == I64{1769238117} && host_cpuid(I64{0}, I64{0}, HOST_CPUID_ECX) == I64{1145913699}
+    if (!amd) { return I64{0} }
+    signature: host_cpuid(I64{1}, I64{0}, HOST_CPUID_EAX)
+    family: wrapping(((signature >> I64{8}) & I64{15}) + ((signature >> I64{20}) & I64{255}))
+    if (family < I64{25}) { return I64{0} }
     I64{64579}
 }
 
@@ -3849,11 +3821,7 @@ perf_counters_start: fn(buffer: I64, file: I64) {
         return
     }
     status := I64{-12}
-    if (buffer != I64{0}) {
-        #Unsafe("rt_sigaction borrows the four-word action on the stack; the handler is this runtime's three-word C-ABI export and the restorer its rt_sigreturn rail") {
-            status = os_syscall_stack4_i64(I64{13}, PERF_COUNTERS_SIGNAL, rt_perf_samples_signal_address(), I64{469762052}, rt_process_signal_restore_address(), I64{0}, I64{8})
-        }
-    }
+    if (buffer != I64{0}) { status = perf_samples_handle(PERF_COUNTERS_SIGNAL) }
     if (status >= I64{0}) {
         loop {
             if (sync_cas(buffer, I64{0}, I64{1}) == I64{0}) { break }
@@ -3958,11 +3926,7 @@ perf_counter_event_open: fn(attr: I64, kind: I64, config: I64, period: I64, form
 
 // Arm counter descriptor `fd` for one more overflow (PERF_EVENT_IOC_REFRESH
 // 1): at it the kernel disables the counter and signals the thread.
-perf_counter_refresh: fn(fd: I64) -> I64 {
-    #Unsafe("ioctl PERF_EVENT_IOC_REFRESH takes its count as a word") {
-        return os_syscall_i64(I64{16}, fd, I64{9218}, I64{1}, I64{0}, I64{0}, I64{0})
-    }
-}
+perf_counter_refresh: fn(fd: I64) -> I64 { observe_syscall(I64{16}, fd, I64{9218}, I64{1}, I64{0}) }
 
 // Arm counter `counter` (a slot of the table, or -1 for a CPU-time sample)
 // for its next period, after the handler wrote its sample.
@@ -4026,16 +3990,14 @@ perf_topdown_open: fn(samples: I64, lenses: I64) -> I64 {
 // The CPU's vendor by CPUID.0's EBX, EDX and ECX: PERF_TOPDOWN_AMD for
 // "AuthenticAMD", PERF_TOPDOWN_INTEL for "GenuineIntel", else 0.
 perf_topdown_vendor: fn() -> I64 {
-    #Unsafe("cpuid only reports processor identification") {
-        ebx: os_cpuid_ebx_i64(I64{0}, I64{0})
-        edx: os_cpuid_edx_i64(I64{0}, I64{0})
-        ecx: os_cpuid_ecx_i64(I64{0}, I64{0})
-        if (ebx == I64{1752462657} && edx == I64{1769238117} && ecx == I64{1145913699}) {
-            return PERF_TOPDOWN_AMD
-        }
-        if (ebx == I64{1970169159} && edx == I64{1231384169} && ecx == I64{1818588270}) {
-            return PERF_TOPDOWN_INTEL
-        }
+    ebx: host_cpuid(I64{0}, I64{0}, HOST_CPUID_EBX)
+    edx: host_cpuid(I64{0}, I64{0}, HOST_CPUID_EDX)
+    ecx: host_cpuid(I64{0}, I64{0}, HOST_CPUID_ECX)
+    if (ebx == I64{1752462657} && edx == I64{1769238117} && ecx == I64{1145913699}) {
+        return PERF_TOPDOWN_AMD
+    }
+    if (ebx == I64{1970169159} && edx == I64{1231384169} && ecx == I64{1818588270}) {
+        return PERF_TOPDOWN_INTEL
     }
     I64{0}
 }
@@ -4210,12 +4172,8 @@ perf_topdown_start: fn(buffer: I64, file: I64) {
         return
     }
     vendor: perf_topdown_vendor()
-    signature := I64{0}
-    hypervisor := false
-    #Unsafe("cpuid only reports processor identification") {
-        signature = os_cpuid_eax_i64(I64{1}, I64{0})
-        hypervisor = ((os_cpuid_ecx_i64(I64{1}, I64{0}) >> I64{31}) & I64{1}) != I64{0}
-    }
+    signature: host_cpuid(I64{1}, I64{0}, HOST_CPUID_EAX)
+    hypervisor: ((host_cpuid(I64{1}, I64{0}, HOST_CPUID_ECX) >> I64{31}) & I64{1}) != I64{0}
     set: perf_topdown_set(vendor, signature, hypervisor)
     count: perf_topdown_events(set)
     #Unsafe("five writes of a stack-local word, which the kernel copies before each call returns") {
@@ -4226,11 +4184,7 @@ perf_topdown_start: fn(buffer: I64, file: I64) {
         _ := os_write_word_i64(file, count, I64{8})
     }
     status := I64{-12}
-    if (buffer != I64{0} && count > I64{0}) {
-        #Unsafe("rt_sigaction borrows the four-word action on the stack; the handler is this runtime's three-word C-ABI export and the restorer its rt_sigreturn rail") {
-            status = os_syscall_stack4_i64(I64{13}, PERF_COUNTERS_SIGNAL, rt_perf_samples_signal_address(), I64{469762052}, rt_process_signal_restore_address(), I64{0}, I64{8})
-        }
-    }
+    if (buffer != I64{0} && count > I64{0}) { status = perf_samples_handle(PERF_COUNTERS_SIGNAL) }
     if (status >= I64{0}) {
         loop {
             if (sync_cas(buffer, I64{0}, I64{1}) == I64{0}) { break }
@@ -6026,10 +5980,10 @@ perf_flight_dump: fn() {
     process: perf_flight_syscall(I64{39}, I64{0}, I64{0}, I64{0})
     me: thread_tid()
     sync_store(wrapping(text + PERF_FLIGHT_SELF_AT), me)
-    if (perf_flight_handle() >= I64{0}) {
-        #Unsafe("tgkill of this thread, whose handler copies the registers it interrupts into the text page and returns") {
-            _ := os_syscall_i64(I64{234}, process, me, PERF_FLIGHT_CAPTURE_SIGNAL, I64{0}, I64{0}, I64{0})
-        }
+    if (perf_samples_handle(PERF_FLIGHT_CAPTURE_SIGNAL) >= I64{0}) {
+        // tgkill of this thread, whose handler copies the registers it
+        // interrupts into the text page and returns.
+        _ := perf_flight_syscall(I64{234}, process, me, PERF_FLIGHT_CAPTURE_SIGNAL)
     }
     if (rt_text_word(wrapping(stop + I64{16})) == I64{0} && frame != I64{0}) {
         rt_text_store(wrapping(stop + I64{16}), rt_text_word(wrapping(frame + I64{8})))
@@ -6162,7 +6116,7 @@ perf_flight_tasks: fn(fd: I64, state: I64, words: I64, zeros: I64) -> Bool {
                 next
             }
             if (tid == me) { next }
-            if (status == I64{1}) { status = perf_flight_handle() }
+            if (status == I64{1}) { status = perf_samples_handle(PERF_FLIGHT_CAPTURE_SIGNAL) }
             if (status < I64{0}) { next }
             // tgkill of a live registered thread of this process.
             if (perf_flight_syscall(I64{234}, process, tid, PERF_FLIGHT_CAPTURE_SIGNAL) == I64{0}) {
@@ -6311,19 +6265,9 @@ perf_flight_context: fn(row: I64, context: I64) {
     rt_text_store(wrapping(row + I64{48}), PERF_FLIGHT_TASK_KNOWN)
 }
 
-// Install the sampler's handler (jet_rt_perf_samples_signal) for
-// PERF_FLIGHT_CAPTURE_SIGNAL; the status, negative when it cannot be.
-perf_flight_handle: fn() -> I64 {
-    status := I64{-1}
-    #Unsafe("rt_sigaction borrows the four-word action on the stack; the handler is this runtime's three-word C-ABI export and the restorer its rt_sigreturn rail") {
-        status = os_syscall_stack4_i64(I64{13}, PERF_FLIGHT_CAPTURE_SIGNAL, rt_perf_samples_signal_address(), I64{469762052}, rt_process_signal_restore_address(), I64{0}, I64{8})
-    }
-    status
-}
-
 // A raw system call of the dump's, which neither allocates nor records.
 perf_flight_syscall: fn(number: I64, a: I64, b: I64, c: I64) -> I64 {
-    #Unsafe("the dump's file, directory and clock calls borrow the state's scratch or the process's own mappings for their duration") {
+    #Unsafe("the dump's calls take words alone or borrow the state's scratch or the process's own mappings for their duration") {
         return os_syscall_i64(number, a, b, c, I64{0}, I64{0}, I64{0})
     }
 }
@@ -7921,11 +7865,7 @@ perf_causal_next: fn(state: I64, pc: I64, now: I64) {
         index = wrapping(index + I64{1})
     }
     fd: perf_samples_fd
-    if (fd >= I64{0}) {
-        #Unsafe("one write of the record's words in the lens's own mapping, which the kernel copies before the call returns") {
-            _ := os_syscall_i64(I64{1}, fd, record, wrapping(words * I64{8}), I64{0}, I64{0}, I64{0})
-        }
-    }
+    if (fd >= I64{0}) { _ := host_write_all(fd, record, wrapping(words * I64{8})) }
     sync_store(wrapping(state + PERF_CAUSAL_RANGE_COUNT), I64{0})
     random := rt_text_word(wrapping(state + PERF_CAUSAL_RANDOM))
     random = random ~ (random << I64{13})
@@ -8090,8 +8030,6 @@ perf_causal_name: fn(slot: I64, data: I64, length: I64) {
     rt_text_store(wrapping(record + I64{8}), slot)
     rt_text_store(wrapping(record + I64{16}), kept)
     rt_text_bytes_copy(wrapping(record + I64{24}), data, kept)
-    #Unsafe("one write of the record, which the kernel copies before the call returns") {
-        _ := os_syscall_i64(I64{1}, fd, record, bytes, I64{0}, I64{0}, I64{0})
-    }
+    _ := host_write_all(fd, record, bytes)
     jet_rt_free(record, bytes, I64{8})
 }

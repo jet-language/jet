@@ -28,10 +28,7 @@ aes_ni_table := I64{0}
 
 // CPUID.1:ECX bits 25 (AES-NI), 1 (PCLMULQDQ) and 9 (SSSE3, for pshufb).
 aes_ni_present: fn() -> Bool {
-    #Unsafe("cpuid only reports processor identification") {
-        if (os_cpuid_ecx_i64(I64{1}, I64{0}) & I64{33554946} == I64{33554946}) { return true }
-    }
-    false
+    host_cpuid(I64{1}, I64{0}, HOST_CPUID_ECX) & I64{33554946} == I64{33554946}
 }
 
 // The core.crypto.__aes_blocks operations, as Cipher.jet numbers them.

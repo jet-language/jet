@@ -1,0 +1,62 @@
+// A format changes tokens only where the spec says the edit is a fix `jet fmt`
+// performs. Each parse diagnostic a format repairs is a registry row stating
+// `fmt_applies_fix`, and the spec sentence that makes its rewrite a fmt fix is
+// quoted here, keyed by the row's code. Run from the repository root.
+use {
+    teaching_files: core.files
+    jet_foundation.[diagnostic_registry_row, diagnostic_registry_rows]
+    jet_parser.[jet_format_source]
+}
+
+#Test("each parse diagnostic fmt repairs has its rewrite sentence in the spec") {
+    sentences: [[String]]{
+        {"E0080", "arrow reports **E0080**; `jet fmt` rewrites it to `{{ expr }}`"},
+        {"E0082", "are E0082, whose Safe edit\ninserts the parentheses precedence already implies"},
+        {"E0373", "canonical: E0373 supplies the behavior-preserving line-break or end-of-line\nfix."},
+        {"E0386", "E0386, a registered diagnostic\nwith a machine-applicable fixit, inserts the grouping the desugar already uses."},
+        {"E0992", "`if subject {{ arm -> … }}` is E0992, auto-fixed)."},
+        {"E0999", "A one-item list or adjacent bare stack is E0999 with\nthe canonical rewrite. `jet fmt` performs that rewrite and preserves order."},
+    }
+    spec: teaching_files.read("Docs/Spec/spec.md") ?? panic("read Docs/Spec/spec.md: {err}")
+    decisions: teaching_files.read("Docs/Spec/syntax-decisions.md") ?? panic("read Docs/Spec/syntax-decisions.md: {err}")
+    loop row in diagnostic_registry_rows() {
+        if !row.fmt_applies_fix -> next
+        quoted := false
+        loop sentence in sentences {
+            if sentence[0] != row.code -> next
+            assert(sentence[1].contains(row.code), "the {row.code} sentence does not name its code")
+            assert(spec.contains(sentence[1]) || decisions.contains(sentence[1]), "the spec no longer says fmt performs the {row.code} rewrite:\n{sentence[1]}")
+            quoted = true
+        }
+        assert(quoted, "{row.code} states `fmt_applies_fix` with no spec sentence quoted here")
+    }
+    loop sentence in sentences {
+        row: diagnostic_registry_row(sentence[0]) ?? panic("{sentence[0]} is no registry row")
+        assert(row.fmt_applies_fix, "{sentence[0]} has a sentence quoted, but its row does not state `fmt_applies_fix`")
+    }
+}
+
+// The one marker rewrite with no parse diagnostic.
+#Test("empty marker parentheses cite the spec sentence that makes dropping them a fmt fix") {
+    text: teaching_files.read("Docs/Spec/syntax-decisions.md") ?? panic("read Docs/Spec/syntax-decisions.md: {err}")
+    assert(text.contains("written; empty parentheses are an error the formatter fixes."))
+    assert_eq(jet_format_source("#Inline()\nf: fn() {{}}\n", false).text, "#Inline f: fn() {{}}\n")
+}
+
+// A parse error with no ratified fmt fix leaves the source as written: a
+// field's `priv(package)` (E0417), a comma before a loop guard (E0379), a
+// dotless variant pattern (E0367). A lex error, such as a `->` split from
+// its `)` (E0986), refuses before the parse.
+#Test("a format refuses a parse error with no ratified fix") {
+    refused: [String]{
+        "S: struct {{\n    priv(package) value: Int,\n}}\n",
+        "run: fn() {{\n    values: loop u in [1, 2, 3], if u > 1 -> u\n    print(values)\n}}\n",
+        "run: fn() {{\n    x: 1\n    if x == {{\n        A(v) -> print(v)\n        else -> print(0)\n    }}\n}}\n",
+        "f: fn()\n-> Int {{\n    1\n}}\n",
+    }
+    loop source in refused {
+        formatted: jet_format_source(source, false)
+        assert(!formatted.ok, "fmt rewrote {source}")
+        assert(formatted.diagnostics.len() > 0)
+    }
+}
