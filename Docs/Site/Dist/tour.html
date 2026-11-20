@@ -51,8 +51,8 @@
   <section>
     <h2 id="hello">Hello, and the whole toolchain</h2>
     <p>This example runs from one file; no project setup is shown. fn run is where running starts.</p>
-    <div class="code"><div class="code-head"><span>Examples/Basics/Hello.jet</span></div><div class="code-body"><pre><code><span class="c">// Your first program. `fn run` is where running starts.</span>
-<span class="k">fn</span> <span class="f">run</span>() {
+    <div class="code"><div class="code-head"><span>Examples/Basics/Hello.jet</span></div><div class="code-body"><pre><code><span class="c">// Your first program. `run: fn` is where running starts.</span>
+<span class="f">run</span><span class="g">:</span> <span class="k">fn</span>() {
     <span class="f">print</span>(<span class="s">"hello, world"</span>)
     <span class="k">return</span>
 }</code></pre></div><div class="code-out"><span class="ps">$ jet run Examples/Basics/Hello.jet</span><br>hello, world</div></div>
@@ -65,9 +65,9 @@
   <section>
     <h2 id="values">Values</h2>
     <p>:: binds a value and it stays put. := binds a place you can reassign. Types mostly stay out of the way: they ride signatures and struct fields, and values carry them everywhere else.</p>
-    <div class="code"><div class="code-head"><span>run it</span></div><div class="code-body"><pre><code><span class="k">fn</span> <span class="f">run</span>() {
-    name <span class="g">::</span> <span class="s">"Jet"</span>
-    year <span class="g">::</span> <span class="n">2026</span>
+    <div class="code"><div class="code-head"><span>run it</span></div><div class="code-body"><pre><code><span class="f">run</span><span class="g">:</span> <span class="k">fn</span>() {
+    name<span class="g">:</span> <span class="s">"Jet"</span>
+    year<span class="g">:</span> <span class="n">2026</span>
     <span class="f">print</span>(<span class="s">"values: {name} {year}"</span>)
     count <span class="g">:=</span> <span class="n">0</span>
     count += <span class="n">3</span>
@@ -79,20 +79,20 @@
     <h2 id="functions">Functions and effect rows<span class="sec-file">Examples/Basics/BodyRules.jet</span></h2>
     <p>A result type sits bare after the parameters; -&gt; starts the body. Effects split the arrow: -[IO]&gt; says this function touches the outside world, and the compiler checks it. Omit the row and Jet infers it; write it and Jet enforces it.</p>
     <div class="code"><div class="code-head"><span>Examples/Basics/BodyRules.jet</span></div><div class="code-body"><pre><code><span class="c">// D-SIG-SHAPE1=B: a result is bare after the parameters and `-&gt;` starts the body.</span>
-<span class="k">fn</span> <span class="f">double</span>(n: <span class="t">Int</span>) <span class="t">Int</span> <span class="g">-&gt;</span> n * <span class="n">2</span>
+<span class="f">double</span><span class="g">:</span> <span class="k">fn</span>(n: <span class="t">Int</span>) <span class="t">Int</span> <span class="g">-&gt;</span> n * <span class="n">2</span>
 
-<span class="k">fn</span> <span class="f">bump</span>(n: <span class="t">Int</span>) <span class="t">Int</span> <span class="g">-[IO]&gt;</span> {
+<span class="f">bump</span><span class="g">:</span> <span class="k">fn</span>(n: <span class="t">Int</span>) <span class="t">Int</span> <span class="g">-[IO]&gt;</span> {
     <span class="f">print</span>(n)
     n + <span class="n">1</span>
 }
 
-<span class="k">fn</span> <span class="f">run</span>() <span class="g">-[IO]&gt;</span> { <span class="f">print</span>(<span class="f">bump</span>(<span class="f">double</span>(<span class="n">20</span>))) }</code></pre></div><div class="code-out"><span class="ps">$ jet run Examples/Basics/BodyRules.jet</span><br>40<br>41</div></div>
+<span class="f">run</span><span class="g">:</span> <span class="k">fn</span>() <span class="g">-[IO]&gt;</span> { <span class="f">print</span>(<span class="f">bump</span>(<span class="f">double</span>(<span class="n">20</span>))) }</code></pre></div><div class="code-out"><span class="ps">$ jet run Examples/Basics/BodyRules.jet</span><br>40<br>41</div></div>
   </section>
 
   <section>
     <h2 id="matching">Pattern matching is a table<span class="sec-file">Examples/Basics/PatternMatching.jet</span></h2>
     <p>An arm table reads like the decision it makes. Or-patterns share a body, wildcards skip what does not matter, and else catches the rest.</p>
-    <div class="code"><div class="code-head"><span>Examples/Basics/PatternMatching.jet</span></div><div class="code-body"><pre><code><span class="k">fn</span> <span class="f">describe_conn</span>(c: <span class="t">Conn</span>) <span class="t">String</span> <span class="g">-&gt;</span> {
+    <div class="code"><div class="code-head"><span>Examples/Basics/PatternMatching.jet</span></div><div class="code-body"><pre><code><span class="f">describe_conn</span><span class="g">:</span> <span class="k">fn</span>(c: <span class="t">Conn</span>) <span class="t">String</span> <span class="g">-&gt;</span> {
     <span class="k">if</span> c == {
         .Active(id) | .Reconnecting(id) <span class="g">-&gt;</span> {
             <span class="c">// D-PATO: or-pattern — Active and Reconnecting share the same body.</span>
@@ -111,10 +111,10 @@
   <section>
     <h2 id="failure">Failure is in the signature</h2>
     <p>A function that can fail says so: Int !IOError returns a whole number or that error, and nothing else. Callers discharge the failure with ?? or let it propagate; ignoring it is a compile error. There are no exceptions and no error codes to forget.</p>
-    <div class="code"><div class="code-head"><span>run it</span></div><div class="code-body"><pre><code><span class="k">fn</span> <span class="f">load_port</span>() <span class="t">Int</span> <span class="g">!</span><span class="t">IOError</span> <span class="g">-&gt;</span> <span class="f">Ok</span>(<span class="n">8080</span>)
+    <div class="code"><div class="code-head"><span>run it</span></div><div class="code-body"><pre><code><span class="f">load_port</span><span class="g">:</span> <span class="k">fn</span>() <span class="t">Int</span> <span class="g">!</span><span class="t">IOError</span> <span class="g">-&gt;</span> <span class="f">Ok</span>(<span class="n">8080</span>)
 
-<span class="k">fn</span> <span class="f">run</span>() {
-    port <span class="g">::</span> <span class="f">load_port</span>() <span class="g">??</span> <span class="n">3000</span>
+<span class="f">run</span><span class="g">:</span> <span class="k">fn</span>() {
+    port<span class="g">:</span> <span class="f">load_port</span>() <span class="g">??</span> <span class="n">3000</span>
     <span class="f">print</span>(<span class="s">"port {port}"</span>)
 }</code></pre></div><div class="code-out"><span class="ps">$ jet run failure.jet</span><br>port 8080</div></div>
   </section>
@@ -124,19 +124,19 @@
     <p>A default value lives on the parameter's type, and it may name an earlier parameter.</p>
     <div class="code"><div class="code-head"><span>Examples/Basics/DefaultRefs.jet</span></div><div class="code-body"><pre><code><span class="c">// D-NARG-D2 (S61): a default may reference an earlier parameter.</span>
 <span class="c">// `height: Int{width}` fills height with whatever width was given.</span>
-<span class="k">struct</span> <span class="t">Rect</span> {
+<span class="t">Rect</span><span class="g">:</span> <span class="k">struct</span> {
     width: <span class="t">Int</span>
     height: <span class="t">Int</span>
 
-    <span class="k">fn</span> <span class="f">square</span>(width: <span class="t">Int</span>, height: <span class="t">Int</span>{width}) <span class="t">Rect</span> <span class="g">-&gt;</span> {width: width, height: height}
+    <span class="f">square</span><span class="g">:</span> <span class="k">fn</span>(width: <span class="t">Int</span>, height: <span class="t">Int</span>{width}) <span class="t">Rect</span> <span class="g">-&gt;</span> {width: width, height: height}
 }
 
-<span class="k">fn</span> <span class="f">box_dims</span>(w: <span class="t">Int</span>, h: <span class="t">Int</span>{w}, d: <span class="t">Int</span>{h}) <span class="t">String</span> <span class="g">-&gt;</span> <span class="s">"{w}x{h}x{d}"</span>
+<span class="f">box_dims</span><span class="g">:</span> <span class="k">fn</span>(w: <span class="t">Int</span>, h: <span class="t">Int</span>{w}, d: <span class="t">Int</span>{h}) <span class="t">String</span> <span class="g">-&gt;</span> <span class="s">"{w}x{h}x{d}"</span>
 
-<span class="k">fn</span> <span class="f">run</span>() {
-    s <span class="g">::</span> <span class="t">Rect</span>.<span class="f">square</span>(<span class="n">5</span>)
+<span class="f">run</span><span class="g">:</span> <span class="k">fn</span>() {
+    s<span class="g">:</span> <span class="t">Rect</span>.<span class="f">square</span>(<span class="n">5</span>)
     <span class="f">print</span>(<span class="s">"{s.width}x{s.height}"</span>)
-    r <span class="g">::</span> <span class="t">Rect</span>.<span class="f">square</span>(<span class="n">5</span>, <span class="n">3</span>)
+    r<span class="g">:</span> <span class="t">Rect</span>.<span class="f">square</span>(<span class="n">5</span>, <span class="n">3</span>)
     <span class="f">print</span>(<span class="s">"{r.width}x{r.height}"</span>)
     <span class="f">print</span>(<span class="f">box_dims</span>(<span class="n">4</span>))
     <span class="f">print</span>(<span class="f">box_dims</span>(<span class="n">4</span>, <span class="n">2</span>))
@@ -147,32 +147,32 @@
   <section>
     <h2 id="loops">Loops produce values<span class="sec-file">Examples/Basics/ComprehensionForms.jet</span></h2>
     <p>This example uses the collection loop form to produce values, filter with a guard, and stop at a prefix.</p>
-    <div class="code"><div class="code-head"><span>Examples/Basics/ComprehensionForms.jet</span></div><div class="code-body"><pre><code><span class="k">fn</span> <span class="f">run</span>() {
-    values <span class="g">::</span> [<span class="t">Int</span>]{<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>}
-    doubled <span class="g">::</span> <span class="k">loop</span> value <span class="k">in</span> values <span class="g">-&gt;</span> value * <span class="n">2</span>
-    even <span class="g">::</span> <span class="k">loop</span> value <span class="k">in</span> values <span class="k">if</span> value % <span class="n">2</span> == <span class="n">0</span> <span class="g">-&gt;</span> value
-    prefix <span class="g">::</span> <span class="k">loop</span> value <span class="k">in</span> values <span class="g">-&gt;</span> {
+    <div class="code"><div class="code-head"><span>Examples/Basics/ComprehensionForms.jet</span></div><div class="code-body"><pre><code><span class="f">run</span><span class="g">:</span> <span class="k">fn</span>() {
+    values<span class="g">:</span> [<span class="t">Int</span>]{<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>}
+    doubled<span class="g">:</span> <span class="k">loop</span> value <span class="k">in</span> values <span class="g">-&gt;</span> value * <span class="n">2</span>
+    even<span class="g">:</span> <span class="k">loop</span> value <span class="k">in</span> values <span class="k">if</span> value % <span class="n">2</span> == <span class="n">0</span> <span class="g">-&gt;</span> value
+    prefix<span class="g">:</span> <span class="k">loop</span> value <span class="k">in</span> values <span class="g">-&gt;</span> {
         <span class="k">if</span> value &gt; <span class="n">3</span> <span class="g">-&gt;</span> <span class="k">break</span>
         value
     }
-    nested <span class="g">::</span> <span class="k">loop</span> left <span class="k">in</span> [<span class="n">1</span>, <span class="n">2</span>] <span class="g">-&gt;</span> <span class="k">loop</span> right <span class="k">in</span> [<span class="n">10</span>, <span class="n">20</span>] <span class="g">-&gt;</span> left + right
+    nested<span class="g">:</span> <span class="k">loop</span> left <span class="k">in</span> [<span class="n">1</span>, <span class="n">2</span>] <span class="g">-&gt;</span> <span class="k">loop</span> right <span class="k">in</span> [<span class="n">10</span>, <span class="n">20</span>] <span class="g">-&gt;</span> left + right
 
     by_value <span class="g">:=</span> [<span class="t">Int</span>:<span class="t">Int</span>]{}
     <span class="k">loop</span> value <span class="k">in</span> values <span class="g">-&gt;</span> by_value.<span class="f">add</span>(value, value * <span class="n">10</span>).<span class="f">drop</span>(<span class="s">"keys are unique"</span>)
-    unique <span class="g">::</span> <span class="t">Set</span>.<span class="f">from</span>(<span class="k">loop</span> value <span class="k">in</span> [<span class="n">1</span>, <span class="n">2</span>, <span class="n">2</span>, <span class="n">3</span>] <span class="g">-&gt;</span> value)
-    lazy <span class="g">::</span> values.<span class="f">lazy</span>().<span class="f">map</span>(value <span class="g">-&gt;</span> value + <span class="n">10</span>)</code></pre></div></div>
+    unique<span class="g">:</span> <span class="t">Set</span>.<span class="f">from</span>(<span class="k">loop</span> value <span class="k">in</span> [<span class="n">1</span>, <span class="n">2</span>, <span class="n">2</span>, <span class="n">3</span>] <span class="g">-&gt;</span> value)
+    lazy<span class="g">:</span> values.<span class="f">lazy</span>().<span class="f">map</span>(value <span class="g">-&gt;</span> value + <span class="n">10</span>)</code></pre></div></div>
   </section>
 
   <section>
     <h2 id="concurrency">Explicit task lifetimes<span class="sec-file">Examples/Concurrency/TasksJoinAll.jet</span></h2>
     <p>This example shows explicit task joins, collection, racing, and detachment. Each operation is visible at its use site.</p>
-    <div class="code"><div class="code-head"><span>Examples/Concurrency/TasksJoinAll.jet</span></div><div class="code-body"><pre><code><span class="k">fn</span> <span class="f">run</span>() {
+    <div class="code"><div class="code-head"><span>Examples/Concurrency/TasksJoinAll.jet</span></div><div class="code-body"><pre><code><span class="f">run</span><span class="g">:</span> <span class="k">fn</span>() {
     <span class="c">// Join discharges the duty and yields the value.</span>
-    joined <span class="g">::</span> <span class="k">task</span> <span class="f">work</span>(<span class="n">5</span>)
+    joined<span class="g">:</span> <span class="k">task</span> <span class="f">work</span>(<span class="n">5</span>)
     <span class="f">print</span>(joined.<span class="f">join</span>() <span class="g">??</span> <span class="f">panic</span>(<span class="s">"join failed"</span>))
 
     <span class="c">// `all` consumes every handle in the list.</span>
-    results <span class="g">::</span> <span class="k">task</span>.<span class="f">all</span> {<span class="f">work</span>(<span class="n">1</span>), <span class="f">work</span>(<span class="n">2</span>), <span class="f">work</span>(<span class="n">3</span>)} <span class="g">??</span> <span class="f">panic</span>(<span class="s">"task.all failed"</span>)
+    results<span class="g">:</span> <span class="k">task</span>.<span class="f">all</span> {<span class="f">work</span>(<span class="n">1</span>), <span class="f">work</span>(<span class="n">2</span>), <span class="f">work</span>(<span class="n">3</span>)} <span class="g">??</span> <span class="f">panic</span>(<span class="s">"task.all failed"</span>)
     <span class="f">print</span>(results[<span class="n">0</span>] + results[<span class="n">1</span>] + results[<span class="n">2</span>])
 
     <span class="k">task</span>.<span class="f">group</span> race_group {
@@ -186,7 +186,7 @@
     }
 
     <span class="c">// `detach` discharges the duty for fire-and-forget work.</span>
-    background <span class="g">::</span> <span class="k">task</span> <span class="f">work</span>(<span class="n">6</span>)
+    background<span class="g">:</span> <span class="k">task</span> <span class="f">work</span>(<span class="n">6</span>)
     background.<span class="f">detach</span>()
     <span class="f">print</span>(<span class="s">"detached"</span>)
 }</code></pre></div></div>
@@ -195,12 +195,12 @@
   <section>
     <h2 id="files">Files, honestly<span class="sec-file">Examples/Systems/Files/Files.jet</span></h2>
     <p>File operations return real errors and carry the FS effect. The happy path stays short; the failure path is visible.</p>
-    <div class="code"><div class="code-head"><span>Examples/Systems/Files/Files.jet</span></div><div class="code-body"><pre><code><span class="k">use</span> core.files <span class="k">as</span> fs
+    <div class="code"><div class="code-head"><span>Examples/Systems/Files/Files.jet</span></div><div class="code-body"><pre><code><span class="k">use</span> fs<span class="g">:</span> core.files
 
-<span class="k">fn</span> <span class="f">run</span>() {
-    path <span class="g">::</span> <span class="s">"/tmp/jet_m10_files.txt"</span>
-    wrote <span class="g">::</span> fs.<span class="f">write</span>(path, <span class="s">"hello\\njet"</span>) <span class="g">??</span> <span class="k">return</span> <span class="f">Err</span>(<span class="s">"write failed"</span>)
-    text <span class="g">::</span> fs.<span class="f">read</span>(path) <span class="g">??</span> <span class="k">return</span> <span class="f">Err</span>(<span class="s">"read failed"</span>)
+<span class="f">run</span><span class="g">:</span> <span class="k">fn</span>() {
+    path<span class="g">:</span> <span class="s">"/tmp/jet_m10_files.txt"</span>
+    wrote<span class="g">:</span> fs.<span class="f">write</span>(path, <span class="s">"hello\\njet"</span>) <span class="g">??</span> <span class="k">return</span> <span class="f">Err</span>(<span class="s">"write failed"</span>)
+    text<span class="g">:</span> fs.<span class="f">read</span>(path) <span class="g">??</span> <span class="k">return</span> <span class="f">Err</span>(<span class="s">"read failed"</span>)
     <span class="f">print</span>(text.<span class="f">to_upper</span>())
     <span class="f">print</span>(fs.<span class="f">exists</span>(path))
 }</code></pre></div></div>

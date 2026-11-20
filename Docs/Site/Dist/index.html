@@ -49,13 +49,13 @@
           </div>
         </div>
         <div class="lens-code"><pre><code><span class="c">// hero.jet is a complete program. Run it: jet run hero.jet</span>
-<span class="k">fn</span> <span class="f">plan</span>(dest: <span class="t">String</span>, seats: <span class="t">Int</span>{<span class="n">2</span>}) <span class="t">String</span> <span class="g">-&gt;</span> <span class="s">"{dest}, party of {seats}"</span>
+<span class="f">plan</span><span class="g">:</span> <span class="k">fn</span>(dest: <span class="t">String</span>, seats: <span class="t">Int</span>{<span class="n">2</span>}) <span class="t">String</span> <span class="g">-&gt;</span> <span class="s">"{dest}, party of {seats}"</span>
 <span class="xr">          &#9492; default rides the type: plan("Lisbon") seats 2</span>
-<span class="k">fn</span> <span class="f">load_port</span>() <span class="t">Int</span> <span class="g">!</span><span class="t">IOError</span> <span class="g">-&gt;</span> <span class="f">Ok</span>(<span class="n">8080</span>)
+<span class="f">load_port</span><span class="g">:</span> <span class="k">fn</span>() <span class="t">Int</span> <span class="g">!</span><span class="t">IOError</span> <span class="g">-&gt;</span> <span class="f">Ok</span>(<span class="n">8080</span>)
 <span class="xr">             &#9492; the whole failure contract, in the signature</span>
-<span class="k">fn</span> <span class="f">run</span>() {
+<span class="f">run</span><span class="g">:</span> <span class="k">fn</span>() {
 <span class="xr">      &#9492; inferred effect row -[IO]&gt;: this program prints</span>
-    port <span class="g">::</span> <span class="f">load_port</span>() <span class="g">??</span> <span class="n">3000</span>
+    port<span class="g">:</span> <span class="f">load_port</span>() <span class="g">??</span> <span class="n">3000</span>
 <span class="xr">                        &#9492; ?? discharges the failure or it propagates</span>
     <span class="f">print</span>(<span class="f">plan</span>(<span class="s">"Lisbon"</span>, <span class="n">3</span>))
     <span class="f">print</span>(<span class="s">"listening on {port}"</span>)
@@ -120,9 +120,9 @@
       <div class="duo-item">
         <h3>Defaults ride the type</h3>
         <p>A default value lives on the type, and it may name an earlier parameter. Call <code>box_dims(4)</code> and get a cube.</p>
-        <div class="code"><div class="code-head"><span>cube.jet</span><span>from Examples/Basics/DefaultRefs.jet</span></div><div class="code-body"><pre><code><span class="k">fn</span> <span class="f">box_dims</span>(w: <span class="t">Int</span>, h: <span class="t">Int</span>{w}, d: <span class="t">Int</span>{h}) <span class="t">String</span> <span class="g">-&gt;</span> <span class="s">"{w}x{h}x{d}"</span>
+        <div class="code"><div class="code-head"><span>cube.jet</span><span>from Examples/Basics/DefaultRefs.jet</span></div><div class="code-body"><pre><code><span class="f">box_dims</span><span class="g">:</span> <span class="k">fn</span>(w: <span class="t">Int</span>, h: <span class="t">Int</span>{w}, d: <span class="t">Int</span>{h}) <span class="t">String</span> <span class="g">-&gt;</span> <span class="s">"{w}x{h}x{d}"</span>
 
-<span class="k">fn</span> <span class="f">run</span>() {
+<span class="f">run</span><span class="g">:</span> <span class="k">fn</span>() {
     <span class="f">print</span>(<span class="f">box_dims</span>(<span class="n">4</span>))
     <span class="f">print</span>(<span class="f">box_dims</span>(<span class="n">4</span>, <span class="n">2</span>))
     <span class="f">print</span>(<span class="f">box_dims</span>(<span class="n">4</span>, <span class="n">2</span>, <span class="n">1</span>))
@@ -131,10 +131,10 @@
       <div class="duo-item">
         <h3>Explicit task lifetimes</h3>
         <p>The example shows explicit join, <code>all</code>, <code>race</code>, <code>any</code>, and detach handling for spawned tasks.</p>
-        <div class="code"><div class="code-head"><span>Examples/Concurrency/TasksJoinAll.jet</span></div><div class="code-body"><pre><code>joined <span class="g">::</span> <span class="k">task</span> <span class="f">work</span>(<span class="n">5</span>)
+        <div class="code"><div class="code-head"><span>Examples/Concurrency/TasksJoinAll.jet</span></div><div class="code-body"><pre><code>joined<span class="g">:</span> <span class="k">task</span> <span class="f">work</span>(<span class="n">5</span>)
 <span class="f">print</span>(joined.<span class="f">join</span>() <span class="g">??</span> <span class="f">panic</span>(<span class="s">"join failed"</span>))
 
-results <span class="g">::</span> <span class="k">task</span>.all {<span class="f">work</span>(<span class="n">1</span>), <span class="f">work</span>(<span class="n">2</span>), <span class="f">work</span>(<span class="n">3</span>)} <span class="g">??</span> <span class="f">panic</span>(<span class="s">"task.all failed"</span>)
+results<span class="g">:</span> <span class="k">task</span>.all {<span class="f">work</span>(<span class="n">1</span>), <span class="f">work</span>(<span class="n">2</span>), <span class="f">work</span>(<span class="n">3</span>)} <span class="g">??</span> <span class="f">panic</span>(<span class="s">"task.all failed"</span>)
 <span class="f">print</span>(results[<span class="n">0</span>] + results[<span class="n">1</span>] + results[<span class="n">2</span>])</code></pre></div></div>
       </div>
     </div>
@@ -149,18 +149,19 @@ results <span class="g">::</span> <span class="k">task</span>.all {<span class="
         <iframe src="widget/index.html" title="A Jet web-widget example" loading="lazy"></iframe>
         <div class="live-tag">Widget/counter.jet, web-target example</div>
       </div>
-      <div class="code"><div class="code-head"><span>Widget/counter.jet</span></div><div class="code-body"><pre><code><span class="k">use</span> core.ui <span class="k">as</span> ui
-<span class="k">use</span> core.reactive <span class="k">as</span> reactive
-<span class="g">#[Target(Web), HTML(Path{"shell.html"})]</span>
+      <div class="code"><div class="code-head"><span>Widget/counter.jet</span></div><div class="code-body"><pre><code><span class="k">use</span> ui<span class="g">:</span> core.ui
+<span class="k">use</span> reactive<span class="g">:</span> core.reactive
+<span class="k">use</span> core.color.[Color]
+<span class="g">#[Target(Web), HTML(Pathshell.html)]</span>
 
-<span class="k">fn</span> <span class="f">run</span>() {
-    count <span class="g">::</span> reactive.<span class="f">signal</span>(<span class="n">0</span>)
+<span class="f">run</span><span class="g">:</span> <span class="k">fn</span>() {
+    count<span class="g">:</span> reactive.<span class="f">signal</span>(<span class="n">0</span>)
     ui.<span class="f">reactive_render</span>(() <span class="g">-&gt;</span> {
         n <span class="g">:=</span> count.<span class="f">get</span>()
-        color <span class="g">:=</span> <span class="s">"#2E2E33"</span>
-        <span class="k">if</span> n % <span class="n">2</span> == <span class="n">1</span> <span class="g">-&gt;</span> color = <span class="s">"#E8232A"</span>
-        backend <span class="g">::</span> ui.<span class="f">null_backend</span>()
-        tree <span class="g">::</span> ui.<span class="f">box</span>([
+        color <span class="g">:=</span> Color{r: <span class="n">46</span>, g: <span class="n">46</span>, b: <span class="n">51</span>, a: <span class="n">255</span>}
+        <span class="k">if</span> n % <span class="n">2</span> == <span class="n">1</span> <span class="g">-&gt;</span> color = Color{r: <span class="n">232</span>, g: <span class="n">35</span>, b: <span class="n">42</span>, a: <span class="n">255</span>}
+        backend<span class="g">:</span> ui.<span class="f">null_backend</span>()
+        tree<span class="g">:</span> ui.<span class="f">box</span>([
             ui.<span class="f">node_color</span>(<span class="s">"count: {n}"</span>, <span class="n">160.0</span>, <span class="n">40.0</span>, color),
             ui.<span class="f">button</span>(<span class="s">"Add one"</span>, on_click: () <span class="g">-&gt;</span> {
                 count.<span class="f">set</span>(count.<span class="f">get</span>() + <span class="n">1</span>)
