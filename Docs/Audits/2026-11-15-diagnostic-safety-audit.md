@@ -71,7 +71,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0145 | PersistNotModuleLevel | Compiler/JetParser/Source/Parser/Statements.jet:2207 | no local binding has persistent storage |
 | E0148 | PatternTableMissingElse | Compiler/JetSema/Source/Sema/Coverage.jet:459 | the table needs a value for every text |
 | E0149 | RuntimeStringAsCheckedText | Compiler/JetSema/Source/Sema/Diagnostics.jet:607 | the checked form checks the text; nothing skips the check |
-| E0150 | TypestateWrongState | Compiler/JetSema/Source/Sema/Typestate.jet:866 | the state is the resource's protocol |
+| E0150 | TypestateWrongState | Compiler/JetSema/Source/Sema/Typestate.jet:880 | the state is the resource's protocol |
 | E0151 | TypestateUnknownState | Compiler/JetSema/Source/Sema/Registration/StateFacts.jet:196 | no opt-in names a state the type lacks |
 | E0152 | InvalidRegexLiteral | Compiler/JetSema/Source/Sema/Diagnostics.jet:601 | compile the run-time pattern with the fallible regex constructor |
 | E0153 | ProtocolExpansionFailed | Compiler/JetSema/Source/Sema/Registration/EnumNumbers.jet:275 | no handle types exist to use |
