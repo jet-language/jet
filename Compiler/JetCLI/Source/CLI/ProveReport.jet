@@ -204,6 +204,7 @@ JetCLIProveTests: struct {
 // One stop record of a test report, paired with the failed test it ended.
 // `caught` when the test caught it (`caught_by`: a failed assertion or a
 // property case); an uncaught stop the test didn't expect is a runtime stop.
+// `test` names the test that stopped, "" for a stop no test run recorded.
 JetCLIProveStopRecord: struct {
     code: String,
     message: String,
@@ -211,6 +212,7 @@ JetCLIProveStopRecord: struct {
     line: Int,
     caught: Bool,
     expected: Bool,
+    test: String,
     used: Bool,
 }
 
@@ -943,7 +945,8 @@ jet_cli_prove_exit_rank: fn(code: Int) -> Int Never! {
 }
 
 // A report's records as test items. A stop record (kind Runtime) is where a
-// failed test stopped; it joins that test's item instead of counting as one.
+// failed test stopped; it joins that test's item instead of counting as one,
+// tied by the test it names, never by its message text alone.
 // A test a failed contract stopped is that contract's row, not a unit item.
 // An expected failure that failed passes, and one that passed fails. A
 // property's seed is its failure's, else the run's `seed`. Contract records
@@ -965,6 +968,7 @@ jet_cli_prove_test_items: fn(identity: JetCLIProveIdentity, members: [JetCLIProv
                 line: Int{record.source.line},
                 caught: caught,
                 expected: expected,
+                test: jet_cli_prove_attachment(record, "test"),
                 used: false,
             },
         )
@@ -1038,6 +1042,7 @@ jet_cli_prove_test_items: fn(identity: JetCLIProveIdentity, members: [JetCLIProv
         if state == 1 {
             loop index in 0..<stops.len() {
                 if stops[index].used || stops[index].message != record.detail -> next
+                if stops[index].test != "" && stops[index].test != record.identity.claim_id -> next
                 stops[index].used = true
                 path = stops[index].path.copy()
                 line = stops[index].line

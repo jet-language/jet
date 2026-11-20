@@ -372,6 +372,10 @@ jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptio
                 parts.flags & 8 == 0 -> "assertion"
                 else -> ""
             }
+            // The stop names its test, so `jet prove` ties it to that test
+            // even when another test stops with the same message. The test's
+            // name has no later reader, so the stop takes it.
+            observed.attachments.push(EvidenceAttachment{name: "test", value: parts.name.move()})
             if caught != "" {
                 observed.attachments.push(EvidenceAttachment{name: "caught_by", value: caught})
                 // A caught and an uncaught stop at one site stay two records.
