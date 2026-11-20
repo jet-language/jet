@@ -11,6 +11,7 @@ use {
     web: core.web
     server: core.http.server
     net: core.net
+    time: core.time
 }
 
 s6_pipeline_crlf: fn() -> String { "\r\n" }
@@ -66,6 +67,66 @@ s6_pipeline_exchange: fn(addr: String, request: String) -> String {
         assert(!invalid.contains("200 OK"), "unsupported version persisted: {invalid}")
         assert(invalid.ends_with("Connection: close{crlf}{crlf}"), invalid)
     }
+    bound.shutdown(30s) ?? panic("shutdown")
+    serving.join() ?? panic("server join")
+}
+
+// Reads one response to the end the server's side ends it with.
+s6_response: fn(addr: String, request: String) -> TCPStream {
+    stream: net.tcp_connect(addr) ?? panic("connect")
+    stream.write_bytes(request.bytes()) ?? panic("request write")
+    response := ""
+    loop {
+        part: stream.read(8192) ?? panic("response read")
+        if part == "" -> break
+        response = "{response}{part}"
+    }
+    assert(response.starts_with("HTTP/1.1 200 OK") && response.ends_with("two"), response)
+    stream
+}
+
+// Writes `chunk` until a write fails: the bytes written before then.
+s6_send_until_cut: fn(stream: &TCPStream, chunk: [U8], pause: Duration) -> Int {
+    clock: time.start()
+    sent := 0
+    loop {
+        failed: if stream.write_bytes(chunk) == {
+            .Ok(_) -> false
+            .Err(_) -> true
+        }
+        if failed -> break
+        sent += chunk.len()
+        assert(time.elapsed(clock).ns < 30000000000, "the server still reads after 30 s")
+        if pause.ns > 0 -> time.sleep(pause)
+    }
+    sent
+}
+
+// Once the server has answered and ended its side, it reads and drops what
+// the client still sends, but only for a bounded time and a bounded number
+// of bytes; then its socket closes and the client's writes fail.
+#Test("a client that never stops sending is cut off by the linger bounds") {
+    mux: web.app()
+    mux.get("/two", fn(_req: HTTPRequest) { Ok(server.response(200, "two")) })
+    bound: mux.bind("127.0.0.1:0") ?? panic("bind")
+    addr: bound.local_addr() ?? panic("address")
+    serving: task { bound.serve() ?? panic("server") }
+    crlf: s6_pipeline_crlf()
+    request: "GET /two HTTP/1.1{crlf}Host: local{crlf}{crlf}"
+    // A byte every 20 ms never reaches the byte bound: the server keeps
+    // reading it until the 2 s time bound cuts it, not at once.
+    slow := s6_response(addr, request)
+    clock: time.start()
+    _: s6_send_until_cut(slow, "x".bytes(), 20ms)
+    lingered_ms: time.elapsed(clock).ns /% 1000000
+    assert(lingered_ms >= 1000, "the server closed after {lingered_ms} ms, not lingering")
+    // As fast as it can: the byte bound cuts it long before the time bound
+    // would, so far less than a second of loopback writes gets through.
+    fast := s6_response(addr, request)
+    chunk := [U8]{}
+    loop _ in 0..<65536 -> chunk.push(120)
+    sent: s6_send_until_cut(fast, chunk, 0ms)
+    assert(sent < 64 * 1024 * 1024, "the server read {sent} bytes past its byte bound")
     bound.shutdown(30s) ?? panic("shutdown")
     serving.join() ?? panic("server join")
 }

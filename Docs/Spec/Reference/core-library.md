@@ -1853,6 +1853,18 @@ to the listener's TLS setup, not to construction. A failed bind is an
 `HTTPError.IO` naming the address and the bind failure; nothing on the server
 path exits the process.
 
+Once a plain connection is answered, the server ends its side of it, so the
+client reads the whole response and its end, then reads and drops what the
+client still sends (the rest of a pipelined batch, a body no handler read)
+until the client ends its side, for at most 2 seconds and 256 KiB, and only
+then closes the socket. A socket closed with unread bytes makes the kernel
+answer with a reset, which can discard the response before the client reads
+it; a client that sends past either bound gets that reset. The connection's
+count is given back before it lingers, so a lingering connection holds no
+place in the server's or its peer's limits and no shutdown drain waits for it.
+Past the drain, and for a connection refused over the limits, the socket
+closes at once. A TLS connection sends close_notify and closes at once.
+
 An `HTTPServer` answers connections from `serve()` (alias `wait()`) until
 `shutdown(grace)`, where `grace` defaults to zero, or until its accept is
 canceled (the serving task's cancel, or a signal `process.on_signal`
