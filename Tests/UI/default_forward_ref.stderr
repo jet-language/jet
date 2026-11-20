@@ -1,17 +1,17 @@
-Error [jet.DefaultReadsLaterParameter]: Default for `a` in `f` references `b`, which comes after it
+Error: Jet.DefaultReadsLaterParameter: Default for `a` in `f` references `b`, which comes after it
   --> Tests/UI/default_forward_ref.jet:1:14
     |
   1 | f: fn(a: Int{b}, b: Int) -> Int { a }
     |              ^
  Why: Defaults fill left to right; a parameter isn't in scope until it appears in the list
  Fix: Reorder the parameters so `b` comes before `a`, or use a constant default
-More: jet-lang.dev/e/E0126
+More: jet-lang.dev/e/Jet.DefaultReadsLaterParameter
 
-Error [jet.MissingArgument]: This call to `f` is missing `b`
+Error: Jet.MissingArgument: This call to `f` is missing `b`
   --> Tests/UI/default_forward_ref.jet:3:16
     |
   3 | run: fn() { _: f(1) }
     |                ^
  Why: `b` has no default, so every call has to supply it
  Fix: Add `b: …` to the call
-More: jet-lang.dev/e/E0766
+More: jet-lang.dev/e/Jet.MissingArgument

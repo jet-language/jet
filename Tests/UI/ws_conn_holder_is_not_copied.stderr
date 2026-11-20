@@ -1,17 +1,17 @@
-Error [jet.MissingMoveMarker]: `wire` cannot be moved from borrowed storage
+Error: Jet.MissingMoveMarker: `wire` cannot be moved from borrowed storage
   --> Tests/UI/ws_conn_holder_is_not_copied.jet:16:45
     |
  16 | wrap: fn(wire: Wire) -> Child { Child{wire: wire} }
     |                                             ^^^^
  Why: `wire` is a read or write parameter, so its caller keeps the value, and `Wire` can't be copied into the struct literal
  Fix: Declare the parameter `wire: &&Wire` so the caller hands the value over
-More: jet-lang.dev/e/E0201
+More: jet-lang.dev/e/Jet.MissingMoveMarker
 
-Error [jet.MissingMoveMarker]: `self` cannot be moved from borrowed storage
+Error: Jet.MissingMoveMarker: `self` cannot be moved from borrowed storage
   --> Tests/UI/ws_conn_holder_is_not_copied.jet:9:44
     |
   9 |     child: fn(self) -> Child { Child{wire: self} }
     |                                            ^^^^
  Why: `self` is a read or write parameter, so its caller keeps the value, and `Wire` can't be copied into the struct literal
  Fix: Declare the parameter `self: &&Wire` so the caller hands the value over
-More: jet-lang.dev/e/E0201
+More: jet-lang.dev/e/Jet.MissingMoveMarker

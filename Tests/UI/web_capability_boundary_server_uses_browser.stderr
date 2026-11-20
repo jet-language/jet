@@ -1,8 +1,8 @@
-Error [jet.ServerCodeUsesBrowser]: `Drafts.save` runs on the server, as `#App.SignedIn` marks it, but it uses the `Browser` effect, which only the page has.
+Error: Jet.ServerCodeUsesBrowser: `Drafts.save` runs on the server, as `#App.SignedIn` marks it, but it uses the `Browser` effect, which only the page has.
   --> Tests/UI/web_capability_boundary_server_uses_browser.jet:10:19
     |
  10 |     #App.SignedIn save: fn(self, draft: String) -> Int {
     |                   ^^^^
  Why: An endpoint, a job, a schedule, a webhook and a signing key run their bodies on the server, and the `Browser` effect (the page's DOM, its local and session storage and its events) exists only in the page, so the server can never make the call.
  Fix: Do the `Browser` work in the page, in a screen or a `#Target(JS)` function, and keep `Drafts.save` to work the server can do.
-More: jet-lang.dev/e/E2824
+More: jet-lang.dev/e/Jet.ServerCodeUsesBrowser

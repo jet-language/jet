@@ -1,17 +1,17 @@
-Error [jet.InvalidOutput]: Output entry `run` has the wrong callable contract
+Error: Jet.InvalidOutput: Output entry `run` has the wrong callable contract
   --> Tests/UI/Taint/counted_loop_zero_iterations_keeps_pre_loop_taint.jet:5:1
     |
   5 | run: fn(n: Int) {
     | ^^^^^^^^^^^^^^^^^
  Why: An Executable takes zero or one typed CLI parameter and declares no return type, `-> Never`, or only a unit error contract such as `IOError!`
  Fix: Declare the entry as `run: fn()` or `run: fn() IOError!`
-More: jet-lang.dev/e/E1321
+More: jet-lang.dev/e/Jet.InvalidOutput
 
-Error [jet.TaggedValueDenied]: A `Input` value is denied at `process.cmd`
+Error: Jet.TaggedValueDenied: A `Input` value is denied at `process.cmd`
   --> Tests/UI/Taint/counted_loop_zero_iterations_keeps_pre_loop_taint.jet:8:16
     |
   8 |     _: process.cmd(["echo", value])
     |                ^^^
  Why: The declaration for `Input` denies `Exec`, which covers this destination
  Fix: Remove the destination use, or pass the value through a matching `#Scrub(Input)` function
-More: jet-lang.dev/e/E0721
+More: jet-lang.dev/e/Jet.TaggedValueDenied

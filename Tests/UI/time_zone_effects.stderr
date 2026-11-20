@@ -1,4 +1,4 @@
-Error [jet.EffectBoundExceeded]: `env_only` uses the effect `FS.Read`, which its signature doesn't allow
+Error: Jet.EffectBoundExceeded: `env_only` uses the effect `FS.Read`, which its signature doesn't allow
   --> Tests/UI/time_zone_effects.jet:6:30
     |
   6 | env_only: fn(name: String) -[Env]> Zone TimeError! { time.zone(name) }
@@ -7,9 +7,9 @@ Error [jet.EffectBoundExceeded]: `env_only` uses the effect `FS.Read`, which its
  Fix: Add `FS.Read` to the effect list, or stop using it in `env_only`
  Denial: invocation
  Call chain: env_only
-More: jet-lang.dev/e/E0740
+More: jet-lang.dev/e/Jet.EffectBoundExceeded
 
-Error [jet.EffectBoundExceeded]: `read_only` uses the effect `Env`, which its signature doesn't allow
+Error: Jet.EffectBoundExceeded: `read_only` uses the effect `Env`, which its signature doesn't allow
   --> Tests/UI/time_zone_effects.jet:8:31
     |
   8 | read_only: fn(name: String) -[FS.Read]> ZonedDateTime TimeError! { time.parse_zoned(name) }
@@ -18,9 +18,9 @@ Error [jet.EffectBoundExceeded]: `read_only` uses the effect `Env`, which its si
  Fix: Add `Env` to the effect list, or stop using it in `read_only`
  Denial: invocation
  Call chain: read_only
-More: jet-lang.dev/e/E0740
+More: jet-lang.dev/e/Jet.EffectBoundExceeded
 
-Error [jet.ImpureCallInPureContext]: `pure` calls the impure function `time.zone`
+Error: Jet.ImpureCallInPureContext: `pure` calls the impure function `time.zone`
   --> Tests/UI/time_zone_effects.jet:4:52
     |
   4 | pure: fn(name: String) -[]> Zone TimeError! { time.zone(name) }
@@ -29,4 +29,4 @@ Error [jet.ImpureCallInPureContext]: `pure` calls the impure function `time.zone
  Fix: Remove the call from `pure`, or drop the `-[]>` bound from `pure` so its effects are inferred
  Denial: pure
  Call chain: pure → time.zone
-More: jet-lang.dev/e/E3401
+More: jet-lang.dev/e/Jet.ImpureCallInPureContext

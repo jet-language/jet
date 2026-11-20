@@ -1,8 +1,8 @@
-Error [jet.ErrorNotPropagatable]: `make_error` fails with `Err`, which can't propagate into `DomainError` here
+Error: Jet.ErrorNotPropagatable: `make_error` fails with `Err`, which can't propagate into `DomainError` here
   --> Tests/UI/e2404_nested_error_constructor_domain.jet:12:9
     |
  12 |         make_error(),
     |         ^^^^^^^^^^
  Why: `make_error` is defined at `e2404_nested_error_constructor_domain.jet:8:1` with effective failure contract `explicit Err!`; the caller's `explicit DomainError!` contract has no route from `Err` to `DomainError`
  Fix: Declare the caller with `Err` as its failure domain, or add `impl DomainError.From(Err) { … }`; otherwise handle `make_error` locally with `??`
-More: jet-lang.dev/e/E2404
+More: jet-lang.dev/e/Jet.ErrorNotPropagatable

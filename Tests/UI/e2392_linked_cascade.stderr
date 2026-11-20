@@ -1,17 +1,17 @@
-Error [jet.ArgumentCountMismatch]: `load_row` expects 0 arguments, got 1
+Error: Jet.ArgumentCountMismatch: `load_row` expects 0 arguments, got 1
   --> Tests/UI/e2392_linked_cascade.jet:15:5
     |
  15 |     load_row(1)
     |     ^^^^^^^^
  Why: Every argument must match a parameter
  Fix: Check the definition of `load_row`
-More: jet-lang.dev/e/E0104
+More: jet-lang.dev/e/Jet.ArgumentCountMismatch
 
-Error [jet.ErrorNotPropagatable]: `load_row` fails with `SourceErr`, which can't propagate into `TargetErr` here
+Error: Jet.ErrorNotPropagatable: `load_row` fails with `SourceErr`, which can't propagate into `TargetErr` here
   --> Tests/UI/e2392_linked_cascade.jet:15:5
     |
  15 |     load_row(1)
     |     ^^^^^^^^
  Why: `load_row` is defined at `e2392_linked_cascade.jet:12:1` with effective failure contract `explicit SourceErr!`; the caller's `explicit TargetErr!` contract has no route from `SourceErr` to `TargetErr`
  Fix: Declare the caller with `SourceErr` as its failure domain, or add `impl TargetErr.From(SourceErr) { … }`; otherwise handle `load_row` locally with `??`
-More: jet-lang.dev/e/E2404
+More: jet-lang.dev/e/Jet.ErrorNotPropagatable

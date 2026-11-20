@@ -1,8 +1,8 @@
-Error [jet.RawAddressIntoKernel]: `_peek` carries the caller-chosen address `address` to `pointer_from_address`
+Error: Jet.RawAddressIntoKernel: `_peek` carries the caller-chosen address `address` to `pointer_from_address`
   --> Tests/UI/E3114RawAddressIntoKernel/run.jet:9:18
     |
   9 |         pointer: mem.Ptr<Int>.from_addr(address)
     |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
  Why: Code outside the kernel files calls `_peek` without a gate, so the address `pointer_from_address` uses would skip the kernel's audit.
  Fix: Take an owner or a `View<T>` in place of `address`, or mark `_peek` `#Unsafe("…")` so each caller vouches for the address.
-More: jet-lang.dev/e/E3114
+More: jet-lang.dev/e/Jet.RawAddressIntoKernel

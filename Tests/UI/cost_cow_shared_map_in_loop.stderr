@@ -1,8 +1,8 @@
-Error [jet.HiddenCopyInLoop]: Editing a shared map backing store inside a loop
+Error: Jet.HiddenCopyInLoop: Editing a shared map backing store inside a loop
   --> Tests/UI/cost_cow_shared_map_in_loop.jet:9:15
     |
   9 |         counts[key] = out.len()
     |               ^^^^^^^^^^^^^^^
  Why: The loop pays for this copy on every turn and the source doesn't show it, so the loop's cost grows with the copied value's size.
  Fix: To keep the copy out of the loop, mutate an exclusive map place, or move the edit outside the loop.
-More: jet-lang.dev/e/L2511
+More: jet-lang.dev/e/Jet.HiddenCopyInLoop

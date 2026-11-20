@@ -1,13 +1,13 @@
-Error [jet.ImpureGateNotAllowed]: `core.files.exists()` inside `#Impure` is a Tier-2 comptime effect, but its package doesn't hold `Meta.Host`
+Error: Jet.ImpureGateNotAllowed: `core.files.exists()` inside `#Impure` is a Tier-2 comptime effect, but its package doesn't hold `Meta.Host`
   --> hostdep/hostdep.jet:5:24
     |
   5 |         found: #run fs.exists("hostdep.jet")
     |                        ^^^^^^
  Why: The `#Impure` block opts in to ambient I/O, but reaching the host while compiling is also the expert effect `Meta.Host`, which no package holds by default: the main package holds it by naming it, and lends it to a dependency with `authority.grants`, so the package file shows every build that touches the host.
  Fix: Add `Meta.Host` to the main package's `authority: { allow: [...] }` row; for a dependency, add `Meta.Host` to the main package's `authority: { grants: { "name": [...] } }` line for it.
-More: jet-lang.dev/e/E3411
+More: jet-lang.dev/e/Jet.ImpureGateNotAllowed
 
-Error [jet.DependencyCheckFailed]: Dependency package `hostdep` has errors
+Error: Jet.DependencyCheckFailed: Dependency package `hostdep` has errors
  Why: A dependency package is checked as its own package; its errors, shown above, fail every package that imports it
  Fix: Fix the errors shown above; `jet check hostdep` checks that package on its own
-More: jet-lang.dev/e/E0626
+More: jet-lang.dev/e/Jet.DependencyCheckFailed

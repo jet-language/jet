@@ -1,4 +1,4 @@
-Error [jet.UseAfterMove]: `s` moves out of a lambda that can run more than once
+Error: Jet.UseAfterMove: `s` moves out of a lambda that can run more than once
   --> Tests/UI/lambda_move_capture_repeated_call.jet:7:47
     |
   7 |     xs.fold(0, fn(acc, x) { acc + x + consume(s.move()) })
@@ -9,4 +9,4 @@ Error [jet.UseAfterMove]: `s` moves out of a lambda that can run more than once
     |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this lambda may run more than once
  Why: The lambda is passed on or stored, so it may be called again, and that call would use `s` after the first call gave it away
  Fix: Pass a copy (`s.copy()`), or move `s` in as a parameter of the lambda instead of capturing it
-More: jet-lang.dev/e/E0121
+More: jet-lang.dev/e/Jet.UseAfterMove
