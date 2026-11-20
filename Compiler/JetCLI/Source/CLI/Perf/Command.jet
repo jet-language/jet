@@ -1242,13 +1242,14 @@ jet_cli_perf_log_span_summary: fn(trace: CanonicalJSON) -> String? Never! {
 
 // The core.perf zones, frame marks and plots of the trace's `zones`
 // receipt section (jet_cli_perf_zones_section): why zones stayed off when
-// the runtime could not turn them on; each zone name with how many closed,
-// the CPU-time samples taken inside them, their total and longest time,
-// heaviest first, and the lines of the source most of those samples were
-// on, each with its samples; the frames with how many and their mean and
-// longest interval; and each plot with how many values and its last. The
-// section counts every one the run closed, the spans past the trace's row
-// limit too.
+// the runtime could not turn them on; that the spans file reached its
+// bound, so the rows after it were dropped; each zone name with how many
+// closed, the CPU-time samples taken inside them, their total and longest
+// time, heaviest first, and the lines of the source most of those samples
+// were on, each with its samples; the frames with how many and their mean
+// and longest interval; and each plot with how many values and its last.
+// The section counts every one the run closed, the spans past the trace's
+// row limit too.
 jet_cli_perf_zone_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     lines := [String]{}
     items: jet_cli_perf_rows(trace, "receipt_sections") ?? return lines
@@ -1259,6 +1260,9 @@ jet_cli_perf_zone_lines: fn(trace: CanonicalJSON) -> [String] Never! {
         source: jet_cli_perf_field_text(fields, "source") ?? ""
         if jet_cli_perf_member_text(section.value, "refused") == .Val(reason) {
             lines.push("zones off: {reason}")
+        }
+        if jet_cli_perf_member_text(section.value, "cut") == .Val(reason) {
+            lines.push("spans cut: {reason}")
         }
         if jet_cli_perf_key(fields, "zones") == .Val(zones_at) {
             if jettrace_array(fields[zones_at].value, "receipt zones.zones") == .Ok(zones) {

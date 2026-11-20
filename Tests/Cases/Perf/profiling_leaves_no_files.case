@@ -1,0 +1,63 @@
+# Profiling leaves no files behind. A flight-recorded program removes its
+# ring, the ring's image and its zones' rows (`.spans`) when it exits. One
+# that is killed leaves them, and the next `jet perf attach` removes them,
+# since their program is gone, while the running program it attaches to
+# keeps its own. An attach's own copies go once it has read them.
+requires: os-name:linux
+fixture: ProfilesLeaveNoFiles.fixture
+env: NO_COLOR=1
+env: XDG_RUNTIME_DIR={work}/run
+env: TMPDIR={work}/tmp
+step: mkdir -m 700 run tmp
+exit: 0
+session ends line: jet run --observe live.jet
+stderr: null
+recv ends
+stdout.trim: ~ "READY" # the program is running its loop
+step: jet perf attach {pid:ends} --source live.jet --zones=300ms --out ends.jettrace
+exit: 0
+file: ends.jettrace ~ "\"kind\":\"zone\"" # the attach turned its zones on, so it wrote zone rows
+step: ls run/jet/jet-flight-{pid:ends}.samples run/jet/jet-flight-{pid:ends}.samples.image run/jet/jet-flight-{pid:ends}.samples.spans
+exit: 0 # its ring, image and zones' rows are there while it runs
+step: touch stop
+exit: 0
+close ends
+exit: 0 # the stop file ends its loop
+step: sh -c 'ls -A run/jet | grep -c .'
+exit: 1 # grep counts no line
+stdout: = "0\n" # at its exit the program removed all three, and the attach left no copy
+step: rm stop
+exit: 0
+session killed line: jet run --observe live.jet
+stderr: null
+recv killed
+stdout.trim: ~ "READY" # a second run
+step: jet perf attach {pid:killed} --source live.jet --zones=300ms --out killed.jettrace
+exit: 0
+step: ls run/jet/jet-flight-{pid:killed}.samples run/jet/jet-flight-{pid:killed}.samples.image run/jet/jet-flight-{pid:killed}.samples.spans
+exit: 0 # its ring, image and zones' rows are there while it runs
+signal killed: KILL
+close killed
+exit: any # the case's KILL ends the program
+step: sh -c 'ls run/jet/jet-flight-*.samples run/jet/jet-flight-*.samples.image run/jet/jet-flight-*.samples.spans'
+exit: 0 # a killed program removes none of them
+session live line: jet run --observe live.jet
+stderr: null
+recv live
+stdout.trim: ~ "READY" # a third run
+step: sh -c 'n=0; while [ ! -f run/jet/jet-flight-{pid:live}.samples ] && [ $n -lt 200 ]; do sleep 0.05; n=$((n+1)); done'
+exit: 0
+step: jet perf attach {pid:live} --source live.jet --out live.jettrace
+exit: 0
+step: sh -c 'ls -A run/jet | grep -v -c "^jet-flight-{pid:live}\."'
+exit: 1 # grep counts no line
+stdout: = "0\n" # the attach removed the killed program's files and its own copies, and only the running program's are left
+step: ls run/jet/jet-flight-{pid:live}.samples run/jet/jet-flight-{pid:live}.samples.image
+exit: 0 # the running program keeps its ring and image
+step: touch stop
+exit: 0
+close live
+exit: 0 # the stop file ends its loop
+step: sh -c 'ls -A run/jet | grep -c .'
+exit: 1 # grep counts no line
+stdout: = "0\n" # and at its exit it removed its own

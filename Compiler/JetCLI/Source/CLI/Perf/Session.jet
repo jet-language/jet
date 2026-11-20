@@ -201,6 +201,8 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
         // copy: the parsed argv keeps its words; the spawn owns its own.
         argv.push(arg.copy())
     }
+    // What killed programs, sessions and attaches left behind goes first.
+    jet_cli_perf_sweep_leftovers()
     spec := perf_process.cmd(argv).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
     // A run's program samples into a file of this session's (the runtime's
     // PerfSamples.jet), beside which `jet run` writes the program's image
@@ -460,6 +462,8 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
         // one that isn't this user's alone is refused before any request is
         // left in it.
         home: jet_cli_perf_flight_home() ?? return jet_cli_perf_home_refused(err, color)
+        // What killed programs, sessions and attaches left in it goes first.
+        jet_cli_perf_sweep_leftovers()
         text: perf_files.read(path) ?? return jet_cli_perf_error("cannot read source {path}: {jet_cli_io_error_text(err)}", JET_CLI_PERF_FIX, color)
         // With `--zones=`, the program's zones, frame marks, plots and log
         // spans for that window, before its ring is read, and the window
@@ -539,7 +543,7 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
 // no ring.
 jet_cli_perf_attach_flight: fn(pid: Int, home: String, source: String) -[FS, Env, Time]> JetCLIPerfSamples? Never! {
     published: perf_files.join(home, "jet-flight-{pid}.samples")
-    taken: perf_files.join(home, "jet-perf-attach-{pid}-{perf_time.unix_ns()}.samples")
+    taken: perf_files.join(home, "jet-perf-attach-{perf_process.current_pid()}-{pid}-{perf_time.unix_ns()}.samples")
     perf_files.copy(published, taken) ?? return None
     if perf_files.copy("{published}.image", "{taken}.image") == .Err(_) {
         perf_files.remove(taken).drop("the attach reads the ring it copied once")
@@ -584,7 +588,7 @@ jet_cli_perf_attach_heap: fn(pid: Int, home: String, source: String) -[FS, Env, 
     if bytes[7] == (U8{255}) {
         return Err(JetCLIPerfHeapError{message: "it keeps no list of its live blocks: it was not started with allocation tracking", unobserved: true})
     }
-    taken: perf_files.join(home, "jet-perf-attach-{pid}-{perf_time.unix_ns()}.heap")
+    taken: perf_files.join(home, "jet-perf-attach-{perf_process.current_pid()}-{pid}-{perf_time.unix_ns()}.heap")
     perf_files.write_bytes(taken, bytes.slice(8, bytes.len())) ?? return Err(jet_cli_perf_heap_failed("cannot keep process {pid}'s heap snapshot: {jet_cli_io_error_text(err)}"))
     if perf_files.copy("{ring}.image", "{taken}.image") == .Err(failure) {
         perf_files.remove(taken).drop("the attach reads the snapshot it kept once")
@@ -655,7 +659,7 @@ jet_cli_perf_attach_zones: fn(pid: Int, home: String, window_ms: Int, window: &J
     cpu: if cpu_before == .Val(first) && cpu_after == .Val(last) && last >= first -> Val(last - first) else -> None
     window = Val(JetCLIPerfRuntimeWindow{elapsed_ns: U64{wall}, cpu_ns: cpu, exit: false})
     perf_time.sleep(250ms)
-    taken: perf_files.join(home, "jet-perf-attach-{pid}-{perf_time.unix_ns()}.spans")
+    taken: perf_files.join(home, "jet-perf-attach-{perf_process.current_pid()}-{pid}-{perf_time.unix_ns()}.spans")
     perf_files.copy("{ring}.spans", taken) ?? return None
     Val(taken)
 }
@@ -664,18 +668,15 @@ jet_cli_perf_attach_zones: fn(pid: Int, home: String, window_ms: Int, window: &J
 // its ring and image and reads an attach's requests (JetRuntime
 // PerfSamples.jet perf_flight_home finds the same one): `jet` in
 // `$XDG_RUNTIME_DIR` when that names an absolute path, else `jet-<uid>` in
-// the temporary directory, made owner-only when missing. One already there
-// is used only when it is a directory, not a link, this user owns and no
-// one else can open: a directory someone else made or opened could hold
-// their requests and show them the ring.
+// the temporary directory (jet_cli_perf_flight_place), made owner-only
+// when missing. One already there is used only when it is a directory, not
+// a link, this user owns and no one else can open: a directory someone else
+// made or opened could hold their requests and show them the ring.
 jet_cli_perf_flight_home: fn() -[FS, Env]> String JetCLIPerfHomeError! {
-    runtime: perf_sys.get("XDG_RUNTIME_DIR") ?? ""
-    private: runtime.starts_with("/")
-    parent: if private -> runtime else -> perf_sys.temp_dir()
-    name: if private -> "jet" else -> "jet-{perf_sys.geteuid()}"
-    home: perf_files.join(parent, name)
-    held: perf_files.open_directory(parent) ?? return Err(JetCLIPerfHomeError{home: home, cause: "cannot open {parent}: {jet_cli_io_error_text(err)}", shared: false})
-    if held.create_directory(name, mode: Val(0o700)) == {
+    place: jet_cli_perf_flight_place()
+    home: perf_files.join(place.parent, place.name)
+    held: perf_files.open_directory(place.parent) ?? return Err(JetCLIPerfHomeError{home: home, cause: "cannot open {place.parent}: {jet_cli_io_error_text(err)}", shared: false})
+    if held.create_directory(place.name, mode: Val(0o700)) == {
         .Ok(_) -> {}
         .Err(.AlreadyExists(_)) -> {}
         .Err(failure) -> return Err(JetCLIPerfHomeError{home: home, cause: "cannot make {home}: {jet_cli_io_error_text(failure)}", shared: false})
@@ -690,6 +691,93 @@ jet_cli_perf_flight_home: fn() -[FS, Env]> String JetCLIPerfHomeError! {
     }
     if cause != "" -> return Err(JetCLIPerfHomeError{home: home, cause: cause, shared: true})
     Ok(home)
+}
+
+// Where jet_cli_perf_flight_home's directory is: its parent and its name.
+jet_cli_perf_flight_place: fn() -[Env]> {parent: String, name: String} Never! {
+    runtime: perf_sys.get("XDG_RUNTIME_DIR") ?? ""
+    if runtime.starts_with("/") -> return {parent: runtime, name: "jet"}
+    {parent: perf_sys.temp_dir(), name: "jet-{perf_sys.geteuid()}"}
+}
+
+// What a killed profiled program, session or attach left behind, removed
+// by the next `jet perf run` or attach (jet_cli_perf_sweep): in the
+// temporary directory, a session's samples and the files beside them
+// (`jet-perf-<pid>-…`) and an attach's copies (`jet-perf-attach-<pid>-…`);
+// in this user's flight directory, when it is there and theirs alone, a
+// flight-recorded program's ring, image, zones' rows and requests
+// (`jet-flight-<pid>.…`) and an attach's copies. A program that exits
+// removes its own (JetRuntime PerfSamples.jet perf_flight_end), and a
+// session or attach removes what it reads.
+jet_cli_perf_sweep_leftovers: fn() -[FS, Env, Time]> {
+    jet_cli_perf_sweep(perf_sys.temp_dir())
+    place: jet_cli_perf_flight_place()
+    home: perf_files.join(place.parent, place.name)
+    facts: perf_files.lstat(home) ?? return
+    if facts.is_dir && !facts.is_symlink && facts.owner == Val(perf_sys.geteuid()) && facts.mode & 0o077 == 0 {
+        jet_cli_perf_sweep(home)
+    }
+}
+
+// Remove each file of `dir` this user owns that names a process
+// (jet_cli_perf_file_pid) which is gone, or is a later one under the same
+// pid: one that started more than JET_CLI_PERF_SWEEP_SLACK_NS after the
+// file was last written. Only where /proc shows when the host booted, so
+// a host without /proc loses no file.
+jet_cli_perf_sweep: fn(dir: String) -[FS, Env, Time]> {
+    boot_ns: jet_cli_perf_boot_ns() ?? return
+    listed: perf_files.list_dir(dir) ?? return
+    loop entry in listed {
+        pid: jet_cli_perf_file_pid(entry.name) ?? next
+        path: perf_files.join(dir, entry.name)
+        facts: perf_files.lstat(path) ?? next
+        if !facts.is_file || facts.is_symlink || facts.owner != Val(perf_sys.geteuid()) -> next
+        written: facts.modified.to_unix_ns() ?? next
+        if jet_cli_perf_process_start(pid) == .Ok(ticks) {
+            // /proc's start is in clock ticks after the boot, 100 a second.
+            started: boot_ns + (Int.parse(ticks) ?? next) * 10000000
+            if started <= written + JET_CLI_PERF_SWEEP_SLACK_NS -> next
+        }
+        perf_files.remove(path).drop("a file whose process is gone is only tidied away")
+    }
+}
+
+// How much later than a file's last write its process may seem to have
+// started and still own it: /proc/stat gives the boot to the second.
+JET_CLI_PERF_SWEEP_SLACK_NS: 2000000000
+
+// When this host booted, in nanoseconds since the Unix epoch, from
+// /proc/stat's `btime`; None where /proc doesn't show it.
+jet_cli_perf_boot_ns: fn() -[FS]> Int? Never! {
+    text: perf_files.read("/proc/stat") ?? return None
+    loop line in text.split("\n") {
+        if line.starts_with("btime ") {
+            return Val((Int.parse(line.slice(6..<line.len())) ?? return None) * 1000000000)
+        }
+    }
+    None
+}
+
+// The process a profiling file is named for: `jet-flight-<pid>.…`,
+// `jet-perf-attach-<pid>-…` or `jet-perf-<pid>-…`; None for any other name.
+jet_cli_perf_file_pid: fn(name: String) -> Int? Never! {
+    rest: if {
+        name.starts_with("jet-flight-") -> name.slice(11..<name.len())
+        name.starts_with("jet-perf-attach-") -> name.slice(16..<name.len())
+        name.starts_with("jet-perf-") -> name.slice(9..<name.len())
+        else -> {
+            return None
+        }
+    }
+    bytes: rest.bytes()
+    digits := 0
+    loop digits < bytes.len() && bytes[digits] >= (U8{48}) && bytes[digits] <= (U8{57}) {
+        digits += 1
+    }
+    if digits == 0 || digits == bytes.len() -> return None
+    if bytes[digits] != (U8{46}) && bytes[digits] != (U8{45}) -> return None
+    pid: Int.parse(rest.slice(0..<digits)) ?? return None
+    if pid > 0 -> Val(pid) else -> None
 }
 
 // Why jet_cli_perf_flight_home found no private directory: `shared` when

@@ -785,6 +785,22 @@ program spent across it (its `/proc` utime and stime at each end), not the
 run since it started.
 Tests/Cases/Perf/attach_turns_zones_on.case is the worked example.
 
+Profiling leaves no files behind. The spans file, a flight ring's
+`.samples.spans` or a `jet perf run` session's, holds at most 16 MiB of
+rows: a program that closes more zones, log spans, frame marks and plots
+keeps those that fit and a last row saying the rest were dropped, which
+the trace's `zones` section keeps as `cut` and `jet perf view` shows as
+`spans cut: <reason>`. A new zones request empties the flight ring's file
+first. At a normal exit the program removes its ring, the ring's image and
+its `.spans`. A killed program can't, so the next `jet perf run` or
+`jet perf attach` removes, from the temporary directory and the user's
+private directory, each file of this user's named for a process
+(`jet-flight-<pid>.…`, `jet-perf-<pid>-…`, `jet-perf-attach-<pid>-…`, an
+attach's copies under the attach's own pid) when that process is gone or
+started after the file was last written, a later process under the same
+pid. Tests/Cases/Perf/profiling_leaves_no_files.case and
+Tests/Cases/Perf/spans_file_is_bounded.case are the worked examples.
+
 `jet run --observe --checked-alloc app.jet` keeps the live list as a `jet
 perf run --lens=alloc` does, which `jet perf attach <pid> --source app.jet
 --lens=alloc` snapshots while the program runs. It leaves

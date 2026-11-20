@@ -1361,8 +1361,9 @@ perf_samples_exit: fn() {
 
 // What a row of the spans file (perf_spans_fd) is, in the high half of its
 // length word (perf_zone_row): a closed core.log span, a closed
-// core.perf.zone, a frame mark, a plotted value, or zones that could not
-// turn on, the row's name saying why (perf_zones_refused).
+// core.perf.zone, a frame mark, a plotted value, zones that could not
+// turn on, the row's name saying why (perf_zones_refused), or the file's
+// last row, written when it reached its bound (perf_spans_write).
 PERF_ZONE_LOG: I64{0}
 
 PERF_ZONE_ZONE: I64{1}
@@ -1372,6 +1373,8 @@ PERF_ZONE_FRAME: I64{2}
 PERF_ZONE_PLOT: I64{3}
 
 PERF_ZONE_REFUSED: I64{4}
+
+PERF_ZONE_CUT: I64{5}
 
 // The first zone-site table registered (jet_perf_zone_table), 0 until one
 // is: a library's, so registering it while zones are off is one store.
@@ -1979,20 +1982,16 @@ perf_zone_ring_drain: fn(buffer: I64, ring: I64, scale: I64) {
 // with `kind` (PERF_ZONE_LOG and the others) from bit 32, each a
 // little-endian word, then the name. Rows gather in the spans buffer
 // (perf_spans_buffer), written out when it fills and at exit
-// (perf_spans_flush); a row larger than the buffer is written alone. A
-// zone's row comes through its thread's zone ring (perf_zone_ring_put).
+// (perf_spans_flush); a row larger than the buffer is written alone, after
+// the rows before it. A zone's row comes through its thread's zone ring
+// (perf_zone_ring_put).
 perf_zone_row: fn(kind: I64, start: I64, end: I64, name: I64) {
-    length: rt_text_len(name)
-    size: I64{32} + length
-    task: if (scheduler_control_current() == I64{0}) -> I64{0} else -> perf_zone_task()
     buffer: perf_spans_buffer
-    if (buffer == I64{0} || size > PERF_SPANS_BUFFER_BYTES) {
-        row: jet_rt_alloc(size, I64{8})
-        perf_zone_row_store(row, kind, start, end, task, rt_text_data(name), length)
-        _ := host_write_all(perf_spans_fd, row, size)
-        jet_rt_free(row, size, I64{8})
+    if (buffer == I64{0}) {
         return
     }
+    length: rt_text_len(name)
+    task: if (scheduler_control_current() == I64{0}) -> I64{0} else -> perf_zone_task()
     sync_thread_lock(buffer)
     perf_spans_put(buffer, kind, start, end, task, rt_text_data(name), length)
     sync_thread_unlock(buffer)
@@ -2004,12 +2003,20 @@ perf_zone_row: fn(kind: I64, start: I64, end: I64, name: I64) {
 perf_spans_put: fn(buffer: I64, kind: I64, start: I64, end: I64, task: I64, data: I64, length: I64) {
     size: I64{32} + length
     used := rt_text_word(wrapping(buffer + I64{8}))
-    if (used + size > PERF_SPANS_BUFFER_BYTES) {
-        _ := host_write_all(perf_spans_fd, wrapping(buffer + PERF_SPANS_HEADER_BYTES), used)
+    if (size > PERF_SPANS_BUFFER_BYTES || used + size > PERF_SPANS_BUFFER_BYTES) {
+        perf_spans_write(buffer, wrapping(buffer + PERF_SPANS_HEADER_BYTES), used)
         used = I64{0}
     }
-    perf_zone_row_store(wrapping(wrapping(buffer + PERF_SPANS_HEADER_BYTES) + used), kind, start, end, task, data, length)
-    rt_text_store(wrapping(buffer + I64{8}), used + size)
+    if (size > PERF_SPANS_BUFFER_BYTES) {
+        row: jet_rt_alloc(size, I64{8})
+        perf_zone_row_store(row, kind, start, end, task, data, length)
+        perf_spans_write(buffer, row, size)
+        jet_rt_free(row, size, I64{8})
+    } else {
+        perf_zone_row_store(wrapping(wrapping(buffer + PERF_SPANS_HEADER_BYTES) + used), kind, start, end, task, data, length)
+        used += size
+    }
+    rt_text_store(wrapping(buffer + I64{8}), used)
 }
 
 perf_zone_row_store: fn(row: I64, kind: I64, start: I64, end: I64, task: I64, data: I64, length: I64) {
@@ -2020,11 +2027,46 @@ perf_zone_row_store: fn(row: I64, kind: I64, start: I64, end: I64, task: I64, da
     coll_copy(data, wrapping(row + I64{32}), length)
 }
 
-// The spans buffer's bytes for rows, and its header: the lock word, then
-// the bytes used.
+// The spans buffer's bytes for rows, and its header: the lock word, the
+// bytes used, then the bytes the spans file holds (perf_spans_write), -1 once
+// it reached its bound.
 PERF_SPANS_BUFFER_BYTES: I64{65536}
 
-PERF_SPANS_HEADER_BYTES: I64{16}
+PERF_SPANS_HEADER_BYTES: I64{24}
+
+// The most bytes of rows the spans file holds: a run or an attach window
+// that closes more zones, log spans, frames and plots than fit keeps the
+// first of them, then a PERF_ZONE_CUT row that says the rest were dropped,
+// so the file can't fill the runtime directory it lives in.
+PERF_SPANS_FILE_BYTES: I64{16777216}
+
+// Write the `size` bytes of whole rows at `rows` to the spans file, whose
+// buffer `buffer` the caller holds locked, while they fit its bound
+// (PERF_SPANS_FILE_BYTES). The first rows that don't are dropped, and a
+// PERF_ZONE_CUT row, past the bound, says so; every row after it is dropped
+// too, until the file is emptied (perf_spans_truncate).
+perf_spans_write: fn(buffer: I64, rows: I64, size: I64) {
+    if (size <= I64{0}) {
+        return
+    }
+    held: rt_text_word(wrapping(buffer + I64{16}))
+    if (held < I64{0}) {
+        return
+    }
+    if (held + size <= PERF_SPANS_FILE_BYTES) {
+        _ := host_write_all(perf_spans_fd, rows, size)
+        rt_text_store(wrapping(buffer + I64{16}), held + size)
+        return
+    }
+    reason: rt_static_text("the spans file reached its 16 MiB bound, so the rows after this were dropped")
+    length: rt_text_len(reason)
+    row: jet_rt_alloc(I64{32} + length, I64{8})
+    now: perf_zone_now()
+    perf_zone_row_store(row, PERF_ZONE_CUT, now, now, I64{0}, rt_text_data(reason), length)
+    _ := host_write_all(perf_spans_fd, row, I64{32} + length)
+    jet_rt_free(row, I64{32} + length, I64{8})
+    rt_text_store(wrapping(buffer + I64{16}), I64{-1})
+}
 
 // Write out the rows the spans buffer holds (perf_zone_row) and those of
 // the zone rings (perf_zone_rings_drain); at exit (perf_samples_exit),
@@ -2037,11 +2079,25 @@ perf_spans_flush: fn() {
     }
     sync_thread_lock(buffer)
     perf_zone_rings_drain(buffer)
-    used: rt_text_word(wrapping(buffer + I64{8}))
-    if (used > I64{0}) {
-        _ := host_write_all(perf_spans_fd, wrapping(buffer + PERF_SPANS_HEADER_BYTES), used)
-        rt_text_store(wrapping(buffer + I64{8}), I64{0})
+    perf_spans_write(buffer, wrapping(buffer + PERF_SPANS_HEADER_BYTES), rt_text_word(wrapping(buffer + I64{8})))
+    rt_text_store(wrapping(buffer + I64{8}), I64{0})
+    sync_thread_unlock(buffer)
+}
+
+// Empty the spans file and its buffer, so a later attach reads only its
+// own rows and has the whole bound (PERF_SPANS_FILE_BYTES) for them. The
+// rows the zone rings hold go too.
+perf_spans_truncate: fn() {
+    buffer: perf_spans_buffer
+    if (buffer == I64{0} || perf_spans_fd < I64{0}) {
+        return
     }
+    sync_thread_lock(buffer)
+    perf_zone_rings_drain(buffer)
+    // ftruncate; the file is opened O_APPEND, so the next row lands at 0.
+    _ := observe_syscall(I64{77}, perf_spans_fd, I64{0}, I64{0}, I64{0})
+    rt_text_store(wrapping(buffer + I64{8}), I64{0})
+    rt_text_store(wrapping(buffer + I64{16}), I64{0})
     sync_thread_unlock(buffer)
 }
 
@@ -2733,6 +2789,7 @@ perf_spans_fd_set: fn(fd: I64) {
     buffer: jet_rt_alloc(PERF_SPANS_HEADER_BYTES + PERF_SPANS_BUFFER_BYTES, I64{8})
     rt_text_store(buffer, I64{0})
     rt_text_store(wrapping(buffer + I64{8}), I64{0})
+    rt_text_store(wrapping(buffer + I64{16}), I64{0})
     #Unsafe("the observation start runs before the entry, whose span closes read it") {
         perf_spans_buffer = buffer
         perf_spans_fd = fd
@@ -4807,7 +4864,9 @@ perf_flight_publish: fn(directory: I64) {
 // While the request stands, zones, frame marks, plots and log spans write
 // their rows to `<ring>.spans` (perf_spans_fd_set), emptied when a request
 // turns zones on and written out at each publication; once it is gone the
-// zones word is cleared, and the rows stay for the attach to read.
+// zones word is cleared, and the rows stay for the attach to read. Log
+// spans keep writing rows while zones are off, within the file's bound
+// (PERF_SPANS_FILE_BYTES).
 perf_flight_zones: fn(path: I64) {
     request: perf_flight_beside(path, rt_static_text(".zones"))
     name: observe_cstring(request)
@@ -4824,9 +4883,8 @@ perf_flight_zones: fn(path: I64) {
             jet_rt_string_drop(spans)
             perf_spans_fd_set(fd)
         } else {
-            // ftruncate: a later attach reads only its own rows.
-            perf_spans_flush()
-            _ := observe_syscall(I64{77}, perf_spans_fd, I64{0}, I64{0}, I64{0})
+            // A later attach reads only its own rows.
+            perf_spans_truncate()
             perf_zones_set(I64{1})
         }
     }
@@ -4885,8 +4943,10 @@ perf_flight_heap: fn(path: I64) {
     jet_rt_string_drop(request)
 }
 
-// At a run's exit (Observe.jet jet_rt_observe_exit): the published ring and
-// image go, and no publication follows.
+// At a run's exit (Observe.jet jet_rt_observe_exit): the published ring,
+// its image and its zones' rows (`.spans`) go, and no publication follows.
+// A killed run removes none of them; the next `jet perf run` or attach does
+// (Session.jet jet_cli_perf_sweep).
 perf_flight_end: fn() {
     state: perf_flight_state
     if (state == I64{0} || observe_root == I64{0} || !perf_flight_lock(state, I64{100000000})) {
@@ -4900,8 +4960,11 @@ perf_flight_end: fn() {
             path: perf_flight_path(home)
             jet_rt_string_drop(home)
             image: perf_flight_beside(path, rt_static_text(".image"))
+            spans: perf_flight_beside(path, rt_static_text(".spans"))
             perf_flight_unlink(path)
             perf_flight_unlink(image)
+            perf_flight_unlink(spans)
+            jet_rt_string_drop(spans)
             jet_rt_string_drop(image)
             jet_rt_string_drop(path)
         }
