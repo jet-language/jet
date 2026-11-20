@@ -1,0 +1,20 @@
+# The time values a program holds show as Jet writes their types and values,
+# never as pointers. Here they are an Instant, a Duration the program made,
+# and the Duration elapsed since the Instant. `locals` shows them, `print`
+# shows each of them, and `print` reads a field of one. The clock's readings
+# vary from run to run, so only their fields' names are matched.
+fixture: LocalsShowAnInstantAsItsJetValue.fixture
+env: NO_COLOR=1
+step: jet debug prog.jet
+stdin: locals_show_an_instant_as_its_jet_value.stdin
+exit: 0
+stdout: ~ "Breakpoint hit  prog.jet:7  in run()\n" # the stop is after the three values are made
+stdout: ~ "began: Instant = Instant{start_ns: " # the Instant, by its Jet type and fields
+stdout: ~ "pause: Duration = Duration{ns: 1500000000}\n" # the Duration made from 1500 ms
+stdout: ~ "spent: Duration = Duration{ns: " # the Duration the Instant's elapsed() answered
+stdout: ~ "(Jet) print began\nbegan = Instant{start_ns: " # print shows the Instant
+stdout: ~ "(Jet) print spent\nspent = Duration{ns: " # and the elapsed Duration
+stdout: ~ "(Jet) print pause.ns\npause.ns = 1500000000\n" # and reads a Duration's field
+stdout: !~ "Pointer" # never as a pointer
+stdout: !~ "= 0x" # nor as an address
+stdout: ~ "1500000000ns true\nProgram finished\n" # the program ran on to its end
