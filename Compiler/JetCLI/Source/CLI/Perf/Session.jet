@@ -311,6 +311,12 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
             if jet_cli_perf_session_heaps(source.move(), found.heaps.move()) == .Val(section) {
                 capture.receipts.push(section)
             }
+            if jet_cli_perf_threads_section(found.threads.move(), found.threads_claimed) == .Val(section) {
+                capture.receipts.push(section)
+            }
+            if jet_cli_perf_syscalls_section(found.syscalls.move(), found.syscalls_lost) == .Val(section) {
+                capture.receipts.push(section)
+            }
         }
     }
     full := [String]{action}

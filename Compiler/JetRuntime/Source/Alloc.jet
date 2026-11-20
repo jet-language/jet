@@ -2851,6 +2851,40 @@ priv alloc_check_frames: fn(out: I64, count: I64) {
     }
 }
 
+// The calling chain alloc_check_frames walks, as a key: `seed` hashed with
+// its first `count` return addresses, each as the link-time call site
+// before it (the address less 1 and `bias`), up to the first site outside
+// [low, high). With `into` not 0 it also stores those sites at into,
+// into+8, ... It allocates nothing, so a hook on every host call keys its
+// caller by it (PerfSamples.jet perf_syscall_row).
+priv alloc_frames_key: fn(seed: I64, into: I64, count: I64, bias: I64, low: I64, high: I64) -> I64 {
+    frame := I64{0}
+    #Unsafe("the frame stub (alloc_frames_start) only copies rbp to rax and returns; a missing stub leaves no chain") {
+        stub: os_load_i64(wrapping(alloc_root + I64{56}))
+        if (stub != I64{0}) { frame = os_call_address_i64(stub, I64{0}) }
+    }
+    key := seed
+    index := I64{0}
+    loop index < count {
+        if (frame == I64{0} || frame & I64{7} != I64{0}) { break }
+        address := I64{0}
+        #Unsafe("frame is an active caller's [saved rbp][return address] pair on this thread's stack: each followed link ascends by less than 16 MiB or crosses a stack segment's bridge frame") {
+            address = os_load_i64(wrapping(frame + I64{8}))
+            frame = stack_frame_caller(frame)
+        }
+        site: wrapping(wrapping(address - I64{1}) - bias)
+        if (address == I64{0} || site < low || site >= high) { break }
+        if (into != I64{0}) {
+            #Unsafe("into lends count writable words: a host call row's site words") {
+                os_store_i64(wrapping(into + wrapping(index * I64{8})), site)
+            }
+        }
+        key = wrapping((key ~ site) * I64{1099511628211})
+        index = wrapping(index + I64{1})
+    }
+    key
+}
+
 #Export(c) priv jet_rt_alloc_check_take: fn(size: I64, align: I64) -> I64 {
     prefix: alloc_check_prefix(align)
     inner_align: if (align < I64{8}) -> I64{8} else -> align

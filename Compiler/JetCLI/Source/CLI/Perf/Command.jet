@@ -260,6 +260,8 @@ jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String]
     loop line in jet_cli_perf_memory_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_topdown_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_off_cpu_lines(trace) -> out = "{out}{line}\n"
+    loop line in jet_cli_perf_thread_lines(trace) -> out = "{out}{line}\n"
+    loop line in jet_cli_perf_syscall_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_game_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_receipt_lines(trace) -> out = "{out}{line}\n"
     if frames == "all" {
@@ -602,18 +604,19 @@ jet_cli_perf_receipt_sections: fn(trace: CanonicalJSON) -> [JetDriverRunReceiptS
 
 // `receipt <name> <value>` for each receipt section the trace records, the
 // value as its canonical JSON, but the allocations, the heap snapshots, the
-// causal predictions, the topdown lens's and the zones, which
-// jet_cli_perf_allocation_lines, jet_cli_perf_heap_lines,
-// jet_cli_perf_causal_lines, jet_cli_perf_topdown_lines and
-// jet_cli_perf_zone_lines show.
+// causal predictions, the topdown lens's, the zones, the threads and the
+// host calls, which jet_cli_perf_allocation_lines, jet_cli_perf_heap_lines,
+// jet_cli_perf_causal_lines, jet_cli_perf_topdown_lines,
+// jet_cli_perf_zone_lines, jet_cli_perf_thread_lines and
+// jet_cli_perf_syscall_lines show.
 jet_cli_perf_receipt_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     items: jet_cli_perf_rows(trace, "receipt_sections") ?? return [String]{}
     lines := [String]{}
+    // The sections their own lines show.
+    shown: [String]{"allocations", "heap", "causal", "topdown", "zones", "threads", "syscalls"}
     loop item in items {
         section: trace_receipt_section_from_json(item) ?? next
-        if section.name == "allocations" || section.name == "heap" || section.name == "causal" || section.name == "topdown" || section.name == "zones" {
-            next
-        }
+        if shown.contains(section.name) -> next
         bytes: canonical_json_bytes(section.value)
         text: String.from_bytes(bytes.slice(0, bytes.len() - 1)) ?? next
         lines.push("receipt {section.name} {text}")
@@ -1463,6 +1466,133 @@ jet_cli_perf_off_cpu_lines: fn(trace: CanonicalJSON) -> [String] Never! {
         lines.push("  {row.ns}ns waits={row.waits} · {row.stack}")
     }
     lines
+}
+
+// The threads of the trace's `threads` receipt section
+// (jet_cli_perf_threads_section): `threads count=2 claimed=1`, then each,
+// in spawn order: `  thread 4251 jet_rt_process_execution_worker
+// stack=8388608 cpu_ns=81234 off_cpu_ns=2104567 · spawned at
+// ProcessExecutionCollect.jet:117 process_execution_collect_start from
+// main.jet:4 run` (jet_cli_perf_sites_text). The main thread's stack is
+// its limit, `stack=unlimited` with none; ` running at exit` marks a thread
+// the exit found running, its times measured then.
+jet_cli_perf_thread_lines: fn(trace: CanonicalJSON) -> [String] Never! {
+    lines := [String]{}
+    items: jet_cli_perf_rows(trace, "receipt_sections") ?? return lines
+    loop item in items {
+        section: trace_receipt_section_from_json(item) ?? next
+        if section.name != "threads" -> next
+        fields: jettrace_object_view(section.value, "receipt threads") ?? next
+        at: jet_cli_perf_key(fields, "threads") ?? next
+        rows: jettrace_array(fields[at].value, "receipt threads.threads") ?? next
+        claimed: jet_cli_perf_field_integer(fields, "claimed") ?? "0"
+        lines.push("threads count={rows.len()} claimed={claimed}")
+        loop row in rows {
+            tid: jet_cli_perf_member_integer(row, "tid") ?? "?"
+            name: jet_cli_perf_member_text(row, "name") ?? "?"
+            stack: jet_cli_perf_member_integer(row, "stack_bytes") ?? "unlimited"
+            cpu: jet_cli_perf_member_integer(row, "cpu_ns") ?? "0"
+            off: jet_cli_perf_member_integer(row, "off_cpu_ns") ?? "0"
+            state: if (jet_cli_perf_member_text(row, "state") ?? "") == "running" -> " running at exit" else -> ""
+            spawn: if jet_cli_perf_sites_text(row, "spawned_at") == .Val(text) -> " · spawned at {text}" else -> ""
+            lines.push("  thread {tid} {name} stack={stack} cpu_ns={cpu} off_cpu_ns={off}{state}{spawn}")
+        }
+    }
+    lines
+}
+
+// The host calls of one name from one calling site, summed
+// (jet_cli_perf_syscall_lines).
+JetCLIPerfSyscallSum: struct {
+    name: String,
+    caller: String,
+    count: Int,
+    ns: Int,
+}
+
+// The host calls of the trace's `syscalls` receipt section
+// (jet_cli_perf_syscalls_section), summed by name and calling site:
+// `syscalls calls=9 time_ns=81234`, with ` lost=…` for the calls the
+// runtime's table had no row for, then each, the most time first, at most
+// 32: `  pipe2 count=3 time_ns=6123 · at HostSpawn.jet:159 spawn_pipe from
+// main.jet:4 run` (jet_cli_perf_sites_text). A call that never returned,
+// as a successful execve, counts with no time.
+jet_cli_perf_syscall_lines: fn(trace: CanonicalJSON) -> [String] Never! {
+    lines := [String]{}
+    items: jet_cli_perf_rows(trace, "receipt_sections") ?? return lines
+    loop item in items {
+        section: trace_receipt_section_from_json(item) ?? next
+        if section.name != "syscalls" -> next
+        fields: jettrace_object_view(section.value, "receipt syscalls") ?? next
+        at: jet_cli_perf_key(fields, "syscalls") ?? next
+        rows: jettrace_array(fields[at].value, "receipt syscalls.syscalls") ?? next
+        found := [JetCLIPerfSyscallSum]{}
+        calls := 0
+        time := 0
+        loop row in rows {
+            count: jet_cli_perf_member_number(row, "count") ?? next
+            ns: jet_cli_perf_member_number(row, "time_ns") ?? 0
+            name: jet_cli_perf_member_text(row, "name") ?? "?"
+            caller: jet_cli_perf_sites_text(row, "stack") ?? "unknown"
+            calls += count
+            time += ns
+            place := -1
+            loop index in 0..<found.len() {
+                if found[index].name == name && found[index].caller == caller {
+                    place = index
+                    break
+                }
+            }
+            if place < 0 {
+                place = found.len()
+                found.push(JetCLIPerfSyscallSum{name: name, caller: caller, count: 0, ns: 0})
+            }
+            found[place].count += count
+            found[place].ns += ns
+        }
+        lost: jet_cli_perf_field_integer(fields, "lost") ?? "0"
+        dropped: if lost == "0" -> "" else -> " lost={lost}"
+        lines.push("syscalls calls={calls} time_ns={time}{dropped}")
+        found.sort_by(fn(left: JetCLIPerfSyscallSum, right: JetCLIPerfSyscallSum) { (right.ns <=> left.ns).then(left.name <=> right.name).then(left.caller <=> right.caller) })
+        shown: if found.len() > 32 -> 32 else -> found.len()
+        loop index in 0..<shown {
+            row: found[index]
+            lines.push("  {row.name} count={row.count} time_ns={row.ns} · at {row.caller}")
+        }
+    }
+    lines
+}
+
+// The calling site of a `threads` or `syscalls` row's sites `key`
+// (jet_cli_perf_sites_json): its innermost site, then ` from ` the
+// innermost of the checked source when that is another, each as
+// `<file>:<line> <function>` or, for an inlined function's line from
+// another file, `<function> line <line>`. None with no sites.
+jet_cli_perf_sites_text: fn(row: CanonicalJSON, key: String) -> String? Never! {
+    fields: jettrace_object_view(row, "receipt row") ?? return None
+    at: jet_cli_perf_key(fields, key) ?? return None
+    sites: jettrace_array(fields[at].value, "receipt row.{key}") ?? return None
+    if sites.len() == 0 -> return None
+    text := jet_cli_perf_call_site_text(sites[0])
+    loop index in 0..<sites.len() {
+        site: jettrace_object_view(sites[index], "receipt site") ?? next
+        own_at: jet_cli_perf_key(site, "own") ?? next
+        if site[own_at].value == .Bool(own) {
+            if own {
+                if index > 0 -> text = "{text} from {jet_cli_perf_call_site_text(sites[index])}"
+                break
+            }
+        }
+    }
+    Val(text)
+}
+
+// One site of jet_cli_perf_sites_text, its file by its last component.
+jet_cli_perf_call_site_text: fn(site: CanonicalJSON) -> String Never! {
+    name: jet_cli_perf_member_text(site, "function") ?? "?"
+    line: jet_cli_perf_member_integer(site, "line") ?? "?"
+    file: jet_cli_perf_member_text(site, "file") ?? return "{name} line {line}"
+    "{cli_files.basename(file)}:{line} {name}"
 }
 
 // The text `key` of a row `item`'s symbol: its `path` or `name`.

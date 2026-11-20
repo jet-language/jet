@@ -1,0 +1,9 @@
+// A process run: the runtime starts a collector thread for the child, and
+// the run's host calls make its pipes, look its program up on PATH and
+// open its pidfd.
+use process: core.process
+
+run: fn() {
+    receipt: process.cmd([String]{"true"}).stdout(.Capture).stderr(.Capture).run() ?? panic("true: {err}")
+    print("ran: \"{receipt.output}\"")
+}

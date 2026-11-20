@@ -214,6 +214,19 @@ PERF_SAMPLES_OUT_BYTES: I64{8192}
 // The most call sites a spawn, wait or wake record keeps.
 PERF_SAMPLES_STACK_DEPTH: I64{32}
 
+// The threads the system table keeps rows for (perf_system), the main
+// thread's the first, and the words of each row.
+PERF_THREADS_ROWS: I64{256}
+
+PERF_THREADS_ROW_WORDS: I64{40}
+
+// The rows of distinct host calls the system table keeps, each a number
+// and a calling stack (a power of two: perf_syscall_row probes its rows
+// from its key's bits), and the words of each row.
+PERF_SYSCALLS_ROWS: I64{1024}
+
+PERF_SYSCALLS_ROW_WORDS: I64{36}
+
 // The most bytes of its wait's name a wait record keeps.
 PERF_SAMPLES_WAIT_NAME: I64{256}
 
@@ -334,6 +347,27 @@ perf_samples_interval_us := PERF_SAMPLES_INTERVAL_US
 // The log spans file, `<samples>.spans`, -1 unless the start opened it.
 perf_spans_fd := I64{-1}
 
+// The thread and host call table (perf_system_start) under `jet perf run`,
+// 0 until the start maps it and for the flight recorder: the pid that
+// mapped it@0, how many thread rows were claimed@8, how many host calls
+// found no row@16, then PERF_THREADS_ROWS thread rows and
+// PERF_SYSCALLS_ROWS host call rows. A thread's row (perf_threads_spawn):
+// its kernel id (0 until it runs)@0, its entry less the load bias (0 for
+// the main thread)@8, its stack's bytes@16, the monotonic clock as it
+// began@24 and ended@32, its CPU time@40, 1 once it ended@48, the count of
+// the call sites that spawned it@56, then those sites
+// (perf_samples_stack)@64. A host call row (perf_syscall_row): its key (0
+// while free)@0, the call's number@8, how many calls@16, their
+// nanoseconds@24, then their calling sites, 0 after the last
+// (perf_syscall_key)@32.
+perf_system := I64{0}
+
+// The files the exit writes the table's threads and host calls to
+// (perf_system_exit), `<samples>.threads` and `<samples>.syscalls`.
+perf_threads_fd := I64{-1}
+
+perf_syscalls_fd := I64{-1}
+
 // Nonzero while zones are recorded (perf_zones_set). A compiled zone site
 // (JetIR X64Select.jet ir_x64_zone_site) of an image's code is a `jmp`
 // over its call that the runtime patches while zones are on
@@ -410,6 +444,8 @@ perf_samples_start: fn() {
     counters := I64{-1}
     topdown := I64{-1}
     sampler := I64{-1}
+    threads := I64{-1}
+    calls := I64{-1}
     if (flight) { fd = perf_flight_open() }
     if (!flight && rt_text_len(path) != I64{0}) {
         name: fd_c_path(path)
@@ -422,6 +458,8 @@ perf_samples_start: fn() {
             if ((lenses & PERF_LENS_CPU) != I64{0}) {
                 sampler = perf_samples_open_beside(path, rt_static_text(".pc"))
             }
+            threads = perf_samples_open_beside(path, rt_static_text(".threads"))
+            calls = perf_samples_open_beside(path, rt_static_text(".syscalls"))
         }
     }
     if (!flight) { jet_rt_string_drop(path) }
@@ -494,10 +532,13 @@ perf_samples_start: fn() {
         if (counters >= I64{0}) { _ := host_call(I64{3}, counters, I64{0}, I64{0}) }
         if (topdown >= I64{0}) { _ := host_call(I64{3}, topdown, I64{0}, I64{0}) }
         if (sampler >= I64{0}) { _ := host_call(I64{3}, sampler, I64{0}, I64{0}) }
+        if (threads >= I64{0}) { _ := host_call(I64{3}, threads, I64{0}, I64{0}) }
+        if (calls >= I64{0}) { _ := host_call(I64{3}, calls, I64{0}, I64{0}) }
         return
     }
     perf_counters_start(buffer, counters)
     perf_topdown_start(buffer, topdown)
+    perf_system_start(threads, calls)
     // A flight recorder of a checked image (`jet run --observe
     // --checked-alloc`) keeps the live list too, which `jet perf attach
     // --lens=alloc` snapshots (perf_flight_heap); only the alloc lens has
@@ -607,6 +648,229 @@ perf_samples_thread_end: fn(sampler: I64) {
     #Unsafe("timer_delete takes the id this thread's start was given") {
         _ := os_syscall_i64(I64{226}, sampler, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
+}
+
+// Map the thread and host call table (perf_system) once the start has
+// armed sampling, keeping `threads` and `calls`, the files the exit writes
+// it to (perf_system_exit), the main thread, which starts sampling, its
+// first row. Without both files or the table's pages the run keeps no
+// table, and the files are closed.
+perf_system_start: fn(threads: I64, calls: I64) {
+    table: if (threads >= I64{0} && calls >= I64{0}) -> alloc_map_try(perf_system_bytes()) else -> I64{0}
+    if (table == I64{0}) {
+        if (threads >= I64{0}) { _ := host_call(I64{3}, threads, I64{0}, I64{0}) }
+        if (calls >= I64{0}) { _ := host_call(I64{3}, calls, I64{0}, I64{0}) }
+        return
+    }
+    rt_text_store(table, perf_system_pid())
+    main: perf_threads_claim(table)
+    // RLIMIT_STACK's soft limit, 0 for none.
+    soft: thread_rlimit_soft(I64{3})
+    rt_text_store(wrapping(main + I64{16}), if (soft < I64{0}) -> I64{0} else -> soft)
+    rt_text_store(wrapping(main + I64{24}), time_host_monotonic_i64())
+    rt_text_store(main, thread_tid())
+    #Unsafe("set once, before the table is published; a host call or spawn that reads perf_system 0 keeps no row") {
+        perf_threads_fd = threads
+        perf_syscalls_fd = calls
+        perf_system = table
+    }
+}
+
+// The bytes of the system table (perf_system), and where its host call
+// rows start.
+perf_system_bytes: fn() -> I64 {
+    wrapping(perf_syscalls_offset() + wrapping(PERF_SYSCALLS_ROWS * wrapping(PERF_SYSCALLS_ROW_WORDS * I64{8})))
+}
+
+perf_syscalls_offset: fn() -> I64 {
+    wrapping(I64{24} + wrapping(PERF_THREADS_ROWS * wrapping(PERF_THREADS_ROW_WORDS * I64{8})))
+}
+
+// This process's id, read without a host call, which the table would count.
+perf_system_pid: fn() -> I64 {
+    #Unsafe("getpid takes no arguments") {
+        return os_syscall_i64(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+}
+
+// The next thread row of `table` (perf_system), 0 once every row is taken.
+perf_threads_claim: fn(table: I64) -> I64 {
+    index: sync_add(wrapping(table + I64{8}), I64{1})
+    if (index >= PERF_THREADS_ROWS) -> I64{0} else -> wrapping(wrapping(table + I64{24}) + wrapping(index * wrapping(PERF_THREADS_ROW_WORDS * I64{8})))
+}
+
+// The row of a thread Thread.jet thread_spawn starts to run `entry`, under
+// `jet perf run`: claimed by the spawner, which keeps the entry and its own
+// calling stack (perf_samples_stack) there, for the thread to fill in as
+// it begins and ends (perf_threads_begin, perf_threads_end); 0 without a
+// table or once every row is taken. The row of a thread that never starts
+// keeps id 0.
+perf_threads_spawn: fn(entry: I64) -> I64 {
+    table: perf_system
+    if (table == I64{0}) { return I64{0} }
+    row: perf_threads_claim(table)
+    if (row == I64{0}) { return I64{0} }
+    rt_text_store(wrapping(row + I64{8}), wrapping(entry - perf_samples_bias))
+    rt_text_store(wrapping(row + I64{56}), perf_samples_stack(wrapping(row + I64{64})))
+    row
+}
+
+// A spawned thread's first words in its row `row` (perf_threads_spawn; 0
+// for none): its stack's bytes, the monotonic clock now, then its id.
+perf_threads_begin: fn(row: I64, stack_bytes: I64) {
+    if (row == I64{0}) {
+        return
+    }
+    rt_text_store(wrapping(row + I64{16}), stack_bytes)
+    rt_text_store(wrapping(row + I64{24}), time_host_monotonic_i64())
+    sync_store(row, thread_tid())
+}
+
+// A spawned thread's last words in its row `row` (0 for none), as its
+// entry returns: the monotonic clock now, its CPU time, then its end mark.
+perf_threads_end: fn(row: I64) {
+    if (row == I64{0}) {
+        return
+    }
+    rt_text_store(wrapping(row + I64{32}), time_host_monotonic_i64())
+    rt_text_store(wrapping(row + I64{40}), perf_samples_cpu_clock_ns(I64{3}))
+    sync_store(wrapping(row + I64{48}), I64{1})
+}
+
+// A host call (HostProcess.jet host_call) under `jet perf run`: counted at
+// its row (perf_syscall_row) before it enters the kernel, so an execve
+// that succeeds, which never returns, counts too, and timed on the
+// monotonic clock once it returns. The child of a vfork (HostSpawn.jet
+// spawn_vfork) counts its calls, its PATH's execve probes, in the table it
+// shares with its parent, which waits meanwhile.
+perf_syscall_call: fn(number: I64, a1: I64, a2: I64, a3: I64) -> I64 {
+    row: perf_syscall_row(perf_system, number)
+    began: time_host_monotonic_i64()
+    result := I64{0}
+    #Unsafe("host_call's audited caller supplies the Linux syscall's valid word arguments") {
+        result = os_syscall_i64(number, a1, a2, a3, I64{0}, I64{0}, I64{0})
+    }
+    if (row != I64{0}) {
+        _ := sync_add(wrapping(row + I64{24}), wrapping(time_host_monotonic_i64() - began))
+    }
+    result
+}
+
+// The row of host call `number` from this thread's calling stack in
+// `table` (perf_system), its call counted: the row whose key
+// (perf_syscall_key) matches, else a free one it claims and fills with
+// the number and the calling sites; 0, counted as lost, when every row is
+// another's. Nothing here allocates.
+perf_syscall_row: fn(table: I64, number: I64) -> I64 {
+    key: perf_syscall_key(number, I64{0}) | I64{1}
+    rows: wrapping(table + perf_syscalls_offset())
+    mask: wrapping(PERF_SYSCALLS_ROWS - I64{1})
+    first: (key >> I64{32}) & mask
+    probe := I64{0}
+    loop probe < PERF_SYSCALLS_ROWS {
+        row: wrapping(rows + wrapping(((first + probe) & mask) * wrapping(PERF_SYSCALLS_ROW_WORDS * I64{8})))
+        held: sync_cas(row, I64{0}, key)
+        if (held == I64{0}) {
+            rt_text_store(wrapping(row + I64{8}), number)
+            _ := perf_syscall_key(number, wrapping(row + I64{32}))
+        }
+        if (held == I64{0} || held == key) {
+            _ := sync_add(wrapping(row + I64{16}), I64{1})
+            return row
+        }
+        probe = wrapping(probe + I64{1})
+    }
+    _ := sync_add(wrapping(table + I64{16}), I64{1})
+    I64{0}
+}
+
+// The key of host call `number` from this thread's calling stack: the
+// number hashed with the call sites up the frame pointer chain, at most
+// PERF_SAMPLES_STACK_DEPTH of them, each less the load bias, while it is in
+// the image's code, as perf_samples_stack walks them (Alloc.jet
+// alloc_frames_key). With `into` not 0 it also stores those sites there.
+// It allocates nothing.
+perf_syscall_key: fn(number: I64, into: I64) -> I64 {
+    alloc_frames_key(wrapping(number * I64{-7046029254386353131}), into, PERF_SAMPLES_STACK_DEPTH, perf_samples_bias, perf_samples_code_low, perf_samples_code_high)
+}
+
+// At the exit (perf_samples_exit): the system table into its files, each
+// emptied first, so that a later exit's replaces an earlier's.
+// `<samples>.threads`: PERF_THREADS_ROW_WORDS, how many rows were claimed
+// (past PERF_THREADS_ROWS, the threads that got none), then the rows kept,
+// a thread still running with the exit as its end and its CPU time so far
+// (its end mark still 0). `<samples>.syscalls`: the words of a row less its
+// key, how many rows follow, how many calls found no row, then each taken
+// row less its key. A forked child that inherited the table writes none.
+perf_system_exit: fn() {
+    table: perf_system
+    if (table == I64{0} || rt_text_word(table) != perf_system_pid()) {
+        return
+    }
+    now: time_host_monotonic_i64()
+    claimed: sync_load(wrapping(table + I64{8}))
+    kept: if (claimed > PERF_THREADS_ROWS) -> PERF_THREADS_ROWS else -> claimed
+    row_bytes: wrapping(PERF_THREADS_ROW_WORDS * I64{8})
+    size: wrapping(I64{16} + wrapping(kept * row_bytes))
+    out: jet_rt_alloc(size, I64{8})
+    rt_text_store(out, PERF_THREADS_ROW_WORDS)
+    rt_text_store(wrapping(out + I64{8}), claimed)
+    index := I64{0}
+    loop index < kept {
+        row: wrapping(wrapping(table + I64{24}) + wrapping(index * row_bytes))
+        written: wrapping(wrapping(out + I64{16}) + wrapping(index * row_bytes))
+        rt_text_bytes_copy(written, row, row_bytes)
+        tid: rt_text_word(row)
+        if (tid != I64{0} && sync_load(wrapping(row + I64{48})) == I64{0}) {
+            // The thread's own CPU-time clock: MAKE_THREAD_CPUCLOCK(tid,
+            // CPUCLOCK_SCHED).
+            rt_text_store(wrapping(written + I64{32}), now)
+            rt_text_store(wrapping(written + I64{40}), perf_samples_cpu_clock_ns(((tid ~ I64{-1}) << I64{3}) | I64{6}))
+        }
+        index = wrapping(index + I64{1})
+    }
+    perf_system_write(perf_threads_fd, out, size)
+    jet_rt_free(out, size, I64{8})
+    rows: wrapping(table + perf_syscalls_offset())
+    call_bytes: wrapping(PERF_SYSCALLS_ROW_WORDS * I64{8})
+    taken := I64{0}
+    index = I64{0}
+    loop index < PERF_SYSCALLS_ROWS {
+        if (sync_load(wrapping(rows + wrapping(index * call_bytes))) != I64{0}) {
+            taken = wrapping(taken + I64{1})
+        }
+        index = wrapping(index + I64{1})
+    }
+    kept_bytes: wrapping(call_bytes - I64{8})
+    calls_size: wrapping(I64{24} + wrapping(taken * kept_bytes))
+    calls: jet_rt_alloc(calls_size, I64{8})
+    rt_text_store(calls, wrapping(PERF_SYSCALLS_ROW_WORDS - I64{1}))
+    rt_text_store(wrapping(calls + I64{8}), taken)
+    rt_text_store(wrapping(calls + I64{16}), sync_load(wrapping(table + I64{16})))
+    // A row taken since the count is left out once the count's are written.
+    at := I64{24}
+    index = I64{0}
+    loop index < PERF_SYSCALLS_ROWS {
+        row: wrapping(rows + wrapping(index * call_bytes))
+        if (sync_load(row) != I64{0} && wrapping(at + kept_bytes) <= calls_size) {
+            rt_text_bytes_copy(wrapping(calls + at), wrapping(row + I64{8}), kept_bytes)
+            at = wrapping(at + kept_bytes)
+        }
+        index = wrapping(index + I64{1})
+    }
+    perf_system_write(perf_syscalls_fd, calls, calls_size)
+    jet_rt_free(calls, calls_size, I64{8})
+}
+
+// The `size` bytes at `bytes` as the whole of the file `fd`, which appends.
+perf_system_write: fn(fd: I64, bytes: I64, size: I64) {
+    if (fd < I64{0}) {
+        return
+    }
+    #Unsafe("ftruncate takes the table's own descriptor") {
+        _ := os_syscall_i64(I64{77}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    _ := host_write_all(fd, bytes, size)
 }
 
 // Choose the CPU lens's sampler once, on the thread that starts sampling,
@@ -1066,7 +1330,8 @@ perf_samples_cpu_clock_ns: fn(clock: I64) -> I64 {
 // comes first (perf_samples_heap), then the allocations' records. The spans
 // buffer's rows and the records the handlers keep (perf_samples_flush) are
 // written out first, then the causal lens's idle table
-// (perf_causal_idle_write).
+// (perf_causal_idle_write) and the threads and host calls
+// (perf_system_exit).
 perf_samples_exit: fn() {
     perf_spans_flush()
     fd: perf_samples_fd
@@ -1075,6 +1340,7 @@ perf_samples_exit: fn() {
     }
     perf_samples_flush(fd)
     perf_causal_idle_write(fd)
+    perf_system_exit()
     perf_samples_heap(rt_static_text("exit"))
     buffer: perf_samples_buffer
     handlers: if (buffer == I64{0}) -> I64{0} else -> sync_load(wrapping(buffer + wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_SLOTS) * I64{8})))
