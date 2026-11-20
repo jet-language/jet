@@ -1,0 +1,26 @@
+# A timer marks a task when its deadline passes, and a busy loop that never
+# waits stops at the check its next iteration starts with; until then that
+# check reads no clock. The timer follows the deadline in force: an inner
+# `#Deadline` that shortens it, the outer deadline it gives back when it
+# ends unpassed, a deadline that a finished wait leaves in force, and the
+# deadline a task inherits at spawn. Each spinner stops with the deadline
+# failure no earlier than its deadline. Without the timer the joins never
+# return and the run steps time out.
+fixture: ADeadlinesTimerStopsABusyLoopUnderNestedRestoredAndInheritedDeadlinesOnEveryTier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "nested: deadline, on time\nrestored: deadline, on time\nafter a wait: deadline, on time\ninherited: deadline, on time\n"
+step: jet run -O1 main.jet
+exit: 0
+stdout: = "nested: deadline, on time\nrestored: deadline, on time\nafter a wait: deadline, on time\ninherited: deadline, on time\n"
+step: jet run -O2 main.jet
+exit: 0
+stdout: = "nested: deadline, on time\nrestored: deadline, on time\nafter a wait: deadline, on time\ninherited: deadline, on time\n"
+step: jet build -O2 main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "nested: deadline, on time\nrestored: deadline, on time\nafter a wait: deadline, on time\ninherited: deadline, on time\n"

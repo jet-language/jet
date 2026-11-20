@@ -4288,8 +4288,9 @@ through their own groups every unfinished descendant, even when the cancel
 arrives while the task waits at a group's closing brace (D-GROUP-CANCEL1=A).
 A deadline (`#Deadline(limit)`, `task.timeout`) that passes is delivered
 the same way: at the next wait point or check, as E3003, so a handler busy in
-a loop stops at its deadline. A task or root that has set a deadline reads
-the clock at the check each loop iteration or recursive call starts with.
+a loop stops at its deadline. A timer marks the task when its deadline
+passes; until then the check each loop iteration or recursive call starts
+with reads no clock.
 
 When `run` returns, the runtime cancels every live task, however many there
 are, and keeps running them until none is queued, ready or running, or until

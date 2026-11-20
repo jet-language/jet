@@ -119,6 +119,13 @@ sync_futex_wait_shared: fn(address: I64, expected: I64) -> I64 {
 
 #Export(c) jet_rt_host_wait: fn(address: I64, expected: I64, deadline_ns: I64) -> I64 { I64{-38} }
 
+// Whether another thread runs while the running one computes (JetIR IR.jet
+// IR_HOST_PROVIDER): 1 on a native host, whose kernel preempts. A host that
+// runs its threads as coroutines on one thread of its own (the web, JetWeb
+// Host.jet) defines it as 0, so nothing a timer thread does (Scheduler.jet
+// scheduler_deadline_watch) can reach a thread that computes without waiting.
+#Export(c) jet_rt_host_parallel: fn() -> I64 { I64{1} }
+
 // The stop of a wait the host can't make. A web page whose JavaScript
 // engine has no JavaScript Promise Integration can neither suspend the
 // program nor block its event loop, so its jet_rt_host_can_wait calls this
