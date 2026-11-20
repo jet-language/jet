@@ -757,16 +757,22 @@ functions), optimization `level` (null outside Jet functions), link
 `address`, `size`, `samples` and `events` (one count per counter); `code`,
 its bytes as lowercase hex; `lines`, `{"line":7,"offset":10}` where its
 source line changes; `names`, the `{"address":…,"name":…}` of what its
-calls, jumps and rip-relative operands reach; and `instructions`, each
-sampled instruction's `offset`, `samples` and `events`. A function past the
+calls, jumps and rip-relative operands reach; `instructions`, each
+sampled instruction's `offset`, `samples` and `events`; and `inlined`, each
+run of code the build inlined into it (from its DWARF inline records), with
+the inlined function's `name`, the `call_line` of the call and the run's
+`offset` and `size` within the function. A function past the
 cap is kept `cut`: its `code` is `""`, its `names` empty, and its `lines`
 are those of its sampled instructions. The verifier checks the section's
-keys, the hex against `size`, the offsets' order, the sums and the counts.
+keys, the hex against `size`, the offsets' order, the sums and the counts,
+and that each inlined run has a name and lies inside its function.
 Version 3 of `jet.trace` adds the section; a version 2 trace is refused
 with the advice to record it again.
 
-`jet perf view run.jettrace --instructions` lists the hottest function's
-code, each instruction with its share of the function's samples:
+`jet perf view run.jettrace --instructions` lists the code with the most
+samples of its own (those whose innermost code it is): a function, or a run
+inlined into one, so at -O2 a hot loop inlined into its caller is listed as
+itself. Each instruction has its share of those samples:
 
 ```text
 fib profile:cpu samples=2590 share=86% level=O2; shares below are of fib's samples
@@ -782,12 +788,20 @@ the one their interrupt landed on, often after the one that spent the time
 (the skid), and the line says precise samples need `perf_event_paranoid` at
 most 1. A run that captured counters adds a column per counter, each
 instruction's share of the function's events. `--instructions=NAME` lists
-each function of that symbol, and `--instructions=FILE:LINE` (`fib.jet:7`)
-the instructions of that line in each function sampled there. A cut
-function lists its sampled instructions as `(code not kept)`. `--json`
+each function of that symbol and each run of a function of that name
+inlined into another, whose header adds `inlined into run on line 14`. A
+run nested in another run is inlined into that run, and the header then
+names the function whose code holds both: `inlined into run on line 15 in
+entry`. `--instructions=FILE:LINE` (`fib.jet:7`) lists the instructions of
+that line in each function sampled there. A line's heading names the
+function whose code its instructions are, the inlined one inside a run. A
+cut function lists its sampled instructions as `(code not kept)`. `--json`
 writes `jet.trace.instructions` (`trace`, `sampler`, `counters`, `samples`
-and each function with its `instructions`, their `address`, `offset`,
-`line`, `bytes`, `text`, `samples` and `events`), and `--html` one
+and each function or run with its `holder`, `call_line` and `within`, the
+function it is inlined into, the line of the call and the function whose
+code holds it, each null for a function, and its `instructions`, their
+`address`, `offset`, `function`, `line`, `bytes`, `text`, `samples` and
+`events`), and `--html` one
 self-contained page of the listing. `jet perf view` of a trace that keeps
 the section prints `instructions functions=12 kept=12 cut=0
 code_bytes=34567`, then that `--instructions` lists them, and `jet perf

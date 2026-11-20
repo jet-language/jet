@@ -3,8 +3,11 @@
 # it with no image: the hottest function bare, a function by its name, a
 # line by FILE:LINE, each instruction with its share of its function's
 # samples, under a line naming the sampler and whether a share can skid.
-# `-O0` keeps `spin_hot_loop` a function of its own. A function or line the
-# section doesn't hold is refused as Jet.PerfNoInstructions (exit 2).
+# `-O0` keeps `spin_hot_loop` a function of its own. At -O1 it is inlined
+# into `run`, and at -O2 `run` into the image's entry too; the bare view
+# still lists the hot loop as itself, with what it is inlined into. A
+# function or line the section doesn't hold is refused as
+# Jet.PerfNoInstructions (exit 2).
 requires: os-name:linux
 fixture: PrecisePcNamesItsSource.fixture
 env: NO_COLOR=1
@@ -43,3 +46,23 @@ stdout: = ""
 stderr: ~ "Error: Jet.PerfNoInstructions: " # a function the section doesn't hold is refused
 stderr: ~ "keeps no instruction samples of `nothing_here`" # by the name it was given
 stderr: ~ "`spin_hot_loop`" # naming the functions it does hold
+step: jet perf run main.jet -O1 --out {work}/spin1.jettrace
+exit: 0
+stdout: ~ "spun=" # the program ran to its end
+step: jet perf view {work}/spin1.jettrace --instructions
+exit: 0
+stdout: ~ "spin_hot_loop profile:cpu samples=" # the inlined hot loop is listed as itself
+stdout: ~ "level=O1, inlined into run on line 15; shares below are of spin_hot_loop's samples" # with the function and line it is inlined into
+stdout: ~ "  main.jet:8 spin_hot_loop samples=" # its line names it, not its caller
+step: jet perf view {work}/spin1.jettrace --instructions --json
+exit: 0
+stdout: ~ "\"holder\":\"run\"" # the JSON view names the function it is inlined into
+stdout: ~ "\"symbol\":\"spin_hot_loop\"" # and the run by its own name
+step: jet perf run main.jet -O2 --out {work}/spin2.jettrace
+exit: 0
+stdout: ~ "spun=" # the program ran to its end
+step: jet perf view {work}/spin2.jettrace --instructions
+exit: 0
+stdout: ~ "spin_hot_loop profile:cpu samples=" # at -O2 too, the hot loop as itself
+stdout: ~ "level=O2, inlined into " # inlined
+stdout: ~ "  main.jet:8 spin_hot_loop samples=" # its line names it

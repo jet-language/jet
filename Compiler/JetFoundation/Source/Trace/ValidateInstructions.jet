@@ -3,8 +3,9 @@
 // A function's `code` is lowercase hex of its `size` bytes, or empty when it
 // is `cut`, past `cap_bytes` of kept code; `bytes` is the code kept in all,
 // and `kept` and `cut` count the functions. Its line rows and sampled
-// instructions are at ascending offsets inside it, each events list holds
-// one count per name of `counters`, and its samples and events are its
+// instructions are at ascending offsets inside it, each run of code inlined
+// into it names its function and lies inside it, each events list holds one
+// count per name of `counters`, and its samples and events are its
 // instructions' sums.
 jettrace_validate_instructions: fn(value: CanonicalJSON, label: String) JetTraceError! {
     fields: jettrace_object_keys(value, label, [String]{"bytes", "cap_bytes", "counters", "cut", "functions", "kept", "samples"})
@@ -23,7 +24,7 @@ jettrace_validate_instructions: fn(value: CanonicalJSON, label: String) JetTrace
     held_cut := U64{0}
     loop index in 0..<functions.len() {
         at: "{label}.functions[{index}]"
-        item: jettrace_object_keys(functions[index], at, [String]{"address", "code", "cut", "events", "file", "instructions", "level", "lines", "names", "samples", "size", "symbol"})
+        item: jettrace_object_keys(functions[index], at, [String]{"address", "code", "cut", "events", "file", "inlined", "instructions", "level", "lines", "names", "samples", "size", "symbol"})
         _: jettrace_unsigned(item[jettrace_get(item, "address")].value, "{at}.address")
         _: jettrace_text(item[jettrace_get(item, "file")].value, "{at}.file")
         _: jettrace_optional_unsigned(item[jettrace_get(item, "level")].value, "{at}.level")
@@ -63,6 +64,20 @@ jettrace_validate_instructions: fn(value: CanonicalJSON, label: String) JetTrace
             named: jettrace_object_keys(names[name], place, [String]{"address", "name"})
             _: jettrace_unsigned(named[jettrace_get(named, "address")].value, "{place}.address")
             _: jettrace_text(named[jettrace_get(named, "name")].value, "{place}.name")
+        }
+        inlined: jettrace_array(item[jettrace_get(item, "inlined")].value, "{at}.inlined")
+        loop run in 0..<inlined.len() {
+            place: "{at}.inlined[{run}]"
+            inline_run: jettrace_object_keys(inlined[run], place, [String]{"call_line", "name", "offset", "size"})
+            _: jettrace_unsigned(inline_run[jettrace_get(inline_run, "call_line")].value, "{place}.call_line")
+            if jettrace_text(inline_run[jettrace_get(inline_run, "name")].value, "{place}.name").len() == 0 {
+                return Err(jettrace_error("{place}.name is empty"))
+            }
+            offset: jettrace_unsigned(inline_run[jettrace_get(inline_run, "offset")].value, "{place}.offset")
+            length: jettrace_unsigned(inline_run[jettrace_get(inline_run, "size")].value, "{place}.size")
+            if length == (U64{0}) || offset + length > size {
+                return Err(jettrace_error("{place} is empty or outside the function"))
+            }
         }
         rows: jettrace_array(item[jettrace_get(item, "instructions")].value, "{at}.instructions")
         sum := U64{0}

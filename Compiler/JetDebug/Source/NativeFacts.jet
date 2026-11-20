@@ -1232,6 +1232,29 @@ native_function_at: fn(image: NativeImage, pc: Int) -> NativeFunction? Never! {
     Val(image.functions[low - 1])
 }
 
+// Where each run of the function named `name` inlined into another function
+// sits: the holding function's index in `image.functions` and the run's
+// index in its `inlined`, in address order of the holding functions and DIE
+// order within one.
+NativeInlinedPlace: struct {
+    function: Int,
+    run: Int,
+}
+
+native_inlined_named: fn(image: NativeImage, name: String) -> [NativeInlinedPlace] Never! {
+    places := [NativeInlinedPlace]{}
+    loop (index, function) in image.functions {
+        loop (at, run) in function.inlined {
+            if image.abstracts.get(run.origin) == .Val(abstract) {
+                if abstract.name == name {
+                    places.push(NativeInlinedPlace{function: index, run: at})
+                }
+            }
+        }
+    }
+    places
+}
+
 // The program's entry in `image`, whose code is `codes` (its `.text`
 // sections): native_main_entry on its `main`'s bytes. -1 when it has no
 // `main`, or no section holds that function's code.
