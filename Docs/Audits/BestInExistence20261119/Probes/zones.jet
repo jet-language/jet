@@ -1,0 +1,31 @@
+// A zone's cost, off and on: `jet run zones.jet -- MODE N` calls a small
+// function N times (two million by default) and prints how long the calls
+// took. In `zoned` mode the function opens a `perf.zone`, which is a
+// patched-out site under `jet run` and a written zone under `jet perf run`;
+// in `plain` mode it has no zone, the baseline for both.
+use {
+    perf: core.perf
+    process: core.process
+    time: core.time
+}
+
+zoned: fn(i: Int) -> Int {
+    _tick: perf.zone("tick")
+    (i * 31 + 7) % 1000003
+}
+
+plain: fn(i: Int) -> Int { (i * 31 + 7) % 1000003 }
+
+run: fn() {
+    args: process.args()
+    mode: args.get(0) ?? "zoned"
+    count: Int.parse(args.get(1) ?? "2000000") ?? 2000000
+    started: time.start()
+    acc := 0
+    loop i in 0..<count {
+        step: if mode == "plain" -> plain(i) else -> zoned(i)
+        acc = (acc + step) % 1000003
+    }
+    took: time.elapsed(started).ns
+    print("{mode} {count} calls: acc {acc}, took {took} ns")
+}

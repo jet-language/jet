@@ -1,0 +1,62 @@
+// Times its own work, so `jet run` and `jet run --record` compare without
+// the build. `cpu` runs four tasks of fib at once: their joins are the only
+// sync events. `sync` passes numbers back and forth through two channels and
+// bumps a shared tally for each: several sync events per number.
+use {
+    process: core.process
+    time: core.time
+}
+
+Counter: struct {
+    count: Int,
+}
+
+fib: fn(n: Int) -> Int {
+    if n < 2 -> return n
+    fib(n - 1) + fib(n - 2)
+}
+
+relay: fn(count: Int, input: Receiver<Int>, out: Sender<Int>, tally: Shared<Counter>) {
+    loop _ in 0..<count {
+        n: input.receive() ?? 0
+        tally.count += 1
+        out.send(n + 1)
+    }
+}
+
+cpu: fn(n: Int) -> Int {
+    a: task fib(n)
+    b: task fib(n)
+    c: task fib(n)
+    d: task fib(n)
+    ra: a.join() ?? 0
+    rb: b.join() ?? 0
+    rc: c.join() ?? 0
+    rd: d.join() ?? 0
+    ra + rb + rc + rd
+}
+
+sync: fn(count: Int) -> Int {
+    { sender: to_b, receiver: from_a }: channel<Int>(1)
+    { sender: to_a, receiver: from_b }: channel<Int>(1)
+    tally: Shared{Counter{count: 0}}
+    echo: task relay(count, from_a, to_a, tally)
+    total := 0
+    loop i in 0..<count {
+        to_b.send(i)
+        total += from_b.receive() ?? 0
+        tally.count += 1
+    }
+    echo.join() ?? panic("echo failed")
+    total + tally.count
+}
+
+run: fn() {
+    args: process.args()
+    mode: args.get(0) ?? "cpu"
+    size: Int.parse(args.get(1) ?? "32") ?? 32
+    started: time.start()
+    result: if mode == "sync" -> sync(size) else -> cpu(size)
+    took: time.elapsed(started).ns
+    print("{mode} {size}: result {result}, took {took} ns")
+}
