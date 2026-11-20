@@ -1113,6 +1113,30 @@ render_page: fn(row: RowFacts, example: TextFile?) -> String Never! {
 
 page_path: fn(name: String) -> String Never! { "{PAGES_DIR}/{name}/index.html" }
 
+// The page under a row's code: an older `jet-lang.dev/e/<code>` link lands on
+// the page under its name.
+render_redirect: fn(row: RowFacts) -> String Never! {
+    name: html_escape(row.name)
+    lines: [String]{
+        PAGE_GENERATED_BY,
+        "<!doctype html>",
+        "<html lang=\"en\">",
+        "<head>",
+        "<meta charset=\"utf-8\">",
+        "<title>{name} — Jet diagnostic</title>",
+        "<link rel=\"canonical\" href=\"../{name}/\">",
+        "<meta http-equiv=\"refresh\" content=\"0; url=../{name}/\">",
+        "</head>",
+        "<body>",
+        "<p><a href=\"../{name}/\">{name}</a></p>",
+        "</body>",
+        "</html>",
+    }
+    "{lines.join("\n")}\n"
+}
+
+// One explain page per row under its name, and under its code a page that
+// sends a reader there.
 render_pages: fn(facts: [RowFacts], snapshots: [TextFile]) -> [TextFile] Never! {
     first: first_snapshots(snapshots)
     pages := [TextFile]{}
@@ -1120,6 +1144,7 @@ render_pages: fn(facts: [RowFacts], snapshots: [TextFile]) -> [TextFile] Never! 
         example := TextFile?{None}
         if first.get(row.name) == .Val(at) -> example = Val(snapshots[at].copy())
         pages.push(TextFile{path: page_path(row.name), text: render_page(row, example)})
+        pages.push(TextFile{path: page_path(row.code), text: render_redirect(row)})
     }
     pages
 }
@@ -1975,6 +2000,11 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\",\n
     assert_eq(page_path(facts.name), "{PAGES_DIR}/Jet.BadPath/index.html")
     cited: render_page(facts, Val(TextFile{path: "Tests/UI/a.stderr", text: "Error: Jet.BadPath: <x>"}))
     assert(cited.contains("<code>Tests/UI/a.stderr</code>.</p>\n<pre class=\"diag\">Error: Jet.BadPath: &lt;x&gt;</pre>"))
+    redirect: render_redirect(facts)
+    assert(redirect.starts_with("{PAGE_GENERATED_BY}\n"))
+    assert(redirect.contains("<meta http-equiv=\"refresh\" content=\"0; url=../Jet.BadPath/\">"))
+    pages: render_pages([facts], [TextFile]{})
+    assert_eq(pages.map(fn(made) { made.path }), [String]{"{PAGES_DIR}/Jet.BadPath/index.html", "{PAGES_DIR}/E9999/index.html"})
 }
 
 #Test("a page cites the first snapshot that names its row") {
