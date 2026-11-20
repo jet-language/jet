@@ -1662,10 +1662,11 @@ ir_lint_control: fn(f: IRFunction, at: Int, pass: String, open: &[Int], elses: &
 
 // Each Core call row whose route is a runtime route: the route takes as
 // many arguments as some call of the row passes (ir_core_call hands a row's
-// arguments to its route one for one). A row whose route the native table
-// lacks is no finding: the registry claims no native coverage the builder
-// reads, and the builder rejects a call of it at its site (an ICE row naming
-// the function).
+// arguments to its route one for one). A route a lowering of its own calls
+// with inputs it builds from the call's (IR_ROUTES_EXPANDED) is left to
+// that lowering. A row whose route the native table lacks is no finding:
+// the registry claims no native coverage the builder reads, and the builder
+// rejects a call of it at its site (an ICE row naming the function).
 ir_lint_core_routes: fn() -> [IRLintFinding] Never! {
     out := [IRLintFinding]{}
     loop row in CORE_CALLS {
@@ -1676,7 +1677,9 @@ ir_lint_core_routes: fn() -> [IRLintFinding] Never! {
             }
         }
         name: ir_route_symbol(symbol)
-        if ir_route_builder_lowered(name) || ir_environment_route(name) != None -> next
+        if ir_route_builder_lowered(name) || IR_ROUTES_EXPANDED.contains(name) || ir_environment_route(name) != None {
+            next
+        }
         route: ir_runtime_route(name) ?? next
         arity: route.params.len()
         if arity < row.signature.arity || arity > row.signature.max_arity {
