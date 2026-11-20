@@ -1,0 +1,6 @@
+Stop: Jet.Deadlock: Tasks wait on each other
+  --> Tests/UI/runtime_e3006.jet:6
+  task 1 (main)  waits to receive from a channel only task 1 sends on  runtime_e3006.jet:6
+ Why: Each task of the cycle waits for the next one: to join it, to edit a Shared value it holds, or to receive on a channel only it can send on. The main task is one of them, so the program could never finish. The `-->` line is where the main task waits; each line below names a task, what it waits for and where.
+ Fix: Break the cycle: send before you receive, join a task only after the values it waits for are sent, or give one wait a deadline or a `select` with another way out.
+More: jet-lang.dev/e/Jet.Deadlock

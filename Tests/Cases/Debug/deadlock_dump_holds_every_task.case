@@ -14,14 +14,14 @@ fixture: DeadlockDumpHoldsEveryTask.fixture
 env: NO_COLOR=1
 step plain: jet run cycle.jet
 exit: 70
-stderr: ~ "deadlock: tasks wait on each other" # the cycle, as the stop's trace
+stderr: ~ "Stop: Jet.Deadlock: Tasks wait on each other\n  --> cycle.jet:23\n" # the cycle, as the root's stop at its receive
 stderr: ~ "task 2 (link)  waits to receive from a channel" # each task of it
 stderr: ~ "task 1 (main)  waits to receive from a channel" # the root too
 stderr: !~ "dump written" # no recorder, no dump
 file: .jet/dumps absent
 step o0: jet run --observe cycle.jet
 exit: 70
-stderr: ~ "deadlock: tasks wait on each other" # the same stop
+stderr: ~ "Stop: Jet.Deadlock: Tasks wait on each other" # the same stop
 stderr: ~ "dump written: " # and, observed, its dump
 entries: .jet/dumps ext = "jetdump" = 1 # one stop, one dump
 capture: dump = sole-entry .jet/dumps ext = "jetdump"
@@ -55,7 +55,7 @@ stdout: !~ "No task " # every task is in the dump
 remove: .jet/dumps
 step o2: jet run --observe -O2 cycle.jet
 exit: 70
-stderr: ~ "deadlock: tasks wait on each other" # the same stop at -O2
+stderr: ~ "Stop: Jet.Deadlock: Tasks wait on each other" # the same stop at -O2
 stderr: ~ "dump written: " # with its dump
 entries: .jet/dumps ext = "jetdump" = 1 # one stop, one dump
 capture: dump2 = sole-entry .jet/dumps ext = "jetdump"

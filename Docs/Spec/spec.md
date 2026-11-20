@@ -4692,24 +4692,26 @@ joined task, the task holding the edit permit of a `Shared<T>` it reads or
 edits, or every task holding a `Sender` of the empty channel it receives
 from. When the last task of a cycle of such waits blocks, every task in the
 cycle fails as a panicking task fails: its join returns `.Panicked` with one
-report, and its scope unwinds. Tasks outside the cycle run on; if the main
-task is in the cycle, the program stops (exit 70). The report names each
-task, its wait and its line:
-
-```text
-deadlock: tasks wait on each other
-  task 1 (main)  waits to join task 2  main.jet:18
-  task 2  waits to edit a Shared value task 1 holds  main.jet:10
-```
-
-A cycle through channels, two tasks that each wait for the other's word while
-the task that started them joins the first, reads:
+report, and its scope unwinds. Tasks outside the cycle run on. A task's
+report names each task, its wait and its line:
 
 ```text
 deadlock: tasks wait on each other
   task 3  waits to join task 4  pair.jet:22
   task 4  waits to receive from a channel only task 3 and task 5 send on  pair.jet:11
   task 5  waits to receive from a channel only task 3 and task 4 send on  pair.jet:11
+```
+
+If the main task is in the cycle, the program stops with the registered
+`Jet.Deadlock` report (E3006, exit 70). Its `-->` line is where the main task
+waits in its own code, never the Core wait it blocked in, and the cycle's
+task lines follow, then the report's Why, Fix and More lines:
+
+```text
+Stop: Jet.Deadlock: Tasks wait on each other
+  --> main.jet:18
+  task 1 (main)  waits to join task 2  main.jet:18
+  task 2  waits to edit a Shared value task 1 holds  main.jet:10
 ```
 
 When the main task is in the cycle under `jet run --observe`, its stop
