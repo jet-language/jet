@@ -530,7 +530,7 @@ import-reference indices. Missing roots or files return normally; missing
 references append the existing E0003 diagnostic and continue to the next
 admission. These statement exits are outside finite value-loop fallbacks, whose
 exhaustion route cannot carry a multi-statement diagnostic block.
-The run-suite regression
-`Tests/Run/LanguageFeatures/MetadataAndDependencySearch.jet` exercises all three metadata
+The standalone regression
+`Tests/Fixtures/r19_metadata_and_dependency_search.jet` exercises all three metadata
 snapshots, unchanged definition payloads, absent roots/files, duplicate
 first-match candidates and continuation after a missing reference.

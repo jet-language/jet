@@ -237,14 +237,14 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1635,
+  "total": 1634,
   "counts": {
     "Compiler": 799,
     "Core": 179,
     "Docs": 13,
     "Examples": 45,
     "Jetpack": 8,
-    "Tests": 563,
+    "Tests": 562,
     "Tools": 28
   },
   "regions": [
@@ -7698,45 +7698,10 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "Tests",
-      "file": "Tests/Cases/Cffi/CffiBorrowedByteViewCrossesForTheCall.fixture/main.jet",
-      "line": 13,
-      "column": 5,
-      "reason": "the block holds the four bytes for the whole call, C keeps no pointer to it, and it is released once"
-    },
-    {
-      "package": "Tests",
-      "file": "Tests/Cases/Cffi/CffiNullStringReturnReadsAsAbsent.fixture/main.jet",
-      "line": 14,
-      "column": 9,
-      "reason": "a non-null result names a static NUL-terminated string C never frees"
-    },
-    {
-      "package": "Tests",
-      "file": "Tests/Cases/Cffi/CffiPartialReadReturnsItsStatusAndLength.fixture/main.jet",
-      "line": 14,
-      "column": 5,
-      "reason": "both blocks are live for the call, C writes at most `output_cap` bytes and keeps no pointer, and each is released once"
-    },
-    {
-      "package": "Tests",
-      "file": "Tests/Cases/Cffi/CffiPointerAndCountCrossTogether.fixture/main.jet",
-      "line": 13,
-      "column": 5,
-      "reason": "the block holds the three bytes for the whole call, C keeps no pointer to it, and it is released once"
-    },
-    {
-      "package": "Tests",
       "file": "Tests/Cases/Cffi/CffiRawStatusOutPointerReadsOnlyOnSuccess.fixture/main.jet",
       "line": 23,
       "column": 5,
       "reason": "store_load receives a live non-null slot; bytes are read only after status zero"
-    },
-    {
-      "package": "Tests",
-      "file": "Tests/Cases/Cffi/CffiStatusAndWrittenCountBothReturn.fixture/main.jet",
-      "line": 14,
-      "column": 5,
-      "reason": "both blocks are live for the calls, C writes at most `output_cap` bytes and keeps no pointer, and each is released once"
     },
     {
       "package": "Tests",
@@ -10708,6 +10673,55 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "Tests",
+      "file": "Tests/Fixtures/UnsafeObligations/run.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "local pointer"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Fixtures/explicit_cleanup_order.jet",
+      "line": 39,
+      "column": 5,
+      "reason": "exercise the explicit process-stop cleanup boundary"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Fixtures/ffi_stack4_i64.jet",
+      "line": 2,
+      "column": 1,
+      "reason": "the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Fixtures/ffi_stack4_i64.jet",
+      "line": 49,
+      "column": 5,
+      "reason": "Linux getpid syscall 39 ignores all argument registers and retains no stack pointer"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Fixtures/fmt_import_c_bindings.jet",
+      "line": 7,
+      "column": 1,
+      "reason": "audited C boundary"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Fixtures/fmt_import_c_bindings.jet",
+      "line": 10,
+      "column": 1,
+      "reason": "audited C boundary"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Fixtures/native_global_word.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "the fixture's one-threaded caller (run, or global-word.c) is the only writer"
+    },
+    {
+      "package": "Tests",
       "file": "Tests/Fixtures/native_inline_c_shared_state.jet",
       "line": 4,
       "column": 1,
@@ -10855,31 +10869,10 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "Tests",
-      "file": "Tests/Run/UnsafeAndRuntime/AsmSevenInputsPushToTheStack.jet",
-      "line": 7,
-      "column": 1,
-      "reason": "the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return"
-    },
-    {
-      "package": "Tests",
-      "file": "Tests/Run/UnsafeAndRuntime/AsmSevenInputsPushToTheStack.jet",
-      "line": 54,
-      "column": 5,
-      "reason": "Linux getpid syscall 39 ignores all argument registers and retains no stack pointer"
-    },
-    {
-      "package": "Tests",
       "file": "Tests/Run/UnsafeAndRuntime/MemFromAddrDirect.jet",
       "line": 11,
       "column": 5,
       "reason": "the borrowed value is live in the caller and the pointer never escapes"
-    },
-    {
-      "package": "Tests",
-      "file": "Tests/Run/UnsafeAndRuntime/NativeGlobalWord.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "run, the program's one thread, is the only writer"
     },
     {
       "package": "Tests",
@@ -11706,9 +11699,9 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Docs | 13 |
 | Examples | 45 |
 | Jetpack | 8 |
-| Tests | 563 |
+| Tests | 562 |
 | Tools | 28 |
-| **total** | **1635** |
+| **total** | **1634** |
 
 ### Regions
 
@@ -12778,12 +12771,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Tests | Tests/Cases/CLIPartsInspect/Fixtures/Team/unsafe/main.jet | 2:5 | "audit" |
 | Tests | Tests/Cases/CLIPartsInspect/Fixtures/TestHardened/hardened/main.jet | 5:5 | "test deliberately reads after arena reset" |
 | Tests | Tests/Cases/CLIPartsInspect/Fixtures/TestHardened/release/main.jet | 5:5 | "test deliberately reads after arena reset" |
-| Tests | Tests/Cases/Cffi/CffiBorrowedByteViewCrossesForTheCall.fixture/main.jet | 13:5 | "the block holds the four bytes for the whole call, C keeps no pointer to it, and it is released once" |
-| Tests | Tests/Cases/Cffi/CffiNullStringReturnReadsAsAbsent.fixture/main.jet | 14:9 | "a non-null result names a static NUL-terminated string C never frees" |
-| Tests | Tests/Cases/Cffi/CffiPartialReadReturnsItsStatusAndLength.fixture/main.jet | 14:5 | "both blocks are live for the call, C writes at most `output_cap` bytes and keeps no pointer, and each is released once" |
-| Tests | Tests/Cases/Cffi/CffiPointerAndCountCrossTogether.fixture/main.jet | 13:5 | "the block holds the three bytes for the whole call, C keeps no pointer to it, and it is released once" |
 | Tests | Tests/Cases/Cffi/CffiRawStatusOutPointerReadsOnlyOnSuccess.fixture/main.jet | 23:5 | "store_load receives a live non-null slot; bytes are read only after status zero" |
-| Tests | Tests/Cases/Cffi/CffiStatusAndWrittenCountBothReturn.fixture/main.jet | 14:5 | "both blocks are live for the calls, C writes at most `output_cap` bytes and keeps no pointer, and each is released once" |
 | Tests | Tests/Cases/Cffi/FFICapabilityBoundaryIsSafeOnlyInsideUnsafe/Input/o2/run.jet | 8:5 | "the foreign call may write through the borrowed value" |
 | Tests | Tests/Cases/Cffi/FFICapabilityBoundaryIsSafeOnlyInsideUnsafe/Input/o3/run.jet | 8:5 | "the foreign call may write through the borrowed value" |
 | Tests | Tests/Cases/Cffi/RuntimeExitImportExitsWithItsArgument.fixture/main.jet | 1:1 | "this program owns the exit status it passes" |
@@ -13208,6 +13196,13 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Tests | Tests/Conformance/Corpus/Core/Sys/waitpid.jet | 5:5 | "poll for a child that this witness does not have" |
 | Tests | Tests/Conformance/Corpus/Core/Tasks/queued_handle.jet | 17:5 | "the handles stay in this program and never reach the runtime's queue" |
 | Tests | Tests/Conformance/Corpus/Core/Tasks/queued_task.jet | 5:5 | "the handle stays in this program and never reaches the runtime's queue" |
+| Tests | Tests/Fixtures/UnsafeObligations/run.jet | 5:5 | "local pointer" |
+| Tests | Tests/Fixtures/explicit_cleanup_order.jet | 39:5 | "exercise the explicit process-stop cleanup boundary" |
+| Tests | Tests/Fixtures/ffi_stack4_i64.jet | 2:1 | "the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return" |
+| Tests | Tests/Fixtures/ffi_stack4_i64.jet | 49:5 | "Linux getpid syscall 39 ignores all argument registers and retains no stack pointer" |
+| Tests | Tests/Fixtures/fmt_import_c_bindings.jet | 7:1 | "audited C boundary" |
+| Tests | Tests/Fixtures/fmt_import_c_bindings.jet | 10:1 | "audited C boundary" |
+| Tests | Tests/Fixtures/native_global_word.jet | 6:5 | "the fixture's one-threaded caller (run, or global-word.c) is the only writer" |
 | Tests | Tests/Fixtures/native_inline_c_shared_state.jet | 4:1 | "updates this program's private counter" |
 | Tests | Tests/Fixtures/native_inline_c_shared_state.jet | 13:1 | "reads the counter defined by fixture_bump" |
 | Tests | Tests/Fixtures/native_inline_c_shared_state.jet | 25:5 | "the counter is private to these two bodies" |
@@ -13229,10 +13224,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Tests | Tests/Run/Dyn/NumberInUnsafe.jet | 7:5 | "the literal below is a valid JSON number lexeme" |
 | Tests | Tests/Run/FailureFoundation/TransactOSStop.jet | 34:5 | "the stop runs the shared cleanup boundary" |
 | Tests | Tests/Run/PatternsAndFields/FixedSizeListWidensAtCoreCall.jet | 5:5 | "fixed signature vector" |
-| Tests | Tests/Run/UnsafeAndRuntime/AsmSevenInputsPushToTheStack.jet | 7:1 | "the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return" |
-| Tests | Tests/Run/UnsafeAndRuntime/AsmSevenInputsPushToTheStack.jet | 54:5 | "Linux getpid syscall 39 ignores all argument registers and retains no stack pointer" |
 | Tests | Tests/Run/UnsafeAndRuntime/MemFromAddrDirect.jet | 11:5 | "the borrowed value is live in the caller and the pointer never escapes" |
-| Tests | Tests/Run/UnsafeAndRuntime/NativeGlobalWord.jet | 6:5 | "run, the program's one thread, is the only writer" |
 | Tests | Tests/UI/AuditedGateLadderForbidden/run.jet | 3:5 | "the organization policy refuses this audited escape" |
 | Tests | Tests/UI/E3113PackageWithoutKernelFiles/run.jet | 6:1 | "the caller releases the storage with `free_raw`, exactly once" |
 | Tests | Tests/UI/E3113RawMemoryOutsideKernel/kernel.jet | 4:1 | "the caller releases the storage with `free_raw`, exactly once" |
