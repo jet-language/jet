@@ -34,13 +34,11 @@ timing_host: fn() -> I64 {
 
 // "GenuineIntel" is CPUID.0's EBX, EDX, ECX: "Genu", "ineI", "ntel".
 timing_host_probe: fn() -> I64 {
-    #Unsafe("cpuid only reports processor identification") {
-        top: os_cpuid_eax_i64(I64{0}, I64{0})
-        intel: os_cpuid_ebx_i64(I64{0}, I64{0}) == I64{1970169159} && os_cpuid_edx_i64(I64{0}, I64{0}) == I64{1231384169} && os_cpuid_ecx_i64(I64{0}, I64{0}) == I64{1818588270}
-        if (!intel) { return TIMING_HOST_NO_STATEMENT }
-        if (top >= I64{7} && os_cpuid_edx_i64(I64{7}, I64{0}) & I64{536870912} != I64{0}) {
-            return TIMING_HOST_INTEL_DOITM
-        }
+    top: host_cpuid(I64{0}, I64{0}, HOST_CPUID_EAX)
+    intel: host_cpuid(I64{0}, I64{0}, HOST_CPUID_EBX) == I64{1970169159} && host_cpuid(I64{0}, I64{0}, HOST_CPUID_EDX) == I64{1231384169} && host_cpuid(I64{0}, I64{0}, HOST_CPUID_ECX) == I64{1818588270}
+    if (!intel) { return TIMING_HOST_NO_STATEMENT }
+    if (top >= I64{7} && host_cpuid(I64{7}, I64{0}, HOST_CPUID_EDX) & I64{536870912} != I64{0}) {
+        return TIMING_HOST_INTEL_DOITM
     }
     TIMING_HOST_CONFIRMED
 }

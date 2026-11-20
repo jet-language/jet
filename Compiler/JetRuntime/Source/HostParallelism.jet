@@ -568,16 +568,20 @@ compute_simd_lanes_word := I64{0}
 }
 
 compute_simd_lanes_probe: fn() -> I64 {
-    #Unsafe("cpuid and xgetbv only report processor identification and the OS-enabled state") {
-        top: os_cpuid_eax_i64(I64{0}, I64{0})
-        if (top < I64{1}) { return I64{1} }
-        ecx: os_cpuid_ecx_i64(I64{1}, I64{0})
-        edx: os_cpuid_edx_i64(I64{1}, I64{0})
-        xsave: I64{201326592}
-        if (top >= I64{7} && ecx & xsave == xsave && os_xgetbv_i64(I64{0}) & I64{6} == I64{6}) {
-            if (os_cpuid_ebx_i64(I64{7}, I64{0}) & I64{32} != I64{0}) { return I64{8} }
+    top: host_cpuid(I64{0}, I64{0}, HOST_CPUID_EAX)
+    if (top < I64{1}) { return I64{1} }
+    ecx: host_cpuid(I64{1}, I64{0}, HOST_CPUID_ECX)
+    edx: host_cpuid(I64{1}, I64{0}, HOST_CPUID_EDX)
+    xsave: I64{201326592}
+    if (top >= I64{7} && ecx & xsave == xsave) {
+        enabled := I64{0}
+        #Unsafe("xgetbv only reports the OS-enabled state, which CPUID.1:ECX has just shown the OS reports (OSXSAVE)") {
+            enabled = os_xgetbv_i64(I64{0})
         }
-        if (edx & I64{67108864} != I64{0}) { return I64{4} }
+        if (enabled & I64{6} == I64{6} && host_cpuid(I64{7}, I64{0}, HOST_CPUID_EBX) & I64{32} != I64{0}) {
+            return I64{8}
+        }
     }
+    if (edx & I64{67108864} != I64{0}) { return I64{4} }
     I64{1}
 }

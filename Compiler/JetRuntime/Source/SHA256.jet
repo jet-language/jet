@@ -257,11 +257,9 @@ sha256_ni_table := I64{0}
 
 // CPUID.7.0:EBX bit 29 (SHA) with CPUID.1:ECX bits 9 (SSSE3) and 19 (SSE4.1).
 sha256_ni_present: fn() -> Bool {
-    #Unsafe("cpuid only reports processor identification") {
-        if (os_cpuid_eax_i64(I64{0}, I64{0}) < I64{7}) { return false }
-        if (os_cpuid_ecx_i64(I64{1}, I64{0}) & I64{524800} != I64{524800}) { return false }
-        if (os_cpuid_ebx_i64(I64{7}, I64{0}) & I64{536870912} != I64{0}) { return true }
-    }
+    if (host_cpuid(I64{0}, I64{0}, HOST_CPUID_EAX) < I64{7}) { return false }
+    if (host_cpuid(I64{1}, I64{0}, HOST_CPUID_ECX) & I64{524800} != I64{524800}) { return false }
+    if (host_cpuid(I64{7}, I64{0}, HOST_CPUID_EBX) & I64{536870912} != I64{0}) { return true }
     false
 }
 

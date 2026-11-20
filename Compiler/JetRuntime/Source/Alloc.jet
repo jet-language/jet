@@ -3038,10 +3038,7 @@ alloc_check_track_on: fn() -> Bool { alloc_check_tracking == I64{1} }
 // The observation writer (ObserveLive.jet jet_rt_observe_writer), as it
 // starts: the live list leaves out every block it takes from now on.
 alloc_check_track_skip_thread: fn() {
-    base := I64{0}
-    #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); it is only kept to compare") {
-        base = os_tls_base_i64()
-    }
+    base: thread_base()
     #Unsafe("an aligned whole-word store; a take that loads the word before it is a take of another thread's") {
         alloc_check_track_skipped = base
     }
