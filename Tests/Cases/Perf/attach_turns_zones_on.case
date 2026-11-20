@@ -3,8 +3,9 @@
 # on for that window and off again, and the trace holds the zones, frame
 # marks and plots the program recorded meanwhile, beside the ring's samples.
 # An attach without `--zones=` records none. The trace's run window is the
-# zones window: at least the 500 ms asked for and no longer than the attach
-# took, with the program's CPU in it.
+# attach's window, which holds the zones window: at least the 500 ms asked
+# for and no longer than the attach took, with the program's CPU in it, to
+# the nanosecond.
 requires: os-name:linux
 fixture: AttachTurnsZonesOn.fixture
 env: NO_COLOR=1
@@ -23,17 +24,19 @@ capture: took = elapsed
 file: zones.jettrace ~ "\"kind\":\"zone\"" # the window's zones are trace rows
 file: zones.jettrace ~ "\"kind\":\"frame_mark\"" # and its frame marks
 file: zones.jettrace ~ "\"kind\":\"plot\"" # and its plots
-json: file zones.jettrace doc $.content.profile.window_status = "live" # the header's window is the one the zones were on
+json: file zones.jettrace doc $.content.profile.window_status = "live" # the header's window is the attach's, which the zones were on in
 json: file zones.jettrace doc $.content.profile.window_wall_ns >= 500000000 # its wall time: at least the 500 ms window, not the run since it started
 json: file zones.jettrace doc $.content.profile.window_wall_ns <= {cap:took}+0 # and no more than the attach took, as this case timed it
 capture: wall file zones.jettrace doc $.content.profile.window_wall_ns
 json: file zones.jettrace doc $.content.profile.window_cpu_ns > 0 # the program's CPU in the window: its tick loop ran
 json: file zones.jettrace doc $.content.profile.window_cpu_ns <= 2*{cap:wall} # at most the window's wall on each of its two threads, the loop's and the runtime's observation writer
+json: file zones.jettrace doc $.content.receipt_sections[?name="window"][0].value.cpu_resolution_ns = 1 # counted by each thread's schedstat, not in ticks
 step: jet perf view zones.jettrace
 exit: 0
 stdout: ~ "zone tick count=" # the zones the window recorded
-stdout: ~ " window=live run_wall=" # the header's window is the zones window
+stdout: ~ " window=live run_wall=" # the header's window is the attach's
 stdout: !~ " run_cpu=0ns" # with the program's CPU in it
+stdout: !~ "run_cpu_resolution=" # counted to the nanosecond
 stdout: ~ " · live.jet:13 " # the ring's samples inside them, on the tick loop's line
 stdout: ~ "frames count=" # its frame marks
 step: jet perf attach {pid:live} --source live.jet --zones=soon --out bad.jettrace

@@ -3,7 +3,8 @@
 # bounded ring it publishes beside its live snapshot. `jet perf attach`
 # drains that ring, so the trace of a point capture holds the waits the
 # program made before the attach: what each waited for, at which line, and
-# what ended it.
+# what ended it. Its run window is the attach's own, from its first read of
+# the program to its last, with the program's CPU in it.
 requires: os-name:linux
 fixture: AttachDrainsFlightRing.fixture
 env: NO_COLOR=1
@@ -13,10 +14,17 @@ recv live
 stdout.trim: = ready.out # the program has made its waits
 step: jet perf attach {pid:live} --source live.jet --out ring.jettrace
 exit: 0
+capture: took = elapsed
 file: ring.jettrace is-file
+json: file ring.jettrace doc $.content.profile.window_status = "live" # the header's window is the attach's
+json: file ring.jettrace doc $.content.profile.window_wall_ns > 0 # its wall time, from the live snapshot's read to the ring's
+json: file ring.jettrace doc $.content.profile.window_wall_ns <= {cap:took}+0 # no more than the attach took, not the run since it started
+json: file ring.jettrace doc $.content.profile.window_cpu_ns >= 0 # the program's CPU in it, which a sleeping program may not have spent
+json: file ring.jettrace doc $.content.receipt_sections[?name="window"][0].value.cpu_clock = "schedstat" # counted to the nanosecond
 step: jet perf view ring.jettrace
 exit: 0
 stdout: ~ "waits count=" # the ring's waits are the trace's
+stdout: ~ " window=live run_wall=" # the header's window is the attach's
 stdout: ~ "in time sleep at live.jet:14, woken by its timeout" # run's sleep, by its line
 stdout: ~ "in channel receive at live.jet:10 for channel " # the child's receive, by its line and channel
 stdout: ~ "at live.jet:15" # the send that woke it, by its line

@@ -4,6 +4,7 @@ use {
     jet_backend.[X64DebugEncoding, X64ImageFunction, X64Jetline, X64JetlineFunction]
     jet_cli.[
         JET_CLI_PERF_OBJECT_SOCKET,
+        JetCLIPerfAttachCPU,
         JetCLIPerfExperiment,
         JetCLIPerfHeap,
         JetCLIPerfHeapBlock,
@@ -29,6 +30,8 @@ use {
         JetCLIPerfWake,
         JetCLIPerfZoneSampled,
         JetCLIPerfZoneTotal,
+        jet_cli_perf_attach_closed,
+        jet_cli_perf_attach_keep_window,
         jet_cli_perf_browser_decode,
         jet_cli_perf_causal_section,
         jet_cli_perf_capture_bytes,
@@ -46,6 +49,7 @@ use {
         jet_cli_perf_observed,
         jet_cli_perf_pc_json,
         jet_cli_perf_pc_words,
+        jet_cli_perf_profile_summary,
         jet_cli_perf_sampler_reason,
         jet_cli_perf_samples_count,
         jet_cli_perf_samples_profile,
@@ -194,6 +198,48 @@ jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
     hardware: TraceHardware{cpu_arch: "x86_64", logical_cpus: U64{1}, os: "linux", target: "x86_64-unknown-linux-gnu"}
     bytes: jet_cli_perf_capture_bytes(capture, "run", [String]{"app.jet"}, toolchain, hardware) ?? panic(err.message)
     _: verify_jettrace(bytes) ?? panic(err.message)
+}
+
+#Test("an attach's window counts each thread's CPU in it, names the threads that exited, and its header names a tick resolution") {
+    opened := [Int:U64]{}
+    opened[1] = U64{1000}
+    opened[2] = U64{500}
+    opened[3] = U64{700}
+    // Thread 1 ran 600 ns more, thread 2 slept, thread 3 exited and thread 4
+    // started in the window.
+    shut := [Int:U64]{}
+    shut[1] = U64{1600}
+    shut[2] = U64{500}
+    shut[4] = U64{300}
+    first: JetCLIPerfAttachCPU{ns: U64{2200}, resolution_ns: U64{1}, threads: opened}
+    last: JetCLIPerfAttachCPU{ns: U64{2400}, resolution_ns: U64{1}, threads: shut}
+    precise: jet_cli_perf_attach_closed(U64{5000}, Val(first), Val(last))
+    assert_eq(precise.window.elapsed_ns, U64{5000})
+    assert_eq(precise.window.cpu_ns, Val(U64{900}))
+    assert_eq(precise.resolution_ns, Val(U64{1}))
+    assert_eq(precise.exited, 1)
+    early: JetCLIPerfAttachCPU{ns: U64{20000000}, resolution_ns: U64{10000000}, threads: [Int:U64]{}}
+    late: JetCLIPerfAttachCPU{ns: U64{50000000}, resolution_ns: U64{10000000}, threads: [Int:U64]{}}
+    ticked: jet_cli_perf_attach_closed(U64{5000}, Val(early), Val(late))
+    assert_eq(ticked.window.cpu_ns, Val(U64{30000000}))
+    assert_eq(ticked.resolution_ns, Val(U64{10000000}))
+    // Ends counted differently, or an end with no CPU, give the window none.
+    assert_eq(jet_cli_perf_attach_closed(U64{5000}, Val(first), Val(late)).window.cpu_ns, None)
+    assert_eq(jet_cli_perf_attach_closed(U64{5000}, None, Val(late)).window.cpu_ns, None)
+    live: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(17))
+    observations: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{0}, live: live}}
+    toolchain: TraceToolchain{jet_version: "test", compiler_build_id: "test", stdlib_id: "test", runner_id: "test"}
+    hardware: TraceHardware{cpu_arch: "x86_64", logical_cpus: U64{1}, os: "linux", target: "x86_64-unknown-linux-gnu"}
+    exact := jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    jet_cli_perf_attach_keep_window(exact, 7, precise, [String]{"its live snapshot", "its flight ring"})
+    assert(exact.profile.window_reason.contains("from its first read of the program to its last (its live snapshot, its flight ring)"))
+    assert(exact.profile.window_reason.contains("less that of the threads that exited in it (1)"))
+    exact_trace: verify_jettrace(jet_cli_perf_capture_bytes(exact, "attach", [String]{"attach", "7"}, toolchain, hardware) ?? panic(err.message)) ?? panic(err.message)
+    assert((jet_cli_perf_profile_summary(exact_trace) ?? "").ends_with(" window=live run_wall=5000ns run_cpu=900ns"))
+    coarse := jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    jet_cli_perf_attach_keep_window(coarse, 7, ticked, [String]{"its live snapshot"})
+    coarse_trace: verify_jettrace(jet_cli_perf_capture_bytes(coarse, "attach", [String]{"attach", "7"}, toolchain, hardware) ?? panic(err.message)) ?? panic(err.message)
+    assert((jet_cli_perf_profile_summary(coarse_trace) ?? "").ends_with(" window=live run_wall=5000ns run_cpu=30000000ns run_cpu_resolution=10ms"))
 }
 
 #Test("perf observations of a run sit on its own clock, from its start") {

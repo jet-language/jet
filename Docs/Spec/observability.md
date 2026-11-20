@@ -771,6 +771,23 @@ that conflicts with the others, such as `--lens=alloc` without `--source`,
 stays `Jet.UnknownFlag` (exit 2).
 Tests/Cases/Perf/attach_names_each_refusal.case is the worked example.
 
+An attach's profile run window is the attach's own window on the program,
+`live`, not the run since it started, whatever it read: it opens before the
+attach's first read of the program (its live snapshot) and closes after its
+last (its flight ring, the end of a `--zones=` window, a heap snapshot's
+answer, a browser relay's rows). Its wall time is on jet's monotonic clock
+and its CPU is the program's: the sum of each thread's run time in
+`/proc/<pid>/task/<tid>/schedstat`, to the nanosecond, at each end, a thread
+that started in the window counting all of its own. A thread that exits in
+the window takes its time there with it, since `/proc` keeps a dead thread's
+time only in the process's clock ticks; the window's reason names how many
+did. Where the kernel keeps no schedstat, the CPU is the process's `/proc`
+utime and stime at each end, in clock ticks, and `jet perf view` names that
+resolution after it (`run_cpu=30000000ns run_cpu_resolution=10ms`). The
+trace's `window` receipt section (type `JetPerfAttachWindow`) records the
+CPU's clock (`schedstat` or `ticks`), its resolution in nanoseconds and the
+threads that exited. The `native` row `process_cpu` keeps the program's CPU
+since its run started.
 `core.perf` zones, frame marks and plots stay off in such a run: each zone
 site tests one runtime word and calls nothing while it is clear.
 `jet perf attach <pid> --source app.jet --zones=500ms` turns them on for the
@@ -779,10 +796,6 @@ which the writer's next publication answers by setting the word and writing
 the zone, frame, plot and log span rows to `.samples.spans`. It then removes
 the request, so the next publication clears the word, and reads the rows into
 the trace beside the ring's, each zone holding the ring's samples inside it.
-The profile's run window is then that window, `live`: its wall time from the
-request to its removal on jet's monotonic clock, and the process CPU the
-program spent across it (its `/proc` utime and stime at each end), not the
-run since it started.
 Tests/Cases/Perf/attach_turns_zones_on.case is the worked example.
 
 Profiling leaves no files behind. The spans file, a flight ring's
