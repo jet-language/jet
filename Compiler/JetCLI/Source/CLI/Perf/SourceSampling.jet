@@ -1941,15 +1941,15 @@ jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSa
         // Each signal pays the kernel's delivery and return besides the
         // handler's own time. A sample the kernel wrote to a ring took no
         // signal: its drain's time is the handlers', with the delivery of
-        // each signal that the ring filled, and the kernel's time to write
-        // it is the rings' own.
+        // each signal of a ring's drain timer, and the kernel's time to
+        // write it is the rings' own.
         drained: if cost.ring_samples < sampled.signals -> cost.ring_samples else -> sampled.signals
         signals: sampled.signals - drained
         took: cost.handler_ns + signals * cost.delivery_ns + cost.ring_ns
         profile.overhead_ns = Val(took)
         profile.overhead_status = "measured"
         sampler: "the sampler took {took / U64{1000}} microseconds, {jet_cli_perf_hundredths(took, cost.cpu_ns)} of the {cost.cpu_ns / U64{1000}} microseconds of CPU time sampled: "
-        profile.overhead_reason = if cost.ring_samples == (U64{0}) -> "{sampler}{cost.handler_ns / U64{1000}} in its handlers and {sampled.signals} signals at the {cost.delivery_ns} nanoseconds the kernel took to deliver and return from one as sampling started" else -> "{sampler}{cost.handler_ns / U64{1000}} in its handlers and drains, each signal a ring filled delivered within them, {signals} signals at the {cost.delivery_ns} nanoseconds the kernel took to deliver and return from one as sampling started, and {cost.ring_ns / U64{1000}} microseconds the kernel took to write the {cost.ring_samples} samples to the threads' rings, as timed when sampling started"
+        profile.overhead_reason = if cost.ring_samples == (U64{0}) -> "{sampler}{cost.handler_ns / U64{1000}} in its handlers and {sampled.signals} signals at the {cost.delivery_ns} nanoseconds the kernel took to deliver and return from one as sampling started" else -> "{sampler}{cost.handler_ns / U64{1000}} in its handlers and drains, each drain timer's signal delivered within them, {signals} signals at the {cost.delivery_ns} nanoseconds the kernel took to deliver and return from one as sampling started, and {cost.ring_ns / U64{1000}} microseconds the kernel took to write the {cost.ring_samples} samples to the threads' rings, as timed when sampling started"
     }
     Val(profile)
 }

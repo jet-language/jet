@@ -419,7 +419,7 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     assert(profile.reason.contains("; the task clock took them, a perf event on each thread's CPU time in user mode, so time in the kernel takes none, and the kernel walked each sample's stack into its thread's ring, at most 127 callchain entries"))
     assert(profile.reason.contains("; 1 samples' stacks were cut at the 127 callchain entries the kernel writes (perf_event_max_stack), so their outermost callers are missing"))
     assert_eq(profile.overhead_ns, Val(U64{7500}))
-    assert_eq(profile.overhead_reason, "the sampler took 7 microseconds, 0.18% of the 4000 microseconds of CPU time sampled: 6 in its handlers and drains, each signal a ring filled delivered within them, 0 signals at the 1000 nanoseconds the kernel took to deliver and return from one as sampling started, and 1 microseconds the kernel took to write the 3 samples to the threads' rings, as timed when sampling started")
+    assert_eq(profile.overhead_reason, "the sampler took 7 microseconds, 0.18% of the 4000 microseconds of CPU time sampled: 6 in its handlers and drains, each drain timer's signal delivered within them, 0 signals at the 1000 nanoseconds the kernel took to deliver and return from one as sampling started, and 1 microseconds the kernel took to write the 3 samples to the threads' rings, as timed when sampling started")
 }
 
 // Each record the runtime could not write is counted. A flight ring keeps
