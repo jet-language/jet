@@ -984,7 +984,7 @@ jfmt_fmt_stmt: fn(f: &JetFmt, stmt: Stmt) {
                             jfmt_fmt_guard_dispatch(f, arms, else_body, span)
                         } else { jfmt_fmt_classic_switch(f, arms, else_body, span.start) }
                     } else { jfmt_fmt_guard_dispatch(f, arms, else_body, span) }
-                } else { jfmt_fmt_dispatch(f, subject, arms, else_body, false, span) }
+                } else { jfmt_fmt_dispatch(f, subject, arms, else_body, span) }
             }
         }
         .Break(_) -> { jfmt_write(f, "break") }
@@ -1145,7 +1145,7 @@ jfmt_fmt_stmt: fn(f: &JetFmt, stmt: Stmt) {
         // exactly like a `Stmt.Switch` (arm grammar) with a `#` lead.
         .ComptimeSwitch(subject, arms, else_body, span) -> {
             jfmt_write(f, "#if ")
-            jfmt_fmt_dispatch(f, subject, arms, else_body, true, span)
+            jfmt_fmt_dispatch(f, subject, arms, else_body, span)
         }
         // `#Context(field: value, …) { … }`.
         .ContextBlock(_, body, span) -> { jfmt_fmt_block_body(f, body, span.end) }
@@ -1391,23 +1391,23 @@ jfmt_is_explicit_drop: fn(stmt: Stmt) -> Bool {
 // `#if` lead). Shared by `Stmt.Switch` and `Stmt.ComptimeSwitch`.
 // A table written on one line stays on one line when it fits, as
 // `jfmt_fmt_guard_expr` keeps a value table.
-jfmt_fmt_dispatch: fn(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, force_arm_blocks: Bool, span: Span) {
+jfmt_fmt_dispatch: fn(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span) {
     if jfmt_one_line_trial_lost(f) {
         return
     }
     if jfmt_switch_written_on_one_line(f, span.start, arms) {
         // Inside a one-line trial the expanded form would fail it as well.
         if f.one_line_trials > 0 {
-            jfmt_fmt_dispatch_table(f, subject, arms, else_body, force_arm_blocks, true)
+            jfmt_fmt_dispatch_table(f, subject, arms, else_body, true)
             return
         }
         mark: jfmt_one_line_trial_begin(f)
-        jfmt_fmt_dispatch_table(f, subject, arms, else_body, force_arm_blocks, true)
+        jfmt_fmt_dispatch_table(f, subject, arms, else_body, true)
         if jfmt_one_line_trial_end(f, mark) {
             return
         }
     }
-    jfmt_fmt_dispatch_table(f, subject, arms, else_body, force_arm_blocks, false)
+    jfmt_fmt_dispatch_table(f, subject, arms, else_body, false)
 }
 
 // A hole table (`if n % <> == 0 { 15 -> … }`) keeps its source as written,
@@ -1453,7 +1453,7 @@ jfmt_switch_written_on_one_line: fn(f: JetFmt, start: Int, arms: [SwitchArm]) ->
     jfmt_written_on_one_line(f, Span{start: start, end: f.source_toks[close].span.end})
 }
 
-jfmt_fmt_dispatch_table: fn(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, force_arm_blocks: Bool, compact: Bool) {
+jfmt_fmt_dispatch_table: fn(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, compact: Bool) {
     table_op: jfmt_dispatch_op_from_source(f, subject) ?? jfmt_dispatch_op(f, subject, arms)
     statement_table: jfmt_table_is_statements(f, arms, else_body)
     jfmt_fmt_expr(f, subject, JFMT_PREC_OR_FALLBACK)
@@ -1465,7 +1465,7 @@ jfmt_fmt_dispatch_table: fn(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_b
         arm: arms[index]
         if compact {
             if index > 0 -> jfmt_write(f, ", ")
-            jfmt_fmt_switch_arm(f, subject, table_op, arm, force_arm_blocks, statement_table)
+            jfmt_fmt_switch_arm(f, subject, table_op, arm, false, statement_table)
             next
         }
         if index > 0 {
@@ -1475,7 +1475,7 @@ jfmt_fmt_dispatch_table: fn(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_b
         // One arm per line: braces keep a leading-dot next arm from reading
         // as a chain on this arm's expression.
         next_starts_with_dot: index + 1 < arms.len() && jfmt_arm_head_starts_with_dot(arms[index + 1].cond)
-        jfmt_fmt_switch_arm(f, subject, table_op, arm, force_arm_blocks || next_starts_with_dot, statement_table)
+        jfmt_fmt_switch_arm(f, subject, table_op, arm, next_starts_with_dot, statement_table)
         jfmt_emit_trailing(f, arm.span.end)
     }
     if else_body == .Val(else_b) {
@@ -1483,7 +1483,7 @@ jfmt_fmt_dispatch_table: fn(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_b
         jfmt_write(f, "else")
         jfmt_write(f, " ")
         jfmt_write(f, "->")
-        jfmt_fmt_arm_body(f, else_b, force_arm_blocks, statement_table)
+        jfmt_fmt_arm_body(f, else_b, false, statement_table)
         jfmt_fmt_dispatch_else_trail(f, arms, compact)
     }
     jfmt_table_close(f, compact)

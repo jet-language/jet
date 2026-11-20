@@ -42,10 +42,12 @@ use {
         type_name,
     ]
     jet_lexer.[
+        TOKEN_BANG,
         TOKEN_BLOCK_COMMENT,
         TOKEN_COMMA,
         TOKEN_EOF,
         TOKEN_GT,
+        TOKEN_HASH,
         TOKEN_IDENT,
         TOKEN_KW_ELSE,
         TOKEN_KW_PRIV,
@@ -1426,6 +1428,43 @@ jfmt_source_marker_group_span: fn(f: JetFmt, start: Int) -> JetFmtSourceList? Ne
     None
 }
 
+// How the source wrote a marker: `#X` alone, the first rule of a `#[X, …]`
+// list, or a later rule of one. A marker with no written sigil before its
+// name (a generated one) is UNWRITTEN.
+JFMT_MARKER_UNWRITTEN: 0
+
+JFMT_MARKER_LONE: 1
+
+JFMT_MARKER_OPENS: 2
+
+JFMT_MARKER_JOINS: 3
+
+jfmt_marker_written: fn(f: JetFmt, marker: Marker) -> Int Never! {
+    at: jfmt_first_token_at(f, marker.name_span.start)
+    if at >= f.source_toks.len() || f.source_toks[at].span.start != marker.name_span.start {
+        return JFMT_MARKER_UNWRITTEN
+    }
+    index := at - 1
+    loop index >= 0 && (jfmt_is_comment_kind(f.source_toks[index].kind) || f.source_toks[index].kind == TOKEN_BANG) {
+        index -= 1
+    }
+    if index < 0 -> return JFMT_MARKER_UNWRITTEN
+    kind: f.source_toks[index].kind
+    if kind == TOKEN_HASH -> return JFMT_MARKER_LONE
+    if kind == TOKEN_COMMA -> return JFMT_MARKER_JOINS
+    if kind == TOKEN_LBRACKET && index > 0 && f.source_toks[index - 1].kind == TOKEN_HASH {
+        return JFMT_MARKER_OPENS
+    }
+    JFMT_MARKER_UNWRITTEN
+}
+
+// The source wrote `()` right after the marker's name, with nothing inside.
+jfmt_marker_written_empty_parens: fn(f: JetFmt, marker: Marker) -> Bool Never! {
+    at: jfmt_first_token_at(f, marker.name_span.end)
+    if at + 1 >= f.source_toks.len() -> return false
+    f.source_toks[at].kind == TOKEN_LPAREN && f.source_toks[at].span.start == marker.name_span.end && f.source_toks[at + 1].kind == TOKEN_RPAREN
+}
+
 jfmt_source_span_multiline: fn(f: JetFmt, span: Span) -> Bool Never! {
     (jfmt_src_valid(f, span.start, span.end) && jfmt_bytes_have_newline(f.src_bytes, span.start, span.end)) || jfmt_span_has_comment(f, span.start, span.end)
 }
@@ -2601,10 +2640,10 @@ jfmt_format_program_with: fn(f: &JetFmt, prog: Program) -> String {
         }
     }
     if has_ordered_file_rules && ordered_file_rules_precede_imports {
-        jfmt_fmt_marker_group(f, ordered_file_rules, "#", true)
+        jfmt_fmt_marker_one_list(f, ordered_file_rules, "#", true)
         first = false
     } else if file_rules.len() > 0 {
-        jfmt_fmt_marker_group(f, file_rules, "#", true)
+        jfmt_fmt_marker_one_list(f, file_rules, "#", true)
         first = false
     }
     // A file-head `#FX(…)` cap stays on the line above the imports it heads;
@@ -2628,7 +2667,7 @@ jfmt_format_program_with: fn(f: &JetFmt, prog: Program) -> String {
     if has_ordered_file_rules && !ordered_file_rules_precede_imports {
         if !first -> jfmt_blank_line_between_items(f)
         first = false
-        jfmt_fmt_marker_group(f, ordered_file_rules, "#", true)
+        jfmt_fmt_marker_one_list(f, ordered_file_rules, "#", true)
     }
     // Module-scoped `#Policy(...)` at a fixed position.
     module_policies := [PolicyDeclaration]{}
