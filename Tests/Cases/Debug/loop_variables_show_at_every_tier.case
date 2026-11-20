@@ -1,0 +1,43 @@
+# A loop's variable is in the debug info at every tier: the slot its walk's
+# step loads the item into carries the variable's name (JetIR BuildExpr.jet
+# ir_walk_item_named), so `locals` at a stop in the body shows the List
+# element, the text's line and the Iterable's item of that pass. The
+# fixture must stay in jet fmt form.
+fixture: LoopVariablesShowAtEveryTier.fixture
+env: NO_COLOR=1
+step: jet build -O0 prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog --break prog.jet:32
+stdin: loop_variables_show_at_every_tier.stdin
+exit: 0
+stdout+stderr: ~ "word: String = \"alpha\"" # O0: the List walk's first element
+stdout+stderr: ~ "word: String = \"beta\"" # and its second
+stdout+stderr: ~ "line: String = \"first line\"" # the text's first line
+stdout+stderr: ~ "line: String = \"second line\"" # and its second
+stdout+stderr: ~ "count: Int = 10" # the Iterable's first item
+stdout+stderr: ~ "count: Int = 20" # and its second
+step: jet build -O1 prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog --break prog.jet:32
+stdin: loop_variables_show_at_every_tier.stdin
+exit: 0
+stdout+stderr: ~ "word: String = \"alpha\"" # O1: the List walk's first element
+stdout+stderr: ~ "word: String = \"beta\"" # and its second
+stdout+stderr: ~ "line: String = \"first line\"" # the text's first line
+stdout+stderr: ~ "line: String = \"second line\"" # and its second
+stdout+stderr: ~ "count: Int = 10" # the Iterable's first item
+stdout+stderr: ~ "count: Int = 20" # and its second
+step: jet build -O2 prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog --break prog.jet:32
+stdin: loop_variables_show_at_every_tier.stdin
+exit: 0
+stdout+stderr: ~ "word: String = \"alpha\"" # O2: the List walk's first element
+stdout+stderr: ~ "word: String = \"beta\"" # and its second
+stdout+stderr: ~ "line: String = \"first line\"" # the text's first line
+stdout+stderr: ~ "line: String = \"second line\"" # and its second
+stdout+stderr: ~ "count: Int = 10" # the Iterable's first item
+stdout+stderr: ~ "count: Int = 20" # and its second
+step: {work}/.jet/build/prog
+exit: 0
+stdout: = "word alpha 5\nword beta 4\nline first line 10\nline second line 11\ncount 10 11\ncount 20 21\n" # the image runs unchanged

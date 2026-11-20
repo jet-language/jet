@@ -23,7 +23,7 @@ file: deep.jettrace !~ "\"helper\":\"stop poll\"" # and no stop poll: those run 
 file: deep.jettrace !~ "\"helper\":\"jet_ir_" # never by its symbol
 step: jet perf view {work}/deep.jettrace
 exit: 0
-capture: row = text stdout.after_first("  deep.jet:8 deep samples=").split("\n", 0)
+capture: row = text stdout.after_first("  deep.jet:9 deep samples=").split("\n", 0)
 cap:row: ~ " · closure " # the line's samples in the closure's helpers are split out
 cap:row: !~ " · stop poll samples=" # and none in a stop poll
 step: jet perf run -O2 fib.jet --out {work}/fib.jettrace -- 35

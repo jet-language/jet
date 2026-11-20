@@ -17,7 +17,8 @@
 // read-only data the dump does not copy, so `bt`, `locals` and `print` read
 // the stop, or the task `task N` selects, as they read a live one, a value
 // cut off showing as NATIVE_DEBUG_CUT_OFF; `tasks` lists every task, each a
-// deadlock held with its wait, and `events` lists the ring.
+// deadlock held with its wait, `events` lists the ring, and `disassemble`
+// lists the image's code (NativeListing.jet).
 use {
     native_dump_files: core.files
     jet_backend.[X64DebugEncoding, X64Jetline, X64JetlineFunction, X64Trace, X64_TRACE_RBP, X64_TRACE_RIP, X64_TRACE_RSP]
@@ -97,7 +98,7 @@ NATIVE_DUMP_REDACTED: "<redacted>"
 // The ring records `events` lists without `--last`.
 NATIVE_DUMP_EVENTS: 20
 
-NATIVE_DUMP_HELP: "Commands: backtrace (bt), frame N, locals, print NAME (p NAME), tasks, task N, events [--last N], help (h), quit (q)"
+NATIVE_DUMP_HELP: "Commands: backtrace (bt), frame N, locals, print NAME (p NAME), disassemble [FUNCTION|LINE|FILE:LINE|FILE:A-B] [--bytes] (disas), tasks, task N, events [--last N], help (h), quit (q)"
 
 // A dump's tasks, the stopped one first, its memory, with the image's, and
 // the address of its task registry's root (0: none).
@@ -223,10 +224,13 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
     pid: native_dump_word(bytes, 16)
     seconds: native_dump_word(bytes, 24)
     records: bytes.len() - memory
+    // The image's code facts, which name the symbols `disassemble` lists by:
+    // a dump session's `binary` is the dump, not the image.
+    facts: native_eval_image_of(elf)
     backing := bytes.move()
     backing.extend(elf.move())
     dump: NativeDump{tasks: tasks, memory: NativeMemory{trace: None, blocks: blocks, backing: backing.move(), cut: cut}, registry: registry}
-    session: NativeSession{binary: path, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: "", output_read: 0, started: true, threads: [NativeThread]{}, observe_root: 0, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: Val(dump), task: 0, program_entry: program_entry}
+    session: NativeSession{binary: path, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: "", output_read: 0, started: true, threads: [NativeThread]{}, observe_root: 0, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: Val(dump), task: 0, program_entry: program_entry, eval_image: Val(facts)}
     Ok(NativeDumpOpened{session: session, ring: ring, pid: pid, seconds: seconds, build: build, image_file: image_file, image: length, memory: memory, records: records, budget: budget, cut_off: cut_off})
 }
 
@@ -549,6 +553,7 @@ native_dump_command: fn(session: &NativeSession, line: String, events: [String],
             native_dump_frame(session, frames, index, file, lines)
         }
         "tasks" -> Ok(native_dump_task_list(session, file))
+        "disassemble" | "disas" -> native_disassemble(session, operand, file, lines)
         "task" -> {
             wanted: Int.parse(operand) ?? -1
             index: native_dump_task_index(session, wanted) ?? return Ok("No task {operand}; `tasks` lists them\n")

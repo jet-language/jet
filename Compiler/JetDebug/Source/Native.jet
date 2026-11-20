@@ -2476,6 +2476,9 @@ NativeSession: struct {
                 frames: self.backtrace() ?? return Err(err)
                 text = native_debug_backtrace(frames)
             }
+            "disassemble" | "disas" -> {
+                text = native_disassemble(self, operand, file, lines) ?? return Err(err)
+            }
             "tasks" -> text = self.tasks_text() ?? return Err(err)
             "h" | "help" -> text = "{NATIVE_DEBUG_HELP}\n"
             "" -> {}
@@ -5632,16 +5635,12 @@ native_debug_word: fn(trace: X64Trace, address: Int) -> Int? Never! {
     Val(native_number(bytes, 0, 8, X64DebugEncoding.Signed))
 }
 
-// The addresses of `line` in the Jet source `file`. A path names the files
-// whose recorded path (native_line_source) is it or ends with it, so
-// `Sema/CheckProgram.jet` or an editor's absolute path picks one of the
-// image's same-named files; a base name, or a path no file's matches, names
-// every file of that base name. In each function, the first statement row
-// (no call row) of the line in its own code and in each inlined copy it
-// holds (two instances of a generic module's member inlined into one caller
-// are two copies). A function with no row of the line, but rows on or
-// before it, gives its first row of the nearest later line instead.
-native_line_addresses: fn(image: NativeImage, file: String, line: Int) -> [Int] Never! {
+// The functions of the Jet source `file`, by their index in the line
+// table. A path names the files whose recorded path (native_line_source)
+// is it or ends with it, so `Sema/CheckProgram.jet` or an editor's absolute
+// path picks one of the image's same-named files; a base name, or a path no
+// file's matches, names every file of that base name.
+native_line_functions: fn(image: NativeImage, file: String) -> [Int] Never! {
     wanted: native_files.basename(file)
     by_path := false
     if file.contains("/") {
@@ -5652,10 +5651,24 @@ native_line_addresses: fn(image: NativeImage, file: String, line: Int) -> [Int] 
             }
         }
     }
-    addresses := [Int]{}
-    loop function in image.lines.functions {
+    found := [Int]{}
+    loop (index, function) in image.lines.functions {
         named: if by_path -> native_line_file_is(function.dir, function.file, file) else -> native_files.basename(function.file) == wanted
-        if !named -> next
+        if named -> found.push(index)
+    }
+    found
+}
+
+// The addresses of `line` in the Jet source `file` (native_line_functions).
+// In each function, the first statement row (no call row) of the line in
+// its own code and in each inlined copy it holds (two instances of a
+// generic module's member inlined into one caller are two copies). A
+// function with no row of the line, but rows on or before it, gives its
+// first row of the nearest later line instead.
+native_line_addresses: fn(image: NativeImage, file: String, line: Int) -> [Int] Never! {
+    addresses := [Int]{}
+    loop index in native_line_functions(image, file) {
+        function: image.lines.functions[index]
         described: native_function_at(image, function.low)
         sites := [NativeLineSite]{}
         covers := false
@@ -6095,7 +6108,7 @@ native_eval_image_of: fn(elf: [U8]) -> Shared<NativeEvalImage> Never! {
 // both speak it. Every stop prints the Jet source line with its `<- here`
 // caret and the frame's locals; frames without Jet line information (the
 // runtime) are never shown. Each readout starts with a capital.
-NATIVE_DEBUG_HELP: "Commands: step (s), next (n), continue (c), finish (f), reverse-step (rs), reverse-next (rn), reverse-finish (rf), reverse-continue (rc), jump N, back [K], events, break LINE|FILE:LINE|FUNCTION [if EXPR] (b), log FILE:LINE \"TEXT {{EXPR}}\", watch PLACE, why PLACE, breaks, delete N, frame N, up, down, locals, print NAME (p NAME), backtrace (bt), tasks, fix, help (h), quit (q)"
+NATIVE_DEBUG_HELP: "Commands: step (s), next (n), continue (c), finish (f), reverse-step (rs), reverse-next (rn), reverse-finish (rf), reverse-continue (rc), jump N, back [K], events, break LINE|FILE:LINE|FUNCTION [if EXPR] (b), log FILE:LINE \"TEXT {{EXPR}}\", watch PLACE, why PLACE, breaks, delete N, frame N, up, down, locals, print NAME (p NAME), backtrace (bt), disassemble [FUNCTION|LINE|FILE:LINE|FILE:A-B] [--bytes] (disas), tasks, fix, help (h), quit (q)"
 
 // The runtime's observation start, which an image links when it has a task,
 // a channel, a live value or an event (JetRuntime ObserveLive.jet): a replay

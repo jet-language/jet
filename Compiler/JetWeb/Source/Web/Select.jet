@@ -207,7 +207,7 @@ web_stop_point: fn(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, at
             web_store(e, stopped)
             web_end(e)
         }
-    } else if st.armed >= 0 && !ir_opt_polls_checks_call(f, st.poll, st.trap, st.turn, at) {
+    } else if st.armed >= 0 && !ir_opt_polls_checks_call(m, f, st.poll, st.trap, st.turn, at) {
         // A poll that checks no call (a loop's own check, a recursive
         // body's entry check) can observe only what another task asked for,
         // which arms the runtime's word first (JetRuntime Scheduler.jet

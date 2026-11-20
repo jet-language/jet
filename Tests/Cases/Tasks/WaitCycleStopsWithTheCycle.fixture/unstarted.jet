@@ -1,0 +1,17 @@
+// A task canceled before its body runs ends the Sender it took along, and
+// one canceled at its first receive drops it there: either way the main task
+// holds the only Sender it waits on, so the program stops with the deadlock.
+
+run: fn() {
+    { sender: go_sender, receiver: go }: channel<Int>()
+    { sender: ack_sender, receiver: ack }: channel<Int>()
+    worker: task {
+        _ := go.receive() ?? panic("closed")
+        ack_sender.send(1)
+    }
+    worker.cancel()
+    worker.detach()
+    got: ack.receive() ?? -1
+    ack_sender.send(got) ?? print("refused")
+    go_sender.send(got) ?? print("refused")
+}

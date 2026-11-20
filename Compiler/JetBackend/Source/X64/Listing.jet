@@ -1,0 +1,162 @@
+// The listing builder: the one place a stretch of machine code
+// becomes the rows jet debug's `disassemble`, a crash dump's console, the
+// editor adapter's disassemble request, `jet perf view --instructions` and
+// Canvas show. Each row is one instruction x64_decode reads, with the
+// source line the image's line table (Image/Jetline.jet) gives its address,
+// the symbol its branch, call or rip-relative operand reaches, and the mark
+// its caller gives that address. The callers only format the rows.
+
+// A symbol the listing names addresses by: code [address, address + size)
+// named `name` (a Jet function as its line table names it, or a `.symtab`
+// symbol). A size of 0 holds its address alone.
+X64ListingSymbol: struct {
+    address: Int,
+    size: Int,
+    name: String,
+}
+
+// One listed instruction: its address and its offset from the listed
+// code's start, its bytes, its mnemonic and operands as objdump -M intel
+// spells them (X64Insn), how it leaves, the address its relative branch or
+// rip-relative operand reaches (-1: none) and the symbol holding that
+// address (x64_listing_name; "" when none does), its source line (0: no row
+// of the line table holds it) and its caller's mark ("" for none).
+X64ListingRow: struct {
+    address: Int,
+    offset: Int,
+    bytes: [U8],
+    mnemonic: String,
+    operands: String,
+    flow: X64Flow,
+    reach: Int,
+    target: String,
+    line: Int,
+    mark: String,
+}
+
+// The rows of `code`, which runs at `address`, in address order. Each row's
+// line is the statement line the rows of function `function` of `lines`
+// give it (as x64_jetline_line does; -1 leaves every line 0), what it
+// reaches is named from `symbols` (in address order), and `marks` gives a
+// row its mark by address. Bytes the code ends in the middle of an
+// instruction list as (bad), a byte each.
+x64_listing: fn(code: [U8], address: Int, lines: X64Jetline, function: Int, symbols: [X64ListingSymbol], marks: [Int:String]) -> [X64ListingRow] Never! {
+    rows := [X64ListingRow]{}
+    // The line table walks with the rows, which are in address order: `row`
+    // is the last row read, `read` whether it is still to be passed, `line`
+    // the last statement row's line at or before the instruction.
+    low := 0
+    high := 0
+    cursor := 0
+    end := 0
+    if function >= 0 {
+        low = lines.functions[function].low
+        high = lines.functions[function].high
+        cursor = lines.functions[function].rows
+        end = lines.functions[function].rows_end
+    }
+    row := X64LineRow{at: low, line: 1}
+    read := false
+    line := 0
+    at := 0
+    loop at < code.len() {
+        here: address + at
+        insn: x64_decode(code, at, here) ?? x64_decode_bad()
+        loop {
+            if !read {
+                if cursor >= end -> break
+                x64_jetline_next(lines.table, cursor, row)
+                read = true
+            }
+            if row.at > here -> break
+            if !row.call -> line = row.line
+            read = false
+        }
+        shown: if here >= low && here < high -> line else -> 0
+        reach: if insn.reaches -> insn.reach else -> -1
+        rows.push(
+            X64ListingRow{
+                address: here,
+                offset: at,
+                bytes: loop k in at..<at + insn.length -> code[k],
+                mnemonic: "{insn.mnemonic}",
+                operands: insn.operands.join(","),
+                flow: insn.flow,
+                reach: reach,
+                target: if reach >= 0 -> x64_listing_name(symbols, reach) else -> "",
+                line: shown,
+                mark: if marks.get(here) == .Val(mark) -> "{mark}" else -> "",
+            },
+        )
+        at += insn.length
+    }
+    rows
+}
+
+// The symbol holding `address` among `symbols` (in address order): its
+// name at its start, "name+N" past it (N in bytes, as gdb writes it); ""
+// when none holds it. Of symbols at one address the first named wins.
+x64_listing_name: fn(symbols: [X64ListingSymbol], address: Int) -> String Never! {
+    // The first symbol starting past `address`.
+    low := 0
+    high := symbols.len()
+    loop low < high {
+        middle: (low + high) >> 1
+        if symbols[middle].address <= address -> low = middle + 1 else -> high = middle
+    }
+    // Back to the first of the symbols at the start that holds it.
+    found := low - 1
+    loop found > 0 && symbols[found - 1].address == symbols[found].address -> found -= 1
+    if found < 0 -> return ""
+    symbol: symbols[found]
+    if address != symbol.address && address >= symbol.address + symbol.size -> return ""
+    if address == symbol.address -> return "{symbol.name}"
+    "{symbol.name}+{address - symbol.address}"
+}
+
+// A row's instruction as objdump -M intel lays it out: the mnemonic padded
+// to six columns, then its operands, then what it reaches: `<fib>` after a
+// branch's or call's address, `# 0x404010 <counter>` after a rip-relative
+// operand. A jump into the code being listed, [low, high), names its target
+// by its offset there, `<+58>`, as gdb does; a call names the function.
+x64_listing_text: fn(row: X64ListingRow, low: Int, high: Int) -> String Never! {
+    pad: if row.mnemonic.len() < 6 -> " ".repeat(6 - row.mnemonic.len()) else -> ""
+    text: if row.operands == "" -> "{row.mnemonic}" else -> "{row.mnemonic}{pad} {row.operands}"
+    if row.reach < 0 -> return text
+    jump: row.flow == .Jump || row.flow == .Cond || row.flow == .Loop
+    if jump && row.reach >= low && row.reach < high -> return "{text} <+{row.reach - low}>"
+    named: if row.target != "" -> " <{row.target}>" else -> ""
+    if jump || row.flow == .Call -> return "{text}{named}"
+    "{text}  # {x64_hex(row.reach)}{named}"
+}
+
+#Test("a listing gives each instruction its line, names what it reaches and keeps its mark") {
+    // fib at 0x401000: push rbx; mov rbx,rdi; call fib; jl +1; pop rbx; ret;
+    // mov rax,[rip+0x100], its lines 6, 7 (from the call) and 8 (from pop).
+    code: [U8]{0x53, 0x48, 0x89, 0xfb, 0xe8, 0xf7, 0xff, 0xff, 0xff, 0x7c, 0x01, 0x5b, 0xc3, 0x48, 0x8b, 0x05, 0x00, 0x01, 0x00, 0x00}
+    table := [U8]{}
+    x64_jetline_rows(table, [X64LineRow]{X64LineRow{at: 0, line: 6}, X64LineRow{at: 4, line: 7}, X64LineRow{at: 11, line: 8}})
+    end: table.len()
+    lines: X64Jetline{table: table, functions: [X64JetlineFunction]{X64JetlineFunction{low: 0x401000, high: 0x401014, name: "fib", file: "fib.jet", dir: "", decl: 5, rows: 0, rows_end: end}}, ascending: true}
+    symbols: [X64ListingSymbol]{X64ListingSymbol{address: 0x401000, size: 20, name: "fib"}, X64ListingSymbol{address: 0x401100, size: 32, name: "counter"}}
+    rows: x64_listing(code, 0x401000, lines, 0, symbols, [Int:String]{0x401004: "b1"})
+    assert_eq(rows.len(), 7)
+    texts: loop row in rows -> x64_listing_text(row, 0x401000, 0x401014)
+    assert_eq(texts, [String]{"push   rbx", "mov    rbx,rdi", "call   0x401000 <fib>", "jl     0x40100c <+12>", "pop    rbx", "ret", "mov    rax,QWORD PTR [rip+0x100]  # 0x401114 <counter+20>"})
+    assert_eq(loop row in rows -> row.line, [Int]{6, 6, 7, 7, 8, 8, 8})
+    assert_eq(loop row in rows -> row.offset, [Int]{0, 1, 4, 9, 11, 12, 13})
+    assert_eq(rows[2].mark, "b1")
+    assert_eq(rows[1].mark, "")
+    assert_eq(rows[2].bytes, [U8]{0xe8, 0xf7, 0xff, 0xff, 0xff})
+    // Outside every symbol, and past one's size, nothing is named.
+    assert_eq(x64_listing_name(symbols, 0x400fff), "")
+    assert_eq(x64_listing_name(symbols, 0x401120), "")
+    assert_eq(x64_listing_name(symbols, 0x401100), "counter")
+}
+
+#Test("code that ends inside an instruction lists its bytes as (bad), and code without a line table lists line 0") {
+    lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}
+    rows: x64_listing([U8]{0x90, 0x48, 0x8b}, 0x1000, lines, -1, [X64ListingSymbol]{}, [Int:String]{})
+    assert_eq(loop row in rows -> x64_listing_text(row, 0x1000, 0x1003), [String]{"nop", "(bad)", "(bad)"})
+    assert_eq(loop row in rows -> row.line, [Int]{0, 0, 0})
+}

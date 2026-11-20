@@ -5,7 +5,9 @@
 # holds one of the channel's Senders. Tasks outside the cycle run on, and a
 # cycle through the main task stops the program with the deadlock report at
 # the main task's wait. A Sender that travels in a request makes no cycle:
-# the client waiting for the answer runs on.
+# the client waiting for the answer runs on. A Sender a task took along ends
+# with the task even when a cancel stops it before its body runs, so the
+# main task that holds the only other one is still found in its cycle.
 fixture: WaitCycleStopsWithTheCycle.fixture
 env: NO_COLOR=1
 step: jet run cycle.jet
@@ -24,6 +26,12 @@ stdout: = ""
 stderr: ~ "Stop: Jet.Deadlock: Tasks wait on each other\n  --> alone.jet:7\n" # the main task in a cycle stops the program, at its receive
 stderr: ~ "task 1 (main)  waits to receive from a channel only task 1 sends on  " # main holds the only Sender it waits on
 stderr: ~ "alone.jet:7" # at its receive
+stderr: !~ "Jet.Panic" # a deadlock, not a panic
+step: jet run unstarted.jet
+exit: 70
+stdout: = ""
+stderr: ~ "Stop: Jet.Deadlock: Tasks wait on each other\n  --> unstarted.jet:14\n" # the canceled task's Sender ended with it, so main is a cycle alone
+stderr: ~ "task 1 (main)  waits to receive from a channel only task 1 sends on  " # main holds the only Sender left
 stderr: !~ "Jet.Panic" # a deadlock, not a panic
 step: jet run reply.jet
 exit: 0

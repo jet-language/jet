@@ -1,0 +1,31 @@
+# `disassemble` (`disas`) lists the machine code of the stopped function
+# under its source lines. The run starts at `run`, whose entry breakpoint is
+# number 1, so the breakpoint on line 3 is number 2: its row is marked `b2`
+# and, being where the program stopped, ends `<- here` as the stop's source
+# line does, and its bytes are the program's own, never the trap byte. The
+# recursive calls name `fib`. A line lists only its rows, `--bytes` adds
+# their encoding, a runtime routine lists by its symbol, and a name or line
+# with no code is answered as `break` answers it. The fixture must stay in
+# jet fmt form: line 3 is fib's sum. No other debugger or disassembler is on
+# PATH.
+fixture: DisassembleMarksStopAndBreakpoint.fixture
+env: NO_COLOR=1
+step: jet debug prog.jet
+env: PATH={work}/no-tools
+stdin: disassemble_marks_stop_and_breakpoint.stdin
+exit: 0
+stdout: ~ "Breakpoint hit  prog.jet:3  in fib()\n" # the stop the listing marks
+stdout: ~ "disas\nfib  prog.jet:1-3  -O0  0x" # the stopped function, its lines, level and address
+stdout: ~ "prog.jet:3   fib(n - 1) + fib(n - 2)\n   b2  0x" # the line's header, then its first row: breakpoint 2
+stdout.filter(~ "        <- here").filter(~ " <+"): lines >= 1 # the pc's row ends as the stop's source line does
+stdout: ~ "call   0x" # the calls
+stdout: ~ " <fib>\n" # name the function they call
+stdout: !~ "int3" # the trap byte shows as the instruction it covers
+stdout: ~ "disas --bytes prog.jet:3\nfib  prog.jet:3  -O0  0x" # one line's rows
+stdout: ~ " e8 " # with their bytes: a call's opcode
+stdout: ~ "disas jet_int_add\njet_int_add  0x" # a runtime routine, by its symbol
+stdout: ~ "disas nope\nNo function `nope`\n" # a name with no code
+stdout: ~ "disas prog.jet:40\nNo code on prog.jet:40\n" # a line with no code
+stdout: ~ "Deleted breakpoint 2\n" # the breakpoint goes
+stdout: ~ "55\n" # the program's own output
+stdout: ~ "Program finished\n" # and it runs to its end

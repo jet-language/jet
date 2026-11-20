@@ -1,0 +1,44 @@
+// Each loop binds its variable to the value its walk's step loaded: a
+// List's element, a text's line and an Iterable's item.
+Count: struct {
+    priv at: Int,
+    priv end: Int,
+
+    impl Iterator {
+        Item: Int,
+
+        next: fn(&self) -> Int? {
+            if self.at >= self.end -> return None
+            self.at += 1
+            Val(self.at * 10)
+        }
+    }
+}
+
+Counts: struct {
+    priv end: Int,
+
+    impl Iterable {
+        Iter: Count,
+
+        iter: fn(&&self) -> Count { Count{at: 0, end: self.end} }
+    }
+}
+
+run: fn() {
+    words: [String]{"alpha", "beta"}
+    loop word in words {
+        size: word.len()
+        print("word {word} {size}")
+    }
+    text: "first line\nsecond line"
+    loop line in text.lines() {
+        size: line.len()
+        print("line {line} {size}")
+    }
+    counts: Counts{end: 2}
+    loop count in counts {
+        next_count: count + 1
+        print("count {count} {next_count}")
+    }
+}

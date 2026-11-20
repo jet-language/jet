@@ -13,8 +13,9 @@
 # 24, while it runs under `jet run --observe --checked-alloc`, and `jet perf
 # attach --lens=alloc` snapshots them there and says how long it held the
 # program, its run window running from its first read of the program to the
-# snapshot's answer with the program's CPU in it; a run not started with
-# allocation tracking is refused.
+# snapshot's answer with the program's CPU in it. With `--zones=500ms` too,
+# the window holds the 500 ms and is no longer than the attach took. A run
+# not started with allocation tracking is refused.
 requires: os-name:linux
 requires: arch:x86_64
 fixture: HeapSnapshotRetention.fixture
@@ -76,8 +77,8 @@ recv held
 stdout.trim: ~ "READY" # every body is live and the program waits
 step attach: jet perf attach {pid:held} --lens=alloc --source held.jet --out {work}/attach.jettrace
 exit: 0
-capture: took = elapsed
 stderr: ~ "Heap snapshot: held the program's allocations and frees for " # how long the snapshot held the program
+capture: took = elapsed
 json: file attach.jettrace doc $.content.receipt_sections[?name="heap"][0].value.snapshots[0].name = "attach"
 json: file attach.jettrace doc $.content.receipt_sections[?name="heap"][0].value.snapshots[0].sites[?line=24][?type="[Int]"][?blocks=200] #= 1 # every body, by its type and line, while the program runs
 json: file attach.jettrace doc $.content.receipt_sections[?name="heap"][0].value.snapshots[0].sites[?line=null] #= 0 # each live block has its line
@@ -88,6 +89,19 @@ json: file attach.jettrace doc $.content.receipt_sections[?name="window"][0].val
 step attachview: jet perf view {work}/attach.jettrace
 exit: 0
 stdout: ~ "  [Int]  held.jet:24 run  200 blocks  " # the view names them so too
+stdout: ~ " window=live run_wall=" # the header's window is the attach's
+stdout: !~ " run_cpu=0ns" # with the program's CPU in it
+step window: jet perf attach {pid:held} --lens=alloc --zones=500ms --source held.jet --out {work}/window.jettrace
+exit: 0
+stderr: ~ "Heap snapshot: held the program's allocations and frees for " # the snapshot, at the window's end
+capture: waited = elapsed
+json: file window.jettrace doc $.content.receipt_sections[?name="heap"][0].value.snapshots[0].sites[?line=24][?type="[Int]"][?blocks=200] #= 1 # the same bodies
+json: file window.jettrace doc $.content.profile.window_status = "live" # the header's window is the attach's
+json: file window.jettrace doc $.content.profile.window_wall_ns >= 500000000 # its wall time holds the 500 ms window, not the run since it started
+json: file window.jettrace doc $.content.profile.window_wall_ns <= {cap:waited}+0 # and no more than the attach took
+json: file window.jettrace doc $.content.profile.window_cpu_ns > 0 # the program's CPU in it
+step windowview: jet perf view {work}/window.jettrace
+exit: 0
 stdout: ~ " window=live run_wall=" # the header's window is the attach's
 stdout: !~ " run_cpu=0ns" # with the program's CPU in it
 signal held: KILL

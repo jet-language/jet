@@ -489,6 +489,14 @@ NATIVE_TEST_SPIN: "use process: core.process\n\nSpin: struct {{\n    count: Int,
     inner: session.command("locals", first.stop, "prog.jet", lines) ?? panic("locals: {err.detail}")
     assert(inner.text.contains("i: Int = 0\n"), inner.text)
     assert(inner.text.contains("total: Int = 0\n"), inner.text)
+    // `disas` in the inlined frame lists the function it is inlined into,
+    // its run marked, and where the frame's locals live at the pc.
+    listed: session.command("disas", first.stop, "prog.jet", lines) ?? panic("disas: {err.detail}")
+    assert(listed.text.starts_with("run  prog.jet:"), listed.text)
+    assert(listed.text.contains("  -O2  0x"), listed.text)
+    assert(listed.text.contains("  inlined sum_squares, called on line 14\n"), listed.text)
+    assert(listed.text.contains("\n   b1  0x"), listed.text)
+    assert(listed.text.contains("        <- here\n"), listed.text)
     // run's own frame holds run's locals, not the inlined function's.
     assert(session.select_frame(1) ?? panic("select: {err.detail}"), "run's frame")
     outer: session.command("locals", first.stop, "prog.jet", lines) ?? panic("locals: {err.detail}")
@@ -703,6 +711,45 @@ NATIVE_TEST_RECOVER: "bump: fn(rounds: Int) -> Int {{\n    rounds * 2\n}}\n\ndou
     assert(native_debug_hit_breakpoint(first.stop) != None)
     shown: session.command("locals", first.stop, "prog.jet", lines) ?? panic("locals: {err.detail}")
     assert(shown.text.contains("count: Int = 0\n"))
+    session.close()
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+}
+
+// `disas` at a breakpoint lists the stopped function under its source
+// lines, the pc and the breakpoint marked on the program's own bytes (no
+// trap byte), its call named; a name, a line and --bytes pick and widen the
+// listing, and what names no code is answered as `break` answers it.
+#Test("disassemble_lists_the_stopped_function_with_its_stop_and_breakpoint") {
+    scratch: native_test_files.temp_dir("jet-debug-disas") ?? panic("scratch: {err}")
+    root: scratch.path
+    session := native_test_session(root, NATIVE_TEST_PROGRAM, [String]{"-O0"})
+    lines: NATIVE_TEST_PROGRAM.split("\n").to_list()
+    first: session.run_to([NativeBreak]{{file: "prog.jet", line: 9}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
+    listed: session.command("disas", first.stop, "prog.jet", lines) ?? panic("disas: {err.detail}")
+    assert(listed.text.starts_with("run  prog.jet:"), listed.text)
+    assert(listed.text.contains("  -O0  0x"), listed.text)
+    assert(listed.text.contains("prog.jet:9   count += double(i)\n   b1  0x"), listed.text)
+    assert(listed.text.contains("        <- here\n"), listed.text)
+    assert(listed.text.contains(" <double>\n"), listed.text)
+    assert(!listed.text.contains("int3"), listed.text)
+    named: session.command("disassemble double", first.stop, "prog.jet", lines) ?? panic("disassemble: {err.detail}")
+    assert(named.text.starts_with("double  prog.jet:"), named.text)
+    assert(named.text.contains("prog.jet:2   y: x * 2\n"), named.text)
+    assert(!named.text.contains("<- here"), named.text)
+    line: session.command("disas --bytes prog.jet:9", first.stop, "prog.jet", lines) ?? panic("disas line: {err.detail}")
+    assert(line.text.contains("prog.jet:9   count += double(i)\n"), line.text)
+    assert(!line.text.contains("prog.jet:7 "), line.text)
+    assert(line.text.contains(" e8 "), line.text)
+    routine: session.command("disas jet_int_add", first.stop, "prog.jet", lines) ?? panic("disas routine: {err.detail}")
+    assert(routine.text.starts_with("jet_int_add  0x"), routine.text)
+    assert(routine.text.contains("\n       0x"), routine.text)
+    nothing: session.command("disas nope", first.stop, "prog.jet", lines) ?? panic("disas nope: {err.detail}")
+    assert_eq(nothing.text, "No function `nope`\n")
+    far: session.command("disas prog.jet:40", first.stop, "prog.jet", lines) ?? panic("disas far: {err.detail}")
+    assert_eq(far.text, "No code on prog.jet:40\n")
+    session.clear_breakpoints() ?? panic("clear: {err.detail}")
+    rest: session.command("c", first.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    assert(rest.text.contains("count 2\nProgram finished\n"), rest.text)
     session.close()
     native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
 }
