@@ -67,8 +67,9 @@ Every run also writes the results file's `standings` section (#6834,
 against every peer in `matrix.json` `rails.standings` (Rust, C, Zig, Go,
 Python, Node, Bun, Vite, Lua, LuaJIT) and its hand-written asm ceiling
 (`Tools/Perf/AsmParity/<cell>/ref.S`, linked by the cell's `gauntlet` list).
-The metrics are startup, run wall, run cycles (`perf stat -e cycles:u`), peak
-RSS and size. Size is compared on one stated basis (`measurement-manifest.json`
+The metrics are startup, run wall, run cycles (user-mode cycles, perf stat's
+`cycles:u` event, which the harness counts), peak RSS and size. Size is
+compared on one stated basis (`measurement-manifest.json`
 `standings.size_basis`): a compiled program counts as its static, stripped
 build where its language can build that way and that build reproduces the
 expected output; otherwise as its stripped binary plus every shared library it
