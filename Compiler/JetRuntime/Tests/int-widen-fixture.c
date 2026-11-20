@@ -79,9 +79,9 @@ static void rejected(int64_t raw, bool f32, int64_t line, const char *location) 
     int status;
     assert(waitpid(child, &status, 0) == child);
     assert(WIFEXITED(status) && WEXITSTATUS(status) == 70);
-    assert(strstr(text, f32 ? "Stop [E3010]: `whole number has no exact F32; approx(x) rounds it to the nearest F32`\n" : "Stop [E3010]: `whole number has no exact Float; approx(x) rounds it to the nearest Float`\n"));
+    assert(strstr(text, f32 ? "Stop: Jet.ArithmeticOrBoundsFailure: `whole number has no exact F32; approx(x) rounds it to the nearest F32`\n" : "Stop: Jet.ArithmeticOrBoundsFailure: `whole number has no exact Float; approx(x) rounds it to the nearest Float`\n"));
     assert(strstr(text, location));
-    assert(!strstr(text, "E3001"));
+    assert(!strstr(text, "Jet.Panic"));
 }
 
 int main(void) {

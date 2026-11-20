@@ -1701,7 +1701,7 @@ channel_verdict: fn(lane: &Lane, binary: String) -[Env, Exec, FS, IO, Time, Time
                 if ran.stdout != "" {
                     failures.push("{mode}: stdout {json.dumps(Dyn.Text(ran.stdout.copy())) ?? ""} is not empty")
                 }
-                if !ran.stderr.starts_with("Stop [E3001]: `panic: {stop[1]}`") {
+                if !ran.stderr.starts_with("Stop: Jet.Panic: `panic: {stop[1]}`") {
                     failures.push("{mode}: stderr does not open with the E3001 `panic: {stop[1]}` report")
                 }
             }
@@ -1910,7 +1910,7 @@ c_verdict: fn(lane: &Lane, found: Spec) -[Env, Exec, FS, IO, Time, Time.Wait]> P
         loop kind in 0..<5 {
             direct: execute(lane, binary, [String]{"{kind}", "direct"}, out, [Setting]{}, 70, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
             captured: execute(lane, binary, [String]{"{kind}", "captured"}, out, [Setting]{}, 70, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
-            stop: if kind == 1 -> "Stop [E3010]:" else -> "Stop [E3001]:"
+            stop: if kind == 1 -> "Stop: Jet.ArithmeticOrBoundsFailure:" else -> "Stop: Jet.Panic:"
             if direct.stdout != "" || !direct.stderr.starts_with(stop) {
                 return Err(problem("trap report process-edge verdict differs"))
             }
@@ -2756,7 +2756,7 @@ fragment_registry: fn(name: String) -> Registry Never! {
 
 #Test("process-edge goldens decode the committed runtime report literals") {
     repo: test_repo()
-    assert_eq(trap_literal(repo, "trap_msg_header_panic") ?? panic(err.message), "Stop [E3001]: `panic: ")
+    assert_eq(trap_literal(repo, "trap_msg_header_panic") ?? panic(err.message), "Stop: Jet.Panic: `panic: ")
     assert_eq(trap_literal(repo, "trap_msg_prelude_end") ?? panic(err.message), "`\n  --> <core.prelude>:0\n")
     assert_eq(scheduler_literal(repo, "scheduler_msg_canceled") ?? panic(err.message), "task canceled at a cooperative wait point")
     assert((trap_literal(repo, "trap_footer_e3001") ?? panic(err.message)).starts_with(" Why: The program hit a `panic`"))
