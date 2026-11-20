@@ -3049,6 +3049,14 @@ jet_driver_comptime_flush: fn(
         item_config.effect_call = comptime_request.effect_call
         eval_result: jet_eval_native_run(native, item, [TComptimeValue]{}, item_config, comptime_request.span)
         if request.trace_sink == .Val(sink) -> sink.end("comptime.eval", 1)
+        // A signal from outside jet that ended the child stops the build
+        // whatever the item is: the code never finished, so no fold below may
+        // turn the item into run-time code, a refused value or a dropped one.
+        if eval_result.error == .Val(eval_error) && eval_error.diagnostic.outside_signal != None {
+            diagnostics.push(jet_driver_attach_registration_source_location(eval_error.diagnostic, graph, comptime_request.module_identity))
+            flushed.stop = Val(jet_driver_comptime_run_result(values, checked_functions, trace, false, false))
+            return flushed
+        }
         // A local value whose evaluation prints, ends the program, stops or
         // fails stays run-time code: its output never joins the build's.
         if source.local_value {

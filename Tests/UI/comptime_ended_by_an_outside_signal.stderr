@@ -1,0 +1,9 @@
+Error: Jet.ComptimeEndedBySignal: Compile-time code was ended by SIGKILL from outside jet
+  --> Tests/UI/comptime_ended_by_an_outside_signal.jet:16:38
+    |
+ 16 | #StepLimit(4000000000) FOREVER: #run spin()
+    |                                      ^^^^
+ Why: Jet runs compile-time code in a process of its own, and another process or the system (as when memory runs out) sent that process SIGKILL, so the code never finished; jet and the program did not raise it
+ Fix: Build again without stopping it; if the system ended it because memory ran out, free memory or make the compile-time work smaller
+More: jet-lang.dev/e/Jet.ComptimeEndedBySignal
+Exit status: 137

@@ -59,7 +59,7 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
 
 #Test("UI directive table preserves argv cwd streams and refuses internal or unknown facts") {
     loop row in kit_ui_directives() {
-        argument: if row.name == "complexity_cli" -> "branches 8" else if row.name == "compiler_extension" -> "Tools/hook.wasm" else if row.name == "org_policy" -> "organization.policy" else -> ""
+        argument: if row.name == "complexity_cli" -> "branches 8" else if row.name == "compiler_extension" -> "Tools/hook.wasm" else if row.name == "org_policy" -> "organization.policy" else if row.name == "signal_child" -> "KILL" else -> ""
         call: kit_ui_invocation("// @{row.name} {argument}\nprint(1)\n", "Tests/UI/a.jet", false)
         if row.capability != "" {
             assert_eq(call.refused, row.capability)
@@ -108,6 +108,47 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     assert(hangar.hangar_tamper)
     assert_eq(hangar.argv, ["hangar", "verify", "--no-color"])
     assert_eq(kit_ui_arg("// @check_cli\n// @check_cli ignored\n", "check_cli"), Val("ignored"))
+}
+
+#Test("UI signal_child signals the invocation's running child and snapshots jet's exit status") {
+    // The signal rides on the row's invocation, `jet check` when none other.
+    killed: kit_ui_invocation("// @signal_child KILL\n", "Tests/UI/s.jet", false)
+    assert_eq(killed.refused, "")
+    assert_eq(killed.signal_child, 9)
+    assert_eq(killed.argv, ["check", "Tests/UI/s.jet"])
+    assert_eq(kit_ui_invocation("// @run_cli\n// @signal_child SIGTERM\n", "Tests/UI/s.jet", false).argv, ["run", "Tests/UI/s.jet"])
+    assert_eq(kit_ui_invocation("// @run_cli\n// @signal_child SIGTERM\n", "Tests/UI/s.jet", false).signal_child, 15)
+    assert_eq(kit_ui_invocation("// @signal_child 0\n", "Tests/UI/s.jet", false).refused, "@signal_child names no signal: `0`")
+    assert_eq(kit_ui_invocation("// @signal_child BOOM\n", "Tests/UI/s.jet", false).refused, "@signal_child names no signal: `BOOM`")
+    assert_eq(kit_ui_invocation("run: fn() {{}}", "Tests/UI/s.jet", false).signal_child, 0)
+    report: "Error: Jet.ComptimeEndedBySignal: ended\n\n1 problem found\nRun `jet explain Jet.ComptimeEndedBySignal` to learn more\n"
+    assert_eq(kit_ui_actual(killed, kit_ui_test_run(137, report)), "Error: Jet.ComptimeEndedBySignal: ended\nExit status: 137\n")
+    // A child runs once it is on a CPU and past its start; the name in
+    // parentheses may hold spaces and parentheses.
+    assert(kit_exec_stat_running("4242 (jet comptime) R 4241 4241 1 0 -1 4194560 100 0 0 0 7 3 0 0 20 0 1 0 5 1000 10\n"))
+    assert(kit_exec_stat_running("4242 (a) (b) R 4241 4241 1 0 -1 4194560 100 0 0 0 12 0 0 0 20 0 1 0 5 1000 10\n"))
+    assert(!kit_exec_stat_running("4242 (jet-comptime) S 4241 4241 1 0 -1 4194560 100 0 0 0 70 30 0 0 20 0 1 0 5 1000 10\n"))
+    assert(!kit_exec_stat_running("4242 (jet-comptime) R 4241 4241 1 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 1 0 5 1000 10\n"))
+    assert(!kit_exec_stat_running("4242 (jet-comptime) R 4241\n"))
+    assert(!kit_exec_stat_running(""))
+}
+
+#Test("a run's signal_child reaches the running child, and a run whose child never appears fails") {
+    if sys.name() != "linux" {
+        return
+    }
+    root: kit_ui_test_scratch("signal-child")
+    env: KitEnv{root: root, scratch: root, jet: "/bin/sh", jetpack: "", timeout: 30s, memory_limit: 0}
+    // The child spins until the signal; the parent outlives it and reports
+    // the status the signal left it.
+    spinning: kit_exec_run(env, ["/bin/sh", "-c", "sh -c 'while :; do :; done'; echo \"child: $?\" >&2"], root, root, [U8]{}, [KitEnvVar]{}, None, 9)
+    assert_eq(spinning.error, "")
+    assert_eq(spinning.stderr, "child: 137\n")
+    assert_eq(spinning.code, 0)
+    // A run that ends with no child is a failed run, never a snapshot.
+    childless: kit_exec_run(env, ["/bin/sh", "-c", "exit 3"], root, root, [U8]{}, [KitEnvVar]{}, None, 9)
+    assert(childless.error.contains("@signal_child"), childless.error)
+    files.remove_all(root) ?? panic("remove signal_child scratch: {err}")
 }
 
 // A fixture's `// @name` lines are spelled as its rows are, so renaming a

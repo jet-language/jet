@@ -11311,6 +11311,29 @@ Deadlock: struct {
     }
 }
 
+ComptimeEndedBySignal: struct {
+    signal: String,
+
+    impl Diagnostic {
+        code: "E3007",
+        safety_class: .Soundness,
+        safety_reason: "The process running the compile-time code ended before the code finished, so the value it computes does not exist.",
+        expert_path: "none: the build runs again without the signal",
+        meaning: "Compile-time code whose process a signal from outside jet ended",
+        no_fix: .Behavior,
+
+        what: fn(self) -> String { "Compile-time code was ended by {self.signal} from outside jet" }
+
+        why: fn(self) -> String {
+            "Jet runs compile-time code in a process of its own, and another process or the system (as when memory runs out) sent that process {self.signal}, so the code never finished; jet and the program did not raise it"
+        }
+
+        fix: fn(self) -> String {
+            "Build again without stopping it; if the system ended it because memory ran out, free memory or make the compile-time work smaller."
+        }
+    }
+}
+
 ArithmeticOrBoundsFailure: struct {
     msg: String,
 

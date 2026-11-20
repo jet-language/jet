@@ -389,7 +389,9 @@ kit_exec_terminal_order: fn(events: [KitTerminalEvent]) -> [KitTerminalEvent] {
     ordered
 }
 
-kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: [U8], overlay: [KitEnvVar], terminal: KitTerminal?) -> KitRun {
+// `signal_child`, when not 0, is the signal the child's own child gets once
+// it runs (kit_exec_signal_child).
+kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: [U8], overlay: [KitEnvVar], terminal: KitTerminal?, signal_child: Int{0}) -> KitRun {
     if kit_exec_prepare(env, cwd, scratch, overlay) == .Val(stopped) -> return stopped
     started: time.instant()
     spec := kit_exec_spec(env, argv, cwd, scratch, overlay)
@@ -440,6 +442,7 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
         }
         .None -> child.stdin.close()
     }
+    signal_error: if signal_child > 0 -> kit_exec_signal_child(child, watched, spent, started, signal_child, env.timeout.ns) else -> ""
     kit_exec_wait(child, watched, spent, started, -1)
     // Every output byte, read before the wait detaches the readers.
     output := [U8]{}
@@ -449,6 +452,7 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
     if read_error == "" -> read_error = errors_read
     receipt: child.wait() ?? return kit_exec_failed("wait: {err}")
     if read_error != "" -> return kit_exec_failed(read_error)
+    if signal_error != "" -> return kit_exec_failed(signal_error)
     // The entry's claim: the child's resident peak and, on a memory-backed
     // scratch, the files the row holds once it is done.
     if env.peak == .Val(cell) {
@@ -547,6 +551,73 @@ kit_exec_wait: fn(child: ProcessChild, watched: &KitResident, spent: &KitCPU, st
         time.sleep(if until >= 0 && until - at < pause * 1000000 -> time.duration_ns(until - at) else -> time.duration_ms(pause))
         if pause < 10 -> pause = if pause * 2 > 10 -> 10 else -> pause * 2
     }
+}
+
+// Sends `signal` to the child of the step child `child` once it runs
+// (kit_exec_running_child), polling for it as kit_exec_wait polls, with the
+// same memory and CPU watch, until `deadline` ns after spawn. "" once sent;
+// else why not, the step child stopped (with its tree) when the deadline
+// passed, so the wait that follows ends.
+kit_exec_signal_child: fn(child: ProcessChild, watched: &KitResident, spent: &KitCPU, started: time.Instant, signal: Int, deadline: Int) -> String {
+    pid: child.id()
+    pause := 1
+    loop {
+        if kit_exec_running_child(pid) == .Val(target) {
+            #Unsafe("the testkit signals the child of its own step child, as the row's `@signal_child` asks") {
+                sys.kill(target, signal) ?? return "@signal_child: can't signal process {target}: {err}"
+            }
+            return ""
+        }
+        exited: child.exited() ?? return "@signal_child: can't poll the step's process: {err}"
+        if exited -> return "@signal_child: the step's process ended before a child of it ran"
+        at: started.elapsed().ns
+        if at >= deadline {
+            pids := [Int]{}
+            _: kit_exec_tree_resident(pid, true, pids)
+            _: kit_exec_stop_tree(pid, pids)
+            return "@signal_child: no child of the step's process ran within {deadline / 1000000} ms"
+        }
+        kit_exec_watch_resident(watched, at)
+        kit_exec_watch_cpu(spent, at)
+        time.sleep(time.duration_ms(pause))
+        if pause < 10 -> pause = if pause * 2 > 10 -> 10 else -> pause * 2
+    }
+    ""
+}
+
+// The CPU time, in clock ticks, a child has spent once it runs
+// (kit_exec_stat_running): a tenth of a second at the usual 100 ticks a
+// second, more than a process spends starting, so the signal reaches the
+// work it started rather than its start.
+KIT_EXEC_RUNNING_TICKS: 10
+
+// A child of `pid` (`/proc/<pid>/task/<tid>/children`) that runs, as its
+// `/proc/<child>/stat` shows (kit_exec_stat_running); None while none does.
+kit_exec_running_child: fn(pid: Int) -> Int? {
+    threads: files.list_dir("/proc/{pid}/task") ?? return None
+    loop thread in threads {
+        children: files.read(files.join(thread.path, "children")) ?? next
+        loop word in children.split(" ") {
+            candidate: Int.parse(word.trim()) ?? next
+            stat: files.read("/proc/{candidate}/stat") ?? next
+            if kit_exec_stat_running(stat) -> return Val(candidate)
+        }
+    }
+    None
+}
+
+// Whether the `/proc/<pid>/stat` line `stat` is of a process on a CPU (state
+// `R`) that has spent KIT_EXEC_RUNNING_TICKS of CPU time (utime plus stime,
+// the 14th and 15th fields). The fields are read after the name's closing
+// `) `, since the name in parentheses may hold spaces.
+kit_exec_stat_running: fn(stat: String) -> Bool {
+    parts: stat.split(") ").to_list()
+    if parts.len() < 2 -> return false
+    fields: parts[parts.len() - 1].split(" ").to_list()
+    if fields.len() < 13 || fields[0] != "R" -> return false
+    user: Int.parse(fields[11]) ?? return false
+    system: Int.parse(fields[12]) ?? return false
+    user + system >= KIT_EXEC_RUNNING_TICKS
 }
 
 // The CPU limit on one child: the child (`pid` 0 is unwatched), the CPU time

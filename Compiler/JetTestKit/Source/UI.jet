@@ -97,6 +97,11 @@ kit_ui_directives: fn() -> [KitUIDirective] {
         // Marks a programmable build entry; an invocation row (`build_grants`)
         // runs it, and one with none is refused (kit_ui_invocation).
         {name: "programmable_build", argv: [], parent: false, exit: "any", streams: "", capability: ""},
+        // `@signal_child SIGNAL` (`KILL`, `TERM`, ...): the kit runs the
+        // invocation, sends the signal to the child process jet starts once
+        // it runs (kit_exec_signal_child), and snapshots the report with
+        // jet's exit status.
+        {name: "signal_child", argv: [], parent: false, exit: "any", streams: "", capability: ""},
     }
     loop name in ["parent_control_cancel", "jetpack_retired_store_verbs"] {
         rows.push(KitUIDirective{name: name.copy(), argv: [], parent: false, exit: "any", streams: "", capability: "missing CLI fixture API: {name}"})
@@ -217,6 +222,11 @@ kit_ui_invocation: fn(source: String, file: String, lint: Bool) -> KitUICall {
     if !selected && kit_ui_arg(source, "programmable_build") != None {
         call.refused = "missing CLI fixture API: programmable_build"
     }
+    if kit_ui_arg(source, "signal_child") == .Val(named) {
+        number: kit_steps_signal_number(named) ?? 0
+        if number <= 0 -> call.refused = "@signal_child names no signal: `{named}`"
+        call.signal_child = number
+    }
     call
 }
 
@@ -321,6 +331,8 @@ kit_ui_normalize: fn(shown: String, actual: String, root: String) -> String {
 }
 
 kit_ui_actual: fn(call: KitUICall, run: KitRun) -> String {
+    // A signaled child's report shows the status jet ended with.
+    if call.signal_child > 0 -> return "{kit_ui_rendered_only(run.stderr)}Exit status: {run.code}\n"
     if call.streams == "lint" -> return kit_ui_rendered_only(run.stderr)
     if call.streams == "both" -> return "{run.stdout}{run.stderr}"
     if call.streams == "stderr" -> return run.stderr
@@ -581,7 +593,7 @@ kit_ui_outcomes: fn(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
         // The staged tree is the toolchain the check finds around `Core`.
         overlay.push(KitEnvVar{name: ENV_JET_TOOLCHAIN_ROOT, value: None})
     }
-    result: kit_exec_invoke_with_env(ctx.env, args, cwd, ctx.scratch, call.stdin.bytes(), overlay)
+    result: kit_exec_run(ctx.env, args, cwd, ctx.scratch, call.stdin.bytes(), overlay, None, call.signal_child)
     actual: kit_ui_normalize(entry.path, kit_ui_actual(call, result), if call.check_core -> cwd else -> source)
     verdict: kit_ui_snapshot(entry, call, result, actual, ctx)
     outcomes := [KitOutcome]{KitOutcome{verdict: verdict, run: result, tier: "-"}}

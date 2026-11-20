@@ -1,0 +1,18 @@
+// @signal_child KILL
+// Compile-time work whose process something outside jet kills, as the kit
+// does here once it runs: the check stops with the report at the binding's
+// call, and ends with 137 (128 + SIGKILL's 9), as a shell reports a process
+// that signal ended, never as a compiler defect.
+spin: fn() -> Int {
+    total := 0
+    loop total >= 0 {
+        text := ""
+        loop _ in 0..<2000 -> text = "{text}x"
+        total += text.len()
+    }
+    total
+}
+
+#StepLimit(4000000000) FOREVER: #run spin()
+
+run: fn() { print("{FOREVER}") }

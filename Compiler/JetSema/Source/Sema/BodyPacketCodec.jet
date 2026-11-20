@@ -1156,6 +1156,7 @@ body_codec_put_diagnostic: fn(out: &BodyCodecOut, value: Diagnostic) Never! {
     body_codec_put_list_string(out, value.call_chain)
     body_codec_put_list_string(out, value.scope_chain)
     body_codec_put_opt_string(out, value.nearest_granting_scope)
+    body_codec_put_opt_int(out, value.outside_signal)
 }
 
 body_codec_get_diagnostic: fn(bytes: [U8], input: &BodyCodecIn) -> Diagnostic Never! {
@@ -1184,7 +1185,8 @@ body_codec_get_diagnostic: fn(bytes: [U8], input: &BodyCodecIn) -> Diagnostic Ne
     f22: body_codec_get_list_string(bytes, input)
     f23: body_codec_get_list_string(bytes, input)
     f24: body_codec_get_opt_string(bytes, input)
-    Diagnostic{moment: f0, severity: f1, code: f2, span: f3, source_path: f4, source_offset: f5, source_start: f6, origin: f7, cause: f8, labels: f9, what: f10, why: f11, fix: f12, edit: f13, fix_edits: f14, fix_calls: f15, applicability: f16, safety: f17, no_fix_reason: f18, detail: f19, structured: f20, denial_kind: f21, call_chain: f22, scope_chain: f23, nearest_granting_scope: f24}
+    f25: body_codec_get_opt_int(bytes, input)
+    Diagnostic{moment: f0, severity: f1, code: f2, span: f3, source_path: f4, source_offset: f5, source_start: f6, origin: f7, cause: f8, labels: f9, what: f10, why: f11, fix: f12, edit: f13, fix_edits: f14, fix_calls: f15, applicability: f16, safety: f17, no_fix_reason: f18, detail: f19, structured: f20, denial_kind: f21, call_chain: f22, scope_chain: f23, nearest_granting_scope: f24, outside_signal: f25}
 }
 
 body_codec_put_diagnosticmoment: fn(out: &BodyCodecOut, value: DiagnosticMoment) Never! {

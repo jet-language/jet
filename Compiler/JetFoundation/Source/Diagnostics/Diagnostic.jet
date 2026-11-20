@@ -171,6 +171,10 @@ Diagnostic: struct {
     call_chain: [String]{[String]{}},
     scope_chain: [String]{[String]{}},
     nearest_granting_scope: String?{None},
+    // The signal from outside jet that ended a process this report is about
+    // (E3007): a command it stops ends with 128 plus the signal, as a shell
+    // reports a process that signal ended.
+    outside_signal: Int?{None},
 }
 
 diagnostic_with_source_path: fn(diagnostic: &&Diagnostic, source_path: String, aggregate_source_offset: Int) -> Diagnostic Never! {

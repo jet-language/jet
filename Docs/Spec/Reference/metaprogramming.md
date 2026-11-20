@@ -171,6 +171,15 @@ limit that is not a whole number above 0 is E0930
 A step is measured as time: the evaluator gives n steps n / 2000
 milliseconds.
 
+Compile-time work runs in a process of its own, which ends with the `jet`
+that started it however that `jet` ends, a kill included
+([`comptime_child_dies_with_its_parent.case`](../../../Tests/Cases/RuntimeStops/comptime_child_dies_with_its_parent.case)).
+When something outside jet ends that process with SIGHUP, SIGINT, SIGKILL
+or SIGTERM (another process, or the system when memory runs out), the build
+stops with E3007 at the call whose work it ran, and the command ends with
+128 plus the signal, as a shell reports a process that signal ended
+([`comptime_ended_by_an_outside_signal.jet`](../../../Tests/UI/comptime_ended_by_an_outside_signal.jet)).
+
 `@if` performs compile-time selection. The selected arm is type-checked and
 emitted; the other arm is name-resolved so misspelled names are still found.
 Nested `@if` forms use the same rule. See

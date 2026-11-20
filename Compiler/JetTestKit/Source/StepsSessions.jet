@@ -358,8 +358,20 @@ kit_steps_session_action: fn(step: KitStep, context: KitStepCtx, previous: KitSt
     kit_steps_action_error(state, "session label unavailable")
 }
 
+// The number of the signal a case or a UI row names: `KILL` or `SIGKILL`,
+// and the others the same way, or a number; None for an unknown name.
+kit_steps_signal_number: fn(name: String) -> Int? {
+    if name == "INT" || name == "SIGINT" -> return Val(2)
+    if name == "TERM" || name == "SIGTERM" -> return Val(15)
+    if name == "KILL" || name == "SIGKILL" -> return Val(9)
+    if name == "HUP" || name == "SIGHUP" -> return Val(1)
+    if name == "STOP" || name == "SIGSTOP" -> return Val(19)
+    if name == "CONT" || name == "SIGCONT" -> return Val(18)
+    Val(Int.parse(name) ?? return None)
+}
+
 kit_steps_signal: fn(pid: Int, name: String) -> Bool Err! {
-    number: if name == "INT" || name == "SIGINT" -> 2 else if name == "TERM" || name == "SIGTERM" -> 15 else if name == "KILL" || name == "SIGKILL" -> 9 else if name == "HUP" || name == "SIGHUP" -> 1 else if name == "STOP" || name == "SIGSTOP" -> 19 else if name == "CONT" || name == "SIGCONT" -> 18 else -> Int.parse(name) ?? return Err("unknown signal")
+    number: kit_steps_signal_number(name) ?? return Err("unknown signal")
     #Unsafe("the case explicitly authorizes signaling its own spawned child") {
         sys.kill(pid, number) ?? return Err("signal delivery failed")
     }
