@@ -145,7 +145,9 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
     elf: bytes[header..<header + length]
     image: native_image_read(elf) ?? return Err(NativeDebugError{detail: "the program of `{path}` has no Jet debug information"})
     // A dump's frames open as the image's code opens them.
-    openings: native_openings(image, native_elf_codes(elf, ".text"))
+    codes: native_elf_codes(elf, ".text")
+    openings: native_openings(image, codes)
+    program_entry: native_image_entry(image, codes)
     registry: native_dump_word(bytes, 80)
     // Each memory section is a span of the dump's bytes, which back them.
     blocks := [NativeBlock]{}
@@ -199,7 +201,7 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
     seconds: native_dump_word(bytes, 24)
     records: bytes.len() - native_dump_pad(length) - memory
     dump: NativeDump{tasks: tasks, memory: NativeMemory{trace: None, blocks: blocks, backing: bytes.move(), cut: cut}, registry: registry}
-    session: NativeSession{binary: path, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: "", output_read: 0, started: true, threads: [NativeThread]{}, observe_root: 0, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: Val(dump), task: 0}
+    session: NativeSession{binary: path, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: "", output_read: 0, started: true, threads: [NativeThread]{}, observe_root: 0, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: Val(dump), task: 0, program_entry: program_entry}
     Ok(NativeDumpOpened{session: session, ring: ring, pid: pid, seconds: seconds, image: length, memory: memory, records: records, budget: budget, cut_off: cut_off})
 }
 
@@ -412,7 +414,7 @@ native_dump_where: fn(image: NativeImage, ring: [U8], at: Int, pc: Int, first: I
 }
 
 // The source file of the run the dump at `path` caught, `source` as its
-// image's line table names it (NativeSession.run_source). A relative one is
+// image's line table names it (NativeSession.entry_source). A relative one is
 // relative to the directory the run ran in (JetCLI Host.jet
 // jet_cli_debug_directory), which holds the `.jet/dumps` the dump is in
 // (JetRuntime PerfSamples.jet perf_flight_dump_open). A dump kept elsewhere

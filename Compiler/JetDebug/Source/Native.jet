@@ -539,6 +539,10 @@ NativeSession: struct {
     // stopped the last run.
     interrupt: Int{-1},
     interrupted: Bool{false},
+    // The program's entry, the Jet function its image's `main` hands the
+    // run to (native_image_entry), as an index of the line table's
+    // functions; -1 when the image names none.
+    program_entry: Int{-1},
 
     // Load the debug facts of `binary` (a native image with debug info, its
     // own or in the side file its `.gnu_debuglink` names). The program's
@@ -548,8 +552,9 @@ NativeSession: struct {
         image: native_image_load(binary, elf) ?? return Err(NativeDebugError{detail: "`{binary}` has no Jet debug information; build it with `jet build -O0`"})
         native_files.write(output_path, "") ?? return Err(NativeDebugError{detail: "couldn't create the program output file: {err}"})
         observe_root: native_elf_symbol(elf, X64_OBSERVE_ROOT_SYMBOL) ?? 0
-        openings: native_openings(image, native_elf_codes(elf, ".text"))
-        Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: output_path, output_read: 0, started: false, threads: [NativeThread]{}, observe_root: observe_root, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: None, task: 0, replay_start: native_elf_symbol(elf, NATIVE_REPLAY_START_SYMBOL) != None})
+        codes: native_elf_codes(elf, ".text")
+        openings: native_openings(image, codes)
+        Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: output_path, output_read: 0, started: false, threads: [NativeThread]{}, observe_root: observe_root, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: None, task: 0, replay_start: native_elf_symbol(elf, NATIVE_REPLAY_START_SYMBOL) != None, program_entry: native_image_entry(image, codes)})
     }
 
     // A breakpoint on `line` of the Jet source `file` (a base name or a path,
@@ -580,6 +585,13 @@ NativeSession: struct {
             if found.name == function -> addresses.push(self.entry(index))
         }
         self.place(addresses)
+    }
+
+    // A breakpoint at the start of the program's entry (`program_entry`);
+    // None when the image names none.
+    break_in_entry: fn(&self) -> Int? NativeDebugError! {
+        if self.program_entry < 0 -> return Ok(None)
+        self.place([Int]{self.entry(self.program_entry)})
     }
 
     // Where a breakpoint on the start of function `index` traps: past the
@@ -1794,7 +1806,9 @@ NativeSession: struct {
         elf: native_files.read_bytes(binary) ?? return Err(NativeDebugError{detail: "couldn't read the program `{binary}`: {err}"})
         image: native_image_load(binary, elf) ?? return Err(NativeDebugError{detail: "`{binary}` has no Jet debug information; build it with `jet build -O0`"})
         self.observe_root = native_elf_symbol(elf, X64_OBSERVE_ROOT_SYMBOL) ?? 0
-        self.openings = native_openings(image, native_elf_codes(elf, ".text"))
+        codes: native_elf_codes(elf, ".text")
+        self.openings = native_openings(image, codes)
+        self.program_entry = native_image_entry(image, codes)
         self.image = image
         self.binary = binary
         self.breakpoints = [NativeBreakpoint]{}
@@ -2133,19 +2147,12 @@ NativeSession: struct {
         self.forget_placed()
     }
 
-    // The source file of the program's `run`, as the image's line table
-    // records it; an -O2 image inlines `run` into its entry wrapper
-    // (JetIR Build.jet's `entry`), whose file is `run`'s. "" when the image
-    // holds neither.
-    run_source: fn(&self) -> String Never! {
-        wrapper := ""
-        loop found in self.image.lines.functions {
-            if found.name == "run" -> return native_line_source(found.dir, found.file)
-            if found.name == "entry" && wrapper == "" {
-                wrapper = native_line_source(found.dir, found.file)
-            }
-        }
-        wrapper
+    // The source file of the program's entry (`program_entry`), as the
+    // image's line table records it; "" when the image names no entry.
+    entry_source: fn(&self) -> String Never! {
+        if self.program_entry < 0 -> return ""
+        found: self.image.lines.functions[self.program_entry]
+        native_line_source(found.dir, found.file)
     }
 
     // The optimization level the program was built at (0, 1 or 2), which an
@@ -2153,18 +2160,14 @@ NativeSession: struct {
     // again around them only at the same level.
     level: fn(&self) -> Int Never! { self.image.level }
 
-    // Run the program with `args` to the start of its `run`, in the Jet
-    // source `file` whose text is `lines`: of its entry wrapper when `run`
-    // is inlined there (run_source). None when the program has neither.
+    // Run the program with `args` to the start of its entry (`program_entry`),
+    // in the Jet source `file` whose text is `lines`. None when the image
+    // names no entry.
     open: fn(&self, file: String, lines: [String], args: [String]) -> NativeDebugStep? NativeDebugError! {
         start := -1
-        named: [String]{"run", "entry"}
-        loop function in named {
-            if self.break_in(function) == {
-                .Ok(placed) -> start = placed ?? -1
-                .Err(failure) -> return Err(failure)
-            }
-            if start >= 0 -> break
+        if self.break_in_entry() == {
+            .Ok(placed) -> start = placed ?? -1
+            .Err(failure) -> return Err(failure)
         }
         if start < 0 -> return Ok(None)
         first: self.launch(args) ?? return Err(err)

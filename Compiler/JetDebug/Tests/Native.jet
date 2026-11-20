@@ -484,9 +484,43 @@ NATIVE_TEST_INLINED_RUN: "work: fn(n: Int) -> Int {{\n    n * 2\n}}\n\nrun: fn()
         }
     } ?? false
     assert(!named, "run is inlined into the entry at -O2")
-    assert_eq(native_test_files.basename(session.run_source()), "prog.jet")
+    assert_eq(native_test_files.basename(session.entry_source()), "prog.jet")
+    // The image's `main` hands the run to the entry wrapper, which keeps run's
+    // code inlined: the wrapper is the program's entry.
+    assert(session.program_entry >= 0, "the image's main names its entry")
+    assert_eq(session.image.lines.functions[session.program_entry].name, "entry")
     lines: NATIVE_TEST_INLINED_RUN.split("\n").to_list()
     first: session.open("prog.jet", lines, [String]{}) ?? panic("the entry wrapper opens the session")
+    rest: session.command("c", first.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    assert(rest.text.contains("got 42\nProgram finished\n"), rest.text)
+    session.close()
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+}
+
+// A `run` that can fail is run by a generated entry function (JetIR
+// ir_entry_function), which the image's `main` hands the run to.
+NATIVE_TEST_FALLIBLE_RUN: "run: fn() Err! {{\n    n: 21\n    print(\"got {{n * 2}}\")\n}}\n"
+
+// The program's entry is the function its image's `main` runs, whatever
+// it is named: through a generated entry function to the `run` it runs, so
+// the session opens at run's first line, not in the wrapper.
+#Test("a_session_opens_at_the_entry_its_image_runs") {
+    scratch: native_test_files.temp_dir("jet-debug-entry") ?? panic("scratch: {err}")
+    root: scratch.path
+    session := native_test_session(root, NATIVE_TEST_FALLIBLE_RUN, [String]{"-O0"})
+    wrapped: loop found in session.image.lines.functions {
+        if found.name == "entry" {
+            break true
+        }
+    } ?? false
+    assert(wrapped, "a fallible run is run by a generated entry function")
+    assert(session.program_entry >= 0, "the image's main names its entry")
+    assert_eq(session.image.lines.functions[session.program_entry].name, "run")
+    assert_eq(native_test_files.basename(session.entry_source()), "prog.jet")
+    lines: NATIVE_TEST_FALLIBLE_RUN.split("\n").to_list()
+    first: session.open("prog.jet", lines, [String]{}) ?? panic("the session opens at the entry")
+    assert(first.text.contains("in run()"), first.text)
+    assert(first.text.contains("2 |     n: 21"), first.text)
     rest: session.command("c", first.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
     assert(rest.text.contains("got 42\nProgram finished\n"), rest.text)
     session.close()

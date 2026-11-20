@@ -909,8 +909,10 @@ it does not turn an unavailable panel or command into a silent no-op.
 
 ## The debugger console
 
-`jet debug <file.jet>` stops at the start of `run` (or at `--break
-<file>:<line>`) and reads one command a line at the `(Jet) ` prompt. When
+`jet debug <file.jet>` stops at the start of the program's entry, the Jet
+function its image's `main` runs (`run`, a script's statements, or an -O2
+image's entry wrapper that keeps `run` inlined), or at `--break
+<file>:<line>`, and reads one command a line at the `(Jet) ` prompt. When
 its stdin is a terminal, the program shares it, as a shell's job does: the
 program reads the terminal while it runs and the console while it is
 stopped. Otherwise the program's stdin is empty, and its reads end at
@@ -993,7 +995,12 @@ step would have ended. `jet debug --dap` settles every run the same way
 
 While `jet debug --dap` runs the program on (`continue`, and the start from
 `configurationDone` or `restart`), the next request stops every thread where
-it is: `pause` answers and reports the stop; `disconnect` ends the session;
+it is: `pause` answers and reports the stop; a pause that finds the program
+still starting, before any code of its own has run, lets it run on to the
+start of its entry, where the console and `stopOnEntry` stop too, and
+reports the pause there, so its stack always has the program's first Jet
+frame (a breakpoint reached first, or the program's end, is reported
+instead); `disconnect` ends the session;
 `restart` starts the program again (an attached one does not restart); a
 request about a stop (`stackTrace`, `scopes`, `variables`, `evaluate`) or a
 run command waits for the next stop, the program running on to it, and is

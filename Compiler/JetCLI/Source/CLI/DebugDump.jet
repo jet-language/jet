@@ -23,7 +23,7 @@ jet_cli_debug_dump: fn(path: String, color: Bool) -[FS, Env, IO, Time.Wait, FFI.
     frames: opened.session.backtrace() ?? return jet_cli_debug_unavailable(err, color)
     stop: native_dump_jet_frame(frames, 0) ?? 0
     _ := opened.session.select_frame(stop) ?? return jet_cli_debug_unavailable(err, color)
-    source: native_dump_source(path, opened.session.run_source())
+    source: native_dump_source(path, opened.session.entry_source())
     lines: (cli_files.read(source) ?? "").split("\n").to_list()
     events: native_dump_events(opened.session.image, opened.ring)
     file: cli_files.basename(source)

@@ -1,0 +1,26 @@
+# `pause` sent the moment `configurationDone` starts the program may find it
+# still starting, before any code of its own has run. The stop is never one
+# with an empty stack: the program runs on to the start of its entry,
+# the Jet function the image's `main` hands the run to, and the pause is
+# reported there, so the stopped task's innermost frame is `run` in main.jet
+# whenever the pause lands.
+fixture: DapCLIPausesARunningTargetThroughProductionWire.fixture
+env: NO_COLOR=1
+session dap content-length: jet debug --dap {work}/main.jet
+send dap: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\"}}"
+send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{\"program\":\"{work}/main.jet\",\"stopOnEntry\":false,\"args\":[],\"env\":{}}}"
+send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{}}"
+send dap: "{\"seq\":4,\"type\":\"request\",\"command\":\"pause\",\"arguments\":{}}"
+recv dap collect until ndjson $[?request_seq=4][?success=true][?command="pause"] #>= 1 && ndjson $[?event="stopped"] #>= 1 timeout 30s
+json: stdout ndjson $[?event="stopped"][0].body.reason = "pause" # a pause, not the breakpoint the run to the entry used
+json: stdout ndjson $[?event="stopped"][0].body.threadId = 1 # in the root task
+json: stdout ndjson $[?event="exited"] #= 0 # the program did not run past its pause
+send dap: "{\"seq\":5,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.request_seq = 5 timeout 30s
+json: stdout doc $.success = true
+json: stdout doc $.body.stackFrames #>= 1 # never an empty stack
+json: stdout doc $.body.stackFrames[0].name = "run" # the program's first Jet frame
+json: stdout doc $.body.stackFrames[0].source.name = "main.jet" # in its own source
+send dap: "{\"seq\":6,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{}}"
+close dap timeout 10s
+exit: 0

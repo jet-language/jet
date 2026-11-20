@@ -1,0 +1,33 @@
+# `stopOnEntry` stops at the start of the program's entry: the Jet function
+# that the image's `main` hands the run to, whatever its name. In this -O2
+# image, `run` starts a task and is inlined into its generated entry
+# function, so no function named `run` is left. The launch stops at the start
+# of that entry function, in prog.jet, before the program prints anything.
+# Run on from there, the program prints what it prints undebugged.
+fixture: DapCLIStopsOnEntryWhereTheImageEnters.fixture
+env: NO_COLOR=1
+step: jet build -O2 prog.jet
+exit: 0
+session dap content-length: jet debug --dap {work}/.jet/build/prog
+send dap: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\",\"linesStartAt1\":true,\"columnsStartAt1\":true}}"
+recv dap until $.request_seq = 1 timeout 30s every 100ms
+send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{\"program\":\"{work}/.jet/build/prog\",\"stopOnEntry\":true,\"args\":[]}}"
+recv dap until $.event = "initialized" timeout 30s every 100ms
+send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{}}"
+recv dap collect until ndjson $[?event="stopped"] #>= 1 timeout 30s
+json: stdout ndjson $[?event="stopped"] #= 1 # the launch stops
+json: stdout ndjson $[?event="stopped"][0].body.reason = "entry"
+json: stdout ndjson $[?event="exited"] #= 0 # the program has not ended
+stdout: !~ "got 42" # nor printed anything
+send dap: "{\"seq\":4,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.request_seq = 4 timeout 30s every 100ms
+json: stdout doc $.success = true
+json: stdout doc $.body.stackFrames #>= 1 # a Jet frame, not an empty stack
+json: stdout doc $.body.stackFrames[0].source.name = "prog.jet" # the entry is the program's own code
+stdout: !~ "__jet_" # no runtime frames among the Jet ones
+send dap: "{\"seq\":5,\"type\":\"request\",\"command\":\"continue\",\"arguments\":{\"threadId\":1}}"
+recv dap collect until ndjson $[?event="terminated"] #>= 1 timeout 30s
+stdout: ~ "got 42" # the image runs unchanged
+stdout: ~ "\"event\":\"exited\"" # and the program ends
+close dap
+exit: 0
