@@ -113,7 +113,8 @@ BuildRun: struct {
 }
 
 // `builder` (a directory with jet and jet-runtime/) builds the stage `name`:
-// jet, the runtime pack it lowers and IDENTITY, which names the built jet.
+// jet, jet.debug (its DWARF, which its `.gnu_debuglink` names), the runtime
+// pack it lowers and IDENTITY, which names the built jet.
 build_stage: fn(run: BuildRun, name: String, builder: String, identity: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Stage Never! {
     built: files.join(run.tree, "Compiler/JetCLI/.jet/build/jet")
     built_pack: files.join(run.tree, "Compiler/JetCLI/.jet/build/jet-runtime")
@@ -129,6 +130,12 @@ build_stage: fn(run: BuildRun, name: String, builder: String, identity: String) 
     dir: files.join(run.work, name)
     files.create_dir_all(dir) ?? return Stage{dir: "", identity: "", error: "{name}: cannot create {dir}: {err}"}
     copy_file(built, files.join(dir, "jet"), true) ?? return Stage{dir: "", identity: "", error: "{name}: cannot copy {built}: {err}"}
+    if files.exists("{built}.debug") {
+        copy_file("{built}.debug", files.join(dir, "jet.debug"), false) ?? return Stage{dir: "", identity: "", error: "{name}: cannot copy {built}.debug: {err}"}
+    }
+    staged: files.join(dir, "jet")
+    debug_problem: debug_file_problem(files.read_bytes(staged) ?? [U8]{}, staged)
+    if debug_problem != "" -> return Stage{dir: "", identity: "", error: "{name}: {debug_problem}"}
     if !copy_tree(built_pack, files.join(dir, "jet-runtime")) {
         return Stage{dir: "", identity: "", error: "{name}: cannot copy {built_pack}"}
     }
@@ -216,6 +223,9 @@ build_main: fn(args: [String], root: String) -[Env, Exec, FS, IO, Time, Time.Wai
     }
 
     copy_file(files.join(s2.dir, "jet"), files.join(out, "jet"), true) ?? return build_fail(1, "cannot copy s2 into {out}: {err}")
+    if files.exists(files.join(s2.dir, "jet.debug")) {
+        copy_file(files.join(s2.dir, "jet.debug"), files.join(out, "jet.debug"), false) ?? return build_fail(1, "cannot copy s2's jet.debug into {out}: {err}")
+    }
     link_compiler_aliases(out) ?? return build_fail(1, "cannot link the compiler aliases in {out}: {err}")
     if !copy_tree(files.join(s2.dir, "jet-runtime"), files.join(out, "jet-runtime")) {
         return build_fail(1, "cannot copy {s2.dir}/jet-runtime into {out}")

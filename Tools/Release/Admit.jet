@@ -2564,6 +2564,13 @@ assemble: fn(ctx: Ctx, plan: MergePlan) -[Env, Exec, FS, Time, Time.Wait]> Assem
     remove_tree(temp)
     files.create_dir_all(temp) ?? return Err(assembly("cannot create {temp}: {err}"))
     copy_file(ctx.candidate.jet, files.join(temp, "jet"), true) ?? return Err(assembly("cannot copy jet into {temp}: {err}"))
+    // jet's DWARF, which its `.gnu_debuglink` names, ships beside it.
+    if files.exists("{ctx.candidate.jet}.debug") {
+        copy_file("{ctx.candidate.jet}.debug", files.join(temp, "jet.debug"), false) ?? return Err(assembly("cannot copy jet.debug into {temp}: {err}"))
+    }
+    assembled_jet: files.join(temp, "jet")
+    debug_problem: debug_file_problem(files.read_bytes(assembled_jet) ?? [U8]{}, assembled_jet)
+    if debug_problem != "" -> return Err(assembly(debug_problem))
     link_compiler_aliases(temp) ?? return Err(assembly("cannot link the compiler aliases in {temp}: {err}"))
     if !copy_tree(ctx.candidate.runtime, files.join(temp, "jet-runtime")) {
         return Err(assembly("cannot copy {ctx.candidate.runtime} into {temp}"))

@@ -132,7 +132,7 @@ jettrace_test_array_item: fn(value: CanonicalJSON, index: Int) -> CanonicalJSON 
 
 #Test("trace_version_has_one_typed_home") {
     version: TRACE_VERSION
-    assert_eq(version, U32{2})
+    assert_eq(version, U32{3})
     assert_eq(TRACE_SCHEMA, "jet.trace")
     wrapper: jettrace_test_valid(jettrace_sample_skeleton())
     assert_eq(jettrace_test_wrapper_lookup(wrapper, "version") ?? panic(err.message), CanonicalJSON.Integer("{version}"))
@@ -436,7 +436,7 @@ jettrace_test_io: fn(task: U64?) -> TraceIO Never! {
 #Test("newer_major_version_names_required_toolchain") {
     content: trace_skeleton_content_json(jettrace_sample_skeleton()) ?? panic(err.message)
     wrapper := jettrace_artifact(content) ?? panic(err.message)
-    jettrace_test_set(wrapper, "version", .Integer("3"))
+    jettrace_test_set(wrapper, "version", .Integer("4"))
     assert(jettrace_test_error_bytes(canonical_json_bytes(wrapper)).contains("newer jet toolchain"))
 }
 
@@ -445,6 +445,15 @@ jettrace_test_io: fn(task: U64?) -> TraceIO Never! {
     wrapper := jettrace_artifact(content) ?? panic(err.message)
     jettrace_test_set(wrapper, "version", .Integer("1"))
     assert(jettrace_test_error_bytes(canonical_json_bytes(wrapper)).contains("older format this reader no longer reads"))
+}
+
+#Test("a version 2 trace is refused and recorded again") {
+    content: trace_skeleton_content_json(jettrace_sample_skeleton()) ?? panic(err.message)
+    wrapper := jettrace_artifact(content) ?? panic(err.message)
+    jettrace_test_set(wrapper, "version", .Integer("2"))
+    refused: jettrace_test_error_bytes(canonical_json_bytes(wrapper))
+    assert(refused.contains("older format this reader no longer reads"))
+    assert(refused.contains("record it again with `jet perf run`"))
 }
 
 #Test("embedded_source_maps_hash_and_sort_for_offline_truth") {

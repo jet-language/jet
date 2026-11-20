@@ -3708,6 +3708,15 @@ sema_expr_check_declared_direct_call: fn(call: Call, expected: Type?, environmen
         diagnostics.push(sema_error("E0102", call.name_span, "`{call.name}` is a number type, not a function", "Jet builds a value of a number type with braces; parentheses call a function", "write `{call.name}{{{sema_expr_number_type_argument_text(call.args[0].expr)}}}`"))
         return None
     }
+    // `len(items)`: a function another language has, which Jet spells
+    // another way (an idiom row in Calls/Methods.jet).
+    if call.type_args.len() == 0 && call.args.len() == 1 && sema_scope_resolve_index(scopes, call.name) == None {
+        idiom: sema_call_free_idiom_index(call.name)
+        if idiom >= 0 && sema_call_method_owners(environment, program, call.name).len() == 0 {
+            diagnostics.push(sema_call_free_idiom_error(idiom, call, environment, program))
+            return None
+        }
+    }
     scopes.ownership_call_depth += 1
     target: sema_call_resolve_direct(call.name, call.type_args, environment, program, scopes, call.name_span, diagnostics) ?? {
         scopes.ownership_call_depth -= 1
@@ -4682,7 +4691,10 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
     }
     context.allow_string_view_read = previous_string_view_read
     scopes.ownership_call_depth -= 1
-    receiver_value: receiver_checked ?? return None
+    receiver_value: receiver_checked ?? {
+        sema_call_dotted_idiom_edit(receiver, method, method_span, diagnostics)
+        return None
+    }
     if method == "text" {
         sema_expr_lint_default_body_text(receiver, receiver_value.ty, args, scopes, diagnostics)
     }
@@ -6002,14 +6014,75 @@ sema_expr_text_plus: fn(left: Expr, right: Expr, span: Span) -> Diagnostic {
     left_name: sema_expr_simple_text_operand(left)
     right_name: sema_expr_simple_text_operand(right)
     if left_name != "" && right_name != "" {
-        return sema_error("E0109", span, "text values `{left_name}` and `{right_name}` aren't joined with `+`", "there's one way to build text: interpolation (S8)", "write the pieces inside one string: \"{{{left_name}}}{{{right_name}}}\"")
+        joined: sema_error("E0109", span, "text values `{left_name}` and `{right_name}` aren't joined with `+`", "there's one way to build text: interpolation (S8)", "write the pieces inside one string: \"{{{left_name}}}{{{right_name}}}\"")
+        return diagnostic_with_edit(joined, TextEdit{span: span, new_text: "\"{{{left_name}}}{{{right_name}}}\""})
     }
     if sema_expr_text_piece(left) == .Val(left_piece) {
         if sema_expr_text_piece(right) == .Val(right_piece) {
-            return sema_error("E0109", span, "text isn't joined with `+`", "there's one way to build text: interpolation (S8)", "write the pieces inside one string: \"{left_piece}{right_piece}\"")
+            joined: sema_error("E0109", span, "text isn't joined with `+`", "there's one way to build text: interpolation (S8)", "write the pieces inside one string: \"{left_piece}{right_piece}\"")
+            return diagnostic_with_edit(joined, TextEdit{span: span, new_text: "\"{left_piece}{right_piece}\""})
         }
     }
     sema_error("E0109", span, "text isn't joined with `+`", "there's one way to build text: interpolation (S8)", "write the pieces inside one interpolated string (schematic: the checked operands are not simple names)")
+}
+
+// Whether `expr` is the call `str(value)`.
+sema_expr_str_call: fn(expr: Expr) -> Bool Never! {
+    if expr == .Call(call, _) {
+        return call.name == "str" && call.type_args.len() == 0 && call.args.len() == 1
+    }
+    false
+}
+
+// A `+` chain piece's text inside the one interpolated string: `str(value)`
+// reads as its argument. None for a piece with no short spelling.
+sema_expr_str_chain_piece: fn(expr: Expr) -> String? Never! {
+    if expr == .Call(call, _) {
+        if !sema_expr_str_call(expr) -> return None
+        return sema_expr_text_piece(call.args[0].expr)
+    }
+    sema_expr_text_piece(expr)
+}
+
+// `"n=" + str(n)`: text another language builds from `str(…)` and `+`. The
+// edit writes the whole chain as one interpolated string, `"n={n}"`. None
+// unless some piece calls `str` while nothing in scope is named `str`, and
+// every piece is text, a name, a number or `str` of one.
+sema_expr_str_chain_habit: fn(left: Expr, right: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Diagnostic? {
+    called := sema_expr_str_call(right)
+    operand := left
+    loop !called {
+        if operand == .Binary(level_op, level_left, level_right, _, _) && level_op == BinOp.Add {
+            called = sema_expr_str_call(level_right)
+            operand = level_left
+        } else {
+            called = sema_expr_str_call(operand)
+            break
+        }
+    }
+    if !called || sema_scope_resolve_index(scopes, "str") != None -> return None
+    text := sema_expr_str_chain_piece(right) ?? return None
+    start := 0
+    operand = left
+    loop {
+        if operand == .Binary(level_op, level_left, level_right, _, _) && level_op == BinOp.Add {
+            piece: sema_expr_str_chain_piece(level_right) ?? return None
+            text = "{piece}{text}"
+            operand = level_left
+        } else {
+            piece: sema_expr_str_chain_piece(operand) ?? return None
+            text = "{piece}{text}"
+            start = expr_span(operand).start
+            break
+        }
+    }
+    end := expr_span(right).end
+    if right == .Call(call, _) {
+        end = sema_call_close_paren_end(environment, program, expr_span(call.args[0].expr).end) ?? return None
+    }
+    span: Span{start: start, end: end}
+    habit: sema_error("E0109", span, "text isn't built with `str(…)` and `+`", "there's one way to build text: interpolation; a value goes inside the string as `{{value}}`", "write `\"{text}\"`")
+    Val(diagnostic_with_edit(habit, TextEdit{span: span, new_text: "\"{text}\""}))
 }
 
 sema_expr_lint_normalized_path_text: fn(name: String, scopes: SemaScopeTable) -> Bool Never! {
@@ -6054,6 +6127,10 @@ sema_expr_matrix_product_type: fn(lhs: Type, rhs: Type) -> Type? Never! {
 }
 
 sema_expr_check_binary: fn(op: BinOp, left: Expr, right: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if op == BinOp.Add && sema_expr_str_chain_habit(left, right, environment, program, scopes) == .Val(habit) {
+        diagnostics.push(habit)
+        return None
+    }
     if left == .Binary(_, _, _, _, _) {
         return sema_expr_check_binary_chain(op, left, right, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }

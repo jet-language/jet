@@ -97,13 +97,17 @@ jet_cli_perf_read: fn(path: String) -[FS]> CanonicalJSON JetTraceError! {
 // (PeerExport.jet jet_cli_perf_import). The text and HTML per-line tables of
 // a trace show each line's typed cost facts (LineCosts.jet). `--retained-by
 // <type>` shows instead what retains the live blocks of that type in each
-// heap snapshot of a trace (jet_cli_perf_heap_retention_lines).
+// heap snapshot of a trace (jet_cli_perf_heap_retention_lines), and
+// `--instructions[=NAME|FILE:LINE]` the code its samples landed in
+// (Instructions.jet jet_cli_perf_instructions_view).
 jet_cli_perf_view: fn(args: [String], color: Bool) -[FS, Env, Exec, Time]> JetDriverVerbOutput Never! {
     extension: artifact_extension()
-    usage: "run `jet perf view <path{extension}|path.pb.gz|path.json> [--json|--html] [--frames=jet|all]`, or `jet perf view <path{extension}> --retained-by <type>`"
+    usage: "run `jet perf view <path{extension}|path.pb.gz|path.json> [--json|--html] [--frames=jet|all]`, `jet perf view <path{extension}> --retained-by <type>`, or `jet perf view <path{extension}> --instructions[=NAME|FILE:LINE] [--json|--html]`"
     path := String?{None}
     mode := "text"
     frames := "jet"
+    // `--instructions`'s function or line, "" for the hottest function.
+    instructions := String?{None}
     // The argument that holds `--retained-by`'s type, from byte `retained_from`.
     retained_at := -1
     retained_from := 0
@@ -125,6 +129,14 @@ jet_cli_perf_view: fn(args: [String], color: Bool) -[FS, Env, Exec, Time]> JetDr
         if arg.starts_with("--retained-by=") {
             retained_at = index
             retained_from = 14
+            next
+        }
+        if arg == "--instructions" {
+            instructions = Val("")
+            next
+        }
+        if arg.starts_with("--instructions=") {
+            instructions = Val(arg.slice(15..<arg.len()))
             next
         }
         if arg == "--json" {
@@ -164,9 +176,15 @@ jet_cli_perf_view: fn(args: [String], color: Bool) -[FS, Env, Exec, Time]> JetDr
         path = Val(arg.copy())
     }
     shown: path ?? return jet_cli_perf_error("`jet perf view` needs a {extension} path", JET_CLI_PERF_FIX, color)
+    if instructions != None && (retained_at >= 0 || frames != "jet") {
+        return jet_cli_perf_error("`--instructions` lists code, without `--retained-by` or `--frames`", usage, color)
+    }
     if !shown.ends_with(extension) {
         if retained_at >= 0 {
             return jet_cli_perf_error("`--retained-by` reads the heap snapshots of a {extension} trace only", usage, color)
+        }
+        if instructions != None {
+            return jet_cli_perf_no_instructions("`{shown}` keeps no instruction samples", "A pprof or OTLP export carries no code; only the {extension} trace it came from keeps it.", "view the {extension} trace it was exported from with `--instructions`", color)
         }
         if mode == "json" {
             return jet_cli_perf_error("`--json` views a {extension} trace only", "view a pprof or OTLP export as text or with `--html`", color)
@@ -182,6 +200,9 @@ jet_cli_perf_view: fn(args: [String], color: Bool) -[FS, Env, Exec, Time]> JetDr
         return JetDriverVerbOutput{stdout: "{out}{jet_cli_perf_view_sections(flame, imported.timeline, table, color)}", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
     trace: jet_cli_perf_read(shown) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
+    if instructions.move() == .Val(wanted) {
+        return jet_cli_perf_instructions_view(trace, shown, wanted, mode, color)
+    }
     if retained_at >= 0 {
         if mode != "text" || frames != "jet" {
             return jet_cli_perf_error("`--retained-by` shows text only, without `--json`, `--html` or `--frames`", usage, color)
@@ -251,6 +272,7 @@ jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String]
         jet_cli_perf_span_summary(trace),
         jet_cli_perf_log_span_summary(trace),
         jet_cli_perf_wait_summary(trace),
+        jet_cli_perf_instructions_summary(trace),
     }
     loop summary in summaries {
         if summary == .Val(line) -> out = "{out}{line}\n"
@@ -595,8 +617,13 @@ jet_cli_perf_receipt_sections: fn(trace: CanonicalJSON) -> [JetDriverRunReceiptS
     items: jet_cli_perf_rows(trace, "receipt_sections") ?? return Err(jet_cli_read_error("trace content.receipt_sections is missing or not an array"))
     sections := [JetDriverRunReceiptSection]{}
     loop index in 0..<items.len() {
+        // The heap snapshots compare by their own deltas; a build's code
+        // differs with its build, not its run. Each is skipped by its name,
+        // before its value is copied out.
+        fields: jettrace_object_view(items[index], "receipt section") ?? return Err(jet_cli_read_error("content.receipt_sections[{index}]: {err.message}"))
+        name: jet_cli_perf_field_text(fields, "name") ?? ""
+        if name == "heap" || name == "instructions" -> next
         section: trace_receipt_section_from_json(items[index]) ?? return Err(jet_cli_read_error("content.receipt_sections[{index}]: {err.message}"))
-        if section.name == "heap" -> next
         recorded: jet_driver_run_receipt_section_new(section.name, section.type_name, canonical_json_bytes(section.value)) ?? return Err(jet_cli_read_error("content.receipt_sections[{index}]: {err.message}"))
         sections.push(recorded)
     }
@@ -606,19 +633,20 @@ jet_cli_perf_receipt_sections: fn(trace: CanonicalJSON) -> [JetDriverRunReceiptS
 // `receipt <name> <value>` for each receipt section the trace records, the
 // value as its canonical JSON, but the allocations, the heap snapshots, the
 // causal predictions, the topdown lens's, the zones, the tasks, the
-// threads, the host calls and the helpers, which
+// threads, the host calls, the helpers and the code, which
 // jet_cli_perf_allocation_lines, jet_cli_perf_heap_lines,
 // jet_cli_perf_causal_lines, jet_cli_perf_topdown_lines,
 // jet_cli_perf_zone_lines, jet_cli_perf_task_summary with
 // jet_cli_perf_task_phase_lines, jet_cli_perf_thread_lines,
-// jet_cli_perf_syscall_lines and the per-line table
-// (jet_cli_perf_line_table) show, and the causal lens's tasks' timings, a
-// row per task, which only the trace keeps.
+// jet_cli_perf_syscall_lines, the per-line table
+// (jet_cli_perf_line_table) and jet_cli_perf_instructions_summary show,
+// and the causal lens's tasks' timings, a row per task, which only the
+// trace keeps.
 jet_cli_perf_receipt_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     items: jet_cli_perf_rows(trace, "receipt_sections") ?? return [String]{}
     lines := [String]{}
     // The sections their own lines show, or none does.
-    shown: [String]{"allocations", "heap", "causal", "causal_tasks", "topdown", "zones", "tasks", "threads", "syscalls", "helpers"}
+    shown: [String]{"allocations", "heap", "causal", "causal_tasks", "topdown", "zones", "tasks", "threads", "syscalls", "helpers", "instructions"}
     loop item in items {
         section: trace_receipt_section_from_json(item) ?? next
         if shown.contains(section.name) -> next

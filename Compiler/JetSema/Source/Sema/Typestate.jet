@@ -15,7 +15,7 @@
 //
 // The receiver's type comes from the function's checked body: the type of the
 // receiver's node in its expression-type column.
-use jet_foundation.[ASTTables, BodyTree, Diagnostic, Expr, Func, Item, Name, NameTable, OrFallback, Pattern, Span, Stmt, SwitchArm, Type, body_tree_new, checked_expr_type_id, expr_binary_operands, expr_span, name_count, name_find, name_index, name_intern, name_table_sized, name_text]
+use jet_foundation.[ASTTables, BodyTree, Diagnostic, Expr, Func, Item, Name, NameTable, OrFallback, Pattern, Span, Stmt, SwitchArm, Type, body_tree_new, checked_expr_type_id, expr_binary_operands, expr_span, foundation_byte_text, name_count, name_find, name_index, name_intern, name_table_sized, name_text]
 
 SEMA_STATE_TASK: "Task"
 
@@ -49,11 +49,14 @@ SemaStateTable: struct {
     // The keys of `needs` in declaration order, so a fix lists moves as the
     // type declares them.
     typed_keys: [String],
+    // The types that own a typed method or a state list, by the name they
+    // are declared under (`Payment.Client`).
+    owners: NameTable,
 }
 
 // A table with no rows yet.
 sema_state_table_new: fn() -> SemaStateTable Never! {
-    SemaStateTable{keys: name_table_sized(64), needs: [[SemaStateNeed]]{[SemaStateNeed]{}}, results: [String]{""}, cases: [[String]]{[String]{}}, typed_keys: [String]{}}
+    SemaStateTable{keys: name_table_sized(64), needs: [[SemaStateNeed]]{[SemaStateNeed]{}}, results: [String]{""}, cases: [[String]]{[String]{}}, typed_keys: [String]{}, owners: name_table_sized(16)}
 }
 
 // The id of `key` in `table`, with its columns grown to cover it.
@@ -345,6 +348,7 @@ sema_state_table_add_items: fn(table: &SemaStateTable, items: [Item]) Never! {
             }
             .Enum(definition) -> {
                 if definition.state == .Val(state) {
+                    _: name_intern(table.owners, definition.name)
                     id: sema_state_table_id(table, definition.name)
                     table.cases[id] = loop entry in state.states -> entry.name
                 }
@@ -361,6 +365,7 @@ sema_state_table_add_method: fn(table: &SemaStateTable, type_name: String, metho
     if method.state_types.len() == 0 {
         return
     }
+    _: name_intern(table.owners, type_name)
     sema_state_table_add_typed(table, "{type_name}.{method.name}", method)
 }
 
@@ -373,13 +378,22 @@ sema_state_nominal: fn(ty: Type) -> String? Never! {
     }
 }
 
-// The nominal type of a checked node, without its module qualification.
+// The nominal type of a checked node, without its module qualification. The
+// module and the type may both hold `.` (`app.Payment.Client`), so the type
+// is the longest tail the table knows as an owner, else the last segment.
 sema_state_node_type: fn(walk: SemaStateWalk, tree: BodyTree, id: Int) -> String? Never! {
     if !walk.typed -> return None
     row: checked_expr_type_id(tree.expr_types, id) ?? return None
     name: sema_state_nominal(tree.types.types[row]) ?? return None
-    parts: name.split(".").to_list()
-    Val(parts[parts.len() - 1])
+    bytes: name.bytes()
+    last := 0
+    loop at in 0..<bytes.len() {
+        if (Int{bytes[at]}) != 46 -> next
+        tail: foundation_byte_text(bytes, at + 1, bytes.len())
+        if name_find(walk.table.owners, tail) == .Val(_) -> return Val(tail)
+        last = at + 1
+    }
+    Val(foundation_byte_text(bytes, last, bytes.len()))
 }
 
 // Rust `static_method_type_name`: `Type.ctor()` / `Ns.Type.ctor()`.

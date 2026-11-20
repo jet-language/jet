@@ -12,6 +12,7 @@ A seed is one directory:
 | Entry | Holds |
 |---|---|
 | `jet` | The compiler, a static x86-64 Linux executable |
+| `jet.debug` | The compiler's DWARF, which `jet`'s `.gnu_debuglink` names by name and CRC-32; `jet debug` of `jet` reads it beside `jet`, and `jet` keeps its symbols and line table, so its fault reports name their frames without it (absent from releases before the build moved it out of `jet`) |
 | `jet-runtime/` | The prebuilt runtime pack; `jet` carries it built in, and only an unembedded `jet-bare` reads it |
 | `jetpack` | The package-manager engine built by the same compiler (when the release has one) |
 | `IDENTITY` | `jet@a0.0.N#<digest>`, the identity the compiler reports and stamps into builds, which `jet` also carries; the digest is the sha256 of `jet` with its `jet.identity` part zeroed ([`devtools embed`](../Reference/cli.md)) |

@@ -168,7 +168,7 @@ ir_opt_stops_hand_off: fn(f: &IRFunction, m: IRModule) Never! {
             next
         }
         ir_opt_stops_drops(code, f, ir_opt_stops_before_drops(f, target) + 1, target)
-        ir_opt_stops_drops(code, f, target + 2, f.c[target + 1])
+        ir_opt_stops_edge_copy(code, f, target + 2, f.c[target + 1])
     }
     f.op = code.op.move()
     f.dst = code.dst.move()
@@ -184,6 +184,25 @@ ir_opt_stops_before_drops: fn(f: IRFunction, at: Int) -> Int Never! {
     k := at - 1
     loop k >= 0 && f.op[k] == .Drop -> k -= 1
     k
+}
+
+// Instructions `start` to `end` of `f` into `code`, a second copy of a stop
+// edge that stays where it is: each call gets operands of its own in `f`'s
+// args pool, as no two calls share one entry (the SSA form maps each
+// entry's read to one value, Ssa.jet IRSsa.use_args).
+ir_opt_stops_edge_copy: fn(code: &IROptCode, f: &IRFunction, start: Int, end: Int) Never! {
+    loop k in start..<end {
+        op: f.op[k]
+        b := f.b[k]
+        if op == .Call || op == .CallRuntime || op == .CallIndirect {
+            b = f.args.len()
+            loop index in f.b[k]..<(f.b[k] + f.c[k]) {
+                operand: f.args[index]
+                f.args.push(operand)
+            }
+        }
+        ir_opt_code_put(code, op, f.dst[k], f.a[k], b, f.c[k], f.code_line[k])
+    }
 }
 
 // The Br of the stop edge at `edge` (an If, with no Else, on what a stop,
@@ -844,6 +863,51 @@ ir_opt_polls_br_end: fn(f: IRFunction, at: Int, level: Int) -> Int Never! {
     assert_eq(returns, 3)
     assert_eq(turns.len(), 1)
     assert(!ir_opt_polls_checks_call(view, f, poll, -1, turn, turns[0]))
+}
+
+// The same body with a turn whose edge takes a cleanup token and hands it
+// back: the copy in the body's stop edge gets operands of its own, so the
+// SSA form reads each copy's token where that copy took it.
+#Test("A stop edge's copy of the later edge has call operands of its own") {
+    m := ir_module_new()
+    int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    word: ir_word_row(m)
+    poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
+    turn: ir_stop_poll(m, IR_STOP_TURN_KEY)
+    enter: ir_intern_name(m, "jet_rt_cleanup_enter")
+    leave: ir_intern_name(m, "jet_rt_cleanup_leave")
+    f := ir_function_new("f", "test:handoff.jet.f", "", "handoff.jet", 1)
+    x: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
+    code: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "code"), 1)
+    f.result = int_row
+    r: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+    stopped: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
+    token: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_open(f, IROp.Block, 2)
+    passed: ir_args(f, [Int]{x})
+    _ := ir_emit(f, IROp.CallIndirect, r, code, passed, 1, 2)
+    ir_x64_test_stop_edge(f, flag, poll, IROp.Br, 2)
+    ir_end(f, 2)
+    none: ir_args(f, [Int]{})
+    _ := ir_emit(f, IROp.Call, stopped, turn, none, 0, 3)
+    _ := ir_open_if(f, stopped, 3)
+    _ := ir_emit(f, IROp.CallRuntime, token, enter, none, 0, 3)
+    handed: ir_args(f, [Int]{token})
+    _ := ir_emit(f, IROp.CallRuntime, -1, leave, handed, 1, 3)
+    _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 3)
+    ir_end(f, 3)
+    _ := ir_emit(f, IROp.Return, -1, r, -1, -1, 4)
+    ir_opt_stops_hand_off(f, ir_opt_view(m, [String]{}))
+    starts := [Int]{}
+    loop (at, op) in f.op {
+        if op != .CallRuntime || f.a[at] != leave -> next
+        assert_eq(f.args[f.b[at]], token)
+        starts.push(f.b[at])
+    }
+    assert_eq(starts.len(), 2)
+    assert(starts[0] != starts[1])
+    assert_eq(ir_ssa_verify(f, ir_ssa_build(f)).len(), 0)
 }
 
 // The same body with its call in a loop: the stop edge branches out of the

@@ -406,9 +406,15 @@ parser_parse_operators: fn(state: &JetParserState, minimum: Int, depth: Int, all
             parser_report_condition_xor_update(state)
             operator = TOKEN_NOT_EQ
         }
+        habit: parser_operator_habit_kind(state, operator)
+        if habit != 0 -> operator = habit
+        power: parser_power_habit_ahead(state, operator)
         precedence := parser_expression_precedence(operator)
         if precedence == 0 || precedence < minimum -> break
         if stop_before_comparison && parser_expression_comparison_boundary(operator) -> break
+        if habit != 0 -> parser_report_operator_habit(state, habit)
+        power_start: parser_current(state).span.start
+        if power -> parser_bump(state)
         operator_token: parser_bump(state)
         pattern_test: operator == TOKEN_EQ_EQ && parser_comparison_pattern_rhs_ahead(state, allow_struct_lit)
         if marked_subject && !pattern_test -> parser_report_marked_value(state, left.span)
@@ -443,6 +449,9 @@ parser_parse_operators: fn(state: &JetParserState, minimum: Int, depth: Int, all
         }
 
         right := parser_parse_expression_restricted(state, precedence + 1, depth + 1, allow_struct_lit, stop_before_comparison)
+        if power {
+            parser_report_power_habit(state, left.expr, left.span, Span{start: power_start, end: operator_token.span.end}, right.span)
+        }
         span := parser_cover(left.span, right.span)
 
         if operator == TOKEN_DOT_DOT || operator == TOKEN_DOT_DOT_LT {
@@ -1018,6 +1027,26 @@ parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bo
         }
     }
     if kind == TOKEN_LT_GT -> return parser_parse_pipe_value(state, token)
+    if kind == TOKEN_IDENT && parser_text_prefix_ahead(state) {
+        parser_bump(state)
+        parser_report_text_prefix(state, token)
+        return parser_parse_prefix(state, depth, allow_struct_lit, stop_before_comparison)
+    }
+    if kind == TOKEN_IDENT && parser_arrow_habit_ahead(state) {
+        parser_bump(state)
+        parser_bump(state)
+        arrow: parser_bump(state)
+        body: parser_parse_expression_restricted(state, 1, depth + 1, allow_struct_lit, stop_before_comparison)
+        parser_report_arrow_habit(state, token, arrow.span, body.span)
+        return body
+    }
+    if kind == TOKEN_IDENT && word == "not" && parser_not_habit_ahead(state) {
+        parser_bump(state)
+        parser_report_not_habit(state, token)
+        operand: parser_parse_expression_restricted(state, 13, depth + 1, allow_struct_lit, stop_before_comparison)
+        span := parser_cover(token.span, operand.span)
+        return ParsedExpr{expr: Expr.Unary{op: UnOp.Not, operand: operand.expr, span: span, id: parser_node_id(state)}, span: span}
+    }
     // Rust has no unary `+`: `+1` falls through to "expected a value".
     // Prefix `~` complements an integer's bits.
     if kind == TOKEN_MINUS || kind == TOKEN_BANG || kind == TOKEN_TILDE {

@@ -205,18 +205,28 @@ NativeRange: struct {
 }
 
 // The facts of the ELF image `elf`; None without a `.debug_jetline`.
-native_image_read: fn(elf: [U8]) -> NativeImage? Never! {
-    table: native_elf_section(elf, ".debug_jetline") ?? return None
-    image := NativeImage{lines: x64_jetline_parse(table), functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: native_elf_section(elf, ".debug_loclists") ?? [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}, frames: native_frames_read(elf), addresses: native_elf_section(elf, ".debug_addr") ?? [U8]{}}
-    if native_elf_section(elf, ".debug_jetsource") == .Val(record) {
+native_image_read: fn(elf: [U8]) -> NativeImage? Never! { native_image_read_apart(elf, elf) }
+
+// The facts of the ELF image `elf` whose DWARF is in the ELF file `dwarf`
+// (its side debug file, or `elf` itself): its line table and sources'
+// digests are the image's own, or the side file's when the image keeps
+// none, its call frame information always the image's, and its units,
+// abbreviations, location, address and range lists the side file's. None
+// without a `.debug_jetline` in either.
+native_image_read_apart: fn(elf: [U8], dwarf: [U8]) -> NativeImage? Never! {
+    lines: if native_elf_header(elf, ".debug_jetline") != None -> elf else -> dwarf
+    table: native_elf_section(lines, ".debug_jetline") ?? return None
+    image := NativeImage{lines: x64_jetline_parse(table), functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: native_elf_section(dwarf, ".debug_loclists") ?? [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}, frames: native_frames_read(elf), addresses: native_elf_section(dwarf, ".debug_addr") ?? [U8]{}}
+    sources: if native_elf_header(elf, ".debug_jetsource") != None -> elf else -> dwarf
+    if native_elf_section(sources, ".debug_jetsource") == .Val(record) {
         // A record that doesn't parse is none.
         listed: x64_dwarf_sources_parse(record) ?? [X64DebugSource]{}
         loop source in listed -> image.sources[source.path] = source.digest
     }
-    info: native_elf_section(elf, ".debug_info") ?? return Val(image)
-    abbrev: native_elf_section(elf, ".debug_abbrev") ?? return Val(image)
+    info: native_elf_section(dwarf, ".debug_info") ?? return Val(image)
+    abbrev: native_elf_section(dwarf, ".debug_abbrev") ?? return Val(image)
     // The inlined runs' range lists.
-    ranges: native_elf_section(elf, ".debug_rnglists") ?? [U8]{}
+    ranges: native_elf_section(dwarf, ".debug_rnglists") ?? [U8]{}
     at := 0
     loop at + 12 <= info.len() {
         length: link_debug_le(info, at, 4)
@@ -304,7 +314,8 @@ native_elf_header: fn(elf: [U8], name: String) -> Int? Never! {
 
 // The offsets of the headers of every section named `name`, in order: a
 // bound image has two `.text` and two `.eh_frame`, the runtime's and the
-// program's.
+// program's. A SHT_NOBITS header names none: its section has no bytes in
+// this file, as a side debug file's headers of the image's loaded sections.
 native_elf_headers: fn(elf: [U8], name: String) -> [Int] Never! {
     found := [Int]{}
     headers: link_debug_addr(elf, 40)
@@ -317,7 +328,9 @@ native_elf_headers: fn(elf: [U8], name: String) -> [Int] Never! {
     loop k in 0..<count {
         header: headers + k * size
         at: link_debug_le(elf, header, 4)
-        if at >= 0 && x64_jetline_text(elf, names + at) == name -> found.push(header)
+        if at >= 0 && link_debug_le(elf, header + 4, 4) != 8 && x64_jetline_text(elf, names + at) == name {
+            found.push(header)
+        }
     }
     found
 }

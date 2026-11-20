@@ -17,7 +17,9 @@
 // writes `jet`, the same executable with each runtime file and jet's own
 // identity added as parts it maps at load (JetCLI RuntimeEmbed.jet), and
 // that identity to IDENTITY beside it for the tools that name a jet without
-// running it. So jet reads no runtime or identity file: only jet-bare reads
+// running it. jet's DWARF goes to jet.debug beside it, which jet's
+// `.gnu_debuglink` names for `jet debug`; jet keeps its symbols and its Jet
+// line table. So jet reads no runtime or identity file: only jet-bare reads
 // jet-runtime/. jet-bare has no runtime image, so the runtime step can't run
 // Core code at compile time: every
 // Core module value must be a constant the compiler folds, and one that
@@ -123,6 +125,8 @@ build: fn(b: Build) -[Exec, FS]> {
         embed.reads("{RUNTIME_DIR}/IDENTITY")
         embed.output("JetCLI/.jet/build/jet")
         embed.output("JetCLI/.jet/build/IDENTITY")
+        // jet's DWARF, beside it: the step names it after the jet it writes.
+        embed.writes("JetCLI/.jet/build/jet.debug")
         embed.timeout(10min)
         toolchain: b.add_install("toolchain", [], [runtime, embed], [bare])
         b.default(toolchain)

@@ -799,9 +799,11 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             ir_contract_scope(m, p, b, pre, body, post, result, span)
         }
         .RefutableBind(pattern, init, fallback, span) -> {
+            ir_stmt_line(p, b, span)
             ir_refutable_bind(m, p, b, pattern, init, fallback, span)
         }
         .TupleDestructure(_, init, _, binds, span) | .StructDestructure(_, init, _, binds, span) -> {
+            ir_stmt_line(p, b, span)
             ir_field_destructure(m, p, b, init, binds, span)
         }
         .ListDestructure(_, init, count, line, elements, span) -> {
@@ -983,9 +985,9 @@ ir_measure_scope: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int]) Nev
     _: ir_runtime(m, b, "jet_rt_test_measure_end", [Int]{state}, -1)
 }
 
-// The line of a call, binding or return statement starts the code it emits,
-// so the line table (and a fault backtrace) names the statement, not the last
-// line an operator set.
+// The line of a call, binding (a destructuring one too) or return statement
+// starts the code it emits, so the line table (and a fault backtrace) names
+// the statement, not the last line an operator set.
 ir_stmt_line: fn(p: IRProgram, b: &IRBuilder, span: Span) Never! {
     if span.end <= span.start {
         return

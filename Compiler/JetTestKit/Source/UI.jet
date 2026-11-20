@@ -47,15 +47,15 @@ kit_ui_directives: fn() -> [KitUIDirective] {
         // A Library output's bindings are validated when `jet build --lib`
         // builds it (E1341); a loadable `.jetlib` that a later `jet run`
         // refuses (E1338, E1339) comes from the same build.
-        {name: "LibraryInvalidBinding", argv: ["build", "--lib"], parent: true, exit: "nonzero", streams: "rendered", capability: ""},
+        {name: "library_invalid_binding", argv: ["build", "--lib"], parent: true, exit: "nonzero", streams: "rendered", capability: ""},
         {name: "jetlib_version_mismatch", argv: ["build", "$file", "--lib"], parent: false, exit: "nonzero", streams: "rendered", capability: ""},
         {name: "jetlib_effect_refused", argv: ["build", "$file", "--lib"], parent: false, exit: "nonzero", streams: "rendered", capability: ""},
         // `jet env --env missing` in a project whose `env.jet` declares other
         // environment modules (E1337).
-        {name: "EnvFacetMissing", argv: ["env", "--env", "missing"], parent: true, exit: "nonzero", streams: "rendered", capability: ""},
+        {name: "env_facet_missing", argv: ["env", "--env", "missing"], parent: true, exit: "nonzero", streams: "rendered", capability: ""},
         // `jet env --trust` in a project whose staged `state/lock` is a
         // malformed workspace lock (E1202).
-        {name: "WorkspaceLockE1202", argv: ["env", "--trust"], parent: true, exit: "nonzero", streams: "rendered", capability: ""},
+        {name: "workspace_lock_e1202", argv: ["env", "--trust"], parent: true, exit: "nonzero", streams: "rendered", capability: ""},
         // `jetpack hangar verify <digest>` of an object whose payload was
         // rewritten after `jetpack hangar ingest` (kit_ui_hangar_tamper).
         {name: "jetpack_hangar_digest_mismatch", argv: ["hangar", "verify", "--no-color"], parent: false, exit: "nonzero", streams: "rendered", capability: ""},
@@ -83,7 +83,7 @@ kit_ui_directives: fn() -> [KitUIDirective] {
         // which exits 0 with or without a report.
         {name: "report_cli", argv: ["lint", "$file"], parent: false, exit: "any", streams: "rendered", capability: ""},
         {name: "repl_deny", argv: ["repl", "--deny=FS"], parent: false, exit: "nonzero", streams: "stderr", capability: ""},
-        {name: "CommandOverrideConflict", argv: ["run"], parent: true, exit: "nonzero", streams: "both", capability: ""},
+        {name: "command_override_conflict", argv: ["run"], parent: true, exit: "nonzero", streams: "both", capability: ""},
         {name: "gate", argv: ["check", "--gate", "$arg", "$file"], parent: false, exit: "any", streams: "rendered", capability: ""},
         // `jet status` and `jet project parts` in the project directory: at a
         // workspace root each lists the members.

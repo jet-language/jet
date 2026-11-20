@@ -342,7 +342,10 @@ trap_core_site: fn(file: I64, file_len: I64) -> Bool {
 // calling chain whose file is not Core's (Fault.jet trace_walk, which
 // allocates nothing). It includes that frame's function when the stop names
 // one. Returns false and writes nothing when no frame qualifies: every
-// frame is Core's, or the image keeps no location table.
+// frame is Core's, or the image keeps neither a location table nor a build
+// id. A release image keeps no table: it writes its build id and the
+// chain's return addresses instead, which `jet crash` names (Fault.jet
+// trace_release_callers), and returns false.
 trap_user_location: fn(with_function: Bool) -> Bool { trace_walk(I64{0}, with_function) }
 
 // One frame of that walk: function `name`, `file` and `line`. A frame in

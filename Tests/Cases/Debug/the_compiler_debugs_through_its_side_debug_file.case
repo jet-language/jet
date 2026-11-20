@@ -1,0 +1,38 @@
+# The compiler's `jet` keeps its line table but not its DWARF: the build
+# moves that to `jet.debug` beside it, which jet's `.gnu_debuglink` names
+# (Docs/Spec/spec.md, after `debug_info: split`). `jet debug` of jet itself
+# follows the link: a breakpoint on a Sema function stops there with the
+# frame's locals and the compiler's frames, and the check runs on to its
+# verdict. The breakpoint names the function, so no line of the compiler's
+# sources is pinned here.
+# The same jet through a link in a directory without `jet.debug` is refused
+# by name, and one beside another build's `jet.debug` is refused by the
+# link's CRC-32: a debugger never shows another build's frames as jet's.
+env: NO_COLOR=1
+requires: os:linux
+copy: {root}/Examples/Basics/Hello.jet app/hello.jet
+mkdir: alone
+symlink: {jet} alone/jet
+mkdir: other
+symlink: {jet} other/jet
+write: other/jet.debug the_compiler_debugs_through_its_side_debug_file.other.template
+step: jet debug {jet} -- check app/hello.jet
+stdin: the_compiler_debugs_through_its_side_debug_file.stdin
+exit: 0
+stdout+stderr: ~ "Breakpoint set  sema_function_check_passes\n" # the breakpoint names the Sema function
+stdout+stderr: ~ "in sema_function_check_passes()" # the check stops in it
+stdout+stderr: ~ "print owner_key\nowner_key = \"function:" # a local of the Sema frame, read through jet.debug's DWARF
+stdout+stderr: ~ "#0  sema_function_check_passes()  at CheckProgram.jet:" # the backtrace starts in the Sema frame
+stdout+stderr: ~ "jet_driver_compile()  at Pipeline.jet:" # and reaches the driver
+stdout+stderr: ~ "Deleted breakpoint 2\n" # with the breakpoint gone
+stdout+stderr: ~ "has no problems" # the check runs to its verdict
+stdout+stderr: ~ "Program finished\n" # and the compiler to its end
+step alone: jet debug {work}/alone/jet -- check app/hello.jet
+exit: 1
+stdout+stderr: ~ "keeps its DWARF in `jet.debug`, which is not beside it at `" # the missing side file is named
+stdout+stderr: !~ "Breakpoint" # nothing runs without it
+step other: jet debug {work}/other/jet -- check app/hello.jet
+exit: 1
+stdout+stderr: ~ "jet.debug` is not the debug file of `" # another build's side file is refused
+stdout+stderr: ~ "its CRC-32 is" # by the link's CRC-32
+stdout+stderr: !~ "Breakpoint" # nothing runs with it

@@ -6840,10 +6840,22 @@ sema_stmt_compound_result: fn(op: BinOp, place: Type, offered: Type, value: Expr
     sema_expr_binary_type(op, place, offered, span, diagnostics)
 }
 
+// `total = 0` where nothing declares `total`: another language's first
+// assignment, which Jet writes as the declaration `total := 0`. A name with
+// its own report (a near name, a script local) keeps that report.
+sema_stmt_unknown_assignment_target: fn(name: String, name_span: Span, op: BinOp?, op_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Diagnostic {
+    unknown: sema_unknown_name_at(name, name_span, environment, program, scopes)
+    if op != None || unknown.edit != None || unknown.code != "E0107" -> return unknown
+    plain: sema_unknown_name(name, name_span)
+    if unknown.what != plain.what || unknown.fix != plain.fix -> return unknown
+    declared: sema_error("E0107", name_span, "nothing named `{name}` exists here", "an assignment changes a binding that is already declared, and nothing declares `{name}`", "declare it with `:=`, a binding you can assign again: `{name} := …`")
+    diagnostic_with_edit(declared, TextEdit{span: op_span, new_text: ":="})
+}
+
 sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     index: sema_scope_resolve_index(scopes, name)
     if index == None {
-        diagnostics.push(sema_unknown_name_at(name, name_span, environment, program, scopes))
+        diagnostics.push(sema_stmt_unknown_assignment_target(name, name_span, op, op_span, environment, program, scopes))
         return None
     }
     binding: sema_scope_binding_row(environment, scopes, index)
@@ -7998,7 +8010,7 @@ sema_stmt_check_scope_member: fn(name: String, args: [Expr], args_span: Span?, b
             generic_names: loop parameter in environment.generic_params -> parameter.name
             caller: sema_scope_caller_row(environment, graph)
             if sema_type_written_name_unknown(graph, caller, row_name, generic_names) {
-                diagnostics.push(sema_unknown_type_name(row_name, row_span, sema_type_declared_names(graph, caller)))
+                diagnostics.push(sema_unknown_type_name(row_name, row_span, sema_type_declared_names(graph, caller), sema_source_word_span(graph, caller, row_span, row_name)))
                 dsl_args_valid = false
             }
         }

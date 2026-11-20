@@ -23,5 +23,11 @@ exit: 0
 step: built
 exit: 70 # tests/failure_tier_parity.rs:115 exit 70
 stdout: empty
-stderr.filter(!^= "  --> "): = runtime_e1003.report # tests/failure_tier_parity.rs:120 registered report, release AOT
+stderr: file release.txt
 stderr: count "Stop: Jet.IntegerOutOfRange" = 1 # tests/failure_tier_parity.rs:121 one stop
+file: release.txt ~ "(names and lines: jet crash)" # a release image gives the stop's callers as addresses under its build id
+step: jet crash
+stdin: {work}/release.txt
+exit: 0
+stdout.filter(!^= "  --> "): = runtime_e1003.report # tests/failure_tier_parity.rs:120 registered report, release AOT, named by jet crash
+stdout: ~ "  --> main.jet:5" # jet crash names the user's call

@@ -1,0 +1,114 @@
+// The `instructions` receipt section a native `jet perf run` keeps (JetCLI
+// Perf/Instructions.jet): the code of its sampled functions, hottest first.
+// A function's `code` is lowercase hex of its `size` bytes, or empty when it
+// is `cut`, past `cap_bytes` of kept code; `bytes` is the code kept in all,
+// and `kept` and `cut` count the functions. Its line rows and sampled
+// instructions are at ascending offsets inside it, each events list holds
+// one count per name of `counters`, and its samples and events are its
+// instructions' sums.
+jettrace_validate_instructions: fn(value: CanonicalJSON, label: String) JetTraceError! {
+    fields: jettrace_object_keys(value, label, [String]{"bytes", "cap_bytes", "counters", "cut", "functions", "kept", "samples"})
+    counters: jettrace_array(fields[jettrace_get(fields, "counters")].value, "{label}.counters")
+    loop index in 0..<counters.len() {
+        _: jettrace_text(counters[index], "{label}.counters[{index}]")
+    }
+    cap: jettrace_unsigned(fields[jettrace_get(fields, "cap_bytes")].value, "{label}.cap_bytes")
+    bytes: jettrace_unsigned(fields[jettrace_get(fields, "bytes")].value, "{label}.bytes")
+    kept: jettrace_unsigned(fields[jettrace_get(fields, "kept")].value, "{label}.kept")
+    cut: jettrace_unsigned(fields[jettrace_get(fields, "cut")].value, "{label}.cut")
+    _: jettrace_unsigned(fields[jettrace_get(fields, "samples")].value, "{label}.samples")
+    functions: jettrace_array(fields[jettrace_get(fields, "functions")].value, "{label}.functions")
+    held := U64{0}
+    held_kept := U64{0}
+    held_cut := U64{0}
+    loop index in 0..<functions.len() {
+        at: "{label}.functions[{index}]"
+        item: jettrace_object_keys(functions[index], at, [String]{"address", "code", "cut", "events", "file", "instructions", "level", "lines", "names", "samples", "size", "symbol"})
+        _: jettrace_unsigned(item[jettrace_get(item, "address")].value, "{at}.address")
+        _: jettrace_text(item[jettrace_get(item, "file")].value, "{at}.file")
+        _: jettrace_optional_unsigned(item[jettrace_get(item, "level")].value, "{at}.level")
+        symbol: jettrace_text(item[jettrace_get(item, "symbol")].value, "{at}.symbol")
+        if symbol.len() == 0 -> return Err(jettrace_error("{at}.symbol is empty"))
+        size: jettrace_unsigned(item[jettrace_get(item, "size")].value, "{at}.size")
+        code: jettrace_text(item[jettrace_get(item, "code")].value, "{at}.code")
+        if jettrace_bool(item[jettrace_get(item, "cut")].value, "{at}.cut") {
+            if code.len() != 0 -> return Err(jettrace_error("{at}.code is kept for a cut function"))
+            held_cut += U64{1}
+        } else {
+            digits: U64{code.len()}
+            wanted: size * U64{2}
+            if digits != wanted || !jettrace_lower_hex(code) {
+                return Err(jettrace_error("{at}.code is not lowercase hex of its {size} bytes"))
+            }
+            held += size
+            held_kept += U64{1}
+        }
+        events: jettrace_counts(item[jettrace_get(item, "events")].value, "{at}.events", counters.len())
+        samples: jettrace_unsigned(item[jettrace_get(item, "samples")].value, "{at}.samples")
+        lines: jettrace_array(item[jettrace_get(item, "lines")].value, "{at}.lines")
+        after := U64{0}
+        loop row in 0..<lines.len() {
+            place: "{at}.lines[{row}]"
+            line: jettrace_object_keys(lines[row], place, [String]{"line", "offset"})
+            _: jettrace_unsigned(line[jettrace_get(line, "line")].value, "{place}.line")
+            offset: jettrace_unsigned(line[jettrace_get(line, "offset")].value, "{place}.offset")
+            if (row > 0 && offset <= after) || offset >= size {
+                return Err(jettrace_error("{place}.offset is out of order or outside the function"))
+            }
+            after = offset
+        }
+        names: jettrace_array(item[jettrace_get(item, "names")].value, "{at}.names")
+        loop name in 0..<names.len() {
+            place: "{at}.names[{name}]"
+            named: jettrace_object_keys(names[name], place, [String]{"address", "name"})
+            _: jettrace_unsigned(named[jettrace_get(named, "address")].value, "{place}.address")
+            _: jettrace_text(named[jettrace_get(named, "name")].value, "{place}.name")
+        }
+        rows: jettrace_array(item[jettrace_get(item, "instructions")].value, "{at}.instructions")
+        sum := U64{0}
+        sums := [U64]{}
+        loop _ in 0..<counters.len() -> sums.push(U64{0})
+        loop row in 0..<rows.len() {
+            place: "{at}.instructions[{row}]"
+            sampled: jettrace_object_keys(rows[row], place, [String]{"events", "offset", "samples"})
+            offset: jettrace_unsigned(sampled[jettrace_get(sampled, "offset")].value, "{place}.offset")
+            if (row > 0 && offset <= after) || offset >= size {
+                return Err(jettrace_error("{place}.offset is out of order or outside the function"))
+            }
+            after = offset
+            sum += jettrace_unsigned(sampled[jettrace_get(sampled, "samples")].value, "{place}.samples")
+            counted: jettrace_counts(sampled[jettrace_get(sampled, "events")].value, "{place}.events", counters.len())
+            loop k in 0..<counted.len() -> sums[k] = sums[k] + counted[k]
+        }
+        if sum != samples || sums != events {
+            return Err(jettrace_error("{at}'s samples or events are not its instructions' sums"))
+        }
+    }
+    if held != bytes || held_kept != kept || held_cut != cut {
+        return Err(jettrace_error("{label} miscounts the code and functions it keeps"))
+    }
+    if bytes > cap {
+        return Err(jettrace_error("{label} keeps more than its cap of {cap} bytes of code"))
+    }
+    return
+}
+
+// An array of `width` unsigned counts.
+jettrace_counts: fn(value: CanonicalJSON, label: String, width: Int) -> [U64] JetTraceError! {
+    items: jettrace_array(value, label)
+    if items.len() != width {
+        return Err(jettrace_error("{label} does not hold one count per counter"))
+    }
+    counts := [U64]{}
+    loop index in 0..<width -> counts.push(jettrace_unsigned(items[index], "{label}[{index}]"))
+    Ok(counts)
+}
+
+// Whether `text` is lowercase hex digits alone.
+jettrace_lower_hex: fn(text: String) -> Bool Never! {
+    loop byte in text.bytes() {
+        number: Int{byte}
+        if !(number >= 48 && number <= 57) && !(number >= 97 && number <= 102) -> return false
+    }
+    true
+}

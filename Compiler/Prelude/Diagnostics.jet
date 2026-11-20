@@ -33,7 +33,9 @@ UnterminatedText: struct {
         expert_path: "none: no opt-in decides where unterminated text ends",
         stage: [.Jet],
         meaning: "Text, an interpolation or a block comment left open at the end of the file",
-        no_fix: .Behavior,
+        structured_fix: .SourceEdit,
+        no_fix: None,
+        fix_safety: .NeedsReview,
 
         what: fn(self) -> String { "Unterminated text literal, interpolation, or block comment" }
 
@@ -2020,7 +2022,9 @@ OperatorTypeMismatch: struct {
         expert_path: "none: an `impl` hook for the pair defines the operation",
         meaning: "Operator type mismatch (including numeric pairs where neither operand can widen to the other, and `+` on text)",
         detail: true,
-        no_fix: .Ambiguous,
+        structured_fix: .SuggestedSourceEdit,
+        no_fix: None,
+        fix_safety: .NeedsReview,
 
         what: fn(self) -> String {
             "`+` can't compare or combine Int (a whole number) and String (text)"
@@ -2306,7 +2310,9 @@ UnknownType: struct {
         expert_path: "none: no opt-in uses a type that does not exist",
         meaning: "Unknown type name",
         detail: true,
-        no_fix: .Ambiguous,
+        structured_fix: .SuggestedSourceEdit,
+        no_fix: None,
+        fix_safety: .NeedsReview,
 
         what: fn(self) -> String { "`Bogus` isn't a known effect" }
 
@@ -20643,6 +20649,31 @@ AttachWhichProcess: struct {
 
         fix: fn(self) -> String {
             "Attach to one pid at a time: `jet perf attach <pid> --source <file.jet>`."
+        }
+    }
+}
+
+PerfNoInstructions: struct {
+    trace: String,
+    scope: String,
+
+    impl Diagnostic {
+        code: "E2126",
+        safety_class: .Soundness,
+        safety_reason: "A listing of code no sample landed in would show shares the run never measured, so the view refuses rather than list code from somewhere else.",
+        expert_path: "none: the trace of a native `jet perf run` keeps the code its samples landed in",
+        stage: [.Jet],
+        meaning: "`jet perf view --instructions` reads a trace that keeps no instruction samples, or none of the named function or line",
+        detail: true,
+
+        what: fn(self) -> String { "`{self.trace}` keeps no instruction samples{self.scope}" }
+
+        why: fn(self) -> String {
+            "The instruction view lists the code a native run's samples landed in, which `jet perf run` keeps in the trace as it records; a trace that keeps none of it, or none of the named function or line, has nothing to list."
+        }
+
+        fix: fn(self) -> String {
+            "Profile the program natively with `jet perf run -O2 <file.jet>`, then view its trace with `--instructions`."
         }
     }
 }

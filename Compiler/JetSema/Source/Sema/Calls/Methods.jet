@@ -2315,34 +2315,187 @@ sema_call_item_free_function_root: fn(item: Item, name: String) -> Bool? Never! 
     None
 }
 
-// A method another language spells on a receiver whose Jet surface lacks
-// it, and what Jet writes instead: `spelling` is Jet code on a value named
-// `value`, and `witness` a program that writes it on such a receiver.
+// A method or field another language spells on a receiver whose Jet surface
+// lacks it, or a function it calls that Jet spells another way, and what
+// Jet writes instead: `spelling` is Jet code on a value named `value`, and
+// `witness` a program that writes it on such a receiver.
+// A row with a `rename` is also an edit. On a method it writes `rename` for
+// the method's name; on a field read it writes the call `rename()`. A row
+// with no receiver is a free function, or a dotted `object.function` when
+// `foreign` holds a dot. A free function's edit writes `spelling` for the
+// whole one-argument call, with the argument for `value`. A dotted row's
+// edit writes `rename` for the dotted name.
 // Compiler/JetDriver/Tests/MethodIdioms.jet checks every witness clean and
-// finds its spelling in it, so no row can point at an API that is gone.
+// finds its spelling, and any rename, in it, so no row can point at an API
+// that is gone.
 SemaMethodIdiom: struct {
     receiver: String,
     foreign: String,
     note: String,
     spelling: String,
     witness: String,
+    rename: String{""},
 }
 
 SEMA_METHOD_IDIOMS: [SemaMethodIdiom]{
     {receiver: "I32", foreign: "abs", note: "`abs` is on `Int`, so widen the value first", spelling: "Int{{value}}.abs()", witness: "run: fn() {{\n    value: I32{{-3}}\n    print(Int{{value}}.abs())\n}}\n"},
     {receiver: "Int", foreign: "to_float", note: "Jet converts a number by naming the type it becomes", spelling: "Float{{value}}", witness: "run: fn() {{\n    value: 7\n    print(Float{{value}})\n}}\n"},
     {receiver: "List", foreign: "as_mut_ptr", note: "Jet has no raw pointers; a list's elements are written in place by index", spelling: "value[index] = item", witness: "run: fn() {{\n    value := [U8]{{1, 2}}\n    index: 0\n    item: U8{{5}}\n    value[index] = item\n    print(value)\n}}\n"},
+    {receiver: "List", foreign: "length", note: "a Jet list's length is the method `len`", spelling: "value.len()", rename: "len", witness: "run: fn() {{\n    value: [1, 2, 3]\n    print(value.len())\n}}\n"},
+    {receiver: "List", foreign: "append", note: "a Jet list grows with `push`", spelling: "value.push(item)", rename: "push", witness: "run: fn() {{\n    value := [1, 2]\n    item: 3\n    value.push(item)\n    print(value)\n}}\n"},
+    {receiver: "String", foreign: "length", note: "a Jet string's length is the method `len`", spelling: "value.len()", rename: "len", witness: "run: fn() {{\n    value: \"ada\"\n    print(value.len())\n}}\n"},
+    {receiver: "String", foreign: "toUpperCase", note: "Jet spells JavaScript's `toUpperCase` as `to_upper`", spelling: "value.to_upper()", rename: "to_upper", witness: "run: fn() {{\n    value: \"ada\"\n    print(value.to_upper())\n}}\n"},
+    {receiver: "String", foreign: "toLowerCase", note: "Jet spells JavaScript's `toLowerCase` as `to_lower`", spelling: "value.to_lower()", rename: "to_lower", witness: "run: fn() {{\n    value: \"ADA\"\n    print(value.to_lower())\n}}\n"},
+    {receiver: "", foreign: "len", note: "a length is the method `len` on the value", spelling: "value.len()", witness: "run: fn() {{\n    value: [1, 2, 3]\n    print(value.len())\n}}\n"},
+    {receiver: "", foreign: "str", note: "Jet puts a value into text by writing it inside the string", spelling: "\"{{value}}\"", witness: "run: fn() {{\n    value: 7\n    print(\"{{value}}\")\n}}\n"},
+    {receiver: "", foreign: "range", note: "a Jet range is written with `..<`", spelling: "0..<value", witness: "run: fn() {{\n    value: 3\n    loop i in 0..<value {{\n        print(i)\n    }}\n}}\n"},
+    {receiver: "", foreign: "console.log", note: "Jet prints a line with `print`", spelling: "print(value)", rename: "print", witness: "run: fn() {{\n    value: \"hi\"\n    print(value)\n}}\n"},
+}
+
+// The idiom row for `member` on this receiver; -1 without one.
+sema_call_method_idiom_index: fn(receiver: Type, member: String) -> Int Never! {
+    label: sema_call_method_leaf(sema_call_receiver_method_label(sema_expr_unwrap_tag(receiver)))
+    if label == "" -> return -1
+    loop (index, idiom) in SEMA_METHOD_IDIOMS {
+        if idiom.receiver == label && idiom.foreign == member -> return index
+    }
+    -1
+}
+
+// The free-function idiom row for `name`; -1 without one.
+sema_call_free_idiom_index: fn(name: String) -> Int Never! {
+    loop (index, idiom) in SEMA_METHOD_IDIOMS {
+        if idiom.receiver == "" && idiom.foreign == name -> return index
+    }
+    -1
+}
+
+// The dotted idiom row for `object.member`; -1 without one.
+sema_call_dotted_idiom_index: fn(object: String, member: String) -> Int Never! {
+    loop (index, idiom) in SEMA_METHOD_IDIOMS {
+        foreign: idiom.foreign
+        if idiom.receiver != "" || foreign.len() != object.len() + 1 + member.len() -> next
+        if foreign.starts_with(object) && foreign.ends_with(member) && foreign.bytes()[object.len()] == (U8{46}) {
+            return index
+        }
+    }
+    -1
 }
 
 // The Fix an idiom row gives `method` on this receiver; None without a row.
 sema_call_method_idiom_fix: fn(receiver: Type, method: String) -> String? Never! {
-    label: sema_call_method_leaf(sema_call_receiver_method_label(sema_expr_unwrap_tag(receiver)))
-    loop idiom in SEMA_METHOD_IDIOMS {
-        if idiom.receiver == label && idiom.foreign == method {
-            return Val("{idiom.note}: write `{idiom.spelling}`")
-        }
-    }
+    index: sema_call_method_idiom_index(receiver, method)
+    if index < 0 -> return None
+    Val("{SEMA_METHOD_IDIOMS[index].note}: write `{SEMA_METHOD_IDIOMS[index].spelling}`")
+}
+
+// The rename edit's text an idiom row gives `method` on this receiver; None
+// when the row is no rename or there is no row.
+sema_call_method_idiom_rename: fn(receiver: Type, method: String) -> String? Never! {
+    index: sema_call_method_idiom_index(receiver, method)
+    if index < 0 || SEMA_METHOD_IDIOMS[index].rename == "" -> return None
+    Val("{SEMA_METHOD_IDIOMS[index].rename}")
+}
+
+// The text of a call argument a free-function idiom can carry into its
+// spelling: a name or an integer literal; None for any other argument.
+sema_call_idiom_argument_text: fn(expr: Expr) -> String? Never! {
+    if expr == .Ident(name, _, _) -> return Val("{name}")
+    if expr == .Int(value, _, _, _, _) -> return Val("{value}")
     None
+}
+
+// The row of the checked module when its source is the text the spans
+// index; -1 for a module stitched from several segments or one offset into
+// its source.
+sema_call_span_source_row: fn(environment: SemaScopeEnvironment, graph: SemaRegistrationGraph) -> Int {
+    sema_span_source_row(graph, sema_scope_caller_row(environment, graph))
+}
+
+// `row` when its module's source is the text the spans index; -1 for no
+// row, or a module stitched from several segments or offset into its source.
+sema_span_source_row: fn(graph: SemaRegistrationGraph, row: Int) -> Int {
+    if row < 0 -> return -1
+    segments: graph.modules[row].source_segments
+    if segments.len() > 1 -> return -1
+    if segments.len() == 1 && (segments[0].generated.start != 0 || segments[0].source_start != 0) {
+        return -1
+    }
+    row
+}
+
+// The offset just past the `)` that closes a call whose last argument ends
+// at `after`, read from the checked module's source. None when that source
+// is not the text the spans index, or the next mark is not `)`.
+sema_call_close_paren_end: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, after: Int) -> Int? {
+    graph: program.registration_graph ?? return None
+    row: sema_call_span_source_row(environment, graph)
+    if row < 0 -> return None
+    bytes: graph.modules[row].source.bytes()
+    at := after
+    loop at < bytes.len() && (bytes[at] == (U8{32}) || bytes[at] == (U8{9})) -> at += 1
+    if at < bytes.len() && bytes[at] == (U8{41}) -> return Val(at + 1)
+    None
+}
+
+// The span of `word` where `span` starts with it, read from the checked
+// module's source: `Pont` in `Pont{x: 1}`. The span itself when it is the
+// word alone; None when the source there spells something else.
+sema_call_source_word_span: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span, word: String) -> Span? {
+    graph: program.registration_graph ?? return sema_type_name_span(word, span)
+    sema_source_word_span(graph, sema_scope_caller_row(environment, graph), span, word)
+}
+
+// sema_call_source_word_span over the source of the module at `row`.
+sema_source_word_span: fn(graph: SemaRegistrationGraph, row: Int, span: Span, word: String) -> Span? {
+    word_span: Span{start: span.start, end: span.start + word.count_bytes()}
+    if span.end == word_span.end -> return Val(word_span)
+    if span.end < word_span.end -> return None
+    source_row: sema_span_source_row(graph, row)
+    if source_row < 0 -> return None
+    bytes: graph.modules[source_row].source.bytes()
+    letters: word.bytes()
+    if word_span.end > bytes.len() -> return None
+    loop index in 0..<letters.len() {
+        if bytes[span.start + index] != letters[index] -> return None
+    }
+    Val(word_span)
+}
+
+// E0102 for a one-argument call of a function another language has and Jet
+// spells another way (`len(items)`): the row's spelling, as an edit over the
+// whole call when the argument is a name or a number.
+sema_call_free_idiom_error: fn(index: Int, call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic {
+    idiom: SEMA_METHOD_IDIOMS[index]
+    argument: sema_call_idiom_argument_text(call.args[0].expr) ?? {
+        return sema_error("E0102", call.name_span, "`{call.name}(…)` isn't a Jet function", idiom.note, "write `{idiom.spelling}`")
+    }
+    written: idiom.spelling.replace("value", argument)
+    diagnostic: sema_error("E0102", call.name_span, "`{call.name}(…)` isn't a Jet function", idiom.note, "write `{written}`")
+    end: sema_call_close_paren_end(environment, program, expr_span(call.args[0].expr).end) ?? return diagnostic
+    diagnostic_with_edit(diagnostic, TextEdit{span: Span{start: call.name_span.start, end: end}, new_text: written})
+}
+
+// A dotted call another language makes on a name nothing declares
+// (`console.log(x)`): the E0107 its receiver just reported gets the row's
+// Fix, and its edit writes the row's rename for the dotted name.
+sema_call_dotted_idiom_edit: fn(receiver: Expr, method: String, method_span: Span, diagnostics: &[Diagnostic]) {
+    if diagnostics.len() == 0 {
+        return
+    }
+    if receiver == .Ident(name, span, _) {
+        last: diagnostics.len() - 1
+        if diagnostics[last].code != "E0107" || diagnostics[last].span != (Span?{Val(span)}) {
+            return
+        }
+        index: sema_call_dotted_idiom_index(name, method)
+        if index < 0 || SEMA_METHOD_IDIOMS[index].rename == "" {
+            return
+        }
+        rename: SEMA_METHOD_IDIOMS[index].rename
+        reported: sema_error("E0107", span, "nothing named `{name}` exists here", SEMA_METHOD_IDIOMS[index].note, "write `{rename}(…)`")
+        diagnostics[last] = diagnostic_with_edit(reported, TextEdit{span: Span{start: span.start, end: method_span.end}, new_text: "{rename}"})
+    }
 }
 
 // The receiver's built-in methods that take `actual` arguments and its
@@ -2418,7 +2571,8 @@ sema_call_method_error: fn(code: String, span: Span, what: String, why: String, 
 
 sema_call_missing_instance_method: fn(method: String, receiver: Type, actual: Int, why: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic {
     candidates: sema_call_method_candidates(receiver, actual, environment, program)
-    suggestion: sema_call_method_suggestion(method, candidates)
+    // An idiom row's Fix wins, so only its rename is the edit.
+    suggestion: if sema_call_method_idiom_index(receiver, method) >= 0 -> sema_call_method_idiom_rename(receiver, method) else -> sema_call_method_suggestion(method, candidates)
     sema_call_method_error("E0311", span, "`{method}` isn't a method on this value", why, sema_call_method_fix(method, receiver, candidates, suggestion, "check the spelling of `{method}`"), suggestion)
 }
 

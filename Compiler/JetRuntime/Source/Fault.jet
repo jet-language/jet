@@ -25,7 +25,8 @@
 // A release image (`debug_info: split`) keeps no location table: its report
 // (Assets/FaultReport/addresses.S) gives the first line, the build id and the
 // frames' addresses, and `jet crash` turns it into the text above from the
-// side debug file.
+// side debug file. A stop's `-->` line at its caller is written the same way
+// in a release image (trace_release_callers).
 
 // Checked FunctionAddress intrinsic in the canonical RuntimeLibrary table.
 rt_fault_signal_address: fn() -> I64 {
@@ -191,9 +192,10 @@ trace_text: fn() -> I64 {
 // it. With none (0), the walk stops at the innermost frame whose file is not
 // Core's and writes that frame's `-->` line (Trap.jet trap_user_frame, with
 // its function when `with_function`); it returns whether one was written.
-// That form allocates nothing, so a stop raised in Core (Trap.jet
-// trap_user_location) links no allocator into an image that never
-// allocates. A host that reports the chain itself (trace_host) answers
+// A release image writes its callers for `jet crash` in its place
+// (trace_release_callers). That form allocates nothing, so a stop raised in
+// Core (Trap.jet trap_user_location) links no allocator into an image that
+// never allocates. A host that reports the chain itself (trace_host) answers
 // first.
 trace_walk: fn(text: I64, with_function: Bool) -> Bool {
     hosted: trace_host(text, with_function)
@@ -350,6 +352,8 @@ trace_decimal: fn(at: I64, length: I64) -> I64 {
 // section of `image` (its load bias `bias`), as trace_walk takes them:
 // onto `text`, or to the first frame outside Core when `text` is 0. With no
 // `start` (0), only the function whose code holds runtime address `target`.
+// A release image keeps no table, so its walk for a `-->` line writes the
+// chain for `jet crash` instead (trace_release_callers) and returns false.
 priv trace_frames: fn(text: I64, image: I64, bias: I64, start: I64, target: I64, with_function: Bool) -> Bool {
     table := I64{0}
     table_end := I64{0}
@@ -375,7 +379,12 @@ priv trace_frames: fn(text: I64, image: I64, bias: I64, start: I64, target: I64,
             }
         }
     }
-    if (table == I64{0}) { return false }
+    if (table == I64{0}) {
+        if (text == I64{0} && start != I64{0}) {
+            trace_release_callers(image, bias, start, with_function)
+        }
+        return false
+    }
     if (start == I64{0}) {
         return trace_frame(text, table, table_end, wrapping(target - bias), with_function)
     }
@@ -396,6 +405,101 @@ priv trace_frames: fn(text: I64, image: I64, bias: I64, start: I64, target: I64,
         steps = wrapping(steps + I64{1})
     }
     false
+}
+
+// A stop's callers in a release image (`debug_info: split`), which keeps no
+// location table to name them: its build id line, as its fault report
+// gives (Assets/FaultReport/addresses.S), a label, and the link-time return
+// address of each caller on the chain from `start`, up to 64. `jet crash`
+// (JetCLI CLI/Crash.jet jet_cli_crash_callers) names the innermost one
+// outside Core from the side debug file as the `-->` line a dev build
+// writes here, with its function after the label `Callers with function:`.
+// Nothing when the image holds no build id.
+priv trace_release_callers: fn(image: I64, bias: I64, start: I64, with_function: Bool) {
+    id: trace_build_id(image)
+    if (id == I64{0}) {
+        return
+    }
+    trap_write_static(rt_static_text("Build "))
+    at := I64{0}
+    loop at < (I64{20}) {
+        trace_hex(trace_u32_big(wrapping(id + at)), I64{8})
+        at = wrapping(at + I64{4})
+    }
+    trap_write_static(rt_static_text(" (names and lines: jet crash)\n"))
+    if with_function -> trap_write_static(rt_static_text("Callers with function:\n")) else {
+        trap_write_static(rt_static_text("Callers:\n"))
+    }
+    frame := start
+    steps := I64{0}
+    loop frame != (I64{0}) && frame & (I64{7}) == (I64{0}) && steps < (I64{64}) {
+        address := I64{0}
+        #Unsafe("frame is an active caller's [saved rbp][return address] pair on this thread's stack") {
+            address = os_load_i64(wrapping(frame + I64{8}))
+        }
+        if (address != I64{0}) {
+            linked: wrapping(address - bias)
+            trap_write_static(rt_static_text("  0x"))
+            digits := I64{1}
+            loop digits < (I64{16}) && (linked >> wrapping(digits * I64{4})) != (I64{0}) {
+                digits = wrapping(digits + I64{1})
+            }
+            trace_hex(linked, digits)
+            trap_msg_newline()
+        }
+        #Unsafe("each followed link ascends by less than 16 MiB or crosses a stack segment's bridge frame, so frame stays on this thread's chain") {
+            frame = stack_frame_caller(frame)
+        }
+        steps = wrapping(steps + I64{1})
+    }
+}
+
+// The address of the 20-byte GNU build id in `image`, a read-only mapping
+// of this executable's ELF64 file: the build-id note a PT_NOTE program
+// header holds, as addresses.S finds it. 0 when it holds none.
+trace_build_id: fn(image: I64) -> I64 {
+    headers: wrapping(image + trace_u64(wrapping(image + I64{32})))
+    entry: trace_u16(wrapping(image + I64{54}))
+    count: trace_u16(wrapping(image + I64{56}))
+    index := I64{0}
+    loop index < count {
+        header: wrapping(headers + wrapping(index * entry))
+        if (trace_u32(header) == I64{4}) {
+            note := wrapping(image + trace_u64(wrapping(header + I64{8})))
+            end: wrapping(note + trace_u64(wrapping(header + I64{32})))
+            loop wrapping(note + I64{12}) <= end {
+                name_size: trace_u32(note)
+                desc_size: trace_u32(wrapping(note + I64{4}))
+                desc: wrapping(wrapping(note + I64{12}) + (wrapping(name_size + I64{3}) & I64{-4}))
+                // Type 3 (NT_GNU_BUILD_ID) under the name "GNU\0".
+                if (trace_u32(wrapping(note + I64{8})) == I64{3} && name_size == I64{4} && trace_u32(wrapping(note + I64{12})) == I64{5590599} && desc_size == I64{20}) {
+                    return desc
+                }
+                note = wrapping(desc + (wrapping(desc_size + I64{3}) & I64{-4}))
+            }
+        }
+        index = wrapping(index + I64{1})
+    }
+    I64{0}
+}
+
+// The low `digits` (1 to 16) lowercase hex digits of `value`, most
+// significant first, eight to a write; no heap.
+trace_hex: fn(value: I64, digits: I64) {
+    left := digits
+    loop left > (I64{0}) {
+        count: if (left > I64{8}) -> I64{8} else -> left
+        word := I64{0}
+        k := I64{0}
+        loop k < count {
+            nibble: (value >> wrapping(wrapping(wrapping(left - k) - I64{1}) * I64{4})) & I64{15}
+            glyph: if (nibble < I64{10}) -> wrapping(nibble + I64{48}) else -> wrapping(nibble + I64{87})
+            word |= glyph << wrapping(k * I64{8})
+            k = wrapping(k + I64{1})
+        }
+        trap_write_word(word, count)
+        left = wrapping(left - count)
+    }
 }
 
 // The Jet function whose code holds link-time address `pc`, from the table
@@ -505,7 +609,7 @@ trace_cstr_len: fn(at: I64, end: I64) -> I64 {
 
 priv trace_u8: fn(at: I64) -> I64 {
     byte := I64{0}
-    #Unsafe("at lies in a mapping the trace reads: the executable's read-only ELF header, section table or location table, or the page the host's frames were written to") {
+    #Unsafe("at lies in a mapping the trace reads: the executable's read-only ELF header, program or section table, notes or location table, or the page the host's frames were written to") {
         byte = os_load_u8(at)
     }
     byte
@@ -514,6 +618,14 @@ priv trace_u8: fn(at: I64) -> I64 {
 trace_u16: fn(at: I64) -> I64 { trace_u8(at) | trace_u8(wrapping(at + I64{1})) << I64{8} }
 
 trace_u32: fn(at: I64) -> I64 { trace_u16(at) | trace_u16(wrapping(at + I64{2})) << I64{16} }
+
+trace_u64: fn(at: I64) -> I64 { trace_u32(at) | trace_u32(wrapping(at + I64{4})) << I64{32} }
+
+// The four bytes at `at` as one number, the first the most significant, so
+// trace_hex writes them in order.
+trace_u32_big: fn(at: I64) -> I64 {
+    trace_u8(at) << I64{24} | trace_u8(wrapping(at + I64{1})) << I64{16} | trace_u8(wrapping(at + I64{2})) << I64{8} | trace_u8(wrapping(at + I64{3}))
+}
 
 // The unsigned LEB128 at `at`.
 trace_uleb: fn(at: I64) -> I64 {

@@ -10,8 +10,10 @@ use {
         DiagnosticLabel,
         Name,
         Span,
+        TextEdit,
         diagnostic_from_registry,
         diagnostic_registry_row,
+        diagnostic_with_edit,
         foundation_byte_text,
         name_empty,
         name_index,
@@ -82,6 +84,21 @@ add_unknown_escape: fn(diagnostics: &[Diagnostic], start: Int, end: Int, escape_
     what: "`\\{escape_text}` isn't an escape Jet knows"
     why: "inside quoted text, `\\` starts an escape: `\\n` (new line), `\\r` (carriage return), `\\t` (tab), `\\\"` (quote), `\\\\` (backslash), `\\u{{H}}` (the Unicode scalar with hexadecimal value H)"
     add_diagnostic(diagnostics, "E0001", start, end, what, why, "write `\\\\` for a real backslash")
+}
+
+// E0002 for a character literal `raw` holding more than one character, as
+// Python and JavaScript quote text. When the text needs no escaping its
+// edit writes it as a String.
+add_long_char: fn(diagnostics: &[Diagnostic], raw: [U8], source_start: Int, span_end: Int) {
+    diagnostic := diagnostic_from_registry("E0002", Val(Span{start: source_start, end: span_end}), "a character literal must be exactly one character", "write `'x'` with a single character between the quotes", "use a String for longer text")
+    if raw.len() > 3 && byte_at(raw, raw.len() - 1) == 39 {
+        text: foundation_byte_text(raw, 1, raw.len() - 1)
+        plain: !text.contains("\"") && !text.contains("\\") && !text.contains("{{") && !text.contains("}}") && !text.contains("'") && !text.contains("\n")
+        if plain {
+            diagnostic = diagnostic_with_edit(diagnostic, TextEdit{span: Span{start: source_start, end: source_start + raw.len()}, new_text: "\"{text}\""})
+        }
+    }
+    diagnostics.push(diagnostic)
 }
 
 // `source[start..<end]` (one scalar's UTF-8 bytes) packed into one Int, first
@@ -972,7 +989,7 @@ decode_char: fn(text: String, source_start: Int, diagnostics: &[Diagnostic]) -> 
         if byte_at(raw, 1 + width) != 39 {
             span_end := source_start + 1 + width
             if span_end > source_start + raw.len() -> span_end = source_start + raw.len()
-            add_diagnostic(diagnostics, "E0002", source_start, span_end, "a character literal must be exactly one character", "write `'x'` with a single character between the quotes", "use a String for longer text")
+            add_long_char(diagnostics, raw, source_start, span_end)
         }
         return foundation_byte_text(raw, 1, 1 + width)
     }

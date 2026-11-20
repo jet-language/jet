@@ -110,6 +110,23 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     assert_eq(kit_ui_arg("// @check_cli\n// @check_cli ignored\n", "check_cli"), Val("ignored"))
 }
 
+// A fixture's `// @name` lines are spelled as its rows are, so renaming a
+// fixture's folder never leaves its directive behind.
+#Test("UI fixtures name only directives the table has") {
+    root: sys.current_dir()
+    unported := [String]{}
+    loop directory in ["Tests/UI", "Tests/UILint"] {
+        loop entry in kit_ui_collect(root, directory, directory == "Tests/UILint") {
+            source: files.read(files.join(root, entry.path)) ?? panic("read UI fixture {entry.path}: {err}")
+            refused: kit_ui_invocation(source, entry.path, entry.mode.starts_with("lint")).refused
+            if refused.starts_with("unported fixture directive") {
+                unported.push("{entry.path}: {refused}")
+            }
+        }
+    }
+    assert(unported.len() == 0, unported.join("\n"))
+}
+
 #Test("UI check_core checks the staged Core with the project's files and the entry's text on top") {
     call: kit_ui_invocation("// @check_core Collections/Set.jet\nuse probe: core.files\n", "Tests/UI/layers/main.jet", false)
     assert(call.check_core)

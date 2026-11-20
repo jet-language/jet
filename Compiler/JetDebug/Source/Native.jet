@@ -7,8 +7,9 @@
 // where each lives and its type. No outside debugger takes part.
 use {
     native_files: core.files
+    native_hex: core.encoding.hex
     native_math: core.math
-    jet_backend.[X64DebugEncoding, X64LineRow, X64Trace, X64TraceResume, X64_DEBUG_ITEMS_DROP_SYMBOL, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_EVENT_EXIT, X64_TRACE_EVENT_STOP, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, link_debug_uleb, x64_debug_eval_symbols, x64_jetline_find, x64_jetline_line, x64_jetline_next, x64_jetline_place, x64_jetline_sleb, x64_jetline_text, x64_trace_attach, x64_trace_close, x64_trace_debug_register, x64_trace_detach, x64_trace_event_message, x64_trace_follow_exits, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_seize, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait, x64_trace_wait_for, x64_trace_wait_or_input, x64_trace_write]
+    jet_backend.[X64DebugEncoding, X64LineRow, X64Trace, X64TraceResume, X64_DEBUG_ITEMS_DROP_SYMBOL, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_EVENT_EXIT, X64_TRACE_EVENT_STOP, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, link_debug_le, link_debug_uleb, x64_debug_eval_symbols, x64_jetline_find, x64_jetline_line, x64_jetline_next, x64_jetline_place, x64_jetline_sleb, x64_jetline_text, x64_trace_attach, x64_trace_close, x64_trace_debug_register, x64_trace_detach, x64_trace_event_message, x64_trace_follow_exits, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_seize, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait, x64_trace_wait_for, x64_trace_wait_or_input, x64_trace_write]
     jet_foundation.[DeepChecks, Diagnostic, ENV_JET_RECORD, EXIT_ICE, EXIT_RUNTIME_PANIC, MODULE_CORE_PREFIX, deep_checks_flags, diagnostic_display_identities, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all, foundation_named_type]
 }
 
@@ -420,18 +421,83 @@ NativeUnwound: struct {
     known: [Bool],
 }
 
-// The debug facts of the image `binary`, whose bytes are `elf`: its own, or,
-// when it keeps none (`debug_info: split`), those of the side file its
-// `.gnu_debuglink` names beside it. The link names a file, not a directory,
-// and the build makes that name a link to the symbol store's side file.
-native_image_load: fn(binary: String, elf: [U8]) -[FS.Read]> NativeImage? {
-    own: native_image_read(elf)
-    if own != None -> return own
-    link: native_elf_section(elf, ".gnu_debuglink") ?? return None
+// The debug facts of the image `binary`, whose bytes are `elf`: its own,
+// or, when it keeps no DWARF and its `.gnu_debuglink` names a side debug
+// file, its line table (its own, or the side file's when it keeps none) and
+// the side file's DWARF (native_image_read_apart). A `debug_info: split`
+// build keeps none of either; the compiler's own image keeps its line
+// table and moves the rest to `jet.debug` (JetCLI RuntimeEmbed.jet). The
+// side file is found and checked by native_side_file: one that is missing
+// or isn't this image's is refused by name, never read as its facts.
+native_image_load: fn(binary: String, elf: [U8]) -[FS.Read]> NativeImage NativeDebugError! {
+    if native_elf_header(elf, ".debug_info") == None && native_elf_section(elf, ".gnu_debuglink") == .Val(link) {
+        side: native_side_file(binary, elf, link) ?? return Err(err)
+        apart: native_image_read_apart(elf, side) ?? return Err(NativeDebugError{detail: "neither `{binary}` nor its side debug file has a Jet line table"})
+        return Ok(apart)
+    }
+    own: native_image_read(elf) ?? return Err(NativeDebugError{detail: "`{binary}` has no Jet debug information; build it with `jet build -O0`"})
+    Ok(own)
+}
+
+// The side debug file of the image `binary`, whose bytes are `elf` and
+// whose `.gnu_debuglink` is `link` (the file's name, its NUL, padding to 4
+// bytes, then the file's CRC-32): the file of that name beside `binary`,
+// which a split build links to the symbol store's side file and the
+// compiler build writes beside jet; else, for an image with a build id,
+// `.jet/symbols/.build-id/<first byte>/<rest>.debug` (the symbol store's
+// name for it) in the directory of `binary` or one above it. The first of
+// them whose CRC-32 is the link's is the one; when none is, the report
+// names the file the link asks for and, of one that is there but another
+// build's, its CRC-32 against the link's.
+native_side_file: fn(binary: String, elf: [U8], link: [U8]) -[FS.Read]> [U8] NativeDebugError! {
     name: x64_jetline_text(link, 0)
-    if name.len() == 0 -> return None
-    side: native_files.read_bytes(native_files.join(native_files.dirname(binary), name)) ?? return None
-    native_image_read(side)
+    crc_at: (name.len() + 4) /% 4 * 4
+    if name.len() == 0 || crc_at + 4 > link.len() {
+        return Err(NativeDebugError{detail: "the `.gnu_debuglink` of `{binary}` names no side debug file"})
+    }
+    wanted: link_debug_le(link, crc_at, 4)
+    beside: native_files.join(native_files.dirname(binary), name)
+    places := [String]{beside}
+    id: native_build_id(elf)
+    if id.len() > 1 {
+        stored: ".jet/symbols/.build-id/{native_hex.encode(id[0..<1])}/{native_hex.encode(id[1..<id.len()])}.debug"
+        directory := native_files.dirname(binary)
+        loop {
+            places.push(native_files.join(directory, stored))
+            above: native_files.dirname(directory)
+            if above == directory -> break
+            directory = above
+        }
+    }
+    other := ""
+    loop place in places {
+        bytes: native_files.read_bytes(place) ?? next
+        found: native_hex.crc32(bytes)
+        if found == wanted -> return Ok(bytes)
+        if other == "" {
+            other = "`{place}` is not the debug file of `{binary}`: its CRC-32 is {native_crc_text(found)}, but the image's `.gnu_debuglink` asks for {native_crc_text(wanted)}"
+        }
+    }
+    if other != "" {
+        return Err(NativeDebugError{detail: "{other}; put the `{name}` built with this `{binary}` beside it"})
+    }
+    Err(NativeDebugError{detail: "`{binary}` keeps its DWARF in `{name}`, which is not beside it at `{beside}` or in a `.jet/symbols` build-id store above it; put the `{name}` built with it beside it"})
+}
+
+// The build id of the image `elf`, the descriptor of its
+// `.note.gnu.build-id`; empty when it has none.
+native_build_id: fn(elf: [U8]) -> [U8] Never! {
+    note: native_elf_section(elf, ".note.gnu.build-id") ?? return [U8]{}
+    if note.len() < 12 || link_debug_le(note, 8, 4) != 3 -> return [U8]{}
+    from: 12 + (link_debug_le(note, 0, 4) + 3) /% 4 * 4
+    to: from + link_debug_le(note, 4, 4)
+    if to > note.len() -> return [U8]{}
+    note[from..<to]
+}
+
+// A CRC-32 as eight hex digits, most significant first, as tools print it.
+native_crc_text: fn(crc: Int) -> String Never! {
+    native_hex.encode([U8]{U8{(crc >> 24) & 255}, U8{(crc >> 16) & 255}, U8{(crc >> 8) & 255}, U8{crc & 255}})
 }
 
 NativeSession: struct {
@@ -596,7 +662,7 @@ NativeSession: struct {
     // output is written to `output_path`; nothing runs until `launch`.
     start: fn(binary: String, output_path: String) -> NativeSession NativeDebugError! {
         elf: native_files.read_bytes(binary) ?? return Err(NativeDebugError{detail: "couldn't read the program `{binary}`: {err}"})
-        image: native_image_load(binary, elf) ?? return Err(NativeDebugError{detail: "`{binary}` has no Jet debug information; build it with `jet build -O0`"})
+        image: native_image_load(binary, elf) ?? return Err(err)
         native_files.write(output_path, "") ?? return Err(NativeDebugError{detail: "couldn't create the program output file: {err}"})
         observe_root: native_elf_symbol(elf, X64_OBSERVE_ROOT_SYMBOL) ?? 0
         codes: native_elf_codes(elf, ".text")
@@ -1976,7 +2042,7 @@ NativeSession: struct {
     // breakpoints, watches and compiled expressions of the old image go.
     load: fn(&self, binary: String) NativeDebugError! {
         elf: native_files.read_bytes(binary) ?? return Err(NativeDebugError{detail: "couldn't read the program `{binary}`: {err}"})
-        image: native_image_load(binary, elf) ?? return Err(NativeDebugError{detail: "`{binary}` has no Jet debug information; build it with `jet build -O0`"})
+        image: native_image_load(binary, elf) ?? return Err(err)
         self.observe_root = native_elf_symbol(elf, X64_OBSERVE_ROOT_SYMBOL) ?? 0
         self.root_stop = native_elf_symbol(elf, NATIVE_ROOT_STOP_SYMBOL) ?? 0
         codes: native_elf_codes(elf, ".text")

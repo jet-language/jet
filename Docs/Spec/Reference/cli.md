@@ -1681,7 +1681,10 @@ pack, the Jet-only object, the Core library and its export and thread lists,
 the web partition and its receipt, and `IDENTITY`, the identity of the jet
 that lowered the runtime) added as its `jet.runtime/<file>` part, and last
 its own identity as its `jet.identity` part, in one pass, and writes that
-identity to `identity`. The runtime's `IDENTITY` must name `image`. A jet's
+identity to `identity`. The image's DWARF does not go into `out`: it goes
+to `<out>.debug`, which `out`'s `.gnu_debuglink` names with its CRC-32 and
+`jet debug` reads beside it; `out` keeps its symbols and its Jet line
+table. The runtime's `IDENTITY` must name `image`. A jet's
 identity is `jet@<release>#<digest>`, the digest the sha256 of the jet's
 bytes with its `jet.identity` part's bytes zeroed: the sha256 of the file
 for a jet without that part. The compiler build's `runtime` step checks Core

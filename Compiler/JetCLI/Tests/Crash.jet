@@ -1,0 +1,63 @@
+// `jet crash` naming a release stop's callers (CLI/Crash.jet
+// jet_cli_crash_callers): the innermost caller outside Core is the stop's
+// `-->` line, in place of the Core site the report fell back to, and with
+// no such caller the fallback stays.
+use {
+    jet_backend.[X64Jetline, X64JetlineFunction, X64LineRow, x64_jetline_rows]
+    jet_cli.[jet_cli_crash_callers]
+}
+
+// A Core function at 0x1000 and the user's `run` at 0x2000 (prog.jet),
+// whose call on line 7 spans 0x2008..<0x200d and whose line 7 goes on after
+// it.
+crash_callers_table: fn() -> X64Jetline {
+    rows := [U8]{}
+    x64_jetline_rows(rows, [X64LineRow]{X64LineRow{at: 0, line: 5}, X64LineRow{at: 8, line: 7, column: 5, call: true}, X64LineRow{at: 13, line: 7}})
+    end: rows.len()
+    X64Jetline{
+        table: rows,
+        functions: [X64JetlineFunction]{
+            X64JetlineFunction{low: 0x1000, high: 0x1100, name: "channel", file: "<corelib>/channel.jet", dir: ".", decl: 3, rows: 0, rows_end: 0},
+            X64JetlineFunction{low: 0x2000, high: 0x2040, name: "run", file: "prog.jet", dir: ".", decl: 4, rows: 0, rows_end: end},
+        },
+        ascending: true,
+    }
+}
+
+crash_callers_report: fn() -> [String] {
+    [String]{
+        "Stop: Jet.Panic: `panic: no`",
+        "Build 00112233445566778899aabbccddeeff00112233 (names and lines: jet crash)",
+        "Callers:",
+        "  0x9000",
+        "  0x1010",
+        "  0x2011",
+        "  0x3000",
+        "  --> <corelib>/channel.jet:9 in channel",
+        "    |",
+        "  9 |     panic(\"no\")",
+        "    |     ^^^^^",
+        " Why: why",
+    }
+}
+
+#Test("a release stop's callers name its `-->` line at the innermost caller outside Core, without the Core site") {
+    out := [String]{"Stop: Jet.Panic: `panic: no`"}
+    left: jet_cli_crash_callers(crash_callers_report(), 2, crash_callers_table(), out)
+    assert_eq(out, [String]{"Stop: Jet.Panic: `panic: no`", "  --> prog.jet:7"})
+    assert_eq(left, 11)
+    report := crash_callers_report()
+    report[2] = "Callers with function:"
+    named := [String]{}
+    _: jet_cli_crash_callers(report, 2, crash_callers_table(), named)
+    assert_eq(named, [String]{"  --> prog.jet:7 in run"})
+}
+
+#Test("a release stop with no caller outside Core keeps the Core site it fell back to") {
+    report: crash_callers_report()
+    kept: [String]{report[0], report[1], report[2], report[3], report[4], report[7], report[8], report[9], report[10], report[11]}
+    out := [String]{}
+    left: jet_cli_crash_callers(kept, 2, crash_callers_table(), out)
+    assert_eq(out.len(), 0)
+    assert_eq(left, 5)
+}

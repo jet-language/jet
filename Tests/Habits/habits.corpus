@@ -1,4 +1,4 @@
-# Fifty Python and JavaScript habits and typos, each written once in Jet and
+# Fifty-one Python and JavaScript habits and typos, each written once in Jet and
 # once, as the same slip, in Python. Tools/Agent/HabitCorpus.jet runs every
 # Jet case through `jet check --json`, applies its `fix_edits` and checks the
 # result again. It also runs every Python case under Python 3.13 and counts the
@@ -233,6 +233,18 @@ n = 7
 label = "n=" + n.toString()
 print(label)
 
+== str_call
+-- jet
+run: fn() {
+    n: 7
+    label: str(n)
+    print(label)
+}
+-- python
+n = 7
+label = n.toString()
+print(label)
+
 == null_literal
 -- jet
 run: fn() {
@@ -265,6 +277,8 @@ print(found)
 
 == let_binding
 -- jet
+// An allowed failure: Tests/UI/retired_binding_spellings_get_the_generic_statement_error
+// pins the generic statement error for a retired binding word, with no edit.
 run: fn() {
     let total = 3
     print(total)
@@ -275,6 +289,8 @@ print(total)
 
 == const_binding
 -- jet
+// An allowed failure: Tests/UI/retired_binding_spellings_get_the_generic_statement_error
+// pins the generic statement error for a retired binding word, with no edit.
 run: fn() {
     const total = 3
     print(total)
@@ -285,6 +301,8 @@ print(total)
 
 == var_binding
 -- jet
+// An allowed failure: Tests/UI/retired_binding_spellings_get_the_generic_statement_error
+// pins the generic statement error for a retired binding word, with no edit.
 run: fn() {
     var total = 3
     print(total)
@@ -448,6 +466,7 @@ Person: struct {
 run: fn() {
     p: Person{name: "Ada", age: 36}
     print(p.nmae)
+    print(p.age)
 }
 -- python
 class Person:
@@ -467,6 +486,7 @@ Person: struct {
 run: fn() {
     p: Person{name: "Ada", age: 36}
     print(p.agee)
+    print(p.name)
 }
 -- python
 class Person:
@@ -527,7 +547,7 @@ Point: struct {
 
 run: fn() {
     p: Pont{x: 1, y: 2}
-    print(p.x)
+    print(p.x + p.y)
 }
 -- python
 class Point:
@@ -535,7 +555,7 @@ class Point:
         self.x = x
         self.y = y
 p = Pont(1, 2)
-print(p.x)
+print(p.x + p.y)
 
 == misspelled_variant
 -- jet

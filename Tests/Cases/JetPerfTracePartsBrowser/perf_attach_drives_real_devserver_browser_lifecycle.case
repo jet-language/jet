@@ -16,10 +16,15 @@ env: S6_BROWSER_PHASE=attached
 exit: 0
 wait: attach
 exit: 0
+capture: took = elapsed
 file: browser.jettrace is-file
+json: file browser.jettrace doc $.content.profile.window_status = "live" # the header's window is the attach's, from its first read of the devserver to its relay's rows
+json: file browser.jettrace doc $.content.profile.window_wall_ns <= {cap:took}+0 # no more than the attach took, not the run since it started
+json: file browser.jettrace doc $.content.receipt_sections[?name="window"][0].value.cpu_clock = "schedstat" # counted to the nanosecond
 # Public view calls read_verified -> verify_jettrace (CmdPerf.rs2143/3404-3405), original hash-valid oracle.
 step: jet perf view browser.jettrace
 exit: 0
+stdout: ~ " window=live run_wall=" # the header's window is the attach's
 file: browser.jettrace ~ "\"name\":\"handlers__init$handler0\"" # original trace contains the handler frame name
 step: jet test client/browser_client.jet
 env: S6_BROWSER_PORT={free-port:browser}

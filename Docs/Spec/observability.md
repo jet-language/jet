@@ -16,7 +16,7 @@ question it answers.
 |---|---|---|---|---|
 | Live scheduler | What runs, waits, or queues now? | `jet run app.jet --observe`, then `jet inspect live --attach <pid>` (the task tree with each task's name, open log spans and arena allocations, channel depths and waiters, deadlines and effect counts, redrawn every second; `--once` prints one view), or `jet inspect structure --live <pid>` or another named inspect plane | `--observe` publishes bounded `jet.devtools.v1` facts. Use `--json` for a machine projection. Attaching to a process run without `--observe`, or owned by another user, is refused with `E2105` before anything of it is read. | The live snapshot is `jet-observe-<pid>.json` in the host temporary directory. Despite the `.json` name, it holds the runtime's raw records, which `jet inspect` decodes. It carries freshness and process identity and exposes no unpublished values. |
 | GC promotions | Which allocations enter automatic memory management, and what ownership rewrite helps? | `jet run app.jet --gc-trace`, then `jet gc report` | `--gc-trace` records promotion evidence. | `.jet/gc/trace-v1.json` uses `jet.gc.trace` v1. The separate `jet.gc.report` v1 projection requires complete promotion and identity evidence and rejects dropped rows. |
-| Wall-clock session | Which symbols consume wall time, CPU, task, lock, or I/O time? | `jet perf run app.jet`, then `jet perf view <trace.jettrace>` | `jet perf run`, `jet perf test`, and `jet perf attach <pid> --source app.jet` record sessions. The ratified user-verb recorder is `--record=<name>` on `run`, `dev`, and `test`. | The default artifact is `.jet/perf/<stamp>-<short-id>.jettrace`, with schema `jet.trace` v1. |
+| Wall-clock session | Which symbols consume wall time, CPU, task, lock, or I/O time? | `jet perf run app.jet`, then `jet perf view <trace.jettrace>` | `jet perf run`, `jet perf test`, and `jet perf attach <pid> --source app.jet` record sessions. The ratified user-verb recorder is `--record=<name>` on `run`, `dev`, and `test`. | The default artifact is `.jet/perf/<stamp>-<short-id>.jettrace`, with schema `jet.trace` v3. |
 | Browser rows | Which browser, WebAssembly, or DOM rows consume time? | `jet dev --target=web`, then `jet perf attach <pid>` | The dev server sends bounded, payload-free relay rows; `jet perf attach` requests collection. | The request transport uses `jet.browser.request.v1`; `jet perf attach` merges rows into the canonical `.jettrace` rather than creating a second trace format. |
 | Log records | Which modules log, at which level, and who set it? | `jet explain log`, then `JET_LOG=warn,shop.db=debug jet run .` or `jet run --log=warn,shop.db=debug .` | `--log=<filter>` on `run` and `dev` sets the top `core.log` level filter, above `JET_LOG`, the code's `set_level` and the package's `log:` field. | Records go to the `core.log` sink; each carries its `module`. The ladder is in `Docs/Spec/Reference/core-library.md` under `core.log`. |
 
@@ -91,7 +91,7 @@ matches the trace's own view line for line; `--html` works on them too, and
 `--json` stays the trace's own view. Tests/Cases/Perf/export_round_trip.case
 is the worked example.
 
-The canonical trace wrapper is `jet.trace` version 1, verified by
+The canonical trace wrapper is `jet.trace` version 3, verified by
 `Compiler/JetFoundation/Source/Trace/JetTrace.jet`. A trace's identity, toolchain, and
 hardware facts stay bound to that artifact; `jet perf view`, `compare`,
 `attach`, and `export` use the same verification seam.
@@ -722,6 +722,67 @@ view` prints it as `receipt perf <canonical JSON>`, and `jet perf compare`
 lists each field that differs between two traces' receipts
 (`perf.build.options.optimize: "O0" -> "O2"`). `jet perf attach` records no
 `perf` section.
+
+## Instructions
+
+A `jet perf run` trace of a native program keeps the code its samples landed
+in as the receipt section `instructions` (type `JetPerfInstructions`), so it
+is listed later without the image. The session gathers the program counter
+of each CPU-time sample and each counter sample, and groups them by the
+function that holds them: the Jet function the `.debug_jetline` table
+names, else the image's `.symtab` symbol (a runtime routine, a linked C
+function). The section keeps `samples`, the run's CPU-time samples;
+`counters`, the names of the counters the run captured; `cap_bytes`, the
+most code it keeps (1048576 bytes); `bytes`, `kept` and `cut`, the code and
+functions it kept and cut; and `functions`, the most samples first, then the
+most counter events. Each has its `symbol`, `file` (`""` outside Jet
+functions), optimization `level` (null outside Jet functions), link
+`address`, `size`, `samples` and `events` (one count per counter); `code`,
+its bytes as lowercase hex; `lines`, `{"line":7,"offset":10}` where its
+source line changes; `names`, the `{"address":…,"name":…}` of what its
+calls, jumps and rip-relative operands reach; and `instructions`, each
+sampled instruction's `offset`, `samples` and `events`. A function past the
+cap is kept `cut`: its `code` is `""`, its `names` empty, and its `lines`
+are those of its sampled instructions. The verifier checks the section's
+keys, the hex against `size`, the offsets' order, the sums and the counts.
+Version 3 of `jet.trace` adds the section; a version 2 trace is refused
+with the advice to record it again.
+
+`jet perf view run.jettrace --instructions` lists the hottest function's
+code, each instruction with its share of the function's samples:
+
+```text
+fib profile:cpu samples=2590 share=86% level=O2; shares below are of fib's samples
+sampler: ibs_op, precise: each sample names the instruction that ran
+  fib.jet:7 fib samples=2590 share=100%
+          +0    push   rbp
+  33.1%   +14   call   0x401a30 <fib>
+```
+
+The sampler line says what a share can mean: a precise sampler (`ibs_op`,
+`pebs`) names the instruction that ran; the task clock and the timer name
+the one their interrupt landed on, often after the one that spent the time
+(the skid), and the line says precise samples need `perf_event_paranoid` at
+most 1. A run that captured counters adds a column per counter, each
+instruction's share of the function's events. `--instructions=NAME` lists
+each function of that symbol, and `--instructions=FILE:LINE` (`fib.jet:7`)
+the instructions of that line in each function sampled there. A cut
+function lists its sampled instructions as `(code not kept)`. `--json`
+writes `jet.trace.instructions` (`trace`, `sampler`, `counters`, `samples`
+and each function with its `instructions`, their `address`, `offset`,
+`line`, `bytes`, `text`, `samples` and `events`), and `--html` one
+self-contained page of the listing. `jet perf view` of a trace that keeps
+the section prints `instructions functions=12 kept=12 cut=0
+code_bytes=34567`, then that `--instructions` lists them, and `jet perf
+compare` leaves the section out, since a build's code differs with its
+build.
+
+`--instructions` of a trace without the section (a browser trace, a trace
+of a run that sampled no Jet or `.symtab` function, a pprof or OTLP export),
+or of a function or line the section doesn't hold, is E2126
+(`Jet.PerfNoInstructions`, exit 2), which names the functions it does hold.
+Tests/Cases/Perf/view_instructions_lists_sampled_code.case is the worked
+example.
 
 ## Comparing captures
 

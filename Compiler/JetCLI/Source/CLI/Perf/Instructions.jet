@@ -1,0 +1,673 @@
+// `jet perf view --instructions`: the code a native run's samples landed in.
+// The run keeps its sampled functions' code in the trace's `instructions`
+// receipt section (JetFoundation Trace/ValidateInstructions.jet), so the
+// view needs no image later; the view lists it through the one listing
+// builder (JetBackend X64/Listing.jet), each instruction with its share of
+// its function's samples.
+use {
+    perf_hex: core.encoding.hex
+    inst_files: core.files
+    jet_backend.[X64ImageFunction, X64Jetline, X64JetlineFunction, X64LineRow, X64ListingSymbol, x64_hex, x64_image_function_find, x64_jetline_find, x64_jetline_line, x64_jetline_rows, x64_listing, x64_listing_text]
+    jet_debug.[NativeCode, native_elf_codes]
+    jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE]
+    jet_foundation.[
+        CanonicalJSON,
+        CanonicalJSONField,
+        TRACE_COUNTERS,
+        TraceReceiptSection,
+        canonical_json_sha256,
+        jettrace_array,
+        jettrace_object_view,
+        trace_counter_name,
+        trace_id,
+    ]
+}
+
+// The code a trace keeps, at most, in bytes: a function past it is kept
+// cut, its sampled instructions without its code.
+JET_CLI_PERF_CODE_CAP: 1048576
+
+// One sampled function as the capture gathers it: its code [low, high),
+// its name and file as the line table gives them (a `.symtab` symbol's
+// name and no file outside Jet functions), its line table entry (-1 for a
+// `.symtab` symbol), its CPU-time samples and its captured counters'
+// events, and the program counters sampled in it.
+JetCLIPerfCode: struct {
+    low: Int,
+    high: Int,
+    name: String,
+    file: String,
+    function: Int,
+    samples: U64,
+    events: [U64],
+    rows: [JetCLIPerfPc],
+}
+
+// The trace's `instructions` receipt section (type `JetPerfInstructions`)
+// of the run `sampled` counted from the ELF image `elf`, built at
+// optimization level `level`: each function a sampled program counter is
+// in, the most samples first, then the most counter events. A function
+// keeps its symbol, file, level (null outside Jet functions), link address,
+// size, its code as hex, its line rows `{"line":7,"offset":10}` where the
+// line changes, the names its calls, jumps and rip-relative operands reach,
+// and one row per sampled instruction: its offset, samples and events, one
+// count per captured counter (`counters`). Past JET_CLI_PERF_CODE_CAP bytes
+// of code a function is kept `cut`: no code, no names, and the lines of its
+// sampled instructions alone. `bytes`, `kept` and `cut` count the code and
+// functions kept, `samples` the run's CPU-time samples. None when no
+// sampled program counter is in a function.
+jet_cli_perf_instructions_section: fn(elf: [U8], level: Int, sampled: JetCLIPerfSamples) -> TraceReceiptSection? Never! {
+    // The counters the run captured, by their index of TRACE_COUNTERS.
+    captured := [Int]{}
+    loop (index, period) in sampled.periods {
+        if period > (U64{0}) -> captured.push(index)
+    }
+    found := [JetCLIPerfCode]{}
+    at := [Int:Int]{}
+    loop named in sampled.pcs {
+        index: jet_cli_perf_code_entry(found, at, sampled.table, sampled.functions, named.pc, captured.len()) ?? next
+        events: loop counter in captured -> named.events[counter]
+        found[index].samples += named.samples
+        loop k in 0..<events.len() -> found[index].events[k] = found[index].events[k] + events[k]
+        found[index].rows.push(JetCLIPerfPc{pc: named.pc, samples: named.samples, events: events})
+    }
+    if found.len() == 0 -> return None
+    found.sort_by(fn(left: JetCLIPerfCode, right: JetCLIPerfCode) { (right.samples <=> left.samples).then(jet_cli_perf_code_events(right) <=> jet_cli_perf_code_events(left)).then(left.low <=> right.low) })
+    loop index in 0..<found.len() {
+        found[index].rows.sort_by(fn(left: JetCLIPerfPc, right: JetCLIPerfPc) { left.pc <=> right.pc })
+    }
+    symbols: jet_cli_perf_code_symbols(sampled.table, sampled.functions)
+    codes: native_elf_codes(elf, ".text")
+    functions := [CanonicalJSON]{}
+    bytes := 0
+    kept := 0
+    cut := 0
+    loop code in found {
+        size: code.high - code.low
+        held: if bytes + size <= JET_CLI_PERF_CODE_CAP -> jet_cli_perf_code_bytes(codes, code.low, size) else -> None
+        lines := [CanonicalJSON]{}
+        names := [CanonicalJSON]{}
+        hex := ""
+        if held == .Val(text) {
+            last := 0
+            reached := [Int:Bool]{}
+            loop row in x64_listing(text, code.low, sampled.table, code.function, symbols, [Int:String]{}) {
+                if row.line > 0 && row.line != last {
+                    lines.push(jet_cli_perf_code_line(row.offset, row.line))
+                    last = row.line
+                }
+                if row.reach >= 0 && row.target != "" && !reached.has_key(row.reach) {
+                    reached[row.reach] = true
+                    names.push(CanonicalJSON.Object([CanonicalJSONField]{{key: "address", value: CanonicalJSON.Integer("{row.reach}")}, {key: "name", value: CanonicalJSON.String("{row.target}")}}))
+                }
+            }
+            hex = perf_hex.encode(text)
+            bytes += size
+            kept += 1
+        } else {
+            if code.function >= 0 {
+                last := 0
+                loop row in code.rows {
+                    line: x64_jetline_line(sampled.table, sampled.table.functions[code.function], row.pc) ?? 0
+                    if line > 0 && line != last {
+                        lines.push(jet_cli_perf_code_line(row.pc - code.low, line))
+                        last = line
+                    }
+                }
+            }
+            cut += 1
+        }
+        instructions: loop row in code.rows -> CanonicalJSON.Object(
+            [CanonicalJSONField]{
+                {key: "events", value: jet_cli_perf_code_counts(row.events)},
+                {key: "offset", value: CanonicalJSON.Integer("{row.pc - code.low}")},
+                {key: "samples", value: CanonicalJSON.Integer("{row.samples}")},
+            },
+        )
+        functions.push(
+            CanonicalJSON.Object(
+                [CanonicalJSONField]{
+                    {key: "address", value: CanonicalJSON.Integer("{code.low}")},
+                    {key: "code", value: CanonicalJSON.String(hex)},
+                    {key: "cut", value: CanonicalJSON.Bool(held == None)},
+                    {key: "events", value: jet_cli_perf_code_counts(code.events)},
+                    {key: "file", value: CanonicalJSON.String("{code.file}")},
+                    {key: "instructions", value: CanonicalJSON.Array(instructions)},
+                    {key: "level", value: if code.function >= 0 -> CanonicalJSON.Integer("{level}") else -> CanonicalJSON.Null},
+                    {key: "lines", value: CanonicalJSON.Array(lines)},
+                    {key: "names", value: CanonicalJSON.Array(names)},
+                    {key: "samples", value: CanonicalJSON.Integer("{code.samples}")},
+                    {key: "size", value: CanonicalJSON.Integer("{size}")},
+                    {key: "symbol", value: CanonicalJSON.String("{code.name}")},
+                },
+            ),
+        )
+    }
+    counters: loop counter in captured -> CanonicalJSON.String(trace_counter_name(TRACE_COUNTERS[counter]))
+    value: CanonicalJSON.Object(
+        [CanonicalJSONField]{
+            {key: "bytes", value: CanonicalJSON.Integer("{bytes}")},
+            {key: "cap_bytes", value: CanonicalJSON.Integer("{JET_CLI_PERF_CODE_CAP}")},
+            {key: "counters", value: CanonicalJSON.Array(counters)},
+            {key: "cut", value: CanonicalJSON.Integer("{cut}")},
+            {key: "functions", value: CanonicalJSON.Array(functions)},
+            {key: "kept", value: CanonicalJSON.Integer("{kept}")},
+            {key: "samples", value: CanonicalJSON.Integer("{sampled.total}")},
+        },
+    )
+    Val(TraceReceiptSection{name: "instructions", type_name: "JetPerfInstructions", value: value, digest: canonical_json_sha256(value)})
+}
+
+// The entry of `found` (by its start in `at`) for the function holding
+// program counter `pc`: the line table's function, else the `.symtab`
+// symbol's, added with `width` counters when it has none. None outside
+// both.
+jet_cli_perf_code_entry: fn(found: &[JetCLIPerfCode], at: &[Int:Int], table: X64Jetline, functions: [X64ImageFunction], pc: Int, width: Int) -> Int? Never! {
+    function: x64_jetline_find(table, pc)
+    symbol: if function >= 0 -> -1 else -> x64_image_function_find(functions, pc)
+    if function < 0 && symbol < 0 -> return None
+    low: if function >= 0 -> table.functions[function].low else -> functions[symbol].start
+    if at.get(low) == .Val(index) -> return Val(index)
+    events := [U64]{}
+    loop _ in 0..<width -> events.push(U64{0})
+    at[low] = found.len()
+    if function >= 0 {
+        found.push(JetCLIPerfCode{low: low, high: table.functions[function].high, name: "{table.functions[function].name}", file: "{table.functions[function].file}", function: function, samples: U64{0}, events: events, rows: [JetCLIPerfPc]{}})
+    } else {
+        found.push(JetCLIPerfCode{low: low, high: low + functions[symbol].size, name: "{functions[symbol].name}", file: "", function: -1, samples: U64{0}, events: events, rows: [JetCLIPerfPc]{}})
+    }
+    Val(found.len() - 1)
+}
+
+// A function's counter events, all counters together.
+jet_cli_perf_code_events: fn(code: JetCLIPerfCode) -> U64 Never! {
+    total := U64{0}
+    loop count in code.events -> total += count
+    total
+}
+
+// The symbols a capture names what code reaches by, in address order: the
+// line table's functions, then each sized `.symtab` function at another
+// start (a runtime routine, a linked C function).
+jet_cli_perf_code_symbols: fn(table: X64Jetline, functions: [X64ImageFunction]) -> [X64ListingSymbol] Never! {
+    symbols := [X64ListingSymbol]{}
+    starts := [Int:Bool]{}
+    loop function in table.functions {
+        symbols.push(X64ListingSymbol{address: function.low, size: function.high - function.low, name: "{function.name}"})
+        starts[function.low] = true
+    }
+    loop function in functions {
+        if starts.has_key(function.start) -> next
+        symbols.push(X64ListingSymbol{address: function.start, size: function.size, name: "{function.name}"})
+    }
+    symbols.sort_by(fn(left: X64ListingSymbol, right: X64ListingSymbol) { (left.address <=> right.address).then(left.name <=> right.name) })
+    symbols
+}
+
+// The `size` bytes of code at link address `low`, from the image's `.text`
+// sections `codes`; None when no section holds them all.
+jet_cli_perf_code_bytes: fn(codes: [NativeCode], low: Int, size: Int) -> [U8]? Never! {
+    loop code in codes {
+        if low >= code.address && low + size <= code.address + code.bytes.len() {
+            from: low - code.address
+            return Val(code.bytes[from..<from + size])
+        }
+    }
+    None
+}
+
+jet_cli_perf_code_line: fn(offset: Int, line: Int) -> CanonicalJSON Never! {
+    CanonicalJSON.Object([CanonicalJSONField]{{key: "line", value: CanonicalJSON.Integer("{line}")}, {key: "offset", value: CanonicalJSON.Integer("{offset}")}})
+}
+
+jet_cli_perf_code_counts: fn(counts: [U64]) -> CanonicalJSON Never! {
+    CanonicalJSON.Array(loop count in counts -> CanonicalJSON.Integer("{count}"))
+}
+
+// One function of a trace's `instructions` section as the view reads it:
+// `lines` its line rows by offset, `names` the symbols its code reaches
+// (each at its address alone), `events` its events per counter of
+// JetCLIPerfInstructions.counters, and `rows` its sampled instructions.
+JetCLIPerfListed: struct {
+    symbol: String,
+    file: String,
+    level: Int?,
+    address: Int,
+    size: Int,
+    code: [U8],
+    cut: Bool,
+    lines: [X64LineRow],
+    names: [X64ListingSymbol],
+    samples: Int,
+    events: [Int],
+    rows: [JetCLIPerfListedRow],
+}
+
+// A sampled instruction: its offset in its function, its samples and its
+// events per counter.
+JetCLIPerfListedRow: struct {
+    offset: Int,
+    samples: Int,
+    events: [Int],
+}
+
+// A trace's `instructions` section: the counters the run captured, its
+// CPU-time samples and its functions, hottest first.
+JetCLIPerfInstructions: struct {
+    counters: [String],
+    samples: Int,
+    functions: [JetCLIPerfListed],
+}
+
+// One instruction as the view lists it: its address and offset, its line
+// (0 for none), its bytes as hex and its text ("" for a cut function's,
+// whose code the trace doesn't keep), its samples and events.
+JetCLIPerfListedInstruction: struct {
+    address: Int,
+    offset: Int,
+    line: Int,
+    bytes: String,
+    text: String,
+    samples: Int,
+    events: [Int],
+}
+
+// The value of the trace's receipt section `name`, read in place.
+jet_cli_perf_section_fields: fn(trace: CanonicalJSON, name: String) -> View<CanonicalJSONField>? Never! from trace {
+    items: jet_cli_perf_rows(trace, "receipt_sections") ?? return None
+    loop item in items {
+        fields: jettrace_object_view(item, "receipt section") ?? next
+        if (jet_cli_perf_field_text(fields, "name") ?? "") != name -> next
+        at: jet_cli_perf_key(fields, "value") ?? return None
+        value: jettrace_object_view(fields[at].value, "receipt {name}") ?? return None
+        return Val(value)
+    }
+    None
+}
+
+// The trace's `instructions` section; None when it keeps none.
+jet_cli_perf_instructions_read: fn(trace: CanonicalJSON) -> JetCLIPerfInstructions? Never! {
+    fields: jet_cli_perf_section_fields(trace, "instructions") ?? return None
+    counters_at: jet_cli_perf_key(fields, "counters") ?? return None
+    functions_at: jet_cli_perf_key(fields, "functions") ?? return None
+    samples_at: jet_cli_perf_key(fields, "samples") ?? return None
+    read := JetCLIPerfInstructions{counters: [String]{}, samples: jet_cli_perf_number(fields[samples_at].value), functions: [JetCLIPerfListed]{}}
+    counters: jettrace_array(fields[counters_at].value, "instructions.counters") ?? return None
+    loop name in counters {
+        if name == .String(text) -> read.counters.push("{text}")
+    }
+    functions: jettrace_array(fields[functions_at].value, "instructions.functions") ?? return None
+    loop item in functions {
+        listed: jet_cli_perf_listed_read(item) ?? return None
+        read.functions.push(listed)
+    }
+    Val(read)
+}
+
+// An integer value as a number, 0 for any other value.
+jet_cli_perf_number: fn(value: CanonicalJSON) -> Int Never! {
+    if value == .Integer(digits) -> return Int.parse(digits) ?? 0
+    0
+}
+
+// An array of integers as numbers.
+jet_cli_perf_numbers: fn(value: CanonicalJSON) -> [Int] Never! {
+    items: jettrace_array(value, "counts") ?? return [Int]{}
+    loop item in items -> jet_cli_perf_number(item)
+}
+
+// One function of the `instructions` section (the validator checked its
+// shape when the trace was read).
+jet_cli_perf_listed_read: fn(item: CanonicalJSON) -> JetCLIPerfListed? Never! {
+    fields: jettrace_object_view(item, "instructions function") ?? return None
+    text: jet_cli_perf_field_text(fields, "code") ?? return None
+    code: perf_hex.decode(text) ?? return None
+    symbol: jet_cli_perf_field_text(fields, "symbol") ?? return None
+    address: jet_cli_perf_member_number(item, "address") ?? return None
+    size: jet_cli_perf_member_number(item, "size") ?? return None
+    cut_at: jet_cli_perf_key(fields, "cut") ?? return None
+    events_at: jet_cli_perf_key(fields, "events") ?? return None
+    lines_at: jet_cli_perf_key(fields, "lines") ?? return None
+    names_at: jet_cli_perf_key(fields, "names") ?? return None
+    rows_at: jet_cli_perf_key(fields, "instructions") ?? return None
+    lines := [X64LineRow]{}
+    line_items: jettrace_array(fields[lines_at].value, "instructions.lines") ?? return None
+    loop row in line_items {
+        lines.push(X64LineRow{at: jet_cli_perf_member_number(row, "offset") ?? 0, line: jet_cli_perf_member_number(row, "line") ?? 0})
+    }
+    names := [X64ListingSymbol]{}
+    name_items: jettrace_array(fields[names_at].value, "instructions.names") ?? return None
+    loop row in name_items {
+        names.push(X64ListingSymbol{address: jet_cli_perf_member_number(row, "address") ?? 0, size: 0, name: jet_cli_perf_member_text(row, "name") ?? ""})
+    }
+    names.sort_by(fn(left: X64ListingSymbol, right: X64ListingSymbol) { (left.address <=> right.address).then(left.name <=> right.name) })
+    rows := [JetCLIPerfListedRow]{}
+    row_items: jettrace_array(fields[rows_at].value, "instructions.instructions") ?? return None
+    loop row in row_items {
+        row_fields: jettrace_object_view(row, "instruction") ?? return None
+        events: jet_cli_perf_key(row_fields, "events") ?? return None
+        rows.push(JetCLIPerfListedRow{offset: jet_cli_perf_member_number(row, "offset") ?? 0, samples: jet_cli_perf_member_number(row, "samples") ?? 0, events: jet_cli_perf_numbers(row_fields[events].value)})
+    }
+    listed: JetCLIPerfListed{
+        symbol: symbol,
+        file: jet_cli_perf_field_text(fields, "file") ?? "",
+        level: jet_cli_perf_member_number(item, "level"),
+        address: address,
+        size: size,
+        code: code,
+        cut: fields[cut_at].value == CanonicalJSON.Bool(true),
+        lines: lines,
+        names: names,
+        samples: jet_cli_perf_member_number(item, "samples") ?? 0,
+        events: jet_cli_perf_numbers(fields[events_at].value),
+        rows: rows,
+    }
+    Val(listed)
+}
+
+// The instructions of `listed` in address order, those on line `line`
+// alone unless it is 0: each of its code when the trace keeps it, listed
+// with its line rows and names (x64_listing), else each sampled one, its
+// line from the rows.
+jet_cli_perf_listed_instructions: fn(listed: JetCLIPerfListed, line: Int) -> [JetCLIPerfListedInstruction] Never! {
+    sampled := [Int:Int]{}
+    loop (index, row) in listed.rows -> sampled[row.offset] = index
+    shown := [JetCLIPerfListedInstruction]{}
+    if listed.cut {
+        loop row in listed.rows {
+            held := 0
+            loop place in listed.lines {
+                if place.at <= row.offset -> held = place.line
+            }
+            if line != 0 && held != line -> next
+            shown.push(JetCLIPerfListedInstruction{address: listed.address + row.offset, offset: row.offset, line: held, bytes: "", text: "", samples: row.samples, events: jet_cli_perf_listed_events(listed, sampled.get(row.offset) ?? -1)})
+        }
+        return shown
+    }
+    table := [U8]{}
+    x64_jetline_rows(table, listed.lines)
+    end: table.len()
+    high: listed.address + listed.size
+    lines: X64Jetline{table: table, functions: [X64JetlineFunction]{X64JetlineFunction{low: listed.address, high: high, name: "{listed.symbol}", file: "{listed.file}", dir: "", decl: 0, rows: 0, rows_end: end}}, ascending: true}
+    function: if listed.lines.len() > 0 -> 0 else -> -1
+    loop row in x64_listing(listed.code, listed.address, lines, function, listed.names, [Int:String]{}) {
+        if line != 0 && row.line != line -> next
+        index: sampled.get(row.offset) ?? -1
+        shown.push(
+            JetCLIPerfListedInstruction{
+                address: row.address,
+                offset: row.offset,
+                line: row.line,
+                bytes: perf_hex.encode(row.bytes),
+                text: x64_listing_text(row, listed.address, high),
+                samples: if index >= 0 -> listed.rows[index].samples else -> 0,
+                events: jet_cli_perf_listed_events(listed, index),
+            },
+        )
+    }
+    shown
+}
+
+// The events of `listed`'s sampled instruction `index`, per counter; none
+// counted for -1, an instruction no sample named.
+jet_cli_perf_listed_events: fn(listed: JetCLIPerfListed, index: Int) -> [Int] Never! {
+    events := [Int]{}
+    loop counter in 0..<listed.events.len() {
+        events.push(if index >= 0 && counter < listed.rows[index].events.len() -> listed.rows[index].events[counter] else -> 0)
+    }
+    events
+}
+
+// `part` of `whole` to a tenth of a percent, "33.1%"; "" when `whole` is 0.
+jet_cli_perf_tenths: fn(part: Int, whole: Int) -> String Never! {
+    if whole <= 0 -> return ""
+    tenths: (part * 1000 + whole /% 2) /% whole
+    "{tenths /% 10}.{tenths %% 10}%"
+}
+
+// `part` of `whole` to a whole percent, "97%"; "0%" when `whole` is 0.
+jet_cli_perf_percent: fn(part: Int, whole: Int) -> String Never! {
+    if whole <= 0 -> return "0%"
+    "{(part * 100 + whole /% 2) /% whole}%"
+}
+
+// `text` right-aligned in `width` characters.
+jet_cli_perf_right: fn(text: String, width: Int) -> String Never! {
+    padding: width - text.len()
+    if padding <= 0 -> return "{text}"
+    "{" ".repeat(padding)}{text}"
+}
+
+// The sampler the trace's `perf` receipt names (jet_cli_perf_pc_json):
+// its source and whether it is precise. None when it names none.
+JetCLIPerfSamplerNamed: struct {
+    source: String,
+    precise: Bool,
+}
+
+jet_cli_perf_sampler_named: fn(trace: CanonicalJSON) -> JetCLIPerfSamplerNamed? Never! {
+    perf: jet_cli_perf_section_fields(trace, "perf") ?? return None
+    capture_at: jet_cli_perf_key(perf, "capture") ?? return None
+    capture: jettrace_object_view(perf[capture_at].value, "perf.capture") ?? return None
+    sampling_at: jet_cli_perf_key(capture, "sampling") ?? return None
+    sampling: jettrace_object_view(capture[sampling_at].value, "perf.capture.sampling") ?? return None
+    pc_at: jet_cli_perf_key(sampling, "pc") ?? return None
+    pc: jettrace_object_view(sampling[pc_at].value, "perf.capture.sampling.pc") ?? return None
+    precise_at: jet_cli_perf_key(pc, "precise") ?? return None
+    Val(JetCLIPerfSamplerNamed{source: jet_cli_perf_field_text(pc, "source") ?? return None, precise: pc[precise_at].value == CanonicalJSON.Bool(true)})
+}
+
+// The sampler line: a precise sampler charges each sample to the
+// instruction that ran; the task clock and the timer charge it where the
+// interrupt landed, which the runtime only avoids where
+// perf_event_paranoid lets it open a precise one (PerfSamples.jet
+// perf_precise_choose tries one at 1 or below).
+jet_cli_perf_sampler_line: fn(sampler: JetCLIPerfSamplerNamed?) -> String Never! {
+    used: sampler ?? return "sampler: not recorded: a share can sit on an instruction after the one that spent the time"
+    if used.precise {
+        return "sampler: {used.source}, precise: each sample names the instruction that ran"
+    }
+    "sampler: {used.source}, skid: a share can sit on an instruction after the one that spent the time; precise samples need perf_event_paranoid at most 1"
+}
+
+// `wanted` as FILE:LINE: the file and line; None for a function's name.
+JetCLIPerfWantedLine: struct {
+    file: String,
+    line: Int,
+}
+
+jet_cli_perf_wanted_line: fn(wanted: String) -> JetCLIPerfWantedLine? Never! {
+    parts: wanted.split(":").to_list()
+    if parts.len() != 2 || parts[0] == "" -> return None
+    line: Int.parse(parts[1]) ?? return None
+    Val(JetCLIPerfWantedLine{file: "{parts[0]}", line: line})
+}
+
+// Whether `listed` is in `file`: its path, or its path's last part.
+jet_cli_perf_listed_in: fn(listed: JetCLIPerfListed, file: String) -> Bool Never! {
+    listed.file != "" && (listed.file == file || listed.file.ends_with("/{file}") || inst_files.basename(listed.file) == file)
+}
+
+// One listed function: the function and the instructions shown, all of
+// them, or those on one line.
+JetCLIPerfShown: struct {
+    index: Int,
+    rows: [JetCLIPerfListedInstruction],
+}
+
+// `jet perf view <trace> --instructions[=NAME|FILE:LINE]` of the verified
+// trace read from `path`, as text, `--json` or `--html` (`mode`). Bare,
+// the hottest function; NAME each function the line table or `.symtab`
+// names so; FILE:LINE the instructions of that line in each function that
+// has samples there. Shares are each instruction's of its function's
+// samples, as perf annotate gives them, then of its events per captured
+// counter. A trace without the section, or without the function or line,
+// is refused (E2126).
+jet_cli_perf_instructions_view: fn(trace: CanonicalJSON, path: String, wanted: String, mode: String, color: Bool) -> JetDriverVerbOutput Never! {
+    read: jet_cli_perf_instructions_read(trace) ?? return jet_cli_perf_instructions_none(trace, path, color)
+    shown := [JetCLIPerfShown]{}
+    by_line: jet_cli_perf_wanted_line(wanted)
+    loop (index, listed) in read.functions {
+        if wanted == "" && index > 0 -> break
+        if by_line == .Val(place) {
+            if !jet_cli_perf_listed_in(listed, place.file) -> next
+            rows: jet_cli_perf_listed_instructions(listed, place.line)
+            if rows.len() > 0 -> shown.push(JetCLIPerfShown{index: index, rows: rows})
+            next
+        }
+        if wanted != "" && listed.symbol != wanted -> next
+        shown.push(JetCLIPerfShown{index: index, rows: jet_cli_perf_listed_instructions(listed, 0)})
+    }
+    if shown.len() == 0 {
+        named := [String]{}
+        loop listed in read.functions {
+            if named.len() < 5 -> named.push("`{listed.symbol}`")
+        }
+        return jet_cli_perf_no_instructions("`{path}` keeps no instruction samples of `{wanted}`", JET_CLI_PERF_NO_INSTRUCTIONS_WHY, "name a function or FILE:LINE it sampled, such as {named.join(", ")}, or give `--instructions` alone for the hottest function", color)
+    }
+    sampler: jet_cli_perf_sampler_named(trace)
+    if mode == "json" {
+        return JetDriverVerbOutput{stdout: jet_cli_perf_json("perf.instructions", jet_cli_perf_instructions_json(trace_id(trace) ?? "unknown", read, shown, sampler)), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
+    lines: jet_cli_perf_instructions_lines(read, shown, sampler)
+    if mode == "html" {
+        return JetDriverVerbOutput{stdout: jet_cli_perf_instructions_html(trace_id(trace) ?? "unknown", lines), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
+    out := ""
+    loop line in lines -> out = "{out}{line}\n"
+    JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// The text lines of the functions `shown`: per function a header with its
+// samples, their share of the run's and its level, the sampler line once,
+// a columns line when the run captured counters, then a header over each
+// run of a line's instructions, `  fib.jet:7 fib samples=2590 share=86%`,
+// and a row per instruction, `  33.1%   +14   call   0x401a30 <fib>`.
+jet_cli_perf_instructions_lines: fn(read: JetCLIPerfInstructions, shown: [JetCLIPerfShown], sampler: JetCLIPerfSamplerNamed?) -> [String] Never! {
+    lines := [String]{}
+    loop (order, view) in shown {
+        listed: read.functions[view.index]
+        level: if listed.level == .Val(number) -> " level=O{number}" else -> ""
+        counted: if read.counters.len() > 0 -> " and events" else -> ""
+        cut: if listed.cut -> "; its code is cut: the trace keeps at most {JET_CLI_PERF_CODE_CAP} bytes of code" else -> ""
+        lines.push("{listed.symbol} profile:cpu samples={listed.samples} share={jet_cli_perf_percent(listed.samples, read.samples)}{level}; shares below are of {listed.symbol}'s samples{counted}{cut}")
+        if order == 0 {
+            lines.push(jet_cli_perf_sampler_line(sampler))
+            if read.counters.len() > 0 -> lines.push("columns: cpu, {read.counters.join(", ")}")
+        }
+        // Each line's samples in the function.
+        totals := [Int:Int]{}
+        loop row in jet_cli_perf_listed_instructions(listed, 0) {
+            totals[row.line] = (totals.get(row.line) ?? 0) + row.samples
+        }
+        file: if listed.file == "" -> "" else -> inst_files.basename(listed.file)
+        current := -1
+        loop row in view.rows {
+            if row.line > 0 && row.line != current {
+                total: totals.get(row.line) ?? 0
+                lines.push("  {file}:{row.line} {listed.symbol} samples={total} share={jet_cli_perf_percent(total, listed.samples)}")
+            }
+            current = row.line
+            shares := jet_cli_perf_right(if row.samples > 0 -> jet_cli_perf_tenths(row.samples, listed.samples) else -> "", 7)
+            loop (counter, count) in row.events {
+                whole: if counter < listed.events.len() -> listed.events[counter] else -> 0
+                shares = "{shares}{jet_cli_perf_right(if count > 0 -> jet_cli_perf_tenths(count, whole) else -> "", 7)}"
+            }
+            text: if row.text == "" -> "(code not kept)" else -> "{row.text}"
+            lines.push("{shares}   {jet_cli_pad("+{row.offset}", 6)}{text}")
+        }
+    }
+    lines
+}
+
+// The `--json` view: the trace, its sampler, its counters and run samples,
+// and each function shown with its instructions.
+jet_cli_perf_instructions_json: fn(id: String, read: JetCLIPerfInstructions, shown: [JetCLIPerfShown], sampler: JetCLIPerfSamplerNamed?) -> CanonicalJSON Never! {
+    functions := [CanonicalJSON]{}
+    loop view in shown {
+        listed: read.functions[view.index]
+        rows: loop row in view.rows -> CanonicalJSON.Object(
+            [CanonicalJSONField]{
+                {key: "address", value: CanonicalJSON.String(x64_hex(row.address))},
+                {key: "bytes", value: if listed.cut -> CanonicalJSON.Null else -> CanonicalJSON.String("{row.bytes}")},
+                {key: "events", value: CanonicalJSON.Array(loop count in row.events -> CanonicalJSON.Integer("{count}"))},
+                {key: "line", value: if row.line > 0 -> CanonicalJSON.Integer("{row.line}") else -> CanonicalJSON.Null},
+                {key: "offset", value: CanonicalJSON.Integer("{row.offset}")},
+                {key: "samples", value: CanonicalJSON.Integer("{row.samples}")},
+                {key: "text", value: if listed.cut -> CanonicalJSON.Null else -> CanonicalJSON.String("{row.text}")},
+            },
+        )
+        functions.push(
+            CanonicalJSON.Object(
+                [CanonicalJSONField]{
+                    {key: "address", value: CanonicalJSON.String(x64_hex(listed.address))},
+                    {key: "cut", value: CanonicalJSON.Bool(listed.cut)},
+                    {key: "events", value: CanonicalJSON.Array(loop count in listed.events -> CanonicalJSON.Integer("{count}"))},
+                    {key: "file", value: CanonicalJSON.String("{listed.file}")},
+                    {key: "instructions", value: CanonicalJSON.Array(rows)},
+                    {key: "level", value: if listed.level == .Val(number) -> CanonicalJSON.Integer("{number}") else -> CanonicalJSON.Null},
+                    {key: "samples", value: CanonicalJSON.Integer("{listed.samples}")},
+                    {key: "size", value: CanonicalJSON.Integer("{listed.size}")},
+                    {key: "symbol", value: CanonicalJSON.String("{listed.symbol}")},
+                },
+            ),
+        )
+    }
+    named: if sampler == .Val(used) -> CanonicalJSON.Object([CanonicalJSONField]{{key: "precise", value: CanonicalJSON.Bool(used.precise)}, {key: "source", value: CanonicalJSON.String("{used.source}")}}) else -> CanonicalJSON.Null
+    CanonicalJSON.Object(
+        [CanonicalJSONField]{
+            {key: "counters", value: CanonicalJSON.Array(loop name in read.counters -> CanonicalJSON.String("{name}"))},
+            {key: "functions", value: CanonicalJSON.Array(functions)},
+            {key: "kind", value: CanonicalJSON.String("jet.trace.instructions")},
+            {key: "sampler", value: named},
+            {key: "samples", value: CanonicalJSON.Integer("{read.samples}")},
+            {key: "trace", value: CanonicalJSON.String("{id}")},
+        },
+    )
+}
+
+// The `--html` view: one self-contained page of the text view's lines.
+jet_cli_perf_instructions_html: fn(id: String, lines: [String]) -> String Never! {
+    escaped: loop line in lines -> jet_cli_perf_html_escape(line)
+    page: [String]{
+        "<!doctype html>",
+        "<html lang=\"en\"><head><meta charset=\"utf-8\"><title>jettrace {id} instructions</title>",
+        "<style>body{{font:14px/1.4 ui-monospace,monospace;margin:1.5rem;background:#111;color:#eee}}</style></head><body>",
+        "<h1>jettrace {id} instructions</h1>",
+        "<pre>{escaped.join("\n")}</pre>",
+        "</body></html>",
+    }
+    "{page.join("\n")}\n"
+}
+
+// The trace's code in a line of the text view: `instructions functions=12
+// kept=10 cut=2 code_bytes=34567`; None when it keeps none.
+jet_cli_perf_instructions_summary: fn(trace: CanonicalJSON) -> String? Never! {
+    fields: jet_cli_perf_section_fields(trace, "instructions") ?? return None
+    kept: jet_cli_perf_number(fields[jet_cli_perf_key(fields, "kept") ?? return None].value)
+    cut: jet_cli_perf_number(fields[jet_cli_perf_key(fields, "cut") ?? return None].value)
+    bytes: jet_cli_perf_number(fields[jet_cli_perf_key(fields, "bytes") ?? return None].value)
+    Val("instructions functions={kept + cut} kept={kept} cut={cut} code_bytes={bytes}: `--instructions` lists them")
+}
+
+// Why and how to fix a trace without instruction samples: the Prelude
+// registry's text for E2126 (Jet.PerfNoInstructions).
+JET_CLI_PERF_NO_INSTRUCTIONS_WHY: "The instruction view lists the code a native run's samples landed in, which `jet perf run` keeps in the trace as it records; a trace that keeps none of it, or none of the named function or line, has nothing to list."
+
+JET_CLI_PERF_NO_INSTRUCTIONS_FIX: "profile the program natively with `jet perf run -O2 <file.jet>`, then view its trace with `--instructions`"
+
+// A trace without an `instructions` section, refused (E2126): a browser
+// trace holds timed spans and no samples of the module's code.
+jet_cli_perf_instructions_none: fn(trace: CanonicalJSON, path: String, color: Bool) -> JetDriverVerbOutput Never! {
+    what: "`{path}` keeps no instruction samples"
+    browser: jet_cli_perf_rows(trace, "browser") ?? return jet_cli_perf_no_instructions(what, JET_CLI_PERF_NO_INSTRUCTIONS_WHY, JET_CLI_PERF_NO_INSTRUCTIONS_FIX, color)
+    if browser.len() > 0 {
+        return jet_cli_perf_no_instructions(what, "A browser trace holds timed spans; the browser samples none of the module's code for Jet.", "profile the native build: `jet perf run -O2 <file.jet>`", color)
+    }
+    jet_cli_perf_no_instructions(what, JET_CLI_PERF_NO_INSTRUCTIONS_WHY, JET_CLI_PERF_NO_INSTRUCTIONS_FIX, color)
+}
+
+// A view refused for the instructions it can't list (E2126), exit 2.
+jet_cli_perf_no_instructions: fn(what: String, why: String, fix: String, color: Bool) -> JetDriverVerbOutput Never! {
+    jet_cli_report_output("", "E2126", what, why, fix, color, JET_DRIVER_EXIT_USAGE)
+}
