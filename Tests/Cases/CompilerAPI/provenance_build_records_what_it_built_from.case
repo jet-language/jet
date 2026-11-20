@@ -1,0 +1,31 @@
+# `jet build` records what it built from, and `jet inspect build` shows the same graph before any build. The graph names the target, its files and the module the dependency's exported `install` generates, with its maker and each handoff. The receipt gives each source the compiler checked a `check` node holding the SHA-256 of the exact bytes it read: the entry, the dependency's tool.jet, and the generated module, whose node also takes the authority it was made under. The executable's `link` node is keyed by its `compile` node, and that node is keyed by every `check` node, so the executable's identity follows from the exact sources. The program it links runs the generated code.
+fixture: ProvenanceBuild.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet inspect build handed/main.jet --json
+exit: 0
+json: stdout doc $.build.targets[?name="app"][0].kind = "Executable"
+json: stdout doc $.build.targets[?name="app"][0].files = ["main.jet",".jet/generated/handed/greeting.jet"]
+json: stdout doc $.build.generated[0].path = ".jet/generated/handed/greeting.jet"
+json: stdout doc $.build.generated[0].made_by = "`meta.add` in `stage` at ../tool/tool.jet:6"
+json: stdout doc $.build.generated[0].handoffs = ["`build` handed it to `tool.install` at main.jet:5","`install` handed it to `stage` at ../tool/tool.jet:3"]
+json: stdout doc $.build.generated[0].authority = "Meta.Generate"
+step: jet build handed/main.jet --write-generated=on
+exit: 0
+json: file handed/.jet/build/receipt.json doc $.targets[?name="app"][0].files = ["main.jet",".jet/generated/handed/greeting.jet"]
+json: file handed/.jet/build/receipt.json doc $.nodes[?kind="check"][?subject="main.jet"][0].input_digests = [{"name":"main.jet","digest":"aab8159767a0bf88c6adb1aea21782267a97ed76cc34d1b15902ee65c8afa464"}] # SHA-256 of the fixture's handed/main.jet bytes
+json: file handed/.jet/build/receipt.json doc $.nodes[?kind="check"][?subject="../tool/tool.jet"][0].input_digests = [{"name":"../tool/tool.jet","digest":"983ae69de6355ab3e0a92ea10a4f81e1f9c7abc9cb200101026b76e8172a0048"}] # SHA-256 of the dependency's tool/tool.jet bytes
+json: file handed/.jet/build/receipt.json doc $.nodes[?kind="check"][?subject=".jet/generated/handed/greeting.jet"][0].inputs = [".jet/generated/handed/greeting.jet","authority"]
+capture: generated_digest file handed/.jet/build/receipt.json doc $.nodes[?kind="check"][?subject=".jet/generated/handed/greeting.jet"][0].input_digests[0].digest
+json: file handed/.jet/build/receipt.json doc $.generated[0].digest = "sha256:{cap:generated_digest}" # the generated row and its check node name the same bytes
+capture: tool_check file handed/.jet/build/receipt.json doc $.nodes[?kind="check"][?subject="../tool/tool.jet"][0].key
+capture: main_check file handed/.jet/build/receipt.json doc $.nodes[?kind="check"][?subject="main.jet"][0].key
+json: file handed/.jet/build/receipt.json doc $.nodes[?kind="compile"][0].inputs = ["check:../tool/tool.jet","check:.jet/generated/handed/greeting.jet","check:main.jet"]
+json: file handed/.jet/build/receipt.json doc $.nodes[?kind="compile"][0].input_digests[?name="check:../tool/tool.jet"][0].digest = "{cap:tool_check}"
+json: file handed/.jet/build/receipt.json doc $.nodes[?kind="compile"][0].input_digests[?name="check:main.jet"][0].digest = "{cap:main_check}"
+capture: compile_key file handed/.jet/build/receipt.json doc $.nodes[?kind="compile"][0].key
+json: file handed/.jet/build/receipt.json doc $.nodes[?kind="link"][0].input_digests = [{"name":"compile:main","digest":"{cap:compile_key}"}] # the executable's identity is keyed by its compile
+json: file handed/.jet/build/times.json doc $.rows[?name="app"][0].reused = false
+step: {work}/handed/.jet/build/app
+exit: 0
+stdout: = "added by the tool\n"

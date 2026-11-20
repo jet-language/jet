@@ -1,0 +1,13 @@
+# A build's diagnostics name the file that holds each problem. When the dependency's exported `install` no longer fits the helper it calls, `jet build` of the depending package reports that call at the dependency's own file and line, not at the entry that used it. It names the dependency package that failed, reports the entry's call to the function the failed generator never made at the entry's line, and builds no program.
+fixture: ProvenanceBuild.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+capture: broken = text file.replace("stage(meta) }", "stage(meta, 1) }") tool/tool.jet
+write: tool/tool.jet = "{cap:broken}"
+step: jet build handed/main.jet --write-generated=on
+exit: 1
+stderr: ~ "Error: Jet.ArgumentCountMismatch: `stage` expects 1 argument, got 2" # the dependency's problem
+stderr: ~ "  --> ../tool/tool.jet:3:31" # at the dependency's own line
+stderr: ~ "Error: Jet.DependencyCheckFailed: Dependency package `tool` has errors" # the package that failed
+stderr: ~ "  --> main.jet:9:19" # the entry's call to `greeting`, which the generator never made
+file: handed/.jet/build/app absent

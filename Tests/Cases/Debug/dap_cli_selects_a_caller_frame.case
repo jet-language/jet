@@ -4,7 +4,7 @@
 # expression, and a REPL one) reads the caller's locals. Selecting a caller
 # does not move the program: `stepOut` still leaves the innermost frame.
 # The fixture must stay in jet fmt form: line 2 is `scale`'s first line,
-# line 9 the call in `total_of`'s loop and line 16 the call in `run`. No
+# line 8 the call in `total_of`'s loop and line 14 the call in `run`. No
 # other debugger is on PATH.
 fixture: DapCLISelectsACallerFrame.fixture
 env: NO_COLOR=1
@@ -25,9 +25,9 @@ recv dap until $.request_seq = 5 timeout 30s every 100ms
 json: stdout doc $.body.stackFrames[0].name = "scale"
 json: stdout doc $.body.stackFrames[0].line = 2
 json: stdout doc $.body.stackFrames[1].name = "total_of"
-json: stdout doc $.body.stackFrames[1].line = 9
+json: stdout doc $.body.stackFrames[1].line = 8
 json: stdout doc $.body.stackFrames[2].name = "run"
-json: stdout doc $.body.stackFrames[2].line = 16
+json: stdout doc $.body.stackFrames[2].line = 14
 capture: loop_frame stdout doc $.body.stackFrames[1].id
 capture: run_frame stdout doc $.body.stackFrames[2].id
 send dap: "{\"seq\":6,\"type\":\"request\",\"command\":\"scopes\",\"arguments\":{\"frameId\":{cap:loop_frame}}}"

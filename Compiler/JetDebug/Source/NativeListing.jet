@@ -29,10 +29,10 @@ NativeListingAsk: struct {
 // name or line: the selected frame's function, its pc's row ending
 // `<- here`, under where each of the frame's locals lives there. NAME: each
 // function of the line table `break` names so (code a fix replaced gives
-// way to the code that runs it now), else each sized `.symtab` symbol of
-// that name. A line: the rows of each function of the file that hold it,
-// the pieces the optimizer moved away included. `file` is the console's
-// source, read as `lines`.
+// way to the code that runs it now) and each run of it inlined into another
+// function, else each sized `.symtab` symbol of that name. A line: the rows
+// of each function of the file that hold it, the pieces the optimizer moved
+// away included. `file` is the console's source, read as `lines`.
 native_disassemble: fn(session: &NativeSession, operand: String, file: String, lines: [String]) -> String NativeDebugError! {
     spec := ""
     specs := 0
@@ -85,6 +85,13 @@ native_disassemble: fn(session: &NativeSession, operand: String, file: String, l
         loop (index, function) in session.image.lines.functions {
             if function.name != spec || native_listing_replaced(session, function.low) -> next
             text = "{text}{if text == "" -> "" else -> "\n"}{native_listing_block(session, symbols, index, function.low, function.high, function.name, ask, file, lines)}"
+        }
+        loop place in native_inlined_named(session.image, spec) {
+            low: session.image.functions[place.function].inlined[place.run].low
+            high: session.image.functions[place.function].inlined[place.run].high
+            call_line: session.image.functions[place.function].inlined[place.run].call_line
+            index: x64_jetline_find(session.image.lines, low)
+            text = "{text}{if text == "" -> "" else -> "\n"}{native_listing_block(session, symbols, index, low, high, "{spec}, inlined into {session.image.functions[place.function].name} on line {call_line}", ask, file, lines)}"
         }
         if text != "" -> return Ok(text)
         loop symbol in symbols {

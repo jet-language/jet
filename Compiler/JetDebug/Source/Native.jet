@@ -696,11 +696,18 @@ NativeSession: struct {
     }
 
     // A breakpoint at the start of the Jet function `function`, past its
-    // prologue.
+    // prologue, and at the start of each run of it inlined into another
+    // function.
     break_in: fn(&self, function: String) -> Int? NativeDebugError! {
         addresses := [Int]{}
         loop (index, found) in self.image.lines.functions {
             if found.name == function -> addresses.push(self.entry(index))
+        }
+        loop place in native_inlined_named(self.image, function) {
+            low: self.image.functions[place.function].inlined[place.run].low
+            index: x64_jetline_find(self.image.lines, low)
+            at: if index >= 0 && low == self.image.lines.functions[index].low -> self.entry(index) else -> low
+            if !addresses.contains(at) -> addresses.push(at)
         }
         self.place(addresses)
     }

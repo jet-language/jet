@@ -269,7 +269,9 @@ sema_core_body_builtin_name: fn(key: String, holder: String) -> String? Never! {
     parts: key.split_once("{holder}.") ?? return None
     bytes: parts.after.bytes()
     loop at in 0..<bytes.len() {
-        if bytes[at] == (U8{46}) || bytes[at] == (U8{58}) -> return Val(foundation_byte_text(bytes, 0, at))
+        if bytes[at] == (U8{46}) || bytes[at] == (U8{58}) {
+            return Val(foundation_byte_text(bytes, 0, at))
+        }
     }
     Val(parts.after)
 }

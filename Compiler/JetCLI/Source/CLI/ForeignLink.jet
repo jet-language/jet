@@ -622,7 +622,8 @@ jet_cli_native_inline_c: fn(closure: &JetCLIClosureCTools, facts: JetDriverForei
         object: "{temporary}/inline_{index}.o"
         argv := jet_cli_native_c_argv(tools)
         loop flag in flags -> argv.push(flag)
-        loop flag in ([String]{jet_cli_native_c_build_map(temporary), "-c", source, "-o", object.copy()}) {
+        loop flag in
+            ([String]{jet_cli_native_c_build_map(temporary), "-c", source, "-o", object.copy()}) {
             argv.push(flag)
         }
         compiles.push(argv)

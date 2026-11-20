@@ -1,16 +1,16 @@
 // The `instructions` receipt section's checks: a kept function's code is
-// lowercase hex of its bytes and a cut one keeps none, its rows are in
-// order inside it, its counts are its instructions' sums, and the code
-// kept stays under the cap.
+// lowercase hex of its bytes and a cut one keeps none, its rows and
+// inlined runs are in order inside it, its counts are its instructions'
+// sums, and the code kept stays under the cap.
 use jet_foundation.[CanonicalJSON, canonical_json_parse, jettrace_validate_instructions]
 
 // A section of `fib`, its 5 bytes `code` kept, its second sampled
-// instruction at `second` and its samples stated as `samples`, and
-// `memcpy`, cut, keeping `cut_code`, with one sample at +8; under a cap of
-// `cap` bytes.
-instructions_test_section: fn(code: String, second: Int, samples: Int, cut_code: String, cap: Int) -> CanonicalJSON Never! {
-    fib: "{{\"address\":4096,\"code\":\"{code}\",\"cut\":false,\"events\":[30],\"file\":\"fib.jet\",\"instructions\":[{{\"events\":[10],\"offset\":0,\"samples\":3}},{{\"events\":[20],\"offset\":{second},\"samples\":1}}],\"level\":2,\"lines\":[{{\"line\":7,\"offset\":0}}],\"names\":[],\"samples\":{samples},\"size\":5,\"symbol\":\"fib\"}}"
-    memcpy: "{{\"address\":8192,\"code\":\"{cut_code}\",\"cut\":true,\"events\":[0],\"file\":\"\",\"instructions\":[{{\"events\":[0],\"offset\":8,\"samples\":1}}],\"level\":null,\"lines\":[],\"names\":[],\"samples\":1,\"size\":64,\"symbol\":\"memcpy\"}}"
+// instruction at `second`, its samples stated as `samples` and the run
+// `inlined` into it, and `memcpy`, cut, keeping `cut_code`, with one
+// sample at +8; under a cap of `cap` bytes.
+instructions_test_section: fn(code: String, second: Int, samples: Int, cut_code: String, cap: Int, inlined: String{""}) -> CanonicalJSON Never! {
+    fib: "{{\"address\":4096,\"code\":\"{code}\",\"cut\":false,\"events\":[30],\"file\":\"fib.jet\",\"inlined\":[{inlined}],\"instructions\":[{{\"events\":[10],\"offset\":0,\"samples\":3}},{{\"events\":[20],\"offset\":{second},\"samples\":1}}],\"level\":2,\"lines\":[{{\"line\":7,\"offset\":0}}],\"names\":[],\"samples\":{samples},\"size\":5,\"symbol\":\"fib\"}}"
+    memcpy: "{{\"address\":8192,\"code\":\"{cut_code}\",\"cut\":true,\"events\":[0],\"file\":\"\",\"inlined\":[],\"instructions\":[{{\"events\":[0],\"offset\":8,\"samples\":1}}],\"level\":null,\"lines\":[],\"names\":[],\"samples\":1,\"size\":64,\"symbol\":\"memcpy\"}}"
     text: "{{\"bytes\":5,\"cap_bytes\":{cap},\"counters\":[\"l1d_misses\"],\"cut\":1,\"functions\":[{fib},{memcpy}],\"kept\":1,\"samples\":10}}\n"
     canonical_json_parse(text.bytes()) ?? panic(err.message)
 }
@@ -25,6 +25,15 @@ instructions_test_refusal: fn(value: CanonicalJSON) -> String Never! {
 
 #Test("an instructions section with its code, rows and sums in order is accepted") {
     assert_eq(instructions_test_refusal(instructions_test_section("554889e5c3", 4, 4, "", 1048576)), "")
+    step: "{{\"call_line\":7,\"name\":\"step\",\"offset\":1,\"size\":3}}"
+    assert_eq(instructions_test_refusal(instructions_test_section("554889e5c3", 4, 4, "", 1048576, inlined: step)), "")
+}
+
+#Test("an instructions section is refused for an inlined run without a name or outside its function") {
+    unnamed: "{{\"call_line\":7,\"name\":\"\",\"offset\":1,\"size\":3}}"
+    assert_eq(instructions_test_refusal(instructions_test_section("554889e5c3", 4, 4, "", 1048576, inlined: unnamed)), "instructions.functions[0].inlined[0].name is empty")
+    outside: "{{\"call_line\":7,\"name\":\"step\",\"offset\":3,\"size\":3}}"
+    assert_eq(instructions_test_refusal(instructions_test_section("554889e5c3", 4, 4, "", 1048576, inlined: outside)), "instructions.functions[0].inlined[0] is empty or outside the function")
 }
 
 #Test("an instructions section is refused for code that is not its function's bytes in lowercase hex") {

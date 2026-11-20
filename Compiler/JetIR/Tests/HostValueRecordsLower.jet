@@ -1,0 +1,56 @@
+// Every record a compile-time host value hands out through a field must lower
+// without a declaration: as a host value itself (ir_host_value_name), a runtime
+// handle or a compiler-owned record row. A record that is none of these stops
+// the comptime evaluator when typed code reads it, so this walk names it here.
+use {
+    jet_foundation.[CORE_RECORD_FIELD_ROWS, Type, ir_host_value_name, ir_runtime_handle_row]
+    jet_ir.[ir_compiler_owned_core_fields, ir_compiler_owned_record_fields]
+}
+
+// The named types `ty` spells, through lists, options and results.
+host_record_names: fn(ty: Type) -> [String] {
+    if ty == .Named(name) -> return [String]{name}
+    if ty == .List(element) -> return host_record_names(element)
+    if ty == .Option(inner) -> return host_record_names(inner)
+    if ty == .Result(ok, err) {
+        names := host_record_names(ok)
+        loop name in host_record_names(err) -> names.push(name)
+        return names
+    }
+    [String]{}
+}
+
+#Test("host_value_fields_reach_only_lowerable_records") {
+    // Only a record typed by the rows alone can lack a declaration; other
+    // names (declared structs, enums, builtins) lower from their source.
+    row_owners := [String:Bool]{}
+    loop row in CORE_RECORD_FIELD_ROWS -> row_owners[row.owner] = true
+    core: ir_compiler_owned_core_fields()
+    pending := [String]{}
+    loop row in CORE_RECORD_FIELD_ROWS {
+        if ir_host_value_name(row.owner) -> pending.push(row.owner)
+    }
+    seen := [String:Bool]{}
+    unlowered := [String]{}
+    next_owner := 0
+    loop next_owner < pending.len() {
+        owner: pending[next_owner]
+        next_owner += 1
+        if seen.get(owner) != None -> next
+        seen[owner] = true
+        loop row in CORE_RECORD_FIELD_ROWS {
+            if row.owner != owner -> next
+            loop name in host_record_names(row.ty) {
+                if row_owners.get(name) == None -> next
+                if ir_host_value_name(name) || ir_runtime_handle_row(name) != None || ir_compiler_owned_record_fields(name, core) != None {
+                    pending.push(name)
+                } else { unlowered.push("{owner}.{row.field}: {name}") }
+            }
+        }
+    }
+    if unlowered.len() > 0 {
+        panic("host value fields reach records with no lowering: {unlowered.join(", ")}")
+    }
+    assert(seen.get("CompilerEffectProvenance") != None)
+    assert(seen.get("CompilerOutputEntry") != None)
+}

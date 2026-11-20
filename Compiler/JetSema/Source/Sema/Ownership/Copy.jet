@@ -489,7 +489,9 @@ sema_copy_nominal_has_impl: fn(
 sema_copy_generic_bound: fn(param: TGenericParam, bound_name: String, graph: SemaRegistrationGraph?) -> Bool Never! {
     if graph == .Val(registered) {
         loop bound in param.bounds {
-            if symbol_key_names(symbol_table_key(registered.symbols, bound), bound_name) -> return true
+            if symbol_key_names(symbol_table_key(registered.symbols, bound), bound_name) {
+                return true
+            }
         }
     }
     false

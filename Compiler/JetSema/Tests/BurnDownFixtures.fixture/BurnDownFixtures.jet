@@ -18,7 +18,9 @@ bd_returned: fn(function: FnBody) -> Int Never! {
         if function.tree.stmts[statement] == .Return(value, _) {
             returned := value ?? panic("missing returned policy value")
             if body_node(function.tree, returned).kind == .Ok(inner) -> returned = inner
-            if body_node(function.tree, returned).kind == .TryWithContext(inner, _, _, _, _, _) -> returned = inner
+            if body_node(function.tree, returned).kind == .TryWithContext(inner, _, _, _, _, _) {
+                returned = inner
+            }
             return returned
         }
     }

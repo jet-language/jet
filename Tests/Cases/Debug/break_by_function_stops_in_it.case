@@ -4,7 +4,7 @@
 # the loop in `total_of`, and `c` stops in the next call, with `n = 1`.
 # Deleting the breakpoint lets the program run to its end.
 # The fixture must stay in jet fmt form: line 2 is `scale`'s first line and
-# line 9 the call in the loop. No other debugger is on PATH: the stops are
+# line 8 the loop and its call. No other debugger is on PATH: the stops are
 # jet debug's own.
 fixture: BreakByFunctionStopsInIt.fixture
 env: NO_COLOR=1
@@ -16,8 +16,8 @@ stdout: ~ "Breakpoint set  scale\n" # the breakpoint names the function
 stdout: ~ "Breakpoint hit  prog.jet:2  in scale()\n" # it stops at the body's first line
 stdout: ~ "print n\nn = 0\n" # the first call's argument
 stdout: ~ "#0  scale()  at prog.jet:2\n" # the backtrace starts in the function
-stdout: ~ "#1  total_of()  at prog.jet:9\n" # called from the loop
-stdout: ~ "finish\n9 |         total += scale(i, 3)        <- here\n" # finish returns to the call's line in the caller
+stdout: ~ "#1  total_of()  at prog.jet:8\n" # called from the loop
+stdout: ~ "finish\n8 |     loop i in 0..<limit -> total += scale(i, 3)        <- here\n" # finish returns to the call's line in the caller
 stdout: ~ "print n\nn = 1\n" # the second call stops too
 stdout: ~ "Deleted breakpoint 2\n" # delete takes the breakpoint's number
 stdout: ~ "18\n" # the program's own output: 0 + 3 + 6 + 9

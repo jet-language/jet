@@ -63,9 +63,7 @@ core_module_has_type: fn(module_name: String, name: String) -> Bool Never! {
 
 // The declared leaf of a Core type name: what follows its last `.`
 // (`<corelib>/core.net.TCPStream`, `net.TCPStream` -> `TCPStream`).
-core_module_type_leaf: fn(name: String) -> String Never! {
-    symbol_key_leaf(name)
-}
+core_module_type_leaf: fn(name: String) -> String Never! { symbol_key_leaf(name) }
 
 core_type_modules: fn(name: String) -> [String] Never! {
     core_type_modules_in(CORE_TYPE_EXPORT_KEYS, CORE_TYPE_EXPORT_KEY_ROWS, CORE_TYPE_EXPORT_MODULES, core_module_type_leaf(name))
@@ -446,7 +444,9 @@ core_path_module: fn(path: String) -> String? Never! {
     end := bytes.len()
     loop {
         head: foundation_byte_text(bytes, 0, end)
-        if core_module_export(head) != None || core_module_source_path(head) != None -> return Val(head)
+        if core_module_export(head) != None || core_module_source_path(head) != None {
+            return Val(head)
+        }
         loop end > 0 && bytes[end - 1] != (U8{46}) -> end -= 1
         if end == 0 -> return None
         end -= 1

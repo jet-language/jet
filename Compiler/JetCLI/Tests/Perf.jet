@@ -1143,12 +1143,14 @@ jet_cli_perf_test_line_row: fn(digest: String, at: Int, name: String) -> TracePr
 }
 
 // A run keeps each function its samples landed in, hottest first, with
-// a row per sampled instruction. With no image to read its code from, each
-// is kept cut: the lines of its sampled instructions alone, and the view
-// lists those instructions without their code.
+// a row per sampled instruction and the runs of code inlined into it. With
+// no image to read its code from, each is kept cut: the lines of its
+// sampled instructions alone, and the view lists those instructions
+// without their code.
 #Test("a run keeps the code its samples landed in, and the view lists it by function and line") {
-    // fib's code at 0x1000, its rows line 5 at +0 and line 7 at +16; a
-    // runtime function beside it in the symbol table.
+    // fib's code at 0x1000, its rows line 5 at +0 and line 7 at +16, and
+    // step inlined into it at +32 for the call on line 6; a runtime
+    // function beside it in the symbol table.
     rows := [U8]{}
     x64_jetline_rows(rows, [X64LineRow]{X64LineRow{at: 0, line: 5}, X64LineRow{at: 16, line: 7}})
     end: rows.len()
@@ -1156,13 +1158,15 @@ jet_cli_perf_test_line_row: fn(digest: String, at: Int, name: String) -> TracePr
     functions: [X64ImageFunction]{X64ImageFunction{start: 4096, size: 256, name: "fib.fib"}, X64ImageFunction{start: 12288, size: 16, name: "jet_rt_alloc"}}
     one: 1 << 48
     words: jet_cli_perf_test_words([Int]{4112 | one, 4100 | one, 4112 | one, 12292 | one})
-    sampled: jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words, 0)
+    run: NativeInlined{die: 10, origin: 1, low: 4128, high: 4144, call_line: 6, parent: -1, file: 1, call_file: 1}
+    inlines: JetCLIPerfInlines{functions: [Int:NativeFunction]{4096: NativeFunction{low: 4096, high: 4352, name: "fib", file: 1, variables: [NativeVariable]{}, inlined: [NativeInlined]{run}}}, abstracts: [Int:NativeAbstract]{1: NativeAbstract{name: "step", file: 1}}}
+    sampled: jet_cli_perf_samples_count(table, functions, inlines, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words, 0)
     assert_eq(sampled.pcs.len(), 3)
     section: jet_cli_perf_instructions_section([U8]{}, 2, sampled) ?? panic("fib holds samples")
     assert_eq(section.type_name, "JetPerfInstructions")
     json: String.from_bytes(canonical_json_bytes(section.value)) ?? panic("the section is UTF-8")
-    fib: `{"address":4096,"code":"","cut":true,"events":[],"file":"fib.jet","instructions":[{"events":[],"offset":4,"samples":1},{"events":[],"offset":16,"samples":2}],"level":2,"lines":[{"line":5,"offset":4},{"line":7,"offset":16}],"names":[],"samples":3,"size":256,"symbol":"fib"}`
-    alloc: `{"address":12288,"code":"","cut":true,"events":[],"file":"","instructions":[{"events":[],"offset":4,"samples":1}],"level":null,"lines":[],"names":[],"samples":1,"size":16,"symbol":"jet_rt_alloc"}`
+    fib: `{"address":4096,"code":"","cut":true,"events":[],"file":"fib.jet","inlined":[{"call_line":6,"name":"step","offset":32,"size":16}],"instructions":[{"events":[],"offset":4,"samples":1},{"events":[],"offset":16,"samples":2}],"level":2,"lines":[{"line":5,"offset":4},{"line":7,"offset":16}],"names":[],"samples":3,"size":256,"symbol":"fib"}`
+    alloc: `{"address":12288,"code":"","cut":true,"events":[],"file":"","inlined":[],"instructions":[{"events":[],"offset":4,"samples":1}],"level":null,"lines":[],"names":[],"samples":1,"size":16,"symbol":"jet_rt_alloc"}`
     open: `{"bytes":0,"cap_bytes":1048576,"counters":[],"cut":2,"functions":[`
     close: `],"kept":0,"samples":4}`
     expected: "{open}{fib},{alloc}{close}"
@@ -1209,7 +1213,7 @@ jet_cli_perf_test_line_row: fn(digest: String, at: Int, name: String) -> TracePr
 // of its events per captured counter; the sampler line says a share can
 // skid under the task clock.
 #Test("the instruction view lists kept code with its shares of samples and events") {
-    fib: `{"address":4096,"code":"554889e5c3","cut":false,"events":[30],"file":"src/fib.jet","instructions":[{"events":[10],"offset":0,"samples":3},{"events":[20],"offset":4,"samples":1}],"level":2,"lines":[{"line":7,"offset":0},{"line":8,"offset":4}],"names":[],"samples":4,"size":5,"symbol":"fib"}`
+    fib: `{"address":4096,"code":"554889e5c3","cut":false,"events":[30],"file":"src/fib.jet","inlined":[],"instructions":[{"events":[10],"offset":0,"samples":3},{"events":[20],"offset":4,"samples":1}],"level":2,"lines":[{"line":7,"offset":0},{"line":8,"offset":4}],"names":[],"samples":4,"size":5,"symbol":"fib"}`
     kept: `{"name":"instructions","value":{"bytes":5,"cap_bytes":1048576,"counters":["l1d_misses"],"cut":0,"functions":[`
     perf: `{"name":"perf","value":{"capture":{"sampling":{"pc":{"precise":false,"source":"task_clock"}}}}}`
     wrapped: `{"content":{"browser":[],"receipt_sections":[`
@@ -1224,4 +1228,52 @@ jet_cli_perf_test_line_row: fn(digest: String, at: Int, name: String) -> TracePr
     page: jet_cli_perf_instructions_view(trace, "run.jettrace", "", "html", false)
     assert(page.stdout.contains("<pre>fib profile:cpu samples=4 share=40%"))
     assert(page.stdout.contains("push   rbp"))
+}
+
+// At -O2 a hot callee is code inlined into its caller: the view names it
+// as its own function. Bare, it lists the run with the most samples of its
+// own, with the function and line it is inlined into; by name, the run;
+// the caller's listing names whose code each line's instructions are.
+#Test("the instruction view lists a function inlined into its caller as its own") {
+    // fib's push at +0 on line 7, step's mov at +1 on its line 3, inlined
+    // for the call on line 7, and fib's ret at +4 on line 8.
+    fib: `{"address":4096,"code":"554889e5c3","cut":false,"events":[],"file":"src/fib.jet","inlined":[{"call_line":7,"name":"step","offset":1,"size":3}],"instructions":[{"events":[],"offset":0,"samples":1},{"events":[],"offset":1,"samples":3}],"level":2,"lines":[{"line":7,"offset":0},{"line":3,"offset":1},{"line":8,"offset":4}],"names":[],"samples":4,"size":5,"symbol":"fib"}`
+    kept: `{"name":"instructions","value":{"bytes":5,"cap_bytes":1048576,"counters":[],"cut":0,"functions":[`
+    wrapped: `{"content":{"browser":[],"receipt_sections":[`
+    trace: canonical_json_parse("{wrapped}{kept}{fib}],\"kept\":1,\"samples\":10}}}}]}}}}\n".bytes()) ?? panic(err.message)
+    sampler: "sampler: not recorded: a share can sit on an instruction after the one that spent the time\n"
+    step: "step profile:cpu samples=3 share=30% level=O2, inlined into fib on line 7; shares below are of step's samples\n{sampler}  fib.jet:3 step samples=3 share=100%\n 100.0%   +1    mov    rbp,rsp\n"
+    hottest: jet_cli_perf_instructions_view(trace, "run.jettrace", "", "text", false)
+    assert_eq(hottest.stdout, step)
+    by_name: jet_cli_perf_instructions_view(trace, "run.jettrace", "step", "text", false)
+    assert_eq(by_name.stdout, step)
+    whole: jet_cli_perf_instructions_view(trace, "run.jettrace", "fib", "text", false)
+    lines: "  fib.jet:7 fib samples=1 share=25%\n  25.0%   +0    push   rbp\n  fib.jet:3 step samples=3 share=75%\n  75.0%   +1    mov    rbp,rsp\n  fib.jet:8 fib samples=0 share=0%\n          +4    ret\n"
+    assert_eq(whole.stdout, "fib profile:cpu samples=4 share=40% level=O2; shares below are of fib's samples\n{sampler}{lines}")
+    listed: jet_cli_perf_instructions_view(trace, "run.jettrace", "step", "json", false)
+    assert(listed.stdout.contains(`"call_line":7`) && listed.stdout.contains(`"holder":"fib"`) && listed.stdout.contains(`"symbol":"step"`), listed.stdout)
+    assert(listed.stdout.contains(`"function":"step","line":3`) && listed.stdout.contains(`"samples":3,"size":3`), listed.stdout)
+    assert(listed.stdout.contains(`"within":"fib"`), listed.stdout)
+    named: jet_cli_perf_instructions_view(trace, "run.jettrace", "fib", "json", false)
+    assert(named.stdout.contains(`"call_line":null`) && named.stdout.contains(`"holder":null`) && named.stdout.contains(`"function":"step"`), named.stdout)
+    assert(named.stdout.contains(`"within":null`), named.stdout)
+}
+
+// At -O2 a caller can itself be inlined into the image's entry: a run
+// nested in another run is inlined into that run, and its header names
+// the function whose code holds both. A run with the same code as one
+// before it is nested in that one.
+#Test("the instruction view names the run a nested inlined run is inlined into") {
+    entry: `{"address":4096,"code":"554889e5c3","cut":false,"events":[],"file":"src/fib.jet","inlined":[{"call_line":12,"name":"run","offset":1,"size":3},{"call_line":7,"name":"step","offset":1,"size":3}],"instructions":[{"events":[],"offset":0,"samples":1},{"events":[],"offset":1,"samples":3}],"level":2,"lines":[{"line":12,"offset":0},{"line":3,"offset":1},{"line":8,"offset":4}],"names":[],"samples":4,"size":5,"symbol":"entry"}`
+    kept: `{"name":"instructions","value":{"bytes":5,"cap_bytes":1048576,"counters":[],"cut":0,"functions":[`
+    wrapped: `{"content":{"browser":[],"receipt_sections":[`
+    trace: canonical_json_parse("{wrapped}{kept}{entry}],\"kept\":1,\"samples\":4}}}}]}}}}\n".bytes()) ?? panic(err.message)
+    sampler: "sampler: not recorded: a share can sit on an instruction after the one that spent the time\n"
+    step: "step profile:cpu samples=3 share=75% level=O2, inlined into run on line 7 in entry; shares below are of step's samples\n{sampler}  fib.jet:3 step samples=3 share=100%\n 100.0%   +1    mov    rbp,rsp\n"
+    hottest: jet_cli_perf_instructions_view(trace, "run.jettrace", "", "text", false)
+    assert_eq(hottest.stdout, step)
+    by_name: jet_cli_perf_instructions_view(trace, "run.jettrace", "run", "text", false)
+    assert(by_name.stdout.starts_with("run profile:cpu samples=3 share=75% level=O2, inlined into entry on line 12; "), by_name.stdout)
+    listed: jet_cli_perf_instructions_view(trace, "run.jettrace", "step", "json", false)
+    assert(listed.stdout.contains(`"holder":"run"`) && listed.stdout.contains(`"within":"entry"`), listed.stdout)
 }

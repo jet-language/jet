@@ -1,0 +1,20 @@
+# An archived receipt never makes a build clean. After the entry changes, the receipt and times left by the earlier build, even with the times edited to claim the image was reused, do not let `jet build` skip anything. The build checks the new bytes again, records their digest and a new executable identity, reuses no image, and the program it links runs the new code.
+fixture: ProvenanceBuild.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build handed/main.jet --write-generated=on
+exit: 0
+capture: old_link file handed/.jet/build/receipt.json doc $.nodes[?kind="link"][0].key
+capture: forged = text file.replace("\"reused\":false", "\"reused\":true") handed/.jet/build/times.json
+write: handed/.jet/build/times.json = "{cap:forged}"
+capture: edited = text file.replace("print(greeting())", "print(greeting())\n    print(\"rebuilt\")") handed/main.jet
+write: handed/main.jet = "{cap:edited}"
+step: jet build handed/main.jet --write-generated=on
+exit: 0
+json: file handed/.jet/build/receipt.json doc $.nodes[?kind="check"][?subject="main.jet"][0].input_digests = [{"name":"main.jet","digest":"3843eaf0d9d4913966923138cb9ced35959c5abd9c05b7a9fd0e9635188fcdea"}] # SHA-256 of the edited main.jet
+json: file handed/.jet/build/receipt.json doc $.nodes[?kind="link"][?key="{cap:old_link}"] #= 0 # the executable's identity is new
+json: file handed/.jet/build/receipt.json doc $.cache_hits #= 0 # nothing came from a store
+json: file handed/.jet/build/times.json doc $.rows[?reused=true] #= 0 # the forged reuse is gone: the image was built again
+step: {work}/handed/.jet/build/app
+exit: 0
+stdout: = "added by the tool\nrebuilt\n"

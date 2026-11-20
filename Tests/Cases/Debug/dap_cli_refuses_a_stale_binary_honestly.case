@@ -7,7 +7,8 @@
 # to rebuild or `fix` it. An expression that doesn't reach the changed
 # code still answers, and the program runs on to the total its image
 # computes, 6, not the edited source's 9.
-# The fixtures must stay in jet fmt form: line 8 is the loop's body.
+# The fixtures must stay in jet fmt form: line 6 is the loop body's first
+# line, and the body keeps two lines so that `jet fmt` leaves it braced.
 fixture: DapCLIRefusesAStaleBinaryHonestly.fixture
 env: NO_COLOR=1
 env: PATH={work}/no-tools
@@ -15,7 +16,7 @@ session dap content-length: jet debug --dap {work}/main.jet
 send dap: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\"}}"
 send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{\"program\":\"{work}/main.jet\",\"stopOnEntry\":false,\"args\":[]}}"
 recv dap until $.event = "initialized" timeout 30s every 100ms
-send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/main.jet\"},\"breakpoints\":[{\"line\":8}]}}"
+send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/main.jet\"},\"breakpoints\":[{\"line\":6}]}}"
 recv dap until $.request_seq = 3 timeout 30s every 100ms
 json: stdout doc $.body.breakpoints[0].verified = true
 send dap: "{\"seq\":4,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{}}"

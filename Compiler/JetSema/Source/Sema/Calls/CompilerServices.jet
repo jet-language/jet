@@ -290,9 +290,7 @@ sema_compiler_services_lower_core_call: fn(check: SemaCompilerServicesCallCheck,
 sema_call_compiler_value_owner: fn(ty: Type) -> String? {
     if ty == {
         .Tagged(_, inner) -> return sema_call_compiler_value_owner(inner)
-        .Named(name) | .Apply(name, _) -> {
-            return Val(symbol_key_leaf(name))
-        }
+        .Named(name) | .Apply(name, _) -> { return Val(symbol_key_leaf(name)) }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     None

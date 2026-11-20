@@ -785,8 +785,11 @@ jet_target_capabilities_for_core_usage: fn(api: String) -> [TargetCapability] Ne
     // starts with, cut at a `.`; the helper is the member path after it
     // (`core.time.sleep` -> `core.time`, `sleep`).
     module_name := ""
-    loop name in ([String]{"core.mem", "core.term", "core.concurrency", "core.tasks", "core.time", "core.crypto.random", "core.crypto.uuid", "core.hardware"}) {
-        if name.len() > module_name.len() && (api == name || api.starts_with("{name}.")) -> module_name = name
+    loop name in
+        ([String]{"core.mem", "core.term", "core.concurrency", "core.tasks", "core.time", "core.crypto.random", "core.crypto.uuid", "core.hardware"}) {
+        if name.len() > module_name.len() && (api == name || api.starts_with("{name}.")) {
+            module_name = name
+        }
     }
     if module_name == "" -> return [TargetCapability]{}
     helper: if module_name.len() == api.len() -> "" else -> api.slice(module_name.len() + 1, api.len())

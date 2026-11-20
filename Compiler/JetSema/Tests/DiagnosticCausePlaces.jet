@@ -1,0 +1,56 @@
+// Presenting a report moves each of its causes into the report's file: a
+// located cause with no origin of its own takes the report's origin and
+// shift, a cause that names its own file keeps it, two causes with one code
+// stay two and in order, and a cause with no location stays unknown.
+use {
+    jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot, jet_driver_present_diagnostic]
+    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, DiagnosticCause, DiagnosticOrigin, SourceFile, Span]
+}
+
+CAUSE_ROOT: "/jet-cause-places/not-on-disk"
+
+CAUSE_MAIN: "run: fn() {{ first(1) second(2) }}\n"
+
+cause_require: fn(ok: Bool, name: String) Never! {
+    if !ok -> panic("diagnostic cause places: {name}")
+}
+
+// `code file start-end` of a presented cause, `-` where it has none.
+cause_place: fn(cause: DiagnosticCause) -> String Never! {
+    file := "-"
+    if cause.origin == .Val(origin) -> file = "{origin.display}@{origin.revision}"
+    place := "-"
+    if cause.span == .Val(span) -> place = "{span.start}-{span.end}"
+    "{cause.code} {file} {place}"
+}
+
+#Test("diagnostic_causes_keep_their_places") {
+    main_file: JetDriverAuthorizedSourceFile{path: "{CAUSE_ROOT}/main.jet", relative_path: "main.jet", identity: "cause-root", source: CAUSE_MAIN}
+    snapshot: JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: CAUSE_ROOT, identity: "cause-root", allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{main_file}, foreign_cache_files: [JetDriverAuthorizedSourceFile]{}}},
+        entry_root_identity: "cause-root",
+        entry_path: "{CAUSE_ROOT}/main.jet",
+    }
+    helper: DiagnosticOrigin{display: "helper.jet", path: "{CAUSE_ROOT}/helper.jet", source: "value: 1\n", revision: "helper-revision"}
+    causes: [DiagnosticCause]{
+        DiagnosticCause{code: "E0104", span: Val(Span{start: 112, end: 120})},
+        DiagnosticCause{code: "E0104", span: Val(Span{start: 122, end: 131})},
+        DiagnosticCause{code: "E0003"},
+        DiagnosticCause{code: "E0104", span: Val(Span{start: 0, end: 5}), origin: Val(helper)},
+    }
+    raw: Diagnostic{severity: DIAGNOSTIC_ERROR, code: "E2404", span: Val(Span{start: 112, end: 120}), source_path: Val("main.jet"), source_offset: Val(100), source_start: Val(0), cause: causes, what: "a call fails", why: "why", fix: "fix"}
+
+    origins := [String:DiagnosticOrigin]{}
+    presented: jet_driver_present_diagnostic(raw, snapshot, [SourceFile]{}, origins)
+    own: presented.origin ?? panic("diagnostic cause places: the report lost its origin")
+    cause_require(own.display == "main.jet", "the report is placed in main.jet")
+    cause_require(presented.cause.len() == 4, "every cause is kept")
+
+    first_place: "E0104 main.jet@{own.revision} 12-20"
+    second_place: "E0104 main.jet@{own.revision} 22-31"
+    cause_require(cause_place(presented.cause[0]) == first_place, "a located cause takes the report's origin and shift")
+    cause_require(cause_place(presented.cause[1]) == second_place, "a second cause with the same code keeps its own place, in order")
+    cause_require(cause_place(presented.cause[2]) == "E0003 - -", "a cause with no location takes no file and no span")
+    cause_require(cause_place(presented.cause[3]) == "E0104 helper.jet@helper-revision 0-5", "a cause in an import keeps that import's origin and offsets")
+    print("diagnostic causes keep their places: passed")
+}

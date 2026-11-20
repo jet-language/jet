@@ -507,6 +507,24 @@ NATIVE_TEST_SPIN: "use process: core.process\n\nSpin: struct {{\n    count: Int,
     native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
 }
 
+// `break` and `disas` by name reach a function the optimizer inlined: -O2
+// inlines sum_squares into run, which calls it on line 14.
+#Test("an_o2_session_breaks_in_and_lists_an_inlined_function_by_name") {
+    scratch: native_test_files.temp_dir("jet-debug-inlined-name") ?? panic("scratch: {err}")
+    root: scratch.path
+    session := native_test_session(root, NATIVE_TEST_INLINED, [String]{"-O2"})
+    lines: NATIVE_TEST_INLINED.split("\n").to_list()
+    first: session.open("prog.jet", lines, [String]{}) ?? panic("the session opens at run")
+    listed: session.command("disas sum_squares", first.stop, "prog.jet", lines) ?? panic("disas: {err.detail}")
+    assert(listed.text.contains("sum_squares, inlined into run on line 14"), listed.text)
+    placed: session.command("break sum_squares", first.stop, "prog.jet", lines) ?? panic("break: {err.detail}")
+    hit: session.command("c", placed.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    assert(hit.text.contains("Breakpoint hit  prog.jet:"), hit.text)
+    assert(hit.text.contains("in sum_squares()"), hit.text)
+    session.close()
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+}
+
 // An -O2 `run` that starts a task inlines into the entry wrapper.
 NATIVE_TEST_INLINED_RUN: "work: fn(n: Int) -> Int {{\n    n * 2\n}}\n\nrun: fn() {{\n    t: task work(21)\n    print(\"got {{t.join() ?? 0}}\")\n}}\n"
 
