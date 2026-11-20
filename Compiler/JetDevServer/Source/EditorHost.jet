@@ -1014,13 +1014,15 @@ editor_field_u64: fn(params: Dyn, key: String) -> U64 EditorHostError! {
             if checked(U64{number}) == .Val(result) -> return Ok(result)
         }
     } else if value.decode<Float>() == .Ok(number) {
-        if number.is_finite() && number >= (Float{0.0}) && number <= (Float{18446744073709551616.0}) {
-            integer: Int{number}
-            if (Float{integer}) == number {
-                // Rust's float-to-u64 cast saturates at the rounded MAX.
-                if number >= (Float{18446744073709551616.0}) -> return Ok(U64{18446744073709551615})
-                return Ok(checked(U64{integer}) ?? panic("checked editor unsigned integer"))
+        // Rust's float-to-u64 cast of a whole number: it saturates at the
+        // rounded MAX, and the top half is above Int's range.
+        if number.is_finite() && number >= (Float{0.0}) && number <= (Float{18446744073709551616.0}) && number.rounded(.TowardZero) == number {
+            if number >= (Float{18446744073709551616.0}) -> return Ok(U64{18446744073709551615})
+            if number < (Float{9223372036854775808.0}) {
+                return Ok(checked(U64{Int{number}}) ?? panic("checked editor unsigned integer"))
             }
+            high: checked(U64{Int{number - (Float{9223372036854775808.0})}}) ?? panic("checked editor unsigned integer")
+            return Ok(high + U64{9223372036854775808})
         }
     }
     Err(EditorHostError.InvalidRequest("editor request field `{key}` must be a nonnegative integer"))
