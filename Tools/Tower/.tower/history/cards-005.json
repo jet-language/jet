@@ -18597,6 +18597,178 @@
       "completedAt": "2026-11-16T23:33:49.945Z",
       "questions": [],
       "retiredAt": "2026-11-19T23:54:48.408Z"
+    },
+    {
+      "id": "c0pg5tj9",
+      "num": 6813,
+      "title": "Uploads: streamed, size-limited, resumable file uploads with progress, from every target",
+      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G15).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "All 5 criteria met (c1 on p234, dev 77460a182a). The kit.file_button progress half moved to #6821 c10."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "c1 waits on kit.file_button (#6447 kit / #6821); c2-c5 met on p226."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "An app.Upload streams to storage, and a body over the api's max_upload gets 413 before it is read.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p234 batch compiler (dev 77460a182a), commit 31080f2e3d: jet test Compiler --profile cases --filter WebApp/upload_over_the_limit_is_413_before_it_is_read PASS 1/1.",
+          "at": "2026-11-17T00:03:03.244Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "WebApp/upload_over_the_limit_is_413_before_it_is_read"
+          }
+        },
+        {
+          "n": 2,
+          "text": "Storage names each stored file itself and returns a blob ID. The client's file name is kept only as metadata and never becomes part of a path, so a name such as ../../etc/passwd stores safely. The server checks the media type from the bytes against the declared list, and a body declared image/png that holds HTML gets 415.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p226 batch compiler (dev 713d2cd072; uploads 33b4f0a1d8 + 46177eada7): jet test Compiler --profile cases --filter WebApp/upload_storage_names_files_and_checks_content PASS (sp-uploads WebApp/upload_ 3/3).",
+          "at": "2026-11-16T20:50:05.264Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "WebApp/upload_storage_names_files_and_checks_content"
+          }
+        },
+        {
+          "n": 3,
+          "text": "Before it reads the body, attach runs the method that #App.UploadCheck(method:) names, as the caller and after the session check; that method applies the project's row policy (D-DBPOLICY1, #3709), so a signed-in caller who is not a member gets 403 and the body is never read.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p226 batch compiler (dev 713d2cd072; uploads 33b4f0a1d8 + 46177eada7): jet test Compiler --profile cases --filter WebApp/upload_by_a_non_member_is_403_before_it_is_read PASS (in WebApp/upload_ 3/3).",
+          "at": "2026-11-16T20:50:06.275Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "WebApp/upload_by_a_non_member_is_403_before_it_is_read"
+          }
+        },
+        {
+          "n": 4,
+          "text": "A download of a stored blob runs the read policy of the row that holds its BlobID and is served with Content-Disposition: attachment and X-Content-Type-Options: nosniff.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p226 batch compiler (dev 713d2cd072; uploads 33b4f0a1d8 + 46177eada7): jet test Compiler --profile cases --filter WebApp/blob_download_runs_row_policy PASS 1/1.",
+          "at": "2026-11-16T20:50:07.356Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "WebApp/blob_download_runs_row_policy"
+          }
+        },
+        {
+          "n": 5,
+          "text": "An upload is spooled after its check passes and before the transaction starts; a retried transaction reads the staged body; a blob kept in a transaction that rolls back is deleted. A staged file lives no longer than its request, and one left by a crash is deleted when the server next starts.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p226 batch compiler (dev 713d2cd072; uploads 33b4f0a1d8 + 46177eada7): jet test Compiler --profile cases --filter WebApp/upload_spools_before_the_transaction_and_rolls_back PASS (in WebApp/upload_ 3/3).",
+          "at": "2026-11-16T20:50:08.434Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "WebApp/upload_spools_before_the_transaction_and_rolls_back"
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": "c0snkbac",
+      "needsAcceptance": false,
+      "created": "2026-11-13T15:13:59.169Z",
+      "updated": "2026-11-17T00:03:05.048Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 5,
+      "completedAt": "2026-11-17T00:03:05.048Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T00:04:54.614Z"
+    },
+    {
+      "id": "c016keg2",
+      "num": 6815,
+      "title": "Progressive web app install: generated web app manifest, icons and offline shell on top of #6048",
+      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G17).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Both criteria met (c2 on p234, dev 77460a182a)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": ".installable(name:, icon:, color:) writes a web app manifest, linked from every page, with 192 px, 512 px and maskable icons generated from the one icon.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p230 batch compiler (dev 47086f2eb3), commit 60422df1de: jet test Compiler --profile cases --filter WebBuild/installable_writes_the_manifest_and_icons PASS 1/1.",
+          "at": "2026-11-16T22:20:28.795Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "WebBuild/installable_writes_the_manifest_and_icons"
+          }
+        },
+        {
+          "n": 2,
+          "text": "The service worker (#6048) caches the app shell and the hashed assets, so an offline reload shows the shell. Under .offline(.Queue) it holds the queue.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p234 batch compiler (dev 77460a182a), commit 2c2dbc61c2: jet test Compiler --profile cases --filter WebBrowser/installed_app_reloads_offline PASS in the p234 full cases suite and alone.",
+          "at": "2026-11-17T00:04:08.001Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "WebBrowser/installed_app_reloads_offline"
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": "c0snkbac",
+      "needsAcceptance": false,
+      "created": "2026-11-13T15:14:02.055Z",
+      "updated": "2026-11-17T00:04:09.872Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-17T00:04:09.872Z",
+      "questions": [],
+      "retiredAt": "2026-11-20T00:04:54.614Z"
     }
   ]
 }
