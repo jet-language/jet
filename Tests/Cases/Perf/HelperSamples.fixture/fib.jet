@@ -1,0 +1,14 @@
+// A recursive fib under run, with n from the command line so the call can't
+// fold at compile time.
+use core.process
+
+fib: fn(n: Int) -> Int {
+    if n < 2 -> return n
+    fib(n - 1) + fib(n - 2)
+}
+
+run: fn() {
+    args: process.args()
+    n: if args.len() > 0 -> Int.parse(args[args.len() - 1]) ?? 30 else -> 30
+    print("fib={fib(n)}")
+}

@@ -1,10 +1,10 @@
 # Linux perf is the comparator for `jet perf run`'s own sampler: on the same
 # -O2 fib, sampling the same CPU clock, both put fib first, at the same
-# hottest source line. perf names the compiler's stop poll beside it by its
-# symbol; jet perf counts those samples at the fib line that called the poll
-# and says how many there were. `jet perf` reads no perf data; perf only
-# checks it, as an interop check of Jet's symbol map. The fixture is the
-# capture suite's.
+# hottest source line. The compiler's stop polls in fib run inline while no
+# other task asks for a stop, so perf finds no sample in the poll's helper
+# `jet_ir_stop_turn`, and jet perf counts none at fib's lines. `jet perf`
+# reads no perf data; perf only checks it, as an interop check of Jet's
+# symbol map. The fixture is the capture suite's.
 requires: os-name:linux
 requires: tool:perf
 fixture: ../JetPerfTracePartsCaptureRun/Fixtures/Fib
@@ -15,7 +15,8 @@ exit: 0
 stdout: = "fib=9227465\n" # the comparator ran the program to its end
 step: perf report -i {work}/fib.perf --stdio -q --sort overhead,sym
 exit: 0
-stdout: before "[.] fib.fib" "[.] jet_ir_stop_turn" # perf: fib has the most samples, the stop poll fewer
+stdout: ~ "[.] fib.fib" # perf: fib has the samples
+stdout: !~ "[.] jet_ir_stop_turn" # and the stop poll's helper none: its hot path is inline in fib
 step: perf report -i {work}/fib.perf --stdio -q --symbols fib.fib --sort overhead,srcline
 exit: 0
 stdout: before "fib.jet:7" "fib.jet:5" # perf: fib's recursive line is its hottest
@@ -25,5 +26,5 @@ exit: 0
 stdout: = "fib=9227465\n" # the profiled run ran the same program to its end
 json: file fib.jettrace doc $.content.profile.rows[0].symbol.name = "fib" # jet perf: fib has the most samples
 json: file fib.jettrace doc $.content.profile.rows[0].source.start_line = 7 # jet perf: at the recursive line, as perf says
-file: fib.jettrace ~ " samples in compiler-emitted helpers, such as stop polls, count at the line that called them" # jet perf counts the stop poll's samples at fib's line
+file: fib.jettrace !~ " samples in compiler-emitted helpers, such as stop polls, count at the line that called them" # jet perf counts no stop poll samples at fib's line
 file: fib.jettrace !~ "jet_ir_stop_turn " # and names no helper outside Jet functions

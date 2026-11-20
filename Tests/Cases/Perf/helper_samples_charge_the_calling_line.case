@@ -1,24 +1,34 @@
 # A CPU-time sample in a helper the compiler emits into the program's code,
-# such as the stop poll at a recursive body's entry, counts at the Jet line
-# that called it, and the receipt counts those samples: an -O2 fib names no
-# helper outside Jet functions, where about a third of its samples used to
-# land under `jet_ir_stop_turn`. The `helpers` receipt splits them out by
-# line and helper, named in Jet's terms, and the view's row of the line that
-# recurses shows the stop poll's samples beside its cost facts, which name
-# the poll at each of its two calls.
+# such as the stop poll after a call through a function value, counts at the
+# Jet line that called it, and the receipt counts those samples: a recursion
+# through a function value names no helper outside Jet functions. The
+# `helpers` receipt splits them out by line and helper, named in Jet's terms,
+# and the view's row of the line that makes the calls shows the stop poll's
+# samples. An -O2 fib keeps its stop polls as cost facts, one at each of its
+# two recursive calls, but they run inline while no other task asks for a
+# stop: about a third of its samples used to land under `jet_ir_stop_turn`,
+# and now none land in a helper.
 requires: os-name:linux
-fixture: RecursiveInclusiveTime.fixture
+fixture: HelperSamples.fixture
 env: NO_COLOR=1
+step: jet perf run -O2 deep.jet --out {work}/deep.jettrace -- 32
+exit: 0
+stdout: = "deep=2178309\n"
+json: file deep.jettrace doc $.content.profile.reason ~ " samples in compiler-emitted helpers, such as stop polls, count at the line that called them" # the receipt counts the helper samples
+json: file deep.jettrace doc $.content.profile.reason !~ "jet_ir_" # and names no helper outside Jet functions
+file: deep.jettrace ~ "\"function\":\"twice\",\"helper\":\"stop poll\",\"line\":11" # the helpers receipt names the poll in Jet's terms, at the calling line
+file: deep.jettrace !~ "\"helper\":\"jet_ir_" # never by its symbol
+step: jet perf view {work}/deep.jettrace
+exit: 0
+capture: row = text stdout.after_first("  deep.jet:11 twice samples=").split("\n", 0)
+cap:row: ~ " · stop poll samples=" # the line's samples in the poll are split out
 step: jet perf run -O2 fib.jet --out {work}/fib.jettrace -- 35
 exit: 0
 stdout: = "fib=9227465\n"
-json: file fib.jettrace doc $.content.profile.reason ~ " samples in compiler-emitted helpers, such as stop polls, count at the line that called them" # the receipt counts the helper samples
-json: file fib.jettrace doc $.content.profile.reason !~ "jet_ir_" # and names no helper outside Jet functions
-json: file fib.jettrace doc $.content.profile.rows[0].symbol.name = "fib" # the helper samples count at fib's lines
-file: fib.jettrace ~ "\"function\":\"fib\",\"helper\":\"stop poll\",\"line\":" # the helpers receipt names the poll in Jet's terms
-file: fib.jettrace !~ "\"helper\":\"jet_ir_" # never by its symbol
+json: file fib.jettrace doc $.content.profile.rows[0].symbol.name = "fib" # fib has the most samples
+file: fib.jettrace !~ "\"helper\":\"stop poll\"" # and none in a stop poll's helper
 step: jet perf view {work}/fib.jettrace
 exit: 0
-capture: row = text stdout.after_first("  fib.jet:7 fib samples=").split("\n", 0)
-cap:row: ~ " · cost: stop poll ×2 — semantic remainder (loop depth 0)" # the poll at each recursive call is a cost fact
-cap:row: ~ " · stop poll samples=" # and the line's samples in the poll are split out
+capture: fib_row = text stdout.after_first("  fib.jet:7 fib samples=").split("\n", 0)
+cap:fib_row: ~ " · cost: stop poll ×2 — semantic remainder (loop depth 0)" # the poll at each recursive call is a cost fact
+cap:fib_row: !~ " · stop poll samples=" # whose samples are fib's own

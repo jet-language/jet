@@ -4286,7 +4286,13 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
 // `if stopped { edge }` with no Else, its Bool read by nothing else. A stop
 // poll right after a direct call of a selected body (ir_x64_reports_stop)
 // has the hot path `test edx, edx; jnz edge`: every body returns edx 0 from
-// its epilogue and 1 from its stop exit. Elsewhere it keeps `call poll;
+// its epilogue and 1 from its stop exit. A turn poll there (an entry check
+// or a loop's turn folded into the call's poll, OptStops.jet
+// ir_opt_fold_polls) adds what a turn observes beyond the call, which only
+// another task's request (a cancel, a deadline, a pause, a turn) arms the
+// runtime's word for: after the edx test, the armed word's load, test and
+// branch, the turn's call a slow path, so a recursion's hot path calls
+// nothing. Elsewhere it keeps `call poll;
 // test rax, rax; jnz edge`. A stop or turn poll that checks no call
 // (OptStops.jet ir_opt_polls_checks_call: a loop's own check, a recursive
 // body's entry check) reads only the runtime's armed word in its hot path,
@@ -4332,11 +4338,12 @@ ir_x64_stop_point: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
     site := -1
     if !wired {
         skips := [Int]{}
-        if f.a[at] == poll && at > 0 && f.op[at - 1] == .Call && ir_x64_reports_stop(m, f.a[at - 1]) {
+        if (f.a[at] == poll || f.a[at] == turn) && at > 0 && f.op[at - 1] == .Call && ir_x64_reports_stop(m, f.a[at - 1]) {
             // test edx, edx
             e.code.bytes.push(0x85)
             e.code.bytes.push(0xd2)
             site = x64_jcc_rel32(e.code, X64Cond.NE)
+            if f.a[at] == turn -> ir_x64_armed_poll(e, at, branch, true)
         } else if f.a[at] != trap && (routed || !ir_opt_polls_checks_call(f, poll, trap, turn, at)) {
             // A poll that checks no call can observe only what another task
             // asked for, which arms the runtime's word first: the hot path
@@ -4346,19 +4353,9 @@ ir_x64_stop_point: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
             // path (IRX64Emitter.routed), only that path can publish a stop:
             // it falls into the poll's slow path (IRX64Cold.falls), and a
             // stop poll keeps no hot code; a turn keeps its armed word.
-            cold := ir_x64_cold(IRX64ColdKind.Poll, [Int]{})
             falls: routed && e.colds.len() > traps
-            if !falls || f.a[at] == turn {
-                flag: x64_load_rip(e.code, X64_RAX)
-                e.relocs.push(X64Reloc{at: flag, target: X64RelocTarget.RuntimeData{symbol: IR_X64_CHECKS_ARMED_SYMBOL}})
-                x64_test_rr(e.code, X64_RAX, X64_RAX)
-                cold.sites.push(x64_jcc_rel32(e.code, X64Cond.NE))
-            }
             if falls -> e.colds[traps].falls = true
-            cold.resume = e.code.bytes.len()
-            cold.left = at
-            cold.pad = branch
-            e.colds.push(cold)
+            ir_x64_armed_poll(e, at, branch, !falls || f.a[at] == turn)
         } else {
             // In a loop any other poll's own tests of the task control run
             // inline first, so while no stop is asked for the hot path calls
@@ -4379,6 +4376,25 @@ ir_x64_stop_point: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
     e.end_of[branch] = e.code.bytes.len()
     e.pads.push(IRX64Pad{at: branch, end: f.c[branch], site: site, open: e.open, heads: e.heads})
     f.c[branch]
+}
+
+// The armed-word poll of stop point `at` (If `branch`): with `armed`, the
+// hot path loads the runtime's armed word, tests it and branches to the
+// poll's slow path (IRX64ColdKind.Poll), which calls the poll and takes
+// the edge or comes back here; without, only a slow path that falls into it
+// enters it.
+ir_x64_armed_poll: fn(e: &IRX64Emitter, at: Int, branch: Int, armed: Bool) Never! {
+    cold := ir_x64_cold(IRX64ColdKind.Poll, [Int]{})
+    if armed {
+        flag: x64_load_rip(e.code, X64_RAX)
+        e.relocs.push(X64Reloc{at: flag, target: X64RelocTarget.RuntimeData{symbol: IR_X64_CHECKS_ARMED_SYMBOL}})
+        x64_test_rr(e.code, X64_RAX, X64_RAX)
+        cold.sites.push(x64_jcc_rel32(e.code, X64Cond.NE))
+    }
+    cold.resume = e.code.bytes.len()
+    cold.left = at
+    cold.pad = branch
+    e.colds.push(cold)
 }
 
 // Whether function `id` is a selected body (ir_x64_compile_body), whose
@@ -7196,6 +7212,65 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
         }
         assert(route_at >= 0 && poll_at > route_at)
         assert_eq(armed, if key == IR_STOP_TURN_KEY -> 1 else -> 0)
+    }
+}
+
+// f calls body g and then polls: a stop poll tests only the edx g
+// returned; a turn poll (an entry check folded into the call's poll) tests
+// edx and then the armed word, and calls the turn only on its slow path,
+// laid out past the hot code's `test edx, edx` and the armed word's load.
+#Test("A turn poll right after a body's call tests edx and the armed word, calling nothing") {
+    loop key in ([String]{IR_STOP_POLL_KEY, IR_STOP_TURN_KEY}) {
+        m := ir_module_new()
+        m.stop_points = true
+        int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
+        flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+        poll: ir_stop_poll(m, key)
+        g := ir_function_new("g", "test:turn.jet.g", "", "turn.jet", 1)
+        n: ir_slot(g, int_row, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
+        g.result = int_row
+        _ := ir_emit(g, IROp.Return, -1, n, -1, -1, 1)
+        m.functions.push(g)
+        f := ir_function_new("f", "test:turn.jet.f", "", "turn.jet", 2)
+        x: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "x"), 2)
+        f.result = int_row
+        r: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+        stopped: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
+        passed: ir_args(f, [Int]{x})
+        _ := ir_emit(f, IROp.Call, r, poll + 1, passed, 1, 3)
+        none: ir_args(f, [Int]{})
+        _ := ir_emit(f, IROp.Call, stopped, poll, none, 0, 3)
+        _ := ir_open_if(f, stopped, 3)
+        _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 3)
+        ir_end(f, 3)
+        _ := ir_emit(f, IROp.Return, -1, r, -1, -1, 4)
+        m.functions.push(f)
+        compiled: ir_x64_compile_function(m, ir_x64_tables(m), m.functions.len() - 1).function
+        call_at := -1
+        poll_at := -1
+        armed_at := -1
+        loop reloc in compiled.relocs {
+            if reloc.target == {
+                .Function(id) -> {
+                    if id.value == poll + 1 -> call_at = reloc.at
+                    if id.value == poll -> poll_at = reloc.at
+                }
+                .RuntimeData(symbol) -> {
+                    if symbol == IR_X64_CHECKS_ARMED_SYMBOL -> armed_at = reloc.at
+                }
+                .Runtime(_) | .Data(_) -> {}
+            }
+        }
+        assert(call_at >= 0)
+        // test edx, edx right after g's call returns.
+        tested := -1
+        loop at in call_at..<(compiled.code.len() - 1) {
+            pair: (Int{compiled.code[at]} << 8) | Int{compiled.code[at + 1]}
+            if tested < 0 && pair == 0x85d2 -> tested = at
+        }
+        assert(tested > call_at)
+        turned: key == IR_STOP_TURN_KEY
+        assert(if turned -> armed_at > tested && poll_at > armed_at else -> armed_at < 0 && poll_at < 0)
     }
 }
 
