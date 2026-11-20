@@ -379,7 +379,7 @@ constant_literal: fn(source: DiagnosticSource, name: String, fallback: String) -
 
 render_row: fn(source: DiagnosticSource) -> RenderedRow DiagnosticRowsError! {
     context: "{source.name}: struct"
-    known: [String]{"code", "severity", "tier", "lint_name", "stage", "moment", "status", "meaning", "detail", "structured_fix", "no_fix", "fix_next", "fix_safety", "safety_class", "safety_reason", "expert_path"}
+    known: [String]{"code", "severity", "tier", "lint_name", "stage", "moment", "status", "meaning", "detail", "structured_fix", "no_fix", "fix_next", "fix_safety", "fmt_applies_fix", "safety_class", "safety_reason", "expert_path"}
     loop constant in source.constants {
         if !known.contains(constant.name) {
             return Err(rows_fail("{context}: unknown constant `{constant.name}`"))
@@ -516,6 +516,16 @@ render_row: fn(source: DiagnosticSource) -> RenderedRow DiagnosticRowsError! {
     }
     safety_reason: display_text(constant_literal(source, "safety_reason", "") ?? return Err(err), "{context}.safety_reason") ?? return Err(err)
     expert_path: display_text(constant_literal(source, "expert_path", "") ?? return Err(err), "{context}.expert_path") ?? return Err(err)
+    // A row `jet fmt` repairs is a parse error fmt can meet: only an active
+    // row reported while parsing states `fmt_applies_fix`.
+    fmt_fix: entry(source.constants, "fmt_applies_fix") ?? "false"
+    if fmt_fix != "true" && fmt_fix != "false" {
+        return Err(rows_fail("{context}: `fmt_applies_fix` is `true` or `false`"))
+    }
+    if fmt_fix == "true" && (status != "Active" || !"/{stages}/".contains("/parse/")) {
+        return Err(rows_fail("{context}: only an active row reported while parsing states `fmt_applies_fix`"))
+    }
+    fmt_line: if fmt_fix == "true" -> "\n        fmt_applies_fix: true," else -> ""
     text: [String]{
         "    {{",
         "        code: \"{code_text}\",",
@@ -533,7 +543,7 @@ render_row: fn(source: DiagnosticSource) -> RenderedRow DiagnosticRowsError! {
         "        detail: {detail},",
         "        structured_fix: {structured},",
         "        fix_safety: {safety},",
-        "        no_fix_reason: {no_fix},",
+        "        no_fix_reason: {no_fix},{fmt_line}",
         "    }},",
     }.join("\n")
     shown := [String]{}
@@ -1884,6 +1894,16 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\",\n
         staged: row.replace(code, "{code}        status: .{status},\n        stage: [.Sema],\n")
         assert(diagnostic_rows_error(staged).contains("a `.{status}` row runs in no stage"))
     }
+}
+
+#Test("only an active parse row states that fmt applies its fix") {
+    row: MINIMAL_ROW
+    code: MINIMAL_CODE
+    applied: (render_rows(row.replace(code, "{code}        stage: [.Parse],\n        fmt_applies_fix: true,\n")) ?? panic(err.message)).text
+    assert(applied.contains("\n        fmt_applies_fix: true,\n    }},"), applied)
+    assert(!(render_rows(row) ?? panic(err.message)).text.contains("fmt_applies_fix"))
+    assert(diagnostic_rows_error(row.replace(code, "{code}        fmt_applies_fix: true,\n")).contains("only an active row reported while parsing"))
+    assert(diagnostic_rows_error(row.replace(code, "{code}        stage: [.Parse],\n        fmt_applies_fix: yes,\n")).contains("`fmt_applies_fix` is `true` or `false`"))
 }
 
 #Test("an active error row in a classified range states its safety class, and the audit lists it") {

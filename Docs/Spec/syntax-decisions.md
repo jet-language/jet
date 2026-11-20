@@ -9667,8 +9667,8 @@ the prefix law.
 
 **2026-08-21 — D-ARMHEAD-PAREN1=A** *(card #2144)*: in a dispatch table, bare
 distributed atoms may not appear as a direct operand of `&&`/`||`; the atom
-group takes parentheses (`(48 | 45) && ready`). A registered diagnostic with a
-machine-applicable fixit inserts the grouping the desugar already uses. Pure
+group takes parentheses (`(48 | 45) && ready`). E0386, a registered diagnostic
+with a machine-applicable fixit, inserts the grouping the desugar already uses. Pure
 atom arms, pure predicate arms, and pattern guards are untouched. Amends
 D-IFDIST1=A.
 

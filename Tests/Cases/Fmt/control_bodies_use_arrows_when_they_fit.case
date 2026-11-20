@@ -1,6 +1,8 @@
 # tests/fmt.rs::ControlBodiesUseArrowsWhenTheyFit
+# Claim: fmt refuses a file whose adjacent effect `loop` body lacks braces (E0372) and leaves its bytes as written
+# Rule: fmt rewrites tokens only where a ratified line names the edit a fix the formatter performs (E20 ruling (a); the cited set is Compiler/JetParser/Tests/Formatter/Teaching.jet); no ratified line makes E0372's added braces one, so this case once blessed an unratified repair
 fixture: ControlBodiesUseArrowsWhenTheyFit/Input
 step: jet fmt run.jet
-file: run.jet = ControlBodiesUseArrowsWhenTheyFit/formatted.out
-step: jet fmt run.jet
-file: run.jet = ControlBodiesUseArrowsWhenTheyFit/formatted.out
+exit: 2 # the parse reports E0372 and fmt writes nothing
+stderr: ~ "Jet.EffectBodyWithoutBraces" # the refusal names the unbraced `loop` body
+file: run.jet = ControlBodiesUseArrowsWhenTheyFit/Input/run.jet

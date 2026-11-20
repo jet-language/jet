@@ -1,5 +1,6 @@
 # tests/fmt.rs::fmt_simplify_leaves_a_recovered_parse_alone at tests/fmt.rs:1224; hand-port
-# Claim: simplify output equals plain output on a parse-invalid source (tests/fmt.rs:1233-1239)
+# Claim: plain and simplify formats both refuse a parse-invalid source (E0372) and leave it as written (tests/fmt.rs:1233-1239)
+# Rule: fmt rewrites tokens only where a ratified line names the edit a fix the formatter performs (E20 ruling (a); the cited set is Compiler/JetParser/Tests/Formatter/Teaching.jet); no ratified line makes E0372's added braces one, so the plain format that once succeeded here blessed an unratified repair
 # Claim: simplify does not rewrite `:: 42` on the recovered source (tests/fmt.rs:1240-1243)
 # Fixture migrated: broken source written as a literal (Tests/UI/control_body_needs_braces.jet appended, content identical)
 fixture: FmtSimplifyLeavesARecoveredParseAlone.fixture
@@ -7,8 +8,10 @@ env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jet fmt rec/broken_a.jet
-exit: 0 # tests/fmt.rs:1233 plain format of recovered source succeeds
+exit: 2 # the parse reports E0372 and fmt writes nothing
+stderr: ~ "Jet.EffectBodyWithoutBraces" # the refusal names the unbraced bodies
 step: jet fmt --simplify rec/broken_b.jet
-exit: 0 # tests/fmt.rs:1234-1235 simplify succeeds
+exit: 2 # the parse reports E0372 and simplify writes nothing
+stderr: ~ "Jet.EffectBodyWithoutBraces" # the refusal names the unbraced bodies
 file: rec/broken_b.jet == rec/broken_a.jet # tests/fmt.rs:1236-1239 simplified == plain
 file: rec/broken_b.jet !~ ":: 42" # tests/fmt.rs:1240-1243
