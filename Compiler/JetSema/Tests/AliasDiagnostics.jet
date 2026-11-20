@@ -3,6 +3,7 @@
 // its target: the target's values, home and privacy are the alias's.
 use {
     jet_foundation.[
+        Diagnostic,
         Span,
         compiler_threads_single,
         effect_vocabulary_module,
@@ -41,10 +42,10 @@ alias_reports: fn(source: String) -> String {
 // The package of a source root's modules: a directory with no package.
 FILE_MODULE_PACKAGE: "source-root:user"
 
-// The reports for `main_source`, a module whose `use geo` imports the file
-// module `geo_source` beside it. Both sit in a source root, whose modules
-// keep their `priv` declarations to themselves.
-file_module_reports: fn(main_source: &&String, geo_source: &&String) -> String {
+// The diagnostics for `main_source`, a module whose `use geo` imports the
+// file module `geo_source` beside it. Both sit in a source root, whose
+// modules keep their `priv` declarations to themselves.
+file_module_diagnostics: fn(main_source: &&String, geo_source: &&String) -> [Diagnostic] {
     table := module_table()
     main_id: module_intern(table, "user/main")
     geo_id: module_intern(table, "user/geo")
@@ -74,12 +75,29 @@ file_module_reports: fn(main_source: &&String, geo_source: &&String) -> String {
     stage.graph = None
     registration := declared.move() ?? panic("the declaration pass lost its registration graph")
     checked := sema_finalize_registration_graph(registration, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None) ?? panic("finalization failed {err}")
-    // Finalization repeats the declaration pass's reports beside its own
-    // (`jet check` shows each once), so a row repeated is listed once.
+    checked.diagnostics.move()
+}
+
+// The coded reports of file_module_diagnostics. Finalization repeats the
+// declaration pass's reports beside its own (`jet check` shows each once), so
+// a row repeated is listed once.
+file_module_reports: fn(main_source: &&String, geo_source: &&String) -> String {
     rows := [String]{}
-    loop diagnostic in checked.diagnostics {
+    loop diagnostic in file_module_diagnostics(main_source.move(), geo_source.move()) {
         row: "{diagnostic.code}: {diagnostic.what}"
         if diagnostic.code.starts_with("E") && !rows.contains(row) -> rows.push(row)
+    }
+    rows.join("; ")
+}
+
+// Where each E0605 of file_module_diagnostics points, as `start..end`.
+file_module_private_spans: fn(main_source: &&String) -> String {
+    rows := [String]{}
+    loop diagnostic in file_module_diagnostics(main_source.move(), secret_geo_source()) {
+        if diagnostic.code != "E0605" -> next
+        span: diagnostic.span ?? panic("E0605 without a span")
+        row: "{span.start}..{span.end}"
+        if !rows.contains(row) -> rows.push(row)
     }
     rows.join("; ")
 }
@@ -201,4 +219,13 @@ run: fn() { print(geo.secret_key()) }
     assert_eq(file_module_reports(secret_main_source(), secret_geo_source()), "")
     assert_eq(file_module_reports("{secret_main_source()}\naccepts: fn(s: geo.Secret) -> Bool {{ true }}\n", secret_geo_source()), refused)
     assert_eq(file_module_reports("{secret_main_source()}\nMine: geo.Secret\n", secret_geo_source()), refused)
+}
+
+#Test("an alias's privacy error points at its whole target path, as a parameter type's does") {
+    path: "geo.Secret"
+    alias_line: "\nMine: {path}\n"
+    alias_start: secret_main_source().len() + "\nMine: ".len()
+    assert_eq(file_module_private_spans("{secret_main_source()}{alias_line}"), "{alias_start}..{alias_start + path.len()}")
+    parameter_start: secret_main_source().len() + "\naccepts: fn(s: ".len()
+    assert_eq(file_module_private_spans("{secret_main_source()}\naccepts: fn(s: {path}) -> Bool {{ true }}\n"), "{parameter_start}..{parameter_start + path.len()}")
 }

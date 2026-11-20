@@ -464,7 +464,7 @@ body_index_append_prefixes: fn() {
     items.push(body_index_item(late, SemaComptimeItemKind.Constant))
     items.push(body_index_item(late, SemaComptimeItemKind.BodyExpression))
     sema_comptime_body_values_append_items(publication, items, 3)
-    views: [SemaComptimeBodyValues]{empty.copy(), one.copy(), two.copy(), publication.copy()}
+    views: [SemaComptimeBodyValues]{empty.move(), one.copy(), two.copy(), publication.copy()}
     loop index in 0..<views.len() {
         context := sema_check_context_init()
         context.comptime_body_values = views[index].copy()
@@ -543,7 +543,8 @@ body_index_linear_constant_rows: fn(graph: SemaRegistrationGraph, values: [SemaC
         if earlier -> next
         module_index: sema_registration_module_index(graph, value.module_identity) ?? next
         staged_values := [String:SemaComptimeItemValue]{}
-        staged_values[value.key] = value
+        // copy: `values` keeps its row; the staged map owns the value it checks
+        staged_values[value.key] = value.copy()
         loop constant in graph.modules[module_index].constants {
             if symbol_table_key(graph.symbols, constant.symbol.id) != value.key -> next
             row: sema_checked_constant_with_values(graph, graph.modules[module_index], constant, staged_values, diagnostics) ?? next

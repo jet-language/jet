@@ -19,6 +19,7 @@ use jet_foundation.[
     ImportDecl,
     Item,
     NameTable,
+    Span,
     Type,
     TypeAliasDef,
     TypeParam,
@@ -171,6 +172,16 @@ sema_alias_expr_path: fn(value: Expr) -> [String]? Never! {
     }
 }
 
+// The span of a binding's dotted path, from its first name to its last, as a
+// written type's span covers the whole path: a Field's own span is only its
+// member's.
+sema_alias_expr_path_span: fn(value: Expr) -> Span Never! {
+    if value == .Field(base, _, span, _) {
+        return Span{start: sema_alias_expr_path_span(base).start, end: span.end}
+    }
+    expr_span(value)
+}
+
 sema_alias_key: fn(definition: ConstDef) -> String Never! {
     "{definition.name_span.start}:{definition.name_span.end}:{definition.name}"
 }
@@ -201,7 +212,7 @@ sema_alias_rewrite_items: fn(items: [Item], keys: [String]) -> [Item] Never! {
             .Const(definition) -> {
                 if keys.contains(sema_alias_key(definition)) {
                     path: sema_alias_binding_path(definition) ?? [String]{}
-                    value = Item.TypeAlias{value: TypeAliasDef{is_pub: definition.is_pub, is_package_pub: definition.is_package_pub, name: definition.name, name_span: definition.name_span, type_params: [TypeParam]{}, target: foundation_named_type(path.join(".")), target_span: expr_span(definition.value), span: definition.span}}
+                    value = Item.TypeAlias{value: TypeAliasDef{is_pub: definition.is_pub, is_package_pub: definition.is_package_pub, name: definition.name, name_span: definition.name_span, type_params: [TypeParam]{}, target: foundation_named_type(path.join(".")), target_span: sema_alias_expr_path_span(definition.value), span: definition.span}}
                 }
             }
             .CodeModule(code_module) -> {
