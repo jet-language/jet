@@ -60,7 +60,10 @@ SemaEvalProbe: struct {
 // SemaEvalProbes), by the walk of the function keyed `function`. A generic
 // function's instances each answer. `complete` is false when the check
 // produced no value or reported an error; `value_type` is None for an
-// expression with no value.
+// expression with no value. `lent` is true when the expression is a bare
+// name of a non-scalar local (sema_eval_probe_lends): the expression's
+// function takes that capture and hands it back as-is, so a debugger reads
+// the value the stopped frame lends it and drops nothing of it.
 SemaEvalProbeAnswer: struct {
     probe: Int,
     expression: Int,
@@ -72,6 +75,7 @@ SemaEvalProbeAnswer: struct {
     captures: [TCapture],
     refusals: [Diagnostic],
     effects: TEffectFacts,
+    lent: Bool{false},
 }
 
 SemaEvalProbeTable: struct {
@@ -126,13 +130,15 @@ SEMA_EVAL_PROBE_SELF: "jet_debug_self"
 // declared: the failure solve settles whether the function can fail, as it
 // does for any function that declares none, and one that can returns its
 // carrier, which shows as `Ok(…)` or `Err(…)`. The text's own `self` reads
-// the parameter SEMA_EVAL_PROBE_SELF. None for an expression with no value.
+// the parameter SEMA_EVAL_PROBE_SELF, and a lent name (the answer's `lent`)
+// is a parameter the function takes. None for an expression with no value.
 sema_eval_probe_function: fn(answer: SemaEvalProbeAnswer, text: String, name: String) -> String? {
     value: answer.value_type ?? return None
     params := [String]{}
     loop capture in answer.captures {
         shown: if capture.source == "self" -> SEMA_EVAL_PROBE_SELF else -> capture.source
-        params.push("{shown}: {type_name(type_unqualified_nominals(capture.ty))}")
+        taken: if answer.lent -> "&&" else -> ""
+        params.push("{shown}: {taken}{type_name(type_unqualified_nominals(capture.ty))}")
     }
     success: if value == .Result(ok, _) -> ok else -> value
     Val("{name}: fn({params.join(", ")}) -> {type_marked_name(type_unqualified_nominals(success))} {{\n    {sema_eval_probe_without_self(text)}\n}}\n")
@@ -332,6 +338,8 @@ sema_eval_answer_put: fn(answers: &[SemaEvalProbeAnswer], answer: &&SemaEvalProb
 // function is an obligation of the bundle failure solve, which settles after
 // this walk (sema_failure_defer_obligation), so it refuses nothing here: the
 // solve settles the compiled function's failure (sema_eval_probe_function).
+// A bare name of a non-scalar local is lent (sema_eval_probe_lends): the
+// compiled function takes it, so returning it as-is is no refusal (E0120).
 sema_eval_probe_check: fn(value: Expr, probe: Int, expression: Int, exact: Bool, function: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: SemaCheckContext) -> SemaEvalProbeAnswer {
     probe_state := sema_ownership_state_snapshot(state)
     probe_context := sema_check_context_snapshot(context)
@@ -339,13 +347,14 @@ sema_eval_probe_check: fn(value: Expr, probe: Int, expression: Int, exact: Bool,
     probe_context.fresh_expr_ids = true
     probe_context.lambda_escapes = Val(false)
     span: expr_span(value)
+    lent: sema_eval_probe_lends(value, scopes, context)
     lambda: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{}, effects: None, body: LambdaBody.Expr{value: value}, span: span, meta: ast_empty_lambda_meta()}
     expected: Type.Fn{params: [Type]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     diagnostics := [Diagnostic]{}
     checked: sema_expression_lambda_with_host(lambda, Val(expected), environment, program, scopes, probe_state, tail_store, probe_context, diagnostics, false, false, false, true)
-    answer := SemaEvalProbeAnswer{probe: probe, expression: expression, function: function, exact: exact, span: span, complete: false, value_type: None, captures: [TCapture]{}, refusals: [Diagnostic]{}, effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}}}
+    answer := SemaEvalProbeAnswer{probe: probe, expression: expression, function: function, exact: exact, span: span, complete: false, value_type: None, captures: [TCapture]{}, refusals: [Diagnostic]{}, effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}}, lent: lent}
     loop diagnostic in diagnostics.move() {
-        if diagnostic.severity != DIAGNOSTIC_ERROR || (diagnostic.detail ?? "").starts_with(sema_failure_obligation_mark()) {
+        if diagnostic.severity != DIAGNOSTIC_ERROR || (diagnostic.detail ?? "").starts_with(sema_failure_obligation_mark()) || (lent && diagnostic.code == "E0120") {
             next
         }
         answer.refusals.push(diagnostic)
@@ -358,6 +367,21 @@ sema_eval_probe_check: fn(value: Expr, probe: Int, expression: Int, exact: Bool,
         answer.effects = lambda_value.effects
     }
     answer
+}
+
+// Whether `value` is a bare name of a local, parameter or loop element of a
+// non-scalar type. The compiled function would take each capture as a read
+// parameter, which it can't return as-is (E0120), so it takes this one
+// (`&&`) and returns it. A debugger passes the stopped frame's value and
+// drops nothing of the result, so the frame keeps its value and nothing is
+// copied. A value of a generic parameter's type is returned as-is.
+sema_eval_probe_lends: fn(value: Expr, scopes: SemaScopeTable, context: SemaCheckContext) -> Bool {
+    if value == .Ident(name, _, _) {
+        index: sema_scope_resolve_index(scopes, name) ?? return false
+        ty: scopes.bindings[index].symbol.ty ?? return false
+        return !sema_ownership_type_is_scalar(ty) && !sema_copy_site_is_type_parameter(ty, context)
+    }
+    false
 }
 
 // The effect pass's verdict on each answer: what the expression does itself,
