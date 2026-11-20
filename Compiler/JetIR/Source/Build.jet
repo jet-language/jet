@@ -3375,7 +3375,8 @@ ir_recursion_calls: fn(f: IRFunction, count: Int, calls: &[Int], taken: &[Int]) 
 
 // Marks the stack check of `f`, function `id`, when `stacks` holds and
 // `recursive` marks it; resets its entry check index and removes that
-// check unless `recursive` marks it.
+// check unless `recursive` marks it, with the slots only the check used
+// (ir_recursion_drop_slots).
 ir_recursion_entry: fn(f: &IRFunction, recursive: [Bool], id: Int, stacks: Bool) Never! {
     if stacks -> f.stack_check = recursive[id]
     at: f.entry_check
@@ -3387,8 +3388,111 @@ ir_recursion_entry: fn(f: &IRFunction, recursive: [Bool], id: Int, stacks: Bool)
         return
     }
     end: f.c[at + 1]
-    loop k in at..<(end + 1) -> ir_opt_kill(f, k)
+    written := [Int]{}
+    loop k in at..<(end + 1) {
+        row: IR_LINT_OPS[ir_op_code(f.op[k])]
+        if ir_role_is_slot(row.dst) && f.dst[k] >= 0 -> written.push(f.dst[k])
+        ir_opt_kill(f, k)
+    }
     ir_opt_compact(f)
+    ir_recursion_drop_slots(f, written)
+}
+
+// Whether an instruction field of `role` (IR_LINT_OPS) holds a slot.
+ir_role_is_slot: fn(role: IRLintRole) -> Bool Never! { role == .Slot || role == .SlotOrNone }
+
+// After ir_recursion_entry removes a body's entry check: each slot of
+// `written` (what the removed instructions wrote: the poll's result, the
+// stop edge's temporaries) that is no parameter and that nothing left reads
+// or writes goes, and every later slot moves down over it, so the body
+// holds and numbers its slots as if the check had never been built.
+ir_recursion_drop_slots: fn(f: &IRFunction, written: [Int]) Never! {
+    count: f.slot_type.len()
+    dropped := [Bool]{}
+    loop _ in 0..<count -> dropped.push(false)
+    any := false
+    loop slot in written {
+        if slot >= f.param_count && slot < count {
+            dropped[slot] = true
+            any = true
+        }
+    }
+    if !any {
+        return
+    }
+    loop at in 0..<f.op.len() {
+        row: IR_LINT_OPS[ir_op_code(f.op[at])]
+        ir_slot_kept(dropped, row.dst, f.dst[at])
+        ir_slot_kept(dropped, row.a, f.a[at])
+        ir_slot_kept(dropped, row.b, f.b[at])
+        ir_slot_kept(dropped, row.c, f.c[at])
+        if row.b == .Args {
+            loop k in f.b[at]..<(f.b[at] + f.c[at]) {
+                ir_slot_kept(dropped, IRLintRole.Slot, f.args[k])
+            }
+        }
+    }
+    loop slot in f.splits -> ir_slot_kept(dropped, IRLintRole.Slot, slot)
+    loop slot in f.binds -> ir_slot_kept(dropped, IRLintRole.Slot, slot)
+    renamed := [Int]{}
+    kept := 0
+    loop slot in 0..<count {
+        if dropped[slot] {
+            renamed.push(-1)
+            next
+        }
+        renamed.push(kept)
+        kept += 1
+    }
+    if kept == count {
+        return
+    }
+    loop at in 0..<f.op.len() {
+        row: IR_LINT_OPS[ir_op_code(f.op[at])]
+        f.dst[at] = ir_slot_renamed(renamed, row.dst, f.dst[at])
+        f.a[at] = ir_slot_renamed(renamed, row.a, f.a[at])
+        f.b[at] = ir_slot_renamed(renamed, row.b, f.b[at])
+        f.c[at] = ir_slot_renamed(renamed, row.c, f.c[at])
+    }
+    loop k in 0..<f.args.len() -> f.args[k] = ir_slot_renamed(renamed, IRLintRole.Slot, f.args[k])
+    loop k in 0..<f.splits.len() {
+        f.splits[k] = ir_slot_renamed(renamed, IRLintRole.Slot, f.splits[k])
+    }
+    loop k in 0..<f.binds.len() {
+        f.binds[k] = ir_slot_renamed(renamed, IRLintRole.Slot, f.binds[k])
+    }
+    types := [Int]{}
+    kinds := [IRSlotKind]{}
+    names := [Int]{}
+    lines := [Int]{}
+    fixed := [Bool]{}
+    sites := [Int]{}
+    loop slot in 0..<count {
+        if dropped[slot] -> next
+        types.push(f.slot_type[slot])
+        kinds.push(f.slot_kind[slot])
+        names.push(f.slot_name[slot])
+        lines.push(f.slot_line[slot])
+        fixed.push(f.slot_fixed[slot])
+        sites.push(f.slot_site[slot])
+    }
+    f.slot_type = types.move()
+    f.slot_kind = kinds.move()
+    f.slot_name = names.move()
+    f.slot_line = lines.move()
+    f.slot_fixed = fixed.move()
+    f.slot_site = sites.move()
+}
+
+// Clears the drop of the slot a field of `role` holds.
+ir_slot_kept: fn(dropped: &[Bool], role: IRLintRole, value: Int) Never! {
+    if ir_role_is_slot(role) && value >= 0 && value < dropped.len() -> dropped[value] = false
+}
+
+// A field of `role` holding `value`, with its slot renamed.
+ir_slot_renamed: fn(renamed: [Int], role: IRLintRole, value: Int) -> Int Never! {
+    if !ir_role_is_slot(role) || value < 0 || value >= renamed.len() -> return value
+    renamed[value]
 }
 
 // f0 calls itself; f1 calls f2, which calls through a function value and
@@ -3428,6 +3532,50 @@ ir_recursion_entry: fn(f: &IRFunction, recursive: [Bool], id: Int, stacks: Bool)
             assert_eq(checks, [Bool]{stops, stops, stops, false, false})
         }
     }
+}
+
+// A removed entry check takes the slots only it used: f0's parameter is s0,
+// the poll's result s1, the stop edge's temporary s2 and its body's sum s3;
+// f1 is the poll. Without the check the sum is s1, reading the parameter.
+// f2 calls itself, so it keeps its check and its slots.
+#Test("a removed entry check leaves no slot of its own behind") {
+    m := ir_module_new()
+    loop id in 0..<3 {
+        if id == 1 {
+            m.functions.push(ir_function_new("f1", "test:slots.jet.f1", "f1", "slots.jet", 1))
+            next
+        }
+        f := ir_function_new("f{id}", "test:slots.jet.f{id}", "f{id}", "slots.jet", 1)
+        param: ir_slot(f, 0, IRSlotKind.Param, -1, 1)
+        stopped: ir_slot(f, 0, IRSlotKind.Temp, -1, 2)
+        status: ir_slot(f, 0, IRSlotKind.Temp, -1, 3)
+        sum: ir_slot(f, 0, IRSlotKind.Temp, -1, 4)
+        f.entry_check = ir_emit(f, IROp.Call, stopped, 1, -1, 0, 1)
+        _: ir_emit(f, IROp.If, -1, stopped, -1, 4, 1)
+        _: ir_emit(f, IROp.Const, status, -1, -1, -1, 1)
+        _: ir_emit(f, IROp.Return, -1, status, -1, -1, 1)
+        _: ir_emit(f, IROp.End, -1, 1, -1, -1, 1)
+        _: ir_emit(f, IROp.Add, sum, param, param, 0, 1)
+        if id == 2 -> _: ir_emit(f, IROp.Call, -1, 2, -1, 0, 1)
+        _: ir_emit(f, IROp.Return, -1, sum, -1, -1, 1)
+        m.functions.push(f)
+    }
+    ir_recursion_checks_parted(m, 1)
+    plain: m.functions[0]
+    assert_eq(plain.op.len(), 2)
+    assert_eq(plain.op[0], IROp.Add)
+    assert_eq(plain.dst[0], 1)
+    assert_eq(plain.a[0], 0)
+    assert_eq(plain.b[0], 0)
+    assert_eq(plain.a[1], 1)
+    assert_eq(plain.slot_line, [Int]{1, 4})
+    assert_eq(plain.slot_kind.len(), 2)
+    assert_eq(plain.slot_fixed.len(), 2)
+    assert_eq(plain.slot_site.len(), 2)
+    recursive: m.functions[2]
+    assert_eq(recursive.op.len(), 8)
+    assert_eq(recursive.slot_line, [Int]{1, 2, 3, 4})
+    assert_eq(recursive.dst[5], 3)
 }
 
 // A body that calls through a function value takes no stack check when no

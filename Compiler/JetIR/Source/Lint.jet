@@ -10,7 +10,9 @@
 //
 // Per function it checks:
 //   - arena: the instruction and slot columns agree in length, every slot's
-//     type row exists, and exactly the slots 0..<param_count are parameters;
+//     type row exists, exactly the slots 0..<param_count are parameters,
+//     and each word of the split and bind rows (IRFunction.splits, binds)
+//     names a slot of the body;
 //   - operands: each field of an instruction against the role its opcode's
 //     row gives it (slot, name, data row, function, args window, linkage
 //     index, Br depth, immediate) and the slot kinds the row allows;
@@ -806,13 +808,14 @@ ir_lint_function: fn(m: IRModule, context: IRLintContext, f: IRFunction, pass: S
     }
 }
 
-// The columns of `f` agree, its slot type rows and result exist, and its
-// parameters are slots 0..<param_count; false when the rest cannot be read.
+// The columns of `f` agree, its slot type rows and result exist, its
+// parameters are slots 0..<param_count and its split and bind rows name its
+// slots (ir_lint_slot_rows); false when the rest cannot be read.
 ir_lint_arena: fn(m: IRModule, f: IRFunction, pass: String, out: &[IRLintFinding]) -> Bool Never! {
     slots: f.slot_type.len()
     code: f.op.len()
-    if f.slot_kind.len() != slots || f.slot_name.len() != slots || f.slot_line.len() != slots || f.slot_fixed.len() != slots {
-        out.push(ir_lint_finding(f, pass, IR_LINT_ARENA, "slot columns of {slots}, {f.slot_kind.len()}, {f.slot_name.len()}, {f.slot_line.len()} and {f.slot_fixed.len()} rows"))
+    if f.slot_kind.len() != slots || f.slot_name.len() != slots || f.slot_line.len() != slots || f.slot_fixed.len() != slots || f.slot_site.len() != slots {
+        out.push(ir_lint_finding(f, pass, IR_LINT_ARENA, "slot columns of {slots}, {f.slot_kind.len()}, {f.slot_name.len()}, {f.slot_line.len()}, {f.slot_fixed.len()} and {f.slot_site.len()} rows"))
         return false
     }
     if f.dst.len() != code || f.a.len() != code || f.b.len() != code || f.c.len() != code || f.code_line.len() != code {
@@ -839,10 +842,26 @@ ir_lint_arena: fn(m: IRModule, f: IRFunction, pass: String, out: &[IRLintFinding
             out.push(ir_lint_finding(f, pass, IR_LINT_ARENA, "slot {slot} is {if param -> "a parameter" else -> "no parameter"} of {f.param_count} but {f.slot_kind[slot]}"))
         }
     }
+    ir_lint_slot_rows(f, pass, "split", f.splits, out)
+    ir_lint_slot_rows(f, pass, "bind", f.binds, out)
     if f.open.len() > 0 {
         out.push(ir_lint_finding(f, pass, IR_LINT_CONTROL, "{f.open.len()} constructs left open by its builder"))
     }
     sound
+}
+
+// Each `what` row of `words` (IRFunction.splits or binds) is two words, each
+// a slot of `f`: a pass that renumbers slots and misses these rows breaks it.
+ir_lint_slot_rows: fn(f: IRFunction, pass: String, what: String, words: [Int], out: &[IRLintFinding]) Never! {
+    slots: f.slot_type.len()
+    if words.len() % 2 != 0 {
+        out.push(ir_lint_finding(f, pass, IR_LINT_ARENA, "{what} rows of {words.len()} words, not two each"))
+    }
+    loop (k, slot) in words {
+        if slot < 0 || slot >= slots {
+            out.push(ir_lint_finding(f, pass, IR_LINT_ARENA, "{what} row {k / 2} names slot {slot} of {slots}"))
+        }
+    }
 }
 
 ir_lint_at: fn(f: IRFunction, at: Int, pass: String, rule: String, message: String) -> IRLintFinding Never! {

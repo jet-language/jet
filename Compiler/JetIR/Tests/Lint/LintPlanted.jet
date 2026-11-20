@@ -316,6 +316,27 @@ lp_arena: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
     lp_return(f, -1)
 }
 
+// The rows a renumbering of the slots must carry along: a slot column cut
+// short, a split naming a slot past the body's and a bind row of one word.
+lp_site_short: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    _ := lp_const(f, t.int, 3)
+    _ := f.slot_site.pop()
+    lp_return(f, -1)
+}
+
+lp_split_range: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    three: lp_const(f, t.int, 3)
+    f.splits.push(three)
+    f.splits.push(three + 1)
+    lp_return(f, -1)
+}
+
+lp_bind_half: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    three: lp_const(f, t.int, 3)
+    f.binds.push(three)
+    lp_return(f, -1)
+}
+
 lp_type_kind: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
     _ := ir_intern_type(m, "Wrong", IRType{ty: Type.Int, kind: IRTypeKind.Bool, size: 1, align: 1, class: IRClass.Integer, signed: false, bits: 8, drop: ""})
     lp_return(f, -1)
@@ -508,6 +529,9 @@ lp_fixed_trap: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
 // of another bug for the same rule; one module each.
 LP_RULES: [String]{
     "arena",
+    "arena#site",
+    "arena#split",
+    "arena#bind",
     "operand.slot",
     "operand.dst",
     "operand.ref",
@@ -550,6 +574,9 @@ LP_RULES: [String]{
 lp_plant: fn(plant: String, m: &IRModule, t: LPTypes, f: &IRFunction) {
     if plant == {
         "arena" -> lp_arena(m, t, f)
+        "arena#site" -> lp_site_short(m, t, f)
+        "arena#split" -> lp_split_range(m, t, f)
+        "arena#bind" -> lp_bind_half(m, t, f)
         "operand.slot" -> lp_slot_range(m, t, f)
         "operand.dst" -> lp_dst_range(m, t, f)
         "operand.ref" -> lp_name_range(m, t, f)
