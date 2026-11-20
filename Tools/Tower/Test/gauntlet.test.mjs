@@ -45,7 +45,7 @@ test('with an empty table the route serves the planned grid from the entry manif
   assert.equal(body.file, join('state', 'gauntlet', 'table.json'));
   assert.deepEqual(body.table, { updated: null, entries: 0, rows: 0 });
   const { standings } = body;
-  assert.deepEqual(standings.peers, ['rust', 'c', 'zig', 'go', 'python', 'node', 'bun', 'vite', 'lua', 'luajit']);
+  assert.deepEqual(standings.peers, ['rust', 'c', 'zig', 'go', 'python', 'node', 'bun', 'lua', 'luajit']);
   assert.equal(standings.ceiling, 'asm');
   assert.ok(standings.entries.length > 20);
   for (const entry of standings.entries) {
@@ -60,12 +60,12 @@ test('with an empty table the route serves the planned grid from the entry manif
   const hello = standings.entries.find((entry) => entry.entry === 'hello');
   assert.equal(hello.peers.rust.status, 'not_measured');
   assert.equal(hello.peers.lua.status, 'not_measured');
-  assert.equal(hello.peers.luajit.program, 'lua/main.lua');
-  assert.equal(hello.peers.vite.status, 'not_applicable');
+  assert.equal(hello.peers.luajit.program, 'Lua/main.lua');
+  assert.ok(!('vite' in hello.peers));
   assert.equal(hello.peers.asm.role, 'ceiling');
   assert.equal(hello.peers.asm.reference, 'hello');
   assert.ok(standings.entries.some((entry) => entry.peers.asm.status === 'uncovered'), 'an entry with no asm reference keeps its asm cell');
-  for (const entry of standings.entries.filter((item) => item.peers.lua.status === 'uncovered')) assert.match(entry.peers.lua.reason, /^no lua program: lua\/main\.lua is missing$/, entry.entry);
+  for (const entry of standings.entries.filter((item) => item.peers.lua.status === 'uncovered')) assert.match(entry.peers.lua.reason, /^no lua program: Lua\/main\.lua is missing$/, entry.entry);
 });
 
 test('each row the table holds shows on the route at once, with the table\'s counts', async () => {

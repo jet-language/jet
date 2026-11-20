@@ -148,31 +148,31 @@ test("projects live reload comparison rows and axis publication", () => {
       metric: "reload_latency_ms",
       metrics: {
         "jet-dev": { cold_reload_latency_ms: 100, warm_reload_latency_ms: 110 },
-        vite: { cold_reload_latency_ms: 90, warm_reload_latency_ms: 105 },
+        nodemon: { cold_reload_latency_ms: 90, warm_reload_latency_ms: 105 },
       },
       comparisons: {
-        vite: {
+        nodemon: {
           verdict: "loss",
           cold: { status: "measured", jet: 100, peer: 90, ratio: 1.111, verdict: "loss" },
           warm: { status: "measured", jet: 110, peer: 105, ratio: 1.047, verdict: "loss" },
         },
       },
-      verdicts: { vite: "loss" },
+      verdicts: { nodemon: "loss" },
       publication: { status: "ready", blockers: [] },
     },
   };
   const status = projectStatus(report);
   assert.equal(status.publication.complete, true);
-  assert.deepEqual(status.axes.live_reload.metrics.vite, {
+  assert.deepEqual(status.axes.live_reload.metrics.nodemon, {
     cold_reload_latency_ms: 90,
     warm_reload_latency_ms: 105,
   });
-  assert.deepEqual(status.axes.live_reload.comparisons.vite, {
+  assert.deepEqual(status.axes.live_reload.comparisons.nodemon, {
     verdict: "loss",
     cold: { status: "measured", jet: 100, peer: 90, ratio: 1.111, verdict: "loss" },
     warm: { status: "measured", jet: 110, peer: 105, ratio: 1.047, verdict: "loss" },
   });
-  assert.deepEqual(status.axes.live_reload.verdicts, { vite: "loss" });
+  assert.deepEqual(status.axes.live_reload.verdicts, { nodemon: "loss" });
 });
 
 function mergeReport(date, runId, cells) {
@@ -294,7 +294,7 @@ test("axis-only receipts keep language cells and take the latest axis row", () =
       status: "complete",
       metric: "reload_latency_ms",
       comparisons: {
-        vite: {
+        nodemon: {
           verdict: "win",
           cold: { status: "measured", jet: 1, peer: 2, ratio: 0.5, verdict: "win" },
           warm: { status: "measured", jet: 1, peer: 2, ratio: 0.5, verdict: "win" },
@@ -310,7 +310,7 @@ test("axis-only receipts keep language cells and take the latest axis row", () =
       schema: "gauntlet-axis-live-reload-v1",
       metric: "reload_latency_ms",
       comparisons: {
-        vite: {
+        nodemon: {
           verdict: "loss",
           cold: { status: "measured", jet: 10, peer: 1, ratio: 10, verdict: "loss" },
           warm: { status: "measured", jet: 9, peer: 1, ratio: 9, verdict: "loss" },
@@ -324,8 +324,8 @@ test("axis-only receipts keep language cells and take the latest axis row", () =
   ]);
   assert.equal(merged.summary.cells, 1);
   assert.deepEqual(merged.cells[0].peers.map((peer) => peer.peer).sort(), ["python", "rust"]);
-  assert.equal(merged.axes.live_reload.comparisons.vite.verdict, "loss");
-  assert.equal(merged.axes.live_reload.comparisons.vite.cold.ratio, 10);
+  assert.equal(merged.axes.live_reload.comparisons.nodemon.verdict, "loss");
+  assert.equal(merged.axes.live_reload.comparisons.nodemon.cold.ratio, 10);
 });
 
 test("applies the strict <1 boundary to Rust exactly as to every other peer", () => {

@@ -631,7 +631,7 @@ run: its id, date and commit (the harness records `provenance.commit`; an older
 file says "commit not recorded"), and for a merged run the run it merged into.
 
 The page opens with a grid: one line per comparison entry, in two column
-groups. Compiled peers (Rust, C, Zig, Go, Vite) and the asm ceiling ship a
+groups. Compiled peers (Rust, C, Zig, Go) and the asm ceiling ship a
 built program, so they are judged against the binary `jet build` writes; the
 first group is that Jet's column and theirs. Interpreted peers (Python, Node,
 Bun, Lua, LuaJIT) start from source, so they are judged against `jet run`

@@ -26,7 +26,7 @@ const bars = (projected, metric) => panel(projected, metric).bars.map((bar) => `
 
 // The merged fixture as the peers-only run before it: every Jet value gone.
 function withoutJet(standings) {
-  const reason = 'not measured: this run measures rust, c, zig, go, python, node, bun, vite only';
+  const reason = 'not measured: this run measures rust, c, zig, go, python, node, bun only';
   for (const entry of standings.entries) {
     entry.jet = { status: 'not_measured', reason };
     for (const item of Object.values(entry.peers)) {
@@ -39,11 +39,11 @@ function withoutJet(standings) {
 
 test('every entry gets a row for every peer and the asm ceiling, every metric a cell', () => {
   const projected = view();
-  assert.deepEqual(projected.peers.map((peer) => peer.peer), ['rust', 'c', 'zig', 'go', 'python', 'node', 'bun', 'vite', 'lua', 'luajit', 'asm']);
-  assert.deepEqual(projected.columns.map((column) => column.label), ['Jet build', 'Rust', 'C', 'Zig', 'Go', 'Python', 'Node', 'Bun', 'Vite', 'Lua', 'LuaJIT', 'asm ceiling', 'Jet run'], 'a results file names no Jet modes, so every peer is judged against jet build');
+  assert.deepEqual(projected.peers.map((peer) => peer.peer), ['rust', 'c', 'zig', 'go', 'python', 'node', 'bun', 'lua', 'luajit', 'asm']);
+  assert.deepEqual(projected.columns.map((column) => column.label), ['Jet build', 'Rust', 'C', 'Zig', 'Go', 'Python', 'Node', 'Bun', 'Lua', 'LuaJIT', 'asm ceiling', 'Jet run'], 'a results file names no Jet modes, so every peer is judged against jet build');
   assert.deepEqual(projected.metrics.map((metric) => metric.id), ['startup', 'wall', 'cycles', 'peak_rss', 'size']);
   for (const item of projected.entries[0].rows) assert.equal(item.cells.length, 5);
-  assert.deepEqual(projected.summary, { floor: { pass: 29, fail: 1, other: 10 }, ceiling: { meet: 0, miss: 5, other: 0 } });
+  assert.deepEqual(projected.summary, { floor: { pass: 29, fail: 1, other: 5 }, ceiling: { meet: 0, miss: 5, other: 0 } });
 });
 
 test('the grid gives every entry a cell for Jet, every peer and the asm ceiling', () => {
@@ -58,17 +58,19 @@ test('the grid gives every entry a cell for Jet, every peer and the asm ceiling'
     python: '13.2 ms · 13.3 MB · 44.5M cyc · 11.5 MB · 5 pass',
     node: '27.2 ms · 46.6 MB · 72.9M cyc · 138 MB · 5 pass',
     bun: '15.6 ms · 37.4 MB · 46.6M cyc · 105 MB · 5 pass',
-    vite: 'not applicable: Vite bundles web front ends; an entry without a web front end has nothing for it to build',
     lua: 'not measured yet: this run\'s standings do not include Lua',
     luajit: 'not measured yet: this run\'s standings do not include LuaJIT',
     asm: '374 µs · 72 kB · 9.63k cyc · 1.45 kB · 5 miss',
   });
   assert.deepEqual(Object.fromEntries(projected.entries[0].grid.filter((cell) => cell.mode === 'build').map((cell) => [cell.peer, cell.tone])),
-    { jet: 'jet', rust: 'pass', c: 'fail', zig: 'pass', go: 'na', python: 'pass', node: 'pass', bun: 'pass', vite: 'na', lua: 'open', luajit: 'open', asm: 'fail' });
+    { jet: 'jet', rust: 'pass', c: 'fail', zig: 'pass', go: 'na', python: 'pass', node: 'pass', bun: 'pass', lua: 'open', luajit: 'open', asm: 'fail' });
   const html = renderGauntletStandings(projected);
-  assert.match(html, /<table class="gauntlet__table" aria-label="Gauntlet grid">\s*<thead><tr><th scope="col" rowspan="2">entry<\/th><th scope="colgroup" colspan="12" class="ggrid__group ggrid__group--build" title="[^"]+">vs Jet build<\/th><th scope="colgroup" colspan="1" class="ggrid__group ggrid__group--run" title="[^"]+">vs Jet run<\/th><\/tr>\s*<tr><th scope="col" class="ggrid__jet ggrid__jet--build">Jet build<\/th><th scope="col">Rust<\/th>.*<th scope="col">asm ceiling<\/th><th scope="col" class="ggrid__jet ggrid__jet--run">Jet run<\/th><\/tr><\/thead>/);
-  assert.match(html, /<td class="ggrid ggrid--fail" title="hello · C: 851 µs · 1\.95 MB · 617k cyc · 13\.4 kB · 4 pass · 1 fail · click for details" tabindex="0" role="button" data-gentry="hello" data-gmode="build" data-gpeer="c"><b>851 µs · 1\.95 MB<\/b><small>617k cyc · 13\.4 kB<\/small><\/td>/);
-  assert.match(html, /<td class="ggrid ggrid--open" title="hello · Lua: not measured yet: this run&#39;s standings do not include Lua · click for details" tabindex="0" role="button" data-gentry="hello" data-gmode="build" data-gpeer="lua"><b>not measured yet<\/b><small>this run&#39;s standings do not include Lua<\/small><\/td>/);
+  assert.match(html, /<div class="gtoggle" role="tablist" aria-label="Jet mode"><button type="button" role="tab" class="gtoggle__btn gtoggle__btn--on" aria-selected="true" data-gview="build"[^>]*><b>Compiled<\/b> <small>jet build vs Rust, C, Zig, Go, Python, Node, Bun, Lua, LuaJIT, asm ceiling<\/small><\/button><button type="button" role="tab" class="gtoggle__btn" aria-selected="false" data-gview="run"[^>]*><b>Scripting<\/b>/);
+  assert.match(html, /<thead><tr><th scope="col">entry<\/th><th scope="col" class="gcell__jet">Jet build<\/th><th scope="col">Rust<\/th>.*<th scope="col" class="gcol--ceiling">asm ceiling<\/th><\/tr><\/thead>/);
+  assert.match(html, /data-gpeer="jet"><ul class="gjet"><li><span class="gbar__name">startup<\/span><b>331 µs<\/b><\/li><li><span class="gbar__name">run time<\/span><b>417 µs<\/b><\/li><li><span class="gbar__name">memory<\/span><b>292 kB<\/b><\/li><\/ul><\/td>/);
+  assert.match(html, /<td class="gcell gcell--fail" title="hello · C\nstartup: Jet 331 µs vs 683 µs \(Jet\/peer 0\.48, pass\)\n[^"]*click for details" tabindex="0" role="button" data-gentry="hello" data-gmode="build" data-gpeer="c"><ul class="gbars"><li class="gbar gbar--win"><span class="gbar__name">startup<\/span><span class="gbar__track"><span class="gbar__half gbar__half--win"><span class="gbar__fill" style="width:26\.1%"><\/span><\/span><span class="gbar__half gbar__half--loss"><\/span><\/span><span class="gbar__text">2\.06× faster<\/span><\/li>/);
+  assert.match(html, /<td class="gcell gcell--open" title="hello · Lua: not measured yet: this run&#39;s standings do not include Lua" tabindex="0" role="button" data-gentry="hello" data-gmode="build" data-gpeer="lua"><b>not measured yet<\/b><small>this run&#39;s standings do not include Lua<\/small><\/td>/);
+  assert.doesNotMatch(html, /gbar__name">compile</, 'a results file without compile times draws no compile line');
   assert.match(html, /<\/table><\/div>\s*<section class="gdetail" data-gdetail aria-live="polite" hidden><\/section>/);
 });
 
@@ -114,11 +116,10 @@ test('ratios carry the floor verdict and the ceiling gap; non-measured rows keep
   assert.equal(cell(projected, 'c', 'size').peerBasis, 'static stripped');
   assert.equal(cell(projected, 'c', 'size').jetBasis, 'static stripped');
   assert.match(cell(projected, 'rust', 'size').detail, /\(Jet static stripped, peer stripped \+ shared libraries: \S+ kB binary \+ \S+ MB in 3 shared libraries\)$/);
-  assert.deepEqual(projected.sizeBasis.map((item) => item.basis), ['static stripped', 'stripped + shared libraries', 'web artifact', 'bundle', 'script+runtime']);
+  assert.deepEqual(projected.sizeBasis.map((item) => item.basis), ['static stripped', 'stripped + shared libraries', 'web artifact', 'script+runtime']);
   assert.equal(row(projected, 'go').status, 'uncovered');
   assert.equal(row(projected, 'go').reason, 'no go program: go/main.go is missing');
-  assert.equal(row(projected, 'vite').status, 'not_applicable');
-  assert.equal(cell(projected, 'vite', 'wall').ratio, null);
+  assert.equal(row(projected, 'vite'), undefined, 'the gauntlet has no Vite peer');
 });
 
 test('a peer missing from the results file stays a row with a reason', () => {
@@ -135,18 +136,17 @@ test('a peer missing from the results file stays a row with a reason', () => {
 test('a peers-only run shows every peer value as a bar, the asm ceiling marked, and Jet pending', () => {
   const projected = view(PEERS_FIXTURE);
   assert.equal(projected.jetMeasured, false);
-  assert.deepEqual(projected.entries[0].jet, { status: 'not_measured', reason: 'not measured: this run measures rust, c, zig, go, python, node, bun, vite, lua, luajit only', measured: false, provenance: null, runs: null });
+  assert.deepEqual(projected.entries[0].jet, { status: 'not_measured', reason: 'not measured: this run measures rust, c, zig, go, python, node, bun, lua, luajit only', measured: false, provenance: null, runs: null });
   assert.deepEqual(projected.entries[0].grid.filter((cell) => ['rust', 'c', 'python', 'bun', 'asm'].includes(cell.peer)).map((cell) => cell.tone), ['gray', 'gray', 'gray', 'gray', 'gray'], 'until Jet is measured every measured cell is gray');
   assert.deepEqual(bars(projected, 'startup'), ['asm ceiling 296 µs', 'Rust 614 µs', 'C 683 µs', 'Bun 7.31 ms', 'Python 18.2 ms']);
   assert.deepEqual(bars(projected, 'size'), ['asm ceiling 1.45 kB', 'C 13.4 kB', 'Rust 319 kB', 'Python 6.21 MB']);
   assert.deepEqual(panel(projected, 'startup').bars.map((bar) => bar.role), ['ceiling', 'peer', 'peer', 'peer', 'peer']);
   assert.ok(projected.entries[0].panels.every((item) => !item.jet && item.bars.every((bar) => bar.ratio === null && bar.text === null)));
-  assert.deepEqual(panel(projected, 'size').missing, [{ peer: 'bun', label: 'Bun', role: 'peer', status: 'unmeasured', reason: 'bun runtime footprint unmeasured: ldd exit 1; Jet: not measured: this run measures rust, c, zig, go, python, node, bun, vite, lua, luajit only' }]);
+  assert.deepEqual(panel(projected, 'size').missing, [{ peer: 'bun', label: 'Bun', role: 'peer', status: 'unmeasured', reason: 'bun runtime footprint unmeasured: ldd exit 1; Jet: not measured: this run measures rust, c, zig, go, python, node, bun, lua, luajit only' }]);
   assert.deepEqual(projected.entries[0].rows.filter((item) => item.status !== 'ok').map((item) => `${item.peer} ${item.status}: ${item.reason}`), [
     'zig unavailable: cold build exit 127',
     'go uncovered: no go program: go/main.go is missing',
     'node mismatched: line 1 differs: expected `hello, world`, got `hello world`',
-    'vite not_applicable: Vite bundles web front ends; an entry without a web front end has nothing for it to build',
     'lua not_measured: this run\'s standings do not include Lua',
     'luajit not_measured: this run\'s standings do not include LuaJIT',
   ]);
@@ -162,16 +162,14 @@ test('a peers-only run shows every peer value as a bar, the asm ceiling marked, 
   assert.match(text, /\n {2}· Bun size: unmeasured: bun runtime footprint unmeasured: ldd exit 1/);
 
   const html = renderGauntletStandings(projected);
-  assert.match(html, /<span class="gauntlet__pill standings__pill--open">Jet <b>pending<\/b><\/span>/);
-  assert.doesNotMatch(html, /standings__ratio|floor pass/);
-  assert.equal(html.match(/<figure class="standings__panel">/g).length, 5);
-  assert.equal(html.match(/<li class="standings__bar standings__bar--pending"><span class="standings__name">Jet<\/span><span class="standings__note">Jet pending<\/span><\/li>/g).length, 5);
-  assert.match(html, /<li class="standings__bar standings__bar--ceiling" title="hello · asm ceiling 296 µs"><span class="standings__name">asm ceiling<\/span><span class="standings__track"><span class="standings__fill" style="width:8%"><\/span><\/span><span class="standings__value">296 µs<\/span><\/li>/);
-  assert.match(html, /<li class="standings__bar standings__bar--peer" title="hello · Python 18\.2 ms">.*?style="width:100%"/);
-  assert.match(html, /standings__bar--missing"><span class="standings__name">Bun<\/span><span class="standings__note"><b>unmeasured<\/b> bun runtime footprint unmeasured: ldd exit 1/);
-  assert.match(html, /<b>Zig<\/b> <span>unavailable: cold build exit 127<\/span>/);
-  assert.match(html, /<b>Go<\/b> <span>uncovered: no go program: go\/main\.go is missing<\/span>/);
-  assert.match(html, /<b>Node<\/b> <span>mismatched: line 1 differs/);
+  assert.match(html, /<p class="gscore__pending">Jet pending: no Jet row is measured yet, so there are no wins or losses to show\.<\/p>/);
+  assert.doesNotMatch(html, /gbar--win|gbar--loss|gscore__tile|floor pass/);
+  assert.match(html, /<td class="gcell gcell__jet gcell--open" tabindex="0" role="button" data-gentry="hello" data-gmode="build" data-gpeer="jet"><b>not measured yet<\/b><small>not measured: this run measures rust, c, zig, go, python, node, bun, lua, luajit only<\/small><\/td>/);
+  assert.match(html, /data-gpeer="c"><ul class="gbars"><li class="gbar gbar--none"><span class="gbar__name">startup<\/span>.*?<span class="gbar__text">683 µs<\/span><\/li>/, 'before Jet is measured a peer cell shows the peer\'s own values');
+  assert.match(html, /data-gpeer="asm"><ul class="gbars"><li class="gbar gbar--none"><span class="gbar__name">startup<\/span>.*?<span class="gbar__text">296 µs<\/span>/);
+  assert.match(html, /<td class="gcell gcell--fail" title="hello · Zig: unavailable: cold build exit 127"[^>]*><b>unavailable<\/b><small>cold build exit 127<\/small><\/td>/);
+  assert.match(html, /<td class="gcell gcell--na" title="hello · Go: uncovered: no go program: go\/main\.go is missing"/);
+  assert.match(html, /<td class="gcell gcell--fail" title="hello · Node: mismatched: line 1 differs/);
 });
 
 test('Jet pending names why only when Jet was run and did not count', () => {
@@ -182,7 +180,7 @@ test('Jet pending names why only when Jet was run and did not count', () => {
   broken.entries[0].jet = { status: 'failed', reason: 'cold build exit 1' };
   const projected = projectGauntletStandings({ standings: broken });
   assert.match(gauntletStandingsText(projected), /\nhello \(batch\) · Jet build pending \(failed: cold build exit 1\) · Jet run pending\n/);
-  assert.match(renderGauntletStandings(projected), /<span class="standings__note">Jet pending \(failed: cold build exit 1\)<\/span>/);
+  assert.match(renderGauntletStandings(projected), /data-gpeer="jet"><b>failed<\/b><small>cold build exit 1<\/small><\/td>/);
 });
 
 test('a run with Jet merged draws Jet beside the same peer bars, with ratios and verdicts', () => {
@@ -200,25 +198,23 @@ test('a run with Jet merged draws Jet beside the same peer bars, with ratios and
 
   const text = gauntletStandingsText(projected);
   assert.match(text, /^Gauntlet · table table\.json · 9 rows over 1 entries · updated 2026-11-14 12:00 UTC\n/);
-  assert.match(text, /floor 29 pass, 1 fail, 10 other · ceiling 0 meet, 5 miss, 0 other/);
+  assert.match(text, /floor 29 pass, 1 fail, 5 other · ceiling 0 meet, 5 miss, 0 other/);
   assert.match(text, /\nsize basis \(each size value names its basis\):\n {2}static stripped: Jet, Rust, C, Zig, Go and asm/);
   assert.match(text, /\nhello \(batch\) · Jet run pending\n {2}peer +startup +run wall +run cycles +peak RSS +size\n {2}Jet build +331 µs +417 µs +57\.8 k cycles +292 kB +95\.6 kB\n/);
   assert.match(text, /\n {2}C +683 µs 0\.48 pass +851 µs 0\.49 pass +617 k cycles 0\.09 pass +1\.95 MB 0\.15 pass +13\.4 kB 7\.16 fail\n/);
   assert.match(text, /\n {2}size basis: Jet static stripped · Rust stripped \+ shared libraries · C static stripped · Zig static stripped · Python script\+runtime · Node script\+runtime · Bun script\+runtime · asm ceiling static stripped(\n|$)/);
   assert.match(text, /\n {2}Go +uncovered: no go program: go\/main\.go is missing\n/);
-  assert.match(text, /\n {2}Vite +not applicable: Vite bundles web front ends/);
   assert.match(text, /\n {2}asm ceiling +296 µs 1\.12 miss \+12% +374 µs 1\.12 miss \+12% +9\.63 k cycles 6\.01 miss \+501% +72 kB 4\.06 miss \+306% +1\.45 kB 65\.76 miss \+6476%/);
 
   const html = renderGauntletStandings(projected);
-  assert.doesNotMatch(html, /standings__bar--pending|Jet <b>pending/);
-  assert.match(html, /<span class="gauntlet__pill standings__pill--fail">floor fail <b>1<\/b><\/span>/);
-  assert.equal(html.match(/<li class="standings__bar standings__bar--jet"/g).length, 5);
-  assert.match(html, /<li class="standings__bar standings__bar--jet" title="hello · Jet build 95\.6 kB \(static stripped\)">/);
-  assert.match(html, /<li class="standings__bar standings__bar--peer standings__bar--fail" title="hello · C Jet 95\.6 kB \/ 13\.4 kB \(Jet static stripped, peer static stripped\) · 7\.16 fail">.*?<span class="standings__value">13\.4 kB<em>static stripped<\/em><\/span><b class="standings__ratio">7\.16 fail<\/b><\/li>/);
-  assert.match(html, /<li class="standings__bar standings__bar--ceiling standings__bar--fail" title="hello · asm ceiling Jet 331 µs \/ 296 µs · 1\.12 miss \+12%">/);
+  assert.doesNotMatch(html, /gscore__pending/);
+  assert.match(html, /<div class="gscore__tile gscore__tile--win"><h3>startup<\/h3><p class="gscore__count"><b class="gscore__win">6<\/b> won <b class="gscore__loss">0<\/b> lost <span>2 open<\/span><\/p><p class="gscore__ceil">asm ceiling: 0 met, 1 missed<\/p><\/div>/);
+  assert.match(html, /<h3>memory<\/h3>/);
+  assert.match(html, /<div class="glegend" aria-hidden="true">.*<i style="left:37\.5%">2×<\/i><i style="left:50%">even<\/i><i style="left:62\.5%">2×<\/i>/);
+  assert.match(html, /data-gpeer="asm"><ul class="gbars"><li class="gbar gbar--gap"><span class="gbar__name">startup<\/span>.*?<span class="gbar__half gbar__half--loss"><span class="gbar__fill" style="width:4%"><\/span><\/span><\/span><span class="gbar__text">1\.12× slower<\/span>/, 'a missed ceiling is a gap, not a gated loss');
+  assert.match(html, /<details class="gauntlet__rules"><summary>Rules and size basis<\/summary>.*floor 29 pass, 1 fail, 5 other/s);
   assert.match(html, /<p class="gauntlet__policy standings__basis"><strong>size basis \(each size value names its basis\):<\/strong><span>static stripped: /);
-  assert.match(html, /<b>Go<\/b> <span>uncovered: no go program: go\/main\.go is missing<\/span>/);
-  assert.match(html, /<li class="standings__blocked--na"><b>Vite<\/b> <span>not applicable: /);
+  assert.match(html, /<td class="gcell gcell--na" title="hello · Go: uncovered: no go program: go\/main\.go is missing"/);
 });
 
 test('the page shows the gauntlet table: each row it holds, every other cell not measured yet or why not', async () => {
@@ -261,12 +257,12 @@ test('the planned grid covers every entry × Jet, every peer and asm, each cell 
   const projected = projectGauntletStandings({ file: null, table: { updated: null, entries: 0, rows: 0 }, standings: await tableStandings({ rows: {} }) });
   assert.equal(projected.planned, true);
   assert.equal(projected.jetMeasured, false);
-  assert.deepEqual(projected.columns.map((column) => `${column.mode}:${column.peer}`), ['build:jet', 'build:rust', 'build:c', 'build:zig', 'build:go', 'build:vite', 'build:asm', 'run:jet', 'run:python', 'run:node', 'run:bun', 'run:lua', 'run:luajit']);
+  assert.deepEqual(projected.columns.map((column) => `${column.mode}:${column.peer}`), ['build:jet', 'build:rust', 'build:c', 'build:zig', 'build:go', 'build:asm', 'run:jet', 'run:python', 'run:node', 'run:bun', 'run:lua', 'run:luajit']);
   assert.ok(projected.entries.length > 20);
   for (const entry of projected.entries) {
-    assert.equal(entry.grid.length, 13, entry.entry);
+    assert.equal(entry.grid.length, 12, entry.entry);
     assert.deepEqual(entry.grid[0], { peer: 'jet', mode: 'build', label: 'Jet build', head: 'not measured yet', note: null, text: 'not measured yet', tone: 'open', reason: 'not measured yet' });
-    assert.deepEqual(entry.grid[7], { peer: 'jet', mode: 'run', label: 'Jet run', head: 'not measured yet', note: null, text: 'not measured yet', tone: 'open', reason: 'not measured yet' });
+    assert.deepEqual(entry.grid[6], { peer: 'jet', mode: 'run', label: 'Jet run', head: 'not measured yet', note: null, text: 'not measured yet', tone: 'open', reason: 'not measured yet' });
     for (const cell of entry.grid) assert.ok(['open', 'na', 'fail'].includes(cell.tone), `${entry.entry} ${cell.peer}: ${cell.text}`);
   }
   const cells = projected.entries.flatMap((entry) => entry.grid.map((cell) => ({ entry: entry.entry, ...cell })));
@@ -274,8 +270,7 @@ test('the planned grid covers every entry × Jet, every peer and asm, each cell 
   assert.equal(hello.rust, 'not measured yet');
   assert.equal(hello.lua, 'not measured yet');
   assert.equal(hello.asm, 'not measured yet');
-  assert.match(hello.vite, /^not applicable: /);
-  for (const cell of cells.filter((item) => item.peer === 'lua' && item.tone === 'na' && /^uncovered/.test(item.text))) assert.equal(cell.text, 'uncovered: no lua program: lua/main.lua is missing', cell.entry);
+  for (const cell of cells.filter((item) => item.peer === 'lua' && item.tone === 'na' && /^uncovered/.test(item.text))) assert.equal(cell.text, 'uncovered: no lua program: Lua/main.lua is missing', cell.entry);
   const bare = cells.filter((cell) => cell.peer === 'asm' && cell.tone === 'na');
   assert.ok(bare.length > 0, 'an entry with no asm reference keeps its asm cell');
   for (const cell of bare) assert.equal(cell.text, 'uncovered: no ceiling reference');
@@ -285,11 +280,13 @@ test('the planned grid covers every entry × Jet, every peer and asm, each cell 
   assert.match(text, /^Gauntlet · gauntlet table: nothing measured yet/);
   assert.match(text, /\nhello \(batch\)\n {2}Jet build +not measured yet\n {2}Rust +not measured yet\n(.*\n)*? {2}asm ceiling +[^\n]+\n {2}Jet run +not measured yet\n {2}Python +not measured yet\n/);
   const html = renderGauntletStandings(projected);
-  assert.match(html, /^<section class="standings" aria-label="Gauntlet standings"><p class="gauntlet__run">gauntlet table: nothing measured yet/);
-  assert.match(html, /<td class="ggrid ggrid--na" title="[^"]+ · asm ceiling: uncovered: no ceiling reference \([^"]+\) · click for details" tabindex="0" role="button" data-gentry="[^"]+" data-gmode="build" data-gpeer="asm"><b>uncovered<\/b><small>no ceiling reference<\/small><\/td>/);
-  assert.match(html, /data-gmode="run" data-gpeer="python"/);
-  assert.doesNotMatch(html, /data-gmode="run" data-gpeer="(asm|rust|c|zig|go|vite)"/);
-  assert.doesNotMatch(html, /standings__panel|gauntlet__pill/);
+  assert.match(html, /^<section class="standings" aria-label="Gauntlet standings" data-gshown="build"><p class="gauntlet__run">gauntlet table: nothing measured yet/);
+  assert.match(html, /<td class="gcell gcell--na" title="[^"]+ · asm ceiling: uncovered: no ceiling reference \([^"]+\)" tabindex="0" role="button" data-gentry="[^"]+" data-gmode="build" data-gpeer="asm"><b>uncovered<\/b><small>no ceiling reference<\/small><\/td>/);
+  assert.doesNotMatch(html, /data-gmode="run"/, 'the Compiled page shows jet build and its peers only');
+  const scripting = renderGauntletStandings(projected, 'run');
+  assert.match(scripting, /data-gmode="run" data-gpeer="python"/);
+  assert.doesNotMatch(scripting, /data-gpeer="(asm|rust|c|zig|go)"/);
+  assert.doesNotMatch(html + scripting, /gscore|glegend|gauntlet__rules/, 'nothing measured: no tally, legend or rules');
 });
 
 test('`tower gauntlet standings` prints the gauntlet table', async () => {
@@ -316,7 +313,7 @@ test('`tower gauntlet standings` prints the gauntlet table', async () => {
     assert.match(shown.stdout, /^Gauntlet · table other\.json · 1 rows over 1 entries · updated 2026-05-15 08:00 UTC\n/);
     const json = cli('gauntlet', 'standings', '--table', 'other.json', '--json');
     assert.equal(json.status, 0, json.stderr);
-    assert.equal(JSON.parse(json.stdout).entries.find((entry) => entry.entry === 'hello').rows.length, 11);
+    assert.equal(JSON.parse(json.stdout).entries.find((entry) => entry.entry === 'hello').rows.length, 10);
     const help = cli('help', '--check');
     assert.equal(help.status, 0, help.stderr + help.stdout);
   } finally {
@@ -373,14 +370,20 @@ test('one line per entry: compiled peers are judged against jet build\'s binary,
 
   const page = renderGauntletStandings(projected);
   assert.equal(page.match(/<tr><th scope="row"><div><strong>hello<\/strong>/g).length, 1, 'one grid line per entry');
-  assert.match(page, /colspan="7" class="ggrid__group ggrid__group--build"[^>]*>vs Jet build<\/th><th scope="colgroup" colspan="6" class="ggrid__group ggrid__group--run"[^>]*>vs Jet run<\/th>/);
-  assert.match(page, /data-gentry="hello" data-gmode="build" data-gpeer="c"/);
-  assert.match(page, /data-gentry="hello" data-gmode="run" data-gpeer="python"/);
-  assert.doesNotMatch(page, /ggrid__line|ggrid__mode|gauntlet__pill--mode/);
-  assert.match(page, /title="hello · Jet run 2 s"/);
+  assert.match(page, /<b>Compiled<\/b> <small>jet build vs Rust, C, Zig, Go, asm ceiling<\/small>/);
+  assert.match(page, /<b>Scripting<\/b> <small>jet run vs Python, Node, Bun, Lua, LuaJIT<\/small>/);
+  assert.match(page, /data-gentry="hello" data-gmode="build" data-gpeer="c"><ul class="gbars"><li class="gbar gbar--none"><span class="gbar__name">compile<\/span>/);
+  assert.match(page, /<h3>compile<\/h3>/);
+  assert.doesNotMatch(page, /data-gmode="run"/);
+  const scripting = renderGauntletStandings(projected, 'run');
+  assert.match(scripting, /data-gentry="hello" data-gmode="run" data-gpeer="python"><ul class="gbars"><li class="gbar gbar--loss"><span class="gbar__name">startup \+ compile<\/span>/);
+  assert.match(scripting, /data-gpeer="jet"><ul class="gjet"><li><span class="gbar__name">startup \+ compile<\/span><b>2 s<\/b><\/li>/);
+  assert.doesNotMatch(scripting, /gbar__name">compile<|<h3>compile<\/h3>/, 'jet run compiles inside startup: no compile line');
+  assert.equal(renderGauntletStandings(projected, 'nonsense'), page, 'an unknown mode shows Compiled');
   const text = gauntletStandingsText(projected);
-  assert.match(text, /\nJet build judges Rust, C, Zig, Go, Vite, asm ceiling: /);
+  assert.match(text, /\nJet build judges Rust, C, Zig, Go, asm ceiling: /);
   assert.match(text, /\nJet run judges Python, Node, Bun, Lua, LuaJIT: /);
-  assert.match(text, /\n {2}Jet build +\S+ µs[^\n]*\n(.*\n)*? {2}C +\S+ µs \d\.\d\d pass[^\n]*\n(.*\n)*? {2}Jet run +2 s[^\n]*\n {2}Python +\S+ ms \d+\.\d\d fail/);
+  assert.match(text, /\n {2}peer +compile +startup +run wall/, 'compile time is the first column');
+  assert.match(text, /\n {2}Jet build +— +\S+ µs[^\n]*\n(.*\n)*? {2}C +— +\S+ µs \d\.\d\d pass[^\n]*\n(.*\n)*? {2}Jet run +— +2 s[^\n]*\n {2}Python +— +\S+ ms \d+\.\d\d fail/);
   assert.doesNotMatch(text, /· run \d/);
 });

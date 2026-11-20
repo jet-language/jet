@@ -28,7 +28,7 @@ const matrix = await readJson("Tools/Gauntlet/matrix.json");
 const manifest = await readJson("Tools/Gauntlet/measurement-manifest.json");
 const references = await readJson("Tools/Perf/AsmParity/cells.json");
 const policy = standingsPolicy(matrix, manifest);
-const PEERS = ["rust", "c", "zig", "go", "python", "node", "bun", "vite", "lua", "luajit"];
+const PEERS = ["rust", "c", "zig", "go", "python", "node", "bun", "lua", "luajit"];
 const METRICS = STANDINGS_METRICS.map((metric) => metric.id);
 
 const batchEntry = { name: "sieve", mode: "batch", cells: ["cli.sieve"], languages: ["jet", "rust", "python", "node"] };
@@ -39,6 +39,7 @@ const timed = (wall, cycles, extra = {}) => ({
   runtime_wall_seconds: wall,
   runtime_cycles: cycles,
   runtime_peak_rss_kb: 1000,
+  cold_build_seconds: wall * 3,
   ...extra,
 });
 const deployed = (bytes, basis = "static stripped") => ({ size: { status: "ok", basis, build: "static stripped build", file_bytes: bytes, libraries: [], bytes } });
@@ -47,10 +48,8 @@ test("the standings policy names every peer and the asm ceiling, and the manifes
   assert.deepEqual(policy.issues, []);
   assert.deepEqual(policy.peers, PEERS);
   assert.equal(policy.ceiling, "asm");
-  const vite = policy.not_applicable.find((rule) => rule.peer === "vite");
-  assert.deepEqual(vite.modes, ["batch", "batch-steps", "service"]);
-  assert.match(vite.reason, /web front end/);
-  assert.deepEqual(METRICS, ["startup", "wall", "cycles", "peak_rss", "size"]);
+  assert.deepEqual(policy.not_applicable, []);
+  assert.deepEqual(METRICS, ["compile", "startup", "wall", "cycles", "peak_rss", "size"]);
   assert.deepEqual(Object.keys(policy.size_basis), SIZE_BASES);
   assert.deepEqual(standingsPolicy({ rails: {} }, {}).issues.length > 0, true);
   const unstated = { ...manifest, standings: { ...manifest.standings, size_basis: { binary: "bytes of the built executable" } } };
@@ -71,7 +70,6 @@ test("a plan gives every peer and the ceiling a row: measured, uncovered, not ap
   assert.match(plan.peers.c.reason, /no c program/);
   assert.equal(plan.peers.go.plan, "unavailable");
   assert.match(plan.peers.go.reason, /go toolchain unavailable: `go version` exit 127/);
-  assert.equal(plan.peers.vite.plan, "not_applicable");
   assert.equal(plan.peers.asm.plan, "measure");
   assert.equal(plan.peers.asm.role, "ceiling");
   assert.equal(plan.peers.asm.reference, "sieve");
@@ -81,8 +79,8 @@ test("a plan gives every peer and the ceiling a row: measured, uncovered, not ap
   assert.match(bare.peers.asm.reason, /no hand-written reference/);
   const doubled = planEntry(batchEntry, policy, { programs: programs([]), references: [{ name: "a" }, { name: "b" }] });
   assert.equal(doubled.peers.asm.plan, "failed");
-  const web = planEntry({ ...batchEntry, mode: "web" }, policy, { programs: programs(["vite"]), references: [] });
-  assert.equal(web.peers.vite.plan, "measure");
+  const web = planEntry({ ...batchEntry, mode: "web" }, policy, { programs: programs(["rust"]), references: [] });
+  assert.equal(web.peers.rust.plan, "measure");
 });
 
 test("a peer the entry declares non_applicable plans as not applicable with the entry's reason, not as uncovered", () => {
@@ -111,6 +109,13 @@ test("dry-run cells cover entry x peer x metric; service cycles and a missing pe
     if (cell.status !== "measure") assert.ok(cell.reason, `${cell.entry}/${cell.peer}/${cell.metric} has no reason`);
     if (cell.metric !== "size" || cell.status !== "measure") assert.equal(cell.size_basis, null, `${cell.entry}/${cell.peer}/${cell.metric}`);
   }
+  const pythonCompile = cells.find((cell) => cell.entry === "sieve" && cell.peer === "python" && cell.metric === "compile");
+  assert.equal(pythonCompile.status, "uncovered");
+  const rustCompile = cells.find((cell) => cell.entry === "sieve" && cell.peer === "rust" && cell.metric === "compile");
+  assert.equal(rustCompile.status, "measure");
+  const measuredPython = planCells([planEntry(batchEntry, policy, { programs: programs(["python"]), references: [] })])
+    .find((cell) => cell.peer === "python" && cell.metric === "compile");
+  assert.deepEqual([measuredPython.status, measuredPython.reason], ["not_applicable", "python runs from source: it has no build step, and its compile cost counts in startup"]);
   const rustSize = cells.find((cell) => cell.entry === "sieve" && cell.peer === "rust" && cell.metric === "size");
   assert.deepEqual([rustSize.jet_size_basis, rustSize.size_basis], ["static stripped", "static stripped, else stripped + shared libraries"]);
 });
@@ -120,7 +125,6 @@ test("each measured size cell is planned on one stated basis", () => {
   assert.equal(plannedSizeBasis(batchEntry, "asm", "ceiling"), "static stripped");
   assert.equal(plannedSizeBasis(batchEntry, "python"), "script+runtime");
   assert.equal(plannedSizeBasis({ ...batchEntry, mode: "web" }, "rust"), "web artifact");
-  assert.equal(plannedSizeBasis({ ...batchEntry, mode: "web-app" }, "vite"), "bundle");
   assert.equal(plannedSizeBasis({ ...batchEntry, mode: "web" }, "node"), "script+runtime");
   const overridden = { ...batchEntry, spec: { build: { c: ["gcc", "-O3", "main.c", "-o", "main-c"] } } };
   assert.match(plannedSizeBasis(overridden, "c"), /^stripped \+ shared libraries if dynamic \(the entry overrides the build command\)$/);
@@ -144,8 +148,6 @@ test("every comparison entry in the corpus plans a row for every peer and its ce
   assert.equal(byName.hello.peers.asm.reference, "hello");
   assert.equal(byName.sieve.peers.asm.reference, "sieve");
   assert.equal(byName.sieve.peers.bun.plan, "measure");
-  assert.equal(byName["web-widget"].peers.vite.plan, "measure");
-  assert.equal(byName.wordfreq.peers.vite.plan, "not_applicable");
   assert.equal(byName["http-service"].peers.asm.plan, "measure");
   assert.equal(byName["http-service"].peers.asm.reference, "httpservice");
 });
@@ -193,7 +195,10 @@ test("judged rows: the floor passes below 1.00, the ceiling meets at or below 1.
   assert.equal(standing.peers.c.status, "failed");
   assert.equal(standing.peers.zig.status, "unavailable");
   assert.equal(standing.peers.go.status, "uncovered");
-  assert.equal(standing.peers.vite.status, "not_applicable");
+  assert.equal(standing.peers.rust.metrics.compile.verdict, "pass");
+  assert.equal(standing.peers.rust.metrics.compile.source, "cold_build_seconds");
+  assert.equal(standing.peers.python.metrics.compile.verdict, "not_applicable");
+  assert.match(standing.peers.python.metrics.compile.reason, /runs from source: it has no build step/);
   const cycles = standing.peers.asm.metrics.cycles;
   assert.equal(cycles.verdict, "miss");
   assert.ok(Math.abs(cycles.gap - 0.2) < 1e-12);
@@ -240,8 +245,8 @@ test("the section lists every floor loss and ceiling miss, feeds the scoreboard'
   assert.deepEqual(section.losses.floor.map((loss) => `${loss.peer}/${loss.metric}`), ["python/size", "python/cycles", "python/startup", "python/wall", "python/peak_rss"]);
   assert.ok(section.losses.ceiling.some((miss) => miss.metric === "cycles" && Math.abs(miss.ratio - 1.2) < 1e-12));
   assert.ok(section.open.some((cell) => cell.peer === "c" && cell.verdict === "uncovered"));
-  assert.ok(!section.open.some((cell) => cell.peer === "vite"));
-  assert.equal(section.summary.floor.pass, 5);
+  assert.ok(!section.open.some((cell) => cell.metric === "compile" && cell.peer === "python"));
+  assert.equal(section.summary.floor.pass, 6);
   assert.equal(section.summary.floor.fail, 5);
   const forbidden = new Set(["best", "selected", "average", "mean", "avg", "aggregate", "winner", "chosen"]);
   const walk = (value) => {

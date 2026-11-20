@@ -1,6 +1,6 @@
 // Peer standings (#6834): every comparison entry against every standings
 // peer (matrix.json rails.standings) and the hand-written asm ceiling, on
-// startup, run time and size. Jet/peer below 1.00 passes the peer floor;
+// compile time, startup, run time, memory and size. Jet/peer below 1.00 passes the peer floor;
 // Jet/asm at most 1.00 meets the ceiling.
 //
 // This module is pure: run.mjs gathers programs, toolchains, interpreter
@@ -15,6 +15,7 @@
 export const STANDINGS_SCHEMA = "jet.gauntlet.standings.v1";
 
 export const STANDINGS_METRICS = Object.freeze([
+  Object.freeze({ id: "compile", family: "build", label: "compile", what: "cold build from source to a runnable program, wall time (interpreted peers have no build step: their compile cost is in startup)" }),
   Object.freeze({ id: "startup", family: "startup", label: "startup", what: "exec to first output, wall time (service: exec to ready)" }),
   Object.freeze({ id: "wall", family: "run", label: "run wall", what: "wall time of the whole run (service: p50 request latency)" }),
   Object.freeze({ id: "cycles", family: "run", label: "run cycles", what: "user-mode CPU cycles of the process tree (perf stat -e cycles:u)" }),
@@ -34,8 +35,7 @@ export const STANDINGS_JUDGMENT = Object.freeze({
 });
 
 // How a peer's size is counted. Compiled peers ship a binary; interpreted
-// peers ship their script and need their runtime; bundled peers ship the
-// bundle a web build emits. Web entries measure every artifact peer by its
+// peers ship their script and need their runtime. Web entries measure every artifact peer by its
 // web artifact bytes.
 export const PEER_KINDS = Object.freeze({
   jet: "compiled",
@@ -47,17 +47,18 @@ export const PEER_KINDS = Object.freeze({
   python: "interpreted",
   node: "interpreted",
   bun: "interpreted",
-  vite: "bundled",
   lua: "interpreted",
   luajit: "interpreted",
 });
 
 // The stated size basis (#6834 c6): every size cell names one of these, and
 // measurement-manifest.json standings.size_basis defines each, in this order.
-export const SIZE_BASES = Object.freeze(["static stripped", "stripped + shared libraries", "web artifact", "bundle", "script+runtime"]);
+export const SIZE_BASES = Object.freeze(["static stripped", "stripped + shared libraries", "web artifact", "script+runtime"]);
 
 const WEB_MODES = new Set(["web", "web-app"]);
+const COMPILE_SOURCE = Object.freeze({ metric: "cold_build_seconds", unit: "s" });
 const TIMED_SOURCES = Object.freeze({
+  compile: COMPILE_SOURCE,
   startup: { metric: "runtime_first_stdout_seconds", unit: "s" },
   wall: { metric: "runtime_wall_seconds", unit: "s" },
   cycles: { metric: "runtime_cycles", unit: "cycles" },
@@ -69,6 +70,7 @@ const METRIC_SOURCES = Object.freeze({
   web: TIMED_SOURCES,
   "web-app": TIMED_SOURCES,
   service: {
+    compile: COMPILE_SOURCE,
     startup: { metric: "service_startup_seconds", unit: "s" },
     wall: { metric: "service_latency_ms_p50", unit: "ms" },
     cycles: { metric: null, reason: "a service runs until it is stopped, so its cycles have no run to count; startup, latency and RSS judge it" },
@@ -124,6 +126,11 @@ function notApplicable(policy, peer, entry) {
   return policy.not_applicable.find((rule) => rule.peer === peer && rule.modes.includes(entry.mode)) ?? null;
 }
 
+// An interpreted peer starts from source: it has no build step to time, and
+// what it spends compiling counts in its startup.
+const noBuildStep = (peer) => `${peer} runs from source: it has no build step, and its compile cost counts in startup`;
+const buildless = (peer, metric) => metric === "compile" && PEER_KINDS[peer] === "interpreted";
+
 function staticMetricPlan(entry, metric) {
   const source = METRIC_SOURCES[entry.mode]?.[metric];
   if (metric !== "size" && source && source.metric === null) return { status: "unmeasured", reason: source.reason };
@@ -178,7 +185,7 @@ export function planEntry(entry, policy, { programs = {}, references = [], toolc
 export function plannedSizeBasis(entry, peer, role = "peer") {
   const kind = PEER_KINDS[peer] ?? "compiled";
   if (kind === "interpreted") return "script+runtime";
-  if (isWebEntry(entry)) return kind === "bundled" ? "bundle" : "web artifact";
+  if (isWebEntry(entry)) return "web artifact";
   if (role === "ceiling") return "static stripped";
   const build = entry.spec?.build;
   const overridden = build && typeof build === "object" && !Array.isArray(build) ? (build[peer] ?? build.default) : build;
@@ -198,7 +205,9 @@ export function planCells(plans) {
   for (const plan of plans) {
     for (const [peer, item] of Object.entries(plan.peers)) {
       for (const metric of METRIC_IDS) {
-        const fixed = item.plan === "measure" ? (staticMetricPlan(plan, metric) ?? (metric === "cycles" ? plan.cycles : null)) : null;
+        const fixed = item.plan === "measure"
+          ? (buildless(peer, metric) ? { status: "not_applicable", reason: noBuildStep(peer) } : staticMetricPlan(plan, metric) ?? (metric === "cycles" ? plan.cycles : null))
+          : null;
         cells.push({
           entry: plan.entry,
           mode: plan.mode,
@@ -251,7 +260,7 @@ function sizeValue(entry, peer, row, runtimes) {
   if (isWebEntry(entry)) {
     const value = row?.metrics?.artifact_bytes;
     return positive(value)
-      ? { value, unit: "bytes", source: "artifact_bytes", basis: kind === "bundled" ? "bundle" : "web artifact" }
+      ? { value, unit: "bytes", source: "artifact_bytes", basis: "web artifact" }
       : { value: null, reason: "artifact_bytes was not recorded" };
   }
   // #6834 c6: run.mjs records the deployed size (row.size): the static
@@ -330,7 +339,8 @@ export function entryStandings(plan, result, { runtimes = {}, pending = false } 
         metrics[metric] = { jet: null, peer: null, ratio: null, verdict: status.status, reason: status.reason };
         continue;
       }
-      const fixed = metric === "cycles" ? plan.cycles : null;
+      const fixed = buildless(peer, metric) ? { status: "not_applicable", reason: noBuildStep(peer) }
+        : metric === "cycles" ? plan.cycles : null;
       if (fixed) {
         metrics[metric] = { jet: null, peer: null, ratio: null, verdict: fixed.status, reason: fixed.reason };
         continue;
