@@ -1180,9 +1180,10 @@ the optimization level of its build, which the image's debug information
 names (`Jet native backend (O2)`), so the code around the expression is the
 code the program runs, with that function, with the locals' bytes read from
 the frame. It runs in the stopped program itself, on the selected thread,
-when the image's runtime exports its allocator words and its record/replay
-mode (`jet_rt_alloc_class_limit`, `jet_rt_alloc_check_take_code`,
-`jet_rt_alloc_check_give_code` and `jet_rt_replay_mode`, data symbols every image
+when the image's runtime exports its allocator words, its record/replay
+mode and its stdout switch (`jet_rt_alloc_class_limit`,
+`jet_rt_alloc_check_take_code`, `jet_rt_alloc_check_give_code`,
+`jet_rt_replay_mode` and `jet_rt_host_stdout_direct`, data symbols every image
 that allocates holds; nothing in the program writes them for the debugger,
 so a program no debugger touches pays nothing for them): when it starts or
 attaches to the program the debugger maps one room within a jump's reach of
@@ -1233,7 +1234,10 @@ it grew or made from the arena never reaches the program. The debugger
 also turns the
 record/replay mode off for the call and puts it back after (`jet debug
 --record`, `--replay`), so an
-evaluation adds nothing to the recording and takes nothing from it. An
+evaluation adds nothing to the recording and takes nothing from it, and
+sets stdout direct for it, so a `print` the call makes is a write it
+catches, never bytes left in the program's stdout buffer for the program
+to print later, and stderr leaves the program's pending stdout as it was. An
 image whose runtime doesn't export those words evaluates nothing: the
 refusal says to build it again with this jet. The
 mapped code holds a fresh copy of the

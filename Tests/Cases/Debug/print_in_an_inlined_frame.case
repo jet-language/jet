@@ -4,10 +4,12 @@
 # information names the level it was built at, so the expression is
 # compiled at that level and the code around it is the code the program
 # runs. In the inlined frame it is checked in `sum_squares` at the stop's
-# line and reads that frame's live locals; `up` selects `run` at the call,
-# where it reads `run`'s. A call of the inlined function runs its code,
-# compiled again. The same commands run on the O0 image first. The fixture
-# must stay in jet fmt form: line 7 is the loop's body, line 15 the call.
+# line and reads that frame's live locals, its parameter `count` among them
+# as at O0: the inlined body reads the argument `run` passed; `up` selects
+# `run` at the call, where it reads `run`'s. A call of the inlined function
+# runs its code, compiled again. The same commands run on the O0 image
+# first. The fixture must stay in jet fmt form: line 7 is the loop's body,
+# line 15 the call.
 fixture: PrintInAnInlinedFrame.fixture
 env: NO_COLOR=1
 env: PATH={work}/no-tools
@@ -28,7 +30,7 @@ exit: 0
 step: jet debug {work}/.jet/build/prog --break prog.jet:7
 stdin: print_in_an_inlined_frame.stdin
 exit: 0
-stdout: ~ "Locals:  n = 2   total = 1\n" # the third stop, in the copy inlined into `run`
+stdout: ~ "Locals:  count = 1000   n = 2   total = 1\n" # the third stop, in the copy inlined into `run`, with the locals it has at O0
 stdout: ~ "(Jet) print n + 1\nn + 1 = 3\n" # the inlined frame's local, as at O0
 stdout: ~ "(Jet) print total + n * 10\ntotal + n * 10 = 21\n" # two of them, in code compiled at O2
 stdout: ~ "(Jet) print count + 1\ncount + 1 = 1001\n" # `run`'s own frame below it, at the call

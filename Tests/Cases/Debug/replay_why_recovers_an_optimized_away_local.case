@@ -1,22 +1,24 @@
-# An -O2 image keeps no place for `d` at line 21: the optimizer folds it
-# into the sum. `why d` in a replay of that image builds the -O0 image of
-# its source, runs it under the same recording to the same pass of line 21
-# (the loop's second) and answers there: line 20 set `d` to 2, labeled as
+# An -O2 image keeps no place for `d` at line 23: the inlined `double`
+# leaves it in a register that holds it only up to its last read, `total +=
+# d` on line 22. `why d` in a replay of that image builds the -O0 image of
+# its source, runs it under the same recording to the same pass of line 23
+# (the loop's second) and answers there: line 21 set `d` to 2, labeled as
 # recovered from the -O0 replay. The -O2 session stays at its stop, so `c`
 # runs it on. The helper task's tally races the loop, so only the main
-# task's total is asserted.
-# The fixture must stay in jet fmt form; line 20 binds `d`, line 21 adds it.
-fixture: ReplayReverse.fixture
+# task's sums are asserted.
+# The fixture must stay in jet fmt form; line 21 binds `d`, line 23 is past
+# its last read.
+fixture: OptimizedAwayLocal.fixture
 env: NO_COLOR=1
 step: jet run -O2 --record=fast prog.jet
 exit: 0
-stdout: ~ "total 6 tally " # the program's own output among the session's
+stdout: ~ "total 6 passes 3 tally " # the program's own output among the session's
 step: jet build -O2 prog.jet
 exit: 0
-step: jet debug --replay=fast {work}/.jet/build/prog --break prog.jet:21
+step: jet debug --replay=fast {work}/.jet/build/prog --break prog.jet:23
 stdin: replay_why_recovers_an_optimized_away_local.stdin
 exit: 0
-stdout: ~ "(Jet) why d\nd = 2 (recovered from the -O0 replay), set at prog.jet:20 in run() (task 1)\n" # the -O0 replay's write of `d`, labeled
+stdout: ~ "(Jet) why d\nd = 2 (recovered from the -O0 replay), set at prog.jet:21 in run() (task 1)\n" # the -O0 replay's write of `d`, labeled
 stdout: ~ "Program finished\n" # the session runs the program to its end
 stdout+stderr: !~ "replay diverged" # the replay stays faithful to the recording
 stdout+stderr: !~ "didn't" # the session comes back to its stop

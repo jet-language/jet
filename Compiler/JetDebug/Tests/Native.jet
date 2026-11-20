@@ -358,16 +358,19 @@ NATIVE_TEST_SPLIT: "sum_squares: fn(n: Int) -> Int {{\n    total := 0\n    loop 
 // fib's argument depends on the loop, so the call is not folded away.
 NATIVE_TEST_LOOP: "fib: fn(n: Int) -> Int {{\n    if n < 2 -> return n\n    left: fib(n - 1)\n    right: fib(n - 2)\n    left + right\n}}\n\nrun: fn() {{\n    total := 0\n    loop i in 0..<3000000 -> total += i\n    answer: fib(15 + total % 2)\n    print(\"{{total}} {{answer}}\")\n}}\n"
 
-// A ring buffer whose view lists its items in order, in the Prelude's
-// DebugItem rows. The program calls the view itself, so the image has it
-// whether or not the build keeps views.
-NATIVE_TEST_RING: "Ring: struct {{\n    items: [Int],\n    start: Int,\n    count: Int,\n\n    debug_view: fn(self) -> [DebugItem] {{\n        loop k in 0..<self.count -> DebugItem{{label: \"{{k}}\", value: \"{{self.items[(self.start + k) % self.items.len()]}}\"}}\n    }}\n}}\n\nrun: fn() {{\n    ring: Ring{{items: [Int]{{5, 0, 3, 4}}, start: 2, count: 3}}\n    print(\"items {{ring.debug_view().len()}}\")\n}}\n"
+// A ring buffer whose DebugView lists its items in order, in the Prelude's
+// DebugItem rows. A view is a DebugView implementation: a build keeps the
+// drop of the [DebugItem] list it returns only for those (JetIR
+// ir_build_program), and without that drop the debugger calls no view. The
+// program calls the view itself, so the image has it whether or not the
+// build keeps views.
+NATIVE_TEST_RING: "Ring: struct {{\n    items: [Int],\n    start: Int,\n    count: Int,\n\n    impl DebugView {{\n        debug_view: fn(self) -> [DebugItem] Never! {{\n            loop k in 0..<self.count -> DebugItem{{label: \"{{k}}\", value: \"{{self.items[(self.start + k) % self.items.len()]}}\"}}\n        }}\n    }}\n}}\n\nrun: fn() {{\n    ring: Ring{{items: [Int]{{5, 0, 3, 4}}, start: 2, count: 3}}\n    print(\"items {{ring.debug_view().len()}}\")\n}}\n"
 
 #Test("a_struct_with_a_debug_view_shows_its_items") {
     scratch: native_test_files.temp_dir("jet-debug-view") ?? panic("scratch: {err}")
     root: scratch.path
     session := native_test_session(root, NATIVE_TEST_RING, [String]{"-O0"})
-    paused: session.run_to([NativeBreak]{{file: "prog.jet", line: 13}}, "prog.jet", NATIVE_TEST_RING.split("\n").to_list(), [String]{}) ?? panic("run_to: {err.detail}")
+    paused: session.run_to([NativeBreak]{{file: "prog.jet", line: 15}}, "prog.jet", NATIVE_TEST_RING.split("\n").to_list(), [String]{}) ?? panic("run_to: {err.detail}")
     assert(native_debug_hit_breakpoint(paused.stop) != None, paused.text)
     locals: session.locals() ?? panic("locals: {err.detail}")
     shown := ""
@@ -389,13 +392,13 @@ NATIVE_TEST_RING: "Ring: struct {{\n    items: [Int],\n    start: Int,\n    coun
 // print in the output would be the debugger's doing; run in the program,
 // the view's write is kept from the kernel and the open is a refused system
 // call.
-NATIVE_TEST_LOUD: "use {{\n    process: core.process\n    files: core.files\n}}\n\nLoud: struct {{\n    count: Int,\n\n    debug_view: fn(self) -> [DebugItem] {{\n        print(\"viewed\")\n        name: files.read(\"/proc/self/comm\") ?? \"\"\n        [DebugItem]{{DebugItem{{label: \"seen\", value: \"{{self.count}} {{name.len()}}\"}}}}\n    }}\n}}\n\nrun: fn() {{\n    loud: Loud{{count: 7}}\n    if process.args().len() > 5 -> print(\"{{loud.debug_view().len()}}\")\n    print(\"count {{loud.count}}\")\n}}\n"
+NATIVE_TEST_LOUD: "use {{\n    process: core.process\n    files: core.files\n}}\n\nLoud: struct {{\n    count: Int,\n\n    impl DebugView {{\n        debug_view: fn(self) -> [DebugItem] Never! {{\n            print(\"viewed\")\n            name: files.read(\"/proc/self/comm\") ?? \"\"\n            [DebugItem]{{DebugItem{{label: \"seen\", value: \"{{self.count}} {{name.len()}}\"}}}}\n        }}\n    }}\n}}\n\nrun: fn() {{\n    loud: Loud{{count: 7}}\n    if process.args().len() > 5 -> print(\"{{loud.debug_view().len()}}\")\n    print(\"count {{loud.count}}\")\n}}\n"
 
 #Test("a_debug_view_that_makes_a_system_call_is_refused_and_the_program_never_runs_it") {
     scratch: native_test_files.temp_dir("jet-debug-loud") ?? panic("scratch: {err}")
     root: scratch.path
     session := native_test_session(root, NATIVE_TEST_LOUD, [String]{"-O0"})
-    paused: session.run_to([NativeBreak]{{file: "prog.jet", line: 19}}, "prog.jet", NATIVE_TEST_LOUD.split("\n").to_list(), [String]{}) ?? panic("run_to: {err.detail}")
+    paused: session.run_to([NativeBreak]{{file: "prog.jet", line: 21}}, "prog.jet", NATIVE_TEST_LOUD.split("\n").to_list(), [String]{}) ?? panic("run_to: {err.detail}")
     assert(native_debug_hit_breakpoint(paused.stop) != None, paused.text)
     // Twice: each view runs, and is refused, afresh.
     loop _ in 0..<2 {
@@ -418,13 +421,13 @@ NATIVE_TEST_LOUD: "use {{\n    process: core.process\n    files: core.files\n}}\
 }
 
 // A view that runs far past the evaluation budget.
-NATIVE_TEST_SPIN: "use process: core.process\n\nSpin: struct {{\n    count: Int,\n\n    debug_view: fn(self) -> [DebugItem] {{\n        total := 0\n        loop i in 0..<self.count -> total += i % 7\n        [DebugItem]{{DebugItem{{label: \"total\", value: \"{{total}}\"}}}}\n    }}\n}}\n\nrun: fn() {{\n    spin: Spin{{count: 1000000000000000}}\n    if process.args().len() > 5 -> print(\"{{spin.debug_view().len()}}\")\n    print(\"spun {{spin.count > 0}}\")\n}}\n"
+NATIVE_TEST_SPIN: "use process: core.process\n\nSpin: struct {{\n    count: Int,\n\n    impl DebugView {{\n        debug_view: fn(self) -> [DebugItem] Never! {{\n            total := 0\n            loop i in 0..<self.count -> total += i % 7\n            [DebugItem]{{DebugItem{{label: \"total\", value: \"{{total}}\"}}}}\n        }}\n    }}\n}}\n\nrun: fn() {{\n    spin: Spin{{count: 1000000000000000}}\n    if process.args().len() > 5 -> print(\"{{spin.debug_view().len()}}\")\n    print(\"spun {{spin.count > 0}}\")\n}}\n"
 
 #Test("a_debug_view_past_its_budget_is_stopped_and_the_program_runs_on") {
     scratch: native_test_files.temp_dir("jet-debug-spin") ?? panic("scratch: {err}")
     root: scratch.path
     session := native_test_session(root, NATIVE_TEST_SPIN, [String]{"-O0"})
-    paused: session.run_to([NativeBreak]{{file: "prog.jet", line: 16}}, "prog.jet", NATIVE_TEST_SPIN.split("\n").to_list(), [String]{}) ?? panic("run_to: {err.detail}")
+    paused: session.run_to([NativeBreak]{{file: "prog.jet", line: 18}}, "prog.jet", NATIVE_TEST_SPIN.split("\n").to_list(), [String]{}) ?? panic("run_to: {err.detail}")
     assert(native_debug_hit_breakpoint(paused.stop) != None, paused.text)
     locals: session.locals() ?? panic("locals: {err.detail}")
     shown := ""
@@ -611,12 +614,15 @@ NATIVE_TEST_REVERSE: "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nr
     native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
 }
 
-// A task keeps the -O2 loop from folding away; `d` has no place in it.
-NATIVE_TEST_RECOVER: "bump: fn(rounds: Int) -> Int {{\n    rounds * 2\n}}\n\ndouble: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nrun: fn() {{\n    helper: task bump(3)\n    total := 0\n    loop k in 0..<3 {{\n        d: double(k)\n        total += d\n    }}\n    print(\"total {{total}} {{helper.join() ?? 0}}\")\n}}\n"
+// A task keeps the -O2 loop from folding away. `double` is inlined into
+// `run`, and `d` lives in the register that holds the inlined `y` from line
+// 15 to its last read on line 16; on line 17 it has no value.
+NATIVE_TEST_RECOVER: "bump: fn(rounds: Int) -> Int {{\n    rounds * 2\n}}\n\ndouble: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nrun: fn() {{\n    helper: task bump(3)\n    total := 0\n    passes := 0\n    loop k in 0..<3 {{\n        d: double(k)\n        total += d\n        passes += k\n    }}\n    print(\"total {{total}} {{passes}} {{helper.join() ?? 0}}\")\n}}\n"
 
-// An -O2 image keeps no place for `d` on line 15: `why` asks for a
-// recovery, and the -O0 image of the same source, run to the same pass of
-// the line, answers there, labeled; the -O2 session stays at its stop.
+// An -O2 image keeps no place for `d` on line 17, past its last read: `why`
+// asks for a recovery, and the -O0 image of the same source, run to the
+// same pass of the line, answers there, labeled; the -O2 session stays at
+// its stop.
 #Test("why_recovers_an_optimized_away_local_from_the_o0_image") {
     scratch: native_test_files.temp_dir("jet-debug-why-recover") ?? panic("scratch: {err}")
     root: scratch.path
@@ -627,18 +633,40 @@ NATIVE_TEST_RECOVER: "bump: fn(rounds: Int) -> Int {{\n    rounds * 2\n}}\n\ndou
     session := native_test_session(root, NATIVE_TEST_RECOVER, [String]{"-O2"})
     session.env = Val([String]{"NO_COLOR=1"})
     lines: NATIVE_TEST_RECOVER.split("\n").to_list()
-    first: session.run_to([NativeBreak]{{file: "prog.jet", line: 15}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
+    first: session.run_to([NativeBreak]{{file: "prog.jet", line: 17}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
     second: session.command("c", first.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
     asked: session.why("d") ?? panic("why: {err.detail}")
     assert(asked.recover, asked.text)
     image: native_test_files.join(native_test_files.join(unoptimized, "out"), "prog")
     recovered: session.recovered("d", image, native_test_files.join(root, "recovered.txt")) ?? panic("recovered: {err.detail}")
-    assert(recovered.starts_with("d = 2 (recovered from the -O0 replay), set at prog.jet:14 in run() (task 1)\n"), recovered)
+    assert(recovered.starts_with("d = 2 (recovered from the -O0 replay), set at prog.jet:15 in run() (task 1)\n"), recovered)
     rest: session.command("c", second.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
-    assert(rest.text.contains("Breakpoint hit  prog.jet:15"), rest.text)
+    assert(rest.text.contains("Breakpoint hit  prog.jet:17"), rest.text)
     session.close()
     native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
     native_test_files.remove_all(unoptimized) ?? panic("scratch cleanup: {err}")
+}
+
+// On line 16 the -O2 image holds `d` in the register the inlined `double`
+// wrote on line 6. `why` names the write where -O0 does: line 15 of `run`,
+// the frame it was asked in, which binds `d`; the inlined callee's frame is
+// not the local's.
+#Test("why_names_the_line_that_binds_a_local_an_inlined_call_wrote") {
+    scratch: native_test_files.temp_dir("jet-debug-why-inlined") ?? panic("scratch: {err}")
+    root: scratch.path
+    session := native_test_session(root, NATIVE_TEST_RECOVER, [String]{"-O2"})
+    session.env = Val([String]{"NO_COLOR=1"})
+    lines: NATIVE_TEST_RECOVER.split("\n").to_list()
+    first: session.run_to([NativeBreak]{{file: "prog.jet", line: 16}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
+    second: session.command("c", first.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    asked: session.why("d") ?? panic("why: {err.detail}")
+    assert(!asked.recover, asked.text)
+    assert(asked.text.starts_with("d = 2, set at prog.jet:15 in run() (task 1)\n  before: none: this line binds it\n  #0  run()  at prog.jet:15"), asked.text)
+    assert(!asked.text.contains("double()"), asked.text)
+    rest: session.command("c", second.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    assert(rest.text.contains("Breakpoint hit  prog.jet:16"), rest.text)
+    session.close()
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
 }
 
 #Test("a_split_debug_image_is_read_through_its_debug_link") {

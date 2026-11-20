@@ -5204,9 +5204,9 @@ its items oldest first instead of its slots and start index:
 
 ```jet
 Ring: struct {
-    slots: [Int]
-    start: Int
-    count: Int
+    slots: [Int],
+    start: Int,
+    count: Int,
 
     impl DebugView {
         debug_view: fn(self) -> [DebugItem] Never! {

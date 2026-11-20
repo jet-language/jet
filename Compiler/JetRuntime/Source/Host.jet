@@ -58,6 +58,32 @@ host_write_all: fn(fd: I64, bytes: I64, length: I64) -> I64 {
     I64{0}
 }
 
+// `length` bytes, then an LF, to `fd` with no buffer, a writev a pass
+// (os_write_line_i64), retrying interrupted ones: 0, -errno or
+// HOST_WRITE_ZERO, as host_write_all.
+host_write_line: fn(fd: I64, bytes: I64, length: I64) -> I64 {
+    #Unsafe("the caller lends length readable bytes; writev borrows its own LF until return") {
+        at := I64{0}
+        loop at <= length {
+            count: os_write_line_i64(fd, wrapping(bytes + at), wrapping(length - at))
+            if (count == I64{-4}) { next }
+            if (count == I64{0}) { return HOST_WRITE_ZERO }
+            if (count < I64{0}) { return count }
+            at = wrapping(at + count)
+        }
+    }
+    I64{0}
+}
+
+// 1 while `jet debug` runs an evaluation in the stopped program, which
+// writes this word itself and puts it back after (the runtime object exports
+// it, JetBackend X64_DEBUG_EVAL_STORAGE); nothing in the program writes it.
+// Then stdout's bytes go straight to their write, which the debugger keeps
+// from the kernel and shows, and stderr leaves the program's pending stdout
+// bytes in the buffer: an evaluation's print never joins the program's
+// output.
+host_stdout_direct := I64{0}
+
 // Caller holds the lock. Preserve unwritten bytes after a failed/short flush,
 // so a subsequent explicit flush has the same pending suffix, not duplicates.
 host_stdout_flush_locked: fn() -> I64 {
@@ -95,6 +121,10 @@ host_stdout_flush_locked: fn() -> I64 {
 // (Sync.jet sync_sole_enter). Each write is a sync event of a recording or
 // replay (RecordReplay.jet), logged under the lock.
 host_stdout_write: fn(bytes: I64, length: I64, line: Bool, flush: Bool) -> I64 {
+    if (host_stdout_direct != I64{0}) {
+        if (line) { return host_write_line(I64{1}, bytes, length) }
+        return host_write_all(I64{1}, bytes, length)
+    }
     ticket: replay_take(REPLAY_PRINT, I64{0})
     replay_output_check(ticket, REPLAY_PRINT, bytes, length, line)
     sole: sync_sole_enter(host_root)
@@ -155,7 +185,7 @@ host_stderr_write: fn(bytes: I64, length: I64) -> I64 {
     replay_output_check(ticket, REPLAY_EPRINT, bytes, length, false)
     host_lock()
     // An stdout failure must not suppress the requested stderr report.
-    _ := host_stdout_flush_locked()
+    if (host_stdout_direct == I64{0}) { _ := host_stdout_flush_locked() }
     failure: host_write_all(I64{2}, bytes, length)
     replay_output_log(REPLAY_EPRINT, bytes, length, false)
     host_unlock()
@@ -167,20 +197,8 @@ host_stderr_line: fn(bytes: I64, length: I64) -> I64 {
     ticket: replay_take(REPLAY_EPRINT, I64{0})
     replay_output_check(ticket, REPLAY_EPRINT, bytes, length, true)
     host_lock()
-    _ := host_stdout_flush_locked()
-    at := I64{0}
-    failure := I64{0}
-    #Unsafe("bytes lends length readable bytes; writev borrows its own LF until return") {
-        loop at <= length {
-            count: os_write_line_i64(I64{2}, wrapping(bytes + at), wrapping(length - at))
-            if (count == I64{-4}) { next }
-            if (count <= I64{0}) {
-                failure = if (count == I64{0}) -> HOST_WRITE_ZERO else -> count
-                break
-            }
-            at = wrapping(at + count)
-        }
-    }
+    if (host_stdout_direct == I64{0}) { _ := host_stdout_flush_locked() }
+    failure: host_write_line(I64{2}, bytes, length)
     replay_output_log(REPLAY_EPRINT, bytes, length, true)
     host_unlock()
     replay_give(ticket)
@@ -282,17 +300,5 @@ host_print_capture_install: fn(code: I64) {
 // as there.
 #Export(c) jet_term_write_stdout_line_direct: fn(value: I64, flush: U8) {
     // `value` is a borrowed E4 JetCText header.
-    bytes: rt_text_word(value)
-    length: rt_text_word(wrapping(value + I64{8}))
-    #Unsafe("writev borrows the header's bytes and its own LF until return") {
-        at := I64{0}
-        loop at <= length {
-            count: os_write_line_i64(I64{1}, wrapping(bytes + at), wrapping(length - at))
-            if (count == I64{-4}) { next }
-            if (count <= I64{0}) {
-                return
-            }
-            at = wrapping(at + count)
-        }
-    }
+    _ := host_write_line(I64{1}, rt_text_word(value), rt_text_word(wrapping(value + I64{8})))
 }
