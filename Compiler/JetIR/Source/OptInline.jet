@@ -153,10 +153,12 @@ ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction,
     out.call_sites = caller.call_sites
     loop slot in 0..<caller.slot_type.len() {
         _ := ir_slot(out, caller.slot_type[slot], caller.slot_kind[slot], caller.slot_name[slot], caller.slot_line[slot])
+        out.slot_site[slot] = caller.slot_site[slot]
     }
     out.slot_fixed = caller.slot_fixed.copy()
     out.result = caller.result
     loop value in caller.args -> out.args.push(value)
+    loop value in caller.binds -> out.binds.push(value)
     poll: name_rows_value(m.name_rows, IR_STOP_POLL_KEY) ?? -2
     // The stop point after a quiet site goes (its poll through its If's End).
     skip_from := -1
@@ -440,7 +442,10 @@ ir_opt_divisor: fn(f: IRFunction, at: Int) -> Int? Never! {
 // The callee's body in place of the Call at `at` of `caller`, appended to `f`.
 // A parameter the body writes takes its argument into a slot of its own
 // first, so the caller's argument keeps its value: a copy, or a move of a
-// value with a drop (one the call hands over).
+// value with a drop (one the call hands over). One it never writes reads its
+// argument; a named slot of its own, never written, is bound to that
+// argument (IRFunction.binds), which holds its value over the body. The
+// callee's slots belong to the new inline site (IRFunction.slot_site).
 ir_opt_splice: fn(m: IRModule, f: &IRFunction, caller: IRFunction, at: Int, callee: IRFunction) Never! {
     site_line: caller.code_line[at]
     f.frame_bound = ir_frame_bound_add(f.frame_bound, callee.frame_bound)
@@ -450,29 +455,6 @@ ir_opt_splice: fn(m: IRModule, f: &IRFunction, caller: IRFunction, at: Int, call
         slot: ir_x64_write(callee, k)
         if slot >= 0 && slot < callee.param_count -> written[slot] = true
     }
-    map := [Int]{}
-    loop slot in 0..<callee.slot_type.len() {
-        if slot < callee.param_count {
-            argument: caller.args[caller.b[at] + slot]
-            if !written[slot] {
-                map.push(argument)
-                next
-            }
-            own: ir_slot(f, callee.slot_type[slot], IRSlotKind.Local, -1, 0)
-            f.slot_fixed[own] = callee.slot_fixed[slot]
-            transfer: if m.types[callee.slot_type[slot]].drop == "" -> IROp.Copy else -> IROp.Move
-            _ := ir_emit(f, transfer, own, argument, -1, -1, site_line)
-            map.push(own)
-            next
-        }
-        name: if same_file -> callee.slot_name[slot] else -> -1
-        line: if same_file -> callee.slot_line[slot] else -> 0
-        added: ir_slot(f, callee.slot_type[slot], callee.slot_kind[slot], name, line)
-        f.slot_fixed[added] = callee.slot_fixed[slot]
-        map.push(added)
-    }
-    dst: caller.dst[at]
-    callee_facts: ir_opt_facts(callee)
     // This body is a new inline site in the call's own one; the callee's
     // sites nest in it, renumbered as `f`'s (`sites`: by callee site).
     sites := [Int]{f.inline_sites.len() /% IR_INLINE_SITE_WORDS + 1}
@@ -486,6 +468,40 @@ ir_opt_splice: fn(m: IRModule, f: &IRFunction, caller: IRFunction, at: Int, call
         f.inline_sites.push(sites[callee.inline_sites[word + 1]])
         f.inline_sites.push(callee.inline_sites[word + 2])
     }
+    map := [Int]{}
+    loop slot in 0..<callee.slot_type.len() {
+        name: if same_file -> callee.slot_name[slot] else -> -1
+        line: if same_file -> callee.slot_line[slot] else -> 0
+        if slot < callee.param_count {
+            argument: caller.args[caller.b[at] + slot]
+            if !written[slot] {
+                map.push(argument)
+                if name < 0 -> next
+                named: ir_slot(f, callee.slot_type[slot], IRSlotKind.Local, name, line)
+                f.slot_site[named] = sites[0]
+                f.binds.push(named)
+                f.binds.push(argument)
+                next
+            }
+            own: ir_slot(f, callee.slot_type[slot], IRSlotKind.Local, name, line)
+            f.slot_fixed[own] = callee.slot_fixed[slot]
+            f.slot_site[own] = sites[0]
+            transfer: if m.types[callee.slot_type[slot]].drop == "" -> IROp.Copy else -> IROp.Move
+            _ := ir_emit(f, transfer, own, argument, -1, -1, site_line)
+            map.push(own)
+            next
+        }
+        added: ir_slot(f, callee.slot_type[slot], callee.slot_kind[slot], name, line)
+        f.slot_fixed[added] = callee.slot_fixed[slot]
+        f.slot_site[added] = sites[callee.slot_site[slot]]
+        map.push(added)
+    }
+    loop pair in 0..<(callee.binds.len() /% 2) {
+        f.binds.push(map[callee.binds[2 * pair]])
+        f.binds.push(map[callee.binds[2 * pair + 1]])
+    }
+    dst: caller.dst[at]
+    callee_facts: ir_opt_facts(callee)
     _ := ir_emit(f, IROp.Block, -1, -1, -1, -1, site_line)
     depth := 0
     loop k in 0..<callee.op.len() {
@@ -890,4 +906,60 @@ ir_opt_inline_test_located: fn(divisor: Int?) -> Bool Never! {
     assert_eq(ir_opt_inline_test_located(Val(0)), true)
     assert_eq(ir_opt_inline_test_located(Val(-1)), true)
     assert_eq(ir_opt_inline_test_located(None), true)
+}
+
+// bump(by) = total, total := 8 + by, inlined into run(n), whose own `by` is
+// n + 1: at O1 and O2 run's `by` and bump's `total` are folded into the
+// temporaries that compute them (IRFunction.binds) and bump's `by` reads
+// run's argument, yet each is located over the code that reads its value,
+// and the inlined two are locals of the inline site, not of run.
+#Test("An inlined body's parameter and folded locals are located in its inline site") {
+    loop level in 1..<3 {
+        m := ir_module_new()
+        word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+        g := ir_function_new("bump", "test:bump.jet.bump", "", "bump.jet", 1)
+        by: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "by"), 1)
+        g.result = word
+        eight: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Const, eight, 8, -1, -1, 2)
+        sum: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Add, sum, eight, by, IR_OVERFLOW_WRAP, 2)
+        total: ir_slot(g, word, IRSlotKind.Local, ir_intern_name(m, "total"), 2)
+        _ := ir_emit(g, IROp.Move, total, sum, -1, -1, 2)
+        _ := ir_emit(g, IROp.Return, -1, total, -1, -1, 3)
+        f := ir_function_new("run", "test:bump.jet.run", "", "bump.jet", 5)
+        n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), 5)
+        f.result = word
+        one: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(f, IROp.Const, one, 1, -1, -1, 6)
+        more: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(f, IROp.Add, more, n, one, IR_OVERFLOW_WRAP, 6)
+        mine: ir_slot(f, word, IRSlotKind.Local, ir_intern_name(m, "by"), 6)
+        _ := ir_emit(f, IROp.Move, mine, more, -1, -1, 6)
+        got: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        passed: ir_args(f, [Int]{mine})
+        _ := ir_emit(f, IROp.Call, got, 0, passed, 1, 7)
+        _ := ir_emit(f, IROp.Return, -1, got, -1, -1, 7)
+        m.entry = 1
+        name_rows_set(m.function_rows, g.key, 0)
+        name_rows_set(m.function_rows, f.key, 1)
+        m.functions.push(g)
+        m.functions.push(f)
+        options := ir_opt_options(level)
+        options.verify = true
+        report: ir_optimize_module(m, options, compiler_threads_single())
+        assert_eq(report.lint.len(), 0)
+        assert_eq(report.inlined_calls, 1)
+        compiled: ir_x64_compile_function(m, ir_x64_tables(m), 1)
+        assert(compiled.errors.is_empty())
+        names: [String]{"by", "by", "total", "total"}
+        loop (row, site) in ([Int]{0, 1, 1, 0}) {
+            located := false
+            loop range in compiled.debug.ranges {
+                variable: compiled.variables[range.variable]
+                if variable.name == names[row] && variable.site == site -> located = true
+            }
+            assert(located == (site == 1 || row == 0), "O{level}: {names[row]} of site {site}")
+        }
+    }
 }

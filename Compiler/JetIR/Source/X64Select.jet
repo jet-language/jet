@@ -4911,42 +4911,75 @@ ir_x64_same_key: fn(a: [Int], b: [Int]) -> Bool Never! {
 // bytes, so its variable is `indirect`: the debugger reads the bytes there,
 // an aggregate parameter's entry value too (the caller's bytes, which it
 // keeps while the call runs).
-// A local belongs to the inline site of the instruction that first writes
-// it (a callee's local inlined here: OptInline.jet ir_opt_splice).
+// A local belongs to the inline site of its slot (IRFunction.slot_site: a
+// callee's local or parameter inlined here, OptInline.jet ir_opt_splice). A
+// named slot a pass folded into another (IRFunction.binds) is located in
+// that slot's place, or is that slot's constant from its write on.
 ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, positions: [Int], body: Int, end: Int, variables: &[X64DebugVariable], ranges: &[X64VariableRange]) Never! {
     entries: ir_x64_entry_registers(m, f, al)
-    // Per slot: its variable, -1 for none.
-    variable_of := loop _ in 0..<f.slot_type.len() -> -1
+    // Per slot: the slot its value is in. A bind holds only into a slot
+    // written once (a parameter: never), which keeps the value wherever it
+    // is live.
+    held_in := loop slot in 0..<f.slot_type.len() -> slot
+    writes := loop _ in 0..<f.slot_type.len() -> 0
+    if !f.binds.is_empty() {
+        loop at in 0..<f.op.len() {
+            written: ir_x64_write(f, at)
+            if written >= 0 && written < writes.len() -> writes[written] = writes[written] + 1
+        }
+    }
+    bind := 0
+    loop bind + 1 < f.binds.len() {
+        named: f.binds[bind]
+        held: f.binds[bind + 1]
+        bind += 2
+        if named < 0 || named >= held_in.len() || held < 0 || held >= held_in.len() || al.starts[named] <= al.ends[named] {
+            next
+        }
+        once: if held < f.param_count -> writes[held] == 0 else -> writes[held] == 1
+        if once -> held_in[named] = held
+    }
+    // Per variable: the slot its value is in.
+    places := [Int]{}
+    first: variables.len()
     loop slot in 0..<f.slot_type.len() {
         name: f.slot_name[slot]
         if name < 0 || name >= m.names.len() -> next
         ty: ir_x64_type(m, f, slot)
         variable: variables.len()
         indirect: m.types[f.slot_type[slot]].kind == .Aggregate
-        site: if al.starts[slot] >= 0 && al.starts[slot] < f.op.len() -> ir_code_line_site(f.code_line[al.starts[slot]]) else -> 0
-        variables.push(X64DebugVariable{name: m.names[name], ty: f.slot_type[slot], line: f.slot_line[slot], parameter: f.slot_kind[slot] == .Param, indirect: indirect, site: site})
-        variable_of[slot] = variable
+        variables.push(X64DebugVariable{name: m.names[name], ty: f.slot_type[slot], line: f.slot_line[slot], parameter: f.slot_kind[slot] == .Param, indirect: indirect, site: f.slot_site[slot]})
+        place: held_in[slot]
+        places.push(place)
         entry: if slot < entries.len() -> entries[slot] else -> -1
-        if al.starts[slot] > al.ends[slot] || ir_x64_class(ty) == .Empty || al.consts[slot] {
+        // From the body on: the frame-free prefix keeps its values in
+        // registers of its own (ir_x64_wrap).
+        // A slot that never lives starts at the code's end (X64Alloc.jet):
+        // it has no position to bind at.
+        bound: if al.starts[place] < 0 || al.starts[place] > al.ends[place] -> body else -> positions[al.starts[place] + 1]
+        start: if bound < body -> body else -> bound
+        if place != slot && al.consts[place] && al.starts[place] <= al.ends[place] {
+            if end > start {
+                ranges.push(X64VariableRange{variable: variable, start: start, end: end, location: X64DebugLocation.Constant{value: al.values[place]}})
+            }
+            next
+        }
+        if al.starts[place] > al.ends[place] || ir_x64_class(ty) == .Empty || al.consts[place] {
             if entry >= 0 && end > body {
                 ranges.push(X64VariableRange{variable: variable, start: body, end: end, location: X64DebugLocation.EntryValue{reg: entry}})
             }
             next
         }
-        // From the body on: the frame-free prefix keeps its values in
-        // registers of its own (ir_x64_wrap).
-        bound: if al.starts[slot] < 0 -> body else -> positions[al.starts[slot] + 1]
-        start: if bound < body -> body else -> bound
-        if al.frames[slot] != 0 {
+        if al.frames[place] != 0 {
             if end > start {
-                ranges.push(X64VariableRange{variable: variable, start: start, end: end, location: X64DebugLocation.FrameAddress{offset: al.frames[slot]}})
+                ranges.push(X64VariableRange{variable: variable, start: start, end: end, location: X64DebugLocation.FrameAddress{offset: al.frames[place]}})
             }
             next
         }
-        if al.regs[slot] >= 0 || al.xmms[slot] >= 0 {
-            stop: positions[al.ends[slot] + 1]
+        if al.regs[place] >= 0 || al.xmms[place] >= 0 {
+            stop: positions[al.ends[place] + 1]
             // An xmm register is 16 + n (x64_dwarf_register).
-            reg: if al.regs[slot] >= 0 -> al.regs[slot] else -> 16 + al.xmms[slot]
+            reg: if al.regs[place] >= 0 -> al.regs[place] else -> 16 + al.xmms[place]
             if stop > start {
                 ranges.push(X64VariableRange{variable: variable, start: start, end: stop, location: X64DebugLocation.Register{reg: reg}})
             }
@@ -4956,22 +4989,21 @@ ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, positions:
             }
         } else {
             if end > start {
-                ranges.push(X64VariableRange{variable: variable, start: start, end: end, location: X64DebugLocation.Frame{offset: al.homes[slot]}})
+                ranges.push(X64VariableRange{variable: variable, start: start, end: end, location: X64DebugLocation.Frame{offset: al.homes[place]}})
             }
         }
     }
     // A Loop's split (IRFunction.splits) holds its slot's value over the
     // split's own live range, where the slot's own place is stale: there the
-    // variable is in the split's place, past it in its own place again. An
-    // outer Loop's split comes before an inner one's, which cuts it the same
-    // way.
+    // variables in that slot are in the split's place, past it in their own
+    // place again. An outer Loop's split comes before an inner one's, which
+    // cuts it the same way.
     pair := 0
     loop pair + 1 < f.splits.len() {
         split: f.splits[pair]
         home: f.splits[pair + 1]
         pair += 2
-        variable: if home >= 0 && home < variable_of.len() -> variable_of[home] else -> -1
-        if variable < 0 || split < 0 || split >= al.starts.len() || al.starts[split] < 0 || al.starts[split] > al.ends[split] {
+        if split < 0 || split >= al.starts.len() || al.starts[split] < 0 || al.starts[split] > al.ends[split] {
             next
         }
         from: positions[al.starts[split] + 1]
@@ -4979,8 +5011,11 @@ ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, positions:
         stop: positions[al.ends[split] + 1]
         if stop <= start -> next
         location: if al.regs[split] >= 0 -> X64DebugLocation.Register{reg: al.regs[split]} else -> X64DebugLocation.Frame{offset: al.homes[split]}
-        ir_x64_cut_ranges(ranges, variable, start, stop)
-        ranges.push(X64VariableRange{variable: variable, start: start, end: stop, location: location})
+        loop (k, place) in places {
+            if place != home -> next
+            ir_x64_cut_ranges(ranges, first + k, start, stop)
+            ranges.push(X64VariableRange{variable: first + k, start: start, end: stop, location: location})
+        }
     }
 }
 
@@ -7565,6 +7600,57 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
             }
         }
         assert(moved, "{name} is in its split's place inside the Loop")
+    }
+}
+
+// twice(n) = n * k, where a pass folded the named k into the constant 7 it
+// was (IRFunction.binds): k is that constant from the constant's write on,
+// and x, folded into n, is in n's place.
+#Test("A named slot folded into another is located in that slot's place") {
+    m := ir_module_new()
+    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    f := ir_function_new("twice", "test:fold.jet.twice", "", "fold.jet", 1)
+    n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
+    f.result = word
+    k: ir_slot(f, word, IRSlotKind.Local, ir_intern_name(m, "k"), 2)
+    seven: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    x: ir_slot(f, word, IRSlotKind.Local, ir_intern_name(m, "x"), 3)
+    product: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.Const, seven, 7, -1, -1, 2)
+    _ := ir_emit(f, IROp.Mul, product, n, seven, IR_OVERFLOW_WRAP, 3)
+    _ := ir_emit(f, IROp.Return, -1, product, -1, -1, 4)
+    f.binds = [Int]{k, seven, x, n}
+    m.functions.push(f)
+    compiled: ir_x64_compile_function(m, ir_x64_tables(m), 0)
+    assert(compiled.errors.is_empty())
+    constant := false
+    held := false
+    loop range in compiled.debug.ranges {
+        name: compiled.variables[range.variable].name
+        if name == "k" -> constant = range.location == X64DebugLocation.Constant{value: 7}
+        if name == "x" && range.end > range.start -> held = true
+    }
+    assert(constant)
+    assert(held)
+}
+
+// keep(n) = n, with a named local no instruction writes or reads (as a
+// runtime routine's `_` can be): its slot never lives (X64Alloc.jet starts
+// it at the code's end), so the variable has no location and selection
+// reads no position past the code's.
+#Test("A named slot that never lives has no location") {
+    m := ir_module_new()
+    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    f := ir_function_new("keep", "test:dead.jet.keep", "", "dead.jet", 1)
+    n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
+    f.result = word
+    _ := ir_slot(f, word, IRSlotKind.Local, ir_intern_name(m, "unused"), 2)
+    _ := ir_emit(f, IROp.Return, -1, n, -1, -1, 3)
+    m.functions.push(f)
+    compiled: ir_x64_compile_function(m, ir_x64_tables(m), 0)
+    assert(compiled.errors.is_empty())
+    loop range in compiled.debug.ranges {
+        assert(compiled.variables[range.variable].name != "unused", "unused has a location")
     }
 }
 

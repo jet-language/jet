@@ -6346,7 +6346,8 @@ NativePlaceBase: struct {
 
 // The address the operation at `bytes[from]` computes in `frame`: a
 // register's or the frame base's (rbp) plus an offset (DW_OP_breg*,
-// DW_OP_bregx, DW_OP_fbreg). None for any other operation.
+// DW_OP_bregx, DW_OP_fbreg), or a constant (DW_OP_consts, a value with
+// DW_OP_stack_value after it). None for any other operation.
 native_place_base: fn(frame: NativeUnwound, bytes: [U8], from: Int) -> NativePlaceBase? Never! {
     op: Int{bytes[from]}
     at := from + 1
@@ -6365,6 +6366,7 @@ native_place_base: fn(frame: NativeUnwound, bytes: [U8], from: Int) -> NativePla
             if !frame.known[X64_TRACE_RBP] -> return None
             address = frame.registers[X64_TRACE_RBP] + x64_jetline_sleb(bytes, at)
         }
+        op == 0x11 -> address = x64_jetline_sleb(bytes, at)
         else -> return None
     }
     Val(NativePlaceBase{address: address, next: at})
