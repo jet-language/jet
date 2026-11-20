@@ -1,0 +1,157 @@
+#!/usr/bin/env jet
+// Checks that every committed `.jet/lock` that pins a first-party battery
+// (`repository = "embedded:batteries"`) still pins the battery this tree
+// ships. A pin's source hash must equal the tree hash of
+// Jetpack/Provider/Batteries/<name>, the hash `jet fetch` records and a
+// locked fetch verifies (Jetpack/Foundation/Source/TreeHash.jet). An edit to
+// a battery that leaves such a lock behind fails every locked fetch of it.
+// Usage (from the repository root):
+//   jet Tools/Agent/BatteryLocks.jet [--check]
+// A stale pin names its lock and the package directory to run `jet fetch` in.
+use {
+    crypto: core.crypto
+    files: core.files
+    process: core.process
+}
+
+BATTERIES_DIR: "Jetpack/Provider/Batteries"
+
+BATTERIES_REPOSITORY: "repository = \"embedded:batteries\""
+
+USAGE: "usage: jet Tools/Agent/BatteryLocks.jet [--check]"
+
+// The big-endian byte shifts of a file's 8-byte length prefix.
+LENGTH_SHIFTS: [Int]{56, 48, 40, 32, 24, 16, 8, 0}
+
+#Error
+LockError: struct {
+    message: String,
+}
+
+// One battery pin of a lock: the battery's name and the source hash it pins.
+BatteryPin: struct {
+    name: String,
+    source_hash: String,
+}
+
+// One regular file of a tree: its `/`-separated path under the tree root and
+// its bytes.
+TreeFile: struct {
+    relative: String,
+    bytes: [U8],
+}
+
+// The quoted value that follows `key = "` on `line`, or "" without one.
+quoted_after: fn(line: String, key: String) -> String {
+    rest: line.partition("{key} = \"")
+    if rest.sep == "" -> return ""
+    rest.tail.partition("\"").head
+}
+
+// The battery pins of one lock's text: each `source = { … }` line that names
+// the batteries repository, read for its `reference = "NAME#VERSION"` and its
+// `source-hash`.
+battery_pins: fn(lock: String) -> [BatteryPin] {
+    pins := [BatteryPin]{}
+    loop line in lock.split("\n") {
+        if !line.starts_with("source = {{") || !line.contains(BATTERIES_REPOSITORY) -> next
+        pins.push(BatteryPin{name: quoted_after(line, "reference").partition("#").head, source_hash: quoted_after(line, "source-hash")})
+    }
+    pins
+}
+
+// The tree hash a locked fetch verifies: every file in path order, each as
+// its path, NUL, its big-endian 8-byte length, and its bytes.
+tree_digest: fn(entries: [TreeFile]) -> String {
+    sorted := entries.copy()
+    sorted.sort_by(fn(entry) { entry.relative })
+    hasher := crypto.Hasher.new()
+    loop entry in sorted {
+        hasher.update(entry.relative.bytes())
+        hasher.update([U8]{U8{0}})
+        length := [U8]{}
+        loop shift in LENGTH_SHIFTS -> length.push(U8{(entry.bytes.len() >> shift) & 255})
+        hasher.update(length)
+        hasher.update(entry.bytes)
+    }
+    "sha256-{hasher.digest()}"
+}
+
+// The regular files under `directory`, as the tree hash walks them: dot
+// entries, `build` and `target` are not part of a package's identity.
+tree_files: fn(directory: String, relative_dir: String, out: &[TreeFile]) -[FS]> LockError! {
+    entries: files.list_dir(directory) ?? return Err(LockError{message: "cannot list {directory}: {err}"})
+    loop entry in entries {
+        if entry.name.starts_with(".") || entry.name == "build" || entry.name == "target" -> next
+        relative: if relative_dir == "" -> entry.name else -> "{relative_dir}/{entry.name}"
+        if entry.is_dir -> tree_files(entry.path, relative, out) else {
+            bytes: files.read_bytes(entry.path) ?? return Err(LockError{message: "cannot read {entry.path}: {err}"})
+            out.push(TreeFile{relative: relative, bytes: bytes})
+        }
+    }
+}
+
+// The committed lock files, relative to the repository root.
+committed_locks: fn() -[Exec, IO, Time.Wait]> [String] LockError! {
+    receipt: process.cmd([String]{"git", "ls-files", "--", ".jet/lock", "*/.jet/lock"}).stdout(.Capture).stderr(.Capture).run() ?? return Err(LockError{message: "cannot run git ls-files: {err}"})
+    if receipt.code != 0 {
+        return Err(LockError{message: "git ls-files failed ({receipt.code}): {receipt.errors}"})
+    }
+    locks := [String]{}
+    loop line in receipt.output.split("\n") {
+        if line != "" -> locks.push(line.copy())
+    }
+    Ok(locks)
+}
+
+// One line per stale battery pin; none when every pin matches its battery.
+stale_pins: fn(locks: [String]) -[FS]> [String] LockError! {
+    hashes := [String:String]{}
+    stale := [String]{}
+    loop lock in locks {
+        text: files.read(lock) ?? return Err(LockError{message: "cannot read {lock}: {err}"})
+        loop pin in battery_pins(text) {
+            if !hashes.has_key(pin.name) {
+                directory: "{BATTERIES_DIR}/{pin.name}"
+                if !files.is_dir(directory) {
+                    stale.push("{lock}: pins battery `{pin.name}`, which {BATTERIES_DIR} no longer ships")
+                    next
+                }
+                found := [TreeFile]{}
+                tree_files(directory, "", found)
+                hashes[pin.name] = tree_digest(found)
+            }
+            shipped: hashes[pin.name]
+            if pin.source_hash != shipped {
+                package: files.dirname(files.dirname(lock))
+                stale.push("{lock}: pins battery `{pin.name}` at {pin.source_hash}, but it hashes to {shipped}; run `jet fetch` in {package}")
+            }
+        }
+    }
+    Ok(stale)
+}
+
+battery_locks_main: fn(args: [String]) -[FS, Exec, IO, Time.Wait]> String LockError! {
+    if args.len() > 1 || (args.len() == 1 && args[0] != "--check") {
+        return Err(LockError{message: USAGE})
+    }
+    locks: committed_locks()
+    stale: stale_pins(locks)
+    if stale.len() > 0 -> return Err(LockError{message: stale.join("\n")})
+    Ok("battery locks: every battery pin of {locks.len()} committed locks matches its battery")
+}
+
+run: fn() { print(battery_locks_main(process.args()) ?? process.fail(1, err.message)) }
+
+#Test("a lock's battery pins are read from its batteries source lines") {
+    lock: "[[package]]\nname = \"backend\"\nsource = {{ registry = \"batteries\", reference = \"backend#0.1.0\", output = \"\", source-hash = \"sha256-ab\", repository = \"embedded:batteries\", authority = \"toolchain\" }}\n[[package]]\nname = \"contract\"\nsource = {{ path = \"../Contract\" }}\n"
+    pins: battery_pins(lock)
+    assert_eq(pins.len(), 1)
+    assert_eq(pins[0].name, "backend")
+    assert_eq(pins[0].source_hash, "sha256-ab")
+}
+
+#Test("the tree digest hashes files in path order with length prefixes") {
+    entries: [TreeFile]{TreeFile{relative: "sub/b.jet", bytes: [U8]{}}, TreeFile{relative: "a.jet", bytes: "x\n".bytes()}}
+    assert_eq(tree_digest(entries), "sha256-8dece3b2247b5b0c2d8320b2426d21fb90e0a8d017f6e8c910d2fea77ab0fb90")
+}
