@@ -4143,7 +4143,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 8472,
+      "line": 8473,
       "column": 5,
       "reason": "getcpu writes the CPU's 32-bit number into this thread's own entry"
     },
@@ -12305,7 +12305,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 7250:5 | "the vectors name the state's copy and a range of this process's own mappings; the kernel copies between them, faulting on neither" |
 | Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 7750:9 | "openat reads the dump's NUL-terminated path in the state's text page" |
 | Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 8280:5 | "getrusage writes the struct rusage in this thread's own entry" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 8472:5 | "getcpu writes the CPU's 32-bit number into this thread's own entry" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 8473:5 | "getcpu writes the CPU's 32-bit number into this thread's own entry" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 28:5 | "the kernel enters this restorer only from a returning handler, on its signal frame" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 38:5 | "rt_sigaction borrows the four-word action on the stack; handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 61:9 | "written under the scheduler root mutex" |
