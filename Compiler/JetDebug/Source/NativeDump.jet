@@ -489,9 +489,17 @@ native_dump_event: fn(image: NativeImage, ring: [U8], at: Int, words: Int, routi
         return "lost    {native_dump_word(ring, at + 8)} records: the record socket was full"
     }
     // A sampler's end (2 in the address bits, PerfSamples.jet
-    // perf_precise_ended): its serial, then its event's count.
+    // perf_precise_ended): its serial, its event's count, then the time it
+    // ended.
     if kind == NATIVE_DUMP_CLOCK && id == 2 {
         return "ended   sampler {native_dump_word(ring, at + 8)} at count {native_dump_word(ring, at + 16)}"
+    }
+    // A sampler's throttle (3 in the address bits, PerfSamples.jet
+    // perf_samples_ring_throttle): its serial, the time from the epoch, and 1
+    // as the kernel stopped its samples, 0 as it restarted them.
+    if kind == NATIVE_DUMP_CLOCK && id == 3 {
+        how: if native_dump_word(ring, at + 24) == 1 -> "stopped" else -> "restarted"
+        return "throttle sampler {native_dump_word(ring, at + 8)} {how} at {native_dump_word(ring, at + 16) / 1000}us"
     }
     if kind == NATIVE_DUMP_CLOCK {
         return "clock   {native_dump_word(ring, at + 8) / 1000000}ms of CPU time"
@@ -791,21 +799,22 @@ native_dump_frame: fn(session: &NativeSession, frames: [NativeFrame], index: Int
 // its stack, or when none is, the runtime and the routine its address is
 // in; its trailing time, task and count word are no call sites. A cite of
 // the sample before, which no flight ring holds, is a corrupt record. A
-// sampler's end shows its serial and count.
+// sampler's end shows its serial and count, and its throttle when the kernel
+// stopped or restarted its samples.
 #Test("a sample event names its task and its place, the runtime's routine when no Jet frame holds it") {
     image: NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}}
     // Address 0x1000, one call site, the time, task 3 and sampler 1's count
     // word; the same outside every task under the timer; an address alone,
     // made with no record buffer free; one call site of its own and a cite
     // of 2 call sites of the record 5 words back; sampler 1's end at count
-    // 250000.
-    records: [[Int]]{[Int]{0x1000 | (5 << 48), 0x2000, 500, 3, (1 << 48) | 125000}, [Int]{0x1000 | (5 << 48), 0x2000, -1, 0, 0}, [Int]{0x1000 | (1 << 48)}, [Int]{0x1000 | (6 << 48), 0x2000, (-9223372036854775807 - 1) | (2 << 32) | 5, 600, 3, 0}, [Int]{(13 << 59) | (3 << 48) | 2, 1, 250000}}
+    // 250000; sampler 1 stopped 1500 us past the epoch, and restarted.
+    records: [[Int]]{[Int]{0x1000 | (5 << 48), 0x2000, 500, 3, (1 << 48) | 125000}, [Int]{0x1000 | (5 << 48), 0x2000, -1, 0, 0}, [Int]{0x1000 | (1 << 48)}, [Int]{0x1000 | (6 << 48), 0x2000, (-9223372036854775807 - 1) | (2 << 32) | 5, 600, 3, 0}, [Int]{(13 << 59) | (4 << 48) | 2, 1, 250000, 2000000}, [Int]{(13 << 59) | (4 << 48) | 3, 1, 1500000, 1}, [Int]{(13 << 59) | (4 << 48) | 3, 1, 1700000, 0}}
     ring := [U8]{}
     loop record in records {
         loop word in record -> ring.extend(native_low_bytes(word, 8))
     }
     routines: [X64ImageFunction]{{start: 0x0f00, size: 0x0200, name: "unit_os_syscall_i64__asm"}}
-    assert_eq(native_dump_events(image, ring, routines), [String]{"sample  task 3  in the runtime at unit_os_syscall_i64__asm", "sample  outside every task  in the runtime at unit_os_syscall_i64__asm", "sample  a thread  in the runtime at unit_os_syscall_i64__asm", "corrupt sample record: its last call site word cites the sample before, which a flight ring never holds", "ended   sampler 1 at count 250000"})
+    assert_eq(native_dump_events(image, ring, routines), [String]{"sample  task 3  in the runtime at unit_os_syscall_i64__asm", "sample  outside every task  in the runtime at unit_os_syscall_i64__asm", "sample  a thread  in the runtime at unit_os_syscall_i64__asm", "corrupt sample record: its last call site word cites the sample before, which a flight ring never holds", "ended   sampler 1 at count 250000", "throttle sampler 1 stopped at 1500us", "throttle sampler 1 restarted at 1700us"})
     // An address no sized function holds names the runtime alone.
     assert_eq(native_dump_events(image, ring, [X64ImageFunction]{{start: 0x3000, size: 16, name: "elsewhere"}})[1], "sample  outside every task  in the runtime")
 }

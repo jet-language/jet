@@ -1,0 +1,213 @@
+// Composed with the Jet-only runtime by
+// Tests/Cases/RuntimeFragments/the_perf_ring_fragment_counts_lost_and_throttled_records.case:
+// perf_ring_tests drains a sampler's ring (PerfSamples.jet
+// perf_samples_ring_drain) the test filled itself, its records crossing the
+// ring's wrap: four samples, two of the kernel's lost records and three of
+// its throttle records, one throttle still open at the end. Into a memfd
+// begun as a samples file is (perf_samples_header), the drain must write
+// each sample once, with its time and count word, and one record per
+// throttle record, with the sampler's serial, its time and whether it
+// throttles; and it must tally the four samples and the five lost ones
+// apart. The CLI reads those records the same way (SourceSampling.jet
+// jet_cli_perf_nominal, Compiler/JetCLI/Tests/Perf.jet). Not Core API.
+
+// The ring's sampler's serial (PERF_PRECISE_SERIAL), and where the ring's
+// records begin: 40 bytes short of its wrap, so the first sample's words
+// cross it.
+PERF_RING_SERIAL: I64{7}
+
+PERF_RING_START: I64{65496}
+
+// The monotonic time the test's zones clock gives as the process epoch
+// (time_host_epoch_ns): 1 second and 500 nanoseconds.
+PERF_RING_EPOCH: I64{1000000500}
+
+// A record's words, kept to read the file back: the samples' times and
+// counts, then the throttle records' times and kinds.
+PERF_RING_SAMPLES: I64{4}
+
+PERF_RING_THROTTLES: I64{3}
+
+// The kernel's record kinds (PERF_RECORD_*).
+PERF_RING_LOST: I64{2}
+
+PERF_RING_THROTTLE: I64{5}
+
+PERF_RING_UNTHROTTLE: I64{6}
+
+PERF_RING_SAMPLE: I64{9}
+
+// A failed check stops the process (status 101) with what failed on stderr.
+perf_ring_require: fn(ok: Bool, what: I64) {
+    if ok {
+        return
+    }
+    jet_rt_unreachable(rt_text_data(what), rt_text_len(what))
+}
+
+// Stores `word` at `at` past the ring's data `data`, wrapping as the kernel
+// writes it.
+perf_ring_put: fn(data: I64, at: I64, word: I64) {
+    rt_text_store(wrapping(data + (at & wrapping(wrapping(PERF_PRECISE_PAGES * PERF_PRECISE_PAGE) - I64{1}))), word)
+}
+
+// A record's header: its kind, then its size in bytes from bit 48.
+perf_ring_header: fn(kind: I64, size: I64) -> I64 { kind | (size << I64{48}) }
+
+// A sample at `at`, as perf_precise_open asks the kernel for one: its
+// instruction pointer, time, count, an empty callchain, no user registers
+// and no stack. Its size.
+perf_ring_sample: fn(data: I64, at: I64, time: I64, count: I64) -> I64 {
+    perf_ring_put(data, at, perf_ring_header(PERF_RING_SAMPLE, I64{56}))
+    perf_ring_put(data, wrapping(at + I64{8}), I64{4198400})
+    perf_ring_put(data, wrapping(at + I64{16}), time)
+    perf_ring_put(data, wrapping(at + I64{24}), count)
+    perf_ring_put(data, wrapping(at + I64{32}), I64{0})
+    perf_ring_put(data, wrapping(at + I64{40}), I64{0})
+    perf_ring_put(data, wrapping(at + I64{48}), I64{0})
+    I64{56}
+}
+
+// A lost record at `at`: its id, then how many samples the kernel found no
+// room for. Its size.
+perf_ring_lost: fn(data: I64, at: I64, count: I64) -> I64 {
+    perf_ring_put(data, at, perf_ring_header(PERF_RING_LOST, I64{24}))
+    perf_ring_put(data, wrapping(at + I64{8}), I64{11})
+    perf_ring_put(data, wrapping(at + I64{16}), count)
+    I64{24}
+}
+
+// A throttle or unthrottle record at `at`: its time, id and stream id. Its
+// size.
+perf_ring_throttle: fn(data: I64, at: I64, kind: I64, time: I64) -> I64 {
+    perf_ring_put(data, at, perf_ring_header(kind, I64{32}))
+    perf_ring_put(data, wrapping(at + I64{8}), time)
+    perf_ring_put(data, wrapping(at + I64{16}), I64{11})
+    perf_ring_put(data, wrapping(at + I64{24}), I64{11})
+    I64{32}
+}
+
+perf_ring_tests: fn() {
+    name: jet_rt_alloc(I64{8}, I64{8})
+    // "r", NUL-ended: memfd_create(name, MFD_CLOEXEC).
+    rt_text_store(name, I64{114})
+    fd: observe_syscall(I64{319}, name, I64{1}, I64{0}, I64{0})
+    perf_ring_require(fd >= I64{0}, rt_static_text("perf ring: memfd_create failed"))
+    perf_ring_require(perf_samples_header(fd) == I64{0}, rt_static_text("perf ring: the header cannot begin the file"))
+    buffer_bytes: wrapping(wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_SLOTS) + PERF_SAMPLES_TALLIES) * I64{8})
+    buffer: jet_rt_alloc(buffer_bytes, I64{8})
+    thread_zero(buffer, buffer_bytes)
+    rings: jet_rt_alloc(PERF_PRECISE_TABLE_BYTES, I64{8})
+    thread_zero(rings, PERF_PRECISE_TABLE_BYTES)
+    // The kernel's 1000 picoseconds to write each sample.
+    rt_text_store(wrapping(rings + PERF_PRECISE_COST_PS), I64{1000})
+    clock: jet_rt_alloc(I64{24}, I64{8})
+    rt_text_store(clock, I64{2})
+    rt_text_store(wrapping(clock + I64{8}), I64{1})
+    rt_text_store(wrapping(clock + I64{16}), I64{500})
+    #Unsafe("the test runs on one thread and arms no sampler, so no handler reads these") {
+        perf_samples_fd = fd
+        perf_samples_buffer = buffer
+        perf_precise_rings = rings
+        perf_zone_clock = clock
+    }
+    ring_bytes: perf_precise_ring_bytes()
+    ring: jet_rt_alloc(ring_bytes, I64{8})
+    thread_zero(ring, ring_bytes)
+    rt_text_store(wrapping(ring + PERF_PRECISE_SERIAL), PERF_RING_SERIAL)
+    data: wrapping(ring + PERF_PRECISE_PAGE)
+    epoch: PERF_RING_EPOCH
+    // A sample; the throttle the kernel writes before the sample it
+    // throttles at; that sample; 3 samples lost; the unthrottle; the next
+    // sample, its count past the throttled time; 2 more lost; a throttle
+    // with no unthrottle after it, and its sample.
+    at := PERF_RING_START
+    at = wrapping(at + perf_ring_sample(data, at, wrapping(epoch + I64{1000}), I64{125000}))
+    at = wrapping(at + perf_ring_throttle(data, at, PERF_RING_THROTTLE, wrapping(epoch + I64{1500})))
+    at = wrapping(at + perf_ring_sample(data, at, wrapping(epoch + I64{1600}), I64{250000}))
+    at = wrapping(at + perf_ring_lost(data, at, I64{3}))
+    at = wrapping(at + perf_ring_throttle(data, at, PERF_RING_UNTHROTTLE, wrapping(epoch + I64{9000})))
+    at = wrapping(at + perf_ring_sample(data, at, wrapping(epoch + I64{9100}), I64{9000000}))
+    at = wrapping(at + perf_ring_lost(data, at, I64{2}))
+    at = wrapping(at + perf_ring_throttle(data, at, PERF_RING_THROTTLE, wrapping(epoch + I64{9500})))
+    at = wrapping(at + perf_ring_sample(data, at, wrapping(epoch + I64{9600}), I64{9125000}))
+    rt_text_store(wrapping(ring + I64{1032}), PERF_RING_START)
+    rt_text_store(wrapping(ring + I64{1024}), at)
+    perf_samples_ring_drain(ring, I64{0})
+    perf_ring_require(rt_text_word(wrapping(ring + I64{1032})) == at, rt_static_text("perf ring: the drain left records past its tail"))
+    perf_ring_require(rt_text_word(wrapping(ring + PERF_PRECISE_LOCK)) == I64{0}, rt_static_text("perf ring: the drain kept the ring's lock"))
+    perf_ring_require(rt_text_word(buffer) == I64{0}, rt_static_text("perf ring: the drain kept its record buffer"))
+    perf_ring_require(rt_text_word(perf_samples_tally(buffer, PERF_SAMPLES_RING_COUNT)) == PERF_RING_SAMPLES, rt_static_text("perf ring: the drain did not tally exactly the four samples"))
+    perf_ring_require(rt_text_word(perf_samples_tally(buffer, PERF_SAMPLES_RING_PS)) == I64{4000}, rt_static_text("perf ring: the kernel's time is not the four samples'"))
+    perf_ring_require(rt_text_word(perf_samples_tally(buffer, PERF_SAMPLES_RING_CUT)) == I64{0}, rt_static_text("perf ring: an empty callchain counted as cut"))
+    perf_ring_require(rt_text_word(perf_samples_tally(buffer, PERF_SAMPLES_RING_DROPPED)) == I64{5}, rt_static_text("perf ring: the drain did not tally the five samples the kernel lost"))
+    perf_ring_require(perf_samples_lost() == I64{5}, rt_static_text("perf ring: the five lost samples are not the run's lost records"))
+    // The file back: its 16-byte header, then each record.
+    length: observe_syscall(I64{8}, fd, I64{0}, I64{2}, I64{0})
+    perf_ring_require(length > I64{16}, rt_static_text("perf ring: the drain wrote nothing"))
+    bytes: jet_rt_alloc(length, I64{8})
+    // pread64(fd, bytes, length, 0)
+    perf_ring_require(observe_syscall(I64{17}, fd, bytes, length, I64{0}) == length, rt_static_text("perf ring: the file cannot be read back"))
+    times: jet_rt_alloc(I64{32}, I64{8})
+    rt_text_store(times, I64{1000})
+    rt_text_store(wrapping(times + I64{8}), I64{1600})
+    rt_text_store(wrapping(times + I64{16}), I64{9100})
+    rt_text_store(wrapping(times + I64{24}), I64{9600})
+    counts: jet_rt_alloc(I64{32}, I64{8})
+    rt_text_store(counts, I64{125000})
+    rt_text_store(wrapping(counts + I64{8}), I64{250000})
+    rt_text_store(wrapping(counts + I64{16}), I64{9000000})
+    rt_text_store(wrapping(counts + I64{24}), I64{9125000})
+    throttled: jet_rt_alloc(I64{24}, I64{8})
+    rt_text_store(throttled, I64{1500})
+    rt_text_store(wrapping(throttled + I64{8}), I64{9000})
+    rt_text_store(wrapping(throttled + I64{16}), I64{9500})
+    samples := I64{0}
+    throttles := I64{0}
+    cursor := I64{16}
+    loop cursor < length {
+        head: rt_text_word(wrapping(bytes + cursor))
+        words: (head >> PERF_SAMPLES_ADDRESS_BITS) & I64{2047}
+        perf_ring_require(words > I64{0} && wrapping(cursor + wrapping(words * I64{8})) <= length, rt_static_text("perf ring: a record runs past the file"))
+        record: wrapping(bytes + cursor)
+        kind: (head >> PERF_SAMPLES_KIND_BITS) & I64{31}
+        if (kind == I64{0}) {
+            perf_ring_require(samples < PERF_RING_SAMPLES, rt_static_text("perf ring: more samples in the file than the ring held"))
+            perf_ring_require((head & PERF_SAMPLES_ADDRESS_MASK) == (wrapping(I64{4198400} - perf_samples_bias) & PERF_SAMPLES_ADDRESS_MASK), rt_static_text("perf ring: a sample's address is not the one the kernel took"))
+            perf_ring_require(words == wrapping(I64{1} + PERF_SAMPLES_TIMED), rt_static_text("perf ring: a sample with no callers holds more than its address and timed words"))
+            stamp: wrapping(record + wrapping(wrapping(words - PERF_SAMPLES_TIMED) * I64{8}))
+            perf_ring_require(rt_text_word(stamp) == rt_text_word(wrapping(times + wrapping(samples * I64{8}))), rt_static_text("perf ring: a sample's time is not the kernel's from the epoch"))
+            perf_ring_require(rt_text_word(wrapping(stamp + I64{8})) == I64{0}, rt_static_text("perf ring: a sample is charged to a task with no TCB"))
+            perf_ring_require(rt_text_word(wrapping(stamp + I64{16})) == ((PERF_RING_SERIAL << PERF_SAMPLES_ADDRESS_BITS) | rt_text_word(wrapping(counts + wrapping(samples * I64{8})))), rt_static_text("perf ring: a sample's count word is not its sampler's serial over its count"))
+            samples = wrapping(samples + I64{1})
+        } else {
+            perf_ring_require(kind == PERF_SAMPLES_CLOCK && (head & PERF_SAMPLES_ADDRESS_MASK) == PERF_SAMPLES_THROTTLED, rt_static_text("perf ring: the drain wrote a record that is neither a sample nor a throttle's"))
+            perf_ring_require(throttles < PERF_RING_THROTTLES, rt_static_text("perf ring: more throttle records in the file than the ring held"))
+            perf_ring_require(words == PERF_SAMPLES_THROTTLED_WORDS, rt_static_text("perf ring: a throttle record is not its words long"))
+            perf_ring_require(rt_text_word(wrapping(record + I64{8})) == PERF_RING_SERIAL, rt_static_text("perf ring: a throttle record does not name its sampler"))
+            perf_ring_require(rt_text_word(wrapping(record + I64{16})) == rt_text_word(wrapping(throttled + wrapping(throttles * I64{8}))), rt_static_text("perf ring: a throttle record's time is not the kernel's from the epoch"))
+            on: if (throttles == I64{1}) -> I64{0} else -> I64{1}
+            perf_ring_require(rt_text_word(wrapping(record + I64{24})) == on, rt_static_text("perf ring: a throttle record does not say whether the kernel throttled or let go"))
+            throttles = wrapping(throttles + I64{1})
+        }
+        cursor = wrapping(cursor + wrapping(words * I64{8}))
+    }
+    perf_ring_require(samples == PERF_RING_SAMPLES, rt_static_text("perf ring: the file lacks a sample the ring held"))
+    perf_ring_require(throttles == PERF_RING_THROTTLES, rt_static_text("perf ring: the file lacks a throttle record the ring held"))
+    #Unsafe("the test runs on one thread and arms no sampler, so no handler reads these") {
+        perf_samples_fd = I64{-1}
+        perf_samples_buffer = I64{0}
+        perf_precise_rings = I64{0}
+        perf_zone_clock = I64{0}
+    }
+    _ := observe_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0})
+    jet_rt_free(bytes, length, I64{8})
+    jet_rt_free(times, I64{32}, I64{8})
+    jet_rt_free(counts, I64{32}, I64{8})
+    jet_rt_free(throttled, I64{24}, I64{8})
+    jet_rt_free(ring, ring_bytes, I64{8})
+    jet_rt_free(clock, I64{24}, I64{8})
+    jet_rt_free(rings, PERF_PRECISE_TABLE_BYTES, I64{8})
+    jet_rt_free(buffer, buffer_bytes, I64{8})
+    jet_rt_free(name, I64{8}, I64{8})
+}

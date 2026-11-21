@@ -8,14 +8,17 @@
 # So a run keeps its period ends less those in kernel mode, which its
 # samples' own counts find: two consecutive samples of one thread two or
 # more periods apart, and the ends before a thread's first sample and after
-# its last. The session's reason says how many fell there, and they make up
-# the difference exactly; it names apart the samples lost in the rings and
-# those the kernel dropped, which this run loses none of. The samples file
-# a run of the same program writes is checked end by end: each took one
-# sample or fell in kernel mode, the file holds every sample the rings
-# took, and the kernel dropped none. Both hold at every optimization
-# level. The check fails the same file read with one sample missing or one
-# written twice.
+# its last. While the kernel throttles a sampler its count runs on past the
+# thread's CPU time, so a stretch a restart falls in holds at most the ends
+# its time spans, and the rest of its ends passed while throttled. The
+# session's reason says how many fell in kernel mode and how many passed
+# while throttled, and they make up the difference exactly; it names apart
+# the samples lost in the rings and those the kernel dropped, which this
+# run loses none of. The samples file a run of the same program writes is
+# checked end by end: each took one sample, fell in kernel mode or passed
+# while throttled, the file holds every sample the rings took, and the
+# kernel dropped none. Both hold at every optimization level. The check
+# fails the same file read with one sample missing or one written twice.
 requires: os-name:linux
 requires: probe grep -qx 2 /proc/sys/kernel/perf_event_paranoid # the task clock takes the samples at perf_event_paranoid 2
 fixture: TaskClockNominal.fixture
@@ -31,16 +34,19 @@ capture: kept = text cap:tally.split(" ", 0)
 capture: nominal = text cap:tally.split("of the ", 1)
 capture: kernel = text cap:reason.split(" while sampled gives; ", 1).split(" of their periods ended in kernel mode", 0)
 capture: lost = text cap:reason.split("; of their samples, ", 1).split(" were lost in the rings", 0)
-capture: dropped = text cap:reason.split(", drained but not kept, and ", 1).split(" dropped by the kernel", 0)
+capture: dropped = text cap:reason.split(", drained but not kept, ", 1).split(" dropped by the kernel", 0)
+capture: throttled = text cap:reason.split(", which found no room in a ring, and ", 1).split(" not taken while the kernel throttled the sampler", 0)
 json: cap:lost doc $ = 0 # no sample was lost in the rings
 json: cap:dropped doc $ = 0 # nor dropped by the kernel
-json: cap:nominal doc $ = {cap:kept}+{cap:kernel} # so the period ends are the samples kept and those that fell in kernel mode
+step: sh -c 'echo $(({cap:nominal} - {cap:kept} - {cap:kernel} - {cap:throttled}))'
+exit: 0
+stdout: = "0\n" # so the period ends are the samples kept, those that fell in kernel mode and those that passed while throttled
 step: env -u JET_OBSERVE JET_PERF_SAMPLES={work}/spin.samples JET_PERF_LENSES=cpu jet run --observe -O2 spin.jet
 exit: 0
 stdout: = "spun=5702887\n"
 step: sh -c 'od -A n -v -t u2 -w8 spin.samples | awk -f period_ends.awk'
 exit: 0
-stdout: = "every period end took one sample or fell in kernel mode\n"
+stdout: = "every period end took one sample, fell in kernel mode or passed while throttled\n"
 step: sh -c 'od -A n -v -t u2 -w8 spin.samples | awk -v lose=50 -f period_ends.awk'
 exit: 0
 stdout: ~ ", samples the rings took that the file lacks 1, " # a sample missing from the file fails the check
@@ -56,16 +62,19 @@ capture: kept1 = text cap:tally1.split(" ", 0)
 capture: nominal1 = text cap:tally1.split("of the ", 1)
 capture: kernel1 = text cap:reason1.split(" while sampled gives; ", 1).split(" of their periods ended in kernel mode", 0)
 capture: lost1 = text cap:reason1.split("; of their samples, ", 1).split(" were lost in the rings", 0)
-capture: dropped1 = text cap:reason1.split(", drained but not kept, and ", 1).split(" dropped by the kernel", 0)
+capture: dropped1 = text cap:reason1.split(", drained but not kept, ", 1).split(" dropped by the kernel", 0)
+capture: throttled1 = text cap:reason1.split(", which found no room in a ring, and ", 1).split(" not taken while the kernel throttled the sampler", 0)
 json: cap:lost1 doc $ = 0 # at -O1 too
 json: cap:dropped1 doc $ = 0 # at -O1 too
-json: cap:nominal1 doc $ = {cap:kept1}+{cap:kernel1} # at -O1 too
+step: sh -c 'echo $(({cap:nominal1} - {cap:kept1} - {cap:kernel1} - {cap:throttled1}))'
+exit: 0
+stdout: = "0\n" # at -O1 too
 step: env -u JET_OBSERVE JET_PERF_SAMPLES={work}/spin1.samples JET_PERF_LENSES=cpu jet run --observe -O1 spin.jet
 exit: 0
 stdout: = "spun=5702887\n"
 step: sh -c 'od -A n -v -t u2 -w8 spin1.samples | awk -f period_ends.awk'
 exit: 0
-stdout: = "every period end took one sample or fell in kernel mode\n"
+stdout: = "every period end took one sample, fell in kernel mode or passed while throttled\n"
 step: jet perf run -O0 spin.jet --out {work}/spin0.jettrace
 exit: 0
 stdout: = "spun=5702887\n"
@@ -75,13 +84,16 @@ capture: kept0 = text cap:tally0.split(" ", 0)
 capture: nominal0 = text cap:tally0.split("of the ", 1)
 capture: kernel0 = text cap:reason0.split(" while sampled gives; ", 1).split(" of their periods ended in kernel mode", 0)
 capture: lost0 = text cap:reason0.split("; of their samples, ", 1).split(" were lost in the rings", 0)
-capture: dropped0 = text cap:reason0.split(", drained but not kept, and ", 1).split(" dropped by the kernel", 0)
+capture: dropped0 = text cap:reason0.split(", drained but not kept, ", 1).split(" dropped by the kernel", 0)
+capture: throttled0 = text cap:reason0.split(", which found no room in a ring, and ", 1).split(" not taken while the kernel throttled the sampler", 0)
 json: cap:lost0 doc $ = 0 # and at -O0
 json: cap:dropped0 doc $ = 0 # and at -O0
-json: cap:nominal0 doc $ = {cap:kept0}+{cap:kernel0} # and at -O0
+step: sh -c 'echo $(({cap:nominal0} - {cap:kept0} - {cap:kernel0} - {cap:throttled0}))'
+exit: 0
+stdout: = "0\n" # and at -O0
 step: env -u JET_OBSERVE JET_PERF_SAMPLES={work}/spin0.samples JET_PERF_LENSES=cpu jet run --observe -O0 spin.jet
 exit: 0
 stdout: = "spun=5702887\n"
 step: sh -c 'od -A n -v -t u2 -w8 spin0.samples | awk -f period_ends.awk'
 exit: 0
-stdout: = "every period end took one sample or fell in kernel mode\n"
+stdout: = "every period end took one sample, fell in kernel mode or passed while throttled\n"

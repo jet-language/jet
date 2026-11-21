@@ -882,6 +882,7 @@ specification: fn(id: String) -> Spec? Never! {
             "FilesWalk" -> Val({call: Val("files_walk_tests"), witness: FRAGMENT_HOST, expected: ""})
             "HostParallelism" -> Val({call: Val("host_parallelism_tests"), witness: FRAGMENT_HOST, expected: ""})
             "PerfCites" -> Val({call: Val("perf_cites_tests"), witness: FRAGMENT_HOST, expected: ""})
+            "PerfRing" -> Val({call: Val("perf_ring_tests"), witness: FRAGMENT_HOST, expected: ""})
             "WaitCycle" -> Val({call: Val("wait_cycle_tests"), witness: FRAGMENT_HOST, expected: ""})
             "TestSuite" -> Val({call: None, witness: "{RT}test-suite-fixture.c", expected: "test suite: ok\n"})
             "Parallel" -> Val({call: None, witness: "{RT}parallel-fixture.c", expected: ""})
@@ -2645,7 +2646,7 @@ fragment_registry: fn(name: String) -> Registry Never! {
 #Test("a plain transport runs its committed C host") {
     repo: test_repo()
     loop name in
-        ([String]{"Alloc", "FilesWalk", "HostParallelism", "PerfCites", "WaitCycle", "Secret", "TestSuite", "Parallel", "Scheduler", "World", "Sentry", "TestScope", "AllocationPolicy", "Channel", "Stm", "Sync", "Observe", "SharedPublication", "SharedThread", "CollectionsStop"}) {
+        ([String]{"Alloc", "FilesWalk", "HostParallelism", "PerfCites", "PerfRing", "WaitCycle", "Secret", "TestSuite", "Parallel", "Scheduler", "World", "Sentry", "TestScope", "AllocationPolicy", "Channel", "Stm", "Sync", "Observe", "SharedPublication", "SharedThread", "CollectionsStop"}) {
         entry: prepare_transport(repo, fragment_registry(name), "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
         transport: field(entry, "transport")
         assert_eq(text_field(transport, "type"), "plain")
@@ -2655,6 +2656,7 @@ fragment_registry: fn(name: String) -> Registry Never! {
             "FilesWalk" -> "files_walk_tests"
             "HostParallelism" -> "host_parallelism_tests"
             "PerfCites" -> "perf_cites_tests"
+            "PerfRing" -> "perf_ring_tests"
             "WaitCycle" -> "wait_cycle_tests"
             "Secret" -> "secret_tests"
             else -> ""
