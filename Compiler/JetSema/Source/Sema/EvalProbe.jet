@@ -24,6 +24,7 @@ use {
         LambdaParam,
         ModuleID,
         NameRows,
+        NameTable,
         NamedSpan,
         Span,
         Stmt,
@@ -35,9 +36,10 @@ use {
         ast_empty_lambda_meta,
         authority_grantable_roots,
         expr_span,
-        name_rows,
-        name_rows_get_text,
-        name_rows_set,
+        name_find,
+        name_index,
+        name_intern,
+        name_table_sized,
         type_marked_name,
         type_name,
         type_unqualified_nominals,
@@ -429,11 +431,31 @@ sema_eval_probe_writer_refusal: fn(callee: String, written: String, span: Span) 
 // The row of each of a held program's checked functions `functions` by its
 // key, where the held check's verdicts on a function no program holds
 // (sema_eval_held_failure_settle, sema_eval_held_effect_refusals) find the
-// functions it calls.
-sema_eval_held_rows: fn(functions: [FnBody]) -> NameRows Never! {
-    by_key := name_rows()
-    loop (row, held) in functions -> name_rows_set(by_key, held.key, row)
+// functions it calls: the function whose key `keys` interns as `id` is at
+// `rows[id]`, -1 for none (sema_eval_held_row).
+SemaEvalHeldRows: struct {
+    keys: NameTable{name_table_sized(2)},
+    rows: [Int]{[Int]{-1}},
+}
+
+sema_eval_held_rows: fn(functions: [FnBody]) -> SemaEvalHeldRows Never! {
+    by_key := SemaEvalHeldRows{keys: name_table_sized(functions.len() + 1), rows: [Int]{-1}}
+    loop (row, held) in functions -> sema_eval_held_set(by_key, held.key, row)
     by_key
+}
+
+// Puts the function keyed `key` at row `row`, in place of any other.
+sema_eval_held_set: fn(by_key: &SemaEvalHeldRows, key: String, row: Int) Never! {
+    id: name_index(name_intern(by_key.keys, key))
+    loop by_key.rows.len() <= id -> by_key.rows.push(-1)
+    by_key.rows[id] = row
+}
+
+// The row of the function keyed `key`, None when none has it.
+sema_eval_held_row: fn(by_key: SemaEvalHeldRows, key: String) -> Int? Never! {
+    found: name_find(by_key.keys, key) ?? return None
+    row: by_key.rows[name_index(found)]
+    if row < 0 -> None else -> Val(row)
 }
 
 // The failure solve's verdict (sema_failure_solve) on `function`, which no
@@ -444,13 +466,13 @@ sema_eval_held_rows: fn(functions: [FnBody]) -> NameRows Never! {
 // infallible takes the `T Never!` carrier, as the solve projects one
 // (sema_failure_reconcile_function). Otherwise, or with no facts, it keeps
 // its declared carrier.
-sema_eval_held_failure_settle: fn(function: &FnBody, candidate: Bool, failure: SemaFunctionFailureFacts?, functions: [FnBody], by_key: NameRows) Never! {
+sema_eval_held_failure_settle: fn(function: &FnBody, candidate: Bool, failure: SemaFunctionFailureFacts?, functions: [FnBody], by_key: SemaEvalHeldRows) Never! {
     facts: failure ?? return
     if !candidate || facts.direct {
         return
     }
     loop edge in facts.edges {
-        target: name_rows_get_text(by_key, edge) ?? return
+        target: sema_eval_held_row(by_key, edge) ?? return
         infallible: functions[target].failure_carrier == .Infallible
         if !infallible {
             return
@@ -469,7 +491,7 @@ sema_eval_held_failure_settle: fn(function: &FnBody, candidate: Bool, failure: S
 // calls or function values, is refused. A call that no function of
 // `functions` has is left out, as the effect pass leaves out a call with no
 // node.
-sema_eval_held_effect_refusals: fn(function: FnBody, functions: [FnBody], by_key: NameRows, span: Span) -> [Diagnostic] {
+sema_eval_held_effect_refusals: fn(function: FnBody, functions: [FnBody], by_key: SemaEvalHeldRows, span: Span) -> [Diagnostic] {
     refusals := [Diagnostic]{}
     own := [String]{}
     loop name in function.effects.direct -> sema_effect_set_add(own, name)
@@ -478,7 +500,7 @@ sema_eval_held_effect_refusals: fn(function: FnBody, functions: [FnBody], by_key
     seen := (loop _ in functions -> false)
     loop edge in function.effects.call_edges {
         if edge == "__jet_panic__" -> next
-        target: name_rows_get_text(by_key, edge) ?? next
+        target: sema_eval_held_row(by_key, edge) ?? next
         callee: "`{functions[target].name}`"
         sema_eval_probe_row_refusals(functions[target].effects.solved, callee, span, refusals)
         writer: sema_eval_held_state_writer(functions, by_key, target, seen) ?? next
@@ -490,18 +512,18 @@ sema_eval_held_effect_refusals: fn(function: FnBody, functions: [FnBody], by_key
 // The first function of `functions` that writes module state, reached
 // depth-first from `index` through calls and function values
 // (sema_effect_state_writer_path over the solved graph's nodes).
-sema_eval_held_state_writer: fn(functions: [FnBody], by_key: NameRows, index: Int, seen: &[Bool]) -> Int? Never! {
+sema_eval_held_state_writer: fn(functions: [FnBody], by_key: SemaEvalHeldRows, index: Int, seen: &[Bool]) -> Int? Never! {
     if seen[index] -> return None
     seen[index] = true
     if functions[index].effects.module_writes.len() > 0 -> return Val(index)
     loop edge in functions[index].effects.call_edges {
-        target: name_rows_get_text(by_key, edge) ?? next
+        target: sema_eval_held_row(by_key, edge) ?? next
         if sema_eval_held_state_writer(functions, by_key, target, seen) == .Val(found) {
             return Val(found)
         }
     }
     loop edge in functions[index].effects.value_edges {
-        target: name_rows_get_text(by_key, edge) ?? next
+        target: sema_eval_held_row(by_key, edge) ?? next
         if sema_eval_held_state_writer(functions, by_key, target, seen) == .Val(found) {
             return Val(found)
         }

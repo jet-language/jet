@@ -354,16 +354,18 @@ JetCLIPerfWake: struct {
     line: Int?,
 }
 
-// A file or network transfer (PerfSamples.jet perf_samples_io): by the task
-// with runtime id `task`, 0 outside every task, from `start_ns` to `end_ns`
-// on the monotonic clock, a read or a write (`write`) of `target`
-// (jet_cli_perf_io_target) whose class is a JET_CLI_PERF_TARGET_*, a
-// socket's own address (`local`, empty for none and for a file), that
-// moved `result` bytes or failed with errno -`result`, and the frames of
-// the checked source on its stack, innermost first.
+// A file or network transfer, or a socket's connect (PerfSamples.jet
+// perf_samples_io): by the task with runtime id `task`, 0 outside every
+// task, from `start_ns` to `end_ns` on the monotonic clock, a
+// JET_CLI_PERF_IO_* `operation` on `target` (jet_cli_perf_io_target, a
+// connect's the peer it connected to) whose class is a
+// JET_CLI_PERF_TARGET_*, a socket's own address (`local`, empty for none
+// and for a file), that moved `result` bytes or failed with errno
+// -`result`, and the frames of the checked source on its stack, innermost
+// first.
 JetCLIPerfIO: struct {
     task: U64,
-    write: Bool,
+    operation: Int,
     class: Int,
     start_ns: Int,
     end_ns: Int,
@@ -806,6 +808,14 @@ JET_CLI_PERF_TARGET_FD: 2
 
 JET_CLI_PERF_TARGET_SOCKET: 3
 
+// What an I/O record did besides a read, 0 (PerfSamples.jet
+// PERF_SAMPLES_IO_WRITE and PERF_SAMPLES_IO_CONNECT): wrote, or connected a
+// socket to its peer, which moved nothing and is no I/O row: it is the act
+// a listener's accept was waiting for (jet_cli_perf_socket_cause).
+JET_CLI_PERF_IO_WRITE: 1
+
+JET_CLI_PERF_IO_CONNECT: 2
+
 // What a wait waited for (PerfSamples.jet PERF_SAMPLES_OBJECT_TASK and
 // the others): a task a join awaits, a channel, a Shared value's lock, or a
 // socket to be ready.
@@ -1004,7 +1014,7 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
                 split: if class == JET_CLI_PERF_TARGET_SOCKET && (shape >> 16) <= length -> shape >> 16 else -> length
                 target: if class == JET_CLI_PERF_TARGET_FD && length == 8 -> "fd {link_debug_addr(words, at + 48)}" else -> jet_cli_perf_io_target(class, words.slice(at + 48, at + 48 + split))
                 local: if split < length -> jet_cli_perf_io_target(JET_CLI_PERF_TARGET_SOCKET, words.slice(at + 48 + split, at + 48 + length)) else -> ""
-                sampled.transfers.push(JetCLIPerfIO{task: U64{pc}, write: (shape & 255) == 1, class: class, start_ns: link_debug_addr(words, at + 16), end_ns: link_debug_addr(words, at + 24), result: link_debug_addr(words, at + 32), target: target, local: local, frames: jet_cli_perf_samples_stack_frames(sampled, owned, words, at, head, record)})
+                sampled.transfers.push(JetCLIPerfIO{task: U64{pc}, operation: shape & 255, class: class, start_ns: link_debug_addr(words, at + 16), end_ns: link_debug_addr(words, at + 24), result: link_debug_addr(words, at + 32), target: target, local: local, frames: jet_cli_perf_samples_stack_frames(sampled, owned, words, at, head, record)})
             }
             at += record * 8
             next
@@ -2563,7 +2573,7 @@ jet_cli_perf_waits_read: fn(capture: &JetCLIPerfCapture, waits: &&[JetCLIPerfWai
     }
     // What ended each socket wait if a task's act did, by its place in
     // `waits`.
-    causes: loop wait in waits -> jet_cli_perf_socket_cause(transfers, waits, wait)
+    causes: loop wait in waits -> jet_cli_perf_socket_cause(transfers, wait)
     // The end of each task's last wait on each slot, by "slot/task".
     ends := [String:Int]{}
     pending := waits
@@ -2774,45 +2784,37 @@ jet_cli_perf_socket_named: fn(address: String) -> Bool Never! {
 }
 
 // The last act, by its start, of a task of the program other than `wait`'s
-// that may have ended the socket's wait `wait`: for a connected socket's, a
-// transfer of `transfers` at the connection's other end (whose peer is
-// `wait.local` and own address `wait.peer`) begun by the wait's end; for a
-// listener's, which has no peer, a connect, a socket wait of `waits` whose
-// peer reaches the listener's address (jet_cli_perf_socket_reaches), begun
-// by JET_CLI_PERF_WAKE_LEAD_NS after the wait's end, as a wake may land just
+// that may have ended the socket's wait `wait`, of `transfers`: for a
+// connected socket's, a read or write at the connection's other end (whose
+// peer is `wait.local` and own address `wait.peer`) begun by the wait's
+// end; for a listener's, which has no peer, a connect whose peer reaches
+// the listener's address (jet_cli_perf_socket_reaches), begun by
+// JET_CLI_PERF_WAKE_LEAD_NS after the wait's end, as a wake may land just
 // before a wait parks. Either ended at or after that long before the wait
 // began. None for any other wait, and when an address names no endpoint.
-jet_cli_perf_socket_cause: fn(transfers: [JetCLIPerfIO], waits: [JetCLIPerfWait], wait: JetCLIPerfWait) -> JetCLIPerfCause? Never! {
+// The runtime records each connect that succeeds, whether or not it had
+// to wait, so a loopback connect the poller found ready at once still
+// names its task.
+jet_cli_perf_socket_cause: fn(transfers: [JetCLIPerfIO], wait: JetCLIPerfWait) -> JetCLIPerfCause? Never! {
     listener: wait.peer.len() == 0
     if wait.class != JET_CLI_PERF_OBJECT_SOCKET || !jet_cli_perf_socket_named(wait.local) || (!listener && !jet_cli_perf_socket_named(wait.peer)) {
         return None
     }
     floor: wait.start_ns - JET_CLI_PERF_WAKE_LEAD_NS
+    lead: if listener -> JET_CLI_PERF_WAKE_LEAD_NS else -> 0
     found := JetCLIPerfCause?{None}
     // The monotonic clock counts from boot, so every act begins after 0.
     begun := 0
-    if listener {
-        loop other in waits {
-            if other.class != JET_CLI_PERF_OBJECT_SOCKET || other.task == (U64{0}) || other.task == wait.task {
-                next
-            }
-            if !jet_cli_perf_socket_named(other.peer) || !jet_cli_perf_socket_reaches(other.peer, wait.local) {
-                next
-            }
-            if other.start_ns - JET_CLI_PERF_WAKE_LEAD_NS > wait.end_ns || other.end_ns < floor || other.start_ns < begun {
-                next
-            }
-            begun = other.start_ns
-            found = Val(JetCLIPerfCause{task: other.task, line: if other.frames.len() > 0 -> Val(other.frames[0].line) else -> U64?{None}})
-        }
-        return found
-    }
     loop transfer in transfers {
         if transfer.class != JET_CLI_PERF_TARGET_SOCKET || transfer.task == (U64{0}) || transfer.task == wait.task {
             next
         }
-        if transfer.target != wait.local || transfer.local != wait.peer -> next
-        if transfer.start_ns > wait.end_ns || transfer.end_ns < floor || transfer.start_ns < begun {
+        if (transfer.operation == JET_CLI_PERF_IO_CONNECT) != listener -> next
+        // A connect to the listener's address, or an act at the
+        // connection's other end.
+        reached: if listener -> jet_cli_perf_socket_named(transfer.target) && jet_cli_perf_socket_reaches(transfer.target, wait.local) else -> transfer.target == wait.local && transfer.local == wait.peer
+        if !reached -> next
+        if transfer.start_ns - lead > wait.end_ns || transfer.end_ns < floor || transfer.start_ns < begun {
             next
         }
         begun = transfer.start_ns
@@ -2844,11 +2846,12 @@ jet_cli_perf_io_read: fn(capture: &JetCLIPerfCapture, transfers: &&[JetCLIPerfIO
     pending.reverse()
     loop pending.len() > 0 {
         transfer: pending.pop() ?? break
+        if transfer.operation == JET_CLI_PERF_IO_CONNECT -> next
         if (U64{capture.io.len()}) >= TRACE_IO_ROW_LIMIT {
             capture.policy.io_rows_truncated = true
             break
         }
-        operation: if transfer.write -> "write" else -> "read"
+        operation: if transfer.operation == JET_CLI_PERF_IO_WRITE -> "write" else -> "read"
         task_id: if capture.task_ids.has_key(transfer.task) -> Val(capture.task_ids[transfer.task]) else -> U64?{None}
         bytes: if transfer.result > 0 -> checked(U64{transfer.result}) ?? U64{0} else -> U64{0}
         error: if transfer.result < 0 -> checked(U64{0 - transfer.result}) else -> U64?{None}

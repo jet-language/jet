@@ -86,6 +86,7 @@ use {
         module_intern,
         module_table,
         name_count,
+        name_find,
         name_table_sized,
     ]
 }
@@ -581,7 +582,7 @@ body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
     hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, core_bodies: Val(bodies)}}
     _ := body_codec_check(failures, "core", hooks, true, ranked, own_entry: true) ?? panic("BodyCodec could not load module `main`:\n{failures.join("\n")}")
     permit: hooks.guard_read()
-    if !sema_core_bodies_loaded_keys(permit.value.core_bodies, permit.value.core_bodies_loaded).has_key("function:<corelib>/body-codec.rank") {
+    if name_find(sema_core_bodies_loaded_keys(permit.value.core_bodies, permit.value.core_bodies_loaded), "function:<corelib>/body-codec.rank") == None {
         panic("BodyCodec: `rank`, which names `Ordering`, was checked from text in a compile with another entry")
     }
 }
@@ -673,7 +674,7 @@ body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}) {
         row: loaded.modules[position]
         name: text.module_name
         loop function in text.functions {
-            if !loaded_keys.has_key(function.key) {
+            if name_find(loaded_keys, function.key) == None {
                 failures.push("{function.key}: checked from text, not loaded")
             }
         }

@@ -69,6 +69,7 @@ use {
         MetaAttr,
         MetaField,
         sema_casing_pascal_words,
+        NameTable,
         NamedSpan,
         NamedType,
         OrFallback,
@@ -103,6 +104,11 @@ use {
         ast_const,
         core_module_export,
         diagnostic_with_label,
+        name_count,
+        name_find,
+        name_index,
+        name_intern,
+        name_table_sized,
         ast_program,
         ast_struct,
         type_name,
@@ -139,7 +145,7 @@ SemaInlineModuleSurface: struct {
     reexports: [String:SemaInlineTarget],
     // The re-exports whose chain reaches no function: each is reported once,
     // where it breaks (sema_inline_resolve_reexports), so a read is not.
-    broken: [String:Bool],
+    broken: NameTable,
 }
 
 // A re-export between the file's top-level inline modules: `local` in the
@@ -189,17 +195,35 @@ SemaInlineRewrite: struct {
     variadic: [String:Int],
     variadic_arities: [String:[Int]],
     diagnostics: [Diagnostic],
-    // Member types written `priv`, by full dotted path (`lib.Secret`) -> the
-    // span of the name their declaration gives; only their module and its
-    // children name them (sema_inline_private_type).
-    private_types: [String:Span],
+    // Member types written `priv` (sema_inline_private_type).
+    private_types: SemaInlinePrivateTypes,
+}
+
+// Member types written `priv`, by full dotted path (`lib.Secret`), each
+// with the span of the name its declaration gives, by its path's id: only
+// their module and its children name them.
+SemaInlinePrivateTypes: struct {
+    paths: NameTable{name_table_sized(2)},
+    spans: [Span]{[Span]{Span{start: 0, end: 0}}},
+}
+
+// The declared name's span of `priv` member type `path`, if it is one.
+sema_inline_private_span: fn(types: SemaInlinePrivateTypes, path: String) -> Span? Never! {
+    id: name_find(types.paths, path) ?? return None
+    Val(types.spans[name_index(id)])
+}
+
+// Records `priv` member type `path`, its declared name at `span`.
+sema_inline_private_put: fn(types: &SemaInlinePrivateTypes, path: String, span: &&Span) Never! {
+    row: name_index(name_intern(types.paths, path))
+    if row == types.spans.len() -> types.spans.push(span) else -> types.spans[row] = span
 }
 
 SemaInlineHoist: struct {
     declarations: [Item],
     exported: [String:Type],
     has_exported: Bool,
-    private_types: [String:Span],
+    private_types: SemaInlinePrivateTypes,
 }
 
 SemaInlineHoisted: struct {
@@ -565,7 +589,7 @@ sema_inline_alias_imports: fn(items: [Item], parent: String, file_imports: [Impo
 // `rewrite_inline_calls_expr` and the checker's inline-module call routes).
 
 sema_inline_rewrite_empty: fn() -> SemaInlineRewrite Never! {
-    SemaInlineRewrite{types: [String:Type]{}, values: [String:Expr]{}, sibling_module: "", siblings: [String:Bool]{}, modules: [SemaInlineModuleSurface]{}, imported: [String:SemaInlineFunctionBinding]{}, qualified: [String:SemaInlineTarget]{}, aliases: [String:String]{}, locals: [String]{}, variadic: [String:Int]{}, variadic_arities: [String:[Int]]{}, diagnostics: [Diagnostic]{}, private_types: [String:Span]{}}
+    SemaInlineRewrite{types: [String:Type]{}, values: [String:Expr]{}, sibling_module: "", siblings: [String:Bool]{}, modules: [SemaInlineModuleSurface]{}, imported: [String:SemaInlineFunctionBinding]{}, qualified: [String:SemaInlineTarget]{}, aliases: [String:String]{}, locals: [String]{}, variadic: [String:Int]{}, variadic_arities: [String:[Int]]{}, diagnostics: [Diagnostic]{}, private_types: SemaInlinePrivateTypes{}}
 }
 
 sema_inline_is_local: fn(rewrite: SemaInlineRewrite, name: String) -> Bool Never! {
@@ -877,7 +901,7 @@ sema_inline_rewrite_module_call: fn(rewrite: &SemaInlineRewrite, surface: SemaIn
         rewrite.diagnostics.push(diagnostic)
     }
     if surface.functions.get(method) == None {
-        if surface.broken.get(method) == None {
+        if name_find(surface.broken, method) == None {
             rewrite.diagnostics.push(sema_error("E0608", alias_span, "`{method}` is not defined in module `{surface.path}`", "check the module body for the function you're calling", "make sure the function name is spelled correctly"))
         }
         return None
@@ -919,7 +943,7 @@ sema_inline_rewrite_member_value: fn(rewrite: &SemaInlineRewrite, base: Expr, me
         return Val(Expr.Field{base: Expr.Ident{name: sema_inline_member_name(surface.path, SEMA_MODULE_META), span: span, id: AST_NODE_GENERATED}, member: member, span: span, id: node})
     }
     if surface.functions.get(member) == None && surface.constants.get(member) == None {
-        if surface.broken.get(member) == None {
+        if name_find(surface.broken, member) == None {
             rewrite.diagnostics.push(sema_error("E0608", segments[segments.len() - 1].span, "`{member}` is not defined in module `{surface.path}`", "check the module body for the function or constant you're reading", "make sure the member name is spelled correctly"))
         }
         // copy: the rewrite walks the module program by borrowed payload views (Jet has no
@@ -947,7 +971,7 @@ sema_inline_inside: fn(rewrite: SemaInlineRewrite, path: String) -> Bool Never! 
 // at `span`, names outside that module and its children: naming it is using
 // it, as calling a `priv` member function is.
 sema_inline_private_types: fn(rewrite: &SemaInlineRewrite, ty: Type, span: Span) Never! {
-    if rewrite.private_types.len() == 0 {
+    if name_count(rewrite.private_types.paths) == 1 {
         return
     }
     if ty == {
@@ -984,7 +1008,7 @@ sema_inline_private_types: fn(rewrite: &SemaInlineRewrite, ty: Type, span: Span)
 // E0605 when `name`, written at `span`, is a `priv` member type
 // (`lib.Secret`) named outside its module and that module's children.
 sema_inline_private_type: fn(rewrite: &SemaInlineRewrite, name: String, span: Span) Never! {
-    declared: rewrite.private_types.get(name) ?? return
+    declared: sema_inline_private_span(rewrite.private_types, name) ?? return
     owner: name.cut_last(".") ?? return
     if sema_inline_inside(rewrite, owner.before) {
         return
@@ -1770,7 +1794,7 @@ sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist
         direct_types[sema_inline_type_name(display_alias, name)] = resolved.copy()
         direct_names.push(name.copy())
         if !hides_members && sema_inline_private_type_span(inner) == .Val(declared) {
-            hoist.private_types["{source_path}.{name}"] = declared
+            sema_inline_private_put(hoist.private_types, "{source_path}.{name}", declared)
         }
         // The enclosing file reaches private member types by
         // their full module path too. Do not export a nested relative name.
@@ -1998,7 +2022,7 @@ sema_inline_import_target: fn(declaration: ImportDecl, inline_names: [String:Boo
 // privacy (sema_inline_private_type). `imported` records each local name a
 // type binds, so the function binding (sema_inline_bind_imports) takes it as
 // bound.
-sema_inline_bind_type_imports: fn(imports: [ImportDecl], rewrite: &SemaInlineRewrite, imported: &[String:Bool]) -[]> {
+sema_inline_bind_type_imports: fn(imports: [ImportDecl], rewrite: &SemaInlineRewrite, imported: &NameTable) -[]> {
     loop declaration in imports {
         if declaration.kind == .Unqualified(module_alias, module_alias_span, items, _, _) {
             loop item in items {
@@ -2007,19 +2031,19 @@ sema_inline_bind_type_imports: fn(imports: [ImportDecl], rewrite: &SemaInlineRew
                 sema_inline_private_type(rewrite, path, module_alias_span)
                 local: sema_registration_import_local(item)
                 rewrite.types[local] = ty
-                imported[local] = true
+                _ := name_intern(imported, local)
             }
         }
     }
 }
 
-sema_inline_bind_imports: fn(program: Program, surfaces: [SemaInlineModuleSurface], inline_names: [String:Bool], type_imports: [String:Bool], rewrite: &SemaInlineRewrite) -> [ImportDecl] {
+sema_inline_bind_imports: fn(program: Program, surfaces: [SemaInlineModuleSurface], inline_names: [String:Bool], type_imports: NameTable, rewrite: &SemaInlineRewrite) -> [ImportDecl] {
     kept := [ImportDecl]{}
-    seen := [String:Bool]{}
+    seen := name_table_sized(8)
     loop declaration in program.imports {
         target: sema_inline_import_target(declaration, inline_names) ?? {
             if declaration.kind == .Unqualified(_, _, items, _, _) {
-                loop item in items -> seen[sema_registration_import_local(item)] = true
+                loop item in items -> _ := name_intern(seen, sema_registration_import_local(item))
             }
             kept.push(declaration.copy())
             next
@@ -2034,16 +2058,16 @@ sema_inline_bind_imports: fn(program: Program, surfaces: [SemaInlineModuleSurfac
             loop (item_index, item) in items {
                 local: sema_registration_import_local(item)
                 if {
-                    seen.get(local) != None -> {
+                    name_find(seen, local) != None -> {
                         rewrite.diagnostics.push(sema_error("E0105", declaration.alias_span, "the import name `{local}` is used twice", "each import needs a unique namespace name in this file", "rename one with an `alias: path` row"))
                     }
                     // A member type binds in step 1 (sema_inline_bind_type_imports).
-                    type_imports.get(local) != None -> seen[local] = true
+                    name_find(type_imports, local) != None -> { _ := name_intern(seen, local) }
                     members.functions.get(item.original) == None -> {
                         rewrite.diagnostics.push(sema_error("E0611", module_alias_span, "`{item.original}` is not defined in module `{module_alias}`", "check the module body for the item you're importing", "make sure the name is spelled correctly"))
                     }
                     else -> {
-                        seen[local] = true
+                        _ := name_intern(seen, local)
                         span: if item_index < declaration.local_spans.len() -> declaration.local_spans[item_index] else -> declaration.span
                         rewrite.imported[local] = SemaInlineFunctionBinding{semantic_name: sema_inline_member_name(target, item.original), module_alias: target.copy(), source_name: item.original.copy(), span: span, visibility: if declaration.is_pub -> 2 else if declaration.is_package_pub -> 1 else -> 0}
                     }
@@ -2074,7 +2098,7 @@ sema_inline_bind_module_imports: fn(definition: CodeModule, surfaces: [SemaInlin
                 loop candidate in surfaces {
                     if candidate.name != parts[0] -> next
                     target = sema_inline_sibling_target(candidate, parts[1])
-                    if target == None && candidate.broken.get(parts[1]) == None {
+                    if target == None && name_find(candidate.broken, parts[1]) == None {
                         rewrite.diagnostics.push(sema_error("E0611", name_span, "`{parts[1]}` is not defined in module `{parts[0]}`", "check the module body for the item you are re-exporting", "make sure the name is spelled correctly"))
                     }
                 }
@@ -2124,7 +2148,7 @@ sema_inline_bind_module_imports: fn(definition: CodeModule, surfaces: [SemaInlin
                     if sema_inline_sibling_target(surface, item.original) == .Val(target) {
                         bound_locals.push(local)
                         bound_targets.push(target)
-                    } else if surface.broken.get(item.original) == None {
+                    } else if name_find(surface.broken, item.original) == None {
                         rewrite.diagnostics.push(sema_error("E0611", module_alias_span, "`{item.original}` is not defined in module `{module_alias}`", "check the module body for the item you are importing", "make sure the name is spelled correctly"))
                     }
                     next
@@ -2246,7 +2270,7 @@ sema_inline_resolve_reexports: fn(program_items: [Item], surfaces: &[SemaInlineM
         }
         updated := surfaces[row.owner]
         if resolved == .Val(target) -> updated.reexports[row.local] = target else {
-            updated.broken[row.local] = true
+            _ := name_intern(updated.broken, row.local)
         }
         surfaces[row.owner] = updated
         if !looped -> next
@@ -2269,15 +2293,15 @@ sema_inline_resolve_reexports: fn(program_items: [Item], surfaces: &[SemaInlineM
 // (E0609). The fix lists the members to re-export one by one instead, and a
 // read of the name is not reported again.
 sema_inline_check_private_module_aliases: fn(program_items: [Item], surfaces: &[SemaInlineModuleSurface], diagnostics: &[Diagnostic]) -[]> {
-    private := [String:Bool]{}
+    private := name_table_sized(2)
     loop item in program_items {
         if item == .CodeModule(definition) {
             if definition.body != None && !definition.is_pub && !definition.is_package_pub {
-                private[definition.name] = true
+                _ := name_intern(private, definition.name)
             }
         }
     }
-    if private.is_empty() {
+    if name_count(private) == 1 {
         return
     }
     loop item in program_items {
@@ -2285,12 +2309,12 @@ sema_inline_check_private_module_aliases: fn(program_items: [Item], surfaces: &[
             owner: sema_inline_surface_index(surfaces, definition.name)
             if owner < 0 -> next
             loop inner in definition.body ?? next {
-                if inner == .ModuleAlias(alias) && alias.args.is_empty() && private.get(alias.target) != None {
+                if inner == .ModuleAlias(alias) && alias.args.is_empty() && name_find(private, alias.target) != None {
                     index: sema_inline_surface_index(surfaces, alias.target)
                     if index < 0 -> next
                     diagnostics.push(sema_inline_private_module_alias(alias.name, surfaces[index], alias.target_span))
                     updated := surfaces[owner]
-                    updated.broken[alias.name] = true
+                    _ := name_intern(updated.broken, alias.name)
                     surfaces[owner] = updated
                 }
             }
@@ -2374,7 +2398,7 @@ sema_inline_collect_nested: fn(body: [Item], parent: String, file_imports: [Impo
             path: "{parent}.{child.name}"
             private_to := String?{None}
             if !child.is_pub && !child.is_package_pub -> private_to = Val(parent.copy())
-            surface := SemaInlineModuleSurface{name: path.copy(), path: path.copy(), private_to: private_to, functions: [String:Bool]{}, constants: [String:Bool]{}, private_members: [String:Span]{}, reexports: [String:SemaInlineTarget]{}, broken: [String:Bool]{}}
+            surface := SemaInlineModuleSurface{name: path.copy(), path: path.copy(), private_to: private_to, functions: [String:Bool]{}, constants: [String:Bool]{}, private_members: [String:Span]{}, reexports: [String:SemaInlineTarget]{}, broken: name_table_sized(2)}
             sema_inline_surface_members(surface, child_body, !child.is_pub && !child.is_package_pub)
             aliases: sema_inline_module_aliases(child, path, file_imports, inherited)
             binding := sema_inline_rewrite_empty()
@@ -2487,12 +2511,12 @@ sema_inline_strip_members: fn(body: [Item]) -> [Item] Never! {
 
 // Whether a module body, or a module nested in it, declares one name twice.
 sema_inline_repeats_name: fn(body: [Item]) -[]> Bool {
-    seen := [String:Bool]{}
+    seen := name_table_sized(8)
     loop item in body {
         name: sema_registration_root_name(item)
         if name != "" {
-            if seen.get(name) != None -> return true
-            seen[name] = true
+            if name_find(seen, name) != None -> return true
+            _ := name_intern(seen, name)
         }
         if item == .CodeModule(child) && child.body == .Val(child_body) && sema_inline_repeats_name(child_body) {
             return true
@@ -2506,18 +2530,18 @@ sema_inline_repeats_name: fn(body: [Item]) -[]> Bool {
 // declaration of a name is E0105 and leaves the body, so it lowers no member
 // and is reported once.
 sema_inline_refuse_repeated_names: fn(body: &[Item], diagnostics: &[Diagnostic]) -[]> {
-    seen := [String:Bool]{}
+    seen := name_table_sized(8)
     index := 0
     loop index < body.len() {
         name: sema_registration_root_name(body[index])
-        if name != "" && seen.get(name) != None {
+        if name != "" && name_find(seen, name) != None {
             why: if body[index] == .Func(_) -> "every function needs a unique name so calls aren't ambiguous" else -> "module declarations share one namespace"
             diagnostics.push(sema_defined_twice(name, why, sema_registration_root_span(body[index])))
             loop later in index..<body.len() - 1 -> body[later] = body[later + 1]
             _: body.pop()
             next
         }
-        if name != "" -> seen[name] = true
+        if name != "" -> _ := name_intern(seen, name)
         if body[index] == .CodeModule(child) && child.body == .Val(child_body) && sema_inline_repeats_name(child_body) {
             members := child_body
             sema_inline_refuse_repeated_names(members, diagnostics)
@@ -2581,7 +2605,7 @@ sema_inline_modules_lower: fn(program: &Program, diagnostics: &[Diagnostic]) -> 
     // 1. Member types, in item order, then the enclosing file's qualified
     //    names. Each inline module is hoisted in place; every other item
     //    stays where it is.
-    hoist := SemaInlineHoist{declarations: [Item]{}, exported: [String:Type]{}, has_exported: false, private_types: [String:Span]{}}
+    hoist := SemaInlineHoist{declarations: [Item]{}, exported: [String:Type]{}, has_exported: false, private_types: SemaInlinePrivateTypes{}}
     loop index in 0..<program.items.len() {
         hoisted := Item?{None}
         if program.items[index] == .CodeModule(definition) {
@@ -2591,7 +2615,7 @@ sema_inline_modules_lower: fn(program: &Program, diagnostics: &[Diagnostic]) -> 
         // The module item's view ends above, so its slot takes the hoisted item.
         program.items[index] = hoisted.move() ?? next
     }
-    type_imports := [String:Bool]{}
+    type_imports := name_table_sized(2)
     if hoist.has_exported {
         exported := sema_inline_rewrite_empty()
         exported.types = hoist.exported
@@ -2618,7 +2642,7 @@ sema_inline_modules_lower: fn(program: &Program, diagnostics: &[Diagnostic]) -> 
         if item == .CodeModule(definition) {
             if definition.body == .Val(body) {
                 inline_names[definition.name] = true
-                surface := SemaInlineModuleSurface{name: definition.name, path: definition.name, private_to: None, functions: [String:Bool]{}, constants: [String:Bool]{}, private_members: [String:Span]{}, reexports: [String:SemaInlineTarget]{}, broken: [String:Bool]{}}
+                surface := SemaInlineModuleSurface{name: definition.name, path: definition.name, private_to: None, functions: [String:Bool]{}, constants: [String:Bool]{}, private_members: [String:Span]{}, reexports: [String:SemaInlineTarget]{}, broken: name_table_sized(2)}
                 sema_inline_surface_members(surface, body, !definition.is_pub && !definition.is_package_pub)
                 surfaces.push(surface)
             }
@@ -2679,7 +2703,7 @@ sema_inline_modules_lower: fn(program: &Program, diagnostics: &[Diagnostic]) -> 
                 stripped := [Item]{}
                 loop kept in sema_inline_strip_members(body) {
                     // A refused `tools: helpers` leaves the body with its E0609.
-                    if kept == .ModuleAlias(alias) && surface_index >= 0 && surfaces[surface_index].broken.get(alias.name) != None {
+                    if kept == .ModuleAlias(alias) && surface_index >= 0 && name_find(surfaces[surface_index].broken, alias.name) != None {
                         next
                     }
                     stripped.push(kept)

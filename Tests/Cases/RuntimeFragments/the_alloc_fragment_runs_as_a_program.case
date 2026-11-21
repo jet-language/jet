@@ -37,3 +37,12 @@ timeout: 60s
 exit: 0
 stdout: = "alloc tests: ok\n"
 stderr: empty
+# Under an address-space limit below the region window's 16 GiB reservation the
+# window is refused, and every region maps on its own: the witness checks that path.
+step: {work}/fragment isolated
+env: TMPDIR={work}/scratch
+limit: memory=4194304
+timeout: 60s
+exit: 0
+stdout: = "alloc tests: ok\n"
+stderr: empty

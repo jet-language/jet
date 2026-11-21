@@ -12,6 +12,7 @@ use {
         JET_COMPILER_SERVICE_MODULE_VALUES,
         JET_COMPILER_SERVICE_VERB,
         JetModuleValuesOutcome,
+        NamedCtValue,
         compiler_service_comptime_request,
         compiler_service_module_values_outcome,
         foundation_parse_protocol_json,
@@ -82,7 +83,9 @@ ModuleValuesProgram: struct {
 }
 
 module_values_program: fn(items: [Item], source: String, environment: [String:CtValue], generated: String) -> ModuleValuesProgram ComptimeEvalError! {
-    values: jet_config_module_values_program(items, source, environment) ?? return Err(err)
+    reads := [NamedCtValue]{}
+    loop (name, value) in environment -> reads.push(NamedCtValue{name: name, value: value})
+    values: jet_config_module_values_program(items, source, reads) ?? return Err(err)
     Ok(ModuleValuesProgram{text: "{values}\n{generated}\n{ENVMODEL_ENVIRONMENT_SCHEMA}", generated_at: values.count_bytes() + 1})
 }
 

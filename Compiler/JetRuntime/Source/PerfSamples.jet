@@ -197,10 +197,16 @@ PERF_SAMPLES_TARGET_FD: I64{2}
 
 PERF_SAMPLES_TARGET_SOCKET: I64{3}
 
-// A transfer's direction.
+// A transfer's direction, or a connect: a socket's connection made to its
+// peer, which moved nothing (perf_samples_io_peer, from NetRoutes.jet and
+// NetUnixConnect.jet as the connect succeeds), so a listener's accept can
+// name the task that connected to it, whether or not that task's connect
+// ever had to wait.
 PERF_SAMPLES_IO_READ: I64{0}
 
 PERF_SAMPLES_IO_WRITE: I64{1}
+
+PERF_SAMPLES_IO_CONNECT: I64{2}
 
 // The most bytes of its target a transfer's record keeps.
 PERF_SAMPLES_IO_TARGET: I64{1024}
@@ -1381,18 +1387,26 @@ perf_precise_end: fn(fd: I64) {
 // signal, samples perf_precise_spin's steps at a twelfth of the source's
 // period, first called from here and then PERF_PRECISE_DEEP calls deeper,
 // each against the same steps with that sampler disabled, the fastest of
-// PERF_PRECISE_ROUNDS each, on the monotonic clock, which counts the
-// interrupt's time that the thread's CPU clock may leave out. The
-// difference per sample at each depth gives the kernel's picoseconds per
-// sample and per callchain entry (perf_precise_cost_ps,
+// PERF_PRECISE_ROUNDS each, on the thread's present clock
+// (perf_precise_present_ns), which counts the interrupt's time that the
+// thread's CPU clock leaves out and leaves out the time the thread waits
+// preempted, so a busy machine's other programs are not charged to the
+// samples. The difference per sample at each depth gives the kernel's
+// picoseconds per sample and per callchain entry (perf_precise_cost_ps,
 // perf_precise_frame_ps), which each drained sample adds to the tally
 // (PERF_SAMPLES_RING_PS). Both stay 0 where the second sampler does not
 // open or its samples do not tell the depths apart.
 perf_precise_cost: fn(source: I64, fd: I64) {
     _ := observe_syscall(I64{16}, fd, I64{9217}, I64{0}, I64{0})
     // The attribute's 96 bytes, then the counts of a round: its samples and
-    // their callchain entries.
-    scratch: jet_rt_alloc(I64{112}, I64{8})
+    // their callchain entries, then the thread's schedstat descriptor and
+    // the text read from it (perf_precise_present_ns).
+    scratch: jet_rt_alloc(PERF_PRECISE_COST_SCRATCH, I64{8})
+    path: rt_static_text("/proc/thread-self/schedstat")
+    name: observe_cstring(path)
+    // openat(AT_FDCWD, name, O_RDONLY|O_CLOEXEC)
+    rt_text_store(wrapping(scratch + I64{112}), observe_syscall(I64{257}, I64{-100}, name, I64{524288}, I64{0}))
+    jet_rt_free(name, wrapping(rt_text_len(path) + I64{1}), I64{1})
     period: if (source == PERF_PC_TASK_CLOCK) -> PERF_PRECISE_COST_NS else -> (perf_precise_period / I64{12}) & I64{-16}
     timer: perf_precise_open(scratch, source, if (period < I64{16}) -> I64{16} else -> period)
     ring: if (timer < I64{0}) -> I64{-1} else -> alloc_map_shared(perf_precise_ring_bytes(), timer)
@@ -1411,8 +1425,45 @@ perf_precise_cost: fn(source: I64, fd: I64) {
         alloc_unmap(ring, perf_precise_ring_bytes())
     }
     if (timer >= I64{0}) { _ := host_call(I64{3}, timer, I64{0}, I64{0}) }
-    jet_rt_free(scratch, I64{112}, I64{8})
+    stat: rt_text_word(wrapping(scratch + I64{112}))
+    if (stat >= I64{0}) { _ := host_call(I64{3}, stat, I64{0}, I64{0}) }
+    jet_rt_free(scratch, PERF_PRECISE_COST_SCRATCH, I64{8})
     _ := observe_syscall(I64{16}, fd, I64{9216}, I64{0}, I64{0})
+}
+
+// The bytes of perf_precise_cost's scratch: the attribute's 96, the round's
+// two counts, the schedstat descriptor, and PERF_PRECISE_STAT_TEXT of its
+// text.
+PERF_PRECISE_COST_SCRATCH: I64{184}
+
+PERF_PRECISE_STAT_TEXT: I64{64}
+
+// The thread's present clock: the monotonic clock less the nanoseconds the
+// thread has waited on a run queue, the second field of the schedstat the
+// descriptor at `scratch` + 112 reads (CONFIG_SCHED_INFO), its text read
+// into the PERF_PRECISE_STAT_TEXT bytes at `scratch` + 120. It advances
+// while the thread runs and while an interrupt takes its CPU, and stands
+// still while another program's thread runs in its place. The monotonic
+// clock alone where the schedstat does not open or read.
+perf_precise_present_ns: fn(scratch: I64) -> I64 {
+    now: time_host_monotonic_i64()
+    stat: rt_text_word(wrapping(scratch + I64{112}))
+    if (stat < I64{0}) { return now }
+    text: wrapping(scratch + I64{120})
+    // pread64(stat, text, PERF_PRECISE_STAT_TEXT, 0)
+    read: observe_syscall(I64{17}, stat, text, PERF_PRECISE_STAT_TEXT, I64{0})
+    if (read <= I64{0}) { return now }
+    at := I64{0}
+    loop at < read && rt_text_byte(wrapping(text + at)) != (I64{32}) -> at = wrapping(at + I64{1})
+    at = wrapping(at + I64{1})
+    waited := I64{0}
+    loop at < read {
+        digit: wrapping(rt_text_byte(wrapping(text + at)) - I64{48})
+        if (digit < I64{0} || digit > I64{9}) { break }
+        waited = wrapping(wrapping(waited * I64{10}) + digit)
+        at = wrapping(at + I64{1})
+    }
+    wrapping(now - waited)
 }
 
 // The task clock's period while its cost is timed (perf_precise_cost): 10
@@ -1447,7 +1498,7 @@ perf_precise_cost_at: fn(timer: I64, ring: I64, scratch: I64, depth: I64) -> I64
         if (enabled) { _ := observe_syscall(I64{16}, timer, I64{9216}, I64{0}, I64{0}) }
         rt_text_store(wrapping(scratch + I64{96}), I64{0})
         rt_text_store(wrapping(scratch + I64{104}), I64{0})
-        began: perf_samples_cpu_clock_ns(I64{1})
+        began: perf_precise_present_ns(scratch)
         chunk := I64{0}
         seed := round
         loop chunk < PERF_PRECISE_CHUNKS {
@@ -1455,16 +1506,19 @@ perf_precise_cost_at: fn(timer: I64, ring: I64, scratch: I64, depth: I64) -> I64
             perf_precise_ring_count(ring, scratch)
             chunk = wrapping(chunk + I64{1})
         }
-        took: wrapping(perf_samples_cpu_clock_ns(I64{1}) - began)
-        if (enabled) {
-            _ := observe_syscall(I64{16}, timer, I64{9217}, I64{0}, I64{0})
-            perf_precise_ring_count(ring, scratch)
-            if (on < I64{0} || took < on) {
-                on = took
-                samples = rt_text_word(wrapping(scratch + I64{96}))
-                entries = rt_text_word(wrapping(scratch + I64{104}))
+        took: wrapping(perf_precise_present_ns(scratch) - began)
+        if {
+            enabled -> {
+                _ := observe_syscall(I64{16}, timer, I64{9217}, I64{0}, I64{0})
+                perf_precise_ring_count(ring, scratch)
+                if (on < I64{0} || took < on) {
+                    on = took
+                    samples = rt_text_word(wrapping(scratch + I64{96}))
+                    entries = rt_text_word(wrapping(scratch + I64{104}))
+                }
             }
-        } else if (off < I64{0} || took < off) { off = took }
+            (off < I64{0} || took < off) -> off = took
+        }
         // The steps' last state, kept where no optimizer drops them.
         rt_text_store(scratch, seed)
         round = wrapping(round + I64{1})
@@ -1631,11 +1685,17 @@ perf_samples_tally: fn(buffer: I64, index: I64) -> I64 {
 // is still the sampled one, the callers are the kernel's frame pointer
 // walk from it, past the context marker and the interrupted rip, while the
 // call site is in the image's code; when the rules restored another rbp,
-// its chain is followed while it stays in the copy. The record ends in the
-// sample's time on the process-relative monotonic clock zones are timed on
-// and its task (PERF_SAMPLES_TIMED), and is written by the sampled
-// instruction pointer, under the callers perf_samples_put_precise finds.
-// The callchain's entry count, which the drain tallies.
+// its chain is followed while it stays in the copy. Each walk stops at a
+// signal handler's return into the restorer (ProcessSignal.jet
+// jet_rt_process_signal_restore): past it lies the code the signal
+// interrupted, whose own rip and rsp the signal frame holds, beyond the
+// copy, so a frame pointer walk there would skip the interrupted function
+// and name its callers as the handler's, as when a sample lands in this
+// sampler's own drain handler. The record ends in the sample's time on
+// the process-relative monotonic clock zones are timed on and its task
+// (PERF_SAMPLES_TIMED), and is written by the sampled instruction pointer,
+// under the callers perf_samples_put_precise finds. The callchain's entry
+// count, which the drain tallies.
 perf_samples_ring_sample: fn(fd: I64, buffer: I64, slot: I64, data: I64, at: I64, task: I64) -> I64 {
     bias: perf_samples_bias
     precise: wrapping(perf_samples_ring_word(data, wrapping(at + I64{8})) - bias)
@@ -1653,6 +1713,8 @@ perf_samples_ring_sample: fn(fd: I64, buffer: I64, slot: I64, data: I64, at: I64
     side: perf_samples_side(slot, buffer)
     rows: if (side == I64{0}) -> I64{0} else -> perf_samples_side_rows(side)
     rules: perf_samples_scratch(slot, buffer)
+    // The call site a handler's return into the restorer reads as.
+    restorer: wrapping(wrapping(rt_process_signal_restore_address() - I64{1}) - bias)
     if (abi != I64{0} && perf_samples_in_code(pc)) {
         bp: perf_samples_ring_word(data, wrapping(regs + I64{8}))
         stack: perf_samples_ring_word(data, wrapping(regs + I64{16}))
@@ -1685,7 +1747,7 @@ perf_samples_ring_sample: fn(fd: I64, buffer: I64, slot: I64, data: I64, at: I64
                 else -> {}
             }
             site: wrapping(wrapping(perf_samples_ring_stack(data, bytes, copied, stack, wrapping(cfa + rt_text_word(wrapping(row + PERF_CFI_RA_OFFSET)))) - I64{1}) - bias)
-            if (!perf_samples_in_code(site)) {
+            if (!perf_samples_in_code(site) || site == restorer) {
                 frame = I64{0}
                 break
             }
@@ -1698,7 +1760,7 @@ perf_samples_ring_sample: fn(fd: I64, buffer: I64, slot: I64, data: I64, at: I64
             index := I64{2}
             loop index < entries && count < room {
                 site: wrapping(wrapping(perf_samples_ring_word(data, wrapping(chain + wrapping(index * I64{8}))) - I64{1}) - bias)
-                if (!perf_samples_in_code(site)) { break }
+                if (!perf_samples_in_code(site) || site == restorer) { break }
                 rt_text_store(wrapping(slot + wrapping(wrapping(count + I64{1}) * I64{8})), site)
                 count = wrapping(count + I64{1})
                 index = wrapping(index + I64{1})
@@ -1707,7 +1769,7 @@ perf_samples_ring_sample: fn(fd: I64, buffer: I64, slot: I64, data: I64, at: I64
             loop frame != (I64{0}) && count < room {
                 if (frame < sp || frame & I64{7} != I64{0}) { break }
                 site: wrapping(wrapping(perf_samples_ring_stack(data, bytes, copied, stack, wrapping(frame + I64{8})) - I64{1}) - bias)
-                if (!perf_samples_in_code(site)) { break }
+                if (!perf_samples_in_code(site) || site == restorer) { break }
                 rt_text_store(wrapping(slot + wrapping(wrapping(count + I64{1}) * I64{8})), site)
                 count = wrapping(count + I64{1})
                 caller: perf_samples_ring_stack(data, bytes, copied, stack, frame)
@@ -3673,11 +3735,12 @@ perf_samples_io_start: fn() -> I64 {
 // The record of one file or network transfer from `start`
 // (perf_samples_io_start; none when 0) to now on the monotonic clock: the
 // current task's id in place of a sample's program counter, 0 outside
-// every task, then `operation` (PERF_SAMPLES_IO_READ or
-// PERF_SAMPLES_IO_WRITE, with a socket's peer's address's byte length from
-// bit 16, perf_samples_io_peer) with the target's `class`
+// every task, then `operation` (PERF_SAMPLES_IO_READ, PERF_SAMPLES_IO_WRITE
+// or PERF_SAMPLES_IO_CONNECT, with a socket's peer's address's byte length
+// from bit 16, perf_samples_io_peer) with the target's `class`
 // (PERF_SAMPLES_TARGET_*) above its low 8 bits, the start, the end, `result`
-// (the bytes moved, or the negated errno the kernel refused it with), the
+// (the bytes moved, 0 for a connect, or the negated errno the kernel
+// refused it with), the
 // target's byte length, the target in whole words (`length` bytes at
 // `target`, at most PERF_SAMPLES_IO_TARGET of them; for
 // PERF_SAMPLES_TARGET_FD, `target` is the descriptor's number, one word),
@@ -3735,7 +3798,8 @@ perf_samples_io_file: fn(start: I64, operation: I64, result: I64, state: I64) {
     perf_samples_io(start, operation, result, PERF_SAMPLES_TARGET_PATH, rt_text_data(path), rt_text_len(path))
 }
 
-// The record of a transfer on the connected socket `state` (HostSockets.jet),
+// The record of a transfer on, or the connect of, the connected socket
+// `state` (HostSockets.jet, NetRoutes.jet, NetUnixConnect.jet),
 // from `start`: its target the peer's address as getpeername gives it, then
 // the socket's own as getsockname gives it, either empty when the kernel
 // names none, the peer's byte length in the operation's bits from 16.

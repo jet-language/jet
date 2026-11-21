@@ -56,6 +56,7 @@ net_unix_connect_job_drop: fn(job: I64) {
 // explicit deadline/cancellation stops the wait, never the worker.
 net_unix_connect_run: fn(path: I64, output: I64, error: I64) -> I64 {
     operation: rt_static_text("unix connect")
+    began: perf_samples_io_start()
     job: jet_rt_alloc(I64{48}, I64{8})
     thread_zero(job, I64{48})
     net_put(job, I64{0}, I64{2})
@@ -75,6 +76,9 @@ net_unix_connect_run: fn(path: I64, output: I64, error: I64) -> I64 {
             if (sync_load(wrapping(job + I64{8})) != I64{0}) {
                 status: net_word(job, I64{32})
                 if (status == I64{0}) {
+                    // Under `jet perf run` the connect is recorded
+                    // (PerfSamples.jet PERF_SAMPLES_IO_CONNECT).
+                    perf_samples_io_peer(began, PERF_SAMPLES_IO_CONNECT, I64{0}, net_word(job, I64{24}))
                     net_put(output, I64{0}, jet_socket_stream_from_fd_raw(net_word(job, I64{24})))
                     net_put(job, I64{24}, I64{0})
                     result = I64{1}

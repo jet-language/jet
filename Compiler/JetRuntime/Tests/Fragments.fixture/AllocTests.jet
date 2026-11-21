@@ -1,14 +1,29 @@
 // Assemble with JetRuntime/Source and the fixed-width OS leaves. Native exit
 // witness once E1/E2 land: stdout exactly "alloc tests: ok\n", status 0. A failed
-// witness exits 1 without requiring text, containers or any other runtime layer.
+// witness names itself on stderr ("alloc tests: <witness> failed") and exits 1,
+// without requiring containers or any runtime layer past process-static text.
 // Tests are single-threaded on the attached main thread, so small blocks pass
 // through its cache; a test that inspects slab metadata first returns the
 // cache (alloc_cache_flush). Raw metadata inspection owns the entire heap here.
+
+// The running witness's name (a process-static text); alloc_tests names one
+// before its first check.
+alloc_test_witness := I64{0}
+
+alloc_test_named: fn(name: I64) {
+    #Unsafe("the witnesses run one at a time on the main thread") { alloc_test_witness = name }
+}
+
 alloc_test_require: fn(ok: Bool) {
     if ok {
         return
     }
-    #Unsafe("a failed allocator witness terminates this isolated test process") {
+    #Unsafe("a failed allocator witness writes three process-static texts to stderr with raw writes, which take no heap, and terminates this isolated test process") {
+        head: rt_static_text("alloc tests: ")
+        _ := os_syscall_i64(I64{1}, I64{2}, rt_text_data(head), rt_text_len(head), I64{0}, I64{0}, I64{0})
+        _ := os_syscall_i64(I64{1}, I64{2}, rt_text_data(alloc_test_witness), rt_text_len(alloc_test_witness), I64{0}, I64{0}, I64{0})
+        tail: rt_static_text(" failed\n")
+        _ := os_syscall_i64(I64{1}, I64{2}, rt_text_data(tail), rt_text_len(tail), I64{0}, I64{0}, I64{0})
         _ := os_syscall_i64(I64{231}, I64{1}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     loop {
@@ -501,12 +516,27 @@ alloc_test_rows: fn() {
 // map with no lock, and keeps its record in the window's slot for its first
 // unit, with no heap block. An ended run's pages are dropped, and it is the
 // next run of its class. A region larger than the largest class maps on its
-// own, outside the window, with its record on the heap.
+// own, outside the window, with its record on the heap. The system refuses
+// the window only under a finite address-space limit (RLIMIT_AS reads -1
+// when unlimited) below its reservation; then a region is its own registered
+// mapping, writable until its release, which unregisters it.
 alloc_test_window: fn() {
     first: jet_rt_mem_region_reserve(I64{65536})
     window: sync_load(wrapping(alloc_root + ALLOC_WINDOW))
+    if (window == I64{0}) {
+        alloc_test_require(thread_rlimit_soft(I64{9}) >= I64{0})
+        alloc_test_require(first != I64{0} && alloc_page_region(first) != I64{0})
+        #Unsafe("the region owns its 64 KiB until its release below") {
+            os_store_i64(wrapping(first + I64{65528}), I64{9})
+            alloc_test_require(os_load_i64(wrapping(first + I64{65528})) == I64{9})
+        }
+        jet_rt_mem_region_release(first, I64{65536})
+        alloc_test_require(alloc_page_region(first) == I64{0})
+        alloc_cache_flush()
+        return
+    }
     end: wrapping(window + ALLOC_WINDOW_BYTES)
-    alloc_test_require(first != I64{0} && window != I64{0} && first >= window && first < end)
+    alloc_test_require(first != I64{0} && first >= window && first < end)
     alloc_test_require(first & wrapping(ALLOC_PAGE_UNIT - I64{1}) == I64{0} && alloc_page_region(first) != I64{0})
     records: wrapping(window + ALLOC_WINDOW_RECORDS)
     alloc_test_require(alloc_page_region(first) == wrapping(records + wrapping(alloc_test_unit(window, first) * ALLOC_REGION_RECORD_BYTES)))
@@ -564,9 +594,13 @@ alloc_test_unit: fn(window: I64, address: I64) -> I64 { wrapping(address - windo
 alloc_test_window_rows: fn() {
     alloc_window_rows_flush()
     window: sync_load(wrapping(alloc_root + ALLOC_WINDOW))
+    // No window, no runs to keep: alloc_test_window checked the fallback.
+    if (window == I64{0}) {
+        return
+    }
     stack: wrapping(alloc_root + ALLOC_WINDOW_STACKS)
     row: alloc_window_row(I64{0})
-    alloc_test_require(window != I64{0} && row != I64{0} && sync_load(row) == I64{0})
+    alloc_test_require(row != I64{0} && sync_load(row) == I64{0})
     count: wrapping(ALLOC_WINDOW_ROW_LIMIT + I64{1})
     runs: jet_rt_alloc(wrapping(count * I64{8}), I64{8})
     #Unsafe("runs holds count words this test owns, and the window's link words stay mapped") {
@@ -615,6 +649,7 @@ alloc_test_window_rows: fn() {
 #Export(c) alloc_test_cache_flush: fn() { alloc_cache_flush() }
 
 alloc_tests: fn() {
+    alloc_test_named(rt_static_text("layout"))
     jet_rt_alloc_init()
     jet_rt_alloc_init()
     alloc_test_require(alloc_layout_valid(I64{0}, I64{1}))
@@ -624,27 +659,49 @@ alloc_tests: fn() {
     alloc_test_require(!alloc_layout_valid(I64{9223372036854775807}, I64{8}))
     // Null must remain a no-op even with an otherwise-invalid layout.
     jet_rt_free(I64{0}, I64{-1}, I64{0})
+    alloc_test_named(rt_static_text("nullable"))
     alloc_test_nullable()
+    alloc_test_named(rt_static_text("row classes"))
     alloc_test_row_classes()
+    alloc_test_named(rt_static_text("boundaries at align 1"))
     alloc_test_boundaries(I64{1})
+    alloc_test_named(rt_static_text("boundaries at align 8"))
     alloc_test_boundaries(I64{8})
+    alloc_test_named(rt_static_text("boundaries at align 16"))
     alloc_test_boundaries(I64{16})
+    alloc_test_named(rt_static_text("boundaries at align 64"))
     alloc_test_boundaries(I64{64})
+    alloc_test_named(rt_static_text("boundaries at align 4096"))
     alloc_test_boundaries(I64{4096})
+    alloc_test_named(rt_static_text("payload of 0 bytes at align 1"))
     alloc_test_payload(I64{0}, I64{1})
+    alloc_test_named(rt_static_text("payload of 0 bytes at align 8192"))
     alloc_test_payload(I64{0}, I64{8192})
+    alloc_test_named(rt_static_text("payload of 1 byte at align 8192"))
     alloc_test_payload(I64{1}, I64{8192})
+    alloc_test_named(rt_static_text("payload of 65537 bytes at align 8192"))
     alloc_test_payload(I64{65537}, I64{8192})
+    alloc_test_named(rt_static_text("large reuse"))
     alloc_test_large_reuse()
+    alloc_test_named(rt_static_text("large rows"))
     alloc_test_large_rows()
+    alloc_test_named(rt_static_text("reuse"))
     alloc_test_reuse()
+    alloc_test_named(rt_static_text("full slabs"))
     alloc_test_full_slabs()
+    alloc_test_named(rt_static_text("slab stack"))
     alloc_test_slab_stack()
+    alloc_test_named(rt_static_text("counts"))
     alloc_test_counts()
+    alloc_test_named(rt_static_text("zero marks"))
     alloc_test_zero_marks()
+    alloc_test_named(rt_static_text("cache"))
     alloc_test_cache()
+    alloc_test_named(rt_static_text("rows"))
     alloc_test_rows()
+    alloc_test_named(rt_static_text("window"))
     alloc_test_window()
+    alloc_test_named(rt_static_text("window rows"))
     alloc_test_window_rows()
     #Unsafe("the exact success line is two bounded stack words written to stdout") {
         _ := os_write_word_i64(I64{1}, I64{7310503706572385377}, I64{8})

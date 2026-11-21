@@ -15,7 +15,7 @@
 // `flag` local that point reads.
 use {
     jet_backend.[LINK_FAULT_REPORT]
-    jet_ir.[IRFunction, IRModule, IROp, IRSlotKind, IRType, IRX64Tables, IR_INT_INLINE_BITS, IR_OVERFLOW_WRAP, IR_STOP_TURN_KEY, IR_TAIL_JUMP, IR_X64_DIVIDED_BY_ZERO, ir_args, ir_clone_shares, ir_code_line_source, ir_emit, ir_end, ir_function_new, ir_kind_name, ir_module_new, ir_op_name, ir_open, ir_open_if, ir_opt_polls_checks_call, ir_overflow_wraps, ir_slot, ir_stop_key, ir_stop_poll, ir_timing_marked, ir_type_row, ir_word_row, ir_x64_overflow_message, ir_x64_tables]
+    jet_ir.[IRFunction, IRModule, IROp, IRSlotKind, IRType, IRX64Tables, IR_INT_INLINE_BITS, IR_OVERFLOW_WRAP, IR_STOP_TURN_KEY, IR_TAIL_JUMP, IR_X64_DIVIDED_BY_ZERO, ir_args, ir_clone_shares, ir_code_line_source, ir_emit, ir_end, ir_function_new, ir_kind_name, ir_module_new, ir_op_name, ir_open, ir_open_if, ir_opt_polls_checks_call, ir_overflow_wraps, ir_slot, ir_stop_key, ir_stop_poll, ir_timing_marked, ir_type_row, ir_word_row, ir_x64_overflow_message, ir_x64_tables, ir_x64_text_rows_get]
     jet_foundation.[Type, name_rows_value]
     jet_wasm.[WASM_F32, WASM_F64, WASM_I32, WASM_I64, wasm_put_unsigned, wasm_sig_type]
 }
@@ -295,7 +295,7 @@ web_stop_action: fn(e: &WebEmitter, st: WebState) Never! {
 
 // Pushes the address and byte length of selector text `text`.
 web_text: fn(e: &WebEmitter, st: WebState, tables: IRX64Tables, text: String) Never! {
-    row: tables.texts.get(text) ?? -1
+    row: ir_x64_text_rows_get(tables.texts, text)
     if row < 0 {
         web_i64(e, 0)
         web_i64(e, 0)

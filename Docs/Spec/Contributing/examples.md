@@ -233,7 +233,11 @@ SEC. A hit on either reports TIMEOUT with the limit's kind (`cpu limit` or
 so does a deadline inside the harness, such as the free-port probe or a
 host-port lock. A step that must finish within a wall time of its own
 declares `limit: time=SEC`, which also makes the overrun a
-failure of that step. Timeouts must be positive seconds within `Duration`'s
+failure of that step. A step whose claim is its own cost declares
+`limit: cpu=SEC`: the CPU time of its whole process tree, which other load on
+the host does not raise, never looser than `--timeout`; the overrun fails the
+step, so it pairs with a generous `time=` as the hang guard.
+Timeouts must be positive seconds within `Duration`'s
 representable range; out-of-range values are refused before corpus discovery
 with exit code 2. A known-failing case waits at most 10 s for each answer
 (`recv`, `poll`, `await`, `wait` with a deadline, `repeat while`), so a

@@ -179,7 +179,10 @@ sampling starts by
 sending its own thread 64 signals, plus, under a perf event, the kernel's
 time to write each sample to its thread's ring, which the runtime times as
 sampling starts with a second sampler of the same source at a shallow and a
-deep stack; `overhead_reason` gives it as a share of the CPU time sampled.
+deep stack, on the thread's monotonic clock less the time it waited on a run
+queue (its schedstat), so the interrupt's time counts and a busy machine's
+other programs do not; `overhead_reason` gives it as a share of the CPU time
+sampled.
 `jet perf view` sums the rows per function with its share of the
 samples and the CPU time they stand for, at the `interval_us` the trace's
 `perf` receipt section names (none without one),
@@ -572,7 +575,9 @@ channel's. A socket's wait for readiness (an accept, a connect, a read or a
 write) names the socket by its own address, `local_address`, and its peer's,
 `peer_address`, as the kernel's `getsockname` and `getpeername` give them
 (`127.0.0.1:4000`, `[::1]:4000`, a Unix socket's path), either null when the
-socket has none. Its `waker` is `task` when a task's wake ended it, with that
+socket has none. Only a wait that parked is recorded: a readiness the poller
+marked before the task parked blocked it for no time and is no wait. Its
+`waker` is `task` when a task's wake ended it, with that
 task's `waker_task_id` and the line it woke it from as `waker_line`,
 `runtime` when the runtime's did, and `timeout` when no wake did: a sleep,
 or a wait that gave up. The runtime's I/O poller wakes a socket's wait for
@@ -580,8 +585,11 @@ what happened at the connection's other end, so `jet perf run` names the
 task of the program that acted there: for a connected socket's wait, the
 last transfer of another task on the socket at the other end (whose
 addresses are the wait's, swapped) begun by the wait's end; for a listener's
-accept, the last connect of another task to the listener's address. That
-task is the `task` waker, at the transfer's or the connect's line. With no
+accept, the last connect of another task to the listener's address. The
+runtime records each connect that succeeds, whether or not it waited (a
+loopback connect seldom does), as an I/O record that moved nothing and makes
+no `io` row. That task is the `task` waker, at the transfer's or the
+connect's line. With no
 such task the peer is outside the program and `waker` is `peer`, which names
 no task or line. The wake that ended a wait is the last one on the
 same park slot at or before its end, and after the task's previous wait on

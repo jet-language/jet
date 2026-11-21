@@ -23,8 +23,7 @@ use {
         jet_driver_held_eval_open,
     ]
     jet_cli.[jet_cli_driver_request]
-    jet_foundation.[name_rows_set]
-    jet_sema.[SemaScriptProbeChecked]
+    jet_sema.[SemaScriptProbeChecked, sema_eval_held_set]
 }
 
 HELD_EVAL_PATH: "/held-fixture/main.jet"
@@ -79,7 +78,7 @@ held_eval_append: fn(opened: &JetDriverHeldOpened, path: String, text: String) -
     opened.inputs.symbols = done.symbols.move()
     opened.types = done.types.move()
     appended := done.appended.move() ?? return false
-    name_rows_set(opened.eval.rows, appended.function.key, opened.inputs.functions.len())
+    sema_eval_held_set(opened.eval.rows, appended.function.key, opened.inputs.functions.len())
     opened.inputs.functions.push(appended.function.move())
     true
 }
