@@ -6,7 +6,7 @@
 // big-integer decimals); the debug files and types; and per IR function its
 // name, file, line and debug variables.
 use {
-    jet_foundation.[CompilerThreads, Type, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_transfer_rows, sha256_hex]
+    jet_foundation.[CompilerThreads, NameTable, Type, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_transfer_rows, name_find, name_index, name_intern, name_table_sized, sha256_hex]
     jet_sema.[sema_inline_member_module, sema_inline_member_source_name]
     jet_backend.[
         TIME_DURATION_NS,
@@ -43,6 +43,26 @@ use {
     ]
 }
 
+// Texts and a row each names: `rows[id]` is the row of the text `names`
+// interns as `id`, -1 when none is set (ir_x64_text_rows_get).
+IRX64TextRows: struct {
+    names: NameTable{name_table_sized(16)},
+    rows: [Int]{[Int]{-1}},
+}
+
+// The row `table` names for `text`, -1 when it names none.
+ir_x64_text_rows_get: fn(table: IRX64TextRows, text: String) -> Int Never! {
+    found: name_find(table.names, text) ?? return -1
+    table.rows[name_index(found)]
+}
+
+// Names `row` for `text` in `table`.
+ir_x64_text_rows_set: fn(table: &IRX64TextRows, text: String, row: Int) Never! {
+    id: name_index(name_intern(table.names, text))
+    loop table.rows.len() <= id -> table.rows.push(-1)
+    table.rows[id] = row
+}
+
 // The module-wide rows the object writer reads: the IR data rows, then the
 // selector rows every function's selection named (ir_x64_tables_add).
 IRX64Tables: struct {
@@ -54,14 +74,14 @@ IRX64Tables: struct {
     // no ConstText names it.
     headers: [Int],
     // Selector texts (source paths, stop messages, big-integer decimals) -> data row.
-    texts: [String:Int],
+    texts: IRX64TextRows,
     // Big-integer decimals -> the data row of the word that is their static
     // exact Int (ir_x64_static_int).
-    ints: [String:Int],
+    ints: IRX64TextRows,
     // DWARF: the source files (row per distinct path) and a debug type per
     // IR type row (debug row r describes m.types[r]), then the rows they name.
     files: [String],
-    file_rows: [String:Int],
+    file_rows: IRX64TextRows,
     debug_types: [X64DebugType],
     // The data row of the byte caching whether the CPU has FMA3 (X64Select.jet
     // ir_x64_fma), -1 when no function calls jet_std_math_fma.
@@ -71,13 +91,21 @@ IRX64Tables: struct {
     hot: [Bool]{[Bool]{}},
 }
 
-// A data row a function's selection names besides the IR data rows: a
-// selector text, the String header of an IR data row, a big-integer
-// decimal's static Int word, the FMA byte.
-IRX64Use: enum {
-    Text(text: String),
-    Header(row: Int),
-    StaticInt(text: String),
+// The data rows a function's selection names besides the IR data rows, a
+// row per use: a selector text, the String header of an IR data row, a
+// big-integer decimal's static Int word, the FMA byte. Per use its kind,
+// the IR data row a Header names (-1 for the others), and the text a Text
+// or StaticInt names ("" for the others).
+IRX64Uses: struct {
+    kinds: [IRX64UseKind]{[IRX64UseKind]{}},
+    data: [Int]{[Int]{}},
+    texts: [String]{[String]{}},
+}
+
+IRX64UseKind: enum {
+    Text,
+    Header,
+    StaticInt,
     Fma,
 }
 
@@ -93,14 +121,14 @@ IR_X64_LOCAL_DATA: 1099511627776
 // uses their rows afterwards, in function order (ir_x64_tables_add), the
 // rows one walk over the whole module would give them.
 IRX64FunctionTables: struct {
-    uses: [IRX64Use],
+    uses: IRX64Uses,
     // Per use: the byte length of its data.
     lengths: [Int],
     // Selector texts, IR data rows with a String header, big-integer
     // decimals with a static Int -> local data row.
-    texts: [String:Int],
+    texts: IRX64TextRows,
     headers: [Int:Int],
-    ints: [String:Int],
+    ints: IRX64TextRows,
     // The local data row of the FMA byte, -1 when the function calls no
     // jet_std_math_fma.
     fma: Int,
@@ -141,13 +169,13 @@ IRX64Result: struct {
 }
 
 ir_x64_add_text: fn(tables: &IRX64Tables, text: String) -> Int Never! {
-    found: tables.texts.get(text) ?? -1
+    found: ir_x64_text_rows_get(tables.texts, text)
     if found >= 0 -> return found
     id: tables.data.len()
     bytes: text.bytes()
     tables.lengths.push(bytes.len())
     tables.data.push(X64Data{id: X64DataID{value: id}, bytes: bytes, align: 1, relocs: [X64DataReloc]{}, read_only: true})
-    tables.texts[text] = id
+    ir_x64_text_rows_set(tables.texts, text, id)
     id
 }
 
@@ -160,7 +188,7 @@ ir_x64_add_text: fn(tables: &IRX64Tables, text: String) -> Int Never! {
 // that would free it. A decimal the carrier can't hold canonically (one in
 // the inline range, or not plain digits) keeps the runtime parse.
 ir_x64_static_int: fn(tables: &IRX64Tables, text: String) Never! {
-    if tables.ints.get(text) != None || !ir_x64_static_int_fits(text) {
+    if ir_x64_text_rows_get(tables.ints, text) >= 0 || !ir_x64_static_int_fits(text) {
         return
     }
     bytes := [Int]{}
@@ -196,7 +224,7 @@ ir_x64_static_int: fn(tables: &IRX64Tables, text: String) Never! {
     word_row: tables.data.len()
     tables.lengths.push(8)
     tables.data.push(X64Data{id: X64DataID{value: word_row}, bytes: tagged.move(), align: 8, relocs: [X64DataReloc]{X64DataReloc{offset: 0, target: X64DataID{value: carrier_row}, addend: 4611686018427387904}}})
-    tables.ints[text] = word_row
+    ir_x64_text_rows_set(tables.ints, text, word_row)
 }
 
 // Whether ir_x64_static_int makes a static Int for decimal `text`: plain
@@ -466,7 +494,7 @@ ir_x64_tables: fn(m: IRModule) -> IRX64Tables Never! {
 
 // The module's tables before any function's uses: its IR data rows.
 ir_x64_tables_start: fn(m: IRModule) -> IRX64Tables Never! {
-    tables := IRX64Tables{data: [X64Data]{}, lengths: [Int]{}, headers: [Int]{}, texts: [String:Int]{}, ints: [String:Int]{}, files: [String]{}, file_rows: [String:Int]{}, debug_types: [X64DebugType]{}, fma: -1}
+    tables := IRX64Tables{data: [X64Data]{}, lengths: [Int]{}, headers: [Int]{}, texts: IRX64TextRows{}, ints: IRX64TextRows{}, files: [String]{}, file_rows: IRX64TextRows{}, debug_types: [X64DebugType]{}, fma: -1}
     loop (row, bytes) in m.data {
         // A static object (BuildStatic.jet) holds words, which the program
         // may write; a text row is read-only bytes (IR.jet ir_intern_text).
@@ -482,19 +510,20 @@ ir_x64_tables_start: fn(m: IRModule) -> IRX64Tables Never! {
 // Gives the uses of function `f`, the next in function order, their module
 // rows, adding its source file and the rows no function before it named;
 // returns the row of each use, for ir_x64_resolve.
-ir_x64_tables_add: fn(tables: &IRX64Tables, f: IRFunction, uses: [IRX64Use]) -> [Int] Never! {
-    if f.source_file != "" && tables.file_rows.get(f.source_file) == None {
-        tables.file_rows[f.source_file] = tables.files.len()
+ir_x64_tables_add: fn(tables: &IRX64Tables, f: IRFunction, uses: IRX64Uses) -> [Int] Never! {
+    if f.source_file != "" && ir_x64_text_rows_get(tables.file_rows, f.source_file) < 0 {
+        ir_x64_text_rows_set(tables.file_rows, f.source_file, tables.files.len())
         tables.files.push(f.source_file)
     }
     rows := [Int]{}
-    loop wanted in uses {
-        row: if wanted == {
-            .Text(text) -> ir_x64_add_text(tables, text)
-            .Header(data) -> ir_x64_text_header(tables, data)
-            .StaticInt(text) -> {
+    loop (at, kind) in uses.kinds {
+        text: uses.texts[at]
+        row: if kind == {
+            .Text -> ir_x64_add_text(tables, text)
+            .Header -> ir_x64_text_header(tables, uses.data[at])
+            .StaticInt -> {
                 ir_x64_static_int(tables, text)
-                tables.ints.get(text) ?? -1
+                ir_x64_text_rows_get(tables.ints, text)
             }
             .Fma -> {
                 if tables.fma < 0 {
@@ -511,13 +540,13 @@ ir_x64_tables_add: fn(tables: &IRX64Tables, f: IRFunction, uses: [IRX64Use]) -> 
 }
 
 // The rows of `uses` in tables that hold them all already (ir_x64_tables).
-ir_x64_use_rows: fn(tables: IRX64Tables, uses: [IRX64Use]) -> [Int] Never! {
+ir_x64_use_rows: fn(tables: IRX64Tables, uses: IRX64Uses) -> [Int] Never! {
     rows := [Int]{}
-    loop wanted in uses {
-        row: if wanted == {
-            .Text(text) -> tables.texts.get(text) ?? -1
-            .Header(data) -> tables.headers[data]
-            .StaticInt(text) -> tables.ints.get(text) ?? -1
+    loop (at, kind) in uses.kinds {
+        row: if kind == {
+            .Text -> ir_x64_text_rows_get(tables.texts, uses.texts[at])
+            .Header -> tables.headers[uses.data[at]]
+            .StaticInt -> ir_x64_text_rows_get(tables.ints, uses.texts[at])
             .Fma -> tables.fma
         }
         rows.push(row)
@@ -581,7 +610,7 @@ ir_x64_resolve: fn(function: &X64CompiledFunction, rows: [Int]) Never! {
 // in `cold` when the instruction is on its way to a stop (ir_x64_dying).
 ir_x64_function_tables: fn(m: IRModule, row: Int, names: [String]) -> IRX64FunctionTables Never! {
     f: m.functions[row]
-    tables := IRX64FunctionTables{uses: [IRX64Use]{}, lengths: [Int]{}, texts: [String:Int]{}, headers: [Int:Int]{}, ints: [String:Int]{}, fma: -1, logged: ir_x64_log_names(f, names)}
+    tables := IRX64FunctionTables{uses: IRX64Uses{}, lengths: [Int]{}, texts: IRX64TextRows{}, headers: [Int:Int]{}, ints: IRX64TextRows{}, fma: -1, logged: ir_x64_log_names(f, names)}
     _ := ir_x64_use_text(tables, f.source_file)
     // The stop texts already in (ir_x64_add_stop_texts).
     stops := [Bool]{false, false, false, false}
@@ -598,7 +627,7 @@ ir_x64_function_tables: fn(m: IRModule, row: Int, names: [String]) -> IRX64Funct
             data: f.a[at]
             if data >= 0 && data < m.data.len() {
                 if tables.headers.get(data) == None {
-                    tables.headers[data] = ir_x64_add_use(tables, IRX64Use.Header{row: data}, 24)
+                    tables.headers[data] = ir_x64_add_use(tables, IRX64UseKind.Header, data, "", 24)
                 }
                 reads.push(at)
                 read_rows.push(tables.headers[data])
@@ -607,12 +636,13 @@ ir_x64_function_tables: fn(m: IRModule, row: Int, names: [String]) -> IRX64Funct
         if f.op[at] == .ConstBigInt && f.a[at] >= 0 && f.a[at] < m.names.len() {
             text: m.names[f.a[at]]
             _ := ir_x64_use_text(tables, text)
-            if tables.ints.get(text) == None && ir_x64_static_int_fits(text) {
-                tables.ints[text] = ir_x64_add_use(tables, IRX64Use.StaticInt{text: text.copy()}, 8)
+            if ir_x64_text_rows_get(tables.ints, text) < 0 && ir_x64_static_int_fits(text) {
+                word: ir_x64_add_use(tables, IRX64UseKind.StaticInt, -1, text.copy(), 8)
+                ir_x64_text_rows_set(tables.ints, text, word)
             }
         }
         if f.op[at] == .CallRuntime && tables.fma < 0 && f.a[at] >= 0 && f.a[at] < m.names.len() && m.names[f.a[at]] == "jet_std_math_fma" {
-            tables.fma = ir_x64_add_use(tables, IRX64Use.Fma, 1)
+            tables.fma = ir_x64_add_use(tables, IRX64UseKind.Fma, -1, "", 1)
         }
     }
     if reads.len() > 0 {
@@ -694,20 +724,23 @@ ir_x64_dying: fn(f: IRFunction) -> [Bool] Never! {
     assert_eq(ir_x64_dying(f), [Bool]{false, false, true, true, false, false, false, false, false, true, true, false, false, true, true, true})
 }
 
-// Adds use `wanted`, of `length` bytes; returns its local data row.
-ir_x64_add_use: fn(tables: &IRX64FunctionTables, wanted: &&IRX64Use, length: Int) -> Int Never! {
-    id: IR_X64_LOCAL_DATA + tables.uses.len()
-    tables.uses.push(wanted)
+// Adds a use of kind `kind` (naming IR data row `data` or text `text`, as
+// IRX64Uses keeps them), of `length` bytes; returns its local data row.
+ir_x64_add_use: fn(tables: &IRX64FunctionTables, kind: &&IRX64UseKind, data: Int, text: &&String, length: Int) -> Int Never! {
+    id: IR_X64_LOCAL_DATA + tables.uses.kinds.len()
+    tables.uses.kinds.push(kind)
+    tables.uses.data.push(data)
+    tables.uses.texts.push(text)
     tables.lengths.push(length)
     id
 }
 
 // The local data row of selector text `text`, added on first use.
 ir_x64_use_text: fn(tables: &IRX64FunctionTables, text: String) -> Int Never! {
-    found: tables.texts.get(text) ?? -1
+    found: ir_x64_text_rows_get(tables.texts, text)
     if found >= 0 -> return found
-    id: ir_x64_add_use(tables, IRX64Use.Text{text: text}, text.bytes().len())
-    tables.texts[text] = id
+    id: ir_x64_add_use(tables, IRX64UseKind.Text, -1, text.copy(), text.bytes().len())
+    ir_x64_text_rows_set(tables.texts, text, id)
     id
 }
 
@@ -835,7 +868,7 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     // reversed into function order.
     row_errors := [[String]]{}
     row_logs := [[String]]{}
-    row_uses := [[IRX64Use]]{}
+    row_uses := [IRX64Uses]{}
     row_hot := [[Int]]{}
     row_cold := [[Int]]{}
     row := count - 1
@@ -846,7 +879,7 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
             selected := compiled.move()
             row_errors.push(compiler_take_rows<String>(selected.errors))
             row_logs.push(compiler_take_rows<String>(selected.log))
-            row_uses.push(compiler_take_rows<IRX64Use>(selected.uses))
+            row_uses.push(selected.uses.move())
             row_hot.push(compiler_take_rows<Int>(selected.hot))
             row_cold.push(compiler_take_rows<Int>(selected.cold))
             functions.push(selected.function.move())
@@ -855,7 +888,7 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
         } else {
             row_errors.push([String]{"{shells.programs[0].functions[row].name}: selection stopped: {stop}"})
             row_logs.push([String]{})
-            row_uses.push([IRX64Use]{})
+            row_uses.push(IRX64Uses{})
             row_hot.push([Int]{})
             row_cold.push([Int]{})
             functions.push(X64CompiledFunction{id: X64FunctionID{value: row}, name: shells.programs[0].functions[row].name, code: [U8]{}, relocs: [X64Reloc]{}, align: X64_FUNCTION_ALIGN})
@@ -1354,9 +1387,9 @@ ir_x64_release_pop_rest: fn(released: Shared<IRX64Released>) -> [IRX64Result] Ne
 // the list meant, and its functions stay cold.
 ir_x64_hot_order: fn(compiled: &IRX64Result, hot: [String]) -> Int Never! {
     if hot.len() == 0 -> return 0
-    ranks := [String:Int]{}
+    ranks := IRX64TextRows{}
     loop (position, name) in hot {
-        if ranks.get(name) == None -> ranks[name.copy()] = position
+        if ir_x64_text_rows_get(ranks, name) < 0 -> ir_x64_text_rows_set(ranks, name, position)
     }
     count: compiled.functions.len()
     // Per function its rank, -1 when not listed; per rank whether a
@@ -1365,7 +1398,7 @@ ir_x64_hot_order: fn(compiled: &IRX64Result, hot: [String]) -> Int Never! {
     named := [Bool]{}
     loop _ in 0..<hot.len() -> named.push(false)
     loop index in 0..<count {
-        listed: ranks.get(compiled.functions[index].name) ?? -1
+        listed: ir_x64_text_rows_get(ranks, compiled.functions[index].name)
         found.push(listed)
         if listed >= 0 -> named[listed] = true
     }
@@ -1376,7 +1409,7 @@ ir_x64_hot_order: fn(compiled: &IRX64Result, hot: [String]) -> Int Never! {
     missing := 0
     stems := [{stem: String, side: Int, at: Int}]{}
     loop (position, name) in hot {
-        if named[position] || (ranks.get(name) ?? -1) != position -> next
+        if named[position] || ir_x64_text_rows_get(ranks, name) != position -> next
         missing += 1
         start: ir_x64_hash_start(name)
         if start >= 0 -> stems.push({stem: name.slice(0, start), side: 0, at: position})
@@ -1493,7 +1526,7 @@ ir_x64_object_module: fn(owned: &IRX64Result) -> X64ObjectModule Never! {
     variables.reverse()
     sources := [X64FunctionSource]{}
     loop f in owned.program.functions {
-        file: owned.tables.file_rows.get(f.source_file) ?? -1
+        file: ir_x64_text_rows_get(owned.tables.file_rows, f.source_file)
         listed := variables.pop() ?? [X64DebugVariable]{}
         inlines := [X64InlineSite]{}
         loop site in 1..<(f.inline_sites.len() /% IR_INLINE_SITE_WORDS + 1) {
@@ -1506,7 +1539,7 @@ ir_x64_object_module: fn(owned: &IRX64Result) -> X64ObjectModule Never! {
                 next
             }
             callee: owned.program.functions[row]
-            inlines.push(X64InlineSite{function: row, name: ir_x64_member_name(callee.name) ?? callee.name, file: owned.tables.file_rows.get(callee.source_file) ?? -1, line: callee.line, parent: parent, call_line: call_line})
+            inlines.push(X64InlineSite{function: row, name: ir_x64_member_name(callee.name) ?? callee.name, file: ir_x64_text_rows_get(owned.tables.file_rows, callee.source_file), line: callee.line, parent: parent, call_line: call_line})
         }
         sources.push(X64FunctionSource{name: ir_x64_member_name(f.name) ?? f.name, file: file, line: f.line, variables: listed.move(), inlines: inlines.move()})
     }

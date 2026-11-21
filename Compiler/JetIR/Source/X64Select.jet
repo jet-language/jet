@@ -366,7 +366,7 @@ IRX64FunctionResult: struct {
     errors: [String],
     log: [String],
     // The selector rows its code names (IRX64FunctionTables.uses), in order.
-    uses: [IRX64Use],
+    uses: IRX64Uses,
     // The data rows its code reads, apart and on its way to a stop
     // (IRX64FunctionTables hot and cold).
     hot: [Int]{[Int]{}},
@@ -1034,7 +1034,7 @@ ir_x64_stop_if: fn(e: &IRX64Emitter, f: IRFunction, tables: IRX64FunctionTables,
 // instruction's operands), as the emission log marks it.
 ir_x64_stop_if_on: fn(e: &IRX64Emitter, f: IRFunction, tables: IRX64FunctionTables, at: Int, cond: X64Cond, message: String, tests: Int) Never! {
     cold := ir_x64_cold(IRX64ColdKind.Stop, [Int]{x64_jcc_rel32(e.code, cond)})
-    cold.text = tables.texts.get(message) ?? -1
+    cold.text = ir_x64_text_rows_get(tables.texts, message)
     cold.symbol = f.source_file
     cold.line = ir_code_line_source(f.code_line[at])
     cold.right = tests
@@ -1122,7 +1122,7 @@ ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
                 if !cold.falls -> ir_x64_jump_to(e, cold.resume)
             }
             .LocatedRoute -> {
-                path: tables.texts.get(f.source_file) ?? -1
+                path: ir_x64_text_rows_get(tables.texts, f.source_file)
                 ir_x64_operand(e, m, f, al, cold.left, cold.left_imm, X64_RDI)
                 ir_x64_operand(e, m, f, al, cold.right, cold.right_imm, X64_RSI)
                 ir_x64_lea_data(e, X64_RDX, path)
@@ -1189,7 +1189,7 @@ ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
                 // no xmm register, only the first lays out the call: the
                 // later ones load their line, the one argument that differs,
                 // and jump in after the first's.
-                path: tables.texts.get(cold.symbol) ?? -1
+                path: ir_x64_text_rows_get(tables.texts, cold.symbol)
                 target: ir_x64_stop_target(e, cold, exit)
                 x64_mov_ri(e.code, X64_RDX, cold.line)
                 shared := -1
@@ -1217,7 +1217,7 @@ ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
                 }
             }
             .ShiftStop -> {
-                path: tables.texts.get(cold.symbol) ?? -1
+                path: ir_x64_text_rows_get(tables.texts, cold.symbol)
                 x64_mov_ri(e.code, X64_RDI, cold.direction)
                 ir_x64_operand(e, m, f, al, cold.right, cold.right_imm, X64_RSI)
                 x64_mov_ri(e.code, X64_RDX, cold.unsigned)
@@ -4095,14 +4095,14 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
             }
             // A static exact Int (X64Module.jet ir_x64_static_int) is the
             // word its data row holds.
-            word: tables.ints.get(m.names[f.a[at]]) ?? -1
+            word: ir_x64_text_rows_get(tables.ints, m.names[f.a[at]])
             if word >= 0 {
                 reg: ir_x64_home_reg(m, f, al, dst, X64_RAX)
                 ir_x64_lea_data(e, reg, word)
                 x64_load(e.code, reg, reg, 0)
                 return ir_x64_store(e, m, f, al, dst, reg)
             }
-            text: tables.texts.get(m.names[f.a[at]]) ?? -1
+            text: ir_x64_text_rows_get(tables.texts, m.names[f.a[at]])
             ir_x64_helper(e, m, f, al, "jet_rt_int_from_static", [IRX64Arg]{IRX64Arg.Data{id: text}, IRX64Arg.Imm{value: ir_x64_use_length(tables, text)}}, dst)
         }
         .Copy | .Move -> ir_x64_transfer(e, m, f, al, at)
@@ -5274,7 +5274,7 @@ ir_x64_stop_poll: fn(f: IRFunction, row: Int) -> IRX64FunctionResult Never! {
         variables: [X64DebugVariable]{},
         errors: [String]{},
         log: [String]{},
-        uses: [IRX64Use]{},
+        uses: IRX64Uses{},
     }
 }
 
@@ -5342,7 +5342,7 @@ ir_x64_asm_function: fn(m: IRModule, f: IRFunction, leaf: IRAsmLeaf, row: Int, l
         variables: [X64DebugVariable]{},
         errors: [String]{},
         log: log,
-        uses: [IRX64Use]{},
+        uses: IRX64Uses{},
     }
 }
 
@@ -6057,7 +6057,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
         variables: variables.move(),
         errors: e.errors.move(),
         log: log,
-        uses: [IRX64Use]{},
+        uses: IRX64Uses{},
     }
 }
 
@@ -7281,11 +7281,12 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     }
     m.functions.push(f)
     tables: ir_x64_tables(m)
-    assert(tables.ints.get("4611686018427387903") == None)
-    assert(tables.ints.get("-4611686018427387904") == None)
-    assert(tables.ints.get("4611686018427387904") != None)
-    assert(tables.ints.get("-4611686018427387905") != None)
-    word: tables.ints.get("-123456789012345678901234567890") ?? panic("no static Int")
+    assert(ir_x64_text_rows_get(tables.ints, "4611686018427387903") < 0)
+    assert(ir_x64_text_rows_get(tables.ints, "-4611686018427387904") < 0)
+    assert(ir_x64_text_rows_get(tables.ints, "4611686018427387904") >= 0)
+    assert(ir_x64_text_rows_get(tables.ints, "-4611686018427387905") >= 0)
+    word: ir_x64_text_rows_get(tables.ints, "-123456789012345678901234567890")
+    assert(word >= 0, "no static Int")
     assert_eq(tables.data[word].relocs.len(), 1)
     assert_eq(tables.data[word].relocs[0].addend, 4611686018427387904)
     carrier: tables.data[tables.data[word].relocs[0].target.value]
@@ -7321,7 +7322,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     none: ir_x64_tables(plain)
     loop text in
         ([String]{IR_X64_DIVIDED_BY_ZERO, ir_x64_overflow_message("add"), ir_x64_overflow_message("div")}) {
-        assert(none.texts.get(text) == None)
+        assert(ir_x64_text_rows_get(none.texts, text) < 0)
     }
     fixed := ir_module_new()
     word: ir_type_row(fixed, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
@@ -7334,8 +7335,8 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     _ := ir_emit(quotient, IROp.Return, -1, q, -1, -1, 2)
     fixed.functions.push(quotient)
     named: ir_x64_tables(fixed)
-    assert(named.texts.get(IR_X64_DIVIDED_BY_ZERO) != None && named.texts.get(ir_x64_overflow_message("div")) != None)
-    assert(named.texts.get(ir_x64_overflow_message("add")) == None)
+    assert(ir_x64_text_rows_get(named.texts, IR_X64_DIVIDED_BY_ZERO) >= 0 && ir_x64_text_rows_get(named.texts, ir_x64_overflow_message("div")) >= 0)
+    assert(ir_x64_text_rows_get(named.texts, ir_x64_overflow_message("add")) < 0)
 }
 
 // A runtime route the selector runs inline, calling the runtime only for a
