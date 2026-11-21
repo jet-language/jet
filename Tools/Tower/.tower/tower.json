@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112796,
+    "rev": 112800,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -55536,8 +55536,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-21T06:15:45.362Z",
-      "updatedBy": "IfHole-6-1-4",
+      "updated": "2026-11-21T06:18:43.399Z",
+      "updatedBy": "Main",
       "criteriaLastN": 105
     },
     {
@@ -72197,6 +72197,11 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "D-PERF-TARGET1 (blocks c1, c2, c5, c11, c14-c17): IfHole-6-1-4 reviewed it against code on f768b6597e and rejected it with six false claims and two census gaps (recorded on the decision). Main repaired every point the same hour on 97d2a287ab: E2124 vs unavailable made consistent; the case for A rests on run/test building source vs attach watching what it did not build (attach has three ways today, chosen by what the target publishes); no cpu lens; --for shown as ratified and built under c22, not as existing; AccessTrace/JobRunner strace and the outside batch harness time -v named as their own work; syscalls decodes the whole file class; fake-perf fixtures added. Back to draft for a fresh non-drafter review before posting."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "Correction to the previous entry: nothing was filed or posted. D-PERF-ALLOCATOR1 already exists, drafted earlier and ratified 2026-11-21 with outcome A, \"jet debug shows them at the program's end\". Lens's second draft under the same id was refused by Tower and is dropped. c15 is authorized and is built under the ratified A: jet debug stops at the program's end and shows the counting policy's totals, read from the stopped program's memory. The code facts in the previous entry stand (allocator facts 0..5 in Alloc.jet, the PTRACE_O_TRACEEXIT stop reporting only nonzero exits today)."
         },
         {
@@ -72521,7 +72526,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-21T06:15:44.012Z",
+      "updated": "2026-11-21T06:21:01.290Z",
       "updatedBy": "IfHole-6-1-4",
       "criteriaLastN": 26
     },
@@ -125464,27 +125469,27 @@
       "cardId": "c0nwrfck",
       "group": "tooling",
       "title": "What the debugger does with calls the compiler works out ahead",
-      "situation": "Jet works out some values while it compiles. When a program writes `first: count_up(1000000)` and count_up only computes, the compiler runs count_up during the build and the program just holds the answer. That is fine for `jet run`, but it surprises the debugger. Today `jet debug` accepts `break count_up`, says \"Breakpoint set\", and the program finishes without ever stopping, because count_up never runs. A logpoint inside it is accepted and logs nothing. Beginners feel this most: their first breakpoint on a small test function silently does nothing. You decide what `jet debug` does about calls the build computes ahead. We recommend that the program `jet debug` builds keeps those calls, and that an image built elsewhere refuses such a breakpoint and says why.",
+      "situation": "Jet works out some values while it compiles. When a program writes `first: count_up(1000000)` and count_up only computes, the compiler runs count_up during the build and the program just holds the answer. That is fine for `jet run`, but it surprises the debugger. Today `jet debug` accepts `break count_up`, says \"Breakpoint set\", and the program finishes without ever stopping, because count_up never runs. A logpoint inside it is accepted and logs nothing. Beginners feel this most: their first breakpoint on a small test function silently does nothing. You decide what `jet debug` does about calls the build computes ahead. We recommend that the program `jet debug` builds keeps those calls, and that an image built elsewhere, which computed the call and dropped the function, refuses such a breakpoint and says why instead of answering \"No function\".",
       "gist": "When the compiler works out a call ahead of time, what should a breakpoint inside that function do?",
       "lesson": "Jet runs a pure call with fixed arguments while compiling and keeps only its answer. The program then never runs that function. A breakpoint or logpoint in it is set but never fires. The choice is whether debug builds keep those calls, or the debugger explains why it cannot stop there.",
-      "explainer": "Beginner path: write the program, run `jet debug prog.jet`, type `break count_up` and `c`. Under A it stops in count_up with n = 1000000, as the code reads. Under B the break is refused, naming the line that was computed and the fix. Under C the break is set with a note, and the program finishes without stopping.\n\nExpert path: an expert who wants the exact release program builds it with `jet build -O2` and opens the image with `jet debug <image>` or `--attach`. That image computed the call ahead. Under A and B the break is refused with E2239, naming the computed line. Putting `#Runtime(.NoEager)` on a function keeps its calls in every build, today and under every option.",
+      "explainer": "Beginner path: write the program, run `jet debug prog.jet`, type `break count_up` and `c`. Under A it stops in count_up with n = 1000000, as the code reads. Under B the break is refused, naming the line that was computed and the fix. Under C the break is set with a note, and the program finishes without stopping.\n\nExpert path: an expert who wants the exact release program builds it with `jet build -O2` and opens the image with `jet debug <image>` or `--attach`. That image computed the call ahead. Today that image has dropped count_up, so `break count_up` answers \"No function `count_up`\". Under A and B the break is refused with E2239 (Jet.DebugNeverCalled), naming the computed line and the fix. Putting `#Runtime(.NoEager)` on a function keeps its calls in every build, today and under every option.",
       "story": "Sam is learning Jet and writes count_up with a test call, `first: count_up(1000000)`. He wants to watch the loop, so he runs `jet debug prog.jet` and types `break count_up`. Today the debugger answers \"Breakpoint set\", and the program prints its total and ends. Sam decides the debugger is broken.",
       "inWild": "fn countUp(n: u64) u64 {\n    var total: u64 = 0;\n    var i: u64 = 0;\n    while (i < n) : (i += 1) total += i % 7;\n    return total;\n}\n// A plain call runs when the program runs; a debugger stops in it.\nconst first = countUp(1000000);        // inside main: run time\nconst ahead = comptime countUp(1000);  // only when asked for\n# Zig evaluates a call while compiling only when the code says comptime: https://ziglang.org/documentation/master/#comptime",
-      "detail": "Code read on dev 3e8d443247 and checked with the gate-p310 jet. JetSema computes an immutable local `name: value` whose initializer calls only pure code while compiling, and the program holds the value (Compiler/JetSema/Source/Sema/Comptime/LocalValues.jet). The language promises this never changes what a program prints (Docs/Reference/metaprogramming.md). It is a checked fact, so -O0, -O1 and -O2 compute the same locals. `#Runtime(.NoEager)` on a function, method or block turns it off there.\n\n`jet debug prog.jet` builds with `jet build -O0 --dead-code=keep` (JetDebug Native.jet native_debug_build_argv). So count_up stays in the image with no caller. With the program above, on gate-p310: `break count_up` and `break prog.jet:5` answer \"Breakpoint set\" and never stop. `log prog.jet:5 \"s{step}\"` says it runs in the program and logs nothing. A break after line 11 shows `first = 2999997`, and `watch first` works. The same program with `#Runtime(.NoEager)` on run stops in count_up with n = 1000000.\n\nThe placed-logpoint case met this: its loop never ran until its count came from the program's arguments.",
+      "detail": "Code read on dev 3e8d443247 and checked with the gate-p310 jet. JetSema computes an immutable local `name: value` whose initializer calls only pure code while compiling, and the program holds the value (Compiler/JetSema/Source/Sema/Comptime/LocalValues.jet). The language promises this never changes what a program prints (Docs/Spec/Reference/metaprogramming.md). It is a checked fact, so -O0, -O1 and -O2 compute the same locals. `#Runtime(.NoEager)` on a function, method or block turns it off there.\n\n`jet debug prog.jet` builds with `jet build -O0 --dead-code=keep` (JetDebug Native.jet native_debug_build_argv). So count_up stays in the image with no caller. With the program above, on gate-p310: `break count_up` and `break prog.jet:5` answer \"Breakpoint set\" and never stop. `log prog.jet:5 \"s{step}\"` says it runs in the program and logs nothing. A break after line 11 shows `first = 2999997`, and `watch first` works. The same program with `#Runtime(.NoEager)` on run stops in count_up with n = 1000000.\n\nThe placed-logpoint case met this: its loop never ran until its count came from the program's arguments.\n\nImages built elsewhere, re-checked on the gate-p392 jet (dev f768b6597e): `jet build -O0 prog.jet` (and `-O2`) drops count_up, because nothing calls it at run time. `jet debug .jet/build/prog` then answers \"No function `count_up`\" to `break count_up` and \"No code on prog.jet:5\" to `break prog.jet:5`. A breakpoint that is set and never stops arises only where dead code is kept, which is jet debug's own `-O0 --dead-code=keep` build (Native.jet native_debug_build_argv). `jet debug --replay=NAME prog.jet` builds through that same build (jet_cli_debug_launch), so a replay is a jet debug build, not an image built elsewhere.",
       "options": [
         {
           "key": "A",
           "name": "Debug builds keep the calls",
-          "detail": "The program `jet debug` builds computes no local while compiling in the workspace's own packages. It is as if every function there carried `#Runtime(.NoEager)`. So every call the user can read runs, and every breakpoint, logpoint and watch on it works. Constants, `#run`, `@` and Core keep computing while compiling. `jet run` and `jet build` are unchanged.\n\nAn image `jet debug` did not build (`jet debug <image>`, `--attach`, a replay) still computed the call. There a breakpoint on a function the image never calls is refused with B's E2239.",
-          "technical": "`jet debug`'s build passes the policy the `#Runtime(.NoEager)` marker sets to the checker for the workspace's packages, through the build options and the build cache key. It is one mechanism and adds no user syntax or flag.\n\nThe image records each function it keeps but never calls at run time, with the computed line. The debugger reads that record for E2239, and DAP returns the breakpoint unverified with the same message. `why` recovery builds of a built image keep that image's policy, so recovered frames match it. Output is unchanged on every tier, so I9 holds; only when the work runs differs.",
+          "detail": "The program `jet debug` builds computes no local while compiling in the workspace's own packages. It is as if every function there carried `#Runtime(.NoEager)`. So every call the user can read runs, and every breakpoint, logpoint and watch on it works. Constants, `#run`, `@` and Core keep computing while compiling. `jet run` and `jet build` are unchanged.\n\nAn image `jet debug` did not build (`jet debug <image>` or `--attach`) still computed the call and, unless it kept dead code, dropped the function, so today `break count_up` answers \"No function `count_up`\". Under A it is refused with B's E2239 instead, naming the computed line and the fix. A replay is built by jet debug itself, so it runs the calls.",
+          "technical": "`jet debug` builds in a separate `jet build` child (native_debug_build_argv). The policy reaches it as one new build-option row, `eager`, with the values `on` (the default) and `off` (the workspace's own packages compute no local while compiling, the policy `#Runtime(.NoEager)` sets), spelled `--eager=off` beside the `--dead-code=keep` it already passes. The option row's compile-key column puts it in the build cache key. It adds no syntax; the one build option is also open to an expert who wants a built image that runs every call.\n\nThe image's debug info records each workspace function the build computed ahead and never calls at run time, whether it was kept (dead code kept) or dropped, with its name, its declaration line and the line that computed it. The record costs debug-info bytes only, which a release build keeps in its side debug file. The debugger reads that record for E2239, and DAP returns the breakpoint unverified with the same message. `why` recovery builds of a built image keep that image's policy, so recovered frames match it. Output is unchanged on every tier, so I9 holds; only when the work runs differs.",
           "code": "// jet debug prog.jet builds with the call kept:\n(Jet) break count_up\nBreakpoint set  count_up\n(Jet) c\nBreakpoint hit  prog.jet:2  in count_up()\nLocals:  n = 1000000\n// jet run and jet build still compute it ahead."
         },
         {
           "key": "B",
           "name": "Refuse, and say why",
-          "detail": "Builds stay as they are. A breakpoint, line breakpoint or logpoint in a function the image never runs is refused with a new error, E2239, jet.DebugNeverCalled. It names the computed line and gives the fix: put `#Runtime(.NoEager)` on the calling function and start the debugger again. A function that is also called at run time somewhere is accepted as today. A watch on the computed local works, as it does today.",
-          "technical": "The compiler records in the image each kept function with no run-time call, no taken address and no export, with the line that computed it. The console refuses; DAP returns the breakpoint unverified with the message. The same holds for -O1 and -O2 images.",
-          "code": "(Jet) break count_up\nError E2239: `count_up` never runs in this build.\n  Its only call, `first: count_up(1000000)` at\n  prog.jet:11, was computed while compiling.\n  Fix: put #Runtime(.NoEager) on `run`, then\n  run `jet debug prog.jet` again."
+          "detail": "Builds stay as they are. A breakpoint, line breakpoint or logpoint in a function the image never runs is refused with a new error, E2239, Jet.DebugNeverCalled. It names the computed line and gives the fix: put `#Runtime(.NoEager)` on the calling function and start the debugger again. In a default build the function is already dropped, so this replaces today's \"No function\" answer with the reason; in jet debug's own build, which keeps dead code, it replaces a breakpoint that never stops. A function that is also called at run time somewhere is accepted as today. A watch on the computed local works, as it does today.",
+          "technical": "The compiler records in the image's debug info each workspace function with no run-time call, no taken address and no export, kept or dropped, with its name, its declaration line and the line that computed it. The console refuses; DAP returns the breakpoint unverified with the message. The same holds for -O1 and -O2 images.",
+          "code": "(Jet) break count_up\nError: Jet.DebugNeverCalled: `count_up` never runs in this build.\n  Its only call, `first: count_up(1000000)` at\n  prog.jet:11, was computed while compiling.\n  Fix: put #Runtime(.NoEager) on `run`, then\n  run `jet debug prog.jet` again."
         },
         {
           "key": "C",
@@ -125507,7 +125512,7 @@
         "why": "The program a beginner debugs runs the code they read, so their first breakpoint stops. Output stays the same, and built images still explain themselves.",
         "gains": [
           "Every breakpoint the user can place in their own code stops.",
-          "No new syntax, flag or step for the user.",
+          "No new syntax and no step for a beginner; one build option, which jet debug passes itself.",
           "Built images refuse with the reason and the fix."
         ],
         "losses": [
@@ -125518,6 +125523,10 @@
           {
             "loss": "The debugged program differs from jet build -O0 in when work runs.",
             "mitigation": "Output is the same by the language's promise; a built image is still debuggable as it is."
+          },
+          {
+            "loss": "One new build option, `eager`.",
+            "mitigation": "jet debug passes it; a beginner never types it, and an expert can use it for a release image that runs every call."
           }
         ],
         "whyNot": [
@@ -125537,7 +125546,7 @@
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": null,
-      "checkInstructions": "Under A: a Debug case uses the placed-logpoint fixture with a literal count. `jet debug prog.jet` with `break count_up` stops with n = 1000000, and a logpoint on the loop logs each hit. The same program built with `jet build -O0` and opened with `jet debug <image>` refuses `break count_up` with E2239, naming prog.jet:11. Under B: both runs refuse with E2239. Under C: both runs set the break with the note and finish. Nothing here is built yet.",
+      "checkInstructions": "Under A: a Debug case uses the placed-logpoint fixture with a literal count. `jet debug prog.jet` with `break count_up` stops with n = 1000000, and a logpoint on the loop logs each hit. The same program built with `jet build -O0` and opened with `jet debug <image>` refuses `break count_up` with E2239, naming prog.jet:11 (today that image answers \"No function `count_up`\", re-checked on gate-p392). A case also checks that `jet build --eager=off` changes the build cache key. Under B: both runs refuse with E2239. Under C: both runs set the break with the note and finish. Nothing here is built yet.",
       "surface": {
         "gist": "When the compiler works out a call ahead of time, what should a breakpoint inside that function do?",
         "lesson": "Jet runs a pure call with fixed arguments while compiling and keeps only its answer. The function then never runs, so a breakpoint in it is set but never fires. Debug builds could keep such calls, or the debugger could explain itself.",
@@ -125556,7 +125565,7 @@
           {
             "key": "A",
             "name": "Debug builds keep the calls",
-            "gist": "jet debug builds run the user's calls; images built elsewhere refuse with the reason.",
+            "gist": "jet debug builds run the user's calls; images built elsewhere refuse with the reason instead of \"No function\".",
             "gains": [
               "The breakpoint stops where the user expects.",
               "Nothing new to learn or type."
@@ -125580,7 +125589,7 @@
               "The user must edit code and restart to stop there."
             ],
             "proposed": {
-              "code": "(Jet) break count_up\nError E2239: `count_up` never runs in this build.\n  Its only call, `first: count_up(1000000)` at\n  prog.jet:11, was computed while compiling.\n  Fix: put #Runtime(.NoEager) on `run`, then\n  run `jet debug prog.jet` again."
+              "code": "(Jet) break count_up\nError: Jet.DebugNeverCalled: `count_up` never runs in this build.\n  Its only call, `first: count_up(1000000)` at\n  prog.jet:11, was computed while compiling.\n  Fix: put #Runtime(.NoEager) on `run`, then\n  run `jet debug prog.jet` again."
             }
           },
           {
@@ -125601,28 +125610,37 @@
         ],
         "recommendation": {
           "rec": "A",
-          "why": "The code a beginner reads is the code that runs under the debugger, and built images still explain themselves.",
+          "why": "The program a beginner debugs runs the code they read, so their first breakpoint stops. Output stays the same, and built images still explain themselves.",
           "gains": [
-            "Every breakpoint in the user's code stops.",
-            "No new syntax, flag or step."
+            "Every breakpoint the user can place in their own code stops.",
+            "No new syntax and no step for a beginner; one build option, which jet debug passes itself.",
+            "Built images refuse with the reason and the fix."
           ],
           "losses": [
             {
-              "loss": "Big computed values move to program start under jet debug.",
-              "mitigation": "Only the user's own locals move; constants, #run and Core still compute ahead."
+              "loss": "A program that computes a big value ahead starts slower under jet debug.",
+              "mitigation": "Only the workspace's own locals move to run time; Core, constants and #run still compute ahead."
+            },
+            {
+              "loss": "The debugged program differs from jet build -O0 in when work runs.",
+              "mitigation": "Output is the same by the language's promise; a built image is still debuggable as it is."
+            },
+            {
+              "loss": "One new build option, `eager`.",
+              "mitigation": "jet debug passes it; a beginner never types it, and an expert can use it for a release image that runs every call."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Explains, but makes the user edit and restart."
+              "reason": "B explains the problem but makes the user edit the code and restart to see what they asked for."
             },
             {
               "key": "C",
-              "reason": "Keeps a breakpoint it knows will never fire."
+              "reason": "C accepts a breakpoint it knows will never fire, and the note is easy to miss."
             }
           ],
-          "tradeoff": "Debug builds compute the user's locals at run time, so what they read is what runs."
+          "tradeoff": "jet debug builds compute the workspace's locals at run time, so the code the user reads is the code that runs."
         }
       },
       "designAway": [
@@ -125645,11 +125663,10 @@
         }
       ],
       "draftedBy": "Main",
-      "reviewedBy": "IfHole-6-1-4",
+      "reviewedBy": null,
       "draft": true,
-      "status": "rejected",
-      "created": "2026-11-19T09:40:52.961Z",
-      "rejectReason": "Fails, code read on f768b6597e and checked on the gate-p392 jet. (1) \"An image built elsewhere refuses such a breakpoint with E2239\" does not match the code: a normally built image drops the computed-ahead function, so after jet build -O0 (or -O2) and jet debug .jet/build/prog, break count_up answers \"No function `count_up`\" and break prog.jet:5 answers \"No code on prog.jet:5\". A set-but-never-stops breakpoint arises only with dead code kept, which is jet debug own -O0 --dead-code=keep build (Native.jet:6189-6195); the per-image record is empty for default builds and checkInstructions would fail. The record must cover dropped functions too, or the claim goes; B shrinks accordingly. (2) A lists a replay among images jet debug did not build; false: --replay=NAME prog.jet builds through jet_cli_debug_launch (Debug.jet:144-153). (3) Docs/Reference/metaprogramming.md does not exist; it is Docs/Spec/Reference/metaprogramming.md:110. (4) \"adds no user syntax or flag\" misses the channel: jet debug builds in a separate jet build child (Debug.jet:282, native_debug_build_argv), so the policy needs a hidden build flag or an environment variable (a Registry/EnvironmentVariables.jet row) plus the cache key; name which. (5) jet.DebugNeverCalled must be Jet.DebugNeverCalled."
+      "status": "open",
+      "created": "2026-11-19T09:40:52.961Z"
     },
     {
       "id": "D-DEBUG-STDIN1",
@@ -126781,33 +126798,33 @@
       "cardId": "c00ni11n",
       "group": "tooling",
       "title": "How jet perf measures any command or built program, not only a .jet file",
-      "situation": "Jet's profiler has two engines. `jet perf run` and `jet perf test` build a Jet program and watch it from inside, 8,000 samples a second with tasks and waits. `jet perf attach <pid>` watches any running process from outside, for one second, 1,000 samples a second. No form starts a built program or a jet command and counts its work or lists its system calls, its requests to the operating system. So the repo still runs Linux `perf`, GNU `time -v` and `strace` in 19 places. You are asked how a user names that job. We recommend that `jet perf attach` also start a command given after `--`, with two new lenses, `counts` and `syscalls`.",
+      "situation": "`jet perf run` and `jet perf test` build a Jet program from source and watch it from inside, 8,000 samples a second with tasks and waits. `jet perf attach <pid>` watches a running process jet perf did not build, by what that process offers: its browser relay, its runtime's live records when it runs under `--observe`, or, when it publishes nothing, its threads' CPU sampled from outside for one second, 1,000 samples a second. No form starts a built program or a jet command and counts its work or lists its system calls, its requests to the operating system. So the repo still runs Linux `perf`, GNU `time -v` and `strace` in 19 places. You are asked how a user names that job. We recommend that `jet perf attach` also start a command given after `--`, with two new lenses, `counts` and `syscalls`.",
       "gist": "How should `jet perf` count the work of, and list the system calls of, a built program or a jet command?",
-      "lesson": "`jet perf run` and `jet perf test` watch a Jet program from inside. `jet perf attach` watches a running process from outside, for one second. Neither starts a built program or a jet command and counts its work or lists its system calls. Those jobs still use Linux `perf stat`, GNU `time` and `strace`.",
+      "lesson": "`jet perf run` and `jet perf test` watch a Jet program from inside. `jet perf attach` watches a running process it did not build, for one second: through what the process publishes, or from outside when it publishes nothing. Neither starts a built program or a jet command and counts its work or lists its system calls. Those jobs still use Linux `perf stat`, GNU `time` and `strace`.",
       "explainer": "Beginner path. To see how much work a built program does, write `jet perf attach --lens=counts -- .jet/build/hash data.bin`. The view prints `counts instructions:u=... cycles:u=... cpu_ns=... peak_rss_bytes=... processes=1`. To see which files it opens, write `--lens=syscalls` instead. To profile a Jet program's own code, `jet perf run hash.jet` stays the tool, as today.\n\nExpert path. A gate writes `jet perf attach --lens=counts,syscalls --out run.jettrace -- jet build Compiler` and reads `jet perf view run.jettrace --json`. The counts are per process and summed, and every call has its pid, arguments and result. `jet perf compare` compares two such traces' counts.",
       "story": "Sam wants to know whether a change made `jet build Compiler` do more work. Today the speed gate runs Linux `perf stat`, which the dogfood rule forbids for Jet code. Under option A, Sam writes `jet perf attach --lens=counts -- jet build Compiler`. The view prints the instructions and cycles of the whole build, every helper process included.\n\nLater a test fails because `jet run` opened its own file twice. Sam writes `jet perf attach --lens=syscalls -- jet run main.jet`, and the view lists both opens with their paths.",
       "inWild": "$ perf stat -e instructions:u,cycles:u -- jet build Compiler\n$ strace -f -e trace=openat -o run.trace jet run main.jet\n$ /usr/bin/time -v jet build Compiler",
-      "detail": "The code was read on dev 2e2ac929c1. The command `jet perf run` is the function `jet_cli_perf_session` in the file Compiler/JetCLI/Source/CLI/Perf/Session.jet. It always spawns `jet run --observe` with the user's words. The words after `--` go to the program. So no spelling today names a built program or a jet command, and `--` cannot be reused for that.\n\nThe lenses are `cpu`, `memory`, `alloc`, `topdown` and `causal` (`jet_cli_perf_session_lenses`). The runtime opens the memory and top-down counters with perf_event_open on the program's starting thread only (Compiler/JetRuntime/Source/PerfSamples.jet). The runtime also counts the calls that pass through `host_call` in HostProcess.jet, by number and Jet stack, without arguments. Thread starts, the allocator's munmap, the open of /proc/self/exe and the sockets go around it through raw syscalls. Children and the loader are never seen.\n\nTwo kinds of users wait on this. Tools/Perf/CompileThroughput/Throughput.jet runs each compile under `perf stat -x , -e instructions:u,cycles:u` to count its work. Seven cases run strace. CLICompilerSpeed checks the clone and openat calls of `{jet} run`, twice. ControlAndData checks the munmap calls of a built program at exit. Report checks the network calls of `{jet} build`. TaskgroupStack checks the clone calls of a built program. JetpackJetOS runs it twice, and Tools/Perf/CoreStrace once.\n\nThe engine is the same under every option. Counts use perf_event_open with `inherit` set, so every thread and child adds into the total, user mode only. Calls use ptrace on the target, which follows fork, vfork, clone and exec, and decodes open paths, clone flags, munmap ranges and the socket calls. JetDebug's Native.jet already drives ptrace for `jet debug`. A Jet program also gets the Jet line that made each call, from its debug info.\n\nEdge cases, the same under every option. With no counters (a virtual machine without them, or perf_event_paranoid above 2), the run is refused before it starts with E2124. The message names the kernel's errno and the paranoid level, and the fix names the sysctl. Where ptrace is refused (Yama ptrace_scope 3, a seccomp sandbox, or a target already under `jet debug`), `syscalls` is refused the same way.\n\nA setuid program runs without its privilege under ptrace, as under strace, and the view says so. The command's exit code is passed through. A child still running when the command ends is listed by pid and detached; its counts so far are kept. Each call row keeps at most 4096 bytes of decoded arguments. Past 65536 calls the rest are counted per name.",
+      "detail": "The code was read on dev 2e2ac929c1 and re-read on 97d2a287ab. The command `jet perf run` is the function `jet_cli_perf_session` in the file Compiler/JetCLI/Source/CLI/Perf/Session.jet. It always spawns `jet run --observe` with the user's words. The words after `--` go to the program. So no spelling today names a built program or a jet command, and `--` cannot be reused for that.\n\nThe lenses are `cpu`, `memory`, `alloc`, `topdown` and `causal` (`jet_cli_perf_session_lenses`). The runtime opens the memory and top-down counters with perf_event_open on the program's starting thread only (Compiler/JetRuntime/Source/PerfSamples.jet). The runtime also counts the calls that pass through `host_call` in HostProcess.jet, by number and Jet stack, without arguments. Thread starts, the allocator's munmap, the open of /proc/self/exe and the sockets go around it through raw syscalls. Children and the loader are never seen.\n\nTwo kinds of users wait on this. Tools/Perf/CompileThroughput/Throughput.jet runs each compile under `perf stat -x , -e instructions:u,cycles:u` to count its work. Seven cases run strace. CLICompilerSpeed checks the clone and openat calls of `{jet} run`, twice. ControlAndData checks the munmap calls of a built program at exit. Report checks the network calls of `{jet} build`. TaskgroupStack checks the clone calls of a built program. JetpackJetOS runs it twice, and Tools/Perf/CoreStrace once.\n\nThe engine is the same under every option. Counts use perf_event_open with `inherit` set, so every thread and child adds into the total, user mode only. Calls use ptrace on the target, which follows fork, vfork, clone and exec, and decodes the whole file class (open, mkdir, chmod and its family, rename, unlink, stat and their *at forms, with paths and modes), clone flags, munmap ranges, write and writev, and the socket calls. JetpackJetOS needs the file class whole: it orders mkdir against the protected chmod-class calls (nixos_migration_protects_stage_before_writing_inputs.case). JetDebug's Native.jet already drives ptrace for `jet debug`. A Jet program also gets the Jet line that made each call, from its debug info.\n\nEdge cases, the same under every option. With no counters (a virtual machine without them, or perf_event_paranoid above 2), `counts` is reported `unavailable` with the kernel's errno and the paranoid level, and the line names the sysctl to change; the command still runs. Where ptrace is refused (Yama ptrace_scope 3, a seccomp sandbox, or a target already under `jet debug`), `syscalls` is reported `unavailable` the same way, with the errno and the ptrace_scope. E2124 (Jet.AttachTargetNotObserved) keeps its meaning for the pid form alone.\n\nA setuid program runs without its privilege under ptrace, as under strace, and the view says so. The command's exit code is passed through. A child still running when the command ends is listed by pid and detached; its counts so far are kept. Each call row keeps at most 4096 bytes of decoded arguments. Past 65536 calls the rest are counted per name.\n\nHow attach watches today (Compiler/JetCLI/Source/CLI/Perf/Session.jet, jet_cli_perf_attach). It has three ways, chosen by what the target offers, not by a lens: a devserver browser relay; the runtime's own records (live snapshot, flight ring, `--zones=` window and heap, with `--source`), read when the process publishes a live snapshot; and the outside sampler (Outside.jet), used only when the process publishes nothing. Attach takes no `cpu` lens: any `--lens=` but `alloc` is refused. Its window is a fixed second (JET_CLI_PERF_OUTSIDE_WINDOW_MS); `--for=<duration>` is ratified (D-PERF-ATTACH-WINDOW1 = A) and built under #6995 c22.",
       "options": [
         {
           "key": "A",
           "name": "`jet perf attach` can start the command",
-          "detail": "Attach is the outside engine. Today it takes a running pid. It also takes a command after `--`, which it starts and watches for its whole life. Two lenses join it: `counts`, the user-mode instructions and cycles, CPU time and peak memory of each process and in total, and `syscalls`, every system call with its process, arguments and result. The default stays `cpu`, the outside sampler.\n\nFollowing children is new work. Today jet_cli_perf_outside_family (Outside.jet:503) reads each thread's /proc `children` once, when sampling starts, at most 64 processes. A process started later is never sampled. `jet build` and `jet test` start their compile and link children later, so the command form must follow them as they start. The pid form keeps today's read: children started after the attach are missed, and this ballot leaves that.\n\nThe command's exit code is passed through. The pid form is unchanged, and `--for=` (D-PERF-ATTACH-WINDOW1) stays the pid form's window.\n\n`jet perf test` is unchanged. It profiles the tests' own code from inside. `jet perf attach --lens=counts -- jet test x.jet` measures the whole command: compile, test binary and helpers. Those are two jobs, so nothing is spelled twice.\n\nThe compiler compiling Compiler, the job of #6995 c2, c5 and c11, stays on `jet perf run Compiler/JetCLI/run.jet -- build Compiler`. That runs the compiler from source under the inside engine, with phases and tasks. Attach of `jet build Compiler` is the quick look at an installed jet, for the whole run. It samples 1,000 times a second with frame-pointer stacks. It names functions from the image's symbols and declaration lines. Compile-time code counts as `unnamed`, and phases come from the package split.",
-          "technical": "Session.jet jet_cli_perf_attach: words after `--` are the command. It is spawned stopped, the engines open on its pid before it runs, then it runs.\n\nNew child following, with its costs. `cpu` today opens per-thread task-clock events (x64_sampler_open) on the threads of the family read at open. The command form opens one sampling event per CPU with `inherit` on the stopped command instead. Inherited sampling events cannot keep today's per-thread ring, so samples arrive through one ring per CPU, tagged by pid and tid.\n\n`counts` opens instructions:u and cycles:u with `inherit` before exec, so threads and children add in, read per process at its exit. Counting needs no ring, so that inherit is cheap. CPU time and peak memory come from each reap's rusage. `syscalls` ptraces the command with fork, vfork, clone and exec following. Each fork then stops for the tracer, and each call stops twice [INFERENCE: the slowdown is unmeasured].\n\nThe pid form refuses `counts` and `syscalls` with E2102 (Jet.UnknownFlag), whose fix is the `--` form: a count or call list missing the start would mislead. The command form refuses `--for=`, `--source` and `--zones=` the same way.\n\nReceipt delta. The `syscalls` section (JetPerfSyscalls) exists: `jet perf run` counts each host call by number and Jet stack (HostProcess.jet host_call). Its rows have no arguments, no pid and no result. Children and the compile are never seen. Runtime calls that bypass host_call are missed too. The command form fills the same section, adding `pid` to each row and a `calls` list: pid, tid, name, decoded arguments, result.\n\nThe bypass count. `git grep -c -E '^\\s*[^/ ].*os_syscall_i64\\(' f768b6597e -- Compiler/JetRuntime/Source` with HostProcess.jet and PerfSamples.jet excluded prints 153 lines in 30 files. It counts call lines only. Comment lines are excluded, and so are host_call itself and the perf hook. The definition is in Compiler/JetBackend/Source/OS/Linux.jet:393, outside that path. The plain `git grep -c os_syscall_i64` there prints 180 lines in 33 files, comments included.\n\nThe `instructions` section (JetPerfInstructions) also exists. It keeps the sampled machine code, not run totals, so it is unchanged. One new section, `counts` (JetPerfCounts), holds the totals: `instructions_u`, `cycles_u`, `cpu_ns`, `peak_rss_bytes`, per process and summed.\n\nRefusals. No new diagnostic code is needed. A kernel without counters makes `counts` `unavailable` with the errno and perf_event_paranoid, as the memory and topdown lenses already report (observability.md, Instructions and lenses). A refused ptrace makes `syscalls` `unavailable` with the errno and the Yama ptrace_scope. The command still runs. E2124 (Jet.AttachTargetNotObserved) keeps its meaning for the pid form alone. A refusal instead would need a new code, E2127 being free, with its registry row, UI snapshot and diagnostics.md entry.",
+          "detail": "Attach is the verb for a process jet perf did not build. Today it takes a running pid and chooses how to watch it by what it offers: a browser relay, its runtime's live records, or, when it publishes nothing, the outside sampler. It also takes a command after `--`, which it starts and watches for its whole life, choosing the same way for each process the command starts. Two lenses join it, both read from outside whatever the process publishes: `counts`, the user-mode instructions and cycles, CPU time and peak memory of each process and in total, and `syscalls`, every system call with its process, arguments and result. With no `--lens`, attach keeps today's CPU view, chosen as above; no `cpu` lens word is added.\n\nFollowing children is new work. Today jet_cli_perf_outside_family (Outside.jet:503) reads each thread's /proc `children` once, when sampling starts, at most 64 processes. A process started later is never sampled. `jet build` and `jet test` start their compile and link children later, so the command form must follow them as they start. The pid form keeps today's read: children started after the attach are missed, and this ballot leaves that.\n\nThe command's exit code is passed through. The pid form is unchanged. Its window is `--for=<duration>` (D-PERF-ATTACH-WINDOW1, ratified A, built under #6995 c22); until that lands it is a fixed second.\n\n`jet perf test` is unchanged. It profiles the tests' own code from inside. `jet perf attach --lens=counts -- jet test x.jet` measures the whole command: compile, test binary and helpers. Those are two jobs, so nothing is spelled twice.\n\nThe compiler compiling Compiler, the job of #6995 c2, c5 and c11, stays on `jet perf run Compiler/JetCLI/run.jet -- build Compiler`. That runs the compiler from source under the inside engine, with phases and tasks. Attach of `jet build Compiler` is the quick look at an installed jet, for the whole run. It samples 1,000 times a second with frame-pointer stacks. It names functions from the image's symbols and declaration lines. Compile-time code counts as `unnamed`, and phases come from the package split.",
+          "technical": "Session.jet jet_cli_perf_attach: words after `--` are the command. It is spawned stopped, the engines open on its pid before it runs, then it runs.\n\nNew child following, with its costs. The outside sampler today opens per-thread task-clock events (x64_sampler_open) on the threads of the family read at open. The command form opens one sampling event per CPU with `inherit` on the stopped command instead. Inherited sampling events cannot keep today's per-thread ring, so samples arrive through one ring per CPU, tagged by pid and tid.\n\n`counts` opens instructions:u and cycles:u with `inherit` before exec, so threads and children add in, read per process at its exit. Counting needs no ring, so that inherit is cheap. CPU time and peak memory come from each reap's rusage. `syscalls` ptraces the command with fork, vfork, clone and exec following. Each fork then stops for the tracer, and each call stops twice [INFERENCE: the slowdown is unmeasured].\n\nThe pid form refuses `counts` and `syscalls` with E2102 (Jet.UnknownFlag), whose fix is the `--` form: a count or call list missing the start would mislead. The command form refuses `--for=`, `--source` and `--zones=` the same way.\n\nReceipt delta. The `syscalls` section (JetPerfSyscalls) exists: `jet perf run` counts each host call by number and Jet stack (HostProcess.jet host_call). Its rows have no arguments, no pid and no result. Children and the compile are never seen. Runtime calls that bypass host_call are missed too. The command form fills the same section, adding `pid` to each row and a `calls` list: pid, tid, name, decoded arguments, result.\n\nThe bypass count. `git grep -c -E '^\\s*[^/ ].*os_syscall_i64\\(' f768b6597e -- Compiler/JetRuntime/Source` with HostProcess.jet and PerfSamples.jet excluded prints 153 lines in 30 files. It counts call lines only. Comment lines are excluded, and so are host_call itself and the perf hook. The definition is in Compiler/JetBackend/Source/OS/Linux.jet:393, outside that path. The plain `git grep -c os_syscall_i64` there prints 180 lines in 33 files, comments included.\n\nThe `instructions` section (JetPerfInstructions) also exists. It keeps the sampled machine code, not run totals, so it is unchanged. One new section, `counts` (JetPerfCounts), holds the totals: `instructions_u`, `cycles_u`, `cpu_ns`, `peak_rss_bytes`, per process and summed.\n\nRefusals. No new diagnostic code is needed. A kernel without counters makes `counts` `unavailable` with the errno and perf_event_paranoid, as the memory and topdown lenses already report (observability.md, Instructions and lenses). A refused ptrace makes `syscalls` `unavailable` with the errno and the Yama ptrace_scope. The command still runs. E2124 (Jet.AttachTargetNotObserved) keeps its meaning for the pid form alone. A refusal instead would need a new code, E2127 being free, with its registry row, UI snapshot and diagnostics.md entry.",
           "code": "$ jet perf attach --lens=counts -- jet build Compiler\ncounts instructions:u=81204417733 cycles:u=29511803012 cpu_ns=31877000000 peak_rss_bytes=5120000000 processes=3 threads=14\n$ jet perf attach --lens=syscalls -- jet run main.jet\nsyscalls calls=412 processes=2\n  4251 openat(AT_FDCWD, \"main.jet\", O_RDONLY|O_CLOEXEC) = 3\n$ jet perf test hash_test.jet        # unchanged: the tests' code\n$ jet perf run Compiler/JetCLI/run.jet -- build Compiler   # c2: inside"
         },
         {
           "key": "B",
           "name": "`jet perf run --exec`",
           "detail": "`jet perf run` keeps its .jet form and gains `--exec`. Every word after it is the command. The engine, lenses, receipt and refusals are option A's: the outside sampler, `counts` and `syscalls`. That includes A's new work of following children the command starts later, with its costs. `jet perf attach` stays for running pids, missing children started after it attaches, as today.\n\n`jet perf test` refuses `--exec`; `jet perf run --exec jet test x.jet` measures the whole command. For the compiler compiling Compiler, `jet perf run Compiler/JetCLI/run.jet -- build Compiler` stays the inside route. `jet perf run --exec jet build Compiler` is the outside one, with option A's detail and costs.",
-          "technical": "Session.jet jet_cli_perf_session ends its flags at `--exec` and spawns the rest without `jet run --observe`, under the engines of option A. One verb then writes traces from two engines, 8,000 samples a second inside and 1,000 outside. The receipt's `capture.sampling` names which. Outside sampling is reachable from both run and attach.",
-          "code": "$ jet perf run --lens=counts --exec jet build Compiler\n$ jet perf run --lens=syscalls --exec .jet/build/hash data.bin\n$ jet perf attach 4242 --for=20s"
+          "technical": "Session.jet jet_cli_perf_session ends its flags at `--exec` and spawns the rest without `jet run --observe`, under the engines of option A. Run then takes targets it did not build, so it needs attach's per-process choice of how to watch (relay, live records or outside sampler), and both verbs carry that choice. Its traces come from the inside engine at 8,000 samples a second or from outside at 1,000. The receipt's `capture.sampling` names which. Outside sampling is reachable from both run and attach.",
+          "code": "$ jet perf run --lens=counts --exec jet build Compiler\n$ jet perf run --lens=syscalls --exec .jet/build/hash data.bin\n$ jet perf attach 4242"
         },
         {
           "key": "C",
           "name": "New verbs `stat` and `trace`",
           "detail": "Like Linux `perf stat` and `strace`, `jet perf stat <command>` prints the counts and `jet perf trace <command>` the calls when the command ends. `--out` also writes a trace. The engine, receipt and refusals are option A's, including its new work of following children the command starts later, with its costs.\n\nThe perf family then has six verbs that run something: run, test, attach, stat, trace and view. `jet perf stat jet test x.jet` and `jet perf test x.jet` both measure a test run, from outside and from inside. The compiler-compiling-Compiler route is as in A.",
-          "technical": "Two verbs join the perf family in the command registry. Each spawns its command under option A's engines and prints a text report on stderr. The `cpu` outside profile of a launched command has no verb of its own in this option, so `jet perf attach` would still need a launch form for it.",
+          "technical": "Two verbs join the perf family in the command registry. Each spawns its command under option A's engines and prints a text report on stderr. The CPU view of a launched command has no verb of its own in this option, so `jet perf attach` would still need a launch form for it.",
           "code": "$ jet perf stat jet build Compiler\n$ jet perf trace --calls=openat jet run main.jet"
         }
       ],
@@ -126831,11 +126848,11 @@
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "Attach is already the outside engine. Starting the command itself, and newly following the children it starts, gives it the whole run with no new verb.",
+        "why": "Attach is already the verb for a process jet perf did not build, and it already chooses how to watch by what that process offers. Starting the process itself, and following the children it starts, gives it the whole run with no new verb and no second place for that choice.",
         "gains": [
-          "One engine per verb, so a trace's detail is clear from its verb.",
+          "Each verb keeps one rule for its target: run and test build Jet source and watch from inside; attach watches what jet perf did not build.",
           "No new verb and no change to run or test.",
-          "Retires every perf stat, time and strace use in the repo except comparisons."
+          "Retires the perf stat, time and strace rows the census lists. Jetpack's AccessTrace strace and the batch harness's time -v are named as their own work."
         ],
         "losses": [
           {
@@ -126850,24 +126867,24 @@
         "whyNot": [
           {
             "key": "B",
-            "reason": "B puts two engines of different detail under one verb, and outside sampling under two verbs."
+            "reason": "B makes run take targets it did not build, so run and attach would both carry the choice of how to watch, and outside sampling would sit under two verbs."
           },
           {
             "key": "C",
             "reason": "C adds two verbs, and `jet perf stat jet test` overlaps `jet perf test`."
           }
         ],
-        "tradeoff": "Attach's name stretches to a process it starts, in exchange for one engine per verb."
+        "tradeoff": "Attach's name stretches to a process it starts, in exchange for one rule per verb: build-and-watch, or watch what you were given."
       },
       "hybrid": null,
       "ballotMode": "short",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": null,
-      "checkInstructions": "Census: git grep on f768b6597e, Docs and Tower excluded. Every option retires the same rows, since all three share one engine.\n\nRetired by `counts`, each matching its old figure within 1% on one revision. Tools/Perf/CompileThroughput/Throughput.jet runs perf stat and GNU time -v. Tools/Gauntlet/Harness/run.mjs runs perf stat cycles:u over the process tree, named in standings.mjs and measurement-manifest.json. Tools/Perf/AsmParity runs perf stat in AsmParity.mjs and run.jet. Tools/Release/Admit.jet runs perf stat in the speed gate.\n\nAlso retired by `counts`: Tools/Perf/Selfhost/Run.mjs runs /usr/bin/time. Tools/Perf/HelloCompile/Bench.py, Tools/Perf/JetcProfile/Startup/run.jet and Tools/Perf/UnicodeLiteral/Run.jet run time -v.\n\nRetired by `syscalls`, each checking the same facts from `jet perf view --json`. The strace cases are CLICompilerSpeed (two), ControlAndData, Report, TaskgroupStack and JetpackJetOS (two). Tools/Perf/CoreStrace/run.jet takes its strace -c table from the section's per-name totals. Tools/Perf/StdoutBuffer/run.sh counts write and writev.\n\nPartly: Tools/Perf/Scaling (Profile.mjs, Gate/Source/Profile.jet) uses perf record and perf script for timed samples by phase. Outside samples carry no time today (X64Samples: thread, depth, frames). So it moves to the inside route, `jet perf run Compiler/JetCLI/run.jet`.\n\nNot this ballot. Jetpack/CLI/Source/Jobs/AccessTrace.jet runs strace for the cached-job access proof. It is product code that would call the ptrace engine as a library, so it needs its own card row. Tools/Perf/ReadInto (Memory.jet, memory.mjs) runs gdb at exit, #6995 c15.\n\nKept as named comparisons under #6995 c1's allowlist. Tools/Perf/DebugLatency compares with lldb. Tests/Cases/ToolInterop reads Jet output in lldb (four cases) and perf record and report (one). Tools/Perf/Scriptbench runs hyperfine, a peer timing harness. The dev shell (flake.nix) keeps perf and lldb only for those.\n\nFurther cases: counters unavailable (the PerfRun NoCounters seccomp seam), ptrace refused, the exit code passed through, a child left running, and the refused `jet perf stat` hint.",
+      "checkInstructions": "Census: git grep on f768b6597e, re-checked on 97d2a287ab, Docs and Tower excluded. Every option retires the same rows, since all three use the same counting and tracing code.\n\nRetired by `counts`, each matching its old figure within 1% on one revision. Tools/Perf/CompileThroughput/Throughput.jet runs perf stat (Throughput.jet:680). Its --batch form does not run GNU time -v itself: it reads time.txt, which the batch build harness outside the repository writes (Throughput.jet:93-98, :1255-1268), so retiring time -v there changes that harness as well. Tools/Gauntlet/Harness/run.mjs runs perf stat cycles:u over the process tree, named in standings.mjs and measurement-manifest.json. Tools/Perf/AsmParity runs perf stat in AsmParity.mjs and run.jet. Tools/Release/Admit.jet runs perf stat in the speed gate.\n\nAlso retired by `counts`: Tools/Perf/Selfhost/Run.mjs runs /usr/bin/time. Tools/Perf/HelloCompile/Bench.py, Tools/Perf/JetcProfile/Startup/run.jet and Tools/Perf/UnicodeLiteral/Run.jet run time -v.\n\nRetired by `syscalls`, each checking the same facts from `jet perf view --json`. The strace cases are CLICompilerSpeed (two), ControlAndData, Report, TaskgroupStack and JetpackJetOS (two). Tools/Perf/CoreStrace/run.jet takes its strace -c table from the section's per-name totals. Tools/Perf/StdoutBuffer/run.sh counts write and writev.\n\nPartly: Tools/Perf/Scaling (Profile.mjs, Gate/Source/Profile.jet) uses perf record and perf script for timed samples by phase. Outside samples carry no time today (X64Samples: thread, depth, frames). So it moves to the inside route, `jet perf run Compiler/JetCLI/run.jet`.\n\nNot this ballot. Jetpack/CLI/Source/Jobs/AccessTrace.jet runs strace for the cached-job access proof, and Jetpack/CLI/Tests/JobRunner.jet:122 tests it. It is product code that would call the ptrace engine as a library, so it needs its own card row. Tools/Perf/ReadInto (Memory.jet, memory.mjs) runs gdb at exit, #6995 c15.\n\nKept as named comparisons under #6995 c1's allowlist. Tools/Perf/DebugLatency compares with lldb. Tests/Cases/ToolInterop reads Jet output in lldb (four cases) and perf record and report (one). Tools/Perf/Scriptbench runs hyperfine, a peer timing harness. The dev shell (flake.nix) keeps perf and lldb only for those.\n\nFurther cases: counters unavailable (the PerfRun NoCounters seccomp seam), ptrace refused, the exit code passed through, a child left running, and the refused `jet perf stat` hint.\n\nFixtures that stand in for `perf` move with their tools: Tools/Gauntlet/Entries/AsmParity/Fixtures/fake-perf with AsmParity, and Tools/Gauntlet/Entries/ScalingProfile/Fixtures/fake-perf, named in Tools/Gauntlet/Entries/ScalingProfile/entry.json, with Scaling.\n\nJetpackJetOS's strace rows (nixos_migration_protects_stage_before_writing_inputs.case:8-24 runs `strace -f -s 4096 -e trace=%file`) are retired only once `syscalls` decodes the whole file class, which the detail names.",
       "surface": {
         "gist": "How should `jet perf` count the work of, and list the system calls of, a built program or a jet command?",
-        "lesson": "`jet perf run` and `jet perf test` watch a Jet program from inside. `jet perf attach` watches a running process from outside, for one second. Neither starts a built program or a jet command and counts its work or lists its system calls. Those jobs still use Linux `perf stat`, GNU `time` and `strace`.",
+        "lesson": "`jet perf run` and `jet perf test` watch a Jet program from inside. `jet perf attach` watches a running process it did not build, for one second: through what the process publishes, or from outside when it publishes nothing. Neither starts a built program or a jet command and counts its work or lists its system calls. Those jobs still use Linux `perf stat`, GNU `time` and `strace`.",
         "trio": {
           "current": {
             "note": "Today a built program or a jet command is measured with outside tools.",
@@ -126885,7 +126902,7 @@
             "name": "`jet perf attach` can start the command",
             "gist": "Attach watches from outside: a running pid, or a command it starts after `--`.",
             "gains": [
-              "Each verb keeps one engine: run and test inside, attach outside.",
+              "Each verb keeps one rule: run and test build and watch from inside; attach watches what it did not build.",
               "No new verb; `jet perf test` is unchanged.",
               "Counts and calls can cover the whole command, children included."
             ],
@@ -126894,7 +126911,7 @@
               "Following children started later is new work, with its own costs."
             ],
             "proposed": {
-              "code": "$ jet perf attach --lens=counts -- jet build Compiler\n$ jet perf attach --lens=syscalls -- .jet/build/hash data.bin\n$ jet perf attach -- jet check big.jet      # CPU, from outside\n$ jet perf attach 4242 --for=20s            # unchanged pid form"
+              "code": "$ jet perf attach --lens=counts -- jet build Compiler\n$ jet perf attach --lens=syscalls -- .jet/build/hash data.bin\n$ jet perf attach -- jet check big.jet      # CPU, from outside\n$ jet perf attach 4242                      # unchanged pid form"
             }
           },
           {
@@ -126906,7 +126923,7 @@
               "No new verb."
             ],
             "losses": [
-              "Run gets two engines with different detail.",
+              "Run takes targets it did not build, so it needs attach's choice of how to watch.",
               "Run and attach both sample from outside.",
               "Following later children is A's new work and costs."
             ],
@@ -126932,11 +126949,11 @@
         ],
         "recommendation": {
           "rec": "A",
-          "why": "Attach is already the outside engine. Starting the command itself, and newly following the children it starts, gives it the whole run with no new verb.",
+          "why": "Attach is already the verb for a process jet perf did not build, and it already chooses how to watch by what that process offers. Starting the process itself, and following the children it starts, gives it the whole run with no new verb and no second place for that choice.",
           "gains": [
-            "One engine per verb, so a trace's detail is clear from its verb.",
+            "Each verb keeps one rule for its target: run and test build Jet source and watch from inside; attach watches what jet perf did not build.",
             "No new verb and no change to run or test.",
-            "Retires every perf stat, time and strace use in the repo except comparisons."
+            "Retires the perf stat, time and strace rows the census lists. Jetpack's AccessTrace strace and the batch harness's time -v are named as their own work."
           ],
           "losses": [
             {
@@ -126951,14 +126968,14 @@
           "whyNot": [
             {
               "key": "B",
-              "reason": "B puts two engines of different detail under one verb, and outside sampling under two verbs."
+              "reason": "B makes run take targets it did not build, so run and attach would both carry the choice of how to watch, and outside sampling would sit under two verbs."
             },
             {
               "key": "C",
               "reason": "C adds two verbs, and `jet perf stat jet test` overlaps `jet perf test`."
             }
           ],
-          "tradeoff": "Attach's name stretches to a process it starts, in exchange for one engine per verb."
+          "tradeoff": "Attach's name stretches to a process it starts, in exchange for one rule per verb: build-and-watch, or watch what you were given."
         }
       },
       "designAway": [
@@ -126995,7 +127012,7 @@
       "draft": true,
       "status": "rejected",
       "created": "2026-11-20T14:06:03.173Z",
-      "rejectReason": "Fails, code read on f768b6597e. (1) .detail Edge cases says no counters or refused ptrace refuse the run with E2124, but A.technical Refusals and designAway #3 report the lens unavailable and keep E2124 pid-form-only; the .detail text is wrong. (2) \"Attach is already the outside engine\", the one-engine-per-verb gain and whyNot-B are false: jet_cli_perf_attach (Session.jet:358-606) has three engines (devserver browser relay :470-489, the inside live snapshot/flight ring/zones/heap/--source :490-560, the outside sampler only when nothing is published :563-572). (3) attach has no cpu lens: any --lens other than alloc is refused (Session.jet:379-382); the engine is chosen by the absence of a live snapshot. (4) --for= (D-PERF-ATTACH-WINDOW1=A) is not implemented on f768 (refused as unknown at Session.jet:432-434; window fixed at Outside.jet:22), yet the examples show it as existing. (5) \"retires every perf stat, time and strace use except comparisons\" is false: Jetpack/CLI/Source/Jobs/AccessTrace.jet and Jetpack/CLI/Tests/JobRunner.jet:122 keep strace; Throughput.jet --batch reads time.txt written by the outside batch harness (:93-98, :1255-1268). (6) the syscall decode list is too narrow: JetpackJetOS nixos_migration_protects_stage_before_writing_inputs.case:8-24 needs the whole %file class (mkdir, chmod, rename, unlink, stat). Missing from the census: Tools/Gauntlet/Entries/AsmParity/Fixtures/fake-perf and Tools/Gauntlet/Entries/ScalingProfile/{entry.json,Fixtures/fake-perf}."
+      "rejectReason": "Re-review on 97d2a287ab: repairs 1-6 and the fake-perf census hold (attach --out Session.jet:394-398, jet perf compare Command.jet:62, capture.sampling Session.jet:1247, the os_clone_i64/Linux.jet:241 bypass, time -v users all checked). Still false: (1) per-process counts. With inherit a child counter folds into the parent event at exit and the fd reads only the sum; per-process values need inherit_stat with PERF_RECORD_READ plus fork/exit records (a ring, so one event and ring per CPU, since mmap on an inherited per-task event is refused) or ptrace fork-following (contradicting \"ptrace follows forks only when syscalls is asked\"). jet perf reaps only its direct child, and wait4 rusage folds grandchildren into it, so per-process cpu_ns and peak_rss_bytes are not available \"from each reap\". Make counts sum-only, or state the ring or fork-stop cost. [INFERENCE from the perf_event_open(2) and wait4(2) ABI.] Minor: (2) observability.md has no \"Instructions and lenses\" section: memory unavailable is at :315-337, topdown at :597-604, and the paranoid level appears only in the sampler JSON (SourceSampling.jet:648). (3) card shorthand in owner text: \"# c2: inside\" in A code, \"(c2, c5, c11)\" in designAway."
     },
     {
       "id": "D-PERF-ATTACH-WINDOW1",
@@ -130547,6 +130564,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T06:21:01.290Z",
+      "by": "IfHole-6-1-4",
+      "action": "decision.review",
+      "ref": "D-PERF-TARGET1",
+      "note": "rejected: Re-review on 97d2a287ab: repairs 1-6 and the fake-perf census hold (attach --out Session.jet:394-398, jet perf compare Command.jet:62, capture.sampling Session.jet:1247, the os_clone_i64/Linux.jet:241 bypass, time -v users all checked). Still false: (1) per-process counts. With inherit a child counter folds into the parent event at exit and the fd reads only the sum; per-process values need inherit_stat with PERF_RECORD_READ plus fork/exit records (a ring, so one event and ring per CPU, since mmap on an inherited per-task event is refused) or ptrace fork-following (contradicting \"ptrace follows forks only when syscalls is asked\"). jet perf reaps only its direct child, and wait4 rusage folds grandchildren into it, so per-process cpu_ns and peak_rss_bytes are not available \"from each reap\". Make counts sum-only, or state the ring or fork-stop cost. [INFERENCE from the perf_event_open(2) and wait4(2) ABI.] Minor: (2) observability.md has no \"Instructions and lenses\" section: memory unavailable is at :315-337, topdown at :597-604, and the paranoid level appears only in the sampler JSON (SourceSampling.jet:648). (3) card shorthand in owner text: \"# c2: inside\" in A code, \"(c2, c5, c11)\" in designAway."
+    },
+    {
+      "at": "2026-11-21T06:19:02.824Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00ni11n",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T06:18:43.399Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-DEBUG-FOLD1",
+      "note": "review cleared by the edit"
+    },
+    {
+      "at": "2026-11-21T06:17:30.049Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-PERF-TARGET1",
+      "note": "review cleared by the edit"
+    },
     {
       "at": "2026-11-21T06:15:46.511Z",
       "by": "IfHole-6-1-4",
