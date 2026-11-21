@@ -40418,6 +40418,356 @@
       "completedAt": "2026-11-18T01:33:49.782Z",
       "questions": [],
       "retiredAt": "2026-11-21T01:37:39.643Z"
+    },
+    {
+      "id": "c066lqhv",
+      "num": 4941,
+      "title": "Jet Foundation IntegerKinds.jet has unratified I128/U128 rows (S42 closes the integer menu at <=64 bits)",
+      "body": "Found during r12 self-host repair (CheckerCliRoots, 2026-10-09): Docs/spec/syntax-decisions.md S42 (~1050-1052) and the Rust numeric_type_from_name (AST/types.rs ~1104-1125) close the integer menu at <=64 bits, but Compiler/JetFoundation Types/IntegerKinds.jet carries I128/U128 rows with no ratification. JetCli AdaptiveTable used I128 and was moved to Int. Remove the divergent rows (I7/I8), or put 128-bit integers on an owner ballot.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-18",
+          "by": "owner",
+          "text": "Closed by Main on the owner's instruction (2026-11-18: close frozen cards whose work is done, obsolete or duplicate). Duplicate: folded into #5975."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded into #5975 as a criterion (CardTrim 2026-10-28)."
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "wayfinder:task",
+        "trimmed"
+      ],
+      "parentId": "c0spgl2u",
+      "needsAcceptance": false,
+      "created": "2026-10-10T00:11:27.384Z",
+      "updated": "2026-11-18T01:37:40.581Z",
+      "updatedBy": "owner",
+      "completedAt": "2026-11-18T01:37:40.581Z",
+      "questions": [],
+      "retiredAt": "2026-11-21T01:44:31.344Z"
+    },
+    {
+      "id": "c0aq16tk",
+      "num": 4948,
+      "title": "Native user-Rust FFI: cargo metadata forwards only CARGO_NET_OFFLINE (hosted forwards all ambient CARGO_*)",
+      "body": "Parity gap recorded at landing (CliCoreFinish b2c23795f, 2026-10-10). The hosted Rust host (crates FFI.rs:4796) runs  with the inherited ambient environment, so every CARGO_* variable applies. The native Jet port runs metadata inside its mandatory sandbox and forwards only CARGO_NET_OFFLINE. Helper builds match exactly (PATH + CARGO_BUILD_JOBS, fixed private CARGO_HOME/TARGET_DIR/HOME/SOURCE_DATE_EPOCH, synthesized RUSTFLAGS). Effect: users' other cargo settings (registries, proxies, net config) affect hosted metadata but not native. Work: define the forwarded CARGO_* set for native metadata (an owner decision on sandbox policy vs parity) and add tests.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e11",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-18",
+          "by": "owner",
+          "text": "Closed by Main on the owner's instruction (2026-11-18: close frozen cards whose work is done, obsolete or duplicate). Duplicate: folded into #5482."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded into #5482 as a criterion (CardTrim 2026-10-28)."
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "wayfinder:task",
+        "trimmed"
+      ],
+      "parentId": "c0h5gl1x",
+      "needsAcceptance": false,
+      "created": "2026-10-10T05:51:06.694Z",
+      "updated": "2026-11-18T01:37:47.149Z",
+      "updatedBy": "owner",
+      "completedAt": "2026-11-18T01:37:47.149Z",
+      "questions": [],
+      "retiredAt": "2026-11-21T01:44:31.350Z"
+    },
+    {
+      "id": "c0lc8o01",
+      "num": 4951,
+      "title": "Native UI host, browser and Raylib/devtools providers after Rust removal",
+      "body": "Found 2026-10-10 ~03:30 (PortUiBrowser). These runtime families stay entirely non-native tonight (excluded from the Rust-free pack; canonical native refusal): Raylib 7 (dynamic C calls exist, but window open/frame begin/close also call jet_devtools_native_* hooks from the Rust trait registry in jet-foundation DevtoolsNative.rs); UI host 2 (__attach/__dispatch need the scoped JetUiHost capability/binding state, HostServices.rs ~1766-1836); browser 2 (__command needs the shared JetBrowser protocol/event/trace state plus the WS live-writer/TCP authority). Landed natively: UI accessibility/shortcut transfers (757b0e051). Fact sheet with subsystems, source sizes, dependent APIs/tests/examples and options: $JET_SCRATCH_ROOT/PortUiBrowser-owner-ballot.md.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-18",
+          "by": "owner",
+          "text": "Closed by Main on the owner's instruction (2026-11-18: close frozen cards whose work is done, obsolete or duplicate). Duplicate: folded into #4954."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded into #4954 as a criterion (CardTrim 2026-10-28)."
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "wayfinder:task",
+        "trimmed"
+      ],
+      "parentId": "c086hhzb",
+      "needsAcceptance": false,
+      "created": "2026-10-10T06:52:04.331Z",
+      "updated": "2026-11-18T01:37:52.515Z",
+      "updatedBy": "owner",
+      "completedAt": "2026-11-18T01:37:52.515Z",
+      "questions": [],
+      "retiredAt": "2026-11-21T01:44:31.350Z"
+    },
+    {
+      "id": "c0yp2785",
+      "num": 4952,
+      "title": "Native process pipelines (__pipeline_run) after Rust removal",
+      "body": "Non-native tonight (CliCoreFinish, 2026-10-10 ~04:40). Rust Process.rs ~2051-2455 is a separate ~405-line pipeline engine: shared stage budgets, direct-pipe vs bounded-relay transaction, per-stage process-group cleanup and cancellation. It has no faithful native port yet; a serial run or an all-relay approximation would change semantics. The public source pipeline wrapper stays source-owned and the private launch is refused natively (generic missing-provider E2104) until ported. Also non-native: sandbox-bound ProcessSpec (ProcessSandbox.rs, ~1,059 lines: bwrap probe/profiles/secure output dirs). Plain unbound run/spawn/capture IS being ported natively (the native CLI needs it). Tests to restore: pipeline lifecycle/timeout cases.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-18",
+          "by": "owner",
+          "text": "Closed by Main on the owner's instruction (2026-11-18: close frozen cards whose work is done, obsolete or duplicate). Duplicate: folded into #4954."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded into #4954 as a criterion (CardTrim 2026-10-28)."
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "wayfinder:task",
+        "trimmed"
+      ],
+      "parentId": "c086hhzb",
+      "needsAcceptance": false,
+      "created": "2026-10-10T07:06:55.442Z",
+      "updated": "2026-11-18T01:37:56.942Z",
+      "updatedBy": "owner",
+      "completedAt": "2026-11-18T01:37:56.942Z",
+      "questions": [],
+      "retiredAt": "2026-11-21T01:44:31.350Z"
+    },
+    {
+      "id": "c0quz0xg",
+      "num": 4953,
+      "title": "Native UDP after Rust removal (packet schema)",
+      "body": "UDP stays non-native (provisional, 2026-10-10): the legacy JetUDPPacket return ABI has no canonical native schema matching the source Core Packet (data/host/port/original_len/truncated). Six UDP exports were written as groundwork (e9cd09e79), excluded from the pack. Ballot D-NATIVE-UDP1.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-18",
+          "by": "owner",
+          "text": "Closed by Main on the owner's instruction (2026-11-18: close frozen cards whose work is done, obsolete or duplicate). Duplicate: folded into #4954."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded into #4954 as a criterion (CardTrim 2026-10-28)."
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "wayfinder:task",
+        "trimmed"
+      ],
+      "parentId": "c086hhzb",
+      "needsAcceptance": false,
+      "created": "2026-10-10T10:41:19.752Z",
+      "updated": "2026-11-18T01:38:01.466Z",
+      "updatedBy": "owner",
+      "completedAt": "2026-11-18T01:38:01.466Z",
+      "questions": [],
+      "retiredAt": "2026-11-21T01:44:31.359Z"
+    },
+    {
+      "id": "c0nux77t",
+      "num": 5075,
+      "title": "Jetpack: remove the legacy role-file transition and legacy-hangar migration",
+      "body": "Left out of the r16 retired-spelling removal: Jetpack/Environment/Source/Transition/TransitionPlan.jet `env_transition_legacy_plan` (migrates migration-era role files pkg.jet/env.jet/workspace.jet/config.jet into package.jet; Jetpack Foundation still defines PAYLOAD_FILE for it, and CONFIG_FILE is marked retired) and `store_migrate_legacy_hangar` (on-disk store migration on every non-read-only jetpack command). Needs an owner call on which role files are canonical (workspace.jet is still used by the devserver). Then delete both migrations, PAYLOAD_FILE and the retired CONFIG_FILE handling in one cutover.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": "jetpack env --explain",
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-18",
+          "by": "owner",
+          "text": "Closed by Main on the owner's instruction (2026-11-18: close frozen cards whose work is done, obsolete or duplicate). Duplicate: folded into #5895."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded into #5895 as a criterion (CardTrim 2026-10-28)."
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "greenfield",
+        "jetpack",
+        "wayfinder:task",
+        "trimmed"
+      ],
+      "parentId": "c0zvjz0o",
+      "needsAcceptance": false,
+      "created": "2026-10-20T16:43:28.232Z",
+      "updated": "2026-11-18T01:38:05.751Z",
+      "updatedBy": "owner",
+      "completedAt": "2026-11-18T01:38:05.751Z",
+      "questions": [],
+      "retiredAt": "2026-11-21T01:44:31.359Z"
+    },
+    {
+      "id": "c0ui9zol",
+      "num": 6271,
+      "title": "Debug info for optimized builds: DW_TAG_inlined_subroutine entries and location lists for locals at -O1/-O2",
+      "body": "Found by RustOut7-2 while probing lldb on a native jet build at 236cd9310c for #6221 P1. At the default optimization level, inlined functions (e.g. `area`) leave no inlined_subroutine entries, and most locals have no location, so `--release` binaries can't be debugged meaningfully. #6221 P1 covers aggregate type DWARF and makes `jet debug` build with optimize=none/inline=off. This card covers the optimized tiers, which C compilers support (gcc/clang -O2 -g).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P3",
+      "plan": "Emit DW_TAG_inlined_subroutine with call-site file/line for every inlined call, and location lists for locals across register allocation. Verify with lldb on a -O2 probe: break in an inlined function, show frames, print locals.",
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-18",
+          "by": "owner",
+          "text": "Closed by Main on the owner's instruction (2026-11-18: close frozen cards whose work is done, obsolete or duplicate). Duplicate: folded into #6730."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Folded into #6730 (D-G5-7): one debugger card."
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-29T22:01:50.969Z",
+      "updated": "2026-11-18T01:38:10.075Z",
+      "updatedBy": "owner",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-18T01:38:10.075Z",
+      "questions": [],
+      "retiredAt": "2026-11-21T01:44:31.359Z"
+    },
+    {
+      "id": "c0tc8fct",
+      "num": 6573,
+      "title": "JetDevserver Canvas debug: run_session_recorded and run_session_replay are called but defined nowhere",
+      "body": "Compiler/JetDevserver/Source/Canvas/DebugSourceGit.jet:158 and :177 call run_session_recorded(path) and run_session_replay(path, history, refs) for the record-and-replay debug tier (wire value jet-dev-interpreter, being renamed jet-dev-replay under #6571). No definition exists anywhere in the repository, so that tier has no implementation, and the 12 tests/cases debug fixtures that select it cannot be proving it. Build the recording run and the replay natively at O0 (D-EXEC2=A: the program runs as native code and records its trace; replay reads the trace and never interprets), or remove the tier if NativeLldb covers it. Also find out how JetDevserver builds at all with unresolved calls (whether it's excluded from the compiler build or check). Check the duplicate-card hits Tower reported when this card was first added.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-18",
+          "by": "owner",
+          "text": "Closed by Main on the owner's instruction (2026-11-18: close frozen cards whose work is done, obsolete or duplicate). Duplicate: folded into #6618."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Folded into #6618 (D-G5-3): one Canvas card."
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-05T21:45:12.492Z",
+      "updated": "2026-11-18T01:38:14.405Z",
+      "updatedBy": "owner",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-18T01:38:14.404Z",
+      "questions": [],
+      "retiredAt": "2026-11-21T01:44:31.359Z"
     }
   ]
 }
