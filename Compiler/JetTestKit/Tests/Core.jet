@@ -22,6 +22,13 @@ kit_test_checkout_options: fn(root: String) -> KitOptions {
     options
 }
 
+// A run's own limits at the default `--timeout` (kit_run_limits), for a
+// self-test whose child is a Jet compiler, real or a script double: a build
+// on a loaded host takes far longer than a few seconds of wall time.
+kit_test_run_limits: fn() -> KitLimits {
+    kit_run_limits(kit_exec_defaults().timeout) ?? panic("run limits: {err}")
+}
+
 #Test("report statuses have distinct exit codes") {
     passed: KitCaseResult{suite: "golden", case: "a", tier: "o0", status: "PASS", detail: "", exit: 0}
     failed: KitCaseResult{suite: "golden", case: "b", tier: "o0", status: "FAIL", detail: "", exit: 1}

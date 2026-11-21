@@ -131,7 +131,9 @@ cases_test_other_host: fn(kind: String) -> String {
     context := cases_test_context(root, files.join(root, "scratch"))
     context.env.jet = cases_test_real_jet("for the free-port self-test")
     context.env.root = files.cwd() ?? panic("free-port probe source root")
-    context.env.timeout = 600s
+    limits: kit_test_run_limits()
+    context.env.timeout = limits.wall
+    context.env.cpu_limit = Val(limits.cpu)
     assert_eq(kit_cases_run(cases_test_entry("ports"), context)[0].verdict.status, "PASS")
     cases_test_source(root, "ports-wrong", "step: printf \"%s\" {{free-port:app}}\nstdout: = \"wrong\"\n")
     assert_eq(kit_cases_run(cases_test_entry("ports-wrong"), context)[0].verdict.status, "FAIL")
@@ -145,7 +147,9 @@ cases_test_other_host: fn(kind: String) -> String {
     context := cases_test_context(root, files.join(root, "scratch"))
     context.env.jet = cases_test_real_jet("for the free-port self-test")
     context.env.root = files.cwd() ?? panic("free-port probe source root")
-    context.env.timeout = 600s
+    limits: kit_test_run_limits()
+    context.env.timeout = limits.wall
+    context.env.cpu_limit = Val(limits.cpu)
     assert_eq(kit_cases_run(cases_test_entry("template"), context)[0].verdict.status, "PASS")
     files.remove_all(root) ?? panic("remove template free-port scratch")
 }
@@ -192,7 +196,9 @@ cases_test_other_host: fn(kind: String) -> String {
     context := cases_test_context(root, files.join(root, "scratch"))
     context.env.jet = cases_test_real_jet("for the free-port self-test")
     context.env.root = files.cwd() ?? panic("free-port probe source root")
-    context.env.timeout = 600s
+    limits: kit_test_run_limits()
+    context.env.timeout = limits.wall
+    context.env.cpu_limit = Val(limits.cpu)
     assert_eq(kit_cases_run(cases_test_entry("lease"), context)[0].verdict.status, "PASS")
     port: Int.parse((files.read(recorded) ?? panic("the case recorded no port: {err}")).trim()) ?? panic("the case recorded a line that is not a port")
     range: files.read("/proc/sys/net/ipv4/ip_local_port_range") ?? panic("the kernel's ephemeral port range: {err}")
