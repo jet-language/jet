@@ -390,7 +390,11 @@ line would save that wait too. A thread that was blocked (its last
 sample is more than 5 ms old and it has since given up its CPU of its own
 accord, not merely been preempted) owes nothing for the time it was blocked.
 A task's start forgives its worker the delays before it, and a task's end
-pays its own before its joiner sees it. A thread another thread wakes from
+pays its own before its joiner sees it, all of them: a pause can end owing
+a delay a line's sample counted meanwhile, so the end pauses again until
+it owes none. Left owing, that delay would be one no thread paid, since
+its joiner is forgiven it, and the experiment would still take it off its
+time, so every gain would read high. A thread another thread wakes from
 a park owes nothing for the delays inserted while it was parked, as in
 Coz: its waker paid them. Charged them, a thread that joins short tasks
 would pause for them again on the program's critical path. Other delays
