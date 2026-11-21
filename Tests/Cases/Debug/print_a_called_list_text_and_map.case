@@ -20,11 +20,11 @@ stdout: ~ "\nwords(\"xy\", 3).len() = 6\n" # and its length
 stdout: ~ "\ncounts(\"k\", 7) = [\"k\": 7]\n" # a map
 stdout: ~ "\ncounts(\"k\", 7).len() = 1\n" # and its length
 stdout: ~ "\nheld_numbers(3, 2) = Ok([3, 4])\n" # the same, from a function used as a value
-stdout: ~ "\nheld_numbers(3, 2).len() = Ok(2)\n"
-stdout: ~ "\nheld_words(\"xy\", 3) = Ok(\"xyxyxy\")\n"
-stdout: ~ "\nheld_words(\"xy\", 3).len() = Ok(6)\n"
-stdout: ~ "\nheld_counts(\"k\", 7) = Ok([\"k\": 7])\n"
-stdout: ~ "\nheld_counts(\"k\", 7).len() = Ok(1)\n"
+stdout: ~ "\nheld_numbers(3, 2).len() = Ok(2)\n" # its length, kept as Ok
+stdout: ~ "\nheld_words(\"xy\", 3) = Ok(\"xyxyxy\")\n" # a text from a function used as a value
+stdout: ~ "\nheld_words(\"xy\", 3).len() = Ok(6)\n" # its length, kept as Ok
+stdout: ~ "\nheld_counts(\"k\", 7) = Ok([\"k\": 7])\n" # a map from a function used as a value
+stdout: ~ "\nheld_counts(\"k\", 7).len() = Ok(1)\n" # its length, kept as Ok
 stdout: ~ "14\nProgram finished\n" # the evaluations left the program's run unchanged
 step: jet build -O1 prog.jet
 exit: 0
@@ -34,18 +34,18 @@ stdin: print_a_called_list_text_and_map.stdin
 exit: 0
 stdout: ~ "Breakpoint hit  prog.jet:46  in run()" # the same stop on O1
 stdout: ~ "\nnumbers(3, 2) = [3, 4]\n" # the same values on O1
-stdout: ~ "\nnumbers(3, 2).len() = 2\n"
-stdout: ~ "\nwords(\"xy\", 3) = \"xyxyxy\"\n"
-stdout: ~ "\nwords(\"xy\", 3).len() = 6\n"
-stdout: ~ "\ncounts(\"k\", 7) = [\"k\": 7]\n"
-stdout: ~ "\ncounts(\"k\", 7).len() = 1\n"
-stdout: ~ "\nheld_numbers(3, 2) = Ok([3, 4])\n"
-stdout: ~ "\nheld_numbers(3, 2).len() = Ok(2)\n"
-stdout: ~ "\nheld_words(\"xy\", 3) = Ok(\"xyxyxy\")\n"
-stdout: ~ "\nheld_words(\"xy\", 3).len() = Ok(6)\n"
-stdout: ~ "\nheld_counts(\"k\", 7) = Ok([\"k\": 7])\n"
-stdout: ~ "\nheld_counts(\"k\", 7).len() = Ok(1)\n"
-stdout: ~ "14\nProgram finished\n"
+stdout: ~ "\nnumbers(3, 2).len() = 2\n" # its length on O1
+stdout: ~ "\nwords(\"xy\", 3) = \"xyxyxy\"\n" # a text on O1
+stdout: ~ "\nwords(\"xy\", 3).len() = 6\n" # its length on O1
+stdout: ~ "\ncounts(\"k\", 7) = [\"k\": 7]\n" # a map on O1
+stdout: ~ "\ncounts(\"k\", 7).len() = 1\n" # its length on O1
+stdout: ~ "\nheld_numbers(3, 2) = Ok([3, 4])\n" # the same, from a function used as a value on O1
+stdout: ~ "\nheld_numbers(3, 2).len() = Ok(2)\n" # its length, kept as Ok on O1
+stdout: ~ "\nheld_words(\"xy\", 3) = Ok(\"xyxyxy\")\n" # a text from a function used as a value on O1
+stdout: ~ "\nheld_words(\"xy\", 3).len() = Ok(6)\n" # its length, kept as Ok on O1
+stdout: ~ "\nheld_counts(\"k\", 7) = Ok([\"k\": 7])\n" # a map from a function used as a value on O1
+stdout: ~ "\nheld_counts(\"k\", 7).len() = Ok(1)\n" # its length, kept as Ok on O1
+stdout: ~ "14\nProgram finished\n" # the evaluations left the run unchanged on O1
 step: jet build -O2 prog.jet
 exit: 0
 step console_o2: jet debug {work}/.jet/build/prog --break prog.jet:46
@@ -54,15 +54,15 @@ stdin: print_a_called_list_text_and_map.stdin
 exit: 0
 stdout: ~ "Breakpoint hit  prog.jet:46  in run()" # the same stop on O2
 stdout: ~ "\nnumbers(3, 2) = [3, 4]\n" # the same values on O2
-stdout: ~ "\nnumbers(3, 2).len() = 2\n"
-stdout: ~ "\nwords(\"xy\", 3) = \"xyxyxy\"\n"
-stdout: ~ "\nwords(\"xy\", 3).len() = 6\n"
-stdout: ~ "\ncounts(\"k\", 7) = [\"k\": 7]\n"
-stdout: ~ "\ncounts(\"k\", 7).len() = 1\n"
-stdout: ~ "\nheld_numbers(3, 2) = Ok([3, 4])\n"
-stdout: ~ "\nheld_numbers(3, 2).len() = Ok(2)\n"
-stdout: ~ "\nheld_words(\"xy\", 3) = Ok(\"xyxyxy\")\n"
-stdout: ~ "\nheld_words(\"xy\", 3).len() = Ok(6)\n"
-stdout: ~ "\nheld_counts(\"k\", 7) = Ok([\"k\": 7])\n"
-stdout: ~ "\nheld_counts(\"k\", 7).len() = Ok(1)\n"
-stdout: ~ "14\nProgram finished\n"
+stdout: ~ "\nnumbers(3, 2).len() = 2\n" # its length on O2
+stdout: ~ "\nwords(\"xy\", 3) = \"xyxyxy\"\n" # a text on O2
+stdout: ~ "\nwords(\"xy\", 3).len() = 6\n" # its length on O2
+stdout: ~ "\ncounts(\"k\", 7) = [\"k\": 7]\n" # a map on O2
+stdout: ~ "\ncounts(\"k\", 7).len() = 1\n" # its length on O2
+stdout: ~ "\nheld_numbers(3, 2) = Ok([3, 4])\n" # the same, from a function used as a value on O2
+stdout: ~ "\nheld_numbers(3, 2).len() = Ok(2)\n" # its length, kept as Ok on O2
+stdout: ~ "\nheld_words(\"xy\", 3) = Ok(\"xyxyxy\")\n" # a text from a function used as a value on O2
+stdout: ~ "\nheld_words(\"xy\", 3).len() = Ok(6)\n" # its length, kept as Ok on O2
+stdout: ~ "\nheld_counts(\"k\", 7) = Ok([\"k\": 7])\n" # a map from a function used as a value on O2
+stdout: ~ "\nheld_counts(\"k\", 7).len() = Ok(1)\n" # its length, kept as Ok on O2
+stdout: ~ "14\nProgram finished\n" # the evaluations left the run unchanged on O2
