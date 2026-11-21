@@ -1,18 +1,20 @@
 # A build step runs only in the native sandbox, whose Bubblewrap is the `bwrap`
 # on PATH, else Jet's hash-pinned copy in the Hangar (installed from beside jet,
 # or fetched on first need). With neither usable (PATH holds only `sh` for the
-# fixture's probe, the Hangar is empty, no copy is beside the kit's jet, and
-# the fetch is refused) the build is refused before any step runs, and E3505
-# names both and the fetch.
+# fixture's probe, the Hangar is empty, the fetch is refused, and the jet that
+# runs is a lone copy, so no copy is beside it whatever the kit ships next to
+# its own jet) the build is refused before any step runs, and E3505 names both
+# and the fetch.
 fixture: Fixtures/DeclaredStepRunsWithOnlyItsDeclaredFiles
 requires: os-name:linux
 requires: arch:x86_64
 mkdir: {tmp}/no-bwrap
+copy: {jet} {tmp}/lone/jet
 symlink: /bin/sh {tmp}/no-bwrap/sh
 env: NO_COLOR=1
 env: PATH={tmp}/no-bwrap
 env: JETPACK_DENY_NETWORK=1
 env: JET_BWRAP_URL=https://example.invalid/jet-bwrap-x86_64-linux
-step: jet build main.jet --allow=Exec,FS
+step: {tmp}/lone/jet build main.jet --allow=Exec,FS
 exit: nonzero
 stderr: = build-step-without-any-usable-bubblewrap.stderr
