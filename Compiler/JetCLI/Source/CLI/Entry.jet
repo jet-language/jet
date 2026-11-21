@@ -1382,17 +1382,19 @@ jet_cli_workspace_check_entries: fn(dir: String, color: Bool, notices: &[String]
     JetCLIWorkspaceCheck.Members{entries: entries}
 }
 
-// `jet test` of a workspace root tests every member that can run it
-// (Host.jet `jet_cli_test_workspace`): their names and directories, in
-// index order. Absent when the directory is not a workspace index or at
-// most one member can run, which resolves as a bare `jet test` does.
+// `jet test` or `jet doc` of a workspace root runs in each member that can
+// run the command (Host.jet `jet_cli_test_workspace`): their names and
+// directories, in index order, or only the members `argv` picks with
+// `-p <member>` or `-p=<member>` before any `--`. Absent when the directory
+// is not a workspace index, or nothing is picked and at most one member can
+// run, which resolves as a bare command does.
 JetCLIWorkspaceTest: enum {
     Absent,
     Members(names: [String], directories: [String]),
     Refused(plan: JetCLIPlan),
 }
 
-jet_cli_workspace_test_members: fn(dir: String, use_override: Bool, color: Bool, notices: &[String]) -[FS, Env]> JetCLIWorkspaceTest Never! {
+jet_cli_workspace_fan_out_members: fn(dir: String, command: String, argv: [String], use_override: Bool, color: Bool, notices: &[String]) -[FS, Env]> JetCLIWorkspaceTest Never! {
     root: cli_files.realpath(dir) ?? return JetCLIWorkspaceTest.Absent
     index_path := ""
     if jet_cli_workspace_source(root, color) == {
@@ -1400,23 +1402,60 @@ jet_cli_workspace_test_members: fn(dir: String, use_override: Bool, color: Bool,
         .Absent | .Authority(_) | .Failed(_) -> return JetCLIWorkspaceTest.Absent
     }
     members := [JetCLIWorkspaceMember]{}
-    if jet_cli_workspace_members(root, index_path, "test", color) == {
+    if jet_cli_workspace_members(root, index_path, command, color) == {
         .Refused(refusal) -> return JetCLIWorkspaceTest.Refused{plan: refusal}
         .Members(found) -> members = found
     }
     runnable := [JetCLIWorkspaceMember]{}
-    if jet_cli_workspace_runnable(root, members, "test", use_override, color, notices) == {
+    if jet_cli_workspace_runnable(root, members, command, use_override, color, notices) == {
         .Refused(refusal) -> return JetCLIWorkspaceTest.Refused{plan: refusal}
         .Found(scanned) -> runnable = scanned.members
     }
-    if runnable.len() < 2 -> return JetCLIWorkspaceTest.Absent
+    picks := [Int]{}
+    picked := false
+    loop (index, item) in argv {
+        if item == "--" -> break
+        refusal := JetCLIPlan?{None}
+        if {
+            item.starts_with("-p=") -> {
+                refusal = jet_cli_workspace_pick(runnable, item.slice(3..<item.len()), command, color, picks)
+            }
+            item == "-p" && index + 1 < argv.len() -> {
+                refusal = jet_cli_workspace_pick(runnable, argv[index + 1], command, color, picks)
+            }
+            else -> next
+        }
+        if refusal == .Val(plan) -> return JetCLIWorkspaceTest.Refused{plan: plan}
+        picked = true
+    }
+    if !picked && runnable.len() < 2 -> return JetCLIWorkspaceTest.Absent
     names := [String]{}
     directories := [String]{}
+    at := 0
     loop member in runnable {
-        names.push(member.name)
-        directories.push(jet_cli_entry_join(root, member.path))
+        if !picked || picks.contains(at) {
+            names.push(member.name)
+            directories.push(jet_cli_entry_join(root, member.path))
+        }
+        at += 1
     }
     JetCLIWorkspaceTest.Members{names: names, directories: directories}
+}
+
+// Adds the index of the member of `runnable` named `want` to `picks`, once;
+// the refusal, naming the members that can run `jet <command>`, when none is.
+jet_cli_workspace_pick: fn(runnable: [JetCLIWorkspaceMember], want: String, command: String, color: Bool, picks: &[Int]) -> JetCLIPlan? Never! {
+    loop (at, candidate) in runnable {
+        if candidate.name == want {
+            if !picks.contains(at) -> picks.push(at)
+            return None
+        }
+    }
+    hint := "pick one of:"
+    loop (at, member) in runnable {
+        hint = if at == 0 -> "{hint} {member.name}" else -> "{hint}, {member.name}"
+    }
+    Val(jet_cli_fail("E2104", "no workspace member named `{want}` can run `jet {command}`", jet_cli_why("E2104"), hint, color, JET_DRIVER_EXIT_USAGE))
 }
 
 // `missing_bare_entry`: no file and no project (E2104). `jet dev` names what

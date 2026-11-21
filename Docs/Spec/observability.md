@@ -1100,11 +1100,13 @@ command with the kernel's task clock opened on it on each online CPU, with
 jet's terminal; a word without a `/` is looked up on `PATH`. After it ends
 the attach prints the `functions` lines and the trace's path, the trace
 holds the `functions` and `timeline` sections, its run window is the
-command's whole run, and it exits with the command's exit code. A process
-names its frames when its first sample is read, every 20 ms, so a process
-that ends sooner may leave its samples `unnamed`. When the kernel won't
-sample it, the attach is `Jet.DriverOperationFailed` (exit 1) and the
-command doesn't run. `jet perf attach --quiet --out
+command's whole run, and it exits with the command's exit code. The kernel
+also reports each mapping of code the command's processes make and each
+process they start, so a process's frames are named by where it mapped its
+code, read from the mapped files, even when it ended before its first
+sample was read. When the kernel won't sample it, the attach is
+`Jet.DriverOperationFailed` (exit 1) and the command doesn't run.
+`jet perf attach --quiet --out
 profile.jettrace -- jet check Compiler` profiles the compiler compiling
 itself, its timeline split by the phases of its `--trace-out` trace, as
 Tools/Perf/Scaling/Profile.mjs does.

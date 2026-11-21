@@ -1,7 +1,7 @@
 // Pure provider witnesses. Transport permission/pid/race checks need the composed
 // CLI + Core native FS provider; these tests make no hosted parity claim.
 use {
-    jet_backend.[X64Counted, X64DebugEncoding, X64ImageFunction, X64Jetline, X64JetlineFunction, X64LineRow, x64_jetline_rows]
+    jet_backend.[X64Counted, X64DebugEncoding, X64ImageFunction, X64Jetline, X64JetlineFunction, X64LineRow, X64SampleMapping, x64_jetline_rows]
     jet_cli.[
         JET_CLI_PERF_OBJECT_SOCKET,
         JET_CLI_PERF_SAMPLE_US,
@@ -40,6 +40,7 @@ use {
         JetCLIPerfZoneTotal,
         JetCLIPerfZonesWindow,
         jet_cli_canvas_profile_instructions,
+        jet_cli_find_words,
         jet_cli_perf_attach_closed,
         jet_cli_perf_attach_keep_window,
         jet_cli_perf_attach_zoned,
@@ -74,7 +75,9 @@ use {
         jet_cli_perf_outside_fold,
         jet_cli_perf_outside_folded,
         jet_cli_perf_outside_function,
+        jet_cli_perf_outside_hex,
         jet_cli_perf_outside_lines,
+        jet_cli_perf_outside_recorded,
         jet_cli_perf_outside_timeline,
         jet_cli_perf_outside_tree_add,
         jet_cli_perf_pc_json,
@@ -1641,6 +1644,36 @@ jet_cli_perf_test_corrupt: fn(shared: Int, back: Int, chained: Int) -> [U8] Neve
     section: jet_cli_perf_outside_timeline(fold, 1700000000000000000)
     assert_eq(section.type_name, "JetPerfTimeline")
     assert_eq(String.from_bytes(canonical_json_bytes(section.value)) ?? "", "{{\"dropped\":0,\"functions\":[{{\"name\":\"main\",\"self\":0,\"total\":0}},{{\"name\":\"work\",\"self\":0,\"total\":0}}],\"nodes\":[0,-1,1,0],\"origin_unix_ns\":1700000000000000000,\"period_ns\":1000000,\"samples\":[1000,1,1500,-1,2000,0]}}\n")
+}
+
+// A sampled command's process names its code by the mappings the kernel
+// reported it made, so one that has ended, with no /proc entry left, still
+// does; one that made none since its fork runs its parent's, and a
+// mapping made before its execve is its old image's, not its new one's.
+#Test("an outside attach names an ended process's code by the mappings the kernel reported") {
+    exe: perf_test_files.read_link("/proc/self/exe") ?? panic("this test's executable can't be found")
+    maps: perf_test_files.read("/proc/self/maps") ?? panic("this test's mappings can't be read")
+    fold := jet_cli_perf_outside_fold()
+    // Pids past the kernel's largest, so no /proc entry names them.
+    ended: 1073741823
+    child: 1073741822
+    loop line in maps.split("\n").to_list() {
+        words: jet_cli_find_words(line)
+        if words.len() < 6 || !words[1].contains("x") || words[5] != exe -> next
+        bounds: words[0].split("-").to_list()
+        start: jet_cli_perf_outside_hex(bounds[0]) ?? next
+        end: jet_cli_perf_outside_hex(bounds[1]) ?? next
+        offset: jet_cli_perf_outside_hex(words[2]) ?? next
+        fold.mappings.push(X64SampleMapping{pid: ended, start: start, end: end, offset: offset, path: exe, time: 20})
+    }
+    assert(fold.mappings.len() > 0, "this test's executable maps its code")
+    named: jet_cli_perf_outside_recorded(fold, ended)
+    assert_eq(named.len(), fold.mappings.len())
+    loop range in named { assert(range.image >= 0, "an image of the mapped file holds the code") }
+    fold.parents[child] = ended
+    assert_eq(jet_cli_perf_outside_recorded(fold, child).len(), named.len())
+    fold.execs[ended] = 30
+    assert_eq(jet_cli_perf_outside_recorded(fold, ended).len(), 0)
 }
 
 // Past the task row limit, the tasks with the fewest CPU-time samples have

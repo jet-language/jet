@@ -1,0 +1,36 @@
+// A sampled run (Image/Loader.jet x64_sampled_start) starts a command with
+// the kernel's task clock sampling it and every process it starts, and its
+// rings carry, beside the samples, where each of those processes mapped
+// its code and which process started which, so the code is named by where
+// it was mapped even once its process has ended.
+use jet_backend.[X64SampleMapping, X64Samples, x64_sampled_close, x64_sampled_reaped, x64_sampled_start, x64_sampler_drain]
+
+#Test("a sampled command's rings report the code its processes mapped and the processes it started") {
+    // A shell that starts another before it spins, so it forks one. A CPU
+    // that isn't online is left out.
+    cpus: loop cpu in 0..<256 -> cpu
+    run := x64_sampled_start("/bin/sh", [String]{"sh", "-c", "/bin/sh -c 'exit 0'; i=0; while [ $i -lt 20000 ]; do i=$((i+1)); done"}, None, cpus, 1000000)
+    if run.failure.starts_with("the kernel won't sample it") {
+        return
+    }
+    assert_eq(run.failure, "")
+    root: run.command.child
+    taken := X64Samples{words: [Int]{}, execs: [Int]{}, maps: [X64SampleMapping]{}, forks: [Int]{}, samples: 0, lost: 0}
+    loop !x64_sampled_reaped(run) -> x64_sampler_drain(run.sampler, taken)
+    x64_sampler_drain(run.sampler, taken)
+    x64_sampled_close(run)
+    assert_eq(run.status & 0xffff, 0)
+    rooted := false
+    loop mapping in taken.maps {
+        assert(mapping.end > mapping.start, "a mapping holds code")
+        if mapping.pid == root && mapping.path.starts_with("/") -> rooted = true
+    }
+    assert(rooted, "the command's execve mapped its executable's code from its file")
+    started := false
+    at := 0
+    loop at + 1 < taken.forks.len() {
+        if taken.forks[at + 1] == root && taken.forks[at] != root -> started = true
+        at += 2
+    }
+    assert(started, "the process the shell forked names the shell as its parent")
+}

@@ -818,147 +818,147 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3370,
+      "line": 3393,
       "column": 5,
       "reason": "`attr` is the fresh zeroed page just mapped: the attribute block at its start, the clock's two words at its middle"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3382,
+      "line": 3405,
       "column": 1,
       "reason": "the caller's zeroed attribute block `attr`, LOADER_PERF_ATTR_SIZE bytes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3397,
+      "line": 3420,
       "column": 1,
       "reason": "`attr` is the caller's attribute block, which perf_event_open only reads; the ring is a fresh shared mapping of the event's own descriptor"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3423,
+      "line": 3446,
       "column": 1,
       "reason": "clock_gettime writes two words at the caller's `scratch`, read before the next"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3437,
+      "line": 3460,
       "column": 9,
       "reason": "the ring is this sampler's live shared mapping: its header page, then `size` data bytes the kernel wrote up to data_head, read before data_tail lets it write there again"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3527,
+      "line": 3580,
       "column": 5,
       "reason": "the attribute block goes to the command's fresh page's attribute words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3540,
+      "line": 3593,
       "column": 5,
       "reason": "clock_gettime writes the command's page's read words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3678,
+      "line": 3731,
       "column": 5,
       "reason": "each pipe2 writes its two descriptors to the fresh page's status word, which is read before the next"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3694,
+      "line": 3747,
       "column": 9,
       "reason": "fork copies this thread alone; the child makes only system calls on words computed before the fork and on its copy of the page, allocating nothing, so no lock another thread held at the fork can stop it; execve reads the argument block"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3730,
+      "line": 3783,
       "column": 5,
       "reason": "the go byte of the command's page to the child's pipe"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3738,
+      "line": 3791,
       "column": 5,
       "reason": "read fills the failed execve's word of the command's page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3757,
+      "line": 3810,
       "column": 5,
       "reason": "wait4 writes the int status and the rusage to the command's page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3768,
+      "line": 3821,
       "column": 5,
       "reason": "the command's page holds the wait status and rusage its reap wrote"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3797,
+      "line": 3850,
       "column": 5,
       "reason": "the attributes go to the command's fresh page's attribute words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3817,
+      "line": 3870,
       "column": 5,
       "reason": "each read goes to the command's page's read words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3831,
+      "line": 3884,
       "column": 1,
       "reason": "pipe2 writes two int descriptors to the caller's word `word`, read at once"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3845,
+      "line": 3898,
       "column": 1,
       "reason": "close, read, rt_sigaction, rt_sigprocmask, execve, write and exit_group of the child's own descriptors and itself; `page` is its copy of the counted run's page, whose start is a zeroed sigaction, and execve reads the argument block"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3868,
+      "line": 3921,
       "column": 1,
       "reason": "the attributes go to the caller's zeroed counted-run page `page`, which perf_event_open only reads"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3900,
+      "line": 3953,
       "column": 5,
       "reason": "the attributes go to the fresh page's attribute words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3919,
+      "line": 3972,
       "column": 5,
       "reason": "each read goes to the counters' own page's read words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3932,
+      "line": 3985,
       "column": 1,
       "reason": "read fills three words of the caller's counted-run page `page`"
     },
@@ -1777,7 +1777,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetCLI/Source/CLI/Host.jet",
-      "line": 2521,
+      "line": 2532,
       "column": 9,
       "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit"
     },
@@ -12040,27 +12040,27 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3217:9 | "SIGKILL to the helper's own tracee" |
 | Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3228:17 | "the helper's PTRACE_CONT of a stopped thread of its own tracee, which the kill ends" |
 | Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3247:9 | "wait4 of our own child, the helper, keeping no status" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3370:5 | "`attr` is the fresh zeroed page just mapped: the attribute block at its start, the clock's two words at its middle" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3382:1 | "the caller's zeroed attribute block `attr`, LOADER_PERF_ATTR_SIZE bytes" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3397:1 | "`attr` is the caller's attribute block, which perf_event_open only reads; the ring is a fresh shared mapping of the event's own descriptor" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3423:1 | "clock_gettime writes two words at the caller's `scratch`, read before the next" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3437:9 | "the ring is this sampler's live shared mapping: its header page, then `size` data bytes the kernel wrote up to data_head, read before data_tail lets it write there again" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3527:5 | "the attribute block goes to the command's fresh page's attribute words" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3540:5 | "clock_gettime writes the command's page's read words" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3678:5 | "each pipe2 writes its two descriptors to the fresh page's status word, which is read before the next" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3694:9 | "fork copies this thread alone; the child makes only system calls on words computed before the fork and on its copy of the page, allocating nothing, so no lock another thread held at the fork can stop it; execve reads the argument block" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3730:5 | "the go byte of the command's page to the child's pipe" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3738:5 | "read fills the failed execve's word of the command's page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3757:5 | "wait4 writes the int status and the rusage to the command's page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3768:5 | "the command's page holds the wait status and rusage its reap wrote" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3797:5 | "the attributes go to the command's fresh page's attribute words" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3817:5 | "each read goes to the command's page's read words" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3831:1 | "pipe2 writes two int descriptors to the caller's word `word`, read at once" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3845:1 | "close, read, rt_sigaction, rt_sigprocmask, execve, write and exit_group of the child's own descriptors and itself; `page` is its copy of the counted run's page, whose start is a zeroed sigaction, and execve reads the argument block" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3868:1 | "the attributes go to the caller's zeroed counted-run page `page`, which perf_event_open only reads" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3900:5 | "the attributes go to the fresh page's attribute words" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3919:5 | "each read goes to the counters' own page's read words" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3932:1 | "read fills three words of the caller's counted-run page `page`" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3393:5 | "`attr` is the fresh zeroed page just mapped: the attribute block at its start, the clock's two words at its middle" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3405:1 | "the caller's zeroed attribute block `attr`, LOADER_PERF_ATTR_SIZE bytes" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3420:1 | "`attr` is the caller's attribute block, which perf_event_open only reads; the ring is a fresh shared mapping of the event's own descriptor" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3446:1 | "clock_gettime writes two words at the caller's `scratch`, read before the next" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3460:9 | "the ring is this sampler's live shared mapping: its header page, then `size` data bytes the kernel wrote up to data_head, read before data_tail lets it write there again" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3580:5 | "the attribute block goes to the command's fresh page's attribute words" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3593:5 | "clock_gettime writes the command's page's read words" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3731:5 | "each pipe2 writes its two descriptors to the fresh page's status word, which is read before the next" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3747:9 | "fork copies this thread alone; the child makes only system calls on words computed before the fork and on its copy of the page, allocating nothing, so no lock another thread held at the fork can stop it; execve reads the argument block" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3783:5 | "the go byte of the command's page to the child's pipe" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3791:5 | "read fills the failed execve's word of the command's page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3810:5 | "wait4 writes the int status and the rusage to the command's page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3821:5 | "the command's page holds the wait status and rusage its reap wrote" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3850:5 | "the attributes go to the command's fresh page's attribute words" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3870:5 | "each read goes to the command's page's read words" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3884:1 | "pipe2 writes two int descriptors to the caller's word `word`, read at once" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3898:1 | "close, read, rt_sigaction, rt_sigprocmask, execve, write and exit_group of the child's own descriptors and itself; `page` is its copy of the counted run's page, whose start is a zeroed sigaction, and execve reads the argument block" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3921:1 | "the attributes go to the caller's zeroed counted-run page `page`, which perf_event_open only reads" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3953:5 | "the attributes go to the fresh page's attribute words" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3972:5 | "each read goes to the counters' own page's read words" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3985:1 | "read fills three words of the caller's counted-run page `page`" |
 | Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 67:9 | "the scratch mapping is the child's own, made above" |
 | Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 144:9 | "getrandom fills the first word of our scratch page" |
 | Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 151:9 | "getrandom wrote the scratch page's first word" |
@@ -12177,7 +12177,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2519:1 | "calls a checked System V void(void) process entry that remains executable for the entire call" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2529:1 | "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2631:1 | "calls machine code; the caller vouches for its three-word System V signature" |
-| Compiler | Compiler/JetCLI/Source/CLI/Host.jet | 2521:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
+| Compiler | Compiler/JetCLI/Source/CLI/Host.jet | 2532:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 201:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 209:5 | "pointer is an align &gt;= 8 payload being freed with its allocated size; its block reserved the count word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 241:5 | "anonymous private mmap owns fresh writable bytes and cannot alias a live heap block; a failed syscall produces no allocation" |

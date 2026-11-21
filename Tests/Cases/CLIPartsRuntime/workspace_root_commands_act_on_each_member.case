@@ -1,0 +1,36 @@
+# At the root of a three-member workspace (a `package.jet` index whose
+# members alpha, beta and gamma can each run), `jet check`, `jet test`,
+# `jet doc` and `jet build` act on every member, each member's run headed by
+# its name; `jet run` starts one program, so it still asks which.
+fixture: Fixtures/WorkspaceRoot
+# A workspace build writes each member's artifact under the member; the kit's
+# artifact check is pointed at alpha's from the (empty) root build directory.
+artifact: ../../alpha/.jet/build/run
+mkdir: .jet/build
+env: NO_COLOR=1
+step: jet check
+exit: 0
+stderr: ~ "alpha/run.jet` has no problems" # every member is checked
+stderr: ~ "beta/run.jet` has no problems"
+stderr: ~ "gamma/run.jet` has no problems"
+step: jet test
+exit: 0
+stdout: ~ "alpha: pass" # every member's tests run
+stdout: ~ "beta: pass"
+stdout: ~ "gamma: pass"
+stderr: ~ "jet test: member `alpha`" # each member's run is headed by its name
+stderr: ~ "jet test: member `gamma`"
+step: jet doc
+exit: 0
+file: alpha/.jet/doc/index.html is-file # every member is documented, under the member
+file: beta/.jet/doc/index.html is-file
+file: gamma/.jet/doc/index.html is-file
+stderr: ~ "jet doc: member `beta`" # each member's run is headed by its name
+step: jet build
+exit: 0
+file: alpha/.jet/build/run is-file # every member's run entry is built
+file: beta/.jet/build/run is-file
+file: gamma/.jet/build/run is-file
+step: jet run
+exit: 2
+stderr: ~ "`jet run` is ambiguous — 3 workspace members can run" # one program, so a member is picked
