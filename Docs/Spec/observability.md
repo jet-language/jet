@@ -201,7 +201,10 @@ the session kept, and counts any sample in Jet code that kept no stack.
 Under the task clock that count is the task clocks' own, from each
 sampler's count at its end: the CPU time each thread ran while sampled,
 over the period, so the runtime's start and exit outside the samplers give
-none. A period end that falls in kernel mode takes no sample, and the
+none. The runtime disables a sampler before it reads that count, at its
+thread's end or at the exit, and the exit drains the rings only after, so
+every sample a ring took lies at or before its sampler's end and none past
+it. A period end that falls in kernel mode takes no sample, and the
 samples' own counts find each one. The kernel forwards a thread's timer by
 whole periods from the end it last reached, so two consecutive samples'
 counts lie whole periods apart and the ends between them took none, as did
