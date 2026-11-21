@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112950,
+    "rev": 112973,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24446,8 +24446,8 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-21T15:43:06.876Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-21T16:45:04.093Z",
+      "updatedBy": "owner",
       "workOrder": 19,
       "criteriaLastN": 41
     },
@@ -25885,6 +25885,11 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "c20 (2026-11-21): the runtime fix (SA_ONSTACK on the three installs) and its case ProcessSignalDrain/a_handler_runs_when_its_task_is_at_its_guard are queued for the next landing cycle (submission Rivet-3594-c20-onstack, base 938d4d84f8). On the gate runtime the case shows the bug (exit 139). The guard half was taken out of that submission. Its scan had to name two routines it exempts (signal_hub_restore, which puts back the saved original action, and jet_process_signal_disposition_raw, which installs SIG_IGN or SIG_DFL), and a guard with an exemption list is not acceptable. Redo it structurally: one runtime routine is the only rt_sigaction site, and the guard checks only that every handler action it receives is built by the one constructor that sets SA_ONSTACK. The original guard is saved beside the submission as patch.with-guard."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "c19, row BuildEntry/program_owned_main: root cause found. Its `plain` image never allocates, so its main thread has no TCB and GS stays 0 (Thread.jet jet_rt_thread_init). Its stop runs trap_simple_report -> trap_task_site_begin -> jet_rt_stop_domain -> scheduler_control_current, which loads thread_base() + 16: SIGSEGV at 0x10 instead of the Jet.ArithmeticOrBoundsFailure report (p391 streams). The site capture came with the stop-site work of 2026-11-20 (d0ec689cc8, ac7e8574ce). Fix submitted as SUB Main-3594-c19-plain-stop: stop domain 2 exists only once a body has entered and installed the publication rail, so trap_task_site_begin asks scheduler_body_ever_entered (a global load) first. No TCB read and no syscall; the hot callers of jet_rt_stop_domain are unchanged. The other three c19 rows (the two process-tree timeouts and fork_under_load) remain open."
         },
         {
@@ -26117,6 +26122,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-21T03:48:13.611Z"
+        },
+        {
+          "n": 20,
+          "text": "Every signal handler the runtime installs runs on an alternate signal stack (SA_ONSTACK, with a sigaltstack on every thread that can take the signal), so a subscribed signal that arrives while a fiber or task stack is nearly full never runs its handler into the guard page. Found 2026-11-21 in the D-PLUGIN-ENGINE1 review on dev 938d4d84f8: ProcessSignal.jet lines 39 and 337 and ComptimeServe.jet line 107 install handlers without SA_ONSTACK. Proof: a case that subscribes SIGINT, raises it from a task whose stack is within one page of its guard, and finishes with the handler run and exit 0 on O0, O1 and O2; and a guard check that fails on any runtime sigaction without SA_ONSTACK.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T17:59:44.896Z"
         }
       ],
       "refs": [
@@ -26134,9 +26148,9 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:25.012Z",
-      "updated": "2026-11-21T04:58:56.436Z",
+      "updated": "2026-11-21T18:17:21.165Z",
       "updatedBy": "Main",
-      "criteriaLastN": 19
+      "criteriaLastN": 20
     },
     {
       "id": "c0lt9o2a",
@@ -42171,6 +42185,11 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "c2 not met on gate-p419 (tip 24356fa7b8): an owned-main 3M-print loop (Main: program-owned), built --release, writes 37,888,890 bytes into a pipe in 4626 write calls (8 KiB each) against the bound of one write per 64 KiB (578). The non-terminal stdout buffer must grow to 64 KiB; sent to the implementer with the cases that encode 8192."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "Same-run cat on the p403 batch compiler (dev 236298d8c0, 2026-11-21; $JET_SCRATCH_ROOT/lanes/Main/probe-6444/bench.sh, 2M lines / 93 MB on a pipe, hyperfine -N 30 runs interleaved, jet build --release against rustc -O). Reads are fixed: jetcat makes 1,427 read(0) calls averaging 65,487 bytes (rscat makes 11,409 of 8,191), and both outputs are byte-identical to the input. Speed still loses: wall 132.0 ± 5.8 ms against 117.6 ± 3.8 ms (Jet/Rust 1.12), user+sys 131.1 against 116.8 ms (1.12). c1 stays open: the remaining cost is past the read path (per-line handling or the write path), for E24."
         },
         {
@@ -42244,7 +42263,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T14:01:34.913Z",
-      "updated": "2026-11-21T10:25:02.593Z",
+      "updated": "2026-11-21T15:58:31.243Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -48818,6 +48837,11 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "c2 not met (checked 2026-11-21 on dev 24356fa7b8): the libc census names one GAP, msync/mprotect (writable file mappings), and its row cites \"ballot D-MAP-WRITE1\", which does not exist on the board (`decision show D-MAP-WRITE1` finds nothing). So the gap has neither a ballot nor a ruling. Either a ballot for writable mappings is drafted and filed under that ID, or the census row names the real owning criterion. Deciding that Jet needs no writable mappings, only to close this card, is not an option."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "c2 status (p390 tree, `jet Tools/Agent/LibcCensus.jet`, exit 0): one family stays marked GAP, `msync mprotect` (sys/mman.h), citing D-MAP-WRITE1. That ballot is drafted but not posted: its adversarial review (Docs/Audits/2026-11-08-D-MAP-WRITE1-review.md) bars posting it as ready or marking the census rows complete until its blocking gaps G2-G5 are closed (fault recovery, shared atomic layout, durability, one tier meaning). The census accepts a not-needed row only with an owner ruling, and the review names mprotect a separate disposition (HostSpawn.jet already uses it for a guard page). c2 stays open: msync needs the writable-mapping design finished and re-reviewed, and mprotect needs its own census row. All other families are covered, partial, language or owner-ruled not needed."
         },
         {
@@ -48899,7 +48923,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:54:55.014Z",
-      "updated": "2026-11-21T04:21:53.175Z",
+      "updated": "2026-11-21T17:30:37.343Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -51633,6 +51657,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-21",
+          "by": "Main",
+          "text": "c9 not met: WebBrowser/browser_test_ui_mode passed in the 9 full suites p400-p419, but it failed in p399 (11-21 01:32) with the same \"`notes` failed on chromium after 2 attempts: browser protocol failed\", after the late-reply fix dcee077542 (11-20) had landed, and nothing browser-related landed since. The streak is not a root fix; the wait or read that gives up under load is still to be found."
+        },
+        {
           "at": "2026-11-14",
           "by": "Main",
           "text": "c5 case half passes: fe131e30c3 on dev, jet test Compiler --profile cases --filter build_entry/run_steps_stop_a_looping_step_at_its_cpu_limit gives PASS 1 with bwrap on PATH (gate-p66, 2026-11-14). The loaded jet build --profile dev Compiler half and the c3 load sweep are pending: they're Main heavy-slot jobs after the batch compiler."
@@ -51705,11 +51734,11 @@
         {
           "n": 8,
           "text": "RuntimeStops/stack_overflow_under_jet_run_stops_within_a_second_and_4_gib holds its one-second bound under suite load, or measures CPU time instead of wall time. It failed in the p282 and p284 suites and passed alone both times. Proof: it passes in 5 consecutive full cases suites.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T00:38:11.274Z"
+          "evidence": "On dev 24356fa7b8 (p419) and the batch compilers before it: RuntimeStops/stack_overflow_under_jet_run_stops_within_a_second_and_4_gib PASS in 5 consecutive full cases suites, p407, p410, p413, p417 and p419 (suite-pNNN/cases.out, the cycles with a full suite; the cycles between ended before their suite). It also passed in p400, p401, p403 and p406, so 9 of 9 full suites since p400.",
+          "at": "2026-11-21T16:00:27.255Z"
         },
         {
           "n": 9,
@@ -51746,6 +51775,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-21T15:32:53.783Z"
+        },
+        {
+          "n": 13,
+          "text": "FiberLiveness/fibers_past_the_pool_tear_down_in_random_order holds under full-suite load, fixed at its root. In the p420 full suite (dev 4f1f6c1c7f, 2026-11-21) its `jet run` step printed \"threads unchanged false\" after passing in the 9 full suites p400-p419; p420 changed no thread or scheduler code. The fixture (Fixtures/Teardown/main.jet) samples /proc/self/status Threads: after a fixed time.sleep(50ms) and again after a fixed time.sleep(100ms) once every task has joined, so a scheduler worker that starts or retires late under load changes the count. The comparison must wait on the runtime reaching its settled state (or compare against the bound the runtime promises), not on wall time. Proof: the case passes 50 times in a row under the cases runner while a full suite runs.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T16:13:02.497Z"
         }
       ],
       "refs": [],
@@ -51753,9 +51791,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:41:23.645Z",
-      "updated": "2026-11-21T15:32:53.783Z",
+      "updated": "2026-11-21T16:13:02.497Z",
       "updatedBy": "Main",
-      "criteriaLastN": 12
+      "criteriaLastN": 13
     },
     {
       "id": "c08zzpo5",
@@ -54320,6 +54358,16 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "Worktree audit 2026-11-21 (dev 938d4d84f8): the IfHole-6-1 worktree (base 50b6fec6e7) holds unlanded work. When a call is inlined, OptEntry.jet and OptInline.jet copy the caller slot_formal, so an inlined frame lists its function parameters at -O1 and -O2. Native.jet adds a test for it, and observability.md text says an inlined frame locals lists its parameters \"with the value passed where the code still holds it, else <Unavailable> with why\". Every other added line in that tree is on dev. Its diff is saved at $JET_SCRATCH_ROOT/lanes/Main/wt-save/IfHole-6-1.diff. The tree stays until a worker rebases and submits this or it is judged superseded."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
+          "text": "c116 not met: on gate-p419 (tip 24356fa7b8), Tests/Cases/Perf/overlapping_zones_attaches_share_the_window failed 28 of 30 cases-runner runs (window_wall_ns 1.956e9 against >= 2e9, load 11-28); it passed once in the p419 suite. Sent back to its implementer."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "c115 cause (Rivet, 2026-11-21): jet perf run spawns jet run --observe (Perf/Session.jet:197-199), whose jet_rt_observe_link route is not root-free, so ir_entry_own keeps the process root and the profiled program is a rooted main, not the shipped owned main. Decided within this card's scope: an observed program keeps its owned main, since a profiler must measure the shipped program. c114 decided: one load and branch before each runtime syscall (the host_call gate), measured inside noise against at least 210 ns per syscall (20M getppid, p407 O2); perf's own and signal-handler syscalls stay ungated; the #6444 cat bench gates it."
         },
         {
@@ -55723,11 +55771,11 @@
         {
           "n": 105,
           "text": "Regression of c67: `Perf/receipt_reports_measured_overhead` fails again under suite load. In p387-p391, overhead_ns reached 43-66 ms against the case's 40 ms bar (p391: 50262488). Quiet, it is 34.9 ms (1.74%). Lens's root: at 8 kHz with whole kernel callchains, the kernel's ring write is about 1.85 us a sample (30.1 of 34.9 ms), and under load the kernel's own perf-interrupt time climbs. The runtime's handlers and drains are 4.8 ms. No ratified decision sets the 2% bar, so the fix is either engineering that cuts the kernel's per-sample cost while keeping c44 whole stacks and c68 8 kHz, or the D-PERF-OVERHEAD-BOUND1 ballot (Lens drafting); never a looser bar without a ruling. Proof: the case passes in 3 consecutive full suites (suite-pNNN cases.out), under whatever bound is ratified.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T04:53:14.472Z"
+          "evidence": "Bound ratified by D-PERF-OVERHEAD-BOUND1 A (2026-11-21): Jet runtime share under 1% at the default 8 kHz, the kernel share always stated without a bar. Landed 9611545bc8 (the receipts overhead in two parts, case bound overhead_runtime_ns <= 20 ms of 2 s and overhead_ns = runtime + kernel; in the p419 tree, dev 24356fa7b8) and ae66195a2e (p422, dev ee95a8efba). Perf/receipt_reports_measured_overhead PASS in 3 consecutive full suites under that bound: suite-p419 (24356fa7b8), suite-p420 (4f1f6c1c7f), suite-p422 (ee95a8efba) cases.out. Before it, FAIL in suite-p413 and suite-p417.",
+          "at": "2026-11-21T16:48:13.530Z"
         },
         {
           "n": 106,
@@ -55822,20 +55870,29 @@
         {
           "n": 116,
           "text": "Two attaches never cut each other off: at dev ba5711569a (2026-11-21) every attach that turns zones on shares one `<ring>.zones` request file, and the first attach to end removes it, turning zones off under any attach still running (perf_flight_zones, PerfSamples.jet; found by Rivet reviewing D-LIVE-TIMELINE1). Each attach holds its own request, zones stay on while any stands, and an unwatched run still checks only one fixed name. Proof: a case with two overlapping zone attaches where the first ends early, and the second still records zones to its end.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T13:21:04.436Z"
+          "evidence": "Landed c7d25303e9 (p422, dev ee95a8efba): the case waits for the samples.window file before its checks. Perf/overlapping_zones_attaches_share_the_window, two overlapping zone attaches where the first ends early and the second still records zones to its end, PASS in the p422 full suite (suite-p422 cases.out, listed fixed against p420) and in p422 proof line rthewindow-1 (n=1 bad=0). Before the case fix it also passed 30/30 at load 10-22 and 30/30 at load 39-158 on Rivets runs.",
+          "at": "2026-11-21T16:48:05.754Z"
         },
         {
           "n": 117,
           "text": "jet perf attach requires what D-PERF-ZONES1 ratified, the same user and permission as a debugger: at dev ba5711569a (2026-11-21) an attach needs only the same user, not the ptrace permission a debugger needs (for example under Yama ptrace_scope=1, which allows only a parent to attach). Attach checks the same permission the debugger's attach checks and refuses with that diagnostic otherwise. Proof: a case where a non-parent attach that ptrace refuses is also refused by jet perf attach, and a permitted one succeeds.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed fd85776340 (c117.r2, p419, tip 24356fa7b8). Tests/Cases/Perf/attach_needs_the_debuggers_permission.case: a non-parent attach that ptrace refuses on this ptrace_scope 1 host is refused by both jet perf attach and jet debug --attach (E2231, tool-neutral text), and an attach run under the shared Tests/Fixtures/Ptrace authorizer succeeds. PASS in the p419 full suite and proof run, with the other attach cases (attach_drains_flight_ring, attach_gives_the_jetcprofile_facts, attach_samples_a_plain_jet_process, attach_turns_zones_on, Debug/debug_attaches_to_a_running_program, the dap_cli attach cases) PASS on the authorizer.",
+          "at": "2026-11-21T15:43:49.745Z"
+        },
+        {
+          "n": 118,
+          "text": "The debugger evaluator returns the right value for a call that returns a list. Found by Lens on gate-p420 (dev 4f1f6c1c7f, 2026-11-21): with `build: fn(i: Int, items: Int) -> [Int] { out := [Int]{}; out.push(i); loop k in 1..<items -> out.push(i + k); out }`, stopped at a line inside main, `jet debug main.jet --break main.jet:33 --do continue --do \"print build(3, 2).len()\" --do \"print build(3, 2)\"` prints `.len() = 0` and `build(3, 2) = [3533934837823998284, <Unavailable>, … 140737488319240 more]` instead of 2 and [3, 4], while `print [Int]{3, 4}` is right. So the evaluator reads a returned list from the wrong place: its result slot or the list header is not where the call left it. Fixed at the evaluators call-result path for every growing value (list, text, map), not for this call. Proof: a Debug case that prints a called list, text and map result and their .len() on O0, O1 and O2, with the expected values.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-21T13:21:05.267Z"
+          "at": "2026-11-21T17:08:06.581Z"
         }
       ],
       "refs": [],
@@ -55843,9 +55900,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-21T15:43:47.152Z",
+      "updated": "2026-11-21T18:02:26.194Z",
       "updatedBy": "Main",
-      "criteriaLastN": 117
+      "criteriaLastN": 118
     },
     {
       "id": "c0in2dft",
@@ -61995,7 +62052,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:40:23.429Z",
-      "updated": "2026-11-21T13:38:57.850Z",
+      "updated": "2026-11-21T18:18:18.988Z",
       "updatedBy": "Main"
     },
     {
@@ -71875,8 +71932,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T12:27:38.913Z",
-      "updated": "2026-11-21T12:58:47.461Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-21T16:45:18.760Z",
+      "updatedBy": "owner",
       "criteriaLastN": 12
     },
     {
@@ -72646,6 +72703,16 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "c5 part 1 transcript (dev 24356fa7b8, gate-p419 jet with its jet.debug): `jet debug $D/jet --break Compiler/JetSema/Source/Sema/CheckProgram.jet:9910 --do bt --do locals --do \"print module_index\" -- check t.jet`, rc 0 in 74 s. \"Breakpoint hit CheckProgram.jet:9910 in sema_check_declaration_module()\"; backtrace #0 sema_check_declaration_module, #1 sema_check_declaration_module_in_shared [inlined], #2 sema_check_declaration_modules, #3 sema_collect_comptime_declarations, #4 jet_driver_compile_loaded_stages (Pipeline.jet:5972) ... #12 jet_cli_compile_check (Host.jet:302), #15 jet_cli_compile_on_worker.lambda; locals print the checked item: module_result = SemaGraphModuleResult{module_name: \"t\", source_file: \"t.jet\", ...}, module_index = 0, foreign = true; `values` reads \"unavailable (not kept at this point)\". Full transcript: $JET_SCRATCH_ROOT/lanes/Main/c5-debug-p419.txt. Part 2 (jet perf run of jet build Compiler naming the hottest functions) runs in the next free heavy slot."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
+          "text": "c28: the case passes in the full suites p410, p413, p417 and p419 (after c28.r4 46a4d03008), but no unit test injects lost or throttled records into the sampler count (git grep finds none on 24356fa7b8), so c28 stays open until that test lands."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "c29 waits on D-IMAGE-SECTIONS1 (posted 2026-11-21, drafted by Lens, reviewed by Rivet through r3): no ratified decision lists sections or their bytes (D-DEBUG-LISTING1 covers segments and symbols, D-DISASM1 machine code), and segments cannot give .rodata's size because the read-only LOAD holds .rodata and .eh_frame together. Meanwhile CoreActivation's nm count moves to `jet debug --do symbols`, whose rows are nm --defined-only's set (staged as Lens-6995-c11-tasks-case-coreactivation-symbols); size -A and the BuildEntry readelf -x case wait on the ballot."
         },
         {
@@ -72996,20 +73063,20 @@
         {
           "n": 28,
           "text": "The task-clock accounting holds under load: a run's period ends equal its kept samples plus those that fell in kernel mode, and the sampler reports and accounts any the kernel threw away (throttled or lost records) instead of letting the totals disagree. In the p401 full suite (dev 9a0ab2b757, 2026-11-21) Tests/Cases/Perf/task_clock_nominal_matches_kept.case failed at -O1 with nominal 460 against kept+kernel 458; the same case passed alone on the same compiler and in p399 and p400. Proof: the case passing in a full-suite run, plus a unit test in which the sampler's count includes injected lost or throttled records.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T09:03:36.000Z"
+          "evidence": "Landed c6406715ce (p425, dev 8ea723d82c): the drain tallies PERF_RECORD_LOST and THROTTLE/UNTHROTTLE records into the samples file (throttled period ends reported apart from kernel-mode ends). Unit test: Compiler/JetRuntime/Tests/Fragments.fixture/PerfRingTests.jet writes a fake ring with samples, one LOST record of 5 and 3 THROTTLE/UNTHROTTLE records, drains it and requires perf_samples_lost() == 5, the dropped tally == 5 and every throttle record in the file; its case RuntimeFragments/the_perf_ring_fragment_counts_lost_and_throttled_records PASS in the p425 full suite. Perf/task_clock_nominal_matches_kept (nominal = kept + kernel + throttled) PASS in the p419, p420, p422 and p425 full suites (suite-pNNN cases.out).",
+          "at": "2026-11-21T17:22:12.012Z"
         },
         {
           "n": 29,
           "text": "Jet tools report a built image's section sizes and dump a named section's bytes, so Tests/Cases CoreActivation (nm and size -A) and BuildEntry (readelf -x) drop the external binutils; the surface goes on a ballot first unless an existing jet inspect or jet debug --do form fits (D-DEBUG-LISTING1 lists symbols and segments, not section sizes or bytes). Found by Lens finishing c17 on p407 (2026-11-21). Proof: both cases run with no nm, size or readelf and check the same facts.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T10:53:05.750Z"
+          "evidence": "Landed b11ffab4c2 (D-IMAGE-SECTIONS1 A: `jet debug IMAGE --do sections`, `--bytes` adds their bytes) and 1eb8510abe (p420, dev 4f1f6c1c7f). BuildEntry/a_folded_string_read_only_for_its_length_costs_no_bytes and Debug/sections_list_an_image_and_its_bytes PASS in the p420 full suite, and neither calls readelf, size or nm (checked on 4f1f6c1c7f). CoreActivation (Tools/Perf/CoreActivation.mjs and its Jet twin run.jet) reads section sizes and symbols through `jet debug IMAGE --do sections|symbols`; `jet Tools/Gauntlet/PortBars.jet --entry CoreActivation` on gate-p420: parity PASS 8/8 cases do the job. The same run reports the twin losing the speed port bar (wall 3.15x, peak memory 3.38x the original), which keeps the original running under the port rules; that is a port-bar gap of the entry, not of c29.",
+          "at": "2026-11-21T16:14:28.508Z"
         }
       ],
       "refs": [],
@@ -73017,8 +73084,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-21T12:42:53.462Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-21T17:22:12.012Z",
+      "updatedBy": "Main",
       "criteriaLastN": 29
     },
     {
@@ -126991,8 +127058,10 @@
       "draftedBy": "Main",
       "reviewedBy": "BallotReviewLiveTimeline",
       "draft": false,
-      "status": "open",
-      "created": "2026-11-20T05:37:12.212Z"
+      "status": "ratified",
+      "created": "2026-11-20T05:37:12.212Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-21"
     },
     {
       "id": "D-DISASM1",
@@ -128850,8 +128919,10 @@
       "draftedBy": "Lens",
       "reviewedBy": "Main",
       "draft": false,
-      "status": "open",
-      "created": "2026-11-21T05:55:43.682Z"
+      "status": "ratified",
+      "created": "2026-11-21T05:55:43.682Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-21"
     },
     {
       "id": "D-SEMINDEX-TYPED1",
@@ -129022,20 +129093,20 @@
       "cardId": "c0yuouhx",
       "group": "architecture",
       "title": "Choose what runs a plugin whose path is known only at run time",
-      "situation": "Today `plugin.load` takes only a literal path. When the program is built, the compiler reads that component and translates it into the program's own machine code. At run time the host only checks that the file still matches the copy it was built from. The ratified decision D-CORE-PLUGINPATH1 adds `plugin.load<Trait>(path, policy)`, whose path is computed while the program runs. A built program holds nothing that can run a component it never saw, so that load needs an engine. No decision picks one, and this ballot does. The main users are Jetpack's build-plugin and compiler-extension hosts, which load plugins chosen at run time. We recommend translating the component when it loads, inside the host, with the translator that already serves literal paths, run as a contained Jet task.",
+      "situation": "Today `plugin.load` takes only a literal path, and the compiler translates that plugin into the program's own machine code at build time. The ratified decision D-CORE-PLUGINPATH1 adds `plugin.load<Trait>(path, policy)`, whose path is computed while the program runs. A built program holds nothing that can run a component it never saw, so that load needs an engine, and this ballot picks one. The main users are Jetpack's build-plugin and compiler-extension hosts. The owner ruled that a guest escaping its sandbox is unacceptable, even when the translator has a bug. So the recommendation translates in a child process, then a separate checker proves the machine code safe before it may run. The code then runs behind guard pages and, on CPUs that have them, hardware memory keys that lock the program's memory. One cost is physical and stays: a program that translates plugins must carry the translator, at least 2.5 MB.",
       "gist": "When a program loads a plugin whose path it learns only at run time, what runs that plugin's code?",
-      "lesson": "A plugin is a WebAssembly component: portable code that a host runs inside a sandbox. Something must turn it into work the processor does. An interpreter reads each instruction and acts on it, so it is small but slower. A translator turns the whole component into machine code before the first call, so calls run at full speed, but the translator must be present at load. It can live inside the program or in a helper process beside it.",
-      "explainer": "Beginner path: the code is the same under every option. A user declares a trait, calls `plugin.load<Analyzer>(path, policy)`, and calls `tool.analyze(bytes)`. A missing or mistyped export is refused at load under every option. Under A nothing else is written or shipped: no helper file, no second limits value and no setting.\n\nExpert path: the expert passes the ratified `limits: plugin.Limits{...}` and handles each `PluginError`. To bound how long a load may take, the expert uses Jet's one deadline mechanism, `#Deadline(5s)` or `task.timeout`. Under A the load returns the expiry as `Budget(.Time)`, as a network read returns its timeout.\n\nUnder A and E the guest runs the same translated code as a literal-path plugin, with the same fuel, time, memory, table and bounds checks and the same frames. Under B that code runs in a child process. C and D add a second way of running guest code, so each must repeat those checks to the same rules.\n\nEvery option bounds a load's work with the same fixed safety caps, as the wire cap and frame count are fixed today. A function body over 1 MiB, control nested over 10,000 levels, or translation memory past its cap fails the load. The cap is 1 GiB, or half the memory the process can still claim if that is less. A, D and E map new code from a sealed in-memory file, never from writable memory.",
-      "story": "Ravi ships a log tool that loads customer-written filters from a folder named on the command line. Under A he ships one file, and each filter runs at native speed once loaded. A filter without `analyze` is refused at load. A filter that trips a translator bug fails its own load, and the tool keeps running. Under B or E he must also ship an engine helper beside his tool. Under C his tool is at least 3.5 MB smaller, but filters run slower.",
+      "lesson": "A plugin is a WebAssembly component: portable code that a host runs inside a sandbox. Something must turn it into work the processor does. An interpreter reads each instruction and acts on it, so it is small but slower. A translator turns the whole component into machine code before the first call, so calls run at full speed, but the translator must be present at load. The sandbox is the promise that the plugin's code never touches the program's own memory.",
+      "explainer": "Beginner path: the code is the same under every option. A user declares a trait, calls `plugin.load<Analyzer>(path, policy)`, and calls `tool.analyze(bytes)`. A missing or mistyped export is refused at load under every option. Under A nothing else is written or shipped: no helper file, no second limits value, no setting and no sandbox switch.\n\nExpert path: the expert passes the ratified `limits: plugin.Limits{...}` and handles each `PluginError`. To bound how long a load may take, the expert uses Jet's one deadline mechanism, `#Deadline(5s)` or `task.timeout`. Under A the load returns the expiry as `Budget(.Time)`, as a network read returns its timeout. Code the checker refuses fails the load as `Defect`, naming the file and the function.\n\nUnder A and E the guest runs the same translated code as a literal-path plugin, with the same fuel, time, memory, table and bounds checks and the same frames. Under A, D and E every guest, literal or loaded at run time, also runs behind the same checker, guard pages and memory keys. Under B that code runs in a child process. C and D add a second way of running guest code, so each must repeat the fuel, time and frame rules exactly.\n\nEvery option bounds a load's work with the same fixed safety caps, as the wire cap and frame count are fixed today. A function body over 1 MiB, control nested over 10,000 levels, or translation memory past its cap fails the load. The cap is 1 GiB, or half the memory the process can still claim if that is less. A, D and E map new code from a sealed in-memory file, never from writable memory.",
+      "story": "Ravi ships a log tool that loads customer-written filters from a folder named on the command line. Under A he ships one file, and each filter runs at native speed once loaded. A filter without `analyze` is refused at load. A filter crafted to trip a translator bug fails its own load at the checker, and the tool keeps running. Under B or E he must also ship an engine helper beside his tool. Under C his tool is at least 3.5 MB smaller, but filters run slower.",
       "inWild": "// Wasmtime (Rust): the component is compiled to machine code when it loads,\n// by Cranelift (optimizing) or Winch (single pass), inside the host process.\nlet engine = Engine::default();\nlet component = Component::from_file(&engine, &path)?;\nlet (tool, _) = Analyzer::instantiate(&mut store, &component, &linker)?;\nlet report = tool.call_analyze(&mut store, &snapshot)?;\n// Ahead-of-time variant: `wasmtime compile` writes a .cwasm file,\n// and Component::deserialize maps it; that call is marked unsafe.",
-      "detail": "Code read on dev 49abf9184a. Measurements used the compiler at commit 628e9695aa on x86-64 Linux, one small program at a time.\n\nLiteral loads today: the plugin link step (Compiler/JetPlugin/Source/Plugin/Link.jet) reads each literal artifact while the program is built. It decodes it with JetWasm and translates every core function into the program's own JetIR functions (Translate.jet). The runtime host (Compiler/JetRuntime/Source/PluginHost.jet) calls that code in process. At load, pg_load only compares the file's bytes with the copy embedded at build time.\n\nFuel is spent at function entry and at loop heads, in slices of 4096. The deadline is checked when a slice runs out, so a call past its deadline fails as Budget(.Time) and the plugin keeps serving calls. Memory and table growth go through runtime checks against the load's caps.\n\nA computed path does not type-check today. `jet check` on a host that calls `tool.analyze(41)` after `plugin.load(\"{name}.wat\", policy)` reports `Plugin export \\`analyze\\` has no Component interface`.\n\nSame-program size, built with `jet build` (O2). Both programs build an Authority, read `process.args()` and print one number:\n\n```text\nwithout a plugin                            179,832 bytes\nwith one literal plugin and one call        265,592 bytes\nthe plugin host code adds                    85,760 bytes\n```\n\nCall speed. One million calls of a one-instruction export took 54 to 66 ms over several runs. So a call costs about 55 to 65 ns.\n\nWhat the optimizer is worth. A guest loop that makes a call, a load and a store each iteration ran 60 calls of 2 million iterations. Process user time, in two builds of the same host:\n\n```text\n                    build 1          build 2\nguest built at O0   462 to 470 ms    439 ms\nguest built at O2   313 to 320 ms    303 ms\nO0 time / O2 time   1.47             1.45\n```\n\nSo O2 runs such a guest about 1.45 times faster. A three-instruction loop settles nothing. Its O0/O2 ratio was 1.96 in one build and 0.82 in the other, from code layout alone.\n\nLoad cost and memory, as upper bounds. Each row is a whole `jet build` of a host that loads one literal plugin and calls it. So it includes the front end, the WAT reader and the link, and the translation alone costs less. These builds don't use the build store: an empty store gave the same times and stayed empty. The large guests have one generated function body of arithmetic with a branch every 16 steps:\n\n```text\nguest code                    peak RSS        wall time\nnone (the host alone)          82 MB          0.04 s\nSandboxMathKit, 17 KB          101 to 109 MB  0.07 to 0.09 s\none 247 KB body                174 to 178 MB  0.42 to 0.55 s\none 1,012 KB body              454 to 466 MB  2.07 to 2.15 s\n```\n\nO0 and O2 differ by under 5 percent in each row. Under heavy machine load, another run took 0.38 to 0.75 s for SandboxMathKit, also with no store use. Memory and time grow about linearly with the code: about 380 bytes of memory per byte of guest code.\n\nThe largest function body in the WebAssembly the repository ships is 94,691 bytes, in the site's 796 KB HarfBuzz module. The largest in a shipped component is 6,352 bytes, in the Zed extension.\n\nMachine code in the jet binary, summed from its symbol table by source file:\n\n```text\nJetWasm decoder, validator, component, opcodes    about 0.35 MB\nJetWasm WAT text reader (Text.wat_*)               353,630 bytes\nJetPlugin translator, link, descriptor, interface  about 0.25 MB\nJetIR x64 selection, allocation, module, SSA, IR  1,534,065 bytes\nJetBackend x64 encoder                              45,788 bytes\nJetBackend in-memory linker (MemoryLink)           158,381 bytes\nJetIR optimizer passes (Opt*)                    1,931,419 bytes\n```\n\nSo A needs at least 2.18 MB of code at O0, for binary `.wasm` only. Linking in memory adds an estimated 0.16 MB, taking MemoryLink as the stand-in. An O1 or O2 host adds the optimizer, about 1.93 MB more.\n\nThese are lower bounds. JetPlugin also depends on JetFoundation and on more of JetIR than the rows above. A user host links no compiler code, so it shares none of that. It would link only the part the translator reaches, which is not measured. In `jet`, JetFoundation's functions total 13.9 MB and JetIR's 13.6 MB. JetWasm depends on nothing, so C and D carry none of this. The gap between A and C is therefore larger than the table shows.\n\nSize per host and per option. The A column sums the measurements above, so it is a lower bound. The C, D and E columns are estimates. B's helper is an estimated 4.5 MB file, shipped once:\n\n```text\nhost                               A (min)  B             C        D        E\njet run program (O0)               +2.3 MB  +helper file  +0.6 MB  +0.8 MB  +0.2 MB\njet build program (O2)             +4.3 MB  +helper file  +0.6 MB  +0.8 MB  +0.2 MB\njetpack build-plugin and\ncompiler-extension hosts           +4.3 MB  +helper file  +0.6 MB  +0.8 MB  +0.2 MB\nthe same hosts moved into `jet`    +0      +0            +0.6 MB  +0.8 MB  +0\n```\n\nThe jetpack binary today links only the compiler front end (Jetpack/Bootstrap/sources.list), so its hosts pay A's full size. The design note plans to run them inside `jet`, which already links the translator and back end. Then they pay nothing under A. For scale, the nixpkgs build of libwasmtime.so 48.0.0 is 50,449,344 bytes; a trimmed embedding is smaller.\n\nPipe round trip: a Python loop writing 8 bytes to a native `cat` child and reading them back took 6.4 to 6.6 microseconds. Python's own write and read cost 1.1 microseconds, so a native round trip is about 5 microseconds. That is roughly 80 to 100 times one in-process call.\n\nWeb tier: `plugin.load` needs the `Exec` effect, and the web target denies it. Building the plugin host with `--os=web` fails today with `Jet.TargetDeniedEffect: run uses Exec, which target wasm32-unknown-unknown denies`. No option changes that. Native code generation is x86-64 only today, so every option serves Linux x86-64 hosts.\n\nSystems that forbid new machine code: SELinux with deny_execmem, and PaX MPROTECT, refuse anonymous memory that becomes executable and private mappings made executable after a write. A, D and E map their code shared from a sealed memfd, read and execute, which is neither. Not probed, since no SELinux or PaX system was at hand: deny_execmem does not refuse it. The policy must still let the domain execute its own in-memory files, and where it doesn't, the load is refused with the named error.\n\nSo a policy that refuses executable in-memory files still refuses run-time loads under A, D and E. B maps code only in its helper. C maps no code. Literal-path plugins are built into the program, so they work under every option.\n\nJet's image loader already fills memfds and maps them (JetBackend Image/Loader.jet `loader_memfd`). It creates them with MFD_EXEC, to start images; A does not use that flag. A creates its memfd with MFD_NOEXEC_SEAL, which a kernel set to refuse executable memfds still allows, since mapping code needs no exec bit.\n\nContainment, probed on the gate compiler: a task indexed past the end of a three-item list. Its join returned `.Panicked` with the panic's text, and the program printed its next line and exited 0. The spec states this for every task: a panic reaches the joiner as `.Panicked`. A stack overflow is not contained: a task recursing without end stopped the whole program (Jet.StackOverflow, exit 70). Nor is an allocation failure, which aborts the process (JetRuntime Alloc.jet).\n\nSaved work: none for a host today. Reuse is a compile-time constant of the compiler, off on dev (JetFoundation BuildOptions.jet `BUILD_REUSE_SAVED_WORK`). The store code lives in JetCLI, which no host links.\n\nCaps: the ratified `plugin.Limits` has fuel, memory_bytes, table_elements and timeout, all per component or per call (Core/Plugin/Plugin.jet). The wire cap of 1,048,576 bytes and the 32-frame fault limit are fixed constants beside them (spec, plugin budgets).\n\nThe design note Docs/Proposals/plugin-wasm-engine-2026-10-29.md leaves a run-time path in a user program out of scope until a ballot asks for one.",
+      "detail": "Code read on dev 49abf9184a, and on 97d2a287ab for the sandbox walls. Measurements used the compiler at commit 628e9695aa on x86-64 Linux, one small program at a time. The wall probes are C programs, run on an AMD Ryzen 9 7950X3D under Linux 7.2.8 while the machine was heavily loaded.\n\nLiteral loads today: the plugin link step (Compiler/JetPlugin/Source/Plugin/Link.jet) reads each literal artifact while the program is built. It decodes it with JetWasm and translates every core function into the program's own JetIR functions (Translate.jet). The runtime host (Compiler/JetRuntime/Source/PluginHost.jet) calls that code in process. At load, pg_load only compares the file's bytes with the copy embedded at build time.\n\nFuel is spent at function entry and at loop heads, in slices of 4096. The deadline is checked when a slice runs out, so a call past its deadline fails as Budget(.Time) and the plugin keeps serving calls. Memory and table growth go through runtime checks against the load's caps.\n\nSandbox today: each heap access is checked against the memory's limit in the translated code (Translate.jet `address`). The memory is mapped at its cap with no guard region (PluginHost.jet `pg_mmap`). Guest code runs on the host's stack and writes its fuel and depth words in the instance record, a host heap block. So the checks are the only wall, and a translator bug that drops one is an escape.\n\nGuest code calls 34 runtime helpers (Translate.jet `PLUG_RUNTIME_NAMES`). 15 of them, the bit counts and float helpers, take only values and return a value.\n\nA computed path does not type-check today. `jet check` on a host that calls `tool.analyze(41)` after `plugin.load(\"{name}.wat\", policy)` reports `Plugin export \\`analyze\\` has no Component interface`.\n\nSame-program size, built with `jet build` (O2). Both programs build an Authority, read `process.args()` and print one number:\n\n```text\nwithout a plugin                            179,832 bytes\nwith one literal plugin and one call        265,592 bytes\nthe plugin host code adds                    85,760 bytes\n```\n\nCall speed. One million calls of a one-instruction export took 54 to 66 ms over several runs. So a call costs about 55 to 65 ns.\n\nWhat the optimizer is worth. A guest loop that makes a call, a load and a store each iteration ran 60 calls of 2 million iterations. Process user time, in two builds of the same host:\n\n```text\n                    build 1          build 2\nguest built at O0   462 to 470 ms    439 ms\nguest built at O2   313 to 320 ms    303 ms\nO0 time / O2 time   1.47             1.45\n```\n\nSo O2 runs such a guest about 1.45 times faster. A three-instruction loop settles nothing. Its O0/O2 ratio was 1.96 in one build and 0.82 in the other, from code layout alone.\n\nLoad cost and memory, as upper bounds. Each row is a whole `jet build` of a host that loads one literal plugin and calls it. So it includes the front end, the WAT reader and the link, and the translation alone costs less. These builds don't use the build store: an empty store gave the same times and stayed empty. The large guests have one generated function body of arithmetic with a branch every 16 steps:\n\n```text\nguest code                    peak RSS        wall time\nnone (the host alone)          82 MB          0.04 s\nSandboxMathKit, 17 KB          101 to 109 MB  0.07 to 0.09 s\none 247 KB body                174 to 178 MB  0.42 to 0.55 s\none 1,012 KB body              454 to 466 MB  2.07 to 2.15 s\n```\n\nO0 and O2 differ by under 5 percent in each row. Under heavy machine load, another run took 0.38 to 0.75 s for SandboxMathKit, also with no store use. Memory and time grow about linearly with the code: about 380 bytes of memory per byte of guest code.\n\nThe largest function body in the WebAssembly the repository ships is 94,691 bytes, in the site's 796 KB HarfBuzz module. The largest in a shipped component is 6,352 bytes, in the Zed extension.\n\nSandbox walls, probed:\n\n```text\nkeys register written in and out, per call   16.3 to 17.0 ns at best\n                                             19 to 48 ns under load\nprotection keys one process can allocate     15\n8 GiB no-access reservation, 64 KiB opened   9.2 us each\nreservations that fit one address space      16,382\nguard fault caught and resumed               2.6 us\nfault through the exit landing, keys on      3.1 to 4.1 us\nguest read of host memory, guest key only    faulted (SEGV_PKUERR), 20,000 of 20,000\nprocess start and reap, 265 KB Jet program   0.37 ms at best, 3 ms mean under load\nprocess start and reap, 504 MB jet binary    0.65 ms at best, 4 ms mean under load\nx86-64 decoder at O2, 2.6 MB of code         3.4 MB/s, 0.85 us an instruction\nchecker prototype, every loadable component  452 functions, 125,754 instructions,\n  at O0, O1 and O2                           none refused\nchecker prototype, hand-made unsafe changes  74 of 74 refused; 8 safe ones accepted\nsignal to guest code, own stack, guest key   handler ran, process went on\nthe same, handler without its own stack      process died (SIGSEGV)\n64 KiB frame near a 4 KiB stack guard        no fault; the page below overwritten\n64 KiB frame near a 1 MiB stack guard        faulted at the guard; page untouched\ntask parked in an import, resumed elsewhere  keys follow the task; nested and outer\n                                             host reads trapped; chain unwound\n40 guests through 14 keys, 400 calls         15,600 cross-guest reads, all faulted;\n                                             1.24 key re-tags per call\n14 guests parked in imports, then a 15th     15th took a parked guest's key; all\n  guest's call that releases them            finished; 406 cross reads all faulted\n```\n\nThree conditions surfaced in those probes. With the host's memory locked, a signal is delivered only to a handler on its own stack. Jet's fault and profiler handlers already use one, but its process-signal and SIGSYS handlers don't yet. With glibc's rseq registration on, a trap during guest code ended the process. So did plain preemption of a thread in guest code. With it off, every probe returned, and Jet's runtime registers no rseq area. And a guest stack guard smaller than the largest frame can be stepped over.\n\nWhy a child process: an in-host task contains a panic, but not a stack overflow or an allocation failure. Probed: a task indexed past a list's end returned `.Panicked` to its joiner and the program went on. A task recursing without end stopped the whole program (Jet.StackOverflow, exit 70). An allocation failure aborts the process (JetRuntime Alloc.jet).\n\nMachine code in the jet binary, summed from its symbol table by source file:\n\n```text\nJetWasm decoder, validator, component, opcodes    about 0.35 MB\nJetWasm WAT text reader (Text.wat_*)               353,630 bytes\nJetPlugin translator, link, descriptor, interface  about 0.25 MB\nJetIR x64 selection, allocation, module, SSA, IR  1,534,065 bytes\nJetBackend x64 encoder                              45,788 bytes\nJetBackend x64 decoder (Decoder.*, 31 functions)    97,861 bytes\nJetBackend in-memory linker (MemoryLink)           158,381 bytes\nJetIR optimizer passes (Opt*)                    1,931,419 bytes\n```\n\nSo A's translator needs at least 2.18 MB of code at O0, for binary `.wasm` only. Linking in memory adds an estimated 0.16 MB, taking MemoryLink as the stand-in. An O1 or O2 host adds the optimizer, about 1.93 MB more. The decoder and a checker on it add an estimated 0.2 MB.\n\nThese are lower bounds. JetPlugin also depends on JetFoundation and on more of JetIR than the rows above. A user host links no compiler code, so it shares none of that. It would link only the part the translator reaches, which is not measured. In `jet`, JetFoundation's functions total 13.9 MB and JetIR's 13.6 MB. JetWasm depends on nothing, so C and D carry none of this. The gap between A and C is therefore larger than the table shows.\n\nSize per host and per option. The A column sums the measurements above, so it is a lower bound. The C, D and E columns are estimates. B's helper is an estimated 4.5 MB file, shipped once:\n\n```text\nhost                               A (min)  B             C        D        E\njet run program (O0)               +2.5 MB  +helper file  +0.6 MB  +1.0 MB  +0.4 MB\njet build program (O2)             +4.5 MB  +helper file  +0.6 MB  +1.0 MB  +0.4 MB\njetpack build-plugin and\ncompiler-extension hosts           +4.5 MB  +helper file  +0.6 MB  +1.0 MB  +0.4 MB\nthe same hosts moved into `jet`    +0.1 MB  +0            +0.6 MB  +1.0 MB  +0.1 MB\n```\n\nThe jetpack binary today links only the compiler front end (Jetpack/Bootstrap/sources.list), so its hosts pay A's full size. The design note plans to run them inside `jet`, which already links the translator, back end and decoder. Then they pay only the checker under A. For scale, the nixpkgs build of libwasmtime.so 48.0.0 is 50,449,344 bytes; a trimmed embedding is smaller.\n\nPipe round trip: a Python loop writing 8 bytes to a native `cat` child and reading them back took 6.4 to 6.6 microseconds. Python's own write and read cost 1.1 microseconds, so a native round trip is about 5 microseconds. That is roughly 60 to 90 times one in-process call, with or without memory keys.\n\nWeb tier: `plugin.load` needs the `Exec` effect, and the web target denies it. Building the plugin host with `--os=web` fails today with `Jet.TargetDeniedEffect: run uses Exec, which target wasm32-unknown-unknown denies`. No option changes that. Native code generation is x86-64 only today, so every option serves Linux x86-64 hosts.\n\nSystems that forbid new machine code: SELinux with deny_execmem, and PaX MPROTECT, refuse anonymous memory that becomes executable and private mappings made executable after a write. A, D and E map their code shared from a sealed memfd, read and execute, which is neither. Not probed, since no SELinux or PaX system was at hand: deny_execmem does not refuse it. The policy must still let the domain execute its own in-memory files, and where it doesn't, the load is refused with the named error.\n\nSo a policy that refuses executable in-memory files still refuses run-time loads under A, D and E. That is physical: such a policy forbids exactly what any translating engine must do. B maps code only in its helper. C maps no code. Literal-path plugins are built into the program, so they work under every option.\n\nJet's image loader already fills memfds and maps them (JetBackend Image/Loader.jet `loader_memfd`). It creates them with MFD_EXEC, to start images; A does not use that flag. A creates its memfd with MFD_NOEXEC_SEAL, which a kernel set to refuse executable memfds still allows, since mapping code needs no exec bit.\n\nSaved work: none for a host today. Reuse is a compile-time constant of the compiler, off on dev (JetFoundation BuildOptions.jet `BUILD_REUSE_SAVED_WORK`). The store code lives in JetCLI, which no host links.\n\nCaps: the ratified `plugin.Limits` has fuel, memory_bytes, table_elements and timeout, all per component or per call (Core/Plugin/Plugin.jet). The wire cap of 1,048,576 bytes and the 32-frame fault limit are fixed constants beside them (spec, plugin budgets).\n\nThe design note Docs/Proposals/plugin-wasm-engine-2026-10-29.md leaves a run-time path in a user program out of scope until a ballot asks for one.",
       "options": [
         {
           "key": "A",
-          "name": "Translate at load, in the host, as a contained task",
-          "detail": "A program that calls `plugin.load<T>` links the WebAssembly decoder, the plugin translator and the code generator's back end. At load, Core reads the bytes once, checks the optional sha256, decodes the component and checks every trait method against the exports. Then it translates at the host's own level, O0 under `jet run` and O2 under `jet build`. So it runs the same code as a literal-path guest.\n\nThe translation runs as a Jet task with a 16 MiB stack, one at a time. A panic fails that load as `Defect`, and the host keeps running. Fixed caps on body size, nesting and memory keep it from exhausting its stack or the machine; a breach fails the load. The code is mapped read and execute from a sealed in-memory file, never from writable memory. A run-time path names a binary `.wasm` file, as a run-time `exec` path names a built program.",
-          "technical": "Reused: the link step's translation (Compiler/JetPlugin Link.jet, Translate.jet), the descriptor and PluginHost. Fuel slices, the per-call timeout, memory and table caps, and frames are unchanged. The ratified `plugin.Limits` value is unchanged, and no second limits value is added.\n\nContainment. The load joins the translation task. A panic in the decoder, validator or translator reaches the load as `.Panicked` and becomes `Defect` in load, naming the file. All three are safe Jet code, so malformed bytes can panic or reach a cap but cannot corrupt host memory. What remains is a miscompile that drops a check, which literal-path guests share.\n\nStack. A stack overflow in any task ends the process, so A keeps translation far from one. The validator refuses control nested over 10,000 levels, a fixed constant. The translation runs in `task.group translate(stack: 16 MiB)`. Bodies of 69,000 and 75,000 levels built at O2 on a 39 MiB stack. Nested blocks of 40,000 levels, four times the cap, built at O2 on a 16 MiB stack.\n\nAn overflow past that stack still ends the host. Turning one into a task failure would need unwinding out of a memory fault, which Jet's runtime does not do. Under an address-space limit below 1.6 GiB the runtime grants a smaller stack, a hundredth of the limit.\n\nMemory. Translation memory is capped at the smaller of 1 GiB and half the memory the process can still claim, read at load start. That room is free memory, lowered to each enclosing cgroup's memory.max less its use, and the address-space limit less the mapped size. The compiler already reads the first two this way to size its threads (JetCLI Request.jet).\n\nNew runtime work: the translating task carries a heap budget. The allocator checks it before each allocation. One past it, or one the OS refuses, panics that task instead of aborting the process. The load returns `Budget(.Memory)`, and the unwinding task frees what it held. An OS out-of-memory kill, from growth elsewhere after the read, still ends the host.\n\nThe code generator holds the whole module until it finishes, so memory is not freed per function (JetIR X64Module.jet). The worst peak measured was about 660 MB for a 1 MiB body at O2, so 1 GiB holds about 1.6 MiB of body. A code-size cap would never bind, so there is none. A function body over 1 MiB fails the load: 11 times the largest the repository ships.\n\nTime. Today a 1 MiB body of 69,000 nested blocks, each with a branch out, takes 20 s at O2, 18 s of it in the x64 code generator. Each block end scans every pending forward jump of the function (JetIR X64Select.jet `ir_x64_end`), so time grows with the square of the depth.\n\nAt 50,000 levels that pass took 10.7 s for nested blocks with the branch. It took 0.3 s for nested blocks without it, for nested ifs and for flat blocks with it. New code generator work keeps each open block's pending jumps with that block, so an end patches only its own. Deeply nested Jet programs compile faster too.\n\nA 1 MiB body of nested ifs builds in 2.6 s at O2. Run-time loads stay off until every probed shape, nested branches included, builds a 1 MiB body in under 3 s. The memory cap holds 1.6 to 2.2 MiB of body by shape, so that bounds a load to about 5 to 7 s.\n\nDeadline. A caller that wants a tighter bound wraps the load in `#Deadline` or `task.timeout`. Today a join that outlives its deadline ends the process (spec, E3003; probed). New runtime work makes the load a typed-error wait, like a network read: at expiry it cancels the task and returns `Budget(.Time)` in load.\n\nThe task runs without the caller's deadline, so its own loop checks never raise E3003. Cancelled, it stops at its next loop check and frees its memory as it unwinds. A load waiting its turn returns the same way, and one cancelled while waiting never starts. Jet code gains no new call; the deadline stays the one mechanism.\n\nMapping. The back end relocates the code for its address and writes it into a memfd made with MFD_NOEXEC_SEAL. It seals the memfd against writes and resizing and maps it shared, read and execute. Probed: after sealing, a write and a writable map were refused, a read-execute map ran its code, and a change to read, write and execute was refused.\n\nSo no page is ever writable and executable. SELinux was not probed: deny_execmem does not refuse it. The policy must still let the domain execute its own in-memory files, and where it doesn't, the load is refused with the named error.\n\nReuse. Loads of the same sha256 in one process translate once and share the code, each with its own limits. Across runs: none today. A later ballot that ratifies saved-work reuse must say how a deployed host opts in and count the store code's size.\n\nTranslations run one at a time, on one thread, so one heap budget bounds them all.\n\nRequired work: the heap budget, the typed wait and the code generator fix above, a WebAssembly spec-test runner and a fuzzer of mutated components. The last two also cover literal-path guests, which use the same translator. Run-time loads stay off until the spec suite's core tests pass, the fuzzer runs with no open crash, and the time check holds.\n\nSize: at least 2.3 MB in an O0 host and 4.3 MB in an O1 or O2 host. Calls: about 55 to 65 ns, as literal plugins. Web: refused at build, as today, because `plugin.load` needs `Exec`. I9: one code generator on every level, so no exception.\n\nEdge cases:\n\n```text\nguest trap        same PluginError and frames as a literal plugin\nbad module        Guest in load: couldn't load plugin `x.wasm`: not a WebAssembly\n                  Component: magic header not detected (at byte 0)\nmissing method    Guest in load: couldn't load plugin `x.wasm`: x.wasm does not\n                  export `analyze` required by Analyzer\n.wat path         Guest in load: couldn't load plugin `x.wasm`: a run-time path must\n                  name a binary .wasm component\nload race         one read; the sha256, decoder and translator use that buffer\nconcurrent loads  one translation at a time; a load waiting its turn returns\n                  Budget(.Time) at its caller's deadline, and never starts once\n                  cancelled\ntranslator panic  Defect in load: couldn't load plugin `x.wasm`: the translator\n                  failed: <panic text>; the host keeps running\nstack overflow    the nesting cap keeps translation within its 16 MiB stack; an\n                  overflow past it still ends the host\ncompile bomb      a body over 1 MiB or nesting over 10,000 levels: Guest in load;\n                  memory past the cap, or refused by the OS: Budget(.Memory) in\n                  load; past the caller's deadline: Budget(.Time) in load\nOS memory kill    an out-of-memory kill still ends the host; the cap reads the\n                  cgroup's room first\nno new code       deny_execmem does not refuse the sealed memfd mapping (not\n                  probed); a policy that refuses executable in-memory files:\n                  Guest in load: couldn't load plugin `x.wasm`: this system\n                  refuses executable in-memory files; literal plugins still work\nuntrusted bytes   reach the safe-Jet decoder, validator and back end inside the\n                  host, validator first, inside the contained task\n```",
-          "code": "use plugin: core.plugin\nuse process: core.process\n\nAnalyzer: trait {\n    analyze: fn(self, snapshot: [U8]) -> [U8],\n}\n\n// The load, translation included, must finish within 5 s.\n#Deadline(5s) open: fn(path: String, policy: Authority) -> Plugin<Analyzer> {\n    caps: plugin.Limits{fuel: 50_000_000, memory_bytes: 33_554_432, timeout: Duration{2s}}\n    plugin.load<Analyzer>(path, policy, limits: caps)\n}\n\nrun: fn() {\n    policy: Authority.from_rights([\"FS.Read(\\\"plugins\\\")\"])\n    tool: open(\"plugins/{process.args()[0]}.wasm\", policy)\n    if tool.analyze(\"rows\".bytes()) == {\n        .Ok(report) -> { print(\"{report.len()} bytes\") }\n        .Err(error) -> print(\"analyze failed: {error}\")\n    }\n}\n// A: translated in the host at the host's level; calls take 55 to 65 ns.\n// A panic, a memory breach or a missed deadline fails the load as a\n// PluginError, reported at the first call; the host keeps running.\n// Past 2 s a call fails as Budget(.Time); the plugin keeps serving calls."
+          "name": "Translate in a child, check the code, run it fenced in the host",
+          "detail": "A program that calls `plugin.load<T>` links the WebAssembly decoder, the plugin translator, the code generator's back end and a code checker. At load, Core reads the bytes once and checks the optional sha256. It starts a copy of the program itself as a translating child and pipes it those bytes. The child checks every trait method against the exports and translates at the host's own level. So the guest runs the same code as a literal-path guest.\n\nThe host seals the child's code, then a separate checker follows every value through every instruction. It proves the code can reach only its own memory, stack and guest page, its own functions and fixed entry points. Anything else fails the load as `Defect`, so a translator bug is caught, never run.\n\nThe code then runs behind guard pages, on its own stack. On CPUs with memory keys, the program's memory and every other plugin's memory are locked while guest code runs. A crash, stack overflow or memory blow-up while translating ends only the child. A run-time path names a binary `.wasm` file, as a run-time `exec` path names a built program.",
+          "technical": "Reused: the link step's translation (Compiler/JetPlugin Link.jet, Translate.jet), the descriptor and PluginHost. Fuel slices, the per-call timeout, memory and table caps, and frames are unchanged. The ratified `plugin.Limits` value is unchanged, and no second limits value is added. Code read on dev 97d2a287ab. Probes ran on an AMD Ryzen 9 7950X3D under Linux 7.2.8, on a heavily loaded machine.\n\nThe rule. Guest code may touch only its own memory, its own stack and its own guest page. It may read its own read-only page. It may call only its own functions, its dispatchers and a fixed list of runtime entry points. Three walls enforce the rule, and none of them trusts the translator.\n\nWall 1, the checker. It is new code, written apart from the translator, on the existing x86-64 decoder (JetBackend X64/Decoder.jet). The host runs it on every translated function after the code is sealed and before it is mapped executable. So the bytes checked are the bytes that run.\n\nThe checker is a dataflow abstract interpreter over registers and frame slots, as VeriWasm is. It takes the shared back end's output as it is, at every level, and asks nothing of it. Each register and frame slot holds one abstract value:\n\n```text\nconst c, bnd B    a known integer, or an integer in 0..B; a 32-bit write\n                  or `and` with a mask gives bnd\ninst              the instance pointer: rdi of guest functions, rsi of entries\narea              the export's argument and result area: rdx of an entry\noutp              a results pointer: rsi of a guest function, rdx of a dispatcher\nmemtab, tables    the read-only rows: [inst+0x30] and [inst+0x38]\nheap B            a memory's base plus an offset in 0..B, loaded from a row\nstack d           rbp plus d, in this function's own frame\nentry r           the caller's callee-saved register r, until restored\ntop               anything else; never used as an address\n```\n\nValues move through `mov`, `lea`, `add`, `sub`, `and`, shifts and frame-slot spills and reloads. At a join the values merge. A bound or heap offset that grows round a loop widens to its cap, then to `top`, so every load settles or is refused. The rules it enforces:\n\n```text\nheap      [heap B + bnd C * scale + disp] with disp >= 0 and\n          B + C * scale + disp + size within the 8 GiB reservation\nstack     a slot of this frame, never at or above the saved rbp;\n          frames at most 64 KiB\nslots     a slot keeps a value only after a full-width mov to its\n          exact offset; any other write over its bytes (ALU, SSE,\n          setcc, pop, xchg, a narrow or unaligned store) forgets it;\n          a call forgets every slot below rsp\nguest page   the trap, fuel and depth words, globals below the\n          module's global count, the area within its 512 bytes, and\n          the dropped flags; fuel is only ever lowered, so a guest\n          can't outrun its budget\nread-only page   reads only, and only rows below the module's\n          memory and table counts\nresults pointer   [outp + d], d >= 0; each caller passes a range of\n          its own live frame, and forgets what that range held\ncalls     direct only, to a function's first byte: guest functions\n          and dispatchers with rdi = inst, and the fixed runtime entry\n          points; no indirect call or jump\nreturns   rsp back at entry and rbx, rbp, r12 to r15 restored, at ret\n          and at every tail jump\ncode      every jump lands on an instruction decoded in that function;\n          no syscall, int, WRPKRU, XRSTOR, segment write or far jump;\n          only an allowlist of instructions; every access has a size\n```\n\nThe counts come from the decoded module, which the host also uses to build the read-only page, so a row past them is never read.\n\nA refusal fails the load as `Defect`: couldn't load plugin `x.wasm`: the translated code breaks the sandbox rule in `f` at +0x1a4. That is a translator bug caught at load, never a guest run. Literal-path guests pass the same checker when the program is built. The fuzzer runs every translation through it, so a refusal there is a translator bug found.\n\nProbed with a 873-line Python prototype of these rules, reading the disassembler's text. It ran over every component that loads today, at O0, O1 and O2, with each module's own counts. That is SandboxMathKit, 13 plugin test fixtures and a review probe guest: 452 functions and 125,754 instructions. It refused none of them.\n\nTwo more plugin fixtures are meant to fail at build, with `Jet.ArgumentCountMismatch`, so they have no code. The Zed extension and the site's HarfBuzz module don't load through `plugin.load` today. The extension's exports return Unit, which the plugin surface refuses, and HarfBuzz is a core module, not a component.\n\nThe prototype also refused every unsafe change made by hand to real output: 74 of 74. On the review probe's O2 guest it refused these 25:\n\n```text\nheap        a dropped zero extension, a negative displacement, an index\n            past the reservation, a base from a forged spill slot\nread-only   writes to the memories row and to a limit\ncalls       an indirect call, a forged instance, a jump out, a host call\ncode        syscall, WRPKRU, an image-data read, an fs store\nframes      a store over the return address, a 128 KiB frame, three\n            broken returns\ninstance    a reused instance register, a replaced area pointer, an\n            indexed instance store\nfuel        the fuel word raised by a constant, set from a guest value,\n            or raised in place\n```\n\nThe review probe's own set added 10 changes and a loop, all refused. They change a spilled heap base by a 4-byte store, `add`, `movq` and `pop`, and swap a slot with `xchg`. They read rows past the module's counts and store past its globals. They call or jump into a function's middle. The loop grows a heap pointer without end.\n\nA further 25 changes, all refused, cover the other write forms over a slot. Those are `setcc`, `xor`, `or`, `neg`, `movsd`, narrow and unaligned stores, a store through a copied frame address, and both `xchg` orders. They also cover a spill below rsp across a call, and a `pop` to an rsp-based operand.\n\nThe rest of those 25 are row 1 of one memory, row 0 of no tables, global 0 of no globals, and two area overruns. Then come an index grown round a loop, a heap pointer stepped back, a sizeless operand, a fuel swap, and two wrong branch addresses.\n\nThe multi-value fixture gave 7 of 7 results-pointer changes refused. They cover a write below the pointer and a write into saved registers. They also cover a pointer into the caller's caller and one over saved registers. A guest integer, the instance or a dispatcher's slot passed as the pointer were refused too. The guest-side code below gave 6 of 6 refused.\n\nEight safe variants were accepted, so the rules don't refuse sound code. They are a re-masked table slot, a 64-bit copy cursor, a removed copy check, a plain spill and reload, and a register swapped twice. The others are an index re-extended inside a loop, a slot rewritten after a narrow store, and a store at the area's last word.\n\nThe size of the Jet checker will be close to the prototype's logic, without its text parsing. No line count is claimed before it is written.\n\nWall 2, guard pages. Each guest memory is an 8 GiB reservation with no access, and only its current size is open. A 32-bit index plus a 32-bit offset can't leave it, so a dropped bounds check lands in the guard. The explicit checks stay, so traps keep today's meaning; the guard is the backstop. Memory64 is refused at decode today (JetWasm Decode.jet, the limits flags), and that refusal stays, since the guard relies on it.\n\nThe runtime's fault handler sees a fault from guest code at a guard or guest-stack address. It points the guest at the exit gate's landing, and the call fails as a trap with frames.\n\nProbed: reserving 8 GiB and opening 64 KiB took 9.2 µs per memory, and 16,382 reservations fit one address space. A fault in a guard was caught and resumed in 2.6 µs. A reservation takes address space, not memory.\n\nThe guest stack. Each guest gets its own stack, reserved at the depth limit times the largest frame the checker found, plus the largest pure helper frame. Below it sits a 1 MiB guard: more than the 64 KiB frame cap plus the red zone. Jet emits no stack probes, so one frame may skip up to 64 KiB; the 1 MiB guard still catches it. The depth limit stays 1,000 calls, and it traps before the stack runs out.\n\nProbed with a C stand-in for a guest frame: a 64 KiB frame plus pushes near the bottom of a stack. Over a 4 KiB guard, no fault came, and 8 bytes of the page below now held the guest's word. Over a 1 MiB guard, the fault came at the guard and the page below was untouched.\n\nWall 3, memory keys. On x86 CPUs with protection keys, guest memory and the guest stack carry the guest's key. The host's own memory keeps key 0. The entry gate opens only the guest's keys and switches to the guest stack; the exit gate restores the host's keys and stack.\n\nThe instance splits into three pages, so each word sits under the right key. Today it is one 120-byte host block (PluginHost.jet `PG_INST_*`, Translate.jet `PLUG_INST_*`):\n\n```text\nguest page, read-write, guest key    trap, fuel and depth words; globals;\n                                     the export argument and result area;\n                                     data and element dropped flags\nread-only page, shared read key      memory rows (base, limit), table rows,\n                                     the pointer to the host record\nhost record, host key                trap message, frame count and frames,\n                                     descriptor, plugin, fuel reserve,\n                                     deadline\n```\n\nThe export area moves into the guest page. The entry gate passes its address in rdx, and the checker binds the area to that argument alone. The read-only key is write-disabled while guest code runs, so the bounds and bases can be read but never changed.\n\nEach gate writes an absolute value to the keys register and compares it before going on. So a jump into a gate's middle can't open host memory. While guest code runs, host memory refuses every access, even if walls 1 and 2 both failed. Pure helpers, the 15 bit-count and float helpers that take only values, run without leaving the guest. The build checks that their code touches only the stack; any that fails goes through the gates.\n\nProbed: with only the guest's key open, a read of host memory faulted with SEGV_PKUERR. The host's handler ran and the host word stayed unchanged, 20,000 times in 20,000. A trap through the exit landing cost 3.1 to 4.1 µs. A gate pair cost 16.3 to 17.0 ns at best and 19 to 48 ns under heavy load. So a call costs about 72 to 82 ns instead of 55 to 65 ns.\n\nHelpers. Guest code calls 34 runtime helpers today, and 19 are host code that would run with host memory open. Under A they shrink to six behind the exit gate. The translator emits the rest as guest code, which the checker checks and the guest's key confines:\n\n```text\nguest code     memory.fill, copy and init; data.drop; table.get, set,\n               fill, copy, init and size; elem.drop; call_indirect's\n               lookup; trunc's range check\nexit gate      memory.grow, table.grow, the fuel slice end, trap,\n               frame, and host imports\n```\n\nGuest copies use the same checked form: two bounds checks against the limit, then 8-byte and byte loops. Each step re-extends its 32-bit cursor, so the heap rule holds. Large copies may run slower than the host's memmove; that was not measured.\n\ncall_indirect becomes guest code too. Each table's entries sit in their own reservation, sized to the table cap rounded up to a power of two. An entry is the function id plus one, and its signature. The lookup checks the index against the size, masks it to the reservation, and reads the entry. A zero id traps as an uninitialized element, and another signature traps as a mismatch. It then calls the signature's dispatcher directly.\n\nToday a dispatcher's default case returns zero, since the host helper checked first. Under A it traps as a signature mismatch. So even a forged entry can only reach a function of the right signature. call_indirect no longer crosses a gate at all; its lookup cost was not measured.\n\nThe six exit-gate helpers stay host code. They take integers and guest addresses, and they read and write guest memory only through one accessor. It forms each address as base plus a 32-bit pointer plus a 32-bit length, inside the reservation. So a missed bounds check in a helper still lands in the guard. A logic bug elsewhere in those six is one wall, not three. Every in-process engine has the same seam, Wasmtime's runtime calls included.\n\nSignals. While host memory is locked, a signal can only be delivered to a handler on its own stack. So every runtime sigaction gets SA_ONSTACK. Today three handlers lack it. Two are the process-signal handlers (JetRuntime ProcessSignal.jet lines 39 and 337, flags 0x14000000). The third is the SIGSYS handler (ComptimeServe.jet line 107). A guard test asserts the flag on every runtime sigaction.\n\nThe entry gate refuses a thread with no alternate stack. Fault.jet `fault_stack_start` returns 0 when it can't map one, and the runtime records that in a thread flag. The first load's key test, in the child, sends a non-fault signal while in guest code, besides the fault.\n\nProbed: a thread spinning in guest code, on the guest stack with only the guest key open, got SIGUSR1. With SA_ONSTACK and an alternate stack, the handler ran once and the process went on. Without SA_ONSTACK, as ProcessSignal.jet installs today, the process died with SIGSEGV.\n\nKeys need one more thing: no rseq area. With glibc's rseq registration on, a thread preempted in guest code died with SIGSEGV from the kernel, with no trap and no signal of its own. A trap with rseq on ended the process too. With it off, every probe returned. Jet's runtime is static musl and registers none, and a guard test asserts that.\n\nRe-entry and thread moves. A host import may call back into a guest, and a task may park in an import and resume on another thread. So each task keeps a chain of gate contexts in host-key memory: host stack, guest stack, the previous context and the keys value. The gates find it through the current task, not the thread. Fiber switches happen only in host code, and every gate writes absolute keys.\n\nProbed with a C model of that chain on a ucontext fiber. A task started on one thread, parked in an import and resumed on another, whose own keys were the host's. A nested re-entry then trapped on host memory, and the chain went back to the outer call. The outer guest, now on the second thread, wrote its own memory and then trapped on host memory. The chain ended empty and the host word was unchanged.\n\nMany guests. One process can allocate 15 keys, and one stays for the read-only pages. So 14 guests hold keys at a time, and any number may be loaded. A guest without a key has its pages tagged key 0 and closed. When it next runs, it takes the least recently used key and the old holder's pages are re-tagged to key 0.\n\nA key held by a guest that is running is never taken. A guest parked in a host import is not running, so its key may be taken. The import's return path takes a key and re-tags before guest code resumes. So a fifteenth guest running at once waits only until another leaves guest code, which every fuel slice end and every import does. No two guests ever share a key, and one guest reading another is the same fault as reading the host.\n\nProbed: 40 guests and 400 calls in random order through 14 keys, with 240 steals and 494 re-tags, 1.24 per call. Each guest read its own memory every time, and 15,600 cross-guest reads all faulted. The steal cost was not timed.\n\nProbed again with fourteen guests parked in imports, each waiting on work only a fifteenth guest's call does. Each guest is its own thread. Under this rule the fifteenth took a parked guest's key, and all fifteen finished. The 406 cross-guest reads all faulted, and every own-memory read succeeded. When parked guests kept their keys instead, the fifteenth found no key in 2 s, and nothing would ever free one.\n\nKeys need three things. The CPU must have them: Intel servers since 2017, Intel desktops and laptops since about 2019, and AMD since 2020, per vendor documents; this machine has them. The kernel must deliver signals as above, which Linux 7.2.8 did. And no rseq area may be registered. At the first load the child runs a one-shot key test, so a failing kernel costs only the child.\n\nWithout keys. Walls 1 and 2 still hold, and the guest behaves identically: same results, traps, limits and frames. An escape would then need a translator bug and a checker bug that agree. Calls cost 55 to 65 ns. The gates have two bodies, since WRPKRU faults on a CPU without keys. So an internal runtime switch, not a user surface, forces the keyless gates. The plugin test cases run both ways in CI, so neither body ships untested.\n\nHardware isolation without keys means a process per guest, which is option B: a second mechanism under I8, at about 5 µs a call.\n\nSide channels. Base plus a masked 32-bit index keeps even speculative heap and table reads inside the guest's own reservation. That covers bounds-check bypass. Branch-target and return-stack poisoning inside one process are not covered: a guest could steer the host's speculation and read host bytes through cache timing. That is a leak, not a write, and it stays a named residual. Only a process per guest closes it, which is B.\n\nMulti-memory. Each memory gets its own reservation and its own row. The checker ties each base to the row it was read from, so an index meant for one memory can't reach another. A copy between memories checks both, as above.\n\nTranslation in a child. The host starts itself again through /proc/self/exe with a translator entry, so no helper file ships and versions always match. It passes the bytes and the addresses to link against over a pipe. The child decodes, validates and translates, writes the code into a memfd the host made, and replies with the descriptor. Untrusted bytes never reach a decoder in the host, which checks the descriptor against the trait.\n\nThe child runs under an address-space limit at the memory cap, and an OOM score that makes the kernel kill it first. A system-call filter lets it use only its pipe, its memfd and memory calls. A panic, stack overflow, allocation failure or OOM kill ends only the child: `Defect` or `Budget(.Memory)` in load. One translation runs at a time.\n\nProbed: starting and reaping a 265 KB Jet program took 0.37 ms at best, and 0.65 ms for a 504 MB binary. Under heavy load the means were 3 and 4 ms. The child replaces the earlier in-host task with its heap budget and 16 MiB stack, so that runtime work is dropped.\n\nMemory. Translation memory is capped at the smaller of 1 GiB and half the memory the process can still claim, read at load start. That room is free memory, lowered to each enclosing cgroup's memory.max less its use, and the address-space limit less the mapped size. The compiler already reads the first two this way to size its threads (JetCLI Request.jet).\n\nThe code generator holds the whole module until it finishes, so memory is not freed per function (JetIR X64Module.jet). The worst peak measured was about 660 MB for a 1 MiB body at O2, so 1 GiB holds about 1.6 MiB of body. A code-size cap would never bind, so there is none. A function body over 1 MiB fails the load: 11 times the largest the repository ships.\n\nTime. Today a 1 MiB body of 69,000 nested blocks, each with a branch out, takes 20 s at O2, 18 s of it in the x64 code generator. Each block end scans every pending forward jump of the function (JetIR X64Select.jet `ir_x64_end`), so time grows with the square of the depth.\n\nAt 50,000 levels that pass took 10.7 s for nested blocks with the branch. It took 0.3 s for nested blocks without it, for nested ifs and for flat blocks with it. New code generator work keeps each open block's pending jumps with that block, so an end patches only its own. Deeply nested Jet programs compile faster too.\n\nA 1 MiB body of nested ifs builds in 2.6 s at O2. Run-time loads stay off until every probed shape, nested branches included, builds a 1 MiB body in under 3 s. The memory cap holds 1.6 to 2.2 MiB of body by shape, so that bounds a load to about 5 to 7 s.\n\nDeadline. A caller that wants a tighter bound wraps the load in `#Deadline` or `task.timeout`. New runtime work makes the load a typed-error wait on the child, like a network read. At expiry the host kills the child and returns `Budget(.Time)` in load. The load joins no task, so the E3003 end of a late join can't happen. Jet code gains no new call; the deadline stays the one mechanism.\n\nMapping. The host makes a memfd with MFD_NOEXEC_SEAL and hands it to the child, which writes the relocated code and exits. The host seals it against writes and resizing, checks it, and maps it shared, read and execute. Probed earlier: after sealing, a write and a writable map were refused, a read-execute map ran its code, and a change to read, write and execute was refused.\n\nSo no page is ever writable and executable. SELinux was not probed: deny_execmem does not refuse it. The policy must still let the domain execute its own in-memory files, and where it doesn't, the load is refused with the named error.\n\nReuse. Loads of the same sha256 in one process translate once and share the code, each with its own limits and its own key. Across runs: none today. The checker would make a disk cache safe to read, since planted code must pass it too. A later ballot that ratifies saved-work reuse must say how a deployed host opts in and count the store code's size.\n\nRequired work, all in the plugin translator, runtime and code generator:\n\n```text\nchecker          the rules above, on X64/Decoder.jet, run at build and load\nguard pages      8 GiB memory reservations, table reservations, the\n                 fault-to-trap path, guest stacks with a 1 MiB guard\ninstance split   guest page, read-only page and host record; new\n                 PG_INST_* and PLUG_INST_* offsets; the area moved\nguest helpers    bulk memory and table operations and call_indirect's\n                 lookup emitted as guest code; dispatchers trap by default\nhost helpers     six behind the exit gate, guest memory through one\n                 reservation accessor\ngates            absolute keys, a per-task context chain, the key\n                 manager with least-recently-used steal\nsignals          SA_ONSTACK on every runtime sigaction, the alternate-\n                 stack flag, the guard tests, the no-rseq test\nkeyless switch   internal; plugin cases run with and without keys\nchild            the translator entry, its limits and filter, the typed wait\ncode generator   per-block pending jumps\ntests            a WebAssembly spec-test runner and a fuzzer of mutated\n                 components, which cover literal-path guests too\n```\n\nRun-time loads stay off until the spec suite's core tests pass, the fuzzer runs with no open crash or checker refusal, and the time check holds.\n\nSize: at least 2.5 MB in an O0 host and 4.5 MB in an O1 or O2 host. That is the translator's 2.3 or 4.3 MB, plus the decoder and checker, an estimated 0.2 MB. Calls: about 72 to 82 ns with keys and 55 to 65 ns without; literal-path calls pay the same gates. Web: refused at build, as today, because `plugin.load` needs `Exec`. I9: one code generator on every level, and the checker generates no code, so no exception.\n\nEdge cases:\n\n```text\nguest trap        same PluginError and frames as a literal plugin\nbad module        Guest in load: couldn't load plugin `x.wasm`: not a WebAssembly\n                  Component: magic header not detected (at byte 0)\nmissing method    Guest in load: couldn't load plugin `x.wasm`: x.wasm does not\n                  export `analyze` required by Analyzer\n.wat path         Guest in load: couldn't load plugin `x.wasm`: a run-time path must\n                  name a binary .wasm component\nload race         one read; the sha256 and the child use that buffer\ntranslator bug    the checker refuses the code: Defect in load, naming the function\n                  and offset; the guest never runs\nmissed check      an access past the bounds lands in the guard: the call traps as\n                  out of bounds memory access; the plugin keeps serving calls\ndeep frames       a guest stack overflow hits the 1 MiB guard: the call traps\nhost memory       with keys, any guest access to it faults: the call traps\nother guests      each running guest holds its own key; another's memory faults\n                  as host memory does; a fifteenth running guest waits for a key\nsignals           every runtime handler runs on its own stack; a thread with no\n                  alternate stack is refused at the entry gate\nre-entry          an import that calls back nests a gate context; a task that\n                  moves threads takes its keys with it\nforged table      a guest-written table entry reaches only functions of the\n                  right signature; others trap as a signature mismatch\ntranslator crash  a panic, stack overflow or allocation failure ends the child:\n                  Defect in load: the translator failed: <its report>\ncompile bomb      a body over 1 MiB or nesting over 10,000 levels: Guest in load;\n                  memory past the cap: Budget(.Memory) in load; past the caller's\n                  deadline the child is killed: Budget(.Time) in load\nOS memory kill    the child's OOM score makes it the kernel's first choice\nconcurrent loads  one translation at a time; a waiting load returns Budget(.Time)\n                  at its caller's deadline\nno /proc          Guest in load: couldn't start the plugin translator\nno keys           no CPU flag, a failed key test or a registered rseq area: walls\n                  1 and 2 only; same behavior, calls 55 to 65 ns\naddress space     a limit with no room for an 8 GiB reservation: Budget(.Memory)\n                  in load: no room for the plugin's guard pages; literal plugins too\nno new code       a policy that refuses executable in-memory files: Guest in load:\n                  this system refuses executable in-memory files\nmemory64          refused at decode, as today: the guard needs 32-bit addresses\nside channels     heap and table reads stay inside the guest's reservation even\n                  speculatively; branch-target and return-stack poisoning are a\n                  named residual\nhost helpers      six helpers stay host code; their guest addresses go through\n                  the reservation, but a logic bug in them is a single wall\nuntrusted bytes   reach only the child; the host reads its code and descriptor\n```",
+          "code": "use plugin: core.plugin\nuse process: core.process\n\nAnalyzer: trait {\n    analyze: fn(self, snapshot: [U8]) -> [U8],\n}\n\n// The load, translation included, must finish within 5 s.\n#Deadline(5s) open: fn(path: String, policy: Authority) -> Plugin<Analyzer> {\n    caps: plugin.Limits{fuel: 50_000_000, memory_bytes: 33_554_432, timeout: Duration{2s}}\n    plugin.load<Analyzer>(path, policy, limits: caps)\n}\n\nrun: fn() {\n    policy: Authority.from_rights([\"FS.Read(\\\"plugins\\\")\"])\n    tool: open(\"plugins/{process.args()[0]}.wasm\", policy)\n    if tool.analyze(\"rows\".bytes()) == {\n        .Ok(report) -> { print(\"{report.len()} bytes\") }\n        .Err(error) -> print(\"analyze failed: {error}\")\n    }\n}\n// A: translated in a child of this program at its level, checked, then run\n// fenced; calls take about 72 to 82 ns with memory keys, 55 to 65 without.\n// A translator bug, crash or compile bomb fails the load as a PluginError,\n// reported at the first call; the host keeps running.\n// Past 2 s a call fails as Budget(.Time); the plugin keeps serving calls."
         },
         {
           "key": "B",
@@ -129055,14 +129126,14 @@
           "key": "D",
           "name": "Single-pass WebAssembly compiler in the runtime",
           "detail": "The runtime gains a baseline compiler that turns each WebAssembly function straight into x86-64 code in one pass. Loading is fast and the compiler is small. Calls run in process. It is a second code generator beside Jet's own, with its own copy of the bounds, fuel and deadline checks.",
-          "technical": "Size, an estimate: the decoder is about 0.35 MB measured, plus a one-pass emitter of 0.3 to 0.6 MB. No comparable Jet code exists to measure. Speed: on the same CoreMark table, Wasmer's single-pass compiler ran about 1.6 times slower than its Cranelift compiler. Those numbers are from 2019 and 2020.\n\nLimits: the emitter must spend fuel at function entry and loop heads, in slices of 4096, and check the deadline at each slice end. Memory and table growth call the same runtime checks. It becomes a second trusted sandbox to audit. Web: refused at build, as today.\n\nI9 forbids a second code generator. So D needs this ratified exception:\n\n\"Excluded from I9 on O0, O1 and O2: a plugin guest loaded by `plugin.load<T>` is compiled by Core's single-pass WebAssembly compiler, not the Jet code generator. Literal-path guests are unchanged. The web tier has no `plugin.load`.\"\n\nEdge cases:\n\n```text\nguest trap        frames come from the emitter's own frame records; offsets must match A's\nbad module        same decoder; same Guest in load message as A\nload race         one read, as A\nconcurrent loads  one compile at a time, as A\ncompiler defect   fails one load as Defect if the emitter is Jet code, as A\ncompile bomb      linear in size; A's caps and the caller's deadline apply\nno new code       as in A: mapped from a sealed memfd\nuntrusted bytes   reach the decoder, validator and emitter inside the host\n```",
+          "technical": "Size, an estimate: the decoder is about 0.35 MB measured, plus a one-pass emitter of 0.3 to 0.6 MB, plus A's decoder and checker, an estimated 0.2 MB. No comparable Jet code exists to measure. Speed: on the same CoreMark table, Wasmer's single-pass compiler ran about 1.6 times slower than its Cranelift compiler. Those numbers are from 2019 and 2020.\n\nLimits: the emitter must spend fuel at function entry and loop heads, in slices of 4096, and check the deadline at each slice end. Memory and table growth call the same runtime checks. A's checker, guard pages and memory keys apply to its code too, so escapes stay closed. But its fuel, deadline and frame rules are a second copy to keep equal to A's. Web: refused at build, as today.\n\nI9 forbids a second code generator. So D needs this ratified exception:\n\n\"Excluded from I9 on O0, O1 and O2: a plugin guest loaded by `plugin.load<T>` is compiled by Core's single-pass WebAssembly compiler, not the Jet code generator. Literal-path guests are unchanged. The web tier has no `plugin.load`.\"\n\nEdge cases:\n\n```text\nguest trap        frames come from the emitter's own frame records; offsets must match A's\nbad module        same decoder; same Guest in load message as A\nload race         one read, as A\nconcurrent loads  one compile at a time, as A\ncompiler defect   fails one load as Defect if the emitter is Jet code, as A\nemitter bug       A's checker refuses the code: Defect in load\ncompile bomb      linear in size; A's caps and the caller's deadline apply\nno new code       as in A: mapped from a sealed memfd\nuntrusted bytes   reach the decoder, validator and emitter inside the host\n```",
           "code": "use plugin: core.plugin\nuse process: core.process\n\nAnalyzer: trait {\n    analyze: fn(self, snapshot: [U8]) -> [U8],\n}\n\nrun: fn() {\n    policy: Authority.from_rights([\"FS.Read(\\\"plugins\\\")\"])\n    path: \"plugins/{process.args()[0]}.wasm\"\n    caps: plugin.Limits{fuel: 50_000_000, memory_bytes: 33_554_432, timeout: Duration{2s}}\n    tool: plugin.load<Analyzer>(path, policy, limits: caps)\n    if tool.analyze(\"rows\".bytes()) == {\n        .Ok(report) -> { print(\"{report.len()} bytes\") }\n        .Err(error) -> print(\"analyze failed: {error}\")\n    }\n}\n// D: a guest-only compiler builds each function in one pass, with its own checks.\n// Past 2 s a call fails as Budget(.Time); the plugin keeps serving calls.\n// Memory and table caps use the same runtime checks as translated guests."
         },
         {
           "key": "E",
           "name": "Translate in a helper at load, run in the host",
-          "detail": "At load the host pipes the bytes it read to an engine helper, `jet-plugin-engine`. The helper translates them with A's translator and returns native code tagged with the bytes' sha256. The host checks the tag, maps the code and runs it in process, as A does. The host stays small, and translator crashes and compile bombs stay in the helper. A steered translator bug still yields code the host runs, so escapes are not isolated. The helper must ship beside the program and match its Jet version exactly.",
-          "technical": "This is Wasmtime's precompile route, done by a helper at load. Size: the host adds a loader of an estimated 0.2 MB, with MemoryLink as the stand-in. The helper is an estimated 4.5 MB or more, shipped once. Calls: about 55 to 65 ns, as A. Load: a process start plus A's translation.\n\nLimits, frames and the web tier behave as in A. I9: one code generator, so no exception.\n\nA disk cache keyed by sha256 would skip repeat translations. It is left out, as in A. Any process that can write the cache could plant native code that runs outside the sandbox. Wasmtime marks `Component::deserialize` unsafe for the same reason.\n\nEdge cases:\n\n```text\nguest trap        same PluginError and frames as A\nbad module        the helper's decoder refuses it; same Guest in load message as A\nload race         the host hashes and pipes the bytes it read; the reply must carry that sha256\nconcurrent loads  one helper per load\ntranslator defect the helper exits; the load fails as Defect, the host lives\ncompile bomb      the helper applies A's caps; the host stops it past the caller's\n                  deadline: Budget(.Time) in load\nmissing helper    Guest in load: couldn't load plugin `x.wasm`: the plugin engine\n                  `jet-plugin-engine` was not found\nversion mismatch  Guest in load: the plugin engine is from another Jet version\nuntrusted bytes   reach only the helper, but a translator bug a crafted component\n                  steers, such as a dropped bounds or fuel check, yields code the host\n                  maps and runs; escape exposure equals A's\nno new code       as in A: the host maps the reply from a sealed memfd\n```",
+          "detail": "At load the host pipes the bytes it read to an engine helper, `jet-plugin-engine`, a separate file. The helper translates them with A's translator and returns native code tagged with the bytes' sha256. The host checks the tag, runs A's checker over the code, and runs it in process behind A's guard pages and memory keys. So a steered translator bug fails the load, as in A. The host stays about 4 MB smaller than under A. The helper must ship beside the program and match its Jet version exactly.",
+          "technical": "This is Wasmtime's precompile route, done by a helper at load, with A's checker in the host. Size: the host adds a loader of an estimated 0.2 MB, with MemoryLink as the stand-in, plus A's decoder and checker, an estimated 0.2 MB. The helper is an estimated 4.5 MB or more, shipped once. Calls: as A, about 72 to 82 ns with memory keys and 55 to 65 ns without. Load: a process start plus A's translation and check.\n\nLimits, frames, the three walls and the web tier behave as in A. I9: one code generator, so no exception. The only difference from A is where the translator lives: a second file instead of the program itself.\n\nA disk cache keyed by sha256 would skip repeat translations. It is left out, as in A. With the checker, planted code must still pass it, so a later ballot could allow one.\n\nEdge cases:\n\n```text\nguest trap        same PluginError and frames as A\nbad module        the helper's decoder refuses it; same Guest in load message as A\nload race         the host hashes and pipes the bytes it read; the reply must carry that sha256\nconcurrent loads  one helper per load\ntranslator defect the helper exits; the load fails as Defect, the host lives\ntranslator bug    A's checker refuses the code: Defect in load; the guest never runs\ncompile bomb      the helper applies A's caps; the host stops it past the caller's\n                  deadline: Budget(.Time) in load\nmissing helper    Guest in load: couldn't load plugin `x.wasm`: the plugin engine\n                  `jet-plugin-engine` was not found\nversion mismatch  Guest in load: the plugin engine is from another Jet version\nuntrusted bytes   reach only the helper; the host reads its code and descriptor\nno keys           as in A: the checker and guard pages hold\nno new code       as in A: the host maps the reply from a sealed memfd\n```",
           "code": "use plugin: core.plugin\nuse process: core.process\n\nAnalyzer: trait {\n    analyze: fn(self, snapshot: [U8]) -> [U8],\n}\n\nrun: fn() {\n    policy: Authority.from_rights([\"FS.Read(\\\"plugins\\\")\"])\n    path: \"plugins/{process.args()[0]}.wasm\"\n    caps: plugin.Limits{fuel: 50_000_000, memory_bytes: 33_554_432, timeout: Duration{2s}}\n    tool: plugin.load<Analyzer>(path, policy, limits: caps)\n    if tool.analyze(\"rows\".bytes()) == {\n        .Ok(report) -> { print(\"{report.len()} bytes\") }\n        .Err(error) -> print(\"analyze failed: {error}\")\n    }\n}\n// E: jet-plugin-engine translates at load; the host maps the code and calls it in process.\n// Past 2 s a call fails as Budget(.Time); the plugin keeps serving calls.\n// A missing or mismatched helper refuses the load as Guest in load."
         }
       ],
@@ -129085,65 +129156,77 @@
       ],
       "rec": "A",
       "recommendation": {
-        "why": "A runs run-time-path plugins with the same translator and checks as literal-path plugins. It needs no helper file, no new limits value and no I9 exception. Only programs calling `plugin.load<T>` pay its size.",
+        "why": "A runs run-time-path plugins with the same translator as literal-path plugins. A separate checker proves each load's code safe before it runs. It passed every component that loads today, and refused all 74 unsafe changes tried. Guard pages catch any stray heap address, and memory keys lock the host's and other plugins' memory where the CPU has them. It needs no helper file, no new limits value and no I9 exception.",
         "gains": [
-          "Run-time-path calls cost the same as literal-path calls, about 55 to 65 ns.",
-          "One translator and one set of sandbox checks; a translator panic, a memory breach or a missed deadline fails one load, not the host.",
-          "One file to ship, and no knob beyond the ratified `plugin.Limits` and Jet's own deadline."
+          "A translator bug alone cannot let a guest escape: the checker refuses unsafe code before it runs, and guard pages and memory keys back it up.",
+          "Calls cost about 72 to 82 ns with memory keys and 55 to 65 ns without, 60 to 90 times faster than a pipe.",
+          "One file to ship; a translator crash, stack overflow or memory blow-up ends only the translating child, never the host."
         ],
         "losses": [
           {
-            "loss": "Hosts that use `plugin.load<T>` grow by at least 2.3 MB at O0 and 4.3 MB at O2.",
-            "mitigation": "Only those hosts pay it; literal-path programs are unchanged. Hosts run inside `jet` pay nothing, because `jet` already links this code."
+            "loss": "Hosts that use `plugin.load<T>` grow by at least 2.5 MB at O0 and 4.5 MB at O2.",
+            "mitigation": "This is physical: a program that translates must hold a translator. Only those hosts pay; literal-path programs are unchanged, and hosts inside `jet` pay about 0.1 MB."
           },
           {
-            "loss": "A translator bug that drops a check could let a crafted guest escape the sandbox.",
-            "mitigation": "Literal-path guests and every compiling engine share this exposure. One translator is one place to harden: the validator runs first, and a spec-test runner and a component fuzzer are required work."
+            "loss": "On CPUs with memory keys, each call pays about 17 ns to lock and unlock the host's memory.",
+            "mitigation": "Only the way in and out pays; work inside the guest runs at full speed, and pure helpers run without leaving the guest."
           },
           {
-            "loss": "Each new component is translated before its first call: about 2.6 s per MiB at O2, once the code generator fix lands.",
-            "mitigation": "Loads of the same sha256 in one process translate once. The memory cap bounds a load to about 5 to 7 s, and `#Deadline` returns `Budget(.Time)` sooner. Across runs: none today."
+            "loss": "Without memory keys, safety rests on the checker and guard pages alone.",
+            "mitigation": "The checker is small, written apart from the translator, and fuzzed on every translation. Behavior is identical with or without keys."
           },
           {
-            "loss": "A stack overflow past the translation's 16 MiB stack, or an OS out-of-memory kill, still ends the host.",
-            "mitigation": "The 10,000-level nesting cap keeps translation far inside its stack: 69,000 levels built on 39 MiB. The memory cap reads the cgroup's room before it starts."
+            "loss": "Each new component is translated and checked before its first call: about 2.6 s per MiB of body, once the code generator fix lands.",
+            "mitigation": "Loads of the same sha256 in one process translate once. The memory cap bounds a load to about 5 to 7 s, and `#Deadline` returns `Budget(.Time)` sooner."
           },
           {
             "loss": "A system that refuses executable mappings of in-memory files refuses run-time loads.",
-            "mitigation": "deny_execmem does not refuse A's sealed mapping, though no SELinux system was probed. Under a stricter policy the error names the cause, and literal-path plugins still work."
+            "mitigation": "This is physical: such a policy forbids what any translating engine must do. The error names the cause, and literal-path plugins still work."
+          },
+          {
+            "loss": "Six runtime helpers stay host code: memory and table growth, fuel, traps, frames and host imports. A logic bug in them has one wall, their own checks.",
+            "mitigation": "Every guest address they use is formed inside the guest's reservation, so a missed bounds check still faults. Bulk memory and table work moved into checked guest code."
+          },
+          {
+            "loss": "Branch-target and return-stack poisoning inside one process could leak host bytes to a guest through cache timing.",
+            "mitigation": "It is a leak, not a write, and heap and table reads stay inside the guest even speculatively. Only a process per guest, option B, closes it."
+          },
+          {
+            "loss": "With more than 14 plugins running guest code at once, the next one waits for a memory key.",
+            "mitigation": "Any number may be loaded. A plugin gives up its key at every fuel slice end and every host import, so the wait is at most one slice."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "Every call pays a pipe round trip of about 5 microseconds, roughly 80 to 100 times an in-process call. A helper must also ship beside each program."
+            "reason": "Every call pays a pipe round trip of about 5 microseconds, roughly 60 to 90 times an in-process call. A helper must also ship beside each program."
           },
           {
             "key": "C",
-            "reason": "Guest code runs several times slower, and the interpreter repeats the sandbox checks in a second place. It also needs an I9 exception."
+            "reason": "Guest code runs several times slower, and the interpreter repeats the fuel, time and frame rules in a second place. It also needs an I9 exception."
           },
           {
             "key": "D",
-            "reason": "It is a second code generator with its own sandbox checks to audit. It needs an I9 exception, and its code is slower than the translator's."
+            "reason": "It is a second code generator whose fuel, deadline and frame rules must be kept equal to A's. It needs an I9 exception, and its code is slower than the translator's."
           },
           {
             "key": "E",
-            "reason": "Its crash isolation A now gets from a task, so what remains is a smaller host. For that, a version-matched helper must ship beside every program, and a steered translator bug still yields code the host runs."
+            "reason": "It differs from A only in where the translator lives: a version-matched helper file instead of the program itself. That saves about 4 MB per host, for a second file to ship and keep matched."
           }
         ],
-        "tradeoff": "At least two to four megabytes in hosts that load plugins at run time, for native-speed calls, one file to ship, one translator and one set of sandbox checks."
+        "tradeoff": "At least two and a half to four and a half megabytes in hosts that load plugins at run time, and about 17 ns per call for the memory keys. Two residuals stay named: six host helpers and speculative leaks. In return: a sandbox no translator bug alone can break, native-speed calls and one file to ship."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Lens. Lens rejected owner1 after probing a stack overflow, an allocation failure, a deadline around a join and a 1 MiB body. owner2 engineered all four away; Lens accepted owner2 and confirmed owner3's two measured-figure fixes."
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Lens. Lens rejected the first revision on nine claims and the second on the checker's frame-slot, count and loop rules and a key-wait deadlock. This revision answers each with a probe, and Lens reviews it against the owner's ruling that a guest must never escape."
       },
       "checkInstructions": null,
       "surface": {
         "gist": "When a program loads a plugin whose path it learns only at run time, what runs that plugin's code?",
-        "lesson": "A plugin is a sandboxed WebAssembly component, translated at build time, so its path must be in the source. A run-time path needs an engine at load: a translator in the program, a helper, or an interpreter.",
+        "lesson": "A plugin is a sandboxed WebAssembly component, translated at build time, so its path must be in the source. A run-time path needs an engine at load: a translator in the program, a helper, or an interpreter. That engine may have bugs.",
         "trio": {
           "current": {
             "note": "Observed today: a computed path does not type-check.",
@@ -129158,19 +129241,19 @@
         "options": [
           {
             "key": "A",
-            "name": "Translate at load, in the host, as a contained task",
-            "gist": "The program translates at load, in a task.",
+            "name": "Translate in a child, check the code, run it fenced in the host",
+            "gist": "A child translates; a checker proves the code safe.",
             "gains": [
-              "Calls as fast as literal paths.",
-              "One translator; a translator bug fails one load."
+              "Calls near literal-path speed.",
+              "A translator bug alone cannot let a guest escape."
             ],
             "losses": [
-              "Using programs grow 2.3 to 4.3 MB or more.",
-              "A translator miscompile could let a guest escape.",
-              "Stack overflow or OS kill mid-translation ends the host."
+              "Using programs grow 2.5 to 4.5 MB or more.",
+              "Memory keys add about 17 ns per call.",
+              "Six host helpers and speculation stay residuals."
             ],
             "proposed": {
-              "code": "use plugin: core.plugin\nuse process: core.process\n\nAnalyzer: trait {\n    analyze: fn(self, snapshot: [U8]) -> [U8],\n}\n\nrun: fn() {\n    policy: Authority.from_rights([\"FS.Read(\\\"plugins\\\")\"])\n    tool: plugin.load<Analyzer>(\"plugins/{process.args()[0]}.wasm\", policy)\n    report: tool.analyze(\"rows\".bytes()) ?? panic(\"analyze failed\")\n    print(\"{report.len()} bytes\")\n}\n// A: translated at load as a task; a call takes about 60 ns"
+              "code": "use plugin: core.plugin\nuse process: core.process\n\nAnalyzer: trait {\n    analyze: fn(self, snapshot: [U8]) -> [U8],\n}\n\nrun: fn() {\n    policy: Authority.from_rights([\"FS.Read(\\\"plugins\\\")\"])\n    tool: plugin.load<Analyzer>(\"plugins/{process.args()[0]}.wasm\", policy)\n    report: tool.analyze(\"rows\".bytes()) ?? panic(\"analyze failed\")\n    print(\"{report.len()} bytes\")\n}\n// A: a child translates, a checker approves, the host runs it fenced"
             }
           },
           {
@@ -129182,7 +129265,7 @@
               "The program stays small."
             ],
             "losses": [
-              "Each call crosses processes, 80 to 100 times slower.",
+              "Each call crosses processes, 60 to 90 times slower.",
               "A helper must ship beside the program."
             ],
             "proposed": {
@@ -129211,10 +129294,10 @@
             "gist": "A second, small compiler translates in one pass.",
             "gains": [
               "Fast loads and in-process calls.",
-              "An estimated 0.8 MB."
+              "An estimated 1.0 MB."
             ],
             "losses": [
-              "A second code generator with its own sandbox checks.",
+              "A second code generator whose rules must match A's.",
               "Needs an exception to the one-code-generator rule."
             ],
             "proposed": {
@@ -129224,14 +129307,13 @@
           {
             "key": "E",
             "name": "Translate in a helper at load, run in the host",
-            "gist": "A helper translates at load; the program runs the result.",
+            "gist": "A helper translates; the program runs the result.",
             "gains": [
-              "Calls as fast as A; an estimated 0.2 MB growth.",
+              "Calls as fast as A; about 0.4 MB growth.",
               "Translation runs outside the program."
             ],
             "losses": [
-              "A same-version helper must ship beside the program.",
-              "Steered translator bugs still run in the program."
+              "A same-version helper must ship beside the program."
             ],
             "proposed": {
               "code": "use plugin: core.plugin\nuse process: core.process\n\nAnalyzer: trait {\n    analyze: fn(self, snapshot: [U8]) -> [U8],\n}\n\nrun: fn() {\n    policy: Authority.from_rights([\"FS.Read(\\\"plugins\\\")\"])\n    tool: plugin.load<Analyzer>(\"plugins/{process.args()[0]}.wasm\", policy)\n    report: tool.analyze(\"rows\".bytes()) ?? panic(\"analyze failed\")\n    print(\"{report.len()} bytes\")\n}\n// E: a helper translates at load; the program maps and calls the code"
@@ -129240,22 +129322,22 @@
         ],
         "recommendation": {
           "rec": "A",
-          "why": "Run-time plugins get literal plugins' translator, checks and call speed, with no helper file or new limits value. Only programs using it pay the size.",
+          "why": "A checker proves each plugin's code safe first, so a translator bug alone cannot become an escape. Calls stay near native speed.",
           "gains": [
-            "Native-speed calls, one file, one translator."
+            "No escape from a translator bug alone; near-native calls; one file."
           ],
           "losses": [
             {
-              "loss": "At least 2.3 to 4.3 MB in programs using it.",
-              "mitigation": "Literal-path programs and hosts inside `jet` pay nothing."
+              "loss": "At least 2.5 to 4.5 MB in programs using it.",
+              "mitigation": "Physical: translating needs a translator. Literal-path programs pay nothing."
             },
             {
-              "loss": "A translator miscompile could still let a guest escape.",
-              "mitigation": "Literal paths share it; spec tests and fuzzing are required."
+              "loss": "Memory keys add about 17 ns per call.",
+              "mitigation": "Only entry and exit pay; guest work runs at full speed."
             },
             {
-              "loss": "Stack overflow or OS kill mid-translation ends the host.",
-              "mitigation": "Nesting and memory caps keep translation clear of both."
+              "loss": "Six host helpers and speculative leaks remain.",
+              "mitigation": "Helper addresses still fault; leaks can't write."
             }
           ],
           "whyNot": [
@@ -129269,50 +129351,45 @@
             },
             {
               "key": "D",
-              "reason": "A second compiler with its own sandbox checks."
+              "reason": "A second compiler whose rules must match A's."
             },
             {
               "key": "E",
-              "reason": "A matched helper must ship."
+              "reason": "A matched helper file must ship."
             }
           ],
-          "tradeoff": "Megabytes in run-time plugin programs, for native calls, one file and one sandbox."
+          "tradeoff": "Megabytes and 17 ns per call, for a sandbox translator bugs cannot break."
         }
       },
       "designAway": [
         {
-          "loss": "Hosts that use `plugin.load<T>` grow by at least 2.3 MB at O0 and 4.3 MB at O2.",
+          "loss": "A translator bug that drops a check could let a crafted guest escape the sandbox.",
+          "attempts": [
+            "Spec tests and a fuzzer alone: rejected, since testing cannot prove a bug absent.",
+            "Check the translated machine code with a separate checker before mapping it, as VeriWasm does for Lucet: kept. It is a dataflow interpreter over registers and frame slots, built on Jet's x86-64 decoder. A prototype passed every loadable component at O0 to O2 and refused 74 of 74 unsafe changes.",
+            "Reserve 8 GiB guard regions around each memory, so a 32-bit address plus offset can only fault: kept.",
+            "Lock the host's memory with protection keys while guest code runs, as ERIM does: kept, where the CPU and kernel have them."
+          ],
+          "result": "Removed structurally: an escape needs a translator bug the checker also misses. With keys, host memory then still faults, since the checker refuses any code that rewrites the key register. The six host helpers and speculative leaks remain, named below."
+        },
+        {
+          "loss": "Hosts that use `plugin.load<T>` grow by at least 2.5 MB at O0 and 4.5 MB at O2.",
           "attempts": [
             "Always translate at O0, without the optimizer: saves 1.93 MB, but a guest that calls and touches memory ran about 1.45 times slower. Rejected, because the same guest would then run slower depending on how its path was written.",
             "Accept text `.wat` paths at run time: rejected, because it adds the 0.35 MB WAT reader for a form that shipped plugins do not use.",
             "Put the translator in the shared runtime for every program: rejected, because every program would pay the size, plugin or not.",
             "Translate in a helper process (option E): rejected, a version-matched helper must then ship beside every program."
           ],
-          "result": "Remains, paid only by hosts that call `plugin.load<T>`; hosts inside `jet` pay nothing."
+          "result": "Remains, and it is physical: a program that translates must hold a translator. Only hosts that call `plugin.load<T>` pay; hosts inside `jet` pay about 0.1 MB."
         },
         {
-          "loss": "A translator defect stopped the host instead of failing one load.",
+          "loss": "A translator crash, stack overflow or allocation failure ended the host.",
           "attempts": [
             "Translate in a helper and run in the host: this is option E, which needs a version-matched helper beside every program.",
-            "Run the translation as a Jet task and report its panic as `Defect` in load: kept. A probe shows a task's panic reaches its join, and the host runs on."
+            "Run the translation as a Jet task: rejected. A probe shows a task contains a panic, but a task's stack overflow stopped the whole program, and an allocation failure aborts the process.",
+            "Translate in a child started from the host's own program file with a translator entry: kept. The child gets the memory cap as its address-space limit and is first in line for the kernel's out-of-memory killer."
           ],
-          "result": "Removed for panics: a translator panic fails one load as `Defect`. A stack overflow and an allocation failure are not panics; the next two entries take them."
-        },
-        {
-          "loss": "A stack overflow in the translation ended the host.",
-          "attempts": [
-            "Turn a stack overflow into a task failure: rejected, it needs unwinding out of a memory fault, which Jet's runtime does not do for any task.",
-            "Cap control nesting at 10,000 levels in the validator and run the translation on a named 16 MiB stack: kept. 69,000 levels built at O2 on 39 MiB."
-          ],
-          "result": "Reduced: the cap keeps translation far inside its stack. An overflow past it, which would take a translator defect, still ends the host."
-        },
-        {
-          "loss": "An allocation failure during translation aborted the host.",
-          "attempts": [
-            "Count translation memory after the fact: rejected, the process aborts at the failing allocation first.",
-            "Give the translating task a heap budget the allocator checks before each allocation, and let an allocation past it or refused by the OS panic that task: kept, as new runtime work."
-          ],
-          "result": "Removed: either becomes `Budget(.Memory)` in load. An OS out-of-memory kill, from growth elsewhere, still ends the host."
+          "result": "Removed: any translator failure ends only the child. The load fails as `Defect`, or as `Budget(.Memory)` past the cap, and the host runs on."
         },
         {
           "loss": "The 1 GiB memory cap ignored cgroup and address-space limits.",
@@ -129326,7 +129403,7 @@
           "loss": "A deadline around the load ended the host, since a join past its deadline raises E3003.",
           "attempts": [
             "Add a join with a timeout to Jet code: rejected, a second way to bound a wait beside `#Deadline`.",
-            "Make the load a typed-error wait, as a network read is: at expiry it cancels the task and returns `Budget(.Time)`: kept, as new runtime work."
+            "Make the load a typed-error wait, as a network read is: at expiry it kills the child and returns `Budget(.Time)`: kept, as new runtime work."
           ],
           "result": "Removed: `#Deadline` and `task.timeout` bound a load and the host runs on."
         },
@@ -129341,10 +129418,10 @@
         {
           "loss": "Untrusted bytes reach the decoder, validator and back end inside the host process.",
           "attempts": [
-            "Move them to a helper process: B pays 80 to 100 times per call, and E still maps the helper's code, so a miscompile escapes either way.",
-            "Keep them in safe Jet code, inside the contained task, under fixed caps, validator first: kept."
+            "Move them to a helper process that also runs the guest: that is B, which pays 60 to 90 times per call.",
+            "Decode, validate and translate in the child: kept. The host reads only the child's code and descriptor, and checks both before use."
           ],
-          "result": "Reduced to a miscompile, the exposure literal-path guests already have. A spec-test runner and a fuzzer are required work."
+          "result": "Removed from the host: untrusted bytes reach only the child, and nothing the child returns runs until the checker passes it."
         },
         {
           "loss": "Each new component is translated before its first call, on every build and every `jet` start.",
@@ -129353,7 +129430,35 @@
             "Translate each sha256 once per process: kept.",
             "Keep translated code in the machine store `jet build` uses: not today. No host links the store code, and no ratified switch reaches a deployed host."
           ],
-          "result": "Reduced to once per process. Across runs: none today. A later ballot that ratifies saved-work reuse must say how a deployed host opts in and count the store code's size."
+          "result": "Reduced to once per process. The child's start adds 0.4 to 0.7 ms, and the check reads code at 3.4 MB/s or faster. Across runs: none today."
+        },
+        {
+          "loss": "Memory keys cost each call about 17 ns, and up to 48 ns under heavy load.",
+          "attempts": [
+            "Skip the keys: rejected, the owner ruled that a guest escape is unacceptable.",
+            "Gate every helper call: rejected, it doubles the cost for bit counts and float helpers.",
+            "Let helpers that touch no memory run without leaving the guest: kept. If one ever touched memory, the keys would trap it."
+          ],
+          "result": "Reduced: only entering and leaving the guest, and helpers that touch memory, pay."
+        },
+        {
+          "loss": "Machines without memory keys, or hosts that register glibc's rseq area, cannot use the key wall.",
+          "attempts": [
+            "Fall back to running the guest in another process: rejected here. That is option B, a second mechanism that I8 would have to allow.",
+            "Run with the checker and guard pages alone, with identical behavior: kept.",
+            "Turn keys off when the CPU lacks them, a one-time test in the child fails, or rseq is registered: kept.",
+            "Force the keyless gates with an internal switch and run the plugin cases both ways: kept, so the keyless body never ships untested."
+          ],
+          "result": "Reduced: two walls hold on every machine, and the third is added where the CPU and kernel allow. Jet's runtime registers no rseq area."
+        },
+        {
+          "loss": "A signal during guest code, with the host's memory locked, could end the host.",
+          "attempts": [
+            "Run every handler on its own stack and open all keys before it reads the interrupted state: kept. The process-signal and SIGSYS handlers gain SA_ONSTACK, and a guard test asserts it on every runtime sigaction.",
+            "Refuse guest entry on a thread with no alternate stack: kept.",
+            "Send a non-fault signal in the first load's key test: kept. Probed: with its own stack, a signal to guest code ran its handler and the process went on; without one, the process died."
+          ],
+          "result": "Removed: a trap or signal in guest code lands in the host as a `PluginError` or a handled signal, as today."
         },
         {
           "loss": "Run-time loads failed where new machine code is forbidden, such as SELinux deny_execmem.",
@@ -129361,7 +129466,7 @@
             "Write anonymous memory, then make it executable: rejected, deny_execmem and PaX MPROTECT refuse it.",
             "Map the code shared from a memfd made with MFD_NOEXEC_SEAL and sealed, never writable: kept. Probed: writes and a writable map were refused, and the read-execute map ran."
           ],
-          "result": "Reduced, not probed under SELinux: deny_execmem does not refuse it. The policy must still let the domain execute its own in-memory files, and where it doesn't, the load is refused with the named error."
+          "result": "Reduced, not probed under SELinux: deny_execmem does not refuse it. A policy that refuses executable in-memory files still refuses the load, by name; that is physical for any translating engine."
         },
         {
           "loss": "A second limits value, `plugin.LoadLimits`, sat beside the ratified `plugin.Limits`, sharing field names with other meanings.",
@@ -129370,6 +129475,60 @@
             "Bound loads by fixed safety caps and the caller's `#Deadline`, which Jet already has: kept."
           ],
           "result": "Removed: one limits value, as ratified, and Jet's one deadline mechanism."
+        },
+        {
+          "loss": "The checker's rules described code the back end doesn't emit, and the export area and instance mixed guest and host words.",
+          "attempts": [
+            "Make the shared back end emit fixed forms for the checker: rejected, a second code generator mode.",
+            "Check the back end's output as it is, with a dataflow interpreter over registers and frame slots: kept.",
+            "Forget a frame slot on any write over its bytes but a full-width mov, and bound rows, globals and the area by the module's own counts: kept.",
+            "Split the instance into a guest page, a read-only page and a host record, with the export area in the guest page: kept."
+          ],
+          "result": "Removed: the prototype accepts all 452 functions that load today, at every level, refuses all 74 unsafe changes, and binds the area to the entry's own argument."
+        },
+        {
+          "loss": "Runtime helpers ran as host code with host memory open, behind one wall.",
+          "attempts": [
+            "Gate every helper and trust its checks: rejected, one wall for 19 helpers.",
+            "Emit bulk memory and table operations and call_indirect's lookup as checked guest code: kept.",
+            "Form every guest address the remaining helpers use inside the reservation: kept."
+          ],
+          "result": "Reduced: six helpers remain host code. A missed bounds check in them still faults, but any other logic bug in them is a single wall, a named residual."
+        },
+        {
+          "loss": "A 64 KiB guest frame could step over a one-page stack guard.",
+          "attempts": [
+            "Stack probes in the back end: rejected, it changes code every Jet program shares.",
+            "A 1 MiB guard under every guest stack, more than the 64 KiB frame cap: kept. Probed: a 4 KiB guard was stepped over; a 1 MiB guard caught the same frame."
+          ],
+          "result": "Removed: any admitted frame that overruns the guest stack faults in its guard and traps."
+        },
+        {
+          "loss": "Imports that re-enter a guest, and tasks that move threads, had no defined gate state.",
+          "attempts": [
+            "One saved host context per thread: rejected, a parked task can resume on another thread.",
+            "A per-task chain of gate contexts in host memory, and absolute keys at every gate: kept. Probed with a task that moved threads and re-entered."
+          ],
+          "result": "Removed: each gate restores exactly the context it saved, on whichever thread the task runs."
+        },
+        {
+          "loss": "Past about 13 live guests, guests shared memory keys, so one could read another behind two walls.",
+          "attempts": [
+            "Share keys past the limit: rejected, the owner's bar counts a cross-guest read as an escape.",
+            "A process per guest past the limit: rejected, that is option B.",
+            "Give each running guest its own key, taking the least recently used one and closing its old holder's pages: kept. Probed with 40 guests and 14 keys.",
+            "Count a guest parked in a host import as not running, so its key may be taken; it takes one again on return: kept. Probed with fourteen guests parked on a fifteenth."
+          ],
+          "result": "Removed: no two guests ever share a key, and parked guests can't starve a running one. A fifteenth guest running at once waits at most one fuel slice."
+        },
+        {
+          "loss": "Branch-target and return-stack poisoning inside one process could leak host bytes.",
+          "attempts": [
+            "Mask every heap and table index: kept, which stops speculative reads outside the guest's reservation.",
+            "Fill the return-stack buffer at the exit gate: not adopted. It doesn't cover branch targets, and its cost was not measured.",
+            "A process per guest: that is option B."
+          ],
+          "result": "Remains as a named residual: a leak through cache timing, never a write. Every in-process engine shares it."
         }
       ],
       "reports": [
@@ -131875,6 +132034,30 @@
       "created": "2026-11-21T12:43:29.685Z",
       "answeredAt": "2026-11-21",
       "answeredBy": "Main"
+    },
+    {
+      "id": "q471lk6a",
+      "cardId": "c0py34oh",
+      "decisionId": "D-PLACE-RETURN1",
+      "by": "owner",
+      "kind": "question",
+      "text": "Try to engineer away the downsides",
+      "status": "open",
+      "answer": "",
+      "created": "2026-11-21T16:45:18.760Z"
+    },
+    {
+      "id": "q5lxtkff",
+      "cardId": "c0yuouhx",
+      "decisionId": "D-PLUGIN-ENGINE1",
+      "by": "owner",
+      "kind": "question",
+      "text": "Engineer away the downsides. A guest escaping is a massive unacceptable issue",
+      "status": "answered",
+      "answer": "The revised A makes a guest escape need more than a translator bug. A plugin is translated in a child copy of the program, so a translator crash, stack overflow or memory blow-up ends only the child. The load then fails, and the program keeps running.\n\nBefore any translated code may run, a separate checker follows every value through every instruction, as VeriWasm does. It refuses the load unless the code can reach only the guest's own memory, stack and functions. I built a prototype and ran it over every plugin that loads today, at every optimization level. It accepted all 452 functions. It refused all 74 unsafe changes made by hand, including 11 from an independent reviewer.\n\nTwo hardware walls back the checker up. Each guest memory sits in an 8 GiB reserved region whose unused part faults on any access. Each guest stack has a 1 MiB guard, larger than any frame. On CPUs with memory protection keys, the program's memory and every other plugin's memory are locked while guest code runs. Each running plugin gets its own key, so one plugin can't read another. A plugin waiting in a host call gives its key up, so waiting plugins can't block a running one.\n\nI measured each piece on this machine. The key switch costs about 17 ns per call, so a call takes 72–82 ns instead of 55–65. A crafted read of host memory faulted 20,000 times out of 20,000. Without keys, the checker and guard regions still hold, with identical behaviour, and CI tests that path too.\n\nTwo residuals remain, and I name them rather than hide them. Six runtime helpers, such as memory growth and host imports, stay host code; a logic bug in them has one wall. And speculative attacks on branch prediction could leak host bytes through cache timing, though never write them. Only a process per plugin, option B, closes that, at about 5 µs a call.\n\nTwo costs are physical. A program that translates must contain a translator, so it grows by at least 2.5 MB at O0 and 4.5 MB at O2. And a system policy that forbids executable in-memory files refuses such loads by name. Literal-path plugins are unaffected.\n\nThe ballot is revised to match: A now carries the child-copy translator, the checker, the guard regions and per-plugin keys, and B (a process per plugin) stays on it as the alternative that also closes the speculative leak. Two fresh adversarial reviews rejected the earlier revisions on eleven failed claims; each was fixed and proven by probe, and the third revision passed.",
+      "created": "2026-11-21T16:45:54.489Z",
+      "answeredAt": "2026-11-21",
+      "answeredBy": "Main"
     }
   ],
   "ideas": [
@@ -132707,6 +132890,188 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T18:18:18.988Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q5lxtkff",
+      "note": ""
+    },
+    {
+      "at": "2026-11-21T18:18:12.945Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-PLUGIN-ENGINE1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-21T18:17:21.165Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ufrhm0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T18:02:26.194Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T17:59:44.896Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0ufrhm0",
+      "note": "20 criteria, soft limit 6: A safety defect found by review in the signal handling this card owns; its own card would split the area"
+    },
+    {
+      "at": "2026-11-21T17:59:44.896Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ufrhm0",
+      "note": "#20 Every signal handler the runtime installs runs on an alterna"
+    },
+    {
+      "at": "2026-11-21T17:30:37.343Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0cs6xlg",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T17:22:12.012Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00ni11n",
+      "note": "#28"
+    },
+    {
+      "at": "2026-11-21T17:08:06.581Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "115 criteria, soft limit 6: a wrong-value defect in the debugger evaluator, which this card owns (it is the debugger best-in-existence card); not a new stream"
+    },
+    {
+      "at": "2026-11-21T17:08:06.581Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#118 The debugger evaluator returns the right value for a call th"
+    },
+    {
+      "at": "2026-11-21T16:48:13.531Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#105"
+    },
+    {
+      "at": "2026-11-21T16:48:05.754Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#116"
+    },
+    {
+      "at": "2026-11-21T16:46:08.806Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-LIVE-TIMELINE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-21T16:45:54.489Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q5lxtkff",
+      "note": ""
+    },
+    {
+      "at": "2026-11-21T16:45:18.760Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q471lk6a",
+      "note": ""
+    },
+    {
+      "at": "2026-11-21T16:45:04.093Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-DEP-FEATURES1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-21T16:14:28.508Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00ni11n",
+      "note": "#29"
+    },
+    {
+      "at": "2026-11-21T16:13:02.497Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0gy2j07",
+      "note": "13 criteria, soft limit 6: a load regression in the area this card owns (tests failing under machine load); one more row of the same root class as c7-c9 and c12"
+    },
+    {
+      "at": "2026-11-21T16:13:02.497Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0gy2j07",
+      "note": "#13 FiberLiveness/fibers_past_the_pool_tear_down_in_random_order"
+    },
+    {
+      "at": "2026-11-21T16:02:31.876Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00ni11n",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T16:00:27.256Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gy2j07",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-21T16:00:20.634Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00ni11n",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T16:00:18.313Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gy2j07",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T15:58:31.243Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c05p5u7s",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T15:46:10.309Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T15:43:49.746Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#117"
+    },
     {
       "at": "2026-11-21T15:43:47.152Z",
       "by": "Main",
