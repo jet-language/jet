@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 113020,
+    "rev": 113025,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24224,11 +24224,11 @@
         {
           "n": 20,
           "text": "Build, package and debug provenance fixtures cover export discovery, dependency features, the build graph, diagnostics, generated dependencies and exact source and executable identities, and never infer a clean build from archived receipts.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:53:33.002Z",
+          "evidence": "dev 942f0c6d93 (p436 batch compiler, carries the c20 stack S1-S10 and 4e61d9cf38): `jet test Compiler --profile cases --filter CompilerAPI/provenance_` PASS 6/6 (build diagnostics name the dependency file, a dependency setting keys the build, build records what it built from incl. generated files with made_by/handoffs/digest, an archived receipt is never a clean build, debug dump names its build and sources, build keys follow the options); `--filter PackageOutputs/dependency_` PASS 5/5 (entry record path, typo names the entry, own settings, setting on its entry, from profile and build); `--filter BuildEntry/run_steps_record_the_graph_and_times` PASS.",
+          "at": "2026-11-21T22:49:08.909Z",
           "proof": {
             "profile": "cases",
             "filter": "CompilerAPI/provenance_"
@@ -24446,7 +24446,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-21T21:35:01.151Z",
+      "updated": "2026-11-21T22:49:08.909Z",
       "updatedBy": "Main",
       "workOrder": 19,
       "criteriaLastN": 41
@@ -36499,11 +36499,11 @@
         {
           "n": 1,
           "text": "D-WORKSPACE-CMD1=A: at the root of a three-member workspace, `jet check`, `jet test`, `jet doc` and `jet build` act on every member, `-p <member>` narrows them, and `jet run` still asks which program to start.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:57:37.504Z",
+          "evidence": "dev c137227f92 (the CLI change 388d556a45, its case files given partial-line reasons in c137227f92), on the p436 batch compiler built from 942f0c6d93: `jet test Compiler --profile cases --filter CLIPartsRuntime/workspace_root_commands_` PASS 2/2 (act_on_each_member: check, test, doc and build act on alpha, beta and gamma, each run headed by its member, and `jet run` exits 2 \"ambiguous — 3 workspace members can run\"; narrow_to_picked_members: -p narrows check, test, doc and build, -p repeats, -p nope is refused naming the members, `jet run -p alpha` runs alpha), and Workspace/root_commands_fan_out_or_pick_a_member PASS.",
+          "at": "2026-11-21T22:52:28.825Z",
           "proof": {
             "profile": "cases",
             "filter": "Workspace/root_commands_"
@@ -36525,11 +36525,11 @@
         {
           "n": 3,
           "text": "E0626 for a failing dependency prints that dependency's own diagnostics inline.",
-          "status": "met",
-          "metBy": "Main",
+          "status": "open",
+          "metBy": null,
           "verifiedBy": null,
-          "evidence": "jet check of a package importing a failing dependency prints that dependency's own errors inline (E0113 at shapes/shapes.jet:2:5), then its E0626 (tests/ui/dependency_package_errors PASS, ui-liveui-n21ui.txt); a failing workspace member's errors print once (workspace_check_covers_every_member_without_picking_an_entry asserts count = 1, PASS); jet run of net/backend_battery prints the underlying E2104 (service.tree #4957 at Batteries/backend/backend.jet:271:21) before E0626",
-          "at": "2026-10-30T17:59:28.584Z"
+          "evidence": "",
+          "at": "2026-11-21T22:52:58.191Z"
         },
         {
           "n": 4,
@@ -36559,7 +36559,7 @@
       "parentId": "c06osxzz",
       "needsAcceptance": false,
       "created": "2026-10-28T11:04:13.858Z",
-      "updated": "2026-11-21T19:40:10.980Z",
+      "updated": "2026-11-21T22:52:58.191Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -73111,12 +73111,12 @@
         },
         {
           "n": 16,
-          "text": "A jet perf syscall view traces the system calls of any jet command or built program with their arguments (opened paths, clone flags, munmap at exit, network calls), extending #6841 c72 beyond Jet programs, so Tools/Perf/CoreStrace and the cases CLICompilerSpeed x2, ControlAndData, JetpackJetOS x2, Report and TaskgroupStack drop strace. Proof: each of those runs with no external tracer and checks the same facts.",
-          "status": "open",
-          "metBy": null,
+          "text": "A jet perf syscall view traces the system calls of any jet command or built program with their arguments (opened paths, clone flags, munmap at exit, network calls), extending #6841 c72 beyond Jet programs, so Tools/Perf/CoreStrace and the cases CLICompilerSpeed x2, ControlAndData, Report and TaskgroupStack drop strace. Proof: each of those runs with no external tracer and checks the same facts. (The JetpackJetOS cases are out: owner order 2026-11-21, jetos is frozen and separate from jetpack, so no jetos work.)",
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T12:07:14.264Z"
+          "evidence": "dev 7693055e59, the p431 batch compiler (commit c0f1c23bab, jet perf attach --lens=syscalls): its full cases suite PASSes CLICompilerSpeed/jet_run_of_a_small_program_starts_only_the_compile_thread, CLICompilerSpeed/jet_run_opens_its_own_file_once, ControlAndData/process_exit_leaves_heap_to_kernel_after_user_cleanup, Report/ordinary_build_opens_no_network_connection, TaskgroupStack/a_joined_task_runs_on_the_joining_thread, Perf/attach_traces_a_commands_syscalls and Perf/attach_names_each_refusal, each tracing through jet perf attach; `git grep -w strace` in Tests/Cases names only a comment. `jet Tools/Perf/CoreStrace/run.jet -- --jet <p431 jet>` exits 0 under `jet perf attach --lens=syscalls`: out-of-tree 336 file calls and checkout 785, 0 on the tree, both PASS. The Debug guard (debug_names_no_outside_debugger) passes on that tip.",
+          "at": "2026-11-21T22:46:32.825Z"
         },
         {
           "n": 17,
@@ -73279,7 +73279,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-21T22:42:18.294Z",
+      "updated": "2026-11-21T22:46:32.825Z",
       "updatedBy": "Main",
       "criteriaLastN": 31
     },
@@ -133138,6 +133138,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T22:52:58.192Z",
+      "by": "Main",
+      "action": "card.criteria-reopen",
+      "ref": "c0vzmbkk",
+      "note": "#3: evidence named no commit; re-proved on c137227f92"
+    },
+    {
+      "at": "2026-11-21T22:52:28.825Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vzmbkk",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-21T22:49:08.909Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dktg7a",
+      "note": "#20"
+    },
+    {
+      "at": "2026-11-21T22:46:32.825Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00ni11n",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-21T22:46:31.150Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c00ni11n",
+      "note": "#16: Owner order 2026-11-21: jetos is frozen, no jetos work; was: A jet perf syscall view traces the system calls of any jet command or built program with their arguments (opened paths, clone flags, munmap at exit, network calls), extending #6841 c72 beyond Jet prog"
+    },
     {
       "at": "2026-11-21T22:42:18.294Z",
       "by": "Main",
