@@ -165,6 +165,7 @@ use {
         PackageMarker,
         PackageParseError,
         pkg_build_entry_source,
+        pkg_dep_display,
         pkg_inline_deps_collect,
         pkg_inline_deps_is_pinned,
         pkg_inline_deps_l0203_unpinned,
@@ -175,6 +176,7 @@ use {
         pkg_package_marker_source,
         pkg_package_markers,
         pkg_package_markers_masked,
+        pkg_parse_deps,
         pkg_parse_purposes,
         pkg_workspace_head_possible,
     ]
@@ -713,7 +715,10 @@ jet_driver_parse_dependency_entries: fn(source: String, source_path: String, tok
                         diagnostics.push(jet_driver_diagnostic_at_source("E0003", Val(token.span), source_path, 0, "a package dependency is declared more than once", "each package dependency name selects exactly one source", "keep one declaration for this dependency"))
                     }
                     else -> {
-                        dependencies.push(JetDriverPackageDependency{name: name, source: value, source_path: source_path, span: Val(token.span), target_root_index: -1})
+                        entry := JetDriverPackageDependency{name: name, source: value, source_path: source_path, span: Val(token.span), target_root_index: -1}
+                        if tokens[value_index].kind != TOKEN_LBRACE || jet_driver_read_dependency_record(entry, source, tokens, tables, value_index, diagnostics) {
+                            dependencies.push(entry)
+                        }
                     }
                 }
             }
@@ -724,6 +729,58 @@ jet_driver_parse_dependency_entries: fn(source: String, source_path: String, tok
         }
     }
     dependencies
+}
+
+// A record entry (`tool: { path: ../tool, settings: { loud: true } }`): the
+// package model's dependency reader checks its fields (E1215 at the entry)
+// and names its source, which `entry` then carries in its short spelling.
+// The settings keep their manifest spans. False when the record is refused.
+jet_driver_read_dependency_record: fn(entry: &JetDriverPackageDependency, source: String, tokens: [Token], tables: TokenTables, open: Int, diagnostics: &[Diagnostic]) -> Bool {
+    record: jet_driver_manifest_field_value(source, tokens, open).text
+    parsed: if pkg_parse_deps("{entry.name}: {record}") == {
+        .Ok(value) -> value
+        .Err(error) -> {
+            refused := pkg_manifest_parse_diagnostic(entry.source_path, error)
+            refused.span = entry.span
+            diagnostics.push(diagnostic_with_source_path(refused, entry.source_path, 0))
+            return false
+        }
+    }
+    found: parsed.sources.get(entry.name) ?? return false
+    entry.source = if found == {
+        .Provider(_, target) -> target
+        .Version(selector) -> selector
+        .Git(_, _) | .CLib(_) | .Foreign(_, _) -> pkg_dep_display(found)
+    }
+    close: jet_driver_manifest_matching_brace(tokens, open) ?? return true
+    index := jet_driver_manifest_skip_separators(tokens, open + 1, close)
+    loop index + 2 < close && tokens[index + 1].kind == TOKEN_COLON {
+        if token_decoded(tables, tokens[index]) == "settings" && tokens[index + 2].kind == TOKEN_LBRACE {
+            settings_close: jet_driver_manifest_matching_brace(tokens, index + 2) ?? return true
+            jet_driver_parse_dependency_settings(source, tokens, tables, index + 2, settings_close, entry.settings)
+            return true
+        }
+        value: jet_driver_manifest_field_value(source, tokens, index + 2)
+        if value.next_index <= index + 2 -> return true
+        index = jet_driver_manifest_skip_separators(tokens, value.next_index, close)
+    }
+    true
+}
+
+// The `name: value` entries of a dependency entry's `settings: { … }` block
+// (between `open` and `close`), whose shape the package model has checked.
+jet_driver_parse_dependency_settings: fn(source: String, tokens: [Token], tables: TokenTables, open: Int, close: Int, settings: &[JetDriverDependencySetting]) {
+    index := jet_driver_manifest_skip_separators(tokens, open + 1, close)
+    loop index + 2 < close && tokens[index + 1].kind == TOKEN_COLON {
+        name_token: tokens[index]
+        value: jet_driver_manifest_field_value(source, tokens, index + 2)
+        value_end: if value.next_index < close -> value.next_index else -> close
+        if value_end <= index + 2 {
+            return
+        }
+        settings.push(JetDriverDependencySetting{name: token_decoded(tables, name_token), value: jet_driver_manifest_tokens_text(source, tokens, tables, index + 2, value_end), span: Span{start: name_token.span.start, end: tokens[value_end - 1].span.end}})
+        index = jet_driver_manifest_skip_separators(tokens, value_end, close)
+    }
 }
 
 jet_driver_package_identity: fn(name: String, version: String) -> String Never! {
