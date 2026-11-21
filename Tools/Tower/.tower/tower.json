@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112777,
+    "rev": 112796,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -23980,6 +23980,11 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "D-DEP-FEATURES1 (c20(a)) drafted by Lens, reviewed by Main against code and posted: DepSpec has Path, Git, Registry and Foreign with no features (Jetpack/PackageModel Manifest.jet); Variant.features is the foreign-provider variant; the build session has no option or dependency method, so C adds surface; the typed-argument path is proved by Lens-3202-c20a-dependency-features, which passes on the gate-p392 jet and fails when its checks are inverted. The review found the mitigation false on dev (jet doc cut the head at a braced default); the ballot now says so and c37 fixes it. The c20a proof is held until the ballot is ratified A."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "c20 checked on the p389 batch compiler (census build of 113aff2b14): `--filter CompilerAPI/provenance_` gives 4 PASS. These cover export discovery (the dependency exported `install` that generates greeting.jet), the build graph (`jet inspect build --json`), diagnostics at the dependency file, generated dependencies (made_by, handoffs, authority), exact source identities (sha256 input digests), the executable identity keyed by its compile, option keys, and the rule that an archived receipt never makes a build clean. NOT covered, so c20 stays open: dependency features (Jetpack Variant features selected by a depending package and keyed in the receipt; no case selects a feature), and debug provenance (no fixture ties a debug artifact, a dump or a debug-info image, to the exact source and image identity it came from). Next: one fixture for each."
         },
         {
@@ -24357,6 +24362,24 @@
           "verifiedBy": null,
           "evidence": "p391 full suite (batch compiler = census build of dev 55614ffe3b, which includes e1ec1bae53, Lens-3202-c36-envelope-trace): `jet test Compiler --profile cases` reports \"PASS Tests/Cases/MachineOutput/every_json_report_door_uses_the_one_machine_envelope.case\". It errored with the missing-.jettrace failure in every suite through p390. Log: $JET_SCRATCH_ROOT-side lander suite-p391/cases.out.",
           "at": "2026-11-21T04:32:46.669Z"
+        },
+        {
+          "n": 37,
+          "text": "jet doc shows a public function's whole signature, parameter defaults included: for `install: fn(name: String, loud: Bool{false}) -> String` it prints that head, not `install: fn(name: String, loud: Bool`. Today jet_cli_doc_declaration_text (Compiler/JetCLI/Source/CLI/Docs.jet) ends the head at the first `{` byte, so every braced default (`Bool{false}`, `[String]{}`, a struct literal) cuts off the rest of the signature (probe on the gate-p392 jet, 2026-11-21). D-DEP-FEATURES1's option A relies on it: its one loss, no manifest list of optional parts, is mitigated by jet doc listing the exported build functions with their parameters and defaults. Proof: `jet test Compiler/JetCLI --filter \"declaration head\"`, and `jet doc` on a one-file package with that function prints the whole head.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T05:54:43.269Z"
+        },
+        {
+          "n": 38,
+          "text": "jet doc's failure line names the function's real failure contract: a function returning `String` under the implicit default prints `failure: String Err! (implicit default Err!)`, as one with no return type prints `failure: Err! (implicit default Err!)`; today it prints `failure: String (implicit default Err!)`, which reads as a failure type of String (probe on the gate-p392 jet, 2026-11-21; the text comes from semindex_failure_contract_name in jet_cli_doc_enrich). Proof: a jet doc golden over a function returning a value under the implicit default, beside the existing undocumented-function golden.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T05:54:45.361Z"
         }
       ],
       "refs": [
@@ -24386,10 +24409,10 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-21T04:32:46.669Z",
+      "updated": "2026-11-21T05:55:59.182Z",
       "updatedBy": "Main",
       "workOrder": 19,
-      "criteriaLastN": 36
+      "criteriaLastN": 38
     },
     {
       "id": "c0svneex",
@@ -40022,8 +40045,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T13:58:56.482Z",
-      "updated": "2026-11-18T03:15:07.480Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-21T06:15:46.511Z",
+      "updatedBy": "IfHole-6-1-4",
       "criteriaLastN": 17
     },
     {
@@ -50462,7 +50485,7 @@
       "track": "epoch",
       "epoch": "e22",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -50475,20 +50498,20 @@
         {
           "n": 1,
           "text": "Moving a task `&&name` capture inside the body (a call taking `&&`, a let binding, a `:=` rebinding) checks clean and runs on O0, O1 and O2 with the value dropped exactly once. Proof: `jet test Compiler --profile cases --filter Concurrency/task_capture_move_in_body_`, one case per form, each failing on a0_042.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:04:07.350Z"
+          "evidence": "gate-p392 compiler, dev b3b4cb8c80, same tree as f768b6597e: jet test Compiler --profile cases --filter task_capture_ gives 5 PASS 0 FAIL. Each form has its own case checking clean and running on O0, O1 and O2 with one close line: MemorySemantics/a_task_capture_passed_to_a_taking_call_in_its_body_closes_once (a call taking &&, also an AOT build), a_task_capture_bound_by_name_in_its_body_closes_once (a binding), and a_task_capture_rebound_with_colon_equals_in_its_body_closes_once (a := rebinding). The criterion's named filter Concurrency/task_capture_move_in_body_ selects nothing: the cases were filed under these names. Also PASS in suite-p392 cases.",
+          "at": "2026-11-21T05:36:11.863Z"
         },
         {
           "n": 2,
           "text": "A real use of the captured name after the body's move still reports E0121 at the later use.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:46:14.613Z",
+          "evidence": "gate-p392 compiler, dev b3b4cb8c80, same tree as f768b6597e: jet test Compiler --profile ui --filter task_capture gives 8 PASS 0 FAIL, including UI/task_capture_moved_in_body_then_used_after (plain task; a use after the block reports Jet.UseAfterMove, which is E0121, at 18:17, labeling the capture as the move) and UI/E0121_task_capture_used_after_its_move_in_the_body (grouped task; owned.n after consume(owned) in the body reports E0121 at 12:19, labeling the move at 11:30). Also PASS in suite-p392 ui.",
+          "at": "2026-11-21T05:36:13.022Z",
           "proof": {
             "profile": "ui",
             "filter": "E0121_task_capture_later_use"
@@ -50497,11 +50520,11 @@
         {
           "n": 3,
           "text": "A value taken by a task `&&name` capture runs its Close exactly once when the task drops it, for plain and grouped tasks on O0, O1 and O2, the same as a local or call-taken value (on seed-b14 it never runs: an I1 leak). Proof: `jet test Compiler --profile cases --filter Concurrency/task_capture_close_once_`, one case per form printing the close line.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:04:08.309Z"
+          "evidence": "gate-p392 compiler, dev b3b4cb8c80, same tree as f768b6597e: Tests/Cases/TaskControlTiers/a_task_capture_moved_inside_its_body_closes_once_on_every_tier passes on O0, O1 and O2 with empty stderr. Its golden prints one close line per form for plain and grouped tasks (held, call, binding, rebinding), and a value the body never moves closes once when the task drops it. Part of the same cases run, 5 PASS 0 FAIL. The named filter Concurrency/task_capture_close_once_ selects nothing; this case is the per-form proof.",
+          "at": "2026-11-21T05:36:14.209Z"
         }
       ],
       "refs": [],
@@ -50509,9 +50532,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T16:58:53.917Z",
-      "updated": "2026-11-17T01:45:06.663Z",
+      "updated": "2026-11-21T05:36:16.032Z",
       "updatedBy": "Main",
-      "criteriaLastN": 3
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-21T05:36:16.032Z"
     },
     {
       "id": "c0pmy5fy",
@@ -54102,6 +54126,16 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "c94 checked, left open: zones (Perf/attach_turns_zones_on), flight ring (Perf/attach_drains_flight_ring), alloc (Perf/heap_snapshot_types_retention_and_diff) and outside (Perf/attach_samples_a_plain_jet_process) each assert the real window in their headers; the browser family (perf_attach_drives_real_devserver_browser_lifecycle) is KNOWN-FAILING under #5931 (known-failing.tsv, devserver E2104), so c94 waits on #5931."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
+          "text": "c89 checked, left open: on the gate-p392 jet (probe axis p3, $JET_SCRATCH_ROOT/lanes/Lens/c89-p3-gate-p392.txt) a `jet perf attach --source live.jet --zones=500ms` header reads window=live run_wall=847040249ns run_cpu=52288977ns: the window's real wall and CPU, no longer 1443ns/0ns, and Perf/attach_turns_zones_on asserts it (window_wall_ns >= 500 ms and <= took, cpu > 0). Not met: c89 asks for about 500 ms for a 500 ms window, and the window ran 847 ms, because it opens at the writer's next 250 ms publication after the request and closes at the next one after it is removed (observability.md, zones). Also open: the view still prints `Sample wall 1683ns` for the live snapshot's own sample. To close: open and close the zones window on the request itself (not the publication cadence), or bound the overshoot in the case, and make the snapshot's sample line say what it is."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "c105: ballot D-PERF-OVERHEAD-BOUND1 (drafted by Lens, reviewed by Main) is posted to the owner. Option A bounds the runtime's share at 1% and reports the kernel's share as an estimate from timed samples, which may read low (1.85 us/sample charged vs 2.3 us probed). A fixed 4 kHz default was weighed and excluded by c68's 8 kHz parity. The overhead row stays failing until the ballot is ratified and built; no bar was relaxed."
         },
         {
@@ -55395,11 +55429,11 @@
         {
           "n": 97,
           "text": "The causal profiler does no unbounded-Int arithmetic per call: Compiler/JetCLI/Source/CLI/Perf/Causal.jet:203 multiplies Ints (BitAnd-masked afterwards) on every call, so it pays an exact bigint product where a U64/I64 product gives the same masked value; it is rewritten on a fixed-width type and the causal cases give the same output.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T14:18:04.017Z",
+          "evidence": "Landed in 11aacb0e77 (on dev f768b6597e): jet_cli_perf_causal_draw (Compiler/JetCLI/Source/CLI/Perf/Causal.jet) advances its state with wrapping U64 products masked to 63 bits, so no unbounded-Int product runs per call. Causal cases on the gate-p392 compiler (dev b3b4cb8c80, same tree as f768b6597e): jet test Compiler --profile cases --filter causal -> PASS Perf/causal_task_clocks_hold, Perf/causal_counts_answered_requests, Perf/causal_profile_predicts_speedup (3 PASS, 0 FAIL), their goldens unchanged.",
+          "at": "2026-11-21T06:08:01.102Z",
           "proof": {
             "profile": "cases",
             "filter": "causal"
@@ -55502,8 +55536,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-21T05:25:14.526Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-21T06:15:45.362Z",
+      "updatedBy": "IfHole-6-1-4",
       "criteriaLastN": 105
     },
     {
@@ -71280,6 +71314,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T20:27:52.006Z"
+        },
+        {
+          "n": 7,
+          "text": "The census judges the snapshot's guards with the compiler under test: once the census build makes jet and its runtime pack, every guard shard and guard package runs on that jet, with it as $JET; with no build, or a build that failed or made no runtime pack, they run on the seed, so a broken build still lists every guard failure. Found in p393: the machine-door guard ran on the seed, so the ratified jet.report/v4 change (#3202 c10, D-DIAG-ONESHAPE1) failed the census, and an unintended change to machine output would have passed it. Proof: a census of a submission that migrates the Tests/Fixtures/MachineDoors goldens with the output change passes its guards row, and the census log shows the guard runs started on the snapshot's jet.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T05:42:35.947Z"
         }
       ],
       "refs": [],
@@ -71287,9 +71330,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T20:27:39.035Z",
-      "updated": "2026-11-17T01:53:34.216Z",
+      "updated": "2026-11-21T05:42:35.947Z",
       "updatedBy": "Main",
-      "criteriaLastN": 6
+      "criteriaLastN": 7
     },
     {
       "id": "c05hrwee",
@@ -72154,6 +72197,16 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "Correction to the previous entry: nothing was filed or posted. D-PERF-ALLOCATOR1 already exists, drafted earlier and ratified 2026-11-21 with outcome A, \"jet debug shows them at the program's end\". Lens's second draft under the same id was refused by Tower and is dropped. c15 is authorized and is built under the ratified A: jet debug stops at the program's end and shows the counting policy's totals, read from the stopped program's memory. The code facts in the previous entry stand (allocator facts 0..5 in Alloc.jet, the PTRACE_O_TRACEEXIT stop reporting only nonzero exits today)."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
+          "text": "c15's ballot D-PERF-ALLOCATOR1 drafted by Lens, reviewed by Main against code and posted: jet_rt_program_allocator_fact (Compiler/JetRuntime/Source/Alloc.jet) exports facts 0..5 (allocations, requested, live, high-water, cap, mode); the tracker's alloc_try_validated already bypasses the selected policy, the door option A moves the observer onto; the debug engine's PTRACE_O_TRACEEXIT stop (option B) reports only nonzero exits today; the alloc lens builds with --checked-alloc (Perf/Session.jet), so option C would count tracked blocks, not the policy's reservations. c15 waits on the ruling."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "D-PERF-TARGET1 redrafted by Lens and updated on the board (rec A: jet perf attach also starts a command after --, with counts and syscalls lenses). Main checked the redraft against f768b6597e: attach dispatch Command.jet:60, x64_sampler_open, E2102/E2124 registered and E2127 free, the 64-process cap at Outside.jet:29, and 153 call lines in 30 runtime files bypassing host_call. Following children for a launched command's whole life is stated as new work with its costs, not as existing. Not posted: the board records Main as drafter, so a review by another agent is still owed before posting. c1, c2, c5, c11 and c14-c17 wait on it."
         },
         {
@@ -72468,8 +72521,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-21T05:29:01.054Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-21T06:15:44.012Z",
+      "updatedBy": "IfHole-6-1-4",
       "criteriaLastN": 26
     },
     {
@@ -122687,10 +122740,11 @@
         "Preserve logical growth atomicity, not a false capacity/address rollback promise."
       ],
       "draftedBy": "Main",
-      "reviewedBy": null,
+      "reviewedBy": "IfHole-6-1-4",
       "draft": true,
-      "status": "open",
-      "created": "2026-11-17T21:36:27.090Z"
+      "status": "rejected",
+      "created": "2026-11-17T21:36:27.090Z",
+      "rejectReason": "Fails, not postable as drafted. (1) It says posting remains BLOCKED and not to post a fastest-default recommendation, yet carries rec=A; keep it a draft or drop the performance premise. (2) The A and B code blocks are not the same program (A a from_columns/into_columns round trip, B a borrowed view.len()); neither writes the story parser that owns positions and velocities, indexes rows and recovers every input on a length mismatch. (3) It narrows ratified D-ALLOC-FAIL1=C (\"failed growth leaves the collection unchanged\") by allowing capacities and addresses to change on failed growth, without saying so; design-away: allocate every column new buffer first, then commit, freeing them on failure. (4) Drafting residue in owner text: \"r1 C\", \"r1 used\", \"Answer to q4f453bp\" (no beginner or expert path), a drafter instruction inside B.technical; the trio current code is a bare comment; comparisons give Odin only, missing Zig std.MultiArrayList. (5) probes/review-columns.jet is not in the repo; a fresh probe on p392 confirms Columns<Particle>{} gives Jet.UnknownType E0119."
     },
     {
       "id": "D-FNVAL-COPY1",
@@ -125591,10 +125645,11 @@
         }
       ],
       "draftedBy": "Main",
-      "reviewedBy": null,
+      "reviewedBy": "IfHole-6-1-4",
       "draft": true,
-      "status": "open",
-      "created": "2026-11-19T09:40:52.961Z"
+      "status": "rejected",
+      "created": "2026-11-19T09:40:52.961Z",
+      "rejectReason": "Fails, code read on f768b6597e and checked on the gate-p392 jet. (1) \"An image built elsewhere refuses such a breakpoint with E2239\" does not match the code: a normally built image drops the computed-ahead function, so after jet build -O0 (or -O2) and jet debug .jet/build/prog, break count_up answers \"No function `count_up`\" and break prog.jet:5 answers \"No code on prog.jet:5\". A set-but-never-stops breakpoint arises only with dead code kept, which is jet debug own -O0 --dead-code=keep build (Native.jet:6189-6195); the per-image record is empty for default builds and checkInstructions would fail. The record must cover dropped functions too, or the claim goes; B shrinks accordingly. (2) A lists a replay among images jet debug did not build; false: --replay=NAME prog.jet builds through jet_cli_debug_launch (Debug.jet:144-153). (3) Docs/Reference/metaprogramming.md does not exist; it is Docs/Spec/Reference/metaprogramming.md:110. (4) \"adds no user syntax or flag\" misses the channel: jet debug builds in a separate jet build child (Debug.jet:282, native_debug_build_argv), so the policy needs a hidden build flag or an environment variable (a Registry/EnvironmentVariables.jet row) plus the cache key; name which. (5) jet.DebugNeverCalled must be Jet.DebugNeverCalled."
     },
     {
       "id": "D-DEBUG-STDIN1",
@@ -126936,10 +126991,11 @@
         }
       ],
       "draftedBy": "Main",
-      "reviewedBy": null,
+      "reviewedBy": "IfHole-6-1-4",
       "draft": true,
-      "status": "open",
-      "created": "2026-11-20T14:06:03.173Z"
+      "status": "rejected",
+      "created": "2026-11-20T14:06:03.173Z",
+      "rejectReason": "Fails, code read on f768b6597e. (1) .detail Edge cases says no counters or refused ptrace refuse the run with E2124, but A.technical Refusals and designAway #3 report the lens unavailable and keep E2124 pid-form-only; the .detail text is wrong. (2) \"Attach is already the outside engine\", the one-engine-per-verb gain and whyNot-B are false: jet_cli_perf_attach (Session.jet:358-606) has three engines (devserver browser relay :470-489, the inside live snapshot/flight ring/zones/heap/--source :490-560, the outside sampler only when nothing is published :563-572). (3) attach has no cpu lens: any --lens other than alloc is refused (Session.jet:379-382); the engine is chosen by the absence of a live snapshot. (4) --for= (D-PERF-ATTACH-WINDOW1=A) is not implemented on f768 (refused as unknown at Session.jet:432-434; window fixed at Outside.jet:22), yet the examples show it as existing. (5) \"retires every perf stat, time and strace use except comparisons\" is false: Jetpack/CLI/Source/Jobs/AccessTrace.jet and Jetpack/CLI/Tests/JobRunner.jet:122 keep strace; Throughput.jet --batch reads time.txt written by the outside batch harness (:93-98, :1255-1268). (6) the syscall decode list is too narrow: JetpackJetOS nixos_migration_protects_stage_before_writing_inputs.case:8-24 needs the whole %file class (mkdir, chmod, rename, unlink, stat). Missing from the census: Tools/Gauntlet/Entries/AsmParity/Fixtures/fake-perf and Tools/Gauntlet/Entries/ScalingProfile/{entry.json,Fixtures/fake-perf}."
     },
     {
       "id": "D-PERF-ATTACH-WINDOW1",
@@ -128034,6 +128090,197 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-21T05:20:16.324Z"
+    },
+    {
+      "id": "D-DEP-FEATURES1",
+      "cardId": "c0dktg7a",
+      "group": "tooling",
+      "title": "How a package turns on an optional part of a package it depends on",
+      "situation": "A dependency is a package your package uses. It often has optional parts, which Rust calls features: TLS support, a faster backend, a louder logger. Jet packages have no feature list. On dev f768b6597e a dependency's exported build function can already take a typed argument and add different code for it, and the build receipt keys both the call and the result. #3202 c20 asks that build provenance cover dependency features. You are asked whether Jet adds a feature mechanism or names typed build arguments as the one way. We recommend typed arguments, with no new surface.",
+      "gist": "How does a package choose an optional part of a dependency, and where does the build record that choice?",
+      "lesson": "A dependency often has optional parts, such as TLS support or a loud logger. Rust calls them features. Jet packages have no feature list today. A dependency's build function can already take a typed argument that changes the code it adds.",
+      "explainer": "Beginner path. To turn on a dependency's optional part, call its exported build function with the argument it documents: `tool.install(b.compiler(app), loud: true)`. A misspelled name or a wrong type is a compile error at that line.\n\nExpert path. The receipt keys the choice twice. The `check` node of the file holding the call keys the call's bytes. The generated module's `check` node keys the code the choice produced, and `generated[].handoffs` names the call site. The compile and link keys follow both, so a different choice is a different image identity.",
+      "story": "Ana's app uses a package `tool` that can add a quiet or a loud greeting. The tool's author wrote `install: fn(meta: Compiler, loud: Bool)`. Ana writes `tool.install(b.compiler(app), loud: true)` in her build function. When she types `lound: true`, the compiler stops at that line. Later a teammate asks why the build's identity changed. The receipt shows a new digest for main.jet and for the generated greeting module, and the handoff names main.jet:5, where the choice is.",
+      "inWild": "[dependencies]\ntool = { path = \"../tool\", default-features = false, features = [\"loud\"] }\n\n// Zig: build.zig\nconst tool = b.dependency(\"tool\", .{ .loud = true });",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Typed arguments, as today",
+          "detail": "A dependency offers a choice as a typed parameter of an exported build function. The depending package passes it where it calls that function from its own `build`. Nothing is added: this works on dev f768b6597e.\n\nA probe on the gate-p392 jet changed the ProvenanceBuild fixture's `install` to take `loud: Bool` and add one of two greetings. The program then printed the loud one. The receipt's generated row named `meta.add` at tool.jet:7, with the handoff from main.jet:5.",
+          "technical": "Keying. The depending file's `check` node digests its bytes, which hold the argument. The generated module's `check` node digests the code the argument chose. The `compile` node is keyed by every `check` key, and `link` by `compile`. So two choices give two compile and link keys, with no new receipt field.\n\nThe c20 fixture then builds the app twice, `loud: false` and `loud: true`. It asserts two generated digests, two compile keys and the same handoff site, and that each image prints its own greeting.",
+          "code": "// tool/tool.jet\ninstall: fn(meta: Compiler, loud: Bool) { stage(meta, loud) }\n\n// app/main.jet\ntool.install(b.compiler(app), loud: true)"
+        },
+        {
+          "key": "B",
+          "name": "Manifest features",
+          "detail": "Like Cargo, a dependency's `package.jet` gains `features: { loud: [] }`, and a dependency entry gains `features: [\"loud\"]`. Code tests a feature at compile time, and every feature turned on anywhere in the graph is on for everyone. The receipt gains a `features` row per package.",
+          "technical": "Manifest vocabulary (DepSpec in Jetpack/PackageModel Manifest.jet has Path, Git, Registry and Foreign today, none with features). It also needs a compile-time fact for code to read, union rules across the graph, a receipt field and new diagnostics. Jetpack's Variant.features (PackageModel Variant.jet) is for foreign provider packages and stays separate.",
+          "code": "deps: {\n    tool: { path: ../tool, features: [\"loud\"] }\n}"
+        },
+        {
+          "key": "C",
+          "name": "Declared build options",
+          "detail": "Like Zig, the dependency declares options with defaults in its build function. The depending package sets them by name when it adds the dependency. The receipt keys each option's value.",
+          "technical": "Two new Build methods, an option declaration and a dependency handle, beside the build session's current ones (add_executable, add_library and the rest in JetBuildSession Declarations.jet). Values are text, checked at build time against the declared type.",
+          "code": "// tool\nloud: b.option(\"loud\", Bool, default: false)\n// app\ntool: b.dependency(\"tool\", options: [\"loud\": \"true\"])"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust (Cargo)",
+          "note": "Features are named in the manifest and unified across the graph. https://doc.rust-lang.org/cargo/reference/features.html",
+          "code": "tool = { path = \"../tool\", features = [\"loud\"] }"
+        },
+        {
+          "lang": "Zig",
+          "note": "A dependency's build options are passed when it is added. https://ziglang.org/learn/build-system/",
+          "code": "const tool = b.dependency(\"tool\", .{ .loud = true });"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A typed argument already chooses a dependency's optional part, is checked, and is keyed in the build receipt. A second mechanism would only add rules.",
+        "gains": [
+          "No new surface; one mechanism for varying a dependency.",
+          "A misspelled or mistyped choice is a compile error."
+        ],
+        "losses": [
+          {
+            "loss": "No manifest list of a package's optional parts.",
+            "mitigation": "`jet doc` lists build functions with their parameters and defaults once #3202 c37 lands; today it cuts the head at a braced default."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B adds a second mechanism, and additive features let one package's choice change another's build."
+          },
+          {
+            "key": "C",
+            "reason": "C adds text-named options where a typed argument already works."
+          }
+        ],
+        "tradeoff": "No manifest feature list, in exchange for one checked mechanism."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Proof for A: a CompilerAPI/provenance_ case over a fixture whose dependency's `install` takes `loud: Bool`. It builds with `loud: false`, then `loud: true`. It asserts two generated digests, two compile keys and two link keys. Both builds name the same handoff site, main.jet:5, and each image prints its own greeting.",
+      "surface": {
+        "gist": "How does a package choose an optional part of a dependency, and where does the build record that choice?",
+        "lesson": "A dependency often has optional parts, such as TLS support or a loud logger. Rust calls them features. Jet packages have no feature list today. A dependency's build function can already take a typed argument that changes the code it adds.",
+        "trio": {
+          "current": {
+            "note": "Today the dependency's exported build function takes the choice as a typed argument.",
+            "code": "// tool/tool.jet\ninstall: fn(meta: Compiler, loud: Bool) { ... }\n\n// app/main.jet\nbuild: fn(b: Build) {\n    app: b.add_executable(\"app\", [\"main.jet\"], [])\n    tool.install(b.compiler(app), loud: true)\n}"
+          },
+          "wild": {
+            "lang": "Rust (Cargo)",
+            "note": "The manifest names features; code tests them with `cfg`; features add up across the graph.",
+            "code": "[dependencies]\ntool = { path = \"../tool\", features = [\"loud\"] }\n\n#[cfg(feature = \"loud\")]\nfn greeting() -> &'static str { \"LOUD\" }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Typed arguments, as today",
+            "gist": "A choice is a typed argument of the dependency's exported build function.",
+            "gains": [
+              "Nothing new to learn or build.",
+              "The type checker rejects a misspelled choice.",
+              "The receipt already keys the choice and its effect."
+            ],
+            "losses": [
+              "No manifest list of a package's optional parts."
+            ],
+            "proposed": {
+              "code": "tool.install(b.compiler(app), loud: true)"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Manifest features",
+            "gist": "`package.jet` lists features; a dependency entry turns some on.",
+            "gains": [
+              "Familiar to Rust users.",
+              "Choices are visible in the manifest."
+            ],
+            "losses": [
+              "A second way to vary a dependency, beside build arguments.",
+              "Features add up across the graph, so one user's choice reaches another."
+            ],
+            "proposed": {
+              "code": "deps: {\n    tool: { path: ../tool, features: [\"loud\"] }\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Declared build options",
+            "gist": "The dependency declares named options; the user sets them by name.",
+            "gains": [
+              "Options listed in one place, with defaults."
+            ],
+            "losses": [
+              "Two new build methods for what an argument already does.",
+              "Option names are text, so a typo is caught only at build."
+            ],
+            "proposed": {
+              "code": "tool: b.dependency(\"tool\", options: [\"loud\": \"true\"])"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A typed argument already chooses a dependency's optional part, is checked, and is keyed in the build receipt. A second mechanism would only add rules.",
+          "gains": [
+            "No new surface; one mechanism for varying a dependency.",
+            "A misspelled or mistyped choice is a compile error."
+          ],
+          "losses": [
+            {
+              "loss": "No manifest list of a package's optional parts.",
+              "mitigation": "`jet doc` lists build functions with their parameters and defaults once #3202 c37 lands; today it cuts the head at a braced default."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B adds a second mechanism, and additive features let one package's choice change another's build."
+            },
+            {
+              "key": "C",
+              "reason": "C adds text-named options where a typed argument already works."
+            }
+          ],
+          "tradeoff": "No manifest feature list, in exchange for one checked mechanism."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "No manifest list of a package's optional parts.",
+          "attempts": [
+            "Add a manifest feature list: rejected, it is option B's second mechanism.",
+            "List exported build functions with their parameters in `jet doc`: kept."
+          ],
+          "result": "Reduced once #3202 c37's fix lands: the choices are then listed, with their defaults, where the functions are documented; today `jet doc` cuts the head at a braced default."
+        },
+        {
+          "loss": "The receipt names the call site, not the argument's value.",
+          "attempts": [
+            "Add argument values to each handoff: deferred, the call site's line holds the value and its bytes are keyed."
+          ],
+          "result": "Remains as a small gap: a reader opens main.jet:5 to see the value."
+        }
+      ],
+      "draftedBy": "Lens",
+      "reviewedBy": "Main",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-21T05:55:43.682Z"
     }
   ],
   "questions": [
@@ -130300,6 +130547,160 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T06:15:46.511Z",
+      "by": "IfHole-6-1-4",
+      "action": "decision.review",
+      "ref": "D-ARRAY-ZIPCOLUMNS1",
+      "note": "rejected: Fails, not postable as drafted. (1) It says posting remains BLOCKED and not to post a fastest-default recommendation, yet carries rec=A; keep it a draft or drop the performance premise. (2) The A and B code blocks are not the same program (A a from_columns/into_columns round trip, B a borrowed view.len()); neither writes the story parser that owns positions and velocities, indexes rows and recovers every input on a length mismatch. (3) It narrows ratified D-ALLOC-FAIL1=C (\"failed growth leaves the collection unchanged\") by allowing capacities and addresses to change on failed growth, without saying so; design-away: allocate every column new buffer first, then commit, freeing them on failure. (4) Drafting residue in owner text: \"r1 C\", \"r1 used\", \"Answer to q4f453bp\" (no beginner or expert path), a drafter instruction inside B.technical; the trio current code is a bare comment; comparisons give Odin only, missing Zig std.MultiArrayList. (5) probes/review-columns.jet is not in the repo; a fresh probe on p392 confirms Columns<Particle>{} gives Jet.UnknownType E0119."
+    },
+    {
+      "at": "2026-11-21T06:15:45.362Z",
+      "by": "IfHole-6-1-4",
+      "action": "decision.review",
+      "ref": "D-DEBUG-FOLD1",
+      "note": "rejected: Fails, code read on f768b6597e and checked on the gate-p392 jet. (1) \"An image built elsewhere refuses such a breakpoint with E2239\" does not match the code: a normally built image drops the computed-ahead function, so after jet build -O0 (or -O2) and jet debug .jet/build/prog, break count_up answers \"No function `count_up`\" and break prog.jet:5 answers \"No code on prog.jet:5\". A set-but-never-stops breakpoint arises only with dead code kept, which is jet debug own -O0 --dead-code=keep build (Native.jet:6189-6195); the per-image record is empty for default builds and checkInstructions would fail. The record must cover dropped functions too, or the claim goes; B shrinks accordingly. (2) A lists a replay among images jet debug did not build; false: --replay=NAME prog.jet builds through jet_cli_debug_launch (Debug.jet:144-153). (3) Docs/Reference/metaprogramming.md does not exist; it is Docs/Spec/Reference/metaprogramming.md:110. (4) \"adds no user syntax or flag\" misses the channel: jet debug builds in a separate jet build child (Debug.jet:282, native_debug_build_argv), so the policy needs a hidden build flag or an environment variable (a Registry/EnvironmentVariables.jet row) plus the cache key; name which. (5) jet.DebugNeverCalled must be Jet.DebugNeverCalled."
+    },
+    {
+      "at": "2026-11-21T06:15:44.012Z",
+      "by": "IfHole-6-1-4",
+      "action": "decision.review",
+      "ref": "D-PERF-TARGET1",
+      "note": "rejected: Fails, code read on f768b6597e. (1) .detail Edge cases says no counters or refused ptrace refuse the run with E2124, but A.technical Refusals and designAway #3 report the lens unavailable and keep E2124 pid-form-only; the .detail text is wrong. (2) \"Attach is already the outside engine\", the one-engine-per-verb gain and whyNot-B are false: jet_cli_perf_attach (Session.jet:358-606) has three engines (devserver browser relay :470-489, the inside live snapshot/flight ring/zones/heap/--source :490-560, the outside sampler only when nothing is published :563-572). (3) attach has no cpu lens: any --lens other than alloc is refused (Session.jet:379-382); the engine is chosen by the absence of a live snapshot. (4) --for= (D-PERF-ATTACH-WINDOW1=A) is not implemented on f768 (refused as unknown at Session.jet:432-434; window fixed at Outside.jet:22), yet the examples show it as existing. (5) \"retires every perf stat, time and strace use except comparisons\" is false: Jetpack/CLI/Source/Jobs/AccessTrace.jet and Jetpack/CLI/Tests/JobRunner.jet:122 keep strace; Throughput.jet --batch reads time.txt written by the outside batch harness (:93-98, :1255-1268). (6) the syscall decode list is too narrow: JetpackJetOS nixos_migration_protects_stage_before_writing_inputs.case:8-24 needs the whole %file class (mkdir, chmod, rename, unlink, stat). Missing from the census: Tools/Gauntlet/Entries/AsmParity/Fixtures/fake-perf and Tools/Gauntlet/Entries/ScalingProfile/{entry.json,Fixtures/fake-perf}."
+    },
+    {
+      "at": "2026-11-21T06:09:20.730Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00ni11n",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T06:09:06.270Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00ni11n",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T06:08:34.554Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T06:08:33.783Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T06:08:01.102Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#97"
+    },
+    {
+      "at": "2026-11-21T05:55:59.182Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0dktg7a",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T05:55:56.959Z",
+      "by": "Main",
+      "action": "decision.post",
+      "ref": "D-DEP-FEATURES1",
+      "note": "reviewed by Main"
+    },
+    {
+      "at": "2026-11-21T05:55:54.304Z",
+      "by": "Main",
+      "action": "decision.review",
+      "ref": "D-DEP-FEATURES1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-21T05:55:43.683Z",
+      "by": "Lens",
+      "action": "decision.add",
+      "ref": "D-DEP-FEATURES1",
+      "note": "How a package turns on an optional part of a package it depends on (draft)"
+    },
+    {
+      "at": "2026-11-21T05:54:45.361Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0dktg7a",
+      "note": "28 criteria, soft limit 6: a defect in how jet doc reports a failure contract, found with the signature defect above; failure contracts are this card's error work"
+    },
+    {
+      "at": "2026-11-21T05:54:45.361Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0dktg7a",
+      "note": "#38 jet doc's failure line names the function's real failure con"
+    },
+    {
+      "at": "2026-11-21T05:54:43.269Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0dktg7a",
+      "note": "27 criteria, soft limit 6: a defect found reviewing D-DEP-FEATURES1, this card's c20 ballot: its option A's mitigation fails until jet doc prints defaults"
+    },
+    {
+      "at": "2026-11-21T05:54:43.269Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0dktg7a",
+      "note": "#37 jet doc shows a public function's whole signature, parameter"
+    },
+    {
+      "at": "2026-11-21T05:42:35.947Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0p9v5z5",
+      "note": "7 criteria, soft limit 6: a defect in the census this card owns, found landing #3202 c10; a gap is a criterion on the owning card, never a card of its own"
+    },
+    {
+      "at": "2026-11-21T05:42:35.947Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0p9v5z5",
+      "note": "#7 The census judges the snapshot's guards with the compiler un"
+    },
+    {
+      "at": "2026-11-21T05:36:16.033Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0j93bm1",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-21T05:36:14.209Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0j93bm1",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-21T05:36:13.022Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0j93bm1",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-21T05:36:11.863Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0j93bm1",
+      "note": "#1"
+    },
     {
       "at": "2026-11-21T05:30:06.456Z",
       "by": "Main",
