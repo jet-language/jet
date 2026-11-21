@@ -187,7 +187,6 @@ use {
         effect_value_base,
         EffectRowEntry,
         body_fixed_timing,
-        BuildSettingOverride,
         DeepChecks,
         deep_checks_off,
         deep_checks_selects,
@@ -309,7 +308,6 @@ use {
         EffectBudgetModule,
         EffectBudgetOutput,
         EffectBudgetProgram,
-        LockedBuildContribution,
         PackageEffectSummary,
         PackageFacts,
         pkg_compute_package_effects,
@@ -883,8 +881,8 @@ jet_driver_host_os_key: fn(value: String) -> String Never! {
 // the lock's `[build.stamp]` the host read (request.build_stamp); without one
 // it is no git revision, clean, the compiler's own package version and no time.
 // A compile never captures a fresh stamp from git and the clock: only lock
-// writers do. Each loaded dependency's settings are its own, at their
-// declared defaults; the entry package's writers never reach them.
+// writers do. Each loaded dependency's settings are its own, each folded
+// over its own writer chain (jet_driver_setting_writers).
 jet_driver_build_facts: fn(load: JetDriverLoadResult, request: JetDriverCompileRequest, target_machine: TargetMachine) -> SemaBuildFacts Never! {
     package_name := ""
     package_version := ""
@@ -895,12 +893,12 @@ jet_driver_build_facts: fn(load: JetDriverLoadResult, request: JetDriverCompileR
     purposes := [String]{}
     loop package in load.packages {
         if package.identity != load.package_identity {
-            package_settings[package.identity] = jet_driver_build_settings(package, "", [LockedBuildContribution]{}, [BuildSettingOverride]{})
+            package_settings[package.identity] = jet_driver_build_settings(load, package, request)
             next
         }
         package_name = package.name
         package_version = package.version ?? ""
-        settings = jet_driver_build_settings(package, request.profile, request.build_contributions, request.setting_overrides)
+        settings = jet_driver_build_settings(load, package, request)
         package_markers = package.markers
         package_manifest = package.manifest_path ?? ""
         purposes = package.purposes
@@ -954,16 +952,16 @@ jet_driver_package_name: fn(declared: String, entry_path: String) -> String Neve
     name
 }
 
-// Each declared setting's value for `profile`: the effective writer of its
-// chain (jet_driver_setting_writers): its default, then the value the selected
-// `build:` profile gives it, then the value the package's `build: fn`
-// contributed, as the lock records it (the function's
-// environment layer is above the profile's optimization-bundle layer), then
-// a `--set` value.
-jet_driver_build_settings: fn(package: JetDriverPackageInfo, profile: String, contributions: [LockedBuildContribution], overrides: [BuildSettingOverride]) -> [SemaBuildSetting] Never! {
+// Each setting `package` declares, at the effective writer of its chain
+// (jet_driver_setting_writers): its default, then, for a dependency, the
+// entries that set it, then the value the selected `build:` profile gives
+// it, then the value the entry package's `build: fn` contributed, as the
+// lock records it (the function's environment layer is above the profile's
+// optimization-bundle layer), then a `--set` value.
+jet_driver_build_settings: fn(load: JetDriverLoadResult, package: JetDriverPackageInfo, request: JetDriverCompileRequest) -> [SemaBuildSetting] Never! {
     settings := [SemaBuildSetting]{}
     loop setting in package.settings {
-        writers: jet_driver_setting_writers(package, setting, profile, contributions, overrides)
+        writers: jet_driver_setting_writers(load, package, setting, request)
         settings.push(jet_driver_setting_effective(setting, writers))
     }
     settings
@@ -5827,9 +5825,10 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         return jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Check), false, trace)
     }
     jet_driver_unsafe_check(request, load)
-    // Every `--set` writer names a declared setting of the entry package and
-    // agrees with the other command-line writers (BuildFactChain.jet).
-    setting_refusals: jet_driver_setting_override_diagnostics(load, request)
+    // Every `--set` writer names a declared setting, and every setting's
+    // writers agree where the contribution law needs them to
+    // (BuildFactChain.jet).
+    setting_refusals: jet_driver_setting_writer_diagnostics(load, request)
     if setting_refusals.len() > 0 {
         loop diagnostic in setting_refusals -> load.diagnostics.push(diagnostic)
         return jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Load), false, trace)

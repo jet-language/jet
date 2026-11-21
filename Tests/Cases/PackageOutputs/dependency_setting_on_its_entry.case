@@ -1,0 +1,28 @@
+# A dependency's setting climbs one writer chain (BuildFactChain.jet). tool declares `loud: Bool = false`. report's entry for tool writes `loud: false` and chatty's writes `loud: true`. app's own entry writes `loud: true`, which decides over report's, and `jet explain` marks report's writer shadowed. clash has no value of its own, so report and chatty disagree: E3521 naming both entries, until `--set tool.loud=true` decides. A profile that writes one setting twice is E3521 with no `--set` at all.
+fixture: DependencySettingEntry.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run app/main.jet
+exit: 0
+stdout: = "LOUD\nreport: LOUD\n"
+step: jet explain "#build.settings.tool.loud" app/main.jet
+exit: 0
+stdout: ~ "Build.Settings.tool.loud = true" # app's entry decides
+stdout: ~ "[effective] root entry / package true" # app's own line
+stdout: ~ "[shadowed] dependency entry / package false" # report's line
+stdout: ~ "../report/package.jet:deps.tool.settings.loud" # names report's entry
+step: jet run clash/main.jet
+exit: 1
+stderr: ~ "Jet.BuildFactConflict" # the two entries disagree
+stderr: ~ "Fact `Build.Settings.tool.loud` has conflicting values at the dependency entry layer"
+stderr: ~ "`../report/package.jet:deps.tool.settings.loud` writes false" # names report's entry
+stderr: ~ "`../chatty/package.jet:deps.tool.settings.loud` writes true" # names chatty's entry
+step: jet run --set tool.loud=true clash/main.jet
+exit: 0
+stdout: = "report: LOUD\nchatty: LOUD\n"
+step: jet run --set tool.lound=true clash/main.jet
+exit: 1
+stderr: ~ "`#build.settings.tool.lound` is undeclared" # a qualified name tool does not declare
+step: jet run --profile=release twice/main.jet
+exit: 1
+stderr: ~ "Fact `Build.Settings.fast` has conflicting values at the optimization bundle layer" # checked without `--set`

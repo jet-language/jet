@@ -33,8 +33,13 @@ jet_cli_explain_build_fact_name: fn(query: String) -> String? Never! {
     }
     if fixed != None -> return fixed
     if !name.starts_with("#build.settings.") -> return None
+    // `loud`, or a dependency's setting by its package's name, `tool.loud`.
     key: name.removeprefix("#build.settings.")
-    if key == "" || key.contains(".") -> return None
+    parts: key.split(".").to_list()
+    if parts.len() > 2 -> return None
+    loop part in parts {
+        if part == "" -> return None
+    }
     Val("Build.Settings.{key}")
 }
 
