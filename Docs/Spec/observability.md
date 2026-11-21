@@ -1101,25 +1101,34 @@ Tests/Cases/Perf/flight_ring_keeps_the_last_turn.case is the worked example.
 `core.perf` zones, frame marks and plots stay off in such a run: each zone
 site tests one runtime word and calls nothing while it is clear.
 `jet perf attach <pid> --source app.jet --zones=500ms` turns them on for the
-window. It leaves `jet-flight-<pid>.samples.zones` beside the ring and
-rewrites it every 250 ms while the window lasts. The writer's next
-publication answers it by setting the word, writing the zone, frame, plot
+window. It leaves its own lease, `jet-flight-<pid>.samples.zones.<its pid>`,
+then the trigger every attach shares, `jet-flight-<pid>.samples.zones`,
+beside the ring, and rewrites both every 250 ms while the window lasts. An
+unwatched publication makes one `lstat`, of the trigger. While the trigger
+stands, the writer's publication lists the leases and answers the first by
+setting the word, writing the zone, frame, plot
 and log span rows to `.samples.spans`, and opening the zones window: each
 thread samples its CPU time every 125 microseconds, as under `jet perf
 run`, its records going to `.samples.window` rather than the ring, which
-holds too few at that rate. The attach then removes the request, so the next
-publication clears the word and closes the window: each thread samples every
+holds too few at that rate. Ending, the attach removes only its own lease.
+The publication that finds no lease standing removes the trigger, clears
+the word and closes the window: each thread samples every
 10ms again, and a window row in `.spans` names the window's start and end on
 the zones' clock, its interval, the program's CPU time, the handlers' time,
-one signal's delivery time and the records lost in it. A request not
-rewritten within a second was left by an attach that died; the publication
-removes it and closes the window the same way. The attach reads the rows
+one signal's delivery time and the records lost in it. So two attaches
+share one window, and neither turns zones off under the other; one that
+arrives as the last leaves lays the trigger again at its next renewal,
+within 250 ms. A lease not rewritten within a second was left by an attach
+that died; the publication removes it, and with the last the trigger, and
+closes the window the same way. The attach reads the rows
 into the trace with the window's records, of which only the samples stamped
 inside the window count, each zone holding those inside it; its `overhead`
-is the window's measured cost. Without a window row (no window opened) it
-reads the ring's records instead.
-Tests/Cases/Perf/attach_turns_zones_on.case and
-Tests/Cases/Perf/zones_request_lapses_unrenewed.case are the worked examples.
+is the window's measured cost. Without a window row (no window opened, or
+another attach still holds it) it reads the ring's records instead.
+Tests/Cases/Perf/attach_turns_zones_on.case,
+Tests/Cases/Perf/zones_request_lapses_unrenewed.case and
+Tests/Cases/Perf/overlapping_zones_attaches_share_the_window.case are the
+worked examples.
 
 Profiling leaves no files behind. The spans file, a flight ring's
 `.samples.spans` or a `jet perf run` session's, holds at most 16 MiB of
@@ -1130,8 +1139,8 @@ dropped row by kind, and at exit, or as an attach's zones window closes,
 writes the counts in a last row. The `zones` section keeps them as
 `dropped`. `jet perf view` shows both as `spans cut: <reason>: 1534080
 zones, 2 log spans`, naming each kind that lost any. A zone's `count`
-is the zones the file kept. A new zones request empties the flight ring's file
-first. At a normal exit the program removes its ring, the ring's image, its
+is the zones the file kept. Zones turning on in a flight-recorded run empty
+the flight ring's file first. At a normal exit the program removes its ring, the ring's image, its
 `.spans` and its `.window`. A killed program can't, so the next `jet perf run` or
 `jet perf attach` removes, from the temporary directory and the user's
 private directory, each file of this user's named for a process

@@ -5880,10 +5880,14 @@ perf_flight_window_handled := I64{0}
 
 perf_flight_window_lost := I64{0}
 
-// How long an attach's zones request stands unrenewed (Session.jet
+// How long an attach's zones lease stands unrenewed (Session.jet
 // jet_cli_perf_attach_zones writes it every 250 ms): 1 s. One older was
-// left by an attach that died, so it is removed, which closes the window.
+// left by an attach that died, so it is removed; with it the last, the
+// trigger goes and the window closes (perf_flight_zones).
 PERF_FLIGHT_LEASE_NS: I64{1000000000}
+
+// The bytes of directory entries perf_flight_leased reads at a time.
+PERF_FLIGHT_LEASES_BYTES: I64{4096}
 
 // An attach's zones window opens as zones turn on (perf_flight_zones): the
 // handlers' records go to the window file `<path>.window`, emptied, kept in
@@ -5939,8 +5943,8 @@ perf_flight_window_open: fn(path: I64) {
     }
 }
 
-// The window closes as zones turn off, its attach's request gone or its
-// lease lapsed (perf_flight_zones), and at the exit (perf_flight_window_end):
+// The window closes as zones turn off, the last attach's lease gone or
+// lapsed (perf_flight_zones), and at the exit (perf_flight_window_end):
 // its end, CPU time, handler time and lost records are taken first; each
 // thread then samples at the flight recorder's interval again, the records
 // go to the record socket again, and those the sides kept are written to
@@ -6390,7 +6394,7 @@ perf_flight_home: fn(temp: I64) -> I64 {
     name: observe_cstring(home)
     // mkdir(name, 0700); one already there is checked as a new one is.
     _ := observe_syscall(I64{83}, name, I64{448}, I64{0}, I64{0})
-    private: perf_flight_owned_at(name, I64{16384}) >= I64{0}
+    private: perf_flight_owned_at(I64{-100}, name, I64{16384}) >= I64{0}
     jet_rt_free(name, wrapping(rt_text_len(home) + I64{1}), I64{1})
     if (!private) {
         jet_rt_string_drop(home)
@@ -6399,15 +6403,17 @@ perf_flight_home: fn(temp: I64) -> I64 {
     home
 }
 
-// When the C string `name` names, its final link not followed, a file of
+// When the C string `name` names, in the directory open as `directory` (a
+// path's own with AT_FDCWD, -100), its final link not followed, a file of
 // `kind` (S_IFDIR or S_IFREG) this user owns, closed to others when it is a
 // directory: its last modification on the real-time clock, in nanoseconds;
 // else -1. A request another user left is not this user's, so it is
 // ignored.
-perf_flight_owned_at: fn(name: I64, kind: I64) -> I64 {
+perf_flight_owned_at: fn(directory: I64, name: I64, kind: I64) -> I64 {
     facts: jet_rt_alloc(I64{144}, I64{8})
-    // lstat: st_mode, then st_uid, at byte 24; st_mtim at byte 88.
-    found: observe_syscall(I64{6}, name, facts, I64{0}, I64{0}) == I64{0}
+    // lstat, or newfstatat with AT_SYMLINK_NOFOLLOW in an open directory:
+    // st_mode, then st_uid, at byte 24; st_mtim at byte 88.
+    found: (if (directory == I64{-100}) -> observe_syscall(I64{6}, name, facts, I64{0}, I64{0}) else -> observe_syscall(I64{262}, directory, name, facts, I64{256})) == I64{0}
     word: if (found) -> rt_text_word(wrapping(facts + I64{24})) else -> I64{0}
     modified: wrapping(wrapping(rt_text_word(wrapping(facts + I64{88})) * I64{1000000000}) + rt_text_word(wrapping(facts + I64{96})))
     jet_rt_free(facts, I64{144}, I64{8})
@@ -6441,8 +6447,8 @@ perf_flight_publish: fn(directory: I64) {
             }
         } else {
             path: perf_flight_path(home)
+            perf_flight_zones(home, path)
             jet_rt_string_drop(home)
-            perf_flight_zones(path)
             if (rt_text_word(wrapping(state + PERF_FLIGHT_IMAGE)) == I64{0}) {
                 image: perf_flight_beside(path, rt_static_text(".image"))
                 if (perf_flight_file(image, perf_samples_image, perf_flight_image_bytes(perf_samples_image))) {
@@ -6460,28 +6466,30 @@ perf_flight_publish: fn(directory: I64) {
 }
 
 // `jet perf attach` turns zones on in a flight-recorded run by leaving
-// `<ring>.zones` beside the published ring `path`, renewing it every 250 ms,
-// and off by removing it. Only a request this user owns counts
-// (perf_flight_owned_at), and only while it was renewed within
-// PERF_FLIGHT_LEASE_NS: an older one was left by an attach that died, and is
-// removed. While the request stands, zones, frame marks, plots and log
-// spans write their rows to `<ring>.spans` (perf_spans_fd_set), emptied
-// when a request turns zones on and written out at each publication, and
-// the zones window is open (perf_flight_window_open); once it is gone the
-// window closes, the zones word is cleared, and the rows stay for the
-// attach to read, with the counts of those the bound dropped. Log spans
-// keep writing rows while zones are off, within the file's bound
-// (PERF_SPANS_FILE_BYTES).
-perf_flight_zones: fn(path: I64) {
+// `<ring>.zones`, the one trigger, beside the published ring `path` in
+// `home`, after its own lease, `<ring>.zones.<its pid>`, renewing both
+// every 250 ms, and ending by removing only its lease. Only files this user
+// owns count (perf_flight_owned_at). An unwatched turn makes one lstat, of
+// the trigger; only while the trigger stands does it list the leases
+// (perf_flight_leased), and once none stands it removes the trigger, so no
+// attach turns zones off under another. While a lease stands, zones, frame
+// marks, plots and log spans write their rows to `<ring>.spans`
+// (perf_spans_fd_set), emptied when a request turns zones on and written
+// out at each publication, and the zones window is open
+// (perf_flight_window_open); once none stands the window closes, the zones
+// word is cleared, and the rows stay for the attaches to read, with the
+// counts of those the bound dropped. Log spans keep writing rows while
+// zones are off, within the file's bound (PERF_SPANS_FILE_BYTES).
+perf_flight_zones: fn(home: I64, path: I64) {
     request: perf_flight_beside(path, rt_static_text(".zones"))
     name: observe_cstring(request)
-    renewed: perf_flight_owned_at(name, I64{32768})
-    lapsed: renewed >= I64{0} && wrapping(perf_flight_realtime() - renewed) > PERF_FLIGHT_LEASE_NS
-    // unlink
-    if (lapsed) { _ := observe_syscall(I64{87}, name, I64{0}, I64{0}, I64{0}) }
+    standing: perf_flight_owned_at(I64{-100}, name, I64{32768}) >= I64{0}
+    wanted: standing && perf_flight_leased(home)
+    // unlink: the last lease is gone. An attach arriving meanwhile writes
+    // the trigger again at its next renewal.
+    if (standing && !wanted) { _ := observe_syscall(I64{87}, name, I64{0}, I64{0}, I64{0}) }
     jet_rt_free(name, wrapping(rt_text_len(request) + I64{1}), I64{1})
     jet_rt_string_drop(request)
-    wanted: renewed >= I64{0} && !lapsed
     if (wanted && perf_zones_on == I64{0}) {
         if (perf_spans_fd < I64{0}) {
             spans: perf_flight_beside(path, rt_static_text(".spans"))
@@ -6506,6 +6514,67 @@ perf_flight_zones: fn(path: I64) {
     perf_spans_flush(closing)
 }
 
+// Whether an attach's lease stands in `home`: a `<ring>.zones.<pid>` beside
+// this program's ring, a file this user owns, renewed within
+// PERF_FLIGHT_LEASE_NS. An older one was left by an attach that died, and
+// is removed.
+perf_flight_leased: fn(home: I64) -> Bool {
+    named: observe_cstring(home)
+    // O_RDONLY|O_DIRECTORY|O_CLOEXEC.
+    directory: observe_syscall(I64{257}, I64{-100}, named, I64{589824}, I64{0})
+    jet_rt_free(named, wrapping(rt_text_len(home) + I64{1}), I64{1})
+    if (directory < I64{0}) { return false }
+    builder: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(builder, rt_static_text("jet-flight-"))
+    // getpid
+    observe_decimal_unsigned(builder, observe_syscall(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}))
+    jet_rt_string_builder_push(builder, rt_static_text(".samples.zones."))
+    prefix: jet_rt_string_builder_finish(builder)
+    length: rt_text_len(prefix)
+    scratch: jet_rt_alloc(PERF_FLIGHT_LEASES_BYTES, I64{8})
+    now: perf_flight_realtime()
+    standing := false
+    loop {
+        got: observe_syscall(I64{217}, directory, scratch, PERF_FLIGHT_LEASES_BYTES, I64{0})
+        if (got <= I64{0}) { break }
+        at := I64{0}
+        loop at < got {
+            entry: wrapping(scratch + at)
+            name: wrapping(entry + I64{19})
+            if (perf_flight_lease_name(name, rt_text_data(prefix), length)) {
+                renewed: perf_flight_owned_at(directory, name, I64{32768})
+                if (renewed >= I64{0}) {
+                    if (wrapping(now - renewed) > PERF_FLIGHT_LEASE_NS) {
+                        // unlinkat
+                        _ := observe_syscall(I64{263}, directory, name, I64{0}, I64{0})
+                    } else { standing = true }
+                }
+            }
+            step: perf_cfi_u16(wrapping(entry + I64{16}))
+            if (step == I64{0}) { break }
+            at = wrapping(at + step)
+        }
+    }
+    jet_rt_free(scratch, PERF_FLIGHT_LEASES_BYTES, I64{8})
+    jet_rt_string_drop(prefix)
+    _ := observe_syscall(I64{3}, directory, I64{0}, I64{0}, I64{0})
+    standing
+}
+
+// Whether the C string `name` is a lease: the `length` bytes of `prefix`,
+// then a process id's digits.
+perf_flight_lease_name: fn(name: I64, prefix: I64, length: I64) -> Bool {
+    count: perf_flight_length(name)
+    if (count <= length || !rt_text_equal_bytes(name, prefix, length)) { return false }
+    at := length
+    loop at < count {
+        digit: rt_text_byte(wrapping(name + at))
+        if (digit < I64{48} || digit > I64{57}) { return false }
+        at = wrapping(at + I64{1})
+    }
+    true
+}
+
 // `jet perf attach --lens=alloc` asks a flight-recorded run for a heap
 // snapshot by leaving `<ring>.heap-request`, a file this user owns
 // (perf_flight_owned_at), beside the published ring
@@ -6520,7 +6589,7 @@ perf_flight_zones: fn(path: I64) {
 perf_flight_heap: fn(path: I64) {
     request: perf_flight_beside(path, rt_static_text(".heap-request"))
     asked: observe_cstring(request)
-    wanted: perf_flight_owned_at(asked, I64{32768}) >= I64{0}
+    wanted: perf_flight_owned_at(I64{-100}, asked, I64{32768}) >= I64{0}
     if (wanted) {
         answer: perf_flight_beside(path, rt_static_text(".heap"))
         staged: perf_flight_beside(path, rt_static_text(".heap.stage"))

@@ -764,30 +764,41 @@ JetCLIPerfZonesTaken: struct {
     held: JetCLIPerfAttachWindow?,
 }
 
-// How often an attach renews its zones request, in 25 ms waits: every
-// 250 ms, well within the second after which the program takes an
-// unrenewed one for an attach that died (JetRuntime PerfSamples.jet
-// PERF_FLIGHT_LEASE_NS).
+// How often an attach renews its zones lease and the trigger, in 25 ms
+// waits: every 250 ms, well within the second after which the program
+// takes an unrenewed lease for an attach that died (JetRuntime
+// PerfSamples.jet PERF_FLIGHT_LEASE_NS).
 JET_CLI_PERF_ZONES_RENEW: 10
 
 // Turn zones on in the flight-recorded program `pid` for `window_ms`: leave
-// the request, a file only this user can write, beside the ring it
-// publishes in `home` (JetRuntime PerfSamples.jet perf_flight_zones), which
-// its next publication (every 100 ms) answers by recording zones, frame
-// marks, plots and log spans to `<ring>.spans` and opening its zones
-// window: its records go to `<ring>.window`, each thread sampled every
-// 125 microseconds of CPU time. The request is rewritten every
-// JET_CLI_PERF_ZONES_RENEW waits, as the program removes one unrenewed for
-// a second; it is removed after the window, and two publications awaited,
-// the window's row among them (jet_cli_perf_spans_window). The rows,
-// copied out of the program's way, and the window's records beside a copy
-// of the ring's image, read as a run's samples are with lines in `source`
-// its own; None when it wrote no rows. A window file of another version
-// than this jet reads (jet_cli_perf_samples_records) is refused.
+// this attach's own lease, `<ring>.zones.<its pid>`, then the trigger every
+// attach shares, `<ring>.zones`, files only this user can write, beside the
+// ring the program publishes in `home` (JetRuntime PerfSamples.jet
+// perf_flight_zones). Its next publication (every 100 ms) answers by
+// recording zones, frame marks, plots and log spans to `<ring>.spans` and
+// opening its zones window: its records go to `<ring>.window`, each thread
+// sampled every 125 microseconds of CPU time. Both are rewritten every
+// JET_CLI_PERF_ZONES_RENEW waits, as the program removes a lease unrenewed
+// for a second, and the trigger once no lease stands. After the window only
+// the lease is removed, so another attach's window stays open, and two
+// publications are awaited, the window's row among them when this was the
+// last lease (jet_cli_perf_spans_window). The rows, copied out of the
+// program's way, and the window's records beside a copy of the ring's
+// image, read as a run's samples are with lines in `source` its own; None
+// when it wrote no rows. An attach that ends while another holds the window
+// finds no window row, so it reads the rows alone, and the caller the
+// ring's records. A window file of another version than this jet reads
+// (jet_cli_perf_samples_records) is refused.
 jet_cli_perf_attach_zones: fn(pid: Int, home: String, window_ms: Int, source: String) -[FS, Env, Time]> JetCLIPerfZonesTaken? JetCLIReadError! {
     ring: perf_files.join(home, "jet-flight-{pid}.samples")
     request: "{ring}.zones"
-    _: perf_files.create(request, mode: Val(0o600), links: .Refuse) ?? return Ok(None)
+    lease: "{request}.{perf_process.current_pid()}"
+    // The lease first, so the publication that finds the trigger finds it.
+    _: perf_files.create(lease, mode: Val(0o600), links: .Refuse) ?? return Ok(None)
+    _: perf_files.create(request, mode: Val(0o600), links: .Refuse) ?? {
+        perf_files.remove(lease).drop("a lease without the trigger turns nothing on")
+        return Ok(None)
+    }
     waited := 0
     loop _ in 0..<(window_ms + 24) /% 25 {
         perf_time.sleep(25ms)
@@ -795,10 +806,13 @@ jet_cli_perf_attach_zones: fn(pid: Int, home: String, window_ms: Int, source: St
         if waited == JET_CLI_PERF_ZONES_RENEW {
             waited = 0
             // Rewritten from empty, its modification time is now.
-            perf_files.write_bytes(request, [U8]{}).drop("a request the program finds unrenewed only ends the window early")
+            perf_files.write_bytes(lease, [U8]{}).drop("a lease the program finds unrenewed only ends the window early")
+            // The program removes the trigger once no lease stands; one
+            // that removed it as this attach arrived finds it again here.
+            perf_files.write_bytes(request, [U8]{}).drop("a trigger the program no longer sees only ends the window early")
         }
     }
-    perf_files.remove(request).drop("a request the program no longer sees turns zones off")
+    perf_files.remove(lease).drop("a lease the program no longer sees ends this attach's hold")
     perf_time.sleep(250ms)
     stem: perf_files.join(home, "jet-perf-attach-{perf_process.current_pid()}-{pid}-{perf_time.unix_ns()}")
     spans: "{stem}.spans"

@@ -1,8 +1,9 @@
-# `jet perf attach --zones=WINDOW` renews its zones request every 250 ms
-# while its window is open. A request not renewed within a second was left
-# by an attach that died, so the program removes it, closes the zones
-# window and turns its zones off: the window's row in `.spans` says so. A
-# request left by hand and never renewed is such a request.
+# `jet perf attach --zones=WINDOW` renews its zones lease and the trigger
+# every 250 ms while its window is open. A lease not renewed within a second
+# was left by an attach that died, so the program removes it; with no lease
+# left it removes the trigger, closes the zones window and turns its zones
+# off: the window's row in `.spans` says so. A lease and trigger left by
+# hand and never renewed are such a request.
 requires: os-name:linux
 fixture: AttachTurnsZonesOn.fixture
 env: NO_COLOR=1
@@ -14,16 +15,16 @@ session live line: jet run --observe live.jet
 stderr: null
 recv live
 stdout.trim: ~ "READY" # the program is running its loop
-step: sh -c 'n=0; while [ ! -f run/jet/jet-flight-{pid:live}.samples ] && [ $n -lt 200 ]; do sleep 0.05; n=$((n+1)); done; touch run/jet/jet-flight-{pid:live}.samples.zones'
+step: sh -c 'n=0; while [ ! -f run/jet/jet-flight-{pid:live}.samples ] && [ $n -lt 200 ]; do sleep 0.05; n=$((n+1)); done; touch run/jet/jet-flight-{pid:live}.samples.zones.1 && touch run/jet/jet-flight-{pid:live}.samples.zones'
 exit: 0
 step: sh -c 'n=0; while [ ! -s run/jet/jet-flight-{pid:live}.samples.spans ] && [ $n -lt 100 ]; do sleep 0.05; n=$((n+1)); done; ls run/jet | grep -c -e "samples.spans$" -e "samples.window$"'
 exit: 0
 stdout: = "2\n" # the request turned zones on: zone rows, and the window's own records
 step: sleep 2
 exit: 0
-step: sh -c 'ls run/jet | grep -c "samples.zones$"'
+step: sh -c 'ls run/jet | grep -c -e "samples.zones$" -e "samples.zones.1$"'
 exit: 1 # grep counts no line
-stdout: = "0\n" # unrenewed, the request lapsed and the program removed it
+stdout: = "0\n" # unrenewed, the lease lapsed and the program removed it, and with it the trigger
 step: sh -c 'od -A n -v -t u1 -w1 run/jet/jet-flight-{pid:live}.samples.spans | awk -f window_rows.awk'
 exit: 0
 stdout: = "1\n" # and closed the window once: one row of kind 6 holding five words, walked row by row, as a name's bytes leave the next row unaligned
