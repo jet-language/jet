@@ -116,6 +116,70 @@ pkg_merge_test_writer: fn(key: String, value: String, layer: ContributionLayer, 
     }
 }
 
+// Two libraries, `lib` and `report`, set `tool.loud` on their entries for
+// `tool`, with different values.
+pkg_merge_test_entries: fn() -> [FactContribution] {
+    [FactContribution]{
+        pkg_merge_test_writer("tool.loud", "false", ContributionLayer.Declaration, "tool/package.jet"),
+        pkg_merge_test_writer("tool.loud", "true", ContributionLayer.DependencyEntry, "lib/package.jet"),
+        pkg_merge_test_writer("tool.loud", "false", ContributionLayer.DependencyEntry, "report/package.jet"),
+    }
+}
+
+#Test("fact law lets a more explicit writer decide between disagreeing dependency entries") {
+    writers := pkg_merge_test_entries()
+    writers.push(pkg_merge_test_writer("tool.loud", "true", ContributionLayer.RootEntry, "app/package.jet"))
+    resolved: pkg_fact_resolve(FactKey.new("tool.loud"), writers) ?? panic("the root's entry decides")
+    assert_eq(resolved.value, FactValue.Text{value: "true"})
+    assert_eq(resolved.provenance[resolved.effective].source, "app/package.jet")
+    assert_eq(resolved.provenance.len(), 4)
+    cli := pkg_merge_test_entries()
+    cli.push(pkg_merge_test_writer("tool.loud", "false", ContributionLayer.CommandLine, "command line"))
+    decided: pkg_fact_resolve(FactKey.new("tool.loud"), cli) ?? panic("the command line decides")
+    assert_eq(decided.value, FactValue.Text{value: "false"})
+    assert_eq(decided.provenance[decided.effective].source, "command line")
+}
+
+#Test("fact law refuses disagreeing dependency entries when their layer decides") {
+    if pkg_fact_resolve(FactKey.new("tool.loud"), pkg_merge_test_entries()) == {
+        .Ok(_) -> { panic("expected a conflict") }
+        .Err(error) -> {
+            if error == {
+                .Conflict(_, layer, first, second) -> {
+                    assert_eq(layer, ContributionLayer.DependencyEntry)
+                    assert_eq(first.source, "lib/package.jet")
+                    assert_eq(second.source, "report/package.jet")
+                }
+                .InvalidForce(_, _, _) | .SafetyWidening(_, _, _) | .SafetyIncomparable(_, _, _) -> {
+                    panic("expected FactError.Conflict")
+                }
+            }
+        }
+    }
+}
+
+#Test("fact law still refuses a same-layer disagreement above the dependency entries") {
+    writers := pkg_merge_test_entries()
+    writers.push(pkg_merge_test_writer("tool.loud", "true", ContributionLayer.RootEntry, "app/package.jet"))
+    writers.push(pkg_merge_test_writer("tool.loud", "true", ContributionLayer.OptimizationBundle, "release"))
+    writers.push(pkg_merge_test_writer("tool.loud", "false", ContributionLayer.OptimizationBundle, "release"))
+    writers.push(pkg_merge_test_writer("tool.loud", "true", ContributionLayer.CommandLine, "command line"))
+    if pkg_fact_resolve(FactKey.new("tool.loud"), writers) == {
+        .Ok(_) -> {
+            panic("a profile writing one setting twice must conflict, even under the command line")
+        }
+        .Err(error) -> assert(error == .Conflict(_, _, _, _))
+    }
+}
+
+#Test("fact law orders the entry layers between the declaration and the profile") {
+    assert(ContributionLayer.Declaration.rank() < ContributionLayer.DependencyEntry.rank())
+    assert(ContributionLayer.DependencyEntry.rank() < ContributionLayer.RootEntry.rank())
+    assert(ContributionLayer.RootEntry.rank() < ContributionLayer.OptimizationBundle.rank())
+    assert_eq(ContributionLayer.DependencyEntry.name(), "dependency entry")
+    assert_eq(ContributionLayer.RootEntry.name(), "root entry")
+}
+
 #Test("entry combines packages and resolves settings") {
     first: EntryContribution{packages: [Pkg]{Pkg.new("default", "ripgrep")}, settings: [String:[FactContribution]]{"prompt": [FactContribution]{pkg_merge_test_writer("prompt", "jetpack", ContributionLayer.Declaration, "package.jet")}}}
     second: EntryContribution{packages: [Pkg]{Pkg.new("default", "fd")}, settings: [String:[FactContribution]]{"prompt": [FactContribution]{pkg_merge_test_writer("prompt", "wordstats", ContributionLayer.OptimizationBundle, "profile")}}}

@@ -47,6 +47,12 @@ SourceScope: enum {
 #Comparable
 ContributionLayer: enum {
     Declaration,
+    // A dependency's entry in another package's `deps:` (`tool: { path: ../tool,
+    // settings: { loud: true } }`); entries may disagree when a more explicit
+    // writer decides.
+    DependencyEntry,
+    // The root package's own entry for the dependency.
+    RootEntry,
     OptimizationBundle,
     Workspace,
     Environment,
@@ -57,6 +63,8 @@ ContributionLayer: enum {
     name: fn(self) -> String Never! {
         if self == {
             .Declaration -> "declaration"
+            .DependencyEntry -> "dependency entry"
+            .RootEntry -> "root entry"
             .OptimizationBundle -> "optimization bundle"
             .Workspace -> "workspace"
             .Environment -> "environment"
@@ -69,19 +77,21 @@ ContributionLayer: enum {
     rank: fn(self) -> Int Never! {
         if self == {
             .Declaration -> 0
-            .OptimizationBundle -> 1
-            .Workspace -> 2
-            .Environment -> 3
-            .System -> 4
-            .Fleet -> 5
-            .CommandLine -> 6
+            .DependencyEntry -> 1
+            .RootEntry -> 2
+            .OptimizationBundle -> 3
+            .Workspace -> 4
+            .Environment -> 5
+            .System -> 6
+            .Fleet -> 7
+            .CommandLine -> 8
         }
     }
 
     can_force: fn(self) -> Bool Never! {
         if self == {
             .System | .Fleet -> true
-            .Declaration | .OptimizationBundle | .Workspace | .Environment | .CommandLine -> false
+            .Declaration | .DependencyEntry | .RootEntry | .OptimizationBundle | .Workspace | .Environment | .CommandLine -> false
         }
     }
 }
@@ -408,13 +418,16 @@ pkg_fact_resolve: fn(key: FactKey, declarations: [FactContribution]) -> Effectiv
             return Err(FactError.InvalidForce{key: key.name, layer: declaration.layer, source: declaration.source})
         }
     }
+    // Same-rung writers must agree, except dependency entries: they stand
+    // when a more explicit writer decides, and conflict below when their
+    // layer is the one that decides.
     group_start := 0
     loop index in 1..<chain.len() {
         declaration: chain[index]
         first: chain[group_start]
         if declaration.layer != first.layer || declaration.scope != first.scope {
             group_start = index
-        } else if declaration.value != first.value {
+        } else if declaration.value != first.value && declaration.layer != ContributionLayer.DependencyEntry {
             return Err(FactError.Conflict{key: key.name, layer: declaration.layer, first: first, second: declaration})
         }
     }
