@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112975,
+    "rev": 112978,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -36455,6 +36455,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-21",
+          "by": "Main",
+          "text": "Probe on dev b66642b8bc (gate-p429 jet), a three-member workspace shop/{alpha,beta,gamma} with one #Test each: at the root `jet check` (exit 0) and `jet test` (each member, exit 0) act on every member as D-WORKSPACE-CMD1=A rules; `jet doc` and `jet build` still refuse with \"`jet doc`/`jet build` is ambiguous — 3 workspace members can run\" (Jet.InvalidCommandInput, exit 2); `jet check -p beta` and `jet build -p alpha` narrow correctly, but `jet test -p gamma` is refused (\"`-p` is only valid with `jet run`, `jet dev`, `jet debug`, `jet check`, `jet build` or `jet jobs`\"); `jet run` still asks (exit 2), as ruled. So c1 is still open: doc and build at the root, and `-p` on test (and doc). Also, the member line for gamma prints after its result (\"gamma: pass ... jet test: member `gamma`\"): member output is not kept in order."
+        },
+        {
           "at": "2026-10-29",
           "text": "All decisions ratified; advanced out of deciding."
         }
@@ -36523,7 +36528,7 @@
       "parentId": "c06osxzz",
       "needsAcceptance": false,
       "created": "2026-10-28T11:04:13.858Z",
-      "updated": "2026-11-20T08:52:03.671Z",
+      "updated": "2026-11-21T19:40:10.980Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -71932,8 +71937,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T12:27:38.913Z",
-      "updated": "2026-11-21T16:45:18.760Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-21T19:41:33.279Z",
+      "updatedBy": "Main",
       "criteriaLastN": 12
     },
     {
@@ -130296,32 +130301,32 @@
       "cardId": "c0py34oh",
       "group": "architecture",
       "title": "How a called function learns where its returned value goes",
-      "situation": "The ratified D-PLACE-DEFAULT1 builds a growing value that a function returns, such as a list or text, on its caller's scope stack. When the caller stores that value in something older or sends it, the value goes to the heap at today's cost. So every call has to tell the callee one fact: stack or heap.\n\nA direct call can say it. But function values, closures, runtime kernels, C exports, plugin guests and the debugger's evaluator reach the same code without knowing which function they call. The vote picks how the fact travels. We recommend one hidden argument.",
+      "situation": "The ratified D-PLACE-DEFAULT1 builds a growing value that a function returns, such as a list or text, on its caller's scope stack. When the caller stores that value in something older or sends it, the value goes to the heap at today's cost. So every call has to tell the callee one fact: stack or heap.\n\nA direct call can say it. But function values, closures, runtime kernels, C exports, plugin guests and the debugger's evaluator reach the same code without knowing which function they call. The vote picks how the fact travels. We recommend one hidden argument that the runtime checks, with one builder body.",
       "gist": "How should a called function learn whether the list or text it returns goes on its caller's stack or the heap?",
       "lesson": "A function that returns a list has to build it somewhere. Under the ratified placement rule the caller decides: its scope stack when the list stays local, the heap when the list is stored or sent. The callee must learn that choice at every call, even through a function value, where the compiler does not know the callee. Nothing changes in what users write.",
-      "explainer": "A call's destination is one word: heap, which means the current allocator, or stack, which means a fresh scope stack of the calling task. The caller's placement rule picks it at each call, and sema records the pick. So O0, O1, O2 and the web pass the same word at the same call (I9).\n\nThe word is a flag, not a handle. Heap sends the callee to the allocator it would use today, #Context's or the default, which it reads from the task as it does now. Stack opens a fresh scope stack of the task, which the callee finds the same way. Cyclone passes a region handle instead; a flag is enough here, because both places belong to the calling task.\n\nTrait calls dispatch by a type test, then call directly; every option treats them as direct calls. The options differ in how the word reaches the callee through function values and closures. A passes it as an argument. B compiles two bodies. C passes it only on direct calls. D sends no word and copies afterward. E keeps the word in the task's context record.",
+      "explainer": "A call's destination is one word: heap, which means the current allocator, or stack, which means a fresh scope stack of the calling task. The caller's placement rule picks it at each call, and sema records the pick. So O0, O1, O2 and the web pass the same word at the same call (I9).\n\nHeap is 0. It sends the callee to the allocator it would use today, #Context's or the default. Stack is the address of the fresh scope stack the caller opened. Cyclone passes a region handle; this word is an address the runtime's page map already knows.\n\nTrait calls dispatch by a type test, then call directly; every option treats them as direct calls. The options differ in how the word reaches the callee through function values and closures. A passes it as one hidden argument that the runtime checks, and keeps one builder body. B compiles two bodies. C passes it only on direct calls. D sends no word and copies afterward. E keeps the word in the task's context record.",
       "story": "Noor's log tool splits each line with a splitter it picks at startup, so the call goes through a function value. The list of words stays in the loop, so the rule puts that list on a stack. Each word was stored into the list, something older, so the words stay on the heap, as today. Her tool keeps the word lists of error lines for the whole run, so those lists go to the heap. One function serves both calls and must build each list in the right place.",
       "inWild": "// C++17: the caller passes the address of its result slot as a hidden\n// argument, and the callee builds the result there (no copy).\nstd::vector<std::string> trimmed(const std::vector<std::string>& lines);\nauto words = trimmed(lines);  // built in words' slot; its buffer is on the heap\n# https://en.cppreference.com/w/cpp/language/copy_elision",
-      "detail": "Rules every option shares. The caller's rule picks the destination at each call: stack when the result stays local, heap when it is stored in something older, sent or captured by a task. Inside a #Context(allocator:) block every call passes heap, which means that allocator, so a named allocator still wins as ratified.\n\nOnly the returned value itself is placed. Its elements follow the stored-in-older rule: an item pushed into the list being built is stored in something older than itself, so it goes to the heap, as today.\n\nA value carries its home. Today a value made under #Context goes back to the allocator that served it, through a header word below its address (JetRuntime Context.jet). A stacked value records its stack the same way. So a caller frees whatever it receives correctly, even a parameter or field the callee hands back.\n\nForwarding, f() { g() }, passes f's destination on to g. When a function can return one of two values, both follow the destination. Under stack each gets its own fresh stack, and the one not returned is freed at its last use. After ? or an early return, a partly built result is dropped like any local.\n\nRecursive calls the compiler can see pass heap, as the ratified rule puts a recursive function's growing locals on the heap. The function's own result still follows its caller. Recursion through a function value cannot be seen, so such a call passes its destination as usual, and each level that gets stack takes its own fresh stack, in chunks.\n\nA destination never crosses a task: a task's result reaches others by a send or a join, which the rule places on the heap.\n\nA generic function, fn<T>() -> T, takes the word only in the instances where T grows, since each instance is compiled apart. Trait methods are called directly after a type test, so each implementation takes the word only if its own result grows.\n\nForeign entries pass heap. They are the C export thunk, whose Text result C frees with jet_text_free, and plugin guest exports, whose results the host copies. Runtime kernels and JavaScript callbacks that call a Jet function pass heap too. The spec says collection result builders cross a native kernel as host callbacks (spec.md 1752), so map, split and partition builders are called from runtime code. JavaScript exports on the web and the debugger's evaluator pass heap.\n\nEach such entry passes a constant, so it needs no row of its own in the probe. On the web, trait calls and closures take the same shape as natively. Every function value already passes one hidden argument, its closure record, through a generated adapter (JetIR BuildExpr.jet).\n\nHot patching. jet dev restarts a native program on each change (JetCLI Host.jet). The debugger's fix accepts changed parameters only when no live frame would pass the old ones (NativeFix.jet 551-557, Native.jet 2812-2814). A fix that adds or drops the hidden word counts as a parameter change. The fix's frame check refuses it while an old caller's frame is live.\n\nThe probe Docs/Audits/PlaceDefault20261121/Probes/returns.jet, with returns.sh and returns.log, measures what each convention adds to a call. Every list there comes from today's heap, so a row differs from plain only by its convention. The trait row is a type test, then a direct call. The host was shared, and the log prints the one-minute load beside every run: 8.2 to 18.0. So each row is the fastest of five runs that alternate with the other conventions.\n\nO2, a call returning a two-item list, ns per call (plain, argument, test, branch, context word, copy): direct 24.6, 25.1, 25.5, 28.3, 45.4, 42.8. Function value 24.9, 24.7, 24.7, 29.4, 45.6, 43.5. Trait 34.2, 32.5, 32.2, 36.5, 52.0, 51.1. Closure 32.3, 32.2, 34.3, 37.2, 52.6, 50.6.\n\nThe argument is within 1.7 ns of plain at O0, O1 and O2 on every form. The context word adds 18 to 22 ns at every level, and the copy 17 to 21. On the web under node, plain, argument, test and context word cost 52.8, 52.8, 52.7 and 88.2 ns direct. Through a function value they cost 58.4, 57.5, 56.4 and 91.5.\n\nThe test row passes the word and tests it first. Its stack path is an arm of its own that returns, never taken here, so the row measures the test, not the stack path. It is within 2.0 ns of plain at every level, on every form and on the web, as the argument is. An independent seven-run probe at O1 and O2 found the same.\n\nThe branch row merges two lists into one variable, so O2 keeps the list in memory. That costs 2.3 to 4.9 ns over plain at O2, and nothing measurable at O0 and O1. So A's code tests the word first and gives the stack path an arm of its own.\n\nThe copy grows with the value. At O2 direct, 16 items cost 58.4 ns plain, 92.2 with one sized copy (1.58 times) and 122.6 with the probe's push-by-push copy (2.10 times). 1,000 items cost 1,179, 2,112 (1.79 times) and 2,752 (2.33 times). The review's own sized copy gave 1.59 and 1.73 times. So a sized copy costs about 1.6 to 1.8 times plain, and a push copy 2.1 to 2.3.\n\nIn the O2 symbol table the builder is 1,749 bytes, 1,765 with the argument. It is 1,961 with the test, 2,141 with the branch and 2,144 with the context word. The 16 bytes are the probe's use of the word, an add. The test itself is a compare and a jump, about 9 bytes in a reviewer's disassembly. The rest of its 196 bytes, and the branch's 376, are stand-in stack arms built in line. Its function-value adapter is 75 bytes, 79 with the argument.\n\nThe scope-stack path does not exist yet, so no row measures its speed, its size or a stack's own gain. The review's ceiling is 12 to 13 ns per short-lived value (alloc.jet). That is what a value returned to the heap instead of a stack gives up.",
+      "detail": "Rules every option shares. The caller's rule picks the destination at each call: stack when the result stays local, heap when it is stored in something older, sent or captured by a task. Inside a #Context(allocator:) block every call passes heap, which means that allocator, so a named allocator still wins as ratified.\n\nOnly the returned value itself is placed. Its elements follow the stored-in-older rule: an item pushed into the list being built is stored in something older than itself, so it goes to the heap, as today. The list's fixed header keeps today's home: the caller's frame through a return slot (JetIR OptReturnSlot.jet), else a box.\n\nA value carries its home. Today a value made under #Context goes back to the allocator that served it, through a header word below its address (JetRuntime Context.jet). A stacked value records its stack the same way. So a caller frees whatever it receives correctly, even a parameter or field the callee hands back.\n\nForwarding, f() { g() }, passes f's destination on to g and makes no new offer. When a function can return one of two values, each candidate grows where the destination says, so none is stacked under heap. Under stack, the first to grow claims the offered stack, and the others grow on the heap. The one not returned is freed at its last use. After ? or an early return, a partly built result is dropped like any local.\n\nRecursive calls the compiler can see pass heap, as the ratified rule puts a recursive function's growing locals on the heap. The function's own result still follows its caller. Recursion through a function value cannot be seen, so such a call passes its destination as usual, and each level that gets stack takes its own fresh stack, in chunks.\n\nA destination never crosses a task: a task's result reaches others by a send or a join, which the rule places on the heap.\n\nA generic function, fn<T>() -> T, takes the word only in the instances where T grows, since each instance is compiled apart. Trait methods are called directly after a type test, so each implementation takes the word only if its own result grows.\n\nForeign entries pass heap. They are the C export thunk, whose Text result C frees with jet_text_free, and plugin guest exports, whose results the host copies. Runtime kernels and JavaScript callbacks that call a Jet function pass heap too. The spec says collection result builders cross a native kernel as host callbacks (spec.md 1752), so map, split and partition builders are called from runtime code. JavaScript exports on the web and the debugger's evaluator entry pass heap.\n\nEach such entry passes a constant, so it needs no row of its own in the probe. On the web, trait calls and closures take the same shape as natively. Every function value already passes one hidden argument, its closure record, through a generated adapter (JetIR BuildExpr.jet).\n\nHot patching. jet dev restarts a native program on each change (JetCLI Host.jet). The debugger's fix accepts changed parameters only when no live frame would pass the old ones (NativeFix.jet native_fix_types). Under A and C the word comes or goes only when a function's result starts or stops growing. That changes its result type, so the same frame check refuses it while an old caller's frame is live.\n\nThe first probe, Docs/Audits/PlaceDefault20261121/Probes/returns.jet with returns.sh and returns.log, measures what each convention adds to a call. Every list there comes from today's heap, so a row differs from plain only by its convention. The trait row is a type test, then a direct call. The log prints the one-minute load beside every run: 1.3 to 6.0, median 2.1. Each row is the fastest of five runs that alternate with the other conventions.\n\nThese figures come from returns.log at dev commit b66642b8bc: 5 rounds per row at machine load 1.3 to 6.0, median 2.1.\n\nO2, a call returning a two-item list, ns per call (plain, argument, test, branch, context word, copy): direct 21.9, 22.0, 22.1, 27.0, 41.6, 37.8. Function value 23.1, 22.6, 22.8, 26.5, 40.4, 38.5. Trait 30.7, 29.6, 29.4, 33.9, 47.8, 45.6. Closure 29.5, 29.9, 30.4, 35.3, 48.2, 45.2.\n\nThe argument is within 1.1 ns of plain at O0, O1 and O2 on every form. The context word adds 16 to 20 ns at each of them, and the copy 14 to 18. On the web under node, plain, argument, test and context word cost 49.9, 49.5, 50.0 and 80.6 ns direct. Through a function value they cost 51.8, 51.0, 51.4 and 82.4.\n\nThe branch row merges two lists into one variable, so O2 keeps the list in memory. That costs 3 to 6 ns over plain at O2, and nothing measurable at O0 and O1.\n\nThe copy grows with the value. At O2 direct, 16 items cost 54.1 ns plain, 83.9 with one sized copy (1.55 times) and 109.2 with the probe's push-by-push copy (2.02 times). 1,000 items cost 1,118, 1,929 (1.73 times) and 2,444 (2.19 times). So a sized copy costs about 1.5 to 1.8 times plain, and a push copy 2.0 to 2.2.\n\nThe second probe, place.jet with place.sh and place.log beside returns.jet, measures A as revised. Its arm row passes the word and keeps a whole second body for the stack, never taken. Its place row is one body whose list lives in storage the caller names, so each growth asks the runtime's place lookup which allocator owns it. Its local row has the same call and caller but grows its own list, with no lookup.\n\nSo place less local is the lookup alone, the step a stacked result adds to each growth. Plain less local is returning a list's header rather than a length. The arena row makes the place calls inside a #Context(allocator: arena) block, so the same body grows its list in the arena.\n\nplace.log times a call that builds a two-item list, in ns per call, the fastest of five runs. Its rows are plain, argument, arm, local, place and arena. O2 direct 22.1, 22.3, 22.6, 21.8, 27.9, 50.6. Function value 22.9, 22.8, 23.3, 22.8, 23.9, 49.8. Closure 29.7, 30.0, 32.8, 29.0, 29.4, 67.1.\n\nOn the web, direct: 50.0, 49.3, 49.9, 46.7, 45.5, 65.8. Through a function value: 51.3, 50.5, 51.6, 49.2, 49.9, 68.3. These figures come from place.log at dev commit 71c563d975: 5 rounds per row at machine load 1.5 to 8, median 3.\n\nAcross O0, O1, O2 and the web, the argument is within 1.6 ns of plain, and the never-taken arm within 3.1. The lookup, place less local, costs -0.8 to 6.1 ns natively and -1.3 to 0.8 on the web. Returning the list's header instead of a length, plain less local, is 0.1 to 4.5 ns. The arena row costs 18.4 to 37.7 ns more than place. There the lookup finds the arena's carrier, and the list grows in the arena.\n\nThe O2 symbol table: build 1,749 bytes, build_to 1,765, build_arm 3,736, build_into 1,658 and build_local 2,153. Their function-value adapters are 75, 79, 79, 475, 79 bytes. The debugger lists dest, i, items and out in build_to, and i, items and out in build.\n\nThe same log runs convention.mjs and register.py. convention.mjs writes a wasm module byte by byte and runs it under node. Its builder is called through call_indirect with no word, with one more i32 parameter, and with a mutable global set first. The fastest of nine runs: 2.15 ns with no word, 2.26 with the parameter and 3.61 with the global.\n\nregister.py writes x64 machine code byte by byte and runs it through Python. Its call goes through a register with no word, the word in rdx as a third argument, and the word in RAX. The fastest of nine runs: 0.89 ns with no word, 0.89 in rdx and 0.89 in RAX.\n\nThe scope-stack path does not exist yet, so no row measures a stack's own gain. The review's ceiling is 12 to 13 ns per short-lived value (alloc.jet). That is what a value returned to the heap instead of a stack gives up.",
       "options": [
         {
           "key": "A",
-          "name": "A hidden destination argument",
-          "detail": "Every function, function type and trait method whose result holds a growing value takes one more argument, the destination word. Direct and indirect calls pass it in a register. A function value's adapter passes it on beside the closure record. Each foreign entry passes heap, and the compiler writes every such entry.",
-          "technical": "Passing the word is within noise of plain at O0, O1 and O2, for direct calls, function values, traits and closures. Testing it costs nothing measurable when the stack path has its own arm. Merging both arms into one variable cost 2.3 to 4.9 ns at O2, so A's code never does. The builder grows 16 bytes for the probe's use of the word and about 9 for the test, plus the stack path, not yet measured. Its adapter grows 4.\n\nOn the web the wasm function type gains one i32, and call_indirect checks the whole type, so every function value of that type carries it. The debug info marks the argument artificial, so Locals hide it and the evaluator passes heap. A fix that adds or drops the argument counts as a parameter change.",
-          "code": "trimmed: fn(lines: [String]) -> [String] {  // one hidden word: stack or heap\n    out := [String]{}\n    loop line in lines { out.push(line.trim()) }\n    out\n}\nsplit: if wide -> trimmed else -> squeezed  // a function value\nwords := split(lines)    // passes stack: words stays here\nkept.push(split(lines))  // passes heap: kept outlives the call"
+          "name": "A hidden destination argument, checked by the runtime, and one builder body",
+          "detail": "Each function whose result grows takes one hidden argument, the destination: the next argument register on x64 and one more i32 parameter on the web. Jet types do not change. The callee hands the word to the runtime calls that grow its result, as their place. The runtime honors a stack word only when it names the task's newest offer, still unclaimed; any other word means heap. Each builder keeps one body.",
+          "technical": "The word is one IR argument of every call to a function whose result grows, so the verifier checks it at every call. Each back end lowers it as a real argument, right after the declared ones. On x64 it takes the next argument register. Once the declared ones fill all six, it takes the next stack argument slot, as a seventh argument would. On the web it is one more i32 parameter.\n\nA return-slot address (JetIR OptReturnSlot.jet) stays last, after the word. The grow path, the frame-free prefix, tail calls and adapters already keep arguments (JetIR X64Select.jet).\n\nEvery function of one Jet type takes it or none does, since the result type decides. So a function value's adapter, which already adds the closure record, adds the word too, and call_indirect checks one wasm type. In the probes, the word costs no measurable time a call on x64 and 0.11 ns through call_indirect on the web.\n\nA word cannot misplace a result. Heap is 0 and takes today's path unchecked. Offers nest like calls: a call that offers a stack pushes it on its task's offers. Its return withdraws the offer if it is still unclaimed, and a claim takes the offer off the task's offers, as a return does for an unclaimed one. A stack word is honored only when the page map names the task's newest offer, still unclaimed. The first growth claims it, and a missing, stale or garbage word means heap.\n\nA compiler that passed its own caller's offer to a call whose result it stores would still be honored. So the IR verifier checks where each call's word comes from: heap, a fresh offer, or the function's own word when it returns that call's result.\n\nOne body. The runtime already grows a list from the allocator that owns a place it is told (JetRuntime Alloc.jet alloc_grow_carrier, through alloc_owner). Place 0 means the current allocator, which a builder's own list passes today, so the heap path runs today's code. Text growth (alloc_grow_bytes) takes no place today, so it gains the same argument. A scope-stack word is a place alloc_owner resolves through the page map, written once in the runtime. \n\nIn the probe, the lookup costs -1.3 to 6.1 ns a call at two items.\n\nThe builder grows 16 bytes at O2 in the probe for keeping and using the word, and has no test and no arm. A whole stack arm, as the first draft of A carried, measured 1,971 bytes.\n\nThe debugger sees nothing new. The word is no source variable, so the debug info records none for it, and Locals and the frame list read as today. The evaluator's compiled entry passes heap like any foreign entry, and calls inside an expression follow the rule like any Jet code.",
+          "code": "trimmed: fn(lines: [String]) -> [String] {  // one body; the word is hidden\n    out := [String]{}\n    loop line in lines { out.push(line.trim()) }\n    out  // grown where the call's word said\n}\nsplit: if wide -> trimmed else -> squeezed  // a function value\nwords := split(lines)    // the call passes stack: words stays here\nkept.push(split(lines))  // the call passes heap: kept outlives the call"
         },
         {
           "key": "B",
           "name": "Two bodies, chosen by destination",
           "detail": "The compiler builds each such function twice: a body that builds on the heap and one that builds on a fresh stack. A direct call, a trait call after its type test included, picks a body. Function values and closures hold both entries, so an indirect call picks too. Foreign entries take the heap body.",
-          "technical": "It needs no argument and no test of a word. Each builder's code doubles: 1,749 more bytes for the probe's builder at O2. A stack body calls stack bodies when it forwards. Each function value needs a second entry word. The debugger sets a line's breakpoint in both bodies, and the profiler merges two symbols into one function. On the web, both bodies and both table entries exist. I9 holds, as specialization is a sema fact.",
+          "technical": "It needs no word and no test of a word. Each builder's code doubles: 1,749 more bytes for the probe's builder at O2. A stack body calls stack bodies when it forwards. Each function value needs a second entry word. The debugger sets a line's breakpoint in both bodies, and the profiler merges two symbols into one function. On the web, both bodies and both table entries exist. I9 holds, as specialization is a sema fact.",
           "code": "// The compiler emits two bodies of trimmed:\n//   trimmed        builds its result on the heap\n//   trimmed.stack  builds it on a fresh stack\nsplit: if wide -> trimmed else -> squeezed  // holds both entries\nwords := split(lines)    // calls the stack entry\nkept.push(split(lines))  // calls the heap entry"
         },
         {
           "key": "C",
           "name": "The heap at every indirect call",
-          "detail": "Direct calls pass the destination as A does, and so do trait calls, which call directly after a type test. A call through a function value or closure always gets heap, because its adapter passes heap. Function types stay as they are today. The placement report names such values as returned through an indirect call.",
+          "detail": "Direct calls pass the destination as a hidden argument, and so do trait calls, which call directly after a type test. A call through a function value or closure always gets heap, because its adapter passes heap. Function types stay as they are today. The placement report names such values as returned through an indirect call.",
           "technical": "A call through a function value or closure costs exactly today's call and today's heap. It gives up the stack's gain on every value returned through one, up to the review's 12 to 13 ns ceiling per value. The census the review asked for has a row for that rule, so its share will be known.",
           "code": "words := trimmed(lines)  // direct: passes stack\nsplit: if wide -> trimmed else -> squeezed\nmore := split(lines)     // indirect: always the heap"
         },
@@ -130329,14 +130334,14 @@
           "key": "D",
           "name": "The result's stack moves with it",
           "detail": "No destination at all. A callee builds the value it returns on a fresh stack of the task, as for any local, and hands that stack over with the value. When the caller's rule says heap, the caller copies the value onto the heap, as a value leaving a #Context block moves today.",
-          "technical": "Zero cost at the call, direct or indirect, and no change to any signature. Every stored or sent result pays a copy: 17 to 21 ns more at two items. A sized copy costs about 1.6 to 1.8 times plain at 16 and 1,000 items; the probe's push copy, 2.1 to 2.3 times. Today such a result is built on the heap once, so this breaks the ratified promise that the heap path costs what it costs today.",
+          "technical": "Zero cost at the call, direct or indirect, and no change to any signature. Every stored or sent result pays a copy: 14 to 18 ns more at two items. A sized copy costs about 1.5 to 1.8 times plain at 16 and 1,000 items; the probe's push copy, 2.0 to 2.2 times. Today such a result is built on the heap once, so this breaks the ratified promise that the heap path costs what it costs today.",
           "code": "words := split(lines)    // the list's own stack comes back with it\nkept.push(split(lines))  // the caller copies it onto the heap"
         },
         {
           "key": "E",
           "name": "A destination word in the task's context",
           "detail": "The caller writes the destination into a word of the current context record, where #Context's allocator lives, right before the call. The callee reads and clears it on entry. No signature changes.",
-          "technical": "The probe kept the word in a module global written under #Unsafe. At O2 that cost 18 to 21 ns more per call on every form. It cost 18 to 22 at O0 and O1 and 33 to 35 on the web, and grew the builder by 395 bytes. A context word adds a thread-base load to the same store, load and clear; the probe does not show how much of the gap it keeps.\n\nEvery entry, foreign ones included, must write the word before the call. A missed write leaves a stale word that misplaces the result, and no type check catches it. The debugger's evaluator must save and restore the word.",
+          "technical": "The probe kept the word in a module global written under #Unsafe. At O2 that cost 17 to 20 ns more per call on every form. It cost 16 to 19 at O0 and O1 and 31 to 31 on the web, and grew the builder by 395 bytes. A context word adds a thread-base load to the same store, load and clear; the probe does not show how much of the gap it keeps.\n\nThe word waits in memory from one call to the next. A missed write leaves the previous call's word, a real stack, which misplaces the result unchecked. The debugger's evaluator must save and restore the word.",
           "code": "// The caller writes the context's destination word, then calls;\n// trimmed reads and clears it on entry.\nwords := split(lines)    // word = stack\nkept.push(split(lines))  // word = heap"
         }
       ],
@@ -130360,39 +130365,41 @@
           "lang": "Rust and C++",
           "note": "A large result travels through a hidden pointer to the caller's slot, LLVM's sret argument, and C++17 guarantees it is built there. Only the fixed part is placed; a vector's buffer still comes from the heap.",
           "code": "define void @trimmed(ptr sret(%Vec) %out, ptr %lines)"
+        },
+        {
+          "lang": "x86-64 System V",
+          "note": "A variadic call already passes one hidden fact outside the parameters: AL holds the number of vector registers used, and no prototype names it. System V AMD64 ABI, section 3.5.7.",
+          "code": "mov al, 1      ; one vector register carries an argument\ncall printf"
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "One word in a register reaches every callee, direct or indirect. Passing and testing it cost nothing measurable. Stored and sent results keep today's heap cost, and nothing changes in what users write.",
+        "why": "One hidden argument reaches every callee, direct or indirect, through machinery that already keeps arguments. Jet types do not change. The runtime honors only the task's newest unclaimed offer, and the verifier checks each call's word. Each builder keeps one body, and stored and sent results keep today's heap cost.",
         "gains": [
-          "One rule for every call, direct or indirect.",
-          "Passing and testing the word cost nothing measurable.",
-          "Stored and sent results keep today's heap cost, as ratified.",
-          "The web, C exports and plugins need no second mechanism."
+          "One rule for every call, direct or indirect, and no Jet type changes.",
+          "A missing, stale or garbage word yields the heap, and only the task's newest offer is honored.",
+          "One builder body: no test of the word and no stack arm.",
+          "The debugger and the evaluator see nothing new.",
+          "Stored and sent results keep today's heap cost, as ratified."
         ],
         "losses": [
           {
-            "loss": "Every function type returning a growing value gains a hidden word.",
-            "mitigation": "The compiler writes every foreign entry, and each passes heap; users write and see nothing."
+            "loss": "Machine signatures of growing-result functions gain one argument, and the web's wasm types one i32.",
+            "mitigation": "The compiler writes every foreign entry and passes heap there. The probes' word costs no measurable time a call on x64 and 0.11 ns through call_indirect."
           },
           {
-            "loss": "The debugger meets one extra parameter.",
-            "mitigation": "The debug info marks it artificial, so Locals hide it."
+            "loss": "Each builder grows by keeping and using the word: 16 bytes at O2 in the probe.",
+            "mitigation": "No test and no stack arm remain. A whole stack arm measured 1,971 bytes, and B would add 1,749."
           },
           {
-            "loss": "Each builder carries a stack path beside its heap path.",
-            "mitigation": "Its size is not measured yet; the test that picks it is a compare and a jump."
-          },
-          {
-            "loss": "Each builder grows at O2: 16 bytes for the word and about 9 for the test, plus the stack path.",
-            "mitigation": "B would double each builder instead, 1,749 more bytes in the probe."
+            "loss": "A stacked result grows through the runtime's lookup and claim rather than a bump written into the builder.",
+            "mitigation": "The lookup costs -1.3 to 6.1 ns a call at two items in the probe. The heap path never reaches it, since heap is 0."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "It doubles every builder and every function value's entries to save an argument and a test that cost nothing measurable."
+            "reason": "It doubles every builder and every function value's entries, to save one argument."
           },
           {
             "key": "C",
@@ -130400,23 +130407,23 @@
           },
           {
             "key": "D",
-            "reason": "It copies every stored or sent result, 1.6 to 2.3 times today's cost, breaking the ratified heap promise."
+            "reason": "It copies every stored or sent result, 1.5 to 2.2 times today's cost, breaking the ratified heap promise."
           },
           {
             "key": "E",
-            "reason": "It moves the destination through memory at every call, measured slower on every form, and a missed write misplaces a result unchecked."
+            "reason": "Its word waits in memory between calls, so every call must also clear it. Its probe measured a module global, 16 to 20 ns slower; a thread-base word was not measured."
           }
         ],
-        "tradeoff": "A hidden word joins some signatures so that every call, direct or not, can place its result."
+        "tradeoff": "One hidden argument at calls that return growing values, checked by the runtime, so every call places its result with one builder body and a missing or stale word only means heap."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Rivet. Rivet rejected r0 and r1, the second because a probe row measured a merged list rather than the destination test. r2 adds the separate-path test row; Rivet reproduced every figure and accepted."
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Rivet. Rivet rejected r3 and r4, then accepted r5 with the one sentence on claimed offers that r5 carries. Rivet then accepted the figures with five range fixes, which r6 carries."
       },
-      "checkInstructions": "Under every option: run Docs/Audits/PlaceDefault20261121/Probes/returns.sh with jet and node on PATH, and compare with returns.log beside it. It takes about 9 minutes and prints the load beside every run. Expect the argument and test rows within noise of plain at O0, O1 and O2. Expect the branch rows 2.3 to 4.9 ns above plain at O2, and the context word and copy rows well above it.\n\nUnder A, after the build: a case builds one builder at O0, O1, O2 and the web. It calls the builder directly, through a function value, a trait and a closure. jet inspect placement reports the result stacked in all four, and heap when it is pushed into an older list. The case also maps a list with a closure that returns text, at O1; the closure's result reports heap, because a runtime kernel calls it.\n\nThe same case checks a #Export(c) function returning Text and a plugin export returning a list. A jet debug case checks that Locals do not list the hidden word and that print trimmed(lines) prints the list. One size check: the builder's hot path keeps its list out of memory, so its O2 frame is no larger than the plain builder's.\n\nUnder B: the same cases, plus a symbol check that each builder has two bodies. Under C: the indirect calls report heap. Under D: the stored result reports a copy. Under E: the probe's context word rows.\n\nEvidence labels: the call costs are measured on a shared host, so each is the fastest of five alternating runs, with the load logged. Code sizes come from the O2 symbol table; the test's 9 bytes come from a reviewer's disassembly. The stack path's speed and size and the stack's own gain are not measured, since the scope-stack path does not exist yet. The 12 to 13 ns ceiling is the review's alloc.jet figure.",
+      "checkInstructions": "Under every option: run returns.sh and place.sh in Docs/Audits/PlaceDefault20261121/Probes with jet, node and python3 on PATH. Compare with returns.log and place.log beside them. Each prints the load beside every run, and the conventions alternate within each round.\n\nExpect in returns.log the argument and test rows within noise of plain at O0, O1 and O2. Expect the branch rows 3 to 6 ns above plain at O2, and the context word and copy rows well above it.\n\nExpect in place.log: the argument and arm rows within 3.1 ns of plain, place less local -1 to 6 ns, and the arena row above place. The O2 symbol table shows build_arm 1,971 bytes above build_to. The debugger lists dest among build_to's locals and only i, items and out for build.\n\nUnder A, after the build: a case builds one builder at O0, O1, O2 and the web. It calls the builder directly, through a function value, a trait and a closure. jet inspect placement reports the result stacked in all four, and heap when it is pushed into an older list. The case also maps a list with a closure that returns text, at O1; the closure's result reports heap, because a runtime kernel calls it.\n\nThe same case checks a #Export(c) function returning Text and a plugin export returning a list. The IR verifier refuses a call to a builder without its destination argument, in a unit test. A runtime unit test grows from a claimed, a closed, another task's and a garbage stack word, and each lands on the heap.\n\nA jet debug case checks that a builder's Locals and frame list match a plain function's, and that print trimmed(lines) prints the list. A symbol check finds one body per builder, and one more i32 in each builder's wasm type.\n\nUnder B: the same cases, plus a symbol check that each builder has two bodies. Under C: the indirect calls report heap. Under D: the stored result reports a copy. Under E: the probe's context word rows.\n\nEvidence labels: every call cost is the fastest of five alternating runs, with the load logged. The call figures come from returns.log at dev commit b66642b8bc, load 1.3 to 6.0, and place.log at dev commit 71c563d975, load 1.5 to 8.\n\nCode sizes come from the O2 symbol table. The x64 argument and wasm parameter rows measure the convention in hand-written machine code and wasm, since the compiler does not emit it yet. The claim check and the stack's own gain are not measured, since the scope-stack path does not exist yet. The 12 to 13 ns ceiling is the review's alloc.jet figure.",
       "surface": {
         "gist": "How should a called function learn whether the list or text it returns goes on its caller's stack or the heap?",
         "lesson": "Under the ratified placement rule, a list a function returns can go on its caller's stack. It goes there when it stays local, and on the heap when stored or sent. The called function must learn which, even through a function value. Users write nothing new.",
@@ -130434,18 +130441,18 @@
         "options": [
           {
             "key": "A",
-            "name": "A hidden destination argument",
-            "gist": "Each such function takes one hidden word, stack or heap, on every call.",
+            "name": "A hidden destination argument, one body",
+            "gist": "Each call passes stack or heap as a hidden argument; each function keeps one body.",
             "gains": [
-              "Same rule for direct and indirect calls.",
-              "Passing the word costs nothing measurable."
+              "No Jet type changes; a missing or stale word just means heap.",
+              "One body, and the debugger sees nothing new."
             ],
             "losses": [
-              "Function types gain a hidden word.",
-              "Each builder carries a stack path."
+              "Machine signatures gain one argument.",
+              "Each builder grows about 16 bytes."
             ],
             "proposed": {
-              "code": "words := split(lines)    // passes stack\nkept.push(split(lines))  // passes heap"
+              "code": "words := split(lines)    // the call writes stack\nkept.push(split(lines))  // the call writes heap"
             }
           },
           {
@@ -130453,7 +130460,7 @@
             "name": "Two bodies",
             "gist": "The compiler builds a stack body and a heap body of each such function.",
             "gains": [
-              "No argument and no test of a word."
+              "No word and no test of a word."
             ],
             "losses": [
               "Builder code doubles.",
@@ -130485,7 +130492,7 @@
               "No change to any call."
             ],
             "losses": [
-              "Stored results pay a copy, 1.6 to 2.3 times today."
+              "Stored results pay a copy, 1.5 to 2.2 times today."
             ],
             "proposed": {
               "code": "kept.push(split(lines))  // copied onto the heap"
@@ -130499,8 +130506,8 @@
               "No change to any signature."
             ],
             "losses": [
-              "Slower on every call form measured.",
-              "A missed write misplaces a result."
+              "Its word waits in memory between calls.",
+              "Measured slower as a module global."
             ],
             "proposed": {
               "code": "words := split(lines)  // context word = stack"
@@ -130509,26 +130516,26 @@
         ],
         "recommendation": {
           "rec": "A",
-          "why": "One hidden word reaches every callee, direct or indirect. Passing and testing it cost nothing measurable, and stored results keep today's heap cost.",
+          "why": "A hidden argument reaches every callee through existing machinery, and the runtime checks it. Each function keeps one body, and stored results keep today's heap cost.",
           "gains": [
-            "One rule for every call.",
-            "Passing and testing the word cost nothing measurable.",
-            "Nothing new for users to write."
+            "One rule for every call, no Jet type changes.",
+            "A missing or stale word only means heap.",
+            "One body; the debugger sees nothing new."
           ],
           "losses": [
             {
-              "loss": "Function types returning lists gain a hidden word.",
-              "mitigation": "The compiler writes every C, plugin, web and debugger entry, and each passes heap."
+              "loss": "Machine signatures gain one argument.",
+              "mitigation": "The compiler writes every foreign entry; the word costs no measurable time a call on x64."
             },
             {
-              "loss": "Each builder carries a stack path beside its heap path.",
-              "mitigation": "Its size is not measured yet; the test that picks it is a compare and a jump."
+              "loss": "Each builder grows about 16 bytes.",
+              "mitigation": "No test or stack arm; a stack arm measured about 2,000 bytes."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Doubles builder code to save an argument and a test that cost nothing measurable."
+              "reason": "Doubles builder code to save one argument."
             },
             {
               "key": "C",
@@ -130540,28 +130547,62 @@
             },
             {
               "key": "E",
-              "reason": "Slower, and a missed write misplaces results."
+              "reason": "Its word waits between calls."
             }
           ],
-          "tradeoff": "A hidden word joins some signatures so every call can place its result."
+          "tradeoff": "One checked hidden argument at some calls, so every call places its result with one body."
         }
       },
       "designAway": [
         {
-          "loss": "A hidden argument changes every function type that returns a growing value.",
+          "loss": "A hidden argument changed every function type that returns a growing value.",
           "attempts": [
             "Pass it only at direct calls (C): rejected, indirect results lose the stack.",
-            "Keep it in the task's context (E): rejected, measured slower and fragile.",
-            "The compiler writes every foreign entry, passing heap: kept."
+            "Keep it in the task's context (E): rejected, its word waits in memory between calls.",
+            "Carry it in RAX and a wasm global: rejected in review. The stack-grow path re-enters a function with RAX holding a segment address, and a global keeps its word between calls.",
+            "Keep it an argument of the machine code only, which the compiler writes at every entry: kept. In the probes, the word costs no measurable time a call on x64 and 0.11 ns through call_indirect."
           ],
-          "result": "Nothing changes for users; C, plugin, web and debugger entries pass heap."
+          "result": "Reduced: Jet and C function types are unchanged. Machine signatures of growing-result functions gain one argument, which the IR verifier checks at every call."
+        },
+        {
+          "loss": "A wrong word could put a result on a stack that is gone or belongs to another call.",
+          "attempts": [
+            "The runtime honors only the task's newest offer, still unclaimed, and a call's return withdraws its unclaimed offer. A claim takes the offer off the task's offers, as a return does for an unclaimed one. Any other word means heap: kept.",
+            "The IR verifier checks that each call's word is heap, a fresh offer, or the function's own word when it returns that call's result: kept."
+          ],
+          "result": "Reduced: a missing, stale or garbage word yields the heap, today's behavior. A compiler that passed the wrong live offer would be honored, so the verifier checks each call's word."
+        },
+        {
+          "loss": "The debugger met one extra parameter.",
+          "attempts": [
+            "The word is no source variable, so the debug info records none, as for a function value's closure record: kept. The probe's debugger lists a word passed as a Jet parameter among build_to's locals.",
+            "The evaluator's compiled entry passes heap like any foreign entry: kept."
+          ],
+          "result": "Removed: Locals, the frame list and the evaluator see nothing new."
+        },
+        {
+          "loss": "Each builder carried a stack path beside its heap path, of unmeasured size.",
+          "attempts": [
+            "Merge both paths into one variable: rejected, 3 to 6 ns at O2 (returns.log).",
+            "Give the stack a whole arm of its own: measured 1,971 bytes at O2 (place.log), rejected.",
+            "One body that hands the word to the runtime's growth calls as their place: kept. The lookup measured -1.3 to 6.1 ns a call at two items (place.log)."
+          ],
+          "result": "Removed from builders: the stack path is the runtime's place lookup and claim, written once."
+        },
+        {
+          "loss": "O2 builder growth was 16 bytes for the word, about 9 for the test, plus the stack path.",
+          "attempts": [
+            "Drop the test and the stack arm, as above: kept."
+          ],
+          "result": "Reduced to keeping and using the word: 16 bytes in the probe."
         },
         {
           "loss": "A function with two candidate results cannot build both in one place.",
           "attempts": [
-            "Each candidate opens its own fresh stack, and the one not returned is freed at its last use: kept."
+            "Each candidate opens its own fresh stack: rejected in review. Under heap, the one returned would reach a caller that stores it.",
+            "Each candidate grows where the destination says. Under stack, the first to grow claims the offered stack and the others grow on the heap; under heap, all grow on the heap: kept."
           ],
-          "result": "Gone."
+          "result": "Gone: no candidate is stacked under heap. Under stack, a second candidate pays today's heap cost."
         },
         {
           "loss": "Recursion could stack results without bound.",
@@ -132047,9 +132088,11 @@
       "by": "owner",
       "kind": "question",
       "text": "Try to engineer away the downsides",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-21T16:45:18.760Z"
+      "status": "answered",
+      "answer": "Done: D-PLACE-RETURN1 is revised (posted, open), with every downside attacked and every figure measured quietly at dev 71c563d975 and b66642b8bc (place.log at load 1.5 to 8, median 3; returns.log at load 2 to 4; both re-checked by a second agent). What changed:\n1. The hidden argument no longer touches any Jet or C function type: it exists only in machine code and costs no measurable time a call on x64 and 0.11 ns through a function value on the web.\n2. A wrong or stale word can no longer misplace a result: the runtime honors only the task's newest unclaimed offer, a return withdraws it, any other word means heap (today's behaviour), and the IR verifier checks each call's word.\n3. The debugger sees nothing new: the word has no debug variable and the evaluator passes heap.\n4. Builders no longer carry a second stack path: one body hands the word to the runtime's growth calls (-1.3 to 6.1 ns a call at two items; the separate stack arm, 1,971 bytes, was rejected).\n5. Code size is down to the word itself: 16 bytes at O2.\n6. Two candidate results: the first to grow takes the stack, the others grow on the heap, so nothing stored ever lands on a stack.\n7. Recursion stays unrestricted: visible recursion passes heap, and each stacked level through a function value gets its own chunked stack.\nWhat remains is named in the ballot with its cost: a second candidate under a stack destination pays today's heap cost.",
+      "created": "2026-11-21T16:45:18.760Z",
+      "answeredAt": "2026-11-21",
+      "answeredBy": "Main"
     },
     {
       "id": "q5lxtkff",
@@ -132895,6 +132938,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T19:41:33.279Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q471lk6a",
+      "note": ""
+    },
+    {
+      "at": "2026-11-21T19:41:23.790Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-PLACE-RETURN1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-21T19:40:10.980Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vzmbkk",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-21T19:29:52.023Z",
       "by": "Main",
@@ -136391,713 +136455,6 @@
       "action": "card.criteria-meet",
       "ref": "c0nwrfck",
       "note": "#90"
-    },
-    {
-      "at": "2026-11-20T08:51:46.896Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#73"
-    },
-    {
-      "at": "2026-11-20T08:42:45.653Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c00ni11n",
-      "note": "12 criteria, soft limit 6: gap found doing c5, as c5 requires"
-    },
-    {
-      "at": "2026-11-20T08:42:45.653Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00ni11n",
-      "note": "#12 When jet debug ends by any cause (a signal, a timeout, the t"
-    },
-    {
-      "at": "2026-11-20T08:18:51.872Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c05y3url",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-20T08:18:40.100Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00ni11n",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-20T08:18:39.085Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c00ni11n",
-      "note": "11 criteria, soft limit 6: gaps found doing c5 become criteria here, as c5 requires"
-    },
-    {
-      "at": "2026-11-20T08:18:39.085Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00ni11n",
-      "note": "#11 `jet perf run` of a compiler build keeps complete coverage: "
-    },
-    {
-      "at": "2026-11-20T08:18:37.641Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c00ni11n",
-      "note": "10 criteria, soft limit 6: gaps found doing c5 become criteria here, as c5 requires"
-    },
-    {
-      "at": "2026-11-20T08:18:37.641Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00ni11n",
-      "note": "#10 A multi-threaded program under jet debug runs to its exit af"
-    },
-    {
-      "at": "2026-11-20T08:18:36.774Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c00ni11n",
-      "note": "9 criteria, soft limit 6: gaps found doing c5 become criteria here, as c5 requires"
-    },
-    {
-      "at": "2026-11-20T08:18:36.774Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00ni11n",
-      "note": "#9 jet debug evaluates in a frame of a source file reached thro"
-    },
-    {
-      "at": "2026-11-20T07:40:27.812Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0in2dft",
-      "note": "#5 One covers rule: the compiler's authority check (Policy/Auth"
-    },
-    {
-      "at": "2026-11-20T07:19:11.084Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c05y3url",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-20T07:09:48.675Z",
-      "by": "Main",
-      "action": "decision.post",
-      "ref": "D-DISASM1",
-      "note": "reviewed by BallotReviewDisasm"
-    },
-    {
-      "at": "2026-11-20T07:09:13.683Z",
-      "by": "BallotReviewDisasm",
-      "action": "decision.review",
-      "ref": "D-DISASM1",
-      "note": "passed"
-    },
-    {
-      "at": "2026-11-20T07:09:09.260Z",
-      "by": "BallotReviewDisasm",
-      "action": "decision.update",
-      "ref": "D-DISASM1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-20T06:54:09.315Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-DISASM1",
-      "note": "Machine code in Jet's own tools: list a function's instructions in jet debug and give each its samples in jet perf view (draft)"
-    },
-    {
-      "at": "2026-11-20T06:40:19.147Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-20T06:40:18.236Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c05y3url",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-20T06:40:03.752Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "95 criteria, soft limit 6: gap found while dogfooding #6970: no Jet tool shows machine code, which lldb and perf annotate both do"
-    },
-    {
-      "at": "2026-11-20T06:40:03.752Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#95 Machine code is visible through Jet's own tools, after a rat"
-    },
-    {
-      "at": "2026-11-20T06:01:44.119Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-20T06:01:43.302Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "94 criteria, soft limit 6: follow-up of c89 found by the p345 profile re-probe"
-    },
-    {
-      "at": "2026-11-20T06:01:43.302Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#94 Every jet perf attach lens reports the real window in its he"
-    },
-    {
-      "at": "2026-11-20T05:49:54.430Z",
-      "by": "Main",
-      "action": "decision.post",
-      "ref": "D-LIVE-TIMELINE1",
-      "note": "reviewed by BallotReviewLiveTimeline"
-    },
-    {
-      "at": "2026-11-20T05:49:34.944Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "93 criteria, soft limit 6: same review"
-    },
-    {
-      "at": "2026-11-20T05:49:34.944Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#93 jet perf attach names each refusal by its cause: a program t"
-    },
-    {
-      "at": "2026-11-20T05:49:34.202Z",
-      "by": "BallotReviewLiveTimeline",
-      "action": "decision.review",
-      "ref": "D-LIVE-TIMELINE1",
-      "note": "passed"
-    },
-    {
-      "at": "2026-11-20T05:49:33.014Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "92 criteria, soft limit 6: same review"
-    },
-    {
-      "at": "2026-11-20T05:49:33.014Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#92 Profiling leaves no files behind: the .spans file is bounded"
-    },
-    {
-      "at": "2026-11-20T05:49:32.197Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "91 criteria, soft limit 6: same review"
-    },
-    {
-      "at": "2026-11-20T05:49:32.197Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#91 No profile event is lost silently: a sample dropped because "
-    },
-    {
-      "at": "2026-11-20T05:49:31.341Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "90 criteria, soft limit 6: defects found by the D-LIVE-TIMELINE1 review in today's perf attach; they belong to this card's area"
-    },
-    {
-      "at": "2026-11-20T05:49:31.341Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#90 Turning another user's zones on is refused: an attach reques"
-    },
-    {
-      "at": "2026-11-20T05:49:14.060Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-LIVE-TIMELINE1",
-      "note": "review cleared by the edit"
-    },
-    {
-      "at": "2026-11-20T05:48:41.141Z",
-      "by": "BallotReviewLiveTimeline",
-      "action": "decision.review",
-      "ref": "D-LIVE-TIMELINE1",
-      "note": "passed"
-    },
-    {
-      "at": "2026-11-20T05:37:12.212Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-LIVE-TIMELINE1",
-      "note": "A live timeline: watch a running program's work as it happens (draft)"
-    },
-    {
-      "at": "2026-11-20T05:35:24.466Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0in2dft",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-20T05:35:23.455Z",
-      "by": "Main",
-      "action": "decision.post",
-      "ref": "D-AUTH-WITH1",
-      "note": "reviewed by BallotReviewE0712"
-    },
-    {
-      "at": "2026-11-20T05:34:48.112Z",
-      "by": "BallotReviewE0712",
-      "action": "decision.review",
-      "ref": "D-AUTH-WITH1",
-      "note": "passed"
-    },
-    {
-      "at": "2026-11-20T05:20:23.199Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-AUTH-WITH1",
-      "note": "When narrowing an Authority to a right it doesn't hold is reported (draft)"
-    },
-    {
-      "at": "2026-11-20T04:26:43.408Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-20T03:33:29.460Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0xbfhbt",
-      "note": "#1: the named WebDev proof tests the unported web target (#5931), not this claim; same assertions moved to Debug cases on the O0 and native sessions; was: The Canvas debug overlay offers a session selector, breakpoints and watches anchored by file hash and source span, values on pins and wires, an active node and wire pulse, step, resume and stop, a cal; proof: jet test Compiler --profile cases --filter debug/canvas_debug_"
-    },
-    {
-      "at": "2026-11-20T03:33:02.377Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0xbfhbt",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-20T03:26:53.162Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0gmf0y4",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-20T03:26:42.444Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xbfhbt",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-20T03:26:41.293Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xbfhbt",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-20T03:26:40.118Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xbfhbt",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-20T03:26:37.597Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xbfhbt",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-20T03:26:36.501Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xbfhbt",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-20T03:26:35.414Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0i4ehbt",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-20T03:26:34.236Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0i4ehbt",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-20T03:26:32.935Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0gmf0y4",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-20T03:14:52.181Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c05y3url",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-20T03:14:12.504Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "89 criteria, soft limit 6: gap G38 of the dated best-in-existence review (Docs/Audits/2026-11-19-debug-profile-best-in-existence.md); the review is c39 and every failed axis is a criterion here"
-    },
-    {
-      "at": "2026-11-20T03:14:12.504Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#89 G38: An attached capture's header reports the attach window'"
-    },
-    {
-      "at": "2026-11-20T03:14:11.634Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "88 criteria, soft limit 6: gap G37 of the dated best-in-existence review (Docs/Audits/2026-11-19-debug-profile-best-in-existence.md); the review is c39 and every failed axis is a criterion here"
-    },
-    {
-      "at": "2026-11-20T03:14:11.634Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#88 G37: The profile timeline draws live from the flight ring wh"
-    },
-    {
-      "at": "2026-11-20T03:14:10.484Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "87 criteria, soft limit 6: gap G36 of the dated best-in-existence review (Docs/Audits/2026-11-19-debug-profile-best-in-existence.md); the review is c39 and every failed axis is a criterion here"
-    },
-    {
-      "at": "2026-11-20T03:14:10.484Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#87 G36: A recorded profiling zone costs under 27 ns with record"
-    },
-    {
-      "at": "2026-11-20T03:14:09.600Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "86 criteria, soft limit 6: gap G35 of the dated best-in-existence review (Docs/Audits/2026-11-19-debug-profile-best-in-existence.md); the review is c39 and every failed axis is a criterion here"
-    },
-    {
-      "at": "2026-11-20T03:14:09.600Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#86 G35: `jet perf view` splits a line's samples by the runtime "
-    },
-    {
-      "at": "2026-11-20T03:14:08.774Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "85 criteria, soft limit 6: gap G34 of the dated best-in-existence review (Docs/Audits/2026-11-19-debug-profile-best-in-existence.md); the review is c39 and every failed axis is a criterion here"
-    },
-    {
-      "at": "2026-11-20T03:14:08.774Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#85 G34: At -O1 and -O2 each inlined local is scoped to its inli"
-    },
-    {
-      "at": "2026-11-20T03:14:07.897Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "84 criteria, soft limit 6: gap G33 of the dated best-in-existence review (Docs/Audits/2026-11-19-debug-profile-best-in-existence.md); the review is c39 and every failed axis is a criterion here"
-    },
-    {
-      "at": "2026-11-20T03:14:07.897Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#84 G33: A generic instance frame is named as the source spells "
-    },
-    {
-      "at": "2026-11-20T03:14:06.997Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "83 criteria, soft limit 6: gap G32 of the dated best-in-existence review (Docs/Audits/2026-11-19-debug-profile-best-in-existence.md); the review is c39 and every failed axis is a criterion here"
-    },
-    {
-      "at": "2026-11-20T03:14:06.997Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#83 G32: The best-in-existence review probes the Canvas Debug an"
-    },
-    {
-      "at": "2026-11-20T03:14:06.172Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "82 criteria, soft limit 6: gap G31 of the dated best-in-existence review (Docs/Audits/2026-11-19-debug-profile-best-in-existence.md); the review is c39 and every failed axis is a criterion here"
-    },
-    {
-      "at": "2026-11-20T03:14:06.172Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#82 G31: A DAP `pause` at start stops at the first Jet frame, or"
-    },
-    {
-      "at": "2026-11-20T03:14:05.363Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "81 criteria, soft limit 6: gap G30 of the dated best-in-existence review (Docs/Audits/2026-11-19-debug-profile-best-in-existence.md); the review is c39 and every failed axis is a criterion here"
-    },
-    {
-      "at": "2026-11-20T03:14:05.363Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#81 G30: A crash dump names its image by build hash and copies t"
-    },
-    {
-      "at": "2026-11-20T03:14:04.547Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "80 criteria, soft limit 6: gap G29 of the dated best-in-existence review (Docs/Audits/2026-11-19-debug-profile-best-in-existence.md); the review is c39 and every failed axis is a criterion here"
-    },
-    {
-      "at": "2026-11-20T03:14:04.546Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#80 G29: A crash dump keeps every frame's live locals (a caller "
-    },
-    {
-      "at": "2026-11-20T03:14:03.731Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "79 criteria, soft limit 6: gap G28 of the dated best-in-existence review (Docs/Audits/2026-11-19-debug-profile-best-in-existence.md); the review is c39 and every failed axis is a criterion here"
-    },
-    {
-      "at": "2026-11-20T03:14:03.731Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#79 G28: A deadlock under `jet debug` is reported as a deadlock "
-    },
-    {
-      "at": "2026-11-20T03:14:02.900Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "78 criteria, soft limit 6: gap G27 of the dated best-in-existence review (Docs/Audits/2026-11-19-debug-profile-best-in-existence.md); the review is c39 and every failed axis is a criterion here"
-    },
-    {
-      "at": "2026-11-20T03:14:02.900Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#78 G27: A breakpoint condition that allocates, or a logpoint th"
-    },
-    {
-      "at": "2026-11-20T03:14:02.063Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "77 criteria, soft limit 6: gap G26 of the dated best-in-existence review (Docs/Audits/2026-11-19-debug-profile-best-in-existence.md); the review is c39 and every failed axis is a criterion here"
-    },
-    {
-      "at": "2026-11-20T03:14:02.063Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#77 G26: A debugger expression that needs a runtime entry the im"
-    },
-    {
-      "at": "2026-11-20T03:14:01.233Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "76 criteria, soft limit 6: gap G25 of the dated best-in-existence review (Docs/Audits/2026-11-19-debug-profile-best-in-existence.md); the review is c39 and every failed axis is a criterion here"
-    },
-    {
-      "at": "2026-11-20T03:14:01.233Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#76 G25: A `Shared` local shows by its contents (`Shared{Score{c"
-    },
-    {
-      "at": "2026-11-20T03:14:00.422Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "75 criteria, soft limit 6: gap G24 of the dated best-in-existence review (Docs/Audits/2026-11-19-debug-profile-best-in-existence.md); the review is c39 and every failed axis is a criterion here"
-    },
-    {
-      "at": "2026-11-20T03:14:00.422Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#75 G24: -O2 location lists end each range where the value's reg"
-    },
-    {
-      "at": "2026-11-20T03:13:59.522Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "74 criteria, soft limit 6: gap G23 of the dated best-in-existence review (Docs/Audits/2026-11-19-debug-profile-best-in-existence.md); the review is c39 and every failed axis is a criterion here"
-    },
-    {
-      "at": "2026-11-20T03:13:59.522Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#74 G23: At every tier a stop lists a local only from its bindin"
-    },
-    {
-      "at": "2026-11-20T03:13:58.673Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "73 criteria, soft limit 6: gap G22 of the dated best-in-existence review (Docs/Audits/2026-11-19-debug-profile-best-in-existence.md); the review is c39 and every failed axis is a criterion here"
-    },
-    {
-      "at": "2026-11-20T03:13:58.673Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#73 G22: `jet debug --record=NAME` refuses a NAME that is alread"
-    },
-    {
-      "at": "2026-11-20T02:59:07.099Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "72 criteria, soft limit 6: profiler gap found while dogfooding jet perf on #6084; it belongs to the profiler card"
-    },
-    {
-      "at": "2026-11-20T02:59:07.099Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#72 `jet perf` shows every thread the runtime starts, including "
-    },
-    {
-      "at": "2026-11-20T02:58:34.492Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ta538w",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-20T02:55:36.859Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0in2dft",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-20T02:40:54.133Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00ni11n",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-20T02:40:47.744Z",
-      "by": "Main",
-      "action": "decision.post",
-      "ref": "D-DEBUG-STDIN1",
-      "note": "reviewed by BallotReviewStdin"
-    },
-    {
-      "at": "2026-11-20T02:40:46.759Z",
-      "by": "BallotReviewStdin",
-      "action": "decision.review",
-      "ref": "D-DEBUG-STDIN1",
-      "note": "passed"
-    },
-    {
-      "at": "2026-11-20T02:40:45.715Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-DEBUG-STDIN1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-20T02:32:03.981Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-DEBUG-STDIN1",
-      "note": "How a program under jet debug reads its input from a file or pipe (draft)"
-    },
-    {
-      "at": "2026-11-20T01:56:55.529Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0i4ehbt",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-20T01:56:54.202Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0i4ehbt",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-20T01:38:49.275Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c00ni11n",
-      "note": "8 criteria, soft limit 6: dogfooding gaps found while meeting c6; the owner order puts a gap on the card that owns its area, never a new card"
-    },
-    {
-      "at": "2026-11-20T01:38:49.275Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00ni11n",
-      "note": "#8 `jet debug` shows runtime handle types (Duration, Instant an"
     }
   ],
   "nextNum": 368,
