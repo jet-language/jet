@@ -10,11 +10,14 @@ step native: built
 exit: 0
 stdout: = "6\n"
 when arch x86_64
-when tool objdump
-# A release build inlines `run` into its generated entry, main.run__entry.
-step: objdump -d --no-show-raw-insn --disassemble=main.run__entry .jet/build/main
+# A release build inlines `run` into its generated entry, main.run__entry,
+# which `jet debug` lists by its symbol at the first stop. No disassembler
+# is on PATH.
+step: jet debug .jet/build/main
+env: PATH={work}/no-tools
+stdin: disas_entry.stdin
 exit: 0
-stdout: ~ "incq" # card #6477: the entry body retains its strings and lists inline
-stdout: !~ "lock " # card #6477: a vetted libc leaf cannot start a second thread
-end when
+stdout: ~ "(Jet) disas main.run__entry\nmain.run__entry  main.jet:" # the entry, by its symbol
+stdout: ~ "inc    QWORD PTR" # the entry body retains its strings and lists inline
+stdout: !~ "lock " # a vetted libc leaf cannot start a second thread
 end when

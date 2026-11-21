@@ -1263,7 +1263,8 @@ stdin is empty too. D-DBG-VERBS1=A names the commands:
 - `disassemble` (`disas`) lists machine code under its source lines
   (D-DISASM1). With no operand it lists the selected frame's function (the
   one an inlined frame is inlined into); `disas NAME` lists a function by
-  its Jet name, or a runtime routine by its symbol; `disas LINE`,
+  its Jet name or its symbol (`disas main.run__entry` lists `entry`), or a
+  runtime routine by its symbol; `disas LINE`,
   `disas FILE:LINE` and `disas FILE:A-B` list only the rows of those lines.
   `--bytes` adds each instruction's encoding. The heading names the
   function, its lines, the build's level, its address and size
